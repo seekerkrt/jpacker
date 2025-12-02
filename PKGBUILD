@@ -1,7 +1,7 @@
-# Maintainer: Your Name <youremail@example.com>
+# Maintainer: seekerkrt <seekerkrt@gmail.com>
 pkgname=jpacker
 # pkgverはpkgver()関数によって自動更新されます
-pkgver=0.0.1.r0.gXXXXXX
+pkgver=0.4.0.r0.gXXXXXX
 pkgrel=1
 pkgdesc="A simple C++ AUR helper and Pacman wrapper"
 arch=('x86_64')
