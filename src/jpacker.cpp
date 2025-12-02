@@ -1,9 +1,8 @@
 /**
  * jpacker - A full-featured Pacman wrapper and AUR helper
- * v4.4.0 Features:
- * - RAII Transactional Cleanup (DirCleanupGuard)
- * - Removes partial directories if git clone fails
- * - Respects XDG_CACHE_HOME
+ * v4.7.0 Features:
+ * - Extended 'add-src': Supports appending env vars directly (jpacker add-src pkg VAR=VAL)
+ * - New 'edit-src': Open build config file with sudo editor
  */
 
 #include <algorithm>
@@ -23,7 +22,7 @@ namespace fs = std::filesystem;
 
 // --- 設定 ---
 #ifndef JPKG_VERSION
-#define JPKG_VERSION "4.4.0"
+#define JPKG_VERSION "0.4.0"
 #endif
 
 const std::string VERSION = JPKG_VERSION;
@@ -31,6 +30,7 @@ const std::string AUR_RPC_URL = "https://aur.archlinux.org/rpc/v5/search/";
 const std::string AUR_BASE_URL = "https://aur.archlinux.org/";
 const std::string USER_AGENT = "jpacker/" + VERSION;
 const std::string CONFIG_FILE = "/etc/jpacker/jpacker.conf";
+const std::string PACKAGE_BUILD_DIR = "/etc/jpacker/package.build";
 
 // --- グローバル設定 ---
 struct AppConfig {
@@ -89,8 +89,43 @@ void load_config() {
     }
 }
 
-// --- RAII Classes ---
+bool is_force_source(const std::string& pkg_name) {
+    fs::path target = fs::path(PACKAGE_BUILD_DIR) / pkg_name;
+    return fs::exists(target);
+}
 
+std::string get_package_env(const std::string& pkg_name) {
+    fs::path p = fs::path(PACKAGE_BUILD_DIR) / pkg_name;
+    if(!fs::exists(p)) return "";
+
+    std::ifstream file(p);
+    std::string   line;
+    std::string   env_str = "";
+
+    std::cout << ":: Loading custom build flags for " << pkg_name << "..." << std::endl;
+
+    while(std::getline(file, line)) {
+        size_t comment = line.find('#');
+        if(comment != std::string::npos) line = line.substr(0, comment);
+        if(trim(line).empty()) continue;
+
+        size_t eq_pos = line.find('=');
+        if(eq_pos != std::string::npos) {
+            std::string key = trim(line.substr(0, eq_pos));
+            std::string val = trim(line.substr(eq_pos + 1));
+
+            if(!val.empty()) {
+                if(val.front() != '"' && val.front() != '\'') {
+                    val = "\"" + val + "\"";
+                }
+                env_str += key + "=" + val + " ";
+            }
+        }
+    }
+    return env_str;
+}
+
+// --- RAII Classes ---
 class CurlGlobal {
 public:
     CurlGlobal() {
@@ -134,7 +169,6 @@ public:
     }
 };
 
-// 【New!】失敗時の自動クリーンアップ用ガード
 class DirCleanupGuard {
     fs::path path_;
     bool     committed_ = false;
@@ -142,41 +176,21 @@ class DirCleanupGuard {
 public:
     explicit DirCleanupGuard(const fs::path& path) : path_(path) {
     }
-
-    // 成功確定: これを呼ぶとデストラクタで削除されない
     void commit() {
         committed_ = true;
     }
-
     ~DirCleanupGuard() {
         if(!committed_ && fs::exists(path_)) {
             std::cerr << "\033[1;31m::\033[0m Rolling back: cleaning up " << path_ << std::endl;
             try {
                 fs::remove_all(path_);
             } catch(...) {
-                std::cerr << "Error during cleanup." << std::endl;
             }
         }
     }
 };
 
-// --- ヘルプ表示 ---
-void print_help() {
-    std::cout << "\033[1;36mjpacker\033[0m v" << VERSION << "\n"
-              << std::endl;
-    std::cout << "\033[1mUSAGE\033[0m" << std::endl;
-    std::cout << "    jpacker <operation> [options] [targets...]\n"
-              << std::endl;
-    std::cout << "\033[1mOPERATIONS\033[0m" << std::endl;
-    std::cout << "    \033[1m-S, -Syu\033[0m       Install/Update" << std::endl;
-    std::cout << "    \033[1m-Ss\033[0m <query>    Search" << std::endl;
-    std::cout << "    \033[1m-R, -Rs\033[0m        Remove" << std::endl;
-    std::cout << "\033[1mOPTIONS\033[0m" << std::endl;
-    std::cout << "    \033[1m--noedit\033[0m       Skip PKGBUILD review" << std::endl;
-    std::cout << "    \033[1m-h, --help\033[0m     Help" << std::endl;
-}
-
-// --- ヘルパー関数 ---
+// --- Helper Functions ---
 size_t WriteCallback(void* contents, size_t size, size_t nmemb, void* userp) {
     size_t total_size = size * nmemb;
     ((std::string*)userp)->append((char*)contents, total_size);
@@ -245,85 +259,163 @@ void search_aur(const std::vector<std::string>& keywords) {
     }
 }
 
-// AURビルド (RAII cleanup 適用)
 void install_aur(const std::string& pkg_name) {
-    std::cout << ":: Processing AUR package: " << pkg_name << "..." << std::endl;
-
+    std::cout << ":: Processing source package: " << pkg_name << "..." << std::endl;
     fs::path build_base = get_cache_dir();
     fs::path pkg_dir = build_base / pkg_name;
-
     if(!fs::exists(build_base)) fs::create_directories(build_base);
 
-    // 1. Clone or Pull
     {
         WorkDirGuard wd(build_base);
-
         if(fs::exists(pkg_dir) && fs::exists(pkg_dir / ".git")) {
-            // 既存更新
             std::cout << ":: Updating " << pkg_name << "..." << std::endl;
             WorkDirGuard wd_repo(pkg_dir);
             if(run_command("git fetch origin && git reset --hard origin/master") != 0) {
                 throw std::runtime_error("Failed to update repository.");
             }
         } else {
-            // 新規作成
             std::cout << ":: Cloning " << pkg_name << "..." << std::endl;
             if(fs::exists(pkg_dir)) fs::remove_all(pkg_dir);
-
-            // 【RAII】成功するまでクリーンアップを予約
             DirCleanupGuard cleanup_guard(pkg_dir);
-
             if(run_command("git clone " + AUR_BASE_URL + pkg_name + ".git") != 0) {
-                // ここで例外を投げると、cleanup_guard のデストラクタが走り pkg_dir を削除する
                 throw std::runtime_error("Failed to clone " + pkg_name);
             }
-
-            // 成功したので削除をキャンセル
             cleanup_guard.commit();
         }
     }
 
-    // 2. Edit / Build
     {
         WorkDirGuard wd(pkg_dir);
-
         if(!g_config.no_edit) {
             if(ask_user("Edit PKGBUILD?")) {
                 const char* env_editor = std::getenv("EDITOR");
                 std::string editor_cmd = (env_editor) ? std::string(env_editor) : g_config.editor;
                 run_command(editor_cmd + " PKGBUILD");
-                if(!ask_user("Proceed with installation?")) {
-                    throw std::runtime_error("Aborted by user.");
-                }
+                if(!ask_user("Proceed with installation?")) throw std::runtime_error("Aborted.");
             }
         } else {
             std::cout << ":: Skipping review (--noedit)." << std::endl;
         }
 
-        if(run_command("makepkg -sic") != 0) {
-            throw std::runtime_error("Build failed for " + pkg_name);
+        std::string custom_env = get_package_env(pkg_name);
+        std::string build_cmd = custom_env + "makepkg -sic";
+        if(run_command(build_cmd) != 0) throw std::runtime_error("Build failed.");
+    }
+}
+
+// --- Commands ---
+
+// 【Updated】add-src: 引数に '=' があれば変数として直前のパッケージ設定に書き込む
+void cmd_add_src(const std::vector<std::string>& args) {
+    std::vector<std::string> current_pkgs;
+
+    for(const auto& arg : args) {
+        if(arg.find('=') == std::string::npos) {
+            // '=' がない -> パッケージ名とみなす
+            fs::path p = fs::path(PACKAGE_BUILD_DIR) / arg;
+            if(run_command("sudo touch " + p.string()) != 0) {
+                std::cerr << "Failed to add " << arg << std::endl;
+            } else {
+                std::cout << ":: Added " << arg << " to source-build list." << std::endl;
+                current_pkgs.push_back(p.string());
+            }
+        } else {
+            // '=' がある -> 環境変数設定 (例: CFLAGS="-O3")
+            // 直前に処理したすべてのパッケージファイルに追記する
+            if(current_pkgs.empty()) {
+                std::cerr << "Warning: Variable '" << arg << "' provided before any package name. Ignoring." << std::endl;
+                continue;
+            }
+            for(const auto& pkg_path : current_pkgs) {
+                std::cout << "   -> Appending " << arg << " to " << pkg_path << std::endl;
+                // sudo tee -a を使って追記
+                std::string cmd = "echo '" + arg + "' | sudo tee -a " + pkg_path + " > /dev/null";
+                run_command(cmd);
+            }
         }
     }
+}
+
+// 【New!】edit-src: 設定ファイルをエディタで開く
+void cmd_edit_src(const std::vector<std::string>& targets) {
+    const char* env_editor = std::getenv("EDITOR");
+    std::string editor = (env_editor) ? std::string(env_editor) : g_config.editor;
+
+    for(const auto& pkg : targets) {
+        fs::path p = fs::path(PACKAGE_BUILD_DIR) / pkg;
+        if(!fs::exists(p)) {
+            std::cout << ":: Creating config file for " << pkg << "..." << std::endl;
+            run_command("sudo touch " + p.string());
+        }
+        std::cout << ":: Editing build config for " << pkg << "..." << std::endl;
+        // /etc 配下のファイルなので sudo でエディタを開く
+        run_command("sudo " + editor + " " + p.string());
+    }
+}
+
+void cmd_del_src(const std::vector<std::string>& targets) {
+    for(const auto& pkg : targets) {
+        fs::path p = fs::path(PACKAGE_BUILD_DIR) / pkg;
+        std::cout << ":: Removing " << pkg << " from source-build list..." << std::endl;
+        if(run_command("sudo rm -f " + p.string()) != 0) {
+            std::cerr << "Failed to remove " << pkg << std::endl;
+        }
+    }
+}
+
+void cmd_upgrade() {
+    std::cout << ":: Starting full system upgrade..." << std::endl;
+    if(run_command("sudo pacman -Syu") != 0) {
+        throw std::runtime_error("System update failed.");
+    }
+    if(fs::exists(PACKAGE_BUILD_DIR)) {
+        std::cout << ":: Checking for source-build packages..." << std::endl;
+        for(const auto& entry : fs::directory_iterator(PACKAGE_BUILD_DIR)) {
+            if(entry.is_regular_file()) {
+                std::string pkg_name = entry.path().filename().string();
+                try {
+                    install_aur(pkg_name);
+                } catch(const std::exception& e) {
+                    std::cerr << "Error updating " << pkg_name << ": " << e.what() << std::endl;
+                }
+            }
+        }
+    }
+}
+
+// --- Help ---
+void print_help() {
+    std::cout << "\033[1;36mjpacker\033[0m v" << VERSION << "\n"
+              << std::endl;
+    std::cout << "\033[1mUSAGE\033[0m" << std::endl;
+    std::cout << "    jpacker <op> [options] [targets...]\n"
+              << std::endl;
+    std::cout << "\033[1mOPERATIONS\033[0m" << std::endl;
+    std::cout << "    \033[1mupgrade\033[0m              System update & source rebuilds" << std::endl;
+    std::cout << "    \033[1madd-src\033[0m <pkg> [V=K]  Mark pkg for source build (with optional env vars)" << std::endl;
+    std::cout << "    \033[1medit-src\033[0m <pkg>       Edit build config file" << std::endl;
+    std::cout << "    \033[1mdel-src\033[0m <pkg>        Unmark pkg" << std::endl;
+    std::cout << "    \033[1m-S, -Syu\033[0m             Install/Update" << std::endl;
+    std::cout << "    \033[1m-Ss\033[0m <query>          Search" << std::endl;
+    std::cout << "    \033[1m-R, -Rs\033[0m              Remove" << std::endl;
+    std::cout << "\033[1mOPTIONS\033[0m" << std::endl;
+    std::cout << "    \033[1m--noedit\033[0m             Skip PKGBUILD review" << std::endl;
 }
 
 int main(int argc, char* argv[]) {
     CurlGlobal curl_global;
     load_config();
-
     if(argc < 2) {
         print_help();
         return 1;
     }
-
     std::string first_arg = argv[1];
     if(first_arg == "-h" || first_arg == "--help") {
         print_help();
         return 0;
     }
 
-    std::vector<std::string> args;
-    std::vector<std::string> targets;
-    std::vector<std::string> flags;
+    std::vector<std::string> args, targets, flags;
     std::string              operation = first_arg;
     flags.push_back(operation);
 
@@ -342,14 +434,31 @@ int main(int argc, char* argv[]) {
         args.push_back(arg);
     }
 
-    bool is_sync = (operation.find("-S") == 0);
-    bool is_search = (is_sync && operation.find('s') != std::string::npos);
-    bool is_info = (is_sync && operation.find('i') != std::string::npos);
-    bool is_clean = (is_sync && operation.find('c') != std::string::npos);
-    bool is_sys_upgrade = (is_sync && (operation.find('u') != std::string::npos || operation.find('y') != std::string::npos));
-    bool needs_sudo = (is_sync || operation.find("-R") == 0 || operation.find("-U") == 0 || operation.find("-D") == 0);
-
     try {
+        if(operation == "upgrade") {
+            cmd_upgrade();
+            return 0;
+        }
+        if(operation == "add-src" && !targets.empty()) {
+            cmd_add_src(targets);
+            return 0;
+        }
+        if(operation == "del-src" && !targets.empty()) {
+            cmd_del_src(targets);
+            return 0;
+        }
+        if(operation == "edit-src" && !targets.empty()) {
+            cmd_edit_src(targets);
+            return 0;
+        }
+
+        bool is_sync = (operation.find("-S") == 0);
+        bool is_search = (is_sync && operation.find('s') != std::string::npos);
+        bool is_info = (is_sync && operation.find('i') != std::string::npos);
+        bool is_clean = (is_sync && operation.find('c') != std::string::npos);
+        bool is_sys_upgrade = (is_sync && (operation.find('u') != std::string::npos || operation.find('y') != std::string::npos));
+        bool needs_sudo = (is_sync || operation.find("-R") == 0 || operation.find("-U") == 0 || operation.find("-D") == 0);
+
         if(is_search) {
             run_command("pacman " + join_args(args));
             std::cout << ":: Searching AUR..." << std::endl;
@@ -360,11 +469,11 @@ int main(int argc, char* argv[]) {
 
         if(is_sync) {
             if(targets.empty()) return run_command("sudo pacman " + join_args(args));
-
-            std::vector<std::string> repo_targets;
-            std::vector<std::string> aur_targets;
+            std::vector<std::string> repo_targets, aur_targets;
             for(const auto& t : targets) {
-                if(is_repo_package(t))
+                if(is_force_source(t))
+                    aur_targets.push_back(t);
+                else if(is_repo_package(t))
                     repo_targets.push_back(t);
                 else
                     aur_targets.push_back(t);
@@ -380,7 +489,6 @@ int main(int argc, char* argv[]) {
             }
             return 0;
         }
-
         std::string cmd_args = "";
         for(const auto& arg : args) {
             if(arg == "--noedit") continue;
@@ -389,7 +497,6 @@ int main(int argc, char* argv[]) {
         }
         std::string cmd_prefix = needs_sudo ? "sudo pacman " : "pacman ";
         return run_command(cmd_prefix + cmd_args);
-
     } catch(const std::exception& e) {
         std::cerr << "\033[1;31mError:\033[0m " << e.what() << std::endl;
         return 1;
