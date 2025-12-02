@@ -1,4 +1,4 @@
-.TH JPACKER 8 "December 2025" "jpacker 0.7.0" "System Administration Utilities"
+.TH JPACKER 8 "December 2025" "jpacker 0.9.0" "System Administration Utilities"
 .SH NAME
 jpacker \- A robust Pacman wrapper and AUR helper with source-based build management
 .SH SYNOPSIS
@@ -40,10 +40,16 @@ Mark a package to always be built from source. This creates a configuration file
 You can optionally append environment variables to the configuration.
 .TP
 .B del-src \fI<package>\fR
-Unmark a package from source-build management. Removes the configuration file.
+Unmark a package from source-build management (removes configuration only).
+.TP
+.B revert \fI<package>\fR
+Unmark a package AND immediately reinstall the official binary version (via \fBpacman -S\fR) if the package exists in the official repositories. Use this to restore a package to its standard state.
 .TP
 .B edit-src \fI<package>\fR
 Open the build configuration file for the specified package using the defined \fBEDITOR\fR.
+.TP
+.B list-src
+List all packages currently registered for source-based builds.
 
 .SH OPTIONS
 .TP
@@ -55,13 +61,41 @@ Display the help message and exit.
 
 .SH CONFIGURATION
 The main configuration file is located at \fI/etc/jpacker/jpacker.conf\fR.
-It supports the following keys:
 .TP
 .B NOEDIT
 Set to \fBtrue\fR to disable PKGBUILD review prompts globally.
 .TP
 .B EDITOR
-Specify the preferred text editor. If not set, the \fBEDITOR\fR environment variable is used.
+Specify the preferred text editor.
 .TP
 .B LOGFILE
-Specify the path to the log file. Supports tilde expansion
+Specify the path to the log file.
+
+.SH FILES
+.TP
+.I /etc/jpacker/jpacker.conf
+Global configuration file.
+.TP
+.I /etc/jpacker/package.build/
+Directory containing configuration files for source-build packages.
+.TP
+.I ~/.cache/jpacker/
+Build cache directory.
+
+.SH EXAMPLES
+.B Revert a package to official binary:
+.RS
+jpacker revert neofetch
+.RE
+
+.B Update system and source builds:
+.RS
+jpacker upgrade
+.RE
+
+.SH SEE ALSO
+.BR pacman (8),
+.BR makepkg (8)
+
+.SH AUTHOR
+Written by your_name <youremail@example.com>
