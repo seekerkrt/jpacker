@@ -1,10 +1,4 @@
-/**
- * jpacker - A full-featured Pacman wrapper and AUR helper
- * v0.11.0 Features:
- * - Configurable 'NODIFF' option to skip git diff prompts
- * - CLI flag '--nodiff'
- */
-
+#include "logger.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cstdlib>
@@ -19,7 +13,6 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
-
 using json = nlohmann::json;
 namespace fs = std::filesystem;
 
@@ -108,45 +101,6 @@ void load_config() {
         }
     }
 }
-
-class Logger {
-    static std::ofstream logFile;
-    static bool          initialized;
-    static std::string   get_timestamp() {
-        auto              now = std::chrono::system_clock::now();
-        auto              in_time_t = std::chrono::system_clock::to_time_t(now);
-        std::stringstream ss;
-        ss << std::put_time(std::localtime(&in_time_t), "%Y-%m-%d %H:%M:%S");
-        return ss.str();
-    }
-
-public:
-    static void init(const fs::path& path) {
-        if(path.has_parent_path() && !fs::exists(path.parent_path())) {
-            fs::create_directories(path.parent_path());
-        }
-        logFile.open(path, std::ios::app);
-        initialized = logFile.is_open();
-    }
-    static void info(const std::string& msg) {
-        std::cout << "\033[1;32m::\033[0m " << msg << std::endl;
-        if(initialized) logFile << "[" << get_timestamp() << "] [INFO] " << msg << std::endl;
-    }
-    static void warn(const std::string& msg) {
-        std::cout << "\033[1;33m:: Warning:\033[0m " << msg << std::endl;
-        if(initialized) logFile << "[" << get_timestamp() << "] [WARN] " << msg << std::endl;
-    }
-    static void error(const std::string& msg) {
-        std::cerr << "\033[1;31m:: Error:\033[0m " << msg << std::endl;
-        if(initialized) logFile << "[" << get_timestamp() << "] [ERROR] " << msg << std::endl;
-    }
-    static void raw_cmd(const std::string& cmd) {
-        std::cout << "\033[1;33m::\033[0m Running: " << cmd << std::endl;
-        if(initialized) logFile << "[" << get_timestamp() << "] [EXEC] " << cmd << std::endl;
-    }
-};
-std::ofstream Logger::logFile;
-bool          Logger::initialized = false;
 
 // --- Helpers ---
 bool is_force_source(const std::string& pkg_name) {
