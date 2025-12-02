@@ -6,13 +6,13 @@ BUILD_DIR:= build
 
 # --- コンパイラ設定 ---
 CXX      := g++
-# C++17必須, 最適化, 警告, パイプ処理, バージョン定義
-CXXFLAGS := -std=c++17 -O2 -pipe -Wall -Wextra -DJPKG_VERSION=\"$(VERSION)\"
-# ライブラリリンク (-lcurl は必須)
+# -DJPKG_VERSION=\"$(VERSION)\" を追加してソースコードに渡す
+CXXFLAGS := -std=c++20 -O2 -pipe -Wall -Wextra -DJPKG_VERSION=\"$(VERSION)\"
+# ライブラリリンク
 LDLIBS   := -lcurl
 LDFLAGS  :=
 
-# --- インストール先設定 (Arch Linuxのパッケージング標準準拠) ---
+# --- インストール先設定 ---
 PREFIX   ?= /usr/local
 BINDIR   ?= $(PREFIX)/bin
 
@@ -26,36 +26,28 @@ DEPS     := $(OBJS:.o=.d)
 
 all: $(TARGET)
 
-# リンク処理: オジェクトファイルの後に LDLIBS (-lcurl) を置くのが重要
 $(TARGET): $(OBJS)
 	@echo ":: Linking $@"
 	$(CXX) $(LDFLAGS) $^ -o $@ $(LDLIBS)
 
-# コンパイル処理: .cpp -> .o
-# -MMD -MP でヘッダーファイルの依存関係(.d)を自動生成
 $(BUILD_DIR)/%.o: $(SRC_DIR)/%.cpp
 	@mkdir -p $(BUILD_DIR)
-	@echo ":: Compiling $<"
+	@echo ":: Compiling $< (v$(VERSION))"
 	$(CXX) $(CXXFLAGS) -MMD -MP -c $< -o $@
 
-# デバッグビルド用ターゲット (make debug)
 debug: CXXFLAGS += -g -O0 -DDEBUG
 debug: all
 
-# クリーンアップ
 clean:
 	@echo ":: Cleaning up"
 	rm -rf $(BUILD_DIR) $(TARGET)
 
-# インストール (DESTDIR対応)
 install: $(TARGET)
 	@echo ":: Installing to $(DESTDIR)$(BINDIR)/$(TARGET)"
 	install -Dm755 $(TARGET) $(DESTDIR)$(BINDIR)/$(TARGET)
 
-# アンインストール
 uninstall:
 	@echo ":: Removing from $(DESTDIR)$(BINDIR)/$(TARGET)"
 	rm -f $(DESTDIR)$(BINDIR)/$(TARGET)
 
-# 依存関係ファイルの読み込み
 -include $(DEPS)
