@@ -1,43 +1,44 @@
 # Maintainer: Your Name <youremail@example.com>
 pkgname=jpacker
-pkgver=4.0.1
+# pkgverはpkgver()関数によって自動更新されます
+pkgver=0.0.1.r0.gXXXXXX
 pkgrel=1
 pkgdesc="A simple C++ AUR helper and Pacman wrapper"
 arch=('x86_64')
-url="https://github.com/example/jpacker" # プロジェクトのURL（あれば）
+url="https://gitlab.com/seekerkrt/jpacker"
 license=('MIT')
 
 # 実行時に必要な依存パッケージ
 depends=('curl' 'pacman' 'git')
 
-# ビルド時のみ必要な依存パッケージ (ヘッダーファイルなど)
-makedepends=('nlohmann-json' 'base-devel')
+# ビルド時に必要なパッケージ ('git' が必須)
+makedepends=('git' 'nlohmann-json' 'base-devel')
 
-# ソースコードの場所 (ローカルファイルを指定)
-# 実際のリリース時はここをGitHubのURLなどに変更します
-# ... (前略) ...
+# GitLabのリポジトリをソースとして指定
+source=("git+https://gitlab.com/seekerkrt/jpacker.git")
 
-# 変更点1: sourceにLICENSEを追加
-source=("file://Makefile"
-        "file://src/jpacker.cpp"
-        "file://LICENSE")
+# Gitリポジトリの場合はチェックサムをSKIPにするのが通例
+sha256sums=('SKIP')
 
-sha256sums=('SKIP' 'SKIP' 'SKIP')
-
-prepare() {
-    mkdir -p "$srcdir/src"
-    mv "$srcdir/jpacker.cpp" "$srcdir/src/"
+# バージョン番号をGitのタグやコミットから自動生成する関数
+pkgver() {
+    cd "$pkgname"
+    # タグがあればそれを使い、なければリビジョン番号を生成
+    git describe --long --tags 2>/dev/null | sed 's/\([^-]*-g\)/r\1/;s/-/./g' ||
+    printf "r%s.%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
 }
 
 build() {
-    cd "$srcdir"
+    # git cloneされたディレクトリに入る
+    cd "$pkgname"
     make
 }
 
 package() {
-    cd "$srcdir"
+    cd "$pkgname"
+    # インストール
     make DESTDIR="$pkgdir" install
 
-    # 変更点2: ライセンスファイルを正規のパスにインストール
+    # ライセンスファイルのインストール
     install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }
