@@ -3,7 +3,7 @@
 A robust, C++20 AUR helper and Pacman wrapper for Arch Linux.
 
 `jpacker` is designed to be a seamless replacement for `pacman` commands while adding powerful AUR support and **Gentoo-like source-based package management** capabilities.
-
+Written in C++20
 ## Features
 
 * **Pacman Wrapper**: Supports standard syntax (`-S`, `-Syu`, `-R`, `-Q`, etc.) and passes unknown commands directly to `pacman`.
