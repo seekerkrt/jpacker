@@ -1,6 +1,6 @@
 # --- プロジェクト情報 ---
 TARGET    := jpacker
-VERSION   := $(strip 0.5.1)# ここは適宜更新
+VERSION   := 0.5.1
 SRC_DIR   := src
 BUILD_DIR := build
 
@@ -8,10 +8,11 @@ BUILD_DIR := build
 PREFIX      ?= /usr/local
 BINDIR      ?= $(PREFIX)/bin
 SYSCONFDIR  ?= /etc
-# 【New!】 補完ファイルのパス (Arch Linux標準)
 COMPDIR     ?= /usr/share/bash-completion/completions
+# 【New!】 マニュアルページのディレクトリ (man8)
+MANDIR      ?= $(PREFIX)/share/man/man8
 
-# ... (コンパイラ設定などは変更なし) ...
+# --- コンパイラ設定 ---
 CXX       ?= g++
 CXXFLAGS  ?= -O2 -pipe
 LDFLAGS   ?=
@@ -48,8 +49,11 @@ install: $(TARGET)
 	install -d $(DESTDIR)$(SYSCONFDIR)/jpacker/package.build
 
 	@echo ":: Installing bash completion..."
-	# 【New!】 補完スクリプトのインストール
 	install -Dm644 jpacker_completion.bash $(DESTDIR)$(COMPDIR)/jpacker
+
+	@echo ":: Installing man page..."
+	# 【New!】 マニュアルのインストール
+	install -Dm644 jpacker.8 $(DESTDIR)$(MANDIR)/jpacker.8
 
 uninstall:
 	@echo ":: Removing binary..."
@@ -62,5 +66,9 @@ uninstall:
 
 	@echo ":: Removing completion..."
 	rm -f $(DESTDIR)$(COMPDIR)/jpacker
+
+	@echo ":: Removing man page..."
+	# 【New!】 マニュアルの削除
+	rm -f $(DESTDIR)$(MANDIR)/jpacker.8
 
 -include $(DEPS)
