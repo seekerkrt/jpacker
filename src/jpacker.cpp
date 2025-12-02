@@ -25,7 +25,7 @@ namespace fs = std::filesystem;
 
 // --- 設定 ---
 #ifndef JPKG_VERSION
-#define JPKG_VERSION "0.11.0"
+#define JPKG_VERSION "1.0.0"
 #endif
 
 const std::string VERSION = JPKG_VERSION;
