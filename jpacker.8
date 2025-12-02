@@ -1,4 +1,4 @@
-.TH JPACKER 8 "December 2025" "jpacker 0.9.0" "System Administration Utilities"
+.TH JPACKER 8 "December 2025" "jpacker 0.11.0" "System Administration Utilities"
 .SH NAME
 jpacker \- A robust Pacman wrapper and AUR helper with source-based build management
 .SH SYNOPSIS
@@ -34,13 +34,17 @@ Example: \fIjpacker build coreutils CFLAGS="-O3 -march=native"\fR
 .TP
 .B upgrade
 Perform a full system upgrade. This first runs \fBsudo pacman -Syu\fR, then checks all packages marked via \fBadd-src\fR and rebuilds them from source (git pull + makepkg).
+During updates, jpacker will show a git diff summary if changes are detected.
+.TP
+.B clean
+Clean package caches. This first runs \fBsudo pacman -Sc\fR to clean the official package cache, and then prompts to remove build artifacts from the jpacker cache directory (\fI~/.cache/jpacker/\fR). Log files are preserved.
 .TP
 .B add-src \fI<package> [VAR=VALUE...]\fR
 Mark a package to always be built from source. This creates a configuration file in \fI/etc/jpacker/package.build/\fR.
 You can optionally append environment variables to the configuration.
 .TP
 .B del-src \fI<package>\fR
-Unmark a package from source-build management (removes configuration only).
+Unmark a package from source-build management. Removes the configuration file.
 .TP
 .B revert \fI<package>\fR
 Unmark a package AND immediately reinstall the official binary version (via \fBpacman -S\fR) if the package exists in the official repositories. Use this to restore a package to its standard state.
@@ -49,48 +53,78 @@ Unmark a package AND immediately reinstall the official binary version (via \fBp
 Open the build configuration file for the specified package using the defined \fBEDITOR\fR.
 .TP
 .B list-src
-List all packages currently registered for source-based builds.
+List all packages currently registered for source-based builds along with their custom environment variables.
 
 .SH OPTIONS
 .TP
 .BR \-\-noedit
 Skip the interactive review/edit of PKGBUILD files before building.
 .TP
+.BR \-\-nodiff
+Skip the interactive git diff check during package updates.
+.TP
 .BR \-h , \ \-\-help
 Display the help message and exit.
 
 .SH CONFIGURATION
 The main configuration file is located at \fI/etc/jpacker/jpacker.conf\fR.
+It supports the following keys:
 .TP
 .B NOEDIT
 Set to \fBtrue\fR to disable PKGBUILD review prompts globally.
 .TP
+.B NODIFF
+Set to \fBtrue\fR to disable git diff checks during updates globally.
+.TP
 .B EDITOR
-Specify the preferred text editor.
+Specify the preferred text editor. If not set, the \fBEDITOR\fR environment variable is used.
 .TP
 .B LOGFILE
-Specify the path to the log file.
+Specify the path to the log file. Supports tilde expansion (e.g., \fB~/logs/jpacker.log\fR).
+Default is \fI~/.cache/jpacker/jpacker.log\fR.
 
 .SH FILES
 .TP
 .I /etc/jpacker/jpacker.conf
-Global configuration file.
+Global configuration file. Controls editor settings, log locations, and review prompts.
 .TP
 .I /etc/jpacker/package.build/
-Directory containing configuration files for source-build packages.
+Directory containing configuration files for packages marked with \fBadd-src\fR.
+Each file corresponds to a package name and can define environment variables (e.g., CFLAGS) that are applied during \fBmakepkg\fR execution.
 .TP
 .I ~/.cache/jpacker/
-Build cache directory.
+Default directory used for downloading and building packages (respects \fBXDG_CACHE_HOME\fR).
+.TP
+.I ~/.cache/jpacker/jpacker.log
+Default log file location.
+
+.SH ENVIRONMENT
+.TP
+.B EDITOR
+The editor used for reviewing PKGBUILDs and editing configurations.
+.TP
+.B XDG_CACHE_HOME
+Used to determine the build directory location.
 
 .SH EXAMPLES
-.B Revert a package to official binary:
-.RS
-jpacker revert neofetch
-.RE
-
-.B Update system and source builds:
+.B Update system and AUR packages:
 .RS
 jpacker upgrade
+.RE
+
+.B Install a package from AUR without review:
+.RS
+jpacker -S google-chrome --noedit
+.RE
+
+.B Mark a package to use custom optimizations:
+.RS
+jpacker add-src neofetch CFLAGS="-O3 -march=native"
+.RE
+
+.B Clean caches to free up space:
+.RS
+jpacker clean
 .RE
 
 .SH SEE ALSO
@@ -98,4 +132,4 @@ jpacker upgrade
 .BR makepkg (8)
 
 .SH AUTHOR
-Written by your_name <youremail@example.com>
+Written by seekerkrt name <seekerkrt@gmail.com>

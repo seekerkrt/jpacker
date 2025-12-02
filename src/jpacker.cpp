@@ -1,7 +1,8 @@
 /**
  * jpacker - A full-featured Pacman wrapper and AUR helper
- * v0.9.0 Features:
- * - New 'revert' command: Unmark source-build AND reinstall official binary immediately
+ * v0.11.0 Features:
+ * - Configurable 'NODIFF' option to skip git diff prompts
+ * - CLI flag '--nodiff'
  */
 
 #include <algorithm>
@@ -24,7 +25,7 @@ namespace fs = std::filesystem;
 
 // --- 設定 ---
 #ifndef JPKG_VERSION
-#define JPKG_VERSION "0.9.0"
+#define JPKG_VERSION "0.11.0"
 #endif
 
 const std::string VERSION = JPKG_VERSION;
@@ -35,9 +36,9 @@ const std::string USER_AGENT = "jpacker/" + VERSION;
 const std::string CONFIG_FILE = "/etc/jpacker/jpacker.conf";
 const std::string PACKAGE_BUILD_DIR = "/etc/jpacker/package.build";
 
-// --- グローバル設定 ---
 struct AppConfig {
     bool        no_edit = false;
+    bool        no_diff = false;// New!
     std::string editor = "nano";
     std::string log_file = "";
 };
@@ -80,7 +81,6 @@ fs::path get_cache_dir() {
     return base / "jpacker";
 }
 
-// --- Config Loader ---
 void load_config() {
     if(!fs::exists(CONFIG_FILE)) return;
     std::ifstream file(CONFIG_FILE);
@@ -97,6 +97,9 @@ void load_config() {
             if(key == "noedit") {
                 std::string v = to_lower(val);
                 if(v == "true" || v == "1" || v == "yes") g_config.no_edit = true;
+            } else if(key == "nodiff") {// New!
+                std::string v = to_lower(val);
+                if(v == "true" || v == "1" || v == "yes") g_config.no_diff = true;
             } else if(key == "editor") {
                 if(!val.empty()) g_config.editor = val;
             } else if(key == "logfile") {
@@ -106,7 +109,6 @@ void load_config() {
     }
 }
 
-// --- Logger ---
 class Logger {
     static std::ofstream logFile;
     static bool          initialized;
@@ -175,7 +177,6 @@ std::string get_package_env(const std::string& pkg_name) {
     return env_str;
 }
 
-// --- RAII Classes ---
 class CurlGlobal {
 public:
     CurlGlobal() {
@@ -237,7 +238,6 @@ public:
     }
 };
 
-// --- Helper Functions ---
 size_t WriteCallback(void* contents, size_t size, size_t nmemb, void* userp) {
     size_t total_size = size * nmemb;
     ((std::string*)userp)->append((char*)contents, total_size);
@@ -313,16 +313,26 @@ void build_from_git(const std::string& pkg_name, const std::string& git_url, con
         if(fs::exists(pkg_dir) && fs::exists(pkg_dir / ".git")) {
             Logger::info("Updating repository...");
             WorkDirGuard wd_repo(pkg_dir);
-            if(run_command("git fetch origin && git reset --hard origin/master") != 0) {
-                throw std::runtime_error("Failed to update repository.");
+            if(run_command("git fetch origin") != 0) throw std::runtime_error("Failed to fetch updates.");
+
+            // Smart Review (Skip if NODIFF=true)
+            if(!g_config.no_diff) {
+                int diff_ret = std::system("git diff --quiet HEAD..origin/master");
+                if(diff_ret != 0) {
+                    if(ask_user("Updates detected. View diff?")) {
+                        run_command("git diff HEAD..origin/master --color=always");
+                    }
+                }
+            } else {
+                Logger::info("Skipping diff review (--nodiff).");
             }
+
+            if(run_command("git reset --hard origin/master") != 0) throw std::runtime_error("Failed to reset repository.");
         } else {
             Logger::info("Cloning repository...");
             if(fs::exists(pkg_dir)) fs::remove_all(pkg_dir);
             DirCleanupGuard cleanup_guard(pkg_dir);
-            if(run_command("git clone " + git_url + " " + pkg_name) != 0) {
-                throw std::runtime_error("Failed to clone " + pkg_name);
-            }
+            if(run_command("git clone " + git_url + " " + pkg_name) != 0) throw std::runtime_error("Failed to clone " + pkg_name);
             cleanup_guard.commit();
         }
     }
@@ -337,7 +347,7 @@ void build_from_git(const std::string& pkg_name, const std::string& git_url, con
                 if(!ask_user("Proceed with build?")) throw std::runtime_error("Aborted.");
             }
         } else {
-            Logger::info("Skipping review (--noedit).");
+            Logger::info("Skipping PKGBUILD review (--noedit).");
         }
         std::string build_cmd;
         if(!trim(custom_env).empty()) {
@@ -449,40 +459,48 @@ void cmd_del_src(const std::vector<std::string>& targets) {
         run_command("sudo rm -f " + p.string());
     }
 }
-
-// 【New!】revert実装
 void cmd_revert(const std::vector<std::string>& targets) {
     std::vector<std::string> reinstall_targets;
-
-    // 1. 設定解除
     for(const auto& pkg : targets) {
         fs::path p = fs::path(PACKAGE_BUILD_DIR) / pkg;
         if(fs::exists(p)) {
             Logger::info("Unmarking source-build for " + pkg);
             run_command("sudo rm -f " + p.string());
-        } else {
-            Logger::warn(pkg + " was not marked for source-build.");
-        }
-
-        // 2. リポジトリ確認
+        } else
+            Logger::warn(pkg + " was not marked.");
         if(is_repo_package(pkg)) {
             Logger::info(pkg + " exists in official repos. Will reinstall binary.");
             reinstall_targets.push_back(pkg);
-        } else {
+        } else
             Logger::info(pkg + " is likely an AUR package. Config removed only.");
-        }
     }
-
-    // 3. 公式バイナリの再インストール
     if(!reinstall_targets.empty()) {
         std::string pkg_list = join_args(reinstall_targets);
         Logger::info("Reinstalling binaries: " + pkg_list);
-        if(run_command("sudo pacman -S " + pkg_list) != 0) {
-            throw std::runtime_error("Failed to reinstall binary packages.");
-        }
+        if(run_command("sudo pacman -S " + pkg_list) != 0) throw std::runtime_error("Failed to reinstall binaries.");
     }
 }
-
+void cmd_clean() {
+    Logger::info("Cleaning package caches...");
+    if(run_command("sudo pacman -Sc") != 0) Logger::warn("Pacman clean failed or cancelled.");
+    fs::path cache = get_cache_dir();
+    if(fs::exists(cache) && !fs::is_empty(cache)) {
+        if(ask_user("Clean jpacker build cache (" + cache.string() + ")?")) {
+            Logger::info("Removing cached build files...");
+            for(const auto& entry : fs::directory_iterator(cache)) {
+                if(entry.path().filename() == "jpacker.log") continue;
+                try {
+                    fs::remove_all(entry.path());
+                } catch(const std::exception& e) {
+                    Logger::error("Failed to remove " + entry.path().string() + ": " + e.what());
+                }
+            }
+            Logger::info("jpacker cache cleaned.");
+        } else
+            Logger::info("Skipped jpacker cache cleaning.");
+    } else
+        Logger::info("jpacker cache is empty.");
+}
 void cmd_upgrade() {
     Logger::info("System upgrade...");
     if(run_command("sudo pacman -Syu") != 0) throw std::runtime_error("Update failed.");
@@ -501,7 +519,6 @@ void cmd_upgrade() {
     }
 }
 
-// --- Help & Main ---
 void print_help() {
     std::cout << "\033[1;36mjpacker\033[0m v" << VERSION << "\n"
               << std::endl;
@@ -511,17 +528,19 @@ void print_help() {
     std::cout << "\033[1mOPERATIONS\033[0m" << std::endl;
     std::cout << "    \033[1mbuild\033[0m <pkg> [V=K]  One-off build" << std::endl;
     std::cout << "    \033[1mupgrade\033[0m              System update & rebuilds" << std::endl;
+    std::cout << "    \033[1mclean\033[0m                Clean package caches" << std::endl;
     std::cout << "    \033[1madd-src\033[0m <pkg> [V=K]  Mark pkg for source build" << std::endl;
     std::cout << "    \033[1medit-src\033[0m <pkg>       Edit config" << std::endl;
     std::cout << "    \033[1mlist-src\033[0m             List registered source pkgs" << std::endl;
-    std::cout << "    \033[1mdel-src\033[0m <pkg>        Unmark pkg (config removal only)" << std::endl;
-    std::cout << "    \033[1mrevert\033[0m <pkg>         Unmark AND reinstall binary (if Repo)" << std::endl;
+    std::cout << "    \033[1mdel-src\033[0m <pkg>        Unmark pkg" << std::endl;
+    std::cout << "    \033[1mrevert\033[0m <pkg>         Unmark & reinstall binary" << std::endl;
     std::cout << "    \033[1m-S, -Syu\033[0m             Install/Update" << std::endl;
     std::cout << "    \033[1m-Ss\033[0m <query>          Search" << std::endl;
     std::cout << "\033[1mOPTIONS\033[0m" << std::endl;
     std::cout << "    \033[1m--noedit\033[0m             Skip review" << std::endl;
+    std::cout << "    \033[1m--nodiff\033[0m             Skip diff prompt" << std::endl;// New
     std::cout << "\033[1mCONFIG\033[0m" << std::endl;
-    std::cout << "    jpacker.conf: LOGFILE=~/path/to/log" << std::endl;
+    std::cout << "    jpacker.conf: LOGFILE=..., NOEDIT=..., NODIFF=..." << std::endl;
 }
 
 int main(int argc, char* argv[]) {
@@ -557,6 +576,10 @@ int main(int argc, char* argv[]) {
             g_config.no_edit = true;
             continue;
         }
+        if(arg == "--nodiff") {
+            g_config.no_diff = true;
+            continue;
+        }// New
         if(i > 1) {
             if(arg[0] == '-')
                 flags.push_back(arg);
@@ -575,6 +598,10 @@ int main(int argc, char* argv[]) {
             cmd_upgrade();
             return 0;
         }
+        if(operation == "clean") {
+            cmd_clean();
+            return 0;
+        }
         if(operation == "add-src" && !targets.empty()) {
             cmd_add_src(targets);
             return 0;
@@ -586,7 +613,7 @@ int main(int argc, char* argv[]) {
         if(operation == "revert" && !targets.empty()) {
             cmd_revert(targets);
             return 0;
-        }// New
+        }
         if(operation == "edit-src" && !targets.empty()) {
             cmd_edit_src(targets);
             return 0;
@@ -636,6 +663,7 @@ int main(int argc, char* argv[]) {
         std::string cmd_args = "";
         for(const auto& arg : args) {
             if(arg == "--noedit") continue;
+            if(arg == "--nodiff") continue;// New
             if(!cmd_args.empty()) cmd_args += " ";
             cmd_args += arg;
         }
