@@ -1,15 +1,16 @@
 /**
  * jpacker - A full-featured Pacman wrapper and AUR helper
- * * Design Philosophy:
- * - Pass-through: Arguments not handled by jpacker are passed directly to pacman.
- * - Sudo-smart: Automatically applies sudo for write operations (-S, -R, -U).
- * - Hybrid: Combines Repo and AUR operations seamlessly.
+ * v4.2.0 Features:
+ * - Improved Help/Usage display with ANSI colors
+ * - Configuration file support (/etc/jpacker/jpacker.conf)
+ * - PKGBUILD review/edit feature
  */
 
 #include <algorithm>
 #include <cstdlib>
 #include <curl/curl.h>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <nlohmann/json.hpp>
 #include <sstream>
@@ -20,10 +21,69 @@
 using json = nlohmann::json;
 namespace fs = std::filesystem;
 
-// --- 設定 ---
+// --- 設定 (Defaults) ---
+// Makefileから渡されなかった場合のフォールバック
+#ifndef JPKG_VERSION
+#define JPKG_VERSION "0.0.0-dev"
+#endif
+
+const std::string VERSION = JPKG_VERSION;
 const std::string AUR_RPC_URL = "https://aur.archlinux.org/rpc/v5/search/";
 const std::string AUR_BASE_URL = "https://aur.archlinux.org/";
-const std::string USER_AGENT = "jpacker/4.0.1";
+const std::string USER_AGENT = "jpacker/" + VERSION;
+const std::string CONFIG_FILE = "/etc/jpacker/jpacker.conf";
+
+// --- グローバル設定保持用 ---
+struct AppConfig {
+    bool        no_edit = false;
+    std::string editor = "nano";
+};
+
+AppConfig g_config;
+
+// --- 文字列ユーティリティ ---
+std::string trim(const std::string& str) {
+    size_t first = str.find_first_not_of(" \t\n\r");
+    if(first == std::string::npos) return "";
+    size_t last = str.find_last_not_of(" \t\n\r");
+    return str.substr(first, (last - first + 1));
+}
+
+std::string to_lower(std::string str) {
+    std::transform(str.begin(), str.end(), str.begin(), ::tolower);
+    return str;
+}
+
+// --- 設定ファイル読み込み ---
+void load_config() {
+    if(!fs::exists(CONFIG_FILE)) return;
+
+    std::ifstream file(CONFIG_FILE);
+    std::string   line;
+    while(std::getline(file, line)) {
+        size_t comment_pos = line.find('#');
+        if(comment_pos != std::string::npos) {
+            line = line.substr(0, comment_pos);
+        }
+        if(trim(line).empty()) continue;
+
+        std::stringstream ss(line);
+        std::string       key, val;
+        if(std::getline(ss, key, '=') && std::getline(ss, val)) {
+            key = to_lower(trim(key));
+            val = trim(val);
+
+            if(key == "noedit") {
+                std::string v = to_lower(val);
+                if(v == "true" || v == "1" || v == "yes") {
+                    g_config.no_edit = true;
+                }
+            } else if(key == "editor") {
+                if(!val.empty()) g_config.editor = val;
+            }
+        }
+    }
+}
 
 // --- RAII Classes ---
 class CurlGlobal {
@@ -69,6 +129,39 @@ public:
     }
 };
 
+// --- ヘルプ表示 (New!) ---
+void print_help() {
+    std::cout << "\033[1;36mjpacker\033[0m v" << VERSION << " - A minimal AUR helper & Pacman wrapper\n"
+              << std::endl;
+
+    std::cout << "\033[1mUSAGE\033[0m" << std::endl;
+    std::cout << "    jpacker <operation> [options] [targets...]\n"
+              << std::endl;
+
+    std::cout << "\033[1mOPERATIONS\033[0m" << std::endl;
+    std::cout << "    \033[1m-S, -Syu\033[0m       Install packages (Repo/AUR) or update system" << std::endl;
+    std::cout << "    \033[1m-Ss\033[0m <query>    Search for packages in official repos and AUR" << std::endl;
+    std::cout << "    \033[1m-R, -Rs\033[0m        Remove packages (wraps pacman -R)" << std::endl;
+    std::cout << "    \033[1m-Q, -Qi\033[0m        Query local packages (wraps pacman -Q)" << std::endl;
+    std::cout << "    \033[1m...\033[0m            Any other pacman operations are passed through\n"
+              << std::endl;
+
+    std::cout << "\033[1mOPTIONS\033[0m" << std::endl;
+    std::cout << "    \033[1m--noedit\033[0m       Skip reviewing/editing PKGBUILD files" << std::endl;
+    std::cout << "    \033[1m-h, --help\033[0m     Display this help message\n"
+              << std::endl;
+
+    std::cout << "\033[1mCONFIGURATION\033[0m" << std::endl;
+    std::cout << "    File: " << CONFIG_FILE << std::endl;
+    std::cout << "    Vars: NOEDIT=true|false, EDITOR=nano|vim\n"
+              << std::endl;
+
+    std::cout << "\033[1mEXAMPLES\033[0m" << std::endl;
+    std::cout << "    jpacker -Syu google-chrome" << std::endl;
+    std::cout << "    jpacker -Ss visual studio code" << std::endl;
+    std::cout << "    jpacker -S firefox --noedit" << std::endl;
+}
+
 // --- ヘルパー関数 ---
 
 size_t WriteCallback(void* contents, size_t size, size_t nmemb, void* userp) {
@@ -82,7 +175,6 @@ int run_command(const std::string& cmd) {
     return std::system(cmd.c_str());
 }
 
-// 引数リストを文字列に結合 (join_strs は廃止し join_args に統一)
 std::string join_args(const std::vector<std::string>& args) {
     std::stringstream ss;
     for(size_t i = 0; i < args.size(); ++i) {
@@ -92,10 +184,16 @@ std::string join_args(const std::vector<std::string>& args) {
     return ss.str();
 }
 
-// 公式リポジトリに存在するかチェック
 bool is_repo_package(const std::string& pkg_name) {
     std::string cmd = "pacman -Si " + pkg_name + " > /dev/null 2>&1";
     return (std::system(cmd.c_str()) == 0);
+}
+
+bool ask_user(const std::string& question) {
+    std::cout << ":: " << question << " [Y/n] ";
+    std::string input;
+    std::getline(std::cin, input);
+    return (input.empty() || to_lower(input) == "y" || to_lower(input) == "yes");
 }
 
 // --- AUR クライアント ---
@@ -122,10 +220,8 @@ public:
 void search_aur(const std::vector<std::string>& keywords) {
     for(const auto& pkg_name : keywords) {
         if(pkg_name[0] == '-') continue;
-
         std::string response = AurClient::search_query(pkg_name);
         if(response.empty()) continue;
-
         try {
             auto j = json::parse(response);
             if(j.contains("results") && j["results"].is_array()) {
@@ -141,15 +237,15 @@ void search_aur(const std::vector<std::string>& keywords) {
     }
 }
 
-// AURビルドロジック (未使用の extra_flags 引数を削除)
 void install_aur(const std::string& pkg_name) {
-    std::cout << ":: Building AUR package: " << pkg_name << "..." << std::endl;
+    std::cout << ":: Processing AUR package: " << pkg_name << "..." << std::endl;
     fs::path build_base = fs::temp_directory_path() / "jpacker_build";
     fs::path pkg_dir = build_base / pkg_name;
 
     if(fs::exists(pkg_dir)) fs::remove_all(pkg_dir);
     fs::create_directories(build_base);
 
+    // 1. Clone
     {
         WorkDirGuard wd(build_base);
         if(run_command("git clone " + AUR_BASE_URL + pkg_name + ".git") != 0) {
@@ -157,8 +253,26 @@ void install_aur(const std::string& pkg_name) {
         }
     }
 
+    // 2. Edit / Review
     {
         WorkDirGuard wd(pkg_dir);
+
+        if(!g_config.no_edit) {
+            if(ask_user("Edit PKGBUILD?")) {
+                const char* env_editor = std::getenv("EDITOR");
+                std::string editor_cmd = (env_editor) ? std::string(env_editor) : g_config.editor;
+
+                run_command(editor_cmd + " PKGBUILD");
+
+                if(!ask_user("Proceed with installation?")) {
+                    throw std::runtime_error("Installation aborted by user.");
+                }
+            }
+        } else {
+            std::cout << ":: Skipping PKGBUILD review (--noedit is active)." << std::endl;
+        }
+
+        // 3. Build
         if(run_command("makepkg -sic") != 0) {
             throw std::runtime_error("Build failed for " + pkg_name);
         }
@@ -169,23 +283,50 @@ void install_aur(const std::string& pkg_name) {
 
 int main(int argc, char* argv[]) {
     CurlGlobal curl_global;
+    load_config();
 
+    // 引数なしの場合
     if(argc < 2) {
-        return run_command("pacman");
+        print_help();
+        return 1;
     }
 
+    // ヘルプフラグの確認
+    std::string first_arg = argv[1];
+    if(first_arg == "-h" || first_arg == "--help") {
+        print_help();
+        return 0;
+    }
+
+    // 引数解析
     std::vector<std::string> args;
-    for(int i = 1; i < argc; ++i)
-        args.push_back(argv[i]);
+    std::vector<std::string> targets;
+    std::vector<std::string> flags;
+    std::string              operation = first_arg;
+    flags.push_back(operation);
 
-    std::string operation = args[0];
+    for(int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
 
-    // 動作モード判定
+        if(arg == "--noedit") {
+            g_config.no_edit = true;
+            continue;
+        }
+
+        if(i > 1) {
+            if(arg[0] == '-') {
+                flags.push_back(arg);
+            } else {
+                targets.push_back(arg);
+            }
+        }
+        args.push_back(arg);
+    }
+
     bool is_sync = (operation.find("-S") == 0);
     bool is_remove = (operation.find("-R") == 0);
     bool is_upgrade = (operation.find("-U") == 0);
     bool is_database = (operation.find("-D") == 0);
-
     bool needs_sudo = (is_sync || is_remove || is_upgrade || is_database);
 
     bool is_search = (is_sync && operation.find('s') != std::string::npos);
@@ -193,20 +334,7 @@ int main(int argc, char* argv[]) {
     bool is_clean = (is_sync && operation.find('c') != std::string::npos);
     bool is_sys_upgrade = (is_sync && (operation.find('u') != std::string::npos || operation.find('y') != std::string::npos));
 
-    std::vector<std::string> targets;
-    std::vector<std::string> flags;
-    flags.push_back(operation);
-
-    for(size_t i = 1; i < args.size(); ++i) {
-        if(args[i][0] == '-') {
-            flags.push_back(args[i]);
-        } else {
-            targets.push_back(args[i]);
-        }
-    }
-
     try {
-        // Case A: 検索 (-Ss)
         if(is_search) {
             run_command("pacman " + join_args(args));
             std::cout << ":: Searching AUR..." << std::endl;
@@ -214,13 +342,11 @@ int main(int argc, char* argv[]) {
             return 0;
         }
 
-        // Case B: 情報 (-Si)
-        if(is_info) {
+        if(is_info || is_clean) {
             return run_command("pacman " + join_args(args));
         }
 
-        // Case C: インストール (-S / -Syu)
-        if(is_sync && !is_clean && !is_info) {
+        if(is_sync) {
             if(targets.empty()) {
                 return run_command("sudo pacman " + join_args(args));
             }
@@ -235,32 +361,33 @@ int main(int argc, char* argv[]) {
                     aur_targets.push_back(t);
             }
 
-            // 1. 公式リポジトリ
             if(!repo_targets.empty() || is_sys_upgrade) {
                 std::string cmd = "sudo pacman " + join_args(flags);
                 if(!repo_targets.empty()) {
-                    // ここを修正: join_strs -> join_args
                     cmd += " " + join_args(repo_targets);
                 }
-
                 if(run_command(cmd) != 0) {
                     throw std::runtime_error("Pacman operation failed.");
                 }
             }
 
-            // 2. AUR
             if(!aur_targets.empty()) {
                 for(const auto& pkg : aur_targets) {
-                    // ここを修正: 引数を削除
                     install_aur(pkg);
                 }
             }
             return 0;
         }
 
-        // Case D: その他 (Pass-through)
+        std::string cmd_args = "";
+        for(const auto& arg : args) {
+            if(arg == "--noedit") continue;
+            if(!cmd_args.empty()) cmd_args += " ";
+            cmd_args += arg;
+        }
+
         std::string cmd_prefix = needs_sudo ? "sudo pacman " : "pacman ";
-        return run_command(cmd_prefix + join_args(args));
+        return run_command(cmd_prefix + cmd_args);
 
     } catch(const std::exception& e) {
         std::cerr << "\033[1;31mError:\033[0m " << e.what() << std::endl;
