@@ -1,8 +1,9 @@
 /**
  * jpacker - A full-featured Pacman wrapper and AUR helper
- * v4.7.0 Features:
- * - Extended 'add-src': Supports appending env vars directly (jpacker add-src pkg VAR=VAL)
- * - New 'edit-src': Open build config file with sudo editor
+ * v0.5.1 Features:
+ * - Smart build flags: Only applies custom env vars if defined in package.build
+ * - Fallbacks to system makepkg.conf when config file is empty
+ * - One-off build command and persistent source management
  */
 
 #include <algorithm>
@@ -22,12 +23,13 @@ namespace fs = std::filesystem;
 
 // --- 設定 ---
 #ifndef JPKG_VERSION
-#define JPKG_VERSION "0.4.0"
+#define JPKG_VERSION "0.5.1"
 #endif
 
 const std::string VERSION = JPKG_VERSION;
 const std::string AUR_RPC_URL = "https://aur.archlinux.org/rpc/v5/search/";
 const std::string AUR_BASE_URL = "https://aur.archlinux.org/";
+const std::string ARCH_GIT_BASE = "https://gitlab.archlinux.org/archlinux/packaging/packages/";
 const std::string USER_AGENT = "jpacker/" + VERSION;
 const std::string CONFIG_FILE = "/etc/jpacker/jpacker.conf";
 const std::string PACKAGE_BUILD_DIR = "/etc/jpacker/package.build";
@@ -94,15 +96,14 @@ bool is_force_source(const std::string& pkg_name) {
     return fs::exists(target);
 }
 
+// ファイルからKEY=VALUEを読み取る
+// 空ファイルやコメントのみの場合は空文字を返す
 std::string get_package_env(const std::string& pkg_name) {
     fs::path p = fs::path(PACKAGE_BUILD_DIR) / pkg_name;
     if(!fs::exists(p)) return "";
 
     std::ifstream file(p);
-    std::string   line;
-    std::string   env_str = "";
-
-    std::cout << ":: Loading custom build flags for " << pkg_name << "..." << std::endl;
+    std::string   line, env_str;
 
     while(std::getline(file, line)) {
         size_t comment = line.find('#');
@@ -113,11 +114,8 @@ std::string get_package_env(const std::string& pkg_name) {
         if(eq_pos != std::string::npos) {
             std::string key = trim(line.substr(0, eq_pos));
             std::string val = trim(line.substr(eq_pos + 1));
-
             if(!val.empty()) {
-                if(val.front() != '"' && val.front() != '\'') {
-                    val = "\"" + val + "\"";
-                }
+                if(val.front() != '"' && val.front() != '\'') val = "\"" + val + "\"";
                 env_str += key + "=" + val + " ";
             }
         }
@@ -259,31 +257,36 @@ void search_aur(const std::vector<std::string>& keywords) {
     }
 }
 
-void install_aur(const std::string& pkg_name) {
-    std::cout << ":: Processing source package: " << pkg_name << "..." << std::endl;
+// --- Build Logic ---
+
+void build_from_git(const std::string& pkg_name, const std::string& git_url, const std::string& custom_env) {
+    std::cout << ":: Building " << pkg_name << " from source (" << git_url << ")..." << std::endl;
+
     fs::path build_base = get_cache_dir();
     fs::path pkg_dir = build_base / pkg_name;
     if(!fs::exists(build_base)) fs::create_directories(build_base);
 
+    // 1. Clone / Pull
     {
         WorkDirGuard wd(build_base);
         if(fs::exists(pkg_dir) && fs::exists(pkg_dir / ".git")) {
-            std::cout << ":: Updating " << pkg_name << "..." << std::endl;
+            std::cout << ":: Updating repository..." << std::endl;
             WorkDirGuard wd_repo(pkg_dir);
             if(run_command("git fetch origin && git reset --hard origin/master") != 0) {
                 throw std::runtime_error("Failed to update repository.");
             }
         } else {
-            std::cout << ":: Cloning " << pkg_name << "..." << std::endl;
+            std::cout << ":: Cloning repository..." << std::endl;
             if(fs::exists(pkg_dir)) fs::remove_all(pkg_dir);
             DirCleanupGuard cleanup_guard(pkg_dir);
-            if(run_command("git clone " + AUR_BASE_URL + pkg_name + ".git") != 0) {
+            if(run_command("git clone " + git_url + " " + pkg_name) != 0) {
                 throw std::runtime_error("Failed to clone " + pkg_name);
             }
             cleanup_guard.commit();
         }
     }
 
+    // 2. Edit / Build
     {
         WorkDirGuard wd(pkg_dir);
         if(!g_config.no_edit) {
@@ -291,64 +294,96 @@ void install_aur(const std::string& pkg_name) {
                 const char* env_editor = std::getenv("EDITOR");
                 std::string editor_cmd = (env_editor) ? std::string(env_editor) : g_config.editor;
                 run_command(editor_cmd + " PKGBUILD");
-                if(!ask_user("Proceed with installation?")) throw std::runtime_error("Aborted.");
+                if(!ask_user("Proceed with build?")) throw std::runtime_error("Aborted.");
             }
         } else {
             std::cout << ":: Skipping review (--noedit)." << std::endl;
         }
 
-        std::string custom_env = get_package_env(pkg_name);
-        std::string build_cmd = custom_env + "makepkg -sic";
+        // 【改良点】カスタム設定の有無でコマンドを分岐
+        std::string build_cmd;
+        if(!trim(custom_env).empty()) {
+            std::cout << ":: Applying custom build flags: " << custom_env << std::endl;
+            build_cmd = custom_env + "makepkg -sic";
+        } else {
+            std::cout << ":: Using default makepkg.conf settings (no custom flags)." << std::endl;
+            build_cmd = "makepkg -sic";
+        }
+
         if(run_command(build_cmd) != 0) throw std::runtime_error("Build failed.");
     }
 }
 
+void install_aur(const std::string& pkg_name) {
+    std::string env = get_package_env(pkg_name);
+    build_from_git(pkg_name, AUR_BASE_URL + pkg_name + ".git", env);
+}
+
 // --- Commands ---
 
-// 【Updated】add-src: 引数に '=' があれば変数として直前のパッケージ設定に書き込む
+void cmd_build(const std::vector<std::string>& args) {
+    if(args.empty()) {
+        std::cerr << "Usage: jpacker build <pkg> [VAR=VAL...]" << std::endl;
+        return;
+    }
+    std::string pkg_name, custom_env;
+    for(const auto& arg : args) {
+        if(arg.find('=') != std::string::npos)
+            custom_env += arg + " ";
+        else if(pkg_name.empty())
+            pkg_name = arg;
+        else
+            std::cerr << "Warning: Ignoring extra arg '" << arg << "'" << std::endl;
+    }
+    if(pkg_name.empty()) {
+        std::cerr << "Error: No package specified." << std::endl;
+        return;
+    }
+
+    std::string git_url;
+    if(is_repo_package(pkg_name)) {
+        std::cout << ":: Package found in official repos." << std::endl;
+        git_url = ARCH_GIT_BASE + pkg_name + ".git";
+    } else {
+        std::cout << ":: Package assumed to be in AUR." << std::endl;
+        git_url = AUR_BASE_URL + pkg_name + ".git";
+    }
+
+    try {
+        build_from_git(pkg_name, git_url, custom_env);
+    } catch(const std::exception& e) {
+        std::cerr << "Build Error: " << e.what() << std::endl;
+        if(is_repo_package(pkg_name)) std::cerr << "Hint: Official repo names might differ from pkg names." << std::endl;
+    }
+}
+
 void cmd_add_src(const std::vector<std::string>& args) {
     std::vector<std::string> current_pkgs;
-
     for(const auto& arg : args) {
         if(arg.find('=') == std::string::npos) {
-            // '=' がない -> パッケージ名とみなす
             fs::path p = fs::path(PACKAGE_BUILD_DIR) / arg;
-            if(run_command("sudo touch " + p.string()) != 0) {
+            if(run_command("sudo touch " + p.string()) != 0)
                 std::cerr << "Failed to add " << arg << std::endl;
-            } else {
+            else {
                 std::cout << ":: Added " << arg << " to source-build list." << std::endl;
                 current_pkgs.push_back(p.string());
             }
         } else {
-            // '=' がある -> 環境変数設定 (例: CFLAGS="-O3")
-            // 直前に処理したすべてのパッケージファイルに追記する
-            if(current_pkgs.empty()) {
-                std::cerr << "Warning: Variable '" << arg << "' provided before any package name. Ignoring." << std::endl;
-                continue;
-            }
+            if(current_pkgs.empty()) continue;
             for(const auto& pkg_path : current_pkgs) {
                 std::cout << "   -> Appending " << arg << " to " << pkg_path << std::endl;
-                // sudo tee -a を使って追記
-                std::string cmd = "echo '" + arg + "' | sudo tee -a " + pkg_path + " > /dev/null";
-                run_command(cmd);
+                run_command("echo '" + arg + "' | sudo tee -a " + pkg_path + " > /dev/null");
             }
         }
     }
 }
 
-// 【New!】edit-src: 設定ファイルをエディタで開く
 void cmd_edit_src(const std::vector<std::string>& targets) {
     const char* env_editor = std::getenv("EDITOR");
     std::string editor = (env_editor) ? std::string(env_editor) : g_config.editor;
-
     for(const auto& pkg : targets) {
         fs::path p = fs::path(PACKAGE_BUILD_DIR) / pkg;
-        if(!fs::exists(p)) {
-            std::cout << ":: Creating config file for " << pkg << "..." << std::endl;
-            run_command("sudo touch " + p.string());
-        }
-        std::cout << ":: Editing build config for " << pkg << "..." << std::endl;
-        // /etc 配下のファイルなので sudo でエディタを開く
+        if(!fs::exists(p)) run_command("sudo touch " + p.string());
         run_command("sudo " + editor + " " + p.string());
     }
 }
@@ -356,20 +391,16 @@ void cmd_edit_src(const std::vector<std::string>& targets) {
 void cmd_del_src(const std::vector<std::string>& targets) {
     for(const auto& pkg : targets) {
         fs::path p = fs::path(PACKAGE_BUILD_DIR) / pkg;
-        std::cout << ":: Removing " << pkg << " from source-build list..." << std::endl;
-        if(run_command("sudo rm -f " + p.string()) != 0) {
-            std::cerr << "Failed to remove " << pkg << std::endl;
-        }
+        std::cout << ":: Removing " << pkg << " from list..." << std::endl;
+        run_command("sudo rm -f " + p.string());
     }
 }
 
 void cmd_upgrade() {
-    std::cout << ":: Starting full system upgrade..." << std::endl;
-    if(run_command("sudo pacman -Syu") != 0) {
-        throw std::runtime_error("System update failed.");
-    }
+    std::cout << ":: System upgrade..." << std::endl;
+    if(run_command("sudo pacman -Syu") != 0) throw std::runtime_error("Update failed.");
     if(fs::exists(PACKAGE_BUILD_DIR)) {
-        std::cout << ":: Checking for source-build packages..." << std::endl;
+        std::cout << ":: Rebuilding source packages..." << std::endl;
         for(const auto& entry : fs::directory_iterator(PACKAGE_BUILD_DIR)) {
             if(entry.is_regular_file()) {
                 std::string pkg_name = entry.path().filename().string();
@@ -383,7 +414,7 @@ void cmd_upgrade() {
     }
 }
 
-// --- Help ---
+// --- Help & Main ---
 void print_help() {
     std::cout << "\033[1;36mjpacker\033[0m v" << VERSION << "\n"
               << std::endl;
@@ -391,15 +422,15 @@ void print_help() {
     std::cout << "    jpacker <op> [options] [targets...]\n"
               << std::endl;
     std::cout << "\033[1mOPERATIONS\033[0m" << std::endl;
-    std::cout << "    \033[1mupgrade\033[0m              System update & source rebuilds" << std::endl;
-    std::cout << "    \033[1madd-src\033[0m <pkg> [V=K]  Mark pkg for source build (with optional env vars)" << std::endl;
-    std::cout << "    \033[1medit-src\033[0m <pkg>       Edit build config file" << std::endl;
+    std::cout << "    \033[1mbuild\033[0m <pkg> [V=K]  One-off build" << std::endl;
+    std::cout << "    \033[1mupgrade\033[0m              System update & rebuilds" << std::endl;
+    std::cout << "    \033[1madd-src\033[0m <pkg> [V=K]  Mark pkg for source build" << std::endl;
+    std::cout << "    \033[1medit-src\033[0m <pkg>       Edit config" << std::endl;
     std::cout << "    \033[1mdel-src\033[0m <pkg>        Unmark pkg" << std::endl;
     std::cout << "    \033[1m-S, -Syu\033[0m             Install/Update" << std::endl;
     std::cout << "    \033[1m-Ss\033[0m <query>          Search" << std::endl;
-    std::cout << "    \033[1m-R, -Rs\033[0m              Remove" << std::endl;
     std::cout << "\033[1mOPTIONS\033[0m" << std::endl;
-    std::cout << "    \033[1m--noedit\033[0m             Skip PKGBUILD review" << std::endl;
+    std::cout << "    \033[1m--noedit\033[0m             Skip review" << std::endl;
 }
 
 int main(int argc, char* argv[]) {
@@ -435,6 +466,10 @@ int main(int argc, char* argv[]) {
     }
 
     try {
+        if(operation == "build") {
+            cmd_build(targets);
+            return 0;
+        }
         if(operation == "upgrade") {
             cmd_upgrade();
             return 0;

@@ -1,6 +1,6 @@
 # --- プロジェクト情報 ---
 TARGET    := jpacker
-VERSION   := $(strip 0.4.0)# ここは適宜更新
+VERSION   := $(strip 0.5.1)# ここは適宜更新
 SRC_DIR   := src
 BUILD_DIR := build
 
