@@ -1,16 +1,19 @@
 /**
  * jpacker - A full-featured Pacman wrapper and AUR helper
- * v0.5.1 Features:
- * - Smart build flags: Only applies custom env vars if defined in package.build
- * - Fallbacks to system makepkg.conf when config file is empty
- * - One-off build command and persistent source management
+ * v0.7.0 Features:
+ * - Configurable log file path via jpacker.conf (LOGFILE=...)
+ * - Supports ~/ expansion for paths
+ * - Minimal Logging with timestamps and log levels
  */
 
 #include <algorithm>
+#include <chrono>
 #include <cstdlib>
+#include <ctime>
 #include <curl/curl.h>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <nlohmann/json.hpp>
 #include <sstream>
@@ -23,7 +26,7 @@ namespace fs = std::filesystem;
 
 // --- 設定 ---
 #ifndef JPKG_VERSION
-#define JPKG_VERSION "0.5.1"
+#define JPKG_VERSION "0.7.0"
 #endif
 
 const std::string VERSION = JPKG_VERSION;
@@ -38,6 +41,7 @@ const std::string PACKAGE_BUILD_DIR = "/etc/jpacker/package.build";
 struct AppConfig {
     bool        no_edit = false;
     std::string editor = "nano";
+    std::string log_file = "";// New: ログファイルのパス
 };
 
 AppConfig g_config;
@@ -55,6 +59,17 @@ std::string to_lower(std::string str) {
     return str;
 }
 
+// 【New!】パスのチルダ(~)展開
+fs::path expand_path(const std::string& path_str) {
+    if(path_str.empty()) return "";
+    if(path_str[0] == '~') {
+        const char* home = std::getenv("HOME");
+        if(!home) throw std::runtime_error("HOME environment variable not set.");
+        return fs::path(home) / path_str.substr(1);
+    }
+    return fs::path(path_str);
+}
+
 fs::path get_cache_dir() {
     const char* xdg_cache = std::getenv("XDG_CACHE_HOME");
     fs::path    base;
@@ -68,6 +83,7 @@ fs::path get_cache_dir() {
     return base / "jpacker";
 }
 
+// --- Config Loader ---
 void load_config() {
     if(!fs::exists(CONFIG_FILE)) return;
     std::ifstream file(CONFIG_FILE);
@@ -81,35 +97,83 @@ void load_config() {
         if(std::getline(ss, key, '=') && std::getline(ss, val)) {
             key = to_lower(trim(key));
             val = trim(val);
+
             if(key == "noedit") {
                 std::string v = to_lower(val);
                 if(v == "true" || v == "1" || v == "yes") g_config.no_edit = true;
             } else if(key == "editor") {
                 if(!val.empty()) g_config.editor = val;
+            } else if(key == "logfile") {// New: LOGFILE設定の読み込み
+                if(!val.empty()) g_config.log_file = val;
             }
         }
     }
 }
+
+// --- Logger ---
+class Logger {
+    static std::ofstream logFile;
+    static bool          initialized;
+
+    static std::string get_timestamp() {
+        auto              now = std::chrono::system_clock::now();
+        auto              in_time_t = std::chrono::system_clock::to_time_t(now);
+        std::stringstream ss;
+        ss << std::put_time(std::localtime(&in_time_t), "%Y-%m-%d %H:%M:%S");
+        return ss.str();
+    }
+
+public:
+    static void init(const fs::path& path) {
+        // 親ディレクトリを作成
+        if(path.has_parent_path() && !fs::exists(path.parent_path())) {
+            fs::create_directories(path.parent_path());
+        }
+        logFile.open(path, std::ios::app);
+        initialized = logFile.is_open();
+    }
+
+    static void info(const std::string& msg) {
+        std::cout << "\033[1;32m::\033[0m " << msg << std::endl;
+        if(initialized) logFile << "[" << get_timestamp() << "] [INFO] " << msg << std::endl;
+    }
+
+    static void warn(const std::string& msg) {
+        std::cout << "\033[1;33m:: Warning:\033[0m " << msg << std::endl;
+        if(initialized) logFile << "[" << get_timestamp() << "] [WARN] " << msg << std::endl;
+    }
+
+    static void error(const std::string& msg) {
+        std::cerr << "\033[1;31m:: Error:\033[0m " << msg << std::endl;
+        if(initialized) logFile << "[" << get_timestamp() << "] [ERROR] " << msg << std::endl;
+    }
+
+    static void raw_cmd(const std::string& cmd) {
+        std::cout << "\033[1;33m::\033[0m Running: " << cmd << std::endl;
+        if(initialized) logFile << "[" << get_timestamp() << "] [EXEC] " << cmd << std::endl;
+    }
+};
+
+std::ofstream Logger::logFile;
+bool          Logger::initialized = false;
+
+// ... (以下、is_force_source, get_package_env, RAII classes, Helpers は変更なし) ...
 
 bool is_force_source(const std::string& pkg_name) {
     fs::path target = fs::path(PACKAGE_BUILD_DIR) / pkg_name;
     return fs::exists(target);
 }
 
-// ファイルからKEY=VALUEを読み取る
-// 空ファイルやコメントのみの場合は空文字を返す
 std::string get_package_env(const std::string& pkg_name) {
     fs::path p = fs::path(PACKAGE_BUILD_DIR) / pkg_name;
     if(!fs::exists(p)) return "";
-
     std::ifstream file(p);
     std::string   line, env_str;
-
+    Logger::info("Loading custom build flags from " + p.string());
     while(std::getline(file, line)) {
         size_t comment = line.find('#');
         if(comment != std::string::npos) line = line.substr(0, comment);
         if(trim(line).empty()) continue;
-
         size_t eq_pos = line.find('=');
         if(eq_pos != std::string::npos) {
             std::string key = trim(line.substr(0, eq_pos));
@@ -179,7 +243,7 @@ public:
     }
     ~DirCleanupGuard() {
         if(!committed_ && fs::exists(path_)) {
-            std::cerr << "\033[1;31m::\033[0m Rolling back: cleaning up " << path_ << std::endl;
+            Logger::warn("Rolling back: cleaning up " + path_.string());
             try {
                 fs::remove_all(path_);
             } catch(...) {
@@ -196,7 +260,7 @@ size_t WriteCallback(void* contents, size_t size, size_t nmemb, void* userp) {
 }
 
 int run_command(const std::string& cmd) {
-    std::cout << "\033[1;33m::\033[0m Running: " << cmd << std::endl;
+    Logger::raw_cmd(cmd);
     return std::system(cmd.c_str());
 }
 
@@ -258,25 +322,22 @@ void search_aur(const std::vector<std::string>& keywords) {
 }
 
 // --- Build Logic ---
-
 void build_from_git(const std::string& pkg_name, const std::string& git_url, const std::string& custom_env) {
-    std::cout << ":: Building " << pkg_name << " from source (" << git_url << ")..." << std::endl;
-
+    Logger::info("Building " + pkg_name + " from source (" + git_url + ")...");
     fs::path build_base = get_cache_dir();
     fs::path pkg_dir = build_base / pkg_name;
     if(!fs::exists(build_base)) fs::create_directories(build_base);
 
-    // 1. Clone / Pull
     {
         WorkDirGuard wd(build_base);
         if(fs::exists(pkg_dir) && fs::exists(pkg_dir / ".git")) {
-            std::cout << ":: Updating repository..." << std::endl;
+            Logger::info("Updating repository...");
             WorkDirGuard wd_repo(pkg_dir);
             if(run_command("git fetch origin && git reset --hard origin/master") != 0) {
                 throw std::runtime_error("Failed to update repository.");
             }
         } else {
-            std::cout << ":: Cloning repository..." << std::endl;
+            Logger::info("Cloning repository...");
             if(fs::exists(pkg_dir)) fs::remove_all(pkg_dir);
             DirCleanupGuard cleanup_guard(pkg_dir);
             if(run_command("git clone " + git_url + " " + pkg_name) != 0) {
@@ -286,7 +347,6 @@ void build_from_git(const std::string& pkg_name, const std::string& git_url, con
         }
     }
 
-    // 2. Edit / Build
     {
         WorkDirGuard wd(pkg_dir);
         if(!g_config.no_edit) {
@@ -297,16 +357,15 @@ void build_from_git(const std::string& pkg_name, const std::string& git_url, con
                 if(!ask_user("Proceed with build?")) throw std::runtime_error("Aborted.");
             }
         } else {
-            std::cout << ":: Skipping review (--noedit)." << std::endl;
+            Logger::info("Skipping review (--noedit).");
         }
 
-        // 【改良点】カスタム設定の有無でコマンドを分岐
         std::string build_cmd;
         if(!trim(custom_env).empty()) {
-            std::cout << ":: Applying custom build flags: " << custom_env << std::endl;
+            Logger::info("Applying custom build flags: " + custom_env);
             build_cmd = custom_env + "makepkg -sic";
         } else {
-            std::cout << ":: Using default makepkg.conf settings (no custom flags)." << std::endl;
+            Logger::info("Using default makepkg.conf settings.");
             build_cmd = "makepkg -sic";
         }
 
@@ -320,10 +379,9 @@ void install_aur(const std::string& pkg_name) {
 }
 
 // --- Commands ---
-
 void cmd_build(const std::vector<std::string>& args) {
     if(args.empty()) {
-        std::cerr << "Usage: jpacker build <pkg> [VAR=VAL...]" << std::endl;
+        Logger::error("Usage: jpacker build <pkg> [VAR=VAL...]");
         return;
     }
     std::string pkg_name, custom_env;
@@ -333,27 +391,27 @@ void cmd_build(const std::vector<std::string>& args) {
         else if(pkg_name.empty())
             pkg_name = arg;
         else
-            std::cerr << "Warning: Ignoring extra arg '" << arg << "'" << std::endl;
+            Logger::warn("Ignoring extra arg '" + arg + "'");
     }
     if(pkg_name.empty()) {
-        std::cerr << "Error: No package specified." << std::endl;
+        Logger::error("No package specified.");
         return;
     }
 
     std::string git_url;
     if(is_repo_package(pkg_name)) {
-        std::cout << ":: Package found in official repos." << std::endl;
+        Logger::info("Package found in official repos.");
         git_url = ARCH_GIT_BASE + pkg_name + ".git";
     } else {
-        std::cout << ":: Package assumed to be in AUR." << std::endl;
+        Logger::info("Package assumed to be in AUR.");
         git_url = AUR_BASE_URL + pkg_name + ".git";
     }
 
     try {
         build_from_git(pkg_name, git_url, custom_env);
     } catch(const std::exception& e) {
-        std::cerr << "Build Error: " << e.what() << std::endl;
-        if(is_repo_package(pkg_name)) std::cerr << "Hint: Official repo names might differ from pkg names." << std::endl;
+        Logger::error(std::string("Build Error: ") + e.what());
+        if(is_repo_package(pkg_name)) Logger::warn("Hint: Official repo names might differ from pkg names.");
     }
 }
 
@@ -363,15 +421,15 @@ void cmd_add_src(const std::vector<std::string>& args) {
         if(arg.find('=') == std::string::npos) {
             fs::path p = fs::path(PACKAGE_BUILD_DIR) / arg;
             if(run_command("sudo touch " + p.string()) != 0)
-                std::cerr << "Failed to add " << arg << std::endl;
+                Logger::error("Failed to add " + arg);
             else {
-                std::cout << ":: Added " << arg << " to source-build list." << std::endl;
+                Logger::info("Added " + arg + " to source-build list.");
                 current_pkgs.push_back(p.string());
             }
         } else {
             if(current_pkgs.empty()) continue;
             for(const auto& pkg_path : current_pkgs) {
-                std::cout << "   -> Appending " << arg << " to " << pkg_path << std::endl;
+                Logger::info("   -> Appending " + arg + " to " + pkg_path);
                 run_command("echo '" + arg + "' | sudo tee -a " + pkg_path + " > /dev/null");
             }
         }
@@ -391,23 +449,23 @@ void cmd_edit_src(const std::vector<std::string>& targets) {
 void cmd_del_src(const std::vector<std::string>& targets) {
     for(const auto& pkg : targets) {
         fs::path p = fs::path(PACKAGE_BUILD_DIR) / pkg;
-        std::cout << ":: Removing " << pkg << " from list..." << std::endl;
+        Logger::info("Removing " + pkg + " from list...");
         run_command("sudo rm -f " + p.string());
     }
 }
 
 void cmd_upgrade() {
-    std::cout << ":: System upgrade..." << std::endl;
+    Logger::info("System upgrade...");
     if(run_command("sudo pacman -Syu") != 0) throw std::runtime_error("Update failed.");
     if(fs::exists(PACKAGE_BUILD_DIR)) {
-        std::cout << ":: Rebuilding source packages..." << std::endl;
+        Logger::info("Rebuilding source packages...");
         for(const auto& entry : fs::directory_iterator(PACKAGE_BUILD_DIR)) {
             if(entry.is_regular_file()) {
                 std::string pkg_name = entry.path().filename().string();
                 try {
                     install_aur(pkg_name);
                 } catch(const std::exception& e) {
-                    std::cerr << "Error updating " << pkg_name << ": " << e.what() << std::endl;
+                    Logger::error("Error updating " + pkg_name + ": " + e.what());
                 }
             }
         }
@@ -431,11 +489,33 @@ void print_help() {
     std::cout << "    \033[1m-Ss\033[0m <query>          Search" << std::endl;
     std::cout << "\033[1mOPTIONS\033[0m" << std::endl;
     std::cout << "    \033[1m--noedit\033[0m             Skip review" << std::endl;
+    std::cout << "\033[1mCONFIG\033[0m" << std::endl;
+    std::cout << "    jpacker.conf: LOGFILE=~/path/to/log" << std::endl;
 }
 
 int main(int argc, char* argv[]) {
     CurlGlobal curl_global;
+
+    // 1. 設定ファイル読み込み (ログパスを知るため)
     load_config();
+
+    // 2. ログ初期化
+    try {
+        fs::path log_path;
+        if(!g_config.log_file.empty()) {
+            log_path = expand_path(g_config.log_file);
+        } else {
+            // デフォルト: ~/.cache/jpacker/jpacker.log
+            fs::path cache_dir = get_cache_dir();
+            if(!fs::exists(cache_dir)) fs::create_directories(cache_dir);
+            log_path = cache_dir / "jpacker.log";
+        }
+        Logger::init(log_path);
+        Logger::info("Started jpacker v" + VERSION);
+    } catch(const std::exception& e) {
+        std::cerr << "Warning: Failed to initialize log: " << e.what() << std::endl;
+    }
+
     if(argc < 2) {
         print_help();
         return 1;
@@ -496,7 +576,7 @@ int main(int argc, char* argv[]) {
 
         if(is_search) {
             run_command("pacman " + join_args(args));
-            std::cout << ":: Searching AUR..." << std::endl;
+            Logger::info("Searching AUR...");
             search_aur(targets);
             return 0;
         }
@@ -533,7 +613,7 @@ int main(int argc, char* argv[]) {
         std::string cmd_prefix = needs_sudo ? "sudo pacman " : "pacman ";
         return run_command(cmd_prefix + cmd_args);
     } catch(const std::exception& e) {
-        std::cerr << "\033[1;31mError:\033[0m " << e.what() << std::endl;
+        Logger::error(e.what());
         return 1;
     }
 }

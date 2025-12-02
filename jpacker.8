@@ -1,4 +1,4 @@
-.TH JPACKER 8 "December 2025" "jpacker 0.5.1" "System Administration Utilities"
+.TH JPACKER 8 "December 2025" "jpacker 0.7.0" "System Administration Utilities"
 .SH NAME
 jpacker \- A robust Pacman wrapper and AUR helper with source-based build management
 .SH SYNOPSIS
@@ -54,58 +54,14 @@ Skip the interactive review/edit of PKGBUILD files before building.
 Display the help message and exit.
 
 .SH CONFIGURATION
-.TP
-.I /etc/jpacker/jpacker.conf
-The main configuration file.
-.RS
+The main configuration file is located at \fI/etc/jpacker/jpacker.conf\fR.
+It supports the following keys:
 .TP
 .B NOEDIT
 Set to \fBtrue\fR to disable PKGBUILD review prompts globally.
 .TP
 .B EDITOR
-Specify the preferred text editor.
-.RE
-
-.SH FILES
+Specify the preferred text editor. If not set, the \fBEDITOR\fR environment variable is used.
 .TP
-.I /etc/jpacker/package.build/
-Directory containing configuration files for packages marked with \fBadd-src\fR. Files in this directory can define environment variables (e.g., CFLAGS) that are applied during \fBmakepkg\fR execution.
-.TP
-.I ~/.cache/jpacker/
-Default directory used for downloading and building packages (respects \fBXDG_CACHE_HOME\fR).
-
-.SH ENVIRONMENT
-.TP
-.B EDITOR
-The editor used for reviewing PKGBUILDs and editing configurations.
-.TP
-.B XDG_CACHE_HOME
-Used to determine the build directory location.
-
-.SH EXAMPLES
-.B Update system and AUR packages:
-.RS
-jpacker upgrade
-.RE
-
-.B Install a package from AUR:
-.RS
-jpacker -S google-chrome
-.RE
-
-.B Mark a package to use custom optimizations:
-.RS
-jpacker add-src neofetch CFLAGS="-O3 -march=native"
-.RE
-
-.B One-off build of an official package:
-.RS
-jpacker build grep CFLAGS="-O3"
-.RE
-
-.SH SEE ALSO
-.BR pacman (8),
-.BR makepkg (8)
-
-.SH AUTHOR
-Written by your_name <youremail@example.com>
+.B LOGFILE
+Specify the path to the log file. Supports tilde expansion
