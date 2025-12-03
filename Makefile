@@ -1,6 +1,6 @@
 # --- プロジェクト情報 ---
 TARGET    := jpacker
-VERSION   := 1.1.0
+VERSION   := 1.2.0
 SRC_DIR   := src
 BUILD_DIR := build
 
