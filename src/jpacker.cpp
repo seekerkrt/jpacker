@@ -1,11 +1,13 @@
 /**
  * jpacker - A full-featured Pacman wrapper and AUR helper
- * v1.1.0 Features:
- * - Variable expansion in config files (e.g. CXXFLAGS="$CFLAGS")
- * - Smart quoting handling
+ * v1.2.0 Features:
+ * - Smart Upgrade: Skips rebuilding packages if the version hasn't changed during 'upgrade'.
+ * - Variable expansion support in config files.
+ * - '--nodiff' option support.
  */
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstdlib>
 #include <ctime>
@@ -14,9 +16,10 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
-#include <map>// New
+#include <map>
+#include <memory>
 #include <nlohmann/json.hpp>
-#include <regex>// New
+#include <regex>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -27,7 +30,7 @@ namespace fs = std::filesystem;
 
 // --- 設定 ---
 #ifndef JPKG_VERSION
-#define JPKG_VERSION "1.1.0"
+#define JPKG_VERSION "1.2.0"
 #endif
 
 const std::string VERSION = JPKG_VERSION;
@@ -60,7 +63,6 @@ std::string to_lower(std::string str) {
     return str;
 }
 
-// 引用符を取り除くヘルパー ("value" -> value)
 std::string unquote(std::string str) {
     if(str.length() >= 2) {
         char first = str.front();
@@ -95,6 +97,18 @@ fs::path get_cache_dir() {
     return base / "jpacker";
 }
 
+// コマンド出力を取得するヘルパー
+std::string exec_command(const char* cmd) {
+    std::array<char, 128> buffer;
+    std::string           result;
+    // 修正: decltype(&pclose) を int(*)(FILE*) に変更して警告を回避
+    std::unique_ptr<FILE, int (*)(FILE*)> pipe(popen(cmd, "r"), pclose);
+    if(!pipe) return "";
+    while(fgets(buffer.data(), buffer.size(), pipe.get()) != nullptr) {
+        result += buffer.data();
+    }
+    return trim(result);
+}
 void load_config() {
     if(!fs::exists(CONFIG_FILE)) return;
     std::ifstream file(CONFIG_FILE);
@@ -168,38 +182,24 @@ bool is_force_source(const std::string& pkg_name) {
     return fs::exists(target);
 }
 
-// 【Updated】変数展開機能付きの環境変数ローダー
 std::string get_package_env(const std::string& pkg_name) {
     fs::path p = fs::path(PACKAGE_BUILD_DIR) / pkg_name;
     if(!fs::exists(p)) return "";
-
-    std::ifstream file(p);
-    std::string   line;
-    std::string   env_str = "";
-
-    // 変数を記憶するマップ
+    std::ifstream                      file(p);
+    std::string                        line;
+    std::string                        env_str = "";
     std::map<std::string, std::string> vars;
-
     Logger::info("Loading custom build flags from " + p.string());
-
     while(std::getline(file, line)) {
         size_t comment = line.find('#');
         if(comment != std::string::npos) line = line.substr(0, comment);
         if(trim(line).empty()) continue;
-
         size_t eq_pos = line.find('=');
         if(eq_pos != std::string::npos) {
             std::string key = trim(line.substr(0, eq_pos));
             std::string raw_val = trim(line.substr(eq_pos + 1));
-
-            // 1. クォートを外す
             std::string val = unquote(raw_val);
-
-            // 2. 変数展開 ($VAR または ${VAR})
-            // シンプルな正規表現で置換: \$([A-Za-z0-9_]+) または \$\{([A-Za-z0-9_]+)\}
-            // C++のregexは完全なシェル互換ではないが、基本的な置換は可能
             try {
-                // ${VAR} 形式
                 std::regex  re_brace(R"(\$\{([A-Za-z0-9_]+)\})");
                 std::smatch match;
                 while(std::regex_search(val, match, re_brace)) {
@@ -207,8 +207,6 @@ std::string get_package_env(const std::string& pkg_name) {
                     std::string replacement = vars.count(var_name) ? vars[var_name] : "";
                     val = match.prefix().str() + replacement + match.suffix().str();
                 }
-
-                // $VAR 形式
                 std::regex re_simple(R"(\$([A-Za-z0-9_]+))");
                 while(std::regex_search(val, match, re_simple)) {
                     std::string var_name = match[1];
@@ -216,14 +214,8 @@ std::string get_package_env(const std::string& pkg_name) {
                     val = match.prefix().str() + replacement + match.suffix().str();
                 }
             } catch(...) {
-                // Regexエラー等の場合は展開を諦める
             }
-
-            // 3. マップに保存 (次の行での参照用)
             vars[key] = val;
-
-            // 4. 環境変数文字列に追加 (安全のために再度クォートする)
-            // 空でなければ追加
             if(!val.empty()) {
                 env_str += key + "=\"" + val + "\" ";
             }
@@ -232,12 +224,55 @@ std::string get_package_env(const std::string& pkg_name) {
     return env_str;
 }
 
-// ... (Rest of the code is unchanged from v1.0.2) ...
-
 std::string get_git_branch() {
     if(std::system("git show-ref --verify --quiet refs/remotes/origin/main") == 0) return "main";
     if(std::system("git show-ref --verify --quiet refs/remotes/origin/master") == 0) return "master";
     return "master";
+}
+
+// 【New!】更新が必要かチェックする関数
+// 戻り値: true (更新必要 or インストールされていない), false (最新版)
+bool is_update_needed(const std::string& pkg_name) {
+    // 1. インストール済みバージョン取得
+    std::string installed_full = exec_command(("pacman -Q " + pkg_name + " 2>/dev/null").c_str());
+    if(installed_full.empty()) {
+        return true;// インストールされていないのでビルド必要
+    }
+    // "package 1.0.0-1" -> "1.0.0-1"
+    size_t      space_pos = installed_full.find(' ');
+    std::string installed_ver = (space_pos != std::string::npos) ? installed_full.substr(space_pos + 1) : "";
+
+    // 2. PKGBUILDから最新バージョン取得 (.SRCINFO生成)
+    // NOTE: ディレクトリ移動は呼び出し元(WorkDirGuard)で制御されている前提
+    std::string srcinfo = exec_command("makepkg --printsrcinfo 2>/dev/null");
+    std::string pkgver, pkgrel;
+
+    std::stringstream ss(srcinfo);
+    std::string       line;
+    while(std::getline(ss, line)) {
+        if(line.find("pkgver =") != std::string::npos) {
+            pkgver = trim(line.substr(line.find('=') + 1));
+        } else if(line.find("pkgrel =") != std::string::npos) {
+            pkgrel = trim(line.substr(line.find('=') + 1));
+        }
+    }
+
+    if(pkgver.empty() || pkgrel.empty()) return true;// 取得失敗時は安全側に倒してビルド
+    std::string new_ver = pkgver + "-" + pkgrel;
+
+    // 3. vercmp で比較
+    std::string cmp_cmd = "vercmp " + new_ver + " " + installed_ver;
+    std::string cmp_res = exec_command(cmp_cmd.c_str());
+
+    // vercmp > 0 なら new_ver の方が新しい
+    try {
+        if(std::stoi(cmp_res) > 0) return true;
+    } catch(...) {
+        return true;
+    }
+
+    Logger::info(pkg_name + " is up to date (" + installed_ver + "). Skipping.");
+    return false;
 }
 
 class CurlGlobal {
@@ -365,39 +400,54 @@ void search_aur(const std::vector<std::string>& keywords) {
 }
 
 // --- Build Logic ---
-void build_from_git(const std::string& pkg_name, const std::string& git_url, const std::string& custom_env) {
-    Logger::info("Building " + pkg_name + " from source (" + git_url + ")...");
+// 【Updated】 only_if_updated フラグを追加
+void build_from_git(const std::string& pkg_name, const std::string& git_url, const std::string& custom_env, bool only_if_updated) {
+    Logger::info("Processing " + pkg_name + "...");
     fs::path build_base = get_cache_dir();
     fs::path pkg_dir = build_base / pkg_name;
     if(!fs::exists(build_base)) fs::create_directories(build_base);
 
     {
         WorkDirGuard wd(build_base);
+        bool         needs_clone = true;
+
         if(fs::exists(pkg_dir) && fs::exists(pkg_dir / ".git")) {
-            Logger::info("Updating repository...");
-            WorkDirGuard wd_repo(pkg_dir);
-            if(run_command("git fetch origin") != 0) throw std::runtime_error("Failed to fetch updates.");
+            {
+                WorkDirGuard wd_repo(pkg_dir);
+                std::string  current_url = exec_command("git config --get remote.origin.url");
+                if(current_url.find(git_url) == std::string::npos && git_url.find(current_url) == std::string::npos) {
+                    Logger::warn("Remote URL mismatch. Re-cloning...");
+                } else {
+                    needs_clone = false;
+                }
+            }
 
-            std::string branch = get_git_branch();
-            Logger::info("Detected branch: " + branch);
+            if(!needs_clone) {
+                Logger::info("Updating repository...");
+                WorkDirGuard wd_repo(pkg_dir);
+                if(run_command("git fetch origin") != 0) throw std::runtime_error("Failed to fetch updates.");
 
-            if(!g_config.no_diff) {
-                int diff_ret = std::system(("git diff --quiet HEAD..origin/" + branch).c_str());
-                if(diff_ret != 0) {
-                    if(ask_user("Updates detected. View diff?")) {
-                        run_command("git diff HEAD..origin/" + branch + " --color=always");
+                std::string branch = get_git_branch();
+                Logger::info("Detected branch: " + branch);
+
+                if(!g_config.no_diff) {
+                    int diff_ret = std::system(("git diff --quiet HEAD..origin/" + branch).c_str());
+                    if(diff_ret != 0) {
+                        if(ask_user("Updates detected. View diff?")) {
+                            run_command("git diff HEAD..origin/" + branch + " --color=always");
+                        }
                     }
                 }
-            } else {
-                Logger::info("Skipping diff review (--nodiff).");
-            }
 
-            if(run_command("git reset --hard origin/" + branch) != 0) {
-                throw std::runtime_error("Failed to reset repository.");
+                if(run_command("git reset --hard origin/" + branch) != 0) {
+                    throw std::runtime_error("Failed to reset repository.");
+                }
             }
-        } else {
-            Logger::info("Cloning repository...");
+        }
+
+        if(needs_clone) {
             if(fs::exists(pkg_dir)) fs::remove_all(pkg_dir);
+            Logger::info("Cloning repository...");
             DirCleanupGuard cleanup_guard(pkg_dir);
             if(run_command("git clone " + git_url + " " + pkg_name) != 0) {
                 throw std::runtime_error("Failed to clone " + pkg_name);
@@ -408,6 +458,14 @@ void build_from_git(const std::string& pkg_name, const std::string& git_url, con
 
     {
         WorkDirGuard wd(pkg_dir);
+
+        // 【New!】 更新チェック (only_if_updated = true の場合のみ)
+        if(only_if_updated) {
+            if(!is_update_needed(pkg_name)) {
+                return;// 更新不要なので終了
+            }
+        }
+
         if(!g_config.no_edit) {
             if(ask_user("Edit PKGBUILD?")) {
                 const char* env_editor = std::getenv("EDITOR");
@@ -430,19 +488,18 @@ void build_from_git(const std::string& pkg_name, const std::string& git_url, con
     }
 }
 
-void install_smart_source(const std::string& pkg_name) {
+// 【Updated】引数追加
+void install_smart_source(const std::string& pkg_name, bool only_if_updated) {
     std::string env = get_package_env(pkg_name);
     std::string git_url;
 
     if(is_repo_package(pkg_name)) {
         git_url = ARCH_GIT_BASE + pkg_name + ".git";
-        Logger::info("Target is official repo package. Using: " + git_url);
     } else {
         git_url = AUR_BASE_URL + pkg_name + ".git";
-        Logger::info("Target is AUR package. Using: " + git_url);
     }
 
-    build_from_git(pkg_name, git_url, env);
+    build_from_git(pkg_name, git_url, env, only_if_updated);
 }
 
 // --- Commands ---
@@ -467,17 +524,15 @@ void cmd_build(const std::vector<std::string>& args) {
 
     std::string git_url;
     if(is_repo_package(pkg_name)) {
-        Logger::info("Package found in official repos.");
         git_url = ARCH_GIT_BASE + pkg_name + ".git";
     } else {
-        Logger::info("Package assumed to be in AUR.");
         git_url = AUR_BASE_URL + pkg_name + ".git";
     }
     try {
-        build_from_git(pkg_name, git_url, custom_env);
+        // build コマンドは常にビルドする (only_if_updated = false)
+        build_from_git(pkg_name, git_url, custom_env, false);
     } catch(const std::exception& e) {
         Logger::error(std::string("Build Error: ") + e.what());
-        if(is_repo_package(pkg_name)) Logger::warn("Hint: Official repo names might differ from pkg names.");
     }
 }
 
@@ -586,12 +641,13 @@ void cmd_upgrade() {
     Logger::info("System upgrade...");
     if(run_command("sudo pacman -Syu") != 0) throw std::runtime_error("Update failed.");
     if(fs::exists(PACKAGE_BUILD_DIR)) {
-        Logger::info("Rebuilding source packages...");
+        Logger::info("Checking source packages...");
         for(const auto& entry : fs::directory_iterator(PACKAGE_BUILD_DIR)) {
             if(entry.is_regular_file()) {
                 std::string pkg_name = entry.path().filename().string();
                 try {
-                    install_smart_source(pkg_name);
+                    // upgrade 時は true (更新がある場合のみビルド)
+                    install_smart_source(pkg_name, true);
                 } catch(const std::exception& e) {
                     Logger::error("Error updating " + pkg_name + ": " + e.what());
                 }
@@ -736,8 +792,9 @@ int main(int argc, char* argv[]) {
                 if(run_command(cmd) != 0) throw std::runtime_error("Pacman failed.");
             }
             if(!aur_targets.empty()) {
+                // 通常インストール(-S)は false (強制的にインストール/再ビルド)
                 for(const auto& pkg : aur_targets)
-                    install_smart_source(pkg);
+                    install_smart_source(pkg, false);
             }
             return 0;
         }
