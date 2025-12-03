@@ -1,5 +1,12 @@
-#include "logger.hpp"
+/**
+ * jpacker - A full-featured Pacman wrapper and AUR helper
+ * v1.0.2 Features:
+ * - Fix: Automatically resets cache if remote URL changes (e.g., AUR -> Official)
+ * - Fix: Branch detection logic improved
+ */
+
 #include <algorithm>
+#include <array>// New
 #include <chrono>
 #include <cstdlib>
 #include <ctime>
@@ -8,17 +15,19 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <memory>// New
 #include <nlohmann/json.hpp>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
+
 using json = nlohmann::json;
 namespace fs = std::filesystem;
 
 // --- 設定 ---
 #ifndef JPKG_VERSION
-#define JPKG_VERSION "1.0.0"
+#define JPKG_VERSION "1.0.2"
 #endif
 
 const std::string VERSION = JPKG_VERSION;
@@ -31,7 +40,7 @@ const std::string PACKAGE_BUILD_DIR = "/etc/jpacker/package.build";
 
 struct AppConfig {
     bool        no_edit = false;
-    bool        no_diff = false;// New!
+    bool        no_diff = false;
     std::string editor = "nano";
     std::string log_file = "";
 };
@@ -90,7 +99,7 @@ void load_config() {
             if(key == "noedit") {
                 std::string v = to_lower(val);
                 if(v == "true" || v == "1" || v == "yes") g_config.no_edit = true;
-            } else if(key == "nodiff") {// New!
+            } else if(key == "nodiff") {
                 std::string v = to_lower(val);
                 if(v == "true" || v == "1" || v == "yes") g_config.no_diff = true;
             } else if(key == "editor") {
@@ -101,6 +110,45 @@ void load_config() {
         }
     }
 }
+
+class Logger {
+    static std::ofstream logFile;
+    static bool          initialized;
+    static std::string   get_timestamp() {
+        auto              now = std::chrono::system_clock::now();
+        auto              in_time_t = std::chrono::system_clock::to_time_t(now);
+        std::stringstream ss;
+        ss << std::put_time(std::localtime(&in_time_t), "%Y-%m-%d %H:%M:%S");
+        return ss.str();
+    }
+
+public:
+    static void init(const fs::path& path) {
+        if(path.has_parent_path() && !fs::exists(path.parent_path())) {
+            fs::create_directories(path.parent_path());
+        }
+        logFile.open(path, std::ios::app);
+        initialized = logFile.is_open();
+    }
+    static void info(const std::string& msg) {
+        std::cout << "\033[1;32m::\033[0m " << msg << std::endl;
+        if(initialized) logFile << "[" << get_timestamp() << "] [INFO] " << msg << std::endl;
+    }
+    static void warn(const std::string& msg) {
+        std::cout << "\033[1;33m:: Warning:\033[0m " << msg << std::endl;
+        if(initialized) logFile << "[" << get_timestamp() << "] [WARN] " << msg << std::endl;
+    }
+    static void error(const std::string& msg) {
+        std::cerr << "\033[1;31m:: Error:\033[0m " << msg << std::endl;
+        if(initialized) logFile << "[" << get_timestamp() << "] [ERROR] " << msg << std::endl;
+    }
+    static void raw_cmd(const std::string& cmd) {
+        std::cout << "\033[1;33m::\033[0m Running: " << cmd << std::endl;
+        if(initialized) logFile << "[" << get_timestamp() << "] [EXEC] " << cmd << std::endl;
+    }
+};
+std::ofstream Logger::logFile;
+bool          Logger::initialized = false;
 
 // --- Helpers ---
 bool is_force_source(const std::string& pkg_name) {
@@ -129,6 +177,24 @@ std::string get_package_env(const std::string& pkg_name) {
         }
     }
     return env_str;
+}
+
+// コマンド出力を取得するヘルパー
+std::string exec_command(const char* cmd) {
+    std::array<char, 128>                    buffer;
+    std::string                              result;
+    std::unique_ptr<FILE, decltype(&pclose)> pipe(popen(cmd, "r"), pclose);
+    if(!pipe) return "";
+    while(fgets(buffer.data(), buffer.size(), pipe.get()) != nullptr) {
+        result += buffer.data();
+    }
+    return trim(result);
+}
+
+std::string get_git_branch() {
+    if(std::system("git show-ref --verify --quiet refs/remotes/origin/main") == 0) return "main";
+    if(std::system("git show-ref --verify --quiet refs/remotes/origin/master") == 0) return "master";
+    return "master";
 }
 
 class CurlGlobal {
@@ -264,29 +330,59 @@ void build_from_git(const std::string& pkg_name, const std::string& git_url, con
 
     {
         WorkDirGuard wd(build_base);
-        if(fs::exists(pkg_dir) && fs::exists(pkg_dir / ".git")) {
-            Logger::info("Updating repository...");
-            WorkDirGuard wd_repo(pkg_dir);
-            if(run_command("git fetch origin") != 0) throw std::runtime_error("Failed to fetch updates.");
+        bool         needs_clone = true;
 
-            // Smart Review (Skip if NODIFF=true)
-            if(!g_config.no_diff) {
-                int diff_ret = std::system("git diff --quiet HEAD..origin/master");
-                if(diff_ret != 0) {
-                    if(ask_user("Updates detected. View diff?")) {
-                        run_command("git diff HEAD..origin/master --color=always");
-                    }
+        if(fs::exists(pkg_dir) && fs::exists(pkg_dir / ".git")) {
+            // 【New!】URLの整合性チェック
+            {
+                WorkDirGuard wd_repo(pkg_dir);
+                std::string  current_url = exec_command("git config --get remote.origin.url");
+                // 末尾の.gitの有無などの揺らぎを吸収するため、部分一致や単純比較を行う
+                // ここでは単純化のため、不一致なら再クローンとする
+                if(current_url.find(git_url) == std::string::npos && git_url.find(current_url) == std::string::npos) {
+                    Logger::warn("Remote URL mismatch. Re-cloning...");
+                    Logger::info("Old: " + current_url);
+                    Logger::info("New: " + git_url);
+                    // ここで削除するが、WorkDirGuardでpkg_dirに入っている状態だと削除できない可能性があるため
+                    // 一旦フラグを立てて、ブロックを抜けた後で削除するなどの工夫がいるが
+                    // 単純に親ディレクトリ(build_base)にいる状態(=ここ)で削除すればOK
+                } else {
+                    needs_clone = false;
                 }
-            } else {
-                Logger::info("Skipping diff review (--nodiff).");
             }
 
-            if(run_command("git reset --hard origin/master") != 0) throw std::runtime_error("Failed to reset repository.");
-        } else {
+            if(!needs_clone) {
+                Logger::info("Updating repository...");
+                WorkDirGuard wd_repo(pkg_dir);
+                if(run_command("git fetch origin") != 0) throw std::runtime_error("Failed to fetch updates.");
+
+                std::string branch = get_git_branch();
+                Logger::info("Detected branch: " + branch);
+
+                if(!g_config.no_diff) {
+                    int diff_ret = std::system(("git diff --quiet HEAD..origin/" + branch).c_str());
+                    if(diff_ret != 0) {
+                        if(ask_user("Updates detected. View diff?")) {
+                            run_command("git diff HEAD..origin/" + branch + " --color=always");
+                        }
+                    }
+                } else {
+                    Logger::info("Skipping diff review (--nodiff).");
+                }
+
+                if(run_command("git reset --hard origin/" + branch) != 0) {
+                    throw std::runtime_error("Failed to reset repository.");
+                }
+            }
+        }
+
+        if(needs_clone) {
+            if(fs::exists(pkg_dir)) fs::remove_all(pkg_dir);// 不整合がある場合もここで消える
             Logger::info("Cloning repository...");
-            if(fs::exists(pkg_dir)) fs::remove_all(pkg_dir);
             DirCleanupGuard cleanup_guard(pkg_dir);
-            if(run_command("git clone " + git_url + " " + pkg_name) != 0) throw std::runtime_error("Failed to clone " + pkg_name);
+            if(run_command("git clone " + git_url + " " + pkg_name) != 0) {
+                throw std::runtime_error("Failed to clone " + pkg_name);
+            }
             cleanup_guard.commit();
         }
     }
@@ -314,9 +410,20 @@ void build_from_git(const std::string& pkg_name, const std::string& git_url, con
         if(run_command(build_cmd) != 0) throw std::runtime_error("Build failed.");
     }
 }
-void install_aur(const std::string& pkg_name) {
+
+void install_smart_source(const std::string& pkg_name) {
     std::string env = get_package_env(pkg_name);
-    build_from_git(pkg_name, AUR_BASE_URL + pkg_name + ".git", env);
+    std::string git_url;
+
+    if(is_repo_package(pkg_name)) {
+        git_url = ARCH_GIT_BASE + pkg_name + ".git";
+        Logger::info("Target is official repo package. Using: " + git_url);
+    } else {
+        git_url = AUR_BASE_URL + pkg_name + ".git";
+        Logger::info("Target is AUR package. Using: " + git_url);
+    }
+
+    build_from_git(pkg_name, git_url, env);
 }
 
 // --- Commands ---
@@ -354,6 +461,7 @@ void cmd_build(const std::vector<std::string>& args) {
         if(is_repo_package(pkg_name)) Logger::warn("Hint: Official repo names might differ from pkg names.");
     }
 }
+
 void cmd_add_src(const std::vector<std::string>& args) {
     std::vector<std::string> current_pkgs;
     for(const auto& arg : args) {
@@ -464,7 +572,7 @@ void cmd_upgrade() {
             if(entry.is_regular_file()) {
                 std::string pkg_name = entry.path().filename().string();
                 try {
-                    install_aur(pkg_name);
+                    install_smart_source(pkg_name);
                 } catch(const std::exception& e) {
                     Logger::error("Error updating " + pkg_name + ": " + e.what());
                 }
@@ -492,7 +600,7 @@ void print_help() {
     std::cout << "    \033[1m-Ss\033[0m <query>          Search" << std::endl;
     std::cout << "\033[1mOPTIONS\033[0m" << std::endl;
     std::cout << "    \033[1m--noedit\033[0m             Skip review" << std::endl;
-    std::cout << "    \033[1m--nodiff\033[0m             Skip diff prompt" << std::endl;// New
+    std::cout << "    \033[1m--nodiff\033[0m             Skip diff prompt" << std::endl;
     std::cout << "\033[1mCONFIG\033[0m" << std::endl;
     std::cout << "    jpacker.conf: LOGFILE=..., NOEDIT=..., NODIFF=..." << std::endl;
 }
@@ -533,7 +641,7 @@ int main(int argc, char* argv[]) {
         if(arg == "--nodiff") {
             g_config.no_diff = true;
             continue;
-        }// New
+        }
         if(i > 1) {
             if(arg[0] == '-')
                 flags.push_back(arg);
@@ -610,14 +718,14 @@ int main(int argc, char* argv[]) {
             }
             if(!aur_targets.empty()) {
                 for(const auto& pkg : aur_targets)
-                    install_aur(pkg);
+                    install_smart_source(pkg);
             }
             return 0;
         }
         std::string cmd_args = "";
         for(const auto& arg : args) {
             if(arg == "--noedit") continue;
-            if(arg == "--nodiff") continue;// New
+            if(arg == "--nodiff") continue;
             if(!cmd_args.empty()) cmd_args += " ";
             cmd_args += arg;
         }
