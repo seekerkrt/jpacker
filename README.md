@@ -1,20 +1,18 @@
 # jpacker
 
-A robust, C++20 AUR helper and Pacman wrapper for Arch Linux.
+`jpacker` is a robust AUR helper and `pacman` wrapper for Arch Linux, written in C++20.
 
-`jpacker` is designed to be a seamless replacement for `pacman` commands while adding powerful AUR support and **Gentoo-like source-based package management** capabilities.
-
-Written in C++20.
+It aims to be a seamless replacement for everyday `pacman` usage while adding AUR support and Gentoo-like source-based package management features.
 
 ## Features
 
-- **Pacman Wrapper**: Supports standard syntax (`-S`, `-Syu`, `-R`, `-Q`, etc.) and passes unknown commands directly to `pacman`.
-- **AUR Support**: Search and install AUR packages with dependency handling via `makepkg`.
-- **Source-Based Optimization**: Mark specific packages to always build from source with custom environment variables, for example `CFLAGS="-O3 -march=native"`.
-- **Safe & Robust**: Written in C++20 using RAII patterns for resource management such as network operations and directory handling.
-- **Review First**: Prompts to edit or review `PKGBUILD` by default before building.
-- **One-Shot Build**: Easily build official repository packages from source for testing optimizations.
-- **Logging**: Keeps track of activities in a log file.
+- **Pacman wrapper**: Supports standard `pacman` syntax such as `-S`, `-Syu`, `-R`, and `-Q`, and forwards unknown commands to `pacman`.
+- **AUR support**: Search for and install AUR packages, including build workflows based on `makepkg`.
+- **Source-based optimization**: Mark selected packages to always be built from source with custom environment variables such as `CFLAGS="-O3 -march=native"`.
+- **Safe and robust implementation**: Written in C++20 and designed with RAII-based resource management for tasks such as networking and temporary directory handling.
+- **Review-first workflow**: Prompts you to review or edit `PKGBUILD` files before building by default.
+- **One-off source builds**: Build official repository packages from source for testing or local optimization without permanently registering them.
+- **Logging**: Records operations in a log file.
 
 ## Installation
 
@@ -27,7 +25,7 @@ Written in C++20.
 
 ### Build from source
 
-You can install `jpacker` using `makepkg`:
+You can install `jpacker` with `makepkg`:
 
 ```bash
 git clone https://gitlab.com/seekerkrt/jpacker.git
@@ -35,40 +33,40 @@ cd jpacker
 makepkg -si
 ```
 
-This installs the binary, configuration files, man page (`man jpacker`), and bash completion script.
+This installs the binary, configuration files, man page (`man jpacker`), and Bash completion script.
 
 ## Usage
 
-### Basic operations (Pacman-compatible)
+### Basic operations
 
 `jpacker` accepts standard `pacman` flags.
 
 ```bash
-# Install packages (repo or AUR)
+# Install packages from the official repositories or the AUR
 jpacker -S firefox google-chrome
 
-# Search packages
+# Search for packages
 jpacker -Ss "visual studio code"
 
 # Remove packages
 jpacker -Rns google-chrome
 
-# Update system (sync database and upgrade)
+# Synchronize package databases and upgrade the system
 jpacker -Syu
 ```
 
-### Advanced: Source-based management
+### Source-based package management
 
-`jpacker` allows you to manage specific packages as source builds, enabling custom optimization flags similar to Gentoo's `package.env`.
+`jpacker` can manage selected packages as source builds, allowing you to apply custom build flags in a way similar to Gentoo's `package.env`.
 
-#### 1. Mark a package for source build
+#### 1. Mark a package for source builds
 
 ```bash
 # Add 'neofetch' to the source-build list with custom CFLAGS
 jpacker add-src neofetch CFLAGS="-O3 -march=native"
 ```
 
-This creates a config file at:
+This creates a configuration file at:
 
 ```text
 /etc/jpacker/package.build/neofetch
@@ -80,24 +78,24 @@ This creates a config file at:
 jpacker list-src
 ```
 
-#### 3. Edit build configuration
+#### 3. Edit the build configuration
 
 ```bash
 jpacker edit-src neofetch
 ```
 
-#### 4. Install or update
+#### 4. Install or update the package
 
-When you run `-S` or perform an upgrade, `jpacker` detects the configuration and builds the package from source (`git pull + makepkg`) instead of installing the binary package.
+When you install or upgrade packages, `jpacker` checks whether a package has a source-build configuration. If it does, `jpacker` builds it from source (for example, using `git pull` and `makepkg`) instead of installing the prebuilt binary package.
 
 ```bash
-# Install from source with your CFLAGS
+# Install from source using your custom CFLAGS
 jpacker -S neofetch
 ```
 
-#### 5. Full system upgrade
+#### 5. Perform a full system upgrade
 
-Updates official repositories via `pacman` and rebuilds all AUR and source-marked packages.
+This updates packages from the official repositories and rebuilds all AUR packages and source-marked packages.
 
 ```bash
 jpacker upgrade
@@ -105,21 +103,21 @@ jpacker upgrade
 
 #### 6. Revert to the official binary package
 
-If you want to stop building from source and immediately return to the standard official binary:
+If you want to stop building a package from source and immediately switch back to the standard binary package:
 
 ```bash
 jpacker revert neofetch
 ```
 
-This removes the build config and runs:
+This removes the build configuration and then runs:
 
 ```bash
 sudo pacman -S neofetch
 ```
 
-### One-off build
+### One-off builds
 
-Build a package from source once, whether it is from the official repositories or the AUR, without registering it.
+You can build a package from source once, whether it comes from the official repositories or the AUR, without registering it as a permanent source-build package.
 
 ```bash
 jpacker build coreutils CFLAGS="-O3 -march=native"
@@ -127,7 +125,7 @@ jpacker build coreutils CFLAGS="-O3 -march=native"
 
 ## Configuration
 
-The configuration file is located at:
+The main configuration file is located at:
 
 ```text
 /etc/jpacker/jpacker.conf
@@ -138,7 +136,7 @@ Example:
 ```ini
 # /etc/jpacker/jpacker.conf
 
-# Skip PKGBUILD review prompt (default: false)
+# Skip the PKGBUILD review prompt (default: false)
 # NOEDIT=true
 
 # Preferred editor (default: $EDITOR or nano)
@@ -148,7 +146,7 @@ Example:
 # LOGFILE=~/logs/jpacker.log
 ```
 
-You can also skip review temporarily using the command-line flag:
+You can also skip the review step temporarily from the command line:
 
 ```bash
 jpacker -S google-chrome --noedit
