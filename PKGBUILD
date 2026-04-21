@@ -23,8 +23,8 @@ sha256sums=('SKIP')
 # バージョン番号をGitのタグやコミットから自動生成する関数
 pkgver() {
     cd "$pkgname"
-    # タグがあればそれを使い、なければリビジョン番号を生成
-    git describe --long --tags 2>/dev/null | sed 's/\([^-]*-g\)/r\1/;s/-/./g' ||
+    # リリースタグだけを使い、checkpoint系タグがpkgverに混ざらないようにする
+    git describe --long --tags --match 'v[0-9]*' 2>/dev/null | sed 's/\([^-]*-g\)/r\1/;s/-/./g' ||
     printf "r%s.%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
 }
 
