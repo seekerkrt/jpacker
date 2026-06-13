@@ -70,6 +70,12 @@ struct AurPackageInfo {
     std::optional<long long>       OutOfDate;
 };
 
+struct PackageBuildSource {
+    std::string requested_name;
+    std::string clone_name;
+    std::string git_url;
+};
+
 // --- ユーティリティ ---
 std::string trim(const std::string& str) {
     size_t first = str.find_first_not_of(" \t\n\r");
@@ -603,6 +609,32 @@ public:
         return parse_aur_package_info(j["results"][0]);
     }
 };
+
+PackageBuildSource resolve_build_source(const std::string& pkg_name) {
+    require_valid_package_name(pkg_name);
+
+    if(is_repo_package(pkg_name)) {
+        return PackageBuildSource{pkg_name, pkg_name, ARCH_GIT_BASE + pkg_name + ".git"};
+    }
+
+    std::optional<AurPackageInfo> info;
+    try {
+        info = AurClient::info(pkg_name);
+    } catch(const std::exception& e) {
+        throw std::runtime_error("Failed to fetch AUR info for " + pkg_name + ": " + e.what());
+    }
+
+    if(!info.has_value()) {
+        throw std::runtime_error("Package not found in repos or AUR: " + pkg_name);
+    }
+    if(info->PackageBase.empty()) {
+        throw std::runtime_error("AUR info for " + pkg_name + " does not include PackageBase.");
+    }
+    require_valid_package_name(info->PackageBase);
+
+    return PackageBuildSource{pkg_name, info->PackageBase, AUR_BASE_URL + info->PackageBase + ".git"};
+}
+
 void search_aur(const std::vector<std::string>& keywords) {
     for(const auto& pkg_name : keywords) {
         if(pkg_name.empty()) continue;
@@ -706,11 +738,12 @@ int cmd_sync_info(const std::vector<std::string>& args, const std::vector<std::s
 
 // --- Build Logic ---
 // 【Updated】 only_if_updated フラグを追加
-void build_from_git(const std::string& pkg_name, const std::string& git_url, const std::string& custom_env, bool only_if_updated) {
+void build_from_git(const std::string& pkg_name, const std::string& clone_name, const std::string& git_url, const std::string& custom_env, bool only_if_updated) {
     require_valid_package_name(pkg_name);
+    require_valid_package_name(clone_name);
     Logger::info("Processing " + pkg_name + "...");
     fs::path build_base = get_cache_dir();
-    fs::path pkg_dir = build_base / pkg_name;
+    fs::path pkg_dir = build_base / clone_name;
     if(!fs::exists(build_base)) fs::create_directories(build_base);
 
     {
@@ -759,8 +792,8 @@ void build_from_git(const std::string& pkg_name, const std::string& git_url, con
             if(fs::exists(pkg_dir)) fs::remove_all(pkg_dir);
             Logger::info("Cloning repository...");
             DirCleanupGuard cleanup_guard(pkg_dir);
-            if(run_command("git clone " + shell_quote(git_url) + " " + shell_quote(pkg_name)) != 0) {
-                throw std::runtime_error("Failed to clone " + pkg_name);
+            if(run_command("git clone " + shell_quote(git_url) + " " + shell_quote(clone_name)) != 0) {
+                throw std::runtime_error("Failed to clone " + clone_name);
             }
             cleanup_guard.commit();
         }
@@ -803,15 +836,9 @@ void build_from_git(const std::string& pkg_name, const std::string& git_url, con
 // 【Updated】引数追加
 void install_smart_source(const std::string& pkg_name, bool only_if_updated) {
     std::string env = get_package_env(pkg_name);
-    std::string git_url;
+    PackageBuildSource source = resolve_build_source(pkg_name);
 
-    if(is_repo_package(pkg_name)) {
-        git_url = ARCH_GIT_BASE + pkg_name + ".git";
-    } else {
-        git_url = AUR_BASE_URL + pkg_name + ".git";
-    }
-
-    build_from_git(pkg_name, git_url, env, only_if_updated);
+    build_from_git(source.requested_name, source.clone_name, source.git_url, env, only_if_updated);
 }
 
 // --- Commands ---
@@ -839,15 +866,10 @@ int cmd_build(const std::vector<std::string>& args) {
     }
     require_valid_package_name(pkg_name);
 
-    std::string git_url;
-    if(is_repo_package(pkg_name)) {
-        git_url = ARCH_GIT_BASE + pkg_name + ".git";
-    } else {
-        git_url = AUR_BASE_URL + pkg_name + ".git";
-    }
     try {
+        PackageBuildSource source = resolve_build_source(pkg_name);
         // build コマンドは常にビルドする (only_if_updated = false)
-        build_from_git(pkg_name, git_url, custom_env, false);
+        build_from_git(source.requested_name, source.clone_name, source.git_url, custom_env, false);
     } catch(const std::exception& e) {
         Logger::error(std::string("Build Error: ") + e.what());
         return 1;
