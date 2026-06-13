@@ -22,6 +22,7 @@
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <regex>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -79,6 +80,12 @@ struct PackageBuildSource {
 struct InstalledPackage {
     std::string name;
     std::string version;
+};
+
+struct DependencyClassification {
+    std::vector<std::string> repo;
+    std::vector<std::string> aur;
+    std::vector<std::string> unknown;
 };
 
 // --- ユーティリティ ---
@@ -154,6 +161,13 @@ bool is_valid_package_name(const std::string& name) {
     return std::all_of(name.begin(), name.end(), [](unsigned char ch) {
         return std::isalnum(ch) || ch == '@' || ch == '.' || ch == '_' || ch == '+' || ch == '-';
     });
+}
+
+std::string dependency_package_name(const std::string& dependency) {
+    std::string dep = trim(dependency);
+    size_t      pos = dep.find_first_of("<>=");
+    if(pos != std::string::npos) dep = dep.substr(0, pos);
+    return trim(dep);
 }
 
 void require_valid_package_name(const std::string& name) {
@@ -696,6 +710,115 @@ void print_aur_info(const AurPackageInfo& pkg) {
     std::cout << "Out Of Date     : " << out_of_date_display(pkg.OutOfDate) << std::endl;
 }
 
+void add_dependency(std::vector<std::string>& dependencies, std::set<std::string>& seen, const std::string& dependency) {
+    std::string dep = trim(dependency);
+    if(dep.empty()) return;
+    if(seen.insert(dep).second) dependencies.push_back(dep);
+}
+
+std::vector<std::string> collect_build_dependencies(const AurPackageInfo& pkg) {
+    std::vector<std::string> dependencies;
+    std::set<std::string>    seen;
+
+    for(const auto& dep : pkg.Depends)
+        add_dependency(dependencies, seen, dep);
+    for(const auto& dep : pkg.MakeDepends)
+        add_dependency(dependencies, seen, dep);
+    for(const auto& dep : pkg.CheckDepends)
+        add_dependency(dependencies, seen, dep);
+
+    return dependencies;
+}
+
+void add_classified_dependency(std::vector<std::string>& dependencies, const std::string& dependency, const std::string& package_name) {
+    if(dependency == package_name)
+        dependencies.push_back(dependency);
+    else
+        dependencies.push_back(dependency + " (" + package_name + ")");
+}
+
+DependencyClassification classify_dependencies(const std::vector<std::string>& dependencies) {
+    DependencyClassification result;
+
+    for(const auto& dependency : dependencies) {
+        std::string package_name = dependency_package_name(dependency);
+        if(!is_valid_package_name(package_name)) {
+            result.unknown.push_back(dependency);
+            continue;
+        }
+
+        if(is_repo_package(package_name)) {
+            add_classified_dependency(result.repo, dependency, package_name);
+            continue;
+        }
+
+        try {
+            if(AurClient::info(package_name).has_value()) {
+                add_classified_dependency(result.aur, dependency, package_name);
+            } else {
+                result.unknown.push_back(dependency);
+            }
+        } catch(const std::exception& e) {
+            Logger::warn("Failed to check AUR dependency " + package_name + ": " + e.what());
+            result.unknown.push_back(dependency);
+        }
+    }
+
+    return result;
+}
+
+void print_dependency_group(const std::string& label, const std::vector<std::string>& dependencies) {
+    std::cout << label << std::endl;
+    if(dependencies.empty()) {
+        std::cout << "  None" << std::endl;
+        return;
+    }
+    for(const auto& dep : dependencies) {
+        std::cout << "  " << dep << std::endl;
+    }
+}
+
+int cmd_deps(const std::vector<std::string>& targets) {
+    if(targets.empty()) {
+        Logger::error("Usage: jpacker deps <pkg>");
+        return 1;
+    }
+
+    bool failed = false;
+    for(size_t i = 0; i < targets.size(); ++i) {
+        const auto& target = targets[i];
+        require_valid_package_name(target);
+
+        try {
+            std::optional<AurPackageInfo> info = AurClient::info(target);
+            if(!info.has_value()) {
+                Logger::error("AUR package not found: " + target);
+                failed = true;
+                continue;
+            }
+
+            std::vector<std::string> dependencies = collect_build_dependencies(info.value());
+            DependencyClassification classified = classify_dependencies(dependencies);
+
+            if(i > 0) std::cout << std::endl;
+            std::cout << "Package         : " << info->Name << std::endl;
+            std::cout << "Package Base    : " << info->PackageBase << std::endl;
+            std::cout << "Dependencies    : " << dependencies.size() << std::endl;
+            std::cout << std::endl;
+            print_dependency_group("Official repo dependencies:", classified.repo);
+            std::cout << std::endl;
+            print_dependency_group("AUR dependencies:", classified.aur);
+            std::cout << std::endl;
+            print_dependency_group("Unknown dependencies:", classified.unknown);
+        } catch(const std::exception& e) {
+            Logger::error("Failed to inspect dependencies for " + target + ": " + e.what());
+            failed = true;
+        }
+    }
+
+    return failed ? 1 : 0;
+}
+
 int cmd_sync_info(const std::vector<std::string>& args, const std::vector<std::string>& flags, const std::vector<std::string>& targets) {
     if(targets.empty()) return run_command("pacman " + join_shell_args(args));
 
@@ -1116,6 +1239,7 @@ void print_help() {
     std::cout << "    \033[1mbuild\033[0m <pkg> [V=K]  One-off build" << std::endl;
     std::cout << "    \033[1mupgrade\033[0m              System update & rebuilds" << std::endl;
     std::cout << "    \033[1mclean\033[0m                Clean package caches" << std::endl;
+    std::cout << "    \033[1mdeps\033[0m <pkg>           Classify AUR dependencies" << std::endl;
     std::cout << "    \033[1madd-src\033[0m <pkg> [V=K]  Mark pkg for source build" << std::endl;
     std::cout << "    \033[1medit-src\033[0m <pkg>       Edit config" << std::endl;
     std::cout << "    \033[1mlist-src\033[0m             List registered source pkgs" << std::endl;
@@ -1206,6 +1330,9 @@ int main(int argc, char* argv[]) {
         }
         if(operation == "clean") {
             return cmd_clean();
+        }
+        if(operation == "deps") {
+            return cmd_deps(targets);
         }
         if((operation == "add-src" || operation == "del-src" || operation == "revert" || operation == "edit-src") && targets.empty()) {
             Logger::error("Missing target for " + operation);
