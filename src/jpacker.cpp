@@ -1,6 +1,6 @@
 /**
  * jpacker - A full-featured Pacman wrapper and AUR helper
- * v1.2.1 Features:
+ * v1.2.2 Features:
  * - Smart Upgrade: Skips rebuilding packages if the version hasn't changed during 'upgrade'.
  * - Variable expansion support in config files.
  * - '--nodiff' option support.
@@ -32,7 +32,7 @@ namespace fs = std::filesystem;
 
 // --- 設定 ---
 #ifndef JPKG_VERSION
-#define JPKG_VERSION "1.2.1"
+#define JPKG_VERSION "1.2.2"
 #endif
 
 const std::string VERSION = JPKG_VERSION;
@@ -61,7 +61,9 @@ std::string trim(const std::string& str) {
 }
 
 std::string to_lower(std::string str) {
-    std::transform(str.begin(), str.end(), str.begin(), ::tolower);
+    std::transform(str.begin(), str.end(), str.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::tolower(ch));
+    });
     return str;
 }
 
@@ -117,6 +119,28 @@ bool split_env_assignment(const std::string& arg, std::string& key, std::string&
     return is_valid_env_key(key);
 }
 
+std::string expand_config_vars(std::string val, const std::map<std::string, std::string>& vars) {
+    std::regex  re_brace(R"(\$\{([A-Za-z0-9_]+)\})");
+    std::regex  re_simple(R"(\$([A-Za-z0-9_]+))");
+    std::smatch match;
+
+    for(int i = 0; i < 32 && std::regex_search(val, match, re_brace); ++i) {
+        std::string var_name = match[1];
+        std::string replacement = vars.count(var_name) ? vars.at(var_name) : "";
+        std::string next = match.prefix().str() + replacement + match.suffix().str();
+        if(next == val) break;
+        val = next;
+    }
+    for(int i = 0; i < 32 && std::regex_search(val, match, re_simple); ++i) {
+        std::string var_name = match[1];
+        std::string replacement = vars.count(var_name) ? vars.at(var_name) : "";
+        std::string next = match.prefix().str() + replacement + match.suffix().str();
+        if(next == val) break;
+        val = next;
+    }
+    return val;
+}
+
 bool pacman_option_takes_value(const std::string& arg) {
     static const std::vector<std::string> long_opts = {
             "--arch", "--assume-installed", "--cachedir", "--color", "--config", "--dbpath",
@@ -158,7 +182,9 @@ fs::path expand_path(const std::string& path_str) {
     if(path_str[0] == '~') {
         const char* home = std::getenv("HOME");
         if(!home) throw std::runtime_error("HOME environment variable not set.");
-        return fs::path(home) / path_str.substr(1);
+        if(path_str.length() == 1) return fs::path(home);
+        if(path_str[1] == '/') return fs::path(home) / path_str.substr(2);
+        throw std::runtime_error("Unsupported home expansion: " + path_str);
     }
     return fs::path(path_str);
 }
@@ -280,20 +306,9 @@ std::string get_package_env(const std::string& pkg_name) {
         std::string key, val;
         if(split_env_assignment(line, key, val)) {
             try {
-                std::regex  re_brace(R"(\$\{([A-Za-z0-9_]+)\})");
-                std::smatch match;
-                while(std::regex_search(val, match, re_brace)) {
-                    std::string var_name = match[1];
-                    std::string replacement = vars.count(var_name) ? vars[var_name] : "";
-                    val = match.prefix().str() + replacement + match.suffix().str();
-                }
-                std::regex re_simple(R"(\$([A-Za-z0-9_]+))");
-                while(std::regex_search(val, match, re_simple)) {
-                    std::string var_name = match[1];
-                    std::string replacement = vars.count(var_name) ? vars[var_name] : "";
-                    val = match.prefix().str() + replacement + match.suffix().str();
-                }
-            } catch(...) {
+                val = expand_config_vars(val, vars);
+            } catch(const std::exception& e) {
+                Logger::warn("Failed to expand variables for " + key + ": " + e.what());
             }
             vars[key] = val;
             if(!val.empty()) {
@@ -307,6 +322,11 @@ std::string get_package_env(const std::string& pkg_name) {
 }
 
 std::string get_git_branch() {
+    std::string remote_head = exec_command("git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null");
+    const std::string prefix = "origin/";
+    if(remote_head.find(prefix) == 0 && remote_head.length() > prefix.length()) {
+        return remote_head.substr(prefix.length());
+    }
     if(std::system("git show-ref --verify --quiet refs/remotes/origin/main") == 0) return "main";
     if(std::system("git show-ref --verify --quiet refs/remotes/origin/master") == 0) return "master";
     return "master";
@@ -477,6 +497,7 @@ public:
 };
 void search_aur(const std::vector<std::string>& keywords) {
     for(const auto& pkg_name : keywords) {
+        if(pkg_name.empty()) continue;
         if(pkg_name[0] == '-') continue;
         std::string response = AurClient::search_query(pkg_name);
         if(response.empty()) continue;
@@ -528,15 +549,19 @@ void build_from_git(const std::string& pkg_name, const std::string& git_url, con
                 Logger::info("Detected branch: " + branch);
 
                 if(!g_config.no_diff) {
-                    int diff_ret = std::system(("git diff --quiet HEAD..origin/" + branch).c_str());
-                    if(diff_ret != 0) {
+                    std::string remote_ref = "origin/" + branch;
+                    int diff_ret = run_command("git diff --quiet " + shell_quote("HEAD.." + remote_ref));
+                    if(diff_ret > 1) {
+                        throw std::runtime_error("Failed to compare repository changes.");
+                    }
+                    if(diff_ret == 1) {
                         if(ask_user("Updates detected. View diff?")) {
-                            run_command("git diff HEAD..origin/" + branch + " --color=always");
+                            run_command("git diff " + shell_quote("HEAD.." + remote_ref) + " --color=always");
                         }
                     }
                 }
 
-                if(run_command("git reset --hard origin/" + branch) != 0) {
+                if(run_command("git reset --hard " + shell_quote("origin/" + branch)) != 0) {
                     throw std::runtime_error("Failed to reset repository.");
                 }
             }
@@ -781,7 +806,8 @@ void cmd_clean() {
     } else
         Logger::info("jpacker cache is empty.");
 }
-void cmd_upgrade() {
+int cmd_upgrade() {
+    bool failed = false;
     Logger::info("System upgrade...");
     if(run_command("sudo pacman -Syu") != 0) throw std::runtime_error("Update failed.");
     if(fs::exists(PACKAGE_BUILD_DIR)) {
@@ -794,10 +820,12 @@ void cmd_upgrade() {
                     install_smart_source(pkg_name, true);
                 } catch(const std::exception& e) {
                     Logger::error("Error updating " + pkg_name + ": " + e.what());
+                    failed = true;
                 }
             }
         }
     }
+    return failed ? 1 : 0;
 }
 
 void print_help() {
@@ -853,6 +881,10 @@ int main(int argc, char* argv[]) {
 
     for(int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
+        if(arg.empty()) {
+            Logger::error("Empty arguments are not supported.");
+            return 1;
+        }
         if(arg == "--noedit") {
             g_config.no_edit = true;
             continue;
@@ -870,7 +902,7 @@ int main(int argc, char* argv[]) {
             } else if(arg == "--") {
                 flags.push_back(arg);
                 end_of_options = true;
-            } else if(arg[0] == '-') {
+            } else if(!arg.empty() && arg[0] == '-') {
                 flags.push_back(arg);
                 option_value_expected = pacman_option_takes_value(arg);
             } else {
@@ -889,8 +921,7 @@ int main(int argc, char* argv[]) {
             return cmd_build(targets);
         }
         if(operation == "upgrade") {
-            cmd_upgrade();
-            return 0;
+            return cmd_upgrade();
         }
         if(operation == "clean") {
             cmd_clean();
@@ -926,6 +957,10 @@ int main(int argc, char* argv[]) {
         bool needs_sudo = (is_sync || operation.find("-R") == 0 || operation.find("-U") == 0 || operation.find("-D") == 0);
 
         if(is_search) {
+            if(targets.empty()) {
+                Logger::error("Missing search query.");
+                return 1;
+            }
             run_command("pacman " + join_shell_args(args));
             Logger::info("Searching AUR...");
             search_aur(targets);
