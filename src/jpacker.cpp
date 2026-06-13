@@ -1,6 +1,6 @@
 /**
  * jpacker - A full-featured Pacman wrapper and AUR helper
- * v1.2.3 Features:
+ * v1.2.4 Features:
  * - Smart Upgrade: Skips rebuilding packages if the version hasn't changed during 'upgrade'.
  * - Variable expansion support in config files.
  * - '--nodiff' option support.
@@ -32,7 +32,7 @@ namespace fs = std::filesystem;
 
 // --- 設定 ---
 #ifndef JPKG_VERSION
-#define JPKG_VERSION "1.2.3"
+#define JPKG_VERSION "1.2.4"
 #endif
 
 const std::string VERSION = JPKG_VERSION;
@@ -76,6 +76,36 @@ std::string unquote(std::string str) {
         }
     }
     return str;
+}
+
+std::string strip_comment(const std::string& line) {
+    bool in_single_quote = false;
+    bool in_double_quote = false;
+    bool escaped = false;
+
+    for(size_t i = 0; i < line.length(); ++i) {
+        char ch = line[i];
+        if(escaped) {
+            escaped = false;
+            continue;
+        }
+        if(ch == '\\' && in_double_quote) {
+            escaped = true;
+            continue;
+        }
+        if(ch == '\'' && !in_double_quote) {
+            in_single_quote = !in_single_quote;
+            continue;
+        }
+        if(ch == '"' && !in_single_quote) {
+            in_double_quote = !in_double_quote;
+            continue;
+        }
+        if(ch == '#' && !in_single_quote && !in_double_quote) {
+            return line.substr(0, i);
+        }
+    }
+    return line;
 }
 
 std::string shell_quote(const std::string& str) {
@@ -219,8 +249,7 @@ void load_config() {
     std::ifstream file(CONFIG_FILE);
     std::string   line;
     while(std::getline(file, line)) {
-        size_t comment_pos = line.find('#');
-        if(comment_pos != std::string::npos) line = line.substr(0, comment_pos);
+        line = strip_comment(line);
         if(trim(line).empty()) continue;
         std::stringstream ss(line);
         std::string       key, val;
@@ -302,8 +331,7 @@ std::string get_package_env(const std::string& pkg_name) {
     std::map<std::string, std::string> vars;
     Logger::info("Loading custom build flags from " + p.string());
     while(std::getline(file, line)) {
-        size_t comment = line.find('#');
-        if(comment != std::string::npos) line = line.substr(0, comment);
+        line = strip_comment(line);
         if(trim(line).empty()) continue;
         std::string key, val;
         if(split_env_assignment(line, key, val)) {
@@ -742,8 +770,7 @@ void cmd_list_src() {
             std::ifstream file(entry.path());
             std::string   line;
             while(std::getline(file, line)) {
-                size_t comment = line.find('#');
-                if(comment != std::string::npos) line = line.substr(0, comment);
+                line = strip_comment(line);
                 if(!trim(line).empty()) std::cout << "    " << trim(line) << std::endl;
             }
         }
