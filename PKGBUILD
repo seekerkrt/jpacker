@@ -1,7 +1,7 @@
 # Maintainer: seekerkrt <seekerkrt@gmail.com>
 pkgname=jpacker
 # pkgverはpkgver()関数によって自動更新されます
-pkgver=1.3.0
+pkgver=1.3.1
 pkgrel=1
 pkgdesc="A simple C++ AUR helper and Pacman wrapper"
 arch=('x86_64')
