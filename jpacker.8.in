@@ -1,4 +1,4 @@
-.TH JPACKER 8 "June 2026" "jpacker 1.3.1" "System Administration Utilities"
+.TH JPACKER 8 "June 2026" "jpacker @VERSION@" "System Administration Utilities"
 .SH NAME
 jpacker \- A robust Pacman wrapper and AUR helper with source-based build management
 .SH SYNOPSIS
