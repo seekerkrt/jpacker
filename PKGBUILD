@@ -5,7 +5,7 @@ pkgver=1.2.5.r0.gXXXXXX
 pkgrel=1
 pkgdesc="A simple C++ AUR helper and Pacman wrapper"
 arch=('x86_64')
-url="https://gitlab.com/seekerkrt/jpacker"
+url="https://github.com/seekerkrt/jpacker"
 license=('MIT')
 
 # 実行時に必要な依存パッケージ
