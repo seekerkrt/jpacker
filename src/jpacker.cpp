@@ -1,6 +1,6 @@
 /**
  * jpacker - A full-featured Pacman wrapper and AUR helper
- * v1.2.2 Features:
+ * v1.2.3 Features:
  * - Smart Upgrade: Skips rebuilding packages if the version hasn't changed during 'upgrade'.
  * - Variable expansion support in config files.
  * - '--nodiff' option support.
@@ -32,7 +32,7 @@ namespace fs = std::filesystem;
 
 // --- 設定 ---
 #ifndef JPKG_VERSION
-#define JPKG_VERSION "1.2.2"
+#define JPKG_VERSION "1.2.3"
 #endif
 
 const std::string VERSION = JPKG_VERSION;
@@ -226,7 +226,7 @@ void load_config() {
         std::string       key, val;
         if(std::getline(ss, key, '=') && std::getline(ss, val)) {
             key = to_lower(trim(key));
-            val = trim(val);
+            val = unquote(trim(val));
             if(key == "noedit") {
                 std::string v = to_lower(val);
                 if(v == "true" || v == "1" || v == "yes") g_config.no_edit = true;
@@ -283,6 +283,8 @@ public:
 std::ofstream Logger::logFile;
 bool          Logger::initialized = false;
 
+int command_status(const std::string& cmd);
+
 // --- Helpers ---
 bool is_force_source(const std::string& pkg_name) {
     require_valid_package_name(pkg_name);
@@ -327,8 +329,8 @@ std::string get_git_branch() {
     if(remote_head.find(prefix) == 0 && remote_head.length() > prefix.length()) {
         return remote_head.substr(prefix.length());
     }
-    if(std::system("git show-ref --verify --quiet refs/remotes/origin/main") == 0) return "main";
-    if(std::system("git show-ref --verify --quiet refs/remotes/origin/master") == 0) return "master";
+    if(command_status("git show-ref --verify --quiet refs/remotes/origin/main") == 0) return "main";
+    if(command_status("git show-ref --verify --quiet refs/remotes/origin/master") == 0) return "master";
     return "master";
 }
 
@@ -444,13 +446,17 @@ size_t WriteCallback(void* contents, size_t size, size_t nmemb, void* userp) {
     ((std::string*)userp)->append((char*)contents, total_size);
     return total_size;
 }
-int run_command(const std::string& cmd) {
-    Logger::raw_cmd(cmd);
+int command_status(const std::string& cmd) {
     int status = std::system(cmd.c_str());
     if(status == -1) return 127;
     if(WIFEXITED(status)) return WEXITSTATUS(status);
     if(WIFSIGNALED(status)) return 128 + WTERMSIG(status);
     return 1;
+}
+
+int run_command(const std::string& cmd) {
+    Logger::raw_cmd(cmd);
+    return command_status(cmd);
 }
 std::string join_shell_args(const std::vector<std::string>& args) {
     std::stringstream ss;
@@ -468,7 +474,7 @@ std::string build_editor_command(const std::string& editor, const fs::path& targ
 bool is_repo_package(const std::string& pkg_name) {
     require_valid_package_name(pkg_name);
     std::string cmd = "pacman -Si " + shell_quote(pkg_name) + " > /dev/null 2>&1";
-    return (std::system(cmd.c_str()) == 0);
+    return (command_status(cmd) == 0);
 }
 bool ask_user(const std::string& question) {
     std::cout << ":: " << question << " [Y/n] ";
@@ -961,10 +967,10 @@ int main(int argc, char* argv[]) {
                 Logger::error("Missing search query.");
                 return 1;
             }
-            run_command("pacman " + join_shell_args(args));
+            int pacman_ret = run_command("pacman " + join_shell_args(args));
             Logger::info("Searching AUR...");
             search_aur(targets);
-            return 0;
+            return pacman_ret;
         }
         if(is_info || is_clean) return run_command("pacman " + join_shell_args(args));
 
