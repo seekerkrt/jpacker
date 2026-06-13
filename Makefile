@@ -1,6 +1,10 @@
 # --- プロジェクト情報 ---
 TARGET    := jpacker
-VERSION   := 1.3.0
+VERSION_FILE := VERSION
+VERSION   := $(strip $(shell cat $(VERSION_FILE) 2>/dev/null))
+ifeq ($(VERSION),)
+VERSION   := unknown
+endif
 SRC_DIR   := src
 BUILD_DIR := build
 
@@ -25,22 +29,26 @@ DEPS      := $(OBJS:.o=.d)
 
 .PHONY: all clean install uninstall
 
-all: $(TARGET)
+all: $(TARGET) jpacker.8
 
 $(TARGET): $(OBJS)
 	@echo ":: Linking $@"
 	$(CXX) $(LDFLAGS) $(OBJS) -o $@ $(MY_LDLIBS)
 
-$(BUILD_DIR)/%.o: $(SRC_DIR)/%.cpp
+$(BUILD_DIR)/%.o: $(SRC_DIR)/%.cpp $(VERSION_FILE)
 	@mkdir -p $(BUILD_DIR)
 	@echo ":: Compiling $< (v$(VERSION))"
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -MMD -MP -c $< -o $@
+
+jpacker.8: jpacker.8.in $(VERSION_FILE)
+	@echo ":: Generating $@ (v$(VERSION))"
+	sed 's/@VERSION@/$(VERSION)/g' jpacker.8.in > $@
 
 clean:
 	@echo ":: Cleaning up"
 	rm -rf $(BUILD_DIR) $(TARGET)
 
-install: $(TARGET)
+install: $(TARGET) jpacker.8
 	@echo ":: Installing binary..."
 	install -Dm755 $(TARGET) $(DESTDIR)$(BINDIR)/$(TARGET)
 
