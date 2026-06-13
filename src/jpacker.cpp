@@ -39,7 +39,8 @@ namespace fs = std::filesystem;
 
 const std::string VERSION = JPKG_VERSION;
 const std::string AUR_RPC_URL = "https://aur.archlinux.org/rpc/v5/search/";
-const std::string AUR_RPC_INFO_URL = "https://aur.archlinux.org/rpc/v5/info?arg[]=";
+const std::string AUR_RPC_INFO_BASE_URL = "https://aur.archlinux.org/rpc/";
+const std::string AUR_RPC_INFO_URL = AUR_RPC_INFO_BASE_URL + "?v=5&type=info&arg%5B%5D=";
 const std::string AUR_BASE_URL = "https://aur.archlinux.org/";
 const std::string ARCH_GIT_BASE = "https://gitlab.archlinux.org/archlinux/packaging/packages/";
 const std::string USER_AGENT = "jpacker/" + VERSION;
@@ -593,12 +594,18 @@ public:
     static std::string get_url(const std::string& url) {
         CurlHandle  handle;
         std::string readBuffer;
+        char        errorBuffer[CURL_ERROR_SIZE] = {0};
         curl_easy_setopt(handle.get(), CURLOPT_URL, url.c_str());
         curl_easy_setopt(handle.get(), CURLOPT_WRITEFUNCTION, WriteCallback);
         curl_easy_setopt(handle.get(), CURLOPT_WRITEDATA, &readBuffer);
         curl_easy_setopt(handle.get(), CURLOPT_USERAGENT, USER_AGENT.c_str());
+        curl_easy_setopt(handle.get(), CURLOPT_ERRORBUFFER, errorBuffer);
         CURLcode res = curl_easy_perform(handle.get());
-        if(res != CURLE_OK) return "";
+        if(res != CURLE_OK) {
+            std::string error = errorBuffer[0] ? errorBuffer : curl_easy_strerror(res);
+            Logger::warn("AUR request failed: " + error);
+            return "";
+        }
         return readBuffer;
     }
 
@@ -626,6 +633,39 @@ public:
             return std::nullopt;
         }
         return parse_aur_package_info(j["results"][0]);
+    }
+
+    static std::map<std::string, AurPackageInfo> info_many(const std::vector<std::string>& pkg_names) {
+        std::map<std::string, AurPackageInfo> results;
+        if(pkg_names.empty()) return results;
+
+        CurlHandle  handle;
+        std::string url = AUR_RPC_INFO_BASE_URL + "?v=5&type=info";
+        bool        has_arg = false;
+        for(size_t i = 0; i < pkg_names.size(); ++i) {
+            char* escaped = curl_easy_escape(handle.get(), pkg_names[i].c_str(), static_cast<int>(pkg_names[i].length()));
+            if(!escaped) continue;
+            url += "&";
+            url += "arg%5B%5D=";
+            url += escaped;
+            has_arg = true;
+            curl_free(escaped);
+        }
+        if(!has_arg) return results;
+
+        std::string response = get_url(url);
+        if(response.empty()) return results;
+
+        auto j = json::parse(response);
+        if(!j.contains("results") || !j["results"].is_array()) {
+            return results;
+        }
+
+        for(const auto& pkg : j["results"]) {
+            AurPackageInfo info = parse_aur_package_info(pkg);
+            if(!info.Name.empty()) results[info.Name] = info;
+        }
+        return results;
     }
 };
 
@@ -904,19 +944,56 @@ int cmd_query_foreign_updates() {
     bool failed = false;
 
     std::vector<InstalledPackage> packages = get_foreign_packages();
+    if(packages.empty()) {
+        Logger::info("No foreign packages found.");
+        return 0;
+    }
+
+    std::vector<std::string> package_names;
     for(const auto& local_pkg : packages) {
+        package_names.push_back(local_pkg.name);
+    }
+
+    Logger::info("Checking AUR updates for " + std::to_string(packages.size()) + " foreign packages...");
+
+    std::map<std::string, AurPackageInfo> aur_packages;
+    const size_t                          batch_size = 100;
+    for(size_t offset = 0; offset < package_names.size(); offset += batch_size) {
+        size_t end = std::min(offset + batch_size, package_names.size());
+        Logger::info("Fetching AUR info for packages " + std::to_string(offset + 1) + "-" + std::to_string(end) + " of " +
+                     std::to_string(package_names.size()) + "...");
+
+        std::vector<std::string> batch(package_names.begin() + offset, package_names.begin() + end);
         try {
-            std::optional<AurPackageInfo> aur_pkg = AurClient::info(local_pkg.name);
-            if(!aur_pkg.has_value()) {
-                Logger::warn("Foreign package not found in AUR: " + local_pkg.name);
-                continue;
+            std::map<std::string, AurPackageInfo> batch_results = AurClient::info_many(batch);
+            if(batch_results.empty()) {
+                Logger::warn("Bulk AUR info returned no results. Falling back to per-package checks for this batch.");
+                for(const auto& package_name : batch) {
+                    std::optional<AurPackageInfo> aur_pkg = AurClient::info(package_name);
+                    if(aur_pkg.has_value()) {
+                        batch_results[aur_pkg->Name] = aur_pkg.value();
+                    }
+                }
             }
-            if(aur_version_is_newer(aur_pkg->Version, local_pkg.version)) {
-                std::cout << local_pkg.name << " " << local_pkg.version << " -> " << aur_pkg->Version << std::endl;
-            }
+            aur_packages.insert(batch_results.begin(), batch_results.end());
         } catch(const std::exception& e) {
-            Logger::error("Failed to check AUR update for " + local_pkg.name + ": " + e.what());
+            Logger::error("Failed to fetch AUR info: " + std::string(e.what()));
             failed = true;
+        }
+    }
+
+    for(size_t i = 0; i < packages.size(); ++i) {
+        const auto& local_pkg = packages[i];
+        Logger::info("Checking package " + std::to_string(i + 1) + "/" + std::to_string(packages.size()) + ": " + local_pkg.name);
+
+        auto aur_pkg = aur_packages.find(local_pkg.name);
+        if(aur_pkg == aur_packages.end()) {
+            Logger::warn("Foreign package not found in AUR: " + local_pkg.name);
+            continue;
+        }
+
+        if(aur_version_is_newer(aur_pkg->second.Version, local_pkg.version)) {
+            std::cout << local_pkg.name << " " << local_pkg.version << " -> " << aur_pkg->second.Version << std::endl;
         }
     }
 
