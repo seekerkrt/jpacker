@@ -1,7 +1,15 @@
 # Maintainer: seekerkrt <seekerkrt@gmail.com>
 pkgname=jpacker
-# pkgverはpkgver()関数によって自動更新されます
-pkgver=1.3.1
+_srcname=jpacker-src
+
+_read_version_file() {
+    local version_file="$1"
+    if [[ -f "$version_file" ]]; then
+        tr -d '[:space:]' < "$version_file"
+    fi
+}
+
+pkgver=$(_read_version_file VERSION)
 pkgrel=1
 pkgdesc="A simple C++ AUR helper and Pacman wrapper"
 arch=('x86_64')
@@ -15,27 +23,28 @@ depends=('curl' 'pacman' 'git')
 makedepends=('git' 'nlohmann-json' 'base-devel')
 
 # GitLabのリポジトリをソースとして指定
-source=("git+https://gitlab.com/seekerkrt/jpacker.git")
+source=("$_srcname::git+https://github.com/seekerkrt/jpacker.git")
 
 # Gitリポジトリの場合はチェックサムをSKIPにするのが通例
 sha256sums=('SKIP')
 
-# バージョン番号をGitのタグやコミットから自動生成する関数
 pkgver() {
-    cd "$pkgname"
-    # リリースタグだけを使い、checkpoint系タグがpkgverに混ざらないようにする
-    git describe --long --tags --match 'v[0-9]*' 2>/dev/null | sed 's/\([^-]*-g\)/r\1/;s/-/./g' ||
-    printf "r%s.%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+    local version
+    version=$(_read_version_file "$srcdir/$_srcname/VERSION")
+    if [[ -z "$version" ]]; then
+        version=$(_read_version_file "$startdir/VERSION")
+    fi
+    printf '%s\n' "$version"
 }
 
 build() {
     # git cloneされたディレクトリに入る
-    cd "$pkgname"
+    cd "$_srcname"
     make
 }
 
 package() {
-    cd "$pkgname"
+    cd "$_srcname"
     # インストール
     make PREFIX=/usr DESTDIR="$pkgdir" install
 
