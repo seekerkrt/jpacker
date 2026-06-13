@@ -38,7 +38,7 @@ namespace fs = std::filesystem;
 
 const std::string VERSION = JPKG_VERSION;
 const std::string AUR_RPC_URL = "https://aur.archlinux.org/rpc/v5/search/";
-const std::string AUR_RPC_INFO_URL = "https://aur.archlinux.org/rpc/v5/info/";
+const std::string AUR_RPC_INFO_URL = "https://aur.archlinux.org/rpc/v5/info?arg[]=";
 const std::string AUR_BASE_URL = "https://aur.archlinux.org/";
 const std::string ARCH_GIT_BASE = "https://gitlab.archlinux.org/archlinux/packaging/packages/";
 const std::string USER_AGENT = "jpacker/" + VERSION;
@@ -74,6 +74,11 @@ struct PackageBuildSource {
     std::string requested_name;
     std::string clone_name;
     std::string git_url;
+};
+
+struct InstalledPackage {
+    std::string name;
+    std::string version;
 };
 
 // --- ユーティリティ ---
@@ -736,6 +741,62 @@ int cmd_sync_info(const std::vector<std::string>& args, const std::vector<std::s
     return failed ? 1 : 0;
 }
 
+std::vector<InstalledPackage> get_foreign_packages() {
+    std::vector<InstalledPackage> packages;
+    std::string                   output = exec_command("pacman -Qm 2>/dev/null");
+    if(output.empty()) return packages;
+
+    std::stringstream ss(output);
+    std::string       line;
+    while(std::getline(ss, line)) {
+        line = trim(line);
+        if(line.empty()) continue;
+
+        std::stringstream line_ss(line);
+        InstalledPackage  pkg;
+        if(line_ss >> pkg.name >> pkg.version) {
+            require_valid_package_name(pkg.name);
+            packages.push_back(pkg);
+        }
+    }
+    return packages;
+}
+
+bool aur_version_is_newer(const std::string& aur_version, const std::string& installed_version) {
+    std::string cmp_cmd = "vercmp " + shell_quote(aur_version) + " " + shell_quote(installed_version);
+    std::string cmp_res = exec_command(cmp_cmd.c_str());
+
+    try {
+        return std::stoi(cmp_res) > 0;
+    } catch(...) {
+        Logger::warn("Failed to compare versions: " + installed_version + " -> " + aur_version);
+        return false;
+    }
+}
+
+int cmd_query_foreign_updates() {
+    bool failed = false;
+
+    std::vector<InstalledPackage> packages = get_foreign_packages();
+    for(const auto& local_pkg : packages) {
+        try {
+            std::optional<AurPackageInfo> aur_pkg = AurClient::info(local_pkg.name);
+            if(!aur_pkg.has_value()) {
+                Logger::warn("Foreign package not found in AUR: " + local_pkg.name);
+                continue;
+            }
+            if(aur_version_is_newer(aur_pkg->Version, local_pkg.version)) {
+                std::cout << local_pkg.name << " " << local_pkg.version << " -> " << aur_pkg->Version << std::endl;
+            }
+        } catch(const std::exception& e) {
+            Logger::error("Failed to check AUR update for " + local_pkg.name + ": " + e.what());
+            failed = true;
+        }
+    }
+
+    return failed ? 1 : 0;
+}
+
 // --- Build Logic ---
 // 【Updated】 only_if_updated フラグを追加
 void build_from_git(const std::string& pkg_name, const std::string& clone_name, const std::string& git_url, const std::string& custom_env, bool only_if_updated) {
@@ -1059,6 +1120,7 @@ void print_help() {
     std::cout << "    \033[1mrevert\033[0m <pkg>         Unmark & reinstall binary" << std::endl;
     std::cout << "    \033[1m-S, -Syu\033[0m             Install/Update" << std::endl;
     std::cout << "    \033[1m-Ss\033[0m <query>          Search" << std::endl;
+    std::cout << "    \033[1m-Qua\033[0m                 Check AUR/foreign updates" << std::endl;
     std::cout << "\033[1mOPTIONS\033[0m" << std::endl;
     std::cout << "    \033[1m--noedit\033[0m             Skip review" << std::endl;
     std::cout << "    \033[1m--nodiff\033[0m             Skip diff prompt" << std::endl;
@@ -1165,11 +1227,15 @@ int main(int argc, char* argv[]) {
         }
 
         bool is_sync = (operation.find("-S") == 0);
+        bool is_query = (operation.find("-Q") == 0);
+        bool is_foreign_updates = (is_query && operation.find('u') != std::string::npos && operation.find('a') != std::string::npos);
         bool is_search = (is_sync && operation.find('s') != std::string::npos);
         bool is_info = (is_sync && operation.find('i') != std::string::npos);
         bool is_clean = (is_sync && operation.find('c') != std::string::npos);
         bool is_sys_upgrade = (is_sync && (operation.find('u') != std::string::npos || operation.find('y') != std::string::npos));
         bool needs_sudo = (is_sync || operation.find("-R") == 0 || operation.find("-U") == 0 || operation.find("-D") == 0);
+
+        if(is_foreign_updates) return cmd_query_foreign_updates();
 
         if(is_search) {
             if(targets.empty()) {
