@@ -7,7 +7,7 @@ _jpacker() {
     prev="${COMP_WORDS[COMP_CWORD-1]}"
 
     # 主要コマンドとオプション
-    opts="build upgrade clean add-src del-src edit-src list-src revert -S -Syu -Ss -R -Rs -Rns -Q -h --help --noedit --nodiff"
+    opts="build upgrade clean deps add-src del-src edit-src list-src revert -S -Syu -Ss -R -Rs -Rns -Q -h --help --noedit --nodiff"
 
     # 第1引数（コマンド）の補完
     if [[ ${COMP_CWORD} -eq 1 ]]; then

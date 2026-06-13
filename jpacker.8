@@ -32,6 +32,10 @@ Environment variables (like CFLAGS) can be passed directly.
 .br
 Example: \fIjpacker build coreutils CFLAGS="-O3 -march=native"\fR
 .TP
+.B deps \fI<package>\fR
+Inspect an AUR package's runtime, make, and check dependencies, then classify them as official repository dependencies, AUR dependencies, or unknown dependencies.
+This command does not recursively resolve, clone, build, or install dependencies.
+.TP
 .B upgrade
 Perform a system upgrade. This first runs \fBsudo pacman -Syu\fR, then checks packages marked via \fBadd-src\fR and rebuilds them from source only when their PKGBUILD version is newer than the installed package.
 During source package updates, jpacker can show a git diff if changes are detected.
@@ -116,6 +120,11 @@ jpacker upgrade
 .B Install a package from AUR without review:
 .RS
 jpacker -S google-chrome --noedit
+.RE
+
+.B Classify dependencies of an AUR package:
+.RS
+jpacker deps google-chrome
 .RE
 
 .B Mark a package to use custom optimizations:
