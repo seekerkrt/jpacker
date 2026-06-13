@@ -1,6 +1,6 @@
 /**
  * jpacker - A full-featured Pacman wrapper and AUR helper
- * v1.2.0 Features:
+ * v1.2.1 Features:
  * - Smart Upgrade: Skips rebuilding packages if the version hasn't changed during 'upgrade'.
  * - Variable expansion support in config files.
  * - '--nodiff' option support.
@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <chrono>
 #include <cstdlib>
 #include <ctime>
@@ -23,6 +24,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <sys/wait.h>
 #include <vector>
 
 using json = nlohmann::json;
@@ -30,7 +32,7 @@ namespace fs = std::filesystem;
 
 // --- 設定 ---
 #ifndef JPKG_VERSION
-#define JPKG_VERSION "1.2.0"
+#define JPKG_VERSION "1.2.1"
 #endif
 
 const std::string VERSION = JPKG_VERSION;
@@ -72,6 +74,83 @@ std::string unquote(std::string str) {
         }
     }
     return str;
+}
+
+std::string shell_quote(const std::string& str) {
+    std::string quoted = "'";
+    for(char ch : str) {
+        if(ch == '\'')
+            quoted += "'\\''";
+        else
+            quoted += ch;
+    }
+    quoted += "'";
+    return quoted;
+}
+
+bool is_valid_package_name(const std::string& name) {
+    if(name.empty() || name[0] == '-') return false;
+    return std::all_of(name.begin(), name.end(), [](unsigned char ch) {
+        return std::isalnum(ch) || ch == '@' || ch == '.' || ch == '_' || ch == '+' || ch == '-';
+    });
+}
+
+void require_valid_package_name(const std::string& name) {
+    if(!is_valid_package_name(name)) {
+        throw std::runtime_error("Invalid package name: " + name);
+    }
+}
+
+bool is_valid_env_key(const std::string& key) {
+    if(key.empty()) return false;
+    if(!(std::isalpha(static_cast<unsigned char>(key[0])) || key[0] == '_')) return false;
+    return std::all_of(key.begin() + 1, key.end(), [](unsigned char ch) {
+        return std::isalnum(ch) || ch == '_';
+    });
+}
+
+bool split_env_assignment(const std::string& arg, std::string& key, std::string& value) {
+    size_t eq_pos = arg.find('=');
+    if(eq_pos == std::string::npos) return false;
+    key = trim(arg.substr(0, eq_pos));
+    value = unquote(trim(arg.substr(eq_pos + 1)));
+    return is_valid_env_key(key);
+}
+
+bool pacman_option_takes_value(const std::string& arg) {
+    static const std::vector<std::string> long_opts = {
+            "--arch", "--assume-installed", "--cachedir", "--color", "--config", "--dbpath",
+            "--gpgdir", "--hookdir", "--ignore", "--ignoregroup", "--logfile", "--overwrite",
+            "--print-format", "--root", "--sysroot"};
+    static const std::vector<std::string> short_opts = {"-b", "-r"};
+
+    if(arg.find('=') != std::string::npos) return false;
+    if(std::find(long_opts.begin(), long_opts.end(), arg) != long_opts.end()) return true;
+    return std::find(short_opts.begin(), short_opts.end(), arg) != short_opts.end();
+}
+
+bool is_safe_command_token(const std::string& token) {
+    if(token.empty()) return false;
+    return std::all_of(token.begin(), token.end(), [](unsigned char ch) {
+        return std::isalnum(ch) || ch == '/' || ch == '.' || ch == '_' || ch == '+' || ch == '-' || ch == '=' ||
+               ch == ':' || ch == '@' || ch == '%';
+    });
+}
+
+std::vector<std::string> split_command_words(const std::string& command) {
+    std::stringstream        ss(command);
+    std::string              word;
+    std::vector<std::string> words;
+    while(ss >> word) {
+        if(!is_safe_command_token(word)) {
+            throw std::runtime_error("Unsafe command token: " + word);
+        }
+        words.push_back(word);
+    }
+    if(words.empty()) {
+        throw std::runtime_error("Editor command is empty.");
+    }
+    return words;
 }
 
 fs::path expand_path(const std::string& path_str) {
@@ -153,6 +232,8 @@ public:
         if(path.has_parent_path() && !fs::exists(path.parent_path())) {
             fs::create_directories(path.parent_path());
         }
+        if(logFile.is_open()) logFile.close();
+        logFile.clear();
         logFile.open(path, std::ios::app);
         initialized = logFile.is_open();
     }
@@ -178,11 +259,13 @@ bool          Logger::initialized = false;
 
 // --- Helpers ---
 bool is_force_source(const std::string& pkg_name) {
+    require_valid_package_name(pkg_name);
     fs::path target = fs::path(PACKAGE_BUILD_DIR) / pkg_name;
     return fs::exists(target);
 }
 
 std::string get_package_env(const std::string& pkg_name) {
+    require_valid_package_name(pkg_name);
     fs::path p = fs::path(PACKAGE_BUILD_DIR) / pkg_name;
     if(!fs::exists(p)) return "";
     std::ifstream                      file(p);
@@ -194,11 +277,8 @@ std::string get_package_env(const std::string& pkg_name) {
         size_t comment = line.find('#');
         if(comment != std::string::npos) line = line.substr(0, comment);
         if(trim(line).empty()) continue;
-        size_t eq_pos = line.find('=');
-        if(eq_pos != std::string::npos) {
-            std::string key = trim(line.substr(0, eq_pos));
-            std::string raw_val = trim(line.substr(eq_pos + 1));
-            std::string val = unquote(raw_val);
+        std::string key, val;
+        if(split_env_assignment(line, key, val)) {
             try {
                 std::regex  re_brace(R"(\$\{([A-Za-z0-9_]+)\})");
                 std::smatch match;
@@ -217,8 +297,10 @@ std::string get_package_env(const std::string& pkg_name) {
             }
             vars[key] = val;
             if(!val.empty()) {
-                env_str += key + "=\"" + val + "\" ";
+                env_str += key + "=" + shell_quote(val) + " ";
             }
+        } else if(line.find('=') != std::string::npos) {
+            Logger::warn("Ignoring invalid environment assignment: " + trim(line));
         }
     }
     return env_str;
@@ -233,8 +315,9 @@ std::string get_git_branch() {
 // 【New!】更新が必要かチェックする関数
 // 戻り値: true (更新必要 or インストールされていない), false (最新版)
 bool is_update_needed(const std::string& pkg_name) {
+    require_valid_package_name(pkg_name);
     // 1. インストール済みバージョン取得
-    std::string installed_full = exec_command(("pacman -Q " + pkg_name + " 2>/dev/null").c_str());
+    std::string installed_full = exec_command(("pacman -Q " + shell_quote(pkg_name) + " 2>/dev/null").c_str());
     if(installed_full.empty()) {
         return true;// インストールされていないのでビルド必要
     }
@@ -261,7 +344,7 @@ bool is_update_needed(const std::string& pkg_name) {
     std::string new_ver = pkgver + "-" + pkgrel;
 
     // 3. vercmp で比較
-    std::string cmp_cmd = "vercmp " + new_ver + " " + installed_ver;
+    std::string cmp_cmd = "vercmp " + shell_quote(new_ver) + " " + shell_quote(installed_ver);
     std::string cmp_res = exec_command(cmp_cmd.c_str());
 
     // vercmp > 0 なら new_ver の方が新しい
@@ -343,18 +426,28 @@ size_t WriteCallback(void* contents, size_t size, size_t nmemb, void* userp) {
 }
 int run_command(const std::string& cmd) {
     Logger::raw_cmd(cmd);
-    return std::system(cmd.c_str());
+    int status = std::system(cmd.c_str());
+    if(status == -1) return 127;
+    if(WIFEXITED(status)) return WEXITSTATUS(status);
+    if(WIFSIGNALED(status)) return 128 + WTERMSIG(status);
+    return 1;
 }
-std::string join_args(const std::vector<std::string>& args) {
+std::string join_shell_args(const std::vector<std::string>& args) {
     std::stringstream ss;
     for(size_t i = 0; i < args.size(); ++i) {
         if(i > 0) ss << " ";
-        ss << args[i];
+        ss << shell_quote(args[i]);
     }
     return ss.str();
 }
+std::string build_editor_command(const std::string& editor, const fs::path& target) {
+    std::vector<std::string> args = split_command_words(editor);
+    args.push_back(target.string());
+    return join_shell_args(args);
+}
 bool is_repo_package(const std::string& pkg_name) {
-    std::string cmd = "pacman -Si " + pkg_name + " > /dev/null 2>&1";
+    require_valid_package_name(pkg_name);
+    std::string cmd = "pacman -Si " + shell_quote(pkg_name) + " > /dev/null 2>&1";
     return (std::system(cmd.c_str()) == 0);
 }
 bool ask_user(const std::string& question) {
@@ -369,7 +462,10 @@ public:
     static std::string search_query(const std::string& query) {
         CurlHandle  handle;
         std::string readBuffer;
-        std::string url = AUR_RPC_URL + query;
+        char* escaped = curl_easy_escape(handle.get(), query.c_str(), static_cast<int>(query.length()));
+        if(!escaped) return "";
+        std::string url = AUR_RPC_URL + escaped;
+        curl_free(escaped);
         curl_easy_setopt(handle.get(), CURLOPT_URL, url.c_str());
         curl_easy_setopt(handle.get(), CURLOPT_WRITEFUNCTION, WriteCallback);
         curl_easy_setopt(handle.get(), CURLOPT_WRITEDATA, &readBuffer);
@@ -402,6 +498,7 @@ void search_aur(const std::vector<std::string>& keywords) {
 // --- Build Logic ---
 // 【Updated】 only_if_updated フラグを追加
 void build_from_git(const std::string& pkg_name, const std::string& git_url, const std::string& custom_env, bool only_if_updated) {
+    require_valid_package_name(pkg_name);
     Logger::info("Processing " + pkg_name + "...");
     fs::path build_base = get_cache_dir();
     fs::path pkg_dir = build_base / pkg_name;
@@ -449,7 +546,7 @@ void build_from_git(const std::string& pkg_name, const std::string& git_url, con
             if(fs::exists(pkg_dir)) fs::remove_all(pkg_dir);
             Logger::info("Cloning repository...");
             DirCleanupGuard cleanup_guard(pkg_dir);
-            if(run_command("git clone " + git_url + " " + pkg_name) != 0) {
+            if(run_command("git clone " + shell_quote(git_url) + " " + shell_quote(pkg_name)) != 0) {
                 throw std::runtime_error("Failed to clone " + pkg_name);
             }
             cleanup_guard.commit();
@@ -470,7 +567,9 @@ void build_from_git(const std::string& pkg_name, const std::string& git_url, con
             if(ask_user("Edit PKGBUILD?")) {
                 const char* env_editor = std::getenv("EDITOR");
                 std::string editor_cmd = (env_editor) ? std::string(env_editor) : g_config.editor;
-                run_command(editor_cmd + " PKGBUILD");
+                if(run_command(build_editor_command(editor_cmd, "PKGBUILD")) != 0) {
+                    throw std::runtime_error("Editor failed.");
+                }
                 if(!ask_user("Proceed with build?")) throw std::runtime_error("Aborted.");
             }
         } else {
@@ -503,24 +602,29 @@ void install_smart_source(const std::string& pkg_name, bool only_if_updated) {
 }
 
 // --- Commands ---
-void cmd_build(const std::vector<std::string>& args) {
+int cmd_build(const std::vector<std::string>& args) {
     if(args.empty()) {
         Logger::error("Usage: jpacker build <pkg> [VAR=VAL...]");
-        return;
+        return 1;
     }
     std::string pkg_name, custom_env;
     for(const auto& arg : args) {
-        if(arg.find('=') != std::string::npos)
-            custom_env += arg + " ";
-        else if(pkg_name.empty())
+        std::string key, val;
+        if(split_env_assignment(arg, key, val))
+            custom_env += key + "=" + shell_quote(val) + " ";
+        else if(arg.find('=') != std::string::npos) {
+            Logger::error("Invalid environment assignment: " + arg);
+            return 1;
+        } else if(pkg_name.empty())
             pkg_name = arg;
         else
             Logger::warn("Ignoring extra arg '" + arg + "'");
     }
     if(pkg_name.empty()) {
         Logger::error("No package specified.");
-        return;
+        return 1;
     }
+    require_valid_package_name(pkg_name);
 
     std::string git_url;
     if(is_repo_package(pkg_name)) {
@@ -533,37 +637,64 @@ void cmd_build(const std::vector<std::string>& args) {
         build_from_git(pkg_name, git_url, custom_env, false);
     } catch(const std::exception& e) {
         Logger::error(std::string("Build Error: ") + e.what());
+        return 1;
     }
+    return 0;
 }
 
-void cmd_add_src(const std::vector<std::string>& args) {
+int cmd_add_src(const std::vector<std::string>& args) {
+    bool                     failed = false;
     std::vector<std::string> current_pkgs;
     for(const auto& arg : args) {
+        std::string key, val;
         if(arg.find('=') == std::string::npos) {
+            require_valid_package_name(arg);
             fs::path p = fs::path(PACKAGE_BUILD_DIR) / arg;
-            if(run_command("sudo touch " + p.string()) != 0)
+            if(run_command("sudo touch " + shell_quote(p.string())) != 0) {
                 Logger::error("Failed to add " + arg);
-            else {
+                failed = true;
+            } else {
                 Logger::info("Added " + arg + " to source-build list.");
                 current_pkgs.push_back(p.string());
             }
-        } else {
-            if(current_pkgs.empty()) continue;
+        } else if(split_env_assignment(arg, key, val)) {
+            if(current_pkgs.empty()) {
+                Logger::error("Environment assignment requires a preceding package: " + arg);
+                failed = true;
+                continue;
+            }
             for(const auto& pkg_path : current_pkgs) {
                 Logger::info("   -> Appending " + arg + " to " + pkg_path);
-                run_command("echo '" + arg + "' | sudo tee -a " + pkg_path + " > /dev/null");
+                if(run_command("printf '%s\\n' " + shell_quote(key + "=" + val) + " | sudo tee -a " + shell_quote(pkg_path) + " > /dev/null") != 0) {
+                    Logger::error("Failed to append " + key + " to " + pkg_path);
+                    failed = true;
+                }
             }
+        } else {
+            Logger::error("Invalid environment assignment: " + arg);
+            failed = true;
         }
     }
+    return failed ? 1 : 0;
 }
-void cmd_edit_src(const std::vector<std::string>& targets) {
+int cmd_edit_src(const std::vector<std::string>& targets) {
+    bool        failed = false;
     const char* env_editor = std::getenv("EDITOR");
-    std::string editor = (env_editor) ? std::string(env_editor) : g_config.editor;
+    std::string editor_cmd = (env_editor) ? std::string(env_editor) : g_config.editor;
     for(const auto& pkg : targets) {
+        require_valid_package_name(pkg);
         fs::path p = fs::path(PACKAGE_BUILD_DIR) / pkg;
-        if(!fs::exists(p)) run_command("sudo touch " + p.string());
-        run_command("sudo " + editor + " " + p.string());
+        if(!fs::exists(p) && run_command("sudo touch " + shell_quote(p.string())) != 0) {
+            Logger::error("Failed to create " + p.string());
+            failed = true;
+            continue;
+        }
+        if(run_command("sudo " + build_editor_command(editor_cmd, p)) != 0) {
+            Logger::error("Editor failed for " + p.string());
+            failed = true;
+        }
     }
+    return failed ? 1 : 0;
 }
 void cmd_list_src() {
     if(!fs::exists(PACKAGE_BUILD_DIR)) {
@@ -588,20 +719,32 @@ void cmd_list_src() {
     }
     if(!found) std::cout << "  (none)" << std::endl;
 }
-void cmd_del_src(const std::vector<std::string>& targets) {
+int cmd_del_src(const std::vector<std::string>& targets) {
+    bool failed = false;
     for(const auto& pkg : targets) {
+        require_valid_package_name(pkg);
         fs::path p = fs::path(PACKAGE_BUILD_DIR) / pkg;
         Logger::info("Removing " + pkg + " from list...");
-        run_command("sudo rm -f " + p.string());
+        if(run_command("sudo rm -f " + shell_quote(p.string())) != 0) {
+            Logger::error("Failed to remove " + pkg);
+            failed = true;
+        }
     }
+    return failed ? 1 : 0;
 }
 void cmd_revert(const std::vector<std::string>& targets) {
+    bool                     failed = false;
     std::vector<std::string> reinstall_targets;
     for(const auto& pkg : targets) {
+        require_valid_package_name(pkg);
         fs::path p = fs::path(PACKAGE_BUILD_DIR) / pkg;
         if(fs::exists(p)) {
             Logger::info("Unmarking source-build for " + pkg);
-            run_command("sudo rm -f " + p.string());
+            if(run_command("sudo rm -f " + shell_quote(p.string())) != 0) {
+                Logger::error("Failed to remove " + pkg);
+                failed = true;
+                continue;
+            }
         } else
             Logger::warn(pkg + " was not marked.");
         if(is_repo_package(pkg)) {
@@ -611,10 +754,11 @@ void cmd_revert(const std::vector<std::string>& targets) {
             Logger::info(pkg + " is likely an AUR package. Config removed only.");
     }
     if(!reinstall_targets.empty()) {
-        std::string pkg_list = join_args(reinstall_targets);
+        std::string pkg_list = join_shell_args(reinstall_targets);
         Logger::info("Reinstalling binaries: " + pkg_list);
         if(run_command("sudo pacman -S " + pkg_list) != 0) throw std::runtime_error("Failed to reinstall binaries.");
     }
+    if(failed) throw std::runtime_error("Failed to revert one or more packages.");
 }
 void cmd_clean() {
     Logger::info("Cleaning package caches...");
@@ -683,11 +827,9 @@ void print_help() {
 int main(int argc, char* argv[]) {
     CurlGlobal curl_global;
     try {
-        fs::path log_dir = get_cache_dir();
-        if(!fs::exists(log_dir)) fs::create_directories(log_dir);
-        Logger::init(log_dir / "jpacker.log");
         load_config();
-        if(!g_config.log_file.empty()) Logger::init(expand_path(g_config.log_file));
+        fs::path log_path = g_config.log_file.empty() ? (get_cache_dir() / "jpacker.log") : expand_path(g_config.log_file);
+        Logger::init(log_path);
         Logger::info("Started jpacker v" + VERSION);
     } catch(...) {
         std::cerr << "Warning: Failed to initialize log." << std::endl;
@@ -706,6 +848,8 @@ int main(int argc, char* argv[]) {
     std::vector<std::string> args, targets, flags;
     std::string              operation = first_arg;
     flags.push_back(operation);
+    bool                     option_value_expected = false;
+    bool                     end_of_options = false;
 
     for(int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -718,18 +862,31 @@ int main(int argc, char* argv[]) {
             continue;
         }
         if(i > 1) {
-            if(arg[0] == '-')
+            if(option_value_expected) {
                 flags.push_back(arg);
-            else
+                option_value_expected = false;
+            } else if(end_of_options) {
                 targets.push_back(arg);
+            } else if(arg == "--") {
+                flags.push_back(arg);
+                end_of_options = true;
+            } else if(arg[0] == '-') {
+                flags.push_back(arg);
+                option_value_expected = pacman_option_takes_value(arg);
+            } else {
+                targets.push_back(arg);
+            }
         }
         args.push_back(arg);
+    }
+    if(option_value_expected) {
+        Logger::error("Missing value for option " + flags.back());
+        return 1;
     }
 
     try {
         if(operation == "build") {
-            cmd_build(targets);
-            return 0;
+            return cmd_build(targets);
         }
         if(operation == "upgrade") {
             cmd_upgrade();
@@ -739,21 +896,22 @@ int main(int argc, char* argv[]) {
             cmd_clean();
             return 0;
         }
+        if((operation == "add-src" || operation == "del-src" || operation == "revert" || operation == "edit-src") && targets.empty()) {
+            Logger::error("Missing target for " + operation);
+            return 1;
+        }
         if(operation == "add-src" && !targets.empty()) {
-            cmd_add_src(targets);
-            return 0;
+            return cmd_add_src(targets);
         }
         if(operation == "del-src" && !targets.empty()) {
-            cmd_del_src(targets);
-            return 0;
+            return cmd_del_src(targets);
         }
         if(operation == "revert" && !targets.empty()) {
             cmd_revert(targets);
             return 0;
         }
         if(operation == "edit-src" && !targets.empty()) {
-            cmd_edit_src(targets);
-            return 0;
+            return cmd_edit_src(targets);
         }
         if(operation == "list-src") {
             cmd_list_src();
@@ -768,17 +926,18 @@ int main(int argc, char* argv[]) {
         bool needs_sudo = (is_sync || operation.find("-R") == 0 || operation.find("-U") == 0 || operation.find("-D") == 0);
 
         if(is_search) {
-            run_command("pacman " + join_args(args));
+            run_command("pacman " + join_shell_args(args));
             Logger::info("Searching AUR...");
             search_aur(targets);
             return 0;
         }
-        if(is_info || is_clean) return run_command("pacman " + join_args(args));
+        if(is_info || is_clean) return run_command("pacman " + join_shell_args(args));
 
         if(is_sync) {
-            if(targets.empty()) return run_command("sudo pacman " + join_args(args));
+            if(targets.empty()) return run_command("sudo pacman " + join_shell_args(args));
             std::vector<std::string> repo_targets, aur_targets;
             for(const auto& t : targets) {
+                require_valid_package_name(t);
                 if(is_force_source(t))
                     aur_targets.push_back(t);
                 else if(is_repo_package(t))
@@ -787,8 +946,8 @@ int main(int argc, char* argv[]) {
                     aur_targets.push_back(t);
             }
             if(!repo_targets.empty() || is_sys_upgrade) {
-                std::string cmd = "sudo pacman " + join_args(flags);
-                if(!repo_targets.empty()) cmd += " " + join_args(repo_targets);
+                std::string cmd = "sudo pacman " + join_shell_args(flags);
+                if(!repo_targets.empty()) cmd += " " + join_shell_args(repo_targets);
                 if(run_command(cmd) != 0) throw std::runtime_error("Pacman failed.");
             }
             if(!aur_targets.empty()) {
@@ -803,7 +962,7 @@ int main(int argc, char* argv[]) {
             if(arg == "--noedit") continue;
             if(arg == "--nodiff") continue;
             if(!cmd_args.empty()) cmd_args += " ";
-            cmd_args += arg;
+            cmd_args += shell_quote(arg);
         }
         std::string cmd_prefix = needs_sudo ? "sudo pacman " : "pacman ";
         return run_command(cmd_prefix + cmd_args);
