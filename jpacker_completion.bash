@@ -7,7 +7,7 @@ _jpacker() {
     prev="${COMP_WORDS[COMP_CWORD-1]}"
 
     # 主要コマンドとオプション
-    opts="install search remove upgrade add-src del-src edit-src list-src revert -S -Syu -Ss -R -Rs -Q -h --help --noedit --nodiff"
+    opts="build upgrade clean add-src del-src edit-src list-src revert -S -Syu -Ss -R -Rs -Rns -Q -h --help --noedit --nodiff"
 
     # 第1引数（コマンド）の補完
     if [[ ${COMP_CWORD} -eq 1 ]]; then
@@ -17,7 +17,7 @@ _jpacker() {
 
     # 直前が特定のコマンドだった場合の挙動
     case "${prev}" in
-        add-src|del-src|edit-src)
+        del-src|edit-src|revert)
             # 登録済みのパッケージ名を補完 (package.build内のファイル一覧)
             if [[ -d /etc/jpacker/package.build ]]; then
                 local build_pkgs=$(ls /etc/jpacker/package.build 2>/dev/null)
@@ -25,9 +25,9 @@ _jpacker() {
             fi
             return 0
             ;;
-        -S|-Syu|install)
+        -S|-Syu)
             # パッケージ名の補完は重いので、--noedit などのオプションのみ提示
-            COMPREPLY=( $(compgen -W "--noedit" -- ${cur}) )
+            COMPREPLY=( $(compgen -W "--noedit --nodiff" -- ${cur}) )
             return 0
             ;;
     esac

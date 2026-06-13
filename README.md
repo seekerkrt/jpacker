@@ -95,7 +95,8 @@ jpacker -S neofetch
 
 #### 5. Perform a full system upgrade
 
-This updates packages from the official repositories and rebuilds all AUR packages and source-marked packages.
+This updates packages from the official repositories and then checks source-marked packages.
+Marked packages are rebuilt from source when their PKGBUILD version is newer than the installed package.
 
 ```bash
 jpacker upgrade
