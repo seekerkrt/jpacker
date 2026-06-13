@@ -640,7 +640,8 @@ PackageBuildSource resolve_build_source(const std::string& pkg_name) {
     return PackageBuildSource{pkg_name, info->PackageBase, AUR_BASE_URL + info->PackageBase + ".git"};
 }
 
-void search_aur(const std::vector<std::string>& keywords) {
+bool search_aur(const std::vector<std::string>& keywords) {
+    bool found = false;
     for(const auto& pkg_name : keywords) {
         if(pkg_name.empty()) continue;
         if(pkg_name[0] == '-') continue;
@@ -650,6 +651,7 @@ void search_aur(const std::vector<std::string>& keywords) {
             auto j = json::parse(response);
             if(j.contains("results") && j["results"].is_array()) {
                 for(const auto& pkg : j["results"]) {
+                    found = true;
                     std::cout << "\033[1;35maur\033[0m/\033[1m" << pkg["Name"].get<std::string>()
                               << "\033[0m \033[1;32m" << pkg["Version"].get<std::string>() << "\033[0m" << std::endl;
                     if(pkg.contains("Description") && !pkg["Description"].is_null())
@@ -659,6 +661,7 @@ void search_aur(const std::vector<std::string>& keywords) {
         } catch(...) {
         }
     }
+    return found;
 }
 
 std::string join_display_values(const std::vector<std::string>& values) {
@@ -1244,8 +1247,8 @@ int main(int argc, char* argv[]) {
             }
             int pacman_ret = run_command("pacman " + join_shell_args(args));
             Logger::info("Searching AUR...");
-            search_aur(targets);
-            return pacman_ret;
+            bool aur_found = search_aur(targets);
+            return (pacman_ret == 0 || aur_found) ? 0 : 1;
         }
         if(is_info) return cmd_sync_info(args, flags, targets);
         if(is_clean) return run_command("pacman " + join_shell_args(args));
