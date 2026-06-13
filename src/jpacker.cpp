@@ -20,6 +20,7 @@
 #include <map>
 #include <memory>
 #include <nlohmann/json.hpp>
+#include <optional>
 #include <regex>
 #include <sstream>
 #include <stdexcept>
@@ -37,6 +38,7 @@ namespace fs = std::filesystem;
 
 const std::string VERSION = JPKG_VERSION;
 const std::string AUR_RPC_URL = "https://aur.archlinux.org/rpc/v5/search/";
+const std::string AUR_RPC_INFO_URL = "https://aur.archlinux.org/rpc/v5/info/";
 const std::string AUR_BASE_URL = "https://aur.archlinux.org/";
 const std::string ARCH_GIT_BASE = "https://gitlab.archlinux.org/archlinux/packaging/packages/";
 const std::string USER_AGENT = "jpacker/" + VERSION;
@@ -51,6 +53,22 @@ struct AppConfig {
 };
 
 AppConfig g_config;
+
+struct AurPackageInfo {
+    std::string                    Name;
+    std::string                    PackageBase;
+    std::string                    Version;
+    std::string                    Description;
+    std::vector<std::string>       Depends;
+    std::vector<std::string>       MakeDepends;
+    std::vector<std::string>       CheckDepends;
+    std::vector<std::string>       OptDepends;
+    std::vector<std::string>       Provides;
+    std::vector<std::string>       Conflicts;
+    std::vector<std::string>       Replaces;
+    std::string                    Maintainer;
+    std::optional<long long>       OutOfDate;
+};
 
 // --- ユーティリティ ---
 std::string trim(const std::string& str) {
@@ -511,15 +529,45 @@ bool ask_user(const std::string& question) {
     return (input.empty() || to_lower(input) == "y" || to_lower(input) == "yes");
 }
 
+std::string json_string_or_empty(const json& obj, const std::string& key) {
+    if(!obj.contains(key) || obj[key].is_null()) return "";
+    return obj[key].get<std::string>();
+}
+
+std::vector<std::string> json_string_array_or_empty(const json& obj, const std::string& key) {
+    std::vector<std::string> values;
+    if(!obj.contains(key) || !obj[key].is_array()) return values;
+    for(const auto& item : obj[key]) {
+        if(!item.is_null()) values.push_back(item.get<std::string>());
+    }
+    return values;
+}
+
+AurPackageInfo parse_aur_package_info(const json& pkg) {
+    AurPackageInfo info;
+    info.Name = json_string_or_empty(pkg, "Name");
+    info.PackageBase = json_string_or_empty(pkg, "PackageBase");
+    info.Version = json_string_or_empty(pkg, "Version");
+    info.Description = json_string_or_empty(pkg, "Description");
+    info.Depends = json_string_array_or_empty(pkg, "Depends");
+    info.MakeDepends = json_string_array_or_empty(pkg, "MakeDepends");
+    info.CheckDepends = json_string_array_or_empty(pkg, "CheckDepends");
+    info.OptDepends = json_string_array_or_empty(pkg, "OptDepends");
+    info.Provides = json_string_array_or_empty(pkg, "Provides");
+    info.Conflicts = json_string_array_or_empty(pkg, "Conflicts");
+    info.Replaces = json_string_array_or_empty(pkg, "Replaces");
+    info.Maintainer = json_string_or_empty(pkg, "Maintainer");
+    if(pkg.contains("OutOfDate") && !pkg["OutOfDate"].is_null()) {
+        info.OutOfDate = pkg["OutOfDate"].get<long long>();
+    }
+    return info;
+}
+
 class AurClient {
 public:
-    static std::string search_query(const std::string& query) {
+    static std::string get_url(const std::string& url) {
         CurlHandle  handle;
         std::string readBuffer;
-        char* escaped = curl_easy_escape(handle.get(), query.c_str(), static_cast<int>(query.length()));
-        if(!escaped) return "";
-        std::string url = AUR_RPC_URL + escaped;
-        curl_free(escaped);
         curl_easy_setopt(handle.get(), CURLOPT_URL, url.c_str());
         curl_easy_setopt(handle.get(), CURLOPT_WRITEFUNCTION, WriteCallback);
         curl_easy_setopt(handle.get(), CURLOPT_WRITEDATA, &readBuffer);
@@ -527,6 +575,32 @@ public:
         CURLcode res = curl_easy_perform(handle.get());
         if(res != CURLE_OK) return "";
         return readBuffer;
+    }
+
+    static std::string search_query(const std::string& query) {
+        CurlHandle  handle;
+        char* escaped = curl_easy_escape(handle.get(), query.c_str(), static_cast<int>(query.length()));
+        if(!escaped) return "";
+        std::string url = AUR_RPC_URL + escaped;
+        curl_free(escaped);
+        return get_url(url);
+    }
+
+    static std::optional<AurPackageInfo> info(const std::string& pkg_name) {
+        CurlHandle handle;
+        char*      escaped = curl_easy_escape(handle.get(), pkg_name.c_str(), static_cast<int>(pkg_name.length()));
+        if(!escaped) return std::nullopt;
+        std::string url = AUR_RPC_INFO_URL + escaped;
+        curl_free(escaped);
+
+        std::string response = get_url(url);
+        if(response.empty()) return std::nullopt;
+
+        auto j = json::parse(response);
+        if(!j.contains("results") || !j["results"].is_array() || j["results"].empty()) {
+            return std::nullopt;
+        }
+        return parse_aur_package_info(j["results"][0]);
     }
 };
 void search_aur(const std::vector<std::string>& keywords) {
@@ -548,6 +622,86 @@ void search_aur(const std::vector<std::string>& keywords) {
         } catch(...) {
         }
     }
+}
+
+std::string join_display_values(const std::vector<std::string>& values) {
+    if(values.empty()) return "None";
+    std::stringstream ss;
+    for(size_t i = 0; i < values.size(); ++i) {
+        if(i > 0) ss << "  ";
+        ss << values[i];
+    }
+    return ss.str();
+}
+
+std::string out_of_date_display(const std::optional<long long>& out_of_date) {
+    if(!out_of_date.has_value()) return "No";
+    return std::to_string(out_of_date.value());
+}
+
+void print_aur_info(const AurPackageInfo& pkg) {
+    std::cout << "Repository      : aur" << std::endl;
+    std::cout << "Name            : " << pkg.Name << std::endl;
+    std::cout << "Package Base    : " << pkg.PackageBase << std::endl;
+    std::cout << "Version         : " << pkg.Version << std::endl;
+    std::cout << "Description     : " << (pkg.Description.empty() ? "None" : pkg.Description) << std::endl;
+    std::cout << "Depends On      : " << join_display_values(pkg.Depends) << std::endl;
+    std::cout << "Make Deps       : " << join_display_values(pkg.MakeDepends) << std::endl;
+    std::cout << "Check Deps      : " << join_display_values(pkg.CheckDepends) << std::endl;
+    std::cout << "Optional Deps   : " << join_display_values(pkg.OptDepends) << std::endl;
+    std::cout << "Provides        : " << join_display_values(pkg.Provides) << std::endl;
+    std::cout << "Conflicts With  : " << join_display_values(pkg.Conflicts) << std::endl;
+    std::cout << "Replaces        : " << join_display_values(pkg.Replaces) << std::endl;
+    std::cout << "Maintainer      : " << (pkg.Maintainer.empty() ? "None" : pkg.Maintainer) << std::endl;
+    std::cout << "Out Of Date     : " << out_of_date_display(pkg.OutOfDate) << std::endl;
+}
+
+int cmd_sync_info(const std::vector<std::string>& args, const std::vector<std::string>& flags, const std::vector<std::string>& targets) {
+    if(targets.empty()) return run_command("pacman " + join_shell_args(args));
+
+    bool                     failed = false;
+    std::vector<std::string> repo_targets;
+    std::vector<AurPackageInfo> aur_infos;
+
+    for(const auto& target : targets) {
+        if(target.find('/') != std::string::npos) {
+            repo_targets.push_back(target);
+            continue;
+        }
+
+        require_valid_package_name(target);
+        if(is_repo_package(target)) {
+            repo_targets.push_back(target);
+            continue;
+        }
+
+        try {
+            std::optional<AurPackageInfo> info = AurClient::info(target);
+            if(info.has_value()) {
+                aur_infos.push_back(info.value());
+            } else {
+                Logger::error("Package not found in repos or AUR: " + target);
+                failed = true;
+            }
+        } catch(const std::exception& e) {
+            Logger::error("Failed to fetch AUR info for " + target + ": " + e.what());
+            failed = true;
+        }
+    }
+
+    if(!repo_targets.empty()) {
+        std::vector<std::string> pacman_args = flags;
+        pacman_args.insert(pacman_args.end(), repo_targets.begin(), repo_targets.end());
+        if(run_command("pacman " + join_shell_args(pacman_args)) != 0) failed = true;
+        if(!aur_infos.empty()) std::cout << std::endl;
+    }
+
+    for(size_t i = 0; i < aur_infos.size(); ++i) {
+        if(i > 0) std::cout << std::endl;
+        print_aur_info(aur_infos[i]);
+    }
+
+    return failed ? 1 : 0;
 }
 
 // --- Build Logic ---
@@ -1005,7 +1159,8 @@ int main(int argc, char* argv[]) {
             search_aur(targets);
             return pacman_ret;
         }
-        if(is_info || is_clean) return run_command("pacman " + join_shell_args(args));
+        if(is_info) return cmd_sync_info(args, flags, targets);
+        if(is_clean) return run_command("pacman " + join_shell_args(args));
 
         if(is_sync) {
             if(targets.empty()) return run_command("sudo pacman " + join_shell_args(args));
