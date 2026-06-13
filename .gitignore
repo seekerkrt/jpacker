@@ -40,6 +40,8 @@ objs/
 pkg/
 jpacker/
 jpacker
+/build/
+/jpacker
 
 # Arch Linux / Makepkg artifacts
 *.pkg.tar.zst
