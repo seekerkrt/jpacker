@@ -1,34 +1,46 @@
 # jpacker
 
-`jpacker` is a robust AUR helper and `pacman` wrapper for Arch Linux, written in C++20.
+`jpacker` is a C++20 `pacman` wrapper for Arch Linux with AUR support and source-based package management features.
 
-It aims to be a seamless replacement for everyday `pacman` usage while adding AUR support and Gentoo-like source-based package management features.
+It aims to provide a familiar command-line workflow for everyday `pacman` usage while adding AUR build support and Gentoo-like source-based package management features.
+
+## Repository
+
+* Canonical repository: [GitHub](https://github.com/seekerkrt/jpacker)
+* Backup mirror: [GitLab](https://gitlab.com/seekerkrt/jpacker)
+* Issues and pull requests are managed on GitHub.
+
+## Contributing
+
+Issues and pull requests are welcome on GitHub.
+
+This project is maintained by a solo developer, and I am still getting used to managing pull requests and external contributions. Responses may take some time.
 
 ## Features
 
-- **Pacman wrapper**: Supports standard `pacman` syntax such as `-S`, `-Syu`, `-R`, and `-Q`, and forwards unknown commands to `pacman`.
-- **AUR support**: Search for and install AUR packages, including build workflows based on `makepkg`.
-- **Source-based optimization**: Mark selected packages to always be built from source with custom environment variables such as `CFLAGS="-O3 -march=native"`.
-- **Safe and robust implementation**: Written in C++20 and designed with RAII-based resource management for tasks such as networking and temporary directory handling.
-- **Review-first workflow**: Prompts you to review or edit `PKGBUILD` files before building by default.
-- **One-off source builds**: Build official repository packages from source for testing or local optimization without permanently registering them.
-- **Logging**: Records operations in a log file.
+* **Pacman wrapper**: Supports standard `pacman` syntax such as `-S`, `-Syu`, `-R`, and `-Q`, and forwards unknown commands to `pacman`.
+* **AUR support**: Search for and build/install AUR packages using workflows based on `makepkg`.
+* **Source-based optimization**: Mark selected packages to always be built from source with custom environment variables such as `CFLAGS="-O3 -march=native"`.
+* **Safe and robust implementation**: Written in C++20 and designed with RAII-based resource management for tasks such as networking and temporary directory handling.
+* **Review-first workflow**: Prompts you to review or edit `PKGBUILD` files before building by default.
+* **One-off source builds**: Build official repository packages from source for testing or local optimization without permanently registering them.
+* **Logging**: Records operations in a log file.
 
 ## Installation
 
 ### Requirements
 
-- `base-devel`
-- `git`
-- `curl`
-- `nlohmann-json`
+* `base-devel`
+* `git`
+* `curl`
+* `nlohmann-json`
 
 ### Build from source
 
 You can install `jpacker` with `makepkg`:
 
 ```bash
-git clone https://gitlab.com/seekerkrt/jpacker.git
+git clone https://github.com/seekerkrt/jpacker.git
 cd jpacker
 makepkg -si
 ```
@@ -62,14 +74,14 @@ jpacker -Syu
 #### 1. Mark a package for source builds
 
 ```bash
-# Add 'neofetch' to the source-build list with custom CFLAGS
-jpacker add-src neofetch CFLAGS="-O3 -march=native"
+# Add 'fastfetch' to the source-build list with custom CFLAGS
+jpacker add-src fastfetch CFLAGS="-O3 -march=native"
 ```
 
 This creates a configuration file at:
 
 ```text
-/etc/jpacker/package.build/neofetch
+/etc/jpacker/package.build/fastfetch
 ```
 
 #### 2. List registered source packages
@@ -81,16 +93,16 @@ jpacker list-src
 #### 3. Edit the build configuration
 
 ```bash
-jpacker edit-src neofetch
+jpacker edit-src fastfetch
 ```
 
 #### 4. Install or update the package
 
-When you install or upgrade packages, `jpacker` checks whether a package has a source-build configuration. If it does, `jpacker` builds it from source (for example, using `git pull` and `makepkg`) instead of installing the prebuilt binary package.
+When you install or upgrade packages, `jpacker` checks whether a package has a source-build configuration. If it does, `jpacker` builds it from source, for example by updating the package build files and running `makepkg`, instead of installing the prebuilt binary package.
 
 ```bash
 # Install from source using your custom CFLAGS
-jpacker -S neofetch
+jpacker -S fastfetch
 ```
 
 #### 5. Perform a full system upgrade
@@ -107,13 +119,13 @@ jpacker upgrade
 If you want to stop building a package from source and immediately switch back to the standard binary package:
 
 ```bash
-jpacker revert neofetch
+jpacker revert fastfetch
 ```
 
 This removes the build configuration and then runs:
 
 ```bash
-sudo pacman -S neofetch
+sudo pacman -S fastfetch
 ```
 
 ### One-off builds
