@@ -1,6 +1,6 @@
 /**
  * jpacker - A full-featured Pacman wrapper and AUR helper
- * v1.2.4 Features:
+ * v1.2.5 Features:
  * - Smart Upgrade: Skips rebuilding packages if the version hasn't changed during 'upgrade'.
  * - Variable expansion support in config files.
  * - '--nodiff' option support.
@@ -32,7 +32,7 @@ namespace fs = std::filesystem;
 
 // --- 設定 ---
 #ifndef JPKG_VERSION
-#define JPKG_VERSION "1.2.4"
+#define JPKG_VERSION "1.2.5"
 #endif
 
 const std::string VERSION = JPKG_VERSION;
@@ -818,9 +818,13 @@ void cmd_revert(const std::vector<std::string>& targets) {
     }
     if(failed) throw std::runtime_error("Failed to revert one or more packages.");
 }
-void cmd_clean() {
+int cmd_clean() {
+    bool failed = false;
     Logger::info("Cleaning package caches...");
-    if(run_command("sudo pacman -Sc") != 0) Logger::warn("Pacman clean failed or cancelled.");
+    if(run_command("sudo pacman -Sc") != 0) {
+        Logger::warn("Pacman clean failed or cancelled.");
+        failed = true;
+    }
     fs::path cache = get_cache_dir();
     if(fs::exists(cache) && !fs::is_empty(cache)) {
         if(ask_user("Clean jpacker build cache (" + cache.string() + ")?")) {
@@ -838,6 +842,7 @@ void cmd_clean() {
             Logger::info("Skipped jpacker cache cleaning.");
     } else
         Logger::info("jpacker cache is empty.");
+    return failed ? 1 : 0;
 }
 int cmd_upgrade() {
     bool failed = false;
@@ -892,8 +897,10 @@ int main(int argc, char* argv[]) {
         fs::path log_path = g_config.log_file.empty() ? (get_cache_dir() / "jpacker.log") : expand_path(g_config.log_file);
         Logger::init(log_path);
         Logger::info("Started jpacker v" + VERSION);
+    } catch(const std::exception& e) {
+        std::cerr << "Warning: Failed to initialize log: " << e.what() << std::endl;
     } catch(...) {
-        std::cerr << "Warning: Failed to initialize log." << std::endl;
+        std::cerr << "Warning: Failed to initialize log: unknown error." << std::endl;
     }
 
     if(argc < 2) {
@@ -957,8 +964,7 @@ int main(int argc, char* argv[]) {
             return cmd_upgrade();
         }
         if(operation == "clean") {
-            cmd_clean();
-            return 0;
+            return cmd_clean();
         }
         if((operation == "add-src" || operation == "del-src" || operation == "revert" || operation == "edit-src") && targets.empty()) {
             Logger::error("Missing target for " + operation);
