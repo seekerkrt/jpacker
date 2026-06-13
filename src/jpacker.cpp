@@ -1,6 +1,6 @@
 /**
  * jpacker - A full-featured Pacman wrapper and AUR helper
- * v1.2.5 Features:
+ * v1.3.0 Features:
  * - Smart Upgrade: Skips rebuilding packages if the version hasn't changed during 'upgrade'.
  * - Variable expansion support in config files.
  * - '--nodiff' option support.
@@ -33,7 +33,7 @@ namespace fs = std::filesystem;
 
 // --- 設定 ---
 #ifndef JPKG_VERSION
-#define JPKG_VERSION "1.2.5"
+#define JPKG_VERSION "1.3.0"
 #endif
 
 const std::string VERSION = JPKG_VERSION;
