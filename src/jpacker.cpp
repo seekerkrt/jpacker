@@ -90,6 +90,23 @@ struct DependencyClassification {
     std::vector<std::string> unknown;
 };
 
+enum class DependencyKind {
+    Repo,
+    Aur,
+    Unknown
+};
+
+struct RecursiveDependencyNode {
+    std::string                          dependency;
+    std::string                          package_name;
+    DependencyKind                       kind = DependencyKind::Unknown;
+    bool                                 already_visited = false;
+    bool                                 max_depth_reached = false;
+    std::vector<RecursiveDependencyNode> children;
+};
+
+const int MAX_RECURSIVE_DEP_DEPTH = 16;
+
 // --- ユーティリティ ---
 std::string trim(const std::string& str) {
     size_t first = str.find_first_not_of(" \t\n\r");
@@ -808,6 +825,103 @@ DependencyClassification classify_dependencies(const std::vector<std::string>& d
     return result;
 }
 
+std::string dependency_display_name(const std::string& dependency, const std::string& package_name) {
+    if(package_name.empty() || dependency == package_name) return dependency;
+    return dependency + " (" + package_name + ")";
+}
+
+std::string dependency_kind_display(DependencyKind kind) {
+    switch(kind) {
+    case DependencyKind::Repo:
+        return "repo";
+    case DependencyKind::Aur:
+        return "aur";
+    case DependencyKind::Unknown:
+        return "unknown";
+    }
+    return "unknown";
+}
+
+RecursiveDependencyNode resolve_recursive_dependency(
+        const std::string& dependency, std::set<std::string>& visited, int depth, int max_depth);
+
+std::vector<RecursiveDependencyNode> resolve_recursive_dependencies(
+        const AurPackageInfo& pkg, std::set<std::string>& visited, int depth, int max_depth) {
+    std::vector<RecursiveDependencyNode> nodes;
+    for(const auto& dependency : collect_build_dependencies(pkg)) {
+        nodes.push_back(resolve_recursive_dependency(dependency, visited, depth, max_depth));
+    }
+    return nodes;
+}
+
+RecursiveDependencyNode resolve_recursive_dependency(
+        const std::string& dependency, std::set<std::string>& visited, int depth, int max_depth) {
+    RecursiveDependencyNode node;
+    node.dependency = dependency;
+    node.package_name = dependency_package_name(dependency);
+
+    if(!is_valid_package_name(node.package_name)) {
+        node.kind = DependencyKind::Unknown;
+        return node;
+    }
+
+    if(is_repo_package(node.package_name)) {
+        node.kind = DependencyKind::Repo;
+        return node;
+    }
+
+    std::optional<AurPackageInfo> info;
+    try {
+        info = AurClient::info(node.package_name);
+    } catch(const std::exception& e) {
+        Logger::warn("Failed to check AUR dependency " + node.package_name + ": " + e.what());
+        node.kind = DependencyKind::Unknown;
+        return node;
+    }
+
+    if(!info.has_value()) {
+        node.kind = DependencyKind::Unknown;
+        return node;
+    }
+
+    node.kind = DependencyKind::Aur;
+    if(!visited.insert(node.package_name).second) {
+        node.already_visited = true;
+        return node;
+    }
+    if(depth >= max_depth) {
+        node.max_depth_reached = true;
+        return node;
+    }
+
+    node.children = resolve_recursive_dependencies(info.value(), visited, depth + 1, max_depth);
+    return node;
+}
+
+void print_recursive_dependency_node(const RecursiveDependencyNode& node, size_t indent) {
+    std::cout << std::string(indent, ' ') << "- "
+              << dependency_display_name(node.dependency, node.package_name) << " ["
+              << dependency_kind_display(node.kind) << "]";
+    if(node.already_visited) std::cout << " (already visited)";
+    if(node.max_depth_reached) std::cout << " (max depth reached)";
+    std::cout << std::endl;
+
+    for(const auto& child : node.children) {
+        print_recursive_dependency_node(child, indent + 2);
+    }
+}
+
+void print_recursive_dependency_tree(const std::vector<RecursiveDependencyNode>& nodes) {
+    std::cout << "Recursive dependency tree:" << std::endl;
+    if(nodes.empty()) {
+        std::cout << "  None" << std::endl;
+        return;
+    }
+    for(const auto& node : nodes) {
+        print_recursive_dependency_node(node, 2);
+    }
+}
+
 void print_dependency_group(const std::string& label, const std::vector<std::string>& dependencies) {
     std::cout << label << std::endl;
     if(dependencies.empty()) {
@@ -819,9 +933,21 @@ void print_dependency_group(const std::string& label, const std::vector<std::str
     }
 }
 
-int cmd_deps(const std::vector<std::string>& targets) {
+int cmd_deps(const std::vector<std::string>& targets, const std::vector<std::string>& flags) {
+    bool recursive = false;
+    for(const auto& flag : flags) {
+        if(flag == "deps") continue;
+        if(flag == "--recursive") {
+            recursive = true;
+            continue;
+        }
+        Logger::error("Unsupported deps option: " + flag);
+        Logger::error("Usage: jpacker deps [--recursive] <pkg>");
+        return 1;
+    }
+
     if(targets.empty()) {
-        Logger::error("Usage: jpacker deps <pkg>");
+        Logger::error("Usage: jpacker deps [--recursive] <pkg>");
         return 1;
     }
 
@@ -851,6 +977,14 @@ int cmd_deps(const std::vector<std::string>& targets) {
             print_dependency_group("AUR dependencies:", classified.aur);
             std::cout << std::endl;
             print_dependency_group("Unknown dependencies:", classified.unknown);
+            if(recursive) {
+                std::set<std::string> visited;
+                visited.insert(info->Name);
+                std::vector<RecursiveDependencyNode> recursive_nodes =
+                        resolve_recursive_dependencies(info.value(), visited, 1, MAX_RECURSIVE_DEP_DEPTH);
+                std::cout << std::endl;
+                print_recursive_dependency_tree(recursive_nodes);
+            }
         } catch(const std::exception& e) {
             Logger::error("Failed to inspect dependencies for " + target + ": " + e.what());
             failed = true;
@@ -1317,7 +1451,7 @@ void print_help() {
     std::cout << "    \033[1mbuild\033[0m <pkg> [V=K]  One-off build" << std::endl;
     std::cout << "    \033[1mupgrade\033[0m              System update & rebuilds" << std::endl;
     std::cout << "    \033[1mclean\033[0m                Clean package caches" << std::endl;
-    std::cout << "    \033[1mdeps\033[0m <pkg>           Classify AUR dependencies" << std::endl;
+    std::cout << "    \033[1mdeps\033[0m [--recursive] <pkg> Classify AUR dependencies" << std::endl;
     std::cout << "    \033[1madd-src\033[0m <pkg> [V=K]  Mark pkg for source build" << std::endl;
     std::cout << "    \033[1medit-src\033[0m <pkg>       Edit config" << std::endl;
     std::cout << "    \033[1mlist-src\033[0m             List registered source pkgs" << std::endl;
@@ -1410,7 +1544,7 @@ int main(int argc, char* argv[]) {
             return cmd_clean();
         }
         if(operation == "deps") {
-            return cmd_deps(targets);
+            return cmd_deps(targets, flags);
         }
         if((operation == "add-src" || operation == "del-src" || operation == "revert" || operation == "edit-src") && targets.empty()) {
             Logger::error("Missing target for " + operation);
