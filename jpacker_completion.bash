@@ -1,13 +1,13 @@
 # jpacker_completion.bash
 
 _jpacker() {
-    local cur prev opts
+    local cur prev opts deps_opts
     COMPREPLY=()
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
 
     # 主要コマンドとオプション
-    opts="build upgrade clean deps add-src del-src edit-src list-src revert -S -Syu -Ss -R -Rs -Rns -Q -h --help --noedit --nodiff"
+    opts="build upgrade clean deps plan add-src del-src edit-src list-src revert -S -Syu -Ss -R -Rs -Rns -Q -h --help --noedit --nodiff"
     deps_opts="--recursive"
 
     # 第1引数（コマンド）の補完
