@@ -10,6 +10,8 @@ jpacker is still under active development.
 
 It is not intended to be a complete drop-in replacement for `pacman` or `yay` at this stage. Some commands, options, and edge cases are not implemented yet, and behavior may change as AUR support and compatibility are improved.
 
+For detailed compatibility goals and command routing specifications, see [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md).
+
 For safety, important package operations should still be reviewed carefully before execution.
 
 ## Repository
