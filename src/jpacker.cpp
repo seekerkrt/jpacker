@@ -106,6 +106,7 @@ struct ProvidedDependency {
 struct RecursiveDependencyNode {
     std::string                          dependency;
     std::string                          package_name;
+    std::string                          package_base;
     std::optional<ProvidedDependency>    provided_by;
     DependencyKind                       kind = DependencyKind::Unknown;
     bool                                 already_visited = false;
@@ -113,8 +114,13 @@ struct RecursiveDependencyNode {
     std::vector<RecursiveDependencyNode> children;
 };
 
+struct BuildPlanEntry {
+    std::string package_name;
+    std::string package_base;
+};
+
 struct BuildPlan {
-    std::vector<std::string> order;
+    std::vector<BuildPlanEntry> order;
     std::vector<std::string> provided;
     std::vector<std::string> unresolved;
     std::vector<std::string> cycles;
@@ -956,6 +962,22 @@ void add_classified_dependency(std::vector<std::string>& dependencies, const std
         dependencies.push_back(dependency + " (" + package_name + ")");
 }
 
+std::string dependency_display_name(const std::string& dependency, const std::string& package_name);
+
+std::string package_base_or_name(const AurPackageInfo& info) {
+    return info.PackageBase.empty() ? info.Name : info.PackageBase;
+}
+
+bool has_distinct_package_base(const AurPackageInfo& info) {
+    return !info.PackageBase.empty() && info.PackageBase != info.Name;
+}
+
+void add_classified_aur_dependency(std::vector<std::string>& dependencies, const std::string& dependency, const AurPackageInfo& info) {
+    std::string display = dependency_display_name(dependency, info.Name);
+    if(has_distinct_package_base(info)) display += " (base: " + info.PackageBase + ")";
+    dependencies.push_back(display);
+}
+
 std::string provided_dependency_display(const std::string& dependency, const ProvidedDependency& provider) {
     return dependency + " [provided by " + provider.repository + "/" + provider.package_name + "]";
 }
@@ -976,8 +998,9 @@ DependencyClassification classify_dependencies(const std::vector<std::string>& d
         }
 
         try {
-            if(AurClient::info(package_name).has_value()) {
-                add_classified_dependency(result.aur, dependency, package_name);
+            std::optional<AurPackageInfo> info = AurClient::info(package_name);
+            if(info.has_value()) {
+                add_classified_aur_dependency(result.aur, dependency, info.value());
             } else {
                 std::optional<ProvidedDependency> provider = find_dependency_provider(package_name);
                 if(provider.has_value())
@@ -1066,7 +1089,8 @@ RecursiveDependencyNode resolve_recursive_dependency(
     }
 
     node.kind = DependencyKind::Aur;
-    if(!visited.insert(node.package_name).second) {
+    node.package_base = package_base_or_name(info.value());
+    if(!visited.insert(node.package_base).second) {
         node.already_visited = true;
         return node;
     }
@@ -1083,6 +1107,9 @@ void print_recursive_dependency_node(const RecursiveDependencyNode& node, size_t
     std::cout << std::string(indent, ' ') << "- "
               << dependency_display_name(node.dependency, node.package_name) << " ["
               << dependency_kind_display(node.kind) << "]";
+    if(node.kind == DependencyKind::Aur && !node.package_base.empty() && node.package_base != node.package_name) {
+        std::cout << " base: " << node.package_base;
+    }
     if(node.provided_by.has_value()) {
         std::cout << " by " << node.provided_by->repository << "/" << node.provided_by->package_name;
     }
@@ -1112,14 +1139,15 @@ void add_unique_value(std::vector<std::string>& values, const std::string& value
     if(std::find(values.begin(), values.end(), trimmed) == values.end()) values.push_back(trimmed);
 }
 
+void add_build_plan_entry(BuildPlan& plan, const AurPackageInfo& info) {
+    BuildPlanEntry entry{info.Name, package_base_or_name(info)};
+    auto           same_base = [&entry](const BuildPlanEntry& existing) { return existing.package_base == entry.package_base; };
+    if(std::find_if(plan.order.begin(), plan.order.end(), same_base) == plan.order.end()) plan.order.push_back(entry);
+}
+
 void collect_aur_build_plan(
         const std::string& package_name, BuildPlan& plan, std::set<std::string>& visited,
         std::set<std::string>& visiting, int depth, int max_depth) {
-    if(visited.count(package_name) > 0) return;
-    if(visiting.count(package_name) > 0) {
-        add_unique_value(plan.cycles, package_name);
-        return;
-    }
     if(depth > max_depth) {
         add_unique_value(plan.unresolved, package_name + " (max depth reached)");
         return;
@@ -1139,7 +1167,14 @@ void collect_aur_build_plan(
         return;
     }
 
-    visiting.insert(package_name);
+    std::string build_unit = package_base_or_name(info.value());
+    if(visited.count(build_unit) > 0) return;
+    if(visiting.count(build_unit) > 0) {
+        add_unique_value(plan.cycles, build_unit);
+        return;
+    }
+
+    visiting.insert(build_unit);
 
     for(const auto& dependency : collect_build_dependencies(info.value())) {
         std::string dep_name = dependency_package_name(dependency);
@@ -1172,9 +1207,9 @@ void collect_aur_build_plan(
         }
     }
 
-    visiting.erase(package_name);
-    visited.insert(package_name);
-    add_unique_value(plan.order, package_name);
+    visiting.erase(build_unit);
+    visited.insert(build_unit);
+    add_build_plan_entry(plan, info.value());
 }
 
 void print_build_plan(const BuildPlan& plan) {
@@ -1183,7 +1218,10 @@ void print_build_plan(const BuildPlan& plan) {
         std::cout << "  None" << std::endl;
     } else {
         for(size_t i = 0; i < plan.order.size(); ++i) {
-            std::cout << "  " << (i + 1) << ". " << plan.order[i] << std::endl;
+            const BuildPlanEntry& entry = plan.order[i];
+            std::cout << "  " << (i + 1) << ". " << entry.package_base;
+            if(entry.package_base != entry.package_name) std::cout << " (for " << entry.package_name << ")";
+            std::cout << std::endl;
         }
     }
 
@@ -1271,7 +1309,7 @@ int cmd_deps(const std::vector<std::string>& targets, const std::vector<std::str
             print_dependency_group("Unknown dependencies:", classified.unknown);
             if(recursive) {
                 std::set<std::string> visited;
-                visited.insert(info->Name);
+                visited.insert(package_base_or_name(info.value()));
                 std::vector<RecursiveDependencyNode> recursive_nodes =
                         resolve_recursive_dependencies(info.value(), visited, 1, MAX_RECURSIVE_DEP_DEPTH);
                 std::cout << std::endl;
