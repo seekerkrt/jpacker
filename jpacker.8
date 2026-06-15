@@ -37,6 +37,11 @@ Inspect an AUR package's runtime, make, and check dependencies, then classify th
 With \fB\-\-recursive\fR, recursively inspect AUR dependencies. Official repository and unknown dependencies are shown but not traversed.
 This command does not clone, build, install dependencies, or calculate build order.
 .TP
+.B plan \fI<package>\fR
+Display a build order plan for an AUR package and its recursive AUR dependencies.
+Official repository dependencies are not included in the build plan. Unknown dependencies are reported as unresolved.
+This command does not clone, build, or install dependencies.
+.TP
 .B upgrade
 Perform a system upgrade. This first runs \fBsudo pacman -Syu\fR, then checks packages marked via \fBadd-src\fR and rebuilds them from source only when their PKGBUILD version is newer than the installed package.
 During source package updates, jpacker can show a git diff if changes are detected.
@@ -131,6 +136,11 @@ jpacker deps google-chrome
 .B Recursively inspect AUR dependencies:
 .RS
 jpacker deps --recursive google-chrome
+.RE
+
+.B Show a build order plan for an AUR package:
+.RS
+jpacker plan mongodb-bin
 .RE
 
 .B Mark a package to use custom optimizations:
