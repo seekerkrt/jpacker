@@ -173,6 +173,10 @@ By default, logs are stored at:
 ~/.cache/jpacker/jpacker.log
 ```
 
+## Versioning
+
+This project follows Semantic Versioning. For details on versioning policy and compatibility, see [docs/VERSIONING.md](docs/VERSIONING.md).
+
 ## License
 
 MIT License
