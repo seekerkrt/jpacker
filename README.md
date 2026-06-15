@@ -4,6 +4,14 @@
 
 It aims to provide a familiar command-line workflow for everyday `pacman` usage while adding AUR build support and Gentoo-like source-based package management features.
 
+## Project status
+
+jpacker is still under active development.
+
+It is not intended to be a complete drop-in replacement for `pacman` or `yay` at this stage. Some commands, options, and edge cases are not implemented yet, and behavior may change as AUR support and compatibility are improved.
+
+For safety, important package operations should still be reviewed carefully before execution.
+
 ## Repository
 
 * Canonical repository: [GitHub](https://github.com/seekerkrt/jpacker)
