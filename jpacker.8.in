@@ -32,9 +32,10 @@ Environment variables (like CFLAGS) can be passed directly.
 .br
 Example: \fIjpacker build coreutils CFLAGS="-O3 -march=native"\fR
 .TP
-.B deps \fI<package>\fR
+.B deps [\-\-recursive] \fI<package>\fR
 Inspect an AUR package's runtime, make, and check dependencies, then classify them as official repository dependencies, AUR dependencies, or unknown dependencies.
-This command does not recursively resolve, clone, build, or install dependencies.
+With \fB\-\-recursive\fR, recursively inspect AUR dependencies. Official repository and unknown dependencies are shown but not traversed.
+This command does not clone, build, install dependencies, or calculate build order.
 .TP
 .B upgrade
 Perform a system upgrade. This first runs \fBsudo pacman -Syu\fR, then checks packages marked via \fBadd-src\fR and rebuilds them from source only when their PKGBUILD version is newer than the installed package.
@@ -125,6 +126,11 @@ jpacker -S google-chrome --noedit
 .B Classify dependencies of an AUR package:
 .RS
 jpacker deps google-chrome
+.RE
+
+.B Recursively inspect AUR dependencies:
+.RS
+jpacker deps --recursive google-chrome
 .RE
 
 .B Mark a package to use custom optimizations:

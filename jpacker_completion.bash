@@ -8,6 +8,7 @@ _jpacker() {
 
     # 主要コマンドとオプション
     opts="build upgrade clean deps add-src del-src edit-src list-src revert -S -Syu -Ss -R -Rs -Rns -Q -h --help --noedit --nodiff"
+    deps_opts="--recursive"
 
     # 第1引数（コマンド）の補完
     if [[ ${COMP_CWORD} -eq 1 ]]; then
@@ -17,6 +18,10 @@ _jpacker() {
 
     # 直前が特定のコマンドだった場合の挙動
     case "${prev}" in
+        deps)
+            COMPREPLY=( $(compgen -W "${deps_opts}" -- ${cur}) )
+            return 0
+            ;;
         del-src|edit-src|revert)
             # 登録済みのパッケージ名を補完 (package.build内のファイル一覧)
             if [[ -d /etc/jpacker/package.build ]]; then
