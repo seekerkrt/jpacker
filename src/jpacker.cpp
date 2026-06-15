@@ -105,6 +105,12 @@ struct RecursiveDependencyNode {
     std::vector<RecursiveDependencyNode> children;
 };
 
+struct BuildPlan {
+    std::vector<std::string> order;
+    std::vector<std::string> unresolved;
+    std::vector<std::string> cycles;
+};
+
 const int MAX_RECURSIVE_DEP_DEPTH = 16;
 
 // --- ユーティリティ ---
@@ -922,6 +928,83 @@ void print_recursive_dependency_tree(const std::vector<RecursiveDependencyNode>&
     }
 }
 
+void add_unique_value(std::vector<std::string>& values, const std::string& value) {
+    std::string trimmed = trim(value);
+    if(trimmed.empty()) return;
+    if(std::find(values.begin(), values.end(), trimmed) == values.end()) values.push_back(trimmed);
+}
+
+void collect_aur_build_plan(
+        const std::string& package_name, BuildPlan& plan, std::set<std::string>& visited,
+        std::set<std::string>& visiting, int depth, int max_depth) {
+    if(visited.count(package_name) > 0) return;
+    if(visiting.count(package_name) > 0) {
+        add_unique_value(plan.cycles, package_name);
+        return;
+    }
+    if(depth > max_depth) {
+        add_unique_value(plan.unresolved, package_name + " (max depth reached)");
+        return;
+    }
+
+    std::optional<AurPackageInfo> info;
+    try {
+        info = AurClient::info(package_name);
+    } catch(const std::exception& e) {
+        Logger::warn("Failed to fetch AUR info for " + package_name + ": " + e.what());
+        add_unique_value(plan.unresolved, package_name);
+        return;
+    }
+
+    if(!info.has_value()) {
+        add_unique_value(plan.unresolved, package_name);
+        return;
+    }
+
+    visiting.insert(package_name);
+
+    for(const auto& dependency : collect_build_dependencies(info.value())) {
+        std::string dep_name = dependency_package_name(dependency);
+        if(!is_valid_package_name(dep_name)) {
+            add_unique_value(plan.unresolved, dependency);
+            continue;
+        }
+        if(is_repo_package(dep_name)) continue;
+        collect_aur_build_plan(dep_name, plan, visited, visiting, depth + 1, max_depth);
+    }
+
+    visiting.erase(package_name);
+    visited.insert(package_name);
+    add_unique_value(plan.order, package_name);
+}
+
+void print_build_plan(const BuildPlan& plan) {
+    std::cout << "Build plan:" << std::endl;
+    if(plan.order.empty()) {
+        std::cout << "  None" << std::endl;
+    } else {
+        for(size_t i = 0; i < plan.order.size(); ++i) {
+            std::cout << "  " << (i + 1) << ". " << plan.order[i] << std::endl;
+        }
+    }
+
+    if(!plan.unresolved.empty()) {
+        std::cout << std::endl;
+        std::cout << "Unresolved dependencies:" << std::endl;
+        for(const auto& dependency : plan.unresolved) {
+            std::cout << "  " << dependency << std::endl;
+        }
+    }
+
+    if(!plan.cycles.empty()) {
+        std::cout << std::endl;
+        std::cout << "Cyclic dependencies:" << std::endl;
+        for(const auto& dependency : plan.cycles) {
+            std::cout << "  " << dependency << std::endl;
+        }
+    }
+}
+
 void print_dependency_group(const std::string& label, const std::vector<std::string>& dependencies) {
     std::cout << label << std::endl;
     if(dependencies.empty()) {
@@ -987,6 +1070,47 @@ int cmd_deps(const std::vector<std::string>& targets, const std::vector<std::str
             }
         } catch(const std::exception& e) {
             Logger::error("Failed to inspect dependencies for " + target + ": " + e.what());
+            failed = true;
+        }
+    }
+
+    return failed ? 1 : 0;
+}
+
+int cmd_plan(const std::vector<std::string>& targets, const std::vector<std::string>& flags) {
+    for(const auto& flag : flags) {
+        if(flag == "plan") continue;
+        Logger::error("Unsupported plan option: " + flag);
+        Logger::error("Usage: jpacker plan <pkg>");
+        return 1;
+    }
+
+    if(targets.empty()) {
+        Logger::error("Usage: jpacker plan <pkg>");
+        return 1;
+    }
+
+    bool failed = false;
+    for(size_t i = 0; i < targets.size(); ++i) {
+        const auto& target = targets[i];
+        require_valid_package_name(target);
+
+        try {
+            if(!AurClient::info(target).has_value()) {
+                Logger::error("AUR package not found: " + target);
+                failed = true;
+                continue;
+            }
+
+            BuildPlan             plan;
+            std::set<std::string> visited;
+            std::set<std::string> visiting;
+            collect_aur_build_plan(target, plan, visited, visiting, 0, MAX_RECURSIVE_DEP_DEPTH);
+
+            if(i > 0) std::cout << std::endl;
+            print_build_plan(plan);
+        } catch(const std::exception& e) {
+            Logger::error("Failed to plan build order for " + target + ": " + e.what());
             failed = true;
         }
     }
@@ -1452,6 +1576,7 @@ void print_help() {
     std::cout << "    \033[1mupgrade\033[0m              System update & rebuilds" << std::endl;
     std::cout << "    \033[1mclean\033[0m                Clean package caches" << std::endl;
     std::cout << "    \033[1mdeps\033[0m [--recursive] <pkg> Classify AUR dependencies" << std::endl;
+    std::cout << "    \033[1mplan\033[0m <pkg>           Show AUR build order plan" << std::endl;
     std::cout << "    \033[1madd-src\033[0m <pkg> [V=K]  Mark pkg for source build" << std::endl;
     std::cout << "    \033[1medit-src\033[0m <pkg>       Edit config" << std::endl;
     std::cout << "    \033[1mlist-src\033[0m             List registered source pkgs" << std::endl;
@@ -1545,6 +1670,9 @@ int main(int argc, char* argv[]) {
         }
         if(operation == "deps") {
             return cmd_deps(targets, flags);
+        }
+        if(operation == "plan") {
+            return cmd_plan(targets, flags);
         }
         if((operation == "add-src" || operation == "del-src" || operation == "revert" || operation == "edit-src") && targets.empty()) {
             Logger::error("Missing target for " + operation);
