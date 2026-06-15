@@ -87,18 +87,26 @@ struct InstalledPackage {
 struct DependencyClassification {
     std::vector<std::string> repo;
     std::vector<std::string> aur;
+    std::vector<std::string> provided;
     std::vector<std::string> unknown;
 };
 
 enum class DependencyKind {
     Repo,
     Aur,
+    Provided,
     Unknown
+};
+
+struct ProvidedDependency {
+    std::string repository;
+    std::string package_name;
 };
 
 struct RecursiveDependencyNode {
     std::string                          dependency;
     std::string                          package_name;
+    std::optional<ProvidedDependency>    provided_by;
     DependencyKind                       kind = DependencyKind::Unknown;
     bool                                 already_visited = false;
     bool                                 max_depth_reached = false;
@@ -107,6 +115,7 @@ struct RecursiveDependencyNode {
 
 struct BuildPlan {
     std::vector<std::string> order;
+    std::vector<std::string> provided;
     std::vector<std::string> unresolved;
     std::vector<std::string> cycles;
 };
@@ -193,6 +202,10 @@ std::string dependency_package_name(const std::string& dependency) {
     size_t      pos = dep.find_first_of("<>=");
     if(pos != std::string::npos) dep = dep.substr(0, pos);
     return trim(dep);
+}
+
+std::string provided_dependency_name(const std::string& provided) {
+    return dependency_package_name(provided);
 }
 
 void require_valid_package_name(const std::string& name) {
@@ -572,6 +585,95 @@ bool is_repo_package(const std::string& pkg_name) {
     std::string cmd = "pacman -Si " + shell_quote(pkg_name) + " > /dev/null 2>&1";
     return (command_status(cmd) == 0);
 }
+
+std::string repo_name_from_sync_db(const fs::path& db_path) {
+    std::string filename = db_path.filename().string();
+    const std::string suffix = ".db";
+    if(filename.length() > suffix.length() && filename.substr(filename.length() - suffix.length()) == suffix) {
+        return filename.substr(0, filename.length() - suffix.length());
+    }
+    return db_path.stem().string();
+}
+
+void add_repo_provider(
+        std::map<std::string, ProvidedDependency>& providers, const std::string& provided,
+        const std::string& repository, const std::string& package_name) {
+    std::string provided_name = provided_dependency_name(provided);
+    if(provided_name.empty() || !is_valid_package_name(provided_name)) return;
+    if(providers.count(provided_name) == 0) providers[provided_name] = ProvidedDependency{repository, package_name};
+}
+
+void parse_repo_sync_desc(
+        const std::string& desc, const std::string& repository,
+        std::map<std::string, ProvidedDependency>& providers) {
+    std::stringstream       ss(desc);
+    std::string             line;
+    std::string             package_name;
+    std::vector<std::string> package_provides;
+    std::string             section;
+
+    auto flush_package = [&]() {
+        if(package_name.empty()) return;
+        for(const auto& provided : package_provides) {
+            add_repo_provider(providers, provided, repository, package_name);
+        }
+        package_name.clear();
+        package_provides.clear();
+    };
+
+    while(std::getline(ss, line)) {
+        line = trim(line);
+        if(line.empty()) continue;
+
+        if(line == "%FILENAME%") {
+            flush_package();
+            section = line;
+            continue;
+        }
+
+        if(line.length() >= 2 && line.front() == '%' && line.back() == '%') {
+            section = line;
+            continue;
+        }
+
+        if(section == "%NAME%") {
+            package_name = line;
+        } else if(section == "%PROVIDES%") {
+            package_provides.push_back(line);
+        }
+    }
+    flush_package();
+}
+
+const std::map<std::string, ProvidedDependency>& repo_providers() {
+    static std::map<std::string, ProvidedDependency> providers;
+    static bool                                      loaded = false;
+    if(loaded) return providers;
+    loaded = true;
+
+    fs::path sync_dir = "/var/lib/pacman/sync";
+    if(!fs::exists(sync_dir)) return providers;
+
+    for(const auto& entry : fs::directory_iterator(sync_dir)) {
+        if(!entry.is_regular_file() || entry.path().extension() != ".db") continue;
+
+        std::string cmd = "bsdtar -xOf " + shell_quote(entry.path().string()) + " '*/desc' 2>/dev/null";
+        std::string desc = exec_command(cmd.c_str());
+        if(desc.empty()) continue;
+
+        parse_repo_sync_desc(desc, repo_name_from_sync_db(entry.path()), providers);
+    }
+
+    return providers;
+}
+
+std::optional<ProvidedDependency> find_repo_provider(const std::string& dependency_name) {
+    if(!is_valid_package_name(dependency_name)) return std::nullopt;
+    const auto& providers = repo_providers();
+    auto        it = providers.find(dependency_name);
+    if(it == providers.end()) return std::nullopt;
+    return it->second;
+}
 bool ask_user(const std::string& question) {
     std::cout << ":: " << question << " [Y/n] ";
     std::string input;
@@ -642,6 +744,27 @@ public:
         return get_url(url);
     }
 
+    static std::vector<std::string> search_names_by_provides(const std::string& provided_name) {
+        std::vector<std::string> names;
+        CurlHandle               handle;
+        char* escaped = curl_easy_escape(handle.get(), provided_name.c_str(), static_cast<int>(provided_name.length()));
+        if(!escaped) return names;
+        std::string url = AUR_RPC_URL + escaped + "?by=provides";
+        curl_free(escaped);
+
+        std::string response = get_url(url);
+        if(response.empty()) return names;
+
+        auto j = json::parse(response);
+        if(!j.contains("results") || !j["results"].is_array()) return names;
+
+        for(const auto& pkg : j["results"]) {
+            std::string name = json_string_or_empty(pkg, "Name");
+            if(!name.empty()) names.push_back(name);
+        }
+        return names;
+    }
+
     static std::optional<AurPackageInfo> info(const std::string& pkg_name) {
         CurlHandle handle;
         char*      escaped = curl_easy_escape(handle.get(), pkg_name.c_str(), static_cast<int>(pkg_name.length()));
@@ -692,6 +815,38 @@ public:
         return results;
     }
 };
+
+bool aur_package_provides(const AurPackageInfo& info, const std::string& dependency_name) {
+    for(const auto& provided : info.Provides) {
+        if(provided_dependency_name(provided) == dependency_name) return true;
+    }
+    return false;
+}
+
+std::optional<ProvidedDependency> find_aur_provider(const std::string& dependency_name) {
+    if(!is_valid_package_name(dependency_name)) return std::nullopt;
+
+    std::vector<std::string> candidates = AurClient::search_names_by_provides(dependency_name);
+    for(const auto& candidate : candidates) {
+        if(!is_valid_package_name(candidate)) continue;
+        try {
+            std::optional<AurPackageInfo> info = AurClient::info(candidate);
+            if(info.has_value() && aur_package_provides(info.value(), dependency_name)) {
+                return ProvidedDependency{"aur", info->Name};
+            }
+        } catch(const std::exception& e) {
+            Logger::warn("Failed to check AUR provider " + candidate + ": " + e.what());
+        }
+    }
+
+    return std::nullopt;
+}
+
+std::optional<ProvidedDependency> find_dependency_provider(const std::string& dependency_name) {
+    std::optional<ProvidedDependency> repo_provider = find_repo_provider(dependency_name);
+    if(repo_provider.has_value()) return repo_provider;
+    return find_aur_provider(dependency_name);
+}
 
 PackageBuildSource resolve_build_source(const std::string& pkg_name) {
     require_valid_package_name(pkg_name);
@@ -801,6 +956,10 @@ void add_classified_dependency(std::vector<std::string>& dependencies, const std
         dependencies.push_back(dependency + " (" + package_name + ")");
 }
 
+std::string provided_dependency_display(const std::string& dependency, const ProvidedDependency& provider) {
+    return dependency + " [provided by " + provider.repository + "/" + provider.package_name + "]";
+}
+
 DependencyClassification classify_dependencies(const std::vector<std::string>& dependencies) {
     DependencyClassification result;
 
@@ -820,11 +979,19 @@ DependencyClassification classify_dependencies(const std::vector<std::string>& d
             if(AurClient::info(package_name).has_value()) {
                 add_classified_dependency(result.aur, dependency, package_name);
             } else {
-                result.unknown.push_back(dependency);
+                std::optional<ProvidedDependency> provider = find_dependency_provider(package_name);
+                if(provider.has_value())
+                    result.provided.push_back(provided_dependency_display(dependency, provider.value()));
+                else
+                    result.unknown.push_back(dependency);
             }
         } catch(const std::exception& e) {
             Logger::warn("Failed to check AUR dependency " + package_name + ": " + e.what());
-            result.unknown.push_back(dependency);
+            std::optional<ProvidedDependency> provider = find_repo_provider(package_name);
+            if(provider.has_value())
+                result.provided.push_back(provided_dependency_display(dependency, provider.value()));
+            else
+                result.unknown.push_back(dependency);
         }
     }
 
@@ -842,6 +1009,8 @@ std::string dependency_kind_display(DependencyKind kind) {
         return "repo";
     case DependencyKind::Aur:
         return "aur";
+    case DependencyKind::Provided:
+        return "provided";
     case DependencyKind::Unknown:
         return "unknown";
     }
@@ -886,7 +1055,13 @@ RecursiveDependencyNode resolve_recursive_dependency(
     }
 
     if(!info.has_value()) {
-        node.kind = DependencyKind::Unknown;
+        std::optional<ProvidedDependency> provider = find_dependency_provider(node.package_name);
+        if(provider.has_value()) {
+            node.kind = DependencyKind::Provided;
+            node.provided_by = provider;
+        } else {
+            node.kind = DependencyKind::Unknown;
+        }
         return node;
     }
 
@@ -908,6 +1083,9 @@ void print_recursive_dependency_node(const RecursiveDependencyNode& node, size_t
     std::cout << std::string(indent, ' ') << "- "
               << dependency_display_name(node.dependency, node.package_name) << " ["
               << dependency_kind_display(node.kind) << "]";
+    if(node.provided_by.has_value()) {
+        std::cout << " by " << node.provided_by->repository << "/" << node.provided_by->package_name;
+    }
     if(node.already_visited) std::cout << " (already visited)";
     if(node.max_depth_reached) std::cout << " (max depth reached)";
     std::cout << std::endl;
@@ -970,7 +1148,28 @@ void collect_aur_build_plan(
             continue;
         }
         if(is_repo_package(dep_name)) continue;
-        collect_aur_build_plan(dep_name, plan, visited, visiting, depth + 1, max_depth);
+
+        std::optional<AurPackageInfo> dependency_info;
+        try {
+            dependency_info = AurClient::info(dep_name);
+        } catch(const std::exception& e) {
+            Logger::warn("Failed to check AUR dependency " + dep_name + ": " + e.what());
+        }
+
+        if(dependency_info.has_value()) {
+            collect_aur_build_plan(dep_name, plan, visited, visiting, depth + 1, max_depth);
+            continue;
+        }
+
+        std::optional<ProvidedDependency> provider = find_dependency_provider(dep_name);
+        if(provider.has_value()) {
+            add_unique_value(plan.provided, provided_dependency_display(dependency, provider.value()));
+            if(provider->repository == "aur") {
+                collect_aur_build_plan(provider->package_name, plan, visited, visiting, depth + 1, max_depth);
+            }
+        } else {
+            add_unique_value(plan.unresolved, dependency);
+        }
     }
 
     visiting.erase(package_name);
@@ -985,6 +1184,14 @@ void print_build_plan(const BuildPlan& plan) {
     } else {
         for(size_t i = 0; i < plan.order.size(); ++i) {
             std::cout << "  " << (i + 1) << ". " << plan.order[i] << std::endl;
+        }
+    }
+
+    if(!plan.provided.empty()) {
+        std::cout << std::endl;
+        std::cout << "Provided dependencies:" << std::endl;
+        for(const auto& dependency : plan.provided) {
+            std::cout << "  " << dependency << std::endl;
         }
     }
 
@@ -1058,6 +1265,8 @@ int cmd_deps(const std::vector<std::string>& targets, const std::vector<std::str
             print_dependency_group("Official repo dependencies:", classified.repo);
             std::cout << std::endl;
             print_dependency_group("AUR dependencies:", classified.aur);
+            std::cout << std::endl;
+            print_dependency_group("Provided dependencies:", classified.provided);
             std::cout << std::endl;
             print_dependency_group("Unknown dependencies:", classified.unknown);
             if(recursive) {
