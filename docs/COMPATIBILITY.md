@@ -37,11 +37,14 @@ Commands that are specific to `jpacker`'s source-based management features:
 * `clean`: Clean package caches.
 * `deps [--recursive] <pkg>`: Classify AUR dependencies.
 * `plan <pkg>`: Show the build order plan for an AUR package.
+* `fetch <pkg>`: Safely clone or fetch AUR build repositories for inspection without building or installing.
 * `add-src <pkg> [V=K]`: Mark a package for source-based builds.
 * `del-src <pkg>`: Unmark a package.
 * `edit-src <pkg>`: Edit custom environment variables/makeopts for the package.
 * `list-src`: List registered source packages.
 * `revert <pkg>`: Unmark and reinstall the official binary package.
+
+`jpacker fetch <pkg>` is a safe retrieval stage for inspecting AUR build repositories, not an execution stage for build/install. It clones missing AUR repositories and, for existing clones, runs only `git fetch origin`. It does not update the working tree and does not run `git pull`, merge, reset, build, or install operations. Future behavior that advances a working tree should be considered separately as `sync`, `update`, `fetch --update`, or another explicitly named operation.
 
 ---
 

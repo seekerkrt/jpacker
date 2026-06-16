@@ -42,6 +42,13 @@ Display a build order plan for an AUR package and its recursive AUR dependencies
 Official repository and repository-provided dependencies are not included in the build plan. Unknown dependencies are reported as unresolved.
 This command does not clone, build, or install dependencies.
 .TP
+.B fetch \fI<package>\fR
+Safely retrieve the AUR build repositories needed to inspect an AUR package and its recursive AUR dependencies before any build/install stage.
+Fetch targets are resolved by PackageBase. Official repository and provided dependencies are not cloned. Unknown dependencies are reported as unresolved.
+Missing AUR repositories are cloned. Existing cloned repositories run only \fBgit fetch origin\fR.
+This command does not update the working tree and does not run \fBgit pull\fR, merge, reset, build, or install operations.
+Future behavior that advances a working tree should be considered separately as a command or option such as \fBsync\fR, \fBupdate\fR, or \fBfetch --update\fR.
+.TP
 .B upgrade
 Perform a system upgrade. This first runs \fBsudo pacman -Syu\fR, then checks packages marked via \fBadd-src\fR and rebuilds them from source only when their PKGBUILD version is newer than the installed package.
 During source package updates, jpacker can show a git diff if changes are detected.
@@ -141,6 +148,11 @@ jpacker deps --recursive google-chrome
 .B Show a build order plan for an AUR package:
 .RS
 jpacker plan mongodb-bin
+.RE
+
+.B Safely clone or fetch AUR build repositories:
+.RS
+jpacker fetch mongodb-bin
 .RE
 
 .B Mark a package to use custom optimizations:
