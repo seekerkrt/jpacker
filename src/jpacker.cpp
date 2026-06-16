@@ -1987,7 +1987,7 @@ void print_help() {
     std::cout << "    \033[1mdeps\033[0m [--recursive] <pkg> Classify AUR dependencies" << std::endl;
     std::cout << "    \033[1mplan\033[0m <pkg>           Show AUR build order plan" << std::endl;
     std::cout << "    \033[1mfetch\033[0m <pkg>          Safely clone/fetch AUR build repositories" << std::endl;
-    std::cout << "                              Uses git fetch only for existing clones; no pull/reset/build/install" << std::endl;
+    std::cout << "                              Existing clones: git fetch only; no worktree update/pull/reset/build/install" << std::endl;
     std::cout << "    \033[1madd-src\033[0m <pkg> [V=K]  Mark pkg for source build" << std::endl;
     std::cout << "    \033[1medit-src\033[0m <pkg>       Edit config" << std::endl;
     std::cout << "    \033[1mlist-src\033[0m             List registered source pkgs" << std::endl;

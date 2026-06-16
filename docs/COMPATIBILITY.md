@@ -44,7 +44,7 @@ Commands that are specific to `jpacker`'s source-based management features:
 * `list-src`: List registered source packages.
 * `revert <pkg>`: Unmark and reinstall the official binary package.
 
-`jpacker fetch <pkg>` is a safe retrieval stage for inspecting AUR build repositories, not an execution stage for build/install. It clones missing AUR repositories and, for existing clones, runs only `git fetch origin`. It does not update the working tree and does not run `git pull`, merge, reset, build, or install operations. Future behavior that advances a working tree should be considered separately as `sync`, `update`, `fetch --update`, or another explicitly named operation.
+`jpacker fetch <pkg>` is a safe retrieval stage for inspecting AUR build repositories, not an execution stage for build/install. It clones missing AUR repositories and, for existing clones, runs only `git fetch origin`. It does not update the working tree and does not run `git pull`, merge, reset, build, or install operations. Future behavior that advances a working tree is not implemented by `fetch` and should be considered in a separate issue as `sync`, `update`, `fetch --update`, or another explicitly named operation.
 
 ---
 

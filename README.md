@@ -88,7 +88,7 @@ jpacker fetch spotify
 
 Missing AUR repositories are cloned into the jpacker cache. Existing cloned repositories run only `git fetch origin`; the working tree is not updated. This command does not run `git pull`, merge, reset, build, or install operations.
 
-Future behavior that advances a working tree should be handled as a separate operation such as `sync`, `update`, or `fetch --update`.
+Future behavior that advances a working tree is not implemented by `fetch`; it should be handled in a separate issue as an explicit operation such as `sync`, `update`, or `fetch --update`.
 
 ### Source-based package management
 
