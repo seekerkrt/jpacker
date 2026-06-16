@@ -115,13 +115,18 @@ struct RecursiveDependencyNode {
 };
 
 struct BuildPlanEntry {
-    std::string package_name;
-    std::string package_base;
+    std::string              package_base;
+    std::vector<std::string> package_names;
+};
+
+struct BuildPlanProvidedDependency {
+    std::string        dependency;
+    ProvidedDependency provider;
 };
 
 struct BuildPlan {
     std::vector<BuildPlanEntry> order;
-    std::vector<std::string> provided;
+    std::vector<BuildPlanProvidedDependency> provided;
     std::vector<std::string> unresolved;
     std::vector<std::string> cycles;
 };
@@ -913,6 +918,15 @@ std::string join_display_values(const std::vector<std::string>& values) {
     return ss.str();
 }
 
+std::string join_comma_display_values(const std::vector<std::string>& values) {
+    std::stringstream ss;
+    for(size_t i = 0; i < values.size(); ++i) {
+        if(i > 0) ss << ", ";
+        ss << values[i];
+    }
+    return ss.str();
+}
+
 std::string out_of_date_display(const std::optional<long long>& out_of_date) {
     if(!out_of_date.has_value()) return "No";
     return std::to_string(out_of_date.value());
@@ -1140,9 +1154,27 @@ void add_unique_value(std::vector<std::string>& values, const std::string& value
 }
 
 void add_build_plan_entry(BuildPlan& plan, const AurPackageInfo& info) {
-    BuildPlanEntry entry{info.Name, package_base_or_name(info)};
-    auto           same_base = [&entry](const BuildPlanEntry& existing) { return existing.package_base == entry.package_base; };
-    if(std::find_if(plan.order.begin(), plan.order.end(), same_base) == plan.order.end()) plan.order.push_back(entry);
+    std::string package_base = package_base_or_name(info);
+    auto        same_base = [&package_base](const BuildPlanEntry& existing) { return existing.package_base == package_base; };
+    auto        it = std::find_if(plan.order.begin(), plan.order.end(), same_base);
+    if(it == plan.order.end()) {
+        plan.order.push_back(BuildPlanEntry{package_base, {info.Name}});
+        return;
+    }
+    add_unique_value(it->package_names, info.Name);
+}
+
+void add_build_plan_provided_dependency(
+        BuildPlan& plan, const std::string& dependency, const ProvidedDependency& provider) {
+    std::string trimmed = trim(dependency);
+    if(trimmed.empty()) return;
+
+    auto same_dependency = [&](const BuildPlanProvidedDependency& existing) {
+        return existing.dependency == trimmed && existing.provider.repository == provider.repository &&
+               existing.provider.package_name == provider.package_name;
+    };
+    if(std::find_if(plan.provided.begin(), plan.provided.end(), same_dependency) != plan.provided.end()) return;
+    plan.provided.push_back(BuildPlanProvidedDependency{trimmed, provider});
 }
 
 void collect_aur_build_plan(
@@ -1198,7 +1230,7 @@ void collect_aur_build_plan(
 
         std::optional<ProvidedDependency> provider = find_dependency_provider(dep_name);
         if(provider.has_value()) {
-            add_unique_value(plan.provided, provided_dependency_display(dependency, provider.value()));
+            add_build_plan_provided_dependency(plan, dependency, provider.value());
             if(provider->repository == "aur") {
                 collect_aur_build_plan(provider->package_name, plan, visited, visiting, depth + 1, max_depth);
             }
@@ -1220,8 +1252,16 @@ void print_build_plan(const BuildPlan& plan) {
         for(size_t i = 0; i < plan.order.size(); ++i) {
             const BuildPlanEntry& entry = plan.order[i];
             std::cout << "  " << (i + 1) << ". " << entry.package_base;
-            if(entry.package_base != entry.package_name) std::cout << " (for " << entry.package_name << ")";
             std::cout << std::endl;
+            std::vector<std::string> distinct_targets;
+            for(const auto& package_name : entry.package_names) {
+                if(package_name != entry.package_base) add_unique_value(distinct_targets, package_name);
+            }
+            if(!distinct_targets.empty()) {
+                std::cout << "     target package";
+                if(distinct_targets.size() > 1) std::cout << "s";
+                std::cout << ": " << join_comma_display_values(distinct_targets) << std::endl;
+            }
         }
     }
 
@@ -1229,7 +1269,8 @@ void print_build_plan(const BuildPlan& plan) {
         std::cout << std::endl;
         std::cout << "Provided dependencies:" << std::endl;
         for(const auto& dependency : plan.provided) {
-            std::cout << "  " << dependency << std::endl;
+            std::cout << "  - " << dependency.dependency << " -> " << dependency.provider.repository << "/"
+                      << dependency.provider.package_name << std::endl;
         }
     }
 
@@ -1237,7 +1278,7 @@ void print_build_plan(const BuildPlan& plan) {
         std::cout << std::endl;
         std::cout << "Unresolved dependencies:" << std::endl;
         for(const auto& dependency : plan.unresolved) {
-            std::cout << "  " << dependency << std::endl;
+            std::cout << "  - " << dependency << std::endl;
         }
     }
 
@@ -1245,7 +1286,7 @@ void print_build_plan(const BuildPlan& plan) {
         std::cout << std::endl;
         std::cout << "Cyclic dependencies:" << std::endl;
         for(const auto& dependency : plan.cycles) {
-            std::cout << "  " << dependency << std::endl;
+            std::cout << "  - " << dependency << std::endl;
         }
     }
 }
