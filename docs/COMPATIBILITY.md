@@ -31,18 +31,18 @@ For commands where official repository and AUR targets can be combined, `jpacker
   - Scans for foreign packages via `pacman -Qm` and queries the AUR API to check for updates.
 
 ### 3. Unique jpacker Features
-Commands that are specific to `jpacker`'s source-based management features:
+Commands that are specific to `jpacker`'s AUR inspection and source build preference features:
 * `build <pkg> [V=K]`: Run a one-off build from source.
-* `upgrade`: Check and rebuild source-marked or AUR packages.
-* `clean`: Clean package caches.
+* `upgrade`: Run a system update and configured rebuilds.
+* `clean`: Clean package/build caches.
 * `deps [--recursive] <pkg>`: Classify AUR dependencies.
 * `plan <pkg>`: Show the build order plan for an AUR package.
 * `fetch <pkg>`: Safely clone or fetch AUR build repositories for inspection without building or installing.
-* `add-src <pkg> [V=K]`: Mark a package for source-based builds.
-* `del-src <pkg>`: Unmark a package.
-* `edit-src <pkg>`: Edit custom environment variables/makeopts for the package.
-* `list-src`: List registered source packages.
-* `revert <pkg>`: Unmark and reinstall the official binary package.
+* `add-src <pkg> [V=K]`: Enable a source-build preference for a package.
+* `del-src <pkg>`: Remove a source-build preference.
+* `edit-src <pkg>`: Edit a source-build preference and its custom build variables.
+* `list-src`: List source-build preferences.
+* `revert <pkg>`: Remove a source-build preference and reinstall the official binary package.
 
 `jpacker fetch <pkg>` is a safe retrieval stage for inspecting AUR build repositories, not an execution stage for build/install. It clones missing AUR repositories and, for existing clones, runs only `git fetch origin`. It does not update the working tree and does not run `git pull`, merge, reset, build, or install operations. Future behavior that advances a working tree is not implemented by `fetch` and should be considered in a separate issue as `sync`, `update`, `fetch --update`, or another explicitly named operation.
 

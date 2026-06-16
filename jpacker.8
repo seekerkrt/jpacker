@@ -10,7 +10,7 @@ jpacker \- A robust Pacman wrapper and AUR helper with source-based build manage
 .B jpacker
 is a C++20 based AUR helper designed to act as a seamless wrapper for
 .BR pacman (8).
-It extends pacman's functionality by handling AUR packages, providing one-off source builds for official packages, and managing persistent source-based build configurations (similar to Gentoo's package.env).
+It extends pacman's functionality by handling AUR packages, providing one-off source builds for official packages, and managing persistent per-package source build preferences (similar to Gentoo's package.env).
 
 Any operation or flag not explicitly handled by jpacker is passed through to pacman directly.
 
@@ -18,7 +18,7 @@ Any operation or flag not explicitly handled by jpacker is passed through to pac
 .TP
 .B \-S, \-Syu, \-Syy
 Install packages or update the system. If a target is found in the official repositories, pacman is used. If not, it is searched in the AUR.
-If a package is marked for source-build (via \fBadd-src\fR), it will be built from source even if it exists in the official repositories.
+If a package has a source-build preference (via \fBadd-src\fR), it will be built from source even if it exists in the official repositories.
 .TP
 .B \-Ss \fI<query>\fR
 Search for packages in both the official repositories and the AUR.
@@ -50,27 +50,27 @@ This command does not update the working tree and does not run \fBgit pull\fR, m
 Future behavior that advances a working tree is not implemented by \fBfetch\fR and should be considered in a separate issue as a command or option such as \fBsync\fR, \fBupdate\fR, or \fBfetch --update\fR.
 .TP
 .B upgrade
-Perform a system upgrade. This first runs \fBsudo pacman -Syu\fR, then checks packages marked via \fBadd-src\fR and rebuilds them from source only when their PKGBUILD version is newer than the installed package.
+Perform a system upgrade and configured rebuilds. This first runs \fBsudo pacman -Syu\fR, then checks packages with source-build preferences and rebuilds them from source only when their PKGBUILD version is newer than the installed package.
 During source package updates, jpacker can show a git diff if changes are detected.
 .TP
 .B clean
-Clean package caches. This first runs \fBsudo pacman -Sc\fR to clean the official package cache, and then prompts to remove build artifacts from the jpacker cache directory (\fI~/.cache/jpacker/\fR). Log files are preserved.
+Clean package/build caches. This first runs \fBsudo pacman -Sc\fR to clean the official package cache, and then prompts to remove build artifacts from the jpacker cache directory (\fI~/.cache/jpacker/\fR). Log files are preserved.
 .TP
 .B add-src \fI<package> [VAR=VALUE...]\fR
-Mark a package to always be built from source. This creates a configuration file in \fI/etc/jpacker/package.build/\fR.
-You can optionally append environment variables to the configuration.
+Enable a source-build preference for a package. This creates a preference file in \fI/etc/jpacker/package.build/\fR.
+You can optionally append build environment variables to the preference.
 .TP
 .B del-src \fI<package>\fR
-Unmark a package from source-build management. Removes the configuration file.
+Remove a source-build preference. Removes the preference file.
 .TP
 .B revert \fI<package>\fR
-Unmark a package AND immediately reinstall the official binary version (via \fBpacman -S\fR) if the package exists in the official repositories. Use this to restore a package to its standard state.
+Remove a source-build preference AND immediately reinstall the official binary version (via \fBpacman -S\fR) if the package exists in the official repositories. Use this to restore a package to its standard state.
 .TP
 .B edit-src \fI<package>\fR
-Open the build configuration file for the specified package using the defined \fBEDITOR\fR.
+Open the source-build preference file for the specified package using the defined \fBEDITOR\fR.
 .TP
 .B list-src
-List all packages currently registered for source-based builds along with their custom environment variables.
+List source-build preferences along with their custom environment variables.
 
 .SH OPTIONS
 .TP
@@ -107,7 +107,7 @@ Default is \fI~/.cache/jpacker/jpacker.log\fR.
 Global configuration file. Controls editor settings, log locations, and review prompts.
 .TP
 .I /etc/jpacker/package.build/
-Directory containing configuration files for packages marked with \fBadd-src\fR.
+Directory containing source-build preference files managed with \fBadd-src\fR.
 Each file corresponds to a package name and can define environment variables (e.g., CFLAGS) that are applied during \fBmakepkg\fR execution.
 .TP
 .I ~/.cache/jpacker/
@@ -125,7 +125,7 @@ The editor used for reviewing PKGBUILDs and editing configurations.
 Used to determine the build directory location.
 
 .SH EXAMPLES
-.B Update system and source-marked packages:
+.B Update the system and packages with source-build preferences:
 .RS
 jpacker upgrade
 .RE
@@ -155,7 +155,7 @@ jpacker plan mongodb-bin
 jpacker fetch mongodb-bin
 .RE
 
-.B Mark a package to use custom optimizations:
+.B Enable a source-build preference with custom optimizations:
 .RS
 jpacker add-src neofetch CFLAGS="-O3 -march=native"
 .RE

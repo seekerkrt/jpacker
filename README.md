@@ -1,8 +1,8 @@
 # jpacker
 
-`jpacker` is a C++20 `pacman` wrapper for Arch Linux with AUR support and source-based package management features.
+`jpacker` is a C++20 `pacman` wrapper for Arch Linux with AUR support and source build preference features.
 
-It aims to provide a familiar command-line workflow for everyday `pacman` usage while adding AUR build support and Gentoo-like source-based package management features.
+It aims to provide a familiar command-line workflow for everyday `pacman` usage while adding AUR build support and Gentoo-like source build preferences.
 
 ## Project status
 
@@ -90,30 +90,30 @@ Missing AUR repositories are cloned into the jpacker cache. Existing cloned repo
 
 Future behavior that advances a working tree is not implemented by `fetch`; it should be handled in a separate issue as an explicit operation such as `sync`, `update`, or `fetch --update`.
 
-### Source-based package management
+### Source build preferences
 
-`jpacker` can manage selected packages as source builds, allowing you to apply custom build flags in a way similar to Gentoo's `package.env`.
+`jpacker` can manage per-package source build preferences, allowing you to force selected packages to build from source and apply custom build flags in a way similar to Gentoo's `package.env`.
 
-#### 1. Mark a package for source builds
+#### 1. Enable a source-build preference
 
 ```bash
-# Add 'fastfetch' to the source-build list with custom CFLAGS
+# Enable source builds for 'fastfetch' with custom CFLAGS
 jpacker add-src fastfetch CFLAGS="-O3 -march=native"
 ```
 
-This creates a configuration file at:
+This creates a source-build preference file at:
 
 ```text
 /etc/jpacker/package.build/fastfetch
 ```
 
-#### 2. List registered source packages
+#### 2. List source-build preferences
 
 ```bash
 jpacker list-src
 ```
 
-#### 3. Edit the build configuration
+#### 3. Edit a source-build preference
 
 ```bash
 jpacker edit-src fastfetch
@@ -121,7 +121,7 @@ jpacker edit-src fastfetch
 
 #### 4. Install or update the package
 
-When you install or upgrade packages, `jpacker` checks whether a package has a source-build configuration. If it does, `jpacker` builds it from source, for example by updating the package build files and running `makepkg`, instead of installing the prebuilt binary package.
+When you install or upgrade packages, `jpacker` checks whether a package has a source-build preference. If it does, `jpacker` builds it from source, for example by updating the package build files and running `makepkg`, instead of installing the prebuilt binary package.
 
 ```bash
 # Install from source using your custom CFLAGS
@@ -130,8 +130,8 @@ jpacker -S fastfetch
 
 #### 5. Perform a full system upgrade
 
-This updates packages from the official repositories and then checks source-marked packages.
-Marked packages are rebuilt from source when their PKGBUILD version is newer than the installed package.
+This updates packages from the official repositories and then checks packages with source-build preferences.
+Preferred source builds are rebuilt when their PKGBUILD version is newer than the installed package.
 
 ```bash
 jpacker upgrade
