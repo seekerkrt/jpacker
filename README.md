@@ -77,6 +77,19 @@ jpacker -Rns google-chrome
 jpacker -Syu
 ```
 
+### AUR build repository inspection
+
+`jpacker fetch <pkg>` is a safe retrieval stage for inspecting AUR build repositories before building or installing anything.
+
+```bash
+# Clone or fetch the AUR build repositories needed for the package
+jpacker fetch spotify
+```
+
+Missing AUR repositories are cloned into the jpacker cache. Existing cloned repositories run only `git fetch origin`; the working tree is not updated. This command does not run `git pull`, merge, reset, build, or install operations.
+
+Future behavior that advances a working tree should be handled as a separate operation such as `sync`, `update`, or `fetch --update`.
+
 ### Source-based package management
 
 `jpacker` can manage selected packages as source builds, allowing you to apply custom build flags in a way similar to Gentoo's `package.env`.

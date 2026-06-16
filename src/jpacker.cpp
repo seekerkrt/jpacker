@@ -1179,7 +1179,7 @@ void add_build_plan_provided_dependency(
 
 void collect_aur_build_plan(
         const std::string& package_name, BuildPlan& plan, std::set<std::string>& visited,
-        std::set<std::string>& visiting, int depth, int max_depth) {
+        std::set<std::string>& visiting, int depth, int max_depth, bool traverse_aur_providers = true) {
     if(depth > max_depth) {
         add_unique_value(plan.unresolved, package_name + " (max depth reached)");
         return;
@@ -1224,15 +1224,15 @@ void collect_aur_build_plan(
         }
 
         if(dependency_info.has_value()) {
-            collect_aur_build_plan(dep_name, plan, visited, visiting, depth + 1, max_depth);
+            collect_aur_build_plan(dep_name, plan, visited, visiting, depth + 1, max_depth, traverse_aur_providers);
             continue;
         }
 
         std::optional<ProvidedDependency> provider = find_dependency_provider(dep_name);
         if(provider.has_value()) {
             add_build_plan_provided_dependency(plan, dependency, provider.value());
-            if(provider->repository == "aur") {
-                collect_aur_build_plan(provider->package_name, plan, visited, visiting, depth + 1, max_depth);
+            if(traverse_aur_providers && provider->repository == "aur") {
+                collect_aur_build_plan(provider->package_name, plan, visited, visiting, depth + 1, max_depth, traverse_aur_providers);
             }
         } else {
             add_unique_value(plan.unresolved, dependency);
@@ -1289,6 +1289,28 @@ void print_build_plan(const BuildPlan& plan) {
             std::cout << "  - " << dependency << std::endl;
         }
     }
+}
+
+BuildPlan resolve_build_plan(const std::string& target) {
+    require_valid_package_name(target);
+    if(!AurClient::info(target).has_value()) throw std::runtime_error("AUR package not found: " + target);
+
+    BuildPlan             plan;
+    std::set<std::string> visited;
+    std::set<std::string> visiting;
+    collect_aur_build_plan(target, plan, visited, visiting, 0, MAX_RECURSIVE_DEP_DEPTH);
+    return plan;
+}
+
+BuildPlan resolve_fetch_plan(const std::string& target) {
+    require_valid_package_name(target);
+    if(!AurClient::info(target).has_value()) throw std::runtime_error("AUR package not found: " + target);
+
+    BuildPlan             plan;
+    std::set<std::string> visited;
+    std::set<std::string> visiting;
+    collect_aur_build_plan(target, plan, visited, visiting, 0, MAX_RECURSIVE_DEP_DEPTH, false);
+    return plan;
 }
 
 void print_dependency_group(const std::string& label, const std::vector<std::string>& dependencies) {
@@ -1384,21 +1406,120 @@ int cmd_plan(const std::vector<std::string>& targets, const std::vector<std::str
         require_valid_package_name(target);
 
         try {
-            if(!AurClient::info(target).has_value()) {
-                Logger::error("AUR package not found: " + target);
-                failed = true;
-                continue;
-            }
-
-            BuildPlan             plan;
-            std::set<std::string> visited;
-            std::set<std::string> visiting;
-            collect_aur_build_plan(target, plan, visited, visiting, 0, MAX_RECURSIVE_DEP_DEPTH);
+            BuildPlan plan = resolve_build_plan(target);
 
             if(i > 0) std::cout << std::endl;
             print_build_plan(plan);
         } catch(const std::exception& e) {
             Logger::error("Failed to plan build order for " + target + ": " + e.what());
+            failed = true;
+        }
+    }
+
+    return failed ? 1 : 0;
+}
+
+std::string aur_git_url_for_package_base(const std::string& package_base) {
+    require_valid_package_name(package_base);
+    return AUR_BASE_URL + package_base + ".git";
+}
+
+void print_fetch_plan(const BuildPlan& plan) {
+    std::cout << "Fetch targets:" << std::endl;
+    if(plan.order.empty()) {
+        std::cout << "  None" << std::endl;
+    } else {
+        for(size_t i = 0; i < plan.order.size(); ++i) {
+            const BuildPlanEntry& entry = plan.order[i];
+            std::cout << "  " << (i + 1) << ". " << entry.package_base << " -> "
+                      << aur_git_url_for_package_base(entry.package_base) << std::endl;
+        }
+    }
+
+    if(!plan.unresolved.empty()) {
+        std::cout << std::endl;
+        std::cout << "Unresolved dependencies:" << std::endl;
+        for(const auto& dependency : plan.unresolved) {
+            Logger::warn(dependency);
+        }
+    }
+
+    if(!plan.cycles.empty()) {
+        std::cout << std::endl;
+        std::cout << "Cyclic dependencies:" << std::endl;
+        for(const auto& dependency : plan.cycles) {
+            Logger::warn(dependency);
+        }
+    }
+}
+
+void fetch_aur_package_base(const std::string& package_base) {
+    require_valid_package_name(package_base);
+    fs::path cache_dir = get_cache_dir();
+    fs::path repo_dir = cache_dir / package_base;
+    std::string git_url = aur_git_url_for_package_base(package_base);
+
+    if(!fs::exists(cache_dir)) fs::create_directories(cache_dir);
+
+    if(fs::exists(repo_dir)) {
+        if(!fs::is_directory(repo_dir)) throw std::runtime_error(repo_dir.string() + " exists but is not a directory.");
+        if(!fs::exists(repo_dir / ".git")) throw std::runtime_error(repo_dir.string() + " exists but is not a git repository.");
+
+        WorkDirGuard wd_repo(repo_dir);
+        std::string  current_url = trim(exec_command("git config --get remote.origin.url"));
+        if(current_url.empty()) throw std::runtime_error("Missing remote.origin.url for " + package_base + ".");
+        if(current_url.find(git_url) == std::string::npos && git_url.find(current_url) == std::string::npos) {
+            throw std::runtime_error("Remote URL mismatch for " + package_base + ": " + current_url);
+        }
+
+        Logger::info("Fetching " + package_base + "...");
+        if(run_command("git fetch origin") != 0) throw std::runtime_error("Failed to fetch " + package_base + ".");
+        return;
+    }
+
+    Logger::info("Cloning " + package_base + "...");
+    WorkDirGuard    wd_cache(cache_dir);
+    DirCleanupGuard cleanup_guard(repo_dir);
+    if(run_command("git clone " + shell_quote(git_url) + " " + shell_quote(package_base)) != 0) {
+        throw std::runtime_error("Failed to clone " + package_base + ".");
+    }
+    cleanup_guard.commit();
+}
+
+int cmd_fetch(const std::vector<std::string>& targets, const std::vector<std::string>& flags) {
+    for(const auto& flag : flags) {
+        if(flag == "fetch") continue;
+        Logger::error("Unsupported fetch option: " + flag);
+        Logger::error("Usage: jpacker fetch <pkg>");
+        return 1;
+    }
+
+    if(targets.empty()) {
+        Logger::error("Usage: jpacker fetch <pkg>");
+        return 1;
+    }
+
+    bool failed = false;
+    for(size_t i = 0; i < targets.size(); ++i) {
+        const auto& target = targets[i];
+        require_valid_package_name(target);
+
+        try {
+            BuildPlan plan = resolve_fetch_plan(target);
+
+            if(i > 0) std::cout << std::endl;
+            print_fetch_plan(plan);
+
+            for(const auto& entry : plan.order) {
+                try {
+                    fetch_aur_package_base(entry.package_base);
+                } catch(const std::exception& e) {
+                    Logger::error(e.what());
+                    failed = true;
+                }
+            }
+        } catch(const std::exception& e) {
+            Logger::error("Failed to fetch repositories for " + target + ": " + e.what());
             failed = true;
         }
     }
@@ -1865,6 +1986,8 @@ void print_help() {
     std::cout << "    \033[1mclean\033[0m                Clean package caches" << std::endl;
     std::cout << "    \033[1mdeps\033[0m [--recursive] <pkg> Classify AUR dependencies" << std::endl;
     std::cout << "    \033[1mplan\033[0m <pkg>           Show AUR build order plan" << std::endl;
+    std::cout << "    \033[1mfetch\033[0m <pkg>          Safely clone/fetch AUR build repositories" << std::endl;
+    std::cout << "                              Uses git fetch only for existing clones; no pull/reset/build/install" << std::endl;
     std::cout << "    \033[1madd-src\033[0m <pkg> [V=K]  Mark pkg for source build" << std::endl;
     std::cout << "    \033[1medit-src\033[0m <pkg>       Edit config" << std::endl;
     std::cout << "    \033[1mlist-src\033[0m             List registered source pkgs" << std::endl;
@@ -1961,6 +2084,9 @@ int main(int argc, char* argv[]) {
         }
         if(operation == "plan") {
             return cmd_plan(targets, flags);
+        }
+        if(operation == "fetch") {
+            return cmd_fetch(targets, flags);
         }
         if((operation == "add-src" || operation == "del-src" || operation == "revert" || operation == "edit-src") && targets.empty()) {
             Logger::error("Missing target for " + operation);
