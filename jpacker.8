@@ -47,7 +47,7 @@ Safely retrieve the AUR build repositories needed to inspect an AUR package and 
 Fetch targets are resolved by PackageBase. Official repository and provided dependencies are not cloned. Unknown dependencies are reported as unresolved.
 Missing AUR repositories are cloned. Existing cloned repositories run only \fBgit fetch origin\fR.
 This command does not update the working tree and does not run \fBgit pull\fR, merge, reset, build, or install operations.
-Future behavior that advances a working tree should be considered separately as a command or option such as \fBsync\fR, \fBupdate\fR, or \fBfetch --update\fR.
+Future behavior that advances a working tree is not implemented by \fBfetch\fR and should be considered in a separate issue as a command or option such as \fBsync\fR, \fBupdate\fR, or \fBfetch --update\fR.
 .TP
 .B upgrade
 Perform a system upgrade. This first runs \fBsudo pacman -Syu\fR, then checks packages marked via \fBadd-src\fR and rebuilds them from source only when their PKGBUILD version is newer than the installed package.
