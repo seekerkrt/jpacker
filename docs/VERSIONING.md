@@ -1,79 +1,103 @@
-# jpacker バージョン運用方針 (Versioning Policy)
+# jpacker バージョン運用方針
 
-本ドキュメントでは、`jpacker` プロジェクトにおけるバージョン番号の付与基準と運用方針を定義します。
+このドキュメントでは、jpacker のバージョン番号の付け方とリリース範囲の判断基準を定義する。
 
-## バージョン表記と管理の基本
+jpacker は `MAJOR.MINOR.PATCH` 形式のバージョン番号を使う。ただし、厳密な Semantic Versioning
+としては運用しない。jpacker では release series based versioning として、各 release series に
+開発テーマを持たせ、そのテーマに属する後方互換な変更は同じ `MAJOR.MINOR.x` series の中で継続して
+取り込めるものとして扱う。
 
-`jpacker` は、セマンティック バージョニング 2.0.0 (SemVer) に基づいて `MAJOR.MINOR.PATCH` 形式でバージョンを管理します。
+バージョンの正本はリポジトリルートの `VERSION` ファイルとする。Git tag は `v1.4.0` のように
+`v` prefix を付ける。
 
-* **バージョンの正本**: プロジェクトルートにある `VERSION` ファイルに記述されているバージョン番号を正とします。
-* **Git タグ**: リリース時の Git タグには、`v` プレフィックスを付与して `vMAJOR.MINOR.PATCH`（例: `v1.3.2`）とします。
+## 互換性の判断対象
 
----
+jpacker は CLI ツールなので、互換性は内部 C++ API ではなく、ユーザーから見える挙動を基準に判断する。
 
-## 互換性の定義と対象範囲
+互換性の判断対象には、次を含める。
 
-`jpacker` は CLI ツールであるため、API ではなく**コマンドラインインターフェースおよびその実行環境における互換性**を基準にバージョンアップを判断します。
+- コマンド名、オプション、引数、その意味
+- ユーザーやスクリプトが依存しうる出力形式
+- 終了コード
+- `/etc/jpacker/jpacker.conf` などの config file format
+- `/etc/jpacker/package.build/` などの config / state directory
+- pacman、makepkg、git、AUR repository を使う package build の期待挙動
+- inspection-only command と build / install / update / reset などを行う command の安全境界
 
-### 互換性判断の対象
+内部の C++ class、関数、ファイル分割は、安定した公開 API としては扱わない。
 
-* CLI オプション、サブコマンド、引数の意味
-* 出力形式（他のスクリプトでパースされる可能性のあるもの）
-* 終了コード（終了ステータス）
-* 設定ファイル（`/etc/jpacker/jpacker.conf` など）のフォーマットと項目
-* 管理ディレクトリ（`/etc/jpacker/package.build/` など）の構成
-* 保存されるデータ形式
-* PKGBUILD や AUR を利用したビルド時の期待挙動
+## MAJOR
 
-### 互換性判断の対象外
+`MAJOR` は、後方互換性のない breaking release で上げる。
 
-* **内部 C++ API**: `jpacker` はライブラリとしての利用を想定しておらず、ソースコード内のクラスや関数等の API は現時点では安定公開 API として扱いません。
+例:
 
----
+- ユーザーが CLI の形や通常 workflow を覚え直す必要がある
+- 既存コマンドや option を削除する
+- 既存コマンドや option の意味を大きく変える
+- 既存利用を壊しうる出力形式や終了コードの変更を行う
+- config 形式を非互換に変える
+- config directory や state directory の場所を変える
+- 安全境界を大きく変える
+- 新しい大テーマや product direction へ移行する
 
-## バージョンアップの基準
+`v2.0.0` は、`pactune` rename など、identity や workflow に関わる breaking release 候補を扱う
+場所として想定する。
 
-### MAJOR バージョン
+## MINOR
 
-**後方互換性のない破壊的変更**が行われた場合に上げます。
+`MINOR` は、新しい後方互換な release series を始める場合、または後方互換なまとまった拡張を行う場合に
+上げる。
 
-* 既存の CLI オプションやサブコマンドの削除（※単なる非推奨化（Deprecated）のみで、後方互換性が維持されている場合は MAJOR とはしません）
-* 既存のサブコマンドやオプションの引数の意味変更
-* 出力形式や終了コードの破壊的な変更
-* 設定ファイル形式や管理データ形式の互換性破壊
-* *注意*: 大規模な新機能の追加や、内部実装の大幅なリファクタリング（刷新）であっても、後方互換性が維持されている場合は必ずしも MAJOR バージョンを上げる必要はありません。
+例:
 
-### MINOR バージョン
+- 新しい主テーマを持つ release series を始める
+- 既存利用を壊さずに新しいコマンドや option を追加する
+- AUR 対応範囲を広げ、対応 workflow の面を大きく増やす
+- dependency や PackageBase 処理に、後方互換な大きめの能力を追加する
+- 既存挙動を保ったまま、新しい実験領域を追加する
 
-**後方互換性を維持した機能追加や仕様拡張**が行われた場合に上げます。
+## PATCH
 
-* 新しいサブコマンドや CLI オプションの追加
-* AUR 対応範囲の拡張
-* 依存関係解析や PackageBase 処理の拡張
-* まとまったパフォーマンスの改善
-* 実験的な機能の追加
-* 既存機能の非推奨化（Deprecated）の警告表示の追加（動作自体の後方互換性は維持されている場合）
+`PATCH` は、同一 release series 内の後方互換な変更で上げる。
 
-### PATCH バージョン
+PATCH release には bug fix だけでなく、小〜中規模の後方互換な機能追加を含める場合がある。ただし、その変更は
+進行中の release series のテーマに属しており、ユーザーに CLI の覚え直しや config migration を要求しない
+ものに限る。
 
-**後方互換性を壊さないバグ修正や軽微な調整**が行われた場合に上げます。
+例:
 
-* 画面やログの表示崩れの修正
-* 終了コードの誤りの修正（意図しない異常終了コードの修正など）
-* ビルド設定（Makefile や PKGBUILD など）の修正
-* マニュアル（man ページ）、`README.md` などのドキュメント修正・typo 修正
-* 内部実装の小さな整理やコードクリンナップ
-* *注意*: 修正箇所の規模や変更行数の多さではなく、あくまで「互換性が維持されているか」「機能追加が行われていないか」を基準に判断します。
+- bug fix
+- documentation update
+- build / packaging fix
+- 既存の意味を保つ表示の明確化
+- ユーザーから見える挙動を変えない内部整理
+- 現在の release series 内に収まる、小〜中規模の後方互換な機能追加
 
----
+`v1.4.x` は AUR build/install completion series として扱う。AUR dependency planning、safe fetch、
+build/install plan execution の段階導入のように、このテーマを完成させる後方互換な変更は、既存 CLI と
+安全境界を維持する限り `v1.4.x` の PATCH release に含めてよい。
 
-## 判断に迷った場合
+## PATCH に含めない変更
 
-変更内容が MAJOR/MINOR/PATCH のいずれに該当するか判断に迷った場合は、以下を基準にします。
+次の変更は PATCH release に含めない。
 
-* 既存ユーザーの使い方が壊れる場合は MAJOR
-* 後方互換性を保ったまま新しい使い方が増える場合は MINOR
-* 既存の使い方を直すだけの場合は PATCH
+- CLI を覚え直す必要がある変更
+- config 形式変更
+- config directory 変更
+- 安全境界の大きな変更
+- 既存コマンドの意味を大きく変える変更
+- 新しい大テーマへの移行
+- 将来の `pactune` transition のような breaking rename や identity change
 
-判断が難しい変更については、GitHub の Issue や Pull Request で議論した上で最終決定します。
-ただし、破壊的変更でない限り、過度に MAJOR を上げることは避けます。
+これらは、後方互換であれば新しい MINOR series、breaking change であれば MAJOR release として扱う。
+
+## 迷った場合
+
+ユーザー影響を正直に伝える、もっとも小さい version bump を選ぶ。
+
+- 既存 workflow が壊れるなら `MAJOR`
+- 後方互換な新テーマや大きめの能力追加なら `MINOR`
+- 現在の release series を完成させる後方互換な変更なら `PATCH`
+
+判断が難しい場合は、GitHub Issue または Pull Request で議論し、判断理由を残す。

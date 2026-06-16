@@ -2,6 +2,8 @@
 
 jpacker は、v1.4.0 以降、`main` / `develop` / `feature/*` / `fix/*` / `docs/*` / `release/*` を使った軽量 Git Flow 型の運用を行う。
 
+バージョン番号の付け方と release series の扱いは [VERSIONING.md](VERSIONING.md) を参照する。
+
 ## Branches
 
 ### main
