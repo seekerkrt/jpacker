@@ -1291,6 +1291,19 @@ void print_build_plan(const BuildPlan& plan) {
     }
 }
 
+void require_executable_build_plan(const std::string& target, const BuildPlan& plan) {
+    if(!plan.unresolved.empty()) {
+        throw std::runtime_error(
+                "Cannot execute build plan for " + target + "; unresolved dependencies: " +
+                join_comma_display_values(plan.unresolved));
+    }
+    if(!plan.cycles.empty()) {
+        throw std::runtime_error(
+                "Cannot execute build plan for " + target + "; cyclic dependencies: " +
+                join_comma_display_values(plan.cycles));
+    }
+}
+
 BuildPlan resolve_build_plan(const std::string& target) {
     require_valid_package_name(target);
     if(!AurClient::info(target).has_value()) throw std::runtime_error("AUR package not found: " + target);
@@ -1773,6 +1786,29 @@ void install_smart_source(const std::string& pkg_name, bool only_if_updated) {
     build_from_git(source.requested_name, source.clone_name, source.git_url, env, only_if_updated);
 }
 
+void install_aur_build_plan(const std::string& target) {
+    BuildPlan plan = resolve_build_plan(target);
+    require_executable_build_plan(target, plan);
+
+    for(const auto& entry : plan.order) {
+        std::string package_names = join_comma_display_values(entry.package_names);
+        Logger::info("Building AUR PackageBase: " + entry.package_base);
+        Logger::info("Target package(s): " + package_names);
+
+        std::string pkg_name = entry.package_names.empty() ? entry.package_base : entry.package_names.front();
+        std::string env = get_package_env(pkg_name);
+        if(env.empty() && pkg_name != entry.package_base) env = get_package_env(entry.package_base);
+
+        try {
+            build_from_git(pkg_name, entry.package_base, aur_git_url_for_package_base(entry.package_base), env, false);
+        } catch(const std::exception& e) {
+            throw std::runtime_error(
+                    "Failed while building/installing PackageBase " + entry.package_base + " (" + package_names +
+                    "): " + e.what());
+        }
+    }
+}
+
 // --- Commands ---
 int cmd_build(const std::vector<std::string>& args) {
     if(args.empty()) {
@@ -2161,9 +2197,14 @@ int main(int argc, char* argv[]) {
                 if(run_command(cmd) != 0) throw std::runtime_error("Pacman failed.");
             }
             if(!aur_targets.empty()) {
-                // 通常インストール(-S)は false (強制的にインストール/再ビルド)
-                for(const auto& pkg : aur_targets)
-                    install_smart_source(pkg, false);
+                // aur_targets also contains official repo packages with source-build preferences.
+                // Those must keep the existing source-build path instead of AUR build-plan execution.
+                for(const auto& pkg : aur_targets) {
+                    if(is_repo_package(pkg))
+                        install_smart_source(pkg, false);
+                    else
+                        install_aur_build_plan(pkg);
+                }
             }
             return 0;
         }
