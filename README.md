@@ -198,7 +198,7 @@ By default, logs are stored at:
 
 ## Versioning
 
-This project uses release series based versioning. For details on versioning policy and compatibility, see [docs/VERSIONING.md](docs/VERSIONING.md).
+This project uses MAJOR.MINOR.PATCH version numbers with a SemVer-like policy. For details on versioning policy and compatibility, see [docs/VERSIONING.md](docs/VERSIONING.md).
 
 ## License
 

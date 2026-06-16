@@ -3,9 +3,8 @@
 このドキュメントでは、jpacker のバージョン番号の付け方とリリース範囲の判断基準を定義する。
 
 jpacker は `MAJOR.MINOR.PATCH` 形式のバージョン番号を使う。ただし、厳密な Semantic Versioning
-としては運用しない。jpacker では release series based versioning として、各 release series に
-開発テーマを持たせ、そのテーマに属する後方互換な変更は同じ `MAJOR.MINOR.x` series の中で継続して
-取り込めるものとして扱う。
+準拠とは名乗らない。基本判断は Semantic Versioning に近づけ、破壊的変更は `MAJOR`、後方互換な
+機能追加や対応範囲の拡大は `MINOR`、bug fix や小さな補正は `PATCH` として扱う。
 
 バージョンの正本はリポジトリルートの `VERSION` ファイルとする。Git tag は `v1.4.0` のように
 `v` prefix を付ける。
@@ -46,37 +45,35 @@ jpacker は CLI ツールなので、互換性は内部 C++ API ではなく、�
 
 ## MINOR
 
-`MINOR` は、新しい後方互換な release series を始める場合、または後方互換なまとまった拡張を行う場合に
-上げる。
+`MINOR` は、後方互換な機能追加、機能拡張、対応範囲の拡大で上げる。
 
 例:
 
-- 新しい主テーマを持つ release series を始める
 - 既存利用を壊さずに新しいコマンドや option を追加する
-- AUR 対応範囲を広げ、対応 workflow の面を大きく増やす
-- dependency や PackageBase 処理に、後方互換な大きめの能力を追加する
-- 既存挙動を保ったまま、新しい実験領域を追加する
+- 既存コマンドに後方互換な機能的変更を加える
+- AUR 対応範囲を広げる
+- dependency や PackageBase 処理に、後方互換な能力を追加する
+- 既存挙動を保ったまま、新しい workflow を追加する
+
+AUR build plan execution のように、build / install の実行範囲や対応 workflow を広げる変更は、後方互換で
+あっても `MINOR` 相当として扱う。
 
 ## PATCH
 
-`PATCH` は、同一 release series 内の後方互換な変更で上げる。
-
-PATCH release には bug fix だけでなく、小〜中規模の後方互換な機能追加を含める場合がある。ただし、その変更は
-進行中の release series のテーマに属しており、ユーザーに CLI の覚え直しや config migration を要求しない
-ものに限る。
+`PATCH` は、bug fix、docs、build / packaging fix、表示改善、エラー文改善、既存機能の小さな補正で上げる。
 
 例:
 
 - bug fix
-- documentation update
+- docs update
 - build / packaging fix
-- 既存の意味を保つ表示の明確化
+- 既存の意味を保つ表示改善
+- エラー文の改善
+- 既存機能の小さな補正
 - ユーザーから見える挙動を変えない内部整理
-- 現在の release series 内に収まる、小〜中規模の後方互換な機能追加
 
-`v1.4.x` は AUR build/install completion series として扱う。AUR dependency planning、safe fetch、
-build/install plan execution の段階導入のように、このテーマを完成させる後方互換な変更は、既存 CLI と
-安全境界を維持する限り `v1.4.x` の PATCH release に含めてよい。
+PATCH は後方互換な変更だけを含める。ただし、後方互換であっても、新しい command / option、既存 command の
+機能的変更、対応 workflow の拡大は原則として `MINOR` として扱う。
 
 ## PATCH に含めない変更
 
@@ -88,6 +85,9 @@ build/install plan execution の段階導入のように、このテーマを完
 - 安全境界の大きな変更
 - 既存コマンドの意味を大きく変える変更
 - 新しい大テーマへの移行
+- 新しい command / option
+- 既存 command の機能的変更
+- 対応 workflow の拡大
 - 将来の `pactune` transition のような breaking rename や identity change
 
 これらは、後方互換であれば新しい MINOR series、breaking change であれば MAJOR release として扱う。
@@ -97,7 +97,7 @@ build/install plan execution の段階導入のように、このテーマを完
 ユーザー影響を正直に伝える、もっとも小さい version bump を選ぶ。
 
 - 既存 workflow が壊れるなら `MAJOR`
-- 後方互換な新テーマや大きめの能力追加なら `MINOR`
-- 現在の release series を完成させる後方互換な変更なら `PATCH`
+- 後方互換な機能追加、機能拡張、対応範囲の拡大なら `MINOR`
+- bug fix、docs、build / packaging fix、表示改善、エラー文改善、既存機能の小さな補正なら `PATCH`
 
 判断が難しい場合は、GitHub Issue または Pull Request で議論し、判断理由を残す。
