@@ -7,7 +7,7 @@ _jpacker() {
     prev="${COMP_WORDS[COMP_CWORD-1]}"
 
     # 主要コマンドとオプション
-    opts="build upgrade clean deps plan fetch add-src del-src edit-src list-src revert -S -Syu -Ss -R -Rs -Rns -Q -h --help --noedit --nodiff --noconfirm"
+    opts="build upgrade clean deps plan fetch add-src del-src edit-src list-src revert -S -Syu -Ss -Si -R -Rs -Rns -Q -Qua -h --help --noedit --nodiff --noconfirm"
     deps_opts="--recursive"
 
     # 第1引数（コマンド）の補完
