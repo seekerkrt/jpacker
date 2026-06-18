@@ -5,6 +5,7 @@
  * - Smart Upgrade: Skips rebuilding packages if the version hasn't changed during 'upgrade'.
  * - Variable expansion support in config files.
  * - '--nodiff' option support.
+ * - '--noconfirm' option support.
  */
 
 #include <algorithm>
@@ -51,6 +52,7 @@ const std::string PACKAGE_BUILD_DIR = "/etc/jpacker/package.build";
 struct AppConfig {
     bool        no_edit = false;
     bool        no_diff = false;
+    bool        no_confirm = false;
     std::string editor = "nano";
     std::string log_file = "";
 };
@@ -585,6 +587,18 @@ std::string join_shell_args(const std::vector<std::string>& args) {
         ss << shell_quote(args[i]);
     }
     return ss.str();
+}
+std::vector<std::string> pacman_args_with_global_options(std::vector<std::string> args) {
+    if(g_config.no_confirm && std::find(args.begin(), args.end(), "--noconfirm") == args.end()) {
+        args.push_back("--noconfirm");
+    }
+    return args;
+}
+std::string join_pacman_args(const std::vector<std::string>& args) {
+    return join_shell_args(pacman_args_with_global_options(args));
+}
+std::string makepkg_install_command() {
+    return g_config.no_confirm ? "makepkg -sic --noconfirm" : "makepkg -sic";
 }
 std::string build_editor_command(const std::string& editor, const fs::path& target) {
     std::vector<std::string> args = split_command_words(editor);
@@ -1541,7 +1555,7 @@ int cmd_fetch(const std::vector<std::string>& targets, const std::vector<std::st
 }
 
 int cmd_sync_info(const std::vector<std::string>& args, const std::vector<std::string>& flags, const std::vector<std::string>& targets) {
-    if(targets.empty()) return run_command("pacman " + join_shell_args(args));
+    if(targets.empty()) return run_command("pacman " + join_pacman_args(args));
 
     bool                     failed = false;
     std::vector<std::string> repo_targets;
@@ -1576,7 +1590,7 @@ int cmd_sync_info(const std::vector<std::string>& args, const std::vector<std::s
     if(!repo_targets.empty()) {
         std::vector<std::string> pacman_args = flags;
         pacman_args.insert(pacman_args.end(), repo_targets.begin(), repo_targets.end());
-        if(run_command("pacman " + join_shell_args(pacman_args)) != 0) failed = true;
+        if(run_command("pacman " + join_pacman_args(pacman_args)) != 0) failed = true;
         if(!aur_infos.empty()) std::cout << std::endl;
     }
 
@@ -1769,10 +1783,10 @@ void build_from_git(const std::string& pkg_name, const std::string& clone_name, 
         std::string build_cmd;
         if(!trim(custom_env).empty()) {
             Logger::info("Applying custom build flags: " + custom_env);
-            build_cmd = custom_env + "makepkg -sic";
+            build_cmd = custom_env + makepkg_install_command();
         } else {
             Logger::info("Using default makepkg.conf settings.");
-            build_cmd = "makepkg -sic";
+            build_cmd = makepkg_install_command();
         }
         if(run_command(build_cmd) != 0) throw std::runtime_error("Build failed.");
     }
@@ -1957,15 +1971,17 @@ void cmd_revert(const std::vector<std::string>& targets) {
     }
     if(!reinstall_targets.empty()) {
         std::string pkg_list = join_shell_args(reinstall_targets);
+        std::vector<std::string> pacman_args = {"-S"};
+        pacman_args.insert(pacman_args.end(), reinstall_targets.begin(), reinstall_targets.end());
         Logger::info("Reinstalling binaries: " + pkg_list);
-        if(run_command("sudo pacman -S " + pkg_list) != 0) throw std::runtime_error("Failed to reinstall binaries.");
+        if(run_command("sudo pacman " + join_pacman_args(pacman_args)) != 0) throw std::runtime_error("Failed to reinstall binaries.");
     }
     if(failed) throw std::runtime_error("Failed to revert one or more packages.");
 }
 int cmd_clean() {
     bool failed = false;
     Logger::info("Cleaning package caches...");
-    if(run_command("sudo pacman -Sc") != 0) {
+    if(run_command("sudo pacman " + join_pacman_args({"-Sc"})) != 0) {
         Logger::warn("Pacman clean failed or cancelled.");
         failed = true;
     }
@@ -1991,7 +2007,7 @@ int cmd_clean() {
 int cmd_upgrade() {
     bool failed = false;
     Logger::info("System upgrade...");
-    if(run_command("sudo pacman -Syu") != 0) throw std::runtime_error("Update failed.");
+    if(run_command("sudo pacman " + join_pacman_args({"-Syu"})) != 0) throw std::runtime_error("Update failed.");
     if(fs::exists(PACKAGE_BUILD_DIR)) {
         Logger::info("Checking source packages...");
         for(const auto& entry : fs::directory_iterator(PACKAGE_BUILD_DIR)) {
@@ -2044,6 +2060,7 @@ void print_help() {
     std::cout << "\033[1mOPTIONS\033[0m" << std::endl;
     std::cout << "    \033[1m--noedit\033[0m             Skip review" << std::endl;
     std::cout << "    \033[1m--nodiff\033[0m             Skip diff prompt" << std::endl;
+    std::cout << "    \033[1m--noconfirm\033[0m         Pass --noconfirm to pacman/makepkg" << std::endl;
     std::cout << "\033[1mCONFIG\033[0m" << std::endl;
     std::cout << "    jpacker.conf: LOGFILE=..., NOEDIT=..., NODIFF=..." << std::endl;
 }
@@ -2065,7 +2082,28 @@ int main(int argc, char* argv[]) {
         print_help();
         return 1;
     }
-    std::string first_arg = argv[1];
+    int operation_index = 1;
+    for(; operation_index < argc; ++operation_index) {
+        std::string arg = argv[operation_index];
+        if(arg == "--noedit") {
+            g_config.no_edit = true;
+            continue;
+        }
+        if(arg == "--nodiff") {
+            g_config.no_diff = true;
+            continue;
+        }
+        if(arg == "--noconfirm") {
+            g_config.no_confirm = true;
+            continue;
+        }
+        break;
+    }
+    if(operation_index >= argc) {
+        print_help();
+        return 1;
+    }
+    std::string first_arg = argv[operation_index];
     if(first_arg == "-h" || first_arg == "--help") {
         print_help();
         return 0;
@@ -2091,7 +2129,11 @@ int main(int argc, char* argv[]) {
             g_config.no_diff = true;
             continue;
         }
-        if(i > 1) {
+        if(arg == "--noconfirm") {
+            g_config.no_confirm = true;
+            continue;
+        }
+        if(i > operation_index) {
             if(option_value_expected) {
                 flags.push_back(arg);
                 option_value_expected = false;
@@ -2171,16 +2213,16 @@ int main(int argc, char* argv[]) {
                 Logger::error("Missing search query.");
                 return 1;
             }
-            int pacman_ret = run_command("pacman " + join_shell_args(args));
+            int pacman_ret = run_command("pacman " + join_pacman_args(args));
             Logger::info("Searching AUR...");
             bool aur_found = search_aur(targets);
             return (pacman_ret == 0 || aur_found) ? 0 : 1;
         }
         if(is_info) return cmd_sync_info(args, flags, targets);
-        if(is_clean) return run_command("pacman " + join_shell_args(args));
+        if(is_clean) return run_command("pacman " + join_pacman_args(args));
 
         if(is_sync) {
-            if(targets.empty()) return run_command("sudo pacman " + join_shell_args(args));
+            if(targets.empty()) return run_command("sudo pacman " + join_pacman_args(args));
             std::vector<std::string> repo_targets, aur_targets;
             for(const auto& t : targets) {
                 require_valid_package_name(t);
@@ -2192,7 +2234,7 @@ int main(int argc, char* argv[]) {
                     aur_targets.push_back(t);
             }
             if(!repo_targets.empty() || is_sys_upgrade) {
-                std::string cmd = "sudo pacman " + join_shell_args(flags);
+                std::string cmd = "sudo pacman " + join_pacman_args(flags);
                 if(!repo_targets.empty()) cmd += " " + join_shell_args(repo_targets);
                 if(run_command(cmd) != 0) throw std::runtime_error("Pacman failed.");
             }
@@ -2208,15 +2250,15 @@ int main(int argc, char* argv[]) {
             }
             return 0;
         }
-        std::string cmd_args = "";
+        std::vector<std::string> cmd_args;
         for(const auto& arg : args) {
             if(arg == "--noedit") continue;
             if(arg == "--nodiff") continue;
-            if(!cmd_args.empty()) cmd_args += " ";
-            cmd_args += shell_quote(arg);
+            if(arg == "--noconfirm") continue;
+            cmd_args.push_back(arg);
         }
         std::string cmd_prefix = needs_sudo ? "sudo pacman " : "pacman ";
-        return run_command(cmd_prefix + cmd_args);
+        return run_command(cmd_prefix + join_pacman_args(cmd_args));
     } catch(const std::exception& e) {
         Logger::error(e.what());
         return 1;

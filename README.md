@@ -192,6 +192,12 @@ command line から一時的に review step を skip することもできます
 jpacker -S google-chrome --noedit
 ```
 
+`--noconfirm` を指定すると、pacman execution と makepkg execution に `--noconfirm` を渡します。ただし、unresolved dependencies や cyclic dependencies が残る AUR build plan は `--noconfirm` 指定時でも実行前に停止します。provider selection、split package selection、conflicts / replaces などの未実装判断を自動で進めるものではありません。
+
+```bash
+jpacker --noconfirm -S google-chrome
+```
+
 ### Logs
 
 default では logs は次の path に保存されます。
@@ -398,6 +404,12 @@ You can also skip the review step temporarily from the command line:
 
 ```bash
 jpacker -S google-chrome --noedit
+```
+
+`--noconfirm` passes `--noconfirm` to pacman and makepkg execution. It does not bypass unresolved dependency or cyclic dependency checks in AUR build plans, and it does not automatically decide unsupported provider selection, split package selection, conflicts, or replaces cases.
+
+```bash
+jpacker --noconfirm -S google-chrome
 ```
 
 ### Logs
