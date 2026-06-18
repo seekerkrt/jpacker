@@ -29,6 +29,7 @@
 #include <stdexcept>
 #include <string>
 #include <sys/wait.h>
+#include <unistd.h>
 #include <vector>
 
 using json = nlohmann::json;
@@ -2066,6 +2067,12 @@ void print_help() {
 }
 
 int main(int argc, char* argv[]) {
+    if(geteuid() == 0) {
+        Logger::error("Do not run jpacker as root or with sudo.");
+        Logger::error("Run jpacker as a normal user; jpacker will invoke sudo/pacman when needed.");
+        return 1;
+    }
+
     CurlGlobal curl_global;
     try {
         load_config();

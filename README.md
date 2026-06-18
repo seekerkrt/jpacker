@@ -70,6 +70,8 @@ makepkg -si
 
 ### 基本的な使い方
 
+`jpacker` 自体は `sudo` や root で起動せず、通常ユーザーで実行してください。`pacman` が必要な操作では、`jpacker` が必要に応じて `sudo pacman` を呼び出します。
+
 `jpacker` は標準的な `pacman` flags を受け付けます。
 
 ```bash
