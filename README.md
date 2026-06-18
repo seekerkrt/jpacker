@@ -61,9 +61,16 @@ cd jpacker
 makepkg -si
 ```
 
-これにより binary、configuration files、man page (`man jpacker`)、Bash completion script が install されます。
+これにより binary、configuration files、man page (`man jpacker`)、Bash / zsh completion scripts が install されます。
+
+補完ファイルは次の場所に install されます:
+
+* Bash: `/usr/share/bash-completion/completions/jpacker`
+* zsh: `/usr/share/zsh/site-functions/_jpacker`
 
 ### 基本的な使い方
+
+`jpacker` 自体は `sudo` や root で起動せず、通常ユーザーで実行してください。`pacman` が必要な操作では、`jpacker` が必要に応じて `sudo pacman` を呼び出します。
 
 `jpacker` は標準的な `pacman` flags を受け付けます。
 
@@ -179,6 +186,9 @@ Example:
 # Skip the PKGBUILD review prompt (default: false)
 # NOEDIT=true
 
+# Skip the diff prompt after fetching repository updates (default: false)
+# NODIFF=true
+
 # Preferred editor (default: $EDITOR or nano)
 # EDITOR=vim
 
@@ -190,6 +200,12 @@ command line から一時的に review step を skip することもできます
 
 ```bash
 jpacker -S google-chrome --noedit
+```
+
+`--noconfirm` を指定すると、pacman execution と makepkg execution に `--noconfirm` を渡します。ただし、unresolved dependencies や cyclic dependencies が残る AUR build plan は `--noconfirm` 指定時でも実行前に停止します。provider selection、split package selection、conflicts / replaces などの未実装判断を自動で進めるものではありません。
+
+```bash
+jpacker --noconfirm -S google-chrome
 ```
 
 ### Logs
@@ -267,7 +283,12 @@ cd jpacker
 makepkg -si
 ```
 
-This installs the binary, configuration files, man page (`man jpacker`), and Bash completion script.
+This installs the binary, configuration files, man page (`man jpacker`), and Bash / zsh completion scripts.
+
+Completion files are installed to:
+
+* Bash: `/usr/share/bash-completion/completions/jpacker`
+* zsh: `/usr/share/zsh/site-functions/_jpacker`
 
 ### Usage
 
@@ -387,6 +408,9 @@ Example:
 # Skip the PKGBUILD review prompt (default: false)
 # NOEDIT=true
 
+# Skip the diff prompt after fetching repository updates (default: false)
+# NODIFF=true
+
 # Preferred editor (default: $EDITOR or nano)
 # EDITOR=vim
 
@@ -398,6 +422,12 @@ You can also skip the review step temporarily from the command line:
 
 ```bash
 jpacker -S google-chrome --noedit
+```
+
+`--noconfirm` passes `--noconfirm` to pacman and makepkg execution. It does not bypass unresolved dependency or cyclic dependency checks in AUR build plans, and it does not automatically decide unsupported provider selection, split package selection, conflicts, or replaces cases.
+
+```bash
+jpacker --noconfirm -S google-chrome
 ```
 
 ### Logs

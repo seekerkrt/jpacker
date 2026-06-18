@@ -80,6 +80,9 @@ Skip the interactive review/edit of PKGBUILD files before building.
 .BR \-\-nodiff
 Skip the interactive git diff check during package updates.
 .TP
+.BR \-\-noconfirm
+Pass \fB--noconfirm\fR to pacman and makepkg execution. This does not bypass jpacker's unresolved or cyclic build plan checks.
+.TP
 .BR \-h , \ \-\-help
 Display the help message and exit.
 
@@ -115,6 +118,12 @@ Default directory used for downloading and building packages (respects \fBXDG_CA
 .TP
 .I ~/.cache/jpacker/jpacker.log
 Default log file location.
+.TP
+.I /usr/share/bash-completion/completions/jpacker
+Bash completion file.
+.TP
+.I /usr/share/zsh/site-functions/_jpacker
+zsh completion file.
 
 .SH ENVIRONMENT
 .TP
@@ -133,6 +142,11 @@ jpacker upgrade
 .B Install a package from AUR without review:
 .RS
 jpacker -S google-chrome --noedit
+.RE
+
+.B Install a package without pacman/makepkg confirmation prompts:
+.RS
+jpacker --noconfirm -S google-chrome
 .RE
 
 .B Classify dependencies of an AUR package:
