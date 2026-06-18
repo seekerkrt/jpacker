@@ -13,7 +13,7 @@ PREFIX      ?= /usr/local
 BINDIR      ?= $(PREFIX)/bin
 SYSCONFDIR  ?= /etc
 COMPDIR     ?= /usr/share/bash-completion/completions
-# 【New!】 マニュアルページのディレクトリ (man8)
+ZSHCOMPDIR  ?= /usr/share/zsh/site-functions
 MANDIR      ?= $(PREFIX)/share/man/man8
 
 # --- コンパイラ設定 ---
@@ -59,8 +59,10 @@ install: $(TARGET) jpacker.8
 	@echo ":: Installing bash completion..."
 	install -Dm644 jpacker_completion.bash $(DESTDIR)$(COMPDIR)/jpacker
 
+	@echo ":: Installing zsh completion..."
+	install -Dm644 _jpacker $(DESTDIR)$(ZSHCOMPDIR)/_jpacker
+
 	@echo ":: Installing man page..."
-	# 【New!】 マニュアルのインストール
 	install -Dm644 jpacker.8 $(DESTDIR)$(MANDIR)/jpacker.8
 
 uninstall:
@@ -72,11 +74,13 @@ uninstall:
 	rm -rf $(DESTDIR)$(SYSCONFDIR)/jpacker/package.build
 	-rmdir $(DESTDIR)$(SYSCONFDIR)/jpacker
 
-	@echo ":: Removing completion..."
+	@echo ":: Removing bash completion..."
 	rm -f $(DESTDIR)$(COMPDIR)/jpacker
 
+	@echo ":: Removing zsh completion..."
+	rm -f $(DESTDIR)$(ZSHCOMPDIR)/_jpacker
+
 	@echo ":: Removing man page..."
-	# 【New!】 マニュアルの削除
 	rm -f $(DESTDIR)$(MANDIR)/jpacker.8
 
 -include $(DEPS)
