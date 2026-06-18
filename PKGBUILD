@@ -22,8 +22,8 @@ depends=('curl' 'pacman' 'git')
 # ビルド時に必要なパッケージ ('git' が必須)
 makedepends=('git' 'nlohmann-json' 'base-devel')
 
-# GitLabのリポジトリをソースとして指定
-source=("$_srcname::git+https://github.com/seekerkrt/jpacker.git")
+# GitHub release tag をソースとして指定
+source=("jpacker-src::git+https://github.com/seekerkrt/jpacker.git#tag=v${pkgver}")
 
 # Gitリポジトリの場合はチェックサムをSKIPにするのが通例
 sha256sums=('SKIP')
