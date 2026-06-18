@@ -2073,6 +2073,23 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    for(int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+
+        if(arg == "--noedit" || arg == "--nodiff" || arg == "--noconfirm") {
+            continue;
+        }
+        if(arg == "-h" || arg == "--help") {
+            print_help();
+            return 0;
+        }
+        if(arg == "-V" || arg == "--version") {
+            std::cout << "jpacker v" << VERSION << std::endl;
+            return 0;
+        }
+        break;
+    }
+
     CurlGlobal curl_global;
     try {
         load_config();
