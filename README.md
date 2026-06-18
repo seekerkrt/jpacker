@@ -186,6 +186,9 @@ Example:
 # Skip the PKGBUILD review prompt (default: false)
 # NOEDIT=true
 
+# Skip the diff prompt after fetching repository updates (default: false)
+# NODIFF=true
+
 # Preferred editor (default: $EDITOR or nano)
 # EDITOR=vim
 
@@ -404,6 +407,9 @@ Example:
 
 # Skip the PKGBUILD review prompt (default: false)
 # NOEDIT=true
+
+# Skip the diff prompt after fetching repository updates (default: false)
+# NODIFF=true
 
 # Preferred editor (default: $EDITOR or nano)
 # EDITOR=vim
