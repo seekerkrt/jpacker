@@ -1,0 +1,119 @@
+#compdef jpacker
+
+local -a _jpacker_operations
+local -a _jpacker_global_options
+local -a _jpacker_deps_options
+
+_jpacker_operations=(
+    build
+    upgrade
+    clean
+    deps
+    plan
+    fetch
+    add-src
+    del-src
+    edit-src
+    list-src
+    revert
+    -S
+    -Syu
+    -Ss
+    -Si
+    -R
+    -Rs
+    -Rns
+    -Q
+    -Qua
+)
+
+_jpacker_global_options=(
+    --help
+    -h
+    --noedit
+    --nodiff
+    --noconfirm
+)
+
+_jpacker_deps_options=(
+    --recursive
+)
+
+_jpacker_complete_operations() {
+    compadd -Q -- "${_jpacker_operations[@]}"
+}
+
+_jpacker_complete_global_options() {
+    compadd -Q -- "${_jpacker_global_options[@]}"
+}
+
+_jpacker_complete_deps_options() {
+    compadd -Q -- "${_jpacker_deps_options[@]}"
+}
+
+_jpacker_source_preferences() {
+    local pref_dir=/etc/jpacker/package.build
+    local -a prefs
+
+    if [[ -d $pref_dir ]]; then
+        prefs=($pref_dir/*(N:t))
+    fi
+
+    if (( ${#prefs} )); then
+        compadd -Q -- "${prefs[@]}"
+    else
+        _message 'no source-build preferences found'
+    fi
+}
+
+_jpacker_find_operation() {
+    local i word
+
+    reply=()
+    for (( i = 2; i < CURRENT; i++ )); do
+        word=${words[i]}
+        case $word in
+            --help|-h|--noedit|--nodiff|--noconfirm)
+                ;;
+            *)
+                reply=("$word")
+                return 0
+                ;;
+        esac
+    done
+
+    return 1
+}
+
+local operation
+
+_jpacker_find_operation
+operation=${reply[1]}
+
+if [[ -z $operation ]]; then
+    _alternative \
+        'operations:jpacker operation:_jpacker_complete_operations' \
+        'global-options:global option:_jpacker_complete_global_options'
+    return
+fi
+
+case $operation in
+    deps)
+        _alternative \
+            'deps-options:deps option:_jpacker_complete_deps_options' \
+            'targets:package name:_message "package name"'
+        ;;
+    del-src|edit-src|revert)
+        _jpacker_source_preferences
+        ;;
+    -S|-Syu)
+        _alternative \
+            'global-options:global option:_jpacker_complete_global_options' \
+            'targets:package name:_message "package name completion is not provided by jpacker"'
+        ;;
+    *)
+        _alternative \
+            'global-options:global option:_jpacker_complete_global_options' \
+            'arguments:argument:_message "argument"'
+        ;;
+esac
