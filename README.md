@@ -208,6 +208,12 @@ jpacker -S google-chrome --noedit
 jpacker --noconfirm -S google-chrome
 ```
 
+AUR / source build の build/install 時に、`--rebuild` を指定すると `makepkg -f` 相当、`--cleanbuild` を指定すると `makepkg -C` 相当を渡します。両方を指定した場合は `makepkg -f -C` 相当として扱います。これらは jpacker 固有の option であり、pacman execution や `.SRCINFO` 読み取り用の `makepkg --printsrcinfo` には渡しません。
+
+```bash
+jpacker --rebuild --cleanbuild -S google-chrome
+```
+
 ### Logs
 
 default では logs は次の path に保存されます。
@@ -428,6 +434,12 @@ jpacker -S google-chrome --noedit
 
 ```bash
 jpacker --noconfirm -S google-chrome
+```
+
+For AUR/source build install execution, `--rebuild` passes the equivalent of `makepkg -f`, and `--cleanbuild` passes the equivalent of `makepkg -C`. When both are specified, jpacker passes the equivalent of `makepkg -f -C`. These are jpacker-specific options; they are not forwarded to pacman execution or to `makepkg --printsrcinfo` metadata reads.
+
+```bash
+jpacker --rebuild --cleanbuild -S google-chrome
 ```
 
 ### Logs
