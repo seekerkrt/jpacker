@@ -83,6 +83,12 @@ Skip the interactive git diff check during package updates.
 .BR \-\-noconfirm
 Pass \fB--noconfirm\fR to pacman and makepkg execution. This does not bypass jpacker's unresolved or cyclic build plan checks.
 .TP
+.BR \-\-rebuild
+Pass \fB-f\fR to makepkg build/install execution so existing built package artifacts are not reused.
+.TP
+.BR \-\-cleanbuild
+Pass \fB-C\fR to makepkg build/install execution so the existing \fIsrcdir\fR is not reused.
+.TP
 .BR \-h , \ \-\-help
 Display the help message and exit.
 
