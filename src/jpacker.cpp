@@ -2074,8 +2074,27 @@ void print_help() {
     std::cout << "    jpacker.conf: LOGFILE=..., NOEDIT=..., NODIFF=..." << std::endl;
 }
 
+bool handle_info_only_option(int argc, char* argv[]) {
+    for(int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        if(arg == "-h" || arg == "--help") {
+            print_help();
+            return true;
+        }
+        if(arg == "-V" || arg == "--version") {
+            std::cout << "jpacker v" << VERSION << std::endl;
+            return true;
+        }
+    }
+    return false;
+}
+
 int main(int argc, char* argv[]) {
     if(geteuid() == 0) {
+        if(handle_info_only_option(argc, argv)) {
+            return 0;
+        }
+
         Logger::error("Do not run jpacker as root or with sudo.");
         Logger::error("Run jpacker as a normal user; jpacker will invoke sudo/pacman when needed.");
         return 1;
