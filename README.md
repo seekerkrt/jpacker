@@ -61,12 +61,13 @@ cd jpacker
 makepkg -si
 ```
 
-これにより binary、configuration files、man page (`man jpacker`)、Bash / zsh completion scripts が install されます。
+これにより binary、configuration files、man page (`man jpacker`)、Bash / zsh / fish completion scripts が install されます。
 
 補完ファイルは次の場所に install されます:
 
 * Bash: `/usr/share/bash-completion/completions/jpacker`
 * zsh: `/usr/share/zsh/site-functions/_jpacker`
+* fish: `/usr/share/fish/vendor_completions.d/jpacker.fish`
 
 ### 基本的な使い方
 
@@ -289,12 +290,13 @@ cd jpacker
 makepkg -si
 ```
 
-This installs the binary, configuration files, man page (`man jpacker`), and Bash / zsh completion scripts.
+This installs the binary, configuration files, man page (`man jpacker`), and Bash / zsh / fish completion scripts.
 
 Completion files are installed to:
 
 * Bash: `/usr/share/bash-completion/completions/jpacker`
 * zsh: `/usr/share/zsh/site-functions/_jpacker`
+* fish: `/usr/share/fish/vendor_completions.d/jpacker.fish`
 
 ### Usage
 
