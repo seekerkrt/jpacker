@@ -63,10 +63,10 @@ install: $(TARGET) $(MANPAGE)
 	install -d $(DESTDIR)$(SYSCONFDIR)/jpacker/package.build
 
 	@echo ":: Installing bash completion..."
-	install -Dm644 jpacker_completion.bash $(DESTDIR)$(COMPDIR)/jpacker
+	install -Dm644 completions/jpacker_completion.bash $(DESTDIR)$(COMPDIR)/jpacker
 
 	@echo ":: Installing zsh completion..."
-	install -Dm644 _jpacker $(DESTDIR)$(ZSHCOMPDIR)/_jpacker
+	install -Dm644 completions/_jpacker $(DESTDIR)$(ZSHCOMPDIR)/_jpacker
 
 	@echo ":: Installing man page..."
 	install -Dm644 $(MANPAGE) $(DESTDIR)$(MANDIR)/jpacker.8
