@@ -59,7 +59,7 @@ install: $(TARGET) $(MANPAGE)
 	install -Dm755 $(TARGET) $(DESTDIR)$(BINDIR)/$(TARGET)
 
 	@echo ":: Installing configs..."
-	install -Dm644 jpacker.conf $(DESTDIR)$(SYSCONFDIR)/jpacker/jpacker.conf
+	install -Dm644 config/jpacker.conf $(DESTDIR)$(SYSCONFDIR)/jpacker/jpacker.conf
 	install -d $(DESTDIR)$(SYSCONFDIR)/jpacker/package.build
 
 	@echo ":: Installing bash completion..."
