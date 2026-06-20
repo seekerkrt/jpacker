@@ -31,6 +31,25 @@ jpacker / pactune は、性能向上やベンチマークのために過剰な�
 
 目指すのは、速さのための過剰最適化ではなく、必要な変更を安全に記録し、再適用しやすくすることである。
 
+## makepkg.conf の代替を目指さない
+
+jpacker / pactune は、`makepkg.conf` の代替を目指すものではない。
+
+`CFLAGS` / `CXXFLAGS` など、makepkg 全体に適用する基本設定は `makepkg.conf` に任せる。  
+jpacker / pactune が扱うべきなのは、全体設定ではなく、パッケージ単位の例外である。
+
+たとえば、普段は `makepkg.conf` で `-O3 -march=native` を使っていても、特定のパッケージだけ安全性や安定性を優先して `-O2` に抑えたい場合がある。
+
+このような場合に、pactune は以下を記録・再適用できる道具として育てたい。
+
+- このパッケージだけ全体設定から外す理由
+- パッケージ単位の build option
+- patch や PKGBUILD 差分
+- 更新時に再適用すべき変更
+- 差分が当たらなくなった場合に安全に停止する導線
+
+つまり、pactune は過剰最適化のための道具ではなく、必要な例外を安全に管理するための道具でもある。
+
 ## 既存 AUR helper への敬意
 
 jpacker は yay / paru / pikaur など既存の AUR helper との互換や上位互換を目指すものではない。
