@@ -16,6 +16,7 @@ BINDIR      ?= $(PREFIX)/bin
 SYSCONFDIR  ?= /etc
 COMPDIR     ?= /usr/share/bash-completion/completions
 ZSHCOMPDIR  ?= /usr/share/zsh/site-functions
+FISHCOMPDIR ?= /usr/share/fish/vendor_completions.d
 MANDIR      ?= $(PREFIX)/share/man/man8
 
 # --- コンパイラ設定 ---
@@ -68,6 +69,9 @@ install: $(TARGET) $(MANPAGE)
 	@echo ":: Installing zsh completion..."
 	install -Dm644 completions/_jpacker $(DESTDIR)$(ZSHCOMPDIR)/_jpacker
 
+	@echo ":: Installing fish completion..."
+	install -Dm644 completions/jpacker.fish $(DESTDIR)$(FISHCOMPDIR)/jpacker.fish
+
 	@echo ":: Installing man page..."
 	install -Dm644 $(MANPAGE) $(DESTDIR)$(MANDIR)/jpacker.8
 
@@ -85,6 +89,9 @@ uninstall:
 
 	@echo ":: Removing zsh completion..."
 	rm -f $(DESTDIR)$(ZSHCOMPDIR)/_jpacker
+
+	@echo ":: Removing fish completion..."
+	rm -f $(DESTDIR)$(FISHCOMPDIR)/jpacker.fish
 
 	@echo ":: Removing man page..."
 	rm -f $(DESTDIR)$(MANDIR)/jpacker.8
