@@ -282,6 +282,7 @@ bool handle_info_only_option(int argc, char* argv[]);
 
 // 文字列 / path / config
 std::string trim(const std::string& str);
+bool remote_url_matches_expected(const std::string& current_url, const std::string& expected_url);
 std::string to_lower(std::string str);
 std::string unquote(std::string str);
 std::string strip_comment(const std::string& line);
@@ -722,6 +723,10 @@ std::string trim(const std::string& str) {
     if(first == std::string::npos) return "";
     size_t last = str.find_last_not_of(" \t\n\r");
     return str.substr(first, (last - first + 1));
+}
+
+bool remote_url_matches_expected(const std::string& current_url, const std::string& expected_url) {
+    return trim(current_url) == trim(expected_url);
 }
 
 std::string to_lower(std::string str) {
@@ -1919,7 +1924,7 @@ void fetch_aur_package_base(const std::string& package_base) {
         WorkDirGuard wd_repo(repo_dir);
         std::string  current_url = trim(exec_command("git config --get remote.origin.url"));
         if(current_url.empty()) throw std::runtime_error("Missing remote.origin.url for " + package_base + ".");
-        if(current_url.find(git_url) == std::string::npos && git_url.find(current_url) == std::string::npos) {
+        if(!remote_url_matches_expected(current_url, git_url)) {
             throw std::runtime_error("Remote URL mismatch for " + package_base + ": " + current_url);
         }
 
@@ -1954,7 +1959,7 @@ void build_from_git(const std::string& pkg_name, const std::string& clone_name, 
             {
                 WorkDirGuard wd_repo(pkg_dir);
                 std::string  current_url = exec_command("git config --get remote.origin.url");
-                if(current_url.find(git_url) == std::string::npos && git_url.find(current_url) == std::string::npos) {
+                if(!remote_url_matches_expected(current_url, git_url)) {
                     Logger::warn("Remote URL mismatch. Re-cloning...");
                 } else {
                     needs_clone = false;
