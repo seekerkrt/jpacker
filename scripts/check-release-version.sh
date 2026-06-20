@@ -31,10 +31,10 @@ expected_binary_version="jpacker v$version"
     fail "./jpacker --version mismatch: expected '$expected_binary_version', got '$binary_version'"
 pass "./jpacker --version matches VERSION"
 
-[ -f jpacker.8 ] || fail "jpacker.8 is missing; run make first."
-grep -Fq "\"jpacker $version\"" jpacker.8 ||
-    fail "jpacker.8 does not contain generated version 'jpacker $version'."
-pass "jpacker.8 contains VERSION"
+[ -f man/jpacker.8 ] || fail "man/jpacker.8 is missing; run make first."
+grep -Fq "\"jpacker $version\"" man/jpacker.8 ||
+    fail "man/jpacker.8 does not contain generated version 'jpacker $version'."
+pass "man/jpacker.8 contains VERSION"
 
 [ -f PKGBUILD ] || fail "PKGBUILD is missing."
 grep -Fq 'pkgver=$(_read_version_file VERSION)' PKGBUILD ||

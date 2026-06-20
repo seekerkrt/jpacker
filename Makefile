@@ -7,6 +7,8 @@ VERSION   := unknown
 endif
 SRC_DIR   := src
 BUILD_DIR := build
+MANPAGE   := man/jpacker.8
+MANPAGE_IN := man/jpacker.8.in
 
 # --- インストール先設定 ---
 PREFIX      ?= /usr/local
@@ -29,7 +31,7 @@ DEPS      := $(OBJS:.o=.d)
 
 .PHONY: all clean release-check install uninstall
 
-all: $(TARGET) jpacker.8
+all: $(TARGET) $(MANPAGE)
 
 $(TARGET): $(OBJS)
 	@echo ":: Linking $@"
@@ -40,9 +42,9 @@ $(BUILD_DIR)/%.o: $(SRC_DIR)/%.cpp $(VERSION_FILE)
 	@echo ":: Compiling $< (v$(VERSION))"
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -MMD -MP -c $< -o $@
 
-jpacker.8: jpacker.8.in $(VERSION_FILE)
+$(MANPAGE): $(MANPAGE_IN) $(VERSION_FILE)
 	@echo ":: Generating $@ (v$(VERSION))"
-	sed 's/@VERSION@/$(VERSION)/g' jpacker.8.in > $@
+	sed 's/@VERSION@/$(VERSION)/g' $(MANPAGE_IN) > $@
 
 clean:
 	@echo ":: Cleaning up"
@@ -52,7 +54,7 @@ release-check:
 	@echo ":: Checking release version consistency"
 	sh scripts/check-release-version.sh
 
-install: $(TARGET) jpacker.8
+install: $(TARGET) $(MANPAGE)
 	@echo ":: Installing binary..."
 	install -Dm755 $(TARGET) $(DESTDIR)$(BINDIR)/$(TARGET)
 
@@ -67,7 +69,7 @@ install: $(TARGET) jpacker.8
 	install -Dm644 _jpacker $(DESTDIR)$(ZSHCOMPDIR)/_jpacker
 
 	@echo ":: Installing man page..."
-	install -Dm644 jpacker.8 $(DESTDIR)$(MANDIR)/jpacker.8
+	install -Dm644 $(MANPAGE) $(DESTDIR)$(MANDIR)/jpacker.8
 
 uninstall:
 	@echo ":: Removing binary..."
