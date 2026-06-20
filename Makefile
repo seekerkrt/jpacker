@@ -27,7 +27,7 @@ SRCS      := $(wildcard $(SRC_DIR)/*.cpp)
 OBJS      := $(SRCS:$(SRC_DIR)/%.cpp=$(BUILD_DIR)/%.o)
 DEPS      := $(OBJS:.o=.d)
 
-.PHONY: all clean install uninstall
+.PHONY: all clean release-check install uninstall
 
 all: $(TARGET) jpacker.8
 
@@ -47,6 +47,10 @@ jpacker.8: jpacker.8.in $(VERSION_FILE)
 clean:
 	@echo ":: Cleaning up"
 	rm -rf $(BUILD_DIR) $(TARGET)
+
+release-check:
+	@echo ":: Checking release version consistency"
+	sh scripts/check-release-version.sh
 
 install: $(TARGET) jpacker.8
 	@echo ":: Installing binary..."

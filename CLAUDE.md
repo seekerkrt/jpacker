@@ -1,4 +1,4 @@
-# AGENTS.md
+# CLAUDE.md
 
 このファイルは、Codex などの AI coding agent が jpacker を編集するときの作業方針をまとめる。
 

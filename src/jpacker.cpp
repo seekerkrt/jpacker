@@ -54,6 +54,8 @@ struct AppConfig {
     bool        no_edit = false;
     bool        no_diff = false;
     bool        no_confirm = false;
+    bool        rebuild = false;
+    bool        clean_build = false;
     std::string editor = "nano";
     std::string log_file = "";
 };
@@ -599,7 +601,11 @@ std::string join_pacman_args(const std::vector<std::string>& args) {
     return join_shell_args(pacman_args_with_global_options(args));
 }
 std::string makepkg_install_command() {
-    return g_config.no_confirm ? "makepkg -sic --noconfirm" : "makepkg -sic";
+    std::vector<std::string> args = {"makepkg", "-sic"};
+    if(g_config.no_confirm) args.push_back("--noconfirm");
+    if(g_config.rebuild) args.push_back("-f");
+    if(g_config.clean_build) args.push_back("-C");
+    return join_shell_args(args);
 }
 std::string build_editor_command(const std::string& editor, const fs::path& target) {
     std::vector<std::string> args = split_command_words(editor);
@@ -2062,12 +2068,33 @@ void print_help() {
     std::cout << "    \033[1m--noedit\033[0m             Skip review" << std::endl;
     std::cout << "    \033[1m--nodiff\033[0m             Skip diff prompt" << std::endl;
     std::cout << "    \033[1m--noconfirm\033[0m         Pass --noconfirm to pacman/makepkg" << std::endl;
+    std::cout << "    \033[1m--rebuild\033[0m           Pass -f to makepkg build/install" << std::endl;
+    std::cout << "    \033[1m--cleanbuild\033[0m        Pass -C to makepkg build/install" << std::endl;
     std::cout << "\033[1mCONFIG\033[0m" << std::endl;
     std::cout << "    jpacker.conf: LOGFILE=..., NOEDIT=..., NODIFF=..." << std::endl;
 }
 
+bool handle_info_only_option(int argc, char* argv[]) {
+    for(int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        if(arg == "-h" || arg == "--help") {
+            print_help();
+            return true;
+        }
+        if(arg == "-V" || arg == "--version") {
+            std::cout << "jpacker v" << VERSION << std::endl;
+            return true;
+        }
+    }
+    return false;
+}
+
 int main(int argc, char* argv[]) {
     if(geteuid() == 0) {
+        if(handle_info_only_option(argc, argv)) {
+            return 0;
+        }
+
         Logger::error("Do not run jpacker as root or with sudo.");
         Logger::error("Run jpacker as a normal user; jpacker will invoke sudo/pacman when needed.");
         return 1;
@@ -2076,7 +2103,7 @@ int main(int argc, char* argv[]) {
     for(int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
 
-        if(arg == "--noedit" || arg == "--nodiff" || arg == "--noconfirm") {
+        if(arg == "--noedit" || arg == "--nodiff" || arg == "--noconfirm" || arg == "--rebuild" || arg == "--cleanbuild") {
             continue;
         }
         if(arg == "-h" || arg == "--help") {
@@ -2121,6 +2148,14 @@ int main(int argc, char* argv[]) {
             g_config.no_confirm = true;
             continue;
         }
+        if(arg == "--rebuild") {
+            g_config.rebuild = true;
+            continue;
+        }
+        if(arg == "--cleanbuild") {
+            g_config.clean_build = true;
+            continue;
+        }
         break;
     }
     if(operation_index >= argc) {
@@ -2155,6 +2190,14 @@ int main(int argc, char* argv[]) {
         }
         if(arg == "--noconfirm") {
             g_config.no_confirm = true;
+            continue;
+        }
+        if(arg == "--rebuild") {
+            g_config.rebuild = true;
+            continue;
+        }
+        if(arg == "--cleanbuild") {
+            g_config.clean_build = true;
             continue;
         }
         if(i > operation_index) {
@@ -2279,6 +2322,8 @@ int main(int argc, char* argv[]) {
             if(arg == "--noedit") continue;
             if(arg == "--nodiff") continue;
             if(arg == "--noconfirm") continue;
+            if(arg == "--rebuild") continue;
+            if(arg == "--cleanbuild") continue;
             cmd_args.push_back(arg);
         }
         std::string cmd_prefix = needs_sudo ? "sudo pacman " : "pacman ";
