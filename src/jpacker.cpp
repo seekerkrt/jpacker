@@ -667,6 +667,7 @@ void print_help() {
     std::cout << "\033[1mOPERATIONS\033[0m" << std::endl;
     std::cout << "    \033[1mbuild\033[0m <pkg> [V=K]  One-off source build" << std::endl;
     std::cout << "    \033[1mupgrade\033[0m              System update and configured rebuilds" << std::endl;
+    std::cout << "                              Checks registered source-build preferences after -Syu" << std::endl;
     std::cout << "    \033[1mclean\033[0m                Clean package/build caches" << std::endl;
     std::cout << std::endl;
     std::cout << "\033[1mAUR INSPECTION\033[0m" << std::endl;
@@ -685,6 +686,7 @@ void print_help() {
     std::cout << "\033[1mPACMAN COMPATIBILITY\033[0m" << std::endl;
     std::cout << "    \033[1m-S\033[0m <pkg>              Install package" << std::endl;
     std::cout << "    \033[1m-Syu\033[0m                  System upgrade" << std::endl;
+    std::cout << "                              Pacman-compatible; does not scan all source-build preferences" << std::endl;
     std::cout << "    \033[1m-Ss\033[0m <query>          Search packages" << std::endl;
     std::cout << "    \033[1m-Si\033[0m <pkg>             Show package info" << std::endl;
     std::cout << "    \033[1m-Qua\033[0m                 Check AUR/foreign updates" << std::endl;
