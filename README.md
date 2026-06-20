@@ -89,6 +89,8 @@ jpacker -Rns google-chrome
 jpacker -Syu
 ```
 
+`jpacker -Syu` は pacman 互換の system upgrade として扱われ、登録済み source build preferences の全体走査は行いません。system upgrade 後に `/etc/jpacker/package.build/` の設定を確認し、必要な package を自動で rebuild したい場合は `jpacker upgrade` を使ってください。
+
 ### AUR build repository inspection / `fetch`
 
 `jpacker fetch <pkg>` は、build や install の前に AUR build repository を確認するための安全な retrieval stage です。
@@ -144,6 +146,7 @@ jpacker -S fastfetch
 
 official repositories の packages を更新したあと、source build preferences がある packages を確認します。
 Preferred source builds は、PKGBUILD version が installed package より新しい場合に rebuild されます。
+`jpacker -Syu` は pacman 互換の system upgrade であり、登録済み source build preferences の全体走査は行いません。登録済み source-build 設定を system upgrade 後に自動確認・再ビルドしたい場合は、`jpacker -Syu` ではなく `jpacker upgrade` を使ってください。
 
 ```bash
 jpacker upgrade
@@ -318,6 +321,8 @@ jpacker -Rns google-chrome
 jpacker -Syu
 ```
 
+`jpacker -Syu` is treated as a pacman-compatible system upgrade and does not scan all registered source-build preferences. Use `jpacker upgrade` instead when you want jpacker to check `/etc/jpacker/package.build/` after the system upgrade and rebuild configured source packages when needed.
+
 ### AUR build repository inspection / `fetch`
 
 `jpacker fetch <pkg>` is a safe retrieval stage for inspecting AUR build repositories before building or installing anything.
@@ -373,6 +378,7 @@ jpacker -S fastfetch
 
 This updates packages from the official repositories and then checks packages with source-build preferences.
 Preferred source builds are rebuilt when their PKGBUILD version is newer than the installed package.
+`jpacker -Syu` is a pacman-compatible system upgrade and does not scan all registered source-build preferences. If you want registered source-build settings to be checked automatically after a system upgrade and rebuilt when needed, use `jpacker upgrade` instead of `jpacker -Syu`.
 
 ```bash
 jpacker upgrade
