@@ -206,7 +206,7 @@ command line から一時的に review step を skip することもできます
 jpacker -S google-chrome --noedit
 ```
 
-`--noconfirm` を指定すると、pacman execution と makepkg execution に `--noconfirm` を渡します。ただし、unresolved dependencies や cyclic dependencies が残る AUR build plan は `--noconfirm` 指定時でも実行前に停止します。provider selection、split package selection、conflicts / replaces などの未実装判断を自動で進めるものではありません。
+`--noconfirm` を指定すると、pacman execution と makepkg execution に `--noconfirm` を渡します。jpacker では「全部 yes」ではなく「対話で止まらない」指定として扱う方針です。ただし、unresolved dependencies や cyclic dependencies が残る AUR build plan は `--noconfirm` 指定時でも実行前に停止します。provider selection、split package selection、conflicts / replaces などの未実装判断を自動で進めるものではありません。option pass-through policy の詳細は [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) を参照してください。
 
 ```bash
 jpacker --noconfirm -S google-chrome
@@ -438,7 +438,7 @@ You can also skip the review step temporarily from the command line:
 jpacker -S google-chrome --noedit
 ```
 
-`--noconfirm` passes `--noconfirm` to pacman and makepkg execution. It does not bypass unresolved dependency or cyclic dependency checks in AUR build plans, and it does not automatically decide unsupported provider selection, split package selection, conflicts, or replaces cases.
+`--noconfirm` passes `--noconfirm` to pacman and makepkg execution. jpacker treats it as a request to avoid interactive blocking, not as "yes to everything". It does not bypass unresolved dependency or cyclic dependency checks in AUR build plans, and it does not automatically decide unsupported provider selection, split package selection, conflicts, or replaces cases. See [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) for the option pass-through policy.
 
 ```bash
 jpacker --noconfirm -S google-chrome
