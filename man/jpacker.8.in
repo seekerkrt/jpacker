@@ -19,6 +19,7 @@ Any operation or flag not explicitly handled by jpacker is passed through to pac
 .B \-S, \-Syu, \-Syy
 Install packages or update the system. If a target is found in the official repositories, pacman is used. If not, it is searched in the AUR.
 If a package has a source-build preference (via \fBadd-src\fR), it will be built from source even if it exists in the official repositories.
+\fBjpacker -Syu\fR is treated as a pacman-compatible system upgrade and does not scan all registered source-build preferences. Use \fBjpacker upgrade\fR when registered source-build settings should be checked after the system upgrade and rebuilt when needed.
 .TP
 .B \-Ss \fI<query>\fR
 Search for packages in both the official repositories and the AUR.
@@ -51,6 +52,7 @@ Future behavior that advances a working tree is not implemented by \fBfetch\fR a
 .TP
 .B upgrade
 Perform a system upgrade and configured rebuilds. This first runs \fBsudo pacman -Syu\fR, then checks packages with source-build preferences and rebuilds them from source only when their PKGBUILD version is newer than the installed package.
+Use this command, not \fBjpacker -Syu\fR, when registered source-build settings in \fI/etc/jpacker/package.build/\fR should be checked automatically after a system upgrade.
 During source package updates, jpacker can show a git diff if changes are detected.
 .TP
 .B clean
@@ -130,6 +132,9 @@ Bash completion file.
 .TP
 .I /usr/share/zsh/site-functions/_jpacker
 zsh completion file.
+.TP
+.I /usr/share/fish/vendor_completions.d/jpacker.fish
+fish completion file.
 
 .SH ENVIRONMENT
 .TP
@@ -143,6 +148,11 @@ Used to determine the build directory location.
 .B Update the system and packages with source-build preferences:
 .RS
 jpacker upgrade
+.RE
+
+.B Update the system without scanning registered source-build preferences:
+.RS
+jpacker -Syu
 .RE
 
 .B Install a package from AUR without review:

@@ -7,6 +7,8 @@ VERSION   := unknown
 endif
 SRC_DIR   := src
 BUILD_DIR := build
+MANPAGE   := man/jpacker.8
+MANPAGE_IN := man/jpacker.8.in
 
 # --- インストール先設定 ---
 PREFIX      ?= /usr/local
@@ -14,6 +16,7 @@ BINDIR      ?= $(PREFIX)/bin
 SYSCONFDIR  ?= /etc
 COMPDIR     ?= /usr/share/bash-completion/completions
 ZSHCOMPDIR  ?= /usr/share/zsh/site-functions
+FISHCOMPDIR ?= /usr/share/fish/vendor_completions.d
 MANDIR      ?= $(PREFIX)/share/man/man8
 
 # --- コンパイラ設定 ---
@@ -29,7 +32,7 @@ DEPS      := $(OBJS:.o=.d)
 
 .PHONY: all clean release-check install uninstall
 
-all: $(TARGET) jpacker.8
+all: $(TARGET) $(MANPAGE)
 
 $(TARGET): $(OBJS)
 	@echo ":: Linking $@"
@@ -40,9 +43,9 @@ $(BUILD_DIR)/%.o: $(SRC_DIR)/%.cpp $(VERSION_FILE)
 	@echo ":: Compiling $< (v$(VERSION))"
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -MMD -MP -c $< -o $@
 
-jpacker.8: jpacker.8.in $(VERSION_FILE)
+$(MANPAGE): $(MANPAGE_IN) $(VERSION_FILE)
 	@echo ":: Generating $@ (v$(VERSION))"
-	sed 's/@VERSION@/$(VERSION)/g' jpacker.8.in > $@
+	sed 's/@VERSION@/$(VERSION)/g' $(MANPAGE_IN) > $@
 
 clean:
 	@echo ":: Cleaning up"
@@ -52,22 +55,25 @@ release-check:
 	@echo ":: Checking release version consistency"
 	sh scripts/check-release-version.sh
 
-install: $(TARGET) jpacker.8
+install: $(TARGET) $(MANPAGE)
 	@echo ":: Installing binary..."
 	install -Dm755 $(TARGET) $(DESTDIR)$(BINDIR)/$(TARGET)
 
 	@echo ":: Installing configs..."
-	install -Dm644 jpacker.conf $(DESTDIR)$(SYSCONFDIR)/jpacker/jpacker.conf
+	install -Dm644 config/jpacker.conf $(DESTDIR)$(SYSCONFDIR)/jpacker/jpacker.conf
 	install -d $(DESTDIR)$(SYSCONFDIR)/jpacker/package.build
 
 	@echo ":: Installing bash completion..."
-	install -Dm644 jpacker_completion.bash $(DESTDIR)$(COMPDIR)/jpacker
+	install -Dm644 completions/jpacker_completion.bash $(DESTDIR)$(COMPDIR)/jpacker
 
 	@echo ":: Installing zsh completion..."
-	install -Dm644 _jpacker $(DESTDIR)$(ZSHCOMPDIR)/_jpacker
+	install -Dm644 completions/_jpacker $(DESTDIR)$(ZSHCOMPDIR)/_jpacker
+
+	@echo ":: Installing fish completion..."
+	install -Dm644 completions/jpacker.fish $(DESTDIR)$(FISHCOMPDIR)/jpacker.fish
 
 	@echo ":: Installing man page..."
-	install -Dm644 jpacker.8 $(DESTDIR)$(MANDIR)/jpacker.8
+	install -Dm644 $(MANPAGE) $(DESTDIR)$(MANDIR)/jpacker.8
 
 uninstall:
 	@echo ":: Removing binary..."
@@ -83,6 +89,9 @@ uninstall:
 
 	@echo ":: Removing zsh completion..."
 	rm -f $(DESTDIR)$(ZSHCOMPDIR)/_jpacker
+
+	@echo ":: Removing fish completion..."
+	rm -f $(DESTDIR)$(FISHCOMPDIR)/jpacker.fish
 
 	@echo ":: Removing man page..."
 	rm -f $(DESTDIR)$(MANDIR)/jpacker.8
