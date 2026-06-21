@@ -1,4 +1,4 @@
-# Maintainer: seekerkrt <seekerkrt@gmail.com>
+# Maintainer: seekerkrt
 pkgname=jpacker
 _srcname=jpacker-src
 
