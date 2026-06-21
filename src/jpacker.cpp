@@ -69,6 +69,12 @@ struct AppConfig {
 
 AppConfig g_config;
 
+enum class PromptDefault {
+    Yes,
+    No,
+    None,
+};
+
 // AUR RPC の package info response を、依存解決や表示で扱いやすくした型。
 struct AurPackageInfo {
     std::string                    Name;
@@ -332,7 +338,7 @@ std::vector<InstalledPackage> get_foreign_packages();
 bool aur_version_is_newer(const std::string& aur_version, const std::string& installed_version);
 
 // prompt / ユーザー確認
-bool ask_user(const std::string& question);
+bool ask_user(const std::string& question, PromptDefault default_answer);
 
 // AUR RPC / JSON解析
 size_t WriteCallback(void* contents, size_t size, size_t nmemb, void* userp);
@@ -1222,11 +1228,71 @@ bool aur_version_is_newer(const std::string& aur_version, const std::string& ins
 }
 
 // prompt / ユーザー確認
-bool ask_user(const std::string& question) {
-    std::cout << ":: " << question << " [Y/n] ";
-    std::string input;
-    std::getline(std::cin, input);
-    return (input.empty() || to_lower(input) == "y" || to_lower(input) == "yes");
+std::optional<bool> prompt_default_value(PromptDefault default_answer) {
+    switch(default_answer) {
+        case PromptDefault::Yes:
+            return true;
+        case PromptDefault::No:
+            return false;
+        case PromptDefault::None:
+            return std::nullopt;
+    }
+    return std::nullopt;
+}
+
+std::string prompt_suffix(PromptDefault default_answer) {
+    switch(default_answer) {
+        case PromptDefault::Yes:
+            return "[Y/n]";
+        case PromptDefault::No:
+            return "[y/N]";
+        case PromptDefault::None:
+            return "[y/n]";
+    }
+    return "[y/n]";
+}
+
+std::string prompt_answer_label(bool answer) {
+    return answer ? "yes" : "no";
+}
+
+bool ask_user(const std::string& question, PromptDefault default_answer) {
+    std::optional<bool> default_value = prompt_default_value(default_answer);
+
+    if(g_config.no_confirm) {
+        if(default_value.has_value()) {
+            Logger::info("Skipping prompt (--noconfirm): " + question + " -> " + prompt_answer_label(default_value.value()));
+            return default_value.value();
+        }
+        throw std::runtime_error("Cannot answer prompt without interaction (--noconfirm): " + question);
+    }
+
+    if(!isatty(STDIN_FILENO)) {
+        if(default_value.has_value() && default_value.value() == false) {
+            Logger::info("Skipping prompt (non-interactive stdin): " + question + " -> no");
+            return false;
+        }
+        throw std::runtime_error("Cannot safely answer prompt with non-interactive stdin: " + question);
+    }
+
+    for(;;) {
+        std::cout << ":: " << question << " " << prompt_suffix(default_answer) << " ";
+        std::string input;
+        if(!std::getline(std::cin, input)) {
+            throw std::runtime_error("Failed to read prompt input: " + question);
+        }
+
+        input = to_lower(trim(input));
+        if(input.empty()) {
+            if(default_value.has_value()) return default_value.value();
+            Logger::warn("Please answer yes or no.");
+            continue;
+        }
+        if(input == "y" || input == "yes") return true;
+        if(input == "n" || input == "no") return false;
+
+        Logger::warn("Please answer yes or no.");
+    }
 }
 
 // AUR RPC / JSON解析
@@ -1983,7 +2049,7 @@ void build_from_git(const std::string& pkg_name, const std::string& clone_name, 
                         throw std::runtime_error("Failed to compare repository changes.");
                     }
                     if(diff_ret == 1) {
-                        if(ask_user("Updates detected. View diff?")) {
+                        if(ask_user("Updates detected. View diff?", PromptDefault::No)) {
                             run_command("git diff " + shell_quote("HEAD.." + remote_ref) + " --color=always");
                         }
                     }
@@ -2017,13 +2083,13 @@ void build_from_git(const std::string& pkg_name, const std::string& clone_name, 
         }
 
         if(!g_config.no_edit) {
-            if(ask_user("Edit PKGBUILD?")) {
+            if(ask_user("Edit PKGBUILD?", PromptDefault::No)) {
                 const char* env_editor = std::getenv("EDITOR");
                 std::string editor_cmd = (env_editor) ? std::string(env_editor) : g_config.editor;
                 if(run_command(build_editor_command(editor_cmd, "PKGBUILD")) != 0) {
                     throw std::runtime_error("Editor failed.");
                 }
-                if(!ask_user("Proceed with build?")) throw std::runtime_error("Aborted.");
+                if(!ask_user("Proceed with build?", PromptDefault::Yes)) throw std::runtime_error("Aborted.");
             }
         } else {
             Logger::info("Skipping PKGBUILD review (--noedit).");
@@ -2541,7 +2607,7 @@ int cmd_clean() {
     }
     fs::path cache = get_cache_dir();
     if(fs::exists(cache) && !fs::is_empty(cache)) {
-        if(ask_user("Clean jpacker build cache (" + cache.string() + ")?")) {
+        if(ask_user("Clean jpacker build cache (" + cache.string() + ")?", PromptDefault::No)) {
             Logger::info("Removing cached build files...");
             for(const auto& entry : fs::directory_iterator(cache)) {
                 if(entry.path().filename() == "jpacker.log") continue;

@@ -110,6 +110,8 @@ AUR / source build 経路では、pacman option をそのまま makepkg option �
 
 この方針は #83 の prompt helper 実装前提でもある。prompt helper では、単純に `--noconfirm` を「yes」として扱うのではなく、非対話時に安全に停止するもの、default を選べるもの、明示 option が必要なものを分ける。
 
+現時点の jpacker 独自 prompt は、prompt ごとに default selection を持つ。`Updates detected. View diff?`、`Edit PKGBUILD?`、`Clean jpacker build cache?` は default no とし、`Proceed with build?` は default yes とする。`--noconfirm` 指定時は prompt を表示せず、この default selection を採用する。ただし EOF や入力読み取り失敗は Enter と同じ扱いにしない。stdin が TTY でない場合も、危険側へ進まないように扱う。
+
 ### `--needed`
 
 `--needed` は pacman 由来 option として、pacman execution へ pass-through する。
