@@ -2454,8 +2454,9 @@ int cmd_edit_src(const std::vector<std::string>& targets) {
         }
 
         if(run_command("sudo install -Dm644 " + shell_quote(temp_path.string()) + " " + shell_quote(p.string())) != 0) {
-            Logger::error("Failed to install edited source-build preference to " + p.string());
+            Logger::error("Failed to install edited source-build preference to " + p.string() + "; edited file kept at " + temp_path.string());
             failed = true;
+            continue;
         }
 
         cleanup_temp();
