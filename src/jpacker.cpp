@@ -15,10 +15,12 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cerrno>
 #include <chrono>
 #include <cstdlib>
 #include <ctime>
 #include <curl/curl.h>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -2390,16 +2392,73 @@ int cmd_edit_src(const std::vector<std::string>& targets) {
     std::string editor_cmd = (env_editor) ? std::string(env_editor) : g_config.editor;
     for(const auto& pkg : targets) {
         require_valid_package_name(pkg);
-        fs::path p = fs::path(PACKAGE_BUILD_DIR) / pkg;
-        if(!fs::exists(p) && run_command("sudo touch " + shell_quote(p.string())) != 0) {
-            Logger::error("Failed to create " + p.string());
+        fs::path    p = fs::path(PACKAGE_BUILD_DIR) / pkg;
+        std::string temp_template = "/tmp/jpacker-edit-src-" + pkg + ".XXXXXX";
+        std::vector<char> temp_name(temp_template.begin(), temp_template.end());
+        temp_name.push_back('\0');
+
+        int fd = mkstemp(temp_name.data());
+        if(fd == -1) {
+            Logger::error("Failed to create temporary file: " + std::string(std::strerror(errno)));
             failed = true;
             continue;
         }
-        if(run_command("sudo " + build_editor_command(editor_cmd, p)) != 0) {
+
+        fs::path temp_path = temp_name.data();
+        if(close(fd) != 0) {
+            Logger::error("Failed to close temporary file " + temp_path.string() + ": " + std::string(std::strerror(errno)));
+            std::error_code ec;
+            fs::remove(temp_path, ec);
+            failed = true;
+            continue;
+        }
+
+        auto cleanup_temp = [&temp_path]() {
+            std::error_code ec;
+            fs::remove(temp_path, ec);
+            if(ec) Logger::warn("Failed to remove temporary file " + temp_path.string() + ": " + ec.message());
+        };
+
+        if(fs::exists(p)) {
+            std::ifstream src(p, std::ios::binary);
+            if(!src) {
+                Logger::error("Failed to read " + p.string());
+                cleanup_temp();
+                failed = true;
+                continue;
+            }
+
+            std::ofstream dst(temp_path, std::ios::binary | std::ios::trunc);
+            if(!dst) {
+                Logger::error("Failed to write temporary file " + temp_path.string());
+                cleanup_temp();
+                failed = true;
+                continue;
+            }
+
+            dst << src.rdbuf();
+            dst.close();
+            if(!dst) {
+                Logger::error("Failed to copy " + p.string() + " to " + temp_path.string());
+                cleanup_temp();
+                failed = true;
+                continue;
+            }
+        }
+
+        if(run_command(build_editor_command(editor_cmd, temp_path)) != 0) {
             Logger::error("Editor failed for " + p.string());
             failed = true;
+            cleanup_temp();
+            continue;
         }
+
+        if(run_command("sudo install -Dm644 " + shell_quote(temp_path.string()) + " " + shell_quote(p.string())) != 0) {
+            Logger::error("Failed to install edited source-build preference to " + p.string());
+            failed = true;
+        }
+
+        cleanup_temp();
     }
     return failed ? 1 : 0;
 }
