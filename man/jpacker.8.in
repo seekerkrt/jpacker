@@ -83,7 +83,7 @@ Skip the interactive review/edit of PKGBUILD files before building.
 Skip the interactive git diff check during package updates.
 .TP
 .BR \-\-noconfirm
-Pass \fB--noconfirm\fR to pacman and makepkg execution. This does not bypass jpacker's unresolved or cyclic build plan checks.
+Pass \fB--noconfirm\fR to pacman and makepkg execution. jpacker treats this as a request to avoid interactive blocking, not as "yes to everything". This does not bypass jpacker's unresolved or cyclic build plan checks.
 .TP
 .BR \-\-rebuild
 Pass \fB-f\fR to makepkg build/install execution so existing built package artifacts are not reused.
@@ -198,6 +198,8 @@ jpacker clean
 .SH SEE ALSO
 .BR pacman (8),
 .BR makepkg (8)
+.PP
+For the detailed operation and option pass-through policy, see the repository document \fIdocs/COMPATIBILITY.md\fR.
 
 .SH AUTHOR
 Written by seekerkrt.
