@@ -40,7 +40,7 @@ Issue で明示されていない限り、広範囲のスタイル変更、大�
 - plan / deps / fetch の安全境界を崩さない。
 - fetch に build / install / pull / merge / reset を混ぜない。
 - `--noconfirm` は pacman / makepkg の確認省略に限り、未解決依存や循環依存を自動突破させない。
-- pacman / makepkg / git などへ委譲する外部コマンドは可能な範囲で表示し、特に pacman / makepkg に渡す option がユーザーから見えることを重視する。
+- pacman / makepkg / git などへ委譲する、利用者に影響する主要な外部コマンドは実行前に表示し、特に pacman / makepkg に渡す option がユーザーから見えることを重視する。
 - jpacker 本体は通常ユーザーで起動し、必要な pacman 操作だけ sudo 経由で行う方針を尊重する。
 
 ## Commit message

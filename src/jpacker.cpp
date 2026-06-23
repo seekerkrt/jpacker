@@ -69,6 +69,17 @@ struct AppConfig {
 
 AppConfig g_config;
 
+struct MakepkgBuildOptions {
+    bool rebuild = false;
+    bool clean_build = false;
+};
+
+enum class PromptDefault {
+    Yes,
+    No,
+    None,
+};
+
 // AUR RPC の package info response を、依存解決や表示で扱いやすくした型。
 struct AurPackageInfo {
     std::string                    Name;
@@ -305,7 +316,7 @@ int run_command(const std::string& cmd);
 std::string join_shell_args(const std::vector<std::string>& args);
 std::vector<std::string> pacman_args_with_global_options(std::vector<std::string> args);
 std::string join_pacman_args(const std::vector<std::string>& args);
-std::string makepkg_install_command();
+std::string makepkg_install_command(const MakepkgBuildOptions& options);
 std::string build_editor_command(const std::string& editor, const fs::path& target);
 
 // pacman / repository補助
@@ -329,15 +340,20 @@ void parse_repo_sync_desc(
 const std::map<std::string, ProvidedDependency>& repo_providers();
 std::optional<ProvidedDependency> find_repo_provider(const std::string& dependency_name);
 std::vector<InstalledPackage> get_foreign_packages();
+std::set<std::string> get_foreign_package_names();
 bool aur_version_is_newer(const std::string& aur_version, const std::string& installed_version);
+bool has_local_package_artifact(const fs::path& pkg_dir);
+bool has_local_srcdir(const fs::path& pkg_dir);
+MakepkgBuildOptions resolve_makepkg_build_options(const fs::path& pkg_dir);
 
 // prompt / ユーザー確認
-bool ask_user(const std::string& question);
+bool ask_user(const std::string& question, PromptDefault default_answer);
 
 // AUR RPC / JSON解析
 size_t WriteCallback(void* contents, size_t size, size_t nmemb, void* userp);
 std::string json_string_or_empty(const json& obj, const std::string& key);
 std::vector<std::string> json_string_array_or_empty(const json& obj, const std::string& key);
+std::optional<long long> json_optional_long_long(const json& obj, const std::string& key);
 AurPackageInfo parse_aur_package_info(const json& pkg);
 
 // AUR provider / build source解決
@@ -951,11 +967,11 @@ std::string join_pacman_args(const std::vector<std::string>& args) {
     return join_shell_args(pacman_args_with_global_options(args));
 }
 
-std::string makepkg_install_command() {
+std::string makepkg_install_command(const MakepkgBuildOptions& options) {
     std::vector<std::string> args = {"makepkg", "-sic"};
     if(g_config.no_confirm) args.push_back("--noconfirm");
-    if(g_config.rebuild) args.push_back("-f");
-    if(g_config.clean_build) args.push_back("-C");
+    if(options.rebuild) args.push_back("-f");
+    if(options.clean_build) args.push_back("-C");
     return join_shell_args(args);
 }
 
@@ -1209,6 +1225,14 @@ std::vector<InstalledPackage> get_foreign_packages() {
     return packages;
 }
 
+std::set<std::string> get_foreign_package_names() {
+    std::set<std::string> names;
+    for(const auto& pkg : get_foreign_packages()) {
+        names.insert(pkg.name);
+    }
+    return names;
+}
+
 bool aur_version_is_newer(const std::string& aur_version, const std::string& installed_version) {
     std::string cmp_cmd = "vercmp " + shell_quote(aur_version) + " " + shell_quote(installed_version);
     std::string cmp_res = exec_command(cmp_cmd.c_str());
@@ -1221,12 +1245,111 @@ bool aur_version_is_newer(const std::string& aur_version, const std::string& ins
     }
 }
 
+bool has_local_package_artifact(const fs::path& pkg_dir) {
+    if(!fs::exists(pkg_dir) || !fs::is_directory(pkg_dir)) return false;
+
+    for(const auto& entry : fs::directory_iterator(pkg_dir)) {
+        if(!entry.is_regular_file()) continue;
+
+        std::string filename = entry.path().filename().string();
+        if(filename.size() >= 4 && filename.substr(filename.size() - 4) == ".sig") continue;
+        if(filename.find(".pkg.tar") != std::string::npos) return true;
+    }
+    return false;
+}
+
+bool has_local_srcdir(const fs::path& pkg_dir) {
+    fs::path src_dir = pkg_dir / "src";
+    return fs::exists(src_dir) && fs::is_directory(src_dir);
+}
+
+MakepkgBuildOptions resolve_makepkg_build_options(const fs::path& pkg_dir) {
+    MakepkgBuildOptions options;
+    bool                has_artifact = has_local_package_artifact(pkg_dir);
+
+    if(g_config.clean_build) {
+        options.clean_build = true;
+    } else if(has_local_srcdir(pkg_dir)) {
+        options.clean_build = ask_user("Clean build existing build directory?", PromptDefault::No);
+    }
+
+    if(g_config.rebuild) {
+        options.rebuild = true;
+    } else if(options.clean_build && has_artifact) {
+        options.rebuild = true;
+    } else if(has_artifact) {
+        options.rebuild = ask_user("Rebuild package?", PromptDefault::No);
+    }
+
+    return options;
+}
+
 // prompt / ユーザー確認
-bool ask_user(const std::string& question) {
-    std::cout << ":: " << question << " [Y/n] ";
-    std::string input;
-    std::getline(std::cin, input);
-    return (input.empty() || to_lower(input) == "y" || to_lower(input) == "yes");
+std::optional<bool> prompt_default_value(PromptDefault default_answer) {
+    switch(default_answer) {
+        case PromptDefault::Yes:
+            return true;
+        case PromptDefault::No:
+            return false;
+        case PromptDefault::None:
+            return std::nullopt;
+    }
+    return std::nullopt;
+}
+
+std::string prompt_suffix(PromptDefault default_answer) {
+    switch(default_answer) {
+        case PromptDefault::Yes:
+            return "[Y/n]";
+        case PromptDefault::No:
+            return "[y/N]";
+        case PromptDefault::None:
+            return "[y/n]";
+    }
+    return "[y/n]";
+}
+
+std::string prompt_answer_label(bool answer) {
+    return answer ? "yes" : "no";
+}
+
+bool ask_user(const std::string& question, PromptDefault default_answer) {
+    std::optional<bool> default_value = prompt_default_value(default_answer);
+
+    if(g_config.no_confirm) {
+        if(default_value.has_value()) {
+            Logger::info("Skipping prompt (--noconfirm): " + question + " -> " + prompt_answer_label(default_value.value()));
+            return default_value.value();
+        }
+        throw std::runtime_error("Cannot answer prompt without interaction (--noconfirm): " + question);
+    }
+
+    if(!isatty(STDIN_FILENO)) {
+        if(default_value.has_value() && default_value.value() == false) {
+            Logger::info("Skipping prompt (non-interactive stdin): " + question + " -> no");
+            return false;
+        }
+        throw std::runtime_error("Cannot safely answer prompt with non-interactive stdin: " + question);
+    }
+
+    for(;;) {
+        std::cout << ":: " << question << " " << prompt_suffix(default_answer) << " ";
+        std::string input;
+        if(!std::getline(std::cin, input)) {
+            throw std::runtime_error("Failed to read prompt input: " + question);
+        }
+
+        input = to_lower(trim(input));
+        if(input.empty()) {
+            if(default_value.has_value()) return default_value.value();
+            Logger::warn("Please answer yes or no.");
+            continue;
+        }
+        if(input == "y" || input == "yes") return true;
+        if(input == "n" || input == "no") return false;
+
+        Logger::warn("Please answer yes or no.");
+    }
 }
 
 // AUR RPC / JSON解析
@@ -1250,6 +1373,15 @@ std::vector<std::string> json_string_array_or_empty(const json& obj, const std::
     return values;
 }
 
+std::optional<long long> json_optional_long_long(const json& obj, const std::string& key) {
+    if(!obj.contains(key) || obj[key].is_null() || !obj[key].is_number()) return std::nullopt;
+    try {
+        return obj[key].get<long long>();
+    } catch(...) {
+        return std::nullopt;
+    }
+}
+
 AurPackageInfo parse_aur_package_info(const json& pkg) {
     AurPackageInfo info;
     info.Name = json_string_or_empty(pkg, "Name");
@@ -1264,9 +1396,7 @@ AurPackageInfo parse_aur_package_info(const json& pkg) {
     info.Conflicts = json_string_array_or_empty(pkg, "Conflicts");
     info.Replaces = json_string_array_or_empty(pkg, "Replaces");
     info.Maintainer = json_string_or_empty(pkg, "Maintainer");
-    if(pkg.contains("OutOfDate") && !pkg["OutOfDate"].is_null()) {
-        info.OutOfDate = pkg["OutOfDate"].get<long long>();
-    }
+    info.OutOfDate = json_optional_long_long(pkg, "OutOfDate");
     return info;
 }
 
@@ -1428,7 +1558,8 @@ PackageBuildSource resolve_build_source(const std::string& pkg_name) {
 
 // AUR検索 / info表示
 bool search_aur(const std::vector<std::string>& keywords) {
-    bool found = false;
+    bool                  found = false;
+    std::set<std::string> installed_foreign_packages = get_foreign_package_names();
     for(const auto& pkg_name : keywords) {
         if(pkg_name.empty()) continue;
         if(pkg_name[0] == '-') continue;
@@ -1439,8 +1570,16 @@ bool search_aur(const std::vector<std::string>& keywords) {
             if(j.contains("results") && j["results"].is_array()) {
                 for(const auto& pkg : j["results"]) {
                     found = true;
-                    std::cout << "\033[1;35maur\033[0m/\033[1m" << pkg["Name"].get<std::string>()
-                              << "\033[0m \033[1;32m" << pkg["Version"].get<std::string>() << "\033[0m" << std::endl;
+                    std::string name = pkg["Name"].get<std::string>();
+                    std::cout << "\033[1;35maur\033[0m/\033[1m" << name << "\033[0m \033[1;32m"
+                              << pkg["Version"].get<std::string>() << "\033[0m";
+                    if(installed_foreign_packages.contains(name)) {
+                        std::cout << " \033[1;36m[installed]\033[0m";
+                    }
+                    if(json_optional_long_long(pkg, "OutOfDate").has_value()) {
+                        std::cout << " \033[1;31m[out-of-date]\033[0m";
+                    }
+                    std::cout << std::endl;
                     if(pkg.contains("Description") && !pkg["Description"].is_null())
                         std::cout << "    " << pkg["Description"].get<std::string>() << std::endl;
                 }
@@ -1471,8 +1610,7 @@ std::string join_comma_display_values(const std::vector<std::string>& values) {
 }
 
 std::string out_of_date_display(const std::optional<long long>& out_of_date) {
-    if(!out_of_date.has_value()) return "No";
-    return std::to_string(out_of_date.value());
+    return out_of_date.has_value() ? "\033[1;31myes\033[0m" : "no";
 }
 
 void print_aur_info(const AurPackageInfo& pkg) {
@@ -1489,7 +1627,7 @@ void print_aur_info(const AurPackageInfo& pkg) {
     std::cout << "Conflicts With  : " << join_display_values(pkg.Conflicts) << std::endl;
     std::cout << "Replaces        : " << join_display_values(pkg.Replaces) << std::endl;
     std::cout << "Maintainer      : " << (pkg.Maintainer.empty() ? "None" : pkg.Maintainer) << std::endl;
-    std::cout << "Out Of Date     : " << out_of_date_display(pkg.OutOfDate) << std::endl;
+    std::cout << "Out of Date     : " << out_of_date_display(pkg.OutOfDate) << std::endl;
 }
 
 // dependency分類 / recursive dependency tree
@@ -1983,7 +2121,7 @@ void build_from_git(const std::string& pkg_name, const std::string& clone_name, 
                         throw std::runtime_error("Failed to compare repository changes.");
                     }
                     if(diff_ret == 1) {
-                        if(ask_user("Updates detected. View diff?")) {
+                        if(ask_user("Updates detected. View diff?", PromptDefault::No)) {
                             run_command("git diff " + shell_quote("HEAD.." + remote_ref) + " --color=always");
                         }
                     }
@@ -2017,24 +2155,25 @@ void build_from_git(const std::string& pkg_name, const std::string& clone_name, 
         }
 
         if(!g_config.no_edit) {
-            if(ask_user("Edit PKGBUILD?")) {
+            if(ask_user("Edit PKGBUILD?", PromptDefault::No)) {
                 const char* env_editor = std::getenv("EDITOR");
                 std::string editor_cmd = (env_editor) ? std::string(env_editor) : g_config.editor;
                 if(run_command(build_editor_command(editor_cmd, "PKGBUILD")) != 0) {
                     throw std::runtime_error("Editor failed.");
                 }
-                if(!ask_user("Proceed with build?")) throw std::runtime_error("Aborted.");
+                if(!ask_user("Proceed with build?", PromptDefault::Yes)) throw std::runtime_error("Aborted.");
             }
         } else {
             Logger::info("Skipping PKGBUILD review (--noedit).");
         }
+        MakepkgBuildOptions makepkg_options = resolve_makepkg_build_options(pkg_dir);
         std::string build_cmd;
         if(!trim(custom_env).empty()) {
             Logger::info("Applying custom build flags: " + custom_env);
-            build_cmd = custom_env + makepkg_install_command();
+            build_cmd = custom_env + makepkg_install_command(makepkg_options);
         } else {
             Logger::info("Using default makepkg.conf settings.");
-            build_cmd = makepkg_install_command();
+            build_cmd = makepkg_install_command(makepkg_options);
         }
         if(run_command(build_cmd) != 0) throw std::runtime_error("Build failed.");
     }
@@ -2541,7 +2680,7 @@ int cmd_clean() {
     }
     fs::path cache = get_cache_dir();
     if(fs::exists(cache) && !fs::is_empty(cache)) {
-        if(ask_user("Clean jpacker build cache (" + cache.string() + ")?")) {
+        if(ask_user("Clean jpacker build cache (" + cache.string() + ")?", PromptDefault::No)) {
             Logger::info("Removing cached build files...");
             for(const auto& entry : fs::directory_iterator(cache)) {
                 if(entry.path().filename() == "jpacker.log") continue;

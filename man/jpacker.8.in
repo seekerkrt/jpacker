@@ -23,6 +23,10 @@ If a package has a source-build preference (via \fBadd-src\fR), it will be built
 .TP
 .B \-Ss \fI<query>\fR
 Search for packages in both the official repositories and the AUR.
+AUR search results may show status tags such as \fB[installed]\fR and \fB[out-of-date]\fR when that metadata is available.
+.TP
+.B \-Si \fI<package>\fR
+Show package information. Official repository packages use pacman output; AUR packages use AUR metadata and include the out-of-date flag state.
 .TP
 .B \-R, \-Rs, \-Rns \fI<target>\fR
 Remove packages. This is a direct wrapper around \fBpacman -R\fR.
@@ -83,13 +87,13 @@ Skip the interactive review/edit of PKGBUILD files before building.
 Skip the interactive git diff check during package updates.
 .TP
 .BR \-\-noconfirm
-Pass \fB--noconfirm\fR to pacman and makepkg execution. This does not bypass jpacker's unresolved or cyclic build plan checks.
+Pass \fB--noconfirm\fR to pacman and makepkg execution. jpacker treats this as a request to avoid interactive blocking, not as "yes to everything". This does not bypass jpacker's unresolved or cyclic build plan checks.
 .TP
 .BR \-\-rebuild
-Pass \fB-f\fR to makepkg build/install execution so existing built package artifacts are not reused.
+Pass \fB-f\fR to makepkg build/install execution so existing built package artifacts are not reused. When omitted, jpacker may ask before rebuilding an existing local package artifact; the default answer is no.
 .TP
 .BR \-\-cleanbuild
-Pass \fB-C\fR to makepkg build/install execution so the existing \fIsrcdir\fR is not reused.
+Pass \fB-C\fR to makepkg build/install execution so the existing \fIsrcdir\fR is not reused. When omitted, jpacker may ask before cleaning an existing local \fIsrc/\fR directory; the default answer is no. If a local package artifact exists in the same package directory, cleanbuild also enables rebuild.
 .TP
 .BR \-h , \ \-\-help
 Display the help message and exit.
@@ -198,6 +202,8 @@ jpacker clean
 .SH SEE ALSO
 .BR pacman (8),
 .BR makepkg (8)
+.PP
+For the detailed operation and option pass-through policy, see the repository document \fIdocs/COMPATIBILITY.md\fR.
 
 .SH AUTHOR
 Written by seekerkrt.

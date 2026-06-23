@@ -10,9 +10,13 @@
 
 日常的な `pacman` のコマンドライン操作をなるべくそのまま使えるようにしつつ、AUR package の build / install と、Gentoo の `package.env` に近い source build preference を追加することを目指しています。
 
+> [!NOTE]
+> jpacker は Arch Linux / pacman / AUR の公式ツールではありません。
+> pacman / makepkg / AUR の既存の流儀を尊重しながら、日常的なパッケージ操作を補助するためのツールです。
+
 ### 開発背景
 
-jpacker は、既存の yay / paru などを置き換えるための代替 AUR helper として作り始めたものではありません。
+jpacker は、既存 AUR helper と同じ方向を目指すために作り始めたものではありません。
 
 Arch Linux の優れた `pacman` / `makepkg` の仕組みをそのまま活かしつつ、そこに Gentoo のようなソースコードビルド系ディストリビューションが持つ「自分の環境に合わせてビルドを調整する楽しさ」を少し取り入れたら、面白いツールになるのではないか。そんな発想から作り始めた実験的なプロジェクトです。
 
@@ -24,7 +28,7 @@ Arch Linux の優れた `pacman` / `makepkg` の仕組みをそのまま活か�
 
 jpacker は現在も開発中です。
 
-現時点では `pacman` や `yay` の完全な drop-in replacement ではありません。よく使う happy path は通り始めていますが、AUR support はまだ発展途上であり、未実装の command / option / edge case が残っています。AUR 対応や互換性の改善にあわせて、挙動が変わる可能性もあります。
+現時点では `pacman` や既存 AUR helper と同じ挙動をすべて提供するものではありません。よく使う happy path は通り始めていますが、AUR support はまだ発展途上であり、未実装の command / option / edge case が残っています。AUR 対応や互換性の改善にあわせて、挙動が変わる可能性もあります。
 
 詳細な互換性目標と command routing の仕様は [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) を参照してください。
 
@@ -40,7 +44,11 @@ jpacker は現在も開発中です。
 
 Issue と pull request は GitHub で受け付けています。
 
-この project は solo developer が管理しており、pull request や外部 contribution の運用にもまだ慣れている途中です。返答に時間がかかる場合があります。
+この project は、今のところ solo developer による個人開発です。OSS project としての外部 contribution 受け入れや pull request 運用にはまだ慣れていない部分がありますが、bug report、提案、改善案は歓迎します。
+
+提案や pull request は、jpacker の方針や保守負担との兼ね合いを見ながら判断します。
+
+返答や確認に時間がかかる場合があります。
 
 ### 主な機能
 
@@ -83,7 +91,9 @@ makepkg -si
 
 `jpacker` 自体は `sudo` や root で起動せず、通常ユーザーで実行してください。`pacman` が必要な操作では、`jpacker` が必要に応じて `sudo pacman` を呼び出します。
 
-`jpacker` は標準的な `pacman` flags を受け付けます。
+`jpacker` は標準的な `pacman` flags を受け付けます。ただし、すべての `pacman` options / flags に対応しているわけではありません。対応範囲は段階的に実装・検証しています。
+
+`jpacker` が利用者に影響する主要な外部コマンドを実行する場合は、実行前に対象のコマンドを表示します。
 
 ```bash
 # Install packages from the official repositories or the AUR
@@ -222,7 +232,7 @@ jpacker -S google-chrome --noedit
 jpacker --noconfirm -S google-chrome
 ```
 
-AUR / source build の build/install 時に、`--rebuild` を指定すると `makepkg -f` 相当、`--cleanbuild` を指定すると `makepkg -C` 相当を渡します。両方を指定した場合は `makepkg -f -C` 相当として扱います。これらは jpacker 固有の option であり、pacman execution や `.SRCINFO` 読み取り用の `makepkg --printsrcinfo` には渡しません。
+AUR / source build の build/install 時に、`--rebuild` を指定すると `makepkg -f` 相当、`--cleanbuild` を指定すると `makepkg -C` 相当を渡します。両方を指定した場合は `makepkg -f -C` 相当として扱います。未指定の場合、既存の package artifact や `src/` directory があるときは、必要に応じて default no の確認 prompt で rebuild / cleanbuild を選べます。cleanbuild を有効にし、同じ package directory に既存 package artifact がある場合は、artifact 再利用を避けるため rebuild も有効にします。`--noconfirm` 指定時はこの prompt を出さず、未指定の rebuild / cleanbuild は no 扱いにします。これらは jpacker 固有の option であり、pacman execution や `.SRCINFO` 読み取り用の `makepkg --printsrcinfo` には渡しません。
 
 ```bash
 jpacker --rebuild --cleanbuild -S google-chrome
@@ -252,9 +262,13 @@ MIT License
 
 It aims to provide a familiar command-line workflow for everyday `pacman` usage while adding AUR build support and Gentoo-like source build preferences.
 
+> [!NOTE]
+> jpacker is not an official Arch Linux, pacman, or AUR tool.
+> It aims to assist day-to-day package operations while respecting existing pacman, makepkg, and AUR workflows.
+
 ### Motivation
 
-jpacker was not started as a drop-in replacement for existing AUR helpers such as yay or paru.
+jpacker was not started to follow the same direction as existing AUR helpers.
 
 The project began from a simple idea: Arch Linux already has an excellent `pacman` / `makepkg` ecosystem, and it might be interesting to keep that foundation while adding a small amount of the flexibility found in source-based distributions such as Gentoo — especially the ability to tune builds for your own environment.
 
@@ -266,7 +280,7 @@ The author is not trying to rush this into a finished daily-driver tool. Instead
 
 jpacker is still under active development.
 
-It is not intended to be a complete drop-in replacement for `pacman` or `yay` at this stage. Common happy paths are starting to work, but AUR support is still evolving. Some commands, options, and edge cases are not implemented yet, and behavior may change as AUR support and compatibility are improved.
+It does not provide the full behavior surface of `pacman` or existing AUR helpers at this stage. Common happy paths are starting to work, but AUR support is still evolving. Some commands, options, and edge cases are not implemented yet, and behavior may change as AUR support and compatibility are improved.
 
 For detailed compatibility goals and command routing specifications, see [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md).
 
@@ -280,9 +294,13 @@ For safety, important package operations should still be reviewed carefully befo
 
 ### Contributing
 
-Issues and pull requests are welcome on GitHub.
+Issues and pull requests are accepted on GitHub.
 
-This project is maintained by a solo developer, and I am still getting used to managing pull requests and external contributions. Responses may take some time.
+This project is currently a solo developer project. I am still learning how to handle external contributions and pull request workflows as an OSS project, but bug reports, suggestions, and improvement ideas are welcome.
+
+Suggestions and pull requests will be considered in light of jpacker's direction and maintenance cost.
+
+Responses and reviews may take some time.
 
 ### Features
 
@@ -325,7 +343,11 @@ Completion files are installed to:
 
 #### Basic operations
 
-`jpacker` accepts standard `pacman` flags.
+Do not run jpacker itself with sudo or as root. Run it as a normal user. For operations that need pacman, jpacker will invoke sudo pacman when needed.
+
+jpacker accepts standard pacman flags where supported. Not all pacman options / flags are implemented yet; support is added and verified incrementally.
+
+When jpacker runs major external commands that affect the user, it prints the command before executing it.
 
 ```bash
 # Install packages from the official repositories or the AUR
@@ -464,7 +486,7 @@ jpacker -S google-chrome --noedit
 jpacker --noconfirm -S google-chrome
 ```
 
-For AUR/source build install execution, `--rebuild` passes the equivalent of `makepkg -f`, and `--cleanbuild` passes the equivalent of `makepkg -C`. When both are specified, jpacker passes the equivalent of `makepkg -f -C`. These are jpacker-specific options; they are not forwarded to pacman execution or to `makepkg --printsrcinfo` metadata reads.
+For AUR/source build install execution, `--rebuild` passes the equivalent of `makepkg -f`, and `--cleanbuild` passes the equivalent of `makepkg -C`. When both are specified, jpacker passes the equivalent of `makepkg -f -C`. When they are not specified, jpacker may ask with a default-no prompt before rebuilding an existing package artifact or cleaning an existing `src/` directory. If cleanbuild is enabled and a package artifact exists in the same package directory, jpacker also enables rebuild to avoid reusing that artifact. With `--noconfirm`, these prompts are skipped and unspecified rebuild/cleanbuild choices default to no. These are jpacker-specific options; they are not forwarded to pacman execution or to `makepkg --printsrcinfo` metadata reads.
 
 ```bash
 jpacker --rebuild --cleanbuild -S google-chrome
