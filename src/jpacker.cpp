@@ -353,6 +353,7 @@ bool ask_user(const std::string& question, PromptDefault default_answer);
 size_t WriteCallback(void* contents, size_t size, size_t nmemb, void* userp);
 std::string json_string_or_empty(const json& obj, const std::string& key);
 std::vector<std::string> json_string_array_or_empty(const json& obj, const std::string& key);
+std::optional<long long> json_optional_long_long(const json& obj, const std::string& key);
 AurPackageInfo parse_aur_package_info(const json& pkg);
 
 // AUR provider / build source解決
@@ -1372,6 +1373,15 @@ std::vector<std::string> json_string_array_or_empty(const json& obj, const std::
     return values;
 }
 
+std::optional<long long> json_optional_long_long(const json& obj, const std::string& key) {
+    if(!obj.contains(key) || obj[key].is_null() || !obj[key].is_number()) return std::nullopt;
+    try {
+        return obj[key].get<long long>();
+    } catch(...) {
+        return std::nullopt;
+    }
+}
+
 AurPackageInfo parse_aur_package_info(const json& pkg) {
     AurPackageInfo info;
     info.Name = json_string_or_empty(pkg, "Name");
@@ -1386,9 +1396,7 @@ AurPackageInfo parse_aur_package_info(const json& pkg) {
     info.Conflicts = json_string_array_or_empty(pkg, "Conflicts");
     info.Replaces = json_string_array_or_empty(pkg, "Replaces");
     info.Maintainer = json_string_or_empty(pkg, "Maintainer");
-    if(pkg.contains("OutOfDate") && !pkg["OutOfDate"].is_null()) {
-        info.OutOfDate = pkg["OutOfDate"].get<long long>();
-    }
+    info.OutOfDate = json_optional_long_long(pkg, "OutOfDate");
     return info;
 }
 
@@ -1568,6 +1576,9 @@ bool search_aur(const std::vector<std::string>& keywords) {
                     if(installed_foreign_packages.contains(name)) {
                         std::cout << " [installed]";
                     }
+                    if(json_optional_long_long(pkg, "OutOfDate").has_value()) {
+                        std::cout << " [out-of-date]";
+                    }
                     std::cout << std::endl;
                     if(pkg.contains("Description") && !pkg["Description"].is_null())
                         std::cout << "    " << pkg["Description"].get<std::string>() << std::endl;
@@ -1599,8 +1610,7 @@ std::string join_comma_display_values(const std::vector<std::string>& values) {
 }
 
 std::string out_of_date_display(const std::optional<long long>& out_of_date) {
-    if(!out_of_date.has_value()) return "No";
-    return std::to_string(out_of_date.value());
+    return out_of_date.has_value() ? "yes" : "no";
 }
 
 void print_aur_info(const AurPackageInfo& pkg) {
@@ -1617,7 +1627,7 @@ void print_aur_info(const AurPackageInfo& pkg) {
     std::cout << "Conflicts With  : " << join_display_values(pkg.Conflicts) << std::endl;
     std::cout << "Replaces        : " << join_display_values(pkg.Replaces) << std::endl;
     std::cout << "Maintainer      : " << (pkg.Maintainer.empty() ? "None" : pkg.Maintainer) << std::endl;
-    std::cout << "Out Of Date     : " << out_of_date_display(pkg.OutOfDate) << std::endl;
+    std::cout << "Out of Date     : " << out_of_date_display(pkg.OutOfDate) << std::endl;
 }
 
 // dependency分類 / recursive dependency tree
