@@ -340,6 +340,7 @@ void parse_repo_sync_desc(
 const std::map<std::string, ProvidedDependency>& repo_providers();
 std::optional<ProvidedDependency> find_repo_provider(const std::string& dependency_name);
 std::vector<InstalledPackage> get_foreign_packages();
+std::set<std::string> get_foreign_package_names();
 bool aur_version_is_newer(const std::string& aur_version, const std::string& installed_version);
 bool has_local_package_artifact(const fs::path& pkg_dir);
 bool has_local_srcdir(const fs::path& pkg_dir);
@@ -1223,6 +1224,14 @@ std::vector<InstalledPackage> get_foreign_packages() {
     return packages;
 }
 
+std::set<std::string> get_foreign_package_names() {
+    std::set<std::string> names;
+    for(const auto& pkg : get_foreign_packages()) {
+        names.insert(pkg.name);
+    }
+    return names;
+}
+
 bool aur_version_is_newer(const std::string& aur_version, const std::string& installed_version) {
     std::string cmp_cmd = "vercmp " + shell_quote(aur_version) + " " + shell_quote(installed_version);
     std::string cmp_res = exec_command(cmp_cmd.c_str());
@@ -1541,7 +1550,8 @@ PackageBuildSource resolve_build_source(const std::string& pkg_name) {
 
 // AUR検索 / info表示
 bool search_aur(const std::vector<std::string>& keywords) {
-    bool found = false;
+    bool                  found = false;
+    std::set<std::string> installed_foreign_packages = get_foreign_package_names();
     for(const auto& pkg_name : keywords) {
         if(pkg_name.empty()) continue;
         if(pkg_name[0] == '-') continue;
@@ -1552,8 +1562,13 @@ bool search_aur(const std::vector<std::string>& keywords) {
             if(j.contains("results") && j["results"].is_array()) {
                 for(const auto& pkg : j["results"]) {
                     found = true;
-                    std::cout << "\033[1;35maur\033[0m/\033[1m" << pkg["Name"].get<std::string>()
-                              << "\033[0m \033[1;32m" << pkg["Version"].get<std::string>() << "\033[0m" << std::endl;
+                    std::string name = pkg["Name"].get<std::string>();
+                    std::cout << "\033[1;35maur\033[0m/\033[1m" << name << "\033[0m \033[1;32m"
+                              << pkg["Version"].get<std::string>() << "\033[0m";
+                    if(installed_foreign_packages.contains(name)) {
+                        std::cout << " [installed]";
+                    }
+                    std::cout << std::endl;
                     if(pkg.contains("Description") && !pkg["Description"].is_null())
                         std::cout << "    " << pkg["Description"].get<std::string>() << std::endl;
                 }
