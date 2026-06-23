@@ -1255,17 +1255,20 @@ bool has_local_srcdir(const fs::path& pkg_dir) {
 
 MakepkgBuildOptions resolve_makepkg_build_options(const fs::path& pkg_dir) {
     MakepkgBuildOptions options;
-
-    if(g_config.rebuild) {
-        options.rebuild = true;
-    } else if(has_local_package_artifact(pkg_dir)) {
-        options.rebuild = ask_user("Rebuild package?", PromptDefault::No);
-    }
+    bool                has_artifact = has_local_package_artifact(pkg_dir);
 
     if(g_config.clean_build) {
         options.clean_build = true;
     } else if(has_local_srcdir(pkg_dir)) {
         options.clean_build = ask_user("Clean build existing build directory?", PromptDefault::No);
+    }
+
+    if(g_config.rebuild) {
+        options.rebuild = true;
+    } else if(options.clean_build && has_artifact) {
+        options.rebuild = true;
+    } else if(has_artifact) {
+        options.rebuild = ask_user("Rebuild package?", PromptDefault::No);
     }
 
     return options;

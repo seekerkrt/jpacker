@@ -53,7 +53,7 @@
 
 `--rebuild` は AUR / source build の build/install 実行時に `makepkg -f` 相当として扱う。`--cleanbuild` は `makepkg -C` 相当として扱う。これらは pacman 由来 option ではないため、pacman execution へは渡さない。
 
-`--rebuild` / `--cleanbuild` が未指定の場合、jpacker は既存の package artifact や `src/` directory がある場面で、必要に応じて default no の prompt で rebuild / cleanbuild を確認する。`--noconfirm` 指定時は prompt を出さず、未指定の rebuild / cleanbuild は no として扱う。
+`--rebuild` / `--cleanbuild` が未指定の場合、jpacker は既存の package artifact や `src/` directory がある場面で、必要に応じて default no の prompt で rebuild / cleanbuild を確認する。cleanbuild を有効にし、同じ package directory に既存 package artifact がある場合は、artifact 再利用を避けるため rebuild も有効にする。`--noconfirm` 指定時は prompt を出さず、未指定の rebuild / cleanbuild は no として扱う。
 
 ---
 
