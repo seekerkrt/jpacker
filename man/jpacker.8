@@ -86,10 +86,10 @@ Skip the interactive git diff check during package updates.
 Pass \fB--noconfirm\fR to pacman and makepkg execution. jpacker treats this as a request to avoid interactive blocking, not as "yes to everything". This does not bypass jpacker's unresolved or cyclic build plan checks.
 .TP
 .BR \-\-rebuild
-Pass \fB-f\fR to makepkg build/install execution so existing built package artifacts are not reused.
+Pass \fB-f\fR to makepkg build/install execution so existing built package artifacts are not reused. When omitted, jpacker may ask before rebuilding an existing local package artifact; the default answer is no.
 .TP
 .BR \-\-cleanbuild
-Pass \fB-C\fR to makepkg build/install execution so the existing \fIsrcdir\fR is not reused.
+Pass \fB-C\fR to makepkg build/install execution so the existing \fIsrcdir\fR is not reused. When omitted, jpacker may ask before cleaning an existing local \fIsrc/\fR directory; the default answer is no. If a local package artifact exists in the same package directory, cleanbuild also enables rebuild.
 .TP
 .BR \-h , \ \-\-help
 Display the help message and exit.
