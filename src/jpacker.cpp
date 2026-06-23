@@ -69,6 +69,11 @@ struct AppConfig {
 
 AppConfig g_config;
 
+struct MakepkgBuildOptions {
+    bool rebuild = false;
+    bool clean_build = false;
+};
+
 enum class PromptDefault {
     Yes,
     No,
@@ -311,7 +316,7 @@ int run_command(const std::string& cmd);
 std::string join_shell_args(const std::vector<std::string>& args);
 std::vector<std::string> pacman_args_with_global_options(std::vector<std::string> args);
 std::string join_pacman_args(const std::vector<std::string>& args);
-std::string makepkg_install_command();
+std::string makepkg_install_command(const MakepkgBuildOptions& options);
 std::string build_editor_command(const std::string& editor, const fs::path& target);
 
 // pacman / repository補助
@@ -336,6 +341,9 @@ const std::map<std::string, ProvidedDependency>& repo_providers();
 std::optional<ProvidedDependency> find_repo_provider(const std::string& dependency_name);
 std::vector<InstalledPackage> get_foreign_packages();
 bool aur_version_is_newer(const std::string& aur_version, const std::string& installed_version);
+bool has_local_package_artifact(const fs::path& pkg_dir);
+bool has_local_srcdir(const fs::path& pkg_dir);
+MakepkgBuildOptions resolve_makepkg_build_options(const fs::path& pkg_dir);
 
 // prompt / ユーザー確認
 bool ask_user(const std::string& question, PromptDefault default_answer);
@@ -957,11 +965,11 @@ std::string join_pacman_args(const std::vector<std::string>& args) {
     return join_shell_args(pacman_args_with_global_options(args));
 }
 
-std::string makepkg_install_command() {
+std::string makepkg_install_command(const MakepkgBuildOptions& options) {
     std::vector<std::string> args = {"makepkg", "-sic"};
     if(g_config.no_confirm) args.push_back("--noconfirm");
-    if(g_config.rebuild) args.push_back("-f");
-    if(g_config.clean_build) args.push_back("-C");
+    if(options.rebuild) args.push_back("-f");
+    if(options.clean_build) args.push_back("-C");
     return join_shell_args(args);
 }
 
@@ -1225,6 +1233,42 @@ bool aur_version_is_newer(const std::string& aur_version, const std::string& ins
         Logger::warn("Failed to compare versions: " + installed_version + " -> " + aur_version);
         return false;
     }
+}
+
+bool has_local_package_artifact(const fs::path& pkg_dir) {
+    if(!fs::exists(pkg_dir) || !fs::is_directory(pkg_dir)) return false;
+
+    for(const auto& entry : fs::directory_iterator(pkg_dir)) {
+        if(!entry.is_regular_file()) continue;
+
+        std::string filename = entry.path().filename().string();
+        if(filename.size() >= 4 && filename.substr(filename.size() - 4) == ".sig") continue;
+        if(filename.find(".pkg.tar") != std::string::npos) return true;
+    }
+    return false;
+}
+
+bool has_local_srcdir(const fs::path& pkg_dir) {
+    fs::path src_dir = pkg_dir / "src";
+    return fs::exists(src_dir) && fs::is_directory(src_dir);
+}
+
+MakepkgBuildOptions resolve_makepkg_build_options(const fs::path& pkg_dir) {
+    MakepkgBuildOptions options;
+
+    if(g_config.rebuild) {
+        options.rebuild = true;
+    } else if(has_local_package_artifact(pkg_dir)) {
+        options.rebuild = ask_user("Rebuild package?", PromptDefault::No);
+    }
+
+    if(g_config.clean_build) {
+        options.clean_build = true;
+    } else if(has_local_srcdir(pkg_dir)) {
+        options.clean_build = ask_user("Clean build existing build directory?", PromptDefault::No);
+    }
+
+    return options;
 }
 
 // prompt / ユーザー確認
@@ -2094,13 +2138,14 @@ void build_from_git(const std::string& pkg_name, const std::string& clone_name, 
         } else {
             Logger::info("Skipping PKGBUILD review (--noedit).");
         }
+        MakepkgBuildOptions makepkg_options = resolve_makepkg_build_options(pkg_dir);
         std::string build_cmd;
         if(!trim(custom_env).empty()) {
             Logger::info("Applying custom build flags: " + custom_env);
-            build_cmd = custom_env + makepkg_install_command();
+            build_cmd = custom_env + makepkg_install_command(makepkg_options);
         } else {
             Logger::info("Using default makepkg.conf settings.");
-            build_cmd = makepkg_install_command();
+            build_cmd = makepkg_install_command(makepkg_options);
         }
         if(run_command(build_cmd) != 0) throw std::runtime_error("Build failed.");
     }
