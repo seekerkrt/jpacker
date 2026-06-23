@@ -2,7 +2,7 @@
 
 `jpacker` は Arch Linux 向けの **pacman-first wrapper** として扱う。
 
-目的は、日常的な `pacman` workflow をできるだけ自然に通しつつ、AUR build / install と source build preference を補助することにある。現時点では `pacman`、`yay`、`paru` の完全な drop-in replacement ではなく、完全互換も宣言しない。
+目的は、日常的な `pacman` workflow をできるだけ自然に通しつつ、AUR build / install と source build preference を補助することにある。jpacker は Arch Linux / pacman / AUR の公式ツールではなく、現時点では `pacman` や既存 AUR helper と同じ挙動をすべて提供するものでもない。pacman options / flags の対応範囲は段階的に実装・検証しており、完全互換も宣言しない。
 
 この文書は、pacman / makepkg 由来の operation / option をどこまで pass-through するか、また jpacker 固有の operation / option とどう分けるかを固定するための方針である。実装がまだ追いついていない部分は「暫定」または「未整理」として扱う。
 
@@ -214,11 +214,19 @@ AUR / source build 経路では、最終的な install reason と関係するた
 
 ---
 
+## 外部コマンド表示
+
+jpacker が利用者に影響する主要な外部コマンドを実行する場合は、実行前に対象のコマンドを表示する。
+
+ただし、metadata 確認や内部判定のための小さな確認コマンドまで、通常ログにすべて列挙する方針ではない。
+
+---
+
 ## Out of scope
 
 次はこの方針文書では扱わない。
 
-- pacman / yay / paru 完全互換の宣言
+- pacman / 既存 AUR helper 完全互換の宣言
 - provider selection の本格実装
 - split package selection の本格実装
 - conflicts / replaces の自動解決
