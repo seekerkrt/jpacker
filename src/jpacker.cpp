@@ -1574,10 +1574,10 @@ bool search_aur(const std::vector<std::string>& keywords) {
                     std::cout << "\033[1;35maur\033[0m/\033[1m" << name << "\033[0m \033[1;32m"
                               << pkg["Version"].get<std::string>() << "\033[0m";
                     if(installed_foreign_packages.contains(name)) {
-                        std::cout << " [installed]";
+                        std::cout << " \033[1;36m[installed]\033[0m";
                     }
                     if(json_optional_long_long(pkg, "OutOfDate").has_value()) {
-                        std::cout << " [out-of-date]";
+                        std::cout << " \033[1;31m[out-of-date]\033[0m";
                     }
                     std::cout << std::endl;
                     if(pkg.contains("Description") && !pkg["Description"].is_null())
@@ -1610,7 +1610,7 @@ std::string join_comma_display_values(const std::vector<std::string>& values) {
 }
 
 std::string out_of_date_display(const std::optional<long long>& out_of_date) {
-    return out_of_date.has_value() ? "yes" : "no";
+    return out_of_date.has_value() ? "\033[1;31myes\033[0m" : "no";
 }
 
 void print_aur_info(const AurPackageInfo& pkg) {
