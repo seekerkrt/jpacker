@@ -367,6 +367,7 @@ bool search_aur(const std::vector<std::string>& keywords);
 std::string join_display_values(const std::vector<std::string>& values);
 std::string join_comma_display_values(const std::vector<std::string>& values);
 bool is_orphaned(const AurPackageInfo& pkg);
+std::string orphaned_display(const AurPackageInfo& pkg);
 std::string out_of_date_display(const std::optional<long long>& out_of_date);
 void print_aur_info(const AurPackageInfo& pkg);
 
@@ -1618,6 +1619,10 @@ bool is_orphaned(const AurPackageInfo& pkg) {
     return pkg.Maintainer.empty();
 }
 
+std::string orphaned_display(const AurPackageInfo& pkg) {
+    return is_orphaned(pkg) ? "\033[1;33myes\033[0m" : "no";
+}
+
 std::string out_of_date_display(const std::optional<long long>& out_of_date) {
     return out_of_date.has_value() ? "\033[1;31myes\033[0m" : "no";
 }
@@ -1636,9 +1641,7 @@ void print_aur_info(const AurPackageInfo& pkg) {
     std::cout << "Conflicts With  : " << join_display_values(pkg.Conflicts) << std::endl;
     std::cout << "Replaces        : " << join_display_values(pkg.Replaces) << std::endl;
     std::cout << "Maintainer      : " << (pkg.Maintainer.empty() ? "None" : pkg.Maintainer) << std::endl;
-    if(is_orphaned(pkg)) {
-        std::cout << "Status          : orphaned" << std::endl;
-    }
+    std::cout << "Orphaned        : " << orphaned_display(pkg) << std::endl;
     std::cout << "Out of Date     : " << out_of_date_display(pkg.OutOfDate) << std::endl;
 }
 
