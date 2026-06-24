@@ -366,6 +366,7 @@ PackageBuildSource resolve_build_source(const std::string& pkg_name);
 bool search_aur(const std::vector<std::string>& keywords);
 std::string join_display_values(const std::vector<std::string>& values);
 std::string join_comma_display_values(const std::vector<std::string>& values);
+bool is_orphaned(const AurPackageInfo& pkg);
 std::string out_of_date_display(const std::optional<long long>& out_of_date);
 void print_aur_info(const AurPackageInfo& pkg);
 
@@ -1570,14 +1571,18 @@ bool search_aur(const std::vector<std::string>& keywords) {
             if(j.contains("results") && j["results"].is_array()) {
                 for(const auto& pkg : j["results"]) {
                     found = true;
-                    std::string name = pkg["Name"].get<std::string>();
+                    AurPackageInfo info = parse_aur_package_info(pkg);
+                    std::string    name = info.Name;
                     std::cout << "\033[1;35maur\033[0m/\033[1m" << name << "\033[0m \033[1;32m"
-                              << pkg["Version"].get<std::string>() << "\033[0m";
+                              << info.Version << "\033[0m";
                     if(installed_foreign_packages.contains(name)) {
                         std::cout << " \033[1;36m[installed]\033[0m";
                     }
-                    if(json_optional_long_long(pkg, "OutOfDate").has_value()) {
+                    if(info.OutOfDate.has_value()) {
                         std::cout << " \033[1;31m[out-of-date]\033[0m";
+                    }
+                    if(is_orphaned(info)) {
+                        std::cout << " \033[1;33m[orphaned]\033[0m";
                     }
                     std::cout << std::endl;
                     if(pkg.contains("Description") && !pkg["Description"].is_null())
@@ -1609,6 +1614,10 @@ std::string join_comma_display_values(const std::vector<std::string>& values) {
     return ss.str();
 }
 
+bool is_orphaned(const AurPackageInfo& pkg) {
+    return pkg.Maintainer.empty();
+}
+
 std::string out_of_date_display(const std::optional<long long>& out_of_date) {
     return out_of_date.has_value() ? "\033[1;31myes\033[0m" : "no";
 }
@@ -1627,6 +1636,9 @@ void print_aur_info(const AurPackageInfo& pkg) {
     std::cout << "Conflicts With  : " << join_display_values(pkg.Conflicts) << std::endl;
     std::cout << "Replaces        : " << join_display_values(pkg.Replaces) << std::endl;
     std::cout << "Maintainer      : " << (pkg.Maintainer.empty() ? "None" : pkg.Maintainer) << std::endl;
+    if(is_orphaned(pkg)) {
+        std::cout << "Status          : orphaned" << std::endl;
+    }
     std::cout << "Out of Date     : " << out_of_date_display(pkg.OutOfDate) << std::endl;
 }
 
