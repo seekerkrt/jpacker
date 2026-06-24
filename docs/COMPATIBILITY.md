@@ -72,8 +72,11 @@
 - `-S <target>`: official repository package は pacman へ渡し、official repository にない target または source build preference がある target は AUR / source build 経路へ進める。
 - `-Ss <query>`: pacman search のあと AUR search を補完する。
 - `-Si <target>`: official repository にあれば pacman info を使い、なければ AUR metadata を表示する。
+- `-Sc`: `sudo pacman -Sc` へ委譲し、pacman cache のみを対象にする。jpacker の build/cache も削除したい場合は `clean` を使う。
 - `-Qua`: foreign packages を見て AUR update を確認する。
 - `-Syu` / `-Sy` / `-Su`: pacman-compatible system upgrade として扱い、登録済み source build preferences の全体走査は行わない。source build preferences も確認したい場合は `upgrade` を使う。
+
+現時点の `upgrade` / source update 系の一部では、更新判定用の `.SRCINFO` を得るために `makepkg --printsrcinfo` を実行する場合があり、後続の review prompt より前に PKGBUILD が評価されうる。これは既知の制限で、#134 で `.SRCINFO` 優先の更新判定へ整理する予定である。
 
 ---
 
