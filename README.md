@@ -111,6 +111,8 @@ jpacker -Syu
 
 `jpacker -Syu` は pacman 互換の system upgrade として扱われ、登録済み source build preferences の全体走査は行いません。system upgrade 後に `/etc/jpacker/package.build/` の設定を確認し、必要な package を自動で rebuild したい場合は `jpacker upgrade` を使ってください。
 
+`jpacker -Sc` は `sudo pacman -Sc` へ委譲され、pacman cache のみを対象にします。jpacker の build/cache も削除したい場合は `jpacker clean` を使ってください。
+
 ### AUR build repository inspection / `fetch`
 
 `jpacker fetch <pkg>` は、build や install の前に AUR build repository を確認するための安全な retrieval stage です。
@@ -172,6 +174,8 @@ Preferred source builds は、PKGBUILD version が installed package より新�
 jpacker upgrade
 ```
 
+注意: 現在の upgrade / source update 系の一部では、更新判定用の `.SRCINFO` を得るために `makepkg --printsrcinfo` を実行する場合があり、後続の review prompt より前に PKGBUILD が評価されうる。これは既知の制限で、[#134](https://github.com/seekerkrt/jpacker/issues/134) で `.SRCINFO` 優先の更新判定へ整理する予定です。
+
 #### 6. Official binary package に戻す
 
 source build をやめて standard binary package に戻したい場合は、次を実行します。
@@ -213,7 +217,7 @@ Example:
 # Skip the diff prompt after fetching repository updates (default: false)
 # NODIFF=true
 
-# Preferred editor (default: $EDITOR or nano)
+# Preferred editor (priority: $EDITOR > this setting > nano)
 # EDITOR=vim
 
 # Log file path (default: ~/.cache/jpacker/jpacker.log)
@@ -365,6 +369,8 @@ jpacker -Syu
 
 `jpacker -Syu` is treated as a pacman-compatible system upgrade and does not scan all registered source-build preferences. Use `jpacker upgrade` instead when you want jpacker to check `/etc/jpacker/package.build/` after the system upgrade and rebuild configured source packages when needed.
 
+`jpacker -Sc` is passed through to `sudo pacman -Sc` and cleans pacman caches only. Use `jpacker clean` when you also want to remove jpacker build/cache files.
+
 ### AUR build repository inspection / `fetch`
 
 `jpacker fetch <pkg>` is a safe retrieval stage for inspecting AUR build repositories before building or installing anything.
@@ -426,6 +432,8 @@ Preferred source builds are rebuilt when their PKGBUILD version is newer than th
 jpacker upgrade
 ```
 
+Note: some upgrade/source-update checks currently use `makepkg --printsrcinfo` to obtain `.SRCINFO`, which may evaluate the PKGBUILD before the later review prompt. This is a known limitation tracked in [#134](https://github.com/seekerkrt/jpacker/issues/134) and will be moved toward `.SRCINFO`-first checks.
+
 #### 6. Revert to the official binary package
 
 If you want to stop building a package from source and immediately switch back to the standard binary package:
@@ -467,7 +475,7 @@ Example:
 # Skip the diff prompt after fetching repository updates (default: false)
 # NODIFF=true
 
-# Preferred editor (default: $EDITOR or nano)
+# Preferred editor (priority: $EDITOR > this setting > nano)
 # EDITOR=vim
 
 # Log file path (default: ~/.cache/jpacker/jpacker.log)
