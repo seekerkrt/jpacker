@@ -77,6 +77,42 @@
 
 ---
 
+## AUR metadata 表示ポリシー
+
+v1.8.0 では、AUR package status display cleanup として、AUR package の状態を分かりやすく表示することを優先する。
+
+`jpacker -Ss` は検索・発見用途として軽く保つ。AUR search result に表示する状態タグは次の順序に固定する。
+
+- `[installed]`
+- `[out-of-date]`
+- `[orphaned]`
+
+状態タグの色は次の通りとする。
+
+- `[installed]`: cyan
+- `[out-of-date]`: red
+- `[orphaned]`: yellow
+
+`-Si` は AUR package の状態情報を確認できる表示として扱う。v1.8.0 では、少なくとも次の情報を確認できるようにする。
+
+- maintainer
+- out-of-date
+- orphaned / maintainer missing
+- installed state
+
+v1.8.0 では次の表示は扱わない。これらは検索表示や package info 表示の契約に混ぜず、別 Issue で必要性と表示位置を整理してから扱う。
+
+- `-Ss` size 表示
+- `-Si` size 表示
+- `plan` size 表示
+- AUR build 前 size 推定
+- AUR build 後 package artifact size 表示
+- transaction 全体の容量見積もり
+- votes / popularity
+- first submitted / last modified
+
+---
+
 ## pacman / makepkg 由来 option の pass-through
 
 pacman へ直接委譲する経路では、jpacker が明示的に消費しない pacman-compatible option を pacman へ渡す。
