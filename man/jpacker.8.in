@@ -20,13 +20,14 @@ Any operation or flag not explicitly handled by jpacker is passed through to pac
 Install packages or update the system. If a target is found in the official repositories, pacman is used. If not, it is searched in the AUR.
 If a package has a source-build preference (via \fBadd-src\fR), it will be built from source even if it exists in the official repositories.
 \fBjpacker -Syu\fR is treated as a pacman-compatible system upgrade and does not scan all registered source-build preferences. Use \fBjpacker upgrade\fR when registered source-build settings should be checked after the system upgrade and rebuilt when needed.
+\fBjpacker -Sc\fR is passed through to \fBsudo pacman -Sc\fR and cleans pacman caches only. Use \fBjpacker clean\fR when you also want to remove jpacker build/cache files.
 .TP
 .B \-Ss \fI<query>\fR
 Search for packages in both the official repositories and the AUR.
-AUR search results may show status tags such as \fB[installed]\fR and \fB[out-of-date]\fR when that metadata is available.
+AUR search results may show status tags such as \fB[installed]\fR, \fB[out-of-date]\fR, and \fB[orphaned]\fR when that metadata is available.
 .TP
 .B \-Si \fI<package>\fR
-Show package information. Official repository packages use pacman output; AUR packages use AUR metadata and include the out-of-date flag state.
+Show package information. Official repository packages use pacman output; AUR packages use AUR metadata and include installed, orphaned, and out-of-date state.
 .TP
 .B \-R, \-Rs, \-Rns \fI<target>\fR
 Remove packages. This is a direct wrapper around \fBpacman -R\fR.
@@ -58,6 +59,7 @@ Future behavior that advances a working tree is not implemented by \fBfetch\fR a
 Perform a system upgrade and configured rebuilds. This first runs \fBsudo pacman -Syu\fR, then checks packages with source-build preferences and rebuilds them from source only when their PKGBUILD version is newer than the installed package.
 Use this command, not \fBjpacker -Syu\fR, when registered source-build settings in \fI/etc/jpacker/package.build/\fR should be checked automatically after a system upgrade.
 During source package updates, jpacker can show a git diff if changes are detected.
+Some upgrade/source-update checks currently use \fBmakepkg --printsrcinfo\fR to obtain \fI.SRCINFO\fR, which may evaluate the PKGBUILD before the later review prompt. This known limitation is tracked in issue #134 and will be moved toward \fI.SRCINFO\fR-first checks.
 .TP
 .B clean
 Clean package/build caches. This first runs \fBsudo pacman -Sc\fR to clean the official package cache, and then prompts to remove build artifacts from the jpacker cache directory (\fI~/.cache/jpacker/\fR). Log files are preserved.
@@ -109,7 +111,7 @@ Set to \fBtrue\fR to disable PKGBUILD review prompts globally.
 Set to \fBtrue\fR to disable git diff checks during updates globally.
 .TP
 .B EDITOR
-Specify the preferred text editor. If the \fBEDITOR\fR environment variable is set, it takes precedence.
+Specify the preferred text editor. The priority is the \fBEDITOR\fR environment variable, this configuration value, then \fBnano\fR.
 Editor command tokens are restricted to simple command words and options for safety.
 .TP
 .B LOGFILE

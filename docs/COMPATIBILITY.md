@@ -72,8 +72,47 @@
 - `-S <target>`: official repository package は pacman へ渡し、official repository にない target または source build preference がある target は AUR / source build 経路へ進める。
 - `-Ss <query>`: pacman search のあと AUR search を補完する。
 - `-Si <target>`: official repository にあれば pacman info を使い、なければ AUR metadata を表示する。
+- `-Sc`: `sudo pacman -Sc` へ委譲し、pacman cache のみを対象にする。jpacker の build/cache も削除したい場合は `clean` を使う。
 - `-Qua`: foreign packages を見て AUR update を確認する。
 - `-Syu` / `-Sy` / `-Su`: pacman-compatible system upgrade として扱い、登録済み source build preferences の全体走査は行わない。source build preferences も確認したい場合は `upgrade` を使う。
+
+現時点の `upgrade` / source update 系の一部では、更新判定用の `.SRCINFO` を得るために `makepkg --printsrcinfo` を実行する場合があり、後続の review prompt より前に PKGBUILD が評価されうる。これは既知の制限で、#134 で `.SRCINFO` 優先の更新判定へ整理する予定である。
+
+---
+
+## AUR metadata 表示ポリシー
+
+v1.8.0 では、AUR package status display cleanup として、AUR package の状態を分かりやすく表示することを優先する。
+
+`jpacker -Ss` は検索・発見用途として軽く保つ。AUR search result に表示する状態タグは次の順序に固定する。
+
+- `[installed]`
+- `[out-of-date]`
+- `[orphaned]`
+
+状態タグの色は次の通りとする。
+
+- `[installed]`: cyan
+- `[out-of-date]`: red
+- `[orphaned]`: yellow
+
+`-Si` は AUR package の状態情報を確認できる表示として扱う。v1.8.0 では、少なくとも次の情報を確認できるようにする。
+
+- maintainer
+- out-of-date
+- orphaned / maintainer missing
+- installed state
+
+v1.8.0 では次の表示は扱わない。これらは検索表示や package info 表示の契約に混ぜず、別 Issue で必要性と表示位置を整理してから扱う。
+
+- `-Ss` size 表示
+- `-Si` size 表示
+- `plan` size 表示
+- AUR build 前 size 推定
+- AUR build 後 package artifact size 表示
+- transaction 全体の容量見積もり
+- votes / popularity
+- first submitted / last modified
 
 ---
 

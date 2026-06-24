@@ -328,6 +328,7 @@ void require_valid_package_name(const std::string& name);
 bool is_force_source(const std::string& pkg_name);
 std::string get_package_env(const std::string& pkg_name);
 std::string get_git_branch();
+bool is_installed_package(const std::string& pkg_name);
 bool is_update_needed(const std::string& pkg_name);
 bool is_repo_package(const std::string& pkg_name);
 std::string repo_name_from_sync_db(const fs::path& db_path);
@@ -366,6 +367,9 @@ PackageBuildSource resolve_build_source(const std::string& pkg_name);
 bool search_aur(const std::vector<std::string>& keywords);
 std::string join_display_values(const std::vector<std::string>& values);
 std::string join_comma_display_values(const std::vector<std::string>& values);
+bool is_orphaned(const AurPackageInfo& pkg);
+std::string installed_display(const AurPackageInfo& pkg);
+std::string orphaned_display(const AurPackageInfo& pkg);
 std::string out_of_date_display(const std::optional<long long>& out_of_date);
 void print_aur_info(const AurPackageInfo& pkg);
 
@@ -622,7 +626,7 @@ int run_jpacker(int argc, char* argv[]) {
             return (pacman_ret == 0 || aur_found) ? 0 : 1;
         }
         if(is_info) return cmd_sync_info(args, flags, targets);
-        if(is_clean) return run_command("pacman " + join_pacman_args(args));
+        if(is_clean) return run_command("sudo pacman " + join_pacman_args(args));
 
         if(is_sync) {
             if(targets.empty()) return run_command("sudo pacman " + join_pacman_args(args));
@@ -717,7 +721,7 @@ void print_help() {
     std::cout << "    \033[1m--rebuild\033[0m           Pass -f to makepkg build/install" << std::endl;
     std::cout << "    \033[1m--cleanbuild\033[0m        Pass -C to makepkg build/install" << std::endl;
     std::cout << "\033[1mCONFIG\033[0m" << std::endl;
-    std::cout << "    jpacker.conf: LOGFILE=..., NOEDIT=..., NODIFF=..." << std::endl;
+    std::cout << "    jpacker.conf: EDITOR=..., LOGFILE=..., NOEDIT=..., NODIFF=..." << std::endl;
 }
 
 bool handle_info_only_option(int argc, char* argv[]) {
@@ -1107,6 +1111,11 @@ bool is_update_needed(const std::string& pkg_name) {
 
     Logger::info(pkg_name + " is up to date (" + installed_ver + "). Skipping.");
     return false;
+}
+
+bool is_installed_package(const std::string& pkg_name) {
+    if(pkg_name.empty()) return false;
+    return command_status("pacman -Q " + shell_quote(pkg_name) + " > /dev/null 2>&1") == 0;
 }
 
 bool is_repo_package(const std::string& pkg_name) {
@@ -1570,14 +1579,18 @@ bool search_aur(const std::vector<std::string>& keywords) {
             if(j.contains("results") && j["results"].is_array()) {
                 for(const auto& pkg : j["results"]) {
                     found = true;
-                    std::string name = pkg["Name"].get<std::string>();
+                    AurPackageInfo info = parse_aur_package_info(pkg);
+                    std::string    name = info.Name;
                     std::cout << "\033[1;35maur\033[0m/\033[1m" << name << "\033[0m \033[1;32m"
-                              << pkg["Version"].get<std::string>() << "\033[0m";
+                              << info.Version << "\033[0m";
                     if(installed_foreign_packages.contains(name)) {
                         std::cout << " \033[1;36m[installed]\033[0m";
                     }
-                    if(json_optional_long_long(pkg, "OutOfDate").has_value()) {
+                    if(info.OutOfDate.has_value()) {
                         std::cout << " \033[1;31m[out-of-date]\033[0m";
+                    }
+                    if(is_orphaned(info)) {
+                        std::cout << " \033[1;33m[orphaned]\033[0m";
                     }
                     std::cout << std::endl;
                     if(pkg.contains("Description") && !pkg["Description"].is_null())
@@ -1609,6 +1622,18 @@ std::string join_comma_display_values(const std::vector<std::string>& values) {
     return ss.str();
 }
 
+bool is_orphaned(const AurPackageInfo& pkg) {
+    return pkg.Maintainer.empty();
+}
+
+std::string installed_display(const AurPackageInfo& pkg) {
+    return is_installed_package(pkg.Name) ? "\033[1;36myes\033[0m" : "no";
+}
+
+std::string orphaned_display(const AurPackageInfo& pkg) {
+    return is_orphaned(pkg) ? "\033[1;33myes\033[0m" : "no";
+}
+
 std::string out_of_date_display(const std::optional<long long>& out_of_date) {
     return out_of_date.has_value() ? "\033[1;31myes\033[0m" : "no";
 }
@@ -1627,6 +1652,8 @@ void print_aur_info(const AurPackageInfo& pkg) {
     std::cout << "Conflicts With  : " << join_display_values(pkg.Conflicts) << std::endl;
     std::cout << "Replaces        : " << join_display_values(pkg.Replaces) << std::endl;
     std::cout << "Maintainer      : " << (pkg.Maintainer.empty() ? "None" : pkg.Maintainer) << std::endl;
+    std::cout << "Installed       : " << installed_display(pkg) << std::endl;
+    std::cout << "Orphaned        : " << orphaned_display(pkg) << std::endl;
     std::cout << "Out of Date     : " << out_of_date_display(pkg.OutOfDate) << std::endl;
 }
 
