@@ -126,6 +126,12 @@ jpacker fetch spotify
 
 working tree を進める将来の挙動は `fetch` には含めません。必要な場合は `sync`、`update`、`fetch --update` のような明示的な別 operation として扱うべきです。
 
+### AUR dependency version constraints
+
+`jpacker deps` / `jpacker plan` は、AUR dependency に含まれる `foo>=1.2` のような version constraint を検出し、表示に残します。ただし jpacker v1.x では、pacman / libalpm 相当の完全な version constraint 判定は行いません。
+
+constraint 付き dependency は package name 部分で従来通り解決を試みますが、version 条件を満たしているとは表示しません。未検証の constraint は warning または unresolved reason として表示され、build plan 実行時には未解決依存として扱われます。
+
 ### Source build preferences
 
 `jpacker` は per-package source build preferences を管理できます。これにより、選択した package を source から build し、Gentoo の `package.env` に近い形で custom build flags を適用できます。
@@ -383,6 +389,12 @@ jpacker fetch spotify
 Missing AUR repositories are cloned into the jpacker cache. Existing cloned repositories run only `git fetch origin`; the working tree is not updated. This command does not run `git pull`, merge, reset, build, or install operations.
 
 Future behavior that advances a working tree is not implemented by `fetch`; it should be handled in a separate issue as an explicit operation such as `sync`, `update`, or `fetch --update`.
+
+### AUR dependency version constraints
+
+`jpacker deps` / `jpacker plan` detects version constraints in AUR dependencies such as `foo>=1.2` and keeps them visible in output. jpacker v1.x does not implement a complete pacman/libalpm-compatible version constraint solver.
+
+Dependencies with constraints are still resolved by their package name when possible, but jpacker does not report the version condition as satisfied. Unverified constraints are shown as warnings or unresolved reasons, and build plan execution treats them as unresolved dependencies.
 
 ### Source build preferences
 
