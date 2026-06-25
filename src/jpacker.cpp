@@ -110,6 +110,28 @@ struct InstalledPackage {
     std::string version;
 };
 
+// AUR dependency string の raw/name/operator/version を失わないための最小表現。
+// POLICY: v1.x では version compare は行わず、constraint の検出と表示だけを担当する。
+struct ParsedDependency {
+    std::string                raw;
+    std::string                name;
+    std::optional<std::string> op;
+    std::optional<std::string> version;
+
+    bool has_constraint() const {
+        return op.has_value();
+    }
+
+    bool has_parseable_constraint() const {
+        return op.has_value() && version.has_value() && !version->empty() &&
+               version->find_first_of("<>=") != 0;
+    }
+
+    bool has_malformed_constraint() const {
+        return has_constraint() && !has_parseable_constraint();
+    }
+};
+
 // 依存を official repo / AUR / provider / unknown に分けた結果。
 struct DependencyClassification {
     std::vector<std::string> repo;
@@ -322,8 +344,13 @@ std::string build_editor_command(const std::string& editor, const fs::path& targ
 // pacman / repository補助
 bool pacman_option_takes_value(const std::string& arg);
 bool is_valid_package_name(const std::string& name);
+ParsedDependency parse_dependency_string(const std::string& dependency);
 std::string dependency_package_name(const std::string& dependency);
 std::string provided_dependency_name(const std::string& provided);
+std::string dependency_constraint_note(const std::string& dependency);
+std::string dependency_constraint_unresolved_reason(const std::string& dependency);
+std::string dependency_display_with_constraint_note(const std::string& display, const std::string& dependency);
+void warn_unverified_version_constraint(const std::string& dependency);
 void require_valid_package_name(const std::string& name);
 bool is_force_source(const std::string& pkg_name);
 std::string get_package_env(const std::string& pkg_name);
@@ -1005,15 +1032,58 @@ bool is_valid_package_name(const std::string& name) {
     });
 }
 
+ParsedDependency parse_dependency_string(const std::string& dependency) {
+    ParsedDependency parsed;
+    parsed.raw = trim(dependency);
+
+    size_t pos = parsed.raw.find_first_of("<>=");
+    if(pos == std::string::npos) {
+        parsed.name = parsed.raw;
+        return parsed;
+    }
+
+    parsed.name = trim(parsed.raw.substr(0, pos));
+    if((parsed.raw[pos] == '<' || parsed.raw[pos] == '>') && pos + 1 < parsed.raw.size() &&
+       parsed.raw[pos + 1] == '=') {
+        parsed.op = parsed.raw.substr(pos, 2);
+        parsed.version = trim(parsed.raw.substr(pos + 2));
+    } else {
+        parsed.op = parsed.raw.substr(pos, 1);
+        parsed.version = trim(parsed.raw.substr(pos + 1));
+    }
+
+    return parsed;
+}
+
 std::string dependency_package_name(const std::string& dependency) {
-    std::string dep = trim(dependency);
-    size_t      pos = dep.find_first_of("<>=");
-    if(pos != std::string::npos) dep = dep.substr(0, pos);
-    return trim(dep);
+    return parse_dependency_string(dependency).name;
 }
 
 std::string provided_dependency_name(const std::string& provided) {
     return dependency_package_name(provided);
+}
+
+std::string dependency_constraint_note(const std::string& dependency) {
+    ParsedDependency parsed = parse_dependency_string(dependency);
+    if(!parsed.has_parseable_constraint()) return "";
+    return " [constraint: " + parsed.op.value() + " " + parsed.version.value() + ", not verified]";
+}
+
+std::string dependency_constraint_unresolved_reason(const std::string& dependency) {
+    ParsedDependency parsed = parse_dependency_string(dependency);
+    if(parsed.has_malformed_constraint()) return parsed.raw + " (invalid version constraint)";
+    if(parsed.has_constraint()) return parsed.raw + " (version constraint is not verified)";
+    return parsed.raw;
+}
+
+std::string dependency_display_with_constraint_note(const std::string& display, const std::string& dependency) {
+    return display + dependency_constraint_note(dependency);
+}
+
+void warn_unverified_version_constraint(const std::string& dependency) {
+    ParsedDependency parsed = parse_dependency_string(dependency);
+    if(!parsed.has_parseable_constraint()) return;
+    Logger::warn("version constraint for " + parsed.raw + " is not verified");
 }
 
 void require_valid_package_name(const std::string& name) {
@@ -1679,10 +1749,12 @@ std::vector<std::string> collect_build_dependencies(const AurPackageInfo& pkg) {
 }
 
 void add_classified_dependency(std::vector<std::string>& dependencies, const std::string& dependency, const std::string& package_name) {
+    std::string display;
     if(dependency == package_name)
-        dependencies.push_back(dependency);
+        display = dependency;
     else
-        dependencies.push_back(dependency + " (" + package_name + ")");
+        display = dependency + " (" + package_name + ")";
+    dependencies.push_back(dependency_display_with_constraint_note(display, dependency));
 }
 
 std::string package_base_or_name(const AurPackageInfo& info) {
@@ -1694,24 +1766,35 @@ bool has_distinct_package_base(const AurPackageInfo& info) {
 }
 
 void add_classified_aur_dependency(std::vector<std::string>& dependencies, const std::string& dependency, const AurPackageInfo& info) {
-    std::string display = dependency_display_name(dependency, info.Name);
+    std::string display;
+    if(info.Name.empty() || dependency == info.Name)
+        display = dependency;
+    else
+        display = dependency + " (" + info.Name + ")";
     if(has_distinct_package_base(info)) display += " (base: " + info.PackageBase + ")";
-    dependencies.push_back(display);
+    dependencies.push_back(dependency_display_with_constraint_note(display, dependency));
 }
 
 std::string provided_dependency_display(const std::string& dependency, const ProvidedDependency& provider) {
-    return dependency + " [provided by " + provider.repository + "/" + provider.package_name + "]";
+    return dependency + " [provided by " + provider.repository + "/" + provider.package_name + "]" +
+           dependency_constraint_note(dependency);
 }
 
 DependencyClassification classify_dependencies(const std::vector<std::string>& dependencies) {
     DependencyClassification result;
 
     for(const auto& dependency : dependencies) {
-        std::string package_name = dependency_package_name(dependency);
+        ParsedDependency parsed = parse_dependency_string(dependency);
+        std::string      package_name = parsed.name;
         if(!is_valid_package_name(package_name)) {
             result.unknown.push_back(dependency);
             continue;
         }
+        if(parsed.has_malformed_constraint()) {
+            result.unknown.push_back(dependency_constraint_unresolved_reason(dependency));
+            continue;
+        }
+        warn_unverified_version_constraint(dependency);
 
         if(is_repo_package(package_name)) {
             add_classified_dependency(result.repo, dependency, package_name);
@@ -1727,7 +1810,7 @@ DependencyClassification classify_dependencies(const std::vector<std::string>& d
                 if(provider.has_value())
                     result.provided.push_back(provided_dependency_display(dependency, provider.value()));
                 else
-                    result.unknown.push_back(dependency);
+                    result.unknown.push_back(dependency_display_with_constraint_note(dependency, dependency));
             }
         } catch(const std::exception& e) {
             Logger::warn("Failed to check AUR dependency " + package_name + ": " + e.what());
@@ -1735,7 +1818,7 @@ DependencyClassification classify_dependencies(const std::vector<std::string>& d
             if(provider.has_value())
                 result.provided.push_back(provided_dependency_display(dependency, provider.value()));
             else
-                result.unknown.push_back(dependency);
+                result.unknown.push_back(dependency_display_with_constraint_note(dependency, dependency));
         }
     }
 
@@ -1743,8 +1826,12 @@ DependencyClassification classify_dependencies(const std::vector<std::string>& d
 }
 
 std::string dependency_display_name(const std::string& dependency, const std::string& package_name) {
-    if(package_name.empty() || dependency == package_name) return dependency;
-    return dependency + " (" + package_name + ")";
+    std::string display;
+    if(package_name.empty() || dependency == package_name)
+        display = dependency;
+    else
+        display = dependency + " (" + package_name + ")";
+    return dependency_display_with_constraint_note(display, dependency);
 }
 
 std::string dependency_kind_display(DependencyKind kind) {
@@ -1774,9 +1861,10 @@ RecursiveDependencyNode resolve_recursive_dependency(
         const std::string& dependency, std::set<std::string>& visited, int depth, int max_depth) {
     RecursiveDependencyNode node;
     node.dependency = dependency;
-    node.package_name = dependency_package_name(dependency);
+    ParsedDependency parsed = parse_dependency_string(dependency);
+    node.package_name = parsed.name;
 
-    if(!is_valid_package_name(node.package_name)) {
+    if(!is_valid_package_name(node.package_name) || parsed.has_malformed_constraint()) {
         node.kind = DependencyKind::Unknown;
         return node;
     }
@@ -1914,10 +2002,18 @@ void collect_aur_build_plan(
     visiting.insert(build_unit);
 
     for(const auto& dependency : collect_build_dependencies(info.value())) {
-        std::string dep_name = dependency_package_name(dependency);
+        ParsedDependency parsed = parse_dependency_string(dependency);
+        std::string      dep_name = parsed.name;
         if(!is_valid_package_name(dep_name)) {
             add_unique_value(plan.unresolved, dependency);
             continue;
+        }
+        if(parsed.has_malformed_constraint()) {
+            add_unique_value(plan.unresolved, dependency_constraint_unresolved_reason(dependency));
+            continue;
+        }
+        if(parsed.has_constraint()) {
+            add_unique_value(plan.unresolved, dependency_constraint_unresolved_reason(dependency));
         }
         if(is_repo_package(dep_name)) continue;
 
@@ -1974,8 +2070,10 @@ void print_build_plan(const BuildPlan& plan) {
         std::cout << std::endl;
         std::cout << "Provided dependencies:" << std::endl;
         for(const auto& dependency : plan.provided) {
-            std::cout << "  - " << dependency.dependency << " -> " << dependency.provider.repository << "/"
-                      << dependency.provider.package_name << std::endl;
+            std::cout << "  - "
+                      << dependency_display_with_constraint_note(dependency.dependency, dependency.dependency)
+                      << " -> " << dependency.provider.repository << "/" << dependency.provider.package_name
+                      << std::endl;
         }
     }
 

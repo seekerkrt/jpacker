@@ -41,11 +41,13 @@ Example: \fIjpacker build coreutils CFLAGS="-O3 -march=native"\fR
 .B deps [\-\-recursive] \fI<package>\fR
 Inspect an AUR package's runtime, make, and check dependencies, then classify them as official repository dependencies, AUR dependencies, provided dependencies, or unknown dependencies.
 With \fB\-\-recursive\fR, recursively inspect AUR dependencies. Official repository, provided, and unknown dependencies are shown but not traversed.
+Version constraints such as \fBfoo>=1.2\fR are detected and shown, but jpacker v1.x does not verify them with a complete pacman/libalpm-compatible solver.
 This command does not clone, build, install dependencies, or calculate build order.
 .TP
 .B plan \fI<package>\fR
 Display a build order plan for an AUR package and its recursive AUR dependencies.
 Official repository and repository-provided dependencies are not included in the build plan. Unknown dependencies are reported as unresolved.
+Unverified version constraints are reported as unresolved reasons and are not treated as satisfied.
 This command does not clone, build, or install dependencies.
 .TP
 .B fetch \fI<package>\fR
