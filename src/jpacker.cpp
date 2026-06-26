@@ -132,11 +132,24 @@ struct ParsedDependency {
     }
 };
 
+// 依存名を満たす provider package と、その所属 repository。
+struct ProvidedDependency {
+    std::string repository;
+    std::string package_name;
+};
+
+// 複数 provider がある依存。#97 ではここで止め、暗黙選択しない。
+struct AmbiguousProvidedDependency {
+    std::string dependency;
+    std::vector<ProvidedDependency> candidates;
+};
+
 // 依存を official repo / AUR / provider / unknown に分けた結果。
 struct DependencyClassification {
     std::vector<std::string> repo;
     std::vector<std::string> aur;
     std::vector<std::string> provided;
+    std::vector<AmbiguousProvidedDependency> ambiguous_providers;
     std::vector<std::string> unknown;
 };
 
@@ -144,13 +157,8 @@ enum class DependencyKind {
     Repo,
     Aur,
     Provided,
+    AmbiguousProvider,
     Unknown
-};
-
-// 依存名を満たす provider package と、その所属 repository。
-struct ProvidedDependency {
-    std::string repository;
-    std::string package_name;
 };
 
 // recursive dependency tree の 1 node。表示と循環検出結果を同じ単位で持つ。
@@ -159,6 +167,7 @@ struct RecursiveDependencyNode {
     std::string                          package_name;
     std::string                          package_base;
     std::optional<ProvidedDependency>    provided_by;
+    std::vector<ProvidedDependency>      provider_candidates;
     DependencyKind                       kind = DependencyKind::Unknown;
     bool                                 already_visited = false;
     bool                                 max_depth_reached = false;
@@ -181,6 +190,7 @@ struct BuildPlanProvidedDependency {
 struct BuildPlan {
     std::vector<BuildPlanEntry> order;
     std::vector<BuildPlanProvidedDependency> provided;
+    std::vector<AmbiguousProvidedDependency> ambiguous_providers;
     std::vector<std::string> unresolved;
     std::vector<std::string> cycles;
 };
@@ -360,13 +370,13 @@ bool is_update_needed(const std::string& pkg_name);
 bool is_repo_package(const std::string& pkg_name);
 std::string repo_name_from_sync_db(const fs::path& db_path);
 void add_repo_provider(
-        std::map<std::string, ProvidedDependency>& providers, const std::string& provided,
+        std::map<std::string, std::vector<ProvidedDependency>>& providers, const std::string& provided,
         const std::string& repository, const std::string& package_name);
 void parse_repo_sync_desc(
         const std::string& desc, const std::string& repository,
-        std::map<std::string, ProvidedDependency>& providers);
-const std::map<std::string, ProvidedDependency>& repo_providers();
-std::optional<ProvidedDependency> find_repo_provider(const std::string& dependency_name);
+        std::map<std::string, std::vector<ProvidedDependency>>& providers);
+const std::map<std::string, std::vector<ProvidedDependency>>& repo_providers();
+std::vector<ProvidedDependency> find_repo_providers(const std::string& dependency_name);
 std::vector<InstalledPackage> get_foreign_packages();
 std::set<std::string> get_foreign_package_names();
 bool aur_version_is_newer(const std::string& aur_version, const std::string& installed_version);
@@ -386,8 +396,8 @@ AurPackageInfo parse_aur_package_info(const json& pkg);
 
 // AUR provider / build source解決
 bool aur_package_provides(const AurPackageInfo& info, const std::string& dependency_name);
-std::optional<ProvidedDependency> find_aur_provider(const std::string& dependency_name);
-std::optional<ProvidedDependency> find_dependency_provider(const std::string& dependency_name);
+std::vector<ProvidedDependency> find_aur_providers(const std::string& dependency_name);
+std::vector<ProvidedDependency> find_dependency_providers(const std::string& dependency_name);
 PackageBuildSource resolve_build_source(const std::string& pkg_name);
 
 // AUR検索 / info表示
@@ -408,6 +418,7 @@ std::string package_base_or_name(const AurPackageInfo& info);
 bool has_distinct_package_base(const AurPackageInfo& info);
 void add_classified_aur_dependency(std::vector<std::string>& dependencies, const std::string& dependency, const AurPackageInfo& info);
 std::string provided_dependency_display(const std::string& dependency, const ProvidedDependency& provider);
+std::string provider_display(const ProvidedDependency& provider);
 DependencyClassification classify_dependencies(const std::vector<std::string>& dependencies);
 std::string dependency_display_name(const std::string& dependency, const std::string& package_name);
 std::string dependency_kind_display(DependencyKind kind);
@@ -423,6 +434,8 @@ void add_unique_value(std::vector<std::string>& values, const std::string& value
 void add_build_plan_entry(BuildPlan& plan, const AurPackageInfo& info);
 void add_build_plan_provided_dependency(
         BuildPlan& plan, const std::string& dependency, const ProvidedDependency& provider);
+void add_build_plan_ambiguous_provider(
+        BuildPlan& plan, const std::string& dependency, const std::vector<ProvidedDependency>& candidates);
 void collect_aur_build_plan(
         const std::string& package_name, BuildPlan& plan, std::set<std::string>& visited,
         std::set<std::string>& visiting, int depth, int max_depth, bool traverse_aur_providers = true);
@@ -431,6 +444,10 @@ void require_executable_build_plan(const std::string& target, const BuildPlan& p
 BuildPlan resolve_build_plan(const std::string& target);
 BuildPlan resolve_fetch_plan(const std::string& target);
 void print_dependency_group(const std::string& label, const std::vector<std::string>& dependencies);
+void print_ambiguous_provider_group(
+        const std::string& label, const std::vector<AmbiguousProvidedDependency>& dependencies);
+std::string ambiguous_provider_dependency_summary(const AmbiguousProvidedDependency& dependency);
+std::string join_ambiguous_provider_summaries(const std::vector<AmbiguousProvidedDependency>& dependencies);
 std::string aur_git_url_for_package_base(const std::string& package_base);
 void print_fetch_plan(const BuildPlan& plan);
 void fetch_aur_package_base(const std::string& package_base);
@@ -1203,17 +1220,29 @@ std::string repo_name_from_sync_db(const fs::path& db_path) {
     return db_path.stem().string();
 }
 
+bool same_provider(const ProvidedDependency& lhs, const ProvidedDependency& rhs) {
+    return lhs.repository == rhs.repository && lhs.package_name == rhs.package_name;
+}
+
+void add_provider_candidate(std::vector<ProvidedDependency>& candidates, const ProvidedDependency& provider) {
+    auto same = [&provider](const ProvidedDependency& existing) {
+        return same_provider(existing, provider);
+    };
+    if(std::find_if(candidates.begin(), candidates.end(), same) != candidates.end()) return;
+    candidates.push_back(provider);
+}
+
 void add_repo_provider(
-        std::map<std::string, ProvidedDependency>& providers, const std::string& provided,
+        std::map<std::string, std::vector<ProvidedDependency>>& providers, const std::string& provided,
         const std::string& repository, const std::string& package_name) {
     std::string provided_name = provided_dependency_name(provided);
     if(provided_name.empty() || !is_valid_package_name(provided_name)) return;
-    if(providers.count(provided_name) == 0) providers[provided_name] = ProvidedDependency{repository, package_name};
+    add_provider_candidate(providers[provided_name], ProvidedDependency{repository, package_name});
 }
 
 void parse_repo_sync_desc(
         const std::string& desc, const std::string& repository,
-        std::map<std::string, ProvidedDependency>& providers) {
+        std::map<std::string, std::vector<ProvidedDependency>>& providers) {
     std::stringstream       ss(desc);
     std::string             line;
     std::string             package_name;
@@ -1253,33 +1282,61 @@ void parse_repo_sync_desc(
     flush_package();
 }
 
-const std::map<std::string, ProvidedDependency>& repo_providers() {
-    static std::map<std::string, ProvidedDependency> providers;
-    static bool                                      loaded = false;
+std::vector<fs::path> repo_sync_db_paths(const fs::path& sync_dir) {
+    std::vector<fs::path> paths;
+    std::string           repo_list = exec_command("pacman-conf --repo-list 2>/dev/null");
+    std::set<std::string> seen;
+
+    std::stringstream ss(repo_list);
+    std::string       repo;
+    while(std::getline(ss, repo)) {
+        repo = trim(repo);
+        if(repo.empty()) continue;
+        fs::path db_path = sync_dir / (repo + ".db");
+        if(fs::exists(db_path) && fs::is_regular_file(db_path)) {
+            paths.push_back(db_path);
+            seen.insert(db_path.filename().string());
+        }
+    }
+
+    std::vector<fs::path> fallback_paths;
+    for(const auto& entry : fs::directory_iterator(sync_dir)) {
+        if(!entry.is_regular_file() || entry.path().extension() != ".db") continue;
+        if(seen.count(entry.path().filename().string()) > 0) continue;
+        fallback_paths.push_back(entry.path());
+    }
+    std::sort(fallback_paths.begin(), fallback_paths.end());
+    for(const auto& path : fallback_paths) {
+        paths.push_back(path);
+    }
+    return paths;
+}
+
+const std::map<std::string, std::vector<ProvidedDependency>>& repo_providers() {
+    static std::map<std::string, std::vector<ProvidedDependency>> providers;
+    static bool                                                   loaded = false;
     if(loaded) return providers;
     loaded = true;
 
     fs::path sync_dir = "/var/lib/pacman/sync";
     if(!fs::exists(sync_dir)) return providers;
 
-    for(const auto& entry : fs::directory_iterator(sync_dir)) {
-        if(!entry.is_regular_file() || entry.path().extension() != ".db") continue;
-
-        std::string cmd = "bsdtar -xOf " + shell_quote(entry.path().string()) + " '*/desc' 2>/dev/null";
+    for(const auto& db_path : repo_sync_db_paths(sync_dir)) {
+        std::string cmd = "bsdtar -xOf " + shell_quote(db_path.string()) + " '*/desc' 2>/dev/null";
         std::string desc = exec_command(cmd.c_str());
         if(desc.empty()) continue;
 
-        parse_repo_sync_desc(desc, repo_name_from_sync_db(entry.path()), providers);
+        parse_repo_sync_desc(desc, repo_name_from_sync_db(db_path), providers);
     }
 
     return providers;
 }
 
-std::optional<ProvidedDependency> find_repo_provider(const std::string& dependency_name) {
-    if(!is_valid_package_name(dependency_name)) return std::nullopt;
+std::vector<ProvidedDependency> find_repo_providers(const std::string& dependency_name) {
+    if(!is_valid_package_name(dependency_name)) return {};
     const auto& providers = repo_providers();
     auto        it = providers.find(dependency_name);
-    if(it == providers.end()) return std::nullopt;
+    if(it == providers.end()) return {};
     return it->second;
 }
 
@@ -1585,29 +1642,36 @@ bool aur_package_provides(const AurPackageInfo& info, const std::string& depende
     return false;
 }
 
-std::optional<ProvidedDependency> find_aur_provider(const std::string& dependency_name) {
-    if(!is_valid_package_name(dependency_name)) return std::nullopt;
+std::vector<ProvidedDependency> find_aur_providers(const std::string& dependency_name) {
+    std::vector<ProvidedDependency> providers;
+    if(!is_valid_package_name(dependency_name)) return providers;
 
-    std::vector<std::string> candidates = AurClient::search_names_by_provides(dependency_name);
+    std::vector<std::string> candidates;
+    try {
+        candidates = AurClient::search_names_by_provides(dependency_name);
+    } catch(const std::exception& e) {
+        Logger::warn("Failed to search AUR providers for " + dependency_name + ": " + e.what());
+        return providers;
+    }
     for(const auto& candidate : candidates) {
         if(!is_valid_package_name(candidate)) continue;
         try {
             std::optional<AurPackageInfo> info = AurClient::info(candidate);
             if(info.has_value() && aur_package_provides(info.value(), dependency_name)) {
-                return ProvidedDependency{"aur", info->Name};
+                add_provider_candidate(providers, ProvidedDependency{"aur", info->Name});
             }
         } catch(const std::exception& e) {
             Logger::warn("Failed to check AUR provider " + candidate + ": " + e.what());
         }
     }
 
-    return std::nullopt;
+    return providers;
 }
 
-std::optional<ProvidedDependency> find_dependency_provider(const std::string& dependency_name) {
-    std::optional<ProvidedDependency> repo_provider = find_repo_provider(dependency_name);
-    if(repo_provider.has_value()) return repo_provider;
-    return find_aur_provider(dependency_name);
+std::vector<ProvidedDependency> find_dependency_providers(const std::string& dependency_name) {
+    std::vector<ProvidedDependency> repo_provider = find_repo_providers(dependency_name);
+    if(!repo_provider.empty()) return repo_provider;
+    return find_aur_providers(dependency_name);
 }
 
 PackageBuildSource resolve_build_source(const std::string& pkg_name) {
@@ -1780,6 +1844,29 @@ std::string provided_dependency_display(const std::string& dependency, const Pro
            dependency_constraint_note(dependency);
 }
 
+std::string provider_display(const ProvidedDependency& provider) {
+    return provider.repository + "/" + provider.package_name;
+}
+
+void add_ambiguous_provider_dependency(
+        std::vector<AmbiguousProvidedDependency>& dependencies, const std::string& dependency,
+        const std::vector<ProvidedDependency>& candidates) {
+    std::string trimmed = trim(dependency);
+    if(trimmed.empty() || candidates.empty()) return;
+
+    auto same_dependency = [&trimmed](const AmbiguousProvidedDependency& existing) {
+        return existing.dependency == trimmed;
+    };
+    auto it = std::find_if(dependencies.begin(), dependencies.end(), same_dependency);
+    if(it == dependencies.end()) {
+        dependencies.push_back(AmbiguousProvidedDependency{trimmed, {}});
+        it = std::prev(dependencies.end());
+    }
+    for(const auto& candidate : candidates) {
+        add_provider_candidate(it->candidates, candidate);
+    }
+}
+
 DependencyClassification classify_dependencies(const std::vector<std::string>& dependencies) {
     DependencyClassification result;
 
@@ -1806,17 +1893,21 @@ DependencyClassification classify_dependencies(const std::vector<std::string>& d
             if(info.has_value()) {
                 add_classified_aur_dependency(result.aur, dependency, info.value());
             } else {
-                std::optional<ProvidedDependency> provider = find_dependency_provider(package_name);
-                if(provider.has_value())
-                    result.provided.push_back(provided_dependency_display(dependency, provider.value()));
+                std::vector<ProvidedDependency> providers = find_dependency_providers(package_name);
+                if(providers.size() == 1)
+                    result.provided.push_back(provided_dependency_display(dependency, providers.front()));
+                else if(providers.size() > 1)
+                    add_ambiguous_provider_dependency(result.ambiguous_providers, dependency, providers);
                 else
                     result.unknown.push_back(dependency_display_with_constraint_note(dependency, dependency));
             }
         } catch(const std::exception& e) {
             Logger::warn("Failed to check AUR dependency " + package_name + ": " + e.what());
-            std::optional<ProvidedDependency> provider = find_repo_provider(package_name);
-            if(provider.has_value())
-                result.provided.push_back(provided_dependency_display(dependency, provider.value()));
+            std::vector<ProvidedDependency> providers = find_repo_providers(package_name);
+            if(providers.size() == 1)
+                result.provided.push_back(provided_dependency_display(dependency, providers.front()));
+            else if(providers.size() > 1)
+                add_ambiguous_provider_dependency(result.ambiguous_providers, dependency, providers);
             else
                 result.unknown.push_back(dependency_display_with_constraint_note(dependency, dependency));
         }
@@ -1842,6 +1933,8 @@ std::string dependency_kind_display(DependencyKind kind) {
         return "aur";
     case DependencyKind::Provided:
         return "provided";
+    case DependencyKind::AmbiguousProvider:
+        return "ambiguous-provider";
     case DependencyKind::Unknown:
         return "unknown";
     }
@@ -1884,10 +1977,13 @@ RecursiveDependencyNode resolve_recursive_dependency(
     }
 
     if(!info.has_value()) {
-        std::optional<ProvidedDependency> provider = find_dependency_provider(node.package_name);
-        if(provider.has_value()) {
+        std::vector<ProvidedDependency> providers = find_dependency_providers(node.package_name);
+        if(providers.size() == 1) {
             node.kind = DependencyKind::Provided;
-            node.provided_by = provider;
+            node.provided_by = providers.front();
+        } else if(providers.size() > 1) {
+            node.kind = DependencyKind::AmbiguousProvider;
+            node.provider_candidates = providers;
         } else {
             node.kind = DependencyKind::Unknown;
         }
@@ -1918,6 +2014,13 @@ void print_recursive_dependency_node(const RecursiveDependencyNode& node, size_t
     }
     if(node.provided_by.has_value()) {
         std::cout << " by " << node.provided_by->repository << "/" << node.provided_by->package_name;
+    }
+    if(!node.provider_candidates.empty()) {
+        std::cout << " candidates: ";
+        for(size_t i = 0; i < node.provider_candidates.size(); ++i) {
+            if(i > 0) std::cout << ", ";
+            std::cout << provider_display(node.provider_candidates[i]);
+        }
     }
     if(node.already_visited) std::cout << " (already visited)";
     if(node.max_depth_reached) std::cout << " (max depth reached)";
@@ -1968,6 +2071,11 @@ void add_build_plan_provided_dependency(
     };
     if(std::find_if(plan.provided.begin(), plan.provided.end(), same_dependency) != plan.provided.end()) return;
     plan.provided.push_back(BuildPlanProvidedDependency{trimmed, provider});
+}
+
+void add_build_plan_ambiguous_provider(
+        BuildPlan& plan, const std::string& dependency, const std::vector<ProvidedDependency>& candidates) {
+    add_ambiguous_provider_dependency(plan.ambiguous_providers, dependency, candidates);
 }
 
 void collect_aur_build_plan(
@@ -2029,12 +2137,15 @@ void collect_aur_build_plan(
             continue;
         }
 
-        std::optional<ProvidedDependency> provider = find_dependency_provider(dep_name);
-        if(provider.has_value()) {
-            add_build_plan_provided_dependency(plan, dependency, provider.value());
-            if(traverse_aur_providers && provider->repository == "aur") {
-                collect_aur_build_plan(provider->package_name, plan, visited, visiting, depth + 1, max_depth, traverse_aur_providers);
+        std::vector<ProvidedDependency> providers = find_dependency_providers(dep_name);
+        if(providers.size() == 1) {
+            const ProvidedDependency& provider = providers.front();
+            add_build_plan_provided_dependency(plan, dependency, provider);
+            if(traverse_aur_providers && provider.repository == "aur") {
+                collect_aur_build_plan(provider.package_name, plan, visited, visiting, depth + 1, max_depth, traverse_aur_providers);
             }
+        } else if(providers.size() > 1) {
+            add_build_plan_ambiguous_provider(plan, dependency, providers);
         } else {
             add_unique_value(plan.unresolved, dependency);
         }
@@ -2077,6 +2188,11 @@ void print_build_plan(const BuildPlan& plan) {
         }
     }
 
+    if(!plan.ambiguous_providers.empty()) {
+        std::cout << std::endl;
+        print_ambiguous_provider_group("Ambiguous provided dependencies:", plan.ambiguous_providers);
+    }
+
     if(!plan.unresolved.empty()) {
         std::cout << std::endl;
         std::cout << "Unresolved dependencies:" << std::endl;
@@ -2092,6 +2208,12 @@ void print_build_plan(const BuildPlan& plan) {
             std::cout << "  - " << dependency << std::endl;
         }
     }
+
+    if(!plan.ambiguous_providers.empty()) {
+        std::cout << std::endl;
+        std::cout << "Plan status: incomplete" << std::endl;
+        std::cout << "  ambiguous providers are not selected" << std::endl;
+    }
 }
 
 void require_executable_build_plan(const std::string& target, const BuildPlan& plan) {
@@ -2099,6 +2221,11 @@ void require_executable_build_plan(const std::string& target, const BuildPlan& p
         throw std::runtime_error(
                 "Cannot execute build plan for " + target + "; unresolved dependencies: " +
                 join_comma_display_values(plan.unresolved));
+    }
+    if(!plan.ambiguous_providers.empty()) {
+        throw std::runtime_error(
+                "Cannot execute build plan for " + target + "; ambiguous providers: " +
+                join_ambiguous_provider_summaries(plan.ambiguous_providers));
     }
     if(!plan.cycles.empty()) {
         throw std::runtime_error(
@@ -2140,6 +2267,40 @@ void print_dependency_group(const std::string& label, const std::vector<std::str
     }
 }
 
+void print_ambiguous_provider_group(
+        const std::string& label, const std::vector<AmbiguousProvidedDependency>& dependencies) {
+    std::cout << label << std::endl;
+    if(dependencies.empty()) {
+        std::cout << "  None" << std::endl;
+        return;
+    }
+
+    for(const auto& dependency : dependencies) {
+        std::cout << "  " << dependency_display_with_constraint_note(dependency.dependency, dependency.dependency)
+                  << std::endl;
+        std::cout << "    candidates:" << std::endl;
+        for(size_t i = 0; i < dependency.candidates.size(); ++i) {
+            std::cout << "      " << (i + 1) << ". " << provider_display(dependency.candidates[i]) << std::endl;
+        }
+    }
+}
+
+std::string ambiguous_provider_dependency_summary(const AmbiguousProvidedDependency& dependency) {
+    std::vector<std::string> candidates;
+    for(const auto& candidate : dependency.candidates) {
+        candidates.push_back(provider_display(candidate));
+    }
+    return dependency.dependency + " (" + join_comma_display_values(candidates) + ")";
+}
+
+std::string join_ambiguous_provider_summaries(const std::vector<AmbiguousProvidedDependency>& dependencies) {
+    std::vector<std::string> values;
+    for(const auto& dependency : dependencies) {
+        values.push_back(ambiguous_provider_dependency_summary(dependency));
+    }
+    return join_comma_display_values(values);
+}
+
 std::string aur_git_url_for_package_base(const std::string& package_base) {
     require_valid_package_name(package_base);
     return AUR_BASE_URL + package_base + ".git";
@@ -2163,6 +2324,11 @@ void print_fetch_plan(const BuildPlan& plan) {
         for(const auto& dependency : plan.unresolved) {
             Logger::warn(dependency);
         }
+    }
+
+    if(!plan.ambiguous_providers.empty()) {
+        std::cout << std::endl;
+        print_ambiguous_provider_group("Ambiguous provided dependencies:", plan.ambiguous_providers);
     }
 
     if(!plan.cycles.empty()) {
@@ -2380,6 +2546,8 @@ int cmd_deps(const std::vector<std::string>& targets, const std::vector<std::str
             std::cout << std::endl;
             print_dependency_group("Provided dependencies:", classified.provided);
             std::cout << std::endl;
+            print_ambiguous_provider_group("Ambiguous provided dependencies:", classified.ambiguous_providers);
+            std::cout << std::endl;
             print_dependency_group("Unknown dependencies:", classified.unknown);
             if(recursive) {
                 std::set<std::string> visited;
@@ -2453,6 +2621,7 @@ int cmd_fetch(const std::vector<std::string>& targets, const std::vector<std::st
 
             if(i > 0) std::cout << std::endl;
             print_fetch_plan(plan);
+            require_executable_build_plan(target, plan);
 
             for(const auto& entry : plan.order) {
                 try {
