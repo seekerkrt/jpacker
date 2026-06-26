@@ -54,6 +54,7 @@ const std::string AUR_BASE_URL = "https://aur.archlinux.org/";
 const std::string ARCH_GIT_BASE = "https://gitlab.archlinux.org/archlinux/packaging/packages/";
 const std::string USER_AGENT = "jpacker/" + VERSION;
 const std::string CONFIG_FILE = "/etc/jpacker/jpacker.conf";
+// POLICY: source-build preference の永続化場所。意味を変える場合は互換性影響として扱う。
 const std::string PACKAGE_BUILD_DIR = "/etc/jpacker/package.build";
 
 // jpacker.conf と CLI option を反映した、1回の実行中の設定状態。
@@ -299,6 +300,7 @@ public:
     }
     ~DirCleanupGuard() {
         if(!committed_ && fs::exists(path_)) {
+            // LANDMINE: 途中失敗した新規 clone/build directory だけを rollback する前提。
             Logger::warn("Rolling back: cleaning up " + path_.string());
             try {
                 fs::remove_all(path_);
@@ -792,6 +794,7 @@ std::string trim(const std::string& str) {
 }
 
 bool remote_url_matches_expected(const std::string& current_url, const std::string& expected_url) {
+    // LANDMINE: cache directory の再利用可否を決める guard。曖昧一致にすると別 remote を上書きし得る。
     return trim(current_url) == trim(expected_url);
 }
 
@@ -844,6 +847,7 @@ std::string strip_comment(const std::string& line) {
 }
 
 std::string shell_quote(const std::string& str) {
+    // POLICY: 外部コマンド引数は、validation 済みの値でも shell 境界では必ず quote する。
     std::string quoted = "'";
     for(char ch : str) {
         if(ch == '\'')
@@ -868,6 +872,7 @@ bool split_env_assignment(const std::string& arg, std::string& key, std::string&
     if(eq_pos == std::string::npos) return false;
     key = trim(arg.substr(0, eq_pos));
     value = unquote(trim(arg.substr(eq_pos + 1)));
+    // POLICY: makepkg へ渡す環境変数名は shell identifier 相当に制限する。
     return is_valid_env_key(key);
 }
 
@@ -1005,6 +1010,7 @@ std::string join_shell_args(const std::vector<std::string>& args) {
 }
 
 std::vector<std::string> pacman_args_with_global_options(std::vector<std::string> args) {
+    // POLICY: --noconfirm は pacman/makepkg へ委譲するだけで、未解決依存の自動突破には使わない。
     if(g_config.no_confirm && std::find(args.begin(), args.end(), "--noconfirm") == args.end()) {
         args.push_back("--noconfirm");
     }
@@ -1031,15 +1037,16 @@ std::string build_editor_command(const std::string& editor, const fs::path& targ
 
 // pacman / repository補助
 bool pacman_option_takes_value(const std::string& arg) {
-    static const std::vector<std::string> long_opts = {
+    // POLICY: 固定の pacman option table。process lifetime の保持だが mutable な副作用は持たない。
+    static const std::vector<std::string> s_long_opts = {
             "--arch", "--assume-installed", "--cachedir", "--color", "--config", "--dbpath",
             "--gpgdir", "--hookdir", "--ignore", "--ignoregroup", "--logfile", "--overwrite",
             "--print-format", "--root", "--sysroot"};
-    static const std::vector<std::string> short_opts = {"-b", "-r"};
+    static const std::vector<std::string> s_short_opts = {"-b", "-r"};
 
     if(arg.find('=') != std::string::npos) return false;
-    if(std::find(long_opts.begin(), long_opts.end(), arg) != long_opts.end()) return true;
-    return std::find(short_opts.begin(), short_opts.end(), arg) != short_opts.end();
+    if(std::find(s_long_opts.begin(), s_long_opts.end(), arg) != s_long_opts.end()) return true;
+    return std::find(s_short_opts.begin(), s_short_opts.end(), arg) != s_short_opts.end();
 }
 
 bool is_valid_package_name(const std::string& name) {
@@ -1089,6 +1096,7 @@ std::string dependency_constraint_note(const std::string& dependency) {
 std::string dependency_constraint_unresolved_reason(const std::string& dependency) {
     ParsedDependency parsed = parse_dependency_string(dependency);
     if(parsed.has_malformed_constraint()) return parsed.raw + " (invalid version constraint)";
+    // POLICY(#96): dependency の version constraint は表示・警告まで。jpacker 側で比較解決しない。
     if(parsed.has_constraint()) return parsed.raw + " (version constraint is not verified)";
     return parsed.raw;
 }
@@ -1313,23 +1321,25 @@ std::vector<fs::path> repo_sync_db_paths(const fs::path& sync_dir) {
 }
 
 const std::map<std::string, std::vector<ProvidedDependency>>& repo_providers() {
-    static std::map<std::string, std::vector<ProvidedDependency>> providers;
-    static bool                                                   loaded = false;
-    if(loaded) return providers;
-    loaded = true;
+    // POLICY: repo provider 情報は pacman sync DB から作る 1 process 内 cache。
+    // ここは単一 thread 前提で、実行中に外部状態を再読込しない。
+    static std::map<std::string, std::vector<ProvidedDependency>> s_providers;
+    static bool                                                   s_loaded = false;
+    if(s_loaded) return s_providers;
+    s_loaded = true;
 
     fs::path sync_dir = "/var/lib/pacman/sync";
-    if(!fs::exists(sync_dir)) return providers;
+    if(!fs::exists(sync_dir)) return s_providers;
 
     for(const auto& db_path : repo_sync_db_paths(sync_dir)) {
         std::string cmd = "bsdtar -xOf " + shell_quote(db_path.string()) + " '*/desc' 2>/dev/null";
         std::string desc = exec_command(cmd.c_str());
         if(desc.empty()) continue;
 
-        parse_repo_sync_desc(desc, repo_name_from_sync_db(db_path), providers);
+        parse_repo_sync_desc(desc, repo_name_from_sync_db(db_path), s_providers);
     }
 
-    return providers;
+    return s_providers;
 }
 
 std::vector<ProvidedDependency> find_repo_providers(const std::string& dependency_name) {
@@ -1453,6 +1463,7 @@ bool ask_user(const std::string& question, PromptDefault default_answer) {
     std::optional<bool> default_value = prompt_default_value(default_answer);
 
     if(g_config.no_confirm) {
+        // POLICY: --noconfirm でも default を持たない prompt は自動回答しない。
         if(default_value.has_value()) {
             Logger::info("Skipping prompt (--noconfirm): " + question + " -> " + prompt_answer_label(default_value.value()));
             return default_value.value();
@@ -1461,6 +1472,7 @@ bool ask_user(const std::string& question, PromptDefault default_answer) {
     }
 
     if(!isatty(STDIN_FILENO)) {
+        // LANDMINE: 非対話 stdin では、破壊的になり得る yes default を安全に選べない。
         if(default_value.has_value() && default_value.value() == false) {
             Logger::info("Skipping prompt (non-interactive stdin): " + question + " -> no");
             return false;
@@ -1547,6 +1559,7 @@ std::string AurClient::get_url(const std::string& url) {
     curl_easy_setopt(handle.get(), CURLOPT_ERRORBUFFER, errorBuffer);
     CURLcode res = curl_easy_perform(handle.get());
     if(res != CURLE_OK) {
+        // NOTE: 呼び出し側は空 response を「取得不能/未検出」として扱い、CLI 境界で文脈付きに変換する。
         std::string error = errorBuffer[0] ? errorBuffer : curl_easy_strerror(res);
         Logger::warn("AUR request failed: " + error);
         return "";
@@ -1670,6 +1683,7 @@ std::vector<ProvidedDependency> find_aur_providers(const std::string& dependency
 
 std::vector<ProvidedDependency> find_dependency_providers(const std::string& dependency_name) {
     std::vector<ProvidedDependency> repo_provider = find_repo_providers(dependency_name);
+    // POLICY: pacman-first。official repo provider が見つかる場合は AUR provider を混ぜない。
     if(!repo_provider.empty()) return repo_provider;
     return find_aur_providers(dependency_name);
 }
@@ -1854,6 +1868,7 @@ void add_ambiguous_provider_dependency(
     std::string trimmed = trim(dependency);
     if(trimmed.empty() || candidates.empty()) return;
 
+    // POLICY(#97/#143): 複数 provider はここで集約し、暗黙選択しない。
     auto same_dependency = [&trimmed](const AmbiguousProvidedDependency& existing) {
         return existing.dependency == trimmed;
     };
@@ -2121,6 +2136,7 @@ void collect_aur_build_plan(
             continue;
         }
         if(parsed.has_constraint()) {
+            // POLICY(#96): plan は未検証 constraint を解決済み扱いにしない。
             add_unique_value(plan.unresolved, dependency_constraint_unresolved_reason(dependency));
         }
         if(is_repo_package(dep_name)) continue;
@@ -2252,6 +2268,7 @@ BuildPlan resolve_fetch_plan(const std::string& target) {
     BuildPlan             plan;
     std::set<std::string> visited;
     std::set<std::string> visiting;
+    // POLICY: fetch は取得対象の列挙まで。AUR provider を辿って暗黙に追加取得しない。
     collect_aur_build_plan(target, plan, visited, visiting, 0, MAX_RECURSIVE_DEP_DEPTH, false);
     return plan;
 }
@@ -2352,6 +2369,7 @@ void fetch_aur_package_base(const std::string& package_base) {
         if(!fs::is_directory(repo_dir)) throw std::runtime_error(repo_dir.string() + " exists but is not a directory.");
         if(!fs::exists(repo_dir / ".git")) throw std::runtime_error(repo_dir.string() + " exists but is not a git repository.");
 
+        // POLICY: fetch command は既存 clone で git fetch まで。worktree update/pull/reset/build/install はしない。
         WorkDirGuard wd_repo(repo_dir);
         std::string  current_url = trim(exec_command("git config --get remote.origin.url"));
         if(current_url.empty()) throw std::runtime_error("Missing remote.origin.url for " + package_base + ".");
@@ -2418,6 +2436,7 @@ void build_from_git(const std::string& pkg_name, const std::string& clone_name, 
                     }
                 }
 
+                // LANDMINE: reset は build/install 経路だけで許可する。fetch 経路へ持ち込まない。
                 if(run_command("git reset --hard " + shell_quote("origin/" + branch)) != 0) {
                     throw std::runtime_error("Failed to reset repository.");
                 }
@@ -2790,6 +2809,7 @@ int cmd_add_src(const std::vector<std::string>& args) {
         std::string key, val;
         if(arg.find('=') == std::string::npos) {
             require_valid_package_name(arg);
+            // POLICY: 1 package = 1 preference file。ファイル名は package name validation で固定する。
             fs::path p = fs::path(PACKAGE_BUILD_DIR) / arg;
             if(run_command("sudo touch " + shell_quote(p.string())) != 0) {
                 Logger::error("Failed to add " + arg);
@@ -2886,6 +2906,7 @@ int cmd_edit_src(const std::vector<std::string>& targets) {
             continue;
         }
 
+        // POLICY: /etc 配下の preference 更新だけ sudo に委譲し、編集本体は通常ユーザーの一時ファイルで行う。
         if(run_command("sudo install -Dm644 " + shell_quote(temp_path.string()) + " " + shell_quote(p.string())) != 0) {
             Logger::error("Failed to install edited source-build preference to " + p.string() + "; edited file kept at " + temp_path.string());
             failed = true;
