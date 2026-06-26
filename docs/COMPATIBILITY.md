@@ -42,6 +42,34 @@
 
 ---
 
+## AUR dependency provider selection policy
+
+jpacker は dependency provider の選択についても、独自 solver や独自 repository 優先順位を増やしすぎない。現時点では、まず pacman / makepkg の流儀を優先し、jpacker が扱う AUR helper 的な領域では曖昧なものを暗黙に成功扱いしない、という基本方針として扱う。
+
+dependency `bar` を解決する場合、基本順序は次の通りとする。
+
+1. official repository の exact package として解決できるか確認する。
+2. repo exact package がある場合は repo dependency として扱う。repository order は `pacman.conf` / pacman の解決順に従い、jpacker 独自の repository 優先順位は作らない。
+3. repo exact package がなければ、AUR exact package として解決できるか確認する。
+4. exact package が repo / AUR のどちらにもなければ provider を探す。
+5. provider が 0 件なら unresolved として扱う。
+6. provider が 1 件なら auto-resolve してよい。`deps` / `plan` では provided dependency として表示する。
+7. provider が複数なら ambiguous provider として扱い、暗黙に最初の 1 件を選ばない。
+
+複数 provider の選択 prompt、direct target に対する provider selection、provider choice の保存は、jpacker v1.9.0 / #97 の必須範囲には含めない。必要に応じて後続 Issue で扱う。
+
+### command ごとの扱い
+
+`-Ss` は search / discovery として扱う。provider selection や unresolved stop とは分け、候補を表示するだけで provider を選択しない。
+
+`deps` は dependency inspection / classification として扱う。repo exact、AUR exact、provided dependency、ambiguous provider、unknown dependency、version constraint 未検証を分類して表示する。provider が複数ある場合は ambiguous として候補一覧を表示し、ここでは選択しない。
+
+`plan` は build / install そのものではなく、build plan の可視化・診断として扱う。可能な範囲で build order を表示し、ambiguous provider が残る場合は complete plan ではなく incomplete plan として表示する。`jpacker plan <pkg>` 自体は、情報を表示できたなら基本的に成功扱いでよい。ただし target package が見つからない、引数が不正、AUR RPC が失敗するなど、plan 作成自体ができない場合は失敗扱いにしてよい。
+
+build / install / fetch 実行系では、ambiguous provider、unresolved dependency、cyclic dependency が残る plan は実行不可として停止する。#96 の方針により、未検証 version constraint を理由に unresolved とした dependency も実行不可のまま扱う。
+
+---
+
 ## jpacker 固有 option
 
 次の option は jpacker 固有として扱う。

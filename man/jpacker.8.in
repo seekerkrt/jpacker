@@ -39,14 +39,16 @@ Environment variables (like CFLAGS) can be passed directly.
 Example: \fIjpacker build coreutils CFLAGS="-O3 -march=native"\fR
 .TP
 .B deps [\-\-recursive] \fI<package>\fR
-Inspect an AUR package's runtime, make, and check dependencies, then classify them as official repository dependencies, AUR dependencies, provided dependencies, or unknown dependencies.
-With \fB\-\-recursive\fR, recursively inspect AUR dependencies. Official repository, provided, and unknown dependencies are shown but not traversed.
+Inspect an AUR package's runtime, make, and check dependencies, then classify them as official repository dependencies, AUR dependencies, provided dependencies, ambiguous provider candidates, or unknown dependencies.
+With \fB\-\-recursive\fR, recursively inspect AUR dependencies. Official repository, provided, ambiguous, and unknown dependencies are shown but not traversed.
+If exactly one provider is found, it may be shown as a provided dependency. If multiple providers are found, jpacker reports the dependency as ambiguous and does not choose one implicitly.
 Version constraints such as \fBfoo>=1.2\fR are detected and shown, but jpacker v1.x does not verify them with a complete pacman/libalpm-compatible solver.
 This command does not clone, build, install dependencies, or calculate build order.
 .TP
 .B plan \fI<package>\fR
 Display a build order plan for an AUR package and its recursive AUR dependencies.
 Official repository and repository-provided dependencies are not included in the build plan. Unknown dependencies are reported as unresolved.
+If multiple providers remain for a dependency, the plan is reported as incomplete with ambiguous provider candidates; jpacker does not choose one implicitly.
 Unverified version constraints are reported as unresolved reasons and are not treated as satisfied.
 This command does not clone, build, or install dependencies.
 .TP
@@ -91,7 +93,7 @@ Skip the interactive review/edit of PKGBUILD files before building.
 Skip the interactive git diff check during package updates.
 .TP
 .BR \-\-noconfirm
-Pass \fB--noconfirm\fR to pacman and makepkg execution. jpacker treats this as a request to avoid interactive blocking, not as "yes to everything". This does not bypass jpacker's unresolved or cyclic build plan checks.
+Pass \fB--noconfirm\fR to pacman and makepkg execution. jpacker treats this as a request to avoid interactive blocking, not as "yes to everything". This does not bypass jpacker's ambiguous provider, unresolved dependency, or cyclic build plan checks.
 .TP
 .BR \-\-rebuild
 Pass \fB-f\fR to makepkg build/install execution so existing built package artifacts are not reused. When omitted, jpacker may ask before rebuilding an existing local package artifact; the default answer is no.
