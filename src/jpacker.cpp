@@ -103,6 +103,8 @@ struct PackageBuildSource {
     std::string requested_name;
     std::string clone_name;
     std::string git_url;
+    bool        is_aur = false;
+    bool        has_distinct_package_base = false;
 };
 
 // pacman local database から読んだ installed package の最小情報。
@@ -181,6 +183,12 @@ struct BuildPlanEntry {
     std::vector<std::string> package_names;
 };
 
+// install 実行時に、PackageBase とは別の package name を明示選択する必要がある target。
+struct BuildPlanSplitPackageTarget {
+    std::string package_base;
+    std::string package_name;
+};
+
 // build plan 上で provider により解決された依存を記録する。
 struct BuildPlanProvidedDependency {
     std::string        dependency;
@@ -190,6 +198,7 @@ struct BuildPlanProvidedDependency {
 // AUR build / fetch の順序、未解決依存、循環検出結果をまとめる計画。
 struct BuildPlan {
     std::vector<BuildPlanEntry> order;
+    std::vector<BuildPlanSplitPackageTarget> split_package_targets;
     std::vector<BuildPlanProvidedDependency> provided;
     std::vector<AmbiguousProvidedDependency> ambiguous_providers;
     std::vector<std::string> unresolved;
@@ -401,6 +410,7 @@ bool aur_package_provides(const AurPackageInfo& info, const std::string& depende
 std::vector<ProvidedDependency> find_aur_providers(const std::string& dependency_name);
 std::vector<ProvidedDependency> find_dependency_providers(const std::string& dependency_name);
 PackageBuildSource resolve_build_source(const std::string& pkg_name);
+void require_supported_build_source_install_target(const PackageBuildSource& source);
 
 // AUR検索 / info表示
 bool search_aur(const std::vector<std::string>& keywords);
@@ -433,6 +443,7 @@ void print_recursive_dependency_tree(const std::vector<RecursiveDependencyNode>&
 
 // build plan / fetch plan
 void add_unique_value(std::vector<std::string>& values, const std::string& value);
+void add_build_plan_split_package_target(BuildPlan& plan, const AurPackageInfo& info);
 void add_build_plan_entry(BuildPlan& plan, const AurPackageInfo& info);
 void add_build_plan_provided_dependency(
         BuildPlan& plan, const std::string& dependency, const ProvidedDependency& provider);
@@ -443,6 +454,7 @@ void collect_aur_build_plan(
         std::set<std::string>& visiting, int depth, int max_depth, bool traverse_aur_providers = true);
 void print_build_plan(const BuildPlan& plan);
 void require_executable_build_plan(const std::string& target, const BuildPlan& plan);
+void require_executable_install_plan(const std::string& target, const BuildPlan& plan);
 BuildPlan resolve_build_plan(const std::string& target);
 BuildPlan resolve_fetch_plan(const std::string& target);
 void print_dependency_group(const std::string& label, const std::vector<std::string>& dependencies);
@@ -450,6 +462,8 @@ void print_ambiguous_provider_group(
         const std::string& label, const std::vector<AmbiguousProvidedDependency>& dependencies);
 std::string ambiguous_provider_dependency_summary(const AmbiguousProvidedDependency& dependency);
 std::string join_ambiguous_provider_summaries(const std::vector<AmbiguousProvidedDependency>& dependencies);
+std::string split_package_target_summary(const BuildPlanSplitPackageTarget& target);
+std::string join_split_package_target_summaries(const std::vector<BuildPlanSplitPackageTarget>& targets);
 std::string aur_git_url_for_package_base(const std::string& package_base);
 void print_fetch_plan(const BuildPlan& plan);
 void fetch_aur_package_base(const std::string& package_base);
@@ -1692,7 +1706,7 @@ PackageBuildSource resolve_build_source(const std::string& pkg_name) {
     require_valid_package_name(pkg_name);
 
     if(is_repo_package(pkg_name)) {
-        return PackageBuildSource{pkg_name, pkg_name, ARCH_GIT_BASE + pkg_name + ".git"};
+        return PackageBuildSource{pkg_name, pkg_name, ARCH_GIT_BASE + pkg_name + ".git", false, false};
     }
 
     std::optional<AurPackageInfo> info;
@@ -1710,7 +1724,19 @@ PackageBuildSource resolve_build_source(const std::string& pkg_name) {
     }
     require_valid_package_name(info->PackageBase);
 
-    return PackageBuildSource{pkg_name, info->PackageBase, AUR_BASE_URL + info->PackageBase + ".git"};
+    return PackageBuildSource{
+            pkg_name, info->PackageBase, AUR_BASE_URL + info->PackageBase + ".git", true,
+            has_distinct_package_base(info.value())};
+}
+
+void require_supported_build_source_install_target(const PackageBuildSource& source) {
+    // POLICY(#98): makepkg -i 経路では split package の install 対象を jpacker が個別選択できない。
+    // v1.9.0 では、PackageBase と requested package name が異なる AUR target は安全側で停止する。
+    if(source.is_aur && source.has_distinct_package_base) {
+        throw std::runtime_error(
+                "Cannot build/install split AUR package " + source.requested_name + " from PackageBase " +
+                source.clone_name + "; explicit split package install target selection is not implemented.");
+    }
 }
 
 // AUR検索 / info表示
@@ -2064,10 +2090,24 @@ void add_unique_value(std::vector<std::string>& values, const std::string& value
     if(std::find(values.begin(), values.end(), trimmed) == values.end()) values.push_back(trimmed);
 }
 
+void add_build_plan_split_package_target(BuildPlan& plan, const AurPackageInfo& info) {
+    if(!has_distinct_package_base(info)) return;
+
+    auto same_target = [&info](const BuildPlanSplitPackageTarget& existing) {
+        return existing.package_base == info.PackageBase && existing.package_name == info.Name;
+    };
+    if(std::find_if(plan.split_package_targets.begin(), plan.split_package_targets.end(), same_target) !=
+       plan.split_package_targets.end())
+        return;
+
+    plan.split_package_targets.push_back(BuildPlanSplitPackageTarget{info.PackageBase, info.Name});
+}
+
 void add_build_plan_entry(BuildPlan& plan, const AurPackageInfo& info) {
     std::string package_base = package_base_or_name(info);
     auto        same_base = [&package_base](const BuildPlanEntry& existing) { return existing.package_base == package_base; };
     auto        it = std::find_if(plan.order.begin(), plan.order.end(), same_base);
+    add_build_plan_split_package_target(plan, info);
     if(it == plan.order.end()) {
         plan.order.push_back(BuildPlanEntry{package_base, {info.Name}});
         return;
@@ -2209,6 +2249,14 @@ void print_build_plan(const BuildPlan& plan) {
         print_ambiguous_provider_group("Ambiguous provided dependencies:", plan.ambiguous_providers);
     }
 
+    if(!plan.split_package_targets.empty()) {
+        std::cout << std::endl;
+        std::cout << "Split package install targets:" << std::endl;
+        for(const auto& target : plan.split_package_targets) {
+            std::cout << "  - " << target.package_name << " (base: " << target.package_base << ")" << std::endl;
+        }
+    }
+
     if(!plan.unresolved.empty()) {
         std::cout << std::endl;
         std::cout << "Unresolved dependencies:" << std::endl;
@@ -2225,10 +2273,12 @@ void print_build_plan(const BuildPlan& plan) {
         }
     }
 
-    if(!plan.ambiguous_providers.empty()) {
+    if(!plan.ambiguous_providers.empty() || !plan.split_package_targets.empty()) {
         std::cout << std::endl;
         std::cout << "Plan status: incomplete" << std::endl;
-        std::cout << "  ambiguous providers are not selected" << std::endl;
+        if(!plan.ambiguous_providers.empty()) std::cout << "  ambiguous providers are not selected" << std::endl;
+        if(!plan.split_package_targets.empty())
+            std::cout << "  split package install target selection is not implemented" << std::endl;
     }
 }
 
@@ -2247,6 +2297,16 @@ void require_executable_build_plan(const std::string& target, const BuildPlan& p
         throw std::runtime_error(
                 "Cannot execute build plan for " + target + "; cyclic dependencies: " +
                 join_comma_display_values(plan.cycles));
+    }
+}
+
+void require_executable_install_plan(const std::string& target, const BuildPlan& plan) {
+    require_executable_build_plan(target, plan);
+    if(!plan.split_package_targets.empty()) {
+        throw std::runtime_error(
+                "Cannot execute install plan for " + target +
+                "; split package install target selection is not implemented: " +
+                join_split_package_target_summaries(plan.split_package_targets));
     }
 }
 
@@ -2314,6 +2374,18 @@ std::string join_ambiguous_provider_summaries(const std::vector<AmbiguousProvide
     std::vector<std::string> values;
     for(const auto& dependency : dependencies) {
         values.push_back(ambiguous_provider_dependency_summary(dependency));
+    }
+    return join_comma_display_values(values);
+}
+
+std::string split_package_target_summary(const BuildPlanSplitPackageTarget& target) {
+    return target.package_name + " (base: " + target.package_base + ")";
+}
+
+std::string join_split_package_target_summaries(const std::vector<BuildPlanSplitPackageTarget>& targets) {
+    std::vector<std::string> values;
+    for(const auto& target : targets) {
+        values.push_back(split_package_target_summary(target));
     }
     return join_comma_display_values(values);
 }
@@ -2492,13 +2564,14 @@ void build_from_git(const std::string& pkg_name, const std::string& clone_name, 
 void install_smart_source(const std::string& pkg_name, bool only_if_updated) {
     std::string env = get_package_env(pkg_name);
     PackageBuildSource source = resolve_build_source(pkg_name);
+    require_supported_build_source_install_target(source);
 
     build_from_git(source.requested_name, source.clone_name, source.git_url, env, only_if_updated);
 }
 
 void install_aur_build_plan(const std::string& target) {
     BuildPlan plan = resolve_build_plan(target);
-    require_executable_build_plan(target, plan);
+    require_executable_install_plan(target, plan);
 
     for(const auto& entry : plan.order) {
         std::string package_names = join_comma_display_values(entry.package_names);
@@ -2793,6 +2866,7 @@ int cmd_build(const std::vector<std::string>& args) {
 
     try {
         PackageBuildSource source = resolve_build_source(pkg_name);
+        require_supported_build_source_install_target(source);
         // build コマンドは常にビルドする (only_if_updated = false)
         build_from_git(source.requested_name, source.clone_name, source.git_url, custom_env, false);
     } catch(const std::exception& e) {
