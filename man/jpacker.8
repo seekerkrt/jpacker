@@ -1,4 +1,4 @@
-.TH JPACKER 8 "June 2026" "jpacker 1.8.0" "System Administration Utilities"
+.TH JPACKER 8 "June 2026" "jpacker 1.9.0" "System Administration Utilities"
 .SH NAME
 jpacker \- A robust Pacman wrapper and AUR helper with source-based build management
 .SH SYNOPSIS
@@ -8,8 +8,7 @@ jpacker \- A robust Pacman wrapper and AUR helper with source-based build manage
 .RI [ targets... ]
 .SH DESCRIPTION
 .B jpacker
-is a C++20 based AUR helper designed to act as a seamless wrapper for
-.BR pacman (8).
+is a C++20 pacman wrapper and AUR helper.
 It extends pacman's functionality by handling AUR packages, providing one-off source builds for official packages, and managing persistent per-package source build preferences (similar to Gentoo's package.env).
 
 Any operation or flag not explicitly handled by jpacker is passed through to pacman directly.
@@ -39,18 +38,24 @@ Environment variables (like CFLAGS) can be passed directly.
 Example: \fIjpacker build coreutils CFLAGS="-O3 -march=native"\fR
 .TP
 .B deps [\-\-recursive] \fI<package>\fR
-Inspect an AUR package's runtime, make, and check dependencies, then classify them as official repository dependencies, AUR dependencies, provided dependencies, or unknown dependencies.
-With \fB\-\-recursive\fR, recursively inspect AUR dependencies. Official repository, provided, and unknown dependencies are shown but not traversed.
+Inspect an AUR package's runtime, make, and check dependencies, then classify them as official repository dependencies, AUR dependencies, provided dependencies, ambiguous provider candidates, or unknown dependencies.
+With \fB\-\-recursive\fR, recursively inspect AUR dependencies. Official repository, provided, ambiguous, and unknown dependencies are shown but not traversed.
+If exactly one provider is found, it may be shown as a provided dependency. If multiple providers are found, jpacker reports the dependency as ambiguous and does not choose one implicitly.
+Version constraints such as \fBfoo>=1.2\fR are detected and shown, but jpacker v1.x does not verify them with a complete pacman/libalpm-compatible solver.
 This command does not clone, build, install dependencies, or calculate build order.
 .TP
 .B plan \fI<package>\fR
 Display a build order plan for an AUR package and its recursive AUR dependencies.
 Official repository and repository-provided dependencies are not included in the build plan. Unknown dependencies are reported as unresolved.
+If multiple providers remain for a dependency, the plan is reported as incomplete with ambiguous provider candidates; jpacker does not choose one implicitly.
+Unverified version constraints are reported as unresolved reasons and are not treated as satisfied.
+If the requested AUR package has a package name different from its PackageBase, the plan shows it as a split package install target and reports the plan as incomplete because install target selection is not implemented.
 This command does not clone, build, or install dependencies.
 .TP
 .B fetch \fI<package>\fR
 Safely retrieve the AUR build repositories needed to inspect an AUR package and its recursive AUR dependencies before any build/install stage.
 Fetch targets are resolved by PackageBase. Official repository and provided dependencies are not cloned. Unknown dependencies are reported as unresolved.
+Split package install target selection is not required for fetch itself; if the requested package resolves to a PackageBase and the fetch plan has no unresolved, ambiguous, or cyclic issue, fetch may still clone or fetch that PackageBase.
 Missing AUR repositories are cloned. Existing cloned repositories run only \fBgit fetch origin\fR.
 This command does not update the working tree and does not run \fBgit pull\fR, merge, reset, build, or install operations.
 Future behavior that advances a working tree is not implemented by \fBfetch\fR and should be considered in a separate issue as a command or option such as \fBsync\fR, \fBupdate\fR, or \fBfetch --update\fR.
@@ -89,7 +94,7 @@ Skip the interactive review/edit of PKGBUILD files before building.
 Skip the interactive git diff check during package updates.
 .TP
 .BR \-\-noconfirm
-Pass \fB--noconfirm\fR to pacman and makepkg execution. jpacker treats this as a request to avoid interactive blocking, not as "yes to everything". This does not bypass jpacker's unresolved or cyclic build plan checks.
+Pass \fB--noconfirm\fR to pacman and makepkg execution. jpacker treats this as a request to avoid interactive blocking, not as "yes to everything". This does not bypass jpacker's ambiguous provider, unresolved dependency, cyclic build plan, or split package install target checks.
 .TP
 .BR \-\-rebuild
 Pass \fB-f\fR to makepkg build/install execution so existing built package artifacts are not reused. When omitted, jpacker may ask before rebuilding an existing local package artifact; the default answer is no.
