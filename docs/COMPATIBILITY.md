@@ -64,7 +64,7 @@ dependency `bar` を解決する場合、基本順序は次の通りとする。
 
 `deps` は dependency inspection / classification として扱う。repo exact、AUR exact、provided dependency、ambiguous provider、unknown dependency、version constraint 未検証を分類して表示する。provider が複数ある場合は ambiguous として候補一覧を表示し、ここでは選択しない。
 
-`plan` は build / install そのものではなく、build plan の可視化・診断として扱う。可能な範囲で build order を表示し、ambiguous provider が残る場合は complete plan ではなく incomplete plan として表示する。`jpacker plan <pkg>` 自体は、情報を表示できたなら基本的に成功扱いでよい。ただし target package が見つからない、引数が不正、AUR RPC が失敗するなど、plan 作成自体ができない場合は失敗扱いにしてよい。
+`plan` は build / install そのものではなく、build plan の可視化・診断として扱う。可能な範囲で build order を表示し、unresolved dependency、ambiguous provider、cyclic dependency、未検証 version constraint、split package install target が残る場合は complete plan ではなく incomplete plan として表示する。`jpacker plan <pkg>` 自体は、情報を表示できたなら基本的に成功扱いでよい。ただし target package が見つからない、引数が不正、AUR RPC が失敗するなど、plan 作成自体ができない場合は失敗扱いにしてよい。
 
 build / install / fetch 実行系では、ambiguous provider、unresolved dependency、cyclic dependency が残る plan は実行不可として停止する。#96 の方針により、未検証 version constraint を理由に unresolved とした dependency も実行不可のまま扱う。
 
