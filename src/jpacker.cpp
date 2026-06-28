@@ -9,7 +9,6 @@
  */
 
 // このファイルは、jpacker の CLI 入口、pacman wrapper、AUR/source build 補助をまとめる実装単位。
-// この整理ではファイル分割せず、上から「型定義」「関数宣言」「run_jpacker()/main()」「詳細実装」の順に置く。
 // 関数宣言と詳細実装は、将来の分割候補が見えるように section comment で大まかな責務ごとに分類する。
 
 #include <algorithm>
@@ -46,6 +45,8 @@ namespace fs = std::filesystem;
 #define JPKG_VERSION "unknown"
 #endif
 
+namespace {
+
 const std::string VERSION = JPKG_VERSION;
 const std::string AUR_RPC_URL = "https://aur.archlinux.org/rpc/v5/search/";
 const std::string AUR_RPC_INFO_BASE_URL = "https://aur.archlinux.org/rpc/";
@@ -56,6 +57,8 @@ const std::string USER_AGENT = "jpacker/" + VERSION;
 const std::string CONFIG_FILE = "/etc/jpacker/jpacker.conf";
 // POLICY: source-build preference の永続化場所。意味を変える場合は互換性影響として扱う。
 const std::string PACKAGE_BUILD_DIR = "/etc/jpacker/package.build";
+
+} // namespace
 
 // jpacker.conf と CLI option を反映した、1回の実行中の設定状態。
 struct AppConfig {
@@ -68,7 +71,11 @@ struct AppConfig {
     std::string log_file = "";
 };
 
+namespace {
+
 AppConfig g_config;
+
+} // namespace
 
 struct MakepkgBuildOptions {
     bool rebuild = false;
@@ -82,6 +89,7 @@ enum class PromptDefault {
 };
 
 // AUR RPC の package info response を、依存解決や表示で扱いやすくした型。
+// NOTE: メンバ名は AUR RPC JSON key と 1:1 で対応させるため PascalCase のまま維持する。
 struct AurPackageInfo {
     std::string                    Name;
     std::string                    PackageBase;
@@ -205,9 +213,15 @@ struct BuildPlan {
     std::vector<std::string> cycles;
 };
 
+namespace {
+
 const int MAX_RECURSIVE_DEP_DEPTH = 16;
 
+} // namespace
+
 // --- 内部クラス ---
+namespace {
+
 // CLI 表示と log file 出力をまとめる薄い logger。
 class Logger {
     static std::ofstream logFile;
@@ -283,8 +297,7 @@ class WorkDirGuard {
     fs::path original_path_;
 
 public:
-    explicit WorkDirGuard(const fs::path& target_path) {
-        original_path_ = fs::current_path();
+    explicit WorkDirGuard(const fs::path& target_path) : original_path_(fs::current_path()) {
         if(!fs::exists(target_path)) fs::create_directories(target_path);
         fs::current_path(target_path);
     }
@@ -329,6 +342,8 @@ public:
     static std::map<std::string, AurPackageInfo> info_many(const std::vector<std::string>& pkg_names);
 };
 
+} // namespace
+
 // --- 関数宣言 ---
 
 // CLI入口 / help
@@ -340,7 +355,7 @@ bool handle_info_only_option(int argc, char* argv[]);
 std::string trim(const std::string& str);
 bool remote_url_matches_expected(const std::string& current_url, const std::string& expected_url);
 std::string to_lower(std::string str);
-std::string unquote(std::string str);
+std::string unquote(const std::string& str);
 std::string strip_comment(const std::string& line);
 std::string shell_quote(const std::string& str);
 bool is_valid_env_key(const std::string& key);
@@ -564,14 +579,14 @@ int run_jpacker(int argc, char* argv[]) {
         print_help();
         return 1;
     }
-    std::string first_arg = argv[operation_index];
+    const std::string first_arg = argv[operation_index];
     if(first_arg == "-h" || first_arg == "--help") {
         print_help();
         return 0;
     }
 
     std::vector<std::string> args, targets, flags;
-    std::string              operation = first_arg;
+    const std::string&       operation = first_arg;
     flags.push_back(operation);
     bool                     option_value_expected = false;
     bool                     end_of_options = false;
@@ -666,14 +681,14 @@ int run_jpacker(int argc, char* argv[]) {
             return 0;
         }
 
-        bool is_sync = (operation.find("-S") == 0);
-        bool is_query = (operation.find("-Q") == 0);
+        bool is_sync = operation.starts_with("-S");
+        bool is_query = operation.starts_with("-Q");
         bool is_foreign_updates = (is_query && operation.find('u') != std::string::npos && operation.find('a') != std::string::npos);
         bool is_search = (is_sync && operation.find('s') != std::string::npos);
         bool is_info = (is_sync && operation.find('i') != std::string::npos);
         bool is_clean = (is_sync && operation.find('c') != std::string::npos);
         bool is_sys_upgrade = (is_sync && (operation.find('u') != std::string::npos || operation.find('y') != std::string::npos));
-        bool needs_sudo = (is_sync || operation.find("-R") == 0 || operation.find("-U") == 0 || operation.find("-D") == 0);
+        bool needs_sudo = (is_sync || operation.starts_with("-R") || operation.starts_with("-U") || operation.starts_with("-D"));
 
         if(is_foreign_updates) return cmd_query_foreign_updates();
 
@@ -824,7 +839,7 @@ std::string to_lower(std::string str) {
     return str;
 }
 
-std::string unquote(std::string str) {
+std::string unquote(const std::string& str) {
     if(str.length() >= 2) {
         char first = str.front();
         char last = str.back();
@@ -997,7 +1012,6 @@ void load_config() {
 std::string exec_command(const char* cmd) {
     std::array<char, 128> buffer;
     std::string           result;
-    // 修正: decltype(&pclose) を int(*)(FILE*) に変更して警告を回避
     std::unique_ptr<FILE, int (*)(FILE*)> pipe(popen(cmd, "r"), pclose);
     if(!pipe) return "";
     while(fgets(buffer.data(), buffer.size(), pipe.get()) != nullptr) {
@@ -1175,7 +1189,7 @@ std::string get_package_env(const std::string& pkg_name) {
 std::string get_git_branch() {
     std::string remote_head = exec_command("git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null");
     const std::string prefix = "origin/";
-    if(remote_head.find(prefix) == 0 && remote_head.length() > prefix.length()) {
+    if(remote_head.starts_with(prefix) && remote_head.length() > prefix.length()) {
         return remote_head.substr(prefix.length());
     }
     if(command_status("git show-ref --verify --quiet refs/remotes/origin/main") == 0) return "main";
@@ -1185,16 +1199,13 @@ std::string get_git_branch() {
 
 bool is_update_needed(const std::string& pkg_name) {
     require_valid_package_name(pkg_name);
-    // 1. インストール済みバージョン取得
     std::string installed_full = exec_command(("pacman -Q " + shell_quote(pkg_name) + " 2>/dev/null").c_str());
     if(installed_full.empty()) {
         return true;// インストールされていないのでビルド必要
     }
-    // "package 1.0.0-1" -> "1.0.0-1"
     size_t      space_pos = installed_full.find(' ');
     std::string installed_ver = (space_pos != std::string::npos) ? installed_full.substr(space_pos + 1) : "";
 
-    // 2. PKGBUILDから最新バージョン取得 (.SRCINFO生成)
     // NOTE: ディレクトリ移動は呼び出し元(WorkDirGuard)で制御されている前提
     std::string srcinfo = exec_command("makepkg --printsrcinfo 2>/dev/null");
     std::string pkgver, pkgrel;
@@ -1212,11 +1223,9 @@ bool is_update_needed(const std::string& pkg_name) {
     if(pkgver.empty() || pkgrel.empty()) return true;// 取得失敗時は安全側に倒してビルド
     std::string new_ver = pkgver + "-" + pkgrel;
 
-    // 3. vercmp で比較
     std::string cmp_cmd = "vercmp " + shell_quote(new_ver) + " " + shell_quote(installed_ver);
     std::string cmp_res = exec_command(cmp_cmd.c_str());
 
-    // vercmp > 0 なら new_ver の方が新しい
     try {
         if(std::stoi(cmp_res) > 0) return true;
     } catch(...) {
@@ -1522,7 +1531,8 @@ bool ask_user(const std::string& question, PromptDefault default_answer) {
 // AUR RPC / JSON解析
 size_t WriteCallback(void* contents, size_t size, size_t nmemb, void* userp) {
     size_t total_size = size * nmemb;
-    ((std::string*)userp)->append((char*)contents, total_size);
+    auto*  buffer = static_cast<std::string*>(userp);
+    buffer->append(static_cast<char*>(contents), total_size);
     return total_size;
 }
 
@@ -1660,8 +1670,8 @@ std::map<std::string, AurPackageInfo> AurClient::info_many(const std::vector<std
     }
 
     for(const auto& pkg : j["results"]) {
-        AurPackageInfo info = parse_aur_package_info(pkg);
-        if(!info.Name.empty()) results[info.Name] = info;
+        AurPackageInfo pkg_info = parse_aur_package_info(pkg);
+        if(!pkg_info.Name.empty()) results[pkg_info.Name] = pkg_info;
     }
     return results;
 }
