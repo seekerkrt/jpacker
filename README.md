@@ -138,6 +138,12 @@ constraint 付き dependency は package name 部分で従来通り解決を試�
 
 build / install / fetch 実行系では、ambiguous provider や unresolved dependency が残る plan は実行前に停止します。詳細は [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) の provider selection policy を参照してください。
 
+### AUR split package install targets
+
+AUR RPC の `PackageBase` は clone / fetch / build repository の単位で、package name は install 対象です。split package では、たとえば `Name=linux-mainline-headers` / `PackageBase=linux-mainline` のように一致しないことがあります。
+
+`jpacker plan <pkg>` は、このような split package target を `Split package install targets` として表示し、install target selection が未実装であるため incomplete plan として扱います。`jpacker -S <pkg>` や `jpacker build <pkg>` の build/install 実行経路では、`PackageBase` と package name が異なる AUR target を clone / build / install 前に停止します。`jpacker fetch <pkg>` は PackageBase 単位の取得なので、PackageBase へ解決でき、他の unresolved / ambiguous / cyclic な問題が残らない場合は実行できます。
+
 ### Source build preferences
 
 `jpacker` は per-package source build preferences を管理できます。これにより、選択した package を source から build し、Gentoo の `package.env` に近い形で custom build flags を適用できます。
@@ -407,6 +413,12 @@ Dependencies with constraints are still resolved by their package name when poss
 For now, when a dependency has no exact package match but has provider candidates, `jpacker deps` / `jpacker plan` classifies it by the number of providers. A single provider may be treated as a provided dependency, but multiple providers are reported as ambiguous provider candidates; jpacker does not implicitly pick the first one.
 
 Build / install / fetch execution stops before running a plan that still has ambiguous providers or unresolved dependencies. See the provider selection policy in [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) for details.
+
+### AUR split package install targets
+
+In AUR metadata, `PackageBase` is the clone / fetch / build repository unit, while the package name is the install target. For split packages, they may differ, such as `Name=linux-mainline-headers` / `PackageBase=linux-mainline`.
+
+`jpacker plan <pkg>` shows such split package targets under `Split package install targets` and reports the plan as incomplete because install target selection is not implemented. Build/install execution paths such as `jpacker -S <pkg>` and `jpacker build <pkg>` stop before clone / build / install when the requested AUR target has a package name different from its `PackageBase`. `jpacker fetch <pkg>` operates by PackageBase, so it can still run when the package name resolves to a PackageBase and no other unresolved, ambiguous, or cyclic plan issue remains.
 
 ### Source build preferences
 

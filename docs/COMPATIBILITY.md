@@ -70,6 +70,24 @@ build / install / fetch 実行系では、ambiguous provider、unresolved depend
 
 ---
 
+## AUR split package install target policy
+
+AUR metadata の `PackageBase` は clone / fetch / build repository の単位であり、package name は install 対象である。単体 package では結果として一致してよいが、split package では一致するとは限らない。
+
+jpacker v1.9.0 / #98 では、`PackageBase` と install target package name を別概念として扱う。jpacker が install target を安全に一意決定できない場合は、暗黙に先頭候補や PackageBase 名を選ばない。
+
+現時点の具体挙動は次の通り。
+
+- `deps <pkg>` は入力 target を package name として AUR RPC info を確認し、`Package` と `Package Base` を表示する。
+- `plan <pkg>` は、AUR RPC info 上で `Name` と `PackageBase` が異なる target を `Split package install targets` として表示し、install target selection 未実装の incomplete plan として扱う。
+- `fetch <pkg>` は PackageBase 単位の取得操作であるため、package name から PackageBase へ解決でき、ambiguous provider / unresolved dependency / cyclic dependency が残らない場合は実行してよい。
+- `-S <pkg>` などの install 経路と `build <pkg>` は現状 `makepkg -i` を含む build/install 経路であるため、`Name` と `PackageBase` が異なる AUR target では clone / build / install 前に停止する。
+- `--noconfirm` は split package install target selection 未実装を自動承認しない。
+
+この guard は、AUR RPC info で requested package の `Name` と `PackageBase` が異なる場合を対象にする。`PackageBase == Name` だが同じ PackageBase から sibling package も生成されるケースの完全な列挙・選択は、`.SRCINFO` / generated package list / package file selection と合わせて後続 Issue で扱う。
+
+---
+
 ## jpacker 固有 option
 
 次の option は jpacker 固有として扱う。
