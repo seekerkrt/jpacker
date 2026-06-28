@@ -411,6 +411,7 @@ std::vector<ProvidedDependency> find_aur_providers(const std::string& dependency
 std::vector<ProvidedDependency> find_dependency_providers(const std::string& dependency_name);
 PackageBuildSource resolve_build_source(const std::string& pkg_name);
 void require_supported_build_source_install_target(const PackageBuildSource& source);
+void require_executable_build_source_plan(const PackageBuildSource& source);
 
 // AUR検索 / info表示
 bool search_aur(const std::vector<std::string>& keywords);
@@ -470,6 +471,7 @@ void fetch_aur_package_base(const std::string& package_base);
 
 // source build / AUR install
 void build_from_git(const std::string& pkg_name, const std::string& clone_name, const std::string& git_url, const std::string& custom_env, bool only_if_updated);
+void require_executable_sync_install_target(const std::string& pkg_name);
 void install_smart_source(const std::string& pkg_name, bool only_if_updated);
 void install_aur_build_plan(const std::string& target);
 
@@ -699,6 +701,9 @@ int run_jpacker(int argc, char* argv[]) {
                     repo_targets.push_back(t);
                 else
                     aur_targets.push_back(t);
+            }
+            for(const auto& pkg : aur_targets) {
+                require_executable_sync_install_target(pkg);
             }
             if(!repo_targets.empty() || is_sys_upgrade) {
                 std::string cmd = "sudo pacman " + join_pacman_args(flags);
@@ -1739,6 +1744,16 @@ void require_supported_build_source_install_target(const PackageBuildSource& sou
     }
 }
 
+void require_executable_build_source_plan(const PackageBuildSource& source) {
+    require_supported_build_source_install_target(source);
+    if(!source.is_aur) return;
+
+    // POLICY(#99): build/source-build は makepkg -i まで進む実行系なので、
+    // clone/fetch/build/install 前に unresolved / ambiguous / cyclic / split target を拒否する。
+    BuildPlan plan = resolve_build_plan(source.requested_name);
+    require_executable_install_plan(source.requested_name, plan);
+}
+
 // AUR検索 / info表示
 bool search_aur(const std::vector<std::string>& keywords) {
     bool                  found = false;
@@ -2273,10 +2288,13 @@ void print_build_plan(const BuildPlan& plan) {
         }
     }
 
-    if(!plan.ambiguous_providers.empty() || !plan.split_package_targets.empty()) {
+    if(!plan.unresolved.empty() || !plan.ambiguous_providers.empty() || !plan.cycles.empty() ||
+       !plan.split_package_targets.empty()) {
         std::cout << std::endl;
         std::cout << "Plan status: incomplete" << std::endl;
+        if(!plan.unresolved.empty()) std::cout << "  unresolved dependencies remain" << std::endl;
         if(!plan.ambiguous_providers.empty()) std::cout << "  ambiguous providers are not selected" << std::endl;
+        if(!plan.cycles.empty()) std::cout << "  cyclic dependencies detected" << std::endl;
         if(!plan.split_package_targets.empty())
             std::cout << "  split package install target selection is not implemented" << std::endl;
     }
@@ -2564,9 +2582,20 @@ void build_from_git(const std::string& pkg_name, const std::string& clone_name, 
 void install_smart_source(const std::string& pkg_name, bool only_if_updated) {
     std::string env = get_package_env(pkg_name);
     PackageBuildSource source = resolve_build_source(pkg_name);
-    require_supported_build_source_install_target(source);
+    require_executable_build_source_plan(source);
 
     build_from_git(source.requested_name, source.clone_name, source.git_url, env, only_if_updated);
+}
+
+void require_executable_sync_install_target(const std::string& pkg_name) {
+    if(is_repo_package(pkg_name)) {
+        PackageBuildSource source = resolve_build_source(pkg_name);
+        require_executable_build_source_plan(source);
+        return;
+    }
+
+    BuildPlan plan = resolve_build_plan(pkg_name);
+    require_executable_install_plan(pkg_name, plan);
 }
 
 void install_aur_build_plan(const std::string& target) {
@@ -2866,7 +2895,7 @@ int cmd_build(const std::vector<std::string>& args) {
 
     try {
         PackageBuildSource source = resolve_build_source(pkg_name);
-        require_supported_build_source_install_target(source);
+        require_executable_build_source_plan(source);
         // build コマンドは常にビルドする (only_if_updated = false)
         build_from_git(source.requested_name, source.clone_name, source.git_url, custom_env, false);
     } catch(const std::exception& e) {
