@@ -3135,6 +3135,11 @@ int cmd_upgrade() {
         for(const auto& entry : fs::directory_iterator(PACKAGE_BUILD_DIR)) {
             if(entry.is_regular_file()) {
                 std::string pkg_name = entry.path().filename().string();
+                if(!is_valid_package_name(pkg_name)) {
+                    Logger::warn("Ignoring invalid source-build preference filename: " + pkg_name);
+                    failed = true;
+                    continue;
+                }
                 try {
                     // upgrade 時は true (更新がある場合のみビルド)
                     install_smart_source(pkg_name, true);

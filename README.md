@@ -111,7 +111,7 @@ jpacker -Syu
 
 `jpacker -Syu` は pacman 互換の system upgrade として扱われ、登録済み source build preferences の全体走査は行いません。system upgrade 後に `/etc/jpacker/package.build/` の設定を確認し、必要な package を自動で rebuild したい場合は `jpacker upgrade` を使ってください。
 
-`jpacker -Sc` は `sudo pacman -Sc` へ委譲され、pacman cache のみを対象にします。jpacker の build/cache も削除したい場合は `jpacker clean` を使ってください。
+`jpacker -Sc` は `sudo pacman -Sc` へ委譲され、pacman cache のみを対象にします。jpacker の build/cache も削除したい場合は `jpacker clean` を使ってください。jpacker の cache directory は、`XDG_CACHE_HOME` が設定されていれば `$XDG_CACHE_HOME/jpacker`、未設定なら `$HOME/.cache/jpacker` です。`jpacker clean` は実行時に解決した jpacker cache directory を表示し、確認後に cached build files を削除します。`jpacker.log` は削除対象から除外されます。
 
 ### AUR build repository inspection / `fetch`
 
@@ -236,7 +236,13 @@ Example:
 # NODIFF=true
 
 # Preferred editor (priority: $EDITOR > this setting > nano)
+# Accepts a simple editor command and simple options only.
+# Complex shell syntax such as shell expansion, nested quoting, pipes,
+# redirects, or command chains is intentionally unsupported for safety.
+# Examples:
+# EDITOR=nano
 # EDITOR=vim
+# EDITOR=code --wait
 
 # Log file path (default: ~/.cache/jpacker/jpacker.log)
 # LOGFILE=~/logs/jpacker.log
@@ -387,7 +393,7 @@ jpacker -Syu
 
 `jpacker -Syu` is treated as a pacman-compatible system upgrade and does not scan all registered source-build preferences. Use `jpacker upgrade` instead when you want jpacker to check `/etc/jpacker/package.build/` after the system upgrade and rebuild configured source packages when needed.
 
-`jpacker -Sc` is passed through to `sudo pacman -Sc` and cleans pacman caches only. Use `jpacker clean` when you also want to remove jpacker build/cache files.
+`jpacker -Sc` is passed through to `sudo pacman -Sc` and cleans pacman caches only. Use `jpacker clean` when you also want to remove jpacker build/cache files. The jpacker cache directory is `$XDG_CACHE_HOME/jpacker` when `XDG_CACHE_HOME` is set, otherwise `$HOME/.cache/jpacker`. `jpacker clean` shows the resolved jpacker cache directory at runtime and removes cached build files after confirmation. `jpacker.log` is excluded.
 
 ### AUR build repository inspection / `fetch`
 
@@ -512,7 +518,13 @@ Example:
 # NODIFF=true
 
 # Preferred editor (priority: $EDITOR > this setting > nano)
+# Accepts a simple editor command and simple options only.
+# Complex shell syntax such as shell expansion, nested quoting, pipes,
+# redirects, or command chains is intentionally unsupported for safety.
+# Examples:
+# EDITOR=nano
 # EDITOR=vim
+# EDITOR=code --wait
 
 # Log file path (default: ~/.cache/jpacker/jpacker.log)
 # LOGFILE=~/logs/jpacker.log
