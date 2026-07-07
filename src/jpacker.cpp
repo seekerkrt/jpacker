@@ -415,10 +415,13 @@ bool ask_user(const std::string& question, PromptDefault default_answer);
 
 // AUR RPC / JSON解析
 size_t WriteCallback(void* contents, size_t size, size_t nmemb, void* userp);
+json parse_aur_rpc_response(const std::string& response, const std::string& context);
+const json& aur_rpc_results_array(const json& response, const std::string& context);
 std::string json_string_or_empty(const json& obj, const std::string& key);
 std::vector<std::string> json_string_array_or_empty(const json& obj, const std::string& key);
 std::optional<long long> json_optional_long_long(const json& obj, const std::string& key);
 AurPackageInfo parse_aur_package_info(const json& pkg);
+AurPackageInfo parse_aur_rpc_package_info(const json& pkg, const std::string& context);
 
 // AUR provider / build source解決
 bool aur_package_provides(const AurPackageInfo& info, const std::string& dependency_name);
@@ -1536,22 +1539,46 @@ size_t WriteCallback(void* contents, size_t size, size_t nmemb, void* userp) {
     return total_size;
 }
 
+json parse_aur_rpc_response(const std::string& response, const std::string& context) {
+    try {
+        json parsed = json::parse(response);
+        if(!parsed.is_object()) {
+            throw std::runtime_error("top-level JSON value is not an object");
+        }
+        return parsed;
+    } catch(const json::parse_error& e) {
+        throw std::runtime_error(
+                "AUR RPC response parse failed for " + context + ": " + std::string(e.what()));
+    } catch(const std::runtime_error& e) {
+        throw std::runtime_error(
+                "AUR RPC response parse failed for " + context + ": unexpected response: " + e.what());
+    }
+}
+
+const json& aur_rpc_results_array(const json& response, const std::string& context) {
+    if(!response.contains("results") || !response["results"].is_array()) {
+        throw std::runtime_error(
+                "AUR RPC response parse failed for " + context + ": unexpected response: missing results array");
+    }
+    return response["results"];
+}
+
 std::string json_string_or_empty(const json& obj, const std::string& key) {
-    if(!obj.contains(key) || obj[key].is_null()) return "";
+    if(!obj.is_object() || !obj.contains(key) || obj[key].is_null() || !obj[key].is_string()) return "";
     return obj[key].get<std::string>();
 }
 
 std::vector<std::string> json_string_array_or_empty(const json& obj, const std::string& key) {
     std::vector<std::string> values;
-    if(!obj.contains(key) || !obj[key].is_array()) return values;
+    if(!obj.is_object() || !obj.contains(key) || !obj[key].is_array()) return values;
     for(const auto& item : obj[key]) {
-        if(!item.is_null()) values.push_back(item.get<std::string>());
+        if(item.is_string()) values.push_back(item.get<std::string>());
     }
     return values;
 }
 
 std::optional<long long> json_optional_long_long(const json& obj, const std::string& key) {
-    if(!obj.contains(key) || obj[key].is_null() || !obj[key].is_number()) return std::nullopt;
+    if(!obj.is_object() || !obj.contains(key) || obj[key].is_null() || !obj[key].is_number()) return std::nullopt;
     try {
         return obj[key].get<long long>();
     } catch(...) {
@@ -1574,6 +1601,22 @@ AurPackageInfo parse_aur_package_info(const json& pkg) {
     info.Replaces = json_string_array_or_empty(pkg, "Replaces");
     info.Maintainer = json_string_or_empty(pkg, "Maintainer");
     info.OutOfDate = json_optional_long_long(pkg, "OutOfDate");
+    return info;
+}
+
+AurPackageInfo parse_aur_rpc_package_info(const json& pkg, const std::string& context) {
+    if(!pkg.is_object()) {
+        throw std::runtime_error(
+                "AUR RPC response parse failed for " + context +
+                ": unexpected response: package info entry is not an object");
+    }
+
+    AurPackageInfo info = parse_aur_package_info(pkg);
+    if(info.Name.empty()) {
+        throw std::runtime_error(
+                "AUR RPC response parse failed for " + context +
+                ": unexpected response: package info entry is missing Name");
+    }
     return info;
 }
 
@@ -1616,12 +1659,13 @@ std::vector<std::string> AurClient::search_names_by_provides(const std::string& 
     std::string response = get_url(url);
     if(response.empty()) return names;
 
-    auto j = json::parse(response);
-    if(!j.contains("results") || !j["results"].is_array()) return names;
+    std::string context = "provides search " + provided_name;
+    json        j = parse_aur_rpc_response(response, context);
+    const json& results = aur_rpc_results_array(j, context);
 
-    for(const auto& pkg : j["results"]) {
-        std::string name = json_string_or_empty(pkg, "Name");
-        if(!name.empty()) names.push_back(name);
+    for(const auto& pkg : results) {
+        AurPackageInfo info = parse_aur_rpc_package_info(pkg, context);
+        names.push_back(info.Name);
     }
     return names;
 }
@@ -1636,11 +1680,13 @@ std::optional<AurPackageInfo> AurClient::info(const std::string& pkg_name) {
     std::string response = get_url(url);
     if(response.empty()) return std::nullopt;
 
-    auto j = json::parse(response);
-    if(!j.contains("results") || !j["results"].is_array() || j["results"].empty()) {
+    std::string context = "package info " + pkg_name;
+    json        j = parse_aur_rpc_response(response, context);
+    const json& results = aur_rpc_results_array(j, context);
+    if(results.empty()) {
         return std::nullopt;
     }
-    return parse_aur_package_info(j["results"][0]);
+    return parse_aur_rpc_package_info(results[0], context);
 }
 
 std::map<std::string, AurPackageInfo> AurClient::info_many(const std::vector<std::string>& pkg_names) {
@@ -1664,14 +1710,13 @@ std::map<std::string, AurPackageInfo> AurClient::info_many(const std::vector<std
     std::string response = get_url(url);
     if(response.empty()) return results;
 
-    auto j = json::parse(response);
-    if(!j.contains("results") || !j["results"].is_array()) {
-        return results;
-    }
+    std::string context = "multiinfo";
+    json        j = parse_aur_rpc_response(response, context);
+    const json& aur_results = aur_rpc_results_array(j, context);
 
-    for(const auto& pkg : j["results"]) {
-        AurPackageInfo pkg_info = parse_aur_package_info(pkg);
-        if(!pkg_info.Name.empty()) results[pkg_info.Name] = pkg_info;
+    for(const auto& pkg : aur_results) {
+        AurPackageInfo pkg_info = parse_aur_rpc_package_info(pkg, context);
+        results[pkg_info.Name] = pkg_info;
     }
     return results;
 }
@@ -1774,29 +1819,30 @@ bool search_aur(const std::vector<std::string>& keywords) {
         std::string response = AurClient::search_query(pkg_name);
         if(response.empty()) continue;
         try {
-            auto j = json::parse(response);
-            if(j.contains("results") && j["results"].is_array()) {
-                for(const auto& pkg : j["results"]) {
-                    found = true;
-                    AurPackageInfo info = parse_aur_package_info(pkg);
-                    std::string    name = info.Name;
-                    std::cout << "\033[1;35maur\033[0m/\033[1m" << name << "\033[0m \033[1;32m"
-                              << info.Version << "\033[0m";
-                    if(installed_foreign_packages.contains(name)) {
-                        std::cout << " \033[1;36m[installed]\033[0m";
-                    }
-                    if(info.OutOfDate.has_value()) {
-                        std::cout << " \033[1;31m[out-of-date]\033[0m";
-                    }
-                    if(is_orphaned(info)) {
-                        std::cout << " \033[1;33m[orphaned]\033[0m";
-                    }
-                    std::cout << std::endl;
-                    if(pkg.contains("Description") && !pkg["Description"].is_null())
-                        std::cout << "    " << pkg["Description"].get<std::string>() << std::endl;
+            std::string context = "search query " + pkg_name;
+            json        j = parse_aur_rpc_response(response, context);
+            const json& results = aur_rpc_results_array(j, context);
+            for(const auto& pkg : results) {
+                AurPackageInfo info = parse_aur_rpc_package_info(pkg, context);
+                found = true;
+                std::string    name = info.Name;
+                std::cout << "\033[1;35maur\033[0m/\033[1m" << name << "\033[0m \033[1;32m"
+                          << info.Version << "\033[0m";
+                if(installed_foreign_packages.contains(name)) {
+                    std::cout << " \033[1;36m[installed]\033[0m";
                 }
+                if(info.OutOfDate.has_value()) {
+                    std::cout << " \033[1;31m[out-of-date]\033[0m";
+                }
+                if(is_orphaned(info)) {
+                    std::cout << " \033[1;33m[orphaned]\033[0m";
+                }
+                std::cout << std::endl;
+                std::string description = json_string_or_empty(pkg, "Description");
+                if(!description.empty()) std::cout << "    " << description << std::endl;
             }
-        } catch(...) {
+        } catch(const std::exception& e) {
+            Logger::warn(e.what());
         }
     }
     return found;
