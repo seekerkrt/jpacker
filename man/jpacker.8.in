@@ -20,6 +20,8 @@ Install packages or update the system. If a target is found in the official repo
 If a package has a source-build preference (via \fBadd-src\fR), it will be built from source even if it exists in the official repositories.
 \fBjpacker -Syu\fR is treated as a pacman-compatible system upgrade and does not scan all registered source-build preferences. Use \fBjpacker upgrade\fR when registered source-build settings should be checked after the system upgrade and rebuilt when needed.
 \fBjpacker -Sc\fR is passed through to \fBsudo pacman -Sc\fR and cleans pacman caches only. Use \fBjpacker clean\fR when you also want to remove jpacker build/cache files.
+The jpacker cache directory is \fI$XDG_CACHE_HOME/jpacker\fR when \fBXDG_CACHE_HOME\fR is set, otherwise \fI$HOME/.cache/jpacker\fR.
+\fBjpacker clean\fR shows the resolved jpacker cache directory at runtime and removes cached build files after confirmation. \fIjpacker.log\fR is excluded.
 .TP
 .B \-Ss \fI<query>\fR
 Search for packages in both the official repositories and the AUR.
@@ -67,7 +69,7 @@ During source package updates, jpacker can show a git diff if changes are detect
 Some upgrade/source-update checks currently use \fBmakepkg --printsrcinfo\fR to obtain \fI.SRCINFO\fR, which may evaluate the PKGBUILD before the later review prompt. This known limitation is tracked in issue #134 and will be moved toward \fI.SRCINFO\fR-first checks.
 .TP
 .B clean
-Clean package/build caches. This first runs \fBsudo pacman -Sc\fR to clean the official package cache, and then prompts to remove build artifacts from the jpacker cache directory (\fI~/.cache/jpacker/\fR). Log files are preserved.
+Clean package/build caches. This first runs \fBsudo pacman -Sc\fR to clean the official package cache, and then prompts to remove cached build files from the resolved jpacker cache directory. The directory is \fI$XDG_CACHE_HOME/jpacker\fR when \fBXDG_CACHE_HOME\fR is set, otherwise \fI$HOME/.cache/jpacker\fR. \fIjpacker.log\fR is preserved.
 .TP
 .B add-src \fI<package> [VAR=VALUE...]\fR
 Enable a source-build preference for a package. This creates a preference file in \fI/etc/jpacker/package.build/\fR.
@@ -117,7 +119,7 @@ Set to \fBtrue\fR to disable git diff checks during updates globally.
 .TP
 .B EDITOR
 Specify the preferred text editor. The priority is the \fBEDITOR\fR environment variable, this configuration value, then \fBnano\fR.
-Editor command tokens are restricted to simple command words and options for safety.
+Editor command tokens are restricted to simple command words and simple options for safety. For example, \fBnano\fR, \fBvim\fR, and \fBcode --wait\fR are supported. Complex shell syntax such as shell expansion, nested quoting, pipes, redirects, or command chains is intentionally unsupported.
 .TP
 .B LOGFILE
 Specify the path to the log file. Supports tilde expansion (e.g., \fB~/logs/jpacker.log\fR).
@@ -133,7 +135,7 @@ Directory containing source-build preference files managed with \fBadd-src\fR.
 Each file corresponds to a package name and can define environment variables (e.g., CFLAGS) that are applied during \fBmakepkg\fR execution.
 .TP
 .I ~/.cache/jpacker/
-Default directory used for downloading and building packages (respects \fBXDG_CACHE_HOME\fR).
+Default directory used for downloading and building packages when \fBXDG_CACHE_HOME\fR is not set. If \fBXDG_CACHE_HOME\fR is set, jpacker uses \fI$XDG_CACHE_HOME/jpacker\fR.
 .TP
 .I ~/.cache/jpacker/jpacker.log
 Default log file location.
