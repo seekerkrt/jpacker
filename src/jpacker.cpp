@@ -33,6 +33,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <system_error>
 #include <sys/wait.h>
 #include <unistd.h>
 #include <vector>
@@ -86,6 +87,12 @@ enum class PromptDefault {
     Yes,
     No,
     None,
+};
+
+enum class UpdateCheckResult {
+    NeedsBuild,
+    UpToDate,
+    Unknown,
 };
 
 // AUR RPC の package info response を、依存解決や表示で扱いやすくした型。
@@ -392,7 +399,8 @@ bool is_force_source(const std::string& pkg_name);
 std::string get_package_env(const std::string& pkg_name);
 std::string get_git_branch();
 bool is_installed_package(const std::string& pkg_name);
-bool is_update_needed(const std::string& pkg_name);
+std::optional<std::string> read_srcinfo_version(const fs::path& pkg_dir);
+UpdateCheckResult check_update_status(const std::string& pkg_name, const fs::path& pkg_dir);
 bool is_repo_package(const std::string& pkg_name);
 std::string repo_name_from_sync_db(const fs::path& db_path);
 void add_repo_provider(
@@ -1200,43 +1208,55 @@ std::string get_git_branch() {
     return "master";
 }
 
-bool is_update_needed(const std::string& pkg_name) {
+std::optional<std::string> read_srcinfo_version(const fs::path& pkg_dir) {
+    fs::path        srcinfo_path = pkg_dir / ".SRCINFO";
+    std::error_code ec;
+    if(!fs::is_regular_file(srcinfo_path, ec) || ec) return std::nullopt;
+
+    std::ifstream file(srcinfo_path);
+    if(!file) return std::nullopt;
+
+    std::string pkgver;
+    std::string pkgrel;
+    std::string line;
+    while(std::getline(file, line)) {
+        std::string trimmed = trim(line);
+        if(trimmed.starts_with("pkgver =")) {
+            pkgver = trim(trimmed.substr(trimmed.find('=') + 1));
+        } else if(trimmed.starts_with("pkgrel =")) {
+            pkgrel = trim(trimmed.substr(trimmed.find('=') + 1));
+        }
+    }
+
+    if(pkgver.empty() || pkgrel.empty()) return std::nullopt;
+    return pkgver + "-" + pkgrel;
+}
+
+UpdateCheckResult check_update_status(const std::string& pkg_name, const fs::path& pkg_dir) {
     require_valid_package_name(pkg_name);
     std::string installed_full = exec_command(("pacman -Q " + shell_quote(pkg_name) + " 2>/dev/null").c_str());
     if(installed_full.empty()) {
-        return true;// インストールされていないのでビルド必要
+        return UpdateCheckResult::NeedsBuild;// インストールされていないのでビルド必要
     }
     size_t      space_pos = installed_full.find(' ');
     std::string installed_ver = (space_pos != std::string::npos) ? installed_full.substr(space_pos + 1) : "";
 
-    // NOTE: ディレクトリ移動は呼び出し元(WorkDirGuard)で制御されている前提
-    std::string srcinfo = exec_command("makepkg --printsrcinfo 2>/dev/null");
-    std::string pkgver, pkgrel;
+    // POLICY: upgrade の pre-review 更新判定では PKGBUILD を評価しない。
+    // 既存 .SRCINFO が読めない場合は呼び出し元で対話確認または skip へ進める。
+    std::optional<std::string> new_ver = read_srcinfo_version(pkg_dir);
+    if(!new_ver.has_value()) return UpdateCheckResult::Unknown;
 
-    std::stringstream ss(srcinfo);
-    std::string       line;
-    while(std::getline(ss, line)) {
-        if(line.find("pkgver =") != std::string::npos) {
-            pkgver = trim(line.substr(line.find('=') + 1));
-        } else if(line.find("pkgrel =") != std::string::npos) {
-            pkgrel = trim(line.substr(line.find('=') + 1));
-        }
-    }
-
-    if(pkgver.empty() || pkgrel.empty()) return true;// 取得失敗時は安全側に倒してビルド
-    std::string new_ver = pkgver + "-" + pkgrel;
-
-    std::string cmp_cmd = "vercmp " + shell_quote(new_ver) + " " + shell_quote(installed_ver);
+    std::string cmp_cmd = "vercmp " + shell_quote(new_ver.value()) + " " + shell_quote(installed_ver) + " 2>/dev/null";
     std::string cmp_res = exec_command(cmp_cmd.c_str());
 
     try {
-        if(std::stoi(cmp_res) > 0) return true;
+        if(std::stoi(cmp_res) > 0) return UpdateCheckResult::NeedsBuild;
     } catch(...) {
-        return true;
+        return UpdateCheckResult::Unknown;
     }
 
     Logger::info(pkg_name + " is up to date (" + installed_ver + "). Skipping.");
-    return false;
+    return UpdateCheckResult::UpToDate;
 }
 
 bool is_installed_package(const std::string& pkg_name) {
@@ -2603,10 +2623,26 @@ void build_from_git(const std::string& pkg_name, const std::string& clone_name, 
     {
         WorkDirGuard wd(pkg_dir);
 
-        // 【New!】 更新チェック (only_if_updated = true の場合のみ)
         if(only_if_updated) {
-            if(!is_update_needed(pkg_name)) {
+            UpdateCheckResult update_check = check_update_status(pkg_name, pkg_dir);
+            if(update_check == UpdateCheckResult::UpToDate) {
                 return;// 更新不要なので終了
+            }
+            if(update_check == UpdateCheckResult::Unknown) {
+                Logger::warn("Unable to determine update status from .SRCINFO for " + pkg_name + ".");
+                Logger::warn("Skipping pre-review PKGBUILD evaluation.");
+                if(g_config.no_confirm) {
+                    Logger::warn("Skipping " + pkg_name + ": update status is unknown and --noconfirm is set.");
+                    return;
+                }
+                if(!isatty(STDIN_FILENO)) {
+                    Logger::warn("Skipping " + pkg_name + ": update status is unknown and stdin is non-interactive.");
+                    return;
+                }
+                if(!ask_user("Update status is unknown because .SRCINFO is missing or incomplete. Continue to review/build?",
+                            PromptDefault::No)) {
+                    return;
+                }
             }
         }
 

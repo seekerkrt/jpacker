@@ -185,14 +185,14 @@ jpacker -S fastfetch
 #### 5. Full system upgrade を実行する
 
 official repositories の packages を更新したあと、source build preferences がある packages を確認します。
-Preferred source builds は、PKGBUILD version が installed package より新しい場合に rebuild されます。
+Preferred source builds は、既存 `.SRCINFO` の version が installed package より新しい場合に rebuild されます。
 `jpacker -Syu` は pacman 互換の system upgrade であり、登録済み source build preferences の全体走査は行いません。登録済み source-build 設定を system upgrade 後に自動確認・再ビルドしたい場合は、`jpacker -Syu` ではなく `jpacker upgrade` を使ってください。
 
 ```bash
 jpacker upgrade
 ```
 
-注意: 現在の upgrade / source update 系の一部では、更新判定用の `.SRCINFO` を得るために `makepkg --printsrcinfo` を実行する場合があり、後続の review prompt より前に PKGBUILD が評価されうる。これは既知の制限で、[#134](https://github.com/seekerkrt/jpacker/issues/134) で `.SRCINFO` 優先の更新判定へ整理する予定です。
+`jpacker upgrade` の review 前更新判定では、working tree にある既存 `.SRCINFO` を使います。`.SRCINFO` がない、または version 情報が不完全な場合、review 前に `makepkg --printsrcinfo` は実行せず、対話実行では続行確認を行い、`--noconfirm` または非対話実行では対象 package を skip します。
 
 #### 6. Official binary package に戻す
 
@@ -260,7 +260,7 @@ jpacker -S google-chrome --noedit
 jpacker --noconfirm -S google-chrome
 ```
 
-AUR / source build の build/install 時に、`--rebuild` を指定すると `makepkg -f` 相当、`--cleanbuild` を指定すると `makepkg -C` 相当を渡します。両方を指定した場合は `makepkg -f -C` 相当として扱います。未指定の場合、既存の package artifact や `src/` directory があるときは、必要に応じて default no の確認 prompt で rebuild / cleanbuild を選べます。cleanbuild を有効にし、同じ package directory に既存 package artifact がある場合は、artifact 再利用を避けるため rebuild も有効にします。`--noconfirm` 指定時はこの prompt を出さず、未指定の rebuild / cleanbuild は no 扱いにします。これらは jpacker 固有の option であり、pacman execution や `.SRCINFO` 読み取り用の `makepkg --printsrcinfo` には渡しません。
+AUR / source build の build/install 時に、`--rebuild` を指定すると `makepkg -f` 相当、`--cleanbuild` を指定すると `makepkg -C` 相当を渡します。両方を指定した場合は `makepkg -f -C` 相当として扱います。未指定の場合、既存の package artifact や `src/` directory があるときは、必要に応じて default no の確認 prompt で rebuild / cleanbuild を選べます。cleanbuild を有効にし、同じ package directory に既存 package artifact がある場合は、artifact 再利用を避けるため rebuild も有効にします。`--noconfirm` 指定時はこの prompt を出さず、未指定の rebuild / cleanbuild は no 扱いにします。これらは jpacker 固有の option であり、pacman execution や review 前の `.SRCINFO` 更新判定には渡しません。
 
 ```bash
 jpacker --rebuild --cleanbuild -S google-chrome
@@ -467,14 +467,14 @@ jpacker -S fastfetch
 #### 5. Perform a full system upgrade
 
 This updates packages from the official repositories and then checks packages with source-build preferences.
-Preferred source builds are rebuilt when their PKGBUILD version is newer than the installed package.
+Preferred source builds are rebuilt when the version in the existing `.SRCINFO` is newer than the installed package.
 `jpacker -Syu` is a pacman-compatible system upgrade and does not scan all registered source-build preferences. If you want registered source-build settings to be checked automatically after a system upgrade and rebuilt when needed, use `jpacker upgrade` instead of `jpacker -Syu`.
 
 ```bash
 jpacker upgrade
 ```
 
-Note: some upgrade/source-update checks currently use `makepkg --printsrcinfo` to obtain `.SRCINFO`, which may evaluate the PKGBUILD before the later review prompt. This is a known limitation tracked in [#134](https://github.com/seekerkrt/jpacker/issues/134) and will be moved toward `.SRCINFO`-first checks.
+`jpacker upgrade` uses the existing `.SRCINFO` in the working tree for pre-review update checks. If `.SRCINFO` is missing or incomplete, jpacker does not run `makepkg --printsrcinfo` before review; interactive runs ask whether to continue, while `--noconfirm` or non-interactive runs skip the package.
 
 #### 6. Revert to the official binary package
 
@@ -542,7 +542,7 @@ jpacker -S google-chrome --noedit
 jpacker --noconfirm -S google-chrome
 ```
 
-For AUR/source build install execution, `--rebuild` passes the equivalent of `makepkg -f`, and `--cleanbuild` passes the equivalent of `makepkg -C`. When both are specified, jpacker passes the equivalent of `makepkg -f -C`. When they are not specified, jpacker may ask with a default-no prompt before rebuilding an existing package artifact or cleaning an existing `src/` directory. If cleanbuild is enabled and a package artifact exists in the same package directory, jpacker also enables rebuild to avoid reusing that artifact. With `--noconfirm`, these prompts are skipped and unspecified rebuild/cleanbuild choices default to no. These are jpacker-specific options; they are not forwarded to pacman execution or to `makepkg --printsrcinfo` metadata reads.
+For AUR/source build install execution, `--rebuild` passes the equivalent of `makepkg -f`, and `--cleanbuild` passes the equivalent of `makepkg -C`. When both are specified, jpacker passes the equivalent of `makepkg -f -C`. When they are not specified, jpacker may ask with a default-no prompt before rebuilding an existing package artifact or cleaning an existing `src/` directory. If cleanbuild is enabled and a package artifact exists in the same package directory, jpacker also enables rebuild to avoid reusing that artifact. With `--noconfirm`, these prompts are skipped and unspecified rebuild/cleanbuild choices default to no. These are jpacker-specific options; they are not forwarded to pacman execution or pre-review `.SRCINFO` update checks.
 
 ```bash
 jpacker --rebuild --cleanbuild -S google-chrome
