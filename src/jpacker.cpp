@@ -33,6 +33,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <system_error>
 #include <sys/wait.h>
 #include <unistd.h>
 #include <vector>
@@ -86,6 +87,12 @@ enum class PromptDefault {
     Yes,
     No,
     None,
+};
+
+enum class UpdateCheckResult {
+    NeedsBuild,
+    UpToDate,
+    Unknown,
 };
 
 // AUR RPC の package info response を、依存解決や表示で扱いやすくした型。
@@ -391,8 +398,16 @@ void require_valid_package_name(const std::string& name);
 bool is_force_source(const std::string& pkg_name);
 std::string get_package_env(const std::string& pkg_name);
 std::string get_git_branch();
+std::vector<std::string> split_lines(const std::string& text);
+std::vector<fs::path> find_install_scripts(const fs::path& pkg_dir);
+std::vector<std::string> git_changed_files(const std::string& range);
+bool is_review_sensitive_file(const std::string& path);
+void log_update_diff_guidance(const std::string& range);
+void log_review_targets(const fs::path& pkg_dir, const std::vector<fs::path>& install_scripts);
+void review_build_files(const fs::path& pkg_dir);
 bool is_installed_package(const std::string& pkg_name);
-bool is_update_needed(const std::string& pkg_name);
+std::optional<std::string> read_srcinfo_version(const fs::path& pkg_dir);
+UpdateCheckResult check_update_status(const std::string& pkg_name, const fs::path& pkg_dir);
 bool is_repo_package(const std::string& pkg_name);
 std::string repo_name_from_sync_db(const fs::path& db_path);
 void add_repo_provider(
@@ -415,10 +430,13 @@ bool ask_user(const std::string& question, PromptDefault default_answer);
 
 // AUR RPC / JSON解析
 size_t WriteCallback(void* contents, size_t size, size_t nmemb, void* userp);
+json parse_aur_rpc_response(const std::string& response, const std::string& context);
+const json& aur_rpc_results_array(const json& response, const std::string& context);
 std::string json_string_or_empty(const json& obj, const std::string& key);
 std::vector<std::string> json_string_array_or_empty(const json& obj, const std::string& key);
 std::optional<long long> json_optional_long_long(const json& obj, const std::string& key);
 AurPackageInfo parse_aur_package_info(const json& pkg);
+AurPackageInfo parse_aur_rpc_package_info(const json& pkg, const std::string& context);
 
 // AUR provider / build source解決
 bool aur_package_provides(const AurPackageInfo& info, const std::string& dependency_name);
@@ -795,8 +813,8 @@ void print_help() {
     std::cout << "    \033[1m-Qua\033[0m                 Check AUR/foreign updates" << std::endl;
     std::cout << std::endl;
     std::cout << "\033[1mOPTIONS\033[0m" << std::endl;
-    std::cout << "    \033[1m--noedit\033[0m             Skip review" << std::endl;
-    std::cout << "    \033[1m--nodiff\033[0m             Skip diff prompt" << std::endl;
+    std::cout << "    \033[1m--noedit\033[0m             Skip PKGBUILD/.install review" << std::endl;
+    std::cout << "    \033[1m--nodiff\033[0m             Skip update diff prompt" << std::endl;
     std::cout << "    \033[1m--noconfirm\033[0m         Pass --noconfirm to pacman/makepkg" << std::endl;
     std::cout << "    \033[1m--rebuild\033[0m           Pass -f to makepkg build/install" << std::endl;
     std::cout << "    \033[1m--cleanbuild\033[0m        Pass -C to makepkg build/install" << std::endl;
@@ -1197,43 +1215,156 @@ std::string get_git_branch() {
     return "master";
 }
 
-bool is_update_needed(const std::string& pkg_name) {
+std::vector<std::string> split_lines(const std::string& text) {
+    std::vector<std::string> lines;
+    std::stringstream        stream(text);
+    std::string              line;
+    while(std::getline(stream, line)) {
+        line = trim(line);
+        if(!line.empty()) lines.push_back(line);
+    }
+    return lines;
+}
+
+std::vector<fs::path> find_install_scripts(const fs::path& pkg_dir) {
+    std::vector<fs::path> scripts;
+    std::error_code       ec;
+    if(!fs::is_directory(pkg_dir, ec) || ec) return scripts;
+
+    for(const auto& entry : fs::directory_iterator(pkg_dir, ec)) {
+        if(ec) break;
+        if(!entry.is_regular_file(ec) || ec) {
+            ec.clear();
+            continue;
+        }
+        if(entry.path().extension() == ".install") {
+            scripts.push_back(entry.path().filename());
+        }
+    }
+    std::sort(scripts.begin(), scripts.end());
+    return scripts;
+}
+
+std::vector<std::string> git_changed_files(const std::string& range) {
+    std::string cmd = "git diff --name-only " + shell_quote(range) + " 2>/dev/null";
+    return split_lines(exec_command(cmd.c_str()));
+}
+
+bool is_review_sensitive_file(const std::string& path) {
+    fs::path file_path(path);
+    return file_path.filename() == "PKGBUILD" || file_path.extension() == ".install";
+}
+
+void log_update_diff_guidance(const std::string& range) {
+    std::vector<std::string> changed_files = git_changed_files(range);
+    if(changed_files.empty()) return;
+
+    Logger::info("Update diff range: " + range + " (existing cache repository).");
+
+    std::vector<std::string> review_sensitive_files;
+    for(const auto& file : changed_files) {
+        if(is_review_sensitive_file(file)) review_sensitive_files.push_back(file);
+    }
+    if(!review_sensitive_files.empty()) {
+        Logger::warn("Review-sensitive file changes: " + join_comma_display_values(review_sensitive_files));
+    }
+}
+
+void log_review_targets(const fs::path& pkg_dir, const std::vector<fs::path>& install_scripts) {
+    Logger::info("Review target: PKGBUILD");
+    if(install_scripts.empty()) return;
+
+    std::vector<std::string> names;
+    for(const auto& script : install_scripts) {
+        names.push_back(script.string());
+    }
+    // POLICY: PKGBUILD はここで評価しない。作業ツリーにある *.install だけを、見落とし防止として案内する。
+    Logger::warn("Install script(s) present; review before build: " + join_comma_display_values(names));
+    Logger::info("Review directory: " + pkg_dir.string());
+}
+
+void review_build_files(const fs::path& pkg_dir) {
+    std::vector<fs::path> install_scripts = find_install_scripts(pkg_dir);
+
+    if(g_config.no_edit) {
+        Logger::info("Skipping PKGBUILD/.install review (--noedit).");
+        return;
+    }
+
+    log_review_targets(pkg_dir, install_scripts);
+
+    const char* env_editor = std::getenv("EDITOR");
+    std::string editor_cmd = (env_editor) ? std::string(env_editor) : g_config.editor;
+    bool        edited = false;
+
+    if(ask_user("Edit PKGBUILD?", PromptDefault::No)) {
+        if(run_command(build_editor_command(editor_cmd, "PKGBUILD")) != 0) {
+            throw std::runtime_error("Editor failed.");
+        }
+        edited = true;
+    }
+
+    for(const auto& install_script : install_scripts) {
+        if(ask_user("Edit install script " + install_script.string() + "?", PromptDefault::No)) {
+            if(run_command(build_editor_command(editor_cmd, install_script)) != 0) {
+                throw std::runtime_error("Editor failed.");
+            }
+            edited = true;
+        }
+    }
+
+    if(edited && !ask_user("Proceed with build?", PromptDefault::Yes)) throw std::runtime_error("Aborted.");
+}
+
+std::optional<std::string> read_srcinfo_version(const fs::path& pkg_dir) {
+    fs::path        srcinfo_path = pkg_dir / ".SRCINFO";
+    std::error_code ec;
+    if(!fs::is_regular_file(srcinfo_path, ec) || ec) return std::nullopt;
+
+    std::ifstream file(srcinfo_path);
+    if(!file) return std::nullopt;
+
+    std::string pkgver;
+    std::string pkgrel;
+    std::string line;
+    while(std::getline(file, line)) {
+        std::string trimmed = trim(line);
+        if(trimmed.starts_with("pkgver =")) {
+            pkgver = trim(trimmed.substr(trimmed.find('=') + 1));
+        } else if(trimmed.starts_with("pkgrel =")) {
+            pkgrel = trim(trimmed.substr(trimmed.find('=') + 1));
+        }
+    }
+
+    if(pkgver.empty() || pkgrel.empty()) return std::nullopt;
+    return pkgver + "-" + pkgrel;
+}
+
+UpdateCheckResult check_update_status(const std::string& pkg_name, const fs::path& pkg_dir) {
     require_valid_package_name(pkg_name);
     std::string installed_full = exec_command(("pacman -Q " + shell_quote(pkg_name) + " 2>/dev/null").c_str());
     if(installed_full.empty()) {
-        return true;// インストールされていないのでビルド必要
+        return UpdateCheckResult::NeedsBuild;// インストールされていないのでビルド必要
     }
     size_t      space_pos = installed_full.find(' ');
     std::string installed_ver = (space_pos != std::string::npos) ? installed_full.substr(space_pos + 1) : "";
 
-    // NOTE: ディレクトリ移動は呼び出し元(WorkDirGuard)で制御されている前提
-    std::string srcinfo = exec_command("makepkg --printsrcinfo 2>/dev/null");
-    std::string pkgver, pkgrel;
+    // POLICY: upgrade の pre-review 更新判定では PKGBUILD を評価しない。
+    // 既存 .SRCINFO が読めない場合は呼び出し元で対話確認または skip へ進める。
+    std::optional<std::string> new_ver = read_srcinfo_version(pkg_dir);
+    if(!new_ver.has_value()) return UpdateCheckResult::Unknown;
 
-    std::stringstream ss(srcinfo);
-    std::string       line;
-    while(std::getline(ss, line)) {
-        if(line.find("pkgver =") != std::string::npos) {
-            pkgver = trim(line.substr(line.find('=') + 1));
-        } else if(line.find("pkgrel =") != std::string::npos) {
-            pkgrel = trim(line.substr(line.find('=') + 1));
-        }
-    }
-
-    if(pkgver.empty() || pkgrel.empty()) return true;// 取得失敗時は安全側に倒してビルド
-    std::string new_ver = pkgver + "-" + pkgrel;
-
-    std::string cmp_cmd = "vercmp " + shell_quote(new_ver) + " " + shell_quote(installed_ver);
+    std::string cmp_cmd = "vercmp " + shell_quote(new_ver.value()) + " " + shell_quote(installed_ver) + " 2>/dev/null";
     std::string cmp_res = exec_command(cmp_cmd.c_str());
 
     try {
-        if(std::stoi(cmp_res) > 0) return true;
+        if(std::stoi(cmp_res) > 0) return UpdateCheckResult::NeedsBuild;
     } catch(...) {
-        return true;
+        return UpdateCheckResult::Unknown;
     }
 
     Logger::info(pkg_name + " is up to date (" + installed_ver + "). Skipping.");
-    return false;
+    return UpdateCheckResult::UpToDate;
 }
 
 bool is_installed_package(const std::string& pkg_name) {
@@ -1536,22 +1667,46 @@ size_t WriteCallback(void* contents, size_t size, size_t nmemb, void* userp) {
     return total_size;
 }
 
+json parse_aur_rpc_response(const std::string& response, const std::string& context) {
+    try {
+        json parsed = json::parse(response);
+        if(!parsed.is_object()) {
+            throw std::runtime_error("top-level JSON value is not an object");
+        }
+        return parsed;
+    } catch(const json::parse_error& e) {
+        throw std::runtime_error(
+                "AUR RPC response parse failed for " + context + ": " + std::string(e.what()));
+    } catch(const std::runtime_error& e) {
+        throw std::runtime_error(
+                "AUR RPC response parse failed for " + context + ": unexpected response: " + e.what());
+    }
+}
+
+const json& aur_rpc_results_array(const json& response, const std::string& context) {
+    if(!response.contains("results") || !response["results"].is_array()) {
+        throw std::runtime_error(
+                "AUR RPC response parse failed for " + context + ": unexpected response: missing results array");
+    }
+    return response["results"];
+}
+
 std::string json_string_or_empty(const json& obj, const std::string& key) {
-    if(!obj.contains(key) || obj[key].is_null()) return "";
+    if(!obj.is_object() || !obj.contains(key) || obj[key].is_null() || !obj[key].is_string()) return "";
     return obj[key].get<std::string>();
 }
 
 std::vector<std::string> json_string_array_or_empty(const json& obj, const std::string& key) {
     std::vector<std::string> values;
-    if(!obj.contains(key) || !obj[key].is_array()) return values;
+    if(!obj.is_object() || !obj.contains(key) || !obj[key].is_array()) return values;
     for(const auto& item : obj[key]) {
-        if(!item.is_null()) values.push_back(item.get<std::string>());
+        if(item.is_string()) values.push_back(item.get<std::string>());
     }
     return values;
 }
 
 std::optional<long long> json_optional_long_long(const json& obj, const std::string& key) {
-    if(!obj.contains(key) || obj[key].is_null() || !obj[key].is_number()) return std::nullopt;
+    if(!obj.is_object() || !obj.contains(key) || obj[key].is_null() || !obj[key].is_number()) return std::nullopt;
     try {
         return obj[key].get<long long>();
     } catch(...) {
@@ -1574,6 +1729,22 @@ AurPackageInfo parse_aur_package_info(const json& pkg) {
     info.Replaces = json_string_array_or_empty(pkg, "Replaces");
     info.Maintainer = json_string_or_empty(pkg, "Maintainer");
     info.OutOfDate = json_optional_long_long(pkg, "OutOfDate");
+    return info;
+}
+
+AurPackageInfo parse_aur_rpc_package_info(const json& pkg, const std::string& context) {
+    if(!pkg.is_object()) {
+        throw std::runtime_error(
+                "AUR RPC response parse failed for " + context +
+                ": unexpected response: package info entry is not an object");
+    }
+
+    AurPackageInfo info = parse_aur_package_info(pkg);
+    if(info.Name.empty()) {
+        throw std::runtime_error(
+                "AUR RPC response parse failed for " + context +
+                ": unexpected response: package info entry is missing Name");
+    }
     return info;
 }
 
@@ -1616,12 +1787,13 @@ std::vector<std::string> AurClient::search_names_by_provides(const std::string& 
     std::string response = get_url(url);
     if(response.empty()) return names;
 
-    auto j = json::parse(response);
-    if(!j.contains("results") || !j["results"].is_array()) return names;
+    std::string context = "provides search " + provided_name;
+    json        j = parse_aur_rpc_response(response, context);
+    const json& results = aur_rpc_results_array(j, context);
 
-    for(const auto& pkg : j["results"]) {
-        std::string name = json_string_or_empty(pkg, "Name");
-        if(!name.empty()) names.push_back(name);
+    for(const auto& pkg : results) {
+        AurPackageInfo info = parse_aur_rpc_package_info(pkg, context);
+        names.push_back(info.Name);
     }
     return names;
 }
@@ -1636,11 +1808,13 @@ std::optional<AurPackageInfo> AurClient::info(const std::string& pkg_name) {
     std::string response = get_url(url);
     if(response.empty()) return std::nullopt;
 
-    auto j = json::parse(response);
-    if(!j.contains("results") || !j["results"].is_array() || j["results"].empty()) {
+    std::string context = "package info " + pkg_name;
+    json        j = parse_aur_rpc_response(response, context);
+    const json& results = aur_rpc_results_array(j, context);
+    if(results.empty()) {
         return std::nullopt;
     }
-    return parse_aur_package_info(j["results"][0]);
+    return parse_aur_rpc_package_info(results[0], context);
 }
 
 std::map<std::string, AurPackageInfo> AurClient::info_many(const std::vector<std::string>& pkg_names) {
@@ -1664,14 +1838,13 @@ std::map<std::string, AurPackageInfo> AurClient::info_many(const std::vector<std
     std::string response = get_url(url);
     if(response.empty()) return results;
 
-    auto j = json::parse(response);
-    if(!j.contains("results") || !j["results"].is_array()) {
-        return results;
-    }
+    std::string context = "multiinfo";
+    json        j = parse_aur_rpc_response(response, context);
+    const json& aur_results = aur_rpc_results_array(j, context);
 
-    for(const auto& pkg : j["results"]) {
-        AurPackageInfo pkg_info = parse_aur_package_info(pkg);
-        if(!pkg_info.Name.empty()) results[pkg_info.Name] = pkg_info;
+    for(const auto& pkg : aur_results) {
+        AurPackageInfo pkg_info = parse_aur_rpc_package_info(pkg, context);
+        results[pkg_info.Name] = pkg_info;
     }
     return results;
 }
@@ -1774,29 +1947,30 @@ bool search_aur(const std::vector<std::string>& keywords) {
         std::string response = AurClient::search_query(pkg_name);
         if(response.empty()) continue;
         try {
-            auto j = json::parse(response);
-            if(j.contains("results") && j["results"].is_array()) {
-                for(const auto& pkg : j["results"]) {
-                    found = true;
-                    AurPackageInfo info = parse_aur_package_info(pkg);
-                    std::string    name = info.Name;
-                    std::cout << "\033[1;35maur\033[0m/\033[1m" << name << "\033[0m \033[1;32m"
-                              << info.Version << "\033[0m";
-                    if(installed_foreign_packages.contains(name)) {
-                        std::cout << " \033[1;36m[installed]\033[0m";
-                    }
-                    if(info.OutOfDate.has_value()) {
-                        std::cout << " \033[1;31m[out-of-date]\033[0m";
-                    }
-                    if(is_orphaned(info)) {
-                        std::cout << " \033[1;33m[orphaned]\033[0m";
-                    }
-                    std::cout << std::endl;
-                    if(pkg.contains("Description") && !pkg["Description"].is_null())
-                        std::cout << "    " << pkg["Description"].get<std::string>() << std::endl;
+            std::string context = "search query " + pkg_name;
+            json        j = parse_aur_rpc_response(response, context);
+            const json& results = aur_rpc_results_array(j, context);
+            for(const auto& pkg : results) {
+                AurPackageInfo info = parse_aur_rpc_package_info(pkg, context);
+                found = true;
+                std::string    name = info.Name;
+                std::cout << "\033[1;35maur\033[0m/\033[1m" << name << "\033[0m \033[1;32m"
+                          << info.Version << "\033[0m";
+                if(installed_foreign_packages.contains(name)) {
+                    std::cout << " \033[1;36m[installed]\033[0m";
                 }
+                if(info.OutOfDate.has_value()) {
+                    std::cout << " \033[1;31m[out-of-date]\033[0m";
+                }
+                if(is_orphaned(info)) {
+                    std::cout << " \033[1;33m[orphaned]\033[0m";
+                }
+                std::cout << std::endl;
+                std::string description = json_string_or_empty(pkg, "Description");
+                if(!description.empty()) std::cout << "    " << description << std::endl;
             }
-        } catch(...) {
+        } catch(const std::exception& e) {
+            Logger::warn(e.what());
         }
     }
     return found;
@@ -2530,7 +2704,8 @@ void build_from_git(const std::string& pkg_name, const std::string& clone_name, 
                         throw std::runtime_error("Failed to compare repository changes.");
                     }
                     if(diff_ret == 1) {
-                        if(ask_user("Updates detected. View diff?", PromptDefault::No)) {
+                        log_update_diff_guidance("HEAD.." + remote_ref);
+                        if(ask_user("Updates detected in existing cache repository. View git diff?", PromptDefault::No)) {
                             run_command("git diff " + shell_quote("HEAD.." + remote_ref) + " --color=always");
                         }
                     }
@@ -2557,25 +2732,30 @@ void build_from_git(const std::string& pkg_name, const std::string& clone_name, 
     {
         WorkDirGuard wd(pkg_dir);
 
-        // 【New!】 更新チェック (only_if_updated = true の場合のみ)
         if(only_if_updated) {
-            if(!is_update_needed(pkg_name)) {
+            UpdateCheckResult update_check = check_update_status(pkg_name, pkg_dir);
+            if(update_check == UpdateCheckResult::UpToDate) {
                 return;// 更新不要なので終了
+            }
+            if(update_check == UpdateCheckResult::Unknown) {
+                Logger::warn("Unable to determine update status from .SRCINFO for " + pkg_name + ".");
+                Logger::warn("Skipping pre-review PKGBUILD evaluation.");
+                if(g_config.no_confirm) {
+                    Logger::warn("Skipping " + pkg_name + ": update status is unknown and --noconfirm is set.");
+                    return;
+                }
+                if(!isatty(STDIN_FILENO)) {
+                    Logger::warn("Skipping " + pkg_name + ": update status is unknown and stdin is non-interactive.");
+                    return;
+                }
+                if(!ask_user("Update status is unknown because .SRCINFO is missing or incomplete. Continue to review/build?",
+                            PromptDefault::No)) {
+                    return;
+                }
             }
         }
 
-        if(!g_config.no_edit) {
-            if(ask_user("Edit PKGBUILD?", PromptDefault::No)) {
-                const char* env_editor = std::getenv("EDITOR");
-                std::string editor_cmd = (env_editor) ? std::string(env_editor) : g_config.editor;
-                if(run_command(build_editor_command(editor_cmd, "PKGBUILD")) != 0) {
-                    throw std::runtime_error("Editor failed.");
-                }
-                if(!ask_user("Proceed with build?", PromptDefault::Yes)) throw std::runtime_error("Aborted.");
-            }
-        } else {
-            Logger::info("Skipping PKGBUILD review (--noedit).");
-        }
+        review_build_files(pkg_dir);
         MakepkgBuildOptions makepkg_options = resolve_makepkg_build_options(pkg_dir);
         std::string build_cmd;
         if(!trim(custom_env).empty()) {
@@ -3135,6 +3315,11 @@ int cmd_upgrade() {
         for(const auto& entry : fs::directory_iterator(PACKAGE_BUILD_DIR)) {
             if(entry.is_regular_file()) {
                 std::string pkg_name = entry.path().filename().string();
+                if(!is_valid_package_name(pkg_name)) {
+                    Logger::warn("Ignoring invalid source-build preference filename: " + pkg_name);
+                    failed = true;
+                    continue;
+                }
                 try {
                     // upgrade 時は true (更新がある場合のみビルド)
                     install_smart_source(pkg_name, true);

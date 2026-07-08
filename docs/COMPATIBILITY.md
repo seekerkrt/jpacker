@@ -11,7 +11,7 @@
 ## 基本方針
 
 - jpacker が明示的に扱う operation / option は、jpacker 側で解釈する。
-- jpacker 固有 option は、pacman execution や `.SRCINFO` 読み取り用の `makepkg --printsrcinfo` へ渡さない。
+- jpacker 固有 option は、pacman execution や review 前の `.SRCINFO` 更新判定へ渡さない。
 - pacman が自然に扱える operation / option は、可能な範囲で pacman へ pass-through する。
 - AUR / source build 経路では、pacman transaction option を無条件に makepkg へ置き換えない。
 - `--noconfirm` は「全部 yes」ではなく、「対話で止まらない」指定として扱う。
@@ -97,7 +97,12 @@ jpacker v1.9.0 / #98 では、`PackageBase` と install target package name を�
 - `--rebuild`
 - `--cleanbuild`
 
-`--noedit` は PKGBUILD review / edit prompt を省略する。`--nodiff` は repository update 後の diff prompt を省略する。
+`--noedit` は build/install 前の PKGBUILD / `.install` review / edit prompt を省略する。
+`.install` review は PKGBUILD を評価して `install=` を解決するものではなく、作業ツリー直下の `*.install` を見落としにくくするための案内である。
+
+`--nodiff` は既存 cache repository 更新後の diff prompt と、diff 対象ファイルの案内を省略する。
+初回 clone では比較元になる既存 checkout がないため、update diff prompt は出ない。build/install 前の review prompt で PKGBUILD / `*.install` の存在を確認する。
+既存 cache repository では `git fetch origin` 後、reset 前に `HEAD..origin/<branch>` の diff を確認できる。この diff は「現在 cache にある checkout から、取得した remote branch へ進めた場合の変更」を示す。
 
 `--rebuild` は AUR / source build の build/install 実行時に `makepkg -f` 相当として扱う。`--cleanbuild` は `makepkg -C` 相当として扱う。これらは pacman 由来 option ではないため、pacman execution へは渡さない。
 
@@ -124,7 +129,7 @@ jpacker v1.9.0 / #98 では、`PackageBase` と install target package name を�
 - `-Qua`: foreign packages を見て AUR update を確認する。
 - `-Syu` / `-Sy` / `-Su`: pacman-compatible system upgrade として扱い、登録済み source build preferences の全体走査は行わない。source build preferences も確認したい場合は `upgrade` を使う。
 
-現時点の `upgrade` / source update 系の一部では、更新判定用の `.SRCINFO` を得るために `makepkg --printsrcinfo` を実行する場合があり、後続の review prompt より前に PKGBUILD が評価されうる。これは既知の制限で、#134 で `.SRCINFO` 優先の更新判定へ整理する予定である。
+`upgrade` の source-build 更新判定では、working tree にある既存 `.SRCINFO` を使う。`.SRCINFO` がない、または version 情報が不完全な場合、review 前に `makepkg --printsrcinfo` は実行しない。対話実行では続行確認を行い、`--noconfirm` または非対話実行では対象 package を skip する。
 
 ---
 
@@ -199,7 +204,7 @@ AUR / source build 経路では、pacman option をそのまま makepkg option �
 
 この方針は #83 の prompt helper 実装前提でもある。prompt helper では、単純に `--noconfirm` を「yes」として扱うのではなく、非対話時に安全に停止するもの、default を選べるもの、明示 option が必要なものを分ける。
 
-現時点の jpacker 独自 prompt は、prompt ごとに default selection を持つ。`Updates detected. View diff?`、`Edit PKGBUILD?`、`Rebuild package?`、`Clean build existing build directory?`、`Clean jpacker build cache?` は default no とし、`Proceed with build?` は default yes とする。`--noconfirm` 指定時は prompt を表示せず、この default selection を採用する。ただし EOF や入力読み取り失敗は Enter と同一扱いにしない。stdin が TTY でない場合も、危険側へ進まないように扱う。
+現時点の jpacker 独自 prompt は、prompt ごとに default selection を持つ。`Updates detected in existing cache repository. View git diff?`、`Edit PKGBUILD?`、`Edit install script <file>?`、`Rebuild package?`、`Clean build existing build directory?`、`Clean jpacker build cache?` は default no とし、`Proceed with build?` は default yes とする。`--noconfirm` 指定時は prompt を表示せず、この default selection を採用する。ただし EOF や入力読み取り失敗は Enter と同一扱いにしない。stdin が TTY でない場合も、危険側へ進まないように扱う。
 
 ### `--needed`
 

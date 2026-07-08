@@ -1,4 +1,4 @@
-.TH JPACKER 8 "June 2026" "jpacker 1.9.1" "System Administration Utilities"
+.TH JPACKER 8 "June 2026" "jpacker 1.10.0" "System Administration Utilities"
 .SH NAME
 jpacker \- A robust Pacman wrapper and AUR helper with source-based build management
 .SH SYNOPSIS
@@ -20,6 +20,8 @@ Install packages or update the system. If a target is found in the official repo
 If a package has a source-build preference (via \fBadd-src\fR), it will be built from source even if it exists in the official repositories.
 \fBjpacker -Syu\fR is treated as a pacman-compatible system upgrade and does not scan all registered source-build preferences. Use \fBjpacker upgrade\fR when registered source-build settings should be checked after the system upgrade and rebuilt when needed.
 \fBjpacker -Sc\fR is passed through to \fBsudo pacman -Sc\fR and cleans pacman caches only. Use \fBjpacker clean\fR when you also want to remove jpacker build/cache files.
+The jpacker cache directory is \fI$XDG_CACHE_HOME/jpacker\fR when \fBXDG_CACHE_HOME\fR is set, otherwise \fI$HOME/.cache/jpacker\fR.
+\fBjpacker clean\fR shows the resolved jpacker cache directory at runtime and removes cached build files after confirmation. \fIjpacker.log\fR is excluded.
 .TP
 .B \-Ss \fI<query>\fR
 Search for packages in both the official repositories and the AUR.
@@ -61,13 +63,14 @@ This command does not update the working tree and does not run \fBgit pull\fR, m
 Future behavior that advances a working tree is not implemented by \fBfetch\fR and should be considered in a separate issue as a command or option such as \fBsync\fR, \fBupdate\fR, or \fBfetch --update\fR.
 .TP
 .B upgrade
-Perform a system upgrade and configured rebuilds. This first runs \fBsudo pacman -Syu\fR, then checks packages with source-build preferences and rebuilds them from source only when their PKGBUILD version is newer than the installed package.
+Perform a system upgrade and configured rebuilds. This first runs \fBsudo pacman -Syu\fR, then checks packages with source-build preferences and rebuilds them from source only when the version in the existing \fI.SRCINFO\fR is newer than the installed package.
 Use this command, not \fBjpacker -Syu\fR, when registered source-build settings in \fI/etc/jpacker/package.build/\fR should be checked automatically after a system upgrade.
-During source package updates, jpacker can show a git diff if changes are detected.
-Some upgrade/source-update checks currently use \fBmakepkg --printsrcinfo\fR to obtain \fI.SRCINFO\fR, which may evaluate the PKGBUILD before the later review prompt. This known limitation is tracked in issue #134 and will be moved toward \fI.SRCINFO\fR-first checks.
+During existing cache repository updates, jpacker can show \fBHEAD..origin/<branch>\fR before resetting the working tree. Initial clones have no previous checkout to compare against, so no update diff prompt is shown.
+Before build/install, jpacker prompts to review \fIPKGBUILD\fR and reports top-level \fI*.install\fR files when present. This does not evaluate \fIPKGBUILD\fR to resolve \fBinstall=\fR; it only highlights install scripts already present in the working tree.
+\fBjpacker upgrade\fR uses the existing \fI.SRCINFO\fR in the working tree for pre-review update checks. If \fI.SRCINFO\fR is missing or incomplete, jpacker does not run \fBmakepkg --printsrcinfo\fR before review; interactive runs ask whether to continue, while \fB--noconfirm\fR or non-interactive runs skip the package.
 .TP
 .B clean
-Clean package/build caches. This first runs \fBsudo pacman -Sc\fR to clean the official package cache, and then prompts to remove build artifacts from the jpacker cache directory (\fI~/.cache/jpacker/\fR). Log files are preserved.
+Clean package/build caches. This first runs \fBsudo pacman -Sc\fR to clean the official package cache, and then prompts to remove cached build files from the resolved jpacker cache directory. The directory is \fI$XDG_CACHE_HOME/jpacker\fR when \fBXDG_CACHE_HOME\fR is set, otherwise \fI$HOME/.cache/jpacker\fR. \fIjpacker.log\fR is preserved.
 .TP
 .B add-src \fI<package> [VAR=VALUE...]\fR
 Enable a source-build preference for a package. This creates a preference file in \fI/etc/jpacker/package.build/\fR.
@@ -88,10 +91,10 @@ List source-build preferences along with their custom environment variables.
 .SH OPTIONS
 .TP
 .BR \-\-noedit
-Skip the interactive review/edit of PKGBUILD files before building.
+Skip the interactive review/edit of \fIPKGBUILD\fR and top-level \fI*.install\fR files before building.
 .TP
 .BR \-\-nodiff
-Skip the interactive git diff check during package updates.
+Skip the interactive git diff check during existing cache repository updates.
 .TP
 .BR \-\-noconfirm
 Pass \fB--noconfirm\fR to pacman and makepkg execution. jpacker treats this as a request to avoid interactive blocking, not as "yes to everything". This does not bypass jpacker's ambiguous provider, unresolved dependency, cyclic build plan, or split package install target checks.
@@ -110,14 +113,14 @@ The main configuration file is located at \fI/etc/jpacker/jpacker.conf\fR.
 It supports the following keys:
 .TP
 .B NOEDIT
-Set to \fBtrue\fR to disable PKGBUILD review prompts globally.
+Set to \fBtrue\fR to disable \fIPKGBUILD\fR / \fI*.install\fR review prompts globally.
 .TP
 .B NODIFF
-Set to \fBtrue\fR to disable git diff checks during updates globally.
+Set to \fBtrue\fR to disable git diff checks during existing cache repository updates globally.
 .TP
 .B EDITOR
 Specify the preferred text editor. The priority is the \fBEDITOR\fR environment variable, this configuration value, then \fBnano\fR.
-Editor command tokens are restricted to simple command words and options for safety.
+Editor command tokens are restricted to simple command words and simple options for safety. For example, \fBnano\fR, \fBvim\fR, and \fBcode --wait\fR are supported. Complex shell syntax such as shell expansion, nested quoting, pipes, redirects, or command chains is intentionally unsupported.
 .TP
 .B LOGFILE
 Specify the path to the log file. Supports tilde expansion (e.g., \fB~/logs/jpacker.log\fR).
@@ -133,7 +136,7 @@ Directory containing source-build preference files managed with \fBadd-src\fR.
 Each file corresponds to a package name and can define environment variables (e.g., CFLAGS) that are applied during \fBmakepkg\fR execution.
 .TP
 .I ~/.cache/jpacker/
-Default directory used for downloading and building packages (respects \fBXDG_CACHE_HOME\fR).
+Default directory used for downloading and building packages when \fBXDG_CACHE_HOME\fR is not set. If \fBXDG_CACHE_HOME\fR is set, jpacker uses \fI$XDG_CACHE_HOME/jpacker\fR.
 .TP
 .I ~/.cache/jpacker/jpacker.log
 Default log file location.
