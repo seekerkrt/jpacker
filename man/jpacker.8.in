@@ -63,10 +63,10 @@ This command does not update the working tree and does not run \fBgit pull\fR, m
 Future behavior that advances a working tree is not implemented by \fBfetch\fR and should be considered in a separate issue as a command or option such as \fBsync\fR, \fBupdate\fR, or \fBfetch --update\fR.
 .TP
 .B upgrade
-Perform a system upgrade and configured rebuilds. This first runs \fBsudo pacman -Syu\fR, then checks packages with source-build preferences and rebuilds them from source only when their PKGBUILD version is newer than the installed package.
+Perform a system upgrade and configured rebuilds. This first runs \fBsudo pacman -Syu\fR, then checks packages with source-build preferences and rebuilds them from source only when the version in the existing \fI.SRCINFO\fR is newer than the installed package.
 Use this command, not \fBjpacker -Syu\fR, when registered source-build settings in \fI/etc/jpacker/package.build/\fR should be checked automatically after a system upgrade.
 During source package updates, jpacker can show a git diff if changes are detected.
-Some upgrade/source-update checks currently use \fBmakepkg --printsrcinfo\fR to obtain \fI.SRCINFO\fR, which may evaluate the PKGBUILD before the later review prompt. This known limitation is tracked in issue #134 and will be moved toward \fI.SRCINFO\fR-first checks.
+\fBjpacker upgrade\fR uses the existing \fI.SRCINFO\fR in the working tree for pre-review update checks. If \fI.SRCINFO\fR is missing or incomplete, jpacker does not run \fBmakepkg --printsrcinfo\fR before review; interactive runs ask whether to continue, while \fB--noconfirm\fR or non-interactive runs skip the package.
 .TP
 .B clean
 Clean package/build caches. This first runs \fBsudo pacman -Sc\fR to clean the official package cache, and then prompts to remove cached build files from the resolved jpacker cache directory. The directory is \fI$XDG_CACHE_HOME/jpacker\fR when \fBXDG_CACHE_HOME\fR is set, otherwise \fI$HOME/.cache/jpacker\fR. \fIjpacker.log\fR is preserved.

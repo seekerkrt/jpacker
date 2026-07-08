@@ -11,7 +11,7 @@
 ## 基本方針
 
 - jpacker が明示的に扱う operation / option は、jpacker 側で解釈する。
-- jpacker 固有 option は、pacman execution や `.SRCINFO` 読み取り用の `makepkg --printsrcinfo` へ渡さない。
+- jpacker 固有 option は、pacman execution や review 前の `.SRCINFO` 更新判定へ渡さない。
 - pacman が自然に扱える operation / option は、可能な範囲で pacman へ pass-through する。
 - AUR / source build 経路では、pacman transaction option を無条件に makepkg へ置き換えない。
 - `--noconfirm` は「全部 yes」ではなく、「対話で止まらない」指定として扱う。
@@ -124,7 +124,7 @@ jpacker v1.9.0 / #98 では、`PackageBase` と install target package name を�
 - `-Qua`: foreign packages を見て AUR update を確認する。
 - `-Syu` / `-Sy` / `-Su`: pacman-compatible system upgrade として扱い、登録済み source build preferences の全体走査は行わない。source build preferences も確認したい場合は `upgrade` を使う。
 
-現時点の `upgrade` / source update 系の一部では、更新判定用の `.SRCINFO` を得るために `makepkg --printsrcinfo` を実行する場合があり、後続の review prompt より前に PKGBUILD が評価されうる。これは既知の制限で、#134 で `.SRCINFO` 優先の更新判定へ整理する予定である。
+`upgrade` の source-build 更新判定では、working tree にある既存 `.SRCINFO` を使う。`.SRCINFO` がない、または version 情報が不完全な場合、review 前に `makepkg --printsrcinfo` は実行しない。対話実行では続行確認を行い、`--noconfirm` または非対話実行では対象 package を skip する。
 
 ---
 
