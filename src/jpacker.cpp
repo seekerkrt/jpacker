@@ -398,6 +398,13 @@ void require_valid_package_name(const std::string& name);
 bool is_force_source(const std::string& pkg_name);
 std::string get_package_env(const std::string& pkg_name);
 std::string get_git_branch();
+std::vector<std::string> split_lines(const std::string& text);
+std::vector<fs::path> find_install_scripts(const fs::path& pkg_dir);
+std::vector<std::string> git_changed_files(const std::string& range);
+bool is_review_sensitive_file(const std::string& path);
+void log_update_diff_guidance(const std::string& range);
+void log_review_targets(const fs::path& pkg_dir, const std::vector<fs::path>& install_scripts);
+void review_build_files(const fs::path& pkg_dir);
 bool is_installed_package(const std::string& pkg_name);
 std::optional<std::string> read_srcinfo_version(const fs::path& pkg_dir);
 UpdateCheckResult check_update_status(const std::string& pkg_name, const fs::path& pkg_dir);
@@ -806,8 +813,8 @@ void print_help() {
     std::cout << "    \033[1m-Qua\033[0m                 Check AUR/foreign updates" << std::endl;
     std::cout << std::endl;
     std::cout << "\033[1mOPTIONS\033[0m" << std::endl;
-    std::cout << "    \033[1m--noedit\033[0m             Skip review" << std::endl;
-    std::cout << "    \033[1m--nodiff\033[0m             Skip diff prompt" << std::endl;
+    std::cout << "    \033[1m--noedit\033[0m             Skip PKGBUILD/.install review" << std::endl;
+    std::cout << "    \033[1m--nodiff\033[0m             Skip update diff prompt" << std::endl;
     std::cout << "    \033[1m--noconfirm\033[0m         Pass --noconfirm to pacman/makepkg" << std::endl;
     std::cout << "    \033[1m--rebuild\033[0m           Pass -f to makepkg build/install" << std::endl;
     std::cout << "    \033[1m--cleanbuild\033[0m        Pass -C to makepkg build/install" << std::endl;
@@ -1206,6 +1213,107 @@ std::string get_git_branch() {
     if(command_status("git show-ref --verify --quiet refs/remotes/origin/main") == 0) return "main";
     if(command_status("git show-ref --verify --quiet refs/remotes/origin/master") == 0) return "master";
     return "master";
+}
+
+std::vector<std::string> split_lines(const std::string& text) {
+    std::vector<std::string> lines;
+    std::stringstream        stream(text);
+    std::string              line;
+    while(std::getline(stream, line)) {
+        line = trim(line);
+        if(!line.empty()) lines.push_back(line);
+    }
+    return lines;
+}
+
+std::vector<fs::path> find_install_scripts(const fs::path& pkg_dir) {
+    std::vector<fs::path> scripts;
+    std::error_code       ec;
+    if(!fs::is_directory(pkg_dir, ec) || ec) return scripts;
+
+    for(const auto& entry : fs::directory_iterator(pkg_dir, ec)) {
+        if(ec) break;
+        if(!entry.is_regular_file(ec) || ec) {
+            ec.clear();
+            continue;
+        }
+        if(entry.path().extension() == ".install") {
+            scripts.push_back(entry.path().filename());
+        }
+    }
+    std::sort(scripts.begin(), scripts.end());
+    return scripts;
+}
+
+std::vector<std::string> git_changed_files(const std::string& range) {
+    std::string cmd = "git diff --name-only " + shell_quote(range) + " 2>/dev/null";
+    return split_lines(exec_command(cmd.c_str()));
+}
+
+bool is_review_sensitive_file(const std::string& path) {
+    fs::path file_path(path);
+    return file_path.filename() == "PKGBUILD" || file_path.extension() == ".install";
+}
+
+void log_update_diff_guidance(const std::string& range) {
+    std::vector<std::string> changed_files = git_changed_files(range);
+    if(changed_files.empty()) return;
+
+    Logger::info("Update diff range: " + range + " (existing cache repository).");
+
+    std::vector<std::string> review_sensitive_files;
+    for(const auto& file : changed_files) {
+        if(is_review_sensitive_file(file)) review_sensitive_files.push_back(file);
+    }
+    if(!review_sensitive_files.empty()) {
+        Logger::warn("Review-sensitive file changes: " + join_comma_display_values(review_sensitive_files));
+    }
+}
+
+void log_review_targets(const fs::path& pkg_dir, const std::vector<fs::path>& install_scripts) {
+    Logger::info("Review target: PKGBUILD");
+    if(install_scripts.empty()) return;
+
+    std::vector<std::string> names;
+    for(const auto& script : install_scripts) {
+        names.push_back(script.string());
+    }
+    // POLICY: PKGBUILD はここで評価しない。作業ツリーにある *.install だけを、見落とし防止として案内する。
+    Logger::warn("Install script(s) present; review before build: " + join_comma_display_values(names));
+    Logger::info("Review directory: " + pkg_dir.string());
+}
+
+void review_build_files(const fs::path& pkg_dir) {
+    std::vector<fs::path> install_scripts = find_install_scripts(pkg_dir);
+
+    if(g_config.no_edit) {
+        Logger::info("Skipping PKGBUILD/.install review (--noedit).");
+        return;
+    }
+
+    log_review_targets(pkg_dir, install_scripts);
+
+    const char* env_editor = std::getenv("EDITOR");
+    std::string editor_cmd = (env_editor) ? std::string(env_editor) : g_config.editor;
+    bool        edited = false;
+
+    if(ask_user("Edit PKGBUILD?", PromptDefault::No)) {
+        if(run_command(build_editor_command(editor_cmd, "PKGBUILD")) != 0) {
+            throw std::runtime_error("Editor failed.");
+        }
+        edited = true;
+    }
+
+    for(const auto& install_script : install_scripts) {
+        if(ask_user("Edit install script " + install_script.string() + "?", PromptDefault::No)) {
+            if(run_command(build_editor_command(editor_cmd, install_script)) != 0) {
+                throw std::runtime_error("Editor failed.");
+            }
+            edited = true;
+        }
+    }
+
+    if(edited && !ask_user("Proceed with build?", PromptDefault::Yes)) throw std::runtime_error("Aborted.");
 }
 
 std::optional<std::string> read_srcinfo_version(const fs::path& pkg_dir) {
@@ -2596,7 +2704,8 @@ void build_from_git(const std::string& pkg_name, const std::string& clone_name, 
                         throw std::runtime_error("Failed to compare repository changes.");
                     }
                     if(diff_ret == 1) {
-                        if(ask_user("Updates detected. View diff?", PromptDefault::No)) {
+                        log_update_diff_guidance("HEAD.." + remote_ref);
+                        if(ask_user("Updates detected in existing cache repository. View git diff?", PromptDefault::No)) {
                             run_command("git diff " + shell_quote("HEAD.." + remote_ref) + " --color=always");
                         }
                     }
@@ -2646,18 +2755,7 @@ void build_from_git(const std::string& pkg_name, const std::string& clone_name, 
             }
         }
 
-        if(!g_config.no_edit) {
-            if(ask_user("Edit PKGBUILD?", PromptDefault::No)) {
-                const char* env_editor = std::getenv("EDITOR");
-                std::string editor_cmd = (env_editor) ? std::string(env_editor) : g_config.editor;
-                if(run_command(build_editor_command(editor_cmd, "PKGBUILD")) != 0) {
-                    throw std::runtime_error("Editor failed.");
-                }
-                if(!ask_user("Proceed with build?", PromptDefault::Yes)) throw std::runtime_error("Aborted.");
-            }
-        } else {
-            Logger::info("Skipping PKGBUILD review (--noedit).");
-        }
+        review_build_files(pkg_dir);
         MakepkgBuildOptions makepkg_options = resolve_makepkg_build_options(pkg_dir);
         std::string build_cmd;
         if(!trim(custom_env).empty()) {

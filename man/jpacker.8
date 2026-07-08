@@ -65,7 +65,8 @@ Future behavior that advances a working tree is not implemented by \fBfetch\fR a
 .B upgrade
 Perform a system upgrade and configured rebuilds. This first runs \fBsudo pacman -Syu\fR, then checks packages with source-build preferences and rebuilds them from source only when the version in the existing \fI.SRCINFO\fR is newer than the installed package.
 Use this command, not \fBjpacker -Syu\fR, when registered source-build settings in \fI/etc/jpacker/package.build/\fR should be checked automatically after a system upgrade.
-During source package updates, jpacker can show a git diff if changes are detected.
+During existing cache repository updates, jpacker can show \fBHEAD..origin/<branch>\fR before resetting the working tree. Initial clones have no previous checkout to compare against, so no update diff prompt is shown.
+Before build/install, jpacker prompts to review \fIPKGBUILD\fR and reports top-level \fI*.install\fR files when present. This does not evaluate \fIPKGBUILD\fR to resolve \fBinstall=\fR; it only highlights install scripts already present in the working tree.
 \fBjpacker upgrade\fR uses the existing \fI.SRCINFO\fR in the working tree for pre-review update checks. If \fI.SRCINFO\fR is missing or incomplete, jpacker does not run \fBmakepkg --printsrcinfo\fR before review; interactive runs ask whether to continue, while \fB--noconfirm\fR or non-interactive runs skip the package.
 .TP
 .B clean
@@ -90,10 +91,10 @@ List source-build preferences along with their custom environment variables.
 .SH OPTIONS
 .TP
 .BR \-\-noedit
-Skip the interactive review/edit of PKGBUILD files before building.
+Skip the interactive review/edit of \fIPKGBUILD\fR and top-level \fI*.install\fR files before building.
 .TP
 .BR \-\-nodiff
-Skip the interactive git diff check during package updates.
+Skip the interactive git diff check during existing cache repository updates.
 .TP
 .BR \-\-noconfirm
 Pass \fB--noconfirm\fR to pacman and makepkg execution. jpacker treats this as a request to avoid interactive blocking, not as "yes to everything". This does not bypass jpacker's ambiguous provider, unresolved dependency, cyclic build plan, or split package install target checks.
@@ -112,10 +113,10 @@ The main configuration file is located at \fI/etc/jpacker/jpacker.conf\fR.
 It supports the following keys:
 .TP
 .B NOEDIT
-Set to \fBtrue\fR to disable PKGBUILD review prompts globally.
+Set to \fBtrue\fR to disable \fIPKGBUILD\fR / \fI*.install\fR review prompts globally.
 .TP
 .B NODIFF
-Set to \fBtrue\fR to disable git diff checks during updates globally.
+Set to \fBtrue\fR to disable git diff checks during existing cache repository updates globally.
 .TP
 .B EDITOR
 Specify the preferred text editor. The priority is the \fBEDITOR\fR environment variable, this configuration value, then \fBnano\fR.

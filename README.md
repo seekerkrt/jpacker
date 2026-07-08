@@ -193,6 +193,7 @@ jpacker upgrade
 ```
 
 `jpacker upgrade` の review 前更新判定では、working tree にある既存 `.SRCINFO` を使います。`.SRCINFO` がない、または version 情報が不完全な場合、review 前に `makepkg --printsrcinfo` は実行せず、対話実行では続行確認を行い、`--noconfirm` または非対話実行では対象 package を skip します。
+既存 cache repository の更新では、reset 前に `HEAD..origin/<branch>` の git diff を確認できます。これは現在 cache にある checkout から、取得した remote branch へ進めた場合の変更です。初回 clone では比較元がないため diff prompt は出ず、build 前の review prompt で `PKGBUILD` と作業ツリー直下の `*.install` を確認します。
 
 #### 6. Official binary package に戻す
 
@@ -248,11 +249,13 @@ Example:
 # LOGFILE=~/logs/jpacker.log
 ```
 
-command line から一時的に review step を skip することもできます。
+command line から一時的に review step を skip することもできます。default では build/install 前に `PKGBUILD` を review でき、作業ツリー直下に `*.install` がある場合は存在を表示して個別に edit できます。これは PKGBUILD を評価して `install=` を解決するものではなく、maintainer install script の見落としを減らすための案内です。
 
 ```bash
 jpacker -S google-chrome --noedit
 ```
+
+`--noedit` は `PKGBUILD` / `*.install` の review / edit prompt を skip します。`--nodiff` は既存 cache repository 更新時の git diff prompt を skip します。初回 clone には update diff がないため、`--nodiff` の有無に関わらず diff prompt は出ません。
 
 `--noconfirm` を指定すると、pacman execution と makepkg execution に `--noconfirm` を渡します。jpacker では「全部 yes」ではなく「対話で止まらない」指定として扱う方針です。ただし、unresolved dependencies や cyclic dependencies が残る AUR build plan は `--noconfirm` 指定時でも実行前に停止します。provider selection、split package selection、conflicts / replaces などの未実装判断を自動で進めるものではありません。option pass-through policy の詳細は [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) を参照してください。
 
@@ -475,6 +478,7 @@ jpacker upgrade
 ```
 
 `jpacker upgrade` uses the existing `.SRCINFO` in the working tree for pre-review update checks. If `.SRCINFO` is missing or incomplete, jpacker does not run `makepkg --printsrcinfo` before review; interactive runs ask whether to continue, while `--noconfirm` or non-interactive runs skip the package.
+When an existing cache repository is updated, jpacker can show `HEAD..origin/<branch>` before resetting the working tree. This diff means "changes from the currently cached checkout to the fetched remote branch". Initial clones have no previous checkout to compare against, so there is no update diff prompt; the pre-build review prompt covers `PKGBUILD` and any top-level `*.install` files.
 
 #### 6. Revert to the official binary package
 
@@ -530,11 +534,13 @@ Example:
 # LOGFILE=~/logs/jpacker.log
 ```
 
-You can also skip the review step temporarily from the command line:
+You can also skip the review step temporarily from the command line. By default, jpacker lets you review `PKGBUILD` before build/install and, when top-level `*.install` files exist, shows them and offers to edit each one. This does not evaluate PKGBUILD or resolve `install=`; it is guidance so maintainer install scripts are harder to miss.
 
 ```bash
 jpacker -S google-chrome --noedit
 ```
+
+`--noedit` skips the `PKGBUILD` / `*.install` review and edit prompts. `--nodiff` skips the git diff prompt for existing cache repository updates. Initial clones do not have an update diff to show, regardless of `--nodiff`.
 
 `--noconfirm` passes `--noconfirm` to pacman and makepkg execution. jpacker treats it as a request to avoid interactive blocking, not as "yes to everything". It does not bypass unresolved dependency or cyclic dependency checks in AUR build plans, and it does not automatically decide unsupported provider selection, split package selection, conflicts, or replaces cases. See [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) for the option pass-through policy.
 
