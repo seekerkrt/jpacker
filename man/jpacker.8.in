@@ -11,7 +11,10 @@ jpacker \- A robust Pacman wrapper and AUR helper with source-based build manage
 is a C++20 pacman wrapper and AUR helper.
 It extends pacman's functionality by handling AUR packages, providing one-off source builds for official packages, and managing persistent per-package source build preferences (similar to Gentoo's package.env).
 
-Any operation or flag not explicitly handled by jpacker is passed through to pacman directly.
+Operations handled entirely by pacman pass through pacman-compatible options that jpacker does not consume.
+When a sync target is routed to AUR or a source build, pacman options that cannot retain their meaning during makepkg build/install are rejected before the transaction starts instead of being ignored.
+Pacman options that take values must follow the operation and may use either \fB--option value\fR or \fB--option=value\fR form. A missing value for an option tracked by jpacker stops before pacman execution.
+Unsupported options for jpacker-specific operations also stop instead of being forwarded to pacman.
 
 .SH OPERATIONS
 .TP
@@ -104,6 +107,8 @@ Pass \fB-f\fR to makepkg build/install execution so existing built package artif
 .TP
 .BR \-\-cleanbuild
 Pass \fB-C\fR to makepkg build/install execution so the existing \fIsrcdir\fR is not reused. When omitted, jpacker may ask before cleaning an existing local \fIsrc/\fR directory; the default answer is no. If a local package artifact exists in the same package directory, cleanbuild also enables rebuild.
+.PP
+AUR/source build installation uses \fBmakepkg -sic\fR as its baseline. \fB--noconfirm\fR adds the same makepkg option, while \fB--rebuild\fR and \fB--cleanbuild\fR add \fB-f\fR and \fB-C\fR respectively. Other pacman transaction options are not translated to makepkg; if an AUR/source-build target is present, unsupported options stop the invocation before pacman or makepkg execution.
 .TP
 .BR \-h , \ \-\-help
 Display the help message and exit.

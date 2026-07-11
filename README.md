@@ -93,6 +93,8 @@ makepkg -si
 
 `jpacker` は標準的な `pacman` flags を受け付けます。ただし、すべての `pacman` options / flags に対応しているわけではありません。対応範囲は段階的に実装・検証しています。
 
+pacman だけで完結する経路では、jpacker が消費しない pacman-compatible option を pacman へ渡します。一方、`-S` が AUR package または source-build preference のある package へ分岐する場合、makepkg build/install に同じ意味で反映できない pacman option は黙って無視せず、外部コマンドの実行前に unsupported として停止します。必要な場合は official repository target と AUR / source build target を別 invocation に分けてください。
+
 `jpacker` が利用者に影響する主要な外部コマンドを実行する場合は、実行前に対象のコマンドを表示します。
 
 ```bash
@@ -263,7 +265,7 @@ jpacker -S google-chrome --noedit
 jpacker --noconfirm -S google-chrome
 ```
 
-AUR / source build の build/install 時に、`--rebuild` を指定すると `makepkg -f` 相当、`--cleanbuild` を指定すると `makepkg -C` 相当を渡します。両方を指定した場合は `makepkg -f -C` 相当として扱います。未指定の場合、既存の package artifact や `src/` directory があるときは、必要に応じて default no の確認 prompt で rebuild / cleanbuild を選べます。cleanbuild を有効にし、同じ package directory に既存 package artifact がある場合は、artifact 再利用を避けるため rebuild も有効にします。`--noconfirm` 指定時はこの prompt を出さず、未指定の rebuild / cleanbuild は no 扱いにします。これらは jpacker 固有の option であり、pacman execution や review 前の `.SRCINFO` 更新判定には渡しません。
+AUR / source build の build/install は `makepkg -sic` を基本形とします。`--rebuild` を指定すると `-f`、`--cleanbuild` を指定すると `-C` を追加し、`--noconfirm` は makepkg にも渡します。未指定の場合、既存の package artifact や `src/` directory があるときは、必要に応じて default no の確認 prompt で rebuild / cleanbuild を選べます。cleanbuild を有効にし、同じ package directory に既存 package artifact がある場合は、artifact 再利用を避けるため rebuild も有効にします。`--noconfirm` 指定時はこの prompt を出さず、未指定の rebuild / cleanbuild は no 扱いにします。`--noedit` / `--nodiff` / `--rebuild` / `--cleanbuild` は jpacker 固有の option であり、そのまま pacman へは渡しません。
 
 ```bash
 jpacker --rebuild --cleanbuild -S google-chrome
@@ -377,6 +379,8 @@ Completion files are installed to:
 Do not run jpacker itself with sudo or as root. Run it as a normal user. For operations that need pacman, jpacker will invoke sudo pacman when needed.
 
 jpacker accepts standard pacman flags where supported. Not all pacman options / flags are implemented yet; support is added and verified incrementally.
+
+On routes handled entirely by pacman, jpacker forwards pacman-compatible options that it does not consume. If `-S` routes any target to AUR or a source-build preference, however, a pacman option that cannot retain its meaning during makepkg build/install is rejected before any external transaction starts. Split official repository and AUR/source-build targets into separate invocations when such an option is needed.
 
 When jpacker runs major external commands that affect the user, it prints the command before executing it.
 
@@ -548,7 +552,7 @@ jpacker -S google-chrome --noedit
 jpacker --noconfirm -S google-chrome
 ```
 
-For AUR/source build install execution, `--rebuild` passes the equivalent of `makepkg -f`, and `--cleanbuild` passes the equivalent of `makepkg -C`. When both are specified, jpacker passes the equivalent of `makepkg -f -C`. When they are not specified, jpacker may ask with a default-no prompt before rebuilding an existing package artifact or cleaning an existing `src/` directory. If cleanbuild is enabled and a package artifact exists in the same package directory, jpacker also enables rebuild to avoid reusing that artifact. With `--noconfirm`, these prompts are skipped and unspecified rebuild/cleanbuild choices default to no. These are jpacker-specific options; they are not forwarded to pacman execution or pre-review `.SRCINFO` update checks.
+AUR/source build installation uses `makepkg -sic` as its baseline. `--rebuild` adds `-f`, `--cleanbuild` adds `-C`, and `--noconfirm` is also passed to makepkg. When rebuild/cleanbuild are not specified, jpacker may ask with a default-no prompt before rebuilding an existing package artifact or cleaning an existing `src/` directory. If cleanbuild is enabled and a package artifact exists in the same package directory, jpacker also enables rebuild to avoid reusing that artifact. With `--noconfirm`, these prompts are skipped and unspecified rebuild/cleanbuild choices default to no. `--noedit`, `--nodiff`, `--rebuild`, and `--cleanbuild` are jpacker-specific and are not passed through unchanged to pacman.
 
 ```bash
 jpacker --rebuild --cleanbuild -S google-chrome

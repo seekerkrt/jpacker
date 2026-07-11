@@ -386,6 +386,9 @@ std::string build_editor_command(const std::string& editor, const fs::path& targ
 
 // pacman / repository補助
 bool pacman_option_takes_value(const std::string& arg);
+bool validate_optionless_jpacker_operation(const std::string& operation, const std::vector<std::string>& flags);
+std::optional<std::string> unsupported_source_sync_option(
+        const std::string& operation, const std::vector<std::string>& flags);
 bool is_valid_package_name(const std::string& name);
 ParsedDependency parse_dependency_string(const std::string& dependency);
 std::string dependency_package_name(const std::string& dependency);
@@ -659,6 +662,13 @@ int run_jpacker(int argc, char* argv[]) {
     }
 
     try {
+        const std::vector<std::string> optionless_operations = {
+                "build", "upgrade", "clean", "add-src", "del-src", "revert", "edit-src", "list-src"};
+        if(std::find(optionless_operations.begin(), optionless_operations.end(), operation) != optionless_operations.end() &&
+           !validate_optionless_jpacker_operation(operation, flags)) {
+            return 1;
+        }
+
         if(operation == "build") {
             return cmd_build(targets);
         }
@@ -734,6 +744,16 @@ int run_jpacker(int argc, char* argv[]) {
                     repo_targets.push_back(t);
                 else
                     aur_targets.push_back(t);
+            }
+            if(!aur_targets.empty()) {
+                std::optional<std::string> unsupported_option = unsupported_source_sync_option(operation, flags);
+                if(unsupported_option.has_value()) {
+                    Logger::error(
+                            "Unsupported pacman option for AUR/source-build target: " + unsupported_option.value());
+                    Logger::error(
+                            "Split official repository and AUR/source-build targets, or rerun without this option.");
+                    return 1;
+                }
             }
             for(const auto& pkg : aur_targets) {
                 require_executable_sync_install_target(pkg);
@@ -1098,6 +1118,34 @@ bool pacman_option_takes_value(const std::string& arg) {
     if(arg.find('=') != std::string::npos) return false;
     if(std::find(s_long_opts.begin(), s_long_opts.end(), arg) != s_long_opts.end()) return true;
     return std::find(s_short_opts.begin(), s_short_opts.end(), arg) != s_short_opts.end();
+}
+
+bool validate_optionless_jpacker_operation(const std::string& operation, const std::vector<std::string>& flags) {
+    for(const auto& flag : flags) {
+        if(flag == operation) continue;
+
+        Logger::error("Unsupported " + operation + " option: " + flag);
+        return false;
+    }
+    return true;
+}
+
+std::optional<std::string> unsupported_source_sync_option(
+        const std::string& operation, const std::vector<std::string>& flags) {
+    // POLICY(#56): -S の y/u modifier は official repository update にだけ作用する。
+    // AUR/source-build 側へ意味を移せない他の pacman option は、黙って無視せず build 前に止める。
+    if(operation.size() < 2 || operation[0] != '-' || operation[1] != 'S' ||
+       !std::all_of(operation.begin() + 2, operation.end(), [](char modifier) {
+           return modifier == 'y' || modifier == 'u';
+       })) {
+        return operation;
+    }
+
+    for(const auto& flag : flags) {
+        if(flag == operation || flag == "--") continue;
+        return flag;
+    }
+    return std::nullopt;
 }
 
 bool is_valid_package_name(const std::string& name) {

@@ -14,6 +14,7 @@
 - jpacker 固有 option は、pacman execution や review 前の `.SRCINFO` 更新判定へ渡さない。
 - pacman が自然に扱える operation / option は、可能な範囲で pacman へ pass-through する。
 - AUR / source build 経路では、pacman transaction option を無条件に makepkg へ置き換えない。
+- jpacker 固有 operation の未対応 option と、AUR / source build 経路へ安全に反映できない pacman option は、黙って無視せず実行前に停止する。
 - `--noconfirm` は「全部 yes」ではなく、「対話で止まらない」指定として扱う。
 - `--noconfirm` だけで rebuild / cleanbuild / provider selection / split package selection / conflicts / replaces / 未解決依存の突破を勝手に有効化しない。
 - 値を取る option は、値を target と誤認しないように扱う。値が欠けている場合は停止する。
@@ -37,6 +38,8 @@
 - `revert <pkg>`
 
 `deps`、`plan`、`fetch` は調査・表示・取得段階の operation であり、build / install / pull / merge / reset を混ぜない。`fetch` は未取得 repository の clone と、既存 clone に対する `git fetch origin` までに留める。
+
+`deps` の `--recursive` を除き、jpacker 固有 operation に未対応 option を指定した場合は停止する。pacman option と同名でも、jpacker 固有 operation から pacman へ暗黙に転送しない。
 
 `foo>=1.2` のような AUR dependency version constraint は、v1.x では検出・表示するが、pacman / libalpm 相当の完全な solver としては判定しない。package name 部分で解決できる場合も、version constraint を満たしているとは断定せず、未検証の constraint は warning または unresolved reason として扱う。
 
@@ -119,6 +122,8 @@ jpacker v1.9.0 / #98 では、`PackageBase` と install target package name を�
 - `-Q` 系
 - `-U` 系
 - `-D` 系
+- `-F` 系
+- `-T` 系
 
 ただし、次のように jpacker が補完する operation がある。
 
@@ -128,6 +133,8 @@ jpacker v1.9.0 / #98 では、`PackageBase` と install target package name を�
 - `-Sc`: `sudo pacman -Sc` へ委譲し、pacman cache のみを対象にする。jpacker の build/cache も削除したい場合は `clean` を使う。
 - `-Qua`: foreign packages を見て AUR update を確認する。
 - `-Syu` / `-Sy` / `-Su`: pacman-compatible system upgrade として扱い、登録済み source build preferences の全体走査は行わない。source build preferences も確認したい場合は `upgrade` を使う。
+
+`-R` / `-Q` / `-U` / `-D` / `-F` / `-T` 系と、AUR / source build へ分岐しない `-S` 系は、jpacker 固有 option を取り除いた引数列を pacman へ委譲する。`-S <target>` だけは target を official repository と AUR / source build に分類するため、下記の追加制約を持つ。
 
 `upgrade` の source-build 更新判定では、working tree にある既存 `.SRCINFO` を使う。`.SRCINFO` がない、または version 情報が不完全な場合、review 前に `makepkg --printsrcinfo` は実行しない。対話実行では続行確認を行い、`--noconfirm` または非対話実行では対象 package を skip する。
 
@@ -173,13 +180,13 @@ v1.8.0 では次の表示は扱わない。これらは検索表示や package i
 
 pacman へ直接委譲する経路では、jpacker が明示的に消費しない pacman-compatible option を pacman へ渡す。
 
-AUR / source build 経路では、pacman option をそのまま makepkg option とみなさない。現時点で makepkg build/install execution へ明示的に反映するのは次の範囲に留める。
+AUR / source build 経路では、pacman option をそのまま makepkg option とみなさない。makepkg build/install execution の基本形は `makepkg -sic` であり、jpacker が明示的に追加するのは次の範囲に留める。
 
 - `--noconfirm`: pacman / makepkg execution へ渡す。
 - `--rebuild`: jpacker 固有 option として `makepkg -f` 相当へ変換する。
 - `--cleanbuild`: jpacker 固有 option として `makepkg -C` 相当へ変換する。
 
-それ以外の pacman transaction option は、official repository target へは pass-through してよいが、AUR / source build target に対して同じ意味で効くとは宣言しない。
+それ以外の pacman transaction option は official repository target へ pass-through する。AUR / source build target が同じ `-S` invocation に含まれる場合は、option を黙って無視した部分実行を避けるため、pacman / makepkg の実行前に transaction 全体を停止する。必要なら official repository target と AUR / source build target を別 invocation に分ける。
 
 ---
 
@@ -210,19 +217,19 @@ AUR / source build 経路では、pacman option をそのまま makepkg option �
 
 `--needed` は pacman 由来 option として、pacman execution へ pass-through する。
 
-AUR / source build 経路では、現時点で「既に入っているなら build/install を省略する」という完全な意味は宣言しない。将来的には build plan と installed package state の扱いとして整理する。
+AUR / source build 経路では、現時点で「既に入っているなら build/install を省略する」という意味を維持できないため、`--needed` を含む invocation は unsupported として停止する。将来対応する場合は build plan と installed package state の契約として整理する。
 
 ### `--asdeps` / `--asexplicit`
 
 `--asdeps` と `--asexplicit` は pacman 由来 option として、pacman execution へ pass-through する。
 
-AUR / source build 経路では、最終的な install reason と関係するため、単純な pass-through だけでは足りない。将来的には build plan / install reason の契約として扱う。現時点では、AUR / source build target に対する完全な反映は宣言しない。
+AUR / source build 経路では、最終的な install reason と関係するため、単純な pass-through だけでは足りない。現時点では `--asdeps` / `--asexplicit` を含む invocation を unsupported として停止し、将来対応する場合は build plan / install reason の契約として扱う。
 
 ---
 
 ## 値を取る option の扱い
 
-値を取る pacman option は、次のどちらの形式も option と値の組として扱う。
+operation の後ろに置かれた、値を取る pacman option は、次のどちらの形式も option と値の組として扱う。
 
 - `--option value`
 - `--option=value`
@@ -250,7 +257,7 @@ AUR / source build 経路では、最終的な install reason と関係するた
 - `-b`
 - `-r`
 
-この追跡は、option value を package target と誤認しないための最小限の parsing である。pacman option の意味検証そのものは pacman に委ねる。値が必要な形式で値が欠けている場合、jpacker は pacman 実行前に停止する。
+この追跡は、`-S` の target 分類時に option value を package target と誤認しないための最小限の parsing であり、pacman option 全体を再実装するものではない。追跡対象の option で値が欠けている場合、jpacker は pacman 実行前に停止する。pacman へ直接委譲する経路での option の意味・値の妥当性は pacman に委ねる。
 
 ---
 
@@ -273,8 +280,12 @@ AUR / source build 経路では、最終的な install reason と関係するた
 - `--hookdir`
 - `--logfile`
 - `--print-format`
+- `--nodeps` / `--assume-installed`
+- `--dbonly` / `--noscriptlet`
+- `--downloadonly`
+- `--print`
 
-特に database path、root、sysroot、config を変える option は、pacman の見ている world と jpacker の AUR metadata / installed package state / build cache の見ている world がずれる可能性がある。AUR / source build 経路で意味を持たせる場合は、別 Issue で安全境界を整理する。
+特に database path、root、sysroot、config を変える option は、pacman の見ている world と jpacker の AUR metadata / installed package state / build cache の見ている world がずれる可能性がある。`--needed`、install reason、dependency check、download-only、print-only なども makepkg build/install と同じ意味にはならない。現時点では、これらを含む `-S` に AUR / source build target があれば unsupported として停止する。
 
 ---
 
@@ -329,9 +340,7 @@ jpacker が利用者に影響する主要な外部コマンドを実行する場
 
 ## Future roadmap
 
-この方針は #56 の親 Issue として v2.0.0 まで段階的に整理する。
-
-v1.x では、`--noconfirm`、`--needed`、`--asdeps`、`--asexplicit` など必要性の高い option から個別に扱う。#56 は v2.0.0 時点の compatibility policy を整理する親 Issue であり、個別 PR では `Refs #56` として参照する。
+#56 は v1.11.0 付近で現在の compatibility policy に一度区切りを付ける。完全な pacman option table や AUR helper 互換を完成条件にはせず、新しい option を AUR / source build 経路へ反映する場合は、安全境界を個別に設計する。
 
 ## Related future topics
 
