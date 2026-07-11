@@ -9,6 +9,7 @@ SRC_DIR   := src
 BUILD_DIR := build
 MANPAGE   := man/jpacker.8
 MANPAGE_IN := man/jpacker.8.in
+TEST_TARGET := build/tests/jpacker-test
 
 # --- インストール先設定 ---
 PREFIX      ?= /usr/local
@@ -30,7 +31,7 @@ SRCS      := $(wildcard $(SRC_DIR)/*.cpp)
 OBJS      := $(SRCS:$(SRC_DIR)/%.cpp=$(BUILD_DIR)/%.o)
 DEPS      := $(OBJS:.o=.d)
 
-.PHONY: all clean release-check install uninstall
+.PHONY: all clean test-conflicts-replaces release-check install uninstall
 
 all: $(TARGET) $(MANPAGE)
 
@@ -50,6 +51,14 @@ $(MANPAGE): $(MANPAGE_IN) $(VERSION_FILE)
 clean:
 	@echo ":: Cleaning up"
 	rm -rf $(BUILD_DIR) $(TARGET)
+
+$(TEST_TARGET): $(SRCS) $(VERSION_FILE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling isolated conflicts/replaces test binary"
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -DJPACKER_ENABLE_TEST_OVERRIDES $(SRCS) -o $@ $(MY_LDLIBS)
+
+test-conflicts-replaces: $(TEST_TARGET)
+	sh tests/test-conflicts-replaces.sh $(abspath $(TEST_TARGET))
 
 release-check:
 	@echo ":: Checking release version consistency"
