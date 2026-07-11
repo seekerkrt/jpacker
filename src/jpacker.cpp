@@ -396,6 +396,8 @@ std::string build_editor_command(const std::string& editor, const fs::path& targ
 
 // pacman / repository補助
 bool pacman_option_takes_value(const std::string& arg);
+bool pacman_operation_requests_refresh(
+        const std::string& operation, const std::vector<std::string>& flags);
 bool validate_optionless_jpacker_operation(const std::string& operation, const std::vector<std::string>& flags);
 std::optional<std::string> unsupported_source_sync_option(
         const std::string& operation, const std::vector<std::string>& flags);
@@ -533,7 +535,9 @@ void install_aur_build_plan(const std::string& target);
 int cmd_deps(const std::vector<std::string>& targets, const std::vector<std::string>& flags);
 int cmd_plan(const std::vector<std::string>& targets, const std::vector<std::string>& flags);
 int cmd_fetch(const std::vector<std::string>& targets, const std::vector<std::string>& flags);
-int cmd_sync_info(const std::vector<std::string>& args, const std::vector<std::string>& flags, const std::vector<std::string>& targets);
+int cmd_sync_info(
+        const std::vector<std::string>& args, const std::vector<std::string>& flags,
+        const std::vector<std::string>& targets, bool use_sudo);
 int cmd_query_foreign_updates();
 int cmd_build(const std::vector<std::string>& args);
 int cmd_add_src(const std::vector<std::string>& args);
@@ -736,6 +740,7 @@ int run_jpacker(int argc, char* argv[]) {
             return 0;
         }
 
+        bool requests_refresh = pacman_operation_requests_refresh(operation, flags);
         bool is_sync = operation.starts_with("-S");
         bool is_query = operation.starts_with("-Q");
         bool is_foreign_updates = (is_query && operation.find('u') != std::string::npos && operation.find('a') != std::string::npos);
@@ -743,7 +748,9 @@ int run_jpacker(int argc, char* argv[]) {
         bool is_info = (is_sync && operation.find('i') != std::string::npos);
         bool is_clean = (is_sync && operation.find('c') != std::string::npos);
         bool is_sys_upgrade = (is_sync && (operation.find('u') != std::string::npos || operation.find('y') != std::string::npos));
-        bool needs_sudo = (is_sync || operation.starts_with("-R") || operation.starts_with("-U") || operation.starts_with("-D"));
+        bool needs_sudo =
+                is_sync || operation.starts_with("-R") || operation.starts_with("-U") ||
+                operation.starts_with("-D") || (operation.starts_with("-F") && requests_refresh);
 
         if(is_foreign_updates) return cmd_query_foreign_updates();
 
@@ -752,12 +759,30 @@ int run_jpacker(int argc, char* argv[]) {
                 Logger::error("Missing search query.");
                 return 1;
             }
-            int pacman_ret = run_command("pacman " + join_pacman_args(args));
+            std::string pacman_prefix = requests_refresh ? "sudo pacman " : "pacman ";
+            int         pacman_ret = run_command(pacman_prefix + join_pacman_args(args));
             Logger::info("Searching AUR...");
             bool aur_found = search_aur(targets);
             return (pacman_ret == 0 || aur_found) ? 0 : 1;
         }
-        if(is_info) return cmd_sync_info(args, flags, targets);
+        if(is_info) {
+            if(requests_refresh) {
+                auto unqualified_target = std::find_if(targets.begin(), targets.end(), [](const std::string& target) {
+                    return target.find('/') == std::string::npos;
+                });
+                if(unqualified_target != targets.end()) {
+                    // POLICY(#172): refresh 後に AUR fallback すると official DB の更新だけが先行する。
+                    // refresh 付き info は repository-qualified target に限定し、分類前に停止する。
+                    Logger::error(
+                            "Cannot combine pacman refresh with AUR info fallback for unqualified target: " +
+                            *unqualified_target);
+                    Logger::error(
+                            "Use a repository-qualified target such as repo/package, or run refresh and -Si separately.");
+                    return 1;
+                }
+            }
+            return cmd_sync_info(args, flags, targets, requests_refresh);
+        }
         if(is_clean) return run_command("sudo pacman " + join_pacman_args(args));
 
         if(is_sync) {
@@ -1149,6 +1174,30 @@ bool pacman_option_takes_value(const std::string& arg) {
     if(arg.find('=') != std::string::npos) return false;
     if(std::find(s_long_opts.begin(), s_long_opts.end(), arg) != s_long_opts.end()) return true;
     return std::find(s_short_opts.begin(), s_short_opts.end(), arg) != s_short_opts.end();
+}
+
+bool pacman_operation_requests_refresh(
+        const std::string& operation, const std::vector<std::string>& flags) {
+    auto short_option_requests_refresh = [](const std::string& option) {
+        if(option.size() < 2 || option[0] != '-' || option[1] == '-') return false;
+        return std::find(option.begin() + 1, option.end(), 'y') != option.end();
+    };
+
+    if(short_option_requests_refresh(operation)) return true;
+
+    bool option_value_expected = false;
+    // POLICY(#172): flags[0] は operation。残りは元の option 順で、値を取る option の次は判定対象外にする。
+    for(size_t i = 1; i < flags.size(); ++i) {
+        const std::string& flag = flags[i];
+        if(option_value_expected) {
+            option_value_expected = false;
+            continue;
+        }
+        if(flag == "--") break;
+        if(flag == "--refresh" || short_option_requests_refresh(flag)) return true;
+        option_value_expected = pacman_option_takes_value(flag);
+    }
+    return false;
 }
 
 bool validate_optionless_jpacker_operation(const std::string& operation, const std::vector<std::string>& flags) {
@@ -3141,8 +3190,11 @@ int cmd_fetch(const std::vector<std::string>& targets, const std::vector<std::st
     return failed ? 1 : 0;
 }
 
-int cmd_sync_info(const std::vector<std::string>& args, const std::vector<std::string>& flags, const std::vector<std::string>& targets) {
-    if(targets.empty()) return run_command("pacman " + join_pacman_args(args));
+int cmd_sync_info(
+        const std::vector<std::string>& args, const std::vector<std::string>& flags,
+        const std::vector<std::string>& targets, bool use_sudo) {
+    std::string pacman_prefix = use_sudo ? "sudo pacman " : "pacman ";
+    if(targets.empty()) return run_command(pacman_prefix + join_pacman_args(args));
 
     bool                     failed = false;
     std::vector<std::string> repo_targets;
@@ -3177,7 +3229,7 @@ int cmd_sync_info(const std::vector<std::string>& args, const std::vector<std::s
     if(!repo_targets.empty()) {
         std::vector<std::string> pacman_args = flags;
         pacman_args.insert(pacman_args.end(), repo_targets.begin(), repo_targets.end());
-        if(run_command("pacman " + join_pacman_args(pacman_args)) != 0) failed = true;
+        if(run_command(pacman_prefix + join_pacman_args(pacman_args)) != 0) failed = true;
         if(!aur_infos.empty()) std::cout << std::endl;
     }
 
