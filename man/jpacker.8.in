@@ -107,8 +107,11 @@ Pass \fB-f\fR to makepkg build/install execution so existing built package artif
 .TP
 .BR \-\-cleanbuild
 Pass \fB-C\fR to makepkg build/install execution so the existing \fIsrcdir\fR is not reused. When omitted, jpacker may ask before cleaning an existing local \fIsrc/\fR directory; the default answer is no. If a local package artifact exists in the same package directory, cleanbuild also enables rebuild.
+.TP
+.BR \-\-rmdeps
+Pass \fB-r\fR to AUR/source-build makepkg execution. This is explicit opt-in and is not enabled by \fB--noconfirm\fR alone. makepkg removes only dependencies it installed through \fB-s\fR after a successful build; jpacker does not run its own pacman removal or orphan cleanup. This option is not passed to pacman-only installs.
 .PP
-AUR/source build installation uses \fBmakepkg -sic\fR as its baseline. \fB--noconfirm\fR adds the same makepkg option, while \fB--rebuild\fR and \fB--cleanbuild\fR add \fB-f\fR and \fB-C\fR respectively. Other pacman transaction options are not translated to makepkg; if an AUR/source-build target is present, unsupported options stop the invocation before pacman or makepkg execution.
+AUR/source build installation uses \fBmakepkg -sic\fR as its baseline. \fB--noconfirm\fR adds the same makepkg option, while \fB--rebuild\fR, \fB--cleanbuild\fR, and \fB--rmdeps\fR add \fB-f\fR, \fB-C\fR, and \fB-r\fR respectively. Other pacman transaction options are not translated to makepkg; if an AUR/source-build target is present, unsupported options stop the invocation before pacman or makepkg execution.
 .TP
 .BR \-h , \ \-\-help
 Display the help message and exit.

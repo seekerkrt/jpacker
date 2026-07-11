@@ -265,10 +265,12 @@ jpacker -S google-chrome --noedit
 jpacker --noconfirm -S google-chrome
 ```
 
-AUR / source build の build/install は `makepkg -sic` を基本形とします。`--rebuild` を指定すると `-f`、`--cleanbuild` を指定すると `-C` を追加し、`--noconfirm` は makepkg にも渡します。未指定の場合、既存の package artifact や `src/` directory があるときは、必要に応じて default no の確認 prompt で rebuild / cleanbuild を選べます。cleanbuild を有効にし、同じ package directory に既存 package artifact がある場合は、artifact 再利用を避けるため rebuild も有効にします。`--noconfirm` 指定時はこの prompt を出さず、未指定の rebuild / cleanbuild は no 扱いにします。`--noedit` / `--nodiff` / `--rebuild` / `--cleanbuild` は jpacker 固有の option であり、そのまま pacman へは渡しません。
+AUR / source build の build/install は `makepkg -sic` を基本形とします。`--rebuild` を指定すると `-f`、`--cleanbuild` を指定すると `-C`、`--rmdeps` を指定すると `-r` を追加し、`--noconfirm` は makepkg にも渡します。未指定の場合、既存の package artifact や `src/` directory があるときは、必要に応じて default no の確認 prompt で rebuild / cleanbuild を選べます。cleanbuild を有効にし、同じ package directory に既存 package artifact がある場合は、artifact 再利用を避けるため rebuild も有効にします。`--noconfirm` 指定時はこの prompt を出さず、未指定の rebuild / cleanbuild は no 扱いにします。`--noedit` / `--nodiff` / `--rebuild` / `--cleanbuild` / `--rmdeps` は jpacker 固有の option であり、そのまま pacman へは渡しません。
+
+`--rmdeps` は明示 opt-in です。未指定時や `--noconfirm` だけを指定した場合は依存削除を有効にしません。`--rmdeps --noconfirm` を両方指定した場合は、makepkg に `-r` と `--noconfirm` の両方を渡します。削除対象の判断と実行は `makepkg -s/-r` に委ね、jpacker 自身は `pacman -Rns`、`pacman -Qdt`、orphan cleanup を実行しません。この option は pacman-only install には作用せず、pacman にも渡しません。
 
 ```bash
-jpacker --rebuild --cleanbuild -S google-chrome
+jpacker --rebuild --cleanbuild --rmdeps -S google-chrome
 ```
 
 ### Logs
@@ -552,10 +554,12 @@ jpacker -S google-chrome --noedit
 jpacker --noconfirm -S google-chrome
 ```
 
-AUR/source build installation uses `makepkg -sic` as its baseline. `--rebuild` adds `-f`, `--cleanbuild` adds `-C`, and `--noconfirm` is also passed to makepkg. When rebuild/cleanbuild are not specified, jpacker may ask with a default-no prompt before rebuilding an existing package artifact or cleaning an existing `src/` directory. If cleanbuild is enabled and a package artifact exists in the same package directory, jpacker also enables rebuild to avoid reusing that artifact. With `--noconfirm`, these prompts are skipped and unspecified rebuild/cleanbuild choices default to no. `--noedit`, `--nodiff`, `--rebuild`, and `--cleanbuild` are jpacker-specific and are not passed through unchanged to pacman.
+AUR/source build installation uses `makepkg -sic` as its baseline. `--rebuild` adds `-f`, `--cleanbuild` adds `-C`, `--rmdeps` adds `-r`, and `--noconfirm` is also passed to makepkg. When rebuild/cleanbuild are not specified, jpacker may ask with a default-no prompt before rebuilding an existing package artifact or cleaning an existing `src/` directory. If cleanbuild is enabled and a package artifact exists in the same package directory, jpacker also enables rebuild to avoid reusing that artifact. With `--noconfirm`, these prompts are skipped and unspecified rebuild/cleanbuild choices default to no. `--noedit`, `--nodiff`, `--rebuild`, `--cleanbuild`, and `--rmdeps` are jpacker-specific and are not passed through unchanged to pacman.
+
+`--rmdeps` is explicit opt-in. Omitting it, including when using `--noconfirm` alone, does not enable dependency removal. When both `--rmdeps --noconfirm` are explicit, jpacker passes both `-r` and `--noconfirm` to makepkg. Dependency selection and removal remain makepkg's `-s/-r` responsibility; jpacker does not run its own `pacman -Rns`, `pacman -Qdt`, or orphan cleanup. The option has no effect on pacman-only installs and is not forwarded to pacman.
 
 ```bash
-jpacker --rebuild --cleanbuild -S google-chrome
+jpacker --rebuild --cleanbuild --rmdeps -S google-chrome
 ```
 
 ### Logs
