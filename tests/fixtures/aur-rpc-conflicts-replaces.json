@@ -1,0 +1,87 @@
+{
+  "packages": {
+    "clean-root": {
+      "Name": "clean-root",
+      "PackageBase": "clean-root",
+      "Version": "1.0-1",
+      "Depends": []
+    },
+    "conflict-only": {
+      "Name": "conflict-only",
+      "PackageBase": "conflict-only",
+      "Version": "1.0-1",
+      "Conflicts": ["conflict-old", "conflict-git"]
+    },
+    "replace-only": {
+      "Name": "replace-only",
+      "PackageBase": "replace-only",
+      "Version": "1.0-1",
+      "Replaces": ["replace-legacy"]
+    },
+    "dependency-risk-root": {
+      "Name": "dependency-risk-root",
+      "PackageBase": "dependency-risk-root",
+      "Version": "1.0-1",
+      "Depends": ["risk-dep", "risk-dep"]
+    },
+    "risk-dep": {
+      "Name": "risk-dep",
+      "PackageBase": "risk-dep",
+      "Version": "1.0-1",
+      "Conflicts": ["dep-old>=2"],
+      "Replaces": ["dep-legacy"]
+    },
+    "risk-root": {
+      "Name": "risk-root",
+      "PackageBase": "risk-root",
+      "Version": "1.0-1",
+      "Depends": ["risk-dep"],
+      "Conflicts": ["root-old", "root-git"],
+      "Replaces": ["root-legacy"]
+    },
+    "cycle-root": {
+      "Name": "cycle-root",
+      "PackageBase": "cycle-root",
+      "Version": "1.0-1",
+      "Depends": ["cycle-dep"]
+    },
+    "cycle-dep": {
+      "Name": "cycle-dep",
+      "PackageBase": "cycle-dep",
+      "Version": "1.0-1",
+      "Depends": ["cycle-root"]
+    },
+    "unresolved-root": {
+      "Name": "unresolved-root",
+      "PackageBase": "unresolved-root",
+      "Version": "1.0-1",
+      "Depends": ["missing-dep-150"]
+    },
+    "ambiguous-root": {
+      "Name": "ambiguous-root",
+      "PackageBase": "ambiguous-root",
+      "Version": "1.0-1",
+      "Depends": ["virtual-dep-150"]
+    },
+    "provider-a": {
+      "Name": "provider-a",
+      "PackageBase": "provider-a",
+      "Version": "1.0-1",
+      "Provides": ["virtual-dep-150"]
+    },
+    "provider-b": {
+      "Name": "provider-b",
+      "PackageBase": "provider-b",
+      "Version": "1.0-1",
+      "Provides": ["virtual-dep-150"]
+    },
+    "split-child": {
+      "Name": "split-child",
+      "PackageBase": "split-base",
+      "Version": "1.0-1"
+    }
+  },
+  "providers": {
+    "virtual-dep-150": ["provider-a", "provider-b"]
+  }
+}

@@ -45,6 +45,22 @@
 
 ---
 
+## AUR conflicts / replaces metadata policy
+
+AUR RPC の `Conflicts` / `Replaces` は dependency resolution の入力とは分け、package metadata risk として raw value を保持する。jpacker v1.x は libalpm 相当の transaction solver を持たないため、この metadata が存在する plan を「安全に検証済み」と扱わない。
+
+command ごとの扱いは次の通りとする。
+
+- `-Si <aur-pkg>` は従来どおり `Conflicts With` / `Replaces` を package metadata として表示する。
+- `deps <pkg>` は対象 AUR package の metadata warning を dependency 分類とは別に表示する。warning 自体は inspection failure とせず、return code 0 を維持する。
+- `plan <pkg>` は recursive plan に含まれる root / dependency AUR package の metadata を package 名と PackageBase に結びつけて表示する。同一 package の重複は除き、risk が 1 件でもあれば incomplete plan とする。plan を表示できた場合の return code は 0 のままとする。
+- `fetch <pkg>` は metadata risk を表示するが、unresolved dependency、ambiguous provider、cycle がなければ PackageBase の clone / `git fetch origin` を許可する。fetch は working tree update、build、install、transaction を行わない。
+- AUR build/install plan は metadata risk が 1 件でもあれば clone / fetch / build / makepkg / pacman transaction より前に停止する。`--noconfirm` はこの停止を突破しない。
+
+jpacker は installed/local DB や repo sync DB と metadata を照合して実際の衝突有無を判定しない。`Replaces` を dependency resolution や install target 選択に利用せず、package 削除・置換・provider 選択も自動実行しない。source-build preference が付いた official repository package は AUR metadata plan の対象外であり、従来どおり pacman / Arch packaging 側の情報を正とする。
+
+---
+
 ## AUR dependency provider selection policy
 
 jpacker は dependency provider の選択についても、独自 solver や独自 repository 優先順位を増やしすぎない。現時点では、まず pacman / makepkg の流儀を優先し、jpacker が扱う AUR helper 的な領域では曖昧なものを暗黙に成功扱いしない、という基本方針として扱う。

@@ -49,9 +49,7 @@ namespace fs = std::filesystem;
 namespace {
 
 const std::string VERSION = JPKG_VERSION;
-const std::string AUR_RPC_URL = "https://aur.archlinux.org/rpc/v5/search/";
-const std::string AUR_RPC_INFO_BASE_URL = "https://aur.archlinux.org/rpc/";
-const std::string AUR_RPC_INFO_URL = AUR_RPC_INFO_BASE_URL + "?v=5&type=info&arg%5B%5D=";
+const std::string AUR_RPC_DEFAULT_BASE_URL = "https://aur.archlinux.org/rpc/";
 const std::string AUR_BASE_URL = "https://aur.archlinux.org/";
 const std::string ARCH_GIT_BASE = "https://gitlab.archlinux.org/archlinux/packaging/packages/";
 const std::string USER_AGENT = "jpacker/" + VERSION;
@@ -169,7 +167,7 @@ struct DependencyClassification {
     std::vector<std::string> repo;
     std::vector<std::string> aur;
     std::vector<std::string> provided;
-    std::vector<AmbiguousProvidedDependency> ambiguous_providers;
+    std::vector<AmbiguousProvidedDependency>     ambiguous_providers;
     std::vector<std::string> unknown;
 };
 
@@ -212,14 +210,24 @@ struct BuildPlanProvidedDependency {
     ProvidedDependency provider;
 };
 
+// AUR package が宣言する conflicts / replaces を、解決済みと誤認せず plan に残す。
+// POLICY(#150): v1.x では installed/repo DB との照合や置換先選択を行わず、raw metadata を保持する。
+struct BuildPlanMetadataRisk {
+    std::string              package_name;
+    std::string              package_base;
+    std::vector<std::string> conflicts;
+    std::vector<std::string> replaces;
+};
+
 // AUR build / fetch の順序、未解決依存、循環検出結果をまとめる計画。
 struct BuildPlan {
-    std::vector<BuildPlanEntry> order;
-    std::vector<BuildPlanSplitPackageTarget> split_package_targets;
-    std::vector<BuildPlanProvidedDependency> provided;
+    std::vector<BuildPlanEntry>                  order;
+    std::vector<BuildPlanSplitPackageTarget>     split_package_targets;
+    std::vector<BuildPlanProvidedDependency>     provided;
+    std::vector<BuildPlanMetadataRisk>           metadata_risks;
     std::vector<AmbiguousProvidedDependency> ambiguous_providers;
-    std::vector<std::string> unresolved;
-    std::vector<std::string> cycles;
+    std::vector<std::string>                     unresolved;
+    std::vector<std::string>                     cycles;
 };
 
 namespace {
@@ -434,6 +442,9 @@ MakepkgBuildOptions resolve_makepkg_build_options(const fs::path& pkg_dir);
 bool ask_user(const std::string& question, PromptDefault default_answer);
 
 // AUR RPC / JSON解析
+std::string aur_rpc_base_url();
+std::string aur_rpc_search_url();
+std::string aur_rpc_info_url();
 size_t WriteCallback(void* contents, size_t size, size_t nmemb, void* userp);
 json parse_aur_rpc_response(const std::string& response, const std::string& context);
 const json& aur_rpc_results_array(const json& response, const std::string& context);
@@ -483,6 +494,7 @@ void print_recursive_dependency_tree(const std::vector<RecursiveDependencyNode>&
 // build plan / fetch plan
 void add_unique_value(std::vector<std::string>& values, const std::string& value);
 void add_build_plan_split_package_target(BuildPlan& plan, const AurPackageInfo& info);
+void add_build_plan_metadata_risk(BuildPlan& plan, const AurPackageInfo& info);
 void add_build_plan_entry(BuildPlan& plan, const AurPackageInfo& info);
 void add_build_plan_provided_dependency(
         BuildPlan& plan, const std::string& dependency, const ProvidedDependency& provider);
@@ -492,6 +504,7 @@ void collect_aur_build_plan(
         const std::string& package_name, BuildPlan& plan, std::set<std::string>& visited,
         std::set<std::string>& visiting, int depth, int max_depth, bool traverse_aur_providers = true);
 void print_build_plan(const BuildPlan& plan);
+void require_fetchable_build_plan(const std::string& target, const BuildPlan& plan);
 void require_executable_build_plan(const std::string& target, const BuildPlan& plan);
 void require_executable_install_plan(const std::string& target, const BuildPlan& plan);
 BuildPlan resolve_build_plan(const std::string& target);
@@ -503,6 +516,9 @@ std::string ambiguous_provider_dependency_summary(const AmbiguousProvidedDepende
 std::string join_ambiguous_provider_summaries(const std::vector<AmbiguousProvidedDependency>& dependencies);
 std::string split_package_target_summary(const BuildPlanSplitPackageTarget& target);
 std::string join_split_package_target_summaries(const std::vector<BuildPlanSplitPackageTarget>& targets);
+void print_metadata_risk_group(const std::vector<BuildPlanMetadataRisk>& risks);
+std::string metadata_risk_summary(const BuildPlanMetadataRisk& risk);
+std::string join_metadata_risk_summaries(const std::vector<BuildPlanMetadataRisk>& risks);
 std::string aur_git_url_for_package_base(const std::string& package_base);
 void print_fetch_plan(const BuildPlan& plan);
 void fetch_aur_package_base(const std::string& package_base);
@@ -1725,6 +1741,27 @@ bool ask_user(const std::string& question, PromptDefault default_answer) {
 }
 
 // AUR RPC / JSON解析
+std::string aur_rpc_base_url() {
+#ifdef JPACKER_ENABLE_TEST_OVERRIDES
+    // POLICY: local fixture injection は isolated test binary 限定。production の endpoint は固定する。
+    const char* test_base_url = std::getenv("JPACKER_TEST_AUR_RPC_BASE_URL");
+    if(test_base_url && test_base_url[0] != '\0') {
+        std::string base_url = test_base_url;
+        if(base_url.back() != '/') base_url += '/';
+        return base_url;
+    }
+#endif
+    return AUR_RPC_DEFAULT_BASE_URL;
+}
+
+std::string aur_rpc_search_url() {
+    return aur_rpc_base_url() + "v5/search/";
+}
+
+std::string aur_rpc_info_url() {
+    return aur_rpc_base_url() + "?v=5&type=info&arg%5B%5D=";
+}
+
 size_t WriteCallback(void* contents, size_t size, size_t nmemb, void* userp) {
     size_t total_size = size * nmemb;
     auto*  buffer = static_cast<std::string*>(userp);
@@ -1836,7 +1873,7 @@ std::string AurClient::search_query(const std::string& query) {
     CurlHandle  handle;
     char* escaped = curl_easy_escape(handle.get(), query.c_str(), static_cast<int>(query.length()));
     if(!escaped) return "";
-    std::string url = AUR_RPC_URL + escaped;
+    std::string url = aur_rpc_search_url() + escaped;
     curl_free(escaped);
     return get_url(url);
 }
@@ -1846,7 +1883,7 @@ std::vector<std::string> AurClient::search_names_by_provides(const std::string& 
     CurlHandle               handle;
     char* escaped = curl_easy_escape(handle.get(), provided_name.c_str(), static_cast<int>(provided_name.length()));
     if(!escaped) return names;
-    std::string url = AUR_RPC_URL + escaped + "?by=provides";
+    std::string url = aur_rpc_search_url() + escaped + "?by=provides";
     curl_free(escaped);
 
     std::string response = get_url(url);
@@ -1867,7 +1904,7 @@ std::optional<AurPackageInfo> AurClient::info(const std::string& pkg_name) {
     CurlHandle handle;
     char*      escaped = curl_easy_escape(handle.get(), pkg_name.c_str(), static_cast<int>(pkg_name.length()));
     if(!escaped) return std::nullopt;
-    std::string url = AUR_RPC_INFO_URL + escaped;
+    std::string url = aur_rpc_info_url() + escaped;
     curl_free(escaped);
 
     std::string response = get_url(url);
@@ -1887,7 +1924,7 @@ std::map<std::string, AurPackageInfo> AurClient::info_many(const std::vector<std
     if(pkg_names.empty()) return results;
 
     CurlHandle  handle;
-    std::string url = AUR_RPC_INFO_BASE_URL + "?v=5&type=info";
+    std::string url = aur_rpc_base_url() + "?v=5&type=info";
     bool        has_arg = false;
     for(size_t i = 0; i < pkg_names.size(); ++i) {
         char* escaped = curl_easy_escape(handle.get(), pkg_names[i].c_str(), static_cast<int>(pkg_names[i].length()));
@@ -2367,6 +2404,21 @@ void add_build_plan_split_package_target(BuildPlan& plan, const AurPackageInfo& 
     plan.split_package_targets.push_back(BuildPlanSplitPackageTarget{info.PackageBase, info.Name});
 }
 
+void add_build_plan_metadata_risk(BuildPlan& plan, const AurPackageInfo& info) {
+    if(info.Conflicts.empty() && info.Replaces.empty()) return;
+
+    std::string package_base = package_base_or_name(info);
+    auto same_package = [&info, &package_base](const BuildPlanMetadataRisk& existing) {
+        return existing.package_name == info.Name && existing.package_base == package_base;
+    };
+    if(std::find_if(plan.metadata_risks.begin(), plan.metadata_risks.end(), same_package) !=
+       plan.metadata_risks.end())
+        return;
+
+    plan.metadata_risks.push_back(
+            BuildPlanMetadataRisk{info.Name, package_base, info.Conflicts, info.Replaces});
+}
+
 void add_build_plan_entry(BuildPlan& plan, const AurPackageInfo& info) {
     std::string package_base = package_base_or_name(info);
     auto        same_base = [&package_base](const BuildPlanEntry& existing) { return existing.package_base == package_base; };
@@ -2418,6 +2470,9 @@ void collect_aur_build_plan(
         add_unique_value(plan.unresolved, package_name);
         return;
     }
+
+    // POLICY(#150): visited PackageBase で再帰を打ち切る場合も、package 単位の raw metadata は先に保持する。
+    add_build_plan_metadata_risk(plan, info.value());
 
     std::string build_unit = package_base_or_name(info.value());
     if(visited.count(build_unit) > 0) return;
@@ -2476,6 +2531,44 @@ void collect_aur_build_plan(
     add_build_plan_entry(plan, info.value());
 }
 
+void print_metadata_risk_group(const std::vector<BuildPlanMetadataRisk>& risks) {
+    std::cout << "Metadata conflicts/replaces:" << std::endl;
+    for(const auto& risk : risks) {
+        std::cout << "  " << risk.package_name;
+        if(risk.package_base != risk.package_name) std::cout << " (base: " << risk.package_base << ")";
+        std::cout << std::endl;
+        if(!risk.conflicts.empty())
+            std::cout << "    conflicts: " << join_comma_display_values(risk.conflicts) << std::endl;
+        if(!risk.replaces.empty())
+            std::cout << "    replaces: " << join_comma_display_values(risk.replaces) << std::endl;
+    }
+}
+
+std::string metadata_risk_summary(const BuildPlanMetadataRisk& risk) {
+    std::vector<std::string> metadata;
+    if(!risk.conflicts.empty()) metadata.push_back("conflicts: " + join_comma_display_values(risk.conflicts));
+    if(!risk.replaces.empty()) metadata.push_back("replaces: " + join_comma_display_values(risk.replaces));
+
+    std::stringstream summary;
+    summary << risk.package_name;
+    if(risk.package_base != risk.package_name) summary << " (base: " << risk.package_base << ")";
+    summary << " [";
+    for(size_t i = 0; i < metadata.size(); ++i) {
+        if(i > 0) summary << "; ";
+        summary << metadata[i];
+    }
+    summary << "]";
+    return summary.str();
+}
+
+std::string join_metadata_risk_summaries(const std::vector<BuildPlanMetadataRisk>& risks) {
+    std::vector<std::string> values;
+    for(const auto& risk : risks) {
+        values.push_back(metadata_risk_summary(risk));
+    }
+    return join_comma_display_values(values);
+}
+
 void print_build_plan(const BuildPlan& plan) {
     std::cout << "Build plan:" << std::endl;
     if(plan.order.empty()) {
@@ -2521,6 +2614,11 @@ void print_build_plan(const BuildPlan& plan) {
         }
     }
 
+    if(!plan.metadata_risks.empty()) {
+        std::cout << std::endl;
+        print_metadata_risk_group(plan.metadata_risks);
+    }
+
     if(!plan.unresolved.empty()) {
         std::cout << std::endl;
         std::cout << "Unresolved dependencies:" << std::endl;
@@ -2538,7 +2636,7 @@ void print_build_plan(const BuildPlan& plan) {
     }
 
     if(!plan.unresolved.empty() || !plan.ambiguous_providers.empty() || !plan.cycles.empty() ||
-       !plan.split_package_targets.empty()) {
+       !plan.split_package_targets.empty() || !plan.metadata_risks.empty()) {
         std::cout << std::endl;
         std::cout << "Plan status: incomplete" << std::endl;
         if(!plan.unresolved.empty()) std::cout << "  unresolved dependencies remain" << std::endl;
@@ -2546,10 +2644,12 @@ void print_build_plan(const BuildPlan& plan) {
         if(!plan.cycles.empty()) std::cout << "  cyclic dependencies detected" << std::endl;
         if(!plan.split_package_targets.empty())
             std::cout << "  split package install target selection is not implemented" << std::endl;
+        if(!plan.metadata_risks.empty())
+            std::cout << "  conflicts/replaces metadata is not resolved automatically" << std::endl;
     }
 }
 
-void require_executable_build_plan(const std::string& target, const BuildPlan& plan) {
+void require_fetchable_build_plan(const std::string& target, const BuildPlan& plan) {
     if(!plan.unresolved.empty()) {
         throw std::runtime_error(
                 "Cannot execute build plan for " + target + "; unresolved dependencies: " +
@@ -2564,6 +2664,16 @@ void require_executable_build_plan(const std::string& target, const BuildPlan& p
         throw std::runtime_error(
                 "Cannot execute build plan for " + target + "; cyclic dependencies: " +
                 join_comma_display_values(plan.cycles));
+    }
+}
+
+void require_executable_build_plan(const std::string& target, const BuildPlan& plan) {
+    require_fetchable_build_plan(target, plan);
+    if(!plan.metadata_risks.empty()) {
+        throw std::runtime_error(
+                "Cannot execute build plan for " + target +
+                "; conflicts/replaces metadata requires manual review: " +
+                join_metadata_risk_summaries(plan.metadata_risks));
     }
 }
 
@@ -2693,6 +2803,13 @@ void print_fetch_plan(const BuildPlan& plan) {
         for(const auto& dependency : plan.cycles) {
             Logger::warn(dependency);
         }
+    }
+
+    if(!plan.metadata_risks.empty()) {
+        std::cout << std::endl;
+        print_metadata_risk_group(plan.metadata_risks);
+        Logger::warn(
+                "Conflicts/replaces metadata requires manual review before build/install; fetch is allowed.");
     }
 }
 
@@ -2925,6 +3042,13 @@ int cmd_deps(const std::vector<std::string>& targets, const std::vector<std::str
             print_ambiguous_provider_group("Ambiguous provided dependencies:", classified.ambiguous_providers);
             std::cout << std::endl;
             print_dependency_group("Unknown dependencies:", classified.unknown);
+            BuildPlan metadata_plan;
+            add_build_plan_metadata_risk(metadata_plan, info.value());
+            if(!metadata_plan.metadata_risks.empty()) {
+                std::cout << std::endl;
+                print_metadata_risk_group(metadata_plan.metadata_risks);
+                Logger::warn("Conflicts/replaces metadata is separate from dependency resolution and requires manual review.");
+            }
             if(recursive) {
                 std::set<std::string> visited;
                 visited.insert(package_base_or_name(info.value()));
@@ -2997,7 +3121,8 @@ int cmd_fetch(const std::vector<std::string>& targets, const std::vector<std::st
 
             if(i > 0) std::cout << std::endl;
             print_fetch_plan(plan);
-            require_executable_build_plan(target, plan);
+            // POLICY(#150): fetch は read-only retrieval stage。metadata risk は表示するが取得を妨げない。
+            require_fetchable_build_plan(target, plan);
 
             for(const auto& entry : plan.order) {
                 try {

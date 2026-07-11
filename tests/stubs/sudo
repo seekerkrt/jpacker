@@ -1,0 +1,3 @@
+#!/bin/sh
+printf 'sudo %s\n' "$*" >> "$JPACKER_TEST_COMMAND_LOG"
+exit 99

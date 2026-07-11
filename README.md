@@ -134,6 +134,12 @@ working tree を進める将来の挙動は `fetch` には含めません。必�
 
 constraint 付き dependency は package name 部分での解決を試みますが、version 条件を満たしているとは表示しません。未検証の constraint は warning または unresolved reason として表示され、build plan 実行時には未解決依存として扱われます。
 
+### AUR conflicts / replaces metadata
+
+`jpacker -Si <aur-pkg>` は AUR RPC の `Conflicts` / `Replaces` を従来どおり package metadata として表示します。`jpacker deps <pkg>` は対象 package の metadata warning を dependency 分類とは別に表示し、`jpacker plan <pkg>` は recursive plan に含まれる各 AUR package の metadata を package 名付きで表示します。この metadata が 1 件でも残る plan は incomplete です。
+
+jpacker v1.x は installed package や official repository package との実際の衝突判定、replacement による install target 選択、package の自動削除・置換を行いません。そのため AUR build/install 経路は clone / fetch / build / makepkg / pacman transaction より前に停止し、`--noconfirm` でも突破しません。`jpacker fetch` は read-only retrieval stage なので、metadata risk を表示したうえで clone または `git fetch origin` を許可します。
+
 ### AUR dependency providers
 
 現時点では、dependency に exact package がなく provider 候補がある場合、`jpacker deps` / `jpacker plan` は候補数に応じて分類する方針です。provider が 1 件なら provided dependency として扱いますが、複数ある場合は ambiguous provider として候補を表示し、暗黙に最初の 1 件を選びません。
@@ -422,6 +428,12 @@ Future behavior that advances a working tree is not implemented by `fetch`; it s
 `jpacker deps` / `jpacker plan` detects version constraints in AUR dependencies such as `foo>=1.2` and keeps them visible in output. jpacker v1.x does not implement a complete pacman/libalpm-compatible version constraint solver.
 
 Dependencies with constraints are still resolved by their package name when possible, but jpacker does not report the version condition as satisfied. Unverified constraints are shown as warnings or unresolved reasons, and build plan execution treats them as unresolved dependencies.
+
+### AUR conflicts / replaces metadata
+
+`jpacker -Si <aur-pkg>` continues to show the AUR RPC `Conflicts` / `Replaces` fields as package metadata. `jpacker deps <pkg>` reports metadata warnings for the target separately from dependency classification, while `jpacker plan <pkg>` shows the metadata for every AUR package in the recursive plan. A plan containing any such metadata is incomplete.
+
+jpacker v1.x does not determine whether an installed or official repository package actually conflicts, select install targets through replacements, or remove/replace packages automatically. AUR build/install paths therefore stop before clone, fetch, build, makepkg, or a pacman transaction, and `--noconfirm` does not bypass the guard. Since `jpacker fetch` is a read-only retrieval stage, it reports the metadata risk but still allows clone or `git fetch origin`.
 
 ### AUR dependency providers
 
