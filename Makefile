@@ -31,7 +31,7 @@ SRCS      := $(wildcard $(SRC_DIR)/*.cpp)
 OBJS      := $(SRCS:$(SRC_DIR)/%.cpp=$(BUILD_DIR)/%.o)
 DEPS      := $(OBJS:.o=.d)
 
-.PHONY: all clean test-conflicts-replaces release-check install uninstall
+.PHONY: all clean test-conflicts-replaces test-pacman-routing release-check install uninstall
 
 all: $(TARGET) $(MANPAGE)
 
@@ -54,11 +54,14 @@ clean:
 
 $(TEST_TARGET): $(SRCS) $(VERSION_FILE)
 	@mkdir -p $(dir $@)
-	@echo ":: Compiling isolated conflicts/replaces test binary"
+	@echo ":: Compiling isolated integration test binary"
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -DJPACKER_ENABLE_TEST_OVERRIDES $(SRCS) -o $@ $(MY_LDLIBS)
 
 test-conflicts-replaces: $(TEST_TARGET)
 	sh tests/test-conflicts-replaces.sh $(abspath $(TEST_TARGET))
+
+test-pacman-routing: $(TEST_TARGET)
+	sh tests/test-pacman-routing.sh $(abspath $(TEST_TARGET))
 
 release-check:
 	@echo ":: Checking release version consistency"

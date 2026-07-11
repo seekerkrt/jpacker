@@ -95,6 +95,10 @@ makepkg -si
 
 pacman だけで完結する経路では、jpacker が消費しない pacman-compatible option を pacman へ渡します。一方、`-S` が AUR package または source-build preference のある package へ分岐する場合、makepkg build/install に同じ意味で反映できない pacman option は黙って無視せず、外部コマンドの実行前に unsupported として停止します。必要な場合は official repository target と AUR / source build target を別 invocation に分けてください。
 
+`-F` / `-Fl` などの file database query は通常ユーザーの `pacman` へ委譲し、`-Fy` / `-Fyy` / `-F -y` / `-F --refresh` のように refresh を含む場合だけ `sudo pacman` を使います。`-Ss` に refresh を組み合わせた場合も official repository search 側を `sudo pacman` で実行したあと、通常どおり AUR search を行います。
+
+`-Si` に refresh を組み合わせる場合、AUR fallback の判定前に official database refresh だけが先行しないよう、target は `core/filesystem` のような repository-qualified form に限定します。unqualified target が 1 件でもあれば pacman / sudo / AUR query の前に停止するため、必要なら refresh と `-Si` を別 invocation に分けてください。refresh なしの通常の `-Si <pkg>` は従来どおり official repository を優先し、見つからなければ AUR metadata を表示します。
+
 `jpacker` が利用者に影響する主要な外部コマンドを実行する場合は、実行前に対象のコマンドを表示します。
 
 ```bash
@@ -389,6 +393,10 @@ Do not run jpacker itself with sudo or as root. Run it as a normal user. For ope
 jpacker accepts standard pacman flags where supported. Not all pacman options / flags are implemented yet; support is added and verified incrementally.
 
 On routes handled entirely by pacman, jpacker forwards pacman-compatible options that it does not consume. If `-S` routes any target to AUR or a source-build preference, however, a pacman option that cannot retain its meaning during makepkg build/install is rejected before any external transaction starts. Split official repository and AUR/source-build targets into separate invocations when such an option is needed.
+
+Read-only file database queries such as `-F` and `-Fl` are delegated to plain `pacman`. Forms that request a refresh, including `-Fy`, `-Fyy`, `-F -y`, and `-F --refresh`, use `sudo pacman`. When refresh is combined with `-Ss`, the official repository search runs through `sudo pacman` before the usual AUR search.
+
+When refresh is combined with `-Si`, every target must use a repository-qualified form such as `core/filesystem`. This prevents an official database refresh from running before jpacker discovers that an unqualified target needs AUR fallback. If any target is unqualified, jpacker stops before pacman, sudo, or an AUR query; split refresh and `-Si` into separate invocations when needed. Normal `-Si <pkg>` without refresh keeps the existing repository-first AUR fallback behavior.
 
 When jpacker runs major external commands that affect the user, it prints the command before executing it.
 

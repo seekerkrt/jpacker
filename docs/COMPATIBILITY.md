@@ -157,6 +157,14 @@ jpacker v1.9.0 / #98 では、`PackageBase` と install target package name を�
 
 `-R` / `-Q` / `-U` / `-D` / `-F` / `-T` 系と、AUR / source build へ分岐しない `-S` 系は、jpacker 固有 option を取り除いた引数列を pacman へ委譲する。`-S <target>` だけは target を official repository と AUR / source build に分類するため、下記の追加制約を持つ。
 
+refresh modifierを含むread/query経路のsudo境界は次のように扱う。
+
+- `-F <file>` / `-Fl <pkg>` などのread-only file database queryはplain `pacman`へ委譲する。
+- `-Fy` / `-Fyy` / `-F -y` / `-F --refresh` はfile databaseを更新するため`sudo pacman`へ委譲する。
+- `-Ss <query>`は従来どおりplain pacman searchとAUR searchを組み合わせる。`-Ssy` / `-Ss --refresh`ではofficial repository search側を`sudo pacman`で実行したあとAUR searchを行う。
+- `-Si`とrefreshを組み合わせる場合、targetは`repo/package`形式に限定し、AUR fallbackを行わない。unqualified targetが1件でもあれば、official refreshだけを先行させないためpacman / sudo / AUR queryより前に停止する。必要ならrefreshと`-Si`を別invocationに分ける。
+- refreshなしの通常の`-Si <target>`は、official repositoryを優先し、見つからない場合にAUR metadataを表示する従来契約を維持する。
+
 `upgrade` の source-build 更新判定では、working tree にある既存 `.SRCINFO` を使う。`.SRCINFO` がない、または version 情報が不完全な場合、review 前に `makepkg --printsrcinfo` は実行しない。対話実行では続行確認を行い、`--noconfirm` または非対話実行では対象 package を skip する。
 
 ---

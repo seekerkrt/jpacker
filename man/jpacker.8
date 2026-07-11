@@ -29,9 +29,14 @@ The jpacker cache directory is \fI$XDG_CACHE_HOME/jpacker\fR when \fBXDG_CACHE_H
 .B \-Ss \fI<query>\fR
 Search for packages in both the official repositories and the AUR.
 AUR search results may show status tags such as \fB[installed]\fR, \fB[out-of-date]\fR, and \fB[orphaned]\fR when that metadata is available.
+When refresh is requested with \fB-y\fR or \fB--refresh\fR, the official repository search uses \fBsudo pacman\fR before the usual AUR search.
 .TP
 .B \-Si \fI<package>\fR
 Show package information. Official repository packages use pacman output; AUR packages use AUR metadata and include installed, orphaned, and out-of-date state.
+When refresh is requested, every target must use a repository-qualified form such as \fBcore/filesystem\fR. An unqualified target stops before pacman, sudo, or an AUR query so an official database refresh cannot run before a possible AUR fallback is known. Without refresh, the existing repository-first AUR fallback remains available.
+.TP
+.B \-F, \-Fl \fI<query>\fR
+Search or list the pacman file database without sudo. Forms that request a file database refresh, including \fB-Fy\fR, \fB-Fyy\fR, \fB-F -y\fR, and \fB-F --refresh\fR, use \fBsudo pacman\fR.
 .TP
 .B \-R, \-Rs, \-Rns \fI<target>\fR
 Remove packages. This is a direct wrapper around \fBpacman -R\fR.
