@@ -68,6 +68,7 @@ struct AppConfig {
     bool        no_confirm = false;
     bool        rebuild = false;
     bool        clean_build = false;
+    bool        rm_deps = false;
     std::string editor = "nano";
     std::string log_file = "";
 };
@@ -81,6 +82,7 @@ AppConfig g_config;
 struct MakepkgBuildOptions {
     bool rebuild = false;
     bool clean_build = false;
+    bool rm_deps = false;
 };
 
 enum class PromptDefault {
@@ -541,7 +543,8 @@ int run_jpacker(int argc, char* argv[]) {
     for(int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
 
-        if(arg == "--noedit" || arg == "--nodiff" || arg == "--noconfirm" || arg == "--rebuild" || arg == "--cleanbuild") {
+        if(arg == "--noedit" || arg == "--nodiff" || arg == "--noconfirm" || arg == "--rebuild" ||
+           arg == "--cleanbuild" || arg == "--rmdeps") {
             continue;
         }
         if(arg == "-h" || arg == "--help") {
@@ -594,6 +597,10 @@ int run_jpacker(int argc, char* argv[]) {
             g_config.clean_build = true;
             continue;
         }
+        if(arg == "--rmdeps") {
+            g_config.rm_deps = true;
+            continue;
+        }
         break;
     }
     if(operation_index >= argc) {
@@ -636,6 +643,10 @@ int run_jpacker(int argc, char* argv[]) {
         }
         if(arg == "--cleanbuild") {
             g_config.clean_build = true;
+            continue;
+        }
+        if(arg == "--rmdeps") {
+            g_config.rm_deps = true;
             continue;
         }
         if(i > operation_index) {
@@ -782,6 +793,7 @@ int run_jpacker(int argc, char* argv[]) {
             if(arg == "--noconfirm") continue;
             if(arg == "--rebuild") continue;
             if(arg == "--cleanbuild") continue;
+            if(arg == "--rmdeps") continue;
             cmd_args.push_back(arg);
         }
         std::string cmd_prefix = needs_sudo ? "sudo pacman " : "pacman ";
@@ -838,6 +850,7 @@ void print_help() {
     std::cout << "    \033[1m--noconfirm\033[0m         Pass --noconfirm to pacman/makepkg" << std::endl;
     std::cout << "    \033[1m--rebuild\033[0m           Pass -f to makepkg build/install" << std::endl;
     std::cout << "    \033[1m--cleanbuild\033[0m        Pass -C to makepkg build/install" << std::endl;
+    std::cout << "    \033[1m--rmdeps\033[0m            Pass -r to makepkg build/install" << std::endl;
     std::cout << "\033[1mCONFIG\033[0m" << std::endl;
     std::cout << "    jpacker.conf: EDITOR=..., LOGFILE=..., NOEDIT=..., NODIFF=..." << std::endl;
 }
@@ -1097,6 +1110,8 @@ std::string makepkg_install_command(const MakepkgBuildOptions& options) {
     if(g_config.no_confirm) args.push_back("--noconfirm");
     if(options.rebuild) args.push_back("-f");
     if(options.clean_build) args.push_back("-C");
+    // POLICY(#123): 削除対象の判断と実行は makepkg -s/-r に委ね、jpacker では再実装しない。
+    if(options.rm_deps) args.push_back("-r");
     return join_shell_args(args);
 }
 
@@ -1619,6 +1634,8 @@ bool has_local_srcdir(const fs::path& pkg_dir) {
 MakepkgBuildOptions resolve_makepkg_build_options(const fs::path& pkg_dir) {
     MakepkgBuildOptions options;
     bool                has_artifact = has_local_package_artifact(pkg_dir);
+
+    options.rm_deps = g_config.rm_deps;
 
     if(g_config.clean_build) {
         options.clean_build = true;

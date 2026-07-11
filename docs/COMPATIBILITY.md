@@ -99,6 +99,7 @@ jpacker v1.9.0 / #98 では、`PackageBase` と install target package name を�
 - `--nodiff`
 - `--rebuild`
 - `--cleanbuild`
+- `--rmdeps`
 
 `--noedit` は build/install 前の PKGBUILD / `.install` review / edit prompt を省略する。
 `.install` review は PKGBUILD を評価して `install=` を解決するものではなく、作業ツリー直下の `*.install` を見落としにくくするための案内である。
@@ -110,6 +111,10 @@ jpacker v1.9.0 / #98 では、`PackageBase` と install target package name を�
 `--rebuild` は AUR / source build の build/install 実行時に `makepkg -f` 相当として扱う。`--cleanbuild` は `makepkg -C` 相当として扱う。これらは pacman 由来 option ではないため、pacman execution へは渡さない。
 
 `--rebuild` / `--cleanbuild` が未指定の場合、jpacker は既存の package artifact や `src/` directory がある場面で、必要に応じて default no の prompt で rebuild / cleanbuild を確認する。cleanbuild を有効にし、同じ package directory に既存 package artifact がある場合は、artifact 再利用を避けるため rebuild も有効にする。`--noconfirm` 指定時は prompt を出さず、未指定の rebuild / cleanbuild は no として扱う。
+
+`--rmdeps` は明示 opt-in の jpacker 固有 option として、AUR / source build の共通 build/install 経路で `makepkg -r` 相当へ変換する。未指定時は build 後の依存削除を行わず、`--noconfirm` だけで暗黙に有効化しない。`--rmdeps --noconfirm` を両方指定した場合は、その明示意図どおり makepkg へ `-r` と `--noconfirm` の両方を渡す。
+
+削除対象は、同じ invocation の `makepkg -s` による dependency auto-resolution で導入され、build が成功した後に makepkg が削除対象と判断した dependency に限る。jpacker は `pacman -Rns`、`pacman -Qdt`、独自 orphan cleanup を実行しない。pacman-only 経路や official repository package の通常 install では `--rmdeps` を pacman へ渡さず、作用させない。
 
 ---
 
@@ -185,6 +190,7 @@ AUR / source build 経路では、pacman option をそのまま makepkg option �
 - `--noconfirm`: pacman / makepkg execution へ渡す。
 - `--rebuild`: jpacker 固有 option として `makepkg -f` 相当へ変換する。
 - `--cleanbuild`: jpacker 固有 option として `makepkg -C` 相当へ変換する。
+- `--rmdeps`: jpacker 固有 option として `makepkg -r` 相当へ変換する。
 
 それ以外の pacman transaction option は official repository target へ pass-through する。AUR / source build target が同じ `-S` invocation に含まれる場合は、option を黙って無視した部分実行を避けるため、pacman / makepkg の実行前に transaction 全体を停止する。必要なら official repository target と AUR / source build target を別 invocation に分ける。
 
@@ -207,6 +213,7 @@ AUR / source build 経路では、pacman option をそのまま makepkg option �
 - conflicts / replaces の自動判断
 - 明示されていない rebuild
 - 明示されていない cleanbuild
+- 明示されていない rmdeps
 - 危険な削除や reset
 
 この方針は #83 の prompt helper 実装前提でもある。prompt helper では、単純に `--noconfirm` を「yes」として扱うのではなく、非対話時に安全に停止するもの、default を選べるもの、明示 option が必要なものを分ける。
