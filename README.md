@@ -93,6 +93,12 @@ makepkg -si
 
 `jpacker` は標準的な `pacman` flags を受け付けます。ただし、すべての `pacman` options / flags に対応しているわけではありません。対応範囲は段階的に実装・検証しています。
 
+pacman だけで完結する経路では、jpacker が消費しない pacman-compatible option を pacman へ渡します。一方、`-S` が AUR package または source-build preference のある package へ分岐する場合、makepkg build/install に同じ意味で反映できない pacman option は黙って無視せず、外部コマンドの実行前に unsupported として停止します。必要な場合は official repository target と AUR / source build target を別 invocation に分けてください。
+
+`-F` / `-Fl` などの file database query は通常ユーザーの `pacman` へ委譲し、`-Fy` / `-Fyy` / `-F -y` / `-F --refresh` のように refresh を含む場合だけ `sudo pacman` を使います。`-Ss` に refresh を組み合わせた場合も official repository search 側を `sudo pacman` で実行したあと、通常どおり AUR search を行います。
+
+`-Si` に refresh を組み合わせる場合、AUR fallback の判定前に official database refresh だけが先行しないよう、target は `core/filesystem` のような repository-qualified form に限定します。unqualified target が 1 件でもあれば pacman / sudo / AUR query の前に停止するため、必要なら refresh と `-Si` を別 invocation に分けてください。refresh なしの通常の `-Si <pkg>` は従来どおり official repository を優先し、見つからなければ AUR metadata を表示します。
+
 `jpacker` が利用者に影響する主要な外部コマンドを実行する場合は、実行前に対象のコマンドを表示します。
 
 ```bash
@@ -131,6 +137,12 @@ working tree を進める将来の挙動は `fetch` には含めません。必�
 `jpacker deps` / `jpacker plan` は、AUR dependency に含まれる `foo>=1.2` のような version constraint を検出し、表示に残します。ただし jpacker v1.x では、pacman / libalpm 相当の完全な version constraint 判定は行いません。
 
 constraint 付き dependency は package name 部分での解決を試みますが、version 条件を満たしているとは表示しません。未検証の constraint は warning または unresolved reason として表示され、build plan 実行時には未解決依存として扱われます。
+
+### AUR conflicts / replaces metadata
+
+`jpacker -Si <aur-pkg>` は AUR RPC の `Conflicts` / `Replaces` を従来どおり package metadata として表示します。`jpacker deps <pkg>` は対象 package の metadata warning を dependency 分類とは別に表示し、`jpacker plan <pkg>` は recursive plan に含まれる各 AUR package の metadata を package 名付きで表示します。この metadata が 1 件でも残る plan は incomplete です。
+
+jpacker v1.x は installed package や official repository package との実際の衝突判定、replacement による install target 選択、package の自動削除・置換を行いません。そのため AUR build/install 経路は clone / fetch / build / makepkg / pacman transaction より前に停止し、`--noconfirm` でも突破しません。`jpacker fetch` は read-only retrieval stage なので、metadata risk を表示したうえで clone または `git fetch origin` を許可します。
 
 ### AUR dependency providers
 
@@ -263,10 +275,12 @@ jpacker -S google-chrome --noedit
 jpacker --noconfirm -S google-chrome
 ```
 
-AUR / source build の build/install 時に、`--rebuild` を指定すると `makepkg -f` 相当、`--cleanbuild` を指定すると `makepkg -C` 相当を渡します。両方を指定した場合は `makepkg -f -C` 相当として扱います。未指定の場合、既存の package artifact や `src/` directory があるときは、必要に応じて default no の確認 prompt で rebuild / cleanbuild を選べます。cleanbuild を有効にし、同じ package directory に既存 package artifact がある場合は、artifact 再利用を避けるため rebuild も有効にします。`--noconfirm` 指定時はこの prompt を出さず、未指定の rebuild / cleanbuild は no 扱いにします。これらは jpacker 固有の option であり、pacman execution や review 前の `.SRCINFO` 更新判定には渡しません。
+AUR / source build の build/install は `makepkg -sic` を基本形とします。`--rebuild` を指定すると `-f`、`--cleanbuild` を指定すると `-C`、`--rmdeps` を指定すると `-r` を追加し、`--noconfirm` は makepkg にも渡します。未指定の場合、既存の package artifact や `src/` directory があるときは、必要に応じて default no の確認 prompt で rebuild / cleanbuild を選べます。cleanbuild を有効にし、同じ package directory に既存 package artifact がある場合は、artifact 再利用を避けるため rebuild も有効にします。`--noconfirm` 指定時はこの prompt を出さず、未指定の rebuild / cleanbuild は no 扱いにします。`--noedit` / `--nodiff` / `--rebuild` / `--cleanbuild` / `--rmdeps` は jpacker 固有の option であり、そのまま pacman へは渡しません。
+
+`--rmdeps` は明示 opt-in です。未指定時や `--noconfirm` だけを指定した場合は依存削除を有効にしません。`--rmdeps --noconfirm` を両方指定した場合は、makepkg に `-r` と `--noconfirm` の両方を渡します。削除対象の判断と実行は `makepkg -s/-r` に委ね、jpacker 自身は `pacman -Rns`、`pacman -Qdt`、orphan cleanup を実行しません。この option は pacman-only install には作用せず、pacman にも渡しません。
 
 ```bash
-jpacker --rebuild --cleanbuild -S google-chrome
+jpacker --rebuild --cleanbuild --rmdeps -S google-chrome
 ```
 
 ### Logs
@@ -378,6 +392,12 @@ Do not run jpacker itself with sudo or as root. Run it as a normal user. For ope
 
 jpacker accepts standard pacman flags where supported. Not all pacman options / flags are implemented yet; support is added and verified incrementally.
 
+On routes handled entirely by pacman, jpacker forwards pacman-compatible options that it does not consume. If `-S` routes any target to AUR or a source-build preference, however, a pacman option that cannot retain its meaning during makepkg build/install is rejected before any external transaction starts. Split official repository and AUR/source-build targets into separate invocations when such an option is needed.
+
+Read-only file database queries such as `-F` and `-Fl` are delegated to plain `pacman`. Forms that request a refresh, including `-Fy`, `-Fyy`, `-F -y`, and `-F --refresh`, use `sudo pacman`. When refresh is combined with `-Ss`, the official repository search runs through `sudo pacman` before the usual AUR search.
+
+When refresh is combined with `-Si`, every target must use a repository-qualified form such as `core/filesystem`. This prevents an official database refresh from running before jpacker discovers that an unqualified target needs AUR fallback. If any target is unqualified, jpacker stops before pacman, sudo, or an AUR query; split refresh and `-Si` into separate invocations when needed. Normal `-Si <pkg>` without refresh keeps the existing repository-first AUR fallback behavior.
+
 When jpacker runs major external commands that affect the user, it prints the command before executing it.
 
 ```bash
@@ -416,6 +436,12 @@ Future behavior that advances a working tree is not implemented by `fetch`; it s
 `jpacker deps` / `jpacker plan` detects version constraints in AUR dependencies such as `foo>=1.2` and keeps them visible in output. jpacker v1.x does not implement a complete pacman/libalpm-compatible version constraint solver.
 
 Dependencies with constraints are still resolved by their package name when possible, but jpacker does not report the version condition as satisfied. Unverified constraints are shown as warnings or unresolved reasons, and build plan execution treats them as unresolved dependencies.
+
+### AUR conflicts / replaces metadata
+
+`jpacker -Si <aur-pkg>` continues to show the AUR RPC `Conflicts` / `Replaces` fields as package metadata. `jpacker deps <pkg>` reports metadata warnings for the target separately from dependency classification, while `jpacker plan <pkg>` shows the metadata for every AUR package in the recursive plan. A plan containing any such metadata is incomplete.
+
+jpacker v1.x does not determine whether an installed or official repository package actually conflicts, select install targets through replacements, or remove/replace packages automatically. AUR build/install paths therefore stop before clone, fetch, build, makepkg, or a pacman transaction, and `--noconfirm` does not bypass the guard. Since `jpacker fetch` is a read-only retrieval stage, it reports the metadata risk but still allows clone or `git fetch origin`.
 
 ### AUR dependency providers
 
@@ -548,10 +574,12 @@ jpacker -S google-chrome --noedit
 jpacker --noconfirm -S google-chrome
 ```
 
-For AUR/source build install execution, `--rebuild` passes the equivalent of `makepkg -f`, and `--cleanbuild` passes the equivalent of `makepkg -C`. When both are specified, jpacker passes the equivalent of `makepkg -f -C`. When they are not specified, jpacker may ask with a default-no prompt before rebuilding an existing package artifact or cleaning an existing `src/` directory. If cleanbuild is enabled and a package artifact exists in the same package directory, jpacker also enables rebuild to avoid reusing that artifact. With `--noconfirm`, these prompts are skipped and unspecified rebuild/cleanbuild choices default to no. These are jpacker-specific options; they are not forwarded to pacman execution or pre-review `.SRCINFO` update checks.
+AUR/source build installation uses `makepkg -sic` as its baseline. `--rebuild` adds `-f`, `--cleanbuild` adds `-C`, `--rmdeps` adds `-r`, and `--noconfirm` is also passed to makepkg. When rebuild/cleanbuild are not specified, jpacker may ask with a default-no prompt before rebuilding an existing package artifact or cleaning an existing `src/` directory. If cleanbuild is enabled and a package artifact exists in the same package directory, jpacker also enables rebuild to avoid reusing that artifact. With `--noconfirm`, these prompts are skipped and unspecified rebuild/cleanbuild choices default to no. `--noedit`, `--nodiff`, `--rebuild`, `--cleanbuild`, and `--rmdeps` are jpacker-specific and are not passed through unchanged to pacman.
+
+`--rmdeps` is explicit opt-in. Omitting it, including when using `--noconfirm` alone, does not enable dependency removal. When both `--rmdeps --noconfirm` are explicit, jpacker passes both `-r` and `--noconfirm` to makepkg. Dependency selection and removal remain makepkg's `-s/-r` responsibility; jpacker does not run its own `pacman -Rns`, `pacman -Qdt`, or orphan cleanup. The option has no effect on pacman-only installs and is not forwarded to pacman.
 
 ```bash
-jpacker --rebuild --cleanbuild -S google-chrome
+jpacker --rebuild --cleanbuild --rmdeps -S google-chrome
 ```
 
 ### Logs

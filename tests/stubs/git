@@ -1,0 +1,11 @@
+#!/bin/sh
+printf 'git %s\n' "$*" >> "$JPACKER_TEST_COMMAND_LOG"
+if [ "$1" = "clone" ]; then
+    mkdir -p "$3/.git"
+    exit 0
+fi
+if [ "$1" = "config" ]; then
+    printf 'https://aur.archlinux.org/%s.git\n' "$(basename "$PWD")"
+    exit 0
+fi
+exit 0

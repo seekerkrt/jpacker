@@ -1,0 +1,3 @@
+#!/bin/sh
+printf 'pacman %s\n' "$*" >> "$JPACKER_TEST_COMMAND_LOG"
+exit "${JPACKER_TEST_PACMAN_EXIT_CODE:-1}"

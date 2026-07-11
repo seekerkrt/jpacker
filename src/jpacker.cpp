@@ -49,9 +49,7 @@ namespace fs = std::filesystem;
 namespace {
 
 const std::string VERSION = JPKG_VERSION;
-const std::string AUR_RPC_URL = "https://aur.archlinux.org/rpc/v5/search/";
-const std::string AUR_RPC_INFO_BASE_URL = "https://aur.archlinux.org/rpc/";
-const std::string AUR_RPC_INFO_URL = AUR_RPC_INFO_BASE_URL + "?v=5&type=info&arg%5B%5D=";
+const std::string AUR_RPC_DEFAULT_BASE_URL = "https://aur.archlinux.org/rpc/";
 const std::string AUR_BASE_URL = "https://aur.archlinux.org/";
 const std::string ARCH_GIT_BASE = "https://gitlab.archlinux.org/archlinux/packaging/packages/";
 const std::string USER_AGENT = "jpacker/" + VERSION;
@@ -68,6 +66,7 @@ struct AppConfig {
     bool        no_confirm = false;
     bool        rebuild = false;
     bool        clean_build = false;
+    bool        rm_deps = false;
     std::string editor = "nano";
     std::string log_file = "";
 };
@@ -81,6 +80,7 @@ AppConfig g_config;
 struct MakepkgBuildOptions {
     bool rebuild = false;
     bool clean_build = false;
+    bool rm_deps = false;
 };
 
 enum class PromptDefault {
@@ -167,7 +167,7 @@ struct DependencyClassification {
     std::vector<std::string> repo;
     std::vector<std::string> aur;
     std::vector<std::string> provided;
-    std::vector<AmbiguousProvidedDependency> ambiguous_providers;
+    std::vector<AmbiguousProvidedDependency>     ambiguous_providers;
     std::vector<std::string> unknown;
 };
 
@@ -210,14 +210,24 @@ struct BuildPlanProvidedDependency {
     ProvidedDependency provider;
 };
 
+// AUR package が宣言する conflicts / replaces を、解決済みと誤認せず plan に残す。
+// POLICY(#150): v1.x では installed/repo DB との照合や置換先選択を行わず、raw metadata を保持する。
+struct BuildPlanMetadataRisk {
+    std::string              package_name;
+    std::string              package_base;
+    std::vector<std::string> conflicts;
+    std::vector<std::string> replaces;
+};
+
 // AUR build / fetch の順序、未解決依存、循環検出結果をまとめる計画。
 struct BuildPlan {
-    std::vector<BuildPlanEntry> order;
-    std::vector<BuildPlanSplitPackageTarget> split_package_targets;
-    std::vector<BuildPlanProvidedDependency> provided;
+    std::vector<BuildPlanEntry>                  order;
+    std::vector<BuildPlanSplitPackageTarget>     split_package_targets;
+    std::vector<BuildPlanProvidedDependency>     provided;
+    std::vector<BuildPlanMetadataRisk>           metadata_risks;
     std::vector<AmbiguousProvidedDependency> ambiguous_providers;
-    std::vector<std::string> unresolved;
-    std::vector<std::string> cycles;
+    std::vector<std::string>                     unresolved;
+    std::vector<std::string>                     cycles;
 };
 
 namespace {
@@ -386,6 +396,11 @@ std::string build_editor_command(const std::string& editor, const fs::path& targ
 
 // pacman / repository補助
 bool pacman_option_takes_value(const std::string& arg);
+bool pacman_operation_requests_refresh(
+        const std::string& operation, const std::vector<std::string>& flags);
+bool validate_optionless_jpacker_operation(const std::string& operation, const std::vector<std::string>& flags);
+std::optional<std::string> unsupported_source_sync_option(
+        const std::string& operation, const std::vector<std::string>& flags);
 bool is_valid_package_name(const std::string& name);
 ParsedDependency parse_dependency_string(const std::string& dependency);
 std::string dependency_package_name(const std::string& dependency);
@@ -429,6 +444,9 @@ MakepkgBuildOptions resolve_makepkg_build_options(const fs::path& pkg_dir);
 bool ask_user(const std::string& question, PromptDefault default_answer);
 
 // AUR RPC / JSON解析
+std::string aur_rpc_base_url();
+std::string aur_rpc_search_url();
+std::string aur_rpc_info_url();
 size_t WriteCallback(void* contents, size_t size, size_t nmemb, void* userp);
 json parse_aur_rpc_response(const std::string& response, const std::string& context);
 const json& aur_rpc_results_array(const json& response, const std::string& context);
@@ -478,6 +496,7 @@ void print_recursive_dependency_tree(const std::vector<RecursiveDependencyNode>&
 // build plan / fetch plan
 void add_unique_value(std::vector<std::string>& values, const std::string& value);
 void add_build_plan_split_package_target(BuildPlan& plan, const AurPackageInfo& info);
+void add_build_plan_metadata_risk(BuildPlan& plan, const AurPackageInfo& info);
 void add_build_plan_entry(BuildPlan& plan, const AurPackageInfo& info);
 void add_build_plan_provided_dependency(
         BuildPlan& plan, const std::string& dependency, const ProvidedDependency& provider);
@@ -487,6 +506,7 @@ void collect_aur_build_plan(
         const std::string& package_name, BuildPlan& plan, std::set<std::string>& visited,
         std::set<std::string>& visiting, int depth, int max_depth, bool traverse_aur_providers = true);
 void print_build_plan(const BuildPlan& plan);
+void require_fetchable_build_plan(const std::string& target, const BuildPlan& plan);
 void require_executable_build_plan(const std::string& target, const BuildPlan& plan);
 void require_executable_install_plan(const std::string& target, const BuildPlan& plan);
 BuildPlan resolve_build_plan(const std::string& target);
@@ -498,6 +518,9 @@ std::string ambiguous_provider_dependency_summary(const AmbiguousProvidedDepende
 std::string join_ambiguous_provider_summaries(const std::vector<AmbiguousProvidedDependency>& dependencies);
 std::string split_package_target_summary(const BuildPlanSplitPackageTarget& target);
 std::string join_split_package_target_summaries(const std::vector<BuildPlanSplitPackageTarget>& targets);
+void print_metadata_risk_group(const std::vector<BuildPlanMetadataRisk>& risks);
+std::string metadata_risk_summary(const BuildPlanMetadataRisk& risk);
+std::string join_metadata_risk_summaries(const std::vector<BuildPlanMetadataRisk>& risks);
 std::string aur_git_url_for_package_base(const std::string& package_base);
 void print_fetch_plan(const BuildPlan& plan);
 void fetch_aur_package_base(const std::string& package_base);
@@ -512,7 +535,9 @@ void install_aur_build_plan(const std::string& target);
 int cmd_deps(const std::vector<std::string>& targets, const std::vector<std::string>& flags);
 int cmd_plan(const std::vector<std::string>& targets, const std::vector<std::string>& flags);
 int cmd_fetch(const std::vector<std::string>& targets, const std::vector<std::string>& flags);
-int cmd_sync_info(const std::vector<std::string>& args, const std::vector<std::string>& flags, const std::vector<std::string>& targets);
+int cmd_sync_info(
+        const std::vector<std::string>& args, const std::vector<std::string>& flags,
+        const std::vector<std::string>& targets, bool use_sudo);
 int cmd_query_foreign_updates();
 int cmd_build(const std::vector<std::string>& args);
 int cmd_add_src(const std::vector<std::string>& args);
@@ -538,7 +563,8 @@ int run_jpacker(int argc, char* argv[]) {
     for(int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
 
-        if(arg == "--noedit" || arg == "--nodiff" || arg == "--noconfirm" || arg == "--rebuild" || arg == "--cleanbuild") {
+        if(arg == "--noedit" || arg == "--nodiff" || arg == "--noconfirm" || arg == "--rebuild" ||
+           arg == "--cleanbuild" || arg == "--rmdeps") {
             continue;
         }
         if(arg == "-h" || arg == "--help") {
@@ -591,6 +617,10 @@ int run_jpacker(int argc, char* argv[]) {
             g_config.clean_build = true;
             continue;
         }
+        if(arg == "--rmdeps") {
+            g_config.rm_deps = true;
+            continue;
+        }
         break;
     }
     if(operation_index >= argc) {
@@ -635,6 +665,10 @@ int run_jpacker(int argc, char* argv[]) {
             g_config.clean_build = true;
             continue;
         }
+        if(arg == "--rmdeps") {
+            g_config.rm_deps = true;
+            continue;
+        }
         if(i > operation_index) {
             if(option_value_expected) {
                 flags.push_back(arg);
@@ -659,6 +693,13 @@ int run_jpacker(int argc, char* argv[]) {
     }
 
     try {
+        const std::vector<std::string> optionless_operations = {
+                "build", "upgrade", "clean", "add-src", "del-src", "revert", "edit-src", "list-src"};
+        if(std::find(optionless_operations.begin(), optionless_operations.end(), operation) != optionless_operations.end() &&
+           !validate_optionless_jpacker_operation(operation, flags)) {
+            return 1;
+        }
+
         if(operation == "build") {
             return cmd_build(targets);
         }
@@ -699,6 +740,7 @@ int run_jpacker(int argc, char* argv[]) {
             return 0;
         }
 
+        bool requests_refresh = pacman_operation_requests_refresh(operation, flags);
         bool is_sync = operation.starts_with("-S");
         bool is_query = operation.starts_with("-Q");
         bool is_foreign_updates = (is_query && operation.find('u') != std::string::npos && operation.find('a') != std::string::npos);
@@ -706,7 +748,9 @@ int run_jpacker(int argc, char* argv[]) {
         bool is_info = (is_sync && operation.find('i') != std::string::npos);
         bool is_clean = (is_sync && operation.find('c') != std::string::npos);
         bool is_sys_upgrade = (is_sync && (operation.find('u') != std::string::npos || operation.find('y') != std::string::npos));
-        bool needs_sudo = (is_sync || operation.starts_with("-R") || operation.starts_with("-U") || operation.starts_with("-D"));
+        bool needs_sudo =
+                is_sync || operation.starts_with("-R") || operation.starts_with("-U") ||
+                operation.starts_with("-D") || (operation.starts_with("-F") && requests_refresh);
 
         if(is_foreign_updates) return cmd_query_foreign_updates();
 
@@ -715,12 +759,30 @@ int run_jpacker(int argc, char* argv[]) {
                 Logger::error("Missing search query.");
                 return 1;
             }
-            int pacman_ret = run_command("pacman " + join_pacman_args(args));
+            std::string pacman_prefix = requests_refresh ? "sudo pacman " : "pacman ";
+            int         pacman_ret = run_command(pacman_prefix + join_pacman_args(args));
             Logger::info("Searching AUR...");
             bool aur_found = search_aur(targets);
             return (pacman_ret == 0 || aur_found) ? 0 : 1;
         }
-        if(is_info) return cmd_sync_info(args, flags, targets);
+        if(is_info) {
+            if(requests_refresh) {
+                auto unqualified_target = std::find_if(targets.begin(), targets.end(), [](const std::string& target) {
+                    return target.find('/') == std::string::npos;
+                });
+                if(unqualified_target != targets.end()) {
+                    // POLICY(#172): refresh 後に AUR fallback すると official DB の更新だけが先行する。
+                    // refresh 付き info は repository-qualified target に限定し、分類前に停止する。
+                    Logger::error(
+                            "Cannot combine pacman refresh with AUR info fallback for unqualified target: " +
+                            *unqualified_target);
+                    Logger::error(
+                            "Use a repository-qualified target such as repo/package, or run refresh and -Si separately.");
+                    return 1;
+                }
+            }
+            return cmd_sync_info(args, flags, targets, requests_refresh);
+        }
         if(is_clean) return run_command("sudo pacman " + join_pacman_args(args));
 
         if(is_sync) {
@@ -734,6 +796,16 @@ int run_jpacker(int argc, char* argv[]) {
                     repo_targets.push_back(t);
                 else
                     aur_targets.push_back(t);
+            }
+            if(!aur_targets.empty()) {
+                std::optional<std::string> unsupported_option = unsupported_source_sync_option(operation, flags);
+                if(unsupported_option.has_value()) {
+                    Logger::error(
+                            "Unsupported pacman option for AUR/source-build target: " + unsupported_option.value());
+                    Logger::error(
+                            "Split official repository and AUR/source-build targets, or rerun without this option.");
+                    return 1;
+                }
             }
             for(const auto& pkg : aur_targets) {
                 require_executable_sync_install_target(pkg);
@@ -762,6 +834,7 @@ int run_jpacker(int argc, char* argv[]) {
             if(arg == "--noconfirm") continue;
             if(arg == "--rebuild") continue;
             if(arg == "--cleanbuild") continue;
+            if(arg == "--rmdeps") continue;
             cmd_args.push_back(arg);
         }
         std::string cmd_prefix = needs_sudo ? "sudo pacman " : "pacman ";
@@ -818,6 +891,7 @@ void print_help() {
     std::cout << "    \033[1m--noconfirm\033[0m         Pass --noconfirm to pacman/makepkg" << std::endl;
     std::cout << "    \033[1m--rebuild\033[0m           Pass -f to makepkg build/install" << std::endl;
     std::cout << "    \033[1m--cleanbuild\033[0m        Pass -C to makepkg build/install" << std::endl;
+    std::cout << "    \033[1m--rmdeps\033[0m            Pass -r to makepkg build/install" << std::endl;
     std::cout << "\033[1mCONFIG\033[0m" << std::endl;
     std::cout << "    jpacker.conf: EDITOR=..., LOGFILE=..., NOEDIT=..., NODIFF=..." << std::endl;
 }
@@ -1077,6 +1151,8 @@ std::string makepkg_install_command(const MakepkgBuildOptions& options) {
     if(g_config.no_confirm) args.push_back("--noconfirm");
     if(options.rebuild) args.push_back("-f");
     if(options.clean_build) args.push_back("-C");
+    // POLICY(#123): 削除対象の判断と実行は makepkg -s/-r に委ね、jpacker では再実装しない。
+    if(options.rm_deps) args.push_back("-r");
     return join_shell_args(args);
 }
 
@@ -1098,6 +1174,58 @@ bool pacman_option_takes_value(const std::string& arg) {
     if(arg.find('=') != std::string::npos) return false;
     if(std::find(s_long_opts.begin(), s_long_opts.end(), arg) != s_long_opts.end()) return true;
     return std::find(s_short_opts.begin(), s_short_opts.end(), arg) != s_short_opts.end();
+}
+
+bool pacman_operation_requests_refresh(
+        const std::string& operation, const std::vector<std::string>& flags) {
+    auto short_option_requests_refresh = [](const std::string& option) {
+        if(option.size() < 2 || option[0] != '-' || option[1] == '-') return false;
+        return std::find(option.begin() + 1, option.end(), 'y') != option.end();
+    };
+
+    if(short_option_requests_refresh(operation)) return true;
+
+    bool option_value_expected = false;
+    // POLICY(#172): flags[0] は operation。残りは元の option 順で、値を取る option の次は判定対象外にする。
+    for(size_t i = 1; i < flags.size(); ++i) {
+        const std::string& flag = flags[i];
+        if(option_value_expected) {
+            option_value_expected = false;
+            continue;
+        }
+        if(flag == "--") break;
+        if(flag == "--refresh" || short_option_requests_refresh(flag)) return true;
+        option_value_expected = pacman_option_takes_value(flag);
+    }
+    return false;
+}
+
+bool validate_optionless_jpacker_operation(const std::string& operation, const std::vector<std::string>& flags) {
+    for(const auto& flag : flags) {
+        if(flag == operation) continue;
+
+        Logger::error("Unsupported " + operation + " option: " + flag);
+        return false;
+    }
+    return true;
+}
+
+std::optional<std::string> unsupported_source_sync_option(
+        const std::string& operation, const std::vector<std::string>& flags) {
+    // POLICY(#56): -S の y/u modifier は official repository update にだけ作用する。
+    // AUR/source-build 側へ意味を移せない他の pacman option は、黙って無視せず build 前に止める。
+    if(operation.size() < 2 || operation[0] != '-' || operation[1] != 'S' ||
+       !std::all_of(operation.begin() + 2, operation.end(), [](char modifier) {
+           return modifier == 'y' || modifier == 'u';
+       })) {
+        return operation;
+    }
+
+    for(const auto& flag : flags) {
+        if(flag == operation || flag == "--") continue;
+        return flag;
+    }
+    return std::nullopt;
 }
 
 bool is_valid_package_name(const std::string& name) {
@@ -1572,6 +1700,8 @@ MakepkgBuildOptions resolve_makepkg_build_options(const fs::path& pkg_dir) {
     MakepkgBuildOptions options;
     bool                has_artifact = has_local_package_artifact(pkg_dir);
 
+    options.rm_deps = g_config.rm_deps;
+
     if(g_config.clean_build) {
         options.clean_build = true;
     } else if(has_local_srcdir(pkg_dir)) {
@@ -1660,6 +1790,27 @@ bool ask_user(const std::string& question, PromptDefault default_answer) {
 }
 
 // AUR RPC / JSON解析
+std::string aur_rpc_base_url() {
+#ifdef JPACKER_ENABLE_TEST_OVERRIDES
+    // POLICY: local fixture injection は isolated test binary 限定。production の endpoint は固定する。
+    const char* test_base_url = std::getenv("JPACKER_TEST_AUR_RPC_BASE_URL");
+    if(test_base_url && test_base_url[0] != '\0') {
+        std::string base_url = test_base_url;
+        if(base_url.back() != '/') base_url += '/';
+        return base_url;
+    }
+#endif
+    return AUR_RPC_DEFAULT_BASE_URL;
+}
+
+std::string aur_rpc_search_url() {
+    return aur_rpc_base_url() + "v5/search/";
+}
+
+std::string aur_rpc_info_url() {
+    return aur_rpc_base_url() + "?v=5&type=info&arg%5B%5D=";
+}
+
 size_t WriteCallback(void* contents, size_t size, size_t nmemb, void* userp) {
     size_t total_size = size * nmemb;
     auto*  buffer = static_cast<std::string*>(userp);
@@ -1771,7 +1922,7 @@ std::string AurClient::search_query(const std::string& query) {
     CurlHandle  handle;
     char* escaped = curl_easy_escape(handle.get(), query.c_str(), static_cast<int>(query.length()));
     if(!escaped) return "";
-    std::string url = AUR_RPC_URL + escaped;
+    std::string url = aur_rpc_search_url() + escaped;
     curl_free(escaped);
     return get_url(url);
 }
@@ -1781,7 +1932,7 @@ std::vector<std::string> AurClient::search_names_by_provides(const std::string& 
     CurlHandle               handle;
     char* escaped = curl_easy_escape(handle.get(), provided_name.c_str(), static_cast<int>(provided_name.length()));
     if(!escaped) return names;
-    std::string url = AUR_RPC_URL + escaped + "?by=provides";
+    std::string url = aur_rpc_search_url() + escaped + "?by=provides";
     curl_free(escaped);
 
     std::string response = get_url(url);
@@ -1802,7 +1953,7 @@ std::optional<AurPackageInfo> AurClient::info(const std::string& pkg_name) {
     CurlHandle handle;
     char*      escaped = curl_easy_escape(handle.get(), pkg_name.c_str(), static_cast<int>(pkg_name.length()));
     if(!escaped) return std::nullopt;
-    std::string url = AUR_RPC_INFO_URL + escaped;
+    std::string url = aur_rpc_info_url() + escaped;
     curl_free(escaped);
 
     std::string response = get_url(url);
@@ -1822,7 +1973,7 @@ std::map<std::string, AurPackageInfo> AurClient::info_many(const std::vector<std
     if(pkg_names.empty()) return results;
 
     CurlHandle  handle;
-    std::string url = AUR_RPC_INFO_BASE_URL + "?v=5&type=info";
+    std::string url = aur_rpc_base_url() + "?v=5&type=info";
     bool        has_arg = false;
     for(size_t i = 0; i < pkg_names.size(); ++i) {
         char* escaped = curl_easy_escape(handle.get(), pkg_names[i].c_str(), static_cast<int>(pkg_names[i].length()));
@@ -2302,6 +2453,21 @@ void add_build_plan_split_package_target(BuildPlan& plan, const AurPackageInfo& 
     plan.split_package_targets.push_back(BuildPlanSplitPackageTarget{info.PackageBase, info.Name});
 }
 
+void add_build_plan_metadata_risk(BuildPlan& plan, const AurPackageInfo& info) {
+    if(info.Conflicts.empty() && info.Replaces.empty()) return;
+
+    std::string package_base = package_base_or_name(info);
+    auto same_package = [&info, &package_base](const BuildPlanMetadataRisk& existing) {
+        return existing.package_name == info.Name && existing.package_base == package_base;
+    };
+    if(std::find_if(plan.metadata_risks.begin(), plan.metadata_risks.end(), same_package) !=
+       plan.metadata_risks.end())
+        return;
+
+    plan.metadata_risks.push_back(
+            BuildPlanMetadataRisk{info.Name, package_base, info.Conflicts, info.Replaces});
+}
+
 void add_build_plan_entry(BuildPlan& plan, const AurPackageInfo& info) {
     std::string package_base = package_base_or_name(info);
     auto        same_base = [&package_base](const BuildPlanEntry& existing) { return existing.package_base == package_base; };
@@ -2353,6 +2519,9 @@ void collect_aur_build_plan(
         add_unique_value(plan.unresolved, package_name);
         return;
     }
+
+    // POLICY(#150): visited PackageBase で再帰を打ち切る場合も、package 単位の raw metadata は先に保持する。
+    add_build_plan_metadata_risk(plan, info.value());
 
     std::string build_unit = package_base_or_name(info.value());
     if(visited.count(build_unit) > 0) return;
@@ -2411,6 +2580,44 @@ void collect_aur_build_plan(
     add_build_plan_entry(plan, info.value());
 }
 
+void print_metadata_risk_group(const std::vector<BuildPlanMetadataRisk>& risks) {
+    std::cout << "Metadata conflicts/replaces:" << std::endl;
+    for(const auto& risk : risks) {
+        std::cout << "  " << risk.package_name;
+        if(risk.package_base != risk.package_name) std::cout << " (base: " << risk.package_base << ")";
+        std::cout << std::endl;
+        if(!risk.conflicts.empty())
+            std::cout << "    conflicts: " << join_comma_display_values(risk.conflicts) << std::endl;
+        if(!risk.replaces.empty())
+            std::cout << "    replaces: " << join_comma_display_values(risk.replaces) << std::endl;
+    }
+}
+
+std::string metadata_risk_summary(const BuildPlanMetadataRisk& risk) {
+    std::vector<std::string> metadata;
+    if(!risk.conflicts.empty()) metadata.push_back("conflicts: " + join_comma_display_values(risk.conflicts));
+    if(!risk.replaces.empty()) metadata.push_back("replaces: " + join_comma_display_values(risk.replaces));
+
+    std::stringstream summary;
+    summary << risk.package_name;
+    if(risk.package_base != risk.package_name) summary << " (base: " << risk.package_base << ")";
+    summary << " [";
+    for(size_t i = 0; i < metadata.size(); ++i) {
+        if(i > 0) summary << "; ";
+        summary << metadata[i];
+    }
+    summary << "]";
+    return summary.str();
+}
+
+std::string join_metadata_risk_summaries(const std::vector<BuildPlanMetadataRisk>& risks) {
+    std::vector<std::string> values;
+    for(const auto& risk : risks) {
+        values.push_back(metadata_risk_summary(risk));
+    }
+    return join_comma_display_values(values);
+}
+
 void print_build_plan(const BuildPlan& plan) {
     std::cout << "Build plan:" << std::endl;
     if(plan.order.empty()) {
@@ -2456,6 +2663,11 @@ void print_build_plan(const BuildPlan& plan) {
         }
     }
 
+    if(!plan.metadata_risks.empty()) {
+        std::cout << std::endl;
+        print_metadata_risk_group(plan.metadata_risks);
+    }
+
     if(!plan.unresolved.empty()) {
         std::cout << std::endl;
         std::cout << "Unresolved dependencies:" << std::endl;
@@ -2473,7 +2685,7 @@ void print_build_plan(const BuildPlan& plan) {
     }
 
     if(!plan.unresolved.empty() || !plan.ambiguous_providers.empty() || !plan.cycles.empty() ||
-       !plan.split_package_targets.empty()) {
+       !plan.split_package_targets.empty() || !plan.metadata_risks.empty()) {
         std::cout << std::endl;
         std::cout << "Plan status: incomplete" << std::endl;
         if(!plan.unresolved.empty()) std::cout << "  unresolved dependencies remain" << std::endl;
@@ -2481,10 +2693,12 @@ void print_build_plan(const BuildPlan& plan) {
         if(!plan.cycles.empty()) std::cout << "  cyclic dependencies detected" << std::endl;
         if(!plan.split_package_targets.empty())
             std::cout << "  split package install target selection is not implemented" << std::endl;
+        if(!plan.metadata_risks.empty())
+            std::cout << "  conflicts/replaces metadata is not resolved automatically" << std::endl;
     }
 }
 
-void require_executable_build_plan(const std::string& target, const BuildPlan& plan) {
+void require_fetchable_build_plan(const std::string& target, const BuildPlan& plan) {
     if(!plan.unresolved.empty()) {
         throw std::runtime_error(
                 "Cannot execute build plan for " + target + "; unresolved dependencies: " +
@@ -2499,6 +2713,16 @@ void require_executable_build_plan(const std::string& target, const BuildPlan& p
         throw std::runtime_error(
                 "Cannot execute build plan for " + target + "; cyclic dependencies: " +
                 join_comma_display_values(plan.cycles));
+    }
+}
+
+void require_executable_build_plan(const std::string& target, const BuildPlan& plan) {
+    require_fetchable_build_plan(target, plan);
+    if(!plan.metadata_risks.empty()) {
+        throw std::runtime_error(
+                "Cannot execute build plan for " + target +
+                "; conflicts/replaces metadata requires manual review: " +
+                join_metadata_risk_summaries(plan.metadata_risks));
     }
 }
 
@@ -2628,6 +2852,13 @@ void print_fetch_plan(const BuildPlan& plan) {
         for(const auto& dependency : plan.cycles) {
             Logger::warn(dependency);
         }
+    }
+
+    if(!plan.metadata_risks.empty()) {
+        std::cout << std::endl;
+        print_metadata_risk_group(plan.metadata_risks);
+        Logger::warn(
+                "Conflicts/replaces metadata requires manual review before build/install; fetch is allowed.");
     }
 }
 
@@ -2860,6 +3091,13 @@ int cmd_deps(const std::vector<std::string>& targets, const std::vector<std::str
             print_ambiguous_provider_group("Ambiguous provided dependencies:", classified.ambiguous_providers);
             std::cout << std::endl;
             print_dependency_group("Unknown dependencies:", classified.unknown);
+            BuildPlan metadata_plan;
+            add_build_plan_metadata_risk(metadata_plan, info.value());
+            if(!metadata_plan.metadata_risks.empty()) {
+                std::cout << std::endl;
+                print_metadata_risk_group(metadata_plan.metadata_risks);
+                Logger::warn("Conflicts/replaces metadata is separate from dependency resolution and requires manual review.");
+            }
             if(recursive) {
                 std::set<std::string> visited;
                 visited.insert(package_base_or_name(info.value()));
@@ -2932,7 +3170,8 @@ int cmd_fetch(const std::vector<std::string>& targets, const std::vector<std::st
 
             if(i > 0) std::cout << std::endl;
             print_fetch_plan(plan);
-            require_executable_build_plan(target, plan);
+            // POLICY(#150): fetch は read-only retrieval stage。metadata risk は表示するが取得を妨げない。
+            require_fetchable_build_plan(target, plan);
 
             for(const auto& entry : plan.order) {
                 try {
@@ -2951,8 +3190,11 @@ int cmd_fetch(const std::vector<std::string>& targets, const std::vector<std::st
     return failed ? 1 : 0;
 }
 
-int cmd_sync_info(const std::vector<std::string>& args, const std::vector<std::string>& flags, const std::vector<std::string>& targets) {
-    if(targets.empty()) return run_command("pacman " + join_pacman_args(args));
+int cmd_sync_info(
+        const std::vector<std::string>& args, const std::vector<std::string>& flags,
+        const std::vector<std::string>& targets, bool use_sudo) {
+    std::string pacman_prefix = use_sudo ? "sudo pacman " : "pacman ";
+    if(targets.empty()) return run_command(pacman_prefix + join_pacman_args(args));
 
     bool                     failed = false;
     std::vector<std::string> repo_targets;
@@ -2987,7 +3229,7 @@ int cmd_sync_info(const std::vector<std::string>& args, const std::vector<std::s
     if(!repo_targets.empty()) {
         std::vector<std::string> pacman_args = flags;
         pacman_args.insert(pacman_args.end(), repo_targets.begin(), repo_targets.end());
-        if(run_command("pacman " + join_pacman_args(pacman_args)) != 0) failed = true;
+        if(run_command(pacman_prefix + join_pacman_args(pacman_args)) != 0) failed = true;
         if(!aur_infos.empty()) std::cout << std::endl;
     }
 

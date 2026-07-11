@@ -1,4 +1,4 @@
-.TH JPACKER 8 "June 2026" "jpacker 1.10.0" "System Administration Utilities"
+.TH JPACKER 8 "June 2026" "jpacker 1.11.0" "System Administration Utilities"
 .SH NAME
 jpacker \- A robust Pacman wrapper and AUR helper with source-based build management
 .SH SYNOPSIS
@@ -11,7 +11,10 @@ jpacker \- A robust Pacman wrapper and AUR helper with source-based build manage
 is a C++20 pacman wrapper and AUR helper.
 It extends pacman's functionality by handling AUR packages, providing one-off source builds for official packages, and managing persistent per-package source build preferences (similar to Gentoo's package.env).
 
-Any operation or flag not explicitly handled by jpacker is passed through to pacman directly.
+Operations handled entirely by pacman pass through pacman-compatible options that jpacker does not consume.
+When a sync target is routed to AUR or a source build, pacman options that cannot retain their meaning during makepkg build/install are rejected before the transaction starts instead of being ignored.
+Pacman options that take values must follow the operation and may use either \fB--option value\fR or \fB--option=value\fR form. A missing value for an option tracked by jpacker stops before pacman execution.
+Unsupported options for jpacker-specific operations also stop instead of being forwarded to pacman.
 
 .SH OPERATIONS
 .TP
@@ -26,9 +29,14 @@ The jpacker cache directory is \fI$XDG_CACHE_HOME/jpacker\fR when \fBXDG_CACHE_H
 .B \-Ss \fI<query>\fR
 Search for packages in both the official repositories and the AUR.
 AUR search results may show status tags such as \fB[installed]\fR, \fB[out-of-date]\fR, and \fB[orphaned]\fR when that metadata is available.
+When refresh is requested with \fB-y\fR or \fB--refresh\fR, the official repository search uses \fBsudo pacman\fR before the usual AUR search.
 .TP
 .B \-Si \fI<package>\fR
 Show package information. Official repository packages use pacman output; AUR packages use AUR metadata and include installed, orphaned, and out-of-date state.
+When refresh is requested, every target must use a repository-qualified form such as \fBcore/filesystem\fR. An unqualified target stops before pacman, sudo, or an AUR query so an official database refresh cannot run before a possible AUR fallback is known. Without refresh, the existing repository-first AUR fallback remains available.
+.TP
+.B \-F, \-Fl \fI<query>\fR
+Search or list the pacman file database without sudo. Forms that request a file database refresh, including \fB-Fy\fR, \fB-Fyy\fR, \fB-F -y\fR, and \fB-F --refresh\fR, use \fBsudo pacman\fR.
 .TP
 .B \-R, \-Rs, \-Rns \fI<target>\fR
 Remove packages. This is a direct wrapper around \fBpacman -R\fR.
@@ -44,6 +52,7 @@ Inspect an AUR package's runtime, make, and check dependencies, then classify th
 With \fB\-\-recursive\fR, recursively inspect AUR dependencies. Official repository, provided, ambiguous, and unknown dependencies are shown but not traversed.
 If exactly one provider is found, it may be shown as a provided dependency. If multiple providers are found, jpacker reports the dependency as ambiguous and does not choose one implicitly.
 Version constraints such as \fBfoo>=1.2\fR are detected and shown, but jpacker v1.x does not verify them with a complete pacman/libalpm-compatible solver.
+If the target package declares AUR \fBConflicts\fR or \fBReplaces\fR metadata, it is shown separately as a metadata warning. This warning does not change the command's successful inspection status.
 This command does not clone, build, install dependencies, or calculate build order.
 .TP
 .B plan \fI<package>\fR
@@ -52,12 +61,14 @@ Official repository and repository-provided dependencies are not included in the
 If multiple providers remain for a dependency, the plan is reported as incomplete with ambiguous provider candidates; jpacker does not choose one implicitly.
 Unverified version constraints are reported as unresolved reasons and are not treated as satisfied.
 If the requested AUR package has a package name different from its PackageBase, the plan shows it as a split package install target and reports the plan as incomplete because install target selection is not implemented.
+Conflicts/replaces metadata for every AUR package in the recursive plan is shown with its package name. A plan containing this metadata is incomplete because jpacker v1.x does not resolve it automatically.
 This command does not clone, build, or install dependencies.
 .TP
 .B fetch \fI<package>\fR
 Safely retrieve the AUR build repositories needed to inspect an AUR package and its recursive AUR dependencies before any build/install stage.
 Fetch targets are resolved by PackageBase. Official repository and provided dependencies are not cloned. Unknown dependencies are reported as unresolved.
 Split package install target selection is not required for fetch itself; if the requested package resolves to a PackageBase and the fetch plan has no unresolved, ambiguous, or cyclic issue, fetch may still clone or fetch that PackageBase.
+Conflicts/replaces metadata is shown as a warning but does not prevent fetch, because fetch is limited to read-only repository retrieval.
 Missing AUR repositories are cloned. Existing cloned repositories run only \fBgit fetch origin\fR.
 This command does not update the working tree and does not run \fBgit pull\fR, merge, reset, build, or install operations.
 Future behavior that advances a working tree is not implemented by \fBfetch\fR and should be considered in a separate issue as a command or option such as \fBsync\fR, \fBupdate\fR, or \fBfetch --update\fR.
@@ -97,13 +108,20 @@ Skip the interactive review/edit of \fIPKGBUILD\fR and top-level \fI*.install\fR
 Skip the interactive git diff check during existing cache repository updates.
 .TP
 .BR \-\-noconfirm
-Pass \fB--noconfirm\fR to pacman and makepkg execution. jpacker treats this as a request to avoid interactive blocking, not as "yes to everything". This does not bypass jpacker's ambiguous provider, unresolved dependency, cyclic build plan, or split package install target checks.
+Pass \fB--noconfirm\fR to pacman and makepkg execution. jpacker treats this as a request to avoid interactive blocking, not as "yes to everything". This does not bypass jpacker's ambiguous provider, unresolved dependency, cyclic build plan, split package install target, or conflicts/replaces metadata checks.
 .TP
 .BR \-\-rebuild
 Pass \fB-f\fR to makepkg build/install execution so existing built package artifacts are not reused. When omitted, jpacker may ask before rebuilding an existing local package artifact; the default answer is no.
 .TP
 .BR \-\-cleanbuild
 Pass \fB-C\fR to makepkg build/install execution so the existing \fIsrcdir\fR is not reused. When omitted, jpacker may ask before cleaning an existing local \fIsrc/\fR directory; the default answer is no. If a local package artifact exists in the same package directory, cleanbuild also enables rebuild.
+.TP
+.BR \-\-rmdeps
+Pass \fB-r\fR to AUR/source-build makepkg execution. This is explicit opt-in and is not enabled by \fB--noconfirm\fR alone. makepkg removes only dependencies it installed through \fB-s\fR after a successful build; jpacker does not run its own pacman removal or orphan cleanup. This option is not passed to pacman-only installs.
+.PP
+AUR/source build installation uses \fBmakepkg -sic\fR as its baseline. \fB--noconfirm\fR adds the same makepkg option, while \fB--rebuild\fR, \fB--cleanbuild\fR, and \fB--rmdeps\fR add \fB-f\fR, \fB-C\fR, and \fB-r\fR respectively. Other pacman transaction options are not translated to makepkg; if an AUR/source-build target is present, unsupported options stop the invocation before pacman or makepkg execution.
+.PP
+jpacker v1.x does not compare AUR conflicts/replaces metadata with installed or official repository packages, use replacements to select install targets, or automatically remove or replace packages. Any AUR build/install plan containing this metadata stops before clone, fetch, build, makepkg, or a pacman transaction.
 .TP
 .BR \-h , \ \-\-help
 Display the help message and exit.

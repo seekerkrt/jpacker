@@ -29,14 +29,15 @@ set -l jpacker_global_options \
     --nodiff \
     --noconfirm \
     --rebuild \
-    --cleanbuild
+    --cleanbuild \
+    --rmdeps
 
 function __fish_jpacker_seen_operation
     set -l tokens (commandline -opc)
 
     for token in $tokens[2..-1]
         switch $token
-            case --help -h --noedit --nodiff --noconfirm --rebuild --cleanbuild
+            case --help -h --noedit --nodiff --noconfirm --rebuild --cleanbuild --rmdeps
                 continue
             case '*'
                 echo $token
