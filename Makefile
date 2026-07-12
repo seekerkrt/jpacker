@@ -31,7 +31,7 @@ SRCS      := $(wildcard $(SRC_DIR)/*.cpp)
 OBJS      := $(SRCS:$(SRC_DIR)/%.cpp=$(BUILD_DIR)/%.o)
 DEPS      := $(OBJS:.o=.d)
 
-.PHONY: all clean test-conflicts-replaces test-pacman-routing release-check install uninstall
+.PHONY: all clean test-build-cache-symlink test-conflicts-replaces test-pacman-routing release-check install uninstall
 
 all: $(TARGET) $(MANPAGE)
 
@@ -62,6 +62,9 @@ test-conflicts-replaces: $(TEST_TARGET)
 
 test-pacman-routing: $(TEST_TARGET)
 	sh tests/test-pacman-routing.sh $(abspath $(TEST_TARGET))
+
+test-build-cache-symlink: $(TEST_TARGET)
+	sh tests/test-build-cache-symlink.sh $(abspath $(TEST_TARGET))
 
 release-check:
 	@echo ":: Checking release version consistency"
