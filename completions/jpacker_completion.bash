@@ -7,7 +7,7 @@ _jpacker() {
     prev="${COMP_WORDS[COMP_CWORD-1]}"
 
     # 主要コマンドとオプション
-    opts="build upgrade clean deps plan fetch add-src del-src edit-src list-src revert -S -Syu -Ss -Si -R -Rs -Rns -Q -Qua -h --help --noedit --nodiff --noconfirm --rebuild --cleanbuild --rmdeps"
+    opts="build upgrade clean deps plan fetch add-src del-src edit-src list-src revert -S -Syu -Ss -Si -R -Rs -Rns -Q -Qua -h --help --noedit --nodiff --noconfirm --rebuild --cleanbuild --rmdeps --aur --repo"
     deps_opts="--recursive"
 
     # 第1引数（コマンド）の補完
@@ -30,8 +30,16 @@ _jpacker() {
             fi
             return 0
             ;;
-        -S|-Syu)
+        -S)
             # パッケージ名の補完は重いので、--noedit などのオプションのみ提示
+            COMPREPLY=( $(compgen -W "--noedit --nodiff --noconfirm --rebuild --cleanbuild --rmdeps --aur --repo" -- ${cur}) )
+            return 0
+            ;;
+        -Ss|-Si)
+            COMPREPLY=( $(compgen -W "--aur --repo" -- ${cur}) )
+            return 0
+            ;;
+        -Syu)
             COMPREPLY=( $(compgen -W "--noedit --nodiff --noconfirm --rebuild --cleanbuild --rmdeps" -- ${cur}) )
             return 0
             ;;

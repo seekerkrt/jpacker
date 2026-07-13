@@ -116,6 +116,8 @@ jpacker v1.9.0 / #98 では、`PackageBase` と install target package name を�
 - `--rebuild`
 - `--cleanbuild`
 - `--rmdeps`
+- `--aur`
+- `--repo`
 
 `--noedit` は build/install 前の PKGBUILD / `.install` review / edit prompt を省略する。
 `.install` review は PKGBUILD を評価して `install=` を解決するものではなく、作業ツリー直下の `*.install` を見落としにくくするための案内である。
@@ -131,6 +133,49 @@ jpacker v1.9.0 / #98 では、`PackageBase` と install target package name を�
 `--rmdeps` は明示 opt-in の jpacker 固有 option として、AUR / source build の共通 build/install 経路で `makepkg -r` 相当へ変換する。未指定時は build 後の依存削除を行わず、`--noconfirm` だけで暗黙に有効化しない。`--rmdeps --noconfirm` を両方指定した場合は、その明示意図どおり makepkg へ `-r` と `--noconfirm` の両方を渡す。
 
 削除対象は、同じ invocation の `makepkg -s` による dependency auto-resolution で導入され、build が成功した後に makepkg が削除対象と判断した dependency に限る。jpacker は `pacman -Rns`、`pacman -Qdt`、独自 orphan cleanup を実行しない。pacman-only 経路や official repository package の通常 install では `--rmdeps` を pacman へ渡さず、作用させない。
+
+`--aur` / `--repo` は package source を invocation 単位で限定する selector である。pacman / makepkg へは渡さず、下記の source selection policy に従って jpacker が routing に使う。
+
+---
+
+## Package source selection policy
+
+source selection は排他的な 3 状態として扱う。
+
+- Auto: selector 未指定時の default。既存の自動分類を変更しない。
+- AurOnly (`--aur`): root target を AUR に限定し、official repository へ fallback しない。
+- RepoOnly (`--repo`): target を official binary repository に限定し、AUR / source build へ fallback しない。
+
+同じ selector の重複指定は idempotent として許可する。`--aur` と `--repo` が同じ invocation に存在する場合は、順序にかかわらず conflict とし、pacman / sudo / AUR RPC / git / makepkg や cache mutation より前に停止する。`--noconfirm` は selection、conflict、not-found、build plan の安全 guard を変更しない。
+
+selector の初期対応 scope は、plain sync install (`-S`)、sync search (`-Ss`)、sync info (`-Si`) に限る。plain sync install には refresh / upgrade / clean modifier を含めない。`upgrade`、`-Syu`、`-Su`、`-Sy`、`-Qua`、`-Q`、`-F`、`-U`、`build`、`fetch`、`deps`、`plan` など、scope 外の operation で selector を認識した場合は、黙って無視せず外部コマンド前に停止する。
+
+Auto の契約は次のとおりであり、selector 追加後も維持する。
+
+- plain `-S`: official repository package は binary repository、source build preference がある official package は official source-build route、official repository にない package は AUR route を使う。
+- `-Ss`: official repository search と AUR search を組み合わせる。
+- `-Si`: official repository を優先し、見つからない場合だけ AUR metadata へ fallback する。
+
+AurOnly の契約は次のとおりとする。
+
+- plain `-S`: official repository probe と source build preference を root target の分類に使わず、全 root target を AUR RPC / PackageBase / AUR build plan で preflight する。official repository に同名 package があっても AUR を選ぶ。AUR build plan 内の official dependency は既存の dependency 処理へ委ねてよい。全 root target の validation、AUR info、PackageBase、build plan、executable-install guard、metadata risk guard が成功した後にだけ execution へ進み、後続 target の明白な失敗より前に先行 target を clone / build / install しない。AUR に存在しなければ明示的に失敗し、repository へ fallback しない。
+- `-Ss`: AUR search だけを実行する。repository search へ fallback せず、match がなければ non-zero とする。
+- `-Si`: AUR RPC info だけを使い、repository info へ fallback しない。AUR に存在しない target は not-found とする。
+- `core/filesystem` のような repository-qualified target は AUR package name へ暗黙変換せず、AUR RPC や外部コマンドより前に invalid target として停止する。
+
+RepoOnly の契約は次のとおりとする。
+
+- plain `-S`: per-target の repository/AUR classification probe を行わず、selector だけを除いた ordered pacman argv を一度の binary repository transaction へ渡す。source build preference、AUR RPC、AUR build/install は使わない。package が repository に存在しない場合は pacman の failure を返し、AUR へ fallback しない。repository-qualified target を許可する。
+- `-Ss`: official repository search だけを pacman へ委譲し、AUR search / RPC を実行しない。
+- `-Si`: official repository info だけを pacman へ委譲し、missing target でも AUR へ fallback しない。qualified / unqualified target の両方を許可する。
+
+source build preference は Auto でのみ従来どおり有効である。`--repo` は preference がある package でも、この invocation だけ official binary package を選び、preference file を変更・削除しない。`--aur` は official source-build preference と official source-build route を使わず、AUR package を選ぶ。
+
+refresh の契約は selection ごとに分ける。AurOnly の `-Ss` / `-Si` と refresh は、official database refresh を AUR-only operation へ混ぜないため外部コマンド前に拒否する。RepoOnly の `-Ss` / `-Si` と refresh は AUR fallback risk がないため許可し、既存 routing どおり `sudo pacman` へ委譲する。特に `-Si --repo --refresh <unqualified-target>` は許可する。Auto の refresh guard と routing は変更しない。
+
+selector は operation の前後にある通常の global option 位置で認識する。ただし parser の優先順位は、(1) pacman option value 待ち、(2) `--` 後の opaque operand、(3) `--` marker、(4) jpacker global option、(5) pacman option / target の順を維持する。したがって `-Q --root --aur filesystem` の `--aur` は `--root` の value、`-U -- --repo` の `--repo` は opaque operand であり、source selection へ反映しない。通常位置で selector として認識した token だけを pacman argv から除去し、他の option / value / target の相対順を維持する。
+
+永続的な source priority、selector の config file 保存、upgrade / `-Syu` / `-Qua` の source policy、provider selection、dependency solver の変更は、この source selection policy の scope 外とする。
 
 ---
 
@@ -161,8 +206,8 @@ refresh modifierを含むread/query経路のsudo境界は次のように扱う�
 
 - `-F <file>` / `-Fl <pkg>` などのread-only file database queryはplain `pacman`へ委譲する。
 - `-Fy` / `-Fyy` / `-F -y` / `-F --refresh` はfile databaseを更新するため`sudo pacman`へ委譲する。
-- `-Ss <query>`は従来どおりplain pacman searchとAUR searchを組み合わせる。`-Ssy` / `-Ss --refresh`ではofficial repository search側を`sudo pacman`で実行したあとAUR searchを行う。
-- `-Si`とrefreshを組み合わせる場合、targetは`repo/package`形式に限定し、AUR fallbackを行わない。unqualified targetが1件でもあれば、official refreshだけを先行させないためpacman / sudo / AUR queryより前に停止する。必要ならrefreshと`-Si`を別invocationに分ける。
+- selector 未指定の`-Ss <query>`は従来どおりplain pacman searchとAUR searchを組み合わせる。`-Ssy` / `-Ss --refresh`ではofficial repository search側を`sudo pacman`で実行したあとAUR searchを行う。
+- selector 未指定の`-Si`とrefreshを組み合わせる場合、targetは`repo/package`形式に限定し、AUR fallbackを行わない。unqualified targetが1件でもあれば、official refreshだけを先行させないためpacman / sudo / AUR queryより前に停止する。必要ならrefreshと`-Si`を別invocationに分ける。
 - refreshなしの通常の`-Si <target>`は、official repositoryを優先し、見つからない場合にAUR metadataを表示する従来契約を維持する。
 
 `upgrade` の source-build 更新判定では、working tree にある既存 `.SRCINFO` を使う。`.SRCINFO` がない、または version 情報が不完全な場合、review 前に `makepkg --printsrcinfo` は実行しない。対話実行では続行確認を行い、`--noconfirm` または非対話実行では対象 package を skip する。

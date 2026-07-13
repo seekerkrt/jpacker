@@ -69,6 +69,7 @@ setup_case() {
     unset JPACKER_TEST_PACMAN_QM_OUTPUT
     unset JPACKER_TEST_PACMAN_REPO_PACKAGES
     unset JPACKER_TEST_PACKAGE_BUILD_DIR
+    unset JPACKER_TEST_MAKEPKG_EXIT_CODE
 
     cache_root=$XDG_CACHE_HOME/jpacker
     entry_path=$cache_root/clean-root

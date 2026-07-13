@@ -95,11 +95,32 @@ makepkg -si
 
 pacman だけで完結する経路では、jpacker が消費しない pacman-compatible option を pacman へ渡します。一方、`-S` が AUR package または source-build preference のある package へ分岐する場合、makepkg build/install に同じ意味で反映できない pacman option は黙って無視せず、外部コマンドの実行前に unsupported として停止します。必要な場合は official repository target と AUR / source build target を別 invocation に分けてください。
 
-operation 確定後、値を取る pacman option の次の token は、その綴りにかかわらず option value として優先します。option value として消費されていない最初の `--` は end-of-options marker として pacman へ保持し、それ以降の token は opaque operand として扱います。`--noedit` や `--rmdeps` などの jpacker global option は、option value 位置でも `--` 後でもない通常位置でのみ認識します。
+operation 確定後、値を取る pacman option の次の token は、その綴りにかかわらず option value として優先します。option value として消費されていない最初の `--` は end-of-options marker として pacman へ保持し、それ以降の token は opaque operand として扱います。`--noedit`、`--rmdeps`、`--aur`、`--repo` などの jpacker global option は、option value 位置でも `--` 後でもない通常位置でのみ認識します。
 
-`-F` / `-Fl` などの file database query は通常ユーザーの `pacman` へ委譲し、`-Fy` / `-Fyy` / `-F -y` / `-F --refresh` のように refresh を含む場合だけ `sudo pacman` を使います。`-Ss` に refresh を組み合わせた場合も official repository search 側を `sudo pacman` で実行したあと、通常どおり AUR search を行います。
+`-F` / `-Fl` などの file database query は通常ユーザーの `pacman` へ委譲し、`-Fy` / `-Fyy` / `-F -y` / `-F --refresh` のように refresh を含む場合だけ `sudo pacman` を使います。selector 未指定の `-Ss` に refresh を組み合わせた場合も official repository search 側を `sudo pacman` で実行したあと、通常どおり AUR search を行います。
 
-`-Si` に refresh を組み合わせる場合、AUR fallback の判定前に official database refresh だけが先行しないよう、target は `core/filesystem` のような repository-qualified form に限定します。unqualified target が 1 件でもあれば pacman / sudo / AUR query の前に停止するため、必要なら refresh と `-Si` を別 invocation に分けてください。refresh なしの通常の `-Si <pkg>` は従来どおり official repository を優先し、見つからなければ AUR metadata を表示します。
+selector 未指定の `-Si` に refresh を組み合わせる場合、AUR fallback の判定前に official database refresh だけが先行しないよう、target は `core/filesystem` のような repository-qualified form に限定します。unqualified target が 1 件でもあれば pacman / sudo / AUR query の前に停止するため、必要なら refresh と `-Si` を別 invocation に分けてください。refresh なしの通常の `-Si <pkg>` は従来どおり official repository を優先し、見つからなければ AUR metadata を表示します。
+
+#### Package source selection
+
+`-S`、`-Ss`、`-Si` では、jpacker 固有の `--aur` / `--repo` で、この invocation が使う package source を明示的に限定できます。selector を指定しない場合は従来の Auto routing を維持し、official repository package は binary repository、source build preference がある official package は source build、official repository にない package は AUR へ進みます。`-Ss` は repository と AUR の両方を検索し、`-Si` は repository を優先して、見つからない場合だけ AUR へ fallback します。
+
+* `--aur`: root target を AUR package に限定し、official repository へ fallback しません。official repository に同名 package がある場合も AUR を選び、source build preference と official source-build route は使いません。AUR build plan 内の official dependency は、既存の dependency 処理に委ねます。`core/filesystem` のような repository-qualified target は AUR package name として扱わず、失敗します。
+* `--repo`: target を official binary repository に限定し、AUR や source build へ fallback しません。source build preference がある package でも、この invocation だけ binary package を選びます。preference file 自体は変更・削除しません。repository-qualified target も指定できます。
+
+同じ selector の重複指定は idempotent として許可します。`--aur` と `--repo` を同時に指定すると、外部コマンドや AUR query の前に失敗します。`--noconfirm` は source の限定や、この conflict を突破しません。selector を使えるのは plain `-S` install、`-Ss` search、`-Si` info だけで、`upgrade` / `-Syu` / `-Qua` や `build` / `fetch` / `deps` / `plan` などでは未対応です。`--aur` と refresh の組み合わせも、official database refresh を AUR-only operation へ混ぜないため拒否します。`--repo` の `-Ss` / `-Si` は refresh を指定でき、従来どおり `sudo pacman` へ委譲します。
+
+```bash
+# AUR だけから install / search / info
+jpacker -S --aur google-chrome
+jpacker -Ss --aur browser
+jpacker -Si --aur google-chrome
+
+# official binary repositories だけから install / search / info
+jpacker -S --repo firefox
+jpacker -Ss --repo browser
+jpacker -Si --repo firefox
+```
 
 `jpacker` が利用者に影響する主要な外部コマンドを実行する場合は、実行前に対象のコマンドを表示します。
 
@@ -396,11 +417,32 @@ jpacker accepts standard pacman flags where supported. Not all pacman options / 
 
 On routes handled entirely by pacman, jpacker forwards pacman-compatible options that it does not consume. If `-S` routes any target to AUR or a source-build preference, however, a pacman option that cannot retain its meaning during makepkg build/install is rejected before any external transaction starts. Split official repository and AUR/source-build targets into separate invocations when such an option is needed.
 
-After the operation is identified, the token following a value-taking pacman option is treated as its value regardless of its spelling. The first `--` not consumed as an option value is preserved as the end-of-options marker, and later tokens are treated as opaque operands. jpacker global options such as `--noedit` and `--rmdeps` are recognized only in normal option positions, not as pacman option values or after `--`.
+After the operation is identified, the token following a value-taking pacman option is treated as its value regardless of its spelling. The first `--` not consumed as an option value is preserved as the end-of-options marker, and later tokens are treated as opaque operands. jpacker global options such as `--noedit`, `--rmdeps`, `--aur`, and `--repo` are recognized only in normal option positions, not as pacman option values or after `--`.
 
-Read-only file database queries such as `-F` and `-Fl` are delegated to plain `pacman`. Forms that request a refresh, including `-Fy`, `-Fyy`, `-F -y`, and `-F --refresh`, use `sudo pacman`. When refresh is combined with `-Ss`, the official repository search runs through `sudo pacman` before the usual AUR search.
+Read-only file database queries such as `-F` and `-Fl` are delegated to plain `pacman`. Forms that request a refresh, including `-Fy`, `-Fyy`, `-F -y`, and `-F --refresh`, use `sudo pacman`. When refresh is combined with `-Ss` without a source selector, the official repository search runs through `sudo pacman` before the usual AUR search.
 
-When refresh is combined with `-Si`, every target must use a repository-qualified form such as `core/filesystem`. This prevents an official database refresh from running before jpacker discovers that an unqualified target needs AUR fallback. If any target is unqualified, jpacker stops before pacman, sudo, or an AUR query; split refresh and `-Si` into separate invocations when needed. Normal `-Si <pkg>` without refresh keeps the existing repository-first AUR fallback behavior.
+When refresh is combined with `-Si` without a source selector, every target must use a repository-qualified form such as `core/filesystem`. This prevents an official database refresh from running before jpacker discovers that an unqualified target needs AUR fallback. If any target is unqualified, jpacker stops before pacman, sudo, or an AUR query; split refresh and `-Si` into separate invocations when needed. Normal `-Si <pkg>` without refresh keeps the existing repository-first AUR fallback behavior.
+
+#### Package source selection
+
+For `-S`, `-Ss`, and `-Si`, the jpacker-specific `--aur` / `--repo` options explicitly limit the package source used by that invocation. Without a selector, the existing Auto routing is unchanged: official repository packages use the binary repository, official packages with a source build preference use the source-build route, and packages absent from the official repositories use AUR. `-Ss` searches both repositories and AUR, while `-Si` prefers repository information and falls back to AUR only when the package is not found there.
+
+* `--aur`: Limit root targets to AUR, with no official repository fallback. AUR is selected even when an official package has the same name, and source build preferences and the official source-build route are ignored. Official dependencies in the AUR build plan remain handled by the existing dependency path. A repository-qualified target such as `core/filesystem` is not converted into an AUR package name and fails.
+* `--repo`: Limit targets to official binary repositories, with no AUR or source-build fallback. For a package with a source build preference, this selects the binary package for this invocation only; the preference file is not modified or removed. Repository-qualified targets are accepted.
+
+Repeating the same selector is idempotent and allowed. Combining `--aur` and `--repo` fails before any external command or AUR query. `--noconfirm` does not bypass source selection or this conflict. Selectors are initially supported only for plain `-S` installs, `-Ss` searches, and `-Si` information queries; they are not supported for `upgrade` / `-Syu` / `-Qua` or jpacker-specific operations such as `build` / `fetch` / `deps` / `plan`. Combining `--aur` with refresh is also rejected so an official database refresh is not mixed into an AUR-only operation. `--repo` searches and information queries may use refresh and retain the existing `sudo pacman` routing.
+
+```bash
+# Install / search / show information using only AUR
+jpacker -S --aur google-chrome
+jpacker -Ss --aur browser
+jpacker -Si --aur google-chrome
+
+# Install / search / show information using only official binary repositories
+jpacker -S --repo firefox
+jpacker -Ss --repo browser
+jpacker -Si --repo firefox
+```
 
 When jpacker runs major external commands that affect the user, it prints the command before executing it.
 
