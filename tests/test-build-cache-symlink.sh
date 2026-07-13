@@ -66,6 +66,8 @@ setup_case() {
     unset JPACKER_TEST_GIT_REMOTE_URL
     unset JPACKER_TEST_GIT_CLONE_EXIT_CODE
     unset JPACKER_TEST_GIT_CLONE_SYMLINK_TARGET
+    unset JPACKER_TEST_PACMAN_QM_OUTPUT
+    unset JPACKER_TEST_PACKAGE_BUILD_DIR
 
     cache_root=$XDG_CACHE_HOME/jpacker
     entry_path=$cache_root/clean-root

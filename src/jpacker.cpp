@@ -24,6 +24,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <limits>
 #include <map>
 #include <memory>
 #include <nlohmann/json.hpp>
@@ -36,6 +37,7 @@
 #include <system_error>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <utility>
 #include <vector>
 
 using json = nlohmann::json;
@@ -55,7 +57,17 @@ const std::string ARCH_GIT_BASE = "https://gitlab.archlinux.org/archlinux/packag
 const std::string USER_AGENT = "jpacker/" + VERSION;
 const std::string CONFIG_FILE = "/etc/jpacker/jpacker.conf";
 // POLICY: source-build preference の永続化場所。意味を変える場合は互換性影響として扱う。
+#ifdef JPACKER_ENABLE_TEST_OVERRIDES
+const std::string PACKAGE_BUILD_DIR = [] {
+    const char* test_package_build_dir = std::getenv("JPACKER_TEST_PACKAGE_BUILD_DIR");
+    if(test_package_build_dir && test_package_build_dir[0] != '\0') {
+        return std::string(test_package_build_dir);
+    }
+    return std::string("/etc/jpacker/package.build");
+}();
+#else
 const std::string PACKAGE_BUILD_DIR = "/etc/jpacker/package.build";
+#endif
 
 } // namespace
 
@@ -111,6 +123,12 @@ struct AurPackageInfo {
     std::vector<std::string>       Replaces;
     std::string                    Maintainer;
     std::optional<long long>       OutOfDate;
+};
+
+// AUR RPC の parse/schema/semantic violation。transport failure や not-found と区別して伝播する。
+class AurRpcResponseError : public std::runtime_error {
+public:
+    using std::runtime_error::runtime_error;
 };
 
 // requested package から、実際に取得する PackageBase と git URL を結びつける型。
@@ -397,7 +415,7 @@ public:
 class AurClient {
 public:
     static std::string get_url(const std::string& url);
-    static std::string search_query(const std::string& query);
+    static std::vector<AurPackageInfo> search(const std::string& query);
     static std::vector<std::string> search_names_by_provides(const std::string& provided_name);
     static std::optional<AurPackageInfo> info(const std::string& pkg_name);
     static std::map<std::string, AurPackageInfo> info_many(const std::vector<std::string>& pkg_names);
@@ -494,11 +512,9 @@ std::string aur_rpc_info_url();
 size_t WriteCallback(void* contents, size_t size, size_t nmemb, void* userp);
 json parse_aur_rpc_response(const std::string& response, const std::string& context);
 const json& aur_rpc_results_array(const json& response, const std::string& context);
-std::string json_string_or_empty(const json& obj, const std::string& key);
-std::vector<std::string> json_string_array_or_empty(const json& obj, const std::string& key);
-std::optional<long long> json_optional_long_long(const json& obj, const std::string& key);
-AurPackageInfo parse_aur_package_info(const json& pkg);
-AurPackageInfo parse_aur_rpc_package_info(const json& pkg, const std::string& context);
+AurPackageInfo parse_aur_rpc_package_info(const json& pkg, const std::string& context, size_t result_index);
+std::vector<AurPackageInfo> parse_aur_rpc_package_results(
+        const std::string& response, const std::string& context);
 
 // AUR provider / build source解決
 bool aur_package_provides(const AurPackageInfo& info, const std::string& dependency_name);
@@ -509,6 +525,7 @@ void require_supported_build_source_install_target(const PackageBuildSource& sou
 void require_executable_build_source_plan(const PackageBuildSource& source);
 
 // AUR検索 / info表示
+void preflight_aur_search_schema(const std::vector<std::string>& keywords);
 bool search_aur(const std::vector<std::string>& keywords);
 std::string join_display_values(const std::vector<std::string>& values);
 std::string join_comma_display_values(const std::vector<std::string>& values);
@@ -522,7 +539,7 @@ void print_aur_info(const AurPackageInfo& pkg);
 void add_dependency(std::vector<std::string>& dependencies, std::set<std::string>& seen, const std::string& dependency);
 std::vector<std::string> collect_build_dependencies(const AurPackageInfo& pkg);
 void add_classified_dependency(std::vector<std::string>& dependencies, const std::string& dependency, const std::string& package_name);
-std::string package_base_or_name(const AurPackageInfo& info);
+std::string package_base_name(const AurPackageInfo& info);
 bool has_distinct_package_base(const AurPackageInfo& info);
 void add_classified_aur_dependency(std::vector<std::string>& dependencies, const std::string& dependency, const AurPackageInfo& info);
 std::string provided_dependency_display(const std::string& dependency, const ProvidedDependency& provider);
@@ -574,6 +591,7 @@ void build_from_git(const std::string& pkg_name, const std::string& clone_name, 
 void require_executable_sync_install_target(const std::string& pkg_name);
 void install_smart_source(const std::string& pkg_name, bool only_if_updated);
 void install_aur_build_plan(const std::string& target);
+void preflight_upgrade_source_metadata();
 
 // コマンド処理
 int cmd_deps(const std::vector<std::string>& targets, const std::vector<std::string>& flags);
@@ -818,6 +836,7 @@ int run_jpacker(int argc, char* argv[]) {
                 Logger::error("Missing search query.");
                 return 1;
             }
+            if(requests_refresh) preflight_aur_search_schema(targets);
             std::string pacman_prefix = requests_refresh ? "sudo pacman " : "pacman ";
             int         pacman_ret = run_command(pacman_prefix + join_pacman_args(args));
             Logger::info("Searching AUR...");
@@ -2119,84 +2138,198 @@ size_t WriteCallback(void* contents, size_t size, size_t nmemb, void* userp) {
 }
 
 json parse_aur_rpc_response(const std::string& response, const std::string& context) {
+    json parsed;
     try {
-        json parsed = json::parse(response);
-        if(!parsed.is_object()) {
-            throw std::runtime_error("top-level JSON value is not an object");
-        }
-        return parsed;
-    } catch(const json::parse_error& e) {
-        throw std::runtime_error(
+        parsed = json::parse(response);
+    } catch(const json::exception& e) {
+        throw AurRpcResponseError(
                 "AUR RPC response parse failed for " + context + ": " + std::string(e.what()));
-    } catch(const std::runtime_error& e) {
-        throw std::runtime_error(
-                "AUR RPC response parse failed for " + context + ": unexpected response: " + e.what());
     }
+
+    if(!parsed.is_object()) {
+        throw AurRpcResponseError(
+                "AUR RPC response validation failed for " + context +
+                ": expected top-level object, got " + parsed.type_name());
+    }
+    return parsed;
 }
 
 const json& aur_rpc_results_array(const json& response, const std::string& context) {
-    if(!response.contains("results") || !response["results"].is_array()) {
-        throw std::runtime_error(
-                "AUR RPC response parse failed for " + context + ": unexpected response: missing results array");
+    auto results = response.find("results");
+    if(results == response.end()) {
+        throw AurRpcResponseError(
+                "AUR RPC response validation failed for " + context +
+                ": field results expected array, got missing");
     }
-    return response["results"];
+    if(!results->is_array()) {
+        throw AurRpcResponseError(
+                "AUR RPC response validation failed for " + context +
+                ": field results expected array, got " + std::string(results->type_name()));
+    }
+    return *results;
 }
 
-std::string json_string_or_empty(const json& obj, const std::string& key) {
-    if(!obj.is_object() || !obj.contains(key) || obj[key].is_null() || !obj[key].is_string()) return "";
-    return obj[key].get<std::string>();
+[[noreturn]] void throw_aur_rpc_validation_error(
+        const std::string& context, const std::string& detail) {
+    throw AurRpcResponseError("AUR RPC response validation failed for " + context + ": " + detail);
 }
 
-std::vector<std::string> json_string_array_or_empty(const json& obj, const std::string& key) {
+std::string json_value_for_error(const std::string& value) {
+    return json(value).dump();
+}
+
+std::string aur_rpc_result_context(
+        const std::string& context, size_t result_index) {
+    return context + " result[" + std::to_string(result_index) + "]";
+}
+
+std::string required_json_string(
+        const json& obj, const std::string& key, const std::string& context) {
+    auto value = obj.find(key);
+    if(value == obj.end()) {
+        throw_aur_rpc_validation_error(context, "field " + key + " expected string, got missing");
+    }
+    if(!value->is_string()) {
+        throw_aur_rpc_validation_error(
+                context, "field " + key + " expected string, got " + std::string(value->type_name()));
+    }
+
+    std::string result = value->get<std::string>();
+    if(trim(result).empty()) {
+        throw_aur_rpc_validation_error(
+                context, "field " + key + " expected non-empty string, got empty or whitespace-only string");
+    }
+    return result;
+}
+
+std::string optional_json_string(
+        const json& obj, const std::string& key, const std::string& context) {
+    auto value = obj.find(key);
+    if(value == obj.end() || value->is_null()) return "";
+    if(!value->is_string()) {
+        throw_aur_rpc_validation_error(
+                context, "field " + key + " expected string or null, got " +
+                                 std::string(value->type_name()));
+    }
+    return value->get<std::string>();
+}
+
+std::optional<long long> optional_json_integer(
+        const json& obj, const std::string& key, const std::string& context) {
+    auto value = obj.find(key);
+    if(value == obj.end() || value->is_null()) return std::nullopt;
+    if(!value->is_number_integer()) {
+        throw_aur_rpc_validation_error(
+                context, "field " + key + " expected integer or null, got " +
+                                 std::string(value->type_name()));
+    }
+
+    if(value->is_number_unsigned()) {
+        auto unsigned_value = value->get<unsigned long long>();
+        if(unsigned_value > static_cast<unsigned long long>(std::numeric_limits<long long>::max())) {
+            throw_aur_rpc_validation_error(
+                    context, "field " + key + " integer is outside supported range");
+        }
+        return static_cast<long long>(unsigned_value);
+    }
+    return value->get<long long>();
+}
+
+std::vector<std::string> optional_json_string_array(
+        const json& obj, const std::string& key, const std::string& context) {
+    auto value = obj.find(key);
+    if(value == obj.end() || value->is_null()) return {};
+    if(!value->is_array()) {
+        throw_aur_rpc_validation_error(
+                context, "field " + key + " expected array or null, got " +
+                                 std::string(value->type_name()));
+    }
+
     std::vector<std::string> values;
-    if(!obj.is_object() || !obj.contains(key) || !obj[key].is_array()) return values;
-    for(const auto& item : obj[key]) {
-        if(item.is_string()) values.push_back(item.get<std::string>());
+    values.reserve(value->size());
+    for(size_t i = 0; i < value->size(); ++i) {
+        const json& item = (*value)[i];
+        if(!item.is_string()) {
+            throw_aur_rpc_validation_error(
+                    context, "field " + key + "[" + std::to_string(i) +
+                                     "] expected string, got " + item.type_name());
+        }
+        values.push_back(item.get<std::string>());
     }
     return values;
 }
 
-std::optional<long long> json_optional_long_long(const json& obj, const std::string& key) {
-    if(!obj.is_object() || !obj.contains(key) || obj[key].is_null() || !obj[key].is_number()) return std::nullopt;
-    try {
-        return obj[key].get<long long>();
-    } catch(...) {
-        return std::nullopt;
+void validate_package_identifier(
+        const std::string& value, const std::string& field, const std::string& context) {
+    if(!is_valid_package_name(value)) {
+        throw_aur_rpc_validation_error(
+                context, "invalid " + field + " " + json_value_for_error(value));
     }
 }
 
-AurPackageInfo parse_aur_package_info(const json& pkg) {
-    AurPackageInfo info;
-    info.Name = json_string_or_empty(pkg, "Name");
-    info.PackageBase = json_string_or_empty(pkg, "PackageBase");
-    info.Version = json_string_or_empty(pkg, "Version");
-    info.Description = json_string_or_empty(pkg, "Description");
-    info.Depends = json_string_array_or_empty(pkg, "Depends");
-    info.MakeDepends = json_string_array_or_empty(pkg, "MakeDepends");
-    info.CheckDepends = json_string_array_or_empty(pkg, "CheckDepends");
-    info.OptDepends = json_string_array_or_empty(pkg, "OptDepends");
-    info.Provides = json_string_array_or_empty(pkg, "Provides");
-    info.Conflicts = json_string_array_or_empty(pkg, "Conflicts");
-    info.Replaces = json_string_array_or_empty(pkg, "Replaces");
-    info.Maintainer = json_string_or_empty(pkg, "Maintainer");
-    info.OutOfDate = json_optional_long_long(pkg, "OutOfDate");
-    return info;
+void validate_metadata_identifiers(
+        const std::vector<std::string>& values, const std::string& field,
+        const std::string& context) {
+    for(size_t i = 0; i < values.size(); ++i) {
+        ParsedDependency parsed = parse_dependency_string(values[i]);
+        if(!is_valid_package_name(parsed.name)) {
+            throw_aur_rpc_validation_error(
+                    context, "field " + field + "[" + std::to_string(i) +
+                                     "] contains invalid package identifier " +
+                                     json_value_for_error(parsed.name));
+        }
+    }
 }
 
-AurPackageInfo parse_aur_rpc_package_info(const json& pkg, const std::string& context) {
+AurPackageInfo parse_aur_rpc_package_info(
+        const json& pkg, const std::string& context, size_t result_index) {
+    std::string entry_context = aur_rpc_result_context(context, result_index);
     if(!pkg.is_object()) {
-        throw std::runtime_error(
-                "AUR RPC response parse failed for " + context +
-                ": unexpected response: package info entry is not an object");
+        throw_aur_rpc_validation_error(
+                entry_context, "package entry expected object, got " + std::string(pkg.type_name()));
     }
 
-    AurPackageInfo info = parse_aur_package_info(pkg);
-    if(info.Name.empty()) {
-        throw std::runtime_error(
-                "AUR RPC response parse failed for " + context +
-                ": unexpected response: package info entry is missing Name");
-    }
+    AurPackageInfo info;
+    info.Name = required_json_string(pkg, "Name", entry_context);
+    validate_package_identifier(info.Name, "Name", entry_context);
+    entry_context += " (package " + json_value_for_error(info.Name) + ")";
+
+    info.PackageBase = required_json_string(pkg, "PackageBase", entry_context);
+    validate_package_identifier(info.PackageBase, "PackageBase", entry_context);
+    info.Version = required_json_string(pkg, "Version", entry_context);
+    info.Description = optional_json_string(pkg, "Description", entry_context);
+    info.Maintainer = optional_json_string(pkg, "Maintainer", entry_context);
+    info.OutOfDate = optional_json_integer(pkg, "OutOfDate", entry_context);
+
+    info.Depends = optional_json_string_array(pkg, "Depends", entry_context);
+    info.MakeDepends = optional_json_string_array(pkg, "MakeDepends", entry_context);
+    info.CheckDepends = optional_json_string_array(pkg, "CheckDepends", entry_context);
+    info.OptDepends = optional_json_string_array(pkg, "OptDepends", entry_context);
+    info.Provides = optional_json_string_array(pkg, "Provides", entry_context);
+    info.Conflicts = optional_json_string_array(pkg, "Conflicts", entry_context);
+    info.Replaces = optional_json_string_array(pkg, "Replaces", entry_context);
+
+    // POLICY(#174): OptDepends は `pkg: description` を許すため型だけを検証する。
+    validate_metadata_identifiers(info.Depends, "Depends", entry_context);
+    validate_metadata_identifiers(info.MakeDepends, "MakeDepends", entry_context);
+    validate_metadata_identifiers(info.CheckDepends, "CheckDepends", entry_context);
+    validate_metadata_identifiers(info.Provides, "Provides", entry_context);
+    validate_metadata_identifiers(info.Conflicts, "Conflicts", entry_context);
+    validate_metadata_identifiers(info.Replaces, "Replaces", entry_context);
     return info;
+}
+
+std::vector<AurPackageInfo> parse_aur_rpc_package_results(
+        const std::string& response, const std::string& context) {
+    json        parsed = parse_aur_rpc_response(response, context);
+    const json& results = aur_rpc_results_array(parsed, context);
+
+    std::vector<AurPackageInfo> packages;
+    packages.reserve(results.size());
+    for(size_t i = 0; i < results.size(); ++i) {
+        packages.push_back(parse_aur_rpc_package_info(results[i], context, i));
+    }
+    return packages;
 }
 
 std::string AurClient::get_url(const std::string& url) {
@@ -2218,13 +2351,17 @@ std::string AurClient::get_url(const std::string& url) {
     return readBuffer;
 }
 
-std::string AurClient::search_query(const std::string& query) {
+std::vector<AurPackageInfo> AurClient::search(const std::string& query) {
+    std::vector<AurPackageInfo> packages;
     CurlHandle  handle;
     char* escaped = curl_easy_escape(handle.get(), query.c_str(), static_cast<int>(query.length()));
-    if(!escaped) return "";
+    if(!escaped) return packages;
     std::string url = aur_rpc_search_url() + escaped;
     curl_free(escaped);
-    return get_url(url);
+
+    std::string response = get_url(url);
+    if(response.empty()) return packages;
+    return parse_aur_rpc_package_results(response, "search query " + query);
 }
 
 std::vector<std::string> AurClient::search_names_by_provides(const std::string& provided_name) {
@@ -2238,12 +2375,9 @@ std::vector<std::string> AurClient::search_names_by_provides(const std::string& 
     std::string response = get_url(url);
     if(response.empty()) return names;
 
-    std::string context = "provides search " + provided_name;
-    json        j = parse_aur_rpc_response(response, context);
-    const json& results = aur_rpc_results_array(j, context);
-
-    for(const auto& pkg : results) {
-        AurPackageInfo info = parse_aur_rpc_package_info(pkg, context);
+    std::vector<AurPackageInfo> results =
+            parse_aur_rpc_package_results(response, "provides search " + provided_name);
+    for(const auto& info : results) {
         names.push_back(info.Name);
     }
     return names;
@@ -2259,18 +2393,31 @@ std::optional<AurPackageInfo> AurClient::info(const std::string& pkg_name) {
     std::string response = get_url(url);
     if(response.empty()) return std::nullopt;
 
-    std::string context = "package info " + pkg_name;
-    json        j = parse_aur_rpc_response(response, context);
-    const json& results = aur_rpc_results_array(j, context);
+    std::string                 context = "package info " + pkg_name;
+    std::vector<AurPackageInfo> results = parse_aur_rpc_package_results(response, context);
     if(results.empty()) {
         return std::nullopt;
     }
-    return parse_aur_rpc_package_info(results[0], context);
+    if(results.size() != 1) {
+        throw_aur_rpc_validation_error(
+                context, "expected zero or one result, got " + std::to_string(results.size()));
+    }
+    if(results.front().Name != pkg_name) {
+        throw_aur_rpc_validation_error(
+                context, "requested " + pkg_name + " but response Name was " + results.front().Name);
+    }
+    return results.front();
 }
 
 std::map<std::string, AurPackageInfo> AurClient::info_many(const std::vector<std::string>& pkg_names) {
     std::map<std::string, AurPackageInfo> results;
     if(pkg_names.empty()) return results;
+
+    std::set<std::string> requested_names;
+    for(const auto& pkg_name : pkg_names) {
+        require_valid_package_name(pkg_name);
+        requested_names.insert(pkg_name);
+    }
 
     CurlHandle  handle;
     std::string url = aur_rpc_base_url() + "?v=5&type=info";
@@ -2289,13 +2436,17 @@ std::map<std::string, AurPackageInfo> AurClient::info_many(const std::vector<std
     std::string response = get_url(url);
     if(response.empty()) return results;
 
-    std::string context = "multiinfo";
-    json        j = parse_aur_rpc_response(response, context);
-    const json& aur_results = aur_rpc_results_array(j, context);
-
-    for(const auto& pkg : aur_results) {
-        AurPackageInfo pkg_info = parse_aur_rpc_package_info(pkg, context);
-        results[pkg_info.Name] = pkg_info;
+    std::string                 context = "multiinfo";
+    std::vector<AurPackageInfo> aur_results = parse_aur_rpc_package_results(response, context);
+    for(const auto& pkg_info : aur_results) {
+        if(!requested_names.contains(pkg_info.Name)) {
+            throw_aur_rpc_validation_error(
+                    context, "response Name " + pkg_info.Name + " was not requested");
+        }
+        if(!results.emplace(pkg_info.Name, pkg_info).second) {
+            throw_aur_rpc_validation_error(
+                    context, "duplicate response Name " + pkg_info.Name);
+        }
     }
     return results;
 }
@@ -2315,17 +2466,20 @@ std::vector<ProvidedDependency> find_aur_providers(const std::string& dependency
     std::vector<std::string> candidates;
     try {
         candidates = AurClient::search_names_by_provides(dependency_name);
+    } catch(const AurRpcResponseError&) {
+        throw;
     } catch(const std::exception& e) {
         Logger::warn("Failed to search AUR providers for " + dependency_name + ": " + e.what());
         return providers;
     }
     for(const auto& candidate : candidates) {
-        if(!is_valid_package_name(candidate)) continue;
         try {
             std::optional<AurPackageInfo> info = AurClient::info(candidate);
             if(info.has_value() && aur_package_provides(info.value(), dependency_name)) {
                 add_provider_candidate(providers, ProvidedDependency{"aur", info->Name});
             }
+        } catch(const AurRpcResponseError&) {
+            throw;
         } catch(const std::exception& e) {
             Logger::warn("Failed to check AUR provider " + candidate + ": " + e.what());
         }
@@ -2351,6 +2505,8 @@ PackageBuildSource resolve_build_source(const std::string& pkg_name) {
     std::optional<AurPackageInfo> info;
     try {
         info = AurClient::info(pkg_name);
+    } catch(const AurRpcResponseError&) {
+        throw;
     } catch(const std::exception& e) {
         throw std::runtime_error("Failed to fetch AUR info for " + pkg_name + ": " + e.what());
     }
@@ -2389,39 +2545,42 @@ void require_executable_build_source_plan(const PackageBuildSource& source) {
 }
 
 // AUR検索 / info表示
+void preflight_aur_search_schema(const std::vector<std::string>& keywords) {
+    // POLICY(#174): refresh付きsearchはAUR responseのschemaをDB mutationより先に検証する。
+    for(const auto& keyword : keywords) {
+        if(keyword.empty() || keyword[0] == '-') continue;
+        try {
+            static_cast<void>(AurClient::search(keyword));
+        } catch(const AurRpcResponseError&) {
+            throw;
+        } catch(const std::exception&) {
+            // transport/その他の既存search契約は、pacman実行後の通常search phaseへ委ねる。
+        }
+    }
+}
+
 bool search_aur(const std::vector<std::string>& keywords) {
     bool                  found = false;
     std::set<std::string> installed_foreign_packages = get_foreign_package_names();
     for(const auto& pkg_name : keywords) {
         if(pkg_name.empty()) continue;
         if(pkg_name[0] == '-') continue;
-        std::string response = AurClient::search_query(pkg_name);
-        if(response.empty()) continue;
-        try {
-            std::string context = "search query " + pkg_name;
-            json        j = parse_aur_rpc_response(response, context);
-            const json& results = aur_rpc_results_array(j, context);
-            for(const auto& pkg : results) {
-                AurPackageInfo info = parse_aur_rpc_package_info(pkg, context);
-                found = true;
-                std::string    name = info.Name;
-                std::cout << "\033[1;35maur\033[0m/\033[1m" << name << "\033[0m \033[1;32m"
-                          << info.Version << "\033[0m";
-                if(installed_foreign_packages.contains(name)) {
-                    std::cout << " \033[1;36m[installed]\033[0m";
-                }
-                if(info.OutOfDate.has_value()) {
-                    std::cout << " \033[1;31m[out-of-date]\033[0m";
-                }
-                if(is_orphaned(info)) {
-                    std::cout << " \033[1;33m[orphaned]\033[0m";
-                }
-                std::cout << std::endl;
-                std::string description = json_string_or_empty(pkg, "Description");
-                if(!description.empty()) std::cout << "    " << description << std::endl;
+        for(const auto& info : AurClient::search(pkg_name)) {
+            found = true;
+            const std::string& name = info.Name;
+            std::cout << "\033[1;35maur\033[0m/\033[1m" << name << "\033[0m \033[1;32m"
+                      << info.Version << "\033[0m";
+            if(installed_foreign_packages.contains(name)) {
+                std::cout << " \033[1;36m[installed]\033[0m";
             }
-        } catch(const std::exception& e) {
-            Logger::warn(e.what());
+            if(info.OutOfDate.has_value()) {
+                std::cout << " \033[1;31m[out-of-date]\033[0m";
+            }
+            if(is_orphaned(info)) {
+                std::cout << " \033[1;33m[orphaned]\033[0m";
+            }
+            std::cout << std::endl;
+            if(!info.Description.empty()) std::cout << "    " << info.Description << std::endl;
         }
     }
     return found;
@@ -2511,12 +2670,13 @@ void add_classified_dependency(std::vector<std::string>& dependencies, const std
     dependencies.push_back(dependency_display_with_constraint_note(display, dependency));
 }
 
-std::string package_base_or_name(const AurPackageInfo& info) {
-    return info.PackageBase.empty() ? info.Name : info.PackageBase;
+std::string package_base_name(const AurPackageInfo& info) {
+    // POLICY(#174): PackageBase は strict AUR RPC parser の required identifier。
+    return info.PackageBase;
 }
 
 bool has_distinct_package_base(const AurPackageInfo& info) {
-    return !info.PackageBase.empty() && info.PackageBase != info.Name;
+    return info.PackageBase != info.Name;
 }
 
 void add_classified_aur_dependency(std::vector<std::string>& dependencies, const std::string& dependency, const AurPackageInfo& info) {
@@ -2592,6 +2752,8 @@ DependencyClassification classify_dependencies(const std::vector<std::string>& d
                 else
                     result.unknown.push_back(dependency_display_with_constraint_note(dependency, dependency));
             }
+        } catch(const AurRpcResponseError&) {
+            throw;
         } catch(const std::exception& e) {
             Logger::warn("Failed to check AUR dependency " + package_name + ": " + e.what());
             std::vector<ProvidedDependency> providers = find_repo_providers(package_name);
@@ -2661,6 +2823,8 @@ RecursiveDependencyNode resolve_recursive_dependency(
     std::optional<AurPackageInfo> info;
     try {
         info = AurClient::info(node.package_name);
+    } catch(const AurRpcResponseError&) {
+        throw;
     } catch(const std::exception& e) {
         Logger::warn("Failed to check AUR dependency " + node.package_name + ": " + e.what());
         node.kind = DependencyKind::Unknown;
@@ -2682,7 +2846,7 @@ RecursiveDependencyNode resolve_recursive_dependency(
     }
 
     node.kind = DependencyKind::Aur;
-    node.package_base = package_base_or_name(info.value());
+    node.package_base = package_base_name(info.value());
     if(!visited.insert(node.package_base).second) {
         node.already_visited = true;
         return node;
@@ -2756,7 +2920,7 @@ void add_build_plan_split_package_target(BuildPlan& plan, const AurPackageInfo& 
 void add_build_plan_metadata_risk(BuildPlan& plan, const AurPackageInfo& info) {
     if(info.Conflicts.empty() && info.Replaces.empty()) return;
 
-    std::string package_base = package_base_or_name(info);
+    std::string package_base = package_base_name(info);
     auto same_package = [&info, &package_base](const BuildPlanMetadataRisk& existing) {
         return existing.package_name == info.Name && existing.package_base == package_base;
     };
@@ -2769,7 +2933,7 @@ void add_build_plan_metadata_risk(BuildPlan& plan, const AurPackageInfo& info) {
 }
 
 void add_build_plan_entry(BuildPlan& plan, const AurPackageInfo& info) {
-    std::string package_base = package_base_or_name(info);
+    std::string package_base = package_base_name(info);
     auto        same_base = [&package_base](const BuildPlanEntry& existing) { return existing.package_base == package_base; };
     auto        it = std::find_if(plan.order.begin(), plan.order.end(), same_base);
     add_build_plan_split_package_target(plan, info);
@@ -2809,6 +2973,8 @@ void collect_aur_build_plan(
     std::optional<AurPackageInfo> info;
     try {
         info = AurClient::info(package_name);
+    } catch(const AurRpcResponseError&) {
+        throw;
     } catch(const std::exception& e) {
         Logger::warn("Failed to fetch AUR info for " + package_name + ": " + e.what());
         add_unique_value(plan.unresolved, package_name);
@@ -2823,7 +2989,7 @@ void collect_aur_build_plan(
     // POLICY(#150): visited PackageBase で再帰を打ち切る場合も、package 単位の raw metadata は先に保持する。
     add_build_plan_metadata_risk(plan, info.value());
 
-    std::string build_unit = package_base_or_name(info.value());
+    std::string build_unit = package_base_name(info.value());
     if(visited.count(build_unit) > 0) return;
     if(visiting.count(build_unit) > 0) {
         add_unique_value(plan.cycles, build_unit);
@@ -2852,6 +3018,8 @@ void collect_aur_build_plan(
         std::optional<AurPackageInfo> dependency_info;
         try {
             dependency_info = AurClient::info(dep_name);
+        } catch(const AurRpcResponseError&) {
+            throw;
         } catch(const std::exception& e) {
             Logger::warn("Failed to check AUR dependency " + dep_name + ": " + e.what());
         }
@@ -3366,6 +3534,31 @@ void install_aur_build_plan(const std::string& target) {
     }
 }
 
+void preflight_upgrade_source_metadata() {
+    if(!fs::exists(PACKAGE_BUILD_DIR)) return;
+
+    // POLICY(#174): upgradeの既存pacman-first実行は維持するが、schema violationだけは
+    // system transactionより前に全source packageのplanを横断して拒否する。
+    for(const auto& entry : fs::directory_iterator(PACKAGE_BUILD_DIR)) {
+        if(!entry.is_regular_file()) continue;
+
+        std::string pkg_name = entry.path().filename().string();
+        if(!is_valid_package_name(pkg_name)) continue;
+        try {
+            PackageBuildSource source = resolve_build_source(pkg_name);
+            if(source.is_aur) {
+                // LANDMINE(#174): split/install guardより先にplan全体のschemaを検証する。
+                // preflightでは実行可能性を判定せず、ordinary plan errorは実行phaseへ委ねる。
+                static_cast<void>(resolve_build_plan(source.requested_name));
+            }
+        } catch(const AurRpcResponseError&) {
+            throw;
+        } catch(const std::exception&) {
+            // not-found/transport/通常plan errorは、従来どおりsystem upgrade後の実行phaseで報告する。
+        }
+    }
+}
+
 // コマンド処理
 int cmd_deps(const std::vector<std::string>& targets, const std::vector<std::string>& flags) {
     bool recursive = false;
@@ -3424,7 +3617,7 @@ int cmd_deps(const std::vector<std::string>& targets, const std::vector<std::str
             }
             if(recursive) {
                 std::set<std::string> visited;
-                visited.insert(package_base_or_name(info.value()));
+                visited.insert(package_base_name(info.value()));
                 std::vector<RecursiveDependencyNode> recursive_nodes =
                         resolve_recursive_dependencies(info.value(), visited, 1, MAX_RECURSIVE_DEP_DEPTH);
                 std::cout << std::endl;
@@ -3484,7 +3677,8 @@ int cmd_fetch(const std::vector<std::string>& targets, const std::vector<std::st
         return 1;
     }
 
-    bool failed = false;
+    bool                                           failed = false;
+    std::vector<std::pair<std::string, BuildPlan>> plans;
     for(size_t i = 0; i < targets.size(); ++i) {
         const auto& target = targets[i];
         require_valid_package_name(target);
@@ -3496,18 +3690,24 @@ int cmd_fetch(const std::vector<std::string>& targets, const std::vector<std::st
             print_fetch_plan(plan);
             // POLICY(#150): fetch は read-only retrieval stage。metadata risk は表示するが取得を妨げない。
             require_fetchable_build_plan(target, plan);
-
-            for(const auto& entry : plan.order) {
-                try {
-                    fetch_aur_package_base(entry.package_base);
-                } catch(const std::exception& e) {
-                    Logger::error(e.what());
-                    failed = true;
-                }
-            }
+            plans.emplace_back(target, std::move(plan));
         } catch(const std::exception& e) {
             Logger::error("Failed to fetch repositories for " + target + ": " + e.what());
             failed = true;
+        }
+    }
+
+    // POLICY(#174): 全targetのschema/semantic preflightが成功するまでclone/fetchへ進まない。
+    if(failed) return 1;
+
+    for(const auto& [target, plan] : plans) {
+        for(const auto& entry : plan.order) {
+            try {
+                fetch_aur_package_base(entry.package_base);
+            } catch(const std::exception& e) {
+                Logger::error("Failed to fetch repositories for " + target + ": " + e.what());
+                failed = true;
+            }
         }
     }
 
@@ -3601,6 +3801,8 @@ int cmd_query_foreign_updates() {
                 }
             }
             aur_packages.insert(batch_results.begin(), batch_results.end());
+        } catch(const AurRpcResponseError&) {
+            throw;
         } catch(const std::exception& e) {
             Logger::error("Failed to fetch AUR info: " + std::string(e.what()));
             failed = true;
@@ -3884,6 +4086,7 @@ int cmd_clean() {
 
 int cmd_upgrade() {
     bool failed = false;
+    preflight_upgrade_source_metadata();
     Logger::info("System upgrade...");
     if(run_command("sudo pacman " + join_pacman_args({"-Syu"})) != 0) throw std::runtime_error("Update failed.");
     if(fs::exists(PACKAGE_BUILD_DIR)) {
@@ -3899,6 +4102,9 @@ int cmd_upgrade() {
                 try {
                     // upgrade 時は true (更新がある場合のみビルド)
                     install_smart_source(pkg_name, true);
+                } catch(const AurRpcResponseError&) {
+                    // POLICY(#174): schema violation検出後は後続source packageのmutationへ進まない。
+                    throw;
                 } catch(const std::exception& e) {
                     Logger::error("Error updating " + pkg_name + ": " + e.what());
                     failed = true;

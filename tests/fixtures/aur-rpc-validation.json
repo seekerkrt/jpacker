@@ -1,0 +1,517 @@
+{
+  "packages": {
+    "valid-minimal": {
+      "Name": "valid-minimal",
+      "PackageBase": "valid-minimal",
+      "Version": "1.0-1"
+    },
+    "arrays-null": {
+      "Name": "arrays-null",
+      "PackageBase": "arrays-null",
+      "Version": "1.0-1",
+      "Depends": null,
+      "MakeDepends": null,
+      "CheckDepends": null,
+      "OptDepends": null,
+      "Provides": null,
+      "Conflicts": null,
+      "Replaces": null,
+      "Description": null,
+      "Maintainer": null,
+      "OutOfDate": null
+    },
+    "arrays-empty": {
+      "Name": "arrays-empty",
+      "PackageBase": "arrays-empty",
+      "Version": "1.0-1",
+      "Depends": [],
+      "MakeDepends": [],
+      "CheckDepends": [],
+      "OptDepends": [],
+      "Provides": [],
+      "Conflicts": [],
+      "Replaces": []
+    },
+    "arrays-valid": {
+      "Name": "arrays-valid",
+      "PackageBase": "arrays-valid",
+      "Version": "1.0-1",
+      "Description": "strict array fixture",
+      "Maintainer": "fixture-maintainer",
+      "OutOfDate": 1,
+      "Depends": ["foo>=1"],
+      "MakeDepends": ["bar=2"],
+      "CheckDepends": ["baz<3"],
+      "OptDepends": ["optional-package: optional description"],
+      "Provides": ["virtual-valid=1"],
+      "Conflicts": ["old-package>=1"],
+      "Replaces": ["legacy-package"]
+    },
+    "valid-dep": {
+      "Name": "valid-dep",
+      "PackageBase": "valid-dep",
+      "Version": "1.0-1"
+    },
+    "valid-root": {
+      "Name": "valid-root",
+      "PackageBase": "valid-root",
+      "Version": "1.0-1",
+      "Depends": ["valid-dep"]
+    },
+    "valid-split": {
+      "Name": "valid-split",
+      "PackageBase": "valid-split-base",
+      "Version": "1.0-1"
+    },
+    "upgrade-split-root": {
+      "Name": "upgrade-split-root",
+      "PackageBase": "upgrade-split-base",
+      "Version": "1.0-1",
+      "Depends": ["upgrade-split-malformed"]
+    },
+    "upgrade-split-malformed": {
+      "Name": "upgrade-split-malformed",
+      "PackageBase": "upgrade-split-malformed",
+      "Version": "1.0-1",
+      "Conflicts": "not-an-array"
+    },
+    "upgrade-sequence-a": {
+      "Name": "upgrade-sequence-a",
+      "PackageBase": "upgrade-sequence-a",
+      "Version": "1.0-1"
+    },
+    "upgrade-sequence-b": {
+      "Name": "upgrade-sequence-b",
+      "PackageBase": "upgrade-sequence-b",
+      "Version": "1.0-1"
+    },
+    "search-valid-entry": {
+      "Name": "search-valid-result",
+      "PackageBase": "search-valid-result",
+      "Version": "1.0-1",
+      "Description": "valid search result"
+    },
+    "single-provider-root": {
+      "Name": "single-provider-root",
+      "PackageBase": "single-provider-root",
+      "Version": "1.0-1",
+      "Depends": ["virtual-one"]
+    },
+    "provider-one": {
+      "Name": "provider-one",
+      "PackageBase": "provider-one",
+      "Version": "1.0-1",
+      "Provides": ["virtual-one"]
+    },
+    "ambiguous-provider-root": {
+      "Name": "ambiguous-provider-root",
+      "PackageBase": "ambiguous-provider-root",
+      "Version": "1.0-1",
+      "Depends": ["virtual-ambiguous"]
+    },
+    "provider-a": {
+      "Name": "provider-a",
+      "PackageBase": "provider-a",
+      "Version": "1.0-1",
+      "Provides": ["virtual-ambiguous"]
+    },
+    "provider-b": {
+      "Name": "provider-b",
+      "PackageBase": "provider-b",
+      "Version": "1.0-1",
+      "Provides": ["virtual-ambiguous"]
+    },
+    "cycle-root-174": {
+      "Name": "cycle-root-174",
+      "PackageBase": "cycle-root-174",
+      "Version": "1.0-1",
+      "Depends": ["cycle-dep-174"]
+    },
+    "cycle-dep-174": {
+      "Name": "cycle-dep-174",
+      "PackageBase": "cycle-dep-174",
+      "Version": "1.0-1",
+      "Depends": ["cycle-root-174"]
+    },
+    "unresolved-root-174": {
+      "Name": "unresolved-root-174",
+      "PackageBase": "unresolved-root-174",
+      "Version": "1.0-1",
+      "Depends": ["missing-dependency-174"]
+    },
+
+    "depends-scalar-string": {
+      "Name": "depends-scalar-string",
+      "PackageBase": "depends-scalar-string",
+      "Version": "1.0-1",
+      "Depends": "not-an-array"
+    },
+    "makedepends-scalar-number": {
+      "Name": "makedepends-scalar-number",
+      "PackageBase": "makedepends-scalar-number",
+      "Version": "1.0-1",
+      "MakeDepends": 42
+    },
+    "checkdepends-scalar-object": {
+      "Name": "checkdepends-scalar-object",
+      "PackageBase": "checkdepends-scalar-object",
+      "Version": "1.0-1",
+      "CheckDepends": {"name": "bad"}
+    },
+    "optdepends-scalar-boolean": {
+      "Name": "optdepends-scalar-boolean",
+      "PackageBase": "optdepends-scalar-boolean",
+      "Version": "1.0-1",
+      "OptDepends": true
+    },
+    "provides-element-number": {
+      "Name": "provides-element-number",
+      "PackageBase": "provides-element-number",
+      "Version": "1.0-1",
+      "Provides": ["virtual-valid", 42]
+    },
+    "conflicts-element-null": {
+      "Name": "conflicts-element-null",
+      "PackageBase": "conflicts-element-null",
+      "Version": "1.0-1",
+      "Conflicts": [null]
+    },
+    "replaces-element-object": {
+      "Name": "replaces-element-object",
+      "PackageBase": "replaces-element-object",
+      "Version": "1.0-1",
+      "Replaces": [{"name": "legacy"}]
+    },
+    "depends-element-boolean": {
+      "Name": "depends-element-boolean",
+      "PackageBase": "depends-element-boolean",
+      "Version": "1.0-1",
+      "Depends": [false]
+    },
+
+    "id-name-missing": {
+      "PackageBase": "id-name-missing",
+      "Version": "1.0-1"
+    },
+    "id-name-null": {
+      "Name": null,
+      "PackageBase": "id-name-null",
+      "Version": "1.0-1"
+    },
+    "id-name-number": {
+      "Name": 42,
+      "PackageBase": "id-name-number",
+      "Version": "1.0-1"
+    },
+    "id-name-empty": {
+      "Name": "",
+      "PackageBase": "id-name-empty",
+      "Version": "1.0-1"
+    },
+    "id-name-whitespace": {
+      "Name": "   ",
+      "PackageBase": "id-name-whitespace",
+      "Version": "1.0-1"
+    },
+    "id-name-invalid": {
+      "Name": "../escape",
+      "PackageBase": "id-name-invalid",
+      "Version": "1.0-1"
+    },
+    "id-base-missing": {
+      "Name": "id-base-missing",
+      "Version": "1.0-1"
+    },
+    "id-base-null": {
+      "Name": "id-base-null",
+      "PackageBase": null,
+      "Version": "1.0-1"
+    },
+    "id-base-number": {
+      "Name": "id-base-number",
+      "PackageBase": 42,
+      "Version": "1.0-1"
+    },
+    "id-base-empty": {
+      "Name": "id-base-empty",
+      "PackageBase": "",
+      "Version": "1.0-1"
+    },
+    "id-base-whitespace": {
+      "Name": "id-base-whitespace",
+      "PackageBase": "   ",
+      "Version": "1.0-1"
+    },
+    "id-base-invalid": {
+      "Name": "id-base-invalid",
+      "PackageBase": "../escape",
+      "Version": "1.0-1"
+    },
+    "single-mismatch-request": {
+      "Name": "other-package",
+      "PackageBase": "other-package",
+      "Version": "1.0-1"
+    },
+    "single-multiple-first": {
+      "Name": "single-multiple-first",
+      "PackageBase": "single-multiple-first",
+      "Version": "1.0-1"
+    },
+    "single-multiple-second": {
+      "Name": "single-multiple-second",
+      "PackageBase": "single-multiple-second",
+      "Version": "1.0-1"
+    },
+
+    "version-missing": {
+      "Name": "version-missing",
+      "PackageBase": "version-missing"
+    },
+    "version-null": {
+      "Name": "version-null",
+      "PackageBase": "version-null",
+      "Version": null
+    },
+    "version-number": {
+      "Name": "version-number",
+      "PackageBase": "version-number",
+      "Version": 42
+    },
+    "version-empty": {
+      "Name": "version-empty",
+      "PackageBase": "version-empty",
+      "Version": ""
+    },
+    "description-number": {
+      "Name": "description-number",
+      "PackageBase": "description-number",
+      "Version": "1.0-1",
+      "Description": 42
+    },
+    "maintainer-boolean": {
+      "Name": "maintainer-boolean",
+      "PackageBase": "maintainer-boolean",
+      "Version": "1.0-1",
+      "Maintainer": false
+    },
+    "outofdate-float": {
+      "Name": "outofdate-float",
+      "PackageBase": "outofdate-float",
+      "Version": "1.0-1",
+      "OutOfDate": 1.5
+    },
+    "outofdate-overflow": {
+      "Name": "outofdate-overflow",
+      "PackageBase": "outofdate-overflow",
+      "Version": "1.0-1",
+      "OutOfDate": 9223372036854775808
+    },
+
+    "semantic-depends": {
+      "Name": "semantic-depends",
+      "PackageBase": "semantic-depends",
+      "Version": "1.0-1",
+      "Depends": ["../escape>=1"]
+    },
+    "semantic-makedepends": {
+      "Name": "semantic-makedepends",
+      "PackageBase": "semantic-makedepends",
+      "Version": "1.0-1",
+      "MakeDepends": ["bad/name"]
+    },
+    "semantic-checkdepends": {
+      "Name": "semantic-checkdepends",
+      "PackageBase": "semantic-checkdepends",
+      "Version": "1.0-1",
+      "CheckDepends": [""]
+    },
+    "semantic-provides": {
+      "Name": "semantic-provides",
+      "PackageBase": "semantic-provides",
+      "Version": "1.0-1",
+      "Provides": ["../virtual=1"]
+    },
+    "semantic-conflicts": {
+      "Name": "semantic-conflicts",
+      "PackageBase": "semantic-conflicts",
+      "Version": "1.0-1",
+      "Conflicts": ["bad name"]
+    },
+    "semantic-replaces": {
+      "Name": "semantic-replaces",
+      "PackageBase": "semantic-replaces",
+      "Version": "1.0-1",
+      "Replaces": ["-bad"]
+    },
+
+    "invalid-root-preflight": {
+      "Name": "../escape",
+      "PackageBase": "../escape",
+      "Version": "1.0-1",
+      "Depends": ["valid-dep"]
+    },
+    "direct-root": {
+      "Name": "direct-root",
+      "PackageBase": "direct-root",
+      "Version": "1.0-1",
+      "Depends": ["malformed-direct"]
+    },
+    "malformed-direct": {
+      "Name": "malformed-direct",
+      "PackageBase": "malformed-direct",
+      "Version": "1.0-1",
+      "Conflicts": "not-an-array"
+    },
+    "recursive-root": {
+      "Name": "recursive-root",
+      "PackageBase": "recursive-root",
+      "Version": "1.0-1",
+      "Depends": ["recursive-middle"]
+    },
+    "recursive-middle": {
+      "Name": "recursive-middle",
+      "PackageBase": "recursive-middle",
+      "Version": "1.0-1",
+      "Depends": ["recursive-malformed"]
+    },
+    "recursive-malformed": {
+      "Name": "recursive-malformed",
+      "PackageBase": "recursive-malformed",
+      "Version": "1.0-1",
+      "Replaces": [null]
+    },
+    "provider-name-root": {
+      "Name": "provider-name-root",
+      "PackageBase": "provider-name-root",
+      "Version": "1.0-1",
+      "Depends": ["virtual-provider-name"]
+    },
+    "provider-invalid-name-entry": {
+      "Name": "../provider",
+      "PackageBase": "provider-invalid-name-entry",
+      "Version": "1.0-1",
+      "Provides": ["virtual-provider-name"]
+    },
+    "provider-base-root": {
+      "Name": "provider-base-root",
+      "PackageBase": "provider-base-root",
+      "Version": "1.0-1",
+      "Depends": ["virtual-provider-base"]
+    },
+    "provider-invalid-base-entry": {
+      "Name": "provider-invalid-base-entry",
+      "PackageBase": "../provider-base",
+      "Version": "1.0-1",
+      "Provides": ["virtual-provider-base"]
+    },
+    "provider-provides-root": {
+      "Name": "provider-provides-root",
+      "PackageBase": "provider-provides-root",
+      "Version": "1.0-1",
+      "Depends": ["virtual-provider-provides"]
+    },
+    "provider-invalid-provides-entry": {
+      "Name": "provider-invalid-provides-entry",
+      "PackageBase": "provider-invalid-provides-entry",
+      "Version": "1.0-1",
+      "Provides": "virtual-provider-provides"
+    },
+    "provider-candidate-root": {
+      "Name": "provider-candidate-root",
+      "PackageBase": "provider-candidate-root",
+      "Version": "1.0-1",
+      "Depends": ["virtual-provider-candidate"]
+    },
+    "provider-candidate-search-entry": {
+      "Name": "provider-candidate",
+      "PackageBase": "provider-candidate",
+      "Version": "1.0-1",
+      "Provides": ["virtual-provider-candidate"]
+    },
+    "provider-candidate": {
+      "Name": "provider-candidate",
+      "PackageBase": "provider-candidate",
+      "Version": "1.0-1",
+      "Depends": 42,
+      "Provides": ["virtual-provider-candidate"]
+    },
+    "provider-mismatch-root": {
+      "Name": "provider-mismatch-root",
+      "PackageBase": "provider-mismatch-root",
+      "Version": "1.0-1",
+      "Depends": ["virtual-provider-mismatch"]
+    },
+    "provider-mismatch-search-entry": {
+      "Name": "provider-mismatch",
+      "PackageBase": "provider-mismatch",
+      "Version": "1.0-1",
+      "Provides": ["virtual-provider-mismatch"]
+    },
+    "provider-mismatch": {
+      "Name": "other-provider",
+      "PackageBase": "other-provider",
+      "Version": "1.0-1",
+      "Provides": ["virtual-provider-mismatch"]
+    },
+    "search-invalid-entry": {
+      "Name": "search-invalid-entry",
+      "PackageBase": "search-invalid-entry",
+      "Version": "1.0-1",
+      "Description": {"text": "not a string"}
+    },
+
+    "multi-dup-a": {
+      "Name": "multi-dup-a",
+      "PackageBase": "multi-dup-a",
+      "Version": "2.0-1"
+    },
+    "multi-dup-b": {
+      "Name": "multi-dup-a",
+      "PackageBase": "multi-dup-b",
+      "Version": "2.0-1"
+    },
+    "multi-unrequested-a": {
+      "Name": "multi-unrequested-a",
+      "PackageBase": "multi-unrequested-a",
+      "Version": "2.0-1"
+    },
+    "multi-unrequested-b": {
+      "Name": "multi-outside",
+      "PackageBase": "multi-outside",
+      "Version": "2.0-1"
+    },
+    "multi-present": {
+      "Name": "multi-present",
+      "PackageBase": "multi-present",
+      "Version": "2.0-1"
+    }
+  },
+  "providers": {
+    "search-valid-query": ["search-valid-entry"],
+    "search-invalid-query": ["search-invalid-entry"],
+    "virtual-one": ["provider-one"],
+    "virtual-ambiguous": ["provider-a", "provider-b"],
+    "virtual-provider-name": ["provider-invalid-name-entry"],
+    "virtual-provider-base": ["provider-invalid-base-entry"],
+    "virtual-provider-provides": ["provider-invalid-provides-entry"],
+    "virtual-provider-candidate": ["provider-candidate-search-entry"],
+    "virtual-provider-mismatch": ["provider-mismatch-search-entry"]
+  },
+  "info_results": {
+    "single-multiple-request": ["single-multiple-first", "single-multiple-second"]
+  },
+  "info_sequence_groups": {
+    "upgrade-execution-schema-error": {
+      "requests": ["upgrade-sequence-a", "upgrade-sequence-b"],
+      "result_overrides": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        {"Depends": "wrong-type"}
+      ]
+    }
+  }
+}

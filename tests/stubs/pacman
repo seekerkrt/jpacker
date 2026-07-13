@@ -1,3 +1,6 @@
 #!/bin/sh
 printf 'pacman %s\n' "$*" >> "$JPACKER_TEST_COMMAND_LOG"
+if [ "$1" = "-Qm" ] && [ -n "${JPACKER_TEST_PACMAN_QM_OUTPUT:-}" ]; then
+    printf '%s\n' "$JPACKER_TEST_PACMAN_QM_OUTPUT"
+fi
 exit "${JPACKER_TEST_PACMAN_EXIT_CODE:-1}"
