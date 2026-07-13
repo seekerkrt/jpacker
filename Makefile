@@ -31,7 +31,7 @@ SRCS      := $(wildcard $(SRC_DIR)/*.cpp)
 OBJS      := $(SRCS:$(SRC_DIR)/%.cpp=$(BUILD_DIR)/%.o)
 DEPS      := $(OBJS:.o=.d)
 
-.PHONY: all clean test-conflicts-replaces test-pacman-routing release-check install uninstall
+.PHONY: all clean test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-conflicts-replaces test-needed-contract test-pacman-routing test-pkgbuild-export test-source-selection release-check install uninstall
 
 all: $(TARGET) $(MANPAGE)
 
@@ -60,8 +60,26 @@ $(TEST_TARGET): $(SRCS) $(VERSION_FILE)
 test-conflicts-replaces: $(TEST_TARGET)
 	sh tests/test-conflicts-replaces.sh $(abspath $(TEST_TARGET))
 
+test-aur-rpc-validation: $(TEST_TARGET)
+	sh tests/test-aur-rpc-validation.sh $(abspath $(TEST_TARGET))
+
+test-cli-parser: $(TEST_TARGET)
+	sh tests/test-cli-parser.sh $(abspath $(TEST_TARGET))
+
 test-pacman-routing: $(TEST_TARGET)
 	sh tests/test-pacman-routing.sh $(abspath $(TEST_TARGET))
+
+test-build-cache-symlink: $(TEST_TARGET)
+	sh tests/test-build-cache-symlink.sh $(abspath $(TEST_TARGET))
+
+test-source-selection: $(TEST_TARGET)
+	sh tests/test-source-selection.sh $(abspath $(TEST_TARGET))
+
+test-needed-contract: $(TEST_TARGET)
+	sh tests/test-needed-contract.sh $(abspath $(TEST_TARGET))
+
+test-pkgbuild-export: $(TEST_TARGET)
+	sh tests/test-pkgbuild-export.sh $(abspath $(TEST_TARGET))
 
 release-check:
 	@echo ":: Checking release version consistency"

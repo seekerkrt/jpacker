@@ -3,6 +3,7 @@
 local -a _jpacker_operations
 local -a _jpacker_global_options
 local -a _jpacker_deps_options
+local -a _jpacker_sync_needed_option
 
 _jpacker_operations=(
     build
@@ -11,6 +12,8 @@ _jpacker_operations=(
     deps
     plan
     fetch
+    -G
+    -Gp
     add-src
     del-src
     edit-src
@@ -36,10 +39,16 @@ _jpacker_global_options=(
     --rebuild
     --cleanbuild
     --rmdeps
+    --aur
+    --repo
 )
 
 _jpacker_deps_options=(
     --recursive
+)
+
+_jpacker_sync_needed_option=(
+    --needed
 )
 
 _jpacker_complete_operations() {
@@ -52,6 +61,10 @@ _jpacker_complete_global_options() {
 
 _jpacker_complete_deps_options() {
     compadd -Q -- "${_jpacker_deps_options[@]}"
+}
+
+_jpacker_complete_sync_needed_option() {
+    compadd -Q -- "${_jpacker_sync_needed_option[@]}"
 }
 
 _jpacker_source_preferences() {
@@ -76,7 +89,7 @@ _jpacker_find_operation() {
     for (( i = 2; i < CURRENT; i++ )); do
         word=${words[i]}
         case $word in
-            --help|-h|--noedit|--nodiff|--noconfirm|--rebuild|--cleanbuild|--rmdeps)
+            --help|-h|--noedit|--nodiff|--noconfirm|--rebuild|--cleanbuild|--rmdeps|--aur|--repo)
                 ;;
             *)
                 reply=("$word")
@@ -106,12 +119,16 @@ case $operation in
             'deps-options:deps option:_jpacker_complete_deps_options' \
             'targets:package name:_message "package name"'
         ;;
+    -G|-Gp)
+        _message 'AUR package name'
+        ;;
     del-src|edit-src|revert)
         _jpacker_source_preferences
         ;;
     -S|-Syu)
         _alternative \
             'global-options:global option:_jpacker_complete_global_options' \
+            'pacman-options:pacman-compatible option:_jpacker_complete_sync_needed_option' \
             'targets:package name:_message "package name completion is not provided by jpacker"'
         ;;
     *)

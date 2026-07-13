@@ -20,10 +20,14 @@
 #include <ctime>
 #include <curl/curl.h>
 #include <cstring>
+#include <dirent.h>
 #include <filesystem>
+#include <fcntl.h>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <linux/fs.h>
+#include <limits>
 #include <map>
 #include <memory>
 #include <nlohmann/json.hpp>
@@ -34,8 +38,11 @@
 #include <stdexcept>
 #include <string>
 #include <system_error>
+#include <sys/stat.h>
+#include <sys/syscall.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <utility>
 #include <vector>
 
 using json = nlohmann::json;
@@ -55,7 +62,17 @@ const std::string ARCH_GIT_BASE = "https://gitlab.archlinux.org/archlinux/packag
 const std::string USER_AGENT = "jpacker/" + VERSION;
 const std::string CONFIG_FILE = "/etc/jpacker/jpacker.conf";
 // POLICY: source-build preference の永続化場所。意味を変える場合は互換性影響として扱う。
+#ifdef JPACKER_ENABLE_TEST_OVERRIDES
+const std::string PACKAGE_BUILD_DIR = [] {
+    const char* test_package_build_dir = std::getenv("JPACKER_TEST_PACKAGE_BUILD_DIR");
+    if(test_package_build_dir && test_package_build_dir[0] != '\0') {
+        return std::string(test_package_build_dir);
+    }
+    return std::string("/etc/jpacker/package.build");
+}();
+#else
 const std::string PACKAGE_BUILD_DIR = "/etc/jpacker/package.build";
+#endif
 
 } // namespace
 
@@ -71,9 +88,96 @@ struct AppConfig {
     std::string log_file = "";
 };
 
+enum class PackageSourceSelection {
+    Auto,
+    AurOnly,
+    RepoOnly,
+};
+
+enum class JpackerGlobalOption {
+    NoEdit,
+    NoDiff,
+    NoConfirm,
+    Rebuild,
+    CleanBuild,
+    RmDeps,
+    Aur,
+    Repo,
+};
+
+enum class SourceSelectableSyncOperation {
+    Install,
+    Search,
+    Info,
+    Unsupported,
+};
+
+enum class CliTokenRole {
+    JpackerGlobalOption,
+    Operation,
+    PacmanOption,
+    PacmanOptionValue,
+    EndOfOptions,
+    Target,
+    OpaqueOperand,
+};
+
+struct ParsedCliToken {
+    std::string  value;
+    size_t       argv_index;
+    CliTokenRole role;
+};
+
+// CLI tokenの構文上の役割と、routing用view / pacman委譲用viewを同じparse結果に束ねる。
+struct ParsedCliArguments {
+    std::string                 operation;
+    std::vector<ParsedCliToken> tokens;
+    std::vector<std::string>    ordered_pacman_args;
+    std::vector<std::string>    consumed_global_options;
+    std::vector<std::string>    flags;
+    std::vector<std::string>    targets;
+    std::vector<size_t>         target_token_indices;
+    std::optional<std::string>  pending_option;
+    bool                        end_of_options = false;
+    PackageSourceSelection      source_selection = PackageSourceSelection::Auto;
+};
+
+// pacman-compatible sync optionのうち、source buildへ意味を保って変換できるinvocation-level policy。
+struct SourceSyncOptions {
+    bool needed = false;
+};
+
+enum class PkgbuildExportMode {
+    Tree,
+    PkgbuildStdout,
+};
+
+// requested AUR package と、export 対象になる PackageBase repository を結びつける。
+struct AurExportSource {
+    std::string requested_name;
+    std::string package_base;
+    std::string git_url;
+};
+
+struct CapturedCommandResult {
+    std::string output;
+    int         exit_code = 127;
+};
+
 namespace {
 
 AppConfig g_config;
+
+const std::array<std::pair<const char*, JpackerGlobalOption>, 8> JPACKER_GLOBAL_OPTIONS = {{
+        {"--noedit", JpackerGlobalOption::NoEdit},
+        {"--nodiff", JpackerGlobalOption::NoDiff},
+        {"--noconfirm", JpackerGlobalOption::NoConfirm},
+        {"--rebuild", JpackerGlobalOption::Rebuild},
+        {"--cleanbuild", JpackerGlobalOption::CleanBuild},
+        {"--rmdeps", JpackerGlobalOption::RmDeps},
+        {"--aur", JpackerGlobalOption::Aur},
+        {"--repo", JpackerGlobalOption::Repo},
+}};
 
 } // namespace
 
@@ -81,6 +185,7 @@ struct MakepkgBuildOptions {
     bool rebuild = false;
     bool clean_build = false;
     bool rm_deps = false;
+    bool needed = false;
 };
 
 enum class PromptDefault {
@@ -111,6 +216,12 @@ struct AurPackageInfo {
     std::vector<std::string>       Replaces;
     std::string                    Maintainer;
     std::optional<long long>       OutOfDate;
+};
+
+// AUR RPC の parse/schema/semantic violation。transport failure や not-found と区別して伝播する。
+class AurRpcResponseError : public std::runtime_error {
+public:
+    using std::runtime_error::runtime_error;
 };
 
 // requested package から、実際に取得する PackageBase と git URL を結びつける型。
@@ -239,10 +350,45 @@ const int MAX_RECURSIVE_DEP_DEPTH = 16;
 // --- 内部クラス ---
 namespace {
 
+enum class CachePathRequirement {
+    Existing,
+    ExistingDirectory,
+    Missing,
+    ExistingOrMissing,
+};
+
+// canonical path だけでなく、再検証に必要な設定上の path も保持する。
+struct ValidatedCacheRoot {
+    fs::path path;
+    fs::path canonical_path;
+};
+
+struct ValidatedCachePath {
+    ValidatedCacheRoot root;
+    fs::path           path;
+    fs::path           canonical_path;
+    bool               exists = false;
+    bool               is_directory = false;
+};
+
+ValidatedCacheRoot prepare_trusted_cache_root();
+ValidatedCacheRoot require_unchanged_cache_root(const ValidatedCacheRoot& root);
+ValidatedCachePath require_trusted_cache_path(
+        const ValidatedCacheRoot& root, const fs::path& path, CachePathRequirement requirement);
+ValidatedCachePath revalidate_trusted_cache_path(
+        const ValidatedCachePath& path, CachePathRequirement requirement);
+void remove_trusted_cache_path(const ValidatedCachePath& path);
+bool rollback_trusted_cache_path(const ValidatedCachePath& path);
+std::vector<ValidatedCachePath> preflight_cache_cleanup(const ValidatedCacheRoot& root);
+
 // CLI 表示と log file 出力をまとめる薄い logger。
 class Logger {
     static std::ofstream logFile;
     static bool          initialized;
+    static bool          diagnostics_to_stderr_;
+    static std::ostream& diagnostic_stream() {
+        return diagnostics_to_stderr_ ? std::cerr : std::cout;
+    }
     static std::string   get_timestamp() {
         auto              now = std::chrono::system_clock::now();
         auto              in_time_t = std::chrono::system_clock::to_time_t(now);
@@ -252,6 +398,9 @@ class Logger {
     }
 
 public:
+    static void set_diagnostics_to_stderr() {
+        diagnostics_to_stderr_ = true;
+    }
     static void init(const fs::path& path) {
         if(path.has_parent_path() && !fs::exists(path.parent_path())) {
             fs::create_directories(path.parent_path());
@@ -262,11 +411,11 @@ public:
         initialized = logFile.is_open();
     }
     static void info(const std::string& msg) {
-        std::cout << "\033[1;32m::\033[0m " << msg << std::endl;
+        diagnostic_stream() << "\033[1;32m::\033[0m " << msg << std::endl;
         if(initialized) logFile << "[" << get_timestamp() << "] [INFO] " << msg << std::endl;
     }
     static void warn(const std::string& msg) {
-        std::cout << "\033[1;33m:: Warning:\033[0m " << msg << std::endl;
+        diagnostic_stream() << "\033[1;33m:: Warning:\033[0m " << msg << std::endl;
         if(initialized) logFile << "[" << get_timestamp() << "] [WARN] " << msg << std::endl;
     }
     static void error(const std::string& msg) {
@@ -274,12 +423,13 @@ public:
         if(initialized) logFile << "[" << get_timestamp() << "] [ERROR] " << msg << std::endl;
     }
     static void raw_cmd(const std::string& cmd) {
-        std::cout << "\033[1;33m::\033[0m Running: " << cmd << std::endl;
+        diagnostic_stream() << "\033[1;33m::\033[0m Running: " << cmd << std::endl;
         if(initialized) logFile << "[" << get_timestamp() << "] [EXEC] " << cmd << std::endl;
     }
 };
 std::ofstream Logger::logFile;
 bool          Logger::initialized = false;
+bool          Logger::diagnostics_to_stderr_ = false;
 
 // libcurl の global init/cleanup を 1 実行の寿命に束ねる RAII guard。
 class CurlGlobal {
@@ -310,13 +460,22 @@ public:
 };
 
 // build/fetch 中の current directory 変更を、scope exit で元に戻す guard。
+// POLICY(#175): cache safety helper が検証した existing directory だけを受け取る。
 class WorkDirGuard {
     fs::path original_path_;
 
-public:
     explicit WorkDirGuard(const fs::path& target_path) : original_path_(fs::current_path()) {
-        if(!fs::exists(target_path)) fs::create_directories(target_path);
         fs::current_path(target_path);
+    }
+
+public:
+    explicit WorkDirGuard(const ValidatedCacheRoot& target)
+        : WorkDirGuard(require_unchanged_cache_root(target).canonical_path) {
+    }
+    explicit WorkDirGuard(const ValidatedCachePath& target)
+        : WorkDirGuard(revalidate_trusted_cache_path(
+                               target, CachePathRequirement::ExistingDirectory)
+                               .canonical_path) {
     }
     ~WorkDirGuard() {
         try {
@@ -328,23 +487,427 @@ public:
 
 // 途中失敗した clone/build 用 directory を rollback するための guard。
 class DirCleanupGuard {
-    fs::path path_;
-    bool     committed_ = false;
+    ValidatedCachePath path_;
+    bool               committed_ = false;
 
 public:
-    explicit DirCleanupGuard(const fs::path& path) : path_(path) {
+    explicit DirCleanupGuard(const ValidatedCachePath& path) : path_(path) {
     }
     void commit() {
         committed_ = true;
     }
     ~DirCleanupGuard() {
-        if(!committed_ && fs::exists(path_)) {
-            // LANDMINE: 途中失敗した新規 clone/build directory だけを rollback する前提。
-            Logger::warn("Rolling back: cleaning up " + path_.string());
-            try {
-                fs::remove_all(path_);
-            } catch(...) {
+        if(committed_) return;
+
+        // LANDMINE(#175): destructor では、clone 前に検証した path を再検証できた場合だけ rollback する。
+        try {
+            if(rollback_trusted_cache_path(path_)) {
+                Logger::warn("Rolled back failed clone: cleaned up " + path_.path.string());
             }
+        } catch(const std::exception& e) {
+            Logger::warn("Refusing unsafe clone rollback for " + path_.path.string() + ": " + e.what());
+        } catch(...) {
+            Logger::warn("Refusing unsafe clone rollback for " + path_.path.string() + ": unknown error");
+        }
+    }
+};
+
+class OwnedFileDescriptor {
+    int descriptor_ = -1;
+
+public:
+    explicit OwnedFileDescriptor(int descriptor) : descriptor_(descriptor) {
+    }
+    OwnedFileDescriptor(const OwnedFileDescriptor&) = delete;
+    OwnedFileDescriptor& operator=(const OwnedFileDescriptor&) = delete;
+    ~OwnedFileDescriptor() {
+        if(descriptor_ >= 0) close(descriptor_);
+    }
+    int get() const {
+        return descriptor_;
+    }
+    int release() {
+        return std::exchange(descriptor_, -1);
+    }
+};
+
+struct DirectoryIdentity {
+    dev_t device;
+    ino_t inode;
+};
+
+DirectoryIdentity require_directory_identity(int descriptor, const std::string& context) {
+    struct stat status {};
+    if(fstat(descriptor, &status) != 0) {
+        throw std::runtime_error("Failed to inspect " + context + ": " + std::strerror(errno));
+    }
+    if(!S_ISDIR(status.st_mode)) {
+        throw std::runtime_error(context + " is not a directory.");
+    }
+    return DirectoryIdentity{status.st_dev, status.st_ino};
+}
+
+bool directory_identity_matches(
+        const DirectoryIdentity& expected, const struct stat& actual) {
+    return S_ISDIR(actual.st_mode) && expected.device == actual.st_dev &&
+           expected.inode == actual.st_ino;
+}
+
+bool filesystem_identity_matches(
+        const struct stat& expected, const struct stat& actual) {
+    return expected.st_dev == actual.st_dev && expected.st_ino == actual.st_ino &&
+           (expected.st_mode & S_IFMT) == (actual.st_mode & S_IFMT);
+}
+
+fs::path proc_file_descriptor_path(int descriptor) {
+    return fs::path("/proc") / std::to_string(getpid()) / "fd" /
+           std::to_string(descriptor);
+}
+
+class AnchoredDirectory {
+    fs::path            display_path_;
+    OwnedFileDescriptor descriptor_;
+    DirectoryIdentity   identity_;
+
+    AnchoredDirectory(
+            fs::path display_path, int descriptor, DirectoryIdentity identity)
+        : display_path_(std::move(display_path)), descriptor_(descriptor), identity_(identity) {
+    }
+
+public:
+    AnchoredDirectory(const AnchoredDirectory&) = delete;
+    AnchoredDirectory& operator=(const AnchoredDirectory&) = delete;
+
+    static AnchoredDirectory open_path(
+            const fs::path& path, const std::string& context) {
+        int descriptor = open(path.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+        if(descriptor < 0) {
+            throw std::runtime_error(
+                    "Failed to open " + context + " " + path.string() + ": " +
+                    std::strerror(errno));
+        }
+        OwnedFileDescriptor opened_directory(descriptor);
+        DirectoryIdentity identity = require_directory_identity(descriptor, context);
+
+        struct stat named_status {};
+        if(fstatat(AT_FDCWD, path.c_str(), &named_status, AT_SYMLINK_NOFOLLOW) != 0) {
+            throw std::runtime_error(
+                    "Failed to revalidate " + context + " " + path.string() + ": " +
+                    std::strerror(errno));
+        }
+        if(!directory_identity_matches(identity, named_status)) {
+            throw std::runtime_error(
+                    "Refusing changed " + context + " path: " + path.string());
+        }
+
+        return AnchoredDirectory(path, opened_directory.release(), identity);
+    }
+
+    static AnchoredDirectory adopt_current_directory(
+            fs::path display_path, int descriptor, DirectoryIdentity identity) {
+        return AnchoredDirectory(std::move(display_path), descriptor, identity);
+    }
+
+    int descriptor() const {
+        return descriptor_.get();
+    }
+
+    const DirectoryIdentity& identity() const {
+        return identity_;
+    }
+
+    const fs::path& display_path() const {
+        return display_path_;
+    }
+};
+
+void remove_directory_contents_at(
+        int directory_descriptor, const fs::path& display_path) {
+    int scan_descriptor = openat(
+            directory_descriptor, ".",
+            O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+    if(scan_descriptor < 0) {
+        throw std::runtime_error(
+                "Failed to scan temporary directory " + display_path.string() + ": " +
+                std::strerror(errno));
+    }
+
+    DIR* raw_stream = fdopendir(scan_descriptor);
+    if(!raw_stream) {
+        int error = errno;
+        close(scan_descriptor);
+        throw std::runtime_error(
+                "Failed to read temporary directory " + display_path.string() + ": " +
+                std::strerror(error));
+    }
+    std::unique_ptr<DIR, int (*)(DIR*)> stream(raw_stream, closedir);
+
+    while(true) {
+        errno = 0;
+        dirent* entry = readdir(stream.get());
+        if(!entry) {
+            if(errno != 0) {
+                throw std::runtime_error(
+                        "Failed while reading temporary directory " +
+                        display_path.string() + ": " + std::strerror(errno));
+            }
+            break;
+        }
+
+        std::string leaf_name = entry->d_name;
+        if(leaf_name == "." || leaf_name == "..") continue;
+        fs::path entry_display_path = display_path / leaf_name;
+
+        struct stat observed_status {};
+        if(fstatat(
+                   directory_descriptor, leaf_name.c_str(), &observed_status,
+                   AT_SYMLINK_NOFOLLOW) != 0) {
+            if(errno == ENOENT) continue;
+            throw std::runtime_error(
+                    "Failed to inspect temporary entry " +
+                    entry_display_path.string() + ": " + std::strerror(errno));
+        }
+
+        if(S_ISDIR(observed_status.st_mode)) {
+            int child_descriptor = openat(
+                    directory_descriptor, leaf_name.c_str(),
+                    O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+            if(child_descriptor < 0) {
+                throw std::runtime_error(
+                        "Refusing changed temporary directory entry " +
+                        entry_display_path.string() + ": " + std::strerror(errno));
+            }
+            OwnedFileDescriptor child(child_descriptor);
+
+            struct stat opened_status {};
+            if(fstat(child.get(), &opened_status) != 0 ||
+               !filesystem_identity_matches(observed_status, opened_status)) {
+                throw std::runtime_error(
+                        "Refusing changed temporary directory entry: " +
+                        entry_display_path.string());
+            }
+
+            remove_directory_contents_at(child.get(), entry_display_path);
+
+            struct stat final_status {};
+            if(fstatat(
+                       directory_descriptor, leaf_name.c_str(), &final_status,
+                       AT_SYMLINK_NOFOLLOW) != 0 ||
+               !filesystem_identity_matches(opened_status, final_status)) {
+                throw std::runtime_error(
+                        "Refusing changed temporary directory entry: " +
+                        entry_display_path.string());
+            }
+            if(unlinkat(directory_descriptor, leaf_name.c_str(), AT_REMOVEDIR) != 0) {
+                throw std::runtime_error(
+                        "Failed to remove temporary directory entry " +
+                        entry_display_path.string() + ": " + std::strerror(errno));
+            }
+            continue;
+        }
+
+        struct stat final_status {};
+        if(fstatat(
+                   directory_descriptor, leaf_name.c_str(), &final_status,
+                   AT_SYMLINK_NOFOLLOW) != 0 ||
+           !filesystem_identity_matches(observed_status, final_status)) {
+            throw std::runtime_error(
+                    "Refusing changed temporary entry: " +
+                    entry_display_path.string());
+        }
+        if(unlinkat(directory_descriptor, leaf_name.c_str(), 0) != 0) {
+            throw std::runtime_error(
+                    "Failed to remove temporary entry " + entry_display_path.string() +
+                    ": " + std::strerror(errno));
+        }
+    }
+}
+
+// cache とは独立した、一回の export だけが所有する secure temporary directory。
+// POLICY(#167): 保存identityとの不一致を観測した場合は、named pathのcleanup/publishを拒否する。
+class TemporaryDirectoryGuard {
+    OwnedFileDescriptor parent_descriptor_;
+    OwnedFileDescriptor directory_descriptor_;
+    DirectoryIdentity   parent_identity_;
+    DirectoryIdentity   directory_identity_;
+    std::string         leaf_name_;
+    fs::path            display_path_;
+    bool                owns_path_ = true;
+
+    TemporaryDirectoryGuard(
+            int parent_descriptor, int directory_descriptor,
+            DirectoryIdentity parent_identity, DirectoryIdentity directory_identity,
+            std::string leaf_name, fs::path display_path)
+        : parent_descriptor_(parent_descriptor), directory_descriptor_(directory_descriptor),
+          parent_identity_(parent_identity), directory_identity_(directory_identity),
+          leaf_name_(std::move(leaf_name)),
+          display_path_(std::move(display_path)) {
+    }
+
+public:
+    TemporaryDirectoryGuard(const TemporaryDirectoryGuard&) = delete;
+    TemporaryDirectoryGuard& operator=(const TemporaryDirectoryGuard&) = delete;
+
+    static TemporaryDirectoryGuard create(const AnchoredDirectory& parent) {
+        int retained_parent_descriptor =
+                fcntl(parent.descriptor(), F_DUPFD_CLOEXEC, 0);
+        if(retained_parent_descriptor < 0) {
+            throw std::runtime_error(
+                    "Failed to retain temporary directory parent " +
+                    parent.display_path().string() + ": " + std::strerror(errno));
+        }
+        OwnedFileDescriptor retained_parent(retained_parent_descriptor);
+        DirectoryIdentity retained_parent_identity = require_directory_identity(
+                retained_parent.get(), "temporary directory parent");
+        if(retained_parent_identity.device != parent.identity().device ||
+           retained_parent_identity.inode != parent.identity().inode) {
+            throw std::runtime_error(
+                    "Temporary directory parent changed identity: " +
+                    parent.display_path().string());
+        }
+
+        std::string template_path =
+                (proc_file_descriptor_path(retained_parent.get()) /
+                 ".jpacker-pkgbuild-XXXXXX")
+                        .string();
+        std::vector<char> path_buffer(template_path.begin(), template_path.end());
+        path_buffer.push_back('\0');
+
+        char* created_path = mkdtemp(path_buffer.data());
+        if(!created_path) {
+            throw std::runtime_error(
+                    "Failed to create temporary directory under " +
+                    parent.display_path().string() + ": " + std::strerror(errno));
+        }
+
+        std::string leaf_name = fs::path(created_path).filename().string();
+        struct stat created_status {};
+        if(fstatat(
+                   retained_parent.get(), leaf_name.c_str(), &created_status,
+                   AT_SYMLINK_NOFOLLOW) != 0 ||
+           !S_ISDIR(created_status.st_mode)) {
+            throw std::runtime_error(
+                    "Failed to inspect created temporary directory " +
+                    (parent.display_path() / leaf_name).string());
+        }
+
+        int directory_descriptor = openat(
+                retained_parent.get(), leaf_name.c_str(),
+                O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+        if(directory_descriptor < 0) {
+            int open_error = errno;
+            struct stat current_status {};
+            if(fstatat(
+                       retained_parent.get(), leaf_name.c_str(), &current_status,
+                       AT_SYMLINK_NOFOLLOW) == 0 &&
+               filesystem_identity_matches(created_status, current_status)) {
+                unlinkat(retained_parent.get(), leaf_name.c_str(), AT_REMOVEDIR);
+            }
+            throw std::runtime_error(
+                    "Failed to open temporary directory " +
+                    (parent.display_path() / leaf_name).string() + ": " +
+                    std::strerror(open_error));
+        }
+        OwnedFileDescriptor opened_directory(directory_descriptor);
+        DirectoryIdentity directory_identity = require_directory_identity(
+                directory_descriptor, "temporary export directory");
+
+        struct stat named_status {};
+        if(fstatat(
+                   retained_parent.get(), leaf_name.c_str(), &named_status,
+                   AT_SYMLINK_NOFOLLOW) != 0 ||
+           !directory_identity_matches(directory_identity, named_status) ||
+           !filesystem_identity_matches(created_status, named_status)) {
+            throw std::runtime_error(
+                    "Refusing changed temporary directory path: " +
+                    (parent.display_path() / leaf_name).string());
+        }
+
+        return TemporaryDirectoryGuard(
+                retained_parent.release(), opened_directory.release(),
+                retained_parent_identity, directory_identity, leaf_name,
+                parent.display_path() / leaf_name);
+    }
+
+    int parent_descriptor() const {
+        return parent_descriptor_.get();
+    }
+
+    int directory_descriptor() const {
+        return directory_descriptor_.get();
+    }
+
+    const std::string& leaf_name() const {
+        return leaf_name_;
+    }
+
+    const fs::path& display_path() const {
+        return display_path_;
+    }
+
+    fs::path anchored_path() const {
+        return proc_file_descriptor_path(directory_descriptor_.get());
+    }
+
+    void require_owned_identity() const {
+        DirectoryIdentity parent_identity = require_directory_identity(
+                parent_descriptor_.get(), "temporary directory parent");
+        if(parent_identity.device != parent_identity_.device ||
+           parent_identity.inode != parent_identity_.inode) {
+            throw std::runtime_error(
+                    "Temporary directory parent changed identity: " +
+                    display_path_.parent_path().string());
+        }
+
+        DirectoryIdentity open_identity = require_directory_identity(
+                directory_descriptor_.get(), "temporary export directory");
+        if(open_identity.device != directory_identity_.device ||
+           open_identity.inode != directory_identity_.inode) {
+            throw std::runtime_error(
+                    "Temporary export directory descriptor changed identity: " +
+                    display_path_.string());
+        }
+
+        struct stat named_status {};
+        if(fstatat(
+                   parent_descriptor_.get(), leaf_name_.c_str(), &named_status,
+                   AT_SYMLINK_NOFOLLOW) != 0 ||
+           !directory_identity_matches(directory_identity_, named_status)) {
+            throw std::runtime_error(
+                    "Refusing changed temporary directory path: " +
+                    display_path_.string());
+        }
+    }
+
+    void release() {
+        owns_path_ = false;
+    }
+
+    void cleanup() {
+        if(!owns_path_) return;
+        // LANDMINE(#167): identity mismatchを観測した場合はreplacementを消さずartifactを残す。
+        require_owned_identity();
+        remove_directory_contents_at(directory_descriptor_.get(), display_path_);
+        require_owned_identity();
+        if(unlinkat(
+                   parent_descriptor_.get(), leaf_name_.c_str(),
+                   AT_REMOVEDIR) != 0) {
+            throw std::runtime_error(
+                    "Failed to remove temporary directory " + display_path_.string() +
+                    ": " + std::strerror(errno));
+        }
+        owns_path_ = false;
+    }
+
+    ~TemporaryDirectoryGuard() {
+        if(!owns_path_) return;
+        try {
+            cleanup();
+        } catch(const std::exception& e) {
+            Logger::warn(e.what());
+        } catch(...) {
+            Logger::warn(
+                    "Refusing unsafe temporary directory cleanup: unknown error");
         }
     }
 };
@@ -353,9 +916,11 @@ public:
 class AurClient {
 public:
     static std::string get_url(const std::string& url);
-    static std::string search_query(const std::string& query);
+    static std::string get_url_strict(const std::string& url);
+    static std::vector<AurPackageInfo> search(const std::string& query);
     static std::vector<std::string> search_names_by_provides(const std::string& provided_name);
     static std::optional<AurPackageInfo> info(const std::string& pkg_name);
+    static std::optional<AurPackageInfo> info_strict(const std::string& pkg_name);
     static std::map<std::string, AurPackageInfo> info_many(const std::vector<std::string>& pkg_names);
 };
 
@@ -367,6 +932,18 @@ public:
 int run_jpacker(int argc, char* argv[]);
 void print_help();
 bool handle_info_only_option(int argc, char* argv[]);
+bool is_jpacker_global_option(const std::string& arg);
+bool argv_requests_pkgbuild_export_diagnostics(int argc, char* argv[]);
+bool apply_jpacker_global_option(const std::string& arg, ParsedCliArguments& parsed);
+std::optional<ParsedCliArguments> parse_cli_arguments(int argc, char* argv[]);
+std::optional<PkgbuildExportMode> pkgbuild_export_mode(const ParsedCliArguments& parsed);
+bool validate_pkgbuild_export_invocation(const ParsedCliArguments& parsed);
+bool parsed_has_semantic_pacman_option(
+        const ParsedCliArguments& parsed, const std::string& option);
+SourceSyncOptions parse_source_sync_options(const ParsedCliArguments& parsed);
+std::string package_source_selection_option(PackageSourceSelection selection);
+SourceSelectableSyncOperation source_selectable_sync_operation(const ParsedCliArguments& parsed);
+bool validate_source_selection_operation(const ParsedCliArguments& parsed);
 
 // 文字列 / path / config
 std::string trim(const std::string& str);
@@ -385,12 +962,15 @@ fs::path get_cache_dir();
 void load_config();
 
 // コマンド実行 / shell引数
+CapturedCommandResult capture_command_output(const char* cmd);
 std::string exec_command(const char* cmd);
 int command_status(const std::string& cmd);
 int run_command(const std::string& cmd);
 std::string join_shell_args(const std::vector<std::string>& args);
 std::vector<std::string> pacman_args_with_global_options(std::vector<std::string> args);
 std::string join_pacman_args(const std::vector<std::string>& args);
+std::vector<std::string> ordered_pacman_args_excluding_targets(
+        const ParsedCliArguments& parsed, const std::set<size_t>& excluded_target_token_indices);
 std::string makepkg_install_command(const MakepkgBuildOptions& options);
 std::string build_editor_command(const std::string& editor, const fs::path& target);
 
@@ -400,8 +980,9 @@ bool pacman_operation_requests_refresh(
         const std::string& operation, const std::vector<std::string>& flags);
 bool validate_optionless_jpacker_operation(const std::string& operation, const std::vector<std::string>& flags);
 std::optional<std::string> unsupported_source_sync_option(
-        const std::string& operation, const std::vector<std::string>& flags);
+        const ParsedCliArguments& parsed);
 bool is_valid_package_name(const std::string& name);
+bool is_valid_aur_export_identifier(const std::string& name);
 ParsedDependency parse_dependency_string(const std::string& dependency);
 std::string dependency_package_name(const std::string& dependency);
 std::string provided_dependency_name(const std::string& provided);
@@ -410,6 +991,7 @@ std::string dependency_constraint_unresolved_reason(const std::string& dependenc
 std::string dependency_display_with_constraint_note(const std::string& display, const std::string& dependency);
 void warn_unverified_version_constraint(const std::string& dependency);
 void require_valid_package_name(const std::string& name);
+void require_valid_aur_export_target(const std::string& target);
 bool is_force_source(const std::string& pkg_name);
 std::string get_package_env(const std::string& pkg_name);
 std::string get_git_branch();
@@ -438,7 +1020,8 @@ std::set<std::string> get_foreign_package_names();
 bool aur_version_is_newer(const std::string& aur_version, const std::string& installed_version);
 bool has_local_package_artifact(const fs::path& pkg_dir);
 bool has_local_srcdir(const fs::path& pkg_dir);
-MakepkgBuildOptions resolve_makepkg_build_options(const fs::path& pkg_dir);
+MakepkgBuildOptions resolve_makepkg_build_options(
+        const fs::path& pkg_dir, const SourceSyncOptions& source_sync_options);
 
 // prompt / ユーザー確認
 bool ask_user(const std::string& question, PromptDefault default_answer);
@@ -450,11 +1033,9 @@ std::string aur_rpc_info_url();
 size_t WriteCallback(void* contents, size_t size, size_t nmemb, void* userp);
 json parse_aur_rpc_response(const std::string& response, const std::string& context);
 const json& aur_rpc_results_array(const json& response, const std::string& context);
-std::string json_string_or_empty(const json& obj, const std::string& key);
-std::vector<std::string> json_string_array_or_empty(const json& obj, const std::string& key);
-std::optional<long long> json_optional_long_long(const json& obj, const std::string& key);
-AurPackageInfo parse_aur_package_info(const json& pkg);
-AurPackageInfo parse_aur_rpc_package_info(const json& pkg, const std::string& context);
+AurPackageInfo parse_aur_rpc_package_info(const json& pkg, const std::string& context, size_t result_index);
+std::vector<AurPackageInfo> parse_aur_rpc_package_results(
+        const std::string& response, const std::string& context);
 
 // AUR provider / build source解決
 bool aur_package_provides(const AurPackageInfo& info, const std::string& dependency_name);
@@ -465,7 +1046,8 @@ void require_supported_build_source_install_target(const PackageBuildSource& sou
 void require_executable_build_source_plan(const PackageBuildSource& source);
 
 // AUR検索 / info表示
-bool search_aur(const std::vector<std::string>& keywords);
+void preflight_aur_search_schema(const std::vector<std::string>& keywords);
+bool search_aur(const std::vector<std::string>& keywords, bool query_installed_state = true);
 std::string join_display_values(const std::vector<std::string>& values);
 std::string join_comma_display_values(const std::vector<std::string>& values);
 bool is_orphaned(const AurPackageInfo& pkg);
@@ -478,7 +1060,7 @@ void print_aur_info(const AurPackageInfo& pkg);
 void add_dependency(std::vector<std::string>& dependencies, std::set<std::string>& seen, const std::string& dependency);
 std::vector<std::string> collect_build_dependencies(const AurPackageInfo& pkg);
 void add_classified_dependency(std::vector<std::string>& dependencies, const std::string& dependency, const std::string& package_name);
-std::string package_base_or_name(const AurPackageInfo& info);
+std::string package_base_name(const AurPackageInfo& info);
 bool has_distinct_package_base(const AurPackageInfo& info);
 void add_classified_aur_dependency(std::vector<std::string>& dependencies, const std::string& dependency, const AurPackageInfo& info);
 std::string provided_dependency_display(const std::string& dependency, const ProvidedDependency& provider);
@@ -522,22 +1104,53 @@ void print_metadata_risk_group(const std::vector<BuildPlanMetadataRisk>& risks);
 std::string metadata_risk_summary(const BuildPlanMetadataRisk& risk);
 std::string join_metadata_risk_summaries(const std::vector<BuildPlanMetadataRisk>& risks);
 std::string aur_git_url_for_package_base(const std::string& package_base);
+AurExportSource resolve_aur_export_source(const std::string& target);
+AnchoredDirectory require_export_current_directory();
+AnchoredDirectory require_export_temporary_parent();
+fs::path require_missing_export_destination(
+        const AnchoredDirectory& current_directory, const std::string& package_base);
+void validate_aur_export_checkout(
+        const AurExportSource& source, const TemporaryDirectoryGuard& checkout);
+void clone_and_validate_aur_export(
+        const AurExportSource& source, const TemporaryDirectoryGuard& checkout);
+std::string read_pkgbuild_bytes(const TemporaryDirectoryGuard& checkout);
+void rename_export_without_replacement(
+        TemporaryDirectoryGuard& temporary_directory,
+        const AnchoredDirectory& destination_parent, const std::string& destination_name,
+        const fs::path& destination_display_path);
 void print_fetch_plan(const BuildPlan& plan);
 void fetch_aur_package_base(const std::string& package_base);
 
 // source build / AUR install
-void build_from_git(const std::string& pkg_name, const std::string& clone_name, const std::string& git_url, const std::string& custom_env, bool only_if_updated);
+void build_from_git(
+        const std::string& pkg_name, const std::string& clone_name, const std::string& git_url,
+        const std::string& custom_env, bool only_if_updated,
+        const SourceSyncOptions& source_sync_options);
+void require_valid_aur_package_target(const std::string& target);
 void require_executable_sync_install_target(const std::string& pkg_name);
-void install_smart_source(const std::string& pkg_name, bool only_if_updated);
-void install_aur_build_plan(const std::string& target);
+void install_smart_source(
+        const std::string& pkg_name, bool only_if_updated,
+        const SourceSyncOptions& source_sync_options);
+void execute_aur_build_plan(
+        const BuildPlan& plan, bool use_source_build_preferences,
+        const SourceSyncOptions& source_sync_options);
+void install_aur_build_plan(
+        const std::string& target, const SourceSyncOptions& source_sync_options);
+void preflight_upgrade_source_metadata();
 
 // コマンド処理
 int cmd_deps(const std::vector<std::string>& targets, const std::vector<std::string>& flags);
 int cmd_plan(const std::vector<std::string>& targets, const std::vector<std::string>& flags);
 int cmd_fetch(const std::vector<std::string>& targets, const std::vector<std::string>& flags);
+int cmd_export_pkgbuild_tree(const std::string& target);
+int cmd_print_pkgbuild(const std::string& target);
+int cmd_sync_search(
+        const ParsedCliArguments& parsed, bool use_sudo, PackageSourceSelection source_selection);
 int cmd_sync_info(
-        const std::vector<std::string>& args, const std::vector<std::string>& flags,
-        const std::vector<std::string>& targets, bool use_sudo);
+        const ParsedCliArguments& parsed, bool use_sudo, PackageSourceSelection source_selection);
+int cmd_sync_install(
+        const ParsedCliArguments& parsed, bool is_sys_upgrade,
+        PackageSourceSelection source_selection);
 int cmd_query_foreign_updates();
 int cmd_build(const std::vector<std::string>& args);
 int cmd_add_src(const std::vector<std::string>& args);
@@ -550,38 +1163,85 @@ int cmd_upgrade();
 
 // --- CLI 入口 ---
 int run_jpacker(int argc, char* argv[]) {
-    if(geteuid() == 0) {
-        if(handle_info_only_option(argc, argv)) {
-            return 0;
-        }
+    if(handle_info_only_option(argc, argv)) return 0;
 
+    // POLICY(#167): parser/root-check failureも -Gp のmachine-readable stdoutへ混ぜない。
+    if(argv_requests_pkgbuild_export_diagnostics(argc, argv)) {
+        Logger::set_diagnostics_to_stderr();
+    }
+
+    if(geteuid() == 0) {
         Logger::error("Do not run jpacker as root or with sudo.");
         Logger::error("Run jpacker as a normal user; jpacker will invoke sudo/pacman when needed.");
         return 1;
     }
 
-    for(int i = 1; i < argc; ++i) {
-        std::string arg = argv[i];
+    if(argc < 2) {
+        print_help();
+        return 1;
+    }
 
-        if(arg == "--noedit" || arg == "--nodiff" || arg == "--noconfirm" || arg == "--rebuild" ||
-           arg == "--cleanbuild" || arg == "--rmdeps") {
-            continue;
+    // Config is read-only here; CLI parsing remains before default cache/log creation.
+    try {
+        load_config();
+    } catch(const std::exception& e) {
+        std::cerr << "Warning: Failed to load config: " << e.what() << std::endl;
+    } catch(...) {
+        std::cerr << "Warning: Failed to load config: unknown error." << std::endl;
+    }
+
+    std::optional<ParsedCliArguments> parsed_result = parse_cli_arguments(argc, argv);
+    if(!parsed_result.has_value()) return 1;
+
+    const ParsedCliArguments&        parsed = parsed_result.value();
+    std::optional<PkgbuildExportMode> export_mode = pkgbuild_export_mode(parsed);
+    if(export_mode.has_value()) {
+        // POLICY(#167): export/print は cache log 初期化より前に分岐し、内部 build cache を作らない。
+        Logger::set_diagnostics_to_stderr();
+        if(!validate_pkgbuild_export_invocation(parsed)) return 1;
+
+        CurlGlobal curl_global;
+        try {
+            if(export_mode.value() == PkgbuildExportMode::Tree) {
+                return cmd_export_pkgbuild_tree(parsed.targets.front());
+            }
+            return cmd_print_pkgbuild(parsed.targets.front());
+        } catch(const std::exception& e) {
+            Logger::error(e.what());
+            return 1;
         }
-        if(arg == "-h" || arg == "--help") {
-            print_help();
-            return 0;
-        }
-        if(arg == "-V" || arg == "--version") {
-            std::cout << "jpacker v" << VERSION << std::endl;
-            return 0;
-        }
-        break;
+    }
+
+    // POLICY(#168): selector conflict / scope errors must stop before the default log creates the cache root.
+    if(!validate_source_selection_operation(parsed)) return 1;
+
+    const std::vector<std::string> optionless_operations = {
+            "build", "upgrade", "clean", "add-src", "del-src", "revert", "edit-src", "list-src"};
+    if(std::find(optionless_operations.begin(), optionless_operations.end(), parsed.operation) !=
+                       optionless_operations.end() &&
+       !validate_optionless_jpacker_operation(parsed.operation, parsed.flags)) {
+        // POLICY(#169): unsupported custom-operation options must stop before cache or source mutation.
+        return 1;
     }
 
     CurlGlobal curl_global;
     try {
-        load_config();
-        fs::path log_path = g_config.log_file.empty() ? (get_cache_dir() / "jpacker.log") : expand_path(g_config.log_file);
+        fs::path log_path;
+        if(g_config.log_file.empty()) {
+            // POLICY(#175): default log must not create or open a file through an unsafe cache root/symlink.
+            ValidatedCacheRoot cache_root = prepare_trusted_cache_root();
+            ValidatedCachePath cache_log = require_trusted_cache_path(
+                    cache_root, cache_root.path / "jpacker.log",
+                    CachePathRequirement::ExistingOrMissing);
+            if(cache_log.exists && !fs::is_regular_file(cache_log.canonical_path)) {
+                throw std::runtime_error(
+                        "Unsafe jpacker cache log path " + cache_log.path.string() +
+                        ": expected a regular file.");
+            }
+            log_path = cache_log.canonical_path;
+        } else {
+            log_path = expand_path(g_config.log_file);
+        }
         Logger::init(log_path);
         Logger::info("Started jpacker v" + VERSION);
     } catch(const std::exception& e) {
@@ -590,116 +1250,12 @@ int run_jpacker(int argc, char* argv[]) {
         std::cerr << "Warning: Failed to initialize log: unknown error." << std::endl;
     }
 
-    if(argc < 2) {
-        print_help();
-        return 1;
-    }
-    int operation_index = 1;
-    for(; operation_index < argc; ++operation_index) {
-        std::string arg = argv[operation_index];
-        if(arg == "--noedit") {
-            g_config.no_edit = true;
-            continue;
-        }
-        if(arg == "--nodiff") {
-            g_config.no_diff = true;
-            continue;
-        }
-        if(arg == "--noconfirm") {
-            g_config.no_confirm = true;
-            continue;
-        }
-        if(arg == "--rebuild") {
-            g_config.rebuild = true;
-            continue;
-        }
-        if(arg == "--cleanbuild") {
-            g_config.clean_build = true;
-            continue;
-        }
-        if(arg == "--rmdeps") {
-            g_config.rm_deps = true;
-            continue;
-        }
-        break;
-    }
-    if(operation_index >= argc) {
-        print_help();
-        return 1;
-    }
-    const std::string first_arg = argv[operation_index];
-    if(first_arg == "-h" || first_arg == "--help") {
-        print_help();
-        return 0;
-    }
-
-    std::vector<std::string> args, targets, flags;
-    const std::string&       operation = first_arg;
-    flags.push_back(operation);
-    bool                     option_value_expected = false;
-    bool                     end_of_options = false;
-
-    for(int i = 1; i < argc; ++i) {
-        std::string arg = argv[i];
-        if(arg.empty()) {
-            Logger::error("Empty arguments are not supported.");
-            return 1;
-        }
-        if(arg == "--noedit") {
-            g_config.no_edit = true;
-            continue;
-        }
-        if(arg == "--nodiff") {
-            g_config.no_diff = true;
-            continue;
-        }
-        if(arg == "--noconfirm") {
-            g_config.no_confirm = true;
-            continue;
-        }
-        if(arg == "--rebuild") {
-            g_config.rebuild = true;
-            continue;
-        }
-        if(arg == "--cleanbuild") {
-            g_config.clean_build = true;
-            continue;
-        }
-        if(arg == "--rmdeps") {
-            g_config.rm_deps = true;
-            continue;
-        }
-        if(i > operation_index) {
-            if(option_value_expected) {
-                flags.push_back(arg);
-                option_value_expected = false;
-            } else if(end_of_options) {
-                targets.push_back(arg);
-            } else if(arg == "--") {
-                flags.push_back(arg);
-                end_of_options = true;
-            } else if(!arg.empty() && arg[0] == '-') {
-                flags.push_back(arg);
-                option_value_expected = pacman_option_takes_value(arg);
-            } else {
-                targets.push_back(arg);
-            }
-        }
-        args.push_back(arg);
-    }
-    if(option_value_expected) {
-        Logger::error("Missing value for option " + flags.back());
-        return 1;
-    }
+    const std::string&               operation = parsed.operation;
+    const std::vector<std::string>&  args = parsed.ordered_pacman_args;
+    const std::vector<std::string>&  targets = parsed.targets;
+    const std::vector<std::string>&  flags = parsed.flags;
 
     try {
-        const std::vector<std::string> optionless_operations = {
-                "build", "upgrade", "clean", "add-src", "del-src", "revert", "edit-src", "list-src"};
-        if(std::find(optionless_operations.begin(), optionless_operations.end(), operation) != optionless_operations.end() &&
-           !validate_optionless_jpacker_operation(operation, flags)) {
-            return 1;
-        }
-
         if(operation == "build") {
             return cmd_build(targets);
         }
@@ -744,8 +1300,13 @@ int run_jpacker(int argc, char* argv[]) {
         bool is_sync = operation.starts_with("-S");
         bool is_query = operation.starts_with("-Q");
         bool is_foreign_updates = (is_query && operation.find('u') != std::string::npos && operation.find('a') != std::string::npos);
-        bool is_search = (is_sync && operation.find('s') != std::string::npos);
-        bool is_info = (is_sync && operation.find('i') != std::string::npos);
+        SourceSelectableSyncOperation selected_sync_operation = source_selectable_sync_operation(parsed);
+        bool is_search = parsed.source_selection == PackageSourceSelection::Auto
+                                 ? (is_sync && operation.find('s') != std::string::npos)
+                                 : selected_sync_operation == SourceSelectableSyncOperation::Search;
+        bool is_info = parsed.source_selection == PackageSourceSelection::Auto
+                               ? (is_sync && operation.find('i') != std::string::npos)
+                               : selected_sync_operation == SourceSelectableSyncOperation::Info;
         bool is_clean = (is_sync && operation.find('c') != std::string::npos);
         bool is_sys_upgrade = (is_sync && (operation.find('u') != std::string::npos || operation.find('y') != std::string::npos));
         bool needs_sudo =
@@ -759,14 +1320,10 @@ int run_jpacker(int argc, char* argv[]) {
                 Logger::error("Missing search query.");
                 return 1;
             }
-            std::string pacman_prefix = requests_refresh ? "sudo pacman " : "pacman ";
-            int         pacman_ret = run_command(pacman_prefix + join_pacman_args(args));
-            Logger::info("Searching AUR...");
-            bool aur_found = search_aur(targets);
-            return (pacman_ret == 0 || aur_found) ? 0 : 1;
+            return cmd_sync_search(parsed, requests_refresh, parsed.source_selection);
         }
         if(is_info) {
-            if(requests_refresh) {
+            if(parsed.source_selection == PackageSourceSelection::Auto && requests_refresh) {
                 auto unqualified_target = std::find_if(targets.begin(), targets.end(), [](const std::string& target) {
                     return target.find('/') == std::string::npos;
                 });
@@ -781,64 +1338,15 @@ int run_jpacker(int argc, char* argv[]) {
                     return 1;
                 }
             }
-            return cmd_sync_info(args, flags, targets, requests_refresh);
+            return cmd_sync_info(parsed, requests_refresh, parsed.source_selection);
         }
         if(is_clean) return run_command("sudo pacman " + join_pacman_args(args));
 
         if(is_sync) {
-            if(targets.empty()) return run_command("sudo pacman " + join_pacman_args(args));
-            std::vector<std::string> repo_targets, aur_targets;
-            for(const auto& t : targets) {
-                require_valid_package_name(t);
-                if(is_force_source(t))
-                    aur_targets.push_back(t);
-                else if(is_repo_package(t))
-                    repo_targets.push_back(t);
-                else
-                    aur_targets.push_back(t);
-            }
-            if(!aur_targets.empty()) {
-                std::optional<std::string> unsupported_option = unsupported_source_sync_option(operation, flags);
-                if(unsupported_option.has_value()) {
-                    Logger::error(
-                            "Unsupported pacman option for AUR/source-build target: " + unsupported_option.value());
-                    Logger::error(
-                            "Split official repository and AUR/source-build targets, or rerun without this option.");
-                    return 1;
-                }
-            }
-            for(const auto& pkg : aur_targets) {
-                require_executable_sync_install_target(pkg);
-            }
-            if(!repo_targets.empty() || is_sys_upgrade) {
-                std::string cmd = "sudo pacman " + join_pacman_args(flags);
-                if(!repo_targets.empty()) cmd += " " + join_shell_args(repo_targets);
-                if(run_command(cmd) != 0) throw std::runtime_error("Pacman failed.");
-            }
-            if(!aur_targets.empty()) {
-                // aur_targets also contains official repo packages with source-build preferences.
-                // Those must keep the existing source-build path instead of AUR build-plan execution.
-                for(const auto& pkg : aur_targets) {
-                    if(is_repo_package(pkg))
-                        install_smart_source(pkg, false);
-                    else
-                        install_aur_build_plan(pkg);
-                }
-            }
-            return 0;
-        }
-        std::vector<std::string> cmd_args;
-        for(const auto& arg : args) {
-            if(arg == "--noedit") continue;
-            if(arg == "--nodiff") continue;
-            if(arg == "--noconfirm") continue;
-            if(arg == "--rebuild") continue;
-            if(arg == "--cleanbuild") continue;
-            if(arg == "--rmdeps") continue;
-            cmd_args.push_back(arg);
+            return cmd_sync_install(parsed, is_sys_upgrade, parsed.source_selection);
         }
         std::string cmd_prefix = needs_sudo ? "sudo pacman " : "pacman ";
-        return run_command(cmd_prefix + join_pacman_args(cmd_args));
+        return run_command(cmd_prefix + join_pacman_args(args));
     } catch(const std::exception& e) {
         Logger::error(e.what());
         return 1;
@@ -865,6 +1373,8 @@ void print_help() {
     std::cout << "    \033[1mclean\033[0m                Clean package/build caches" << std::endl;
     std::cout << std::endl;
     std::cout << "\033[1mAUR INSPECTION\033[0m" << std::endl;
+    std::cout << "    \033[1m-G\033[0m <pkg>             Export one AUR PackageBase repository to ./<PackageBase> (no build/install)" << std::endl;
+    std::cout << "    \033[1m-Gp\033[0m <pkg>            Print only one AUR PackageBase PKGBUILD to stdout (no persistent checkout)" << std::endl;
     std::cout << "    \033[1mdeps\033[0m [--recursive] <pkg> Classify AUR dependencies" << std::endl;
     std::cout << "    \033[1mplan\033[0m <pkg>           Show AUR build order plan" << std::endl;
     std::cout << "    \033[1mfetch\033[0m <pkg>          Safely clone/fetch AUR build repositories" << std::endl;
@@ -889,16 +1399,84 @@ void print_help() {
     std::cout << "    \033[1m--noedit\033[0m             Skip PKGBUILD/.install review" << std::endl;
     std::cout << "    \033[1m--nodiff\033[0m             Skip update diff prompt" << std::endl;
     std::cout << "    \033[1m--noconfirm\033[0m         Pass --noconfirm to pacman/makepkg" << std::endl;
+    std::cout << "    \033[1m--needed\033[0m            Pass to pacman; AUR/source -S applies it only to final install" << std::endl;
+    std::cout << "                              Adds no jpacker build/review/plan skip" << std::endl;
     std::cout << "    \033[1m--rebuild\033[0m           Pass -f to makepkg build/install" << std::endl;
     std::cout << "    \033[1m--cleanbuild\033[0m        Pass -C to makepkg build/install" << std::endl;
     std::cout << "    \033[1m--rmdeps\033[0m            Pass -r to makepkg build/install" << std::endl;
+    std::cout << "    \033[1m--aur\033[0m               Limit -S/-Ss/-Si to AUR; no repository fallback" << std::endl;
+    std::cout << "    \033[1m--repo\033[0m              Limit -S/-Ss/-Si to official binary repositories; no AUR/source-build fallback" << std::endl;
     std::cout << "\033[1mCONFIG\033[0m" << std::endl;
     std::cout << "    jpacker.conf: EDITOR=..., LOGFILE=..., NOEDIT=..., NODIFF=..." << std::endl;
+}
+
+std::optional<JpackerGlobalOption> jpacker_global_option_kind(const std::string& arg) {
+    auto option = std::find_if(
+            JPACKER_GLOBAL_OPTIONS.begin(), JPACKER_GLOBAL_OPTIONS.end(),
+            [&arg](const auto& entry) { return arg == entry.first; });
+    if(option == JPACKER_GLOBAL_OPTIONS.end()) return std::nullopt;
+    return option->second;
+}
+
+bool is_jpacker_global_option(const std::string& arg) {
+    return jpacker_global_option_kind(arg).has_value();
+}
+
+bool argv_requests_pkgbuild_export_diagnostics(int argc, char* argv[]) {
+    // POLICY(#173): operation 前のglobal optionだけを飛ばし、option value/opaque operandは見ない。
+    for(int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        if(is_jpacker_global_option(arg)) continue;
+        return arg == "-G" || arg == "-Gp";
+    }
+    return false;
+}
+
+bool apply_jpacker_global_option(const std::string& arg, ParsedCliArguments& parsed) {
+    std::optional<JpackerGlobalOption> option = jpacker_global_option_kind(arg);
+    if(!option.has_value()) throw std::logic_error("Unknown jpacker global option: " + arg);
+
+    switch(option.value()) {
+    case JpackerGlobalOption::NoEdit:
+        g_config.no_edit = true;
+        break;
+    case JpackerGlobalOption::NoDiff:
+        g_config.no_diff = true;
+        break;
+    case JpackerGlobalOption::NoConfirm:
+        g_config.no_confirm = true;
+        break;
+    case JpackerGlobalOption::Rebuild:
+        g_config.rebuild = true;
+        break;
+    case JpackerGlobalOption::CleanBuild:
+        g_config.clean_build = true;
+        break;
+    case JpackerGlobalOption::RmDeps:
+        g_config.rm_deps = true;
+        break;
+    case JpackerGlobalOption::Aur:
+        if(parsed.source_selection == PackageSourceSelection::RepoOnly) {
+            Logger::error("Cannot combine --aur and --repo.");
+            return false;
+        }
+        parsed.source_selection = PackageSourceSelection::AurOnly;
+        break;
+    case JpackerGlobalOption::Repo:
+        if(parsed.source_selection == PackageSourceSelection::AurOnly) {
+            Logger::error("Cannot combine --aur and --repo.");
+            return false;
+        }
+        parsed.source_selection = PackageSourceSelection::RepoOnly;
+        break;
+    }
+    return true;
 }
 
 bool handle_info_only_option(int argc, char* argv[]) {
     for(int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
+        if(is_jpacker_global_option(arg)) continue;
         if(arg == "-h" || arg == "--help") {
             print_help();
             return true;
@@ -907,8 +1485,228 @@ bool handle_info_only_option(int argc, char* argv[]) {
             std::cout << "jpacker v" << VERSION << std::endl;
             return true;
         }
+        // POLICY(#173): help/versionはoperation位置だけで扱い、option valueやopaque operandを横取りしない。
+        return false;
     }
     return false;
+}
+
+std::optional<ParsedCliArguments> parse_cli_arguments(int argc, char* argv[]) {
+    ParsedCliArguments parsed;
+    bool               has_operation = false;
+
+    for(int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        if(arg.empty()) {
+            Logger::error("Empty arguments are not supported.");
+            return std::nullopt;
+        }
+
+        if(!has_operation) {
+            if(is_jpacker_global_option(arg)) {
+                if(!apply_jpacker_global_option(arg, parsed)) return std::nullopt;
+                parsed.tokens.push_back(
+                        ParsedCliToken{arg, static_cast<size_t>(i), CliTokenRole::JpackerGlobalOption});
+                parsed.consumed_global_options.push_back(arg);
+                continue;
+            }
+
+            has_operation = true;
+            parsed.operation = arg;
+            parsed.tokens.push_back(
+                    ParsedCliToken{arg, static_cast<size_t>(i), CliTokenRole::Operation});
+            parsed.ordered_pacman_args.push_back(arg);
+            parsed.flags.push_back(arg);
+            continue;
+        }
+
+        // POLICY(#173): pacmanの構文状態を確定してから、通常位置のjpacker optionだけを消費する。
+        if(parsed.pending_option.has_value()) {
+            parsed.tokens.push_back(
+                    ParsedCliToken{arg, static_cast<size_t>(i), CliTokenRole::PacmanOptionValue});
+            parsed.ordered_pacman_args.push_back(arg);
+            parsed.flags.push_back(arg);
+            parsed.pending_option.reset();
+            continue;
+        }
+        if(parsed.end_of_options) {
+            size_t token_index = parsed.tokens.size();
+            parsed.tokens.push_back(
+                    ParsedCliToken{arg, static_cast<size_t>(i), CliTokenRole::OpaqueOperand});
+            parsed.ordered_pacman_args.push_back(arg);
+            parsed.targets.push_back(arg);
+            parsed.target_token_indices.push_back(token_index);
+            continue;
+        }
+        if(arg == "--") {
+            parsed.tokens.push_back(
+                    ParsedCliToken{arg, static_cast<size_t>(i), CliTokenRole::EndOfOptions});
+            parsed.ordered_pacman_args.push_back(arg);
+            parsed.flags.push_back(arg);
+            parsed.end_of_options = true;
+            continue;
+        }
+        if(is_jpacker_global_option(arg)) {
+            if(!apply_jpacker_global_option(arg, parsed)) return std::nullopt;
+            parsed.tokens.push_back(
+                    ParsedCliToken{arg, static_cast<size_t>(i), CliTokenRole::JpackerGlobalOption});
+            parsed.consumed_global_options.push_back(arg);
+            continue;
+        }
+        if(arg[0] == '-') {
+            parsed.tokens.push_back(
+                    ParsedCliToken{arg, static_cast<size_t>(i), CliTokenRole::PacmanOption});
+            parsed.ordered_pacman_args.push_back(arg);
+            parsed.flags.push_back(arg);
+            if(pacman_option_takes_value(arg)) parsed.pending_option = arg;
+            continue;
+        }
+
+        size_t token_index = parsed.tokens.size();
+        parsed.tokens.push_back(
+                ParsedCliToken{arg, static_cast<size_t>(i), CliTokenRole::Target});
+        parsed.ordered_pacman_args.push_back(arg);
+        parsed.targets.push_back(arg);
+        parsed.target_token_indices.push_back(token_index);
+    }
+
+    if(!has_operation) {
+        print_help();
+        return std::nullopt;
+    }
+    if(parsed.pending_option.has_value()) {
+        Logger::error("Missing value for option " + parsed.pending_option.value());
+        return std::nullopt;
+    }
+    return parsed;
+}
+
+std::optional<PkgbuildExportMode> pkgbuild_export_mode(const ParsedCliArguments& parsed) {
+    if(parsed.operation == "-G") return PkgbuildExportMode::Tree;
+    if(parsed.operation == "-Gp") return PkgbuildExportMode::PkgbuildStdout;
+    return std::nullopt;
+}
+
+bool validate_pkgbuild_export_invocation(const ParsedCliArguments& parsed) {
+    // POLICY(#173): operation/target 以外の role は、綴りを再解釈せず元 argv 位置のまま拒否する。
+    for(const auto& token : parsed.tokens) {
+        if(token.role == CliTokenRole::Operation || token.role == CliTokenRole::Target) continue;
+
+        Logger::error(
+                "Unsupported option " + token.value + " for operation " + parsed.operation + ".");
+        return false;
+    }
+
+    if(parsed.targets.size() != 1) {
+        Logger::error(
+                "Operation " + parsed.operation + " requires exactly one AUR package target.");
+        Logger::error("Usage: jpacker " + parsed.operation + " <pkg>");
+        return false;
+    }
+
+    const std::string& target = parsed.targets.front();
+    if(target.find('/') != std::string::npos || !is_valid_aur_export_identifier(target)) {
+        Logger::error("Invalid AUR target for operation " + parsed.operation + ": " + target);
+        return false;
+    }
+    return true;
+}
+
+bool parsed_has_semantic_pacman_option(
+        const ParsedCliArguments& parsed, const std::string& option) {
+    return std::any_of(parsed.tokens.begin(), parsed.tokens.end(), [&](const ParsedCliToken& token) {
+        return token.role == CliTokenRole::PacmanOption && token.value == option;
+    });
+}
+
+SourceSyncOptions parse_source_sync_options(const ParsedCliArguments& parsed) {
+    SourceSyncOptions options;
+    // POLICY(#173): option valueや`--`後のoperandをsemantic optionへ昇格させない。
+    options.needed = parsed_has_semantic_pacman_option(parsed, "--needed");
+    return options;
+}
+
+std::string package_source_selection_option(PackageSourceSelection selection) {
+    switch(selection) {
+    case PackageSourceSelection::Auto:
+        return "automatic source selection";
+    case PackageSourceSelection::AurOnly:
+        return "--aur";
+    case PackageSourceSelection::RepoOnly:
+        return "--repo";
+    }
+    throw std::logic_error("Unknown package source selection.");
+}
+
+SourceSelectableSyncOperation source_selectable_sync_operation(const ParsedCliArguments& parsed) {
+    if(!parsed.operation.starts_with("-S")) return SourceSelectableSyncOperation::Unsupported;
+
+    bool has_search = false;
+    bool has_info = false;
+    bool has_unsupported_modifier = false;
+
+    auto inspect_short_modifiers = [&](const std::string& option, size_t first_modifier) {
+        if(option.size() <= first_modifier || option[0] != '-' || option.starts_with("--")) return;
+        for(size_t i = first_modifier; i < option.size(); ++i) {
+            switch(option[i]) {
+            case 's':
+                has_search = true;
+                break;
+            case 'i':
+                has_info = true;
+                break;
+            case 'c':
+            case 'g':
+            case 'l':
+            case 'u':
+                has_unsupported_modifier = true;
+                break;
+            default:
+                break;
+            }
+        }
+    };
+
+    inspect_short_modifiers(parsed.operation, 2);
+    for(const auto& token : parsed.tokens) {
+        if(token.role != CliTokenRole::PacmanOption) continue;
+        if(token.value == "--search")
+            has_search = true;
+        else if(token.value == "--info")
+            has_info = true;
+        else if(token.value == "--clean" || token.value == "--groups" ||
+                token.value == "--list" || token.value == "--sysupgrade")
+            has_unsupported_modifier = true;
+        else
+            inspect_short_modifiers(token.value, 1);
+    }
+
+    if(has_unsupported_modifier || (has_search && has_info)) {
+        return SourceSelectableSyncOperation::Unsupported;
+    }
+    if(has_search) return SourceSelectableSyncOperation::Search;
+    if(has_info) return SourceSelectableSyncOperation::Info;
+    return SourceSelectableSyncOperation::Install;
+}
+
+bool validate_source_selection_operation(const ParsedCliArguments& parsed) {
+    if(parsed.source_selection == PackageSourceSelection::Auto) return true;
+
+    const std::string selector = package_source_selection_option(parsed.source_selection);
+    const bool requests_refresh = pacman_operation_requests_refresh(parsed.operation, parsed.flags);
+    SourceSelectableSyncOperation sync_operation = source_selectable_sync_operation(parsed);
+
+    if(parsed.source_selection == PackageSourceSelection::AurOnly && requests_refresh) {
+        Logger::error(
+                "Cannot combine --aur with pacman refresh for operation " + parsed.operation + ".");
+        return false;
+    }
+    if(sync_operation == SourceSelectableSyncOperation::Unsupported ||
+       (sync_operation == SourceSelectableSyncOperation::Install && requests_refresh)) {
+        Logger::error(selector + " is not supported for operation " + parsed.operation + ".");
+        return false;
+    }
+    return true;
 }
 
 // 文字列 / path / config
@@ -1073,6 +1871,247 @@ fs::path get_cache_dir() {
     return base / "jpacker";
 }
 
+namespace {
+
+fs::path absolute_cache_path(const fs::path& path) {
+    std::error_code ec;
+    fs::path        absolute_path = fs::absolute(path, ec);
+    if(ec) {
+        throw std::runtime_error(
+                "Unable to resolve jpacker cache path " + path.string() + ": " + ec.message());
+    }
+
+    // LANDMINE(#175): lexical normalization before this check could erase a symlink/.. boundary.
+    for(const auto& component : absolute_path.relative_path()) {
+        if(component == "." || component == "..") {
+            throw std::runtime_error(
+                    "Unsafe jpacker cache path " + absolute_path.string() +
+                    ": dot path components are not allowed.");
+        }
+    }
+    return absolute_path.lexically_normal();
+}
+
+fs::file_status cache_symlink_status(const fs::path& component, const fs::path& target_path) {
+    std::error_code ec;
+    fs::file_status status = fs::symlink_status(component, ec);
+    if(ec == std::errc::no_such_file_or_directory) {
+        return fs::file_status(fs::file_type::not_found);
+    }
+    if(ec) {
+        throw std::runtime_error(
+                "Unable to inspect jpacker cache path " + target_path.string() + " at " +
+                component.string() + ": " + ec.message());
+    }
+    return status;
+}
+
+void require_no_symlink_components(const fs::path& absolute_path, bool final_may_be_nondirectory) {
+    fs::path current_path = absolute_path.root_path();
+    fs::path relative_path = absolute_path.relative_path();
+    auto     component = relative_path.begin();
+    auto     end = relative_path.end();
+    for(; component != end; ++component) {
+        current_path /= *component;
+        fs::file_status status = cache_symlink_status(current_path, absolute_path);
+        if(fs::is_symlink(status)) {
+            throw std::runtime_error(
+                    "Unsafe jpacker cache path " + absolute_path.string() +
+                    ": symlink component is not allowed: " + current_path.string());
+        }
+
+        auto next = component;
+        ++next;
+        bool is_final_component = next == end;
+        if(fs::exists(status) && (!is_final_component || !final_may_be_nondirectory) &&
+           !fs::is_directory(status)) {
+            throw std::runtime_error(
+                    "Unsafe jpacker cache path " + absolute_path.string() +
+                    ": non-directory path component: " + current_path.string());
+        }
+    }
+}
+
+bool is_path_contained(const fs::path& root, const fs::path& candidate, bool allow_root) {
+    auto root_component = root.begin();
+    auto candidate_component = candidate.begin();
+    for(; root_component != root.end(); ++root_component, ++candidate_component) {
+        if(candidate_component == candidate.end() || *root_component != *candidate_component) return false;
+    }
+    return allow_root || candidate_component != candidate.end();
+}
+
+ValidatedCacheRoot validate_cache_root_path(const fs::path& raw_root, bool create_if_missing) {
+    fs::path root_path = absolute_cache_path(raw_root);
+    require_no_symlink_components(root_path, false);
+
+    fs::file_status root_status = cache_symlink_status(root_path, root_path);
+    if(!fs::exists(root_status)) {
+        if(!create_if_missing) {
+            throw std::runtime_error("Trusted jpacker cache root is missing: " + root_path.string());
+        }
+
+        std::error_code ec;
+        fs::create_directories(root_path, ec);
+        if(ec) {
+            throw std::runtime_error(
+                    "Failed to create jpacker cache root " + root_path.string() + ": " + ec.message());
+        }
+
+        // POLICY(#175): creation is followed by the same no-follow component check before trust is granted.
+        require_no_symlink_components(root_path, false);
+        root_status = cache_symlink_status(root_path, root_path);
+    }
+    if(!fs::is_directory(root_status)) {
+        throw std::runtime_error(
+                "Unsafe jpacker cache root " + root_path.string() + ": expected a regular directory.");
+    }
+
+    std::error_code ec;
+    fs::path        canonical_root = fs::canonical(root_path, ec);
+    if(ec) {
+        throw std::runtime_error(
+                "Failed to canonicalize jpacker cache root " + root_path.string() + ": " + ec.message());
+    }
+    return ValidatedCacheRoot{root_path, canonical_root};
+}
+
+ValidatedCacheRoot require_unchanged_cache_root(const ValidatedCacheRoot& expected_root) {
+    ValidatedCacheRoot current_root = validate_cache_root_path(expected_root.path, false);
+    if(current_root.canonical_path != expected_root.canonical_path) {
+        throw std::runtime_error(
+                "Unsafe jpacker cache root " + expected_root.path.string() +
+                ": canonical path changed after validation.");
+    }
+    return current_root;
+}
+
+ValidatedCachePath validate_cache_path_against_root(
+        const ValidatedCacheRoot& root, const fs::path& raw_path, CachePathRequirement requirement) {
+    fs::path path = absolute_cache_path(raw_path);
+    require_no_symlink_components(path, true);
+
+    fs::file_status status = cache_symlink_status(path, path);
+    bool            path_exists = fs::exists(status);
+    bool            path_is_directory = path_exists && fs::is_directory(status);
+
+    if(requirement == CachePathRequirement::Existing && !path_exists) {
+        throw std::runtime_error("Trusted jpacker cache path is missing: " + path.string());
+    }
+    if(requirement == CachePathRequirement::ExistingDirectory && !path_is_directory) {
+        throw std::runtime_error(
+                "Unsafe jpacker cache path " + path.string() + ": expected an existing directory.");
+    }
+    if(requirement == CachePathRequirement::Missing && path_exists) {
+        throw std::runtime_error(
+                "Unsafe jpacker cache path " + path.string() + ": expected the path to be missing.");
+    }
+
+    fs::path resolved_path;
+    if(path_exists) {
+        std::error_code ec;
+        resolved_path = fs::canonical(path, ec);
+        if(ec) {
+            throw std::runtime_error(
+                    "Failed to canonicalize jpacker cache path " + path.string() + ": " + ec.message());
+        }
+    } else {
+        fs::path parent_path = path.parent_path();
+        require_no_symlink_components(parent_path, false);
+        fs::file_status parent_status = cache_symlink_status(parent_path, path);
+        if(!fs::is_directory(parent_status)) {
+            throw std::runtime_error(
+                    "Unsafe jpacker cache path " + path.string() +
+                    ": existing parent directory is required before creation.");
+        }
+
+        std::error_code ec;
+        fs::path        canonical_parent = fs::canonical(parent_path, ec);
+        if(ec) {
+            throw std::runtime_error(
+                    "Failed to canonicalize jpacker cache parent " + parent_path.string() + ": " + ec.message());
+        }
+        if(!is_path_contained(root.canonical_path, canonical_parent, true)) {
+            throw std::runtime_error(
+                    "Unsafe jpacker cache path " + path.string() +
+                    ": parent resolves outside trusted cache root " + root.canonical_path.string());
+        }
+
+        // POLICY(#175): weakly_canonical is used only for a missing leaf whose existing parent was verified above.
+        resolved_path = fs::weakly_canonical(path, ec);
+        if(ec) {
+            throw std::runtime_error(
+                    "Failed to resolve missing jpacker cache path " + path.string() + ": " + ec.message());
+        }
+    }
+
+    // POLICY(#175): containment is path-component based; similarly prefixed sibling directories are not trusted.
+    if(!is_path_contained(root.canonical_path, resolved_path, false)) {
+        throw std::runtime_error(
+                "Unsafe jpacker cache path " + path.string() + ": canonical path " +
+                resolved_path.string() + " is outside trusted cache root " + root.canonical_path.string());
+    }
+
+    return ValidatedCachePath{root, path, resolved_path, path_exists, path_is_directory};
+}
+
+ValidatedCachePath require_trusted_cache_path(
+        const ValidatedCacheRoot& root, const fs::path& path, CachePathRequirement requirement) {
+    ValidatedCacheRoot current_root = require_unchanged_cache_root(root);
+    return validate_cache_path_against_root(current_root, path, requirement);
+}
+
+ValidatedCachePath revalidate_trusted_cache_path(
+        const ValidatedCachePath& expected_path, CachePathRequirement requirement) {
+    ValidatedCachePath current_path =
+            require_trusted_cache_path(expected_path.root, expected_path.path, requirement);
+    if(current_path.canonical_path != expected_path.canonical_path) {
+        throw std::runtime_error(
+                "Unsafe jpacker cache path " + expected_path.path.string() +
+                ": canonical path changed after validation.");
+    }
+    return current_path;
+}
+
+ValidatedCacheRoot prepare_trusted_cache_root() {
+    return validate_cache_root_path(get_cache_dir(), true);
+}
+
+void remove_trusted_cache_path(const ValidatedCachePath& expected_path) {
+    ValidatedCachePath current_path =
+            revalidate_trusted_cache_path(expected_path, CachePathRequirement::Existing);
+    std::error_code ec;
+    fs::remove_all(current_path.canonical_path, ec);
+    if(ec) {
+        throw std::runtime_error(
+                "Failed to remove trusted jpacker cache path " + current_path.path.string() + ": " +
+                ec.message());
+    }
+}
+
+bool rollback_trusted_cache_path(const ValidatedCachePath& expected_path) {
+    require_unchanged_cache_root(expected_path.root);
+    fs::file_status status = cache_symlink_status(expected_path.path, expected_path.path);
+    if(!fs::exists(status)) return false;
+
+    remove_trusted_cache_path(expected_path);
+    return true;
+}
+
+std::vector<ValidatedCachePath> preflight_cache_cleanup(const ValidatedCacheRoot& expected_root) {
+    ValidatedCacheRoot              root = require_unchanged_cache_root(expected_root);
+    std::vector<ValidatedCachePath> targets;
+    for(const auto& entry : fs::directory_iterator(root.canonical_path)) {
+        fs::path filename = entry.path().filename();
+        if(filename == "jpacker.log") continue;
+        targets.push_back(require_trusted_cache_path(
+                root, root.path / filename, CachePathRequirement::Existing));
+    }
+    return targets;
+}
+
+} // namespace
+
 void load_config() {
     if(!fs::exists(CONFIG_FILE)) return;
     std::ifstream file(CONFIG_FILE);
@@ -1101,15 +2140,31 @@ void load_config() {
 }
 
 // コマンド実行 / shell引数
-std::string exec_command(const char* cmd) {
+CapturedCommandResult capture_command_output(const char* cmd) {
     std::array<char, 128> buffer;
     std::string           result;
     std::unique_ptr<FILE, int (*)(FILE*)> pipe(popen(cmd, "r"), pclose);
-    if(!pipe) return "";
+    if(!pipe) return CapturedCommandResult{};
     while(fgets(buffer.data(), buffer.size(), pipe.get()) != nullptr) {
         result += buffer.data();
     }
-    return trim(result);
+    bool read_failed = ferror(pipe.get()) != 0;
+    int  status = pclose(pipe.release());
+    int  exit_code = 127;
+    if(status != -1) {
+        if(WIFEXITED(status))
+            exit_code = WEXITSTATUS(status);
+        else if(WIFSIGNALED(status))
+            exit_code = 128 + WTERMSIG(status);
+        else
+            exit_code = 1;
+    }
+    if(read_failed) exit_code = 1;
+    return CapturedCommandResult{trim(result), exit_code};
+}
+
+std::string exec_command(const char* cmd) {
+    return capture_command_output(cmd).output;
 }
 
 int command_status(const std::string& cmd) {
@@ -1135,15 +2190,34 @@ std::string join_shell_args(const std::vector<std::string>& args) {
 }
 
 std::vector<std::string> pacman_args_with_global_options(std::vector<std::string> args) {
-    // POLICY: --noconfirm は pacman/makepkg へ委譲するだけで、未解決依存の自動突破には使わない。
-    if(g_config.no_confirm && std::find(args.begin(), args.end(), "--noconfirm") == args.end()) {
-        args.push_back("--noconfirm");
+    if(g_config.no_confirm) {
+        // POLICY(#173): generated optionはoperation直後へ置き、semantic `--`やoption valueを再解釈しない。
+        // 認識済みglobal tokenはordered viewから除外済みなので、ここでは常に1件だけ生成する。
+        if(args.empty())
+            args.push_back("--noconfirm");
+        else
+            args.insert(args.begin() + 1, "--noconfirm");
     }
     return args;
 }
 
 std::string join_pacman_args(const std::vector<std::string>& args) {
     return join_shell_args(pacman_args_with_global_options(args));
+}
+
+std::vector<std::string> ordered_pacman_args_excluding_targets(
+        const ParsedCliArguments& parsed, const std::set<size_t>& excluded_target_token_indices) {
+    std::vector<std::string> args;
+    for(size_t i = 0; i < parsed.tokens.size(); ++i) {
+        const ParsedCliToken& token = parsed.tokens[i];
+        if(token.role == CliTokenRole::JpackerGlobalOption) continue;
+        if((token.role == CliTokenRole::Target || token.role == CliTokenRole::OpaqueOperand) &&
+           excluded_target_token_indices.contains(i)) {
+            continue;
+        }
+        args.push_back(token.value);
+    }
+    return args;
 }
 
 std::string makepkg_install_command(const MakepkgBuildOptions& options) {
@@ -1153,6 +2227,8 @@ std::string makepkg_install_command(const MakepkgBuildOptions& options) {
     if(options.clean_build) args.push_back("-C");
     // POLICY(#123): 削除対象の判断と実行は makepkg -s/-r に委ね、jpacker では再実装しない。
     if(options.rm_deps) args.push_back("-r");
+    // POLICY(#169): jpacker独自のbuild skip判定は追加せず、再install要否だけをmakepkg/pacmanへ委ねる。
+    if(options.needed) args.push_back("--needed");
     return join_shell_args(args);
 }
 
@@ -1211,9 +2287,10 @@ bool validate_optionless_jpacker_operation(const std::string& operation, const s
 }
 
 std::optional<std::string> unsupported_source_sync_option(
-        const std::string& operation, const std::vector<std::string>& flags) {
+        const ParsedCliArguments& parsed) {
     // POLICY(#56): -S の y/u modifier は official repository update にだけ作用する。
     // AUR/source-build 側へ意味を移せない他の pacman option は、黙って無視せず build 前に止める。
+    const std::string& operation = parsed.operation;
     if(operation.size() < 2 || operation[0] != '-' || operation[1] != 'S' ||
        !std::all_of(operation.begin() + 2, operation.end(), [](char modifier) {
            return modifier == 'y' || modifier == 'u';
@@ -1221,9 +2298,10 @@ std::optional<std::string> unsupported_source_sync_option(
         return operation;
     }
 
-    for(const auto& flag : flags) {
-        if(flag == operation || flag == "--") continue;
-        return flag;
+    for(const auto& token : parsed.tokens) {
+        if(token.role != CliTokenRole::PacmanOption) continue;
+        if(token.value == "--needed") continue;
+        return token.value;
     }
     return std::nullopt;
 }
@@ -1233,6 +2311,11 @@ bool is_valid_package_name(const std::string& name) {
     return std::all_of(name.begin(), name.end(), [](unsigned char ch) {
         return std::isalnum(ch) || ch == '@' || ch == '.' || ch == '_' || ch == '+' || ch == '-';
     });
+}
+
+bool is_valid_aur_export_identifier(const std::string& name) {
+    // POLICY(#167): package identifier であっても、filesystem の dot component は export 名にしない。
+    return name != "." && name != ".." && is_valid_package_name(name);
 }
 
 ParsedDependency parse_dependency_string(const std::string& dependency) {
@@ -1293,6 +2376,12 @@ void warn_unverified_version_constraint(const std::string& dependency) {
 void require_valid_package_name(const std::string& name) {
     if(!is_valid_package_name(name)) {
         throw std::runtime_error("Invalid package name: " + name);
+    }
+}
+
+void require_valid_aur_export_target(const std::string& target) {
+    if(target.find('/') != std::string::npos || !is_valid_aur_export_identifier(target)) {
+        throw std::runtime_error("Invalid AUR target: " + target);
     }
 }
 
@@ -1696,11 +2785,13 @@ bool has_local_srcdir(const fs::path& pkg_dir) {
     return fs::exists(src_dir) && fs::is_directory(src_dir);
 }
 
-MakepkgBuildOptions resolve_makepkg_build_options(const fs::path& pkg_dir) {
+MakepkgBuildOptions resolve_makepkg_build_options(
+        const fs::path& pkg_dir, const SourceSyncOptions& source_sync_options) {
     MakepkgBuildOptions options;
     bool                has_artifact = has_local_package_artifact(pkg_dir);
 
     options.rm_deps = g_config.rm_deps;
+    options.needed = source_sync_options.needed;
 
     if(g_config.clean_build) {
         options.clean_build = true;
@@ -1819,84 +2910,242 @@ size_t WriteCallback(void* contents, size_t size, size_t nmemb, void* userp) {
 }
 
 json parse_aur_rpc_response(const std::string& response, const std::string& context) {
+    json parsed;
     try {
-        json parsed = json::parse(response);
-        if(!parsed.is_object()) {
-            throw std::runtime_error("top-level JSON value is not an object");
-        }
-        return parsed;
-    } catch(const json::parse_error& e) {
-        throw std::runtime_error(
+        parsed = json::parse(response);
+    } catch(const json::exception& e) {
+        throw AurRpcResponseError(
                 "AUR RPC response parse failed for " + context + ": " + std::string(e.what()));
-    } catch(const std::runtime_error& e) {
-        throw std::runtime_error(
-                "AUR RPC response parse failed for " + context + ": unexpected response: " + e.what());
     }
+
+    if(!parsed.is_object()) {
+        throw AurRpcResponseError(
+                "AUR RPC response validation failed for " + context +
+                ": expected top-level object, got " + parsed.type_name());
+    }
+    return parsed;
 }
 
 const json& aur_rpc_results_array(const json& response, const std::string& context) {
-    if(!response.contains("results") || !response["results"].is_array()) {
-        throw std::runtime_error(
-                "AUR RPC response parse failed for " + context + ": unexpected response: missing results array");
+    auto results = response.find("results");
+    if(results == response.end()) {
+        throw AurRpcResponseError(
+                "AUR RPC response validation failed for " + context +
+                ": field results expected array, got missing");
     }
-    return response["results"];
+    if(!results->is_array()) {
+        throw AurRpcResponseError(
+                "AUR RPC response validation failed for " + context +
+                ": field results expected array, got " + std::string(results->type_name()));
+    }
+    return *results;
 }
 
-std::string json_string_or_empty(const json& obj, const std::string& key) {
-    if(!obj.is_object() || !obj.contains(key) || obj[key].is_null() || !obj[key].is_string()) return "";
-    return obj[key].get<std::string>();
+[[noreturn]] void throw_aur_rpc_validation_error(
+        const std::string& context, const std::string& detail) {
+    throw AurRpcResponseError("AUR RPC response validation failed for " + context + ": " + detail);
 }
 
-std::vector<std::string> json_string_array_or_empty(const json& obj, const std::string& key) {
+std::string json_value_for_error(const std::string& value) {
+    return json(value).dump();
+}
+
+std::string aur_rpc_result_context(
+        const std::string& context, size_t result_index) {
+    return context + " result[" + std::to_string(result_index) + "]";
+}
+
+std::string required_json_string(
+        const json& obj, const std::string& key, const std::string& context) {
+    auto value = obj.find(key);
+    if(value == obj.end()) {
+        throw_aur_rpc_validation_error(context, "field " + key + " expected string, got missing");
+    }
+    if(!value->is_string()) {
+        throw_aur_rpc_validation_error(
+                context, "field " + key + " expected string, got " + std::string(value->type_name()));
+    }
+
+    std::string result = value->get<std::string>();
+    if(trim(result).empty()) {
+        throw_aur_rpc_validation_error(
+                context, "field " + key + " expected non-empty string, got empty or whitespace-only string");
+    }
+    return result;
+}
+
+std::string optional_json_string(
+        const json& obj, const std::string& key, const std::string& context) {
+    auto value = obj.find(key);
+    if(value == obj.end() || value->is_null()) return "";
+    if(!value->is_string()) {
+        throw_aur_rpc_validation_error(
+                context, "field " + key + " expected string or null, got " +
+                                 std::string(value->type_name()));
+    }
+    return value->get<std::string>();
+}
+
+std::optional<long long> optional_json_integer(
+        const json& obj, const std::string& key, const std::string& context) {
+    auto value = obj.find(key);
+    if(value == obj.end() || value->is_null()) return std::nullopt;
+    if(!value->is_number_integer()) {
+        throw_aur_rpc_validation_error(
+                context, "field " + key + " expected integer or null, got " +
+                                 std::string(value->type_name()));
+    }
+
+    if(value->is_number_unsigned()) {
+        auto unsigned_value = value->get<unsigned long long>();
+        if(unsigned_value > static_cast<unsigned long long>(std::numeric_limits<long long>::max())) {
+            throw_aur_rpc_validation_error(
+                    context, "field " + key + " integer is outside supported range");
+        }
+        return static_cast<long long>(unsigned_value);
+    }
+    return value->get<long long>();
+}
+
+std::vector<std::string> optional_json_string_array(
+        const json& obj, const std::string& key, const std::string& context) {
+    auto value = obj.find(key);
+    if(value == obj.end() || value->is_null()) return {};
+    if(!value->is_array()) {
+        throw_aur_rpc_validation_error(
+                context, "field " + key + " expected array or null, got " +
+                                 std::string(value->type_name()));
+    }
+
     std::vector<std::string> values;
-    if(!obj.is_object() || !obj.contains(key) || !obj[key].is_array()) return values;
-    for(const auto& item : obj[key]) {
-        if(item.is_string()) values.push_back(item.get<std::string>());
+    values.reserve(value->size());
+    for(size_t i = 0; i < value->size(); ++i) {
+        const json& item = (*value)[i];
+        if(!item.is_string()) {
+            throw_aur_rpc_validation_error(
+                    context, "field " + key + "[" + std::to_string(i) +
+                                     "] expected string, got " + item.type_name());
+        }
+        values.push_back(item.get<std::string>());
     }
     return values;
 }
 
-std::optional<long long> json_optional_long_long(const json& obj, const std::string& key) {
-    if(!obj.is_object() || !obj.contains(key) || obj[key].is_null() || !obj[key].is_number()) return std::nullopt;
-    try {
-        return obj[key].get<long long>();
-    } catch(...) {
-        return std::nullopt;
+void validate_package_identifier(
+        const std::string& value, const std::string& field, const std::string& context) {
+    if(!is_valid_package_name(value)) {
+        throw_aur_rpc_validation_error(
+                context, "invalid " + field + " " + json_value_for_error(value));
     }
 }
 
-AurPackageInfo parse_aur_package_info(const json& pkg) {
-    AurPackageInfo info;
-    info.Name = json_string_or_empty(pkg, "Name");
-    info.PackageBase = json_string_or_empty(pkg, "PackageBase");
-    info.Version = json_string_or_empty(pkg, "Version");
-    info.Description = json_string_or_empty(pkg, "Description");
-    info.Depends = json_string_array_or_empty(pkg, "Depends");
-    info.MakeDepends = json_string_array_or_empty(pkg, "MakeDepends");
-    info.CheckDepends = json_string_array_or_empty(pkg, "CheckDepends");
-    info.OptDepends = json_string_array_or_empty(pkg, "OptDepends");
-    info.Provides = json_string_array_or_empty(pkg, "Provides");
-    info.Conflicts = json_string_array_or_empty(pkg, "Conflicts");
-    info.Replaces = json_string_array_or_empty(pkg, "Replaces");
-    info.Maintainer = json_string_or_empty(pkg, "Maintainer");
-    info.OutOfDate = json_optional_long_long(pkg, "OutOfDate");
-    return info;
+void validate_metadata_identifiers(
+        const std::vector<std::string>& values, const std::string& field,
+        const std::string& context) {
+    for(size_t i = 0; i < values.size(); ++i) {
+        ParsedDependency parsed = parse_dependency_string(values[i]);
+        if(!is_valid_package_name(parsed.name)) {
+            throw_aur_rpc_validation_error(
+                    context, "field " + field + "[" + std::to_string(i) +
+                                     "] contains invalid package identifier " +
+                                     json_value_for_error(parsed.name));
+        }
+    }
 }
 
-AurPackageInfo parse_aur_rpc_package_info(const json& pkg, const std::string& context) {
+AurPackageInfo parse_aur_rpc_package_info(
+        const json& pkg, const std::string& context, size_t result_index) {
+    std::string entry_context = aur_rpc_result_context(context, result_index);
     if(!pkg.is_object()) {
-        throw std::runtime_error(
-                "AUR RPC response parse failed for " + context +
-                ": unexpected response: package info entry is not an object");
+        throw_aur_rpc_validation_error(
+                entry_context, "package entry expected object, got " + std::string(pkg.type_name()));
     }
 
-    AurPackageInfo info = parse_aur_package_info(pkg);
-    if(info.Name.empty()) {
-        throw std::runtime_error(
-                "AUR RPC response parse failed for " + context +
-                ": unexpected response: package info entry is missing Name");
-    }
+    AurPackageInfo info;
+    info.Name = required_json_string(pkg, "Name", entry_context);
+    validate_package_identifier(info.Name, "Name", entry_context);
+    entry_context += " (package " + json_value_for_error(info.Name) + ")";
+
+    info.PackageBase = required_json_string(pkg, "PackageBase", entry_context);
+    validate_package_identifier(info.PackageBase, "PackageBase", entry_context);
+    info.Version = required_json_string(pkg, "Version", entry_context);
+    info.Description = optional_json_string(pkg, "Description", entry_context);
+    info.Maintainer = optional_json_string(pkg, "Maintainer", entry_context);
+    info.OutOfDate = optional_json_integer(pkg, "OutOfDate", entry_context);
+
+    info.Depends = optional_json_string_array(pkg, "Depends", entry_context);
+    info.MakeDepends = optional_json_string_array(pkg, "MakeDepends", entry_context);
+    info.CheckDepends = optional_json_string_array(pkg, "CheckDepends", entry_context);
+    info.OptDepends = optional_json_string_array(pkg, "OptDepends", entry_context);
+    info.Provides = optional_json_string_array(pkg, "Provides", entry_context);
+    info.Conflicts = optional_json_string_array(pkg, "Conflicts", entry_context);
+    info.Replaces = optional_json_string_array(pkg, "Replaces", entry_context);
+
+    // POLICY(#174): OptDepends は `pkg: description` を許すため型だけを検証する。
+    validate_metadata_identifiers(info.Depends, "Depends", entry_context);
+    validate_metadata_identifiers(info.MakeDepends, "MakeDepends", entry_context);
+    validate_metadata_identifiers(info.CheckDepends, "CheckDepends", entry_context);
+    validate_metadata_identifiers(info.Provides, "Provides", entry_context);
+    validate_metadata_identifiers(info.Conflicts, "Conflicts", entry_context);
+    validate_metadata_identifiers(info.Replaces, "Replaces", entry_context);
     return info;
+}
+
+std::vector<AurPackageInfo> parse_aur_rpc_package_results(
+        const std::string& response, const std::string& context) {
+    json        parsed = parse_aur_rpc_response(response, context);
+    const json& results = aur_rpc_results_array(parsed, context);
+
+    std::vector<AurPackageInfo> packages;
+    packages.reserve(results.size());
+    for(size_t i = 0; i < results.size(); ++i) {
+        packages.push_back(parse_aur_rpc_package_info(results[i], context, i));
+    }
+    return packages;
+}
+
+std::optional<AurPackageInfo> parse_single_aur_info_response(
+        const std::string& response, const std::string& pkg_name) {
+    std::string                 context = "package info " + pkg_name;
+    std::vector<AurPackageInfo> results = parse_aur_rpc_package_results(response, context);
+    if(results.empty()) return std::nullopt;
+    if(results.size() != 1) {
+        throw_aur_rpc_validation_error(
+                context, "expected zero or one result, got " + std::to_string(results.size()));
+    }
+    if(results.front().Name != pkg_name) {
+        throw_aur_rpc_validation_error(
+                context, "requested " + pkg_name + " but response Name was " + results.front().Name);
+    }
+    return results.front();
+}
+
+std::string AurClient::get_url_strict(const std::string& url) {
+    CurlHandle  handle;
+    std::string readBuffer;
+    char        errorBuffer[CURL_ERROR_SIZE] = {0};
+    curl_easy_setopt(handle.get(), CURLOPT_URL, url.c_str());
+    curl_easy_setopt(handle.get(), CURLOPT_WRITEFUNCTION, WriteCallback);
+    curl_easy_setopt(handle.get(), CURLOPT_WRITEDATA, &readBuffer);
+    curl_easy_setopt(handle.get(), CURLOPT_USERAGENT, USER_AGENT.c_str());
+    curl_easy_setopt(handle.get(), CURLOPT_ERRORBUFFER, errorBuffer);
+    curl_easy_setopt(handle.get(), CURLOPT_FAILONERROR, 1L);
+    CURLcode res = curl_easy_perform(handle.get());
+    if(res != CURLE_OK) {
+        std::string error = errorBuffer[0] ? errorBuffer : curl_easy_strerror(res);
+        throw std::runtime_error("AUR request failed: " + error);
+    }
+
+    long response_code = 0;
+    curl_easy_getinfo(handle.get(), CURLINFO_RESPONSE_CODE, &response_code);
+    if(response_code < 200 || response_code >= 300) {
+        throw std::runtime_error(
+                "AUR request failed with HTTP status " + std::to_string(response_code) + ".");
+    }
+    if(readBuffer.empty()) {
+        throw std::runtime_error("AUR request returned an empty response.");
+    }
+    return readBuffer;
 }
 
 std::string AurClient::get_url(const std::string& url) {
@@ -1918,13 +3167,17 @@ std::string AurClient::get_url(const std::string& url) {
     return readBuffer;
 }
 
-std::string AurClient::search_query(const std::string& query) {
+std::vector<AurPackageInfo> AurClient::search(const std::string& query) {
+    std::vector<AurPackageInfo> packages;
     CurlHandle  handle;
     char* escaped = curl_easy_escape(handle.get(), query.c_str(), static_cast<int>(query.length()));
-    if(!escaped) return "";
+    if(!escaped) return packages;
     std::string url = aur_rpc_search_url() + escaped;
     curl_free(escaped);
-    return get_url(url);
+
+    std::string response = get_url(url);
+    if(response.empty()) return packages;
+    return parse_aur_rpc_package_results(response, "search query " + query);
 }
 
 std::vector<std::string> AurClient::search_names_by_provides(const std::string& provided_name) {
@@ -1938,12 +3191,9 @@ std::vector<std::string> AurClient::search_names_by_provides(const std::string& 
     std::string response = get_url(url);
     if(response.empty()) return names;
 
-    std::string context = "provides search " + provided_name;
-    json        j = parse_aur_rpc_response(response, context);
-    const json& results = aur_rpc_results_array(j, context);
-
-    for(const auto& pkg : results) {
-        AurPackageInfo info = parse_aur_rpc_package_info(pkg, context);
+    std::vector<AurPackageInfo> results =
+            parse_aur_rpc_package_results(response, "provides search " + provided_name);
+    for(const auto& info : results) {
         names.push_back(info.Name);
     }
     return names;
@@ -1959,18 +3209,32 @@ std::optional<AurPackageInfo> AurClient::info(const std::string& pkg_name) {
     std::string response = get_url(url);
     if(response.empty()) return std::nullopt;
 
-    std::string context = "package info " + pkg_name;
-    json        j = parse_aur_rpc_response(response, context);
-    const json& results = aur_rpc_results_array(j, context);
-    if(results.empty()) {
-        return std::nullopt;
+    return parse_single_aur_info_response(response, pkg_name);
+}
+
+std::optional<AurPackageInfo> AurClient::info_strict(const std::string& pkg_name) {
+    CurlHandle handle;
+    char*      escaped = curl_easy_escape(
+            handle.get(), pkg_name.c_str(), static_cast<int>(pkg_name.length()));
+    if(!escaped) {
+        throw std::runtime_error("Failed to encode AUR package name: " + pkg_name);
     }
-    return parse_aur_rpc_package_info(results[0], context);
+    std::string url = aur_rpc_info_url() + escaped;
+    curl_free(escaped);
+
+    std::string response = get_url_strict(url);
+    return parse_single_aur_info_response(response, pkg_name);
 }
 
 std::map<std::string, AurPackageInfo> AurClient::info_many(const std::vector<std::string>& pkg_names) {
     std::map<std::string, AurPackageInfo> results;
     if(pkg_names.empty()) return results;
+
+    std::set<std::string> requested_names;
+    for(const auto& pkg_name : pkg_names) {
+        require_valid_package_name(pkg_name);
+        requested_names.insert(pkg_name);
+    }
 
     CurlHandle  handle;
     std::string url = aur_rpc_base_url() + "?v=5&type=info";
@@ -1989,13 +3253,17 @@ std::map<std::string, AurPackageInfo> AurClient::info_many(const std::vector<std
     std::string response = get_url(url);
     if(response.empty()) return results;
 
-    std::string context = "multiinfo";
-    json        j = parse_aur_rpc_response(response, context);
-    const json& aur_results = aur_rpc_results_array(j, context);
-
-    for(const auto& pkg : aur_results) {
-        AurPackageInfo pkg_info = parse_aur_rpc_package_info(pkg, context);
-        results[pkg_info.Name] = pkg_info;
+    std::string                 context = "multiinfo";
+    std::vector<AurPackageInfo> aur_results = parse_aur_rpc_package_results(response, context);
+    for(const auto& pkg_info : aur_results) {
+        if(!requested_names.contains(pkg_info.Name)) {
+            throw_aur_rpc_validation_error(
+                    context, "response Name " + pkg_info.Name + " was not requested");
+        }
+        if(!results.emplace(pkg_info.Name, pkg_info).second) {
+            throw_aur_rpc_validation_error(
+                    context, "duplicate response Name " + pkg_info.Name);
+        }
     }
     return results;
 }
@@ -2015,17 +3283,20 @@ std::vector<ProvidedDependency> find_aur_providers(const std::string& dependency
     std::vector<std::string> candidates;
     try {
         candidates = AurClient::search_names_by_provides(dependency_name);
+    } catch(const AurRpcResponseError&) {
+        throw;
     } catch(const std::exception& e) {
         Logger::warn("Failed to search AUR providers for " + dependency_name + ": " + e.what());
         return providers;
     }
     for(const auto& candidate : candidates) {
-        if(!is_valid_package_name(candidate)) continue;
         try {
             std::optional<AurPackageInfo> info = AurClient::info(candidate);
             if(info.has_value() && aur_package_provides(info.value(), dependency_name)) {
                 add_provider_candidate(providers, ProvidedDependency{"aur", info->Name});
             }
+        } catch(const AurRpcResponseError&) {
+            throw;
         } catch(const std::exception& e) {
             Logger::warn("Failed to check AUR provider " + candidate + ": " + e.what());
         }
@@ -2051,6 +3322,8 @@ PackageBuildSource resolve_build_source(const std::string& pkg_name) {
     std::optional<AurPackageInfo> info;
     try {
         info = AurClient::info(pkg_name);
+    } catch(const AurRpcResponseError&) {
+        throw;
     } catch(const std::exception& e) {
         throw std::runtime_error("Failed to fetch AUR info for " + pkg_name + ": " + e.what());
     }
@@ -2089,39 +3362,44 @@ void require_executable_build_source_plan(const PackageBuildSource& source) {
 }
 
 // AUR検索 / info表示
-bool search_aur(const std::vector<std::string>& keywords) {
+void preflight_aur_search_schema(const std::vector<std::string>& keywords) {
+    // POLICY(#174): refresh付きsearchはAUR responseのschemaをDB mutationより先に検証する。
+    for(const auto& keyword : keywords) {
+        if(keyword.empty() || keyword[0] == '-') continue;
+        try {
+            static_cast<void>(AurClient::search(keyword));
+        } catch(const AurRpcResponseError&) {
+            throw;
+        } catch(const std::exception&) {
+            // transport/その他の既存search契約は、pacman実行後の通常search phaseへ委ねる。
+        }
+    }
+}
+
+bool search_aur(const std::vector<std::string>& keywords, bool query_installed_state) {
     bool                  found = false;
-    std::set<std::string> installed_foreign_packages = get_foreign_package_names();
+    // POLICY(#168): AurOnly search must not invoke pacman, even for the optional [installed] annotation.
+    std::set<std::string> installed_foreign_packages =
+            query_installed_state ? get_foreign_package_names() : std::set<std::string>{};
     for(const auto& pkg_name : keywords) {
         if(pkg_name.empty()) continue;
         if(pkg_name[0] == '-') continue;
-        std::string response = AurClient::search_query(pkg_name);
-        if(response.empty()) continue;
-        try {
-            std::string context = "search query " + pkg_name;
-            json        j = parse_aur_rpc_response(response, context);
-            const json& results = aur_rpc_results_array(j, context);
-            for(const auto& pkg : results) {
-                AurPackageInfo info = parse_aur_rpc_package_info(pkg, context);
-                found = true;
-                std::string    name = info.Name;
-                std::cout << "\033[1;35maur\033[0m/\033[1m" << name << "\033[0m \033[1;32m"
-                          << info.Version << "\033[0m";
-                if(installed_foreign_packages.contains(name)) {
-                    std::cout << " \033[1;36m[installed]\033[0m";
-                }
-                if(info.OutOfDate.has_value()) {
-                    std::cout << " \033[1;31m[out-of-date]\033[0m";
-                }
-                if(is_orphaned(info)) {
-                    std::cout << " \033[1;33m[orphaned]\033[0m";
-                }
-                std::cout << std::endl;
-                std::string description = json_string_or_empty(pkg, "Description");
-                if(!description.empty()) std::cout << "    " << description << std::endl;
+        for(const auto& info : AurClient::search(pkg_name)) {
+            found = true;
+            const std::string& name = info.Name;
+            std::cout << "\033[1;35maur\033[0m/\033[1m" << name << "\033[0m \033[1;32m"
+                      << info.Version << "\033[0m";
+            if(installed_foreign_packages.contains(name)) {
+                std::cout << " \033[1;36m[installed]\033[0m";
             }
-        } catch(const std::exception& e) {
-            Logger::warn(e.what());
+            if(info.OutOfDate.has_value()) {
+                std::cout << " \033[1;31m[out-of-date]\033[0m";
+            }
+            if(is_orphaned(info)) {
+                std::cout << " \033[1;33m[orphaned]\033[0m";
+            }
+            std::cout << std::endl;
+            if(!info.Description.empty()) std::cout << "    " << info.Description << std::endl;
         }
     }
     return found;
@@ -2211,12 +3489,13 @@ void add_classified_dependency(std::vector<std::string>& dependencies, const std
     dependencies.push_back(dependency_display_with_constraint_note(display, dependency));
 }
 
-std::string package_base_or_name(const AurPackageInfo& info) {
-    return info.PackageBase.empty() ? info.Name : info.PackageBase;
+std::string package_base_name(const AurPackageInfo& info) {
+    // POLICY(#174): PackageBase は strict AUR RPC parser の required identifier。
+    return info.PackageBase;
 }
 
 bool has_distinct_package_base(const AurPackageInfo& info) {
-    return !info.PackageBase.empty() && info.PackageBase != info.Name;
+    return info.PackageBase != info.Name;
 }
 
 void add_classified_aur_dependency(std::vector<std::string>& dependencies, const std::string& dependency, const AurPackageInfo& info) {
@@ -2292,6 +3571,8 @@ DependencyClassification classify_dependencies(const std::vector<std::string>& d
                 else
                     result.unknown.push_back(dependency_display_with_constraint_note(dependency, dependency));
             }
+        } catch(const AurRpcResponseError&) {
+            throw;
         } catch(const std::exception& e) {
             Logger::warn("Failed to check AUR dependency " + package_name + ": " + e.what());
             std::vector<ProvidedDependency> providers = find_repo_providers(package_name);
@@ -2361,6 +3642,8 @@ RecursiveDependencyNode resolve_recursive_dependency(
     std::optional<AurPackageInfo> info;
     try {
         info = AurClient::info(node.package_name);
+    } catch(const AurRpcResponseError&) {
+        throw;
     } catch(const std::exception& e) {
         Logger::warn("Failed to check AUR dependency " + node.package_name + ": " + e.what());
         node.kind = DependencyKind::Unknown;
@@ -2382,7 +3665,7 @@ RecursiveDependencyNode resolve_recursive_dependency(
     }
 
     node.kind = DependencyKind::Aur;
-    node.package_base = package_base_or_name(info.value());
+    node.package_base = package_base_name(info.value());
     if(!visited.insert(node.package_base).second) {
         node.already_visited = true;
         return node;
@@ -2456,7 +3739,7 @@ void add_build_plan_split_package_target(BuildPlan& plan, const AurPackageInfo& 
 void add_build_plan_metadata_risk(BuildPlan& plan, const AurPackageInfo& info) {
     if(info.Conflicts.empty() && info.Replaces.empty()) return;
 
-    std::string package_base = package_base_or_name(info);
+    std::string package_base = package_base_name(info);
     auto same_package = [&info, &package_base](const BuildPlanMetadataRisk& existing) {
         return existing.package_name == info.Name && existing.package_base == package_base;
     };
@@ -2469,7 +3752,7 @@ void add_build_plan_metadata_risk(BuildPlan& plan, const AurPackageInfo& info) {
 }
 
 void add_build_plan_entry(BuildPlan& plan, const AurPackageInfo& info) {
-    std::string package_base = package_base_or_name(info);
+    std::string package_base = package_base_name(info);
     auto        same_base = [&package_base](const BuildPlanEntry& existing) { return existing.package_base == package_base; };
     auto        it = std::find_if(plan.order.begin(), plan.order.end(), same_base);
     add_build_plan_split_package_target(plan, info);
@@ -2509,6 +3792,8 @@ void collect_aur_build_plan(
     std::optional<AurPackageInfo> info;
     try {
         info = AurClient::info(package_name);
+    } catch(const AurRpcResponseError&) {
+        throw;
     } catch(const std::exception& e) {
         Logger::warn("Failed to fetch AUR info for " + package_name + ": " + e.what());
         add_unique_value(plan.unresolved, package_name);
@@ -2523,7 +3808,7 @@ void collect_aur_build_plan(
     // POLICY(#150): visited PackageBase で再帰を打ち切る場合も、package 単位の raw metadata は先に保持する。
     add_build_plan_metadata_risk(plan, info.value());
 
-    std::string build_unit = package_base_or_name(info.value());
+    std::string build_unit = package_base_name(info.value());
     if(visited.count(build_unit) > 0) return;
     if(visiting.count(build_unit) > 0) {
         add_unique_value(plan.cycles, build_unit);
@@ -2552,6 +3837,8 @@ void collect_aur_build_plan(
         std::optional<AurPackageInfo> dependency_info;
         try {
             dependency_info = AurClient::info(dep_name);
+        } catch(const AurRpcResponseError&) {
+            throw;
         } catch(const std::exception& e) {
             Logger::warn("Failed to check AUR dependency " + dep_name + ": " + e.what());
         }
@@ -2821,6 +4108,267 @@ std::string aur_git_url_for_package_base(const std::string& package_base) {
     return AUR_BASE_URL + package_base + ".git";
 }
 
+namespace {
+
+std::optional<struct stat> export_entry_status_at(
+        int parent_descriptor, const std::string& leaf_name,
+        const fs::path& display_path) {
+    struct stat status {};
+    if(fstatat(
+               parent_descriptor, leaf_name.c_str(), &status,
+               AT_SYMLINK_NOFOLLOW) == 0) {
+        return status;
+    }
+    if(errno == ENOENT) return std::nullopt;
+    throw std::runtime_error(
+            "Unable to inspect export path " + display_path.string() + ": " +
+            std::strerror(errno));
+}
+
+void require_regular_export_pkgbuild(
+        int checkout_descriptor, const fs::path& pkgbuild_path) {
+    std::optional<struct stat> status = export_entry_status_at(
+            checkout_descriptor, "PKGBUILD", pkgbuild_path);
+    if(!status.has_value() || !S_ISREG(status->st_mode)) {
+        throw std::runtime_error(
+                "Exported PKGBUILD is not a regular non-symlink file: " +
+                pkgbuild_path.string());
+    }
+}
+
+void require_export_git_directory(const TemporaryDirectoryGuard& checkout) {
+    fs::path git_path = checkout.display_path() / ".git";
+    int git_descriptor = openat(
+            checkout.directory_descriptor(), ".git",
+            O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+    if(git_descriptor < 0) {
+        throw std::runtime_error(
+                "Cloned AUR repository is missing a regular .git directory: " +
+                checkout.display_path().string());
+    }
+    OwnedFileDescriptor git_directory(git_descriptor);
+    require_directory_identity(
+            git_directory.get(), "exported .git directory " + git_path.string());
+}
+
+} // namespace
+
+AurExportSource resolve_aur_export_source(const std::string& target) {
+    require_valid_aur_export_target(target);
+
+    std::optional<AurPackageInfo> info;
+    try {
+        info = AurClient::info_strict(target);
+    } catch(const std::exception& e) {
+        throw std::runtime_error("Failed to resolve AUR package " + target + ": " + e.what());
+    }
+    if(!info.has_value()) {
+        throw std::runtime_error("AUR package not found: " + target);
+    }
+    if(!is_valid_aur_export_identifier(info->PackageBase)) {
+        throw std::runtime_error(
+                "Invalid AUR PackageBase for export: " + info->PackageBase);
+    }
+
+    return AurExportSource{
+            target, info->PackageBase, aur_git_url_for_package_base(info->PackageBase)};
+}
+
+AnchoredDirectory require_export_current_directory() {
+    int descriptor = open(".", O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+    if(descriptor < 0) {
+        throw std::runtime_error(
+                "Unable to open current directory: " + std::string(std::strerror(errno)));
+    }
+    OwnedFileDescriptor current_directory_descriptor(descriptor);
+    DirectoryIdentity current_identity = require_directory_identity(
+            descriptor, "current export directory");
+
+    std::error_code ec;
+    fs::path        current_directory = fs::current_path(ec);
+    if(ec) {
+        throw std::runtime_error("Unable to read current directory: " + ec.message());
+    }
+    current_directory = fs::canonical(current_directory, ec);
+    if(ec) {
+        throw std::runtime_error("Unable to canonicalize current directory: " + ec.message());
+    }
+
+    struct stat named_status {};
+    if(fstatat(
+               AT_FDCWD, current_directory.c_str(), &named_status,
+               AT_SYMLINK_NOFOLLOW) != 0) {
+        throw std::runtime_error(
+                "Unable to revalidate current directory " + current_directory.string() +
+                ": " + std::strerror(errno));
+    }
+    if(!directory_identity_matches(current_identity, named_status)) {
+        throw std::runtime_error(
+                "Refusing changed current directory path: " +
+                current_directory.string());
+    }
+    return AnchoredDirectory::adopt_current_directory(
+            current_directory, current_directory_descriptor.release(), current_identity);
+}
+
+AnchoredDirectory require_export_temporary_parent() {
+    std::error_code ec;
+    fs::path temporary_parent = fs::temp_directory_path(ec);
+    if(ec) {
+        throw std::runtime_error("Unable to resolve temporary directory: " + ec.message());
+    }
+    temporary_parent = fs::canonical(temporary_parent, ec);
+    if(ec) {
+        throw std::runtime_error("Unable to canonicalize temporary directory: " + ec.message());
+    }
+    return AnchoredDirectory::open_path(temporary_parent, "temporary directory");
+}
+
+fs::path require_missing_export_destination(
+        const AnchoredDirectory& current_directory, const std::string& package_base) {
+    if(!is_valid_aur_export_identifier(package_base)) {
+        throw std::runtime_error("Invalid AUR PackageBase for export: " + package_base);
+    }
+
+    fs::path destination_path =
+            (current_directory.display_path() / package_base).lexically_normal();
+    // POLICY(#167): export destination は command 開始時 cwd の direct child に固定する。
+    if(destination_path.parent_path() != current_directory.display_path() ||
+       !is_path_contained(current_directory.display_path(), destination_path, false)) {
+        throw std::runtime_error(
+                "Export destination resolves outside current directory: " + destination_path.string());
+    }
+
+    if(export_entry_status_at(
+               current_directory.descriptor(), package_base,
+               destination_path)
+               .has_value()) {
+        throw std::runtime_error("Export destination already exists: " + destination_path.string());
+    }
+    return destination_path;
+}
+
+void validate_aur_export_checkout(
+        const AurExportSource& source, const TemporaryDirectoryGuard& checkout) {
+    checkout.require_owned_identity();
+    require_export_git_directory(checkout);
+    std::string remote_command =
+            "git -C " + shell_quote(checkout.anchored_path().string()) +
+            " config --local --get remote.origin.url 2>/dev/null";
+    CapturedCommandResult remote_result =
+            capture_command_output(remote_command.c_str());
+    if(remote_result.exit_code != 0) {
+        throw std::runtime_error(
+                "Failed to read local remote.origin.url for AUR PackageBase " +
+                source.package_base + " (git config exit " +
+                std::to_string(remote_result.exit_code) + ").");
+    }
+    if(remote_result.output.empty()) {
+        throw std::runtime_error(
+                "Missing remote.origin.url for AUR PackageBase " + source.package_base + ".");
+    }
+    if(!remote_url_matches_expected(remote_result.output, source.git_url)) {
+        throw std::runtime_error(
+                "Remote URL mismatch for AUR PackageBase " + source.package_base +
+                ": " + remote_result.output);
+    }
+
+    require_regular_export_pkgbuild(
+            checkout.directory_descriptor(), checkout.display_path() / "PKGBUILD");
+    checkout.require_owned_identity();
+}
+
+void clone_and_validate_aur_export(
+        const AurExportSource& source, const TemporaryDirectoryGuard& checkout) {
+    checkout.require_owned_identity();
+    std::string clone_command =
+            "git clone --quiet -- " + shell_quote(source.git_url) + " " +
+            shell_quote(checkout.anchored_path().string()) + " > /dev/null";
+    if(run_command(clone_command) != 0) {
+        throw std::runtime_error("Failed to clone AUR PackageBase " + source.package_base + ".");
+    }
+    validate_aur_export_checkout(source, checkout);
+}
+
+std::string read_pkgbuild_bytes(const TemporaryDirectoryGuard& checkout) {
+    checkout.require_owned_identity();
+    fs::path pkgbuild_path = checkout.display_path() / "PKGBUILD";
+    require_regular_export_pkgbuild(checkout.directory_descriptor(), pkgbuild_path);
+
+    int descriptor = openat(
+            checkout.directory_descriptor(), "PKGBUILD",
+            O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
+    if(descriptor < 0) {
+        throw std::runtime_error(
+                "Failed to open PKGBUILD " + pkgbuild_path.string() + ": " + std::strerror(errno));
+    }
+    OwnedFileDescriptor file(descriptor);
+
+    struct stat file_status {};
+    if(fstat(file.get(), &file_status) != 0) {
+        throw std::runtime_error(
+                "Failed to inspect PKGBUILD " + pkgbuild_path.string() + ": " + std::strerror(errno));
+    }
+    if(!S_ISREG(file_status.st_mode)) {
+        throw std::runtime_error(
+                "Exported PKGBUILD is not a regular file: " + pkgbuild_path.string());
+    }
+
+    std::string contents;
+    if(file_status.st_size > 0 &&
+       static_cast<unsigned long long>(file_status.st_size) <=
+               static_cast<unsigned long long>(contents.max_size())) {
+        contents.reserve(static_cast<size_t>(file_status.st_size));
+    }
+
+    std::array<char, 8192> buffer;
+    while(true) {
+        ssize_t bytes_read = ::read(file.get(), buffer.data(), buffer.size());
+        if(bytes_read > 0) {
+            contents.append(buffer.data(), static_cast<size_t>(bytes_read));
+            continue;
+        }
+        if(bytes_read == 0) break;
+        if(errno == EINTR) continue;
+        throw std::runtime_error(
+                "Failed to read PKGBUILD " + pkgbuild_path.string() + ": " + std::strerror(errno));
+    }
+    checkout.require_owned_identity();
+    return contents;
+}
+
+void rename_export_without_replacement(
+        TemporaryDirectoryGuard& temporary_directory,
+        const AnchoredDirectory& destination_parent, const std::string& destination_name,
+        const fs::path& destination_display_path) {
+    if(export_entry_status_at(
+               destination_parent.descriptor(), destination_name,
+               destination_display_path)
+               .has_value()) {
+        throw std::runtime_error(
+                "Export destination already exists: " +
+                destination_display_path.string());
+    }
+    temporary_directory.require_owned_identity();
+
+    // LANDMINE(#167): std::filesystem::rename may replace an entry created after preflight.
+    // directory fd と renameat2(NOREPLACE) で、開始時 cwd 以外や existing path へ publish しない。
+    if(syscall(
+               SYS_renameat2, temporary_directory.parent_descriptor(),
+               temporary_directory.leaf_name().c_str(), destination_parent.descriptor(),
+               destination_name.c_str(), RENAME_NOREPLACE) != 0) {
+        if(errno == EEXIST || errno == ENOTEMPTY) {
+            throw std::runtime_error(
+                    "Export destination already exists: " +
+                    destination_display_path.string());
+        }
+        throw std::runtime_error(
+                "Failed to publish AUR export to " + destination_display_path.string() + ": " +
+                std::strerror(errno));
+    }
+    temporary_directory.release();
+}
+
 void print_fetch_plan(const BuildPlan& plan) {
     std::cout << "Fetch targets:" << std::endl;
     if(plan.order.empty()) {
@@ -2864,18 +4412,22 @@ void print_fetch_plan(const BuildPlan& plan) {
 
 void fetch_aur_package_base(const std::string& package_base) {
     require_valid_package_name(package_base);
-    fs::path cache_dir = get_cache_dir();
-    fs::path repo_dir = cache_dir / package_base;
+    ValidatedCacheRoot cache_root = prepare_trusted_cache_root();
+    ValidatedCachePath repo_path = require_trusted_cache_path(
+            cache_root, cache_root.path / package_base,
+            CachePathRequirement::ExistingOrMissing);
     std::string git_url = aur_git_url_for_package_base(package_base);
 
-    if(!fs::exists(cache_dir)) fs::create_directories(cache_dir);
-
-    if(fs::exists(repo_dir)) {
-        if(!fs::is_directory(repo_dir)) throw std::runtime_error(repo_dir.string() + " exists but is not a directory.");
-        if(!fs::exists(repo_dir / ".git")) throw std::runtime_error(repo_dir.string() + " exists but is not a git repository.");
+    if(repo_path.exists) {
+        if(!repo_path.is_directory) {
+            throw std::runtime_error(repo_path.path.string() + " exists but is not a directory.");
+        }
+        if(!fs::exists(repo_path.canonical_path / ".git")) {
+            throw std::runtime_error(repo_path.path.string() + " exists but is not a git repository.");
+        }
 
         // POLICY: fetch command は既存 clone で git fetch まで。worktree update/pull/reset/build/install はしない。
-        WorkDirGuard wd_repo(repo_dir);
+        WorkDirGuard wd_repo(repo_path);
         std::string  current_url = trim(exec_command("git config --get remote.origin.url"));
         if(current_url.empty()) throw std::runtime_error("Missing remote.origin.url for " + package_base + ".");
         if(!remote_url_matches_expected(current_url, git_url)) {
@@ -2888,30 +4440,40 @@ void fetch_aur_package_base(const std::string& package_base) {
     }
 
     Logger::info("Cloning " + package_base + "...");
-    WorkDirGuard    wd_cache(cache_dir);
-    DirCleanupGuard cleanup_guard(repo_dir);
+    ValidatedCachePath clone_path =
+            revalidate_trusted_cache_path(repo_path, CachePathRequirement::Missing);
+    WorkDirGuard    wd_cache(cache_root);
+    DirCleanupGuard cleanup_guard(clone_path);
     if(run_command("git clone " + shell_quote(git_url) + " " + shell_quote(package_base)) != 0) {
         throw std::runtime_error("Failed to clone " + package_base + ".");
     }
+
+    // POLICY(#175): clone が生成した entry も、成功扱いする前に同じ cache boundary で検証する。
+    require_trusted_cache_path(
+            cache_root, clone_path.path, CachePathRequirement::ExistingDirectory);
     cleanup_guard.commit();
 }
 
 // source build / AUR install
-void build_from_git(const std::string& pkg_name, const std::string& clone_name, const std::string& git_url, const std::string& custom_env, bool only_if_updated) {
+void build_from_git(
+        const std::string& pkg_name, const std::string& clone_name, const std::string& git_url,
+        const std::string& custom_env, bool only_if_updated,
+        const SourceSyncOptions& source_sync_options) {
     require_valid_package_name(pkg_name);
     require_valid_package_name(clone_name);
     Logger::info("Processing " + pkg_name + "...");
-    fs::path build_base = get_cache_dir();
-    fs::path pkg_dir = build_base / clone_name;
-    if(!fs::exists(build_base)) fs::create_directories(build_base);
+    ValidatedCacheRoot build_root = prepare_trusted_cache_root();
+    ValidatedCachePath pkg_path = require_trusted_cache_path(
+            build_root, build_root.path / clone_name,
+            CachePathRequirement::ExistingOrMissing);
 
     {
-        WorkDirGuard wd(build_base);
+        WorkDirGuard wd(build_root);
         bool         needs_clone = true;
 
-        if(fs::exists(pkg_dir) && fs::exists(pkg_dir / ".git")) {
+        if(pkg_path.exists && pkg_path.is_directory && fs::exists(pkg_path.canonical_path / ".git")) {
             {
-                WorkDirGuard wd_repo(pkg_dir);
+                WorkDirGuard wd_repo(pkg_path);
                 std::string  current_url = exec_command("git config --get remote.origin.url");
                 if(!remote_url_matches_expected(current_url, git_url)) {
                     Logger::warn("Remote URL mismatch. Re-cloning...");
@@ -2922,7 +4484,7 @@ void build_from_git(const std::string& pkg_name, const std::string& clone_name, 
 
             if(!needs_clone) {
                 Logger::info("Updating repository...");
-                WorkDirGuard wd_repo(pkg_dir);
+                WorkDirGuard wd_repo(pkg_path);
                 if(run_command("git fetch origin") != 0) throw std::runtime_error("Failed to fetch updates.");
 
                 std::string branch = get_git_branch();
@@ -2943,6 +4505,7 @@ void build_from_git(const std::string& pkg_name, const std::string& clone_name, 
                 }
 
                 // LANDMINE: reset は build/install 経路だけで許可する。fetch 経路へ持ち込まない。
+                revalidate_trusted_cache_path(pkg_path, CachePathRequirement::ExistingDirectory);
                 if(run_command("git reset --hard " + shell_quote("origin/" + branch)) != 0) {
                     throw std::runtime_error("Failed to reset repository.");
                 }
@@ -2950,21 +4513,31 @@ void build_from_git(const std::string& pkg_name, const std::string& clone_name, 
         }
 
         if(needs_clone) {
-            if(fs::exists(pkg_dir)) fs::remove_all(pkg_dir);
+            if(pkg_path.exists) {
+                // POLICY(#175): remote mismatch/non-repository cleanup is limited to the validated cache entry.
+                remove_trusted_cache_path(pkg_path);
+            }
+            pkg_path = require_trusted_cache_path(
+                    build_root, pkg_path.path, CachePathRequirement::Missing);
             Logger::info("Cloning repository...");
-            DirCleanupGuard cleanup_guard(pkg_dir);
+            DirCleanupGuard cleanup_guard(pkg_path);
             if(run_command("git clone " + shell_quote(git_url) + " " + shell_quote(clone_name)) != 0) {
                 throw std::runtime_error("Failed to clone " + clone_name);
             }
+
+            pkg_path = require_trusted_cache_path(
+                    build_root, pkg_path.path, CachePathRequirement::ExistingDirectory);
             cleanup_guard.commit();
         }
     }
 
     {
-        WorkDirGuard wd(pkg_dir);
+        pkg_path = revalidate_trusted_cache_path(
+                pkg_path, CachePathRequirement::ExistingDirectory);
+        WorkDirGuard wd(pkg_path);
 
         if(only_if_updated) {
-            UpdateCheckResult update_check = check_update_status(pkg_name, pkg_dir);
+            UpdateCheckResult update_check = check_update_status(pkg_name, pkg_path.canonical_path);
             if(update_check == UpdateCheckResult::UpToDate) {
                 return;// 更新不要なので終了
             }
@@ -2986,8 +4559,9 @@ void build_from_git(const std::string& pkg_name, const std::string& clone_name, 
             }
         }
 
-        review_build_files(pkg_dir);
-        MakepkgBuildOptions makepkg_options = resolve_makepkg_build_options(pkg_dir);
+        review_build_files(pkg_path.canonical_path);
+        MakepkgBuildOptions makepkg_options =
+                resolve_makepkg_build_options(pkg_path.canonical_path, source_sync_options);
         std::string build_cmd;
         if(!trim(custom_env).empty()) {
             Logger::info("Applying custom build flags: " + custom_env);
@@ -2996,16 +4570,28 @@ void build_from_git(const std::string& pkg_name, const std::string& clone_name, 
             Logger::info("Using default makepkg.conf settings.");
             build_cmd = makepkg_install_command(makepkg_options);
         }
+        // LANDMINE(#175): editor/review の後にも entry を再検証し、cache外cwdでinstallへ進ませない。
+        revalidate_trusted_cache_path(pkg_path, CachePathRequirement::ExistingDirectory);
         if(run_command(build_cmd) != 0) throw std::runtime_error("Build failed.");
     }
 }
 
-void install_smart_source(const std::string& pkg_name, bool only_if_updated) {
+void install_smart_source(
+        const std::string& pkg_name, bool only_if_updated,
+        const SourceSyncOptions& source_sync_options) {
     std::string env = get_package_env(pkg_name);
     PackageBuildSource source = resolve_build_source(pkg_name);
     require_executable_build_source_plan(source);
 
-    build_from_git(source.requested_name, source.clone_name, source.git_url, env, only_if_updated);
+    build_from_git(
+            source.requested_name, source.clone_name, source.git_url, env, only_if_updated,
+            source_sync_options);
+}
+
+void require_valid_aur_package_target(const std::string& target) {
+    if(target.find('/') != std::string::npos || !is_valid_package_name(target)) {
+        throw std::runtime_error("Invalid AUR package target: " + target);
+    }
 }
 
 void require_executable_sync_install_target(const std::string& pkg_name) {
@@ -3019,25 +4605,61 @@ void require_executable_sync_install_target(const std::string& pkg_name) {
     require_executable_install_plan(pkg_name, plan);
 }
 
-void install_aur_build_plan(const std::string& target) {
-    BuildPlan plan = resolve_build_plan(target);
-    require_executable_install_plan(target, plan);
-
+void execute_aur_build_plan(
+        const BuildPlan& plan, bool use_source_build_preferences,
+        const SourceSyncOptions& source_sync_options) {
     for(const auto& entry : plan.order) {
         std::string package_names = join_comma_display_values(entry.package_names);
         Logger::info("Building AUR PackageBase: " + entry.package_base);
         Logger::info("Target package(s): " + package_names);
 
         std::string pkg_name = entry.package_names.empty() ? entry.package_base : entry.package_names.front();
-        std::string env = get_package_env(pkg_name);
-        if(env.empty() && pkg_name != entry.package_base) env = get_package_env(entry.package_base);
+        std::string env;
+        if(use_source_build_preferences) {
+            env = get_package_env(pkg_name);
+            if(env.empty() && pkg_name != entry.package_base) env = get_package_env(entry.package_base);
+        }
 
         try {
-            build_from_git(pkg_name, entry.package_base, aur_git_url_for_package_base(entry.package_base), env, false);
+            build_from_git(
+                    pkg_name, entry.package_base, aur_git_url_for_package_base(entry.package_base),
+                    env, false, source_sync_options);
         } catch(const std::exception& e) {
             throw std::runtime_error(
                     "Failed while building/installing PackageBase " + entry.package_base + " (" + package_names +
                     "): " + e.what());
+        }
+    }
+}
+
+void install_aur_build_plan(
+        const std::string& target, const SourceSyncOptions& source_sync_options) {
+    BuildPlan plan = resolve_build_plan(target);
+    require_executable_install_plan(target, plan);
+    execute_aur_build_plan(plan, true, source_sync_options);
+}
+
+void preflight_upgrade_source_metadata() {
+    if(!fs::exists(PACKAGE_BUILD_DIR)) return;
+
+    // POLICY(#174): upgradeの既存pacman-first実行は維持するが、schema violationだけは
+    // system transactionより前に全source packageのplanを横断して拒否する。
+    for(const auto& entry : fs::directory_iterator(PACKAGE_BUILD_DIR)) {
+        if(!entry.is_regular_file()) continue;
+
+        std::string pkg_name = entry.path().filename().string();
+        if(!is_valid_package_name(pkg_name)) continue;
+        try {
+            PackageBuildSource source = resolve_build_source(pkg_name);
+            if(source.is_aur) {
+                // LANDMINE(#174): split/install guardより先にplan全体のschemaを検証する。
+                // preflightでは実行可能性を判定せず、ordinary plan errorは実行phaseへ委ねる。
+                static_cast<void>(resolve_build_plan(source.requested_name));
+            }
+        } catch(const AurRpcResponseError&) {
+            throw;
+        } catch(const std::exception&) {
+            // not-found/transport/通常plan errorは、従来どおりsystem upgrade後の実行phaseで報告する。
         }
     }
 }
@@ -3100,7 +4722,7 @@ int cmd_deps(const std::vector<std::string>& targets, const std::vector<std::str
             }
             if(recursive) {
                 std::set<std::string> visited;
-                visited.insert(package_base_or_name(info.value()));
+                visited.insert(package_base_name(info.value()));
                 std::vector<RecursiveDependencyNode> recursive_nodes =
                         resolve_recursive_dependencies(info.value(), visited, 1, MAX_RECURSIVE_DEP_DEPTH);
                 std::cout << std::endl;
@@ -3160,7 +4782,8 @@ int cmd_fetch(const std::vector<std::string>& targets, const std::vector<std::st
         return 1;
     }
 
-    bool failed = false;
+    bool                                           failed = false;
+    std::vector<std::pair<std::string, BuildPlan>> plans;
     for(size_t i = 0; i < targets.size(); ++i) {
         const auto& target = targets[i];
         require_valid_package_name(target);
@@ -3172,35 +4795,263 @@ int cmd_fetch(const std::vector<std::string>& targets, const std::vector<std::st
             print_fetch_plan(plan);
             // POLICY(#150): fetch は read-only retrieval stage。metadata risk は表示するが取得を妨げない。
             require_fetchable_build_plan(target, plan);
-
-            for(const auto& entry : plan.order) {
-                try {
-                    fetch_aur_package_base(entry.package_base);
-                } catch(const std::exception& e) {
-                    Logger::error(e.what());
-                    failed = true;
-                }
-            }
+            plans.emplace_back(target, std::move(plan));
         } catch(const std::exception& e) {
             Logger::error("Failed to fetch repositories for " + target + ": " + e.what());
             failed = true;
         }
     }
 
+    // POLICY(#174): 全targetのschema/semantic preflightが成功するまでclone/fetchへ進まない。
+    if(failed) return 1;
+
+    for(const auto& [target, plan] : plans) {
+        for(const auto& entry : plan.order) {
+            try {
+                fetch_aur_package_base(entry.package_base);
+            } catch(const std::exception& e) {
+                Logger::error("Failed to fetch repositories for " + target + ": " + e.what());
+                failed = true;
+            }
+        }
+    }
+
     return failed ? 1 : 0;
 }
 
-int cmd_sync_info(
-        const std::vector<std::string>& args, const std::vector<std::string>& flags,
-        const std::vector<std::string>& targets, bool use_sudo) {
-    std::string pacman_prefix = use_sudo ? "sudo pacman " : "pacman ";
-    if(targets.empty()) return run_command(pacman_prefix + join_pacman_args(args));
+int cmd_export_pkgbuild_tree(const std::string& target) {
+    // command 開始時の cwd を RPC/clone より前に固定し、後続 path 計算の親として使い続ける。
+    AnchoredDirectory current_directory = require_export_current_directory();
+    AurExportSource   source = resolve_aur_export_source(target);
+    fs::path destination_path =
+            require_missing_export_destination(current_directory, source.package_base);
 
-    bool                     failed = false;
+    if(source.requested_name != source.package_base) {
+        Logger::info(
+                source.requested_name + " -> PackageBase " + source.package_base);
+    }
+
+    TemporaryDirectoryGuard temporary_directory =
+            TemporaryDirectoryGuard::create(current_directory);
+    clone_and_validate_aur_export(source, temporary_directory);
+    // LANDMINE(#167): clone後のtreeをpublish直前にもfd基準で再検証する。
+    validate_aur_export_checkout(source, temporary_directory);
+    rename_export_without_replacement(
+            temporary_directory, current_directory, source.package_base,
+            destination_path);
+
+    Logger::info(
+            "Exported AUR PackageBase " + source.package_base +
+            " in the command-start current directory.");
+    return 0;
+}
+
+int cmd_print_pkgbuild(const std::string& target) {
+    AurExportSource source = resolve_aur_export_source(target);
+    if(source.requested_name != source.package_base) {
+        Logger::info(
+                source.requested_name + " -> PackageBase " + source.package_base);
+    }
+
+    AnchoredDirectory temporary_parent = require_export_temporary_parent();
+    TemporaryDirectoryGuard temporary_directory =
+            TemporaryDirectoryGuard::create(temporary_parent);
+    clone_and_validate_aur_export(source, temporary_directory);
+    std::string pkgbuild = read_pkgbuild_bytes(temporary_directory);
+    if(pkgbuild.size() >
+       static_cast<size_t>(std::numeric_limits<std::streamsize>::max())) {
+        throw std::runtime_error("PKGBUILD is too large to write to stdout.");
+    }
+
+    // POLICY(#167): pre-output failure時にstdoutを空に保つため、clone/read/cleanup後にだけ出力する。
+    temporary_directory.cleanup();
+    std::cout.write(pkgbuild.data(), static_cast<std::streamsize>(pkgbuild.size()));
+    std::cout.flush();
+    if(!std::cout) {
+        throw std::runtime_error("Failed to write PKGBUILD to stdout.");
+    }
+    return 0;
+}
+
+int cmd_sync_search(
+        const ParsedCliArguments& parsed, bool use_sudo,
+        PackageSourceSelection source_selection) {
+    std::string pacman_prefix = use_sudo ? "sudo pacman " : "pacman ";
+    switch(source_selection) {
+    case PackageSourceSelection::Auto: {
+        if(use_sudo) preflight_aur_search_schema(parsed.targets);
+        int pacman_status =
+                run_command(pacman_prefix + join_pacman_args(parsed.ordered_pacman_args));
+        Logger::info("Searching AUR...");
+        bool aur_found = search_aur(parsed.targets);
+        return (pacman_status == 0 || aur_found) ? 0 : 1;
+    }
+    case PackageSourceSelection::AurOnly:
+        if(parsed_has_semantic_pacman_option(parsed, "--needed")) {
+            Logger::error("Unsupported pacman option for AUR search: --needed");
+            return 1;
+        }
+        Logger::info("Searching AUR...");
+        return search_aur(parsed.targets, false) ? 0 : 1;
+    case PackageSourceSelection::RepoOnly:
+        return run_command(pacman_prefix + join_pacman_args(parsed.ordered_pacman_args));
+    }
+    throw std::logic_error("Unknown package source selection.");
+}
+
+int cmd_sync_install(
+        const ParsedCliArguments& parsed, bool is_sys_upgrade,
+        PackageSourceSelection source_selection) {
+    const SourceSyncOptions source_sync_options = parse_source_sync_options(parsed);
+
+    if(source_selection == PackageSourceSelection::RepoOnly) {
+        // POLICY(#168): RepoOnly is one ordered binary repository transaction; no classification probe.
+        return run_command("sudo pacman " + join_pacman_args(parsed.ordered_pacman_args));
+    }
+
+    if(source_selection == PackageSourceSelection::AurOnly) {
+        if(parsed.targets.empty()) {
+            Logger::error("Missing AUR package target.");
+            return 1;
+        }
+        for(const auto& target : parsed.targets) {
+            require_valid_aur_package_target(target);
+        }
+
+        std::optional<std::string> unsupported_option = unsupported_source_sync_option(parsed);
+        if(unsupported_option.has_value()) {
+            Logger::error(
+                    "Unsupported pacman option for AUR/source-build target: " +
+                    unsupported_option.value());
+            Logger::error("Rerun --aur without this option.");
+            return 1;
+        }
+
+        std::vector<BuildPlan> plans;
+        plans.reserve(parsed.targets.size());
+        for(const auto& target : parsed.targets) {
+            BuildPlan plan = resolve_build_plan(target);
+            require_executable_install_plan(target, plan);
+            plans.push_back(std::move(plan));
+        }
+
+        // POLICY(#168): every root target is fully planned and guarded before clone/build/install starts.
+        for(const auto& plan : plans) {
+            execute_aur_build_plan(plan, false, source_sync_options);
+        }
+        return 0;
+    }
+
+    if(parsed.targets.empty()) {
+        return run_command("sudo pacman " + join_pacman_args(parsed.ordered_pacman_args));
+    }
+
     std::vector<std::string> repo_targets;
+    std::vector<std::string> aur_targets;
+    std::set<size_t>         aur_target_token_indices;
+    for(size_t i = 0; i < parsed.targets.size(); ++i) {
+        const std::string& target = parsed.targets[i];
+        require_valid_package_name(target);
+        if(is_force_source(target)) {
+            aur_targets.push_back(target);
+            aur_target_token_indices.insert(parsed.target_token_indices[i]);
+        } else if(is_repo_package(target)) {
+            repo_targets.push_back(target);
+        } else {
+            aur_targets.push_back(target);
+            aur_target_token_indices.insert(parsed.target_token_indices[i]);
+        }
+    }
+    if(!aur_targets.empty()) {
+        std::optional<std::string> unsupported_option = unsupported_source_sync_option(parsed);
+        if(unsupported_option.has_value()) {
+            Logger::error(
+                    "Unsupported pacman option for AUR/source-build target: " +
+                    unsupported_option.value());
+            Logger::error(
+                    "Split official repository and AUR/source-build targets, or rerun without this option.");
+            return 1;
+        }
+    }
+    for(const auto& package : aur_targets) {
+        require_executable_sync_install_target(package);
+    }
+    if(!repo_targets.empty() || is_sys_upgrade) {
+        // POLICY(#173): AUR targetのtokenだけを除き、option/value/official targetの元順序を維持する。
+        std::vector<std::string> pacman_args =
+                ordered_pacman_args_excluding_targets(parsed, aur_target_token_indices);
+        if(run_command("sudo pacman " + join_pacman_args(pacman_args)) != 0) {
+            throw std::runtime_error("Pacman failed.");
+        }
+    }
+    if(!aur_targets.empty()) {
+        // Auto keeps the legacy source-build preference and AUR classification behavior.
+        for(const auto& package : aur_targets) {
+            if(is_repo_package(package))
+                install_smart_source(package, false, source_sync_options);
+            else
+                install_aur_build_plan(package, source_sync_options);
+        }
+    }
+    return 0;
+}
+
+int cmd_sync_info(
+        const ParsedCliArguments& parsed, bool use_sudo,
+        PackageSourceSelection source_selection) {
+    std::string pacman_prefix = use_sudo ? "sudo pacman " : "pacman ";
+
+    if(source_selection == PackageSourceSelection::RepoOnly) {
+        return run_command(pacman_prefix + join_pacman_args(parsed.ordered_pacman_args));
+    }
+
+    if(source_selection == PackageSourceSelection::AurOnly) {
+        if(parsed_has_semantic_pacman_option(parsed, "--needed")) {
+            Logger::error("Unsupported pacman option for AUR info: --needed");
+            return 1;
+        }
+        if(parsed.targets.empty()) {
+            Logger::error("Missing AUR package target.");
+            return 1;
+        }
+        for(const auto& target : parsed.targets) {
+            require_valid_aur_package_target(target);
+        }
+
+        bool                        failed = false;
+        std::vector<AurPackageInfo> aur_infos;
+        for(const auto& target : parsed.targets) {
+            try {
+                std::optional<AurPackageInfo> info = AurClient::info(target);
+                if(info.has_value())
+                    aur_infos.push_back(info.value());
+                else {
+                    Logger::error("AUR package not found: " + target);
+                    failed = true;
+                }
+            } catch(const std::exception& e) {
+                Logger::error("Failed to fetch AUR info for " + target + ": " + e.what());
+                failed = true;
+            }
+        }
+        for(size_t i = 0; i < aur_infos.size(); ++i) {
+            if(i > 0) std::cout << std::endl;
+            print_aur_info(aur_infos[i]);
+        }
+        return failed ? 1 : 0;
+    }
+
+    if(parsed.targets.empty()) {
+        return run_command(pacman_prefix + join_pacman_args(parsed.ordered_pacman_args));
+    }
+
+    bool                        failed = false;
+    std::vector<std::string>    repo_targets;
+    std::set<size_t>            aur_target_token_indices;
     std::vector<AurPackageInfo> aur_infos;
 
-    for(const auto& target : targets) {
+    for(size_t i = 0; i < parsed.targets.size(); ++i) {
+        const std::string& target = parsed.targets[i];
         if(target.find('/') != std::string::npos) {
             repo_targets.push_back(target);
             continue;
@@ -3216,19 +5067,23 @@ int cmd_sync_info(
             std::optional<AurPackageInfo> info = AurClient::info(target);
             if(info.has_value()) {
                 aur_infos.push_back(info.value());
+                aur_target_token_indices.insert(parsed.target_token_indices[i]);
             } else {
                 Logger::error("Package not found in repos or AUR: " + target);
                 failed = true;
+                aur_target_token_indices.insert(parsed.target_token_indices[i]);
             }
         } catch(const std::exception& e) {
             Logger::error("Failed to fetch AUR info for " + target + ": " + e.what());
             failed = true;
+            aur_target_token_indices.insert(parsed.target_token_indices[i]);
         }
     }
 
     if(!repo_targets.empty()) {
-        std::vector<std::string> pacman_args = flags;
-        pacman_args.insert(pacman_args.end(), repo_targets.begin(), repo_targets.end());
+        // POLICY(#173): 同名のoption valueを残し、AUR targetのtoken位置だけを除外する。
+        std::vector<std::string> pacman_args =
+                ordered_pacman_args_excluding_targets(parsed, aur_target_token_indices);
         if(run_command(pacman_prefix + join_pacman_args(pacman_args)) != 0) failed = true;
         if(!aur_infos.empty()) std::cout << std::endl;
     }
@@ -3277,6 +5132,8 @@ int cmd_query_foreign_updates() {
                 }
             }
             aur_packages.insert(batch_results.begin(), batch_results.end());
+        } catch(const AurRpcResponseError&) {
+            throw;
         } catch(const std::exception& e) {
             Logger::error("Failed to fetch AUR info: " + std::string(e.what()));
             failed = true;
@@ -3329,7 +5186,9 @@ int cmd_build(const std::vector<std::string>& args) {
         PackageBuildSource source = resolve_build_source(pkg_name);
         require_executable_build_source_plan(source);
         // build コマンドは常にビルドする (only_if_updated = false)
-        build_from_git(source.requested_name, source.clone_name, source.git_url, custom_env, false);
+        build_from_git(
+                source.requested_name, source.clone_name, source.git_url, custom_env, false,
+                SourceSyncOptions{});
     } catch(const std::exception& e) {
         Logger::error(std::string("Build Error: ") + e.what());
         return 1;
@@ -3522,25 +5381,35 @@ void cmd_revert(const std::vector<std::string>& targets) {
 }
 
 int cmd_clean() {
-    bool failed = false;
+    // POLICY(#175): validate every cache deletion target before pacman mutation, then revalidate before remove_all.
+    // Safe-path UX remains pacman clean -> jpacker cache prompt; unsafe cache state stops before either mutation.
+    ValidatedCacheRoot              cache = prepare_trusted_cache_root();
+    std::vector<ValidatedCachePath> cleanup_targets = preflight_cache_cleanup(cache);
+    bool                            cache_has_entries = !fs::is_empty(cache.canonical_path);
+    bool                            failed = false;
     Logger::info("Cleaning package caches...");
     if(run_command("sudo pacman " + join_pacman_args({"-Sc"})) != 0) {
         Logger::warn("Pacman clean failed or cancelled.");
         failed = true;
     }
-    fs::path cache = get_cache_dir();
-    if(fs::exists(cache) && !fs::is_empty(cache)) {
-        if(ask_user("Clean jpacker build cache (" + cache.string() + ")?", PromptDefault::No)) {
+    if(cache_has_entries) {
+        if(ask_user("Clean jpacker build cache (" + cache.path.string() + ")?", PromptDefault::No)) {
             Logger::info("Removing cached build files...");
-            for(const auto& entry : fs::directory_iterator(cache)) {
-                if(entry.path().filename() == "jpacker.log") continue;
+            bool cleanup_failed = false;
+            for(const auto& target : cleanup_targets) {
                 try {
-                    fs::remove_all(entry.path());
+                    remove_trusted_cache_path(target);
                 } catch(const std::exception& e) {
-                    Logger::error("Failed to remove " + entry.path().string() + ": " + e.what());
+                    Logger::error("Failed to remove " + target.path.string() + ": " + e.what());
+                    cleanup_failed = true;
                 }
             }
-            Logger::info("jpacker cache cleaned.");
+            if(cleanup_failed) {
+                failed = true;
+                Logger::warn("jpacker cache cleanup was incomplete.");
+            } else {
+                Logger::info("jpacker cache cleaned.");
+            }
         } else
             Logger::info("Skipped jpacker cache cleaning.");
     } else
@@ -3550,6 +5419,7 @@ int cmd_clean() {
 
 int cmd_upgrade() {
     bool failed = false;
+    preflight_upgrade_source_metadata();
     Logger::info("System upgrade...");
     if(run_command("sudo pacman " + join_pacman_args({"-Syu"})) != 0) throw std::runtime_error("Update failed.");
     if(fs::exists(PACKAGE_BUILD_DIR)) {
@@ -3564,7 +5434,10 @@ int cmd_upgrade() {
                 }
                 try {
                     // upgrade 時は true (更新がある場合のみビルド)
-                    install_smart_source(pkg_name, true);
+                    install_smart_source(pkg_name, true, SourceSyncOptions{});
+                } catch(const AurRpcResponseError&) {
+                    // POLICY(#174): schema violation検出後は後続source packageのmutationへ進まない。
+                    throw;
                 } catch(const std::exception& e) {
                     Logger::error("Error updating " + pkg_name + ": " + e.what());
                     failed = true;

@@ -1,11 +1,61 @@
 #!/bin/sh
 printf 'git %s\n' "$*" >> "$JPACKER_TEST_COMMAND_LOG"
 if [ "$1" = "clone" ]; then
-    mkdir -p "$3/.git"
-    exit 0
+    clone_destination=
+    for clone_arg in "$@"; do
+        clone_destination=$clone_arg
+    done
+    if [ -n "${JPACKER_TEST_GIT_CLONE_SYMLINK_TARGET:-}" ]; then
+        ln -s "$JPACKER_TEST_GIT_CLONE_SYMLINK_TARGET" "$clone_destination"
+        exit "${JPACKER_TEST_GIT_CLONE_EXIT_CODE:-1}"
+    fi
+    if [ -n "${JPACKER_TEST_GIT_CLONE_FIXTURE_DIR:-}" ]; then
+        mkdir -p "$clone_destination"
+        if ! cp -a "$JPACKER_TEST_GIT_CLONE_FIXTURE_DIR/." "$clone_destination/"; then
+            exit 1
+        fi
+        if [ -e "$clone_destination/.jpacker-test-pkgbuild-unreadable" ]; then
+            rm "$clone_destination/.jpacker-test-pkgbuild-unreadable" || exit 1
+            chmod 000 "$clone_destination/PKGBUILD" || exit 1
+        fi
+        if [ -f "$clone_destination/.jpacker-test-final-destination" ]; then
+            final_destination=$(cat "$clone_destination/.jpacker-test-final-destination") || exit 1
+            rm "$clone_destination/.jpacker-test-final-destination" || exit 1
+            mkdir "$PWD/$final_destination" || exit 1
+            printf 'concurrent user path\n' > "$PWD/$final_destination/user-file"
+        fi
+        if [ -e "$clone_destination/.jpacker-test-rename-cwd" ]; then
+            rm "$clone_destination/.jpacker-test-rename-cwd" || exit 1
+            original_work_dir=$PWD
+            mv "$original_work_dir" "$original_work_dir-moved" || exit 1
+            mkdir "$original_work_dir" || exit 1
+        fi
+        if [ -e "$clone_destination/.jpacker-test-swap-temp-identity" ]; then
+            rm "$clone_destination/.jpacker-test-swap-temp-identity" || exit 1
+            original_clone_path=$(readlink -f "$clone_destination") || exit 1
+            mv "$original_clone_path" "$original_clone_path.owned-original" || exit 1
+            mkdir "$original_clone_path" || exit 1
+            printf 'replacement user path\n' > "$original_clone_path/user-file"
+        fi
+    else
+        mkdir -p "$clone_destination/.git"
+    fi
+    exit "${JPACKER_TEST_GIT_CLONE_EXIT_CODE:-0}"
+fi
+config_worktree=$PWD
+if [ "$1" = "-C" ] && [ "${3:-}" = "config" ]; then
+    config_worktree=$2
+    shift 2
 fi
 if [ "$1" = "config" ]; then
-    printf 'https://aur.archlinux.org/%s.git\n' "$(basename "$PWD")"
+    if [ -e "$config_worktree/.jpacker-test-missing-remote" ]; then
+        exit 1
+    fi
+    if [ -n "${JPACKER_TEST_GIT_REMOTE_URL:-}" ]; then
+        printf '%s\n' "$JPACKER_TEST_GIT_REMOTE_URL"
+        exit 0
+    fi
+    printf 'https://aur.archlinux.org/%s.git\n' "$(basename "$config_worktree")"
     exit 0
 fi
 exit 0
