@@ -32,7 +32,7 @@ _jpacker() {
             ;;
         -S)
             # パッケージ名の補完は重いので、--noedit などのオプションのみ提示
-            COMPREPLY=( $(compgen -W "--noedit --nodiff --noconfirm --rebuild --cleanbuild --rmdeps --aur --repo" -- ${cur}) )
+            COMPREPLY=( $(compgen -W "--noedit --nodiff --noconfirm --rebuild --cleanbuild --rmdeps --aur --repo --needed" -- ${cur}) )
             return 0
             ;;
         -Ss|-Si)
@@ -40,7 +40,7 @@ _jpacker() {
             return 0
             ;;
         -Syu)
-            COMPREPLY=( $(compgen -W "--noedit --nodiff --noconfirm --rebuild --cleanbuild --rmdeps" -- ${cur}) )
+            COMPREPLY=( $(compgen -W "--noedit --nodiff --noconfirm --rebuild --cleanbuild --rmdeps --needed" -- ${cur}) )
             return 0
             ;;
     esac

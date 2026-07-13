@@ -137,6 +137,11 @@ struct ParsedCliArguments {
     PackageSourceSelection      source_selection = PackageSourceSelection::Auto;
 };
 
+// pacman-compatible sync optionのうち、source buildへ意味を保って変換できるinvocation-level policy。
+struct SourceSyncOptions {
+    bool needed = false;
+};
+
 namespace {
 
 AppConfig g_config;
@@ -158,6 +163,7 @@ struct MakepkgBuildOptions {
     bool rebuild = false;
     bool clean_build = false;
     bool rm_deps = false;
+    bool needed = false;
 };
 
 enum class PromptDefault {
@@ -497,6 +503,9 @@ bool handle_info_only_option(int argc, char* argv[]);
 bool is_jpacker_global_option(const std::string& arg);
 bool apply_jpacker_global_option(const std::string& arg, ParsedCliArguments& parsed);
 std::optional<ParsedCliArguments> parse_cli_arguments(int argc, char* argv[]);
+bool parsed_has_semantic_pacman_option(
+        const ParsedCliArguments& parsed, const std::string& option);
+SourceSyncOptions parse_source_sync_options(const ParsedCliArguments& parsed);
 std::string package_source_selection_option(PackageSourceSelection selection);
 SourceSelectableSyncOperation source_selectable_sync_operation(const ParsedCliArguments& parsed);
 bool validate_source_selection_operation(const ParsedCliArguments& parsed);
@@ -535,7 +544,7 @@ bool pacman_operation_requests_refresh(
         const std::string& operation, const std::vector<std::string>& flags);
 bool validate_optionless_jpacker_operation(const std::string& operation, const std::vector<std::string>& flags);
 std::optional<std::string> unsupported_source_sync_option(
-        const std::string& operation, const std::vector<std::string>& flags);
+        const ParsedCliArguments& parsed);
 bool is_valid_package_name(const std::string& name);
 ParsedDependency parse_dependency_string(const std::string& dependency);
 std::string dependency_package_name(const std::string& dependency);
@@ -573,7 +582,8 @@ std::set<std::string> get_foreign_package_names();
 bool aur_version_is_newer(const std::string& aur_version, const std::string& installed_version);
 bool has_local_package_artifact(const fs::path& pkg_dir);
 bool has_local_srcdir(const fs::path& pkg_dir);
-MakepkgBuildOptions resolve_makepkg_build_options(const fs::path& pkg_dir);
+MakepkgBuildOptions resolve_makepkg_build_options(
+        const fs::path& pkg_dir, const SourceSyncOptions& source_sync_options);
 
 // prompt / ユーザー確認
 bool ask_user(const std::string& question, PromptDefault default_answer);
@@ -660,12 +670,20 @@ void print_fetch_plan(const BuildPlan& plan);
 void fetch_aur_package_base(const std::string& package_base);
 
 // source build / AUR install
-void build_from_git(const std::string& pkg_name, const std::string& clone_name, const std::string& git_url, const std::string& custom_env, bool only_if_updated);
+void build_from_git(
+        const std::string& pkg_name, const std::string& clone_name, const std::string& git_url,
+        const std::string& custom_env, bool only_if_updated,
+        const SourceSyncOptions& source_sync_options);
 void require_valid_aur_package_target(const std::string& target);
 void require_executable_sync_install_target(const std::string& pkg_name);
-void install_smart_source(const std::string& pkg_name, bool only_if_updated);
-void execute_aur_build_plan(const BuildPlan& plan, bool use_source_build_preferences);
-void install_aur_build_plan(const std::string& target);
+void install_smart_source(
+        const std::string& pkg_name, bool only_if_updated,
+        const SourceSyncOptions& source_sync_options);
+void execute_aur_build_plan(
+        const BuildPlan& plan, bool use_source_build_preferences,
+        const SourceSyncOptions& source_sync_options);
+void install_aur_build_plan(
+        const std::string& target, const SourceSyncOptions& source_sync_options);
 void preflight_upgrade_source_metadata();
 
 // コマンド処理
@@ -720,6 +738,15 @@ int run_jpacker(int argc, char* argv[]) {
     // POLICY(#168): selector conflict / scope errors must stop before the default log creates the cache root.
     if(!validate_source_selection_operation(parsed)) return 1;
 
+    const std::vector<std::string> optionless_operations = {
+            "build", "upgrade", "clean", "add-src", "del-src", "revert", "edit-src", "list-src"};
+    if(std::find(optionless_operations.begin(), optionless_operations.end(), parsed.operation) !=
+                       optionless_operations.end() &&
+       !validate_optionless_jpacker_operation(parsed.operation, parsed.flags)) {
+        // POLICY(#169): unsupported custom-operation options must stop before cache or source mutation.
+        return 1;
+    }
+
     CurlGlobal curl_global;
     try {
         fs::path log_path;
@@ -752,13 +779,6 @@ int run_jpacker(int argc, char* argv[]) {
     const std::vector<std::string>&  flags = parsed.flags;
 
     try {
-        const std::vector<std::string> optionless_operations = {
-                "build", "upgrade", "clean", "add-src", "del-src", "revert", "edit-src", "list-src"};
-        if(std::find(optionless_operations.begin(), optionless_operations.end(), operation) != optionless_operations.end() &&
-           !validate_optionless_jpacker_operation(operation, flags)) {
-            return 1;
-        }
-
         if(operation == "build") {
             return cmd_build(targets);
         }
@@ -900,6 +920,8 @@ void print_help() {
     std::cout << "    \033[1m--noedit\033[0m             Skip PKGBUILD/.install review" << std::endl;
     std::cout << "    \033[1m--nodiff\033[0m             Skip update diff prompt" << std::endl;
     std::cout << "    \033[1m--noconfirm\033[0m         Pass --noconfirm to pacman/makepkg" << std::endl;
+    std::cout << "    \033[1m--needed\033[0m            Pass to pacman; AUR/source -S applies it only to final install" << std::endl;
+    std::cout << "                              Adds no jpacker build/review/plan skip" << std::endl;
     std::cout << "    \033[1m--rebuild\033[0m           Pass -f to makepkg build/install" << std::endl;
     std::cout << "    \033[1m--cleanbuild\033[0m        Pass -C to makepkg build/install" << std::endl;
     std::cout << "    \033[1m--rmdeps\033[0m            Pass -r to makepkg build/install" << std::endl;
@@ -1068,6 +1090,20 @@ std::optional<ParsedCliArguments> parse_cli_arguments(int argc, char* argv[]) {
         return std::nullopt;
     }
     return parsed;
+}
+
+bool parsed_has_semantic_pacman_option(
+        const ParsedCliArguments& parsed, const std::string& option) {
+    return std::any_of(parsed.tokens.begin(), parsed.tokens.end(), [&](const ParsedCliToken& token) {
+        return token.role == CliTokenRole::PacmanOption && token.value == option;
+    });
+}
+
+SourceSyncOptions parse_source_sync_options(const ParsedCliArguments& parsed) {
+    SourceSyncOptions options;
+    // POLICY(#173): option valueや`--`後のoperandをsemantic optionへ昇格させない。
+    options.needed = parsed_has_semantic_pacman_option(parsed, "--needed");
+    return options;
 }
 
 std::string package_source_selection_option(PackageSourceSelection selection) {
@@ -1655,6 +1691,8 @@ std::string makepkg_install_command(const MakepkgBuildOptions& options) {
     if(options.clean_build) args.push_back("-C");
     // POLICY(#123): 削除対象の判断と実行は makepkg -s/-r に委ね、jpacker では再実装しない。
     if(options.rm_deps) args.push_back("-r");
+    // POLICY(#169): jpacker独自のbuild skip判定は追加せず、再install要否だけをmakepkg/pacmanへ委ねる。
+    if(options.needed) args.push_back("--needed");
     return join_shell_args(args);
 }
 
@@ -1713,9 +1751,10 @@ bool validate_optionless_jpacker_operation(const std::string& operation, const s
 }
 
 std::optional<std::string> unsupported_source_sync_option(
-        const std::string& operation, const std::vector<std::string>& flags) {
+        const ParsedCliArguments& parsed) {
     // POLICY(#56): -S の y/u modifier は official repository update にだけ作用する。
     // AUR/source-build 側へ意味を移せない他の pacman option は、黙って無視せず build 前に止める。
+    const std::string& operation = parsed.operation;
     if(operation.size() < 2 || operation[0] != '-' || operation[1] != 'S' ||
        !std::all_of(operation.begin() + 2, operation.end(), [](char modifier) {
            return modifier == 'y' || modifier == 'u';
@@ -1723,9 +1762,10 @@ std::optional<std::string> unsupported_source_sync_option(
         return operation;
     }
 
-    for(const auto& flag : flags) {
-        if(flag == operation || flag == "--") continue;
-        return flag;
+    for(const auto& token : parsed.tokens) {
+        if(token.role != CliTokenRole::PacmanOption) continue;
+        if(token.value == "--needed") continue;
+        return token.value;
     }
     return std::nullopt;
 }
@@ -2198,11 +2238,13 @@ bool has_local_srcdir(const fs::path& pkg_dir) {
     return fs::exists(src_dir) && fs::is_directory(src_dir);
 }
 
-MakepkgBuildOptions resolve_makepkg_build_options(const fs::path& pkg_dir) {
+MakepkgBuildOptions resolve_makepkg_build_options(
+        const fs::path& pkg_dir, const SourceSyncOptions& source_sync_options) {
     MakepkgBuildOptions options;
     bool                has_artifact = has_local_package_artifact(pkg_dir);
 
     options.rm_deps = g_config.rm_deps;
+    options.needed = source_sync_options.needed;
 
     if(g_config.clean_build) {
         options.clean_build = true;
@@ -3560,7 +3602,10 @@ void fetch_aur_package_base(const std::string& package_base) {
 }
 
 // source build / AUR install
-void build_from_git(const std::string& pkg_name, const std::string& clone_name, const std::string& git_url, const std::string& custom_env, bool only_if_updated) {
+void build_from_git(
+        const std::string& pkg_name, const std::string& clone_name, const std::string& git_url,
+        const std::string& custom_env, bool only_if_updated,
+        const SourceSyncOptions& source_sync_options) {
     require_valid_package_name(pkg_name);
     require_valid_package_name(clone_name);
     Logger::info("Processing " + pkg_name + "...");
@@ -3662,7 +3707,8 @@ void build_from_git(const std::string& pkg_name, const std::string& clone_name, 
         }
 
         review_build_files(pkg_path.canonical_path);
-        MakepkgBuildOptions makepkg_options = resolve_makepkg_build_options(pkg_path.canonical_path);
+        MakepkgBuildOptions makepkg_options =
+                resolve_makepkg_build_options(pkg_path.canonical_path, source_sync_options);
         std::string build_cmd;
         if(!trim(custom_env).empty()) {
             Logger::info("Applying custom build flags: " + custom_env);
@@ -3677,12 +3723,16 @@ void build_from_git(const std::string& pkg_name, const std::string& clone_name, 
     }
 }
 
-void install_smart_source(const std::string& pkg_name, bool only_if_updated) {
+void install_smart_source(
+        const std::string& pkg_name, bool only_if_updated,
+        const SourceSyncOptions& source_sync_options) {
     std::string env = get_package_env(pkg_name);
     PackageBuildSource source = resolve_build_source(pkg_name);
     require_executable_build_source_plan(source);
 
-    build_from_git(source.requested_name, source.clone_name, source.git_url, env, only_if_updated);
+    build_from_git(
+            source.requested_name, source.clone_name, source.git_url, env, only_if_updated,
+            source_sync_options);
 }
 
 void require_valid_aur_package_target(const std::string& target) {
@@ -3702,7 +3752,9 @@ void require_executable_sync_install_target(const std::string& pkg_name) {
     require_executable_install_plan(pkg_name, plan);
 }
 
-void execute_aur_build_plan(const BuildPlan& plan, bool use_source_build_preferences) {
+void execute_aur_build_plan(
+        const BuildPlan& plan, bool use_source_build_preferences,
+        const SourceSyncOptions& source_sync_options) {
     for(const auto& entry : plan.order) {
         std::string package_names = join_comma_display_values(entry.package_names);
         Logger::info("Building AUR PackageBase: " + entry.package_base);
@@ -3716,7 +3768,9 @@ void execute_aur_build_plan(const BuildPlan& plan, bool use_source_build_prefere
         }
 
         try {
-            build_from_git(pkg_name, entry.package_base, aur_git_url_for_package_base(entry.package_base), env, false);
+            build_from_git(
+                    pkg_name, entry.package_base, aur_git_url_for_package_base(entry.package_base),
+                    env, false, source_sync_options);
         } catch(const std::exception& e) {
             throw std::runtime_error(
                     "Failed while building/installing PackageBase " + entry.package_base + " (" + package_names +
@@ -3725,10 +3779,11 @@ void execute_aur_build_plan(const BuildPlan& plan, bool use_source_build_prefere
     }
 }
 
-void install_aur_build_plan(const std::string& target) {
+void install_aur_build_plan(
+        const std::string& target, const SourceSyncOptions& source_sync_options) {
     BuildPlan plan = resolve_build_plan(target);
     require_executable_install_plan(target, plan);
-    execute_aur_build_plan(plan, true);
+    execute_aur_build_plan(plan, true, source_sync_options);
 }
 
 void preflight_upgrade_source_metadata() {
@@ -3925,6 +3980,10 @@ int cmd_sync_search(
         return (pacman_status == 0 || aur_found) ? 0 : 1;
     }
     case PackageSourceSelection::AurOnly:
+        if(parsed_has_semantic_pacman_option(parsed, "--needed")) {
+            Logger::error("Unsupported pacman option for AUR search: --needed");
+            return 1;
+        }
         Logger::info("Searching AUR...");
         return search_aur(parsed.targets, false) ? 0 : 1;
     case PackageSourceSelection::RepoOnly:
@@ -3936,6 +3995,8 @@ int cmd_sync_search(
 int cmd_sync_install(
         const ParsedCliArguments& parsed, bool is_sys_upgrade,
         PackageSourceSelection source_selection) {
+    const SourceSyncOptions source_sync_options = parse_source_sync_options(parsed);
+
     if(source_selection == PackageSourceSelection::RepoOnly) {
         // POLICY(#168): RepoOnly is one ordered binary repository transaction; no classification probe.
         return run_command("sudo pacman " + join_pacman_args(parsed.ordered_pacman_args));
@@ -3950,8 +4011,7 @@ int cmd_sync_install(
             require_valid_aur_package_target(target);
         }
 
-        std::optional<std::string> unsupported_option =
-                unsupported_source_sync_option(parsed.operation, parsed.flags);
+        std::optional<std::string> unsupported_option = unsupported_source_sync_option(parsed);
         if(unsupported_option.has_value()) {
             Logger::error(
                     "Unsupported pacman option for AUR/source-build target: " +
@@ -3970,7 +4030,7 @@ int cmd_sync_install(
 
         // POLICY(#168): every root target is fully planned and guarded before clone/build/install starts.
         for(const auto& plan : plans) {
-            execute_aur_build_plan(plan, false);
+            execute_aur_build_plan(plan, false, source_sync_options);
         }
         return 0;
     }
@@ -3996,8 +4056,7 @@ int cmd_sync_install(
         }
     }
     if(!aur_targets.empty()) {
-        std::optional<std::string> unsupported_option =
-                unsupported_source_sync_option(parsed.operation, parsed.flags);
+        std::optional<std::string> unsupported_option = unsupported_source_sync_option(parsed);
         if(unsupported_option.has_value()) {
             Logger::error(
                     "Unsupported pacman option for AUR/source-build target: " +
@@ -4022,9 +4081,9 @@ int cmd_sync_install(
         // Auto keeps the legacy source-build preference and AUR classification behavior.
         for(const auto& package : aur_targets) {
             if(is_repo_package(package))
-                install_smart_source(package, false);
+                install_smart_source(package, false, source_sync_options);
             else
-                install_aur_build_plan(package);
+                install_aur_build_plan(package, source_sync_options);
         }
     }
     return 0;
@@ -4040,6 +4099,10 @@ int cmd_sync_info(
     }
 
     if(source_selection == PackageSourceSelection::AurOnly) {
+        if(parsed_has_semantic_pacman_option(parsed, "--needed")) {
+            Logger::error("Unsupported pacman option for AUR info: --needed");
+            return 1;
+        }
         if(parsed.targets.empty()) {
             Logger::error("Missing AUR package target.");
             return 1;
@@ -4216,7 +4279,9 @@ int cmd_build(const std::vector<std::string>& args) {
         PackageBuildSource source = resolve_build_source(pkg_name);
         require_executable_build_source_plan(source);
         // build コマンドは常にビルドする (only_if_updated = false)
-        build_from_git(source.requested_name, source.clone_name, source.git_url, custom_env, false);
+        build_from_git(
+                source.requested_name, source.clone_name, source.git_url, custom_env, false,
+                SourceSyncOptions{});
     } catch(const std::exception& e) {
         Logger::error(std::string("Build Error: ") + e.what());
         return 1;
@@ -4462,7 +4527,7 @@ int cmd_upgrade() {
                 }
                 try {
                     // upgrade 時は true (更新がある場合のみビルド)
-                    install_smart_source(pkg_name, true);
+                    install_smart_source(pkg_name, true, SourceSyncOptions{});
                 } catch(const AurRpcResponseError&) {
                     // POLICY(#174): schema violation検出後は後続source packageのmutationへ進まない。
                     throw;

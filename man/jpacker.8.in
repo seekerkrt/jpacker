@@ -115,6 +115,9 @@ Skip the interactive git diff check during existing cache repository updates.
 .BR \-\-noconfirm
 Pass \fB--noconfirm\fR to pacman and makepkg execution. jpacker treats this as a request to avoid interactive blocking, not as "yes to everything". This does not bypass jpacker's ambiguous provider, unresolved dependency, cyclic build plan, split package install target, or conflicts/replaces metadata checks.
 .TP
+.BR \-\-needed
+Treat this as a pacman-compatible option, not a jpacker global option. Pacman-only routes retain it in the ordered pacman arguments. For a supported \fB-S\fR target routed to AUR or an official source-build preference, pass it once to makepkg as a policy for the final pacman package install. The option itself does not skip validation, planning, safety guards, review, clone/fetch, or the path to makepkg execution. jpacker does not add an installed-version or local-artifact build-skip heuristic; existing artifact reuse and \fB--rebuild\fR behavior remain unchanged. AUR and official source-build preference routes use the same meaning. Target-less pacman-compatible \fB-Syu --needed\fR is passed through; a source target in an existing supported form receives the same install-only policy, while jpacker's custom \fBupgrade --needed\fR remains unsupported.
+.TP
 .BR \-\-rebuild
 Pass \fB-f\fR to makepkg build/install execution so existing built package artifacts are not reused. When omitted, jpacker may ask before rebuilding an existing local package artifact; the default answer is no.
 .TP
@@ -132,7 +135,7 @@ Limit plain \fB-S\fR installs, \fB-Ss\fR searches, and \fB-Si\fR information que
 .PP
 Repeating the same source selector is allowed. Combining \fB--aur\fR and \fB--repo\fR fails before any external command or AUR query, and \fB--noconfirm\fR does not bypass this conflict or the selected source. Source selectors are not supported for upgrade/refresh/clean sync operations, \fB-Qua\fR, or jpacker-specific operations such as \fBupgrade\fR, \fBbuild\fR, \fBfetch\fR, \fBdeps\fR, and \fBplan\fR. The exception is repository-only \fB-Ss\fR / \fB-Si\fR with refresh, which uses \fBsudo pacman\fR.
 .PP
-AUR/source build installation uses \fBmakepkg -sic\fR as its baseline. \fB--noconfirm\fR adds the same makepkg option, while \fB--rebuild\fR, \fB--cleanbuild\fR, and \fB--rmdeps\fR add \fB-f\fR, \fB-C\fR, and \fB-r\fR respectively. Other pacman transaction options are not translated to makepkg; if an AUR/source-build target is present, unsupported options stop the invocation before pacman or makepkg execution.
+AUR/source build installation uses \fBmakepkg -sic\fR as its baseline. Semantic \fB--needed\fR adds that option once as an install-only policy; duplicates remain ordered in pacman arguments but are collapsed for makepkg. \fB--noconfirm\fR adds the same makepkg option, while \fB--rebuild\fR, \fB--cleanbuild\fR, and \fB--rmdeps\fR independently add \fB-f\fR, \fB-C\fR, and \fB-r\fR respectively. Other pacman transaction options are not translated to makepkg; if an AUR/source-build target is present, unsupported options stop the invocation before pacman or makepkg execution. An option value named \fB--needed\fR, an operand after \fB--\fR, and \fB--needed=true\fR do not enable the source install policy. AUR-only \fB-Ss\fR / \fB-Si\fR reject \fB--needed\fR before an AUR query, while repository-only forms delegate it to pacman.
 .PP
 jpacker v1.x does not compare AUR conflicts/replaces metadata with installed or official repository packages, use replacements to select install targets, or automatically remove or replace packages. Any AUR build/install plan containing this metadata stops before clone, fetch, build, makepkg, or a pacman transaction.
 .TP

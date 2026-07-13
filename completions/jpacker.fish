@@ -75,6 +75,8 @@ complete -c jpacker -f -n '__fish_jpacker_no_operation' -a "$jpacker_global_opti
 
 complete -c jpacker -f -n '__fish_jpacker_using_operation deps' -a '--recursive' -d 'Resolve dependencies recursively'
 
+complete -c jpacker -f -n '__fish_jpacker_using_operation -S; or __fish_jpacker_using_operation -Syu' -a '--needed' -d 'Skip reinstall at final package installation'
+
 complete -c jpacker -f -n '__fish_jpacker_using_operation del-src' -a '(__fish_jpacker_source_preferences)' -d 'source-build preference'
 complete -c jpacker -f -n '__fish_jpacker_using_operation edit-src' -a '(__fish_jpacker_source_preferences)' -d 'source-build preference'
 complete -c jpacker -f -n '__fish_jpacker_using_operation revert' -a '(__fish_jpacker_source_preferences)' -d 'source-build preference'

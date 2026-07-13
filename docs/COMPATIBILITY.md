@@ -257,6 +257,7 @@ pacman へ直接委譲する経路では、jpacker が明示的に消費しな�
 AUR / source build 経路では、pacman option をそのまま makepkg option とみなさない。makepkg build/install execution の基本形は `makepkg -sic` であり、jpacker が明示的に追加するのは次の範囲に留める。
 
 - `--noconfirm`: pacman / makepkg execution へ渡す。
+- `--needed`: target を伴う対応済み `-S` の AUR / source build 経路では、makepkg が最終 package install を pacman へ委譲するときの install-only policy として 1 回だけ渡す。
 - `--rebuild`: jpacker 固有 option として `makepkg -f` 相当へ変換する。
 - `--cleanbuild`: jpacker 固有 option として `makepkg -C` 相当へ変換する。
 - `--rmdeps`: jpacker 固有 option として `makepkg -r` 相当へ変換する。
@@ -291,9 +292,19 @@ AUR / source build 経路では、pacman option をそのまま makepkg option �
 
 ### `--needed`
 
-`--needed` は pacman 由来 option として、pacman execution へ pass-through する。
+`--needed` は jpacker global option ではなく、pacman 由来の互換 option として扱う。pacman-only 経路では ordered pacman argv にそのまま保持する。official repository target と AUR / source build target が混在する `-S` install でも、official transaction の argv には元の `--needed` を保持する。
 
-AUR / source build 経路では、現時点で「既に入っているなら build/install を省略する」という意味を維持できないため、`--needed` を含む invocation は unsupported として停止する。将来対応する場合は build plan と installed package state の契約として整理する。
+target を伴う対応済み `-S` の AUR / source build 経路では、`--needed` を build skip option として扱わない。`--needed` 自体を理由に、package/source validation、AUR RPC / PackageBase 解決、dependency/build plan、conflicts/replaces・provider・split package などの guard、git clone/fetch/update、PKGBUILD / `.install` review、makepkg execution までの経路を省略しない。jpacker は installed version、AUR RPC version、`.SRCINFO`、既存 local artifact を根拠に独自の build skip 判定を追加せず、既存 artifact の再利用と `--rebuild` の契約は従来どおり維持する。
+
+semantic な `--needed` は makepkg command に 1 回だけ渡すが、makepkg が生成済み package の最終 install を pacman `-U` へ委譲するときだけ作用する install-only policy として解釈する。AUR root target と source build preference がある official package は同じ契約を使い、preference を binary repository route へ切り替えない。重複指定は pacman argv では元の順序と個数を保持するが、source build 側では boolean policy として `--needed` を 1 回だけ生成する。
+
+split PackageBase では、makepkg が対象 architecture 向けの生成 artifact を 1 回の `pacman -U --needed` transaction へ渡し、pacman / libalpm が package 単位で install 要否を判断する。全対象が up-to-date として省略された場合も成功扱いである。jpacker は split package ごとの needed 判定や artifact version 比較を再実装せず、既存の split install target guard も突破しない。
+
+`--rebuild` / `--cleanbuild` は build / build directory の再実行方針、`--rmdeps` は makepkg が導入した build dependency の削除方針、`--noconfirm` は prompt suppression であり、`--needed` の install-only policy とは独立して併用できる。どの組み合わせでも plan / review / safety guard は省略しない。
+
+semantic option の判定は parser の token role に従う。通常の pacman option 位置にある exact `--needed` だけを source build policy として認識し、`--root --needed` の option value、`--` 後の opaque operand、`--needed=true` は認識・正規化しない。source route で意味を保てない形や option は、従来どおり外部 mutation 前に停止する。
+
+この変換対象は `-S` install で source target が存在する場合に限る。`jpacker -Ss --aur --needed ...` / `jpacker -Si --aur --needed ...` は AUR RPC 前に unsupported として停止し、RepoOnly の search/info は pacman へそのまま委譲する。target なしの pacman-compatible `jpacker -Syu --needed` は pacman-only pass-through を維持する。target 付きの既存対応形で source route が生じる場合は、その source target にも同じ install-only 契約を適用する。一方、jpacker 固有の `upgrade --needed` は未対応 option として外部 command や cache/source mutation 前に停止し、既存 `.SRCINFO` による `NeedsBuild` / `UpToDate` / `Unknown` の更新判定へ `--needed` を流用しない。
 
 ### `--asdeps` / `--asexplicit`
 
@@ -343,7 +354,6 @@ operation 確定後、値を取る option の次の token は、`--rmdeps` や `
 
 次の option は pacman へ渡すことはできても、AUR / source build 経路で同じ意味を保つには追加設計が必要である。
 
-- `--needed`
 - `--asdeps`
 - `--asexplicit`
 - `--ignore`
@@ -363,7 +373,7 @@ operation 確定後、値を取る option の次の token は、`--rmdeps` や `
 - `--downloadonly`
 - `--print`
 
-特に database path、root、sysroot、config を変える option は、pacman の見ている world と jpacker の AUR metadata / installed package state / build cache の見ている world がずれる可能性がある。`--needed`、install reason、dependency check、download-only、print-only なども makepkg build/install と同じ意味にはならない。現時点では、これらを含む `-S` に AUR / source build target があれば unsupported として停止する。
+特に database path、root、sysroot、config を変える option は、pacman の見ている world と jpacker の AUR metadata / installed package state / build cache の見ている world がずれる可能性がある。install reason、dependency check、download-only、print-only なども makepkg build/install と同じ意味にはならない。現時点では、これらを含む `-S` に AUR / source build target があれば unsupported として停止する。`--needed` だけは前節の install-only policy に限って明示的に変換する。
 
 ---
 
