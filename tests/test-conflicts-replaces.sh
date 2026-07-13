@@ -40,6 +40,13 @@ export XDG_CACHE_HOME=$tmp_dir/cache
 export PATH=$repo_root/tests/stubs:/usr/bin:/bin
 export JPACKER_TEST_AUR_RPC_BASE_URL=http://127.0.0.1:$port/rpc/
 export JPACKER_TEST_COMMAND_LOG=$command_log
+export JPACKER_TEST_PACMAN_EXIT_CODE=1
+export JPACKER_TEST_SUDO_EXIT_CODE=99
+unset JPACKER_TEST_PACMAN_QM_OUTPUT
+unset JPACKER_TEST_PACKAGE_BUILD_DIR
+unset JPACKER_TEST_GIT_REMOTE_URL
+unset JPACKER_TEST_GIT_CLONE_EXIT_CODE
+unset JPACKER_TEST_GIT_CLONE_SYMLINK_TARGET
 
 run_ok() {
     output_file=$1
