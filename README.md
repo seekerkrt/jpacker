@@ -298,6 +298,12 @@ jpacker -S google-chrome --noedit
 jpacker --noconfirm -S google-chrome
 ```
 
+`--needed` は jpacker global option ではなく、pacman-compatible option です。pacman-only 経路では argv を保ったまま pacman へ渡します。対応済みの `-S` install が AUR または source build preference 経路へ進む場合も、jpacker は `--needed` を理由とする build skip 判定を追加せず、最終 package install の要否だけを makepkg / pacman の `--needed` policy に委ねます。AUR と official source build preference で意味は同じです。
+
+そのため `--needed` 自体を理由に、validation、AUR RPC / build plan、provider・split package・conflicts/replaces などの guard、clone/fetch、PKGBUILD / `.install` review、makepkg execution までの経路を省略しません。jpacker は installed version や local artifact を見た独自の build skip 判定を追加せず、既存 artifact の再利用と `--rebuild` の契約は従来どおり維持します。mixed official/AUR invocation では official pacman argv にも `--needed` を保持し、重複指定は pacman argv では保持、makepkg 側では 1 回だけ渡します。
+
+`--rebuild` / `--cleanbuild` は build 方針、`--rmdeps` は makepkg が導入した dependency の cleanup 方針、`--noconfirm` は prompt suppression であり、`--needed` の install-only policy と独立して併用できます。既存の plan / review / safety guard はどの組み合わせでも維持します。target なしの pacman-compatible `jpacker -Syu --needed` はそのまま pacman へ渡し、target 付きの既存対応形で source route が生じる場合は同じ install-only policy を適用します。jpacker 固有の `upgrade --needed` は未対応です。
+
 AUR / source build の build/install は `makepkg -sic` を基本形とします。`--rebuild` を指定すると `-f`、`--cleanbuild` を指定すると `-C`、`--rmdeps` を指定すると `-r` を追加し、`--noconfirm` は makepkg にも渡します。未指定の場合、既存の package artifact や `src/` directory があるときは、必要に応じて default no の確認 prompt で rebuild / cleanbuild を選べます。cleanbuild を有効にし、同じ package directory に既存 package artifact がある場合は、artifact 再利用を避けるため rebuild も有効にします。`--noconfirm` 指定時はこの prompt を出さず、未指定の rebuild / cleanbuild は no 扱いにします。`--noedit` / `--nodiff` / `--rebuild` / `--cleanbuild` / `--rmdeps` は jpacker 固有の option であり、そのまま pacman へは渡しません。
 
 `--rmdeps` は明示 opt-in です。未指定時や `--noconfirm` だけを指定した場合は依存削除を有効にしません。`--rmdeps --noconfirm` を両方指定した場合は、makepkg に `-r` と `--noconfirm` の両方を渡します。削除対象の判断と実行は `makepkg -s/-r` に委ね、jpacker 自身は `pacman -Rns`、`pacman -Qdt`、orphan cleanup を実行しません。この option は pacman-only install には作用せず、pacman にも渡しません。
@@ -619,6 +625,12 @@ jpacker -S google-chrome --noedit
 ```bash
 jpacker --noconfirm -S google-chrome
 ```
+
+`--needed` is a pacman-compatible option, not a jpacker global option. Pacman-only routes preserve it in the pacman argument vector. When a supported `-S` install uses AUR or an official source-build preference, jpacker does not add a build-skip decision for `--needed`; only final package installation is delegated to makepkg/pacman's `--needed` policy. AUR and official source-build preference routes use the same meaning.
+
+`--needed` itself does not skip validation, AUR RPC and build planning, provider/split-package/conflicts/replaces guards, clone/fetch, PKGBUILD / `.install` review, or the path to makepkg execution. jpacker does not add an installed-version or local-artifact heuristic for skipping builds; existing artifact reuse and `--rebuild` behavior remain unchanged. In a mixed official/AUR invocation, `--needed` remains in the official pacman arguments. Duplicates remain in pacman's ordered arguments but produce one `--needed` on the makepkg side.
+
+`--rebuild` / `--cleanbuild` control the build, `--rmdeps` controls cleanup of dependencies installed by makepkg, and `--noconfirm` suppresses prompts; each remains independent of the install-only `--needed` policy. Existing plan, review, and safety guards remain in force. Target-less pacman-compatible `jpacker -Syu --needed` is passed through to pacman; if an existing supported target-bearing form selects a source route, the same install-only policy applies there. The jpacker-specific `upgrade --needed` remains unsupported.
 
 AUR/source build installation uses `makepkg -sic` as its baseline. `--rebuild` adds `-f`, `--cleanbuild` adds `-C`, `--rmdeps` adds `-r`, and `--noconfirm` is also passed to makepkg. When rebuild/cleanbuild are not specified, jpacker may ask with a default-no prompt before rebuilding an existing package artifact or cleaning an existing `src/` directory. If cleanbuild is enabled and a package artifact exists in the same package directory, jpacker also enables rebuild to avoid reusing that artifact. With `--noconfirm`, these prompts are skipped and unspecified rebuild/cleanbuild choices default to no. `--noedit`, `--nodiff`, `--rebuild`, `--cleanbuild`, and `--rmdeps` are jpacker-specific and are not passed through unchanged to pacman.
 
