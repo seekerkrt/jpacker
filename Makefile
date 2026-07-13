@@ -31,7 +31,7 @@ SRCS      := $(wildcard $(SRC_DIR)/*.cpp)
 OBJS      := $(SRCS:$(SRC_DIR)/%.cpp=$(BUILD_DIR)/%.o)
 DEPS      := $(OBJS:.o=.d)
 
-.PHONY: all clean test-aur-rpc-validation test-build-cache-symlink test-conflicts-replaces test-pacman-routing release-check install uninstall
+.PHONY: all clean test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-conflicts-replaces test-pacman-routing release-check install uninstall
 
 all: $(TARGET) $(MANPAGE)
 
@@ -62,6 +62,9 @@ test-conflicts-replaces: $(TEST_TARGET)
 
 test-aur-rpc-validation: $(TEST_TARGET)
 	sh tests/test-aur-rpc-validation.sh $(abspath $(TEST_TARGET))
+
+test-cli-parser: $(TEST_TARGET)
+	sh tests/test-cli-parser.sh $(abspath $(TEST_TARGET))
 
 test-pacman-routing: $(TEST_TARGET)
 	sh tests/test-pacman-routing.sh $(abspath $(TEST_TARGET))

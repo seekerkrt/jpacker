@@ -95,6 +95,8 @@ makepkg -si
 
 pacman だけで完結する経路では、jpacker が消費しない pacman-compatible option を pacman へ渡します。一方、`-S` が AUR package または source-build preference のある package へ分岐する場合、makepkg build/install に同じ意味で反映できない pacman option は黙って無視せず、外部コマンドの実行前に unsupported として停止します。必要な場合は official repository target と AUR / source build target を別 invocation に分けてください。
 
+operation 確定後、値を取る pacman option の次の token は、その綴りにかかわらず option value として優先します。option value として消費されていない最初の `--` は end-of-options marker として pacman へ保持し、それ以降の token は opaque operand として扱います。`--noedit` や `--rmdeps` などの jpacker global option は、option value 位置でも `--` 後でもない通常位置でのみ認識します。
+
 `-F` / `-Fl` などの file database query は通常ユーザーの `pacman` へ委譲し、`-Fy` / `-Fyy` / `-F -y` / `-F --refresh` のように refresh を含む場合だけ `sudo pacman` を使います。`-Ss` に refresh を組み合わせた場合も official repository search 側を `sudo pacman` で実行したあと、通常どおり AUR search を行います。
 
 `-Si` に refresh を組み合わせる場合、AUR fallback の判定前に official database refresh だけが先行しないよう、target は `core/filesystem` のような repository-qualified form に限定します。unqualified target が 1 件でもあれば pacman / sudo / AUR query の前に停止するため、必要なら refresh と `-Si` を別 invocation に分けてください。refresh なしの通常の `-Si <pkg>` は従来どおり official repository を優先し、見つからなければ AUR metadata を表示します。
@@ -393,6 +395,8 @@ Do not run jpacker itself with sudo or as root. Run it as a normal user. For ope
 jpacker accepts standard pacman flags where supported. Not all pacman options / flags are implemented yet; support is added and verified incrementally.
 
 On routes handled entirely by pacman, jpacker forwards pacman-compatible options that it does not consume. If `-S` routes any target to AUR or a source-build preference, however, a pacman option that cannot retain its meaning during makepkg build/install is rejected before any external transaction starts. Split official repository and AUR/source-build targets into separate invocations when such an option is needed.
+
+After the operation is identified, the token following a value-taking pacman option is treated as its value regardless of its spelling. The first `--` not consumed as an option value is preserved as the end-of-options marker, and later tokens are treated as opaque operands. jpacker global options such as `--noedit` and `--rmdeps` are recognized only in normal option positions, not as pacman option values or after `--`.
 
 Read-only file database queries such as `-F` and `-Fl` are delegated to plain `pacman`. Forms that request a refresh, including `-Fy`, `-Fyy`, `-F -y`, and `-F --refresh`, use `sudo pacman`. When refresh is combined with `-Ss`, the official repository search runs through `sudo pacman` before the usual AUR search.
 
