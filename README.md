@@ -54,6 +54,7 @@ Issue と pull request は GitHub で受け付けています。
 
 * **Pacman wrapper**: `-S`, `-Syu`, `-R`, `-Q` などの標準的な `pacman` syntax を扱い、jpacker が明示的に処理しない command は `pacman` に渡します。
 * **AUR support**: `makepkg` based workflow で AUR package を検索し、build / install します。
+* **AUR PKGBUILD export**: AUR PackageBase repository を current directory へ取得し、または root `PKGBUILD` だけを標準出力へ表示できます。
 * **Source-based optimization**: 特定 package を常に source build するように登録し、`CFLAGS="-O3 -march=native"` のような custom environment variables を適用できます。
 * **Safe and robust implementation**: C++20 で実装し、networking や temporary directory handling などに RAII based resource management を使います。
 * **Review-first workflow**: default では build 前に `PKGBUILD` の review / edit を促します。
@@ -155,6 +156,22 @@ jpacker fetch spotify
 
 working tree を進める将来の挙動は `fetch` には含めません。必要な場合は `sync`、`update`、`fetch --update` のような明示的な別 operation として扱うべきです。
 
+### AUR PKGBUILD export / `-G` / `-Gp`
+
+`jpacker -G <pkg>` と `jpacker -Gp <pkg>` は、exactly one AUR package の build files を build/install と切り離して確認する AUR-only operation です。official repository probe、source-build preference、repository fallback は使いません。repository-qualified target や、複数・欠落 target、global/pacman option は AUR RPC や filesystem mutation より前に拒否します。
+
+```bash
+# requested package の PackageBase repository 一式を ./<PackageBase> へ export
+jpacker -G google-chrome
+
+# PackageBase repository root の PKGBUILD 本文だけを stdout へ表示
+jpacker -Gp google-chrome
+```
+
+`-G` は command 開始時の current directory 直下へ `./<PackageBase>` を作ります。split package を指定した場合も directory 名は requested package 名ではなく AUR RPC の `PackageBase` です。destination に directory、file、git repository、symlink、dangling symlink、その他の path がすでに存在すれば失敗し、fetch / pull / reset / overwrite / cleanup の対象にしません。`--noconfirm` はこの operation では unsupported であり、既存 path 拒否を突破しません。clone は invocation が所有する temporary directory で行い、expected AUR remote、`.git`、regular non-symlink `PKGBUILD` を確認してから、既存 path を置換しない形で publish します。command 開始時の current directory と temporary directory は directory descriptor と device/inode で固定し、検証・cleanup・publish は descriptor 相対で行います。
+
+`-Gp` は secure temporary checkout から regular non-symlink `PKGBUILD` を descriptor 相対かつ no-follow で読み、成功時の stdout へその bytes だけを出します。diagnostic、command 表示、PackageBase mapping は stderr に分離し、通常成功時と通常の failure 時には persistent checkout を残しません。どちらも dependency repository を取得せず、jpacker internal build cache や既存 cache repository を変更しません。PKGBUILD を評価せず、`.install` / `.SRCINFO` の生成・表示、makepkg、pacman、build、install は行いません。cleanup 前に temporary path の identity mismatch を検出した場合は、その replacement を削除せず fail-closed で停止し、手動確認用の temporary artifact を残し得ます。
+
 ### AUR dependency version constraints
 
 `jpacker deps` / `jpacker plan` は、AUR dependency に含まれる `foo>=1.2` のような version constraint を検出し、表示に残します。ただし jpacker v1.x では、pacman / libalpm 相当の完全な version constraint 判定は行いません。
@@ -177,7 +194,7 @@ build / install / fetch 実行系では、ambiguous provider や unresolved depe
 
 AUR RPC の `PackageBase` は clone / fetch / build repository の単位で、package name は install 対象です。split package では、たとえば `Name=linux-mainline-headers` / `PackageBase=linux-mainline` のように一致しないことがあります。
 
-`jpacker plan <pkg>` は、このような split package target を `Split package install targets` として表示し、install target selection が未実装であるため incomplete plan として扱います。`jpacker -S <pkg>` や `jpacker build <pkg>` の build/install 実行経路では、`PackageBase` と package name が異なる AUR target を clone / build / install 前に停止します。`jpacker fetch <pkg>` は PackageBase 単位の取得なので、PackageBase へ解決でき、他の unresolved / ambiguous / cyclic な問題が残らない場合は実行できます。
+`jpacker plan <pkg>` は、このような split package target を `Split package install targets` として表示し、install target selection が未実装であるため incomplete plan として扱います。`jpacker -S <pkg>` や `jpacker build <pkg>` の build/install 実行経路では、`PackageBase` と package name が異なる AUR target を clone / build / install 前に停止します。`jpacker fetch <pkg>` は dependency plan の PackageBase 単位で internal cache へ取得します。read-only inspection の `-G` は root PackageBase repository を `./<PackageBase>` へ export し、`-Gp` はその root `PKGBUILD` だけを表示するため、requested name と PackageBase の相違自体では停止しません。
 
 ### Source build preferences
 
@@ -380,6 +397,7 @@ Responses and reviews may take some time.
 
 * **Pacman wrapper**: Supports standard `pacman` syntax such as `-S`, `-Syu`, `-R`, and `-Q`, and forwards unknown commands to `pacman`.
 * **AUR support**: Search for and build/install AUR packages using workflows based on `makepkg`.
+* **AUR PKGBUILD export**: Export an AUR PackageBase repository into the current directory or print only its root `PKGBUILD` to stdout.
 * **Source-based optimization**: Mark selected packages to always be built from source with custom environment variables such as `CFLAGS="-O3 -march=native"`.
 * **Safe and robust implementation**: Written in C++20 and designed with RAII-based resource management for tasks such as networking and temporary directory handling.
 * **Review-first workflow**: Prompts you to review or edit `PKGBUILD` files before building by default.
@@ -483,6 +501,22 @@ Missing AUR repositories are cloned into the jpacker cache. Existing cloned repo
 
 Future behavior that advances a working tree is not implemented by `fetch`; it should be handled in a separate issue as an explicit operation such as `sync`, `update`, or `fetch --update`.
 
+### AUR PKGBUILD export / `-G` / `-Gp`
+
+`jpacker -G <pkg>` and `jpacker -Gp <pkg>` are AUR-only operations for inspecting the build files of exactly one AUR package without building or installing it. They do not probe official repositories, consult source-build preferences, or fall back to a repository package. Repository-qualified targets, missing or multiple targets, and global/pacman options are rejected before an AUR request or filesystem mutation.
+
+```bash
+# Export the requested package's complete PackageBase repository to ./<PackageBase>
+jpacker -G google-chrome
+
+# Print only the PackageBase repository's root PKGBUILD bytes to stdout
+jpacker -Gp google-chrome
+```
+
+`-G` creates `./<PackageBase>` directly below the current directory fixed at command start. For a split package, the directory uses the AUR RPC `PackageBase`, not the requested package name. It fails if any directory, file, Git repository, symlink, dangling symlink, or other path already exists at the destination, and never fetches, pulls, resets, overwrites, or cleans that path. `--noconfirm` is unsupported for this operation and cannot bypass the existing-path guard. The clone is made in an invocation-owned temporary directory; jpacker validates the expected AUR remote, `.git`, and a regular non-symlink `PKGBUILD` before publishing it without replacing an existing path. The command-start current directory and temporary directory are anchored by directory descriptors plus device/inode identity, and validation, cleanup, and publication are descriptor-relative.
+
+`-Gp` reads a regular non-symlink `PKGBUILD` from a secure temporary checkout with descriptor-relative, no-follow access and writes only those bytes to stdout on success. Diagnostics, command display, and PackageBase mapping go to stderr, and no persistent checkout remains after normal success or ordinary failure. Neither operation retrieves dependency repositories or changes the jpacker internal build cache or an existing cached repository. They do not evaluate PKGBUILD, generate or print `.install` / `.SRCINFO`, invoke makepkg or pacman, build, or install anything. If a temporary-path identity mismatch is detected before cleanup, jpacker fails closed without deleting that replacement and may leave temporary artifacts for manual inspection.
+
 ### AUR dependency version constraints
 
 `jpacker deps` / `jpacker plan` detects version constraints in AUR dependencies such as `foo>=1.2` and keeps them visible in output. jpacker v1.x does not implement a complete pacman/libalpm-compatible version constraint solver.
@@ -505,7 +539,7 @@ Build / install / fetch execution stops before running a plan that still has amb
 
 In AUR metadata, `PackageBase` is the clone / fetch / build repository unit, while the package name is the install target. For split packages, they may differ, such as `Name=linux-mainline-headers` / `PackageBase=linux-mainline`.
 
-`jpacker plan <pkg>` shows such split package targets under `Split package install targets` and reports the plan as incomplete because install target selection is not implemented. Build/install execution paths such as `jpacker -S <pkg>` and `jpacker build <pkg>` stop before clone / build / install when the requested AUR target has a package name different from its `PackageBase`. `jpacker fetch <pkg>` operates by PackageBase, so it can still run when the package name resolves to a PackageBase and no other unresolved, ambiguous, or cyclic plan issue remains.
+`jpacker plan <pkg>` shows such split package targets under `Split package install targets` and reports the plan as incomplete because install target selection is not implemented. Build/install execution paths such as `jpacker -S <pkg>` and `jpacker build <pkg>` stop before clone / build / install when the requested AUR target has a package name different from its `PackageBase`. `jpacker fetch <pkg>` retrieves the dependency plan by PackageBase into the internal cache. For read-only inspection, `-G` exports only the root PackageBase repository to `./<PackageBase>`, while `-Gp` prints its root `PKGBUILD`; neither stops merely because the requested name and PackageBase differ.
 
 ### Source build preferences
 

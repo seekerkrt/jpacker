@@ -7,6 +7,8 @@ set -l jpacker_operations \
     deps \
     plan \
     fetch \
+    -G \
+    -Gp \
     add-src \
     del-src \
     edit-src \
@@ -81,4 +83,4 @@ complete -c jpacker -f -n '__fish_jpacker_using_operation del-src' -a '(__fish_j
 complete -c jpacker -f -n '__fish_jpacker_using_operation edit-src' -a '(__fish_jpacker_source_preferences)' -d 'source-build preference'
 complete -c jpacker -f -n '__fish_jpacker_using_operation revert' -a '(__fish_jpacker_source_preferences)' -d 'source-build preference'
 
-complete -c jpacker -f -n 'not __fish_jpacker_no_operation' -a "$jpacker_global_options" -d 'global option'
+complete -c jpacker -f -n 'not __fish_jpacker_no_operation; and not __fish_jpacker_using_operation -G; and not __fish_jpacker_using_operation -Gp' -a "$jpacker_global_options" -d 'global option'

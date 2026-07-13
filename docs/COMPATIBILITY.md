@@ -31,17 +31,35 @@
 - `deps [--recursive] <pkg>`
 - `plan <pkg>`
 - `fetch <pkg>`
+- `-G <pkg>`
+- `-Gp <pkg>`
 - `add-src <pkg> [VAR=VALUE...]`
 - `del-src <pkg>`
 - `edit-src <pkg>`
 - `list-src`
 - `revert <pkg>`
 
-`deps`、`plan`、`fetch` は調査・表示・取得段階の operation であり、build / install / pull / merge / reset を混ぜない。`fetch` は未取得 repository の clone と、既存 clone に対する `git fetch origin` までに留める。
+`deps`、`plan`、`fetch`、`-G`、`-Gp` は調査・表示・取得段階の operation であり、build / install を混ぜない。`fetch` は internal cache に対する未取得 repository の clone と、既存 clone に対する `git fetch origin` までに留める。`-G` / `-Gp` は root PackageBase だけを一時 clone し、dependency plan や internal cache を使わない。
 
 `deps` の `--recursive` を除き、jpacker 固有 operation に未対応 option を指定した場合は停止する。pacman option と同名でも、jpacker 固有 operation から pacman へ暗黙に転送しない。
 
 `foo>=1.2` のような AUR dependency version constraint は、v1.x では検出・表示するが、pacman / libalpm 相当の完全な solver としては判定しない。package name 部分で解決できる場合も、version constraint を満たしているとは断定せず、未検証の constraint は warning または unresolved reason として扱う。
+
+---
+
+## AUR PKGBUILD export policy
+
+`-G <pkg>` / `-Gp <pkg>` は exactly one target の jpacker 固有 AUR-only operation とする。official repository probe、source-build preference、repository fallback は使わず、AUR RPC の exact package info で requested `Name` と effective `PackageBase` を確定する。repository-qualified target、invalid identifier、missing / multiple target、jpacker global option、pacman option、`--` marker は AUR RPC または filesystem mutation より前に拒否する。option value や `--` 後の token を global option として再解釈しない parser role 契約は維持する。
+
+`-G` は command 開始時に current directory を open / canonicalize し、その directory descriptor と device/inode identity を operation 終了まで固定する。destination はその descriptor が指す directory の direct child `<cwd>/<PackageBase>` だけとする。途中で pathname が rename / replacement されても、新しい pathname 側へ publish しない。split package では requested name ではなく PackageBase を directory 名に使う。destination に directory、git repository、regular file、symlink、dangling symlink、special file を含む何らかの entry が存在すれば fail-closed とし、fetch / pull / reset / merge / overwrite / remove を行わない。`--noconfirm` 自体が unsupported であり、existing path guard を突破しない。
+
+clone は current directory 直下の invocation-owned secure temporary directory へ行う。clone 前に target / AUR schema / requested Name / PackageBase / destination / containment を preflight し、clone 後に regular directory、regular `.git` directory、local `remote.origin.url` の expected AUR URL との厳密一致、regular non-symlink `PKGBUILD` を確認する。temporary parent / root も directory descriptor と device/inode identity で固定し、clone、validation、recursive cleanup は descriptor 相対で行う。publish 直前にも checkout と destination を再検証し、directory descriptor 相対の no-replace rename で final path へ移す。identity mismatch を観測した場合は named path のcleanup / publishを拒否し、replacementを削除しないため、手動確認が必要な temporary artifact を残し得る。
+
+destination の同時作成は `RENAME_NOREPLACE` でatomicに拒否する。一方、Linuxには「このinodeと一致する場合だけrename / unlinkする」syscallがないため、同一UID processがfinal identity checkとname-based syscallの極小区間でtemporary nameを敵対的に置換するケースまで原子的には保証しない。通常のfailure cleanupでは各entryのidentityをsyscall直前に再確認してこの窓を狭めるが、このoperationと同時にtemporary pathを変更する同一UID processが存在しないことを前提とする。
+
+`-Gp` は AUR RPC で解決した PackageBase repository を descriptor で固定した secure temporary directory へ clone し、root の regular non-symlink `PKGBUILD` を `openat(O_NOFOLLOW | O_NONBLOCK)` / `fstat` して同じ file descriptor から読み取る。clone、validation、read、temporary cleanup がすべて成功した後にだけ PKGBUILD bytes を stdout へ書き、heading、color、command log、mapping、diagnostic は stdout へ混ぜない。stdout への書き込み開始前の failure では stdout を空に保ち、error は stderr へ出す。通常成功時と通常の failure 時には persistent checkout を残さず、current directory と jpacker cache を変更しない。temporary path の identity が変化した場合だけは replacement 保護を優先し、手動確認用 artifact を残し得る。
+
+両 operation は root PackageBase repository だけを扱う。dependency repository / provider repository の取得、dependency build plan、PKGBUILD evaluation、`.install` / `.SRCINFO` の生成・出力、makepkg、pacman / sudo、editor、build / install は実行しない。既存の `fetch <pkg>` は recursive dependency plan を internal cache へ取得し、既存 clone を `git fetch origin` する別 operation であり、export 元・export 先として流用しない。
 
 ---
 
@@ -100,6 +118,7 @@ jpacker v1.9.0 / #98 では、`PackageBase` と install target package name を�
 - `deps <pkg>` は入力 target を package name として AUR RPC info を確認し、`Package` と `Package Base` を表示する。
 - `plan <pkg>` は、AUR RPC info 上で `Name` と `PackageBase` が異なる target を `Split package install targets` として表示し、install target selection 未実装の incomplete plan として扱う。
 - `fetch <pkg>` は PackageBase 単位の取得操作であるため、package name から PackageBase へ解決でき、ambiguous provider / unresolved dependency / cyclic dependency が残らない場合は実行してよい。
+- `-G <pkg>` は root PackageBase repository を current directory の `./<PackageBase>` へ export し、`-Gp <pkg>` はその root `PKGBUILD` だけを stdout へ表示する。read-only inspection なので `Name` と `PackageBase` の相違自体では停止せず、dependency repository や split package install target selection は扱わない。
 - `-S <pkg>` などの install 経路と `build <pkg>` は現状 `makepkg -i` を含む build/install 経路であるため、`Name` と `PackageBase` が異なる AUR target では clone / build / install 前に停止する。
 - `--noconfirm` は split package install target selection 未実装を自動承認しない。
 
@@ -148,7 +167,7 @@ source selection は排他的な 3 状態として扱う。
 
 同じ selector の重複指定は idempotent として許可する。`--aur` と `--repo` が同じ invocation に存在する場合は、順序にかかわらず conflict とし、pacman / sudo / AUR RPC / git / makepkg や cache mutation より前に停止する。`--noconfirm` は selection、conflict、not-found、build plan の安全 guard を変更しない。
 
-selector の初期対応 scope は、plain sync install (`-S`)、sync search (`-Ss`)、sync info (`-Si`) に限る。plain sync install には refresh / upgrade / clean modifier を含めない。`upgrade`、`-Syu`、`-Su`、`-Sy`、`-Qua`、`-Q`、`-F`、`-U`、`build`、`fetch`、`deps`、`plan` など、scope 外の operation で selector を認識した場合は、黙って無視せず外部コマンド前に停止する。
+selector の初期対応 scope は、plain sync install (`-S`)、sync search (`-Ss`)、sync info (`-Si`) に限る。plain sync install には refresh / upgrade / clean modifier を含めない。`upgrade`、`-Syu`、`-Su`、`-Sy`、`-Qua`、`-Q`、`-F`、`-U`、`build`、`fetch`、`deps`、`plan`、`-G`、`-Gp` など、scope 外の operation で selector を認識した場合は、黙って無視せず外部コマンド前に停止する。
 
 Auto の契約は次のとおりであり、selector 追加後も維持する。
 

@@ -1,0 +1,9 @@
+pkgbase = clean-root
+	pkgdesc = PKGBUILD export fixture
+	pkgver = 1.0
+	pkgrel = 1
+	arch = any
+	source = fixture::https://example.invalid/source
+	sha256sums = SKIP
+
+pkgname = clean-root
