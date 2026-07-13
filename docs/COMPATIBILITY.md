@@ -290,6 +290,8 @@ operation の後ろに置かれた、値を取る pacman option は、次のど�
 
 この追跡は、`-S` の target 分類時に option value を package target と誤認しないための最小限の parsing であり、pacman option 全体を再実装するものではない。追跡対象の option で値が欠けている場合、jpacker は pacman 実行前に停止する。pacman へ直接委譲する経路での option の意味・値の妥当性は pacman に委ねる。
 
+operation 確定後、値を取る option の次の token は、`--rmdeps` や `--noconfirm` など jpacker global option と同じ綴りでも option value として優先する。option value として消費されていない最初の `--` は end-of-options marker として pacman argv に保持し、それ以降は先頭が `-` の token も opaque operand として扱う。jpacker global optionを認識・消費するのは、option value待ちでも `--` 後でもない通常位置だけとする。
+
 ---
 
 ## AUR / source build 経路では単純 pass-through できない option
