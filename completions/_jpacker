@@ -36,6 +36,8 @@ _jpacker_global_options=(
     --rebuild
     --cleanbuild
     --rmdeps
+    --aur
+    --repo
 )
 
 _jpacker_deps_options=(
@@ -76,7 +78,7 @@ _jpacker_find_operation() {
     for (( i = 2; i < CURRENT; i++ )); do
         word=${words[i]}
         case $word in
-            --help|-h|--noedit|--nodiff|--noconfirm|--rebuild|--cleanbuild|--rmdeps)
+            --help|-h|--noedit|--nodiff|--noconfirm|--rebuild|--cleanbuild|--rmdeps|--aur|--repo)
                 ;;
             *)
                 reply=("$word")

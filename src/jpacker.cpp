@@ -83,6 +83,12 @@ struct AppConfig {
     std::string log_file = "";
 };
 
+enum class PackageSourceSelection {
+    Auto,
+    AurOnly,
+    RepoOnly,
+};
+
 enum class JpackerGlobalOption {
     NoEdit,
     NoDiff,
@@ -90,6 +96,15 @@ enum class JpackerGlobalOption {
     Rebuild,
     CleanBuild,
     RmDeps,
+    Aur,
+    Repo,
+};
+
+enum class SourceSelectableSyncOperation {
+    Install,
+    Search,
+    Info,
+    Unsupported,
 };
 
 enum class CliTokenRole {
@@ -119,19 +134,22 @@ struct ParsedCliArguments {
     std::vector<size_t>         target_token_indices;
     std::optional<std::string>  pending_option;
     bool                        end_of_options = false;
+    PackageSourceSelection      source_selection = PackageSourceSelection::Auto;
 };
 
 namespace {
 
 AppConfig g_config;
 
-const std::array<std::pair<const char*, JpackerGlobalOption>, 6> JPACKER_GLOBAL_OPTIONS = {{
+const std::array<std::pair<const char*, JpackerGlobalOption>, 8> JPACKER_GLOBAL_OPTIONS = {{
         {"--noedit", JpackerGlobalOption::NoEdit},
         {"--nodiff", JpackerGlobalOption::NoDiff},
         {"--noconfirm", JpackerGlobalOption::NoConfirm},
         {"--rebuild", JpackerGlobalOption::Rebuild},
         {"--cleanbuild", JpackerGlobalOption::CleanBuild},
         {"--rmdeps", JpackerGlobalOption::RmDeps},
+        {"--aur", JpackerGlobalOption::Aur},
+        {"--repo", JpackerGlobalOption::Repo},
 }};
 
 } // namespace
@@ -477,8 +495,11 @@ int run_jpacker(int argc, char* argv[]);
 void print_help();
 bool handle_info_only_option(int argc, char* argv[]);
 bool is_jpacker_global_option(const std::string& arg);
-void apply_jpacker_global_option(const std::string& arg);
+bool apply_jpacker_global_option(const std::string& arg, ParsedCliArguments& parsed);
 std::optional<ParsedCliArguments> parse_cli_arguments(int argc, char* argv[]);
+std::string package_source_selection_option(PackageSourceSelection selection);
+SourceSelectableSyncOperation source_selectable_sync_operation(const ParsedCliArguments& parsed);
+bool validate_source_selection_operation(const ParsedCliArguments& parsed);
 
 // 文字列 / path / config
 std::string trim(const std::string& str);
@@ -578,7 +599,7 @@ void require_executable_build_source_plan(const PackageBuildSource& source);
 
 // AUR検索 / info表示
 void preflight_aur_search_schema(const std::vector<std::string>& keywords);
-bool search_aur(const std::vector<std::string>& keywords);
+bool search_aur(const std::vector<std::string>& keywords, bool query_installed_state = true);
 std::string join_display_values(const std::vector<std::string>& values);
 std::string join_comma_display_values(const std::vector<std::string>& values);
 bool is_orphaned(const AurPackageInfo& pkg);
@@ -640,8 +661,10 @@ void fetch_aur_package_base(const std::string& package_base);
 
 // source build / AUR install
 void build_from_git(const std::string& pkg_name, const std::string& clone_name, const std::string& git_url, const std::string& custom_env, bool only_if_updated);
+void require_valid_aur_package_target(const std::string& target);
 void require_executable_sync_install_target(const std::string& pkg_name);
 void install_smart_source(const std::string& pkg_name, bool only_if_updated);
+void execute_aur_build_plan(const BuildPlan& plan, bool use_source_build_preferences);
 void install_aur_build_plan(const std::string& target);
 void preflight_upgrade_source_metadata();
 
@@ -649,7 +672,13 @@ void preflight_upgrade_source_metadata();
 int cmd_deps(const std::vector<std::string>& targets, const std::vector<std::string>& flags);
 int cmd_plan(const std::vector<std::string>& targets, const std::vector<std::string>& flags);
 int cmd_fetch(const std::vector<std::string>& targets, const std::vector<std::string>& flags);
-int cmd_sync_info(const ParsedCliArguments& parsed, bool use_sudo);
+int cmd_sync_search(
+        const ParsedCliArguments& parsed, bool use_sudo, PackageSourceSelection source_selection);
+int cmd_sync_info(
+        const ParsedCliArguments& parsed, bool use_sudo, PackageSourceSelection source_selection);
+int cmd_sync_install(
+        const ParsedCliArguments& parsed, bool is_sys_upgrade,
+        PackageSourceSelection source_selection);
 int cmd_query_foreign_updates();
 int cmd_build(const std::vector<std::string>& args);
 int cmd_add_src(const std::vector<std::string>& args);
@@ -670,9 +699,29 @@ int run_jpacker(int argc, char* argv[]) {
         return 1;
     }
 
-    CurlGlobal curl_global;
+    if(argc < 2) {
+        print_help();
+        return 1;
+    }
+
+    // Config is read-only here; CLI parsing remains before default cache/log creation.
     try {
         load_config();
+    } catch(const std::exception& e) {
+        std::cerr << "Warning: Failed to load config: " << e.what() << std::endl;
+    } catch(...) {
+        std::cerr << "Warning: Failed to load config: unknown error." << std::endl;
+    }
+
+    std::optional<ParsedCliArguments> parsed_result = parse_cli_arguments(argc, argv);
+    if(!parsed_result.has_value()) return 1;
+
+    const ParsedCliArguments&        parsed = parsed_result.value();
+    // POLICY(#168): selector conflict / scope errors must stop before the default log creates the cache root.
+    if(!validate_source_selection_operation(parsed)) return 1;
+
+    CurlGlobal curl_global;
+    try {
         fs::path log_path;
         if(g_config.log_file.empty()) {
             // POLICY(#175): default log must not create or open a file through an unsafe cache root/symlink.
@@ -697,15 +746,6 @@ int run_jpacker(int argc, char* argv[]) {
         std::cerr << "Warning: Failed to initialize log: unknown error." << std::endl;
     }
 
-    if(argc < 2) {
-        print_help();
-        return 1;
-    }
-
-    std::optional<ParsedCliArguments> parsed_result = parse_cli_arguments(argc, argv);
-    if(!parsed_result.has_value()) return 1;
-
-    const ParsedCliArguments&        parsed = parsed_result.value();
     const std::string&               operation = parsed.operation;
     const std::vector<std::string>&  args = parsed.ordered_pacman_args;
     const std::vector<std::string>&  targets = parsed.targets;
@@ -763,8 +803,13 @@ int run_jpacker(int argc, char* argv[]) {
         bool is_sync = operation.starts_with("-S");
         bool is_query = operation.starts_with("-Q");
         bool is_foreign_updates = (is_query && operation.find('u') != std::string::npos && operation.find('a') != std::string::npos);
-        bool is_search = (is_sync && operation.find('s') != std::string::npos);
-        bool is_info = (is_sync && operation.find('i') != std::string::npos);
+        SourceSelectableSyncOperation selected_sync_operation = source_selectable_sync_operation(parsed);
+        bool is_search = parsed.source_selection == PackageSourceSelection::Auto
+                                 ? (is_sync && operation.find('s') != std::string::npos)
+                                 : selected_sync_operation == SourceSelectableSyncOperation::Search;
+        bool is_info = parsed.source_selection == PackageSourceSelection::Auto
+                               ? (is_sync && operation.find('i') != std::string::npos)
+                               : selected_sync_operation == SourceSelectableSyncOperation::Info;
         bool is_clean = (is_sync && operation.find('c') != std::string::npos);
         bool is_sys_upgrade = (is_sync && (operation.find('u') != std::string::npos || operation.find('y') != std::string::npos));
         bool needs_sudo =
@@ -778,15 +823,10 @@ int run_jpacker(int argc, char* argv[]) {
                 Logger::error("Missing search query.");
                 return 1;
             }
-            if(requests_refresh) preflight_aur_search_schema(targets);
-            std::string pacman_prefix = requests_refresh ? "sudo pacman " : "pacman ";
-            int         pacman_ret = run_command(pacman_prefix + join_pacman_args(args));
-            Logger::info("Searching AUR...");
-            bool aur_found = search_aur(targets);
-            return (pacman_ret == 0 || aur_found) ? 0 : 1;
+            return cmd_sync_search(parsed, requests_refresh, parsed.source_selection);
         }
         if(is_info) {
-            if(requests_refresh) {
+            if(parsed.source_selection == PackageSourceSelection::Auto && requests_refresh) {
                 auto unqualified_target = std::find_if(targets.begin(), targets.end(), [](const std::string& target) {
                     return target.find('/') == std::string::npos;
                 });
@@ -801,58 +841,12 @@ int run_jpacker(int argc, char* argv[]) {
                     return 1;
                 }
             }
-            return cmd_sync_info(parsed, requests_refresh);
+            return cmd_sync_info(parsed, requests_refresh, parsed.source_selection);
         }
         if(is_clean) return run_command("sudo pacman " + join_pacman_args(args));
 
         if(is_sync) {
-            if(targets.empty()) return run_command("sudo pacman " + join_pacman_args(args));
-            std::vector<std::string> repo_targets, aur_targets;
-            std::set<size_t>        aur_target_token_indices;
-            for(size_t i = 0; i < targets.size(); ++i) {
-                const std::string& t = targets[i];
-                require_valid_package_name(t);
-                if(is_force_source(t)) {
-                    aur_targets.push_back(t);
-                    aur_target_token_indices.insert(parsed.target_token_indices[i]);
-                } else if(is_repo_package(t)) {
-                    repo_targets.push_back(t);
-                } else {
-                    aur_targets.push_back(t);
-                    aur_target_token_indices.insert(parsed.target_token_indices[i]);
-                }
-            }
-            if(!aur_targets.empty()) {
-                std::optional<std::string> unsupported_option = unsupported_source_sync_option(operation, flags);
-                if(unsupported_option.has_value()) {
-                    Logger::error(
-                            "Unsupported pacman option for AUR/source-build target: " + unsupported_option.value());
-                    Logger::error(
-                            "Split official repository and AUR/source-build targets, or rerun without this option.");
-                    return 1;
-                }
-            }
-            for(const auto& pkg : aur_targets) {
-                require_executable_sync_install_target(pkg);
-            }
-            if(!repo_targets.empty() || is_sys_upgrade) {
-                // POLICY(#173): AUR targetのtokenだけを除き、option/value/official targetの元順序を維持する。
-                std::vector<std::string> pacman_args =
-                        ordered_pacman_args_excluding_targets(parsed, aur_target_token_indices);
-                std::string cmd = "sudo pacman " + join_pacman_args(pacman_args);
-                if(run_command(cmd) != 0) throw std::runtime_error("Pacman failed.");
-            }
-            if(!aur_targets.empty()) {
-                // aur_targets also contains official repo packages with source-build preferences.
-                // Those must keep the existing source-build path instead of AUR build-plan execution.
-                for(const auto& pkg : aur_targets) {
-                    if(is_repo_package(pkg))
-                        install_smart_source(pkg, false);
-                    else
-                        install_aur_build_plan(pkg);
-                }
-            }
-            return 0;
+            return cmd_sync_install(parsed, is_sys_upgrade, parsed.source_selection);
         }
         std::string cmd_prefix = needs_sudo ? "sudo pacman " : "pacman ";
         return run_command(cmd_prefix + join_pacman_args(args));
@@ -909,6 +903,8 @@ void print_help() {
     std::cout << "    \033[1m--rebuild\033[0m           Pass -f to makepkg build/install" << std::endl;
     std::cout << "    \033[1m--cleanbuild\033[0m        Pass -C to makepkg build/install" << std::endl;
     std::cout << "    \033[1m--rmdeps\033[0m            Pass -r to makepkg build/install" << std::endl;
+    std::cout << "    \033[1m--aur\033[0m               Limit -S/-Ss/-Si to AUR; no repository fallback" << std::endl;
+    std::cout << "    \033[1m--repo\033[0m              Limit -S/-Ss/-Si to official binary repositories; no AUR/source-build fallback" << std::endl;
     std::cout << "\033[1mCONFIG\033[0m" << std::endl;
     std::cout << "    jpacker.conf: EDITOR=..., LOGFILE=..., NOEDIT=..., NODIFF=..." << std::endl;
 }
@@ -925,7 +921,7 @@ bool is_jpacker_global_option(const std::string& arg) {
     return jpacker_global_option_kind(arg).has_value();
 }
 
-void apply_jpacker_global_option(const std::string& arg) {
+bool apply_jpacker_global_option(const std::string& arg, ParsedCliArguments& parsed) {
     std::optional<JpackerGlobalOption> option = jpacker_global_option_kind(arg);
     if(!option.has_value()) throw std::logic_error("Unknown jpacker global option: " + arg);
 
@@ -948,7 +944,22 @@ void apply_jpacker_global_option(const std::string& arg) {
     case JpackerGlobalOption::RmDeps:
         g_config.rm_deps = true;
         break;
+    case JpackerGlobalOption::Aur:
+        if(parsed.source_selection == PackageSourceSelection::RepoOnly) {
+            Logger::error("Cannot combine --aur and --repo.");
+            return false;
+        }
+        parsed.source_selection = PackageSourceSelection::AurOnly;
+        break;
+    case JpackerGlobalOption::Repo:
+        if(parsed.source_selection == PackageSourceSelection::AurOnly) {
+            Logger::error("Cannot combine --aur and --repo.");
+            return false;
+        }
+        parsed.source_selection = PackageSourceSelection::RepoOnly;
+        break;
     }
+    return true;
 }
 
 bool handle_info_only_option(int argc, char* argv[]) {
@@ -982,7 +993,7 @@ std::optional<ParsedCliArguments> parse_cli_arguments(int argc, char* argv[]) {
 
         if(!has_operation) {
             if(is_jpacker_global_option(arg)) {
-                apply_jpacker_global_option(arg);
+                if(!apply_jpacker_global_option(arg, parsed)) return std::nullopt;
                 parsed.tokens.push_back(
                         ParsedCliToken{arg, static_cast<size_t>(i), CliTokenRole::JpackerGlobalOption});
                 parsed.consumed_global_options.push_back(arg);
@@ -1025,7 +1036,7 @@ std::optional<ParsedCliArguments> parse_cli_arguments(int argc, char* argv[]) {
             continue;
         }
         if(is_jpacker_global_option(arg)) {
-            apply_jpacker_global_option(arg);
+            if(!apply_jpacker_global_option(arg, parsed)) return std::nullopt;
             parsed.tokens.push_back(
                     ParsedCliToken{arg, static_cast<size_t>(i), CliTokenRole::JpackerGlobalOption});
             parsed.consumed_global_options.push_back(arg);
@@ -1057,6 +1068,89 @@ std::optional<ParsedCliArguments> parse_cli_arguments(int argc, char* argv[]) {
         return std::nullopt;
     }
     return parsed;
+}
+
+std::string package_source_selection_option(PackageSourceSelection selection) {
+    switch(selection) {
+    case PackageSourceSelection::Auto:
+        return "automatic source selection";
+    case PackageSourceSelection::AurOnly:
+        return "--aur";
+    case PackageSourceSelection::RepoOnly:
+        return "--repo";
+    }
+    throw std::logic_error("Unknown package source selection.");
+}
+
+SourceSelectableSyncOperation source_selectable_sync_operation(const ParsedCliArguments& parsed) {
+    if(!parsed.operation.starts_with("-S")) return SourceSelectableSyncOperation::Unsupported;
+
+    bool has_search = false;
+    bool has_info = false;
+    bool has_unsupported_modifier = false;
+
+    auto inspect_short_modifiers = [&](const std::string& option, size_t first_modifier) {
+        if(option.size() <= first_modifier || option[0] != '-' || option.starts_with("--")) return;
+        for(size_t i = first_modifier; i < option.size(); ++i) {
+            switch(option[i]) {
+            case 's':
+                has_search = true;
+                break;
+            case 'i':
+                has_info = true;
+                break;
+            case 'c':
+            case 'g':
+            case 'l':
+            case 'u':
+                has_unsupported_modifier = true;
+                break;
+            default:
+                break;
+            }
+        }
+    };
+
+    inspect_short_modifiers(parsed.operation, 2);
+    for(const auto& token : parsed.tokens) {
+        if(token.role != CliTokenRole::PacmanOption) continue;
+        if(token.value == "--search")
+            has_search = true;
+        else if(token.value == "--info")
+            has_info = true;
+        else if(token.value == "--clean" || token.value == "--groups" ||
+                token.value == "--list" || token.value == "--sysupgrade")
+            has_unsupported_modifier = true;
+        else
+            inspect_short_modifiers(token.value, 1);
+    }
+
+    if(has_unsupported_modifier || (has_search && has_info)) {
+        return SourceSelectableSyncOperation::Unsupported;
+    }
+    if(has_search) return SourceSelectableSyncOperation::Search;
+    if(has_info) return SourceSelectableSyncOperation::Info;
+    return SourceSelectableSyncOperation::Install;
+}
+
+bool validate_source_selection_operation(const ParsedCliArguments& parsed) {
+    if(parsed.source_selection == PackageSourceSelection::Auto) return true;
+
+    const std::string selector = package_source_selection_option(parsed.source_selection);
+    const bool requests_refresh = pacman_operation_requests_refresh(parsed.operation, parsed.flags);
+    SourceSelectableSyncOperation sync_operation = source_selectable_sync_operation(parsed);
+
+    if(parsed.source_selection == PackageSourceSelection::AurOnly && requests_refresh) {
+        Logger::error(
+                "Cannot combine --aur with pacman refresh for operation " + parsed.operation + ".");
+        return false;
+    }
+    if(sync_operation == SourceSelectableSyncOperation::Unsupported ||
+       (sync_operation == SourceSelectableSyncOperation::Install && requests_refresh)) {
+        Logger::error(selector + " is not supported for operation " + parsed.operation + ".");
+        return false;
+    }
+    return true;
 }
 
 // 文字列 / path / config
@@ -2648,9 +2742,11 @@ void preflight_aur_search_schema(const std::vector<std::string>& keywords) {
     }
 }
 
-bool search_aur(const std::vector<std::string>& keywords) {
+bool search_aur(const std::vector<std::string>& keywords, bool query_installed_state) {
     bool                  found = false;
-    std::set<std::string> installed_foreign_packages = get_foreign_package_names();
+    // POLICY(#168): AurOnly search must not invoke pacman, even for the optional [installed] annotation.
+    std::set<std::string> installed_foreign_packages =
+            query_installed_state ? get_foreign_package_names() : std::set<std::string>{};
     for(const auto& pkg_name : keywords) {
         if(pkg_name.empty()) continue;
         if(pkg_name[0] == '-') continue;
@@ -3589,6 +3685,12 @@ void install_smart_source(const std::string& pkg_name, bool only_if_updated) {
     build_from_git(source.requested_name, source.clone_name, source.git_url, env, only_if_updated);
 }
 
+void require_valid_aur_package_target(const std::string& target) {
+    if(target.find('/') != std::string::npos || !is_valid_package_name(target)) {
+        throw std::runtime_error("Invalid AUR package target: " + target);
+    }
+}
+
 void require_executable_sync_install_target(const std::string& pkg_name) {
     if(is_repo_package(pkg_name)) {
         PackageBuildSource source = resolve_build_source(pkg_name);
@@ -3600,18 +3702,18 @@ void require_executable_sync_install_target(const std::string& pkg_name) {
     require_executable_install_plan(pkg_name, plan);
 }
 
-void install_aur_build_plan(const std::string& target) {
-    BuildPlan plan = resolve_build_plan(target);
-    require_executable_install_plan(target, plan);
-
+void execute_aur_build_plan(const BuildPlan& plan, bool use_source_build_preferences) {
     for(const auto& entry : plan.order) {
         std::string package_names = join_comma_display_values(entry.package_names);
         Logger::info("Building AUR PackageBase: " + entry.package_base);
         Logger::info("Target package(s): " + package_names);
 
         std::string pkg_name = entry.package_names.empty() ? entry.package_base : entry.package_names.front();
-        std::string env = get_package_env(pkg_name);
-        if(env.empty() && pkg_name != entry.package_base) env = get_package_env(entry.package_base);
+        std::string env;
+        if(use_source_build_preferences) {
+            env = get_package_env(pkg_name);
+            if(env.empty() && pkg_name != entry.package_base) env = get_package_env(entry.package_base);
+        }
 
         try {
             build_from_git(pkg_name, entry.package_base, aur_git_url_for_package_base(entry.package_base), env, false);
@@ -3621,6 +3723,12 @@ void install_aur_build_plan(const std::string& target) {
                     "): " + e.what());
         }
     }
+}
+
+void install_aur_build_plan(const std::string& target) {
+    BuildPlan plan = resolve_build_plan(target);
+    require_executable_install_plan(target, plan);
+    execute_aur_build_plan(plan, true);
 }
 
 void preflight_upgrade_source_metadata() {
@@ -3803,8 +3911,166 @@ int cmd_fetch(const std::vector<std::string>& targets, const std::vector<std::st
     return failed ? 1 : 0;
 }
 
-int cmd_sync_info(const ParsedCliArguments& parsed, bool use_sudo) {
+int cmd_sync_search(
+        const ParsedCliArguments& parsed, bool use_sudo,
+        PackageSourceSelection source_selection) {
     std::string pacman_prefix = use_sudo ? "sudo pacman " : "pacman ";
+    switch(source_selection) {
+    case PackageSourceSelection::Auto: {
+        if(use_sudo) preflight_aur_search_schema(parsed.targets);
+        int pacman_status =
+                run_command(pacman_prefix + join_pacman_args(parsed.ordered_pacman_args));
+        Logger::info("Searching AUR...");
+        bool aur_found = search_aur(parsed.targets);
+        return (pacman_status == 0 || aur_found) ? 0 : 1;
+    }
+    case PackageSourceSelection::AurOnly:
+        Logger::info("Searching AUR...");
+        return search_aur(parsed.targets, false) ? 0 : 1;
+    case PackageSourceSelection::RepoOnly:
+        return run_command(pacman_prefix + join_pacman_args(parsed.ordered_pacman_args));
+    }
+    throw std::logic_error("Unknown package source selection.");
+}
+
+int cmd_sync_install(
+        const ParsedCliArguments& parsed, bool is_sys_upgrade,
+        PackageSourceSelection source_selection) {
+    if(source_selection == PackageSourceSelection::RepoOnly) {
+        // POLICY(#168): RepoOnly is one ordered binary repository transaction; no classification probe.
+        return run_command("sudo pacman " + join_pacman_args(parsed.ordered_pacman_args));
+    }
+
+    if(source_selection == PackageSourceSelection::AurOnly) {
+        if(parsed.targets.empty()) {
+            Logger::error("Missing AUR package target.");
+            return 1;
+        }
+        for(const auto& target : parsed.targets) {
+            require_valid_aur_package_target(target);
+        }
+
+        std::optional<std::string> unsupported_option =
+                unsupported_source_sync_option(parsed.operation, parsed.flags);
+        if(unsupported_option.has_value()) {
+            Logger::error(
+                    "Unsupported pacman option for AUR/source-build target: " +
+                    unsupported_option.value());
+            Logger::error("Rerun --aur without this option.");
+            return 1;
+        }
+
+        std::vector<BuildPlan> plans;
+        plans.reserve(parsed.targets.size());
+        for(const auto& target : parsed.targets) {
+            BuildPlan plan = resolve_build_plan(target);
+            require_executable_install_plan(target, plan);
+            plans.push_back(std::move(plan));
+        }
+
+        // POLICY(#168): every root target is fully planned and guarded before clone/build/install starts.
+        for(const auto& plan : plans) {
+            execute_aur_build_plan(plan, false);
+        }
+        return 0;
+    }
+
+    if(parsed.targets.empty()) {
+        return run_command("sudo pacman " + join_pacman_args(parsed.ordered_pacman_args));
+    }
+
+    std::vector<std::string> repo_targets;
+    std::vector<std::string> aur_targets;
+    std::set<size_t>         aur_target_token_indices;
+    for(size_t i = 0; i < parsed.targets.size(); ++i) {
+        const std::string& target = parsed.targets[i];
+        require_valid_package_name(target);
+        if(is_force_source(target)) {
+            aur_targets.push_back(target);
+            aur_target_token_indices.insert(parsed.target_token_indices[i]);
+        } else if(is_repo_package(target)) {
+            repo_targets.push_back(target);
+        } else {
+            aur_targets.push_back(target);
+            aur_target_token_indices.insert(parsed.target_token_indices[i]);
+        }
+    }
+    if(!aur_targets.empty()) {
+        std::optional<std::string> unsupported_option =
+                unsupported_source_sync_option(parsed.operation, parsed.flags);
+        if(unsupported_option.has_value()) {
+            Logger::error(
+                    "Unsupported pacman option for AUR/source-build target: " +
+                    unsupported_option.value());
+            Logger::error(
+                    "Split official repository and AUR/source-build targets, or rerun without this option.");
+            return 1;
+        }
+    }
+    for(const auto& package : aur_targets) {
+        require_executable_sync_install_target(package);
+    }
+    if(!repo_targets.empty() || is_sys_upgrade) {
+        // POLICY(#173): AUR targetのtokenだけを除き、option/value/official targetの元順序を維持する。
+        std::vector<std::string> pacman_args =
+                ordered_pacman_args_excluding_targets(parsed, aur_target_token_indices);
+        if(run_command("sudo pacman " + join_pacman_args(pacman_args)) != 0) {
+            throw std::runtime_error("Pacman failed.");
+        }
+    }
+    if(!aur_targets.empty()) {
+        // Auto keeps the legacy source-build preference and AUR classification behavior.
+        for(const auto& package : aur_targets) {
+            if(is_repo_package(package))
+                install_smart_source(package, false);
+            else
+                install_aur_build_plan(package);
+        }
+    }
+    return 0;
+}
+
+int cmd_sync_info(
+        const ParsedCliArguments& parsed, bool use_sudo,
+        PackageSourceSelection source_selection) {
+    std::string pacman_prefix = use_sudo ? "sudo pacman " : "pacman ";
+
+    if(source_selection == PackageSourceSelection::RepoOnly) {
+        return run_command(pacman_prefix + join_pacman_args(parsed.ordered_pacman_args));
+    }
+
+    if(source_selection == PackageSourceSelection::AurOnly) {
+        if(parsed.targets.empty()) {
+            Logger::error("Missing AUR package target.");
+            return 1;
+        }
+        for(const auto& target : parsed.targets) {
+            require_valid_aur_package_target(target);
+        }
+
+        bool                        failed = false;
+        std::vector<AurPackageInfo> aur_infos;
+        for(const auto& target : parsed.targets) {
+            try {
+                std::optional<AurPackageInfo> info = AurClient::info(target);
+                if(info.has_value())
+                    aur_infos.push_back(info.value());
+                else {
+                    Logger::error("AUR package not found: " + target);
+                    failed = true;
+                }
+            } catch(const std::exception& e) {
+                Logger::error("Failed to fetch AUR info for " + target + ": " + e.what());
+                failed = true;
+            }
+        }
+        for(size_t i = 0; i < aur_infos.size(); ++i) {
+            if(i > 0) std::cout << std::endl;
+            print_aur_info(aur_infos[i]);
+        }
+        return failed ? 1 : 0;
+    }
+
     if(parsed.targets.empty()) {
         return run_command(pacman_prefix + join_pacman_args(parsed.ordered_pacman_args));
     }

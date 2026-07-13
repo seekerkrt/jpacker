@@ -15,6 +15,7 @@ Operations handled entirely by pacman pass through pacman-compatible options tha
 When a sync target is routed to AUR or a source build, pacman options that cannot retain their meaning during makepkg build/install are rejected before the transaction starts instead of being ignored.
 Pacman options that take values must follow the operation and may use either \fB--option value\fR or \fB--option=value\fR form. A missing value for an option tracked by jpacker stops before pacman execution.
 The token after a value-taking pacman option is treated as its value even when it has the same spelling as a jpacker option. The first \fB--\fR not consumed as an option value is preserved as pacman's end-of-options marker; later tokens are opaque operands and are not interpreted as jpacker options.
+Package source selectors are recognized only in normal global-option positions. A selector that appears as a pacman option value or after \fB--\fR remains part of pacman's ordered argument list.
 Unsupported options for jpacker-specific operations also stop instead of being forwarded to pacman.
 
 .SH OPERATIONS
@@ -22,6 +23,7 @@ Unsupported options for jpacker-specific operations also stop instead of being f
 .B \-S, \-Syu, \-Syy
 Install packages or update the system. If a target is found in the official repositories, pacman is used. If not, it is searched in the AUR.
 If a package has a source-build preference (via \fBadd-src\fR), it will be built from source even if it exists in the official repositories.
+For a plain \fB-S\fR install, \fB--aur\fR treats every root target as an AUR package without repository fallback, while \fB--repo\fR sends the ordered targets and pacman options to one official binary repository transaction without AUR or source-build fallback.
 \fBjpacker -Syu\fR is treated as a pacman-compatible system upgrade and does not scan all registered source-build preferences. Use \fBjpacker upgrade\fR when registered source-build settings should be checked after the system upgrade and rebuilt when needed.
 \fBjpacker -Sc\fR is passed through to \fBsudo pacman -Sc\fR and cleans pacman caches only. Use \fBjpacker clean\fR when you also want to remove jpacker build/cache files.
 The jpacker cache directory is \fI$XDG_CACHE_HOME/jpacker\fR when \fBXDG_CACHE_HOME\fR is set, otherwise \fI$HOME/.cache/jpacker\fR.
@@ -30,11 +32,13 @@ The jpacker cache directory is \fI$XDG_CACHE_HOME/jpacker\fR when \fBXDG_CACHE_H
 .B \-Ss \fI<query>\fR
 Search for packages in both the official repositories and the AUR.
 AUR search results may show status tags such as \fB[installed]\fR, \fB[out-of-date]\fR, and \fB[orphaned]\fR when that metadata is available.
-When refresh is requested with \fB-y\fR or \fB--refresh\fR, the official repository search uses \fBsudo pacman\fR before the usual AUR search.
+In Auto mode, when refresh is requested with \fB-y\fR or \fB--refresh\fR, the official repository search uses \fBsudo pacman\fR before the usual AUR search.
+\fB--aur\fR searches only AUR and does not run pacman; combining it with refresh is rejected. \fB--repo\fR searches only official repositories and retains plain-pacman or refresh-triggered sudo routing.
 .TP
 .B \-Si \fI<package>\fR
 Show package information. Official repository packages use pacman output; AUR packages use AUR metadata and include installed, orphaned, and out-of-date state.
-When refresh is requested, every target must use a repository-qualified form such as \fBcore/filesystem\fR. An unqualified target stops before pacman, sudo, or an AUR query so an official database refresh cannot run before a possible AUR fallback is known. Without refresh, the existing repository-first AUR fallback remains available.
+In Auto mode, when refresh is requested, every target must use a repository-qualified form such as \fBcore/filesystem\fR. An unqualified target stops before pacman, sudo, or an AUR query so an official database refresh cannot run before a possible AUR fallback is known. Without refresh, the existing repository-first AUR fallback remains available.
+\fB--aur\fR shows only AUR metadata and does not run pacman; repository-qualified targets and refresh are rejected. \fB--repo\fR shows only official repository information, never falls back to AUR, and allows refresh with qualified or unqualified targets through the existing sudo routing.
 .TP
 .B \-F, \-Fl \fI<query>\fR
 Search or list the pacman file database without sudo. Forms that request a file database refresh, including \fB-Fy\fR, \fB-Fyy\fR, \fB-F -y\fR, and \fB-F --refresh\fR, use \fBsudo pacman\fR.
@@ -119,6 +123,14 @@ Pass \fB-C\fR to makepkg build/install execution so the existing \fIsrcdir\fR is
 .TP
 .BR \-\-rmdeps
 Pass \fB-r\fR to AUR/source-build makepkg execution. This is explicit opt-in and is not enabled by \fB--noconfirm\fR alone. makepkg removes only dependencies it installed through \fB-s\fR after a successful build; jpacker does not run its own pacman removal or orphan cleanup. This option is not passed to pacman-only installs.
+.TP
+.BR \-\-aur
+Limit plain \fB-S\fR installs, \fB-Ss\fR searches, and \fB-Si\fR information queries to AUR, with no official repository fallback. Official packages with the same name still use AUR, and source-build preferences and the official source-build route are ignored. Repository-qualified root targets are invalid. AUR build-plan dependencies retain their existing handling.
+.TP
+.BR \-\-repo
+Limit plain \fB-S\fR installs, \fB-Ss\fR searches, and \fB-Si\fR information queries to official binary repositories, with no AUR or source-build fallback. A source-build preference is overridden for this invocation only; its preference file is not modified or removed. Repository-qualified targets are accepted.
+.PP
+Repeating the same source selector is allowed. Combining \fB--aur\fR and \fB--repo\fR fails before any external command or AUR query, and \fB--noconfirm\fR does not bypass this conflict or the selected source. Source selectors are not supported for upgrade/refresh/clean sync operations, \fB-Qua\fR, or jpacker-specific operations such as \fBupgrade\fR, \fBbuild\fR, \fBfetch\fR, \fBdeps\fR, and \fBplan\fR. The exception is repository-only \fB-Ss\fR / \fB-Si\fR with refresh, which uses \fBsudo pacman\fR.
 .PP
 AUR/source build installation uses \fBmakepkg -sic\fR as its baseline. \fB--noconfirm\fR adds the same makepkg option, while \fB--rebuild\fR, \fB--cleanbuild\fR, and \fB--rmdeps\fR add \fB-f\fR, \fB-C\fR, and \fB-r\fR respectively. Other pacman transaction options are not translated to makepkg; if an AUR/source-build target is present, unsupported options stop the invocation before pacman or makepkg execution.
 .PP
@@ -191,6 +203,16 @@ jpacker -Syu
 .B Install a package from AUR without review:
 .RS
 jpacker -S google-chrome --noedit
+.RE
+
+.B Install a root target from AUR without repository fallback:
+.RS
+jpacker -S --aur google-chrome
+.RE
+
+.B Install an official binary while overriding a source-build preference for this invocation:
+.RS
+jpacker -S --repo fastfetch
 .RE
 
 .B Install a package without pacman/makepkg confirmation prompts:

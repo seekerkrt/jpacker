@@ -31,7 +31,7 @@ SRCS      := $(wildcard $(SRC_DIR)/*.cpp)
 OBJS      := $(SRCS:$(SRC_DIR)/%.cpp=$(BUILD_DIR)/%.o)
 DEPS      := $(OBJS:.o=.d)
 
-.PHONY: all clean test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-conflicts-replaces test-pacman-routing release-check install uninstall
+.PHONY: all clean test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-conflicts-replaces test-pacman-routing test-source-selection release-check install uninstall
 
 all: $(TARGET) $(MANPAGE)
 
@@ -71,6 +71,9 @@ test-pacman-routing: $(TEST_TARGET)
 
 test-build-cache-symlink: $(TEST_TARGET)
 	sh tests/test-build-cache-symlink.sh $(abspath $(TEST_TARGET))
+
+test-source-selection: $(TEST_TARGET)
+	sh tests/test-source-selection.sh $(abspath $(TEST_TARGET))
 
 release-check:
 	@echo ":: Checking release version consistency"
