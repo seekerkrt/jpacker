@@ -69,6 +69,17 @@ If the requested AUR package has a package name different from its PackageBase, 
 Conflicts/replaces metadata for every AUR package in the recursive plan is shown with its package name. A plan containing this metadata is incomplete because jpacker v1.x does not resolve it automatically.
 This command does not clone, build, or install dependencies.
 .TP
+.B \-G \fI<package>\fR
+Clone exactly one requested AUR package's complete PackageBase repository into \fI./<PackageBase>\fR below the current directory.
+This is an AUR-only operation: it does not probe official repositories, consult source-build preferences, fall back to a repository package, or retrieve dependency repositories. A split package is exported under its PackageBase name.
+If any directory, repository, file, symlink, dangling symlink, or other entry already exists at the destination, the command fails without fetching, updating, overwriting, or removing it. \fB--noconfirm\fR and all other global or pacman options are unsupported and cannot bypass this guard.
+jpacker anchors the command-start current directory and invocation-owned temporary directory with directory descriptors and device/inode identity. It verifies the expected AUR remote, \fI.git\fR, and a regular non-symlink \fIPKGBUILD\fR, then publishes with descriptor-relative no-replace rename. It does not use or modify the jpacker build cache and does not run makepkg, pacman, build, or install operations.
+.TP
+.B \-Gp \fI<package>\fR
+Print only the root \fIPKGBUILD\fR bytes from exactly one requested AUR package's PackageBase repository to standard output.
+The PackageBase is resolved by exact AUR package metadata, including for split packages. The repository is cloned into a descriptor-anchored secure temporary directory; the expected remote and regular non-symlink \fIPKGBUILD\fR are validated. No persistent checkout remains after normal success or ordinary failure. PKGBUILD is opened relative to the checkout descriptor without following symlinks.
+Successful stdout contains only PKGBUILD content. Diagnostics, command display, and PackageBase mapping are written to stderr; failures before stdout emission leave stdout empty. If a temporary-path identity mismatch is detected, jpacker fails closed rather than deleting that replacement and may leave temporary artifacts for manual inspection. The command does not evaluate PKGBUILD, generate or print \fI.install\fR / \fI.SRCINFO\fR, retrieve dependencies, use the jpacker cache, or run makepkg, pacman, build, or install operations. Global and pacman options are unsupported.
+.TP
 .B fetch \fI<package>\fR
 Safely retrieve the AUR build repositories needed to inspect an AUR package and its recursive AUR dependencies before any build/install stage.
 Fetch targets are resolved by PackageBase. Official repository and provided dependencies are not cloned. Unknown dependencies are reported as unresolved.
@@ -133,7 +144,7 @@ Limit plain \fB-S\fR installs, \fB-Ss\fR searches, and \fB-Si\fR information que
 .BR \-\-repo
 Limit plain \fB-S\fR installs, \fB-Ss\fR searches, and \fB-Si\fR information queries to official binary repositories, with no AUR or source-build fallback. A source-build preference is overridden for this invocation only; its preference file is not modified or removed. Repository-qualified targets are accepted.
 .PP
-Repeating the same source selector is allowed. Combining \fB--aur\fR and \fB--repo\fR fails before any external command or AUR query, and \fB--noconfirm\fR does not bypass this conflict or the selected source. Source selectors are not supported for upgrade/refresh/clean sync operations, \fB-Qua\fR, or jpacker-specific operations such as \fBupgrade\fR, \fBbuild\fR, \fBfetch\fR, \fBdeps\fR, and \fBplan\fR. The exception is repository-only \fB-Ss\fR / \fB-Si\fR with refresh, which uses \fBsudo pacman\fR.
+Repeating the same source selector is allowed. Combining \fB--aur\fR and \fB--repo\fR fails before any external command or AUR query, and \fB--noconfirm\fR does not bypass this conflict or the selected source. Source selectors are not supported for upgrade/refresh/clean sync operations, \fB-Qua\fR, or jpacker-specific operations such as \fBupgrade\fR, \fBbuild\fR, \fBfetch\fR, \fBdeps\fR, \fBplan\fR, \fB\-G\fR, and \fB\-Gp\fR. The exception is repository-only \fB-Ss\fR / \fB-Si\fR with refresh, which uses \fBsudo pacman\fR.
 .PP
 AUR/source build installation uses \fBmakepkg -sic\fR as its baseline. Semantic \fB--needed\fR adds that option once as an install-only policy; duplicates remain ordered in pacman arguments but are collapsed for makepkg. \fB--noconfirm\fR adds the same makepkg option, while \fB--rebuild\fR, \fB--cleanbuild\fR, and \fB--rmdeps\fR independently add \fB-f\fR, \fB-C\fR, and \fB-r\fR respectively. Other pacman transaction options are not translated to makepkg; if an AUR/source-build target is present, unsupported options stop the invocation before pacman or makepkg execution. An option value named \fB--needed\fR, an operand after \fB--\fR, and \fB--needed=true\fR do not enable the source install policy. AUR-only \fB-Ss\fR / \fB-Si\fR reject \fB--needed\fR before an AUR query, while repository-only forms delegate it to pacman.
 .PP
@@ -241,6 +252,16 @@ jpacker plan mongodb-bin
 .B Safely clone or fetch AUR build repositories:
 .RS
 jpacker fetch mongodb-bin
+.RE
+
+.B Export one AUR PackageBase repository into the current directory:
+.RS
+jpacker -G google-chrome
+.RE
+
+.B Print only an AUR PackageBase PKGBUILD to stdout:
+.RS
+jpacker -Gp google-chrome
 .RE
 
 .B Enable a source-build preference with custom optimizations:

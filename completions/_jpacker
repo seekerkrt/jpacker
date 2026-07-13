@@ -12,6 +12,8 @@ _jpacker_operations=(
     deps
     plan
     fetch
+    -G
+    -Gp
     add-src
     del-src
     edit-src
@@ -116,6 +118,9 @@ case $operation in
         _alternative \
             'deps-options:deps option:_jpacker_complete_deps_options' \
             'targets:package name:_message "package name"'
+        ;;
+    -G|-Gp)
+        _message 'AUR package name'
         ;;
     del-src|edit-src|revert)
         _jpacker_source_preferences

@@ -31,7 +31,7 @@ SRCS      := $(wildcard $(SRC_DIR)/*.cpp)
 OBJS      := $(SRCS:$(SRC_DIR)/%.cpp=$(BUILD_DIR)/%.o)
 DEPS      := $(OBJS:.o=.d)
 
-.PHONY: all clean test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-conflicts-replaces test-needed-contract test-pacman-routing test-source-selection release-check install uninstall
+.PHONY: all clean test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-conflicts-replaces test-needed-contract test-pacman-routing test-pkgbuild-export test-source-selection release-check install uninstall
 
 all: $(TARGET) $(MANPAGE)
 
@@ -77,6 +77,9 @@ test-source-selection: $(TEST_TARGET)
 
 test-needed-contract: $(TEST_TARGET)
 	sh tests/test-needed-contract.sh $(abspath $(TEST_TARGET))
+
+test-pkgbuild-export: $(TEST_TARGET)
+	sh tests/test-pkgbuild-export.sh $(abspath $(TEST_TARGET))
 
 release-check:
 	@echo ":: Checking release version consistency"

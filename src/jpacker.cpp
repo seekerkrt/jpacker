@@ -20,10 +20,13 @@
 #include <ctime>
 #include <curl/curl.h>
 #include <cstring>
+#include <dirent.h>
 #include <filesystem>
+#include <fcntl.h>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <linux/fs.h>
 #include <limits>
 #include <map>
 #include <memory>
@@ -35,6 +38,8 @@
 #include <stdexcept>
 #include <string>
 #include <system_error>
+#include <sys/stat.h>
+#include <sys/syscall.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #include <utility>
@@ -140,6 +145,23 @@ struct ParsedCliArguments {
 // pacman-compatible sync optionのうち、source buildへ意味を保って変換できるinvocation-level policy。
 struct SourceSyncOptions {
     bool needed = false;
+};
+
+enum class PkgbuildExportMode {
+    Tree,
+    PkgbuildStdout,
+};
+
+// requested AUR package と、export 対象になる PackageBase repository を結びつける。
+struct AurExportSource {
+    std::string requested_name;
+    std::string package_base;
+    std::string git_url;
+};
+
+struct CapturedCommandResult {
+    std::string output;
+    int         exit_code = 127;
 };
 
 namespace {
@@ -363,6 +385,10 @@ std::vector<ValidatedCachePath> preflight_cache_cleanup(const ValidatedCacheRoot
 class Logger {
     static std::ofstream logFile;
     static bool          initialized;
+    static bool          diagnostics_to_stderr_;
+    static std::ostream& diagnostic_stream() {
+        return diagnostics_to_stderr_ ? std::cerr : std::cout;
+    }
     static std::string   get_timestamp() {
         auto              now = std::chrono::system_clock::now();
         auto              in_time_t = std::chrono::system_clock::to_time_t(now);
@@ -372,6 +398,9 @@ class Logger {
     }
 
 public:
+    static void set_diagnostics_to_stderr() {
+        diagnostics_to_stderr_ = true;
+    }
     static void init(const fs::path& path) {
         if(path.has_parent_path() && !fs::exists(path.parent_path())) {
             fs::create_directories(path.parent_path());
@@ -382,11 +411,11 @@ public:
         initialized = logFile.is_open();
     }
     static void info(const std::string& msg) {
-        std::cout << "\033[1;32m::\033[0m " << msg << std::endl;
+        diagnostic_stream() << "\033[1;32m::\033[0m " << msg << std::endl;
         if(initialized) logFile << "[" << get_timestamp() << "] [INFO] " << msg << std::endl;
     }
     static void warn(const std::string& msg) {
-        std::cout << "\033[1;33m:: Warning:\033[0m " << msg << std::endl;
+        diagnostic_stream() << "\033[1;33m:: Warning:\033[0m " << msg << std::endl;
         if(initialized) logFile << "[" << get_timestamp() << "] [WARN] " << msg << std::endl;
     }
     static void error(const std::string& msg) {
@@ -394,12 +423,13 @@ public:
         if(initialized) logFile << "[" << get_timestamp() << "] [ERROR] " << msg << std::endl;
     }
     static void raw_cmd(const std::string& cmd) {
-        std::cout << "\033[1;33m::\033[0m Running: " << cmd << std::endl;
+        diagnostic_stream() << "\033[1;33m::\033[0m Running: " << cmd << std::endl;
         if(initialized) logFile << "[" << get_timestamp() << "] [EXEC] " << cmd << std::endl;
     }
 };
 std::ofstream Logger::logFile;
 bool          Logger::initialized = false;
+bool          Logger::diagnostics_to_stderr_ = false;
 
 // libcurl の global init/cleanup を 1 実行の寿命に束ねる RAII guard。
 class CurlGlobal {
@@ -482,13 +512,415 @@ public:
     }
 };
 
+class OwnedFileDescriptor {
+    int descriptor_ = -1;
+
+public:
+    explicit OwnedFileDescriptor(int descriptor) : descriptor_(descriptor) {
+    }
+    OwnedFileDescriptor(const OwnedFileDescriptor&) = delete;
+    OwnedFileDescriptor& operator=(const OwnedFileDescriptor&) = delete;
+    ~OwnedFileDescriptor() {
+        if(descriptor_ >= 0) close(descriptor_);
+    }
+    int get() const {
+        return descriptor_;
+    }
+    int release() {
+        return std::exchange(descriptor_, -1);
+    }
+};
+
+struct DirectoryIdentity {
+    dev_t device;
+    ino_t inode;
+};
+
+DirectoryIdentity require_directory_identity(int descriptor, const std::string& context) {
+    struct stat status {};
+    if(fstat(descriptor, &status) != 0) {
+        throw std::runtime_error("Failed to inspect " + context + ": " + std::strerror(errno));
+    }
+    if(!S_ISDIR(status.st_mode)) {
+        throw std::runtime_error(context + " is not a directory.");
+    }
+    return DirectoryIdentity{status.st_dev, status.st_ino};
+}
+
+bool directory_identity_matches(
+        const DirectoryIdentity& expected, const struct stat& actual) {
+    return S_ISDIR(actual.st_mode) && expected.device == actual.st_dev &&
+           expected.inode == actual.st_ino;
+}
+
+bool filesystem_identity_matches(
+        const struct stat& expected, const struct stat& actual) {
+    return expected.st_dev == actual.st_dev && expected.st_ino == actual.st_ino &&
+           (expected.st_mode & S_IFMT) == (actual.st_mode & S_IFMT);
+}
+
+fs::path proc_file_descriptor_path(int descriptor) {
+    return fs::path("/proc") / std::to_string(getpid()) / "fd" /
+           std::to_string(descriptor);
+}
+
+class AnchoredDirectory {
+    fs::path            display_path_;
+    OwnedFileDescriptor descriptor_;
+    DirectoryIdentity   identity_;
+
+    AnchoredDirectory(
+            fs::path display_path, int descriptor, DirectoryIdentity identity)
+        : display_path_(std::move(display_path)), descriptor_(descriptor), identity_(identity) {
+    }
+
+public:
+    AnchoredDirectory(const AnchoredDirectory&) = delete;
+    AnchoredDirectory& operator=(const AnchoredDirectory&) = delete;
+
+    static AnchoredDirectory open_path(
+            const fs::path& path, const std::string& context) {
+        int descriptor = open(path.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+        if(descriptor < 0) {
+            throw std::runtime_error(
+                    "Failed to open " + context + " " + path.string() + ": " +
+                    std::strerror(errno));
+        }
+        OwnedFileDescriptor opened_directory(descriptor);
+        DirectoryIdentity identity = require_directory_identity(descriptor, context);
+
+        struct stat named_status {};
+        if(fstatat(AT_FDCWD, path.c_str(), &named_status, AT_SYMLINK_NOFOLLOW) != 0) {
+            throw std::runtime_error(
+                    "Failed to revalidate " + context + " " + path.string() + ": " +
+                    std::strerror(errno));
+        }
+        if(!directory_identity_matches(identity, named_status)) {
+            throw std::runtime_error(
+                    "Refusing changed " + context + " path: " + path.string());
+        }
+
+        return AnchoredDirectory(path, opened_directory.release(), identity);
+    }
+
+    static AnchoredDirectory adopt_current_directory(
+            fs::path display_path, int descriptor, DirectoryIdentity identity) {
+        return AnchoredDirectory(std::move(display_path), descriptor, identity);
+    }
+
+    int descriptor() const {
+        return descriptor_.get();
+    }
+
+    const DirectoryIdentity& identity() const {
+        return identity_;
+    }
+
+    const fs::path& display_path() const {
+        return display_path_;
+    }
+};
+
+void remove_directory_contents_at(
+        int directory_descriptor, const fs::path& display_path) {
+    int scan_descriptor = openat(
+            directory_descriptor, ".",
+            O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+    if(scan_descriptor < 0) {
+        throw std::runtime_error(
+                "Failed to scan temporary directory " + display_path.string() + ": " +
+                std::strerror(errno));
+    }
+
+    DIR* raw_stream = fdopendir(scan_descriptor);
+    if(!raw_stream) {
+        int error = errno;
+        close(scan_descriptor);
+        throw std::runtime_error(
+                "Failed to read temporary directory " + display_path.string() + ": " +
+                std::strerror(error));
+    }
+    std::unique_ptr<DIR, int (*)(DIR*)> stream(raw_stream, closedir);
+
+    while(true) {
+        errno = 0;
+        dirent* entry = readdir(stream.get());
+        if(!entry) {
+            if(errno != 0) {
+                throw std::runtime_error(
+                        "Failed while reading temporary directory " +
+                        display_path.string() + ": " + std::strerror(errno));
+            }
+            break;
+        }
+
+        std::string leaf_name = entry->d_name;
+        if(leaf_name == "." || leaf_name == "..") continue;
+        fs::path entry_display_path = display_path / leaf_name;
+
+        struct stat observed_status {};
+        if(fstatat(
+                   directory_descriptor, leaf_name.c_str(), &observed_status,
+                   AT_SYMLINK_NOFOLLOW) != 0) {
+            if(errno == ENOENT) continue;
+            throw std::runtime_error(
+                    "Failed to inspect temporary entry " +
+                    entry_display_path.string() + ": " + std::strerror(errno));
+        }
+
+        if(S_ISDIR(observed_status.st_mode)) {
+            int child_descriptor = openat(
+                    directory_descriptor, leaf_name.c_str(),
+                    O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+            if(child_descriptor < 0) {
+                throw std::runtime_error(
+                        "Refusing changed temporary directory entry " +
+                        entry_display_path.string() + ": " + std::strerror(errno));
+            }
+            OwnedFileDescriptor child(child_descriptor);
+
+            struct stat opened_status {};
+            if(fstat(child.get(), &opened_status) != 0 ||
+               !filesystem_identity_matches(observed_status, opened_status)) {
+                throw std::runtime_error(
+                        "Refusing changed temporary directory entry: " +
+                        entry_display_path.string());
+            }
+
+            remove_directory_contents_at(child.get(), entry_display_path);
+
+            struct stat final_status {};
+            if(fstatat(
+                       directory_descriptor, leaf_name.c_str(), &final_status,
+                       AT_SYMLINK_NOFOLLOW) != 0 ||
+               !filesystem_identity_matches(opened_status, final_status)) {
+                throw std::runtime_error(
+                        "Refusing changed temporary directory entry: " +
+                        entry_display_path.string());
+            }
+            if(unlinkat(directory_descriptor, leaf_name.c_str(), AT_REMOVEDIR) != 0) {
+                throw std::runtime_error(
+                        "Failed to remove temporary directory entry " +
+                        entry_display_path.string() + ": " + std::strerror(errno));
+            }
+            continue;
+        }
+
+        struct stat final_status {};
+        if(fstatat(
+                   directory_descriptor, leaf_name.c_str(), &final_status,
+                   AT_SYMLINK_NOFOLLOW) != 0 ||
+           !filesystem_identity_matches(observed_status, final_status)) {
+            throw std::runtime_error(
+                    "Refusing changed temporary entry: " +
+                    entry_display_path.string());
+        }
+        if(unlinkat(directory_descriptor, leaf_name.c_str(), 0) != 0) {
+            throw std::runtime_error(
+                    "Failed to remove temporary entry " + entry_display_path.string() +
+                    ": " + std::strerror(errno));
+        }
+    }
+}
+
+// cache とは独立した、一回の export だけが所有する secure temporary directory。
+// POLICY(#167): 保存identityとの不一致を観測した場合は、named pathのcleanup/publishを拒否する。
+class TemporaryDirectoryGuard {
+    OwnedFileDescriptor parent_descriptor_;
+    OwnedFileDescriptor directory_descriptor_;
+    DirectoryIdentity   parent_identity_;
+    DirectoryIdentity   directory_identity_;
+    std::string         leaf_name_;
+    fs::path            display_path_;
+    bool                owns_path_ = true;
+
+    TemporaryDirectoryGuard(
+            int parent_descriptor, int directory_descriptor,
+            DirectoryIdentity parent_identity, DirectoryIdentity directory_identity,
+            std::string leaf_name, fs::path display_path)
+        : parent_descriptor_(parent_descriptor), directory_descriptor_(directory_descriptor),
+          parent_identity_(parent_identity), directory_identity_(directory_identity),
+          leaf_name_(std::move(leaf_name)),
+          display_path_(std::move(display_path)) {
+    }
+
+public:
+    TemporaryDirectoryGuard(const TemporaryDirectoryGuard&) = delete;
+    TemporaryDirectoryGuard& operator=(const TemporaryDirectoryGuard&) = delete;
+
+    static TemporaryDirectoryGuard create(const AnchoredDirectory& parent) {
+        int retained_parent_descriptor =
+                fcntl(parent.descriptor(), F_DUPFD_CLOEXEC, 0);
+        if(retained_parent_descriptor < 0) {
+            throw std::runtime_error(
+                    "Failed to retain temporary directory parent " +
+                    parent.display_path().string() + ": " + std::strerror(errno));
+        }
+        OwnedFileDescriptor retained_parent(retained_parent_descriptor);
+        DirectoryIdentity retained_parent_identity = require_directory_identity(
+                retained_parent.get(), "temporary directory parent");
+        if(retained_parent_identity.device != parent.identity().device ||
+           retained_parent_identity.inode != parent.identity().inode) {
+            throw std::runtime_error(
+                    "Temporary directory parent changed identity: " +
+                    parent.display_path().string());
+        }
+
+        std::string template_path =
+                (proc_file_descriptor_path(retained_parent.get()) /
+                 ".jpacker-pkgbuild-XXXXXX")
+                        .string();
+        std::vector<char> path_buffer(template_path.begin(), template_path.end());
+        path_buffer.push_back('\0');
+
+        char* created_path = mkdtemp(path_buffer.data());
+        if(!created_path) {
+            throw std::runtime_error(
+                    "Failed to create temporary directory under " +
+                    parent.display_path().string() + ": " + std::strerror(errno));
+        }
+
+        std::string leaf_name = fs::path(created_path).filename().string();
+        struct stat created_status {};
+        if(fstatat(
+                   retained_parent.get(), leaf_name.c_str(), &created_status,
+                   AT_SYMLINK_NOFOLLOW) != 0 ||
+           !S_ISDIR(created_status.st_mode)) {
+            throw std::runtime_error(
+                    "Failed to inspect created temporary directory " +
+                    (parent.display_path() / leaf_name).string());
+        }
+
+        int directory_descriptor = openat(
+                retained_parent.get(), leaf_name.c_str(),
+                O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+        if(directory_descriptor < 0) {
+            int open_error = errno;
+            struct stat current_status {};
+            if(fstatat(
+                       retained_parent.get(), leaf_name.c_str(), &current_status,
+                       AT_SYMLINK_NOFOLLOW) == 0 &&
+               filesystem_identity_matches(created_status, current_status)) {
+                unlinkat(retained_parent.get(), leaf_name.c_str(), AT_REMOVEDIR);
+            }
+            throw std::runtime_error(
+                    "Failed to open temporary directory " +
+                    (parent.display_path() / leaf_name).string() + ": " +
+                    std::strerror(open_error));
+        }
+        OwnedFileDescriptor opened_directory(directory_descriptor);
+        DirectoryIdentity directory_identity = require_directory_identity(
+                directory_descriptor, "temporary export directory");
+
+        struct stat named_status {};
+        if(fstatat(
+                   retained_parent.get(), leaf_name.c_str(), &named_status,
+                   AT_SYMLINK_NOFOLLOW) != 0 ||
+           !directory_identity_matches(directory_identity, named_status) ||
+           !filesystem_identity_matches(created_status, named_status)) {
+            throw std::runtime_error(
+                    "Refusing changed temporary directory path: " +
+                    (parent.display_path() / leaf_name).string());
+        }
+
+        return TemporaryDirectoryGuard(
+                retained_parent.release(), opened_directory.release(),
+                retained_parent_identity, directory_identity, leaf_name,
+                parent.display_path() / leaf_name);
+    }
+
+    int parent_descriptor() const {
+        return parent_descriptor_.get();
+    }
+
+    int directory_descriptor() const {
+        return directory_descriptor_.get();
+    }
+
+    const std::string& leaf_name() const {
+        return leaf_name_;
+    }
+
+    const fs::path& display_path() const {
+        return display_path_;
+    }
+
+    fs::path anchored_path() const {
+        return proc_file_descriptor_path(directory_descriptor_.get());
+    }
+
+    void require_owned_identity() const {
+        DirectoryIdentity parent_identity = require_directory_identity(
+                parent_descriptor_.get(), "temporary directory parent");
+        if(parent_identity.device != parent_identity_.device ||
+           parent_identity.inode != parent_identity_.inode) {
+            throw std::runtime_error(
+                    "Temporary directory parent changed identity: " +
+                    display_path_.parent_path().string());
+        }
+
+        DirectoryIdentity open_identity = require_directory_identity(
+                directory_descriptor_.get(), "temporary export directory");
+        if(open_identity.device != directory_identity_.device ||
+           open_identity.inode != directory_identity_.inode) {
+            throw std::runtime_error(
+                    "Temporary export directory descriptor changed identity: " +
+                    display_path_.string());
+        }
+
+        struct stat named_status {};
+        if(fstatat(
+                   parent_descriptor_.get(), leaf_name_.c_str(), &named_status,
+                   AT_SYMLINK_NOFOLLOW) != 0 ||
+           !directory_identity_matches(directory_identity_, named_status)) {
+            throw std::runtime_error(
+                    "Refusing changed temporary directory path: " +
+                    display_path_.string());
+        }
+    }
+
+    void release() {
+        owns_path_ = false;
+    }
+
+    void cleanup() {
+        if(!owns_path_) return;
+        // LANDMINE(#167): identity mismatchを観測した場合はreplacementを消さずartifactを残す。
+        require_owned_identity();
+        remove_directory_contents_at(directory_descriptor_.get(), display_path_);
+        require_owned_identity();
+        if(unlinkat(
+                   parent_descriptor_.get(), leaf_name_.c_str(),
+                   AT_REMOVEDIR) != 0) {
+            throw std::runtime_error(
+                    "Failed to remove temporary directory " + display_path_.string() +
+                    ": " + std::strerror(errno));
+        }
+        owns_path_ = false;
+    }
+
+    ~TemporaryDirectoryGuard() {
+        if(!owns_path_) return;
+        try {
+            cleanup();
+        } catch(const std::exception& e) {
+            Logger::warn(e.what());
+        } catch(...) {
+            Logger::warn(
+                    "Refusing unsafe temporary directory cleanup: unknown error");
+        }
+    }
+};
+
 // AUR RPC access をまとめる client。JSON解析の詳細とは分けて扱う。
 class AurClient {
 public:
     static std::string get_url(const std::string& url);
+    static std::string get_url_strict(const std::string& url);
     static std::vector<AurPackageInfo> search(const std::string& query);
     static std::vector<std::string> search_names_by_provides(const std::string& provided_name);
     static std::optional<AurPackageInfo> info(const std::string& pkg_name);
+    static std::optional<AurPackageInfo> info_strict(const std::string& pkg_name);
     static std::map<std::string, AurPackageInfo> info_many(const std::vector<std::string>& pkg_names);
 };
 
@@ -501,8 +933,11 @@ int run_jpacker(int argc, char* argv[]);
 void print_help();
 bool handle_info_only_option(int argc, char* argv[]);
 bool is_jpacker_global_option(const std::string& arg);
+bool argv_requests_pkgbuild_export_diagnostics(int argc, char* argv[]);
 bool apply_jpacker_global_option(const std::string& arg, ParsedCliArguments& parsed);
 std::optional<ParsedCliArguments> parse_cli_arguments(int argc, char* argv[]);
+std::optional<PkgbuildExportMode> pkgbuild_export_mode(const ParsedCliArguments& parsed);
+bool validate_pkgbuild_export_invocation(const ParsedCliArguments& parsed);
 bool parsed_has_semantic_pacman_option(
         const ParsedCliArguments& parsed, const std::string& option);
 SourceSyncOptions parse_source_sync_options(const ParsedCliArguments& parsed);
@@ -527,6 +962,7 @@ fs::path get_cache_dir();
 void load_config();
 
 // コマンド実行 / shell引数
+CapturedCommandResult capture_command_output(const char* cmd);
 std::string exec_command(const char* cmd);
 int command_status(const std::string& cmd);
 int run_command(const std::string& cmd);
@@ -546,6 +982,7 @@ bool validate_optionless_jpacker_operation(const std::string& operation, const s
 std::optional<std::string> unsupported_source_sync_option(
         const ParsedCliArguments& parsed);
 bool is_valid_package_name(const std::string& name);
+bool is_valid_aur_export_identifier(const std::string& name);
 ParsedDependency parse_dependency_string(const std::string& dependency);
 std::string dependency_package_name(const std::string& dependency);
 std::string provided_dependency_name(const std::string& provided);
@@ -554,6 +991,7 @@ std::string dependency_constraint_unresolved_reason(const std::string& dependenc
 std::string dependency_display_with_constraint_note(const std::string& display, const std::string& dependency);
 void warn_unverified_version_constraint(const std::string& dependency);
 void require_valid_package_name(const std::string& name);
+void require_valid_aur_export_target(const std::string& target);
 bool is_force_source(const std::string& pkg_name);
 std::string get_package_env(const std::string& pkg_name);
 std::string get_git_branch();
@@ -666,6 +1104,20 @@ void print_metadata_risk_group(const std::vector<BuildPlanMetadataRisk>& risks);
 std::string metadata_risk_summary(const BuildPlanMetadataRisk& risk);
 std::string join_metadata_risk_summaries(const std::vector<BuildPlanMetadataRisk>& risks);
 std::string aur_git_url_for_package_base(const std::string& package_base);
+AurExportSource resolve_aur_export_source(const std::string& target);
+AnchoredDirectory require_export_current_directory();
+AnchoredDirectory require_export_temporary_parent();
+fs::path require_missing_export_destination(
+        const AnchoredDirectory& current_directory, const std::string& package_base);
+void validate_aur_export_checkout(
+        const AurExportSource& source, const TemporaryDirectoryGuard& checkout);
+void clone_and_validate_aur_export(
+        const AurExportSource& source, const TemporaryDirectoryGuard& checkout);
+std::string read_pkgbuild_bytes(const TemporaryDirectoryGuard& checkout);
+void rename_export_without_replacement(
+        TemporaryDirectoryGuard& temporary_directory,
+        const AnchoredDirectory& destination_parent, const std::string& destination_name,
+        const fs::path& destination_display_path);
 void print_fetch_plan(const BuildPlan& plan);
 void fetch_aur_package_base(const std::string& package_base);
 
@@ -690,6 +1142,8 @@ void preflight_upgrade_source_metadata();
 int cmd_deps(const std::vector<std::string>& targets, const std::vector<std::string>& flags);
 int cmd_plan(const std::vector<std::string>& targets, const std::vector<std::string>& flags);
 int cmd_fetch(const std::vector<std::string>& targets, const std::vector<std::string>& flags);
+int cmd_export_pkgbuild_tree(const std::string& target);
+int cmd_print_pkgbuild(const std::string& target);
 int cmd_sync_search(
         const ParsedCliArguments& parsed, bool use_sudo, PackageSourceSelection source_selection);
 int cmd_sync_info(
@@ -710,6 +1164,11 @@ int cmd_upgrade();
 // --- CLI 入口 ---
 int run_jpacker(int argc, char* argv[]) {
     if(handle_info_only_option(argc, argv)) return 0;
+
+    // POLICY(#167): parser/root-check failureも -Gp のmachine-readable stdoutへ混ぜない。
+    if(argv_requests_pkgbuild_export_diagnostics(argc, argv)) {
+        Logger::set_diagnostics_to_stderr();
+    }
 
     if(geteuid() == 0) {
         Logger::error("Do not run jpacker as root or with sudo.");
@@ -735,6 +1194,24 @@ int run_jpacker(int argc, char* argv[]) {
     if(!parsed_result.has_value()) return 1;
 
     const ParsedCliArguments&        parsed = parsed_result.value();
+    std::optional<PkgbuildExportMode> export_mode = pkgbuild_export_mode(parsed);
+    if(export_mode.has_value()) {
+        // POLICY(#167): export/print は cache log 初期化より前に分岐し、内部 build cache を作らない。
+        Logger::set_diagnostics_to_stderr();
+        if(!validate_pkgbuild_export_invocation(parsed)) return 1;
+
+        CurlGlobal curl_global;
+        try {
+            if(export_mode.value() == PkgbuildExportMode::Tree) {
+                return cmd_export_pkgbuild_tree(parsed.targets.front());
+            }
+            return cmd_print_pkgbuild(parsed.targets.front());
+        } catch(const std::exception& e) {
+            Logger::error(e.what());
+            return 1;
+        }
+    }
+
     // POLICY(#168): selector conflict / scope errors must stop before the default log creates the cache root.
     if(!validate_source_selection_operation(parsed)) return 1;
 
@@ -896,6 +1373,8 @@ void print_help() {
     std::cout << "    \033[1mclean\033[0m                Clean package/build caches" << std::endl;
     std::cout << std::endl;
     std::cout << "\033[1mAUR INSPECTION\033[0m" << std::endl;
+    std::cout << "    \033[1m-G\033[0m <pkg>             Export one AUR PackageBase repository to ./<PackageBase> (no build/install)" << std::endl;
+    std::cout << "    \033[1m-Gp\033[0m <pkg>            Print only one AUR PackageBase PKGBUILD to stdout (no persistent checkout)" << std::endl;
     std::cout << "    \033[1mdeps\033[0m [--recursive] <pkg> Classify AUR dependencies" << std::endl;
     std::cout << "    \033[1mplan\033[0m <pkg>           Show AUR build order plan" << std::endl;
     std::cout << "    \033[1mfetch\033[0m <pkg>          Safely clone/fetch AUR build repositories" << std::endl;
@@ -941,6 +1420,16 @@ std::optional<JpackerGlobalOption> jpacker_global_option_kind(const std::string&
 
 bool is_jpacker_global_option(const std::string& arg) {
     return jpacker_global_option_kind(arg).has_value();
+}
+
+bool argv_requests_pkgbuild_export_diagnostics(int argc, char* argv[]) {
+    // POLICY(#173): operation 前のglobal optionだけを飛ばし、option value/opaque operandは見ない。
+    for(int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        if(is_jpacker_global_option(arg)) continue;
+        return arg == "-G" || arg == "-Gp";
+    }
+    return false;
 }
 
 bool apply_jpacker_global_option(const std::string& arg, ParsedCliArguments& parsed) {
@@ -1090,6 +1579,37 @@ std::optional<ParsedCliArguments> parse_cli_arguments(int argc, char* argv[]) {
         return std::nullopt;
     }
     return parsed;
+}
+
+std::optional<PkgbuildExportMode> pkgbuild_export_mode(const ParsedCliArguments& parsed) {
+    if(parsed.operation == "-G") return PkgbuildExportMode::Tree;
+    if(parsed.operation == "-Gp") return PkgbuildExportMode::PkgbuildStdout;
+    return std::nullopt;
+}
+
+bool validate_pkgbuild_export_invocation(const ParsedCliArguments& parsed) {
+    // POLICY(#173): operation/target 以外の role は、綴りを再解釈せず元 argv 位置のまま拒否する。
+    for(const auto& token : parsed.tokens) {
+        if(token.role == CliTokenRole::Operation || token.role == CliTokenRole::Target) continue;
+
+        Logger::error(
+                "Unsupported option " + token.value + " for operation " + parsed.operation + ".");
+        return false;
+    }
+
+    if(parsed.targets.size() != 1) {
+        Logger::error(
+                "Operation " + parsed.operation + " requires exactly one AUR package target.");
+        Logger::error("Usage: jpacker " + parsed.operation + " <pkg>");
+        return false;
+    }
+
+    const std::string& target = parsed.targets.front();
+    if(target.find('/') != std::string::npos || !is_valid_aur_export_identifier(target)) {
+        Logger::error("Invalid AUR target for operation " + parsed.operation + ": " + target);
+        return false;
+    }
+    return true;
 }
 
 bool parsed_has_semantic_pacman_option(
@@ -1620,15 +2140,31 @@ void load_config() {
 }
 
 // コマンド実行 / shell引数
-std::string exec_command(const char* cmd) {
+CapturedCommandResult capture_command_output(const char* cmd) {
     std::array<char, 128> buffer;
     std::string           result;
     std::unique_ptr<FILE, int (*)(FILE*)> pipe(popen(cmd, "r"), pclose);
-    if(!pipe) return "";
+    if(!pipe) return CapturedCommandResult{};
     while(fgets(buffer.data(), buffer.size(), pipe.get()) != nullptr) {
         result += buffer.data();
     }
-    return trim(result);
+    bool read_failed = ferror(pipe.get()) != 0;
+    int  status = pclose(pipe.release());
+    int  exit_code = 127;
+    if(status != -1) {
+        if(WIFEXITED(status))
+            exit_code = WEXITSTATUS(status);
+        else if(WIFSIGNALED(status))
+            exit_code = 128 + WTERMSIG(status);
+        else
+            exit_code = 1;
+    }
+    if(read_failed) exit_code = 1;
+    return CapturedCommandResult{trim(result), exit_code};
+}
+
+std::string exec_command(const char* cmd) {
+    return capture_command_output(cmd).output;
 }
 
 int command_status(const std::string& cmd) {
@@ -1777,6 +2313,11 @@ bool is_valid_package_name(const std::string& name) {
     });
 }
 
+bool is_valid_aur_export_identifier(const std::string& name) {
+    // POLICY(#167): package identifier であっても、filesystem の dot component は export 名にしない。
+    return name != "." && name != ".." && is_valid_package_name(name);
+}
+
 ParsedDependency parse_dependency_string(const std::string& dependency) {
     ParsedDependency parsed;
     parsed.raw = trim(dependency);
@@ -1835,6 +2376,12 @@ void warn_unverified_version_constraint(const std::string& dependency) {
 void require_valid_package_name(const std::string& name) {
     if(!is_valid_package_name(name)) {
         throw std::runtime_error("Invalid package name: " + name);
+    }
+}
+
+void require_valid_aur_export_target(const std::string& target) {
+    if(target.find('/') != std::string::npos || !is_valid_aur_export_identifier(target)) {
+        throw std::runtime_error("Invalid AUR target: " + target);
     }
 }
 
@@ -2557,6 +3104,50 @@ std::vector<AurPackageInfo> parse_aur_rpc_package_results(
     return packages;
 }
 
+std::optional<AurPackageInfo> parse_single_aur_info_response(
+        const std::string& response, const std::string& pkg_name) {
+    std::string                 context = "package info " + pkg_name;
+    std::vector<AurPackageInfo> results = parse_aur_rpc_package_results(response, context);
+    if(results.empty()) return std::nullopt;
+    if(results.size() != 1) {
+        throw_aur_rpc_validation_error(
+                context, "expected zero or one result, got " + std::to_string(results.size()));
+    }
+    if(results.front().Name != pkg_name) {
+        throw_aur_rpc_validation_error(
+                context, "requested " + pkg_name + " but response Name was " + results.front().Name);
+    }
+    return results.front();
+}
+
+std::string AurClient::get_url_strict(const std::string& url) {
+    CurlHandle  handle;
+    std::string readBuffer;
+    char        errorBuffer[CURL_ERROR_SIZE] = {0};
+    curl_easy_setopt(handle.get(), CURLOPT_URL, url.c_str());
+    curl_easy_setopt(handle.get(), CURLOPT_WRITEFUNCTION, WriteCallback);
+    curl_easy_setopt(handle.get(), CURLOPT_WRITEDATA, &readBuffer);
+    curl_easy_setopt(handle.get(), CURLOPT_USERAGENT, USER_AGENT.c_str());
+    curl_easy_setopt(handle.get(), CURLOPT_ERRORBUFFER, errorBuffer);
+    curl_easy_setopt(handle.get(), CURLOPT_FAILONERROR, 1L);
+    CURLcode res = curl_easy_perform(handle.get());
+    if(res != CURLE_OK) {
+        std::string error = errorBuffer[0] ? errorBuffer : curl_easy_strerror(res);
+        throw std::runtime_error("AUR request failed: " + error);
+    }
+
+    long response_code = 0;
+    curl_easy_getinfo(handle.get(), CURLINFO_RESPONSE_CODE, &response_code);
+    if(response_code < 200 || response_code >= 300) {
+        throw std::runtime_error(
+                "AUR request failed with HTTP status " + std::to_string(response_code) + ".");
+    }
+    if(readBuffer.empty()) {
+        throw std::runtime_error("AUR request returned an empty response.");
+    }
+    return readBuffer;
+}
+
 std::string AurClient::get_url(const std::string& url) {
     CurlHandle  handle;
     std::string readBuffer;
@@ -2618,20 +3209,21 @@ std::optional<AurPackageInfo> AurClient::info(const std::string& pkg_name) {
     std::string response = get_url(url);
     if(response.empty()) return std::nullopt;
 
-    std::string                 context = "package info " + pkg_name;
-    std::vector<AurPackageInfo> results = parse_aur_rpc_package_results(response, context);
-    if(results.empty()) {
-        return std::nullopt;
+    return parse_single_aur_info_response(response, pkg_name);
+}
+
+std::optional<AurPackageInfo> AurClient::info_strict(const std::string& pkg_name) {
+    CurlHandle handle;
+    char*      escaped = curl_easy_escape(
+            handle.get(), pkg_name.c_str(), static_cast<int>(pkg_name.length()));
+    if(!escaped) {
+        throw std::runtime_error("Failed to encode AUR package name: " + pkg_name);
     }
-    if(results.size() != 1) {
-        throw_aur_rpc_validation_error(
-                context, "expected zero or one result, got " + std::to_string(results.size()));
-    }
-    if(results.front().Name != pkg_name) {
-        throw_aur_rpc_validation_error(
-                context, "requested " + pkg_name + " but response Name was " + results.front().Name);
-    }
-    return results.front();
+    std::string url = aur_rpc_info_url() + escaped;
+    curl_free(escaped);
+
+    std::string response = get_url_strict(url);
+    return parse_single_aur_info_response(response, pkg_name);
 }
 
 std::map<std::string, AurPackageInfo> AurClient::info_many(const std::vector<std::string>& pkg_names) {
@@ -3516,6 +4108,267 @@ std::string aur_git_url_for_package_base(const std::string& package_base) {
     return AUR_BASE_URL + package_base + ".git";
 }
 
+namespace {
+
+std::optional<struct stat> export_entry_status_at(
+        int parent_descriptor, const std::string& leaf_name,
+        const fs::path& display_path) {
+    struct stat status {};
+    if(fstatat(
+               parent_descriptor, leaf_name.c_str(), &status,
+               AT_SYMLINK_NOFOLLOW) == 0) {
+        return status;
+    }
+    if(errno == ENOENT) return std::nullopt;
+    throw std::runtime_error(
+            "Unable to inspect export path " + display_path.string() + ": " +
+            std::strerror(errno));
+}
+
+void require_regular_export_pkgbuild(
+        int checkout_descriptor, const fs::path& pkgbuild_path) {
+    std::optional<struct stat> status = export_entry_status_at(
+            checkout_descriptor, "PKGBUILD", pkgbuild_path);
+    if(!status.has_value() || !S_ISREG(status->st_mode)) {
+        throw std::runtime_error(
+                "Exported PKGBUILD is not a regular non-symlink file: " +
+                pkgbuild_path.string());
+    }
+}
+
+void require_export_git_directory(const TemporaryDirectoryGuard& checkout) {
+    fs::path git_path = checkout.display_path() / ".git";
+    int git_descriptor = openat(
+            checkout.directory_descriptor(), ".git",
+            O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+    if(git_descriptor < 0) {
+        throw std::runtime_error(
+                "Cloned AUR repository is missing a regular .git directory: " +
+                checkout.display_path().string());
+    }
+    OwnedFileDescriptor git_directory(git_descriptor);
+    require_directory_identity(
+            git_directory.get(), "exported .git directory " + git_path.string());
+}
+
+} // namespace
+
+AurExportSource resolve_aur_export_source(const std::string& target) {
+    require_valid_aur_export_target(target);
+
+    std::optional<AurPackageInfo> info;
+    try {
+        info = AurClient::info_strict(target);
+    } catch(const std::exception& e) {
+        throw std::runtime_error("Failed to resolve AUR package " + target + ": " + e.what());
+    }
+    if(!info.has_value()) {
+        throw std::runtime_error("AUR package not found: " + target);
+    }
+    if(!is_valid_aur_export_identifier(info->PackageBase)) {
+        throw std::runtime_error(
+                "Invalid AUR PackageBase for export: " + info->PackageBase);
+    }
+
+    return AurExportSource{
+            target, info->PackageBase, aur_git_url_for_package_base(info->PackageBase)};
+}
+
+AnchoredDirectory require_export_current_directory() {
+    int descriptor = open(".", O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+    if(descriptor < 0) {
+        throw std::runtime_error(
+                "Unable to open current directory: " + std::string(std::strerror(errno)));
+    }
+    OwnedFileDescriptor current_directory_descriptor(descriptor);
+    DirectoryIdentity current_identity = require_directory_identity(
+            descriptor, "current export directory");
+
+    std::error_code ec;
+    fs::path        current_directory = fs::current_path(ec);
+    if(ec) {
+        throw std::runtime_error("Unable to read current directory: " + ec.message());
+    }
+    current_directory = fs::canonical(current_directory, ec);
+    if(ec) {
+        throw std::runtime_error("Unable to canonicalize current directory: " + ec.message());
+    }
+
+    struct stat named_status {};
+    if(fstatat(
+               AT_FDCWD, current_directory.c_str(), &named_status,
+               AT_SYMLINK_NOFOLLOW) != 0) {
+        throw std::runtime_error(
+                "Unable to revalidate current directory " + current_directory.string() +
+                ": " + std::strerror(errno));
+    }
+    if(!directory_identity_matches(current_identity, named_status)) {
+        throw std::runtime_error(
+                "Refusing changed current directory path: " +
+                current_directory.string());
+    }
+    return AnchoredDirectory::adopt_current_directory(
+            current_directory, current_directory_descriptor.release(), current_identity);
+}
+
+AnchoredDirectory require_export_temporary_parent() {
+    std::error_code ec;
+    fs::path temporary_parent = fs::temp_directory_path(ec);
+    if(ec) {
+        throw std::runtime_error("Unable to resolve temporary directory: " + ec.message());
+    }
+    temporary_parent = fs::canonical(temporary_parent, ec);
+    if(ec) {
+        throw std::runtime_error("Unable to canonicalize temporary directory: " + ec.message());
+    }
+    return AnchoredDirectory::open_path(temporary_parent, "temporary directory");
+}
+
+fs::path require_missing_export_destination(
+        const AnchoredDirectory& current_directory, const std::string& package_base) {
+    if(!is_valid_aur_export_identifier(package_base)) {
+        throw std::runtime_error("Invalid AUR PackageBase for export: " + package_base);
+    }
+
+    fs::path destination_path =
+            (current_directory.display_path() / package_base).lexically_normal();
+    // POLICY(#167): export destination は command 開始時 cwd の direct child に固定する。
+    if(destination_path.parent_path() != current_directory.display_path() ||
+       !is_path_contained(current_directory.display_path(), destination_path, false)) {
+        throw std::runtime_error(
+                "Export destination resolves outside current directory: " + destination_path.string());
+    }
+
+    if(export_entry_status_at(
+               current_directory.descriptor(), package_base,
+               destination_path)
+               .has_value()) {
+        throw std::runtime_error("Export destination already exists: " + destination_path.string());
+    }
+    return destination_path;
+}
+
+void validate_aur_export_checkout(
+        const AurExportSource& source, const TemporaryDirectoryGuard& checkout) {
+    checkout.require_owned_identity();
+    require_export_git_directory(checkout);
+    std::string remote_command =
+            "git -C " + shell_quote(checkout.anchored_path().string()) +
+            " config --local --get remote.origin.url 2>/dev/null";
+    CapturedCommandResult remote_result =
+            capture_command_output(remote_command.c_str());
+    if(remote_result.exit_code != 0) {
+        throw std::runtime_error(
+                "Failed to read local remote.origin.url for AUR PackageBase " +
+                source.package_base + " (git config exit " +
+                std::to_string(remote_result.exit_code) + ").");
+    }
+    if(remote_result.output.empty()) {
+        throw std::runtime_error(
+                "Missing remote.origin.url for AUR PackageBase " + source.package_base + ".");
+    }
+    if(!remote_url_matches_expected(remote_result.output, source.git_url)) {
+        throw std::runtime_error(
+                "Remote URL mismatch for AUR PackageBase " + source.package_base +
+                ": " + remote_result.output);
+    }
+
+    require_regular_export_pkgbuild(
+            checkout.directory_descriptor(), checkout.display_path() / "PKGBUILD");
+    checkout.require_owned_identity();
+}
+
+void clone_and_validate_aur_export(
+        const AurExportSource& source, const TemporaryDirectoryGuard& checkout) {
+    checkout.require_owned_identity();
+    std::string clone_command =
+            "git clone --quiet -- " + shell_quote(source.git_url) + " " +
+            shell_quote(checkout.anchored_path().string()) + " > /dev/null";
+    if(run_command(clone_command) != 0) {
+        throw std::runtime_error("Failed to clone AUR PackageBase " + source.package_base + ".");
+    }
+    validate_aur_export_checkout(source, checkout);
+}
+
+std::string read_pkgbuild_bytes(const TemporaryDirectoryGuard& checkout) {
+    checkout.require_owned_identity();
+    fs::path pkgbuild_path = checkout.display_path() / "PKGBUILD";
+    require_regular_export_pkgbuild(checkout.directory_descriptor(), pkgbuild_path);
+
+    int descriptor = openat(
+            checkout.directory_descriptor(), "PKGBUILD",
+            O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
+    if(descriptor < 0) {
+        throw std::runtime_error(
+                "Failed to open PKGBUILD " + pkgbuild_path.string() + ": " + std::strerror(errno));
+    }
+    OwnedFileDescriptor file(descriptor);
+
+    struct stat file_status {};
+    if(fstat(file.get(), &file_status) != 0) {
+        throw std::runtime_error(
+                "Failed to inspect PKGBUILD " + pkgbuild_path.string() + ": " + std::strerror(errno));
+    }
+    if(!S_ISREG(file_status.st_mode)) {
+        throw std::runtime_error(
+                "Exported PKGBUILD is not a regular file: " + pkgbuild_path.string());
+    }
+
+    std::string contents;
+    if(file_status.st_size > 0 &&
+       static_cast<unsigned long long>(file_status.st_size) <=
+               static_cast<unsigned long long>(contents.max_size())) {
+        contents.reserve(static_cast<size_t>(file_status.st_size));
+    }
+
+    std::array<char, 8192> buffer;
+    while(true) {
+        ssize_t bytes_read = ::read(file.get(), buffer.data(), buffer.size());
+        if(bytes_read > 0) {
+            contents.append(buffer.data(), static_cast<size_t>(bytes_read));
+            continue;
+        }
+        if(bytes_read == 0) break;
+        if(errno == EINTR) continue;
+        throw std::runtime_error(
+                "Failed to read PKGBUILD " + pkgbuild_path.string() + ": " + std::strerror(errno));
+    }
+    checkout.require_owned_identity();
+    return contents;
+}
+
+void rename_export_without_replacement(
+        TemporaryDirectoryGuard& temporary_directory,
+        const AnchoredDirectory& destination_parent, const std::string& destination_name,
+        const fs::path& destination_display_path) {
+    if(export_entry_status_at(
+               destination_parent.descriptor(), destination_name,
+               destination_display_path)
+               .has_value()) {
+        throw std::runtime_error(
+                "Export destination already exists: " +
+                destination_display_path.string());
+    }
+    temporary_directory.require_owned_identity();
+
+    // LANDMINE(#167): std::filesystem::rename may replace an entry created after preflight.
+    // directory fd と renameat2(NOREPLACE) で、開始時 cwd 以外や existing path へ publish しない。
+    if(syscall(
+               SYS_renameat2, temporary_directory.parent_descriptor(),
+               temporary_directory.leaf_name().c_str(), destination_parent.descriptor(),
+               destination_name.c_str(), RENAME_NOREPLACE) != 0) {
+        if(errno == EEXIST || errno == ENOTEMPTY) {
+            throw std::runtime_error(
+                    "Export destination already exists: " +
+                    destination_display_path.string());
+        }
+        throw std::runtime_error(
+                "Failed to publish AUR export to " + destination_display_path.string() + ": " +
+                std::strerror(errno));
+    }
+    temporary_directory.release();
+}
+
 void print_fetch_plan(const BuildPlan& plan) {
     std::cout << "Fetch targets:" << std::endl;
     if(plan.order.empty()) {
@@ -3964,6 +4817,60 @@ int cmd_fetch(const std::vector<std::string>& targets, const std::vector<std::st
     }
 
     return failed ? 1 : 0;
+}
+
+int cmd_export_pkgbuild_tree(const std::string& target) {
+    // command 開始時の cwd を RPC/clone より前に固定し、後続 path 計算の親として使い続ける。
+    AnchoredDirectory current_directory = require_export_current_directory();
+    AurExportSource   source = resolve_aur_export_source(target);
+    fs::path destination_path =
+            require_missing_export_destination(current_directory, source.package_base);
+
+    if(source.requested_name != source.package_base) {
+        Logger::info(
+                source.requested_name + " -> PackageBase " + source.package_base);
+    }
+
+    TemporaryDirectoryGuard temporary_directory =
+            TemporaryDirectoryGuard::create(current_directory);
+    clone_and_validate_aur_export(source, temporary_directory);
+    // LANDMINE(#167): clone後のtreeをpublish直前にもfd基準で再検証する。
+    validate_aur_export_checkout(source, temporary_directory);
+    rename_export_without_replacement(
+            temporary_directory, current_directory, source.package_base,
+            destination_path);
+
+    Logger::info(
+            "Exported AUR PackageBase " + source.package_base +
+            " in the command-start current directory.");
+    return 0;
+}
+
+int cmd_print_pkgbuild(const std::string& target) {
+    AurExportSource source = resolve_aur_export_source(target);
+    if(source.requested_name != source.package_base) {
+        Logger::info(
+                source.requested_name + " -> PackageBase " + source.package_base);
+    }
+
+    AnchoredDirectory temporary_parent = require_export_temporary_parent();
+    TemporaryDirectoryGuard temporary_directory =
+            TemporaryDirectoryGuard::create(temporary_parent);
+    clone_and_validate_aur_export(source, temporary_directory);
+    std::string pkgbuild = read_pkgbuild_bytes(temporary_directory);
+    if(pkgbuild.size() >
+       static_cast<size_t>(std::numeric_limits<std::streamsize>::max())) {
+        throw std::runtime_error("PKGBUILD is too large to write to stdout.");
+    }
+
+    // POLICY(#167): pre-output failure時にstdoutを空に保つため、clone/read/cleanup後にだけ出力する。
+    temporary_directory.cleanup();
+    std::cout.write(pkgbuild.data(), static_cast<std::streamsize>(pkgbuild.size()));
+    std::cout.flush();
+    if(!std::cout) {
+        throw std::runtime_error("Failed to write PKGBUILD to stdout.");
+    }
+    return 0;
 }
 
 int cmd_sync_search(
