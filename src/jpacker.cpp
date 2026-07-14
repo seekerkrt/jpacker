@@ -12,6 +12,7 @@
 // 関数宣言と詳細実装は、将来の分割候補が見えるように section comment で大まかな責務ごとに分類する。
 
 #include "dependency_spec.hpp"
+#include "logging.hpp"
 #include "package_identifier.hpp"
 
 #include <algorithm>
@@ -20,14 +21,12 @@
 #include <cerrno>
 #include <chrono>
 #include <cstdlib>
-#include <ctime>
 #include <curl/curl.h>
 #include <cstring>
 #include <dirent.h>
 #include <filesystem>
 #include <fcntl.h>
 #include <fstream>
-#include <iomanip>
 #include <iostream>
 #include <linux/fs.h>
 #include <limits>
@@ -361,56 +360,6 @@ ValidatedCachePath revalidate_trusted_cache_path(
 void remove_trusted_cache_path(const ValidatedCachePath& path);
 bool rollback_trusted_cache_path(const ValidatedCachePath& path);
 std::vector<ValidatedCachePath> preflight_cache_cleanup(const ValidatedCacheRoot& root);
-
-// CLI 表示と log file 出力をまとめる薄い logger。
-class Logger {
-    static std::ofstream logFile;
-    static bool          initialized;
-    static bool          diagnostics_to_stderr_;
-    static std::ostream& diagnostic_stream() {
-        return diagnostics_to_stderr_ ? std::cerr : std::cout;
-    }
-    static std::string   get_timestamp() {
-        auto              now = std::chrono::system_clock::now();
-        auto              in_time_t = std::chrono::system_clock::to_time_t(now);
-        std::stringstream ss;
-        ss << std::put_time(std::localtime(&in_time_t), "%Y-%m-%d %H:%M:%S");
-        return ss.str();
-    }
-
-public:
-    static void set_diagnostics_to_stderr() {
-        diagnostics_to_stderr_ = true;
-    }
-    static void init(const fs::path& path) {
-        if(path.has_parent_path() && !fs::exists(path.parent_path())) {
-            fs::create_directories(path.parent_path());
-        }
-        if(logFile.is_open()) logFile.close();
-        logFile.clear();
-        logFile.open(path, std::ios::app);
-        initialized = logFile.is_open();
-    }
-    static void info(const std::string& msg) {
-        diagnostic_stream() << "\033[1;32m::\033[0m " << msg << std::endl;
-        if(initialized) logFile << "[" << get_timestamp() << "] [INFO] " << msg << std::endl;
-    }
-    static void warn(const std::string& msg) {
-        diagnostic_stream() << "\033[1;33m:: Warning:\033[0m " << msg << std::endl;
-        if(initialized) logFile << "[" << get_timestamp() << "] [WARN] " << msg << std::endl;
-    }
-    static void error(const std::string& msg) {
-        std::cerr << "\033[1;31m:: Error:\033[0m " << msg << std::endl;
-        if(initialized) logFile << "[" << get_timestamp() << "] [ERROR] " << msg << std::endl;
-    }
-    static void raw_cmd(const std::string& cmd) {
-        diagnostic_stream() << "\033[1;33m::\033[0m Running: " << cmd << std::endl;
-        if(initialized) logFile << "[" << get_timestamp() << "] [EXEC] " << cmd << std::endl;
-    }
-};
-std::ofstream Logger::logFile;
-bool          Logger::initialized = false;
-bool          Logger::diagnostics_to_stderr_ = false;
 
 // libcurl の global init/cleanup を 1 実行の寿命に束ねる RAII guard。
 class CurlGlobal {
