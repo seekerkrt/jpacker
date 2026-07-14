@@ -11,6 +11,7 @@
 // このファイルは、jpacker の CLI 入口、pacman wrapper、AUR/source build 補助をまとめる実装単位。
 // 関数宣言と詳細実装は、将来の分割候補が見えるように section comment で大まかな責務ごとに分類する。
 
+#include "dependency_spec.hpp"
 #include "package_identifier.hpp"
 
 #include <algorithm>
@@ -239,28 +240,6 @@ struct PackageBuildSource {
 struct InstalledPackage {
     std::string name;
     std::string version;
-};
-
-// AUR dependency string の raw/name/operator/version を失わないための最小表現。
-// POLICY: v1.x では version compare は行わず、constraint の検出と表示だけを担当する。
-struct ParsedDependency {
-    std::string                raw;
-    std::string                name;
-    std::optional<std::string> op;
-    std::optional<std::string> version;
-
-    bool has_constraint() const {
-        return op.has_value();
-    }
-
-    bool has_parseable_constraint() const {
-        return op.has_value() && version.has_value() && !version->empty() &&
-               version->find_first_of("<>=") != 0;
-    }
-
-    bool has_malformed_constraint() const {
-        return has_constraint() && !has_parseable_constraint();
-    }
 };
 
 // 依存名を満たす provider package と、その所属 repository。
@@ -984,12 +963,6 @@ bool validate_optionless_jpacker_operation(const std::string& operation, const s
 std::optional<std::string> unsupported_source_sync_option(
         const ParsedCliArguments& parsed);
 bool is_valid_aur_export_identifier(const std::string& name);
-ParsedDependency parse_dependency_string(const std::string& dependency);
-std::string dependency_package_name(const std::string& dependency);
-std::string provided_dependency_name(const std::string& provided);
-std::string dependency_constraint_note(const std::string& dependency);
-std::string dependency_constraint_unresolved_reason(const std::string& dependency);
-std::string dependency_display_with_constraint_note(const std::string& display, const std::string& dependency);
 void warn_unverified_version_constraint(const std::string& dependency);
 void require_valid_aur_export_target(const std::string& target);
 bool is_force_source(const std::string& pkg_name);
@@ -2309,55 +2282,6 @@ std::optional<std::string> unsupported_source_sync_option(
 bool is_valid_aur_export_identifier(const std::string& name) {
     // POLICY(#167): package identifier であっても、filesystem の dot component は export 名にしない。
     return name != "." && name != ".." && is_valid_package_name(name);
-}
-
-ParsedDependency parse_dependency_string(const std::string& dependency) {
-    ParsedDependency parsed;
-    parsed.raw = trim(dependency);
-
-    size_t pos = parsed.raw.find_first_of("<>=");
-    if(pos == std::string::npos) {
-        parsed.name = parsed.raw;
-        return parsed;
-    }
-
-    parsed.name = trim(parsed.raw.substr(0, pos));
-    if((parsed.raw[pos] == '<' || parsed.raw[pos] == '>') && pos + 1 < parsed.raw.size() &&
-       parsed.raw[pos + 1] == '=') {
-        parsed.op = parsed.raw.substr(pos, 2);
-        parsed.version = trim(parsed.raw.substr(pos + 2));
-    } else {
-        parsed.op = parsed.raw.substr(pos, 1);
-        parsed.version = trim(parsed.raw.substr(pos + 1));
-    }
-
-    return parsed;
-}
-
-std::string dependency_package_name(const std::string& dependency) {
-    return parse_dependency_string(dependency).name;
-}
-
-std::string provided_dependency_name(const std::string& provided) {
-    return dependency_package_name(provided);
-}
-
-std::string dependency_constraint_note(const std::string& dependency) {
-    ParsedDependency parsed = parse_dependency_string(dependency);
-    if(!parsed.has_parseable_constraint()) return "";
-    return " [constraint: " + parsed.op.value() + " " + parsed.version.value() + ", not verified]";
-}
-
-std::string dependency_constraint_unresolved_reason(const std::string& dependency) {
-    ParsedDependency parsed = parse_dependency_string(dependency);
-    if(parsed.has_malformed_constraint()) return parsed.raw + " (invalid version constraint)";
-    // POLICY(#96): dependency の version constraint は表示・警告まで。jpacker 側で比較解決しない。
-    if(parsed.has_constraint()) return parsed.raw + " (version constraint is not verified)";
-    return parsed.raw;
-}
-
-std::string dependency_display_with_constraint_note(const std::string& display, const std::string& dependency) {
-    return display + dependency_constraint_note(dependency);
 }
 
 void warn_unverified_version_constraint(const std::string& dependency) {
