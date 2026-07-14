@@ -14,6 +14,7 @@
 #include "dependency_spec.hpp"
 #include "logging.hpp"
 #include "package_identifier.hpp"
+#include "process.hpp"
 
 #include <algorithm>
 #include <array>
@@ -42,7 +43,6 @@
 #include <system_error>
 #include <sys/stat.h>
 #include <sys/syscall.h>
-#include <sys/wait.h>
 #include <unistd.h>
 #include <utility>
 #include <vector>
@@ -159,11 +159,6 @@ struct AurExportSource {
     std::string requested_name;
     std::string package_base;
     std::string git_url;
-};
-
-struct CapturedCommandResult {
-    std::string output;
-    int         exit_code = 127;
 };
 
 namespace {
@@ -891,11 +886,7 @@ fs::path expand_path(const std::string& path_str);
 fs::path get_cache_dir();
 void load_config();
 
-// コマンド実行 / shell引数
-CapturedCommandResult capture_command_output(const char* cmd);
-std::string exec_command(const char* cmd);
-int command_status(const std::string& cmd);
-int run_command(const std::string& cmd);
+// shell引数 / command construction
 std::string join_shell_args(const std::vector<std::string>& args);
 std::vector<std::string> pacman_args_with_global_options(std::vector<std::string> args);
 std::string join_pacman_args(const std::vector<std::string>& args);
@@ -2061,47 +2052,7 @@ void load_config() {
     }
 }
 
-// コマンド実行 / shell引数
-CapturedCommandResult capture_command_output(const char* cmd) {
-    std::array<char, 128> buffer;
-    std::string           result;
-    std::unique_ptr<FILE, int (*)(FILE*)> pipe(popen(cmd, "r"), pclose);
-    if(!pipe) return CapturedCommandResult{};
-    while(fgets(buffer.data(), buffer.size(), pipe.get()) != nullptr) {
-        result += buffer.data();
-    }
-    bool read_failed = ferror(pipe.get()) != 0;
-    int  status = pclose(pipe.release());
-    int  exit_code = 127;
-    if(status != -1) {
-        if(WIFEXITED(status))
-            exit_code = WEXITSTATUS(status);
-        else if(WIFSIGNALED(status))
-            exit_code = 128 + WTERMSIG(status);
-        else
-            exit_code = 1;
-    }
-    if(read_failed) exit_code = 1;
-    return CapturedCommandResult{trim(result), exit_code};
-}
-
-std::string exec_command(const char* cmd) {
-    return capture_command_output(cmd).output;
-}
-
-int command_status(const std::string& cmd) {
-    int status = std::system(cmd.c_str());
-    if(status == -1) return 127;
-    if(WIFEXITED(status)) return WEXITSTATUS(status);
-    if(WIFSIGNALED(status)) return 128 + WTERMSIG(status);
-    return 1;
-}
-
-int run_command(const std::string& cmd) {
-    Logger::raw_cmd(cmd);
-    return command_status(cmd);
-}
-
+// shell引数 / command construction
 std::string join_shell_args(const std::vector<std::string>& args) {
     std::stringstream ss;
     for(size_t i = 0; i < args.size(); ++i) {
