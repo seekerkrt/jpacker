@@ -28,6 +28,7 @@ CPPFLAGS  ?=
 MY_CXXFLAGS := -std=c++20 -Wall -Wextra -DJPKG_VERSION=\"$(VERSION)\"
 MY_LDLIBS   := -lcurl
 SRCS      := $(wildcard $(SRC_DIR)/*.cpp)
+HEADERS   := $(wildcard $(SRC_DIR)/*.hpp)
 OBJS      := $(SRCS:$(SRC_DIR)/%.cpp=$(BUILD_DIR)/%.o)
 DEPS      := $(OBJS:.o=.d)
 
@@ -52,7 +53,7 @@ clean:
 	@echo ":: Cleaning up"
 	rm -rf $(BUILD_DIR) $(TARGET)
 
-$(TEST_TARGET): $(SRCS) $(VERSION_FILE)
+$(TEST_TARGET): $(SRCS) $(HEADERS) $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling isolated integration test binary"
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -DJPACKER_ENABLE_TEST_OVERRIDES $(SRCS) -o $@ $(MY_LDLIBS)

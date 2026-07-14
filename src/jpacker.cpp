@@ -11,6 +11,8 @@
 // このファイルは、jpacker の CLI 入口、pacman wrapper、AUR/source build 補助をまとめる実装単位。
 // 関数宣言と詳細実装は、将来の分割候補が見えるように section comment で大まかな責務ごとに分類する。
 
+#include "package_identifier.hpp"
+
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -981,7 +983,6 @@ bool pacman_operation_requests_refresh(
 bool validate_optionless_jpacker_operation(const std::string& operation, const std::vector<std::string>& flags);
 std::optional<std::string> unsupported_source_sync_option(
         const ParsedCliArguments& parsed);
-bool is_valid_package_name(const std::string& name);
 bool is_valid_aur_export_identifier(const std::string& name);
 ParsedDependency parse_dependency_string(const std::string& dependency);
 std::string dependency_package_name(const std::string& dependency);
@@ -990,7 +991,6 @@ std::string dependency_constraint_note(const std::string& dependency);
 std::string dependency_constraint_unresolved_reason(const std::string& dependency);
 std::string dependency_display_with_constraint_note(const std::string& display, const std::string& dependency);
 void warn_unverified_version_constraint(const std::string& dependency);
-void require_valid_package_name(const std::string& name);
 void require_valid_aur_export_target(const std::string& target);
 bool is_force_source(const std::string& pkg_name);
 std::string get_package_env(const std::string& pkg_name);
@@ -2306,13 +2306,6 @@ std::optional<std::string> unsupported_source_sync_option(
     return std::nullopt;
 }
 
-bool is_valid_package_name(const std::string& name) {
-    if(name.empty() || name[0] == '-') return false;
-    return std::all_of(name.begin(), name.end(), [](unsigned char ch) {
-        return std::isalnum(ch) || ch == '@' || ch == '.' || ch == '_' || ch == '+' || ch == '-';
-    });
-}
-
 bool is_valid_aur_export_identifier(const std::string& name) {
     // POLICY(#167): package identifier であっても、filesystem の dot component は export 名にしない。
     return name != "." && name != ".." && is_valid_package_name(name);
@@ -2371,12 +2364,6 @@ void warn_unverified_version_constraint(const std::string& dependency) {
     ParsedDependency parsed = parse_dependency_string(dependency);
     if(!parsed.has_parseable_constraint()) return;
     Logger::warn("version constraint for " + parsed.raw + " is not verified");
-}
-
-void require_valid_package_name(const std::string& name) {
-    if(!is_valid_package_name(name)) {
-        throw std::runtime_error("Invalid package name: " + name);
-    }
 }
 
 void require_valid_aur_export_target(const std::string& target) {
