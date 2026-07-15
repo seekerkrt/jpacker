@@ -67,10 +67,14 @@ setup_case() {
     unset JPACKER_TEST_GIT_CLONE_EXIT_CODE
     unset JPACKER_TEST_GIT_CLONE_SYMLINK_TARGET
     unset JPACKER_TEST_GIT_CLONE_FIXTURE_DIR
+    unset JPACKER_TEST_EDITOR_REPLACE_TARGET
+    unset JPACKER_TEST_EDITOR_REMOVE_TARGET
+    unset JPACKER_TEST_EDITOR_SYMLINK_TARGET
     unset JPACKER_TEST_PACMAN_QM_OUTPUT
     unset JPACKER_TEST_PACMAN_REPO_PACKAGES
     unset JPACKER_TEST_PACKAGE_BUILD_DIR
     unset JPACKER_TEST_MAKEPKG_EXIT_CODE
+    unset EDITOR
 
     cache_root=$XDG_CACHE_HOME/jpacker
     entry_path=$cache_root/clean-root
@@ -122,11 +126,47 @@ run_clean_tty_fail() {
     fi
 }
 
+run_build_tty_ok() {
+    output_file=$1
+    answers=$2
+    : > "$command_log"
+    if ! printf '%b' "$answers" |
+        script -qec "$test_runner --nodiff build clean-root" /dev/null > "$output_file" 2>&1; then
+        echo "expected interactive build to succeed" >&2
+        sed -n '1,240p' "$output_file" >&2
+        cat "$command_log" >&2
+        exit 1
+    fi
+}
+
+run_build_tty_fail() {
+    output_file=$1
+    answers=$2
+    : > "$command_log"
+    if printf '%b' "$answers" |
+        script -qec "$test_runner --nodiff build clean-root" /dev/null > "$output_file" 2>&1; then
+        echo "expected interactive build to fail" >&2
+        sed -n '1,240p' "$output_file" >&2
+        cat "$command_log" >&2
+        exit 1
+    fi
+}
+
 assert_contains() {
     pattern=$1
     file=$2
     if ! grep -F -- "$pattern" "$file" >/dev/null; then
         echo "missing expected output: $pattern" >&2
+        sed -n '1,240p' "$file" >&2
+        exit 1
+    fi
+}
+
+assert_not_contains() {
+    pattern=$1
+    file=$2
+    if grep -F -- "$pattern" "$file" >/dev/null; then
+        echo "unexpected output: $pattern" >&2
         sed -n '1,240p' "$file" >&2
         exit 1
     fi
@@ -160,6 +200,18 @@ assert_only_command() {
     fi
 }
 
+assert_command_before() {
+    first=$1
+    second=$2
+    first_line=$(grep -nFx -- "$first" "$command_log" | sed -n '1s/:.*//p')
+    second_line=$(grep -nFx -- "$second" "$command_log" | sed -n '1s/:.*//p')
+    if [ -z "$first_line" ] || [ -z "$second_line" ] || [ "$first_line" -ge "$second_line" ]; then
+        echo "unexpected command order: $first -> $second" >&2
+        cat "$command_log" >&2
+        exit 1
+    fi
+}
+
 assert_log_empty() {
     if [ -s "$command_log" ]; then
         echo "external command ran before unsafe cache path was rejected" >&2
@@ -169,11 +221,47 @@ assert_log_empty() {
 }
 
 assert_no_cache_mutation_commands() {
-    if grep -E '^(git|makepkg|sudo) ' "$command_log" >/dev/null; then
+    if grep -E '^(git|jpacker-test-editor|makepkg|sudo) ' "$command_log" >/dev/null; then
         echo "unsafe cache path reached a git/build/install command" >&2
         cat "$command_log" >&2
         exit 1
     fi
+    if grep '^pacman ' "$command_log" | grep -v '^pacman -Si ' >/dev/null; then
+        echo "unsafe cache path reached a pacman mutation command" >&2
+        cat "$command_log" >&2
+        exit 1
+    fi
+}
+
+assert_no_build_or_install_commands() {
+    if grep -E '^(makepkg|sudo) ' "$command_log" >/dev/null; then
+        echo "unsafe reviewed artifact reached a build/install command" >&2
+        cat "$command_log" >&2
+        exit 1
+    fi
+    if grep '^pacman ' "$command_log" | grep -v '^pacman -Si ' >/dev/null; then
+        echo "unsafe reviewed artifact reached a pacman mutation command" >&2
+        cat "$command_log" >&2
+        exit 1
+    fi
+}
+
+assert_only_clone_after_metadata() {
+    expected_clone=$1
+    assert_command "$expected_clone"
+    while IFS= read -r command; do
+        case $command in
+            pacman\ -Si\ *)
+                ;;
+            "$expected_clone")
+                ;;
+            *)
+                echo "unsafe cloned checkout reached an unexpected command" >&2
+                cat "$command_log" >&2
+                exit 1
+                ;;
+        esac
+    done < "$command_log"
 }
 
 assert_symlink() {
@@ -197,6 +285,14 @@ assert_symlink_rejection() {
     assert_contains "symlink component is not allowed" "$output_file"
 }
 
+assert_descendant_rejection() {
+    output_file=$1
+    rejected_path=$2
+    reason=$3
+    # pathとreasonを結合して確認し、case directory名によるreasonの偽陽性を防ぐ。
+    assert_contains "$rejected_path: $reason" "$output_file"
+}
+
 create_checkout() {
     checkout_dir=$1
     mkdir -p "$checkout_dir/.git"
@@ -207,6 +303,14 @@ create_checkout() {
 create_regular_repo() {
     repo_dir=$1
     mkdir -p "$repo_dir/.git"
+    printf 'pkgname=jpacker-test-fixture\npkgver=1\npkgrel=1\n' > "$repo_dir/PKGBUILD"
+}
+
+create_clone_fixture() {
+    clone_fixture=$case_dir/clone-fixture
+    mkdir -p "$clone_fixture/.git"
+    printf 'pkgname=jpacker-test-fixture\npkgver=1\npkgrel=1\n' > "$clone_fixture/PKGBUILD"
+    export JPACKER_TEST_GIT_CLONE_FIXTURE_DIR=$clone_fixture
 }
 
 snapshot_directory() {
@@ -214,7 +318,8 @@ snapshot_directory() {
     snapshot_file=$2
     (
         CDPATH= cd "$snapshot_dir"
-        find . -mindepth 1 -printf 'entry %y %p\n'
+        find . -exec stat --printf \
+            'entry type=%F mode=%f uid=%u gid=%g size=%s mtime=%y ctime=%z path=%n target=%N\n' -- {} \;
         find . -type f -exec cksum {} \;
     ) | LC_ALL=C sort > "$snapshot_file"
 }
@@ -336,6 +441,104 @@ assert_log_empty
 assert_symlink "$ancestor_link"
 assert_directory_unchanged "$outside_dir" "$case_dir/before.snapshot"
 
+# --- Persistent checkout descendant boundaries ---
+
+setup_case fetch-git-directory-symlink
+mkdir -p "$entry_path" "$outside_dir/external.git"
+printf 'external git metadata\n' > "$outside_dir/external.git/marker"
+printf 'pkgname=clean-root\n' > "$entry_path/PKGBUILD"
+ln -s "$outside_dir/external.git" "$entry_path/.git"
+snapshot_directory "$outside_dir" "$case_dir/before.snapshot"
+run_fail "$case_dir/output" fetch clean-root
+assert_descendant_rejection "$case_dir/output" "$entry_path/.git" "symlink."
+assert_log_empty
+assert_symlink "$entry_path/.git"
+assert_directory_unchanged "$outside_dir" "$case_dir/before.snapshot"
+
+setup_case build-git-dangling-symlink
+mkdir -p "$entry_path"
+printf 'pkgname=clean-root\n' > "$entry_path/PKGBUILD"
+ln -s "$outside_dir/missing.git" "$entry_path/.git"
+snapshot_directory "$outside_dir" "$case_dir/before.snapshot"
+run_fail "$case_dir/output" --noedit --nodiff build clean-root
+assert_descendant_rejection "$case_dir/output" "$entry_path/.git" "symlink."
+assert_no_cache_mutation_commands
+assert_symlink "$entry_path/.git"
+assert_directory_unchanged "$outside_dir" "$case_dir/before.snapshot"
+
+setup_case fetch-absolute-external-gitdir
+mkdir -p "$entry_path" "$outside_dir/external.git"
+printf 'external git metadata\n' > "$outside_dir/external.git/marker"
+printf 'pkgname=clean-root\n' > "$entry_path/PKGBUILD"
+printf 'gitdir: %s\n' "$outside_dir/external.git" > "$entry_path/.git"
+snapshot_directory "$outside_dir" "$case_dir/before.snapshot"
+run_fail "$case_dir/output" fetch clean-root
+assert_descendant_rejection "$case_dir/output" "$entry_path/.git" "gitfile / redirect."
+assert_not_contains "$outside_dir/external.git" "$case_dir/output"
+assert_log_empty
+assert_directory_unchanged "$outside_dir" "$case_dir/before.snapshot"
+
+setup_case build-relative-external-gitdir
+mkdir -p "$entry_path" "$outside_dir/external.git"
+printf 'external git metadata\n' > "$outside_dir/external.git/marker"
+printf 'pkgname=clean-root\n' > "$entry_path/PKGBUILD"
+printf 'gitdir: ../../../outside/external.git\n' > "$entry_path/.git"
+snapshot_directory "$outside_dir" "$case_dir/before.snapshot"
+run_fail "$case_dir/output" --noedit --nodiff build clean-root
+assert_descendant_rejection "$case_dir/output" "$entry_path/.git" "gitfile / redirect."
+assert_not_contains "$outside_dir/external.git" "$case_dir/output"
+assert_no_cache_mutation_commands
+assert_directory_unchanged "$outside_dir" "$case_dir/before.snapshot"
+
+setup_case build-pkgbuild-symlink
+create_regular_repo "$entry_path"
+printf 'external PKGBUILD\n' > "$outside_dir/PKGBUILD"
+rm "$entry_path/PKGBUILD"
+ln -s "$outside_dir/PKGBUILD" "$entry_path/PKGBUILD"
+snapshot_directory "$outside_dir" "$case_dir/before.snapshot"
+run_fail "$case_dir/output" --noedit --nodiff build clean-root
+assert_descendant_rejection "$case_dir/output" "$entry_path/PKGBUILD" "symlink."
+assert_no_cache_mutation_commands
+assert_symlink "$entry_path/PKGBUILD"
+assert_directory_unchanged "$outside_dir" "$case_dir/before.snapshot"
+
+setup_case build-pkgbuild-dangling-symlink
+create_regular_repo "$entry_path"
+rm "$entry_path/PKGBUILD"
+ln -s "$outside_dir/missing-PKGBUILD" "$entry_path/PKGBUILD"
+snapshot_directory "$outside_dir" "$case_dir/before.snapshot"
+run_fail "$case_dir/output" --noedit --nodiff build clean-root
+assert_descendant_rejection "$case_dir/output" "$entry_path/PKGBUILD" "symlink."
+assert_no_cache_mutation_commands
+assert_symlink "$entry_path/PKGBUILD"
+assert_directory_unchanged "$outside_dir" "$case_dir/before.snapshot"
+
+setup_case build-install-symlink
+create_regular_repo "$entry_path"
+printf 'external install script\n' > "$outside_dir/clean-root.install"
+ln -s "$outside_dir/clean-root.install" "$entry_path/clean-root.install"
+snapshot_directory "$outside_dir" "$case_dir/before.snapshot"
+run_fail "$case_dir/output" --noedit --nodiff build clean-root
+assert_descendant_rejection "$case_dir/output" "$entry_path/clean-root.install" "symlink."
+assert_no_cache_mutation_commands
+assert_symlink "$entry_path/clean-root.install"
+assert_directory_unchanged "$outside_dir" "$case_dir/before.snapshot"
+
+setup_case build-pkgbuild-directory
+create_regular_repo "$entry_path"
+rm "$entry_path/PKGBUILD"
+mkdir "$entry_path/PKGBUILD"
+run_fail "$case_dir/output" --noedit --nodiff build clean-root
+assert_descendant_rejection "$case_dir/output" "$entry_path/PKGBUILD" "non-regular file."
+assert_no_cache_mutation_commands
+
+setup_case build-install-fifo
+create_regular_repo "$entry_path"
+mkfifo "$entry_path/clean-root.install"
+run_fail "$case_dir/output" --noedit --nodiff build clean-root
+assert_descendant_rejection "$case_dir/output" "$entry_path/clean-root.install" "non-regular file."
+assert_no_cache_mutation_commands
+
 # --- Build/update/reset and re-clone boundaries ---
 
 setup_case build-directory-symlink
@@ -361,6 +564,104 @@ assert_no_cache_mutation_commands
 assert_symlink "$entry_path"
 assert_directory_unchanged "$outside_dir" "$case_dir/before.snapshot"
 
+# --- Review-time replacement and successful-clone descendant boundaries ---
+
+setup_case build-review-pkgbuild-replaced
+create_regular_repo "$entry_path"
+printf 'external reviewed artifact\n' > "$outside_dir/PKGBUILD"
+snapshot_directory "$outside_dir" "$case_dir/before.snapshot"
+export EDITOR=$repo_root/tests/stubs/jpacker-test-editor
+export JPACKER_TEST_EDITOR_REPLACE_TARGET=PKGBUILD
+export JPACKER_TEST_EDITOR_SYMLINK_TARGET=$outside_dir/PKGBUILD
+run_build_tty_fail "$case_dir/output" 'y\n'
+assert_descendant_rejection "$case_dir/output" "$entry_path/PKGBUILD" "symlink."
+assert_command "jpacker-test-editor PKGBUILD"
+assert_command_before "git reset --hard origin/main" "jpacker-test-editor PKGBUILD"
+assert_no_build_or_install_commands
+assert_symlink "$entry_path/PKGBUILD"
+assert_directory_unchanged "$outside_dir" "$case_dir/before.snapshot"
+
+setup_case build-review-install-removed
+create_regular_repo "$entry_path"
+printf 'post_install() { :; }\n' > "$entry_path/clean-root.install"
+export EDITOR=$repo_root/tests/stubs/jpacker-test-editor
+export JPACKER_TEST_EDITOR_REMOVE_TARGET=clean-root.install
+run_build_tty_fail "$case_dir/output" 'y\n'
+assert_descendant_rejection "$case_dir/output" "$entry_path/clean-root.install" "non-regular file."
+assert_command "jpacker-test-editor PKGBUILD"
+assert_command_absent "jpacker-test-editor clean-root.install"
+assert_no_build_or_install_commands
+assert_path_absent "$entry_path/clean-root.install"
+
+setup_case build-clone-unsafe-git-symlink
+create_clone_fixture
+rmdir "$clone_fixture/.git"
+mkdir -p "$outside_dir/external.git"
+printf 'external git metadata\n' > "$outside_dir/external.git/marker"
+ln -s "$outside_dir/external.git" "$clone_fixture/.git"
+snapshot_directory "$outside_dir" "$case_dir/before.snapshot"
+run_fail "$case_dir/output" --noedit --nodiff build clean-root
+assert_descendant_rejection "$case_dir/output" "$entry_path/.git" "symlink."
+assert_only_clone_after_metadata "git clone https://aur.archlinux.org/clean-root.git clean-root"
+assert_path_absent "$entry_path"
+assert_directory_unchanged "$outside_dir" "$case_dir/before.snapshot"
+
+setup_case build-clone-unsafe-pkgbuild-symlink
+create_clone_fixture
+printf 'external PKGBUILD\n' > "$outside_dir/PKGBUILD"
+rm "$clone_fixture/PKGBUILD"
+ln -s "$outside_dir/PKGBUILD" "$clone_fixture/PKGBUILD"
+snapshot_directory "$outside_dir" "$case_dir/before.snapshot"
+run_fail "$case_dir/output" --noedit --nodiff build clean-root
+assert_descendant_rejection "$case_dir/output" "$entry_path/PKGBUILD" "symlink."
+assert_only_clone_after_metadata "git clone https://aur.archlinux.org/clean-root.git clean-root"
+assert_path_absent "$entry_path"
+assert_directory_unchanged "$outside_dir" "$case_dir/before.snapshot"
+
+setup_case build-clone-unsafe-install-symlink
+create_clone_fixture
+printf 'external install script\n' > "$outside_dir/clean-root.install"
+ln -s "$outside_dir/clean-root.install" "$clone_fixture/clean-root.install"
+snapshot_directory "$outside_dir" "$case_dir/before.snapshot"
+run_fail "$case_dir/output" --noedit --nodiff build clean-root
+assert_descendant_rejection "$case_dir/output" "$entry_path/clean-root.install" "symlink."
+assert_only_clone_after_metadata "git clone https://aur.archlinux.org/clean-root.git clean-root"
+assert_path_absent "$entry_path"
+assert_directory_unchanged "$outside_dir" "$case_dir/before.snapshot"
+
+setup_case build-clone-remote-mismatch-rollback
+create_clone_fixture
+printf 'outside sibling marker\n' > "$outside_dir/marker"
+snapshot_directory "$outside_dir" "$case_dir/before.snapshot"
+export JPACKER_TEST_GIT_REMOTE_URL=https://example.invalid/wrong.git
+run_fail "$case_dir/output" --noedit --nodiff build clean-root
+assert_contains "Remote URL mismatch for clean-root" "$case_dir/output"
+assert_command "git clone https://aur.archlinux.org/clean-root.git clean-root"
+assert_command "git config --get remote.origin.url"
+assert_command_before "git clone https://aur.archlinux.org/clean-root.git clean-root" "git config --get remote.origin.url"
+assert_command_absent "git fetch origin"
+assert_command_absent "git reset --hard origin/main"
+assert_command_absent "jpacker-test-editor PKGBUILD"
+assert_no_build_or_install_commands
+assert_path_absent "$entry_path"
+assert_directory_unchanged "$outside_dir" "$case_dir/before.snapshot"
+
+setup_case build-clone-valid-descendants
+create_clone_fixture
+printf 'post_install() { :; }\n' > "$clone_fixture/clean-root.install"
+export JPACKER_TEST_MAKEPKG_EXIT_CODE=0
+run_ok "$case_dir/output" --noedit --nodiff build clean-root
+assert_command "git clone https://aur.archlinux.org/clean-root.git clean-root"
+assert_command "git config --get remote.origin.url"
+assert_command "makepkg -sic"
+assert_command_before "git clone https://aur.archlinux.org/clean-root.git clean-root" "git config --get remote.origin.url"
+assert_command_before "git config --get remote.origin.url" "makepkg -sic"
+if [ ! -d "$entry_path/.git" ] || [ -L "$entry_path/.git" ] ||
+   [ ! -f "$entry_path/PKGBUILD" ] || [ -L "$entry_path/PKGBUILD" ] ||
+   [ ! -f "$entry_path/clean-root.install" ] || [ -L "$entry_path/clean-root.install" ]; then
+    fail "valid clone descendants were not retained as regular entries: $entry_path"
+fi
+
 # --- Regular paths retain fetch/build/re-clone behavior ---
 
 setup_case regular-existing-fetch
@@ -372,7 +673,10 @@ assert_command "git fetch origin"
 setup_case regular-missing-fetch
 run_ok "$case_dir/output" fetch clean-root
 assert_command "git clone https://aur.archlinux.org/clean-root.git clean-root"
-if [ ! -d "$entry_path/.git" ]; then
+assert_command "git config --get remote.origin.url"
+assert_command_before "git clone https://aur.archlinux.org/clean-root.git clean-root" "git config --get remote.origin.url"
+if [ ! -d "$entry_path/.git" ] || [ -L "$entry_path/.git" ] ||
+   [ ! -f "$entry_path/PKGBUILD" ] || [ -L "$entry_path/PKGBUILD" ]; then
     fail "regular missing fetch did not create a repository: $entry_path"
 fi
 
@@ -383,11 +687,29 @@ assert_command "git config --get remote.origin.url"
 assert_command "git fetch origin"
 assert_command "git reset --hard origin/main"
 assert_command "makepkg -sic"
+assert_command_before "git config --get remote.origin.url" "git fetch origin"
+assert_command_before "git fetch origin" "git reset --hard origin/main"
+assert_command_before "git reset --hard origin/main" "makepkg -sic"
+
+setup_case regular-existing-review
+create_regular_repo "$entry_path"
+printf 'post_install() { :; }\n' > "$entry_path/clean-root.install"
+export EDITOR=$repo_root/tests/stubs/jpacker-test-editor
+export JPACKER_TEST_MAKEPKG_EXIT_CODE=0
+run_build_tty_ok "$case_dir/output" 'y\ny\ny\n'
+assert_contains "Review target: PKGBUILD" "$case_dir/output"
+assert_contains "clean-root.install" "$case_dir/output"
+assert_command "jpacker-test-editor PKGBUILD"
+assert_command "jpacker-test-editor clean-root.install"
+assert_command "makepkg -sic"
+assert_command_before "git reset --hard origin/main" "jpacker-test-editor PKGBUILD"
+assert_command_before "jpacker-test-editor PKGBUILD" "jpacker-test-editor clean-root.install"
+assert_command_before "jpacker-test-editor clean-root.install" "makepkg -sic"
 
 setup_case regular-remote-mismatch
 create_regular_repo "$entry_path"
 printf 'old clone marker\n' > "$entry_path/old-marker"
-export JPACKER_TEST_GIT_REMOTE_URL=https://example.invalid/wrong.git
+printf 'https://example.invalid/wrong.git\n' > "$entry_path/.git/.jpacker-test-remote-url"
 run_fail "$case_dir/output" --noedit --nodiff build clean-root
 assert_command "git config --get remote.origin.url"
 assert_command "git clone https://aur.archlinux.org/clean-root.git clean-root"

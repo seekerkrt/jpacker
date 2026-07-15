@@ -436,6 +436,7 @@ assert_normal_request_log_nonempty
 
 setup_case local-artifact
 mkdir -p "$XDG_CACHE_HOME/jpacker/clean-root/.git"
+: > "$XDG_CACHE_HOME/jpacker/clean-root/PKGBUILD"
 : > "$XDG_CACHE_HOME/jpacker/clean-root/clean-root-1.0-1-any.pkg.tar.zst"
 run_ok --noedit --nodiff --noconfirm -S --aur --needed clean-root
 assert_command "git fetch origin"
