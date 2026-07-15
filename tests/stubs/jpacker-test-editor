@@ -1,0 +1,19 @@
+#!/bin/sh
+set -eu
+
+printf 'jpacker-test-editor %s\n' "$*" >> "$JPACKER_TEST_COMMAND_LOG"
+
+target=
+for editor_arg in "$@"; do
+    target=$editor_arg
+done
+
+if [ -n "${JPACKER_TEST_EDITOR_REPLACE_TARGET:-}" ] &&
+   [ "$target" = "$JPACKER_TEST_EDITOR_REPLACE_TARGET" ]; then
+    rm -f -- "$target"
+    ln -s "$JPACKER_TEST_EDITOR_SYMLINK_TARGET" "$target"
+fi
+
+if [ -n "${JPACKER_TEST_EDITOR_REMOVE_TARGET:-}" ]; then
+    rm -f -- "$JPACKER_TEST_EDITOR_REMOVE_TARGET"
+fi

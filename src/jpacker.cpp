@@ -1586,19 +1586,112 @@ std::vector<std::string> split_lines(const std::string& text) {
     return lines;
 }
 
+namespace {
+
+bool has_safe_persistent_checkout_git_directory(const fs::path& pkg_dir) {
+    fs::path        git_path = pkg_dir / ".git";
+    std::error_code ec;
+    fs::file_status status = fs::symlink_status(git_path, ec);
+    if(ec == std::errc::no_such_file_or_directory) return false;
+    if(ec) {
+        throw std::runtime_error(
+                "Unsafe persistent checkout descendant " + git_path.string() +
+                ": non-directory .git (inspection failed: " + ec.message() + ").");
+    }
+    if(status.type() == fs::file_type::not_found) return false;
+    if(fs::is_symlink(status)) {
+        throw std::runtime_error(
+                "Unsafe persistent checkout descendant " + git_path.string() + ": symlink.");
+    }
+    if(fs::is_regular_file(status)) {
+        // POLICY(#197): persistent checkout では gitfile/worktree redirect を対応対象にしない。
+        throw std::runtime_error(
+                "Unsafe persistent checkout descendant " + git_path.string() +
+                ": gitfile / redirect.");
+    }
+    if(!fs::is_directory(status)) {
+        throw std::runtime_error(
+                "Unsafe persistent checkout descendant " + git_path.string() +
+                ": non-directory .git.");
+    }
+    return true;
+}
+
+void require_safe_persistent_checkout_git_directory(const fs::path& pkg_dir) {
+    if(has_safe_persistent_checkout_git_directory(pkg_dir)) return;
+
+    fs::path git_path = pkg_dir / ".git";
+    throw std::runtime_error(
+            "Unsafe persistent checkout descendant " + git_path.string() +
+            ": non-directory .git.");
+}
+
+void require_safe_persistent_checkout_artifact(const fs::path& artifact_path) {
+    std::error_code ec;
+    fs::file_status status = fs::symlink_status(artifact_path, ec);
+    if(ec == std::errc::no_such_file_or_directory) {
+        throw std::runtime_error(
+                "Unsafe persistent checkout descendant " + artifact_path.string() +
+                ": non-regular file.");
+    }
+    if(ec) {
+        throw std::runtime_error(
+                "Unsafe persistent checkout descendant " + artifact_path.string() +
+                ": non-regular file (inspection failed: " + ec.message() + ").");
+    }
+    if(fs::is_symlink(status)) {
+        throw std::runtime_error(
+                "Unsafe persistent checkout descendant " + artifact_path.string() + ": symlink.");
+    }
+    if(!fs::is_regular_file(status)) {
+        throw std::runtime_error(
+                "Unsafe persistent checkout descendant " + artifact_path.string() +
+                ": non-regular file.");
+    }
+}
+
+std::vector<fs::path> require_safe_persistent_checkout_descendants(const fs::path& pkg_dir) {
+    // POLICY(#197): descendant の契約は generic cache path ではなく persistent checkout consumer が持つ。
+    require_safe_persistent_checkout_git_directory(pkg_dir);
+    require_safe_persistent_checkout_artifact(pkg_dir / "PKGBUILD");
+    return find_install_scripts(pkg_dir);
+}
+
+void require_safe_persistent_checkout_review_targets(
+        const fs::path& pkg_dir, const std::vector<fs::path>& install_scripts) {
+    // LANDMINE(#197): 再列挙だけでは、review開始後に消えた既存targetを見落とす。
+    require_safe_persistent_checkout_descendants(pkg_dir);
+    for(const auto& install_script : install_scripts) {
+        require_safe_persistent_checkout_artifact(pkg_dir / install_script);
+    }
+}
+
+} // namespace
+
 std::vector<fs::path> find_install_scripts(const fs::path& pkg_dir) {
     std::vector<fs::path> scripts;
     std::error_code       ec;
-    if(!fs::is_directory(pkg_dir, ec) || ec) return scripts;
+    fs::directory_iterator entry(pkg_dir, ec);
+    if(ec) {
+        throw std::runtime_error(
+                "Failed to inspect persistent checkout artifacts in " + pkg_dir.string() + ": " +
+                ec.message());
+    }
 
-    for(const auto& entry : fs::directory_iterator(pkg_dir, ec)) {
-        if(ec) break;
-        if(!entry.is_regular_file(ec) || ec) {
-            ec.clear();
-            continue;
+    const fs::directory_iterator end;
+    while(entry != end) {
+        fs::path artifact_path = entry->path();
+        // POLICY(#197): 名前を先に対象化し、symlinkやspecial fileも検証対象から落とさない。
+        if(artifact_path.extension() == ".install") {
+            require_safe_persistent_checkout_artifact(artifact_path);
+            scripts.push_back(artifact_path.filename());
         }
-        if(entry.path().extension() == ".install") {
-            scripts.push_back(entry.path().filename());
+
+        entry.increment(ec);
+        if(ec) {
+            throw std::runtime_error(
+                    "Failed to inspect persistent checkout artifacts in " + pkg_dir.string() + ": " +
+                    ec.message());
         }
     }
     std::sort(scripts.begin(), scripts.end());
@@ -1644,7 +1737,8 @@ void log_review_targets(const fs::path& pkg_dir, const std::vector<fs::path>& in
 }
 
 void review_build_files(const fs::path& pkg_dir) {
-    std::vector<fs::path> install_scripts = find_install_scripts(pkg_dir);
+    std::vector<fs::path> install_scripts =
+            require_safe_persistent_checkout_descendants(pkg_dir);
 
     if(g_config.no_edit) {
         Logger::info("Skipping PKGBUILD/.install review (--noedit).");
@@ -1658,21 +1752,27 @@ void review_build_files(const fs::path& pkg_dir) {
     bool        edited = false;
 
     if(ask_user("Edit PKGBUILD?", PromptDefault::No)) {
+        require_safe_persistent_checkout_review_targets(pkg_dir, install_scripts);
         if(run_command(build_editor_command(editor_cmd, "PKGBUILD")) != 0) {
             throw std::runtime_error("Editor failed.");
         }
+        require_safe_persistent_checkout_review_targets(pkg_dir, install_scripts);
         edited = true;
     }
 
     for(const auto& install_script : install_scripts) {
         if(ask_user("Edit install script " + install_script.string() + "?", PromptDefault::No)) {
+            require_safe_persistent_checkout_review_targets(pkg_dir, install_scripts);
             if(run_command(build_editor_command(editor_cmd, install_script)) != 0) {
                 throw std::runtime_error("Editor failed.");
             }
+            require_safe_persistent_checkout_review_targets(pkg_dir, install_scripts);
             edited = true;
         }
     }
 
+    // LANDMINE(#197): editor はreview対象を置換できるため、review開始時の検証結果を持ち越さない。
+    require_safe_persistent_checkout_review_targets(pkg_dir, install_scripts);
     if(edited && !ask_user("Proceed with build?", PromptDefault::Yes)) throw std::runtime_error("Aborted.");
 }
 
@@ -2259,9 +2359,7 @@ void fetch_aur_package_base(const std::string& package_base) {
         if(!repo_path.is_directory) {
             throw std::runtime_error(repo_path.path.string() + " exists but is not a directory.");
         }
-        if(!fs::exists(repo_path.canonical_path / ".git")) {
-            throw std::runtime_error(repo_path.path.string() + " exists but is not a git repository.");
-        }
+        require_safe_persistent_checkout_descendants(repo_path.canonical_path);
 
         // POLICY: fetch command は既存 clone で git fetch まで。worktree update/pull/reset/build/install はしない。
         WorkDirGuard wd_repo(repo_path);
@@ -2272,6 +2370,9 @@ void fetch_aur_package_base(const std::string& package_base) {
         }
 
         Logger::info("Fetching " + package_base + "...");
+        repo_path = revalidate_trusted_cache_path(
+                repo_path, CachePathRequirement::ExistingDirectory);
+        require_safe_persistent_checkout_descendants(repo_path.canonical_path);
         if(run_command("git fetch origin") != 0) throw std::runtime_error("Failed to fetch " + package_base + ".");
         return;
     }
@@ -2286,8 +2387,17 @@ void fetch_aur_package_base(const std::string& package_base) {
     }
 
     // POLICY(#175): clone が生成した entry も、成功扱いする前に同じ cache boundary で検証する。
-    require_trusted_cache_path(
+    ValidatedCachePath cloned_path = require_trusted_cache_path(
             cache_root, clone_path.path, CachePathRequirement::ExistingDirectory);
+    require_safe_persistent_checkout_descendants(cloned_path.canonical_path);
+    {
+        WorkDirGuard wd_repo(cloned_path);
+        std::string  current_url = trim(exec_command("git config --get remote.origin.url"));
+        if(current_url.empty()) throw std::runtime_error("Missing remote.origin.url for " + package_base + ".");
+        if(!remote_url_matches_expected(current_url, git_url)) {
+            throw std::runtime_error("Remote URL mismatch for " + package_base + ": " + current_url);
+        }
+    }
     cleanup_guard.commit();
 }
 
@@ -2308,7 +2418,9 @@ void build_from_git(
         WorkDirGuard wd(build_root);
         bool         needs_clone = true;
 
-        if(pkg_path.exists && pkg_path.is_directory && fs::exists(pkg_path.canonical_path / ".git")) {
+        if(pkg_path.exists && pkg_path.is_directory &&
+           has_safe_persistent_checkout_git_directory(pkg_path.canonical_path)) {
+            require_safe_persistent_checkout_descendants(pkg_path.canonical_path);
             {
                 WorkDirGuard wd_repo(pkg_path);
                 std::string  current_url = exec_command("git config --get remote.origin.url");
@@ -2322,6 +2434,9 @@ void build_from_git(
             if(!needs_clone) {
                 Logger::info("Updating repository...");
                 WorkDirGuard wd_repo(pkg_path);
+                pkg_path = revalidate_trusted_cache_path(
+                        pkg_path, CachePathRequirement::ExistingDirectory);
+                require_safe_persistent_checkout_descendants(pkg_path.canonical_path);
                 if(run_command("git fetch origin") != 0) throw std::runtime_error("Failed to fetch updates.");
 
                 std::string branch = get_git_branch();
@@ -2342,10 +2457,15 @@ void build_from_git(
                 }
 
                 // LANDMINE: reset は build/install 経路だけで許可する。fetch 経路へ持ち込まない。
-                revalidate_trusted_cache_path(pkg_path, CachePathRequirement::ExistingDirectory);
+                pkg_path = revalidate_trusted_cache_path(
+                        pkg_path, CachePathRequirement::ExistingDirectory);
+                require_safe_persistent_checkout_descendants(pkg_path.canonical_path);
                 if(run_command("git reset --hard " + shell_quote("origin/" + branch)) != 0) {
                     throw std::runtime_error("Failed to reset repository.");
                 }
+                pkg_path = revalidate_trusted_cache_path(
+                        pkg_path, CachePathRequirement::ExistingDirectory);
+                require_safe_persistent_checkout_descendants(pkg_path.canonical_path);
             }
         }
 
@@ -2364,6 +2484,15 @@ void build_from_git(
 
             pkg_path = require_trusted_cache_path(
                     build_root, pkg_path.path, CachePathRequirement::ExistingDirectory);
+            require_safe_persistent_checkout_descendants(pkg_path.canonical_path);
+            {
+                WorkDirGuard wd_repo(pkg_path);
+                std::string  current_url = trim(exec_command("git config --get remote.origin.url"));
+                if(current_url.empty()) throw std::runtime_error("Missing remote.origin.url for " + clone_name + ".");
+                if(!remote_url_matches_expected(current_url, git_url)) {
+                    throw std::runtime_error("Remote URL mismatch for " + clone_name + ": " + current_url);
+                }
+            }
             cleanup_guard.commit();
         }
     }
@@ -2371,6 +2500,7 @@ void build_from_git(
     {
         pkg_path = revalidate_trusted_cache_path(
                 pkg_path, CachePathRequirement::ExistingDirectory);
+        require_safe_persistent_checkout_descendants(pkg_path.canonical_path);
         WorkDirGuard wd(pkg_path);
 
         if(only_if_updated) {
@@ -2407,8 +2537,10 @@ void build_from_git(
             Logger::info("Using default makepkg.conf settings.");
             build_cmd = makepkg_install_command(makepkg_options);
         }
-        // LANDMINE(#175): editor/review の後にも entry を再検証し、cache外cwdでinstallへ進ませない。
-        revalidate_trusted_cache_path(pkg_path, CachePathRequirement::ExistingDirectory);
+        // LANDMINE(#175,#197): review 後は cache entry と build artifact の両方を再検証する。
+        pkg_path = revalidate_trusted_cache_path(
+                pkg_path, CachePathRequirement::ExistingDirectory);
+        require_safe_persistent_checkout_descendants(pkg_path.canonical_path);
         if(run_command(build_cmd) != 0) throw std::runtime_error("Build failed.");
     }
 }
