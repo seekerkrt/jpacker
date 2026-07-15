@@ -12,6 +12,7 @@
 // 関数宣言と詳細実装は、将来の分割候補が見えるように section comment で大まかな責務ごとに分類する。
 
 #include "aur_rpc.hpp"
+#include "dependency_plan.hpp"
 #include "dependency_spec.hpp"
 #include "logging.hpp"
 #include "package_identifier.hpp"
@@ -202,86 +203,6 @@ struct PackageBuildSource {
     bool        is_aur = false;
     bool        has_distinct_package_base = false;
 };
-
-// 複数 provider がある依存。#97 ではここで止め、暗黙選択しない。
-struct AmbiguousProvidedDependency {
-    std::string dependency;
-    std::vector<ProvidedDependency> candidates;
-};
-
-// 依存を official repo / AUR / provider / unknown に分けた結果。
-struct DependencyClassification {
-    std::vector<std::string> repo;
-    std::vector<std::string> aur;
-    std::vector<std::string> provided;
-    std::vector<AmbiguousProvidedDependency>     ambiguous_providers;
-    std::vector<std::string> unknown;
-};
-
-enum class DependencyKind {
-    Repo,
-    Aur,
-    Provided,
-    AmbiguousProvider,
-    Unknown
-};
-
-// recursive dependency tree の 1 node。表示と循環検出結果を同じ単位で持つ。
-struct RecursiveDependencyNode {
-    std::string                          dependency;
-    std::string                          package_name;
-    std::string                          package_base;
-    std::optional<ProvidedDependency>    provided_by;
-    std::vector<ProvidedDependency>      provider_candidates;
-    DependencyKind                       kind = DependencyKind::Unknown;
-    bool                                 already_visited = false;
-    bool                                 max_depth_reached = false;
-    std::vector<RecursiveDependencyNode> children;
-};
-
-// build plan 内で、同じ PackageBase から生成される package 群を束ねる。
-struct BuildPlanEntry {
-    std::string              package_base;
-    std::vector<std::string> package_names;
-};
-
-// install 実行時に、PackageBase とは別の package name を明示選択する必要がある target。
-struct BuildPlanSplitPackageTarget {
-    std::string package_base;
-    std::string package_name;
-};
-
-// build plan 上で provider により解決された依存を記録する。
-struct BuildPlanProvidedDependency {
-    std::string        dependency;
-    ProvidedDependency provider;
-};
-
-// AUR package が宣言する conflicts / replaces を、解決済みと誤認せず plan に残す。
-// POLICY(#150): v1.x では installed/repo DB との照合や置換先選択を行わず、raw metadata を保持する。
-struct BuildPlanMetadataRisk {
-    std::string              package_name;
-    std::string              package_base;
-    std::vector<std::string> conflicts;
-    std::vector<std::string> replaces;
-};
-
-// AUR build / fetch の順序、未解決依存、循環検出結果をまとめる計画。
-struct BuildPlan {
-    std::vector<BuildPlanEntry>                  order;
-    std::vector<BuildPlanSplitPackageTarget>     split_package_targets;
-    std::vector<BuildPlanProvidedDependency>     provided;
-    std::vector<BuildPlanMetadataRisk>           metadata_risks;
-    std::vector<AmbiguousProvidedDependency> ambiguous_providers;
-    std::vector<std::string>                     unresolved;
-    std::vector<std::string>                     cycles;
-};
-
-namespace {
-
-const int MAX_RECURSIVE_DEP_DEPTH = 16;
-
-} // namespace
 
 // --- 内部クラス ---
 namespace {
@@ -825,7 +746,6 @@ bool validate_optionless_jpacker_operation(const std::string& operation, const s
 std::optional<std::string> unsupported_source_sync_option(
         const ParsedCliArguments& parsed);
 bool is_valid_aur_export_identifier(const std::string& name);
-void warn_unverified_version_constraint(const std::string& dependency);
 void require_valid_aur_export_target(const std::string& target);
 bool is_force_source(const std::string& pkg_name);
 std::string get_package_env(const std::string& pkg_name);
@@ -849,9 +769,7 @@ MakepkgBuildOptions resolve_makepkg_build_options(
 bool ask_user(const std::string& question, PromptDefault default_answer);
 
 // AUR provider / build source解決
-bool aur_package_provides(const AurPackageInfo& info, const std::string& dependency_name);
-std::vector<ProvidedDependency> find_aur_providers(const std::string& dependency_name);
-std::vector<ProvidedDependency> find_dependency_providers(const std::string& dependency_name);
+bool has_distinct_package_base(const AurPackageInfo& info);
 PackageBuildSource resolve_build_source(const std::string& pkg_name);
 void require_supported_build_source_install_target(const PackageBuildSource& source);
 void require_executable_build_source_plan(const PackageBuildSource& source);
@@ -868,42 +786,18 @@ std::string out_of_date_display(const std::optional<long long>& out_of_date);
 void print_aur_info(const AurPackageInfo& pkg);
 
 // dependency分類 / recursive dependency tree
-void add_dependency(std::vector<std::string>& dependencies, std::set<std::string>& seen, const std::string& dependency);
-std::vector<std::string> collect_build_dependencies(const AurPackageInfo& pkg);
-void add_classified_dependency(std::vector<std::string>& dependencies, const std::string& dependency, const std::string& package_name);
-std::string package_base_name(const AurPackageInfo& info);
-bool has_distinct_package_base(const AurPackageInfo& info);
-void add_classified_aur_dependency(std::vector<std::string>& dependencies, const std::string& dependency, const AurPackageInfo& info);
-std::string provided_dependency_display(const std::string& dependency, const ProvidedDependency& provider);
 std::string provider_display(const ProvidedDependency& provider);
-DependencyClassification classify_dependencies(const std::vector<std::string>& dependencies);
 std::string dependency_display_name(const std::string& dependency, const std::string& package_name);
 std::string dependency_kind_display(DependencyKind kind);
-std::vector<RecursiveDependencyNode> resolve_recursive_dependencies(
-        const AurPackageInfo& pkg, std::set<std::string>& visited, int depth, int max_depth);
-RecursiveDependencyNode resolve_recursive_dependency(
-        const std::string& dependency, std::set<std::string>& visited, int depth, int max_depth);
 void print_recursive_dependency_node(const RecursiveDependencyNode& node, size_t indent);
 void print_recursive_dependency_tree(const std::vector<RecursiveDependencyNode>& nodes);
 
 // build plan / fetch plan
 void add_unique_value(std::vector<std::string>& values, const std::string& value);
-void add_build_plan_split_package_target(BuildPlan& plan, const AurPackageInfo& info);
-void add_build_plan_metadata_risk(BuildPlan& plan, const AurPackageInfo& info);
-void add_build_plan_entry(BuildPlan& plan, const AurPackageInfo& info);
-void add_build_plan_provided_dependency(
-        BuildPlan& plan, const std::string& dependency, const ProvidedDependency& provider);
-void add_build_plan_ambiguous_provider(
-        BuildPlan& plan, const std::string& dependency, const std::vector<ProvidedDependency>& candidates);
-void collect_aur_build_plan(
-        const std::string& package_name, BuildPlan& plan, std::set<std::string>& visited,
-        std::set<std::string>& visiting, int depth, int max_depth, bool traverse_aur_providers = true);
 void print_build_plan(const BuildPlan& plan);
 void require_fetchable_build_plan(const std::string& target, const BuildPlan& plan);
 void require_executable_build_plan(const std::string& target, const BuildPlan& plan);
 void require_executable_install_plan(const std::string& target, const BuildPlan& plan);
-BuildPlan resolve_build_plan(const std::string& target);
-BuildPlan resolve_fetch_plan(const std::string& target);
 void print_dependency_group(const std::string& label, const std::vector<std::string>& dependencies);
 void print_ambiguous_provider_group(
         const std::string& label, const std::vector<AmbiguousProvidedDependency>& dependencies);
@@ -2082,12 +1976,6 @@ bool is_valid_aur_export_identifier(const std::string& name) {
     return name != "." && name != ".." && is_valid_package_name(name);
 }
 
-void warn_unverified_version_constraint(const std::string& dependency) {
-    ParsedDependency parsed = parse_dependency_string(dependency);
-    if(!parsed.has_parseable_constraint()) return;
-    Logger::warn("version constraint for " + parsed.raw + " is not verified");
-}
-
 void require_valid_aur_export_target(const std::string& target) {
     if(target.find('/') != std::string::npos || !is_valid_aur_export_identifier(target)) {
         throw std::runtime_error("Invalid AUR target: " + target);
@@ -2293,18 +2181,6 @@ UpdateCheckResult check_update_status(const std::string& pkg_name, const fs::pat
     return UpdateCheckResult::UpToDate;
 }
 
-bool same_provider(const ProvidedDependency& lhs, const ProvidedDependency& rhs) {
-    return lhs.repository == rhs.repository && lhs.package_name == rhs.package_name;
-}
-
-void add_provider_candidate(std::vector<ProvidedDependency>& candidates, const ProvidedDependency& provider) {
-    auto same = [&provider](const ProvidedDependency& existing) {
-        return same_provider(existing, provider);
-    };
-    if(std::find_if(candidates.begin(), candidates.end(), same) != candidates.end()) return;
-    candidates.push_back(provider);
-}
-
 bool aur_version_is_newer(const std::string& aur_version, const std::string& installed_version) {
     std::string cmp_cmd = "vercmp " + shell_quote(aur_version) + " " + shell_quote(installed_version);
     std::string cmp_res = exec_command(cmp_cmd.c_str());
@@ -2431,47 +2307,8 @@ bool ask_user(const std::string& question, PromptDefault default_answer) {
 }
 
 // AUR provider / build source解決
-bool aur_package_provides(const AurPackageInfo& info, const std::string& dependency_name) {
-    for(const auto& provided : info.Provides) {
-        if(provided_dependency_name(provided) == dependency_name) return true;
-    }
-    return false;
-}
-
-std::vector<ProvidedDependency> find_aur_providers(const std::string& dependency_name) {
-    std::vector<ProvidedDependency> providers;
-    if(!is_valid_package_name(dependency_name)) return providers;
-
-    std::vector<std::string> candidates;
-    try {
-        candidates = AurClient::search_names_by_provides(dependency_name);
-    } catch(const AurRpcResponseError&) {
-        throw;
-    } catch(const std::exception& e) {
-        Logger::warn("Failed to search AUR providers for " + dependency_name + ": " + e.what());
-        return providers;
-    }
-    for(const auto& candidate : candidates) {
-        try {
-            std::optional<AurPackageInfo> info = AurClient::info(candidate);
-            if(info.has_value() && aur_package_provides(info.value(), dependency_name)) {
-                add_provider_candidate(providers, ProvidedDependency{"aur", info->Name});
-            }
-        } catch(const AurRpcResponseError&) {
-            throw;
-        } catch(const std::exception& e) {
-            Logger::warn("Failed to check AUR provider " + candidate + ": " + e.what());
-        }
-    }
-
-    return providers;
-}
-
-std::vector<ProvidedDependency> find_dependency_providers(const std::string& dependency_name) {
-    std::vector<ProvidedDependency> repo_provider = find_repo_providers(dependency_name);
-    // POLICY: pacman-first。official repo provider が見つかる場合は AUR provider を混ぜない。
-    if(!repo_provider.empty()) return repo_provider;
-    return find_aur_providers(dependency_name);
+bool has_distinct_package_base(const AurPackageInfo& info) {
+    return info.PackageBase != info.Name;
 }
 
 PackageBuildSource resolve_build_source(const std::string& pkg_name) {
@@ -2622,132 +2459,8 @@ void print_aur_info(const AurPackageInfo& pkg) {
 }
 
 // dependency分類 / recursive dependency tree
-void add_dependency(std::vector<std::string>& dependencies, std::set<std::string>& seen, const std::string& dependency) {
-    std::string dep = trim(dependency);
-    if(dep.empty()) return;
-    if(seen.insert(dep).second) dependencies.push_back(dep);
-}
-
-std::vector<std::string> collect_build_dependencies(const AurPackageInfo& pkg) {
-    std::vector<std::string> dependencies;
-    std::set<std::string>    seen;
-
-    for(const auto& dep : pkg.Depends)
-        add_dependency(dependencies, seen, dep);
-    for(const auto& dep : pkg.MakeDepends)
-        add_dependency(dependencies, seen, dep);
-    for(const auto& dep : pkg.CheckDepends)
-        add_dependency(dependencies, seen, dep);
-
-    return dependencies;
-}
-
-void add_classified_dependency(std::vector<std::string>& dependencies, const std::string& dependency, const std::string& package_name) {
-    std::string display;
-    if(dependency == package_name)
-        display = dependency;
-    else
-        display = dependency + " (" + package_name + ")";
-    dependencies.push_back(dependency_display_with_constraint_note(display, dependency));
-}
-
-std::string package_base_name(const AurPackageInfo& info) {
-    // POLICY(#174): PackageBase は strict AUR RPC parser の required identifier。
-    return info.PackageBase;
-}
-
-bool has_distinct_package_base(const AurPackageInfo& info) {
-    return info.PackageBase != info.Name;
-}
-
-void add_classified_aur_dependency(std::vector<std::string>& dependencies, const std::string& dependency, const AurPackageInfo& info) {
-    std::string display;
-    if(info.Name.empty() || dependency == info.Name)
-        display = dependency;
-    else
-        display = dependency + " (" + info.Name + ")";
-    if(has_distinct_package_base(info)) display += " (base: " + info.PackageBase + ")";
-    dependencies.push_back(dependency_display_with_constraint_note(display, dependency));
-}
-
-std::string provided_dependency_display(const std::string& dependency, const ProvidedDependency& provider) {
-    return dependency + " [provided by " + provider.repository + "/" + provider.package_name + "]" +
-           dependency_constraint_note(dependency);
-}
-
 std::string provider_display(const ProvidedDependency& provider) {
     return provider.repository + "/" + provider.package_name;
-}
-
-void add_ambiguous_provider_dependency(
-        std::vector<AmbiguousProvidedDependency>& dependencies, const std::string& dependency,
-        const std::vector<ProvidedDependency>& candidates) {
-    std::string trimmed = trim(dependency);
-    if(trimmed.empty() || candidates.empty()) return;
-
-    // POLICY(#97/#143): 複数 provider はここで集約し、暗黙選択しない。
-    auto same_dependency = [&trimmed](const AmbiguousProvidedDependency& existing) {
-        return existing.dependency == trimmed;
-    };
-    auto it = std::find_if(dependencies.begin(), dependencies.end(), same_dependency);
-    if(it == dependencies.end()) {
-        dependencies.push_back(AmbiguousProvidedDependency{trimmed, {}});
-        it = std::prev(dependencies.end());
-    }
-    for(const auto& candidate : candidates) {
-        add_provider_candidate(it->candidates, candidate);
-    }
-}
-
-DependencyClassification classify_dependencies(const std::vector<std::string>& dependencies) {
-    DependencyClassification result;
-
-    for(const auto& dependency : dependencies) {
-        ParsedDependency parsed = parse_dependency_string(dependency);
-        std::string      package_name = parsed.name;
-        if(!is_valid_package_name(package_name)) {
-            result.unknown.push_back(dependency);
-            continue;
-        }
-        if(parsed.has_malformed_constraint()) {
-            result.unknown.push_back(dependency_constraint_unresolved_reason(dependency));
-            continue;
-        }
-        warn_unverified_version_constraint(dependency);
-
-        if(is_repo_package(package_name)) {
-            add_classified_dependency(result.repo, dependency, package_name);
-            continue;
-        }
-
-        try {
-            std::optional<AurPackageInfo> info = AurClient::info(package_name);
-            if(info.has_value()) {
-                add_classified_aur_dependency(result.aur, dependency, info.value());
-            } else {
-                std::vector<ProvidedDependency> providers = find_dependency_providers(package_name);
-                if(providers.size() == 1)
-                    result.provided.push_back(provided_dependency_display(dependency, providers.front()));
-                else if(providers.size() > 1)
-                    add_ambiguous_provider_dependency(result.ambiguous_providers, dependency, providers);
-                else
-                    result.unknown.push_back(dependency_display_with_constraint_note(dependency, dependency));
-            }
-        } catch(const AurRpcResponseError&) {
-            throw;
-        } catch(const std::exception& e) {
-            Logger::warn("Failed to check AUR dependency " + package_name + ": " + e.what());
-            std::vector<ProvidedDependency> providers = find_repo_providers(package_name);
-            if(providers.size() == 1)
-                result.provided.push_back(provided_dependency_display(dependency, providers.front()));
-            else if(providers.size() > 1)
-                add_ambiguous_provider_dependency(result.ambiguous_providers, dependency, providers);
-            else
-                result.unknown.push_back(dependency_display_with_constraint_note(dependency, dependency));
-        }
-    }
-
-    return result;
 }
 
 std::string dependency_display_name(const std::string& dependency, const std::string& package_name) {
@@ -2773,72 +2486,6 @@ std::string dependency_kind_display(DependencyKind kind) {
         return "unknown";
     }
     return "unknown";
-}
-
-std::vector<RecursiveDependencyNode> resolve_recursive_dependencies(
-        const AurPackageInfo& pkg, std::set<std::string>& visited, int depth, int max_depth) {
-    std::vector<RecursiveDependencyNode> nodes;
-    for(const auto& dependency : collect_build_dependencies(pkg)) {
-        nodes.push_back(resolve_recursive_dependency(dependency, visited, depth, max_depth));
-    }
-    return nodes;
-}
-
-RecursiveDependencyNode resolve_recursive_dependency(
-        const std::string& dependency, std::set<std::string>& visited, int depth, int max_depth) {
-    RecursiveDependencyNode node;
-    node.dependency = dependency;
-    ParsedDependency parsed = parse_dependency_string(dependency);
-    node.package_name = parsed.name;
-
-    if(!is_valid_package_name(node.package_name) || parsed.has_malformed_constraint()) {
-        node.kind = DependencyKind::Unknown;
-        return node;
-    }
-
-    if(is_repo_package(node.package_name)) {
-        node.kind = DependencyKind::Repo;
-        return node;
-    }
-
-    std::optional<AurPackageInfo> info;
-    try {
-        info = AurClient::info(node.package_name);
-    } catch(const AurRpcResponseError&) {
-        throw;
-    } catch(const std::exception& e) {
-        Logger::warn("Failed to check AUR dependency " + node.package_name + ": " + e.what());
-        node.kind = DependencyKind::Unknown;
-        return node;
-    }
-
-    if(!info.has_value()) {
-        std::vector<ProvidedDependency> providers = find_dependency_providers(node.package_name);
-        if(providers.size() == 1) {
-            node.kind = DependencyKind::Provided;
-            node.provided_by = providers.front();
-        } else if(providers.size() > 1) {
-            node.kind = DependencyKind::AmbiguousProvider;
-            node.provider_candidates = providers;
-        } else {
-            node.kind = DependencyKind::Unknown;
-        }
-        return node;
-    }
-
-    node.kind = DependencyKind::Aur;
-    node.package_base = package_base_name(info.value());
-    if(!visited.insert(node.package_base).second) {
-        node.already_visited = true;
-        return node;
-    }
-    if(depth >= max_depth) {
-        node.max_depth_reached = true;
-        return node;
-    }
-
-    node.children = resolve_recursive_dependencies(info.value(), visited, depth + 1, max_depth);
-    return node;
 }
 
 void print_recursive_dependency_node(const RecursiveDependencyNode& node, size_t indent) {
@@ -2883,150 +2530,6 @@ void add_unique_value(std::vector<std::string>& values, const std::string& value
     std::string trimmed = trim(value);
     if(trimmed.empty()) return;
     if(std::find(values.begin(), values.end(), trimmed) == values.end()) values.push_back(trimmed);
-}
-
-void add_build_plan_split_package_target(BuildPlan& plan, const AurPackageInfo& info) {
-    if(!has_distinct_package_base(info)) return;
-
-    auto same_target = [&info](const BuildPlanSplitPackageTarget& existing) {
-        return existing.package_base == info.PackageBase && existing.package_name == info.Name;
-    };
-    if(std::find_if(plan.split_package_targets.begin(), plan.split_package_targets.end(), same_target) !=
-       plan.split_package_targets.end())
-        return;
-
-    plan.split_package_targets.push_back(BuildPlanSplitPackageTarget{info.PackageBase, info.Name});
-}
-
-void add_build_plan_metadata_risk(BuildPlan& plan, const AurPackageInfo& info) {
-    if(info.Conflicts.empty() && info.Replaces.empty()) return;
-
-    std::string package_base = package_base_name(info);
-    auto same_package = [&info, &package_base](const BuildPlanMetadataRisk& existing) {
-        return existing.package_name == info.Name && existing.package_base == package_base;
-    };
-    if(std::find_if(plan.metadata_risks.begin(), plan.metadata_risks.end(), same_package) !=
-       plan.metadata_risks.end())
-        return;
-
-    plan.metadata_risks.push_back(
-            BuildPlanMetadataRisk{info.Name, package_base, info.Conflicts, info.Replaces});
-}
-
-void add_build_plan_entry(BuildPlan& plan, const AurPackageInfo& info) {
-    std::string package_base = package_base_name(info);
-    auto        same_base = [&package_base](const BuildPlanEntry& existing) { return existing.package_base == package_base; };
-    auto        it = std::find_if(plan.order.begin(), plan.order.end(), same_base);
-    add_build_plan_split_package_target(plan, info);
-    if(it == plan.order.end()) {
-        plan.order.push_back(BuildPlanEntry{package_base, {info.Name}});
-        return;
-    }
-    add_unique_value(it->package_names, info.Name);
-}
-
-void add_build_plan_provided_dependency(
-        BuildPlan& plan, const std::string& dependency, const ProvidedDependency& provider) {
-    std::string trimmed = trim(dependency);
-    if(trimmed.empty()) return;
-
-    auto same_dependency = [&](const BuildPlanProvidedDependency& existing) {
-        return existing.dependency == trimmed && existing.provider.repository == provider.repository &&
-               existing.provider.package_name == provider.package_name;
-    };
-    if(std::find_if(plan.provided.begin(), plan.provided.end(), same_dependency) != plan.provided.end()) return;
-    plan.provided.push_back(BuildPlanProvidedDependency{trimmed, provider});
-}
-
-void add_build_plan_ambiguous_provider(
-        BuildPlan& plan, const std::string& dependency, const std::vector<ProvidedDependency>& candidates) {
-    add_ambiguous_provider_dependency(plan.ambiguous_providers, dependency, candidates);
-}
-
-void collect_aur_build_plan(
-        const std::string& package_name, BuildPlan& plan, std::set<std::string>& visited,
-        std::set<std::string>& visiting, int depth, int max_depth, bool traverse_aur_providers) {
-    if(depth > max_depth) {
-        add_unique_value(plan.unresolved, package_name + " (max depth reached)");
-        return;
-    }
-
-    std::optional<AurPackageInfo> info;
-    try {
-        info = AurClient::info(package_name);
-    } catch(const AurRpcResponseError&) {
-        throw;
-    } catch(const std::exception& e) {
-        Logger::warn("Failed to fetch AUR info for " + package_name + ": " + e.what());
-        add_unique_value(plan.unresolved, package_name);
-        return;
-    }
-
-    if(!info.has_value()) {
-        add_unique_value(plan.unresolved, package_name);
-        return;
-    }
-
-    // POLICY(#150): visited PackageBase で再帰を打ち切る場合も、package 単位の raw metadata は先に保持する。
-    add_build_plan_metadata_risk(plan, info.value());
-
-    std::string build_unit = package_base_name(info.value());
-    if(visited.count(build_unit) > 0) return;
-    if(visiting.count(build_unit) > 0) {
-        add_unique_value(plan.cycles, build_unit);
-        return;
-    }
-
-    visiting.insert(build_unit);
-
-    for(const auto& dependency : collect_build_dependencies(info.value())) {
-        ParsedDependency parsed = parse_dependency_string(dependency);
-        std::string      dep_name = parsed.name;
-        if(!is_valid_package_name(dep_name)) {
-            add_unique_value(plan.unresolved, dependency);
-            continue;
-        }
-        if(parsed.has_malformed_constraint()) {
-            add_unique_value(plan.unresolved, dependency_constraint_unresolved_reason(dependency));
-            continue;
-        }
-        if(parsed.has_constraint()) {
-            // POLICY(#96): plan は未検証 constraint を解決済み扱いにしない。
-            add_unique_value(plan.unresolved, dependency_constraint_unresolved_reason(dependency));
-        }
-        if(is_repo_package(dep_name)) continue;
-
-        std::optional<AurPackageInfo> dependency_info;
-        try {
-            dependency_info = AurClient::info(dep_name);
-        } catch(const AurRpcResponseError&) {
-            throw;
-        } catch(const std::exception& e) {
-            Logger::warn("Failed to check AUR dependency " + dep_name + ": " + e.what());
-        }
-
-        if(dependency_info.has_value()) {
-            collect_aur_build_plan(dep_name, plan, visited, visiting, depth + 1, max_depth, traverse_aur_providers);
-            continue;
-        }
-
-        std::vector<ProvidedDependency> providers = find_dependency_providers(dep_name);
-        if(providers.size() == 1) {
-            const ProvidedDependency& provider = providers.front();
-            add_build_plan_provided_dependency(plan, dependency, provider);
-            if(traverse_aur_providers && provider.repository == "aur") {
-                collect_aur_build_plan(provider.package_name, plan, visited, visiting, depth + 1, max_depth, traverse_aur_providers);
-            }
-        } else if(providers.size() > 1) {
-            add_build_plan_ambiguous_provider(plan, dependency, providers);
-        } else {
-            add_unique_value(plan.unresolved, dependency);
-        }
-    }
-
-    visiting.erase(build_unit);
-    visited.insert(build_unit);
-    add_build_plan_entry(plan, info.value());
 }
 
 void print_metadata_risk_group(const std::vector<BuildPlanMetadataRisk>& risks) {
@@ -3183,29 +2686,6 @@ void require_executable_install_plan(const std::string& target, const BuildPlan&
                 "; split package install target selection is not implemented: " +
                 join_split_package_target_summaries(plan.split_package_targets));
     }
-}
-
-BuildPlan resolve_build_plan(const std::string& target) {
-    require_valid_package_name(target);
-    if(!AurClient::info(target).has_value()) throw std::runtime_error("AUR package not found: " + target);
-
-    BuildPlan             plan;
-    std::set<std::string> visited;
-    std::set<std::string> visiting;
-    collect_aur_build_plan(target, plan, visited, visiting, 0, MAX_RECURSIVE_DEP_DEPTH);
-    return plan;
-}
-
-BuildPlan resolve_fetch_plan(const std::string& target) {
-    require_valid_package_name(target);
-    if(!AurClient::info(target).has_value()) throw std::runtime_error("AUR package not found: " + target);
-
-    BuildPlan             plan;
-    std::set<std::string> visited;
-    std::set<std::string> visiting;
-    // POLICY: fetch は取得対象の列挙まで。AUR provider を辿って暗黙に追加取得しない。
-    collect_aur_build_plan(target, plan, visited, visiting, 0, MAX_RECURSIVE_DEP_DEPTH, false);
-    return plan;
 }
 
 void print_dependency_group(const std::string& label, const std::vector<std::string>& dependencies) {
@@ -3875,18 +3355,16 @@ int cmd_deps(const std::vector<std::string>& targets, const std::vector<std::str
             print_ambiguous_provider_group("Ambiguous provided dependencies:", classified.ambiguous_providers);
             std::cout << std::endl;
             print_dependency_group("Unknown dependencies:", classified.unknown);
-            BuildPlan metadata_plan;
-            add_build_plan_metadata_risk(metadata_plan, info.value());
-            if(!metadata_plan.metadata_risks.empty()) {
+            std::vector<BuildPlanMetadataRisk> metadata_risks =
+                    collect_build_plan_metadata_risks(info.value());
+            if(!metadata_risks.empty()) {
                 std::cout << std::endl;
-                print_metadata_risk_group(metadata_plan.metadata_risks);
+                print_metadata_risk_group(metadata_risks);
                 Logger::warn("Conflicts/replaces metadata is separate from dependency resolution and requires manual review.");
             }
             if(recursive) {
-                std::set<std::string> visited;
-                visited.insert(package_base_name(info.value()));
                 std::vector<RecursiveDependencyNode> recursive_nodes =
-                        resolve_recursive_dependencies(info.value(), visited, 1, MAX_RECURSIVE_DEP_DEPTH);
+                        resolve_recursive_dependencies(info.value());
                 std::cout << std::endl;
                 print_recursive_dependency_tree(recursive_nodes);
             }
