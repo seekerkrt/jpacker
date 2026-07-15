@@ -19,6 +19,7 @@
 #include "pkgbuild_export.hpp"
 #include "process.hpp"
 #include "repository_query.hpp"
+#include "trusted_cache.hpp"
 
 #include <algorithm>
 #include <array>
@@ -192,95 +193,6 @@ struct PackageBuildSource {
     bool        has_distinct_package_base = false;
 };
 
-// --- 内部クラス ---
-namespace {
-
-enum class CachePathRequirement {
-    Existing,
-    ExistingDirectory,
-    Missing,
-    ExistingOrMissing,
-};
-
-// canonical path だけでなく、再検証に必要な設定上の path も保持する。
-struct ValidatedCacheRoot {
-    fs::path path;
-    fs::path canonical_path;
-};
-
-struct ValidatedCachePath {
-    ValidatedCacheRoot root;
-    fs::path           path;
-    fs::path           canonical_path;
-    bool               exists = false;
-    bool               is_directory = false;
-};
-
-ValidatedCacheRoot prepare_trusted_cache_root();
-ValidatedCacheRoot require_unchanged_cache_root(const ValidatedCacheRoot& root);
-ValidatedCachePath require_trusted_cache_path(
-        const ValidatedCacheRoot& root, const fs::path& path, CachePathRequirement requirement);
-ValidatedCachePath revalidate_trusted_cache_path(
-        const ValidatedCachePath& path, CachePathRequirement requirement);
-void remove_trusted_cache_path(const ValidatedCachePath& path);
-bool rollback_trusted_cache_path(const ValidatedCachePath& path);
-std::vector<ValidatedCachePath> preflight_cache_cleanup(const ValidatedCacheRoot& root);
-
-// build/fetch 中の current directory 変更を、scope exit で元に戻す guard。
-// POLICY(#175): cache safety helper が検証した existing directory だけを受け取る。
-class WorkDirGuard {
-    fs::path original_path_;
-
-    explicit WorkDirGuard(const fs::path& target_path) : original_path_(fs::current_path()) {
-        fs::current_path(target_path);
-    }
-
-public:
-    explicit WorkDirGuard(const ValidatedCacheRoot& target)
-        : WorkDirGuard(require_unchanged_cache_root(target).canonical_path) {
-    }
-    explicit WorkDirGuard(const ValidatedCachePath& target)
-        : WorkDirGuard(revalidate_trusted_cache_path(
-                               target, CachePathRequirement::ExistingDirectory)
-                               .canonical_path) {
-    }
-    ~WorkDirGuard() {
-        try {
-            if(fs::exists(original_path_)) fs::current_path(original_path_);
-        } catch(...) {
-        }
-    }
-};
-
-// 途中失敗した clone/build 用 directory を rollback するための guard。
-class DirCleanupGuard {
-    ValidatedCachePath path_;
-    bool               committed_ = false;
-
-public:
-    explicit DirCleanupGuard(const ValidatedCachePath& path) : path_(path) {
-    }
-    void commit() {
-        committed_ = true;
-    }
-    ~DirCleanupGuard() {
-        if(committed_) return;
-
-        // LANDMINE(#175): destructor では、clone 前に検証した path を再検証できた場合だけ rollback する。
-        try {
-            if(rollback_trusted_cache_path(path_)) {
-                Logger::warn("Rolled back failed clone: cleaned up " + path_.path.string());
-            }
-        } catch(const std::exception& e) {
-            Logger::warn("Refusing unsafe clone rollback for " + path_.path.string() + ": " + e.what());
-        } catch(...) {
-            Logger::warn("Refusing unsafe clone rollback for " + path_.path.string() + ": unknown error");
-        }
-    }
-};
-
-} // namespace
-
 // --- 関数宣言 ---
 
 // CLI入口 / help
@@ -313,7 +225,6 @@ std::string expand_config_vars(std::string val, const std::map<std::string, std:
 bool is_safe_command_token(const std::string& token);
 std::vector<std::string> split_command_words(const std::string& command);
 fs::path expand_path(const std::string& path_str);
-fs::path get_cache_dir();
 void load_config();
 
 // shell引数 / command construction
@@ -498,14 +409,14 @@ int run_jpacker(int argc, char* argv[]) {
             // POLICY(#175): default log must not create or open a file through an unsafe cache root/symlink.
             ValidatedCacheRoot cache_root = prepare_trusted_cache_root();
             ValidatedCachePath cache_log = require_trusted_cache_path(
-                    cache_root, cache_root.path / "jpacker.log",
+                    cache_root, "jpacker.log",
                     CachePathRequirement::ExistingOrMissing);
-            if(cache_log.exists && !fs::is_regular_file(cache_log.canonical_path)) {
+            if(cache_log.exists() && !fs::is_regular_file(cache_log.canonical_path())) {
                 throw std::runtime_error(
-                        "Unsafe jpacker cache log path " + cache_log.path.string() +
+                        "Unsafe jpacker cache log path " + cache_log.path().string() +
                         ": expected a regular file.");
             }
-            log_path = cache_log.canonical_path;
+            log_path = cache_log.canonical_path();
         } else {
             log_path = expand_path(g_config.log_file);
         }
@@ -1120,259 +1031,6 @@ fs::path expand_path(const std::string& path_str) {
     return fs::path(path_str);
 }
 
-fs::path get_cache_dir() {
-    const char* xdg_cache = std::getenv("XDG_CACHE_HOME");
-    fs::path    base;
-    if(xdg_cache && std::string(xdg_cache).length() > 0) {
-        base = xdg_cache;
-    } else {
-        const char* home = std::getenv("HOME");
-        if(!home) throw std::runtime_error("HOME environment variable not set.");
-        base = fs::path(home) / ".cache";
-    }
-    return base / "jpacker";
-}
-
-namespace {
-
-fs::path absolute_cache_path(const fs::path& path) {
-    std::error_code ec;
-    fs::path        absolute_path = fs::absolute(path, ec);
-    if(ec) {
-        throw std::runtime_error(
-                "Unable to resolve jpacker cache path " + path.string() + ": " + ec.message());
-    }
-
-    // LANDMINE(#175): lexical normalization before this check could erase a symlink/.. boundary.
-    for(const auto& component : absolute_path.relative_path()) {
-        if(component == "." || component == "..") {
-            throw std::runtime_error(
-                    "Unsafe jpacker cache path " + absolute_path.string() +
-                    ": dot path components are not allowed.");
-        }
-    }
-    return absolute_path.lexically_normal();
-}
-
-fs::file_status cache_symlink_status(const fs::path& component, const fs::path& target_path) {
-    std::error_code ec;
-    fs::file_status status = fs::symlink_status(component, ec);
-    if(ec == std::errc::no_such_file_or_directory) {
-        return fs::file_status(fs::file_type::not_found);
-    }
-    if(ec) {
-        throw std::runtime_error(
-                "Unable to inspect jpacker cache path " + target_path.string() + " at " +
-                component.string() + ": " + ec.message());
-    }
-    return status;
-}
-
-void require_no_symlink_components(const fs::path& absolute_path, bool final_may_be_nondirectory) {
-    fs::path current_path = absolute_path.root_path();
-    fs::path relative_path = absolute_path.relative_path();
-    auto     component = relative_path.begin();
-    auto     end = relative_path.end();
-    for(; component != end; ++component) {
-        current_path /= *component;
-        fs::file_status status = cache_symlink_status(current_path, absolute_path);
-        if(fs::is_symlink(status)) {
-            throw std::runtime_error(
-                    "Unsafe jpacker cache path " + absolute_path.string() +
-                    ": symlink component is not allowed: " + current_path.string());
-        }
-
-        auto next = component;
-        ++next;
-        bool is_final_component = next == end;
-        if(fs::exists(status) && (!is_final_component || !final_may_be_nondirectory) &&
-           !fs::is_directory(status)) {
-            throw std::runtime_error(
-                    "Unsafe jpacker cache path " + absolute_path.string() +
-                    ": non-directory path component: " + current_path.string());
-        }
-    }
-}
-
-bool is_path_contained(const fs::path& root, const fs::path& candidate, bool allow_root) {
-    auto root_component = root.begin();
-    auto candidate_component = candidate.begin();
-    for(; root_component != root.end(); ++root_component, ++candidate_component) {
-        if(candidate_component == candidate.end() || *root_component != *candidate_component) return false;
-    }
-    return allow_root || candidate_component != candidate.end();
-}
-
-ValidatedCacheRoot validate_cache_root_path(const fs::path& raw_root, bool create_if_missing) {
-    fs::path root_path = absolute_cache_path(raw_root);
-    require_no_symlink_components(root_path, false);
-
-    fs::file_status root_status = cache_symlink_status(root_path, root_path);
-    if(!fs::exists(root_status)) {
-        if(!create_if_missing) {
-            throw std::runtime_error("Trusted jpacker cache root is missing: " + root_path.string());
-        }
-
-        std::error_code ec;
-        fs::create_directories(root_path, ec);
-        if(ec) {
-            throw std::runtime_error(
-                    "Failed to create jpacker cache root " + root_path.string() + ": " + ec.message());
-        }
-
-        // POLICY(#175): creation is followed by the same no-follow component check before trust is granted.
-        require_no_symlink_components(root_path, false);
-        root_status = cache_symlink_status(root_path, root_path);
-    }
-    if(!fs::is_directory(root_status)) {
-        throw std::runtime_error(
-                "Unsafe jpacker cache root " + root_path.string() + ": expected a regular directory.");
-    }
-
-    std::error_code ec;
-    fs::path        canonical_root = fs::canonical(root_path, ec);
-    if(ec) {
-        throw std::runtime_error(
-                "Failed to canonicalize jpacker cache root " + root_path.string() + ": " + ec.message());
-    }
-    return ValidatedCacheRoot{root_path, canonical_root};
-}
-
-ValidatedCacheRoot require_unchanged_cache_root(const ValidatedCacheRoot& expected_root) {
-    ValidatedCacheRoot current_root = validate_cache_root_path(expected_root.path, false);
-    if(current_root.canonical_path != expected_root.canonical_path) {
-        throw std::runtime_error(
-                "Unsafe jpacker cache root " + expected_root.path.string() +
-                ": canonical path changed after validation.");
-    }
-    return current_root;
-}
-
-ValidatedCachePath validate_cache_path_against_root(
-        const ValidatedCacheRoot& root, const fs::path& raw_path, CachePathRequirement requirement) {
-    fs::path path = absolute_cache_path(raw_path);
-    require_no_symlink_components(path, true);
-
-    fs::file_status status = cache_symlink_status(path, path);
-    bool            path_exists = fs::exists(status);
-    bool            path_is_directory = path_exists && fs::is_directory(status);
-
-    if(requirement == CachePathRequirement::Existing && !path_exists) {
-        throw std::runtime_error("Trusted jpacker cache path is missing: " + path.string());
-    }
-    if(requirement == CachePathRequirement::ExistingDirectory && !path_is_directory) {
-        throw std::runtime_error(
-                "Unsafe jpacker cache path " + path.string() + ": expected an existing directory.");
-    }
-    if(requirement == CachePathRequirement::Missing && path_exists) {
-        throw std::runtime_error(
-                "Unsafe jpacker cache path " + path.string() + ": expected the path to be missing.");
-    }
-
-    fs::path resolved_path;
-    if(path_exists) {
-        std::error_code ec;
-        resolved_path = fs::canonical(path, ec);
-        if(ec) {
-            throw std::runtime_error(
-                    "Failed to canonicalize jpacker cache path " + path.string() + ": " + ec.message());
-        }
-    } else {
-        fs::path parent_path = path.parent_path();
-        require_no_symlink_components(parent_path, false);
-        fs::file_status parent_status = cache_symlink_status(parent_path, path);
-        if(!fs::is_directory(parent_status)) {
-            throw std::runtime_error(
-                    "Unsafe jpacker cache path " + path.string() +
-                    ": existing parent directory is required before creation.");
-        }
-
-        std::error_code ec;
-        fs::path        canonical_parent = fs::canonical(parent_path, ec);
-        if(ec) {
-            throw std::runtime_error(
-                    "Failed to canonicalize jpacker cache parent " + parent_path.string() + ": " + ec.message());
-        }
-        if(!is_path_contained(root.canonical_path, canonical_parent, true)) {
-            throw std::runtime_error(
-                    "Unsafe jpacker cache path " + path.string() +
-                    ": parent resolves outside trusted cache root " + root.canonical_path.string());
-        }
-
-        // POLICY(#175): weakly_canonical is used only for a missing leaf whose existing parent was verified above.
-        resolved_path = fs::weakly_canonical(path, ec);
-        if(ec) {
-            throw std::runtime_error(
-                    "Failed to resolve missing jpacker cache path " + path.string() + ": " + ec.message());
-        }
-    }
-
-    // POLICY(#175): containment is path-component based; similarly prefixed sibling directories are not trusted.
-    if(!is_path_contained(root.canonical_path, resolved_path, false)) {
-        throw std::runtime_error(
-                "Unsafe jpacker cache path " + path.string() + ": canonical path " +
-                resolved_path.string() + " is outside trusted cache root " + root.canonical_path.string());
-    }
-
-    return ValidatedCachePath{root, path, resolved_path, path_exists, path_is_directory};
-}
-
-ValidatedCachePath require_trusted_cache_path(
-        const ValidatedCacheRoot& root, const fs::path& path, CachePathRequirement requirement) {
-    ValidatedCacheRoot current_root = require_unchanged_cache_root(root);
-    return validate_cache_path_against_root(current_root, path, requirement);
-}
-
-ValidatedCachePath revalidate_trusted_cache_path(
-        const ValidatedCachePath& expected_path, CachePathRequirement requirement) {
-    ValidatedCachePath current_path =
-            require_trusted_cache_path(expected_path.root, expected_path.path, requirement);
-    if(current_path.canonical_path != expected_path.canonical_path) {
-        throw std::runtime_error(
-                "Unsafe jpacker cache path " + expected_path.path.string() +
-                ": canonical path changed after validation.");
-    }
-    return current_path;
-}
-
-ValidatedCacheRoot prepare_trusted_cache_root() {
-    return validate_cache_root_path(get_cache_dir(), true);
-}
-
-void remove_trusted_cache_path(const ValidatedCachePath& expected_path) {
-    ValidatedCachePath current_path =
-            revalidate_trusted_cache_path(expected_path, CachePathRequirement::Existing);
-    std::error_code ec;
-    fs::remove_all(current_path.canonical_path, ec);
-    if(ec) {
-        throw std::runtime_error(
-                "Failed to remove trusted jpacker cache path " + current_path.path.string() + ": " +
-                ec.message());
-    }
-}
-
-bool rollback_trusted_cache_path(const ValidatedCachePath& expected_path) {
-    require_unchanged_cache_root(expected_path.root);
-    fs::file_status status = cache_symlink_status(expected_path.path, expected_path.path);
-    if(!fs::exists(status)) return false;
-
-    remove_trusted_cache_path(expected_path);
-    return true;
-}
-
-std::vector<ValidatedCachePath> preflight_cache_cleanup(const ValidatedCacheRoot& expected_root) {
-    ValidatedCacheRoot              root = require_unchanged_cache_root(expected_root);
-    std::vector<ValidatedCachePath> targets;
-    for(const auto& entry : fs::directory_iterator(root.canonical_path)) {
-        fs::path filename = entry.path().filename();
-        if(filename == "jpacker.log") continue;
-        targets.push_back(require_trusted_cache_path(
-                root, root.path / filename, CachePathRequirement::Existing));
-    }
-    return targets;
-}
-
-} // namespace
 
 void load_config() {
     if(!fs::exists(CONFIG_FILE)) return;
@@ -2351,15 +2009,15 @@ void fetch_aur_package_base(const std::string& package_base) {
     require_valid_package_name(package_base);
     ValidatedCacheRoot cache_root = prepare_trusted_cache_root();
     ValidatedCachePath repo_path = require_trusted_cache_path(
-            cache_root, cache_root.path / package_base,
+            cache_root, package_base,
             CachePathRequirement::ExistingOrMissing);
     std::string git_url = aur_git_url_for_package_base(package_base);
 
-    if(repo_path.exists) {
-        if(!repo_path.is_directory) {
-            throw std::runtime_error(repo_path.path.string() + " exists but is not a directory.");
+    if(repo_path.exists()) {
+        if(!repo_path.is_directory()) {
+            throw std::runtime_error(repo_path.path().string() + " exists but is not a directory.");
         }
-        require_safe_persistent_checkout_descendants(repo_path.canonical_path);
+        require_safe_persistent_checkout_descendants(repo_path.canonical_path());
 
         // POLICY: fetch command は既存 clone で git fetch まで。worktree update/pull/reset/build/install はしない。
         WorkDirGuard wd_repo(repo_path);
@@ -2372,7 +2030,7 @@ void fetch_aur_package_base(const std::string& package_base) {
         Logger::info("Fetching " + package_base + "...");
         repo_path = revalidate_trusted_cache_path(
                 repo_path, CachePathRequirement::ExistingDirectory);
-        require_safe_persistent_checkout_descendants(repo_path.canonical_path);
+        require_safe_persistent_checkout_descendants(repo_path.canonical_path());
         if(run_command("git fetch origin") != 0) throw std::runtime_error("Failed to fetch " + package_base + ".");
         return;
     }
@@ -2388,8 +2046,8 @@ void fetch_aur_package_base(const std::string& package_base) {
 
     // POLICY(#175): clone が生成した entry も、成功扱いする前に同じ cache boundary で検証する。
     ValidatedCachePath cloned_path = require_trusted_cache_path(
-            cache_root, clone_path.path, CachePathRequirement::ExistingDirectory);
-    require_safe_persistent_checkout_descendants(cloned_path.canonical_path);
+            cache_root, package_base, CachePathRequirement::ExistingDirectory);
+    require_safe_persistent_checkout_descendants(cloned_path.canonical_path());
     {
         WorkDirGuard wd_repo(cloned_path);
         std::string  current_url = trim(exec_command("git config --get remote.origin.url"));
@@ -2411,16 +2069,16 @@ void build_from_git(
     Logger::info("Processing " + pkg_name + "...");
     ValidatedCacheRoot build_root = prepare_trusted_cache_root();
     ValidatedCachePath pkg_path = require_trusted_cache_path(
-            build_root, build_root.path / clone_name,
+            build_root, clone_name,
             CachePathRequirement::ExistingOrMissing);
 
     {
         WorkDirGuard wd(build_root);
         bool         needs_clone = true;
 
-        if(pkg_path.exists && pkg_path.is_directory &&
-           has_safe_persistent_checkout_git_directory(pkg_path.canonical_path)) {
-            require_safe_persistent_checkout_descendants(pkg_path.canonical_path);
+        if(pkg_path.exists() && pkg_path.is_directory() &&
+           has_safe_persistent_checkout_git_directory(pkg_path.canonical_path())) {
+            require_safe_persistent_checkout_descendants(pkg_path.canonical_path());
             {
                 WorkDirGuard wd_repo(pkg_path);
                 std::string  current_url = exec_command("git config --get remote.origin.url");
@@ -2436,7 +2094,7 @@ void build_from_git(
                 WorkDirGuard wd_repo(pkg_path);
                 pkg_path = revalidate_trusted_cache_path(
                         pkg_path, CachePathRequirement::ExistingDirectory);
-                require_safe_persistent_checkout_descendants(pkg_path.canonical_path);
+                require_safe_persistent_checkout_descendants(pkg_path.canonical_path());
                 if(run_command("git fetch origin") != 0) throw std::runtime_error("Failed to fetch updates.");
 
                 std::string branch = get_git_branch();
@@ -2459,23 +2117,23 @@ void build_from_git(
                 // LANDMINE: reset は build/install 経路だけで許可する。fetch 経路へ持ち込まない。
                 pkg_path = revalidate_trusted_cache_path(
                         pkg_path, CachePathRequirement::ExistingDirectory);
-                require_safe_persistent_checkout_descendants(pkg_path.canonical_path);
+                require_safe_persistent_checkout_descendants(pkg_path.canonical_path());
                 if(run_command("git reset --hard " + shell_quote("origin/" + branch)) != 0) {
                     throw std::runtime_error("Failed to reset repository.");
                 }
                 pkg_path = revalidate_trusted_cache_path(
                         pkg_path, CachePathRequirement::ExistingDirectory);
-                require_safe_persistent_checkout_descendants(pkg_path.canonical_path);
+                require_safe_persistent_checkout_descendants(pkg_path.canonical_path());
             }
         }
 
         if(needs_clone) {
-            if(pkg_path.exists) {
+            if(pkg_path.exists()) {
                 // POLICY(#175): remote mismatch/non-repository cleanup is limited to the validated cache entry.
                 remove_trusted_cache_path(pkg_path);
             }
             pkg_path = require_trusted_cache_path(
-                    build_root, pkg_path.path, CachePathRequirement::Missing);
+                    build_root, clone_name, CachePathRequirement::Missing);
             Logger::info("Cloning repository...");
             DirCleanupGuard cleanup_guard(pkg_path);
             if(run_command("git clone " + shell_quote(git_url) + " " + shell_quote(clone_name)) != 0) {
@@ -2483,8 +2141,8 @@ void build_from_git(
             }
 
             pkg_path = require_trusted_cache_path(
-                    build_root, pkg_path.path, CachePathRequirement::ExistingDirectory);
-            require_safe_persistent_checkout_descendants(pkg_path.canonical_path);
+                    build_root, clone_name, CachePathRequirement::ExistingDirectory);
+            require_safe_persistent_checkout_descendants(pkg_path.canonical_path());
             {
                 WorkDirGuard wd_repo(pkg_path);
                 std::string  current_url = trim(exec_command("git config --get remote.origin.url"));
@@ -2500,11 +2158,11 @@ void build_from_git(
     {
         pkg_path = revalidate_trusted_cache_path(
                 pkg_path, CachePathRequirement::ExistingDirectory);
-        require_safe_persistent_checkout_descendants(pkg_path.canonical_path);
+        require_safe_persistent_checkout_descendants(pkg_path.canonical_path());
         WorkDirGuard wd(pkg_path);
 
         if(only_if_updated) {
-            UpdateCheckResult update_check = check_update_status(pkg_name, pkg_path.canonical_path);
+            UpdateCheckResult update_check = check_update_status(pkg_name, pkg_path.canonical_path());
             if(update_check == UpdateCheckResult::UpToDate) {
                 return;// 更新不要なので終了
             }
@@ -2526,9 +2184,9 @@ void build_from_git(
             }
         }
 
-        review_build_files(pkg_path.canonical_path);
+        review_build_files(pkg_path.canonical_path());
         MakepkgBuildOptions makepkg_options =
-                resolve_makepkg_build_options(pkg_path.canonical_path, source_sync_options);
+                resolve_makepkg_build_options(pkg_path.canonical_path(), source_sync_options);
         std::string build_cmd;
         if(!trim(custom_env).empty()) {
             Logger::info("Applying custom build flags: " + custom_env);
@@ -2540,7 +2198,7 @@ void build_from_git(
         // LANDMINE(#175,#197): review 後は cache entry と build artifact の両方を再検証する。
         pkg_path = revalidate_trusted_cache_path(
                 pkg_path, CachePathRequirement::ExistingDirectory);
-        require_safe_persistent_checkout_descendants(pkg_path.canonical_path);
+        require_safe_persistent_checkout_descendants(pkg_path.canonical_path());
         if(run_command(build_cmd) != 0) throw std::runtime_error("Build failed.");
     }
 }
@@ -3319,7 +2977,7 @@ int cmd_clean() {
     // Safe-path UX remains pacman clean -> jpacker cache prompt; unsafe cache state stops before either mutation.
     ValidatedCacheRoot              cache = prepare_trusted_cache_root();
     std::vector<ValidatedCachePath> cleanup_targets = preflight_cache_cleanup(cache);
-    bool                            cache_has_entries = !fs::is_empty(cache.canonical_path);
+    bool                            cache_has_entries = !fs::is_empty(cache.canonical_path());
     bool                            failed = false;
     Logger::info("Cleaning package caches...");
     if(run_command("sudo pacman " + join_pacman_args({"-Sc"})) != 0) {
@@ -3327,14 +2985,14 @@ int cmd_clean() {
         failed = true;
     }
     if(cache_has_entries) {
-        if(ask_user("Clean jpacker build cache (" + cache.path.string() + ")?", PromptDefault::No)) {
+        if(ask_user("Clean jpacker build cache (" + cache.path().string() + ")?", PromptDefault::No)) {
             Logger::info("Removing cached build files...");
             bool cleanup_failed = false;
             for(const auto& target : cleanup_targets) {
                 try {
                     remove_trusted_cache_path(target);
                 } catch(const std::exception& e) {
-                    Logger::error("Failed to remove " + target.path.string() + ": " + e.what());
+                    Logger::error("Failed to remove " + target.path().string() + ": " + e.what());
                     cleanup_failed = true;
                 }
             }
