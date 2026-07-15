@@ -795,19 +795,10 @@ void print_recursive_dependency_tree(const std::vector<RecursiveDependencyNode>&
 // build plan / fetch plan
 void add_unique_value(std::vector<std::string>& values, const std::string& value);
 void print_build_plan(const BuildPlan& plan);
-void require_fetchable_build_plan(const std::string& target, const BuildPlan& plan);
-void require_executable_build_plan(const std::string& target, const BuildPlan& plan);
-void require_executable_install_plan(const std::string& target, const BuildPlan& plan);
 void print_dependency_group(const std::string& label, const std::vector<std::string>& dependencies);
 void print_ambiguous_provider_group(
         const std::string& label, const std::vector<AmbiguousProvidedDependency>& dependencies);
-std::string ambiguous_provider_dependency_summary(const AmbiguousProvidedDependency& dependency);
-std::string join_ambiguous_provider_summaries(const std::vector<AmbiguousProvidedDependency>& dependencies);
-std::string split_package_target_summary(const BuildPlanSplitPackageTarget& target);
-std::string join_split_package_target_summaries(const std::vector<BuildPlanSplitPackageTarget>& targets);
 void print_metadata_risk_group(const std::vector<BuildPlanMetadataRisk>& risks);
-std::string metadata_risk_summary(const BuildPlanMetadataRisk& risk);
-std::string join_metadata_risk_summaries(const std::vector<BuildPlanMetadataRisk>& risks);
 std::string aur_git_url_for_package_base(const std::string& package_base);
 AurExportSource resolve_aur_export_source(const std::string& target);
 AnchoredDirectory require_export_current_directory();
@@ -2545,31 +2536,6 @@ void print_metadata_risk_group(const std::vector<BuildPlanMetadataRisk>& risks) 
     }
 }
 
-std::string metadata_risk_summary(const BuildPlanMetadataRisk& risk) {
-    std::vector<std::string> metadata;
-    if(!risk.conflicts.empty()) metadata.push_back("conflicts: " + join_comma_display_values(risk.conflicts));
-    if(!risk.replaces.empty()) metadata.push_back("replaces: " + join_comma_display_values(risk.replaces));
-
-    std::stringstream summary;
-    summary << risk.package_name;
-    if(risk.package_base != risk.package_name) summary << " (base: " << risk.package_base << ")";
-    summary << " [";
-    for(size_t i = 0; i < metadata.size(); ++i) {
-        if(i > 0) summary << "; ";
-        summary << metadata[i];
-    }
-    summary << "]";
-    return summary.str();
-}
-
-std::string join_metadata_risk_summaries(const std::vector<BuildPlanMetadataRisk>& risks) {
-    std::vector<std::string> values;
-    for(const auto& risk : risks) {
-        values.push_back(metadata_risk_summary(risk));
-    }
-    return join_comma_display_values(values);
-}
-
 void print_build_plan(const BuildPlan& plan) {
     std::cout << "Build plan:" << std::endl;
     if(plan.order.empty()) {
@@ -2650,44 +2616,6 @@ void print_build_plan(const BuildPlan& plan) {
     }
 }
 
-void require_fetchable_build_plan(const std::string& target, const BuildPlan& plan) {
-    if(!plan.unresolved.empty()) {
-        throw std::runtime_error(
-                "Cannot execute build plan for " + target + "; unresolved dependencies: " +
-                join_comma_display_values(plan.unresolved));
-    }
-    if(!plan.ambiguous_providers.empty()) {
-        throw std::runtime_error(
-                "Cannot execute build plan for " + target + "; ambiguous providers: " +
-                join_ambiguous_provider_summaries(plan.ambiguous_providers));
-    }
-    if(!plan.cycles.empty()) {
-        throw std::runtime_error(
-                "Cannot execute build plan for " + target + "; cyclic dependencies: " +
-                join_comma_display_values(plan.cycles));
-    }
-}
-
-void require_executable_build_plan(const std::string& target, const BuildPlan& plan) {
-    require_fetchable_build_plan(target, plan);
-    if(!plan.metadata_risks.empty()) {
-        throw std::runtime_error(
-                "Cannot execute build plan for " + target +
-                "; conflicts/replaces metadata requires manual review: " +
-                join_metadata_risk_summaries(plan.metadata_risks));
-    }
-}
-
-void require_executable_install_plan(const std::string& target, const BuildPlan& plan) {
-    require_executable_build_plan(target, plan);
-    if(!plan.split_package_targets.empty()) {
-        throw std::runtime_error(
-                "Cannot execute install plan for " + target +
-                "; split package install target selection is not implemented: " +
-                join_split_package_target_summaries(plan.split_package_targets));
-    }
-}
-
 void print_dependency_group(const std::string& label, const std::vector<std::string>& dependencies) {
     std::cout << label << std::endl;
     if(dependencies.empty()) {
@@ -2715,34 +2643,6 @@ void print_ambiguous_provider_group(
             std::cout << "      " << (i + 1) << ". " << provider_display(dependency.candidates[i]) << std::endl;
         }
     }
-}
-
-std::string ambiguous_provider_dependency_summary(const AmbiguousProvidedDependency& dependency) {
-    std::vector<std::string> candidates;
-    for(const auto& candidate : dependency.candidates) {
-        candidates.push_back(provider_display(candidate));
-    }
-    return dependency.dependency + " (" + join_comma_display_values(candidates) + ")";
-}
-
-std::string join_ambiguous_provider_summaries(const std::vector<AmbiguousProvidedDependency>& dependencies) {
-    std::vector<std::string> values;
-    for(const auto& dependency : dependencies) {
-        values.push_back(ambiguous_provider_dependency_summary(dependency));
-    }
-    return join_comma_display_values(values);
-}
-
-std::string split_package_target_summary(const BuildPlanSplitPackageTarget& target) {
-    return target.package_name + " (base: " + target.package_base + ")";
-}
-
-std::string join_split_package_target_summaries(const std::vector<BuildPlanSplitPackageTarget>& targets) {
-    std::vector<std::string> values;
-    for(const auto& target : targets) {
-        values.push_back(split_package_target_summary(target));
-    }
-    return join_comma_display_values(values);
 }
 
 std::string aur_git_url_for_package_base(const std::string& package_base) {

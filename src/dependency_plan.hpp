@@ -87,3 +87,6 @@ std::vector<RecursiveDependencyNode> resolve_recursive_dependencies(const AurPac
 std::vector<BuildPlanMetadataRisk> collect_build_plan_metadata_risks(const AurPackageInfo& pkg);
 BuildPlan resolve_build_plan(const std::string& target);
 BuildPlan resolve_fetch_plan(const std::string& target);
+void require_fetchable_build_plan(const std::string& target, const BuildPlan& plan);
+void require_executable_build_plan(const std::string& target, const BuildPlan& plan);
+void require_executable_install_plan(const std::string& target, const BuildPlan& plan);

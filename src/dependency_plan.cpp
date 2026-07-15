@@ -8,6 +8,7 @@
 #include <exception>
 #include <iterator>
 #include <set>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -486,4 +487,113 @@ BuildPlan resolve_fetch_plan(const std::string& target) {
     collect_aur_build_plan(
             target, plan, visited, visiting, 0, MAX_RECURSIVE_DEP_DEPTH, false);
     return plan;
+}
+
+namespace {
+
+std::string join_guard_summary_values(const std::vector<std::string>& values) {
+    std::stringstream summary;
+    for(size_t i = 0; i < values.size(); ++i) {
+        if(i > 0) summary << ", ";
+        summary << values[i];
+    }
+    return summary.str();
+}
+
+std::string provider_summary(const ProvidedDependency& provider) {
+    return provider.repository + "/" + provider.package_name;
+}
+
+std::string ambiguous_provider_dependency_summary(const AmbiguousProvidedDependency& dependency) {
+    std::vector<std::string> candidates;
+    for(const auto& candidate : dependency.candidates) {
+        candidates.push_back(provider_summary(candidate));
+    }
+    return dependency.dependency + " (" + join_guard_summary_values(candidates) + ")";
+}
+
+std::string join_ambiguous_provider_summaries(const std::vector<AmbiguousProvidedDependency>& dependencies) {
+    std::vector<std::string> values;
+    for(const auto& dependency : dependencies) {
+        values.push_back(ambiguous_provider_dependency_summary(dependency));
+    }
+    return join_guard_summary_values(values);
+}
+
+std::string split_package_target_summary(const BuildPlanSplitPackageTarget& target) {
+    return target.package_name + " (base: " + target.package_base + ")";
+}
+
+std::string join_split_package_target_summaries(const std::vector<BuildPlanSplitPackageTarget>& targets) {
+    std::vector<std::string> values;
+    for(const auto& target : targets) {
+        values.push_back(split_package_target_summary(target));
+    }
+    return join_guard_summary_values(values);
+}
+
+std::string metadata_risk_summary(const BuildPlanMetadataRisk& risk) {
+    std::vector<std::string> metadata;
+    if(!risk.conflicts.empty()) metadata.push_back("conflicts: " + join_guard_summary_values(risk.conflicts));
+    if(!risk.replaces.empty()) metadata.push_back("replaces: " + join_guard_summary_values(risk.replaces));
+
+    std::stringstream summary;
+    summary << risk.package_name;
+    if(risk.package_base != risk.package_name) summary << " (base: " << risk.package_base << ")";
+    summary << " [";
+    for(size_t i = 0; i < metadata.size(); ++i) {
+        if(i > 0) summary << "; ";
+        summary << metadata[i];
+    }
+    summary << "]";
+    return summary.str();
+}
+
+std::string join_metadata_risk_summaries(const std::vector<BuildPlanMetadataRisk>& risks) {
+    std::vector<std::string> values;
+    for(const auto& risk : risks) {
+        values.push_back(metadata_risk_summary(risk));
+    }
+    return join_guard_summary_values(values);
+}
+
+} // namespace
+
+void require_fetchable_build_plan(const std::string& target, const BuildPlan& plan) {
+    if(!plan.unresolved.empty()) {
+        throw std::runtime_error(
+                "Cannot execute build plan for " + target + "; unresolved dependencies: " +
+                join_guard_summary_values(plan.unresolved));
+    }
+    if(!plan.ambiguous_providers.empty()) {
+        throw std::runtime_error(
+                "Cannot execute build plan for " + target + "; ambiguous providers: " +
+                join_ambiguous_provider_summaries(plan.ambiguous_providers));
+    }
+    if(!plan.cycles.empty()) {
+        throw std::runtime_error(
+                "Cannot execute build plan for " + target + "; cyclic dependencies: " +
+                join_guard_summary_values(plan.cycles));
+    }
+}
+
+void require_executable_build_plan(const std::string& target, const BuildPlan& plan) {
+    require_fetchable_build_plan(target, plan);
+    if(!plan.metadata_risks.empty()) {
+        throw std::runtime_error(
+                "Cannot execute build plan for " + target +
+                "; conflicts/replaces metadata requires manual review: " +
+                join_metadata_risk_summaries(plan.metadata_risks));
+    }
+}
+
+void require_executable_install_plan(const std::string& target, const BuildPlan& plan) {
+    // POLICY: 段階的なguard呼び出し順は、複数の問題があるplanで最初に報告するcategoryの契約。
+    require_executable_build_plan(target, plan);
+    if(!plan.split_package_targets.empty()) {
+        throw std::runtime_error(
+                "Cannot execute install plan for " + target +
+                "; split package install target selection is not implemented: " +
+                join_split_package_target_summaries(plan.split_package_targets));
+    }
 }
