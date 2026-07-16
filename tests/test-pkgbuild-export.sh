@@ -281,6 +281,7 @@ assert_contains "requires exactly one AUR package target" "$stderr_file"
 assert_stdout_empty
 assert_command_log_empty
 assert_normal_request_log_empty
+assert_cache_root_absent
 
 run_fail -G clean-root risk-root
 assert_contains "requires exactly one AUR package target" "$stderr_file"
