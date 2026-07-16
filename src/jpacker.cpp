@@ -13,6 +13,7 @@
 
 #include "app_config.hpp"
 #include "aur_rpc.hpp"
+#include "cli_parser.hpp"
 #include "dependency_plan.hpp"
 #include "dependency_spec.hpp"
 #include "logging.hpp"
@@ -72,69 +73,11 @@ const std::string PACKAGE_BUILD_DIR = "/etc/jpacker/package.build";
 
 } // namespace
 
-enum class PackageSourceSelection {
-    Auto,
-    AurOnly,
-    RepoOnly,
-};
-
-enum class JpackerGlobalOption {
-    NoEdit,
-    NoDiff,
-    NoConfirm,
-    Rebuild,
-    CleanBuild,
-    RmDeps,
-    Aur,
-    Repo,
-};
-
 enum class SourceSelectableSyncOperation {
     Install,
     Search,
     Info,
     Unsupported,
-};
-
-enum class CliTokenRole {
-    JpackerGlobalOption,
-    Operation,
-    PacmanOption,
-    PacmanOptionValue,
-    EndOfOptions,
-    Target,
-    OpaqueOperand,
-};
-
-struct ParsedCliToken {
-    std::string  value;
-    size_t       argv_index;
-    CliTokenRole role;
-};
-
-// CLIがAppConfigへ追加するenable-only override。未指定のfalseはconfig file値を消さない。
-struct CliOverrides {
-    bool no_edit = false;
-    bool no_diff = false;
-    bool no_confirm = false;
-    bool rebuild = false;
-    bool clean_build = false;
-    bool rm_deps = false;
-};
-
-// CLI tokenの構文上の役割と、routing用view / pacman委譲用viewを同じparse結果に束ねる。
-struct ParsedCliArguments {
-    std::string                 operation;
-    std::vector<ParsedCliToken> tokens;
-    std::vector<std::string>    ordered_pacman_args;
-    std::vector<std::string>    consumed_global_options;
-    std::vector<std::string>    flags;
-    std::vector<std::string>    targets;
-    std::vector<size_t>         target_token_indices;
-    std::optional<std::string>  pending_option;
-    bool                        end_of_options = false;
-    PackageSourceSelection      source_selection = PackageSourceSelection::Auto;
-    CliOverrides                cli_overrides;
 };
 
 // pacman-compatible sync optionのうち、source buildへ意味を保って変換できるinvocation-level policy。
@@ -150,17 +93,6 @@ enum class PkgbuildExportMode {
 namespace {
 
 AppConfig g_config;
-
-const std::array<std::pair<const char*, JpackerGlobalOption>, 8> JPACKER_GLOBAL_OPTIONS = {{
-        {"--noedit", JpackerGlobalOption::NoEdit},
-        {"--nodiff", JpackerGlobalOption::NoDiff},
-        {"--noconfirm", JpackerGlobalOption::NoConfirm},
-        {"--rebuild", JpackerGlobalOption::Rebuild},
-        {"--cleanbuild", JpackerGlobalOption::CleanBuild},
-        {"--rmdeps", JpackerGlobalOption::RmDeps},
-        {"--aur", JpackerGlobalOption::Aur},
-        {"--repo", JpackerGlobalOption::Repo},
-}};
 
 } // namespace
 
@@ -198,10 +130,7 @@ struct PackageBuildSource {
 int run_jpacker(int argc, char* argv[]);
 void print_help();
 bool handle_info_only_option(int argc, char* argv[]);
-bool is_jpacker_global_option(const std::string& arg);
 bool argv_requests_pkgbuild_export_diagnostics(int argc, char* argv[]);
-bool apply_jpacker_global_option(const std::string& arg, ParsedCliArguments& parsed);
-std::optional<ParsedCliArguments> parse_cli_arguments(int argc, char* argv[]);
 std::optional<PkgbuildExportMode> pkgbuild_export_mode(const ParsedCliArguments& parsed);
 bool validate_pkgbuild_export_invocation(const ParsedCliArguments& parsed);
 bool parsed_has_semantic_pacman_option(
@@ -228,13 +157,10 @@ std::vector<std::string> split_command_words(const std::string& command);
 std::string join_shell_args(const std::vector<std::string>& args);
 std::vector<std::string> pacman_args_with_global_options(std::vector<std::string> args);
 std::string join_pacman_args(const std::vector<std::string>& args);
-std::vector<std::string> ordered_pacman_args_excluding_targets(
-        const ParsedCliArguments& parsed, const std::set<size_t>& excluded_target_token_indices);
 std::string makepkg_install_command(const MakepkgBuildOptions& options);
 std::string build_editor_command(const std::string& editor, const fs::path& target);
 
 // pacman / repository補助
-bool pacman_option_takes_value(const std::string& arg);
 bool pacman_operation_requests_refresh(
         const std::string& operation, const std::vector<std::string>& flags);
 bool validate_optionless_jpacker_operation(const std::string& operation, const std::vector<std::string>& flags);
@@ -395,6 +321,11 @@ int run_jpacker(int argc, char* argv[]) {
     if(!parsed_result.has_value()) return 1;
 
     const ParsedCliArguments&        parsed = parsed_result.value();
+    if(parsed.operation.empty()) {
+        // POLICY: usage presentationはrunnerが所有し、CLI override publish前に終了する。
+        print_help();
+        return 1;
+    }
     apply_cli_overrides(config, parsed.cli_overrides);
     g_config = std::move(config);
 
@@ -652,18 +583,6 @@ void print_help() {
     std::cout << "    jpacker.conf: EDITOR=..., LOGFILE=..., NOEDIT=..., NODIFF=..." << std::endl;
 }
 
-std::optional<JpackerGlobalOption> jpacker_global_option_kind(const std::string& arg) {
-    auto option = std::find_if(
-            JPACKER_GLOBAL_OPTIONS.begin(), JPACKER_GLOBAL_OPTIONS.end(),
-            [&arg](const auto& entry) { return arg == entry.first; });
-    if(option == JPACKER_GLOBAL_OPTIONS.end()) return std::nullopt;
-    return option->second;
-}
-
-bool is_jpacker_global_option(const std::string& arg) {
-    return jpacker_global_option_kind(arg).has_value();
-}
-
 bool argv_requests_pkgbuild_export_diagnostics(int argc, char* argv[]) {
     // POLICY(#173): operation 前のglobal optionだけを飛ばし、option value/opaque operandは見ない。
     for(int i = 1; i < argc; ++i) {
@@ -672,47 +591,6 @@ bool argv_requests_pkgbuild_export_diagnostics(int argc, char* argv[]) {
         return arg == "-G" || arg == "-Gp";
     }
     return false;
-}
-
-bool apply_jpacker_global_option(const std::string& arg, ParsedCliArguments& parsed) {
-    std::optional<JpackerGlobalOption> option = jpacker_global_option_kind(arg);
-    if(!option.has_value()) throw std::logic_error("Unknown jpacker global option: " + arg);
-
-    switch(option.value()) {
-    case JpackerGlobalOption::NoEdit:
-        parsed.cli_overrides.no_edit = true;
-        break;
-    case JpackerGlobalOption::NoDiff:
-        parsed.cli_overrides.no_diff = true;
-        break;
-    case JpackerGlobalOption::NoConfirm:
-        parsed.cli_overrides.no_confirm = true;
-        break;
-    case JpackerGlobalOption::Rebuild:
-        parsed.cli_overrides.rebuild = true;
-        break;
-    case JpackerGlobalOption::CleanBuild:
-        parsed.cli_overrides.clean_build = true;
-        break;
-    case JpackerGlobalOption::RmDeps:
-        parsed.cli_overrides.rm_deps = true;
-        break;
-    case JpackerGlobalOption::Aur:
-        if(parsed.source_selection == PackageSourceSelection::RepoOnly) {
-            Logger::error("Cannot combine --aur and --repo.");
-            return false;
-        }
-        parsed.source_selection = PackageSourceSelection::AurOnly;
-        break;
-    case JpackerGlobalOption::Repo:
-        if(parsed.source_selection == PackageSourceSelection::AurOnly) {
-            Logger::error("Cannot combine --aur and --repo.");
-            return false;
-        }
-        parsed.source_selection = PackageSourceSelection::RepoOnly;
-        break;
-    }
-    return true;
 }
 
 bool handle_info_only_option(int argc, char* argv[]) {
@@ -731,96 +609,6 @@ bool handle_info_only_option(int argc, char* argv[]) {
         return false;
     }
     return false;
-}
-
-std::optional<ParsedCliArguments> parse_cli_arguments(int argc, char* argv[]) {
-    ParsedCliArguments parsed;
-    bool               has_operation = false;
-
-    for(int i = 1; i < argc; ++i) {
-        std::string arg = argv[i];
-        if(arg.empty()) {
-            Logger::error("Empty arguments are not supported.");
-            return std::nullopt;
-        }
-
-        if(!has_operation) {
-            if(is_jpacker_global_option(arg)) {
-                if(!apply_jpacker_global_option(arg, parsed)) return std::nullopt;
-                parsed.tokens.push_back(
-                        ParsedCliToken{arg, static_cast<size_t>(i), CliTokenRole::JpackerGlobalOption});
-                parsed.consumed_global_options.push_back(arg);
-                continue;
-            }
-
-            has_operation = true;
-            parsed.operation = arg;
-            parsed.tokens.push_back(
-                    ParsedCliToken{arg, static_cast<size_t>(i), CliTokenRole::Operation});
-            parsed.ordered_pacman_args.push_back(arg);
-            parsed.flags.push_back(arg);
-            continue;
-        }
-
-        // POLICY(#173): pacmanの構文状態を確定してから、通常位置のjpacker optionだけを消費する。
-        if(parsed.pending_option.has_value()) {
-            parsed.tokens.push_back(
-                    ParsedCliToken{arg, static_cast<size_t>(i), CliTokenRole::PacmanOptionValue});
-            parsed.ordered_pacman_args.push_back(arg);
-            parsed.flags.push_back(arg);
-            parsed.pending_option.reset();
-            continue;
-        }
-        if(parsed.end_of_options) {
-            size_t token_index = parsed.tokens.size();
-            parsed.tokens.push_back(
-                    ParsedCliToken{arg, static_cast<size_t>(i), CliTokenRole::OpaqueOperand});
-            parsed.ordered_pacman_args.push_back(arg);
-            parsed.targets.push_back(arg);
-            parsed.target_token_indices.push_back(token_index);
-            continue;
-        }
-        if(arg == "--") {
-            parsed.tokens.push_back(
-                    ParsedCliToken{arg, static_cast<size_t>(i), CliTokenRole::EndOfOptions});
-            parsed.ordered_pacman_args.push_back(arg);
-            parsed.flags.push_back(arg);
-            parsed.end_of_options = true;
-            continue;
-        }
-        if(is_jpacker_global_option(arg)) {
-            if(!apply_jpacker_global_option(arg, parsed)) return std::nullopt;
-            parsed.tokens.push_back(
-                    ParsedCliToken{arg, static_cast<size_t>(i), CliTokenRole::JpackerGlobalOption});
-            parsed.consumed_global_options.push_back(arg);
-            continue;
-        }
-        if(arg[0] == '-') {
-            parsed.tokens.push_back(
-                    ParsedCliToken{arg, static_cast<size_t>(i), CliTokenRole::PacmanOption});
-            parsed.ordered_pacman_args.push_back(arg);
-            parsed.flags.push_back(arg);
-            if(pacman_option_takes_value(arg)) parsed.pending_option = arg;
-            continue;
-        }
-
-        size_t token_index = parsed.tokens.size();
-        parsed.tokens.push_back(
-                ParsedCliToken{arg, static_cast<size_t>(i), CliTokenRole::Target});
-        parsed.ordered_pacman_args.push_back(arg);
-        parsed.targets.push_back(arg);
-        parsed.target_token_indices.push_back(token_index);
-    }
-
-    if(!has_operation) {
-        print_help();
-        return std::nullopt;
-    }
-    if(parsed.pending_option.has_value()) {
-        Logger::error("Missing value for option " + parsed.pending_option.value());
-        return std::nullopt;
-    }
-    return parsed;
 }
 
 std::optional<PkgbuildExportMode> pkgbuild_export_mode(const ParsedCliArguments& parsed) {
@@ -1109,21 +897,6 @@ std::string join_pacman_args(const std::vector<std::string>& args) {
     return join_shell_args(pacman_args_with_global_options(args));
 }
 
-std::vector<std::string> ordered_pacman_args_excluding_targets(
-        const ParsedCliArguments& parsed, const std::set<size_t>& excluded_target_token_indices) {
-    std::vector<std::string> args;
-    for(size_t i = 0; i < parsed.tokens.size(); ++i) {
-        const ParsedCliToken& token = parsed.tokens[i];
-        if(token.role == CliTokenRole::JpackerGlobalOption) continue;
-        if((token.role == CliTokenRole::Target || token.role == CliTokenRole::OpaqueOperand) &&
-           excluded_target_token_indices.contains(i)) {
-            continue;
-        }
-        args.push_back(token.value);
-    }
-    return args;
-}
-
 std::string makepkg_install_command(const MakepkgBuildOptions& options) {
     std::vector<std::string> args = {"makepkg", "-sic"};
     if(g_config.no_confirm) args.push_back("--noconfirm");
@@ -1143,19 +916,6 @@ std::string build_editor_command(const std::string& editor, const fs::path& targ
 }
 
 // pacman / repository補助
-bool pacman_option_takes_value(const std::string& arg) {
-    // POLICY: 固定の pacman option table。process lifetime の保持だが mutable な副作用は持たない。
-    static const std::vector<std::string> s_long_opts = {
-            "--arch", "--assume-installed", "--cachedir", "--color", "--config", "--dbpath",
-            "--gpgdir", "--hookdir", "--ignore", "--ignoregroup", "--logfile", "--overwrite",
-            "--print-format", "--root", "--sysroot"};
-    static const std::vector<std::string> s_short_opts = {"-b", "-r"};
-
-    if(arg.find('=') != std::string::npos) return false;
-    if(std::find(s_long_opts.begin(), s_long_opts.end(), arg) != s_long_opts.end()) return true;
-    return std::find(s_short_opts.begin(), s_short_opts.end(), arg) != s_short_opts.end();
-}
-
 bool pacman_operation_requests_refresh(
         const std::string& operation, const std::vector<std::string>& flags) {
     auto short_option_requests_refresh = [](const std::string& option) {
