@@ -10,6 +10,8 @@ BUILD_DIR := build
 MANPAGE   := man/jpacker.8
 MANPAGE_IN := man/jpacker.8.in
 TEST_TARGET := build/tests/jpacker-test
+APP_CONFIG_MODULE_TEST_TARGET := build/tests/app-config-test
+APP_CONFIG_INTEGRATION_TEST_TARGET := build/tests/jpacker-app-config-test
 
 # --- インストール先設定 ---
 PREFIX      ?= /usr/local
@@ -32,7 +34,7 @@ HEADERS   := $(wildcard $(SRC_DIR)/*.hpp)
 OBJS      := $(SRCS:$(SRC_DIR)/%.cpp=$(BUILD_DIR)/%.o)
 DEPS      := $(OBJS:.o=.d)
 
-.PHONY: all clean test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-conflicts-replaces test-needed-contract test-pacman-routing test-pkgbuild-export test-source-selection release-check install uninstall
+.PHONY: all clean test-app-config test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-conflicts-replaces test-needed-contract test-pacman-routing test-pkgbuild-export test-source-selection release-check install uninstall
 
 all: $(TARGET) $(MANPAGE)
 
@@ -57,6 +59,19 @@ $(TEST_TARGET): $(SRCS) $(HEADERS) $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling isolated integration test binary"
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -DJPACKER_ENABLE_TEST_OVERRIDES $(SRCS) -o $@ $(MY_LDLIBS)
+
+$(APP_CONFIG_MODULE_TEST_TARGET): tests/app_config_test.cpp $(SRC_DIR)/app_config.cpp $(SRC_DIR)/app_config.hpp $(VERSION_FILE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling app config module test binary"
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -I$(SRC_DIR) tests/app_config_test.cpp $(SRC_DIR)/app_config.cpp -o $@
+
+$(APP_CONFIG_INTEGRATION_TEST_TARGET): $(SRCS) $(HEADERS) $(VERSION_FILE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling app config integration test binary"
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -DJPACKER_ENABLE_TEST_OVERRIDES -DJPACKER_ENABLE_TEST_CONFIG_PATH -DJPACKER_ENABLE_APP_CONFIG_TEST_HOOKS $(SRCS) -o $@ $(MY_LDLIBS)
+
+test-app-config: $(APP_CONFIG_MODULE_TEST_TARGET) $(APP_CONFIG_INTEGRATION_TEST_TARGET)
+	sh tests/test-app-config.sh $(abspath $(APP_CONFIG_MODULE_TEST_TARGET)) $(abspath $(APP_CONFIG_INTEGRATION_TEST_TARGET))
 
 test-conflicts-replaces: $(TEST_TARGET)
 	sh tests/test-conflicts-replaces.sh $(abspath $(TEST_TARGET))

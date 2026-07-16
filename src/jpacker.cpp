@@ -11,6 +11,7 @@
 // このファイルは、jpacker の CLI 入口、pacman wrapper、AUR/source build 補助をまとめる実装単位。
 // 関数宣言と詳細実装は、将来の分割候補が見えるように section comment で大まかな責務ごとに分類する。
 
+#include "app_config.hpp"
 #include "aur_rpc.hpp"
 #include "dependency_plan.hpp"
 #include "dependency_spec.hpp"
@@ -56,7 +57,6 @@ namespace {
 const std::string VERSION = JPKG_VERSION;
 const std::string AUR_BASE_URL = "https://aur.archlinux.org/";
 const std::string ARCH_GIT_BASE = "https://gitlab.archlinux.org/archlinux/packaging/packages/";
-const std::string CONFIG_FILE = "/etc/jpacker/jpacker.conf";
 // POLICY: source-build preference の永続化場所。意味を変える場合は互換性影響として扱う。
 #ifdef JPACKER_ENABLE_TEST_OVERRIDES
 const std::string PACKAGE_BUILD_DIR = [] {
@@ -71,18 +71,6 @@ const std::string PACKAGE_BUILD_DIR = "/etc/jpacker/package.build";
 #endif
 
 } // namespace
-
-// jpacker.conf と CLI option を反映した、1回の実行中の設定状態。
-struct AppConfig {
-    bool        no_edit = false;
-    bool        no_diff = false;
-    bool        no_confirm = false;
-    bool        rebuild = false;
-    bool        clean_build = false;
-    bool        rm_deps = false;
-    std::string editor = "nano";
-    std::string log_file = "";
-};
 
 enum class PackageSourceSelection {
     Auto,
@@ -124,6 +112,16 @@ struct ParsedCliToken {
     CliTokenRole role;
 };
 
+// CLIがAppConfigへ追加するenable-only override。未指定のfalseはconfig file値を消さない。
+struct CliOverrides {
+    bool no_edit = false;
+    bool no_diff = false;
+    bool no_confirm = false;
+    bool rebuild = false;
+    bool clean_build = false;
+    bool rm_deps = false;
+};
+
 // CLI tokenの構文上の役割と、routing用view / pacman委譲用viewを同じparse結果に束ねる。
 struct ParsedCliArguments {
     std::string                 operation;
@@ -136,6 +134,7 @@ struct ParsedCliArguments {
     std::optional<std::string>  pending_option;
     bool                        end_of_options = false;
     PackageSourceSelection      source_selection = PackageSourceSelection::Auto;
+    CliOverrides                cli_overrides;
 };
 
 // pacman-compatible sync optionのうち、source buildへ意味を保って変換できるinvocation-level policy。
@@ -212,7 +211,7 @@ std::string package_source_selection_option(PackageSourceSelection selection);
 SourceSelectableSyncOperation source_selectable_sync_operation(const ParsedCliArguments& parsed);
 bool validate_source_selection_operation(const ParsedCliArguments& parsed);
 
-// 文字列 / path / config
+// 文字列 / path / source preference
 std::string trim(const std::string& str);
 bool remote_url_matches_expected(const std::string& current_url, const std::string& expected_url);
 std::string to_lower(std::string str);
@@ -224,8 +223,6 @@ bool split_env_assignment(const std::string& arg, std::string& key, std::string&
 std::string expand_config_vars(std::string val, const std::map<std::string, std::string>& vars);
 bool is_safe_command_token(const std::string& token);
 std::vector<std::string> split_command_words(const std::string& command);
-fs::path expand_path(const std::string& path_str);
-void load_config();
 
 // shell引数 / command construction
 std::string join_shell_args(const std::vector<std::string>& args);
@@ -339,6 +336,31 @@ void cmd_revert(const std::vector<std::string>& targets);
 int cmd_clean();
 int cmd_upgrade();
 
+namespace {
+
+AppConfig load_invocation_app_config() {
+#ifdef JPACKER_ENABLE_TEST_CONFIG_PATH
+    // POLICY: productionはfixed pathを使い、専用test binaryだけが正規の明示path loaderを選ぶ。
+    const char* test_config_path = std::getenv("JPACKER_TEST_CONFIG_FILE");
+    if(test_config_path && test_config_path[0] != '\0') {
+        return load_app_config(test_config_path);
+    }
+#endif
+    return load_default_app_config();
+}
+
+void apply_cli_overrides(AppConfig& config, const CliOverrides& overrides) {
+    // POLICY: CLI global optionはenable-only。未指定fieldでconfig fileのtrueを消さない。
+    if(overrides.no_edit) config.no_edit = true;
+    if(overrides.no_diff) config.no_diff = true;
+    if(overrides.no_confirm) config.no_confirm = true;
+    if(overrides.rebuild) config.rebuild = true;
+    if(overrides.clean_build) config.clean_build = true;
+    if(overrides.rm_deps) config.rm_deps = true;
+}
+
+} // namespace
+
 // --- CLI 入口 ---
 int run_jpacker(int argc, char* argv[]) {
     if(handle_info_only_option(argc, argv)) return 0;
@@ -359,9 +381,10 @@ int run_jpacker(int argc, char* argv[]) {
         return 1;
     }
 
-    // Config is read-only here; CLI parsing remains before default cache/log creation.
+    // Configはparse成功までlocalに保持し、invalid CLIから最終実行設定へのpartial publishを防ぐ。
+    AppConfig config;
     try {
-        load_config();
+        config = load_invocation_app_config();
     } catch(const std::exception& e) {
         std::cerr << "Warning: Failed to load config: " << e.what() << std::endl;
     } catch(...) {
@@ -372,6 +395,9 @@ int run_jpacker(int argc, char* argv[]) {
     if(!parsed_result.has_value()) return 1;
 
     const ParsedCliArguments&        parsed = parsed_result.value();
+    apply_cli_overrides(config, parsed.cli_overrides);
+    g_config = std::move(config);
+
     std::optional<PkgbuildExportMode> export_mode = pkgbuild_export_mode(parsed);
     if(export_mode.has_value()) {
         // POLICY(#167): export/print は cache log 初期化より前に分岐し、内部 build cache を作らない。
@@ -418,7 +444,7 @@ int run_jpacker(int argc, char* argv[]) {
             }
             log_path = cache_log.canonical_path();
         } else {
-            log_path = expand_path(g_config.log_file);
+            log_path = expand_config_path(g_config.log_file);
         }
         Logger::init(log_path);
         Logger::info("Started jpacker v" + VERSION);
@@ -531,7 +557,45 @@ int run_jpacker(int argc, char* argv[]) {
     }
 }
 
+#ifdef JPACKER_ENABLE_APP_CONFIG_TEST_HOOKS
+namespace {
+
+int verify_parse_failure_does_not_publish_cli_overrides() {
+    char program[] = "jpacker";
+    char no_edit[] = "--noedit";
+    char no_diff[] = "--nodiff";
+    char no_confirm[] = "--noconfirm";
+    char rebuild[] = "--rebuild";
+    char clean_build[] = "--cleanbuild";
+    char rm_deps[] = "--rmdeps";
+    char operation[] = "-Q";
+    char missing_value_option[] = "--config";
+    std::array<char*, 9> parse_failure_argv = {
+            program, no_edit, no_diff, no_confirm, rebuild,
+            clean_build, rm_deps, operation, missing_value_option};
+
+    if(run_jpacker(static_cast<int>(parse_failure_argv.size()), parse_failure_argv.data()) != 1) {
+        std::cerr << "Expected CLI parse failure." << std::endl;
+        return 1;
+    }
+    if(g_config.no_edit || g_config.no_diff || g_config.no_confirm || g_config.rebuild ||
+       g_config.clean_build || g_config.rm_deps) {
+        std::cerr << "CLI parse failure published partial config overrides." << std::endl;
+        return 1;
+    }
+    return 0;
+}
+
+} // namespace
+#endif
+
 int main(int argc, char* argv[]) {
+#ifdef JPACKER_ENABLE_APP_CONFIG_TEST_HOOKS
+    const char* app_config_test_case = std::getenv("JPACKER_TEST_APP_CONFIG_CASE");
+    if(app_config_test_case && std::string(app_config_test_case) == "parse-failure-cli-overrides") {
+        return verify_parse_failure_does_not_publish_cli_overrides();
+    }
+#endif
     return run_jpacker(argc, argv);
 }
 
@@ -616,22 +680,22 @@ bool apply_jpacker_global_option(const std::string& arg, ParsedCliArguments& par
 
     switch(option.value()) {
     case JpackerGlobalOption::NoEdit:
-        g_config.no_edit = true;
+        parsed.cli_overrides.no_edit = true;
         break;
     case JpackerGlobalOption::NoDiff:
-        g_config.no_diff = true;
+        parsed.cli_overrides.no_diff = true;
         break;
     case JpackerGlobalOption::NoConfirm:
-        g_config.no_confirm = true;
+        parsed.cli_overrides.no_confirm = true;
         break;
     case JpackerGlobalOption::Rebuild:
-        g_config.rebuild = true;
+        parsed.cli_overrides.rebuild = true;
         break;
     case JpackerGlobalOption::CleanBuild:
-        g_config.clean_build = true;
+        parsed.cli_overrides.clean_build = true;
         break;
     case JpackerGlobalOption::RmDeps:
-        g_config.rm_deps = true;
+        parsed.cli_overrides.rm_deps = true;
         break;
     case JpackerGlobalOption::Aur:
         if(parsed.source_selection == PackageSourceSelection::RepoOnly) {
@@ -1017,46 +1081,6 @@ std::vector<std::string> split_command_words(const std::string& command) {
         throw std::runtime_error("Editor command is empty.");
     }
     return words;
-}
-
-fs::path expand_path(const std::string& path_str) {
-    if(path_str.empty()) return "";
-    if(path_str[0] == '~') {
-        const char* home = std::getenv("HOME");
-        if(!home) throw std::runtime_error("HOME environment variable not set.");
-        if(path_str.length() == 1) return fs::path(home);
-        if(path_str[1] == '/') return fs::path(home) / path_str.substr(2);
-        throw std::runtime_error("Unsupported home expansion: " + path_str);
-    }
-    return fs::path(path_str);
-}
-
-
-void load_config() {
-    if(!fs::exists(CONFIG_FILE)) return;
-    std::ifstream file(CONFIG_FILE);
-    std::string   line;
-    while(std::getline(file, line)) {
-        line = strip_comment(line);
-        if(trim(line).empty()) continue;
-        std::stringstream ss(line);
-        std::string       key, val;
-        if(std::getline(ss, key, '=') && std::getline(ss, val)) {
-            key = to_lower(trim(key));
-            val = unquote(trim(val));
-            if(key == "noedit") {
-                std::string v = to_lower(val);
-                if(v == "true" || v == "1" || v == "yes") g_config.no_edit = true;
-            } else if(key == "nodiff") {
-                std::string v = to_lower(val);
-                if(v == "true" || v == "1" || v == "yes") g_config.no_diff = true;
-            } else if(key == "editor") {
-                if(!val.empty()) g_config.editor = val;
-            } else if(key == "logfile") {
-                if(!val.empty()) g_config.log_file = val;
-            }
-        }
-    }
 }
 
 // shell引数 / command construction
