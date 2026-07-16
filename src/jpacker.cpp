@@ -22,6 +22,7 @@
 #include "pkgbuild_export.hpp"
 #include "process.hpp"
 #include "repository_query.hpp"
+#include "source_preference.hpp"
 #include "trusted_cache.hpp"
 
 #include <algorithm>
@@ -37,7 +38,6 @@
 #include <limits>
 #include <map>
 #include <optional>
-#include <regex>
 #include <set>
 #include <sstream>
 #include <stdexcept>
@@ -59,18 +59,6 @@ namespace {
 const std::string VERSION = JPKG_VERSION;
 const std::string AUR_BASE_URL = "https://aur.archlinux.org/";
 const std::string ARCH_GIT_BASE = "https://gitlab.archlinux.org/archlinux/packaging/packages/";
-// POLICY: source-build preference の永続化場所。意味を変える場合は互換性影響として扱う。
-#ifdef JPACKER_ENABLE_TEST_OVERRIDES
-const std::string PACKAGE_BUILD_DIR = [] {
-    const char* test_package_build_dir = std::getenv("JPACKER_TEST_PACKAGE_BUILD_DIR");
-    if(test_package_build_dir && test_package_build_dir[0] != '\0') {
-        return std::string(test_package_build_dir);
-    }
-    return std::string("/etc/jpacker/package.build");
-}();
-#else
-const std::string PACKAGE_BUILD_DIR = "/etc/jpacker/package.build";
-#endif
 
 } // namespace
 
@@ -116,16 +104,11 @@ void print_help();
 bool handle_info_only_option(int argc, char* argv[]);
 bool argv_requests_pkgbuild_export_diagnostics(int argc, char* argv[]);
 
-// 文字列 / path / source preference
+// 文字列 / path
 std::string trim(const std::string& str);
 bool remote_url_matches_expected(const std::string& current_url, const std::string& expected_url);
 std::string to_lower(std::string str);
-std::string unquote(const std::string& str);
-std::string strip_comment(const std::string& line);
 std::string shell_quote(const std::string& str);
-bool is_valid_env_key(const std::string& key);
-bool split_env_assignment(const std::string& arg, std::string& key, std::string& value);
-std::string expand_config_vars(std::string val, const std::map<std::string, std::string>& vars);
 bool is_safe_command_token(const std::string& token);
 std::vector<std::string> split_command_words(const std::string& command);
 
@@ -138,8 +121,7 @@ std::string build_editor_command(const std::string& editor, const fs::path& targ
 
 // pacman / repository補助
 bool validate_optionless_jpacker_operation(const std::string& operation, const std::vector<std::string>& flags);
-bool is_force_source(const std::string& pkg_name);
-std::string get_package_env(const std::string& pkg_name);
+std::string load_source_preference_environment(const std::string& package_name);
 std::string get_git_branch();
 std::vector<std::string> split_lines(const std::string& text);
 std::vector<fs::path> find_install_scripts(const fs::path& pkg_dir);
@@ -593,7 +575,7 @@ bool handle_info_only_option(int argc, char* argv[]) {
     return false;
 }
 
-// 文字列 / path / config
+// 文字列 / path
 std::string trim(const std::string& str) {
     size_t first = str.find_first_not_of(" \t\n\r");
     if(first == std::string::npos) return "";
@@ -613,47 +595,6 @@ std::string to_lower(std::string str) {
     return str;
 }
 
-std::string unquote(const std::string& str) {
-    if(str.length() >= 2) {
-        char first = str.front();
-        char last = str.back();
-        if((first == '"' && last == '"') || (first == '\'' && last == '\'')) {
-            return str.substr(1, str.length() - 2);
-        }
-    }
-    return str;
-}
-
-std::string strip_comment(const std::string& line) {
-    bool in_single_quote = false;
-    bool in_double_quote = false;
-    bool escaped = false;
-
-    for(size_t i = 0; i < line.length(); ++i) {
-        char ch = line[i];
-        if(escaped) {
-            escaped = false;
-            continue;
-        }
-        if(ch == '\\' && in_double_quote) {
-            escaped = true;
-            continue;
-        }
-        if(ch == '\'' && !in_double_quote) {
-            in_single_quote = !in_single_quote;
-            continue;
-        }
-        if(ch == '"' && !in_single_quote) {
-            in_double_quote = !in_double_quote;
-            continue;
-        }
-        if(ch == '#' && !in_single_quote && !in_double_quote) {
-            return line.substr(0, i);
-        }
-    }
-    return line;
-}
-
 std::string shell_quote(const std::string& str) {
     // POLICY: 外部コマンド引数は、validation 済みの値でも shell 境界では必ず quote する。
     std::string quoted = "'";
@@ -665,45 +606,6 @@ std::string shell_quote(const std::string& str) {
     }
     quoted += "'";
     return quoted;
-}
-
-bool is_valid_env_key(const std::string& key) {
-    if(key.empty()) return false;
-    if(!(std::isalpha(static_cast<unsigned char>(key[0])) || key[0] == '_')) return false;
-    return std::all_of(key.begin() + 1, key.end(), [](unsigned char ch) {
-        return std::isalnum(ch) || ch == '_';
-    });
-}
-
-bool split_env_assignment(const std::string& arg, std::string& key, std::string& value) {
-    size_t eq_pos = arg.find('=');
-    if(eq_pos == std::string::npos) return false;
-    key = trim(arg.substr(0, eq_pos));
-    value = unquote(trim(arg.substr(eq_pos + 1)));
-    // POLICY: makepkg へ渡す環境変数名は shell identifier 相当に制限する。
-    return is_valid_env_key(key);
-}
-
-std::string expand_config_vars(std::string val, const std::map<std::string, std::string>& vars) {
-    std::regex  re_brace(R"(\$\{([A-Za-z0-9_]+)\})");
-    std::regex  re_simple(R"(\$([A-Za-z0-9_]+))");
-    std::smatch match;
-
-    for(int i = 0; i < 32 && std::regex_search(val, match, re_brace); ++i) {
-        std::string var_name = match[1];
-        std::string replacement = vars.count(var_name) ? vars.at(var_name) : "";
-        std::string next = match.prefix().str() + replacement + match.suffix().str();
-        if(next == val) break;
-        val = next;
-    }
-    for(int i = 0; i < 32 && std::regex_search(val, match, re_simple); ++i) {
-        std::string var_name = match[1];
-        std::string replacement = vars.count(var_name) ? vars.at(var_name) : "";
-        std::string next = match.prefix().str() + replacement + match.suffix().str();
-        if(next == val) break;
-        val = next;
-    }
-    return val;
 }
 
 bool is_safe_command_token(const std::string& token) {
@@ -785,40 +687,15 @@ bool validate_optionless_jpacker_operation(const std::string& operation, const s
     return true;
 }
 
-bool is_force_source(const std::string& pkg_name) {
-    require_valid_package_name(pkg_name);
-    fs::path target = fs::path(PACKAGE_BUILD_DIR) / pkg_name;
-    return fs::exists(target);
-}
-
-std::string get_package_env(const std::string& pkg_name) {
-    require_valid_package_name(pkg_name);
-    fs::path p = fs::path(PACKAGE_BUILD_DIR) / pkg_name;
-    if(!fs::exists(p)) return "";
-    std::ifstream                      file(p);
-    std::string                        line;
-    std::string                        env_str = "";
-    std::map<std::string, std::string> vars;
-    Logger::info("Loading custom build flags from " + p.string());
-    while(std::getline(file, line)) {
-        line = strip_comment(line);
-        if(trim(line).empty()) continue;
-        std::string key, val;
-        if(split_env_assignment(line, key, val)) {
-            try {
-                val = expand_config_vars(val, vars);
-            } catch(const std::exception& e) {
-                Logger::warn("Failed to expand variables for " + key + ": " + e.what());
-            }
-            vars[key] = val;
-            if(!val.empty()) {
-                env_str += key + "=" + shell_quote(val) + " ";
-            }
-        } else if(line.find('=') != std::string::npos) {
-            Logger::warn("Ignoring invalid environment assignment: " + trim(line));
-        }
-    }
-    return env_str;
+std::string load_source_preference_environment(const std::string& package_name) {
+    return get_package_env(
+            package_name,
+            [](const fs::path& entry_path) {
+                Logger::info("Loading custom build flags from " + entry_path.string());
+            },
+            [](const std::string& warning) {
+                Logger::warn(warning);
+            });
 }
 
 std::string get_git_branch() {
@@ -1805,7 +1682,7 @@ void build_from_git(
 void install_smart_source(
         const std::string& pkg_name, bool only_if_updated,
         const SourceSyncOptions& source_sync_options) {
-    std::string env = get_package_env(pkg_name);
+    std::string env = load_source_preference_environment(pkg_name);
     PackageBuildSource source = resolve_build_source(pkg_name);
     require_executable_build_source_plan(source);
 
@@ -1842,8 +1719,10 @@ void execute_aur_build_plan(
         std::string pkg_name = entry.package_names.empty() ? entry.package_base : entry.package_names.front();
         std::string env;
         if(use_source_build_preferences) {
-            env = get_package_env(pkg_name);
-            if(env.empty() && pkg_name != entry.package_base) env = get_package_env(entry.package_base);
+            env = load_source_preference_environment(pkg_name);
+            if(env.empty() && pkg_name != entry.package_base) {
+                env = load_source_preference_environment(entry.package_base);
+            }
         }
 
         try {
@@ -1866,11 +1745,11 @@ void install_aur_build_plan(
 }
 
 void preflight_upgrade_source_metadata() {
-    if(!fs::exists(PACKAGE_BUILD_DIR)) return;
+    if(!fs::exists(source_preference_root())) return;
 
     // POLICY(#174): upgradeの既存pacman-first実行は維持するが、schema violationだけは
     // system transactionより前に全source packageのplanを横断して拒否する。
-    for(const auto& entry : fs::directory_iterator(PACKAGE_BUILD_DIR)) {
+    for(const auto& entry : source_preference_entries()) {
         if(!entry.is_regular_file()) continue;
 
         std::string pkg_name = entry.path().filename().string();
@@ -2393,9 +2272,8 @@ int cmd_add_src(const std::vector<std::string>& args) {
     for(const auto& arg : args) {
         std::string key, val;
         if(arg.find('=') == std::string::npos) {
-            require_valid_package_name(arg);
             // POLICY: 1 package = 1 preference file。ファイル名は package name validation で固定する。
-            fs::path p = fs::path(PACKAGE_BUILD_DIR) / arg;
+            fs::path p = source_preference_entry_path(arg);
             if(run_command("sudo touch " + shell_quote(p.string())) != 0) {
                 Logger::error("Failed to add " + arg);
                 failed = true;
@@ -2429,8 +2307,7 @@ int cmd_edit_src(const std::vector<std::string>& targets) {
     const char* env_editor = std::getenv("EDITOR");
     std::string editor_cmd = (env_editor) ? std::string(env_editor) : g_config.editor;
     for(const auto& pkg : targets) {
-        require_valid_package_name(pkg);
-        fs::path    p = fs::path(PACKAGE_BUILD_DIR) / pkg;
+        fs::path    p = source_preference_entry_path(pkg);
         std::string temp_template = "/tmp/jpacker-edit-src-" + pkg + ".XXXXXX";
         std::vector<char> temp_name(temp_template.begin(), temp_template.end());
         temp_name.push_back('\0');
@@ -2504,23 +2381,22 @@ int cmd_edit_src(const std::vector<std::string>& targets) {
 }
 
 void cmd_list_src() {
-    if(!fs::exists(PACKAGE_BUILD_DIR)) {
+    if(!fs::exists(source_preference_root())) {
         std::cout << "No source-build packages registered." << std::endl;
         return;
     }
     std::cout << "\033[1mRegistered Source Packages:\033[0m" << std::endl;
     bool found = false;
-    for(const auto& entry : fs::directory_iterator(PACKAGE_BUILD_DIR)) {
+    for(const auto& entry : source_preference_entries()) {
         if(entry.is_regular_file()) {
             found = true;
             std::string pkg = entry.path().filename().string();
             std::cout << "  \033[1;36m" << pkg << "\033[0m" << std::endl;
-            std::ifstream file(entry.path());
-            std::string   line;
-            while(std::getline(file, line)) {
-                line = strip_comment(line);
-                if(!trim(line).empty()) std::cout << "    " << trim(line) << std::endl;
-            }
+            read_source_preference_entry(
+                    entry.path(),
+                    [](const std::string& line) {
+                        std::cout << "    " << line << std::endl;
+                    });
         }
     }
     if(!found) std::cout << "  (none)" << std::endl;
@@ -2529,8 +2405,7 @@ void cmd_list_src() {
 int cmd_del_src(const std::vector<std::string>& targets) {
     bool failed = false;
     for(const auto& pkg : targets) {
-        require_valid_package_name(pkg);
-        fs::path p = fs::path(PACKAGE_BUILD_DIR) / pkg;
+        fs::path p = source_preference_entry_path(pkg);
         Logger::info("Removing " + pkg + " from list...");
         if(run_command("sudo rm -f " + shell_quote(p.string())) != 0) {
             Logger::error("Failed to remove " + pkg);
@@ -2544,8 +2419,7 @@ void cmd_revert(const std::vector<std::string>& targets) {
     bool                     failed = false;
     std::vector<std::string> reinstall_targets;
     for(const auto& pkg : targets) {
-        require_valid_package_name(pkg);
-        fs::path p = fs::path(PACKAGE_BUILD_DIR) / pkg;
+        fs::path p = source_preference_entry_path(pkg);
         if(fs::exists(p)) {
             Logger::info("Unmarking source-build for " + pkg);
             if(run_command("sudo rm -f " + shell_quote(p.string())) != 0) {
@@ -2613,9 +2487,9 @@ int cmd_upgrade() {
     preflight_upgrade_source_metadata();
     Logger::info("System upgrade...");
     if(run_command("sudo pacman " + join_pacman_args({"-Syu"})) != 0) throw std::runtime_error("Update failed.");
-    if(fs::exists(PACKAGE_BUILD_DIR)) {
+    if(fs::exists(source_preference_root())) {
         Logger::info("Checking source packages...");
-        for(const auto& entry : fs::directory_iterator(PACKAGE_BUILD_DIR)) {
+        for(const auto& entry : source_preference_entries()) {
             if(entry.is_regular_file()) {
                 std::string pkg_name = entry.path().filename().string();
                 if(!is_valid_package_name(pkg_name)) {
