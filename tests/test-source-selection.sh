@@ -293,6 +293,22 @@ run_ok -S -i --repo filesystem
 assert_only_command "pacman -S -i filesystem"
 assert_request_log_empty
 
+# POLICY: Autoはoperation文字列だけでsearch/infoを分類し、separated modifierをinstall routeで扱う。
+# selector routeとの現行非対称を共通化しないため、official targetでcall pathを固定する。
+setup_case separated-auto-search-short
+export JPACKER_TEST_PACMAN_REPO_PACKAGES=official-a
+run_ok -S -s official-a
+assert_command "pacman -Si official-a"
+assert_command "sudo pacman -S -s official-a"
+assert_request_log_empty
+
+setup_case separated-auto-info-short
+export JPACKER_TEST_PACMAN_REPO_PACKAGES=official-a
+run_ok -S -i official-a
+assert_command "pacman -Si official-a"
+assert_command "sudo pacman -S -i official-a"
+assert_request_log_empty
+
 conflict_index=0
 for conflict_order in \
     "--aur --repo -S conflict-target" \
@@ -323,6 +339,7 @@ assert_unsupported_operation() {
     assert_contains "$operation" "$output_file"
     assert_command_log_empty
     assert_request_log_empty
+    assert_cache_root_absent
 }
 
 unsupported_index=0
