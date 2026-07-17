@@ -15,6 +15,7 @@
 #include "aur_rpc.hpp"
 #include "cli_parser.hpp"
 #include "cli_routing.hpp"
+#include "checkout_fetch.hpp"
 #include "dependency_plan.hpp"
 #include "dependency_spec.hpp"
 #include "logging.hpp"
@@ -173,7 +174,6 @@ void print_ambiguous_provider_group(
 void print_metadata_risk_group(const std::vector<BuildPlanMetadataRisk>& risks);
 std::string aur_git_url_for_package_base(const std::string& package_base);
 void print_fetch_plan(const BuildPlan& plan);
-void fetch_aur_package_base(const std::string& package_base);
 
 // source build / AUR install
 void build_from_git(
@@ -1364,60 +1364,6 @@ void print_fetch_plan(const BuildPlan& plan) {
     }
 }
 
-void fetch_aur_package_base(const std::string& package_base) {
-    require_valid_package_name(package_base);
-    ValidatedCacheRoot cache_root = prepare_trusted_cache_root();
-    ValidatedCachePath repo_path = require_trusted_cache_path(
-            cache_root, package_base,
-            CachePathRequirement::ExistingOrMissing);
-    std::string git_url = aur_git_url_for_package_base(package_base);
-
-    if(repo_path.exists()) {
-        if(!repo_path.is_directory()) {
-            throw std::runtime_error(repo_path.path().string() + " exists but is not a directory.");
-        }
-        require_safe_persistent_checkout_descendants(repo_path);
-
-        // POLICY: fetch command は既存 clone で git fetch まで。worktree update/pull/reset/build/install はしない。
-        WorkDirGuard wd_repo(repo_path);
-        std::string  current_url = trim(exec_command("git config --get remote.origin.url"));
-        if(current_url.empty()) throw std::runtime_error("Missing remote.origin.url for " + package_base + ".");
-        if(!remote_url_matches_expected(current_url, git_url)) {
-            throw std::runtime_error("Remote URL mismatch for " + package_base + ": " + current_url);
-        }
-
-        Logger::info("Fetching " + package_base + "...");
-        repo_path = revalidate_trusted_cache_path(
-                repo_path, CachePathRequirement::ExistingDirectory);
-        require_safe_persistent_checkout_descendants(repo_path);
-        if(run_command("git fetch origin") != 0) throw std::runtime_error("Failed to fetch " + package_base + ".");
-        return;
-    }
-
-    Logger::info("Cloning " + package_base + "...");
-    ValidatedCachePath clone_path =
-            revalidate_trusted_cache_path(repo_path, CachePathRequirement::Missing);
-    WorkDirGuard    wd_cache(cache_root);
-    DirCleanupGuard cleanup_guard(clone_path);
-    if(run_command("git clone " + shell_quote(git_url) + " " + shell_quote(package_base)) != 0) {
-        throw std::runtime_error("Failed to clone " + package_base + ".");
-    }
-
-    // POLICY(#175): clone が生成した entry も、成功扱いする前に同じ cache boundary で検証する。
-    ValidatedCachePath cloned_path = require_trusted_cache_path(
-            cache_root, package_base, CachePathRequirement::ExistingDirectory);
-    require_safe_persistent_checkout_descendants(cloned_path);
-    {
-        WorkDirGuard wd_repo(cloned_path);
-        std::string  current_url = trim(exec_command("git config --get remote.origin.url"));
-        if(current_url.empty()) throw std::runtime_error("Missing remote.origin.url for " + package_base + ".");
-        if(!remote_url_matches_expected(current_url, git_url)) {
-            throw std::runtime_error("Remote URL mismatch for " + package_base + ": " + current_url);
-        }
-    }
-    cleanup_guard.commit();
-}
-
 // source build / AUR install
 void build_from_git(
         const std::string& pkg_name, const std::string& clone_name, const std::string& git_url,
@@ -1794,7 +1740,9 @@ int cmd_fetch(const std::vector<std::string>& targets, const std::vector<std::st
     for(const auto& [target, plan] : plans) {
         for(const auto& entry : plan.order) {
             try {
-                fetch_aur_package_base(entry.package_base);
+                fetch_persistent_checkout(
+                        entry.package_base,
+                        aur_git_url_for_package_base(entry.package_base));
             } catch(const std::exception& e) {
                 Logger::error("Failed to fetch repositories for " + target + ": " + e.what());
                 failed = true;
