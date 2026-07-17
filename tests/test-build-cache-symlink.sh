@@ -593,6 +593,42 @@ assert_command_absent "jpacker-test-editor clean-root.install"
 assert_no_build_or_install_commands
 assert_path_absent "$entry_path/clean-root.install"
 
+setup_case fetch-clone-unsafe-git-symlink
+create_clone_fixture
+rmdir "$clone_fixture/.git"
+mkdir -p "$outside_dir/external.git"
+printf 'external git metadata\n' > "$outside_dir/external.git/marker"
+ln -s "$outside_dir/external.git" "$clone_fixture/.git"
+snapshot_directory "$outside_dir" "$case_dir/before.snapshot"
+run_fail "$case_dir/output" fetch clean-root
+assert_descendant_rejection "$case_dir/output" "$entry_path/.git" "symlink."
+assert_only_clone_after_metadata "git clone https://aur.archlinux.org/clean-root.git clean-root"
+assert_path_absent "$entry_path"
+assert_directory_unchanged "$outside_dir" "$case_dir/before.snapshot"
+
+setup_case fetch-clone-unsafe-pkgbuild-symlink
+create_clone_fixture
+printf 'external PKGBUILD\n' > "$outside_dir/PKGBUILD"
+rm "$clone_fixture/PKGBUILD"
+ln -s "$outside_dir/PKGBUILD" "$clone_fixture/PKGBUILD"
+snapshot_directory "$outside_dir" "$case_dir/before.snapshot"
+run_fail "$case_dir/output" fetch clean-root
+assert_descendant_rejection "$case_dir/output" "$entry_path/PKGBUILD" "symlink."
+assert_only_clone_after_metadata "git clone https://aur.archlinux.org/clean-root.git clean-root"
+assert_path_absent "$entry_path"
+assert_directory_unchanged "$outside_dir" "$case_dir/before.snapshot"
+
+setup_case fetch-clone-unsafe-install-symlink
+create_clone_fixture
+printf 'external install script\n' > "$outside_dir/clean-root.install"
+ln -s "$outside_dir/clean-root.install" "$clone_fixture/clean-root.install"
+snapshot_directory "$outside_dir" "$case_dir/before.snapshot"
+run_fail "$case_dir/output" fetch clean-root
+assert_descendant_rejection "$case_dir/output" "$entry_path/clean-root.install" "symlink."
+assert_only_clone_after_metadata "git clone https://aur.archlinux.org/clean-root.git clean-root"
+assert_path_absent "$entry_path"
+assert_directory_unchanged "$outside_dir" "$case_dir/before.snapshot"
+
 setup_case build-clone-unsafe-git-symlink
 create_clone_fixture
 rmdir "$clone_fixture/.git"
@@ -626,6 +662,23 @@ snapshot_directory "$outside_dir" "$case_dir/before.snapshot"
 run_fail "$case_dir/output" --noedit --nodiff build clean-root
 assert_descendant_rejection "$case_dir/output" "$entry_path/clean-root.install" "symlink."
 assert_only_clone_after_metadata "git clone https://aur.archlinux.org/clean-root.git clean-root"
+assert_path_absent "$entry_path"
+assert_directory_unchanged "$outside_dir" "$case_dir/before.snapshot"
+
+setup_case fetch-clone-remote-mismatch-rollback
+create_clone_fixture
+printf 'outside sibling marker\n' > "$outside_dir/marker"
+snapshot_directory "$outside_dir" "$case_dir/before.snapshot"
+export JPACKER_TEST_GIT_REMOTE_URL=https://example.invalid/wrong.git
+run_fail "$case_dir/output" fetch clean-root
+assert_contains "Remote URL mismatch for clean-root: https://example.invalid/wrong.git" "$case_dir/output"
+assert_command "git clone https://aur.archlinux.org/clean-root.git clean-root"
+assert_command "git config --get remote.origin.url"
+assert_command_before "git clone https://aur.archlinux.org/clean-root.git clean-root" "git config --get remote.origin.url"
+assert_command_absent "git fetch origin"
+assert_command_absent "git reset --hard origin/main"
+assert_command_absent "jpacker-test-editor PKGBUILD"
+assert_no_build_or_install_commands
 assert_path_absent "$entry_path"
 assert_directory_unchanged "$outside_dir" "$case_dir/before.snapshot"
 
@@ -669,12 +722,21 @@ create_regular_repo "$entry_path"
 run_ok "$case_dir/output" fetch clean-root
 assert_command "git config --get remote.origin.url"
 assert_command "git fetch origin"
+assert_command_before "git config --get remote.origin.url" "git fetch origin"
+assert_command_absent "git clone https://aur.archlinux.org/clean-root.git clean-root"
+assert_command_absent "git reset --hard origin/main"
+assert_command_absent "jpacker-test-editor PKGBUILD"
+assert_no_build_or_install_commands
 
 setup_case regular-missing-fetch
 run_ok "$case_dir/output" fetch clean-root
 assert_command "git clone https://aur.archlinux.org/clean-root.git clean-root"
 assert_command "git config --get remote.origin.url"
 assert_command_before "git clone https://aur.archlinux.org/clean-root.git clean-root" "git config --get remote.origin.url"
+assert_command_absent "git fetch origin"
+assert_command_absent "git reset --hard origin/main"
+assert_command_absent "jpacker-test-editor PKGBUILD"
+assert_no_build_or_install_commands
 if [ ! -d "$entry_path/.git" ] || [ -L "$entry_path/.git" ] ||
    [ ! -f "$entry_path/PKGBUILD" ] || [ -L "$entry_path/PKGBUILD" ]; then
     fail "regular missing fetch did not create a repository: $entry_path"
@@ -706,14 +768,34 @@ assert_command_before "git reset --hard origin/main" "jpacker-test-editor PKGBUI
 assert_command_before "jpacker-test-editor PKGBUILD" "jpacker-test-editor clean-root.install"
 assert_command_before "jpacker-test-editor clean-root.install" "makepkg -sic"
 
-setup_case regular-remote-mismatch
+setup_case fetch-existing-remote-mismatch
+create_regular_repo "$entry_path"
+printf 'old clone marker\n' > "$entry_path/old-marker"
+printf 'https://example.invalid/wrong.git\n' > "$entry_path/.git/.jpacker-test-remote-url"
+run_fail "$case_dir/output" fetch clean-root
+assert_contains "Remote URL mismatch for clean-root: https://example.invalid/wrong.git" "$case_dir/output"
+assert_command "git config --get remote.origin.url"
+assert_command_absent "git clone https://aur.archlinux.org/clean-root.git clean-root"
+assert_command_absent "git fetch origin"
+assert_command_absent "git reset --hard origin/main"
+assert_command_absent "jpacker-test-editor PKGBUILD"
+assert_no_build_or_install_commands
+assert_contains "old clone marker" "$entry_path/old-marker"
+if [ ! -d "$entry_path/.git" ]; then
+    fail "fetch remote mismatch removed the existing checkout"
+fi
+
+setup_case build-existing-remote-mismatch
 create_regular_repo "$entry_path"
 printf 'old clone marker\n' > "$entry_path/old-marker"
 printf 'https://example.invalid/wrong.git\n' > "$entry_path/.git/.jpacker-test-remote-url"
 run_fail "$case_dir/output" --noedit --nodiff build clean-root
+assert_contains "Remote URL mismatch. Re-cloning..." "$case_dir/output"
+assert_output_before "Remote URL mismatch. Re-cloning..." "Running: git clone" "$case_dir/output"
 assert_command "git config --get remote.origin.url"
 assert_command "git clone https://aur.archlinux.org/clean-root.git clean-root"
 assert_command "makepkg -sic"
+assert_command_before "git config --get remote.origin.url" "git clone https://aur.archlinux.org/clean-root.git clean-root"
 assert_command_absent "git fetch origin"
 assert_command_absent "git reset --hard origin/main"
 if [ -e "$entry_path/old-marker" ]; then
