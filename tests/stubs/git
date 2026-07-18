@@ -1,5 +1,36 @@
 #!/bin/sh
 printf 'git %s\n' "$*" >> "$JPACKER_TEST_COMMAND_LOG"
+if [ "$1" = "symbolic-ref" ]; then
+    if [ -n "${JPACKER_TEST_GIT_SYMBOLIC_REF:-}" ]; then
+        printf '%s\n' "$JPACKER_TEST_GIT_SYMBOLIC_REF"
+        exit 0
+    fi
+    exit "${JPACKER_TEST_GIT_SYMBOLIC_REF_EXIT_CODE:-1}"
+fi
+if [ "$1" = "show-ref" ]; then
+    case ${4:-} in
+        refs/remotes/origin/main)
+            exit "${JPACKER_TEST_GIT_MAIN_REF_EXIT_CODE:-0}"
+            ;;
+        refs/remotes/origin/master)
+            exit "${JPACKER_TEST_GIT_MASTER_REF_EXIT_CODE:-0}"
+            ;;
+    esac
+fi
+if [ "$1" = "diff" ]; then
+    case ${2:-} in
+        --quiet)
+            exit "${JPACKER_TEST_GIT_DIFF_QUIET_EXIT_CODE:-0}"
+            ;;
+        --name-only)
+            if [ -n "${JPACKER_TEST_GIT_CHANGED_FILES:-}" ]; then
+                printf '%b' "$JPACKER_TEST_GIT_CHANGED_FILES"
+            fi
+            exit "${JPACKER_TEST_GIT_DIFF_NAME_ONLY_EXIT_CODE:-0}"
+            ;;
+    esac
+    exit "${JPACKER_TEST_GIT_DIFF_COLOR_EXIT_CODE:-0}"
+fi
 if [ "$1" = "clone" ]; then
     clone_url=
     clone_destination=
