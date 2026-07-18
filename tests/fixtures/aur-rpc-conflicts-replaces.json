@@ -79,6 +79,19 @@
       "Name": "split-child",
       "PackageBase": "split-base",
       "Version": "1.0-1"
+    },
+    "split-metadata-root": {
+      "Name": "split-metadata-root",
+      "PackageBase": "split-metadata-base",
+      "Version": "1.0-1",
+      "Conflicts": ["split-metadata-old"]
+    },
+    "split-metadata-ambiguous-root": {
+      "Name": "split-metadata-ambiguous-root",
+      "PackageBase": "split-metadata-ambiguous-base",
+      "Version": "1.0-1",
+      "Depends": ["virtual-dep-150"],
+      "Conflicts": ["split-metadata-ambiguous-old"]
     }
   },
   "providers": {

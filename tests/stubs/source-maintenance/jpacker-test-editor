@@ -1,0 +1,33 @@
+#!/bin/sh
+set -eu
+
+printf 'jpacker-test-editor %s\n' "$*" >> "$JPACKER_TEST_COMMAND_LOG"
+
+target=
+for editor_argument in "$@"; do
+    target=$editor_argument
+done
+
+if [ -z "$target" ]; then
+    exit 1
+fi
+
+snapshot_file=${JPACKER_TEST_SOURCE_MAINTENANCE_EDITOR_SNAPSHOT_FILE:-}
+if [ -n "$snapshot_file" ]; then
+    /usr/bin/cp -- "$target" "$snapshot_file"
+fi
+
+fail_substring=${JPACKER_TEST_SOURCE_MAINTENANCE_EDITOR_FAIL_SUBSTRING:-}
+case $target in
+    *"$fail_substring"*)
+        if [ -n "$fail_substring" ]; then
+            exit 1
+        fi
+        ;;
+esac
+
+if [ "${JPACKER_TEST_SOURCE_MAINTENANCE_EDITOR_APPEND_LINE+x}" = "x" ]; then
+    printf '%s\n' "$JPACKER_TEST_SOURCE_MAINTENANCE_EDITOR_APPEND_LINE" >> "$target"
+fi
+
+exit 0
