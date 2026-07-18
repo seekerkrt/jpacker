@@ -1,0 +1,9 @@
+#!/bin/sh
+set -eu
+
+printf 'sudo %s\n' "$*" >> "$JPACKER_TEST_COMMAND_LOG"
+
+if [ -n "${JPACKER_TEST_SUDO_MAIN_OUTPUT:-}" ]; then
+    printf '%s\n' "$JPACKER_TEST_SUDO_MAIN_OUTPUT"
+fi
+exit "${JPACKER_TEST_SUDO_MAIN_STATUS:-99}"
