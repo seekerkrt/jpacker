@@ -10,6 +10,7 @@ BUILD_DIR := build
 MANPAGE   := man/jpacker.8
 MANPAGE_IN := man/jpacker.8.in
 TEST_TARGET := build/tests/jpacker-test
+COMMANDS_INSPECT_TEST_TARGET := build/tests/jpacker-commands-inspect-test
 APP_CONFIG_MODULE_TEST_TARGET := build/tests/app-config-test
 APP_CONFIG_INTEGRATION_TEST_TARGET := build/tests/jpacker-app-config-test
 
@@ -31,10 +32,11 @@ MY_CXXFLAGS := -std=c++20 -Wall -Wextra -DJPKG_VERSION=\"$(VERSION)\"
 MY_LDLIBS   := -lcurl
 SRCS      := $(wildcard $(SRC_DIR)/*.cpp)
 HEADERS   := $(wildcard $(SRC_DIR)/*.hpp)
+COMMANDS_INSPECT_TEST_SRCS := $(filter-out $(SRC_DIR)/aur_rpc.cpp,$(SRCS)) tests/commands_inspect_aur_stub.cpp
 OBJS      := $(SRCS:$(SRC_DIR)/%.cpp=$(BUILD_DIR)/%.o)
 DEPS      := $(OBJS:.o=.d)
 
-.PHONY: all clean test-app-config test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-conflicts-replaces test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check install uninstall
+.PHONY: all clean test-app-config test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-commands-inspect test-conflicts-replaces test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check install uninstall
 
 all: $(TARGET) $(MANPAGE)
 
@@ -60,6 +62,11 @@ $(TEST_TARGET): $(SRCS) $(HEADERS) $(VERSION_FILE)
 	@echo ":: Compiling isolated integration test binary"
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -DJPACKER_ENABLE_TEST_OVERRIDES $(SRCS) -o $@ $(MY_LDLIBS)
 
+$(COMMANDS_INSPECT_TEST_TARGET): $(COMMANDS_INSPECT_TEST_SRCS) $(HEADERS) $(VERSION_FILE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling command inspection characterization test binary"
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -DJPACKER_ENABLE_TEST_OVERRIDES -I$(SRC_DIR) $(COMMANDS_INSPECT_TEST_SRCS) -o $@ $(MY_LDLIBS)
+
 $(APP_CONFIG_MODULE_TEST_TARGET): tests/app_config_test.cpp $(SRC_DIR)/app_config.cpp $(SRC_DIR)/app_config.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling app config module test binary"
@@ -81,6 +88,9 @@ test-aur-rpc-validation: $(TEST_TARGET)
 
 test-cli-parser: $(TEST_TARGET)
 	sh tests/test-cli-parser.sh $(abspath $(TEST_TARGET))
+
+test-commands-inspect: $(COMMANDS_INSPECT_TEST_TARGET)
+	sh tests/test-commands-inspect.sh $(abspath $(COMMANDS_INSPECT_TEST_TARGET))
 
 test-pacman-routing: $(TEST_TARGET)
 	sh tests/test-pacman-routing.sh $(abspath $(TEST_TARGET))
