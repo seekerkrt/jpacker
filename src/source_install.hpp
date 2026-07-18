@@ -1,0 +1,28 @@
+#pragma once
+
+#include <string>
+
+struct AppConfig;
+struct BuildPlan;
+
+void build_source_target(
+        const std::string& package_name,
+        const std::string& custom_environment,
+        const AppConfig& config);
+
+void require_executable_source_install_target(
+        const std::string& package_name);
+
+void execute_aur_build_plan(
+        const BuildPlan& plan,
+        bool use_source_build_preferences,
+        bool needed,
+        const AppConfig& config);
+
+void install_smart_source(
+        const std::string& package_name,
+        bool only_if_updated,
+        bool needed,
+        const AppConfig& config);
+
+void preflight_upgrade_source_metadata();
