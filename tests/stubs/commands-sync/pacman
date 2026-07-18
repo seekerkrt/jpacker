@@ -1,0 +1,45 @@
+#!/bin/sh
+set -eu
+
+printf 'pacman %s\n' "$*" >> "$JPACKER_TEST_COMMAND_LOG"
+
+main_output=${JPACKER_TEST_PACMAN_MAIN_OUTPUT:-}
+main_status=${JPACKER_TEST_PACMAN_MAIN_STATUS:-1}
+
+if [ -n "${JPACKER_TEST_PACMAN_MAIN_COMMAND:-}" ] &&
+   [ "$*" = "$JPACKER_TEST_PACMAN_MAIN_COMMAND" ]; then
+    if [ -n "$main_output" ]; then
+        printf '%s\n' "$main_output"
+    fi
+    exit "$main_status"
+fi
+
+case ${1:-} in
+    -Qm)
+        if [ -n "${JPACKER_TEST_PACMAN_QM_OUTPUT:-}" ]; then
+            printf '%s\n' "$JPACKER_TEST_PACMAN_QM_OUTPUT"
+        fi
+        exit 0
+        ;;
+    -Q)
+        for package in ${JPACKER_TEST_PACMAN_INSTALLED_PACKAGES:-}; do
+            if [ "${2:-}" = "$package" ]; then
+                exit 0
+            fi
+        done
+        exit 1
+        ;;
+    -Si)
+        for package in ${JPACKER_TEST_PACMAN_REPO_PACKAGES:-}; do
+            if [ "${2:-}" = "$package" ]; then
+                exit 0
+            fi
+        done
+        exit 1
+        ;;
+esac
+
+if [ -n "$main_output" ]; then
+    printf '%s\n' "$main_output"
+fi
+exit "$main_status"

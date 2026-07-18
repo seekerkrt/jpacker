@@ -1,0 +1,128 @@
+#include "aur_rpc.hpp"
+
+#include <cstdlib>
+#include <fstream>
+#include <map>
+#include <optional>
+#include <stdexcept>
+#include <string>
+#include <utility>
+#include <vector>
+
+// WHY: sync handler の外部呼び出し順と継続境界を、real AUR transportから
+// 切り離したisolated integration binaryで決定的にcharacterizeする。
+namespace {
+
+const char* COMMAND_LOG_ENV = "JPACKER_TEST_COMMAND_LOG";
+
+int g_search_deferred_call_count = 0;
+
+std::string required_environment_value(const char* name) {
+    const char* value = std::getenv(name);
+    if(value == nullptr || value[0] == '\0') {
+        throw std::runtime_error(std::string("Missing test environment variable: ") + name);
+    }
+    return value;
+}
+
+void append_command_log(const std::string& line) {
+    std::ofstream log(required_environment_value(COMMAND_LOG_ENV), std::ios::app);
+    if(!log) throw std::runtime_error("Failed to open commands-sync command log.");
+
+    log << line << '\n';
+    if(!log) throw std::runtime_error("Failed to write commands-sync command log.");
+}
+
+AurPackageInfo package_info(const std::string& name) {
+    AurPackageInfo info;
+    info.Name = name;
+    info.PackageBase = name;
+    info.Version = "1.0-1";
+    info.Description = "commands sync fixture";
+    info.Maintainer = "jpacker-test";
+    return info;
+}
+
+AurPackageInfo search_presentation_info() {
+    AurPackageInfo info = package_info("search-presented");
+    info.Version = "2.0-1";
+    info.Description = "search presentation fixture";
+    info.Maintainer.clear();
+    info.OutOfDate = 1;
+    return info;
+}
+
+std::optional<AurPackageInfo> fixture_info(const std::string& package_name) {
+    if(package_name == "info-error") {
+        throw std::runtime_error("fixture info failure");
+    }
+    if(package_name == "info-missing" || package_name == "plan-missing") {
+        return std::nullopt;
+    }
+
+    if(package_name == "info-a" || package_name == "info-b" ||
+       package_name == "info-installed" || package_name == "info-uninstalled" ||
+       package_name == "plan-a" || package_name == "plan-b" ||
+       package_name == "source-a" || package_name == "source-b" ||
+       package_name == "forced-official") {
+        return package_info(package_name);
+    }
+
+    return std::nullopt;
+}
+
+} // namespace
+
+CurlGlobal::CurlGlobal() = default;
+
+CurlGlobal::~CurlGlobal() = default;
+
+std::vector<AurPackageInfo> AurClient::search(const std::string& query) {
+    append_command_log("aur search " + query);
+
+    if(query == "search-schema") {
+        throw AurRpcResponseError("fixture search schema failure");
+    }
+    if(query == "search-deferred") {
+        ++g_search_deferred_call_count;
+        if(g_search_deferred_call_count == 1) {
+            throw std::runtime_error("fixture deferred search failure");
+        }
+        return {package_info(query)};
+    }
+    if(query == "search-presented") return {search_presentation_info()};
+    if(query == "search-hit-a" || query == "search-hit-b") {
+        return {package_info(query)};
+    }
+    return {};
+}
+
+std::vector<std::string> AurClient::search_names_by_provides(
+        const std::string& provided_name) {
+    append_command_log("aur provides " + provided_name);
+    return {};
+}
+
+std::optional<AurPackageInfo> AurClient::info(const std::string& package_name) {
+    append_command_log("aur info " + package_name);
+    return fixture_info(package_name);
+}
+
+std::optional<AurPackageInfo> AurClient::info_strict(const std::string& package_name) {
+    append_command_log("aur info-strict " + package_name);
+    return fixture_info(package_name);
+}
+
+std::map<std::string, AurPackageInfo> AurClient::info_many(
+        const std::vector<std::string>& package_names) {
+    std::string line = "aur info-many";
+    for(const auto& package_name : package_names) line += " " + package_name;
+    append_command_log(line);
+
+    std::map<std::string, AurPackageInfo> package_by_name;
+    for(const auto& package_name : package_names) {
+        std::optional<AurPackageInfo> info = fixture_info(package_name);
+        if(info.has_value()) package_by_name.emplace(package_name, std::move(*info));
+    }
+    return package_by_name;
+}

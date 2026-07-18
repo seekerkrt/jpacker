@@ -11,6 +11,7 @@ MANPAGE   := man/jpacker.8
 MANPAGE_IN := man/jpacker.8.in
 TEST_TARGET := build/tests/jpacker-test
 COMMANDS_INSPECT_TEST_TARGET := build/tests/jpacker-commands-inspect-test
+COMMANDS_SYNC_TEST_TARGET := build/tests/jpacker-commands-sync-test
 SOURCE_INSTALL_CHARACTERIZATION_TEST_TARGET := build/tests/jpacker-source-install-characterization-test
 APP_CONFIG_MODULE_TEST_TARGET := build/tests/app-config-test
 APP_CONFIG_INTEGRATION_TEST_TARGET := build/tests/jpacker-app-config-test
@@ -34,11 +35,12 @@ MY_LDLIBS   := -lcurl
 SRCS      := $(wildcard $(SRC_DIR)/*.cpp)
 HEADERS   := $(wildcard $(SRC_DIR)/*.hpp)
 COMMANDS_INSPECT_TEST_SRCS := $(filter-out $(SRC_DIR)/aur_rpc.cpp,$(SRCS)) tests/commands_inspect_aur_stub.cpp
+COMMANDS_SYNC_TEST_SRCS := $(filter-out $(SRC_DIR)/aur_rpc.cpp,$(SRCS)) tests/stubs/commands-sync/aur_rpc_stub.cpp
 SOURCE_INSTALL_CHARACTERIZATION_TEST_SRCS := $(filter-out $(SRC_DIR)/jpacker.cpp,$(SRCS))
 OBJS      := $(SRCS:$(SRC_DIR)/%.cpp=$(BUILD_DIR)/%.o)
 DEPS      := $(OBJS:.o=.d)
 
-.PHONY: all clean test-app-config test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-commands-inspect test-commands-source-maintenance test-conflicts-replaces test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check install uninstall
+.PHONY: all clean test-app-config test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-commands-inspect test-commands-source-maintenance test-commands-sync test-conflicts-replaces test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check install uninstall
 
 all: $(TARGET) $(MANPAGE)
 
@@ -68,6 +70,11 @@ $(COMMANDS_INSPECT_TEST_TARGET): $(COMMANDS_INSPECT_TEST_SRCS) $(HEADERS) $(VERS
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling command inspection characterization test binary"
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -DJPACKER_ENABLE_TEST_OVERRIDES -I$(SRC_DIR) $(COMMANDS_INSPECT_TEST_SRCS) -o $@ $(MY_LDLIBS)
+
+$(COMMANDS_SYNC_TEST_TARGET): $(COMMANDS_SYNC_TEST_SRCS) $(HEADERS) $(VERSION_FILE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling sync command characterization test binary"
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -DJPACKER_ENABLE_TEST_OVERRIDES -DJPACKER_ENABLE_TEST_CONFIG_PATH -I$(SRC_DIR) $(COMMANDS_SYNC_TEST_SRCS) -o $@ $(MY_LDLIBS)
 
 $(SOURCE_INSTALL_CHARACTERIZATION_TEST_TARGET): tests/source_install_characterization.cpp $(SRCS) $(HEADERS) $(VERSION_FILE)
 	@mkdir -p $(dir $@)
@@ -101,6 +108,9 @@ test-commands-inspect: $(COMMANDS_INSPECT_TEST_TARGET)
 
 test-commands-source-maintenance: $(APP_CONFIG_INTEGRATION_TEST_TARGET) $(SOURCE_INSTALL_CHARACTERIZATION_TEST_TARGET)
 	sh tests/test-commands-source-maintenance.sh $(abspath $(APP_CONFIG_INTEGRATION_TEST_TARGET)) $(abspath $(SOURCE_INSTALL_CHARACTERIZATION_TEST_TARGET))
+
+test-commands-sync: $(COMMANDS_SYNC_TEST_TARGET)
+	sh tests/test-commands-sync.sh $(abspath $(COMMANDS_SYNC_TEST_TARGET))
 
 test-pacman-routing: $(TEST_TARGET)
 	sh tests/test-pacman-routing.sh $(abspath $(TEST_TARGET))
