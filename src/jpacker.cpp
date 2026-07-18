@@ -16,34 +16,31 @@
 #include "cli_parser.hpp"
 #include "cli_routing.hpp"
 #include "commands_inspect.hpp"
+#include "commands_source_maintenance.hpp"
 #include "dependency_plan.hpp"
 #include "logging.hpp"
 #include "package_identifier.hpp"
 #include "process.hpp"
 #include "repository_query.hpp"
-#include "source_build.hpp"
+#include "source_install.hpp"
 #include "source_preference.hpp"
 #include "trusted_cache.hpp"
 
 #include <algorithm>
 #include <array>
-#include <cctype>
-#include <cerrno>
 #include <chrono>
 #include <cstdlib>
-#include <cstring>
 #include <filesystem>
-#include <fstream>
 #include <iostream>
 #include <optional>
 #include <set>
 #include <sstream>
 #include <stdexcept>
 #include <string>
-#include <system_error>
-#include <unistd.h>
 #include <utility>
 #include <vector>
+
+#include <unistd.h>
 
 namespace fs = std::filesystem;
 
@@ -55,8 +52,6 @@ namespace fs = std::filesystem;
 namespace {
 
 const std::string VERSION = JPKG_VERSION;
-const std::string AUR_BASE_URL = "https://aur.archlinux.org/";
-const std::string ARCH_GIT_BASE = "https://gitlab.archlinux.org/archlinux/packaging/packages/";
 
 } // namespace
 
@@ -65,21 +60,6 @@ namespace {
 AppConfig g_config;
 
 } // namespace
-
-enum class PromptDefault {
-    Yes,
-    No,
-    None,
-};
-
-// requested package から、実際に取得する PackageBase と git URL を結びつける型。
-struct PackageBuildSource {
-    std::string requested_name;
-    std::string clone_name;
-    std::string git_url;
-    bool        is_aur = false;
-    bool        has_distinct_package_base = false;
-};
 
 // --- 関数宣言 ---
 
@@ -90,56 +70,29 @@ bool handle_info_only_option(int argc, char* argv[]);
 bool argv_requests_pkgbuild_export_diagnostics(int argc, char* argv[]);
 
 // 文字列 / path
-std::string trim(const std::string& str);
-std::string to_lower(std::string str);
 std::string shell_quote(const std::string& str);
-bool is_safe_command_token(const std::string& token);
-std::vector<std::string> split_command_words(const std::string& command);
 
 // shell引数 / command construction
 std::string join_shell_args(const std::vector<std::string>& args);
 std::vector<std::string> pacman_args_with_global_options(std::vector<std::string> args);
 std::string join_pacman_args(const std::vector<std::string>& args);
-std::string build_editor_command(const std::string& editor, const fs::path& target);
 
 // pacman / repository補助
 bool validate_optionless_jpacker_operation(const std::string& operation, const std::vector<std::string>& flags);
-std::string load_source_preference_environment(const std::string& package_name);
-
-// prompt / ユーザー確認
-bool ask_user(const std::string& question, PromptDefault default_answer);
-
-// AUR provider / build source解決
-bool has_distinct_package_base(const AurPackageInfo& info);
-PackageBuildSource resolve_build_source(const std::string& pkg_name);
-void require_supported_build_source_install_target(const PackageBuildSource& source);
-void require_executable_build_source_plan(const PackageBuildSource& source);
-
 // AUR検索 / info表示
 void preflight_aur_search_schema(const std::vector<std::string>& keywords);
 bool search_aur(const std::vector<std::string>& keywords, bool query_installed_state = true);
 std::string join_display_values(const std::vector<std::string>& values);
-std::string join_comma_display_values(const std::vector<std::string>& values);
 bool is_orphaned(const AurPackageInfo& pkg);
 std::string installed_display(const AurPackageInfo& pkg);
 std::string orphaned_display(const AurPackageInfo& pkg);
 std::string out_of_date_display(const std::optional<long long>& out_of_date);
 void print_aur_info(const AurPackageInfo& pkg);
 
-std::string aur_git_url_for_package_base(const std::string& package_base);
-
 // source build / AUR install
 void require_valid_aur_package_target(const std::string& target);
-void require_executable_sync_install_target(const std::string& pkg_name);
-void install_smart_source(
-        const std::string& pkg_name, bool only_if_updated,
-        const SourceSyncOptions& source_sync_options);
-void execute_aur_build_plan(
-        const BuildPlan& plan, bool use_source_build_preferences,
-        const SourceSyncOptions& source_sync_options);
 void install_aur_build_plan(
         const std::string& target, const SourceSyncOptions& source_sync_options);
-void preflight_upgrade_source_metadata();
 
 // コマンド処理
 int cmd_sync_search(
@@ -149,15 +102,6 @@ int cmd_sync_info(
 int cmd_sync_install(
         const ParsedCliArguments& parsed, bool is_sys_upgrade,
         PackageSourceSelection source_selection);
-int cmd_build(const std::vector<std::string>& args);
-int cmd_add_src(const std::vector<std::string>& args);
-int cmd_edit_src(const std::vector<std::string>& targets);
-void cmd_list_src();
-int cmd_del_src(const std::vector<std::string>& targets);
-void cmd_revert(const std::vector<std::string>& targets);
-int cmd_clean();
-int cmd_upgrade();
-
 namespace {
 
 AppConfig load_invocation_app_config() {
@@ -298,13 +242,13 @@ int run_jpacker(int argc, char* argv[]) {
 
     try {
         if(operation == "build") {
-            return cmd_build(targets);
+            return cmd_build(targets, g_config);
         }
         if(operation == "upgrade") {
-            return cmd_upgrade();
+            return cmd_upgrade(g_config);
         }
         if(operation == "clean") {
-            return cmd_clean();
+            return cmd_clean(g_config);
         }
         if(operation == "deps") {
             return cmd_deps(targets, flags);
@@ -326,11 +270,11 @@ int run_jpacker(int argc, char* argv[]) {
             return cmd_del_src(targets);
         }
         if(operation == "revert" && !targets.empty()) {
-            cmd_revert(targets);
+            cmd_revert(targets, g_config);
             return 0;
         }
         if(operation == "edit-src" && !targets.empty()) {
-            return cmd_edit_src(targets);
+            return cmd_edit_src(targets, g_config);
         }
         if(operation == "list-src") {
             cmd_list_src();
@@ -518,20 +462,6 @@ bool handle_info_only_option(int argc, char* argv[]) {
 }
 
 // 文字列 / path
-std::string trim(const std::string& str) {
-    size_t first = str.find_first_not_of(" \t\n\r");
-    if(first == std::string::npos) return "";
-    size_t last = str.find_last_not_of(" \t\n\r");
-    return str.substr(first, (last - first + 1));
-}
-
-std::string to_lower(std::string str) {
-    std::transform(str.begin(), str.end(), str.begin(), [](unsigned char ch) {
-        return static_cast<char>(std::tolower(ch));
-    });
-    return str;
-}
-
 std::string shell_quote(const std::string& str) {
     // POLICY: 外部コマンド引数は、validation 済みの値でも shell 境界では必ず quote する。
     std::string quoted = "'";
@@ -543,30 +473,6 @@ std::string shell_quote(const std::string& str) {
     }
     quoted += "'";
     return quoted;
-}
-
-bool is_safe_command_token(const std::string& token) {
-    if(token.empty()) return false;
-    return std::all_of(token.begin(), token.end(), [](unsigned char ch) {
-        return std::isalnum(ch) || ch == '/' || ch == '.' || ch == '_' || ch == '+' || ch == '-' || ch == '=' ||
-               ch == ':' || ch == '@' || ch == '%';
-    });
-}
-
-std::vector<std::string> split_command_words(const std::string& command) {
-    std::stringstream        ss(command);
-    std::string              word;
-    std::vector<std::string> words;
-    while(ss >> word) {
-        if(!is_safe_command_token(word)) {
-            throw std::runtime_error("Unsafe command token: " + word);
-        }
-        words.push_back(word);
-    }
-    if(words.empty()) {
-        throw std::runtime_error("Editor command is empty.");
-    }
-    return words;
 }
 
 // shell引数 / command construction
@@ -595,12 +501,6 @@ std::string join_pacman_args(const std::vector<std::string>& args) {
     return join_shell_args(pacman_args_with_global_options(args));
 }
 
-std::string build_editor_command(const std::string& editor, const fs::path& target) {
-    std::vector<std::string> args = split_command_words(editor);
-    args.push_back(target.string());
-    return join_shell_args(args);
-}
-
 // pacman / repository補助
 bool validate_optionless_jpacker_operation(const std::string& operation, const std::vector<std::string>& flags) {
     for(const auto& flag : flags) {
@@ -610,141 +510,6 @@ bool validate_optionless_jpacker_operation(const std::string& operation, const s
         return false;
     }
     return true;
-}
-
-std::string load_source_preference_environment(const std::string& package_name) {
-    return get_package_env(
-            package_name,
-            [](const fs::path& entry_path) {
-                Logger::info("Loading custom build flags from " + entry_path.string());
-            },
-            [](const std::string& warning) {
-                Logger::warn(warning);
-            });
-}
-
-// prompt / ユーザー確認
-std::optional<bool> prompt_default_value(PromptDefault default_answer) {
-    switch(default_answer) {
-        case PromptDefault::Yes:
-            return true;
-        case PromptDefault::No:
-            return false;
-        case PromptDefault::None:
-            return std::nullopt;
-    }
-    return std::nullopt;
-}
-
-std::string prompt_suffix(PromptDefault default_answer) {
-    switch(default_answer) {
-        case PromptDefault::Yes:
-            return "[Y/n]";
-        case PromptDefault::No:
-            return "[y/N]";
-        case PromptDefault::None:
-            return "[y/n]";
-    }
-    return "[y/n]";
-}
-
-std::string prompt_answer_label(bool answer) {
-    return answer ? "yes" : "no";
-}
-
-bool ask_user(const std::string& question, PromptDefault default_answer) {
-    std::optional<bool> default_value = prompt_default_value(default_answer);
-
-    if(g_config.no_confirm) {
-        // POLICY: --noconfirm でも default を持たない prompt は自動回答しない。
-        if(default_value.has_value()) {
-            Logger::info("Skipping prompt (--noconfirm): " + question + " -> " + prompt_answer_label(default_value.value()));
-            return default_value.value();
-        }
-        throw std::runtime_error("Cannot answer prompt without interaction (--noconfirm): " + question);
-    }
-
-    if(!isatty(STDIN_FILENO)) {
-        // LANDMINE: 非対話 stdin では、破壊的になり得る yes default を安全に選べない。
-        if(default_value.has_value() && default_value.value() == false) {
-            Logger::info("Skipping prompt (non-interactive stdin): " + question + " -> no");
-            return false;
-        }
-        throw std::runtime_error("Cannot safely answer prompt with non-interactive stdin: " + question);
-    }
-
-    for(;;) {
-        std::cout << ":: " << question << " " << prompt_suffix(default_answer) << " ";
-        std::string input;
-        if(!std::getline(std::cin, input)) {
-            throw std::runtime_error("Failed to read prompt input: " + question);
-        }
-
-        input = to_lower(trim(input));
-        if(input.empty()) {
-            if(default_value.has_value()) return default_value.value();
-            Logger::warn("Please answer yes or no.");
-            continue;
-        }
-        if(input == "y" || input == "yes") return true;
-        if(input == "n" || input == "no") return false;
-
-        Logger::warn("Please answer yes or no.");
-    }
-}
-
-// AUR provider / build source解決
-bool has_distinct_package_base(const AurPackageInfo& info) {
-    return info.PackageBase != info.Name;
-}
-
-PackageBuildSource resolve_build_source(const std::string& pkg_name) {
-    require_valid_package_name(pkg_name);
-
-    if(is_repo_package(pkg_name)) {
-        return PackageBuildSource{pkg_name, pkg_name, ARCH_GIT_BASE + pkg_name + ".git", false, false};
-    }
-
-    std::optional<AurPackageInfo> info;
-    try {
-        info = AurClient::info(pkg_name);
-    } catch(const AurRpcResponseError&) {
-        throw;
-    } catch(const std::exception& e) {
-        throw std::runtime_error("Failed to fetch AUR info for " + pkg_name + ": " + e.what());
-    }
-
-    if(!info.has_value()) {
-        throw std::runtime_error("Package not found in repos or AUR: " + pkg_name);
-    }
-    if(info->PackageBase.empty()) {
-        throw std::runtime_error("AUR info for " + pkg_name + " does not include PackageBase.");
-    }
-    require_valid_package_name(info->PackageBase);
-
-    return PackageBuildSource{
-            pkg_name, info->PackageBase, AUR_BASE_URL + info->PackageBase + ".git", true,
-            has_distinct_package_base(info.value())};
-}
-
-void require_supported_build_source_install_target(const PackageBuildSource& source) {
-    // POLICY(#98): makepkg -i 経路では split package の install 対象を jpacker が個別選択できない。
-    // v1.9.0 では、PackageBase と requested package name が異なる AUR target は安全側で停止する。
-    if(source.is_aur && source.has_distinct_package_base) {
-        throw std::runtime_error(
-                "Cannot build/install split AUR package " + source.requested_name + " from PackageBase " +
-                source.clone_name + "; explicit split package install target selection is not implemented.");
-    }
-}
-
-void require_executable_build_source_plan(const PackageBuildSource& source) {
-    require_supported_build_source_install_target(source);
-    if(!source.is_aur) return;
-
-    // POLICY(#99): build/source-build は makepkg -i まで進む実行系なので、
-    // clone/fetch/build/install 前に unresolved / ambiguous / cyclic / split target を拒否する。
-    BuildPlan plan = resolve_build_plan(source.requested_name);
-    require_executable_install_plan(source.requested_name, plan);
 }
 
 // AUR検索 / info表示
@@ -801,15 +566,6 @@ std::string join_display_values(const std::vector<std::string>& values) {
     return ss.str();
 }
 
-std::string join_comma_display_values(const std::vector<std::string>& values) {
-    std::stringstream ss;
-    for(size_t i = 0; i < values.size(); ++i) {
-        if(i > 0) ss << ", ";
-        ss << values[i];
-    }
-    return ss.str();
-}
-
 bool is_orphaned(const AurPackageInfo& pkg) {
     return pkg.Maintainer.empty();
 }
@@ -845,77 +601,10 @@ void print_aur_info(const AurPackageInfo& pkg) {
     std::cout << "Out of Date     : " << out_of_date_display(pkg.OutOfDate) << std::endl;
 }
 
-std::string aur_git_url_for_package_base(const std::string& package_base) {
-    require_valid_package_name(package_base);
-    return AUR_BASE_URL + package_base + ".git";
-}
-
-
 // source build / AUR install
-void install_smart_source(
-        const std::string& pkg_name, bool only_if_updated,
-        const SourceSyncOptions& source_sync_options) {
-    std::string env = load_source_preference_environment(pkg_name);
-    PackageBuildSource source = resolve_build_source(pkg_name);
-    require_executable_build_source_plan(source);
-
-    SourceBuildRequest request;
-    request.package_name = source.requested_name;
-    request.checkout_name = source.clone_name;
-    request.git_url = source.git_url;
-    request.custom_environment = env;
-    request.only_if_updated = only_if_updated;
-    request.needed = source_sync_options.needed;
-    execute_source_build(request, g_config);
-}
-
 void require_valid_aur_package_target(const std::string& target) {
     if(target.find('/') != std::string::npos || !is_valid_package_name(target)) {
         throw std::runtime_error("Invalid AUR package target: " + target);
-    }
-}
-
-void require_executable_sync_install_target(const std::string& pkg_name) {
-    if(is_repo_package(pkg_name)) {
-        PackageBuildSource source = resolve_build_source(pkg_name);
-        require_executable_build_source_plan(source);
-        return;
-    }
-
-    BuildPlan plan = resolve_build_plan(pkg_name);
-    require_executable_install_plan(pkg_name, plan);
-}
-
-void execute_aur_build_plan(
-        const BuildPlan& plan, bool use_source_build_preferences,
-        const SourceSyncOptions& source_sync_options) {
-    for(const auto& entry : plan.order) {
-        std::string package_names = join_comma_display_values(entry.package_names);
-        Logger::info("Building AUR PackageBase: " + entry.package_base);
-        Logger::info("Target package(s): " + package_names);
-
-        std::string pkg_name = entry.package_names.empty() ? entry.package_base : entry.package_names.front();
-        std::string env;
-        if(use_source_build_preferences) {
-            env = load_source_preference_environment(pkg_name);
-            if(env.empty() && pkg_name != entry.package_base) {
-                env = load_source_preference_environment(entry.package_base);
-            }
-        }
-
-        try {
-            SourceBuildRequest request;
-            request.package_name = pkg_name;
-            request.checkout_name = entry.package_base;
-            request.git_url = aur_git_url_for_package_base(entry.package_base);
-            request.custom_environment = env;
-            request.needed = source_sync_options.needed;
-            execute_source_build(request, g_config);
-        } catch(const std::exception& e) {
-            throw std::runtime_error(
-                    "Failed while building/installing PackageBase " + entry.package_base + " (" + package_names +
-                    "): " + e.what());
-        }
     }
 }
 
@@ -923,32 +612,8 @@ void install_aur_build_plan(
         const std::string& target, const SourceSyncOptions& source_sync_options) {
     BuildPlan plan = resolve_build_plan(target);
     require_executable_install_plan(target, plan);
-    execute_aur_build_plan(plan, true, source_sync_options);
-}
-
-void preflight_upgrade_source_metadata() {
-    if(!fs::exists(source_preference_root())) return;
-
-    // POLICY(#174): upgradeの既存pacman-first実行は維持するが、schema violationだけは
-    // system transactionより前に全source packageのplanを横断して拒否する。
-    for(const auto& entry : source_preference_entries()) {
-        if(!entry.is_regular_file()) continue;
-
-        std::string pkg_name = entry.path().filename().string();
-        if(!is_valid_package_name(pkg_name)) continue;
-        try {
-            PackageBuildSource source = resolve_build_source(pkg_name);
-            if(source.is_aur) {
-                // LANDMINE(#174): split/install guardより先にplan全体のschemaを検証する。
-                // preflightでは実行可能性を判定せず、ordinary plan errorは実行phaseへ委ねる。
-                static_cast<void>(resolve_build_plan(source.requested_name));
-            }
-        } catch(const AurRpcResponseError&) {
-            throw;
-        } catch(const std::exception&) {
-            // not-found/transport/通常plan errorは、従来どおりsystem upgrade後の実行phaseで報告する。
-        }
-    }
+    execute_aur_build_plan(
+            plan, true, source_sync_options.needed, g_config);
 }
 
 // コマンド処理
@@ -1016,7 +681,8 @@ int cmd_sync_install(
 
         // POLICY(#168): every root target is fully planned and guarded before clone/build/install starts.
         for(const auto& plan : plans) {
-            execute_aur_build_plan(plan, false, source_sync_options);
+            execute_aur_build_plan(
+                    plan, false, source_sync_options.needed, g_config);
         }
         return 0;
     }
@@ -1053,7 +719,7 @@ int cmd_sync_install(
         }
     }
     for(const auto& package : aur_targets) {
-        require_executable_sync_install_target(package);
+        require_executable_source_install_target(package);
     }
     if(!repo_targets.empty() || is_sys_upgrade) {
         // POLICY(#173): AUR targetのtokenだけを除き、option/value/official targetの元順序を維持する。
@@ -1067,7 +733,8 @@ int cmd_sync_install(
         // Auto keeps the legacy source-build preference and AUR classification behavior.
         for(const auto& package : aur_targets) {
             if(is_repo_package(package))
-                install_smart_source(package, false, source_sync_options);
+                install_smart_source(
+                        package, false, source_sync_options.needed, g_config);
             else
                 install_aur_build_plan(package, source_sync_options);
         }
@@ -1172,293 +839,5 @@ int cmd_sync_info(
         print_aur_info(aur_infos[i]);
     }
 
-    return failed ? 1 : 0;
-}
-
-int cmd_build(const std::vector<std::string>& args) {
-    if(args.empty()) {
-        Logger::error("Usage: jpacker build <pkg> [VAR=VAL...]");
-        return 1;
-    }
-    std::string pkg_name, custom_env;
-    for(const auto& arg : args) {
-        std::string key, val;
-        if(split_env_assignment(arg, key, val))
-            custom_env += key + "=" + shell_quote(val) + " ";
-        else if(arg.find('=') != std::string::npos) {
-            Logger::error("Invalid environment assignment: " + arg);
-            return 1;
-        } else if(pkg_name.empty())
-            pkg_name = arg;
-        else
-            Logger::warn("Ignoring extra arg '" + arg + "'");
-    }
-    if(pkg_name.empty()) {
-        Logger::error("No package specified.");
-        return 1;
-    }
-    require_valid_package_name(pkg_name);
-
-    try {
-        PackageBuildSource source = resolve_build_source(pkg_name);
-        require_executable_build_source_plan(source);
-        // build コマンドは常にビルドする (only_if_updated = false)
-        SourceBuildRequest request;
-        request.package_name = source.requested_name;
-        request.checkout_name = source.clone_name;
-        request.git_url = source.git_url;
-        request.custom_environment = custom_env;
-        execute_source_build(request, g_config);
-    } catch(const std::exception& e) {
-        Logger::error(std::string("Build Error: ") + e.what());
-        return 1;
-    }
-    return 0;
-}
-
-int cmd_add_src(const std::vector<std::string>& args) {
-    bool                     failed = false;
-    std::vector<std::string> current_pkgs;
-    for(const auto& arg : args) {
-        std::string key, val;
-        if(arg.find('=') == std::string::npos) {
-            // POLICY: 1 package = 1 preference file。ファイル名は package name validation で固定する。
-            fs::path p = source_preference_entry_path(arg);
-            if(run_command("sudo touch " + shell_quote(p.string())) != 0) {
-                Logger::error("Failed to add " + arg);
-                failed = true;
-            } else {
-                Logger::info("Added " + arg + " to source-build list.");
-                current_pkgs.push_back(p.string());
-            }
-        } else if(split_env_assignment(arg, key, val)) {
-            if(current_pkgs.empty()) {
-                Logger::error("Environment assignment requires a preceding package: " + arg);
-                failed = true;
-                continue;
-            }
-            for(const auto& pkg_path : current_pkgs) {
-                Logger::info("   -> Appending " + arg + " to " + pkg_path);
-                if(run_command("printf '%s\\n' " + shell_quote(key + "=" + val) + " | sudo tee -a " + shell_quote(pkg_path) + " > /dev/null") != 0) {
-                    Logger::error("Failed to append " + key + " to " + pkg_path);
-                    failed = true;
-                }
-            }
-        } else {
-            Logger::error("Invalid environment assignment: " + arg);
-            failed = true;
-        }
-    }
-    return failed ? 1 : 0;
-}
-
-int cmd_edit_src(const std::vector<std::string>& targets) {
-    bool        failed = false;
-    const char* env_editor = std::getenv("EDITOR");
-    std::string editor_cmd = (env_editor) ? std::string(env_editor) : g_config.editor;
-    for(const auto& pkg : targets) {
-        fs::path    p = source_preference_entry_path(pkg);
-        std::string temp_template = "/tmp/jpacker-edit-src-" + pkg + ".XXXXXX";
-        std::vector<char> temp_name(temp_template.begin(), temp_template.end());
-        temp_name.push_back('\0');
-
-        int fd = mkstemp(temp_name.data());
-        if(fd == -1) {
-            Logger::error("Failed to create temporary file: " + std::string(std::strerror(errno)));
-            failed = true;
-            continue;
-        }
-
-        fs::path temp_path = temp_name.data();
-        if(close(fd) != 0) {
-            Logger::error("Failed to close temporary file " + temp_path.string() + ": " + std::string(std::strerror(errno)));
-            std::error_code ec;
-            fs::remove(temp_path, ec);
-            failed = true;
-            continue;
-        }
-
-        auto cleanup_temp = [&temp_path]() {
-            std::error_code ec;
-            fs::remove(temp_path, ec);
-            if(ec) Logger::warn("Failed to remove temporary file " + temp_path.string() + ": " + ec.message());
-        };
-
-        if(fs::exists(p)) {
-            std::ifstream src(p, std::ios::binary);
-            if(!src) {
-                Logger::error("Failed to read " + p.string());
-                cleanup_temp();
-                failed = true;
-                continue;
-            }
-
-            std::ofstream dst(temp_path, std::ios::binary | std::ios::trunc);
-            if(!dst) {
-                Logger::error("Failed to write temporary file " + temp_path.string());
-                cleanup_temp();
-                failed = true;
-                continue;
-            }
-
-            dst << src.rdbuf();
-            dst.close();
-            if(!dst) {
-                Logger::error("Failed to copy " + p.string() + " to " + temp_path.string());
-                cleanup_temp();
-                failed = true;
-                continue;
-            }
-        }
-
-        if(run_command(build_editor_command(editor_cmd, temp_path)) != 0) {
-            Logger::error("Editor failed for " + p.string());
-            failed = true;
-            cleanup_temp();
-            continue;
-        }
-
-        // POLICY: /etc 配下の preference 更新だけ sudo に委譲し、編集本体は通常ユーザーの一時ファイルで行う。
-        if(run_command("sudo install -Dm644 " + shell_quote(temp_path.string()) + " " + shell_quote(p.string())) != 0) {
-            Logger::error("Failed to install edited source-build preference to " + p.string() + "; edited file kept at " + temp_path.string());
-            failed = true;
-            continue;
-        }
-
-        cleanup_temp();
-    }
-    return failed ? 1 : 0;
-}
-
-void cmd_list_src() {
-    if(!fs::exists(source_preference_root())) {
-        std::cout << "No source-build packages registered." << std::endl;
-        return;
-    }
-    std::cout << "\033[1mRegistered Source Packages:\033[0m" << std::endl;
-    bool found = false;
-    for(const auto& entry : source_preference_entries()) {
-        if(entry.is_regular_file()) {
-            found = true;
-            std::string pkg = entry.path().filename().string();
-            std::cout << "  \033[1;36m" << pkg << "\033[0m" << std::endl;
-            read_source_preference_entry(
-                    entry.path(),
-                    [](const std::string& line) {
-                        std::cout << "    " << line << std::endl;
-                    });
-        }
-    }
-    if(!found) std::cout << "  (none)" << std::endl;
-}
-
-int cmd_del_src(const std::vector<std::string>& targets) {
-    bool failed = false;
-    for(const auto& pkg : targets) {
-        fs::path p = source_preference_entry_path(pkg);
-        Logger::info("Removing " + pkg + " from list...");
-        if(run_command("sudo rm -f " + shell_quote(p.string())) != 0) {
-            Logger::error("Failed to remove " + pkg);
-            failed = true;
-        }
-    }
-    return failed ? 1 : 0;
-}
-
-void cmd_revert(const std::vector<std::string>& targets) {
-    bool                     failed = false;
-    std::vector<std::string> reinstall_targets;
-    for(const auto& pkg : targets) {
-        fs::path p = source_preference_entry_path(pkg);
-        if(fs::exists(p)) {
-            Logger::info("Unmarking source-build for " + pkg);
-            if(run_command("sudo rm -f " + shell_quote(p.string())) != 0) {
-                Logger::error("Failed to remove " + pkg);
-                failed = true;
-                continue;
-            }
-        } else
-            Logger::warn(pkg + " was not marked.");
-        if(is_repo_package(pkg)) {
-            Logger::info(pkg + " exists in official repos. Will reinstall binary.");
-            reinstall_targets.push_back(pkg);
-        } else
-            Logger::info(pkg + " is likely an AUR package. Config removed only.");
-    }
-    if(!reinstall_targets.empty()) {
-        std::string pkg_list = join_shell_args(reinstall_targets);
-        std::vector<std::string> pacman_args = {"-S"};
-        pacman_args.insert(pacman_args.end(), reinstall_targets.begin(), reinstall_targets.end());
-        Logger::info("Reinstalling binaries: " + pkg_list);
-        if(run_command("sudo pacman " + join_pacman_args(pacman_args)) != 0) throw std::runtime_error("Failed to reinstall binaries.");
-    }
-    if(failed) throw std::runtime_error("Failed to revert one or more packages.");
-}
-
-int cmd_clean() {
-    // POLICY(#175): validate every cache deletion target before pacman mutation, then revalidate before remove_all.
-    // Safe-path UX remains pacman clean -> jpacker cache prompt; unsafe cache state stops before either mutation.
-    ValidatedCacheRoot              cache = prepare_trusted_cache_root();
-    std::vector<ValidatedCachePath> cleanup_targets = preflight_cache_cleanup(cache);
-    bool                            cache_has_entries = !fs::is_empty(cache.canonical_path());
-    bool                            failed = false;
-    Logger::info("Cleaning package caches...");
-    if(run_command("sudo pacman " + join_pacman_args({"-Sc"})) != 0) {
-        Logger::warn("Pacman clean failed or cancelled.");
-        failed = true;
-    }
-    if(cache_has_entries) {
-        if(ask_user("Clean jpacker build cache (" + cache.path().string() + ")?", PromptDefault::No)) {
-            Logger::info("Removing cached build files...");
-            bool cleanup_failed = false;
-            for(const auto& target : cleanup_targets) {
-                try {
-                    remove_trusted_cache_path(target);
-                } catch(const std::exception& e) {
-                    Logger::error("Failed to remove " + target.path().string() + ": " + e.what());
-                    cleanup_failed = true;
-                }
-            }
-            if(cleanup_failed) {
-                failed = true;
-                Logger::warn("jpacker cache cleanup was incomplete.");
-            } else {
-                Logger::info("jpacker cache cleaned.");
-            }
-        } else
-            Logger::info("Skipped jpacker cache cleaning.");
-    } else
-        Logger::info("jpacker cache is empty.");
-    return failed ? 1 : 0;
-}
-
-int cmd_upgrade() {
-    bool failed = false;
-    preflight_upgrade_source_metadata();
-    Logger::info("System upgrade...");
-    if(run_command("sudo pacman " + join_pacman_args({"-Syu"})) != 0) throw std::runtime_error("Update failed.");
-    if(fs::exists(source_preference_root())) {
-        Logger::info("Checking source packages...");
-        for(const auto& entry : source_preference_entries()) {
-            if(entry.is_regular_file()) {
-                std::string pkg_name = entry.path().filename().string();
-                if(!is_valid_package_name(pkg_name)) {
-                    Logger::warn("Ignoring invalid source-build preference filename: " + pkg_name);
-                    failed = true;
-                    continue;
-                }
-                try {
-                    // upgrade 時は true (更新がある場合のみビルド)
-                    install_smart_source(pkg_name, true, SourceSyncOptions{});
-                } catch(const AurRpcResponseError&) {
-                    // POLICY(#174): schema violation検出後は後続source packageのmutationへ進まない。
-                    throw;
-                } catch(const std::exception& e) {
-                    Logger::error("Error updating " + pkg_name + ": " + e.what());
-                    failed = true;
-                }
-            }
-        }
-    }
     return failed ? 1 : 0;
 }
