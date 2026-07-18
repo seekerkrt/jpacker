@@ -3,6 +3,10 @@ printf 'pacman %s\n' "$*" >> "$JPACKER_TEST_COMMAND_LOG"
 if [ "$1" = "-Qm" ] && [ -n "${JPACKER_TEST_PACMAN_QM_OUTPUT:-}" ]; then
     printf '%s\n' "$JPACKER_TEST_PACMAN_QM_OUTPUT"
 fi
+if [ "$1" = "-Q" ] && [ -n "${JPACKER_TEST_PACMAN_Q_OUTPUT:-}" ]; then
+    printf '%s\n' "$JPACKER_TEST_PACMAN_Q_OUTPUT"
+    exit "${JPACKER_TEST_PACMAN_Q_EXIT_CODE:-0}"
+fi
 if [ "$1" = "-Si" ] && [ -n "${JPACKER_TEST_PACMAN_REPO_PACKAGES:-}" ]; then
     for package in $JPACKER_TEST_PACMAN_REPO_PACKAGES; do
         if [ "${2:-}" = "$package" ]; then
