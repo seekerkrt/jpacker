@@ -1,4 +1,5 @@
 #if __has_include("source_install.hpp")
+#include "dependency_plan.hpp"
 #include "source_install.hpp"
 #define JPACKER_HAS_EXTRACTED_SOURCE_INSTALL 1
 #else
