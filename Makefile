@@ -30,7 +30,7 @@ CXX       ?= g++
 CXXFLAGS  ?= -O2 -pipe
 LDFLAGS   ?=
 CPPFLAGS  ?=
-MY_CXXFLAGS := -std=c++20 -Wall -Wextra -DJPKG_VERSION=\"$(VERSION)\"
+MY_CXXFLAGS := -std=c++20 -Wall -Wextra -DJPACKER_VERSION=\"$(VERSION)\"
 MY_LDLIBS   := -lcurl
 SRCS      := $(wildcard $(SRC_DIR)/*.cpp)
 HEADERS   := $(wildcard $(SRC_DIR)/*.hpp)

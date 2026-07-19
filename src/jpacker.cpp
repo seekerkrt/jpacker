@@ -40,13 +40,13 @@
 namespace fs = std::filesystem;
 
 // --- 設定 ---
-#ifndef JPKG_VERSION
-#define JPKG_VERSION "unknown"
+#ifndef JPACKER_VERSION
+#define JPACKER_VERSION "unknown"
 #endif
 
 namespace {
 
-const std::string VERSION = JPKG_VERSION;
+const std::string VERSION = JPACKER_VERSION;
 
 } // namespace
 
