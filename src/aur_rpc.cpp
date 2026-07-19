@@ -12,15 +12,15 @@
 #include <set>
 #include <string>
 
-#ifndef JPKG_VERSION
-#define JPKG_VERSION "unknown"
+#ifndef JPACKER_VERSION
+#define JPACKER_VERSION "unknown"
 #endif
 
 namespace {
 
 using json = nlohmann::json;
 
-const std::string VERSION = JPKG_VERSION;
+const std::string VERSION = JPACKER_VERSION;
 const std::string AUR_RPC_DEFAULT_BASE_URL = "https://aur.archlinux.org/rpc/";
 const std::string USER_AGENT = "jpacker/" + VERSION;
 
