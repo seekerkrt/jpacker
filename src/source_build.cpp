@@ -199,7 +199,12 @@ std::string makepkg_install_command(
 
 std::string build_editor_command(const std::string& editor, const fs::path& target) {
     std::vector<std::string> args = split_command_words(editor);
-    args.push_back(target.string());
+    fs::path editor_target = target;
+    if(editor_target.is_relative()) {
+        // POLICY(#219): package-controlled basenameをeditor optionにせず、checkout内の明示pathとして渡す。
+        editor_target = fs::path(".") / editor_target;
+    }
+    args.push_back(editor_target.string());
     return join_shell_args(args);
 }
 

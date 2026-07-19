@@ -57,12 +57,15 @@ setup_case() {
     xdg_cache_dir=$case_dir/xdg-cache
     outside_dir=$case_dir/outside
     command_log=$case_dir/commands.log
+    editor_argv_log=$case_dir/editor-argv.log
 
     mkdir -p "$home_dir" "$xdg_cache_dir" "$outside_dir"
     : > "$command_log"
+    : > "$editor_argv_log"
     export HOME=$home_dir
     export XDG_CACHE_HOME=$xdg_cache_dir
     export JPACKER_TEST_COMMAND_LOG=$command_log
+    export JPACKER_TEST_EDITOR_ARGV_LOG=$editor_argv_log
     unset JPACKER_TEST_GIT_REMOTE_URL
     unset JPACKER_TEST_GIT_CLONE_EXIT_CODE
     unset JPACKER_TEST_GIT_CLONE_SYMLINK_TARGET
@@ -70,6 +73,7 @@ setup_case() {
     unset JPACKER_TEST_EDITOR_REPLACE_TARGET
     unset JPACKER_TEST_EDITOR_REMOVE_TARGET
     unset JPACKER_TEST_EDITOR_SYMLINK_TARGET
+    unset JPACKER_TEST_EDITOR_EXIT_CODE
     unset JPACKER_TEST_PACMAN_QM_OUTPUT
     unset JPACKER_TEST_PACMAN_REPO_PACKAGES
     unset JPACKER_TEST_PACKAGE_BUILD_DIR
@@ -208,6 +212,24 @@ assert_command_before() {
     if [ -z "$first_line" ] || [ -z "$second_line" ] || [ "$first_line" -ge "$second_line" ]; then
         echo "unexpected command order: $first -> $second" >&2
         cat "$command_log" >&2
+        exit 1
+    fi
+}
+
+assert_editor_argv_log() {
+    expected=$1
+    actual=$(cat "$editor_argv_log")
+    if [ "$actual" != "$expected" ]; then
+        echo "unexpected editor argv" >&2
+        printf 'expected:\n%s\nactual:\n%s\n' "$expected" "$actual" >&2
+        exit 1
+    fi
+}
+
+assert_editor_targets_not_option_like() {
+    if grep -E '^target=<-' "$editor_argv_log" >/dev/null; then
+        echo "editor review target remained option-like" >&2
+        cat "$editor_argv_log" >&2
         exit 1
     fi
 }
@@ -571,12 +593,12 @@ create_regular_repo "$entry_path"
 printf 'external reviewed artifact\n' > "$outside_dir/PKGBUILD"
 snapshot_directory "$outside_dir" "$case_dir/before.snapshot"
 export EDITOR=$repo_root/tests/stubs/jpacker-test-editor
-export JPACKER_TEST_EDITOR_REPLACE_TARGET=PKGBUILD
+export JPACKER_TEST_EDITOR_REPLACE_TARGET=./PKGBUILD
 export JPACKER_TEST_EDITOR_SYMLINK_TARGET=$outside_dir/PKGBUILD
 run_build_tty_fail "$case_dir/output" 'y\n'
 assert_descendant_rejection "$case_dir/output" "$entry_path/PKGBUILD" "symlink."
-assert_command "jpacker-test-editor PKGBUILD"
-assert_command_before "git reset --hard origin/main" "jpacker-test-editor PKGBUILD"
+assert_command "jpacker-test-editor ./PKGBUILD"
+assert_command_before "git reset --hard origin/main" "jpacker-test-editor ./PKGBUILD"
 assert_no_build_or_install_commands
 assert_symlink "$entry_path/PKGBUILD"
 assert_directory_unchanged "$outside_dir" "$case_dir/before.snapshot"
@@ -588,8 +610,8 @@ export EDITOR=$repo_root/tests/stubs/jpacker-test-editor
 export JPACKER_TEST_EDITOR_REMOVE_TARGET=clean-root.install
 run_build_tty_fail "$case_dir/output" 'y\n'
 assert_descendant_rejection "$case_dir/output" "$entry_path/clean-root.install" "non-regular file."
-assert_command "jpacker-test-editor PKGBUILD"
-assert_command_absent "jpacker-test-editor clean-root.install"
+assert_command "jpacker-test-editor ./PKGBUILD"
+assert_command_absent "jpacker-test-editor ./clean-root.install"
 assert_no_build_or_install_commands
 assert_path_absent "$entry_path/clean-root.install"
 
@@ -677,7 +699,7 @@ assert_command "git config --get remote.origin.url"
 assert_command_before "git clone https://aur.archlinux.org/clean-root.git clean-root" "git config --get remote.origin.url"
 assert_command_absent "git fetch origin"
 assert_command_absent "git reset --hard origin/main"
-assert_command_absent "jpacker-test-editor PKGBUILD"
+assert_command_absent "jpacker-test-editor ./PKGBUILD"
 assert_no_build_or_install_commands
 assert_path_absent "$entry_path"
 assert_directory_unchanged "$outside_dir" "$case_dir/before.snapshot"
@@ -694,7 +716,7 @@ assert_command "git config --get remote.origin.url"
 assert_command_before "git clone https://aur.archlinux.org/clean-root.git clean-root" "git config --get remote.origin.url"
 assert_command_absent "git fetch origin"
 assert_command_absent "git reset --hard origin/main"
-assert_command_absent "jpacker-test-editor PKGBUILD"
+assert_command_absent "jpacker-test-editor ./PKGBUILD"
 assert_no_build_or_install_commands
 assert_path_absent "$entry_path"
 assert_directory_unchanged "$outside_dir" "$case_dir/before.snapshot"
@@ -725,7 +747,7 @@ assert_command "git fetch origin"
 assert_command_before "git config --get remote.origin.url" "git fetch origin"
 assert_command_absent "git clone https://aur.archlinux.org/clean-root.git clean-root"
 assert_command_absent "git reset --hard origin/main"
-assert_command_absent "jpacker-test-editor PKGBUILD"
+assert_command_absent "jpacker-test-editor ./PKGBUILD"
 assert_no_build_or_install_commands
 
 setup_case regular-missing-fetch
@@ -735,7 +757,7 @@ assert_command "git config --get remote.origin.url"
 assert_command_before "git clone https://aur.archlinux.org/clean-root.git clean-root" "git config --get remote.origin.url"
 assert_command_absent "git fetch origin"
 assert_command_absent "git reset --hard origin/main"
-assert_command_absent "jpacker-test-editor PKGBUILD"
+assert_command_absent "jpacker-test-editor ./PKGBUILD"
 assert_no_build_or_install_commands
 if [ ! -d "$entry_path/.git" ] || [ -L "$entry_path/.git" ] ||
    [ ! -f "$entry_path/PKGBUILD" ] || [ -L "$entry_path/PKGBUILD" ]; then
@@ -761,12 +783,58 @@ export JPACKER_TEST_MAKEPKG_EXIT_CODE=0
 run_build_tty_ok "$case_dir/output" 'y\ny\ny\n'
 assert_contains "Review target: PKGBUILD" "$case_dir/output"
 assert_contains "clean-root.install" "$case_dir/output"
-assert_command "jpacker-test-editor PKGBUILD"
-assert_command "jpacker-test-editor clean-root.install"
+assert_command "jpacker-test-editor ./PKGBUILD"
+assert_command "jpacker-test-editor ./clean-root.install"
 assert_command "makepkg -sic"
-assert_command_before "git reset --hard origin/main" "jpacker-test-editor PKGBUILD"
-assert_command_before "jpacker-test-editor PKGBUILD" "jpacker-test-editor clean-root.install"
-assert_command_before "jpacker-test-editor clean-root.install" "makepkg -sic"
+assert_command_before "git reset --hard origin/main" "jpacker-test-editor ./PKGBUILD"
+assert_command_before "jpacker-test-editor ./PKGBUILD" "jpacker-test-editor ./clean-root.install"
+assert_command_before "jpacker-test-editor ./clean-root.install" "makepkg -sic"
+assert_editor_argv_log 'argv-begin
+arg[0]=<./PKGBUILD>
+target=<./PKGBUILD>
+argv-end
+argv-begin
+arg[0]=<./clean-root.install>
+target=<./clean-root.install>
+argv-end'
+assert_editor_targets_not_option_like
+
+setup_case regular-existing-leading-hyphen-review
+create_regular_repo "$entry_path"
+printf 'post_install() { :; }\n' > "$entry_path/-option.install"
+export EDITOR=$repo_root/tests/stubs/jpacker-test-editor
+export JPACKER_TEST_MAKEPKG_EXIT_CODE=0
+run_build_tty_ok "$case_dir/output" 'y\ny\ny\n'
+assert_contains "-option.install" "$case_dir/output"
+assert_command "jpacker-test-editor ./PKGBUILD"
+assert_command "jpacker-test-editor ./-option.install"
+assert_command "makepkg -sic"
+assert_command_before "jpacker-test-editor ./PKGBUILD" "jpacker-test-editor ./-option.install"
+assert_command_before "jpacker-test-editor ./-option.install" "makepkg -sic"
+assert_editor_argv_log 'argv-begin
+arg[0]=<./PKGBUILD>
+target=<./PKGBUILD>
+argv-end
+argv-begin
+arg[0]=<./-option.install>
+target=<./-option.install>
+argv-end'
+assert_editor_targets_not_option_like
+
+setup_case regular-existing-leading-hyphen-editor-failure
+create_regular_repo "$entry_path"
+printf 'post_install() { :; }\n' > "$entry_path/-option.install"
+export EDITOR=$repo_root/tests/stubs/jpacker-test-editor
+export JPACKER_TEST_EDITOR_EXIT_CODE=42
+run_build_tty_fail "$case_dir/output" 'n\ny\n'
+assert_contains "Editor failed." "$case_dir/output"
+assert_command "jpacker-test-editor ./-option.install"
+assert_no_build_or_install_commands
+assert_editor_argv_log 'argv-begin
+arg[0]=<./-option.install>
+target=<./-option.install>
+argv-end'
+assert_editor_targets_not_option_like
 
 setup_case fetch-existing-remote-mismatch
 create_regular_repo "$entry_path"
@@ -778,7 +846,7 @@ assert_command "git config --get remote.origin.url"
 assert_command_absent "git clone https://aur.archlinux.org/clean-root.git clean-root"
 assert_command_absent "git fetch origin"
 assert_command_absent "git reset --hard origin/main"
-assert_command_absent "jpacker-test-editor PKGBUILD"
+assert_command_absent "jpacker-test-editor ./PKGBUILD"
 assert_no_build_or_install_commands
 assert_contains "old clone marker" "$entry_path/old-marker"
 if [ ! -d "$entry_path/.git" ]; then
