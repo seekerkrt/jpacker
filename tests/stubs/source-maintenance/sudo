@@ -50,7 +50,16 @@ case ${1:-} in
         ;;
     install)
         shift
-        /usr/bin/install "$@"
+        if [ "$#" -eq 4 ] &&
+           [ "${1:-}" = "-Dm644" ] &&
+           [ "${2:-}" = "--" ] &&
+           [ "${3:-}" = "/dev/stdin" ]; then
+            destination=$4
+            # stdinはshell変数へ格納せず、NULを含むbyte streamのままinstallへ渡す。
+            /usr/bin/install -Dm644 -- /dev/stdin "$destination"
+        else
+            /usr/bin/install "$@"
+        fi
         ;;
     rm)
         shift

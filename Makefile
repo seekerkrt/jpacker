@@ -16,6 +16,7 @@ SOURCE_INSTALL_CHARACTERIZATION_TEST_TARGET := build/tests/jpacker-source-instal
 APP_CONFIG_MODULE_TEST_TARGET := build/tests/app-config-test
 APP_CONFIG_INTEGRATION_TEST_TARGET := build/tests/jpacker-app-config-test
 PACKAGE_IDENTIFIER_TEST_TARGET := build/tests/package-identifier-test
+PROCESS_STDIN_FD_TEST_TARGET := build/tests/process-stdin-fd-test
 
 # --- インストール先設定 ---
 PREFIX      ?= /usr/local
@@ -97,6 +98,11 @@ $(PACKAGE_IDENTIFIER_TEST_TARGET): tests/package_identifier_test.cpp $(SRC_DIR)/
 	@echo ":: Compiling package identifier test binary"
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -I$(SRC_DIR) tests/package_identifier_test.cpp $(SRC_DIR)/package_identifier.cpp -o $@
 
+$(PROCESS_STDIN_FD_TEST_TARGET): tests/process_stdin_fd_test.cpp $(SRC_DIR)/process.cpp $(SRC_DIR)/process.hpp $(SRC_DIR)/logging.cpp $(SRC_DIR)/logging.hpp $(VERSION_FILE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling process stdin fd test binary"
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -I$(SRC_DIR) tests/process_stdin_fd_test.cpp $(SRC_DIR)/process.cpp $(SRC_DIR)/logging.cpp -o $@
+
 test-app-config: $(APP_CONFIG_MODULE_TEST_TARGET) $(APP_CONFIG_INTEGRATION_TEST_TARGET)
 	sh tests/test-app-config.sh $(abspath $(APP_CONFIG_MODULE_TEST_TARGET)) $(abspath $(APP_CONFIG_INTEGRATION_TEST_TARGET))
 
@@ -115,7 +121,8 @@ test-cli-parser: $(TEST_TARGET)
 test-commands-inspect: $(COMMANDS_INSPECT_TEST_TARGET)
 	sh tests/test-commands-inspect.sh $(abspath $(COMMANDS_INSPECT_TEST_TARGET))
 
-test-commands-source-maintenance: $(APP_CONFIG_INTEGRATION_TEST_TARGET) $(SOURCE_INSTALL_CHARACTERIZATION_TEST_TARGET)
+test-commands-source-maintenance: $(APP_CONFIG_INTEGRATION_TEST_TARGET) $(SOURCE_INSTALL_CHARACTERIZATION_TEST_TARGET) $(PROCESS_STDIN_FD_TEST_TARGET)
+	$(abspath $(PROCESS_STDIN_FD_TEST_TARGET))
 	sh tests/test-commands-source-maintenance.sh $(abspath $(APP_CONFIG_INTEGRATION_TEST_TARGET)) $(abspath $(SOURCE_INSTALL_CHARACTERIZATION_TEST_TARGET))
 
 test-commands-sync: $(COMMANDS_SYNC_TEST_TARGET)

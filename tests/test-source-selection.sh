@@ -337,7 +337,15 @@ case $editor_command in
         ;;
 esac
 edit_temp_path=${editor_command#jpacker-test-editor --wait }
-assert_command_at 2 "sudo install -Dm644 $edit_temp_path $edit_src_path"
+assert_command_at 2 "sudo install -Dm644 -- /dev/stdin $edit_src_path"
+privileged_command=$(sed -n '2p' "$command_log")
+case $privileged_command in
+    *"$edit_temp_path"*)
+        echo "edit-src exposed its temporary pathname to sudo" >&2
+        cat "$command_log" >&2
+        exit 1
+        ;;
+esac
 assert_command_count 2
 if [ -e "$edit_temp_path" ] || [ -L "$edit_temp_path" ]; then
     echo "edit-src did not remove its temporary file after successful install" >&2

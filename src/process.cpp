@@ -3,10 +3,13 @@
 #include "logging.hpp"
 
 #include <array>
+#include <cerrno>
 #include <cstdio>
 #include <cstdlib>
+#include <fcntl.h>
 #include <memory>
 #include <sys/wait.h>
+#include <unistd.h>
 
 namespace {
 
@@ -57,4 +60,39 @@ int command_status(const std::string& cmd) {
 int run_command(const std::string& cmd) {
     Logger::raw_cmd(cmd);
     return command_status(cmd);
+}
+
+int run_command_with_stdin_fd(const std::string& command, int source_fd) {
+    Logger::raw_cmd(command);
+    const char* command_text = command.c_str();
+
+    pid_t child_pid = fork();
+    if(child_pid == -1) return 127;
+    if(child_pid == 0) {
+        if(source_fd == STDIN_FILENO) {
+            // LANDMINE: open(O_CLOEXEC)がfd 0を返した場合、dup2(0, 0)ではCLOEXECが解除されない。
+            int descriptor_flags = fcntl(STDIN_FILENO, F_GETFD);
+            if(descriptor_flags == -1 ||
+               fcntl(STDIN_FILENO, F_SETFD, descriptor_flags & ~FD_CLOEXEC) == -1) {
+                _exit(127);
+            }
+        } else if(dup2(source_fd, STDIN_FILENO) == -1) {
+            _exit(127);
+        }
+
+        // source_fdにはO_CLOEXECがあるため、dup2後の元descriptorはexec時に閉じる。
+        execl("/bin/sh", "sh", "-c", command_text, static_cast<char*>(nullptr));
+        _exit(127);
+    }
+
+    int   status = 0;
+    pid_t wait_result;
+    do {
+        wait_result = waitpid(child_pid, &status, 0);
+    } while(wait_result == -1 && errno == EINTR);
+
+    if(wait_result == -1) return 127;
+    if(WIFEXITED(status)) return WEXITSTATUS(status);
+    if(WIFSIGNALED(status)) return 128 + WTERMSIG(status);
+    return 1;
 }
