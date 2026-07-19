@@ -1,10 +1,60 @@
 #!/bin/sh
 printf 'git %s\n' "$*" >> "$JPACKER_TEST_COMMAND_LOG"
+if [ "$1" = "symbolic-ref" ]; then
+    if [ -n "${JPACKER_TEST_GIT_SYMBOLIC_REF:-}" ]; then
+        printf '%s\n' "$JPACKER_TEST_GIT_SYMBOLIC_REF"
+        exit 0
+    fi
+    exit "${JPACKER_TEST_GIT_SYMBOLIC_REF_EXIT_CODE:-1}"
+fi
+if [ "$1" = "show-ref" ]; then
+    case ${4:-} in
+        refs/remotes/origin/main)
+            exit "${JPACKER_TEST_GIT_MAIN_REF_EXIT_CODE:-0}"
+            ;;
+        refs/remotes/origin/master)
+            exit "${JPACKER_TEST_GIT_MASTER_REF_EXIT_CODE:-0}"
+            ;;
+    esac
+fi
+if [ "$1" = "diff" ]; then
+    case ${2:-} in
+        --quiet)
+            exit "${JPACKER_TEST_GIT_DIFF_QUIET_EXIT_CODE:-0}"
+            ;;
+        --name-only)
+            if [ -n "${JPACKER_TEST_GIT_CHANGED_FILES:-}" ]; then
+                printf '%b' "$JPACKER_TEST_GIT_CHANGED_FILES"
+            fi
+            exit "${JPACKER_TEST_GIT_DIFF_NAME_ONLY_EXIT_CODE:-0}"
+            ;;
+    esac
+    exit "${JPACKER_TEST_GIT_DIFF_COLOR_EXIT_CODE:-0}"
+fi
 if [ "$1" = "clone" ]; then
+    clone_url=
     clone_destination=
-    for clone_arg in "$@"; do
-        clone_destination=$clone_arg
+    shift
+    while [ "$#" -gt 0 ]; do
+        case $1 in
+            --)
+                ;;
+            -*)
+                ;;
+            *)
+                if [ -z "$clone_url" ]; then
+                    clone_url=$1
+                else
+                    clone_destination=$1
+                fi
+                ;;
+        esac
+        shift
     done
+    if [ -n "${JPACKER_TEST_GIT_CLONE_FAIL_DESTINATION:-}" ] &&
+       [ "$clone_destination" = "$JPACKER_TEST_GIT_CLONE_FAIL_DESTINATION" ]; then
+        exit "${JPACKER_TEST_GIT_CLONE_FAIL_DESTINATION_EXIT_CODE:-1}"
+    fi
     if [ -n "${JPACKER_TEST_GIT_CLONE_SYMLINK_TARGET:-}" ]; then
         ln -s "$JPACKER_TEST_GIT_CLONE_SYMLINK_TARGET" "$clone_destination"
         exit "${JPACKER_TEST_GIT_CLONE_EXIT_CODE:-1}"
@@ -13,6 +63,9 @@ if [ "$1" = "clone" ]; then
         mkdir -p "$clone_destination"
         if ! cp -a "$JPACKER_TEST_GIT_CLONE_FIXTURE_DIR/." "$clone_destination/"; then
             exit 1
+        fi
+        if [ -d "$clone_destination/.git" ] && [ ! -L "$clone_destination/.git" ]; then
+            printf '%s\n' "$clone_url" > "$clone_destination/.git/.jpacker-test-remote-url" || exit 1
         fi
         if [ -e "$clone_destination/.jpacker-test-pkgbuild-unreadable" ]; then
             rm "$clone_destination/.jpacker-test-pkgbuild-unreadable" || exit 1
@@ -39,6 +92,8 @@ if [ "$1" = "clone" ]; then
         fi
     else
         mkdir -p "$clone_destination/.git"
+        printf 'pkgname=jpacker-test-fixture\npkgver=1\npkgrel=1\n' > "$clone_destination/PKGBUILD"
+        printf '%s\n' "$clone_url" > "$clone_destination/.git/.jpacker-test-remote-url"
     fi
     exit "${JPACKER_TEST_GIT_CLONE_EXIT_CODE:-0}"
 fi
@@ -53,6 +108,10 @@ if [ "$1" = "config" ]; then
     fi
     if [ -n "${JPACKER_TEST_GIT_REMOTE_URL:-}" ]; then
         printf '%s\n' "$JPACKER_TEST_GIT_REMOTE_URL"
+        exit 0
+    fi
+    if [ -f "$config_worktree/.git/.jpacker-test-remote-url" ]; then
+        cat "$config_worktree/.git/.jpacker-test-remote-url"
         exit 0
     fi
     printf 'https://aur.archlinux.org/%s.git\n' "$(basename "$config_worktree")"

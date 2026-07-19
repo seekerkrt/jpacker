@@ -1,0 +1,70 @@
+#!/bin/sh
+set -eu
+
+command_text=$*
+printf 'sudo %s\n' "$command_text" >> "$JPACKER_TEST_COMMAND_LOG"
+
+fail_exact_file=${JPACKER_TEST_SOURCE_MAINTENANCE_FAIL_EXACT_FILE:-}
+fail_substring=${JPACKER_TEST_SOURCE_MAINTENANCE_FAIL_SUBSTRING:-}
+
+if [ -n "$fail_exact_file" ] && [ -f "$fail_exact_file" ]; then
+    if grep -Fx -- "$command_text" "$fail_exact_file" >/dev/null 2>&1 ||
+       grep -Fx -- "sudo $command_text" "$fail_exact_file" >/dev/null 2>&1; then
+        exit 1
+    fi
+fi
+
+if [ -n "$fail_substring" ]; then
+    case $command_text in
+        *"$fail_substring"*) exit 1 ;;
+    esac
+fi
+
+default_exit_code=${JPACKER_TEST_SUDO_EXIT_CODE:-0}
+if [ "$default_exit_code" -ne 0 ]; then
+    exit "$default_exit_code"
+fi
+
+if [ "${1:-}" = "pacman" ] && [ "${2:-}" = "-Sc" ]; then
+    race_path=${JPACKER_TEST_SOURCE_MAINTENANCE_PACMAN_SC_RACE_PATH:-}
+    race_target=${JPACKER_TEST_SOURCE_MAINTENANCE_PACMAN_SC_RACE_TARGET:-}
+    if [ -n "$race_path" ] && [ -n "$race_target" ]; then
+        /usr/bin/rm -rf -- "$race_path"
+        /usr/bin/ln -s -- "$race_target" "$race_path"
+    fi
+fi
+
+mutate_filesystem=${JPACKER_TEST_SOURCE_MAINTENANCE_SUDO_MUTATE:-0}
+if [ "$mutate_filesystem" != "1" ]; then
+    exit 0
+fi
+
+case ${1:-} in
+    touch)
+        shift
+        /usr/bin/touch "$@"
+        ;;
+    tee)
+        shift
+        /usr/bin/tee "$@"
+        ;;
+    install)
+        shift
+        if [ "$#" -eq 4 ] &&
+           [ "${1:-}" = "-Dm644" ] &&
+           [ "${2:-}" = "--" ] &&
+           [ "${3:-}" = "/dev/stdin" ]; then
+            destination=$4
+            # stdinはshell変数へ格納せず、NULを含むbyte streamのままinstallへ渡す。
+            /usr/bin/install -Dm644 -- /dev/stdin "$destination"
+        else
+            /usr/bin/install "$@"
+        fi
+        ;;
+    rm)
+        shift
+        /usr/bin/rm "$@"
+        ;;
+esac
+
+exit 0

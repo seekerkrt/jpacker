@@ -1,48 +1,16 @@
-# Prerequisites
+# Compiler artifacts
 *.o
 *.d
-
-# Compiled Object files
-*.slo
-*.lo
-*.o
-*.obj
-*.res
-
-# Precompiled Headers
-*.gch
-*.pch
-
-# Compiled Dynamic libraries
-*.so
-*.dylib
-*.dll
-
-# Fortran module files
-*.mod
-*.smod
-
-# Compiled Static libraries
-*.lai
-*.la
-*.a
-*.lib
-
-# Executables
-*.exe
 *.out
-*.app
-jpkg
 
-# Config
-.vscode/
-objs/
-pkg/
-jpacker/
-jpacker
+# Project build outputs
 /build/
 /jpacker
 
-# Arch Linux / Makepkg artifacts
+# Local editor settings
+.vscode/
+
+# Arch Linux package artifacts
+/pkg/
 *.pkg.tar.zst
 *.pkg.tar.xz

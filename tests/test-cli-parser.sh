@@ -87,6 +87,16 @@ assert_contains() {
     fi
 }
 
+assert_not_contains() {
+    pattern=$1
+    file=$2
+    if grep -F -- "$pattern" "$file" >/dev/null; then
+        echo "unexpected output: $pattern" >&2
+        sed -n '1,240p' "$file" >&2
+        exit 1
+    fi
+}
+
 assert_command() {
     expected=$1
     if ! grep -Fx -- "$expected" "$command_log" >/dev/null; then
@@ -133,6 +143,20 @@ assert_command_log_empty() {
         cat "$command_log" >&2
         exit 1
     fi
+}
+
+assert_cache_root_absent() {
+    if [ -e "$XDG_CACHE_HOME/jpacker" ] || [ -L "$XDG_CACHE_HOME/jpacker" ]; then
+        echo "default cache/log initialization ran before entry validation completed" >&2
+        find "$XDG_CACHE_HOME/jpacker" -maxdepth 2 -print >&2 || true
+        exit 1
+    fi
+}
+
+assert_pre_log_exit() {
+    assert_command_log_empty
+    assert_not_contains "Started jpacker v" "$output_file"
+    assert_cache_root_absent
 }
 
 assert_no_mutation_commands() {
@@ -182,6 +206,17 @@ run_exact value-short-dbpath-noedit \
 run_exact value-short-root-nodiff \
     "pacman -Q -r --nodiff filesystem" \
     -Q -r --nodiff filesystem
+
+# Parser分離時のtable移し忘れを検出するため、未coverageのvalue-taking long optionを全件固定する。
+for value_option in \
+    --arch --assume-installed --color --gpgdir --hookdir --ignore \
+    --ignoregroup --logfile --overwrite --print-format --sysroot
+do
+    case_name=value-${value_option#--}-rmdeps
+    run_exact "$case_name" \
+        "pacman -Q $value_option --rmdeps filesystem" \
+        -Q "$value_option" --rmdeps filesystem
+done
 
 # Matrix B: semantic `--`後は全tokenをopaque operandとして保持する。
 for global_option in --rmdeps --noconfirm --rebuild --cleanbuild --noedit --nodiff; do
@@ -234,7 +269,7 @@ for missing_option in --root --config -b -r; do
     run_fail -Q "$missing_option"
     assert_contains "Missing value for option" "$output_file"
     assert_contains "$missing_option" "$output_file"
-    assert_command_log_empty
+    assert_pre_log_exit
 done
 
 # Matrix G: value位置の`--`はmarkerではなくvalue。次の`--`だけがmarkerになる。
@@ -259,26 +294,31 @@ run_exact database-relative-order \
     "sudo pacman -D target-a --config custom.conf target-b" \
     -D target-a --config custom.conf target-b
 
-# Help/versionはleading global後のoperation位置だけで扱う。
+# argc/help/versionはconfig・default cache・Logger初期化より前に終了する。
+setup_case no-arguments
+run_fail
+assert_contains "USAGE" "$output_file"
+assert_pre_log_exit
+
 setup_case help-after-global
 run_ok --noedit --help
 assert_contains "USAGE" "$output_file"
-assert_command_log_empty
+assert_pre_log_exit
 
 setup_case version-after-global
 run_ok --noedit --version
 assert_contains "jpacker v" "$output_file"
-assert_command_log_empty
+assert_pre_log_exit
 
 setup_case help-operation
 run_ok --help
 assert_contains "USAGE" "$output_file"
-assert_command_log_empty
+assert_pre_log_exit
 
 setup_case version-operation
 run_ok --version
 assert_contains "jpacker v" "$output_file"
-assert_command_log_empty
+assert_pre_log_exit
 
 run_exact help-as-option-value \
     "pacman -Q --root --help filesystem" \

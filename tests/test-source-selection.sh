@@ -59,6 +59,11 @@ setup_case() {
     unset JPACKER_TEST_GIT_CLONE_SYMLINK_TARGET
     unset JPACKER_TEST_GIT_CLONE_FIXTURE_DIR
     unset JPACKER_TEST_MAKEPKG_EXIT_CODE
+    unset JPACKER_TEST_SOURCE_PREFERENCE_EXTERNAL
+    unset JPACKER_TEST_EDITOR_REPLACE_TARGET
+    unset JPACKER_TEST_EDITOR_SYMLINK_TARGET
+    unset JPACKER_TEST_EDITOR_REMOVE_TARGET
+    unset EDITOR
 }
 
 run_ok() {
@@ -88,6 +93,32 @@ assert_contains() {
     file=$2
     if ! grep -F -- "$pattern" "$file" >/dev/null; then
         echo "missing expected output: $pattern" >&2
+        sed -n '1,240p' "$file" >&2
+        exit 1
+    fi
+}
+
+assert_line() {
+    expected=$1
+    file=$2
+    if ! grep -Fx -- "$expected" "$file" >/dev/null; then
+        echo "missing expected line: $expected" >&2
+        sed -n '1,240p' "$file" >&2
+        exit 1
+    fi
+}
+
+assert_line_before() {
+    first=$1
+    second=$2
+    file=$3
+    assert_line "$first" "$file"
+    assert_line "$second" "$file"
+    first_line_number=$(grep -nFx -- "$first" "$file" | sed -n '1s/:.*//p')
+    second_line_number=$(grep -nFx -- "$second" "$file" | sed -n '1s/:.*//p')
+    if [ "$first_line_number" -ge "$second_line_number" ]; then
+        echo "unexpected line order: $first" >&2
+        echo "must appear before: $second" >&2
         sed -n '1,240p' "$file" >&2
         exit 1
     fi
@@ -126,6 +157,28 @@ assert_only_command() {
     assert_command "$expected"
     if [ "$(wc -l < "$command_log")" -ne 1 ]; then
         echo "unexpected additional command(s)" >&2
+        cat "$command_log" >&2
+        exit 1
+    fi
+}
+
+assert_command_at() {
+    line_number=$1
+    expected=$2
+    actual=$(sed -n "${line_number}p" "$command_log")
+    if [ "$actual" != "$expected" ]; then
+        echo "unexpected command at line $line_number: $actual" >&2
+        echo "expected: $expected" >&2
+        cat "$command_log" >&2
+        exit 1
+    fi
+}
+
+assert_command_count() {
+    expected=$1
+    actual=$(wc -l < "$command_log")
+    if [ "$actual" -ne "$expected" ]; then
+        echo "unexpected command count: $actual (expected $expected)" >&2
         cat "$command_log" >&2
         exit 1
     fi
@@ -217,6 +270,137 @@ run_exact() {
     assert_request_log_empty
 }
 
+# Source preferenceのpath/read契約。列挙順はfilesystem依存なので固定しない。
+setup_case list-src-missing-root
+export JPACKER_TEST_PACKAGE_BUILD_DIR=$case_dir/missing-package.build
+run_ok list-src
+assert_contains "No source-build packages registered." "$output_file"
+assert_command_log_empty
+assert_request_log_empty
+if [ -e "$JPACKER_TEST_PACKAGE_BUILD_DIR" ] || [ -L "$JPACKER_TEST_PACKAGE_BUILD_DIR" ]; then
+    echo "list-src created the missing source preference root" >&2
+    exit 1
+fi
+
+setup_case list-src-regular-entries
+cat > "$JPACKER_TEST_PACKAGE_BUILD_DIR/alpha" <<'SOURCE_PREFERENCE'
+  # comment-only line
+    CFLAGS = "-O2 # kept quoted"   # removed trailing comment
+    raw value without equals        # removed raw comment
+
+SOURCE_PREFERENCE
+printf '%s\n' "LDFLAGS='-Wl,--as-needed'" > "$JPACKER_TEST_PACKAGE_BUILD_DIR/zeta"
+mkdir "$JPACKER_TEST_PACKAGE_BUILD_DIR/ignored-directory"
+printf 'nested entry\n' > "$JPACKER_TEST_PACKAGE_BUILD_DIR/ignored-directory/not-an-entry"
+run_ok list-src
+assert_contains "Registered Source Packages:" "$output_file"
+assert_contains "alpha" "$output_file"
+assert_line_before '    CFLAGS = "-O2 # kept quoted"' \
+    "    raw value without equals" "$output_file"
+assert_contains "zeta" "$output_file"
+assert_line "    LDFLAGS='-Wl,--as-needed'" "$output_file"
+assert_not_contains "removed trailing comment" "$output_file"
+assert_not_contains "removed raw comment" "$output_file"
+assert_not_contains "ignored-directory" "$output_file"
+assert_not_contains "not-an-entry" "$output_file"
+assert_command_log_empty
+assert_request_log_empty
+
+# Mutationとpresentationはhandler側のまま維持する。sudo stubはfilesystemを変更しない。
+setup_case add-src-handler
+add_src_path=$JPACKER_TEST_PACKAGE_BUILD_DIR/clean-root
+run_ok add-src clean-root CFLAGS=-O2
+assert_contains "Added clean-root to source-build list." "$output_file"
+assert_contains "Appending CFLAGS=-O2 to $add_src_path" "$output_file"
+assert_command_at 1 "sudo touch $add_src_path"
+assert_command_at 2 "sudo tee -a $add_src_path"
+assert_command_count 2
+if [ -e "$add_src_path" ] || [ -L "$add_src_path" ]; then
+    echo "sudo test stub unexpectedly created the add-src entry" >&2
+    exit 1
+fi
+
+setup_case edit-src-handler
+edit_src_path=$JPACKER_TEST_PACKAGE_BUILD_DIR/clean-root
+printf 'CFLAGS=-Oexisting\n' > "$edit_src_path"
+export EDITOR="jpacker-test-editor --wait"
+run_ok edit-src clean-root
+editor_command=$(sed -n '1p' "$command_log")
+editor_prefix="jpacker-test-editor --wait /tmp/jpacker-edit-src-clean-root."
+case $editor_command in
+    "$editor_prefix"??????)
+        ;;
+    *)
+        echo "unexpected edit-src editor command: $editor_command" >&2
+        cat "$command_log" >&2
+        exit 1
+        ;;
+esac
+edit_temp_path=${editor_command#jpacker-test-editor --wait }
+assert_command_at 2 "sudo install -Dm644 -- /dev/stdin $edit_src_path"
+privileged_command=$(sed -n '2p' "$command_log")
+case $privileged_command in
+    *"$edit_temp_path"*)
+        echo "edit-src exposed its temporary pathname to sudo" >&2
+        cat "$command_log" >&2
+        exit 1
+        ;;
+esac
+assert_command_count 2
+if [ -e "$edit_temp_path" ] || [ -L "$edit_temp_path" ]; then
+    echo "edit-src did not remove its temporary file after successful install" >&2
+    exit 1
+fi
+
+setup_case del-src-handler
+del_src_path=$JPACKER_TEST_PACKAGE_BUILD_DIR/clean-root
+printf 'CFLAGS=-Oexisting\n' > "$del_src_path"
+run_ok del-src clean-root
+assert_contains "Removing clean-root from list..." "$output_file"
+assert_only_command "sudo rm -f $del_src_path"
+if [ ! -f "$del_src_path" ]; then
+    echo "sudo test stub unexpectedly removed the del-src entry" >&2
+    exit 1
+fi
+
+setup_case revert-handler
+revert_src_path=$JPACKER_TEST_PACKAGE_BUILD_DIR/official-a
+printf 'CFLAGS=-Oexisting\n' > "$revert_src_path"
+export JPACKER_TEST_PACMAN_REPO_PACKAGES=official-a
+run_ok revert official-a
+assert_contains "Unmarking source-build for official-a" "$output_file"
+assert_contains "official-a exists in official repos. Will reinstall binary." "$output_file"
+assert_contains "Reinstalling binaries: 'official-a'" "$output_file"
+assert_command_at 1 "sudo rm -f $revert_src_path"
+assert_command_at 2 "pacman -Si official-a"
+assert_command_at 3 "sudo pacman -S official-a"
+assert_command_count 3
+if [ ! -f "$revert_src_path" ]; then
+    echo "sudo test stub unexpectedly removed the revert entry" >&2
+    exit 1
+fi
+
+# Auto source selectionはpreference lookupやrepository/AUR probeより先にpackage名を検証する。
+for dot_target in . ..; do
+    case $dot_target in
+        .) dot_target_label=dot ;;
+        ..) dot_target_label=dot-dot ;;
+    esac
+    setup_case "auto-install-reject-$dot_target_label"
+    printf 'SOURCE_PREFERENCE_GUARD=yes\n' > "$JPACKER_TEST_PACKAGE_BUILD_DIR/root-guard"
+    preference_checksum=$(cksum "$JPACKER_TEST_PACKAGE_BUILD_DIR/root-guard")
+
+    run_fail -S "$dot_target"
+
+    assert_contains "Invalid package name: $dot_target" "$output_file"
+    assert_command_log_empty
+    assert_request_log_empty
+    if [ "$(cksum "$JPACKER_TEST_PACKAGE_BUILD_DIR/root-guard")" != "$preference_checksum" ]; then
+        echo "source selection changed the source preference fixture for $dot_target" >&2
+        exit 1
+    fi
+done
+
 # Matrix A: selector parse、option value、opaque operand、conflict。
 run_exact option-value-aur \
     "pacman -Q --root --aur filesystem" \
@@ -293,6 +477,22 @@ run_ok -S -i --repo filesystem
 assert_only_command "pacman -S -i filesystem"
 assert_request_log_empty
 
+# POLICY: Autoはoperation文字列だけでsearch/infoを分類し、separated modifierをinstall routeで扱う。
+# selector routeとの現行非対称を共通化しないため、official targetでcall pathを固定する。
+setup_case separated-auto-search-short
+export JPACKER_TEST_PACMAN_REPO_PACKAGES=official-a
+run_ok -S -s official-a
+assert_command "pacman -Si official-a"
+assert_command "sudo pacman -S -s official-a"
+assert_request_log_empty
+
+setup_case separated-auto-info-short
+export JPACKER_TEST_PACMAN_REPO_PACKAGES=official-a
+run_ok -S -i official-a
+assert_command "pacman -Si official-a"
+assert_command "sudo pacman -S -i official-a"
+assert_request_log_empty
+
 conflict_index=0
 for conflict_order in \
     "--aur --repo -S conflict-target" \
@@ -323,6 +523,7 @@ assert_unsupported_operation() {
     assert_contains "$operation" "$output_file"
     assert_command_log_empty
     assert_request_log_empty
+    assert_cache_root_absent
 }
 
 unsupported_index=0
@@ -505,12 +706,32 @@ assert_no_source_build_commands
 assert_request_log_empty
 
 setup_case auto-install-preferred-official
-prepare_source_preference clean-root
+cat > "$JPACKER_TEST_PACKAGE_BUILD_DIR/clean-root" <<'SOURCE_PREFERENCE'
+  # whole-line comment
+  FIRST = "alpha value" # stripped comment
+  QUOTED = 'quoted # value' # stripped after the quoted hash
+  DUP=first
+  DUP = second
+  BRACED = ${FIRST}/brace
+  SIMPLE = $DUP/simple
+  UNDEFINED = $JPACKER_TEST_SOURCE_PREFERENCE_EXTERNAL
+  EMPTY = ''
+  9INVALID=value
+  ignored without equals
+SOURCE_PREFERENCE
+export JPACKER_TEST_SOURCE_PREFERENCE_EXTERNAL=from-process-environment
 export JPACKER_TEST_PACMAN_REPO_PACKAGES=clean-root
 export JPACKER_TEST_MAKEPKG_EXIT_CODE=0
 run_ok --noedit --nodiff --noconfirm -S clean-root
 assert_command "git clone https://gitlab.archlinux.org/archlinux/packaging/packages/clean-root.git clean-root"
 assert_command "makepkg -sic --noconfirm"
+assert_contains "Loading custom build flags from $JPACKER_TEST_PACKAGE_BUILD_DIR/clean-root" "$output_file"
+assert_contains "Applying custom build flags: FIRST='alpha value' QUOTED='quoted # value' DUP='first' DUP='second' BRACED='alpha value/brace' SIMPLE='second/simple'" "$output_file"
+assert_contains "Ignoring invalid environment assignment: 9INVALID=value" "$output_file"
+assert_not_contains "UNDEFINED=" "$output_file"
+assert_not_contains "EMPTY=" "$output_file"
+assert_not_contains "from-process-environment" "$output_file"
+assert_not_contains "ignored without equals" "$output_file"
 assert_request_log_empty
 
 setup_case auto-install-aur

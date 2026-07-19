@@ -1,0 +1,7 @@
+#!/bin/sh
+printf 'vercmp %s\n' "$*" >> "$JPACKER_TEST_COMMAND_LOG"
+if [ -n "${JPACKER_TEST_VERCMP_OUTPUT:-}" ]; then
+    printf '%s\n' "$JPACKER_TEST_VERCMP_OUTPUT"
+    exit "${JPACKER_TEST_VERCMP_EXIT_CODE:-0}"
+fi
+exec /usr/bin/vercmp "$@"
