@@ -240,6 +240,14 @@ assert_total_command_count() {
     fi
 }
 
+assert_request_log_empty() {
+    if [ -s "$request_log" ]; then
+        echo "unexpected AUR RPC request before package validation completed" >&2
+        cat "$request_log" >&2
+        exit 1
+    fi
+}
+
 assert_command_before() {
     first=$1
     second=$2
@@ -347,6 +355,40 @@ assert_contains "Build Error: Build failed." "$output_file"
 assert_command "makepkg -sic"
 
 echo "  ok: P0-1 cmd_build"
+
+# dot path componentは、source preferenceの副作用を始める前にpackage validationで拒否する。
+for dot_target in . ..; do
+    case $dot_target in
+        .) dot_target_label=dot ;;
+        ..) dot_target_label=dot-dot ;;
+    esac
+    for operation in add-src edit-src del-src revert; do
+        setup_case "$operation-reject-$dot_target_label"
+        printf 'ROOT_GUARD=yes\n' > "$preference_dir/root-guard"
+        printf 'PARENT_GUARD=yes\n' > "$case_dir/parent-guard"
+        root_guard_checksum=$(cksum "$preference_dir/root-guard")
+        parent_guard_checksum=$(cksum "$case_dir/parent-guard")
+
+        run_fail "$operation" "$dot_target"
+
+        assert_contains "Invalid package name: $dot_target" "$output_file"
+        assert_total_command_count 0
+        assert_request_log_empty
+        if [ "$(cksum "$preference_dir/root-guard")" != "$root_guard_checksum" ] ||
+           [ "$(cksum "$case_dir/parent-guard")" != "$parent_guard_checksum" ]; then
+            echo "$operation $dot_target changed the source preference fixture" >&2
+            exit 1
+        fi
+        entry_count=$(find "$preference_dir" -mindepth 1 -maxdepth 1 -print | wc -l)
+        if [ "$entry_count" -ne 1 ]; then
+            echo "$operation $dot_target changed source preference entries" >&2
+            find "$preference_dir" -maxdepth 1 -print >&2
+            exit 1
+        fi
+    done
+done
+
+echo "  ok: dot package names stop before source preference side effects"
 
 # P0-2: add-src is a streaming mutation with cumulative assignment scope.
 setup_case add-src-streaming

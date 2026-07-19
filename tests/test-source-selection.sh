@@ -372,6 +372,27 @@ if [ ! -f "$revert_src_path" ]; then
     exit 1
 fi
 
+# Auto source selectionはpreference lookupやrepository/AUR probeより先にpackage名を検証する。
+for dot_target in . ..; do
+    case $dot_target in
+        .) dot_target_label=dot ;;
+        ..) dot_target_label=dot-dot ;;
+    esac
+    setup_case "auto-install-reject-$dot_target_label"
+    printf 'SOURCE_PREFERENCE_GUARD=yes\n' > "$JPACKER_TEST_PACKAGE_BUILD_DIR/root-guard"
+    preference_checksum=$(cksum "$JPACKER_TEST_PACKAGE_BUILD_DIR/root-guard")
+
+    run_fail -S "$dot_target"
+
+    assert_contains "Invalid package name: $dot_target" "$output_file"
+    assert_command_log_empty
+    assert_request_log_empty
+    if [ "$(cksum "$JPACKER_TEST_PACKAGE_BUILD_DIR/root-guard")" != "$preference_checksum" ]; then
+        echo "source selection changed the source preference fixture for $dot_target" >&2
+        exit 1
+    fi
+done
+
 # Matrix A: selector parse、option value、opaque operand、conflict。
 run_exact option-value-aur \
     "pacman -Q --root --aur filesystem" \
