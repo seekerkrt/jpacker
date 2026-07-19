@@ -4,9 +4,25 @@ set -eu
 printf 'jpacker-test-editor %s\n' "$*" >> "$JPACKER_TEST_COMMAND_LOG"
 
 target=
+argument_index=0
+if [ -n "${JPACKER_TEST_EDITOR_ARGV_LOG:-}" ]; then
+    printf 'argv-begin\n' >> "$JPACKER_TEST_EDITOR_ARGV_LOG"
+fi
 for editor_arg in "$@"; do
     target=$editor_arg
+    if [ -n "${JPACKER_TEST_EDITOR_ARGV_LOG:-}" ]; then
+        printf 'arg[%s]=<%s>\n' "$argument_index" "$editor_arg" >> "$JPACKER_TEST_EDITOR_ARGV_LOG"
+    fi
+    argument_index=$((argument_index + 1))
 done
+if [ -n "${JPACKER_TEST_EDITOR_ARGV_LOG:-}" ]; then
+    printf 'target=<%s>\n' "$target" >> "$JPACKER_TEST_EDITOR_ARGV_LOG"
+    printf 'argv-end\n' >> "$JPACKER_TEST_EDITOR_ARGV_LOG"
+fi
+
+if [ -n "${JPACKER_TEST_EDITOR_EXIT_CODE:-}" ]; then
+    exit "$JPACKER_TEST_EDITOR_EXIT_CODE"
+fi
 
 if [ -n "${JPACKER_TEST_EDITOR_REPLACE_TARGET:-}" ] &&
    [ "$target" = "$JPACKER_TEST_EDITOR_REPLACE_TARGET" ]; then
