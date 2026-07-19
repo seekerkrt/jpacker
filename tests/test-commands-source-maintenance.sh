@@ -90,6 +90,10 @@ setup_case() {
     unset JPACKER_TEST_SOURCE_MAINTENANCE_EDITOR_SNAPSHOT_FILE
     unset JPACKER_TEST_SOURCE_MAINTENANCE_EDITOR_APPEND_LINE
     unset JPACKER_TEST_SOURCE_MAINTENANCE_EDITOR_FAIL_SUBSTRING
+    unset JPACKER_TEST_SOURCE_MAINTENANCE_EDITOR_REPLACEMENT_KIND
+    unset JPACKER_TEST_SOURCE_MAINTENANCE_EDITOR_REPLACEMENT_SUBSTRING
+    unset JPACKER_TEST_SOURCE_MAINTENANCE_EDITOR_REPLACEMENT_TARGET
+    unset JPACKER_TEST_SOURCE_MAINTENANCE_EDITOR_REPLACEMENT_SOURCE
     unset EDITOR
 }
 
@@ -109,6 +113,37 @@ run_fail() {
     : > "$request_log"
     if "$test_binary" "$@" > "$output_file" 2>&1; then
         echo "expected command to fail: $*" >&2
+        sed -n '1,260p' "$output_file" >&2
+        cat "$command_log" >&2
+        exit 1
+    fi
+}
+
+run_ok_stdin_closed() {
+    : > "$command_log"
+    : > "$request_log"
+    if ! "$test_binary" "$@" <&- > "$output_file" 2>&1; then
+        echo "expected command with closed stdin to succeed: $*" >&2
+        sed -n '1,260p' "$output_file" >&2
+        cat "$command_log" >&2
+        exit 1
+    fi
+}
+
+run_fail_nonblocking() {
+    : > "$command_log"
+    : > "$request_log"
+    exit_code=0
+    if timeout 5 "$test_binary" "$@" > "$output_file" 2>&1; then
+        echo "expected command to fail without blocking: $*" >&2
+        sed -n '1,260p' "$output_file" >&2
+        cat "$command_log" >&2
+        exit 1
+    else
+        exit_code=$?
+    fi
+    if [ "$exit_code" -eq 124 ]; then
+        echo "command blocked until timeout: $*" >&2
         sed -n '1,260p' "$output_file" >&2
         cat "$command_log" >&2
         exit 1
@@ -437,7 +472,7 @@ assert_file_equals "$case_dir/alpha.expected" "$preference_dir/beta"
 
 echo "  ok: P0-2 cmd_add_src"
 
-# P0-3: edit-src temp lifecycle, editor precedence, and target-local continuation.
+# P0-3: edit-src pins the user-opened source fd and gives root only /dev/stdin + destination.
 setup_case edit-src-config-editor
 printf 'CFLAGS=-Oexisting\n' > "$preference_dir/alpha"
 printf 'CFLAGS=-Oexisting\n' > "$case_dir/existing.expected"
@@ -455,10 +490,28 @@ case $editor_command in
         ;;
 esac
 edit_temp_path=${editor_command##* }
-assert_command_at 2 "sudo install -Dm644 $edit_temp_path $preference_dir/alpha"
+assert_command_at 2 "sudo install -Dm644 -- /dev/stdin $preference_dir/alpha"
+privileged_command=$(sed -n '2p' "$command_log")
+case $privileged_command in
+    *"$edit_temp_path"*)
+        echo "privileged command exposed temporary pathname: $privileged_command" >&2
+        exit 1
+        ;;
+esac
+assert_contains "Running: sudo install -Dm644 -- /dev/stdin '$preference_dir/alpha'" "$output_file"
+logged_install_count=$(grep -Fc -- "Running: sudo install -Dm644 -- /dev/stdin '$preference_dir/alpha'" "$output_file" || true)
+if [ "$logged_install_count" -ne 1 ]; then
+    echo "privileged install command was not logged exactly once" >&2
+    sed -n '1,260p' "$output_file" >&2
+    exit 1
+fi
 assert_file_equals "$case_dir/existing.expected" "$case_dir/editor.snapshot"
 printf 'CFLAGS=-Oexisting\nLDFLAGS=-Wl,--as-needed\n' > "$case_dir/edited.expected"
 assert_file_equals "$case_dir/edited.expected" "$preference_dir/alpha"
+if [ "$(stat -c '%a' "$preference_dir/alpha")" != "644" ]; then
+    echo "edit-src destination mode is not 0644" >&2
+    exit 1
+fi
 assert_path_absent "$edit_temp_path"
 
 setup_case edit-src-environment-editor
@@ -475,6 +528,45 @@ case $editor_command in
         exit 1
         ;;
 esac
+assert_command_at 2 "sudo install -Dm644 -- /dev/stdin $preference_dir/alpha"
+
+setup_case edit-src-create-missing-preference
+export EDITOR=jpacker-test-editor
+export JPACKER_TEST_SOURCE_MAINTENANCE_EDITOR_APPEND_LINE='CREATED=yes'
+run_ok edit-src alpha
+editor_command=$(sed -n '1p' "$command_log")
+edit_temp_path=${editor_command##* }
+printf 'CREATED=yes\n' > "$case_dir/created.expected"
+assert_file_equals "$case_dir/created.expected" "$preference_dir/alpha"
+assert_command_at 2 "sudo install -Dm644 -- /dev/stdin $preference_dir/alpha"
+assert_path_absent "$edit_temp_path"
+
+setup_case edit-src-empty-content
+: > "$case_dir/replacement-content"
+export EDITOR=jpacker-test-editor
+export JPACKER_TEST_SOURCE_MAINTENANCE_EDITOR_REPLACEMENT_KIND=regular
+export JPACKER_TEST_SOURCE_MAINTENANCE_EDITOR_REPLACEMENT_SOURCE=$case_dir/replacement-content
+run_ok edit-src alpha
+editor_command=$(sed -n '1p' "$command_log")
+edit_temp_path=${editor_command##* }
+assert_file_equals "$case_dir/replacement-content" "$preference_dir/alpha"
+assert_path_absent "$edit_temp_path"
+
+setup_case edit-src-no-final-newline
+printf 'NO_FINAL_NEWLINE' > "$case_dir/replacement-content"
+export EDITOR=jpacker-test-editor
+export JPACKER_TEST_SOURCE_MAINTENANCE_EDITOR_REPLACEMENT_KIND=regular
+export JPACKER_TEST_SOURCE_MAINTENANCE_EDITOR_REPLACEMENT_SOURCE=$case_dir/replacement-content
+run_ok edit-src alpha
+assert_file_equals "$case_dir/replacement-content" "$preference_dir/alpha"
+
+setup_case edit-src-binary-regular-replacement
+printf 'BINARY\000PAYLOAD\n' > "$case_dir/replacement-content"
+export EDITOR=jpacker-test-editor
+export JPACKER_TEST_SOURCE_MAINTENANCE_EDITOR_REPLACEMENT_KIND=regular
+export JPACKER_TEST_SOURCE_MAINTENANCE_EDITOR_REPLACEMENT_SOURCE=$case_dir/replacement-content
+run_ok edit-src alpha
+assert_file_equals "$case_dir/replacement-content" "$preference_dir/alpha"
 
 setup_case edit-src-editor-failure
 printf 'CFLAGS=-Oexisting\n' > "$preference_dir/alpha"
@@ -487,6 +579,54 @@ assert_contains "Editor failed for $preference_dir/alpha" "$output_file"
 assert_path_absent "$edit_temp_path"
 assert_command_content_absent "sudo install"
 
+setup_case edit-src-reject-symlink
+printf 'ORIGINAL=yes\n' > "$preference_dir/alpha"
+printf 'ORIGINAL=yes\n' > "$case_dir/original.expected"
+printf 'UNREVIEWED=yes\n' > "$case_dir/symlink-target"
+export EDITOR=jpacker-test-editor
+export JPACKER_TEST_SOURCE_MAINTENANCE_EDITOR_REPLACEMENT_KIND=symlink
+export JPACKER_TEST_SOURCE_MAINTENANCE_EDITOR_REPLACEMENT_TARGET=$case_dir/symlink-target
+run_fail edit-src alpha
+editor_command=$(sed -n '1p' "$command_log")
+edit_temp_path=${editor_command##* }
+assert_contains "Failed to open edited temporary file $edit_temp_path" "$output_file"
+assert_total_command_count 1
+assert_path_absent "$edit_temp_path"
+assert_file_equals "$case_dir/original.expected" "$preference_dir/alpha"
+
+setup_case edit-src-reject-directory
+printf 'ORIGINAL=yes\n' > "$preference_dir/alpha"
+export EDITOR=jpacker-test-editor
+export JPACKER_TEST_SOURCE_MAINTENANCE_EDITOR_REPLACEMENT_KIND=directory
+run_fail edit-src alpha
+editor_command=$(sed -n '1p' "$command_log")
+edit_temp_path=${editor_command##* }
+assert_contains "Edited temporary file is not a regular file: $edit_temp_path" "$output_file"
+assert_total_command_count 1
+assert_path_absent "$edit_temp_path"
+
+setup_case edit-src-reject-fifo-without-blocking
+printf 'ORIGINAL=yes\n' > "$preference_dir/alpha"
+export EDITOR=jpacker-test-editor
+export JPACKER_TEST_SOURCE_MAINTENANCE_EDITOR_REPLACEMENT_KIND=fifo
+run_fail_nonblocking edit-src alpha
+editor_command=$(sed -n '1p' "$command_log")
+edit_temp_path=${editor_command##* }
+assert_contains "Edited temporary file is not a regular file: $edit_temp_path" "$output_file"
+assert_total_command_count 1
+assert_path_absent "$edit_temp_path"
+
+setup_case edit-src-reject-missing-source
+printf 'ORIGINAL=yes\n' > "$preference_dir/alpha"
+export EDITOR=jpacker-test-editor
+export JPACKER_TEST_SOURCE_MAINTENANCE_EDITOR_REPLACEMENT_KIND=missing
+run_fail edit-src alpha
+editor_command=$(sed -n '1p' "$command_log")
+edit_temp_path=${editor_command##* }
+assert_contains "Failed to open edited temporary file $edit_temp_path" "$output_file"
+assert_total_command_count 1
+assert_path_absent "$edit_temp_path"
+
 setup_case edit-src-install-failure
 printf 'CFLAGS=-Oexisting\n' > "$preference_dir/alpha"
 printf 'CFLAGS=-Oexisting\n' > "$case_dir/existing.expected"
@@ -496,6 +636,7 @@ export JPACKER_TEST_SOURCE_MAINTENANCE_FAIL_SUBSTRING='install -Dm644'
 run_fail edit-src alpha
 editor_command=$(sed -n '1p' "$command_log")
 edit_temp_path=${editor_command##* }
+assert_command_at 2 "sudo install -Dm644 -- /dev/stdin $preference_dir/alpha"
 assert_contains "edited file kept at $edit_temp_path" "$output_file"
 if [ ! -f "$edit_temp_path" ]; then
     echo "edit-src removed the retained file after install failure" >&2
@@ -505,7 +646,7 @@ assert_contains "EDITED=yes" "$edit_temp_path"
 assert_file_equals "$case_dir/existing.expected" "$preference_dir/alpha"
 rm -f "$edit_temp_path"
 
-setup_case edit-src-continues
+setup_case edit-src-editor-failure-continues
 printf 'FIRST=original\n' > "$preference_dir/first"
 printf 'SECOND=original\n' > "$preference_dir/second"
 export EDITOR=jpacker-test-editor
@@ -520,15 +661,48 @@ case $second_editor_command in
     "jpacker-test-editor /tmp/jpacker-edit-src-second."??????)
         ;;
     *)
-        echo "edit-src did not continue to second target" >&2
+        echo "edit-src did not continue after editor failure" >&2
         cat "$command_log" >&2
         exit 1
         ;;
 esac
-assert_command_at 3 "sudo install -Dm644 $second_temp_path $preference_dir/second"
+assert_command_at 3 "sudo install -Dm644 -- /dev/stdin $preference_dir/second"
 assert_path_absent "$first_temp_path"
 assert_path_absent "$second_temp_path"
 assert_contains "EDITED=yes" "$preference_dir/second"
+
+setup_case edit-src-source-validation-continues
+printf 'FIRST=original\n' > "$preference_dir/first"
+printf 'SECOND=original\n' > "$preference_dir/second"
+printf 'UNREVIEWED=yes\n' > "$case_dir/symlink-target"
+export EDITOR=jpacker-test-editor
+export JPACKER_TEST_SOURCE_MAINTENANCE_EDITOR_APPEND_LINE='EDITED=yes'
+export JPACKER_TEST_SOURCE_MAINTENANCE_EDITOR_REPLACEMENT_KIND=symlink
+export JPACKER_TEST_SOURCE_MAINTENANCE_EDITOR_REPLACEMENT_SUBSTRING=jpacker-edit-src-first.
+export JPACKER_TEST_SOURCE_MAINTENANCE_EDITOR_REPLACEMENT_TARGET=$case_dir/symlink-target
+run_fail edit-src first second
+first_editor_command=$(sed -n '1p' "$command_log")
+second_editor_command=$(sed -n '2p' "$command_log")
+first_temp_path=${first_editor_command##* }
+second_temp_path=${second_editor_command##* }
+assert_contains "Failed to open edited temporary file $first_temp_path" "$output_file"
+assert_command_at 3 "sudo install -Dm644 -- /dev/stdin $preference_dir/second"
+assert_path_absent "$first_temp_path"
+assert_path_absent "$second_temp_path"
+assert_contains "EDITED=yes" "$preference_dir/second"
+
+setup_case edit-src-source-fd-zero
+: > "$case_dir/log-parent"
+{
+    printf 'EDITOR=jpacker-test-editor\n'
+    printf 'LOGFILE=%s\n' "$case_dir/log-parent/jpacker.log"
+} > "$config_file"
+printf 'FD_ZERO\000PAYLOAD' > "$case_dir/replacement-content"
+export JPACKER_TEST_SOURCE_MAINTENANCE_EDITOR_REPLACEMENT_KIND=regular
+export JPACKER_TEST_SOURCE_MAINTENANCE_EDITOR_REPLACEMENT_SOURCE=$case_dir/replacement-content
+run_ok_stdin_closed edit-src alpha
+assert_command_at 2 "sudo install -Dm644 -- /dev/stdin $preference_dir/alpha"
+assert_file_equals "$case_dir/replacement-content" "$preference_dir/alpha"
 
 echo "  ok: P0-3 cmd_edit_src"
 

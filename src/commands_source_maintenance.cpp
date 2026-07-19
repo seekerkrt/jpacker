@@ -16,6 +16,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <fcntl.h>
 #include <fstream>
 #include <iostream>
 #include <optional>
@@ -23,6 +24,7 @@
 #include <stdexcept>
 #include <string>
 #include <system_error>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <vector>
 
@@ -335,13 +337,60 @@ int cmd_edit_src(
             continue;
         }
 
-        // POLICY: /etc 配下の preference 更新だけ sudo に委譲し、編集本体は通常ユーザーの一時ファイルで行う。
-        if(run_command("sudo install -Dm644 " + shell_quote(temp_path.string()) + " " + shell_quote(p.string())) != 0) {
+        // POLICY: editorのrename型saveを許容しつつ、最終pathnameは権限昇格前にnofollowでpinする。
+        int source_fd = open(
+                temp_path.c_str(),
+                O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK);
+        if(source_fd == -1) {
+            int open_error = errno;
+            Logger::error(
+                    "Failed to open edited temporary file " + temp_path.string() + ": " +
+                    std::string(std::strerror(open_error)));
+            failed = true;
+            cleanup_temp();
+            continue;
+        }
+
+        auto close_source = [&]() {
+            if(close(source_fd) == 0) return true;
+            int close_error = errno;
+            Logger::error(
+                    "Failed to close edited temporary file " + temp_path.string() + ": " +
+                    std::string(std::strerror(close_error)));
+            return false;
+        };
+
+        struct stat source_status {};
+        if(fstat(source_fd, &source_status) != 0) {
+            int stat_error = errno;
+            Logger::error(
+                    "Failed to inspect edited temporary file " + temp_path.string() + ": " +
+                    std::string(std::strerror(stat_error)));
+            close_source();
+            failed = true;
+            cleanup_temp();
+            continue;
+        }
+        if(!S_ISREG(source_status.st_mode)) {
+            Logger::error("Edited temporary file is not a regular file: " + temp_path.string());
+            close_source();
+            failed = true;
+            cleanup_temp();
+            continue;
+        }
+
+        // POLICY: root側は固定済みstdinから読み、validated preference destinationへのwriteだけを担当する。
+        int install_status = run_command_with_stdin_fd(
+                "sudo install -Dm644 -- /dev/stdin " + shell_quote(p.string()),
+                source_fd);
+        bool source_closed = close_source();
+        if(install_status != 0) {
             Logger::error("Failed to install edited source-build preference to " + p.string() + "; edited file kept at " + temp_path.string());
             failed = true;
             continue;
         }
 
+        if(!source_closed) failed = true;
         cleanup_temp();
     }
     return failed ? 1 : 0;
