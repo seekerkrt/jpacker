@@ -3,6 +3,7 @@
 #include "dependency_spec.hpp"
 #include "package_identifier.hpp"
 #include "process.hpp"
+#include "shell_words.hpp"
 
 #include <algorithm>
 #include <filesystem>
@@ -16,25 +17,12 @@ namespace {
 
 namespace fs = std::filesystem;
 
-// repository queryをmonolithへ逆依存させず、汎用utilityを公開しないためのlocal helper。
+// repository query固有のoutput parsingは、汎用string utilityへ持ち上げず局所保持する。
 std::string trim(const std::string& str) {
     size_t first = str.find_first_not_of(" \t\n\r");
     if(first == std::string::npos) return "";
     size_t last = str.find_last_not_of(" \t\n\r");
     return str.substr(first, (last - first + 1));
-}
-
-std::string shell_quote(const std::string& str) {
-    // POLICY: 外部コマンド引数は、validation 済みの値でも shell 境界では必ず quote する。
-    std::string quoted = "'";
-    for(char ch : str) {
-        if(ch == '\'')
-            quoted += "'\\''";
-        else
-            quoted += ch;
-    }
-    quoted += "'";
-    return quoted;
 }
 
 std::string repo_name_from_sync_db(const fs::path& db_path) {
@@ -151,7 +139,7 @@ const std::map<std::string, std::vector<ProvidedDependency>>& repo_providers() {
     if(!fs::exists(sync_dir)) return s_providers;
 
     for(const auto& db_path : repo_sync_db_paths(sync_dir)) {
-        std::string cmd = "bsdtar -xOf " + shell_quote(db_path.string()) + " '*/desc' 2>/dev/null";
+        std::string cmd = "bsdtar -xOf " + shell_words::quote(db_path.string()) + " '*/desc' 2>/dev/null";
         std::string desc = exec_command(cmd.c_str());
         if(desc.empty()) continue;
 
@@ -165,12 +153,12 @@ const std::map<std::string, std::vector<ProvidedDependency>>& repo_providers() {
 
 bool is_installed_package(const std::string& pkg_name) {
     if(pkg_name.empty()) return false;
-    return command_status("pacman -Q " + shell_quote(pkg_name) + " > /dev/null 2>&1") == 0;
+    return command_status("pacman -Q " + shell_words::quote(pkg_name) + " > /dev/null 2>&1") == 0;
 }
 
 bool is_repo_package(const std::string& pkg_name) {
     require_valid_package_name(pkg_name);
-    std::string cmd = "pacman -Si " + shell_quote(pkg_name) + " > /dev/null 2>&1";
+    std::string cmd = "pacman -Si " + shell_words::quote(pkg_name) + " > /dev/null 2>&1";
     return (command_status(cmd) == 0);
 }
 

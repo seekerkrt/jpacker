@@ -4,6 +4,7 @@
 #include "package_identifier.hpp"
 #include "persistent_checkout.hpp"
 #include "process.hpp"
+#include "shell_words.hpp"
 #include "trusted_cache.hpp"
 
 #include <stdexcept>
@@ -18,19 +19,6 @@ std::string trim(const std::string& str) {
     if(first == std::string::npos) return "";
     std::string::size_type last = str.find_last_not_of(" \t\n\r");
     return str.substr(first, (last - first + 1));
-}
-
-std::string shell_quote(const std::string& str) {
-    // POLICY: 外部コマンド引数は、validation 済みの値でも shell 境界では必ず quote する。
-    std::string quoted = "'";
-    for(char ch : str) {
-        if(ch == '\'')
-            quoted += "'\\''";
-        else
-            quoted += ch;
-    }
-    quoted += "'";
-    return quoted;
 }
 
 } // namespace
@@ -72,7 +60,7 @@ void fetch_persistent_checkout(
     WorkDirGuard    wd_cache(cache_root);
     DirCleanupGuard cleanup_guard(clone_path);
     if(run_command(
-               "git clone " + shell_quote(expected_remote_url) + " " + shell_quote(package_base)) != 0) {
+               "git clone " + shell_words::quote(expected_remote_url) + " " + shell_words::quote(package_base)) != 0) {
         throw std::runtime_error("Failed to clone " + package_base + ".");
     }
 
