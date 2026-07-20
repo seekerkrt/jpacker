@@ -5,6 +5,7 @@
 #include "package_identifier.hpp"
 #include "persistent_checkout.hpp"
 #include "process.hpp"
+#include "shell_words.hpp"
 #include "trusted_cache.hpp"
 
 #include <algorithm>
@@ -57,19 +58,6 @@ std::string to_lower(std::string str) {
     return str;
 }
 
-std::string shell_quote(const std::string& str) {
-    // POLICY: 外部コマンド引数は、validation 済みの値でも shell 境界では必ず quote する。
-    std::string quoted = "'";
-    for(char ch : str) {
-        if(ch == '\'')
-            quoted += "'\\''";
-        else
-            quoted += ch;
-    }
-    quoted += "'";
-    return quoted;
-}
-
 bool is_safe_command_token(const std::string& token) {
     if(token.empty()) return false;
     return std::all_of(token.begin(), token.end(), [](unsigned char ch) {
@@ -92,15 +80,6 @@ std::vector<std::string> split_command_words(const std::string& command) {
         throw std::runtime_error("Editor command is empty.");
     }
     return words;
-}
-
-std::string join_shell_args(const std::vector<std::string>& args) {
-    std::stringstream ss;
-    for(size_t i = 0; i < args.size(); ++i) {
-        if(i > 0) ss << " ";
-        ss << shell_quote(args[i]);
-    }
-    return ss.str();
 }
 
 std::string join_comma_display_values(const std::vector<std::string>& values) {
@@ -194,7 +173,7 @@ std::string makepkg_install_command(
     if(options.rm_deps) args.push_back("-r");
     // POLICY(#169): jpacker独自のbuild skip判定は追加せず、再install要否だけをmakepkg/pacmanへ委ねる。
     if(options.needed) args.push_back("--needed");
-    return join_shell_args(args);
+    return shell_words::join(args);
 }
 
 std::string build_editor_command(const std::string& editor, const fs::path& target) {
@@ -205,7 +184,7 @@ std::string build_editor_command(const std::string& editor, const fs::path& targ
         editor_target = fs::path(".") / editor_target;
     }
     args.push_back(editor_target.string());
-    return join_shell_args(args);
+    return shell_words::join(args);
 }
 
 std::string get_git_branch() {
@@ -231,7 +210,7 @@ std::vector<std::string> split_lines(const std::string& text) {
 }
 
 std::vector<std::string> git_changed_files(const std::string& range) {
-    std::string cmd = "git diff --name-only " + shell_quote(range) + " 2>/dev/null";
+    std::string cmd = "git diff --name-only " + shell_words::quote(range) + " 2>/dev/null";
     return split_lines(exec_command(cmd.c_str()));
 }
 
@@ -337,7 +316,7 @@ std::optional<std::string> read_srcinfo_version(const fs::path& pkg_dir) {
 
 UpdateCheckResult check_update_status(const std::string& pkg_name, const fs::path& pkg_dir) {
     require_valid_package_name(pkg_name);
-    std::string installed_full = exec_command(("pacman -Q " + shell_quote(pkg_name) + " 2>/dev/null").c_str());
+    std::string installed_full = exec_command(("pacman -Q " + shell_words::quote(pkg_name) + " 2>/dev/null").c_str());
     if(installed_full.empty()) {
         return UpdateCheckResult::NeedsBuild;// インストールされていないのでビルド必要
     }
@@ -349,7 +328,7 @@ UpdateCheckResult check_update_status(const std::string& pkg_name, const fs::pat
     std::optional<std::string> new_ver = read_srcinfo_version(pkg_dir);
     if(!new_ver.has_value()) return UpdateCheckResult::Unknown;
 
-    std::string cmp_cmd = "vercmp " + shell_quote(new_ver.value()) + " " + shell_quote(installed_ver) + " 2>/dev/null";
+    std::string cmp_cmd = "vercmp " + shell_words::quote(new_ver.value()) + " " + shell_words::quote(installed_ver) + " 2>/dev/null";
     std::string cmp_res = exec_command(cmp_cmd.c_str());
 
     try {
@@ -449,14 +428,14 @@ void execute_source_build(
 
                 if(!config.no_diff) {
                     std::string remote_ref = "origin/" + branch;
-                    int diff_ret = run_command("git diff --quiet " + shell_quote("HEAD.." + remote_ref));
+                    int diff_ret = run_command("git diff --quiet " + shell_words::quote("HEAD.." + remote_ref));
                     if(diff_ret > 1) {
                         throw std::runtime_error("Failed to compare repository changes.");
                     }
                     if(diff_ret == 1) {
                         log_update_diff_guidance("HEAD.." + remote_ref);
                         if(ask_user("Updates detected in existing cache repository. View git diff?", PromptDefault::No, config)) {
-                            run_command("git diff " + shell_quote("HEAD.." + remote_ref) + " --color=always");
+                            run_command("git diff " + shell_words::quote("HEAD.." + remote_ref) + " --color=always");
                         }
                     }
                 }
@@ -465,7 +444,7 @@ void execute_source_build(
                 pkg_path = revalidate_trusted_cache_path(
                         pkg_path, CachePathRequirement::ExistingDirectory);
                 require_safe_persistent_checkout_descendants(pkg_path);
-                if(run_command("git reset --hard " + shell_quote("origin/" + branch)) != 0) {
+                if(run_command("git reset --hard " + shell_words::quote("origin/" + branch)) != 0) {
                     throw std::runtime_error("Failed to reset repository.");
                 }
                 pkg_path = revalidate_trusted_cache_path(
@@ -483,7 +462,7 @@ void execute_source_build(
                     build_root, request.checkout_name, CachePathRequirement::Missing);
             Logger::info("Cloning repository...");
             DirCleanupGuard cleanup_guard(pkg_path);
-            if(run_command("git clone " + shell_quote(request.git_url) + " " + shell_quote(request.checkout_name)) != 0) {
+            if(run_command("git clone " + shell_words::quote(request.git_url) + " " + shell_words::quote(request.checkout_name)) != 0) {
                 throw std::runtime_error("Failed to clone " + request.checkout_name);
             }
 

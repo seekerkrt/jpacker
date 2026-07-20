@@ -4,6 +4,7 @@
 #include "logging.hpp"
 #include "package_identifier.hpp"
 #include "process.hpp"
+#include "shell_words.hpp"
 
 #include <array>
 #include <cerrno>
@@ -30,8 +31,8 @@ namespace fs = std::filesystem;
 
 const std::string AUR_BASE_URL = "https://aur.archlinux.org/";
 
-// export lifecycleをpersistent source checkoutから独立させるためのlocal helper群。
-// POLICY(#196): generic helperへ持ち上げず、各ownerが必要なpolicyをprivateに保持する。
+// export lifecycleをpersistent source checkoutから独立させるためのlocal security guard群。
+// POLICY(#196): path / URL validation policyはgeneric helperへ持ち上げず、owner内に保持する。
 std::string trim(const std::string& str) {
     size_t first = str.find_first_not_of(" \t\n\r");
     if(first == std::string::npos) return "";
@@ -42,19 +43,6 @@ std::string trim(const std::string& str) {
 bool remote_url_matches_expected(
         const std::string& current_url, const std::string& expected_url) {
     return trim(current_url) == trim(expected_url);
-}
-
-std::string shell_quote(const std::string& str) {
-    // POLICY: 外部コマンド引数は、validation済みの値でもshell境界では必ずquoteする。
-    std::string quoted = "'";
-    for(char ch : str) {
-        if(ch == '\'')
-            quoted += "'\\''";
-        else
-            quoted += ch;
-    }
-    quoted += "'";
-    return quoted;
 }
 
 bool is_path_contained(const fs::path& root, const fs::path& candidate, bool allow_root) {
@@ -631,7 +619,7 @@ void validate_aur_export_checkout(
     checkout.require_owned_identity();
     require_export_git_directory(checkout);
     std::string remote_command =
-            "git -C " + shell_quote(checkout.anchored_path().string()) +
+            "git -C " + shell_words::quote(checkout.anchored_path().string()) +
             " config --local --get remote.origin.url 2>/dev/null";
     CapturedCommandResult remote_result =
             capture_command_output(remote_command.c_str());
@@ -660,8 +648,8 @@ void clone_and_validate_aur_export(
         const AurExportSource& source, const TemporaryDirectoryGuard& checkout) {
     checkout.require_owned_identity();
     std::string clone_command =
-            "git clone --quiet -- " + shell_quote(source.git_url) + " " +
-            shell_quote(checkout.anchored_path().string()) + " > /dev/null";
+            "git clone --quiet -- " + shell_words::quote(source.git_url) + " " +
+            shell_words::quote(checkout.anchored_path().string()) + " > /dev/null";
     if(run_command(clone_command) != 0) {
         throw std::runtime_error("Failed to clone AUR PackageBase " + source.package_base + ".");
     }

@@ -20,6 +20,7 @@
 #include "commands_sync.hpp"
 #include "logging.hpp"
 #include "process.hpp"
+#include "shell_words.hpp"
 #include "trusted_cache.hpp"
 
 #include <algorithm>
@@ -29,7 +30,6 @@
 #include <filesystem>
 #include <iostream>
 #include <optional>
-#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -64,11 +64,7 @@ void print_help();
 bool handle_info_only_option(int argc, char* argv[]);
 bool argv_requests_pkgbuild_export_diagnostics(int argc, char* argv[]);
 
-// 文字列 / path
-std::string shell_quote(const std::string& str);
-
 // shell引数 / command construction
-std::string join_shell_args(const std::vector<std::string>& args);
 std::vector<std::string> pacman_args_with_global_options(std::vector<std::string> args);
 std::string join_pacman_args(const std::vector<std::string>& args);
 
@@ -417,30 +413,7 @@ bool handle_info_only_option(int argc, char* argv[]) {
     return false;
 }
 
-// 文字列 / path
-std::string shell_quote(const std::string& str) {
-    // POLICY: 外部コマンド引数は、validation 済みの値でも shell 境界では必ず quote する。
-    std::string quoted = "'";
-    for(char ch : str) {
-        if(ch == '\'')
-            quoted += "'\\''";
-        else
-            quoted += ch;
-    }
-    quoted += "'";
-    return quoted;
-}
-
 // shell引数 / command construction
-std::string join_shell_args(const std::vector<std::string>& args) {
-    std::stringstream ss;
-    for(size_t i = 0; i < args.size(); ++i) {
-        if(i > 0) ss << " ";
-        ss << shell_quote(args[i]);
-    }
-    return ss.str();
-}
-
 std::vector<std::string> pacman_args_with_global_options(std::vector<std::string> args) {
     if(g_config.no_confirm) {
         // POLICY(#173): generated optionはoperation直後へ置き、semantic `--`やoption valueを再解釈しない。
@@ -454,7 +427,7 @@ std::vector<std::string> pacman_args_with_global_options(std::vector<std::string
 }
 
 std::string join_pacman_args(const std::vector<std::string>& args) {
-    return join_shell_args(pacman_args_with_global_options(args));
+    return shell_words::join(pacman_args_with_global_options(args));
 }
 
 // pacman / repository補助
