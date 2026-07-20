@@ -9,6 +9,7 @@
 #include "pkgbuild_export.hpp"
 #include "process.hpp"
 #include "repository_query.hpp"
+#include "shell_words.hpp"
 
 #include <algorithm>
 #include <cstddef>
@@ -28,25 +29,12 @@ namespace {
 
 const std::string AUR_BASE_URL = "https://aur.archlinux.org/";
 
-// 他consumerを持つjpacker.cpp側helperとは、translation unitを跨ぐutility APIを作らず局所重複する。
+// inspection固有のtrimは、domain contractを汎用string utilityへ持ち上げず局所保持する。
 std::string trim(const std::string& str) {
     size_t first = str.find_first_not_of(" \t\n\r");
     if(first == std::string::npos) return "";
     size_t last = str.find_last_not_of(" \t\n\r");
     return str.substr(first, (last - first + 1));
-}
-
-std::string shell_quote(const std::string& str) {
-    // POLICY: 外部コマンド引数は、validation 済みの値でも shell 境界では必ず quote する。
-    std::string quoted = "'";
-    for(char ch : str) {
-        if(ch == '\'')
-            quoted += "'\\''";
-        else
-            quoted += ch;
-    }
-    quoted += "'";
-    return quoted;
 }
 
 std::string join_comma_display_values(const std::vector<std::string>& values) {
@@ -64,7 +52,7 @@ std::string aur_git_url_for_package_base(const std::string& package_base) {
 }
 
 bool aur_version_is_newer(const std::string& aur_version, const std::string& installed_version) {
-    std::string cmp_cmd = "vercmp " + shell_quote(aur_version) + " " + shell_quote(installed_version);
+    std::string cmp_cmd = "vercmp " + shell_words::quote(aur_version) + " " + shell_words::quote(installed_version);
     std::string cmp_res = exec_command(cmp_cmd.c_str());
 
     try {

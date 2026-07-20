@@ -8,6 +8,7 @@
 #include "package_identifier.hpp"
 #include "process.hpp"
 #include "repository_query.hpp"
+#include "shell_words.hpp"
 #include "source_install.hpp"
 #include "source_preference.hpp"
 
@@ -26,28 +27,6 @@
 // POLICY: runnerのconfig ownerとtop-level catchは維持し、source_installへCLI policyを逆流させない。
 namespace {
 
-std::string shell_quote(const std::string& str) {
-    // POLICY: 外部コマンド引数は、validation 済みの値でも shell 境界では必ず quote する。
-    std::string quoted = "'";
-    for(char ch : str) {
-        if(ch == '\'')
-            quoted += "'\\''";
-        else
-            quoted += ch;
-    }
-    quoted += "'";
-    return quoted;
-}
-
-std::string join_shell_args(const std::vector<std::string>& args) {
-    std::stringstream ss;
-    for(size_t i = 0; i < args.size(); ++i) {
-        if(i > 0) ss << " ";
-        ss << shell_quote(args[i]);
-    }
-    return ss.str();
-}
-
 std::vector<std::string> pacman_args_with_global_options(
         std::vector<std::string> args, const AppConfig& config) {
     if(config.no_confirm) {
@@ -63,7 +42,7 @@ std::vector<std::string> pacman_args_with_global_options(
 
 std::string join_pacman_args(
         const std::vector<std::string>& args, const AppConfig& config) {
-    return join_shell_args(pacman_args_with_global_options(args, config));
+    return shell_words::join(pacman_args_with_global_options(args, config));
 }
 
 void preflight_aur_search_schema(const std::vector<std::string>& keywords) {

@@ -1,6 +1,7 @@
 #include "source_preference.hpp"
 
 #include "package_identifier.hpp"
+#include "shell_words.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -110,18 +111,6 @@ std::string expand_config_vars(
     return value;
 }
 
-std::string shell_quote(const std::string& str) {
-    std::string quoted = "'";
-    for(char ch : str) {
-        if(ch == '\'')
-            quoted += "'\\''";
-        else
-            quoted += ch;
-    }
-    quoted += "'";
-    return quoted;
-}
-
 } // namespace
 
 std::filesystem::path source_preference_root() {
@@ -179,7 +168,7 @@ std::string get_package_env(
             }
             variables[key] = value;
             if(!value.empty()) {
-                environment += key + "=" + shell_quote(value) + " ";
+                environment += key + "=" + shell_words::quote(value) + " ";
             }
         } else if(line.find('=') != std::string::npos && on_warning) {
             on_warning("Ignoring invalid environment assignment: " + trim(line));

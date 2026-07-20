@@ -6,6 +6,7 @@
 #include "package_identifier.hpp"
 #include "process.hpp"
 #include "repository_query.hpp"
+#include "shell_words.hpp"
 #include "source_install.hpp"
 #include "source_preference.hpp"
 #include "trusted_cache.hpp"
@@ -52,19 +53,6 @@ std::string to_lower(std::string str) {
     return str;
 }
 
-std::string shell_quote(const std::string& str) {
-    // POLICY: 外部コマンド引数は、validation 済みの値でも shell 境界では必ず quote する。
-    std::string quoted = "'";
-    for(char ch : str) {
-        if(ch == '\'')
-            quoted += "'\\''";
-        else
-            quoted += ch;
-    }
-    quoted += "'";
-    return quoted;
-}
-
 bool is_safe_command_token(const std::string& token) {
     if(token.empty()) return false;
     return std::all_of(token.begin(), token.end(), [](unsigned char ch) {
@@ -89,15 +77,6 @@ std::vector<std::string> split_command_words(const std::string& command) {
     return words;
 }
 
-std::string join_shell_args(const std::vector<std::string>& args) {
-    std::stringstream ss;
-    for(size_t i = 0; i < args.size(); ++i) {
-        if(i > 0) ss << " ";
-        ss << shell_quote(args[i]);
-    }
-    return ss.str();
-}
-
 std::vector<std::string> pacman_args_with_global_options(
         std::vector<std::string> args,
         const AppConfig& config) {
@@ -115,13 +94,13 @@ std::vector<std::string> pacman_args_with_global_options(
 std::string join_pacman_args(
         const std::vector<std::string>& args,
         const AppConfig& config) {
-    return join_shell_args(pacman_args_with_global_options(args, config));
+    return shell_words::join(pacman_args_with_global_options(args, config));
 }
 
 std::string build_editor_command(const std::string& editor, const fs::path& target) {
     std::vector<std::string> args = split_command_words(editor);
     args.push_back(target.string());
-    return join_shell_args(args);
+    return shell_words::join(args);
 }
 
 std::optional<bool> prompt_default_value(PromptDefault default_answer) {
@@ -209,7 +188,7 @@ int cmd_build(
     for(const auto& arg : args) {
         std::string key, val;
         if(split_env_assignment(arg, key, val))
-            custom_env += key + "=" + shell_quote(val) + " ";
+            custom_env += key + "=" + shell_words::quote(val) + " ";
         else if(arg.find('=') != std::string::npos) {
             Logger::error("Invalid environment assignment: " + arg);
             return 1;
@@ -241,7 +220,7 @@ int cmd_add_src(const std::vector<std::string>& args) {
         if(arg.find('=') == std::string::npos) {
             // POLICY: 1 package = 1 preference file。ファイル名は package name validation で固定する。
             fs::path p = source_preference_entry_path(arg);
-            if(run_command("sudo touch " + shell_quote(p.string())) != 0) {
+            if(run_command("sudo touch " + shell_words::quote(p.string())) != 0) {
                 Logger::error("Failed to add " + arg);
                 failed = true;
             } else {
@@ -256,7 +235,7 @@ int cmd_add_src(const std::vector<std::string>& args) {
             }
             for(const auto& pkg_path : current_pkgs) {
                 Logger::info("   -> Appending " + arg + " to " + pkg_path);
-                if(run_command("printf '%s\\n' " + shell_quote(key + "=" + val) + " | sudo tee -a " + shell_quote(pkg_path) + " > /dev/null") != 0) {
+                if(run_command("printf '%s\\n' " + shell_words::quote(key + "=" + val) + " | sudo tee -a " + shell_words::quote(pkg_path) + " > /dev/null") != 0) {
                     Logger::error("Failed to append " + key + " to " + pkg_path);
                     failed = true;
                 }
@@ -381,7 +360,7 @@ int cmd_edit_src(
 
         // POLICY: root側は固定済みstdinから読み、validated preference destinationへのwriteだけを担当する。
         int install_status = run_command_with_stdin_fd(
-                "sudo install -Dm644 -- /dev/stdin " + shell_quote(p.string()),
+                "sudo install -Dm644 -- /dev/stdin " + shell_words::quote(p.string()),
                 source_fd);
         bool source_closed = close_source();
         if(install_status != 0) {
@@ -423,7 +402,7 @@ int cmd_del_src(const std::vector<std::string>& targets) {
     for(const auto& pkg : targets) {
         fs::path p = source_preference_entry_path(pkg);
         Logger::info("Removing " + pkg + " from list...");
-        if(run_command("sudo rm -f " + shell_quote(p.string())) != 0) {
+        if(run_command("sudo rm -f " + shell_words::quote(p.string())) != 0) {
             Logger::error("Failed to remove " + pkg);
             failed = true;
         }
@@ -440,7 +419,7 @@ void cmd_revert(
         fs::path p = source_preference_entry_path(pkg);
         if(fs::exists(p)) {
             Logger::info("Unmarking source-build for " + pkg);
-            if(run_command("sudo rm -f " + shell_quote(p.string())) != 0) {
+            if(run_command("sudo rm -f " + shell_words::quote(p.string())) != 0) {
                 Logger::error("Failed to remove " + pkg);
                 failed = true;
                 continue;
@@ -454,7 +433,7 @@ void cmd_revert(
             Logger::info(pkg + " is likely an AUR package. Config removed only.");
     }
     if(!reinstall_targets.empty()) {
-        std::string pkg_list = join_shell_args(reinstall_targets);
+        std::string pkg_list = shell_words::join(reinstall_targets);
         std::vector<std::string> pacman_args = {"-S"};
         pacman_args.insert(pacman_args.end(), reinstall_targets.begin(), reinstall_targets.end());
         Logger::info("Reinstalling binaries: " + pkg_list);
