@@ -134,8 +134,10 @@ test-pacman-routing: $(TEST_TARGET)
 test-build-cache-symlink: $(TEST_TARGET)
 	sh tests/test-build-cache-symlink.sh $(abspath $(TEST_TARGET))
 
-test-source-build: $(TEST_TARGET)
-	sh tests/test-source-build.sh $(abspath $(TEST_TARGET))
+test-source-build: $(TEST_TARGET) $(APP_CONFIG_INTEGRATION_TEST_TARGET)
+	sh tests/test-source-build.sh \
+		$(abspath $(TEST_TARGET)) \
+		$(abspath $(APP_CONFIG_INTEGRATION_TEST_TARGET))
 
 test-source-selection: $(TEST_TARGET)
 	sh tests/test-source-selection.sh $(abspath $(TEST_TARGET))

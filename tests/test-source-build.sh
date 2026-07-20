@@ -2,6 +2,7 @@
 set -eu
 
 test_binary=$1
+config_test_binary=$2
 repo_root=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
 tmp_dir=$(mktemp -d)
 
@@ -17,7 +18,9 @@ if ! command -v script >/dev/null 2>&1; then
     exit 1
 fi
 ln -s "$test_binary" "$tmp_dir/jpacker-test"
+ln -s "$config_test_binary" "$tmp_dir/jpacker-config-test"
 test_runner=$tmp_dir/jpacker-test
+config_test_runner=$tmp_dir/jpacker-config-test
 
 export PATH=$repo_root/tests/stubs:/usr/bin:/bin
 official_url=https://gitlab.archlinux.org/archlinux/packaging/packages/clean-root.git
@@ -26,11 +29,14 @@ setup_case() {
     case_name=$1
     case_dir=$tmp_dir/cases/$case_name
     command_log=$case_dir/commands.log
+    editor_argv_log=$case_dir/editor-argv.log
     output_file=$case_dir/output
+    config_file=$case_dir/jpacker.conf
     checkout_dir=$case_dir/xdg-cache/jpacker/clean-root
 
     mkdir -p "$case_dir/home" "$case_dir/xdg-cache" "$case_dir/package.build"
     : > "$command_log"
+    : > "$editor_argv_log"
     export HOME=$case_dir/home
     export XDG_CACHE_HOME=$case_dir/xdg-cache
     export JPACKER_TEST_COMMAND_LOG=$command_log
@@ -57,6 +63,13 @@ setup_case() {
     unset JPACKER_TEST_VERCMP_OUTPUT
     unset JPACKER_TEST_VERCMP_EXIT_CODE
     unset EDITOR
+    unset JPACKER_TEST_CONFIG_FILE
+    unset JPACKER_TEST_EDITOR_ARGV_LOG
+    unset JPACKER_TEST_EDITOR_EXIT_CODE
+    unset JPACKER_TEST_EDITOR_REPLACE_TARGET
+    unset JPACKER_TEST_EDITOR_REMOVE_TARGET
+    unset JPACKER_TEST_EDITOR_SYMLINK_TARGET
+    unset JPACKER_TEST_APP_CONFIG_CASE
 }
 
 create_existing_checkout() {
@@ -79,6 +92,14 @@ write_srcinfo() {
         printf 'pkgver = %s\n' "$version"
         printf 'pkgrel = %s\n' "$release"
     } > "$checkout_dir/.SRCINFO"
+}
+
+write_editor_config() {
+    editor_command=$1
+    {
+        printf 'EDITOR=%s\n' "$editor_command"
+        printf '%s\n' 'NODIFF=true'
+    } > "$config_file"
 }
 
 run_ok() {
@@ -108,6 +129,32 @@ run_tty_ok() {
     if ! printf '%b' "$answers" |
         script -qec "$test_runner $*" /dev/null > "$output_file" 2>&1; then
         echo "expected interactive command to succeed: $*" >&2
+        sed -n '1,240p' "$output_file" >&2
+        cat "$command_log" >&2
+        exit 1
+    fi
+}
+
+run_config_tty_ok() {
+    answers=$1
+    shift
+    : > "$command_log"
+    if ! printf '%b' "$answers" |
+        script -qec "$config_test_runner $*" /dev/null > "$output_file" 2>&1; then
+        echo "expected config-aware interactive command to succeed: $*" >&2
+        sed -n '1,240p' "$output_file" >&2
+        cat "$command_log" >&2
+        exit 1
+    fi
+}
+
+run_config_tty_fail() {
+    answers=$1
+    shift
+    : > "$command_log"
+    if printf '%b' "$answers" |
+        script -qec "$config_test_runner $*" /dev/null > "$output_file" 2>&1; then
+        echo "expected config-aware interactive command to fail: $*" >&2
         sed -n '1,240p' "$output_file" >&2
         cat "$command_log" >&2
         exit 1
@@ -169,6 +216,20 @@ assert_command_before() {
     if [ -z "$first_line" ] || [ -z "$second_line" ] || [ "$first_line" -ge "$second_line" ]; then
         echo "unexpected command order: $first -> $second" >&2
         cat "$command_log" >&2
+        exit 1
+    fi
+}
+
+assert_editor_argv_log() {
+    expected=$1
+    expected_file=$case_dir/expected-editor-argv.log
+    printf '%s\n' "$expected" > "$expected_file"
+    if ! cmp "$expected_file" "$editor_argv_log" >/dev/null 2>&1; then
+        echo "unexpected editor argv log" >&2
+        echo "expected:" >&2
+        sed -n '1,240p' "$expected_file" >&2
+        echo "actual:" >&2
+        sed -n '1,240p' "$editor_argv_log" >&2
         exit 1
     fi
 }
@@ -303,5 +364,79 @@ assert_command "git clone $official_url clean-root"
 assert_command "makepkg -sic"
 assert_command_before "git clone $official_url clean-root" "makepkg -sic"
 assert_checkout_retained
+
+# Issue #226: configured editor / environment overrideの優先順位と実argv境界を固定する。
+setup_case editor-configured-argv
+create_existing_checkout
+printf 'post_install() { :; }\n' > "$checkout_dir/-option.install"
+write_editor_config 'jpacker-test-editor --configured-option'
+export JPACKER_TEST_CONFIG_FILE="$config_file"
+export JPACKER_TEST_EDITOR_ARGV_LOG="$editor_argv_log"
+run_config_tty_ok 'y\ny\ny\n' build clean-root
+assert_command "jpacker-test-editor --configured-option ./PKGBUILD"
+assert_command "jpacker-test-editor --configured-option ./-option.install"
+assert_command "makepkg -sic"
+assert_command_before "jpacker-test-editor --configured-option ./PKGBUILD" "jpacker-test-editor --configured-option ./-option.install"
+assert_command_before "jpacker-test-editor --configured-option ./-option.install" "makepkg -sic"
+assert_editor_argv_log 'argv-begin
+arg[0]=<--configured-option>
+arg[1]=<./PKGBUILD>
+target=<./PKGBUILD>
+argv-end
+argv-begin
+arg[0]=<--configured-option>
+arg[1]=<./-option.install>
+target=<./-option.install>
+argv-end'
+
+setup_case editor-environment-override-argv
+create_existing_checkout
+printf 'post_install() { :; }\n' > "$checkout_dir/-option.install"
+write_editor_config 'jpacker-test-editor --configured-option'
+export JPACKER_TEST_CONFIG_FILE="$config_file"
+export JPACKER_TEST_EDITOR_ARGV_LOG="$editor_argv_log"
+export EDITOR='jpacker-test-editor --environment-option'
+run_config_tty_ok 'y\ny\ny\n' build clean-root
+assert_command "jpacker-test-editor --environment-option ./PKGBUILD"
+assert_command "jpacker-test-editor --environment-option ./-option.install"
+assert_command_prefix_absent "jpacker-test-editor --configured-option"
+assert_not_contains "--configured-option" "$editor_argv_log"
+assert_command "makepkg -sic"
+assert_command_before "jpacker-test-editor --environment-option ./PKGBUILD" "jpacker-test-editor --environment-option ./-option.install"
+assert_command_before "jpacker-test-editor --environment-option ./-option.install" "makepkg -sic"
+assert_editor_argv_log 'argv-begin
+arg[0]=<--environment-option>
+arg[1]=<./PKGBUILD>
+target=<./PKGBUILD>
+argv-end
+argv-begin
+arg[0]=<--environment-option>
+arg[1]=<./-option.install>
+target=<./-option.install>
+argv-end'
+
+setup_case editor-configured-failure
+create_existing_checkout
+printf 'post_install() { :; }\n' > "$checkout_dir/-option.install"
+write_editor_config 'jpacker-test-editor --configured-option'
+export JPACKER_TEST_CONFIG_FILE="$config_file"
+export JPACKER_TEST_EDITOR_ARGV_LOG="$editor_argv_log"
+export JPACKER_TEST_EDITOR_EXIT_CODE=42
+run_config_tty_fail 'y\n' build clean-root
+assert_contains "Build Error: Editor failed." "$output_file"
+assert_not_contains "Edit install script -option.install?" "$output_file"
+assert_command "jpacker-test-editor --configured-option ./PKGBUILD"
+assert_command_absent "jpacker-test-editor --configured-option ./-option.install"
+assert_command_prefix_absent "makepkg "
+assert_checkout_retained
+if [ ! -f "$checkout_dir/-option.install" ] || [ -L "$checkout_dir/-option.install" ]; then
+    echo "install script was not retained after editor failure: $checkout_dir/-option.install" >&2
+    exit 1
+fi
+assert_editor_argv_log 'argv-begin
+arg[0]=<--configured-option>
+arg[1]=<./PKGBUILD>
+target=<./PKGBUILD>
+argv-end'
 
 echo "source-build characterization tests: all checks passed"
