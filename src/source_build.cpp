@@ -5,6 +5,7 @@
 #include "package_identifier.hpp"
 #include "persistent_checkout.hpp"
 #include "process.hpp"
+#include "repository_query.hpp"
 #include "shell_words.hpp"
 #include "trusted_cache.hpp"
 
@@ -314,30 +315,51 @@ std::optional<std::string> read_srcinfo_version(const fs::path& pkg_dir) {
     return pkgver + "-" + pkgrel;
 }
 
-UpdateCheckResult check_update_status(const std::string& pkg_name, const fs::path& pkg_dir) {
-    require_valid_package_name(pkg_name);
-    std::string installed_full = exec_command(("pacman -Q " + shell_words::quote(pkg_name) + " 2>/dev/null").c_str());
-    if(installed_full.empty()) {
+UpdateCheckResult check_update_status(
+        const std::string& pkg_name, const fs::path& pkg_dir,
+        const std::optional<SourceUpdateBaseline>& update_baseline) {
+    std::optional<std::string> installed_version = get_installed_package_version(pkg_name);
+    if(!installed_version.has_value()) {
         return UpdateCheckResult::NeedsBuild;// インストールされていないのでビルド必要
     }
-    size_t      space_pos = installed_full.find(' ');
-    std::string installed_ver = (space_pos != std::string::npos) ? installed_full.substr(space_pos + 1) : "";
 
     // POLICY: upgrade の pre-review 更新判定では PKGBUILD を評価しない。
     // 既存 .SRCINFO が読めない場合は呼び出し元で対話確認または skip へ進める。
     std::optional<std::string> new_ver = read_srcinfo_version(pkg_dir);
     if(!new_ver.has_value()) return UpdateCheckResult::Unknown;
 
-    std::string cmp_cmd = "vercmp " + shell_words::quote(new_ver.value()) + " " + shell_words::quote(installed_ver) + " 2>/dev/null";
+    std::string cmp_cmd = "vercmp " + shell_words::quote(new_ver.value()) + " " + shell_words::quote(installed_version.value()) + " 2>/dev/null";
     std::string cmp_res = exec_command(cmp_cmd.c_str());
 
     try {
-        if(std::stoi(cmp_res) > 0) return UpdateCheckResult::NeedsBuild;
+        int version_comparison = std::stoi(cmp_res);
+        if(version_comparison > 0) return UpdateCheckResult::NeedsBuild;
+        if(version_comparison == 0 && update_baseline.has_value()) {
+            const std::optional<std::string>& pre_upgrade_version =
+                    update_baseline->installed_version;
+            // POLICY(#215): pre/postはどちらもpacman -Qのcanonical full versionなので、
+            // transaction中のversion変化は文字列の不一致として判定する。
+            if(!pre_upgrade_version.has_value() ||
+               pre_upgrade_version.value() != installed_version.value()) {
+                if(pre_upgrade_version.has_value()) {
+                    Logger::info(
+                            pkg_name + " was updated by the system transaction (" +
+                            pre_upgrade_version.value() + " -> " + installed_version.value() +
+                            "); rebuilding the preferred source package.");
+                } else {
+                    Logger::info(
+                            pkg_name + " was installed by the system transaction as " +
+                            installed_version.value() +
+                            "; rebuilding the preferred source package.");
+                }
+                return UpdateCheckResult::NeedsBuild;
+            }
+        }
     } catch(...) {
         return UpdateCheckResult::Unknown;
     }
 
-    Logger::info(pkg_name + " is up to date (" + installed_ver + "). Skipping.");
+    Logger::info(pkg_name + " is up to date (" + installed_version.value() + "). Skipping.");
     return UpdateCheckResult::UpToDate;
 }
 
@@ -488,7 +510,8 @@ void execute_source_build(
         WorkDirGuard wd(pkg_path);
 
         if(request.only_if_updated) {
-            UpdateCheckResult update_check = check_update_status(request.package_name, pkg_path.canonical_path());
+            UpdateCheckResult update_check = check_update_status(
+                    request.package_name, pkg_path.canonical_path(), request.update_baseline);
             if(update_check == UpdateCheckResult::UpToDate) {
                 return;// 更新不要なので終了
             }

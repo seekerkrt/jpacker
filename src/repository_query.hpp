@@ -1,5 +1,6 @@
 #pragma once
 
+#include <optional>
 #include <set>
 #include <string>
 #include <vector>
@@ -17,6 +18,7 @@ struct ProvidedDependency {
 };
 
 bool is_installed_package(const std::string& pkg_name);
+std::optional<std::string> get_installed_package_version(const std::string& pkg_name);
 bool is_repo_package(const std::string& pkg_name);
 std::vector<ProvidedDependency> find_repo_providers(const std::string& dependency_name);
 std::vector<InstalledPackage> get_foreign_packages();

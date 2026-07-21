@@ -1,14 +1,21 @@
 #pragma once
 
+#include <optional>
 #include <string>
 
 struct AppConfig;
+
+// upgrade baselineの有無と、snapshot時点の未installを別状態として保持する。
+struct SourceUpdateBaseline {
+    std::optional<std::string> installed_version;
+};
 
 struct SourceBuildRequest {
     std::string package_name;
     std::string checkout_name;
     std::string git_url;
     std::string custom_environment;
+    std::optional<SourceUpdateBaseline> update_baseline;
     bool        only_if_updated = false;
     bool        needed = false;
 };

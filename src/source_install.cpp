@@ -180,7 +180,8 @@ void install_smart_source(
         const std::string& package_name,
         bool only_if_updated,
         bool needed,
-        const AppConfig& config) {
+        const AppConfig& config,
+        const std::optional<SourceUpdateBaseline>& update_baseline) {
     std::string environment = load_source_preference_environment(package_name);
     PackageBuildSource source = resolve_build_source(package_name);
     require_executable_build_source_plan(source);
@@ -192,6 +193,8 @@ void install_smart_source(
     request.custom_environment = environment;
     request.only_if_updated = only_if_updated;
     request.needed = needed;
+    // POLICY(#215): system transactionによるbinary置換baselineはofficial sourceだけに適用する。
+    if(!source.is_aur) request.update_baseline = update_baseline;
     execute_source_build(request, config);
 }
 
