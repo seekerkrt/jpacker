@@ -97,6 +97,11 @@ if [ "$1" = "clone" ]; then
     fi
     exit "${JPACKER_TEST_GIT_CLONE_EXIT_CODE:-0}"
 fi
+if [ "$1" = "reset" ] && [ "${2:-}" = "--hard" ] &&
+   [ -n "${JPACKER_TEST_GIT_RESET_SRCINFO_FIXTURE:-}" ]; then
+    # resetだけがremote fixtureをworking treeへ反映する。
+    /usr/bin/cp -- "$JPACKER_TEST_GIT_RESET_SRCINFO_FIXTURE" "$PWD/.SRCINFO" || exit 1
+fi
 config_worktree=$PWD
 if [ "$1" = "-C" ] && [ "${3:-}" = "config" ]; then
     config_worktree=$2

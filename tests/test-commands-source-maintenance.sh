@@ -75,6 +75,7 @@ setup_case() {
 
     unset JPACKER_TEST_PACMAN_REPO_PACKAGES
     unset JPACKER_TEST_PACMAN_Q_OUTPUT
+    unset JPACKER_TEST_PACMAN_Q_OUTPUT_FILE
     unset JPACKER_TEST_PACMAN_Q_EXIT_CODE
     unset JPACKER_TEST_PACMAN_QM_OUTPUT
     unset JPACKER_TEST_APP_CONFIG_CASE
@@ -84,7 +85,17 @@ setup_case() {
     unset JPACKER_TEST_GIT_CLONE_FAIL_DESTINATION_EXIT_CODE
     unset JPACKER_TEST_GIT_CLONE_SYMLINK_TARGET
     unset JPACKER_TEST_GIT_CLONE_FIXTURE_DIR
+    unset JPACKER_TEST_GIT_RESET_SRCINFO_FIXTURE
+    unset JPACKER_TEST_GIT_SYMBOLIC_REF
+    unset JPACKER_TEST_GIT_SYMBOLIC_REF_EXIT_CODE
+    unset JPACKER_TEST_GIT_MAIN_REF_EXIT_CODE
+    unset JPACKER_TEST_GIT_MASTER_REF_EXIT_CODE
+    unset JPACKER_TEST_VERCMP_OUTPUT
+    unset JPACKER_TEST_VERCMP_EXIT_CODE
+    unset JPACKER_TEST_VERCMP_ARGV_LOG
+    unset JPACKER_TEST_MAKEPKG_ARGV_LOG
     unset JPACKER_TEST_SOURCE_MAINTENANCE_FAIL_SUBSTRING
+    unset JPACKER_TEST_SOURCE_MAINTENANCE_PACMAN_SYU_Q_OUTPUT_FILE
     unset JPACKER_TEST_SOURCE_MAINTENANCE_PACMAN_SC_RACE_PATH
     unset JPACKER_TEST_SOURCE_MAINTENANCE_PACMAN_SC_RACE_TARGET
     unset JPACKER_TEST_SOURCE_MAINTENANCE_EDITOR_SNAPSHOT_FILE
@@ -295,6 +306,20 @@ assert_command_before() {
     fi
 }
 
+assert_command_occurrence_before() {
+    first=$1
+    first_occurrence=$2
+    second=$3
+    second_occurrence=$4
+    first_line=$(grep -nFx -- "$first" "$command_log" | sed -n "${first_occurrence}s/:.*//p")
+    second_line=$(grep -nFx -- "$second" "$command_log" | sed -n "${second_occurrence}s/:.*//p")
+    if [ -z "$first_line" ] || [ -z "$second_line" ] || [ "$first_line" -ge "$second_line" ]; then
+        echo "unexpected command order: $first (#$first_occurrence) -> $second (#$second_occurrence)" >&2
+        cat "$command_log" >&2
+        exit 1
+    fi
+}
+
 assert_output_before() {
     first=$1
     second=$2
@@ -324,6 +349,81 @@ assert_file_equals() {
         diff -u "$expected_file" "$actual_file" >&2 || true
         exit 1
     fi
+}
+
+assert_file_empty() {
+    file=$1
+    if [ -s "$file" ]; then
+        echo "expected file to be empty: $file" >&2
+        sed -n '1,260p' "$file" >&2
+        exit 1
+    fi
+}
+
+assert_argv_log() {
+    actual_file=$1
+    expected=$2
+    expected_file=$case_dir/expected-argv.log
+    printf '%s\n' "$expected" > "$expected_file"
+    assert_file_equals "$expected_file" "$actual_file"
+}
+
+write_upgrade_srcinfo() {
+    srcinfo_file=$1
+    srcinfo_version=$2
+    srcinfo_release=$3
+    {
+        printf 'pkgbase = clean-root\n'
+        printf 'pkgver = %s\n' "$srcinfo_version"
+        printf 'pkgrel = %s\n' "$srcinfo_release"
+        printf 'pkgname = clean-root\n'
+    } > "$srcinfo_file"
+}
+
+setup_upgrade_transition_case() {
+    upgrade_case_name=$1
+    installed_version_before_syu=$2
+    installed_version_after_syu=$3
+    source_preference_state=$4
+    source_git_url=$5
+
+    setup_case "$upgrade_case_name"
+
+    upgrade_package=clean-root
+    installed_version_state=$case_dir/installed-version-state
+    installed_version_before=$case_dir/installed-version-before
+    installed_version_after=$case_dir/installed-version-after-syu
+    initial_srcinfo=$case_dir/initial.SRCINFO
+    remote_srcinfo=$case_dir/remote.SRCINFO
+    checkout_dir=$cache_root/$upgrade_package
+    vercmp_argv_log=$case_dir/vercmp-argv.log
+    makepkg_argv_log=$case_dir/makepkg-argv.log
+
+    : > "$installed_version_before"
+    if [ "$installed_version_before_syu" != not-installed ]; then
+        printf '%s %s\n' "$upgrade_package" "$installed_version_before_syu" > "$installed_version_before"
+    fi
+    printf '%s %s\n' "$upgrade_package" "$installed_version_after_syu" > "$installed_version_after"
+    cp "$installed_version_before" "$installed_version_state"
+
+    write_upgrade_srcinfo "$initial_srcinfo" 1.0 1
+    write_upgrade_srcinfo "$remote_srcinfo" 2.0 1
+    mkdir -p "$checkout_dir/.git"
+    cp "$initial_srcinfo" "$checkout_dir/.SRCINFO"
+    printf 'pkgname=%s\npkgver=1.0\npkgrel=1\n' "$upgrade_package" > "$checkout_dir/PKGBUILD"
+    printf '%s\n' "$source_git_url" > "$checkout_dir/.git/.jpacker-test-remote-url"
+
+    if [ "$source_preference_state" = enabled ]; then
+        : > "$preference_dir/$upgrade_package"
+    fi
+
+    : > "$vercmp_argv_log"
+    : > "$makepkg_argv_log"
+    export JPACKER_TEST_PACMAN_Q_OUTPUT_FILE=$installed_version_state
+    export JPACKER_TEST_SOURCE_MAINTENANCE_PACMAN_SYU_Q_OUTPUT_FILE=$installed_version_after
+    export JPACKER_TEST_GIT_RESET_SRCINFO_FIXTURE=$remote_srcinfo
+    export JPACKER_TEST_VERCMP_ARGV_LOG=$vercmp_argv_log
+    export JPACKER_TEST_MAKEPKG_ARGV_LOG=$makepkg_argv_log
 }
 
 # P0-1: build handler parsing, validation, catch boundary, and source request mapping.
@@ -866,7 +966,9 @@ setup_case upgrade-pacman-failure
 printf 'pacman -Syu --noconfirm\n' > "$sudo_failures"
 run_fail --noedit --nodiff --noconfirm upgrade
 assert_command "pacman -Si clean-root"
+assert_command_count "pacman -Q clean-root" 1
 assert_command "sudo pacman -Syu --noconfirm"
+assert_command_before "pacman -Q clean-root" "sudo pacman -Syu --noconfirm"
 assert_contains "Update failed." "$output_file"
 assert_command_content_absent "git clone"
 assert_command_content_absent "makepkg"
@@ -880,11 +982,224 @@ assert_contains "Ignoring invalid source-build preference filename: bad name" "$
 assert_contains "Error updating missing-upgrade:" "$output_file"
 assert_command "sudo pacman -Syu --noconfirm"
 assert_command "git clone https://aur.archlinux.org/clean-root.git clean-root"
-assert_command "pacman -Q clean-root"
+assert_command_count "pacman -Q clean-root" 2
 assert_command "makepkg -sic --noconfirm"
-assert_command_before "sudo pacman -Syu --noconfirm" "git clone https://aur.archlinux.org/clean-root.git clean-root"
-assert_command_before "git clone https://aur.archlinux.org/clean-root.git clean-root" "pacman -Q clean-root"
-assert_command_before "pacman -Q clean-root" "makepkg -sic --noconfirm"
+assert_command_occurrence_before "pacman -Q clean-root" 1 "sudo pacman -Syu --noconfirm" 1
+assert_command_occurrence_before "sudo pacman -Syu --noconfirm" 1 "git clone https://aur.archlinux.org/clean-root.git clean-root" 1
+assert_command_occurrence_before "git clone https://aur.archlinux.org/clean-root.git clean-root" 1 "pacman -Q clean-root" 2
+assert_command_occurrence_before "pacman -Q clean-root" 2 "makepkg -sic --noconfirm" 1
+
+# Issue #215 regression: system transactionでofficial binaryへ置換された場合も、
+# source-build preferenceを実際のinstalled packageへ反映する。
+official_source_url=https://gitlab.archlinux.org/archlinux/packaging/packages/clean-root.git
+aur_source_url=https://aur.archlinux.org/clean-root.git
+
+setup_upgrade_transition_case \
+    issue-215-case-1-rebuild-after-official-binary-replacement \
+    1.0-1 2.0-1 enabled "$official_source_url"
+export JPACKER_TEST_PACMAN_REPO_PACKAGES=$upgrade_package
+assert_file_equals "$installed_version_before" "$installed_version_state"
+run_ok --noedit --nodiff --noconfirm upgrade
+assert_file_equals "$installed_version_after" "$installed_version_state"
+assert_file_equals "$remote_srcinfo" "$checkout_dir/.SRCINFO"
+assert_contains "Loading custom build flags from $preference_dir/$upgrade_package" "$output_file"
+assert_contains "$upgrade_package was updated by the system transaction (1.0-1 -> 2.0-1); rebuilding the preferred source package." "$output_file"
+assert_not_contains "$upgrade_package is up to date (2.0-1). Skipping." "$output_file"
+assert_command_count "pacman -Si $upgrade_package" 2
+assert_command "sudo pacman -Syu --noconfirm"
+assert_command "git fetch origin"
+assert_command "git reset --hard origin/main"
+assert_command_count "pacman -Q $upgrade_package" 2
+assert_command "vercmp 2.0-1 2.0-1"
+assert_command_count "makepkg -sic --noconfirm" 1
+assert_command_content_absent "git clone"
+assert_command_occurrence_before "pacman -Q $upgrade_package" 1 "sudo pacman -Syu --noconfirm" 1
+assert_command_occurrence_before "sudo pacman -Syu --noconfirm" 1 "git fetch origin" 1
+assert_command_occurrence_before "git fetch origin" 1 "git reset --hard origin/main" 1
+assert_command_occurrence_before "git reset --hard origin/main" 1 "pacman -Q $upgrade_package" 2
+assert_command_occurrence_before "pacman -Q $upgrade_package" 2 "vercmp 2.0-1 2.0-1" 1
+assert_command_occurrence_before "vercmp 2.0-1 2.0-1" 1 "makepkg -sic --noconfirm" 1
+assert_argv_log "$vercmp_argv_log" 'argv-begin
+arg[0]=<2.0-1>
+arg[1]=<2.0-1>
+argv-end'
+assert_argv_log "$makepkg_argv_log" 'argv-begin
+arg[0]=<-sic>
+arg[1]=<--noconfirm>
+argv-end'
+assert_request_log_empty
+
+# Case 1とのfixture差は、fake pacman transaction後のinstalled versionだけ。
+setup_upgrade_transition_case \
+    issue-215-case-2-official-version-unchanged \
+    1.0-1 1.0-1 enabled "$official_source_url"
+export JPACKER_TEST_PACMAN_REPO_PACKAGES=$upgrade_package
+assert_file_equals "$installed_version_before" "$installed_version_state"
+run_ok --noedit --nodiff --noconfirm upgrade
+assert_file_equals "$installed_version_after" "$installed_version_state"
+assert_file_equals "$remote_srcinfo" "$checkout_dir/.SRCINFO"
+assert_contains "Loading custom build flags from $preference_dir/$upgrade_package" "$output_file"
+assert_not_contains "rebuilding the preferred source package." "$output_file"
+assert_command_count "pacman -Si $upgrade_package" 2
+assert_command "sudo pacman -Syu --noconfirm"
+assert_command "git fetch origin"
+assert_command "git reset --hard origin/main"
+assert_command_count "pacman -Q $upgrade_package" 2
+assert_command "vercmp 2.0-1 1.0-1"
+assert_command_count "makepkg -sic --noconfirm" 1
+assert_command_content_absent "git clone"
+assert_command_occurrence_before "pacman -Q $upgrade_package" 1 "sudo pacman -Syu --noconfirm" 1
+assert_command_occurrence_before "sudo pacman -Syu --noconfirm" 1 "git fetch origin" 1
+assert_command_occurrence_before "git reset --hard origin/main" 1 "pacman -Q $upgrade_package" 2
+assert_command_occurrence_before "pacman -Q $upgrade_package" 2 "vercmp 2.0-1 1.0-1" 1
+assert_command_occurrence_before "vercmp 2.0-1 1.0-1" 1 "makepkg -sic --noconfirm" 1
+assert_argv_log "$vercmp_argv_log" 'argv-begin
+arg[0]=<2.0-1>
+arg[1]=<1.0-1>
+argv-end'
+assert_argv_log "$makepkg_argv_log" 'argv-begin
+arg[0]=<-sic>
+arg[1]=<--noconfirm>
+argv-end'
+assert_request_log_empty
+
+setup_upgrade_transition_case \
+    issue-215-case-3-no-source-preference \
+    1.0-1 2.0-1 disabled "$official_source_url"
+export JPACKER_TEST_PACMAN_REPO_PACKAGES=$upgrade_package
+assert_file_equals "$installed_version_before" "$installed_version_state"
+run_ok --noedit --nodiff --noconfirm upgrade
+assert_file_equals "$installed_version_after" "$installed_version_state"
+assert_file_equals "$initial_srcinfo" "$checkout_dir/.SRCINFO"
+assert_not_contains "rebuilding the preferred source package." "$output_file"
+assert_command "sudo pacman -Syu --noconfirm"
+assert_command_absent "pacman -Si $upgrade_package"
+assert_command_content_absent "git "
+assert_command_absent "pacman -Q $upgrade_package"
+assert_command_content_absent "vercmp"
+assert_command_content_absent "makepkg"
+assert_total_command_count 1
+assert_file_empty "$vercmp_argv_log"
+assert_file_empty "$makepkg_argv_log"
+assert_request_log_empty
+
+setup_upgrade_transition_case \
+    issue-215-case-4-aur-build-after-system-upgrade \
+    1.0-1 1.0-1 enabled "$aur_source_url"
+assert_file_equals "$installed_version_before" "$installed_version_state"
+run_ok --noedit --nodiff --noconfirm upgrade
+assert_file_equals "$installed_version_after" "$installed_version_state"
+assert_file_equals "$remote_srcinfo" "$checkout_dir/.SRCINFO"
+assert_contains "Loading custom build flags from $preference_dir/$upgrade_package" "$output_file"
+assert_not_contains "rebuilding the preferred source package." "$output_file"
+assert_command "pacman -Si $upgrade_package"
+assert_command "sudo pacman -Syu --noconfirm"
+assert_command "git fetch origin"
+assert_command "git reset --hard origin/main"
+assert_command_count "pacman -Q $upgrade_package" 2
+assert_command "vercmp 2.0-1 1.0-1"
+assert_command_count "makepkg -sic --noconfirm" 1
+assert_command_content_absent "git clone"
+assert_command_occurrence_before "pacman -Si $upgrade_package" 1 "pacman -Q $upgrade_package" 1
+assert_command_occurrence_before "pacman -Q $upgrade_package" 1 "sudo pacman -Syu --noconfirm" 1
+assert_command_occurrence_before "sudo pacman -Syu --noconfirm" 1 "git fetch origin" 1
+assert_command_occurrence_before "git reset --hard origin/main" 1 "pacman -Q $upgrade_package" 2
+assert_command_occurrence_before "pacman -Q $upgrade_package" 2 "vercmp 2.0-1 1.0-1" 1
+assert_command_occurrence_before "vercmp 2.0-1 1.0-1" 1 "makepkg -sic --noconfirm" 1
+assert_argv_log "$vercmp_argv_log" 'argv-begin
+arg[0]=<2.0-1>
+arg[1]=<1.0-1>
+argv-end'
+assert_argv_log "$makepkg_argv_log" 'argv-begin
+arg[0]=<-sic>
+arg[1]=<--noconfirm>
+argv-end'
+if [ ! -s "$request_log" ]; then
+    echo "expected AUR RPC request for $upgrade_package" >&2
+    exit 1
+fi
+
+setup_upgrade_transition_case \
+    issue-215-case-5-equal-version-without-transaction-change \
+    2.0-1 2.0-1 enabled "$official_source_url"
+export JPACKER_TEST_PACMAN_REPO_PACKAGES=$upgrade_package
+assert_file_equals "$installed_version_before" "$installed_version_state"
+run_ok --noedit --nodiff --noconfirm upgrade
+assert_file_equals "$installed_version_after" "$installed_version_state"
+assert_file_equals "$remote_srcinfo" "$checkout_dir/.SRCINFO"
+assert_contains "$upgrade_package is up to date (2.0-1). Skipping." "$output_file"
+assert_not_contains "rebuilding the preferred source package." "$output_file"
+assert_command_count "pacman -Si $upgrade_package" 2
+assert_command_count "pacman -Q $upgrade_package" 2
+assert_command "sudo pacman -Syu --noconfirm"
+assert_command "git reset --hard origin/main"
+assert_command "vercmp 2.0-1 2.0-1"
+assert_command_content_absent "makepkg"
+assert_command_occurrence_before "pacman -Q $upgrade_package" 1 "sudo pacman -Syu --noconfirm" 1
+assert_command_occurrence_before "git reset --hard origin/main" 1 "pacman -Q $upgrade_package" 2
+assert_command_occurrence_before "pacman -Q $upgrade_package" 2 "vercmp 2.0-1 2.0-1" 1
+assert_argv_log "$vercmp_argv_log" 'argv-begin
+arg[0]=<2.0-1>
+arg[1]=<2.0-1>
+argv-end'
+assert_file_empty "$makepkg_argv_log"
+assert_request_log_empty
+
+setup_upgrade_transition_case \
+    issue-215-case-6-older-source-does-not-downgrade \
+    1.0-1 3.0-1 enabled "$official_source_url"
+export JPACKER_TEST_PACMAN_REPO_PACKAGES=$upgrade_package
+assert_file_equals "$installed_version_before" "$installed_version_state"
+run_ok --noedit --nodiff --noconfirm upgrade
+assert_file_equals "$installed_version_after" "$installed_version_state"
+assert_file_equals "$remote_srcinfo" "$checkout_dir/.SRCINFO"
+assert_contains "$upgrade_package is up to date (3.0-1). Skipping." "$output_file"
+assert_not_contains "rebuilding the preferred source package." "$output_file"
+assert_command_count "pacman -Si $upgrade_package" 2
+assert_command_count "pacman -Q $upgrade_package" 2
+assert_command "sudo pacman -Syu --noconfirm"
+assert_command "git reset --hard origin/main"
+assert_command "vercmp 2.0-1 3.0-1"
+assert_command_content_absent "makepkg"
+assert_command_occurrence_before "pacman -Q $upgrade_package" 1 "sudo pacman -Syu --noconfirm" 1
+assert_command_occurrence_before "git reset --hard origin/main" 1 "pacman -Q $upgrade_package" 2
+assert_command_occurrence_before "pacman -Q $upgrade_package" 2 "vercmp 2.0-1 3.0-1" 1
+assert_argv_log "$vercmp_argv_log" 'argv-begin
+arg[0]=<2.0-1>
+arg[1]=<3.0-1>
+argv-end'
+assert_file_empty "$makepkg_argv_log"
+assert_request_log_empty
+
+setup_upgrade_transition_case \
+    issue-215-case-7-installed-by-system-transaction \
+    not-installed 2.0-1 enabled "$official_source_url"
+export JPACKER_TEST_PACMAN_REPO_PACKAGES=$upgrade_package
+assert_file_empty "$installed_version_state"
+run_ok --noedit --nodiff --noconfirm upgrade
+assert_file_equals "$installed_version_after" "$installed_version_state"
+assert_file_equals "$remote_srcinfo" "$checkout_dir/.SRCINFO"
+assert_contains "$upgrade_package was installed by the system transaction as 2.0-1; rebuilding the preferred source package." "$output_file"
+assert_not_contains "$upgrade_package is up to date (2.0-1). Skipping." "$output_file"
+assert_command_count "pacman -Si $upgrade_package" 2
+assert_command_count "pacman -Q $upgrade_package" 2
+assert_command "sudo pacman -Syu --noconfirm"
+assert_command "git reset --hard origin/main"
+assert_command "vercmp 2.0-1 2.0-1"
+assert_command_count "makepkg -sic --noconfirm" 1
+assert_command_occurrence_before "pacman -Q $upgrade_package" 1 "sudo pacman -Syu --noconfirm" 1
+assert_command_occurrence_before "git reset --hard origin/main" 1 "pacman -Q $upgrade_package" 2
+assert_command_occurrence_before "pacman -Q $upgrade_package" 2 "vercmp 2.0-1 2.0-1" 1
+assert_command_occurrence_before "vercmp 2.0-1 2.0-1" 1 "makepkg -sic --noconfirm" 1
+assert_argv_log "$vercmp_argv_log" 'argv-begin
+arg[0]=<2.0-1>
+arg[1]=<2.0-1>
+argv-end'
+assert_argv_log "$makepkg_argv_log" 'argv-begin
+arg[0]=<-sic>
+arg[1]=<--noconfirm>
+argv-end'
+assert_request_log_empty
 
 echo "  ok: P0-6 cmd_upgrade"
 

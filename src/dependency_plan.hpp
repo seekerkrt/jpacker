@@ -3,6 +3,7 @@
 #include "aur_rpc.hpp"
 #include "repository_query.hpp"
 
+#include <cstddef>
 #include <optional>
 #include <string>
 #include <vector>
@@ -22,12 +23,58 @@ struct DependencyClassification {
     std::vector<std::string>             unknown;
 };
 
+enum class PackageRole {
+    Root,
+    RuntimeDependency,
+    BuildDependency,
+    CheckDependency
+};
+
 enum class DependencyKind {
     Repo,
     Aur,
     Provided,
     AmbiguousProvider,
     Unknown
+};
+
+enum class DesiredInstallReason {
+    Explicit,
+    Dependency
+};
+
+// AUR metadata上のdependency categoryを、raw specificationと対応付けたもの。
+struct TypedPackageDependency {
+    std::string specification;
+    PackageRole role;
+};
+
+// CLI invocation内のroot target。indexは入力順を失わないためのidentityの一部。
+struct RootTargetIdentity {
+    std::size_t invocation_index;
+    std::string requested_name;
+
+    bool operator==(const RootTargetIdentity&) const = default;
+};
+
+// source package nameごとに、plan内で担う全roleと到達元rootを集約する。
+struct PlannedPackageTarget {
+    std::string                     package_name;
+    std::string                     package_base;
+    std::vector<PackageRole>        roles;
+    std::vector<RootTargetIdentity> roots;
+};
+
+// dependency宣言と、その最終的な解決結果を結び付ける。
+struct BuildPlanDependencyEdge {
+    std::string                       parent_package_name;
+    std::string                       parent_package_base;
+    std::string                       dependency_spec;
+    PackageRole                       role;
+    DependencyKind                    kind = DependencyKind::Unknown;
+    std::optional<std::string>        resolved_package_name;
+    std::optional<std::string>        resolved_package_base;
+    std::optional<ProvidedDependency> resolved_provider;
 };
 
 // recursive dependency tree の 1 node。表示と循環検出結果を同じ単位で持つ。
@@ -73,6 +120,9 @@ struct BuildPlanMetadataRisk {
 // AUR build / fetch の順序、未解決依存、循環検出結果をまとめる計画。
 struct BuildPlan {
     std::vector<BuildPlanEntry>              order;
+    std::vector<RootTargetIdentity>           root_targets;
+    std::vector<PlannedPackageTarget>         package_targets;
+    std::vector<BuildPlanDependencyEdge>      dependency_edges;
     std::vector<BuildPlanSplitPackageTarget> split_package_targets;
     std::vector<BuildPlanProvidedDependency> provided;
     std::vector<BuildPlanMetadataRisk>       metadata_risks;
@@ -82,10 +132,13 @@ struct BuildPlan {
 };
 
 std::vector<std::string> collect_build_dependencies(const AurPackageInfo& pkg);
+std::vector<TypedPackageDependency> collect_typed_build_dependencies(const AurPackageInfo& pkg);
+DesiredInstallReason desired_install_reason(const PlannedPackageTarget& target);
 DependencyClassification classify_dependencies(const std::vector<std::string>& dependencies);
 std::vector<RecursiveDependencyNode> resolve_recursive_dependencies(const AurPackageInfo& pkg);
 std::vector<BuildPlanMetadataRisk> collect_build_plan_metadata_risks(const AurPackageInfo& pkg);
 BuildPlan resolve_build_plan(const std::string& target);
+BuildPlan resolve_build_plan(const std::vector<std::string>& targets);
 BuildPlan resolve_fetch_plan(const std::string& target);
 void require_fetchable_build_plan(const std::string& target, const BuildPlan& plan);
 void require_executable_build_plan(const std::string& target, const BuildPlan& plan);

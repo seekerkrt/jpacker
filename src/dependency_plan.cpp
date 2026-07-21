@@ -104,6 +104,18 @@ void add_dependency(
     if(seen.insert(dep).second) dependencies.push_back(dep);
 }
 
+void add_typed_dependency(
+        std::vector<TypedPackageDependency>& dependencies,
+        const std::string& dependency, PackageRole role) {
+    if(trim(dependency).empty()) return;
+
+    auto same_dependency = [&dependency, role](const TypedPackageDependency& existing) {
+        return existing.specification == dependency && existing.role == role;
+    };
+    if(std::find_if(dependencies.begin(), dependencies.end(), same_dependency) != dependencies.end()) return;
+    dependencies.push_back(TypedPackageDependency{dependency, role});
+}
+
 void add_classified_dependency(
         std::vector<std::string>& dependencies, const std::string& dependency,
         const std::string& package_name) {
@@ -173,6 +185,34 @@ std::vector<std::string> collect_build_dependencies(const AurPackageInfo& pkg) {
         add_dependency(dependencies, seen, dep);
 
     return dependencies;
+}
+
+std::vector<TypedPackageDependency> collect_typed_build_dependencies(const AurPackageInfo& pkg) {
+    std::vector<TypedPackageDependency> dependencies;
+
+    for(const auto& dep : pkg.Depends)
+        add_typed_dependency(dependencies, dep, PackageRole::RuntimeDependency);
+    for(const auto& dep : pkg.MakeDepends)
+        add_typed_dependency(dependencies, dep, PackageRole::BuildDependency);
+    for(const auto& dep : pkg.CheckDepends)
+        add_typed_dependency(dependencies, dep, PackageRole::CheckDependency);
+
+    return dependencies;
+}
+
+DesiredInstallReason desired_install_reason(const PlannedPackageTarget& target) {
+    if(std::find(target.roles.begin(), target.roles.end(), PackageRole::Root) != target.roles.end()) {
+        return DesiredInstallReason::Explicit;
+    }
+
+    for(const auto role : target.roles) {
+        if(role == PackageRole::RuntimeDependency || role == PackageRole::BuildDependency ||
+           role == PackageRole::CheckDependency) {
+            return DesiredInstallReason::Dependency;
+        }
+    }
+
+    throw std::logic_error("Planned package target has no package role: " + target.package_name);
 }
 
 DependencyClassification classify_dependencies(const std::vector<std::string>& dependencies) {
@@ -307,6 +347,132 @@ std::vector<RecursiveDependencyNode> resolve_recursive_dependencies(const AurPac
 
 namespace {
 
+int package_role_rank(PackageRole role) {
+    switch(role) {
+    case PackageRole::Root:
+        return 0;
+    case PackageRole::RuntimeDependency:
+        return 1;
+    case PackageRole::BuildDependency:
+        return 2;
+    case PackageRole::CheckDependency:
+        return 3;
+    }
+    throw std::logic_error("Unknown package role.");
+}
+
+void add_package_role(std::vector<PackageRole>& roles, PackageRole role) {
+    if(std::find(roles.begin(), roles.end(), role) != roles.end()) return;
+    roles.push_back(role);
+    std::sort(roles.begin(), roles.end(), [](PackageRole lhs, PackageRole rhs) {
+        return package_role_rank(lhs) < package_role_rank(rhs);
+    });
+}
+
+bool root_identity_less(const RootTargetIdentity& lhs, const RootTargetIdentity& rhs) {
+    if(lhs.invocation_index != rhs.invocation_index) {
+        return lhs.invocation_index < rhs.invocation_index;
+    }
+    return lhs.requested_name < rhs.requested_name;
+}
+
+void add_root_identity(
+        std::vector<RootTargetIdentity>& roots, const RootTargetIdentity& root) {
+    if(std::find(roots.begin(), roots.end(), root) != roots.end()) return;
+    roots.push_back(root);
+    std::sort(roots.begin(), roots.end(), root_identity_less);
+}
+
+PlannedPackageTarget* find_package_target(
+        BuildPlan& plan, const std::string& package_name) {
+    auto same_name = [&package_name](const PlannedPackageTarget& target) {
+        return target.package_name == package_name;
+    };
+    auto it = std::find_if(plan.package_targets.begin(), plan.package_targets.end(), same_name);
+    return it == plan.package_targets.end() ? nullptr : &(*it);
+}
+
+void add_planned_package_target(
+        BuildPlan& plan, const AurPackageInfo& info,
+        const std::vector<PackageRole>& roles, const RootTargetIdentity& root) {
+    PlannedPackageTarget* target = find_package_target(plan, info.Name);
+    if(target == nullptr) {
+        plan.package_targets.push_back(
+                PlannedPackageTarget{info.Name, package_base_name(info), {}, {}});
+        target = &plan.package_targets.back();
+    }
+
+    for(const auto role : roles) add_package_role(target->roles, role);
+    add_root_identity(target->roots, root);
+}
+
+std::vector<TypedPackageDependency> typed_dependencies_for_specification(
+        const std::vector<TypedPackageDependency>& dependencies,
+        const std::string& specification) {
+    std::vector<TypedPackageDependency> matches;
+    for(const auto& dependency : dependencies) {
+        if(trim(dependency.specification) == specification) matches.push_back(dependency);
+    }
+    return matches;
+}
+
+std::vector<PackageRole> package_roles_for_dependencies(
+        const std::vector<TypedPackageDependency>& dependencies) {
+    std::vector<PackageRole> roles;
+    for(const auto& dependency : dependencies) add_package_role(roles, dependency.role);
+    return roles;
+}
+
+void add_build_plan_dependency_edges(
+        BuildPlan& plan, const BuildPlanDependencyEdge& classified_edge,
+        const std::vector<TypedPackageDependency>& dependencies) {
+    for(const auto& dependency : dependencies) {
+        BuildPlanDependencyEdge edge = classified_edge;
+        edge.dependency_spec = dependency.specification;
+        edge.role = dependency.role;
+        plan.dependency_edges.push_back(std::move(edge));
+    }
+}
+
+std::optional<std::string> resolved_aur_dependency_name(
+        const BuildPlanDependencyEdge& edge) {
+    if(edge.kind == DependencyKind::Aur) return edge.resolved_package_name;
+    if(edge.kind == DependencyKind::Provided && edge.resolved_provider.has_value() &&
+       edge.resolved_provider->repository == "aur") {
+        return edge.resolved_provider->package_name;
+    }
+    return std::nullopt;
+}
+
+void propagate_root_identities(BuildPlan& plan) {
+    // WHY(#218): PackageBase visitedはlegacy orderを守るためinvocation-wideで共有する。
+    // 後からrootになったvisited nodeの既存subtreeへは、queryを増やさずedge上でidentityを伝播する。
+    for(const auto& root : plan.root_targets) {
+        std::vector<std::string> pending = {root.requested_name};
+        std::set<std::string>    visited_package_names;
+
+        while(!pending.empty()) {
+            std::string package_name = std::move(pending.back());
+            pending.pop_back();
+            if(!visited_package_names.insert(package_name).second) continue;
+
+            PlannedPackageTarget* target = find_package_target(plan, package_name);
+            if(target == nullptr) continue;
+            add_root_identity(target->roots, root);
+
+            for(const auto& edge : plan.dependency_edges) {
+                if(edge.parent_package_name != package_name) continue;
+                std::optional<std::string> dependency_name = resolved_aur_dependency_name(edge);
+                if(!dependency_name.has_value() ||
+                   find_package_target(plan, dependency_name.value()) == nullptr) {
+                    continue;
+                }
+                pending.push_back(dependency_name.value());
+            }
+        }
+    }
+}
+
 void add_build_plan_split_package_target(BuildPlan& plan, const AurPackageInfo& info) {
     if(!has_distinct_package_base(info)) return;
 
@@ -368,7 +534,9 @@ void add_build_plan_ambiguous_provider(
 
 void collect_aur_build_plan(
         const std::string& package_name, BuildPlan& plan, std::set<std::string>& visited,
-        std::set<std::string>& visiting, int depth, int max_depth, bool traverse_aur_providers) {
+        std::set<std::string>& visiting, const std::vector<PackageRole>& roles,
+        const RootTargetIdentity& root, int depth, int max_depth,
+        bool traverse_aur_providers) {
     if(depth > max_depth) {
         add_unique_value(plan.unresolved, package_name + " (max depth reached)");
         return;
@@ -392,6 +560,9 @@ void collect_aur_build_plan(
 
     // POLICY(#150): visited PackageBase で再帰を打ち切る場合も、package 単位の raw metadata は先に保持する。
     add_build_plan_metadata_risk(plan, info.value());
+    // POLICY(#218): role/root metadataはPackageBase visitedより先にmergeする。
+    // legacy orderのpost-order追加はこの位置へ動かさない。
+    add_planned_package_target(plan, info.value(), roles, root);
 
     std::string build_unit = package_base_name(info.value());
     if(visited.count(build_unit) > 0) return;
@@ -402,22 +573,43 @@ void collect_aur_build_plan(
 
     visiting.insert(build_unit);
 
+    const std::vector<TypedPackageDependency> typed_dependencies =
+            collect_typed_build_dependencies(info.value());
     for(const auto& dependency : collect_build_dependencies(info.value())) {
+        std::vector<TypedPackageDependency> matching_dependencies =
+                typed_dependencies_for_specification(typed_dependencies, dependency);
+        if(matching_dependencies.empty()) {
+            throw std::logic_error("Build dependency is missing its package role: " + dependency);
+        }
+        std::vector<PackageRole> dependency_roles =
+                package_roles_for_dependencies(matching_dependencies);
+        BuildPlanDependencyEdge edge{
+                info->Name, build_unit, matching_dependencies.front().specification,
+                matching_dependencies.front().role, DependencyKind::Unknown,
+                std::nullopt, std::nullopt, std::nullopt};
+
         ParsedDependency parsed = parse_dependency_string(dependency);
         std::string      dep_name = parsed.name;
         if(!is_valid_package_name(dep_name)) {
             add_unique_value(plan.unresolved, dependency);
+            add_build_plan_dependency_edges(plan, edge, matching_dependencies);
             continue;
         }
         if(parsed.has_malformed_constraint()) {
             add_unique_value(plan.unresolved, dependency_constraint_unresolved_reason(dependency));
+            add_build_plan_dependency_edges(plan, edge, matching_dependencies);
             continue;
         }
         if(parsed.has_constraint()) {
             // POLICY(#96): plan は未検証 constraint を解決済み扱いにしない。
             add_unique_value(plan.unresolved, dependency_constraint_unresolved_reason(dependency));
         }
-        if(is_repo_package(dep_name)) continue;
+        if(is_repo_package(dep_name)) {
+            edge.kind = DependencyKind::Repo;
+            edge.resolved_package_name = dep_name;
+            add_build_plan_dependency_edges(plan, edge, matching_dependencies);
+            continue;
+        }
 
         std::optional<AurPackageInfo> dependency_info;
         try {
@@ -429,25 +621,35 @@ void collect_aur_build_plan(
         }
 
         if(dependency_info.has_value()) {
+            edge.kind = DependencyKind::Aur;
+            edge.resolved_package_name = dependency_info->Name;
+            edge.resolved_package_base = dependency_info->PackageBase;
+            add_build_plan_dependency_edges(plan, edge, matching_dependencies);
             collect_aur_build_plan(
-                    dep_name, plan, visited, visiting, depth + 1, max_depth,
-                    traverse_aur_providers);
+                    dep_name, plan, visited, visiting, dependency_roles, root,
+                    depth + 1, max_depth, traverse_aur_providers);
             continue;
         }
 
         std::vector<ProvidedDependency> providers = find_dependency_providers(dep_name);
         if(providers.size() == 1) {
             const ProvidedDependency& provider = providers.front();
+            edge.kind = DependencyKind::Provided;
+            edge.resolved_provider = provider;
             add_build_plan_provided_dependency(plan, dependency, provider);
+            add_build_plan_dependency_edges(plan, edge, matching_dependencies);
             if(traverse_aur_providers && provider.repository == "aur") {
                 collect_aur_build_plan(
-                        provider.package_name, plan, visited, visiting, depth + 1, max_depth,
-                        traverse_aur_providers);
+                        provider.package_name, plan, visited, visiting, dependency_roles, root,
+                        depth + 1, max_depth, traverse_aur_providers);
             }
         } else if(providers.size() > 1) {
+            edge.kind = DependencyKind::AmbiguousProvider;
             add_build_plan_ambiguous_provider(plan, dependency, providers);
+            add_build_plan_dependency_edges(plan, edge, matching_dependencies);
         } else {
             add_unique_value(plan.unresolved, dependency);
+            add_build_plan_dependency_edges(plan, edge, matching_dependencies);
         }
     }
 
@@ -465,14 +667,31 @@ std::vector<BuildPlanMetadataRisk> collect_build_plan_metadata_risks(const AurPa
 }
 
 BuildPlan resolve_build_plan(const std::string& target) {
-    require_valid_package_name(target);
-    if(!AurClient::info(target).has_value()) throw std::runtime_error("AUR package not found: " + target);
+    return resolve_build_plan(std::vector<std::string>{target});
+}
+
+BuildPlan resolve_build_plan(const std::vector<std::string>& targets) {
+    if(targets.empty()) throw std::invalid_argument("Build plan targets must not be empty.");
+
+    for(const auto& target : targets) require_valid_package_name(target);
+    for(const auto& target : targets) {
+        if(!AurClient::info(target).has_value()) {
+            throw std::runtime_error("AUR package not found: " + target);
+        }
+    }
 
     BuildPlan             plan;
     std::set<std::string> visited;
     std::set<std::string> visiting;
-    collect_aur_build_plan(
-            target, plan, visited, visiting, 0, MAX_RECURSIVE_DEP_DEPTH, true);
+    const std::vector<PackageRole> root_roles = {PackageRole::Root};
+    for(std::size_t i = 0; i < targets.size(); ++i) {
+        RootTargetIdentity root{i, targets[i]};
+        plan.root_targets.push_back(root);
+        collect_aur_build_plan(
+                targets[i], plan, visited, visiting, root_roles, root, 0,
+                MAX_RECURSIVE_DEP_DEPTH, true);
+    }
+    propagate_root_identities(plan);
     return plan;
 }
 
@@ -483,9 +702,14 @@ BuildPlan resolve_fetch_plan(const std::string& target) {
     BuildPlan             plan;
     std::set<std::string> visited;
     std::set<std::string> visiting;
+    RootTargetIdentity    root{0, target};
+    plan.root_targets.push_back(root);
+    const std::vector<PackageRole> root_roles = {PackageRole::Root};
     // POLICY: fetch は取得対象の列挙まで。AUR provider を辿って暗黙に追加取得しない。
     collect_aur_build_plan(
-            target, plan, visited, visiting, 0, MAX_RECURSIVE_DEP_DEPTH, false);
+            target, plan, visited, visiting, root_roles, root, 0,
+            MAX_RECURSIVE_DEP_DEPTH, false);
+    propagate_root_identities(plan);
     return plan;
 }
 

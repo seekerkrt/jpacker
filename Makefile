@@ -18,6 +18,8 @@ APP_CONFIG_INTEGRATION_TEST_TARGET := build/tests/jpacker-app-config-test
 PACKAGE_IDENTIFIER_TEST_TARGET := build/tests/package-identifier-test
 SHELL_WORDS_TEST_TARGET := build/tests/shell-words-test
 PROCESS_STDIN_FD_TEST_TARGET := build/tests/process-stdin-fd-test
+DEPENDENCY_PLAN_MODEL_TEST_TARGET := $(BUILD_DIR)/tests/dependency-plan-model-test
+ARTIFACT_INSTALL_PLAN_TEST_TARGET := $(BUILD_DIR)/tests/artifact-install-plan-test
 
 # --- インストール先設定 ---
 PREFIX      ?= /usr/local
@@ -40,10 +42,21 @@ HEADERS   := $(wildcard $(SRC_DIR)/*.hpp)
 COMMANDS_INSPECT_TEST_SRCS := $(filter-out $(SRC_DIR)/aur_rpc.cpp,$(SRCS)) tests/commands_inspect_aur_stub.cpp
 COMMANDS_SYNC_TEST_SRCS := $(filter-out $(SRC_DIR)/aur_rpc.cpp,$(SRCS)) tests/stubs/commands-sync/aur_rpc_stub.cpp
 SOURCE_INSTALL_CHARACTERIZATION_TEST_SRCS := $(filter-out $(SRC_DIR)/jpacker.cpp,$(SRCS))
+DEPENDENCY_PLAN_MODEL_TEST_SRCS := \
+	tests/dependency_plan_model_test.cpp \
+	$(SRC_DIR)/dependency_plan.cpp \
+	$(SRC_DIR)/dependency_spec.cpp \
+	$(SRC_DIR)/package_identifier.cpp \
+	$(SRC_DIR)/logging.cpp \
+	tests/stubs/dependency-plan/aur_rpc_stub.cpp \
+	tests/stubs/dependency-plan/repository_query_stub.cpp
+ARTIFACT_INSTALL_PLAN_TEST_SRCS := \
+	tests/artifact_install_plan_test.cpp \
+	$(SRC_DIR)/artifact_install_plan.cpp
 OBJS      := $(SRCS:$(SRC_DIR)/%.cpp=$(BUILD_DIR)/%.o)
 DEPS      := $(OBJS:.o=.d)
 
-.PHONY: all clean test-app-config test-package-identifier test-shell-words test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-commands-inspect test-commands-source-maintenance test-commands-sync test-conflicts-replaces test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check install uninstall
+.PHONY: all clean test-app-config test-package-identifier test-shell-words test-dependency-plan-model test-artifact-install-plan test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-commands-inspect test-commands-source-maintenance test-commands-sync test-conflicts-replaces test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check install uninstall
 
 all: $(TARGET) $(MANPAGE)
 
@@ -113,6 +126,16 @@ $(PROCESS_STDIN_FD_TEST_TARGET): tests/process_stdin_fd_test.cpp $(SRC_DIR)/proc
 	@echo ":: Compiling process stdin fd test binary"
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -I$(SRC_DIR) tests/process_stdin_fd_test.cpp $(SRC_DIR)/process.cpp $(SRC_DIR)/logging.cpp -o $@
 
+$(DEPENDENCY_PLAN_MODEL_TEST_TARGET): $(DEPENDENCY_PLAN_MODEL_TEST_SRCS) $(SRC_DIR)/dependency_plan.hpp $(SRC_DIR)/aur_rpc.hpp $(SRC_DIR)/repository_query.hpp $(SRC_DIR)/dependency_spec.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/logging.hpp $(VERSION_FILE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling dependency plan model test binary"
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -I$(SRC_DIR) $(DEPENDENCY_PLAN_MODEL_TEST_SRCS) -o $@
+
+$(ARTIFACT_INSTALL_PLAN_TEST_TARGET): $(ARTIFACT_INSTALL_PLAN_TEST_SRCS) $(SRC_DIR)/artifact_install_plan.hpp $(SRC_DIR)/dependency_plan.hpp $(SRC_DIR)/aur_rpc.hpp $(SRC_DIR)/repository_query.hpp $(VERSION_FILE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling artifact install plan test binary"
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -I$(SRC_DIR) $(ARTIFACT_INSTALL_PLAN_TEST_SRCS) -o $@
+
 test-app-config: $(APP_CONFIG_MODULE_TEST_TARGET) $(APP_CONFIG_INTEGRATION_TEST_TARGET)
 	sh tests/test-app-config.sh $(abspath $(APP_CONFIG_MODULE_TEST_TARGET)) $(abspath $(APP_CONFIG_INTEGRATION_TEST_TARGET))
 
@@ -121,6 +144,12 @@ test-package-identifier: $(PACKAGE_IDENTIFIER_TEST_TARGET)
 
 test-shell-words: $(SHELL_WORDS_TEST_TARGET)
 	$(abspath $(SHELL_WORDS_TEST_TARGET))
+
+test-dependency-plan-model: $(DEPENDENCY_PLAN_MODEL_TEST_TARGET)
+	$(abspath $(DEPENDENCY_PLAN_MODEL_TEST_TARGET))
+
+test-artifact-install-plan: $(ARTIFACT_INSTALL_PLAN_TEST_TARGET)
+	$(abspath $(ARTIFACT_INSTALL_PLAN_TEST_TARGET))
 
 test-conflicts-replaces: $(TEST_TARGET)
 	sh tests/test-conflicts-replaces.sh $(abspath $(TEST_TARGET))

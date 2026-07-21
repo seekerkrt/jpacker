@@ -7,6 +7,19 @@ if [ "$1" = "-Q" ] && [ -n "${JPACKER_TEST_PACMAN_Q_OUTPUT:-}" ]; then
     printf '%s\n' "$JPACKER_TEST_PACMAN_Q_OUTPUT"
     exit "${JPACKER_TEST_PACMAN_Q_EXIT_CODE:-0}"
 fi
+if [ "$1" = "-Q" ] && [ -n "${JPACKER_TEST_PACMAN_Q_OUTPUT_FILE:-}" ]; then
+    if [ -f "$JPACKER_TEST_PACMAN_Q_OUTPUT_FILE" ]; then
+        /usr/bin/awk -v package="${2:-}" '
+            $1 == package { print; found = 1; exit }
+            END { if (!found) exit 1 }
+        ' "$JPACKER_TEST_PACMAN_Q_OUTPUT_FILE"
+        query_exit_code=$?
+        if [ "$query_exit_code" -eq 0 ]; then
+            exit "${JPACKER_TEST_PACMAN_Q_EXIT_CODE:-0}"
+        fi
+    fi
+    exit 1
+fi
 if [ "$1" = "-Si" ] && [ -n "${JPACKER_TEST_PACMAN_REPO_PACKAGES:-}" ]; then
     for package in $JPACKER_TEST_PACMAN_REPO_PACKAGES; do
         if [ "${2:-}" = "$package" ]; then

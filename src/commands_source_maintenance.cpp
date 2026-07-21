@@ -20,6 +20,7 @@
 #include <fcntl.h>
 #include <fstream>
 #include <iostream>
+#include <map>
 #include <optional>
 #include <sstream>
 #include <stdexcept>
@@ -173,6 +174,24 @@ bool ask_user(
 
         Logger::warn("Please answer yes or no.");
     }
+}
+
+using SourceUpdateBaselines = std::map<std::string, SourceUpdateBaseline>;
+
+SourceUpdateBaselines snapshot_source_update_baselines() {
+    SourceUpdateBaselines baselines;
+    if(!fs::exists(source_preference_root())) return baselines;
+
+    for(const auto& entry : source_preference_entries()) {
+        if(!entry.is_regular_file()) continue;
+
+        std::string package_name = entry.path().filename().string();
+        if(!is_valid_package_name(package_name)) continue;
+        baselines.emplace(
+                package_name,
+                SourceUpdateBaseline{get_installed_package_version(package_name)});
+    }
+    return baselines;
 }
 
 } // namespace
@@ -482,6 +501,7 @@ int cmd_clean(const AppConfig& config) {
 int cmd_upgrade(const AppConfig& config) {
     bool failed = false;
     preflight_upgrade_source_metadata();
+    SourceUpdateBaselines update_baselines = snapshot_source_update_baselines();
     Logger::info("System upgrade...");
     if(run_command("sudo pacman " + join_pacman_args({"-Syu"}, config)) != 0) throw std::runtime_error("Update failed.");
     if(fs::exists(source_preference_root())) {
@@ -496,7 +516,13 @@ int cmd_upgrade(const AppConfig& config) {
                 }
                 try {
                     // upgrade 時は true (更新がある場合のみビルド)
-                    install_smart_source(pkg_name, true, false, config);
+                    std::optional<SourceUpdateBaseline> update_baseline;
+                    auto baseline = update_baselines.find(pkg_name);
+                    if(baseline != update_baselines.end()) {
+                        update_baseline = baseline->second;
+                    }
+                    install_smart_source(
+                            pkg_name, true, false, config, update_baseline);
                 } catch(const AurRpcResponseError&) {
                     // POLICY(#174): schema violation検出後は後続source packageのmutationへ進まない。
                     throw;
