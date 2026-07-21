@@ -25,6 +25,18 @@ if [ "$default_exit_code" -ne 0 ]; then
     exit "$default_exit_code"
 fi
 
+if [ "${1:-}" = "pacman" ] && [ "${2:-}" = "-Syu" ]; then
+    installed_output_file=${JPACKER_TEST_PACMAN_Q_OUTPUT_FILE:-}
+    post_upgrade_output_file=${JPACKER_TEST_SOURCE_MAINTENANCE_PACMAN_SYU_Q_OUTPUT_FILE:-}
+    if [ -n "$post_upgrade_output_file" ]; then
+        if [ -z "$installed_output_file" ] || [ ! -f "$post_upgrade_output_file" ]; then
+            exit 1
+        fi
+        # POLICY: 成功したfake transactionだけが、case-localなinstalled stateを更新する。
+        /usr/bin/cp -- "$post_upgrade_output_file" "$installed_output_file"
+    fi
+fi
+
 if [ "${1:-}" = "pacman" ] && [ "${2:-}" = "-Sc" ]; then
     race_path=${JPACKER_TEST_SOURCE_MAINTENANCE_PACMAN_SC_RACE_PATH:-}
     race_target=${JPACKER_TEST_SOURCE_MAINTENANCE_PACMAN_SC_RACE_TARGET:-}

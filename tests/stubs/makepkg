@@ -1,3 +1,16 @@
 #!/bin/sh
 printf 'makepkg %s\n' "$*" >> "$JPACKER_TEST_COMMAND_LOG"
+argument_index=0
+if [ -n "${JPACKER_TEST_MAKEPKG_ARGV_LOG:-}" ]; then
+    printf 'argv-begin\n' >> "$JPACKER_TEST_MAKEPKG_ARGV_LOG"
+fi
+for makepkg_arg in "$@"; do
+    if [ -n "${JPACKER_TEST_MAKEPKG_ARGV_LOG:-}" ]; then
+        printf 'arg[%s]=<%s>\n' "$argument_index" "$makepkg_arg" >> "$JPACKER_TEST_MAKEPKG_ARGV_LOG"
+    fi
+    argument_index=$((argument_index + 1))
+done
+if [ -n "${JPACKER_TEST_MAKEPKG_ARGV_LOG:-}" ]; then
+    printf 'argv-end\n' >> "$JPACKER_TEST_MAKEPKG_ARGV_LOG"
+fi
 exit "${JPACKER_TEST_MAKEPKG_EXIT_CODE:-99}"
