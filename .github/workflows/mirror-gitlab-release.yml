@@ -1,0 +1,114 @@
+name: Mirror GitHub release to GitLab
+
+on:
+  release:
+    types:
+      - published
+      - edited
+      - unpublished
+      - deleted
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: GitHub release tag to mirror
+        required: true
+        type: string
+      action:
+        description: Mirror or delete the GitLab release
+        required: true
+        default: sync
+        type: choice
+        options:
+          - sync
+          - delete
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gitlab-release-${{ github.event.release.tag_name || inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  trigger-gitlab:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Resolve release request
+        id: release
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_ACTION: ${{ github.event.action }}
+          EVENT_TAG: ${{ github.event.release.tag_name }}
+          INPUT_ACTION: ${{ inputs.action }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -eu
+
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            action="$INPUT_ACTION"
+            tag="$INPUT_TAG"
+          else
+            tag="$EVENT_TAG"
+            case "$EVENT_ACTION" in
+              published|edited)
+                action=sync
+                ;;
+              unpublished|deleted)
+                action=delete
+                ;;
+              *)
+                echo "Unsupported release action: $EVENT_ACTION" >&2
+                exit 1
+                ;;
+            esac
+          fi
+
+          if [ -z "$tag" ]; then
+            echo "Release tag is empty" >&2
+            exit 1
+          fi
+
+          printf 'action=%s\n' "$action" >> "$GITHUB_OUTPUT"
+          printf 'tag=%s\n' "$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for the tag mirror
+        if: steps.release.outputs.action == 'sync'
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          set -eu
+
+          project='seekerkrt%2Fjpacker'
+          encoded_tag="$(jq -nr --arg value "$TAG" '$value | @uri')"
+
+          for attempt in $(seq 1 24); do
+            if curl --fail --silent --show-error \
+              "https://gitlab.com/api/v4/projects/${project}/repository/tags/${encoded_tag}" \
+              >/dev/null; then
+              echo "GitLab tag is available: $TAG"
+              exit 0
+            fi
+
+            echo "Waiting for GitLab tag mirror ($attempt/24): $TAG"
+            sleep 5
+          done
+
+          echo "GitLab tag did not appear in time: $TAG" >&2
+          exit 1
+
+      - name: Trigger the GitLab release mirror
+        env:
+          ACTION: ${{ steps.release.outputs.action }}
+          TAG: ${{ steps.release.outputs.tag }}
+          GITLAB_RELEASE_TRIGGER_TOKEN: ${{ secrets.GITLAB_RELEASE_TRIGGER_TOKEN }}
+        run: |
+          set -eu
+
+          curl --fail-with-body --silent --show-error \
+            --request POST \
+            --form "token=${GITLAB_RELEASE_TRIGGER_TOKEN}" \
+            --form 'ref=main' \
+            --form "variables[MIRROR_RELEASE_ACTION]=${ACTION}" \
+            --form "variables[MIRROR_RELEASE_TAG]=${TAG}" \
+            'https://gitlab.com/api/v4/projects/seekerkrt%2Fjpacker/trigger/pipeline'
