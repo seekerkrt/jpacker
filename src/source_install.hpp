@@ -1,5 +1,8 @@
 #pragma once
 
+#include "source_build.hpp"
+
+#include <optional>
 #include <string>
 
 struct AppConfig;
@@ -23,6 +26,7 @@ void install_smart_source(
         const std::string& package_name,
         bool only_if_updated,
         bool needed,
-        const AppConfig& config);
+        const AppConfig& config,
+        const std::optional<SourceUpdateBaseline>& update_baseline = std::nullopt);
 
 void preflight_upgrade_source_metadata();
