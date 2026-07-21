@@ -34,11 +34,15 @@ jobs:
           gitlab.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAfuCHKVTjquxvt6CM6tdG4SLp1Btn/nOeHHE5UOzRdf
           EOF
 
-      - name: Mirror repository
+      - name: Mirror branches and tags
         run: |
-          git clone --mirror \
+          git clone --bare \
             "https://github.com/${GITHUB_REPOSITORY}.git" \
             repository.git
 
-          git -C repository.git push --mirror \
+          git -C repository.git remote add gitlab \
             "git@gitlab.com:seekerkrt/jpacker.git"
+
+          git -C repository.git push --force --prune gitlab \
+            'refs/heads/*:refs/heads/*' \
+            'refs/tags/*:refs/tags/*'
