@@ -17,7 +17,7 @@ url="https://github.com/seekerkrt/jpacker"
 license=('MIT')
 
 # 実行時に必要な依存パッケージ
-depends=('curl' 'pacman' 'git')
+depends=('curl' 'pacman' 'libalpm.so' 'git')
 
 # ビルド時に必要なパッケージ ('git' が必須)
 makedepends=('git' 'nlohmann-json' 'base-devel')

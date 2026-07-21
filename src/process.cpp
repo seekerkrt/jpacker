@@ -12,6 +12,7 @@
 #include <memory>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <utility>
 
 namespace {
 
@@ -109,9 +110,9 @@ std::string trim_captured_output(const std::string& str) {
     return str.substr(first, (last - first + 1));
 }
 
-} // namespace
-
-CapturedCommandResult capture_command_output(const char* cmd) {
+CapturedCommandResult capture_command_output_impl(
+        const char* cmd,
+        bool trim_output) {
     std::array<char, 128> buffer;
     std::string           result;
     std::unique_ptr<FILE, int (*)(FILE*)> pipe(popen(cmd, "r"), pclose);
@@ -131,7 +132,19 @@ CapturedCommandResult capture_command_output(const char* cmd) {
             exit_code = 1;
     }
     if(read_failed) exit_code = 1;
-    return CapturedCommandResult{trim_captured_output(result), exit_code};
+    return CapturedCommandResult{
+            trim_output ? trim_captured_output(result) : std::move(result),
+            exit_code};
+}
+
+} // namespace
+
+CapturedCommandResult capture_command_output(const char* cmd) {
+    return capture_command_output_impl(cmd, true);
+}
+
+CapturedCommandResult capture_command_output_raw(const char* cmd) {
+    return capture_command_output_impl(cmd, false);
 }
 
 std::string exec_command(const char* cmd) {

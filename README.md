@@ -69,6 +69,10 @@ Issue と pull request は GitHub で受け付けています。
 * `git`
 * `curl`
 * `nlohmann-json`
+* `pacman`（`pacman-conf` と `libalpm` を提供）
+* `pkgconf`（Arch Linux の `pkg-config` provider）
+
+`libalpm` は read-only の package metadata source としてのみ使用します。package の install / remove は引き続き `pacman` へ、source build は `makepkg` へ委譲します。
 
 #### Build from source
 
@@ -412,6 +416,10 @@ Responses and reviews may take some time.
 * `git`
 * `curl`
 * `nlohmann-json`
+* `pacman` (provides `pacman-conf` and `libalpm`)
+* `pkgconf` (the Arch Linux `pkg-config` provider)
+
+`libalpm` is used as a read-only package metadata source. Package installation and removal remain delegated to `pacman`. Source builds remain delegated to `makepkg`.
 
 #### Build from source
 
