@@ -1,0 +1,44 @@
+name: Mirror to GitLab
+
+on:
+  push:
+  delete:
+  workflow_dispatch:
+  schedule:
+    # 毎日04:23 JST。イベント取りこぼし時の自己修復用。
+    - cron: "23 19 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gitlab-mirror
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Configure SSH
+        env:
+          GITLAB_MIRROR_SSH_KEY: ${{ secrets.GITLAB_MIRROR_SSH_KEY }}
+        run: |
+          install -d -m 700 ~/.ssh
+
+          printf '%s\n' "$GITLAB_MIRROR_SSH_KEY" \
+            > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+
+          cat > ~/.ssh/known_hosts <<'EOF'
+          gitlab.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAfuCHKVTjquxvt6CM6tdG4SLp1Btn/nOeHHE5UOzRdf
+          EOF
+
+      - name: Mirror repository
+        run: |
+          git clone --mirror \
+            "https://github.com/${GITHUB_REPOSITORY}.git" \
+            repository.git
+
+          git -C repository.git push --mirror \
+            "git@gitlab.com:seekerkrt/jpacker.git"
