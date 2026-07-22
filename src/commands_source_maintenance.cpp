@@ -3,6 +3,7 @@
 #include "app_config.hpp"
 #include "aur_rpc.hpp"
 #include "logging.hpp"
+#include "package_metadata.hpp"
 #include "package_identifier.hpp"
 #include "process.hpp"
 #include "repository_query.hpp"
@@ -178,18 +179,46 @@ bool ask_user(
 
 using SourceUpdateBaselines = std::map<std::string, SourceUpdateBaseline>;
 
-SourceUpdateBaselines snapshot_source_update_baselines() {
-    SourceUpdateBaselines baselines;
-    if(!fs::exists(source_preference_root())) return baselines;
+std::vector<std::string> source_update_baseline_package_names() {
+    std::vector<std::string> package_names;
+    if(!fs::exists(source_preference_root())) return package_names;
 
     for(const auto& entry : source_preference_entries()) {
         if(!entry.is_regular_file()) continue;
 
         std::string package_name = entry.path().filename().string();
         if(!is_valid_package_name(package_name)) continue;
-        baselines.emplace(
-                package_name,
-                SourceUpdateBaseline{get_installed_package_version(package_name)});
+        package_names.push_back(package_name);
+    }
+    return package_names;
+}
+
+SourceUpdateBaselines snapshot_source_update_baselines(
+        const PackageMetadataSession& session,
+        const std::vector<std::string>& package_names) {
+    SourceUpdateBaselines baselines;
+    for(const auto& package_name : package_names) {
+        const InstalledPackageQueryResult result =
+                session.query_installed_package(package_name);
+
+        if(const auto* metadata = std::get_if<InstalledPackageMetadata>(&result)) {
+            baselines.emplace(
+                    package_name,
+                    SourceUpdateBaseline{metadata->version});
+            continue;
+        }
+        if(std::holds_alternative<PackageNotFound>(result)) {
+            baselines.emplace(
+                    package_name,
+                    SourceUpdateBaseline{std::nullopt});
+            continue;
+        }
+
+        const auto& failure = std::get<PackageMetadataFailure>(result);
+        throw PackageMetadataError(PackageMetadataFailure{
+                failure.code,
+                "Failed to query installed package metadata for " +
+                        package_name + ": " + failure.diagnostic});
     }
     return baselines;
 }
@@ -501,7 +530,18 @@ int cmd_clean(const AppConfig& config) {
 int cmd_upgrade(const AppConfig& config) {
     bool failed = false;
     preflight_upgrade_source_metadata();
-    SourceUpdateBaselines update_baselines = snapshot_source_update_baselines();
+    SourceUpdateBaselines update_baselines;
+    const std::vector<std::string> package_names =
+            source_update_baseline_package_names();
+    if(!package_names.empty()) {
+        const PacmanDatabasePaths paths = resolve_pacman_database_paths();
+        {
+            // POLICY(#152): 1 read phaseで全baselineを確定し、system mutation前にsessionを解放する。
+            PackageMetadataSession session = PackageMetadataSession::open(paths);
+            update_baselines =
+                    snapshot_source_update_baselines(session, package_names);
+        }
+    }
     Logger::info("System upgrade...");
     if(run_command("sudo pacman " + join_pacman_args({"-Syu"}, config)) != 0) throw std::runtime_error("Update failed.");
     if(fs::exists(source_preference_root())) {

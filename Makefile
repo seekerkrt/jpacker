@@ -22,6 +22,7 @@ DEPENDENCY_PLAN_MODEL_TEST_TARGET := $(BUILD_DIR)/tests/dependency-plan-model-te
 ARTIFACT_INSTALL_PLAN_TEST_TARGET := $(BUILD_DIR)/tests/artifact-install-plan-test
 PACKAGE_METADATA_TEST_TARGET := $(BUILD_DIR)/tests/package-metadata-test
 PACKAGE_METADATA_INTEGRATION_TEST_TARGET := $(BUILD_DIR)/tests/package-metadata-integration-test
+UPGRADE_BASELINE_METADATA_TEST_TARGET := $(BUILD_DIR)/tests/jpacker-upgrade-baseline-metadata-test
 
 # --- インストール先設定 ---
 PREFIX      ?= /usr/local
@@ -70,6 +71,9 @@ PACKAGE_METADATA_INTEGRATION_TEST_SRCS := \
 	$(SRC_DIR)/package_identifier.cpp \
 	$(SRC_DIR)/process.cpp \
 	$(SRC_DIR)/logging.cpp
+UPGRADE_BASELINE_METADATA_TEST_SRCS := \
+	$(SRCS) \
+	tests/stubs/package-metadata/alpm_stub.cpp
 OBJS      := $(SRCS:$(SRC_DIR)/%.cpp=$(BUILD_DIR)/%.o)
 DEPS      := $(OBJS:.o=.d)
 LIBALPM_BUILD_TARGETS := \
@@ -80,7 +84,8 @@ LIBALPM_BUILD_TARGETS := \
 	$(SOURCE_INSTALL_CHARACTERIZATION_TEST_TARGET) \
 	$(APP_CONFIG_INTEGRATION_TEST_TARGET) \
 	$(PACKAGE_METADATA_TEST_TARGET) \
-	$(PACKAGE_METADATA_INTEGRATION_TEST_TARGET)
+	$(PACKAGE_METADATA_INTEGRATION_TEST_TARGET) \
+	$(UPGRADE_BASELINE_METADATA_TEST_TARGET)
 
 .PHONY: all check-libalpm clean test-app-config test-package-identifier test-package-metadata test-package-metadata-integration test-shell-words test-dependency-plan-model test-artifact-install-plan test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-commands-inspect test-commands-source-maintenance test-commands-sync test-conflicts-replaces test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check install uninstall
 
@@ -195,6 +200,17 @@ $(PACKAGE_METADATA_INTEGRATION_TEST_TARGET): $(PACKAGE_METADATA_INTEGRATION_TEST
 		$(PACKAGE_METADATA_INTEGRATION_TEST_SRCS) \
 		-o $@ $(LIBALPM_LDLIBS)
 
+$(UPGRADE_BASELINE_METADATA_TEST_TARGET): $(UPGRADE_BASELINE_METADATA_TEST_SRCS) $(HEADERS) tests/stubs/package-metadata/alpm_stub.hpp $(VERSION_FILE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling upgrade baseline metadata fake-symbol test binary"
+	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
+		-DJPACKER_ENABLE_TEST_OVERRIDES \
+		-DJPACKER_ENABLE_TEST_CONFIG_PATH \
+		-DJPACKER_ENABLE_APP_CONFIG_TEST_HOOKS \
+		-I$(SRC_DIR) -Itests/stubs/package-metadata \
+		$(UPGRADE_BASELINE_METADATA_TEST_SRCS) \
+		-o $@ $(MY_LDLIBS)
+
 test-app-config: $(APP_CONFIG_MODULE_TEST_TARGET) $(APP_CONFIG_INTEGRATION_TEST_TARGET)
 	sh tests/test-app-config.sh $(abspath $(APP_CONFIG_MODULE_TEST_TARGET)) $(abspath $(APP_CONFIG_INTEGRATION_TEST_TARGET))
 
@@ -228,9 +244,12 @@ test-cli-parser: $(TEST_TARGET)
 test-commands-inspect: $(COMMANDS_INSPECT_TEST_TARGET)
 	sh tests/test-commands-inspect.sh $(abspath $(COMMANDS_INSPECT_TEST_TARGET))
 
-test-commands-source-maintenance: $(APP_CONFIG_INTEGRATION_TEST_TARGET) $(SOURCE_INSTALL_CHARACTERIZATION_TEST_TARGET) $(PROCESS_STDIN_FD_TEST_TARGET)
+test-commands-source-maintenance: $(APP_CONFIG_INTEGRATION_TEST_TARGET) $(SOURCE_INSTALL_CHARACTERIZATION_TEST_TARGET) $(PROCESS_STDIN_FD_TEST_TARGET) $(UPGRADE_BASELINE_METADATA_TEST_TARGET)
 	$(abspath $(PROCESS_STDIN_FD_TEST_TARGET))
-	sh tests/test-commands-source-maintenance.sh $(abspath $(APP_CONFIG_INTEGRATION_TEST_TARGET)) $(abspath $(SOURCE_INSTALL_CHARACTERIZATION_TEST_TARGET))
+	sh tests/test-commands-source-maintenance.sh \
+		$(abspath $(APP_CONFIG_INTEGRATION_TEST_TARGET)) \
+		$(abspath $(SOURCE_INSTALL_CHARACTERIZATION_TEST_TARGET)) \
+		$(abspath $(UPGRADE_BASELINE_METADATA_TEST_TARGET))
 
 test-commands-sync: $(COMMANDS_SYNC_TEST_TARGET)
 	sh tests/test-commands-sync.sh $(abspath $(COMMANDS_SYNC_TEST_TARGET))
@@ -241,10 +260,11 @@ test-pacman-routing: $(TEST_TARGET)
 test-build-cache-symlink: $(TEST_TARGET)
 	sh tests/test-build-cache-symlink.sh $(abspath $(TEST_TARGET))
 
-test-source-build: $(TEST_TARGET) $(APP_CONFIG_INTEGRATION_TEST_TARGET)
+test-source-build: $(TEST_TARGET) $(APP_CONFIG_INTEGRATION_TEST_TARGET) $(UPGRADE_BASELINE_METADATA_TEST_TARGET)
 	sh tests/test-source-build.sh \
 		$(abspath $(TEST_TARGET)) \
-		$(abspath $(APP_CONFIG_INTEGRATION_TEST_TARGET))
+		$(abspath $(APP_CONFIG_INTEGRATION_TEST_TARGET)) \
+		$(abspath $(UPGRADE_BASELINE_METADATA_TEST_TARGET))
 
 test-source-selection: $(TEST_TARGET)
 	sh tests/test-source-selection.sh $(abspath $(TEST_TARGET))
