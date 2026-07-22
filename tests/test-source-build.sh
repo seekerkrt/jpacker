@@ -3,6 +3,7 @@ set -eu
 
 test_binary=$1
 config_test_binary=$2
+upgrade_metadata_test_binary=$3
 repo_root=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
 tmp_dir=$(mktemp -d)
 
@@ -19,10 +20,13 @@ if ! command -v script >/dev/null 2>&1; then
 fi
 ln -s "$test_binary" "$tmp_dir/jpacker-test"
 ln -s "$config_test_binary" "$tmp_dir/jpacker-config-test"
+ln -s "$upgrade_metadata_test_binary" "$tmp_dir/jpacker-upgrade-metadata-test"
 test_runner=$tmp_dir/jpacker-test
 config_test_runner=$tmp_dir/jpacker-config-test
+upgrade_metadata_test_runner=$tmp_dir/jpacker-upgrade-metadata-test
 
 export PATH=$repo_root/tests/stubs:/usr/bin:/bin
+upgrade_metadata_path=$repo_root/tests/stubs/upgrade-baseline-metadata:$PATH
 official_url=https://gitlab.archlinux.org/archlinux/packaging/packages/clean-root.git
 
 setup_case() {
@@ -33,10 +37,12 @@ setup_case() {
     output_file=$case_dir/output
     config_file=$case_dir/jpacker.conf
     checkout_dir=$case_dir/xdg-cache/jpacker/clean-root
+    package_metadata_state=$case_dir/package-metadata-state
 
     mkdir -p "$case_dir/home" "$case_dir/xdg-cache" "$case_dir/package.build"
     : > "$command_log"
     : > "$editor_argv_log"
+    : > "$package_metadata_state"
     export HOME=$case_dir/home
     export XDG_CACHE_HOME=$case_dir/xdg-cache
     export JPACKER_TEST_COMMAND_LOG=$command_log
@@ -45,6 +51,8 @@ setup_case() {
     export JPACKER_TEST_PACMAN_EXIT_CODE=1
     export JPACKER_TEST_SUDO_EXIT_CODE=0
     export JPACKER_TEST_MAKEPKG_EXIT_CODE=0
+    export JPACKER_TEST_PACKAGE_METADATA_STATE_FILE=$package_metadata_state
+    export JPACKER_TEST_PACKAGE_METADATA_EVENT_LOG=$command_log
     unset JPACKER_TEST_PACMAN_Q_OUTPUT
     unset JPACKER_TEST_PACMAN_Q_EXIT_CODE
     unset JPACKER_TEST_PACMAN_QM_OUTPUT
@@ -70,6 +78,10 @@ setup_case() {
     unset JPACKER_TEST_EDITOR_REMOVE_TARGET
     unset JPACKER_TEST_EDITOR_SYMLINK_TARGET
     unset JPACKER_TEST_APP_CONFIG_CASE
+    unset JPACKER_TEST_PACKAGE_METADATA_INITIALIZE_FAILURE
+    unset JPACKER_TEST_PACKAGE_METADATA_QUERY_FAILURE_PACKAGE
+    unset JPACKER_TEST_PACKAGE_METADATA_QUERY_FAILURE_AT
+    unset JPACKER_TEST_PACKAGE_METADATA_PACMAN_CONF_EXIT_CODE
 }
 
 create_existing_checkout() {
@@ -81,6 +93,7 @@ create_existing_checkout() {
 prepare_upgrade_case() {
     create_existing_checkout
     : > "$JPACKER_TEST_PACKAGE_BUILD_DIR/clean-root"
+    printf 'clean-root 1.0-1\n' > "$package_metadata_state"
     export JPACKER_TEST_PACMAN_Q_OUTPUT='clean-root 1.0-1'
 }
 
@@ -122,6 +135,16 @@ run_fail() {
     fi
 }
 
+run_upgrade_ok() {
+    : > "$command_log"
+    if ! PATH=$upgrade_metadata_path "$upgrade_metadata_test_runner" "$@" > "$output_file" 2>&1; then
+        echo "expected upgrade metadata command to succeed: $*" >&2
+        sed -n '1,240p' "$output_file" >&2
+        cat "$command_log" >&2
+        exit 1
+    fi
+}
+
 run_tty_ok() {
     answers=$1
     shift
@@ -129,6 +152,19 @@ run_tty_ok() {
     if ! printf '%b' "$answers" |
         script -qec "$test_runner $*" /dev/null > "$output_file" 2>&1; then
         echo "expected interactive command to succeed: $*" >&2
+        sed -n '1,240p' "$output_file" >&2
+        cat "$command_log" >&2
+        exit 1
+    fi
+}
+
+run_upgrade_tty_ok() {
+    answers=$1
+    shift
+    : > "$command_log"
+    if ! printf '%b' "$answers" |
+        PATH=$upgrade_metadata_path script -qec "$upgrade_metadata_test_runner $*" /dev/null > "$output_file" 2>&1; then
+        echo "expected interactive upgrade metadata command to succeed: $*" >&2
         sed -n '1,240p' "$output_file" >&2
         cat "$command_log" >&2
         exit 1
@@ -194,6 +230,18 @@ assert_command_absent() {
     unexpected=$1
     if grep -Fx -- "$unexpected" "$command_log" >/dev/null; then
         echo "unexpected command: $unexpected" >&2
+        cat "$command_log" >&2
+        exit 1
+    fi
+}
+
+assert_command_count() {
+    expected=$1
+    expected_count=$2
+    actual_count=$(grep -Fxc -- "$expected" "$command_log" || true)
+    if [ "$actual_count" -ne "$expected_count" ]; then
+        echo "unexpected command count for: $expected" >&2
+        echo "expected $expected_count, got $actual_count" >&2
         cat "$command_log" >&2
         exit 1
     fi
@@ -304,19 +352,28 @@ setup_case update-newer
 prepare_upgrade_case
 write_srcinfo 2.0 1
 export JPACKER_TEST_VERCMP_OUTPUT=1
-run_ok --noedit --nodiff upgrade
+run_upgrade_ok --noedit --nodiff upgrade
+assert_command_count "pacman-conf --verbose RootDir DBPath" 1
+assert_command_count "alpm initialize" 1
+assert_command_count "alpm query clean-root" 1
+assert_command_count "alpm release" 1
+assert_command "sudo pacman -Syu"
 assert_command "git fetch origin"
 assert_command "git reset --hard origin/main"
+assert_command_count "pacman -Q clean-root" 1
 assert_command "vercmp 2.0-1 1.0-1"
 assert_command "makepkg -sic"
-assert_command_before "git reset --hard origin/main" "vercmp 2.0-1 1.0-1"
+assert_command_before "alpm query clean-root" "alpm release"
+assert_command_before "alpm release" "sudo pacman -Syu"
+assert_command_before "git reset --hard origin/main" "pacman -Q clean-root"
+assert_command_before "pacman -Q clean-root" "vercmp 2.0-1 1.0-1"
 assert_command_before "vercmp 2.0-1 1.0-1" "makepkg -sic"
 
 setup_case update-up-to-date
 prepare_upgrade_case
 write_srcinfo 1.0 1
 export JPACKER_TEST_VERCMP_OUTPUT=0
-run_ok --noedit --nodiff upgrade
+run_upgrade_ok --noedit --nodiff upgrade
 assert_command "git fetch origin"
 assert_command "git reset --hard origin/main"
 assert_command "vercmp 1.0-1 1.0-1"
@@ -326,7 +383,7 @@ assert_command_prefix_absent "jpacker-test-editor "
 
 setup_case update-unknown-noconfirm
 prepare_upgrade_case
-run_ok --noedit --nodiff --noconfirm upgrade
+run_upgrade_ok --noedit --nodiff --noconfirm upgrade
 assert_contains "Unable to determine update status from .SRCINFO for clean-root." "$output_file"
 assert_contains "Skipping clean-root: update status is unknown and --noconfirm is set." "$output_file"
 assert_command "git reset --hard origin/main"
@@ -334,7 +391,7 @@ assert_command_prefix_absent "makepkg "
 
 setup_case update-unknown-noninteractive
 prepare_upgrade_case
-run_ok --noedit --nodiff upgrade
+run_upgrade_ok --noedit --nodiff upgrade
 assert_contains "Unable to determine update status from .SRCINFO for clean-root." "$output_file"
 assert_contains "Skipping clean-root: update status is unknown and stdin is non-interactive." "$output_file"
 assert_command "git reset --hard origin/main"
@@ -342,14 +399,14 @@ assert_command_prefix_absent "makepkg "
 
 setup_case update-unknown-interactive-no
 prepare_upgrade_case
-run_tty_ok 'n\n' --noedit --nodiff upgrade
+run_upgrade_tty_ok 'n\n' --noedit --nodiff upgrade
 assert_contains "Update status is unknown because .SRCINFO is missing or incomplete. Continue to review/build?" "$output_file"
 assert_command "git reset --hard origin/main"
 assert_command_prefix_absent "makepkg "
 
 setup_case update-unknown-interactive-yes
 prepare_upgrade_case
-run_tty_ok 'y\n' --noedit --nodiff upgrade
+run_upgrade_tty_ok 'y\n' --noedit --nodiff upgrade
 assert_contains "Update status is unknown because .SRCINFO is missing or incomplete. Continue to review/build?" "$output_file"
 assert_command "git reset --hard origin/main"
 assert_command "makepkg -sic"

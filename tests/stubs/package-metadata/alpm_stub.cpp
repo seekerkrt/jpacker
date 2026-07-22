@@ -1,5 +1,10 @@
 #include "alpm_stub.hpp"
 
+#include <cerrno>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <fstream>
 #include <memory>
 #include <string>
 #include <utility>
@@ -77,6 +82,95 @@ struct AlpmStubState {
 };
 
 AlpmStubState g_state;
+
+void append_alpm_event(
+        const char* event,
+        const char* detail = nullptr) noexcept {
+    const char* event_log_path =
+            std::getenv("JPACKER_TEST_PACKAGE_METADATA_EVENT_LOG");
+    if(event_log_path == nullptr || event_log_path[0] == '\0') return;
+
+    // POLICY: alpm_release()はnoexcept destructorから呼ばれるため、test観測もC stdioで閉じる。
+    std::FILE* event_log = std::fopen(event_log_path, "a");
+    if(event_log == nullptr) return;
+    if(detail == nullptr) {
+        static_cast<void>(std::fprintf(event_log, "%s\n", event));
+    } else {
+        static_cast<void>(std::fprintf(event_log, "%s %s\n", event, detail));
+    }
+    static_cast<void>(std::fclose(event_log));
+}
+
+bool environment_flag_is_enabled(const char* name) noexcept {
+    const char* value = std::getenv(name);
+    return value != nullptr && std::strcmp(value, "1") == 0;
+}
+
+bool environment_requests_query_failure(const char* package_name) noexcept {
+    const char* failure_package =
+            std::getenv("JPACKER_TEST_PACKAGE_METADATA_QUERY_FAILURE_PACKAGE");
+    if(failure_package != nullptr && package_name != nullptr &&
+       std::strcmp(failure_package, package_name) == 0) {
+        return true;
+    }
+
+    const char* failure_ordinal_text =
+            std::getenv("JPACKER_TEST_PACKAGE_METADATA_QUERY_FAILURE_AT");
+    if(failure_ordinal_text == nullptr || failure_ordinal_text[0] == '\0') return false;
+
+    char* ordinal_end = nullptr;
+    errno = 0;
+    unsigned long long failure_ordinal =
+            std::strtoull(failure_ordinal_text, &ordinal_end, 10);
+    if(errno != 0 || ordinal_end == failure_ordinal_text || ordinal_end[0] != '\0') {
+        return false;
+    }
+    return failure_ordinal ==
+           static_cast<unsigned long long>(g_state.package_query_calls);
+}
+
+void configure_package_lookup_from_environment(
+        const char* queried_package_name,
+        PackageLookupMode& lookup_mode,
+        alpm_errno_t& query_error) {
+    if(environment_requests_query_failure(queried_package_name)) {
+        lookup_mode = PackageLookupMode::Failure;
+        query_error = ALPM_ERR_DB_OPEN;
+        return;
+    }
+
+    const char* state_file_path =
+            std::getenv("JPACKER_TEST_PACKAGE_METADATA_STATE_FILE");
+    if(state_file_path == nullptr) return;
+
+    std::ifstream state_file(state_file_path);
+    if(!state_file) {
+        lookup_mode = PackageLookupMode::Failure;
+        query_error = ALPM_ERR_DB_OPEN;
+        return;
+    }
+
+    std::string package_name;
+    std::string package_version;
+    while(state_file >> package_name >> package_version) {
+        if(package_name != queried_package_name) continue;
+
+        lookup_mode = PackageLookupMode::Present;
+        g_state.package_name = std::move(package_name);
+        g_state.package_version = std::move(package_version);
+        g_state.package_reason = ALPM_PKG_REASON_EXPLICIT;
+        g_state.package_name_is_null = false;
+        g_state.package_version_is_null = false;
+        return;
+    }
+
+    if(state_file.bad()) {
+        lookup_mode = PackageLookupMode::Failure;
+        query_error = ALPM_ERR_DB_OPEN;
+        return;
+    }
+    lookup_mode = PackageLookupMode::Absent;
+}
 
 HandleRecord* record_for_handle(alpm_handle_t* handle) {
     if(handle == nullptr || handle->creation_index >= g_state.handles.size()) return nullptr;
@@ -212,12 +306,17 @@ extern "C" {
 
 alpm_handle_t* alpm_initialize(
         const char* root, const char* database_path, alpm_errno_t* error) {
+    append_alpm_event("alpm initialize");
     ++g_state.initialize_calls;
     g_state.initialize_root = root == nullptr ? "" : root;
     g_state.initialize_database_path = database_path == nullptr ? "" : database_path;
 
-    if(g_state.initialize_fails) {
-        if(error != nullptr) *error = g_state.initialize_error;
+    bool environment_failure = environment_flag_is_enabled(
+            "JPACKER_TEST_PACKAGE_METADATA_INITIALIZE_FAILURE");
+    if(environment_failure || g_state.initialize_fails) {
+        if(error != nullptr) {
+            *error = environment_failure ? ALPM_ERR_SYSTEM : g_state.initialize_error;
+        }
         return nullptr;
     }
 
@@ -229,6 +328,7 @@ alpm_handle_t* alpm_initialize(
 }
 
 int alpm_release(alpm_handle_t* handle) {
+    append_alpm_event("alpm release");
     HandleRecord* record = record_for_handle(handle);
     if(record == nullptr) return -1;
     ++record->release_count;
@@ -299,6 +399,7 @@ alpm_list_t* alpm_db_get_pkgcache(alpm_db_t* database) {
 }
 
 alpm_pkg_t* alpm_db_get_pkg(alpm_db_t* database, const char* name) {
+    append_alpm_event("alpm query", name == nullptr ? "" : name);
     ++g_state.package_query_calls;
     if(database == nullptr) return nullptr;
     if(g_state.should_preserve_package_query_error) {
@@ -313,7 +414,17 @@ alpm_pkg_t* alpm_db_get_pkg(alpm_db_t* database, const char* name) {
         return nullptr;
     }
 
-    switch(g_state.package_lookup_mode) {
+    PackageLookupMode lookup_mode = g_state.package_lookup_mode;
+    alpm_errno_t query_error = g_state.package_query_error;
+    try {
+        configure_package_lookup_from_environment(name, lookup_mode, query_error);
+    } catch(...) {
+        // Test fixtureの読込自体が失敗しても、package absenceへflattenしない。
+        lookup_mode = PackageLookupMode::Failure;
+        query_error = ALPM_ERR_DB_OPEN;
+    }
+
+    switch(lookup_mode) {
         case PackageLookupMode::Present: {
             HandleRecord* record = record_for_handle(database->handle);
             return record == nullptr ? nullptr : &record->package;
@@ -322,7 +433,7 @@ alpm_pkg_t* alpm_db_get_pkg(alpm_db_t* database, const char* name) {
             set_handle_error(database->handle, ALPM_ERR_PKG_NOT_FOUND);
             return nullptr;
         case PackageLookupMode::Failure:
-            set_handle_error(database->handle, g_state.package_query_error);
+            set_handle_error(database->handle, query_error);
             return nullptr;
         case PackageLookupMode::NullWithoutError:
             return nullptr;
