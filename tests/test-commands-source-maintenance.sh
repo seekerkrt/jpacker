@@ -100,6 +100,8 @@ setup_case() {
     unset JPACKER_TEST_VERCMP_EXIT_CODE
     unset JPACKER_TEST_VERCMP_ARGV_LOG
     unset JPACKER_TEST_MAKEPKG_ARGV_LOG
+    unset JPACKER_TEST_MAKEPKG_ENV_LOG
+    unset JPACKER_TEST_MAKEPKG_ENV_KEYS
     unset JPACKER_TEST_SOURCE_MAINTENANCE_FAIL_SUBSTRING
     unset JPACKER_TEST_SOURCE_MAINTENANCE_PACMAN_SYU_Q_OUTPUT_FILE
     unset JPACKER_TEST_SOURCE_MAINTENANCE_PACMAN_SC_RACE_PATH
@@ -312,6 +314,13 @@ assert_command_content_absent() {
         cat "$command_log" >&2
         exit 1
     fi
+}
+
+assert_legacy_separated_source_commands_absent() {
+    # LEGACY(#242): 現行makepkg -sic一括委譲の記録であり、将来の分離routeを禁止する契約ではない。
+    assert_command_content_absent "makepkg --packagelist"
+    assert_command_content_absent "pacman -U"
+    assert_command_content_absent "pacman -D"
 }
 
 assert_command_at() {
@@ -1621,20 +1630,34 @@ assert_command_before \
     "git clone https://aur.archlinux.org/dep-base.git dep-base" \
     "git clone https://aur.archlinux.org/root-base.git root-base"
 assert_command_count "makepkg -sic --noconfirm --needed" 2
+assert_legacy_separated_source_commands_absent
 
 setup_case source-plan-failure-context
 export JPACKER_TEST_MAKEPKG_EXIT_CODE=42
 run_source_fail plan-failure
 assert_contains "Failed while building/installing PackageBase dep-base (dep-target): Build failed." "$output_file"
 assert_command "git clone https://aur.archlinux.org/dep-base.git dep-base"
+assert_command_count "makepkg -sic --noconfirm --needed" 1
 assert_command_absent "git clone https://aur.archlinux.org/root-base.git root-base"
+assert_legacy_separated_source_commands_absent
 
 setup_case source-preference-fallback
-printf 'FALLBACK=base-value\n' > "$preference_dir/base-target"
+legacy_pkgdest=$case_dir/legacy-pkgdest
+makepkg_env_log=$case_dir/makepkg-env.log
+: > "$makepkg_env_log"
+printf 'FALLBACK=base-value\nPKGDEST=%s\n' "$legacy_pkgdest" > "$preference_dir/base-target"
+export JPACKER_TEST_MAKEPKG_ENV_LOG=$makepkg_env_log
+export JPACKER_TEST_MAKEPKG_ENV_KEYS='FALLBACK PKGDEST'
 run_source_ok fallback
 assert_contains "Loading custom build flags from $preference_dir/base-target" "$output_file"
 assert_contains "Applying custom build flags: FALLBACK='base-value' " "$output_file"
 assert_not_contains "Loading custom build flags from $preference_dir/requested-target" "$output_file"
+# LEGACY(#242): 現行behaviorの記録であり、将来のPKGDEST ownership policyではない。
+assert_argv_log "$makepkg_env_log" "env-begin
+env[FALLBACK]=<base-value>
+env[PKGDEST]=<$legacy_pkgdest>
+env-end"
+assert_legacy_separated_source_commands_absent
 
 setup_case source-preference-requested-wins
 printf 'REQUESTED=requested-value\n' > "$preference_dir/requested-target"
@@ -1655,6 +1678,8 @@ assert_command_before \
     "pacman -Si clean-root" \
     "git clone https://gitlab.archlinux.org/archlinux/packaging/packages/clean-root.git clean-root"
 assert_contains "Applying custom build flags: SMART='preference' " "$output_file"
+assert_command_count "makepkg -sic --noconfirm" 1
+assert_legacy_separated_source_commands_absent
 
 setup_case smart-source-missing-post-snapshot
 export JPACKER_TEST_PACMAN_REPO_PACKAGES=clean-root

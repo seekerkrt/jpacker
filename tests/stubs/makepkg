@@ -13,6 +13,27 @@ done
 if [ -n "${JPACKER_TEST_MAKEPKG_ARGV_LOG:-}" ]; then
     printf 'argv-end\n' >> "$JPACKER_TEST_MAKEPKG_ARGV_LOG"
 fi
+if [ -n "${JPACKER_TEST_MAKEPKG_ENV_LOG:-}" ]; then
+    printf 'env-begin\n' >> "$JPACKER_TEST_MAKEPKG_ENV_LOG"
+    for makepkg_env_key in ${JPACKER_TEST_MAKEPKG_ENV_KEYS:-}; do
+        case $makepkg_env_key in
+            [A-Za-z_]*)
+                case $makepkg_env_key in
+                    *[!A-Za-z0-9_]*) exit 2 ;;
+                esac
+                ;;
+            *) exit 2 ;;
+        esac
+        if makepkg_env_value=$(/usr/bin/printenv "$makepkg_env_key"); then
+            printf 'env[%s]=<%s>\n' "$makepkg_env_key" "$makepkg_env_value" \
+                >> "$JPACKER_TEST_MAKEPKG_ENV_LOG"
+        else
+            printf 'env[%s]=<unset>\n' "$makepkg_env_key" \
+                >> "$JPACKER_TEST_MAKEPKG_ENV_LOG"
+        fi
+    done
+    printf 'env-end\n' >> "$JPACKER_TEST_MAKEPKG_ENV_LOG"
+fi
 exit_code=${JPACKER_TEST_MAKEPKG_EXIT_CODE:-99}
 state_after_success_file=${JPACKER_TEST_MAKEPKG_PACKAGE_METADATA_STATE_AFTER_SUCCESS_FILE:-}
 if [ "$exit_code" -eq 0 ] && [ -n "$state_after_success_file" ]; then

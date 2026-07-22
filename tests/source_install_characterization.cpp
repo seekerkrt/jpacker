@@ -27,6 +27,18 @@ AppConfig characterization_config() {
 
 BuildPlan two_entry_plan() {
     BuildPlan plan;
+    const RootTargetIdentity root_identity{0, "root-target"};
+
+    plan.root_targets.push_back(root_identity);
+    plan.package_targets.push_back(PlannedPackageTarget{
+            "dep-target", "dep-base", {PackageRole::RuntimeDependency},
+            {root_identity}});
+    plan.package_targets.push_back(PlannedPackageTarget{
+            "root-target", "root-base", {PackageRole::Root},
+            {root_identity}});
+
+    // LEGACY(#242): semantic metadataではrootとdependencyを区別するが、現行executorは
+    // BuildPlan::orderだけを実行単位とし、両方を同じmakepkg -sic経路へ委譲する。
     plan.order.push_back(BuildPlanEntry{"dep-base", {"dep-target"}});
     plan.order.push_back(BuildPlanEntry{"root-base", {"root-target"}});
     return plan;
