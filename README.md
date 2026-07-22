@@ -34,6 +34,14 @@ jpacker は現在も開発中です。
 
 安全のため、重要な package 操作は実行前に内容を確認してください。
 
+### 設計原則
+
+`jpacker` は、`pacman` や `makepkg` を置き換える独立した package manager ではありません。一貫性と透明性を重視し、元の command と既存 tool の操作・責務・挙動を明確な理由なく変えません。
+
+Arch package metadata と package 間の関係は現在の read-only scope で `libalpm` を正とし、system package transaction は `pacman`、source package の build と artifact install は `makepkg`、source repository の取得と更新は `git` へ任せます。
+
+command 名、引数、既存 tool の慣習から利用者が自然に想像する目的と結果を重視します。判断が曖昧な場合や authoritative な情報を観測できない場合は、推測して副作用を起こさず、安全に停止して理由を示します。詳細は [DECISIONS.md](DECISIONS.md) を参照してください。
+
 ### リポジトリ情報
 
 * Canonical repository: [GitHub](https://github.com/seekerkrt/jpacker)
@@ -380,6 +388,14 @@ It does not provide the full behavior surface of `pacman` or existing AUR helper
 For detailed compatibility goals and command routing specifications, see [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md).
 
 For safety, important package operations should still be reviewed carefully before execution.
+
+### Design principles
+
+`jpacker` is not an independent package manager that replaces `pacman` or `makepkg`. It prioritizes consistency and transparency, and does not change the operations, responsibilities, or behavior of the original commands and existing tools without a clear reason.
+
+Arch package metadata and package relationships use `libalpm` as the authority within the current read-only scope. System package transactions remain delegated to `pacman`, source package builds and artifact installation to `makepkg`, and source repository retrieval and updates to `git`.
+
+jpacker respects the purpose and result that users would naturally expect from a command name, its arguments, and existing tool conventions. When a decision is ambiguous or authoritative information cannot be observed, it does not guess and introduce side effects; it stops safely and explains why. See [DECISIONS.md](DECISIONS.md) for the detailed policy.
 
 ### Repository
 
