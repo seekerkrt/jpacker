@@ -32,6 +32,17 @@ COMPDIR     ?= /usr/share/bash-completion/completions
 ZSHCOMPDIR  ?= /usr/share/zsh/site-functions
 FISHCOMPDIR ?= /usr/share/fish/vendor_completions.d
 MANDIR      ?= $(PREFIX)/share/man/man8
+LICENSEDIR  ?= $(PREFIX)/share/licenses/$(TARGET)
+DOCDIR      ?= $(PREFIX)/share/doc/$(TARGET)
+
+PROJECT_LICENSE_FILES := \
+	LICENSE \
+	LICENSES/jpacker-MIT-legacy.txt \
+	LICENSES/curl.txt \
+	LICENSES/nlohmann-json-MIT.txt
+COMPLIANCE_DOC_FILES := \
+	THIRD_PARTY_NOTICES.md \
+	docs/LICENSING.md
 
 # --- コンパイラ設定 ---
 CXX       ?= g++
@@ -87,7 +98,7 @@ LIBALPM_BUILD_TARGETS := \
 	$(PACKAGE_METADATA_INTEGRATION_TEST_TARGET) \
 	$(UPGRADE_BASELINE_METADATA_TEST_TARGET)
 
-.PHONY: all check-libalpm clean test-app-config test-package-identifier test-package-metadata test-package-metadata-integration test-shell-words test-dependency-plan-model test-artifact-install-plan test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-commands-inspect test-commands-source-maintenance test-commands-sync test-conflicts-replaces test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check install uninstall
+.PHONY: all check-libalpm clean test-app-config test-package-identifier test-package-metadata test-package-metadata-integration test-shell-words test-dependency-plan-model test-artifact-install-plan test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-commands-inspect test-commands-source-maintenance test-commands-sync test-conflicts-replaces test-install-layout test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check install uninstall
 
 all: $(TARGET) $(MANPAGE)
 
@@ -269,6 +280,9 @@ test-source-build: $(TEST_TARGET) $(APP_CONFIG_INTEGRATION_TEST_TARGET) $(UPGRAD
 test-source-selection: $(TEST_TARGET)
 	sh tests/test-source-selection.sh $(abspath $(TEST_TARGET))
 
+test-install-layout: $(TARGET) $(MANPAGE) $(PROJECT_LICENSE_FILES) $(COMPLIANCE_DOC_FILES)
+	sh tests/test-install-layout.sh
+
 test-needed-contract: $(TEST_TARGET)
 	sh tests/test-needed-contract.sh $(abspath $(TEST_TARGET))
 
@@ -278,8 +292,10 @@ test-pkgbuild-export: $(TEST_TARGET)
 release-check:
 	@echo ":: Checking release version consistency"
 	sh scripts/check-release-version.sh
+	@echo ":: Checking license compliance"
+	sh scripts/check-license-compliance.sh
 
-install: $(TARGET) $(MANPAGE)
+install: $(TARGET) $(MANPAGE) $(PROJECT_LICENSE_FILES) $(COMPLIANCE_DOC_FILES)
 	@echo ":: Installing binary..."
 	install -Dm755 $(TARGET) $(DESTDIR)$(BINDIR)/$(TARGET)
 
@@ -298,6 +314,16 @@ install: $(TARGET) $(MANPAGE)
 
 	@echo ":: Installing man page..."
 	install -Dm644 $(MANPAGE) $(DESTDIR)$(MANDIR)/jpacker.8
+
+	@echo ":: Installing license files..."
+	install -Dm644 LICENSE $(DESTDIR)$(LICENSEDIR)/LICENSE
+	install -Dm644 LICENSES/jpacker-MIT-legacy.txt $(DESTDIR)$(LICENSEDIR)/jpacker-MIT-legacy.txt
+	install -Dm644 LICENSES/curl.txt $(DESTDIR)$(LICENSEDIR)/curl.txt
+	install -Dm644 LICENSES/nlohmann-json-MIT.txt $(DESTDIR)$(LICENSEDIR)/nlohmann-json-MIT.txt
+
+	@echo ":: Installing compliance documentation..."
+	install -Dm644 THIRD_PARTY_NOTICES.md $(DESTDIR)$(DOCDIR)/THIRD_PARTY_NOTICES.md
+	install -Dm644 docs/LICENSING.md $(DESTDIR)$(DOCDIR)/LICENSING.md
 
 uninstall:
 	@echo ":: Removing binary..."
@@ -319,5 +345,17 @@ uninstall:
 
 	@echo ":: Removing man page..."
 	rm -f $(DESTDIR)$(MANDIR)/jpacker.8
+
+	@echo ":: Removing license files..."
+	rm -f $(DESTDIR)$(LICENSEDIR)/LICENSE
+	rm -f $(DESTDIR)$(LICENSEDIR)/jpacker-MIT-legacy.txt
+	rm -f $(DESTDIR)$(LICENSEDIR)/curl.txt
+	rm -f $(DESTDIR)$(LICENSEDIR)/nlohmann-json-MIT.txt
+	@rmdir $(DESTDIR)$(LICENSEDIR) 2>/dev/null || true
+
+	@echo ":: Removing compliance documentation..."
+	rm -f $(DESTDIR)$(DOCDIR)/THIRD_PARTY_NOTICES.md
+	rm -f $(DESTDIR)$(DOCDIR)/LICENSING.md
+	@rmdir $(DESTDIR)$(DOCDIR) 2>/dev/null || true
 
 -include $(DEPS)

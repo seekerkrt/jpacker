@@ -94,6 +94,14 @@ jpacker / future pactune が外部 component を呼び出すための順序、�
 
 これらを満たす説明や検証方法がない場合は、自動化を既定動作へ組み込まない。read-only の観測や plan と、build、install、remove、repository update などの mutation を分け、必要な判断材料を利用者へ示すことを優先する。
 
+### 8. Licenseとthird-party compliance
+
+現在のv1.15.0開発系列とv1.15.0以降のjpackerは`GPL-3.0-or-later`で提供する。v1.14.0以前のreleaseはMIT Licenseのまま維持し、過去のtag、release、permissionを書き換えない。
+
+licenseとnoticeの監査では、同じprogramへ組み込まれるdirect linked / header-compiled componentと、command line・stdin/stdout・exit statusを介するexternal programを分離して扱う。libraryのvendor、static link、binary bundle、新規linked/compiled dependencyを追加する場合は、配布前にlicense、notice、Corresponding Sourceを再監査する。
+
+version boundary、配布policy、component別の詳細は[docs/LICENSING.md](docs/LICENSING.md)をsource of truthとする。
+
 ---
 
 ## English
@@ -185,3 +193,11 @@ Before introducing new automation, fallback, solver use, or a behavior change, v
 * Can the behavior change be explained as an independent decision and verified against existing behavior?
 
 If these questions cannot be answered with a clear explanation and verification method, the automation must not become default behavior. Prefer separating read-only observation and planning from mutations such as build, install, removal, and repository update, and expose the decision inputs users need.
+
+### 8. Licensing and third-party compliance
+
+The current v1.15.0 development series and v1.15.0 or later jpacker releases are distributed under `GPL-3.0-or-later`. Releases through v1.14.0 remain under the MIT License; their historical tags, releases, and granted permissions are not rewritten.
+
+License and notice audits distinguish direct linked or header-compiled components incorporated into the program from external programs communicating through command-line arguments, stdin/stdout, and exit status. Adding vendored libraries, static links, binary bundles, or a new linked/compiled dependency requires a new license, notice, and Corresponding Source audit before distribution.
+
+[docs/LICENSING.md](docs/LICENSING.md) is the source of truth for the version boundary, distribution policy, and component-level details.
