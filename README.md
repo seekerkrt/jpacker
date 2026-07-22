@@ -225,6 +225,8 @@ jpacker add-src fastfetch CFLAGS="-O3 -march=native"
 /etc/jpacker/package.build/fastfetch
 ```
 
+通常の `make uninstall` では、source-build preference files は保持されます。個別の preference だけを削除する正式な操作は `jpacker del-src <package>`、preference を削除して official binary package へ戻す操作は `jpacker revert <package>` です。preference directory全体を完全に削除する場合は、内容を確認したうえで利用者が明示的に手動削除してください。
+
 #### 2. Source build preferences を一覧する
 
 ```bash
@@ -288,6 +290,8 @@ main configuration file は次の path にあります。
 ```text
 /etc/jpacker/jpacker.conf
 ```
+
+main configuration fileも通常の `make uninstall` では保持されます。完全に削除する場合は、利用者が明示的に手動削除してください。
 
 Example:
 
@@ -589,6 +593,8 @@ This creates a source-build preference file at:
 /etc/jpacker/package.build/fastfetch
 ```
 
+A normal `make uninstall` preserves source-build preference files. Use `jpacker del-src <package>` to remove one preference, or `jpacker revert <package>` to remove it and return to the official binary package. To remove the entire preference directory, review its contents and delete it manually as an explicit user action.
+
 #### 2. List source-build preferences
 
 ```bash
@@ -652,6 +658,8 @@ The main configuration file is located at:
 ```text
 /etc/jpacker/jpacker.conf
 ```
+
+A normal `make uninstall` also preserves the main configuration file. Delete it manually only when complete removal is explicitly intended.
 
 Example:
 

@@ -329,10 +329,9 @@ uninstall:
 	@echo ":: Removing binary..."
 	rm -f $(DESTDIR)$(BINDIR)/$(TARGET)
 
-	@echo ":: Removing configs..."
-	rm -f $(DESTDIR)$(SYSCONFDIR)/jpacker/jpacker.conf
-	rm -rf $(DESTDIR)$(SYSCONFDIR)/jpacker/package.build
-	-rmdir $(DESTDIR)$(SYSCONFDIR)/jpacker
+	@echo ":: Preserving configs and removing empty config directories..."
+	@rmdir $(DESTDIR)$(SYSCONFDIR)/jpacker/package.build 2>/dev/null || true
+	@rmdir $(DESTDIR)$(SYSCONFDIR)/jpacker 2>/dev/null || true
 
 	@echo ":: Removing bash completion..."
 	rm -f $(DESTDIR)$(COMPDIR)/jpacker
