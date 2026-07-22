@@ -355,7 +355,14 @@ default では logs は次の path に保存されます。
 
 ### License
 
-MIT License
+現在のv1.15.0開発系列とv1.15.0以降のjpackerは、`GPL-3.0-or-later`で提供します。v1.14.0以前のreleaseはMIT Licenseで提供されており、そのhistorical releaseは元のlicenseのまま利用できます。過去のtag、release、permissionは変更しません。
+
+* GNU GPL version 3正式全文: [LICENSE](LICENSE)
+* version boundaryと配布policy: [docs/LICENSING.md](docs/LICENSING.md)
+* linked/compiled componentとexternal program: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
+* v1.14.0以前のMIT全文: [LICENSES/jpacker-MIT-legacy.txt](LICENSES/jpacker-MIT-legacy.txt)
+
+jpackerはlibalpmとlibcurlへ直接動的linkし、nlohmann-jsonのsystem header実装をbinaryへcompileします。一方、pacman、pacman-conf、makepkg、git、vercmp等はcommand lineとprocess boundaryを介して呼び出す別programであり、jpackerへlinkまたはbundleしません。
 
 ---
 
@@ -712,4 +719,11 @@ This project uses MAJOR.MINOR.PATCH version numbers with a SemVer-like policy. F
 
 ### License
 
-MIT License
+The current v1.15.0 development series and v1.15.0 or later releases are distributed under `GPL-3.0-or-later`. jpacker v1.14.0 and earlier releases were distributed under the MIT License. Those historical releases remain available under their original license; their tags, releases, and granted permissions are not changed.
+
+* GNU GPL version 3 full text: [LICENSE](LICENSE)
+* Version boundary and distribution policy: [docs/LICENSING.md](docs/LICENSING.md)
+* Linked/compiled components and external programs: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
+* Historical MIT text for v1.14.0 and earlier: [LICENSES/jpacker-MIT-legacy.txt](LICENSES/jpacker-MIT-legacy.txt)
+
+jpacker directly and dynamically links libalpm and libcurl, and compiles the system nlohmann-json headers into its binary. In contrast, pacman, pacman-conf, makepkg, git, vercmp, and the other programs listed in the notices are separate programs invoked across a command-line/process boundary; they are not linked into or bundled with jpacker.

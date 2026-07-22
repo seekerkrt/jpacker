@@ -14,7 +14,16 @@ pkgrel=1
 pkgdesc="A simple C++ AUR helper and Pacman wrapper"
 arch=('x86_64')
 url="https://github.com/seekerkrt/jpacker"
-license=('MIT')
+
+# POLICY: source tagとlicense metadataを同じversion boundaryへ揃える。
+# v1.14.x以前はMITを維持し、libalpmを直接linkするv1.15.0以降だけGPLにする。
+_license_version_comparison=$(vercmp "$pkgver" 1.15.0) || return 1
+if (( _license_version_comparison < 0 )); then
+    license=('MIT')
+else
+    license=('GPL-3.0-or-later')
+fi
+unset _license_version_comparison
 
 # 実行時に必要な依存パッケージ
 depends=('curl' 'pacman' 'libalpm.so' 'git')
@@ -48,6 +57,9 @@ package() {
     # インストール
     make PREFIX=/usr DESTDIR="$pkgdir" install
 
-    # ライセンスファイルのインストール
-    install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+    # POLICY: v1.14.x以前のtagはMakefile-owned license layout導入前なので、
+    # legacy MIT本文だけPKGBUILD側で補完する。v1.15.0以降はmake installが単一owner。
+    if [[ ${license[0]} == 'MIT' ]]; then
+        install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+    fi
 }
