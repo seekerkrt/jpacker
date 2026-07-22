@@ -50,13 +50,11 @@ command 名、引数、既存 tool の慣習から利用者が自然に想像す
 
 ### Contributing
 
-Issue と pull request は GitHub で受け付けています。
+bug report、提案、typoやdocumentationの小さな修正を歓迎します。
 
-この project は、今のところ solo developer による個人開発です。OSS project としての外部 contribution 受け入れや pull request 運用にはまだ慣れていない部分がありますが、bug report、提案、改善案は歓迎します。
+behavior、architecture、dependency、public contractに関わる変更や大きな実装は、無駄足を減らすためにも、着手前にGitHub Issueで一度相談してください。
 
-提案や pull request は、jpacker の方針や保守負担との兼ね合いを見ながら判断します。
-
-返答や確認に時間がかかる場合があります。
+個人projectのため、返答やreview、mergeをお約束できませんが、詳しい方針は[CONTRIBUTING.md](CONTRIBUTING.md)にまとめています。
 
 ### 主な機能
 
@@ -416,13 +414,11 @@ jpacker respects the purpose and result that users would naturally expect from a
 
 ### Contributing
 
-Issues and pull requests are accepted on GitHub.
+Bug reports, proposals, and small fixes such as typos and documentation are welcome.
 
-This project is currently a solo developer project. I am still learning how to handle external contributions and pull request workflows as an OSS project, but bug reports, suggestions, and improvement ideas are welcome.
+For changes to behavior, architecture, dependencies, public contracts, or larger implementations, please open a GitHub Issue first — it helps avoid wasted effort on both sides.
 
-Suggestions and pull requests will be considered in light of jpacker's direction and maintenance cost.
-
-Responses and reviews may take some time.
+This is a personal project, so response times, reviews, and merges aren't guaranteed, but see [CONTRIBUTING.md](CONTRIBUTING.md) for the details.
 
 ### Features
 
