@@ -181,7 +181,14 @@ void install_smart_source(
         bool only_if_updated,
         bool needed,
         const AppConfig& config,
-        const std::optional<SourceUpdateBaseline>& update_baseline) {
+        const std::optional<SourceUpdateBaseline>& update_baseline,
+        const std::optional<SourceInstalledSnapshot>& installed_snapshot) {
+    if(only_if_updated && !installed_snapshot.has_value()) {
+        throw std::runtime_error(
+                "Authoritative installed package snapshot was not supplied for " +
+                package_name + ".");
+    }
+
     std::string environment = load_source_preference_environment(package_name);
     PackageBuildSource source = resolve_build_source(package_name);
     require_executable_build_source_plan(source);
@@ -195,6 +202,8 @@ void install_smart_source(
     request.needed = needed;
     // POLICY(#215): system transactionによるbinary置換baselineはofficial sourceだけに適用する。
     if(!source.is_aur) request.update_baseline = update_baseline;
+    // POLICY(#152): post-Syu installed stateはsource種別に関係なく同じ更新判定へ渡す。
+    request.installed_snapshot = installed_snapshot;
     execute_source_build(request, config);
 }
 

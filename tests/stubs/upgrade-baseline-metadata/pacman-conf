@@ -11,7 +11,24 @@ if [ "$#" -ne 3 ] ||
 fi
 
 exit_code=${JPACKER_TEST_PACKAGE_METADATA_PACMAN_CONF_EXIT_CODE:-0}
-if [ "$exit_code" -ne 0 ]; then
+failure_at=${JPACKER_TEST_PACKAGE_METADATA_PACMAN_CONF_FAILURE_AT:-}
+case $failure_at in
+    '')
+        should_fail=1
+        ;;
+    *[!0-9]*)
+        exit 2
+        ;;
+    *)
+        call_count=$(grep -Fxc -- 'pacman-conf --verbose RootDir DBPath' "$JPACKER_TEST_COMMAND_LOG")
+        if [ "$call_count" -eq "$failure_at" ]; then
+            should_fail=1
+        else
+            should_fail=0
+        fi
+        ;;
+esac
+if [ "$should_fail" -eq 1 ] && [ "$exit_code" -ne 0 ]; then
     exit "$exit_code"
 fi
 
