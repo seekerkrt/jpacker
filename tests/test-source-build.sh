@@ -79,9 +79,13 @@ setup_case() {
     unset JPACKER_TEST_EDITOR_SYMLINK_TARGET
     unset JPACKER_TEST_APP_CONFIG_CASE
     unset JPACKER_TEST_PACKAGE_METADATA_INITIALIZE_FAILURE
+    unset JPACKER_TEST_PACKAGE_METADATA_INITIALIZE_FAILURE_AT
     unset JPACKER_TEST_PACKAGE_METADATA_QUERY_FAILURE_PACKAGE
     unset JPACKER_TEST_PACKAGE_METADATA_QUERY_FAILURE_AT
+    unset JPACKER_TEST_PACKAGE_METADATA_UNKNOWN_REASON_PACKAGE
     unset JPACKER_TEST_PACKAGE_METADATA_PACMAN_CONF_EXIT_CODE
+    unset JPACKER_TEST_PACKAGE_METADATA_PACMAN_CONF_FAILURE_AT
+    unset JPACKER_TEST_MAKEPKG_PACKAGE_METADATA_STATE_AFTER_SUCCESS_FILE
 }
 
 create_existing_checkout() {
@@ -143,6 +147,8 @@ run_upgrade_ok() {
         cat "$command_log" >&2
         exit 1
     fi
+    # POLICY(#152): upgrade characterization全体でlegacy installed-version queryを禁止する。
+    assert_command_prefix_absent "pacman -Q "
 }
 
 run_tty_ok() {
@@ -169,6 +175,7 @@ run_upgrade_tty_ok() {
         cat "$command_log" >&2
         exit 1
     fi
+    assert_command_prefix_absent "pacman -Q "
 }
 
 run_config_tty_ok() {
@@ -268,6 +275,20 @@ assert_command_before() {
     fi
 }
 
+assert_command_occurrence_before() {
+    first=$1
+    first_occurrence=$2
+    second=$3
+    second_occurrence=$4
+    first_line=$(grep -nFx -- "$first" "$command_log" | sed -n "${first_occurrence}s/:.*//p")
+    second_line=$(grep -nFx -- "$second" "$command_log" | sed -n "${second_occurrence}s/:.*//p")
+    if [ -z "$first_line" ] || [ -z "$second_line" ] || [ "$first_line" -ge "$second_line" ]; then
+        echo "unexpected command order: $first (#$first_occurrence) -> $second (#$second_occurrence)" >&2
+        cat "$command_log" >&2
+        exit 1
+    fi
+}
+
 assert_editor_argv_log() {
     expected=$1
     expected_file=$case_dir/expected-editor-argv.log
@@ -353,20 +374,23 @@ prepare_upgrade_case
 write_srcinfo 2.0 1
 export JPACKER_TEST_VERCMP_OUTPUT=1
 run_upgrade_ok --noedit --nodiff upgrade
-assert_command_count "pacman-conf --verbose RootDir DBPath" 1
-assert_command_count "alpm initialize" 1
-assert_command_count "alpm query clean-root" 1
-assert_command_count "alpm release" 1
+assert_command_count "pacman-conf --verbose RootDir DBPath" 2
+assert_command_count "alpm initialize" 2
+assert_command_count "alpm query clean-root" 2
+assert_command_count "alpm release" 2
 assert_command "sudo pacman -Syu"
+assert_command_count "pacman -Si clean-root" 2
 assert_command "git fetch origin"
 assert_command "git reset --hard origin/main"
-assert_command_count "pacman -Q clean-root" 1
+assert_command_absent "pacman -Q clean-root"
 assert_command "vercmp 2.0-1 1.0-1"
 assert_command "makepkg -sic"
-assert_command_before "alpm query clean-root" "alpm release"
-assert_command_before "alpm release" "sudo pacman -Syu"
-assert_command_before "git reset --hard origin/main" "pacman -Q clean-root"
-assert_command_before "pacman -Q clean-root" "vercmp 2.0-1 1.0-1"
+assert_command_occurrence_before "alpm query clean-root" 1 "alpm release" 1
+assert_command_occurrence_before "alpm release" 1 "sudo pacman -Syu" 1
+assert_command_occurrence_before "sudo pacman -Syu" 1 "alpm query clean-root" 2
+assert_command_occurrence_before "alpm query clean-root" 2 "alpm release" 2
+assert_command_occurrence_before "alpm release" 2 "pacman -Si clean-root" 2
+assert_command_before "git reset --hard origin/main" "vercmp 2.0-1 1.0-1"
 assert_command_before "vercmp 2.0-1 1.0-1" "makepkg -sic"
 
 setup_case update-up-to-date
@@ -377,6 +401,7 @@ run_upgrade_ok --noedit --nodiff upgrade
 assert_command "git fetch origin"
 assert_command "git reset --hard origin/main"
 assert_command "vercmp 1.0-1 1.0-1"
+assert_command_absent "pacman -Q clean-root"
 assert_contains "clean-root is up to date (1.0-1). Skipping." "$output_file"
 assert_command_prefix_absent "makepkg "
 assert_command_prefix_absent "jpacker-test-editor "
@@ -387,6 +412,7 @@ run_upgrade_ok --noedit --nodiff --noconfirm upgrade
 assert_contains "Unable to determine update status from .SRCINFO for clean-root." "$output_file"
 assert_contains "Skipping clean-root: update status is unknown and --noconfirm is set." "$output_file"
 assert_command "git reset --hard origin/main"
+assert_command_absent "pacman -Q clean-root"
 assert_command_prefix_absent "makepkg "
 
 setup_case update-unknown-noninteractive
@@ -395,6 +421,7 @@ run_upgrade_ok --noedit --nodiff upgrade
 assert_contains "Unable to determine update status from .SRCINFO for clean-root." "$output_file"
 assert_contains "Skipping clean-root: update status is unknown and stdin is non-interactive." "$output_file"
 assert_command "git reset --hard origin/main"
+assert_command_absent "pacman -Q clean-root"
 assert_command_prefix_absent "makepkg "
 
 setup_case update-unknown-interactive-no
@@ -402,6 +429,7 @@ prepare_upgrade_case
 run_upgrade_tty_ok 'n\n' --noedit --nodiff upgrade
 assert_contains "Update status is unknown because .SRCINFO is missing or incomplete. Continue to review/build?" "$output_file"
 assert_command "git reset --hard origin/main"
+assert_command_absent "pacman -Q clean-root"
 assert_command_prefix_absent "makepkg "
 
 setup_case update-unknown-interactive-yes
@@ -409,6 +437,7 @@ prepare_upgrade_case
 run_upgrade_tty_ok 'y\n' --noedit --nodiff upgrade
 assert_contains "Update status is unknown because .SRCINFO is missing or incomplete. Continue to review/build?" "$output_file"
 assert_command "git reset --hard origin/main"
+assert_command_absent "pacman -Q clean-root"
 assert_command "makepkg -sic"
 assert_command_before "git reset --hard origin/main" "makepkg -sic"
 

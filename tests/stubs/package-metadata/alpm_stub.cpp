@@ -106,6 +106,21 @@ bool environment_flag_is_enabled(const char* name) noexcept {
     return value != nullptr && std::strcmp(value, "1") == 0;
 }
 
+bool environment_ordinal_matches(
+        const char* name, std::size_t actual_ordinal) noexcept {
+    const char* expected_ordinal_text = std::getenv(name);
+    if(expected_ordinal_text == nullptr || expected_ordinal_text[0] == '\0') return false;
+
+    char* ordinal_end = nullptr;
+    errno = 0;
+    unsigned long long expected_ordinal =
+            std::strtoull(expected_ordinal_text, &ordinal_end, 10);
+    if(errno != 0 || ordinal_end == expected_ordinal_text || ordinal_end[0] != '\0') {
+        return false;
+    }
+    return expected_ordinal == static_cast<unsigned long long>(actual_ordinal);
+}
+
 bool environment_requests_query_failure(const char* package_name) noexcept {
     const char* failure_package =
             std::getenv("JPACKER_TEST_PACKAGE_METADATA_QUERY_FAILURE_PACKAGE");
@@ -114,19 +129,16 @@ bool environment_requests_query_failure(const char* package_name) noexcept {
         return true;
     }
 
-    const char* failure_ordinal_text =
-            std::getenv("JPACKER_TEST_PACKAGE_METADATA_QUERY_FAILURE_AT");
-    if(failure_ordinal_text == nullptr || failure_ordinal_text[0] == '\0') return false;
+    return environment_ordinal_matches(
+            "JPACKER_TEST_PACKAGE_METADATA_QUERY_FAILURE_AT",
+            g_state.package_query_calls);
+}
 
-    char* ordinal_end = nullptr;
-    errno = 0;
-    unsigned long long failure_ordinal =
-            std::strtoull(failure_ordinal_text, &ordinal_end, 10);
-    if(errno != 0 || ordinal_end == failure_ordinal_text || ordinal_end[0] != '\0') {
-        return false;
-    }
-    return failure_ordinal ==
-           static_cast<unsigned long long>(g_state.package_query_calls);
+bool environment_requests_unknown_reason(const char* package_name) noexcept {
+    const char* unknown_reason_package =
+            std::getenv("JPACKER_TEST_PACKAGE_METADATA_UNKNOWN_REASON_PACKAGE");
+    return unknown_reason_package != nullptr && package_name != nullptr &&
+           std::strcmp(unknown_reason_package, package_name) == 0;
 }
 
 void configure_package_lookup_from_environment(
@@ -158,7 +170,10 @@ void configure_package_lookup_from_environment(
         lookup_mode = PackageLookupMode::Present;
         g_state.package_name = std::move(package_name);
         g_state.package_version = std::move(package_version);
-        g_state.package_reason = ALPM_PKG_REASON_EXPLICIT;
+        g_state.package_reason =
+                environment_requests_unknown_reason(queried_package_name)
+                        ? ALPM_PKG_REASON_UNKNOWN
+                        : ALPM_PKG_REASON_EXPLICIT;
         g_state.package_name_is_null = false;
         g_state.package_version_is_null = false;
         return;
@@ -311,8 +326,12 @@ alpm_handle_t* alpm_initialize(
     g_state.initialize_root = root == nullptr ? "" : root;
     g_state.initialize_database_path = database_path == nullptr ? "" : database_path;
 
-    bool environment_failure = environment_flag_is_enabled(
-            "JPACKER_TEST_PACKAGE_METADATA_INITIALIZE_FAILURE");
+    bool environment_failure =
+            environment_flag_is_enabled(
+                    "JPACKER_TEST_PACKAGE_METADATA_INITIALIZE_FAILURE") ||
+            environment_ordinal_matches(
+                    "JPACKER_TEST_PACKAGE_METADATA_INITIALIZE_FAILURE_AT",
+                    g_state.initialize_calls);
     if(environment_failure || g_state.initialize_fails) {
         if(error != nullptr) {
             *error = environment_failure ? ALPM_ERR_SYSTEM : g_state.initialize_error;

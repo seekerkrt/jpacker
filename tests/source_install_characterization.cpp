@@ -77,6 +77,10 @@ int run_scenario(const std::string& scenario, const AppConfig& config) {
         install_characterized_smart_source("clean-root", false, false, config);
         return 0;
     }
+    if(scenario == "smart-source-missing-post-snapshot") {
+        install_characterized_smart_source("clean-root", true, false, config);
+        return 0;
+    }
 
     std::cerr << "Unknown source-install characterization scenario: " << scenario << '\n';
     return 2;
@@ -87,7 +91,8 @@ int run_scenario(const std::string& scenario, const AppConfig& config) {
 int main(int argc, char* argv[]) {
     if(argc != 2) {
         std::cerr << "Usage: " << argv[0]
-                  << " <plan-success|plan-failure|fallback|smart-source>\n";
+                  << " <plan-success|plan-failure|fallback|smart-source|"
+                     "smart-source-missing-post-snapshot>\n";
         return 2;
     }
 

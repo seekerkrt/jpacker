@@ -10,7 +10,6 @@
 #include <map>
 #include <set>
 #include <sstream>
-#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -155,29 +154,6 @@ const std::map<std::string, std::vector<ProvidedDependency>>& repo_providers() {
 bool is_installed_package(const std::string& pkg_name) {
     if(pkg_name.empty()) return false;
     return command_status("pacman -Q " + shell_words::quote(pkg_name) + " > /dev/null 2>&1") == 0;
-}
-
-std::optional<std::string> get_installed_package_version(const std::string& pkg_name) {
-    require_valid_package_name(pkg_name);
-    CapturedCommandResult query_result = capture_command_output(
-            ("pacman -Q " + shell_words::quote(pkg_name) + " 2>/dev/null").c_str());
-    if(query_result.output.empty()) {
-        if(query_result.exit_code == 0 || query_result.exit_code == 1) return std::nullopt;
-        throw std::runtime_error("Failed to query installed package version for " + pkg_name + ".");
-    }
-    if(query_result.exit_code != 0) {
-        throw std::runtime_error("Failed to query installed package version for " + pkg_name + ".");
-    }
-
-    std::stringstream output_stream(query_result.output);
-    std::string       output_package_name;
-    std::string       installed_version;
-    std::string       unexpected_field;
-    if(!(output_stream >> output_package_name >> installed_version) ||
-       output_package_name != pkg_name || output_stream >> unexpected_field) {
-        throw std::runtime_error("Invalid pacman -Q output for " + pkg_name + ".");
-    }
-    return installed_version;
 }
 
 bool is_repo_package(const std::string& pkg_name) {

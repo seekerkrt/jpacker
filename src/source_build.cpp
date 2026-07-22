@@ -5,7 +5,6 @@
 #include "package_identifier.hpp"
 #include "persistent_checkout.hpp"
 #include "process.hpp"
-#include "repository_query.hpp"
 #include "shell_words.hpp"
 #include "trusted_cache.hpp"
 
@@ -317,8 +316,10 @@ std::optional<std::string> read_srcinfo_version(const fs::path& pkg_dir) {
 
 UpdateCheckResult check_update_status(
         const std::string& pkg_name, const fs::path& pkg_dir,
+        const SourceInstalledSnapshot& installed_snapshot,
         const std::optional<SourceUpdateBaseline>& update_baseline) {
-    std::optional<std::string> installed_version = get_installed_package_version(pkg_name);
+    const std::optional<std::string>& installed_version =
+            installed_snapshot.installed_version;
     if(!installed_version.has_value()) {
         return UpdateCheckResult::NeedsBuild;// インストールされていないのでビルド必要
     }
@@ -337,8 +338,8 @@ UpdateCheckResult check_update_status(
         if(version_comparison == 0 && update_baseline.has_value()) {
             const std::optional<std::string>& pre_upgrade_version =
                     update_baseline->installed_version;
-            // POLICY(#215): pre/postはどちらもpacman -Qのcanonical full versionなので、
-            // transaction中のversion変化は文字列の不一致として判定する。
+            // POLICY(#152,#215): pre/postは同じmetadata mappingのowned full versionなので、
+            // system transaction中のversion変化は文字列の不一致として判定する。
             if(!pre_upgrade_version.has_value() ||
                pre_upgrade_version.value() != installed_version.value()) {
                 if(pre_upgrade_version.has_value()) {
@@ -414,6 +415,11 @@ void execute_source_build(
         const AppConfig& config) {
     require_valid_package_name(request.package_name);
     require_valid_package_name(request.checkout_name);
+    if(request.only_if_updated && !request.installed_snapshot.has_value()) {
+        throw std::runtime_error(
+                "Authoritative installed package snapshot was not supplied for " +
+                request.package_name + ".");
+    }
     Logger::info("Processing " + request.package_name + "...");
     ValidatedCacheRoot build_root = prepare_trusted_cache_root();
     ValidatedCachePath pkg_path = require_trusted_cache_path(
@@ -511,7 +517,8 @@ void execute_source_build(
 
         if(request.only_if_updated) {
             UpdateCheckResult update_check = check_update_status(
-                    request.package_name, pkg_path.canonical_path(), request.update_baseline);
+                    request.package_name, pkg_path.canonical_path(),
+                    request.installed_snapshot.value(), request.update_baseline);
             if(update_check == UpdateCheckResult::UpToDate) {
                 return;// 更新不要なので終了
             }

@@ -13,4 +13,14 @@ done
 if [ -n "${JPACKER_TEST_MAKEPKG_ARGV_LOG:-}" ]; then
     printf 'argv-end\n' >> "$JPACKER_TEST_MAKEPKG_ARGV_LOG"
 fi
-exit "${JPACKER_TEST_MAKEPKG_EXIT_CODE:-99}"
+exit_code=${JPACKER_TEST_MAKEPKG_EXIT_CODE:-99}
+state_after_success_file=${JPACKER_TEST_MAKEPKG_PACKAGE_METADATA_STATE_AFTER_SUCCESS_FILE:-}
+if [ "$exit_code" -eq 0 ] && [ -n "$state_after_success_file" ]; then
+    metadata_state_file=${JPACKER_TEST_PACKAGE_METADATA_STATE_FILE:-}
+    if [ -z "$metadata_state_file" ] || [ ! -f "$state_after_success_file" ]; then
+        exit 1
+    fi
+    # POLICY: 成功したfake makepkg installだけが、case-localなinstalled stateを更新する。
+    /usr/bin/cp -- "$state_after_success_file" "$metadata_state_file" || exit 1
+fi
+exit "$exit_code"
