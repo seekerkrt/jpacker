@@ -175,10 +175,12 @@ Default is \fI~/.cache/jpacker/jpacker.log\fR.
 .TP
 .I /etc/jpacker/jpacker.conf
 Global configuration file. Controls editor settings, log locations, and review prompts.
+A normal \fBmake uninstall\fR preserves this file. Remove it manually only when complete removal is explicitly intended.
 .TP
 .I /etc/jpacker/package.build/
 Directory containing source-build preference files managed with \fBadd-src\fR.
 Each file corresponds to a package name and can define environment variables (e.g., CFLAGS) that are applied during \fBmakepkg\fR execution.
+A normal \fBmake uninstall\fR preserves source-build preference files in this directory, but may remove the directory itself when it is empty. Use \fBdel-src\fR or \fBrevert\fR to remove an individual preference; remove any remaining preference files manually only when complete removal is explicitly intended.
 .TP
 .I ~/.cache/jpacker/
 Default directory used for downloading and building packages when \fBXDG_CACHE_HOME\fR is not set. If \fBXDG_CACHE_HOME\fR is set, jpacker uses \fI$XDG_CACHE_HOME/jpacker\fR.
