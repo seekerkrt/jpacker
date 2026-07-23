@@ -543,10 +543,12 @@ void execute_source_build(
         review_build_files(pkg_path, config);
         MakepkgBuildOptions makepkg_options =
                 resolve_makepkg_build_options(pkg_path.canonical_path(), request.needed, config);
+        const std::string custom_environment = serialize_source_build_environment(
+                request.custom_environment, request.empty_value_policy);
         std::string build_cmd;
-        if(!trim(request.custom_environment).empty()) {
-            Logger::info("Applying custom build flags: " + request.custom_environment);
-            build_cmd = request.custom_environment + makepkg_install_command(makepkg_options, config);
+        if(!trim(custom_environment).empty()) {
+            Logger::info("Applying custom build flags: " + custom_environment);
+            build_cmd = custom_environment + makepkg_install_command(makepkg_options, config);
         } else {
             Logger::info("Using default makepkg.conf settings.");
             build_cmd = makepkg_install_command(makepkg_options, config);

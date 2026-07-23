@@ -10,7 +10,7 @@ struct BuildPlan;
 
 void build_source_target(
         const std::string& package_name,
-        const std::string& custom_environment,
+        const SourceBuildEnvironment& custom_environment,
         const AppConfig& config);
 
 void require_executable_source_install_target(

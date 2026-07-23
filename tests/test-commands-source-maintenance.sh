@@ -121,6 +121,8 @@ setup_case() {
     unset JPACKER_TEST_PACKAGE_METADATA_PACMAN_CONF_EXIT_CODE
     unset JPACKER_TEST_PACKAGE_METADATA_PACMAN_CONF_FAILURE_AT
     unset JPACKER_TEST_MAKEPKG_PACKAGE_METADATA_STATE_AFTER_SUCCESS_FILE
+    unset EMPTY
+    unset PKGDEST
     unset EDITOR
 }
 
@@ -549,13 +551,25 @@ assert_total_command_count 0
 
 setup_case build-environment-order
 export JPACKER_TEST_PACMAN_REPO_PACKAGES=clean-root
+makepkg_env_log=$case_dir/makepkg-env.log
+: > "$makepkg_env_log"
+export JPACKER_TEST_MAKEPKG_ENV_LOG=$makepkg_env_log
+export JPACKER_TEST_MAKEPKG_ENV_KEYS='FIRST SECOND EMPTY PKGDEST'
 run_ok --noedit --nodiff --noconfirm build \
-    FIRST=one clean-root "SECOND=two words" FIRST=last ignored
+    FIRST=one clean-root "SECOND=two words" FIRST=last EMPTY= \
+    PKGDEST=first-path PKGDEST= ignored
 assert_contains "Ignoring extra arg 'ignored'" "$output_file"
-assert_contains "Applying custom build flags: FIRST='one' SECOND='two words' FIRST='last' " "$output_file"
+assert_contains "Applying custom build flags: FIRST='one' SECOND='two words' FIRST='last' EMPTY='' PKGDEST='first-path' PKGDEST='' " "$output_file"
 assert_command "pacman -Si clean-root"
 assert_command "git clone https://gitlab.archlinux.org/archlinux/packaging/packages/clean-root.git clean-root"
 assert_command "makepkg -sic --noconfirm"
+assert_argv_log "$makepkg_env_log" 'env-begin
+env[FIRST]=<last>
+env[SECOND]=<two words>
+env[EMPTY]=<>
+env[PKGDEST]=<>
+env-end'
+assert_legacy_separated_source_commands_absent
 
 setup_case build-resolve-failure
 run_fail build missing-source-package
@@ -1666,6 +1680,36 @@ run_source_ok fallback
 assert_contains "Loading custom build flags from $preference_dir/requested-target" "$output_file"
 assert_not_contains "Loading custom build flags from $preference_dir/base-target" "$output_file"
 assert_contains "Applying custom build flags: REQUESTED='requested-value' " "$output_file"
+
+setup_case source-preference-requested-empty-falls-back
+makepkg_env_log=$case_dir/makepkg-env.log
+: > "$makepkg_env_log"
+printf 'PKGDEST=\nEMPTY=""\n' > "$preference_dir/requested-target"
+printf 'FALLBACK=base-value\n' > "$preference_dir/base-target"
+export JPACKER_TEST_MAKEPKG_ENV_LOG=$makepkg_env_log
+export JPACKER_TEST_MAKEPKG_ENV_KEYS='FALLBACK PKGDEST EMPTY'
+run_source_ok fallback
+assert_contains "Loading custom build flags from $preference_dir/requested-target" "$output_file"
+assert_contains "Loading custom build flags from $preference_dir/base-target" "$output_file"
+assert_contains "Applying custom build flags: FALLBACK='base-value' " "$output_file"
+assert_command_count "makepkg -sic --noconfirm" 1
+assert_argv_log "$makepkg_env_log" 'env-begin
+env[FALLBACK]=<base-value>
+env[PKGDEST]=<unset>
+env[EMPTY]=<unset>
+env-end'
+assert_legacy_separated_source_commands_absent
+
+setup_case source-preference-requested-invalid-only-falls-back
+printf '9INVALID=value\nignored without equals\n' > "$preference_dir/requested-target"
+printf 'FALLBACK=base-value\n' > "$preference_dir/base-target"
+run_source_ok fallback
+assert_contains "Loading custom build flags from $preference_dir/requested-target" "$output_file"
+assert_contains "Ignoring invalid environment assignment: 9INVALID=value" "$output_file"
+assert_contains "Loading custom build flags from $preference_dir/base-target" "$output_file"
+assert_contains "Applying custom build flags: FALLBACK='base-value' " "$output_file"
+assert_command_count "makepkg -sic --noconfirm" 1
+assert_legacy_separated_source_commands_absent
 
 setup_case smart-source-order
 printf 'SMART=preference\n' > "$preference_dir/clean-root"

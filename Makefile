@@ -17,6 +17,7 @@ APP_CONFIG_MODULE_TEST_TARGET := build/tests/app-config-test
 APP_CONFIG_INTEGRATION_TEST_TARGET := build/tests/jpacker-app-config-test
 PACKAGE_IDENTIFIER_TEST_TARGET := build/tests/package-identifier-test
 SHELL_WORDS_TEST_TARGET := build/tests/shell-words-test
+SOURCE_ENVIRONMENT_TEST_TARGET := build/tests/source-environment-test
 PROCESS_STDIN_FD_TEST_TARGET := build/tests/process-stdin-fd-test
 DEPENDENCY_PLAN_MODEL_TEST_TARGET := $(BUILD_DIR)/tests/dependency-plan-model-test
 ARTIFACT_INSTALL_PLAN_TEST_TARGET := $(BUILD_DIR)/tests/artifact-install-plan-test
@@ -98,7 +99,7 @@ LIBALPM_BUILD_TARGETS := \
 	$(PACKAGE_METADATA_INTEGRATION_TEST_TARGET) \
 	$(UPGRADE_BASELINE_METADATA_TEST_TARGET)
 
-.PHONY: all check-libalpm clean test-app-config test-package-identifier test-package-metadata test-package-metadata-integration test-shell-words test-dependency-plan-model test-artifact-install-plan test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-commands-inspect test-commands-source-maintenance test-commands-sync test-conflicts-replaces test-install-layout test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check install uninstall
+.PHONY: all check-libalpm clean test-app-config test-package-identifier test-package-metadata test-package-metadata-integration test-shell-words test-source-environment test-dependency-plan-model test-artifact-install-plan test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-commands-inspect test-commands-source-maintenance test-commands-sync test-conflicts-replaces test-install-layout test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check install uninstall
 
 all: $(TARGET) $(MANPAGE)
 
@@ -180,6 +181,19 @@ $(SHELL_WORDS_TEST_TARGET): tests/shell_words_test.cpp $(SRC_DIR)/shell_words.cp
 		$(SRC_DIR)/shell_words.cpp \
 		-o $@
 
+$(SOURCE_ENVIRONMENT_TEST_TARGET): tests/source_environment_test.cpp $(SRC_DIR)/source_environment.cpp $(SRC_DIR)/source_environment.hpp $(SRC_DIR)/source_preference.cpp $(SRC_DIR)/source_preference.hpp $(SRC_DIR)/package_identifier.cpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/shell_words.cpp $(SRC_DIR)/shell_words.hpp $(VERSION_FILE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling source environment test binary"
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
+		-DJPACKER_ENABLE_TEST_OVERRIDES \
+		-I$(SRC_DIR) \
+		tests/source_environment_test.cpp \
+		$(SRC_DIR)/source_environment.cpp \
+		$(SRC_DIR)/source_preference.cpp \
+		$(SRC_DIR)/package_identifier.cpp \
+		$(SRC_DIR)/shell_words.cpp \
+		-o $@
+
 $(PROCESS_STDIN_FD_TEST_TARGET): tests/process_stdin_fd_test.cpp $(SRC_DIR)/process.cpp $(SRC_DIR)/process.hpp $(SRC_DIR)/logging.cpp $(SRC_DIR)/logging.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling process stdin fd test binary"
@@ -236,6 +250,11 @@ test-package-metadata-integration: $(PACKAGE_METADATA_INTEGRATION_TEST_TARGET)
 
 test-shell-words: $(SHELL_WORDS_TEST_TARGET)
 	$(abspath $(SHELL_WORDS_TEST_TARGET))
+
+test-source-environment: $(SOURCE_ENVIRONMENT_TEST_TARGET)
+	JPACKER_TEST_PACKAGE_BUILD_DIR=$(abspath $(BUILD_DIR)/tests/source-environment-fixture) \
+		$(abspath $(SOURCE_ENVIRONMENT_TEST_TARGET)) \
+		$(abspath $(BUILD_DIR)/tests/source-environment-fixture)
 
 test-dependency-plan-model: $(DEPENDENCY_PLAN_MODEL_TEST_TARGET)
 	$(abspath $(DEPENDENCY_PLAN_MODEL_TEST_TARGET))
