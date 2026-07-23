@@ -37,6 +37,12 @@ jpacker. If not, see <https://www.gnu.org/licenses/>.
 
 `or later`は、recipientがGPL version 3、またはFree Software Foundationが将来公開するlater versionのいずれかを選べる、という意味です。GPL本文だけではjpackerに`or later`を指定したことにならないため、上記project noticeとpackage metadataで明示します。
 
+## Contributions
+
+jpackerへ取り込まれたproject-authored contributionは、jpackerの一部として`GPL-3.0-or-later`で配布されます。contributorが保有するcopyrightをjpackerへ譲渡することは求めません。現時点ではDCOやCLAも要求しません。
+
+詳しいcontribution processとthird-party materialの方針は、source treeの[`CONTRIBUTING.md`](../CONTRIBUTING.md)を参照してください。
+
 ## Why GPL-3.0-or-later
 
 jpackerはv1.15.0開発系列から、Arch Linux `pacman` packageが提供する`libalpm` APIを直接利用し、動的にlinkしています。Arch package metadataは`libalpm`を含む`pacman`を`GPL-2.0-or-later`としており、GNU GPL FAQはGPL-covered libraryへlinkするprogramをcombined programとして扱う立場を示しています。
