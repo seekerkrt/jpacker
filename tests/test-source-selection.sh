@@ -59,10 +59,15 @@ setup_case() {
     unset JPACKER_TEST_GIT_CLONE_SYMLINK_TARGET
     unset JPACKER_TEST_GIT_CLONE_FIXTURE_DIR
     unset JPACKER_TEST_MAKEPKG_EXIT_CODE
+    unset JPACKER_TEST_MAKEPKG_ENV_LOG
+    unset JPACKER_TEST_MAKEPKG_ENV_KEYS
     unset JPACKER_TEST_SOURCE_PREFERENCE_EXTERNAL
     unset JPACKER_TEST_EDITOR_REPLACE_TARGET
     unset JPACKER_TEST_EDITOR_SYMLINK_TARGET
     unset JPACKER_TEST_EDITOR_REMOVE_TARGET
+    unset DUP
+    unset EMPTY
+    unset UNDEFINED
     unset EDITOR
 }
 
@@ -104,6 +109,18 @@ assert_line() {
     if ! grep -Fx -- "$expected" "$file" >/dev/null; then
         echo "missing expected line: $expected" >&2
         sed -n '1,240p' "$file" >&2
+        exit 1
+    fi
+}
+
+assert_file_content() {
+    actual_file=$1
+    expected=$2
+    expected_file=$case_dir/expected-file-content
+    printf '%s\n' "$expected" > "$expected_file"
+    if ! cmp -s "$expected_file" "$actual_file"; then
+        echo "unexpected file content: $actual_file" >&2
+        diff -u "$expected_file" "$actual_file" >&2 || true
         exit 1
     fi
 }
@@ -722,6 +739,10 @@ SOURCE_PREFERENCE
 export JPACKER_TEST_SOURCE_PREFERENCE_EXTERNAL=from-process-environment
 export JPACKER_TEST_PACMAN_REPO_PACKAGES=clean-root
 export JPACKER_TEST_MAKEPKG_EXIT_CODE=0
+makepkg_env_log=$case_dir/makepkg-env.log
+: > "$makepkg_env_log"
+export JPACKER_TEST_MAKEPKG_ENV_LOG=$makepkg_env_log
+export JPACKER_TEST_MAKEPKG_ENV_KEYS='DUP EMPTY UNDEFINED'
 run_ok --noedit --nodiff --noconfirm -S clean-root
 assert_command "git clone https://gitlab.archlinux.org/archlinux/packaging/packages/clean-root.git clean-root"
 assert_command "makepkg -sic --noconfirm"
@@ -732,6 +753,11 @@ assert_not_contains "UNDEFINED=" "$output_file"
 assert_not_contains "EMPTY=" "$output_file"
 assert_not_contains "from-process-environment" "$output_file"
 assert_not_contains "ignored without equals" "$output_file"
+assert_file_content "$makepkg_env_log" 'env-begin
+env[DUP]=<second>
+env[EMPTY]=<unset>
+env[UNDEFINED]=<unset>
+env-end'
 assert_request_log_empty
 
 setup_case auto-install-aur

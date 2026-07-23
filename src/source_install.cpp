@@ -32,7 +32,8 @@ struct PackageBuildSource {
     bool        has_distinct_package_base = false;
 };
 
-std::string load_source_preference_environment(const std::string& package_name) {
+SourceBuildEnvironment load_source_preference_environment(
+        const std::string& package_name) {
     return get_package_env(
             package_name,
             [](const fs::path& entry_path) {
@@ -115,7 +116,7 @@ std::string aur_git_url_for_package_base(const std::string& package_base) {
 
 void build_source_target(
         const std::string& package_name,
-        const std::string& custom_environment,
+        const SourceBuildEnvironment& custom_environment,
         const AppConfig& config) {
     PackageBuildSource source = resolve_build_source(package_name);
     require_executable_build_source_plan(source);
@@ -125,6 +126,7 @@ void build_source_target(
     request.checkout_name = source.clone_name;
     request.git_url = source.git_url;
     request.custom_environment = custom_environment;
+    request.empty_value_policy = SourceEnvironmentEmptyValuePolicy::Forward;
     execute_source_build(request, config);
 }
 
@@ -152,11 +154,17 @@ void execute_aur_build_plan(
 
         std::string package_name =
                 entry.package_names.empty() ? entry.package_base : entry.package_names.front();
-        std::string environment;
+        SourceBuildEnvironment environment;
         if(use_source_build_preferences) {
-            environment = load_source_preference_environment(package_name);
-            if(environment.empty() && package_name != entry.package_base) {
+            SourceBuildEnvironment requested_environment =
+                    load_source_preference_environment(package_name);
+            // POLICY(#242): empty definitionを保持したまま、fallback判定だけは従来の
+            // forward可能なnonempty assignment基準にする。
+            if(!requested_environment.has_forwarded_nonempty_assignment() &&
+               package_name != entry.package_base) {
                 environment = load_source_preference_environment(entry.package_base);
+            } else {
+                environment = requested_environment;
             }
         }
 
@@ -189,7 +197,8 @@ void install_smart_source(
                 package_name + ".");
     }
 
-    std::string environment = load_source_preference_environment(package_name);
+    SourceBuildEnvironment environment =
+            load_source_preference_environment(package_name);
     PackageBuildSource source = resolve_build_source(package_name);
     require_executable_build_source_plan(source);
 

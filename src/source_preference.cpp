@@ -1,10 +1,7 @@
 #include "source_preference.hpp"
 
 #include "package_identifier.hpp"
-#include "shell_words.hpp"
 
-#include <algorithm>
-#include <cctype>
 #include <cstdlib>
 #include <exception>
 #include <filesystem>
@@ -37,17 +34,6 @@ std::string trim(const std::string& str) {
     return str.substr(first, last - first + 1);
 }
 
-std::string unquote(const std::string& str) {
-    if(str.length() >= 2) {
-        char first = str.front();
-        char last = str.back();
-        if((first == '"' && last == '"') || (first == '\'' && last == '\'')) {
-            return str.substr(1, str.length() - 2);
-        }
-    }
-    return str;
-}
-
 std::string strip_comment(const std::string& line) {
     bool in_single_quote = false;
     bool in_double_quote = false;
@@ -76,14 +62,6 @@ std::string strip_comment(const std::string& line) {
         }
     }
     return line;
-}
-
-bool is_valid_env_key(const std::string& key) {
-    if(key.empty()) return false;
-    if(!(std::isalpha(static_cast<unsigned char>(key[0])) || key[0] == '_')) return false;
-    return std::all_of(key.begin() + 1, key.end(), [](unsigned char ch) {
-        return std::isalnum(ch) || ch == '_';
-    });
 }
 
 std::string expand_config_vars(
@@ -130,25 +108,15 @@ bool is_force_source(const std::string& package_name) {
     return std::filesystem::exists(source_preference_entry_path(package_name));
 }
 
-bool split_env_assignment(
-        const std::string& assignment, std::string& key, std::string& value) {
-    size_t equals_position = assignment.find('=');
-    if(equals_position == std::string::npos) return false;
-    key = trim(assignment.substr(0, equals_position));
-    value = unquote(trim(assignment.substr(equals_position + 1)));
-    // POLICY: makepkgへ渡す環境変数名はshell identifier相当に制限する。
-    return is_valid_env_key(key);
-}
-
-std::string get_package_env(
+SourceBuildEnvironment get_package_env(
         const std::string& package_name, SourcePreferenceLoadHandler on_load,
         SourcePreferenceWarningHandler on_warning) {
     std::filesystem::path entry_path = source_preference_entry_path(package_name);
-    if(!std::filesystem::exists(entry_path)) return "";
+    if(!std::filesystem::exists(entry_path)) return {};
 
     std::ifstream                      file(entry_path);
     std::string                        line;
-    std::string                        environment;
+    SourceBuildEnvironment             environment;
     std::map<std::string, std::string> variables;
     if(on_load) on_load(entry_path);
 
@@ -167,9 +135,9 @@ std::string get_package_env(
                 }
             }
             variables[key] = value;
-            if(!value.empty()) {
-                environment += key + "=" + shell_words::quote(value) + " ";
-            }
+            // POLICY(#242): expansion用last-value mapとは別に、valid assignmentを
+            // emptyも含めてread順のまま保持する。
+            environment.ordered_assignments.push_back({key, value});
         } else if(line.find('=') != std::string::npos && on_warning) {
             on_warning("Ignoring invalid environment assignment: " + trim(line));
         }

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "source_environment.hpp"
+
 #include <optional>
 #include <string>
 
@@ -19,7 +21,9 @@ struct SourceBuildRequest {
     std::string package_name;
     std::string checkout_name;
     std::string git_url;
-    std::string custom_environment;
+    SourceBuildEnvironment custom_environment;
+    SourceEnvironmentEmptyValuePolicy empty_value_policy =
+            SourceEnvironmentEmptyValuePolicy::Omit;
     std::optional<SourceUpdateBaseline> update_baseline;
     std::optional<SourceInstalledSnapshot> installed_snapshot;
     bool        only_if_updated = false;

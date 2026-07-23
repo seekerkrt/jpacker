@@ -8,6 +8,7 @@
 #include "process.hpp"
 #include "repository_query.hpp"
 #include "shell_words.hpp"
+#include "source_environment.hpp"
 #include "source_install.hpp"
 #include "source_preference.hpp"
 #include "trusted_cache.hpp"
@@ -296,11 +297,12 @@ int cmd_build(
         Logger::error("Usage: jpacker build <pkg> [VAR=VAL...]");
         return 1;
     }
-    std::string pkg_name, custom_env;
+    std::string            pkg_name;
+    SourceBuildEnvironment custom_env;
     for(const auto& arg : args) {
         std::string key, val;
         if(split_env_assignment(arg, key, val))
-            custom_env += key + "=" + shell_words::quote(val) + " ";
+            custom_env.ordered_assignments.push_back({key, val});
         else if(arg.find('=') != std::string::npos) {
             Logger::error("Invalid environment assignment: " + arg);
             return 1;

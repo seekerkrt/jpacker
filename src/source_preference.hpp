@@ -1,5 +1,7 @@
 #pragma once
 
+#include "source_environment.hpp"
+
 #include <filesystem>
 #include <string>
 
@@ -17,11 +19,7 @@ std::filesystem::directory_iterator source_preference_entries();
 
 bool is_force_source(const std::string& package_name);
 
-// cmd_build / cmd_add_src / preference file readが共有する既存assignment syntax。
-bool split_env_assignment(
-        const std::string& assignment, std::string& key, std::string& value);
-
-std::string get_package_env(
+SourceBuildEnvironment get_package_env(
         const std::string& package_name, SourcePreferenceLoadHandler on_load,
         SourcePreferenceWarningHandler on_warning);
 
