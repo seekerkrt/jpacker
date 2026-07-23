@@ -1,6 +1,5 @@
 #pragma once
 
-#include <filesystem>
 #include <optional>
 #include <string>
 #include <vector>
@@ -19,8 +18,8 @@ enum class SourcePkgdestState {
 };
 
 struct ProducedPackageArtifact {
-    std::filesystem::path path;
-    std::string           package_name;
+    // Archive identityのpure projection。filesystem path proofは別capabilityが所有する。
+    std::string package_name;
 };
 
 struct ArtifactSelectionRequest {
@@ -34,8 +33,8 @@ struct ArtifactSelectionRequest {
 };
 
 struct ValidatedArtifactInstallTarget {
-    std::filesystem::path path;
-    std::string           package_name;
+    // Pure policy result。filesystem proofはValidatedPackageArtifactPathが別に所有する。
+    std::string package_name;
 };
 
 enum class ExistingInstallReason {

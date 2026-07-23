@@ -79,16 +79,13 @@ ValidatedArtifactInstallTarget validate_single_output_artifact(
     }
 
     const ProducedPackageArtifact& artifact = request.artifacts.front();
-    if(artifact.path.empty()) {
-        throw std::runtime_error("Produced package artifact path is empty.");
-    }
     if(artifact.package_name != request.requested_name) {
         throw std::runtime_error(
                 "Produced artifact package name does not match the requested package: " +
                 artifact.package_name + " != " + request.requested_name + ".");
     }
 
-    return ValidatedArtifactInstallTarget{artifact.path, artifact.package_name};
+    return ValidatedArtifactInstallTarget{artifact.package_name};
 }
 
 InstallReasonDirective resolve_install_reason_directive(

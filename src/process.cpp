@@ -117,8 +117,13 @@ CapturedCommandResult capture_command_output_impl(
     std::string           result;
     std::unique_ptr<FILE, int (*)(FILE*)> pipe(popen(cmd, "r"), pclose);
     if(!pipe) return CapturedCommandResult{};
-    while(fgets(buffer.data(), buffer.size(), pipe.get()) != nullptr) {
-        result += buffer.data();
+    // POLICY(#242): strict machine-output parserへNULも含む全byteを渡し、
+    // C-string appendによる途中切り捨てを起こさない。
+    while(true) {
+        std::size_t bytes_read =
+                std::fread(buffer.data(), 1, buffer.size(), pipe.get());
+        result.append(buffer.data(), bytes_read);
+        if(bytes_read == 0) break;
     }
     bool read_failed = ferror(pipe.get()) != 0;
     int  status = pclose(pipe.release());

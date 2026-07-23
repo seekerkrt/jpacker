@@ -18,6 +18,9 @@ APP_CONFIG_INTEGRATION_TEST_TARGET := build/tests/jpacker-app-config-test
 PACKAGE_IDENTIFIER_TEST_TARGET := build/tests/package-identifier-test
 SHELL_WORDS_TEST_TARGET := build/tests/shell-words-test
 SOURCE_ENVIRONMENT_TEST_TARGET := build/tests/source-environment-test
+ARTIFACT_WORKSPACE_TEST_TARGET := build/tests/artifact-workspace-test
+ARTIFACT_IDENTITY_TEST_TARGET := build/tests/artifact-identity-test
+PROCESS_CAPTURE_TEST_TARGET := build/tests/process-capture-test
 PROCESS_STDIN_FD_TEST_TARGET := build/tests/process-stdin-fd-test
 DEPENDENCY_PLAN_MODEL_TEST_TARGET := $(BUILD_DIR)/tests/dependency-plan-model-test
 ARTIFACT_INSTALL_PLAN_TEST_TARGET := $(BUILD_DIR)/tests/artifact-install-plan-test
@@ -71,6 +74,30 @@ DEPENDENCY_PLAN_MODEL_TEST_SRCS := \
 ARTIFACT_INSTALL_PLAN_TEST_SRCS := \
 	tests/artifact_install_plan_test.cpp \
 	$(SRC_DIR)/artifact_install_plan.cpp
+ARTIFACT_WORKSPACE_TEST_SRCS := \
+	tests/artifact_workspace_test.cpp \
+	$(SRC_DIR)/artifact_workspace.cpp \
+	$(SRC_DIR)/trusted_cache.cpp \
+	$(SRC_DIR)/source_environment.cpp \
+	$(SRC_DIR)/package_identifier.cpp \
+	$(SRC_DIR)/shell_words.cpp \
+	$(SRC_DIR)/process.cpp \
+	$(SRC_DIR)/logging.cpp
+ARTIFACT_IDENTITY_TEST_SRCS := \
+	tests/artifact_identity_test.cpp \
+	$(SRC_DIR)/artifact_identity.cpp \
+	$(SRC_DIR)/artifact_workspace.cpp \
+	$(SRC_DIR)/trusted_cache.cpp \
+	$(SRC_DIR)/source_environment.cpp \
+	$(SRC_DIR)/package_identifier.cpp \
+	$(SRC_DIR)/shell_words.cpp \
+	$(SRC_DIR)/logging.cpp \
+	tests/stubs/artifact-identity/process_stub.cpp
+PROCESS_CAPTURE_TEST_SRCS := \
+	tests/process_capture_test.cpp \
+	$(SRC_DIR)/process.cpp \
+	$(SRC_DIR)/shell_words.cpp \
+	$(SRC_DIR)/logging.cpp
 PACKAGE_METADATA_TEST_SRCS := \
 	tests/package_metadata_test.cpp \
 	$(SRC_DIR)/package_metadata.cpp \
@@ -99,7 +126,7 @@ LIBALPM_BUILD_TARGETS := \
 	$(PACKAGE_METADATA_INTEGRATION_TEST_TARGET) \
 	$(UPGRADE_BASELINE_METADATA_TEST_TARGET)
 
-.PHONY: all check-libalpm clean test-app-config test-package-identifier test-package-metadata test-package-metadata-integration test-shell-words test-source-environment test-dependency-plan-model test-artifact-install-plan test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-commands-inspect test-commands-source-maintenance test-commands-sync test-conflicts-replaces test-install-layout test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check install uninstall
+.PHONY: all check-libalpm clean test-app-config test-package-identifier test-package-metadata test-package-metadata-integration test-shell-words test-source-environment test-artifact-workspace test-artifact-identity test-process-capture test-dependency-plan-model test-artifact-install-plan test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-commands-inspect test-commands-source-maintenance test-commands-sync test-conflicts-replaces test-install-layout test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check install uninstall
 
 all: $(TARGET) $(MANPAGE)
 
@@ -194,6 +221,32 @@ $(SOURCE_ENVIRONMENT_TEST_TARGET): tests/source_environment_test.cpp $(SRC_DIR)/
 		$(SRC_DIR)/shell_words.cpp \
 		-o $@
 
+$(ARTIFACT_WORKSPACE_TEST_TARGET): $(ARTIFACT_WORKSPACE_TEST_SRCS) $(SRC_DIR)/artifact_workspace.hpp $(SRC_DIR)/trusted_cache.hpp $(SRC_DIR)/source_environment.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/shell_words.hpp $(SRC_DIR)/process.hpp $(SRC_DIR)/logging.hpp tests/stubs/makepkg $(VERSION_FILE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling artifact workspace test binary"
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
+		-DJPACKER_ENABLE_ARTIFACT_WORKSPACE_TEST_HOOKS \
+		-DJPACKER_ENABLE_TRUSTED_CACHE_TEST_HOOKS \
+		-I$(SRC_DIR) \
+		$(ARTIFACT_WORKSPACE_TEST_SRCS) \
+		-o $@
+
+$(ARTIFACT_IDENTITY_TEST_TARGET): $(ARTIFACT_IDENTITY_TEST_SRCS) $(SRC_DIR)/artifact_identity.hpp $(SRC_DIR)/artifact_workspace.hpp $(SRC_DIR)/trusted_cache.hpp $(SRC_DIR)/source_environment.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/shell_words.hpp $(SRC_DIR)/process.hpp $(SRC_DIR)/logging.hpp tests/stubs/artifact-identity/process_stub.hpp $(VERSION_FILE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling artifact identity test binary"
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
+		-I$(SRC_DIR) \
+		$(ARTIFACT_IDENTITY_TEST_SRCS) \
+		-o $@
+
+$(PROCESS_CAPTURE_TEST_TARGET): $(PROCESS_CAPTURE_TEST_SRCS) $(SRC_DIR)/process.hpp $(SRC_DIR)/shell_words.hpp $(SRC_DIR)/logging.hpp $(VERSION_FILE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling process capture test binary"
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
+		-I$(SRC_DIR) \
+		$(PROCESS_CAPTURE_TEST_SRCS) \
+		-o $@
+
 $(PROCESS_STDIN_FD_TEST_TARGET): tests/process_stdin_fd_test.cpp $(SRC_DIR)/process.cpp $(SRC_DIR)/process.hpp $(SRC_DIR)/logging.cpp $(SRC_DIR)/logging.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling process stdin fd test binary"
@@ -255,6 +308,16 @@ test-source-environment: $(SOURCE_ENVIRONMENT_TEST_TARGET)
 	JPACKER_TEST_PACKAGE_BUILD_DIR=$(abspath $(BUILD_DIR)/tests/source-environment-fixture) \
 		$(abspath $(SOURCE_ENVIRONMENT_TEST_TARGET)) \
 		$(abspath $(BUILD_DIR)/tests/source-environment-fixture)
+
+test-artifact-workspace: $(ARTIFACT_WORKSPACE_TEST_TARGET)
+	JPACKER_TEST_MAKEPKG_STUB=$(abspath tests/stubs/makepkg) \
+		$(abspath $(ARTIFACT_WORKSPACE_TEST_TARGET))
+
+test-artifact-identity: $(ARTIFACT_IDENTITY_TEST_TARGET)
+	$(abspath $(ARTIFACT_IDENTITY_TEST_TARGET))
+
+test-process-capture: $(PROCESS_CAPTURE_TEST_TARGET)
+	$(abspath $(PROCESS_CAPTURE_TEST_TARGET))
 
 test-dependency-plan-model: $(DEPENDENCY_PLAN_MODEL_TEST_TARGET)
 	$(abspath $(DEPENDENCY_PLAN_MODEL_TEST_TARGET))
