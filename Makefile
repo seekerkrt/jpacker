@@ -20,6 +20,7 @@ SHELL_WORDS_TEST_TARGET := build/tests/shell-words-test
 SOURCE_ENVIRONMENT_TEST_TARGET := build/tests/source-environment-test
 ARTIFACT_WORKSPACE_TEST_TARGET := build/tests/artifact-workspace-test
 ARTIFACT_IDENTITY_TEST_TARGET := build/tests/artifact-identity-test
+ARTIFACT_INSTALL_EXECUTOR_TEST_TARGET := build/tests/artifact-install-executor-test
 PROCESS_CAPTURE_TEST_TARGET := build/tests/process-capture-test
 PROCESS_STDIN_FD_TEST_TARGET := build/tests/process-stdin-fd-test
 DEPENDENCY_PLAN_MODEL_TEST_TARGET := $(BUILD_DIR)/tests/dependency-plan-model-test
@@ -93,6 +94,20 @@ ARTIFACT_IDENTITY_TEST_SRCS := \
 	$(SRC_DIR)/shell_words.cpp \
 	$(SRC_DIR)/logging.cpp \
 	tests/stubs/artifact-identity/process_stub.cpp
+ARTIFACT_INSTALL_EXECUTOR_TEST_SRCS := \
+	tests/artifact_install_executor_test.cpp \
+	$(SRC_DIR)/artifact_install_executor.cpp \
+	$(SRC_DIR)/artifact_install_plan.cpp \
+	$(SRC_DIR)/artifact_identity.cpp \
+	$(SRC_DIR)/artifact_workspace.cpp \
+	$(SRC_DIR)/package_metadata.cpp \
+	$(SRC_DIR)/trusted_cache.cpp \
+	$(SRC_DIR)/source_environment.cpp \
+	$(SRC_DIR)/package_identifier.cpp \
+	$(SRC_DIR)/shell_words.cpp \
+	$(SRC_DIR)/logging.cpp \
+	tests/stubs/package-metadata/alpm_stub.cpp \
+	tests/stubs/artifact-install-executor/process_stub.cpp
 PROCESS_CAPTURE_TEST_SRCS := \
 	tests/process_capture_test.cpp \
 	$(SRC_DIR)/process.cpp \
@@ -124,9 +139,10 @@ LIBALPM_BUILD_TARGETS := \
 	$(APP_CONFIG_INTEGRATION_TEST_TARGET) \
 	$(PACKAGE_METADATA_TEST_TARGET) \
 	$(PACKAGE_METADATA_INTEGRATION_TEST_TARGET) \
+	$(ARTIFACT_INSTALL_EXECUTOR_TEST_TARGET) \
 	$(UPGRADE_BASELINE_METADATA_TEST_TARGET)
 
-.PHONY: all check-libalpm clean test-app-config test-package-identifier test-package-metadata test-package-metadata-integration test-shell-words test-source-environment test-artifact-workspace test-artifact-identity test-process-capture test-dependency-plan-model test-artifact-install-plan test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-commands-inspect test-commands-source-maintenance test-commands-sync test-conflicts-replaces test-install-layout test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check install uninstall
+.PHONY: all check-libalpm clean test-app-config test-package-identifier test-package-metadata test-package-metadata-integration test-shell-words test-source-environment test-artifact-workspace test-artifact-identity test-artifact-install-executor test-process-capture test-dependency-plan-model test-artifact-install-plan test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-commands-inspect test-commands-source-maintenance test-commands-sync test-conflicts-replaces test-install-layout test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check install uninstall
 
 all: $(TARGET) $(MANPAGE)
 
@@ -239,6 +255,14 @@ $(ARTIFACT_IDENTITY_TEST_TARGET): $(ARTIFACT_IDENTITY_TEST_SRCS) $(SRC_DIR)/arti
 		$(ARTIFACT_IDENTITY_TEST_SRCS) \
 		-o $@
 
+$(ARTIFACT_INSTALL_EXECUTOR_TEST_TARGET): $(ARTIFACT_INSTALL_EXECUTOR_TEST_SRCS) $(SRC_DIR)/artifact_install_executor.hpp $(SRC_DIR)/artifact_install_plan.hpp $(SRC_DIR)/artifact_identity.hpp $(SRC_DIR)/artifact_workspace.hpp $(SRC_DIR)/package_metadata.hpp $(SRC_DIR)/dependency_plan.hpp $(SRC_DIR)/trusted_cache.hpp $(SRC_DIR)/source_environment.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/shell_words.hpp $(SRC_DIR)/process.hpp $(SRC_DIR)/logging.hpp tests/stubs/package-metadata/alpm_stub.hpp tests/stubs/artifact-install-executor/process_stub.hpp $(VERSION_FILE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling artifact install executor fake-symbol test binary"
+	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
+		-I$(SRC_DIR) -Itests/stubs/package-metadata \
+		$(ARTIFACT_INSTALL_EXECUTOR_TEST_SRCS) \
+		-o $@
+
 $(PROCESS_CAPTURE_TEST_TARGET): $(PROCESS_CAPTURE_TEST_SRCS) $(SRC_DIR)/process.hpp $(SRC_DIR)/shell_words.hpp $(SRC_DIR)/logging.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling process capture test binary"
@@ -315,6 +339,9 @@ test-artifact-workspace: $(ARTIFACT_WORKSPACE_TEST_TARGET)
 
 test-artifact-identity: $(ARTIFACT_IDENTITY_TEST_TARGET)
 	$(abspath $(ARTIFACT_IDENTITY_TEST_TARGET))
+
+test-artifact-install-executor: $(ARTIFACT_INSTALL_EXECUTOR_TEST_TARGET)
+	$(abspath $(ARTIFACT_INSTALL_EXECUTOR_TEST_TARGET))
 
 test-process-capture: $(PROCESS_CAPTURE_TEST_TARGET)
 	$(abspath $(PROCESS_CAPTURE_TEST_TARGET))
