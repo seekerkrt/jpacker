@@ -40,7 +40,7 @@ jpacker は現在も開発中です。
 
 Arch package metadata と package 間の関係は現在の read-only scope で `libalpm` を正とし、system package transaction は `pacman`、source-build 経路での検証済み artifact の install transaction は `pacman -U`、source package artifact の build は `makepkg`、source repository の取得と更新は `git` へ任せます。`jpacker` は source-build 経路の artifact workspace、validation、install policy を管理します。
 
-command 名、引数、既存 tool の慣習から利用者が自然に想像する目的と結果を重視します。判断が曖昧な場合や authoritative な情報を観測できない場合は、推測して副作用を起こさず、安全に停止して理由を示します。詳細は [DECISIONS.md](DECISIONS.md) を参照してください。
+command 名、引数、既存 tool の慣習から利用者が自然に想像する目的と結果を重視します。判断が曖昧な場合や authoritative な情報を観測できない場合は、推測して副作用を起こさず、安全に停止して理由を示します。詳細は [DECISIONS.md](docs/DECISIONS.md) を参照してください。
 
 ### リポジトリ情報
 
@@ -410,7 +410,7 @@ For safety, important package operations should still be reviewed carefully befo
 
 Arch package metadata and package relationships use `libalpm` as the authority within the current read-only scope. System package transactions remain delegated to `pacman`, validated-artifact installation transactions on source-build routes to `pacman -U`, source package artifact builds to `makepkg`, and source repository retrieval and updates to `git`. `jpacker` owns the artifact workspace, validation, and install policy for source-build routes.
 
-jpacker respects the purpose and result that users would naturally expect from a command name, its arguments, and existing tool conventions. When a decision is ambiguous or authoritative information cannot be observed, it does not guess and introduce side effects; it stops safely and explains why. See [DECISIONS.md](DECISIONS.md) for the detailed policy.
+jpacker respects the purpose and result that users would naturally expect from a command name, its arguments, and existing tool conventions. When a decision is ambiguous or authoritative information cannot be observed, it does not guess and introduce side effects; it stops safely and explains why. See [DECISIONS.md](docs/DECISIONS.md) for the detailed policy.
 
 ### Repository
 
