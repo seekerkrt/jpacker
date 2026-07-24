@@ -108,6 +108,82 @@ std::optional<AurPackageInfo> graph_info(const std::string& package_name) {
         return package_info(package_name, {"fetch-entry-fail", "fetch-entry-after"});
     }
 
+    if(package_name == "plan-formatter-root") {
+        return package_info(
+                package_name,
+                {"format-0", "format-1023", "format-1024", "format-1152",
+                 "format-1536", "format-1048570", "format-1048571",
+                 "format-1048576", "format-991730", "format-5283285",
+                 "format-int64-max"});
+    }
+
+    if(package_name == "plan-result-root") {
+        return package_info(
+                package_name,
+                {"result-zero", "result-missing", "result-query-failure",
+                 "result-malformed", "result-after-failure"});
+    }
+    if(package_name == "plan-result-later-root") {
+        return package_info(package_name, {"result-later-target"});
+    }
+
+    if(package_name == "plan-identity-root") {
+        AurPackageInfo info = package_info(
+                package_name,
+                {"same-package", "identity-same-virtual", "different-package",
+                 "identity-different-virtual", "same-semantic",
+                 "identity-stale-virtual", "identity-aur-virtual",
+                 "identity-ambiguous-virtual", "identity-unknown-virtual",
+                 "identity-aur-child"});
+        info.MakeDepends = {"same-semantic"};
+        return info;
+    }
+
+    if(package_name == "plan-no-metadata-root") {
+        return package_info(
+                package_name,
+                {"no-metadata-aur-child", "no-metadata-aur-virtual",
+                 "ambiguous-only-virtual", "no-metadata-unknown-virtual"});
+    }
+
+    if(package_name == "plan-cache-first" ||
+       package_name == "plan-cache-second") {
+        return package_info(package_name, {"cache-shared"});
+    }
+
+    if(package_name == "plan-open-failure-first") {
+        return package_info(package_name, {"open-first-package"});
+    }
+    if(package_name == "plan-open-failure-second") {
+        return package_info(package_name, {"open-second-package"});
+    }
+
+    if(package_name == "identity-aur-child" ||
+       package_name == "no-metadata-aur-child") {
+        return package_info(package_name);
+    }
+
+    if(package_name == "identity-aur-provider") {
+        return package_info(
+                package_name, {}, {"identity-aur-virtual"});
+    }
+    if(package_name == "no-metadata-aur-provider") {
+        return package_info(
+                package_name, {}, {"no-metadata-aur-virtual"});
+    }
+
+    if(package_name == "identity-same-virtual" ||
+       package_name == "identity-different-virtual" ||
+       package_name == "identity-stale-virtual" ||
+       package_name == "identity-aur-virtual" ||
+       package_name == "identity-ambiguous-virtual" ||
+       package_name == "identity-unknown-virtual" ||
+       package_name == "no-metadata-aur-virtual" ||
+       package_name == "ambiguous-only-virtual" ||
+       package_name == "no-metadata-unknown-virtual") {
+        return std::nullopt;
+    }
+
     throw std::runtime_error("Unexpected inspection info call: " + package_name);
 }
 
@@ -171,6 +247,16 @@ std::vector<std::string> AurClient::search_names_by_provides(
     if(provided_name == "jpacker-inspect-203-virtual-provider") {
         // POLICY: AUR RPC order is significant to the provider presentation contract.
         return {"provider-z", "provider-a"};
+    }
+    if(provided_name == "identity-aur-virtual") {
+        return {"identity-aur-provider"};
+    }
+    if(provided_name == "no-metadata-aur-virtual") {
+        return {"no-metadata-aur-provider"};
+    }
+    if(provided_name == "identity-unknown-virtual" ||
+       provided_name == "no-metadata-unknown-virtual") {
+        return {};
     }
     throw std::runtime_error(
             "Unexpected inspection search-provides call: " + provided_name);

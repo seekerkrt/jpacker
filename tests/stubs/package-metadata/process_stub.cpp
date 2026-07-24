@@ -1,39 +1,54 @@
 #include "process_stub.hpp"
 
+#include <deque>
+#include <map>
 #include <utility>
+#include <vector>
 
 namespace {
 
-CapturedCommandResult g_result;
-std::size_t           g_capture_calls = 0;
-std::string           g_last_command;
+std::map<std::string, std::deque<CapturedCommandResult>> g_results_by_command;
+std::vector<std::string>                                 g_commands;
 
 } // namespace
 
 namespace package_metadata_test_stub {
 
 void reset_process_stub() {
-    g_result = CapturedCommandResult{};
-    g_capture_calls = 0;
-    g_last_command.clear();
+    g_results_by_command.clear();
+    g_commands.clear();
 }
 
-void set_captured_command_result(CapturedCommandResult result) {
-    g_result = std::move(result);
+void enqueue_captured_command_result(
+        const std::string& command,
+        CapturedCommandResult result) {
+    g_results_by_command[command].push_back(std::move(result));
 }
 
 std::size_t capture_command_call_count() {
-    return g_capture_calls;
+    return g_commands.size();
 }
 
 std::string last_captured_command() {
-    return g_last_command;
+    return g_commands.empty() ? "" : g_commands.back();
+}
+
+std::vector<std::string> captured_commands() {
+    return g_commands;
 }
 
 } // namespace package_metadata_test_stub
 
 CapturedCommandResult capture_command_output_raw(const char* command) {
-    ++g_capture_calls;
-    g_last_command = command == nullptr ? "" : command;
-    return g_result;
+    std::string command_text = command == nullptr ? "" : command;
+    g_commands.push_back(command_text);
+
+    auto result_queue = g_results_by_command.find(command_text);
+    if(result_queue == g_results_by_command.end() || result_queue->second.empty()) {
+        return CapturedCommandResult{};
+    }
+
+    CapturedCommandResult result = std::move(result_queue->second.front());
+    result_queue->second.pop_front();
+    return result;
 }

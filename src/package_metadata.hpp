@@ -1,14 +1,22 @@
 #pragma once
 
+#include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <variant>
+#include <vector>
 
 struct PacmanDatabasePaths {
     std::filesystem::path root_dir;
     std::filesystem::path db_path;
+};
+
+struct PacmanRepositoryConfiguration {
+    PacmanDatabasePaths      database_paths;
+    std::vector<std::string> repository_names;
 };
 
 enum class InstalledPackageReason {
@@ -23,6 +31,18 @@ struct InstalledPackageMetadata {
     InstalledPackageReason reason = InstalledPackageReason::Unknown;
 };
 
+struct RepositoryPackageLookup {
+    std::string                package_name;
+    std::optional<std::string> exact_repository_name;
+};
+
+struct RepositoryPackageMetadata {
+    std::string   repository_name;
+    std::string   package_name;
+    std::uint64_t package_size_bytes;
+    std::uint64_t installed_size_bytes;
+};
+
 struct PackageNotFound {};
 
 enum class PackageMetadataErrorCode {
@@ -33,6 +53,8 @@ enum class PackageMetadataErrorCode {
     InvalidPackageName,
     QueryFailed,
     MalformedMetadata,
+    SyncDatabaseUnavailable,
+    RepositoryNotConfigured,
 };
 
 struct PackageMetadataFailure {
@@ -42,6 +64,11 @@ struct PackageMetadataFailure {
 
 using InstalledPackageQueryResult = std::variant<
         InstalledPackageMetadata,
+        PackageNotFound,
+        PackageMetadataFailure>;
+
+using RepositoryPackageQueryResult = std::variant<
+        RepositoryPackageMetadata,
         PackageNotFound,
         PackageMetadataFailure>;
 
@@ -57,6 +84,7 @@ private:
 };
 
 PacmanDatabasePaths resolve_pacman_database_paths();
+PacmanRepositoryConfiguration resolve_pacman_repository_configuration();
 
 // 1 read phaseのlibalpm handleを単独所有し、raw libalpm型をdomain側へ公開しない。
 class PackageMetadataSession {
@@ -78,6 +106,33 @@ private:
     struct Impl;
 
     explicit PackageMetadataSession(std::unique_ptr<Impl> impl) noexcept;
+
+    std::unique_ptr<Impl> impl_;
+};
+
+// repository sync DB専用のread phaseを所有し、installed/local sessionとは分離する。
+class RepositoryPackageMetadataSession {
+public:
+    static RepositoryPackageMetadataSession open(
+            const PacmanRepositoryConfiguration& configuration);
+
+    RepositoryPackageMetadataSession(const RepositoryPackageMetadataSession&) = delete;
+    RepositoryPackageMetadataSession& operator=(
+            const RepositoryPackageMetadataSession&) = delete;
+
+    RepositoryPackageMetadataSession(RepositoryPackageMetadataSession&&) noexcept;
+    RepositoryPackageMetadataSession& operator=(
+            RepositoryPackageMetadataSession&&) noexcept;
+
+    ~RepositoryPackageMetadataSession() noexcept;
+
+    RepositoryPackageQueryResult query_repository_package(
+            const RepositoryPackageLookup& lookup) const;
+
+private:
+    struct Impl;
+
+    explicit RepositoryPackageMetadataSession(std::unique_ptr<Impl> impl) noexcept;
 
     std::unique_ptr<Impl> impl_;
 };

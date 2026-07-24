@@ -7,11 +7,14 @@
 
 #include <cctype>
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <set>
 #include <sstream>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace {
 
@@ -19,7 +22,14 @@ namespace fs = std::filesystem;
 
 constexpr const char* PACMAN_DATABASE_PATH_COMMAND =
         "pacman-conf --verbose RootDir DBPath 2>/dev/null";
+constexpr const char* PACMAN_REPOSITORY_LIST_COMMAND =
+        "pacman-conf --repo-list 2>/dev/null";
 constexpr std::size_t MAX_ALPM_DIAGNOSTIC_LENGTH = 160;
+
+// POLICY: pacman-managed on-disk sync DBをread-onlyで構造/cache parseする。
+// pacman.confのsignature policyを再実行するものではない。
+constexpr alpm_siglevel_t READ_ONLY_SYNC_DATABASE_SIGLEVEL =
+        static_cast<alpm_siglevel_t>(0);
 
 [[noreturn]] void throw_package_metadata_error(
         PackageMetadataErrorCode code,
@@ -120,6 +130,54 @@ PacmanDatabasePaths parse_pacman_database_paths(const std::string& output) {
             PacmanDatabasePaths{fs::path(root_dir), fs::path(db_path)});
 }
 
+bool contains_control_character(const std::string& value) {
+    for(unsigned char character : value) {
+        if(std::iscntrl(character)) return true;
+    }
+    return false;
+}
+
+void validate_repository_names(const std::vector<std::string>& repository_names) {
+    std::set<std::string> seen_repository_names;
+    for(const auto& repository_name : repository_names) {
+        if(repository_name.empty() || contains_control_character(repository_name)) {
+            throw_package_metadata_error(
+                    PackageMetadataErrorCode::ConfigurationMalformed,
+                    "Repository configuration contains an invalid repository name.");
+        }
+        if(!seen_repository_names.insert(repository_name).second) {
+            throw_package_metadata_error(
+                    PackageMetadataErrorCode::ConfigurationMalformed,
+                    "Repository configuration contains a duplicate repository name.");
+        }
+    }
+}
+
+std::vector<std::string> parse_pacman_repository_names(
+        const std::string& output) {
+    std::vector<std::string> repository_names;
+    std::stringstream        output_stream(output);
+    std::string              line;
+    while(std::getline(output_stream, line)) {
+        if(line.empty() || contains_control_character(line)) {
+            throw_package_metadata_error(
+                    PackageMetadataErrorCode::ConfigurationMalformed,
+                    "pacman-conf returned a malformed repository list.");
+        }
+        repository_names.push_back(std::move(line));
+    }
+    validate_repository_names(repository_names);
+    return repository_names;
+}
+
+PacmanRepositoryConfiguration normalize_pacman_repository_configuration(
+        const PacmanRepositoryConfiguration& configuration) {
+    validate_repository_names(configuration.repository_names);
+    return PacmanRepositoryConfiguration{
+            normalize_pacman_database_paths(configuration.database_paths),
+            configuration.repository_names};
+}
+
 std::string bounded_alpm_error_text(alpm_errno_t error_code) {
     const char* raw_text = alpm_strerror(error_code);
     if(raw_text == nullptr || raw_text[0] == '\0') return "unknown libalpm error";
@@ -171,6 +229,46 @@ PackageMetadataFailure query_failure(
     return PackageMetadataFailure{code, diagnostic};
 }
 
+RepositoryPackageQueryResult query_repository_database(
+        alpm_handle_t* handle,
+        alpm_db_t* database,
+        const std::string& repository_name,
+        const std::string& package_name) {
+    alpm_pkg_t* package = alpm_db_get_pkg(database, package_name.c_str());
+    if(package == nullptr) {
+        alpm_errno_t query_error = alpm_errno(handle);
+        if(query_error == ALPM_ERR_PKG_NOT_FOUND) return PackageNotFound{};
+        return query_failure(
+                PackageMetadataErrorCode::QueryFailed,
+                alpm_failure_diagnostic(
+                        "Repository package query failed",
+                        query_error));
+    }
+
+    // POLICY: libalpmのnonnull returnがquery成功であり、以前の失敗errnoは参照しない。
+    const char* returned_name = alpm_pkg_get_name(package);
+    if(returned_name == nullptr || package_name != returned_name) {
+        return query_failure(
+                PackageMetadataErrorCode::MalformedMetadata,
+                "Repository package metadata contains an invalid package name.");
+    }
+
+    off_t package_size = alpm_pkg_get_size(package);
+    off_t installed_size = alpm_pkg_get_isize(package);
+    if(package_size < static_cast<off_t>(0) ||
+       installed_size < static_cast<off_t>(0)) {
+        return query_failure(
+                PackageMetadataErrorCode::MalformedMetadata,
+                "Repository package metadata contains an invalid package size.");
+    }
+
+    return RepositoryPackageMetadata{
+            repository_name,
+            returned_name,
+            static_cast<std::uint64_t>(package_size),
+            static_cast<std::uint64_t>(installed_size)};
+}
+
 } // namespace
 
 PackageMetadataError::PackageMetadataError(PackageMetadataFailure failure)
@@ -190,6 +288,23 @@ PacmanDatabasePaths resolve_pacman_database_paths() {
                         std::to_string(command_result.exit_code) + ".");
     }
     return parse_pacman_database_paths(command_result.output);
+}
+
+PacmanRepositoryConfiguration resolve_pacman_repository_configuration() {
+    PacmanDatabasePaths database_paths = resolve_pacman_database_paths();
+
+    CapturedCommandResult command_result =
+            capture_command_output_raw(PACMAN_REPOSITORY_LIST_COMMAND);
+    if(command_result.exit_code != 0) {
+        throw_package_metadata_error(
+                PackageMetadataErrorCode::ConfigurationUnavailable,
+                "pacman-conf repository list failed with exit code " +
+                        std::to_string(command_result.exit_code) + ".");
+    }
+
+    return PacmanRepositoryConfiguration{
+            std::move(database_paths),
+            parse_pacman_repository_names(command_result.output)};
 }
 
 struct PackageMetadataSession::Impl {
@@ -318,4 +433,138 @@ InstalledPackageQueryResult PackageMetadataSession::query_installed_package(
             returned_name,
             installed_version,
             map_install_reason(alpm_pkg_get_reason(package))};
+}
+
+struct RepositoryPackageMetadataSession::Impl {
+    struct RegisteredRepository {
+        std::string repository_name;
+        alpm_db_t*  database;
+    };
+
+    Impl(
+            UniqueAlpmHandle owned_handle,
+            std::vector<RegisteredRepository> registered_repositories) noexcept
+        : handle(std::move(owned_handle)),
+          repositories(std::move(registered_repositories)) {}
+
+    UniqueAlpmHandle                  handle;
+    std::vector<RegisteredRepository> repositories;
+};
+
+RepositoryPackageMetadataSession::RepositoryPackageMetadataSession(
+        std::unique_ptr<Impl> impl) noexcept
+    : impl_(std::move(impl)) {}
+
+RepositoryPackageMetadataSession::RepositoryPackageMetadataSession(
+        RepositoryPackageMetadataSession&&) noexcept = default;
+
+RepositoryPackageMetadataSession& RepositoryPackageMetadataSession::operator=(
+        RepositoryPackageMetadataSession&&) noexcept = default;
+
+RepositoryPackageMetadataSession::~RepositoryPackageMetadataSession() noexcept = default;
+
+RepositoryPackageMetadataSession RepositoryPackageMetadataSession::open(
+        const PacmanRepositoryConfiguration& configuration) {
+    PacmanRepositoryConfiguration normalized_configuration =
+            normalize_pacman_repository_configuration(configuration);
+    std::string root_dir = normalized_configuration.database_paths.root_dir.string();
+    std::string db_path = normalized_configuration.database_paths.db_path.string();
+
+    alpm_errno_t initialization_error = ALPM_ERR_OK;
+    alpm_handle_t* raw_handle =
+            alpm_initialize(root_dir.c_str(), db_path.c_str(), &initialization_error);
+    if(raw_handle == nullptr) {
+        throw_package_metadata_error(
+                PackageMetadataErrorCode::InitializationFailed,
+                alpm_failure_diagnostic(
+                        "Failed to initialize repository package metadata session",
+                        initialization_error));
+    }
+
+    UniqueAlpmHandle handle(raw_handle);
+    if(initialization_error != ALPM_ERR_OK) {
+        throw_package_metadata_error(
+                PackageMetadataErrorCode::InitializationFailed,
+                alpm_failure_diagnostic(
+                        "Failed to initialize repository package metadata session",
+                        initialization_error));
+    }
+
+    std::vector<Impl::RegisteredRepository> repositories;
+    repositories.reserve(normalized_configuration.repository_names.size());
+    for(const auto& repository_name : normalized_configuration.repository_names) {
+        alpm_db_t* database = alpm_register_syncdb(
+                handle.get(), repository_name.c_str(),
+                READ_ONLY_SYNC_DATABASE_SIGLEVEL);
+        alpm_errno_t registration_error = alpm_errno(handle.get());
+        if(database == nullptr || registration_error != ALPM_ERR_OK) {
+            throw_package_metadata_error(
+                    PackageMetadataErrorCode::SyncDatabaseUnavailable,
+                    alpm_failure_diagnostic(
+                            "Failed to register a repository package database",
+                            registration_error));
+        }
+
+        int validation_result = alpm_db_get_valid(database);
+        alpm_errno_t validation_error = alpm_errno(handle.get());
+        if(validation_result != 0 || validation_error != ALPM_ERR_OK) {
+            throw_package_metadata_error(
+                    PackageMetadataErrorCode::SyncDatabaseUnavailable,
+                    alpm_failure_diagnostic(
+                            "Repository package database validation failed",
+                            validation_error));
+        }
+
+        // LANDMINE: missing/corrupt sync DB can surface only while loading the cache.
+        // nullptr+OK is retained as a valid empty repository database.
+        static_cast<void>(alpm_db_get_pkgcache(database));
+        alpm_errno_t package_cache_error = alpm_errno(handle.get());
+        if(package_cache_error != ALPM_ERR_OK) {
+            throw_package_metadata_error(
+                    PackageMetadataErrorCode::SyncDatabaseUnavailable,
+                    alpm_failure_diagnostic(
+                            "Failed to load a repository package database",
+                            package_cache_error));
+        }
+
+        repositories.push_back(Impl::RegisteredRepository{repository_name, database});
+    }
+
+    auto impl = std::make_unique<Impl>(std::move(handle), std::move(repositories));
+    return RepositoryPackageMetadataSession(std::move(impl));
+}
+
+RepositoryPackageQueryResult RepositoryPackageMetadataSession::query_repository_package(
+        const RepositoryPackageLookup& lookup) const {
+    if(impl_ == nullptr) {
+        return query_failure(
+                PackageMetadataErrorCode::QueryFailed,
+                "Repository package metadata session is not open.");
+    }
+    if(!is_valid_package_name(lookup.package_name)) {
+        return query_failure(
+                PackageMetadataErrorCode::InvalidPackageName,
+                "Package name is invalid.");
+    }
+
+    if(lookup.exact_repository_name.has_value()) {
+        for(const auto& repository : impl_->repositories) {
+            if(repository.repository_name != lookup.exact_repository_name.value()) continue;
+            return query_repository_database(
+                    impl_->handle.get(), repository.database,
+                    repository.repository_name, lookup.package_name);
+        }
+        return query_failure(
+                PackageMetadataErrorCode::RepositoryNotConfigured,
+                "Requested repository is not configured.");
+    }
+
+    for(const auto& repository : impl_->repositories) {
+        RepositoryPackageQueryResult result = query_repository_database(
+                impl_->handle.get(), repository.database,
+                repository.repository_name, lookup.package_name);
+        if(std::holds_alternative<PackageNotFound>(result)) continue;
+        return result;
+    }
+    return PackageNotFound{};
 }

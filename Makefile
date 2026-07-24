@@ -63,7 +63,11 @@ MY_CXXFLAGS := -std=c++20 -Wall -Wextra -DJPACKER_VERSION=\"$(VERSION)\"
 MY_LDLIBS   := -lcurl
 SRCS      := $(wildcard $(SRC_DIR)/*.cpp)
 HEADERS   := $(wildcard $(SRC_DIR)/*.hpp)
-COMMANDS_INSPECT_TEST_SRCS := $(filter-out $(SRC_DIR)/aur_rpc.cpp,$(SRCS)) tests/commands_inspect_aur_stub.cpp
+COMMANDS_INSPECT_TEST_SRCS := \
+	$(filter-out $(SRC_DIR)/aur_rpc.cpp $(SRC_DIR)/repository_query.cpp,$(SRCS)) \
+	tests/commands_inspect_aur_stub.cpp \
+	tests/stubs/commands-inspect/repository_query_stub.cpp \
+	tests/stubs/package-metadata/alpm_stub.cpp
 COMMANDS_SYNC_TEST_SRCS := $(filter-out $(SRC_DIR)/aur_rpc.cpp,$(SRCS)) tests/stubs/commands-sync/aur_rpc_stub.cpp
 SOURCE_INSTALL_CHARACTERIZATION_TEST_SRCS := $(filter-out $(SRC_DIR)/jpacker.cpp,$(SRCS))
 DEPENDENCY_PLAN_MODEL_TEST_SRCS := \
@@ -227,10 +231,10 @@ $(TEST_TARGET): $(SRCS) $(HEADERS) $(VERSION_FILE)
 	@echo ":: Compiling isolated integration test binary"
 	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -DJPACKER_ENABLE_TEST_OVERRIDES $(SRCS) -o $@ $(MY_LDLIBS) $(LIBALPM_LDLIBS)
 
-$(COMMANDS_INSPECT_TEST_TARGET): $(COMMANDS_INSPECT_TEST_SRCS) $(HEADERS) $(VERSION_FILE)
+$(COMMANDS_INSPECT_TEST_TARGET): $(COMMANDS_INSPECT_TEST_SRCS) $(HEADERS) tests/stubs/package-metadata/alpm_stub.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling command inspection characterization test binary"
-	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -DJPACKER_ENABLE_TEST_OVERRIDES -I$(SRC_DIR) $(COMMANDS_INSPECT_TEST_SRCS) -o $@ $(MY_LDLIBS) $(LIBALPM_LDLIBS)
+	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -DJPACKER_ENABLE_TEST_OVERRIDES -I$(SRC_DIR) -Itests/stubs/package-metadata $(COMMANDS_INSPECT_TEST_SRCS) -o $@ $(MY_LDLIBS)
 
 $(COMMANDS_SYNC_TEST_TARGET): $(COMMANDS_SYNC_TEST_SRCS) $(HEADERS) $(VERSION_FILE)
 	@mkdir -p $(dir $@)

@@ -26,12 +26,19 @@ setup_case() {
     stdout_file=$case_dir/stdout
     stderr_file=$case_dir/stderr
     command_log=$case_dir/commands.log
+    repository_metadata_state=$case_dir/repository-metadata.state
 
     mkdir -p "$case_dir/home" "$case_dir/xdg-cache"
     : > "$command_log"
+    : > "$repository_metadata_state"
     export HOME=$case_dir/home
     export XDG_CACHE_HOME=$case_dir/xdg-cache
     export JPACKER_TEST_COMMAND_LOG=$command_log
+    export JPACKER_TEST_PACKAGE_METADATA_EVENT_LOG=$command_log
+    export JPACKER_TEST_REPOSITORY_METADATA_STATE_FILE=$repository_metadata_state
+    JPACKER_TEST_PACMAN_CONF_REPOSITORY_LIST='core
+extra'
+    export JPACKER_TEST_PACMAN_CONF_REPOSITORY_LIST
     export JPACKER_TEST_PACMAN_EXIT_CODE=1
     export JPACKER_TEST_SUDO_EXIT_CODE=99
     export JPACKER_TEST_VERCMP_OUTPUT=1
@@ -48,6 +55,13 @@ setup_case() {
     unset JPACKER_TEST_GIT_CLONE_SYMLINK_TARGET
     unset JPACKER_TEST_GIT_CLONE_FIXTURE_DIR
     unset JPACKER_TEST_MAKEPKG_EXIT_CODE
+    unset JPACKER_TEST_PACKAGE_METADATA_INITIALIZE_FAILURE
+    unset JPACKER_TEST_PACKAGE_METADATA_INITIALIZE_FAILURE_AT
+    unset JPACKER_TEST_PACKAGE_METADATA_QUERY_FAILURE_PACKAGE
+    unset JPACKER_TEST_PACKAGE_METADATA_QUERY_FAILURE_AT
+    unset JPACKER_TEST_PACKAGE_METADATA_PACMAN_CONF_EXIT_CODE
+    unset JPACKER_TEST_PACKAGE_METADATA_PACMAN_CONF_FAILURE_AT
+    unset JPACKER_TEST_PACMAN_CONF_REPOSITORY_LIST_EXIT_CODE
 }
 
 show_case_diagnostics() {
@@ -105,6 +119,47 @@ assert_exact_line() {
     if ! grep -Fx -- "$expected" "$file" >/dev/null; then
         fail_case "missing expected exact line: $expected"
     fi
+}
+
+assert_not_exact_line() {
+    unexpected=$1
+    file=$2
+    if grep -Fx -- "$unexpected" "$file" >/dev/null; then
+        fail_case "unexpected exact line: $unexpected"
+    fi
+}
+
+assert_exact_line_count() {
+    expected=$1
+    line=$2
+    file=$3
+    actual=$(grep -Fxc -- "$line" "$file" || true)
+    if [ "$actual" -ne "$expected" ]; then
+        fail_case "expected $expected occurrence(s) of '$line', got $actual"
+    fi
+}
+
+assert_line_immediately_after() {
+    first=$1
+    second=$2
+    file=$3
+    if ! awk -v first="$first" -v second="$second" '
+        previous == first && $0 == second { found = 1 }
+        { previous = $0 }
+        END { if(!found) exit 1 }
+    ' "$file"; then
+        fail_case "expected '$second' immediately after '$first'"
+    fi
+}
+
+set_repository_metadata() {
+    repository=$1
+    package=$2
+    package_size=$3
+    installed_size=$4
+    printf '%s %s %s %s\n' \
+        "$repository" "$package" "$package_size" "$installed_size" >> \
+        "$repository_metadata_state"
 }
 
 assert_before() {
@@ -236,6 +291,168 @@ assert_not_contains "Failed to plan build order for invalid/name" "$stderr_file"
 assert_exact_line "aur info plan-first" "$command_log"
 assert_not_contains "aur info plan-third" "$command_log"
 echo "  ok: plan target validation remains outside the target catch"
+
+# Issue #125: formatterはprivate helperのまま、repository metadataからplan表示へ流して固定する。
+setup_case plan-repository-size-formatter
+export JPACKER_TEST_INSPECTION_SCENARIO=plan-repository-size-formatter
+JPACKER_TEST_PACMAN_REPO_PACKAGES='format-0 format-1023 format-1024 format-1152 format-1536 format-1048570 format-1048571 format-1048576 format-991730 format-5283285 format-int64-max'
+export JPACKER_TEST_PACMAN_REPO_PACKAGES
+set_repository_metadata core format-0 0 0
+set_repository_metadata core format-1023 1023 1023
+set_repository_metadata core format-1024 1024 1024
+set_repository_metadata core format-1152 1152 1152
+set_repository_metadata core format-1536 1536 1536
+set_repository_metadata core format-1048570 1048570 1048570
+set_repository_metadata core format-1048571 1048571 1048571
+set_repository_metadata core format-1048576 1048576 1048576
+set_repository_metadata core format-991730 991730 991730
+set_repository_metadata core format-5283285 5283285 5283285
+set_repository_metadata core format-int64-max 9223372036854775807 9223372036854775807
+run_ok plan plan-formatter-root
+assert_line_immediately_after "  core/format-0" "    Package size   : 0 B" "$stdout_file"
+assert_line_immediately_after "  core/format-1023" "    Package size   : 1023 B" "$stdout_file"
+assert_line_immediately_after "  core/format-1024" "    Package size   : 1.00 KiB" "$stdout_file"
+assert_line_immediately_after "  core/format-1152" "    Package size   : 1.13 KiB" "$stdout_file"
+assert_line_immediately_after "  core/format-1536" "    Package size   : 1.50 KiB" "$stdout_file"
+assert_line_immediately_after "  core/format-1048570" "    Package size   : 1023.99 KiB" "$stdout_file"
+assert_line_immediately_after "  core/format-1048571" "    Package size   : 1.00 MiB" "$stdout_file"
+assert_line_immediately_after "  core/format-1048576" "    Package size   : 1.00 MiB" "$stdout_file"
+assert_line_immediately_after "  core/format-991730" "    Package size   : 968.49 KiB" "$stdout_file"
+assert_line_immediately_after "  core/format-5283285" "    Package size   : 5.04 MiB" "$stdout_file"
+assert_line_immediately_after "  core/format-int64-max" "    Package size   : 8.00 EiB" "$stdout_file"
+echo "  ok: plan repository size formatting uses integer IEC round-half-up"
+
+# success/zero/not-found/query failure/malformedは別stateとして表示し、plan statusを汚さない。
+setup_case plan-repository-size-results
+export JPACKER_TEST_INSPECTION_SCENARIO=plan-repository-size-results
+JPACKER_TEST_PACMAN_REPO_PACKAGES='result-zero result-missing result-query-failure result-malformed result-after-failure result-later-target'
+export JPACKER_TEST_PACMAN_REPO_PACKAGES
+export JPACKER_TEST_PACKAGE_METADATA_QUERY_FAILURE_PACKAGE=result-query-failure
+set_repository_metadata core result-zero 0 0
+set_repository_metadata core result-malformed -1 4096
+set_repository_metadata core result-after-failure 1024 1536
+set_repository_metadata core result-later-target 2048 3072
+run_ok plan plan-result-root plan-result-later-root
+assert_line_immediately_after "  core/result-zero" "    Package size   : 0 B" "$stdout_file"
+assert_exact_line "    Installed size : 0 B" "$stdout_file"
+assert_line_immediately_after "  result-missing" "    Metadata       : not found" "$stdout_file"
+assert_line_immediately_after "  result-query-failure" "    Metadata       : unavailable (query failed)" "$stdout_file"
+assert_line_immediately_after "  result-malformed" "    Metadata       : unavailable (invalid metadata)" "$stdout_file"
+assert_line_immediately_after "  core/result-after-failure" "    Package size   : 1.00 KiB" "$stdout_file"
+assert_line_immediately_after "  core/result-later-target" "    Package size   : 2.00 KiB" "$stdout_file"
+assert_before "  result-query-failure" "  core/result-after-failure" "$stdout_file"
+assert_before "  result-query-failure" "  1. plan-result-later-root" "$stdout_file"
+assert_not_contains "Plan status: incomplete" "$stdout_file"
+echo "  ok: plan repository metadata preserves zero, absence, failure, and malformed states"
+
+# semantic lookupは(exact repository, package)、成功表示はreturned repo/packageでdedupeする。
+setup_case plan-repository-size-identities
+export JPACKER_TEST_INSPECTION_SCENARIO=plan-repository-size-identities
+JPACKER_TEST_PACMAN_REPO_PACKAGES='same-package different-package same-semantic'
+export JPACKER_TEST_PACMAN_REPO_PACKAGES
+set_repository_metadata extra same-package 1024 2048
+set_repository_metadata core different-package 2048 3072
+set_repository_metadata extra different-package 4096 5120
+set_repository_metadata core same-semantic 6144 7168
+run_ok plan plan-identity-root
+assert_exact_line_count 1 "  extra/same-package" "$stdout_file"
+assert_exact_line_count 1 "  core/different-package" "$stdout_file"
+assert_exact_line_count 1 "  extra/different-package" "$stdout_file"
+assert_exact_line_count 1 "  core/same-semantic" "$stdout_file"
+assert_before "  extra/same-package" "  core/different-package" "$stdout_file"
+assert_before "  core/different-package" "  extra/different-package" "$stdout_file"
+assert_before "  extra/different-package" "  core/same-semantic" "$stdout_file"
+assert_exact_line_count 1 "alpm sync-query core/same-package" "$command_log"
+assert_exact_line_count 2 "alpm sync-query extra/same-package" "$command_log"
+assert_exact_line_count 1 "alpm sync-query core/different-package" "$command_log"
+assert_exact_line_count 1 "alpm sync-query extra/different-package" "$command_log"
+assert_exact_line_count 1 "alpm sync-query core/same-semantic" "$command_log"
+assert_not_contains "alpm sync-query stale/" "$command_log"
+assert_not_contains "alpm sync-query core/identity-aur-provider" "$command_log"
+assert_not_contains "alpm sync-query extra/identity-aur-provider" "$command_log"
+assert_not_exact_line "  aur/identity-aur-provider" "$stdout_file"
+assert_not_exact_line "  stale/stale-package" "$stdout_file"
+echo "  ok: plan lookup/cache/display identities remain distinct and first-seen"
+
+# AUR build units、AUR provider、ambiguous/unknown edgeだけならmetadata contextを起動しない。
+setup_case plan-repository-size-no-candidates
+export JPACKER_TEST_INSPECTION_SCENARIO=plan-repository-size-no-candidates
+run_ok plan plan-no-metadata-root
+assert_exact_line "  1. no-metadata-aur-child" "$stdout_file"
+assert_exact_line "  2. no-metadata-aur-provider" "$stdout_file"
+assert_not_contains "Repository package sizes:" "$stdout_file"
+assert_not_contains "pacman-conf --verbose RootDir DBPath" "$command_log"
+assert_not_contains "pacman-conf --repo-list" "$command_log"
+assert_not_contains "alpm initialize" "$command_log"
+assert_not_contains "alpm sync-register" "$command_log"
+assert_not_contains "alpm sync-query" "$command_log"
+echo "  ok: plan skips repository metadata calls when no eligible edge exists"
+
+# sessionとquery cacheはcmd_plan invocation全体で共有するが、各targetのsectionは表示する。
+setup_case plan-repository-size-multi-target-cache
+export JPACKER_TEST_INSPECTION_SCENARIO=plan-repository-size-multi-target-cache
+export JPACKER_TEST_PACMAN_REPO_PACKAGES=cache-shared
+set_repository_metadata core cache-shared 991730 5283285
+run_ok plan plan-cache-first plan-cache-second
+assert_exact_line_count 2 "Repository package sizes:" "$stdout_file"
+assert_exact_line_count 2 "  core/cache-shared" "$stdout_file"
+assert_exact_line_count 1 "pacman-conf --verbose RootDir DBPath" "$command_log"
+assert_exact_line_count 1 "pacman-conf --repo-list" "$command_log"
+assert_exact_line_count 1 "alpm initialize" "$command_log"
+assert_exact_line_count 1 "alpm sync-register core" "$command_log"
+assert_exact_line_count 1 "alpm sync-register extra" "$command_log"
+assert_exact_line_count 1 "alpm sync-query core/cache-shared" "$command_log"
+assert_exact_line_count 1 "alpm release" "$command_log"
+echo "  ok: plan shares one metadata session/query cache and renders each target"
+
+# open failureはplan本文とexit 0を維持し、後続targetでsession openを再試行しない。
+setup_case plan-repository-size-open-failure
+export JPACKER_TEST_INSPECTION_SCENARIO=plan-repository-size-open-failure
+JPACKER_TEST_PACMAN_REPO_PACKAGES='open-first-package open-second-package'
+export JPACKER_TEST_PACMAN_REPO_PACKAGES
+export JPACKER_TEST_PACKAGE_METADATA_INITIALIZE_FAILURE=1
+run_ok plan plan-open-failure-first plan-open-failure-second
+assert_exact_line "  1. plan-open-failure-first" "$stdout_file"
+assert_exact_line "  1. plan-open-failure-second" "$stdout_file"
+assert_exact_line_count 2 "Repository package sizes:" "$stdout_file"
+assert_exact_line_count 2 "  Metadata       : unavailable (initialization failed)" "$stdout_file"
+assert_exact_line_count 1 "pacman-conf --verbose RootDir DBPath" "$command_log"
+assert_exact_line_count 1 "pacman-conf --repo-list" "$command_log"
+assert_exact_line_count 1 "alpm initialize" "$command_log"
+assert_not_contains "alpm sync-register" "$command_log"
+assert_not_contains "alpm sync-query" "$command_log"
+assert_not_contains "Failed to plan build order" "$stderr_file"
+echo "  ok: plan metadata session failure is sticky and non-fatal"
+
+# configuration failureもinvocation内で記憶し、raw command failureをplan failureへ誤分類しない。
+setup_case plan-repository-size-configuration-failure
+export JPACKER_TEST_INSPECTION_SCENARIO=plan-repository-size-configuration-failure
+JPACKER_TEST_PACMAN_REPO_PACKAGES='open-first-package open-second-package'
+export JPACKER_TEST_PACMAN_REPO_PACKAGES
+export JPACKER_TEST_PACMAN_CONF_REPOSITORY_LIST_EXIT_CODE=42
+run_ok plan plan-open-failure-first plan-open-failure-second
+assert_exact_line_count 2 "  Metadata       : unavailable (configuration unavailable)" "$stdout_file"
+assert_exact_line_count 1 "pacman-conf --verbose RootDir DBPath" "$command_log"
+assert_exact_line_count 1 "pacman-conf --repo-list" "$command_log"
+assert_not_contains "alpm initialize" "$command_log"
+assert_not_contains "Failed to plan build order" "$stderr_file"
+echo "  ok: plan metadata configuration failure is sticky and non-fatal"
+
+# pacman search/info routingはplan presentationへ接続せず、新metadata callを増やさない。
+setup_case repository-size-search-routing
+export JPACKER_TEST_PACMAN_EXIT_CODE=0
+run_ok -Ss --repo keyword
+assert_exact_line "pacman -Ss keyword" "$command_log"
+assert_not_contains "pacman-conf " "$command_log"
+assert_not_contains "alpm " "$command_log"
+
+setup_case repository-size-info-routing
+export JPACKER_TEST_PACMAN_EXIT_CODE=0
+run_ok -Si --repo filesystem
+assert_exact_line "pacman -Si filesystem" "$command_log"
+assert_not_contains "pacman-conf " "$command_log"
+assert_not_contains "alpm " "$command_log"
+echo "  ok: pacman -Ss/-Si routes do not initialize repository metadata"
 
 # Handler-owned usage/option messagesも、抽出でrunner側へずらさない。
 setup_case deps-empty

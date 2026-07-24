@@ -63,6 +63,9 @@ This command does not clone, build, install dependencies, or calculate build ord
 .B plan \fI<package>\fR
 Display a build order plan for an AUR package and its recursive AUR dependencies.
 Official repository and repository-provided dependencies are not included in the build plan. Unknown dependencies are reported as unresolved.
+After the existing plan body, jpacker displays direct official repository dependencies and uniquely resolved providers from configured official repositories in a separate \fBRepository package sizes\fR section. AUR build units and AUR providers are not assigned estimated sizes.
+\fBPackage size\fR is the compressed repository package archive size, while \fBInstalled size\fR is the installed contents size. jpacker reads existing sync databases without refreshing, updating, or downloading them, and distinguishes known zero, not-found, and unavailable metadata.
+Metadata unavailability does not suppress the existing plan body or by itself change \fBPlan status\fR or the command's exit status. This presentation does not change pacman pass-through, \fB-Ss\fR / \fB-Si\fR routing, dependency resolution, build/install behavior, or transactions.
 If multiple providers remain for a dependency, the plan is reported as incomplete with ambiguous provider candidates; jpacker does not choose one implicitly.
 Unverified version constraints are reported as unresolved reasons and are not treated as satisfied.
 If the requested AUR package has a package name different from its PackageBase, the plan shows it as a split package install target and reports the plan as incomplete because install target selection is not implemented.

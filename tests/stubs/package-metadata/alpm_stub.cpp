@@ -5,10 +5,17 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <map>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
+
+enum class AlpmStubDatabaseKind {
+    Local,
+    Sync,
+};
 
 struct _alpm_handle_t {
     std::size_t  creation_index;
@@ -16,11 +23,16 @@ struct _alpm_handle_t {
 };
 
 struct _alpm_db_t {
-    alpm_handle_t* handle;
+    alpm_handle_t*       handle;
+    AlpmStubDatabaseKind kind;
+    std::string          repository_name;
 };
 
 struct _alpm_pkg_t {
-    alpm_handle_t* handle;
+    alpm_handle_t*       handle;
+    AlpmStubDatabaseKind kind;
+    std::string          repository_name;
+    std::string          lookup_name;
 };
 
 namespace {
@@ -32,11 +44,42 @@ enum class PackageLookupMode {
     NullWithoutError
 };
 
+struct SyncDatabaseBehavior {
+    bool         register_fails = false;
+    alpm_errno_t register_error = ALPM_ERR_DB_OPEN;
+    bool         validation_fails = false;
+    alpm_errno_t validation_error = ALPM_ERR_DB_INVALID;
+    bool         cache_fails = false;
+    alpm_errno_t cache_error = ALPM_ERR_DB_OPEN;
+    bool         cache_empty = false;
+};
+
+struct RepositoryPackageState {
+    PackageLookupMode lookup_mode = PackageLookupMode::Absent;
+    alpm_errno_t      query_error = ALPM_ERR_DB_OPEN;
+    std::string       returned_name;
+    off_t             package_size = 0;
+    off_t             installed_size = 0;
+    bool              name_is_null = false;
+    bool              should_preserve_query_error = false;
+    alpm_errno_t      preserved_query_error = ALPM_ERR_DB_OPEN;
+};
+
+struct SyncDatabaseRecord {
+    SyncDatabaseRecord(alpm_handle_t* handle, const std::string& repository_name)
+        : database{handle, AlpmStubDatabaseKind::Sync, repository_name},
+          cache_node{nullptr, nullptr, nullptr} {}
+
+    alpm_db_t database;
+    alpm_list_t cache_node;
+    std::map<std::string, std::unique_ptr<alpm_pkg_t>> packages;
+};
+
 struct HandleRecord {
     explicit HandleRecord(std::size_t creation_index)
         : handle{creation_index, ALPM_ERR_OK},
-          database{&handle},
-          package{&handle},
+          database{&handle, AlpmStubDatabaseKind::Local, ""},
+          package{&handle, AlpmStubDatabaseKind::Local, "", ""},
           cache_node{&package, nullptr, nullptr} {}
 
     alpm_handle_t handle;
@@ -44,6 +87,7 @@ struct HandleRecord {
     alpm_pkg_t    package;
     alpm_list_t   cache_node;
     std::size_t   release_count = 0;
+    std::vector<std::unique_ptr<SyncDatabaseRecord>> sync_databases;
 };
 
 struct AlpmStubState {
@@ -77,6 +121,15 @@ struct AlpmStubState {
     std::string initialize_root;
     std::string initialize_database_path;
     std::string queried_package_name;
+
+    std::map<std::string, SyncDatabaseBehavior> sync_database_behaviors;
+    std::map<std::pair<std::string, std::string>, RepositoryPackageState>
+            repository_packages;
+    std::vector<package_metadata_test_stub::SyncDatabaseRegistration>
+            sync_database_registrations;
+    std::vector<std::string> sync_database_operations;
+    std::vector<package_metadata_test_stub::RepositoryPackageQuery>
+            repository_package_queries;
 
     std::vector<std::unique_ptr<HandleRecord>> handles;
 };
@@ -187,11 +240,72 @@ void configure_package_lookup_from_environment(
     lookup_mode = PackageLookupMode::Absent;
 }
 
+void configure_repository_package_from_environment(
+        const std::string& repository_name,
+        const std::string& package_name,
+        RepositoryPackageState& package_state) {
+    const char* state_file_path =
+            std::getenv("JPACKER_TEST_REPOSITORY_METADATA_STATE_FILE");
+    if(state_file_path == nullptr) return;
+
+    std::ifstream state_file(state_file_path);
+    if(!state_file) {
+        package_state.lookup_mode = PackageLookupMode::Failure;
+        package_state.query_error = ALPM_ERR_DB_OPEN;
+        return;
+    }
+
+    package_state.lookup_mode = PackageLookupMode::Absent;
+    std::string fixture_repository;
+    std::string fixture_package;
+    off_t       package_size = 0;
+    off_t       installed_size = 0;
+    while(state_file >> fixture_repository >> fixture_package >> package_size >> installed_size) {
+        if(fixture_repository != repository_name || fixture_package != package_name) continue;
+
+        package_state.lookup_mode = PackageLookupMode::Present;
+        package_state.returned_name = fixture_package;
+        package_state.package_size = package_size;
+        package_state.installed_size = installed_size;
+        package_state.name_is_null = false;
+        return;
+    }
+
+    if(!state_file.eof()) {
+        package_state.lookup_mode = PackageLookupMode::Failure;
+        package_state.query_error = ALPM_ERR_DB_OPEN;
+    }
+}
+
 HandleRecord* record_for_handle(alpm_handle_t* handle) {
     if(handle == nullptr || handle->creation_index >= g_state.handles.size()) return nullptr;
     HandleRecord* record = g_state.handles[handle->creation_index].get();
     if(&record->handle != handle) return nullptr;
     return record;
+}
+
+SyncDatabaseRecord* sync_database_record(alpm_db_t* database) {
+    if(database == nullptr || database->kind != AlpmStubDatabaseKind::Sync) return nullptr;
+    HandleRecord* handle_record = record_for_handle(database->handle);
+    if(handle_record == nullptr) return nullptr;
+    for(const auto& sync_database : handle_record->sync_databases) {
+        if(&sync_database->database == database) return sync_database.get();
+    }
+    return nullptr;
+}
+
+RepositoryPackageState& repository_package_state(
+        const std::string& repository_name,
+        const std::string& package_name) {
+    return g_state.repository_packages[{repository_name, package_name}];
+}
+
+RepositoryPackageState* repository_package_state(alpm_pkg_t* package) {
+    if(package == nullptr || package->kind != AlpmStubDatabaseKind::Sync) return nullptr;
+    auto package_state = g_state.repository_packages.find(
+            {package->repository_name, package->lookup_name});
+    if(package_state == g_state.repository_packages.end()) return nullptr;
+    return &package_state->second;
 }
 
 void set_handle_error(alpm_handle_t* handle, alpm_errno_t error) {
@@ -268,6 +382,109 @@ void set_null_package_version() {
     g_state.package_version_is_null = true;
 }
 
+void set_sync_database_register_failure(
+        const std::string& repository_name,
+        alpm_errno_t error) {
+    SyncDatabaseBehavior& behavior =
+            g_state.sync_database_behaviors[repository_name];
+    behavior.register_fails = true;
+    behavior.register_error = error;
+}
+
+void set_sync_database_validation_failure(
+        const std::string& repository_name,
+        alpm_errno_t error) {
+    SyncDatabaseBehavior& behavior =
+            g_state.sync_database_behaviors[repository_name];
+    behavior.validation_fails = true;
+    behavior.validation_error = error;
+}
+
+void set_sync_database_cache_failure(
+        const std::string& repository_name,
+        alpm_errno_t error) {
+    SyncDatabaseBehavior& behavior =
+            g_state.sync_database_behaviors[repository_name];
+    behavior.cache_fails = true;
+    behavior.cache_error = error;
+}
+
+void set_sync_database_empty_cache(const std::string& repository_name) {
+    g_state.sync_database_behaviors[repository_name].cache_empty = true;
+}
+
+void set_repository_package_absent(
+        const std::string& repository_name,
+        const std::string& package_name) {
+    RepositoryPackageState& package_state =
+            repository_package_state(repository_name, package_name);
+    package_state = RepositoryPackageState{};
+}
+
+void set_repository_package_query_failure(
+        const std::string& repository_name,
+        const std::string& package_name,
+        alpm_errno_t error) {
+    RepositoryPackageState& package_state =
+            repository_package_state(repository_name, package_name);
+    package_state = RepositoryPackageState{};
+    package_state.lookup_mode = PackageLookupMode::Failure;
+    package_state.query_error = error;
+}
+
+void set_repository_package_query_null_without_error(
+        const std::string& repository_name,
+        const std::string& package_name) {
+    RepositoryPackageState& package_state =
+            repository_package_state(repository_name, package_name);
+    package_state = RepositoryPackageState{};
+    package_state.lookup_mode = PackageLookupMode::NullWithoutError;
+}
+
+void set_repository_package_metadata(
+        const std::string& repository_name,
+        const std::string& package_name,
+        off_t package_size,
+        off_t installed_size) {
+    RepositoryPackageState& package_state =
+            repository_package_state(repository_name, package_name);
+    package_state = RepositoryPackageState{};
+    package_state.lookup_mode = PackageLookupMode::Present;
+    package_state.returned_name = package_name;
+    package_state.package_size = package_size;
+    package_state.installed_size = installed_size;
+}
+
+void set_repository_package_returned_name(
+        const std::string& repository_name,
+        const std::string& package_name,
+        const std::string& returned_name) {
+    RepositoryPackageState& package_state =
+            repository_package_state(repository_name, package_name);
+    package_state.lookup_mode = PackageLookupMode::Present;
+    package_state.returned_name = returned_name;
+    package_state.name_is_null = false;
+}
+
+void set_repository_package_name_null(
+        const std::string& repository_name,
+        const std::string& package_name) {
+    RepositoryPackageState& package_state =
+            repository_package_state(repository_name, package_name);
+    package_state.lookup_mode = PackageLookupMode::Present;
+    package_state.name_is_null = true;
+}
+
+void preserve_error_on_next_repository_package_query(
+        const std::string& repository_name,
+        const std::string& package_name,
+        alpm_errno_t stale_error) {
+    RepositoryPackageState& package_state =
+            repository_package_state(repository_name, package_name);
+    package_state.should_preserve_query_error = true;
+    package_state.preserved_query_error = stale_error;
+}
+
 std::size_t initialize_call_count() {
     return g_state.initialize_calls;
 }
@@ -313,6 +530,18 @@ std::string last_initialize_database_path() {
 
 std::string last_queried_package_name() {
     return g_state.queried_package_name;
+}
+
+std::vector<SyncDatabaseRegistration> sync_database_registration_history() {
+    return g_state.sync_database_registrations;
+}
+
+std::vector<std::string> sync_database_operation_history() {
+    return g_state.sync_database_operations;
+}
+
+std::vector<RepositoryPackageQuery> repository_package_query_history() {
+    return g_state.repository_package_queries;
 }
 
 } // namespace package_metadata_test_stub
@@ -371,6 +600,8 @@ const char* alpm_strerror(alpm_errno_t error) {
             return "database unavailable";
         case ALPM_ERR_DB_OPEN:
             return "database open failed";
+        case ALPM_ERR_DB_NOT_FOUND:
+            return "database not found";
         case ALPM_ERR_DB_INVALID:
             return "invalid database";
         case ALPM_ERR_PKG_NOT_FOUND:
@@ -392,7 +623,52 @@ alpm_db_t* alpm_get_localdb(alpm_handle_t* handle) {
     return &record->database;
 }
 
+alpm_db_t* alpm_register_syncdb(
+        alpm_handle_t* handle,
+        const char* repository_name,
+        int signature_level) {
+    const std::string repository = repository_name == nullptr ? "" : repository_name;
+    append_alpm_event("alpm sync-register", repository.c_str());
+    g_state.sync_database_registrations.push_back(
+            package_metadata_test_stub::SyncDatabaseRegistration{
+                    repository, signature_level});
+    g_state.sync_database_operations.push_back("register " + repository);
+
+    HandleRecord* handle_record = record_for_handle(handle);
+    if(handle_record == nullptr || repository.empty()) {
+        set_handle_error(handle, ALPM_ERR_WRONG_ARGS);
+        return nullptr;
+    }
+
+    SyncDatabaseBehavior& behavior = g_state.sync_database_behaviors[repository];
+    if(behavior.register_fails) {
+        set_handle_error(handle, behavior.register_error);
+        return nullptr;
+    }
+
+    set_handle_error(handle, ALPM_ERR_OK);
+    auto sync_database = std::make_unique<SyncDatabaseRecord>(handle, repository);
+    alpm_db_t* database = &sync_database->database;
+    handle_record->sync_databases.push_back(std::move(sync_database));
+    return database;
+}
+
 int alpm_db_get_valid(alpm_db_t* database) {
+    if(database != nullptr && database->kind == AlpmStubDatabaseKind::Sync) {
+        append_alpm_event("alpm sync-valid", database->repository_name.c_str());
+        g_state.sync_database_operations.push_back(
+                "valid " + database->repository_name);
+        set_handle_error(database->handle, ALPM_ERR_OK);
+
+        SyncDatabaseBehavior& behavior =
+                g_state.sync_database_behaviors[database->repository_name];
+        if(behavior.validation_fails) {
+            set_handle_error(database->handle, behavior.validation_error);
+            return -1;
+        }
+        return 0;
+    }
+
     ++g_state.database_valid_calls;
     if(database == nullptr) return -1;
     set_handle_error(database->handle, ALPM_ERR_OK);
@@ -404,6 +680,24 @@ int alpm_db_get_valid(alpm_db_t* database) {
 }
 
 alpm_list_t* alpm_db_get_pkgcache(alpm_db_t* database) {
+    if(database != nullptr && database->kind == AlpmStubDatabaseKind::Sync) {
+        append_alpm_event("alpm sync-cache", database->repository_name.c_str());
+        g_state.sync_database_operations.push_back(
+                "cache " + database->repository_name);
+        set_handle_error(database->handle, ALPM_ERR_OK);
+
+        SyncDatabaseBehavior& behavior =
+                g_state.sync_database_behaviors[database->repository_name];
+        if(behavior.cache_fails) {
+            set_handle_error(database->handle, behavior.cache_error);
+            return nullptr;
+        }
+        if(behavior.cache_empty) return nullptr;
+
+        SyncDatabaseRecord* database_record = sync_database_record(database);
+        return database_record == nullptr ? nullptr : &database_record->cache_node;
+    }
+
     ++g_state.package_cache_calls;
     if(database == nullptr) return nullptr;
     set_handle_error(database->handle, ALPM_ERR_OK);
@@ -418,6 +712,67 @@ alpm_list_t* alpm_db_get_pkgcache(alpm_db_t* database) {
 }
 
 alpm_pkg_t* alpm_db_get_pkg(alpm_db_t* database, const char* name) {
+    if(database != nullptr && database->kind == AlpmStubDatabaseKind::Sync) {
+        const std::string package_name = name == nullptr ? "" : name;
+        const std::string query_identity =
+                database->repository_name + "/" + package_name;
+        append_alpm_event("alpm sync-query", query_identity.c_str());
+        g_state.repository_package_queries.push_back(
+                package_metadata_test_stub::RepositoryPackageQuery{
+                        database->repository_name, package_name});
+
+        if(name == nullptr || name[0] == '\0') {
+            set_handle_error(database->handle, ALPM_ERR_WRONG_ARGS);
+            return nullptr;
+        }
+
+        RepositoryPackageState& package_state = repository_package_state(
+                database->repository_name, package_name);
+        try {
+            configure_repository_package_from_environment(
+                    database->repository_name, package_name, package_state);
+        } catch(...) {
+            package_state.lookup_mode = PackageLookupMode::Failure;
+            package_state.query_error = ALPM_ERR_DB_OPEN;
+        }
+        if(environment_requests_query_failure(name)) {
+            package_state.lookup_mode = PackageLookupMode::Failure;
+            package_state.query_error = ALPM_ERR_DB_OPEN;
+        }
+
+        if(package_state.should_preserve_query_error) {
+            set_handle_error(database->handle, package_state.preserved_query_error);
+            package_state.should_preserve_query_error = false;
+        } else {
+            set_handle_error(database->handle, ALPM_ERR_OK);
+        }
+
+        switch(package_state.lookup_mode) {
+            case PackageLookupMode::Present: {
+                SyncDatabaseRecord* database_record = sync_database_record(database);
+                if(database_record == nullptr) return nullptr;
+                auto& package = database_record->packages[package_name];
+                if(package == nullptr) {
+                    package = std::make_unique<alpm_pkg_t>(alpm_pkg_t{
+                            database->handle,
+                            AlpmStubDatabaseKind::Sync,
+                            database->repository_name,
+                            package_name});
+                }
+                return package.get();
+            }
+            case PackageLookupMode::Absent:
+                set_handle_error(database->handle, ALPM_ERR_PKG_NOT_FOUND);
+                return nullptr;
+            case PackageLookupMode::Failure:
+                set_handle_error(database->handle, package_state.query_error);
+                return nullptr;
+            case PackageLookupMode::NullWithoutError:
+                return nullptr;
+        }
+        return nullptr;
+    }
+
     append_alpm_event("alpm query", name == nullptr ? "" : name);
     ++g_state.package_query_calls;
     if(database == nullptr) return nullptr;
@@ -462,6 +817,12 @@ alpm_pkg_t* alpm_db_get_pkg(alpm_db_t* database, const char* name) {
 
 const char* alpm_pkg_get_name(alpm_pkg_t* package) {
     if(package == nullptr) return nullptr;
+    if(package->kind == AlpmStubDatabaseKind::Sync) {
+        RepositoryPackageState* package_state = repository_package_state(package);
+        if(package_state == nullptr || package_state->name_is_null) return nullptr;
+        return package_state->returned_name.c_str();
+    }
+
     set_handle_error(package->handle, ALPM_ERR_OK);
     if(g_state.package_name_is_null) return nullptr;
     return g_state.package_name.c_str();
@@ -472,6 +833,18 @@ const char* alpm_pkg_get_version(alpm_pkg_t* package) {
     set_handle_error(package->handle, ALPM_ERR_OK);
     if(g_state.package_version_is_null) return nullptr;
     return g_state.package_version.c_str();
+}
+
+off_t alpm_pkg_get_size(alpm_pkg_t* package) {
+    RepositoryPackageState* package_state = repository_package_state(package);
+    return package_state == nullptr ? static_cast<off_t>(-1)
+                                    : package_state->package_size;
+}
+
+off_t alpm_pkg_get_isize(alpm_pkg_t* package) {
+    RepositoryPackageState* package_state = repository_package_state(package);
+    return package_state == nullptr ? static_cast<off_t>(-1)
+                                    : package_state->installed_size;
 }
 
 alpm_pkgreason_t alpm_pkg_get_reason(alpm_pkg_t* package) {

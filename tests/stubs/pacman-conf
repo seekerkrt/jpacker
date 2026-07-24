@@ -3,6 +3,17 @@ set -eu
 
 printf 'pacman-conf %s\n' "$*" >> "$JPACKER_TEST_COMMAND_LOG"
 
+if [ "$#" -eq 1 ] && [ "${1:-}" = "--repo-list" ]; then
+    exit_code=${JPACKER_TEST_PACMAN_CONF_REPOSITORY_LIST_EXIT_CODE:-0}
+    if [ "$exit_code" -ne 0 ]; then
+        exit "$exit_code"
+    fi
+    if [ -n "${JPACKER_TEST_PACMAN_CONF_REPOSITORY_LIST:-}" ]; then
+        printf '%s\n' "$JPACKER_TEST_PACMAN_CONF_REPOSITORY_LIST"
+    fi
+    exit 0
+fi
+
 if [ "$#" -ne 3 ] ||
    [ "${1:-}" != "--verbose" ] ||
    [ "${2:-}" != "RootDir" ] ||
