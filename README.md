@@ -200,6 +200,14 @@ jpacker v1.x は installed package や official repository package との実際�
 
 build / install / fetch 実行系では、ambiguous provider や unresolved dependency が残る plan は実行前に停止します。詳細は [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) の provider selection policy を参照してください。
 
+### plan の official repository package size
+
+`jpacker plan <pkg>` は、既存の AUR build plan 本文に続けて、解決済みの official repository dependency を `Repository package sizes` section に表示します。対象は direct repository dependency と、configured official repository から一意に解決した provider です。AUR build unit、AUR provider、ambiguous provider、unknown dependency の size は推定しません。
+
+`Package size` は repository にある compressed package archive の size、`Installed size` は install 後の contents size です。configured repository の既存 sync DB を read-only で参照し、database の refresh / update / download は行いません。
+
+known zero、not found、metadata unavailable は別の状態として表示します。metadata を取得できなくても既存の plan 本文は表示し、metadata availability だけを理由に `Plan status` や plan command の exit status を変更しません。この表示追加は pacman passthrough、`-Ss` / `-Si` routing、dependency / provider resolution、fetch、build / install、transaction behavior を変更しません。
+
 ### AUR split package install targets
 
 AUR RPC の `PackageBase` は clone / fetch / build repository の単位で、package name は install 対象です。split package では、たとえば `Name=linux-mainline-headers` / `PackageBase=linux-mainline` のように一致しないことがあります。
@@ -571,6 +579,14 @@ jpacker v1.x does not determine whether an installed or official repository pack
 In jpacker v1.x, when a dependency has no exact package match but has provider candidates, `jpacker deps` / `jpacker plan` classifies it by the number of providers. A single provider may be treated as a provided dependency, but multiple providers are reported as ambiguous provider candidates; jpacker does not implicitly pick the first one.
 
 Build / install / fetch execution stops before running a plan that still has ambiguous providers or unresolved dependencies. See the provider selection policy in [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) for details.
+
+### Official repository package sizes in `plan`
+
+After the existing AUR build plan body, `jpacker plan <pkg>` displays resolved official repository dependencies in a separate `Repository package sizes` section. It includes direct repository dependencies and providers uniquely resolved from configured official repositories. It does not estimate sizes for AUR build units, AUR providers, ambiguous providers, or unknown dependencies.
+
+`Package size` is the size of the compressed package archive in the repository, while `Installed size` is the size of its installed contents. jpacker reads the configured repositories' existing sync databases without refreshing, updating, or downloading them.
+
+Known zero, not found, and unavailable metadata remain distinct states. A metadata failure does not suppress the existing plan body, and metadata availability alone does not change `Plan status` or the plan command's exit status. This presentation does not change pacman pass-through, `-Ss` / `-Si` routing, dependency or provider resolution, fetch, build or installation, or transaction behavior.
 
 ### AUR split package install targets
 

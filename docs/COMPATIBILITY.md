@@ -107,6 +107,30 @@ build / install / fetch 実行系では、ambiguous provider、unresolved depend
 
 ---
 
+## plan official repository package size metadata policy
+
+`jpacker plan <pkg>` は、AUR build graph の既存表示に続く jpacker-owned presentation として、official repository dependency の package size metadata を表示する。この metadata は `BuildPlan` の graph safety や実行可否を構成せず、`BuildPlan::order` に並ぶ AUR build unit の size も推定しない。
+
+size candidate は `BuildPlan::dependency_edges` の first-seen order から次のように抽出する。
+
+- `DependencyKind::Repo` で `resolved_package_name` がある edge は、configured repository precedence でpackageを検索する。
+- `DependencyKind::Provided` で一意な `resolved_provider` があり、そのrepositoryがconfigured repositoryに含まれ、かつ`aur`ではないedgeは、providerのrepositoryをexact指定してpackageを検索する。
+- AUR dependency / provider、ambiguous provider、unknown dependency、resolved valueの欠落、unconfiguredまたはstaleなrepositoryを指すproviderはcandidateにしない。
+
+repository名とprecedenceは`pacman-conf --repo-list`のconfigured orderだけを正本とする。hard-coded repository list、sync directory走査によるfallback、unconfigured databaseの採用、alphabetical sortは行わない。configured repositoryの既存sync DBは順番にすべてregister、validate、package cache preloadし、1件でも失敗した場合はsession全体をunavailableとする。これは壊れた先行repositoryをskipして同名packageのprecedenceを変えないためである。sync DBはread-only metadata sourceとして参照するだけで、refresh / update、server設定、transaction、database mutationを行わない。
+
+configured precedence lookupはrepositoryをconfigured orderで照会し、同名packageが複数にあれば最初のrepositoryのpackageを採用する。explicit not-foundの場合だけ次のrepositoryへ進み、query failureでは後続へfallbackしない。exact provider lookupは指定されたconfigured repositoryだけを照会し、他repositoryへfallbackしない。
+
+candidateとquery cacheのsemantic identityは`(exact_repository_name, package_name)`とする。したがって、同じpackage名でもconfigured precedence lookupとexact provider lookupは別candidateである。query成功後はreturned `(repository_name, package_name)`をdisplay identityとして重複表示を除き、同じ実packageへ解決したdirect lookupとexact lookupを1表示にまとめる。異なるrepositoryの同名package、ならびにrepository identityを持たないnot-found / failureは別の結果として扱い、edgeのfirst-seen orderを維持する。
+
+`Package size`はcompressed repository package archive、`Installed size`はinstalled contentsのsizeである。0 bytesはknown zeroとして表示し、not foundやunavailableへ変換しない。表示はlocaleとfloating-pointに依存しないbase 1024のIEC unit (`B` / `KiB` / `MiB` / `GiB` / `TiB` / `PiB` / `EiB`)を使う。1024 bytes未満はinteger `B`、それ以上は小数2桁のround-half-upとし、丸め結果が`1024.00`になれば次のunitへpromoteする。
+
+package absence、query failure、malformed metadata、configuration/session failureは区別する。failureをnot foundや0 bytesへflattenせず、user-visible outputには安定した分類だけを表示する。metadata failureがあっても既存のplan本文と他package / targetの表示を続け、metadata availabilityだけを理由にexit statusをnon-zeroへ変えず、graph safetyの正本である`Plan status`へ混ぜない。
+
+このpresentationは`plan`だけに閉じ、pacman passthrough、`-Ss` / `-Si` routing、dependency resolution、provider selection、fetch、build / install lifecycle、transaction behaviorを変更しない。
+
+---
+
 ## AUR split package install target policy
 
 AUR metadata の `PackageBase` は clone / fetch / build repository の単位であり、package name は install 対象である。単体 package では結果として一致してよいが、split package では一致するとは限らない。
