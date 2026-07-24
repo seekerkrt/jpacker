@@ -6,21 +6,26 @@
 #include "dependency_spec.hpp"
 #include "logging.hpp"
 #include "package_identifier.hpp"
+#include "package_metadata.hpp"
 #include "pkgbuild_export.hpp"
 #include "process.hpp"
 #include "repository_query.hpp"
 #include "shell_words.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
+#include <cstdint>
 #include <iostream>
 #include <limits>
 #include <map>
 #include <optional>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include <variant>
 #include <vector>
 
 // inspection command固有のpresentationとtarget orchestrationを所有する。
@@ -28,6 +33,289 @@
 namespace {
 
 const std::string AUR_BASE_URL = "https://aur.archlinux.org/";
+
+using RepositoryPackageLookupIdentity =
+        std::pair<std::optional<std::string>, std::string>;
+using RepositoryPackageDisplayIdentity = std::pair<std::string, std::string>;
+
+// repository metadataはplan graphの正本ではなく、1回のplan invocationだけで有効な
+// read-only presentation enrichmentとして所有する。
+struct RepositoryMetadataPresentationContext {
+    bool configuration_attempted = false;
+    std::optional<PacmanRepositoryConfiguration> configuration;
+    bool session_open_attempted = false;
+    std::optional<RepositoryPackageMetadataSession> session;
+    std::optional<PackageMetadataFailure> unavailable_failure;
+    std::map<RepositoryPackageLookupIdentity, RepositoryPackageQueryResult>
+            query_results;
+};
+
+RepositoryPackageLookupIdentity repository_package_lookup_identity(
+        const RepositoryPackageLookup& lookup) {
+    return {lookup.exact_repository_name, lookup.package_name};
+}
+
+void add_repository_package_lookup(
+        std::vector<RepositoryPackageLookup>& lookups,
+        std::set<RepositoryPackageLookupIdentity>& seen_lookups,
+        RepositoryPackageLookup lookup) {
+    RepositoryPackageLookupIdentity identity =
+            repository_package_lookup_identity(lookup);
+    if(!seen_lookups.insert(identity).second) return;
+    lookups.push_back(std::move(lookup));
+}
+
+std::vector<RepositoryPackageLookup> collect_repository_package_lookups(
+        const BuildPlan& plan) {
+    std::vector<RepositoryPackageLookup> lookups;
+    std::set<RepositoryPackageLookupIdentity> seen_lookups;
+
+    // POLICY(#125): BuildPlan::orderはAUR build unit。official package sizeの正本は
+    // dependency edgeの解決結果だけとし、edge first-seen orderを保持する。
+    for(const auto& edge : plan.dependency_edges) {
+        if(edge.kind == DependencyKind::Repo &&
+           edge.resolved_package_name.has_value()) {
+            add_repository_package_lookup(
+                    lookups, seen_lookups,
+                    RepositoryPackageLookup{
+                            edge.resolved_package_name.value(), std::nullopt});
+            continue;
+        }
+
+        if(edge.kind != DependencyKind::Provided ||
+           !edge.resolved_provider.has_value() ||
+           edge.resolved_provider->repository == "aur") {
+            continue;
+        }
+
+        // Configured membershipはpacman-confの正本をresolveした後で確認する。
+        // 現行provider resolverが返し得るunconfigured/stale repositoryはここではまだ保持する。
+        add_repository_package_lookup(
+                lookups, seen_lookups,
+                RepositoryPackageLookup{
+                        edge.resolved_provider->package_name,
+                        edge.resolved_provider->repository});
+    }
+    return lookups;
+}
+
+bool ensure_repository_configuration(
+        RepositoryMetadataPresentationContext& context) {
+    if(context.configuration.has_value()) return true;
+    if(context.configuration_attempted) return false;
+
+    context.configuration_attempted = true;
+    try {
+        context.configuration.emplace(
+                resolve_pacman_repository_configuration());
+        return true;
+    } catch(const PackageMetadataError& error) {
+        context.unavailable_failure = error.failure();
+        return false;
+    }
+}
+
+bool is_configured_repository(
+        const PacmanRepositoryConfiguration& configuration,
+        const std::string& repository_name) {
+    return std::find(
+                   configuration.repository_names.begin(),
+                   configuration.repository_names.end(), repository_name) !=
+           configuration.repository_names.end();
+}
+
+std::vector<RepositoryPackageLookup> filter_configured_repository_lookups(
+        const std::vector<RepositoryPackageLookup>& lookups,
+        const PacmanRepositoryConfiguration& configuration) {
+    std::vector<RepositoryPackageLookup> configured_lookups;
+    configured_lookups.reserve(lookups.size());
+    for(const auto& lookup : lookups) {
+        if(lookup.exact_repository_name.has_value() &&
+           !is_configured_repository(
+                   configuration, lookup.exact_repository_name.value())) {
+            continue;
+        }
+        configured_lookups.push_back(lookup);
+    }
+    return configured_lookups;
+}
+
+bool ensure_repository_metadata_session(
+        RepositoryMetadataPresentationContext& context) {
+    if(context.session.has_value()) return true;
+    if(context.session_open_attempted || context.unavailable_failure.has_value() ||
+       !context.configuration.has_value()) {
+        return false;
+    }
+
+    context.session_open_attempted = true;
+    try {
+        context.session.emplace(RepositoryPackageMetadataSession::open(
+                context.configuration.value()));
+        return true;
+    } catch(const PackageMetadataError& error) {
+        context.unavailable_failure = error.failure();
+        return false;
+    }
+}
+
+const RepositoryPackageQueryResult& query_repository_package_cached(
+        RepositoryMetadataPresentationContext& context,
+        const RepositoryPackageLookup& lookup) {
+    RepositoryPackageLookupIdentity identity =
+            repository_package_lookup_identity(lookup);
+    auto cached_result = context.query_results.find(identity);
+    if(cached_result != context.query_results.end()) return cached_result->second;
+
+    RepositoryPackageQueryResult result =
+            context.session->query_repository_package(lookup);
+    auto inserted = context.query_results.emplace(
+            std::move(identity), std::move(result));
+    return inserted.first->second;
+}
+
+std::string repository_metadata_failure_reason(PackageMetadataErrorCode code) {
+    switch(code) {
+    case PackageMetadataErrorCode::ConfigurationUnavailable:
+        return "configuration unavailable";
+    case PackageMetadataErrorCode::ConfigurationMalformed:
+        return "configuration malformed";
+    case PackageMetadataErrorCode::InitializationFailed:
+        return "initialization failed";
+    case PackageMetadataErrorCode::LocalDatabaseUnavailable:
+        return "local database unavailable";
+    case PackageMetadataErrorCode::InvalidPackageName:
+        return "invalid package name";
+    case PackageMetadataErrorCode::QueryFailed:
+        return "query failed";
+    case PackageMetadataErrorCode::MalformedMetadata:
+        return "invalid metadata";
+    case PackageMetadataErrorCode::SyncDatabaseUnavailable:
+        return "sync database unavailable";
+    case PackageMetadataErrorCode::RepositoryNotConfigured:
+        return "repository not configured";
+    }
+    return "metadata failure";
+}
+
+std::string repository_package_lookup_display(
+        const RepositoryPackageLookup& lookup) {
+    if(!lookup.exact_repository_name.has_value()) return lookup.package_name;
+    return lookup.exact_repository_name.value() + "/" + lookup.package_name;
+}
+
+std::string format_iec_bytes(std::uint64_t bytes) {
+    constexpr std::uint64_t IEC_UNIT_BASE = 1024;
+    constexpr std::array<const char*, 7> IEC_UNITS = {
+            "B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB"};
+
+    if(bytes < IEC_UNIT_BASE) return std::to_string(bytes) + " B";
+
+    std::size_t unit_index = 0;
+    std::uint64_t unit_divisor = 1;
+    while(unit_index + 1 < IEC_UNITS.size() &&
+          bytes / unit_divisor >= IEC_UNIT_BASE) {
+        unit_divisor *= IEC_UNIT_BASE;
+        ++unit_index;
+    }
+
+    std::uint64_t whole = bytes / unit_divisor;
+    std::uint64_t remainder = bytes % unit_divisor;
+    std::array<std::uint64_t, 3> decimal_digits{};
+    for(auto& digit : decimal_digits) {
+        // unit_divisorは最大2^60なので、remainder * 10はuint64_t内に収まる。
+        remainder *= 10;
+        digit = remainder / unit_divisor;
+        remainder %= unit_divisor;
+    }
+
+    std::uint64_t hundredths = decimal_digits[0] * 10 + decimal_digits[1];
+    if(decimal_digits[2] >= 5) ++hundredths;
+    if(hundredths == 100) {
+        hundredths = 0;
+        ++whole;
+    }
+
+    // LANDMINE: 1023.995...は1024.00ではなく、次unitの1.00として表示する。
+    if(whole == IEC_UNIT_BASE && unit_index + 1 < IEC_UNITS.size()) {
+        whole = 1;
+        hundredths = 0;
+        ++unit_index;
+    }
+
+    std::string formatted = std::to_string(whole) + ".";
+    if(hundredths < 10) formatted += "0";
+    formatted += std::to_string(hundredths);
+    formatted += " ";
+    formatted += IEC_UNITS[unit_index];
+    return formatted;
+}
+
+void print_repository_metadata_unavailable(
+        const PackageMetadataFailure& failure) {
+    std::cout << std::endl;
+    std::cout << "Repository package sizes:" << std::endl;
+    std::cout << "  Metadata       : unavailable ("
+              << repository_metadata_failure_reason(failure.code) << ")"
+              << std::endl;
+}
+
+void print_repository_package_sizes(
+        const BuildPlan& plan,
+        RepositoryMetadataPresentationContext& context) {
+    std::vector<RepositoryPackageLookup> provisional_lookups =
+            collect_repository_package_lookups(plan);
+    if(provisional_lookups.empty()) return;
+
+    if(!ensure_repository_configuration(context)) {
+        print_repository_metadata_unavailable(context.unavailable_failure.value());
+        return;
+    }
+
+    std::vector<RepositoryPackageLookup> lookups =
+            filter_configured_repository_lookups(
+                    provisional_lookups, context.configuration.value());
+    if(lookups.empty()) return;
+
+    if(!ensure_repository_metadata_session(context)) {
+        print_repository_metadata_unavailable(context.unavailable_failure.value());
+        return;
+    }
+
+    std::cout << std::endl;
+    std::cout << "Repository package sizes:" << std::endl;
+    std::set<RepositoryPackageDisplayIdentity> displayed_packages;
+    for(const auto& lookup : lookups) {
+        const RepositoryPackageQueryResult& result =
+                query_repository_package_cached(context, lookup);
+        if(const auto* metadata =
+                   std::get_if<RepositoryPackageMetadata>(&result)) {
+            RepositoryPackageDisplayIdentity display_identity{
+                    metadata->repository_name, metadata->package_name};
+            if(!displayed_packages.insert(display_identity).second) continue;
+
+            std::cout << "  " << metadata->repository_name << "/"
+                      << metadata->package_name << std::endl;
+            std::cout << "    Package size   : "
+                      << format_iec_bytes(metadata->package_size_bytes) << std::endl;
+            std::cout << "    Installed size : "
+                      << format_iec_bytes(metadata->installed_size_bytes) << std::endl;
+            continue;
+        }
+
+        std::cout << "  " << repository_package_lookup_display(lookup) << std::endl;
+        if(std::holds_alternative<PackageNotFound>(result)) {
+            std::cout << "    Metadata       : not found" << std::endl;
+            continue;
+        }
+
+        const PackageMetadataFailure& failure =
+                std::get<PackageMetadataFailure>(result);
+        std::cout << "    Metadata       : unavailable ("
+                  << repository_metadata_failure_reason(failure.code) << ")"
+                  << std::endl;
+    }
+}
 
 // inspection固有のtrimは、domain contractを汎用string utilityへ持ち上げず局所保持する。
 std::string trim(const std::string& str) {
@@ -383,7 +671,8 @@ int cmd_plan(const std::vector<std::string>& targets, const std::vector<std::str
         return 1;
     }
 
-    bool failed = false;
+    bool                                  failed = false;
+    RepositoryMetadataPresentationContext metadata_context;
     for(size_t i = 0; i < targets.size(); ++i) {
         const auto& target = targets[i];
         require_valid_package_name(target);
@@ -393,6 +682,7 @@ int cmd_plan(const std::vector<std::string>& targets, const std::vector<std::str
 
             if(i > 0) std::cout << std::endl;
             print_build_plan(plan);
+            print_repository_package_sizes(plan, metadata_context);
         } catch(const std::exception& e) {
             Logger::error("Failed to plan build order for " + target + ": " + e.what());
             failed = true;
