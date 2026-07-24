@@ -6,6 +6,7 @@
 
 #include "process.hpp"
 
+#include <algorithm>
 #include <exception>
 #include <iostream>
 #include <stdexcept>
@@ -50,12 +51,55 @@ void run_pacman_metadata_smoke_test() {
             "pacman metadata returned an unknown public install reason");
 }
 
+void run_repository_metadata_smoke_test() {
+    PacmanRepositoryConfiguration configuration =
+            resolve_pacman_repository_configuration();
+    expect(
+            !configuration.repository_names.empty(),
+            "pacman configuration did not return any repositories");
+
+    RepositoryPackageMetadataSession session =
+            RepositoryPackageMetadataSession::open(configuration);
+    RepositoryPackageQueryResult pacman_result = session.query_repository_package(
+            RepositoryPackageLookup{"pacman", std::nullopt});
+    if(const auto* failure = std::get_if<PackageMetadataFailure>(&pacman_result)) {
+        throw std::runtime_error(
+                "repository pacman metadata query failed: " + failure->diagnostic);
+    }
+    if(std::holds_alternative<PackageNotFound>(pacman_result)) {
+        throw std::runtime_error("repository pacman package was not found");
+    }
+
+    const RepositoryPackageMetadata& metadata =
+            std::get<RepositoryPackageMetadata>(pacman_result);
+    expect(metadata.package_name == "pacman", "repository query returned a different package");
+    expect(
+            std::find(
+                    configuration.repository_names.begin(),
+                    configuration.repository_names.end(),
+                    metadata.repository_name) != configuration.repository_names.end(),
+            "repository query returned an unconfigured repository");
+
+    RepositoryPackageQueryResult missing_result = session.query_repository_package(
+            RepositoryPackageLookup{
+                    "jpacker-issue-125-package-that-does-not-exist",
+                    std::nullopt});
+    if(const auto* failure = std::get_if<PackageMetadataFailure>(&missing_result)) {
+        throw std::runtime_error(
+                "missing repository package query failed: " + failure->diagnostic);
+    }
+    expect(
+            std::holds_alternative<PackageNotFound>(missing_result),
+            "missing repository package was not reported as not found");
+}
+
 } // namespace
 
 int main() {
     try {
         test_raw_capture_preserves_boundary_whitespace();
         run_pacman_metadata_smoke_test();
+        run_repository_metadata_smoke_test();
     } catch(const std::exception& error) {
         std::cerr << error.what() << '\n';
         return 1;
