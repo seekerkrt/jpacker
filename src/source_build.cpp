@@ -5,6 +5,7 @@
 #include "package_identifier.hpp"
 #include "persistent_checkout.hpp"
 #include "process.hpp"
+#include "separated_source_build.hpp"
 #include "shell_words.hpp"
 #include "trusted_cache.hpp"
 
@@ -19,6 +20,7 @@
 #include <stdexcept>
 #include <string>
 #include <unistd.h>
+#include <utility>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -28,8 +30,6 @@ namespace {
 struct MakepkgBuildOptions {
     bool rebuild = false;
     bool clean_build = false;
-    bool rm_deps = false;
-    bool needed = false;
 };
 
 enum class PromptDefault {
@@ -160,20 +160,6 @@ bool ask_user(
 
         Logger::warn("Please answer yes or no.");
     }
-}
-
-std::string makepkg_install_command(
-        const MakepkgBuildOptions& options,
-        const AppConfig& config) {
-    std::vector<std::string> args = {"makepkg", "-sic"};
-    if(config.no_confirm) args.push_back("--noconfirm");
-    if(options.rebuild) args.push_back("-f");
-    if(options.clean_build) args.push_back("-C");
-    // POLICY(#123): 削除対象の判断と実行は makepkg -s/-r に委ね、jpacker では再実装しない。
-    if(options.rm_deps) args.push_back("-r");
-    // POLICY(#169): jpacker独自のbuild skip判定は追加せず、再install要否だけをmakepkg/pacmanへ委ねる。
-    if(options.needed) args.push_back("--needed");
-    return shell_words::join(args);
 }
 
 std::string build_editor_command(const std::string& editor, const fs::path& target) {
@@ -383,13 +369,9 @@ bool has_local_srcdir(const fs::path& pkg_dir) {
 }
 
 MakepkgBuildOptions resolve_makepkg_build_options(
-        const fs::path& pkg_dir, bool needed,
-        const AppConfig& config) {
+        const fs::path& pkg_dir, const AppConfig& config) {
     MakepkgBuildOptions options;
     bool                has_artifact = has_local_package_artifact(pkg_dir);
-
-    options.rm_deps = config.rm_deps;
-    options.needed = needed;
 
     if(config.clean_build) {
         options.clean_build = true;
@@ -412,6 +394,8 @@ MakepkgBuildOptions resolve_makepkg_build_options(
 
 void execute_source_build(
         const SourceBuildRequest& request,
+        DesiredInstallReason desired_reason,
+        const PacmanDatabasePaths& database_paths,
         const AppConfig& config) {
     require_valid_package_name(request.package_name);
     require_valid_package_name(request.checkout_name);
@@ -509,6 +493,7 @@ void execute_source_build(
         }
     }
 
+    MakepkgBuildOptions makepkg_options;
     {
         pkg_path = revalidate_trusted_cache_path(
                 pkg_path, CachePathRequirement::ExistingDirectory);
@@ -541,22 +526,40 @@ void execute_source_build(
         }
 
         review_build_files(pkg_path, config);
-        MakepkgBuildOptions makepkg_options =
-                resolve_makepkg_build_options(pkg_path.canonical_path(), request.needed, config);
-        const std::string custom_environment = serialize_source_build_environment(
-                request.custom_environment, request.empty_value_policy);
-        std::string build_cmd;
-        if(!trim(custom_environment).empty()) {
-            Logger::info("Applying custom build flags: " + custom_environment);
-            build_cmd = custom_environment + makepkg_install_command(makepkg_options, config);
-        } else {
-            Logger::info("Using default makepkg.conf settings.");
-            build_cmd = makepkg_install_command(makepkg_options, config);
-        }
-        // LANDMINE(#175,#197): review 後は cache entry と build artifact の両方を再検証する。
-        pkg_path = revalidate_trusted_cache_path(
-                pkg_path, CachePathRequirement::ExistingDirectory);
-        require_safe_persistent_checkout_descendants(pkg_path);
-        if(run_command(build_cmd) != 0) throw std::runtime_error("Build failed.");
+        makepkg_options = resolve_makepkg_build_options(
+                pkg_path.canonical_path(), config);
     }
+
+    const std::string custom_environment = serialize_source_build_environment(
+            request.custom_environment, request.empty_value_policy);
+    if(!trim(custom_environment).empty()) {
+        Logger::info("Applying custom build flags: " + custom_environment);
+    } else {
+        Logger::info("Using default makepkg.conf settings.");
+    }
+
+    // LANDMINE(#175,#197,#242): review/editor後のcheckoutだけをshared lifecycleへ渡す。
+    // private artifact root factoryはfilesystemを作り得るため、global preflight完了後の
+    // このPackageBase実行phaseで初めて呼ぶ。
+    pkg_path = revalidate_trusted_cache_path(
+            pkg_path, CachePathRequirement::ExistingDirectory);
+    require_safe_persistent_checkout_descendants(pkg_path);
+    ValidatedPrivateCacheRoot artifact_root =
+            prepare_private_trusted_cache_root();
+    execute_separated_source_build_unit(
+            SeparatedSourceBuildUnitRequest{
+                    pkg_path,
+                    std::move(artifact_root),
+                    request.package_name,
+                    request.checkout_name,
+                    desired_reason,
+                    request.custom_environment,
+                    request.empty_value_policy,
+                    database_paths},
+            SeparatedSourceBuildUnitOptions{
+                    .no_confirm = config.no_confirm,
+                    .needed = request.needed,
+                    .rm_deps = config.rm_deps,
+                    .rebuild = makepkg_options.rebuild,
+                    .clean_build = makepkg_options.clean_build});
 }

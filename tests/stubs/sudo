@@ -1,3 +1,115 @@
 #!/bin/sh
+set -eu
+
+is_typed_pacman_install() {
+    [ "$#" -ge 4 ] && [ "${1:-}" = "pacman" ] && [ "${2:-}" = "-U" ] ||
+        return 1
+    shift 2
+
+    if [ "${1:-}" = "--noconfirm" ]; then
+        shift
+    fi
+    if [ "${1:-}" = "--needed" ]; then
+        shift
+    fi
+    case ${1:-} in
+        --asexplicit|--asdeps)
+            shift
+            ;;
+    esac
+    [ "$#" -eq 2 ] && [ "${1:-}" = "--" ] && [ -n "${2:-}" ]
+}
+
+require_known_pacman_argument_tail() {
+    after_separator=0
+    while [ "$#" -gt 0 ]; do
+        if [ "$after_separator" -eq 1 ]; then
+            shift
+            continue
+        fi
+        case $1 in
+            --)
+                after_separator=1
+                shift
+                ;;
+            --arch|--assume-installed|--cachedir|--color|--config|--dbpath|\
+            --gpgdir|--hookdir|--ignore|--ignoregroup|--logfile|--overwrite|\
+            --print-format|--root|--sysroot|-b|-r)
+                [ "$#" -ge 2 ] || exit 2
+                shift 2
+                ;;
+            --arch=*|--assume-installed=*|--cachedir=*|--color=*|--config=*|\
+            --dbpath=*|--gpgdir=*|--hookdir=*|--ignore=*|--ignoregroup=*|\
+            --logfile=*|--overwrite=*|--print-format=*|--root=*|--sysroot=*)
+                shift
+                ;;
+            --noconfirm|--needed|--refresh|--search|--info|-s|-i|-y)
+                shift
+                ;;
+            -*)
+                exit 2
+                ;;
+            *)
+                shift
+                ;;
+        esac
+    done
+}
+
+require_sudo_argv() {
+    if [ "$#" -lt 1 ]; then
+        exit 2
+    fi
+    case $1 in
+        pacman)
+            [ "$#" -ge 2 ] || exit 2
+            case ${2:-} in
+                -U)
+                    is_typed_pacman_install "$@" || exit 2
+                    ;;
+                -S|-Ss|-Ssy|-Si|-Siy|-Sc|-Syu|-R|-D|-F|-Fy|-Fyy)
+                    shift 2
+                    require_known_pacman_argument_tail "$@"
+                    ;;
+                *)
+                    exit 2
+                    ;;
+            esac
+            ;;
+        touch)
+            [ "$#" -eq 2 ] || exit 2
+            ;;
+        tee)
+            [ "$#" -eq 3 ] && [ "${2:-}" = "-a" ] || exit 2
+            ;;
+        install)
+            [ "$#" -eq 5 ] &&
+                [ "${2:-}" = "-Dm644" ] &&
+                [ "${3:-}" = "--" ] &&
+                [ "${4:-}" = "/dev/stdin" ] || exit 2
+            ;;
+        rm)
+            [ "$#" -eq 3 ] && [ "${2:-}" = "-f" ] || exit 2
+            ;;
+        *)
+            exit 2
+            ;;
+    esac
+}
+
 printf 'sudo %s\n' "$*" >> "$JPACKER_TEST_COMMAND_LOG"
-exit "${JPACKER_TEST_SUDO_EXIT_CODE:-99}"
+require_sudo_argv "$@"
+
+exit_code=${JPACKER_TEST_SUDO_EXIT_CODE:-99}
+if [ "$exit_code" -eq 0 ] && is_typed_pacman_install "$@"; then
+    state_after_success_file=${JPACKER_TEST_MAKEPKG_PACKAGE_METADATA_STATE_AFTER_SUCCESS_FILE:-}
+    metadata_state_file=${JPACKER_TEST_PACKAGE_METADATA_STATE_FILE:-}
+    if [ -n "$state_after_success_file" ]; then
+        if [ -z "$metadata_state_file" ] || [ ! -f "$state_after_success_file" ]; then
+            exit 1
+        fi
+        # POLICY: fake install成功後だけcase-localなinstalled stateを更新する。
+        /usr/bin/cp -- "$state_after_success_file" "$metadata_state_file" || exit 1
+    fi
+fi
+exit "$exit_code"

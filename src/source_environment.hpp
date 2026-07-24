@@ -29,7 +29,8 @@ enum class SourceEnvironmentEmptyValuePolicy {
 bool split_env_assignment(
         const std::string& assignment, std::string& key, std::string& value);
 
-// legacy makepkg command prefixとの互換serializer。末尾spaceも既存表示契約に含む。
+// makepkg command environmentとuser-facing表示が共有するserializer。
+// 末尾spaceも既存表示契約に含む。
 std::string serialize_source_build_environment(
         const SourceBuildEnvironment& environment,
         SourceEnvironmentEmptyValuePolicy empty_value_policy);

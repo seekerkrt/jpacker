@@ -1,5 +1,32 @@
 #!/bin/sh
+set -eu
+
+require_makepkg_argv() {
+    if [ "$#" -eq 1 ] && [ "${1:-}" = "--packagelist" ]; then
+        return 0
+    fi
+    if [ "$#" -lt 1 ] || [ "${1:-}" != "-sc" ]; then
+        exit 2
+    fi
+
+    shift
+    if [ "${1:-}" = "--noconfirm" ]; then
+        shift
+    fi
+    if [ "${1:-}" = "-f" ]; then
+        shift
+    fi
+    if [ "${1:-}" = "-C" ]; then
+        shift
+    fi
+    if [ "$#" -ne 0 ]; then
+        exit 2
+    fi
+}
+
 printf 'makepkg %s\n' "$*" >> "$JPACKER_TEST_COMMAND_LOG"
+require_makepkg_argv "$@"
+
 argument_index=0
 if [ -n "${JPACKER_TEST_MAKEPKG_ARGV_LOG:-}" ]; then
     printf 'argv-begin\n' >> "$JPACKER_TEST_MAKEPKG_ARGV_LOG"
@@ -38,21 +65,29 @@ if [ -n "${JPACKER_TEST_MAKEPKG_CWD_LOG:-}" ]; then
     /usr/bin/pwd >> "$JPACKER_TEST_MAKEPKG_CWD_LOG" || exit 1
 fi
 exit_code=${JPACKER_TEST_MAKEPKG_EXIT_CODE:-99}
-if [ "${1:-}" = "--packagelist" ] &&
-   { [ -n "${JPACKER_TEST_MAKEPKG_PACKAGELIST_OUTPUT_FILE:-}" ] ||
-     [ -n "${JPACKER_TEST_MAKEPKG_PACKAGELIST_EXIT_CODE:-}" ]; }; then
+package_base=$(/usr/bin/basename -- "$(/usr/bin/pwd)") || exit 1
+default_artifact_path=${PKGDEST:+$PKGDEST/$package_base-1.0-1-x86_64.pkg.tar.zst}
+
+if [ "$1" = "--packagelist" ]; then
     if [ -n "${JPACKER_TEST_MAKEPKG_PACKAGELIST_OUTPUT_FILE:-}" ]; then
         /usr/bin/cat -- "$JPACKER_TEST_MAKEPKG_PACKAGELIST_OUTPUT_FILE" || exit 1
+    elif [ -n "$default_artifact_path" ]; then
+        printf '%s\n' "$default_artifact_path"
     fi
     exit "${JPACKER_TEST_MAKEPKG_PACKAGELIST_EXIT_CODE:-$exit_code}"
 fi
-state_after_success_file=${JPACKER_TEST_MAKEPKG_PACKAGE_METADATA_STATE_AFTER_SUCCESS_FILE:-}
-if [ "$exit_code" -eq 0 ] && [ -n "$state_after_success_file" ]; then
-    metadata_state_file=${JPACKER_TEST_PACKAGE_METADATA_STATE_FILE:-}
-    if [ -z "$metadata_state_file" ] || [ ! -f "$state_after_success_file" ]; then
+
+if [ "$exit_code" -eq 0 ] && [ "$1" = "-sc" ]; then
+    artifact_path=$default_artifact_path
+    if [ -n "${JPACKER_TEST_MAKEPKG_PACKAGELIST_OUTPUT_FILE:-}" ]; then
+        artifact_path=$(/usr/bin/sed -n '1p' -- \
+            "$JPACKER_TEST_MAKEPKG_PACKAGELIST_OUTPUT_FILE") || exit 1
+    fi
+    if [ -z "$artifact_path" ]; then
         exit 1
     fi
-    # POLICY: 成功したfake makepkg installだけが、case-localなinstalled stateを更新する。
-    /usr/bin/cp -- "$state_after_success_file" "$metadata_state_file" || exit 1
+    # POLICY: fake buildはowned PKGDESTにregular artifactだけを生成する。
+    # installed stateの更新は後段のfake sudo pacman -Uが所有する。
+    printf '%s\t%s\n' "$package_base" '1.0-1' > "$artifact_path" || exit 1
 fi
 exit "$exit_code"

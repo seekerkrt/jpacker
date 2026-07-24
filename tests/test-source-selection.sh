@@ -3,6 +3,9 @@ set -eu
 
 test_binary=$1
 repo_root=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
+JPACKER_TEST_REPOSITORY_ROOT=$repo_root
+export JPACKER_TEST_REPOSITORY_ROOT
+. "$repo_root/tests/test-command-safety.sh"
 tmp_dir=$(mktemp -d)
 server_pid=
 
@@ -35,6 +38,11 @@ done
 
 port=$(cat "$port_file")
 export PATH=$repo_root/tests/stubs:/usr/bin:/bin
+require_exact_test_command pacman-conf "$repo_root/tests/stubs/pacman-conf"
+require_exact_test_command makepkg "$repo_root/tests/stubs/makepkg"
+require_exact_test_command pacman "$repo_root/tests/stubs/pacman"
+require_exact_test_command sudo "$repo_root/tests/stubs/sudo"
+require_exact_test_command git "$repo_root/tests/stubs/git"
 export JPACKER_TEST_AUR_RPC_BASE_URL=http://127.0.0.1:$port/rpc/
 
 setup_case() {
@@ -59,8 +67,11 @@ setup_case() {
     unset JPACKER_TEST_GIT_CLONE_SYMLINK_TARGET
     unset JPACKER_TEST_GIT_CLONE_FIXTURE_DIR
     unset JPACKER_TEST_MAKEPKG_EXIT_CODE
+    unset JPACKER_TEST_MAKEPKG_PACKAGELIST_EXIT_CODE
     unset JPACKER_TEST_MAKEPKG_ENV_LOG
     unset JPACKER_TEST_MAKEPKG_ENV_KEYS
+    unset JPACKER_TEST_PACKAGE_METADATA_PACMAN_CONF_EXIT_CODE
+    unset JPACKER_TEST_PACKAGE_METADATA_PACMAN_CONF_FAILURE_AT
     unset JPACKER_TEST_SOURCE_PREFERENCE_EXTERNAL
     unset JPACKER_TEST_EDITOR_REPLACE_TARGET
     unset JPACKER_TEST_EDITOR_SYMLINK_TARGET
@@ -164,6 +175,27 @@ assert_command_absent() {
     unexpected=$1
     if grep -Fx -- "$unexpected" "$command_log" >/dev/null; then
         echo "unexpected command: $unexpected" >&2
+        cat "$command_log" >&2
+        exit 1
+    fi
+}
+
+assert_command_pattern() {
+    expected_pattern=$1
+    if ! grep -E -- "$expected_pattern" "$command_log" >/dev/null; then
+        echo "missing expected command pattern: $expected_pattern" >&2
+        cat "$command_log" >&2
+        exit 1
+    fi
+}
+
+assert_command_pattern_count() {
+    expected_count=$1
+    expected_pattern=$2
+    actual_count=$(grep -Ec -- "$expected_pattern" "$command_log" || true)
+    if [ "$actual_count" -ne "$expected_count" ]; then
+        echo "unexpected command pattern count: $actual_count (expected $expected_count)" >&2
+        echo "pattern: $expected_pattern" >&2
         cat "$command_log" >&2
         exit 1
     fi
@@ -587,7 +619,16 @@ setup_case aur-install-success
 export JPACKER_TEST_MAKEPKG_EXIT_CODE=0
 run_ok --noedit --nodiff --noconfirm -S --aur clean-root
 assert_command "git clone https://aur.archlinux.org/clean-root.git clean-root"
-assert_command "makepkg -sic --noconfirm"
+assert_command "pacman-conf --verbose RootDir DBPath"
+assert_command "makepkg --packagelist"
+assert_command "makepkg -sc --noconfirm"
+assert_command_pattern '^pacman -U --print --print-format .* -- .*/clean-root-1\.0-1-x86_64\.pkg\.tar\.zst$'
+assert_command_pattern '^sudo pacman -U --noconfirm -- .*/clean-root-1\.0-1-x86_64\.pkg\.tar\.zst$'
+assert_command_pattern_count 1 '^pacman-conf --verbose RootDir DBPath$'
+assert_command_pattern_count 1 '^makepkg --packagelist$'
+assert_command_pattern_count 1 '^makepkg -sc --noconfirm$'
+assert_command_pattern_count 1 '^pacman -U --print --print-format '
+assert_command_pattern_count 1 '^sudo pacman -U --noconfirm -- '
 assert_command_absent "pacman -Si clean-root"
 assert_request_log_nonempty
 
@@ -655,12 +696,12 @@ assert_contains "Unsupported pacman option for AUR/source-build target: --config
 assert_no_mutation_commands
 assert_cache_entry_absent clean-root
 
-setup_case aur-install-noconfirm-rmdeps
-export JPACKER_TEST_MAKEPKG_EXIT_CODE=0
-run_ok --noedit --nodiff --noconfirm --rmdeps -S --aur clean-root
-assert_command "makepkg -sic --noconfirm -r"
-assert_command_absent "sudo pacman -S --noconfirm clean-root"
-assert_request_log_nonempty
+setup_case aur-install-rejects-rmdeps-before-resolution
+run_fail --noedit --nodiff --noconfirm --rmdeps -S --aur clean-root
+assert_contains "Separated build/install does not support --rmdeps." "$output_file"
+assert_command_log_empty
+assert_request_log_empty
+assert_cache_entry_absent clean-root
 
 # Matrix C: RepoOnly install。ordered argvを一度のbinary repository transactionへ渡す。
 setup_case repo-install-success
@@ -745,7 +786,11 @@ export JPACKER_TEST_MAKEPKG_ENV_LOG=$makepkg_env_log
 export JPACKER_TEST_MAKEPKG_ENV_KEYS='DUP EMPTY UNDEFINED'
 run_ok --noedit --nodiff --noconfirm -S clean-root
 assert_command "git clone https://gitlab.archlinux.org/archlinux/packaging/packages/clean-root.git clean-root"
-assert_command "makepkg -sic --noconfirm"
+assert_command "pacman-conf --verbose RootDir DBPath"
+assert_command "makepkg --packagelist"
+assert_command "makepkg -sc --noconfirm"
+assert_command_pattern '^pacman -U --print --print-format .* -- .*/clean-root-1\.0-1-x86_64\.pkg\.tar\.zst$'
+assert_command_pattern '^sudo pacman -U --noconfirm -- .*/clean-root-1\.0-1-x86_64\.pkg\.tar\.zst$'
 assert_contains "Loading custom build flags from $JPACKER_TEST_PACKAGE_BUILD_DIR/clean-root" "$output_file"
 assert_contains "Applying custom build flags: FIRST='alpha value' QUOTED='quoted # value' DUP='first' DUP='second' BRACED='alpha value/brace' SIMPLE='second/simple'" "$output_file"
 assert_contains "Ignoring invalid environment assignment: 9INVALID=value" "$output_file"
@@ -757,6 +802,11 @@ assert_file_content "$makepkg_env_log" 'env-begin
 env[DUP]=<second>
 env[EMPTY]=<unset>
 env[UNDEFINED]=<unset>
+env-end
+env-begin
+env[DUP]=<second>
+env[EMPTY]=<unset>
+env[UNDEFINED]=<unset>
 env-end'
 assert_request_log_empty
 
@@ -765,7 +815,11 @@ export JPACKER_TEST_MAKEPKG_EXIT_CODE=0
 run_ok --noedit --nodiff --noconfirm -S clean-root
 assert_command "pacman -Si clean-root"
 assert_command "git clone https://aur.archlinux.org/clean-root.git clean-root"
-assert_command "makepkg -sic --noconfirm"
+assert_command "pacman-conf --verbose RootDir DBPath"
+assert_command "makepkg --packagelist"
+assert_command "makepkg -sc --noconfirm"
+assert_command_pattern '^pacman -U --print --print-format .* -- .*/clean-root-1\.0-1-x86_64\.pkg\.tar\.zst$'
+assert_command_pattern '^sudo pacman -U --noconfirm -- .*/clean-root-1\.0-1-x86_64\.pkg\.tar\.zst$'
 assert_request_log_nonempty
 
 setup_case auto-install-mixed-preflight
@@ -782,7 +836,11 @@ export JPACKER_TEST_MAKEPKG_EXIT_CODE=0
 run_ok --noedit --nodiff --noconfirm -S official-a clean-root
 assert_command "sudo pacman -S --noconfirm official-a"
 assert_command "git clone https://aur.archlinux.org/clean-root.git clean-root"
-assert_command "makepkg -sic --noconfirm"
+assert_command "pacman-conf --verbose RootDir DBPath"
+assert_command "makepkg --packagelist"
+assert_command "makepkg -sc --noconfirm"
+assert_command_pattern '^pacman -U --print --print-format .* -- .*/clean-root-1\.0-1-x86_64\.pkg\.tar\.zst$'
+assert_command_pattern '^sudo pacman -U --noconfirm -- .*/clean-root-1\.0-1-x86_64\.pkg\.tar\.zst$'
 assert_request_log_nonempty
 
 setup_case auto-install-unsupported-option

@@ -1,7 +1,84 @@
 #!/bin/sh
 set -eu
 
+is_artifact_identity_query() {
+    expected_identity_format=$(printf '%s\t%s' '%n' '%v')
+    [ "$#" -eq 6 ] &&
+        [ "${1:-}" = "-U" ] &&
+        [ "${2:-}" = "--print" ] &&
+        [ "${3:-}" = "--print-format" ] &&
+        [ "${4:-}" = "$expected_identity_format" ] &&
+        [ "${5:-}" = "--" ] &&
+        [ -n "${6:-}" ]
+}
+
+require_commands_sync_pacman_argument_tail() {
+    while [ "$#" -gt 0 ]; do
+        case $1 in
+            --)
+                return 0
+                ;;
+            --config)
+                [ "$#" -ge 2 ] || exit 2
+                shift 2
+                ;;
+            --config=*)
+                shift
+                ;;
+            --noconfirm|--needed|--refresh)
+                shift
+                ;;
+            -*)
+                exit 2
+                ;;
+            *)
+                shift
+                ;;
+        esac
+    done
+}
+
+require_commands_sync_pacman_argv() {
+    if [ "$#" -lt 1 ]; then
+        exit 2
+    fi
+    case $1 in
+        -U)
+            is_artifact_identity_query "$@" || exit 2
+            ;;
+        -Qm)
+            [ "$#" -eq 1 ] || exit 2
+            ;;
+        -Q)
+            [ "$#" -eq 2 ] || exit 2
+            ;;
+        -Si|-Ss)
+            [ "$#" -ge 2 ] || exit 2
+            shift
+            require_commands_sync_pacman_argument_tail "$@"
+            ;;
+        *)
+            exit 2
+            ;;
+    esac
+}
+
 printf 'pacman %s\n' "$*" >> "$JPACKER_TEST_COMMAND_LOG"
+require_commands_sync_pacman_argv "$@"
+
+if is_artifact_identity_query "$@"; then
+    artifact_path=$6
+    identity_status=${JPACKER_TEST_PACMAN_ARTIFACT_IDENTITY_EXIT_CODE:-0}
+    if [ "$identity_status" -ne 0 ]; then
+        exit "$identity_status"
+    fi
+    if [ -z "$artifact_path" ] || [ ! -f "$artifact_path" ]; then
+        exit 1
+    fi
+    /usr/bin/awk 'NR == 1 { printf "%s\t%s\n", $1, $2; found = 1; exit }
+        END { if (!found) exit 1 }' "$artifact_path"
+    exit $?
+fi
 
 main_output=${JPACKER_TEST_PACMAN_MAIN_OUTPUT:-}
 main_status=${JPACKER_TEST_PACMAN_MAIN_STATUS:-1}

@@ -22,6 +22,7 @@ ARTIFACT_WORKSPACE_TEST_TARGET := build/tests/artifact-workspace-test
 ARTIFACT_IDENTITY_TEST_TARGET := build/tests/artifact-identity-test
 ARTIFACT_INSTALL_EXECUTOR_TEST_TARGET := build/tests/artifact-install-executor-test
 SEPARATED_SOURCE_BUILD_TEST_TARGET := build/tests/separated-source-build-test
+PRODUCTION_SOURCE_BUILD_TEST_TARGET := build/tests/production-source-build-test
 PROCESS_CAPTURE_TEST_TARGET := build/tests/process-capture-test
 PROCESS_STDIN_FD_TEST_TARGET := build/tests/process-stdin-fd-test
 DEPENDENCY_PLAN_MODEL_TEST_TARGET := $(BUILD_DIR)/tests/dependency-plan-model-test
@@ -124,6 +125,29 @@ SEPARATED_SOURCE_BUILD_TEST_SRCS := \
 	$(SRC_DIR)/logging.cpp \
 	tests/stubs/package-metadata/alpm_stub.cpp \
 	tests/stubs/artifact-install-executor/process_stub.cpp
+PRODUCTION_SOURCE_BUILD_TEST_SRCS := \
+	tests/production_source_build_test.cpp \
+	$(SRC_DIR)/source_install.cpp \
+	$(SRC_DIR)/source_build.cpp \
+	$(SRC_DIR)/separated_source_build.cpp \
+	$(SRC_DIR)/artifact_install_executor.cpp \
+	$(SRC_DIR)/artifact_install_plan.cpp \
+	$(SRC_DIR)/artifact_identity.cpp \
+	$(SRC_DIR)/artifact_workspace.cpp \
+	$(SRC_DIR)/package_metadata.cpp \
+	$(SRC_DIR)/trusted_cache.cpp \
+	$(SRC_DIR)/persistent_checkout.cpp \
+	$(SRC_DIR)/source_environment.cpp \
+	$(SRC_DIR)/source_preference.cpp \
+	$(SRC_DIR)/dependency_plan.cpp \
+	$(SRC_DIR)/dependency_spec.cpp \
+	$(SRC_DIR)/package_identifier.cpp \
+	$(SRC_DIR)/repository_query.cpp \
+	$(SRC_DIR)/aur_rpc.cpp \
+	$(SRC_DIR)/shell_words.cpp \
+	$(SRC_DIR)/logging.cpp \
+	tests/stubs/package-metadata/alpm_stub.cpp \
+	tests/stubs/artifact-install-executor/process_stub.cpp
 PROCESS_CAPTURE_TEST_SRCS := \
 	tests/process_capture_test.cpp \
 	$(SRC_DIR)/process.cpp \
@@ -157,9 +181,10 @@ LIBALPM_BUILD_TARGETS := \
 	$(PACKAGE_METADATA_INTEGRATION_TEST_TARGET) \
 	$(ARTIFACT_INSTALL_EXECUTOR_TEST_TARGET) \
 	$(SEPARATED_SOURCE_BUILD_TEST_TARGET) \
+	$(PRODUCTION_SOURCE_BUILD_TEST_TARGET) \
 	$(UPGRADE_BASELINE_METADATA_TEST_TARGET)
 
-.PHONY: all check-libalpm clean test-app-config test-package-identifier test-package-metadata test-package-metadata-integration test-shell-words test-source-environment test-artifact-workspace test-artifact-identity test-artifact-install-executor test-separated-source-build test-process-capture test-dependency-plan-model test-artifact-install-plan test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-commands-inspect test-commands-source-maintenance test-commands-sync test-conflicts-replaces test-install-layout test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check install uninstall
+.PHONY: all check-libalpm clean test-app-config test-package-identifier test-package-metadata test-package-metadata-integration test-shell-words test-source-environment test-artifact-workspace test-artifact-identity test-artifact-install-executor test-separated-source-build test-production-source-build test-process-capture test-dependency-plan-model test-artifact-install-plan test-command-stub-contract test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-commands-inspect test-commands-source-maintenance test-commands-sync test-conflicts-replaces test-install-layout test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check install uninstall
 
 all: $(TARGET) $(MANPAGE)
 
@@ -289,6 +314,15 @@ $(SEPARATED_SOURCE_BUILD_TEST_TARGET): $(SEPARATED_SOURCE_BUILD_TEST_SRCS) $(SRC
 		$(SEPARATED_SOURCE_BUILD_TEST_SRCS) \
 		-o $@
 
+$(PRODUCTION_SOURCE_BUILD_TEST_TARGET): $(PRODUCTION_SOURCE_BUILD_TEST_SRCS) $(HEADERS) tests/stubs/package-metadata/alpm_stub.hpp tests/stubs/artifact-install-executor/process_stub.hpp $(VERSION_FILE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling production source-build fake-symbol test binary"
+	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
+		-DJPACKER_ENABLE_SEPARATED_SOURCE_BUILD_TEST_HOOKS \
+		-I$(SRC_DIR) -Itests/stubs/package-metadata \
+		$(PRODUCTION_SOURCE_BUILD_TEST_SRCS) \
+		-o $@ $(MY_LDLIBS)
+
 $(PROCESS_CAPTURE_TEST_TARGET): $(PROCESS_CAPTURE_TEST_SRCS) $(SRC_DIR)/process.hpp $(SRC_DIR)/shell_words.hpp $(SRC_DIR)/logging.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling process capture test binary"
@@ -372,6 +406,9 @@ test-artifact-install-executor: $(ARTIFACT_INSTALL_EXECUTOR_TEST_TARGET)
 test-separated-source-build: $(SEPARATED_SOURCE_BUILD_TEST_TARGET)
 	$(abspath $(SEPARATED_SOURCE_BUILD_TEST_TARGET))
 
+test-production-source-build: $(PRODUCTION_SOURCE_BUILD_TEST_TARGET)
+	$(abspath $(PRODUCTION_SOURCE_BUILD_TEST_TARGET))
+
 test-process-capture: $(PROCESS_CAPTURE_TEST_TARGET)
 	$(abspath $(PROCESS_CAPTURE_TEST_TARGET))
 
@@ -380,6 +417,9 @@ test-dependency-plan-model: $(DEPENDENCY_PLAN_MODEL_TEST_TARGET)
 
 test-artifact-install-plan: $(ARTIFACT_INSTALL_PLAN_TEST_TARGET)
 	$(abspath $(ARTIFACT_INSTALL_PLAN_TEST_TARGET))
+
+test-command-stub-contract:
+	sh tests/test-command-stub-contract.sh
 
 test-conflicts-replaces: $(TEST_TARGET)
 	sh tests/test-conflicts-replaces.sh $(abspath $(TEST_TARGET))

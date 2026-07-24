@@ -1,5 +1,7 @@
 #pragma once
 
+#include "dependency_plan.hpp"
+#include "package_metadata.hpp"
 #include "source_environment.hpp"
 
 #include <optional>
@@ -32,4 +34,6 @@ struct SourceBuildRequest {
 
 void execute_source_build(
         const SourceBuildRequest& request,
+        DesiredInstallReason desired_reason,
+        const PacmanDatabasePaths& database_paths,
         const AppConfig& config);
