@@ -3,6 +3,9 @@ set -eu
 
 test_binary=$1
 repo_root=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
+JPACKER_TEST_REPOSITORY_ROOT=$repo_root
+export JPACKER_TEST_REPOSITORY_ROOT
+. "$repo_root/tests/test-command-safety.sh"
 fixture_dir=$repo_root/tests/fixtures/pkgbuild-export
 tmp_dir=$(mktemp -d)
 normal_server_pid=
@@ -56,6 +59,11 @@ normal_rpc_url=http://127.0.0.1:$normal_port/rpc/
 schema_rpc_url=http://127.0.0.1:$schema_port/rpc/
 
 export PATH=$repo_root/tests/stubs:/usr/bin:/bin
+require_exact_test_command pacman-conf "$repo_root/tests/stubs/pacman-conf"
+require_exact_test_command makepkg "$repo_root/tests/stubs/makepkg"
+require_exact_test_command pacman "$repo_root/tests/stubs/pacman"
+require_exact_test_command sudo "$repo_root/tests/stubs/sudo"
+require_exact_test_command git "$repo_root/tests/stubs/git"
 
 setup_case() {
     case_name=$1

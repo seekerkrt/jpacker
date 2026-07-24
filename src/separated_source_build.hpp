@@ -37,8 +37,8 @@ public:
     explicit SeparatedSourceBuildCleanupError(const std::string& diagnostic);
 };
 
-// POLICY(#242): production接続はPR5の責務。PR4ではこのshared lifecycleにcallerを
-// 追加せず、safe contextからtyped pacman executorまでのcompositionだけを提供する。
+// POLICY(#242): production callerはこのshared lifecycleだけを呼び、artifact pathや
+// lower-level install primitiveを組み替えない。
 void execute_separated_source_build_unit(
         SeparatedSourceBuildUnitRequest request,
         const SeparatedSourceBuildUnitOptions& options);

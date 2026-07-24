@@ -3,6 +3,9 @@ set -eu
 
 test_binary=$1
 repo_root=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
+JPACKER_TEST_REPOSITORY_ROOT=$repo_root
+export JPACKER_TEST_REPOSITORY_ROOT
+. "$repo_root/tests/test-command-safety.sh"
 tmp_dir=$(mktemp -d)
 server_pid=
 
@@ -32,6 +35,11 @@ done
 
 port=$(cat "$port_file")
 export PATH=$repo_root/tests/stubs:/usr/bin:/bin
+require_exact_test_command pacman-conf "$repo_root/tests/stubs/pacman-conf"
+require_exact_test_command makepkg "$repo_root/tests/stubs/makepkg"
+require_exact_test_command pacman "$repo_root/tests/stubs/pacman"
+require_exact_test_command sudo "$repo_root/tests/stubs/sudo"
+require_exact_test_command git "$repo_root/tests/stubs/git"
 export JPACKER_TEST_AUR_RPC_BASE_URL=http://127.0.0.1:$port/rpc/
 
 setup_case() {
@@ -117,24 +125,6 @@ assert_no_mutation_commands() {
 assert_command_log_empty() {
     if [ -s "$command_log" ]; then
         echo "external command ran before AUR RPC schema preflight completed" >&2
-        cat "$command_log" >&2
-        exit 1
-    fi
-}
-
-assert_only_system_upgrade_sudo() {
-    system_upgrade_count=$(grep -Fxc -- "sudo pacman -Syu" "$command_log" || true)
-    sudo_count=$(grep -c '^sudo ' "$command_log" || true)
-    if [ "$system_upgrade_count" -ne 1 ] || [ "$sudo_count" -ne 1 ]; then
-        echo "upgrade schema test ran an unexpected sudo command" >&2
-        cat "$command_log" >&2
-        exit 1
-    fi
-}
-
-assert_no_source_build_commands() {
-    if grep -E '^(git|makepkg) |^pacman -S( |$)' "$command_log" >/dev/null; then
-        echo "upgrade continued source mutation after AUR RPC schema error" >&2
         cat "$command_log" >&2
         exit 1
     fi
@@ -393,7 +383,8 @@ assert_command "git clone https://aur.archlinux.org/valid-root.git valid-root"
 setup_case normal-build
 run_fail --noedit build valid-minimal
 assert_command "git clone https://aur.archlinux.org/valid-minimal.git valid-minimal"
-assert_command "makepkg -sic"
+assert_command "pacman-conf --verbose RootDir DBPath"
+assert_command "makepkg --packagelist"
 
 setup_case build-guard
 run_fail build ambiguous-provider-root
@@ -413,18 +404,15 @@ assert_cache_entry_absent upgrade-split-root
 assert_cache_entry_absent upgrade-split-base
 assert_cache_entry_absent upgrade-split-malformed
 
-# preflight後の再RPCでschema errorを検出したら、後続source packageへ進まない。
-# fixtureの先頭6 responseは、2 packageそれぞれのpreflight 3回分。
-# 7回目だけrequested entryへ不正fieldを重ね、directory iteratorの順序には依存させない。
-setup_case upgrade-execution-schema-stops-following-source
+# 全targetのplan preflight中、最後のRPCでschema errorを検出しても
+# system/source mutationへ進まない。directory iteratorの順序には依存させない。
+setup_case upgrade-later-preflight-schema-stops-all-source
 prepare_source_preferences upgrade-sequence-a upgrade-sequence-b
 export JPACKER_TEST_SUDO_EXIT_CODE=0
 run_fail upgrade
 assert_validation_error "package info upgrade-sequence-"
 assert_contains "field Depends expected array or null, got string" "$output_file"
-assert_command "sudo pacman -Syu"
-assert_only_system_upgrade_sudo
-assert_no_source_build_commands
+assert_no_mutation_commands
 assert_cache_entry_absent upgrade-sequence-a
 assert_cache_entry_absent upgrade-sequence-b
 

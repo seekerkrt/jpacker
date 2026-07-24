@@ -140,13 +140,13 @@ void require_valid_aur_package_target(const std::string& target) {
     }
 }
 
-void install_aur_build_plan(
-        const std::string& target, const SourceSyncOptions& source_sync_options,
-        const AppConfig& config) {
-    BuildPlan plan = resolve_build_plan(target);
-    require_executable_install_plan(target, plan);
-    execute_aur_build_plan(
-            plan, true, source_sync_options.needed, config);
+void append_source_build_work_items(
+        std::vector<ProductionSourceBuildWorkItem>& destination,
+        std::vector<ProductionSourceBuildWorkItem> source) {
+    destination.reserve(destination.size() + source.size());
+    for(auto& work_item : source) {
+        destination.push_back(std::move(work_item));
+    }
 }
 
 } // namespace
@@ -211,6 +211,7 @@ int cmd_sync_install(
             Logger::error("Rerun --aur without this option.");
             return 1;
         }
+        require_supported_production_source_build_options(config);
 
         std::vector<BuildPlan> plans;
         plans.reserve(parsed.targets.size());
@@ -220,11 +221,20 @@ int cmd_sync_install(
             plans.push_back(std::move(plan));
         }
 
-        // POLICY(#168): every root target is fully planned and guarded before clone/build/install starts.
+        std::vector<ProductionSourceBuildWorkItem> work_items;
         for(const auto& plan : plans) {
-            execute_aur_build_plan(
-                    plan, false, source_sync_options.needed, config);
+            append_source_build_work_items(
+                    work_items,
+                    prepare_aur_source_build_work_items(
+                            plan, false, source_sync_options.needed));
         }
+        // POLICY(#168,#242): every per-root plan keeps its existing order, while
+        // all roots complete static preflight and one database-path resolution
+        // before the first checkout/workspace/build/install mutation.
+        PreparedProductionSourceBuildInvocation invocation =
+                prepare_production_source_build_invocation(
+                        std::move(work_items), config);
+        execute_prepared_source_build_invocation(invocation, config);
         return 0;
     }
 
@@ -259,9 +269,28 @@ int cmd_sync_install(
                     "Split official repository and AUR/source-build targets, or rerun without this option.");
             return 1;
         }
+        require_supported_production_source_build_options(config);
     }
+    std::vector<ProductionSourceBuildWorkItem> source_work_items;
     for(const auto& package : aur_targets) {
-        require_executable_source_install_target(package);
+        if(is_repo_package(package)) {
+            source_work_items.push_back(
+                    prepare_smart_source_build_work_item(
+                            package, false, source_sync_options.needed));
+            continue;
+        }
+
+        BuildPlan plan = resolve_build_plan(package);
+        require_executable_install_plan(package, plan);
+        append_source_build_work_items(
+                source_work_items,
+                prepare_aur_source_build_work_items(
+                        plan, true, source_sync_options.needed));
+    }
+    std::optional<PreparedProductionSourceBuildInvocation> source_invocation;
+    if(!source_work_items.empty()) {
+        source_invocation = prepare_production_source_build_invocation(
+                std::move(source_work_items), config);
     }
     if(!repo_targets.empty() || is_sys_upgrade) {
         // POLICY(#173): AUR targetのtokenだけを除き、option/value/official targetの元順序を維持する。
@@ -271,15 +300,9 @@ int cmd_sync_install(
             throw std::runtime_error("Pacman failed.");
         }
     }
-    if(!aur_targets.empty()) {
-        // Auto keeps the legacy source-build preference and AUR classification behavior.
-        for(const auto& package : aur_targets) {
-            if(is_repo_package(package))
-                install_smart_source(
-                        package, false, source_sync_options.needed, config);
-            else
-                install_aur_build_plan(package, source_sync_options, config);
-        }
+    if(source_invocation.has_value()) {
+        execute_prepared_source_build_invocation(
+                source_invocation.value(), config);
     }
     return 0;
 }

@@ -7,24 +7,26 @@
 
 namespace {
 
-struct ExpectedCaptureCommand {
-    std::string           command;
-    CapturedCommandResult result;
+enum class ExpectedProcessKind {
+    Capture,
+    Run,
 };
 
-struct ExpectedRunCommand {
-    std::string command;
-    int         exit_code = 0;
+struct ExpectedProcessCall {
+    ExpectedProcessKind   kind;
+    std::string           command;
+    CapturedCommandResult capture_result;
+    int                   run_exit_code = 0;
 };
 
 struct ProcessStubState {
-    std::deque<ExpectedCaptureCommand> expected_capture_commands;
-    std::deque<ExpectedRunCommand>     expected_run_commands;
-    std::size_t                        capture_calls = 0;
-    std::size_t                        run_calls = 0;
-    std::string                        last_captured_command;
-    std::string                        last_run_command;
-    const char*                        expectation_failure = nullptr;
+    // POLICY: capture/runを同じFIFOへ積み、process API種別を跨ぐ順序も契約に含める。
+    std::deque<ExpectedProcessCall> expected_calls;
+    std::size_t                     capture_calls = 0;
+    std::size_t                     run_calls = 0;
+    std::string                     last_captured_command;
+    std::string                     last_run_command;
+    const char*                     expectation_failure = nullptr;
     void (*capture_hook)() = nullptr;
     void (*run_hook)() = nullptr;
 };
@@ -65,14 +67,19 @@ void reset_process_stub() {
 
 void expect_capture_command(
         std::string command, CapturedCommandResult result) {
-    process_stub_state().expected_capture_commands.push_back(
-            ExpectedCaptureCommand{
-                    std::move(command), std::move(result)});
+    process_stub_state().expected_calls.push_back(ExpectedProcessCall{
+            ExpectedProcessKind::Capture,
+            std::move(command),
+            std::move(result),
+            0});
 }
 
 void expect_run_command(std::string command, int exit_code) {
-    process_stub_state().expected_run_commands.push_back(
-            ExpectedRunCommand{std::move(command), exit_code});
+    process_stub_state().expected_calls.push_back(ExpectedProcessCall{
+            ExpectedProcessKind::Run,
+            std::move(command),
+            CapturedCommandResult{},
+            exit_code});
 }
 
 void require_process_expectations_consumed() {
@@ -80,11 +87,12 @@ void require_process_expectations_consumed() {
     if(state.expectation_failure != nullptr) {
         throw std::logic_error(state.expectation_failure);
     }
-    if(!state.expected_capture_commands.empty()) {
+    if(!state.expected_calls.empty() &&
+       state.expected_calls.front().kind == ExpectedProcessKind::Capture) {
         throw std::logic_error(
                 "Artifact install process stub has unconsumed capture command expectations.");
     }
-    if(!state.expected_run_commands.empty()) {
+    if(!state.expected_calls.empty()) {
         throw std::logic_error(
                 "Artifact install process stub has unconsumed run command expectations.");
     }
@@ -121,23 +129,23 @@ CapturedCommandResult capture_command_output_raw(const char* command) {
     ++state.capture_calls;
     state.last_captured_command = command == nullptr ? "" : command;
 
-    if(state.expected_capture_commands.empty()) {
+    if(state.expected_calls.empty() ||
+       state.expected_calls.front().kind != ExpectedProcessKind::Capture) {
         fail_process_expectation(
                 state,
                 "Unexpected artifact install capture command with no pending expectation.");
     }
     if(state.last_captured_command !=
-       state.expected_capture_commands.front().command) {
+       state.expected_calls.front().command) {
         fail_process_expectation(
                 state,
                 "Artifact install capture command did not match the next expectation.");
     }
 
-    ExpectedCaptureCommand expectation =
-            std::move(state.expected_capture_commands.front());
-    state.expected_capture_commands.pop_front();
+    ExpectedProcessCall expectation = std::move(state.expected_calls.front());
+    state.expected_calls.pop_front();
     if(state.capture_hook != nullptr) state.capture_hook();
-    return std::move(expectation.result);
+    return std::move(expectation.capture_result);
 }
 
 int run_command(const std::string& command) {
@@ -145,20 +153,20 @@ int run_command(const std::string& command) {
     ++state.run_calls;
     state.last_run_command = command;
 
-    if(state.expected_run_commands.empty()) {
+    if(state.expected_calls.empty() ||
+       state.expected_calls.front().kind != ExpectedProcessKind::Run) {
         fail_process_expectation(
                 state,
                 "Unexpected artifact install run command with no pending expectation.");
     }
-    if(state.last_run_command != state.expected_run_commands.front().command) {
+    if(state.last_run_command != state.expected_calls.front().command) {
         fail_process_expectation(
                 state,
                 "Artifact install run command did not match the next expectation.");
     }
 
-    ExpectedRunCommand expectation =
-            std::move(state.expected_run_commands.front());
-    state.expected_run_commands.pop_front();
+    ExpectedProcessCall expectation = std::move(state.expected_calls.front());
+    state.expected_calls.pop_front();
     if(state.run_hook != nullptr) state.run_hook();
-    return expectation.exit_code;
+    return expectation.run_exit_code;
 }

@@ -1,5 +1,95 @@
 #!/bin/sh
+set -eu
+
+is_artifact_identity_query() {
+    expected_identity_format=$(printf '%s\t%s' '%n' '%v')
+    [ "$#" -eq 6 ] &&
+        [ "${1:-}" = "-U" ] &&
+        [ "${2:-}" = "--print" ] &&
+        [ "${3:-}" = "--print-format" ] &&
+        [ "${4:-}" = "$expected_identity_format" ] &&
+        [ "${5:-}" = "--" ] &&
+        [ -n "${6:-}" ]
+}
+
+require_read_only_pacman_argument_tail() {
+    while [ "$#" -gt 0 ]; do
+        case $1 in
+            --)
+                # POLICY: pacmanの`--`以降はoptionではなくopaque operandとして扱う。
+                return 0
+                ;;
+            --arch|--assume-installed|--cachedir|--color|--config|--dbpath|\
+            --gpgdir|--hookdir|--ignore|--ignoregroup|--logfile|--overwrite|\
+            --print-format|--root|--sysroot|-b|-r)
+                [ "$#" -ge 2 ] || exit 2
+                shift 2
+                ;;
+            --arch=*|--assume-installed=*|--cachedir=*|--color=*|--config=*|\
+            --dbpath=*|--gpgdir=*|--hookdir=*|--ignore=*|--ignoregroup=*|\
+            --logfile=*|--overwrite=*|--print-format=*|--root=*|--sysroot=*)
+                shift
+                ;;
+            --noconfirm|--needed|--refresh|--search|--info|-s|-i|-y)
+                shift
+                ;;
+            -*)
+                exit 2
+                ;;
+            *)
+                shift
+                ;;
+        esac
+    done
+}
+
+require_read_only_pacman_argv() {
+    if [ "$#" -lt 1 ]; then
+        exit 2
+    fi
+    case $1 in
+        -U)
+            is_artifact_identity_query "$@" || exit 2
+            ;;
+        -Qm)
+            [ "$#" -eq 1 ] || exit 2
+            ;;
+        -Q|-Si|-Ss|-F|-Fl|-Gx)
+            [ "$#" -ge 2 ] || exit 2
+            shift
+            require_read_only_pacman_argument_tail "$@"
+            ;;
+        -S)
+            [ "$#" -ge 3 ] || exit 2
+            case ${2:-} in
+                --search|-s|--info|-i) ;;
+                *) exit 2 ;;
+            esac
+            shift 2
+            require_read_only_pacman_argument_tail "$@"
+            ;;
+        *)
+            exit 2
+            ;;
+    esac
+}
+
 printf 'pacman %s\n' "$*" >> "$JPACKER_TEST_COMMAND_LOG"
+require_read_only_pacman_argv "$@"
+
+if is_artifact_identity_query "$@"; then
+    artifact_path=$6
+    identity_exit_code=${JPACKER_TEST_PACMAN_ARTIFACT_IDENTITY_EXIT_CODE:-0}
+    if [ "$identity_exit_code" -ne 0 ]; then
+        exit "$identity_exit_code"
+    fi
+    if [ -z "$artifact_path" ] || [ ! -f "$artifact_path" ]; then
+        exit 1
+    fi
+    /usr/bin/awk 'NR == 1 { printf "%s\t%s\n", $1, $2; found = 1; exit }
+        END { if (!found) exit 1 }' "$artifact_path"
+    exit $?
+fi
 if [ "$1" = "-Qm" ] && [ -n "${JPACKER_TEST_PACMAN_QM_OUTPUT:-}" ]; then
     printf '%s\n' "$JPACKER_TEST_PACMAN_QM_OUTPUT"
 fi

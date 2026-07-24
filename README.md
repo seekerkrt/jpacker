@@ -38,7 +38,7 @@ jpacker は現在も開発中です。
 
 `jpacker` は、`pacman` や `makepkg` を置き換える独立した package manager ではありません。一貫性と透明性を重視し、元の command と既存 tool の操作・責務・挙動を明確な理由なく変えません。
 
-Arch package metadata と package 間の関係は現在の read-only scope で `libalpm` を正とし、system package transaction は `pacman`、source package の build と artifact install は `makepkg`、source repository の取得と更新は `git` へ任せます。
+Arch package metadata と package 間の関係は現在の read-only scope で `libalpm` を正とし、system package transaction は `pacman`、source-build 経路での検証済み artifact の install transaction は `pacman -U`、source package artifact の build は `makepkg`、source repository の取得と更新は `git` へ任せます。`jpacker` は source-build 経路の artifact workspace、validation、install policy を管理します。
 
 command 名、引数、既存 tool の慣習から利用者が自然に想像する目的と結果を重視します。判断が曖昧な場合や authoritative な情報を観測できない場合は、推測して副作用を起こさず、安全に停止して理由を示します。詳細は [DECISIONS.md](DECISIONS.md) を参照してください。
 
@@ -59,7 +59,7 @@ behavior、architecture、dependency、public contractに関わる変更や大�
 ### 主な機能
 
 * **Pacman wrapper**: `-S`, `-Syu`, `-R`, `-Q` などの標準的な `pacman` syntax を扱い、jpacker が明示的に処理しない command は `pacman` に渡します。
-* **AUR support**: `makepkg` based workflow で AUR package を検索し、build / install します。
+* **AUR support**: AUR package を検索し、`makepkg` で build した検証済み artifact を `pacman -U` で install します。
 * **AUR PKGBUILD export**: AUR PackageBase repository を current directory へ取得し、または root `PKGBUILD` だけを標準出力へ表示できます。
 * **Source-based optimization**: 特定 package を常に source build するように登録し、`CFLAGS="-O3 -march=native"` のような custom environment variables を適用できます。
 * **Safe and robust implementation**: C++20 で実装し、networking や temporary directory handling などに RAII based resource management を使います。
@@ -104,7 +104,7 @@ makepkg -si
 
 `jpacker` は標準的な `pacman` flags を受け付けます。ただし、すべての `pacman` options / flags に対応しているわけではありません。対応範囲は段階的に実装・検証しています。
 
-pacman だけで完結する経路では、jpacker が消費しない pacman-compatible option を pacman へ渡します。一方、`-S` が AUR package または source-build preference のある package へ分岐する場合、makepkg build/install に同じ意味で反映できない pacman option は黙って無視せず、外部コマンドの実行前に unsupported として停止します。必要な場合は official repository target と AUR / source build target を別 invocation に分けてください。
+pacman だけで完結する経路では、jpacker が消費しない pacman-compatible option を pacman へ渡します。一方、`-S` が AUR package または source-build preference のある package へ分岐する場合、separated source-build lifecycle で意味を保てない pacman option は黙って無視せず、外部コマンドの実行前に unsupported として停止します。必要な場合は official repository target と AUR / source build target を別 invocation に分けてください。
 
 operation 確定後、値を取る pacman option の次の token は、その綴りにかかわらず option value として優先します。option value として消費されていない最初の `--` は end-of-options marker として pacman へ保持し、それ以降の token は opaque operand として扱います。`--noedit`、`--rmdeps`、`--aur`、`--repo` などの jpacker global option は、option value 位置でも `--` 後でもない通常位置でのみ認識します。
 
@@ -329,18 +329,24 @@ jpacker -S google-chrome --noedit
 jpacker --noconfirm -S google-chrome
 ```
 
-`--needed` は jpacker global option ではなく、pacman-compatible option です。pacman-only 経路では argv を保ったまま pacman へ渡します。対応済みの `-S` install が AUR または source build preference 経路へ進む場合も、jpacker は `--needed` を理由とする build skip 判定を追加せず、最終 package install の要否だけを makepkg / pacman の `--needed` policy に委ねます。AUR と official source build preference で意味は同じです。
+`--needed` は jpacker global option ではなく、pacman-compatible option です。pacman-only 経路では argv を保ったまま pacman へ渡します。対応済みの `-S` install が AUR または source build preference 経路へ進む場合も、jpacker は `--needed` を理由とする build skip 判定を追加せず、最終 package install の要否だけを `sudo pacman -U --needed` に委ねます。AUR と official source build preference で意味は同じです。
 
-そのため `--needed` 自体を理由に、validation、AUR RPC / build plan、provider・split package・conflicts/replaces などの guard、clone/fetch、PKGBUILD / `.install` review、makepkg execution までの経路を省略しません。jpacker は installed version や local artifact を見た独自の build skip 判定を追加せず、既存 artifact の再利用と `--rebuild` の契約は従来どおり維持します。mixed official/AUR invocation では official pacman argv にも `--needed` を保持し、重複指定は pacman argv では保持、makepkg 側では 1 回だけ渡します。
+そのため `--needed` 自体を理由に、validation、AUR RPC / build plan、provider・split package・conflicts/replaces などの guard、clone/fetch、PKGBUILD / `.install` review、makepkg execution までの経路を省略しません。jpacker は installed version や local artifact を見た独自の build skip 判定を追加せず、各 PackageBase を fresh `PKGDEST` で build します。mixed official/AUR invocation では official pacman argv にも `--needed` を保持し、重複指定は pacman argv では保持、source-build 側の `pacman -U` では 1 回だけ渡します。
 
-`--rebuild` / `--cleanbuild` は build 方針、`--rmdeps` は makepkg が導入した dependency の cleanup 方針、`--noconfirm` は prompt suppression であり、`--needed` の install-only policy と独立して併用できます。既存の plan / review / safety guard はどの組み合わせでも維持します。target なしの pacman-compatible `jpacker -Syu --needed` はそのまま pacman へ渡し、target 付きの既存対応形で source route が生じる場合は同じ install-only policy を適用します。jpacker 固有の `upgrade --needed` は未対応です。
+`--rebuild` / `--cleanbuild` は build 方針、`--noconfirm` は prompt suppression であり、`--needed` の install-only policy と独立して併用できます。既存の plan / review / safety guard はどの組み合わせでも維持します。`--rmdeps` は separated source-build 経路では併用できません。target なしの pacman-compatible `jpacker -Syu --needed` はそのまま pacman へ渡し、target 付きの既存対応形で source route が生じる場合は同じ install-only policy を適用します。jpacker 固有の `upgrade --needed` は未対応です。
 
-AUR / source build の build/install は `makepkg -sic` を基本形とします。`--rebuild` を指定すると `-f`、`--cleanbuild` を指定すると `-C`、`--rmdeps` を指定すると `-r` を追加し、`--noconfirm` は makepkg にも渡します。未指定の場合、既存の package artifact や `src/` directory があるときは、必要に応じて default no の確認 prompt で rebuild / cleanbuild を選べます。cleanbuild を有効にし、同じ package directory に既存 package artifact がある場合は、artifact 再利用を避けるため rebuild も有効にします。`--noconfirm` 指定時はこの prompt を出さず、未指定の rebuild / cleanbuild は no 扱いにします。`--noedit` / `--nodiff` / `--rebuild` / `--cleanbuild` / `--rmdeps` は jpacker 固有の option であり、そのまま pacman へは渡しません。
+AUR / source build は、各 PackageBase に invocation-owned の fresh `PKGDEST` を作り、同じ environment で `makepkg --packagelist` により expected artifact を確定してから、build-only の `makepkg -sc` を実行します。artifact validation と installed metadata query の後、typed executor は検証済み artifact を `sudo pacman -U` で install します。makepkg 自身には install を委ねません。`--needed` は `pacman -U` だけに、`--noconfirm` は build-only makepkg と `pacman -U` の両方に渡します。`--rebuild` は makepkg へ `-f`、`--cleanbuild` は `-C` を追加します。
 
-`--rmdeps` は明示 opt-in です。未指定時や `--noconfirm` だけを指定した場合は依存削除を有効にしません。`--rmdeps --noconfirm` を両方指定した場合は、makepkg に `-r` と `--noconfirm` の両方を渡します。削除対象の判断と実行は `makepkg -s/-r` に委ね、jpacker 自身は `pacman -Rns`、`pacman -Qdt`、orphan cleanup を実行しません。この option は pacman-only install には作用せず、pacman にも渡しません。
+現時点で受け入れるのは PackageBase ごとに exactly one artifact だけです。split package の install target selection、sibling / debug package、multiple output は未対応であり、曖昧な artifact を選ばず fail closed で停止します。
+
+build 後の validation、metadata query、または install が失敗した場合は、artifact workspace を診断用に保持します。この workspace は次回実行で自動再利用しません。`pacman -U` の成功後に workspace cleanup だけが失敗した場合、package は install 済みです。diagnostic を確認し、同じ package の install を無条件に再試行しないでください。
+
+未指定の場合、既存の package artifact や `src/` directory があるときは、必要に応じて default no の確認 prompt で rebuild / cleanbuild を選べます。cleanbuild を有効にし、同じ package directory に既存 package artifact がある場合は、makepkg へ `-f` も渡します。`--noconfirm` 指定時はこの prompt を出さず、未指定の rebuild / cleanbuild は no 扱いにします。inherited process environment または source preference が `PKGDEST` を定義している場合は、empty value でも all-target preflight で拒否し、どの source unit の workspace / makepkg / installed metadata query / sudo も開始しません。`--noedit` / `--nodiff` / `--rebuild` / `--cleanbuild` / `--rmdeps` は jpacker 固有の option であり、そのまま pacman へは渡しません。
+
+`--rmdeps` は separated AUR / source-build 経路では未対応です。source target を含む invocation では、artifact workspace 作成、makepkg、installed metadata query、sudo の前に全体を拒否し、`makepkg -r` へ変換しません。jpacker 自身も `pacman -Rns`、`pacman -Qdt`、orphan cleanup を追加しません。この option は pacman-only install には作用せず、pacman にも渡しません。
 
 ```bash
-jpacker --rebuild --cleanbuild --rmdeps -S google-chrome
+jpacker --rebuild --cleanbuild -S google-chrome
 ```
 
 ### Logs
@@ -402,7 +408,7 @@ For safety, important package operations should still be reviewed carefully befo
 
 `jpacker` is not an independent package manager that replaces `pacman` or `makepkg`. It prioritizes consistency and transparency, and does not change the operations, responsibilities, or behavior of the original commands and existing tools without a clear reason.
 
-Arch package metadata and package relationships use `libalpm` as the authority within the current read-only scope. System package transactions remain delegated to `pacman`, source package builds and artifact installation to `makepkg`, and source repository retrieval and updates to `git`.
+Arch package metadata and package relationships use `libalpm` as the authority within the current read-only scope. System package transactions remain delegated to `pacman`, validated-artifact installation transactions on source-build routes to `pacman -U`, source package artifact builds to `makepkg`, and source repository retrieval and updates to `git`. `jpacker` owns the artifact workspace, validation, and install policy for source-build routes.
 
 jpacker respects the purpose and result that users would naturally expect from a command name, its arguments, and existing tool conventions. When a decision is ambiguous or authoritative information cannot be observed, it does not guess and introduce side effects; it stops safely and explains why. See [DECISIONS.md](DECISIONS.md) for the detailed policy.
 
@@ -423,7 +429,7 @@ This is a personal project, so response times, reviews, and merges aren't guaran
 ### Features
 
 * **Pacman wrapper**: Supports standard `pacman` syntax such as `-S`, `-Syu`, `-R`, and `-Q`, and forwards unknown commands to `pacman`.
-* **AUR support**: Search for and build/install AUR packages using workflows based on `makepkg`.
+* **AUR support**: Search for AUR packages, build them with `makepkg`, and install validated artifacts with `pacman -U`.
 * **AUR PKGBUILD export**: Export an AUR PackageBase repository into the current directory or print only its root `PKGBUILD` to stdout.
 * **Source-based optimization**: Mark selected packages to always be built from source with custom environment variables such as `CFLAGS="-O3 -march=native"`.
 * **Safe and robust implementation**: Written in C++20 and designed with RAII-based resource management for tasks such as networking and temporary directory handling.
@@ -470,7 +476,7 @@ Do not run jpacker itself with sudo or as root. Run it as a normal user. For ope
 
 jpacker accepts standard pacman flags where supported. Not all pacman options / flags are implemented yet; support is added and verified incrementally.
 
-On routes handled entirely by pacman, jpacker forwards pacman-compatible options that it does not consume. If `-S` routes any target to AUR or a source-build preference, however, a pacman option that cannot retain its meaning during makepkg build/install is rejected before any external transaction starts. Split official repository and AUR/source-build targets into separate invocations when such an option is needed.
+On routes handled entirely by pacman, jpacker forwards pacman-compatible options that it does not consume. If `-S` routes any target to AUR or a source-build preference, however, a pacman option that cannot retain its meaning in the separated source-build lifecycle is rejected before any external transaction starts. Split official repository and AUR/source-build targets into separate invocations when such an option is needed.
 
 After the operation is identified, the token following a value-taking pacman option is treated as its value regardless of its spelling. The first `--` not consumed as an option value is preserved as the end-of-options marker, and later tokens are treated as opaque operands. jpacker global options such as `--noedit`, `--rmdeps`, `--aur`, and `--repo` are recognized only in normal option positions, not as pacman option values or after `--`.
 
@@ -695,18 +701,24 @@ jpacker -S google-chrome --noedit
 jpacker --noconfirm -S google-chrome
 ```
 
-`--needed` is a pacman-compatible option, not a jpacker global option. Pacman-only routes preserve it in the pacman argument vector. When a supported `-S` install uses AUR or an official source-build preference, jpacker does not add a build-skip decision for `--needed`; only final package installation is delegated to makepkg/pacman's `--needed` policy. AUR and official source-build preference routes use the same meaning.
+`--needed` is a pacman-compatible option, not a jpacker global option. Pacman-only routes preserve it in the pacman argument vector. When a supported `-S` install uses AUR or an official source-build preference, jpacker does not add a build-skip decision for `--needed`; only final package installation is delegated to `sudo pacman -U --needed`. AUR and official source-build preference routes use the same meaning.
 
-`--needed` itself does not skip validation, AUR RPC and build planning, provider/split-package/conflicts/replaces guards, clone/fetch, PKGBUILD / `.install` review, or the path to makepkg execution. jpacker does not add an installed-version or local-artifact heuristic for skipping builds; existing artifact reuse and `--rebuild` behavior remain unchanged. In a mixed official/AUR invocation, `--needed` remains in the official pacman arguments. Duplicates remain in pacman's ordered arguments but produce one `--needed` on the makepkg side.
+`--needed` itself does not skip validation, AUR RPC and build planning, provider/split-package/conflicts/replaces guards, clone/fetch, PKGBUILD / `.install` review, or the path to makepkg execution. jpacker does not add an installed-version or local-artifact heuristic for skipping builds; each PackageBase is built into a fresh `PKGDEST`. In a mixed official/AUR invocation, `--needed` remains in the official pacman arguments. Duplicates remain in pacman's ordered arguments but produce one `--needed` on the source-build `pacman -U` side.
 
-`--rebuild` / `--cleanbuild` control the build, `--rmdeps` controls cleanup of dependencies installed by makepkg, and `--noconfirm` suppresses prompts; each remains independent of the install-only `--needed` policy. Existing plan, review, and safety guards remain in force. Target-less pacman-compatible `jpacker -Syu --needed` is passed through to pacman; if an existing supported target-bearing form selects a source route, the same install-only policy applies there. The jpacker-specific `upgrade --needed` remains unsupported.
+`--rebuild` / `--cleanbuild` control the build and `--noconfirm` suppresses prompts; each remains independent of the install-only `--needed` policy. Existing plan, review, and safety guards remain in force. `--rmdeps` cannot be combined with the separated source-build route. Target-less pacman-compatible `jpacker -Syu --needed` is passed through to pacman; if an existing supported target-bearing form selects a source route, the same install-only policy applies there. The jpacker-specific `upgrade --needed` remains unsupported.
 
-AUR/source build installation uses `makepkg -sic` as its baseline. `--rebuild` adds `-f`, `--cleanbuild` adds `-C`, `--rmdeps` adds `-r`, and `--noconfirm` is also passed to makepkg. When rebuild/cleanbuild are not specified, jpacker may ask with a default-no prompt before rebuilding an existing package artifact or cleaning an existing `src/` directory. If cleanbuild is enabled and a package artifact exists in the same package directory, jpacker also enables rebuild to avoid reusing that artifact. With `--noconfirm`, these prompts are skipped and unspecified rebuild/cleanbuild choices default to no. `--noedit`, `--nodiff`, `--rebuild`, `--cleanbuild`, and `--rmdeps` are jpacker-specific and are not passed through unchanged to pacman.
+AUR/source builds create an invocation-owned fresh `PKGDEST` for each PackageBase, use the same environment to determine the expected artifact with `makepkg --packagelist`, and then run build-only `makepkg -sc`. After artifact validation and an installed metadata query, a typed executor installs the validated artifact with `sudo pacman -U`; makepkg itself does not perform installation. `--needed` is passed only to `pacman -U`, while `--noconfirm` is passed to both build-only makepkg and `pacman -U`. `--rebuild` adds `-f` to makepkg and `--cleanbuild` adds `-C`.
 
-`--rmdeps` is explicit opt-in. Omitting it, including when using `--noconfirm` alone, does not enable dependency removal. When both `--rmdeps --noconfirm` are explicit, jpacker passes both `-r` and `--noconfirm` to makepkg. Dependency selection and removal remain makepkg's `-s/-r` responsibility; jpacker does not run its own `pacman -Rns`, `pacman -Qdt`, or orphan cleanup. The option has no effect on pacman-only installs and is not forwarded to pacman.
+The current route accepts exactly one artifact per PackageBase. Split-package install-target selection, sibling or debug packages, and multiple outputs are unsupported; jpacker fails closed instead of choosing an ambiguous artifact.
+
+If post-build validation, a metadata query, or installation fails, jpacker retains the artifact workspace for diagnostics. A retained workspace is not reused automatically by a later invocation. If only workspace cleanup fails after a successful `pacman -U` transaction, the package is already installed; inspect the diagnostic and do not blindly retry the same installation.
+
+When rebuild/cleanbuild are not specified, jpacker may ask with a default-no prompt before rebuilding an existing package artifact or cleaning an existing `src/` directory. If cleanbuild is enabled and a package artifact exists in the same package directory, jpacker also passes `-f` to makepkg. With `--noconfirm`, these prompts are skipped and unspecified rebuild/cleanbuild choices default to no. If the inherited process environment or a source preference defines `PKGDEST`, even with an empty value, all-target preflight rejects the invocation before any source unit starts its workspace, makepkg, installed metadata query, or sudo work. `--noedit`, `--nodiff`, `--rebuild`, `--cleanbuild`, and `--rmdeps` are jpacker-specific and are not passed through unchanged to pacman.
+
+`--rmdeps` is unsupported on the separated AUR/source-build route. An invocation containing a source target is rejected as a whole before artifact workspace creation, makepkg, an installed metadata query, or sudo, and the option is not translated to `makepkg -r`. jpacker does not add its own `pacman -Rns`, `pacman -Qdt`, or orphan cleanup. The option has no effect on pacman-only installs and is not forwarded to pacman.
 
 ```bash
-jpacker --rebuild --cleanbuild --rmdeps -S google-chrome
+jpacker --rebuild --cleanbuild -S google-chrome
 ```
 
 ### Logs

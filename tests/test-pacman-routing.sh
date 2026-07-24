@@ -3,6 +3,9 @@ set -eu
 
 test_binary=$1
 repo_root=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
+JPACKER_TEST_REPOSITORY_ROOT=$repo_root
+export JPACKER_TEST_REPOSITORY_ROOT
+. "$repo_root/tests/test-command-safety.sh"
 tmp_dir=$(mktemp -d)
 server_pid=
 
@@ -38,6 +41,11 @@ port=$(cat "$port_file")
 export HOME=$tmp_dir/home
 export XDG_CACHE_HOME=$tmp_dir/cache
 export PATH=$repo_root/tests/stubs:/usr/bin:/bin
+require_exact_test_command pacman-conf "$repo_root/tests/stubs/pacman-conf"
+require_exact_test_command makepkg "$repo_root/tests/stubs/makepkg"
+require_exact_test_command pacman "$repo_root/tests/stubs/pacman"
+require_exact_test_command sudo "$repo_root/tests/stubs/sudo"
+require_exact_test_command git "$repo_root/tests/stubs/git"
 export JPACKER_TEST_AUR_RPC_BASE_URL=http://127.0.0.1:$port/rpc/
 export JPACKER_TEST_COMMAND_LOG=$command_log
 export JPACKER_TEST_PACMAN_EXIT_CODE=0

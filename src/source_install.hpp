@@ -1,33 +1,58 @@
 #pragma once
 
+#include "package_metadata.hpp"
 #include "source_build.hpp"
 
 #include <optional>
 #include <string>
+#include <vector>
 
 struct AppConfig;
 struct BuildPlan;
+
+// production all-target preflightで確定し、mutation phaseまで保持する1 build unit。
+// Artifact path/identity/install directiveはPR4 lifecycle内部でだけ生成する。
+struct ProductionSourceBuildWorkItem {
+    SourceBuildRequest             request;
+    DesiredInstallReason          desired_reason = DesiredInstallReason::Explicit;
+    bool                          is_build_plan_entry = false;
+    bool                          uses_system_update_baseline = false;
+    std::vector<std::string>      plan_package_names;
+};
+
+// PacmanDatabasePathsはinvocationで1回だけ解決し、全build unitへvalueとして共有する。
+struct PreparedProductionSourceBuildInvocation {
+    std::vector<ProductionSourceBuildWorkItem> work_items;
+    PacmanDatabasePaths                        database_paths;
+};
+
+void require_supported_production_source_build_options(
+        const AppConfig& config);
 
 void build_source_target(
         const std::string& package_name,
         const SourceBuildEnvironment& custom_environment,
         const AppConfig& config);
 
-void require_executable_source_install_target(
-        const std::string& package_name);
-
-void execute_aur_build_plan(
-        const BuildPlan& plan,
-        bool use_source_build_preferences,
-        bool needed,
-        const AppConfig& config);
-
-void install_smart_source(
+ProductionSourceBuildWorkItem prepare_smart_source_build_work_item(
         const std::string& package_name,
         bool only_if_updated,
-        bool needed,
-        const AppConfig& config,
-        const std::optional<SourceUpdateBaseline>& update_baseline = std::nullopt,
-        const std::optional<SourceInstalledSnapshot>& installed_snapshot = std::nullopt);
+        bool needed);
 
-void preflight_upgrade_source_metadata();
+std::vector<ProductionSourceBuildWorkItem> prepare_aur_source_build_work_items(
+        const BuildPlan& plan,
+        bool use_source_build_preferences,
+        bool needed);
+
+PreparedProductionSourceBuildInvocation prepare_production_source_build_invocation(
+        std::vector<ProductionSourceBuildWorkItem> work_items,
+        const AppConfig& config);
+
+void execute_prepared_source_build_work_item(
+        const ProductionSourceBuildWorkItem& work_item,
+        const PacmanDatabasePaths& database_paths,
+        const AppConfig& config);
+
+void execute_prepared_source_build_invocation(
+        const PreparedProductionSourceBuildInvocation& invocation,
+        const AppConfig& config);
