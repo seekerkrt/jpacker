@@ -921,13 +921,18 @@ CapturedCommandResult ArtifactMakepkgContext::capture_makepkg_output(
 
 int ArtifactMakepkgContext::run_makepkg_build_only(
         const ArtifactWorkspace& workspace,
-        const ExpectedPackageArtifactPath& expected) const {
+        const ExpectedPackageArtifactPath& expected,
+        const ArtifactMakepkgBuildOptions& options) const {
     require_no_inherited_pkgdest();
     require_matching_workspace(workspace);
     expected.require_matching_makepkg_context(*this);
     require_unchanged_checkout();
     FileDescriptorWorkDirGuard working_directory(checkout_descriptor_);
-    int exit_code = run_command(makepkg_command({"-sc"}));
+    std::vector<std::string> arguments = {"-sc"};
+    if(options.no_confirm) arguments.emplace_back("--noconfirm");
+    if(options.rebuild) arguments.emplace_back("-f");
+    if(options.clean_build) arguments.emplace_back("-C");
+    int exit_code = run_command(makepkg_command(arguments));
     require_unchanged_checkout();
     require_matching_workspace(workspace);
     return exit_code;

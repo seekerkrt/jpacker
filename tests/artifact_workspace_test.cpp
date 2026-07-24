@@ -787,7 +787,8 @@ void test_shared_makepkg_context_and_packagelist_adapter(
             query_makepkg_packagelist(workspace, context);
     expect(expected.path() == artifact_path, "Packagelist adapter path differs");
     expect(
-            context.run_makepkg_build_only(workspace, expected) == 0,
+            context.run_makepkg_build_only(
+                    workspace, expected, ArtifactMakepkgBuildOptions{}) == 0,
             "Future build-only makepkg fake failed");
 
     expect_equal(
@@ -835,7 +836,7 @@ void test_build_only_requires_query_bound_expected(
     expect_runtime_error(
             [&workspace, &context, &unbound]() {
                 static_cast<void>(context.run_makepkg_build_only(
-                        workspace, unbound));
+                        workspace, unbound, ArtifactMakepkgBuildOptions{}));
             },
             "unbound expected build", "does not belong");
     expect_equal(
@@ -865,7 +866,7 @@ void test_build_only_rejects_different_context(
     expect_runtime_error(
             [&workspace, &other_context, &expected]() {
                 static_cast<void>(other_context.run_makepkg_build_only(
-                        workspace, expected));
+                        workspace, expected, ArtifactMakepkgBuildOptions{}));
             },
             "different makepkg context", "does not belong");
     expect_equal(
@@ -897,7 +898,7 @@ void test_makepkg_context_rejects_checkout_replacement(
     expect_runtime_error(
             [&workspace, &context, &expected]() {
                 static_cast<void>(context.run_makepkg_build_only(
-                        workspace, expected));
+                        workspace, expected, ArtifactMakepkgBuildOptions{}));
             },
             "checkout replacement", "checkout path changed identity");
     expect_equal(
