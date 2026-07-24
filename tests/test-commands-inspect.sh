@@ -19,6 +19,7 @@ require_exact_test_command makepkg "$repo_root/tests/stubs/makepkg"
 require_exact_test_command pacman "$repo_root/tests/stubs/pacman"
 require_exact_test_command sudo "$repo_root/tests/stubs/sudo"
 require_exact_test_command git "$repo_root/tests/stubs/git"
+require_exact_test_command vercmp "$repo_root/tests/stubs/vercmp"
 
 setup_case() {
     case_name=$1
@@ -210,6 +211,13 @@ assert_single_blank_before_occurrence() {
 assert_no_git_mutation() {
     if grep -E '^git (clone|fetch)( |$)' "$command_log" >/dev/null; then
         fail_case "fetch mutation ran before every target passed preflight"
+    fi
+}
+
+assert_no_foreign_update_mutation() {
+    if grep -E '^(git|makepkg|sudo)( |$)' "$command_log" >/dev/null ||
+       grep -E '^pacman -(S|U|R|D)' "$command_log" >/dev/null; then
+        fail_case "foreign update query unexpectedly ran a mutation command"
     fi
 }
 
@@ -554,6 +562,23 @@ if ! diff -u "$expected_updates_file" "$actual_updates_file"; then
 fi
 echo "  ok: foreign query batches 101 packages and scopes empty-result fallback"
 
+# fallback中のschema/semantic response errorもordinary failureへ落とさず即時伝播する。
+setup_case foreign-fallback-schema-failure
+export JPACKER_TEST_INSPECTION_SCENARIO=foreign-fallback-schema-failure
+set_foreign_packages_101
+run_fail -Qua
+assert_contains "schema fallback failure" "$stderr_file"
+assert_not_contains "Failed to fetch AUR info:" "$stderr_file"
+assert_exact_line "aur info-many 100 foreign-001 foreign-100" "$command_log"
+assert_exact_line "aur info foreign-001" "$command_log"
+assert_not_contains "aur info foreign-002" "$command_log"
+fallback_schema_info_many_count=$(grep -c '^aur info-many ' "$command_log" || true)
+if [ "$fallback_schema_info_many_count" -ne 1 ]; then
+    fail_case "fallback AurRpcResponseError should stop before the second batch"
+fi
+assert_not_contains "Checking package" "$stdout_file"
+echo "  ok: foreign fallback AurRpcResponseError escapes the batch loop"
+
 # ordinary batch failureはaggregate failureにしつつ、次batchと最終package走査を続ける。
 setup_case foreign-ordinary-failure
 export JPACKER_TEST_INSPECTION_SCENARIO=foreign-ordinary-failure
@@ -567,6 +592,9 @@ assert_exact_command_before "aur info-many 100 foreign-001 foreign-100" "aur inf
 if grep '^aur info ' "$command_log" >/dev/null; then
     fail_case "ordinary batch failure unexpectedly entered per-package fallback"
 fi
+assert_contains "Checking package 1/101: foreign-001" "$stdout_file"
+assert_contains "Foreign package not found in AUR: foreign-001" "$stdout_file"
+assert_before "Foreign package not found in AUR: foreign-001" "Checking package 101/101: foreign-101" "$stdout_file"
 assert_exact_line "foreign-101 1.0-1 -> 2.0-1" "$stdout_file"
 echo "  ok: foreign ordinary batch failure continues with aggregate failure"
 
@@ -610,5 +638,37 @@ if ! diff -u "$expected_updates_file" "$actual_updates_file"; then
     fail_case "foreign update lines did not preserve installed package order"
 fi
 echo "  ok: foreign warning and update display preserves installed order"
+
+# up-to-dateとAUR非存在を同じbatchで分類し、query-only境界を維持する。
+setup_case foreign-classification
+export JPACKER_TEST_INSPECTION_SCENARIO=foreign-classification
+JPACKER_TEST_PACMAN_QM_OUTPUT='foreign-up-to-date 2.0-1
+foreign-non-aur 1.0-1'
+export JPACKER_TEST_PACMAN_QM_OUTPUT
+export JPACKER_TEST_VERCMP_OUTPUT=0
+run_ok -Qua
+assert_exact_line_count 1 "pacman -Qm" "$command_log"
+assert_exact_line_count 1 "aur info-many 2 foreign-up-to-date foreign-non-aur" "$command_log"
+assert_not_contains "aur info foreign-" "$command_log"
+assert_exact_line "vercmp 2.0-1 2.0-1" "$command_log"
+assert_not_contains "foreign-up-to-date 2.0-1 ->" "$stdout_file"
+assert_contains "Foreign package not found in AUR: foreign-non-aur" "$stdout_file"
+assert_no_foreign_update_mutation
+echo "  ok: foreign query classifies up-to-date and non-AUR without mutation"
+
+# vercmp parse failureはwarningを出し、fail-closedでupdateに分類しない。
+setup_case foreign-invalid-vercmp
+export JPACKER_TEST_INSPECTION_SCENARIO=foreign-classification
+JPACKER_TEST_PACMAN_QM_OUTPUT='foreign-up-to-date 1.0-1
+foreign-non-aur 1.0-1'
+export JPACKER_TEST_PACMAN_QM_OUTPUT
+export JPACKER_TEST_VERCMP_OUTPUT=invalid
+run_ok -Qua
+assert_exact_line "vercmp 2.0-1 1.0-1" "$command_log"
+assert_contains "Failed to compare versions: 1.0-1 -> 2.0-1" "$stdout_file"
+assert_not_contains "foreign-up-to-date 1.0-1 ->" "$stdout_file"
+assert_contains "Foreign package not found in AUR: foreign-non-aur" "$stdout_file"
+assert_no_foreign_update_mutation
+echo "  ok: foreign version parse failure remains fail-closed"
 
 echo "command inspection characterization tests: all checks passed"

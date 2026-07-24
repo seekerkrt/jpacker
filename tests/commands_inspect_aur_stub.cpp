@@ -51,9 +51,11 @@ AurPackageInfo package_info(
 
 bool is_graph_scenario(const std::string& scenario) {
     return scenario != "foreign-fallback" &&
+           scenario != "foreign-fallback-schema-failure" &&
            scenario != "foreign-ordinary-failure" &&
            scenario != "foreign-schema-failure" &&
-           scenario != "foreign-order";
+           scenario != "foreign-order" &&
+           scenario != "foreign-classification";
 }
 
 bool is_numbered_foreign_package(const std::string& package_name) {
@@ -198,6 +200,11 @@ std::map<std::string, AurPackageInfo> foreign_info_many(
                    package_names, 1, "foreign-101", "foreign-101")) {
             return {{"foreign-101", package_info("foreign-101")}};
         }
+    } else if(scenario == "foreign-fallback-schema-failure") {
+        if(is_expected_numbered_batch(
+                   package_names, 100, "foreign-001", "foreign-100")) {
+            return {};
+        }
     } else if(scenario == "foreign-ordinary-failure") {
         if(is_expected_numbered_batch(
                    package_names, 100, "foreign-001", "foreign-100")) {
@@ -219,6 +226,12 @@ std::map<std::string, AurPackageInfo> foreign_info_many(
             return {
                     {"foreign-order-z", package_info("foreign-order-z")},
                     {"foreign-order-a", package_info("foreign-order-a")}};
+        }
+    } else if(scenario == "foreign-classification") {
+        const std::vector<std::string> expected = {
+                "foreign-up-to-date", "foreign-non-aur"};
+        if(package_names == expected) {
+            return {{"foreign-up-to-date", package_info("foreign-up-to-date")}};
         }
     }
 
@@ -271,6 +284,10 @@ std::optional<AurPackageInfo> AurClient::info(const std::string& package_name) {
     if(scenario == "foreign-fallback" && is_numbered_foreign_package(package_name) &&
        package_name != "foreign-101") {
         return package_info(package_name);
+    }
+    if(scenario == "foreign-fallback-schema-failure" &&
+       package_name == "foreign-001") {
+        throw AurRpcResponseError("schema fallback failure");
     }
 
     throw std::runtime_error(
