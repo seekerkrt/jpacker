@@ -96,6 +96,13 @@ ArtifactWorkspace create_artifact_workspace(ValidatedPrivateCacheRoot root);
 void require_unclaimed_artifact_pkgdest(
         const SourceBuildEnvironment& environment);
 
+// build-only makepkgへ渡せるoptionを、install/remove系optionから型で分離する。
+struct ArtifactMakepkgBuildOptions {
+    bool no_confirm = false;
+    bool rebuild = false;
+    bool clean_build = false;
+};
+
 // packagelistと後続build-only makepkgが共有するcheckout/environment境界。
 // owned PKGDESTはsource assignmentの順序を保った末尾へ一度だけ追加する。
 class ArtifactMakepkgContext final {
@@ -161,10 +168,11 @@ public:
     std::string command_environment_prefix() const;
 
     // query由来expectedとのprovenance照合を必須にし、exact build-only argvだけを
-    // 公開する。追加optionが必要になった時点でsafe option modelを別途拡張する。
+    // 公開する。--needed/-r/-iを受けるarbitrary argv境界にはしない。
     int run_makepkg_build_only(
             const ArtifactWorkspace& workspace,
-            const ExpectedPackageArtifactPath& expected) const;
+            const ExpectedPackageArtifactPath& expected,
+            const ArtifactMakepkgBuildOptions& options) const;
 };
 
 ArtifactMakepkgContext prepare_artifact_makepkg_context(
