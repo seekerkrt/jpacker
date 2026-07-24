@@ -3,6 +3,9 @@ set -eu
 
 test_binary=$1
 repo_root=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
+JPACKER_TEST_REPOSITORY_ROOT=$repo_root
+export JPACKER_TEST_REPOSITORY_ROOT
+. "$repo_root/tests/test-command-safety.sh"
 tmp_dir=$(mktemp -d)
 server_pid=
 
@@ -32,6 +35,11 @@ done
 
 port=$(cat "$port_file")
 export PATH=$repo_root/tests/stubs:/usr/bin:/bin
+require_exact_test_command pacman-conf "$repo_root/tests/stubs/pacman-conf"
+require_exact_test_command makepkg "$repo_root/tests/stubs/makepkg"
+require_exact_test_command pacman "$repo_root/tests/stubs/pacman"
+require_exact_test_command sudo "$repo_root/tests/stubs/sudo"
+require_exact_test_command git "$repo_root/tests/stubs/git"
 export JPACKER_TEST_AUR_RPC_BASE_URL=http://127.0.0.1:$port/rpc/
 
 setup_case() {
@@ -55,6 +63,8 @@ setup_case() {
     unset JPACKER_TEST_GIT_CLONE_SYMLINK_TARGET
     unset JPACKER_TEST_GIT_CLONE_FIXTURE_DIR
     unset JPACKER_TEST_MAKEPKG_EXIT_CODE
+    unset JPACKER_TEST_MAKEPKG_PACKAGELIST_EXIT_CODE
+    unset JPACKER_TEST_MAKEPKG_PACKAGELIST_OUTPUT_FILE
 }
 
 run_ok() {
@@ -367,13 +377,25 @@ assert_command_absent "pacman -Si official-a --config"
 # Matrix J: 通常位置のglobalはAUR/makepkgへ反映し、value/opaque位置では反映しない。
 setup_case aur-global-options
 export JPACKER_TEST_PACMAN_REPO_PACKAGES='official-only'
+export JPACKER_TEST_MAKEPKG_PACKAGELIST_EXIT_CODE=0
+run_fail --noedit --nodiff --noconfirm --rebuild --cleanbuild -S clean-root
+assert_command_count "makepkg -sc --noconfirm -f -C" 1
+
+setup_case aur-global-rmdeps
+export JPACKER_TEST_PACMAN_REPO_PACKAGES='official-only'
 run_fail --noedit --nodiff --noconfirm --rebuild --cleanbuild --rmdeps -S clean-root
-assert_command_count "makepkg -sic --noconfirm -f -C -r" 1
+assert_contains "Separated build/install does not support --rmdeps." "$output_file"
+assert_command "pacman -Si clean-root"
+assert_command_absent "pacman-conf --verbose RootDir DBPath"
+assert_no_mutation_commands
 
 setup_case aur-trailing-rmdeps
 export JPACKER_TEST_PACMAN_REPO_PACKAGES='official-only'
 run_fail -S clean-root --rmdeps --noedit --noconfirm
-assert_command_count "makepkg -sic --noconfirm -r" 1
+assert_contains "Separated build/install does not support --rmdeps." "$output_file"
+assert_command "pacman -Si clean-root"
+assert_command_absent "pacman-conf --verbose RootDir DBPath"
+assert_no_mutation_commands
 
 setup_case aur-global-name-as-option-value
 export JPACKER_TEST_PACMAN_REPO_PACKAGES='official-only'

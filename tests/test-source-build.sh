@@ -3,7 +3,11 @@ set -eu
 
 test_binary=$1
 config_test_binary=$2
+upgrade_metadata_test_binary=$3
 repo_root=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
+JPACKER_TEST_REPOSITORY_ROOT=$repo_root
+export JPACKER_TEST_REPOSITORY_ROOT
+. "$repo_root/tests/test-command-safety.sh"
 tmp_dir=$(mktemp -d)
 
 cleanup() {
@@ -19,10 +23,24 @@ if ! command -v script >/dev/null 2>&1; then
 fi
 ln -s "$test_binary" "$tmp_dir/jpacker-test"
 ln -s "$config_test_binary" "$tmp_dir/jpacker-config-test"
+ln -s "$upgrade_metadata_test_binary" "$tmp_dir/jpacker-upgrade-metadata-test"
 test_runner=$tmp_dir/jpacker-test
 config_test_runner=$tmp_dir/jpacker-config-test
+upgrade_metadata_test_runner=$tmp_dir/jpacker-upgrade-metadata-test
 
 export PATH=$repo_root/tests/stubs:/usr/bin:/bin
+require_exact_test_command pacman-conf "$repo_root/tests/stubs/pacman-conf"
+require_exact_test_command makepkg "$repo_root/tests/stubs/makepkg"
+require_exact_test_command pacman "$repo_root/tests/stubs/pacman"
+require_exact_test_command sudo "$repo_root/tests/stubs/sudo"
+require_exact_test_command git "$repo_root/tests/stubs/git"
+upgrade_metadata_path=$repo_root/tests/stubs/upgrade-baseline-metadata:$PATH
+(
+    PATH=$upgrade_metadata_path
+    export PATH
+    require_exact_test_command pacman-conf \
+        "$repo_root/tests/stubs/upgrade-baseline-metadata/pacman-conf"
+)
 official_url=https://gitlab.archlinux.org/archlinux/packaging/packages/clean-root.git
 
 setup_case() {
@@ -33,10 +51,12 @@ setup_case() {
     output_file=$case_dir/output
     config_file=$case_dir/jpacker.conf
     checkout_dir=$case_dir/xdg-cache/jpacker/clean-root
+    package_metadata_state=$case_dir/package-metadata-state
 
     mkdir -p "$case_dir/home" "$case_dir/xdg-cache" "$case_dir/package.build"
     : > "$command_log"
     : > "$editor_argv_log"
+    : > "$package_metadata_state"
     export HOME=$case_dir/home
     export XDG_CACHE_HOME=$case_dir/xdg-cache
     export JPACKER_TEST_COMMAND_LOG=$command_log
@@ -45,6 +65,8 @@ setup_case() {
     export JPACKER_TEST_PACMAN_EXIT_CODE=1
     export JPACKER_TEST_SUDO_EXIT_CODE=0
     export JPACKER_TEST_MAKEPKG_EXIT_CODE=0
+    export JPACKER_TEST_PACKAGE_METADATA_STATE_FILE=$package_metadata_state
+    export JPACKER_TEST_PACKAGE_METADATA_EVENT_LOG=$command_log
     unset JPACKER_TEST_PACMAN_Q_OUTPUT
     unset JPACKER_TEST_PACMAN_Q_EXIT_CODE
     unset JPACKER_TEST_PACMAN_QM_OUTPUT
@@ -70,6 +92,16 @@ setup_case() {
     unset JPACKER_TEST_EDITOR_REMOVE_TARGET
     unset JPACKER_TEST_EDITOR_SYMLINK_TARGET
     unset JPACKER_TEST_APP_CONFIG_CASE
+    unset JPACKER_TEST_PACKAGE_METADATA_INITIALIZE_FAILURE
+    unset JPACKER_TEST_PACKAGE_METADATA_INITIALIZE_FAILURE_AT
+    unset JPACKER_TEST_PACKAGE_METADATA_QUERY_FAILURE_PACKAGE
+    unset JPACKER_TEST_PACKAGE_METADATA_QUERY_FAILURE_AT
+    unset JPACKER_TEST_PACKAGE_METADATA_UNKNOWN_REASON_PACKAGE
+    unset JPACKER_TEST_PACKAGE_METADATA_PACMAN_CONF_EXIT_CODE
+    unset JPACKER_TEST_PACKAGE_METADATA_PACMAN_CONF_FAILURE_AT
+    unset JPACKER_TEST_MAKEPKG_PACKAGE_METADATA_STATE_AFTER_SUCCESS_FILE
+    unset JPACKER_TEST_MAKEPKG_PACKAGELIST_EXIT_CODE
+    unset JPACKER_TEST_MAKEPKG_PACKAGELIST_OUTPUT_FILE
 }
 
 create_existing_checkout() {
@@ -81,6 +113,7 @@ create_existing_checkout() {
 prepare_upgrade_case() {
     create_existing_checkout
     : > "$JPACKER_TEST_PACKAGE_BUILD_DIR/clean-root"
+    printf 'clean-root 1.0-1\n' > "$package_metadata_state"
     export JPACKER_TEST_PACMAN_Q_OUTPUT='clean-root 1.0-1'
 }
 
@@ -122,6 +155,18 @@ run_fail() {
     fi
 }
 
+run_upgrade_ok() {
+    : > "$command_log"
+    if ! PATH=$upgrade_metadata_path "$upgrade_metadata_test_runner" "$@" > "$output_file" 2>&1; then
+        echo "expected upgrade metadata command to succeed: $*" >&2
+        sed -n '1,240p' "$output_file" >&2
+        cat "$command_log" >&2
+        exit 1
+    fi
+    # POLICY(#152): upgrade characterization全体でlegacy installed-version queryを禁止する。
+    assert_command_prefix_absent "pacman -Q "
+}
+
 run_tty_ok() {
     answers=$1
     shift
@@ -133,6 +178,20 @@ run_tty_ok() {
         cat "$command_log" >&2
         exit 1
     fi
+}
+
+run_upgrade_tty_ok() {
+    answers=$1
+    shift
+    : > "$command_log"
+    if ! printf '%b' "$answers" |
+        PATH=$upgrade_metadata_path script -qec "$upgrade_metadata_test_runner $*" /dev/null > "$output_file" 2>&1; then
+        echo "expected interactive upgrade metadata command to succeed: $*" >&2
+        sed -n '1,240p' "$output_file" >&2
+        cat "$command_log" >&2
+        exit 1
+    fi
+    assert_command_prefix_absent "pacman -Q "
 }
 
 run_config_tty_ok() {
@@ -199,6 +258,18 @@ assert_command_absent() {
     fi
 }
 
+assert_command_count() {
+    expected=$1
+    expected_count=$2
+    actual_count=$(grep -Fxc -- "$expected" "$command_log" || true)
+    if [ "$actual_count" -ne "$expected_count" ]; then
+        echo "unexpected command count for: $expected" >&2
+        echo "expected $expected_count, got $actual_count" >&2
+        cat "$command_log" >&2
+        exit 1
+    fi
+}
+
 assert_command_prefix_absent() {
     unexpected=$1
     if grep -F -- "$unexpected" "$command_log" >/dev/null; then
@@ -215,6 +286,20 @@ assert_command_before() {
     second_line=$(grep -nFx -- "$second" "$command_log" | sed -n '1s/:.*//p')
     if [ -z "$first_line" ] || [ -z "$second_line" ] || [ "$first_line" -ge "$second_line" ]; then
         echo "unexpected command order: $first -> $second" >&2
+        cat "$command_log" >&2
+        exit 1
+    fi
+}
+
+assert_command_occurrence_before() {
+    first=$1
+    first_occurrence=$2
+    second=$3
+    second_occurrence=$4
+    first_line=$(grep -nFx -- "$first" "$command_log" | sed -n "${first_occurrence}s/:.*//p")
+    second_line=$(grep -nFx -- "$second" "$command_log" | sed -n "${second_occurrence}s/:.*//p")
+    if [ -z "$first_line" ] || [ -z "$second_line" ] || [ "$first_line" -ge "$second_line" ]; then
+        echo "unexpected command order: $first (#$first_occurrence) -> $second (#$second_occurrence)" >&2
         cat "$command_log" >&2
         exit 1
     fi
@@ -304,65 +389,87 @@ setup_case update-newer
 prepare_upgrade_case
 write_srcinfo 2.0 1
 export JPACKER_TEST_VERCMP_OUTPUT=1
-run_ok --noedit --nodiff upgrade
+run_upgrade_ok --noedit --nodiff upgrade
+assert_command_count "pacman-conf --verbose RootDir DBPath" 1
+assert_command_count "alpm initialize" 3
+assert_command_count "alpm query clean-root" 3
+assert_command_count "alpm release" 3
+assert_command "sudo pacman -Syu"
+assert_command_count "pacman -Si clean-root" 1
 assert_command "git fetch origin"
 assert_command "git reset --hard origin/main"
+assert_command_absent "pacman -Q clean-root"
 assert_command "vercmp 2.0-1 1.0-1"
-assert_command "makepkg -sic"
+assert_command "makepkg --packagelist"
+assert_command "makepkg -sc"
+assert_command_occurrence_before "alpm query clean-root" 1 "alpm release" 1
+assert_command_occurrence_before "alpm release" 1 "sudo pacman -Syu" 1
+assert_command_occurrence_before "sudo pacman -Syu" 1 "alpm query clean-root" 2
+assert_command_occurrence_before "alpm query clean-root" 2 "alpm release" 2
+assert_command_occurrence_before "pacman -Si clean-root" 1 "pacman-conf --verbose RootDir DBPath" 1
+assert_command_occurrence_before "alpm release" 2 "git fetch origin" 1
 assert_command_before "git reset --hard origin/main" "vercmp 2.0-1 1.0-1"
-assert_command_before "vercmp 2.0-1 1.0-1" "makepkg -sic"
+assert_command_before "vercmp 2.0-1 1.0-1" "makepkg --packagelist"
 
 setup_case update-up-to-date
 prepare_upgrade_case
 write_srcinfo 1.0 1
 export JPACKER_TEST_VERCMP_OUTPUT=0
-run_ok --noedit --nodiff upgrade
+run_upgrade_ok --noedit --nodiff upgrade
 assert_command "git fetch origin"
 assert_command "git reset --hard origin/main"
 assert_command "vercmp 1.0-1 1.0-1"
+assert_command_absent "pacman -Q clean-root"
 assert_contains "clean-root is up to date (1.0-1). Skipping." "$output_file"
 assert_command_prefix_absent "makepkg "
 assert_command_prefix_absent "jpacker-test-editor "
 
 setup_case update-unknown-noconfirm
 prepare_upgrade_case
-run_ok --noedit --nodiff --noconfirm upgrade
+run_upgrade_ok --noedit --nodiff --noconfirm upgrade
 assert_contains "Unable to determine update status from .SRCINFO for clean-root." "$output_file"
 assert_contains "Skipping clean-root: update status is unknown and --noconfirm is set." "$output_file"
 assert_command "git reset --hard origin/main"
+assert_command_absent "pacman -Q clean-root"
 assert_command_prefix_absent "makepkg "
 
 setup_case update-unknown-noninteractive
 prepare_upgrade_case
-run_ok --noedit --nodiff upgrade
+run_upgrade_ok --noedit --nodiff upgrade
 assert_contains "Unable to determine update status from .SRCINFO for clean-root." "$output_file"
 assert_contains "Skipping clean-root: update status is unknown and stdin is non-interactive." "$output_file"
 assert_command "git reset --hard origin/main"
+assert_command_absent "pacman -Q clean-root"
 assert_command_prefix_absent "makepkg "
 
 setup_case update-unknown-interactive-no
 prepare_upgrade_case
-run_tty_ok 'n\n' --noedit --nodiff upgrade
+run_upgrade_tty_ok 'n\n' --noedit --nodiff upgrade
 assert_contains "Update status is unknown because .SRCINFO is missing or incomplete. Continue to review/build?" "$output_file"
 assert_command "git reset --hard origin/main"
+assert_command_absent "pacman -Q clean-root"
 assert_command_prefix_absent "makepkg "
 
 setup_case update-unknown-interactive-yes
 prepare_upgrade_case
-run_tty_ok 'y\n' --noedit --nodiff upgrade
+run_upgrade_tty_ok 'y\n' --noedit --nodiff upgrade
 assert_contains "Update status is unknown because .SRCINFO is missing or incomplete. Continue to review/build?" "$output_file"
 assert_command "git reset --hard origin/main"
-assert_command "makepkg -sic"
-assert_command_before "git reset --hard origin/main" "makepkg -sic"
+assert_command_absent "pacman -Q clean-root"
+assert_command "makepkg --packagelist"
+assert_command "makepkg -sc"
+assert_command_before "git reset --hard origin/main" "makepkg --packagelist"
 
 # P0-4: clone ownership ends after validation; a later makepkg failure keeps the checkout.
 setup_case makepkg-failure-retains-checkout
 export JPACKER_TEST_MAKEPKG_EXIT_CODE=42
+export JPACKER_TEST_MAKEPKG_PACKAGELIST_EXIT_CODE=0
 run_fail --noedit --nodiff build clean-root
-assert_contains "Build Error: Build failed." "$output_file"
+assert_contains "Build-only makepkg failed with exit code 42." "$output_file"
 assert_command "git clone $official_url clean-root"
-assert_command "makepkg -sic"
-assert_command_before "git clone $official_url clean-root" "makepkg -sic"
+assert_command "makepkg --packagelist"
+assert_command "makepkg -sc"
+assert_command_before "git clone $official_url clean-root" "makepkg --packagelist"
 assert_checkout_retained
 
 # Issue #226: configured editor / environment overrideの優先順位と実argv境界を固定する。
@@ -375,9 +482,10 @@ export JPACKER_TEST_EDITOR_ARGV_LOG="$editor_argv_log"
 run_config_tty_ok 'y\ny\ny\n' build clean-root
 assert_command "jpacker-test-editor --configured-option ./PKGBUILD"
 assert_command "jpacker-test-editor --configured-option ./-option.install"
-assert_command "makepkg -sic"
+assert_command "makepkg --packagelist"
+assert_command "makepkg -sc"
 assert_command_before "jpacker-test-editor --configured-option ./PKGBUILD" "jpacker-test-editor --configured-option ./-option.install"
-assert_command_before "jpacker-test-editor --configured-option ./-option.install" "makepkg -sic"
+assert_command_before "jpacker-test-editor --configured-option ./-option.install" "makepkg --packagelist"
 assert_editor_argv_log 'argv-begin
 arg[0]=<--configured-option>
 arg[1]=<./PKGBUILD>
@@ -401,9 +509,10 @@ assert_command "jpacker-test-editor --environment-option ./PKGBUILD"
 assert_command "jpacker-test-editor --environment-option ./-option.install"
 assert_command_prefix_absent "jpacker-test-editor --configured-option"
 assert_not_contains "--configured-option" "$editor_argv_log"
-assert_command "makepkg -sic"
+assert_command "makepkg --packagelist"
+assert_command "makepkg -sc"
 assert_command_before "jpacker-test-editor --environment-option ./PKGBUILD" "jpacker-test-editor --environment-option ./-option.install"
-assert_command_before "jpacker-test-editor --environment-option ./-option.install" "makepkg -sic"
+assert_command_before "jpacker-test-editor --environment-option ./-option.install" "makepkg --packagelist"
 assert_editor_argv_log 'argv-begin
 arg[0]=<--environment-option>
 arg[1]=<./PKGBUILD>
@@ -423,7 +532,7 @@ export JPACKER_TEST_CONFIG_FILE="$config_file"
 export JPACKER_TEST_EDITOR_ARGV_LOG="$editor_argv_log"
 export JPACKER_TEST_EDITOR_EXIT_CODE=42
 run_config_tty_fail 'y\n' build clean-root
-assert_contains "Build Error: Editor failed." "$output_file"
+assert_contains "Build Error: Failed while building/installing PackageBase clean-root (clean-root): Editor failed." "$output_file"
 assert_not_contains "Edit install script -option.install?" "$output_file"
 assert_command "jpacker-test-editor --configured-option ./PKGBUILD"
 assert_command_absent "jpacker-test-editor --configured-option ./-option.install"

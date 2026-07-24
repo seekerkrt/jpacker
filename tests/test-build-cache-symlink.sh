@@ -3,6 +3,9 @@ set -eu
 
 test_binary=$1
 repo_root=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
+JPACKER_TEST_REPOSITORY_ROOT=$repo_root
+export JPACKER_TEST_REPOSITORY_ROOT
+. "$repo_root/tests/test-command-safety.sh"
 tmp_dir=$(mktemp -d)
 server_pid=
 
@@ -41,6 +44,11 @@ done
 
 port=$(cat "$port_file")
 export PATH=$repo_root/tests/stubs:/usr/bin:/bin
+require_exact_test_command pacman-conf "$repo_root/tests/stubs/pacman-conf"
+require_exact_test_command makepkg "$repo_root/tests/stubs/makepkg"
+require_exact_test_command pacman "$repo_root/tests/stubs/pacman"
+require_exact_test_command sudo "$repo_root/tests/stubs/sudo"
+require_exact_test_command git "$repo_root/tests/stubs/git"
 export JPACKER_TEST_AUR_RPC_BASE_URL=http://127.0.0.1:$port/rpc/
 export JPACKER_TEST_PACMAN_EXIT_CODE=1
 export JPACKER_TEST_SUDO_EXIT_CODE=0
@@ -274,6 +282,8 @@ assert_only_clone_after_metadata() {
     while IFS= read -r command; do
         case $command in
             pacman\ -Si\ *)
+                ;;
+            pacman-conf\ --verbose\ RootDir\ DBPath)
                 ;;
             "$expected_clone")
                 ;;
@@ -728,9 +738,10 @@ export JPACKER_TEST_MAKEPKG_EXIT_CODE=0
 run_ok "$case_dir/output" --noedit --nodiff build clean-root
 assert_command "git clone https://aur.archlinux.org/clean-root.git clean-root"
 assert_command "git config --get remote.origin.url"
-assert_command "makepkg -sic"
+assert_command "makepkg --packagelist"
+assert_command "makepkg -sc"
 assert_command_before "git clone https://aur.archlinux.org/clean-root.git clean-root" "git config --get remote.origin.url"
-assert_command_before "git config --get remote.origin.url" "makepkg -sic"
+assert_command_before "git config --get remote.origin.url" "makepkg --packagelist"
 if [ ! -d "$entry_path/.git" ] || [ -L "$entry_path/.git" ] ||
    [ ! -f "$entry_path/PKGBUILD" ] || [ -L "$entry_path/PKGBUILD" ] ||
    [ ! -f "$entry_path/clean-root.install" ] || [ -L "$entry_path/clean-root.install" ]; then
@@ -770,10 +781,10 @@ run_fail "$case_dir/output" --noedit --nodiff build clean-root
 assert_command "git config --get remote.origin.url"
 assert_command "git fetch origin"
 assert_command "git reset --hard origin/main"
-assert_command "makepkg -sic"
+assert_command "makepkg --packagelist"
 assert_command_before "git config --get remote.origin.url" "git fetch origin"
 assert_command_before "git fetch origin" "git reset --hard origin/main"
-assert_command_before "git reset --hard origin/main" "makepkg -sic"
+assert_command_before "git reset --hard origin/main" "makepkg --packagelist"
 
 setup_case regular-existing-review
 create_regular_repo "$entry_path"
@@ -785,10 +796,11 @@ assert_contains "Review target: PKGBUILD" "$case_dir/output"
 assert_contains "clean-root.install" "$case_dir/output"
 assert_command "jpacker-test-editor ./PKGBUILD"
 assert_command "jpacker-test-editor ./clean-root.install"
-assert_command "makepkg -sic"
+assert_command "makepkg --packagelist"
+assert_command "makepkg -sc"
 assert_command_before "git reset --hard origin/main" "jpacker-test-editor ./PKGBUILD"
 assert_command_before "jpacker-test-editor ./PKGBUILD" "jpacker-test-editor ./clean-root.install"
-assert_command_before "jpacker-test-editor ./clean-root.install" "makepkg -sic"
+assert_command_before "jpacker-test-editor ./clean-root.install" "makepkg --packagelist"
 assert_editor_argv_log 'argv-begin
 arg[0]=<./PKGBUILD>
 target=<./PKGBUILD>
@@ -808,9 +820,10 @@ run_build_tty_ok "$case_dir/output" 'y\ny\ny\n'
 assert_contains "-option.install" "$case_dir/output"
 assert_command "jpacker-test-editor ./PKGBUILD"
 assert_command "jpacker-test-editor ./-option.install"
-assert_command "makepkg -sic"
+assert_command "makepkg --packagelist"
+assert_command "makepkg -sc"
 assert_command_before "jpacker-test-editor ./PKGBUILD" "jpacker-test-editor ./-option.install"
-assert_command_before "jpacker-test-editor ./-option.install" "makepkg -sic"
+assert_command_before "jpacker-test-editor ./-option.install" "makepkg --packagelist"
 assert_editor_argv_log 'argv-begin
 arg[0]=<./PKGBUILD>
 target=<./PKGBUILD>
@@ -862,7 +875,7 @@ assert_contains "Remote URL mismatch. Re-cloning..." "$case_dir/output"
 assert_output_before "Remote URL mismatch. Re-cloning..." "Running: git clone" "$case_dir/output"
 assert_command "git config --get remote.origin.url"
 assert_command "git clone https://aur.archlinux.org/clean-root.git clean-root"
-assert_command "makepkg -sic"
+assert_command "makepkg --packagelist"
 assert_command_before "git config --get remote.origin.url" "git clone https://aur.archlinux.org/clean-root.git clean-root"
 assert_command_absent "git fetch origin"
 assert_command_absent "git reset --hard origin/main"
@@ -890,7 +903,8 @@ snapshot_directory "$outside_dir" "$case_dir/before.snapshot"
 export JPACKER_TEST_GIT_CLONE_EXIT_CODE=42
 run_fail "$case_dir/output" --noedit --nodiff build clean-root
 assert_command "git clone https://aur.archlinux.org/clean-root.git clean-root"
-assert_command_absent "makepkg -sic"
+assert_command_absent "makepkg --packagelist"
+assert_command_absent "makepkg -sc"
 assert_path_absent "$entry_path"
 assert_directory_unchanged "$outside_dir" "$case_dir/before.snapshot"
 

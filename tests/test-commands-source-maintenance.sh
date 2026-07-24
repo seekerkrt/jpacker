@@ -3,7 +3,11 @@ set -eu
 
 test_binary=$1
 source_install_test_binary=$2
+upgrade_metadata_test_binary=$3
 repo_root=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
+JPACKER_TEST_REPOSITORY_ROOT=$repo_root
+export JPACKER_TEST_REPOSITORY_ROOT
+. "$repo_root/tests/test-command-safety.sh"
 tmp_dir=$(mktemp -d)
 server_pid=
 
@@ -41,6 +45,20 @@ done
 
 port=$(cat "$port_file")
 export PATH=$repo_root/tests/stubs/source-maintenance:$repo_root/tests/stubs:/usr/bin:/bin
+require_exact_test_command pacman-conf "$repo_root/tests/stubs/pacman-conf"
+require_exact_test_command makepkg "$repo_root/tests/stubs/makepkg"
+require_exact_test_command pacman "$repo_root/tests/stubs/pacman"
+require_exact_test_command sudo "$repo_root/tests/stubs/source-maintenance/sudo"
+require_exact_test_command git "$repo_root/tests/stubs/git"
+require_exact_test_command jpacker-test-editor \
+    "$repo_root/tests/stubs/source-maintenance/jpacker-test-editor"
+upgrade_metadata_path=$repo_root/tests/stubs/upgrade-baseline-metadata:$PATH
+(
+    PATH=$upgrade_metadata_path
+    export PATH
+    require_exact_test_command pacman-conf \
+        "$repo_root/tests/stubs/upgrade-baseline-metadata/pacman-conf"
+)
 export JPACKER_TEST_AUR_RPC_BASE_URL=http://127.0.0.1:$port/rpc/
 
 setup_case() {
@@ -52,11 +70,13 @@ setup_case() {
     cache_root=$case_dir/xdg-cache/jpacker
     sudo_failures=$case_dir/sudo-failures
     config_file=$case_dir/jpacker.conf
+    package_metadata_state=$case_dir/package-metadata-state
 
     mkdir -p "$case_dir/home" "$case_dir/xdg-cache" "$preference_dir"
     : > "$command_log"
     : > "$request_log"
     : > "$sudo_failures"
+    : > "$package_metadata_state"
     {
         printf 'EDITOR=jpacker-test-editor --config\n'
         printf 'LOGFILE=%s\n' "$case_dir/jpacker.log"
@@ -72,6 +92,8 @@ setup_case() {
     export JPACKER_TEST_PACMAN_EXIT_CODE=1
     export JPACKER_TEST_SUDO_EXIT_CODE=0
     export JPACKER_TEST_MAKEPKG_EXIT_CODE=0
+    export JPACKER_TEST_PACKAGE_METADATA_STATE_FILE=$package_metadata_state
+    export JPACKER_TEST_PACKAGE_METADATA_EVENT_LOG=$command_log
 
     unset JPACKER_TEST_PACMAN_REPO_PACKAGES
     unset JPACKER_TEST_PACMAN_Q_OUTPUT
@@ -94,6 +116,9 @@ setup_case() {
     unset JPACKER_TEST_VERCMP_EXIT_CODE
     unset JPACKER_TEST_VERCMP_ARGV_LOG
     unset JPACKER_TEST_MAKEPKG_ARGV_LOG
+    unset JPACKER_TEST_MAKEPKG_ENV_LOG
+    unset JPACKER_TEST_MAKEPKG_ENV_KEYS
+    unset JPACKER_TEST_MAKEPKG_PACKAGELIST_EXIT_CODE
     unset JPACKER_TEST_SOURCE_MAINTENANCE_FAIL_SUBSTRING
     unset JPACKER_TEST_SOURCE_MAINTENANCE_PACMAN_SYU_Q_OUTPUT_FILE
     unset JPACKER_TEST_SOURCE_MAINTENANCE_PACMAN_SC_RACE_PATH
@@ -105,6 +130,18 @@ setup_case() {
     unset JPACKER_TEST_SOURCE_MAINTENANCE_EDITOR_REPLACEMENT_SUBSTRING
     unset JPACKER_TEST_SOURCE_MAINTENANCE_EDITOR_REPLACEMENT_TARGET
     unset JPACKER_TEST_SOURCE_MAINTENANCE_EDITOR_REPLACEMENT_SOURCE
+    unset JPACKER_TEST_PACKAGE_METADATA_INITIALIZE_FAILURE
+    unset JPACKER_TEST_PACKAGE_METADATA_INITIALIZE_FAILURE_AT
+    unset JPACKER_TEST_PACKAGE_METADATA_QUERY_FAILURE_PACKAGE
+    unset JPACKER_TEST_PACKAGE_METADATA_QUERY_FAILURE_AT
+    unset JPACKER_TEST_PACKAGE_METADATA_UNKNOWN_REASON_PACKAGE
+    unset JPACKER_TEST_PACKAGE_METADATA_PACMAN_CONF_EXIT_CODE
+    unset JPACKER_TEST_PACKAGE_METADATA_PACMAN_CONF_FAILURE_AT
+    unset JPACKER_TEST_MAKEPKG_PACKAGE_METADATA_STATE_AFTER_SUCCESS_FILE
+    unset JPACKER_TEST_PACMAN_U_SUCCESS_LOG
+    unset JPACKER_TEST_REPLACE_WORKSPACE_AFTER_PACMAN_U
+    unset EMPTY
+    unset PKGDEST
     unset EDITOR
 }
 
@@ -128,6 +165,41 @@ run_fail() {
         cat "$command_log" >&2
         exit 1
     fi
+}
+
+run_upgrade_ok() {
+    : > "$command_log"
+    : > "$request_log"
+    if ! PATH=$upgrade_metadata_path "$upgrade_metadata_test_binary" "$@" > "$output_file" 2>&1; then
+        echo "expected upgrade metadata command to succeed: $*" >&2
+        sed -n '1,260p' "$output_file" >&2
+        cat "$command_log" >&2
+        exit 1
+    fi
+    # POLICY(#152): upgrade targetのinstalled stateはlibalpm snapshotだけから取得する。
+    assert_command_content_absent "pacman -Q "
+}
+
+run_upgrade_fail() {
+    : > "$command_log"
+    : > "$request_log"
+    exit_code=0
+    if PATH=$upgrade_metadata_path "$upgrade_metadata_test_binary" "$@" > "$output_file" 2>&1; then
+        echo "expected upgrade metadata command to fail: $*" >&2
+        sed -n '1,260p' "$output_file" >&2
+        cat "$command_log" >&2
+        exit 1
+    else
+        exit_code=$?
+    fi
+    if [ "$exit_code" -ne 1 ]; then
+        echo "unexpected upgrade metadata exit code: $exit_code (expected 1)" >&2
+        sed -n '1,260p' "$output_file" >&2
+        cat "$command_log" >&2
+        exit 1
+    fi
+    # failure経路でもlegacy package-specific queryへfallbackしない。
+    assert_command_content_absent "pacman -Q "
 }
 
 run_ok_stdin_closed() {
@@ -225,6 +297,42 @@ assert_not_contains() {
     fi
 }
 
+assert_cleanup_partial_success_fixture() {
+    success_log=$1
+    if [ ! -s "$success_log" ]; then
+        echo "fake pacman -U did not record a successful install in case $case_name" >&2
+        exit 1
+    fi
+    installed_artifact=$(sed -n '1p' "$success_log")
+    if [ -z "$installed_artifact" ] ||
+       [ "$(wc -l < "$success_log")" -ne 1 ]; then
+        echo "unexpected fake pacman -U success log in case $case_name" >&2
+        cat "$success_log" >&2
+        exit 1
+    fi
+    workspace_path=${installed_artifact%/*}
+    displaced_workspace=${workspace_path}.installed-before-cleanup
+    artifact_name=${installed_artifact##*/}
+    if [ ! -d "$workspace_path" ] ||
+       [ ! -f "$displaced_workspace/$artifact_name" ]; then
+        echo "cleanup partial-success fixture was not retained in case $case_name" >&2
+        exit 1
+    fi
+}
+
+assert_output_line_count() {
+    pattern=$1
+    expected_count=$2
+    file=$3
+    actual_count=$(grep -Fc -- "$pattern" "$file" || true)
+    if [ "$actual_count" -ne "$expected_count" ]; then
+        echo "unexpected output count for: $pattern" >&2
+        echo "expected $expected_count, got $actual_count" >&2
+        sed -n '1,260p' "$file" >&2
+        exit 1
+    fi
+}
+
 assert_command() {
     expected=$1
     if ! grep -Fx -- "$expected" "$command_log" >/dev/null; then
@@ -252,6 +360,14 @@ assert_command_content_absent() {
     fi
 }
 
+assert_separated_source_commands() {
+    expected_count=$1
+    assert_command_count "makepkg --packagelist" "$expected_count"
+    assert_command_prefix_count "pacman -U --print --print-format " "$expected_count"
+    assert_command_prefix_count "sudo pacman -U " "$expected_count"
+    assert_command_content_absent "pacman -D"
+}
+
 assert_command_at() {
     line_number=$1
     expected=$2
@@ -270,6 +386,21 @@ assert_command_count() {
     actual_count=$(grep -Fxc -- "$expected" "$command_log" || true)
     if [ "$actual_count" -ne "$expected_count" ]; then
         echo "unexpected command count for: $expected" >&2
+        echo "expected $expected_count, got $actual_count" >&2
+        cat "$command_log" >&2
+        exit 1
+    fi
+}
+
+assert_command_prefix_count() {
+    expected_prefix=$1
+    expected_count=$2
+    actual_count=$(awk -v prefix="$expected_prefix" '
+        index($0, prefix) == 1 { count++ }
+        END { print count + 0 }
+    ' "$command_log")
+    if [ "$actual_count" -ne "$expected_count" ]; then
+        echo "unexpected command prefix count for: $expected_prefix" >&2
         echo "expected $expected_count, got $actual_count" >&2
         cat "$command_log" >&2
         exit 1
@@ -318,6 +449,21 @@ assert_command_occurrence_before() {
         cat "$command_log" >&2
         exit 1
     fi
+}
+
+assert_single_package_metadata_snapshots_around_syu() {
+    package_name=$1
+    expected_session_count=${2:-3}
+    assert_command_count "pacman-conf --verbose RootDir DBPath" 1
+    assert_command_count "alpm initialize" "$expected_session_count"
+    assert_command_count "alpm query $package_name" "$expected_session_count"
+    assert_command_count "alpm release" "$expected_session_count"
+    assert_command_occurrence_before "alpm query $package_name" 1 "alpm release" 1
+    assert_command_occurrence_before "alpm release" 1 "sudo pacman -Syu --noconfirm" 1
+    assert_command_occurrence_before "pacman-conf --verbose RootDir DBPath" 1 "alpm initialize" 1
+    assert_command_occurrence_before "sudo pacman -Syu --noconfirm" 1 "alpm initialize" 2
+    assert_command_occurrence_before "alpm initialize" 2 "alpm query $package_name" 2
+    assert_command_occurrence_before "alpm query $package_name" 2 "alpm release" 2
 }
 
 assert_output_before() {
@@ -403,7 +549,10 @@ setup_upgrade_transition_case() {
     if [ "$installed_version_before_syu" != not-installed ]; then
         printf '%s %s\n' "$upgrade_package" "$installed_version_before_syu" > "$installed_version_before"
     fi
-    printf '%s %s\n' "$upgrade_package" "$installed_version_after_syu" > "$installed_version_after"
+    : > "$installed_version_after"
+    if [ "$installed_version_after_syu" != not-installed ]; then
+        printf '%s %s\n' "$upgrade_package" "$installed_version_after_syu" > "$installed_version_after"
+    fi
     cp "$installed_version_before" "$installed_version_state"
 
     write_upgrade_srcinfo "$initial_srcinfo" 1.0 1
@@ -420,6 +569,7 @@ setup_upgrade_transition_case() {
     : > "$vercmp_argv_log"
     : > "$makepkg_argv_log"
     export JPACKER_TEST_PACMAN_Q_OUTPUT_FILE=$installed_version_state
+    export JPACKER_TEST_PACKAGE_METADATA_STATE_FILE=$installed_version_state
     export JPACKER_TEST_SOURCE_MAINTENANCE_PACMAN_SYU_Q_OUTPUT_FILE=$installed_version_after
     export JPACKER_TEST_GIT_RESET_SRCINFO_FIXTURE=$remote_srcinfo
     export JPACKER_TEST_VERCMP_ARGV_LOG=$vercmp_argv_log
@@ -445,13 +595,33 @@ assert_total_command_count 0
 
 setup_case build-environment-order
 export JPACKER_TEST_PACMAN_REPO_PACKAGES=clean-root
-run_ok --noedit --nodiff --noconfirm build \
-    FIRST=one clean-root "SECOND=two words" FIRST=last ignored
+run_fail --noedit --nodiff --noconfirm build \
+    FIRST=one clean-root "SECOND=two words" FIRST=last EMPTY= \
+    PKGDEST=first-path PKGDEST= ignored
 assert_contains "Ignoring extra arg 'ignored'" "$output_file"
-assert_contains "Applying custom build flags: FIRST='one' SECOND='two words' FIRST='last' " "$output_file"
+assert_contains "Source environment PKGDEST conflicts with invocation-owned artifact workspace." "$output_file"
 assert_command "pacman -Si clean-root"
-assert_command "git clone https://gitlab.archlinux.org/archlinux/packaging/packages/clean-root.git clean-root"
-assert_command "makepkg -sic --noconfirm"
+assert_command_count "pacman-conf --verbose RootDir DBPath" 0
+assert_command_content_absent "git clone"
+assert_command_content_absent "makepkg"
+assert_command_content_absent "pacman -U"
+
+setup_case build-inherited-pkgdest
+export JPACKER_TEST_PACMAN_REPO_PACKAGES=clean-root
+export PKGDEST=
+run_fail --noedit --nodiff --noconfirm build clean-root
+assert_contains "Inherited PKGDEST conflicts with invocation-owned artifact workspace." "$output_file"
+assert_command "pacman -Si clean-root"
+assert_command_count "pacman-conf --verbose RootDir DBPath" 0
+assert_command_content_absent "git clone"
+assert_command_content_absent "makepkg"
+assert_command_content_absent "pacman -U"
+
+setup_case build-rmdeps-rejected
+run_fail --rmdeps --noedit --nodiff --noconfirm build clean-root
+assert_contains "Separated build/install does not support --rmdeps." "$output_file"
+assert_total_command_count 0
+assert_request_log_empty
 
 setup_case build-resolve-failure
 run_fail build missing-source-package
@@ -485,9 +655,30 @@ assert_not_contains "split package install target selection is not implemented" 
 setup_case build-execution-failure
 export JPACKER_TEST_PACMAN_REPO_PACKAGES=clean-root
 export JPACKER_TEST_MAKEPKG_EXIT_CODE=42
+export JPACKER_TEST_MAKEPKG_PACKAGELIST_EXIT_CODE=0
 run_fail --noedit --nodiff build clean-root
-assert_contains "Build Error: Build failed." "$output_file"
-assert_command "makepkg -sic"
+assert_contains "Build Error: Failed while building/installing PackageBase clean-root (clean-root): Build-only makepkg failed with exit code 42." "$output_file"
+assert_command "makepkg --packagelist"
+assert_command "makepkg -sc"
+assert_command_content_absent "sudo pacman -U"
+
+setup_case build-cleanup-partial-success-keeps-cli-contract
+installed_after_success=$case_dir/installed-after-success
+install_success_log=$XDG_CACHE_HOME/pacman-u-success.log
+printf 'clean-root 1.0-1\n' > "$installed_after_success"
+: > "$install_success_log"
+export JPACKER_TEST_PACMAN_REPO_PACKAGES=clean-root
+export JPACKER_TEST_MAKEPKG_PACKAGE_METADATA_STATE_AFTER_SUCCESS_FILE=$installed_after_success
+export JPACKER_TEST_PACMAN_U_SUCCESS_LOG=$install_success_log
+export JPACKER_TEST_REPLACE_WORKSPACE_AFTER_PACMAN_U=1
+run_fail --noedit --nodiff --noconfirm build clean-root
+assert_contains "Package installation succeeded, but artifact workspace cleanup failed:" "$output_file"
+assert_not_contains "Build Error:" "$output_file"
+assert_not_contains "Failed while building/installing PackageBase" "$output_file"
+assert_not_contains "pacman -U failed" "$output_file"
+assert_command_prefix_count "sudo pacman -U --noconfirm -- " 1
+assert_file_equals "$installed_after_success" "$package_metadata_state"
+assert_cleanup_partial_success_fixture "$install_success_log"
 
 echo "  ok: P0-1 cmd_build"
 
@@ -950,44 +1141,278 @@ fi
 echo "  ok: P0-5 cmd_clean"
 
 # P0-6: upgrade keeps metadata preflight -> pacman -> source execution and catch hierarchy.
+setup_case upgrade-metadata-no-target
+run_upgrade_ok --noconfirm upgrade
+assert_command "sudo pacman -Syu --noconfirm"
+assert_command_content_absent "pacman-conf "
+assert_command_content_absent "alpm "
+assert_total_command_count 1
+
+setup_case upgrade-metadata-no-preference-root
+rmdir "$preference_dir"
+run_upgrade_ok --noconfirm upgrade
+assert_command "sudo pacman -Syu --noconfirm"
+assert_command_content_absent "pacman-conf "
+assert_command_content_absent "alpm "
+assert_total_command_count 1
+
+setup_case upgrade-metadata-nonregular-only
+mkdir "$preference_dir/alpha"
+run_upgrade_ok --noconfirm upgrade
+assert_command "sudo pacman -Syu --noconfirm"
+assert_command_content_absent "pacman-conf "
+assert_command_content_absent "alpm "
+assert_total_command_count 1
+
+setup_case upgrade-metadata-invalid-preference-only
+: > "$preference_dir/bad name"
+run_upgrade_fail --noconfirm upgrade
+assert_contains "Ignoring invalid source-build preference filename: bad name" "$output_file"
+assert_output_line_count "Ignoring invalid source-build preference filename: bad name" 1 "$output_file"
+assert_command "sudo pacman -Syu --noconfirm"
+assert_command_content_absent "pacman-conf "
+assert_command_content_absent "alpm "
+assert_command_absent "pacman -Si bad name"
+assert_command_content_absent "git "
+assert_command_content_absent "makepkg "
+assert_request_log_empty
+assert_output_before "System upgrade..." "Ignoring invalid source-build preference filename: bad name" "$output_file"
+
+setup_case upgrade-multi-source-pkgdest-before-syu
+: > "$preference_dir/alpha"
+printf 'PKGDEST=\n' > "$preference_dir/beta"
+export JPACKER_TEST_PACMAN_REPO_PACKAGES='alpha beta'
+mkdir -p "$cache_root/preflight-sentinel"
+printf 'stable upgrade preflight fixture\n' > \
+    "$cache_root/preflight-sentinel/state"
+upgrade_preflight_checksum=$(cksum \
+    "$cache_root/preflight-sentinel/state")
+run_upgrade_fail --noedit --nodiff --noconfirm upgrade
+assert_contains "Source environment PKGDEST conflicts with invocation-owned artifact workspace." "$output_file"
+assert_command_count "pacman -Si alpha" 1
+assert_command_count "pacman -Si beta" 1
+assert_command_count "pacman-conf --verbose RootDir DBPath" 0
+assert_command_content_absent "alpm "
+assert_command_absent "sudo pacman -Syu --noconfirm"
+assert_command_content_absent "git "
+assert_command_content_absent "makepkg"
+assert_command_content_absent "pacman -U"
+if [ -e "$cache_root/alpha" ] || [ -L "$cache_root/alpha" ] ||
+   [ -e "$cache_root/beta" ] || [ -L "$cache_root/beta" ]; then
+    echo "upgrade PKGDEST preflight created a checkout" >&2
+    exit 1
+fi
+upgrade_preflight_after=$(cksum \
+    "$cache_root/preflight-sentinel/state")
+upgrade_preflight_entry_count=$(find "$cache_root" \
+    -mindepth 1 -maxdepth 1 -print | wc -l)
+if [ "$upgrade_preflight_after" != "$upgrade_preflight_checksum" ] ||
+   [ "$upgrade_preflight_entry_count" -ne 1 ]; then
+    echo "upgrade PKGDEST preflight mutated the cache tree" >&2
+    exit 1
+fi
+
+setup_case upgrade-metadata-resolver-failure
+: > "$preference_dir/alpha"
+export JPACKER_TEST_PACMAN_REPO_PACKAGES=alpha
+export JPACKER_TEST_PACKAGE_METADATA_PACMAN_CONF_EXIT_CODE=42
+run_upgrade_fail --noconfirm upgrade
+assert_contains "pacman-conf failed with exit code 42." "$output_file"
+assert_command_count "pacman-conf --verbose RootDir DBPath" 1
+assert_command_content_absent "alpm "
+assert_command_absent "sudo pacman -Syu --noconfirm"
+assert_command_content_absent "git "
+assert_command_content_absent "makepkg "
+
+setup_case upgrade-metadata-session-open-failure
+: > "$preference_dir/alpha"
+printf 'alpha 1.0-1\n' > "$package_metadata_state"
+export JPACKER_TEST_PACMAN_REPO_PACKAGES=alpha
+export JPACKER_TEST_PACKAGE_METADATA_INITIALIZE_FAILURE=1
+run_upgrade_fail --noconfirm upgrade
+assert_contains "Failed to initialize package metadata session: system error." "$output_file"
+assert_command_count "pacman-conf --verbose RootDir DBPath" 1
+assert_command_count "alpm initialize" 1
+assert_command_content_absent "alpm query "
+assert_command_absent "alpm release"
+assert_command_absent "sudo pacman -Syu --noconfirm"
+assert_command_content_absent "git "
+assert_command_content_absent "makepkg "
+
+setup_case upgrade-metadata-query-failure
+: > "$preference_dir/alpha"
+printf 'alpha 1.0-1\n' > "$package_metadata_state"
+export JPACKER_TEST_PACMAN_REPO_PACKAGES=alpha
+export JPACKER_TEST_PACKAGE_METADATA_QUERY_FAILURE_PACKAGE=alpha
+run_upgrade_fail --noconfirm upgrade
+assert_contains "Failed to query installed package metadata for alpha: Installed package query failed: database open failed." "$output_file"
+assert_command_count "pacman-conf --verbose RootDir DBPath" 1
+assert_command_count "alpm initialize" 1
+assert_command_count "alpm query alpha" 1
+assert_command_count "alpm release" 1
+assert_command_absent "sudo pacman -Syu --noconfirm"
+assert_command_content_absent "git "
+assert_command_content_absent "makepkg "
+
+setup_case upgrade-metadata-multi-target-failure
+for package in alpha beta gamma; do
+    : > "$preference_dir/$package"
+    printf '%s 1.0-1\n' "$package" >> "$package_metadata_state"
+done
+export JPACKER_TEST_PACMAN_REPO_PACKAGES='alpha beta gamma'
+export JPACKER_TEST_PACKAGE_METADATA_QUERY_FAILURE_AT=2
+run_upgrade_fail --noconfirm upgrade
+assert_contains "Failed to query installed package metadata for " "$output_file"
+assert_command_count "pacman-conf --verbose RootDir DBPath" 1
+assert_command_count "alpm initialize" 1
+assert_command_prefix_count "alpm query " 2
+assert_command_count "alpm release" 1
+assert_command_absent "sudo pacman -Syu --noconfirm"
+assert_command_content_absent "git "
+assert_command_content_absent "makepkg "
+
+setup_case upgrade-database-paths-resolved-once
+: > "$preference_dir/alpha"
+printf 'alpha 1.0-1\n' > "$package_metadata_state"
+export JPACKER_TEST_PACMAN_REPO_PACKAGES=alpha
+export JPACKER_TEST_PACKAGE_METADATA_PACMAN_CONF_EXIT_CODE=42
+export JPACKER_TEST_PACKAGE_METADATA_PACMAN_CONF_FAILURE_AT=2
+run_upgrade_ok --noedit --nodiff --noconfirm upgrade
+assert_command_count "pacman-conf --verbose RootDir DBPath" 1
+assert_command_count "alpm initialize" 2
+assert_command_count "alpm query alpha" 2
+assert_command_count "alpm release" 2
+assert_command "sudo pacman -Syu --noconfirm"
+assert_command_count "pacman -Si alpha" 1
+assert_command_occurrence_before "alpm release" 1 "sudo pacman -Syu --noconfirm" 1
+assert_command_occurrence_before "sudo pacman -Syu --noconfirm" 1 "alpm initialize" 2
+assert_command_content_absent "makepkg"
+assert_command_content_absent "pacman -U"
+
+setup_case upgrade-post-metadata-session-open-failure
+: > "$preference_dir/alpha"
+printf 'alpha 1.0-1\n' > "$package_metadata_state"
+export JPACKER_TEST_PACMAN_REPO_PACKAGES=alpha
+export JPACKER_TEST_PACKAGE_METADATA_INITIALIZE_FAILURE_AT=2
+run_upgrade_fail --noconfirm upgrade
+post_snapshot_failure_prefix="System upgrade completed, but post-upgrade package metadata snapshot failed: "
+post_initialize_failure_diagnostic="${post_snapshot_failure_prefix}Failed to initialize package metadata session: system error."
+assert_contains "$post_initialize_failure_diagnostic" "$output_file"
+assert_output_line_count "$post_initialize_failure_diagnostic" 1 "$output_file"
+assert_not_contains "${post_snapshot_failure_prefix}${post_snapshot_failure_prefix}" "$output_file"
+assert_command_count "pacman-conf --verbose RootDir DBPath" 1
+assert_command_count "alpm initialize" 2
+assert_command_count "alpm query alpha" 1
+assert_command_count "alpm release" 1
+assert_command "sudo pacman -Syu --noconfirm"
+assert_command_count "pacman -Si alpha" 1
+assert_command_occurrence_before "sudo pacman -Syu --noconfirm" 1 "alpm initialize" 2
+assert_command_content_absent "git "
+assert_command_content_absent "makepkg "
+
+setup_case upgrade-post-metadata-query-failure
+: > "$preference_dir/alpha"
+printf 'alpha 1.0-1\n' > "$package_metadata_state"
+export JPACKER_TEST_PACMAN_REPO_PACKAGES=alpha
+export JPACKER_TEST_PACKAGE_METADATA_QUERY_FAILURE_AT=2
+run_upgrade_fail --noedit --nodiff --noconfirm upgrade
+post_query_failure_diagnostic="System upgrade completed, but post-upgrade package metadata query failed for alpha: Installed package query failed: database open failed. Source processing did not start."
+assert_contains "$post_query_failure_diagnostic" "$output_file"
+assert_output_line_count "$post_query_failure_diagnostic" 1 "$output_file"
+assert_command_count "pacman-conf --verbose RootDir DBPath" 1
+assert_command_count "alpm initialize" 2
+assert_command_count "alpm query alpha" 2
+assert_command_count "alpm release" 2
+assert_command "sudo pacman -Syu --noconfirm"
+assert_command_count "pacman -Si alpha" 1
+assert_command_occurrence_before "alpm query alpha" 2 "alpm release" 2
+assert_command_content_absent "git "
+assert_command_content_absent "vercmp "
+assert_command_content_absent "makepkg "
+
+setup_case upgrade-post-metadata-multi-target-query-failure
+multi_checkout_fixture=$case_dir/multi-checkout-fixture
+mkdir -p "$multi_checkout_fixture/.git"
+write_upgrade_srcinfo "$multi_checkout_fixture/.SRCINFO" 2.0 1
+printf 'pkgname=fixture\npkgver=2.0\npkgrel=1\n' > "$multi_checkout_fixture/PKGBUILD"
+for package in alpha beta gamma; do
+    : > "$preference_dir/$package"
+    printf '%s 1.0-1\n' "$package" >> "$package_metadata_state"
+done
+export JPACKER_TEST_PACMAN_REPO_PACKAGES='alpha beta gamma'
+export JPACKER_TEST_PACKAGE_METADATA_QUERY_FAILURE_AT=5
+export JPACKER_TEST_GIT_CLONE_FIXTURE_DIR=$multi_checkout_fixture
+export JPACKER_TEST_VERCMP_OUTPUT=1
+run_upgrade_fail --noedit --nodiff --noconfirm upgrade
+failed_package=$(awk '
+    $1 == "alpm" && $2 == "query" {
+        query_count++
+        if(query_count == 5) print $3
+    }
+' "$command_log")
+if [ -z "$failed_package" ]; then
+    echo "failed to identify the post-upgrade query failure package" >&2
+    cat "$command_log" >&2
+    exit 1
+fi
+assert_command_count "pacman-conf --verbose RootDir DBPath" 1
+assert_command_count "alpm initialize" 2
+assert_command_prefix_count "alpm query " 6
+assert_command_count "alpm release" 2
+assert_command_content_absent "makepkg"
+assert_command_content_absent "vercmp"
+assert_command_content_absent "git clone"
+assert_command_content_absent "pacman -U"
+for package in alpha beta gamma; do
+    assert_command_count "alpm query $package" 2
+    assert_command_occurrence_before "alpm query $package" 2 "alpm release" 2
+    assert_command_count "pacman -Si $package" 1
+done
+multi_query_failure_diagnostic="System upgrade completed, but post-upgrade package metadata query failed for $failed_package: Installed package query failed: database open failed. Source processing did not start."
+assert_contains "$multi_query_failure_diagnostic" "$output_file"
+assert_output_line_count "$multi_query_failure_diagnostic" 1 "$output_file"
+
 setup_case upgrade-ordinary-preflight-errors
 : > "$preference_dir/missing-upgrade-a"
 : > "$preference_dir/missing-upgrade-b"
-run_fail --noconfirm upgrade
-assert_command "sudo pacman -Syu --noconfirm"
-assert_contains "Error updating missing-upgrade-a:" "$output_file"
-assert_contains "Error updating missing-upgrade-b:" "$output_file"
-assert_output_before "System upgrade..." "Error updating missing-upgrade-a:" "$output_file"
+run_upgrade_fail --noconfirm upgrade
+assert_command_count "pacman-conf --verbose RootDir DBPath" 0
+assert_command_content_absent "alpm "
+assert_command_prefix_count "pacman -Si missing-upgrade-" 1
+assert_command_absent "sudo pacman -Syu --noconfirm"
+assert_contains "Package not found in repos or AUR: missing-upgrade-" "$output_file"
 assert_command_content_absent "git clone"
 assert_command_content_absent "makepkg"
 
 setup_case upgrade-pacman-failure
 : > "$preference_dir/clean-root"
 printf 'pacman -Syu --noconfirm\n' > "$sudo_failures"
-run_fail --noedit --nodiff --noconfirm upgrade
+run_upgrade_fail --noedit --nodiff --noconfirm upgrade
 assert_command "pacman -Si clean-root"
-assert_command_count "pacman -Q clean-root" 1
+assert_command_count "pacman-conf --verbose RootDir DBPath" 1
+assert_command_count "alpm initialize" 1
+assert_command_count "alpm query clean-root" 1
+assert_command_count "alpm release" 1
+assert_command_absent "pacman -Q clean-root"
 assert_command "sudo pacman -Syu --noconfirm"
-assert_command_before "pacman -Q clean-root" "sudo pacman -Syu --noconfirm"
+assert_command_before "alpm release" "sudo pacman -Syu --noconfirm"
 assert_contains "Update failed." "$output_file"
 assert_command_content_absent "git clone"
 assert_command_content_absent "makepkg"
 
-setup_case upgrade-continues-source-packages
+setup_case upgrade-static-source-failure-stops-all-packages
 : > "$preference_dir/clean-root"
 : > "$preference_dir/missing-upgrade"
 : > "$preference_dir/bad name"
-run_fail --noedit --nodiff --noconfirm upgrade
-assert_contains "Ignoring invalid source-build preference filename: bad name" "$output_file"
-assert_contains "Error updating missing-upgrade:" "$output_file"
-assert_command "sudo pacman -Syu --noconfirm"
-assert_command "git clone https://aur.archlinux.org/clean-root.git clean-root"
-assert_command_count "pacman -Q clean-root" 2
-assert_command "makepkg -sic --noconfirm"
-assert_command_occurrence_before "pacman -Q clean-root" 1 "sudo pacman -Syu --noconfirm" 1
-assert_command_occurrence_before "sudo pacman -Syu --noconfirm" 1 "git clone https://aur.archlinux.org/clean-root.git clean-root" 1
-assert_command_occurrence_before "git clone https://aur.archlinux.org/clean-root.git clean-root" 1 "pacman -Q clean-root" 2
-assert_command_occurrence_before "pacman -Q clean-root" 2 "makepkg -sic --noconfirm" 1
+run_upgrade_fail --noedit --nodiff --noconfirm upgrade
+assert_contains "Package not found in repos or AUR: missing-upgrade" "$output_file"
+assert_command "pacman -Si missing-upgrade"
+assert_command_count "pacman-conf --verbose RootDir DBPath" 0
+assert_command_content_absent "alpm "
+assert_command_absent "sudo pacman -Syu --noconfirm"
+assert_command_content_absent "git clone"
+assert_command_content_absent "makepkg"
+assert_command_content_absent "pacman -U"
 
 # Issue #215 regression: system transactionでofficial binaryへ置換された場合も、
 # source-build preferenceを実際のinstalled packageへ反映する。
@@ -999,32 +1424,35 @@ setup_upgrade_transition_case \
     1.0-1 2.0-1 enabled "$official_source_url"
 export JPACKER_TEST_PACMAN_REPO_PACKAGES=$upgrade_package
 assert_file_equals "$installed_version_before" "$installed_version_state"
-run_ok --noedit --nodiff --noconfirm upgrade
+run_upgrade_ok --noedit --nodiff --noconfirm upgrade
 assert_file_equals "$installed_version_after" "$installed_version_state"
 assert_file_equals "$remote_srcinfo" "$checkout_dir/.SRCINFO"
 assert_contains "Loading custom build flags from $preference_dir/$upgrade_package" "$output_file"
 assert_contains "$upgrade_package was updated by the system transaction (1.0-1 -> 2.0-1); rebuilding the preferred source package." "$output_file"
 assert_not_contains "$upgrade_package is up to date (2.0-1). Skipping." "$output_file"
-assert_command_count "pacman -Si $upgrade_package" 2
+assert_command_count "pacman -Si $upgrade_package" 1
 assert_command "sudo pacman -Syu --noconfirm"
+assert_single_package_metadata_snapshots_around_syu "$upgrade_package"
 assert_command "git fetch origin"
 assert_command "git reset --hard origin/main"
-assert_command_count "pacman -Q $upgrade_package" 2
+assert_command_absent "pacman -Q $upgrade_package"
 assert_command "vercmp 2.0-1 2.0-1"
-assert_command_count "makepkg -sic --noconfirm" 1
+assert_command_count "makepkg -sc --noconfirm" 1
+assert_separated_source_commands 1
 assert_command_content_absent "git clone"
-assert_command_occurrence_before "pacman -Q $upgrade_package" 1 "sudo pacman -Syu --noconfirm" 1
-assert_command_occurrence_before "sudo pacman -Syu --noconfirm" 1 "git fetch origin" 1
+assert_command_occurrence_before "alpm release" 2 "git fetch origin" 1
 assert_command_occurrence_before "git fetch origin" 1 "git reset --hard origin/main" 1
-assert_command_occurrence_before "git reset --hard origin/main" 1 "pacman -Q $upgrade_package" 2
-assert_command_occurrence_before "pacman -Q $upgrade_package" 2 "vercmp 2.0-1 2.0-1" 1
-assert_command_occurrence_before "vercmp 2.0-1 2.0-1" 1 "makepkg -sic --noconfirm" 1
+assert_command_occurrence_before "git reset --hard origin/main" 1 "vercmp 2.0-1 2.0-1" 1
+assert_command_occurrence_before "vercmp 2.0-1 2.0-1" 1 "makepkg --packagelist" 1
 assert_argv_log "$vercmp_argv_log" 'argv-begin
 arg[0]=<2.0-1>
 arg[1]=<2.0-1>
 argv-end'
 assert_argv_log "$makepkg_argv_log" 'argv-begin
-arg[0]=<-sic>
+arg[0]=<--packagelist>
+argv-end
+argv-begin
+arg[0]=<-sc>
 arg[1]=<--noconfirm>
 argv-end'
 assert_request_log_empty
@@ -1035,30 +1463,33 @@ setup_upgrade_transition_case \
     1.0-1 1.0-1 enabled "$official_source_url"
 export JPACKER_TEST_PACMAN_REPO_PACKAGES=$upgrade_package
 assert_file_equals "$installed_version_before" "$installed_version_state"
-run_ok --noedit --nodiff --noconfirm upgrade
+run_upgrade_ok --noedit --nodiff --noconfirm upgrade
 assert_file_equals "$installed_version_after" "$installed_version_state"
 assert_file_equals "$remote_srcinfo" "$checkout_dir/.SRCINFO"
 assert_contains "Loading custom build flags from $preference_dir/$upgrade_package" "$output_file"
 assert_not_contains "rebuilding the preferred source package." "$output_file"
-assert_command_count "pacman -Si $upgrade_package" 2
+assert_command_count "pacman -Si $upgrade_package" 1
 assert_command "sudo pacman -Syu --noconfirm"
+assert_single_package_metadata_snapshots_around_syu "$upgrade_package"
 assert_command "git fetch origin"
 assert_command "git reset --hard origin/main"
-assert_command_count "pacman -Q $upgrade_package" 2
+assert_command_absent "pacman -Q $upgrade_package"
 assert_command "vercmp 2.0-1 1.0-1"
-assert_command_count "makepkg -sic --noconfirm" 1
+assert_command_count "makepkg -sc --noconfirm" 1
+assert_separated_source_commands 1
 assert_command_content_absent "git clone"
-assert_command_occurrence_before "pacman -Q $upgrade_package" 1 "sudo pacman -Syu --noconfirm" 1
-assert_command_occurrence_before "sudo pacman -Syu --noconfirm" 1 "git fetch origin" 1
-assert_command_occurrence_before "git reset --hard origin/main" 1 "pacman -Q $upgrade_package" 2
-assert_command_occurrence_before "pacman -Q $upgrade_package" 2 "vercmp 2.0-1 1.0-1" 1
-assert_command_occurrence_before "vercmp 2.0-1 1.0-1" 1 "makepkg -sic --noconfirm" 1
+assert_command_occurrence_before "alpm release" 2 "git fetch origin" 1
+assert_command_occurrence_before "git reset --hard origin/main" 1 "vercmp 2.0-1 1.0-1" 1
+assert_command_occurrence_before "vercmp 2.0-1 1.0-1" 1 "makepkg --packagelist" 1
 assert_argv_log "$vercmp_argv_log" 'argv-begin
 arg[0]=<2.0-1>
 arg[1]=<1.0-1>
 argv-end'
 assert_argv_log "$makepkg_argv_log" 'argv-begin
-arg[0]=<-sic>
+arg[0]=<--packagelist>
+argv-end
+argv-begin
+arg[0]=<-sc>
 arg[1]=<--noconfirm>
 argv-end'
 assert_request_log_empty
@@ -1068,11 +1499,13 @@ setup_upgrade_transition_case \
     1.0-1 2.0-1 disabled "$official_source_url"
 export JPACKER_TEST_PACMAN_REPO_PACKAGES=$upgrade_package
 assert_file_equals "$installed_version_before" "$installed_version_state"
-run_ok --noedit --nodiff --noconfirm upgrade
+run_upgrade_ok --noedit --nodiff --noconfirm upgrade
 assert_file_equals "$installed_version_after" "$installed_version_state"
 assert_file_equals "$initial_srcinfo" "$checkout_dir/.SRCINFO"
 assert_not_contains "rebuilding the preferred source package." "$output_file"
 assert_command "sudo pacman -Syu --noconfirm"
+assert_command_content_absent "pacman-conf "
+assert_command_content_absent "alpm "
 assert_command_absent "pacman -Si $upgrade_package"
 assert_command_content_absent "git "
 assert_command_absent "pacman -Q $upgrade_package"
@@ -1087,31 +1520,34 @@ setup_upgrade_transition_case \
     issue-215-case-4-aur-build-after-system-upgrade \
     1.0-1 1.0-1 enabled "$aur_source_url"
 assert_file_equals "$installed_version_before" "$installed_version_state"
-run_ok --noedit --nodiff --noconfirm upgrade
+run_upgrade_ok --noedit --nodiff --noconfirm upgrade
 assert_file_equals "$installed_version_after" "$installed_version_state"
 assert_file_equals "$remote_srcinfo" "$checkout_dir/.SRCINFO"
 assert_contains "Loading custom build flags from $preference_dir/$upgrade_package" "$output_file"
 assert_not_contains "rebuilding the preferred source package." "$output_file"
-assert_command "pacman -Si $upgrade_package"
+assert_command_count "pacman -Si $upgrade_package" 1
 assert_command "sudo pacman -Syu --noconfirm"
+assert_single_package_metadata_snapshots_around_syu "$upgrade_package"
 assert_command "git fetch origin"
 assert_command "git reset --hard origin/main"
-assert_command_count "pacman -Q $upgrade_package" 2
+assert_command_absent "pacman -Q $upgrade_package"
 assert_command "vercmp 2.0-1 1.0-1"
-assert_command_count "makepkg -sic --noconfirm" 1
+assert_command_count "makepkg -sc --noconfirm" 1
+assert_separated_source_commands 1
 assert_command_content_absent "git clone"
-assert_command_occurrence_before "pacman -Si $upgrade_package" 1 "pacman -Q $upgrade_package" 1
-assert_command_occurrence_before "pacman -Q $upgrade_package" 1 "sudo pacman -Syu --noconfirm" 1
-assert_command_occurrence_before "sudo pacman -Syu --noconfirm" 1 "git fetch origin" 1
-assert_command_occurrence_before "git reset --hard origin/main" 1 "pacman -Q $upgrade_package" 2
-assert_command_occurrence_before "pacman -Q $upgrade_package" 2 "vercmp 2.0-1 1.0-1" 1
-assert_command_occurrence_before "vercmp 2.0-1 1.0-1" 1 "makepkg -sic --noconfirm" 1
+assert_command_occurrence_before "pacman -Si $upgrade_package" 1 "alpm query $upgrade_package" 1
+assert_command_occurrence_before "alpm release" 2 "git fetch origin" 1
+assert_command_occurrence_before "git reset --hard origin/main" 1 "vercmp 2.0-1 1.0-1" 1
+assert_command_occurrence_before "vercmp 2.0-1 1.0-1" 1 "makepkg --packagelist" 1
 assert_argv_log "$vercmp_argv_log" 'argv-begin
 arg[0]=<2.0-1>
 arg[1]=<1.0-1>
 argv-end'
 assert_argv_log "$makepkg_argv_log" 'argv-begin
-arg[0]=<-sic>
+arg[0]=<--packagelist>
+argv-end
+argv-begin
+arg[0]=<-sc>
 arg[1]=<--noconfirm>
 argv-end'
 if [ ! -s "$request_log" ]; then
@@ -1124,20 +1560,19 @@ setup_upgrade_transition_case \
     2.0-1 2.0-1 enabled "$official_source_url"
 export JPACKER_TEST_PACMAN_REPO_PACKAGES=$upgrade_package
 assert_file_equals "$installed_version_before" "$installed_version_state"
-run_ok --noedit --nodiff --noconfirm upgrade
+run_upgrade_ok --noedit --nodiff --noconfirm upgrade
 assert_file_equals "$installed_version_after" "$installed_version_state"
 assert_file_equals "$remote_srcinfo" "$checkout_dir/.SRCINFO"
 assert_contains "$upgrade_package is up to date (2.0-1). Skipping." "$output_file"
 assert_not_contains "rebuilding the preferred source package." "$output_file"
-assert_command_count "pacman -Si $upgrade_package" 2
-assert_command_count "pacman -Q $upgrade_package" 2
+assert_command_count "pacman -Si $upgrade_package" 1
+assert_command_absent "pacman -Q $upgrade_package"
 assert_command "sudo pacman -Syu --noconfirm"
+assert_single_package_metadata_snapshots_around_syu "$upgrade_package" 2
 assert_command "git reset --hard origin/main"
 assert_command "vercmp 2.0-1 2.0-1"
 assert_command_content_absent "makepkg"
-assert_command_occurrence_before "pacman -Q $upgrade_package" 1 "sudo pacman -Syu --noconfirm" 1
-assert_command_occurrence_before "git reset --hard origin/main" 1 "pacman -Q $upgrade_package" 2
-assert_command_occurrence_before "pacman -Q $upgrade_package" 2 "vercmp 2.0-1 2.0-1" 1
+assert_command_occurrence_before "git reset --hard origin/main" 1 "vercmp 2.0-1 2.0-1" 1
 assert_argv_log "$vercmp_argv_log" 'argv-begin
 arg[0]=<2.0-1>
 arg[1]=<2.0-1>
@@ -1150,20 +1585,19 @@ setup_upgrade_transition_case \
     1.0-1 3.0-1 enabled "$official_source_url"
 export JPACKER_TEST_PACMAN_REPO_PACKAGES=$upgrade_package
 assert_file_equals "$installed_version_before" "$installed_version_state"
-run_ok --noedit --nodiff --noconfirm upgrade
+run_upgrade_ok --noedit --nodiff --noconfirm upgrade
 assert_file_equals "$installed_version_after" "$installed_version_state"
 assert_file_equals "$remote_srcinfo" "$checkout_dir/.SRCINFO"
 assert_contains "$upgrade_package is up to date (3.0-1). Skipping." "$output_file"
 assert_not_contains "rebuilding the preferred source package." "$output_file"
-assert_command_count "pacman -Si $upgrade_package" 2
-assert_command_count "pacman -Q $upgrade_package" 2
+assert_command_count "pacman -Si $upgrade_package" 1
+assert_command_absent "pacman -Q $upgrade_package"
 assert_command "sudo pacman -Syu --noconfirm"
+assert_single_package_metadata_snapshots_around_syu "$upgrade_package" 2
 assert_command "git reset --hard origin/main"
 assert_command "vercmp 2.0-1 3.0-1"
 assert_command_content_absent "makepkg"
-assert_command_occurrence_before "pacman -Q $upgrade_package" 1 "sudo pacman -Syu --noconfirm" 1
-assert_command_occurrence_before "git reset --hard origin/main" 1 "pacman -Q $upgrade_package" 2
-assert_command_occurrence_before "pacman -Q $upgrade_package" 2 "vercmp 2.0-1 3.0-1" 1
+assert_command_occurrence_before "git reset --hard origin/main" 1 "vercmp 2.0-1 3.0-1" 1
 assert_argv_log "$vercmp_argv_log" 'argv-begin
 arg[0]=<2.0-1>
 arg[1]=<3.0-1>
@@ -1176,68 +1610,186 @@ setup_upgrade_transition_case \
     not-installed 2.0-1 enabled "$official_source_url"
 export JPACKER_TEST_PACMAN_REPO_PACKAGES=$upgrade_package
 assert_file_empty "$installed_version_state"
-run_ok --noedit --nodiff --noconfirm upgrade
+run_upgrade_ok --noedit --nodiff --noconfirm upgrade
 assert_file_equals "$installed_version_after" "$installed_version_state"
 assert_file_equals "$remote_srcinfo" "$checkout_dir/.SRCINFO"
 assert_contains "$upgrade_package was installed by the system transaction as 2.0-1; rebuilding the preferred source package." "$output_file"
 assert_not_contains "$upgrade_package is up to date (2.0-1). Skipping." "$output_file"
-assert_command_count "pacman -Si $upgrade_package" 2
-assert_command_count "pacman -Q $upgrade_package" 2
+assert_command_count "pacman -Si $upgrade_package" 1
+assert_command_absent "pacman -Q $upgrade_package"
 assert_command "sudo pacman -Syu --noconfirm"
+assert_single_package_metadata_snapshots_around_syu "$upgrade_package"
 assert_command "git reset --hard origin/main"
 assert_command "vercmp 2.0-1 2.0-1"
-assert_command_count "makepkg -sic --noconfirm" 1
-assert_command_occurrence_before "pacman -Q $upgrade_package" 1 "sudo pacman -Syu --noconfirm" 1
-assert_command_occurrence_before "git reset --hard origin/main" 1 "pacman -Q $upgrade_package" 2
-assert_command_occurrence_before "pacman -Q $upgrade_package" 2 "vercmp 2.0-1 2.0-1" 1
-assert_command_occurrence_before "vercmp 2.0-1 2.0-1" 1 "makepkg -sic --noconfirm" 1
+assert_command_count "makepkg -sc --noconfirm" 1
+assert_separated_source_commands 1
+assert_command_occurrence_before "alpm release" 2 "git reset --hard origin/main" 1
+assert_command_occurrence_before "git reset --hard origin/main" 1 "vercmp 2.0-1 2.0-1" 1
+assert_command_occurrence_before "vercmp 2.0-1 2.0-1" 1 "makepkg --packagelist" 1
 assert_argv_log "$vercmp_argv_log" 'argv-begin
 arg[0]=<2.0-1>
 arg[1]=<2.0-1>
 argv-end'
 assert_argv_log "$makepkg_argv_log" 'argv-begin
-arg[0]=<-sic>
+arg[0]=<--packagelist>
+argv-end
+argv-begin
+arg[0]=<-sc>
 arg[1]=<--noconfirm>
 argv-end'
 assert_request_log_empty
+
+setup_upgrade_transition_case \
+    issue-152-post-upgrade-package-absent \
+    1.0-1 not-installed enabled "$official_source_url"
+export JPACKER_TEST_PACMAN_REPO_PACKAGES=$upgrade_package
+run_upgrade_ok --noedit --nodiff --noconfirm upgrade
+assert_file_empty "$installed_version_state"
+assert_single_package_metadata_snapshots_around_syu "$upgrade_package"
+assert_command_count "pacman -Si $upgrade_package" 1
+assert_command "git fetch origin"
+assert_command "git reset --hard origin/main"
+assert_command_absent "pacman -Q $upgrade_package"
+assert_command_content_absent "vercmp "
+assert_command_count "makepkg -sc --noconfirm" 1
+assert_separated_source_commands 1
+assert_command_occurrence_before "alpm release" 2 "git reset --hard origin/main" 1
+assert_command_occurrence_before "alpm release" 2 "git fetch origin" 1
+assert_command_occurrence_before "git reset --hard origin/main" 1 "makepkg --packagelist" 1
+
+setup_upgrade_transition_case \
+    issue-152-post-upgrade-unknown-install-reason \
+    2.0-1 2.0-1 enabled "$official_source_url"
+export JPACKER_TEST_PACMAN_REPO_PACKAGES=$upgrade_package
+export JPACKER_TEST_PACKAGE_METADATA_UNKNOWN_REASON_PACKAGE=$upgrade_package
+run_upgrade_ok --noedit --nodiff --noconfirm upgrade
+assert_contains "$upgrade_package is up to date (2.0-1). Skipping." "$output_file"
+assert_single_package_metadata_snapshots_around_syu "$upgrade_package" 2
+assert_command "vercmp 2.0-1 2.0-1"
+assert_command_absent "pacman -Q $upgrade_package"
+assert_command_content_absent "makepkg"
+
+setup_upgrade_transition_case \
+    issue-152-mixed-valid-and-invalid-post-entries \
+    2.0-1 2.0-1 enabled "$official_source_url"
+: > "$preference_dir/bad name"
+export JPACKER_TEST_PACMAN_REPO_PACKAGES=$upgrade_package
+run_upgrade_fail --noedit --nodiff --noconfirm upgrade
+assert_contains "Ignoring invalid source-build preference filename: bad name" "$output_file"
+assert_output_line_count "Ignoring invalid source-build preference filename: bad name" 1 "$output_file"
+assert_contains "$upgrade_package is up to date (2.0-1). Skipping." "$output_file"
+assert_single_package_metadata_snapshots_around_syu "$upgrade_package" 2
+assert_command_absent "alpm query bad name"
+assert_command_absent "pacman -Si bad name"
+assert_command_count "pacman -Si $upgrade_package" 1
+assert_command "vercmp 2.0-1 2.0-1"
+assert_command_absent "pacman -Q $upgrade_package"
+assert_command_content_absent "makepkg"
+assert_request_log_empty
+
+setup_case issue-152-coherent-post-upgrade-snapshot
+post_syu_metadata_state=$case_dir/post-syu-metadata-state
+live_metadata_after_first_makepkg=$case_dir/live-metadata-after-first-makepkg
+for package in alpha beta; do
+    : > "$preference_dir/$package"
+    printf '%s 1.0-1\n' "$package" >> "$package_metadata_state"
+    printf '%s 1.0-1\n' "$package" >> "$post_syu_metadata_state"
+    printf '%s 9.0-1\n' "$package" >> "$live_metadata_after_first_makepkg"
+    package_checkout=$cache_root/$package
+    mkdir -p "$package_checkout/.git"
+    write_upgrade_srcinfo "$package_checkout/.SRCINFO" 2.0 1
+    printf 'pkgname=%s\npkgver=2.0\npkgrel=1\n' "$package" > "$package_checkout/PKGBUILD"
+    printf 'https://gitlab.archlinux.org/archlinux/packaging/packages/%s.git\n' "$package" > "$package_checkout/.git/.jpacker-test-remote-url"
+done
+export JPACKER_TEST_PACMAN_REPO_PACKAGES='alpha beta'
+export JPACKER_TEST_PACMAN_Q_OUTPUT_FILE=$package_metadata_state
+export JPACKER_TEST_SOURCE_MAINTENANCE_PACMAN_SYU_Q_OUTPUT_FILE=$post_syu_metadata_state
+export JPACKER_TEST_MAKEPKG_PACKAGE_METADATA_STATE_AFTER_SUCCESS_FILE=$live_metadata_after_first_makepkg
+run_upgrade_ok --noedit --nodiff --noconfirm upgrade
+assert_file_equals "$live_metadata_after_first_makepkg" "$package_metadata_state"
+assert_command_count "pacman-conf --verbose RootDir DBPath" 1
+assert_command_count "alpm initialize" 4
+assert_command_count "alpm release" 4
+assert_command_count "git fetch origin" 2
+assert_command_count "git reset --hard origin/main" 2
+assert_command_count "vercmp 2.0-1 1.0-1" 2
+assert_command_absent "vercmp 2.0-1 9.0-1"
+assert_command_count "makepkg -sc --noconfirm" 2
+assert_separated_source_commands 2
+for package in alpha beta; do
+    assert_command_count "alpm query $package" 3
+    assert_command_count "pacman -Si $package" 1
+    assert_command_absent "pacman -Q $package"
+    assert_command_occurrence_before "alpm query $package" 2 "alpm release" 2
+    assert_command_occurrence_before "alpm release" 2 "git fetch origin" 1
+done
 
 echo "  ok: P0-6 cmd_upgrade"
 
 # Schema-fatal upgrade cases remain owned by test-aur-rpc-validation.
 
-# P0-7: direct shared-orchestration characterization, including the CLI-unreachable fallback branch.
+# P0-7: direct production work-list orchestration and separated lifecycle composition.
 setup_case source-plan-order
 run_source_ok plan-success
-assert_contains "Building AUR PackageBase: dep-base" "$output_file"
+assert_contains "Building AUR PackageBase: dep-target" "$output_file"
 assert_contains "Target package(s): dep-target" "$output_file"
-assert_contains "Building AUR PackageBase: root-base" "$output_file"
+assert_contains "Building AUR PackageBase: root-target" "$output_file"
 assert_contains "Target package(s): root-target" "$output_file"
 assert_command_before \
-    "git clone https://aur.archlinux.org/dep-base.git dep-base" \
-    "git clone https://aur.archlinux.org/root-base.git root-base"
-assert_command_count "makepkg -sic --noconfirm --needed" 2
+    "git clone https://aur.archlinux.org/dep-target.git dep-target" \
+    "git clone https://aur.archlinux.org/root-target.git root-target"
+assert_command_count "pacman-conf --verbose RootDir DBPath" 1
+assert_command_count "makepkg -sc --noconfirm" 2
+assert_command_prefix_count "sudo pacman -U --noconfirm --needed --asdeps -- " 1
+assert_command_prefix_count "sudo pacman -U --noconfirm --needed -- " 1
+assert_separated_source_commands 2
 
 setup_case source-plan-failure-context
 export JPACKER_TEST_MAKEPKG_EXIT_CODE=42
+export JPACKER_TEST_MAKEPKG_PACKAGELIST_EXIT_CODE=0
 run_source_fail plan-failure
-assert_contains "Failed while building/installing PackageBase dep-base (dep-target): Build failed." "$output_file"
-assert_command "git clone https://aur.archlinux.org/dep-base.git dep-base"
-assert_command_absent "git clone https://aur.archlinux.org/root-base.git root-base"
+assert_contains "Failed while building/installing PackageBase dep-target (dep-target): Build-only makepkg failed with exit code 42." "$output_file"
+assert_command "git clone https://aur.archlinux.org/dep-target.git dep-target"
+assert_command_count "makepkg --packagelist" 1
+assert_command_count "makepkg -sc --noconfirm" 1
+assert_command_absent "git clone https://aur.archlinux.org/root-target.git root-target"
+assert_command_content_absent "sudo pacman -U"
 
-setup_case source-preference-fallback
-printf 'FALLBACK=base-value\n' > "$preference_dir/base-target"
+setup_case source-preference-pkgdest-conflict
+printf 'FALLBACK=base-value\nPKGDEST=owned-elsewhere\n' > "$preference_dir/base-target"
+run_source_fail fallback
+assert_contains "Loading custom build flags from $preference_dir/base-target" "$output_file"
+assert_contains "Source environment PKGDEST conflicts with invocation-owned artifact workspace." "$output_file"
+assert_command_count "pacman-conf --verbose RootDir DBPath" 0
+assert_command_content_absent "git clone"
+assert_command_content_absent "makepkg"
+assert_command_content_absent "pacman -U"
+
+setup_case source-preference-forwarded
+printf 'REQUESTED=requested-value\n' > "$preference_dir/base-target"
 run_source_ok fallback
 assert_contains "Loading custom build flags from $preference_dir/base-target" "$output_file"
-assert_contains "Applying custom build flags: FALLBACK='base-value' " "$output_file"
-assert_not_contains "Loading custom build flags from $preference_dir/requested-target" "$output_file"
-
-setup_case source-preference-requested-wins
-printf 'REQUESTED=requested-value\n' > "$preference_dir/requested-target"
-printf 'FALLBACK=base-value\n' > "$preference_dir/base-target"
-run_source_ok fallback
-assert_contains "Loading custom build flags from $preference_dir/requested-target" "$output_file"
-assert_not_contains "Loading custom build flags from $preference_dir/base-target" "$output_file"
 assert_contains "Applying custom build flags: REQUESTED='requested-value' " "$output_file"
+assert_command "makepkg -sc --noconfirm"
+assert_separated_source_commands 1
+
+setup_case source-preference-empty-pkgdest-conflict
+printf 'PKGDEST=\nEMPTY=""\n' > "$preference_dir/base-target"
+run_source_fail fallback
+assert_contains "Loading custom build flags from $preference_dir/base-target" "$output_file"
+assert_contains "Source environment PKGDEST conflicts with invocation-owned artifact workspace." "$output_file"
+assert_command_count "pacman-conf --verbose RootDir DBPath" 0
+assert_command_content_absent "git clone"
+assert_command_content_absent "makepkg"
+assert_command_content_absent "pacman -U"
+
+setup_case source-preference-invalid-assignment-ignored
+printf '9INVALID=value\nignored without equals\n' > "$preference_dir/base-target"
+run_source_ok fallback
+assert_contains "Loading custom build flags from $preference_dir/base-target" "$output_file"
+assert_contains "Ignoring invalid environment assignment: 9INVALID=value" "$output_file"
+assert_command_count "makepkg -sc --noconfirm" 1
+assert_separated_source_commands 1
 
 setup_case smart-source-order
 printf 'SMART=preference\n' > "$preference_dir/clean-root"
@@ -1250,6 +1802,19 @@ assert_command_before \
     "pacman -Si clean-root" \
     "git clone https://gitlab.archlinux.org/archlinux/packaging/packages/clean-root.git clean-root"
 assert_contains "Applying custom build flags: SMART='preference' " "$output_file"
+assert_command_count "makepkg -sc --noconfirm" 1
+assert_separated_source_commands 1
+
+setup_case smart-source-missing-post-snapshot
+export JPACKER_TEST_PACMAN_REPO_PACKAGES=clean-root
+run_source_fail smart-source-missing-post-snapshot
+assert_contains "Authoritative installed package snapshot was not supplied for clean-root." "$output_file"
+assert_command "pacman -Si clean-root"
+assert_command_count "pacman-conf --verbose RootDir DBPath" 1
+assert_command_content_absent "git clone"
+assert_command_content_absent "makepkg"
+assert_command_content_absent "pacman -U"
+assert_request_log_empty
 
 echo "  ok: P0-7 shared source-install orchestration"
 

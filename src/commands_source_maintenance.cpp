@@ -1,12 +1,14 @@
 #include "commands_source_maintenance.hpp"
 
 #include "app_config.hpp"
-#include "aur_rpc.hpp"
 #include "logging.hpp"
+#include "package_metadata.hpp"
 #include "package_identifier.hpp"
 #include "process.hpp"
 #include "repository_query.hpp"
+#include "separated_source_build.hpp"
 #include "shell_words.hpp"
+#include "source_environment.hpp"
 #include "source_install.hpp"
 #include "source_preference.hpp"
 #include "trusted_cache.hpp"
@@ -28,6 +30,8 @@
 #include <system_error>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <utility>
+#include <variant>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -177,21 +181,89 @@ bool ask_user(
 }
 
 using SourceUpdateBaselines = std::map<std::string, SourceUpdateBaseline>;
+using SourceInstalledSnapshotResult = std::variant<
+        SourceInstalledSnapshot,
+        PackageMetadataFailure>;
+using SourceInstalledSnapshotResults =
+        std::map<std::string, SourceInstalledSnapshotResult>;
 
-SourceUpdateBaselines snapshot_source_update_baselines() {
+struct UpgradeSourceEntry {
+    std::string package_name;
+    bool        is_regular_file = false;
+    bool        is_valid_package_name = false;
+    std::optional<std::size_t> work_item_index;
+};
+
+using UpgradeSourceEntries = std::vector<UpgradeSourceEntry>;
+
+constexpr const char* POST_UPGRADE_SNAPSHOT_FAILURE_PREFIX =
+        "System upgrade completed, but post-upgrade package metadata snapshot failed: ";
+
+SourceInstalledSnapshotResult map_source_installed_snapshot(
+        const InstalledPackageQueryResult& result) {
+    if(const auto* metadata = std::get_if<InstalledPackageMetadata>(&result)) {
+        return SourceInstalledSnapshot{metadata->version};
+    }
+    if(std::holds_alternative<PackageNotFound>(result)) {
+        return SourceInstalledSnapshot{std::nullopt};
+    }
+    return std::get<PackageMetadataFailure>(result);
+}
+
+SourceUpdateBaselines snapshot_source_update_baselines(
+        const PackageMetadataSession& session,
+        const std::vector<std::string>& package_names) {
     SourceUpdateBaselines baselines;
-    if(!fs::exists(source_preference_root())) return baselines;
+    for(const auto& package_name : package_names) {
+        const InstalledPackageQueryResult result =
+                session.query_installed_package(package_name);
+        SourceInstalledSnapshotResult snapshot_result =
+                map_source_installed_snapshot(result);
 
-    for(const auto& entry : source_preference_entries()) {
-        if(!entry.is_regular_file()) continue;
+        if(const auto* failure = std::get_if<PackageMetadataFailure>(&snapshot_result)) {
+            throw PackageMetadataError(PackageMetadataFailure{
+                    failure->code,
+                    "Failed to query installed package metadata for " +
+                            package_name + ": " + failure->diagnostic});
+        }
 
-        std::string package_name = entry.path().filename().string();
-        if(!is_valid_package_name(package_name)) continue;
+        const auto& snapshot = std::get<SourceInstalledSnapshot>(snapshot_result);
         baselines.emplace(
                 package_name,
-                SourceUpdateBaseline{get_installed_package_version(package_name)});
+                SourceUpdateBaseline{snapshot.installed_version});
     }
     return baselines;
+}
+
+std::optional<UpgradeSourceEntries> collect_upgrade_source_entries() {
+    if(!fs::exists(source_preference_root())) return std::nullopt;
+
+    UpgradeSourceEntries entries;
+    for(const auto& entry : source_preference_entries()) {
+        std::string package_name = entry.path().filename().string();
+        const bool  is_regular_file = entry.is_regular_file();
+        const bool  has_valid_package_name = is_valid_package_name(package_name);
+        entries.push_back(UpgradeSourceEntry{
+                std::move(package_name),
+                is_regular_file,
+                has_valid_package_name,
+                std::nullopt});
+    }
+    return entries;
+}
+
+SourceInstalledSnapshotResults snapshot_post_upgrade_installed_packages(
+        const PackageMetadataSession& session,
+        const std::vector<std::string>& package_names) {
+    SourceInstalledSnapshotResults snapshots;
+    for(const auto& package_name : package_names) {
+        const InstalledPackageQueryResult result =
+                session.query_installed_package(package_name);
+        snapshots.emplace(
+                package_name,
+                map_source_installed_snapshot(result));
+    }
+    return snapshots;
 }
 
 } // namespace
@@ -203,11 +275,12 @@ int cmd_build(
         Logger::error("Usage: jpacker build <pkg> [VAR=VAL...]");
         return 1;
     }
-    std::string pkg_name, custom_env;
+    std::string            pkg_name;
+    SourceBuildEnvironment custom_env;
     for(const auto& arg : args) {
         std::string key, val;
         if(split_env_assignment(arg, key, val))
-            custom_env += key + "=" + shell_words::quote(val) + " ";
+            custom_env.ordered_assignments.push_back({key, val});
         else if(arg.find('=') != std::string::npos) {
             Logger::error("Invalid environment assignment: " + arg);
             return 1;
@@ -224,6 +297,10 @@ int cmd_build(
 
     try {
         build_source_target(pkg_name, custom_env, config);
+    } catch(const SeparatedSourceBuildCleanupError& error) {
+        // Package transactionは成功済みなので、generic Build Error prefixを付けない。
+        Logger::error(error.what());
+        return 1;
     } catch(const std::exception& e) {
         Logger::error(std::string("Build Error: ") + e.what());
         return 1;
@@ -500,38 +577,140 @@ int cmd_clean(const AppConfig& config) {
 
 int cmd_upgrade(const AppConfig& config) {
     bool failed = false;
-    preflight_upgrade_source_metadata();
-    SourceUpdateBaselines update_baselines = snapshot_source_update_baselines();
+    // POLICY(#242): target list、source environment、plan role/identityをSyu前に
+    // snapshotし、system transaction後にpreferenceやplanを再解決しない。
+    std::optional<UpgradeSourceEntries> source_entries =
+            collect_upgrade_source_entries();
+    std::vector<ProductionSourceBuildWorkItem> source_work_items;
+    std::vector<std::string> package_names;
+    if(source_entries.has_value()) {
+        const bool has_source_target = std::any_of(
+                source_entries->begin(), source_entries->end(),
+                [](const UpgradeSourceEntry& entry) {
+                    return entry.is_regular_file && entry.is_valid_package_name;
+                });
+        if(has_source_target) {
+            require_supported_production_source_build_options(config);
+        }
+        for(auto& entry : source_entries.value()) {
+            if(!entry.is_regular_file || !entry.is_valid_package_name) continue;
+
+            entry.work_item_index = source_work_items.size();
+            source_work_items.push_back(
+                    prepare_smart_source_build_work_item(
+                            entry.package_name, true, false));
+            package_names.push_back(entry.package_name);
+        }
+    }
+
+    std::optional<PreparedProductionSourceBuildInvocation> source_invocation;
+    SourceUpdateBaselines update_baselines;
+    if(!source_work_items.empty()) {
+        source_invocation = prepare_production_source_build_invocation(
+                std::move(source_work_items), config);
+        {
+            // POLICY(#152): 1 read phaseで全baselineを確定し、system mutation前にsessionを解放する。
+            PackageMetadataSession session = PackageMetadataSession::open(
+                    source_invocation->database_paths);
+            update_baselines =
+                    snapshot_source_update_baselines(session, package_names);
+        }
+    }
     Logger::info("System upgrade...");
     if(run_command("sudo pacman " + join_pacman_args({"-Syu"}, config)) != 0) throw std::runtime_error("Update failed.");
-    if(fs::exists(source_preference_root())) {
-        Logger::info("Checking source packages...");
-        for(const auto& entry : source_preference_entries()) {
-            if(entry.is_regular_file()) {
-                std::string pkg_name = entry.path().filename().string();
-                if(!is_valid_package_name(pkg_name)) {
-                    Logger::warn("Ignoring invalid source-build preference filename: " + pkg_name);
-                    failed = true;
-                    continue;
-                }
-                try {
-                    // upgrade 時は true (更新がある場合のみビルド)
-                    std::optional<SourceUpdateBaseline> update_baseline;
-                    auto baseline = update_baselines.find(pkg_name);
-                    if(baseline != update_baselines.end()) {
-                        update_baseline = baseline->second;
-                    }
-                    install_smart_source(
-                            pkg_name, true, false, config, update_baseline);
-                } catch(const AurRpcResponseError&) {
-                    // POLICY(#174): schema violation検出後は後続source packageのmutationへ進まない。
-                    throw;
-                } catch(const std::exception& e) {
-                    Logger::error("Error updating " + pkg_name + ": " + e.what());
-                    failed = true;
-                }
+
+    SourceInstalledSnapshotResults installed_snapshots;
+    try {
+        if(source_invocation.has_value()) {
+            Logger::info("Checking source packages...");
+            // POLICY(#152,#242): Syu直後の全targetを1 read phaseでcopyする。
+            // database path設定はpre-Syuで解決した同じvalueを使い、resolverを
+            // source-build途中で再実行しない。
+            {
+                PackageMetadataSession session = PackageMetadataSession::open(
+                        source_invocation->database_paths);
+                installed_snapshots = snapshot_post_upgrade_installed_packages(
+                        session, package_names);
             }
         }
+    } catch(const PackageMetadataError& error) {
+        throw PackageMetadataError(PackageMetadataFailure{
+                error.failure().code,
+                std::string(POST_UPGRADE_SNAPSHOT_FAILURE_PREFIX) +
+                        error.failure().diagnostic});
+    } catch(const std::exception& error) {
+        throw std::runtime_error(
+                std::string(POST_UPGRADE_SNAPSHOT_FAILURE_PREFIX) + error.what());
+    }
+
+    if(!source_entries.has_value()) return failed ? 1 : 0;
+
+    // POLICY(#242): post-Syu metadataはdynamic pre-execution inputとして全件を
+    // source unit開始前に検証する。later targetのfailureが判明済みのまま先行unitを
+    // build/installせず、system upgrade成功済みであることもdiagnosticに残す。
+    for(const auto& entry : source_entries.value()) {
+        if(!entry.is_regular_file || !entry.is_valid_package_name) continue;
+
+        const std::string& package_name = entry.package_name;
+        auto installed_snapshot = installed_snapshots.find(package_name);
+        if(installed_snapshot == installed_snapshots.end()) {
+            throw std::runtime_error(
+                    "System upgrade completed, but authoritative post-upgrade "
+                    "installed package snapshot is missing for " +
+                    package_name + "; source processing did not start.");
+        }
+        if(const auto* metadata_failure =
+                   std::get_if<PackageMetadataFailure>(
+                           &installed_snapshot->second)) {
+            throw PackageMetadataError(PackageMetadataFailure{
+                    metadata_failure->code,
+                    "System upgrade completed, but post-upgrade package metadata "
+                    "query failed for " + package_name + ": " +
+                    metadata_failure->diagnostic +
+                    " Source processing did not start."});
+        }
+    }
+
+    for(const auto& entry : source_entries.value()) {
+        if(!entry.is_regular_file) continue;
+
+        const std::string& pkg_name = entry.package_name;
+        if(!entry.is_valid_package_name) {
+            Logger::warn("Ignoring invalid source-build preference filename: " + pkg_name);
+            failed = true;
+            continue;
+        }
+        if(!entry.work_item_index.has_value() || !source_invocation.has_value()) {
+            throw std::logic_error(
+                    "Prepared upgrade source work item is missing for " +
+                    pkg_name + ".");
+        }
+
+        auto installed_snapshot = installed_snapshots.find(pkg_name);
+        if(installed_snapshot == installed_snapshots.end() ||
+           std::holds_alternative<PackageMetadataFailure>(
+                   installed_snapshot->second)) {
+            throw std::logic_error(
+                    "Validated post-upgrade installed package snapshot is missing for " +
+                    pkg_name + ".");
+        }
+
+        ProductionSourceBuildWorkItem& work_item =
+                source_invocation->work_items[entry.work_item_index.value()];
+        // POLICY(#215): system transactionによるbinary置換baselineはofficial sourceだけに適用する。
+        if(work_item.uses_system_update_baseline) {
+            auto baseline = update_baselines.find(pkg_name);
+            if(baseline != update_baselines.end()) {
+                work_item.request.update_baseline = baseline->second;
+            }
+        }
+        // POLICY(#152): post-Syu installed stateはsource種別に関係なく同じ更新判定へ渡す。
+        work_item.request.installed_snapshot =
+                std::get<SourceInstalledSnapshot>(installed_snapshot->second);
+
+        // lifecycle/build/metadata/pacman/cleanup failureは後続PackageBaseへ進めない。
+        execute_prepared_source_build_work_item(
+                work_item, source_invocation->database_paths, config);
     }
     return failed ? 1 : 0;
 }

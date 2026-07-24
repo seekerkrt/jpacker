@@ -1,0 +1,226 @@
+#include "process.hpp"
+#include "shell_words.hpp"
+
+#include <charconv>
+#include <csignal>
+#include <cerrno>
+#include <exception>
+#include <filesystem>
+#include <iostream>
+#include <stdexcept>
+#include <string>
+#include <string_view>
+#include <unistd.h>
+#include <vector>
+
+namespace fs = std::filesystem;
+
+namespace {
+
+constexpr std::string_view CHILD_MARKER = "--process-capture-child";
+
+void require(bool condition, const std::string& message) {
+    if(!condition) throw std::runtime_error(message);
+}
+
+std::string repeated_output(std::size_t size) {
+    std::string output(size, '\0');
+    for(std::size_t i = 0; i < size; ++i) {
+        output[i] = static_cast<char>('a' + (i % 26));
+    }
+    return output;
+}
+
+bool write_stdout(std::string_view output) {
+    std::size_t offset = 0;
+    while(offset < output.size()) {
+        ssize_t written = write(
+                STDOUT_FILENO,
+                output.data() + offset,
+                output.size() - offset);
+        if(written == -1 && errno == EINTR) continue;
+        if(written <= 0) return false;
+        offset += static_cast<std::size_t>(written);
+    }
+    return true;
+}
+
+std::size_t parse_output_size(std::string_view value) {
+    std::size_t output_size = 0;
+    auto [end, error] = std::from_chars(
+            value.data(), value.data() + value.size(), output_size);
+    if(error != std::errc{} || end != value.data() + value.size()) {
+        throw std::runtime_error("Invalid child output size");
+    }
+    return output_size;
+}
+
+int run_child(int argc, char* argv[]) {
+    require(argc >= 3, "Missing child emitter mode");
+    std::string_view mode = argv[2];
+
+    if(mode == "empty") return 0;
+    if(mode == "size") {
+        require(argc == 4, "Missing child output size");
+        return write_stdout(repeated_output(parse_output_size(argv[3]))) ? 0 : 125;
+    }
+    if(mode == "embedded-nul") {
+        const std::string output{'b', 'e', 'f', 'o', 'r', 'e', '\0', 'a', 'f', 't', 'e', 'r'};
+        return write_stdout(output) ? 0 : 125;
+    }
+    if(mode == "final-lf") return write_stdout("line\n") ? 0 : 125;
+    if(mode == "no-final-lf") return write_stdout("line") ? 0 : 125;
+    if(mode == "carriage-return") return write_stdout("left\rright") ? 0 : 125;
+    if(mode == "trim-boundaries") return write_stdout(" \t\nbody\r\n ") ? 0 : 125;
+    if(mode == "exit-23") return 23;
+    if(mode == "signal-term") {
+        raise(SIGTERM);
+        return 125;
+    }
+
+    throw std::runtime_error("Unknown child emitter mode");
+}
+
+std::string child_command(
+        const fs::path& executable_path,
+        const std::vector<std::string>& arguments) {
+    std::vector<std::string> command_arguments{
+            executable_path.string(), std::string(CHILD_MARKER)};
+    command_arguments.insert(
+            command_arguments.end(), arguments.begin(), arguments.end());
+
+    // POLICY: shellをchild binary自身へ置換し、signal終了をshell由来のexit statusへ変換させない。
+    return "exec " + shell_words::join(command_arguments);
+}
+
+void require_output_equal(
+        const std::string& test_case,
+        const std::string& actual,
+        const std::string& expected) {
+    if(actual == expected) return;
+
+    std::size_t difference = 0;
+    while(difference < actual.size() &&
+          difference < expected.size() &&
+          actual[difference] == expected[difference]) {
+        ++difference;
+    }
+    throw std::runtime_error(
+            test_case + ": output mismatch at byte " + std::to_string(difference) +
+            " (expected size " + std::to_string(expected.size()) +
+            ", actual size " + std::to_string(actual.size()) + ")");
+}
+
+void require_result(
+        const std::string& test_case,
+        const CapturedCommandResult& actual,
+        const std::string& expected_output,
+        int expected_exit_code) {
+    require_output_equal(test_case, actual.output, expected_output);
+    require(
+            actual.exit_code == expected_exit_code,
+            test_case + ": expected exit code " + std::to_string(expected_exit_code) +
+                    ", actual " + std::to_string(actual.exit_code));
+}
+
+CapturedCommandResult capture_raw(
+        const fs::path& executable_path,
+        const std::vector<std::string>& arguments) {
+    std::string command = child_command(executable_path, arguments);
+    return capture_command_output_raw(command.c_str());
+}
+
+CapturedCommandResult capture_trimmed(
+        const fs::path& executable_path,
+        const std::vector<std::string>& arguments) {
+    std::string command = child_command(executable_path, arguments);
+    return capture_command_output(command.c_str());
+}
+
+void test_raw_chunk_boundaries(const fs::path& executable_path) {
+    require_result("empty output", capture_raw(executable_path, {"empty"}), "", 0);
+
+    for(std::size_t size : {127U, 128U, 129U, 256U}) {
+        require_result(
+                std::to_string(size) + " byte output",
+                capture_raw(executable_path, {"size", std::to_string(size)}),
+                repeated_output(size),
+                0);
+    }
+}
+
+void test_raw_byte_preservation(const fs::path& executable_path) {
+    const std::string nul_output{
+            'b', 'e', 'f', 'o', 'r', 'e', '\0', 'a', 'f', 't', 'e', 'r'};
+    require_result(
+            "embedded NUL tail",
+            capture_raw(executable_path, {"embedded-nul"}),
+            nul_output,
+            0);
+    require_result(
+            "final LF",
+            capture_raw(executable_path, {"final-lf"}),
+            "line\n",
+            0);
+    require_result(
+            "no final LF",
+            capture_raw(executable_path, {"no-final-lf"}),
+            "line",
+            0);
+    require_result(
+            "carriage return",
+            capture_raw(executable_path, {"carriage-return"}),
+            "left\rright",
+            0);
+}
+
+void test_trimmed_capture_compatibility(const fs::path& executable_path) {
+    require_result(
+            "trimmed capture",
+            capture_trimmed(executable_path, {"trim-boundaries"}),
+            "body",
+            0);
+}
+
+void test_decoded_exit_status(const fs::path& executable_path) {
+    require_result(
+            "normal exit",
+            capture_raw(executable_path, {"empty"}),
+            "",
+            0);
+    require_result(
+            "exit 23",
+            capture_raw(executable_path, {"exit-23"}),
+            "",
+            23);
+    require_result(
+            "SIGTERM exit",
+            capture_raw(executable_path, {"signal-term"}),
+            "",
+            128 + SIGTERM);
+}
+
+void run_tests(const fs::path& executable_path) {
+    test_raw_chunk_boundaries(executable_path);
+    test_raw_byte_preservation(executable_path);
+    test_trimmed_capture_compatibility(executable_path);
+    test_decoded_exit_status(executable_path);
+}
+
+} // namespace
+
+int main(int argc, char* argv[]) {
+    try {
+        if(argc >= 2 && std::string_view(argv[1]) == CHILD_MARKER) {
+            return run_child(argc, argv);
+        }
+
+        run_tests(fs::canonical("/proc/self/exe"));
+    } catch(const std::exception& error) {
+        std::cerr << error.what() << '\n';
+        return 1;
+    }
+
+    std::cout << "process capture tests: all checks passed\n";
+    return 0;
+}

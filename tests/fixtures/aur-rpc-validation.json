@@ -509,7 +509,6 @@
         null,
         null,
         null,
-        null,
         {"Depends": "wrong-type"}
       ]
     }

@@ -2,11 +2,17 @@
 
 #include "logging.hpp"
 
+#include <cerrno>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
+#include <fcntl.h>
+#include <optional>
 #include <stdexcept>
 #include <string>
+#include <sys/stat.h>
 #include <system_error>
+#include <unistd.h>
 #include <utility>
 #include <vector>
 
@@ -27,6 +33,98 @@ struct ValidatedCachePathState {
     bool     exists = false;
     bool     is_directory = false;
 };
+
+class OwnedCacheRootDescriptor final {
+    int descriptor_ = -1;
+
+public:
+    explicit OwnedCacheRootDescriptor(int descriptor = -1) noexcept
+        : descriptor_(descriptor) {
+    }
+
+    OwnedCacheRootDescriptor(const OwnedCacheRootDescriptor&) = delete;
+    OwnedCacheRootDescriptor& operator=(const OwnedCacheRootDescriptor&) = delete;
+
+    OwnedCacheRootDescriptor(OwnedCacheRootDescriptor&& other) noexcept
+        : descriptor_(std::exchange(other.descriptor_, -1)) {
+    }
+
+    OwnedCacheRootDescriptor& operator=(OwnedCacheRootDescriptor&&) = delete;
+
+    ~OwnedCacheRootDescriptor() noexcept {
+        if(descriptor_ >= 0) close(descriptor_);
+    }
+
+    int get() const noexcept {
+        return descriptor_;
+    }
+
+    int release() noexcept {
+        return std::exchange(descriptor_, -1);
+    }
+};
+
+struct PreparedPrivateCacheRootState {
+    ValidatedCacheRootState     trusted_state;
+    std::optional<struct stat> created_status;
+};
+
+struct OpenedPrivateCacheRootState {
+    OwnedCacheRootDescriptor descriptor;
+    struct stat              status {};
+};
+
+std::uintmax_t cache_status_device(const struct stat& status) {
+    return static_cast<std::uintmax_t>(status.st_dev);
+}
+
+std::uintmax_t cache_status_inode(const struct stat& status) {
+    return static_cast<std::uintmax_t>(status.st_ino);
+}
+
+std::uintmax_t cache_status_owner(const struct stat& status) {
+    return static_cast<std::uintmax_t>(status.st_uid);
+}
+
+bool same_cache_root_identity(
+        const struct stat& expected, const struct stat& actual) {
+    return S_ISDIR(expected.st_mode) && S_ISDIR(actual.st_mode) &&
+           expected.st_dev == actual.st_dev && expected.st_ino == actual.st_ino;
+}
+
+bool has_private_cache_root_mode(const struct stat& status) {
+    const bool is_group_or_world_writable =
+            (status.st_mode & (S_IWGRP | S_IWOTH)) != 0;
+    const bool has_sticky_bit = (status.st_mode & S_ISVTX) != 0;
+    return !is_group_or_world_writable || has_sticky_bit;
+}
+
+void require_private_cache_root_status(
+        const struct stat& status, const fs::path& root_path,
+        std::uintmax_t expected_effective_user,
+        bool require_new_root_mode) {
+    if(!S_ISDIR(status.st_mode)) {
+        throw std::runtime_error(
+                "Private jpacker cache root must be a directory: " +
+                root_path.string());
+    }
+    if(cache_status_owner(status) != expected_effective_user) {
+        throw std::runtime_error(
+                "Private jpacker cache root owner must match the effective user: " +
+                root_path.string());
+    }
+    if(require_new_root_mode && (status.st_mode & 07777) != 0700) {
+        throw std::runtime_error(
+                "New private jpacker cache root must have mode 0700: " +
+                root_path.string());
+    }
+    if(!has_private_cache_root_mode(status)) {
+        throw std::runtime_error(
+                "Private jpacker cache root is group/world writable without the "
+                "sticky bit; set its mode to 0700 explicitly: " +
+                root_path.string());
+    }
+}
 
 fs::path get_cache_dir() {
     const char* xdg_cache = std::getenv("XDG_CACHE_HOME");
@@ -144,6 +242,143 @@ ValidatedCacheRootState validate_cache_root_path(const fs::path& raw_root, bool 
     return ValidatedCacheRootState{root_path, canonical_root};
 }
 
+PreparedPrivateCacheRootState prepare_private_cache_root_path() {
+    fs::path root_path = absolute_cache_path(get_cache_dir());
+    fs::path parent_path = root_path.parent_path();
+
+    // POLICY(#242): legacy root factoryは触らず、private factoryだけがfinal
+    // componentをmkdirat(0700)する。上位parentの作成は既存no-symlink契約で再検証する。
+    require_no_symlink_components(parent_path, false);
+    std::error_code parent_error;
+    fs::create_directories(parent_path, parent_error);
+    if(parent_error) {
+        throw std::runtime_error(
+                "Failed to create jpacker cache parent " +
+                parent_path.string() + ": " + parent_error.message());
+    }
+    require_no_symlink_components(parent_path, false);
+    fs::file_status parent_status = cache_symlink_status(parent_path, root_path);
+    if(!fs::is_directory(parent_status)) {
+        throw std::runtime_error(
+                "Private jpacker cache root requires an existing directory parent: " +
+                parent_path.string());
+    }
+
+    int parent_descriptor = open(
+            parent_path.c_str(),
+            O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+    if(parent_descriptor < 0) {
+        throw std::runtime_error(
+                "Failed to retain private jpacker cache parent " +
+                parent_path.string() + ": " + std::strerror(errno));
+    }
+    OwnedCacheRootDescriptor opened_parent(parent_descriptor);
+
+    struct stat opened_parent_status {};
+    struct stat named_parent_status {};
+    if(fstat(opened_parent.get(), &opened_parent_status) != 0 ||
+       fstatat(
+               AT_FDCWD, parent_path.c_str(), &named_parent_status,
+               AT_SYMLINK_NOFOLLOW) != 0 ||
+       !same_cache_root_identity(opened_parent_status, named_parent_status)) {
+        throw std::runtime_error(
+                "Private jpacker cache parent changed during validation: " +
+                parent_path.string());
+    }
+
+    const std::string root_leaf = root_path.filename().string();
+    if(root_leaf.empty()) {
+        throw std::logic_error(
+                "Private jpacker cache root must have a final path component.");
+    }
+
+    std::optional<struct stat> created_status;
+    struct stat                initial_status {};
+    if(fstatat(
+               opened_parent.get(), root_leaf.c_str(), &initial_status,
+               AT_SYMLINK_NOFOLLOW) != 0) {
+        if(errno != ENOENT) {
+            throw std::runtime_error(
+                    "Failed to inspect private jpacker cache root " +
+                    root_path.string() + ": " + std::strerror(errno));
+        }
+
+        if(mkdirat(opened_parent.get(), root_leaf.c_str(), 0700) == 0) {
+            struct stat created_candidate {};
+            if(fstatat(
+                       opened_parent.get(), root_leaf.c_str(),
+                       &created_candidate, AT_SYMLINK_NOFOLLOW) != 0) {
+                // POLICY(#242): identityを証明できないpersistent root候補は削除しない。
+                throw std::runtime_error(
+                        "Failed to inspect newly created private jpacker cache root " +
+                        root_path.string() + ": " + std::strerror(errno));
+            }
+            created_status = created_candidate;
+        } else if(errno != EEXIST) {
+            throw std::runtime_error(
+                    "Failed to create private jpacker cache root " +
+                    root_path.string() + ": " + std::strerror(errno));
+        }
+    }
+
+    // Creation raceのEEXISTもexisting pathとして、同じno-follow contractへ通す。
+    ValidatedCacheRootState trusted_state =
+            validate_cache_root_path(root_path, false);
+    return PreparedPrivateCacheRootState{
+            std::move(trusted_state), std::move(created_status)};
+}
+
+OpenedPrivateCacheRootState open_private_cache_root(
+        const ValidatedCacheRoot& trusted_root,
+        std::uintmax_t expected_effective_user,
+        const std::optional<struct stat>& created_status = std::nullopt) {
+    int root_descriptor = open(
+            trusted_root.canonical_path().c_str(),
+            O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+    if(root_descriptor < 0) {
+        throw std::runtime_error(
+                "Failed to retain private jpacker cache root " +
+                trusted_root.canonical_path().string() + ": " +
+                std::strerror(errno));
+    }
+    OwnedCacheRootDescriptor opened_root(root_descriptor);
+
+    struct stat opened_status {};
+    if(fstat(opened_root.get(), &opened_status) != 0) {
+        throw std::runtime_error(
+                "Failed to inspect retained private jpacker cache root " +
+                trusted_root.canonical_path().string() + ": " +
+                std::strerror(errno));
+    }
+    require_private_cache_root_status(
+            opened_status, trusted_root.canonical_path(),
+            expected_effective_user, created_status.has_value());
+
+    struct stat named_status {};
+    if(fstatat(
+               AT_FDCWD, trusted_root.canonical_path().c_str(), &named_status,
+               AT_SYMLINK_NOFOLLOW) != 0 ||
+       !same_cache_root_identity(opened_status, named_status)) {
+        throw std::runtime_error(
+                "Private jpacker cache root path changed identity: " +
+                trusted_root.canonical_path().string());
+    }
+    require_private_cache_root_status(
+            named_status, trusted_root.canonical_path(),
+            expected_effective_user, created_status.has_value());
+
+    if(created_status.has_value() &&
+       !same_cache_root_identity(created_status.value(), opened_status)) {
+        // mkdiratで作成したcandidateとretained FDが一致しなければ、replacementを所有しない。
+        throw std::runtime_error(
+                "New private jpacker cache root changed identity before validation: " +
+                trusted_root.canonical_path().string());
+    }
+
+    return OpenedPrivateCacheRootState{
+            std::move(opened_root), opened_status};
+}
+
 fs::path cache_path_for_root(const ValidatedCacheRoot& root, const fs::path& path) {
     if(path.is_absolute()) return path;
     return root.path() / path;
@@ -238,6 +473,103 @@ fs::path change_working_directory(const fs::path& target_path) {
 }
 
 } // namespace
+
+ValidatedPrivateCacheRoot::ValidatedPrivateCacheRoot(
+        ValidatedCacheRoot trusted_root, int directory_descriptor,
+        std::uintmax_t device, std::uintmax_t inode,
+        std::uintmax_t owner) noexcept
+    : trusted_root_(std::move(trusted_root)),
+      directory_descriptor_(directory_descriptor), device_(device), inode_(inode),
+      owner_(owner) {
+}
+
+ValidatedPrivateCacheRoot::ValidatedPrivateCacheRoot(
+        ValidatedPrivateCacheRoot&& other) noexcept
+    : trusted_root_(std::move(other.trusted_root_)),
+      directory_descriptor_(std::exchange(other.directory_descriptor_, -1)),
+      device_(other.device_), inode_(other.inode_), owner_(other.owner_) {
+}
+
+ValidatedPrivateCacheRoot::~ValidatedPrivateCacheRoot() noexcept {
+    if(directory_descriptor_ >= 0) close(directory_descriptor_);
+}
+
+void ValidatedPrivateCacheRoot::require_unchanged_identity_for_owner(
+        std::uintmax_t expected_effective_user) const {
+    if(directory_descriptor_ < 0) {
+        throw std::runtime_error(
+                "Private jpacker cache root is no longer owned.");
+    }
+
+    ValidatedCacheRoot current_root =
+            require_unchanged_cache_root(trusted_root_);
+    struct stat retained_status {};
+    if(fstat(directory_descriptor_, &retained_status) != 0) {
+        throw std::runtime_error(
+                "Failed to inspect retained private jpacker cache root " +
+                current_root.canonical_path().string() + ": " +
+                std::strerror(errno));
+    }
+    if(!S_ISDIR(retained_status.st_mode) ||
+       cache_status_device(retained_status) != device_ ||
+       cache_status_inode(retained_status) != inode_ ||
+       cache_status_owner(retained_status) != owner_ ||
+       owner_ != expected_effective_user) {
+        throw std::runtime_error(
+                "Retained private jpacker cache root changed identity or owner: " +
+                current_root.canonical_path().string());
+    }
+    require_private_cache_root_status(
+            retained_status, current_root.canonical_path(),
+            expected_effective_user, false);
+
+    struct stat named_status {};
+    if(fstatat(
+               AT_FDCWD, current_root.canonical_path().c_str(), &named_status,
+               AT_SYMLINK_NOFOLLOW) != 0 ||
+       !same_cache_root_identity(retained_status, named_status) ||
+       cache_status_device(named_status) != device_ ||
+       cache_status_inode(named_status) != inode_ ||
+       cache_status_owner(named_status) != owner_) {
+        throw std::runtime_error(
+                "Private jpacker cache root path changed identity or owner: " +
+                current_root.canonical_path().string());
+    }
+    require_private_cache_root_status(
+            named_status, current_root.canonical_path(),
+            expected_effective_user, false);
+}
+
+void ValidatedPrivateCacheRoot::require_unchanged_identity() const {
+    require_unchanged_identity_for_owner(
+            static_cast<std::uintmax_t>(geteuid()));
+}
+
+ValidatedPrivateCacheRoot prepare_private_trusted_cache_root() {
+    PreparedPrivateCacheRootState prepared = prepare_private_cache_root_path();
+    ValidatedCacheRoot trusted_root(
+            std::move(prepared.trusted_state.path),
+            std::move(prepared.trusted_state.canonical_path));
+    OpenedPrivateCacheRootState opened = open_private_cache_root(
+            trusted_root, static_cast<std::uintmax_t>(geteuid()),
+            prepared.created_status);
+
+    ValidatedPrivateCacheRoot private_root(
+            std::move(trusted_root), opened.descriptor.get(),
+            cache_status_device(opened.status),
+            cache_status_inode(opened.status),
+            cache_status_owner(opened.status));
+    static_cast<void>(opened.descriptor.release());
+    return private_root;
+}
+
+#ifdef JPACKER_ENABLE_TRUSTED_CACHE_TEST_HOOKS
+void require_private_cache_root_identity_for_test(
+        const ValidatedPrivateCacheRoot& root,
+        std::uintmax_t expected_effective_user) {
+    root.require_unchanged_identity_for_owner(expected_effective_user);
+}
+#endif
 
 ValidatedCacheRoot prepare_trusted_cache_root() {
     ValidatedCacheRootState root = validate_cache_root_path(get_cache_dir(), true);

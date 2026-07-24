@@ -1,0 +1,106 @@
+#!/bin/sh
+set -eu
+
+repo_root=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
+tmp_dir=$(mktemp -d)
+
+cleanup() {
+    rm -rf "$tmp_dir"
+}
+trap cleanup EXIT INT TERM
+
+JPACKER_TEST_REPOSITORY_ROOT=$repo_root
+export JPACKER_TEST_REPOSITORY_ROOT
+. "$repo_root/tests/test-command-safety.sh"
+
+fail() {
+    printf '%s\n' "$*" >&2
+    exit 1
+}
+
+expect_rejected() {
+    case_name=$1
+    shift
+    status=0
+    "$@" >/dev/null 2>&1 || status=$?
+    if [ "$status" -ne 2 ]; then
+        fail "$case_name returned $status instead of rejecting argv with status 2"
+    fi
+}
+
+# The positive case proves that the helper accepts the committed regular,
+# executable stub selected by PATH.
+PATH=$repo_root/tests/stubs:/usr/bin:/bin
+export PATH
+require_exact_test_command pacman-conf "$repo_root/tests/stubs/pacman-conf"
+
+mkdir -p "$tmp_dir/unexpected" "$tmp_dir/non-executable" "$tmp_dir/symlink"
+printf '%s\n' '#!/bin/sh' 'exit 0' > "$tmp_dir/unexpected/pacman-conf"
+chmod 755 "$tmp_dir/unexpected/pacman-conf"
+if (
+    PATH=$tmp_dir/unexpected:$PATH
+    export PATH
+    require_exact_test_command pacman-conf "$repo_root/tests/stubs/pacman-conf"
+    : > "$tmp_dir/binary-started"
+) >/dev/null 2>&1; then
+    fail 'unexpected PATH command was not rejected before binary startup'
+fi
+if [ -e "$tmp_dir/binary-started" ]; then
+    fail 'test command ran past an unsafe command resolution check'
+fi
+
+printf '%s\n' '#!/bin/sh' 'exit 0' > "$tmp_dir/non-executable/pacman-conf"
+chmod 644 "$tmp_dir/non-executable/pacman-conf"
+if (
+    JPACKER_TEST_CASE_STUB_ROOT=$tmp_dir/non-executable
+    PATH=$tmp_dir/non-executable:/usr/bin:/bin
+    export JPACKER_TEST_CASE_STUB_ROOT PATH
+    require_exact_test_command pacman-conf \
+        "$tmp_dir/non-executable/pacman-conf"
+) >/dev/null 2>&1; then
+    fail 'non-executable expected stub was not rejected before binary startup'
+fi
+
+ln -s /usr/bin/true "$tmp_dir/symlink/pacman-conf"
+if (
+    JPACKER_TEST_CASE_STUB_ROOT=$tmp_dir/symlink
+    PATH=$tmp_dir/symlink:/usr/bin:/bin
+    export JPACKER_TEST_CASE_STUB_ROOT PATH
+    require_exact_test_command pacman-conf "$tmp_dir/symlink/pacman-conf"
+) >/dev/null 2>&1; then
+    fail 'stub symlink resolving outside its allowed root was not rejected'
+fi
+
+command_log=$tmp_dir/commands.log
+: > "$command_log"
+export JPACKER_TEST_COMMAND_LOG=$command_log
+export JPACKER_TEST_MAKEPKG_EXIT_CODE=0
+export JPACKER_TEST_PACMAN_EXIT_CODE=0
+export JPACKER_TEST_SUDO_EXIT_CODE=0
+
+expect_rejected 'legacy makepkg install argv' \
+    "$repo_root/tests/stubs/makepkg" -sic
+expect_rejected 'makepkg --needed argv' \
+    "$repo_root/tests/stubs/makepkg" -sc --needed
+expect_rejected 'arbitrary sudo command' \
+    "$repo_root/tests/stubs/sudo" arbitrary-command --unexpected
+expect_rejected 'unexpected pacman option through sudo' \
+    "$repo_root/tests/stubs/sudo" pacman -S --unexpected target
+expect_rejected 'unexpected sync pacman option through sudo' \
+    "$repo_root/tests/stubs/commands-sync/sudo" \
+        pacman -S --unexpected target
+expect_rejected 'unexpected source-maintenance pacman option through sudo' \
+    "$repo_root/tests/stubs/source-maintenance/sudo" \
+        pacman -S --unexpected target
+expect_rejected 'unexpected read-only pacman option' \
+    "$repo_root/tests/stubs/pacman" -Si target --unexpected
+expect_rejected 'unexpected sync read-only pacman option' \
+    "$repo_root/tests/stubs/commands-sync/pacman" -Si target --unexpected
+expect_rejected 'identity query with extra argv' \
+    "$repo_root/tests/stubs/pacman" -U --print --print-format \
+        "$(printf '%s\t%s' '%n' '%v')" -- "$tmp_dir/artifact" extra
+expect_rejected 'typed install with two reason options' \
+    "$repo_root/tests/stubs/sudo" pacman -U --asdeps --asexplicit -- \
+        "$tmp_dir/artifact"
+
+printf '%s\n' 'test command safety and stub contracts: all checks passed'

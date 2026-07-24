@@ -6,7 +6,8 @@
 #define JPACKER_HAS_EXTRACTED_SOURCE_INSTALL 0
 #endif
 
-// POLICY(#203): 抽出前後で同じscenarioをdirect実行し、shared orchestrationの挙動を比較する。
+// POLICY(#203,#242): production ownerのprepared invocationをdirect実行し、
+// CLI wrapperを介さずall-target collectionとshared lifecycle接続をcharacterizeする。
 #define main jpacker_program_main
 #include "../src/jpacker.cpp"
 #undef main
@@ -14,6 +15,8 @@
 #include <exception>
 #include <iostream>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace {
 
@@ -27,14 +30,29 @@ AppConfig characterization_config() {
 
 BuildPlan two_entry_plan() {
     BuildPlan plan;
-    plan.order.push_back(BuildPlanEntry{"dep-base", {"dep-target"}});
-    plan.order.push_back(BuildPlanEntry{"root-base", {"root-target"}});
+    const RootTargetIdentity root_identity{0, "root-target"};
+
+    plan.root_targets.push_back(root_identity);
+    plan.package_targets.push_back(PlannedPackageTarget{
+            "dep-target", "dep-target", {PackageRole::RuntimeDependency},
+            {root_identity}});
+    plan.package_targets.push_back(PlannedPackageTarget{
+            "root-target", "root-target", {PackageRole::Root},
+            {root_identity}});
+
+    plan.order.push_back(BuildPlanEntry{"dep-target", {"dep-target"}});
+    plan.order.push_back(BuildPlanEntry{"root-target", {"root-target"}});
     return plan;
 }
 
 BuildPlan fallback_plan() {
     BuildPlan plan;
-    plan.order.push_back(BuildPlanEntry{"base-target", {"requested-target"}});
+    const RootTargetIdentity root_identity{0, "base-target"};
+    plan.root_targets.push_back(root_identity);
+    plan.package_targets.push_back(PlannedPackageTarget{
+            "base-target", "base-target", {PackageRole::Root},
+            {root_identity}});
+    plan.order.push_back(BuildPlanEntry{"base-target", {"base-target"}});
     return plan;
 }
 
@@ -42,7 +60,13 @@ void execute_characterized_plan(
         const BuildPlan& plan, bool use_source_build_preferences, bool needed,
         const AppConfig& config) {
 #if JPACKER_HAS_EXTRACTED_SOURCE_INSTALL
-    execute_aur_build_plan(plan, use_source_build_preferences, needed, config);
+    std::vector<ProductionSourceBuildWorkItem> work_items =
+            prepare_aur_source_build_work_items(
+                    plan, use_source_build_preferences, needed);
+    PreparedProductionSourceBuildInvocation invocation =
+            prepare_production_source_build_invocation(
+                    std::move(work_items), config);
+    execute_prepared_source_build_invocation(invocation, config);
 #else
     static_cast<void>(config);
     SourceSyncOptions source_sync_options;
@@ -55,7 +79,13 @@ void install_characterized_smart_source(
         const std::string& package_name, bool only_if_updated, bool needed,
         const AppConfig& config) {
 #if JPACKER_HAS_EXTRACTED_SOURCE_INSTALL
-    install_smart_source(package_name, only_if_updated, needed, config);
+    std::vector<ProductionSourceBuildWorkItem> work_items;
+    work_items.push_back(prepare_smart_source_build_work_item(
+            package_name, only_if_updated, needed));
+    PreparedProductionSourceBuildInvocation invocation =
+            prepare_production_source_build_invocation(
+                    std::move(work_items), config);
+    execute_prepared_source_build_invocation(invocation, config);
 #else
     static_cast<void>(config);
     SourceSyncOptions source_sync_options;
@@ -77,6 +107,10 @@ int run_scenario(const std::string& scenario, const AppConfig& config) {
         install_characterized_smart_source("clean-root", false, false, config);
         return 0;
     }
+    if(scenario == "smart-source-missing-post-snapshot") {
+        install_characterized_smart_source("clean-root", true, false, config);
+        return 0;
+    }
 
     std::cerr << "Unknown source-install characterization scenario: " << scenario << '\n';
     return 2;
@@ -87,7 +121,8 @@ int run_scenario(const std::string& scenario, const AppConfig& config) {
 int main(int argc, char* argv[]) {
     if(argc != 2) {
         std::cerr << "Usage: " << argv[0]
-                  << " <plan-success|plan-failure|fallback|smart-source>\n";
+                  << " <plan-success|plan-failure|fallback|smart-source|"
+                     "smart-source-missing-post-snapshot>\n";
         return 2;
     }
 

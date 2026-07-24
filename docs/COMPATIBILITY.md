@@ -107,6 +107,30 @@ build / install / fetch 実行系では、ambiguous provider、unresolved depend
 
 ---
 
+## plan official repository package size metadata policy
+
+`jpacker plan <pkg>` は、AUR build graph の既存表示に続く jpacker-owned presentation として、official repository dependency の package size metadata を表示する。この metadata は `BuildPlan` の graph safety や実行可否を構成せず、`BuildPlan::order` に並ぶ AUR build unit の size も推定しない。
+
+size candidate は `BuildPlan::dependency_edges` の first-seen order から次のように抽出する。
+
+- `DependencyKind::Repo` で `resolved_package_name` がある edge は、configured repository precedence でpackageを検索する。
+- `DependencyKind::Provided` で一意な `resolved_provider` があり、そのrepositoryがconfigured repositoryに含まれ、かつ`aur`ではないedgeは、providerのrepositoryをexact指定してpackageを検索する。
+- AUR dependency / provider、ambiguous provider、unknown dependency、resolved valueの欠落、unconfiguredまたはstaleなrepositoryを指すproviderはcandidateにしない。
+
+repository名とprecedenceは`pacman-conf --repo-list`のconfigured orderだけを正本とする。hard-coded repository list、sync directory走査によるfallback、unconfigured databaseの採用、alphabetical sortは行わない。configured repositoryの既存sync DBは順番にすべてregister、validate、package cache preloadし、1件でも失敗した場合はsession全体をunavailableとする。これは壊れた先行repositoryをskipして同名packageのprecedenceを変えないためである。sync DBはread-only metadata sourceとして参照するだけで、refresh / update、server設定、transaction、database mutationを行わない。
+
+configured precedence lookupはrepositoryをconfigured orderで照会し、同名packageが複数にあれば最初のrepositoryのpackageを採用する。explicit not-foundの場合だけ次のrepositoryへ進み、query failureでは後続へfallbackしない。exact provider lookupは指定されたconfigured repositoryだけを照会し、他repositoryへfallbackしない。
+
+candidateとquery cacheのsemantic identityは`(exact_repository_name, package_name)`とする。したがって、同じpackage名でもconfigured precedence lookupとexact provider lookupは別candidateである。query成功後はreturned `(repository_name, package_name)`をdisplay identityとして重複表示を除き、同じ実packageへ解決したdirect lookupとexact lookupを1表示にまとめる。異なるrepositoryの同名package、ならびにrepository identityを持たないnot-found / failureは別の結果として扱い、edgeのfirst-seen orderを維持する。
+
+`Package size`はcompressed repository package archive、`Installed size`はinstalled contentsのsizeである。0 bytesはknown zeroとして表示し、not foundやunavailableへ変換しない。表示はlocaleとfloating-pointに依存しないbase 1024のIEC unit (`B` / `KiB` / `MiB` / `GiB` / `TiB` / `PiB` / `EiB`)を使う。1024 bytes未満はinteger `B`、それ以上は小数2桁のround-half-upとし、丸め結果が`1024.00`になれば次のunitへpromoteする。
+
+package absence、query failure、malformed metadata、configuration/session failureは区別する。failureをnot foundや0 bytesへflattenせず、user-visible outputには安定した分類だけを表示する。metadata failureがあっても既存のplan本文と他package / targetの表示を続け、metadata availabilityだけを理由にexit statusをnon-zeroへ変えず、graph safetyの正本である`Plan status`へ混ぜない。
+
+このpresentationは`plan`だけに閉じ、pacman passthrough、`-Ss` / `-Si` routing、dependency resolution、provider selection、fetch、build / install lifecycle、transaction behaviorを変更しない。
+
+---
+
 ## AUR split package install target policy
 
 AUR metadata の `PackageBase` は clone / fetch / build repository の単位であり、package name は install 対象である。単体 package では結果として一致してよいが、split package では一致するとは限らない。
@@ -119,7 +143,7 @@ jpacker v1.9.0 / #98 では、`PackageBase` と install target package name を�
 - `plan <pkg>` は、AUR RPC info 上で `Name` と `PackageBase` が異なる target を `Split package install targets` として表示し、install target selection 未実装の incomplete plan として扱う。
 - `fetch <pkg>` は PackageBase 単位の取得操作であるため、package name から PackageBase へ解決でき、ambiguous provider / unresolved dependency / cyclic dependency が残らない場合は実行してよい。
 - `-G <pkg>` は root PackageBase repository を current directory の `./<PackageBase>` へ export し、`-Gp <pkg>` はその root `PKGBUILD` だけを stdout へ表示する。read-only inspection なので `Name` と `PackageBase` の相違自体では停止せず、dependency repository や split package install target selection は扱わない。
-- `-S <pkg>` などの install 経路と `build <pkg>` は現状 `makepkg -i` を含む build/install 経路であるため、`Name` と `PackageBase` が異なる AUR target では clone / build / install 前に停止する。
+- `-S <pkg>` などの install 経路と `build <pkg>` は、fresh `PKGDEST` へ single artifact を build して typed `sudo pacman -U` で install する separated 経路である。`Name` と `PackageBase` が異なる AUR target では、install target を一意に決められないため clone / build / install 前に停止する。
 - `--noconfirm` は split package install target selection 未実装を自動承認しない。
 
 この guard は、AUR RPC info で requested package の `Name` と `PackageBase` が異なる場合を対象にする。`PackageBase == Name` だが同じ PackageBase から sibling package も生成されるケースの完全な列挙・選択は、`.SRCINFO` / generated package list / package file selection と合わせて後続 Issue で扱う。
@@ -145,13 +169,13 @@ jpacker v1.9.0 / #98 では、`PackageBase` と install target package name を�
 初回 clone では比較元になる既存 checkout がないため、update diff prompt は出ない。build/install 前の review prompt で PKGBUILD / `*.install` の存在を確認する。
 既存 cache repository では `git fetch origin` 後、reset 前に `HEAD..origin/<branch>` の diff を確認できる。この diff は「現在 cache にある checkout から、取得した remote branch へ進めた場合の変更」を示す。
 
-`--rebuild` は AUR / source build の build/install 実行時に `makepkg -f` 相当として扱う。`--cleanbuild` は `makepkg -C` 相当として扱う。これらは pacman 由来 option ではないため、pacman execution へは渡さない。
+`--rebuild` は AUR / source build の build-only makepkg 実行時に `-f` として扱う。`--cleanbuild` は同じ実行時に `-C` として扱う。これらは pacman 由来 option ではないため、pacman execution へは渡さない。
 
-`--rebuild` / `--cleanbuild` が未指定の場合、jpacker は既存の package artifact や `src/` directory がある場面で、必要に応じて default no の prompt で rebuild / cleanbuild を確認する。cleanbuild を有効にし、同じ package directory に既存 package artifact がある場合は、artifact 再利用を避けるため rebuild も有効にする。`--noconfirm` 指定時は prompt を出さず、未指定の rebuild / cleanbuild は no として扱う。
+`--rebuild` / `--cleanbuild` が未指定の場合、jpacker は既存の package artifact や `src/` directory がある場面で、必要に応じて default no の prompt で rebuild / cleanbuild を確認する。cleanbuild を有効にし、同じ package directory に既存 package artifact がある場合は `-f` も有効にする。`--noconfirm` 指定時は prompt を出さず、未指定の rebuild / cleanbuild は no として扱う。
 
-`--rmdeps` は明示 opt-in の jpacker 固有 option として、AUR / source build の共通 build/install 経路で `makepkg -r` 相当へ変換する。未指定時は build 後の依存削除を行わず、`--noconfirm` だけで暗黙に有効化しない。`--rmdeps --noconfirm` を両方指定した場合は、その明示意図どおり makepkg へ `-r` と `--noconfirm` の両方を渡す。
+`--rmdeps` は jpacker 固有 option として認識するが、separated AUR / source-build 経路では未対応とする。source target を含む invocation では all-target preflight で拒否し、artifact workspace 作成、makepkg、installed metadata query、sudo のいずれも開始しない。`makepkg -r` へは変換せず、`--noconfirm` を併記しても拒否を突破しない。
 
-削除対象は、同じ invocation の `makepkg -s` による dependency auto-resolution で導入され、build が成功した後に makepkg が削除対象と判断した dependency に限る。jpacker は `pacman -Rns`、`pacman -Qdt`、独自 orphan cleanup を実行しない。pacman-only 経路や official repository package の通常 install では `--rmdeps` を pacman へ渡さず、作用させない。
+jpacker は `pacman -Rns`、`pacman -Qdt`、独自 orphan cleanup を追加しない。pacman-only 経路や official repository package の通常 install では `--rmdeps` を pacman へ渡さず、作用させない。
 
 `--aur` / `--repo` は package source を invocation 単位で限定する selector である。pacman / makepkg へは渡さず、下記の source selection policy に従って jpacker が routing に使う。
 
@@ -273,13 +297,19 @@ v1.8.0 では次の表示は扱わない。これらは検索表示や package i
 
 pacman へ直接委譲する経路では、jpacker が明示的に消費しない pacman-compatible option を pacman へ渡す。
 
-AUR / source build 経路では、pacman option をそのまま makepkg option とみなさない。makepkg build/install execution の基本形は `makepkg -sic` であり、jpacker が明示的に追加するのは次の範囲に留める。
+AUR / source build 経路では、pacman option をそのまま makepkg option とみなさない。production の separated 経路では、makepkg が source package artifact の build、jpacker が artifact workspace・validation・install policy、`pacman -U` が検証済み artifact の install transaction を所有する。各 PackageBase に fresh `PKGDEST` を作り、同じ structured source environment で `makepkg --packagelist`、build-only `makepkg -sc`、artifact validation、installed metadata query、typed `sudo pacman -U` の順に実行する。jpacker が明示的に変換するのは次の範囲に留める。
 
-- `--noconfirm`: pacman / makepkg execution へ渡す。
-- `--needed`: target を伴う対応済み `-S` の AUR / source build 経路では、makepkg が最終 package install を pacman へ委譲するときの install-only policy として 1 回だけ渡す。
-- `--rebuild`: jpacker 固有 option として `makepkg -f` 相当へ変換する。
-- `--cleanbuild`: jpacker 固有 option として `makepkg -C` 相当へ変換する。
-- `--rmdeps`: jpacker 固有 option として `makepkg -r` 相当へ変換する。
+- `--noconfirm`: build-only makepkg と typed `sudo pacman -U` の両方へ渡す。
+- `--needed`: target を伴う対応済み `-S` の AUR / source build 経路では、最終 `sudo pacman -U` だけへ install-only policy として 1 回渡す。makepkg へは渡さない。
+- `--rebuild`: jpacker 固有 option として build-only makepkg の `-f` へ変換する。
+- `--cleanbuild`: jpacker 固有 option として build-only makepkg の `-C` へ変換する。
+- `--rmdeps`: separated source-build 経路では mutation 前に拒否し、`makepkg -r` へ変換しない。
+
+inherited process environment または各 target の structured source environment が `PKGDEST` を定義している場合は、empty value でも all-target preflight で拒否する。later target の conflict でも先行 unit を開始しない。jpacker は `makepkg.conf` 内の `PKGDEST` をこの preflight では解析しない。
+
+現行経路が受け入れるのは PackageBase ごとに exactly one artifact だけである。split package の install target selection、sibling / debug package、multiple output は未対応とし、曖昧な artifact を選ばず fail closed で停止する。
+
+build 後の artifact validation、metadata query、または install が失敗した場合は、artifact workspace を診断用に保持する。保持した workspace は次回 invocation の入力として自動再利用しない。`pacman -U` の成功後に workspace cleanup が失敗した場合は package install 成功済みの partial success であり、同じ package の install を無条件に再試行してはならない。
 
 それ以外の pacman transaction option は official repository target へ pass-through する。AUR / source build target が同じ `-S` invocation に含まれる場合は、option を黙って無視した部分実行を避けるため、pacman / makepkg の実行前に transaction 全体を停止する。必要なら official repository target と AUR / source build target を別 invocation に分ける。
 
@@ -289,7 +319,7 @@ AUR / source build 経路では、pacman option をそのまま makepkg option �
 
 ### `--noconfirm`
 
-`--noconfirm` は pacman 由来の互換 option として扱い、pacman execution と makepkg build/install execution へ pass-through する。
+`--noconfirm` は pacman 由来の互換 option として扱う。pacman-only execution では pacman へ、separated source-build 経路では build-only makepkg と typed `sudo pacman -U` の両方へ pass-through する。`makepkg --packagelist` には追加しない。
 
 同時に、jpacker 自身の prompt 制御にも関係する。ただし意味は「全部 yes」ではなく「対話で止まらない」指定である。
 
@@ -302,7 +332,7 @@ AUR / source build 経路では、pacman option をそのまま makepkg option �
 - conflicts / replaces の自動判断
 - 明示されていない rebuild
 - 明示されていない cleanbuild
-- 明示されていない rmdeps
+- separated source-build 経路での `--rmdeps` 拒否
 - 危険な削除や reset
 
 この方針は #83 の prompt helper 実装前提でもある。prompt helper では、単純に `--noconfirm` を「yes」として扱うのではなく、非対話時に安全に停止するもの、default を選べるもの、明示 option が必要なものを分ける。
@@ -313,13 +343,13 @@ AUR / source build 経路では、pacman option をそのまま makepkg option �
 
 `--needed` は jpacker global option ではなく、pacman 由来の互換 option として扱う。pacman-only 経路では ordered pacman argv にそのまま保持する。official repository target と AUR / source build target が混在する `-S` install でも、official transaction の argv には元の `--needed` を保持する。
 
-target を伴う対応済み `-S` の AUR / source build 経路では、`--needed` を build skip option として扱わない。`--needed` 自体を理由に、package/source validation、AUR RPC / PackageBase 解決、dependency/build plan、conflicts/replaces・provider・split package などの guard、git clone/fetch/update、PKGBUILD / `.install` review、makepkg execution までの経路を省略しない。jpacker は installed version、AUR RPC version、`.SRCINFO`、既存 local artifact を根拠に独自の build skip 判定を追加せず、既存 artifact の再利用と `--rebuild` の契約は従来どおり維持する。
+target を伴う対応済み `-S` の AUR / source build 経路では、`--needed` を build skip option として扱わない。`--needed` 自体を理由に、package/source validation、AUR RPC / PackageBase 解決、dependency/build plan、conflicts/replaces・provider・split package などの guard、git clone/fetch/update、PKGBUILD / `.install` review、`makepkg --packagelist`、build-only makepkg までの経路を省略しない。jpacker は installed version、AUR RPC version、`.SRCINFO`、既存 local artifact を根拠に独自の build skip 判定を追加せず、各 PackageBase を fresh `PKGDEST` で build する。
 
-semantic な `--needed` は makepkg command に 1 回だけ渡すが、makepkg が生成済み package の最終 install を pacman `-U` へ委譲するときだけ作用する install-only policy として解釈する。AUR root target と source build preference がある official package は同じ契約を使い、preference を binary repository route へ切り替えない。重複指定は pacman argv では元の順序と個数を保持するが、source build 側では boolean policy として `--needed` を 1 回だけ生成する。
+semantic な `--needed` は makepkg command へ渡さず、jpacker が検証済み artifact に対して構築する typed `sudo pacman -U` command へ 1 回だけ渡す。AUR root target と source build preference がある official package は同じ契約を使い、preference を binary repository route へ切り替えない。重複指定は pacman-only argv では元の順序と個数を保持するが、source build 側では boolean policy として `--needed` を 1 回だけ生成する。
 
-split PackageBase では、makepkg が対象 architecture 向けの生成 artifact を 1 回の `pacman -U --needed` transaction へ渡し、pacman / libalpm が package 単位で install 要否を判断する。全対象が up-to-date として省略された場合も成功扱いである。jpacker は split package ごとの needed 判定や artifact version 比較を再実装せず、既存の split install target guard も突破しない。
+`--needed` は前述の exactly-one artifact guard を緩和せず、split / sibling / debug / multiple output を選択可能にしない。受け入れた single artifact についてだけ、pacman / libalpm が `pacman -U --needed` の policy に従って install 要否を判断する。
 
-`--rebuild` / `--cleanbuild` は build / build directory の再実行方針、`--rmdeps` は makepkg が導入した build dependency の削除方針、`--noconfirm` は prompt suppression であり、`--needed` の install-only policy とは独立して併用できる。どの組み合わせでも plan / review / safety guard は省略しない。
+`--rebuild` / `--cleanbuild` は build / build directory の再実行方針、`--noconfirm` は prompt suppression であり、`--needed` の install-only policy とは独立して併用できる。`--rmdeps` だけは separated source-build 経路で併用できず、mutation 前に拒否する。どの組み合わせでも plan / review / safety guard は省略しない。
 
 semantic option の判定は parser の token role に従う。通常の pacman option 位置にある exact `--needed` だけを source build policy として認識し、`--root --needed` の option value、`--` 後の opaque operand、`--needed=true` は認識・正規化しない。source route で意味を保てない形や option は、従来どおり外部 mutation 前に停止する。
 
@@ -392,7 +422,7 @@ operation 確定後、値を取る option の次の token は、`--rmdeps` や `
 - `--downloadonly`
 - `--print`
 
-特に database path、root、sysroot、config を変える option は、pacman の見ている world と jpacker の AUR metadata / installed package state / build cache の見ている world がずれる可能性がある。install reason、dependency check、download-only、print-only なども makepkg build/install と同じ意味にはならない。現時点では、これらを含む `-S` に AUR / source build target があれば unsupported として停止する。`--needed` だけは前節の install-only policy に限って明示的に変換する。
+特に database path、root、sysroot、config を変える option は、pacman の見ている world と jpacker の AUR metadata / installed package state / build cache の見ている world がずれる可能性がある。install reason、dependency check、download-only、print-only なども separated source-build lifecycle で同じ意味にはならない。現時点では、これらを含む `-S` に AUR / source build target があれば unsupported として停止する。`--needed` だけは前節の install-only policy に限って明示的に変換する。
 
 ---
 

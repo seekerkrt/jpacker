@@ -2,7 +2,6 @@
 #include "dependency_plan.hpp"
 
 #include <exception>
-#include <filesystem>
 #include <iostream>
 #include <optional>
 #include <stdexcept>
@@ -38,16 +37,13 @@ ArtifactSelectionRequest single_artifact_request() {
             "sample-package",
             ArtifactWorkspaceOwnership::InvocationOwnedFresh,
             SourcePkgdestState::NotDefined,
-            {{"/unused/sample-package-1.0-1-x86_64.pkg.tar.zst", "sample-package"}}};
+            {{"sample-package"}}};
 }
 
 void test_invocation_owned_single_exact_artifact() {
     ArtifactSelectionRequest request = single_artifact_request();
     ValidatedArtifactInstallTarget target = validate_single_output_artifact(request);
 
-    expect(
-            target.path == request.artifacts.front().path,
-            "Validated artifact path differs");
     expect(
             target.package_name == request.artifacts.front().package_name,
             "Validated artifact package name differs");
@@ -77,7 +73,7 @@ void test_unspecified_workspace_ownership_rejected() {
     request.package_base = "sample-package";
     request.source_pkgdest_state = SourcePkgdestState::NotDefined;
     request.artifacts = {
-            {"/unused/sample-package-1.0-1-x86_64.pkg.tar.zst", "sample-package"}};
+            {"sample-package"}};
 
     expect_exception<std::runtime_error>(
             [&request]() { static_cast<void>(validate_single_output_artifact(request)); },
@@ -132,7 +128,7 @@ void test_zero_artifacts_rejected() {
 void test_multiple_artifacts_rejected() {
     ArtifactSelectionRequest request = single_artifact_request();
     request.artifacts.push_back(
-            {"/unused/sample-package-copy.pkg.tar.zst", "sample-package"});
+            {"sample-package"});
 
     expect_exception<std::runtime_error>(
             [&request]() { static_cast<void>(validate_single_output_artifact(request)); },
@@ -142,7 +138,7 @@ void test_multiple_artifacts_rejected() {
 void test_debug_or_sibling_output_rejected() {
     ArtifactSelectionRequest request = single_artifact_request();
     request.artifacts.push_back(
-            {"/unused/sample-package-debug.pkg.tar.zst", "sample-package-debug"});
+            {"sample-package-debug"});
 
     expect_exception<std::runtime_error>(
             [&request]() { static_cast<void>(validate_single_output_artifact(request)); },
@@ -157,15 +153,6 @@ void test_artifact_package_name_mismatch_rejected() {
             [&request]() { static_cast<void>(validate_single_output_artifact(request)); },
             "Produced artifact package name does not match the requested package: "
             "different-package != sample-package.");
-}
-
-void test_empty_artifact_path_rejected() {
-    ArtifactSelectionRequest request = single_artifact_request();
-    request.artifacts.front().path.clear();
-
-    expect_exception<std::runtime_error>(
-            [&request]() { static_cast<void>(validate_single_output_artifact(request)); },
-            "Produced package artifact path is empty.");
 }
 
 void test_new_root_uses_default_reason() {
@@ -362,7 +349,6 @@ int main() {
         run_case(
                 "artifact package name mismatch rejected",
                 test_artifact_package_name_mismatch_rejected);
-        run_case("empty artifact path rejected", test_empty_artifact_path_rejected);
         run_case("new root uses default reason", test_new_root_uses_default_reason);
         run_case(
                 "existing explicit root uses default reason",
@@ -414,6 +400,6 @@ int main() {
         return 1;
     }
 
-    std::cout << "artifact install plan tests: all 29 checks passed\n";
+    std::cout << "artifact install plan tests: all 28 checks passed\n";
     return 0;
 }

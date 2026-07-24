@@ -4,6 +4,15 @@ set -eu
 module_test_binary=$1
 integration_test_binary=$2
 repo_root=$(CDPATH='' cd "$(dirname "$0")/.." && pwd)
+JPACKER_TEST_REPOSITORY_ROOT=$repo_root
+export JPACKER_TEST_REPOSITORY_ROOT
+. "$repo_root/tests/test-command-safety.sh"
+export PATH="$repo_root/tests/stubs:/usr/bin:/bin"
+require_exact_test_command pacman-conf "$repo_root/tests/stubs/pacman-conf"
+require_exact_test_command makepkg "$repo_root/tests/stubs/makepkg"
+require_exact_test_command pacman "$repo_root/tests/stubs/pacman"
+require_exact_test_command sudo "$repo_root/tests/stubs/sudo"
+require_exact_test_command git "$repo_root/tests/stubs/git"
 tmp_dir=$(mktemp -d)
 server_pid=
 
@@ -189,7 +198,6 @@ while [ ! -s "$port_file" ]; do
 done
 
 port=$(cat "$port_file")
-export PATH="$repo_root/tests/stubs:/usr/bin:/bin"
 export JPACKER_TEST_AUR_RPC_BASE_URL="http://127.0.0.1:$port/rpc/"
 
 setup_integration_case() {
@@ -234,6 +242,16 @@ run_integration_ok() {
     fi
 }
 
+run_integration_fail() {
+    : > "$command_log"
+    if "$integration_test_binary" "$@" > "$output_file" 2>&1; then
+        echo "integration command unexpectedly succeeded: $*" >&2
+        sed -n '1,240p' "$output_file" >&2
+        cat "$command_log" >&2
+        exit 1
+    fi
+}
+
 assert_command() {
     expected=$1
     if ! grep -Fx -- "$expected" "$command_log" >/dev/null; then
@@ -261,9 +279,10 @@ assert_command_log_empty() {
 }
 
 setup_integration_case precedence
-run_integration_ok --noconfirm --rebuild --cleanbuild --rmdeps -S --aur clean-root
+run_integration_ok --noconfirm --rebuild --cleanbuild -S --aur clean-root
 assert_line "git clone https://aur.archlinux.org/clean-root.git clean-root" "$command_log"
-assert_command "makepkg -sic --noconfirm -f -C -r"
+assert_command "makepkg -sc --noconfirm -f -C"
+assert_contains "sudo pacman -U --noconfirm -- " "$command_log"
 assert_contains "Skipping PKGBUILD/.install review (--noedit)." "$output_file"
 assert_not_contains "Review target: PKGBUILD" "$output_file"
 if [ ! -f "$HOME/config-log/jpacker.log" ]; then
@@ -274,23 +293,30 @@ if [ -e "$XDG_CACHE_HOME/jpacker/jpacker.log" ]; then
 fi
 
 # 2回目はexisting cache routeへ入り、config由来NODIFFがgit diffを抑止する。
-run_integration_ok --noconfirm --rebuild --cleanbuild --rmdeps -S --aur clean-root
+run_integration_ok --noconfirm --rebuild --cleanbuild -S --aur clean-root
 assert_command "git fetch origin"
 assert_command "git reset --hard origin/main"
-assert_command "makepkg -sic --noconfirm -f -C -r"
+assert_command "makepkg -sc --noconfirm -f -C"
 assert_command_absent "git diff"
 
 # repeated enable-only optionも1回分の最終policyとしてmergeされる。
 run_integration_ok \
     --noconfirm --noconfirm --rebuild --rebuild \
-    --cleanbuild --cleanbuild --rmdeps --rmdeps -S --aur clean-root
-assert_command "makepkg -sic --noconfirm -f -C -r"
-makepkg_count=$(grep -Fxc -- "makepkg -sic --noconfirm -f -C -r" "$command_log" || true)
+    --cleanbuild --cleanbuild -S --aur clean-root
+assert_command "makepkg -sc --noconfirm -f -C"
+makepkg_count=$(grep -Fxc -- "makepkg -sc --noconfirm -f -C" "$command_log" || true)
 if [ "$makepkg_count" -ne 1 ]; then
     echo "repeated CLI option changed the makepkg option multiplicity" >&2
     cat "$command_log" >&2
     exit 1
 fi
+
+# --rmdepsもenable-onlyでmergeされるが、separated source routeでは
+# resolver/checkout/workspace/makepkg/sudoより前に拒否する。
+setup_integration_case rmdeps-rejection
+run_integration_fail --rmdeps --rmdeps -S --aur clean-root
+assert_contains "Separated build/install does not support --rmdeps." "$output_file"
+assert_command_log_empty
 
 # 同一processでparse failure後のg_configを検査し、途中までのCLI overrideがpublishされないことを固定する。
 setup_integration_case parse-failure

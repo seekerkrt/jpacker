@@ -9,6 +9,10 @@ struct CapturedCommandResult {
 };
 
 CapturedCommandResult capture_command_output(const char* cmd);
+
+// stdoutの境界whitespaceにも意味があるparser向け。exit statusのdecode契約は上と同じ。
+CapturedCommandResult capture_command_output_raw(const char* cmd);
+
 std::string exec_command(const char* cmd);
 int command_status(const std::string& cmd);
 int run_command(const std::string& cmd);
