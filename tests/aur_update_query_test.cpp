@@ -1,8 +1,8 @@
 #include "aur_update_query.hpp"
 
 #include "aur_rpc.hpp"
+#include "package_metadata.hpp"
 #include "process.hpp"
-#include "repository_query.hpp"
 
 #include <algorithm>
 #include <exception>
@@ -24,7 +24,7 @@ using InfoStrictHandler =
 using ExecHandler = std::function<std::string(const std::string&)>;
 
 struct QueryFixture {
-    std::vector<InstalledPackage>                  inventory;
+    ForeignPackageInventory                       inventory;
     std::vector<std::vector<std::string>>          info_many_calls;
     std::vector<std::string>                       info_strict_calls;
     std::vector<std::string>                       exec_calls;
@@ -32,6 +32,11 @@ struct QueryFixture {
     InfoManyHandler                                info_many_handler;
     InfoStrictHandler                              info_strict_handler;
     ExecHandler                                    exec_handler;
+    PacmanRepositoryConfiguration                  configuration;
+    std::optional<PacmanRepositoryConfiguration>   observed_configuration;
+    std::optional<PackageMetadataFailure>           configuration_failure;
+    std::optional<PackageMetadataFailure>           inventory_failure;
+    std::size_t                                    configuration_calls = 0;
     std::size_t                                    inventory_calls = 0;
 };
 
@@ -60,6 +65,34 @@ void expect_exception(
     throw std::runtime_error("Expected exception: " + expected_message);
 }
 
+template <typename Callable>
+void expect_package_metadata_error(
+        Callable callable, PackageMetadataErrorCode expected_code,
+        const std::string& expected_message) {
+    try {
+        callable();
+    } catch(const PackageMetadataError& error) {
+        expect(
+                error.failure().code == expected_code,
+                "Unexpected package metadata error code");
+        expect(
+                error.failure().diagnostic == expected_message,
+                "Unexpected package metadata diagnostic: expected [" +
+                        expected_message + "], actual [" +
+                        error.failure().diagnostic + "]");
+        expect(
+                std::string(error.what()) == expected_message,
+                "Package metadata exception message differs");
+        return;
+    } catch(const std::exception& error) {
+        throw std::runtime_error(
+                "Unexpected exception category: " + std::string(error.what()));
+    }
+
+    throw std::runtime_error(
+            "Expected package metadata error: " + expected_message);
+}
+
 AurPackageInfo package_info(
         const std::string& name, const std::string& version = "1.0-1",
         const std::string& package_base = "") {
@@ -83,6 +116,9 @@ std::map<std::string, AurPackageInfo> metadata_for(
 
 void reset_fixture() {
     g_fixture = QueryFixture{};
+    g_fixture.configuration = PacmanRepositoryConfiguration{
+            PacmanDatabasePaths{"/fixture-root", "/fixture-db"},
+            {"fixture-core", "fixture-extra"}};
     g_fixture.info_many_handler = [](const std::vector<std::string>& package_names) {
         return metadata_for(package_names);
     };
@@ -97,19 +133,21 @@ void reset_fixture() {
     };
 }
 
-std::vector<InstalledPackage> make_inventory(
+ForeignPackageInventory make_inventory(
         std::size_t count, const std::string& prefix) {
-    std::vector<InstalledPackage> packages;
+    ForeignPackageInventory packages;
     packages.reserve(count);
     for(std::size_t i = 0; i < count; ++i) {
-        packages.push_back(
-                InstalledPackage{prefix + "-" + std::to_string(i + 1), "1.0-1"});
+        packages.push_back(InstalledPackageMetadata{
+                prefix + "-" + std::to_string(i + 1),
+                "1.0-1",
+                InstalledPackageReason::Unknown});
     }
     return packages;
 }
 
 std::vector<std::string> package_names(
-        const std::vector<InstalledPackage>& packages) {
+        const ForeignPackageInventory& packages) {
     std::vector<std::string> names;
     names.reserve(packages.size());
     for(const auto& package : packages) names.push_back(package.name);
@@ -118,7 +156,7 @@ std::vector<std::string> package_names(
 
 void expect_plan_matches_inventory(
         const AurUpdatePlan& plan,
-        const std::vector<InstalledPackage>& inventory) {
+        const ForeignPackageInventory& inventory) {
     expect(plan.entries.size() == inventory.size(), "Plan entry count differs");
     for(std::size_t i = 0; i < inventory.size(); ++i) {
         expect(
@@ -127,6 +165,9 @@ void expect_plan_matches_inventory(
         expect(
                 plan.entries[i].installed_version == inventory[i].version,
                 "Plan installed version differs at index " + std::to_string(i));
+        expect(
+                plan.entries[i].install_reason == inventory[i].reason,
+                "Plan install reason differs at index " + std::to_string(i));
     }
 }
 
@@ -144,13 +185,46 @@ std::size_t event_index(const std::string& expected_event) {
     return static_cast<std::size_t>(found - g_fixture.events.begin());
 }
 
+void expect_aur_query_not_started(const std::string& context) {
+    expect(
+            g_fixture.info_many_calls.empty(),
+            context + ": bulk AUR info was queried");
+    expect(
+            g_fixture.info_strict_calls.empty(),
+            context + ": strict per-package AUR info was queried");
+    expect(g_fixture.exec_calls.empty(), context + ": vercmp was invoked");
+}
+
 } // namespace
 
 // WHY: query orchestrationだけをisolatedに固定するため、production transport、
-// pacman inventory parser、process runnerをlinkせず同じsymbolを差し込む。
-std::vector<InstalledPackage> get_foreign_packages() {
+// package metadata read phase、process runnerをlinkせず同じsymbolを差し込む。
+PackageMetadataError::PackageMetadataError(PackageMetadataFailure failure)
+    : std::runtime_error(failure.diagnostic), failure_(std::move(failure)) {}
+
+const PackageMetadataFailure& PackageMetadataError::failure() const noexcept {
+    return failure_;
+}
+
+PacmanRepositoryConfiguration resolve_pacman_repository_configuration() {
+    ++g_fixture.configuration_calls;
+    g_fixture.events.push_back("configuration");
+    if(g_fixture.configuration_failure.has_value()) {
+        throw PackageMetadataError(g_fixture.configuration_failure.value());
+    }
+    return g_fixture.configuration;
+}
+
+ForeignPackageInventoryResult query_foreign_package_inventory(
+        const PacmanRepositoryConfiguration& configuration) {
     ++g_fixture.inventory_calls;
-    g_fixture.events.push_back("inventory");
+    g_fixture.observed_configuration = configuration;
+    g_fixture.events.push_back("inventory-open");
+    // production APIはowned valueを返す前にlibalpm read phaseを破棄する。
+    g_fixture.events.push_back("inventory-release");
+    if(g_fixture.inventory_failure.has_value()) {
+        return g_fixture.inventory_failure.value();
+    }
     return g_fixture.inventory;
 }
 
@@ -190,12 +264,62 @@ void test_empty_inventory_skips_aur_queries() {
     expect(
             result.recoverable_failures.empty(),
             "Empty inventory produced recoverable failures");
-    expect(g_fixture.inventory_calls == 1, "Inventory was not queried exactly once");
-    expect(g_fixture.info_many_calls.empty(), "Empty inventory queried bulk AUR info");
     expect(
-            g_fixture.info_strict_calls.empty(),
-            "Empty inventory queried strict per-package AUR info");
-    expect(g_fixture.exec_calls.empty(), "Empty inventory invoked vercmp");
+            g_fixture.configuration_calls == 1,
+            "Configuration was not resolved exactly once");
+    expect(g_fixture.inventory_calls == 1, "Inventory was not queried exactly once");
+    expect(
+            g_fixture.observed_configuration.has_value(),
+            "Resolved configuration was not passed to inventory");
+    expect(
+            g_fixture.observed_configuration->database_paths.root_dir ==
+                            g_fixture.configuration.database_paths.root_dir &&
+                    g_fixture.observed_configuration->database_paths.db_path ==
+                            g_fixture.configuration.database_paths.db_path &&
+                    g_fixture.observed_configuration->repository_names ==
+                            g_fixture.configuration.repository_names,
+            "Inventory received a different repository configuration");
+    expect_aur_query_not_started("Empty inventory");
+}
+
+void test_configuration_failure_stops_before_inventory_and_aur_queries() {
+    reset_fixture();
+    g_fixture.configuration_failure = PackageMetadataFailure{
+            PackageMetadataErrorCode::ConfigurationUnavailable,
+            "configuration unavailable"};
+
+    expect_package_metadata_error(
+            []() { static_cast<void>(query_installed_aur_updates()); },
+            PackageMetadataErrorCode::ConfigurationUnavailable,
+            "configuration unavailable");
+
+    expect(
+            g_fixture.configuration_calls == 1,
+            "Configuration failure did not resolve exactly once");
+    expect(
+            g_fixture.inventory_calls == 0,
+            "Configuration failure reached inventory");
+    expect_aur_query_not_started("Configuration failure");
+}
+
+void test_inventory_failure_propagates_without_aur_queries() {
+    reset_fixture();
+    g_fixture.inventory_failure = PackageMetadataFailure{
+            PackageMetadataErrorCode::QueryFailed,
+            "foreign inventory failed"};
+
+    expect_package_metadata_error(
+            []() { static_cast<void>(query_installed_aur_updates()); },
+            PackageMetadataErrorCode::QueryFailed,
+            "foreign inventory failed");
+
+    expect(
+            g_fixture.inventory_calls == 1,
+            "Inventory failure did not query inventory exactly once");
+    expect(
+            event_index("inventory-open") < event_index("inventory-release"),
+            "Inventory failure did not release its read phase");
+    expect_aur_query_not_started("Inventory failure");
 }
 
 void test_one_through_one_hundred_packages_use_one_batch() {
@@ -542,6 +666,30 @@ void test_plan_preserves_inventory_order_instead_of_map_order() {
             "Ordered partial map unexpectedly used fallback");
 }
 
+void test_install_reason_is_forwarded_to_the_plan() {
+    reset_fixture();
+    g_fixture.inventory = {
+            {"explicit-package", "1.0-1", InstalledPackageReason::Explicit},
+            {"dependency-package", "1.0-1", InstalledPackageReason::Dependency},
+            {"unknown-package", "1.0-1", InstalledPackageReason::Unknown}};
+
+    const AurUpdateQueryResult result = query_installed_aur_updates();
+
+    expect_plan_matches_inventory(result.plan, g_fixture.inventory);
+    expect(
+            result.plan.entries[0].install_reason ==
+                    InstalledPackageReason::Explicit,
+            "Explicit install reason was not forwarded");
+    expect(
+            result.plan.entries[1].install_reason ==
+                    InstalledPackageReason::Dependency,
+            "Dependency install reason was not forwarded");
+    expect(
+            result.plan.entries[2].install_reason ==
+                    InstalledPackageReason::Unknown,
+            "Unknown install reason was not forwarded");
+}
+
 void test_query_dependency_surface_is_read_only() {
     reset_fixture();
     g_fixture.inventory = {{"read-only-package", "1.0-1"}};
@@ -552,6 +700,13 @@ void test_query_dependency_surface_is_read_only() {
     expect(g_fixture.inventory_calls == 1, "Read-only query skipped inventory");
     expect(g_fixture.info_many_calls.size() == 1, "Read-only query skipped AUR metadata");
     expect(g_fixture.exec_calls.size() == 1, "Read-only query did not invoke vercmp once");
+    expect(
+            event_index("configuration") < event_index("inventory-open"),
+            "Inventory started before configuration was resolved");
+    expect(
+            event_index("inventory-release") <
+                    event_index("info-many:read-only-package"),
+            "AUR RPC started before the inventory read phase was released");
     for(const auto& command : g_fixture.exec_calls) {
         expect(command.starts_with("vercmp "), "Query invoked a non-vercmp command");
         for(const char* forbidden : {
@@ -575,6 +730,12 @@ void run_case(const std::string& name, Callable callable) {
 int main() {
     try {
         run_case("empty inventory skips AUR queries", test_empty_inventory_skips_aur_queries);
+        run_case(
+                "configuration failure stops before inventory and AUR queries",
+                test_configuration_failure_stops_before_inventory_and_aur_queries);
+        run_case(
+                "inventory failure propagates without AUR queries",
+                test_inventory_failure_propagates_without_aur_queries);
         run_case(
                 "1-100 packages use one installed-order batch",
                 test_one_through_one_hundred_packages_use_one_batch);
@@ -608,6 +769,9 @@ int main() {
         run_case(
                 "plan preserves inventory order instead of map order",
                 test_plan_preserves_inventory_order_instead_of_map_order);
+        run_case(
+                "install reason is forwarded to the plan",
+                test_install_reason_is_forwarded_to_the_plan);
         run_case(
                 "query dependency surface is read only",
                 test_query_dependency_surface_is_read_only);

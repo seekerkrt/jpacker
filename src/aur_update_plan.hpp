@@ -1,5 +1,7 @@
 #pragma once
 
+#include "installed_package.hpp"
+
 #include <optional>
 #include <string>
 #include <variant>
@@ -43,12 +45,14 @@ enum class AurUpdateClassification {
 struct AurUpdatePlanInput {
     std::string             installed_name;
     std::string             installed_version;
+    InstalledPackageReason  install_reason = InstalledPackageReason::Unknown;
     AurUpdateMetadataResult aur_metadata = AurUpdateMetadataUnavailable{};
 };
 
 struct AurUpdatePlanEntry {
     std::string                           installed_name;
     std::string                           installed_version;
+    InstalledPackageReason                install_reason = InstalledPackageReason::Unknown;
     std::optional<AurUpdateRemotePackage> aur_package;
     AurUpdateClassification               classification =
             AurUpdateClassification::MetadataUnavailable;

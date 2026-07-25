@@ -18,6 +18,12 @@ struct RepositoryPackageQuery {
     std::string package_name;
 };
 
+struct LocalPackageMetadata {
+    std::string       name;
+    std::string       version;
+    alpm_pkgreason_t reason = ALPM_PKG_REASON_EXPLICIT;
+};
+
 void reset_alpm_stub();
 
 void set_initialize_failure(alpm_errno_t error);
@@ -33,8 +39,16 @@ void preserve_error_on_next_package_query();
 void set_package_metadata(
         const std::string& name, const std::string& version,
         alpm_pkgreason_t reason);
+void set_local_packages(const std::vector<LocalPackageMetadata>& packages);
+void set_local_package_name_null(std::size_t package_index);
+void set_local_package_version_null(std::size_t package_index);
 void set_null_package_name();
 void set_null_package_version();
+
+void preserve_error_on_next_local_database(
+        alpm_errno_t stale_error = ALPM_ERR_DB_OPEN);
+void preserve_error_on_next_package_cache(
+        alpm_errno_t stale_error = ALPM_ERR_DB_OPEN);
 
 void set_sync_database_register_failure(
         const std::string& repository_name,
@@ -46,6 +60,12 @@ void set_sync_database_cache_failure(
         const std::string& repository_name,
         alpm_errno_t error = ALPM_ERR_DB_OPEN);
 void set_sync_database_empty_cache(const std::string& repository_name);
+void preserve_error_on_next_sync_database_registration(
+        const std::string& repository_name,
+        alpm_errno_t stale_error = ALPM_ERR_DB_OPEN);
+void preserve_error_on_next_sync_database_cache(
+        const std::string& repository_name,
+        alpm_errno_t stale_error = ALPM_ERR_DB_OPEN);
 
 void set_repository_package_absent(
         const std::string& repository_name,
@@ -79,6 +99,8 @@ std::size_t local_database_call_count();
 std::size_t database_valid_call_count();
 std::size_t package_cache_call_count();
 std::size_t package_query_call_count();
+std::size_t sync_package_cache_call_count(
+        const std::string& repository_name);
 std::size_t created_handle_count();
 std::size_t release_call_count();
 std::size_t release_count_for_handle(std::size_t creation_index);

@@ -2,8 +2,8 @@
 
 #include "aur_rpc.hpp"
 #include "logging.hpp"
+#include "package_metadata.hpp"
 #include "process.hpp"
-#include "repository_query.hpp"
 #include "shell_words.hpp"
 
 #include <algorithm>
@@ -46,7 +46,7 @@ AurVersionRelation compare_aur_versions(
 }
 
 std::vector<AurUpdatePlanInput> make_plan_inputs(
-        const std::vector<InstalledPackage>& installed_packages,
+        const ForeignPackageInventory& installed_packages,
         const std::map<std::string, AurPackageInfo>& aur_packages,
         const std::set<std::string>& metadata_unavailable_packages) {
     std::vector<AurUpdatePlanInput> inputs;
@@ -71,6 +71,7 @@ std::vector<AurUpdatePlanInput> make_plan_inputs(
         inputs.push_back(AurUpdatePlanInput{
                 installed_package.name,
                 installed_package.version,
+                installed_package.reason,
                 std::move(aur_metadata)});
     }
 
@@ -80,7 +81,19 @@ std::vector<AurUpdatePlanInput> make_plan_inputs(
 } // namespace
 
 AurUpdateQueryResult query_installed_aur_updates() {
-    std::vector<InstalledPackage> installed_packages = get_foreign_packages();
+    PacmanRepositoryConfiguration configuration =
+            resolve_pacman_repository_configuration();
+    ForeignPackageInventoryResult inventory_result =
+            query_foreign_package_inventory(configuration);
+    if(const auto* failure =
+               std::get_if<PackageMetadataFailure>(&inventory_result)) {
+        // POLICY(#266): inventory failureは正常なempty inventoryへ落とさない。
+        // AUR RPC開始前にfatal errorとしてCLI境界へ伝播する。
+        throw PackageMetadataError(*failure);
+    }
+
+    ForeignPackageInventory installed_packages =
+            std::get<ForeignPackageInventory>(std::move(inventory_result));
     if(installed_packages.empty()) return {};
 
     std::vector<std::string> package_names;

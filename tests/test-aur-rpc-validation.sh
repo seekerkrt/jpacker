@@ -50,9 +50,13 @@ setup_case() {
 
     mkdir -p "$case_dir/home" "$case_dir/xdg-cache"
     : > "$command_log"
+    inventory_state=$case_dir/foreign-inventory.state
+    : > "$inventory_state"
     export HOME=$case_dir/home
     export XDG_CACHE_HOME=$case_dir/xdg-cache
     export JPACKER_TEST_COMMAND_LOG=$command_log
+    export JPACKER_TEST_FOREIGN_PACKAGE_INVENTORY_STATE_FILE=$inventory_state
+    export JPACKER_TEST_PACMAN_CONF_REPOSITORY_LIST=core
     export JPACKER_TEST_PACMAN_EXIT_CODE=1
     export JPACKER_TEST_SUDO_EXIT_CODE=99
     unset JPACKER_TEST_PACMAN_QM_OUTPUT
@@ -120,6 +124,18 @@ assert_no_mutation_commands() {
         cat "$command_log" >&2
         exit 1
     fi
+}
+
+assert_no_pacman_command() {
+    if grep -E '^pacman( |$)' "$command_log" >/dev/null; then
+        echo "foreign update validation unexpectedly ran pacman" >&2
+        cat "$command_log" >&2
+        exit 1
+    fi
+}
+
+set_foreign_inventory() {
+    printf '%s\n' "$1" > "$inventory_state"
 }
 
 assert_command_log_empty() {
@@ -320,30 +336,30 @@ assert_command_log_empty
 
 # info_manyはrequested setとのmappingとduplicateを厳格に確認する。
 setup_case multi-duplicate
-JPACKER_TEST_PACMAN_QM_OUTPUT='multi-dup-a 1.0-1
+set_foreign_inventory 'multi-dup-a 1.0-1
 multi-dup-b 1.0-1'
-export JPACKER_TEST_PACMAN_QM_OUTPUT
 run_fail -Qua
 assert_validation_error multiinfo
 assert_contains "duplicate response Name multi-dup-a" "$output_file"
 assert_no_mutation_commands
+assert_no_pacman_command
 
 setup_case multi-unrequested
-JPACKER_TEST_PACMAN_QM_OUTPUT='multi-unrequested-a 1.0-1
+set_foreign_inventory 'multi-unrequested-a 1.0-1
 multi-unrequested-b 1.0-1'
-export JPACKER_TEST_PACMAN_QM_OUTPUT
 run_fail -Qua
 assert_validation_error multiinfo
 assert_contains "response Name multi-outside was not requested" "$output_file"
 assert_no_mutation_commands
+assert_no_pacman_command
 
 setup_case multi-missing-allowed
-JPACKER_TEST_PACMAN_QM_OUTPUT='multi-present 1.0-1
+set_foreign_inventory 'multi-present 1.0-1
 multi-missing 1.0-1'
-export JPACKER_TEST_PACMAN_QM_OUTPUT
 run_ok -Qua
 assert_contains "Foreign package not found in AUR: multi-missing" "$output_file"
 assert_no_mutation_commands
+assert_no_pacman_command
 
 # 正常schemaの主要CLIと既存のprovider/split/cycle/unresolved guardをsmoke確認する。
 setup_case normal-deps

@@ -23,6 +23,7 @@ AurUpdatePlanEntry classify_aur_update(const AurUpdatePlanInput& input) {
         return AurUpdatePlanEntry{
                 input.installed_name,
                 input.installed_version,
+                input.install_reason,
                 *aur_package,
                 classification};
     }
@@ -31,6 +32,7 @@ AurUpdatePlanEntry classify_aur_update(const AurUpdatePlanInput& input) {
         return AurUpdatePlanEntry{
                 input.installed_name,
                 input.installed_version,
+                input.install_reason,
                 std::nullopt,
                 AurUpdateClassification::NonAurForeign};
     }
@@ -39,6 +41,7 @@ AurUpdatePlanEntry classify_aur_update(const AurUpdatePlanInput& input) {
         return AurUpdatePlanEntry{
                 input.installed_name,
                 input.installed_version,
+                input.install_reason,
                 std::nullopt,
                 AurUpdateClassification::MetadataUnavailable};
     }
@@ -50,7 +53,7 @@ AurUpdatePlan make_aur_update_plan(const std::vector<AurUpdatePlanInput>& inputs
     AurUpdatePlan plan;
     plan.entries.reserve(inputs.size());
 
-    // POLICY(#266): pacman -Qm由来のinstalled package順をplanでも維持する。
+    // POLICY(#266): installed inventory順をplanでも維持する。
     for(const auto& input : inputs) {
         plan.entries.push_back(classify_aur_update(input));
     }
