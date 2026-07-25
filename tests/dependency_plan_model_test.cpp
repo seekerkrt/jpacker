@@ -1,5 +1,6 @@
 #include "aur_rpc.hpp"
 #include "dependency_plan.hpp"
+#include "dependency_provider.hpp"
 
 #include <algorithm>
 #include <exception>
@@ -8,6 +9,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <variant>
 #include <vector>
 
 namespace dependency_plan_repository_query_stub {
@@ -198,17 +200,6 @@ void expect_aur_rpc_response_error(
             "Expected AurRpcResponseError: " + expected_message);
 }
 
-bool same_provider(const ProvidedDependency& lhs, const ProvidedDependency& rhs) {
-    return lhs.repository == rhs.repository && lhs.package_name == rhs.package_name;
-}
-
-bool same_optional_provider(
-        const std::optional<ProvidedDependency>& lhs,
-        const std::optional<ProvidedDependency>& rhs) {
-    if(lhs.has_value() != rhs.has_value()) return false;
-    return !lhs.has_value() || same_provider(lhs.value(), rhs.value());
-}
-
 void expect_equivalent_plans(const BuildPlan& lhs, const BuildPlan& rhs) {
     expect(lhs.order.size() == rhs.order.size(), "BuildPlan::order size differs");
     for(std::size_t i = 0; i < lhs.order.size(); ++i) {
@@ -241,7 +232,7 @@ void expect_equivalent_plans(const BuildPlan& lhs, const BuildPlan& rhs) {
         expect(left.resolved_package_name == right.resolved_package_name, "Edge resolved name differs");
         expect(left.resolved_package_base == right.resolved_package_base, "Edge resolved base differs");
         expect(
-                same_optional_provider(left.resolved_provider, right.resolved_provider),
+                left.resolved_provider == right.resolved_provider,
                 "Edge provider differs");
     }
 
@@ -264,7 +255,7 @@ void expect_equivalent_plans(const BuildPlan& lhs, const BuildPlan& rhs) {
     expect(lhs.provided.size() == rhs.provided.size(), "BuildPlan::provided size differs");
     for(std::size_t i = 0; i < lhs.provided.size(); ++i) {
         expect(lhs.provided[i].dependency == rhs.provided[i].dependency, "Provided dependency differs");
-        expect(same_provider(lhs.provided[i].provider, rhs.provided[i].provider), "Provider differs");
+        expect(lhs.provided[i].provider == rhs.provided[i].provider, "Provider differs");
     }
 
     expect(lhs.metadata_risks.size() == rhs.metadata_risks.size(), "BuildPlan::metadata_risks size differs");
@@ -286,12 +277,41 @@ void expect_equivalent_plans(const BuildPlan& lhs, const BuildPlan& rhs) {
         expect(left.dependency == right.dependency, "Ambiguous dependency differs");
         expect(left.candidates.size() == right.candidates.size(), "Ambiguous candidates size differs");
         for(std::size_t j = 0; j < left.candidates.size(); ++j) {
-            expect(same_provider(left.candidates[j], right.candidates[j]), "Ambiguous provider differs");
+            expect(left.candidates[j] == right.candidates[j], "Ambiguous provider differs");
         }
     }
 
     expect(lhs.unresolved == rhs.unresolved, "BuildPlan::unresolved differs");
     expect(lhs.cycles == rhs.cycles, "BuildPlan::cycles differs");
+}
+
+void test_provider_origin_value_contract() {
+    const ProvidedDependency repository =
+            ProvidedDependency::from_repository("aur", "same-package");
+    const ProvidedDependency same_repository =
+            ProvidedDependency::from_repository("aur", "same-package");
+    const ProvidedDependency aur =
+            ProvidedDependency::from_aur("same-package");
+    const ProvidedDependency same_aur =
+            ProvidedDependency::from_aur("same-package");
+
+    expect(repository == same_repository, "Repository provider equality differs");
+    expect(aur == same_aur, "AUR provider equality differs");
+    expect(repository != aur, "Repository and AUR provider origins were conflated");
+
+    const auto* repository_origin =
+            std::get_if<RepositoryProviderOrigin>(&repository.origin);
+    expect(repository_origin != nullptr, "Repository provider origin kind differs");
+    expect(
+            repository_origin->repository_name == "aur",
+            "Repository provider origin name differs");
+    expect(
+            std::holds_alternative<AurProviderOrigin>(aur.origin),
+            "AUR provider origin kind differs");
+    expect(
+            provided_dependency_display(repository) == "aur/same-package" &&
+                    provided_dependency_display(aur) == "aur/same-package",
+            "Typed provider display compatibility differs");
 }
 
 void test_case_1_root_only() {
@@ -446,9 +466,8 @@ void test_case_7_unique_aur_provider() {
     expect(edge.kind == DependencyKind::Provided, "Case 7 edge kind differs");
     expect(edge.resolved_provider.has_value(), "Case 7 provider is missing");
     expect(
-            same_provider(
-                    edge.resolved_provider.value(),
-                    ProvidedDependency{"aur", "case7-provider-pkg"}),
+            edge.resolved_provider.value() ==
+                    ProvidedDependency::from_aur("case7-provider-pkg"),
             "Case 7 provider differs");
     const PlannedPackageTarget& provider =
             require_package_target(plan, "case7-provider-pkg");
@@ -457,9 +476,8 @@ void test_case_7_unique_aur_provider() {
     expect(plan.provided.size() == 1, "Case 7 legacy provider count differs");
     expect(plan.provided[0].dependency == "case7-virtual-api", "Case 7 legacy dependency differs");
     expect(
-            same_provider(
-                    plan.provided[0].provider,
-                    ProvidedDependency{"aur", "case7-provider-pkg"}),
+            plan.provided[0].provider ==
+                    ProvidedDependency::from_aur("case7-provider-pkg"),
             "Case 7 legacy provider differs");
     expect_legacy_order(plan, {"case7-provider-pkg", "case7-app"});
 }
@@ -572,13 +590,30 @@ void test_supplemental_multi_root_contracts() {
     expect(provider_edge.kind == DependencyKind::Provided, "Repository provider kind differs");
     expect(provider_edge.resolved_provider.has_value(), "Repository provider is missing");
     expect(
-            same_provider(
-                    provider_edge.resolved_provider.value(),
-                    ProvidedDependency{"extra", "case14-provider"}),
+            provider_edge.resolved_provider.value() ==
+                    ProvidedDependency::from_repository(
+                            "aur", "case14-provider"),
             "Repository provider result differs");
+    const auto* repository_origin = std::get_if<RepositoryProviderOrigin>(
+            &provider_edge.resolved_provider->origin);
+    expect(
+            repository_origin != nullptr &&
+                    repository_origin->repository_name == "aur",
+            "Repository provider origin differs");
+    expect(
+            provided_dependency_display(
+                    provider_edge.resolved_provider.value()) ==
+                    "aur/case14-provider",
+            "Repository provider display differs");
     expect(
             package_target_count(repository_provider, "case14-provider") == 0,
             "Repository provider leaked into source package targets");
+    expect(
+            repository_provider.package_targets.size() == 1,
+            "Repository provider changed source target count");
+    expect_roots(
+            require_package_target(repository_provider, "case14-app"),
+            {{0, "case14-app"}});
     expect_legacy_order(repository_provider, {"case14-app"});
 
     BuildPlan all_roles = resolve_build_plan(
@@ -704,9 +739,9 @@ void test_preflight_dependency_and_provider_failures() {
     expect(
             provider_edge.kind == DependencyKind::Provided &&
                     provider_edge.resolved_provider.has_value() &&
-                    same_provider(
-                            provider_edge.resolved_provider.value(),
-                            ProvidedDependency{"aur", "preflight-provider-good"}),
+                    provider_edge.resolved_provider.value() ==
+                            ProvidedDependency::from_aur(
+                                    "preflight-provider-good"),
             "Known provider was lost after another candidate failed");
     expect(
             provider_candidate.unresolved.empty(),
@@ -926,6 +961,9 @@ void run_case(const std::string& name, Callable callable) {
 
 int main() {
     try {
+        run_case(
+                "provider origin value contract",
+                test_provider_origin_value_contract);
         run_case("Case 1 root only", test_case_1_root_only);
         run_case("Case 2 dependency roles", test_case_2_dependency_roles);
         run_case("Case 3 multiple roles", test_case_3_multiple_roles);

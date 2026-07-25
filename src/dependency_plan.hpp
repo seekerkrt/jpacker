@@ -1,7 +1,7 @@
 #pragma once
 
+#include "dependency_provider.hpp"
 #include "aur_rpc.hpp"
-#include "repository_query.hpp"
 
 #include <cstddef>
 #include <optional>

@@ -4,6 +4,7 @@
 #include "aur_update_query.hpp"
 #include "checkout_fetch.hpp"
 #include "dependency_plan.hpp"
+#include "dependency_provider.hpp"
 #include "dependency_spec.hpp"
 #include "logging.hpp"
 #include "package_identifier.hpp"
@@ -82,10 +83,13 @@ std::vector<RepositoryPackageLookup> collect_repository_package_lookups(
         }
 
         if(edge.kind != DependencyKind::Provided ||
-           !edge.resolved_provider.has_value() ||
-           edge.resolved_provider->repository == "aur") {
+           !edge.resolved_provider.has_value()) {
             continue;
         }
+
+        const auto* repository = std::get_if<RepositoryProviderOrigin>(
+                &edge.resolved_provider->origin);
+        if(repository == nullptr) continue;
 
         // Configured membershipはpacman-confの正本をresolveした後で確認する。
         // 現行provider resolverが返し得るunconfigured/stale repositoryはここではまだ保持する。
@@ -93,7 +97,7 @@ std::vector<RepositoryPackageLookup> collect_repository_package_lookups(
                 lookups, seen_lookups,
                 RepositoryPackageLookup{
                         edge.resolved_provider->package_name,
-                        edge.resolved_provider->repository});
+                        repository->repository_name});
     }
     return lookups;
 }
@@ -338,10 +342,6 @@ std::string aur_git_url_for_package_base(const std::string& package_base) {
     return AUR_BASE_URL + package_base + ".git";
 }
 
-std::string provider_display(const ProvidedDependency& provider) {
-    return provider.repository + "/" + provider.package_name;
-}
-
 std::string dependency_display_name(const std::string& dependency, const std::string& package_name) {
     std::string display;
     if(package_name.empty() || dependency == package_name)
@@ -375,13 +375,15 @@ void print_recursive_dependency_node(const RecursiveDependencyNode& node, size_t
         std::cout << " base: " << node.package_base;
     }
     if(node.provided_by.has_value()) {
-        std::cout << " by " << node.provided_by->repository << "/" << node.provided_by->package_name;
+        std::cout << " by "
+                  << provided_dependency_display(node.provided_by.value());
     }
     if(!node.provider_candidates.empty()) {
         std::cout << " candidates: ";
         for(size_t i = 0; i < node.provider_candidates.size(); ++i) {
             if(i > 0) std::cout << ", ";
-            std::cout << provider_display(node.provider_candidates[i]);
+            std::cout << provided_dependency_display(
+                    node.provider_candidates[i]);
         }
     }
     if(node.already_visited) std::cout << " (already visited)";
@@ -434,7 +436,9 @@ void print_ambiguous_provider_group(
                   << std::endl;
         std::cout << "    candidates:" << std::endl;
         for(size_t i = 0; i < dependency.candidates.size(); ++i) {
-            std::cout << "      " << (i + 1) << ". " << provider_display(dependency.candidates[i]) << std::endl;
+            std::cout << "      " << (i + 1) << ". "
+                      << provided_dependency_display(dependency.candidates[i])
+                      << std::endl;
         }
     }
 }
@@ -479,7 +483,7 @@ void print_build_plan(const BuildPlan& plan) {
         for(const auto& dependency : plan.provided) {
             std::cout << "  - "
                       << dependency_display_with_constraint_note(dependency.dependency, dependency.dependency)
-                      << " -> " << dependency.provider.repository << "/" << dependency.provider.package_name
+                      << " -> " << provided_dependency_display(dependency.provider)
                       << std::endl;
         }
     }

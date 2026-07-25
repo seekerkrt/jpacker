@@ -7,6 +7,7 @@
 #include "shell_words.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <map>
 #include <optional>
@@ -49,14 +50,17 @@ std::string repo_name_from_sync_db(const fs::path& db_path) {
     return db_path.stem().string();
 }
 
-bool same_repo_provider(const ProvidedDependency& lhs, const ProvidedDependency& rhs) {
-    return lhs.repository == rhs.repository && lhs.package_name == rhs.package_name;
+bool contains_control_character(const std::string& value) {
+    return std::any_of(
+            value.begin(), value.end(), [](unsigned char character) {
+                return std::iscntrl(character) != 0;
+            });
 }
 
 void add_repo_provider_candidate(
         std::vector<ProvidedDependency>& candidates, const ProvidedDependency& provider) {
     auto same = [&provider](const ProvidedDependency& existing) {
-        return same_repo_provider(existing, provider);
+        return existing == provider;
     };
     if(std::find_if(candidates.begin(), candidates.end(), same) != candidates.end()) return;
     candidates.push_back(provider);
@@ -65,9 +69,15 @@ void add_repo_provider_candidate(
 void add_repo_provider(
         std::map<std::string, std::vector<ProvidedDependency>>& providers, const std::string& provided,
         const std::string& repository, const std::string& package_name) {
-    std::string provided_name = provided_dependency_name(provided);
-    if(provided_name.empty() || !is_valid_package_name(provided_name)) return;
-    add_repo_provider_candidate(providers[provided_name], ProvidedDependency{repository, package_name});
+    ParsedDependency parsed = parse_dependency_string(provided);
+    if(repository.empty() || contains_control_character(repository) ||
+       !is_valid_package_name(package_name) ||
+       !is_valid_package_name(parsed.name) || parsed.has_malformed_constraint()) {
+        return;
+    }
+    add_repo_provider_candidate(
+            providers[parsed.name],
+            ProvidedDependency::from_repository(repository, package_name));
 }
 
 void parse_repo_sync_desc(
@@ -80,9 +90,11 @@ void parse_repo_sync_desc(
     std::string              section;
 
     auto flush_package = [&]() {
-        if(package_name.empty()) return;
-        for(const auto& provided : package_provides) {
-            add_repo_provider(providers, provided, repository, package_name);
+        if(!package_name.empty()) {
+            for(const auto& provided : package_provides) {
+                add_repo_provider(
+                        providers, provided, repository, package_name);
+            }
         }
         package_name.clear();
         package_provides.clear();
@@ -125,7 +137,7 @@ RepositoryMetadataFailure repository_metadata_failure(
 bool is_safe_repository_path_component(const std::string& repository_name) {
     if(repository_name.empty() || repository_name == "." || repository_name == "..")
         return false;
-    if(repository_name.find('\0') != std::string::npos) return false;
+    if(contains_control_character(repository_name)) return false;
 
     fs::path component(repository_name);
     return !component.is_absolute() && !component.has_parent_path() &&
@@ -187,7 +199,8 @@ std::optional<RepositoryMetadataFailure> parse_repo_sync_desc_strict(
             std::string provided_name = provided_dependency_name(provided);
             add_repo_provider_candidate(
                     snapshot.providers[provided_name],
-                    ProvidedDependency{repository, record.package_name.value()});
+                    ProvidedDependency::from_repository(
+                            repository, record.package_name.value()));
         }
 
         parsed_package = true;
@@ -383,6 +396,20 @@ const StrictRepositoryMetadataSnapshotResult& strict_repository_metadata_snapsho
 }
 
 } // namespace
+
+#ifdef JPACKER_ENABLE_REPOSITORY_QUERY_TEST_HOOKS
+std::vector<ProvidedDependency>
+parse_legacy_repository_provider_candidates_for_test(
+        const std::string& description,
+        const std::string& repository_name,
+        const std::string& dependency_name) {
+    std::map<std::string, std::vector<ProvidedDependency>> providers;
+    parse_repo_sync_desc(description, repository_name, providers);
+    auto found = providers.find(dependency_name);
+    if(found == providers.end()) return {};
+    return found->second;
+}
+#endif
 
 bool is_installed_package(const std::string& pkg_name) {
     if(pkg_name.empty()) return false;

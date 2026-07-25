@@ -134,7 +134,8 @@ std::optional<AurPackageInfo> graph_info(const std::string& package_name) {
                 package_name,
                 {"same-package", "identity-same-virtual", "different-package",
                  "identity-different-virtual", "same-semantic",
-                 "identity-stale-virtual", "identity-aur-virtual",
+                 "identity-stale-virtual",
+                 "identity-repository-aur-virtual", "identity-aur-virtual",
                  "identity-ambiguous-virtual", "identity-unknown-virtual",
                  "identity-aur-child"});
         info.MakeDepends = {"same-semantic"};
@@ -177,6 +178,7 @@ std::optional<AurPackageInfo> graph_info(const std::string& package_name) {
     if(package_name == "identity-same-virtual" ||
        package_name == "identity-different-virtual" ||
        package_name == "identity-stale-virtual" ||
+       package_name == "identity-repository-aur-virtual" ||
        package_name == "identity-aur-virtual" ||
        package_name == "identity-ambiguous-virtual" ||
        package_name == "identity-unknown-virtual" ||

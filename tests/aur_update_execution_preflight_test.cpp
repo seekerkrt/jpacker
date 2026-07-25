@@ -1,4 +1,5 @@
 #include "aur_update_execution_preflight.hpp"
+#include "dependency_provider.hpp"
 #include "stubs/aur-update-execution-preflight/preflight_stub.hpp"
 
 #include <algorithm>
@@ -132,6 +133,21 @@ void add_dependency_target(
         PackageRole role = PackageRole::RuntimeDependency) {
     plan.package_targets.push_back(
             PlannedPackageTarget{package_name, package_base, {role}, roots});
+}
+
+BuildPlanDependencyEdge provided_dependency_edge(
+        const std::string& parent_package_name,
+        const std::string& dependency_spec,
+        std::optional<ProvidedDependency> provider) {
+    return BuildPlanDependencyEdge{
+            parent_package_name,
+            parent_package_name,
+            dependency_spec,
+            PackageRole::RuntimeDependency,
+            DependencyKind::Provided,
+            std::nullopt,
+            std::nullopt,
+            std::move(provider)};
 }
 
 void return_build_plan(BuildPlan plan) {
@@ -653,8 +669,9 @@ void test_unsupported_build_plan_issues_and_same_base_blind_spot() {
     plan.ambiguous_providers.push_back(AmbiguousProvidedDependency{
             "virtual-dependency",
             {
-                    ProvidedDependency{"extra", "provider-a"},
-                    ProvidedDependency{"aur", "provider-b"},
+                    ProvidedDependency::from_repository(
+                            "extra", "provider-a"),
+                    ProvidedDependency::from_aur("provider-b"),
             }});
     plan.metadata_risks.push_back(BuildPlanMetadataRisk{
             "second-child", "shared-suite", {"old-package"}, {"renamed-package"}});
@@ -1333,46 +1350,56 @@ void test_fail_closed_cross_field_consistency() {
             "Dependency edge with Root role");
 
     reset_preflight_stub();
-    BuildPlan provider_without_origin = build_plan_for({
+    BuildPlan missing_provider = build_plan_for({
             {"consistency-root", "consistency-root", "consistency-root"},
     });
-    provider_without_origin.dependency_edges.push_back(
-            BuildPlanDependencyEdge{
-                    "consistency-root",
-                    "consistency-root",
-                    "virtual-dependency",
-                    PackageRole::RuntimeDependency,
-                    DependencyKind::Provided,
-                    std::nullopt,
-                    std::nullopt,
-                    ProvidedDependency{"", "provider-package"}});
-    return_build_plan(std::move(provider_without_origin));
-    AurUpdateExecutionPreflight provider_without_origin_preflight =
+    missing_provider.dependency_edges.push_back(
+            provided_dependency_edge(
+                    "consistency-root", "virtual-dependency", std::nullopt));
+    return_build_plan(std::move(missing_provider));
+    AurUpdateExecutionPreflight missing_provider_preflight =
             resolve_aur_update_execution_preflight(update_plan);
     expect_status(
-            provider_without_origin_preflight.targets.front(),
+            missing_provider_preflight.targets.front(),
             AurUpdateExecutionTargetStatus::Incomplete,
-            "Provided dependency without repository origin");
+            "Provided dependency without resolved provider");
     expect(
             has_issue(
-                    provider_without_origin_preflight.targets.front(),
+                    missing_provider_preflight.targets.front(),
                     AurUpdateExecutionReason::BuildPlanInconsistent),
-            "Provider without repository origin was accepted");
+            "Missing resolved provider was accepted");
+
+    reset_preflight_stub();
+    BuildPlan empty_repository_origin = build_plan_for({
+            {"consistency-root", "consistency-root", "consistency-root"},
+    });
+    empty_repository_origin.dependency_edges.push_back(
+            provided_dependency_edge(
+                    "consistency-root", "virtual-dependency",
+                    ProvidedDependency::from_repository(
+                            "", "provider-package")));
+    return_build_plan(std::move(empty_repository_origin));
+    AurUpdateExecutionPreflight empty_repository_origin_preflight =
+            resolve_aur_update_execution_preflight(update_plan);
+    expect_status(
+            empty_repository_origin_preflight.targets.front(),
+            AurUpdateExecutionTargetStatus::Incomplete,
+            "Provided dependency with empty repository origin");
+    expect(
+            has_issue(
+                    empty_repository_origin_preflight.targets.front(),
+                    AurUpdateExecutionReason::BuildPlanInconsistent),
+            "Empty repository provider origin was accepted");
 
     reset_preflight_stub();
     BuildPlan provider_with_control_origin = build_plan_for({
             {"consistency-root", "consistency-root", "consistency-root"},
     });
     provider_with_control_origin.dependency_edges.push_back(
-            BuildPlanDependencyEdge{
-                    "consistency-root",
-                    "consistency-root",
-                    "virtual-dependency",
-                    PackageRole::RuntimeDependency,
-                    DependencyKind::Provided,
-                    std::nullopt,
-                    std::nullopt,
-                    ProvidedDependency{"co\nre", "provider-package"}});
+            provided_dependency_edge(
+                    "consistency-root", "virtual-dependency",
+                    ProvidedDependency::from_repository(
+                            "co\nre", "provider-package")));
     return_build_plan(std::move(provider_with_control_origin));
     AurUpdateExecutionPreflight provider_with_control_origin_preflight =
             resolve_aur_update_execution_preflight(update_plan);
@@ -1390,15 +1417,11 @@ void test_fail_closed_cross_field_consistency() {
     BuildPlan repository_provider = build_plan_for({
             {"consistency-root", "consistency-root", "consistency-root"},
     });
-    repository_provider.dependency_edges.push_back(BuildPlanDependencyEdge{
-            "consistency-root",
-            "consistency-root",
-            "virtual-dependency",
-            PackageRole::RuntimeDependency,
-            DependencyKind::Provided,
-            std::nullopt,
-            std::nullopt,
-            ProvidedDependency{"core", "provider-package"}});
+    repository_provider.dependency_edges.push_back(
+            provided_dependency_edge(
+                    "consistency-root", "virtual-dependency",
+                    ProvidedDependency::from_repository(
+                            "aur", "provider-package")));
     return_build_plan(std::move(repository_provider));
     AurUpdateExecutionPreflight repository_provider_preflight =
             resolve_aur_update_execution_preflight(update_plan);
@@ -1406,6 +1429,79 @@ void test_fail_closed_cross_field_consistency() {
             repository_provider_preflight.targets.front(),
             AurUpdateExecutionTargetStatus::Executable,
             "Repository provider with valid origin");
+
+    reset_preflight_stub();
+    BuildPlan invalid_provider_package = build_plan_for({
+            {"consistency-root", "consistency-root", "consistency-root"},
+    });
+    invalid_provider_package.dependency_edges.push_back(
+            provided_dependency_edge(
+                    "consistency-root", "virtual-dependency",
+                    ProvidedDependency::from_repository(
+                            "aur", "invalid/provider")));
+    return_build_plan(std::move(invalid_provider_package));
+    AurUpdateExecutionPreflight invalid_provider_package_preflight =
+            resolve_aur_update_execution_preflight(update_plan);
+    expect_status(
+            invalid_provider_package_preflight.targets.front(),
+            AurUpdateExecutionTargetStatus::Incomplete,
+            "Provided dependency with invalid provider package");
+    expect(
+            has_issue(
+                    invalid_provider_package_preflight.targets.front(),
+                    AurUpdateExecutionReason::BuildPlanInconsistent),
+            "Invalid provider package was accepted");
+
+    reset_preflight_stub();
+    BuildPlan missing_aur_provider_target = build_plan_for({
+            {"consistency-root", "consistency-root", "consistency-root"},
+    });
+    missing_aur_provider_target.dependency_edges.push_back(
+            provided_dependency_edge(
+                    "consistency-root", "virtual-dependency",
+                    ProvidedDependency::from_aur("missing-provider")));
+    return_build_plan(std::move(missing_aur_provider_target));
+    AurUpdateExecutionPreflight missing_aur_provider_target_preflight =
+            resolve_aur_update_execution_preflight(update_plan);
+    expect_status(
+            missing_aur_provider_target_preflight.targets.front(),
+            AurUpdateExecutionTargetStatus::Incomplete,
+            "AUR provider without planned target");
+    expect(
+            has_issue(
+                    missing_aur_provider_target_preflight.targets.front(),
+                    AurUpdateExecutionReason::BuildPlanInconsistent),
+            "AUR provider without matching target was accepted");
+
+    reset_preflight_stub();
+    BuildPlan orphan_repository_provider = build_plan_for({
+            {"consistency-root", "consistency-root", "consistency-root"},
+    });
+    const RootTargetIdentity consistency_root{0, "consistency-root"};
+    add_dependency_target(
+            orphan_repository_provider, "repository-provider",
+            "repository-provider", {consistency_root});
+    orphan_repository_provider.order.insert(
+            orphan_repository_provider.order.begin(),
+            BuildPlanEntry{
+                    "repository-provider", {"repository-provider"}});
+    orphan_repository_provider.dependency_edges.push_back(
+            provided_dependency_edge(
+                    "consistency-root", "virtual-dependency",
+                    ProvidedDependency::from_repository(
+                            "aur", "repository-provider")));
+    return_build_plan(std::move(orphan_repository_provider));
+    AurUpdateExecutionPreflight orphan_repository_provider_preflight =
+            resolve_aur_update_execution_preflight(update_plan);
+    expect_status(
+            orphan_repository_provider_preflight.targets.front(),
+            AurUpdateExecutionTargetStatus::Incomplete,
+            "Repository provider with orphan source target");
+    expect(
+            has_issue(
+                    orphan_repository_provider_preflight.targets.front(),
+                    AurUpdateExecutionReason::BuildPlanInconsistent),
+            "Repository provider incorrectly grounded a source target");
 }
 
 void test_rooted_aur_dependency_graph() {
@@ -1522,7 +1618,7 @@ void test_rooted_aur_dependency_graph() {
             DependencyKind::Provided,
             std::nullopt,
             std::nullopt,
-            ProvidedDependency{"aur", "aur-provider"}});
+            ProvidedDependency::from_aur("aur-provider")});
     return_build_plan(std::move(provider));
 
     AurUpdateExecutionPreflight provider_preflight =
@@ -1556,13 +1652,26 @@ void test_ambiguous_provider_specification_normalization() {
     plan.ambiguous_providers.push_back(AmbiguousProvidedDependency{
             "shared-virtual",
             {
-                    ProvidedDependency{"extra", "provider-a"},
-                    ProvidedDependency{"aur", "provider-b"},
+                    ProvidedDependency::from_repository(
+                            "aur", "shared-provider"),
+                    ProvidedDependency::from_aur("shared-provider"),
             }});
     return_build_plan(std::move(plan));
 
     AurUpdateExecutionPreflight preflight =
             resolve_aur_update_execution_preflight(update_plan);
+    expect(
+            preflight.build_plan.has_value() &&
+                    preflight.build_plan->ambiguous_providers.size() == 1,
+            "Typed ambiguous provider summary is missing");
+    expect(
+            preflight.build_plan->ambiguous_providers.front().candidates ==
+                    std::vector<ProvidedDependency>{
+                            ProvidedDependency::from_repository(
+                                    "aur", "shared-provider"),
+                            ProvidedDependency::from_aur("shared-provider"),
+                    },
+            "Typed ambiguous provider candidates were reordered or deduplicated");
     for(const auto& target : preflight.targets) {
         expect_status(
                 target, AurUpdateExecutionTargetStatus::Unsupported,
