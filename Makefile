@@ -339,6 +339,7 @@ $(SOURCE_ENVIRONMENT_TEST_TARGET): tests/source_environment_test.cpp $(SRC_DIR)/
 	@echo ":: Compiling source environment test binary"
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
 		-DJPACKER_ENABLE_TEST_OVERRIDES \
+		-DJPACKER_ENABLE_SOURCE_PREFERENCE_TEST_HOOKS \
 		-I$(SRC_DIR) \
 		tests/source_environment_test.cpp \
 		$(SRC_DIR)/source_environment.cpp \
