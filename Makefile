@@ -12,6 +12,7 @@ MANPAGE_IN := man/jpacker.8.in
 TEST_TARGET := build/tests/jpacker-test
 COMMANDS_INSPECT_TEST_TARGET := build/tests/jpacker-commands-inspect-test
 AUR_RPC_VALIDATION_TEST_TARGET := build/tests/jpacker-aur-rpc-validation-test
+AUR_RPC_ENVELOPE_VALIDATION_TEST_TARGET := build/tests/aur-rpc-envelope-validation-test
 COMMANDS_SYNC_TEST_TARGET := build/tests/jpacker-commands-sync-test
 SOURCE_INSTALL_CHARACTERIZATION_TEST_TARGET := build/tests/jpacker-source-install-characterization-test
 APP_CONFIG_MODULE_TEST_TARGET := build/tests/app-config-test
@@ -28,7 +29,10 @@ PROCESS_CAPTURE_TEST_TARGET := build/tests/process-capture-test
 PROCESS_STDIN_FD_TEST_TARGET := build/tests/process-stdin-fd-test
 AUR_UPDATE_PLAN_TEST_TARGET := $(BUILD_DIR)/tests/aur-update-plan-test
 AUR_UPDATE_QUERY_TEST_TARGET := $(BUILD_DIR)/tests/aur-update-query-test
+AUR_UPDATE_EXECUTION_PREFLIGHT_TEST_TARGET := $(BUILD_DIR)/tests/aur-update-execution-preflight-test
+AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION_TEST_TARGET := $(BUILD_DIR)/tests/aur-update-execution-preflight-integration-test
 DEPENDENCY_PLAN_MODEL_TEST_TARGET := $(BUILD_DIR)/tests/dependency-plan-model-test
+REPOSITORY_QUERY_TEST_TARGET := $(BUILD_DIR)/tests/repository-query-test
 ARTIFACT_INSTALL_PLAN_TEST_TARGET := $(BUILD_DIR)/tests/artifact-install-plan-test
 PACKAGE_METADATA_TEST_TARGET := $(BUILD_DIR)/tests/package-metadata-test
 PACKAGE_METADATA_INTEGRATION_TEST_TARGET := $(BUILD_DIR)/tests/package-metadata-integration-test
@@ -74,6 +78,12 @@ COMMANDS_INSPECT_TEST_SRCS := \
 AUR_RPC_VALIDATION_TEST_SRCS := \
 	$(SRCS) \
 	tests/stubs/package-metadata/alpm_stub.cpp
+AUR_RPC_ENVELOPE_VALIDATION_TEST_SRCS := \
+	tests/aur_rpc_validation_test.cpp \
+	$(SRC_DIR)/aur_rpc.cpp \
+	$(SRC_DIR)/dependency_spec.cpp \
+	$(SRC_DIR)/package_identifier.cpp \
+	$(SRC_DIR)/logging.cpp
 COMMANDS_SYNC_TEST_SRCS := $(filter-out $(SRC_DIR)/aur_rpc.cpp,$(SRCS)) tests/stubs/commands-sync/aur_rpc_stub.cpp
 SOURCE_INSTALL_CHARACTERIZATION_TEST_SRCS := $(filter-out $(SRC_DIR)/jpacker.cpp,$(SRCS))
 AUR_UPDATE_PLAN_TEST_SRCS := \
@@ -85,6 +95,23 @@ AUR_UPDATE_QUERY_TEST_SRCS := \
 	$(SRC_DIR)/aur_update_plan.cpp \
 	$(SRC_DIR)/shell_words.cpp \
 	$(SRC_DIR)/logging.cpp
+AUR_UPDATE_EXECUTION_PREFLIGHT_TEST_SRCS := \
+	tests/aur_update_execution_preflight_test.cpp \
+	$(SRC_DIR)/aur_update_execution_preflight.cpp \
+	$(SRC_DIR)/dependency_spec.cpp \
+	$(SRC_DIR)/package_identifier.cpp \
+	tests/stubs/aur-update-execution-preflight/preflight_stub.cpp
+AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION_TEST_SRCS := \
+	tests/aur_update_execution_preflight_integration_test.cpp \
+	$(SRC_DIR)/aur_update_execution_preflight.cpp \
+	$(SRC_DIR)/dependency_plan.cpp \
+	$(SRC_DIR)/dependency_spec.cpp \
+	$(SRC_DIR)/repository_query.cpp \
+	$(SRC_DIR)/package_metadata.cpp \
+	$(SRC_DIR)/package_identifier.cpp \
+	$(SRC_DIR)/shell_words.cpp \
+	tests/stubs/package-metadata/alpm_stub.cpp \
+	tests/stubs/aur-update-execution-preflight-integration/integration_stub.cpp
 DEPENDENCY_PLAN_MODEL_TEST_SRCS := \
 	tests/dependency_plan_model_test.cpp \
 	$(SRC_DIR)/dependency_plan.cpp \
@@ -93,6 +120,15 @@ DEPENDENCY_PLAN_MODEL_TEST_SRCS := \
 	$(SRC_DIR)/logging.cpp \
 	tests/stubs/dependency-plan/aur_rpc_stub.cpp \
 	tests/stubs/dependency-plan/repository_query_stub.cpp
+REPOSITORY_QUERY_TEST_SRCS := \
+	tests/repository_query_test.cpp \
+	$(SRC_DIR)/repository_query.cpp \
+	$(SRC_DIR)/package_metadata.cpp \
+	$(SRC_DIR)/dependency_spec.cpp \
+	$(SRC_DIR)/package_identifier.cpp \
+	$(SRC_DIR)/shell_words.cpp \
+	tests/stubs/package-metadata/alpm_stub.cpp \
+	tests/stubs/repository-query/process_stub.cpp
 ARTIFACT_INSTALL_PLAN_TEST_SRCS := \
 	tests/artifact_install_plan_test.cpp \
 	$(SRC_DIR)/artifact_install_plan.cpp
@@ -202,9 +238,11 @@ LIBALPM_BUILD_TARGETS := \
 	$(ARTIFACT_INSTALL_EXECUTOR_TEST_TARGET) \
 	$(SEPARATED_SOURCE_BUILD_TEST_TARGET) \
 	$(PRODUCTION_SOURCE_BUILD_TEST_TARGET) \
+	$(REPOSITORY_QUERY_TEST_TARGET) \
+	$(AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION_TEST_TARGET) \
 	$(UPGRADE_BASELINE_METADATA_TEST_TARGET)
 
-.PHONY: all check-libalpm clean test-app-config test-package-identifier test-package-metadata test-package-metadata-integration test-shell-words test-source-environment test-artifact-workspace test-artifact-identity test-artifact-install-executor test-separated-source-build test-production-source-build test-process-capture test-aur-update-plan test-aur-update-query test-dependency-plan-model test-artifact-install-plan test-command-stub-contract test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-commands-inspect test-commands-source-maintenance test-commands-sync test-conflicts-replaces test-install-layout test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check install uninstall
+.PHONY: all check-libalpm clean test-app-config test-package-identifier test-package-metadata test-package-metadata-integration test-repository-query test-shell-words test-source-environment test-artifact-workspace test-artifact-identity test-artifact-install-executor test-separated-source-build test-production-source-build test-process-capture test-aur-update-plan test-aur-update-query test-aur-update-execution-preflight test-aur-update-execution-preflight-integration test-dependency-plan-model test-artifact-install-plan test-command-stub-contract test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-commands-inspect test-commands-source-maintenance test-commands-sync test-conflicts-replaces test-install-layout test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check install uninstall
 
 all: $(TARGET) $(MANPAGE)
 
@@ -256,6 +294,11 @@ $(AUR_RPC_VALIDATION_TEST_TARGET): $(AUR_RPC_VALIDATION_TEST_SRCS) $(HEADERS) te
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling AUR RPC validation fake-symbol test binary"
 	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -DJPACKER_ENABLE_TEST_OVERRIDES -I$(SRC_DIR) -Itests/stubs/package-metadata $(AUR_RPC_VALIDATION_TEST_SRCS) -o $@ $(MY_LDLIBS)
+
+$(AUR_RPC_ENVELOPE_VALIDATION_TEST_TARGET): $(AUR_RPC_ENVELOPE_VALIDATION_TEST_SRCS) $(SRC_DIR)/aur_rpc.hpp $(SRC_DIR)/dependency_spec.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/logging.hpp $(VERSION_FILE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling AUR RPC envelope validation test binary"
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -DJPACKER_ENABLE_TEST_OVERRIDES -I$(SRC_DIR) $(AUR_RPC_ENVELOPE_VALIDATION_TEST_SRCS) -o $@ $(MY_LDLIBS)
 
 $(COMMANDS_SYNC_TEST_TARGET): $(COMMANDS_SYNC_TEST_SRCS) $(HEADERS) $(VERSION_FILE)
 	@mkdir -p $(dir $@)
@@ -371,10 +414,33 @@ $(AUR_UPDATE_QUERY_TEST_TARGET): $(AUR_UPDATE_QUERY_TEST_SRCS) $(SRC_DIR)/aur_up
 	@echo ":: Compiling AUR update query fake-symbol test binary"
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -I$(SRC_DIR) $(AUR_UPDATE_QUERY_TEST_SRCS) -o $@
 
+$(AUR_UPDATE_EXECUTION_PREFLIGHT_TEST_TARGET): $(AUR_UPDATE_EXECUTION_PREFLIGHT_TEST_SRCS) $(SRC_DIR)/aur_update_execution_preflight.hpp $(SRC_DIR)/aur_update_plan.hpp $(SRC_DIR)/dependency_plan.hpp $(SRC_DIR)/dependency_spec.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/installed_package.hpp tests/stubs/aur-update-execution-preflight/preflight_stub.hpp $(VERSION_FILE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling AUR update execution preflight fake-symbol test binary"
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -I$(SRC_DIR) $(AUR_UPDATE_EXECUTION_PREFLIGHT_TEST_SRCS) -o $@
+
+$(AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION_TEST_TARGET): $(AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION_TEST_SRCS) $(SRC_DIR)/aur_update_execution_preflight.hpp $(SRC_DIR)/aur_update_plan.hpp $(SRC_DIR)/dependency_plan.hpp $(SRC_DIR)/aur_rpc.hpp $(SRC_DIR)/repository_query.hpp $(SRC_DIR)/package_metadata.hpp $(SRC_DIR)/installed_package.hpp $(SRC_DIR)/dependency_spec.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/process.hpp $(SRC_DIR)/shell_words.hpp $(SRC_DIR)/logging.hpp tests/stubs/package-metadata/alpm_stub.hpp tests/stubs/aur-update-execution-preflight-integration/integration_stub.hpp $(VERSION_FILE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling AUR update execution preflight production composition test binary"
+	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
+		-I$(SRC_DIR) \
+		-Itests/stubs/package-metadata \
+		-Itests/stubs/aur-update-execution-preflight-integration \
+		$(AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION_TEST_SRCS) \
+		-o $@
+
 $(DEPENDENCY_PLAN_MODEL_TEST_TARGET): $(DEPENDENCY_PLAN_MODEL_TEST_SRCS) $(SRC_DIR)/dependency_plan.hpp $(SRC_DIR)/aur_rpc.hpp $(SRC_DIR)/repository_query.hpp $(SRC_DIR)/dependency_spec.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/logging.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling dependency plan model test binary"
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -I$(SRC_DIR) $(DEPENDENCY_PLAN_MODEL_TEST_SRCS) -o $@
+
+$(REPOSITORY_QUERY_TEST_TARGET): $(REPOSITORY_QUERY_TEST_SRCS) $(SRC_DIR)/repository_query.hpp $(SRC_DIR)/package_metadata.hpp $(SRC_DIR)/installed_package.hpp $(SRC_DIR)/dependency_spec.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/process.hpp $(SRC_DIR)/shell_words.hpp tests/stubs/package-metadata/alpm_stub.hpp tests/stubs/repository-query/process_stub.hpp $(VERSION_FILE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling repository query fake-symbol test binary"
+	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
+		-I$(SRC_DIR) -Itests/stubs/package-metadata \
+		$(REPOSITORY_QUERY_TEST_SRCS) \
+		-o $@
 
 $(ARTIFACT_INSTALL_PLAN_TEST_TARGET): $(ARTIFACT_INSTALL_PLAN_TEST_SRCS) $(SRC_DIR)/artifact_install_plan.hpp $(SRC_DIR)/dependency_plan.hpp $(SRC_DIR)/aur_rpc.hpp $(SRC_DIR)/repository_query.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
@@ -453,8 +519,34 @@ test-aur-update-plan: $(AUR_UPDATE_PLAN_TEST_TARGET)
 test-aur-update-query: $(AUR_UPDATE_QUERY_TEST_TARGET)
 	$(abspath $(AUR_UPDATE_QUERY_TEST_TARGET))
 
+test-aur-update-execution-preflight: $(AUR_UPDATE_EXECUTION_PREFLIGHT_TEST_TARGET)
+	$(abspath $(AUR_UPDATE_EXECUTION_PREFLIGHT_TEST_TARGET))
+
+test-aur-update-execution-preflight-integration: $(AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION_TEST_TARGET)
+	$(abspath $(AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION_TEST_TARGET)) simple
+	$(abspath $(AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION_TEST_TARGET)) repository-failure
+	$(abspath $(AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION_TEST_TARGET)) aur-failure
+
 test-dependency-plan-model: $(DEPENDENCY_PLAN_MODEL_TEST_TARGET)
 	$(abspath $(DEPENDENCY_PLAN_MODEL_TEST_TARGET))
+
+test-repository-query: $(REPOSITORY_QUERY_TEST_TARGET)
+	@set -e; for test_case in \
+		success \
+		configuration-command-failure \
+		configuration-parse-failure \
+		unsafe-repository-name \
+		missing-sync-directory \
+		empty-repository-configuration \
+		missing-configured-database \
+		non-regular-configured-database \
+		database-read-failure \
+		empty-database \
+		malformed-database \
+		invalid-provided-dependency \
+		partial-snapshot; do \
+		$(abspath $(REPOSITORY_QUERY_TEST_TARGET)) $$test_case; \
+	done
 
 test-artifact-install-plan: $(ARTIFACT_INSTALL_PLAN_TEST_TARGET)
 	$(abspath $(ARTIFACT_INSTALL_PLAN_TEST_TARGET))
@@ -465,8 +557,10 @@ test-command-stub-contract:
 test-conflicts-replaces: $(TEST_TARGET)
 	sh tests/test-conflicts-replaces.sh $(abspath $(TEST_TARGET))
 
-test-aur-rpc-validation: $(AUR_RPC_VALIDATION_TEST_TARGET)
-	sh tests/test-aur-rpc-validation.sh $(abspath $(AUR_RPC_VALIDATION_TEST_TARGET))
+test-aur-rpc-validation: $(AUR_RPC_VALIDATION_TEST_TARGET) $(AUR_RPC_ENVELOPE_VALIDATION_TEST_TARGET)
+	sh tests/test-aur-rpc-validation.sh \
+		$(abspath $(AUR_RPC_VALIDATION_TEST_TARGET)) \
+		$(abspath $(AUR_RPC_ENVELOPE_VALIDATION_TEST_TARGET))
 
 test-cli-parser: $(TEST_TARGET)
 	sh tests/test-cli-parser.sh $(abspath $(TEST_TARGET))

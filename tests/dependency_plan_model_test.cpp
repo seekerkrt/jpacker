@@ -10,6 +10,15 @@
 #include <string_view>
 #include <vector>
 
+namespace dependency_plan_repository_query_stub {
+
+void reset_query_counts();
+std::size_t legacy_repo_package_query_count();
+std::size_t sync_database_package_query_count();
+std::size_t strict_repo_provider_query_count();
+
+} // namespace dependency_plan_repository_query_stub
+
 namespace {
 
 void expect(bool condition, const std::string& message) {
@@ -67,6 +76,25 @@ const BuildPlanDependencyEdge& require_edge(
     return *found;
 }
 
+const BuildPlanResolutionFailure& require_resolution_failure(
+        const BuildPlan& plan, BuildPlanResolutionFailureKind kind,
+        std::string_view subject) {
+    const BuildPlanResolutionFailure* found = nullptr;
+    for(const auto& failure : plan.resolution_failures) {
+        if(failure.kind != kind || failure.subject != subject) continue;
+        if(found != nullptr) {
+            throw std::runtime_error(
+                    "Duplicate resolution failure: " + std::string(subject));
+        }
+        found = &failure;
+    }
+    if(found == nullptr) {
+        throw std::runtime_error(
+                "Missing resolution failure: " + std::string(subject));
+    }
+    return *found;
+}
+
 void expect_roles(
         const PlannedPackageTarget& target, const std::vector<PackageRole>& expected) {
     expect(target.roles == expected, "Unexpected roles for " + target.package_name);
@@ -76,6 +104,30 @@ void expect_roots(
         const PlannedPackageTarget& target,
         const std::vector<RootTargetIdentity>& expected) {
     expect(target.roots == expected, "Unexpected roots for " + target.package_name);
+}
+
+void expect_resolution_failure_context(
+        const BuildPlanResolutionFailure& failure,
+        const std::optional<std::string>& parent_package_name,
+        const std::optional<std::string>& parent_package_base,
+        const std::optional<std::string>& dependency_specification,
+        const std::vector<RootTargetIdentity>& roots,
+        const std::string& diagnostic) {
+    expect(
+            failure.parent_package_name == parent_package_name,
+            "Resolution failure parent name differs for " + failure.subject);
+    expect(
+            failure.parent_package_base == parent_package_base,
+            "Resolution failure parent base differs for " + failure.subject);
+    expect(
+            failure.dependency_specification == dependency_specification,
+            "Resolution failure dependency differs for " + failure.subject);
+    expect(
+            failure.roots == roots,
+            "Resolution failure roots differ for " + failure.subject);
+    expect(
+            failure.diagnostic == diagnostic,
+            "Resolution failure diagnostic differs for " + failure.subject);
 }
 
 void expect_legacy_order(
@@ -128,6 +180,24 @@ void expect_failure(Callable callable, const std::string& context) {
     throw std::runtime_error("Expected failure: " + context);
 }
 
+template <typename Callable>
+void expect_aur_rpc_response_error(
+        Callable callable, const std::string& expected_message) {
+    try {
+        callable();
+    } catch(const AurRpcResponseError& error) {
+        expect(
+                std::string(error.what()) == expected_message,
+                "Unexpected AUR RPC response error: " + std::string(error.what()));
+        return;
+    } catch(const std::exception& error) {
+        throw std::runtime_error(
+                "Expected AurRpcResponseError, got: " + std::string(error.what()));
+    }
+    throw std::runtime_error(
+            "Expected AurRpcResponseError: " + expected_message);
+}
+
 bool same_provider(const ProvidedDependency& lhs, const ProvidedDependency& rhs) {
     return lhs.repository == rhs.repository && lhs.package_name == rhs.package_name;
 }
@@ -174,6 +244,10 @@ void expect_equivalent_plans(const BuildPlan& lhs, const BuildPlan& rhs) {
                 same_optional_provider(left.resolved_provider, right.resolved_provider),
                 "Edge provider differs");
     }
+
+    expect(
+            lhs.resolution_failures == rhs.resolution_failures,
+            "BuildPlan::resolution_failures differs");
 
     expect(
             lhs.split_package_targets.size() == rhs.split_package_targets.size(),
@@ -519,6 +593,329 @@ void test_supplemental_multi_root_contracts() {
             "All-role explicit-wins reducer differs");
 }
 
+void test_preflight_root_failure_and_continuation() {
+    BuildPlan plan = resolve_build_plan_for_preflight(
+            {"preflight-root-metadata-failure", "preflight-later-root"});
+
+    expect(
+            plan.root_targets == std::vector<RootTargetIdentity>{
+                    {0, "preflight-root-metadata-failure"},
+                    {1, "preflight-later-root"},
+            },
+            "Preflight root identities differ after root failure");
+    expect(plan.resolution_failures.size() == 1, "Unexpected root failure count");
+    const BuildPlanResolutionFailure& failure = require_resolution_failure(
+            plan, BuildPlanResolutionFailureKind::AurPackageMetadataUnavailable,
+            "preflight-root-metadata-failure");
+    expect_resolution_failure_context(
+            failure, std::nullopt, std::nullopt, std::nullopt,
+            {{0, "preflight-root-metadata-failure"}},
+            "strict root metadata failure");
+    expect(
+            plan.unresolved ==
+                    std::vector<std::string>{"preflight-root-metadata-failure"},
+            "Root metadata failure did not remain unresolved");
+    expect_roots(
+            require_package_target(plan, "preflight-later-root"),
+            {{1, "preflight-later-root"}});
+    expect_legacy_order(plan, {"preflight-later-root"});
+
+    BuildPlan duplicate_failure = resolve_build_plan_for_preflight({
+            "preflight-root-metadata-failure",
+            "preflight-root-metadata-failure",
+    });
+    expect(
+            duplicate_failure.resolution_failures.size() == 1,
+            "Duplicate ordinary failure was not deduplicated");
+    expect(
+            duplicate_failure.resolution_failures.front().roots ==
+                    std::vector<RootTargetIdentity>{
+                            {0, "preflight-root-metadata-failure"},
+                            {1, "preflight-root-metadata-failure"},
+                    },
+            "Deduplicated failure roots differ");
+}
+
+void test_preflight_dependency_and_provider_failures() {
+    BuildPlan dependency = resolve_build_plan_for_preflight(
+            {"preflight-dependency-failure-root"});
+    expect(
+            dependency.resolution_failures.size() == 1,
+            "Unexpected dependency metadata failure count");
+    const BuildPlanResolutionFailure& dependency_failure =
+            require_resolution_failure(
+                    dependency,
+                    BuildPlanResolutionFailureKind::AurPackageMetadataUnavailable,
+                    "preflight-dependency-failure-child");
+    expect_resolution_failure_context(
+            dependency_failure,
+            std::optional<std::string>{"preflight-dependency-failure-root"},
+            std::optional<std::string>{"preflight-dependency-failure-root"},
+            std::optional<std::string>{"preflight-dependency-failure-child"},
+            {{0, "preflight-dependency-failure-root"}},
+            "strict dependency metadata failure");
+    expect(
+            require_edge(
+                    dependency, "preflight-dependency-failure-root",
+                    "preflight-dependency-failure-child",
+                    PackageRole::RuntimeDependency)
+                            .kind == DependencyKind::Unknown,
+            "Dependency metadata failure was treated as resolved");
+
+    BuildPlan provider_search = resolve_build_plan_for_preflight(
+            {"preflight-provider-search-root"});
+    expect(
+            provider_search.resolution_failures.size() == 1,
+            "Unexpected provider search failure count");
+    const BuildPlanResolutionFailure& search_failure =
+            require_resolution_failure(
+                    provider_search,
+                    BuildPlanResolutionFailureKind::ProviderSearchUnavailable,
+                    "preflight-provider-search-virtual");
+    expect_resolution_failure_context(
+            search_failure,
+            std::optional<std::string>{"preflight-provider-search-root"},
+            std::optional<std::string>{"preflight-provider-search-root"},
+            std::optional<std::string>{"preflight-provider-search-virtual"},
+            {{0, "preflight-provider-search-root"}},
+            "strict provider search failure");
+
+    BuildPlan provider_candidate = resolve_build_plan_for_preflight(
+            {"preflight-provider-candidate-root"});
+    expect(
+            provider_candidate.resolution_failures.size() == 1,
+            "Unexpected provider candidate failure count");
+    const BuildPlanResolutionFailure& candidate_failure =
+            require_resolution_failure(
+                    provider_candidate,
+                    BuildPlanResolutionFailureKind::ProviderCandidateMetadataUnavailable,
+                    "preflight-provider-broken");
+    expect_resolution_failure_context(
+            candidate_failure,
+            std::optional<std::string>{"preflight-provider-candidate-root"},
+            std::optional<std::string>{"preflight-provider-candidate-root"},
+            std::optional<std::string>{"preflight-provider-candidate-virtual"},
+            {{0, "preflight-provider-candidate-root"}},
+            "strict provider candidate failure");
+    const BuildPlanDependencyEdge& provider_edge = require_edge(
+            provider_candidate, "preflight-provider-candidate-root",
+            "preflight-provider-candidate-virtual",
+            PackageRole::RuntimeDependency);
+    expect(
+            provider_edge.kind == DependencyKind::Provided &&
+                    provider_edge.resolved_provider.has_value() &&
+                    same_provider(
+                            provider_edge.resolved_provider.value(),
+                            ProvidedDependency{"aur", "preflight-provider-good"}),
+            "Known provider was lost after another candidate failed");
+    expect(
+            provider_candidate.unresolved.empty(),
+            "Known provider was incorrectly left unresolved");
+}
+
+void test_preflight_shared_failure_root_attribution() {
+    BuildPlan plan = resolve_build_plan_for_preflight(
+            {"preflight-shared-root-a", "preflight-shared-root-b"});
+
+    expect(plan.resolution_failures.size() == 1, "Unexpected shared failure count");
+    const BuildPlanResolutionFailure& failure = require_resolution_failure(
+            plan, BuildPlanResolutionFailureKind::AurPackageMetadataUnavailable,
+            "preflight-shared-failure");
+    expect_resolution_failure_context(
+            failure,
+            std::optional<std::string>{"preflight-shared-parent"},
+            std::optional<std::string>{"preflight-shared-parent"},
+            std::optional<std::string>{"preflight-shared-failure"},
+            {
+                    {0, "preflight-shared-root-a"},
+                    {1, "preflight-shared-root-b"},
+            },
+            "strict shared dependency metadata failure");
+    expect_roots(
+            require_package_target(plan, "preflight-shared-parent"),
+            {
+                    {0, "preflight-shared-root-a"},
+                    {1, "preflight-shared-root-b"},
+            });
+}
+
+void test_preflight_response_error_propagation() {
+    expect_aur_rpc_response_error(
+            []() {
+                static_cast<void>(resolve_build_plan_for_preflight(
+                        {"preflight-response-error-root"}));
+            },
+            "root response failure");
+    expect_aur_rpc_response_error(
+            []() {
+                static_cast<void>(resolve_build_plan_for_preflight(
+                        {"preflight-provider-response-root"}));
+            },
+            "provider search response failure");
+    expect_aur_rpc_response_error(
+            []() {
+                static_cast<void>(resolve_build_plan_for_preflight({
+                        "preflight-dependency-response-root",
+                        "preflight-response-must-stop-before-later-root",
+                }));
+            },
+            "dependency info response failure");
+    expect_aur_rpc_response_error(
+            []() {
+                static_cast<void>(resolve_build_plan_for_preflight({
+                        "preflight-provider-candidate-response-root",
+                        "preflight-response-must-stop-before-later-root",
+                }));
+            },
+            "provider candidate info response failure");
+}
+
+void test_preflight_repository_query_boundary() {
+    dependency_plan_repository_query_stub::reset_query_counts();
+    BuildPlan repository_dependency =
+            resolve_build_plan_for_preflight({"case6-app"});
+    expect(
+            require_edge(
+                    repository_dependency, "case6-app", "case6-repo-lib",
+                    PackageRole::RuntimeDependency)
+                            .kind == DependencyKind::Repo,
+            "Strict resolver lost an exact repository dependency");
+    expect(
+            dependency_plan_repository_query_stub::legacy_repo_package_query_count() == 0,
+            "Strict resolver called the legacy pacman repository query");
+    expect(
+            dependency_plan_repository_query_stub::sync_database_package_query_count() == 1,
+            "Strict resolver did not use the sync database package query");
+
+    BuildPlan repository_provider =
+            resolve_build_plan_for_preflight({"case14-app"});
+    expect(
+            require_edge(
+                    repository_provider, "case14-app", "case14-virtual",
+                    PackageRole::RuntimeDependency)
+                            .kind == DependencyKind::Provided,
+            "Strict resolver lost the pacman-first repository provider");
+    expect(
+            repository_provider.resolution_failures.empty(),
+            "Repository provider lookup produced a strict AUR failure");
+    expect(
+            dependency_plan_repository_query_stub::strict_repo_provider_query_count() == 1,
+            "Strict resolver did not use the typed repository provider query");
+}
+
+void test_preflight_repository_metadata_failures() {
+    dependency_plan_repository_query_stub::reset_query_counts();
+    BuildPlan exact_failure = resolve_build_plan_for_preflight({
+            "preflight-repository-exact-failure-root",
+            "preflight-later-root",
+    });
+    expect(
+            exact_failure.resolution_failures.size() == 1,
+            "Unexpected strict repository exact failure count");
+    const BuildPlanResolutionFailure& exact = require_resolution_failure(
+            exact_failure,
+            BuildPlanResolutionFailureKind::RepositoryMetadataUnavailable,
+            "preflight-repository-exact-failure-child");
+    expect_resolution_failure_context(
+            exact,
+            std::optional<std::string>{"preflight-repository-exact-failure-root"},
+            std::optional<std::string>{"preflight-repository-exact-failure-root"},
+            std::optional<std::string>{"preflight-repository-exact-failure-child"},
+            {{0, "preflight-repository-exact-failure-root"}},
+            "strict repository exact metadata failure");
+    expect(
+            require_edge(
+                    exact_failure,
+                    "preflight-repository-exact-failure-root",
+                    "preflight-repository-exact-failure-child",
+                    PackageRole::RuntimeDependency)
+                            .kind == DependencyKind::Unknown,
+            "Unavailable repository exact metadata was treated as confirmed absence");
+    expect_roots(
+            require_package_target(exact_failure, "preflight-later-root"),
+            {{1, "preflight-later-root"}});
+    expect(
+            dependency_plan_repository_query_stub::strict_repo_provider_query_count() == 0,
+            "Repository exact failure continued into provider lookup");
+
+    dependency_plan_repository_query_stub::reset_query_counts();
+    BuildPlan provider_failure = resolve_build_plan_for_preflight(
+            {"preflight-repository-provider-failure-root"});
+    expect(
+            provider_failure.resolution_failures.size() == 1,
+            "Unexpected strict repository provider failure count");
+    const BuildPlanResolutionFailure& provider = require_resolution_failure(
+            provider_failure,
+            BuildPlanResolutionFailureKind::RepositoryMetadataUnavailable,
+            "preflight-repository-provider-failure-virtual");
+    expect_resolution_failure_context(
+            provider,
+            std::optional<std::string>{"preflight-repository-provider-failure-root"},
+            std::optional<std::string>{"preflight-repository-provider-failure-root"},
+            std::optional<std::string>{"preflight-repository-provider-failure-virtual"},
+            {{0, "preflight-repository-provider-failure-root"}},
+            "strict repository provider metadata failure");
+    expect(
+            require_edge(
+                    provider_failure,
+                    "preflight-repository-provider-failure-root",
+                    "preflight-repository-provider-failure-virtual",
+                    PackageRole::RuntimeDependency)
+                            .kind == DependencyKind::Unknown,
+            "Unavailable repository provider metadata was treated as an empty provider set");
+    expect(
+            dependency_plan_repository_query_stub::strict_repo_provider_query_count() == 1,
+            "Strict repository provider query count differs after failure");
+}
+
+void test_legacy_resolution_failure_boundary() {
+    BuildPlan normal = resolve_build_plan("case1-app");
+    expect(
+            normal.resolution_failures.empty(),
+            "Legacy resolver added failures to a successful plan");
+
+    BuildPlan dependency = resolve_build_plan(
+            "preflight-dependency-failure-root");
+    expect(
+            dependency.resolution_failures.empty(),
+            "Legacy resolver captured dependency metadata failure");
+    expect(
+            dependency.unresolved ==
+                    std::vector<std::string>{"preflight-dependency-failure-child"},
+            "Legacy dependency failure behavior changed");
+
+    BuildPlan provider_search = resolve_build_plan(
+            "preflight-provider-search-root");
+    expect(
+            provider_search.resolution_failures.empty(),
+            "Legacy resolver captured provider search failure");
+    expect(
+            provider_search.unresolved ==
+                    std::vector<std::string>{"preflight-provider-search-virtual"},
+            "Legacy provider search failure behavior changed");
+
+    BuildPlan provider_candidate = resolve_build_plan(
+            "preflight-provider-candidate-root");
+    expect(
+            provider_candidate.resolution_failures.empty(),
+            "Legacy resolver captured provider candidate failure");
+    expect(
+            provider_candidate.unresolved.empty(),
+            "Legacy resolver lost the surviving provider candidate");
+
+    expect_exception(
+            []() {
+                static_cast<void>(resolve_build_plan(
+                        "preflight-root-metadata-failure"));
+            },
+            "legacy root metadata failure");
+    expect_exception(
+            []() {
+                static_cast<void>(resolve_build_plan("preflight-root-not-found"));
+            },
+            "AUR package not found: preflight-root-not-found");
+}
+
 template <typename Callable>
 void run_case(const std::string& name, Callable callable) {
     callable();
@@ -542,6 +939,27 @@ int main() {
         run_case("Case 11 single overload compatibility", test_case_11_single_overload_compatibility);
         run_case("Case 12 invalid reducer state", test_case_12_invalid_reducer_state);
         run_case("supplemental multi-root contracts", test_supplemental_multi_root_contracts);
+        run_case(
+                "preflight root failure and continuation",
+                test_preflight_root_failure_and_continuation);
+        run_case(
+                "preflight dependency and provider failures",
+                test_preflight_dependency_and_provider_failures);
+        run_case(
+                "preflight shared failure root attribution",
+                test_preflight_shared_failure_root_attribution);
+        run_case(
+                "preflight response error propagation",
+                test_preflight_response_error_propagation);
+        run_case(
+                "preflight repository query boundary",
+                test_preflight_repository_query_boundary);
+        run_case(
+                "preflight repository metadata failures",
+                test_preflight_repository_metadata_failures);
+        run_case(
+                "legacy resolution failure boundary",
+                test_legacy_resolution_failure_boundary);
     } catch(const std::exception& error) {
         std::cerr << error.what() << '\n';
         return 1;

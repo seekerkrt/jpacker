@@ -35,6 +35,12 @@ bool is_repo_package(const std::string& package_name) {
                    " > /dev/null 2>&1") == 0;
 }
 
+StrictRepositoryPackageQueryResult query_repository_package_strict(
+        const std::string& package_name) {
+    require_valid_package_name(package_name);
+    return RepositoryPackageNotFound{};
+}
+
 std::vector<ProvidedDependency> find_repo_providers(
         const std::string& dependency_name) {
     if(!is_valid_package_name(dependency_name)) return {};
@@ -57,6 +63,11 @@ std::vector<ProvidedDependency> find_repo_providers(
 
     // AUR provider/unknown fixturesと既存provider-order fixtureは、AUR seamへ委譲する。
     return {};
+}
+
+StrictRepositoryProvidersQueryResult query_repository_providers_strict(
+        const std::string& dependency_name) {
+    return find_repo_providers(dependency_name);
 }
 
 std::vector<InstalledPackage> get_foreign_packages() {

@@ -42,6 +42,7 @@ class AurClient {
 public:
     static std::vector<AurPackageInfo> search(const std::string& query);
     static std::vector<std::string> search_names_by_provides(const std::string& provided_name);
+    static std::vector<std::string> search_names_by_provides_strict(const std::string& provided_name);
     static std::optional<AurPackageInfo> info(const std::string& pkg_name);
     static std::optional<AurPackageInfo> info_strict(const std::string& pkg_name);
     static std::map<std::string, AurPackageInfo> info_many(const std::vector<std::string>& pkg_names);

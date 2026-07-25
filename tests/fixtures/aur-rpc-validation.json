@@ -495,10 +495,34 @@
     "virtual-provider-base": ["provider-invalid-base-entry"],
     "virtual-provider-provides": ["provider-invalid-provides-entry"],
     "virtual-provider-candidate": ["provider-candidate-search-entry"],
-    "virtual-provider-mismatch": ["provider-mismatch-search-entry"]
+    "virtual-provider-mismatch": ["provider-mismatch-search-entry"],
+    "strict-search-wrong-type": ["provider-one"]
   },
   "info_results": {
-    "single-multiple-request": ["single-multiple-first", "single-multiple-second"]
+    "single-multiple-request": ["single-multiple-first", "single-multiple-second"],
+    "strict-info-multiple": ["single-multiple-first", "single-multiple-second"]
+  },
+  "info_response_overrides": {
+    "strict-error-string": {"set": {"error": "fixture AUR RPC failure"}},
+    "strict-error-number": {"set": {"error": 42}},
+    "strict-version-missing": {"remove": ["version"]},
+    "strict-version-string": {"set": {"version": "5"}},
+    "strict-version-unsupported": {"set": {"version": 4}},
+    "strict-type-missing": {"remove": ["type"]},
+    "strict-type-number": {"set": {"type": 5}},
+    "strict-type-wrong": {"set": {"type": "search"}},
+    "strict-resultcount-missing": {"remove": ["resultcount"]},
+    "strict-resultcount-string": {"set": {"resultcount": "0"}},
+    "strict-resultcount-negative": {"set": {"resultcount": -1}},
+    "strict-resultcount-mismatch": {"set": {"resultcount": 1}},
+    "strict-results-missing": {"remove": ["results"]},
+    "strict-results-object": {"set": {"results": {}}},
+    "legacy-envelope-permissive": {
+      "remove": ["version", "type", "resultcount"]
+    }
+  },
+  "search_response_overrides": {
+    "strict-search-wrong-type": {"set": {"type": "multiinfo"}}
   },
   "info_sequence_groups": {
     "upgrade-execution-schema-error": {

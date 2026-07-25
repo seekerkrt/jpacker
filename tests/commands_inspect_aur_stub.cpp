@@ -275,6 +275,11 @@ std::vector<std::string> AurClient::search_names_by_provides(
             "Unexpected inspection search-provides call: " + provided_name);
 }
 
+std::vector<std::string> AurClient::search_names_by_provides_strict(
+        const std::string& provided_name) {
+    return search_names_by_provides(provided_name);
+}
+
 std::optional<AurPackageInfo> AurClient::info(const std::string& package_name) {
     append_command_log("aur info " + package_name);
     const std::string scenario = inspection_scenario();

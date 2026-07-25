@@ -12,11 +12,33 @@
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace {
 
 const int MAX_RECURSIVE_DEP_DEPTH = 16;
+
+enum class BuildPlanResolutionMode {
+    Legacy,
+    CaptureOrdinaryFailures
+};
+
+struct BuildPlanResolutionFailureContext {
+    BuildPlan&                     plan;
+    RootTargetIdentity             root;
+    std::optional<std::string>     parent_package_name;
+    std::optional<std::string>     parent_package_base;
+    std::optional<std::string>     dependency_specification;
+};
+
+std::optional<AurPackageInfo> query_aur_package_info(
+        const std::string& package_name, BuildPlanResolutionMode mode) {
+    if(mode == BuildPlanResolutionMode::CaptureOrdinaryFailures) {
+        return AurClient::info_strict(package_name);
+    }
+    return AurClient::info(package_name);
+}
 
 // dependency planをmonolithへ逆依存させず、汎用utilityを公開しないためのlocal helper。
 std::string trim(const std::string& str) {
@@ -60,28 +82,120 @@ bool aur_package_provides(const AurPackageInfo& info, const std::string& depende
     return false;
 }
 
-std::vector<ProvidedDependency> find_aur_providers(const std::string& dependency_name) {
+bool same_resolution_failure(
+        const BuildPlanResolutionFailure& lhs,
+        const BuildPlanResolutionFailure& rhs) {
+    return lhs.kind == rhs.kind &&
+           lhs.parent_package_name == rhs.parent_package_name &&
+           lhs.parent_package_base == rhs.parent_package_base &&
+           lhs.subject == rhs.subject &&
+           lhs.dependency_specification == rhs.dependency_specification;
+}
+
+void add_resolution_failure(
+        BuildPlanResolutionFailureContext* context,
+        BuildPlanResolutionFailureKind kind, const std::string& subject,
+        const std::string& diagnostic) {
+    if(context == nullptr) return;
+
+    BuildPlanResolutionFailure failure{
+            kind,
+            context->parent_package_name,
+            context->parent_package_base,
+            subject,
+            context->dependency_specification,
+            {context->root},
+            diagnostic};
+    auto same_failure = [&failure](const BuildPlanResolutionFailure& existing) {
+        return same_resolution_failure(existing, failure);
+    };
+    auto it = std::find_if(
+            context->plan.resolution_failures.begin(),
+            context->plan.resolution_failures.end(), same_failure);
+    if(it == context->plan.resolution_failures.end()) {
+        context->plan.resolution_failures.push_back(std::move(failure));
+        return;
+    }
+    if(std::find(it->roots.begin(), it->roots.end(), context->root) == it->roots.end()) {
+        it->roots.push_back(context->root);
+    }
+}
+
+enum class RepositoryPackageQueryStatus {
+    Present,
+    NotFound,
+    Unavailable
+};
+
+RepositoryPackageQueryStatus query_repository_package(
+        const std::string& package_name, BuildPlanResolutionMode mode,
+        BuildPlanResolutionFailureContext* failure_context) {
+    if(mode == BuildPlanResolutionMode::Legacy) {
+        return is_repo_package(package_name)
+                ? RepositoryPackageQueryStatus::Present
+                : RepositoryPackageQueryStatus::NotFound;
+    }
+
+    StrictRepositoryPackageQueryResult result =
+            query_repository_package_strict(package_name);
+    if(std::holds_alternative<RepositoryPackagePresent>(result))
+        return RepositoryPackageQueryStatus::Present;
+    if(std::holds_alternative<RepositoryPackageNotFound>(result))
+        return RepositoryPackageQueryStatus::NotFound;
+
+    const RepositoryMetadataFailure& failure =
+            std::get<RepositoryMetadataFailure>(result);
+    add_resolution_failure(
+            failure_context,
+            BuildPlanResolutionFailureKind::RepositoryMetadataUnavailable,
+            package_name, failure.diagnostic);
+    return RepositoryPackageQueryStatus::Unavailable;
+}
+
+std::vector<ProvidedDependency> find_aur_providers(
+        const std::string& dependency_name,
+        BuildPlanResolutionFailureContext* failure_context = nullptr) {
     std::vector<ProvidedDependency> providers;
     if(!is_valid_package_name(dependency_name)) return providers;
 
     std::vector<std::string> candidates;
     try {
-        candidates = AurClient::search_names_by_provides(dependency_name);
+        if(failure_context == nullptr) {
+            candidates = AurClient::search_names_by_provides(dependency_name);
+        } else {
+            candidates = AurClient::search_names_by_provides_strict(dependency_name);
+        }
     } catch(const AurRpcResponseError&) {
         throw;
     } catch(const std::exception& e) {
+        add_resolution_failure(
+                failure_context,
+                BuildPlanResolutionFailureKind::ProviderSearchUnavailable,
+                dependency_name, e.what());
         Logger::warn("Failed to search AUR providers for " + dependency_name + ": " + e.what());
         return providers;
     }
     for(const auto& candidate : candidates) {
         try {
-            std::optional<AurPackageInfo> info = AurClient::info(candidate);
+            std::optional<AurPackageInfo> info = failure_context == nullptr
+                    ? AurClient::info(candidate)
+                    : AurClient::info_strict(candidate);
             if(info.has_value() && aur_package_provides(info.value(), dependency_name)) {
                 add_provider_candidate(providers, ProvidedDependency{"aur", info->Name});
+            } else if(failure_context != nullptr && !info.has_value()) {
+                add_resolution_failure(
+                        failure_context,
+                        BuildPlanResolutionFailureKind::ProviderCandidateMetadataUnavailable,
+                        candidate,
+                        "AUR provider candidate metadata was not returned.");
             }
         } catch(const AurRpcResponseError&) {
             throw;
         } catch(const std::exception& e) {
+            add_resolution_failure(
+                    failure_context,
+                    BuildPlanResolutionFailureKind::ProviderCandidateMetadataUnavailable,
+                    candidate, e.what());
             Logger::warn("Failed to check AUR provider " + candidate + ": " + e.what());
         }
     }
@@ -89,11 +203,30 @@ std::vector<ProvidedDependency> find_aur_providers(const std::string& dependency
     return providers;
 }
 
-std::vector<ProvidedDependency> find_dependency_providers(const std::string& dependency_name) {
-    std::vector<ProvidedDependency> repo_provider = find_repo_providers(dependency_name);
+std::vector<ProvidedDependency> find_dependency_providers(
+        const std::string& dependency_name,
+        BuildPlanResolutionFailureContext* failure_context = nullptr) {
+    std::vector<ProvidedDependency> repo_provider;
+    if(failure_context == nullptr) {
+        repo_provider = find_repo_providers(dependency_name);
+    } else {
+        StrictRepositoryProvidersQueryResult result =
+                query_repository_providers_strict(dependency_name);
+        if(const auto* failure = std::get_if<RepositoryMetadataFailure>(&result);
+           failure != nullptr) {
+            add_resolution_failure(
+                    failure_context,
+                    BuildPlanResolutionFailureKind::RepositoryMetadataUnavailable,
+                    dependency_name, failure->diagnostic);
+            // POLICY(#267): unavailable repository metadata is not confirmed absence.
+            return {};
+        }
+        repo_provider =
+                std::get<std::vector<ProvidedDependency>>(std::move(result));
+    }
     // POLICY: pacman-first。official repo provider が見つかる場合は AUR provider を混ぜない。
     if(!repo_provider.empty()) return repo_provider;
-    return find_aur_providers(dependency_name);
+    return find_aur_providers(dependency_name, failure_context);
 }
 
 void add_dependency(
@@ -473,6 +606,23 @@ void propagate_root_identities(BuildPlan& plan) {
     }
 }
 
+void propagate_resolution_failure_root_identities(BuildPlan& plan) {
+    for(auto& failure : plan.resolution_failures) {
+        if(!failure.parent_package_name.has_value()) continue;
+
+        for(const auto& target : plan.package_targets) {
+            if(target.package_name != failure.parent_package_name.value()) continue;
+            if(failure.parent_package_base.has_value() &&
+               target.package_base != failure.parent_package_base.value()) {
+                continue;
+            }
+            for(const auto& root : target.roots) {
+                add_root_identity(failure.roots, root);
+            }
+        }
+    }
+}
+
 void add_build_plan_split_package_target(BuildPlan& plan, const AurPackageInfo& info) {
     if(!has_distinct_package_base(info)) return;
 
@@ -536,18 +686,32 @@ void collect_aur_build_plan(
         const std::string& package_name, BuildPlan& plan, std::set<std::string>& visited,
         std::set<std::string>& visiting, const std::vector<PackageRole>& roles,
         const RootTargetIdentity& root, int depth, int max_depth,
-        bool traverse_aur_providers) {
+        bool traverse_aur_providers, BuildPlanResolutionMode resolution_mode,
+        const std::optional<std::string>& parent_package_name,
+        const std::optional<std::string>& parent_package_base,
+        const std::optional<std::string>& dependency_specification) {
     if(depth > max_depth) {
         add_unique_value(plan.unresolved, package_name + " (max depth reached)");
         return;
     }
 
     std::optional<AurPackageInfo> info;
+    BuildPlanResolutionFailureContext package_failure_context{
+            plan, root, parent_package_name, parent_package_base,
+            dependency_specification};
+    BuildPlanResolutionFailureContext* failure_context =
+            resolution_mode == BuildPlanResolutionMode::CaptureOrdinaryFailures
+            ? &package_failure_context
+            : nullptr;
     try {
-        info = AurClient::info(package_name);
+        info = query_aur_package_info(package_name, resolution_mode);
     } catch(const AurRpcResponseError&) {
         throw;
     } catch(const std::exception& e) {
+        add_resolution_failure(
+                failure_context,
+                BuildPlanResolutionFailureKind::AurPackageMetadataUnavailable,
+                package_name, e.what());
         Logger::warn("Failed to fetch AUR info for " + package_name + ": " + e.what());
         add_unique_value(plan.unresolved, package_name);
         return;
@@ -604,19 +768,37 @@ void collect_aur_build_plan(
             // POLICY(#96): plan は未検証 constraint を解決済み扱いにしない。
             add_unique_value(plan.unresolved, dependency_constraint_unresolved_reason(dependency));
         }
-        if(is_repo_package(dep_name)) {
+        BuildPlanResolutionFailureContext dependency_failure_context{
+                plan, root, info->Name, build_unit, dependency};
+        BuildPlanResolutionFailureContext* dependency_failure_sink =
+                resolution_mode == BuildPlanResolutionMode::CaptureOrdinaryFailures
+                ? &dependency_failure_context
+                : nullptr;
+        RepositoryPackageQueryStatus repository_status =
+                query_repository_package(
+                        dep_name, resolution_mode, dependency_failure_sink);
+        if(repository_status == RepositoryPackageQueryStatus::Present) {
             edge.kind = DependencyKind::Repo;
             edge.resolved_package_name = dep_name;
+            add_build_plan_dependency_edges(plan, edge, matching_dependencies);
+            continue;
+        }
+        if(repository_status == RepositoryPackageQueryStatus::Unavailable) {
+            add_unique_value(plan.unresolved, dependency);
             add_build_plan_dependency_edges(plan, edge, matching_dependencies);
             continue;
         }
 
         std::optional<AurPackageInfo> dependency_info;
         try {
-            dependency_info = AurClient::info(dep_name);
+            dependency_info = query_aur_package_info(dep_name, resolution_mode);
         } catch(const AurRpcResponseError&) {
             throw;
         } catch(const std::exception& e) {
+            add_resolution_failure(
+                    dependency_failure_sink,
+                    BuildPlanResolutionFailureKind::AurPackageMetadataUnavailable,
+                    dep_name, e.what());
             Logger::warn("Failed to check AUR dependency " + dep_name + ": " + e.what());
         }
 
@@ -627,11 +809,13 @@ void collect_aur_build_plan(
             add_build_plan_dependency_edges(plan, edge, matching_dependencies);
             collect_aur_build_plan(
                     dep_name, plan, visited, visiting, dependency_roles, root,
-                    depth + 1, max_depth, traverse_aur_providers);
+                    depth + 1, max_depth, traverse_aur_providers,
+                    resolution_mode, info->Name, build_unit, dependency);
             continue;
         }
 
-        std::vector<ProvidedDependency> providers = find_dependency_providers(dep_name);
+        std::vector<ProvidedDependency> providers =
+                find_dependency_providers(dep_name, dependency_failure_sink);
         if(providers.size() == 1) {
             const ProvidedDependency& provider = providers.front();
             edge.kind = DependencyKind::Provided;
@@ -641,7 +825,8 @@ void collect_aur_build_plan(
             if(traverse_aur_providers && provider.repository == "aur") {
                 collect_aur_build_plan(
                         provider.package_name, plan, visited, visiting, dependency_roles, root,
-                        depth + 1, max_depth, traverse_aur_providers);
+                        depth + 1, max_depth, traverse_aur_providers,
+                        resolution_mode, info->Name, build_unit, dependency);
             }
         } else if(providers.size() > 1) {
             edge.kind = DependencyKind::AmbiguousProvider;
@@ -658,6 +843,38 @@ void collect_aur_build_plan(
     add_build_plan_entry(plan, info.value());
 }
 
+BuildPlan resolve_build_plan_internal(
+        const std::vector<std::string>& targets,
+        BuildPlanResolutionMode resolution_mode) {
+    if(targets.empty()) throw std::invalid_argument("Build plan targets must not be empty.");
+
+    for(const auto& target : targets) require_valid_package_name(target);
+    if(resolution_mode == BuildPlanResolutionMode::Legacy) {
+        // POLICY: legacy resolverの事前存在確認と例外境界は通常-S consumerの契約。
+        for(const auto& target : targets) {
+            if(!AurClient::info(target).has_value()) {
+                throw std::runtime_error("AUR package not found: " + target);
+            }
+        }
+    }
+
+    BuildPlan             plan;
+    std::set<std::string> visited;
+    std::set<std::string> visiting;
+    const std::vector<PackageRole> root_roles = {PackageRole::Root};
+    for(std::size_t i = 0; i < targets.size(); ++i) {
+        RootTargetIdentity root{i, targets[i]};
+        plan.root_targets.push_back(root);
+        collect_aur_build_plan(
+                targets[i], plan, visited, visiting, root_roles, root, 0,
+                MAX_RECURSIVE_DEP_DEPTH, true, resolution_mode,
+                std::nullopt, std::nullopt, std::nullopt);
+    }
+    propagate_root_identities(plan);
+    propagate_resolution_failure_root_identities(plan);
+    return plan;
+}
+
 } // namespace
 
 std::vector<BuildPlanMetadataRisk> collect_build_plan_metadata_risks(const AurPackageInfo& pkg) {
@@ -671,28 +888,13 @@ BuildPlan resolve_build_plan(const std::string& target) {
 }
 
 BuildPlan resolve_build_plan(const std::vector<std::string>& targets) {
-    if(targets.empty()) throw std::invalid_argument("Build plan targets must not be empty.");
+    return resolve_build_plan_internal(targets, BuildPlanResolutionMode::Legacy);
+}
 
-    for(const auto& target : targets) require_valid_package_name(target);
-    for(const auto& target : targets) {
-        if(!AurClient::info(target).has_value()) {
-            throw std::runtime_error("AUR package not found: " + target);
-        }
-    }
-
-    BuildPlan             plan;
-    std::set<std::string> visited;
-    std::set<std::string> visiting;
-    const std::vector<PackageRole> root_roles = {PackageRole::Root};
-    for(std::size_t i = 0; i < targets.size(); ++i) {
-        RootTargetIdentity root{i, targets[i]};
-        plan.root_targets.push_back(root);
-        collect_aur_build_plan(
-                targets[i], plan, visited, visiting, root_roles, root, 0,
-                MAX_RECURSIVE_DEP_DEPTH, true);
-    }
-    propagate_root_identities(plan);
-    return plan;
+BuildPlan resolve_build_plan_for_preflight(
+        const std::vector<std::string>& targets) {
+    return resolve_build_plan_internal(
+            targets, BuildPlanResolutionMode::CaptureOrdinaryFailures);
 }
 
 BuildPlan resolve_fetch_plan(const std::string& target) {
@@ -708,7 +910,8 @@ BuildPlan resolve_fetch_plan(const std::string& target) {
     // POLICY: fetch は取得対象の列挙まで。AUR provider を辿って暗黙に追加取得しない。
     collect_aur_build_plan(
             target, plan, visited, visiting, root_roles, root, 0,
-            MAX_RECURSIVE_DEP_DEPTH, false);
+            MAX_RECURSIVE_DEP_DEPTH, false, BuildPlanResolutionMode::Legacy,
+            std::nullopt, std::nullopt, std::nullopt);
     propagate_root_identities(plan);
     return plan;
 }
