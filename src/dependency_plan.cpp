@@ -1,8 +1,10 @@
 #include "dependency_plan.hpp"
 
+#include "dependency_provider.hpp"
 #include "dependency_spec.hpp"
 #include "logging.hpp"
 #include "package_identifier.hpp"
+#include "repository_query.hpp"
 
 #include <algorithm>
 #include <exception>
@@ -63,13 +65,9 @@ bool has_distinct_package_base(const AurPackageInfo& info) {
     return info.PackageBase != info.Name;
 }
 
-bool same_provider(const ProvidedDependency& lhs, const ProvidedDependency& rhs) {
-    return lhs.repository == rhs.repository && lhs.package_name == rhs.package_name;
-}
-
 void add_provider_candidate(std::vector<ProvidedDependency>& candidates, const ProvidedDependency& provider) {
     auto same = [&provider](const ProvidedDependency& existing) {
-        return same_provider(existing, provider);
+        return existing == provider;
     };
     if(std::find_if(candidates.begin(), candidates.end(), same) != candidates.end()) return;
     candidates.push_back(provider);
@@ -181,7 +179,8 @@ std::vector<ProvidedDependency> find_aur_providers(
                     ? AurClient::info(candidate)
                     : AurClient::info_strict(candidate);
             if(info.has_value() && aur_package_provides(info.value(), dependency_name)) {
-                add_provider_candidate(providers, ProvidedDependency{"aur", info->Name});
+                add_provider_candidate(
+                        providers, ProvidedDependency::from_aur(info->Name));
             } else if(failure_context != nullptr && !info.has_value()) {
                 add_resolution_failure(
                         failure_context,
@@ -272,9 +271,10 @@ void add_classified_aur_dependency(
     dependencies.push_back(dependency_display_with_constraint_note(display, dependency));
 }
 
-std::string provided_dependency_display(
+std::string provided_dependency_resolution_display(
         const std::string& dependency, const ProvidedDependency& provider) {
-    return dependency + " [provided by " + provider.repository + "/" + provider.package_name + "]" +
+    return dependency + " [provided by " +
+           provided_dependency_display(provider) + "]" +
            dependency_constraint_note(dependency);
 }
 
@@ -376,7 +376,9 @@ DependencyClassification classify_dependencies(const std::vector<std::string>& d
             } else {
                 std::vector<ProvidedDependency> providers = find_dependency_providers(package_name);
                 if(providers.size() == 1)
-                    result.provided.push_back(provided_dependency_display(dependency, providers.front()));
+                    result.provided.push_back(
+                            provided_dependency_resolution_display(
+                                    dependency, providers.front()));
                 else if(providers.size() > 1)
                     add_ambiguous_provider_dependency(result.ambiguous_providers, dependency, providers);
                 else
@@ -388,7 +390,9 @@ DependencyClassification classify_dependencies(const std::vector<std::string>& d
             Logger::warn("Failed to check AUR dependency " + package_name + ": " + e.what());
             std::vector<ProvidedDependency> providers = find_repo_providers(package_name);
             if(providers.size() == 1)
-                result.provided.push_back(provided_dependency_display(dependency, providers.front()));
+                result.provided.push_back(
+                        provided_dependency_resolution_display(
+                                dependency, providers.front()));
             else if(providers.size() > 1)
                 add_ambiguous_provider_dependency(result.ambiguous_providers, dependency, providers);
             else
@@ -571,7 +575,8 @@ std::optional<std::string> resolved_aur_dependency_name(
         const BuildPlanDependencyEdge& edge) {
     if(edge.kind == DependencyKind::Aur) return edge.resolved_package_name;
     if(edge.kind == DependencyKind::Provided && edge.resolved_provider.has_value() &&
-       edge.resolved_provider->repository == "aur") {
+       std::holds_alternative<AurProviderOrigin>(
+               edge.resolved_provider->origin)) {
         return edge.resolved_provider->package_name;
     }
     return std::nullopt;
@@ -669,8 +674,7 @@ void add_build_plan_provided_dependency(
     if(trimmed.empty()) return;
 
     auto same_dependency = [&](const BuildPlanProvidedDependency& existing) {
-        return existing.dependency == trimmed && existing.provider.repository == provider.repository &&
-               existing.provider.package_name == provider.package_name;
+        return existing.dependency == trimmed && existing.provider == provider;
     };
     if(std::find_if(plan.provided.begin(), plan.provided.end(), same_dependency) != plan.provided.end()) return;
     plan.provided.push_back(BuildPlanProvidedDependency{trimmed, provider});
@@ -822,7 +826,8 @@ void collect_aur_build_plan(
             edge.resolved_provider = provider;
             add_build_plan_provided_dependency(plan, dependency, provider);
             add_build_plan_dependency_edges(plan, edge, matching_dependencies);
-            if(traverse_aur_providers && provider.repository == "aur") {
+            if(traverse_aur_providers &&
+               std::holds_alternative<AurProviderOrigin>(provider.origin)) {
                 collect_aur_build_plan(
                         provider.package_name, plan, visited, visiting, dependency_roles, root,
                         depth + 1, max_depth, traverse_aur_providers,
@@ -928,7 +933,7 @@ std::string join_guard_summary_values(const std::vector<std::string>& values) {
 }
 
 std::string provider_summary(const ProvidedDependency& provider) {
-    return provider.repository + "/" + provider.package_name;
+    return provided_dependency_display(provider);
 }
 
 std::string ambiguous_provider_dependency_summary(const AmbiguousProvidedDependency& dependency) {

@@ -1,5 +1,7 @@
 #include "repository_query.hpp"
 
+#include "dependency_provider.hpp"
+
 #include <cstddef>
 #include <stdexcept>
 #include <string>
@@ -15,18 +17,23 @@ std::vector<ProvidedDependency> repository_providers(
         const std::string& dependency_name) {
     if(dependency_name == "case8-virtual") {
         return {
-                ProvidedDependency{"extra", "case8-provider-a"},
-                ProvidedDependency{"community", "case8-provider-b"},
+                ProvidedDependency::from_repository(
+                        "extra", "case8-provider-a"),
+                ProvidedDependency::from_repository(
+                        "community", "case8-provider-b"),
         };
     }
     if(dependency_name == "case11-ambiguous") {
         return {
-                ProvidedDependency{"extra", "case11-provider-a"},
-                ProvidedDependency{"community", "case11-provider-b"},
+                ProvidedDependency::from_repository(
+                        "extra", "case11-provider-a"),
+                ProvidedDependency::from_repository(
+                        "community", "case11-provider-b"),
         };
     }
     if(dependency_name == "case14-virtual") {
-        return {ProvidedDependency{"extra", "case14-provider"}};
+        return {ProvidedDependency::from_repository(
+                "aur", "case14-provider")};
     }
     if(dependency_name == "case7-virtual-api" || dependency_name == "case9-missing" ||
        dependency_name == "case11-virtual" || dependency_name == "case11-missing" ||

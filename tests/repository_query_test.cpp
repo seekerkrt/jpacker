@@ -1,5 +1,6 @@
 #include "repository_query.hpp"
 
+#include "dependency_provider.hpp"
 #include "shell_words.hpp"
 #include "stubs/repository-query/process_stub.hpp"
 
@@ -172,6 +173,15 @@ RepositoryMetadataFailure require_failure(
     return failure;
 }
 
+const RepositoryProviderOrigin& require_repository_provider_origin(
+        const ProvidedDependency& provider, const std::string& context) {
+    const auto* origin =
+            std::get_if<RepositoryProviderOrigin>(&provider.origin);
+    if(origin == nullptr)
+        throw std::runtime_error(context + ": provider is not repository-origin");
+    return *origin;
+}
+
 void test_success_snapshot_and_queries() {
     TestDatabase database;
     database.add_repository_file("core");
@@ -217,11 +227,15 @@ void test_success_snapshot_and_queries() {
                     provider_result, "provider query");
     expect(providers.size() == 2, "provider query did not deduplicate candidates");
     expect(
-            providers[0].repository == "core" &&
+            require_repository_provider_origin(
+                    providers[0], "first provider")
+                            .repository_name == "core" &&
                     providers[0].package_name == "core-provider",
             "first provider does not preserve configured order");
     expect(
-            providers[1].repository == "extra" &&
+            require_repository_provider_origin(
+                    providers[1], "second provider")
+                            .repository_name == "extra" &&
                     providers[1].package_name == "extra-provider",
             "second provider does not preserve configured order");
 
@@ -241,6 +255,89 @@ void test_success_snapshot_and_queries() {
                     database_read_command(database, "extra"),
             },
             "shared success snapshot");
+}
+
+void test_repository_named_aur() {
+    TestDatabase database;
+    database.add_repository_file("aur");
+    enqueue_configuration(database, {"aur"});
+    enqueue_database_read(
+            database, "aur",
+            package_description(
+                    "repository-provider",
+                    {"virtual-api", "virtual-api"}));
+
+    StrictRepositoryProvidersQueryResult provider_result =
+            query_repository_providers_strict("virtual-api");
+    std::vector<ProvidedDependency> providers =
+            require_alternative<std::vector<ProvidedDependency>>(
+                    provider_result, "repository named aur provider query");
+    expect(
+            providers.size() == 1,
+            "repository named aur provider was not first-win deduplicated");
+    expect(
+            require_repository_provider_origin(
+                    providers.front(), "repository named aur provider")
+                            .repository_name == "aur",
+            "repository named aur lost its exact origin name");
+    expect(
+            providers.front().package_name == "repository-provider",
+            "repository named aur provider package differs");
+    expect(
+            providers.front() !=
+                    ProvidedDependency::from_aur("repository-provider"),
+            "repository named aur was conflated with AUR origin");
+
+    expect_commands(
+            {
+                    DATABASE_PATH_COMMAND,
+                    REPOSITORY_LIST_COMMAND,
+                    database_read_command(database, "aur"),
+            },
+            "repository named aur snapshot");
+}
+
+void test_legacy_malformed_candidates_are_skipped() {
+    const std::string description =
+            package_description("", {"leaked-alias"}) +
+            package_description("invalid/provider", {"virtual-api"}) +
+            package_description(
+                    "valid-provider", {"virtual-api", "virtual-api"}) +
+            package_description(
+                    "malformed-alias-provider", {"virtual-api="}) +
+            package_description(
+                    "invalid-alias-provider", {"virtual/api"});
+
+    std::vector<ProvidedDependency> providers =
+            parse_legacy_repository_provider_candidates_for_test(
+                    description, "core", "virtual-api");
+    expect(
+            providers == std::vector<ProvidedDependency>{
+                    ProvidedDependency::from_repository(
+                            "core", "valid-provider")},
+            "legacy parser did not skip malformed candidates locally");
+    expect(
+            parse_legacy_repository_provider_candidates_for_test(
+                    description, "core", "leaked-alias")
+                    .empty(),
+            "legacy parser carried malformed record aliases into the next package");
+    expect(
+            parse_legacy_repository_provider_candidates_for_test(
+                    description, "aur", "virtual-api") ==
+                    std::vector<ProvidedDependency>{
+                            ProvidedDependency::from_repository(
+                                    "aur", "valid-provider")},
+            "legacy parser conflated repository name aur with AUR origin");
+    expect(
+            parse_legacy_repository_provider_candidates_for_test(
+                    description, "", "virtual-api")
+                    .empty(),
+            "legacy parser accepted an empty repository name");
+    expect(
+            parse_legacy_repository_provider_candidates_for_test(
+                    description, "co\nre", "virtual-api")
+                    .empty(),
+            "legacy parser accepted a control-character repository name");
 }
 
 void test_configuration_command_failure() {
@@ -488,6 +585,10 @@ void test_partial_snapshot_is_not_published() {
 void run_test_case(const std::string& test_case) {
     if(test_case == "success")
         test_success_snapshot_and_queries();
+    else if(test_case == "repository-named-aur")
+        test_repository_named_aur();
+    else if(test_case == "legacy-malformed-candidates")
+        test_legacy_malformed_candidates_are_skipped();
     else if(test_case == "configuration-command-failure")
         test_configuration_command_failure();
     else if(test_case == "configuration-parse-failure")

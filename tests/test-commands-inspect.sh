@@ -381,31 +381,49 @@ echo "  ok: plan repository metadata preserves zero, absence, failure, and malfo
 # semantic lookupは(exact repository, package)、成功表示はreturned repo/packageでdedupeする。
 setup_case plan-repository-size-identities
 export JPACKER_TEST_INSPECTION_SCENARIO=plan-repository-size-identities
-JPACKER_TEST_PACMAN_REPO_PACKAGES='same-package different-package same-semantic'
+JPACKER_TEST_PACMAN_CONF_REPOSITORY_LIST='core
+extra
+aur'
+export JPACKER_TEST_PACMAN_CONF_REPOSITORY_LIST
+JPACKER_TEST_PACMAN_REPO_PACKAGES='same-package different-package same-semantic repository-aur-package'
 export JPACKER_TEST_PACMAN_REPO_PACKAGES
 set_repository_metadata extra same-package 1024 2048
 set_repository_metadata core different-package 2048 3072
 set_repository_metadata extra different-package 4096 5120
 set_repository_metadata core same-semantic 6144 7168
+set_repository_metadata aur repository-aur-package 8192 9216
 run_ok plan plan-identity-root
 assert_exact_line_count 1 "  extra/same-package" "$stdout_file"
 assert_exact_line_count 1 "  core/different-package" "$stdout_file"
 assert_exact_line_count 1 "  extra/different-package" "$stdout_file"
 assert_exact_line_count 1 "  core/same-semantic" "$stdout_file"
+assert_exact_line_count 1 "  aur/repository-aur-package" "$stdout_file"
+assert_exact_line "  - identity-repository-aur-virtual -> aur/repository-aur-package" "$stdout_file"
+assert_exact_line "  - identity-aur-virtual -> aur/identity-aur-provider" "$stdout_file"
 assert_before "  extra/same-package" "  core/different-package" "$stdout_file"
 assert_before "  core/different-package" "  extra/different-package" "$stdout_file"
 assert_before "  extra/different-package" "  core/same-semantic" "$stdout_file"
+assert_before "  core/same-semantic" "  aur/repository-aur-package" "$stdout_file"
 assert_exact_line_count 1 "alpm sync-query core/same-package" "$command_log"
 assert_exact_line_count 2 "alpm sync-query extra/same-package" "$command_log"
 assert_exact_line_count 1 "alpm sync-query core/different-package" "$command_log"
 assert_exact_line_count 1 "alpm sync-query extra/different-package" "$command_log"
 assert_exact_line_count 1 "alpm sync-query core/same-semantic" "$command_log"
+assert_exact_line_count 1 "alpm sync-query aur/repository-aur-package" "$command_log"
 assert_not_contains "alpm sync-query stale/" "$command_log"
 assert_not_contains "alpm sync-query core/identity-aur-provider" "$command_log"
 assert_not_contains "alpm sync-query extra/identity-aur-provider" "$command_log"
+assert_not_contains "alpm sync-query aur/identity-aur-provider" "$command_log"
 assert_not_exact_line "  aur/identity-aur-provider" "$stdout_file"
 assert_not_exact_line "  stale/stale-package" "$stdout_file"
 echo "  ok: plan lookup/cache/display identities remain distinct and first-seen"
+
+setup_case deps-typed-provider-display
+export JPACKER_TEST_INSPECTION_SCENARIO=plan-repository-size-identities
+run_ok deps --recursive plan-identity-root
+assert_exact_line "  - identity-repository-aur-virtual [provided] by aur/repository-aur-package" "$stdout_file"
+assert_exact_line "  - identity-aur-virtual [provided] by aur/identity-aur-provider" "$stdout_file"
+echo "  ok: recursive dependency display preserves typed provider labels"
 
 # AUR build units、AUR provider、ambiguous/unknown edgeだけならmetadata contextを起動しない。
 setup_case plan-repository-size-no-candidates

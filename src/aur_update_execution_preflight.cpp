@@ -1,5 +1,6 @@
 #include "aur_update_execution_preflight.hpp"
 
+#include "dependency_provider.hpp"
 #include "dependency_spec.hpp"
 #include "package_identifier.hpp"
 
@@ -11,6 +12,7 @@
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace {
@@ -341,7 +343,8 @@ std::vector<AurDependencyGraphEdge> collect_aur_dependency_graph(
         } else if(
                 edge.kind == DependencyKind::Provided &&
                 edge.resolved_provider.has_value() &&
-                edge.resolved_provider->repository == "aur" &&
+                std::holds_alternative<AurProviderOrigin>(
+                        edge.resolved_provider->origin) &&
                 !edge.resolved_package_name.has_value() &&
                 !edge.resolved_package_base.has_value()) {
             target = find_unique_package_target(
@@ -703,15 +706,19 @@ void inspect_dependency_edges(
                     !edge.resolved_package_base.has_value();
             if(edge.resolved_provider.has_value()) {
                 edge_is_consistent = edge_is_consistent &&
-                        !edge.resolved_provider->repository.empty() &&
-                        !contains_control_character(
-                                edge.resolved_provider->repository) &&
                         is_valid_package_name(
                                 edge.resolved_provider->package_name);
-                if(edge.resolved_provider->repository == "aur" &&
-                   !has_consistent_resolved_target(
-                           edge.resolved_provider->package_name,
-                           std::nullopt)) {
+                if(const auto* repository =
+                           std::get_if<RepositoryProviderOrigin>(
+                                   &edge.resolved_provider->origin);
+                   repository != nullptr) {
+                    edge_is_consistent = edge_is_consistent &&
+                            !repository->repository_name.empty() &&
+                            !contains_control_character(
+                                    repository->repository_name);
+                } else if(!has_consistent_resolved_target(
+                                  edge.resolved_provider->package_name,
+                                  std::nullopt)) {
                     edge_is_consistent = false;
                 }
             }

@@ -114,8 +114,8 @@ build / install / fetch 実行系では、ambiguous provider、unresolved depend
 size candidate は `BuildPlan::dependency_edges` の first-seen order から次のように抽出する。
 
 - `DependencyKind::Repo` で `resolved_package_name` がある edge は、configured repository precedence でpackageを検索する。
-- `DependencyKind::Provided` で一意な `resolved_provider` があり、そのrepositoryがconfigured repositoryに含まれ、かつ`aur`ではないedgeは、providerのrepositoryをexact指定してpackageを検索する。
-- AUR dependency / provider、ambiguous provider、unknown dependency、resolved valueの欠落、unconfiguredまたはstaleなrepositoryを指すproviderはcandidateにしない。
+- `DependencyKind::Provided` で一意な `resolved_provider` があり、そのoriginがRepositoryで、exact repository名がconfigured repositoryに含まれるedgeは、そのrepositoryをexact指定してpackageを検索する。Repository origin名`aur`も同じ契約で扱う。
+- AUR dependency、Aur originのprovider、ambiguous provider、unknown dependency、resolved valueの欠落、unconfiguredまたはstaleなrepositoryを指すproviderはcandidateにしない。
 
 repository名とprecedenceは`pacman-conf --repo-list`のconfigured orderだけを正本とする。hard-coded repository list、sync directory走査によるfallback、unconfigured databaseの採用、alphabetical sortは行わない。configured repositoryの既存sync DBは順番にすべてregister、validate、package cache preloadし、1件でも失敗した場合はsession全体をunavailableとする。これは壊れた先行repositoryをskipして同名packageのprecedenceを変えないためである。sync DBはread-only metadata sourceとして参照するだけで、refresh / update、server設定、transaction、database mutationを行わない。
 

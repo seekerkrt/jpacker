@@ -54,7 +54,9 @@ std::vector<AurPackageInfo> AurClient::search(const std::string& query) {
 
 std::vector<std::string> AurClient::search_names_by_provides(
         const std::string& provided_name) {
-    if(provided_name == "case7-virtual-api") return {"case7-provider-pkg"};
+    if(provided_name == "case7-virtual-api") {
+        return {"case7-provider-pkg", "case7-provider-pkg"};
+    }
     if(provided_name == "case11-virtual") return {"case11-provider"};
     if(provided_name == "preflight-provider-candidate-virtual") {
         return {
