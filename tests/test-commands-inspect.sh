@@ -540,6 +540,16 @@ if [ -z "$last_plan_line" ] || [ -z "$first_fetch_line" ] || [ "$last_plan_line"
 fi
 echo "  ok: fetch entry failure continues through the plan and later roots"
 
+# foreign inventoryが空ならAUR queryへ進まず、従来messageとstatus 0を維持する。
+setup_case foreign-empty
+run_ok -Qua
+assert_contains "No foreign packages found." "$stdout_file"
+assert_exact_line "pacman -Qm" "$command_log"
+assert_not_contains "aur " "$command_log"
+assert_not_contains "Checking package" "$stdout_file"
+assert_no_foreign_update_mutation
+echo "  ok: empty foreign inventory returns success without AUR queries"
+
 # P0-3: 101 packageを100+1へ分け、emptyだったbatchだけper-package fallbackする。
 setup_case foreign-batch-fallback
 export JPACKER_TEST_INSPECTION_SCENARIO=foreign-fallback
@@ -548,10 +558,10 @@ run_ok -Qua
 assert_exact_line "aur info-many 100 foreign-001 foreign-100" "$command_log"
 assert_exact_line "aur info-many 1 foreign-101 foreign-101" "$command_log"
 assert_numbered_foreign_batches
-assert_exact_command_before "aur info-many 100 foreign-001 foreign-100" "aur info foreign-001"
-assert_exact_command_before "aur info foreign-100" "aur info-many 1 foreign-101 foreign-101"
-assert_not_contains "aur info foreign-101" "$command_log"
-fallback_count=$(grep -c '^aur info ' "$command_log" || true)
+assert_exact_command_before "aur info-many 100 foreign-001 foreign-100" "aur info-strict foreign-001"
+assert_exact_command_before "aur info-strict foreign-100" "aur info-many 1 foreign-101 foreign-101"
+assert_not_contains "aur info-strict foreign-101" "$command_log"
+fallback_count=$(grep -c '^aur info-strict ' "$command_log" || true)
 if [ "$fallback_count" -ne 100 ]; then
     fail_case "expected 100 per-package fallback calls, got $fallback_count"
 fi
@@ -570,8 +580,8 @@ run_fail -Qua
 assert_contains "schema fallback failure" "$stderr_file"
 assert_not_contains "Failed to fetch AUR info:" "$stderr_file"
 assert_exact_line "aur info-many 100 foreign-001 foreign-100" "$command_log"
-assert_exact_line "aur info foreign-001" "$command_log"
-assert_not_contains "aur info foreign-002" "$command_log"
+assert_exact_line "aur info-strict foreign-001" "$command_log"
+assert_not_contains "aur info-strict foreign-002" "$command_log"
 fallback_schema_info_many_count=$(grep -c '^aur info-many ' "$command_log" || true)
 if [ "$fallback_schema_info_many_count" -ne 1 ]; then
     fail_case "fallback AurRpcResponseError should stop before the second batch"
@@ -589,7 +599,7 @@ assert_exact_line "aur info-many 100 foreign-001 foreign-100" "$command_log"
 assert_exact_line "aur info-many 1 foreign-101 foreign-101" "$command_log"
 assert_numbered_foreign_batches
 assert_exact_command_before "aur info-many 100 foreign-001 foreign-100" "aur info-many 1 foreign-101 foreign-101"
-if grep '^aur info ' "$command_log" >/dev/null; then
+if grep -E '^aur info(-strict)? ' "$command_log" >/dev/null; then
     fail_case "ordinary batch failure unexpectedly entered per-package fallback"
 fi
 assert_contains "Checking package 1/101: foreign-001" "$stdout_file"
@@ -649,7 +659,7 @@ export JPACKER_TEST_VERCMP_OUTPUT=0
 run_ok -Qua
 assert_exact_line_count 1 "pacman -Qm" "$command_log"
 assert_exact_line_count 1 "aur info-many 2 foreign-up-to-date foreign-non-aur" "$command_log"
-assert_not_contains "aur info foreign-" "$command_log"
+assert_not_contains "aur info-strict foreign-" "$command_log"
 assert_exact_line "vercmp 2.0-1 2.0-1" "$command_log"
 assert_not_contains "foreign-up-to-date 2.0-1 ->" "$stdout_file"
 assert_contains "Foreign package not found in AUR: foreign-non-aur" "$stdout_file"

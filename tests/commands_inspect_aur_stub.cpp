@@ -281,7 +281,17 @@ std::optional<AurPackageInfo> AurClient::info(const std::string& package_name) {
 
     if(is_graph_scenario(scenario)) return graph_info(package_name);
 
-    if(scenario == "foreign-fallback" && is_numbered_foreign_package(package_name) &&
+    throw std::runtime_error(
+            "Unexpected inspection info call for scenario " + scenario + ": " +
+            package_name);
+}
+
+std::optional<AurPackageInfo> AurClient::info_strict(const std::string& package_name) {
+    append_command_log("aur info-strict " + package_name);
+    const std::string scenario = inspection_scenario();
+
+    if(scenario == "foreign-fallback" &&
+       is_numbered_foreign_package(package_name) &&
        package_name != "foreign-101") {
         return package_info(package_name);
     }
@@ -291,13 +301,8 @@ std::optional<AurPackageInfo> AurClient::info(const std::string& package_name) {
     }
 
     throw std::runtime_error(
-            "Unexpected inspection info call for scenario " + scenario + ": " +
-            package_name);
-}
-
-std::optional<AurPackageInfo> AurClient::info_strict(const std::string& package_name) {
-    append_command_log("aur info-strict " + package_name);
-    throw std::runtime_error("Unexpected inspection info_strict call: " + package_name);
+            "Unexpected inspection info_strict call for scenario " + scenario +
+            ": " + package_name);
 }
 
 std::map<std::string, AurPackageInfo> AurClient::info_many(
