@@ -106,6 +106,17 @@ PackageMetadataFailure require_repository_query_failure(
     return failure;
 }
 
+PackageMetadataFailure require_inventory_failure(
+        const ForeignPackageInventoryResult& result,
+        PackageMetadataErrorCode expected_code,
+        const std::string& context) {
+    PackageMetadataFailure failure =
+            require_result_alternative<PackageMetadataFailure>(result, context);
+    expect(failure.code == expected_code, context + ": unexpected failure code");
+    expect(!failure.diagnostic.empty(), context + ": empty failure diagnostic");
+    return failure;
+}
+
 void set_pacman_conf_output(const std::string& output, int exit_code = 0) {
     stub::reset_process_stub();
     stub::enqueue_captured_command_result(
@@ -697,6 +708,500 @@ void test_move_assignment_does_not_double_release() {
     expect(stub::release_count_for_handle(1) == 1, "old destination handle was double released");
 }
 
+void test_foreign_inventory_returns_initialization_failure_as_value() {
+    stub::reset_alpm_stub();
+    stub::set_initialize_failure(ALPM_ERR_SYSTEM);
+
+    ForeignPackageInventoryResult result = query_foreign_package_inventory(
+            valid_repository_configuration({"core"}));
+
+    static_cast<void>(require_inventory_failure(
+            result, PackageMetadataErrorCode::InitializationFailed,
+            "foreign inventory initialization failure"));
+    expect(
+            stub::created_handle_count() == 0,
+            "foreign inventory initialization failure created a handle");
+    expect(
+            stub::release_call_count() == 0,
+            "foreign inventory initialization failure released a handle");
+}
+
+void test_foreign_inventory_requires_configured_repository() {
+    stub::reset_alpm_stub();
+
+    ForeignPackageInventoryResult result = query_foreign_package_inventory(
+            valid_repository_configuration({}));
+
+    static_cast<void>(require_inventory_failure(
+            result, PackageMetadataErrorCode::RepositoryNotConfigured,
+            "foreign inventory without repositories"));
+    expect(stub::initialize_call_count() == 0, "empty repository list reached libalpm");
+    expect(stub::release_call_count() == 0, "empty repository list released no handle");
+}
+
+void test_empty_local_cache_is_empty_foreign_inventory() {
+    stub::reset_alpm_stub();
+    stub::set_empty_package_cache();
+
+    ForeignPackageInventory inventory =
+            require_result_alternative<ForeignPackageInventory>(
+                    query_foreign_package_inventory(
+                            valid_repository_configuration({"core", "extra"})),
+                    "empty local cache inventory");
+
+    expect(inventory.empty(), "empty local cache produced foreign packages");
+    expect(stub::package_cache_call_count() == 1, "local cache was not loaded once");
+    expect(
+            stub::sync_package_cache_call_count("core") == 1 &&
+                    stub::sync_package_cache_call_count("extra") == 1,
+            "sync caches were not preloaded for empty inventory");
+    expect(stub::release_count_for_handle(0) == 1, "empty inventory leaked its handle");
+}
+
+void test_foreign_inventory_local_database_failure() {
+    stub::reset_alpm_stub();
+    stub::set_local_database_unavailable();
+
+    ForeignPackageInventoryResult unavailable_result =
+            query_foreign_package_inventory(
+                    valid_repository_configuration({"core"}));
+    static_cast<void>(require_inventory_failure(
+            unavailable_result,
+            PackageMetadataErrorCode::LocalDatabaseUnavailable,
+            "foreign inventory unavailable local database"));
+    expect(
+            stub::release_count_for_handle(0) == 1,
+            "unavailable local database leaked handle");
+
+    stub::reset_alpm_stub();
+    stub::set_local_database_invalid();
+    ForeignPackageInventoryResult invalid_result =
+            query_foreign_package_inventory(
+                    valid_repository_configuration({"core"}));
+    static_cast<void>(require_inventory_failure(
+            invalid_result,
+            PackageMetadataErrorCode::LocalDatabaseUnavailable,
+            "foreign inventory invalid local database"));
+    expect(
+            stub::release_count_for_handle(0) == 1,
+            "invalid local database leaked handle");
+}
+
+void test_foreign_inventory_local_cache_failure() {
+    stub::reset_alpm_stub();
+    stub::set_package_cache_failure();
+
+    ForeignPackageInventoryResult result = query_foreign_package_inventory(
+            valid_repository_configuration({"core"}));
+
+    static_cast<void>(require_inventory_failure(
+            result, PackageMetadataErrorCode::LocalDatabaseUnavailable,
+            "foreign inventory local cache failure"));
+    expect(stub::release_count_for_handle(0) == 1, "local cache failure leaked handle");
+    expect(
+            stub::sync_package_cache_call_count("core") == 0,
+            "sync cache loaded after local cache failure");
+}
+
+void test_foreign_inventory_sync_register_failure() {
+    stub::reset_alpm_stub();
+    stub::set_sync_database_register_failure("extra");
+
+    ForeignPackageInventoryResult result = query_foreign_package_inventory(
+            valid_repository_configuration({"core", "extra", "testing"}));
+
+    static_cast<void>(require_inventory_failure(
+            result, PackageMetadataErrorCode::SyncDatabaseUnavailable,
+            "foreign inventory sync register failure"));
+    expect(
+            stub::sync_database_operation_history() ==
+                    std::vector<std::string>({"register core", "register extra"}),
+            "sync register failure did not stop immediately");
+    expect(stub::release_count_for_handle(0) == 1, "sync register failure leaked handle");
+}
+
+void test_foreign_inventory_sync_validation_failure() {
+    stub::reset_alpm_stub();
+    stub::set_sync_database_validation_failure("extra");
+
+    ForeignPackageInventoryResult result = query_foreign_package_inventory(
+            valid_repository_configuration({"core", "extra", "testing"}));
+
+    static_cast<void>(require_inventory_failure(
+            result, PackageMetadataErrorCode::SyncDatabaseUnavailable,
+            "foreign inventory sync validation failure"));
+    expect(
+            stub::sync_database_operation_history() ==
+                    std::vector<std::string>({
+                            "register core", "register extra", "register testing",
+                            "valid core", "valid extra"}),
+            "sync validation failure did not stop before cache load");
+    expect(stub::release_count_for_handle(0) == 1, "sync validation failure leaked handle");
+}
+
+void test_foreign_inventory_sync_cache_failure() {
+    stub::reset_alpm_stub();
+    stub::set_sync_database_cache_failure("extra");
+
+    ForeignPackageInventoryResult result = query_foreign_package_inventory(
+            valid_repository_configuration({"core", "extra", "testing"}));
+
+    static_cast<void>(require_inventory_failure(
+            result, PackageMetadataErrorCode::SyncDatabaseUnavailable,
+            "foreign inventory sync cache failure"));
+    expect(
+            stub::sync_package_cache_call_count("core") == 1 &&
+                    stub::sync_package_cache_call_count("extra") == 1 &&
+                    stub::sync_package_cache_call_count("testing") == 0,
+            "sync cache failure continued with a partial repository snapshot");
+    expect(stub::release_count_for_handle(0) == 1, "sync cache failure leaked handle");
+}
+
+void test_foreign_inventory_accepts_empty_sync_cache() {
+    stub::reset_alpm_stub();
+    stub::set_local_packages({
+            {"foreign-package", "1.0-1", ALPM_PKG_REASON_EXPLICIT}});
+    stub::set_sync_database_empty_cache("core");
+
+    ForeignPackageInventory inventory =
+            require_result_alternative<ForeignPackageInventory>(
+                    query_foreign_package_inventory(
+                            valid_repository_configuration({"core"})),
+                    "empty sync cache inventory");
+
+    expect(
+            inventory.size() == 1 && inventory[0].name == "foreign-package",
+            "empty sync cache did not retain the foreign package");
+    expect(
+            stub::sync_package_cache_call_count("core") == 1,
+            "empty sync cache was not preloaded exactly once");
+    expect(
+            stub::release_count_for_handle(0) == 1,
+            "empty sync cache inventory leaked handle");
+}
+
+void test_foreign_inventory_excludes_first_repository_native_package() {
+    stub::reset_alpm_stub();
+    stub::set_local_packages({{"native-package", "1.0-1", ALPM_PKG_REASON_EXPLICIT}});
+    stub::set_repository_package_metadata("core", "native-package", 0, 0);
+    stub::set_repository_package_metadata("extra", "native-package", 0, 0);
+
+    ForeignPackageInventory inventory =
+            require_result_alternative<ForeignPackageInventory>(
+                    query_foreign_package_inventory(
+                            valid_repository_configuration({"core", "extra"})),
+                    "first repository native package");
+
+    expect(inventory.empty(), "first repository native package was classified foreign");
+    expect_repository_query_history(
+            {{"core", "native-package"}},
+            "first repository native package");
+}
+
+void test_foreign_inventory_excludes_later_repository_native_package() {
+    stub::reset_alpm_stub();
+    stub::set_local_packages({{"native-package", "1.0-1", ALPM_PKG_REASON_EXPLICIT}});
+    stub::set_repository_package_absent("core", "native-package");
+    stub::set_repository_package_metadata("extra", "native-package", 0, 0);
+
+    ForeignPackageInventory inventory =
+            require_result_alternative<ForeignPackageInventory>(
+                    query_foreign_package_inventory(
+                            valid_repository_configuration({"core", "extra"})),
+                    "later repository native package");
+
+    expect(inventory.empty(), "later repository native package was classified foreign");
+    expect_repository_query_history(
+            {{"core", "native-package"}, {"extra", "native-package"}},
+            "later repository native package");
+}
+
+void test_foreign_inventory_preserves_local_order_and_reasons() {
+    stub::reset_alpm_stub();
+    stub::set_local_packages({
+            {"zeta-package", "3.0-1", ALPM_PKG_REASON_EXPLICIT},
+            {"alpha-package", "2.0-1", ALPM_PKG_REASON_DEPEND},
+            {"middle-package", "1.0-1", ALPM_PKG_REASON_UNKNOWN}});
+
+    ForeignPackageInventory inventory =
+            require_result_alternative<ForeignPackageInventory>(
+                    query_foreign_package_inventory(
+                            valid_repository_configuration({"core", "extra"})),
+                    "ordered foreign inventory");
+
+    expect(inventory.size() == 3, "foreign inventory size differs");
+    expect(
+            inventory[0].name == "zeta-package" &&
+                    inventory[0].version == "3.0-1" &&
+                    inventory[0].reason == InstalledPackageReason::Explicit,
+            "explicit foreign package metadata differs");
+    expect(
+            inventory[1].name == "alpha-package" &&
+                    inventory[1].version == "2.0-1" &&
+                    inventory[1].reason == InstalledPackageReason::Dependency,
+            "dependency foreign package metadata differs");
+    expect(
+            inventory[2].name == "middle-package" &&
+                    inventory[2].version == "1.0-1" &&
+                    inventory[2].reason == InstalledPackageReason::Unknown,
+            "unknown-reason foreign package metadata differs");
+    expect_repository_query_history(
+            {
+                    {"core", "zeta-package"}, {"extra", "zeta-package"},
+                    {"core", "alpha-package"}, {"extra", "alpha-package"},
+                    {"core", "middle-package"}, {"extra", "middle-package"},
+            },
+            "ordered foreign inventory");
+}
+
+void test_foreign_inventory_maps_future_reason_to_unknown() {
+    stub::reset_alpm_stub();
+    stub::set_local_packages({
+            {"future-reason", "1.0-1", static_cast<alpm_pkgreason_t>(99)}});
+
+    ForeignPackageInventory inventory =
+            require_result_alternative<ForeignPackageInventory>(
+                    query_foreign_package_inventory(
+                            valid_repository_configuration({"core"})),
+                    "future install reason");
+
+    expect(
+            inventory.size() == 1 &&
+                    inventory[0].reason == InstalledPackageReason::Unknown,
+            "future install reason was guessed");
+}
+
+void test_foreign_inventory_rejects_null_local_name() {
+    stub::reset_alpm_stub();
+    stub::set_local_packages({{"test-package", "1.0-1", ALPM_PKG_REASON_EXPLICIT}});
+    stub::set_local_package_name_null(0);
+
+    ForeignPackageInventoryResult result = query_foreign_package_inventory(
+            valid_repository_configuration({"core"}));
+
+    static_cast<void>(require_inventory_failure(
+            result, PackageMetadataErrorCode::MalformedMetadata,
+            "null local package name"));
+}
+
+void test_foreign_inventory_rejects_empty_local_name() {
+    stub::reset_alpm_stub();
+    stub::set_local_packages({{"", "1.0-1", ALPM_PKG_REASON_EXPLICIT}});
+
+    ForeignPackageInventoryResult result = query_foreign_package_inventory(
+            valid_repository_configuration({"core"}));
+
+    static_cast<void>(require_inventory_failure(
+            result, PackageMetadataErrorCode::MalformedMetadata,
+            "empty local package name"));
+}
+
+void test_foreign_inventory_rejects_invalid_local_name() {
+    stub::reset_alpm_stub();
+    stub::set_local_packages({{"invalid/package", "1.0-1", ALPM_PKG_REASON_EXPLICIT}});
+
+    ForeignPackageInventoryResult result = query_foreign_package_inventory(
+            valid_repository_configuration({"core"}));
+
+    static_cast<void>(require_inventory_failure(
+            result, PackageMetadataErrorCode::MalformedMetadata,
+            "invalid local package name"));
+}
+
+void test_foreign_inventory_rejects_null_foreign_version() {
+    stub::reset_alpm_stub();
+    stub::set_local_packages({{"foreign-package", "1.0-1", ALPM_PKG_REASON_EXPLICIT}});
+    stub::set_local_package_version_null(0);
+
+    ForeignPackageInventoryResult result = query_foreign_package_inventory(
+            valid_repository_configuration({"core"}));
+
+    static_cast<void>(require_inventory_failure(
+            result, PackageMetadataErrorCode::MalformedMetadata,
+            "null foreign package version"));
+}
+
+void test_foreign_inventory_rejects_empty_foreign_version() {
+    stub::reset_alpm_stub();
+    stub::set_local_packages({{"foreign-package", "", ALPM_PKG_REASON_EXPLICIT}});
+
+    ForeignPackageInventoryResult result = query_foreign_package_inventory(
+            valid_repository_configuration({"core"}));
+
+    static_cast<void>(require_inventory_failure(
+            result, PackageMetadataErrorCode::MalformedMetadata,
+            "empty foreign package version"));
+}
+
+void test_foreign_inventory_does_not_require_native_version() {
+    stub::reset_alpm_stub();
+    stub::set_local_packages({{"native-package", "", ALPM_PKG_REASON_EXPLICIT}});
+    stub::set_repository_package_metadata("core", "native-package", 0, 0);
+
+    ForeignPackageInventory inventory =
+            require_result_alternative<ForeignPackageInventory>(
+                    query_foreign_package_inventory(
+                            valid_repository_configuration({"core"})),
+                    "native package without version");
+
+    expect(inventory.empty(), "native version was unnecessarily required");
+}
+
+void test_foreign_inventory_rejects_invalid_sync_returned_name() {
+    stub::reset_alpm_stub();
+    stub::set_local_packages({{"native-package", "1.0-1", ALPM_PKG_REASON_EXPLICIT}});
+    stub::set_repository_package_metadata("core", "native-package", 0, 0);
+    stub::set_repository_package_returned_name(
+            "core", "native-package", "invalid/package");
+
+    ForeignPackageInventoryResult result = query_foreign_package_inventory(
+            valid_repository_configuration({"core"}));
+
+    static_cast<void>(require_inventory_failure(
+            result, PackageMetadataErrorCode::MalformedMetadata,
+            "invalid sync returned package name"));
+}
+
+void test_foreign_inventory_rejects_sync_returned_name_mismatch() {
+    stub::reset_alpm_stub();
+    stub::set_local_packages({{"native-package", "1.0-1", ALPM_PKG_REASON_EXPLICIT}});
+    stub::set_repository_package_metadata("core", "native-package", 0, 0);
+    stub::set_repository_package_returned_name(
+            "core", "native-package", "different-package");
+
+    ForeignPackageInventoryResult result = query_foreign_package_inventory(
+            valid_repository_configuration({"core"}));
+
+    static_cast<void>(require_inventory_failure(
+            result, PackageMetadataErrorCode::MalformedMetadata,
+            "sync returned package name mismatch"));
+}
+
+void test_foreign_inventory_rejects_null_sync_returned_name() {
+    stub::reset_alpm_stub();
+    stub::set_local_packages({{"native-package", "1.0-1", ALPM_PKG_REASON_EXPLICIT}});
+    stub::set_repository_package_metadata("core", "native-package", 0, 0);
+    stub::set_repository_package_name_null("core", "native-package");
+
+    ForeignPackageInventoryResult result = query_foreign_package_inventory(
+            valid_repository_configuration({"core"}));
+
+    static_cast<void>(require_inventory_failure(
+            result, PackageMetadataErrorCode::MalformedMetadata,
+            "null sync returned package name"));
+}
+
+void test_foreign_inventory_distinguishes_absence_from_query_failure() {
+    stub::reset_alpm_stub();
+    stub::set_local_packages({{"foreign-package", "1.0-1", ALPM_PKG_REASON_EXPLICIT}});
+
+    ForeignPackageInventory absent_inventory =
+            require_result_alternative<ForeignPackageInventory>(
+                    query_foreign_package_inventory(
+                            valid_repository_configuration({"core"})),
+                    "explicit repository package absence");
+    expect(
+            absent_inventory.size() == 1 &&
+                    absent_inventory[0].name == "foreign-package",
+            "repository absence was not classified foreign");
+
+    stub::reset_alpm_stub();
+    stub::set_local_packages({{"foreign-package", "1.0-1", ALPM_PKG_REASON_EXPLICIT}});
+    stub::set_repository_package_query_failure("core", "foreign-package");
+    ForeignPackageInventoryResult failure_result = query_foreign_package_inventory(
+            valid_repository_configuration({"core"}));
+    static_cast<void>(require_inventory_failure(
+            failure_result, PackageMetadataErrorCode::QueryFailed,
+            "repository membership query failure"));
+
+    stub::reset_alpm_stub();
+    stub::set_local_packages({{"foreign-package", "1.0-1", ALPM_PKG_REASON_EXPLICIT}});
+    stub::set_repository_package_query_null_without_error(
+            "core", "foreign-package");
+    ForeignPackageInventoryResult null_without_error =
+            query_foreign_package_inventory(
+                    valid_repository_configuration({"core"}));
+    static_cast<void>(require_inventory_failure(
+            null_without_error, PackageMetadataErrorCode::QueryFailed,
+            "repository membership nullptr with OK"));
+}
+
+void test_foreign_inventory_ignores_stale_errno_on_successful_pointers() {
+    stub::reset_alpm_stub();
+    stub::set_local_packages({{"native-package", "1.0-1", ALPM_PKG_REASON_EXPLICIT}});
+    stub::preserve_error_on_next_local_database();
+    stub::preserve_error_on_next_sync_database_registration("core");
+    stub::preserve_error_on_next_package_cache();
+    stub::preserve_error_on_next_sync_database_cache("core");
+    stub::set_repository_package_metadata("core", "native-package", 0, 0);
+    stub::preserve_error_on_next_repository_package_query(
+            "core", "native-package");
+
+    ForeignPackageInventory inventory =
+            require_result_alternative<ForeignPackageInventory>(
+                    query_foreign_package_inventory(
+                            valid_repository_configuration({"core"})),
+                    "successful pointers with stale errno");
+
+    expect(inventory.empty(), "stale errno overrode a successful pointer");
+}
+
+void test_foreign_inventory_preloads_all_sync_caches_before_lookup() {
+    stub::reset_alpm_stub();
+    stub::set_local_packages({{"foreign-package", "1.0-1", ALPM_PKG_REASON_EXPLICIT}});
+
+    static_cast<void>(require_result_alternative<ForeignPackageInventory>(
+            query_foreign_package_inventory(
+                    valid_repository_configuration({"core", "extra"})),
+            "sync cache preload order"));
+
+    expect(
+            stub::sync_database_operation_history() ==
+                    std::vector<std::string>({
+                            "register core", "register extra",
+                            "valid core", "valid extra",
+                            "cache core", "cache extra",
+                            "query core/foreign-package",
+                            "query extra/foreign-package"}),
+            "repository lookup began before all sync caches were loaded");
+}
+
+void test_foreign_inventory_releases_handle_once_on_query_failure() {
+    stub::reset_alpm_stub();
+    stub::set_local_packages({{"foreign-package", "1.0-1", ALPM_PKG_REASON_EXPLICIT}});
+    stub::set_repository_package_query_failure("core", "foreign-package");
+
+    ForeignPackageInventoryResult result = query_foreign_package_inventory(
+            valid_repository_configuration({"core"}));
+
+    static_cast<void>(require_inventory_failure(
+            result, PackageMetadataErrorCode::QueryFailed,
+            "inventory failure handle release"));
+    expect(stub::created_handle_count() == 1, "inventory failure created extra handles");
+    expect(stub::release_count_for_handle(0) == 1, "inventory failure release count differs");
+}
+
+void test_foreign_inventory_returns_owned_values_after_release() {
+    stub::reset_alpm_stub();
+    stub::set_local_packages({
+            {"owned-package", "4.2-1", ALPM_PKG_REASON_DEPEND}});
+
+    ForeignPackageInventoryResult result = query_foreign_package_inventory(
+            valid_repository_configuration({"core"}));
+    expect(stub::created_handle_count() == 1, "owned inventory created extra handles");
+    expect(stub::release_count_for_handle(0) == 1, "owned inventory handle was not released");
+
+    stub::reset_alpm_stub();
+    ForeignPackageInventory inventory =
+            require_result_alternative<ForeignPackageInventory>(
+                    result, "owned foreign inventory");
+    expect(
+            inventory.size() == 1 && inventory[0].name == "owned-package" &&
+                    inventory[0].version == "4.2-1" &&
+                    inventory[0].reason == InstalledPackageReason::Dependency,
+            "foreign inventory retained borrowed metadata");
+}
+
 void test_repository_session_open_registers_in_configured_order() {
     stub::reset_alpm_stub();
     {
@@ -1193,6 +1698,34 @@ int main() {
 
         test_move_construction_does_not_double_release();
         test_move_assignment_does_not_double_release();
+
+        test_foreign_inventory_returns_initialization_failure_as_value();
+        test_foreign_inventory_requires_configured_repository();
+        test_empty_local_cache_is_empty_foreign_inventory();
+        test_foreign_inventory_local_database_failure();
+        test_foreign_inventory_local_cache_failure();
+        test_foreign_inventory_sync_register_failure();
+        test_foreign_inventory_sync_validation_failure();
+        test_foreign_inventory_sync_cache_failure();
+        test_foreign_inventory_accepts_empty_sync_cache();
+        test_foreign_inventory_excludes_first_repository_native_package();
+        test_foreign_inventory_excludes_later_repository_native_package();
+        test_foreign_inventory_preserves_local_order_and_reasons();
+        test_foreign_inventory_maps_future_reason_to_unknown();
+        test_foreign_inventory_rejects_null_local_name();
+        test_foreign_inventory_rejects_empty_local_name();
+        test_foreign_inventory_rejects_invalid_local_name();
+        test_foreign_inventory_rejects_null_foreign_version();
+        test_foreign_inventory_rejects_empty_foreign_version();
+        test_foreign_inventory_does_not_require_native_version();
+        test_foreign_inventory_rejects_invalid_sync_returned_name();
+        test_foreign_inventory_rejects_sync_returned_name_mismatch();
+        test_foreign_inventory_rejects_null_sync_returned_name();
+        test_foreign_inventory_distinguishes_absence_from_query_failure();
+        test_foreign_inventory_ignores_stale_errno_on_successful_pointers();
+        test_foreign_inventory_preloads_all_sync_caches_before_lookup();
+        test_foreign_inventory_releases_handle_once_on_query_failure();
+        test_foreign_inventory_returns_owned_values_after_release();
 
         test_repository_session_open_registers_in_configured_order();
         test_repository_session_accepts_empty_repository_list();

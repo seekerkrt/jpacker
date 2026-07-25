@@ -1,5 +1,7 @@
 #pragma once
 
+#include "installed_package.hpp"
+
 #include <cstdint>
 #include <filesystem>
 #include <memory>
@@ -17,18 +19,6 @@ struct PacmanDatabasePaths {
 struct PacmanRepositoryConfiguration {
     PacmanDatabasePaths      database_paths;
     std::vector<std::string> repository_names;
-};
-
-enum class InstalledPackageReason {
-    Explicit,
-    Dependency,
-    Unknown,
-};
-
-struct InstalledPackageMetadata {
-    std::string            name;
-    std::string            version;
-    InstalledPackageReason reason = InstalledPackageReason::Unknown;
 };
 
 struct RepositoryPackageLookup {
@@ -72,6 +62,12 @@ using RepositoryPackageQueryResult = std::variant<
         PackageNotFound,
         PackageMetadataFailure>;
 
+using ForeignPackageInventory = std::vector<InstalledPackageMetadata>;
+
+using ForeignPackageInventoryResult = std::variant<
+        ForeignPackageInventory,
+        PackageMetadataFailure>;
+
 // resolver/session openの失敗を、CLI境界でstd::exceptionとして扱える形で伝播する。
 class PackageMetadataError : public std::runtime_error {
 public:
@@ -85,6 +81,10 @@ private:
 
 PacmanDatabasePaths resolve_pacman_database_paths();
 PacmanRepositoryConfiguration resolve_pacman_repository_configuration();
+
+// local DBと全sync DBを1 handleで照合し、borrowを残さないowned inventoryを返す。
+ForeignPackageInventoryResult query_foreign_package_inventory(
+        const PacmanRepositoryConfiguration& configuration);
 
 // 1 read phaseのlibalpm handleを単独所有し、raw libalpm型をdomain側へ公開しない。
 class PackageMetadataSession {

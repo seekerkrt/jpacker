@@ -269,6 +269,176 @@ RepositoryPackageQueryResult query_repository_database(
             static_cast<std::uint64_t>(installed_size)};
 }
 
+ForeignPackageInventory query_foreign_package_inventory_read_phase(
+        const PacmanRepositoryConfiguration& configuration) {
+    PacmanRepositoryConfiguration normalized_configuration =
+            normalize_pacman_repository_configuration(configuration);
+    if(normalized_configuration.repository_names.empty()) {
+        throw_package_metadata_error(
+                PackageMetadataErrorCode::RepositoryNotConfigured,
+                "No package repositories are configured for foreign package inventory.");
+    }
+
+    std::string root_dir = normalized_configuration.database_paths.root_dir.string();
+    std::string db_path = normalized_configuration.database_paths.db_path.string();
+
+    alpm_errno_t initialization_error = ALPM_ERR_OK;
+    alpm_handle_t* raw_handle =
+            alpm_initialize(root_dir.c_str(), db_path.c_str(), &initialization_error);
+    if(raw_handle == nullptr) {
+        throw_package_metadata_error(
+                PackageMetadataErrorCode::InitializationFailed,
+                alpm_failure_diagnostic(
+                        "Failed to initialize foreign package inventory",
+                        initialization_error));
+    }
+    UniqueAlpmHandle handle(raw_handle);
+
+    // POLICY: nonnull pointerがAPI上の成功条件。handle-global errnoは成功時に
+    // 以前の値を保持し得るため、失敗時のdiagnosticにだけ使用する。
+    alpm_db_t* local_db = alpm_get_localdb(handle.get());
+    if(local_db == nullptr) {
+        throw_package_metadata_error(
+                PackageMetadataErrorCode::LocalDatabaseUnavailable,
+                alpm_failure_diagnostic(
+                        "Failed to access the local package database",
+                        alpm_errno(handle.get())));
+    }
+
+    if(alpm_db_get_valid(local_db) != 0) {
+        throw_package_metadata_error(
+                PackageMetadataErrorCode::LocalDatabaseUnavailable,
+                alpm_failure_diagnostic(
+                        "Local package database validation failed",
+                        alpm_errno(handle.get())));
+    }
+
+    std::vector<alpm_db_t*> sync_databases;
+    sync_databases.reserve(normalized_configuration.repository_names.size());
+    for(const auto& repository_name : normalized_configuration.repository_names) {
+        alpm_db_t* database = alpm_register_syncdb(
+                handle.get(), repository_name.c_str(),
+                READ_ONLY_SYNC_DATABASE_SIGLEVEL);
+        if(database == nullptr) {
+            throw_package_metadata_error(
+                    PackageMetadataErrorCode::SyncDatabaseUnavailable,
+                    alpm_failure_diagnostic(
+                            "Failed to register repository package database '" +
+                                    repository_name + "'",
+                            alpm_errno(handle.get())));
+        }
+        sync_databases.push_back(database);
+    }
+
+    for(alpm_db_t* database : sync_databases) {
+        if(alpm_db_get_valid(database) != 0) {
+            throw_package_metadata_error(
+                    PackageMetadataErrorCode::SyncDatabaseUnavailable,
+                    alpm_failure_diagnostic(
+                            "Repository package database validation failed",
+                            alpm_errno(handle.get())));
+        }
+    }
+
+    // POLICY(#266): cacheをlookup前に全件loadし、正常emptyとload failureを
+    // nullptr直後のerrnoで区別する。local listはこのreturn値を一度だけ走査する。
+    alpm_list_t* local_package_cache = alpm_db_get_pkgcache(local_db);
+    if(local_package_cache == nullptr) {
+        alpm_errno_t package_cache_error = alpm_errno(handle.get());
+        if(package_cache_error != ALPM_ERR_OK) {
+            throw_package_metadata_error(
+                    PackageMetadataErrorCode::LocalDatabaseUnavailable,
+                    alpm_failure_diagnostic(
+                            "Failed to load the local package database",
+                            package_cache_error));
+        }
+    }
+
+    for(alpm_db_t* database : sync_databases) {
+        alpm_list_t* package_cache = alpm_db_get_pkgcache(database);
+        if(package_cache == nullptr) {
+            alpm_errno_t package_cache_error = alpm_errno(handle.get());
+            if(package_cache_error != ALPM_ERR_OK) {
+                throw_package_metadata_error(
+                        PackageMetadataErrorCode::SyncDatabaseUnavailable,
+                        alpm_failure_diagnostic(
+                                "Failed to load a repository package database",
+                                package_cache_error));
+            }
+        }
+    }
+
+    ForeignPackageInventory inventory;
+    // POLICY(#266): pacman -Qmと同じくlocal cache順を正本にし、独自sortしない。
+    for(alpm_list_t* node = local_package_cache; node != nullptr; node = node->next) {
+        if(node->data == nullptr) {
+            throw_package_metadata_error(
+                    PackageMetadataErrorCode::QueryFailed,
+                    "Local package cache contains an invalid package entry.");
+        }
+
+        auto* local_package = static_cast<alpm_pkg_t*>(node->data);
+        const char* raw_package_name = alpm_pkg_get_name(local_package);
+        if(raw_package_name == nullptr || raw_package_name[0] == '\0') {
+            throw_package_metadata_error(
+                    PackageMetadataErrorCode::MalformedMetadata,
+                    "Local package metadata contains an invalid package name.");
+        }
+
+        std::string package_name(raw_package_name);
+        if(!is_valid_package_name(package_name)) {
+            throw_package_metadata_error(
+                    PackageMetadataErrorCode::MalformedMetadata,
+                    "Local package metadata contains an invalid package name.");
+        }
+
+        bool is_native_package = false;
+        for(alpm_db_t* database : sync_databases) {
+            alpm_pkg_t* sync_package =
+                    alpm_db_get_pkg(database, package_name.c_str());
+            if(sync_package == nullptr) {
+                alpm_errno_t query_error = alpm_errno(handle.get());
+                if(query_error == ALPM_ERR_PKG_NOT_FOUND) continue;
+                throw_package_metadata_error(
+                        PackageMetadataErrorCode::QueryFailed,
+                        alpm_failure_diagnostic(
+                                "Repository package membership query failed",
+                                query_error));
+            }
+
+            const char* returned_name = alpm_pkg_get_name(sync_package);
+            if(returned_name == nullptr || returned_name[0] == '\0') {
+                throw_package_metadata_error(
+                        PackageMetadataErrorCode::MalformedMetadata,
+                        "Repository package metadata contains an invalid package name.");
+            }
+            std::string returned_package_name(returned_name);
+            if(!is_valid_package_name(returned_package_name) ||
+               package_name != returned_package_name) {
+                throw_package_metadata_error(
+                        PackageMetadataErrorCode::MalformedMetadata,
+                        "Repository package metadata contains an invalid package name.");
+            }
+            is_native_package = true;
+            break;
+        }
+        if(is_native_package) continue;
+
+        const char* installed_version = alpm_pkg_get_version(local_package);
+        if(installed_version == nullptr || installed_version[0] == '\0') {
+            throw_package_metadata_error(
+                    PackageMetadataErrorCode::MalformedMetadata,
+                    "Foreign package metadata contains an invalid version.");
+        }
+
+        inventory.push_back(InstalledPackageMetadata{
+                std::move(package_name),
+                installed_version,
+                map_install_reason(alpm_pkg_get_reason(local_package))});
+    }
+    return inventory;
+}
+
 } // namespace
 
 PackageMetadataError::PackageMetadataError(PackageMetadataFailure failure)
@@ -305,6 +475,18 @@ PacmanRepositoryConfiguration resolve_pacman_repository_configuration() {
     return PacmanRepositoryConfiguration{
             std::move(database_paths),
             parse_pacman_repository_names(command_result.output)};
+}
+
+ForeignPackageInventoryResult query_foreign_package_inventory(
+        const PacmanRepositoryConfiguration& configuration) {
+    try {
+        // read phaseのRAII資源はprivate helperからreturnする前に必ず解放される。
+        return query_foreign_package_inventory_read_phase(configuration);
+    } catch(const PackageMetadataError& error) {
+        // Expected metadata/libalpm failuresだけをvalueへ戻す。
+        // std::bad_alloc等のruntime failureはflattenしない。
+        return error.failure();
+    }
 }
 
 struct PackageMetadataSession::Impl {
