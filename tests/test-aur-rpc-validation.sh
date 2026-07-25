@@ -2,6 +2,7 @@
 set -eu
 
 test_binary=$1
+envelope_test_binary=$2
 repo_root=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
 JPACKER_TEST_REPOSITORY_ROOT=$repo_root
 export JPACKER_TEST_REPOSITORY_ROOT
@@ -89,6 +90,26 @@ run_fail() {
     fi
 }
 
+run_envelope_ok() {
+    : > "$command_log"
+    if ! "$envelope_test_binary" "$@" > "$output_file" 2>&1; then
+        echo "expected strict envelope command to succeed: $*" >&2
+        sed -n '1,240p' "$output_file" >&2
+        cat "$command_log" >&2
+        exit 1
+    fi
+}
+
+run_envelope_fail() {
+    : > "$command_log"
+    if "$envelope_test_binary" "$@" > "$output_file" 2>&1; then
+        echo "expected strict envelope command to fail: $*" >&2
+        sed -n '1,240p' "$output_file" >&2
+        cat "$command_log" >&2
+        exit 1
+    fi
+}
+
 assert_contains() {
     pattern=$1
     file=$2
@@ -167,6 +188,71 @@ prepare_source_preferences() {
     done
     export JPACKER_TEST_PACKAGE_BUILD_DIR=$preference_dir
 }
+
+# strict APIだけがAUR RPC v5 envelopeを検証する。legacy APIのpermissive境界は維持する。
+setup_case strict-envelope-valid-info
+run_envelope_ok info-strict valid-minimal
+assert_contains "valid-minimal" "$output_file"
+assert_command_log_empty
+
+setup_case strict-envelope-valid-not-found
+run_envelope_ok info-strict strict-not-found
+assert_contains "not-found" "$output_file"
+assert_command_log_empty
+
+setup_case strict-envelope-valid-search
+run_envelope_ok provides-strict virtual-one
+assert_contains "provider-one" "$output_file"
+assert_command_log_empty
+
+setup_case strict-envelope-valid-empty-search
+run_envelope_ok provides-strict strict-search-empty
+if [ -s "$output_file" ]; then
+    echo "valid empty strict provider search returned output" >&2
+    cat "$output_file" >&2
+    exit 1
+fi
+assert_command_log_empty
+
+while IFS='|' read -r package detail; do
+    setup_case "strict-envelope-$package"
+    run_envelope_fail info-strict "$package"
+    assert_validation_error "package info $package"
+    assert_contains "$detail" "$output_file"
+    assert_command_log_empty
+done <<'CASES'
+strict-error-string|field error reported "fixture AUR RPC failure"
+strict-error-number|field error expected string, got number
+strict-version-missing|field version expected integer, got missing
+strict-version-string|field version expected integer, got string
+strict-version-unsupported|field version expected 5, got 4
+strict-type-missing|field type expected string, got missing
+strict-type-number|field type expected string, got number
+strict-type-wrong|field type expected "multiinfo", got "search"
+strict-resultcount-missing|field resultcount expected integer, got missing
+strict-resultcount-string|field resultcount expected integer, got string
+strict-resultcount-negative|field resultcount expected non-negative integer, got -1
+strict-resultcount-mismatch|field resultcount was 1 but results contained 0 entries
+strict-results-missing|field results expected array, got missing
+strict-results-object|field results expected array, got object
+strict-info-multiple|expected zero or one result, got 2
+CASES
+
+setup_case strict-envelope-search-type
+run_envelope_fail provides-strict strict-search-wrong-type
+assert_validation_error "provides search strict-search-wrong-type"
+assert_contains 'field type expected "search", got "multiinfo"' "$output_file"
+assert_command_log_empty
+
+setup_case legacy-envelope-info
+run_envelope_ok info-legacy legacy-envelope-permissive
+assert_contains "not-found" "$output_file"
+assert_command_log_empty
+
+setup_case legacy-envelope-search
+run_envelope_ok provides-legacy strict-search-wrong-type
+assert_contains "provider-one" "$output_file"
+assert_command_log_empty
 
 # missing/null/emptyはoptional arrayの正常契約。全fieldを同じentryで通す。
 for package in valid-minimal arrays-null arrays-empty arrays-valid valid-split; do

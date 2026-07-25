@@ -57,6 +57,26 @@ struct RootTargetIdentity {
     bool operator==(const RootTargetIdentity&) const = default;
 };
 
+// ordinary metadata resolution failureを、confirmed absenceやschema failureと区別して保持する。
+enum class BuildPlanResolutionFailureKind {
+    RepositoryMetadataUnavailable,
+    AurPackageMetadataUnavailable,
+    ProviderSearchUnavailable,
+    ProviderCandidateMetadataUnavailable
+};
+
+struct BuildPlanResolutionFailure {
+    BuildPlanResolutionFailureKind  kind;
+    std::optional<std::string>      parent_package_name;
+    std::optional<std::string>      parent_package_base;
+    std::string                     subject;
+    std::optional<std::string>      dependency_specification;
+    std::vector<RootTargetIdentity> roots;
+    std::string                     diagnostic;
+
+    bool operator==(const BuildPlanResolutionFailure&) const = default;
+};
+
 // source package nameごとに、plan内で担う全roleと到達元rootを集約する。
 struct PlannedPackageTarget {
     std::string                     package_name;
@@ -123,6 +143,7 @@ struct BuildPlan {
     std::vector<RootTargetIdentity>           root_targets;
     std::vector<PlannedPackageTarget>         package_targets;
     std::vector<BuildPlanDependencyEdge>      dependency_edges;
+    std::vector<BuildPlanResolutionFailure>   resolution_failures;
     std::vector<BuildPlanSplitPackageTarget> split_package_targets;
     std::vector<BuildPlanProvidedDependency> provided;
     std::vector<BuildPlanMetadataRisk>       metadata_risks;
@@ -139,6 +160,7 @@ std::vector<RecursiveDependencyNode> resolve_recursive_dependencies(const AurPac
 std::vector<BuildPlanMetadataRisk> collect_build_plan_metadata_risks(const AurPackageInfo& pkg);
 BuildPlan resolve_build_plan(const std::string& target);
 BuildPlan resolve_build_plan(const std::vector<std::string>& targets);
+BuildPlan resolve_build_plan_for_preflight(const std::vector<std::string>& targets);
 BuildPlan resolve_fetch_plan(const std::string& target);
 void require_fetchable_build_plan(const std::string& target, const BuildPlan& plan);
 void require_executable_build_plan(const std::string& target, const BuildPlan& plan);

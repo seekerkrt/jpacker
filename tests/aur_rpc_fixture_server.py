@@ -42,6 +42,16 @@ def sequenced_info_results(requested_name, packages):
     return None
 
 
+def apply_response_override(response, override):
+    if not isinstance(override, dict):
+        return response
+
+    for field in override.get("remove", []):
+        response.pop(field, None)
+    response.update(override.get("set", {}))
+    return response
+
+
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if request_log_path is not None:
@@ -56,10 +66,18 @@ class Handler(BaseHTTPRequestHandler):
         if "/v5/search/" in parsed.path:
             dependency = unquote(parsed.path.rsplit("/", 1)[-1])
             names = fixture.get("providers", {}).get(dependency, [])
+            response_type = "search"
+            response_override = fixture.get("search_response_overrides", {}).get(
+                dependency
+            )
         else:
             names = query.get("arg[]", [])
+            response_type = "multiinfo"
+            requested_name = names[0] if len(names) == 1 else None
+            response_override = fixture.get("info_response_overrides", {}).get(
+                requested_name
+            )
             if len(names) == 1:
-                requested_name = names[0]
                 sequenced_results = sequenced_info_results(
                     requested_name, fixture.get("packages", {})
                 )
@@ -73,10 +91,11 @@ class Handler(BaseHTTPRequestHandler):
             results = [packages[name] for name in names if name in packages]
         response = {
             "version": 5,
-            "type": "multiinfo",
+            "type": response_type,
             "resultcount": len(results),
             "results": results,
         }
+        response = apply_response_override(response, response_override)
         body = json.dumps(response).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "application/json")

@@ -2,6 +2,7 @@
 
 #include <map>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -55,9 +56,39 @@ std::vector<std::string> AurClient::search_names_by_provides(
         const std::string& provided_name) {
     if(provided_name == "case7-virtual-api") return {"case7-provider-pkg"};
     if(provided_name == "case11-virtual") return {"case11-provider"};
+    if(provided_name == "preflight-provider-candidate-virtual") {
+        return {
+                "preflight-provider-broken",
+                "preflight-provider-good",
+        };
+    }
+    if(provided_name == "preflight-provider-search-virtual") {
+        throw std::runtime_error("legacy provider search failure");
+    }
+    if(provided_name == "preflight-provider-response-virtual") {
+        throw AurRpcResponseError("provider search response failure");
+    }
+    if(provided_name == "preflight-provider-candidate-response-virtual") {
+        return {"preflight-provider-candidate-response-broken"};
+    }
     if(provided_name == "case9-missing" || provided_name == "case11-missing") return {};
+    if(provided_name == "preflight-dependency-failure-child" ||
+       provided_name == "preflight-shared-failure") {
+        return {};
+    }
     throw AurRpcResponseError(
             "Unexpected dependency-plan AUR provider search: " + provided_name);
+}
+
+std::vector<std::string> AurClient::search_names_by_provides_strict(
+        const std::string& provided_name) {
+    if(provided_name == "preflight-provider-search-virtual") {
+        throw std::runtime_error("strict provider search failure");
+    }
+    if(provided_name == "preflight-provider-response-virtual") {
+        throw AurRpcResponseError("provider search response failure");
+    }
+    return search_names_by_provides(provided_name);
 }
 
 std::optional<AurPackageInfo> AurClient::info(const std::string& package_name) {
@@ -141,10 +172,78 @@ std::optional<AurPackageInfo> AurClient::info(const std::string& package_name) {
                 {"case15-shared"});
     }
 
+    if(package_name == "preflight-root-metadata-failure") {
+        throw std::runtime_error("legacy root metadata failure");
+    }
+    if(package_name == "preflight-root-not-found") return std::nullopt;
+    if(package_name == "preflight-later-root") return package_info(package_name);
+    if(package_name == "preflight-dependency-failure-root") {
+        return package_info(package_name, {"preflight-dependency-failure-child"});
+    }
+    if(package_name == "preflight-dependency-failure-child") {
+        throw std::runtime_error("legacy dependency metadata failure");
+    }
+    if(package_name == "preflight-provider-search-root") {
+        return package_info(package_name, {"preflight-provider-search-virtual"});
+    }
+    if(package_name == "preflight-provider-candidate-root") {
+        return package_info(package_name, {"preflight-provider-candidate-virtual"});
+    }
+    if(package_name == "preflight-provider-good") {
+        return package_info(
+                package_name, {}, {}, {},
+                {"preflight-provider-candidate-virtual"});
+    }
+    if(package_name == "preflight-provider-broken") {
+        throw std::runtime_error("legacy provider candidate failure");
+    }
+    if(package_name == "preflight-shared-root-a" ||
+       package_name == "preflight-shared-root-b") {
+        return package_info(package_name, {"preflight-shared-parent"});
+    }
+    if(package_name == "preflight-shared-parent") {
+        return package_info(package_name, {"preflight-shared-failure"});
+    }
+    if(package_name == "preflight-shared-failure") {
+        throw std::runtime_error("legacy shared dependency metadata failure");
+    }
+    if(package_name == "preflight-response-error-root") {
+        throw AurRpcResponseError("root response failure");
+    }
+    if(package_name == "preflight-provider-response-root") {
+        return package_info(package_name, {"preflight-provider-response-virtual"});
+    }
+    if(package_name == "preflight-dependency-response-root") {
+        return package_info(package_name, {"preflight-dependency-response-child"});
+    }
+    if(package_name == "preflight-provider-candidate-response-root") {
+        return package_info(
+                package_name,
+                {"preflight-provider-candidate-response-virtual"});
+    }
+    if(package_name == "preflight-repository-exact-failure-root") {
+        return package_info(
+                package_name,
+                {"preflight-repository-exact-failure-child"});
+    }
+    if(package_name == "preflight-repository-provider-failure-root") {
+        return package_info(
+                package_name,
+                {"preflight-repository-provider-failure-virtual"});
+    }
+    if(package_name == "preflight-response-must-stop-before-later-root") {
+        throw std::runtime_error("response error did not stop later root resolution");
+    }
+
     if(package_name == "case7-virtual-api" || package_name == "case8-virtual" ||
        package_name == "case9-missing" || package_name == "case11-virtual" ||
        package_name == "case11-ambiguous" || package_name == "case11-missing" ||
-       package_name == "case14-virtual") {
+       package_name == "case14-virtual" ||
+       package_name == "preflight-provider-search-virtual" ||
+       package_name == "preflight-provider-candidate-virtual" ||
+       package_name == "preflight-provider-response-virtual" ||
+       package_name == "preflight-provider-candidate-response-virtual" ||
+       package_name == "preflight-repository-provider-failure-virtual") {
         return std::nullopt;
     }
 
@@ -152,6 +251,24 @@ std::optional<AurPackageInfo> AurClient::info(const std::string& package_name) {
 }
 
 std::optional<AurPackageInfo> AurClient::info_strict(const std::string& package_name) {
+    if(package_name == "preflight-root-metadata-failure") {
+        throw std::runtime_error("strict root metadata failure");
+    }
+    if(package_name == "preflight-dependency-failure-child") {
+        throw std::runtime_error("strict dependency metadata failure");
+    }
+    if(package_name == "preflight-provider-broken") {
+        throw std::runtime_error("strict provider candidate failure");
+    }
+    if(package_name == "preflight-shared-failure") {
+        throw std::runtime_error("strict shared dependency metadata failure");
+    }
+    if(package_name == "preflight-dependency-response-child") {
+        throw AurRpcResponseError("dependency info response failure");
+    }
+    if(package_name == "preflight-provider-candidate-response-broken") {
+        throw AurRpcResponseError("provider candidate info response failure");
+    }
     return info(package_name);
 }
 
