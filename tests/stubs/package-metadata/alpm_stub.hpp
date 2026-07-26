@@ -40,6 +40,7 @@ void set_package_metadata(
         const std::string& name, const std::string& version,
         alpm_pkgreason_t reason);
 void set_local_packages(const std::vector<LocalPackageMetadata>& packages);
+void set_local_package_cache_entry_null(std::size_t package_index);
 void set_local_package_name_null(std::size_t package_index);
 void set_local_package_version_null(std::size_t package_index);
 void set_null_package_name();

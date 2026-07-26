@@ -44,6 +44,42 @@ enum class UpdateCheckResult {
     Unknown,
 };
 
+std::string up_to_date_diagnostic(
+        const std::string& package_name,
+        const std::string& installed_version) {
+    return package_name + " is up to date (" + installed_version + "). Skipping.";
+}
+
+std::string unknown_update_skip_diagnostic(
+        const std::string& package_name,
+        SourceBuildUpdateStatusUnknownSkipReason reason) {
+    switch(reason) {
+        case SourceBuildUpdateStatusUnknownSkipReason::NoConfirm:
+            return "Skipping " + package_name +
+                   ": update status is unknown and --noconfirm is set.";
+        case SourceBuildUpdateStatusUnknownSkipReason::NonInteractiveStdin:
+            return "Skipping " + package_name +
+                   ": update status is unknown and stdin is non-interactive.";
+        case SourceBuildUpdateStatusUnknownSkipReason::UserDeclined:
+            return "Skipping " + package_name +
+                   ": update status is unknown and the user declined to continue.";
+    }
+    throw std::logic_error("Unknown source-build update-status skip reason.");
+}
+
+SourceBuildExecutionResult source_build_result_from_artifact_outcome(
+        ArtifactInstallExecutionOutcome outcome) {
+    switch(outcome) {
+        case ArtifactInstallExecutionOutcome::Installed:
+            return SourceBuildExecutionResult{
+                    SourceBuildExecutionStatus::Installed, std::nullopt, {}};
+        case ArtifactInstallExecutionOutcome::SkippedAsNeeded:
+            return SourceBuildExecutionResult{
+                    SourceBuildExecutionStatus::SkippedAsNeeded, std::nullopt, {}};
+    }
+    throw std::logic_error("Unknown artifact install execution outcome.");
+}
+
 std::string trim(const std::string& str) {
     size_t first = str.find_first_not_of(" \t\n\r");
     if(first == std::string::npos) return "";
@@ -346,7 +382,7 @@ UpdateCheckResult check_update_status(
         return UpdateCheckResult::Unknown;
     }
 
-    Logger::info(pkg_name + " is up to date (" + installed_version.value() + "). Skipping.");
+    Logger::info(up_to_date_diagnostic(pkg_name, installed_version.value()));
     return UpdateCheckResult::UpToDate;
 }
 
@@ -392,7 +428,7 @@ MakepkgBuildOptions resolve_makepkg_build_options(
 
 } // namespace
 
-std::optional<ArtifactInstallExecutionOutcome> execute_source_build(
+SourceBuildExecutionResult execute_source_build_typed(
         const SourceBuildRequest& request,
         DesiredInstallReason desired_reason,
         const PacmanDatabasePaths& database_paths,
@@ -505,22 +541,47 @@ std::optional<ArtifactInstallExecutionOutcome> execute_source_build(
                     request.package_name, pkg_path.canonical_path(),
                     request.installed_snapshot.value(), request.update_baseline);
             if(update_check == UpdateCheckResult::UpToDate) {
-                return std::nullopt; // 更新不要なので終了
+                return SourceBuildExecutionResult{
+                        SourceBuildExecutionStatus::UpToDate,
+                        std::nullopt,
+                        up_to_date_diagnostic(
+                                request.package_name,
+                                request.installed_snapshot->installed_version.value())};
             }
             if(update_check == UpdateCheckResult::Unknown) {
                 Logger::warn("Unable to determine update status from .SRCINFO for " + request.package_name + ".");
                 Logger::warn("Skipping pre-review PKGBUILD evaluation.");
                 if(config.no_confirm) {
-                    Logger::warn("Skipping " + request.package_name + ": update status is unknown and --noconfirm is set.");
-                    return std::nullopt;
+                    const SourceBuildUpdateStatusUnknownSkipReason reason =
+                            SourceBuildUpdateStatusUnknownSkipReason::NoConfirm;
+                    std::string diagnostic = unknown_update_skip_diagnostic(
+                            request.package_name, reason);
+                    Logger::warn(diagnostic);
+                    return SourceBuildExecutionResult{
+                            SourceBuildExecutionStatus::UpdateStatusUnknownSkipped,
+                            reason,
+                            std::move(diagnostic)};
                 }
                 if(!isatty(STDIN_FILENO)) {
-                    Logger::warn("Skipping " + request.package_name + ": update status is unknown and stdin is non-interactive.");
-                    return std::nullopt;
+                    const SourceBuildUpdateStatusUnknownSkipReason reason =
+                            SourceBuildUpdateStatusUnknownSkipReason::NonInteractiveStdin;
+                    std::string diagnostic = unknown_update_skip_diagnostic(
+                            request.package_name, reason);
+                    Logger::warn(diagnostic);
+                    return SourceBuildExecutionResult{
+                            SourceBuildExecutionStatus::UpdateStatusUnknownSkipped,
+                            reason,
+                            std::move(diagnostic)};
                 }
                 if(!ask_user("Update status is unknown because .SRCINFO is missing or incomplete. Continue to review/build?",
                             PromptDefault::No, config)) {
-                    return std::nullopt;
+                    const SourceBuildUpdateStatusUnknownSkipReason reason =
+                            SourceBuildUpdateStatusUnknownSkipReason::UserDeclined;
+                    return SourceBuildExecutionResult{
+                            SourceBuildExecutionStatus::UpdateStatusUnknownSkipped,
+                            reason,
+                            unknown_update_skip_diagnostic(
+                                    request.package_name, reason)};
                 }
             }
         }
@@ -546,20 +607,40 @@ std::optional<ArtifactInstallExecutionOutcome> execute_source_build(
     require_safe_persistent_checkout_descendants(pkg_path);
     ValidatedPrivateCacheRoot artifact_root =
             prepare_private_trusted_cache_root();
-    return execute_separated_source_build_unit(
-            SeparatedSourceBuildUnitRequest{
-                    pkg_path,
-                    std::move(artifact_root),
-                    request.package_name,
-                    request.checkout_name,
-                    desired_reason,
-                    request.custom_environment,
-                    request.empty_value_policy,
-                    database_paths},
-            SeparatedSourceBuildUnitOptions{
-                    .no_confirm = config.no_confirm,
-                    .needed = request.needed,
-                    .rm_deps = config.rm_deps,
-                    .rebuild = makepkg_options.rebuild,
-                    .clean_build = makepkg_options.clean_build});
+    return source_build_result_from_artifact_outcome(
+            execute_separated_source_build_unit(
+                    SeparatedSourceBuildUnitRequest{
+                            pkg_path,
+                            std::move(artifact_root),
+                            request.package_name,
+                            request.checkout_name,
+                            desired_reason,
+                            request.custom_environment,
+                            request.empty_value_policy,
+                            database_paths},
+                    SeparatedSourceBuildUnitOptions{
+                            .no_confirm = config.no_confirm,
+                            .needed = request.needed,
+                            .rm_deps = config.rm_deps,
+                            .rebuild = makepkg_options.rebuild,
+                            .clean_build = makepkg_options.clean_build}));
+}
+
+std::optional<ArtifactInstallExecutionOutcome> execute_source_build(
+        const SourceBuildRequest& request,
+        DesiredInstallReason desired_reason,
+        const PacmanDatabasePaths& database_paths,
+        const AppConfig& config) {
+    const SourceBuildExecutionResult result = execute_source_build_typed(
+            request, desired_reason, database_paths, config);
+    switch(result.status) {
+        case SourceBuildExecutionStatus::Installed:
+            return ArtifactInstallExecutionOutcome::Installed;
+        case SourceBuildExecutionStatus::SkippedAsNeeded:
+            return ArtifactInstallExecutionOutcome::SkippedAsNeeded;
+        case SourceBuildExecutionStatus::UpToDate:
+        case SourceBuildExecutionStatus::UpdateStatusUnknownSkipped:
+            return std::nullopt;
+    }
+    throw std::logic_error("Unknown source-build execution status.");
 }

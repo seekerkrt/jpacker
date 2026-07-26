@@ -503,6 +503,13 @@ void set_local_packages(const std::vector<LocalPackageMetadata>& packages) {
     }
 }
 
+void set_local_package_cache_entry_null(std::size_t package_index) {
+    if(g_state.handles.empty()) return;
+    auto& cache_nodes = g_state.handles.back()->local_cache_nodes;
+    if(package_index >= cache_nodes.size()) return;
+    cache_nodes[package_index]->data = nullptr;
+}
+
 void set_local_package_name_null(std::size_t package_index) {
     if(package_index >= g_state.local_packages.size()) return;
     g_state.local_packages[package_index].name_is_null = true;

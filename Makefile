@@ -30,6 +30,7 @@ PROCESS_CAPTURE_TEST_TARGET := build/tests/process-capture-test
 PROCESS_STDIN_FD_TEST_TARGET := build/tests/process-stdin-fd-test
 AUR_UPDATE_PLAN_TEST_TARGET := $(BUILD_DIR)/tests/aur-update-plan-test
 UPGRADE_ALL_PLAN_TEST_TARGET := $(BUILD_DIR)/tests/upgrade-all-plan-test
+SYSTEM_SOURCE_UPGRADE_TEST_TARGET := $(BUILD_DIR)/tests/system-source-upgrade-test
 AUR_UPDATE_QUERY_TEST_TARGET := $(BUILD_DIR)/tests/aur-update-query-test
 AUR_UPDATE_EXECUTION_PREFLIGHT_TEST_TARGET := $(BUILD_DIR)/tests/aur-update-execution-preflight-test
 AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION_TEST_TARGET := $(BUILD_DIR)/tests/aur-update-execution-preflight-integration-test
@@ -114,6 +115,22 @@ UPGRADE_ALL_PLAN_TEST_SRCS := \
 	$(SRC_DIR)/upgrade_all_plan.cpp
 UPGRADE_ALL_PLAN_FORBIDDEN_TEST_SRCS := \
 	$(filter-out $(SRC_DIR)/upgrade_all_plan.cpp,$(SRCS))
+# POLICY(#281): phase testはactual orchestrationだけをlinkし、preference IO、
+# package metadata、system command、source lifecycleをfake symbolへ切る。
+SYSTEM_SOURCE_UPGRADE_TEST_SRCS := \
+	tests/system_source_upgrade_test.cpp \
+	$(SRC_DIR)/system_source_upgrade.cpp \
+	$(SRC_DIR)/package_identifier.cpp \
+	$(SRC_DIR)/shell_words.cpp \
+	tests/stubs/system-source-upgrade/phase_stub.cpp
+SYSTEM_SOURCE_UPGRADE_ALLOWED_PRODUCTION_TEST_SRCS := \
+	$(SRC_DIR)/system_source_upgrade.cpp \
+	$(SRC_DIR)/package_identifier.cpp \
+	$(SRC_DIR)/shell_words.cpp
+SYSTEM_SOURCE_UPGRADE_FORBIDDEN_TEST_SRCS := \
+	$(filter-out \
+		$(SYSTEM_SOURCE_UPGRADE_ALLOWED_PRODUCTION_TEST_SRCS), \
+		$(SRCS))
 AUR_UPDATE_QUERY_TEST_SRCS := \
 	tests/aur_update_query_test.cpp \
 	$(SRC_DIR)/aur_update_query.cpp \
@@ -320,7 +337,7 @@ LIBALPM_BUILD_TARGETS := \
 	$(AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION_TEST_TARGET) \
 	$(UPGRADE_BASELINE_METADATA_TEST_TARGET)
 
-.PHONY: all check-libalpm clean check-upgrade-all-plan-link-firewall check-aur-update-operation-result-link-firewall test test-app-config test-package-identifier test-package-metadata test-package-metadata-integration test-repository-query test-shell-words test-source-environment test-artifact-workspace test-artifact-identity test-artifact-install-executor test-separated-source-build test-production-source-build test-process-capture test-aur-update-plan test-upgrade-all-plan test-aur-update-query test-aur-update-command test-aur-update-execution-preflight test-aur-update-execution-preflight-integration test-aur-update-execution-preparation test-aur-update-execution-runner test-aur-update-operation-result test-dependency-plan-model test-artifact-install-plan test-command-stub-contract test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-commands-inspect test-commands-source-maintenance test-commands-sync test-conflicts-replaces test-install-layout test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check install uninstall
+.PHONY: all check-libalpm clean check-upgrade-all-plan-link-firewall check-system-source-upgrade-link-firewall check-aur-update-operation-result-link-firewall test test-app-config test-package-identifier test-package-metadata test-package-metadata-integration test-repository-query test-shell-words test-source-environment test-artifact-workspace test-artifact-identity test-artifact-install-executor test-separated-source-build test-production-source-build test-process-capture test-aur-update-plan test-upgrade-all-plan test-system-source-upgrade test-aur-update-query test-aur-update-command test-aur-update-execution-preflight test-aur-update-execution-preflight-integration test-aur-update-execution-preparation test-aur-update-execution-runner test-aur-update-operation-result test-dependency-plan-model test-artifact-install-plan test-command-stub-contract test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-commands-inspect test-commands-source-maintenance test-commands-sync test-conflicts-replaces test-install-layout test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check install uninstall
 
 all: $(TARGET) $(MANPAGE)
 
@@ -498,6 +515,15 @@ $(UPGRADE_ALL_PLAN_TEST_TARGET): $(UPGRADE_ALL_PLAN_TEST_SRCS) $(SRC_DIR)/upgrad
 	@echo ":: Compiling upgrade-all plan model test binary"
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -I$(SRC_DIR) $(UPGRADE_ALL_PLAN_TEST_SRCS) -o $@
 
+$(SYSTEM_SOURCE_UPGRADE_TEST_TARGET): $(SYSTEM_SOURCE_UPGRADE_TEST_SRCS) $(HEADERS) tests/stubs/system-source-upgrade/phase_stub.hpp $(VERSION_FILE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling system/source upgrade phase fake-symbol test binary"
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
+		-DJPACKER_ENABLE_SYSTEM_SOURCE_UPGRADE_TEST_HOOKS \
+		-I$(SRC_DIR) \
+		$(SYSTEM_SOURCE_UPGRADE_TEST_SRCS) \
+		-o $@
+
 $(AUR_UPDATE_QUERY_TEST_TARGET): $(AUR_UPDATE_QUERY_TEST_SRCS) $(SRC_DIR)/aur_update_query.hpp $(SRC_DIR)/aur_update_plan.hpp $(SRC_DIR)/aur_rpc.hpp $(SRC_DIR)/package_metadata.hpp $(SRC_DIR)/installed_package.hpp $(SRC_DIR)/process.hpp $(SRC_DIR)/shell_words.hpp $(SRC_DIR)/logging.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling AUR update query fake-symbol test binary"
@@ -653,6 +679,20 @@ check-upgrade-all-plan-link-firewall:
 test-upgrade-all-plan: check-upgrade-all-plan-link-firewall $(UPGRADE_ALL_PLAN_TEST_TARGET)
 	$(abspath $(UPGRADE_ALL_PLAN_TEST_TARGET))
 
+check-system-source-upgrade-link-firewall:
+	@echo ":: Checking system/source upgrade phase link firewall"
+	@test "$(words $(filter $(SRC_DIR)/system_source_upgrade.cpp,$(SYSTEM_SOURCE_UPGRADE_TEST_SRCS)))" -eq 1 || { \
+		echo "error: system/source upgrade phase test must link actual orchestration exactly once" >&2; \
+		exit 1; \
+	}
+	@test -z "$(filter $(SYSTEM_SOURCE_UPGRADE_FORBIDDEN_TEST_SRCS),$(SYSTEM_SOURCE_UPGRADE_TEST_SRCS))" || { \
+		echo "error: system/source upgrade phase test links a forbidden production source" >&2; \
+		exit 1; \
+	}
+
+test-system-source-upgrade: check-system-source-upgrade-link-firewall $(SYSTEM_SOURCE_UPGRADE_TEST_TARGET)
+	$(abspath $(SYSTEM_SOURCE_UPGRADE_TEST_TARGET))
+
 test-aur-update-query: $(AUR_UPDATE_QUERY_TEST_TARGET)
 	$(abspath $(AUR_UPDATE_QUERY_TEST_TARGET))
 
@@ -779,6 +819,7 @@ test: \
 	test-process-capture \
 	test-aur-update-plan \
 	test-upgrade-all-plan \
+	test-system-source-upgrade \
 	test-aur-update-query \
 	test-aur-update-command \
 	test-aur-update-execution-preflight \
