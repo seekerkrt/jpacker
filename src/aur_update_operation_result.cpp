@@ -1,0 +1,1328 @@
+#include "aur_update_operation_result.hpp"
+
+#include <algorithm>
+#include <map>
+#include <set>
+#include <utility>
+
+namespace {
+
+void add_reduction_issue(
+        AurUpdateOperationResult& result,
+        AurUpdateOperationReductionReason reason,
+        AurUpdateOperationReductionStage stage,
+        std::string diagnostic,
+        std::vector<std::size_t> affected_update_plan_indices = {},
+        std::vector<std::size_t> preflight_target_positions = {},
+        std::optional<std::size_t> execution_work_item_index = std::nullopt) {
+    result.reduction_issues.push_back(AurUpdateOperationReductionIssue{
+            reason,
+            stage,
+            std::move(affected_update_plan_indices),
+            std::move(preflight_target_positions),
+            execution_work_item_index,
+            std::move(diagnostic)});
+}
+
+std::optional<std::string> package_base_for_target(
+        const AurUpdateExecutionTarget& target) {
+    if(!target.update.aur_package.has_value()) return std::nullopt;
+    return target.update.aur_package->package_base;
+}
+
+bool same_remote_package(
+        const std::optional<AurUpdateRemotePackage>& lhs,
+        const std::optional<AurUpdateRemotePackage>& rhs) {
+    if(lhs.has_value() != rhs.has_value()) return false;
+    if(!lhs.has_value()) return true;
+    return lhs->aur_name == rhs->aur_name &&
+           lhs->package_base == rhs->package_base &&
+           lhs->version == rhs->version &&
+           lhs->version_relation == rhs->version_relation;
+}
+
+bool same_update_entry(
+        const AurUpdatePlanEntry& lhs,
+        const AurUpdatePlanEntry& rhs) {
+    return lhs.installed_name == rhs.installed_name &&
+           lhs.installed_version == rhs.installed_version &&
+           lhs.install_reason == rhs.install_reason &&
+           same_remote_package(lhs.aur_package, rhs.aur_package) &&
+           lhs.classification == rhs.classification;
+}
+
+bool same_preflight_issue(
+        const AurUpdateExecutionIssue& lhs,
+        const AurUpdateExecutionIssue& rhs) {
+    return lhs.reason == rhs.reason &&
+           lhs.package_name == rhs.package_name &&
+           lhs.package_base == rhs.package_base &&
+           lhs.dependency_specification == rhs.dependency_specification &&
+           lhs.diagnostic == rhs.diagnostic;
+}
+
+bool same_preflight_target_snapshot(
+        const AurUpdateExecutionTarget& lhs,
+        const AurUpdateExecutionTarget& rhs) {
+    return lhs.update_plan_index == rhs.update_plan_index &&
+           lhs.build_plan_root_index == rhs.build_plan_root_index &&
+           same_update_entry(lhs.update, rhs.update) &&
+           lhs.status == rhs.status &&
+           lhs.desired_install_reason == rhs.desired_install_reason &&
+           lhs.issues.size() == rhs.issues.size() &&
+           std::equal(
+                   lhs.issues.begin(), lhs.issues.end(),
+                   rhs.issues.begin(), same_preflight_issue);
+}
+
+void validate_preparation_target_snapshot(
+        AurUpdateOperationResult& result,
+        const AurUpdateExecutionPreflight& preflight,
+        const AurUpdateSourceBuildPreparation& preparation,
+        const std::vector<bool>& expected_target_positions) {
+    std::vector<std::size_t> expected_positions;
+    std::vector<std::size_t> affected_indices;
+    for(std::size_t position = 0; position < expected_target_positions.size();
+        ++position) {
+        if(expected_target_positions[position]) {
+            expected_positions.push_back(position);
+        }
+    }
+    for(const auto& target : preparation.affected_update_targets) {
+        affected_indices.push_back(target.update_plan_index);
+    }
+
+    bool is_consistent = preparation.affected_update_targets.size() ==
+            expected_positions.size();
+    const std::size_t comparable_count = std::min(
+            preparation.affected_update_targets.size(),
+            expected_positions.size());
+    for(std::size_t index = 0; index < comparable_count; ++index) {
+        if(!same_preflight_target_snapshot(
+                   preparation.affected_update_targets[index],
+                   preflight.targets[expected_positions[index]])) {
+            is_consistent = false;
+        }
+    }
+    if(is_consistent) return;
+
+    add_reduction_issue(
+            result,
+            AurUpdateOperationReductionReason::
+                    PreparationTargetSnapshotInconsistent,
+            AurUpdateOperationReductionStage::Preparation,
+            "Preparation target snapshot does not match the targets eligible in this preflight phase.",
+            std::move(affected_indices), std::move(expected_positions));
+}
+
+bool is_known_preflight_status(
+        AurUpdateExecutionTargetStatus status) noexcept {
+    switch(status) {
+    case AurUpdateExecutionTargetStatus::Executable:
+    case AurUpdateExecutionTargetStatus::Skipped:
+    case AurUpdateExecutionTargetStatus::Unsupported:
+    case AurUpdateExecutionTargetStatus::Incomplete:
+        return true;
+    }
+    return false;
+}
+
+bool is_known_preflight_reason(AurUpdateExecutionReason reason) noexcept {
+    switch(reason) {
+    case AurUpdateExecutionReason::None:
+    case AurUpdateExecutionReason::UpToDate:
+    case AurUpdateExecutionReason::NonAurForeign:
+    case AurUpdateExecutionReason::AurMetadataUnavailable:
+    case AurUpdateExecutionReason::VersionComparisonUnavailable:
+    case AurUpdateExecutionReason::InstalledReasonUnknown:
+    case AurUpdateExecutionReason::UpdatePlanInconsistent:
+    case AurUpdateExecutionReason::DuplicateUpdateTarget:
+    case AurUpdateExecutionReason::RepositoryMetadataUnavailable:
+    case AurUpdateExecutionReason::AurDependencyMetadataUnavailable:
+    case AurUpdateExecutionReason::ProviderMetadataUnavailable:
+    case AurUpdateExecutionReason::UnresolvedDependency:
+    case AurUpdateExecutionReason::VersionConstraintUnverified:
+    case AurUpdateExecutionReason::DependencyCycle:
+    case AurUpdateExecutionReason::BuildPlanInconsistent:
+    case AurUpdateExecutionReason::PackageBaseMismatch:
+    case AurUpdateExecutionReason::SplitPackageSelectionRequired:
+    case AurUpdateExecutionReason::MultiplePackageTargetsForPackageBase:
+    case AurUpdateExecutionReason::AmbiguousProvider:
+    case AurUpdateExecutionReason::ConflictsOrReplacesUnresolved:
+        return true;
+    }
+    return false;
+}
+
+bool is_normal_skipped_preflight_reason(
+        AurUpdateExecutionReason reason) noexcept {
+    return reason == AurUpdateExecutionReason::UpToDate ||
+           reason == AurUpdateExecutionReason::NonAurForeign;
+}
+
+bool is_known_installed_package_reason(
+        InstalledPackageReason reason) noexcept {
+    switch(reason) {
+    case InstalledPackageReason::Explicit:
+    case InstalledPackageReason::Dependency:
+    case InstalledPackageReason::Unknown:
+        return true;
+    }
+    return false;
+}
+
+bool is_known_version_relation(AurVersionRelation relation) noexcept {
+    switch(relation) {
+    case AurVersionRelation::OlderThanInstalled:
+    case AurVersionRelation::SameAsInstalled:
+    case AurVersionRelation::NewerThanInstalled:
+    case AurVersionRelation::Unavailable:
+        return true;
+    }
+    return false;
+}
+
+bool is_known_update_classification(
+        AurUpdateClassification classification) noexcept {
+    switch(classification) {
+    case AurUpdateClassification::UpdateAvailable:
+    case AurUpdateClassification::UpToDate:
+    case AurUpdateClassification::NonAurForeign:
+    case AurUpdateClassification::MetadataUnavailable:
+    case AurUpdateClassification::VersionComparisonUnavailable:
+        return true;
+    }
+    return false;
+}
+
+bool is_known_desired_install_reason(DesiredInstallReason reason) noexcept {
+    switch(reason) {
+    case DesiredInstallReason::Explicit:
+    case DesiredInstallReason::Dependency:
+        return true;
+    }
+    return false;
+}
+
+bool has_normal_skipped_preflight_issues(
+        const AurUpdateExecutionTarget& target) noexcept {
+    bool has_up_to_date_reason = false;
+    bool has_non_aur_reason = false;
+    for(const auto& issue : target.issues) {
+        if(issue.reason == AurUpdateExecutionReason::None) continue;
+        if(!is_normal_skipped_preflight_reason(issue.reason)) return false;
+        has_up_to_date_reason = has_up_to_date_reason ||
+                issue.reason == AurUpdateExecutionReason::UpToDate;
+        has_non_aur_reason = has_non_aur_reason ||
+                issue.reason == AurUpdateExecutionReason::NonAurForeign;
+    }
+    if(has_up_to_date_reason && !has_non_aur_reason) {
+        return target.update.classification ==
+                       AurUpdateClassification::UpToDate &&
+               target.update.aur_package.has_value() &&
+               (target.update.aur_package->version_relation ==
+                        AurVersionRelation::OlderThanInstalled ||
+                target.update.aur_package->version_relation ==
+                        AurVersionRelation::SameAsInstalled);
+    }
+    if(has_non_aur_reason && !has_up_to_date_reason) {
+        return target.update.classification ==
+                       AurUpdateClassification::NonAurForeign &&
+               !target.update.aur_package.has_value();
+    }
+    return false;
+}
+
+bool is_known_preparation_reason(AurUpdatePreparationReason reason) noexcept {
+    switch(reason) {
+    case AurUpdatePreparationReason::None:
+    case AurUpdatePreparationReason::BlockingPreflight:
+    case AurUpdatePreparationReason::PreflightInconsistent:
+    case AurUpdatePreparationReason::BuildPlanMissing:
+    case AurUpdatePreparationReason::BuildPlanOrderEmpty:
+    case AurUpdatePreparationReason::RootAttributionInconsistent:
+    case AurUpdatePreparationReason::PackageTargetAttributionInconsistent:
+    case AurUpdatePreparationReason::DesiredInstallReasonMissing:
+    case AurUpdatePreparationReason::SourcePreferenceUnavailable:
+    case AurUpdatePreparationReason::SourcePreferencePkgdestConflict:
+    case AurUpdatePreparationReason::StaticWorkItemInvalid:
+    case AurUpdatePreparationReason::PacmanDatabaseUnavailable:
+    case AurUpdatePreparationReason::GenericPreparationInconsistent:
+        return true;
+    }
+    return false;
+}
+
+bool is_known_source_preference_failure_kind(
+        SourcePreferenceFailureKind kind) noexcept {
+    switch(kind) {
+    case SourcePreferenceFailureKind::StatusUnavailable:
+    case SourcePreferenceFailureKind::UnsupportedFileType:
+    case SourcePreferenceFailureKind::OpenFailed:
+    case SourcePreferenceFailureKind::ReadFailed:
+        return true;
+    }
+    return false;
+}
+
+bool is_known_package_metadata_error_code(
+        PackageMetadataErrorCode code) noexcept {
+    switch(code) {
+    case PackageMetadataErrorCode::ConfigurationUnavailable:
+    case PackageMetadataErrorCode::ConfigurationMalformed:
+    case PackageMetadataErrorCode::InitializationFailed:
+    case PackageMetadataErrorCode::LocalDatabaseUnavailable:
+    case PackageMetadataErrorCode::InvalidPackageName:
+    case PackageMetadataErrorCode::QueryFailed:
+    case PackageMetadataErrorCode::MalformedMetadata:
+    case PackageMetadataErrorCode::SyncDatabaseUnavailable:
+    case PackageMetadataErrorCode::RepositoryNotConfigured:
+        return true;
+    }
+    return false;
+}
+
+bool is_executable_preflight_status(
+        AurUpdateExecutionTargetStatus status) noexcept {
+    return status == AurUpdateExecutionTargetStatus::Executable;
+}
+
+bool is_blocking_preflight_status(
+        AurUpdateExecutionTargetStatus status) noexcept {
+    return status == AurUpdateExecutionTargetStatus::Unsupported ||
+           status == AurUpdateExecutionTargetStatus::Incomplete;
+}
+
+enum class PreparationCorrelationPhase {
+    Executable,
+    PreflightBlocked,
+    NoTargets,
+};
+
+PreparationCorrelationPhase determine_preparation_correlation_phase(
+        bool has_execution_result,
+        bool has_preflight_blocker,
+        bool has_executable_target) noexcept {
+    if(has_execution_result) {
+        return PreparationCorrelationPhase::Executable;
+    }
+    if(has_preflight_blocker) {
+        return PreparationCorrelationPhase::PreflightBlocked;
+    }
+    if(has_executable_target) {
+        return PreparationCorrelationPhase::Executable;
+    }
+    return PreparationCorrelationPhase::NoTargets;
+}
+
+bool is_preparation_issue_target_allowed(
+        PreparationCorrelationPhase phase,
+        AurUpdateExecutionTargetStatus status) noexcept {
+    switch(phase) {
+    case PreparationCorrelationPhase::Executable:
+        return status == AurUpdateExecutionTargetStatus::Executable;
+    case PreparationCorrelationPhase::PreflightBlocked:
+        return is_blocking_preflight_status(status);
+    case PreparationCorrelationPhase::NoTargets:
+        return false;
+    }
+    return false;
+}
+
+bool is_preparation_warning_target_allowed(
+        PreparationCorrelationPhase phase,
+        AurUpdateExecutionTargetStatus status) noexcept {
+    return phase == PreparationCorrelationPhase::Executable &&
+           status == AurUpdateExecutionTargetStatus::Executable;
+}
+
+AurUpdateOperationTargetStatus initial_target_status(
+        AurUpdateExecutionTargetStatus status) noexcept {
+    switch(status) {
+    case AurUpdateExecutionTargetStatus::Executable:
+        return AurUpdateOperationTargetStatus::NotAttempted;
+    case AurUpdateExecutionTargetStatus::Skipped:
+        return AurUpdateOperationTargetStatus::Skipped;
+    case AurUpdateExecutionTargetStatus::Unsupported:
+        return AurUpdateOperationTargetStatus::Unsupported;
+    case AurUpdateExecutionTargetStatus::Incomplete:
+        return AurUpdateOperationTargetStatus::Incomplete;
+    }
+    return AurUpdateOperationTargetStatus::Incomplete;
+}
+
+bool is_known_work_item_status(
+        AurUpdateWorkItemExecutionStatus status) noexcept {
+    switch(status) {
+    case AurUpdateWorkItemExecutionStatus::Updated:
+    case AurUpdateWorkItemExecutionStatus::NoChange:
+    case AurUpdateWorkItemExecutionStatus::Failed:
+    case AurUpdateWorkItemExecutionStatus::UpdatedCleanupFailed:
+    case AurUpdateWorkItemExecutionStatus::NoChangeCleanupFailed:
+    case AurUpdateWorkItemExecutionStatus::NotAttempted:
+        return true;
+    }
+    return false;
+}
+
+bool is_known_failure_kind(AurUpdateWorkItemFailureKind kind) noexcept {
+    switch(kind) {
+    case AurUpdateWorkItemFailureKind::None:
+    case AurUpdateWorkItemFailureKind::BuildOrInstallFailed:
+    case AurUpdateWorkItemFailureKind::CleanupFailedAfterPackageTransaction:
+    case AurUpdateWorkItemFailureKind::UnknownException:
+    case AurUpdateWorkItemFailureKind::PriorWorkItemStopped:
+        return true;
+    }
+    return false;
+}
+
+bool is_terminal_status(AurUpdateWorkItemExecutionStatus status) noexcept {
+    return status == AurUpdateWorkItemExecutionStatus::Failed ||
+           status == AurUpdateWorkItemExecutionStatus::UpdatedCleanupFailed ||
+           status ==
+                   AurUpdateWorkItemExecutionStatus::NoChangeCleanupFailed;
+}
+
+bool is_cleanup_failure_status(
+        AurUpdateWorkItemExecutionStatus status) noexcept {
+    return status == AurUpdateWorkItemExecutionStatus::UpdatedCleanupFailed ||
+           status ==
+                   AurUpdateWorkItemExecutionStatus::NoChangeCleanupFailed;
+}
+
+bool has_consistent_failure_kind(
+        AurUpdateWorkItemExecutionStatus status,
+        AurUpdateWorkItemFailureKind failure_kind) noexcept {
+    switch(status) {
+    case AurUpdateWorkItemExecutionStatus::Updated:
+    case AurUpdateWorkItemExecutionStatus::NoChange:
+        return failure_kind == AurUpdateWorkItemFailureKind::None;
+    case AurUpdateWorkItemExecutionStatus::Failed:
+        return failure_kind ==
+                       AurUpdateWorkItemFailureKind::BuildOrInstallFailed ||
+               failure_kind ==
+                       AurUpdateWorkItemFailureKind::UnknownException;
+    case AurUpdateWorkItemExecutionStatus::UpdatedCleanupFailed:
+    case AurUpdateWorkItemExecutionStatus::NoChangeCleanupFailed:
+        return failure_kind == AurUpdateWorkItemFailureKind::
+                                       CleanupFailedAfterPackageTransaction;
+    case AurUpdateWorkItemExecutionStatus::NotAttempted:
+        return failure_kind ==
+                AurUpdateWorkItemFailureKind::PriorWorkItemStopped;
+    }
+    return false;
+}
+
+AurUpdateOperationExecutionContribution make_contribution(
+        const AurUpdateWorkItemExecutionResult& work_item) {
+    return AurUpdateOperationExecutionContribution{
+            work_item.work_item_index,
+            work_item.package_name,
+            work_item.package_base,
+            work_item.status,
+            work_item.failure_kind,
+            work_item.diagnostic};
+}
+
+AurUpdateOperationTargetStatus map_execution_status(
+        AurUpdateWorkItemExecutionStatus status) noexcept {
+    switch(status) {
+    case AurUpdateWorkItemExecutionStatus::Updated:
+        return AurUpdateOperationTargetStatus::Updated;
+    case AurUpdateWorkItemExecutionStatus::NoChange:
+        return AurUpdateOperationTargetStatus::NoChange;
+    case AurUpdateWorkItemExecutionStatus::Failed:
+        return AurUpdateOperationTargetStatus::Failed;
+    case AurUpdateWorkItemExecutionStatus::UpdatedCleanupFailed:
+        return AurUpdateOperationTargetStatus::UpdatedCleanupFailed;
+    case AurUpdateWorkItemExecutionStatus::NoChangeCleanupFailed:
+        return AurUpdateOperationTargetStatus::NoChangeCleanupFailed;
+    case AurUpdateWorkItemExecutionStatus::NotAttempted:
+        return AurUpdateOperationTargetStatus::NotAttempted;
+    }
+    return AurUpdateOperationTargetStatus::Incomplete;
+}
+
+int terminal_priority(AurUpdateWorkItemExecutionStatus status) noexcept {
+    switch(status) {
+    case AurUpdateWorkItemExecutionStatus::UpdatedCleanupFailed:
+        return 3;
+    case AurUpdateWorkItemExecutionStatus::NoChangeCleanupFailed:
+        return 2;
+    case AurUpdateWorkItemExecutionStatus::Failed:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+void retain_decisive_contribution(
+        AurUpdateOperationTargetResult& target,
+        const AurUpdateOperationExecutionContribution& contribution) {
+    target.execution_work_item_index = contribution.work_item_index;
+    if(contribution.failure_kind == AurUpdateWorkItemFailureKind::None) {
+        target.execution_failure_kind.reset();
+    } else {
+        target.execution_failure_kind = contribution.failure_kind;
+    }
+    target.execution_diagnostic = contribution.diagnostic;
+}
+
+void fold_execution_contributions(
+        AurUpdateOperationResult& result,
+        AurUpdateOperationTargetResult& target) {
+    const AurUpdateOperationExecutionContribution* terminal = nullptr;
+    const AurUpdateOperationExecutionContribution* unknown = nullptr;
+    const AurUpdateOperationExecutionContribution* not_attempted = nullptr;
+    const AurUpdateOperationExecutionContribution* updated = nullptr;
+    const AurUpdateOperationExecutionContribution* no_change = nullptr;
+    std::size_t terminal_count = 0;
+
+    for(const auto& contribution : target.execution_contributions) {
+        if(!is_known_work_item_status(contribution.status)) {
+            if(unknown == nullptr) unknown = &contribution;
+            continue;
+        }
+        if(is_terminal_status(contribution.status)) {
+            ++terminal_count;
+            if(terminal == nullptr ||
+               terminal_priority(contribution.status) >
+                       terminal_priority(terminal->status)) {
+                terminal = &contribution;
+            }
+            continue;
+        }
+        if(contribution.status ==
+           AurUpdateWorkItemExecutionStatus::NotAttempted) {
+            if(not_attempted == nullptr) not_attempted = &contribution;
+        } else if(contribution.status ==
+                  AurUpdateWorkItemExecutionStatus::Updated) {
+            updated = &contribution;
+        } else if(contribution.status ==
+                  AurUpdateWorkItemExecutionStatus::NoChange) {
+            no_change = &contribution;
+        }
+    }
+
+    if(terminal_count > 1) {
+        add_reduction_issue(
+                result,
+                AurUpdateOperationReductionReason::WorkItemResultInconsistent,
+                AurUpdateOperationReductionStage::Execution,
+                "Multiple terminal execution outcomes were attributed to one AUR update target.",
+                {target.update_plan_index}, {},
+                terminal == nullptr
+                        ? std::nullopt
+                        : std::optional<std::size_t>{
+                                  terminal->work_item_index});
+    }
+
+    // POLICY(#267): terminal failureは後続NotAttemptedより優先し、unknownを
+    // 含む場合も既知のfailure/cleanup partial resultを捨てない。
+    const AurUpdateOperationExecutionContribution* decisive = terminal;
+    if(decisive == nullptr && unknown != nullptr) {
+        target.status = AurUpdateOperationTargetStatus::Incomplete;
+        decisive = unknown;
+    } else if(decisive == nullptr && not_attempted != nullptr) {
+        target.status = AurUpdateOperationTargetStatus::NotAttempted;
+        decisive = not_attempted;
+    } else if(decisive == nullptr && updated != nullptr) {
+        target.status = AurUpdateOperationTargetStatus::Updated;
+        decisive = updated;
+    } else if(decisive == nullptr && no_change != nullptr) {
+        target.status = AurUpdateOperationTargetStatus::NoChange;
+        decisive = no_change;
+    }
+
+    if(terminal != nullptr) {
+        target.status = map_execution_status(terminal->status);
+    }
+    if(decisive != nullptr) retain_decisive_contribution(target, *decisive);
+}
+
+bool invocation_result_is_consistent(
+        const AurUpdateSourceBuildExecutionResult& execution) noexcept {
+    std::size_t terminal_count = 0;
+    std::size_t terminal_position = 0;
+    bool has_unknown_status = false;
+    for(std::size_t position = 0;
+        position < execution.work_item_results.size(); ++position) {
+        const auto status = execution.work_item_results[position].status;
+        if(!is_known_work_item_status(status)) {
+            has_unknown_status = true;
+            continue;
+        }
+        if(is_terminal_status(status)) {
+            ++terminal_count;
+            terminal_position = position;
+        }
+    }
+    if(has_unknown_status || terminal_count > 1) return false;
+
+    if(terminal_count == 1) {
+        for(std::size_t position = 0;
+            position < execution.work_item_results.size(); ++position) {
+            const auto status = execution.work_item_results[position].status;
+            if(position < terminal_position &&
+               status != AurUpdateWorkItemExecutionStatus::Updated &&
+               status != AurUpdateWorkItemExecutionStatus::NoChange) {
+                return false;
+            }
+            if(position > terminal_position &&
+               status != AurUpdateWorkItemExecutionStatus::NotAttempted) {
+                return false;
+            }
+        }
+    }
+
+    switch(execution.status) {
+    case AurUpdateInvocationExecutionStatus::Completed:
+        return terminal_count == 0 && std::all_of(
+                execution.work_item_results.begin(),
+                execution.work_item_results.end(),
+                [](const AurUpdateWorkItemExecutionResult& work_item) {
+                    return work_item.status ==
+                                   AurUpdateWorkItemExecutionStatus::Updated ||
+                           work_item.status ==
+                                   AurUpdateWorkItemExecutionStatus::NoChange;
+                });
+    case AurUpdateInvocationExecutionStatus::StoppedOnWorkItemFailure:
+        return terminal_count == 1 &&
+               execution.work_item_results[terminal_position].status ==
+                       AurUpdateWorkItemExecutionStatus::Failed;
+    case AurUpdateInvocationExecutionStatus::
+            StoppedAfterPackageCleanupFailure:
+        return terminal_count == 1 &&
+               is_cleanup_failure_status(
+                       execution.work_item_results[terminal_position]
+                               .status);
+    }
+    return false;
+}
+
+bool is_known_invocation_status(
+        AurUpdateInvocationExecutionStatus status) noexcept {
+    switch(status) {
+    case AurUpdateInvocationExecutionStatus::Completed:
+    case AurUpdateInvocationExecutionStatus::StoppedOnWorkItemFailure:
+    case AurUpdateInvocationExecutionStatus::
+            StoppedAfterPackageCleanupFailure:
+        return true;
+    }
+    return false;
+}
+
+AurUpdateOperationStatus map_invocation_status(
+        AurUpdateInvocationExecutionStatus status) noexcept {
+    switch(status) {
+    case AurUpdateInvocationExecutionStatus::Completed:
+        return AurUpdateOperationStatus::Completed;
+    case AurUpdateInvocationExecutionStatus::StoppedOnWorkItemFailure:
+        return AurUpdateOperationStatus::StoppedOnWorkItemFailure;
+    case AurUpdateInvocationExecutionStatus::
+            StoppedAfterPackageCleanupFailure:
+        return AurUpdateOperationStatus::StoppedAfterPackageCleanupFailure;
+    }
+    return AurUpdateOperationStatus::InconsistentResult;
+}
+
+} // namespace
+
+bool AurUpdateOperationResult::is_success() const noexcept {
+    return status == AurUpdateOperationStatus::NoUpdates ||
+           status == AurUpdateOperationStatus::Completed;
+}
+
+bool AurUpdateOperationResult::changed_package_state() const noexcept {
+    if(std::any_of(
+               execution_work_items.begin(), execution_work_items.end(),
+               [](const AurUpdateWorkItemExecutionResult& work_item) {
+                   return work_item.status ==
+                                  AurUpdateWorkItemExecutionStatus::Updated ||
+                          work_item.status == AurUpdateWorkItemExecutionStatus::
+                                                      UpdatedCleanupFailed;
+               })) {
+        return true;
+    }
+    for(const auto& target : targets) {
+        if(target.status == AurUpdateOperationTargetStatus::Updated ||
+           target.status ==
+                   AurUpdateOperationTargetStatus::UpdatedCleanupFailed) {
+            return true;
+        }
+        for(const auto& contribution : target.execution_contributions) {
+            if(contribution.status ==
+                       AurUpdateWorkItemExecutionStatus::Updated ||
+               contribution.status == AurUpdateWorkItemExecutionStatus::
+                                              UpdatedCleanupFailed) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+bool AurUpdateOperationResult::has_partial_completion() const noexcept {
+    return changed_package_state() && !is_success();
+}
+
+bool AurUpdateOperationResult::has_not_attempted_targets() const noexcept {
+    return std::any_of(
+            targets.begin(), targets.end(),
+            [](const AurUpdateOperationTargetResult& target) {
+                return target.status ==
+                        AurUpdateOperationTargetStatus::NotAttempted;
+            });
+}
+
+bool AurUpdateOperationResult::has_cleanup_failure() const noexcept {
+    if(std::any_of(
+               execution_work_items.begin(), execution_work_items.end(),
+               [](const AurUpdateWorkItemExecutionResult& work_item) {
+                   return is_cleanup_failure_status(work_item.status);
+               })) {
+        return true;
+    }
+    for(const auto& target : targets) {
+        if(target.status ==
+                   AurUpdateOperationTargetStatus::UpdatedCleanupFailed ||
+           target.status == AurUpdateOperationTargetStatus::
+                                    NoChangeCleanupFailed) {
+            return true;
+        }
+        if(std::any_of(
+                   target.execution_contributions.begin(),
+                   target.execution_contributions.end(),
+                   [](const AurUpdateOperationExecutionContribution&
+                              contribution) {
+                       return is_cleanup_failure_status(
+                               contribution.status);
+                   })) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool AurUpdateOperationResult::has_blocking_targets() const noexcept {
+    return std::any_of(
+            targets.begin(), targets.end(),
+            [](const AurUpdateOperationTargetResult& target) {
+                return target.status ==
+                               AurUpdateOperationTargetStatus::Unsupported ||
+                       target.status ==
+                               AurUpdateOperationTargetStatus::Incomplete;
+            });
+}
+
+AurUpdateOperationResult reduce_aur_update_operation_result(
+        const AurUpdateExecutionPreflight& preflight,
+        const AurUpdateSourceBuildPreparation& preparation,
+        const std::optional<AurUpdateSourceBuildExecutionResult>& execution) {
+    AurUpdateOperationResult result;
+    result.preparation_issues = preparation.issues;
+    result.preparation_warnings = preparation.warnings;
+    if(execution.has_value()) {
+        result.execution_status = execution->status;
+        result.execution_work_items = execution->work_item_results;
+    }
+    result.targets.reserve(preflight.targets.size());
+
+    std::map<std::size_t, std::vector<std::size_t>>
+            positions_by_update_plan_index;
+    std::vector<bool> executable_positions(preflight.targets.size(), false);
+    std::vector<bool> blocking_positions(preflight.targets.size(), false);
+    bool has_executable_target = false;
+    bool has_preflight_blocker = false;
+    bool all_targets_are_skipped = true;
+
+    for(std::size_t position = 0; position < preflight.targets.size();
+        ++position) {
+        const AurUpdateExecutionTarget& input = preflight.targets[position];
+        bool has_unknown_target_enum = false;
+        positions_by_update_plan_index[input.update_plan_index].push_back(
+                position);
+
+        AurUpdateOperationTargetResult target;
+        target.update_plan_index = input.update_plan_index;
+        target.update = input.update;
+        target.package_base = package_base_for_target(input);
+        target.status = initial_target_status(input.status);
+        target.preflight_issues = input.issues;
+        result.targets.push_back(std::move(target));
+
+        if(!is_known_preflight_status(input.status)) {
+            has_unknown_target_enum = true;
+            add_reduction_issue(
+                    result,
+                    AurUpdateOperationReductionReason::UnknownEnumValue,
+                    AurUpdateOperationReductionStage::Preflight,
+                    "AUR update preflight target has an unknown status.",
+                    {input.update_plan_index}, {position});
+            all_targets_are_skipped = false;
+        } else {
+            executable_positions[position] =
+                    is_executable_preflight_status(input.status);
+            blocking_positions[position] =
+                    is_blocking_preflight_status(input.status);
+            has_executable_target = has_executable_target ||
+                    executable_positions[position];
+            has_preflight_blocker = has_preflight_blocker ||
+                    blocking_positions[position];
+            all_targets_are_skipped = all_targets_are_skipped &&
+                    input.status == AurUpdateExecutionTargetStatus::Skipped;
+        }
+
+        for(const auto& issue : input.issues) {
+            if(!is_known_preflight_reason(issue.reason)) {
+                has_unknown_target_enum = true;
+                add_reduction_issue(
+                        result,
+                        AurUpdateOperationReductionReason::UnknownEnumValue,
+                        AurUpdateOperationReductionStage::Preflight,
+                        "AUR update preflight issue has an unknown reason.",
+                        {input.update_plan_index}, {position});
+            }
+            if(input.status == AurUpdateExecutionTargetStatus::Executable &&
+               issue.reason != AurUpdateExecutionReason::None) {
+                add_reduction_issue(
+                        result,
+                        AurUpdateOperationReductionReason::
+                                OtherCorrelationInconsistent,
+                        AurUpdateOperationReductionStage::Preflight,
+                        "Executable AUR update target retains a blocking preflight issue.",
+                        {input.update_plan_index}, {position});
+            }
+        }
+        if(!is_known_installed_package_reason(
+                   input.update.install_reason)) {
+            has_unknown_target_enum = true;
+            add_reduction_issue(
+                    result,
+                    AurUpdateOperationReductionReason::UnknownEnumValue,
+                    AurUpdateOperationReductionStage::Preflight,
+                    "AUR update target has an unknown installed package reason.",
+                    {input.update_plan_index}, {position});
+        }
+        if(!is_known_update_classification(input.update.classification)) {
+            has_unknown_target_enum = true;
+            add_reduction_issue(
+                    result,
+                    AurUpdateOperationReductionReason::UnknownEnumValue,
+                    AurUpdateOperationReductionStage::Preflight,
+                    "AUR update target has an unknown update classification.",
+                    {input.update_plan_index}, {position});
+        }
+        if(input.update.aur_package.has_value() &&
+           !is_known_version_relation(
+                   input.update.aur_package->version_relation)) {
+            has_unknown_target_enum = true;
+            add_reduction_issue(
+                    result,
+                    AurUpdateOperationReductionReason::UnknownEnumValue,
+                    AurUpdateOperationReductionStage::Preflight,
+                    "AUR update target has an unknown version relation.",
+                    {input.update_plan_index}, {position});
+        }
+        if(input.desired_install_reason.has_value() &&
+           !is_known_desired_install_reason(
+                   *input.desired_install_reason)) {
+            has_unknown_target_enum = true;
+            add_reduction_issue(
+                    result,
+                    AurUpdateOperationReductionReason::UnknownEnumValue,
+                    AurUpdateOperationReductionStage::Preflight,
+                    "AUR update target has an unknown desired install reason.",
+                    {input.update_plan_index}, {position});
+        }
+        if(input.status == AurUpdateExecutionTargetStatus::Skipped &&
+           (has_unknown_target_enum ||
+            !has_normal_skipped_preflight_issues(input))) {
+            add_reduction_issue(
+                    result,
+                    AurUpdateOperationReductionReason::
+                            OtherCorrelationInconsistent,
+                    AurUpdateOperationReductionStage::Preflight,
+                    "Skipped AUR update target cannot be confirmed as a normal skip.",
+                    {input.update_plan_index}, {position});
+            result.targets[position].status =
+                    AurUpdateOperationTargetStatus::Incomplete;
+            all_targets_are_skipped = false;
+        }
+
+        if(input.update_plan_index >= preflight.targets.size()) {
+            add_reduction_issue(
+                    result,
+                    AurUpdateOperationReductionReason::
+                            OutOfRangePreflightUpdatePlanIndex,
+                    AurUpdateOperationReductionStage::Preflight,
+                    "AUR update preflight target has an out-of-range update plan index.",
+                    {input.update_plan_index}, {position});
+            if(executable_positions[position]) {
+                result.targets[position].status =
+                        AurUpdateOperationTargetStatus::Incomplete;
+            }
+        }
+        if(input.update_plan_index != position) {
+            add_reduction_issue(
+                    result,
+                    AurUpdateOperationReductionReason::
+                            PreflightTargetOrderInconsistent,
+                    AurUpdateOperationReductionStage::Preflight,
+                    "AUR update preflight target index differs from its original-order position.",
+                    {input.update_plan_index}, {position});
+        }
+    }
+
+    std::map<std::size_t, std::size_t> unique_position_by_update_plan_index;
+    for(const auto& [update_plan_index, positions] :
+        positions_by_update_plan_index) {
+        if(positions.size() > 1) {
+            add_reduction_issue(
+                    result,
+                    AurUpdateOperationReductionReason::
+                            DuplicatePreflightUpdatePlanIndex,
+                    AurUpdateOperationReductionStage::Preflight,
+                    "AUR update preflight contains a duplicate update plan index.",
+                    {update_plan_index}, positions);
+            for(const std::size_t position : positions) {
+                if(executable_positions[position]) {
+                    result.targets[position].status =
+                            AurUpdateOperationTargetStatus::Incomplete;
+                }
+            }
+            continue;
+        }
+        if(update_plan_index < preflight.targets.size()) {
+            unique_position_by_update_plan_index.emplace(
+                    update_plan_index, positions.front());
+        }
+    }
+
+    const PreparationCorrelationPhase preparation_phase =
+            determine_preparation_correlation_phase(
+                    execution.has_value(), has_preflight_blocker,
+                    has_executable_target);
+
+    // POLICY(#267): normal preparation/executionは全Executable snapshot、
+    // preflight blockerは全blocking target snapshotを正本にする。
+    const std::vector<bool>& expected_preparation_target_positions =
+            preparation_phase == PreparationCorrelationPhase::PreflightBlocked
+            ? blocking_positions
+            : executable_positions;
+    validate_preparation_target_snapshot(
+            result, preflight, preparation,
+            expected_preparation_target_positions);
+    if(preparation_phase == PreparationCorrelationPhase::NoTargets &&
+       !preparation.affected_roots.empty()) {
+        add_reduction_issue(
+                result,
+                AurUpdateOperationReductionReason::
+                        PreparationAttributionInconsistent,
+                AurUpdateOperationReductionStage::Preparation,
+                "Preparation retains root attribution without a target-bearing phase.");
+    }
+
+    const bool apply_preparation_failures = !execution.has_value() &&
+            !has_preflight_blocker && !preparation.issues.empty();
+    for(const auto& issue : preparation.issues) {
+        if(issue.affected_update_plan_indices.empty() &&
+           preparation_phase != PreparationCorrelationPhase::Executable) {
+            add_reduction_issue(
+                    result,
+                    AurUpdateOperationReductionReason::
+                            PreparationAttributionInconsistent,
+                    AurUpdateOperationReductionStage::Preparation,
+                    "Global preparation issue exists outside the executable preparation phase.");
+        }
+        if(!is_known_preparation_reason(issue.reason)) {
+            add_reduction_issue(
+                    result,
+                    AurUpdateOperationReductionReason::UnknownEnumValue,
+                    AurUpdateOperationReductionStage::Preparation,
+                    "AUR update preparation issue has an unknown reason.",
+                    issue.affected_update_plan_indices);
+        } else if(issue.reason == AurUpdatePreparationReason::None) {
+            add_reduction_issue(
+                    result,
+                    AurUpdateOperationReductionReason::
+                            OtherCorrelationInconsistent,
+                    AurUpdateOperationReductionStage::Preparation,
+                    "AUR update preparation issue has no typed reason.",
+                    issue.affected_update_plan_indices);
+        }
+        if(issue.preflight_issue.has_value() &&
+           !is_known_preflight_reason(issue.preflight_issue->reason)) {
+            add_reduction_issue(
+                    result,
+                    AurUpdateOperationReductionReason::UnknownEnumValue,
+                    AurUpdateOperationReductionStage::Preparation,
+                    "Nested AUR update preflight issue has an unknown reason.",
+                    issue.affected_update_plan_indices);
+        }
+        if(issue.source_preference_failure.has_value() &&
+           !is_known_source_preference_failure_kind(
+                   issue.source_preference_failure->kind)) {
+            add_reduction_issue(
+                    result,
+                    AurUpdateOperationReductionReason::UnknownEnumValue,
+                    AurUpdateOperationReductionStage::Preparation,
+                    "AUR update preparation issue has an unknown source preference failure kind.",
+                    issue.affected_update_plan_indices);
+        }
+        if(issue.package_metadata_failure.has_value() &&
+           !is_known_package_metadata_error_code(
+                   issue.package_metadata_failure->code)) {
+            add_reduction_issue(
+                    result,
+                    AurUpdateOperationReductionReason::UnknownEnumValue,
+                    AurUpdateOperationReductionStage::Preparation,
+                    "AUR update preparation issue has an unknown package metadata error code.",
+                    issue.affected_update_plan_indices);
+        }
+        std::set<std::size_t> seen_indices;
+        for(const std::size_t update_plan_index :
+            issue.affected_update_plan_indices) {
+            if(!seen_indices.insert(update_plan_index).second) {
+                add_reduction_issue(
+                        result,
+                        AurUpdateOperationReductionReason::
+                                DuplicatePreparationAttribution,
+                        AurUpdateOperationReductionStage::Preparation,
+                        "AUR update preparation issue contains duplicate target attribution.",
+                        {update_plan_index});
+                continue;
+            }
+
+            const auto position =
+                    unique_position_by_update_plan_index.find(
+                            update_plan_index);
+            if(position == unique_position_by_update_plan_index.end()) {
+                add_reduction_issue(
+                        result,
+                        AurUpdateOperationReductionReason::
+                                UnknownPreparationUpdatePlanIndex,
+                        AurUpdateOperationReductionStage::Preparation,
+                        "AUR update preparation issue refers to an unknown update plan index.",
+                        {update_plan_index});
+                continue;
+            }
+
+            AurUpdateOperationTargetResult& target =
+                    result.targets[position->second];
+            if(!is_preparation_issue_target_allowed(
+                       preparation_phase,
+                       preflight.targets[position->second].status)) {
+                add_reduction_issue(
+                        result,
+                        AurUpdateOperationReductionReason::
+                                PreparationAttributionInconsistent,
+                        AurUpdateOperationReductionStage::Preparation,
+                        "AUR update preparation issue is attributed to a target outside the current preparation phase.",
+                        {update_plan_index}, {position->second});
+            }
+            target.preparation_issues.push_back(issue);
+            if(apply_preparation_failures &&
+               executable_positions[position->second]) {
+                target.status = AurUpdateOperationTargetStatus::Failed;
+            }
+        }
+    }
+
+    for(const auto& warning : preparation.warnings) {
+        if(warning.affected_update_plan_indices.empty() &&
+           !warning.affected_roots.empty()) {
+            add_reduction_issue(
+                    result,
+                    AurUpdateOperationReductionReason::
+                            PreparationAttributionInconsistent,
+                    AurUpdateOperationReductionStage::Preparation,
+                    "AUR update preparation warning has root attribution without update target attribution.");
+        }
+        std::set<std::size_t> seen_indices;
+        for(const std::size_t update_plan_index :
+            warning.affected_update_plan_indices) {
+            if(!seen_indices.insert(update_plan_index).second) {
+                add_reduction_issue(
+                        result,
+                        AurUpdateOperationReductionReason::
+                                DuplicatePreparationAttribution,
+                        AurUpdateOperationReductionStage::Preparation,
+                        "AUR update preparation warning contains duplicate target attribution.",
+                        {update_plan_index});
+                continue;
+            }
+            if(!unique_position_by_update_plan_index.contains(
+                       update_plan_index)) {
+                add_reduction_issue(
+                        result,
+                        AurUpdateOperationReductionReason::
+                                UnknownPreparationUpdatePlanIndex,
+                        AurUpdateOperationReductionStage::Preparation,
+                        "AUR update preparation warning refers to an unknown update plan index.",
+                        {update_plan_index});
+                continue;
+            }
+
+            const std::size_t target_position =
+                    unique_position_by_update_plan_index.at(
+                            update_plan_index);
+            if(!is_preparation_warning_target_allowed(
+                       preparation_phase,
+                       preflight.targets[target_position].status)) {
+                add_reduction_issue(
+                        result,
+                        AurUpdateOperationReductionReason::
+                                PreparationAttributionInconsistent,
+                        AurUpdateOperationReductionStage::Preparation,
+                        "AUR update preparation warning is attributed to a target outside the warning-producing phase.",
+                        {update_plan_index}, {target_position});
+            }
+        }
+    }
+
+    if(!execution.has_value()) {
+        const bool has_prepared_execution_snapshot =
+                preparation.invocation.has_value() || std::any_of(
+                        preparation.affected_update_targets.begin(),
+                        preparation.affected_update_targets.end(),
+                        [](const AurUpdateExecutionTarget& target) {
+                            return target.status ==
+                                    AurUpdateExecutionTargetStatus::Executable;
+                        });
+        if(preparation.invocation.has_value() &&
+           !preparation.issues.empty()) {
+            add_reduction_issue(
+                    result,
+                    AurUpdateOperationReductionReason::
+                            OtherCorrelationInconsistent,
+                    AurUpdateOperationReductionStage::Preparation,
+                    "AUR update preparation contains both an invocation and blocking issues.");
+        } else if(
+                preparation_phase ==
+                        PreparationCorrelationPhase::PreflightBlocked &&
+                preparation.invocation.has_value()) {
+            add_reduction_issue(
+                    result,
+                    AurUpdateOperationReductionReason::
+                            OtherCorrelationInconsistent,
+                    AurUpdateOperationReductionStage::Preparation,
+                    "Preflight-blocked preparation unexpectedly contains an execution invocation.");
+        }
+        if(!has_preflight_blocker && preparation.issues.empty() &&
+           (has_executable_target || has_prepared_execution_snapshot)) {
+            std::vector<std::size_t> missing_indices;
+            for(std::size_t position = 0;
+                position < preflight.targets.size(); ++position) {
+                if(executable_positions[position]) {
+                    missing_indices.push_back(
+                            preflight.targets[position].update_plan_index);
+                }
+            }
+            add_reduction_issue(
+                    result,
+                    AurUpdateOperationReductionReason::MissingExecutionResult,
+                    AurUpdateOperationReductionStage::Execution,
+                    "Prepared AUR update targets have no execution result.",
+                    std::move(missing_indices));
+        }
+    } else {
+        if(!preparation.issues.empty()) {
+            add_reduction_issue(
+                    result,
+                    AurUpdateOperationReductionReason::
+                            ExecutionResultWithPreparationIssues,
+                    AurUpdateOperationReductionStage::Execution,
+                    "AUR update execution result exists together with preparation issues.");
+        }
+        if(has_preflight_blocker || !has_executable_target) {
+            add_reduction_issue(
+                    result,
+                    AurUpdateOperationReductionReason::
+                            OtherCorrelationInconsistent,
+                    AurUpdateOperationReductionStage::Execution,
+                    has_preflight_blocker
+                            ? "AUR update execution result exists for a preflight-blocked operation."
+                            : "AUR update execution result exists without an executable preflight target.");
+        }
+
+        std::map<std::size_t, std::size_t> first_result_position_by_work_index;
+        for(std::size_t result_position = 0;
+            result_position < execution->work_item_results.size();
+            ++result_position) {
+            const AurUpdateWorkItemExecutionResult& work_item =
+                    execution->work_item_results[result_position];
+            const bool inserted =
+                    first_result_position_by_work_index.emplace(
+                            work_item.work_item_index, result_position)
+                            .second;
+            if(!inserted) {
+                add_reduction_issue(
+                        result,
+                        AurUpdateOperationReductionReason::
+                                DuplicateExecutionWorkItemIndex,
+                        AurUpdateOperationReductionStage::Execution,
+                        "AUR update execution result contains a duplicate work item index.",
+                        {}, {}, work_item.work_item_index);
+            }
+            if(work_item.work_item_index != result_position) {
+                add_reduction_issue(
+                        result,
+                        AurUpdateOperationReductionReason::
+                                ExecutionWorkItemOrderInconsistent,
+                        AurUpdateOperationReductionStage::Execution,
+                        "AUR update execution work item index differs from result order.",
+                        {}, {}, work_item.work_item_index);
+            }
+
+            const bool known_status =
+                    is_known_work_item_status(work_item.status);
+            const bool known_failure_kind =
+                    is_known_failure_kind(work_item.failure_kind);
+            if(!known_status) {
+                add_reduction_issue(
+                        result,
+                        AurUpdateOperationReductionReason::UnknownEnumValue,
+                        AurUpdateOperationReductionStage::Execution,
+                        "AUR update work item result has an unknown status.",
+                        work_item.affected_update_plan_indices, {},
+                        work_item.work_item_index);
+            }
+            if(!known_failure_kind) {
+                add_reduction_issue(
+                        result,
+                        AurUpdateOperationReductionReason::UnknownEnumValue,
+                        AurUpdateOperationReductionStage::Execution,
+                        "AUR update work item result has an unknown failure kind.",
+                        work_item.affected_update_plan_indices, {},
+                        work_item.work_item_index);
+            }
+            if(known_status && known_failure_kind &&
+               !has_consistent_failure_kind(
+                       work_item.status, work_item.failure_kind)) {
+                add_reduction_issue(
+                        result,
+                        AurUpdateOperationReductionReason::
+                                WorkItemResultInconsistent,
+                        AurUpdateOperationReductionStage::Execution,
+                        "AUR update work item status and failure kind disagree.",
+                        work_item.affected_update_plan_indices, {},
+                        work_item.work_item_index);
+            }
+            if(work_item.affected_update_plan_indices.empty()) {
+                add_reduction_issue(
+                        result,
+                        AurUpdateOperationReductionReason::
+                                WorkItemResultInconsistent,
+                        AurUpdateOperationReductionStage::Execution,
+                        "AUR update work item result has no target attribution.",
+                        {}, {}, work_item.work_item_index);
+            }
+
+            std::set<std::size_t> seen_attributions;
+            for(const std::size_t update_plan_index :
+                work_item.affected_update_plan_indices) {
+                if(!seen_attributions.insert(update_plan_index).second) {
+                    add_reduction_issue(
+                            result,
+                            AurUpdateOperationReductionReason::
+                                    DuplicateExecutionAttribution,
+                            AurUpdateOperationReductionStage::Execution,
+                            "AUR update work item result contains duplicate target attribution.",
+                            {update_plan_index}, {},
+                            work_item.work_item_index);
+                    continue;
+                }
+
+                const auto position =
+                        unique_position_by_update_plan_index.find(
+                                update_plan_index);
+                if(position ==
+                   unique_position_by_update_plan_index.end()) {
+                    add_reduction_issue(
+                            result,
+                            AurUpdateOperationReductionReason::
+                                    UnknownExecutionUpdatePlanIndex,
+                            AurUpdateOperationReductionStage::Execution,
+                            "AUR update work item result refers to an unknown update plan index.",
+                            {update_plan_index}, {},
+                            work_item.work_item_index);
+                    continue;
+                }
+
+                const std::size_t target_position = position->second;
+                result.targets[target_position]
+                        .execution_contributions.push_back(
+                                make_contribution(work_item));
+                if(!executable_positions[target_position]) {
+                    add_reduction_issue(
+                            result,
+                            AurUpdateOperationReductionReason::
+                                    OtherCorrelationInconsistent,
+                            AurUpdateOperationReductionStage::Execution,
+                            "AUR update execution result is attributed to a non-executable preflight target.",
+                            {update_plan_index}, {target_position},
+                            work_item.work_item_index);
+                }
+            }
+        }
+
+        for(std::size_t position = 0; position < result.targets.size();
+            ++position) {
+            if(!executable_positions[position]) continue;
+            if(result.targets[position].execution_contributions.empty()) {
+                const std::size_t update_plan_index =
+                        result.targets[position].update_plan_index;
+                if(unique_position_by_update_plan_index.contains(
+                           update_plan_index)) {
+                    add_reduction_issue(
+                            result,
+                            AurUpdateOperationReductionReason::
+                                    MissingExecutionAttribution,
+                            AurUpdateOperationReductionStage::Execution,
+                            "Executable AUR update target has no execution attribution.",
+                            {update_plan_index}, {position});
+                }
+                continue;
+            }
+            fold_execution_contributions(result, result.targets[position]);
+        }
+
+        if(!is_known_invocation_status(execution->status)) {
+            add_reduction_issue(
+                    result,
+                    AurUpdateOperationReductionReason::UnknownEnumValue,
+                    AurUpdateOperationReductionStage::Execution,
+                    "AUR update invocation result has an unknown status.");
+        } else if(!invocation_result_is_consistent(*execution)) {
+            add_reduction_issue(
+                    result,
+                    AurUpdateOperationReductionReason::
+                            InvocationResultInconsistent,
+                    AurUpdateOperationReductionStage::Execution,
+                    "AUR update invocation status and work item outcomes disagree.");
+        }
+    }
+
+    if(!result.reduction_issues.empty()) {
+        result.status = AurUpdateOperationStatus::InconsistentResult;
+    } else if(execution.has_value()) {
+        result.status = map_invocation_status(execution->status);
+    } else if(has_preflight_blocker || !preparation.issues.empty()) {
+        result.status = AurUpdateOperationStatus::BlockedBeforeExecution;
+    } else if(!has_executable_target && all_targets_are_skipped) {
+        result.status = AurUpdateOperationStatus::NoUpdates;
+    } else {
+        // 上のmissing-result検査で通常は到達しない。将来fieldが増えても
+        // empty successへ倒れないようfail-closedにする。
+        add_reduction_issue(
+                result,
+                AurUpdateOperationReductionReason::
+                        OtherCorrelationInconsistent,
+                AurUpdateOperationReductionStage::Execution,
+                "AUR update operation could not be reduced to a known status.");
+        result.status = AurUpdateOperationStatus::InconsistentResult;
+    }
+    return result;
+}
