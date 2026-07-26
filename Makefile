@@ -29,6 +29,7 @@ PRODUCTION_SOURCE_BUILD_TEST_TARGET := build/tests/production-source-build-test
 PROCESS_CAPTURE_TEST_TARGET := build/tests/process-capture-test
 PROCESS_STDIN_FD_TEST_TARGET := build/tests/process-stdin-fd-test
 AUR_UPDATE_PLAN_TEST_TARGET := $(BUILD_DIR)/tests/aur-update-plan-test
+UPGRADE_ALL_PLAN_TEST_TARGET := $(BUILD_DIR)/tests/upgrade-all-plan-test
 AUR_UPDATE_QUERY_TEST_TARGET := $(BUILD_DIR)/tests/aur-update-query-test
 AUR_UPDATE_EXECUTION_PREFLIGHT_TEST_TARGET := $(BUILD_DIR)/tests/aur-update-execution-preflight-test
 AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION_TEST_TARGET := $(BUILD_DIR)/tests/aur-update-execution-preflight-integration-test
@@ -106,6 +107,13 @@ SOURCE_INSTALL_CHARACTERIZATION_TEST_SRCS := $(filter-out $(SRC_DIR)/jpacker.cpp
 AUR_UPDATE_PLAN_TEST_SRCS := \
 	tests/aur_update_plan_test.cpp \
 	$(SRC_DIR)/aur_update_plan.cpp
+# POLICY(#281): integrated planner testはowned inputを扱うpure modelだけをlinkし、
+# command/query/mutation TUへ依存しない境界を固定する。
+UPGRADE_ALL_PLAN_TEST_SRCS := \
+	tests/test-upgrade-all-plan.cpp \
+	$(SRC_DIR)/upgrade_all_plan.cpp
+UPGRADE_ALL_PLAN_FORBIDDEN_TEST_SRCS := \
+	$(filter-out $(SRC_DIR)/upgrade_all_plan.cpp,$(SRCS))
 AUR_UPDATE_QUERY_TEST_SRCS := \
 	tests/aur_update_query_test.cpp \
 	$(SRC_DIR)/aur_update_query.cpp \
@@ -312,7 +320,7 @@ LIBALPM_BUILD_TARGETS := \
 	$(AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION_TEST_TARGET) \
 	$(UPGRADE_BASELINE_METADATA_TEST_TARGET)
 
-.PHONY: all check-libalpm clean check-aur-update-operation-result-link-firewall test test-app-config test-package-identifier test-package-metadata test-package-metadata-integration test-repository-query test-shell-words test-source-environment test-artifact-workspace test-artifact-identity test-artifact-install-executor test-separated-source-build test-production-source-build test-process-capture test-aur-update-plan test-aur-update-query test-aur-update-command test-aur-update-execution-preflight test-aur-update-execution-preflight-integration test-aur-update-execution-preparation test-aur-update-execution-runner test-aur-update-operation-result test-dependency-plan-model test-artifact-install-plan test-command-stub-contract test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-commands-inspect test-commands-source-maintenance test-commands-sync test-conflicts-replaces test-install-layout test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check install uninstall
+.PHONY: all check-libalpm clean check-upgrade-all-plan-link-firewall check-aur-update-operation-result-link-firewall test test-app-config test-package-identifier test-package-metadata test-package-metadata-integration test-repository-query test-shell-words test-source-environment test-artifact-workspace test-artifact-identity test-artifact-install-executor test-separated-source-build test-production-source-build test-process-capture test-aur-update-plan test-upgrade-all-plan test-aur-update-query test-aur-update-command test-aur-update-execution-preflight test-aur-update-execution-preflight-integration test-aur-update-execution-preparation test-aur-update-execution-runner test-aur-update-operation-result test-dependency-plan-model test-artifact-install-plan test-command-stub-contract test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-commands-inspect test-commands-source-maintenance test-commands-sync test-conflicts-replaces test-install-layout test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check install uninstall
 
 all: $(TARGET) $(MANPAGE)
 
@@ -485,6 +493,11 @@ $(AUR_UPDATE_PLAN_TEST_TARGET): $(AUR_UPDATE_PLAN_TEST_SRCS) $(SRC_DIR)/aur_upda
 	@echo ":: Compiling AUR update plan model test binary"
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -I$(SRC_DIR) $(AUR_UPDATE_PLAN_TEST_SRCS) -o $@
 
+$(UPGRADE_ALL_PLAN_TEST_TARGET): $(UPGRADE_ALL_PLAN_TEST_SRCS) $(SRC_DIR)/upgrade_all_plan.hpp $(VERSION_FILE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling upgrade-all plan model test binary"
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -I$(SRC_DIR) $(UPGRADE_ALL_PLAN_TEST_SRCS) -o $@
+
 $(AUR_UPDATE_QUERY_TEST_TARGET): $(AUR_UPDATE_QUERY_TEST_SRCS) $(SRC_DIR)/aur_update_query.hpp $(SRC_DIR)/aur_update_plan.hpp $(SRC_DIR)/aur_rpc.hpp $(SRC_DIR)/package_metadata.hpp $(SRC_DIR)/installed_package.hpp $(SRC_DIR)/process.hpp $(SRC_DIR)/shell_words.hpp $(SRC_DIR)/logging.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling AUR update query fake-symbol test binary"
@@ -630,6 +643,16 @@ test-process-capture: $(PROCESS_CAPTURE_TEST_TARGET)
 test-aur-update-plan: $(AUR_UPDATE_PLAN_TEST_TARGET)
 	$(abspath $(AUR_UPDATE_PLAN_TEST_TARGET))
 
+check-upgrade-all-plan-link-firewall:
+	@echo ":: Checking upgrade-all plan link firewall"
+	@test -z "$(filter $(UPGRADE_ALL_PLAN_FORBIDDEN_TEST_SRCS),$(UPGRADE_ALL_PLAN_TEST_SRCS))" || { \
+		echo "error: upgrade-all plan test links a production source outside upgrade_all_plan.cpp" >&2; \
+		exit 1; \
+	}
+
+test-upgrade-all-plan: check-upgrade-all-plan-link-firewall $(UPGRADE_ALL_PLAN_TEST_TARGET)
+	$(abspath $(UPGRADE_ALL_PLAN_TEST_TARGET))
+
 test-aur-update-query: $(AUR_UPDATE_QUERY_TEST_TARGET)
 	$(abspath $(AUR_UPDATE_QUERY_TEST_TARGET))
 
@@ -755,6 +778,7 @@ test: \
 	test-production-source-build \
 	test-process-capture \
 	test-aur-update-plan \
+	test-upgrade-all-plan \
 	test-aur-update-query \
 	test-aur-update-command \
 	test-aur-update-execution-preflight \
