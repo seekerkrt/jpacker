@@ -15,12 +15,14 @@
 #include "aur_rpc.hpp"
 #include "cli_parser.hpp"
 #include "cli_routing.hpp"
+#include "commands_aur_update.hpp"
 #include "commands_inspect.hpp"
 #include "commands_source_maintenance.hpp"
 #include "commands_sync.hpp"
 #include "logging.hpp"
 #include "process.hpp"
 #include "shell_words.hpp"
+#include "source_install.hpp"
 #include "trusted_cache.hpp"
 
 #include <algorithm>
@@ -168,8 +170,23 @@ int run_jpacker(int argc, char* argv[]) {
         return 1;
     }
 
+    if(parsed.operation == "upgrade-aur") {
+        if(!parsed.targets.empty()) {
+            Logger::error("upgrade-aur does not accept target operands.");
+            return 1;
+        }
+        try {
+            // POLICY(#267): NoUpdatesでも--rmdepsを成功扱いせず、queryやlog/cache
+            // 初期化より前に既存separated lifecycleのoption契約で拒否する。
+            require_supported_production_source_build_options(g_config);
+        } catch(const std::exception& error) {
+            Logger::error(error.what());
+            return 1;
+        }
+    }
+
     const std::vector<std::string> optionless_operations = {
-            "build", "upgrade", "clean", "add-src", "del-src", "revert", "edit-src", "list-src"};
+            "build", "upgrade", "upgrade-aur", "clean", "add-src", "del-src", "revert", "edit-src", "list-src"};
     if(std::find(optionless_operations.begin(), optionless_operations.end(), parsed.operation) !=
                        optionless_operations.end() &&
        !validate_optionless_jpacker_operation(parsed.operation, parsed.flags)) {
@@ -214,6 +231,9 @@ int run_jpacker(int argc, char* argv[]) {
         }
         if(operation == "upgrade") {
             return cmd_upgrade(g_config);
+        }
+        if(operation == "upgrade-aur") {
+            return cmd_upgrade_aur(g_config);
         }
         if(operation == "clean") {
             return cmd_clean(g_config);
@@ -345,6 +365,8 @@ void print_help() {
     std::cout << "    \033[1mbuild\033[0m <pkg> [V=K]  One-off source build" << std::endl;
     std::cout << "    \033[1mupgrade\033[0m              System update and configured rebuilds" << std::endl;
     std::cout << "                              Checks registered source-build preferences after -Syu" << std::endl;
+    std::cout << "    \033[1mupgrade-aur\033[0m          Update installed AUR packages only" << std::endl;
+    std::cout << "                              Does not run -Syu; source-build preferences are optional" << std::endl;
     std::cout << "    \033[1mclean\033[0m                Clean package/build caches" << std::endl;
     std::cout << std::endl;
     std::cout << "\033[1mAUR INSPECTION\033[0m" << std::endl;

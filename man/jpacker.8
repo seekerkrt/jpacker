@@ -99,6 +99,12 @@ During existing cache repository updates, jpacker can show \fBHEAD..origin/<bran
 Before build/install, jpacker prompts to review \fIPKGBUILD\fR and reports top-level \fI*.install\fR files when present. This does not evaluate \fIPKGBUILD\fR to resolve \fBinstall=\fR; it only highlights install scripts already present in the working tree.
 \fBjpacker upgrade\fR uses the existing \fI.SRCINFO\fR in the working tree for pre-review update checks. If \fI.SRCINFO\fR is missing or incomplete, jpacker does not run \fBmakepkg --printsrcinfo\fR before review; interactive runs ask whether to continue, while \fB--noconfirm\fR or non-interactive runs skip the package.
 .TP
+.B upgrade-aur
+Update installed AUR packages only. This target-less operation inventories foreign packages in the local package database and considers only packages that still resolve to an exact AUR package. Official repository packages and foreign packages absent from AUR are not update targets. A source-build preference is not required to select an installed AUR package; a matching preference may still supply its existing build environment.
+This operation does not run \fBpacman -Syu\fR and does not update the system or packages selected only by source-build preferences. Run \fBjpacker -Syu\fR or \fBjpacker upgrade\fR separately for those scopes. A future combined operation such as \fBupgrade-all\fR is not part of the \fBupgrade-aur\fR contract.
+jpacker validates the complete AUR update plan before source mutation, then executes prepared build/install work items sequentially and stops at the first failure. A failure does not roll back packages already updated; remaining work is reported as not attempted, partial completion returns a non-zero status, and package, reason, and retained/cleanup workspace status are shown. A cleanup failure after a successful package transaction also returns non-zero even though that package is already updated.
+When no installed AUR package needs an update, the command succeeds without starting git, makepkg, pacman, or sudo. Supported options are \fB--noedit\fR, \fB--nodiff\fR, \fB--noconfirm\fR, \fB--rebuild\fR, and \fB--cleanbuild\fR. Package targets, \fB--needed\fR, \fB--rmdeps\fR, \fB--aur\fR, and \fB--repo\fR are unsupported and stop before update execution.
+.TP
 .B clean
 Clean package/build caches. This first runs \fBsudo pacman -Sc\fR to clean the official package cache, and then prompts to remove cached build files from the resolved jpacker cache directory. The directory is \fI$XDG_CACHE_HOME/jpacker\fR when \fBXDG_CACHE_HOME\fR is set, otherwise \fI$HOME/.cache/jpacker\fR. \fIjpacker.log\fR is preserved.
 .TP
@@ -130,7 +136,7 @@ Skip the interactive git diff check during existing cache repository updates.
 Pass \fB--noconfirm\fR to pacman and makepkg execution. jpacker treats this as a request to avoid interactive blocking, not as "yes to everything". This does not bypass jpacker's ambiguous provider, unresolved dependency, cyclic build plan, split package install target, or conflicts/replaces metadata checks.
 .TP
 .BR \-\-needed
-Treat this as a pacman-compatible option, not a jpacker global option. Pacman-only routes retain it in the ordered pacman arguments. For a supported \fB-S\fR target routed to AUR or an official source-build preference, pass it once to the final \fBsudo pacman -U\fR transaction. The option itself does not skip validation, planning, safety guards, review, clone/fetch, or the path to makepkg execution. jpacker does not add an installed-version or local-artifact build-skip heuristic; each PackageBase is built into a fresh \fIPKGDEST\fR. AUR and official source-build preference routes use the same meaning. Target-less pacman-compatible \fB-Syu --needed\fR is passed through; a source target in an existing supported form receives the same install-only policy, while jpacker's custom \fBupgrade --needed\fR remains unsupported.
+Treat this as a pacman-compatible option, not a jpacker global option. Pacman-only routes retain it in the ordered pacman arguments. For a supported \fB-S\fR target routed to AUR or an official source-build preference, pass it once to the final \fBsudo pacman -U\fR transaction. The option itself does not skip validation, planning, safety guards, review, clone/fetch, or the path to makepkg execution. jpacker does not add an installed-version or local-artifact build-skip heuristic; each PackageBase is built into a fresh \fIPKGDEST\fR. AUR and official source-build preference routes use the same meaning. Target-less pacman-compatible \fB-Syu --needed\fR is passed through; a source target in an existing supported form receives the same install-only policy, while jpacker's custom \fBupgrade --needed\fR and \fBupgrade-aur --needed\fR remain unsupported.
 .TP
 .BR \-\-rebuild
 Pass \fB-f\fR to build-only makepkg execution. When omitted, jpacker may ask before rebuilding an existing local package artifact; the default answer is no.
@@ -139,7 +145,7 @@ Pass \fB-f\fR to build-only makepkg execution. When omitted, jpacker may ask bef
 Pass \fB-C\fR to build-only makepkg execution so the existing \fIsrcdir\fR is not reused. When omitted, jpacker may ask before cleaning an existing local \fIsrc/\fR directory; the default answer is no. If a local package artifact exists in the same package directory, cleanbuild also adds \fB-f\fR.
 .TP
 .BR \-\-rmdeps
-Recognize this as a jpacker option, but reject an invocation that selects the separated AUR/source-build route before artifact workspace creation, makepkg, an installed metadata query, or sudo. It is not translated to \fBmakepkg -r\fR, and jpacker does not run its own pacman removal or orphan cleanup. This option has no effect on and is not passed to pacman-only installs.
+Recognize this as a jpacker option, but reject an invocation that selects the separated AUR/source-build route before artifact workspace creation, makepkg, an installed metadata query, or sudo. \fBupgrade-aur\fR rejects it even when no package needs an update. It is not translated to \fBmakepkg -r\fR, and jpacker does not run its own pacman removal or orphan cleanup. This option has no effect on and is not passed to pacman-only installs.
 .TP
 .BR \-\-aur
 Limit plain \fB-S\fR installs, \fB-Ss\fR searches, and \fB-Si\fR information queries to AUR, with no official repository fallback. Official packages with the same name still use AUR, and source-build preferences and the official source-build route are ignored. Repository-qualified root targets are invalid. AUR build-plan dependencies retain their existing handling.
@@ -147,7 +153,7 @@ Limit plain \fB-S\fR installs, \fB-Ss\fR searches, and \fB-Si\fR information que
 .BR \-\-repo
 Limit plain \fB-S\fR installs, \fB-Ss\fR searches, and \fB-Si\fR information queries to official binary repositories, with no AUR or source-build fallback. A source-build preference is overridden for this invocation only; its preference file is not modified or removed. Repository-qualified targets are accepted.
 .PP
-Repeating the same source selector is allowed. Combining \fB--aur\fR and \fB--repo\fR fails before any external command or AUR query, and \fB--noconfirm\fR does not bypass this conflict or the selected source. Source selectors are not supported for upgrade/refresh/clean sync operations, \fB-Qua\fR, or jpacker-specific operations such as \fBupgrade\fR, \fBbuild\fR, \fBfetch\fR, \fBdeps\fR, \fBplan\fR, \fB\-G\fR, and \fB\-Gp\fR. The exception is repository-only \fB-Ss\fR / \fB-Si\fR with refresh, which uses \fBsudo pacman\fR.
+Repeating the same source selector is allowed. Combining \fB--aur\fR and \fB--repo\fR fails before any external command or AUR query, and \fB--noconfirm\fR does not bypass this conflict or the selected source. Source selectors are not supported for upgrade/refresh/clean sync operations, \fB-Qua\fR, or jpacker-specific operations such as \fBupgrade\fR, \fBupgrade-aur\fR, \fBbuild\fR, \fBfetch\fR, \fBdeps\fR, \fBplan\fR, \fB\-G\fR, and \fB\-Gp\fR. The exception is repository-only \fB-Ss\fR / \fB-Si\fR with refresh, which uses \fBsudo pacman\fR.
 .PP
 AUR/source builds create an invocation-owned fresh \fIPKGDEST\fR for each PackageBase, determine the expected artifact with \fBmakepkg --packagelist\fR, and then run build-only \fBmakepkg -sc\fR. makepkg builds source package artifacts, jpacker owns the artifact workspace, validation, and install policy, and \fBpacman -U\fR owns the validated-artifact install transaction. Semantic \fB--needed\fR is passed once only to that \fBpacman -U\fR transaction. \fB--noconfirm\fR is passed to both build-only makepkg and \fBpacman -U\fR, while \fB--rebuild\fR and \fB--cleanbuild\fR add \fB-f\fR and \fB-C\fR to makepkg. An inherited or source-environment \fIPKGDEST\fR definition, including an empty value, is rejected during all-target preflight before any source unit starts. \fB--rmdeps\fR is likewise rejected instead of becoming \fBmakepkg -r\fR. Other pacman transaction options are not translated to makepkg; if an AUR/source-build target is present, unsupported options stop the invocation before pacman or makepkg execution. An option value named \fB--needed\fR, an operand after \fB--\fR, and \fB--needed=true\fR do not enable the source install policy. AUR-only \fB-Ss\fR / \fB-Si\fR reject \fB--needed\fR before an AUR query, while repository-only forms delegate it to pacman.
 .PP
@@ -219,6 +225,11 @@ jpacker upgrade
 .B Update the system without scanning registered source-build preferences:
 .RS
 jpacker -Syu
+.RE
+
+.B Update installed AUR packages without running a system upgrade:
+.RS
+jpacker upgrade-aur
 .RE
 
 .B Install a package from AUR without review:

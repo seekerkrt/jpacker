@@ -4,10 +4,12 @@ local -a _jpacker_operations
 local -a _jpacker_global_options
 local -a _jpacker_deps_options
 local -a _jpacker_sync_needed_option
+local -a _jpacker_upgrade_aur_options
 
 _jpacker_operations=(
     build
     upgrade
+    upgrade-aur
     clean
     deps
     plan
@@ -51,6 +53,14 @@ _jpacker_sync_needed_option=(
     --needed
 )
 
+_jpacker_upgrade_aur_options=(
+    --noedit
+    --nodiff
+    --noconfirm
+    --rebuild
+    --cleanbuild
+)
+
 _jpacker_complete_operations() {
     compadd -Q -- "${_jpacker_operations[@]}"
 }
@@ -65,6 +75,10 @@ _jpacker_complete_deps_options() {
 
 _jpacker_complete_sync_needed_option() {
     compadd -Q -- "${_jpacker_sync_needed_option[@]}"
+}
+
+_jpacker_complete_upgrade_aur_options() {
+    compadd -Q -- "${_jpacker_upgrade_aur_options[@]}"
 }
 
 _jpacker_source_preferences() {
@@ -114,6 +128,9 @@ if [[ -z $operation ]]; then
 fi
 
 case $operation in
+    upgrade-aur)
+        _jpacker_complete_upgrade_aur_options
+        ;;
     deps)
         _alternative \
             'deps-options:deps option:_jpacker_complete_deps_options' \

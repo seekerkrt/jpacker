@@ -1,0 +1,505 @@
+#!/bin/sh
+set -eu
+
+test_binary=$1
+repo_root=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
+JPACKER_TEST_REPOSITORY_ROOT=$repo_root
+export JPACKER_TEST_REPOSITORY_ROOT
+. "$repo_root/tests/test-command-safety.sh"
+tmp_dir=$(mktemp -d)
+case_count=0
+
+cleanup() {
+    rm -rf "$tmp_dir"
+}
+trap cleanup EXIT INT TERM
+
+export PATH=$repo_root/tests/stubs:/usr/bin:/bin
+require_exact_test_command pacman-conf "$repo_root/tests/stubs/pacman-conf"
+require_exact_test_command makepkg "$repo_root/tests/stubs/makepkg"
+require_exact_test_command pacman "$repo_root/tests/stubs/pacman"
+require_exact_test_command sudo "$repo_root/tests/stubs/sudo"
+require_exact_test_command git "$repo_root/tests/stubs/git"
+require_exact_test_command vercmp "$repo_root/tests/stubs/vercmp"
+
+setup_case() {
+    case_name=$1
+    scenario_name=$2
+    case_dir=$tmp_dir/cases/$case_name
+    stdout_file=$case_dir/stdout
+    stderr_file=$case_dir/stderr
+    command_log=$case_dir/commands.log
+    config_file=$case_dir/jpacker.conf
+
+    mkdir -p "$case_dir/home" "$case_dir/work" "$case_dir/package.build"
+    : > "$stdout_file"
+    : > "$stderr_file"
+    : > "$command_log"
+    : > "$config_file"
+
+    export HOME=$case_dir/home
+    export XDG_CACHE_HOME=$case_dir/xdg-cache
+    export JPACKER_TEST_CONFIG_FILE=$config_file
+    export JPACKER_TEST_PACKAGE_BUILD_DIR=$case_dir/package.build
+    export JPACKER_TEST_COMMAND_LOG=$command_log
+    export JPACKER_TEST_AUR_UPDATE_SCENARIO=$scenario_name
+    export JPACKER_TEST_PACMAN_EXIT_CODE=91
+    export JPACKER_TEST_SUDO_EXIT_CODE=92
+    case_count=$((case_count + 1))
+}
+
+show_case_diagnostics() {
+    echo "--- stdout ---" >&2
+    sed -n '1,240p' "$stdout_file" >&2
+    echo "--- stderr ---" >&2
+    sed -n '1,240p' "$stderr_file" >&2
+    echo "--- event log ---" >&2
+    sed -n '1,280p' "$command_log" >&2
+}
+
+fail_case() {
+    echo "$1" >&2
+    show_case_diagnostics
+    exit 1
+}
+
+run_status() {
+    expected_status=$1
+    shift
+    actual_status=0
+    (cd "$case_dir/work" && "$test_binary" "$@") \
+        > "$stdout_file" 2> "$stderr_file" || actual_status=$?
+    if [ "$actual_status" -ne "$expected_status" ]; then
+        fail_case "unexpected status $actual_status (expected $expected_status): $*"
+    fi
+}
+
+assert_exact_line() {
+    expected=$1
+    file=$2
+    if ! grep -Fx -- "$expected" "$file" >/dev/null; then
+        fail_case "missing exact line: $expected"
+    fi
+}
+
+assert_contains() {
+    expected=$1
+    file=$2
+    if ! grep -F -- "$expected" "$file" >/dev/null; then
+        fail_case "missing expected text: $expected"
+    fi
+}
+
+assert_not_contains() {
+    unexpected=$1
+    file=$2
+    if grep -F -- "$unexpected" "$file" >/dev/null; then
+        fail_case "unexpected text: $unexpected"
+    fi
+}
+
+assert_line_before() {
+    first=$1
+    second=$2
+    file=$3
+    first_line=$(grep -nFx -- "$first" "$file" | sed -n '1s/:.*//p')
+    second_line=$(grep -nFx -- "$second" "$file" | sed -n '1s/:.*//p')
+    if [ -z "$first_line" ] || [ -z "$second_line" ] ||
+       [ "$first_line" -ge "$second_line" ]; then
+        fail_case "expected '$first' before '$second'"
+    fi
+}
+
+assert_cache_absent() {
+    if [ -e "$XDG_CACHE_HOME/jpacker" ]; then
+        fail_case "invalid invocation initialized the jpacker cache"
+    fi
+}
+
+assert_pipeline_absent() {
+    if grep -E '^(query|preflight|prepare|execute|reduce)( |$)' \
+        "$command_log" >/dev/null; then
+        fail_case "invalid or unrelated route entered the AUR update pipeline"
+    fi
+}
+
+assert_no_real_package_command() {
+    if grep -E '^(git|makepkg|pacman|sudo) ' "$command_log" >/dev/null; then
+        fail_case "test scenario invoked a package command instead of the operation stub"
+    fi
+}
+
+assert_no_external_mutation() {
+    if grep -E '^(git|makepkg|pacman|sudo|external) ' "$command_log" >/dev/null; then
+        fail_case "unexpected external mutation"
+    fi
+}
+
+# First characterization: an empty installed foreign inventory is a successful
+# no-op and must never fall through to pacman.
+setup_case no-installed-foreign no-installed-foreign
+run_status 0 upgrade-aur
+assert_exact_line "AUR update: no updates" "$stdout_file"
+assert_exact_line "query" "$command_log"
+assert_exact_line "preflight" "$command_log"
+assert_contains "prepare needed=false" "$command_log"
+assert_exact_line "reduce execution=no" "$command_log"
+assert_no_external_mutation
+
+# UpToDate / NonAurForeign are successful skips and never reach the runner.
+setup_case all-up-to-date all-up-to-date
+run_status 0 upgrade-aur
+assert_exact_line "AUR update: no updates" "$stdout_file"
+assert_exact_line "up-to-date-pkg: skipped: up to date" "$stdout_file"
+assert_not_contains "fixture" "$stderr_file"
+assert_exact_line "reduce execution=no" "$command_log"
+assert_no_external_mutation
+
+setup_case non-aur-foreign non-aur-foreign
+run_status 0 upgrade-aur
+assert_exact_line "AUR update: no updates" "$stdout_file"
+assert_exact_line "non-aur-pkg: skipped: non-AUR foreign" "$stdout_file"
+assert_exact_line "reduce execution=no" "$command_log"
+assert_no_external_mutation
+
+# Incomplete/unsupported preflight targets block every executable work item.
+setup_case metadata-unavailable metadata-unavailable
+run_status 1 upgrade-aur
+assert_exact_line "AUR update: blocked before execution" "$stdout_file"
+assert_exact_line \
+    "metadata-pkg: incomplete: AUR metadata unavailable" "$stdout_file"
+assert_contains \
+    "  preflight issue: AUR metadata unavailable: fixture AUR metadata request failed" \
+    "$stderr_file"
+assert_not_contains "fixture AUR metadata request failed" "$stdout_file"
+assert_exact_line "reduce execution=no" "$command_log"
+assert_no_external_mutation
+
+setup_case version-comparison-unavailable version-comparison-unavailable
+run_status 1 upgrade-aur
+assert_exact_line "AUR update: blocked before execution" "$stdout_file"
+assert_exact_line \
+    "version-pkg: incomplete: version comparison unavailable" "$stdout_file"
+assert_contains \
+    "  preflight issue: version comparison unavailable: fixture version comparator failed" \
+    "$stderr_file"
+assert_no_external_mutation
+
+setup_case unsupported-blocker unsupported-blocker
+run_status 1 upgrade-aur
+assert_exact_line "AUR update: blocked before execution" "$stdout_file"
+assert_exact_line \
+    "unsupported-pkg: unsupported: split package selection required" \
+    "$stdout_file"
+assert_contains \
+    "  preflight issue: split package selection required: fixture split package needs selection" \
+    "$stderr_file"
+assert_no_external_mutation
+
+setup_case incomplete-blocker incomplete-blocker
+run_status 1 upgrade-aur
+assert_exact_line "AUR update: blocked before execution" "$stdout_file"
+assert_exact_line \
+    "incomplete-pkg: incomplete: unresolved dependency" "$stdout_file"
+assert_contains \
+    "  preflight issue: unresolved dependency: fixture dependency could not be resolved" \
+    "$stderr_file"
+assert_no_external_mutation
+
+# This fixture deliberately retains an invocation with an issue.  The command
+# must use is_prepared(), not optional presence, before consuming the runner.
+setup_case preparation-failure preparation-failure
+run_status 1 upgrade-aur
+assert_exact_line "AUR update: blocked before execution" "$stdout_file"
+assert_exact_line \
+    "preparation-pkg: incomplete: source preference unavailable" "$stdout_file"
+assert_contains \
+    "  preparation issue: source preference unavailable: fixture source preference read failed" \
+    "$stderr_file"
+assert_not_contains "fixture source preference read failed" "$stdout_file"
+assert_exact_line "reduce execution=no" "$command_log"
+assert_no_external_mutation
+
+setup_case preparation-warning preparation-warning
+run_status 0 upgrade-aur
+assert_exact_line "AUR update: completed" "$stdout_file"
+assert_exact_line "warning-pkg: updated" "$stdout_file"
+assert_contains \
+    "  preparation warning: warning-pkg: fixture source preference warning" \
+    "$stdout_file"
+assert_not_contains "fixture source preference warning" "$stderr_file"
+assert_exact_line "reduce execution=yes" "$command_log"
+assert_no_real_package_command
+
+# Successful execution variants keep the inventory order in presentation.
+setup_case all-updated all-updated
+run_status 0 upgrade-aur
+assert_exact_line "AUR update: completed" "$stdout_file"
+assert_exact_line "updated-pkg: updated" "$stdout_file"
+assert_exact_line "query" "$command_log"
+assert_line_before "query" "preflight" "$command_log"
+prepare_line=$(grep -F "prepare needed=false" "$command_log" | sed -n '1p')
+execute_line=$(grep -F "execute noedit=" "$command_log" | sed -n '1p')
+assert_line_before "preflight" "$prepare_line" "$command_log"
+assert_line_before "$prepare_line" "$execute_line" "$command_log"
+assert_line_before "$execute_line" "external git clone fixture" "$command_log"
+assert_line_before \
+    "external git clone fixture" "external makepkg -sc fixture" "$command_log"
+assert_line_before \
+    "external makepkg -sc fixture" "external sudo pacman -U fixture" \
+    "$command_log"
+assert_line_before \
+    "external sudo pacman -U fixture" "reduce execution=yes" "$command_log"
+assert_no_real_package_command
+assert_not_contains "pacman upgrade-aur" "$command_log"
+
+setup_case all-no-change all-no-change
+run_status 0 upgrade-aur
+assert_exact_line "AUR update: completed" "$stdout_file"
+assert_exact_line "no-change-pkg: no change" "$stdout_file"
+
+setup_case updated-no-change-mixed updated-no-change-mixed
+run_status 0 upgrade-aur
+assert_exact_line "AUR update: completed" "$stdout_file"
+assert_exact_line "zeta-pkg: updated" "$stdout_file"
+assert_exact_line "alpha-pkg: no change" "$stdout_file"
+assert_line_before \
+    "zeta-pkg: updated" "alpha-pkg: no change" "$stdout_file"
+
+# Fail-fast results must retain the decisive typed failure and partial state.
+setup_case ordinary-execution-failure ordinary-execution-failure
+run_status 1 upgrade-aur
+assert_exact_line \
+    "AUR update: stopped after work-item failure" "$stdout_file"
+assert_exact_line \
+    "failed-pkg: failed: fixture build or install failed" "$stdout_file"
+assert_contains \
+    "  execution failure: build or install failed: fixture build or install failed" \
+    "$stderr_file"
+
+setup_case updated-cleanup-failure updated-cleanup-failure
+run_status 1 upgrade-aur
+assert_exact_line \
+    "AUR update: stopped after cleanup failure" "$stdout_file"
+assert_exact_line \
+    "updated-cleanup-pkg: updated, but cleanup failed" "$stdout_file"
+assert_contains \
+    "  execution failure: cleanup failed after package transaction: fixture cleanup failed after update" \
+    "$stderr_file"
+assert_contains \
+    "AUR update partially completed before failure." "$stdout_file"
+assert_contains \
+    "AUR update cleanup failed after a package transaction." "$stdout_file"
+
+setup_case no-change-cleanup-failure no-change-cleanup-failure
+run_status 1 upgrade-aur
+assert_exact_line \
+    "AUR update: stopped after cleanup failure" "$stdout_file"
+assert_exact_line \
+    "no-change-cleanup-pkg: no package change, but cleanup failed" "$stdout_file"
+assert_contains \
+    "  execution failure: cleanup failed after package transaction: fixture cleanup failed without package change" \
+    "$stderr_file"
+assert_contains \
+    "AUR update cleanup failed after a package transaction." "$stdout_file"
+assert_not_contains \
+    "AUR update partially completed before failure." "$stdout_file"
+
+setup_case partial-completion partial-completion
+run_status 1 upgrade-aur
+assert_exact_line \
+    "AUR update: stopped after work-item failure" "$stdout_file"
+assert_exact_line "first-pkg: updated" "$stdout_file"
+assert_exact_line \
+    "failed-pkg: failed: fixture second work item failed" "$stdout_file"
+assert_exact_line \
+    "later-pkg: not attempted: prior work item stopped" "$stdout_file"
+assert_line_before "first-pkg: updated" \
+    "failed-pkg: failed: fixture second work item failed" "$stdout_file"
+assert_line_before "failed-pkg: failed: fixture second work item failed" \
+    "later-pkg: not attempted: prior work item stopped" "$stdout_file"
+assert_contains \
+    "  execution failure: build or install failed: fixture second work item failed" \
+    "$stderr_file"
+assert_not_contains \
+    "execution failure: prior work item stopped" "$stderr_file"
+assert_not_contains "diagnostic unavailable" "$stderr_file"
+assert_contains \
+    "AUR update partially completed before failure." "$stdout_file"
+assert_contains \
+    "AUR update has targets that were not attempted." "$stdout_file"
+
+setup_case reducer-inconsistency reducer-inconsistency
+run_status 1 upgrade-aur
+assert_exact_line "AUR update: inconsistent result" "$stdout_file"
+assert_contains \
+    "  reduction issue: execution: unknown execution update plan index: fixture reducer mismatch" \
+    "$stderr_file"
+assert_not_contains "fixture reducer mismatch" "$stdout_file"
+
+# Recoverable query diagnostics outlive reduction and force failure even when
+# the reducer itself reports Completed.
+setup_case query-recoverable-failure query-recoverable-failure
+run_status 1 upgrade-aur
+assert_exact_line "AUR update: completed" "$stdout_file"
+assert_exact_line "query-survivor: updated" "$stdout_file"
+assert_contains \
+    "AUR update query failure for query-broken, query-also-broken: fixture RPC timeout" \
+    "$stderr_file"
+assert_contains \
+    "AUR update completed, but query failures were reported." "$stderr_file"
+assert_not_contains "fixture RPC timeout" "$stdout_file"
+
+# POLICY(#267): The following fixtures intentionally retain a Completed
+# operation status alongside one typed abnormal field.  Production reduction
+# does not create these combinations; the CLI boundary must still fail closed.
+setup_case completed-preparation-issue completed-preparation-issue
+run_status 1 upgrade-aur
+assert_exact_line "AUR update: completed" "$stdout_file"
+assert_exact_line "defensive-pkg: updated" "$stdout_file"
+assert_contains \
+    "  preparation issue: source preference unavailable: fixture completed preparation issue" \
+    "$stderr_file"
+
+setup_case completed-reduction-issue completed-reduction-issue
+run_status 1 upgrade-aur
+assert_exact_line "AUR update: completed" "$stdout_file"
+assert_exact_line "defensive-pkg: updated" "$stdout_file"
+assert_contains \
+    "  reduction issue: execution: unknown execution update plan index: fixture completed reduction issue" \
+    "$stderr_file"
+
+setup_case completed-unsupported-target completed-unsupported-target
+run_status 1 upgrade-aur
+assert_exact_line "AUR update: completed" "$stdout_file"
+assert_exact_line \
+    "defensive-pkg: unsupported: split package selection required" \
+    "$stdout_file"
+assert_contains \
+    "  preflight issue: split package selection required: fixture completed unsupported target" \
+    "$stderr_file"
+
+setup_case completed-incomplete-target completed-incomplete-target
+run_status 1 upgrade-aur
+assert_exact_line "AUR update: completed" "$stdout_file"
+assert_exact_line \
+    "defensive-pkg: incomplete: unresolved dependency" "$stdout_file"
+assert_contains \
+    "  preflight issue: unresolved dependency: fixture completed incomplete target" \
+    "$stderr_file"
+
+setup_case completed-execution-failure completed-execution-failure
+run_status 1 upgrade-aur
+assert_exact_line "AUR update: completed" "$stdout_file"
+assert_exact_line "defensive-pkg: updated" "$stdout_file"
+assert_contains \
+    "  execution failure: build or install failed: fixture completed execution failure" \
+    "$stderr_file"
+
+# Invocation-level stopped states must independently fail even when every
+# target and work-item field looks successful.
+setup_case \
+    completed-invocation-execution-failure \
+    completed-invocation-execution-failure
+run_status 1 upgrade-aur
+assert_exact_line "AUR update: completed" "$stdout_file"
+assert_exact_line "defensive-pkg: updated" "$stdout_file"
+
+setup_case \
+    completed-invocation-cleanup-failure \
+    completed-invocation-cleanup-failure
+run_status 1 upgrade-aur
+assert_exact_line "AUR update: completed" "$stdout_file"
+assert_exact_line "defensive-pkg: updated" "$stdout_file"
+
+setup_case \
+    completed-missing-invocation-status \
+    completed-missing-invocation-status
+run_status 1 upgrade-aur
+assert_exact_line "AUR update: completed" "$stdout_file"
+assert_exact_line "defensive-pkg: updated" "$stdout_file"
+
+setup_case completed-cleanup-failure completed-cleanup-failure
+run_status 1 upgrade-aur
+assert_exact_line "AUR update: completed" "$stdout_file"
+assert_exact_line \
+    "defensive-pkg: updated, but cleanup failed" "$stdout_file"
+assert_contains \
+    "  execution failure: cleanup failed after package transaction: fixture completed cleanup failure" \
+    "$stderr_file"
+assert_exact_line \
+    "AUR update cleanup failed after a package transaction." "$stdout_file"
+
+setup_case completed-not-attempted completed-not-attempted
+run_status 1 upgrade-aur
+assert_exact_line "AUR update: completed" "$stdout_file"
+assert_exact_line \
+    "defensive-pkg: not attempted: prior work item stopped" "$stdout_file"
+assert_exact_line \
+    "AUR update has targets that were not attempted." "$stdout_file"
+assert_not_contains \
+    "execution failure: prior work item stopped" "$stderr_file"
+assert_not_contains "diagnostic unavailable" "$stderr_file"
+
+# All supported global options reach both preparation and execution unchanged.
+setup_case option-propagation options-propagation
+run_status 0 --noedit upgrade-aur --nodiff --noconfirm --rebuild --cleanbuild
+assert_exact_line \
+    "prepare needed=false noedit=true nodiff=true noconfirm=true rebuild=true cleanbuild=true rmdeps=false" \
+    "$command_log"
+assert_exact_line \
+    "execute noedit=true nodiff=true noconfirm=true rebuild=true cleanbuild=true rmdeps=false" \
+    "$command_log"
+
+# Misuse is rejected before query and before default cache/log initialization.
+setup_case rmdeps-rejection all-updated
+run_status 1 --rmdeps upgrade-aur
+assert_contains \
+    "Separated build/install does not support --rmdeps." "$stderr_file"
+assert_pipeline_absent
+assert_cache_absent
+
+setup_case needed-rejection all-updated
+run_status 1 upgrade-aur --needed
+assert_contains "Unsupported upgrade-aur option: --needed" "$stderr_file"
+assert_pipeline_absent
+assert_cache_absent
+
+setup_case positional-target-rejection all-updated
+run_status 1 upgrade-aur unexpected-target
+assert_contains \
+    "upgrade-aur does not accept target operands." "$stderr_file"
+assert_pipeline_absent
+assert_cache_absent
+
+setup_case aur-selector-rejection all-updated
+run_status 1 --aur upgrade-aur
+assert_contains \
+    "--aur is not supported for operation upgrade-aur." "$stderr_file"
+assert_pipeline_absent
+assert_cache_absent
+
+setup_case repo-selector-rejection all-updated
+run_status 1 upgrade-aur --repo
+assert_contains \
+    "--repo is not supported for operation upgrade-aur." "$stderr_file"
+assert_pipeline_absent
+assert_cache_absent
+
+# Existing system routes remain exact and never enter the new pipeline.
+setup_case syu-routing-unchanged no-installed-foreign
+export JPACKER_TEST_SUDO_EXIT_CODE=0
+run_status 0 -Syu
+assert_exact_line "sudo pacman -Syu" "$command_log"
+assert_pipeline_absent
+
+setup_case upgrade-routing-unchanged no-installed-foreign
+export JPACKER_TEST_SUDO_EXIT_CODE=0
+run_status 0 upgrade
+assert_exact_line "sudo pacman -Syu" "$command_log"
+assert_pipeline_absent
+
+if [ "$case_count" -ne 36 ]; then
+    fail_case "internal test case count changed: $case_count"
+fi
+echo "AUR update command integration tests passed ($case_count cases)."

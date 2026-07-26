@@ -11,6 +11,7 @@ MANPAGE   := man/jpacker.8
 MANPAGE_IN := man/jpacker.8.in
 TEST_TARGET := build/tests/jpacker-test
 COMMANDS_INSPECT_TEST_TARGET := build/tests/jpacker-commands-inspect-test
+AUR_UPDATE_COMMAND_TEST_TARGET := build/tests/jpacker-aur-update-command-test
 AUR_RPC_VALIDATION_TEST_TARGET := build/tests/jpacker-aur-rpc-validation-test
 AUR_RPC_ENVELOPE_VALIDATION_TEST_TARGET := build/tests/aur-rpc-envelope-validation-test
 COMMANDS_SYNC_TEST_TARGET := build/tests/jpacker-commands-sync-test
@@ -78,6 +79,18 @@ COMMANDS_INSPECT_TEST_SRCS := \
 	$(filter-out $(SRC_DIR)/aur_rpc.cpp $(SRC_DIR)/repository_query.cpp,$(SRCS)) \
 	tests/commands_inspect_aur_stub.cpp \
 	tests/stubs/commands-inspect/repository_query_stub.cpp \
+	tests/stubs/package-metadata/alpm_stub.cpp
+# POLICY(#267): CLI integration binaryはoperation APIだけをscenario stubへ差し替え、
+# parser/routing/command presentationをproductionと同じtranslation unitで通す。
+AUR_UPDATE_COMMAND_TEST_SRCS := \
+	$(filter-out \
+		$(SRC_DIR)/aur_update_query.cpp \
+		$(SRC_DIR)/aur_update_execution_preflight.cpp \
+		$(SRC_DIR)/aur_update_execution_preparation.cpp \
+		$(SRC_DIR)/aur_update_execution_runner.cpp \
+		$(SRC_DIR)/aur_update_operation_result.cpp, \
+		$(SRCS)) \
+	tests/stubs/aur-update-command/operation_stub.cpp \
 	tests/stubs/package-metadata/alpm_stub.cpp
 AUR_RPC_VALIDATION_TEST_SRCS := \
 	$(SRCS) \
@@ -285,6 +298,7 @@ LIBALPM_BUILD_TARGETS := \
 	$(TARGET) \
 	$(TEST_TARGET) \
 	$(COMMANDS_INSPECT_TEST_TARGET) \
+	$(AUR_UPDATE_COMMAND_TEST_TARGET) \
 	$(AUR_RPC_VALIDATION_TEST_TARGET) \
 	$(COMMANDS_SYNC_TEST_TARGET) \
 	$(SOURCE_INSTALL_CHARACTERIZATION_TEST_TARGET) \
@@ -298,7 +312,7 @@ LIBALPM_BUILD_TARGETS := \
 	$(AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION_TEST_TARGET) \
 	$(UPGRADE_BASELINE_METADATA_TEST_TARGET)
 
-.PHONY: all check-libalpm clean check-aur-update-operation-result-link-firewall test-app-config test-package-identifier test-package-metadata test-package-metadata-integration test-repository-query test-shell-words test-source-environment test-artifact-workspace test-artifact-identity test-artifact-install-executor test-separated-source-build test-production-source-build test-process-capture test-aur-update-plan test-aur-update-query test-aur-update-execution-preflight test-aur-update-execution-preflight-integration test-aur-update-execution-preparation test-aur-update-execution-runner test-aur-update-operation-result test-dependency-plan-model test-artifact-install-plan test-command-stub-contract test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-commands-inspect test-commands-source-maintenance test-commands-sync test-conflicts-replaces test-install-layout test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check install uninstall
+.PHONY: all check-libalpm clean check-aur-update-operation-result-link-firewall test test-app-config test-package-identifier test-package-metadata test-package-metadata-integration test-repository-query test-shell-words test-source-environment test-artifact-workspace test-artifact-identity test-artifact-install-executor test-separated-source-build test-production-source-build test-process-capture test-aur-update-plan test-aur-update-query test-aur-update-command test-aur-update-execution-preflight test-aur-update-execution-preflight-integration test-aur-update-execution-preparation test-aur-update-execution-runner test-aur-update-operation-result test-dependency-plan-model test-artifact-install-plan test-command-stub-contract test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-commands-inspect test-commands-source-maintenance test-commands-sync test-conflicts-replaces test-install-layout test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check install uninstall
 
 all: $(TARGET) $(MANPAGE)
 
@@ -345,6 +359,11 @@ $(COMMANDS_INSPECT_TEST_TARGET): $(COMMANDS_INSPECT_TEST_SRCS) $(HEADERS) tests/
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling command inspection characterization test binary"
 	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -DJPACKER_ENABLE_TEST_OVERRIDES -I$(SRC_DIR) -Itests/stubs/package-metadata $(COMMANDS_INSPECT_TEST_SRCS) -o $@ $(MY_LDLIBS)
+
+$(AUR_UPDATE_COMMAND_TEST_TARGET): $(AUR_UPDATE_COMMAND_TEST_SRCS) $(HEADERS) tests/stubs/package-metadata/alpm_stub.hpp $(VERSION_FILE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling AUR update command integration test binary"
+	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -DJPACKER_ENABLE_TEST_OVERRIDES -DJPACKER_ENABLE_TEST_CONFIG_PATH -I$(SRC_DIR) -Itests/stubs/package-metadata $(AUR_UPDATE_COMMAND_TEST_SRCS) -o $@ $(MY_LDLIBS)
 
 $(AUR_RPC_VALIDATION_TEST_TARGET): $(AUR_RPC_VALIDATION_TEST_SRCS) $(HEADERS) tests/stubs/package-metadata/alpm_stub.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
@@ -614,6 +633,9 @@ test-aur-update-plan: $(AUR_UPDATE_PLAN_TEST_TARGET)
 test-aur-update-query: $(AUR_UPDATE_QUERY_TEST_TARGET)
 	$(abspath $(AUR_UPDATE_QUERY_TEST_TARGET))
 
+test-aur-update-command: $(AUR_UPDATE_COMMAND_TEST_TARGET)
+	sh tests/test-aur-update-command.sh $(abspath $(AUR_UPDATE_COMMAND_TEST_TARGET))
+
 test-aur-update-execution-preflight: $(AUR_UPDATE_EXECUTION_PREFLIGHT_TEST_TARGET)
 	$(abspath $(AUR_UPDATE_EXECUTION_PREFLIGHT_TEST_TARGET))
 
@@ -717,6 +739,45 @@ test-needed-contract: $(TEST_TARGET)
 
 test-pkgbuild-export: $(TEST_TARGET)
 	sh tests/test-pkgbuild-export.sh $(abspath $(TEST_TARGET))
+
+test: \
+	test-app-config \
+	test-package-identifier \
+	test-package-metadata \
+	test-package-metadata-integration \
+	test-repository-query \
+	test-shell-words \
+	test-source-environment \
+	test-artifact-workspace \
+	test-artifact-identity \
+	test-artifact-install-executor \
+	test-separated-source-build \
+	test-production-source-build \
+	test-process-capture \
+	test-aur-update-plan \
+	test-aur-update-query \
+	test-aur-update-command \
+	test-aur-update-execution-preflight \
+	test-aur-update-execution-preflight-integration \
+	test-aur-update-execution-preparation \
+	test-aur-update-execution-runner \
+	test-aur-update-operation-result \
+	test-dependency-plan-model \
+	test-artifact-install-plan \
+	test-command-stub-contract \
+	test-aur-rpc-validation \
+	test-build-cache-symlink \
+	test-cli-parser \
+	test-commands-inspect \
+	test-commands-source-maintenance \
+	test-commands-sync \
+	test-conflicts-replaces \
+	test-install-layout \
+	test-needed-contract \
+	test-pacman-routing \
+	test-pkgbuild-export \
+	test-source-build \
+	test-source-selection
 
 release-check:
 	@echo ":: Checking release version consistency"

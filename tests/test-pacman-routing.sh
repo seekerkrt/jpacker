@@ -18,7 +18,7 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-mkdir -p "$tmp_dir/cache" "$tmp_dir/home"
+mkdir -p "$tmp_dir/cache" "$tmp_dir/home" "$tmp_dir/package.build"
 command_log=$tmp_dir/commands.log
 : > "$command_log"
 
@@ -50,9 +50,9 @@ export JPACKER_TEST_AUR_RPC_BASE_URL=http://127.0.0.1:$port/rpc/
 export JPACKER_TEST_COMMAND_LOG=$command_log
 export JPACKER_TEST_PACMAN_EXIT_CODE=0
 export JPACKER_TEST_SUDO_EXIT_CODE=0
+export JPACKER_TEST_PACKAGE_BUILD_DIR=$tmp_dir/package.build
 unset JPACKER_TEST_PACMAN_QM_OUTPUT
 unset JPACKER_TEST_PACMAN_REPO_PACKAGES
-unset JPACKER_TEST_PACKAGE_BUILD_DIR
 unset JPACKER_TEST_MAKEPKG_EXIT_CODE
 unset JPACKER_TEST_GIT_CLONE_FIXTURE_DIR
 
@@ -165,6 +165,15 @@ for jpacker_option in --noedit --nodiff --rebuild --cleanbuild --rmdeps; do
         exit 1
     fi
 done
+
+# custom upgradeとgeneric -Syuの既存routingを保ち、upgrade-aurはpacmanへ委譲しない。
+run_ok "$tmp_dir/custom-upgrade.out" upgrade
+assert_only_command "sudo pacman -Syu"
+run_ok "$tmp_dir/generic-system-upgrade.out" -Syu
+assert_only_command "sudo pacman -Syu"
+run_fail "$tmp_dir/upgrade-aur-target.out" upgrade-aur unexpected-target
+assert_contains "upgrade-aur does not accept target operands." "$tmp_dir/upgrade-aur-target.out"
+assert_log_empty
 
 run_fail "$tmp_dir/aur-refresh.out" -Siy risk-root
 assert_contains "Cannot combine pacman refresh with AUR info fallback" "$tmp_dir/aur-refresh.out"
