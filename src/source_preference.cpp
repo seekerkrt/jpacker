@@ -280,6 +280,23 @@ std::filesystem::directory_iterator source_preference_entries() {
     return std::filesystem::directory_iterator(PACKAGE_BUILD_DIR);
 }
 
+SourcePreferenceDirectorySnapshot snapshot_source_preference_directory() {
+    SourcePreferenceDirectorySnapshot snapshot;
+    if(!std::filesystem::exists(PACKAGE_BUILD_DIR)) return snapshot;
+
+    snapshot.root_exists = true;
+    std::size_t original_index = 0;
+    for(const auto& entry : source_preference_entries()) {
+        snapshot.entries.push_back(SourcePreferenceEntrySnapshot{
+                original_index,
+                entry.path(),
+                entry.path().filename().string(),
+                entry.is_regular_file()});
+        ++original_index;
+    }
+    return snapshot;
+}
+
 bool is_force_source(const std::string& package_name) {
     return std::filesystem::exists(source_preference_entry_path(package_name));
 }

@@ -66,6 +66,8 @@ setup_case() {
     case_dir=$tmp_dir/cases/$case_name
     command_log=$case_dir/commands.log
     output_file=$case_dir/output
+    stdout_file=$case_dir/stdout
+    stderr_file=$case_dir/stderr
     preference_dir=$case_dir/package.build
     cache_root=$case_dir/xdg-cache/jpacker
     sudo_failures=$case_dir/sudo-failures
@@ -116,6 +118,7 @@ setup_case() {
     unset JPACKER_TEST_VERCMP_EXIT_CODE
     unset JPACKER_TEST_VERCMP_ARGV_LOG
     unset JPACKER_TEST_MAKEPKG_ARGV_LOG
+    unset JPACKER_TEST_MAKEPKG_CWD_LOG
     unset JPACKER_TEST_MAKEPKG_ENV_LOG
     unset JPACKER_TEST_MAKEPKG_ENV_KEYS
     unset JPACKER_TEST_MAKEPKG_PACKAGELIST_EXIT_CODE
@@ -199,6 +202,30 @@ run_upgrade_fail() {
         exit 1
     fi
     # failure経路でもlegacy package-specific queryへfallbackしない。
+    assert_command_content_absent "pacman -Q "
+}
+
+run_upgrade_split_fail() {
+    : > "$command_log"
+    : > "$request_log"
+    exit_code=0
+    if PATH=$upgrade_metadata_path "$upgrade_metadata_test_binary" "$@" \
+        > "$stdout_file" 2> "$stderr_file"; then
+        echo "expected upgrade metadata command to fail: $*" >&2
+        sed -n '1,260p' "$stdout_file" >&2
+        sed -n '1,260p' "$stderr_file" >&2
+        cat "$command_log" >&2
+        exit 1
+    else
+        exit_code=$?
+    fi
+    if [ "$exit_code" -ne 1 ]; then
+        echo "unexpected upgrade metadata exit code: $exit_code (expected 1)" >&2
+        sed -n '1,260p' "$stdout_file" >&2
+        sed -n '1,260p' "$stderr_file" >&2
+        cat "$command_log" >&2
+        exit 1
+    fi
     assert_command_content_absent "pacman -Q "
 }
 
@@ -524,6 +551,37 @@ write_upgrade_srcinfo() {
         printf 'pkgrel = %s\n' "$srcinfo_release"
         printf 'pkgname = clean-root\n'
     } > "$srcinfo_file"
+}
+
+prepare_upgrade_source_checkout() {
+    source_package=$1
+    source_version=${2:-2.0}
+    source_checkout=$cache_root/$source_package
+
+    mkdir -p "$source_checkout/.git"
+    {
+        printf 'pkgbase = %s\n' "$source_package"
+        printf 'pkgver = %s\n' "$source_version"
+        printf 'pkgrel = 1\n'
+        printf 'pkgname = %s\n' "$source_package"
+    } > "$source_checkout/.SRCINFO"
+    printf 'pkgname=%s\npkgver=%s\npkgrel=1\n' \
+        "$source_package" "$source_version" > "$source_checkout/PKGBUILD"
+    printf 'https://gitlab.archlinux.org/archlinux/packaging/packages/%s.git\n' \
+        "$source_package" > "$source_checkout/.git/.jpacker-test-remote-url"
+}
+
+capture_two_source_preference_order() {
+    preference_order_file=$case_dir/preference-order
+    find "$preference_dir" -mindepth 1 -maxdepth 1 -type f \
+        -printf '%f\n' > "$preference_order_file"
+    if [ "$(wc -l < "$preference_order_file")" -ne 2 ]; then
+        echo "expected exactly two source preferences in $case_name" >&2
+        cat "$preference_order_file" >&2
+        exit 1
+    fi
+    preference_first=$(sed -n '1p' "$preference_order_file")
+    preference_second=$(sed -n '2p' "$preference_order_file")
 }
 
 setup_upgrade_transition_case() {
@@ -1148,6 +1206,44 @@ assert_command_content_absent "pacman-conf "
 assert_command_content_absent "alpm "
 assert_total_command_count 1
 
+setup_case upgrade-positional-operand-is-ignored
+run_upgrade_ok --noconfirm upgrade ignored-target
+assert_command "sudo pacman -Syu --noconfirm"
+assert_command_content_absent "ignored-target"
+assert_total_command_count 1
+
+# 現行契約: --rmdepsはregularかつvalidなsource preferenceがある場合だけ検証する。
+# sourceが空のupgradeは--rmdepsを無視してsystem Syuを実行する。
+setup_case upgrade-rmdeps-without-source-is-ignored
+run_upgrade_ok --rmdeps --noconfirm upgrade
+assert_command "sudo pacman -Syu --noconfirm"
+assert_total_command_count 1
+
+setup_case upgrade-rmdeps-with-source-stops-before-mutation
+: > "$preference_dir/clean-root"
+run_upgrade_fail --rmdeps --noconfirm upgrade
+assert_contains "Separated build/install does not support --rmdeps." "$output_file"
+assert_command_absent "sudo pacman -Syu --noconfirm"
+assert_command_content_absent "pacman -Si"
+assert_total_command_count 0
+
+setup_case upgrade-warning-remains-on-stdout
+: > "$preference_dir/bad name"
+run_upgrade_split_fail --noconfirm upgrade
+assert_contains "System upgrade..." "$stdout_file"
+assert_contains "Ignoring invalid source-build preference filename: bad name" "$stdout_file"
+assert_file_empty "$stderr_file"
+assert_command "sudo pacman -Syu --noconfirm"
+
+setup_case upgrade-failure-diagnostic-remains-on-stderr
+printf 'pacman -Syu --noconfirm\n' > "$sudo_failures"
+run_upgrade_split_fail --noconfirm upgrade
+assert_contains "System upgrade..." "$stdout_file"
+assert_contains "Running: sudo pacman '-Syu' '--noconfirm'" "$stdout_file"
+assert_not_contains "Update failed." "$stdout_file"
+assert_contains "Update failed." "$stderr_file"
+assert_command "sudo pacman -Syu --noconfirm"
+
 setup_case upgrade-metadata-no-preference-root
 rmdir "$preference_dir"
 run_upgrade_ok --noconfirm upgrade
@@ -1413,6 +1509,105 @@ assert_command_absent "sudo pacman -Syu --noconfirm"
 assert_command_content_absent "git clone"
 assert_command_content_absent "makepkg"
 assert_command_content_absent "pacman -U"
+
+setup_case upgrade-runtime-source-order-follows-preference-enumeration
+for package in beta alpha; do
+    : > "$preference_dir/$package"
+    printf '%s 1.0-1\n' "$package" >> "$package_metadata_state"
+    prepare_upgrade_source_checkout "$package"
+done
+capture_two_source_preference_order
+makepkg_cwd_log=$case_dir/makepkg-cwd.log
+: > "$makepkg_cwd_log"
+export JPACKER_TEST_MAKEPKG_CWD_LOG=$makepkg_cwd_log
+export JPACKER_TEST_PACMAN_REPO_PACKAGES='alpha beta'
+run_upgrade_ok --noedit --nodiff --noconfirm upgrade
+assert_output_before "System upgrade..." "Processing $preference_first..." "$output_file"
+assert_output_before "Processing $preference_first..." "Processing $preference_second..." "$output_file"
+assert_command_before "pacman -Si $preference_first" "pacman -Si $preference_second"
+assert_command_occurrence_before "sudo pacman -Syu --noconfirm" 1 "git fetch origin" 1
+assert_command_count "makepkg --packagelist" 2
+assert_command_count "makepkg -sc --noconfirm" 2
+{
+    printf '%s\n' "$cache_root/$preference_first"
+    printf '%s\n' "$cache_root/$preference_first"
+    printf '%s\n' "$cache_root/$preference_second"
+    printf '%s\n' "$cache_root/$preference_second"
+} > "$case_dir/expected-makepkg-cwd.log"
+assert_file_equals "$case_dir/expected-makepkg-cwd.log" "$makepkg_cwd_log"
+
+setup_case upgrade-first-runtime-source-failure-stops-later-source
+for package in beta alpha; do
+    : > "$preference_dir/$package"
+    printf '%s 1.0-1\n' "$package" >> "$package_metadata_state"
+done
+capture_two_source_preference_order
+export JPACKER_TEST_PACMAN_REPO_PACKAGES='alpha beta'
+export JPACKER_TEST_GIT_CLONE_FAIL_DESTINATION=$preference_first
+run_upgrade_fail --noedit --nodiff --noconfirm upgrade
+assert_command "sudo pacman -Syu --noconfirm"
+assert_command "git clone https://gitlab.archlinux.org/archlinux/packaging/packages/$preference_first.git $preference_first"
+assert_command_absent "git clone https://gitlab.archlinux.org/archlinux/packaging/packages/$preference_second.git $preference_second"
+assert_contains "Failed while building/installing PackageBase $preference_first ($preference_first): Failed to clone $preference_first" "$output_file"
+assert_not_contains "Processing $preference_second..." "$output_file"
+assert_command_occurrence_before "sudo pacman -Syu --noconfirm" 1 \
+    "git clone https://gitlab.archlinux.org/archlinux/packaging/packages/$preference_first.git $preference_first" 1
+assert_command_content_absent "makepkg"
+assert_command_content_absent "pacman -U"
+
+setup_case upgrade-first-source-cleanup-failure-stops-later-source
+for package in beta alpha; do
+    : > "$preference_dir/$package"
+    printf '%s 1.0-1\n' "$package" >> "$package_metadata_state"
+    prepare_upgrade_source_checkout "$package"
+done
+capture_two_source_preference_order
+install_success_log=$XDG_CACHE_HOME/pacman-u-success.log
+: > "$install_success_log"
+export JPACKER_TEST_PACMAN_REPO_PACKAGES='alpha beta'
+export JPACKER_TEST_PACMAN_U_SUCCESS_LOG=$install_success_log
+export JPACKER_TEST_REPLACE_WORKSPACE_AFTER_PACMAN_U=1
+run_upgrade_fail --noedit --nodiff --noconfirm upgrade
+assert_command "sudo pacman -Syu --noconfirm"
+assert_contains "Processing $preference_first..." "$output_file"
+assert_not_contains "Processing $preference_second..." "$output_file"
+assert_contains "Package installation succeeded, but artifact workspace cleanup failed:" "$output_file"
+assert_command_count "makepkg --packagelist" 1
+assert_command_count "makepkg -sc --noconfirm" 1
+assert_command_prefix_count "sudo pacman -U --noconfirm -- " 1
+assert_cleanup_partial_success_fixture "$install_success_log"
+
+# PR2 contract: strict readerはread不能なregistered preferenceをempty
+# environmentへ丸めず、system/source mutation前にtyped preparation failureとする。
+setup_upgrade_transition_case \
+    upgrade-unreadable-preference-stops-before-mutation \
+    1.0-1 1.0-1 enabled \
+    https://gitlab.archlinux.org/archlinux/packaging/packages/clean-root.git
+export JPACKER_TEST_PACMAN_REPO_PACKAGES=$upgrade_package
+chmod 000 "$preference_dir/$upgrade_package"
+run_upgrade_fail --noedit --nodiff --noconfirm upgrade
+chmod 600 "$preference_dir/$upgrade_package"
+assert_contains "Failed to open source preference entry $preference_dir/$upgrade_package: Permission denied" "$output_file"
+assert_not_contains "Loading custom build flags from $preference_dir/$upgrade_package" "$output_file"
+assert_command_absent "sudo pacman -Syu --noconfirm"
+assert_command_content_absent "pacman-conf "
+assert_command_content_absent "alpm "
+assert_command_content_absent "git "
+assert_command_content_absent "makepkg"
+assert_command_content_absent "pacman -U"
+assert_total_command_count 0
+
+setup_upgrade_transition_case \
+    upgrade-rebuild-cleanbuild-option-propagation \
+    1.0-1 1.0-1 enabled \
+    https://gitlab.archlinux.org/archlinux/packaging/packages/clean-root.git
+export JPACKER_TEST_PACMAN_REPO_PACKAGES=$upgrade_package
+run_upgrade_ok --noedit --nodiff --noconfirm --rebuild --cleanbuild upgrade
+assert_command "sudo pacman -Syu --noconfirm"
+assert_command_count "makepkg -sc --noconfirm -f -C" 1
+assert_command_absent "sudo pacman -Syu --noconfirm -f -C"
+assert_contains "Skipping PKGBUILD/.install review (--noedit)." "$output_file"
+assert_command_content_absent "git diff"
 
 # Issue #215 regression: system transactionでofficial binaryへ置換された場合も、
 # source-build preferenceを実際のinstalled packageへ反映する。

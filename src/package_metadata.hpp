@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <map>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -68,6 +69,13 @@ using ForeignPackageInventoryResult = std::variant<
         ForeignPackageInventory,
         PackageMetadataFailure>;
 
+// package state比較用に、libalpmのborrowを残さないname/version snapshotを保持する。
+using LocalPackageVersionSnapshot = std::map<std::string, std::string>;
+
+using LocalPackageVersionSnapshotResult = std::variant<
+        LocalPackageVersionSnapshot,
+        PackageMetadataFailure>;
+
 // resolver/session openの失敗を、CLI境界でstd::exceptionとして扱える形で伝播する。
 class PackageMetadataError : public std::runtime_error {
 public:
@@ -101,6 +109,8 @@ public:
 
     InstalledPackageQueryResult query_installed_package(
             const std::string& package_name) const;
+
+    LocalPackageVersionSnapshotResult snapshot_local_package_versions() const;
 
 private:
     struct Impl;

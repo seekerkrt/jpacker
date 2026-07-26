@@ -9,6 +9,7 @@
 #include "stubs/package-metadata/alpm_stub.hpp"
 
 #include <algorithm>
+#include <cerrno>
 #include <cstdlib>
 #include <exception>
 #include <filesystem>
@@ -21,6 +22,7 @@
 #include <utility>
 #include <vector>
 
+#include <fcntl.h>
 #include <unistd.h>
 
 // process.cppをlinkしないfake-symbol binaryでも、production checkout ownerが使う
@@ -239,6 +241,88 @@ public:
     }
 };
 
+class ScopedStdinReplacement final {
+    int saved_stdin_ = -1;
+    int replacement_fd_ = -1;
+    int peer_fd_ = -1;
+
+    ScopedStdinReplacement(
+            int replacement_fd, int peer_fd)
+        : replacement_fd_(replacement_fd), peer_fd_(peer_fd) {
+        saved_stdin_ = dup(STDIN_FILENO);
+        if(saved_stdin_ == -1 || dup2(replacement_fd_, STDIN_FILENO) == -1) {
+            const int saved_error = errno;
+            if(saved_stdin_ != -1) close(saved_stdin_);
+            close(replacement_fd_);
+            if(peer_fd_ != -1) close(peer_fd_);
+            throw std::runtime_error(
+                    "Failed to replace stdin for production source-build test: " +
+                    std::to_string(saved_error));
+        }
+    }
+
+public:
+    static ScopedStdinReplacement noninteractive() {
+        int descriptors[2];
+        if(pipe(descriptors) != 0) {
+            throw std::runtime_error(
+                    "Failed to create non-interactive stdin fixture.");
+        }
+        close(descriptors[1]);
+        return ScopedStdinReplacement(descriptors[0], -1);
+    }
+
+    static ScopedStdinReplacement terminal_with_input(
+            const std::string& input) {
+        const int master_fd = posix_openpt(O_RDWR | O_NOCTTY);
+        if(master_fd == -1 || grantpt(master_fd) != 0 ||
+           unlockpt(master_fd) != 0) {
+            if(master_fd != -1) close(master_fd);
+            throw std::runtime_error(
+                    "Failed to create terminal stdin fixture.");
+        }
+        const char* slave_name = ptsname(master_fd);
+        if(slave_name == nullptr) {
+            close(master_fd);
+            throw std::runtime_error(
+                    "Failed to resolve terminal stdin fixture path.");
+        }
+        const int slave_fd = open(slave_name, O_RDWR | O_NOCTTY);
+        if(slave_fd == -1) {
+            close(master_fd);
+            throw std::runtime_error(
+                    "Failed to open terminal stdin fixture.");
+        }
+        if(write(
+                   master_fd, input.data(),
+                   static_cast<size_t>(input.size())) !=
+           static_cast<ssize_t>(input.size())) {
+            close(slave_fd);
+            close(master_fd);
+            throw std::runtime_error(
+                    "Failed to seed terminal stdin fixture.");
+        }
+        return ScopedStdinReplacement(slave_fd, master_fd);
+    }
+
+    ScopedStdinReplacement(const ScopedStdinReplacement&) = delete;
+    ScopedStdinReplacement& operator=(const ScopedStdinReplacement&) = delete;
+    ScopedStdinReplacement(ScopedStdinReplacement&& other) noexcept
+        : saved_stdin_(std::exchange(other.saved_stdin_, -1)),
+          replacement_fd_(std::exchange(other.replacement_fd_, -1)),
+          peer_fd_(std::exchange(other.peer_fd_, -1)) {}
+    ScopedStdinReplacement& operator=(ScopedStdinReplacement&&) = delete;
+
+    ~ScopedStdinReplacement() noexcept {
+        if(saved_stdin_ != -1) {
+            static_cast<void>(dup2(saved_stdin_, STDIN_FILENO));
+            close(saved_stdin_);
+        }
+        if(replacement_fd_ != -1) close(replacement_fd_);
+        if(peer_fd_ != -1) close(peer_fd_);
+    }
+};
+
 class TemporaryProductionEnvironment final {
     fs::path                   original_working_directory_;
     fs::path                   path_;
@@ -407,6 +491,16 @@ ProductionSourceBuildWorkItem make_work_item(
     return work_item;
 }
 
+ProductionSourceBuildWorkItem make_update_check_work_item(
+        const std::string& package_name,
+        const std::string& installed_version) {
+    ProductionSourceBuildWorkItem work_item = make_work_item(package_name);
+    work_item.request.only_if_updated = true;
+    work_item.request.installed_snapshot =
+            SourceInstalledSnapshot{installed_version};
+    return work_item;
+}
+
 BuildPlan two_entry_plan() {
     BuildPlan plan;
     const RootTargetIdentity root_identity{0, "root-package"};
@@ -542,6 +636,16 @@ void expect_database_paths(int exit_code = 0) {
                     "RootDir = /\nDBPath = /var/lib/pacman\n", exit_code});
 }
 
+void expect_version_comparison(
+        const std::string& candidate_version,
+        const std::string& installed_version,
+        const std::string& result) {
+    process_stub::expect_capture_command(
+            "vercmp " + shell_quote(candidate_version) + " " +
+                    shell_quote(installed_version) + " 2>/dev/null",
+            CapturedCommandResult{result + "\n", 0});
+}
+
 void schedule_source_unit(std::size_t unit_index) {
     if(g_scenario == nullptr) {
         throw std::logic_error(
@@ -668,6 +772,12 @@ void observe_capture_command() {
         expect(
                 fs::current_path() == unit.checkout_path,
                 "Branch query did not run from the scheduled checkout");
+        return;
+    }
+    if(command.starts_with("vercmp ")) {
+        expect(
+                fs::current_path() == unit.checkout_path,
+                "Source update version comparison did not run from the scheduled checkout");
         return;
     }
     if(command.starts_with("LC_ALL=C ")) {
@@ -922,6 +1032,30 @@ std::optional<ArtifactInstallExecutionOutcome> execute_work_item(
     }
 }
 
+SourceBuildExecutionResult execute_work_item_typed(
+        const PreparedProductionSourceBuildInvocation& invocation,
+        std::size_t work_item_index,
+        ProductionScenario& scenario) {
+    expect(
+            fs::current_path() == scenario.caller_working_directory,
+            "Typed production work-item execution started from a drifted working directory");
+    try {
+        SourceBuildExecutionResult result =
+                execute_prepared_source_build_work_item_typed(
+                        invocation.work_items.at(work_item_index),
+                        invocation.database_paths, scenario.config);
+        expect(
+                fs::current_path() == scenario.caller_working_directory,
+                "Typed production work-item success leaked a changed working directory");
+        return result;
+    } catch(...) {
+        expect(
+                fs::current_path() == scenario.caller_working_directory,
+                "Typed production work-item failure leaked a changed working directory");
+        throw;
+    }
+}
+
 struct PreflightFilesystemSnapshot {
     CacheTreeSnapshot     cache_tree;
     std::vector<fs::path> expected_missing_checkout_paths;
@@ -1065,6 +1199,57 @@ void test_build_plan_projection() {
     expect(
             work_items[0].request.needed && work_items[1].request.needed,
             "--needed was not projected to every BuildPlan unit");
+}
+
+void test_resolved_repository_identity_and_owned_environment_preparation() {
+    process_stub::reset_process_stub();
+    process_stub::expect_run_command(
+            "pacman -Si 'identity-repository' > /dev/null 2>&1", 0);
+
+    const ResolvedSourceBuildIdentity identity =
+            resolve_source_build_identity("identity-repository");
+    expect(
+            identity.requested_name == "identity-repository" &&
+                    identity.package_base == "identity-repository",
+            "Repository source identity lost requested/PackageBase correlation");
+    expect(
+            identity.canonical_source_key ==
+                    "repository:identity-repository",
+            "Repository source identity key differs");
+    expect(
+            identity.git_url ==
+                    "https://gitlab.archlinux.org/archlinux/packaging/packages/identity-repository.git",
+            "Repository source identity Git URL differs");
+    expect(
+            identity.source_kind == SourceBuildSourceKind::Repository &&
+                    !identity.has_distinct_package_base,
+            "Repository source kind flags differ");
+
+    SourceBuildEnvironment environment;
+    environment.ordered_assignments.push_back(
+            SourceEnvironmentAssignment{"CFLAGS", "-O1"});
+    const ProductionSourceBuildWorkItem work_item =
+            prepare_resolved_source_build_work_item(
+                    identity, std::move(environment), true, true);
+    expect(
+            work_item.request.package_name == identity.requested_name &&
+                    work_item.request.checkout_name == identity.package_base &&
+                    work_item.request.git_url == identity.git_url,
+            "Resolved source identity was not projected to the work item");
+    expect(
+            work_item.request.custom_environment.ordered_assignments.size() ==
+                            1 &&
+                    work_item.request.custom_environment.ordered_assignments[0]
+                                    .key == "CFLAGS" &&
+                    work_item.request.custom_environment.ordered_assignments[0]
+                                    .value == "-O1",
+            "Caller-owned strict source environment was not preserved");
+    expect(
+            work_item.request.only_if_updated && work_item.request.needed &&
+                    work_item.uses_system_update_baseline,
+            "Resolved repository work-item policy differs");
+    process_stub::require_process_expectations_consumed();
+    process_stub::reset_process_stub();
 }
 
 void test_rmdeps_global_rejection(
@@ -1252,6 +1437,207 @@ void test_work_item_typed_install_outcomes(
             MetadataMode::ExistingExplicitSameVersion,
             ArtifactInstallExecutionOutcome::SkippedAsNeeded,
             "same-version --needed install outcome");
+}
+
+void expect_extended_work_item_outcome(
+        const TemporaryProductionEnvironment& environment,
+        const std::string& package_name,
+        bool needed,
+        MetadataMode metadata_mode,
+        SourceBuildExecutionStatus expected_status,
+        const std::string& context) {
+    AppConfig config = noninteractive_config();
+    std::vector<ProductionSourceBuildWorkItem> work_items;
+    work_items.push_back(make_work_item(package_name));
+    work_items[0].request.needed = needed;
+    ProductionScenario scenario =
+            make_execution_scenario(environment, work_items, config);
+    scenario.units[0].metadata_mode = metadata_mode;
+
+    PreparedProductionSourceBuildInvocation invocation = prepare_execution(
+            std::move(work_items), scenario);
+    const SourceBuildExecutionResult result =
+            execute_work_item_typed(invocation, 0, scenario);
+
+    expect(result.status == expected_status, context + ": status differs");
+    expect(
+            !result.update_status_unknown_skip_reason.has_value(),
+            context + ": unexpected update-status skip reason");
+    expect(result.diagnostic.empty(), context + ": unexpected diagnostic");
+    expect(
+            scenario.install_attempt_order ==
+                    std::vector<std::string>{package_name},
+            context + ": successful pacman -U was not observed");
+    require_scenario_complete(scenario, 1, context);
+}
+
+void test_extended_work_item_install_outcomes(
+        const TemporaryProductionEnvironment& environment) {
+    expect_extended_work_item_outcome(
+            environment, "extended-installed", false,
+            MetadataMode::Absent,
+            SourceBuildExecutionStatus::Installed,
+            "extended installed outcome");
+    expect_extended_work_item_outcome(
+            environment, "extended-needed-skip", true,
+            MetadataMode::ExistingExplicitSameVersion,
+            SourceBuildExecutionStatus::SkippedAsNeeded,
+            "extended --needed skip outcome");
+}
+
+void test_up_to_date_outcome_and_legacy_flattening(
+        const TemporaryProductionEnvironment& environment) {
+    {
+        AppConfig config = noninteractive_config();
+        std::vector<ProductionSourceBuildWorkItem> work_items;
+        work_items.push_back(make_update_check_work_item(
+                "typed-up-to-date", ARTIFACT_VERSION));
+        ProductionScenario scenario =
+                make_execution_scenario(environment, work_items, config);
+        write_file(
+                scenario.units[0].checkout_path / ".SRCINFO",
+                "pkgver = 1.0\npkgrel = 1\n");
+
+        PreparedProductionSourceBuildInvocation invocation = prepare_execution(
+                std::move(work_items), scenario);
+        expect_version_comparison(
+                ARTIFACT_VERSION, ARTIFACT_VERSION, "0");
+        const SourceBuildExecutionResult result =
+                execute_work_item_typed(invocation, 0, scenario);
+
+        expect(
+                result.status == SourceBuildExecutionStatus::UpToDate,
+                "Up-to-date source result was flattened");
+        expect(
+                !result.update_status_unknown_skip_reason.has_value(),
+                "Up-to-date source result acquired an unknown-status reason");
+        expect(
+                result.diagnostic ==
+                        "typed-up-to-date is up to date (1.0-1). Skipping.",
+                "Up-to-date source diagnostic differs");
+        expect(
+                scenario.install_attempt_order.empty(),
+                "Up-to-date source result reached package installation");
+        require_scenario_complete(
+                scenario, 0, "typed up-to-date source result");
+    }
+
+    {
+        AppConfig config = noninteractive_config();
+        std::vector<ProductionSourceBuildWorkItem> work_items;
+        work_items.push_back(make_update_check_work_item(
+                "legacy-up-to-date", ARTIFACT_VERSION));
+        ProductionScenario scenario =
+                make_execution_scenario(environment, work_items, config);
+        write_file(
+                scenario.units[0].checkout_path / ".SRCINFO",
+                "pkgver = 1.0\npkgrel = 1\n");
+
+        PreparedProductionSourceBuildInvocation invocation = prepare_execution(
+                std::move(work_items), scenario);
+        expect_version_comparison(
+                ARTIFACT_VERSION, ARTIFACT_VERSION, "0");
+        const std::optional<ArtifactInstallExecutionOutcome> outcome =
+                execute_work_item(invocation, 0, scenario);
+
+        expect(
+                !outcome.has_value(),
+                "Legacy source-build API did not flatten up-to-date to nullopt");
+        require_scenario_complete(
+                scenario, 0, "legacy up-to-date flattening");
+    }
+}
+
+void test_unknown_update_status_no_confirm_outcome(
+        const TemporaryProductionEnvironment& environment) {
+    AppConfig config = noninteractive_config();
+    config.no_confirm = true;
+    std::vector<ProductionSourceBuildWorkItem> work_items;
+    work_items.push_back(make_update_check_work_item(
+            "unknown-no-confirm", ARTIFACT_VERSION));
+    ProductionScenario scenario =
+            make_execution_scenario(environment, work_items, config);
+    PreparedProductionSourceBuildInvocation invocation = prepare_execution(
+            std::move(work_items), scenario);
+
+    const SourceBuildExecutionResult result =
+            execute_work_item_typed(invocation, 0, scenario);
+    expect(
+            result.status ==
+                    SourceBuildExecutionStatus::UpdateStatusUnknownSkipped &&
+                    result.update_status_unknown_skip_reason ==
+                            SourceBuildUpdateStatusUnknownSkipReason::NoConfirm,
+            "Unknown update status --noconfirm reason differs");
+    expect(
+            result.diagnostic ==
+                    "Skipping unknown-no-confirm: update status is unknown and --noconfirm is set.",
+            "Unknown update status --noconfirm diagnostic differs");
+    expect(
+            scenario.install_attempt_order.empty(),
+            "Unknown update status --noconfirm skip reached installation");
+    require_scenario_complete(
+            scenario, 0, "unknown update status --noconfirm skip");
+}
+
+void test_unknown_update_status_noninteractive_outcome(
+        const TemporaryProductionEnvironment& environment) {
+    AppConfig config = noninteractive_config();
+    std::vector<ProductionSourceBuildWorkItem> work_items;
+    work_items.push_back(make_update_check_work_item(
+            "unknown-noninteractive", ARTIFACT_VERSION));
+    ProductionScenario scenario =
+            make_execution_scenario(environment, work_items, config);
+    PreparedProductionSourceBuildInvocation invocation = prepare_execution(
+            std::move(work_items), scenario);
+
+    const ScopedStdinReplacement stdin_fixture =
+            ScopedStdinReplacement::noninteractive();
+    static_cast<void>(stdin_fixture);
+    const SourceBuildExecutionResult result =
+            execute_work_item_typed(invocation, 0, scenario);
+    expect(
+            result.status ==
+                    SourceBuildExecutionStatus::UpdateStatusUnknownSkipped &&
+                    result.update_status_unknown_skip_reason ==
+                            SourceBuildUpdateStatusUnknownSkipReason::
+                                    NonInteractiveStdin,
+            "Unknown update status non-interactive reason differs");
+    expect(
+            result.diagnostic ==
+                    "Skipping unknown-noninteractive: update status is unknown and stdin is non-interactive.",
+            "Unknown update status non-interactive diagnostic differs");
+    require_scenario_complete(
+            scenario, 0, "unknown update status non-interactive skip");
+}
+
+void test_unknown_update_status_user_decline_outcome(
+        const TemporaryProductionEnvironment& environment) {
+    AppConfig config = noninteractive_config();
+    std::vector<ProductionSourceBuildWorkItem> work_items;
+    work_items.push_back(make_update_check_work_item(
+            "unknown-declined", ARTIFACT_VERSION));
+    ProductionScenario scenario =
+            make_execution_scenario(environment, work_items, config);
+    PreparedProductionSourceBuildInvocation invocation = prepare_execution(
+            std::move(work_items), scenario);
+
+    const ScopedStdinReplacement stdin_fixture =
+            ScopedStdinReplacement::terminal_with_input("n\n");
+    static_cast<void>(stdin_fixture);
+    const SourceBuildExecutionResult result =
+            execute_work_item_typed(invocation, 0, scenario);
+    expect(
+            result.status ==
+                    SourceBuildExecutionStatus::UpdateStatusUnknownSkipped &&
+                    result.update_status_unknown_skip_reason ==
+                            SourceBuildUpdateStatusUnknownSkipReason::UserDeclined,
+            "Unknown update status user-decline reason differs");
+    expect(
+            result.diagnostic ==
+                    "Skipping unknown-declined: update status is unknown and the user declined to continue.",
+            "Unknown update status user-decline diagnostic differs");
+    require_scenario_complete(
+            scenario, 0, "unknown update status user-decline skip");
 }
 
 void test_single_aur_root_uses_shared_lifecycle(
@@ -1499,12 +1885,18 @@ int main() {
     try {
         test_process_stub_rejects_cross_kind_reordering();
         test_build_plan_projection();
+        test_resolved_repository_identity_and_owned_environment_preparation();
         TemporaryProductionEnvironment environment;
         test_rmdeps_global_rejection(environment);
         test_inherited_pkgdest_global_rejection(environment);
         test_later_target_pkgdest_global_rejection(environment);
         test_database_resolver_failure_stops_all_targets(environment);
         test_work_item_typed_install_outcomes(environment);
+        test_extended_work_item_install_outcomes(environment);
+        test_up_to_date_outcome_and_legacy_flattening(environment);
+        test_unknown_update_status_no_confirm_outcome(environment);
+        test_unknown_update_status_noninteractive_outcome(environment);
+        test_unknown_update_status_user_decline_outcome(environment);
         test_single_aur_root_uses_shared_lifecycle(environment);
         test_multi_unit_options_roles_and_order(environment);
         test_build_failure_does_not_reach_sudo(environment);

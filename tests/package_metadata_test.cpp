@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <iostream>
 #include <limits>
+#include <map>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
@@ -108,6 +109,17 @@ PackageMetadataFailure require_repository_query_failure(
 
 PackageMetadataFailure require_inventory_failure(
         const ForeignPackageInventoryResult& result,
+        PackageMetadataErrorCode expected_code,
+        const std::string& context) {
+    PackageMetadataFailure failure =
+            require_result_alternative<PackageMetadataFailure>(result, context);
+    expect(failure.code == expected_code, context + ": unexpected failure code");
+    expect(!failure.diagnostic.empty(), context + ": empty failure diagnostic");
+    return failure;
+}
+
+PackageMetadataFailure require_snapshot_failure(
+        const LocalPackageVersionSnapshotResult& result,
         PackageMetadataErrorCode expected_code,
         const std::string& context) {
     PackageMetadataFailure failure =
@@ -501,6 +513,152 @@ void test_empty_package_cache_is_queryable_state() {
                 result, "empty package cache query"));
     }
     expect(stub::release_count_for_handle(0) == 1, "empty package cache leaked its handle");
+}
+
+void test_local_package_version_snapshot_is_owned_and_order_independent() {
+    stub::reset_alpm_stub();
+    stub::set_local_packages({
+            {"zeta-package", "3.0-1", ALPM_PKG_REASON_DEPEND},
+            {"alpha-package", "1.0-2", ALPM_PKG_REASON_EXPLICIT}});
+
+    LocalPackageVersionSnapshot snapshot;
+    {
+        PackageMetadataSession session =
+                PackageMetadataSession::open(valid_database_paths());
+        LocalPackageVersionSnapshotResult result =
+                session.snapshot_local_package_versions();
+        snapshot = require_result_alternative<LocalPackageVersionSnapshot>(
+                result, "local package version snapshot");
+
+        expect(
+                stub::package_cache_call_count() == 1,
+                "snapshot reloaded the preloaded local package cache");
+    }
+
+    stub::reset_alpm_stub();
+    expect(
+            snapshot == LocalPackageVersionSnapshot({
+                                {"alpha-package", "1.0-2"},
+                                {"zeta-package", "3.0-1"}}),
+            "snapshot did not retain owned name/version values");
+}
+
+void test_empty_local_package_version_snapshot_is_success() {
+    stub::reset_alpm_stub();
+    stub::set_empty_package_cache();
+    PackageMetadataSession session = PackageMetadataSession::open(valid_database_paths());
+
+    LocalPackageVersionSnapshotResult result =
+            session.snapshot_local_package_versions();
+    LocalPackageVersionSnapshot snapshot =
+            require_result_alternative<LocalPackageVersionSnapshot>(
+                    result, "empty local package version snapshot");
+
+    expect(snapshot.empty(), "empty local database produced snapshot entries");
+    expect(
+            stub::package_cache_call_count() == 1,
+            "empty snapshot reloaded the preloaded local package cache");
+}
+
+void test_local_package_version_snapshot_rejects_invalid_names() {
+    stub::reset_alpm_stub();
+    stub::set_local_packages({{"valid-package", "1.0-1"}});
+    stub::set_local_package_name_null(0);
+    {
+        PackageMetadataSession null_name_session =
+                PackageMetadataSession::open(valid_database_paths());
+        static_cast<void>(require_snapshot_failure(
+                null_name_session.snapshot_local_package_versions(),
+                PackageMetadataErrorCode::MalformedMetadata,
+                "snapshot null package name"));
+    }
+
+    stub::reset_alpm_stub();
+    stub::set_local_packages({{"", "1.0-1"}});
+    {
+        PackageMetadataSession empty_name_session =
+                PackageMetadataSession::open(valid_database_paths());
+        static_cast<void>(require_snapshot_failure(
+                empty_name_session.snapshot_local_package_versions(),
+                PackageMetadataErrorCode::MalformedMetadata,
+                "snapshot empty package name"));
+    }
+
+    stub::reset_alpm_stub();
+    stub::set_local_packages({{"invalid/package", "1.0-1"}});
+    {
+        PackageMetadataSession invalid_name_session =
+                PackageMetadataSession::open(valid_database_paths());
+        static_cast<void>(require_snapshot_failure(
+                invalid_name_session.snapshot_local_package_versions(),
+                PackageMetadataErrorCode::MalformedMetadata,
+                "snapshot invalid package name"));
+    }
+}
+
+void test_local_package_version_snapshot_rejects_invalid_versions() {
+    stub::reset_alpm_stub();
+    stub::set_local_packages({{"valid-package", "1.0-1"}});
+    stub::set_local_package_version_null(0);
+    {
+        PackageMetadataSession null_version_session =
+                PackageMetadataSession::open(valid_database_paths());
+        static_cast<void>(require_snapshot_failure(
+                null_version_session.snapshot_local_package_versions(),
+                PackageMetadataErrorCode::MalformedMetadata,
+                "snapshot null package version"));
+    }
+
+    stub::reset_alpm_stub();
+    stub::set_local_packages({{"valid-package", ""}});
+    {
+        PackageMetadataSession empty_version_session =
+                PackageMetadataSession::open(valid_database_paths());
+        static_cast<void>(require_snapshot_failure(
+                empty_version_session.snapshot_local_package_versions(),
+                PackageMetadataErrorCode::MalformedMetadata,
+                "snapshot empty package version"));
+    }
+}
+
+void test_local_package_version_snapshot_rejects_duplicate_names() {
+    stub::reset_alpm_stub();
+    stub::set_local_packages({
+            {"duplicate-package", "1.0-1"},
+            {"duplicate-package", "2.0-1"}});
+    PackageMetadataSession session =
+            PackageMetadataSession::open(valid_database_paths());
+
+    static_cast<void>(require_snapshot_failure(
+            session.snapshot_local_package_versions(),
+            PackageMetadataErrorCode::MalformedMetadata,
+            "snapshot duplicate package name"));
+}
+
+void test_local_package_version_snapshot_reports_invalid_cache_entry() {
+    stub::reset_alpm_stub();
+    stub::set_local_packages({{"valid-package", "1.0-1"}});
+    PackageMetadataSession session =
+            PackageMetadataSession::open(valid_database_paths());
+    stub::set_local_package_cache_entry_null(0);
+
+    static_cast<void>(require_snapshot_failure(
+            session.snapshot_local_package_versions(),
+            PackageMetadataErrorCode::QueryFailed,
+            "snapshot invalid cache entry"));
+}
+
+void test_moved_from_session_snapshot_reports_query_failure() {
+    stub::reset_alpm_stub();
+    PackageMetadataSession source =
+            PackageMetadataSession::open(valid_database_paths());
+    PackageMetadataSession destination(std::move(source));
+    static_cast<void>(destination);
+
+    static_cast<void>(require_snapshot_failure(
+            source.snapshot_local_package_versions(),
+            PackageMetadataErrorCode::QueryFailed,
+            "moved-from snapshot session"));
 }
 
 void test_package_absent() {
@@ -1682,6 +1840,13 @@ int main() {
         test_invalid_local_database_releases_handle();
         test_package_cache_failure_releases_handle();
         test_empty_package_cache_is_queryable_state();
+        test_local_package_version_snapshot_is_owned_and_order_independent();
+        test_empty_local_package_version_snapshot_is_success();
+        test_local_package_version_snapshot_rejects_invalid_names();
+        test_local_package_version_snapshot_rejects_invalid_versions();
+        test_local_package_version_snapshot_rejects_duplicate_names();
+        test_local_package_version_snapshot_reports_invalid_cache_entry();
+        test_moved_from_session_snapshot_reports_query_failure();
 
         test_package_absent();
         test_package_present();

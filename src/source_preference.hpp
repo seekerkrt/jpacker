@@ -2,6 +2,7 @@
 
 #include "source_environment.hpp"
 
+#include <cstddef>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -20,6 +21,22 @@ std::filesystem::path source_preference_entry_path(const std::string& package_na
 
 // POLICY: sortやpackage validationを加えず、consumer固有の列挙policyを維持する。
 std::filesystem::directory_iterator source_preference_entries();
+
+// system/source upgrade preparationが最初のdirectory iteration順をowned化する。
+// regular-file判定は列挙時点の観測値であり、strict readerが実体を再検証する。
+struct SourcePreferenceEntrySnapshot {
+    std::size_t           original_index = 0;
+    std::filesystem::path entry_path;
+    std::string           package_name;
+    bool                  is_regular_file = false;
+};
+
+struct SourcePreferenceDirectorySnapshot {
+    bool                                       root_exists = false;
+    std::vector<SourcePreferenceEntrySnapshot> entries;
+};
+
+SourcePreferenceDirectorySnapshot snapshot_source_preference_directory();
 
 bool is_force_source(const std::string& package_name);
 

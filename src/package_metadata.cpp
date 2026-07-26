@@ -490,11 +490,17 @@ ForeignPackageInventoryResult query_foreign_package_inventory(
 }
 
 struct PackageMetadataSession::Impl {
-    Impl(UniqueAlpmHandle owned_handle, alpm_db_t* borrowed_local_db) noexcept
-        : handle(std::move(owned_handle)), local_db(borrowed_local_db) {}
+    Impl(
+            UniqueAlpmHandle owned_handle,
+            alpm_db_t* borrowed_local_db,
+            alpm_list_t* borrowed_local_package_cache) noexcept
+        : handle(std::move(owned_handle)),
+          local_db(borrowed_local_db),
+          local_package_cache(borrowed_local_package_cache) {}
 
     UniqueAlpmHandle handle;
     alpm_db_t*       local_db;
+    alpm_list_t*     local_package_cache;
 };
 
 PackageMetadataSession::PackageMetadataSession(std::unique_ptr<Impl> impl) noexcept
@@ -556,7 +562,7 @@ PackageMetadataSession PackageMetadataSession::open(
     // LANDMINE: libalpm 16 maps a cache-load failure inside alpm_db_get_pkg() to
     // ALPM_ERR_PKG_NOT_FOUND. Preload here so a later not-found means a lookup miss.
     // nullptr+OK remains a valid empty DB.
-    static_cast<void>(alpm_db_get_pkgcache(local_db));
+    alpm_list_t* local_package_cache = alpm_db_get_pkgcache(local_db);
     alpm_errno_t package_cache_error = alpm_errno(handle.get());
     if(package_cache_error != ALPM_ERR_OK) {
         throw_package_metadata_error(
@@ -566,7 +572,8 @@ PackageMetadataSession PackageMetadataSession::open(
                         package_cache_error));
     }
 
-    auto impl = std::make_unique<Impl>(std::move(handle), local_db);
+    auto impl = std::make_unique<Impl>(
+            std::move(handle), local_db, local_package_cache);
     return PackageMetadataSession(std::move(impl));
 }
 
@@ -615,6 +622,59 @@ InstalledPackageQueryResult PackageMetadataSession::query_installed_package(
             returned_name,
             installed_version,
             map_install_reason(alpm_pkg_get_reason(package))};
+}
+
+LocalPackageVersionSnapshotResult
+PackageMetadataSession::snapshot_local_package_versions() const {
+    if(impl_ == nullptr) {
+        return query_failure(
+                PackageMetadataErrorCode::QueryFailed,
+                "Package metadata session is not open.");
+    }
+
+    LocalPackageVersionSnapshot snapshot;
+    // POLICY: open()がpreloadした同じcacheを一度だけ走査する。個別lookupや
+    // 再loadを挟まないため、snapshot内の全entryは同じread phaseに属する。
+    for(alpm_list_t* node = impl_->local_package_cache;
+        node != nullptr;
+        node = node->next) {
+        if(node->data == nullptr) {
+            return query_failure(
+                    PackageMetadataErrorCode::QueryFailed,
+                    "Local package cache contains an invalid package entry.");
+        }
+
+        auto* package = static_cast<alpm_pkg_t*>(node->data);
+        const char* raw_package_name = alpm_pkg_get_name(package);
+        if(raw_package_name == nullptr || raw_package_name[0] == '\0') {
+            return query_failure(
+                    PackageMetadataErrorCode::MalformedMetadata,
+                    "Local package metadata contains an invalid package name.");
+        }
+
+        std::string package_name(raw_package_name);
+        if(!is_valid_package_name(package_name)) {
+            return query_failure(
+                    PackageMetadataErrorCode::MalformedMetadata,
+                    "Local package metadata contains an invalid package name.");
+        }
+
+        const char* package_version = alpm_pkg_get_version(package);
+        if(package_version == nullptr || package_version[0] == '\0') {
+            return query_failure(
+                    PackageMetadataErrorCode::MalformedMetadata,
+                    "Local package metadata contains an invalid version.");
+        }
+
+        bool inserted = snapshot.emplace(
+                std::move(package_name), package_version).second;
+        if(!inserted) {
+            return query_failure(
+                    PackageMetadataErrorCode::MalformedMetadata,
+                    "Local package metadata contains a duplicate package name.");
+        }
+    }
+    return snapshot;
 }
 
 struct RepositoryPackageMetadataSession::Impl {

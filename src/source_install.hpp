@@ -10,6 +10,22 @@
 struct AppConfig;
 struct BuildPlan;
 
+enum class SourceBuildSourceKind {
+    Repository,
+    Aur,
+};
+
+// requested packageと実際にcheckoutするPackageBase/sourceを結ぶowned identity。
+// canonical_source_keyはrequested aliasに寄せず、source kind + PackageBaseで安定化する。
+struct ResolvedSourceBuildIdentity {
+    std::string           requested_name;
+    std::string           package_base;
+    std::string           canonical_source_key;
+    std::string           git_url;
+    SourceBuildSourceKind source_kind = SourceBuildSourceKind::Repository;
+    bool                  has_distinct_package_base = false;
+};
+
 // production all-target preflightで確定し、mutation phaseまで保持する1 build unit。
 // Artifact path/identity/install directiveはPR4 lifecycle内部でだけ生成する。
 struct ProductionSourceBuildWorkItem {
@@ -38,6 +54,16 @@ void build_source_target(
         const SourceBuildEnvironment& custom_environment,
         const AppConfig& config);
 
+ResolvedSourceBuildIdentity resolve_source_build_identity(
+        const std::string& package_name);
+
+// strict reader等で既にowned化したenvironmentを再readせずwork itemに射影する。
+ProductionSourceBuildWorkItem prepare_resolved_source_build_work_item(
+        const ResolvedSourceBuildIdentity& identity,
+        SourceBuildEnvironment environment,
+        bool only_if_updated,
+        bool needed);
+
 ProductionSourceBuildWorkItem prepare_smart_source_build_work_item(
         const std::string& package_name,
         bool only_if_updated,
@@ -50,6 +76,11 @@ std::vector<ProductionSourceBuildWorkItem> prepare_aur_source_build_work_items(
 
 PreparedProductionSourceBuildInvocation prepare_production_source_build_invocation(
         std::vector<ProductionSourceBuildWorkItem> work_items,
+        const AppConfig& config);
+
+SourceBuildExecutionResult execute_prepared_source_build_work_item_typed(
+        const ProductionSourceBuildWorkItem& work_item,
+        const PacmanDatabasePaths& database_paths,
         const AppConfig& config);
 
 // nulloptはgeneric only-if-updatedの正常skip。update runner用work itemは

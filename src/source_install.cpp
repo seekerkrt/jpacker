@@ -26,15 +26,6 @@ namespace {
 const std::string AUR_BASE_URL = "https://aur.archlinux.org/";
 const std::string ARCH_GIT_BASE = "https://gitlab.archlinux.org/archlinux/packaging/packages/";
 
-// requested package から、実際に取得する PackageBase と git URL を結びつける型。
-struct PackageBuildSource {
-    std::string requested_name;
-    std::string clone_name;
-    std::string git_url;
-    bool        is_aur = false;
-    bool        has_distinct_package_base = false;
-};
-
 SourceBuildEnvironment load_source_preference_environment(
         const std::string& package_name) {
     return get_package_env(
@@ -51,44 +42,28 @@ bool has_distinct_package_base(const AurPackageInfo& info) {
     return info.PackageBase != info.Name;
 }
 
-PackageBuildSource resolve_build_source(const std::string& package_name) {
-    require_valid_package_name(package_name);
-
-    if(is_repo_package(package_name)) {
-        return PackageBuildSource{
-                package_name, package_name, ARCH_GIT_BASE + package_name + ".git", false, false};
+std::string canonical_source_key(
+        SourceBuildSourceKind source_kind,
+        const std::string& package_base) {
+    switch(source_kind) {
+        case SourceBuildSourceKind::Repository:
+            return "repository:" + package_base;
+        case SourceBuildSourceKind::Aur:
+            return "aur:" + package_base;
     }
-
-    std::optional<AurPackageInfo> info;
-    try {
-        info = AurClient::info(package_name);
-    } catch(const AurRpcResponseError&) {
-        throw;
-    } catch(const std::exception& e) {
-        throw std::runtime_error("Failed to fetch AUR info for " + package_name + ": " + e.what());
-    }
-
-    if(!info.has_value()) {
-        throw std::runtime_error("Package not found in repos or AUR: " + package_name);
-    }
-    if(info->PackageBase.empty()) {
-        throw std::runtime_error("AUR info for " + package_name + " does not include PackageBase.");
-    }
-    require_valid_package_name(info->PackageBase);
-
-    return PackageBuildSource{
-            package_name, info->PackageBase, AUR_BASE_URL + info->PackageBase + ".git", true,
-            has_distinct_package_base(info.value())};
+    throw std::logic_error("Unknown source-build source kind.");
 }
 
-void require_supported_build_source_install_target(const PackageBuildSource& source) {
+void require_supported_build_source_install_target(
+        const ResolvedSourceBuildIdentity& source) {
     // POLICY(#98,#242): productionのsingle-artifact selectionではsplit packageの
     // install対象を個別選択できないため、requested nameとPackageBaseが異なる
     // AUR targetは安全側で停止する。
-    if(source.is_aur && source.has_distinct_package_base) {
+    if(source.source_kind == SourceBuildSourceKind::Aur &&
+       source.has_distinct_package_base) {
         throw std::runtime_error(
                 "Cannot build/install split AUR package " + source.requested_name + " from PackageBase " +
-                source.clone_name + "; explicit split package install target selection is not implemented.");
+                source.package_base + "; explicit split package install target selection is not implemented.");
     }
 }
 
@@ -129,8 +104,10 @@ const PlannedPackageTarget& bind_planned_package_target(
 }
 
 DesiredInstallReason resolve_source_target_reason(
-        const PackageBuildSource& source) {
-    if(!source.is_aur) return DesiredInstallReason::Explicit;
+        const ResolvedSourceBuildIdentity& source) {
+    if(source.source_kind != SourceBuildSourceKind::Aur) {
+        return DesiredInstallReason::Explicit;
+    }
 
     // POLICY(#174,#242): dependency graph全体のRPC schemaを解決してから
     // split/executable guardへ進む。upgradeのsystem transaction前preflightでも
@@ -139,7 +116,7 @@ DesiredInstallReason resolve_source_target_reason(
     require_supported_build_source_install_target(source);
     require_executable_install_plan(source.requested_name, plan);
     const PlannedPackageTarget& target = bind_planned_package_target(
-            plan, source.requested_name, source.clone_name);
+            plan, source.requested_name, source.package_base);
     return desired_install_reason(target);
 }
 
@@ -158,26 +135,89 @@ std::string aur_git_url_for_package_base(const std::string& package_base) {
 }
 
 ProductionSourceBuildWorkItem make_direct_source_build_work_item(
-        const PackageBuildSource& source,
+        const ResolvedSourceBuildIdentity& source,
         SourceBuildEnvironment environment,
         SourceEnvironmentEmptyValuePolicy empty_value_policy,
         bool only_if_updated,
         bool needed) {
     ProductionSourceBuildWorkItem work_item;
     work_item.request.package_name = source.requested_name;
-    work_item.request.checkout_name = source.clone_name;
+    work_item.request.checkout_name = source.package_base;
     work_item.request.git_url = source.git_url;
     work_item.request.custom_environment = std::move(environment);
     work_item.request.empty_value_policy = empty_value_policy;
     work_item.request.only_if_updated = only_if_updated;
     work_item.request.needed = needed;
     work_item.desired_reason = resolve_source_target_reason(source);
-    work_item.uses_system_update_baseline = !source.is_aur;
+    work_item.uses_system_update_baseline =
+            source.source_kind == SourceBuildSourceKind::Repository;
     require_static_production_source_build_work_item(work_item);
     return work_item;
 }
 
+std::optional<ArtifactInstallExecutionOutcome> flatten_source_build_result(
+        const SourceBuildExecutionResult& result) {
+    switch(result.status) {
+        case SourceBuildExecutionStatus::Installed:
+            return ArtifactInstallExecutionOutcome::Installed;
+        case SourceBuildExecutionStatus::SkippedAsNeeded:
+            return ArtifactInstallExecutionOutcome::SkippedAsNeeded;
+        case SourceBuildExecutionStatus::UpToDate:
+        case SourceBuildExecutionStatus::UpdateStatusUnknownSkipped:
+            return std::nullopt;
+    }
+    throw std::logic_error("Unknown source-build execution status.");
+}
+
 } // namespace
+
+ResolvedSourceBuildIdentity resolve_source_build_identity(
+        const std::string& package_name) {
+    require_valid_package_name(package_name);
+
+    if(is_repo_package(package_name)) {
+        const SourceBuildSourceKind source_kind =
+                SourceBuildSourceKind::Repository;
+        return ResolvedSourceBuildIdentity{
+                package_name,
+                package_name,
+                canonical_source_key(source_kind, package_name),
+                ARCH_GIT_BASE + package_name + ".git",
+                source_kind,
+                false};
+    }
+
+    std::optional<AurPackageInfo> info;
+    try {
+        info = AurClient::info(package_name);
+    } catch(const AurRpcResponseError&) {
+        throw;
+    } catch(const std::exception& error) {
+        throw std::runtime_error(
+                "Failed to fetch AUR info for " + package_name + ": " +
+                error.what());
+    }
+
+    if(!info.has_value()) {
+        throw std::runtime_error(
+                "Package not found in repos or AUR: " + package_name);
+    }
+    if(info->PackageBase.empty()) {
+        throw std::runtime_error(
+                "AUR info for " + package_name +
+                " does not include PackageBase.");
+    }
+    require_valid_package_name(info->PackageBase);
+
+    const SourceBuildSourceKind source_kind = SourceBuildSourceKind::Aur;
+    return ResolvedSourceBuildIdentity{
+            package_name,
+            info->PackageBase,
+            canonical_source_key(source_kind, info->PackageBase),
+            AUR_BASE_URL + info->PackageBase + ".git",
+            source_kind,
+            has_distinct_package_base(info.value())};
+}
 
 void build_source_target(
         const std::string& package_name,
@@ -185,7 +225,8 @@ void build_source_target(
         const AppConfig& config) {
     // --rmdepsはAUR/repository probeより前に、invocation optionとして拒否する。
     require_supported_production_source_build_options(config);
-    PackageBuildSource source = resolve_build_source(package_name);
+    ResolvedSourceBuildIdentity source =
+            resolve_source_build_identity(package_name);
     ProductionSourceBuildWorkItem work_item = make_direct_source_build_work_item(
             source, custom_environment,
             SourceEnvironmentEmptyValuePolicy::Forward, false, false);
@@ -195,6 +236,16 @@ void build_source_target(
             prepare_production_source_build_invocation(
                     std::move(work_items), config);
     execute_prepared_source_build_invocation(invocation, config);
+}
+
+ProductionSourceBuildWorkItem prepare_resolved_source_build_work_item(
+        const ResolvedSourceBuildIdentity& identity,
+        SourceBuildEnvironment environment,
+        bool only_if_updated,
+        bool needed) {
+    return make_direct_source_build_work_item(
+            identity, std::move(environment),
+            SourceEnvironmentEmptyValuePolicy::Omit, only_if_updated, needed);
 }
 
 std::vector<ProductionSourceBuildWorkItem> prepare_aur_source_build_work_items(
@@ -249,14 +300,13 @@ ProductionSourceBuildWorkItem prepare_smart_source_build_work_item(
         bool needed) {
     SourceBuildEnvironment environment =
             load_source_preference_environment(package_name);
-    PackageBuildSource source = resolve_build_source(package_name);
-    return make_direct_source_build_work_item(
-            source, std::move(environment),
-            SourceEnvironmentEmptyValuePolicy::Omit, only_if_updated, needed);
+    ResolvedSourceBuildIdentity identity =
+            resolve_source_build_identity(package_name);
+    return prepare_resolved_source_build_work_item(
+            identity, std::move(environment), only_if_updated, needed);
 }
 
-std::optional<ArtifactInstallExecutionOutcome>
-execute_prepared_source_build_work_item(
+SourceBuildExecutionResult execute_prepared_source_build_work_item_typed(
         const ProductionSourceBuildWorkItem& work_item,
         const PacmanDatabasePaths& database_paths,
         const AppConfig& config) {
@@ -270,7 +320,7 @@ execute_prepared_source_build_work_item(
     }
 
     try {
-        return execute_source_build(
+        return execute_source_build_typed(
                 work_item.request, work_item.desired_reason,
                 database_paths, config);
     } catch(const SeparatedSourceBuildCleanupError&) {
@@ -283,6 +333,16 @@ execute_prepared_source_build_work_item(
                 work_item.request.checkout_name + " (" +
                 work_item.request.package_name + "): " + error.what());
     }
+}
+
+std::optional<ArtifactInstallExecutionOutcome>
+execute_prepared_source_build_work_item(
+        const ProductionSourceBuildWorkItem& work_item,
+        const PacmanDatabasePaths& database_paths,
+        const AppConfig& config) {
+    return flatten_source_build_result(
+            execute_prepared_source_build_work_item_typed(
+                    work_item, database_paths, config));
 }
 
 void execute_prepared_source_build_invocation(
