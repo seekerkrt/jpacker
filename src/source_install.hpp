@@ -26,6 +26,10 @@ struct PreparedProductionSourceBuildInvocation {
     PacmanDatabasePaths                        database_paths;
 };
 
+// checkoutやmetadata queryより前に確認できるwork item単体のstatic契約。
+void require_static_production_source_build_work_item(
+        const ProductionSourceBuildWorkItem& work_item);
+
 void require_supported_production_source_build_options(
         const AppConfig& config);
 
