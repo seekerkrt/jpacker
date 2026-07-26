@@ -157,31 +157,6 @@ std::string aur_git_url_for_package_base(const std::string& package_base) {
     return AUR_BASE_URL + package_base + ".git";
 }
 
-void require_static_source_build_work_item(
-        const ProductionSourceBuildWorkItem& work_item) {
-    require_valid_package_name(work_item.request.package_name);
-    require_valid_package_name(work_item.request.checkout_name);
-    if(work_item.request.package_name != work_item.request.checkout_name) {
-        throw std::runtime_error(
-                "Production separated source-build requires requested package and "
-                "PackageBase to match: " + work_item.request.package_name + " / " +
-                work_item.request.checkout_name + ".");
-    }
-    if(work_item.request.git_url.empty()) {
-        throw std::logic_error(
-                "Production source-build work item has an empty Git URL for " +
-                work_item.request.package_name + ".");
-    }
-    switch(work_item.desired_reason) {
-        case DesiredInstallReason::Explicit:
-        case DesiredInstallReason::Dependency:
-            break;
-        default:
-            throw std::logic_error(
-                    "Production source-build work item has an unknown install reason.");
-    }
-}
-
 ProductionSourceBuildWorkItem make_direct_source_build_work_item(
         const PackageBuildSource& source,
         SourceBuildEnvironment environment,
@@ -198,16 +173,11 @@ ProductionSourceBuildWorkItem make_direct_source_build_work_item(
     work_item.request.needed = needed;
     work_item.desired_reason = resolve_source_target_reason(source);
     work_item.uses_system_update_baseline = !source.is_aur;
-    require_static_source_build_work_item(work_item);
+    require_static_production_source_build_work_item(work_item);
     return work_item;
 }
 
 } // namespace
-
-void require_supported_production_source_build_options(
-        const AppConfig& config) {
-    require_supported_separated_install_options(config.rm_deps);
-}
 
 void build_source_target(
         const std::string& package_name,
@@ -267,7 +237,7 @@ std::vector<ProductionSourceBuildWorkItem> prepare_aur_source_build_work_items(
         work_item.desired_reason = desired_install_reason(target);
         work_item.is_build_plan_entry = true;
         work_item.plan_package_names = entry.package_names;
-        require_static_source_build_work_item(work_item);
+        require_static_production_source_build_work_item(work_item);
         work_items.push_back(std::move(work_item));
     }
     return work_items;
@@ -283,32 +253,6 @@ ProductionSourceBuildWorkItem prepare_smart_source_build_work_item(
     return make_direct_source_build_work_item(
             source, std::move(environment),
             SourceEnvironmentEmptyValuePolicy::Omit, only_if_updated, needed);
-}
-
-PreparedProductionSourceBuildInvocation prepare_production_source_build_invocation(
-        std::vector<ProductionSourceBuildWorkItem> work_items,
-        const AppConfig& config) {
-    if(work_items.empty()) {
-        throw std::invalid_argument(
-                "Production source-build invocation must contain at least one work item.");
-    }
-
-    // POLICY(#242): exact orderはrmdeps → inherited PKGDEST → all source
-    // environments → static identity/role → database paths。ここまではworkspace、
-    // checkout、makepkg、metadata session、sudoを開始しない。
-    require_supported_separated_install_options(config.rm_deps);
-    require_unclaimed_artifact_pkgdest(SourceBuildEnvironment{});
-    for(const auto& work_item : work_items) {
-        require_unclaimed_artifact_pkgdest(
-                work_item.request.custom_environment);
-    }
-    for(const auto& work_item : work_items) {
-        require_static_source_build_work_item(work_item);
-    }
-
-    PacmanDatabasePaths database_paths = resolve_pacman_database_paths();
-    return PreparedProductionSourceBuildInvocation{
-            std::move(work_items), std::move(database_paths)};
 }
 
 void execute_prepared_source_build_work_item(

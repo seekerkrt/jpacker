@@ -31,6 +31,8 @@ AUR_UPDATE_PLAN_TEST_TARGET := $(BUILD_DIR)/tests/aur-update-plan-test
 AUR_UPDATE_QUERY_TEST_TARGET := $(BUILD_DIR)/tests/aur-update-query-test
 AUR_UPDATE_EXECUTION_PREFLIGHT_TEST_TARGET := $(BUILD_DIR)/tests/aur-update-execution-preflight-test
 AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION_TEST_TARGET := $(BUILD_DIR)/tests/aur-update-execution-preflight-integration-test
+AUR_UPDATE_EXECUTION_PREPARATION_TEST_TARGET := $(BUILD_DIR)/tests/aur-update-execution-preparation-test
+AUR_UPDATE_EXECUTION_PREPARATION_INTEGRATION_TEST_TARGET := $(BUILD_DIR)/tests/aur-update-execution-preparation-integration-test
 DEPENDENCY_PLAN_MODEL_TEST_TARGET := $(BUILD_DIR)/tests/dependency-plan-model-test
 REPOSITORY_QUERY_TEST_TARGET := $(BUILD_DIR)/tests/repository-query-test
 ARTIFACT_INSTALL_PLAN_TEST_TARGET := $(BUILD_DIR)/tests/artifact-install-plan-test
@@ -112,6 +114,25 @@ AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION_TEST_SRCS := \
 	$(SRC_DIR)/shell_words.cpp \
 	tests/stubs/package-metadata/alpm_stub.cpp \
 	tests/stubs/aur-update-execution-preflight-integration/integration_stub.cpp
+# POLICY(#267): このallowlistはpreparationからexecution/mutation TUを切るlink firewall。
+# $(SRCS)へ広げず、必要なpure symbolだけを専用stubまたはpreparation TUで与える。
+AUR_UPDATE_EXECUTION_PREPARATION_TEST_SRCS := \
+	tests/aur_update_execution_preparation_test.cpp \
+	$(SRC_DIR)/aur_update_execution_preparation.cpp \
+	$(SRC_DIR)/source_install_preparation.cpp \
+	$(SRC_DIR)/source_environment.cpp \
+	$(SRC_DIR)/shell_words.cpp \
+	$(SRC_DIR)/package_identifier.cpp \
+	tests/stubs/aur-update-execution-preparation/preparation_stub.cpp
+AUR_UPDATE_EXECUTION_PREPARATION_INTEGRATION_TEST_SRCS := \
+	tests/aur_update_execution_preparation_integration_test.cpp \
+	$(SRC_DIR)/aur_update_execution_preparation.cpp \
+	$(SRC_DIR)/source_install_preparation.cpp \
+	$(SRC_DIR)/source_preference.cpp \
+	$(SRC_DIR)/source_environment.cpp \
+	$(SRC_DIR)/shell_words.cpp \
+	$(SRC_DIR)/package_identifier.cpp \
+	tests/stubs/aur-update-execution-preparation-integration/preparation_stub.cpp
 DEPENDENCY_PLAN_MODEL_TEST_SRCS := \
 	tests/dependency_plan_model_test.cpp \
 	$(SRC_DIR)/dependency_plan.cpp \
@@ -183,6 +204,7 @@ SEPARATED_SOURCE_BUILD_TEST_SRCS := \
 PRODUCTION_SOURCE_BUILD_TEST_SRCS := \
 	tests/production_source_build_test.cpp \
 	$(SRC_DIR)/source_install.cpp \
+	$(SRC_DIR)/source_install_preparation.cpp \
 	$(SRC_DIR)/source_build.cpp \
 	$(SRC_DIR)/separated_source_build.cpp \
 	$(SRC_DIR)/artifact_install_executor.cpp \
@@ -242,7 +264,7 @@ LIBALPM_BUILD_TARGETS := \
 	$(AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION_TEST_TARGET) \
 	$(UPGRADE_BASELINE_METADATA_TEST_TARGET)
 
-.PHONY: all check-libalpm clean test-app-config test-package-identifier test-package-metadata test-package-metadata-integration test-repository-query test-shell-words test-source-environment test-artifact-workspace test-artifact-identity test-artifact-install-executor test-separated-source-build test-production-source-build test-process-capture test-aur-update-plan test-aur-update-query test-aur-update-execution-preflight test-aur-update-execution-preflight-integration test-dependency-plan-model test-artifact-install-plan test-command-stub-contract test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-commands-inspect test-commands-source-maintenance test-commands-sync test-conflicts-replaces test-install-layout test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check install uninstall
+.PHONY: all check-libalpm clean test-app-config test-package-identifier test-package-metadata test-package-metadata-integration test-repository-query test-shell-words test-source-environment test-artifact-workspace test-artifact-identity test-artifact-install-executor test-separated-source-build test-production-source-build test-process-capture test-aur-update-plan test-aur-update-query test-aur-update-execution-preflight test-aur-update-execution-preflight-integration test-aur-update-execution-preparation test-dependency-plan-model test-artifact-install-plan test-command-stub-contract test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-commands-inspect test-commands-source-maintenance test-commands-sync test-conflicts-replaces test-install-layout test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check install uninstall
 
 all: $(TARGET) $(MANPAGE)
 
@@ -430,6 +452,24 @@ $(AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION_TEST_TARGET): $(AUR_UPDATE_EXECUTIO
 		$(AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION_TEST_SRCS) \
 		-o $@
 
+$(AUR_UPDATE_EXECUTION_PREPARATION_TEST_TARGET): $(AUR_UPDATE_EXECUTION_PREPARATION_TEST_SRCS) $(HEADERS) tests/stubs/aur-update-execution-preparation/preparation_stub.hpp $(VERSION_FILE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling AUR update execution preparation fake-symbol test binary"
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
+		-I$(SRC_DIR) \
+		$(AUR_UPDATE_EXECUTION_PREPARATION_TEST_SRCS) \
+		-o $@
+
+$(AUR_UPDATE_EXECUTION_PREPARATION_INTEGRATION_TEST_TARGET): $(AUR_UPDATE_EXECUTION_PREPARATION_INTEGRATION_TEST_SRCS) $(HEADERS) tests/stubs/aur-update-execution-preparation-integration/preparation_stub.hpp $(VERSION_FILE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling AUR update execution preparation production-reader composition test binary"
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
+		-DJPACKER_ENABLE_TEST_OVERRIDES \
+		-DJPACKER_ENABLE_SOURCE_PREFERENCE_TEST_HOOKS \
+		-I$(SRC_DIR) \
+		$(AUR_UPDATE_EXECUTION_PREPARATION_INTEGRATION_TEST_SRCS) \
+		-o $@
+
 $(DEPENDENCY_PLAN_MODEL_TEST_TARGET): $(DEPENDENCY_PLAN_MODEL_TEST_SRCS) $(SRC_DIR)/dependency_plan.hpp $(SRC_DIR)/dependency_provider.hpp $(SRC_DIR)/aur_rpc.hpp $(SRC_DIR)/repository_query.hpp $(SRC_DIR)/dependency_spec.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/logging.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling dependency plan model test binary"
@@ -528,6 +568,12 @@ test-aur-update-execution-preflight-integration: $(AUR_UPDATE_EXECUTION_PREFLIGH
 	$(abspath $(AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION_TEST_TARGET)) simple
 	$(abspath $(AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION_TEST_TARGET)) repository-failure
 	$(abspath $(AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION_TEST_TARGET)) aur-failure
+
+test-aur-update-execution-preparation: $(AUR_UPDATE_EXECUTION_PREPARATION_TEST_TARGET) $(AUR_UPDATE_EXECUTION_PREPARATION_INTEGRATION_TEST_TARGET)
+	$(abspath $(AUR_UPDATE_EXECUTION_PREPARATION_TEST_TARGET))
+	JPACKER_TEST_PACKAGE_BUILD_DIR=$(abspath $(BUILD_DIR)/tests/aur-update-execution-preparation-fixture) \
+		$(abspath $(AUR_UPDATE_EXECUTION_PREPARATION_INTEGRATION_TEST_TARGET)) \
+		$(abspath $(BUILD_DIR)/tests/aur-update-execution-preparation-fixture)
 
 test-dependency-plan-model: $(DEPENDENCY_PLAN_MODEL_TEST_TARGET)
 	$(abspath $(DEPENDENCY_PLAN_MODEL_TEST_TARGET))
