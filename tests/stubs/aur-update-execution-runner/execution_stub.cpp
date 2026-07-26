@@ -1,0 +1,167 @@
+#include "execution_stub.hpp"
+
+#include "separated_source_build.hpp"
+
+#include <deque>
+#include <optional>
+#include <stdexcept>
+#include <utility>
+
+namespace {
+
+namespace stub = aur_update_execution_runner_test_stub;
+
+struct ScriptedExecution {
+    stub::ScriptedExecutionOutcome outcome =
+            stub::ScriptedExecutionOutcome::Installed;
+    std::string diagnostic;
+};
+
+struct ExecutionStubState {
+    std::deque<ScriptedExecution> outcomes;
+    std::vector<stub::ExecutionCall> calls;
+    const PacmanDatabasePaths* first_database_paths_address = nullptr;
+    std::optional<std::string> expectation_failure;
+};
+
+struct UnknownExecutionFailure {};
+
+ExecutionStubState g_state;
+
+void enqueue(
+        stub::ScriptedExecutionOutcome outcome,
+        std::string diagnostic = {}) {
+    g_state.outcomes.push_back(
+            ScriptedExecution{outcome, std::move(diagnostic)});
+}
+
+[[noreturn]] void fail_unexpected_execution() {
+    constexpr const char* DIAGNOSTIC =
+            "Unexpected source-build work-item execution with no pending outcome.";
+    g_state.expectation_failure = DIAGNOSTIC;
+    throw std::logic_error(DIAGNOSTIC);
+}
+
+} // namespace
+
+namespace aur_update_execution_runner_test_stub {
+
+void reset() {
+    g_state = ExecutionStubState{};
+}
+
+void enqueue_success(ArtifactInstallExecutionOutcome outcome) {
+    switch(outcome) {
+        case ArtifactInstallExecutionOutcome::Installed:
+            enqueue(ScriptedExecutionOutcome::Installed);
+            return;
+        case ArtifactInstallExecutionOutcome::SkippedAsNeeded:
+            enqueue(ScriptedExecutionOutcome::SkippedAsNeeded);
+            return;
+    }
+
+    throw std::logic_error(
+            "AUR update execution stub received an unknown install outcome.");
+}
+
+void enqueue_ordinary_failure(std::string diagnostic) {
+    enqueue(
+            ScriptedExecutionOutcome::OrdinaryFailure,
+            std::move(diagnostic));
+}
+
+void enqueue_cleanup_failure(
+        ArtifactInstallExecutionOutcome outcome,
+        std::string diagnostic) {
+    switch(outcome) {
+        case ArtifactInstallExecutionOutcome::Installed:
+            enqueue(
+                    ScriptedExecutionOutcome::InstalledCleanupFailure,
+                    std::move(diagnostic));
+            return;
+        case ArtifactInstallExecutionOutcome::SkippedAsNeeded:
+            enqueue(
+                    ScriptedExecutionOutcome::SkippedAsNeededCleanupFailure,
+                    std::move(diagnostic));
+            return;
+    }
+
+    throw std::logic_error(
+            "AUR update execution stub received an unknown cleanup outcome.");
+}
+
+void enqueue_unknown_failure() {
+    enqueue(ScriptedExecutionOutcome::UnknownFailure);
+}
+
+const std::vector<ExecutionCall>& call_history() {
+    return g_state.calls;
+}
+
+void require_script_consumed() {
+    if(g_state.expectation_failure.has_value()) {
+        throw std::logic_error(*g_state.expectation_failure);
+    }
+    if(!g_state.outcomes.empty()) {
+        throw std::logic_error(
+                "AUR update execution stub has unconsumed outcomes.");
+    }
+}
+
+} // namespace aur_update_execution_runner_test_stub
+
+SeparatedSourceBuildCleanupError::SeparatedSourceBuildCleanupError(
+        ArtifactInstallExecutionOutcome install_outcome,
+        const std::string& diagnostic)
+    : std::runtime_error(diagnostic),
+      install_outcome_(install_outcome) {
+}
+
+std::optional<ArtifactInstallExecutionOutcome>
+execute_prepared_source_build_work_item(
+        const ProductionSourceBuildWorkItem& work_item,
+        const PacmanDatabasePaths& database_paths,
+        const AppConfig& config) {
+    static_cast<void>(config);
+
+    // POLICY(#267): by-value capabilityのmove元addressとは比較できないため、
+    // runnerが全work itemへ渡したsnapshot参照同士の同一性をstub内で検証する。
+    if(g_state.first_database_paths_address == nullptr) {
+        g_state.first_database_paths_address = &database_paths;
+    } else if(g_state.first_database_paths_address != &database_paths) {
+        g_state.expectation_failure =
+                "AUR update runner did not reuse one Pacman database snapshot.";
+    }
+
+    g_state.calls.push_back(stub::ExecutionCall{
+            g_state.calls.size(),
+            work_item.request.package_name,
+            work_item.request.checkout_name,
+            work_item.plan_package_names,
+            database_paths});
+
+    if(g_state.outcomes.empty()) fail_unexpected_execution();
+
+    ScriptedExecution scripted = std::move(g_state.outcomes.front());
+    g_state.outcomes.pop_front();
+    switch(scripted.outcome) {
+        case stub::ScriptedExecutionOutcome::Installed:
+            return ArtifactInstallExecutionOutcome::Installed;
+        case stub::ScriptedExecutionOutcome::SkippedAsNeeded:
+            return ArtifactInstallExecutionOutcome::SkippedAsNeeded;
+        case stub::ScriptedExecutionOutcome::OrdinaryFailure:
+            throw std::runtime_error(scripted.diagnostic);
+        case stub::ScriptedExecutionOutcome::InstalledCleanupFailure:
+            throw SeparatedSourceBuildCleanupError(
+                    ArtifactInstallExecutionOutcome::Installed,
+                    scripted.diagnostic);
+        case stub::ScriptedExecutionOutcome::SkippedAsNeededCleanupFailure:
+            throw SeparatedSourceBuildCleanupError(
+                    ArtifactInstallExecutionOutcome::SkippedAsNeeded,
+                    scripted.diagnostic);
+        case stub::ScriptedExecutionOutcome::UnknownFailure:
+            throw UnknownExecutionFailure{};
+    }
+
+    throw std::logic_error("AUR update execution stub has an unknown outcome.");
+}

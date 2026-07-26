@@ -89,13 +89,19 @@ std::string expect_runtime_error(
     throw std::runtime_error(context + ": expected runtime_error");
 }
 
+struct CleanupErrorObservation {
+    ArtifactInstallExecutionOutcome install_outcome;
+    std::string                     diagnostic;
+};
+
 template <typename Callable>
-std::string expect_cleanup_error(
+CleanupErrorObservation expect_cleanup_error(
         Callable&& callable, const std::string& context) {
     try {
         std::forward<Callable>(callable)();
     } catch(const SeparatedSourceBuildCleanupError& error) {
-        return error.what();
+        return CleanupErrorObservation{
+                error.install_outcome(), error.what()};
     } catch(const std::exception& error) {
         throw std::runtime_error(
                 context + ": cleanup partial-success was flattened: " +
@@ -430,6 +436,8 @@ AppConfig noninteractive_config() {
 enum class MetadataMode {
     Absent,
     ExistingDependency,
+    ExistingExplicitDifferentVersion,
+    ExistingExplicitSameVersion,
     QueryFailure,
 };
 
@@ -564,6 +572,15 @@ void configure_metadata(const UnitPlan& unit) {
     case MetadataMode::ExistingDependency:
         metadata_stub::set_package_metadata(
                 unit.package_name, "0.9-1", ALPM_PKG_REASON_DEPEND);
+        return;
+    case MetadataMode::ExistingExplicitDifferentVersion:
+        metadata_stub::set_package_metadata(
+                unit.package_name, "0.9-1", ALPM_PKG_REASON_EXPLICIT);
+        return;
+    case MetadataMode::ExistingExplicitSameVersion:
+        metadata_stub::set_package_metadata(
+                unit.package_name, ARTIFACT_VERSION,
+                ALPM_PKG_REASON_EXPLICIT);
         return;
     case MetadataMode::QueryFailure:
         metadata_stub::set_package_query_failure(ALPM_ERR_DB_OPEN);
@@ -881,6 +898,30 @@ void execute_invocation(
             "Production success leaked a changed working directory");
 }
 
+std::optional<ArtifactInstallExecutionOutcome> execute_work_item(
+        const PreparedProductionSourceBuildInvocation& invocation,
+        std::size_t work_item_index,
+        ProductionScenario& scenario) {
+    expect(
+            fs::current_path() == scenario.caller_working_directory,
+            "Production work-item execution started from a drifted working directory");
+    try {
+        std::optional<ArtifactInstallExecutionOutcome> outcome =
+                execute_prepared_source_build_work_item(
+                        invocation.work_items.at(work_item_index),
+                        invocation.database_paths, scenario.config);
+        expect(
+                fs::current_path() == scenario.caller_working_directory,
+                "Production work-item success leaked a changed working directory");
+        return outcome;
+    } catch(...) {
+        expect(
+                fs::current_path() == scenario.caller_working_directory,
+                "Production work-item failure leaked a changed working directory");
+        throw;
+    }
+}
+
 struct PreflightFilesystemSnapshot {
     CacheTreeSnapshot     cache_tree;
     std::vector<fs::path> expected_missing_checkout_paths;
@@ -1160,6 +1201,59 @@ void test_database_resolver_failure_stops_all_targets(
     deactivate_scenario();
 }
 
+void expect_single_work_item_outcome(
+        const TemporaryProductionEnvironment& environment,
+        const std::string& package_name,
+        bool needed,
+        MetadataMode metadata_mode,
+        ArtifactInstallExecutionOutcome expected_outcome,
+        const std::string& context) {
+    AppConfig config = noninteractive_config();
+    std::vector<ProductionSourceBuildWorkItem> work_items;
+    work_items.push_back(make_work_item(package_name));
+    work_items[0].request.needed = needed;
+    ProductionScenario scenario =
+            make_execution_scenario(environment, work_items, config);
+    scenario.units[0].metadata_mode = metadata_mode;
+
+    PreparedProductionSourceBuildInvocation invocation = prepare_execution(
+            std::move(work_items), scenario);
+    const std::optional<ArtifactInstallExecutionOutcome> outcome =
+            execute_work_item(invocation, 0, scenario);
+
+    expect(outcome.has_value(), context + ": typed outcome was omitted");
+    expect(
+            *outcome == expected_outcome,
+            context + ": typed outcome differs");
+    expect(
+            scenario.install_attempt_order ==
+                    std::vector<std::string>{package_name},
+            context + ": successful pacman -U was not observed");
+    expect(
+            !fs::exists(scenario.workspace_paths.at(0)),
+            context + ": successful execution retained its workspace");
+    require_scenario_complete(scenario, 1, context);
+}
+
+void test_work_item_typed_install_outcomes(
+        const TemporaryProductionEnvironment& environment) {
+    expect_single_work_item_outcome(
+            environment, "outcome-needed-false", false,
+            MetadataMode::Absent,
+            ArtifactInstallExecutionOutcome::Installed,
+            "needed=false install outcome");
+    expect_single_work_item_outcome(
+            environment, "outcome-needed-different", true,
+            MetadataMode::ExistingExplicitDifferentVersion,
+            ArtifactInstallExecutionOutcome::Installed,
+            "different-version --needed install outcome");
+    expect_single_work_item_outcome(
+            environment, "outcome-needed-same", true,
+            MetadataMode::ExistingExplicitSameVersion,
+            ArtifactInstallExecutionOutcome::SkippedAsNeeded,
+            "same-version --needed install outcome");
+}
+
 void test_single_aur_root_uses_shared_lifecycle(
         const TemporaryProductionEnvironment& environment) {
     AppConfig config = noninteractive_config();
@@ -1326,18 +1420,23 @@ void test_cleanup_partial_success_stays_distinct_and_stops(
 
     PreparedProductionSourceBuildInvocation invocation = prepare_execution(
             std::move(work_items), scenario);
-    const std::string diagnostic = expect_cleanup_error(
+    const CleanupErrorObservation cleanup_error = expect_cleanup_error(
             [&]() { execute_invocation(invocation, scenario); },
             "production cleanup partial-success");
 
     expect(
-            diagnostic.find("Package installation succeeded") !=
+            cleanup_error.install_outcome ==
+                    ArtifactInstallExecutionOutcome::Installed,
+            "Cleanup error lost the completed install outcome");
+    expect(
+            cleanup_error.diagnostic.find("Package installation succeeded") !=
                     std::string::npos,
             "Cleanup error omitted successful package installation");
     expect(
-            diagnostic.find("Failed while building/installing") ==
+            cleanup_error.diagnostic.find("Failed while building/installing") ==
                     std::string::npos &&
-                    diagnostic.find("pacman -U failed") == std::string::npos,
+                    cleanup_error.diagnostic.find("pacman -U failed") ==
+                            std::string::npos,
             "Cleanup partial-success was flattened to transaction failure");
     expect(
             scenario.workspace_paths.size() == 1 &&
@@ -1353,6 +1452,47 @@ void test_cleanup_partial_success_stays_distinct_and_stops(
             scenario, 1, "production cleanup partial-success");
 }
 
+void test_needed_same_version_cleanup_failure_preserves_no_change(
+        const TemporaryProductionEnvironment& environment) {
+    AppConfig config = noninteractive_config();
+    std::vector<ProductionSourceBuildWorkItem> work_items;
+    work_items.push_back(make_work_item("cleanup-no-change"));
+    work_items[0].request.needed = true;
+    ProductionScenario scenario =
+            make_execution_scenario(environment, work_items, config);
+    scenario.units[0].metadata_mode =
+            MetadataMode::ExistingExplicitSameVersion;
+    scenario.units[0].replace_workspace_after_install = true;
+
+    PreparedProductionSourceBuildInvocation invocation = prepare_execution(
+            std::move(work_items), scenario);
+    const CleanupErrorObservation cleanup_error = expect_cleanup_error(
+            [&]() {
+                static_cast<void>(execute_work_item(invocation, 0, scenario));
+            },
+            "same-version --needed cleanup failure");
+
+    expect(
+            cleanup_error.install_outcome ==
+                    ArtifactInstallExecutionOutcome::SkippedAsNeeded,
+            "Cleanup error flattened same-version --needed skip to install");
+    expect(
+            cleanup_error.diagnostic.find("Package installation succeeded") !=
+                    std::string::npos,
+            "No-change cleanup error changed the existing diagnostic");
+    expect(
+            scenario.install_attempt_order ==
+                    std::vector<std::string>{"cleanup-no-change"},
+            "No-change cleanup failure did not reach successful pacman -U");
+    expect(
+            fs::is_regular_file(
+                    scenario.displaced_workspace_paths.at(0) /
+                    "cleanup-no-change-1.0-1-x86_64.pkg.tar.zst"),
+            "No-change cleanup failure lost its diagnostic artifact workspace");
+    require_scenario_complete(
+            scenario, 1, "same-version --needed cleanup failure");
+}
+
 } // namespace
 
 int main() {
@@ -1364,12 +1504,15 @@ int main() {
         test_inherited_pkgdest_global_rejection(environment);
         test_later_target_pkgdest_global_rejection(environment);
         test_database_resolver_failure_stops_all_targets(environment);
+        test_work_item_typed_install_outcomes(environment);
         test_single_aur_root_uses_shared_lifecycle(environment);
         test_multi_unit_options_roles_and_order(environment);
         test_build_failure_does_not_reach_sudo(environment);
         test_metadata_failure_does_not_reach_sudo(environment);
         test_pacman_failure_stops_later_unit(environment);
         test_cleanup_partial_success_stays_distinct_and_stops(environment);
+        test_needed_same_version_cleanup_failure_preserves_no_change(
+                environment);
         std::cout << "production source-build tests passed\n";
         return 0;
     } catch(const std::exception& error) {

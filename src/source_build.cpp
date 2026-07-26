@@ -392,7 +392,7 @@ MakepkgBuildOptions resolve_makepkg_build_options(
 
 } // namespace
 
-void execute_source_build(
+std::optional<ArtifactInstallExecutionOutcome> execute_source_build(
         const SourceBuildRequest& request,
         DesiredInstallReason desired_reason,
         const PacmanDatabasePaths& database_paths,
@@ -505,22 +505,22 @@ void execute_source_build(
                     request.package_name, pkg_path.canonical_path(),
                     request.installed_snapshot.value(), request.update_baseline);
             if(update_check == UpdateCheckResult::UpToDate) {
-                return;// 更新不要なので終了
+                return std::nullopt; // 更新不要なので終了
             }
             if(update_check == UpdateCheckResult::Unknown) {
                 Logger::warn("Unable to determine update status from .SRCINFO for " + request.package_name + ".");
                 Logger::warn("Skipping pre-review PKGBUILD evaluation.");
                 if(config.no_confirm) {
                     Logger::warn("Skipping " + request.package_name + ": update status is unknown and --noconfirm is set.");
-                    return;
+                    return std::nullopt;
                 }
                 if(!isatty(STDIN_FILENO)) {
                     Logger::warn("Skipping " + request.package_name + ": update status is unknown and stdin is non-interactive.");
-                    return;
+                    return std::nullopt;
                 }
                 if(!ask_user("Update status is unknown because .SRCINFO is missing or incomplete. Continue to review/build?",
                             PromptDefault::No, config)) {
-                    return;
+                    return std::nullopt;
                 }
             }
         }
@@ -546,7 +546,7 @@ void execute_source_build(
     require_safe_persistent_checkout_descendants(pkg_path);
     ValidatedPrivateCacheRoot artifact_root =
             prepare_private_trusted_cache_root();
-    execute_separated_source_build_unit(
+    return execute_separated_source_build_unit(
             SeparatedSourceBuildUnitRequest{
                     pkg_path,
                     std::move(artifact_root),

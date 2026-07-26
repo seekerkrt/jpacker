@@ -10,8 +10,28 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <type_traits>
 #include <utility>
 #include <vector>
+
+static_assert(
+        !std::is_default_constructible_v<
+                PreparedAurUpdateSourceBuildInvocation>);
+static_assert(
+        !std::is_copy_constructible_v<
+                PreparedAurUpdateSourceBuildInvocation>);
+static_assert(
+        std::is_nothrow_move_constructible_v<
+                PreparedAurUpdateSourceBuildInvocation>);
+static_assert(
+        !std::is_move_assignable_v<
+                PreparedAurUpdateSourceBuildInvocation>);
+static_assert(!std::is_aggregate_v<PreparedAurUpdateSourceBuildInvocation>);
+static_assert(
+        !std::is_constructible_v<
+                PreparedAurUpdateSourceBuildInvocation,
+                PreparedProductionSourceBuildInvocation,
+                std::vector<AurUpdatePreparedWorkItemAttribution>>);
 
 namespace {
 
@@ -281,6 +301,31 @@ void expect_result_invariant(
             !preparation.invocation.has_value() ||
                     preparation.issues.empty(),
             context + ": partial invocation escaped with issues");
+    if(!preparation.invocation.has_value()) return;
+
+    const PreparedProductionSourceBuildInvocation& production_invocation =
+            preparation.invocation->production_invocation_for_test();
+    const auto& attributions =
+            preparation.invocation->work_item_attributions();
+    expect(
+            !production_invocation.work_items.empty() &&
+                    attributions.size() ==
+                            production_invocation.work_items.size(),
+            context + ": prepared correlation count differs");
+    for(std::size_t index = 0; index < attributions.size(); ++index) {
+        const auto& attribution = attributions[index];
+        const auto& work_item = production_invocation.work_items[index];
+        expect(
+                attribution.invocation_work_item_index == index &&
+                        attribution.package_name ==
+                                work_item.request.package_name &&
+                        attribution.package_base ==
+                                work_item.request.checkout_name &&
+                        !attribution.affected_update_plan_indices.empty() &&
+                        !attribution.affected_roots.empty(),
+                context + ": prepared correlation identity differs at " +
+                        std::to_string(index));
+    }
 }
 
 void expect_blocked_reason(
@@ -342,6 +387,32 @@ void expect_work_item(
             work_item.plan_package_names ==
                     std::vector<std::string>{package_name},
             context + ": plan_package_names differs");
+}
+
+void expect_attribution(
+        const AurUpdatePreparedWorkItemAttribution& attribution,
+        std::size_t work_item_index,
+        const std::string& package_name,
+        const std::string& package_base,
+        const std::vector<std::size_t>& affected_update_plan_indices,
+        const std::vector<RootTargetIdentity>& affected_roots,
+        const std::string& context) {
+    expect(
+            attribution.invocation_work_item_index == work_item_index,
+            context + ": work item index differs");
+    expect(
+            attribution.package_name == package_name,
+            context + ": package name differs");
+    expect(
+            attribution.package_base == package_base,
+            context + ": PackageBase differs");
+    expect(
+            attribution.affected_update_plan_indices ==
+                    affected_update_plan_indices,
+            context + ": affected update-plan indices differ");
+    expect(
+            attribution.affected_roots == affected_roots,
+            context + ": affected roots differ");
 }
 
 void expect_event_kinds(
@@ -702,18 +773,26 @@ void test_single_root_exact_work_item_and_snapshot() {
 
     expect_result_invariant(preparation, "single-root prepared result");
     expect(preparation.is_prepared(), "Single root was not prepared");
-    expect(preparation.invocation->work_items.size() == 1, "Single root work count differs");
+    const PreparedProductionSourceBuildInvocation& production_invocation =
+            preparation.invocation->production_invocation_for_test();
+    expect(production_invocation.work_items.size() == 1, "Single root work count differs");
     expect_work_item(
-            preparation.invocation->work_items.front(),
+            production_invocation.work_items.front(),
             "single-root",
             expected_environment,
             DesiredInstallReason::Explicit,
             true,
             "single-root exact work item");
+    const auto& attributions =
+            preparation.invocation->work_item_attributions();
+    expect(attributions.size() == 1, "Single root attribution count differs");
+    expect_attribution(
+            attributions.front(), 0, "single-root", "single-root", {0},
+            {{0, "single-root"}}, "single-root exact attribution");
     expect(
-            preparation.invocation->database_paths.root_dir ==
+            production_invocation.database_paths.root_dir ==
                             fs::path("/snapshot/root") &&
-                    preparation.invocation->database_paths.db_path ==
+                    production_invocation.database_paths.db_path ==
                             fs::path("/snapshot/database"),
             "Pacman DB snapshot differs");
     expect(stub::database_call_count() == 1, "Prepared invocation resolved DB more than once");
@@ -780,7 +859,9 @@ void test_build_plan_order_skip_exclusion_and_install_reasons() {
 
     expect_result_invariant(preparation, "ordered multi-root result");
     expect(preparation.is_prepared(), "Ordered multi-root invocation was blocked");
-    const auto& work_items = preparation.invocation->work_items;
+    const PreparedProductionSourceBuildInvocation& production_invocation =
+            preparation.invocation->production_invocation_for_test();
+    const auto& work_items = production_invocation.work_items;
     expect(work_items.size() == 4, "Skipped target changed work item count");
     expect_work_item(
             work_items[0],
@@ -843,11 +924,27 @@ void test_build_plan_order_skip_exclusion_and_install_reasons() {
                             std::vector<RootTargetIdentity>{
                                     {0, "root-a"}, {1, "root-b"}},
             "Shared dependency warning attribution differs");
+    const auto& attributions =
+            preparation.invocation->work_item_attributions();
+    expect(attributions.size() == 4, "Multi-root attribution count differs");
+    expect_attribution(
+            attributions[0], 0, "private-dependency", "private-dependency",
+            {0}, {{0, "root-a"}}, "private dependency attribution");
+    expect_attribution(
+            attributions[1], 1, "shared-dependency", "shared-dependency",
+            {0, 2}, {{0, "root-a"}, {1, "root-b"}},
+            "shared dependency attribution");
+    expect_attribution(
+            attributions[2], 2, "root-b", "root-b", {0, 2},
+            {{0, "root-a"}, {1, "root-b"}}, "root-b attribution");
+    expect_attribution(
+            attributions[3], 3, "root-a", "root-a", {0},
+            {{0, "root-a"}}, "root-a attribution");
     expect(stub::database_call_count() == 1, "Multi-root invocation resolved DB per work item");
     expect(
-            preparation.invocation->database_paths.root_dir ==
+            production_invocation.database_paths.root_dir ==
                             fs::path("/multi/root") &&
-                    preparation.invocation->database_paths.db_path ==
+                    production_invocation.database_paths.db_path ==
                             fs::path("/multi/database"),
             "Multi-root invocation did not retain one owned DB snapshot");
     expect_event_kinds(
@@ -970,7 +1067,8 @@ void test_strict_absent_empty_valid_and_warning_results() {
                     single_root_preflight("absent-root"), false, config);
     expect(absent.is_prepared(), "Absent preference did not select an empty environment");
     expect(
-            absent.invocation->work_items.front()
+            absent.invocation->production_invocation_for_test()
+                    .work_items.front()
                     .request.custom_environment.ordered_assignments.empty(),
             "Absent preference synthesized assignments");
 
@@ -995,7 +1093,8 @@ void test_strict_absent_empty_valid_and_warning_results() {
     expect(valid.is_prepared(), "Valid strict preference was rejected");
     expect(
             same_environment(
-                    valid.invocation->work_items.front()
+                    valid.invocation->production_invocation_for_test()
+                            .work_items.front()
                             .request.custom_environment,
                     valid_environment),
             "Valid strict preference environment differs");
@@ -1297,12 +1396,13 @@ void test_result_state_helpers_reject_forbidden_combination() {
     expect_result_invariant(blocked, "direct blocked model");
     expect(blocked.is_blocked(), "Issue-only result is not blocked");
 
-    AurUpdateSourceBuildPreparation prepared;
-    prepared.invocation = PreparedProductionSourceBuildInvocation{
-            {ProductionSourceBuildWorkItem{}},
-            PacmanDatabasePaths{"/prepared/root", "/prepared/database"}};
-    expect_result_invariant(prepared, "direct prepared model");
-    expect(prepared.is_prepared(), "Invocation-only result is not prepared");
+    stub::reset();
+    const AppConfig config;
+    AurUpdateSourceBuildPreparation prepared =
+            prepare_aur_update_source_build_invocation(
+                    single_root_preflight("prepared-root"), false, config);
+    expect_result_invariant(prepared, "factory prepared model");
+    expect(prepared.is_prepared(), "Factory result is not prepared");
 
     AurUpdatePreparationIssue forbidden_issue;
     forbidden_issue.reason =
@@ -1313,6 +1413,35 @@ void test_result_state_helpers_reject_forbidden_combination() {
             !prepared.is_prepared() && !prepared.is_noop() &&
                     !prepared.is_blocked(),
             "Forbidden invocation-plus-issues state was classified as valid");
+}
+
+void test_move_preserves_correlation_and_invalidates_source() {
+    stub::reset();
+    const AppConfig config;
+    AurUpdateSourceBuildPreparation source =
+            prepare_aur_update_source_build_invocation(
+                    single_root_preflight("move-root"), false, config);
+    expect(source.is_prepared(), "Move source was not prepared");
+
+    AurUpdateSourceBuildPreparation destination = std::move(source);
+    expect(
+            destination.is_prepared(),
+            "Move destination lost prepared correlation");
+    expect(
+            destination.invocation->production_invocation_for_test()
+                            .work_items.front()
+                            .request.package_name == "move-root" &&
+                    destination.invocation->work_item_attributions()
+                                    .front()
+                                    .package_name == "move-root",
+            "Move destination changed work-item attribution correlation");
+    expect(
+            !source.is_prepared(),
+            "Moved-from preparation still reports prepared");
+    expect(
+            source.invocation.has_value() &&
+                    !source.invocation->is_valid(),
+            "Moved-from preparation did not retain an invalid capability");
 }
 
 template<typename Callable>
@@ -1364,6 +1493,9 @@ int main() {
         run_case(
                 "result state helpers reject forbidden combination",
                 test_result_state_helpers_reject_forbidden_combination);
+        run_case(
+                "move preserves correlation and invalidates source",
+                test_move_preserves_correlation_and_invalidates_source);
     } catch(const std::exception& error) {
         std::cerr << error.what() << '\n';
         return 1;

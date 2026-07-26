@@ -52,7 +52,10 @@ PreparedProductionSourceBuildInvocation prepare_production_source_build_invocati
         std::vector<ProductionSourceBuildWorkItem> work_items,
         const AppConfig& config);
 
-void execute_prepared_source_build_work_item(
+// nulloptはgeneric only-if-updatedの正常skip。update runner用work itemは
+// only_if_updated=falseなので、artifact install outcomeを必ず要求できる。
+std::optional<ArtifactInstallExecutionOutcome>
+execute_prepared_source_build_work_item(
         const ProductionSourceBuildWorkItem& work_item,
         const PacmanDatabasePaths& database_paths,
         const AppConfig& config);

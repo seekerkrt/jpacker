@@ -752,10 +752,147 @@ std::vector<ProductionSourceBuildWorkItem> release_work_items(
     return work_items;
 }
 
+std::vector<AurUpdatePreparedWorkItemAttribution>
+snapshot_work_item_attributions(
+        const std::vector<UpdateWorkItemDraft>& drafts) {
+    std::vector<AurUpdatePreparedWorkItemAttribution> attributions;
+    attributions.reserve(drafts.size());
+    for(std::size_t index = 0; index < drafts.size(); ++index) {
+        const UpdateWorkItemDraft& draft = drafts[index];
+        attributions.push_back(AurUpdatePreparedWorkItemAttribution{
+                index,
+                draft.work_item.request.package_name,
+                draft.work_item.request.checkout_name,
+                draft.affected_update_plan_indices,
+                draft.affected_roots});
+    }
+    return attributions;
+}
+
+template<typename Value>
+bool has_duplicate_value(const std::vector<Value>& values) noexcept {
+    for(std::size_t index = 0; index < values.size(); ++index) {
+        if(std::find(values.begin(), values.begin() + index, values[index]) !=
+           values.begin() + index) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool has_update_target_snapshot(
+        const AurUpdateSourceBuildPreparation& preparation,
+        std::size_t update_plan_index) noexcept {
+    return std::any_of(
+            preparation.affected_update_targets.begin(),
+            preparation.affected_update_targets.end(),
+            [update_plan_index](const AurUpdateExecutionTarget& target) {
+                return target.update_plan_index == update_plan_index;
+            });
+}
+
+bool has_root_snapshot(
+        const AurUpdateSourceBuildPreparation& preparation,
+        const RootTargetIdentity& root) noexcept {
+    return std::find(
+                   preparation.affected_roots.begin(),
+                   preparation.affected_roots.end(), root) !=
+           preparation.affected_roots.end();
+}
+
+bool has_exact_prepared_correlation(
+        const PreparedProductionSourceBuildInvocation& production_invocation,
+        const std::vector<AurUpdatePreparedWorkItemAttribution>& attributions,
+        const AurUpdateSourceBuildPreparation& preparation) noexcept {
+    const auto& work_items = production_invocation.work_items;
+    if(work_items.empty() || attributions.size() != work_items.size() ||
+       preparation.affected_update_targets.empty() ||
+       preparation.affected_roots.empty()) {
+        return false;
+    }
+
+    for(std::size_t index = 0; index < work_items.size(); ++index) {
+        const ProductionSourceBuildWorkItem& work_item = work_items[index];
+        const AurUpdatePreparedWorkItemAttribution& attribution =
+                attributions[index];
+        if(attribution.invocation_work_item_index != index ||
+           attribution.package_name != work_item.request.package_name ||
+           attribution.package_base != work_item.request.checkout_name ||
+           attribution.affected_update_plan_indices.empty() ||
+           attribution.affected_roots.empty() ||
+           has_duplicate_value(attribution.affected_update_plan_indices) ||
+           has_duplicate_value(attribution.affected_roots)) {
+            return false;
+        }
+        if(!std::all_of(
+                   attribution.affected_update_plan_indices.begin(),
+                   attribution.affected_update_plan_indices.end(),
+                   [&preparation](std::size_t update_plan_index) {
+                       return has_update_target_snapshot(
+                               preparation, update_plan_index);
+                   }) ||
+           !std::all_of(
+                   attribution.affected_roots.begin(),
+                   attribution.affected_roots.end(),
+                   [&preparation](const RootTargetIdentity& root) {
+                       return has_root_snapshot(preparation, root);
+                   })) {
+            return false;
+        }
+    }
+
+    for(const auto& target : preparation.affected_update_targets) {
+        const bool is_attributed = std::any_of(
+                attributions.begin(), attributions.end(),
+                [&target](
+                        const AurUpdatePreparedWorkItemAttribution& attribution) {
+                    return std::find(
+                                   attribution.affected_update_plan_indices.begin(),
+                                   attribution.affected_update_plan_indices.end(),
+                                   target.update_plan_index) !=
+                           attribution.affected_update_plan_indices.end();
+                });
+        if(!is_attributed) return false;
+    }
+    for(const auto& root : preparation.affected_roots) {
+        const bool is_attributed = std::any_of(
+                attributions.begin(), attributions.end(),
+                [&root](
+                        const AurUpdatePreparedWorkItemAttribution& attribution) {
+                    return std::find(
+                                   attribution.affected_roots.begin(),
+                                   attribution.affected_roots.end(), root) !=
+                           attribution.affected_roots.end();
+                });
+        if(!is_attributed) return false;
+    }
+    return true;
+}
+
 } // namespace
 
+PreparedAurUpdateSourceBuildInvocation::
+        PreparedAurUpdateSourceBuildInvocation(
+                PreparedProductionSourceBuildInvocation&& production_invocation,
+                std::vector<AurUpdatePreparedWorkItemAttribution>&&
+                        work_item_attributions) noexcept
+    : production_invocation_(std::move(production_invocation)),
+      work_item_attributions_(std::move(work_item_attributions)) {
+}
+
+PreparedAurUpdateSourceBuildInvocation::
+        PreparedAurUpdateSourceBuildInvocation(
+                PreparedAurUpdateSourceBuildInvocation&& other) noexcept
+    : production_invocation_(std::move(other.production_invocation_)),
+      work_item_attributions_(std::move(other.work_item_attributions_)),
+      valid_(std::exchange(other.valid_, false)) {
+}
+
 bool AurUpdateSourceBuildPreparation::is_prepared() const noexcept {
-    return invocation.has_value() && issues.empty();
+    return invocation.has_value() && invocation->is_valid() && issues.empty() &&
+           has_exact_prepared_correlation(
+                   invocation->production_invocation_,
+                   invocation->work_item_attributions(), *this);
 }
 
 bool AurUpdateSourceBuildPreparation::is_noop() const noexcept {
@@ -857,8 +994,28 @@ AurUpdateSourceBuildPreparation prepare_aur_update_source_build_invocation(
     try {
         // POLICY(#267): generic preparationをinvocation全体で一度だけ呼び、
         // PacmanDatabasePathsを全work itemで共有するowned snapshotにする。
-        preparation.invocation = prepare_production_source_build_invocation(
+        std::vector<AurUpdatePreparedWorkItemAttribution> attributions =
+                snapshot_work_item_attributions(drafts);
+        PreparedProductionSourceBuildInvocation production_invocation =
+                prepare_production_source_build_invocation(
                 release_work_items(std::move(drafts)), config);
+        if(!has_exact_prepared_correlation(
+                   production_invocation, attributions, preparation)) {
+            throw std::logic_error(
+                    "Prepared AUR update source-build invocation correlation is inconsistent.");
+        }
+
+        // POLICY(#267): generic invocationとattributionの両方が完成してから、
+        // 相関済みaggregateを一度だけpublishする。
+        PreparedAurUpdateSourceBuildInvocation prepared_invocation(
+                std::move(production_invocation), std::move(attributions));
+        return AurUpdateSourceBuildPreparation{
+                std::move(preparation.issues),
+                std::move(preparation.warnings),
+                std::move(preparation.affected_update_targets),
+                std::move(preparation.affected_roots),
+                std::optional<PreparedAurUpdateSourceBuildInvocation>{
+                        std::move(prepared_invocation)}};
     } catch(const PackageMetadataError& error) {
         AurUpdatePreparationIssue issue = make_issue(
                 AurUpdatePreparationReason::PacmanDatabaseUnavailable,

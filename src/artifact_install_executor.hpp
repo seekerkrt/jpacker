@@ -18,6 +18,12 @@ struct ArtifactInstallExecutionOptions {
     bool no_confirm = false;
 };
 
+// pacman -Uのsuccessful return後に、preparation済みstateから確定する変更結果。
+enum class ArtifactInstallExecutionOutcome {
+    Installed,
+    SkippedAsNeeded,
+};
+
 // InstalledPackageQueryResultからinstall policyへ渡すowned value。
 // libalpm sessionやborrowed metadataを保持しない。
 struct InstalledArtifactPolicyState {
@@ -59,7 +65,7 @@ class PreparedArtifactInstall final {
             DesiredInstallReason desired_reason,
             const ArtifactInstallPreparationOptions& options,
             const PacmanDatabasePaths& database_paths);
-    friend void execute_prepared_artifact_install(
+    friend ArtifactInstallExecutionOutcome execute_prepared_artifact_install(
             PreparedArtifactInstall& install,
             const ArtifactInstallExecutionOptions& options);
 
@@ -124,6 +130,6 @@ PreparedArtifactInstall prepare_artifact_install(
         const PacmanDatabasePaths& database_paths);
 
 // POLICY(#242): raw pathや個別directiveを受けず、相関済みaggregateだけをtransactionへ渡す。
-void execute_prepared_artifact_install(
+ArtifactInstallExecutionOutcome execute_prepared_artifact_install(
         PreparedArtifactInstall& install,
         const ArtifactInstallExecutionOptions& options);

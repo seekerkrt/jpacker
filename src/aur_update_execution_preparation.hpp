@@ -11,6 +11,8 @@
 #include <vector>
 
 struct AppConfig;
+struct AurUpdateSourceBuildPreparation;
+struct AurUpdateSourceBuildExecutionResult;
 
 enum class AurUpdatePreparationReason {
     None,
@@ -50,12 +52,77 @@ struct AurUpdatePreparationWarning {
     std::string                     diagnostic;
 };
 
+// BuildPlan::order上の1 work itemと、影響するupdate target/rootを固定する。
+struct AurUpdatePreparedWorkItemAttribution {
+    std::size_t                     invocation_work_item_index = 0;
+    std::string                     package_name;
+    std::string                     package_base;
+    std::vector<std::size_t>        affected_update_plan_indices;
+    std::vector<RootTargetIdentity> affected_roots;
+};
+
+// generic production invocationとupdate固有attributionを相関済みで所有する。
+// POLICY(#267): execution-bearing generic invocationを外部へ公開せず、parallel
+// vectorのcount/order/identityをpreparation後に書き換えられないようにする。
+// moveはexecution capabilityを移し、move元を明示的にinvalid化する。
+class PreparedAurUpdateSourceBuildInvocation final {
+    PreparedProductionSourceBuildInvocation production_invocation_;
+    std::vector<AurUpdatePreparedWorkItemAttribution>
+            work_item_attributions_;
+    bool valid_ = true;
+
+    PreparedAurUpdateSourceBuildInvocation(
+            PreparedProductionSourceBuildInvocation&& production_invocation,
+            std::vector<AurUpdatePreparedWorkItemAttribution>&&
+                    work_item_attributions) noexcept;
+
+    friend AurUpdateSourceBuildPreparation
+    prepare_aur_update_source_build_invocation(
+            const AurUpdateExecutionPreflight& preflight,
+            bool needed,
+            const AppConfig& config);
+    friend struct AurUpdateSourceBuildPreparation;
+    friend AurUpdateSourceBuildExecutionResult
+    execute_prepared_aur_update_source_build_invocation(
+            PreparedAurUpdateSourceBuildInvocation invocation,
+            const AppConfig& config);
+
+public:
+    PreparedAurUpdateSourceBuildInvocation(
+            const PreparedAurUpdateSourceBuildInvocation&) = delete;
+    PreparedAurUpdateSourceBuildInvocation& operator=(
+            const PreparedAurUpdateSourceBuildInvocation&) = delete;
+    PreparedAurUpdateSourceBuildInvocation(
+            PreparedAurUpdateSourceBuildInvocation&& other) noexcept;
+    PreparedAurUpdateSourceBuildInvocation& operator=(
+            PreparedAurUpdateSourceBuildInvocation&&) = delete;
+    ~PreparedAurUpdateSourceBuildInvocation() noexcept = default;
+
+#ifdef JPACKER_ENABLE_AUR_UPDATE_EXECUTION_PREPARATION_TEST_HOOKS
+    // preparationのexact field assertion専用。production buildではgeneric
+    // executorへ渡せる内部snapshotを公開しない。
+    const PreparedProductionSourceBuildInvocation&
+    production_invocation_for_test() const noexcept {
+        return production_invocation_;
+    }
+#endif
+
+    const std::vector<AurUpdatePreparedWorkItemAttribution>&
+    work_item_attributions() const noexcept {
+        return work_item_attributions_;
+    }
+
+    bool is_valid() const noexcept {
+        return valid_;
+    }
+};
+
 struct AurUpdateSourceBuildPreparation {
     std::vector<AurUpdatePreparationIssue>   issues;
     std::vector<AurUpdatePreparationWarning> warnings;
     std::vector<AurUpdateExecutionTarget>    affected_update_targets;
     std::vector<RootTargetIdentity>          affected_roots;
-    std::optional<PreparedProductionSourceBuildInvocation> invocation;
+    std::optional<PreparedAurUpdateSourceBuildInvocation> invocation;
 
     bool is_prepared() const noexcept;
     bool is_noop() const noexcept;
