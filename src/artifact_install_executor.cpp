@@ -143,7 +143,7 @@ PreparedArtifactInstall prepare_artifact_install(
             directive, std::move(artifact));
 }
 
-void execute_prepared_artifact_install(
+ArtifactInstallExecutionOutcome execute_prepared_artifact_install(
         PreparedArtifactInstall& install,
         const ArtifactInstallExecutionOptions& options) {
     std::vector<std::string> arguments = {"sudo", "pacman", "-U"};
@@ -176,4 +176,13 @@ void execute_prepared_artifact_install(
                 "pacman -U failed with exit code " +
                 std::to_string(exit_code) + ".");
     }
+
+    // POLICY(#267): --neededのskipはpacman outputではなく、transaction前に
+    // exactに固定したversion/directive stateからだけ判定する。
+    if(install.needed_ &&
+       install.installed_version_state_ == InstalledVersionState::SameVersion &&
+       install.directive_ == InstallReasonDirective::Default) {
+        return ArtifactInstallExecutionOutcome::SkippedAsNeeded;
+    }
+    return ArtifactInstallExecutionOutcome::Installed;
 }

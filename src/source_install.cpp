@@ -255,7 +255,8 @@ ProductionSourceBuildWorkItem prepare_smart_source_build_work_item(
             SourceEnvironmentEmptyValuePolicy::Omit, only_if_updated, needed);
 }
 
-void execute_prepared_source_build_work_item(
+std::optional<ArtifactInstallExecutionOutcome>
+execute_prepared_source_build_work_item(
         const ProductionSourceBuildWorkItem& work_item,
         const PacmanDatabasePaths& database_paths,
         const AppConfig& config) {
@@ -269,7 +270,7 @@ void execute_prepared_source_build_work_item(
     }
 
     try {
-        execute_source_build(
+        return execute_source_build(
                 work_item.request, work_item.desired_reason,
                 database_paths, config);
     } catch(const SeparatedSourceBuildCleanupError&) {

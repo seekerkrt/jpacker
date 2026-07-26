@@ -257,9 +257,11 @@ const ProductionSourceBuildWorkItem& require_single_work_item(
             preparation.invocation.has_value(),
             context_text + ": prepared result has no invocation");
     expect(
-            preparation.invocation->work_items.size() == 1,
+            preparation.invocation->production_invocation_for_test()
+                            .work_items.size() == 1,
             context_text + ": unexpected work item count");
-    return preparation.invocation->work_items.front();
+    return preparation.invocation->production_invocation_for_test()
+            .work_items.front();
 }
 
 void expect_successful_generic_preparation(
@@ -277,8 +279,10 @@ void expect_successful_generic_preparation(
             context_text +
                     ": generic PKGDEST preflight did not scan ambient and item environments");
     expect(
-            preparation.invocation->database_paths.root_dir == fs::path("/") &&
-                    preparation.invocation->database_paths.db_path ==
+            preparation.invocation->production_invocation_for_test()
+                            .database_paths.root_dir == fs::path("/") &&
+                    preparation.invocation->production_invocation_for_test()
+                                    .database_paths.db_path ==
                             fs::path("/var/lib/pacman"),
             context_text + ": database snapshot differs from resolver-owned value");
 }

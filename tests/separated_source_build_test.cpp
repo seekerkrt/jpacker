@@ -20,7 +20,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-using SeparatedSourceBuildExecutor = void (*)(
+using SeparatedSourceBuildExecutor = ArtifactInstallExecutionOutcome (*)(
         SeparatedSourceBuildUnitRequest,
         const SeparatedSourceBuildUnitOptions&);
 
@@ -80,13 +80,19 @@ std::string expect_runtime_error(
     throw std::runtime_error(context + ": expected runtime_error");
 }
 
+struct CleanupErrorObservation {
+    ArtifactInstallExecutionOutcome install_outcome;
+    std::string                     diagnostic;
+};
+
 template <typename Callable>
-std::string expect_cleanup_error(
+CleanupErrorObservation expect_cleanup_error(
         Callable&& callable, const std::string& context) {
     try {
         std::forward<Callable>(callable)();
     } catch(const SeparatedSourceBuildCleanupError& error) {
-        return error.what();
+        return CleanupErrorObservation{
+                error.install_outcome(), error.what()};
     } catch(const std::exception& error) {
         throw std::runtime_error(
                 context + ": cleanup failure was reported as another error: " +
@@ -755,7 +761,7 @@ void expect_no_workspace_created(
             context + ": workspace directory was created");
 }
 
-void execute_scenario(
+ArtifactInstallExecutionOutcome execute_scenario(
         const TemporaryTestEnvironment& environment,
         LifecycleScenario& scenario,
         DesiredInstallReason desired_reason = DesiredInstallReason::Explicit) {
@@ -774,23 +780,26 @@ void execute_scenario(
             fs::current_path() == scenario.caller_working_directory,
             "Separated lifecycle scenario started from a drifted working directory");
 
-    try {
-        execute_separated_source_build_unit(
-                environment.request(
-                        scenario.source_environment,
-                        scenario.empty_value_policy,
-                        desired_reason),
-                scenario.options);
-    } catch(...) {
-        expect(
-                fs::current_path() == scenario.caller_working_directory,
-                "Separated lifecycle exception did not restore the caller working directory");
-        throw;
-    }
+    const ArtifactInstallExecutionOutcome install_outcome = [&]() {
+        try {
+            return execute_separated_source_build_unit(
+                    environment.request(
+                            scenario.source_environment,
+                            scenario.empty_value_policy,
+                            desired_reason),
+                    scenario.options);
+        } catch(...) {
+            expect(
+                    fs::current_path() == scenario.caller_working_directory,
+                    "Separated lifecycle exception did not restore the caller working directory");
+            throw;
+        }
+    }();
 
     expect(
             fs::current_path() == scenario.caller_working_directory,
             "Separated lifecycle success did not restore the caller working directory");
+    return install_outcome;
 }
 
 void test_rmdeps_rejected_before_workspace(
@@ -1102,11 +1111,14 @@ void test_package_absence_reaches_typed_asdeps_install(
     activate_scenario(scenario);
     metadata_stub::set_package_absent();
 
-    execute_scenario(
+    const ArtifactInstallExecutionOutcome install_outcome = execute_scenario(
             environment, scenario, DesiredInstallReason::Dependency);
 
     expect_process_counts(2, 2, "package absence");
     expect_metadata_counts(1, 1, 1, "package absence");
+    expect(
+            install_outcome == ArtifactInstallExecutionOutcome::Installed,
+            "Package absence did not return Installed");
     expect(
             metadata_stub::last_queried_package_name() == PACKAGE_NAME,
             "Package absence queried a different package name");
@@ -1152,6 +1164,30 @@ void test_same_version_needed_promotion_rejected_before_transaction(
     expect_metadata_counts(1, 1, 1, "same-version needed promotion");
     expect_retained_regular_artifact(
             scenario, 0, "same-version needed promotion");
+    require_scenario_complete(scenario);
+}
+
+void test_same_version_needed_default_returns_skipped_as_needed(
+        const TemporaryTestEnvironment& environment) {
+    LifecycleScenario scenario;
+    scenario.options.needed = true;
+    scenario.plans.front().expect_install = true;
+    activate_scenario(scenario);
+    metadata_stub::set_package_metadata(
+            PACKAGE_NAME, ARTIFACT_VERSION, ALPM_PKG_REASON_EXPLICIT);
+
+    const ArtifactInstallExecutionOutcome install_outcome =
+            execute_scenario(environment, scenario);
+
+    expect(
+            install_outcome ==
+                    ArtifactInstallExecutionOutcome::SkippedAsNeeded,
+            "Same-version --needed install did not return SkippedAsNeeded");
+    expect_process_counts(2, 2, "same-version needed default");
+    expect_metadata_counts(1, 1, 1, "same-version needed default");
+    expect(
+            !fs::exists(scenario.workspace_paths.at(0)),
+            "Same-version --needed success did not clean its workspace");
     require_scenario_complete(scenario);
 }
 
@@ -1261,10 +1297,14 @@ void test_success_uses_typed_options_and_explicit_cleanup(
     metadata_stub::set_package_metadata(
             PACKAGE_NAME, "2:1.4.0-2", ALPM_PKG_REASON_DEPEND);
 
-    execute_scenario(environment, scenario);
+    const ArtifactInstallExecutionOutcome install_outcome =
+            execute_scenario(environment, scenario);
 
     expect_process_counts(2, 2, "successful separated lifecycle");
     expect_metadata_counts(1, 1, 1, "successful separated lifecycle");
+    expect(
+            install_outcome == ArtifactInstallExecutionOutcome::Installed,
+            "Different-version --needed install did not return Installed");
     expect(
             !fs::exists(scenario.workspace_paths.at(0)),
             "Successful separated lifecycle did not explicitly clean workspace");
@@ -1287,15 +1327,21 @@ void test_cleanup_failure_is_distinct_from_install_failure(
     activate_scenario(scenario);
     metadata_stub::set_package_absent();
 
-    const std::string message = expect_cleanup_error(
+    const CleanupErrorObservation cleanup_failure = expect_cleanup_error(
             [&]() { execute_scenario(environment, scenario); },
             "post-install cleanup failure");
 
     expect(
-            message.find("Package installation succeeded") != std::string::npos,
+            cleanup_failure.install_outcome ==
+                    ArtifactInstallExecutionOutcome::Installed,
+            "Post-install cleanup failure did not retain Installed outcome");
+    expect(
+            cleanup_failure.diagnostic.find("Package installation succeeded") !=
+                    std::string::npos,
             "Cleanup failure did not report the successful transaction");
     expect(
-            message.find("pacman -U failed") == std::string::npos,
+            cleanup_failure.diagnostic.find("pacman -U failed") ==
+                    std::string::npos,
             "Cleanup failure was mislabeled as transaction failure");
     expect_process_counts(2, 2, "post-install cleanup failure");
     expect_metadata_counts(1, 1, 1, "post-install cleanup failure");
@@ -1313,6 +1359,55 @@ void test_cleanup_failure_is_distinct_from_install_failure(
     fs::remove_all(
             scenario.displaced_workspace_paths.at(0), cleanup_error);
     expect(!cleanup_error, "Failed to remove displaced installed workspace fixture");
+    require_scenario_complete(scenario);
+}
+
+void test_skipped_as_needed_cleanup_failure_retains_typed_outcome(
+        const TemporaryTestEnvironment& environment) {
+    LifecycleScenario scenario;
+    scenario.options.needed = true;
+    scenario.plans.front().expect_install = true;
+    scenario.plans.front().replace_workspace_after_install = true;
+    activate_scenario(scenario);
+    metadata_stub::set_package_metadata(
+            PACKAGE_NAME, ARTIFACT_VERSION, ALPM_PKG_REASON_EXPLICIT);
+
+    const CleanupErrorObservation cleanup_failure = expect_cleanup_error(
+            [&]() { execute_scenario(environment, scenario); },
+            "post-skip cleanup failure");
+
+    expect(
+            cleanup_failure.install_outcome ==
+                    ArtifactInstallExecutionOutcome::SkippedAsNeeded,
+            "Post-skip cleanup failure did not retain SkippedAsNeeded outcome");
+    expect(
+            cleanup_failure.diagnostic.find("Package installation succeeded") !=
+                    std::string::npos,
+            "Post-skip cleanup diagnostic contract changed");
+    expect(
+            cleanup_failure.diagnostic.find("pacman -U failed") ==
+                    std::string::npos,
+            "Post-skip cleanup failure was mislabeled as transaction failure");
+    expect_process_counts(2, 2, "post-skip cleanup failure");
+    expect_metadata_counts(1, 1, 1, "post-skip cleanup failure");
+    expect(
+            fs::is_directory(scenario.workspace_paths.at(0)),
+            "Post-skip cleanup-failure replacement workspace disappeared");
+    expect(
+            fs::is_regular_file(
+                    scenario.displaced_workspace_paths.at(0) / ARTIFACT_LEAF),
+            "Skipped artifact workspace was not preserved after cleanup failure");
+
+    std::error_code cleanup_error;
+    fs::remove_all(scenario.workspace_paths.at(0), cleanup_error);
+    expect(
+            !cleanup_error,
+            "Failed to remove post-skip cleanup-failure replacement fixture");
+    fs::remove_all(
+            scenario.displaced_workspace_paths.at(0), cleanup_error);
+    expect(
+            !cleanup_error,
+            "Failed to remove displaced skipped workspace fixture");
     require_scenario_complete(scenario);
 }
 
@@ -1444,6 +1539,10 @@ int main() {
             test_same_version_needed_promotion_rejected_before_transaction(
                     environment);
         });
+        run_case("same-version needed default outcome", [&]() {
+            test_same_version_needed_default_returns_skipped_as_needed(
+                    environment);
+        });
         run_case("typed sudo pacman nonzero", [&]() {
             test_typed_sudo_failure_retains_artifact(environment);
         });
@@ -1455,6 +1554,10 @@ int main() {
         });
         run_case("successful install followed by cleanup failure", [&]() {
             test_cleanup_failure_is_distinct_from_install_failure(environment);
+        });
+        run_case("needed skip followed by cleanup failure", [&]() {
+            test_skipped_as_needed_cleanup_failure_retains_typed_outcome(
+                    environment);
         });
         run_case("repeated invocation creates fresh workspace", [&]() {
             test_repeated_invocation_creates_fresh_workspace(environment);

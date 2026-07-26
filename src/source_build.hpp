@@ -8,6 +8,7 @@
 #include <string>
 
 struct AppConfig;
+enum class ArtifactInstallExecutionOutcome;
 
 // upgrade baselineの有無と、snapshot時点の未installを別状態として保持する。
 struct SourceUpdateBaseline {
@@ -32,7 +33,9 @@ struct SourceBuildRequest {
     bool        needed = false;
 };
 
-void execute_source_build(
+// generic only-if-updated経路がinstall前に正常skipした場合だけnulloptを返す。
+// artifact transaction成功後はpackage stateのtyped outcomeを返す。
+std::optional<ArtifactInstallExecutionOutcome> execute_source_build(
         const SourceBuildRequest& request,
         DesiredInstallReason desired_reason,
         const PacmanDatabasePaths& database_paths,

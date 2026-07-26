@@ -22,11 +22,13 @@ void notify_workspace_created_for_test(const std::filesystem::path&) {
 } // namespace
 
 SeparatedSourceBuildCleanupError::SeparatedSourceBuildCleanupError(
+        ArtifactInstallExecutionOutcome install_outcome,
         const std::string& diagnostic)
-    : std::runtime_error(diagnostic) {
+    : std::runtime_error(diagnostic),
+      install_outcome_(install_outcome) {
 }
 
-void execute_separated_source_build_unit(
+ArtifactInstallExecutionOutcome execute_separated_source_build_unit(
         SeparatedSourceBuildUnitRequest request,
         const SeparatedSourceBuildUnitOptions& options) {
     // POLICY(#242): build unit最初のmutationより前に、caller-controlled optionと
@@ -79,21 +81,25 @@ void execute_separated_source_build_unit(
             ArtifactInstallPreparationOptions{
                     options.needed, options.rm_deps},
             request.database_paths);
-    execute_prepared_artifact_install(
-            prepared,
-            ArtifactInstallExecutionOptions{options.no_confirm});
+    const ArtifactInstallExecutionOutcome install_outcome =
+            execute_prepared_artifact_install(
+                    prepared,
+                    ArtifactInstallExecutionOptions{options.no_confirm});
 
     try {
         // POLICY(#242): transaction成功後だけcleanup ownershipを明示的に行使する。
         prepared.cleanup_workspace();
     } catch(const std::exception& error) {
         throw SeparatedSourceBuildCleanupError(
+                install_outcome,
                 "Package installation succeeded, but artifact workspace cleanup failed: " +
                 std::string(error.what()));
     } catch(...) {
         throw SeparatedSourceBuildCleanupError(
+                install_outcome,
                 "Package installation succeeded, but artifact workspace cleanup failed with an unknown error.");
     }
+    return install_outcome;
 }
 
 #ifdef JPACKER_ENABLE_SEPARATED_SOURCE_BUILD_TEST_HOOKS
