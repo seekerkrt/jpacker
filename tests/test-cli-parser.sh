@@ -409,4 +409,21 @@ run_fail -S -- --rmdeps
 assert_contains "Invalid package name: --rmdeps" "$output_file"
 assert_command_log_empty
 
+# Matrix K: upgrade-aurはglobal optionを消費するが、targetやopaque operandは受けない。
+setup_case upgrade-aur-global-options-with-target
+run_fail --noedit upgrade-aur --nodiff --noconfirm --rebuild --cleanbuild clean-root
+assert_contains "upgrade-aur does not accept target operands." "$output_file"
+assert_command_log_empty
+
+setup_case upgrade-aur-rejects-rmdeps
+run_fail --noedit --nodiff --noconfirm --rebuild --cleanbuild --rmdeps upgrade-aur
+assert_contains "Separated build/install does not support --rmdeps." "$output_file"
+assert_command_log_empty
+
+setup_case upgrade-aur-needed-as-opaque-target
+run_fail upgrade-aur -- --needed
+assert_contains "upgrade-aur does not accept target operands." "$output_file"
+assert_not_contains "Unsupported upgrade-aur option: --needed" "$output_file"
+assert_command_log_empty
+
 echo "CLI parser integration tests: all checks passed"

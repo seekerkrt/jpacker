@@ -624,11 +624,18 @@ assert_no_mutation_commands
 assert_cache_entry_absent invalid-root-preflight
 assert_schema_request_log_nonempty
 
-# Matrix I: custom upgradeはoptionless、generic -Syuはpacman-onlyという境界を固定する。
+# Matrix I: custom upgrade/upgrade-aurは--neededを受けず、generic -Syuはpacman-onlyという境界を固定する。
 setup_case custom-upgrade-rejects-needed
 prepare_source_preference clean-root
 run_fail upgrade --needed
 assert_contains "Unsupported upgrade option: --needed" "$output_file"
+assert_command_log_empty
+assert_cache_root_absent
+assert_normal_request_log_empty
+
+setup_case aur-update-rejects-needed
+run_fail upgrade-aur --needed
+assert_contains "Unsupported upgrade-aur option: --needed" "$output_file"
 assert_command_log_empty
 assert_cache_root_absent
 assert_normal_request_log_empty

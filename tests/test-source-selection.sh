@@ -578,6 +578,7 @@ assert_unsupported_operation() {
 unsupported_index=0
 for selector in --aur --repo; do
     assert_unsupported_operation "$selector" upgrade
+    assert_unsupported_operation "$selector" upgrade-aur
     assert_unsupported_operation "$selector" -Su
     assert_unsupported_operation "$selector" -S -u
     if [ "$selector" = "--aur" ]; then

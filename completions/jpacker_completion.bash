@@ -1,14 +1,15 @@
 # jpacker_completion.bash
 
 _jpacker() {
-    local cur prev opts deps_opts
+    local cur prev opts deps_opts upgrade_aur_opts
     COMPREPLY=()
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
 
     # 主要コマンドとオプション
-    opts="build upgrade clean deps plan fetch add-src del-src edit-src list-src revert -G -Gp -S -Syu -Ss -Si -R -Rs -Rns -Q -Qua -h --help --noedit --nodiff --noconfirm --rebuild --cleanbuild --rmdeps --aur --repo"
+    opts="build upgrade upgrade-aur clean deps plan fetch add-src del-src edit-src list-src revert -G -Gp -S -Syu -Ss -Si -R -Rs -Rns -Q -Qua -h --help --noedit --nodiff --noconfirm --rebuild --cleanbuild --rmdeps --aur --repo"
     deps_opts="--recursive"
+    upgrade_aur_opts="--noedit --nodiff --noconfirm --rebuild --cleanbuild"
 
     # 第1引数（コマンド）の補完
     if [[ ${COMP_CWORD} -eq 1 ]]; then
@@ -20,6 +21,11 @@ _jpacker() {
     case "${prev}" in
         deps)
             COMPREPLY=( $(compgen -W "${deps_opts}" -- ${cur}) )
+            return 0
+            ;;
+        upgrade-aur)
+            # targetを取らず、AUR update lifecycleで意味を保てるoptionだけを提示する。
+            COMPREPLY=( $(compgen -W "${upgrade_aur_opts}" -- ${cur}) )
             return 0
             ;;
         -G|-Gp)

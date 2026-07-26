@@ -3,6 +3,7 @@
 set -l jpacker_operations \
     build \
     upgrade \
+    upgrade-aur \
     clean \
     deps \
     plan \
@@ -35,6 +36,13 @@ set -l jpacker_global_options \
     --rmdeps \
     --aur \
     --repo
+
+set -l jpacker_upgrade_aur_options \
+    --noedit \
+    --nodiff \
+    --noconfirm \
+    --rebuild \
+    --cleanbuild
 
 function __fish_jpacker_seen_operation
     set -l tokens (commandline -opc)
@@ -77,10 +85,12 @@ complete -c jpacker -f -n '__fish_jpacker_no_operation' -a "$jpacker_global_opti
 
 complete -c jpacker -f -n '__fish_jpacker_using_operation deps' -a '--recursive' -d 'Resolve dependencies recursively'
 
+complete -c jpacker -f -n '__fish_jpacker_using_operation upgrade-aur' -a "$jpacker_upgrade_aur_options" -d 'upgrade-aur option'
+
 complete -c jpacker -f -n '__fish_jpacker_using_operation -S; or __fish_jpacker_using_operation -Syu' -a '--needed' -d 'Skip reinstall at final package installation'
 
 complete -c jpacker -f -n '__fish_jpacker_using_operation del-src' -a '(__fish_jpacker_source_preferences)' -d 'source-build preference'
 complete -c jpacker -f -n '__fish_jpacker_using_operation edit-src' -a '(__fish_jpacker_source_preferences)' -d 'source-build preference'
 complete -c jpacker -f -n '__fish_jpacker_using_operation revert' -a '(__fish_jpacker_source_preferences)' -d 'source-build preference'
 
-complete -c jpacker -f -n 'not __fish_jpacker_no_operation; and not __fish_jpacker_using_operation -G; and not __fish_jpacker_using_operation -Gp' -a "$jpacker_global_options" -d 'global option'
+complete -c jpacker -f -n 'not __fish_jpacker_no_operation; and not __fish_jpacker_using_operation upgrade-aur; and not __fish_jpacker_using_operation -G; and not __fish_jpacker_using_operation -Gp' -a "$jpacker_global_options" -d 'global option'
