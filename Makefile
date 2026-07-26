@@ -34,6 +34,7 @@ AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION_TEST_TARGET := $(BUILD_DIR)/tests/aur
 AUR_UPDATE_EXECUTION_PREPARATION_TEST_TARGET := $(BUILD_DIR)/tests/aur-update-execution-preparation-test
 AUR_UPDATE_EXECUTION_PREPARATION_INTEGRATION_TEST_TARGET := $(BUILD_DIR)/tests/aur-update-execution-preparation-integration-test
 AUR_UPDATE_EXECUTION_RUNNER_TEST_TARGET := $(BUILD_DIR)/tests/aur-update-execution-runner-test
+AUR_UPDATE_OPERATION_RESULT_TEST_TARGET := $(BUILD_DIR)/tests/aur-update-operation-result-test
 DEPENDENCY_PLAN_MODEL_TEST_TARGET := $(BUILD_DIR)/tests/dependency-plan-model-test
 REPOSITORY_QUERY_TEST_TARGET := $(BUILD_DIR)/tests/repository-query-test
 ARTIFACT_INSTALL_PLAN_TEST_TARGET := $(BUILD_DIR)/tests/artifact-install-plan-test
@@ -146,6 +147,26 @@ AUR_UPDATE_EXECUTION_RUNNER_TEST_SRCS := \
 	$(SRC_DIR)/package_identifier.cpp \
 	tests/stubs/aur-update-execution-preparation/preparation_stub.cpp \
 	tests/stubs/aur-update-execution-runner/execution_stub.cpp
+# POLICY(#267): reducer testはactual moved-from preparationだけをsafe
+# preparation seamで作り、execution/mutation TUをlinkしない。
+AUR_UPDATE_OPERATION_RESULT_TEST_SRCS := \
+	tests/aur_update_operation_result_test.cpp \
+	$(SRC_DIR)/aur_update_operation_result.cpp \
+	$(SRC_DIR)/aur_update_execution_preparation.cpp \
+	$(SRC_DIR)/source_install_preparation.cpp \
+	$(SRC_DIR)/source_environment.cpp \
+	$(SRC_DIR)/shell_words.cpp \
+	$(SRC_DIR)/package_identifier.cpp \
+	tests/stubs/aur-update-execution-preparation/preparation_stub.cpp
+AUR_UPDATE_OPERATION_RESULT_FORBIDDEN_TEST_SRCS := \
+	$(SRC_DIR)/process.cpp \
+	$(SRC_DIR)/checkout_fetch.cpp \
+	$(SRC_DIR)/persistent_checkout.cpp \
+	$(SRC_DIR)/artifact_workspace.cpp \
+	$(SRC_DIR)/separated_source_build.cpp \
+	$(SRC_DIR)/artifact_install_executor.cpp \
+	$(SRC_DIR)/source_build.cpp \
+	$(SRC_DIR)/source_install.cpp
 DEPENDENCY_PLAN_MODEL_TEST_SRCS := \
 	tests/dependency_plan_model_test.cpp \
 	$(SRC_DIR)/dependency_plan.cpp \
@@ -277,7 +298,7 @@ LIBALPM_BUILD_TARGETS := \
 	$(AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION_TEST_TARGET) \
 	$(UPGRADE_BASELINE_METADATA_TEST_TARGET)
 
-.PHONY: all check-libalpm clean test-app-config test-package-identifier test-package-metadata test-package-metadata-integration test-repository-query test-shell-words test-source-environment test-artifact-workspace test-artifact-identity test-artifact-install-executor test-separated-source-build test-production-source-build test-process-capture test-aur-update-plan test-aur-update-query test-aur-update-execution-preflight test-aur-update-execution-preflight-integration test-aur-update-execution-preparation test-aur-update-execution-runner test-dependency-plan-model test-artifact-install-plan test-command-stub-contract test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-commands-inspect test-commands-source-maintenance test-commands-sync test-conflicts-replaces test-install-layout test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check install uninstall
+.PHONY: all check-libalpm clean check-aur-update-operation-result-link-firewall test-app-config test-package-identifier test-package-metadata test-package-metadata-integration test-repository-query test-shell-words test-source-environment test-artifact-workspace test-artifact-identity test-artifact-install-executor test-separated-source-build test-production-source-build test-process-capture test-aur-update-plan test-aur-update-query test-aur-update-execution-preflight test-aur-update-execution-preflight-integration test-aur-update-execution-preparation test-aur-update-execution-runner test-aur-update-operation-result test-dependency-plan-model test-artifact-install-plan test-command-stub-contract test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-commands-inspect test-commands-source-maintenance test-commands-sync test-conflicts-replaces test-install-layout test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check install uninstall
 
 all: $(TARGET) $(MANPAGE)
 
@@ -494,6 +515,14 @@ $(AUR_UPDATE_EXECUTION_RUNNER_TEST_TARGET): $(AUR_UPDATE_EXECUTION_RUNNER_TEST_S
 		$(AUR_UPDATE_EXECUTION_RUNNER_TEST_SRCS) \
 		-o $@
 
+$(AUR_UPDATE_OPERATION_RESULT_TEST_TARGET): $(AUR_UPDATE_OPERATION_RESULT_TEST_SRCS) $(HEADERS) tests/stubs/aur-update-execution-preparation/preparation_stub.hpp $(VERSION_FILE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling pure AUR update operation result test binary"
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
+		-I$(SRC_DIR) \
+		$(AUR_UPDATE_OPERATION_RESULT_TEST_SRCS) \
+		-o $@
+
 $(DEPENDENCY_PLAN_MODEL_TEST_TARGET): $(DEPENDENCY_PLAN_MODEL_TEST_SRCS) $(SRC_DIR)/dependency_plan.hpp $(SRC_DIR)/dependency_provider.hpp $(SRC_DIR)/aur_rpc.hpp $(SRC_DIR)/repository_query.hpp $(SRC_DIR)/dependency_spec.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/logging.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling dependency plan model test binary"
@@ -601,6 +630,16 @@ test-aur-update-execution-preparation: $(AUR_UPDATE_EXECUTION_PREPARATION_TEST_T
 
 test-aur-update-execution-runner: $(AUR_UPDATE_EXECUTION_RUNNER_TEST_TARGET)
 	$(abspath $(AUR_UPDATE_EXECUTION_RUNNER_TEST_TARGET))
+
+check-aur-update-operation-result-link-firewall:
+	@echo ":: Checking AUR update operation result link firewall"
+	@test -z "$(filter $(AUR_UPDATE_OPERATION_RESULT_FORBIDDEN_TEST_SRCS),$(AUR_UPDATE_OPERATION_RESULT_TEST_SRCS))" || { \
+		echo "error: AUR update operation result test links a forbidden mutation source" >&2; \
+		exit 1; \
+	}
+
+test-aur-update-operation-result: check-aur-update-operation-result-link-firewall $(AUR_UPDATE_OPERATION_RESULT_TEST_TARGET)
+	$(abspath $(AUR_UPDATE_OPERATION_RESULT_TEST_TARGET))
 
 test-dependency-plan-model: $(DEPENDENCY_PLAN_MODEL_TEST_TARGET)
 	$(abspath $(DEPENDENCY_PLAN_MODEL_TEST_TARGET))
