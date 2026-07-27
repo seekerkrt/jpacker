@@ -1,221 +1,88 @@
-# jpacker C++ コーディング規約
+# jpacker固有 C++ コーディング規約
 
-## 目的
+## 位置づけと優先順位
 
-- 本規約は、jpacker のコードを **読みやすく・直しやすく・壊しにくく** 保つための共通ルールである。
-- jpacker は C++20 製の CLI ツールであり、pacman / makepkg / AUR の既存の流儀を壊さずに補助することを重視する。
-- 単に動作するだけでなく、将来の自分や他の支援者が、変更の意図・安全境界・未整理部分を復元しやすい状態を保つ。
-- bring-up や実験的な変更を許容する場合も、それが一時的な足場なのか、将来も守る契約なのかを分けて残す。
+C/C++共通規約は`cpp-conventions` Skillを基準とする。
+この文書はjpacker固有の追加・上書き規約だけを定める。
 
-## 基本方針
+矛盾する場合は、この文書と実際に使用されるbuild設定を優先する。ここに書かれていない共通規則は`cpp-conventions`へ従う。
 
-- 既存コードのスタイルと責務の置き方を優先する。
-- Issue の範囲外の変更を混ぜない。
-- 大規模整形、広範囲 rename、ついでのリファクタは避ける。
-- 変更は小さく、確認しやすく、戻しやすい単位にする。
-- CLI の互換性、終了コード、出力形式、設定ファイル、管理ディレクトリの意味を不用意に変えない。
-- pacman / makepkg / git / AUR API に委ねるべき責務を jpacker 側で抱え込みすぎない。
+transaction、互換性、project stance等の設計判断は対応する正式docsを正とし、この文書へ詳細を複製しない。
 
-## ファイル構成
+## 言語・実行環境
 
-- 現状の jpacker は `src/jpacker.cpp` を中心に構成されている。新規変更ではこの既存構成を尊重する。
-- C++ ファイルは、必要が明確な場合に `.hpp` / `.cpp` へ分離してよい。ただし、分離自体を目的にしない。
-- 新しいヘッダやソースを追加する場合は、責務境界が説明できる単位にする。
-- 既存の単一ファイル構成から分割する場合は、Issue の主目的と分割の必要性が一致しているときだけ行う。
-- include 用の薄いラッパーヘッダや、責務の弱い共通ヘッダは作らない。
+- 現行Makefileはhosted環境の`g++`と`-std=c++20`を使用する。
+- standard library、libcurl、libalpmを既存の責務境界に従って利用できる。
+- 例外は内部の失敗伝播に使用できる。CLI境界で`std::exception`等を捕捉し、利用者向けerrorと終了codeへ変換する。
+- destructorから例外を外へ出さない。cleanup failureを無視する場合は、その契約が重要なら理由を残す。
+- RTTI / `dynamic_cast`は現在の設計前提ではない。新しく必要になった場合は、型判別よりinterfaceやdata modelで表せないかを先に確認する。
+- `reinterpret_cast`を通常のapplication logicへ導入しない。外部C APIとの境界で必要なら、狭いadapterに閉じて前提を明示する。
 
-## 命名・配置
+## File構成と分割
 
-- 既存コードのスタイルを優先する。新規コードでは、周辺の命名と責務の置き方に合わせて段階的に整える。
-- 型 / クラス / 構造体名は PascalCase を基本とする。
-- `enum class` 名も型名として PascalCase を基本とする。
-- enum value は既存コードに合わせる。新規の `enum class` では、値も PascalCase を基本とし、必要なら enum 名側で文脈を持たせて値名を短く保つ。
-- 関数名は既存コードに合わせて snake_case を基本とする。
-- private / internal helper 関数も snake_case を基本とし、呼び出し元から見た役割が分かる名前にする。
-- `do_` / `handle_` / `process_` のような広い動詞だけで済ませず、対象や境界が分かる名前を優先する。
-- ローカル変数名は snake_case を基本とする。
-- 関数引数名も snake_case を基本とする。
-- クラスのメンバ変数は既存コードを優先する。新規クラスでは `_` 接尾辞を付ける(例: `slot_`, `state_`)。外部に公開する必要があるものだけ `public` にし、それ以外は `protected` / `private` にする。
-- 構造体のメンバ変数は接尾辞を付けず、素の名前にする。単純なデータ集約として扱い、基本的に `public` のままでよい。
-- 名前空間は原則として小文字にする。
-- project / module の名前空間を追加する場合は、既存コードと将来の分割方針に合わせる。必要以上に広い namespace を勝手に増やさない。
-- translation unit local な補助関数・補助変数・定数・補助型は、原則として無名 namespace に閉じ込める。
-- cpp グローバルの `static` は既存コードでは許容するが、新規コードでは無名 namespace を優先する。
-- グローバル変数は極力使わない。
-- グローバル状態が必要な場合は、無名 namespace または明示的な名前空間に閉じ込める。外部公開される global state は避ける。
-- どうしてもグローバル変数が必要な場合は `g_` 接頭辞を基本とし、用途・寿命・副作用が分かる名前にする。
-- 関数内 `static` 変数は原則として避ける。
-- 関数内 `static` が必要な場合は `s_` 接頭辞を基本とする。
-- 関数内 `static` は、キャッシュ、遅延初期化、状態保持などの理由が明確な場合に限る。
-- 関数内 `static` を使う場合は、寿命・副作用・スレッド / 再入性への影響が分かる名前やコメントを付ける。
-- 定数は意味のある名前を付ける。既存コードに合わせて UPPER_SNAKE_CASE を基本とする。
-- 定数は、外部公開が不要なら translation unit 内に閉じる。
-- マジックナンバーやポリシー値は、意味が残る名前の定数へ寄せる。
-- bool 変数・bool 関数は `is_` / `has_` / `should_` / `can_` / `needs_` など、真偽の意味が読める名前を優先する。
-- collection は複数形または用途が分かる名前にする。例: `aur_packages`, `build_units`, `providers`。
-- map / set / lookup 用変数は key/value や用途が分かる名前にする。例: `package_by_name`, `seen_package_bases`。
-- path 変数は `*_path`、directory は `*_dir` / `*_directory`、file は `*_file` など、ファイルなのかディレクトリなのか分かる名前を優先する。
-- optional / result 的な値は「存在しない可能性」が分かる名前、または戻り値型で意味が分かる形にする。
-- 戻り値の成否や終了状態を表す値は、`status` / `exit_code` / `failed` など、数値なのか真偽なのかが分かる名前にする。
-- 一時変数は短くてよい。ただし、処理が数行を超える場合や意味が重要な場合は説明的な名前にする。
-- `tmp`, `ret`, `val`, `obj` のような曖昧な名前は、短い局所処理以外では避ける。
-- pacman / makepkg / AUR / PKGBUILD / PackageBase など、既存ドメイン用語の表記は揺らさない。
-- 略語は無理に展開しすぎず、既存コード・Arch 文脈で自然なものを使う。ただし、新規の独自略語は避ける。
-- 新しい配置先が自明でない場合は、先に責務と配置案を整理する。
+現在の実装は`src/jpacker.cpp`だけの単一構成ではなく、CLI、設定、package metadata、plan、source build、process実行等を責務ごとの`.hpp` / `.cpp`へ分けている。
 
-## 関数設計・処理分割
+- 新しい非自明な型や複数箇所から使うinterfaceは、既存moduleと同様に宣言を`.hpp`、定義を`.cpp`へ分ける。
+- entry pointとtop-level CLI wiringは`src/jpacker.cpp`へ置き、domain実装を戻して肥大化させない。
+- 既存の責務pairへ収まる変更では、新しいgeneric moduleやwrapperを増やさない。
+- file分割そのものを目的に既存moduleを一括移動しない。
+- testは対象moduleと既存`tests/`の構成に対応させる。
 
-- 新規コードや今後触る箇所では、1 つの関数に解析、表示、外部コマンド実行、ファイル変更を詰め込みすぎない。
-- AUR metadata 取得、依存解決、表示、fetch、build / install は責務を分ける。
-- dry-run / plan 系の処理は、副作用を持つ処理と混ぜない。
-- ユーザー確認、ログ出力、実処理は、可能な範囲で境界を分ける。
-- 関数名は「何を返すか」または「何を実行するか」が分かる名前にする。
-- bool を返す関数は `is_` / `has_` / `can_` / `should_` / `needs_` などで始める。
-- 外部コマンドを実行する関数は、実行することが名前から分かるようにする。
-- 失敗時に例外を投げる関数、bool を返す関数、optional を返す関数の役割を混ぜない。
-- 既存の大きな関数を直ちに全面分割する必要はない。Issue の範囲で触る箇所から、責務の境界を少しずつ明確にする。
+## 命名
 
-## C++ 利用方針
+- 型、class、struct、`enum class`はPascalCaseを基本とする。
+- 新しい`enum class`のvalueもPascalCaseを基本とし、既存enumでは周辺の形式を優先する。
+- free function、method、private / internal helper、local variable、argumentは既存コードに合わせてsnake_caseを基本とする。
+- 新しいclass memberは`_`接尾辞、単純なdata aggregateのstruct memberは接尾辞なしを基本とする。
+- translation-unit localなhelper、定数、補助型は無名namespaceへ閉じる。
+- boolは`is_`、`has_`、`should_`、`can_`、`needs_`等、真偽の意味が読める名前を優先する。
+- path / directory / file、status / exit_code / failedは値の意味が区別できる名前にする。
+- pacman、makepkg、AUR、PKGBUILD、PackageBase等の既存domain用語の表記を揺らさない。
+- repository全体をnamespaceや命名へ揃えるだけの変更は行わない。
 
-### 基本
+## Functionとerrorの境界
 
-- モダンな書き方そのものより、読みやすさ、型安全、後始末の明示を優先する。
-- C++20 の機能は、意図が読みやすくなり、壊れにくくなる場合に使う。
-- 便利な抽象化を足す前に、既存の単純な制御フローで十分かを確認する。
-- 小さな補助型や関数は、責務が明確な場所に閉じる。
+- metadata取得、dependency計画、表示、fetch、build、install、cleanupを1つの関数へ詰め込まない。
+- dry-run / plan生成と副作用実行を別の責務に保つ。
+- exceptionを投げる関数、`bool`、`std::optional`、exit codeを返す関数のfailure contractを混ぜない。
+- exception messageはCLI境界で利用者へ表示される可能性を前提に、失敗内容と対象を含める。
+- network / AUR failure、external command failure、validation failure、internal invariantを同じerror表現へ潰さない。
 
-### 積極的に使うもの
+## pacman・makepkg・git・AUR境界
 
-- **RAII**
-  - curl global 初期化、curl handle、一時ディレクトリ、カレントディレクトリ変更、ファイル、後始末が必要な処理に使う。
-  - 成功時だけ commit し、失敗時は destructor で掃除するような構造を優先する。
-- **`std::filesystem`**
-  - パス結合、存在確認、ディレクトリ作成、削除対象の明示に使う。
-- **`std::optional`**
-  - 「見つからない」と「エラー」を分けたい戻り値に使う。
-- **`enum class`**
-  - 依存種別や状態分類のように、整数や文字列だけでは意味が崩れやすいものに使う。
-- **`std::vector` / `std::map` / `std::set`**
-  - 既存コードのデータ保持方針に合わせ、必要十分な標準コンテナを使う。
-- **例外**
-  - 内部の失敗伝播には使ってよい。CLI 境界では捕捉し、`Logger::error` と終了コードへ変換する。
+- jpackerはpacman-first wrapperである。system package transactionやdatabase authorityを独自に持たない。
+- libalpmはquery / transaction契約に従って使用し、CLI都合の重複modelを増やさない。
+- makepkgのPKGBUILD評価、build、package artifact生成の意味を隠しすぎない。
+- git操作はsource取得に必要な範囲へ限定し、fetchとworking tree mutationを分ける。
+- AUR metadata、dependency、provider、conflictの事実と、jpackerが作るplanを区別する。
+- `/etc/jpacker/package.build/`はsource-build preferenceの保存先であり、意味やlayoutの変更を互換性変更として扱う。
 
-### 慎重に使うもの
+## External command・CLI出力
 
-- **継承 / `virtual`**
-  - 差し替え可能な抽象インターフェースが必要な場合に限る。
-  - 単なる関数分割や状態の整理には、関数・構造体・小さなクラスを優先する。
-- **テンプレート**
-  - 型安全や重複削減の効果が明確な薄いものに限る。
-  - CLI 処理を追いにくくする重いテンプレートメタプログラミングは避ける。
-- **operator overload**
-  - ドメイン上自然で、読み手が挙動を誤解しない場合に限る。
-- **`dynamic_cast` / RTTI 前提の設計**
-  - 原則として避ける。
+- external commandはargvを構造として保持できる既存経路を優先する。shell stringが避けられない場合は、既存のquoting方針とvalidation経路に従い、未検証の値を直接連結しない。
+- package nameやenvironment keyは、対応する既存validatorを通す。
+- sudo pacman、makepkg、git等、利用者に影響する主要commandとoptionは実行前に見える形で表示する。
+- jpacker全体をrootで動かす前提にせず、必要なpacman操作だけをsudo境界へ渡す。
+- user-facing failureは`Logger::error`、継続可能な注意は`Logger::warn`、通常進行は`Logger::info`という既存区分を維持する。
+- CLI option、output wording、machine-consumed output、終了codeを変える場合は、README / man page / testsへの影響を確認する。
 
-### 避けたいもの
+## Resource管理
 
-- 何をしているか追いにくい汎用ラッパー。
-- Issue 目的に対して過剰な新規レイヤ。
-- 既存処理を薄く包むだけの互換関数。
-- 便利そうという理由だけの global state。
-- pacman / makepkg / git の仕様を jpacker 独自に再実装すること。
+- curl global stateとhandle、file、process result、temporary directory、current directory変更は、既存の`CurlGlobal`、`CurlHandle`、`WorkDirGuard`等のRAII型または一意なownerへ束ねる。
+- partial clone / build / install前処理のfailure pathで、どのartifactを残し、どれを掃除するかを明示する。
+- rollbackやcleanupで対象pathを組み立てる場合、base directoryと対象identityをvalidationしてから扱う。
 
-## 資源管理
+## 書式とtool設定
 
-- curl は `CurlGlobal` / `CurlHandle` のように RAII で初期化と解放を束ねる。
-- カレントディレクトリ変更は `WorkDirGuard` のように、必ず元の場所へ戻る構造にする。
-- 一時ディレクトリや clone 途中のディレクトリは、失敗時に掃除されるようにする。
-- `FILE*`、ファイルストリーム、プロセス実行結果などは、所有者と寿命を明確にする。
-- destructor では例外を外へ出さない。失敗時にログが必要なら、握りつぶす理由を短く残す。
+- 現在repository rootに`.editorconfig`と`.clang-format`はない。変更箇所の既存styleとcompiler warningを基準にする。
+- C++ buildは`-Wall -Wextra`を含む。新しいwarningを無視するcastやsuppressionを安易に追加しない。
+- formatterを新規導入したり、repository全体を整形したりする変更は、機能変更と分けた明示的な作業にする。
 
-## 外部コマンドと shell
+## Project固有の確認入口
 
-- 外部コマンド実行は、引数の quote と validation を先に考える。
-- パッケージ名や環境変数名は、既存の `require_valid_package_name` / `is_valid_env_key` のような検証を通す。
-- shell 文字列を組み立てる場合は、`shell_quote` や `join_shell_args` の利用を優先する。
-- `sudo pacman`、`makepkg`、`git` などの実行は、ユーザーに見えるログを残す。
-- 危険な削除や reset は、対象パスと意図を明確にしたうえで最小範囲に閉じる。
+- 基本build: `make`
+- 全test: `make test`
+- 限定test: 対応する`make test-<領域>`
+- release統合確認: `make release-check`
 
-## pacman / makepkg / AUR との境界
-
-- jpacker は pacman-first wrapper である。pacman が自然に扱える処理は pacman へ委ねる。
-- `pacman` の標準的な CLI 意味、終了コード、出力の期待を不用意に変えない。
-- AUR API や PKGBUILD 取得の失敗は、ユーザーが次に何を見ればよいか分かるエラーにする。
-- `makepkg` の挙動や Arch packaging の流儀を隠しすぎない。
-- 依存解決やビルド順の表示は、事実、推測、未解決を混ぜずに出す。
-- `/etc/jpacker/package.build/` は source-build preference の保存先として扱い、意味を変える変更は互換性影響として扱う。
-
-## 安全な CLI 挙動
-
-- `plan` や `deps` は調査・表示のための操作であり、clone / build / install を混ぜない。
-- `fetch` は安全な取得段階であり、既存 clone では `git fetch origin` までに留める。
-- `fetch` に working tree の更新、pull、merge、reset、build、install を混ぜない。必要なら別コマンドや明示オプションとして設計する。
-- dry-run や plan 系の表示は、実行される可能性のある操作と、実際には実行しない操作を明確に分ける。
-- ユーザー確認が必要な処理では、何を変更・削除・実行するのかを短く具体的に表示する。
-- エラー時は、部分成功と失敗を区別し、可能なら処理対象ごとの失敗をログに残す。
-
-## エラー表示・ログ
-
-- ユーザー向けの失敗は `Logger::error`、継続可能な注意は `Logger::warn`、通常の進行は `Logger::info` を使う。
-- 内部例外のメッセージは、CLI 境界でユーザーに伝わることを前提に書く。
-- 失敗理由は「何が失敗したか」と「対象は何か」を含める。
-- ネットワークや AUR 側の失敗は、jpacker のバグと外部状態を混同しない表現にする。
-- ログを増やす場合は、通常利用でうるさすぎない粒度にする。
-
-## コメント運用
-
-### 基本方針
-
-- コメントは多めでもよい。ただし、コードを見れば分かる WHAT の逐語説明は避ける。
-- コメントは、コードそのものでは表現しにくい意図や安全境界を残すために使う。
-- 特に以下を優先する。
-  - **WHY**: なぜこの実装・構造にしたか。
-  - **POLICY**: 守るべき方針、互換性、CLI 契約。
-  - **LANDMINE**: 触ると壊れやすい箇所、既存ユーザー影響、危険な前提。
-  - **NOTE**: 補足、一時対応、将来整理したい点。
-
-### 使いどころ
-
-- pacman / makepkg / AUR の仕様に合わせている箇所。
-- `fetch` のように安全性の境界が重要な箇所。
-- カレントディレクトリ変更や一時ディレクトリ削除など、失敗時の後始末が重要な箇所。
-- 「今はこうしているが、将来別 Issue で変える可能性がある」箇所。
-- 雑に共通化すると挙動が変わる箇所。
-
-## 整形・差分
-
-- 既存ファイルの周辺スタイルに合わせる。
-- 大規模な自動整形は、機能変更やバグ修正と混ぜない。
-- 差分はレビューしやすい粒度に保つ。
-- unrelated cleanup は避ける。
-- 文書だけの Issue では、原則として C++ ソースを整形しない。
-
-## テスト・確認
-
-- C++ やビルド関連に触れた場合は、少なくとも次を確認する。
-
-```bash
-make clean && make
-git diff --check
-```
-
-- CLI 表示や挙動を変えた場合は、対象コマンドを直接実行して確認する。
-- pacman / makepkg / sudo を伴う確認は、実際にシステムへ影響するため、必要性と範囲を明示してから行う。
-- docs-only 変更でも、リポジトリの受け入れ条件で求められている場合は build と diff check を行う。
-
-## コミット運用
-
-- コミットは意味の塊で切る。
-- `git add .` を無条件に使わず、対象ファイルを絞る。
-- コミットメッセージは日本語主体で分かりやすく書く。
-- docs-only 変更では、実装変更がないことを要約に含める。
-
-## 要約
-
-- jpacker は pacman / makepkg / AUR の流儀を尊重する C++20 CLI ツールである。
-- 既存スタイルを優先し、Issue 範囲外のリファクタや大規模整形を混ぜない。
-- RAII で資源管理と後始末を明示する。
-- `plan` / `deps` / `fetch` の安全境界を崩さない。
-- コメントは WHAT より WHY / POLICY / LANDMINE / NOTE を残す。
-- 将来の自分や他の支援者が、読みやすく・直しやすく・壊しにくい状態を維持できることを重視する。
+CLI挙動を変えた場合は対象command、error、終了codeも確認する。pacman / makepkg / sudoを伴うsystem mutationは通常testに含めず、明示された安全な環境とscopeでだけ実施する。

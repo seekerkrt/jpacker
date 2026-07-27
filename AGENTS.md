@@ -1,87 +1,85 @@
 # AGENTS.md
 
-このファイルは、Codex などの AI coding agent が jpacker を編集するときの作業方針をまとめる。
+## 位置づけ
 
-## 基本方針
+この文書は、jpacker repositoryで作業するときの入口・SSOT地図・固有の作業境界を定める。
+言語非依存の共通契約はCodexのグローバル`AGENTS.md`、C/C++共通規約は`cpp-conventions` Skillを基準とし、ここでは再掲しない。
 
-- 既存の Issue / PR / commit message の言語・文体に合わせる。
-- Issue の目的とスコープを優先し、関係のない変更を混ぜない。
-- 既存の main / develop / feature/* / fix/* 運用を尊重する。
-- main は最新安定版、develop は次リリース向け統合ブランチとして扱う。
-- 作業ブランチは原則として develop から切る。
+jpacker固有の指示、`docs/CODING_CONVENTIONS.md`、実際のbuild設定が共通規約と矛盾する場合は、より具体的なrepository側の契約を優先する。
 
-## 言語方針
+## Repository概要と優先事項
 
-- このリポジトリ内の contributor / AI coding agent 向け指示は、日本語で記述する。
-- Issue、PR、commit message、merge message、release note などのプロジェクト記録は、日本語を主文・原典として扱う。必要に応じて、英語の要約や補足を追加してよい。
-- 既存の日本語中心の記録を、Issue で明示されていない限り英語のみへ置き換えない。
-- commit message や merge message は、まず日本語で変更内容が分かるように書く。英語は補足として扱う。
+jpackerは、pacman、makepkg、AUR、gitの既存契約を尊重しながらArch package操作を補助するhosted C++ CLIである。
 
-## Coding style
+このrepositoryでは、特に次を優先する。
 
-実装前に docs/CODING_CONVENTIONS.md を読むこと。実装コードは、そこに記載された C++ 標準とコーディング方針に従う。
+- pacman-firstを維持し、upstream toolの責務を独自再実装しない
+- plan / deps / fetchと、build / install等の副作用境界を明確にする
+- CLI互換性、終了code、出力、設定、管理directoryの意味を不用意に変えない
+- external commandと権限昇格を利用者から見える形に保つ
 
-スタイル判断は次の順で行う。
+## 最初に読む文書
 
-1. Issue で明示された指示。
-2. 変更対象の周辺コードのスタイル（命名、責務分割、コメント粒度、エラー処理、ログ出力の流儀を含む）。
-3. 周辺コードのスタイルが不明瞭な場合、一貫していない場合、または判断材料が足りない場合は、docs/CODING_CONVENTIONS.md。
+- `README.md`: 現行CLIと利用者向け契約
+- `docs/DECISIONS.md`: transaction、ownership、主要な設計判断
+- `docs/PROJECT_STANCE.md`: projectの立場と非目標
+- `docs/COMPATIBILITY.md`: 互換性境界
+- `docs/DEVELOPMENT.md`: branch、PR、mirror、release運用
+- `docs/VERSIONING.md`: version policy
+- `docs/LICENSING.md`: dependencyと配布物のlicense契約
+- `docs/CODING_CONVENTIONS.md`: jpacker固有のC++追加・上書き規約
 
-加えて、次を守る。
+設計判断の詳細をこの文書やコーディング規約へ複製しない。変更対象に対応する正式文書を正とする。
 
-- 現時点では C++20 をプロジェクトの基準とし、Issue で明示されていない限り、より新しい標準機能やコンパイラ固有拡張へ寄せる変更を混ぜない。
-- 周辺コードのスタイルと docs/CODING_CONVENTIONS.md が衝突して見える場合は、変更を最小限に留め、PR の説明で判断理由を明記する。
-- Issue で明示されていない限り、広範囲のスタイル変更、大規模 rename、無関係な整形を混ぜない。
+## 重要な責務境界
 
-## Safety
+- plan / depsは調査・表示の層であり、clone、build、installを混ぜない。
+- fetchは取得段階であり、既存cloneでは`git fetch origin`までを境界とする。working tree更新、pull、merge、reset、build、installを暗黙に追加しない。
+- package transactionとsystem databaseのauthorityはpacman / libalpmへ委ねる。
+- PKGBUILD評価とpackage buildはmakepkg / Arch packaging契約を尊重する。
+- jpacker本体は通常userで動作し、必要なpacman操作だけを明示的なsudo境界へ渡す。
+- AUR/network側のfailure、local validation failure、jpacker内部failureをCLI上で区別する。
+- `--noconfirm`は対応経路のprompt省略であり、未解決dependency、ambiguous provider、conflict / replacement、削除、source selection等のguardを突破する許可ではない。
 
-- pacman / makepkg / git / AUR の責務を jpacker 側で抱え込みすぎない。
-- plan / deps / fetch の安全境界を崩さない。
-- fetch に build / install / pull / merge / reset を混ぜない。
-- `--noconfirm` は pacman / makepkg の確認省略に限り、未解決依存や循環依存を自動突破させない。
-- pacman / makepkg / git などへ委譲する、利用者に影響する主要な外部コマンドは実行前に表示し、特に pacman / makepkg に渡す option がユーザーから見えることを重視する。
-- jpacker 本体は通常ユーザーで起動し、必要な pacman 操作だけ sudo 経由で行う方針を尊重する。
+## Skill routing
 
-## Commit message
+- C/C++の生成・編集・レビューでは`cpp-conventions`を使い、続けて`docs/CODING_CONVENTIONS.md`を必ず読む。
+- read-onlyの責務監査、unused判定、docs整合確認では`audit`を使う。
+- 非自明な変更後のbuild / test / CLI確認では`verify`を使う。
+- commit前の差分整理では`commit-prep`、GitHub操作では`github`を使う。
+- handoffは依頼された保存方式に対応するhandoff系Skillへroutingする。
 
-- commit message は、後で release summary / changelog の素材になる前提で書く。
-- subject は `git log --oneline` で読んでも変更内容が分かる程度に具体的にする。
-- 英語の説明を追加する場合も、日本語の subject / body を原典として扱い、英語は補足に留める。
+## Build・testの入口
 
-必要に応じて、軽量な Conventional Commits 風の分類 prefix を使ってよい。
+- `make`: binaryとman pageの基本build
+- `make test`: repositoryのtest集合
+- `make test-<領域>`: 変更責務に対応する限定test
+- `make release-check`: release前の統合確認
+- `git diff --check`: docs-onlyを含む差分の基本確認
 
-- `feat:` 新機能・機能追加
-- `fix:` バグ修正
-- `docs:` ドキュメント更新
-- `build:` ビルド設定・PKGBUILD・Makefile など
-- `test:` テスト追加・修正
-- `refactor:` 挙動を変えない内部整理
-- `chore:` 雑務・メンテナンス
-- `release:` リリース準備
+CLI出力や終了codeを変えた場合は対象commandを直接確認する。pacman、makepkg、sudo、system package databaseへ影響する確認は通常testと同列に実行せず、対象と副作用を明示した依頼に基づいて行う。
 
-分類に迷う場合は、無理に厳密化せず、変更内容が伝わる日本語 subject を優先する。
+## Branch・remote・mirror
 
-## GitHub workflow
+- GitHubの`origin`がcanonical、GitLabの`gitlab`がbackup mirrorである。
+- `main`は最新安定版、`develop`は次releaseのintegration branchである。
+- 通常の`feature/*`、`fix/*`、`docs/*`は`develop`から派生し、PRも`develop`をtargetとする。
+- release branch、main反映、tag、GitHub Release、mirror更新の手順は`docs/DEVELOPMENT.md`を正とする。
+- Issue、PR、commit message、release noteは日本語を主文とし、英語は必要な場合の補足とする。
 
-- GitHub を canonical repository として扱い、GitLab は backup mirror として扱う。
-- Issue / PR / Release は GitHub 側を正とする。
-- PR 作成、merge、tag 作成、release 作成は、明示的に指示された場合のみ行う。
-- 作業完了後は、実装内容、確認したコマンド、未確認事項を PR または作業ログに残す。
-- GitLab mirror への push は、GitHub 側の状態を確認したうえで、必要な場合のみ行う。
+## Repository固有の慎重領域
 
-## Verification
+- package transaction、dependency plan、provider / conflict / replaces判定
+- source-build preferenceと`/etc/jpacker/package.build/`
+- shell quoting、package name / environment key validation
+- temporary directory、current directory、partial clone / buildのcleanup
+- sudo境界と利用者へ表示するcommand
+- CLI option、出力、終了code、man pageの互換性
 
-C++ やビルド関連に触れた場合は、少なくとも次を確認する。
+## Repository固有のnon-goal
 
-```bash
-make clean && make
-git diff --check
-```
-
-CLI 表示や挙動を変えた場合は、対象コマンドを直接実行して確認する。
-
-docs-only 変更の場合でも、少なくとも次を確認する。
-
-```bash
-git diff --check
-```
+- pacman、makepkg、git、AUR APIの独自再実装
+- plan / deps / fetchへ暗黙の副作用を追加すること
+- convenienceだけを理由にした汎用wrapperやglobal state
+- project文書を越えてrelease / branch policyを再定義すること
+- file分割、namespace導入、整形自体を目的にした一括変更
