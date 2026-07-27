@@ -12,6 +12,7 @@ MANPAGE_IN := man/jpacker.8.in
 TEST_TARGET := build/tests/jpacker-test
 COMMANDS_INSPECT_TEST_TARGET := build/tests/jpacker-commands-inspect-test
 AUR_UPDATE_COMMAND_TEST_TARGET := build/tests/jpacker-aur-update-command-test
+UPGRADE_ALL_COMMAND_TEST_TARGET := build/tests/jpacker-upgrade-all-command-test
 AUR_RPC_VALIDATION_TEST_TARGET := build/tests/jpacker-aur-rpc-validation-test
 AUR_RPC_ENVELOPE_VALIDATION_TEST_TARGET := build/tests/aur-rpc-envelope-validation-test
 COMMANDS_SYNC_TEST_TARGET := build/tests/jpacker-commands-sync-test
@@ -97,7 +98,22 @@ AUR_UPDATE_COMMAND_TEST_SRCS := \
 		$(SRC_DIR)/upgrade_all_operation.cpp, \
 		$(SRCS)) \
 	tests/stubs/aur-update-command/operation_stub.cpp \
+	tests/stubs/upgrade-all-command/operation_stub.cpp \
 	tests/stubs/package-metadata/alpm_stub.cpp
+# POLICY(#281): final CLI testはparser/routing/presentationをproductionのままlinkし、
+# aggregate operation capabilityだけをscenario stubへ差し替える。
+UPGRADE_ALL_COMMAND_TEST_SRCS := \
+	$(filter-out $(SRC_DIR)/upgrade_all_operation.cpp,$(SRCS)) \
+	tests/stubs/upgrade-all-command/operation_stub.cpp \
+	tests/stubs/package-metadata/alpm_stub.cpp
+UPGRADE_ALL_COMMAND_REQUIRED_TEST_SRCS := \
+	$(SRC_DIR)/jpacker.cpp \
+	$(SRC_DIR)/commands_upgrade_all.cpp \
+	$(SRC_DIR)/cli_parser.cpp \
+	$(SRC_DIR)/cli_routing.cpp \
+	$(SRC_DIR)/upgrade_all_operation_result.cpp
+UPGRADE_ALL_COMMAND_FORBIDDEN_TEST_SRCS := \
+	$(SRC_DIR)/upgrade_all_operation.cpp
 AUR_RPC_VALIDATION_TEST_SRCS := \
 	$(SRCS) \
 	tests/stubs/package-metadata/alpm_stub.cpp
@@ -253,6 +269,7 @@ FILTERED_AUR_UPDATE_OPERATION_FORBIDDEN_TEST_SRCS := \
 # command/transport/libalpm/source mutationの外部境界だけを統合stubへ切る。
 UPGRADE_ALL_OPERATION_ALLOWED_PRODUCTION_TEST_SRCS := \
 	$(SRC_DIR)/upgrade_all_operation.cpp \
+	$(SRC_DIR)/upgrade_all_operation_result.cpp \
 	$(SRC_DIR)/system_source_upgrade.cpp \
 	$(SRC_DIR)/filtered_aur_update_operation.cpp \
 	$(SRC_DIR)/upgrade_all_plan.cpp \
@@ -274,6 +291,7 @@ UPGRADE_ALL_OPERATION_TEST_SRCS := \
 	tests/stubs/upgrade-all-operation/operation_stub.cpp
 UPGRADE_ALL_OPERATION_REQUIRED_TEST_SRCS := \
 	$(SRC_DIR)/upgrade_all_operation.cpp \
+	$(SRC_DIR)/upgrade_all_operation_result.cpp \
 	$(SRC_DIR)/system_source_upgrade.cpp \
 	$(SRC_DIR)/filtered_aur_update_operation.cpp \
 	$(SRC_DIR)/aur_update_query.cpp \
@@ -404,6 +422,7 @@ LIBALPM_BUILD_TARGETS := \
 	$(TEST_TARGET) \
 	$(COMMANDS_INSPECT_TEST_TARGET) \
 	$(AUR_UPDATE_COMMAND_TEST_TARGET) \
+	$(UPGRADE_ALL_COMMAND_TEST_TARGET) \
 	$(AUR_RPC_VALIDATION_TEST_TARGET) \
 	$(COMMANDS_SYNC_TEST_TARGET) \
 	$(SOURCE_INSTALL_CHARACTERIZATION_TEST_TARGET) \
@@ -417,7 +436,7 @@ LIBALPM_BUILD_TARGETS := \
 	$(AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION_TEST_TARGET) \
 	$(UPGRADE_BASELINE_METADATA_TEST_TARGET)
 
-.PHONY: all check-libalpm clean check-upgrade-all-plan-link-firewall check-system-source-upgrade-link-firewall check-aur-update-operation-result-link-firewall check-filtered-aur-update-operation-link-firewall check-upgrade-all-operation-link-firewall test test-app-config test-package-identifier test-package-metadata test-package-metadata-integration test-repository-query test-shell-words test-source-environment test-artifact-workspace test-artifact-identity test-artifact-install-executor test-separated-source-build test-production-source-build test-process-capture test-aur-update-plan test-upgrade-all-plan test-system-source-upgrade test-aur-update-query test-aur-update-command test-aur-update-execution-preflight test-aur-update-execution-preflight-integration test-aur-update-execution-preparation test-aur-update-execution-runner test-aur-update-operation-result test-filtered-aur-update-operation test-upgrade-all-operation test-dependency-plan-model test-artifact-install-plan test-command-stub-contract test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-commands-inspect test-commands-source-maintenance test-commands-sync test-conflicts-replaces test-install-layout test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check install uninstall
+.PHONY: all check-libalpm clean check-upgrade-all-plan-link-firewall check-system-source-upgrade-link-firewall check-aur-update-operation-result-link-firewall check-filtered-aur-update-operation-link-firewall check-upgrade-all-operation-link-firewall check-upgrade-all-command-link-firewall test test-app-config test-package-identifier test-package-metadata test-package-metadata-integration test-repository-query test-shell-words test-source-environment test-artifact-workspace test-artifact-identity test-artifact-install-executor test-separated-source-build test-production-source-build test-process-capture test-aur-update-plan test-upgrade-all-plan test-system-source-upgrade test-aur-update-query test-aur-update-command test-upgrade-all-command test-aur-update-execution-preflight test-aur-update-execution-preflight-integration test-aur-update-execution-preparation test-aur-update-execution-runner test-aur-update-operation-result test-filtered-aur-update-operation test-upgrade-all-operation test-dependency-plan-model test-artifact-install-plan test-command-stub-contract test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-commands-inspect test-commands-source-maintenance test-commands-sync test-conflicts-replaces test-install-layout test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check install uninstall
 
 all: $(TARGET) $(MANPAGE)
 
@@ -469,6 +488,17 @@ $(AUR_UPDATE_COMMAND_TEST_TARGET): $(AUR_UPDATE_COMMAND_TEST_SRCS) $(HEADERS) te
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling AUR update command integration test binary"
 	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -DJPACKER_ENABLE_TEST_OVERRIDES -DJPACKER_ENABLE_TEST_CONFIG_PATH -I$(SRC_DIR) -Itests/stubs/package-metadata $(AUR_UPDATE_COMMAND_TEST_SRCS) -o $@ $(MY_LDLIBS)
+
+$(UPGRADE_ALL_COMMAND_TEST_TARGET): $(UPGRADE_ALL_COMMAND_TEST_SRCS) $(HEADERS) tests/stubs/package-metadata/alpm_stub.hpp $(VERSION_FILE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling upgrade-all command integration test binary"
+	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
+		-DJPACKER_ENABLE_TEST_OVERRIDES \
+		-DJPACKER_ENABLE_TEST_CONFIG_PATH \
+		-I$(SRC_DIR) \
+		-Itests/stubs/package-metadata \
+		$(UPGRADE_ALL_COMMAND_TEST_SRCS) \
+		-o $@ $(MY_LDLIBS)
 
 $(AUR_RPC_VALIDATION_TEST_TARGET): $(AUR_RPC_VALIDATION_TEST_SRCS) $(HEADERS) tests/stubs/package-metadata/alpm_stub.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
@@ -798,6 +828,25 @@ test-aur-update-query: $(AUR_UPDATE_QUERY_TEST_TARGET)
 test-aur-update-command: $(AUR_UPDATE_COMMAND_TEST_TARGET)
 	sh tests/test-aur-update-command.sh $(abspath $(AUR_UPDATE_COMMAND_TEST_TARGET))
 
+check-upgrade-all-command-link-firewall:
+	@echo ":: Checking upgrade-all command link firewall"
+	@set -e; for source in $(UPGRADE_ALL_COMMAND_REQUIRED_TEST_SRCS); do \
+		count=$$(printf '%s\n' $(UPGRADE_ALL_COMMAND_TEST_SRCS) | \
+			awk -v expected="$$source" '$$0 == expected { count++ } END { print count + 0 }'); \
+		test "$$count" -eq 1 || { \
+			echo "error: upgrade-all command test must link $$source exactly once" >&2; \
+			exit 1; \
+		}; \
+	done
+	@test -z "$(filter $(UPGRADE_ALL_COMMAND_FORBIDDEN_TEST_SRCS),$(UPGRADE_ALL_COMMAND_TEST_SRCS))" || { \
+		echo "error: upgrade-all command test links the production aggregate operation boundary" >&2; \
+		exit 1; \
+	}
+
+test-upgrade-all-command: check-upgrade-all-command-link-firewall $(UPGRADE_ALL_COMMAND_TEST_TARGET) tests/test-upgrade-all-completion.sh
+	sh tests/test-upgrade-all-command.sh $(abspath $(UPGRADE_ALL_COMMAND_TEST_TARGET))
+	bash tests/test-upgrade-all-completion.sh $(abspath completions/jpacker_completion.bash)
+
 test-aur-update-execution-preflight: $(AUR_UPDATE_EXECUTION_PREFLIGHT_TEST_TARGET)
 	$(abspath $(AUR_UPDATE_EXECUTION_PREFLIGHT_TEST_TARGET))
 
@@ -957,6 +1006,7 @@ test: \
 	test-system-source-upgrade \
 	test-aur-update-query \
 	test-aur-update-command \
+	test-upgrade-all-command \
 	test-aur-update-execution-preflight \
 	test-aur-update-execution-preflight-integration \
 	test-aur-update-execution-preparation \

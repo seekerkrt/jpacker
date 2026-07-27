@@ -103,6 +103,15 @@ enum class SystemSourceUpgradeEventKind {
     InvalidPreferenceWarning,
 };
 
+#ifdef JPACKER_ENABLE_SYSTEM_SOURCE_UPGRADE_TEST_HOOKS
+enum class SystemSourceUpgradeUnexpectedExceptionPoint {
+    SystemPhaseStarted,
+    SystemPhaseCompleted,
+    SourceWorkItemStarted,
+    SourceResultRecorded,
+};
+#endif
+
 struct SystemSourceUpgradeOptionSnapshot {
     bool        no_edit = false;
     bool        no_diff = false;
@@ -244,6 +253,9 @@ public:
 
 #ifdef JPACKER_ENABLE_SYSTEM_SOURCE_UPGRADE_TEST_HOOKS
     void make_first_source_correlation_inconsistent_for_test();
+    void set_unexpected_exception_for_test(
+            SystemSourceUpgradeUnexpectedExceptionPoint point,
+            bool unknown_exception = false);
 #endif
 };
 

@@ -28,6 +28,7 @@
 - `build <pkg> [VAR=VALUE...]`
 - `upgrade`
 - `upgrade-aur`
+- `upgrade-all`
 - `clean`
 - `deps [--recursive] <pkg>`
 - `plan <pkg>`
@@ -58,7 +59,23 @@ execution は prepared work item の順で逐次実行し、最初の build/inst
 
 update 対象がない場合は成功とし、git、makepkg、pacman、sudo を起動しない。許可する option は `--noedit`、`--nodiff`、`--noconfirm`、`--rebuild`、`--cleanbuild` に限る。package target、`--needed`、`--rmdeps`、`--aur`、`--repo` は unsupported とし、update execution 前に停止する。`--rmdeps` は update 対象がない場合も既存 production source-build option guard で拒否し、no-op の有無によって契約を変えない。
 
-`upgrade-aur` は `pacman -Syu` を実行せず、system package や source build preference だけで選ばれる package を update しない。pacman-compatible system upgrade は `-Syu`、system upgrade と登録済み source build preferences の rebuild は `upgrade`、installed foreign inventory の AUR update query だけは `-Qua` として従来どおり分離する。将来 all-in-one の `upgrade-all` を追加する場合も明示的な別 operation とし、`upgrade-aur`、`upgrade`、`-Syu`、`-Qua` の既存 scope を暗黙に広げない。
+`upgrade-aur` は `pacman -Syu` を実行せず、system package や source build preference だけで選ばれる package を update しない。pacman-compatible system upgrade は `-Syu`、system upgrade と登録済み source build preferences の rebuild は `upgrade`、installed foreign inventory の AUR update query だけは `-Qua` として従来どおり分離する。一括更新は明示的な別 operation `upgrade-all` とし、`upgrade-aur`、`upgrade`、`-Syu`、`-Qua` の既存 scope を暗黙に広げない。
+
+---
+
+## Aggregate upgrade operation policy
+
+`upgrade-all` は target を取らないexactな jpacker 固有 operation とし、system upgrade、registered source packages、remaining installed AUR packages を 1 invocation で順次更新する。`upgrade` や `upgrade-aur` の再呼び出し、`-Syu`への暗黙統合、generic pacman fallback は行わない。
+
+許可する option は `--noedit`、`--nodiff`、`--noconfirm`、`--rebuild`、`--cleanbuild` に限る。package target、opaque operand、`--needed`、`--rmdeps`、`--aur`、`--repo` は unsupported とし、default log / cache 初期化、source preference preparation、system `pacman -Syu`、foreign inventory、AUR query、その他の external mutation より前に拒否する。option value位置や`--`後のopaque operandをjpacker global optionとして再解釈しないparser role契約は維持する。
+
+phase順序は `system → registered source → fresh foreign inventory → filtered AUR` とする。system failure、registered source failure、source cleanup failure、foreign inventory failure、AUR query / planning / preflight / preparation failure、AUR execution failure、AUR cleanup failure、aggregate inconsistencyではfail-fastし、後続mutationを開始しない。
+
+explicit source preferenceはautomatically detected AUR targetより優先する。explicit sourceが扱うpackage nameまたはPackageBaseと一致するAUR targetはtyped reason付きduplicate exclusionとし、通常のup-to-date skipと区別する。explicit source PackageBaseがtransitive AUR build unitを満たす場合はexternally satisfiedとして扱い、同じsourceをAUR phaseで再build / installしない。duplicate exclusionとexternal satisfactionはfailureではなく、それだけを理由にnon-zeroとしない。
+
+`upgrade-all` はsingle atomic transactionではなく、automatic rollbackを行わない。先行phaseやwork itemで更新済みのpackageは保持し、停止後のphase / work itemはtyped reason付き`NotAttempted`として報告する。preparation blocker、system failure、source failure、source cleanup failure、foreign inventory failure、aggregate inconsistencyによる未実行を、空の正常resultへ丸めない。partial completion、package transaction後のcleanup failure、何らかの`NotAttempted` phaseはoperation全体のfailureでありnon-zeroとする。
+
+exit codeはaggregate typed resultの`is_success()`を正本とし、成功なら0、失敗なら1とする。`NoUpdates`と`Completed`は、query failure、planning / mapping / preflight / preparation / reduction issue、cleanup failure、failed / `NotAttempted` phase、aggregate inconsistencyがない場合に限り成功とする。statusが`Completed`でもこれらのtyped issueが混入すれば成功へ丸めない。package-stateが`Unknown`でも、それ自体をfailure扱いせず、他のissueやfailureがなく`is_success()`がtrueならexit code 0とし、判定不能であることを表示する。system/source/AURの一部が更新済みでもaggregate resultがfailureならnon-zeroとする。
 
 ---
 
@@ -188,7 +205,7 @@ jpacker v1.9.0 / #98 では、`PackageBase` と install target package name を�
 
 `--rebuild` / `--cleanbuild` が未指定の場合、jpacker は既存の package artifact や `src/` directory がある場面で、必要に応じて default no の prompt で rebuild / cleanbuild を確認する。cleanbuild を有効にし、同じ package directory に既存 package artifact がある場合は `-f` も有効にする。`--noconfirm` 指定時は prompt を出さず、未指定の rebuild / cleanbuild は no として扱う。
 
-`--rmdeps` は jpacker 固有 option として認識するが、separated AUR / source-build 経路では未対応とする。source target を含む invocation では all-target preflight で拒否し、artifact workspace 作成、makepkg、installed metadata query、sudo のいずれも開始しない。`upgrade-aur` では update target の有無より前に拒否する。`makepkg -r` へは変換せず、`--noconfirm` を併記しても拒否を突破しない。
+`--rmdeps` は jpacker 固有 option として認識するが、separated AUR / source-build 経路では未対応とする。source target を含む invocation では all-target preflight で拒否し、artifact workspace 作成、makepkg、installed metadata query、sudo のいずれも開始しない。`upgrade-aur` と `upgrade-all` では update target の有無より前に拒否する。`makepkg -r` へは変換せず、`--noconfirm` を併記しても拒否を突破しない。
 
 jpacker は `pacman -Rns`、`pacman -Qdt`、独自 orphan cleanup を追加しない。pacman-only 経路や official repository package の通常 install では `--rmdeps` を pacman へ渡さず、作用させない。
 
@@ -206,7 +223,7 @@ source selection は排他的な 3 状態として扱う。
 
 同じ selector の重複指定は idempotent として許可する。`--aur` と `--repo` が同じ invocation に存在する場合は、順序にかかわらず conflict とし、pacman / sudo / AUR RPC / git / makepkg や cache mutation より前に停止する。`--noconfirm` は selection、conflict、not-found、build plan の安全 guard を変更しない。
 
-selector の初期対応 scope は、plain sync install (`-S`)、sync search (`-Ss`)、sync info (`-Si`) に限る。plain sync install には refresh / upgrade / clean modifier を含めない。`upgrade`、`upgrade-aur`、`-Syu`、`-Su`、`-Sy`、`-Qua`、`-Q`、`-F`、`-U`、`build`、`fetch`、`deps`、`plan`、`-G`、`-Gp` など、scope 外の operation で selector を認識した場合は、黙って無視せず外部コマンド前に停止する。
+selector の初期対応 scope は、plain sync install (`-S`)、sync search (`-Ss`)、sync info (`-Si`) に限る。plain sync install には refresh / upgrade / clean modifier を含めない。`upgrade`、`upgrade-aur`、`upgrade-all`、`-Syu`、`-Su`、`-Sy`、`-Qua`、`-Q`、`-F`、`-U`、`build`、`fetch`、`deps`、`plan`、`-G`、`-Gp` など、scope 外の operation で selector を認識した場合は、黙って無視せず外部コマンド前に停止する。
 
 Auto の契約は次のとおりであり、selector 追加後も維持する。
 
@@ -233,7 +250,7 @@ refresh の契約は selection ごとに分ける。AurOnly の `-Ss` / `-Si` �
 
 selector は operation の前後にある通常の global option 位置で認識する。ただし parser の優先順位は、(1) pacman option value 待ち、(2) `--` 後の opaque operand、(3) `--` marker、(4) jpacker global option、(5) pacman option / target の順を維持する。したがって `-Q --root --aur filesystem` の `--aur` は `--root` の value、`-U -- --repo` の `--repo` は opaque operand であり、source selection へ反映しない。通常位置で selector として認識した token だけを pacman argv から除去し、他の option / value / target の相対順を維持する。
 
-永続的な source priority、selector の config file 保存、`upgrade` / `upgrade-aur` / `-Syu` / `-Qua` への selector 適用、provider selection、dependency solver の変更は、この source selection policy の scope 外とする。
+永続的な source priority、selector の config file 保存、`upgrade` / `upgrade-aur` / `upgrade-all` / `-Syu` / `-Qua` への selector 適用、provider selection、dependency solver の変更は、この source selection policy の scope 外とする。
 
 ---
 
@@ -270,7 +287,7 @@ refresh modifierを含むread/query経路のsudo境界は次のように扱う�
 
 `upgrade` の source-build 更新判定では、working tree にある既存 `.SRCINFO` を使う。`.SRCINFO` がない、または version 情報が不完全な場合、review 前に `makepkg --printsrcinfo` は実行しない。対話実行では続行確認を行い、`--noconfirm` または非対話実行では対象 package を skip する。
 
-`upgrade` は installed foreign inventory を AUR update target として走査しない。installed AUR packages の update は、system upgrade と分離された `upgrade-aur` で実行する。
+`upgrade` は installed foreign inventory を AUR update target として走査しない。installed AUR packages だけのupdateはsystem upgradeと分離された`upgrade-aur`、system / registered source / installed AURの一括updateは独立した`upgrade-all`で実行する。
 
 ---
 
@@ -370,7 +387,7 @@ semantic な `--needed` は makepkg command へ渡さず、jpacker が検証済�
 
 semantic option の判定は parser の token role に従う。通常の pacman option 位置にある exact `--needed` だけを source build policy として認識し、`--root --needed` の option value、`--` 後の opaque operand、`--needed=true` は認識・正規化しない。source route で意味を保てない形や option は、従来どおり外部 mutation 前に停止する。
 
-この変換対象は `-S` install で source target が存在する場合に限る。`jpacker -Ss --aur --needed ...` / `jpacker -Si --aur --needed ...` は AUR RPC 前に unsupported として停止し、RepoOnly の search/info は pacman へそのまま委譲する。target なしの pacman-compatible `jpacker -Syu --needed` は pacman-only pass-through を維持する。target 付きの既存対応形で source route が生じる場合は、その source target にも同じ install-only 契約を適用する。一方、jpacker 固有の `upgrade --needed` と `upgrade-aur --needed` は未対応 option として外部 command や cache/source mutation 前に停止する。`upgrade` の既存 `.SRCINFO` による `NeedsBuild` / `UpToDate` / `Unknown` 判定や、`upgrade-aur` の installed/AUR version 判定へ `--needed` を流用しない。
+この変換対象は `-S` install で source target が存在する場合に限る。`jpacker -Ss --aur --needed ...` / `jpacker -Si --aur --needed ...` は AUR RPC 前に unsupported として停止し、RepoOnly の search/info は pacman へそのまま委譲する。target なしの pacman-compatible `jpacker -Syu --needed` は pacman-only pass-through を維持する。target 付きの既存対応形で source route が生じる場合は、その source target にも同じ install-only 契約を適用する。一方、jpacker 固有の `upgrade --needed`、`upgrade-aur --needed`、`upgrade-all --needed` は未対応 option として外部 command や cache/source mutation 前に停止する。`upgrade` の既存 `.SRCINFO` による `NeedsBuild` / `UpToDate` / `Unknown` 判定、`upgrade-aur` の installed/AUR version 判定、`upgrade-all` のaggregate package-state判定へ`--needed`を流用しない。
 
 ### `--asdeps` / `--asexplicit`
 
@@ -467,6 +484,7 @@ operation 確定後、値を取る option の次の token は、`--rmdeps` や `
 - `-Ss` のような統合表示では、official repository または AUR のどちらかで match すれば成功として扱う。
 - `-Si` や `-Qua` では、処理継続できる per-package failure は警告に留め、critical failure は non-zero exit code にする。
 - `upgrade-aur` は operation status が `NoUpdates` または `Completed` で、recoverable query failure、preparation / reduction issue、blocking target、failed / `NotAttempted` target または work item、execution / cleanup failure がない場合に限り exit code 0 とする。package の partial update を伴う operation failure と result inconsistency を含む、それ以外は non-zero とする。
+- `upgrade-all` はaggregate resultの`is_success()`がtrueの場合だけexit code 0とする。`NoUpdates` / `Completed`でもtyped issue、query / planning / mapping / preflight / preparation / reduction failure、cleanup failure、`NotAttempted` phase、inconsistencyがあればnon-zeroとする。package-state `Unknown`は単独ではfailureではないが、部分更新済みでもaggregate failureならnon-zeroとする。
 - pacman の標準出力・標準エラーはできるだけそのまま保つ。
 - AUR / source build の表示は jpacker 側の format を使う。
 
@@ -502,7 +520,6 @@ jpacker が利用者に影響する主要な外部コマンドを実行する場
 次の話題は、この方針の周辺で今後整理する。
 
 - no-argument behavior: `jpacker` 単体実行時に help 表示、safe status check、interactive update のどれを採るか。
-- future `upgrade-all`: `-Syu`、登録済み source-build preference、installed AUR update を明示的に統合する場合の順序、failure、partial completion 契約。
 - mixed dependency handling: official repository package と AUR package が混ざる transaction / build plan の扱い。
 - search / info output alignment: `-Ss` / `-Si` の official repository 結果と AUR 結果の見せ方。
 - argument parsing tests: operation / option routing の regression test。

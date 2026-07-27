@@ -651,6 +651,147 @@ void test_nested_system_source_correlation_mismatch_is_rejected() {
     stub::require_script_consumed();
 }
 
+void test_unexpected_exception_after_system_start_is_not_unattempted() {
+    stub::reset();
+    stub::set_preference_directory(preference_directory({}));
+    const AppConfig config;
+    PreparedUpgradeAllOperation prepared = take_prepared(
+            prepare_upgrade_all_operation(config),
+            "unexpected system-start exception fixture");
+    prepared.set_nested_system_source_unexpected_exception_for_test(
+            SystemSourceUpgradeUnexpectedExceptionPoint::SystemPhaseStarted);
+
+    UpgradeAllOperationResult result =
+            execute_prepared_upgrade_all_operation(
+                    std::move(prepared), config);
+    expect(
+            result.status == UpgradeAllOperationStatus::InconsistentResult &&
+                    result.stopped_phase ==
+                            UpgradeAllOperationPhase::System &&
+                    result.system_source.system.status ==
+                            SystemUpgradePhaseStatus::Failed &&
+                    result.system_source.system.package_state_change ==
+                            PackageStateChange::Unknown &&
+                    result.system_source.system.diagnostic.has_value() &&
+                    result.system_source.system.diagnostic->find(
+                            "System result unavailable after phase started") !=
+                            std::string::npos,
+            "System-start exception was falsely reported as NotAttempted");
+    expect(
+            stub::system_commands().empty(),
+            "System-start test hook crossed the system mutation boundary");
+    expect_aur_not_attempted(
+            result,
+            UpgradeAllNotAttemptedReason::PriorAggregateInconsistency,
+            "unexpected system-start exception");
+    expect_no_inventory_or_aur("unexpected system-start exception");
+    stub::require_script_consumed();
+}
+
+void test_unexpected_exception_preserves_system_completion() {
+    stub::reset();
+    stub::set_preference_directory(preference_directory({}));
+    const AppConfig config;
+    PreparedUpgradeAllOperation prepared = take_prepared(
+            prepare_upgrade_all_operation(config),
+            "unexpected post-system exception fixture");
+    prepared.set_nested_system_source_unexpected_exception_for_test(
+            SystemSourceUpgradeUnexpectedExceptionPoint::SystemPhaseCompleted);
+
+    UpgradeAllOperationResult result =
+            execute_prepared_upgrade_all_operation(
+                    std::move(prepared), config);
+    expect(
+            result.status == UpgradeAllOperationStatus::InconsistentResult &&
+                    result.system_source.system.status ==
+                            SystemUpgradePhaseStatus::Completed &&
+                    result.system_source.system.package_state_change ==
+                            PackageStateChange::Unknown &&
+                    result.has_partial_completion(),
+            "Post-system exception discarded known system completion");
+    expect(
+            stub::system_commands().size() == 1,
+            "Post-system exception fixture did not complete system command");
+    expect_no_inventory_or_aur("unexpected post-system exception");
+    stub::require_script_consumed();
+}
+
+void test_unexpected_exception_after_source_start_is_incomplete() {
+    stub::reset();
+    const std::vector<std::string> sources = {"source-started"};
+    const AppConfig config;
+    PreparedUpgradeAllOperation prepared = prepare_sources(sources, config);
+    enqueue_post_source_metadata(sources);
+    prepared.set_nested_system_source_unexpected_exception_for_test(
+            SystemSourceUpgradeUnexpectedExceptionPoint::SourceWorkItemStarted,
+            true);
+
+    UpgradeAllOperationResult result =
+            execute_prepared_upgrade_all_operation(
+                    std::move(prepared), config);
+    const RegisteredSourceUpgradeResult& source =
+            result.system_source.registered_source_results.front();
+    expect(
+            result.status == UpgradeAllOperationStatus::InconsistentResult &&
+                    result.stopped_phase ==
+                            UpgradeAllOperationPhase::RegisteredSource &&
+                    result.system_source.system.status ==
+                            SystemUpgradePhaseStatus::Completed &&
+                    result.system_source.system.package_state_change ==
+                            PackageStateChange::NoChange &&
+                    source.status ==
+                            RegisteredSourceUpgradeStatus::Incomplete &&
+                    source.failure_kind ==
+                            RegisteredSourceUpgradeFailureKind::
+                                    UnknownException &&
+                    source.diagnostic.has_value() &&
+                    source.diagnostic->find(
+                            "Registered source result unavailable after phase started") !=
+                            std::string::npos &&
+                    result.has_partial_completion(),
+            "Source-start exception was falsely reported as NotAttempted");
+    expect(
+            stub::source_execution_calls().empty(),
+            "Source-start test hook crossed the source mutation boundary");
+    expect_no_inventory_or_aur("unexpected source-start exception");
+    stub::require_script_consumed();
+}
+
+void test_unexpected_exception_preserves_recorded_source_result() {
+    stub::reset();
+    const std::vector<std::string> sources = {
+            "source-recorded", "source-pending"};
+    const AppConfig config;
+    PreparedUpgradeAllOperation prepared = prepare_sources(sources, config);
+    enqueue_post_source_metadata(sources);
+    stub::enqueue_source_success(
+            source_execution(SourceBuildExecutionStatus::Installed));
+    prepared.set_nested_system_source_unexpected_exception_for_test(
+            SystemSourceUpgradeUnexpectedExceptionPoint::SourceResultRecorded);
+
+    UpgradeAllOperationResult result =
+            execute_prepared_upgrade_all_operation(
+                    std::move(prepared), config);
+    expect(
+            result.status == UpgradeAllOperationStatus::InconsistentResult &&
+                    result.system_source.registered_source_results[0].status ==
+                            RegisteredSourceUpgradeStatus::Updated &&
+                    result.system_source.registered_source_results[0].
+                                    package_state_change ==
+                            PackageStateChange::Changed &&
+                    result.system_source.registered_source_results[1].status ==
+                            RegisteredSourceUpgradeStatus::NotAttempted &&
+                    result.package_state_change() ==
+                            PackageStateChange::Changed &&
+                    result.has_partial_completion(),
+            "Unexpected exception discarded a recorded source result");
+    expect(
+            stub::source_execution_calls().size() == 1,
+            "Recorded-source exception executed a later source");
+    expect_no_inventory_or_aur("unexpected recorded-source exception");
+    stub::require_script_consumed();
+}
+
 void test_system_failure_is_fail_fast() {
     stub::reset();
     const AppConfig config;
@@ -1510,6 +1651,139 @@ void test_constructed_no_source_no_updates_helper_fixture() {
             "Constructed no-source NoUpdates helper semantics differ");
 }
 
+UpgradeAllOperationResult make_constructed_completed_helper_fixture(
+        PackageStateChange system_package_state) {
+    UpgradeAllOperationResult result;
+    result.status = UpgradeAllOperationStatus::Completed;
+    result.stopped_phase = UpgradeAllOperationPhase::None;
+    result.system_source.status = SystemSourceUpgradeStatus::Completed;
+    result.system_source.stopped_phase = SystemSourceUpgradePhase::None;
+    result.system_source.system.status = SystemUpgradePhaseStatus::Completed;
+    result.system_source.system.package_state_change = system_package_state;
+    result.foreign_inventory.status =
+            UpgradeAllForeignInventoryPhaseStatus::Completed;
+    result.aur.status = UpgradeAllAurPhaseStatus::Completed;
+    result.aur.operation_result.emplace();
+    result.aur.operation_result->reduced_operation_result.status =
+            AurUpdateOperationStatus::Completed;
+    result.aur.operation_result->reduced_operation_result.execution_status =
+            AurUpdateInvocationExecutionStatus::Completed;
+    return result;
+}
+
+void test_constructed_completed_unknown_success_fixture() {
+    UpgradeAllOperationResult result =
+            make_constructed_completed_helper_fixture(
+                    PackageStateChange::Unknown);
+
+    expect(
+            result.is_success() &&
+                    result.package_state_change() ==
+                            PackageStateChange::Unknown,
+            "Completed + Unknown package state must remain successful");
+}
+
+void test_constructed_success_metadata_fixture() {
+    UpgradeAllOperationResult result =
+            make_constructed_completed_helper_fixture(
+                    PackageStateChange::NoChange);
+    result.duplicate_excluded_aur_targets.emplace_back();
+    result.externally_satisfied_aur_build_units.emplace_back();
+
+    expect(
+            result.is_success() && result.has_duplicate_exclusions() &&
+                    result.has_external_satisfaction(),
+            "Duplicate exclusion or external satisfaction changed success");
+}
+
+void test_constructed_completed_query_failure_is_not_success() {
+    UpgradeAllOperationResult result =
+            make_constructed_completed_helper_fixture(
+                    PackageStateChange::NoChange);
+    result.aur.operation_result->query_result.recoverable_failures.push_back(
+            AurUpdateQueryFailure{{"fixture-query"}, "fixture query failure"});
+
+    expect(
+            !result.is_success() && result.has_query_failure(),
+            "Completed result hid a recoverable query failure");
+}
+
+void test_constructed_completed_direct_inventory_failure_is_not_success() {
+    UpgradeAllOperationResult result =
+            make_constructed_completed_helper_fixture(
+                    PackageStateChange::NoChange);
+    result.foreign_inventory.failure = PackageMetadataFailure{
+            PackageMetadataErrorCode::LocalDatabaseUnavailable,
+            "fixture direct foreign inventory failure"};
+    result.foreign_inventory.diagnostic =
+            "fixture direct foreign inventory failure";
+
+    expect(
+            !result.is_success() && result.issues.empty(),
+            "Completed result depended on an aggregate issue copy to detect a direct inventory failure");
+}
+
+void test_constructed_completed_planning_issue_is_not_success() {
+    UpgradeAllOperationResult result =
+            make_constructed_completed_helper_fixture(
+                    PackageStateChange::NoChange);
+    UpgradeAllPlanningIssue issue;
+    issue.kind =
+            UpgradeAllPlanningIssueKind::ConflictingExplicitPackageBase;
+    issue.package_base = "fixture-conflict";
+    result.aur.operation_result->upgrade_all_plan.issues.push_back(
+            std::move(issue));
+
+    expect(
+            !result.is_success() && result.has_planning_issue(),
+            "Completed result hid a planning issue");
+}
+
+void test_constructed_completed_inconsistency_is_not_success() {
+    UpgradeAllOperationResult result =
+            make_constructed_completed_helper_fixture(
+                    PackageStateChange::NoChange);
+    UpgradeAllOperationIssue issue;
+    issue.kind = UpgradeAllOperationIssueKind::
+            ExternalSatisfactionCorrelationInconsistent;
+    issue.phase = UpgradeAllOperationPhase::Reduction;
+    issue.diagnostic = "fixture aggregate inconsistency";
+    result.issues.push_back(std::move(issue));
+
+    expect(
+            !result.is_success() && result.has_inconsistency(),
+            "Completed result hid an aggregate inconsistency");
+}
+
+void test_constructed_completed_cleanup_failure_is_not_success() {
+    UpgradeAllOperationResult result =
+            make_constructed_completed_helper_fixture(
+                    PackageStateChange::NoChange);
+    AurUpdateOperationTargetResult target;
+    target.status =
+            AurUpdateOperationTargetStatus::NoChangeCleanupFailed;
+    result.aur.operation_result->reduced_operation_result.targets.push_back(
+            std::move(target));
+
+    expect(
+            !result.is_success() && result.has_cleanup_failure(),
+            "Completed result hid a cleanup failure");
+}
+
+void test_constructed_completed_not_attempted_is_not_success() {
+    UpgradeAllOperationResult result =
+            make_constructed_completed_helper_fixture(
+                    PackageStateChange::NoChange);
+    AurUpdateOperationTargetResult target;
+    target.status = AurUpdateOperationTargetStatus::NotAttempted;
+    result.aur.operation_result->reduced_operation_result.targets.push_back(
+            std::move(target));
+
+    expect(
+            !result.is_success() && result.has_not_attempted_phase(),
+            "Completed result hid a NotAttempted target");
+}
+
 template<typename Callable>
 void run_case(const std::string& name, Callable callable) {
     callable();
@@ -1547,6 +1821,18 @@ int main() {
         run_case(
                 "nested system/source correlation mismatch",
                 test_nested_system_source_correlation_mismatch_is_rejected);
+        run_case(
+                "unexpected exception after system start",
+                test_unexpected_exception_after_system_start_is_not_unattempted);
+        run_case(
+                "unexpected exception preserves system completion",
+                test_unexpected_exception_preserves_system_completion);
+        run_case(
+                "unexpected exception after source start",
+                test_unexpected_exception_after_source_start_is_incomplete);
+        run_case(
+                "unexpected exception preserves source result",
+                test_unexpected_exception_preserves_recorded_source_result);
         run_case("system failure fail-fast", test_system_failure_is_fail_fast);
         run_case(
                 "first source failure fail-fast",
@@ -1611,6 +1897,30 @@ int main() {
         run_case(
                 "constructed no-source NoUpdates helpers",
                 test_constructed_no_source_no_updates_helper_fixture);
+        run_case(
+                "constructed Completed Unknown success",
+                test_constructed_completed_unknown_success_fixture);
+        run_case(
+                "constructed success metadata",
+                test_constructed_success_metadata_fixture);
+        run_case(
+                "constructed Completed query failure",
+                test_constructed_completed_query_failure_is_not_success);
+        run_case(
+                "constructed Completed direct inventory failure",
+                test_constructed_completed_direct_inventory_failure_is_not_success);
+        run_case(
+                "constructed Completed planning issue",
+                test_constructed_completed_planning_issue_is_not_success);
+        run_case(
+                "constructed Completed inconsistency",
+                test_constructed_completed_inconsistency_is_not_success);
+        run_case(
+                "constructed Completed cleanup failure",
+                test_constructed_completed_cleanup_failure_is_not_success);
+        run_case(
+                "constructed Completed NotAttempted",
+                test_constructed_completed_not_attempted_is_not_success);
     } catch(const std::exception& error) {
         std::cerr << "upgrade_all_operation_test: " << error.what() << '\n';
         return 1;

@@ -37,7 +37,7 @@ set -l jpacker_global_options \
     --aur \
     --repo
 
-set -l jpacker_upgrade_aur_options \
+set -l jpacker_targetless_upgrade_options \
     --noedit \
     --nodiff \
     --noconfirm \
@@ -81,11 +81,12 @@ function __fish_jpacker_source_preferences
 end
 
 complete -c jpacker -f -n '__fish_jpacker_no_operation' -a "$jpacker_operations" -d 'jpacker operation'
+complete -c jpacker -f -n '__fish_jpacker_no_operation' -a upgrade-all -d 'Update the system, registered source packages, and remaining installed AUR packages'
 complete -c jpacker -f -n '__fish_jpacker_no_operation' -a "$jpacker_global_options" -d 'global option'
 
 complete -c jpacker -f -n '__fish_jpacker_using_operation deps' -a '--recursive' -d 'Resolve dependencies recursively'
 
-complete -c jpacker -f -n '__fish_jpacker_using_operation upgrade-aur' -a "$jpacker_upgrade_aur_options" -d 'upgrade-aur option'
+complete -c jpacker -f -n '__fish_jpacker_using_operation upgrade-aur; or __fish_jpacker_using_operation upgrade-all' -a "$jpacker_targetless_upgrade_options" -d 'target-less upgrade option'
 
 complete -c jpacker -f -n '__fish_jpacker_using_operation -S; or __fish_jpacker_using_operation -Syu' -a '--needed' -d 'Skip reinstall at final package installation'
 
@@ -93,4 +94,4 @@ complete -c jpacker -f -n '__fish_jpacker_using_operation del-src' -a '(__fish_j
 complete -c jpacker -f -n '__fish_jpacker_using_operation edit-src' -a '(__fish_jpacker_source_preferences)' -d 'source-build preference'
 complete -c jpacker -f -n '__fish_jpacker_using_operation revert' -a '(__fish_jpacker_source_preferences)' -d 'source-build preference'
 
-complete -c jpacker -f -n 'not __fish_jpacker_no_operation; and not __fish_jpacker_using_operation upgrade-aur; and not __fish_jpacker_using_operation -G; and not __fish_jpacker_using_operation -Gp' -a "$jpacker_global_options" -d 'global option'
+complete -c jpacker -f -n 'not __fish_jpacker_no_operation; and not __fish_jpacker_using_operation upgrade-aur; and not __fish_jpacker_using_operation upgrade-all; and not __fish_jpacker_using_operation -G; and not __fish_jpacker_using_operation -Gp' -a "$jpacker_global_options" -d 'global option'

@@ -19,6 +19,7 @@
 #include "commands_inspect.hpp"
 #include "commands_source_maintenance.hpp"
 #include "commands_sync.hpp"
+#include "commands_upgrade_all.hpp"
 #include "logging.hpp"
 #include "process.hpp"
 #include "shell_words.hpp"
@@ -139,6 +140,28 @@ int run_jpacker(int argc, char* argv[]) {
     apply_cli_overrides(config, parsed.cli_overrides);
     g_config = std::move(config);
 
+    if(parsed.operation == "upgrade-all") {
+        // POLICY(#281): upgrade-all is target-less and does not inherit
+        // pacman operands. Reject misuse before log/cache initialization or
+        // any source/inventory/AUR preparation.
+        const std::vector<std::string> validation_errors =
+                validate_upgrade_all_invocation(parsed);
+        if(!validation_errors.empty()) {
+            for(const std::string& error : validation_errors) {
+                Logger::error(error);
+            }
+            return 1;
+        }
+        try {
+            // Config-file RMDEPS must also fail before preparation, including
+            // invocations with no registered source preferences.
+            require_supported_production_source_build_options(g_config);
+        } catch(const std::exception& error) {
+            Logger::error(error.what());
+            return 1;
+        }
+    }
+
     std::optional<PkgbuildExportMode> export_mode = pkgbuild_export_mode(parsed);
     if(export_mode.has_value()) {
         // POLICY(#167): export/print は cache log 初期化より前に分岐し、内部 build cache を作らない。
@@ -186,7 +209,7 @@ int run_jpacker(int argc, char* argv[]) {
     }
 
     const std::vector<std::string> optionless_operations = {
-            "build", "upgrade", "upgrade-aur", "clean", "add-src", "del-src", "revert", "edit-src", "list-src"};
+            "build", "upgrade", "upgrade-aur", "upgrade-all", "clean", "add-src", "del-src", "revert", "edit-src", "list-src"};
     if(std::find(optionless_operations.begin(), optionless_operations.end(), parsed.operation) !=
                        optionless_operations.end() &&
        !validate_optionless_jpacker_operation(parsed.operation, parsed.flags)) {
@@ -234,6 +257,9 @@ int run_jpacker(int argc, char* argv[]) {
         }
         if(operation == "upgrade-aur") {
             return cmd_upgrade_aur(g_config);
+        }
+        if(operation == "upgrade-all") {
+            return cmd_upgrade_all(g_config);
         }
         if(operation == "clean") {
             return cmd_clean(g_config);
@@ -367,6 +393,9 @@ void print_help() {
     std::cout << "                              Checks registered source-build preferences after -Syu" << std::endl;
     std::cout << "    \033[1mupgrade-aur\033[0m          Update installed AUR packages only" << std::endl;
     std::cout << "                              Does not run -Syu; source-build preferences are optional" << std::endl;
+    std::cout << "    \033[1mupgrade-all\033[0m          Update system, registered source packages, and remaining installed AUR packages" << std::endl;
+    std::cout << "                              Explicit source preferences take priority and prevent duplicate package/PackageBase builds" << std::endl;
+    std::cout << "                              Accepts --noedit, --nodiff, --noconfirm, --rebuild, --cleanbuild; no target operands" << std::endl;
     std::cout << "    \033[1mclean\033[0m                Clean package/build caches" << std::endl;
     std::cout << std::endl;
     std::cout << "\033[1mAUR INSPECTION\033[0m" << std::endl;
