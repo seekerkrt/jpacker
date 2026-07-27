@@ -44,6 +44,7 @@ UPGRADE_ALL_OPERATION_TEST_TARGET := $(BUILD_DIR)/tests/upgrade-all-operation-te
 DEPENDENCY_PLAN_MODEL_TEST_TARGET := $(BUILD_DIR)/tests/dependency-plan-model-test
 REPOSITORY_QUERY_TEST_TARGET := $(BUILD_DIR)/tests/repository-query-test
 ARTIFACT_INSTALL_PLAN_TEST_TARGET := $(BUILD_DIR)/tests/artifact-install-plan-test
+ARTIFACT_SELECTION_MODEL_TEST_TARGET := $(BUILD_DIR)/tests/artifact-selection-model-test
 PACKAGE_METADATA_TEST_TARGET := $(BUILD_DIR)/tests/package-metadata-test
 PACKAGE_METADATA_INTEGRATION_TEST_TARGET := $(BUILD_DIR)/tests/package-metadata-integration-test
 UPGRADE_BASELINE_METADATA_TEST_TARGET := $(BUILD_DIR)/tests/jpacker-upgrade-baseline-metadata-test
@@ -322,7 +323,18 @@ REPOSITORY_QUERY_TEST_SRCS := \
 	tests/stubs/repository-query/process_stub.cpp
 ARTIFACT_INSTALL_PLAN_TEST_SRCS := \
 	tests/artifact_install_plan_test.cpp \
-	$(SRC_DIR)/artifact_install_plan.cpp
+	$(SRC_DIR)/artifact_install_plan.cpp \
+	$(SRC_DIR)/package_identifier.cpp
+# POLICY(#268): selection model testはpure ownerとvalidatorだけをlinkし、filesystem、
+# external command、install executionのtranslation unitを持ち込まない。
+ARTIFACT_SELECTION_MODEL_ALLOWED_PRODUCTION_TEST_SRCS := \
+	$(SRC_DIR)/artifact_install_plan.cpp \
+	$(SRC_DIR)/package_identifier.cpp
+ARTIFACT_SELECTION_MODEL_TEST_SRCS := \
+	tests/artifact_selection_model_test.cpp \
+	$(ARTIFACT_SELECTION_MODEL_ALLOWED_PRODUCTION_TEST_SRCS)
+ARTIFACT_SELECTION_MODEL_FORBIDDEN_TEST_SRCS := \
+	$(filter-out $(ARTIFACT_SELECTION_MODEL_ALLOWED_PRODUCTION_TEST_SRCS),$(SRCS))
 ARTIFACT_WORKSPACE_TEST_SRCS := \
 	tests/artifact_workspace_test.cpp \
 	$(SRC_DIR)/artifact_workspace.cpp \
@@ -436,7 +448,7 @@ LIBALPM_BUILD_TARGETS := \
 	$(AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION_TEST_TARGET) \
 	$(UPGRADE_BASELINE_METADATA_TEST_TARGET)
 
-.PHONY: all check-libalpm clean check-upgrade-all-plan-link-firewall check-system-source-upgrade-link-firewall check-aur-update-operation-result-link-firewall check-filtered-aur-update-operation-link-firewall check-upgrade-all-operation-link-firewall check-upgrade-all-command-link-firewall test test-app-config test-package-identifier test-package-metadata test-package-metadata-integration test-repository-query test-shell-words test-source-environment test-artifact-workspace test-artifact-identity test-artifact-install-executor test-separated-source-build test-production-source-build test-process-capture test-aur-update-plan test-upgrade-all-plan test-system-source-upgrade test-aur-update-query test-aur-update-command test-upgrade-all-command test-aur-update-execution-preflight test-aur-update-execution-preflight-integration test-aur-update-execution-preparation test-aur-update-execution-runner test-aur-update-operation-result test-filtered-aur-update-operation test-upgrade-all-operation test-dependency-plan-model test-artifact-install-plan test-command-stub-contract test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-commands-inspect test-commands-source-maintenance test-commands-sync test-conflicts-replaces test-install-layout test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check install uninstall
+.PHONY: all check-libalpm clean check-upgrade-all-plan-link-firewall check-system-source-upgrade-link-firewall check-aur-update-operation-result-link-firewall check-filtered-aur-update-operation-link-firewall check-upgrade-all-operation-link-firewall check-upgrade-all-command-link-firewall check-artifact-selection-model-link-firewall test test-app-config test-package-identifier test-package-metadata test-package-metadata-integration test-repository-query test-shell-words test-source-environment test-artifact-workspace test-artifact-identity test-artifact-install-executor test-separated-source-build test-production-source-build test-process-capture test-aur-update-plan test-upgrade-all-plan test-system-source-upgrade test-aur-update-query test-aur-update-command test-upgrade-all-command test-aur-update-execution-preflight test-aur-update-execution-preflight-integration test-aur-update-execution-preparation test-aur-update-execution-runner test-aur-update-operation-result test-filtered-aur-update-operation test-upgrade-all-operation test-dependency-plan-model test-artifact-install-plan test-artifact-selection-model test-command-stub-contract test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-commands-inspect test-commands-source-maintenance test-commands-sync test-conflicts-replaces test-install-layout test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check install uninstall
 
 all: $(TARGET) $(MANPAGE)
 
@@ -724,10 +736,15 @@ $(REPOSITORY_QUERY_TEST_TARGET): $(REPOSITORY_QUERY_TEST_SRCS) $(SRC_DIR)/reposi
 		$(REPOSITORY_QUERY_TEST_SRCS) \
 		-o $@
 
-$(ARTIFACT_INSTALL_PLAN_TEST_TARGET): $(ARTIFACT_INSTALL_PLAN_TEST_SRCS) $(SRC_DIR)/artifact_install_plan.hpp $(SRC_DIR)/dependency_plan.hpp $(SRC_DIR)/dependency_provider.hpp $(SRC_DIR)/aur_rpc.hpp $(SRC_DIR)/repository_query.hpp $(VERSION_FILE)
+$(ARTIFACT_INSTALL_PLAN_TEST_TARGET): $(ARTIFACT_INSTALL_PLAN_TEST_SRCS) $(SRC_DIR)/artifact_install_plan.hpp $(SRC_DIR)/dependency_plan.hpp $(SRC_DIR)/dependency_provider.hpp $(SRC_DIR)/aur_rpc.hpp $(SRC_DIR)/repository_query.hpp $(SRC_DIR)/package_identifier.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling artifact install plan test binary"
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -I$(SRC_DIR) $(ARTIFACT_INSTALL_PLAN_TEST_SRCS) -o $@
+
+$(ARTIFACT_SELECTION_MODEL_TEST_TARGET): $(ARTIFACT_SELECTION_MODEL_TEST_SRCS) $(SRC_DIR)/artifact_install_plan.hpp $(SRC_DIR)/dependency_plan.hpp $(SRC_DIR)/dependency_provider.hpp $(SRC_DIR)/aur_rpc.hpp $(SRC_DIR)/repository_query.hpp $(SRC_DIR)/package_identifier.hpp $(VERSION_FILE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling artifact selection model test binary"
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -I$(SRC_DIR) $(ARTIFACT_SELECTION_MODEL_TEST_SRCS) -o $@
 
 $(PACKAGE_METADATA_TEST_TARGET): $(PACKAGE_METADATA_TEST_SRCS) $(SRC_DIR)/package_metadata.hpp $(SRC_DIR)/installed_package.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/process.hpp tests/stubs/package-metadata/alpm_stub.hpp tests/stubs/package-metadata/process_stub.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
@@ -936,6 +953,24 @@ test-repository-query: $(REPOSITORY_QUERY_TEST_TARGET)
 test-artifact-install-plan: $(ARTIFACT_INSTALL_PLAN_TEST_TARGET)
 	$(abspath $(ARTIFACT_INSTALL_PLAN_TEST_TARGET))
 
+check-artifact-selection-model-link-firewall:
+	@echo ":: Checking artifact selection model link firewall"
+	@set -e; for source in $(ARTIFACT_SELECTION_MODEL_ALLOWED_PRODUCTION_TEST_SRCS); do \
+		count=$$(printf '%s\n' $(ARTIFACT_SELECTION_MODEL_TEST_SRCS) | \
+			awk -v expected="$$source" '$$0 == expected { count++ } END { print count + 0 }'); \
+		test "$$count" -eq 1 || { \
+			echo "error: artifact selection model test must link $$source exactly once" >&2; \
+			exit 1; \
+		}; \
+	done
+	@test -z "$(filter $(ARTIFACT_SELECTION_MODEL_FORBIDDEN_TEST_SRCS),$(ARTIFACT_SELECTION_MODEL_TEST_SRCS))" || { \
+		echo "error: artifact selection model test links a forbidden production source" >&2; \
+		exit 1; \
+	}
+
+test-artifact-selection-model: check-artifact-selection-model-link-firewall $(ARTIFACT_SELECTION_MODEL_TEST_TARGET)
+	$(abspath $(ARTIFACT_SELECTION_MODEL_TEST_TARGET))
+
 test-command-stub-contract:
 	sh tests/test-command-stub-contract.sh
 
@@ -1016,6 +1051,7 @@ test: \
 	test-upgrade-all-operation \
 	test-dependency-plan-model \
 	test-artifact-install-plan \
+	test-artifact-selection-model \
 	test-command-stub-contract \
 	test-aur-rpc-validation \
 	test-build-cache-symlink \
