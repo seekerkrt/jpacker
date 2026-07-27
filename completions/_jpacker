@@ -4,12 +4,13 @@ local -a _jpacker_operations
 local -a _jpacker_global_options
 local -a _jpacker_deps_options
 local -a _jpacker_sync_needed_option
-local -a _jpacker_upgrade_aur_options
+local -a _jpacker_targetless_upgrade_options
 
 _jpacker_operations=(
     build
-    upgrade
-    upgrade-aur
+    'upgrade:System update and registered source packages'
+    'upgrade-aur:Update installed AUR packages only'
+    'upgrade-all:System update, registered source packages, and remaining installed AUR packages'
     clean
     deps
     plan
@@ -53,7 +54,7 @@ _jpacker_sync_needed_option=(
     --needed
 )
 
-_jpacker_upgrade_aur_options=(
+_jpacker_targetless_upgrade_options=(
     --noedit
     --nodiff
     --noconfirm
@@ -62,7 +63,7 @@ _jpacker_upgrade_aur_options=(
 )
 
 _jpacker_complete_operations() {
-    compadd -Q -- "${_jpacker_operations[@]}"
+    _describe -t operations 'jpacker operation' _jpacker_operations
 }
 
 _jpacker_complete_global_options() {
@@ -77,8 +78,8 @@ _jpacker_complete_sync_needed_option() {
     compadd -Q -- "${_jpacker_sync_needed_option[@]}"
 }
 
-_jpacker_complete_upgrade_aur_options() {
-    compadd -Q -- "${_jpacker_upgrade_aur_options[@]}"
+_jpacker_complete_targetless_upgrade_options() {
+    compadd -Q -- "${_jpacker_targetless_upgrade_options[@]}"
 }
 
 _jpacker_source_preferences() {
@@ -128,8 +129,8 @@ if [[ -z $operation ]]; then
 fi
 
 case $operation in
-    upgrade-aur)
-        _jpacker_complete_upgrade_aur_options
+    upgrade-aur|upgrade-all)
+        _jpacker_complete_targetless_upgrade_options
         ;;
     deps)
         _alternative \

@@ -52,6 +52,11 @@ struct SystemSourceUpgradePreparationState {
     std::vector<SystemSourceUpgradeWarning> warnings;
     std::vector<SystemSourceUpgradeIssue> issues;
     std::vector<SystemSourceUpgradeDiagnostic> diagnostics;
+#ifdef JPACKER_ENABLE_SYSTEM_SOURCE_UPGRADE_TEST_HOOKS
+    std::optional<SystemSourceUpgradeUnexpectedExceptionPoint>
+            unexpected_exception_point;
+    bool unexpected_exception_is_unknown = false;
+#endif
 };
 
 struct SourceBaselineFailure {
@@ -211,6 +216,89 @@ SystemSourceUpgradeDiagnostic make_diagnostic(
     detail.stops_execution = stops_execution;
     detail.diagnostic = std::move(diagnostic);
     return detail;
+}
+
+#ifdef JPACKER_ENABLE_SYSTEM_SOURCE_UPGRADE_TEST_HOOKS
+struct UnknownSystemSourceTestException {};
+
+void throw_unexpected_exception_for_test(
+        const SystemSourceUpgradePreparationState& state,
+        SystemSourceUpgradeUnexpectedExceptionPoint point) {
+    if(!state.unexpected_exception_point.has_value() ||
+       *state.unexpected_exception_point != point) {
+        return;
+    }
+    if(state.unexpected_exception_is_unknown) {
+        throw UnknownSystemSourceTestException{};
+    }
+    throw std::runtime_error(
+            "fixture unexpected system/source execution exception");
+}
+#endif
+
+void record_unexpected_execution_failure(
+        SystemSourceUpgradeResult& result,
+        SystemSourceUpgradePhase active_phase,
+        std::optional<std::size_t> active_source_position,
+        bool system_package_state_finalized,
+        const std::string& exception_diagnostic) {
+    result.status = SystemSourceUpgradeStatus::InconsistentResult;
+    result.stopped_phase = active_phase;
+
+    std::string diagnostic =
+            "System/source result inconsistent after unexpected exception";
+    if(!exception_diagnostic.empty()) {
+        diagnostic += ": " + exception_diagnostic;
+    }
+
+    if(active_phase == SystemSourceUpgradePhase::System &&
+       result.system.status == SystemUpgradePhaseStatus::NotAttempted) {
+        const std::string unavailable =
+                "System result unavailable after phase started due to an unexpected exception" +
+                (exception_diagnostic.empty()
+                         ? std::string{}
+                         : ": " + exception_diagnostic);
+        result.system.status = SystemUpgradePhaseStatus::Failed;
+        result.system.package_state_change = PackageStateChange::Unknown;
+        result.system.diagnostic = unavailable;
+        diagnostic = unavailable;
+    } else if(result.system.status == SystemUpgradePhaseStatus::Completed &&
+              !system_package_state_finalized) {
+        // system command completionは既知でも、post-state snapshot前なら
+        // package mutationの有無は断言しない。
+        result.system.package_state_change = PackageStateChange::Unknown;
+    }
+
+    if(active_phase == SystemSourceUpgradePhase::RegisteredSource &&
+       active_source_position.has_value() &&
+       *active_source_position < result.registered_source_results.size()) {
+        RegisteredSourceUpgradeResult& source =
+                result.registered_source_results[*active_source_position];
+        if(source.status == RegisteredSourceUpgradeStatus::NotAttempted) {
+            const std::string unavailable =
+                    "Registered source result unavailable after phase started due to an unexpected exception" +
+                    (exception_diagnostic.empty()
+                             ? std::string{}
+                             : ": " + exception_diagnostic);
+            source.status = RegisteredSourceUpgradeStatus::Incomplete;
+            source.failure_kind =
+                    RegisteredSourceUpgradeFailureKind::UnknownException;
+            source.package_state_change = PackageStateChange::Unknown;
+            source.diagnostic = unavailable;
+        }
+    }
+
+    SystemSourceUpgradeDiagnostic detail = make_diagnostic(
+            active_phase, std::move(diagnostic), true);
+    if(active_source_position.has_value() &&
+       *active_source_position < result.registered_source_results.size()) {
+        const RegisteredSourceUpgradeResult& source =
+                result.registered_source_results[*active_source_position];
+        detail.original_preference_index = source.original_preference_index;
+        detail.preference_package_name = source.preference_package_name;
+        detail.resolved_package_base = source.resolved_package_base;
+    }
+    result.diagnostics.push_back(std::move(detail));
 }
 
 SystemSourceUpgradeResult block_preparation(
@@ -621,6 +709,14 @@ make_first_source_correlation_inconsistent_for_test() {
     if(impl_ == nullptr || impl_->state.correlations.empty()) return;
     ++impl_->state.correlations.front().snapshot_index;
 }
+
+void PreparedSystemSourceUpgrade::set_unexpected_exception_for_test(
+        SystemSourceUpgradeUnexpectedExceptionPoint point,
+        bool unknown_exception) {
+    if(impl_ == nullptr) return;
+    impl_->state.unexpected_exception_point = point;
+    impl_->state.unexpected_exception_is_unknown = unknown_exception;
+}
 #endif
 
 SystemSourceUpgradePreparation prepare_system_source_upgrade(
@@ -977,283 +1073,335 @@ SystemSourceUpgradeResult execute_prepared_system_source_upgrade(
             SystemSourceUpgradeStatus::Completed,
             SystemSourceUpgradePhase::None);
 
-    notify(observer, SystemSourceUpgradeEvent{
+    SystemSourceUpgradePhase active_phase = SystemSourceUpgradePhase::System;
+    std::optional<std::size_t> active_source_position;
+    bool system_package_state_finalized = false;
+    try {
+        notify(observer, SystemSourceUpgradeEvent{
             SystemSourceUpgradeEventKind::SystemUpgradeStarting,
             std::nullopt,
             std::nullopt,
             std::nullopt,
             {}});
-    int system_exit_status = 1;
-    try {
-        system_exit_status = run_command(system_upgrade_command(config));
-    } catch(const std::exception& error) {
-        result.system.status = SystemUpgradePhaseStatus::Failed;
-        result.system.package_state_change = PackageStateChange::Unknown;
-        result.system.diagnostic = error.what();
-        result.status = SystemSourceUpgradeStatus::StoppedOnSystemFailure;
-        result.stopped_phase = SystemSourceUpgradePhase::System;
-        result.diagnostics.push_back(make_diagnostic(
-                SystemSourceUpgradePhase::System,
-                error.what(),
-                true));
-        return result;
-    } catch(...) {
-        result.system.status = SystemUpgradePhaseStatus::Failed;
-        result.system.package_state_change = PackageStateChange::Unknown;
-        result.system.diagnostic = UNKNOWN_SYSTEM_FAILURE_DIAGNOSTIC;
-        result.status = SystemSourceUpgradeStatus::StoppedOnSystemFailure;
-        result.stopped_phase = SystemSourceUpgradePhase::System;
-        result.diagnostics.push_back(make_diagnostic(
-                SystemSourceUpgradePhase::System,
-                UNKNOWN_SYSTEM_FAILURE_DIAGNOSTIC,
-                true));
-        return result;
-    }
-    result.system.command_exit_status = system_exit_status;
-    if(system_exit_status != 0) {
-        result.system.status = SystemUpgradePhaseStatus::Failed;
-        result.system.package_state_change = PackageStateChange::Unknown;
-        result.system.diagnostic = "Update failed.";
-        result.status = SystemSourceUpgradeStatus::StoppedOnSystemFailure;
-        result.stopped_phase = SystemSourceUpgradePhase::System;
-        result.diagnostics.push_back(make_diagnostic(
-                SystemSourceUpgradePhase::System,
-                "Update failed.",
-                true));
-        return result;
-    }
-    result.system.status = SystemUpgradePhaseStatus::Completed;
-
-    const bool has_source_work_items = state.source_invocation.has_value();
-    if(has_source_work_items) {
-        notify(observer, SystemSourceUpgradeEvent{
-                SystemSourceUpgradeEventKind::CheckingSourcePackages,
-                std::nullopt,
-                std::nullopt,
-                std::nullopt,
-                {}});
-    }
-
-    SourceInstalledSnapshotResults installed_snapshots;
-    if(state.system_database_paths.has_value() &&
-       (state.before_system_snapshot.has_value() || has_source_work_items)) {
+#ifdef JPACKER_ENABLE_SYSTEM_SOURCE_UPGRADE_TEST_HOOKS
+        throw_unexpected_exception_for_test(
+                state,
+                SystemSourceUpgradeUnexpectedExceptionPoint::
+                        SystemPhaseStarted);
+#endif
+        int system_exit_status = 1;
         try {
-            PackageMetadataSession session = PackageMetadataSession::open(
-                    state.system_database_paths.value());
-            if(state.before_system_snapshot.has_value()) {
-                LocalPackageVersionSnapshotResult after_snapshot =
-                        session.snapshot_local_package_versions();
-                if(const auto* failure =
-                           std::get_if<PackageMetadataFailure>(
-                                   &after_snapshot)) {
-                    record_post_system_snapshot_failure(result, *failure);
-                } else {
-                    const LocalPackageVersionSnapshot& after =
-                            std::get<LocalPackageVersionSnapshot>(
-                                    after_snapshot);
-                    result.system.package_state_change =
-                            state.before_system_snapshot.value() == after
-                            ? PackageStateChange::NoChange
-                            : PackageStateChange::Changed;
-                }
-            } else {
-                result.system.package_state_change = PackageStateChange::Unknown;
-            }
-
-            if(has_source_work_items) {
-                std::vector<std::string> package_names;
-                package_names.reserve(
-                        state.source_invocation->work_items.size());
-                for(const auto& work_item :
-                    state.source_invocation->work_items) {
-                    package_names.push_back(work_item.request.package_name);
-                }
-                installed_snapshots =
-                        snapshot_post_upgrade_installed_packages(
-                                session, package_names);
-            }
-        } catch(const PackageMetadataError& error) {
-            if(state.before_system_snapshot.has_value()) {
-                record_post_system_snapshot_failure(
-                        result, error.failure());
-            } else {
-                result.system.package_state_change = PackageStateChange::Unknown;
-            }
-            if(has_source_work_items) {
-                const std::string diagnostic =
-                        std::string(POST_UPGRADE_SNAPSHOT_FAILURE_PREFIX) +
-                        error.failure().diagnostic;
-                stop_for_global_source_metadata_failure(
-                        result, error.failure(), diagnostic);
-                return result;
-            }
+            system_exit_status = run_command(system_upgrade_command(config));
         } catch(const std::exception& error) {
-            if(state.before_system_snapshot.has_value()) {
-                record_post_system_snapshot_failure(
-                        result,
-                        generic_metadata_failure(error.what()));
-            } else {
-                result.system.package_state_change = PackageStateChange::Unknown;
-            }
-            if(has_source_work_items) {
-                stop_for_global_source_metadata_failure(
-                        result,
-                        std::nullopt,
-                        std::string(POST_UPGRADE_SNAPSHOT_FAILURE_PREFIX) +
-                                error.what());
-                return result;
-            }
+            result.system.status = SystemUpgradePhaseStatus::Failed;
+            result.system.package_state_change = PackageStateChange::Unknown;
+            result.system.diagnostic = error.what();
+            result.status = SystemSourceUpgradeStatus::StoppedOnSystemFailure;
+            result.stopped_phase = SystemSourceUpgradePhase::System;
+            result.diagnostics.push_back(make_diagnostic(
+                    SystemSourceUpgradePhase::System,
+                    error.what(),
+                    true));
+            return result;
         } catch(...) {
-            const std::string diagnostic =
-                    "Post-upgrade package metadata snapshot failed with an unknown exception.";
-            if(state.before_system_snapshot.has_value()) {
-                record_post_system_snapshot_failure(
-                        result,
-                        generic_metadata_failure(diagnostic));
-            } else {
-                result.system.package_state_change = PackageStateChange::Unknown;
+            result.system.status = SystemUpgradePhaseStatus::Failed;
+            result.system.package_state_change = PackageStateChange::Unknown;
+            result.system.diagnostic = UNKNOWN_SYSTEM_FAILURE_DIAGNOSTIC;
+            result.status = SystemSourceUpgradeStatus::StoppedOnSystemFailure;
+            result.stopped_phase = SystemSourceUpgradePhase::System;
+            result.diagnostics.push_back(make_diagnostic(
+                    SystemSourceUpgradePhase::System,
+                    UNKNOWN_SYSTEM_FAILURE_DIAGNOSTIC,
+                    true));
+            return result;
+        }
+        result.system.command_exit_status = system_exit_status;
+        if(system_exit_status != 0) {
+            result.system.status = SystemUpgradePhaseStatus::Failed;
+            result.system.package_state_change = PackageStateChange::Unknown;
+            result.system.diagnostic = "Update failed.";
+            result.status = SystemSourceUpgradeStatus::StoppedOnSystemFailure;
+            result.stopped_phase = SystemSourceUpgradePhase::System;
+            result.diagnostics.push_back(make_diagnostic(
+                    SystemSourceUpgradePhase::System,
+                    "Update failed.",
+                    true));
+            return result;
+        }
+        result.system.status = SystemUpgradePhaseStatus::Completed;
+#ifdef JPACKER_ENABLE_SYSTEM_SOURCE_UPGRADE_TEST_HOOKS
+        throw_unexpected_exception_for_test(
+                state,
+                SystemSourceUpgradeUnexpectedExceptionPoint::
+                        SystemPhaseCompleted);
+#endif
+
+        const bool has_source_work_items = state.source_invocation.has_value();
+        if(has_source_work_items) {
+            active_phase = SystemSourceUpgradePhase::RegisteredSource;
+            notify(observer, SystemSourceUpgradeEvent{
+                    SystemSourceUpgradeEventKind::CheckingSourcePackages,
+                    std::nullopt,
+                    std::nullopt,
+                    std::nullopt,
+                    {}});
+        }
+
+        SourceInstalledSnapshotResults installed_snapshots;
+        if(state.system_database_paths.has_value() &&
+           (state.before_system_snapshot.has_value() || has_source_work_items)) {
+            try {
+                PackageMetadataSession session = PackageMetadataSession::open(
+                        state.system_database_paths.value());
+                if(state.before_system_snapshot.has_value()) {
+                    LocalPackageVersionSnapshotResult after_snapshot =
+                            session.snapshot_local_package_versions();
+                    if(const auto* failure =
+                               std::get_if<PackageMetadataFailure>(
+                                       &after_snapshot)) {
+                        record_post_system_snapshot_failure(result, *failure);
+                    } else {
+                        const LocalPackageVersionSnapshot& after =
+                                std::get<LocalPackageVersionSnapshot>(
+                                        after_snapshot);
+                        result.system.package_state_change =
+                                state.before_system_snapshot.value() == after
+                                ? PackageStateChange::NoChange
+                                : PackageStateChange::Changed;
+                    }
+                } else {
+                    result.system.package_state_change = PackageStateChange::Unknown;
+                }
+                system_package_state_finalized = true;
+
+                if(has_source_work_items) {
+                    std::vector<std::string> package_names;
+                    package_names.reserve(
+                            state.source_invocation->work_items.size());
+                    for(const auto& work_item :
+                        state.source_invocation->work_items) {
+                        package_names.push_back(work_item.request.package_name);
+                    }
+                    installed_snapshots =
+                            snapshot_post_upgrade_installed_packages(
+                                    session, package_names);
+                }
+            } catch(const PackageMetadataError& error) {
+                if(!system_package_state_finalized) {
+                    if(state.before_system_snapshot.has_value()) {
+                        record_post_system_snapshot_failure(
+                                result, error.failure());
+                    } else {
+                        result.system.package_state_change =
+                                PackageStateChange::Unknown;
+                    }
+                    system_package_state_finalized = true;
+                }
+                if(has_source_work_items) {
+                    const std::string diagnostic =
+                            std::string(POST_UPGRADE_SNAPSHOT_FAILURE_PREFIX) +
+                            error.failure().diagnostic;
+                    stop_for_global_source_metadata_failure(
+                            result, error.failure(), diagnostic);
+                    return result;
+                }
+            } catch(const std::exception& error) {
+                if(!system_package_state_finalized) {
+                    if(state.before_system_snapshot.has_value()) {
+                        record_post_system_snapshot_failure(
+                                result,
+                                generic_metadata_failure(error.what()));
+                    } else {
+                        result.system.package_state_change =
+                                PackageStateChange::Unknown;
+                    }
+                    system_package_state_finalized = true;
+                }
+                if(has_source_work_items) {
+                    stop_for_global_source_metadata_failure(
+                            result,
+                            std::nullopt,
+                            std::string(POST_UPGRADE_SNAPSHOT_FAILURE_PREFIX) +
+                                    error.what());
+                    return result;
+                }
+            } catch(...) {
+                const std::string diagnostic =
+                        "Post-upgrade package metadata snapshot failed with an unknown exception.";
+                if(!system_package_state_finalized) {
+                    if(state.before_system_snapshot.has_value()) {
+                        record_post_system_snapshot_failure(
+                                result,
+                                generic_metadata_failure(diagnostic));
+                    } else {
+                        result.system.package_state_change =
+                                PackageStateChange::Unknown;
+                    }
+                    system_package_state_finalized = true;
+                }
+                if(has_source_work_items) {
+                    stop_for_global_source_metadata_failure(
+                            result,
+                            std::nullopt,
+                            std::string(POST_UPGRADE_SNAPSHOT_FAILURE_PREFIX) +
+                                    diagnostic);
+                    return result;
+                }
             }
-            if(has_source_work_items) {
-                stop_for_global_source_metadata_failure(
+        } else if(result.system.before_snapshot_failure.has_value()) {
+            result.system.package_state_change = PackageStateChange::Unknown;
+        } else {
+            result.system.package_state_change = PackageStateChange::Unknown;
+        }
+        system_package_state_finalized = true;
+
+        // POLICY: post-Syu metadata failureは、1件でもsource mutationを始める前に
+        // preference順で全correlationを検査する。
+        for(std::size_t source_position = 0;
+            source_position < state.correlations.size();
+            ++source_position) {
+            const RegisteredSourceCorrelation& correlation =
+                    state.correlations[source_position];
+            if(!correlation.has_valid_package_name) continue;
+            if(!correlation.work_item_index.has_value() ||
+               !state.source_invocation.has_value()) {
+                add_inconsistent_issue(
                         result,
-                        std::nullopt,
-                        std::string(POST_UPGRADE_SNAPSHOT_FAILURE_PREFIX) +
-                                diagnostic);
+                        SystemSourceUpgradeIssueKind::
+                                PreparedCorrelationInconsistent,
+                        SystemSourceUpgradePhase::RegisteredSource,
+                        "Prepared source work item is missing after system upgrade.");
+                return result;
+            }
+
+            const ProductionSourceBuildWorkItem& work_item =
+                    state.source_invocation->work_items[
+                            correlation.work_item_index.value()];
+            auto installed_snapshot = installed_snapshots.find(
+                    work_item.request.package_name);
+            if(installed_snapshot == installed_snapshots.end()) {
+                add_inconsistent_issue(
+                        result,
+                        SystemSourceUpgradeIssueKind::
+                                PreparedCorrelationInconsistent,
+                        SystemSourceUpgradePhase::RegisteredSource,
+                        "System upgrade completed, but authoritative post-upgrade installed package snapshot is missing for " +
+                                work_item.request.package_name +
+                                "; source processing did not start.");
+                return result;
+            }
+            if(const auto* metadata_failure =
+                       std::get_if<PackageMetadataFailure>(
+                               &installed_snapshot->second)) {
+                const std::string diagnostic =
+                        "System upgrade completed, but post-upgrade package metadata query failed for " +
+                        work_item.request.package_name + ": " +
+                        metadata_failure->diagnostic +
+                        " Source processing did not start.";
+                stop_for_source_metadata_failure(
+                        result,
+                        source_position,
+                        *metadata_failure,
+                        diagnostic);
                 return result;
             }
         }
-    } else if(result.system.before_snapshot_failure.has_value()) {
-        result.system.package_state_change = PackageStateChange::Unknown;
-    } else {
-        result.system.package_state_change = PackageStateChange::Unknown;
-    }
 
-    // POLICY: post-Syu metadata failureは、1件でもsource mutationを始める前に
-    // preference順で全correlationを検査する。
-    for(std::size_t source_position = 0;
-        source_position < state.correlations.size();
-        ++source_position) {
-        const RegisteredSourceCorrelation& correlation =
-                state.correlations[source_position];
-        if(!correlation.has_valid_package_name) continue;
-        if(!correlation.work_item_index.has_value() ||
-           !state.source_invocation.has_value()) {
-            add_inconsistent_issue(
-                    result,
-                    SystemSourceUpgradeIssueKind::
-                            PreparedCorrelationInconsistent,
-                    SystemSourceUpgradePhase::RegisteredSource,
-                    "Prepared source work item is missing after system upgrade.");
-            return result;
-        }
+        for(std::size_t source_position = 0;
+            source_position < state.correlations.size();
+            ++source_position) {
+            const RegisteredSourceCorrelation& correlation =
+                    state.correlations[source_position];
+            RegisteredSourceUpgradeResult& source_result =
+                    result.registered_source_results[source_position];
+            if(!correlation.has_valid_package_name) {
+                const std::string diagnostic =
+                        "Ignoring invalid source-build preference filename: " +
+                        source_result.preference_package_name;
+                source_result.status = RegisteredSourceUpgradeStatus::Unsupported;
+                source_result.failure_kind =
+                        RegisteredSourceUpgradeFailureKind::InvalidPreferenceName;
+                source_result.package_state_change = PackageStateChange::NoChange;
+                source_result.diagnostic = diagnostic;
 
-        const ProductionSourceBuildWorkItem& work_item =
-                state.source_invocation->work_items[
-                        correlation.work_item_index.value()];
-        auto installed_snapshot = installed_snapshots.find(
-                work_item.request.package_name);
-        if(installed_snapshot == installed_snapshots.end()) {
-            add_inconsistent_issue(
-                    result,
-                    SystemSourceUpgradeIssueKind::
-                            PreparedCorrelationInconsistent,
-                    SystemSourceUpgradePhase::RegisteredSource,
-                    "System upgrade completed, but authoritative post-upgrade installed package snapshot is missing for " +
-                            work_item.request.package_name +
-                            "; source processing did not start.");
-            return result;
-        }
-        if(const auto* metadata_failure =
-                   std::get_if<PackageMetadataFailure>(
-                           &installed_snapshot->second)) {
-            const std::string diagnostic =
-                    "System upgrade completed, but post-upgrade package metadata query failed for " +
-                    work_item.request.package_name + ": " +
-                    metadata_failure->diagnostic +
-                    " Source processing did not start.";
-            stop_for_source_metadata_failure(
-                    result,
-                    source_position,
-                    *metadata_failure,
-                    diagnostic);
-            return result;
-        }
-    }
-
-    for(std::size_t source_position = 0;
-        source_position < state.correlations.size();
-        ++source_position) {
-        const RegisteredSourceCorrelation& correlation =
-                state.correlations[source_position];
-        RegisteredSourceUpgradeResult& source_result =
-                result.registered_source_results[source_position];
-        if(!correlation.has_valid_package_name) {
-            const std::string diagnostic =
-                    "Ignoring invalid source-build preference filename: " +
-                    source_result.preference_package_name;
-            source_result.status = RegisteredSourceUpgradeStatus::Unsupported;
-            source_result.failure_kind =
-                    RegisteredSourceUpgradeFailureKind::InvalidPreferenceName;
-            source_result.package_state_change = PackageStateChange::NoChange;
-            source_result.diagnostic = diagnostic;
-
-            result.warnings.push_back(SystemSourceUpgradeWarning{
-                    SystemSourceUpgradeWarningKind::InvalidPreferenceName,
-                    source_result.original_preference_index,
-                    source_result.preference_package_name,
-                    result.prepared_snapshot.registered_sources[
-                            source_position].entry_path,
-                    diagnostic});
-            SystemSourceUpgradeIssue issue = make_issue(
-                    SystemSourceUpgradeIssueKind::InvalidPreferenceName,
-                    SystemSourceUpgradeIssueImpact::AffectsSuccess,
-                    SystemSourceUpgradePhase::RegisteredSource,
-                    diagnostic);
-            issue.original_preference_index =
-                    source_result.original_preference_index;
-            issue.preference_package_name =
-                    source_result.preference_package_name;
-            result.issues.push_back(std::move(issue));
-            notify(observer, SystemSourceUpgradeEvent{
-                    SystemSourceUpgradeEventKind::InvalidPreferenceWarning,
-                    source_result.original_preference_index,
-                    source_result.preference_package_name,
-                    result.prepared_snapshot.registered_sources[
-                            source_position].entry_path,
-                    diagnostic});
-            continue;
-        }
-
-        ProductionSourceBuildWorkItem& work_item =
-                state.source_invocation->work_items[
-                        correlation.work_item_index.value()];
-        if(work_item.uses_system_update_baseline) {
-            auto baseline = state.update_baselines.find(
-                    work_item.request.package_name);
-            if(baseline != state.update_baselines.end()) {
-                work_item.request.update_baseline = baseline->second;
+                result.warnings.push_back(SystemSourceUpgradeWarning{
+                        SystemSourceUpgradeWarningKind::InvalidPreferenceName,
+                        source_result.original_preference_index,
+                        source_result.preference_package_name,
+                        result.prepared_snapshot.registered_sources[
+                                source_position].entry_path,
+                        diagnostic});
+                SystemSourceUpgradeIssue issue = make_issue(
+                        SystemSourceUpgradeIssueKind::InvalidPreferenceName,
+                        SystemSourceUpgradeIssueImpact::AffectsSuccess,
+                        SystemSourceUpgradePhase::RegisteredSource,
+                        diagnostic);
+                issue.original_preference_index =
+                        source_result.original_preference_index;
+                issue.preference_package_name =
+                        source_result.preference_package_name;
+                result.issues.push_back(std::move(issue));
+                notify(observer, SystemSourceUpgradeEvent{
+                        SystemSourceUpgradeEventKind::InvalidPreferenceWarning,
+                        source_result.original_preference_index,
+                        source_result.preference_package_name,
+                        result.prepared_snapshot.registered_sources[
+                                source_position].entry_path,
+                        diagnostic});
+                continue;
             }
-        }
-        work_item.request.installed_snapshot =
-                std::get<SourceInstalledSnapshot>(
-                        installed_snapshots.at(
-                                work_item.request.package_name));
 
-        try {
-            SourceBuildExecutionResult execution =
-                    execute_prepared_source_build_work_item_typed(
-                            work_item,
-                            state.source_invocation->database_paths,
-                            config);
-            map_source_execution_result(source_result, execution);
-            if(execution.status ==
-                       SourceBuildExecutionStatus::
-                               UpdateStatusUnknownSkipped &&
-               !execution.diagnostic.empty()) {
+            ProductionSourceBuildWorkItem& work_item =
+                    state.source_invocation->work_items[
+                            correlation.work_item_index.value()];
+            if(work_item.uses_system_update_baseline) {
+                auto baseline = state.update_baselines.find(
+                        work_item.request.package_name);
+                if(baseline != state.update_baselines.end()) {
+                    work_item.request.update_baseline = baseline->second;
+                }
+            }
+            work_item.request.installed_snapshot =
+                    std::get<SourceInstalledSnapshot>(
+                            installed_snapshots.at(
+                                    work_item.request.package_name));
+
+            active_source_position = source_position;
+#ifdef JPACKER_ENABLE_SYSTEM_SOURCE_UPGRADE_TEST_HOOKS
+            throw_unexpected_exception_for_test(
+                    state,
+                    SystemSourceUpgradeUnexpectedExceptionPoint::
+                            SourceWorkItemStarted);
+#endif
+            try {
+                SourceBuildExecutionResult execution =
+                        execute_prepared_source_build_work_item_typed(
+                                work_item,
+                                state.source_invocation->database_paths,
+                                config);
+                map_source_execution_result(source_result, execution);
+                if(execution.status ==
+                           SourceBuildExecutionStatus::
+                                   UpdateStatusUnknownSkipped &&
+                   !execution.diagnostic.empty()) {
+                    SystemSourceUpgradeDiagnostic detail = make_diagnostic(
+                            SystemSourceUpgradePhase::RegisteredSource,
+                            execution.diagnostic,
+                            false);
+                    detail.original_preference_index =
+                            source_result.original_preference_index;
+                    detail.preference_package_name =
+                            source_result.preference_package_name;
+                    detail.resolved_package_base =
+                            source_result.resolved_package_base;
+                    result.diagnostics.push_back(std::move(detail));
+                }
+            } catch(const SeparatedSourceBuildCleanupError& error) {
+                map_cleanup_failure(source_result, error);
                 SystemSourceUpgradeDiagnostic detail = make_diagnostic(
                         SystemSourceUpgradePhase::RegisteredSource,
-                        execution.diagnostic,
-                        false);
+                        error.what(),
+                        true);
                 detail.original_preference_index =
                         source_result.original_preference_index;
                 detail.preference_package_name =
@@ -1261,71 +1409,81 @@ SystemSourceUpgradeResult execute_prepared_system_source_upgrade(
                 detail.resolved_package_base =
                         source_result.resolved_package_base;
                 result.diagnostics.push_back(std::move(detail));
+                result.status = SystemSourceUpgradeStatus::
+                        StoppedAfterSourceCleanupFailure;
+                result.stopped_phase =
+                        SystemSourceUpgradePhase::RegisteredSource;
+                return result;
+            } catch(const std::exception& error) {
+                source_result.status = RegisteredSourceUpgradeStatus::Failed;
+                source_result.failure_kind =
+                        RegisteredSourceUpgradeFailureKind::BuildOrInstallFailed;
+                source_result.package_state_change = PackageStateChange::Unknown;
+                source_result.diagnostic = error.what();
+                SystemSourceUpgradeDiagnostic detail = make_diagnostic(
+                        SystemSourceUpgradePhase::RegisteredSource,
+                        error.what(),
+                        true);
+                detail.original_preference_index =
+                        source_result.original_preference_index;
+                detail.preference_package_name =
+                        source_result.preference_package_name;
+                detail.resolved_package_base =
+                        source_result.resolved_package_base;
+                result.diagnostics.push_back(std::move(detail));
+                result.status =
+                        SystemSourceUpgradeStatus::StoppedOnSourceFailure;
+                result.stopped_phase =
+                        SystemSourceUpgradePhase::RegisteredSource;
+                return result;
+            } catch(...) {
+                source_result.status = RegisteredSourceUpgradeStatus::Failed;
+                source_result.failure_kind =
+                        RegisteredSourceUpgradeFailureKind::UnknownException;
+                source_result.package_state_change = PackageStateChange::Unknown;
+                source_result.diagnostic = UNKNOWN_SOURCE_FAILURE_DIAGNOSTIC;
+                SystemSourceUpgradeDiagnostic detail = make_diagnostic(
+                        SystemSourceUpgradePhase::RegisteredSource,
+                        UNKNOWN_SOURCE_FAILURE_DIAGNOSTIC,
+                        true);
+                detail.original_preference_index =
+                        source_result.original_preference_index;
+                detail.preference_package_name =
+                        source_result.preference_package_name;
+                detail.resolved_package_base =
+                        source_result.resolved_package_base;
+                result.diagnostics.push_back(std::move(detail));
+                result.status =
+                        SystemSourceUpgradeStatus::StoppedOnSourceFailure;
+                result.stopped_phase =
+                        SystemSourceUpgradePhase::RegisteredSource;
+                return result;
             }
-        } catch(const SeparatedSourceBuildCleanupError& error) {
-            map_cleanup_failure(source_result, error);
-            SystemSourceUpgradeDiagnostic detail = make_diagnostic(
-                    SystemSourceUpgradePhase::RegisteredSource,
-                    error.what(),
-                    true);
-            detail.original_preference_index =
-                    source_result.original_preference_index;
-            detail.preference_package_name =
-                    source_result.preference_package_name;
-            detail.resolved_package_base =
-                    source_result.resolved_package_base;
-            result.diagnostics.push_back(std::move(detail));
-            result.status = SystemSourceUpgradeStatus::
-                    StoppedAfterSourceCleanupFailure;
-            result.stopped_phase =
-                    SystemSourceUpgradePhase::RegisteredSource;
-            return result;
-        } catch(const std::exception& error) {
-            source_result.status = RegisteredSourceUpgradeStatus::Failed;
-            source_result.failure_kind =
-                    RegisteredSourceUpgradeFailureKind::BuildOrInstallFailed;
-            source_result.package_state_change = PackageStateChange::Unknown;
-            source_result.diagnostic = error.what();
-            SystemSourceUpgradeDiagnostic detail = make_diagnostic(
-                    SystemSourceUpgradePhase::RegisteredSource,
-                    error.what(),
-                    true);
-            detail.original_preference_index =
-                    source_result.original_preference_index;
-            detail.preference_package_name =
-                    source_result.preference_package_name;
-            detail.resolved_package_base =
-                    source_result.resolved_package_base;
-            result.diagnostics.push_back(std::move(detail));
-            result.status =
-                    SystemSourceUpgradeStatus::StoppedOnSourceFailure;
-            result.stopped_phase =
-                    SystemSourceUpgradePhase::RegisteredSource;
-            return result;
-        } catch(...) {
-            source_result.status = RegisteredSourceUpgradeStatus::Failed;
-            source_result.failure_kind =
-                    RegisteredSourceUpgradeFailureKind::UnknownException;
-            source_result.package_state_change = PackageStateChange::Unknown;
-            source_result.diagnostic = UNKNOWN_SOURCE_FAILURE_DIAGNOSTIC;
-            SystemSourceUpgradeDiagnostic detail = make_diagnostic(
-                    SystemSourceUpgradePhase::RegisteredSource,
-                    UNKNOWN_SOURCE_FAILURE_DIAGNOSTIC,
-                    true);
-            detail.original_preference_index =
-                    source_result.original_preference_index;
-            detail.preference_package_name =
-                    source_result.preference_package_name;
-            detail.resolved_package_base =
-                    source_result.resolved_package_base;
-            result.diagnostics.push_back(std::move(detail));
-            result.status =
-                    SystemSourceUpgradeStatus::StoppedOnSourceFailure;
-            result.stopped_phase =
-                    SystemSourceUpgradePhase::RegisteredSource;
-            return result;
+#ifdef JPACKER_ENABLE_SYSTEM_SOURCE_UPGRADE_TEST_HOOKS
+            throw_unexpected_exception_for_test(
+                    state,
+                    SystemSourceUpgradeUnexpectedExceptionPoint::
+                            SourceResultRecorded);
+#endif
+            active_source_position.reset();
         }
-    }
 
-    return result;
+        return result;
+    } catch(const std::exception& error) {
+        record_unexpected_execution_failure(
+                result,
+                active_phase,
+                active_source_position,
+                system_package_state_finalized,
+                error.what());
+        return result;
+    } catch(...) {
+        record_unexpected_execution_failure(
+                result,
+                active_phase,
+                active_source_position,
+                system_package_state_finalized,
+                "unknown exception");
+        return result;
+    }
 }

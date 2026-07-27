@@ -206,6 +206,52 @@ SystemSourceUpgradeResult make_unattempted_system_source_result(
     return result;
 }
 
+SystemSourceUpgradeResult make_unavailable_system_source_result(
+        const SystemSourceUpgradePreparedSnapshot& snapshot,
+        SystemSourceUpgradePhase observed_phase,
+        const std::string& diagnostic) {
+    SystemSourceUpgradeResult result = make_unattempted_system_source_result(
+            snapshot, SystemSourceUpgradeStatus::InconsistentResult);
+    result.stopped_phase = observed_phase;
+
+    if(observed_phase == SystemSourceUpgradePhase::System) {
+        result.system.status = SystemUpgradePhaseStatus::Failed;
+        result.system.package_state_change = PackageStateChange::Unknown;
+        result.system.diagnostic =
+                "System result unavailable after phase started due to an unexpected exception: " +
+                diagnostic;
+    } else if(observed_phase ==
+              SystemSourceUpgradePhase::RegisteredSource) {
+        result.system.status = SystemUpgradePhaseStatus::Completed;
+        result.system.package_state_change = PackageStateChange::Unknown;
+        for(RegisteredSourceUpgradeResult& source :
+            result.registered_source_results) {
+            source.status = RegisteredSourceUpgradeStatus::Incomplete;
+            source.failure_kind =
+                    RegisteredSourceUpgradeFailureKind::UnknownException;
+            source.package_state_change = PackageStateChange::Unknown;
+            source.diagnostic =
+                    "Registered source result unavailable after phase started due to an unexpected exception: " +
+                    diagnostic;
+        }
+    }
+    return result;
+}
+
+UpgradeAllOperationPhase aggregate_phase_for_system_source(
+        SystemSourceUpgradePhase phase) noexcept {
+    switch(phase) {
+    case SystemSourceUpgradePhase::None:
+    case SystemSourceUpgradePhase::Preparation:
+        return UpgradeAllOperationPhase::Preparation;
+    case SystemSourceUpgradePhase::System:
+        return UpgradeAllOperationPhase::System;
+    case SystemSourceUpgradePhase::RegisteredSource:
+        return UpgradeAllOperationPhase::RegisteredSource;
+    }
+    return UpgradeAllOperationPhase::Preparation;
+}
+
 UpgradeAllOperationIssue make_issue(
         UpgradeAllOperationIssueKind kind,
         UpgradeAllOperationPhase phase,
@@ -356,9 +402,17 @@ bool stop_after_system_source_failure(UpgradeAllOperationResult& result) {
                     UpgradeAllNotAttemptedReason::SourceCleanupFailure);
             return true;
         case SystemSourceUpgradeStatus::BlockedBeforeMutation:
-        case SystemSourceUpgradeStatus::InconsistentResult:
             result.status = UpgradeAllOperationStatus::InconsistentResult;
             result.stopped_phase = UpgradeAllOperationPhase::Preparation;
+            set_not_attempted_after(
+                    result,
+                    UpgradeAllNotAttemptedReason::
+                            PriorAggregateInconsistency);
+            return true;
+        case SystemSourceUpgradeStatus::InconsistentResult:
+            result.status = UpgradeAllOperationStatus::InconsistentResult;
+            result.stopped_phase = aggregate_phase_for_system_source(
+                    result.system_source.stopped_phase);
             set_not_attempted_after(
                     result,
                     UpgradeAllNotAttemptedReason::
@@ -659,20 +713,6 @@ void map_filtered_result_status(UpgradeAllOperationResult& aggregate) {
     }
 }
 
-PackageStateChange aur_package_state_change(
-        const UpgradeAllAurPhaseResult& aur) noexcept {
-    if(!aur.operation_result.has_value()) return PackageStateChange::Unknown;
-    const FilteredAurUpdateExecutionResult& filtered =
-            *aur.operation_result;
-    if(filtered.changed_package_state()) return PackageStateChange::Changed;
-    if((aur.status == UpgradeAllAurPhaseStatus::NoUpdates ||
-        aur.status == UpgradeAllAurPhaseStatus::Completed) &&
-       filtered.is_success()) {
-        return PackageStateChange::NoChange;
-    }
-    return PackageStateChange::Unknown;
-}
-
 bool all_registered_sources_no_change(
         const SystemSourceUpgradeResult& result) noexcept {
     return std::all_of(
@@ -829,141 +869,6 @@ adapt_prepared_source_identities_for_upgrade_all(
     return adapter;
 }
 
-bool UpgradeAllOperationResult::is_success() const noexcept {
-    return status == UpgradeAllOperationStatus::Completed ||
-           status == UpgradeAllOperationStatus::NoUpdates;
-}
-
-PackageStateChange UpgradeAllOperationResult::package_state_change()
-        const noexcept {
-    const PackageStateChange system_source_change =
-            system_source.package_state_change();
-    const PackageStateChange aur_change = aur_package_state_change(aur);
-    if(system_source_change == PackageStateChange::Changed ||
-       aur_change == PackageStateChange::Changed) {
-        return PackageStateChange::Changed;
-    }
-    if(system_source_change == PackageStateChange::Unknown ||
-       aur_change == PackageStateChange::Unknown) {
-        return PackageStateChange::Unknown;
-    }
-    return PackageStateChange::NoChange;
-}
-
-bool UpgradeAllOperationResult::has_partial_completion() const noexcept {
-    if(is_success()) return false;
-    return system_source.system.status ==
-            SystemUpgradePhaseStatus::Completed;
-}
-
-bool UpgradeAllOperationResult::has_not_attempted_phase() const noexcept {
-    if(system_source.system.status ==
-               SystemUpgradePhaseStatus::NotAttempted ||
-       system_source.has_not_attempted_sources() ||
-       foreign_inventory.status ==
-               UpgradeAllForeignInventoryPhaseStatus::NotAttempted ||
-       aur.status == UpgradeAllAurPhaseStatus::NotAttempted) {
-        return true;
-    }
-    return aur.operation_result.has_value() &&
-           aur.operation_result->has_not_attempted_targets();
-}
-
-bool UpgradeAllOperationResult::has_cleanup_failure() const noexcept {
-    return system_source.has_cleanup_failure() ||
-           (aur.operation_result.has_value() &&
-            aur.operation_result->has_cleanup_failure());
-}
-
-bool UpgradeAllOperationResult::has_query_failure() const noexcept {
-    if(foreign_inventory.status ==
-       UpgradeAllForeignInventoryPhaseStatus::Failed) {
-        return true;
-    }
-    if(std::any_of(
-               issues.begin(), issues.end(),
-               [](const UpgradeAllOperationIssue& issue) {
-                   return issue.kind ==
-                                  UpgradeAllOperationIssueKind::
-                                          AurQueryFailed ||
-                          issue.kind ==
-                                  UpgradeAllOperationIssueKind::
-                                          ForeignInventoryConfigurationFailed ||
-                          issue.kind ==
-                                  UpgradeAllOperationIssueKind::
-                                          ForeignInventoryReadFailed;
-               })) {
-        return true;
-    }
-    return aur.operation_result.has_value() &&
-           aur.operation_result->has_query_failure();
-}
-
-bool UpgradeAllOperationResult::has_planning_issue() const noexcept {
-    if(!prepared_snapshot.explicit_source_adapter.issues.empty()) return true;
-    return aur.operation_result.has_value() &&
-           aur.operation_result->has_planning_issue();
-}
-
-bool UpgradeAllOperationResult::has_duplicate_exclusions() const noexcept {
-    return !duplicate_excluded_aur_targets.empty();
-}
-
-bool UpgradeAllOperationResult::has_external_satisfaction() const noexcept {
-    return !externally_satisfied_aur_build_units.empty();
-}
-
-bool UpgradeAllOperationResult::has_inconsistency() const noexcept {
-    if(status == UpgradeAllOperationStatus::InconsistentResult ||
-       system_source.status == SystemSourceUpgradeStatus::InconsistentResult ||
-       aur.status == UpgradeAllAurPhaseStatus::InconsistentResult) {
-        return true;
-    }
-    if(aur.operation_result.has_value() &&
-       (!aur.operation_result->issues.empty() ||
-        !aur.operation_result->reduced_operation_result.
-                reduction_issues.empty() ||
-        aur.operation_result->reduced_operation_result.status ==
-                AurUpdateOperationStatus::InconsistentResult)) {
-        return true;
-    }
-    return std::any_of(
-            issues.begin(), issues.end(),
-            [](const UpgradeAllOperationIssue& issue) {
-                switch(issue.kind) {
-                    case UpgradeAllOperationIssueKind::OptionSnapshotMismatch:
-                    case UpgradeAllOperationIssueKind::SourceSnapshotMismatch:
-                    case UpgradeAllOperationIssueKind::
-                            ExplicitSourceCorrelationInconsistent:
-                    case UpgradeAllOperationIssueKind::
-                            PreparedCapabilityConsumed:
-                    case UpgradeAllOperationIssueKind::
-                            SystemSourceExecutionFailedUnexpectedly:
-                    case UpgradeAllOperationIssueKind::
-                            FilteredAurExecutionFailed:
-                    case UpgradeAllOperationIssueKind::
-                            DuplicateExclusionCorrelationInconsistent:
-                    case UpgradeAllOperationIssueKind::
-                            ExternalSatisfactionCorrelationInconsistent:
-                    case UpgradeAllOperationIssueKind::UnknownFailure:
-                        return true;
-                    case UpgradeAllOperationIssueKind::
-                            ExplicitSourceAdapterInvalid:
-                    case UpgradeAllOperationIssueKind::
-                            SystemSourcePhaseIncomplete:
-                    case UpgradeAllOperationIssueKind::
-                            ForeignInventoryConfigurationFailed:
-                    case UpgradeAllOperationIssueKind::
-                            ForeignInventoryReadFailed:
-                    case UpgradeAllOperationIssueKind::AurQueryFailed:
-                    case UpgradeAllOperationIssueKind::
-                            FilteredAurPreparationFailed:
-                        return false;
-                }
-                return true;
-            });
-}
-
 PreparedUpgradeAllOperation::PreparedUpgradeAllOperation(
         std::unique_ptr<Impl> impl) noexcept
     : impl_(std::move(impl)) {
@@ -1012,6 +917,17 @@ make_nested_system_source_correlation_inconsistent_for_test() {
     }
 #endif
 }
+
+#ifdef JPACKER_ENABLE_SYSTEM_SOURCE_UPGRADE_TEST_HOOKS
+void PreparedUpgradeAllOperation::
+set_nested_system_source_unexpected_exception_for_test(
+        SystemSourceUpgradeUnexpectedExceptionPoint point,
+        bool unknown_exception) {
+    if(impl_ == nullptr) return;
+    impl_->system_source.set_unexpected_exception_for_test(
+            point, unknown_exception);
+}
+#endif
 #endif
 
 UpgradeAllOperationPreparation prepare_upgrade_all_operation(
@@ -1114,24 +1030,51 @@ UpgradeAllOperationResult execute_prepared_upgrade_all_operation(
     result.prepared_snapshot = snapshot;
     result.warnings = snapshot.warnings;
 
+    SystemSourceUpgradePhase observed_system_source_phase =
+            SystemSourceUpgradePhase::Preparation;
+    const SystemSourceUpgradeEventObserver progress_observer =
+            [&observed_system_source_phase](
+                    const SystemSourceUpgradeEvent& event) noexcept {
+                switch(event.kind) {
+                case SystemSourceUpgradeEventKind::LoadingSourcePreference:
+                case SystemSourceUpgradeEventKind::SourcePreferenceWarning:
+                    return;
+                case SystemSourceUpgradeEventKind::SystemUpgradeStarting:
+                    observed_system_source_phase =
+                            SystemSourceUpgradePhase::System;
+                    return;
+                case SystemSourceUpgradeEventKind::CheckingSourcePackages:
+                case SystemSourceUpgradeEventKind::InvalidPreferenceWarning:
+                    observed_system_source_phase =
+                            SystemSourceUpgradePhase::RegisteredSource;
+                    return;
+                }
+            };
+
     try {
-        // POLICY(#281): observerを渡さず、callback exceptionでmutation後の
-        // typed resultを失う既存PR2 Low findingをaggregateへ持ち込まない。
+        // POLICY(#281): noexcept observerはnested result自体も返せない例外時の
+        // 最終防御専用。通常のpartial typed result保持はnested executorが担う。
         result.system_source = execute_prepared_system_source_upgrade(
-                std::move(prepared.impl_->system_source), config);
+                std::move(prepared.impl_->system_source),
+                config,
+                progress_observer);
     } catch(const std::exception& error) {
+        const UpgradeAllOperationPhase stopped_phase =
+                aggregate_phase_for_system_source(
+                        observed_system_source_phase);
         result.status = UpgradeAllOperationStatus::InconsistentResult;
-        result.stopped_phase = UpgradeAllOperationPhase::System;
-        result.system_source = make_unattempted_system_source_result(
+        result.stopped_phase = stopped_phase;
+        result.system_source = make_unavailable_system_source_result(
                 snapshot.system_source,
-                SystemSourceUpgradeStatus::InconsistentResult);
+                observed_system_source_phase,
+                error.what());
         result.issues.push_back(make_issue(
                 UpgradeAllOperationIssueKind::
                         SystemSourceExecutionFailedUnexpectedly,
-                UpgradeAllOperationPhase::System,
+                stopped_phase,
                 error.what()));
         add_stopping_diagnostic(
-                result, UpgradeAllOperationPhase::System, error.what());
+                result, stopped_phase, error.what());
         set_not_attempted_after(
                 result,
                 UpgradeAllNotAttemptedReason::PriorAggregateInconsistency);
@@ -1139,18 +1082,22 @@ UpgradeAllOperationResult execute_prepared_upgrade_all_operation(
     } catch(...) {
         const std::string diagnostic =
                 "System/source execution failed with an unknown exception.";
+        const UpgradeAllOperationPhase stopped_phase =
+                aggregate_phase_for_system_source(
+                        observed_system_source_phase);
         result.status = UpgradeAllOperationStatus::InconsistentResult;
-        result.stopped_phase = UpgradeAllOperationPhase::System;
-        result.system_source = make_unattempted_system_source_result(
+        result.stopped_phase = stopped_phase;
+        result.system_source = make_unavailable_system_source_result(
                 snapshot.system_source,
-                SystemSourceUpgradeStatus::InconsistentResult);
+                observed_system_source_phase,
+                diagnostic);
         result.issues.push_back(make_issue(
                 UpgradeAllOperationIssueKind::
                         SystemSourceExecutionFailedUnexpectedly,
-                UpgradeAllOperationPhase::System,
+                stopped_phase,
                 diagnostic));
         add_stopping_diagnostic(
-                result, UpgradeAllOperationPhase::System, diagnostic);
+                result, stopped_phase, diagnostic);
         set_not_attempted_after(
                 result,
                 UpgradeAllNotAttemptedReason::PriorAggregateInconsistency);
