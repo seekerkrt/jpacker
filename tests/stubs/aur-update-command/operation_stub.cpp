@@ -4,6 +4,7 @@
 #include "aur_update_execution_runner.hpp"
 #include "aur_update_operation_result.hpp"
 #include "aur_update_query.hpp"
+#include "filtered_aur_update_operation.hpp"
 
 #include <algorithm>
 #include <cstdlib>
@@ -191,6 +192,84 @@ bool is_completed_failure_matrix_scenario(const std::string& test_scenario) {
             test_scenario == "completed-missing-invocation-status" ||
             test_scenario == "completed-cleanup-failure" ||
             test_scenario == "completed-not-attempted";
+}
+
+bool target_status_is_success(
+        AurUpdateOperationTargetStatus status) noexcept {
+    switch(status) {
+    case AurUpdateOperationTargetStatus::Updated:
+    case AurUpdateOperationTargetStatus::NoChange:
+    case AurUpdateOperationTargetStatus::Skipped:
+        return true;
+    case AurUpdateOperationTargetStatus::Unsupported:
+    case AurUpdateOperationTargetStatus::Incomplete:
+    case AurUpdateOperationTargetStatus::Failed:
+    case AurUpdateOperationTargetStatus::UpdatedCleanupFailed:
+    case AurUpdateOperationTargetStatus::NoChangeCleanupFailed:
+    case AurUpdateOperationTargetStatus::NotAttempted:
+        return false;
+    }
+    return false;
+}
+
+bool work_item_status_is_success(
+        AurUpdateWorkItemExecutionStatus status) noexcept {
+    switch(status) {
+    case AurUpdateWorkItemExecutionStatus::Updated:
+    case AurUpdateWorkItemExecutionStatus::NoChange:
+        return true;
+    case AurUpdateWorkItemExecutionStatus::Failed:
+    case AurUpdateWorkItemExecutionStatus::UpdatedCleanupFailed:
+    case AurUpdateWorkItemExecutionStatus::NoChangeCleanupFailed:
+    case AurUpdateWorkItemExecutionStatus::NotAttempted:
+        return false;
+    }
+    return false;
+}
+
+bool invocation_status_matches_operation(
+        AurUpdateOperationStatus operation_status,
+        const std::optional<AurUpdateInvocationExecutionStatus>& status) noexcept {
+    switch(operation_status) {
+    case AurUpdateOperationStatus::NoUpdates:
+        return !status.has_value();
+    case AurUpdateOperationStatus::Completed:
+        return status.has_value() &&
+                *status == AurUpdateInvocationExecutionStatus::Completed;
+    case AurUpdateOperationStatus::BlockedBeforeExecution:
+    case AurUpdateOperationStatus::StoppedOnWorkItemFailure:
+    case AurUpdateOperationStatus::StoppedAfterPackageCleanupFailure:
+    case AurUpdateOperationStatus::InconsistentResult:
+        return false;
+    }
+    return false;
+}
+
+bool reduced_result_is_defensively_successful(
+        const AurUpdateOperationResult& result) noexcept {
+    if(!result.is_success() ||
+       !invocation_status_matches_operation(
+               result.status, result.execution_status) ||
+       !result.preparation_issues.empty() || !result.reduction_issues.empty() ||
+       result.has_blocking_targets() || result.has_cleanup_failure() ||
+       result.has_not_attempted_targets()) {
+        return false;
+    }
+    if(!std::all_of(
+               result.targets.begin(), result.targets.end(),
+               [](const AurUpdateOperationTargetResult& target) {
+                   return target_status_is_success(target.status);
+               })) {
+        return false;
+    }
+    return std::all_of(
+            result.execution_work_items.begin(),
+            result.execution_work_items.end(),
+            [](const AurUpdateWorkItemExecutionResult& work_item) {
+                return work_item_status_is_success(work_item.status) &&
+                        work_item.failure_kind ==
+                                AurUpdateWorkItemFailureKind::None;
+            });
 }
 
 } // namespace
@@ -828,4 +907,141 @@ bool AurUpdateOperationResult::has_blocking_targets() const noexcept {
                         target.status ==
                                 AurUpdateOperationTargetStatus::Incomplete;
             });
+}
+
+PreparedFilteredAurUpdateOperation::PreparedFilteredAurUpdateOperation(
+        PreparedFilteredAurUpdateOperation&& other) noexcept
+    : valid_(other.valid_),
+      query_result(std::move(other.query_result)),
+      target_adapter(std::move(other.target_adapter)),
+      upgrade_all_plan(std::move(other.upgrade_all_plan)),
+      filtered_update_plan(std::move(other.filtered_update_plan)),
+      filtered_to_original_query_plan_index(
+              std::move(other.filtered_to_original_query_plan_index)),
+      original_query_plan_to_filtered_index(
+              std::move(other.original_query_plan_to_filtered_index)),
+      target_correlations(std::move(other.target_correlations)),
+      preflight(std::move(other.preflight)),
+      build_unit_correlations(std::move(other.build_unit_correlations)),
+      preparation(std::move(other.preparation)),
+      issues(std::move(other.issues)) {
+    other.valid_ = false;
+}
+
+bool PreparedFilteredAurUpdateOperation::is_valid() const noexcept {
+    return valid_;
+}
+
+bool PreparedFilteredAurUpdateOperation::is_prepared() const noexcept {
+    return valid_ && issues.empty() &&
+            !has_upgrade_all_planning_issues(upgrade_all_plan) &&
+            preparation.has_value() && preparation->is_prepared();
+}
+
+bool PreparedFilteredAurUpdateOperation::is_noop() const noexcept {
+    return valid_ && issues.empty() &&
+            !has_upgrade_all_planning_issues(upgrade_all_plan) &&
+            preparation.has_value() && preparation->is_noop();
+}
+
+bool PreparedFilteredAurUpdateOperation::is_blocked() const noexcept {
+    return valid_ && !is_prepared() && !is_noop();
+}
+
+PreparedFilteredAurUpdateOperation prepare_filtered_aur_update_operation(
+        AurUpdateQueryResult query_result,
+        std::vector<UpgradeAllExplicitSourceIdentity> explicit_sources,
+        const AppConfig& config) {
+    if(!explicit_sources.empty()) {
+        throw std::logic_error(
+                "AUR update command stub only supports an empty explicit source set.");
+    }
+
+    PreparedFilteredAurUpdateOperation prepared;
+    prepared.query_result = std::move(query_result);
+    // POLICY(#281): command regression fixtures keep the full legacy plan so
+    // normal skipped targets remain visible in the unchanged presentation.
+    prepared.filtered_update_plan = prepared.query_result.plan;
+    prepared.preflight = resolve_aur_update_execution_preflight(
+            prepared.filtered_update_plan);
+
+    AurUpdateSourceBuildPreparation legacy_preparation =
+            prepare_aur_update_source_build_invocation(
+                    prepared.preflight, false, config);
+    prepared.preparation.emplace(std::move(legacy_preparation));
+    return prepared;
+}
+
+FilteredAurUpdateExecutionResult execute_prepared_filtered_aur_update_operation(
+        PreparedFilteredAurUpdateOperation prepared,
+        const AppConfig& config) {
+    if(!prepared.is_valid()) {
+        throw std::logic_error(
+                "AUR update command passed an invalid filtered operation.");
+    }
+
+    std::optional<AurUpdateSourceBuildExecutionResult> execution;
+    if(!prepared.preparation.has_value()) {
+        throw std::logic_error(
+                "AUR update command filtered operation lost its preparation.");
+    }
+    if(prepared.preparation->is_prepared()) {
+        execution.emplace(
+                execute_prepared_aur_update_source_build_invocation(
+                        std::move(*prepared.preparation->invocation), config));
+    }
+
+    AurUpdateOperationResult reduced = reduce_aur_update_operation_result(
+            prepared.preflight, *prepared.preparation, execution);
+    prepared.valid_ = false;
+    return FilteredAurUpdateExecutionResult{
+            std::move(prepared.query_result),
+            std::move(prepared.target_adapter),
+            std::move(prepared.upgrade_all_plan),
+            std::move(prepared.filtered_update_plan),
+            std::move(prepared.filtered_to_original_query_plan_index),
+            std::move(prepared.original_query_plan_to_filtered_index),
+            std::move(prepared.target_correlations),
+            std::move(prepared.preflight),
+            std::move(prepared.build_unit_correlations),
+            std::move(*prepared.preparation),
+            std::move(execution),
+            std::move(reduced),
+            {},
+            std::move(prepared.issues)};
+}
+
+bool FilteredAurUpdateExecutionResult::is_success() const noexcept {
+    return !has_query_failure() && !has_planning_issue() &&
+            reduced_result_is_defensively_successful(
+                    reduced_operation_result);
+}
+
+bool FilteredAurUpdateExecutionResult::changed_package_state() const noexcept {
+    return reduced_operation_result.changed_package_state();
+}
+
+bool FilteredAurUpdateExecutionResult::has_partial_completion() const noexcept {
+    return reduced_operation_result.has_partial_completion();
+}
+
+bool FilteredAurUpdateExecutionResult::has_not_attempted_targets() const noexcept {
+    return reduced_operation_result.has_not_attempted_targets();
+}
+
+bool FilteredAurUpdateExecutionResult::has_cleanup_failure() const noexcept {
+    return reduced_operation_result.has_cleanup_failure();
+}
+
+bool FilteredAurUpdateExecutionResult::has_query_failure() const noexcept {
+    return !query_result.recoverable_failures.empty();
+}
+
+bool FilteredAurUpdateExecutionResult::has_planning_issue() const noexcept {
+    return !issues.empty() ||
+            has_upgrade_all_planning_issues(upgrade_all_plan);
+}
+
+bool FilteredAurUpdateExecutionResult::has_duplicate_exclusions() const noexcept {
+    return !upgrade_all_plan.excluded_duplicate_target_indexes.empty();
 }

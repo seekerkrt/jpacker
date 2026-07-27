@@ -20,6 +20,7 @@ struct ScriptedExecution {
 struct ExecutionStubState {
     std::deque<ScriptedExecution> outcomes;
     std::vector<stub::ExecutionCall> calls;
+    std::vector<stub::Event> events;
     const PacmanDatabasePaths* first_database_paths_address = nullptr;
     std::optional<std::string> expectation_failure;
 };
@@ -40,6 +41,16 @@ void enqueue(
             "Unexpected source-build work-item execution with no pending outcome.";
     g_state.expectation_failure = DIAGNOSTIC;
     throw std::logic_error(DIAGNOSTIC);
+}
+
+void record_event(std::size_t call_index, stub::EventKind kind) {
+    stub::ExecutionCall& call = g_state.calls.at(call_index);
+    call.events.push_back(kind);
+    g_state.events.push_back(stub::Event{
+            call_index,
+            kind,
+            call.package_name,
+            call.package_base});
 }
 
 } // namespace
@@ -98,6 +109,10 @@ const std::vector<ExecutionCall>& call_history() {
     return g_state.calls;
 }
 
+const std::vector<Event>& event_history() {
+    return g_state.events;
+}
+
 void require_script_consumed() {
     if(g_state.expectation_failure.has_value()) {
         throw std::logic_error(*g_state.expectation_failure);
@@ -122,8 +137,6 @@ execute_prepared_source_build_work_item(
         const ProductionSourceBuildWorkItem& work_item,
         const PacmanDatabasePaths& database_paths,
         const AppConfig& config) {
-    static_cast<void>(config);
-
     // POLICY(#267): by-value capabilityのmove元addressとは比較できないため、
     // runnerが全work itemへ渡したsnapshot参照同士の同一性をstub内で検証する。
     if(g_state.first_database_paths_address == nullptr) {
@@ -133,29 +146,45 @@ execute_prepared_source_build_work_item(
                 "AUR update runner did not reuse one Pacman database snapshot.";
     }
 
+    const std::size_t call_index = g_state.calls.size();
     g_state.calls.push_back(stub::ExecutionCall{
-            g_state.calls.size(),
+            call_index,
             work_item.request.package_name,
             work_item.request.checkout_name,
             work_item.plan_package_names,
-            database_paths});
+            database_paths,
+            config,
+            {}});
 
     if(g_state.outcomes.empty()) fail_unexpected_execution();
 
     ScriptedExecution scripted = std::move(g_state.outcomes.front());
     g_state.outcomes.pop_front();
+
+    // POLICY(#281): ordinary/unknown failureはbuild中の停止として固定する。
+    // cleanup failureだけはtransaction完了後のcleanup試行まで順序へ残す。
+    record_event(call_index, stub::EventKind::Checkout);
+    record_event(call_index, stub::EventKind::Build);
     switch(scripted.outcome) {
         case stub::ScriptedExecutionOutcome::Installed:
+            record_event(call_index, stub::EventKind::Install);
+            record_event(call_index, stub::EventKind::Cleanup);
             return ArtifactInstallExecutionOutcome::Installed;
         case stub::ScriptedExecutionOutcome::SkippedAsNeeded:
+            record_event(call_index, stub::EventKind::Install);
+            record_event(call_index, stub::EventKind::Cleanup);
             return ArtifactInstallExecutionOutcome::SkippedAsNeeded;
         case stub::ScriptedExecutionOutcome::OrdinaryFailure:
             throw std::runtime_error(scripted.diagnostic);
         case stub::ScriptedExecutionOutcome::InstalledCleanupFailure:
+            record_event(call_index, stub::EventKind::Install);
+            record_event(call_index, stub::EventKind::Cleanup);
             throw SeparatedSourceBuildCleanupError(
                     ArtifactInstallExecutionOutcome::Installed,
                     scripted.diagnostic);
         case stub::ScriptedExecutionOutcome::SkippedAsNeededCleanupFailure:
+            record_event(call_index, stub::EventKind::Install);
+            record_event(call_index, stub::EventKind::Cleanup);
             throw SeparatedSourceBuildCleanupError(
                     ArtifactInstallExecutionOutcome::SkippedAsNeeded,
                     scripted.diagnostic);

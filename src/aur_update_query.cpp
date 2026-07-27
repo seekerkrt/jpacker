@@ -94,6 +94,12 @@ AurUpdateQueryResult query_installed_aur_updates() {
 
     ForeignPackageInventory installed_packages =
             std::get<ForeignPackageInventory>(std::move(inventory_result));
+    return query_aur_updates_for_foreign_inventory(
+            std::move(installed_packages));
+}
+
+AurUpdateQueryResult query_aur_updates_for_foreign_inventory(
+        ForeignPackageInventory installed_packages) {
     if(installed_packages.empty()) return {};
 
     std::vector<std::string> package_names;

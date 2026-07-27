@@ -1,17 +1,11 @@
 #include "commands_aur_update.hpp"
 
 #include "app_config.hpp"
-#include "aur_update_execution_preflight.hpp"
-#include "aur_update_execution_preparation.hpp"
-#include "aur_update_execution_runner.hpp"
-#include "aur_update_operation_result.hpp"
-#include "aur_update_query.hpp"
+#include "filtered_aur_update_operation.hpp"
 #include "logging.hpp"
 #include "source_install.hpp"
 
-#include <algorithm>
 #include <iostream>
-#include <optional>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -113,6 +107,10 @@ std::string_view preparation_reason_label(AurUpdatePreparationReason reason) {
         return "pacman database unavailable";
     case AurUpdatePreparationReason::GenericPreparationInconsistent:
         return "generic preparation inconsistent";
+    case AurUpdatePreparationReason::BuildUnitSelectionInconsistent:
+        return "build unit selection inconsistent";
+    case AurUpdatePreparationReason::ExternalSatisfactionInconsistent:
+        return "external satisfaction inconsistent";
     }
     throw std::logic_error("Unknown AUR update preparation reason.");
 }
@@ -429,92 +427,6 @@ void print_operation_result(
     }
 }
 
-bool target_status_is_success(AurUpdateOperationTargetStatus status) {
-    switch(status) {
-    case AurUpdateOperationTargetStatus::Updated:
-    case AurUpdateOperationTargetStatus::NoChange:
-    case AurUpdateOperationTargetStatus::Skipped:
-        return true;
-    case AurUpdateOperationTargetStatus::Unsupported:
-    case AurUpdateOperationTargetStatus::Incomplete:
-    case AurUpdateOperationTargetStatus::Failed:
-    case AurUpdateOperationTargetStatus::UpdatedCleanupFailed:
-    case AurUpdateOperationTargetStatus::NoChangeCleanupFailed:
-    case AurUpdateOperationTargetStatus::NotAttempted:
-        return false;
-    }
-    throw std::logic_error("Unknown AUR update target status.");
-}
-
-bool work_item_status_is_success(AurUpdateWorkItemExecutionStatus status) {
-    switch(status) {
-    case AurUpdateWorkItemExecutionStatus::Updated:
-    case AurUpdateWorkItemExecutionStatus::NoChange:
-        return true;
-    case AurUpdateWorkItemExecutionStatus::Failed:
-    case AurUpdateWorkItemExecutionStatus::UpdatedCleanupFailed:
-    case AurUpdateWorkItemExecutionStatus::NoChangeCleanupFailed:
-    case AurUpdateWorkItemExecutionStatus::NotAttempted:
-        return false;
-    }
-    throw std::logic_error("Unknown AUR update work item status.");
-}
-
-bool invocation_status_matches_operation(
-        AurUpdateOperationStatus operation_status,
-        const std::optional<AurUpdateInvocationExecutionStatus>& status) {
-    switch(operation_status) {
-    case AurUpdateOperationStatus::NoUpdates:
-        return !status.has_value();
-    case AurUpdateOperationStatus::Completed:
-        if(!status.has_value()) return false;
-        switch(*status) {
-        case AurUpdateInvocationExecutionStatus::Completed:
-            return true;
-        case AurUpdateInvocationExecutionStatus::StoppedOnWorkItemFailure:
-        case AurUpdateInvocationExecutionStatus::
-                StoppedAfterPackageCleanupFailure:
-            return false;
-        }
-        throw std::logic_error("Unknown AUR update invocation status.");
-    case AurUpdateOperationStatus::BlockedBeforeExecution:
-    case AurUpdateOperationStatus::StoppedOnWorkItemFailure:
-    case AurUpdateOperationStatus::StoppedAfterPackageCleanupFailure:
-    case AurUpdateOperationStatus::InconsistentResult:
-        return false;
-    }
-    throw std::logic_error("Unknown AUR update operation status.");
-}
-
-bool command_succeeded(
-    const AurUpdateQueryResult& query_result,
-        const AurUpdateOperationResult& result) {
-    if(!result.is_success() ||
-       !invocation_status_matches_operation(
-               result.status, result.execution_status) ||
-       !query_result.recoverable_failures.empty() ||
-       !result.preparation_issues.empty() || !result.reduction_issues.empty() ||
-       result.has_blocking_targets() || result.has_cleanup_failure() ||
-       result.has_not_attempted_targets()) {
-        return false;
-    }
-    if(!std::all_of(
-               result.targets.begin(), result.targets.end(),
-               [](const AurUpdateOperationTargetResult& target) {
-                   return target_status_is_success(target.status);
-               })) {
-        return false;
-    }
-    return std::all_of(
-            result.execution_work_items.begin(),
-            result.execution_work_items.end(),
-            [](const AurUpdateWorkItemExecutionResult& work_item) {
-                return work_item_status_is_success(work_item.status) &&
-                       work_item.failure_kind ==
-                               AurUpdateWorkItemFailureKind::None;
-            });
-}
-
 } // namespace
 
 int cmd_upgrade_aur(const AppConfig& config) {
@@ -522,23 +434,16 @@ int cmd_upgrade_aur(const AppConfig& config) {
     require_supported_production_source_build_options(config);
 
     AurUpdateQueryResult query_result = query_installed_aur_updates();
-    AurUpdateExecutionPreflight preflight =
-            resolve_aur_update_execution_preflight(query_result.plan);
-    AurUpdateSourceBuildPreparation preparation =
-            prepare_aur_update_source_build_invocation(
-                    preflight, false, config);
+    PreparedFilteredAurUpdateOperation prepared =
+            prepare_filtered_aur_update_operation(
+                    std::move(query_result), {}, config);
+    FilteredAurUpdateExecutionResult result =
+            execute_prepared_filtered_aur_update_operation(
+                    std::move(prepared), config);
 
-    std::optional<AurUpdateSourceBuildExecutionResult> execution;
-    if(preparation.is_prepared()) {
-        // LANDMINE(#267): invocation capabilityだけをconsumeし、issue/warning/
-        // attributionを含むmoved-from preparation snapshotはreducerへ残す。
-        execution.emplace(
-                execute_prepared_aur_update_source_build_invocation(
-                        std::move(*preparation.invocation), config));
-    }
-
-    AurUpdateOperationResult result = reduce_aur_update_operation_result(
-            preflight, preparation, execution);
-    print_operation_result(query_result, result);
-    return command_succeeded(query_result, result) ? 0 : 1;
+    // POLICY(#281): upgrade-aur presentationはlegacy reducer resultを正本にし、
+    // filtered boundary固有のplanner/mapping detailをcommand outputへ追加しない。
+    print_operation_result(
+            result.query_result, result.reduced_operation_result);
+    return result.is_success() ? 0 : 1;
 }

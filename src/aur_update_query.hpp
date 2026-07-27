@@ -1,6 +1,7 @@
 #pragma once
 
 #include "aur_update_plan.hpp"
+#include "package_metadata.hpp"
 
 #include <string>
 #include <vector>
@@ -18,3 +19,5 @@ struct AurUpdateQueryResult {
 };
 
 AurUpdateQueryResult query_installed_aur_updates();
+AurUpdateQueryResult query_aur_updates_for_foreign_inventory(
+        ForeignPackageInventory installed_packages);

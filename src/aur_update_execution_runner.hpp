@@ -36,6 +36,7 @@ enum class AurUpdateInvocationExecutionStatus {
 // update target/root attributionをowned snapshotとして保持する。
 struct AurUpdateWorkItemExecutionResult {
     std::size_t              work_item_index = 0;
+    std::size_t              build_plan_order_index = 0;
     std::string              package_name;
     std::string              package_base;
     std::vector<std::string> plan_package_names;

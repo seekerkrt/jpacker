@@ -248,6 +248,8 @@ bool is_known_preparation_reason(AurUpdatePreparationReason reason) noexcept {
     case AurUpdatePreparationReason::StaticWorkItemInvalid:
     case AurUpdatePreparationReason::PacmanDatabaseUnavailable:
     case AurUpdatePreparationReason::GenericPreparationInconsistent:
+    case AurUpdatePreparationReason::BuildUnitSelectionInconsistent:
+    case AurUpdatePreparationReason::ExternalSatisfactionInconsistent:
         return true;
     }
     return false;
