@@ -27,6 +27,7 @@ struct ExecutableRootBinding {
 
 struct UpdateWorkItemDraft {
     ProductionSourceBuildWorkItem work_item;
+    std::size_t                    build_plan_order_index = 0;
     std::vector<std::size_t>      affected_update_plan_indices;
     std::vector<RootTargetIdentity> affected_roots;
 };
@@ -36,6 +37,17 @@ void add_unique(std::vector<Value>& values, const Value& value) {
     if(std::find(values.begin(), values.end(), value) == values.end()) {
         values.push_back(value);
     }
+}
+
+template<typename Value>
+bool has_duplicate_value(const std::vector<Value>& values) noexcept {
+    for(std::size_t index = 0; index < values.size(); ++index) {
+        if(std::find(values.begin(), values.begin() + index, values[index]) !=
+           values.begin() + index) {
+            return true;
+        }
+    }
+    return false;
 }
 
 bool is_blocking_status(AurUpdateExecutionTargetStatus status) noexcept {
@@ -89,6 +101,19 @@ bool is_dependency_role(PackageRole role) noexcept {
 
 bool is_known_role(PackageRole role) noexcept {
     return role == PackageRole::Root || is_dependency_role(role);
+}
+
+bool is_known_desired_install_reason(DesiredInstallReason reason) noexcept {
+    return reason == DesiredInstallReason::Explicit ||
+           reason == DesiredInstallReason::Dependency;
+}
+
+bool is_known_selection_status(
+        AurUpdateBuildUnitSelectionStatus status) noexcept {
+    return status ==
+                   AurUpdateBuildUnitSelectionStatus::SelectedForAurExecution ||
+           status == AurUpdateBuildUnitSelectionStatus::
+                             ExternallySatisfiedByExplicitSourcePackageBase;
 }
 
 AurUpdatePreparationIssue make_issue(
@@ -481,8 +506,123 @@ std::optional<DesiredInstallReason> desired_reason_for_package_target(
     return DesiredInstallReason::Dependency;
 }
 
+void retain_build_unit_selection_issue(
+        AurUpdateSourceBuildPreparation& preparation,
+        AurUpdatePreparationReason reason,
+        const std::string& diagnostic,
+        const AurUpdateBuildUnitSelectionEntry* selection_entry = nullptr) {
+    AurUpdatePreparationIssue issue = make_issue(reason, diagnostic);
+    if(selection_entry != nullptr) {
+        issue.package_base = selection_entry->package_base;
+        if(selection_entry->package_names.size() == 1) {
+            issue.package_name = selection_entry->package_names.front();
+        }
+    }
+    attribute_issue_to_all_executable_targets(issue, preparation);
+    preparation.issues.push_back(std::move(issue));
+}
+
+bool has_valid_external_satisfaction(
+        const AurUpdateBuildUnitSelectionEntry& selection_entry) noexcept {
+    if(!selection_entry.external_satisfaction.has_value()) return false;
+
+    const AurUpdateExternalSatisfactionAttribution& external =
+            *selection_entry.external_satisfaction;
+    if(external.explicit_source_indexes.empty() ||
+       external.source_identity_keys.empty() ||
+       has_duplicate_value(external.explicit_source_indexes) ||
+       has_duplicate_value(external.source_identity_keys) ||
+       std::any_of(
+               external.source_identity_keys.begin(),
+               external.source_identity_keys.end(),
+               [](const std::string& key) { return key.empty(); }) ||
+       !external.matched_package_base.has_value() ||
+       *external.matched_package_base != selection_entry.package_base) {
+        return false;
+    }
+
+    if(external.matched_package_name.has_value() &&
+       std::find(
+               selection_entry.package_names.begin(),
+               selection_entry.package_names.end(),
+               *external.matched_package_name) ==
+               selection_entry.package_names.end()) {
+        return false;
+    }
+    return true;
+}
+
+bool validate_build_unit_selection(
+        const BuildPlan& plan,
+        const AurUpdateBuildUnitSelection& build_unit_selection,
+        AurUpdateSourceBuildPreparation& preparation) {
+    if(build_unit_selection.entries.size() != plan.order.size()) {
+        retain_build_unit_selection_issue(
+                preparation,
+                AurUpdatePreparationReason::BuildUnitSelectionInconsistent,
+                "Build-unit selection count does not match BuildPlan execution order.");
+    }
+
+    std::size_t selected_execution_index = 0;
+    const std::size_t comparable_count = std::min(
+            build_unit_selection.entries.size(), plan.order.size());
+    for(std::size_t order_index = 0; order_index < comparable_count;
+        ++order_index) {
+        const BuildPlanEntry& plan_entry = plan.order[order_index];
+        const AurUpdateBuildUnitSelectionEntry& selection_entry =
+                build_unit_selection.entries[order_index];
+
+        if(selection_entry.build_plan_order_index != order_index ||
+           selection_entry.package_base != plan_entry.package_base ||
+           selection_entry.package_names != plan_entry.package_names) {
+            retain_build_unit_selection_issue(
+                    preparation,
+                    AurUpdatePreparationReason::BuildUnitSelectionInconsistent,
+                    "Build-unit selection identity or order differs from BuildPlan execution order.",
+                    &selection_entry);
+        }
+
+        if(!is_known_selection_status(selection_entry.status)) {
+            retain_build_unit_selection_issue(
+                    preparation,
+                    AurUpdatePreparationReason::BuildUnitSelectionInconsistent,
+                    "Build-unit selection has an unknown status.",
+                    &selection_entry);
+            continue;
+        }
+
+        if(selection_entry.status == AurUpdateBuildUnitSelectionStatus::
+                                              SelectedForAurExecution) {
+            if(selection_entry.selected_execution_index !=
+                       selected_execution_index ||
+               selection_entry.external_satisfaction.has_value()) {
+                retain_build_unit_selection_issue(
+                        preparation,
+                        AurUpdatePreparationReason::
+                                BuildUnitSelectionInconsistent,
+                        "Selected build unit does not have the expected dense execution index or retains external satisfaction.",
+                        &selection_entry);
+            }
+            ++selected_execution_index;
+            continue;
+        }
+
+        if(selection_entry.selected_execution_index.has_value() ||
+           !has_valid_external_satisfaction(selection_entry)) {
+            retain_build_unit_selection_issue(
+                    preparation,
+                    AurUpdatePreparationReason::
+                            ExternalSatisfactionInconsistent,
+                    "Externally satisfied build unit has an inconsistent execution index or explicit source attribution.",
+                    &selection_entry);
+        }
+    }
+    return preparation.issues.empty();
+}
+
 bool collect_work_item_drafts(
         const BuildPlan& plan,
+        const AurUpdateBuildUnitSelection& build_unit_selection,
         const std::vector<ExecutableRootBinding>& bindings,
         AurUpdateSourceBuildPreparation& preparation,
         std::vector<UpdateWorkItemDraft>& drafts,
@@ -490,7 +630,11 @@ bool collect_work_item_drafts(
     std::vector<std::size_t> order_count_by_package_target(
             plan.package_targets.size(), 0);
 
-    for(const auto& entry : plan.order) {
+    for(std::size_t order_index = 0; order_index < plan.order.size();
+        ++order_index) {
+        const BuildPlanEntry& entry = plan.order[order_index];
+        const AurUpdateBuildUnitSelectionEntry& selection_entry =
+                build_unit_selection.entries[order_index];
         if(!is_valid_package_name(entry.package_base) ||
            entry.package_names.size() != 1 ||
            !is_valid_package_name(entry.package_names.front())) {
@@ -529,6 +673,7 @@ bool collect_work_item_drafts(
         ++order_count_by_package_target[package_target_index];
 
         UpdateWorkItemDraft draft;
+        draft.build_plan_order_index = order_index;
         const bool roots_are_attributed =
                 collect_exact_package_target_attribution(
                         package_target, bindings,
@@ -567,6 +712,22 @@ bool collect_work_item_drafts(
                         "Planned package target contains no known package role.";
             }
             preparation.issues.push_back(std::move(reason_issue));
+            continue;
+        }
+
+        if(selection_entry.status == AurUpdateBuildUnitSelectionStatus::
+                                             ExternallySatisfiedByExplicitSourcePackageBase) {
+            preparation.externally_satisfied_build_units.push_back(
+                    AurUpdateExternallySatisfiedBuildUnit{
+                            order_index,
+                            package_name,
+                            entry.package_base,
+                            entry.package_names,
+                            draft.affected_update_plan_indices,
+                            draft.affected_roots,
+                            package_target.roles,
+                            *desired_reason,
+                            *selection_entry.external_satisfaction});
             continue;
         }
 
@@ -609,6 +770,32 @@ bool collect_work_item_drafts(
                     " Its roots cannot be attributed exactly to executable update targets.";
             attribute_issue_to_all_executable_targets(issue, preparation);
         }
+        preparation.issues.push_back(std::move(issue));
+    }
+
+    if(!preparation.issues.empty()) return false;
+
+    // POLICY(#281): dependency unitだけがselectedでもroot updateは完了しない。
+    // 各Executable root自身のwork itemがcapabilityへ残ることをmutation前に固定する。
+    for(const auto& binding : bindings) {
+        const bool has_selected_root_work_item = std::any_of(
+                drafts.begin(), drafts.end(),
+                [&binding](const UpdateWorkItemDraft& draft) {
+                    return draft.work_item.request.package_name ==
+                                   binding.root.requested_name &&
+                           std::find(
+                                   draft.affected_roots.begin(),
+                                   draft.affected_roots.end(), binding.root) !=
+                                   draft.affected_roots.end();
+                });
+        if(has_selected_root_work_item) continue;
+
+        AurUpdatePreparationIssue issue = make_issue(
+                AurUpdatePreparationReason::BuildUnitSelectionInconsistent,
+                "Executable AUR update root has no selected build unit.");
+        attribute_issue_to_target(issue, *binding.target);
+        issue.affected_roots.push_back(binding.root);
+        issue.package_name = binding.root.requested_name;
         preparation.issues.push_back(std::move(issue));
     }
     return preparation.issues.empty();
@@ -761,23 +948,13 @@ snapshot_work_item_attributions(
         const UpdateWorkItemDraft& draft = drafts[index];
         attributions.push_back(AurUpdatePreparedWorkItemAttribution{
                 index,
+                draft.build_plan_order_index,
                 draft.work_item.request.package_name,
                 draft.work_item.request.checkout_name,
                 draft.affected_update_plan_indices,
                 draft.affected_roots});
     }
     return attributions;
-}
-
-template<typename Value>
-bool has_duplicate_value(const std::vector<Value>& values) noexcept {
-    for(std::size_t index = 0; index < values.size(); ++index) {
-        if(std::find(values.begin(), values.begin() + index, values[index]) !=
-           values.begin() + index) {
-            return true;
-        }
-    }
-    return false;
 }
 
 bool has_update_target_snapshot(
@@ -800,6 +977,89 @@ bool has_root_snapshot(
            preparation.affected_roots.end();
 }
 
+bool has_exact_build_unit_selection_correlation(
+        const std::vector<AurUpdatePreparedWorkItemAttribution>& attributions,
+        const AurUpdateSourceBuildPreparation& preparation) noexcept {
+    std::size_t selected_index = 0;
+    std::size_t external_index = 0;
+    for(std::size_t order_index = 0;
+        order_index < preparation.build_unit_selection.entries.size();
+        ++order_index) {
+        const AurUpdateBuildUnitSelectionEntry& selection_entry =
+                preparation.build_unit_selection.entries[order_index];
+        if(selection_entry.build_plan_order_index != order_index ||
+           selection_entry.package_names.size() != 1 ||
+           selection_entry.package_base.empty() ||
+           !is_known_selection_status(selection_entry.status)) {
+            return false;
+        }
+
+        if(selection_entry.status == AurUpdateBuildUnitSelectionStatus::
+                                              SelectedForAurExecution) {
+            if(selection_entry.selected_execution_index != selected_index ||
+               selection_entry.external_satisfaction.has_value() ||
+               selected_index >= attributions.size()) {
+                return false;
+            }
+            const AurUpdatePreparedWorkItemAttribution& attribution =
+                    attributions[selected_index];
+            if(attribution.invocation_work_item_index != selected_index ||
+               attribution.build_plan_order_index != order_index ||
+               attribution.package_name !=
+                       selection_entry.package_names.front() ||
+               attribution.package_base != selection_entry.package_base) {
+                return false;
+            }
+            ++selected_index;
+            continue;
+        }
+
+        if(selection_entry.selected_execution_index.has_value() ||
+           !has_valid_external_satisfaction(selection_entry) ||
+           external_index >=
+                   preparation.externally_satisfied_build_units.size()) {
+            return false;
+        }
+        const AurUpdateExternallySatisfiedBuildUnit& external =
+                preparation.externally_satisfied_build_units[external_index];
+        if(external.build_plan_order_index != order_index ||
+           external.package_name != selection_entry.package_names.front() ||
+           external.package_base != selection_entry.package_base ||
+           external.plan_package_names != selection_entry.package_names ||
+           external.affected_update_plan_indices.empty() ||
+           external.affected_roots.empty() || external.roles.empty() ||
+           has_duplicate_value(external.affected_update_plan_indices) ||
+           has_duplicate_value(external.affected_roots) ||
+           !std::all_of(
+                   external.affected_update_plan_indices.begin(),
+                   external.affected_update_plan_indices.end(),
+                   [&preparation](std::size_t update_plan_index) {
+                       return has_update_target_snapshot(
+                               preparation, update_plan_index);
+                   }) ||
+           !std::all_of(
+                   external.affected_roots.begin(),
+                   external.affected_roots.end(),
+                   [&preparation](const RootTargetIdentity& root) {
+                       return has_root_snapshot(preparation, root);
+                   }) ||
+           !std::all_of(
+                   external.roles.begin(), external.roles.end(),
+                   is_known_role) ||
+           !is_known_desired_install_reason(
+                   external.desired_install_reason) ||
+           external.external_satisfaction !=
+                   *selection_entry.external_satisfaction) {
+            return false;
+        }
+        ++external_index;
+    }
+
+    return selected_index == attributions.size() &&
+           external_index ==
+                   preparation.externally_satisfied_build_units.size();
+}
+
 bool has_exact_prepared_correlation(
         const PreparedProductionSourceBuildInvocation& production_invocation,
         const std::vector<AurUpdatePreparedWorkItemAttribution>& attributions,
@@ -807,7 +1067,9 @@ bool has_exact_prepared_correlation(
     const auto& work_items = production_invocation.work_items;
     if(work_items.empty() || attributions.size() != work_items.size() ||
        preparation.affected_update_targets.empty() ||
-       preparation.affected_roots.empty()) {
+       preparation.affected_roots.empty() ||
+       !has_exact_build_unit_selection_correlation(
+               attributions, preparation)) {
         return false;
     }
 
@@ -869,6 +1131,25 @@ bool has_exact_prepared_correlation(
     return true;
 }
 
+AurUpdateBuildUnitSelection make_all_selected_build_unit_selection(
+        const AurUpdateExecutionPreflight& preflight) {
+    AurUpdateBuildUnitSelection selection;
+    if(!preflight.build_plan.has_value()) return selection;
+
+    const std::vector<BuildPlanEntry>& order = preflight.build_plan->order;
+    selection.entries.reserve(order.size());
+    for(std::size_t index = 0; index < order.size(); ++index) {
+        selection.entries.push_back(AurUpdateBuildUnitSelectionEntry{
+                index,
+                order[index].package_base,
+                order[index].package_names,
+                AurUpdateBuildUnitSelectionStatus::SelectedForAurExecution,
+                index,
+                std::nullopt});
+    }
+    return selection;
+}
+
 } // namespace
 
 PreparedAurUpdateSourceBuildInvocation::
@@ -905,9 +1186,11 @@ bool AurUpdateSourceBuildPreparation::is_blocked() const noexcept {
 
 AurUpdateSourceBuildPreparation prepare_aur_update_source_build_invocation(
         const AurUpdateExecutionPreflight& preflight,
+        const AurUpdateBuildUnitSelection& build_unit_selection,
         bool needed,
         const AppConfig& config) {
     AurUpdateSourceBuildPreparation preparation;
+    preparation.build_unit_selection = build_unit_selection;
 
     // Blocking preflightとnormal no-opはstrict readerやDB resolverへ進めない。
     retain_skipped_preflight_inconsistencies(preflight, preparation);
@@ -921,7 +1204,18 @@ AurUpdateSourceBuildPreparation prepare_aur_update_source_build_invocation(
         return preparation;
     }
     if(!preparation.issues.empty()) return preparation;
-    if(!has_executable_preflight_targets(preflight)) return preparation;
+    if(!has_executable_preflight_targets(preflight)) {
+        if(!build_unit_selection.entries.empty() ||
+           (preflight.build_plan.has_value() &&
+            !preflight.build_plan->order.empty())) {
+            retain_build_unit_selection_issue(
+                    preparation,
+                    AurUpdatePreparationReason::
+                            BuildUnitSelectionInconsistent,
+                    "AUR update preflight has build-unit selection without an executable target.");
+        }
+        return preparation;
+    }
 
     retain_executable_preflight_inconsistencies(
             preflight, preparation);
@@ -977,11 +1271,16 @@ AurUpdateSourceBuildPreparation prepare_aur_update_source_build_invocation(
                bindings, plan, preparation)) {
         return preparation;
     }
+    if(!validate_build_unit_selection(
+               plan, build_unit_selection, preparation)) {
+        return preparation;
+    }
 
     std::vector<UpdateWorkItemDraft> drafts;
     drafts.reserve(plan.order.size());
     if(!collect_work_item_drafts(
-               plan, bindings, preparation, drafts, needed)) {
+               plan, build_unit_selection, bindings, preparation, drafts,
+               needed)) {
         return preparation;
     }
 
@@ -1014,6 +1313,8 @@ AurUpdateSourceBuildPreparation prepare_aur_update_source_build_invocation(
                 std::move(preparation.warnings),
                 std::move(preparation.affected_update_targets),
                 std::move(preparation.affected_roots),
+                std::move(preparation.build_unit_selection),
+                std::move(preparation.externally_satisfied_build_units),
                 std::optional<PreparedAurUpdateSourceBuildInvocation>{
                         std::move(prepared_invocation)}};
     } catch(const PackageMetadataError& error) {
@@ -1038,4 +1339,14 @@ AurUpdateSourceBuildPreparation prepare_aur_update_source_build_invocation(
         preparation.issues.push_back(std::move(issue));
     }
     return preparation;
+}
+
+AurUpdateSourceBuildPreparation prepare_aur_update_source_build_invocation(
+        const AurUpdateExecutionPreflight& preflight,
+        bool needed,
+        const AppConfig& config) {
+    const AurUpdateBuildUnitSelection build_unit_selection =
+            make_all_selected_build_unit_selection(preflight);
+    return prepare_aur_update_source_build_invocation(
+            preflight, build_unit_selection, needed, config);
 }

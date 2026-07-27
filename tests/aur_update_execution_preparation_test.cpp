@@ -33,6 +33,16 @@ static_assert(
                 PreparedProductionSourceBuildInvocation,
                 std::vector<AurUpdatePreparedWorkItemAttribution>>);
 
+using FilteredPreparationFunction = AurUpdateSourceBuildPreparation (*)(
+        const AurUpdateExecutionPreflight&,
+        const AurUpdateBuildUnitSelection&,
+        bool,
+        const AppConfig&);
+static_assert(std::is_same_v<
+              decltype(static_cast<FilteredPreparationFunction>(
+                      &prepare_aur_update_source_build_invocation)),
+              FilteredPreparationFunction>);
+
 namespace {
 
 namespace fs = std::filesystem;
@@ -258,6 +268,50 @@ AurUpdateExecutionPreflight ordered_multi_root_preflight() {
     return preflight;
 }
 
+AurUpdateBuildUnitSelection build_unit_selection_with_external(
+        const AurUpdateExecutionPreflight& preflight,
+        std::size_t external_order_index,
+        AurUpdateExternalSatisfactionAttribution external_satisfaction) {
+    const BuildPlan& plan = preflight.build_plan.value();
+    AurUpdateBuildUnitSelection selection;
+    selection.entries.reserve(plan.order.size());
+
+    std::size_t selected_execution_index = 0;
+    for(std::size_t order_index = 0; order_index < plan.order.size();
+        ++order_index) {
+        const BuildPlanEntry& entry = plan.order[order_index];
+        if(order_index == external_order_index) {
+            selection.entries.push_back(AurUpdateBuildUnitSelectionEntry{
+                    order_index,
+                    entry.package_base,
+                    entry.package_names,
+                    AurUpdateBuildUnitSelectionStatus::
+                            ExternallySatisfiedByExplicitSourcePackageBase,
+                    std::nullopt,
+                    std::move(external_satisfaction)});
+            continue;
+        }
+        selection.entries.push_back(AurUpdateBuildUnitSelectionEntry{
+                order_index,
+                entry.package_base,
+                entry.package_names,
+                AurUpdateBuildUnitSelectionStatus::SelectedForAurExecution,
+                selected_execution_index,
+                std::nullopt});
+        ++selected_execution_index;
+    }
+    return selection;
+}
+
+AurUpdateExternalSatisfactionAttribution external_satisfaction(
+        const std::string& package_base) {
+    return AurUpdateExternalSatisfactionAttribution{
+            {7, 9},
+            {"source://shared-dependency"},
+            std::nullopt,
+            package_base};
+}
+
 const AurUpdatePreparationIssue& require_issue(
         const AurUpdateSourceBuildPreparation& preparation,
         AurUpdatePreparationReason reason,
@@ -392,6 +446,7 @@ void expect_work_item(
 void expect_attribution(
         const AurUpdatePreparedWorkItemAttribution& attribution,
         std::size_t work_item_index,
+        std::size_t build_plan_order_index,
         const std::string& package_name,
         const std::string& package_base,
         const std::vector<std::size_t>& affected_update_plan_indices,
@@ -400,6 +455,9 @@ void expect_attribution(
     expect(
             attribution.invocation_work_item_index == work_item_index,
             context + ": work item index differs");
+    expect(
+            attribution.build_plan_order_index == build_plan_order_index,
+            context + ": BuildPlan order index differs");
     expect(
             attribution.package_name == package_name,
             context + ": package name differs");
@@ -787,7 +845,7 @@ void test_single_root_exact_work_item_and_snapshot() {
             preparation.invocation->work_item_attributions();
     expect(attributions.size() == 1, "Single root attribution count differs");
     expect_attribution(
-            attributions.front(), 0, "single-root", "single-root", {0},
+            attributions.front(), 0, 0, "single-root", "single-root", {0},
             {{0, "single-root"}}, "single-root exact attribution");
     expect(
             production_invocation.database_paths.root_dir ==
@@ -928,17 +986,17 @@ void test_build_plan_order_skip_exclusion_and_install_reasons() {
             preparation.invocation->work_item_attributions();
     expect(attributions.size() == 4, "Multi-root attribution count differs");
     expect_attribution(
-            attributions[0], 0, "private-dependency", "private-dependency",
+            attributions[0], 0, 0, "private-dependency", "private-dependency",
             {0}, {{0, "root-a"}}, "private dependency attribution");
     expect_attribution(
-            attributions[1], 1, "shared-dependency", "shared-dependency",
+            attributions[1], 1, 1, "shared-dependency", "shared-dependency",
             {0, 2}, {{0, "root-a"}, {1, "root-b"}},
             "shared dependency attribution");
     expect_attribution(
-            attributions[2], 2, "root-b", "root-b", {0, 2},
+            attributions[2], 2, 2, "root-b", "root-b", {0, 2},
             {{0, "root-a"}, {1, "root-b"}}, "root-b attribution");
     expect_attribution(
-            attributions[3], 3, "root-a", "root-a", {0},
+            attributions[3], 3, 3, "root-a", "root-a", {0},
             {{0, "root-a"}}, "root-a attribution");
     expect(stub::database_call_count() == 1, "Multi-root invocation resolved DB per work item");
     expect(
@@ -962,6 +1020,138 @@ void test_build_plan_order_skip_exclusion_and_install_reasons() {
                     stub::EventKind::PacmanDatabaseResolution,
             },
             "multi-root read/validation/DB order");
+}
+
+void test_external_satisfaction_overlay_preserves_original_order() {
+    stub::reset();
+    stub::set_database_paths(
+            PacmanDatabasePaths{"/external/root", "/external/database"});
+
+    AurUpdateExecutionPreflight preflight = ordered_multi_root_preflight();
+    const AurUpdateExternalSatisfactionAttribution expected_external =
+            external_satisfaction("shared-dependency");
+    const AurUpdateBuildUnitSelection selection =
+            build_unit_selection_with_external(
+                    preflight, 1, expected_external);
+    const AppConfig config;
+    AurUpdateSourceBuildPreparation preparation =
+            prepare_aur_update_source_build_invocation(
+                    preflight, selection, false, config);
+
+    expect_result_invariant(preparation, "external satisfaction result");
+    expect(
+            preparation.is_prepared(),
+            "External dependency satisfaction blocked selected roots");
+    expect(
+            preparation.build_unit_selection == selection,
+            "Preparation changed the build-unit selection snapshot");
+
+    const PreparedProductionSourceBuildInvocation& production_invocation =
+            preparation.invocation->production_invocation_for_test();
+    expect(
+            production_invocation.work_items.size() == 3,
+            "External build unit retained an execution capability");
+    expect(
+            stub::strict_preference_read_history() ==
+                    std::vector<std::string>{
+                            "private-dependency", "root-b", "root-a"},
+            "External build unit reached the strict preference reader");
+
+    const auto& attributions =
+            preparation.invocation->work_item_attributions();
+    expect(attributions.size() == 3, "Selected attribution count differs");
+    expect_attribution(
+            attributions[0], 0, 0, "private-dependency",
+            "private-dependency", {0}, {{0, "root-a"}},
+            "selected dependency after filtering");
+    expect_attribution(
+            attributions[1], 1, 2, "root-b", "root-b", {0, 2},
+            {{0, "root-a"}, {1, "root-b"}},
+            "selected dependency-installed root after filtering");
+    expect_attribution(
+            attributions[2], 2, 3, "root-a", "root-a", {0},
+            {{0, "root-a"}}, "selected root after filtering");
+
+    expect(
+            preparation.externally_satisfied_build_units.size() == 1,
+            "External build-unit snapshot count differs");
+    const AurUpdateExternallySatisfiedBuildUnit& external =
+            preparation.externally_satisfied_build_units.front();
+    expect(
+            external.build_plan_order_index == 1 &&
+                    external.package_name == "shared-dependency" &&
+                    external.package_base == "shared-dependency" &&
+                    external.plan_package_names ==
+                            std::vector<std::string>{"shared-dependency"} &&
+                    external.affected_update_plan_indices ==
+                            std::vector<std::size_t>{0, 2} &&
+                    external.affected_roots ==
+                            std::vector<RootTargetIdentity>{
+                                    {0, "root-a"}, {1, "root-b"}} &&
+                    external.roles ==
+                            std::vector<PackageRole>{
+                                    PackageRole::RuntimeDependency} &&
+                    external.desired_install_reason ==
+                            DesiredInstallReason::Dependency &&
+                    external.external_satisfaction == expected_external,
+            "External build-unit snapshot lost identity or attribution");
+    expect(
+            stub::database_call_count() == 1,
+            "Filtered invocation did not retain one database snapshot");
+}
+
+void test_invalid_selection_and_external_root_stop_before_io() {
+    const AppConfig config;
+
+    stub::reset();
+    AurUpdateExecutionPreflight missing_selection_preflight =
+            single_root_preflight("missing-selection");
+    const AurUpdateSourceBuildPreparation missing_selection =
+            prepare_aur_update_source_build_invocation(
+                    missing_selection_preflight,
+                    AurUpdateBuildUnitSelection{}, false, config);
+    expect_blocked_reason(
+            missing_selection,
+            AurUpdatePreparationReason::BuildUnitSelectionInconsistent,
+            "missing selection entry");
+    expect_no_external_preparation_boundary("missing selection entry");
+
+    stub::reset();
+    AurUpdateExecutionPreflight invalid_external_preflight =
+            single_root_preflight("invalid-external");
+    AurUpdateBuildUnitSelection invalid_external =
+            build_unit_selection_with_external(
+                    invalid_external_preflight, 0,
+                    external_satisfaction("wrong-package-base"));
+    const AurUpdateSourceBuildPreparation invalid_external_result =
+            prepare_aur_update_source_build_invocation(
+                    invalid_external_preflight, invalid_external, false,
+                    config);
+    expect_blocked_reason(
+            invalid_external_result,
+            AurUpdatePreparationReason::ExternalSatisfactionInconsistent,
+            "invalid external attribution");
+    expect_no_external_preparation_boundary("invalid external attribution");
+
+    stub::reset();
+    AurUpdateExecutionPreflight external_root_preflight =
+            single_root_preflight("external-root");
+    const AurUpdateBuildUnitSelection external_root_selection =
+            build_unit_selection_with_external(
+                    external_root_preflight, 0,
+                    external_satisfaction("external-root"));
+    const AurUpdateSourceBuildPreparation external_root_result =
+            prepare_aur_update_source_build_invocation(
+                    external_root_preflight, external_root_selection, false,
+                    config);
+    expect_blocked_reason(
+            external_root_result,
+            AurUpdatePreparationReason::BuildUnitSelectionInconsistent,
+            "external executable root");
+    expect(
+            external_root_result.externally_satisfied_build_units.size() == 1,
+            "Blocked external root lost its known satisfaction snapshot");
+    expect_no_external_preparation_boundary("external executable root");
 }
 
 void expect_global_package_root_attribution_blocker(
@@ -1469,6 +1659,12 @@ int main() {
         run_case(
                 "BuildPlan order, skipped exclusion, and install reasons",
                 test_build_plan_order_skip_exclusion_and_install_reasons);
+        run_case(
+                "external satisfaction preserves original BuildPlan order",
+                test_external_satisfaction_overlay_preserves_original_order);
+        run_case(
+                "invalid selection and external root stop before IO",
+                test_invalid_selection_and_external_root_stop_before_io);
         run_case(
                 "unknown package root attribution is global",
                 test_unknown_package_root_attribution_is_global);

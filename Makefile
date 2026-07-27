@@ -38,6 +38,7 @@ AUR_UPDATE_EXECUTION_PREPARATION_TEST_TARGET := $(BUILD_DIR)/tests/aur-update-ex
 AUR_UPDATE_EXECUTION_PREPARATION_INTEGRATION_TEST_TARGET := $(BUILD_DIR)/tests/aur-update-execution-preparation-integration-test
 AUR_UPDATE_EXECUTION_RUNNER_TEST_TARGET := $(BUILD_DIR)/tests/aur-update-execution-runner-test
 AUR_UPDATE_OPERATION_RESULT_TEST_TARGET := $(BUILD_DIR)/tests/aur-update-operation-result-test
+FILTERED_AUR_UPDATE_OPERATION_TEST_TARGET := $(BUILD_DIR)/tests/filtered-aur-update-operation-test
 DEPENDENCY_PLAN_MODEL_TEST_TARGET := $(BUILD_DIR)/tests/dependency-plan-model-test
 REPOSITORY_QUERY_TEST_TARGET := $(BUILD_DIR)/tests/repository-query-test
 ARTIFACT_INSTALL_PLAN_TEST_TARGET := $(BUILD_DIR)/tests/artifact-install-plan-test
@@ -90,7 +91,8 @@ AUR_UPDATE_COMMAND_TEST_SRCS := \
 		$(SRC_DIR)/aur_update_execution_preflight.cpp \
 		$(SRC_DIR)/aur_update_execution_preparation.cpp \
 		$(SRC_DIR)/aur_update_execution_runner.cpp \
-		$(SRC_DIR)/aur_update_operation_result.cpp, \
+		$(SRC_DIR)/aur_update_operation_result.cpp \
+		$(SRC_DIR)/filtered_aur_update_operation.cpp, \
 		$(SRCS)) \
 	tests/stubs/aur-update-command/operation_stub.cpp \
 	tests/stubs/package-metadata/alpm_stub.cpp
@@ -197,6 +199,46 @@ AUR_UPDATE_OPERATION_RESULT_TEST_SRCS := \
 	$(SRC_DIR)/package_identifier.cpp \
 	tests/stubs/aur-update-execution-preparation/preparation_stub.cpp
 AUR_UPDATE_OPERATION_RESULT_FORBIDDEN_TEST_SRCS := \
+	$(SRC_DIR)/process.cpp \
+	$(SRC_DIR)/checkout_fetch.cpp \
+	$(SRC_DIR)/persistent_checkout.cpp \
+	$(SRC_DIR)/artifact_workspace.cpp \
+	$(SRC_DIR)/separated_source_build.cpp \
+	$(SRC_DIR)/artifact_install_executor.cpp \
+	$(SRC_DIR)/source_build.cpp \
+	$(SRC_DIR)/source_install.cpp
+# POLICY(#281): filtered operation testはactual orchestrationをlinkし、query
+# transport、BuildPlan resolver、preparation IO、source lifecycleだけをstub化する。
+FILTERED_AUR_UPDATE_OPERATION_TEST_SRCS := \
+	tests/filtered_aur_update_operation_test.cpp \
+	$(SRC_DIR)/filtered_aur_update_operation.cpp \
+	$(SRC_DIR)/upgrade_all_plan.cpp \
+	$(SRC_DIR)/aur_update_query.cpp \
+	$(SRC_DIR)/aur_update_plan.cpp \
+	$(SRC_DIR)/aur_update_execution_preflight.cpp \
+	$(SRC_DIR)/aur_update_execution_preparation.cpp \
+	$(SRC_DIR)/aur_update_execution_runner.cpp \
+	$(SRC_DIR)/aur_update_operation_result.cpp \
+	$(SRC_DIR)/source_install_preparation.cpp \
+	$(SRC_DIR)/source_environment.cpp \
+	$(SRC_DIR)/shell_words.cpp \
+	$(SRC_DIR)/package_identifier.cpp \
+	$(SRC_DIR)/dependency_spec.cpp \
+	$(SRC_DIR)/logging.cpp \
+	tests/stubs/filtered-aur-update-operation/query_stub.cpp \
+	tests/stubs/aur-update-execution-preflight/preflight_stub.cpp \
+	tests/stubs/aur-update-execution-preparation/preparation_stub.cpp \
+	tests/stubs/aur-update-execution-runner/execution_stub.cpp
+FILTERED_AUR_UPDATE_OPERATION_REQUIRED_TEST_SRCS := \
+	$(SRC_DIR)/filtered_aur_update_operation.cpp \
+	$(SRC_DIR)/aur_update_query.cpp \
+	$(SRC_DIR)/aur_update_execution_preflight.cpp \
+	$(SRC_DIR)/aur_update_execution_preparation.cpp \
+	$(SRC_DIR)/aur_update_execution_runner.cpp \
+	$(SRC_DIR)/aur_update_operation_result.cpp
+FILTERED_AUR_UPDATE_OPERATION_FORBIDDEN_TEST_SRCS := \
+	$(SRC_DIR)/aur_rpc.cpp \
+	$(SRC_DIR)/package_metadata.cpp \
 	$(SRC_DIR)/process.cpp \
 	$(SRC_DIR)/checkout_fetch.cpp \
 	$(SRC_DIR)/persistent_checkout.cpp \
@@ -337,7 +379,7 @@ LIBALPM_BUILD_TARGETS := \
 	$(AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION_TEST_TARGET) \
 	$(UPGRADE_BASELINE_METADATA_TEST_TARGET)
 
-.PHONY: all check-libalpm clean check-upgrade-all-plan-link-firewall check-system-source-upgrade-link-firewall check-aur-update-operation-result-link-firewall test test-app-config test-package-identifier test-package-metadata test-package-metadata-integration test-repository-query test-shell-words test-source-environment test-artifact-workspace test-artifact-identity test-artifact-install-executor test-separated-source-build test-production-source-build test-process-capture test-aur-update-plan test-upgrade-all-plan test-system-source-upgrade test-aur-update-query test-aur-update-command test-aur-update-execution-preflight test-aur-update-execution-preflight-integration test-aur-update-execution-preparation test-aur-update-execution-runner test-aur-update-operation-result test-dependency-plan-model test-artifact-install-plan test-command-stub-contract test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-commands-inspect test-commands-source-maintenance test-commands-sync test-conflicts-replaces test-install-layout test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check install uninstall
+.PHONY: all check-libalpm clean check-upgrade-all-plan-link-firewall check-system-source-upgrade-link-firewall check-aur-update-operation-result-link-firewall check-filtered-aur-update-operation-link-firewall test test-app-config test-package-identifier test-package-metadata test-package-metadata-integration test-repository-query test-shell-words test-source-environment test-artifact-workspace test-artifact-identity test-artifact-install-executor test-separated-source-build test-production-source-build test-process-capture test-aur-update-plan test-upgrade-all-plan test-system-source-upgrade test-aur-update-query test-aur-update-command test-aur-update-execution-preflight test-aur-update-execution-preflight-integration test-aur-update-execution-preparation test-aur-update-execution-runner test-aur-update-operation-result test-filtered-aur-update-operation test-dependency-plan-model test-artifact-install-plan test-command-stub-contract test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-commands-inspect test-commands-source-maintenance test-commands-sync test-conflicts-replaces test-install-layout test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check install uninstall
 
 all: $(TARGET) $(MANPAGE)
 
@@ -581,6 +623,15 @@ $(AUR_UPDATE_OPERATION_RESULT_TEST_TARGET): $(AUR_UPDATE_OPERATION_RESULT_TEST_S
 		$(AUR_UPDATE_OPERATION_RESULT_TEST_SRCS) \
 		-o $@
 
+$(FILTERED_AUR_UPDATE_OPERATION_TEST_TARGET): $(FILTERED_AUR_UPDATE_OPERATION_TEST_SRCS) $(HEADERS) tests/stubs/filtered-aur-update-operation/query_stub.hpp tests/stubs/aur-update-execution-preflight/preflight_stub.hpp tests/stubs/aur-update-execution-preparation/preparation_stub.hpp tests/stubs/aur-update-execution-runner/execution_stub.hpp $(VERSION_FILE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling filtered AUR update operation production-composition test binary"
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
+		-DJPACKER_ENABLE_AUR_UPDATE_EXECUTION_PREPARATION_TEST_HOOKS \
+		-I$(SRC_DIR) \
+		$(FILTERED_AUR_UPDATE_OPERATION_TEST_SRCS) \
+		-o $@
+
 $(DEPENDENCY_PLAN_MODEL_TEST_TARGET): $(DEPENDENCY_PLAN_MODEL_TEST_SRCS) $(SRC_DIR)/dependency_plan.hpp $(SRC_DIR)/dependency_provider.hpp $(SRC_DIR)/aur_rpc.hpp $(SRC_DIR)/repository_query.hpp $(SRC_DIR)/dependency_spec.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/logging.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling dependency plan model test binary"
@@ -726,6 +777,24 @@ check-aur-update-operation-result-link-firewall:
 test-aur-update-operation-result: check-aur-update-operation-result-link-firewall $(AUR_UPDATE_OPERATION_RESULT_TEST_TARGET)
 	$(abspath $(AUR_UPDATE_OPERATION_RESULT_TEST_TARGET))
 
+check-filtered-aur-update-operation-link-firewall:
+	@echo ":: Checking filtered AUR update operation link firewall"
+	@set -e; for source in $(FILTERED_AUR_UPDATE_OPERATION_REQUIRED_TEST_SRCS); do \
+		count=$$(printf '%s\n' $(FILTERED_AUR_UPDATE_OPERATION_TEST_SRCS) | \
+			awk -v expected="$$source" '$$0 == expected { count++ } END { print count + 0 }'); \
+		test "$$count" -eq 1 || { \
+			echo "error: filtered AUR operation test must link $$source exactly once" >&2; \
+			exit 1; \
+		}; \
+	done
+	@test -z "$(filter $(FILTERED_AUR_UPDATE_OPERATION_FORBIDDEN_TEST_SRCS),$(FILTERED_AUR_UPDATE_OPERATION_TEST_SRCS))" || { \
+		echo "error: filtered AUR operation test links a forbidden transport/mutation source" >&2; \
+		exit 1; \
+	}
+
+test-filtered-aur-update-operation: check-filtered-aur-update-operation-link-firewall $(FILTERED_AUR_UPDATE_OPERATION_TEST_TARGET)
+	$(abspath $(FILTERED_AUR_UPDATE_OPERATION_TEST_TARGET))
+
 test-dependency-plan-model: $(DEPENDENCY_PLAN_MODEL_TEST_TARGET)
 	$(abspath $(DEPENDENCY_PLAN_MODEL_TEST_TARGET))
 
@@ -827,6 +896,7 @@ test: \
 	test-aur-update-execution-preparation \
 	test-aur-update-execution-runner \
 	test-aur-update-operation-result \
+	test-filtered-aur-update-operation \
 	test-dependency-plan-model \
 	test-artifact-install-plan \
 	test-command-stub-contract \

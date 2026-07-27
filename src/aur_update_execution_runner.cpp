@@ -34,6 +34,9 @@ void require_valid_prepared_invocation(
         const AurUpdatePreparedWorkItemAttribution& attribution =
                 attributions[index];
         if(attribution.invocation_work_item_index != index ||
+           (index > 0 &&
+            attribution.build_plan_order_index <=
+                    attributions[index - 1].build_plan_order_index) ||
            attribution.package_name != work_item.request.package_name ||
            attribution.package_base != work_item.request.checkout_name ||
            attribution.affected_update_plan_indices.empty() ||
@@ -71,6 +74,7 @@ AurUpdateWorkItemExecutionResult make_not_attempted_result(
         const AurUpdatePreparedWorkItemAttribution& attribution) {
     return AurUpdateWorkItemExecutionResult{
             .work_item_index = attribution.invocation_work_item_index,
+            .build_plan_order_index = attribution.build_plan_order_index,
             .package_name = attribution.package_name,
             .package_base = attribution.package_base,
             .plan_package_names = work_item.plan_package_names,

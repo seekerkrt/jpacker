@@ -938,6 +938,34 @@ void test_unknown_preparation_reason_is_typed() {
             "unknown preparation reason");
 }
 
+void test_build_unit_preparation_reasons_are_known_blockers() {
+    for(const AurUpdatePreparationReason reason : {
+                AurUpdatePreparationReason::BuildUnitSelectionInconsistent,
+                AurUpdatePreparationReason::ExternalSatisfactionInconsistent}) {
+        const AurUpdateExecutionPreflight preflight =
+                preflight_with({executable_target(0, "selection-blocked")});
+        AurUpdateSourceBuildPreparation preparation =
+                preparation_for_execution(preflight);
+        preparation.issues.push_back(preparation_issue(
+                reason, {0}, "typed build-unit preparation blocker"));
+
+        const AurUpdateOperationResult result =
+                reduce_aur_update_operation_result(
+                        preflight, preparation, std::nullopt);
+        expect(
+                result.status ==
+                                AurUpdateOperationStatus::BlockedBeforeExecution &&
+                        !has_reduction_issue(
+                                result,
+                                AurUpdateOperationReductionReason::
+                                        UnknownEnumValue),
+                "Build-unit preparation reason was not accepted as a known blocker");
+        expect_target_statuses(
+                result, {AurUpdateOperationTargetStatus::Failed},
+                "typed build-unit preparation blocker");
+    }
+}
+
 void test_preparation_warning_only_does_not_fail_execution() {
     const AurUpdateExecutionPreflight preflight =
             preflight_with({executable_target(0, "warning-root")});
@@ -1972,6 +2000,9 @@ int main() {
         run_case(
                 "unknown preparation reason is typed",
                 test_unknown_preparation_reason_is_typed);
+        run_case(
+                "build-unit preparation reasons are known blockers",
+                test_build_unit_preparation_reasons_are_known_blockers);
         run_case(
                 "preparation warning alone does not fail execution",
                 test_preparation_warning_only_does_not_fail_execution);

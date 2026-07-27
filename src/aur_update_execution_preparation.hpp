@@ -14,6 +14,42 @@ struct AppConfig;
 struct AurUpdateSourceBuildPreparation;
 struct AurUpdateSourceBuildExecutionResult;
 
+// upgrade-all固有型へ依存せず、明示sourceが満たすbuild unitの根拠をowned保持する。
+struct AurUpdateExternalSatisfactionAttribution {
+    std::vector<std::size_t>     explicit_source_indexes;
+    std::vector<std::string>     source_identity_keys;
+    std::optional<std::string>   matched_package_name;
+    std::optional<std::string>   matched_package_base;
+
+    bool operator==(
+            const AurUpdateExternalSatisfactionAttribution&) const = default;
+};
+
+enum class AurUpdateBuildUnitSelectionStatus {
+    SelectedForAurExecution,
+    ExternallySatisfiedByExplicitSourcePackageBase,
+};
+
+// BuildPlan::order上のidentityと、denseなexecution selectionを分離して固定する。
+struct AurUpdateBuildUnitSelectionEntry {
+    std::size_t                       build_plan_order_index = 0;
+    std::string                       package_base;
+    std::vector<std::string>          package_names;
+    AurUpdateBuildUnitSelectionStatus status =
+            AurUpdateBuildUnitSelectionStatus::SelectedForAurExecution;
+    std::optional<std::size_t> selected_execution_index;
+    std::optional<AurUpdateExternalSatisfactionAttribution>
+            external_satisfaction;
+
+    bool operator==(const AurUpdateBuildUnitSelectionEntry&) const = default;
+};
+
+struct AurUpdateBuildUnitSelection {
+    std::vector<AurUpdateBuildUnitSelectionEntry> entries;
+
+    bool operator==(const AurUpdateBuildUnitSelection&) const = default;
+};
+
 enum class AurUpdatePreparationReason {
     None,
     BlockingPreflight,
@@ -28,6 +64,8 @@ enum class AurUpdatePreparationReason {
     StaticWorkItemInvalid,
     PacmanDatabaseUnavailable,
     GenericPreparationInconsistent,
+    BuildUnitSelectionInconsistent,
+    ExternalSatisfactionInconsistent,
 };
 
 // preparation issueは表示文字列ではなくreasonと既存typed failureを正本にする。
@@ -55,10 +93,25 @@ struct AurUpdatePreparationWarning {
 // BuildPlan::order上の1 work itemと、影響するupdate target/rootを固定する。
 struct AurUpdatePreparedWorkItemAttribution {
     std::size_t                     invocation_work_item_index = 0;
+    std::size_t                     build_plan_order_index = 0;
     std::string                     package_name;
     std::string                     package_base;
     std::vector<std::size_t>        affected_update_plan_indices;
     std::vector<RootTargetIdentity> affected_roots;
+};
+
+// execution capabilityを持たないbuild unitも、元BuildPlan上の位置とroot/roleを失わない。
+struct AurUpdateExternallySatisfiedBuildUnit {
+    std::size_t                     build_plan_order_index = 0;
+    std::string                     package_name;
+    std::string                     package_base;
+    std::vector<std::string>        plan_package_names;
+    std::vector<std::size_t>        affected_update_plan_indices;
+    std::vector<RootTargetIdentity> affected_roots;
+    std::vector<PackageRole>        roles;
+    DesiredInstallReason desired_install_reason =
+            DesiredInstallReason::Dependency;
+    AurUpdateExternalSatisfactionAttribution external_satisfaction;
 };
 
 // generic production invocationとupdate固有attributionを相関済みで所有する。
@@ -76,6 +129,12 @@ class PreparedAurUpdateSourceBuildInvocation final {
             std::vector<AurUpdatePreparedWorkItemAttribution>&&
                     work_item_attributions) noexcept;
 
+    friend AurUpdateSourceBuildPreparation
+    prepare_aur_update_source_build_invocation(
+            const AurUpdateExecutionPreflight& preflight,
+            const AurUpdateBuildUnitSelection& build_unit_selection,
+            bool needed,
+            const AppConfig& config);
     friend AurUpdateSourceBuildPreparation
     prepare_aur_update_source_build_invocation(
             const AurUpdateExecutionPreflight& preflight,
@@ -122,6 +181,9 @@ struct AurUpdateSourceBuildPreparation {
     std::vector<AurUpdatePreparationWarning> warnings;
     std::vector<AurUpdateExecutionTarget>    affected_update_targets;
     std::vector<RootTargetIdentity>          affected_roots;
+    AurUpdateBuildUnitSelection              build_unit_selection;
+    std::vector<AurUpdateExternallySatisfiedBuildUnit>
+            externally_satisfied_build_units;
     std::optional<PreparedAurUpdateSourceBuildInvocation> invocation;
 
     bool is_prepared() const noexcept;
@@ -130,6 +192,13 @@ struct AurUpdateSourceBuildPreparation {
 };
 
 // Update preflightを、executionへ接続しないowned invocation snapshotへ射影する。
+AurUpdateSourceBuildPreparation prepare_aur_update_source_build_invocation(
+        const AurUpdateExecutionPreflight& preflight,
+        const AurUpdateBuildUnitSelection& build_unit_selection,
+        bool needed,
+        const AppConfig& config);
+
+// 既存upgrade-aur経路はBuildPlan::order全件を従来どおりexecution対象にする。
 AurUpdateSourceBuildPreparation prepare_aur_update_source_build_invocation(
         const AurUpdateExecutionPreflight& preflight,
         bool needed,

@@ -282,6 +282,42 @@ void test_empty_inventory_skips_aur_queries() {
     expect_aur_query_not_started("Empty inventory");
 }
 
+void test_explicit_inventory_core_skips_inventory_boundary_and_preserves_order() {
+    reset_fixture();
+    ForeignPackageInventory inventory = {
+            {"core-zeta", "1.0-1", InstalledPackageReason::Explicit},
+            {"core-alpha", "2.0-1", InstalledPackageReason::Dependency}};
+    const ForeignPackageInventory expected_inventory = inventory;
+
+    const AurUpdateQueryResult result =
+            query_aur_updates_for_foreign_inventory(std::move(inventory));
+
+    expect(
+            g_fixture.configuration_calls == 0,
+            "Explicit inventory core resolved repository configuration");
+    expect(
+            g_fixture.inventory_calls == 0,
+            "Explicit inventory core queried installed packages");
+    expect(
+            !g_fixture.observed_configuration.has_value(),
+            "Explicit inventory core passed configuration to inventory query");
+    expect_plan_matches_inventory(result.plan, expected_inventory);
+    expect(
+            result.recoverable_failures.empty(),
+            "Successful explicit inventory core produced a query failure");
+    expect(
+            g_fixture.info_many_calls ==
+                    std::vector<std::vector<std::string>>{
+                            {"core-zeta", "core-alpha"}},
+            "Explicit inventory core changed AUR query order");
+    expect(
+            g_fixture.info_strict_calls.empty(),
+            "Non-empty explicit inventory query used strict fallback");
+    expect(
+            g_fixture.exec_calls.size() == expected_inventory.size(),
+            "Explicit inventory core did not compare every queried package");
+}
+
 void test_configuration_failure_stops_before_inventory_and_aur_queries() {
     reset_fixture();
     g_fixture.configuration_failure = PackageMetadataFailure{
@@ -730,6 +766,9 @@ void run_case(const std::string& name, Callable callable) {
 int main() {
     try {
         run_case("empty inventory skips AUR queries", test_empty_inventory_skips_aur_queries);
+        run_case(
+                "explicit inventory core skips inventory boundary and preserves order",
+                test_explicit_inventory_core_skips_inventory_boundary_and_preserves_order);
         run_case(
                 "configuration failure stops before inventory and AUR queries",
                 test_configuration_failure_stops_before_inventory_and_aur_queries);

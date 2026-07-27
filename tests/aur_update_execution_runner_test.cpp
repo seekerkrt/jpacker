@@ -4,6 +4,7 @@
 #include "stubs/aur-update-execution-preparation/preparation_stub.hpp"
 #include "stubs/aur-update-execution-runner/execution_stub.hpp"
 
+#include <algorithm>
 #include <filesystem>
 #include <iostream>
 #include <optional>
@@ -203,6 +204,43 @@ AurUpdateExecutionPreflight ordered_multi_root_preflight() {
     return preflight;
 }
 
+AurUpdateBuildUnitSelection build_unit_selection_with_external(
+        const AurUpdateExecutionPreflight& preflight,
+        std::size_t external_order_index) {
+    const BuildPlan& plan = preflight.build_plan.value();
+    AurUpdateBuildUnitSelection selection;
+    selection.entries.reserve(plan.order.size());
+    std::size_t selected_execution_index = 0;
+    for(std::size_t order_index = 0; order_index < plan.order.size();
+        ++order_index) {
+        const BuildPlanEntry& entry = plan.order[order_index];
+        if(order_index == external_order_index) {
+            selection.entries.push_back(AurUpdateBuildUnitSelectionEntry{
+                    order_index,
+                    entry.package_base,
+                    entry.package_names,
+                    AurUpdateBuildUnitSelectionStatus::
+                            ExternallySatisfiedByExplicitSourcePackageBase,
+                    std::nullopt,
+                    AurUpdateExternalSatisfactionAttribution{
+                            {3},
+                            {"source://runner-external"},
+                            std::nullopt,
+                            entry.package_base}});
+            continue;
+        }
+        selection.entries.push_back(AurUpdateBuildUnitSelectionEntry{
+                order_index,
+                entry.package_base,
+                entry.package_names,
+                AurUpdateBuildUnitSelectionStatus::SelectedForAurExecution,
+                selected_execution_index,
+                std::nullopt});
+        ++selected_execution_index;
+    }
+    return selection;
+}
+
 std::vector<ExpectedWorkItem> single_root_expectations() {
     const RootTargetIdentity root{0, "root-package"};
     return {
@@ -317,6 +355,9 @@ void expect_result_identity(
     expect(
             actual.work_item_index == expected.index,
             context + ": work item index differs");
+    expect(
+            actual.build_plan_order_index == expected.index,
+            context + ": BuildPlan order index differs");
     expect(
             actual.package_name == expected.package_name,
             context + ": package name differs");
@@ -855,6 +896,63 @@ void test_unknown_exception_is_typed_and_contained() {
             "unknown exception calls");
 }
 
+void test_external_unit_is_absent_from_dense_execution() {
+    const AppConfig config;
+    const PacmanDatabasePaths expected_database_paths{
+            "/filtered/root", "/filtered/database"};
+    AurUpdateExecutionPreflight preflight =
+            three_item_single_root_preflight();
+    const AurUpdateBuildUnitSelection selection =
+            build_unit_selection_with_external(preflight, 1);
+
+    preparation_stub::reset();
+    preparation_stub::set_database_paths(expected_database_paths);
+    AurUpdateSourceBuildPreparation preparation =
+            prepare_aur_update_source_build_invocation(
+                    preflight, selection, false, config);
+    expect(
+            preparation.is_prepared(),
+            "Filtered runner fixture was not prepared");
+    expect(
+            preparation.externally_satisfied_build_units.size() == 1,
+            "Filtered runner fixture lost external satisfaction");
+
+    execution_stub::reset();
+    enqueue_successes(2);
+    const AurUpdateSourceBuildExecutionResult result = execute_without_escape(
+            std::move(*preparation.invocation), config,
+            "filtered execution");
+
+    expect(
+            result.status == AurUpdateInvocationExecutionStatus::Completed &&
+                    result.work_item_results.size() == 2,
+            "Filtered runner result did not complete densely");
+    expect(
+            result.work_item_results[0].work_item_index == 0 &&
+                    result.work_item_results[0].build_plan_order_index == 0 &&
+                    result.work_item_results[0].package_name ==
+                            "first-dependency" &&
+                    result.work_item_results[1].work_item_index == 1 &&
+                    result.work_item_results[1].build_plan_order_index == 2 &&
+                    result.work_item_results[1].package_name == "root-package",
+            "Filtered runner lost dense-to-original BuildPlan mapping");
+
+    const std::vector<execution_stub::ExecutionCall>& calls =
+            execution_stub::call_history();
+    expect(
+            calls.size() == 2 &&
+                    calls[0].package_name == "first-dependency" &&
+                    calls[1].package_name == "root-package" &&
+                    std::none_of(
+                            calls.begin(), calls.end(),
+                            [](const execution_stub::ExecutionCall& call) {
+                                return call.package_name ==
+                                        "second-dependency";
+                            }),
+            "Externally satisfied build unit reached the executor");
+    execution_stub::require_script_consumed();
+}
+
 void test_multi_root_attribution_execution_order_and_one_shot() {
     const AppConfig config;
     const PacmanDatabasePaths expected_database_paths{
@@ -955,6 +1053,9 @@ int main() {
         run_case(
                 "unknown exception is typed and contained",
                 test_unknown_exception_is_typed_and_contained);
+        run_case(
+                "external unit is absent from dense execution",
+                test_external_unit_is_absent_from_dense_execution);
         run_case(
                 "multi-root attribution, execution order, and one-shot replay",
                 test_multi_root_attribution_execution_order_and_one_shot);
