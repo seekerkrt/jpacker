@@ -23,6 +23,7 @@ PACKAGE_IDENTIFIER_TEST_TARGET := build/tests/package-identifier-test
 SHELL_WORDS_TEST_TARGET := build/tests/shell-words-test
 SOURCE_ENVIRONMENT_TEST_TARGET := build/tests/source-environment-test
 ARTIFACT_WORKSPACE_TEST_TARGET := build/tests/artifact-workspace-test
+MULTIPLE_ARTIFACT_WORKSPACE_TEST_TARGET := build/tests/multiple-artifact-workspace-test
 ARTIFACT_IDENTITY_TEST_TARGET := build/tests/artifact-identity-test
 ARTIFACT_INSTALL_EXECUTOR_TEST_TARGET := build/tests/artifact-install-executor-test
 SEPARATED_SOURCE_BUILD_TEST_TARGET := build/tests/separated-source-build-test
@@ -344,6 +345,21 @@ ARTIFACT_WORKSPACE_TEST_SRCS := \
 	$(SRC_DIR)/shell_words.cpp \
 	$(SRC_DIR)/process.cpp \
 	$(SRC_DIR)/logging.cpp
+# POLICY(#268): multiple workspace testはfilesystem capability ownerと、その
+# 既存support translation unitだけをlinkする。
+MULTIPLE_ARTIFACT_WORKSPACE_ALLOWED_PRODUCTION_TEST_SRCS := \
+	$(SRC_DIR)/artifact_workspace.cpp \
+	$(SRC_DIR)/trusted_cache.cpp \
+	$(SRC_DIR)/source_environment.cpp \
+	$(SRC_DIR)/package_identifier.cpp \
+	$(SRC_DIR)/shell_words.cpp \
+	$(SRC_DIR)/process.cpp \
+	$(SRC_DIR)/logging.cpp
+MULTIPLE_ARTIFACT_WORKSPACE_TEST_SRCS := \
+	tests/multiple_artifact_workspace_test.cpp \
+	$(MULTIPLE_ARTIFACT_WORKSPACE_ALLOWED_PRODUCTION_TEST_SRCS)
+MULTIPLE_ARTIFACT_WORKSPACE_FORBIDDEN_TEST_SRCS := \
+	$(filter-out $(MULTIPLE_ARTIFACT_WORKSPACE_ALLOWED_PRODUCTION_TEST_SRCS),$(SRCS))
 ARTIFACT_IDENTITY_TEST_SRCS := \
 	tests/artifact_identity_test.cpp \
 	$(SRC_DIR)/artifact_identity.cpp \
@@ -448,7 +464,7 @@ LIBALPM_BUILD_TARGETS := \
 	$(AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION_TEST_TARGET) \
 	$(UPGRADE_BASELINE_METADATA_TEST_TARGET)
 
-.PHONY: all check-libalpm clean check-upgrade-all-plan-link-firewall check-system-source-upgrade-link-firewall check-aur-update-operation-result-link-firewall check-filtered-aur-update-operation-link-firewall check-upgrade-all-operation-link-firewall check-upgrade-all-command-link-firewall check-artifact-selection-model-link-firewall test test-app-config test-package-identifier test-package-metadata test-package-metadata-integration test-repository-query test-shell-words test-source-environment test-artifact-workspace test-artifact-identity test-artifact-install-executor test-separated-source-build test-production-source-build test-process-capture test-aur-update-plan test-upgrade-all-plan test-system-source-upgrade test-aur-update-query test-aur-update-command test-upgrade-all-command test-aur-update-execution-preflight test-aur-update-execution-preflight-integration test-aur-update-execution-preparation test-aur-update-execution-runner test-aur-update-operation-result test-filtered-aur-update-operation test-upgrade-all-operation test-dependency-plan-model test-artifact-install-plan test-artifact-selection-model test-command-stub-contract test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-commands-inspect test-commands-source-maintenance test-commands-sync test-conflicts-replaces test-install-layout test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check install uninstall
+.PHONY: all check-libalpm clean check-upgrade-all-plan-link-firewall check-system-source-upgrade-link-firewall check-aur-update-operation-result-link-firewall check-filtered-aur-update-operation-link-firewall check-upgrade-all-operation-link-firewall check-upgrade-all-command-link-firewall check-artifact-selection-model-link-firewall check-multiple-artifact-workspace-link-firewall test test-app-config test-package-identifier test-package-metadata test-package-metadata-integration test-repository-query test-shell-words test-source-environment test-artifact-workspace test-multiple-artifact-workspace test-artifact-identity test-artifact-install-executor test-separated-source-build test-production-source-build test-process-capture test-aur-update-plan test-upgrade-all-plan test-system-source-upgrade test-aur-update-query test-aur-update-command test-upgrade-all-command test-aur-update-execution-preflight test-aur-update-execution-preflight-integration test-aur-update-execution-preparation test-aur-update-execution-runner test-aur-update-operation-result test-filtered-aur-update-operation test-upgrade-all-operation test-dependency-plan-model test-artifact-install-plan test-artifact-selection-model test-command-stub-contract test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-commands-inspect test-commands-source-maintenance test-commands-sync test-conflicts-replaces test-install-layout test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check install uninstall
 
 all: $(TARGET) $(MANPAGE)
 
@@ -578,6 +594,16 @@ $(ARTIFACT_WORKSPACE_TEST_TARGET): $(ARTIFACT_WORKSPACE_TEST_SRCS) $(SRC_DIR)/ar
 		-DJPACKER_ENABLE_TRUSTED_CACHE_TEST_HOOKS \
 		-I$(SRC_DIR) \
 		$(ARTIFACT_WORKSPACE_TEST_SRCS) \
+		-o $@
+
+$(MULTIPLE_ARTIFACT_WORKSPACE_TEST_TARGET): $(MULTIPLE_ARTIFACT_WORKSPACE_TEST_SRCS) $(SRC_DIR)/artifact_workspace.hpp $(SRC_DIR)/trusted_cache.hpp $(SRC_DIR)/source_environment.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/shell_words.hpp $(SRC_DIR)/process.hpp $(SRC_DIR)/logging.hpp tests/stubs/makepkg $(VERSION_FILE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling multiple artifact workspace test binary"
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
+		-DJPACKER_ENABLE_ARTIFACT_WORKSPACE_TEST_HOOKS \
+		-DJPACKER_ENABLE_TRUSTED_CACHE_TEST_HOOKS \
+		-I$(SRC_DIR) \
+		$(MULTIPLE_ARTIFACT_WORKSPACE_TEST_SRCS) \
 		-o $@
 
 $(ARTIFACT_IDENTITY_TEST_TARGET): $(ARTIFACT_IDENTITY_TEST_SRCS) $(SRC_DIR)/artifact_identity.hpp $(SRC_DIR)/artifact_workspace.hpp $(SRC_DIR)/trusted_cache.hpp $(SRC_DIR)/source_environment.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/shell_words.hpp $(SRC_DIR)/process.hpp $(SRC_DIR)/logging.hpp tests/stubs/artifact-identity/process_stub.hpp $(VERSION_FILE)
@@ -796,6 +822,25 @@ test-source-environment: $(SOURCE_ENVIRONMENT_TEST_TARGET)
 test-artifact-workspace: $(ARTIFACT_WORKSPACE_TEST_TARGET)
 	JPACKER_TEST_MAKEPKG_STUB=$(abspath tests/stubs/makepkg) \
 		$(abspath $(ARTIFACT_WORKSPACE_TEST_TARGET))
+
+check-multiple-artifact-workspace-link-firewall:
+	@echo ":: Checking multiple artifact workspace link firewall"
+	@set -e; for source in $(MULTIPLE_ARTIFACT_WORKSPACE_ALLOWED_PRODUCTION_TEST_SRCS); do \
+		count=$$(printf '%s\n' $(MULTIPLE_ARTIFACT_WORKSPACE_TEST_SRCS) | \
+			awk -v expected="$$source" '$$0 == expected { count++ } END { print count + 0 }'); \
+		test "$$count" -eq 1 || { \
+			echo "error: multiple artifact workspace test must link $$source exactly once" >&2; \
+			exit 1; \
+		}; \
+	done
+	@test -z "$(filter $(MULTIPLE_ARTIFACT_WORKSPACE_FORBIDDEN_TEST_SRCS),$(MULTIPLE_ARTIFACT_WORKSPACE_TEST_SRCS))" || { \
+		echo "error: multiple artifact workspace test links a forbidden production source" >&2; \
+		exit 1; \
+	}
+
+test-multiple-artifact-workspace: check-multiple-artifact-workspace-link-firewall $(MULTIPLE_ARTIFACT_WORKSPACE_TEST_TARGET)
+	JPACKER_TEST_MAKEPKG_STUB=$(abspath tests/stubs/makepkg) \
+		$(abspath $(MULTIPLE_ARTIFACT_WORKSPACE_TEST_TARGET))
 
 test-artifact-identity: $(ARTIFACT_IDENTITY_TEST_TARGET)
 	$(abspath $(ARTIFACT_IDENTITY_TEST_TARGET))
@@ -1031,6 +1076,7 @@ test: \
 	test-shell-words \
 	test-source-environment \
 	test-artifact-workspace \
+	test-multiple-artifact-workspace \
 	test-artifact-identity \
 	test-artifact-install-executor \
 	test-separated-source-build \

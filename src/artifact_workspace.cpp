@@ -36,6 +36,20 @@ constexpr mode_t ARTIFACT_WORKSPACE_MODE = 0700;
 constexpr char ARTIFACT_WORKSPACE_PREFIX[] = ".artifact-workspace~-";
 constexpr std::size_t ARTIFACT_DIAGNOSTIC_VALUE_LIMIT = 96;
 
+#ifdef JPACKER_ENABLE_ARTIFACT_WORKSPACE_TEST_HOOKS
+MultipleArtifactValidationObserverForTest
+        g_multiple_artifact_validation_observer = nullptr;
+
+void notify_multiple_artifact_validation_for_test(
+        const fs::path& workspace_path) {
+    if(g_multiple_artifact_validation_observer != nullptr)
+        g_multiple_artifact_validation_observer(workspace_path);
+}
+#else
+void notify_multiple_artifact_validation_for_test(const fs::path&) {
+}
+#endif
+
 class OwnedFileDescriptor final {
     int descriptor_ = -1;
 
@@ -593,6 +607,311 @@ InspectedArtifact inspect_post_build_artifact(
             artifact_descriptor.release(), artifact_status.value());
 }
 
+struct ArtifactInspectionTarget {
+    fs::path    path;
+    std::string leaf_name;
+};
+
+class InspectedMultipleArtifact final {
+    OwnedFileDescriptor                        artifact_descriptor_;
+    std::optional<OwnedFileDescriptor>         signature_descriptor_;
+
+public:
+    struct stat                artifact_status {};
+    std::optional<struct stat> signature_status;
+
+    InspectedMultipleArtifact(
+            OwnedFileDescriptor artifact_descriptor,
+            const struct stat& retained_artifact_status,
+            std::optional<OwnedFileDescriptor> signature_descriptor,
+            std::optional<struct stat> retained_signature_status)
+        : artifact_descriptor_(std::move(artifact_descriptor)),
+          signature_descriptor_(std::move(signature_descriptor)),
+          artifact_status(retained_artifact_status),
+          signature_status(std::move(retained_signature_status)) {
+    }
+
+    InspectedMultipleArtifact(
+            const InspectedMultipleArtifact&) = delete;
+    InspectedMultipleArtifact& operator=(
+            const InspectedMultipleArtifact&) = delete;
+    InspectedMultipleArtifact(
+            InspectedMultipleArtifact&&) noexcept = default;
+    InspectedMultipleArtifact& operator=(
+            InspectedMultipleArtifact&&) = delete;
+
+    int artifact_descriptor() const noexcept {
+        return artifact_descriptor_.get();
+    }
+
+    int signature_descriptor() const noexcept {
+        return signature_descriptor_.has_value()
+                       ? signature_descriptor_->get()
+                       : -1;
+    }
+
+    int release_artifact_descriptor() noexcept {
+        return artifact_descriptor_.release();
+    }
+
+    int release_signature_descriptor() noexcept {
+        if(!signature_descriptor_.has_value()) return -1;
+        return signature_descriptor_->release();
+    }
+};
+
+InspectedMultipleArtifact inspect_expected_artifact(
+        int directory_descriptor, const fs::path& workspace_path,
+        const ArtifactInspectionTarget& target,
+        std::uintmax_t expected_artifact_owner,
+        std::uintmax_t expected_signature_owner) {
+    std::optional<struct stat> artifact_status = entry_status_at(
+            directory_descriptor, target.leaf_name, target.path);
+    if(!artifact_status.has_value()) {
+        throw std::runtime_error(
+                "Expected package artifact is missing: " +
+                target.path.string());
+    }
+    require_regular_owned_entry(
+            artifact_status.value(), expected_artifact_owner, target.path,
+            "Package artifact");
+    OwnedFileDescriptor artifact_descriptor = open_and_revalidate_regular_entry(
+            directory_descriptor, target.leaf_name, artifact_status.value(),
+            target.path, "package artifact");
+
+    const std::string signature_leaf = target.leaf_name + ".sig";
+    const fs::path signature_path = workspace_path / signature_leaf;
+    std::optional<struct stat> signature_status = entry_status_at(
+            directory_descriptor, signature_leaf, signature_path);
+    std::optional<OwnedFileDescriptor> signature_descriptor;
+    if(signature_status.has_value()) {
+        require_regular_owned_entry(
+                signature_status.value(), expected_signature_owner,
+                signature_path, "Package signature");
+        signature_descriptor.emplace(open_and_revalidate_regular_entry(
+                directory_descriptor, signature_leaf,
+                signature_status.value(), signature_path,
+                "package signature"));
+    }
+
+    return InspectedMultipleArtifact(
+            std::move(artifact_descriptor), artifact_status.value(),
+            std::move(signature_descriptor), std::move(signature_status));
+}
+
+void require_retained_entry_unchanged(
+        int descriptor, const struct stat& expected_status,
+        std::uintmax_t expected_effective_user,
+        const fs::path& entry_path, const std::string& kind) {
+    if(descriptor < 0) {
+        throw std::runtime_error(
+                "Retained " + kind + " descriptor is closed: " +
+                entry_path.string());
+    }
+    const struct stat retained_status = require_descriptor_status(
+            descriptor, "retained " + kind + " " + entry_path.string());
+    require_regular_owned_entry(
+            retained_status, expected_effective_user, entry_path, kind);
+    if(!same_filesystem_identity(expected_status, retained_status)) {
+        throw std::runtime_error(
+                "Refusing changed retained " + kind + ": " +
+                entry_path.string());
+    }
+}
+
+void require_named_entry_unchanged(
+        int directory_descriptor, const std::string& leaf_name,
+        const struct stat& expected_status,
+        std::uintmax_t expected_effective_user,
+        const fs::path& entry_path, const std::string& kind) {
+    std::optional<struct stat> named_status = entry_status_at(
+            directory_descriptor, leaf_name, entry_path);
+    if(!named_status.has_value()) {
+        throw std::runtime_error(
+                "Expected " + kind + " is missing: " + entry_path.string());
+    }
+    require_regular_owned_entry(
+            named_status.value(), expected_effective_user, entry_path, kind);
+    if(!same_filesystem_identity(expected_status, named_status.value())) {
+        throw std::runtime_error(
+                "Refusing changed " + kind + ": " + entry_path.string());
+    }
+}
+
+void require_inspected_artifact_unchanged(
+        int directory_descriptor, const fs::path& workspace_path,
+        const ArtifactInspectionTarget& target,
+        const InspectedMultipleArtifact& inspected,
+        std::uintmax_t expected_artifact_owner,
+        std::uintmax_t expected_signature_owner) {
+    require_retained_entry_unchanged(
+            inspected.artifact_descriptor(), inspected.artifact_status,
+            expected_artifact_owner, target.path, "package artifact");
+    require_named_entry_unchanged(
+            directory_descriptor, target.leaf_name,
+            inspected.artifact_status, expected_artifact_owner, target.path,
+            "package artifact");
+
+    const std::string signature_leaf = target.leaf_name + ".sig";
+    const fs::path signature_path = workspace_path / signature_leaf;
+    std::optional<struct stat> named_signature_status = entry_status_at(
+            directory_descriptor, signature_leaf, signature_path);
+    if(inspected.signature_status.has_value() !=
+       named_signature_status.has_value()) {
+        throw std::runtime_error(
+                "Refusing changed package signature: " +
+                signature_path.string());
+    }
+    if(!inspected.signature_status.has_value()) return;
+
+    require_retained_entry_unchanged(
+            inspected.signature_descriptor(),
+            inspected.signature_status.value(), expected_signature_owner,
+            signature_path, "package signature");
+    require_named_entry_unchanged(
+            directory_descriptor, signature_leaf,
+            inspected.signature_status.value(), expected_signature_owner,
+            signature_path, "package signature");
+}
+
+void require_only_expected_workspace_entries_for_set(
+        int directory_descriptor, const fs::path& workspace_path,
+        const std::set<std::string>& artifact_leaves,
+        const std::set<std::string>& signature_leaves) {
+    int scan_descriptor = openat(
+            directory_descriptor, ".",
+            O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+    if(scan_descriptor < 0) {
+        throw std::runtime_error(
+                "Failed to enumerate artifact workspace " +
+                workspace_path.string() + ": " + std::strerror(errno));
+    }
+    DIR* raw_stream = fdopendir(scan_descriptor);
+    if(!raw_stream) {
+        const int open_error = errno;
+        close(scan_descriptor);
+        throw std::runtime_error(
+                "Failed to enumerate artifact workspace " +
+                workspace_path.string() + ": " +
+                std::strerror(open_error));
+    }
+    std::unique_ptr<DIR, int (*)(DIR*)> stream(raw_stream, closedir);
+
+    while(true) {
+        errno = 0;
+        dirent* entry = readdir(stream.get());
+        if(!entry) {
+            if(errno != 0) {
+                throw std::runtime_error(
+                        "Failed while enumerating artifact workspace " +
+                        workspace_path.string() + ": " +
+                        std::strerror(errno));
+            }
+            break;
+        }
+
+        const std::string leaf_name = entry->d_name;
+        if(leaf_name == "." || leaf_name == ".." ||
+           artifact_leaves.contains(leaf_name) ||
+           signature_leaves.contains(leaf_name)) {
+            continue;
+        }
+
+        const fs::path extra_path = workspace_path / leaf_name;
+        struct stat extra_status {};
+        if(fstatat(
+                   directory_descriptor, leaf_name.c_str(), &extra_status,
+                   AT_SYMLINK_NOFOLLOW) != 0) {
+            throw std::runtime_error(
+                    "Unexpected artifact workspace entry changed during "
+                    "validation: " +
+                    extra_path.string());
+        }
+        if(S_ISDIR(extra_status.st_mode)) {
+            throw std::runtime_error(
+                    "Unexpected directory in artifact workspace: " +
+                    extra_path.string());
+        }
+        if(leaf_name.ends_with(".sig")) {
+            throw std::runtime_error(
+                    "Unmatched signature in artifact workspace: " +
+                    extra_path.string());
+        }
+        if(S_ISLNK(extra_status.st_mode)) {
+            throw std::runtime_error(
+                    "Unexpected symlink in artifact workspace: " +
+                    extra_path.string());
+        }
+        if(!S_ISREG(extra_status.st_mode)) {
+            throw std::runtime_error(
+                    "Unexpected special file in artifact workspace: " +
+                    extra_path.string());
+        }
+        throw std::runtime_error(
+                "Unexpected entry in artifact workspace: " +
+                extra_path.string());
+    }
+}
+
+std::vector<InspectedMultipleArtifact> inspect_post_build_artifact_set(
+        int directory_descriptor, const fs::path& workspace_path,
+        const std::vector<ArtifactInspectionTarget>& targets,
+        std::uintmax_t expected_artifact_owner,
+        std::uintmax_t expected_signature_owner,
+        bool should_notify_test_observer) {
+    if(targets.empty()) {
+        throw std::runtime_error(
+                "Expected package artifact set must not be empty.");
+    }
+
+    std::set<std::string> artifact_leaves;
+    std::set<std::string> signature_leaves;
+    for(const ArtifactInspectionTarget& target : targets) {
+        if(!artifact_leaves.insert(target.leaf_name).second) {
+            throw std::runtime_error(
+                    "Expected package artifact set contains a duplicate path.");
+        }
+        signature_leaves.insert(target.leaf_name + ".sig");
+    }
+    for(const std::string& signature_leaf : signature_leaves) {
+        if(artifact_leaves.contains(signature_leaf)) {
+            throw std::runtime_error(
+                    "Expected package artifact and signature namespaces collide.");
+        }
+    }
+
+    std::vector<InspectedMultipleArtifact> inspected_artifacts;
+    inspected_artifacts.reserve(targets.size());
+    for(const ArtifactInspectionTarget& target : targets) {
+        inspected_artifacts.push_back(inspect_expected_artifact(
+                directory_descriptor, workspace_path, target,
+                expected_artifact_owner, expected_signature_owner));
+    }
+
+    require_only_expected_workspace_entries_for_set(
+            directory_descriptor, workspace_path, artifact_leaves,
+            signature_leaves);
+    if(should_notify_test_observer)
+        notify_multiple_artifact_validation_for_test(workspace_path);
+
+    for(std::size_t index = 0; index < targets.size(); ++index) {
+        require_inspected_artifact_unchanged(
+                directory_descriptor, workspace_path, targets[index],
+                inspected_artifacts[index], expected_artifact_owner,
+                expected_signature_owner);
+    }
+    require_only_expected_workspace_entries_for_set(
+            directory_descriptor, workspace_path, artifact_leaves,
+            signature_leaves);
+    for(std::size_t index = 0; index < targets.size(); ++index) {
+        require_inspected_artifact_unchanged(
+                directory_descriptor, workspace_path, targets[index],
+                inspected_artifacts[index], expected_artifact_owner,
+                expected_signature_owner);
+    }
+    return inspected_artifacts;
+}
+
 } // namespace
 
 ArtifactWorkspace::ArtifactWorkspace(
@@ -938,6 +1257,27 @@ int ArtifactMakepkgContext::run_makepkg_build_only(
     return exit_code;
 }
 
+int ArtifactMakepkgContext::run_makepkg_build_only(
+        const ArtifactWorkspace& workspace,
+        const ExpectedPackageArtifactSet& expected,
+        const ArtifactMakepkgBuildOptions& options) const {
+    require_no_inherited_pkgdest();
+    require_matching_workspace(workspace);
+    expected.require_matching_workspace(workspace);
+    expected.require_matching_makepkg_context(*this);
+    require_unchanged_checkout();
+    FileDescriptorWorkDirGuard working_directory(checkout_descriptor_);
+    std::vector<std::string> arguments = {"-sc"};
+    if(options.no_confirm) arguments.emplace_back("--noconfirm");
+    if(options.rebuild) arguments.emplace_back("-f");
+    if(options.clean_build) arguments.emplace_back("-C");
+    const int exit_code = run_command(makepkg_command(arguments));
+    require_unchanged_checkout();
+    require_matching_workspace(workspace);
+    expected.require_matching_workspace(workspace);
+    return exit_code;
+}
+
 ArtifactMakepkgContext prepare_artifact_makepkg_context(
         const ValidatedCachePath& checkout,
         const ArtifactWorkspace& workspace,
@@ -1067,6 +1407,144 @@ ExpectedPackageArtifactPath query_makepkg_packagelist(
     return expected;
 }
 
+ExpectedPackageArtifactSet::ExpectedPackageArtifactSet(
+        std::vector<Entry> entries,
+        std::uintmax_t workspace_device,
+        std::uintmax_t workspace_inode) noexcept
+    : entries_(std::move(entries)), workspace_device_(workspace_device),
+      workspace_inode_(workspace_inode) {
+}
+
+void ExpectedPackageArtifactSet::bind_makepkg_context(
+        const ArtifactMakepkgContext& context) {
+    if(makepkg_context_bound_) {
+        throw std::logic_error(
+                "Expected artifact set is already bound to a makepkg context.");
+    }
+    makepkg_context_provenance_ = context.provenance_;
+    makepkg_context_bound_ = true;
+}
+
+void ExpectedPackageArtifactSet::require_matching_makepkg_context(
+        const ArtifactMakepkgContext& context) const {
+    if(entries_.empty() || !makepkg_context_bound_ ||
+       workspace_device_ != context.workspace_device_ ||
+       workspace_inode_ != context.workspace_inode_ ||
+       !makepkg_context_provenance_ ||
+       makepkg_context_provenance_ != context.provenance_) {
+        throw std::runtime_error(
+                "Expected artifact set does not belong to this makepkg context.");
+    }
+}
+
+void ExpectedPackageArtifactSet::require_matching_workspace(
+        const ArtifactWorkspace& workspace) const {
+    workspace.require_unchanged_identity();
+    if(entries_.empty() || workspace_device_ != workspace.device_ ||
+       workspace_inode_ != workspace.inode_) {
+        throw std::runtime_error(
+                "Expected artifact set does not belong to this artifact workspace.");
+    }
+
+    std::set<std::string> artifact_leaves;
+    std::set<std::string> signature_leaves;
+    for(const Entry& entry : entries_) {
+        if(entry.path.parent_path() != workspace.canonical_path_ ||
+           entry.path.filename().string() != entry.leaf_name ||
+           entry.leaf_name.empty() ||
+           !artifact_leaves.insert(entry.leaf_name).second) {
+            throw std::runtime_error(
+                    "Expected artifact set does not belong to this artifact workspace.");
+        }
+        signature_leaves.insert(entry.leaf_name + ".sig");
+    }
+    for(const std::string& signature_leaf : signature_leaves) {
+        if(artifact_leaves.contains(signature_leaf)) {
+            throw std::runtime_error(
+                    "Expected package artifact and signature namespaces collide.");
+        }
+    }
+}
+
+const fs::path& ExpectedPackageArtifactSet::path_at(
+        std::size_t index) const {
+    return entries_.at(index).path;
+}
+
+ExpectedPackageArtifactSet validate_makepkg_packagelist_output_set(
+        const ArtifactWorkspace& workspace,
+        const std::string& raw_output) {
+    workspace.require_unchanged_identity();
+    std::vector<std::string> records = parse_packagelist_records(raw_output);
+    if(records.empty()) {
+        throw std::runtime_error(
+                "Expected one or more makepkg --packagelist artifact paths, got 0.");
+    }
+
+    std::vector<ExpectedPackageArtifactSet::Entry> entries;
+    entries.reserve(records.size());
+    std::set<std::string> artifact_leaves;
+    std::set<std::string> signature_leaves;
+    for(const std::string& record : records) {
+        fs::path candidate(record);
+        require_direct_expected_path(workspace, candidate);
+        std::string leaf_name = candidate.filename().string();
+        if(!artifact_leaves.insert(leaf_name).second) {
+            throw std::runtime_error(
+                    "makepkg --packagelist returned a duplicate artifact path.");
+        }
+        signature_leaves.insert(leaf_name + ".sig");
+        entries.push_back(ExpectedPackageArtifactSet::Entry{
+                std::move(candidate), std::move(leaf_name)});
+    }
+    for(const std::string& signature_leaf : signature_leaves) {
+        if(artifact_leaves.contains(signature_leaf)) {
+            throw std::runtime_error(
+                    "makepkg --packagelist artifact and signature namespaces collide.");
+        }
+    }
+
+    for(const ExpectedPackageArtifactSet::Entry& entry : entries) {
+        if(entry_status_at(
+                   workspace.directory_descriptor_, entry.leaf_name,
+                   entry.path)
+                   .has_value()) {
+            throw std::runtime_error(
+                    "Expected package artifact already exists before build.");
+        }
+
+        const std::string signature_leaf = entry.leaf_name + ".sig";
+        const fs::path signature_path =
+                workspace.canonical_path_ / signature_leaf;
+        if(entry_status_at(
+                   workspace.directory_descriptor_, signature_leaf,
+                   signature_path)
+                   .has_value()) {
+            throw std::runtime_error(
+                    "Expected package signature already exists before build.");
+        }
+    }
+    workspace.require_unchanged_identity();
+    return ExpectedPackageArtifactSet(
+            std::move(entries), workspace.device_, workspace.inode_);
+}
+
+ExpectedPackageArtifactSet query_makepkg_packagelist_set(
+        const ArtifactWorkspace& workspace,
+        const ArtifactMakepkgContext& context) {
+    CapturedCommandResult result = context.capture_makepkg_output(
+            workspace, {"--packagelist"});
+    if(result.exit_code != 0) {
+        throw std::runtime_error(
+                "makepkg --packagelist failed with exit status " +
+                std::to_string(result.exit_code) + ".");
+    }
+    ExpectedPackageArtifactSet expected =
+            validate_makepkg_packagelist_output_set(workspace, result.output);
+    expected.bind_makepkg_context(context);
+    return expected;
+}
+
 ValidatedPackageArtifactPath::ValidatedPackageArtifactPath(
         ArtifactWorkspace&& workspace, fs::path path, std::string leaf_name,
         int artifact_descriptor, std::uintmax_t device,
@@ -1179,6 +1657,286 @@ ValidatedPackageArtifactPath validate_post_build_package_artifact(
             effective_user, effective_user);
 }
 
+ValidatedPackageArtifactSet::Record::Record(
+        fs::path artifact_path, std::string artifact_leaf,
+        int retained_artifact_descriptor,
+        std::uintmax_t retained_artifact_device,
+        std::uintmax_t retained_artifact_inode,
+        std::uintmax_t retained_artifact_owner,
+        bool retained_signature,
+        int retained_signature_descriptor,
+        std::uintmax_t retained_signature_device,
+        std::uintmax_t retained_signature_inode,
+        std::uintmax_t retained_signature_owner) noexcept
+    : path(std::move(artifact_path)), leaf_name(std::move(artifact_leaf)),
+      artifact_descriptor(retained_artifact_descriptor),
+      artifact_device(retained_artifact_device),
+      artifact_inode(retained_artifact_inode),
+      artifact_owner(retained_artifact_owner),
+      has_signature(retained_signature),
+      signature_descriptor(retained_signature_descriptor),
+      signature_device(retained_signature_device),
+      signature_inode(retained_signature_inode),
+      signature_owner(retained_signature_owner) {
+}
+
+ValidatedPackageArtifactSet::Record::Record(Record&& other) noexcept
+    : path(std::move(other.path)), leaf_name(std::move(other.leaf_name)),
+      artifact_descriptor(std::exchange(other.artifact_descriptor, -1)),
+      artifact_device(other.artifact_device),
+      artifact_inode(other.artifact_inode),
+      artifact_owner(other.artifact_owner),
+      has_signature(std::exchange(other.has_signature, false)),
+      signature_descriptor(std::exchange(other.signature_descriptor, -1)),
+      signature_device(other.signature_device),
+      signature_inode(other.signature_inode),
+      signature_owner(other.signature_owner) {
+}
+
+ValidatedPackageArtifactSet::Record::~Record() noexcept {
+    if(artifact_descriptor >= 0) close(artifact_descriptor);
+    if(signature_descriptor >= 0) close(signature_descriptor);
+}
+
+ValidatedPackageArtifactSet::ValidatedPackageArtifactSet(
+        ArtifactWorkspace&& workspace,
+        std::vector<Record>&& records) noexcept
+    : workspace_(std::move(workspace)), records_(std::move(records)) {
+}
+
+ValidatedPackageArtifactSet::ValidatedPackageArtifactSet(
+        ValidatedPackageArtifactSet&& other) noexcept
+    : workspace_(std::move(other.workspace_)),
+      records_(std::move(other.records_)),
+      is_active_(std::exchange(other.is_active_, false)) {
+}
+
+void ValidatedPackageArtifactSet::require_active() const {
+    if(!is_active_ || records_.empty()) {
+        throw std::runtime_error(
+                "Validated package artifact set is no longer owned.");
+    }
+}
+
+std::size_t ValidatedPackageArtifactSet::size() const {
+    require_active();
+    return records_.size();
+}
+
+const fs::path& ValidatedPackageArtifactSet::path_at(
+        std::size_t index) const {
+    require_active();
+    return records_.at(index).path;
+}
+
+const fs::path& ValidatedPackageArtifactSet::workspace_path() const {
+    require_active();
+    return workspace_.path();
+}
+
+ValidatedPackageArtifactSet ValidatedPackageArtifactSet::validate_for_owners(
+        ArtifactWorkspace&& workspace,
+        const ExpectedPackageArtifactSet& expected,
+        std::uintmax_t expected_workspace_owner,
+        std::uintmax_t expected_artifact_owner,
+        std::uintmax_t expected_signature_owner) {
+    expected.require_matching_workspace(workspace);
+    workspace.require_unchanged_identity_for_owner(expected_workspace_owner);
+
+    std::vector<ArtifactInspectionTarget> targets;
+    targets.reserve(expected.entries_.size());
+    std::vector<Record> records;
+    records.reserve(expected.entries_.size());
+    for(const ExpectedPackageArtifactSet::Entry& entry : expected.entries_) {
+        targets.push_back(ArtifactInspectionTarget{entry.path, entry.leaf_name});
+        records.emplace_back(
+                entry.path, entry.leaf_name,
+                -1, 0, 0, 0,
+                false, -1, 0, 0, 0);
+    }
+    std::vector<InspectedMultipleArtifact> inspected =
+            inspect_post_build_artifact_set(
+                    workspace.directory_descriptor_, workspace.canonical_path_,
+                    targets, expected_artifact_owner,
+                    expected_signature_owner, true);
+    workspace.require_unchanged_identity_for_owner(expected_workspace_owner);
+
+    // LANDMINE(#268): filesystem最終検証後は、no-throwのidentity代入、
+    // descriptor release、workspace/vector moveだけをownership commitに含める。
+    for(std::size_t index = 0; index < inspected.size(); ++index) {
+        const bool has_signature =
+                inspected[index].signature_status.has_value();
+        const struct stat* signature_status = has_signature
+                                                      ? &inspected[index]
+                                                                 .signature_status
+                                                                 .value()
+                                                      : nullptr;
+        records[index].artifact_device =
+                status_device(inspected[index].artifact_status);
+        records[index].artifact_inode =
+                status_inode(inspected[index].artifact_status);
+        records[index].artifact_owner =
+                status_owner(inspected[index].artifact_status);
+        records[index].has_signature = has_signature;
+        records[index].signature_device = signature_status != nullptr
+                                                  ? status_device(*signature_status)
+                                                  : 0;
+        records[index].signature_inode = signature_status != nullptr
+                                                 ? status_inode(*signature_status)
+                                                 : 0;
+        records[index].signature_owner = signature_status != nullptr
+                                                 ? status_owner(*signature_status)
+                                                 : 0;
+        records[index].artifact_descriptor =
+                inspected[index].release_artifact_descriptor();
+        records[index].signature_descriptor =
+                inspected[index].release_signature_descriptor();
+    }
+    return ValidatedPackageArtifactSet(
+            std::move(workspace), std::move(records));
+}
+
+void ValidatedPackageArtifactSet::require_validity_for_owner(
+        std::uintmax_t expected_effective_user) const {
+    require_active();
+    workspace_.require_unchanged_identity_for_owner(expected_effective_user);
+
+    std::vector<ArtifactInspectionTarget> targets;
+    targets.reserve(records_.size());
+    for(const Record& record : records_) {
+        if(record.path.parent_path() != workspace_.canonical_path_ ||
+           record.path.filename().string() != record.leaf_name ||
+           record.leaf_name.empty()) {
+            throw std::runtime_error(
+                    "Validated package artifact set escaped its workspace.");
+        }
+
+        if(record.artifact_descriptor < 0) {
+            throw std::runtime_error(
+                    "Validated package artifact descriptor is closed: " +
+                    record.path.string());
+        }
+        const struct stat retained_artifact_status = require_descriptor_status(
+                record.artifact_descriptor,
+                "validated package artifact " + record.path.string());
+        require_regular_owned_entry(
+                retained_artifact_status, expected_effective_user,
+                record.path, "Package artifact");
+        if(status_device(retained_artifact_status) != record.artifact_device ||
+           status_inode(retained_artifact_status) != record.artifact_inode ||
+           status_owner(retained_artifact_status) != record.artifact_owner) {
+            throw std::runtime_error(
+                    "Validated package artifact descriptor changed identity "
+                    "or owner: " +
+                    record.path.string());
+        }
+
+        const fs::path signature_path =
+                workspace_.canonical_path_ / (record.leaf_name + ".sig");
+        if(record.has_signature) {
+            if(record.signature_descriptor < 0) {
+                throw std::runtime_error(
+                        "Validated package signature descriptor is closed: " +
+                        signature_path.string());
+            }
+            const struct stat retained_signature_status =
+                    require_descriptor_status(
+                            record.signature_descriptor,
+                            "validated package signature " +
+                                    signature_path.string());
+            require_regular_owned_entry(
+                    retained_signature_status, expected_effective_user,
+                    signature_path, "Package signature");
+            if(status_device(retained_signature_status) !=
+                       record.signature_device ||
+               status_inode(retained_signature_status) !=
+                       record.signature_inode ||
+               status_owner(retained_signature_status) !=
+                       record.signature_owner) {
+                throw std::runtime_error(
+                        "Validated package signature descriptor changed "
+                        "identity or owner: " +
+                        signature_path.string());
+            }
+        } else if(record.signature_descriptor >= 0) {
+            throw std::runtime_error(
+                    "Validated package signature state is inconsistent: " +
+                    signature_path.string());
+        }
+        targets.push_back(
+                ArtifactInspectionTarget{record.path, record.leaf_name});
+    }
+
+    std::vector<InspectedMultipleArtifact> current =
+            inspect_post_build_artifact_set(
+                    workspace_.directory_descriptor_,
+                    workspace_.canonical_path_, targets,
+                    expected_effective_user, expected_effective_user, false);
+    for(std::size_t index = 0; index < records_.size(); ++index) {
+        const Record& record = records_[index];
+        if(status_device(current[index].artifact_status) !=
+                   record.artifact_device ||
+           status_inode(current[index].artifact_status) !=
+                   record.artifact_inode ||
+           status_owner(current[index].artifact_status) !=
+                   record.artifact_owner) {
+            throw std::runtime_error(
+                    "Validated package artifact path changed identity or "
+                    "owner: " +
+                    record.path.string());
+        }
+        if(current[index].signature_status.has_value() !=
+           record.has_signature) {
+            throw std::runtime_error(
+                    "Validated package signature presence changed: " +
+                    (workspace_.canonical_path_ /
+                     (record.leaf_name + ".sig"))
+                            .string());
+        }
+        if(record.has_signature &&
+           (status_device(current[index].signature_status.value()) !=
+                    record.signature_device ||
+            status_inode(current[index].signature_status.value()) !=
+                    record.signature_inode ||
+            status_owner(current[index].signature_status.value()) !=
+                    record.signature_owner)) {
+            throw std::runtime_error(
+                    "Validated package signature path changed identity or "
+                    "owner: " +
+                    (workspace_.canonical_path_ /
+                     (record.leaf_name + ".sig"))
+                            .string());
+        }
+    }
+    workspace_.require_unchanged_identity_for_owner(expected_effective_user);
+}
+
+void ValidatedPackageArtifactSet::require_validity() const {
+    require_validity_for_owner(static_cast<std::uintmax_t>(geteuid()));
+}
+
+void ValidatedPackageArtifactSet::retain_workspace_for_diagnostics() {
+    require_active();
+    workspace_.retain_for_diagnostics();
+}
+
+void ValidatedPackageArtifactSet::cleanup_workspace() {
+    require_active();
+    workspace_.cleanup();
+    records_.clear();
+    is_active_ = false;
+}
+
+ValidatedPackageArtifactSet validate_post_build_package_artifacts(
+        ArtifactWorkspace&& workspace,
+        const ExpectedPackageArtifactSet& expected) {
+    const std::uintmax_t effective_user =
+            static_cast<std::uintmax_t>(geteuid());
+    return ValidatedPackageArtifactSet::validate_for_owners(
+            std::move(workspace), expected,
+            effective_user, effective_user, effective_user);
+}
+
 #ifdef JPACKER_ENABLE_ARTIFACT_WORKSPACE_TEST_HOOKS
 void require_artifact_workspace_identity_for_test(
         const ArtifactWorkspace& workspace,
@@ -1194,5 +1952,32 @@ ValidatedPackageArtifactPath validate_post_build_package_artifact_for_test(
             std::move(workspace), expected,
             static_cast<std::uintmax_t>(geteuid()),
             expected_artifact_owner);
+}
+
+void set_multiple_artifact_validation_observer_for_test(
+        MultipleArtifactValidationObserverForTest observer) {
+    g_multiple_artifact_validation_observer = observer;
+}
+
+ValidatedPackageArtifactSet validate_post_build_package_artifacts_for_test(
+        ArtifactWorkspace&& workspace,
+        const ExpectedPackageArtifactSet& expected,
+        std::uintmax_t expected_artifact_owner) {
+    return ValidatedPackageArtifactSet::validate_for_owners(
+            std::move(workspace), expected,
+            static_cast<std::uintmax_t>(geteuid()),
+            expected_artifact_owner, expected_artifact_owner);
+}
+
+ValidatedPackageArtifactSet validate_post_build_package_artifacts_for_test(
+        ArtifactWorkspace&& workspace,
+        const ExpectedPackageArtifactSet& expected,
+        std::uintmax_t expected_workspace_owner,
+        std::uintmax_t expected_artifact_owner,
+        std::uintmax_t expected_signature_owner) {
+    return ValidatedPackageArtifactSet::validate_for_owners(
+            std::move(workspace), expected,
+            expected_workspace_owner, expected_artifact_owner,
+            expected_signature_owner);
 }
 #endif
