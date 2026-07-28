@@ -2,6 +2,7 @@
 
 #include "artifact_identity.hpp"
 #include "artifact_install_plan.hpp"
+#include "artifact_workspace.hpp"
 #include "dependency_plan.hpp"
 #include "package_metadata.hpp"
 
