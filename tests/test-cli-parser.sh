@@ -323,6 +323,9 @@ assert_pre_log_exit
 setup_case help-operation
 run_ok --help
 assert_contains "USAGE" "$output_file"
+assert_contains \
+    "Unsupported for separated source builds; no dependency cleanup is performed" \
+    "$output_file"
 assert_pre_log_exit
 
 setup_case version-operation

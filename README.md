@@ -353,6 +353,10 @@ Example:
 # Skip the diff prompt after fetching repository updates (default: false)
 # NODIFF=true
 
+# Request dependency cleanup (default: false).
+# Unsupported source-build routes fail before mutation; no cleanup is performed.
+# RMDEPS=true
+
 # Preferred editor (priority: $EDITOR > this setting > nano)
 # Accepts a simple editor command and simple options only.
 # Complex shell syntax such as shell expansion, nested quoting, pipes,
@@ -394,7 +398,9 @@ build 後の validation、metadata query、または install が失敗した場�
 
 未指定の場合、既存の package artifact や `src/` directory があるときは、必要に応じて default no の確認 prompt で rebuild / cleanbuild を選べます。cleanbuild を有効にし、同じ package directory に既存 package artifact がある場合は、makepkg へ `-f` も渡します。`--noconfirm` 指定時はこの prompt を出さず、未指定の rebuild / cleanbuild は no 扱いにします。inherited process environment または source preference が `PKGDEST` を定義している場合は、empty value でも all-target preflight で拒否し、どの source unit の workspace / makepkg / installed metadata query / sudo も開始しません。`--noedit` / `--nodiff` / `--rebuild` / `--cleanbuild` / `--rmdeps` は jpacker 固有の option であり、そのまま pacman へは渡しません。
 
-`--rmdeps` は separated AUR / source-build 経路では未対応です。source target を含む invocation では、artifact workspace 作成、makepkg、installed metadata query、sudo の前に全体を拒否し、`makepkg -r` へ変換しません。`upgrade-aur` と `upgrade-all` では更新対象の有無より前に拒否します。jpacker 自身も `pacman -Rns`、`pacman -Qdt`、orphan cleanup を追加しません。この option は pacman-only install には作用せず、pacman にも渡しません。
+`--rmdeps` は v1.x の separated AUR / source-build lifecycle では未対応です。旧来は makepkg が build、install、dependency cleanup を一続きで所有していましたが、現行 lifecycle は fresh `PKGDEST` での build-only makepkg と typed `pacman -U` install に分離されています。このため jpacker は、今回の invocation だけが新規導入した make / check dependency の exact set を authoritative に証明できません。pre-existing package、Explicit package、`base-devel` を保護するため、installed package 差分から削除対象を推測せず、source route では既存の route-specific boundary で external mutation 前に拒否します。
+
+`--rmdeps` を `makepkg -r` へ変換せず、`pacman -Rns`、`pacman -Qdt`、orphan cleanup も追加しません。config fileの`RMDEPS=true`にも同じpolicyを適用します。`upgrade-aur` と `upgrade-all` では更新対象がない場合も拒否します。`jpacker upgrade` は、valid な registered source target があれば既存の pre-mutation preparation boundary で拒否しますが、registered source target がなく pacman-only system upgrade へ縮退する場合は作用せず、pacman にも渡しません。他の pacman-only 経路でも同様です。詳細は [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) と [docs/DECISIONS.md](docs/DECISIONS.md) を参照してください。
 
 ```bash
 jpacker --rebuild --cleanbuild -S google-chrome
@@ -776,6 +782,10 @@ Example:
 # Skip the diff prompt after fetching repository updates (default: false)
 # NODIFF=true
 
+# Request dependency cleanup (default: false).
+# Unsupported source-build routes fail before mutation; no cleanup is performed.
+# RMDEPS=true
+
 # Preferred editor (priority: $EDITOR > this setting > nano)
 # Accepts a simple editor command and simple options only.
 # Complex shell syntax such as shell expansion, nested quoting, pipes,
@@ -817,7 +827,9 @@ If post-build validation, a metadata query, or installation fails, jpacker retai
 
 When rebuild/cleanbuild are not specified, jpacker may ask with a default-no prompt before rebuilding an existing package artifact or cleaning an existing `src/` directory. If cleanbuild is enabled and a package artifact exists in the same package directory, jpacker also passes `-f` to makepkg. With `--noconfirm`, these prompts are skipped and unspecified rebuild/cleanbuild choices default to no. If the inherited process environment or a source preference defines `PKGDEST`, even with an empty value, all-target preflight rejects the invocation before any source unit starts its workspace, makepkg, installed metadata query, or sudo work. `--noedit`, `--nodiff`, `--rebuild`, `--cleanbuild`, and `--rmdeps` are jpacker-specific and are not passed through unchanged to pacman.
 
-`--rmdeps` is unsupported on the separated AUR/source-build route. An invocation containing a source target is rejected as a whole before artifact workspace creation, makepkg, an installed metadata query, or sudo, and the option is not translated to `makepkg -r`. `upgrade-aur` and `upgrade-all` reject it before checking whether updates are available. jpacker does not add its own `pacman -Rns`, `pacman -Qdt`, or orphan cleanup. The option has no effect on pacman-only installs and is not forwarded to pacman.
+`--rmdeps` is unsupported in the v1.x separated AUR/source-build lifecycle. The old lifecycle let makepkg own build, installation, and dependency cleanup as one sequence, but the current lifecycle separates build-only makepkg in a fresh `PKGDEST` from typed `pacman -U` installation. jpacker therefore cannot authoritatively prove the exact set of make or check dependencies newly introduced by the current invocation. To protect pre-existing packages, Explicit packages, and `base-devel`, it does not infer removal candidates from installed-package differences; source routes reject the option at their existing route-specific boundary before external mutation.
+
+The option is not translated to `makepkg -r`, and jpacker does not add `pacman -Rns`, `pacman -Qdt`, or orphan cleanup. The same policy applies to `RMDEPS=true` in the configuration file. `upgrade-aur` and `upgrade-all` reject it even when there are no update targets. `jpacker upgrade` rejects it at the existing pre-mutation preparation boundary when a valid registered source target exists; when no registered source target exists and the operation reduces to a pacman-only system upgrade, the option has no effect and is not forwarded to pacman. The same no-effect, no-forwarding rule applies to other pacman-only routes. See [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) and [docs/DECISIONS.md](docs/DECISIONS.md) for details.
 
 ```bash
 jpacker --rebuild --cleanbuild -S google-chrome

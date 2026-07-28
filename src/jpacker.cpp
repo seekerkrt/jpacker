@@ -429,11 +429,11 @@ void print_help() {
     std::cout << "                              Adds no jpacker build/review/plan skip" << std::endl;
     std::cout << "    \033[1m--rebuild\033[0m           Pass -f to build-only makepkg" << std::endl;
     std::cout << "    \033[1m--cleanbuild\033[0m        Pass -C to build-only makepkg" << std::endl;
-    std::cout << "    \033[1m--rmdeps\033[0m            Unsupported for separated source builds" << std::endl;
+    std::cout << "    \033[1m--rmdeps\033[0m            Unsupported for separated source builds; no dependency cleanup is performed" << std::endl;
     std::cout << "    \033[1m--aur\033[0m               Limit -S/-Ss/-Si to AUR; no repository fallback" << std::endl;
     std::cout << "    \033[1m--repo\033[0m              Limit -S/-Ss/-Si to official binary repositories; no AUR/source-build fallback" << std::endl;
     std::cout << "\033[1mCONFIG\033[0m" << std::endl;
-    std::cout << "    jpacker.conf: EDITOR=..., LOGFILE=..., NOEDIT=..., NODIFF=..." << std::endl;
+    std::cout << "    jpacker.conf: EDITOR=..., LOGFILE=..., NOEDIT=..., NODIFF=..., RMDEPS=..." << std::endl;
 }
 
 bool argv_requests_pkgbuild_export_diagnostics(int argc, char* argv[]) {

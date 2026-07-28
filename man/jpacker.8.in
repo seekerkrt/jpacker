@@ -153,7 +153,7 @@ Pass \fB-f\fR to build-only makepkg execution. When omitted, jpacker may ask bef
 Pass \fB-C\fR to build-only makepkg execution so the existing \fIsrcdir\fR is not reused. When omitted, jpacker may ask before cleaning an existing local \fIsrc/\fR directory; the default answer is no. If a local package artifact exists in the same package directory, cleanbuild also adds \fB-f\fR.
 .TP
 .BR \-\-rmdeps
-Recognize this as a jpacker option, but reject an invocation that selects the separated AUR/source-build route before artifact workspace creation, makepkg, an installed metadata query, or sudo. \fBupgrade-aur\fR and \fBupgrade-all\fR reject it before checking whether updates are available. It is not translated to \fBmakepkg -r\fR, and jpacker does not run its own pacman removal or orphan cleanup. This option has no effect on and is not passed to pacman-only installs.
+Recognize this as a jpacker option, but treat it as unsupported for the v1.x separated AUR/source-build lifecycle. jpacker cannot currently prove which make or check dependencies are owned by the current invocation, so source routes reject the option at their existing route-specific boundary before source or system mutation; \fB--noconfirm\fR does not bypass this guard. The option is not translated to \fBmakepkg -r\fR, and jpacker does not run \fBpacman -Rns\fR, \fBpacman -Qdt\fR, or custom orphan cleanup. \fBupgrade-aur\fR and \fBupgrade-all\fR reject it even when there are no update targets. \fBjpacker upgrade\fR rejects it during pre-mutation preparation when a valid registered source target exists; with no registered source target, that operation reduces to a pacman-only system upgrade and the option has no effect and is not forwarded. The same no-effect, no-forwarding rule applies to all other pacman-only routes.
 .TP
 .BR \-\-aur
 Limit plain \fB-S\fR installs, \fB-Ss\fR searches, and \fB-Si\fR information queries to AUR, with no official repository fallback. Official packages with the same name still use AUR, and source-build preferences and the official source-build route are ignored. Repository-qualified root targets are invalid. AUR build-plan dependencies retain their existing handling.
@@ -183,6 +183,9 @@ Set to \fBtrue\fR to disable \fIPKGBUILD\fR / \fI*.install\fR review prompts glo
 .TP
 .B NODIFF
 Set to \fBtrue\fR to disable git diff checks during existing cache repository updates globally.
+.TP
+.B RMDEPS
+Set to \fBtrue\fR to request the same policy as \fB--rmdeps\fR. Separated source-build routes reject the invocation before mutation; no dependency cleanup is performed.
 .TP
 .B EDITOR
 Specify the preferred text editor. The priority is the \fBEDITOR\fR environment variable, this configuration value, then \fBnano\fR.
