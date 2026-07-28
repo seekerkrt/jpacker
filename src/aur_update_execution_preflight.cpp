@@ -34,7 +34,9 @@ bool same_issue(
     return lhs.reason == rhs.reason && lhs.package_name == rhs.package_name &&
            lhs.package_base == rhs.package_base &&
            lhs.dependency_specification == rhs.dependency_specification &&
-           lhs.diagnostic == rhs.diagnostic;
+           lhs.diagnostic == rhs.diagnostic &&
+           lhs.build_plan_projection_issue ==
+                   rhs.build_plan_projection_issue;
 }
 
 void add_issue(
@@ -457,6 +459,27 @@ struct ReachableDependencyCycle {
 
 using PackageBaseGraph = std::map<std::string, std::set<std::string>>;
 
+bool package_target_reaches(
+        const std::vector<AurDependencyGraphEdge>& graph,
+        const PlannedPackageTarget* start,
+        const PlannedPackageTarget* destination) {
+    std::vector<const PlannedPackageTarget*> pending{start};
+    std::set<const PlannedPackageTarget*>    visited;
+    while(!pending.empty()) {
+        const PlannedPackageTarget* current = pending.back();
+        pending.pop_back();
+        if(current == destination) return true;
+        if(!visited.insert(current).second) continue;
+
+        for(const auto& edge : graph) {
+            if(edge.parent == current && !visited.contains(edge.target)) {
+                pending.push_back(edge.target);
+            }
+        }
+    }
+    return false;
+}
+
 bool package_base_reaches(
         const PackageBaseGraph& graph, const std::string& start,
         const std::string& destination) {
@@ -490,6 +513,19 @@ std::vector<ReachableDependencyCycle> collect_reachable_dependency_cycles(
         const std::vector<RootGraphReachability>& reachability) {
     PackageBaseGraph package_base_graph;
     for(const auto& edge : graph) {
+        // POLICY(#268): same-Base package dependency is real package-level
+        // attribution。reverse pathがある場合だけexecution graphのreal
+        // self-cycleへ縮約し、一方向のsibling dependencyはcycleにしない。
+        if(edge.parent->package_base == edge.target->package_base &&
+           edge.parent->package_name != edge.target->package_name) {
+            if(package_target_reaches(graph, edge.target, edge.parent)) {
+                package_base_graph[edge.parent->package_base].insert(
+                        edge.parent->package_base);
+            } else {
+                package_base_graph.try_emplace(edge.parent->package_base);
+            }
+            continue;
+        }
         package_base_graph[edge.parent->package_base].insert(
                 edge.target->package_base);
         package_base_graph.try_emplace(edge.target->package_base);
@@ -925,16 +961,6 @@ void inspect_unresolved_cycles_and_risks(
                         plan, risk.package_name, risk.package_base));
     }
 
-    for(const auto& split : plan.split_package_targets) {
-        add_attributed_issue(
-                issues,
-                make_issue(
-                        AurUpdateExecutionReason::SplitPackageSelectionRequired,
-                        "Split package artifact selection is not implemented.",
-                        split.package_name, split.package_base),
-                roots_for_package(
-                        plan, split.package_name, split.package_base));
-    }
 }
 
 void inspect_package_targets_and_order(
@@ -942,17 +968,30 @@ void inspect_package_targets_and_order(
         const std::vector<AurDependencyGraphEdge>& dependency_graph,
         const std::vector<RootGraphReachability>& root_reachability,
         std::vector<AttributedBuildPlanIssue>& issues) {
-    std::map<std::string, std::vector<const PlannedPackageTarget*>> targets_by_base;
-    std::map<std::string, bool> has_unattributed_target_by_base;
+    BuildPlanArtifactTargetProjectionResult projection =
+            project_build_plan_required_artifact_targets(plan);
+    if(!projection.is_success()) {
+        for(const auto& projection_issue : projection.failure()->issues) {
+            AurUpdateExecutionIssue issue = make_issue(
+                    projection_issue.kind ==
+                                    BuildPlanArtifactTargetProjectionIssueKind::
+                                            PackageBaseMismatch
+                            ? AurUpdateExecutionReason::PackageBaseMismatch
+                            : AurUpdateExecutionReason::BuildPlanInconsistent,
+                    projection_issue.diagnostic,
+                    projection_issue.package_name,
+                    projection_issue.package_base);
+            issue.build_plan_projection_issue = projection_issue;
+            add_attributed_issue(
+                    issues, std::move(issue), projection_issue.roots);
+        }
+    }
+
     for(const auto& target : plan.package_targets) {
-        targets_by_base[target.package_base].push_back(&target);
         bool roots_are_consistent = !target.roots.empty();
         for(const auto& root : target.roots) {
             if(!is_known_plan_root(plan, root)) roots_are_consistent = false;
         }
-        has_unattributed_target_by_base[target.package_base] =
-                has_unattributed_target_by_base[target.package_base] ||
-                !roots_are_consistent;
 
         bool roles_are_consistent = !target.roles.empty() && std::all_of(
                 target.roles.begin(), target.roles.end(),
@@ -995,95 +1034,6 @@ void inspect_package_targets_and_order(
                             target.package_name, target.package_base),
                     target.roots);
         }
-        if(target.package_name != target.package_base) {
-            add_attributed_issue(
-                    issues,
-                    make_issue(
-                            AurUpdateExecutionReason::SplitPackageSelectionRequired,
-                            "Split package artifact selection is not implemented.",
-                            target.package_name, target.package_base),
-                    target.roots);
-        }
-    }
-
-    for(const auto& [package_base, targets] : targets_by_base) {
-        std::set<std::string> package_names;
-        std::vector<RootTargetIdentity> roots;
-        for(const auto* target : targets) {
-            package_names.insert(target->package_name);
-            for(const auto& root : target->roots) add_root_identity(roots, root);
-        }
-        if(package_names.size() != targets.size()) {
-            if(has_unattributed_target_by_base[package_base]) roots.clear();
-            add_attributed_issue(
-                    issues,
-                    make_issue(
-                            AurUpdateExecutionReason::BuildPlanInconsistent,
-                            "BuildPlan contains duplicate planned package targets.",
-                            std::nullopt, package_base),
-                    roots);
-        }
-        if(package_names.size() <= 1) continue;
-        if(has_unattributed_target_by_base[package_base]) roots.clear();
-
-        add_attributed_issue(
-                issues,
-                make_issue(
-                        AurUpdateExecutionReason::MultiplePackageTargetsForPackageBase,
-                        "PackageBase has multiple distinct package targets.",
-                        std::nullopt, package_base),
-                roots);
-    }
-
-    std::map<std::string, std::size_t> order_entry_count_by_base;
-    for(const auto& entry : plan.order) {
-        ++order_entry_count_by_base[entry.package_base];
-        auto group = targets_by_base.find(entry.package_base);
-        bool entry_is_consistent = is_valid_package_name(entry.package_base) &&
-                !entry.package_names.empty() && group != targets_by_base.end();
-        std::set<std::string> seen_package_names;
-        for(const auto& package_name : entry.package_names) {
-            if(!is_valid_package_name(package_name) ||
-               !seen_package_names.insert(package_name).second) {
-                entry_is_consistent = false;
-                continue;
-            }
-            if(group == targets_by_base.end()) continue;
-            bool has_matching_target = std::any_of(
-                    group->second.begin(), group->second.end(),
-                    [&package_name](const PlannedPackageTarget* target) {
-                        return target->package_name == package_name;
-                    });
-            if(!has_matching_target) entry_is_consistent = false;
-        }
-        if(group != targets_by_base.end() && group->second.size() == 1 &&
-           !seen_package_names.contains(group->second.front()->package_name)) {
-            entry_is_consistent = false;
-        }
-        if(entry_is_consistent) continue;
-        add_attributed_issue(
-                issues,
-                make_issue(
-                        AurUpdateExecutionReason::BuildPlanInconsistent,
-                        "BuildPlan execution order contains an invalid PackageBase entry.",
-                        std::nullopt, entry.package_base),
-                roots_for_package(plan, std::nullopt, entry.package_base));
-    }
-
-    for(const auto& [package_base, targets] : targets_by_base) {
-        if(order_entry_count_by_base[package_base] == 1) continue;
-        std::vector<RootTargetIdentity> roots;
-        for(const auto* target : targets) {
-            for(const auto& root : target->roots) add_root_identity(roots, root);
-        }
-        if(has_unattributed_target_by_base[package_base]) roots.clear();
-        add_attributed_issue(
-                issues,
-                make_issue(
-                        AurUpdateExecutionReason::BuildPlanInconsistent,
-                        "BuildPlan PackageBase must appear exactly once in execution order.",
-                        std::nullopt, package_base),
-                roots);
     }
 }
 

@@ -39,6 +39,12 @@ bool is_leaf_package(const std::string& package_name) {
             "case10-common",
             "case13-common",
             "case15-shared",
+            "case16-a-only",
+            "case16-b-only",
+            "case16-shared",
+            "case17-leaf",
+            "case19-early-dep",
+            "case19-late-dep",
     };
     for(const auto& leaf : leaves) {
         if(package_name == leaf) return true;
@@ -172,6 +178,60 @@ std::optional<AurPackageInfo> AurClient::info(const std::string& package_name) {
         return package_info(
                 package_name, {"case15-shared"}, {"case15-shared"},
                 {"case15-shared"});
+    }
+
+    if(package_name == "case16-child-a") {
+        return package_info(
+                package_name, {"case16-a-only", "case16-shared"}, {}, {}, {},
+                "case16-suite");
+    }
+    if(package_name == "case16-child-b") {
+        return package_info(
+                package_name, {"case16-b-only", "case16-shared"}, {}, {}, {},
+                "case16-suite");
+    }
+
+    if(package_name == "case17-parent") {
+        return package_info(
+                package_name, {"case17-sibling"}, {}, {}, {},
+                "case17-suite");
+    }
+    if(package_name == "case17-sibling") {
+        return package_info(
+                package_name, {"case17-leaf"}, {}, {}, {},
+                "case17-suite");
+    }
+
+    if(package_name == "case18-cycle-a") {
+        return package_info(package_name, {"case18-cycle-b"});
+    }
+    if(package_name == "case18-cycle-b") {
+        return package_info(package_name, {"case18-cycle-a"});
+    }
+
+    if(package_name == "case20-cycle-a") {
+        return package_info(
+                package_name, {"case20-cycle-b"}, {}, {}, {},
+                "case20-suite");
+    }
+    if(package_name == "case20-cycle-b") {
+        return package_info(
+                package_name, {"case20-cycle-a"}, {}, {}, {},
+                "case20-suite");
+    }
+
+    if(package_name == "case19-consumer") {
+        return package_info(package_name, {"case19-suite-a"});
+    }
+    if(package_name == "case19-suite-a") {
+        return package_info(
+                package_name, {"case19-early-dep"}, {}, {}, {},
+                "case19-suite");
+    }
+    if(package_name == "case19-suite-b") {
+        return package_info(
+                package_name, {"case19-late-dep"}, {}, {}, {},
+                "case19-suite");
     }
 
     if(package_name == "preflight-root-metadata-failure") {

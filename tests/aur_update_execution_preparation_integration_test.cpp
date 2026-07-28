@@ -508,7 +508,8 @@ void test_nonregular_preferences(PreferenceFixture& fixture) {
             "strict FIFO preference");
 }
 
-void test_package_to_base_fallback(PreferenceFixture& fixture) {
+void test_split_lifecycle_stops_before_package_to_base_fallback(
+        PreferenceFixture& fixture) {
     const std::string package_name = "preparation-fallback-package";
     const std::string package_base = "preparation-fallback-base";
     fixture.write_entry(package_name, "9PACKAGE_INVALID=value\n");
@@ -522,21 +523,26 @@ void test_package_to_base_fallback(PreferenceFixture& fixture) {
             executable_preflight(package_name, package_base));
     static_cast<void>(require_single_issue(
             preparation,
-            AurUpdatePreparationReason::StaticWorkItemInvalid,
-            "package to PackageBase fallback"));
+            AurUpdatePreparationReason::
+                    MultipleArtifactLifecycleNotConnected,
+            "split lifecycle before package to PackageBase fallback"));
     expect(
-            preparation.warnings.size() == 2 &&
-                    preparation.warnings[0].preference_name == package_name &&
-                    preparation.warnings[0].entry_path ==
-                            fixture.entry_path(package_name) &&
-                    preparation.warnings[1].preference_name == package_base &&
-                    preparation.warnings[1].entry_path ==
-                            fixture.entry_path(package_base),
-            "package to PackageBase fallback did not preserve both reads in order");
-    expect_no_generic_preparation("package to PackageBase fallback");
+            preparation.warnings.empty(),
+            "split lifecycle blocker read package or PackageBase preference");
+    expect(
+            preparation.projected_build_units.size() == 1 &&
+                    preparation.projected_build_units.front()
+                                    .required_target_attributions.size() == 1 &&
+                    preparation.projected_build_units.front()
+                                    .required_target_attributions.front()
+                                    .required_target.package_name == package_name,
+            "split lifecycle blocker lost its required target projection");
+    expect_no_generic_preparation(
+            "split lifecycle before package to PackageBase fallback");
 }
 
-void test_package_failure_does_not_read_base(PreferenceFixture& fixture) {
+void test_split_lifecycle_does_not_consume_package_failure(
+        PreferenceFixture& fixture) {
     const std::string package_name = "preparation-package-failure";
     const std::string package_base = "preparation-package-failure-base";
     fixture.write_entry(package_name, "VALUE=available\n");
@@ -548,30 +554,27 @@ void test_package_failure_does_not_read_base(PreferenceFixture& fixture) {
 
     const AurUpdateSourceBuildPreparation preparation = prepare(
             executable_preflight(package_name, package_base));
-    const AurUpdatePreparationIssue& issue = require_single_issue(
+    static_cast<void>(require_single_issue(
             preparation,
-            AurUpdatePreparationReason::SourcePreferenceUnavailable,
-            "package failure short-circuit");
-    expect(
-            issue.package_name == package_name &&
-                    issue.source_preference_failure.has_value() &&
-                    issue.source_preference_failure->kind ==
-                            SourcePreferenceFailureKind::StatusUnavailable,
-            "package failure was replaced by a PackageBase result");
+            AurUpdatePreparationReason::
+                    MultipleArtifactLifecycleNotConnected,
+            "split lifecycle before package preference failure"));
     expect(
             preparation.warnings.empty() &&
                     fs::is_directory(fixture.entry_path(package_base)),
-            "package failure path consumed or changed the PackageBase trap");
-    expect_no_generic_preparation("package failure short-circuit");
+            "split lifecycle path consumed or changed the PackageBase trap");
+    expect_no_generic_preparation(
+            "split lifecycle before package preference failure");
 
     StrictSourcePreferenceResult retry =
             read_source_preference_strict(package_name);
     expect(
-            std::get_if<SourcePreferenceLoaded>(&retry) != nullptr,
-            "package failure short-circuit did not consume the package hook");
+            std::get_if<SourcePreferenceFailure>(&retry) != nullptr,
+            "split lifecycle blocker consumed the package preference failure hook");
 }
 
-void test_base_failure_is_typed(PreferenceFixture& fixture) {
+void test_split_lifecycle_does_not_consume_base_failure(
+        PreferenceFixture& fixture) {
     const std::string package_name = "preparation-base-failure-package";
     const std::string package_base = "preparation-base-failure-base";
     fixture.remove_entry(package_name);
@@ -582,19 +585,24 @@ void test_base_failure_is_typed(PreferenceFixture& fixture) {
 
     const AurUpdateSourceBuildPreparation preparation = prepare(
             executable_preflight(package_name, package_base));
-    const AurUpdatePreparationIssue& issue = require_single_issue(
+    static_cast<void>(require_single_issue(
             preparation,
-            AurUpdatePreparationReason::SourcePreferenceUnavailable,
-            "PackageBase strict failure");
+            AurUpdatePreparationReason::
+                    MultipleArtifactLifecycleNotConnected,
+            "split lifecycle before PackageBase strict failure"));
+    expect_no_generic_preparation(
+            "split lifecycle before PackageBase strict failure");
+
+    StrictSourcePreferenceResult retry =
+            read_source_preference_strict(package_base);
+    const auto* failure = std::get_if<SourcePreferenceFailure>(&retry);
     expect(
-            issue.package_name == package_base &&
-                    issue.source_preference_failure.has_value() &&
-                    issue.source_preference_failure->kind ==
+            failure != nullptr &&
+                    failure->kind ==
                             SourcePreferenceFailureKind::OpenFailed &&
-                    issue.source_preference_failure->entry_path ==
+                    failure->entry_path ==
                             fixture.entry_path(package_base),
-            "PackageBase strict failure lost its typed identity");
-    expect_no_generic_preparation("PackageBase strict failure");
+            "split lifecycle blocker consumed the PackageBase failure hook");
 }
 
 void test_pkgdest_conflict(
@@ -694,9 +702,9 @@ int main(int argc, char* argv[]) {
         test_warning_retention(fixture);
         test_status_open_and_read_failures(fixture);
         test_nonregular_preferences(fixture);
-        test_package_to_base_fallback(fixture);
-        test_package_failure_does_not_read_base(fixture);
-        test_base_failure_is_typed(fixture);
+        test_split_lifecycle_stops_before_package_to_base_fallback(fixture);
+        test_split_lifecycle_does_not_consume_package_failure(fixture);
+        test_split_lifecycle_does_not_consume_base_failure(fixture);
         test_empty_and_nonempty_pkgdest(fixture);
         test_database_failure_is_typed(fixture);
         reset_source_preference_test_hooks();

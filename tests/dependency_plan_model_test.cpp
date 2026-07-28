@@ -146,6 +146,45 @@ void expect_legacy_order(
     }
 }
 
+const BuildPlanEntry& require_build_plan_entry(
+        const BuildPlan& plan, std::string_view package_base) {
+    const BuildPlanEntry* found = nullptr;
+    for(const auto& entry : plan.order) {
+        if(entry.package_base != package_base) continue;
+        if(found != nullptr) {
+            throw std::runtime_error(
+                    "Duplicate build plan entry: " + std::string(package_base));
+        }
+        found = &entry;
+    }
+    if(found == nullptr) {
+        throw std::runtime_error(
+                "Missing build plan entry: " + std::string(package_base));
+    }
+    return *found;
+}
+
+std::size_t require_build_plan_order_index(
+        const BuildPlan& plan, std::string_view package_base) {
+    static_cast<void>(require_build_plan_entry(plan, package_base));
+    for(std::size_t i = 0; i < plan.order.size(); ++i) {
+        if(plan.order[i].package_base == package_base) return i;
+    }
+    throw std::logic_error(
+            "Validated build plan entry has no order index: " +
+            std::string(package_base));
+}
+
+void expect_build_unit_before(
+        const BuildPlan& plan, std::string_view dependency_package_base,
+        std::string_view dependent_package_base) {
+    expect(
+            require_build_plan_order_index(plan, dependency_package_base) <
+                    require_build_plan_order_index(plan, dependent_package_base),
+            "Build unit order differs: " + std::string(dependency_package_base) +
+                    " must precede " + std::string(dependent_package_base));
+}
+
 void expect_direct_aur_resolution(
         const BuildPlanDependencyEdge& edge, const std::string& expected_name,
         const std::string& expected_base) {
@@ -628,6 +667,188 @@ void test_supplemental_multi_root_contracts() {
             "All-role explicit-wins reducer differs");
 }
 
+void test_same_package_base_root_coverage() {
+    BuildPlan plan = resolve_build_plan(
+            std::vector<std::string>{"case16-child-a", "case16-child-b"});
+    expect(
+            plan.root_targets == std::vector<RootTargetIdentity>{
+                    {0, "case16-child-a"},
+                    {1, "case16-child-b"},
+            },
+            "Same-base root identities differ");
+
+    const BuildPlanEntry& suite =
+            require_build_plan_entry(plan, "case16-suite");
+    expect(
+            suite.package_names == std::vector<std::string>{
+                    "case16-child-a", "case16-child-b"},
+            "Same-base required child order differs");
+    expect(plan.order.size() == 4, "Same-base build unit count differs");
+
+    const PlannedPackageTarget& child_a =
+            require_package_target(plan, "case16-child-a");
+    const PlannedPackageTarget& child_b =
+            require_package_target(plan, "case16-child-b");
+    const PlannedPackageTarget& shared =
+            require_package_target(plan, "case16-shared");
+    expect(plan.package_targets.size() == 5, "Same-base package target count differs");
+    expect(package_target_count(plan, "case16-child-a") == 1, "First child target was duplicated");
+    expect(package_target_count(plan, "case16-child-b") == 1, "Second child target was duplicated");
+    expect(package_target_count(plan, "case16-shared") == 1, "Shared dependency target was duplicated");
+    expect(child_a.package_base == "case16-suite", "First child PackageBase differs");
+    expect(child_b.package_base == "case16-suite", "Second child PackageBase differs");
+    expect_roles(child_a, {PackageRole::Root});
+    expect_roles(child_b, {PackageRole::Root});
+    expect_roles(shared, {PackageRole::RuntimeDependency});
+    expect_roots(child_a, {{0, "case16-child-a"}});
+    expect_roots(child_b, {{1, "case16-child-b"}});
+    expect_roots(
+            shared,
+            {{0, "case16-child-a"}, {1, "case16-child-b"}});
+
+    static_cast<void>(require_edge(
+            plan, "case16-child-a", "case16-a-only",
+            PackageRole::RuntimeDependency));
+    static_cast<void>(require_edge(
+            plan, "case16-child-a", "case16-shared",
+            PackageRole::RuntimeDependency));
+    static_cast<void>(require_edge(
+            plan, "case16-child-b", "case16-b-only",
+            PackageRole::RuntimeDependency));
+    static_cast<void>(require_edge(
+            plan, "case16-child-b", "case16-shared",
+            PackageRole::RuntimeDependency));
+    expect(plan.dependency_edges.size() == 4, "Same-base dependency edge count differs");
+
+    expect_build_unit_before(plan, "case16-a-only", "case16-suite");
+    expect_build_unit_before(plan, "case16-b-only", "case16-suite");
+    expect_build_unit_before(plan, "case16-shared", "case16-suite");
+    expect(plan.cycles.empty(), "Independent same-base roots produced a cycle");
+}
+
+void test_same_package_base_sibling_attribution() {
+    BuildPlan plan = resolve_build_plan(std::vector<std::string>{
+            "case17-parent", "case17-parent", "case17-sibling"});
+    expect(
+            plan.root_targets == std::vector<RootTargetIdentity>{
+                    {0, "case17-parent"},
+                    {1, "case17-parent"},
+                    {2, "case17-sibling"},
+            },
+            "Same-base duplicate root identities differ");
+
+    const BuildPlanEntry& suite =
+            require_build_plan_entry(plan, "case17-suite");
+    expect(
+            suite.package_names == std::vector<std::string>{
+                    "case17-parent", "case17-sibling"},
+            "Same-base sibling order or deduplication differs");
+    expect(plan.order.size() == 2, "Same-base sibling build unit count differs");
+    expect(plan.package_targets.size() == 3, "Same-base sibling target count differs");
+    expect(package_target_count(plan, "case17-parent") == 1, "Parent target was duplicated");
+    expect(package_target_count(plan, "case17-sibling") == 1, "Sibling target was duplicated");
+
+    const PlannedPackageTarget& parent =
+            require_package_target(plan, "case17-parent");
+    const PlannedPackageTarget& sibling =
+            require_package_target(plan, "case17-sibling");
+    const PlannedPackageTarget& leaf =
+            require_package_target(plan, "case17-leaf");
+    expect_roles(parent, {PackageRole::Root});
+    expect_roles(
+            sibling,
+            {PackageRole::Root, PackageRole::RuntimeDependency});
+    expect_roles(leaf, {PackageRole::RuntimeDependency});
+    expect_roots(
+            sibling,
+            {
+                    {0, "case17-parent"},
+                    {1, "case17-parent"},
+                    {2, "case17-sibling"},
+            });
+    expect_roots(
+            leaf,
+            {
+                    {0, "case17-parent"},
+                    {1, "case17-parent"},
+                    {2, "case17-sibling"},
+            });
+    expect(
+            desired_install_reason(sibling) == DesiredInstallReason::Explicit,
+            "Same-base root/dependency reason did not prefer Explicit");
+
+    static_cast<void>(require_edge(
+            plan, "case17-parent", "case17-sibling",
+            PackageRole::RuntimeDependency));
+    static_cast<void>(require_edge(
+            plan, "case17-sibling", "case17-leaf",
+            PackageRole::RuntimeDependency));
+    expect_build_unit_before(plan, "case17-leaf", "case17-suite");
+    expect(plan.cycles.empty(), "Same-base sibling dependency produced a false cycle");
+}
+
+void test_real_dependency_cycle_is_preserved() {
+    BuildPlan plan = resolve_build_plan("case18-cycle-a");
+    static_cast<void>(require_edge(
+            plan, "case18-cycle-a", "case18-cycle-b",
+            PackageRole::RuntimeDependency));
+    static_cast<void>(require_edge(
+            plan, "case18-cycle-b", "case18-cycle-a",
+            PackageRole::RuntimeDependency));
+    expect(!plan.cycles.empty(), "Real dependency cycle was not preserved");
+}
+
+void test_same_package_base_real_cycle_is_preserved() {
+    BuildPlan plan = resolve_build_plan("case20-cycle-a");
+    static_cast<void>(require_edge(
+            plan, "case20-cycle-a", "case20-cycle-b",
+            PackageRole::RuntimeDependency));
+    static_cast<void>(require_edge(
+            plan, "case20-cycle-b", "case20-cycle-a",
+            PackageRole::RuntimeDependency));
+    expect(
+            plan.order.size() == 1 &&
+                    plan.order.front().package_base == "case20-suite" &&
+                    plan.order.front().package_names ==
+                            std::vector<std::string>{
+                                    "case20-cycle-a", "case20-cycle-b"},
+            "Same-base real cycle lost its exact execution unit");
+    expect(
+            plan.cycles == std::vector<std::string>{"case20-suite"},
+            "Same-base real cycle was not preserved exactly once");
+}
+
+void test_same_package_base_late_dependency_ordering() {
+    BuildPlan plan = resolve_build_plan(std::vector<std::string>{
+            "case19-consumer", "case19-suite-b"});
+    const BuildPlanEntry& suite =
+            require_build_plan_entry(plan, "case19-suite");
+    expect(
+            suite.package_names == std::vector<std::string>{
+                    "case19-suite-a", "case19-suite-b"},
+            "Late same-base child aggregation differs");
+    expect(plan.package_targets.size() == 5, "Late dependency target count differs");
+    expect(package_target_count(plan, "case19-suite-a") == 1, "Early suite target was duplicated");
+    expect(package_target_count(plan, "case19-suite-b") == 1, "Late suite target was duplicated");
+
+    static_cast<void>(require_edge(
+            plan, "case19-consumer", "case19-suite-a",
+            PackageRole::RuntimeDependency));
+    static_cast<void>(require_edge(
+            plan, "case19-suite-a", "case19-early-dep",
+            PackageRole::RuntimeDependency));
+    static_cast<void>(require_edge(
+            plan, "case19-suite-b", "case19-late-dep",
+            PackageRole::RuntimeDependency));
+
+    // LANDMINE(#268): a late child may add dependencies after a consumer was first traversed.
+    // Moving only the existing PackageBase entry would invert the consumer dependency.
+    expect_build_unit_before(plan, "case19-early-dep", "case19-suite");
+    expect_build_unit_before(plan, "case19-late-dep", "case19-suite");
+    expect_build_unit_before(plan, "case19-suite", "case19-consumer");
+    expect(plan.cycles.empty(), "Late same-base child produced a cycle");
+}
+
 void test_preflight_root_failure_and_continuation() {
     BuildPlan plan = resolve_build_plan_for_preflight(
             {"preflight-root-metadata-failure", "preflight-later-root"});
@@ -977,6 +1198,21 @@ int main() {
         run_case("Case 11 single overload compatibility", test_case_11_single_overload_compatibility);
         run_case("Case 12 invalid reducer state", test_case_12_invalid_reducer_state);
         run_case("supplemental multi-root contracts", test_supplemental_multi_root_contracts);
+        run_case(
+                "same PackageBase root coverage",
+                test_same_package_base_root_coverage);
+        run_case(
+                "same PackageBase sibling attribution",
+                test_same_package_base_sibling_attribution);
+        run_case(
+                "real dependency cycle is preserved",
+                test_real_dependency_cycle_is_preserved);
+        run_case(
+                "same PackageBase real cycle is preserved",
+                test_same_package_base_real_cycle_is_preserved);
+        run_case(
+                "same PackageBase late dependency ordering",
+                test_same_package_base_late_dependency_ordering);
         run_case(
                 "preflight root failure and continuation",
                 test_preflight_root_failure_and_continuation);

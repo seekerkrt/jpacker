@@ -77,7 +77,9 @@ bool same_preflight_issue(
            lhs.package_name == rhs.package_name &&
            lhs.package_base == rhs.package_base &&
            lhs.dependency_specification == rhs.dependency_specification &&
-           lhs.diagnostic == rhs.diagnostic;
+           lhs.diagnostic == rhs.diagnostic &&
+           lhs.build_plan_projection_issue ==
+                   rhs.build_plan_projection_issue;
 }
 
 bool same_preflight_target(

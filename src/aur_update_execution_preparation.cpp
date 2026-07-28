@@ -28,6 +28,8 @@ struct ExecutableRootBinding {
 struct UpdateWorkItemDraft {
     ProductionSourceBuildWorkItem work_item;
     std::size_t                    build_plan_order_index = 0;
+    std::vector<AurUpdateRequiredTargetAttribution>
+            required_target_attributions;
     std::vector<std::size_t>      affected_update_plan_indices;
     std::vector<RootTargetIdentity> affected_roots;
 };
@@ -627,111 +629,90 @@ bool collect_work_item_drafts(
         AurUpdateSourceBuildPreparation& preparation,
         std::vector<UpdateWorkItemDraft>& drafts,
         bool needed) {
-    std::vector<std::size_t> order_count_by_package_target(
-            plan.package_targets.size(), 0);
+    BuildPlanArtifactTargetProjectionResult target_projection =
+            project_build_plan_required_artifact_targets(plan);
+    if(!target_projection.is_success()) {
+        for(const auto& projection_issue : target_projection.failure()->issues) {
+            const bool has_uncovered_issue_for_same_target = std::any_of(
+                    target_projection.failure()->issues.begin(),
+                    target_projection.failure()->issues.end(),
+                    [&projection_issue](
+                            const BuildPlanArtifactTargetProjectionIssue& other) {
+                        return other.kind ==
+                                       BuildPlanArtifactTargetProjectionIssueKind::
+                                               UncoveredPlannedPackageTarget &&
+                                other.package_name ==
+                                        projection_issue.package_name &&
+                                other.package_base ==
+                                        projection_issue.package_base;
+                    });
+            if(projection_issue.kind ==
+                       BuildPlanArtifactTargetProjectionIssueKind::
+                               RootAttributionInconsistent &&
+               has_uncovered_issue_for_same_target) {
+                continue;
+            }
 
-    for(std::size_t order_index = 0; order_index < plan.order.size();
-        ++order_index) {
+            std::string diagnostic = projection_issue.diagnostic;
+            if(projection_issue.kind ==
+               BuildPlanArtifactTargetProjectionIssueKind::
+                       RootAttributionInconsistent) {
+                diagnostic =
+                        "Planned package target roots cannot be attributed exactly to executable update targets.";
+            } else if(projection_issue.kind ==
+                      BuildPlanArtifactTargetProjectionIssueKind::
+                              UncoveredPlannedPackageTarget) {
+                diagnostic =
+                        "Planned package target must occur exactly once in BuildPlan execution order.";
+            }
+            AurUpdatePreparationIssue issue = make_issue(
+                    AurUpdatePreparationReason::
+                            PackageTargetAttributionInconsistent,
+                    std::move(diagnostic));
+            issue.package_name = projection_issue.package_name;
+            issue.package_base = projection_issue.package_base;
+            issue.build_plan_projection_issue = projection_issue;
+            bool roots_are_exact = !projection_issue.roots.empty();
+            for(const auto& root : projection_issue.roots) {
+                const ExecutableRootBinding* binding =
+                        find_root_binding(bindings, root);
+                if(binding == nullptr) {
+                    roots_are_exact = false;
+                    break;
+                }
+                add_unique(
+                        issue.affected_update_plan_indices,
+                        binding->target->update_plan_index);
+                add_unique(issue.affected_roots, root);
+            }
+            if(!roots_are_exact) {
+                if(issue.diagnostic.find("cannot be attributed exactly") ==
+                   std::string::npos) {
+                    issue.diagnostic +=
+                            " Its roots cannot be attributed exactly to executable update targets.";
+                }
+                issue.affected_update_plan_indices.clear();
+                issue.affected_roots.clear();
+                attribute_issue_to_all_executable_targets(issue, preparation);
+            }
+            preparation.issues.push_back(std::move(issue));
+        }
+        return false;
+    }
+
+    std::vector<AurUpdateProjectedBuildUnit> projected_build_units;
+    projected_build_units.reserve(
+            target_projection.success()->build_units.size());
+    for(const auto& projected_targets :
+        target_projection.success()->build_units) {
+        const std::size_t order_index =
+                projected_targets.build_plan_order_index;
         const BuildPlanEntry& entry = plan.order[order_index];
         const AurUpdateBuildUnitSelectionEntry& selection_entry =
                 build_unit_selection.entries[order_index];
-        if(!is_valid_package_name(entry.package_base) ||
-           entry.package_names.size() != 1 ||
-           !is_valid_package_name(entry.package_names.front())) {
-            AurUpdatePreparationIssue issue = make_issue(
-                    AurUpdatePreparationReason::PackageTargetAttributionInconsistent,
-                    "BuildPlan execution entry does not contain exactly one valid package identity.");
-            issue.package_base = entry.package_base;
-            attribute_issue_to_all_executable_targets(issue, preparation);
-            preparation.issues.push_back(std::move(issue));
-            continue;
-        }
-
-        const std::string& package_name = entry.package_names.front();
-        std::vector<std::size_t> matching_target_indices;
-        for(std::size_t index = 0; index < plan.package_targets.size(); ++index) {
-            const PlannedPackageTarget& target = plan.package_targets[index];
-            if(target.package_name == package_name &&
-               target.package_base == entry.package_base) {
-                matching_target_indices.push_back(index);
-            }
-        }
-        if(matching_target_indices.size() != 1) {
-            AurUpdatePreparationIssue issue = make_issue(
-                    AurUpdatePreparationReason::PackageTargetAttributionInconsistent,
-                    "BuildPlan execution entry does not have exactly one planned package target.");
-            issue.package_name = package_name;
-            issue.package_base = entry.package_base;
-            attribute_issue_to_all_executable_targets(issue, preparation);
-            preparation.issues.push_back(std::move(issue));
-            continue;
-        }
-
-        const std::size_t package_target_index = matching_target_indices.front();
-        const PlannedPackageTarget& package_target =
-                plan.package_targets[package_target_index];
-        ++order_count_by_package_target[package_target_index];
 
         UpdateWorkItemDraft draft;
         draft.build_plan_order_index = order_index;
-        const bool roots_are_attributed =
-                collect_exact_package_target_attribution(
-                        package_target, bindings,
-                        draft.affected_update_plan_indices,
-                        draft.affected_roots);
-
-        const bool roles_are_known = !package_target.roles.empty() &&
-                std::all_of(
-                        package_target.roles.begin(),
-                        package_target.roles.end(), is_known_role);
-        AurUpdatePreparationIssue reason_issue = make_issue(
-                AurUpdatePreparationReason::PackageTargetAttributionInconsistent,
-                "Planned package target install reason is inconsistent.");
-        reason_issue.package_name = package_name;
-        reason_issue.package_base = entry.package_base;
-        if(!roots_are_attributed) {
-            // POLICY(#267): partialに解決できたrootを対象推測へ使わず、
-            // exactに検証済みの全Executable rootへglobal attributionする。
-            reason_issue.diagnostic =
-                    "Planned package target roots cannot be attributed exactly to executable update targets.";
-            attribute_issue_to_all_executable_targets(
-                    reason_issue, preparation);
-            preparation.issues.push_back(std::move(reason_issue));
-            continue;
-        }
-
-        attribute_issue_to_draft(reason_issue, draft);
-        std::optional<DesiredInstallReason> desired_reason;
-        if(roles_are_known) {
-            desired_reason = desired_reason_for_package_target(
-                    package_target, bindings, reason_issue);
-        }
-        if(!roles_are_known || !desired_reason.has_value()) {
-            if(!roles_are_known) {
-                reason_issue.diagnostic =
-                        "Planned package target contains no known package role.";
-            }
-            preparation.issues.push_back(std::move(reason_issue));
-            continue;
-        }
-
-        if(selection_entry.status == AurUpdateBuildUnitSelectionStatus::
-                                             ExternallySatisfiedByExplicitSourcePackageBase) {
-            preparation.externally_satisfied_build_units.push_back(
-                    AurUpdateExternallySatisfiedBuildUnit{
-                            order_index,
-                            package_name,
-                            entry.package_base,
-                            entry.package_names,
-                            draft.affected_update_plan_indices,
-                            draft.affected_roots,
-                            package_target.roles,
-                            *desired_reason,
-                            *selection_entry.external_satisfaction});
-            continue;
-        }
-
-        draft.work_item.request.package_name = package_name;
         draft.work_item.request.checkout_name = entry.package_base;
         draft.work_item.request.git_url =
                 AUR_BASE_URL + entry.package_base + ".git";
@@ -741,39 +722,133 @@ bool collect_work_item_drafts(
         draft.work_item.request.only_if_updated = false;
         draft.work_item.request.installed_snapshot = std::nullopt;
         draft.work_item.request.update_baseline = std::nullopt;
-        draft.work_item.desired_reason = *desired_reason;
         draft.work_item.is_build_plan_entry = true;
         draft.work_item.uses_system_update_baseline = false;
-        draft.work_item.plan_package_names = entry.package_names;
+
+        bool unit_is_consistent = true;
+        for(const auto& generic_target : projected_targets.required_targets) {
+            const PlannedPackageTarget* package_target = nullptr;
+            for(const auto& candidate : plan.package_targets) {
+                if(candidate.package_name != generic_target.package_name ||
+                   candidate.package_base != generic_target.package_base) {
+                    continue;
+                }
+                if(package_target != nullptr) {
+                    package_target = nullptr;
+                    break;
+                }
+                package_target = &candidate;
+            }
+
+            AurUpdatePreparationIssue target_issue = make_issue(
+                    AurUpdatePreparationReason::
+                            PackageTargetAttributionInconsistent,
+                    "Planned package target attribution is inconsistent.");
+            target_issue.package_name = generic_target.package_name;
+            target_issue.package_base = generic_target.package_base;
+            if(package_target == nullptr) {
+                attribute_issue_to_all_executable_targets(
+                        target_issue, preparation);
+                preparation.issues.push_back(std::move(target_issue));
+                unit_is_consistent = false;
+                continue;
+            }
+
+            std::vector<std::size_t> child_update_plan_indices;
+            std::vector<RootTargetIdentity> child_roots;
+            const bool roots_are_attributed =
+                    collect_exact_package_target_attribution(
+                            *package_target, bindings,
+                            child_update_plan_indices, child_roots);
+            const bool roles_are_known = !package_target->roles.empty() &&
+                    std::all_of(
+                            package_target->roles.begin(),
+                            package_target->roles.end(), is_known_role);
+            if(!roots_are_attributed || !roles_are_known) {
+                target_issue.diagnostic = !roots_are_attributed
+                        ? "Planned package target roots cannot be attributed exactly to executable update targets."
+                        : "Planned package target contains no known package role.";
+                attribute_issue_to_all_executable_targets(
+                        target_issue, preparation);
+                preparation.issues.push_back(std::move(target_issue));
+                unit_is_consistent = false;
+                continue;
+            }
+
+            for(const auto index : child_update_plan_indices) {
+                add_unique(
+                        target_issue.affected_update_plan_indices, index);
+            }
+            for(const auto& root : child_roots) {
+                add_unique(target_issue.affected_roots, root);
+            }
+            std::optional<DesiredInstallReason> desired_reason =
+                    desired_reason_for_package_target(
+                            *package_target, bindings, target_issue);
+            if(!desired_reason.has_value() ||
+               !is_known_desired_install_reason(*desired_reason)) {
+                preparation.issues.push_back(std::move(target_issue));
+                unit_is_consistent = false;
+                continue;
+            }
+
+            RequiredPackageArtifactTarget required_target{
+                    entry.package_base,
+                    package_target->package_name,
+                    *desired_reason};
+            draft.work_item.required_targets.push_back(required_target);
+            draft.required_target_attributions.push_back(
+                    AurUpdateRequiredTargetAttribution{
+                            required_target,
+                            child_update_plan_indices,
+                            child_roots,
+                            package_target->roles});
+            for(const auto index : child_update_plan_indices) {
+                add_unique(draft.affected_update_plan_indices, index);
+            }
+            for(const auto& root : child_roots) {
+                add_unique(draft.affected_roots, root);
+            }
+        }
+
+        if(!unit_is_consistent) continue;
+        if(draft.work_item.required_targets.size() == 1) {
+            draft.work_item.request.package_name =
+                    draft.work_item.required_targets.front().package_name;
+        }
+
+        projected_build_units.push_back(AurUpdateProjectedBuildUnit{
+                order_index,
+                entry.package_base,
+                draft.required_target_attributions,
+                draft.affected_update_plan_indices,
+                draft.affected_roots});
+
+        if(selection_entry.status == AurUpdateBuildUnitSelectionStatus::
+                                             ExternallySatisfiedByExplicitSourcePackageBase) {
+            if(draft.required_target_attributions.size() == 1) {
+                const AurUpdateRequiredTargetAttribution& child =
+                        draft.required_target_attributions.front();
+                preparation.externally_satisfied_build_units.push_back(
+                        AurUpdateExternallySatisfiedBuildUnit{
+                                order_index,
+                                child.required_target.package_name,
+                                entry.package_base,
+                                entry.package_names,
+                                draft.affected_update_plan_indices,
+                                draft.affected_roots,
+                                child.roles,
+                                child.required_target.desired_reason,
+                                *selection_entry.external_satisfaction});
+            }
+            continue;
+        }
+
         drafts.push_back(std::move(draft));
     }
 
-    for(std::size_t index = 0; index < order_count_by_package_target.size();
-        ++index) {
-        if(order_count_by_package_target[index] == 1) continue;
-
-        const PlannedPackageTarget& package_target =
-                plan.package_targets[index];
-        AurUpdatePreparationIssue issue = make_issue(
-                AurUpdatePreparationReason::PackageTargetAttributionInconsistent,
-                "Planned package target must occur exactly once in BuildPlan execution order.");
-        issue.package_name = package_target.package_name;
-        issue.package_base = package_target.package_base;
-        UpdateWorkItemDraft attribution;
-        if(collect_exact_package_target_attribution(
-                   package_target, bindings,
-                   attribution.affected_update_plan_indices,
-                   attribution.affected_roots)) {
-            attribute_issue_to_draft(issue, attribution);
-        } else {
-            issue.diagnostic +=
-                    " Its roots cannot be attributed exactly to executable update targets.";
-            attribute_issue_to_all_executable_targets(issue, preparation);
-        }
-        preparation.issues.push_back(std::move(issue));
-    }
-
     if(!preparation.issues.empty()) return false;
+    preparation.projected_build_units = std::move(projected_build_units);
 
     // POLICY(#281): dependency unitだけがselectedでもroot updateは完了しない。
     // 各Executable root自身のwork itemがcapabilityへ残ることをmutation前に固定する。
@@ -781,12 +856,19 @@ bool collect_work_item_drafts(
         const bool has_selected_root_work_item = std::any_of(
                 drafts.begin(), drafts.end(),
                 [&binding](const UpdateWorkItemDraft& draft) {
-                    return draft.work_item.request.package_name ==
-                                   binding.root.requested_name &&
-                           std::find(
-                                   draft.affected_roots.begin(),
-                                   draft.affected_roots.end(), binding.root) !=
-                                   draft.affected_roots.end();
+                    const bool contains_root_child = std::any_of(
+                            draft.work_item.required_targets.begin(),
+                            draft.work_item.required_targets.end(),
+                            [&binding](
+                                    const RequiredPackageArtifactTarget& target) {
+                                return target.package_name ==
+                                        binding.root.requested_name;
+                            });
+                    return contains_root_child &&
+                            std::find(
+                                    draft.affected_roots.begin(),
+                                    draft.affected_roots.end(), binding.root) !=
+                                    draft.affected_roots.end();
                 });
         if(has_selected_root_work_item) continue;
 
@@ -799,6 +881,53 @@ bool collect_work_item_drafts(
         preparation.issues.push_back(std::move(issue));
     }
     return preparation.issues.empty();
+}
+
+bool retain_unconnected_artifact_lifecycle_blockers(
+        AurUpdateSourceBuildPreparation& preparation) {
+    for(const auto& build_unit : preparation.projected_build_units) {
+        const bool has_singular_base_target =
+                build_unit.required_target_attributions.size() == 1 &&
+                build_unit.required_target_attributions.front()
+                                .required_target.package_name ==
+                        build_unit.package_base;
+        if(has_singular_base_target) continue;
+
+        // POLICY(#268): internal blockerはpreparationへ集約する一方、旧preflight
+        // と同じchild-first orderingを復元できるexact attributionを保持する。
+        for(const auto& attribution :
+            build_unit.required_target_attributions) {
+            if(attribution.required_target.package_name ==
+               build_unit.package_base) {
+                continue;
+            }
+
+            AurUpdatePreparationIssue split_issue = make_issue(
+                    AurUpdatePreparationReason::
+                            MultipleArtifactLifecycleNotConnected,
+                    "PackageBase required artifact targets are complete, but the multiple-artifact production lifecycle is not connected.");
+            split_issue.package_name =
+                    attribution.required_target.package_name;
+            split_issue.package_base = build_unit.package_base;
+            split_issue.affected_update_plan_indices =
+                    attribution.affected_update_plan_indices;
+            split_issue.affected_roots = attribution.affected_roots;
+            preparation.issues.push_back(std::move(split_issue));
+        }
+
+        if(build_unit.required_target_attributions.size() > 1) {
+            AurUpdatePreparationIssue multiple_issue = make_issue(
+                    AurUpdatePreparationReason::
+                            MultipleArtifactLifecycleNotConnected,
+                    "PackageBase required artifact targets are complete, but the multiple-artifact production lifecycle is not connected.");
+            multiple_issue.package_base = build_unit.package_base;
+            multiple_issue.affected_update_plan_indices =
+                    build_unit.affected_update_plan_indices;
+            multiple_issue.affected_roots = build_unit.affected_roots;
+            preparation.issues.push_back(std::move(multiple_issue));
+        }
+    }
+    return !preparation.issues.empty();
 }
 
 void retain_loaded_warnings(
@@ -951,6 +1080,7 @@ snapshot_work_item_attributions(
                 draft.build_plan_order_index,
                 draft.work_item.request.package_name,
                 draft.work_item.request.checkout_name,
+                draft.required_target_attributions,
                 draft.affected_update_plan_indices,
                 draft.affected_roots});
     }
@@ -977,9 +1107,147 @@ bool has_root_snapshot(
            preparation.affected_roots.end();
 }
 
+template<typename Value, typename ChildValues>
+bool is_exact_first_seen_union(
+        const std::vector<Value>& aggregate,
+        const std::vector<AurUpdateRequiredTargetAttribution>& children,
+        ChildValues child_values) noexcept {
+    std::size_t aggregate_index = 0;
+    for(std::size_t child_index = 0; child_index < children.size();
+        ++child_index) {
+        const std::vector<Value>& values = child_values(children[child_index]);
+        for(std::size_t value_index = 0; value_index < values.size();
+            ++value_index) {
+            const Value& value = values[value_index];
+            bool was_seen = std::find(
+                                    values.begin(),
+                                    values.begin() + value_index, value) !=
+                    values.begin() + value_index;
+            for(std::size_t prior_child = 0;
+                !was_seen && prior_child < child_index; ++prior_child) {
+                const std::vector<Value>& prior_values =
+                        child_values(children[prior_child]);
+                was_seen = std::find(
+                                   prior_values.begin(), prior_values.end(),
+                                   value) != prior_values.end();
+            }
+            if(was_seen) continue;
+            if(aggregate_index >= aggregate.size() ||
+               aggregate[aggregate_index] != value) {
+                return false;
+            }
+            ++aggregate_index;
+        }
+    }
+    return aggregate_index == aggregate.size();
+}
+
+bool has_exact_projected_build_unit_correlation(
+        const AurUpdateSourceBuildPreparation& preparation) noexcept {
+    if(preparation.projected_build_units.size() !=
+       preparation.build_unit_selection.entries.size()) {
+        return false;
+    }
+
+    for(std::size_t order_index = 0;
+        order_index < preparation.projected_build_units.size();
+        ++order_index) {
+        const AurUpdateProjectedBuildUnit& build_unit =
+                preparation.projected_build_units[order_index];
+        const AurUpdateBuildUnitSelectionEntry& selection_entry =
+                preparation.build_unit_selection.entries[order_index];
+        if(build_unit.build_plan_order_index != order_index ||
+           build_unit.package_base != selection_entry.package_base ||
+           build_unit.required_target_attributions.size() !=
+                   selection_entry.package_names.size() ||
+           build_unit.affected_update_plan_indices.empty() ||
+           build_unit.affected_roots.empty() ||
+           has_duplicate_value(build_unit.affected_update_plan_indices) ||
+           has_duplicate_value(build_unit.affected_roots)) {
+            return false;
+        }
+
+        for(std::size_t child_index = 0;
+            child_index < build_unit.required_target_attributions.size();
+            ++child_index) {
+            const AurUpdateRequiredTargetAttribution& child =
+                    build_unit.required_target_attributions[child_index];
+            if(child.required_target.package_base != build_unit.package_base ||
+               child.required_target.package_name !=
+                       selection_entry.package_names[child_index] ||
+               !is_known_desired_install_reason(
+                       child.required_target.desired_reason) ||
+               child.affected_update_plan_indices.empty() ||
+               child.affected_roots.empty() || child.roles.empty() ||
+               has_duplicate_value(child.affected_update_plan_indices) ||
+               has_duplicate_value(child.affected_roots) ||
+               has_duplicate_value(child.roles) ||
+               !std::all_of(
+                       child.affected_update_plan_indices.begin(),
+                       child.affected_update_plan_indices.end(),
+                       [&preparation](std::size_t update_plan_index) {
+                           return has_update_target_snapshot(
+                                   preparation, update_plan_index);
+                       }) ||
+               !std::all_of(
+                       child.affected_roots.begin(),
+                       child.affected_roots.end(),
+                       [&preparation](const RootTargetIdentity& root) {
+                           return has_root_snapshot(preparation, root);
+                       }) ||
+               !std::all_of(
+                       child.roles.begin(), child.roles.end(),
+                       is_known_role)) {
+                return false;
+            }
+        }
+
+        if(!is_exact_first_seen_union<std::size_t>(
+                   build_unit.affected_update_plan_indices,
+                   build_unit.required_target_attributions,
+                   [](const AurUpdateRequiredTargetAttribution& child)
+                           -> const std::vector<std::size_t>& {
+                       return child.affected_update_plan_indices;
+                   }) ||
+           !is_exact_first_seen_union<RootTargetIdentity>(
+                   build_unit.affected_roots,
+                   build_unit.required_target_attributions,
+                   [](const AurUpdateRequiredTargetAttribution& child)
+                           -> const std::vector<RootTargetIdentity>& {
+                       return child.affected_roots;
+                   })) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool has_exact_required_target_attributions(
+        const std::vector<AurUpdateRequiredTargetAttribution>& lhs,
+        const std::vector<AurUpdateRequiredTargetAttribution>& rhs) noexcept {
+    if(lhs.size() != rhs.size()) return false;
+    for(std::size_t index = 0; index < lhs.size(); ++index) {
+        if(lhs[index].required_target.package_base !=
+                   rhs[index].required_target.package_base ||
+           lhs[index].required_target.package_name !=
+                   rhs[index].required_target.package_name ||
+           lhs[index].required_target.desired_reason !=
+                   rhs[index].required_target.desired_reason ||
+           lhs[index].affected_update_plan_indices !=
+                   rhs[index].affected_update_plan_indices ||
+           lhs[index].affected_roots != rhs[index].affected_roots ||
+           lhs[index].roles != rhs[index].roles) {
+            return false;
+        }
+    }
+    return true;
+}
+
 bool has_exact_build_unit_selection_correlation(
         const std::vector<AurUpdatePreparedWorkItemAttribution>& attributions,
         const AurUpdateSourceBuildPreparation& preparation) noexcept {
+    if(!has_exact_projected_build_unit_correlation(preparation)) return false;
+
     std::size_t selected_index = 0;
     std::size_t external_index = 0;
     for(std::size_t order_index = 0;
@@ -1003,11 +1271,21 @@ bool has_exact_build_unit_selection_correlation(
             }
             const AurUpdatePreparedWorkItemAttribution& attribution =
                     attributions[selected_index];
+            const AurUpdateRequiredTargetAttribution& projected_child =
+                    preparation.projected_build_units[order_index]
+                            .required_target_attributions.front();
             if(attribution.invocation_work_item_index != selected_index ||
                attribution.build_plan_order_index != order_index ||
                attribution.package_name !=
                        selection_entry.package_names.front() ||
-               attribution.package_base != selection_entry.package_base) {
+               attribution.package_base != selection_entry.package_base ||
+               !has_exact_required_target_attributions(
+                       attribution.required_target_attributions,
+                       preparation.projected_build_units[order_index]
+                               .required_target_attributions) ||
+               attribution.affected_update_plan_indices !=
+                       projected_child.affected_update_plan_indices ||
+               attribution.affected_roots != projected_child.affected_roots) {
                 return false;
             }
             ++selected_index;
@@ -1022,6 +1300,9 @@ bool has_exact_build_unit_selection_correlation(
         }
         const AurUpdateExternallySatisfiedBuildUnit& external =
                 preparation.externally_satisfied_build_units[external_index];
+        const AurUpdateRequiredTargetAttribution& projected_child =
+                preparation.projected_build_units[order_index]
+                        .required_target_attributions.front();
         if(external.build_plan_order_index != order_index ||
            external.package_name != selection_entry.package_names.front() ||
            external.package_base != selection_entry.package_base ||
@@ -1048,6 +1329,12 @@ bool has_exact_build_unit_selection_correlation(
                    is_known_role) ||
            !is_known_desired_install_reason(
                    external.desired_install_reason) ||
+           external.affected_update_plan_indices !=
+                   projected_child.affected_update_plan_indices ||
+           external.affected_roots != projected_child.affected_roots ||
+           external.roles != projected_child.roles ||
+           external.desired_install_reason !=
+                   projected_child.required_target.desired_reason ||
            external.external_satisfaction !=
                    *selection_entry.external_satisfaction) {
             return false;
@@ -1077,9 +1364,18 @@ bool has_exact_prepared_correlation(
         const ProductionSourceBuildWorkItem& work_item = work_items[index];
         const AurUpdatePreparedWorkItemAttribution& attribution =
                 attributions[index];
+        if(attribution.build_plan_order_index >=
+           preparation.projected_build_units.size()) {
+            return false;
+        }
+        const AurUpdateProjectedBuildUnit& projected_build_unit =
+                preparation.projected_build_units[
+                        attribution.build_plan_order_index];
         if(attribution.invocation_work_item_index != index ||
            attribution.package_name != work_item.request.package_name ||
            attribution.package_base != work_item.request.checkout_name ||
+           work_item.required_targets.size() !=
+                   projected_build_unit.required_target_attributions.size() ||
            attribution.affected_update_plan_indices.empty() ||
            attribution.affected_roots.empty() ||
            has_duplicate_value(attribution.affected_update_plan_indices) ||
@@ -1100,6 +1396,21 @@ bool has_exact_prepared_correlation(
                        return has_root_snapshot(preparation, root);
                    })) {
             return false;
+        }
+        for(std::size_t child_index = 0;
+            child_index < work_item.required_targets.size(); ++child_index) {
+            const RequiredPackageArtifactTarget& work_item_target =
+                    work_item.required_targets[child_index];
+            const RequiredPackageArtifactTarget& projected_target =
+                    projected_build_unit
+                            .required_target_attributions[child_index]
+                            .required_target;
+            if(work_item_target.package_base != projected_target.package_base ||
+               work_item_target.package_name != projected_target.package_name ||
+               work_item_target.desired_reason !=
+                       projected_target.desired_reason) {
+                return false;
+            }
         }
     }
 
@@ -1284,6 +1595,12 @@ AurUpdateSourceBuildPreparation prepare_aur_update_source_build_invocation(
         return preparation;
     }
 
+    // POLICY(#268): exact child projectionはpublishするが、PR5aではmultiple/split
+    // lifecycleをpreference IO、Pacman DB、generic invocationへ進めない。
+    if(retain_unconnected_artifact_lifecycle_blockers(preparation)) {
+        return preparation;
+    }
+
     consume_strict_source_preferences(drafts, preparation);
     if(!preparation.issues.empty()) return preparation;
 
@@ -1314,6 +1631,7 @@ AurUpdateSourceBuildPreparation prepare_aur_update_source_build_invocation(
                 std::move(preparation.affected_update_targets),
                 std::move(preparation.affected_roots),
                 std::move(preparation.build_unit_selection),
+                std::move(preparation.projected_build_units),
                 std::move(preparation.externally_satisfied_build_units),
                 std::optional<PreparedAurUpdateSourceBuildInvocation>{
                         std::move(prepared_invocation)}};

@@ -66,6 +66,8 @@ enum class AurUpdatePreparationReason {
     GenericPreparationInconsistent,
     BuildUnitSelectionInconsistent,
     ExternalSatisfactionInconsistent,
+    // Temporary PR5a boundary. PR5b connects this projected model to lifecycle.
+    MultipleArtifactLifecycleNotConnected,
 };
 
 // preparation issueは表示文字列ではなくreasonと既存typed failureを正本にする。
@@ -78,6 +80,8 @@ struct AurUpdatePreparationIssue {
     std::optional<AurUpdateExecutionIssue> preflight_issue;
     std::optional<SourcePreferenceFailure> source_preference_failure;
     std::optional<PackageMetadataFailure>  package_metadata_failure;
+    std::optional<BuildPlanArtifactTargetProjectionIssue>
+            build_plan_projection_issue;
     std::string                            diagnostic;
 };
 
@@ -90,12 +94,32 @@ struct AurUpdatePreparationWarning {
     std::string                     diagnostic;
 };
 
+// PackageBase aggregate前にchild単体でexact検証したupdate固有attribution。
+struct AurUpdateRequiredTargetAttribution {
+    RequiredPackageArtifactTarget  required_target;
+    std::vector<std::size_t>       affected_update_plan_indices;
+    std::vector<RootTargetIdentity> affected_roots;
+    std::vector<PackageRole>       roles;
+};
+
 // BuildPlan::order上の1 work itemと、影響するupdate target/rootを固定する。
 struct AurUpdatePreparedWorkItemAttribution {
     std::size_t                     invocation_work_item_index = 0;
     std::size_t                     build_plan_order_index = 0;
     std::string                     package_name;
     std::string                     package_base;
+    std::vector<AurUpdateRequiredTargetAttribution>
+            required_target_attributions;
+    std::vector<std::size_t>        affected_update_plan_indices;
+    std::vector<RootTargetIdentity> affected_roots;
+};
+
+// execution capabilityを持たないPR5a projection。multiple blocker時にも保持する。
+struct AurUpdateProjectedBuildUnit {
+    std::size_t build_plan_order_index = 0;
+    std::string package_base;
+    std::vector<AurUpdateRequiredTargetAttribution>
+            required_target_attributions;
     std::vector<std::size_t>        affected_update_plan_indices;
     std::vector<RootTargetIdentity> affected_roots;
 };
@@ -182,6 +206,7 @@ struct AurUpdateSourceBuildPreparation {
     std::vector<AurUpdateExecutionTarget>    affected_update_targets;
     std::vector<RootTargetIdentity>          affected_roots;
     AurUpdateBuildUnitSelection              build_unit_selection;
+    std::vector<AurUpdateProjectedBuildUnit> projected_build_units;
     std::vector<AurUpdateExternallySatisfiedBuildUnit>
             externally_satisfied_build_units;
     std::optional<PreparedAurUpdateSourceBuildInvocation> invocation;

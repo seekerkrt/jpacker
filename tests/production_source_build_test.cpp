@@ -3,6 +3,7 @@
 #include "process.hpp"
 #include "separated_source_build.hpp"
 #include "source_install.hpp"
+#include "source_preference.hpp"
 #include "trusted_cache.hpp"
 
 #include "stubs/artifact-install-executor/process_stub.hpp"
@@ -238,6 +239,33 @@ public:
         } else {
             static_cast<void>(unsetenv(key_.c_str()));
         }
+    }
+};
+
+class ScopedSourcePreferenceEntry final {
+    fs::path root_;
+    fs::path entry_;
+
+public:
+    ScopedSourcePreferenceEntry(
+            const std::string& package_name,
+            const std::string& contents)
+        : root_(source_preference_root()),
+          entry_(root_ / package_name) {
+        fs::create_directories(root_);
+        write_file(entry_, contents);
+    }
+
+    ScopedSourcePreferenceEntry(const ScopedSourcePreferenceEntry&) = delete;
+    ScopedSourcePreferenceEntry& operator=(
+            const ScopedSourcePreferenceEntry&) = delete;
+
+    ~ScopedSourcePreferenceEntry() noexcept {
+        std::error_code error;
+        fs::remove(entry_, error);
+        error.clear();
+        // rootそのものはemptyの場合だけ除去し、広いpathをrecursiveに消さない。
+        fs::remove(root_, error);
     }
 };
 
@@ -487,7 +515,8 @@ ProductionSourceBuildWorkItem make_work_item(
     work_item.request.checkout_name = package_name;
     work_item.request.git_url =
             "https://aur.archlinux.org/" + package_name + ".git";
-    work_item.desired_reason = desired_reason;
+    work_item.required_targets.push_back(RequiredPackageArtifactTarget{
+            package_name, package_name, desired_reason});
     return work_item;
 }
 
@@ -518,6 +547,35 @@ BuildPlan two_entry_plan() {
     plan.order.push_back(
             BuildPlanEntry{"root-package", {"root-package"}});
     return plan;
+}
+
+BuildPlan same_package_base_plan() {
+    BuildPlan plan;
+    const RootTargetIdentity root_identity{0, "split-explicit"};
+    plan.root_targets.push_back(root_identity);
+    plan.package_targets.push_back(PlannedPackageTarget{
+            "split-explicit", "split-suite",
+            {PackageRole::RuntimeDependency, PackageRole::Root},
+            {root_identity}});
+    plan.package_targets.push_back(PlannedPackageTarget{
+            "split-dependency", "split-suite",
+            {PackageRole::RuntimeDependency}, {root_identity}});
+    plan.order.push_back(BuildPlanEntry{
+            "split-suite", {"split-explicit", "split-dependency"}});
+    return plan;
+}
+
+void expect_required_target(
+        const RequiredPackageArtifactTarget& target,
+        const std::string& package_base,
+        const std::string& package_name,
+        DesiredInstallReason desired_reason,
+        const std::string& context) {
+    expect(target.package_base == package_base, context + ": PackageBase differs");
+    expect(target.package_name == package_name, context + ": package name differs");
+    expect(
+            target.desired_reason == desired_reason,
+            context + ": desired install reason differs");
 }
 
 AppConfig noninteractive_config() {
@@ -1190,15 +1248,95 @@ void test_build_plan_projection() {
             work_items[0].request.package_name == "dependency-package" &&
                     work_items[1].request.package_name == "root-package",
             "BuildPlan::order was not preserved by production work-item preparation");
-    expect(
-            work_items[0].desired_reason == DesiredInstallReason::Dependency,
-            "Dependency role was not projected to DesiredInstallReason::Dependency");
-    expect(
-            work_items[1].desired_reason == DesiredInstallReason::Explicit,
-            "Root role did not retain BuildPlan's explicit-priority result");
+    expect(work_items[0].required_targets.size() == 1,
+           "Ordinary dependency work item did not retain one required target");
+    expect(work_items[1].required_targets.size() == 1,
+           "Ordinary root work item did not retain one required target");
+    expect_required_target(
+            require_singular_required_package_target(work_items[0]),
+            "dependency-package", "dependency-package",
+            DesiredInstallReason::Dependency,
+            "ordinary dependency BuildPlan projection");
+    expect_required_target(
+            require_singular_required_package_target(work_items[1]),
+            "root-package", "root-package",
+            DesiredInstallReason::Explicit,
+            "ordinary root BuildPlan projection");
     expect(
             work_items[0].request.needed && work_items[1].request.needed,
             "--needed was not projected to every BuildPlan unit");
+}
+
+void test_same_package_base_projection_preserves_required_children() {
+    const std::vector<ProductionSourceBuildWorkItem> work_items =
+            prepare_aur_source_build_work_items(
+                    same_package_base_plan(), false, false);
+
+    expect(
+            work_items.size() == 1,
+            "Same-PackageBase children were not aggregated into one work item");
+    const ProductionSourceBuildWorkItem& work_item = work_items.front();
+    expect(
+            work_item.request.package_name.empty(),
+            "Multiple required children were flattened into a singular request");
+    expect(
+            work_item.request.checkout_name == "split-suite",
+            "Same-PackageBase work item lost its execution identity");
+    expect(
+            work_item.required_targets.size() == 2,
+            "Same-PackageBase work item lost a required child");
+    expect_required_target(
+            work_item.required_targets[0], "split-suite", "split-explicit",
+            DesiredInstallReason::Explicit,
+            "first same-PackageBase required target");
+    expect_required_target(
+            work_item.required_targets[1], "split-suite", "split-dependency",
+            DesiredInstallReason::Dependency,
+            "second same-PackageBase required target");
+    require_static_production_source_build_work_item(work_item);
+    expect_logic_error(
+            [&work_item]() {
+                static_cast<void>(
+                        require_singular_required_package_target(work_item));
+            },
+            "multiple required target compatibility accessor",
+            "exactly one required package target");
+}
+
+void test_same_package_base_source_preference_route() {
+    const ScopedSourcePreferenceEntry preference(
+            "split-suite", "MAKEFLAGS=-j7\n");
+    const std::vector<ProductionSourceBuildWorkItem> work_items =
+            prepare_aur_source_build_work_items(
+                    same_package_base_plan(), true, false);
+
+    expect(
+            work_items.size() == 1 &&
+                    work_items.front().required_targets.size() == 2,
+            "Source-preference route lost same-PackageBase required targets");
+    const ProductionSourceBuildWorkItem& work_item = work_items.front();
+    expect(
+            work_item.request.package_name.empty() &&
+                    work_item.request.checkout_name == "split-suite",
+            "Source-preference route flattened the multiple-target identity");
+    expect(
+            work_item.request.custom_environment.ordered_assignments.size() ==
+                            1 &&
+                    work_item.request.custom_environment
+                                    .ordered_assignments.front()
+                                    .key == "MAKEFLAGS" &&
+                    work_item.request.custom_environment
+                                    .ordered_assignments.front()
+                                    .value == "-j7",
+            "Source-preference route did not use the PackageBase preference");
+    expect_required_target(
+            work_item.required_targets[0], "split-suite", "split-explicit",
+            DesiredInstallReason::Explicit,
+            "source-preference first required target");
+    expect_required_target(
+            work_item.required_targets[1], "split-suite", "split-dependency",
+            DesiredInstallReason::Dependency,
+            "source-preference second required target");
 }
 
 void test_resolved_repository_identity_and_owned_environment_preparation() {
@@ -1248,6 +1386,14 @@ void test_resolved_repository_identity_and_owned_environment_preparation() {
             work_item.request.only_if_updated && work_item.request.needed &&
                     work_item.uses_system_update_baseline,
             "Resolved repository work-item policy differs");
+    expect(
+            work_item.required_targets.size() == 1,
+            "Resolved source work item did not retain one required target");
+    expect_required_target(
+            require_singular_required_package_target(work_item),
+            "identity-repository", "identity-repository",
+            DesiredInstallReason::Explicit,
+            "resolved source required target");
     process_stub::require_process_expectations_consumed();
     process_stub::reset_process_stub();
 }
@@ -1885,6 +2031,8 @@ int main() {
     try {
         test_process_stub_rejects_cross_kind_reordering();
         test_build_plan_projection();
+        test_same_package_base_projection_preserves_required_children();
+        test_same_package_base_source_preference_route();
         test_resolved_repository_identity_and_owned_environment_preparation();
         TemporaryProductionEnvironment environment;
         test_rmdeps_global_rejection(environment);

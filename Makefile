@@ -46,6 +46,7 @@ AUR_UPDATE_OPERATION_RESULT_TEST_TARGET := $(BUILD_DIR)/tests/aur-update-operati
 FILTERED_AUR_UPDATE_OPERATION_TEST_TARGET := $(BUILD_DIR)/tests/filtered-aur-update-operation-test
 UPGRADE_ALL_OPERATION_TEST_TARGET := $(BUILD_DIR)/tests/upgrade-all-operation-test
 DEPENDENCY_PLAN_MODEL_TEST_TARGET := $(BUILD_DIR)/tests/dependency-plan-model-test
+BUILD_PLAN_ARTIFACT_TARGET_PROJECTION_TEST_TARGET := $(BUILD_DIR)/tests/build-plan-artifact-target-projection-test
 REPOSITORY_QUERY_TEST_TARGET := $(BUILD_DIR)/tests/repository-query-test
 ARTIFACT_INSTALL_PLAN_TEST_TARGET := $(BUILD_DIR)/tests/artifact-install-plan-test
 ARTIFACT_SELECTION_MODEL_TEST_TARGET := $(BUILD_DIR)/tests/artifact-selection-model-test
@@ -166,13 +167,17 @@ AUR_UPDATE_QUERY_TEST_SRCS := \
 AUR_UPDATE_EXECUTION_PREFLIGHT_TEST_SRCS := \
 	tests/aur_update_execution_preflight_test.cpp \
 	$(SRC_DIR)/aur_update_execution_preflight.cpp \
+	$(SRC_DIR)/build_plan_artifact_target_projection.cpp \
+	$(SRC_DIR)/dependency_plan_model.cpp \
 	$(SRC_DIR)/dependency_spec.cpp \
 	$(SRC_DIR)/package_identifier.cpp \
 	tests/stubs/aur-update-execution-preflight/preflight_stub.cpp
 AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION_TEST_SRCS := \
 	tests/aur_update_execution_preflight_integration_test.cpp \
 	$(SRC_DIR)/aur_update_execution_preflight.cpp \
+	$(SRC_DIR)/build_plan_artifact_target_projection.cpp \
 	$(SRC_DIR)/dependency_plan.cpp \
+	$(SRC_DIR)/dependency_plan_model.cpp \
 	$(SRC_DIR)/dependency_spec.cpp \
 	$(SRC_DIR)/repository_query.cpp \
 	$(SRC_DIR)/package_metadata.cpp \
@@ -185,6 +190,8 @@ AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION_TEST_SRCS := \
 AUR_UPDATE_EXECUTION_PREPARATION_TEST_SRCS := \
 	tests/aur_update_execution_preparation_test.cpp \
 	$(SRC_DIR)/aur_update_execution_preparation.cpp \
+	$(SRC_DIR)/build_plan_artifact_target_projection.cpp \
+	$(SRC_DIR)/dependency_plan_model.cpp \
 	$(SRC_DIR)/source_install_preparation.cpp \
 	$(SRC_DIR)/source_environment.cpp \
 	$(SRC_DIR)/shell_words.cpp \
@@ -193,6 +200,8 @@ AUR_UPDATE_EXECUTION_PREPARATION_TEST_SRCS := \
 AUR_UPDATE_EXECUTION_PREPARATION_INTEGRATION_TEST_SRCS := \
 	tests/aur_update_execution_preparation_integration_test.cpp \
 	$(SRC_DIR)/aur_update_execution_preparation.cpp \
+	$(SRC_DIR)/build_plan_artifact_target_projection.cpp \
+	$(SRC_DIR)/dependency_plan_model.cpp \
 	$(SRC_DIR)/source_install_preparation.cpp \
 	$(SRC_DIR)/source_preference.cpp \
 	$(SRC_DIR)/source_environment.cpp \
@@ -205,6 +214,8 @@ AUR_UPDATE_EXECUTION_RUNNER_TEST_SRCS := \
 	tests/aur_update_execution_runner_test.cpp \
 	$(SRC_DIR)/aur_update_execution_runner.cpp \
 	$(SRC_DIR)/aur_update_execution_preparation.cpp \
+	$(SRC_DIR)/build_plan_artifact_target_projection.cpp \
+	$(SRC_DIR)/dependency_plan_model.cpp \
 	$(SRC_DIR)/source_install_preparation.cpp \
 	$(SRC_DIR)/source_environment.cpp \
 	$(SRC_DIR)/shell_words.cpp \
@@ -217,6 +228,8 @@ AUR_UPDATE_OPERATION_RESULT_TEST_SRCS := \
 	tests/aur_update_operation_result_test.cpp \
 	$(SRC_DIR)/aur_update_operation_result.cpp \
 	$(SRC_DIR)/aur_update_execution_preparation.cpp \
+	$(SRC_DIR)/build_plan_artifact_target_projection.cpp \
+	$(SRC_DIR)/dependency_plan_model.cpp \
 	$(SRC_DIR)/source_install_preparation.cpp \
 	$(SRC_DIR)/source_environment.cpp \
 	$(SRC_DIR)/shell_words.cpp \
@@ -241,6 +254,8 @@ FILTERED_AUR_UPDATE_OPERATION_TEST_SRCS := \
 	$(SRC_DIR)/aur_update_plan.cpp \
 	$(SRC_DIR)/aur_update_execution_preflight.cpp \
 	$(SRC_DIR)/aur_update_execution_preparation.cpp \
+	$(SRC_DIR)/build_plan_artifact_target_projection.cpp \
+	$(SRC_DIR)/dependency_plan_model.cpp \
 	$(SRC_DIR)/aur_update_execution_runner.cpp \
 	$(SRC_DIR)/aur_update_operation_result.cpp \
 	$(SRC_DIR)/source_install_preparation.cpp \
@@ -258,6 +273,8 @@ FILTERED_AUR_UPDATE_OPERATION_REQUIRED_TEST_SRCS := \
 	$(SRC_DIR)/aur_update_query.cpp \
 	$(SRC_DIR)/aur_update_execution_preflight.cpp \
 	$(SRC_DIR)/aur_update_execution_preparation.cpp \
+	$(SRC_DIR)/build_plan_artifact_target_projection.cpp \
+	$(SRC_DIR)/dependency_plan_model.cpp \
 	$(SRC_DIR)/aur_update_execution_runner.cpp \
 	$(SRC_DIR)/aur_update_operation_result.cpp
 FILTERED_AUR_UPDATE_OPERATION_FORBIDDEN_TEST_SRCS := \
@@ -283,6 +300,8 @@ UPGRADE_ALL_OPERATION_ALLOWED_PRODUCTION_TEST_SRCS := \
 	$(SRC_DIR)/aur_update_plan.cpp \
 	$(SRC_DIR)/aur_update_execution_preflight.cpp \
 	$(SRC_DIR)/aur_update_execution_preparation.cpp \
+	$(SRC_DIR)/build_plan_artifact_target_projection.cpp \
+	$(SRC_DIR)/dependency_plan_model.cpp \
 	$(SRC_DIR)/aur_update_execution_runner.cpp \
 	$(SRC_DIR)/aur_update_operation_result.cpp \
 	$(SRC_DIR)/source_install_preparation.cpp \
@@ -303,20 +322,46 @@ UPGRADE_ALL_OPERATION_REQUIRED_TEST_SRCS := \
 	$(SRC_DIR)/aur_update_query.cpp \
 	$(SRC_DIR)/aur_update_execution_preflight.cpp \
 	$(SRC_DIR)/aur_update_execution_preparation.cpp \
+	$(SRC_DIR)/build_plan_artifact_target_projection.cpp \
+	$(SRC_DIR)/dependency_plan_model.cpp \
 	$(SRC_DIR)/aur_update_execution_runner.cpp \
 	$(SRC_DIR)/aur_update_operation_result.cpp
 UPGRADE_ALL_OPERATION_FORBIDDEN_TEST_SRCS := \
 	$(filter-out \
 		$(UPGRADE_ALL_OPERATION_ALLOWED_PRODUCTION_TEST_SRCS), \
 		$(SRCS))
-DEPENDENCY_PLAN_MODEL_TEST_SRCS := \
-	tests/dependency_plan_model_test.cpp \
+# POLICY(#268): dependency resolver model testはresolverとpure model supportだけを
+# productionからlinkし、metadata/process/source-build execution ownerを持ち込まない。
+DEPENDENCY_PLAN_MODEL_ALLOWED_PRODUCTION_TEST_SRCS := \
 	$(SRC_DIR)/dependency_plan.cpp \
+	$(SRC_DIR)/dependency_plan_model.cpp \
 	$(SRC_DIR)/dependency_spec.cpp \
 	$(SRC_DIR)/package_identifier.cpp \
-	$(SRC_DIR)/logging.cpp \
+	$(SRC_DIR)/logging.cpp
+DEPENDENCY_PLAN_MODEL_REQUIRED_TEST_SUPPORT_SRCS := \
 	tests/stubs/dependency-plan/aur_rpc_stub.cpp \
 	tests/stubs/dependency-plan/repository_query_stub.cpp
+DEPENDENCY_PLAN_MODEL_TEST_SRCS := \
+	tests/dependency_plan_model_test.cpp \
+	$(DEPENDENCY_PLAN_MODEL_ALLOWED_PRODUCTION_TEST_SRCS) \
+	$(DEPENDENCY_PLAN_MODEL_REQUIRED_TEST_SUPPORT_SRCS)
+DEPENDENCY_PLAN_MODEL_FORBIDDEN_TEST_SRCS := \
+	$(filter-out \
+		$(DEPENDENCY_PLAN_MODEL_ALLOWED_PRODUCTION_TEST_SRCS), \
+		$(SRCS))
+# POLICY(#268): BuildPlan required artifact target projection testはpure adapterと
+# reducer/identifierだけをlinkし、filesystem/process/metadata/executor/stubを持ち込まない。
+BUILD_PLAN_ARTIFACT_TARGET_PROJECTION_ALLOWED_PRODUCTION_TEST_SRCS := \
+	$(SRC_DIR)/build_plan_artifact_target_projection.cpp \
+	$(SRC_DIR)/dependency_plan_model.cpp \
+	$(SRC_DIR)/package_identifier.cpp
+BUILD_PLAN_ARTIFACT_TARGET_PROJECTION_TEST_SRCS := \
+	tests/build_plan_artifact_target_projection_test.cpp \
+	$(BUILD_PLAN_ARTIFACT_TARGET_PROJECTION_ALLOWED_PRODUCTION_TEST_SRCS)
+BUILD_PLAN_ARTIFACT_TARGET_PROJECTION_FORBIDDEN_TEST_SRCS := \
+	$(filter-out \
+		$(BUILD_PLAN_ARTIFACT_TARGET_PROJECTION_ALLOWED_PRODUCTION_TEST_SRCS), \
+		$(SRCS))
 REPOSITORY_QUERY_TEST_SRCS := \
 	tests/repository_query_test.cpp \
 	$(SRC_DIR)/repository_query.cpp \
@@ -496,7 +541,9 @@ PRODUCTION_SOURCE_BUILD_TEST_SRCS := \
 	$(SRC_DIR)/persistent_checkout.cpp \
 	$(SRC_DIR)/source_environment.cpp \
 	$(SRC_DIR)/source_preference.cpp \
+	$(SRC_DIR)/build_plan_artifact_target_projection.cpp \
 	$(SRC_DIR)/dependency_plan.cpp \
+	$(SRC_DIR)/dependency_plan_model.cpp \
 	$(SRC_DIR)/dependency_spec.cpp \
 	$(SRC_DIR)/package_identifier.cpp \
 	$(SRC_DIR)/repository_query.cpp \
@@ -547,7 +594,7 @@ LIBALPM_BUILD_TARGETS := \
 	$(AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION_TEST_TARGET) \
 	$(UPGRADE_BASELINE_METADATA_TEST_TARGET)
 
-.PHONY: all check-libalpm clean check-upgrade-all-plan-link-firewall check-system-source-upgrade-link-firewall check-aur-update-operation-result-link-firewall check-filtered-aur-update-operation-link-firewall check-upgrade-all-operation-link-firewall check-upgrade-all-command-link-firewall check-artifact-selection-model-link-firewall check-artifact-identity-selection-link-firewall check-multiple-artifact-workspace-link-firewall check-multiple-artifact-identity-link-firewall check-package-base-artifact-install-plan-link-firewall check-package-base-artifact-install-executor-link-firewall test test-app-config test-package-identifier test-package-metadata test-package-metadata-integration test-repository-query test-shell-words test-source-environment test-artifact-workspace test-multiple-artifact-workspace test-artifact-identity test-multiple-artifact-identity test-artifact-install-executor test-package-base-artifact-install-plan test-package-base-artifact-install-executor test-separated-source-build test-production-source-build test-process-capture test-aur-update-plan test-upgrade-all-plan test-system-source-upgrade test-aur-update-query test-aur-update-command test-upgrade-all-command test-aur-update-execution-preflight test-aur-update-execution-preflight-integration test-aur-update-execution-preparation test-aur-update-execution-runner test-aur-update-operation-result test-filtered-aur-update-operation test-upgrade-all-operation test-dependency-plan-model test-artifact-install-plan test-artifact-selection-model test-artifact-identity-selection test-command-stub-contract test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-commands-inspect test-commands-source-maintenance test-commands-sync test-conflicts-replaces test-install-layout test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check install uninstall
+.PHONY: all check-libalpm clean check-upgrade-all-plan-link-firewall check-system-source-upgrade-link-firewall check-aur-update-operation-result-link-firewall check-filtered-aur-update-operation-link-firewall check-upgrade-all-operation-link-firewall check-upgrade-all-command-link-firewall check-dependency-plan-model-link-firewall check-build-plan-artifact-target-projection-link-firewall check-artifact-selection-model-link-firewall check-artifact-identity-selection-link-firewall check-multiple-artifact-workspace-link-firewall check-multiple-artifact-identity-link-firewall check-package-base-artifact-install-plan-link-firewall check-package-base-artifact-install-executor-link-firewall test test-app-config test-package-identifier test-package-metadata test-package-metadata-integration test-repository-query test-shell-words test-source-environment test-artifact-workspace test-multiple-artifact-workspace test-artifact-identity test-multiple-artifact-identity test-artifact-install-executor test-package-base-artifact-install-plan test-package-base-artifact-install-executor test-separated-source-build test-production-source-build test-process-capture test-aur-update-plan test-upgrade-all-plan test-system-source-upgrade test-aur-update-query test-aur-update-command test-upgrade-all-command test-aur-update-execution-preflight test-aur-update-execution-preflight-integration test-aur-update-execution-preparation test-aur-update-execution-runner test-aur-update-operation-result test-filtered-aur-update-operation test-upgrade-all-operation test-dependency-plan-model test-build-plan-artifact-target-projection test-artifact-install-plan test-artifact-selection-model test-artifact-identity-selection test-command-stub-contract test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-commands-inspect test-commands-source-maintenance test-commands-sync test-conflicts-replaces test-install-layout test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check install uninstall
 
 all: $(TARGET) $(MANPAGE)
 
@@ -744,6 +791,7 @@ $(PRODUCTION_SOURCE_BUILD_TEST_TARGET): $(PRODUCTION_SOURCE_BUILD_TEST_SRCS) $(H
 	@echo ":: Compiling production source-build fake-symbol test binary"
 	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
 		-DJPACKER_ENABLE_SEPARATED_SOURCE_BUILD_TEST_HOOKS \
+		-DJPACKER_ENABLE_TEST_OVERRIDES \
 		-I$(SRC_DIR) -Itests/stubs/package-metadata \
 		$(PRODUCTION_SOURCE_BUILD_TEST_SRCS) \
 		-o $@ $(MY_LDLIBS)
@@ -860,6 +908,11 @@ $(DEPENDENCY_PLAN_MODEL_TEST_TARGET): $(DEPENDENCY_PLAN_MODEL_TEST_SRCS) $(SRC_D
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling dependency plan model test binary"
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -I$(SRC_DIR) $(DEPENDENCY_PLAN_MODEL_TEST_SRCS) -o $@
+
+$(BUILD_PLAN_ARTIFACT_TARGET_PROJECTION_TEST_TARGET): $(BUILD_PLAN_ARTIFACT_TARGET_PROJECTION_TEST_SRCS) $(SRC_DIR)/build_plan_artifact_target_projection.hpp $(SRC_DIR)/artifact_install_plan.hpp $(SRC_DIR)/dependency_plan.hpp $(SRC_DIR)/dependency_provider.hpp $(SRC_DIR)/aur_rpc.hpp $(SRC_DIR)/package_identifier.hpp $(VERSION_FILE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling BuildPlan artifact target projection test binary"
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -I$(SRC_DIR) $(BUILD_PLAN_ARTIFACT_TARGET_PROJECTION_TEST_SRCS) -o $@
 
 $(REPOSITORY_QUERY_TEST_TARGET): $(REPOSITORY_QUERY_TEST_SRCS) $(SRC_DIR)/repository_query.hpp $(SRC_DIR)/dependency_provider.hpp $(SRC_DIR)/package_metadata.hpp $(SRC_DIR)/installed_package.hpp $(SRC_DIR)/dependency_spec.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/process.hpp $(SRC_DIR)/shell_words.hpp tests/stubs/package-metadata/alpm_stub.hpp tests/stubs/repository-query/process_stub.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
@@ -1035,7 +1088,8 @@ test-separated-source-build: $(SEPARATED_SOURCE_BUILD_TEST_TARGET)
 	$(abspath $(SEPARATED_SOURCE_BUILD_TEST_TARGET))
 
 test-production-source-build: $(PRODUCTION_SOURCE_BUILD_TEST_TARGET)
-	$(abspath $(PRODUCTION_SOURCE_BUILD_TEST_TARGET))
+	JPACKER_TEST_PACKAGE_BUILD_DIR=$(abspath $(BUILD_DIR)/tests/production-source-build-preferences) \
+		$(abspath $(PRODUCTION_SOURCE_BUILD_TEST_TARGET))
 
 test-process-capture: $(PROCESS_CAPTURE_TEST_TARGET)
 	$(abspath $(PROCESS_CAPTURE_TEST_TARGET))
@@ -1155,8 +1209,53 @@ check-upgrade-all-operation-link-firewall:
 test-upgrade-all-operation: check-upgrade-all-operation-link-firewall $(UPGRADE_ALL_OPERATION_TEST_TARGET)
 	$(abspath $(UPGRADE_ALL_OPERATION_TEST_TARGET))
 
-test-dependency-plan-model: $(DEPENDENCY_PLAN_MODEL_TEST_TARGET)
+check-dependency-plan-model-link-firewall:
+	@echo ":: Checking dependency plan model link firewall"
+	@set -e; for source in $(DEPENDENCY_PLAN_MODEL_ALLOWED_PRODUCTION_TEST_SRCS); do \
+		count=$$(printf '%s\n' $(DEPENDENCY_PLAN_MODEL_TEST_SRCS) | \
+			awk -v expected="$$source" '$$0 == expected { count++ } END { print count + 0 }'); \
+		test "$$count" -eq 1 || { \
+			echo "error: dependency plan model test must link $$source exactly once" >&2; \
+			exit 1; \
+		}; \
+	done
+	@set -e; for source in $(DEPENDENCY_PLAN_MODEL_REQUIRED_TEST_SUPPORT_SRCS); do \
+		count=$$(printf '%s\n' $(DEPENDENCY_PLAN_MODEL_TEST_SRCS) | \
+			awk -v expected="$$source" '$$0 == expected { count++ } END { print count + 0 }'); \
+		test "$$count" -eq 1 || { \
+			echo "error: dependency plan model test must link support $$source exactly once" >&2; \
+			exit 1; \
+		}; \
+	done
+	@test -z "$(filter $(DEPENDENCY_PLAN_MODEL_FORBIDDEN_TEST_SRCS),$(DEPENDENCY_PLAN_MODEL_TEST_SRCS))" || { \
+		echo "error: dependency plan model test links a forbidden production source" >&2; \
+		exit 1; \
+	}
+
+test-dependency-plan-model: check-dependency-plan-model-link-firewall $(DEPENDENCY_PLAN_MODEL_TEST_TARGET)
 	$(abspath $(DEPENDENCY_PLAN_MODEL_TEST_TARGET))
+
+check-build-plan-artifact-target-projection-link-firewall:
+	@echo ":: Checking BuildPlan artifact target projection link firewall"
+	@set -e; for source in $(BUILD_PLAN_ARTIFACT_TARGET_PROJECTION_ALLOWED_PRODUCTION_TEST_SRCS); do \
+		count=$$(printf '%s\n' $(BUILD_PLAN_ARTIFACT_TARGET_PROJECTION_TEST_SRCS) | \
+			awk -v expected="$$source" '$$0 == expected { count++ } END { print count + 0 }'); \
+		test "$$count" -eq 1 || { \
+			echo "error: BuildPlan artifact target projection test must link $$source exactly once" >&2; \
+			exit 1; \
+		}; \
+	done
+	@test -z "$(filter $(BUILD_PLAN_ARTIFACT_TARGET_PROJECTION_FORBIDDEN_TEST_SRCS),$(BUILD_PLAN_ARTIFACT_TARGET_PROJECTION_TEST_SRCS))" || { \
+		echo "error: BuildPlan artifact target projection test links a forbidden production source" >&2; \
+		exit 1; \
+	}
+	@test -z "$(filter tests/stubs/%,$(BUILD_PLAN_ARTIFACT_TARGET_PROJECTION_TEST_SRCS))" || { \
+		echo "error: BuildPlan artifact target projection test links a test stub" >&2; \
+		exit 1; \
+	}
+
+test-build-plan-artifact-target-projection: check-build-plan-artifact-target-projection-link-firewall $(BUILD_PLAN_ARTIFACT_TARGET_PROJECTION_TEST_TARGET)
+	$(abspath $(BUILD_PLAN_ARTIFACT_TARGET_PROJECTION_TEST_TARGET))
 
 test-repository-query: $(REPOSITORY_QUERY_TEST_TARGET)
 	@set -e; for test_case in \
@@ -1299,6 +1398,7 @@ test: \
 	test-filtered-aur-update-operation \
 	test-upgrade-all-operation \
 	test-dependency-plan-model \
+	test-build-plan-artifact-target-projection \
 	test-artifact-install-plan \
 	test-package-base-artifact-install-plan \
 	test-artifact-selection-model \

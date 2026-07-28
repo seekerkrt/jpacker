@@ -1215,6 +1215,66 @@ void test_build_unit_order_identity_mismatch_blocks_mutation() {
     expect_no_mutation("build-unit correlation mismatch");
 }
 
+void test_projection_payload_private_snapshot_drift_blocks_mutation() {
+    reset_stubs();
+    return_build_plan(
+            root_plan({{"payload-root", "payload-root"}}),
+            {"payload-root"});
+    const AppConfig config;
+    PreparedFilteredAurUpdateOperation prepared =
+            prepare_filtered_aur_update_operation(
+                    query_result({update_entry("payload-root")}), {}, config);
+    expect(prepared.is_prepared(), "Projection drift fixture did not prepare");
+
+    BuildPlanArtifactTargetProjectionIssue projection_issue{
+            BuildPlanArtifactTargetProjectionIssueKind::
+                    MissingPlannedPackageTarget,
+            std::size_t{0},
+            std::size_t{0},
+            {0},
+            std::string{"payload-root"},
+            std::string{"payload-root"},
+            {RootTargetIdentity{0, "payload-root"}},
+            "Typed projection payload."};
+    AurUpdateExecutionIssue issue{
+            AurUpdateExecutionReason::BuildPlanInconsistent,
+            std::string{"payload-root"},
+            std::string{"payload-root"},
+            std::nullopt,
+            "Projection snapshot issue.",
+            projection_issue};
+
+    // Public observerはconstのまま保ち、testだけがowned private snapshotを
+    // 意図的に破損してpre-execution firewallを確認する。
+    AurUpdateExecutionPreflight& owned_preflight =
+            const_cast<AurUpdateExecutionPreflight&>(
+                    prepared.execution_preflight());
+    AurUpdateSourceBuildPreparation& owned_preparation =
+            const_cast<AurUpdateSourceBuildPreparation&>(
+                    *prepared.source_build_preparation());
+    owned_preflight.targets.front().issues.push_back(issue);
+    owned_preparation.affected_update_targets.front().issues.push_back(
+            std::move(issue));
+    owned_preparation.affected_update_targets.front()
+            .issues.back()
+            .build_plan_projection_issue->package_target_indices = {1};
+
+    FilteredAurUpdateExecutionResult result =
+            execute_prepared_filtered_aur_update_operation(
+                    std::move(prepared), config);
+
+    expect(
+            has_operation_issue(
+                    result.issues,
+                    FilteredAurUpdateOperationIssueKind::
+                            PreflightTargetMappingInconsistent),
+            "Projection-only private snapshot drift was not typed");
+    expect(
+            !result.execution.has_value() && result.has_planning_issue(),
+            "Projection-only private snapshot drift reached execution");
+    expect_no_mutation("projection payload private snapshot drift");
+}
+
 void test_prepared_operation_replay_is_rejected() {
     reset_stubs();
     return_build_plan(
@@ -1345,6 +1405,9 @@ int main() {
         run_case(
                 "build-unit order identity mismatch",
                 test_build_unit_order_identity_mismatch_blocks_mutation);
+        run_case(
+                "projection payload private snapshot drift",
+                test_projection_payload_private_snapshot_drift_blocks_mutation);
         run_case(
                 "prepared operation replay",
                 test_prepared_operation_replay_is_rejected);

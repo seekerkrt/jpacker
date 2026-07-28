@@ -2,6 +2,7 @@
 
 #include "app_config.hpp"
 #include "aur_rpc.hpp"
+#include "build_plan_artifact_target_projection.hpp"
 #include "dependency_plan.hpp"
 #include "logging.hpp"
 #include "package_identifier.hpp"
@@ -67,42 +68,6 @@ void require_supported_build_source_install_target(
     }
 }
 
-const PlannedPackageTarget& bind_planned_package_target(
-        const BuildPlan& plan, const std::string& package_name,
-        const std::string& package_base) {
-    const PlannedPackageTarget* matched_target = nullptr;
-    for(const auto& target : plan.package_targets) {
-        if(target.package_name != package_name ||
-           target.package_base != package_base) {
-            continue;
-        }
-        if(matched_target != nullptr) {
-            throw std::logic_error(
-                    "BuildPlan contains duplicate package target binding for " +
-                    package_name + " from PackageBase " + package_base + ".");
-        }
-        matched_target = &target;
-    }
-    if(matched_target == nullptr) {
-        throw std::logic_error(
-                "BuildPlan is missing package target binding for " + package_name +
-                " from PackageBase " + package_base + ".");
-    }
-    if(matched_target->roots.empty()) {
-        throw std::logic_error(
-                "BuildPlan package target has no root identity: " + package_name + ".");
-    }
-    for(const auto& root : matched_target->roots) {
-        if(std::find(plan.root_targets.begin(), plan.root_targets.end(), root) ==
-           plan.root_targets.end()) {
-            throw std::logic_error(
-                    "BuildPlan package target refers to an unknown root identity: " +
-                    package_name + ".");
-        }
-    }
-    return *matched_target;
-}
-
 DesiredInstallReason resolve_source_target_reason(
         const ResolvedSourceBuildIdentity& source) {
     if(source.source_kind != SourceBuildSourceKind::Aur) {
@@ -115,16 +80,32 @@ DesiredInstallReason resolve_source_target_reason(
     BuildPlan plan = resolve_build_plan(source.requested_name);
     require_supported_build_source_install_target(source);
     require_executable_install_plan(source.requested_name, plan);
-    const PlannedPackageTarget& target = bind_planned_package_target(
-            plan, source.requested_name, source.package_base);
-    return desired_install_reason(target);
+    BuildPlanArtifactTargetProjectionResult projection =
+            project_build_plan_required_artifact_targets(plan);
+    if(!projection.is_success()) {
+        throw std::logic_error(
+                "BuildPlan required artifact target projection failed for " +
+                source.requested_name + ".");
+    }
+    for(const auto& unit : projection.success()->build_units) {
+        if(unit.package_base != source.package_base) continue;
+        for(const auto& target : unit.required_targets) {
+            if(target.package_name == source.requested_name) {
+                return target.desired_reason;
+            }
+        }
+    }
+    throw std::logic_error(
+            "BuildPlan required artifact target projection omitted " +
+            source.requested_name + ".");
 }
 
-std::string join_comma_display_values(const std::vector<std::string>& values) {
+std::string join_required_package_names(
+        const std::vector<RequiredPackageArtifactTarget>& targets) {
     std::stringstream ss;
-    for(size_t i = 0; i < values.size(); ++i) {
+    for(size_t i = 0; i < targets.size(); ++i) {
         if(i > 0) ss << ", ";
-        ss << values[i];
+        ss << targets[i].package_name;
     }
     return ss.str();
 }
@@ -148,7 +129,10 @@ ProductionSourceBuildWorkItem make_direct_source_build_work_item(
     work_item.request.empty_value_policy = empty_value_policy;
     work_item.request.only_if_updated = only_if_updated;
     work_item.request.needed = needed;
-    work_item.desired_reason = resolve_source_target_reason(source);
+    work_item.required_targets.push_back(RequiredPackageArtifactTarget{
+            source.package_base,
+            source.requested_name,
+            resolve_source_target_reason(source)});
     work_item.uses_system_update_baseline =
             source.source_kind == SourceBuildSourceKind::Repository;
     require_static_production_source_build_work_item(work_item);
@@ -252,42 +236,47 @@ std::vector<ProductionSourceBuildWorkItem> prepare_aur_source_build_work_items(
         const BuildPlan& plan,
         bool use_source_build_preferences,
         bool needed) {
+    BuildPlanArtifactTargetProjectionResult projection =
+            project_build_plan_required_artifact_targets(plan);
+    if(!projection.is_success()) {
+        throw std::logic_error(
+                "BuildPlan required artifact target projection failed before source-build work-item preparation.");
+    }
+
     std::vector<ProductionSourceBuildWorkItem> work_items;
-    work_items.reserve(plan.order.size());
-    for(const auto& entry : plan.order) {
-        if(entry.package_names.size() != 1) {
-            throw std::logic_error(
-                    "Production separated source-build requires exactly one package "
-                    "name for PackageBase " + entry.package_base + ".");
-        }
-        const std::string& package_name = entry.package_names.front();
-        const PlannedPackageTarget& target = bind_planned_package_target(
-                plan, package_name, entry.package_base);
+    work_items.reserve(projection.success()->build_units.size());
+    for(const auto& unit : projection.success()->build_units) {
+        const bool is_singular = unit.required_targets.size() == 1;
+        const std::string preference_name = is_singular
+                ? unit.required_targets.front().package_name
+                : unit.package_base;
         SourceBuildEnvironment environment;
         if(use_source_build_preferences) {
             SourceBuildEnvironment requested_environment =
-                    load_source_preference_environment(package_name);
+                    load_source_preference_environment(preference_name);
             // POLICY(#242): empty definitionを保持したまま、fallback判定だけは従来の
             // forward可能なnonempty assignment基準にする。PKGDEST definitionは
             // fallbackで捨てず、all-target preflightまで保持する。
             if(!requested_environment.has_forwarded_nonempty_assignment() &&
                !requested_environment.defines("PKGDEST") &&
-               package_name != entry.package_base) {
-                environment = load_source_preference_environment(entry.package_base);
+               is_singular && preference_name != unit.package_base) {
+                environment = load_source_preference_environment(unit.package_base);
             } else {
                 environment = requested_environment;
             }
         }
 
         ProductionSourceBuildWorkItem work_item;
-        work_item.request.package_name = package_name;
-        work_item.request.checkout_name = entry.package_base;
-        work_item.request.git_url = aur_git_url_for_package_base(entry.package_base);
+        if(is_singular) {
+            work_item.request.package_name =
+                    unit.required_targets.front().package_name;
+        }
+        work_item.request.checkout_name = unit.package_base;
+        work_item.request.git_url = aur_git_url_for_package_base(unit.package_base);
         work_item.request.custom_environment = std::move(environment);
         work_item.request.needed = needed;
-        work_item.desired_reason = desired_install_reason(target);
+        work_item.required_targets = unit.required_targets;
         work_item.is_build_plan_entry = true;
-        work_item.plan_package_names = entry.package_names;
         require_static_production_source_build_work_item(work_item);
         work_items.push_back(std::move(work_item));
     }
@@ -310,18 +299,20 @@ SourceBuildExecutionResult execute_prepared_source_build_work_item_typed(
         const ProductionSourceBuildWorkItem& work_item,
         const PacmanDatabasePaths& database_paths,
         const AppConfig& config) {
+    const RequiredPackageArtifactTarget& target =
+            require_singular_required_package_target(work_item);
     if(work_item.is_build_plan_entry) {
         Logger::info(
                 "Building AUR PackageBase: " +
                 work_item.request.checkout_name);
         Logger::info(
                 "Target package(s): " +
-                join_comma_display_values(work_item.plan_package_names));
+                join_required_package_names(work_item.required_targets));
     }
 
     try {
         return execute_source_build_typed(
-                work_item.request, work_item.desired_reason,
+                work_item.request, target.desired_reason,
                 database_paths, config);
     } catch(const SeparatedSourceBuildCleanupError&) {
         // POLICY(#242): install成功後cleanup失敗の型とdiagnosticをgeneric

@@ -268,6 +268,43 @@ AurUpdateExecutionPreflight ordered_multi_root_preflight() {
     return preflight;
 }
 
+AurUpdateExecutionPreflight same_package_base_multiple_preflight() {
+    const RootTargetIdentity dependency_installed_root{0, "split-runtime"};
+    const RootTargetIdentity explicit_root{1, "split-explicit"};
+
+    BuildPlan plan;
+    plan.root_targets = {dependency_installed_root, explicit_root};
+    plan.package_targets = {
+            // split-runtimeはinstalled Dependencyのupdate rootであると同時に、
+            // split-explicitから到達するruntime dependencyでもある。
+            PlannedPackageTarget{
+                    "split-runtime",
+                    "split-suite",
+                    {PackageRole::Root, PackageRole::RuntimeDependency},
+                    {dependency_installed_root, explicit_root}},
+            PlannedPackageTarget{
+                    "split-explicit",
+                    "split-suite",
+                    {PackageRole::Root},
+                    {explicit_root}},
+    };
+    plan.order.push_back(BuildPlanEntry{
+            "split-suite", {"split-runtime", "split-explicit"}});
+
+    AurUpdateExecutionPreflight preflight;
+    preflight.targets = {
+            executable_target(
+                    0, 0, "split-runtime",
+                    DesiredInstallReason::Dependency, "split-suite"),
+            skipped_target(1, "skipped-between-split-roots"),
+            executable_target(
+                    2, 1, "split-explicit",
+                    DesiredInstallReason::Explicit, "split-suite"),
+    };
+    preflight.build_plan = std::move(plan);
+    return preflight;
+}
+
 AurUpdateBuildUnitSelection build_unit_selection_with_external(
         const AurUpdateExecutionPreflight& preflight,
         std::size_t external_order_index,
@@ -429,18 +466,21 @@ void expect_work_item(
             !work_item.request.update_baseline.has_value(),
             context + ": update baseline was synthesized");
     expect(
-            work_item.desired_reason == desired_reason,
-            context + ": desired install reason differs");
+            work_item.required_targets.size() == 1,
+            context + ": ordinary work item required target count differs");
+    const RequiredPackageArtifactTarget& required_target =
+            require_singular_required_package_target(work_item);
+    expect(
+            required_target.package_base == package_name &&
+                    required_target.package_name == package_name &&
+                    required_target.desired_reason == desired_reason,
+            context + ": required target identity or reason differs");
     expect(
             work_item.is_build_plan_entry,
             context + ": BuildPlan marker differs");
     expect(
             !work_item.uses_system_update_baseline,
             context + ": system update baseline marker differs");
-    expect(
-            work_item.plan_package_names ==
-                    std::vector<std::string>{package_name},
-            context + ": plan_package_names differs");
 }
 
 void expect_attribution(
@@ -1022,6 +1062,138 @@ void test_build_plan_order_skip_exclusion_and_install_reasons() {
             "multi-root read/validation/DB order");
 }
 
+void test_same_package_base_projection_retains_exact_child_attribution() {
+    stub::reset();
+    const AppConfig config;
+    const AurUpdateSourceBuildPreparation preparation =
+            prepare_aur_update_source_build_invocation(
+                    same_package_base_multiple_preflight(), false, config);
+
+    expect_blocked_reason(
+            preparation,
+            AurUpdatePreparationReason::
+                    MultipleArtifactLifecycleNotConnected,
+            "same-PackageBase multiple lifecycle boundary");
+    expect(
+            preparation.issues.size() == 3 &&
+                    preparation.issues[0].package_name ==
+                            std::optional<std::string>{"split-runtime"} &&
+                    preparation.issues[0].affected_update_plan_indices ==
+                            std::vector<std::size_t>{0, 2} &&
+                    preparation.issues[1].package_name ==
+                            std::optional<std::string>{"split-explicit"} &&
+                    preparation.issues[1].affected_update_plan_indices ==
+                            std::vector<std::size_t>{2} &&
+                    !preparation.issues[2].package_name.has_value() &&
+                    preparation.issues[2].package_base ==
+                            std::optional<std::string>{"split-suite"} &&
+                    preparation.issues[2].affected_update_plan_indices ==
+                            std::vector<std::size_t>{0, 2},
+            "Same-PackageBase lifecycle blocker lost legacy child-first attribution");
+    expect(
+            preparation.projected_build_units.size() == 1,
+            "Same-PackageBase BuildPlan entry was not projected exactly once");
+    const auto& build_unit = preparation.projected_build_units.front();
+    expect(
+            build_unit.build_plan_order_index == 0 &&
+                    build_unit.package_base == "split-suite",
+            "Projected same-PackageBase build unit identity differs");
+    expect(
+            build_unit.required_target_attributions.size() == 2,
+            "Projected build unit lost a required child attribution");
+
+    const auto& dependency_child =
+            build_unit.required_target_attributions[0];
+    expect(
+            dependency_child.required_target.package_base == "split-suite" &&
+                    dependency_child.required_target.package_name ==
+                            "split-runtime" &&
+                    dependency_child.required_target.desired_reason ==
+                            DesiredInstallReason::Dependency,
+            "Dependency-installed split child identity or reason differs");
+    expect(
+            dependency_child.affected_update_plan_indices ==
+                            std::vector<std::size_t>{0, 2} &&
+                    dependency_child.affected_roots ==
+                            std::vector<RootTargetIdentity>{
+                                    {0, "split-runtime"},
+                                    {1, "split-explicit"}} &&
+                    dependency_child.roles ==
+                            std::vector<PackageRole>{
+                                    PackageRole::Root,
+                                    PackageRole::RuntimeDependency},
+            "Dependency-installed split child attribution differs");
+
+    const auto& explicit_child =
+            build_unit.required_target_attributions[1];
+    expect(
+            explicit_child.required_target.package_base == "split-suite" &&
+                    explicit_child.required_target.package_name ==
+                            "split-explicit" &&
+                    explicit_child.required_target.desired_reason ==
+                            DesiredInstallReason::Explicit,
+            "Explicit split child identity or reason differs");
+    expect(
+            explicit_child.affected_update_plan_indices ==
+                            std::vector<std::size_t>{2} &&
+                    explicit_child.affected_roots ==
+                            std::vector<RootTargetIdentity>{
+                                    {1, "split-explicit"}} &&
+                    explicit_child.roles ==
+                            std::vector<PackageRole>{PackageRole::Root},
+            "Explicit split child attribution differs");
+
+    expect(
+            build_unit.affected_update_plan_indices ==
+                            std::vector<std::size_t>{0, 2} &&
+                    build_unit.affected_roots ==
+                            std::vector<RootTargetIdentity>{
+                                    {0, "split-runtime"},
+                                    {1, "split-explicit"}},
+            "Same-PackageBase build-unit attribution union differs");
+    expect_no_external_preparation_boundary(
+            "same-PackageBase multiple lifecycle boundary");
+}
+
+void test_incomplete_same_package_base_plan_has_no_projection() {
+    stub::reset();
+    AurUpdateExecutionPreflight preflight =
+            same_package_base_multiple_preflight();
+    preflight.build_plan->order.front().package_names.pop_back();
+
+    const AppConfig config;
+    const AurUpdateSourceBuildPreparation preparation =
+            prepare_aur_update_source_build_invocation(
+                    preflight, false, config);
+
+    expect_blocked_reason(
+            preparation,
+            AurUpdatePreparationReason::PackageTargetAttributionInconsistent,
+            "incomplete same-PackageBase BuildPlan");
+    expect(
+            preparation.projected_build_units.empty(),
+            "Incomplete BuildPlan escaped a partial projected build unit");
+    const auto uncovered_target_issue = std::find_if(
+            preparation.issues.begin(), preparation.issues.end(),
+            [](const AurUpdatePreparationIssue& issue) {
+                return issue.build_plan_projection_issue.has_value() &&
+                        issue.build_plan_projection_issue->kind ==
+                                BuildPlanArtifactTargetProjectionIssueKind::
+                                        UncoveredPlannedPackageTarget;
+            });
+    expect(
+            uncovered_target_issue != preparation.issues.end() &&
+                    uncovered_target_issue->build_plan_projection_issue
+                                    ->package_name ==
+                            std::optional<std::string>{"split-explicit"} &&
+                    uncovered_target_issue->build_plan_projection_issue
+                                    ->package_target_indices ==
+                            std::vector<std::size_t>{1},
+            "Preparation lost the typed uncovered-target projection payload");
+    expect_no_external_preparation_boundary(
+            "incomplete same-PackageBase BuildPlan");
+}
+
 void test_external_satisfaction_overlay_preserves_original_order() {
     stub::reset();
     stub::set_database_paths(
@@ -1081,8 +1253,6 @@ void test_external_satisfaction_overlay_preserves_original_order() {
             external.build_plan_order_index == 1 &&
                     external.package_name == "shared-dependency" &&
                     external.package_base == "shared-dependency" &&
-                    external.plan_package_names ==
-                            std::vector<std::string>{"shared-dependency"} &&
                     external.affected_update_plan_indices ==
                             std::vector<std::size_t>{0, 2} &&
                     external.affected_roots ==
@@ -1365,21 +1535,11 @@ void test_strict_typed_failures_are_not_flattened() {
     }
 }
 
-void test_package_base_fallback_and_failure_order() {
+void test_split_lifecycle_stops_before_source_preference() {
     const AppConfig config;
 
     stub::reset();
-    stub::enqueue_source_preference_result(
-            "split-cli",
-            loaded_preference(
-                    "split-cli", {}, {"requested warning"}));
-    stub::enqueue_source_preference_result(
-            "split-suite",
-            loaded_preference(
-                    "split-suite",
-                    environment({{"MAKEFLAGS", "-j8"}}),
-                    {"base warning"}));
-    AurUpdateSourceBuildPreparation fallback =
+    AurUpdateSourceBuildPreparation preparation =
             prepare_aur_update_source_build_invocation(
                     single_root_preflight(
                             "split-cli",
@@ -1387,88 +1547,37 @@ void test_package_base_fallback_and_failure_order() {
                             "split-suite"),
                     false,
                     config);
-    // Production契約ではrequested package != PackageBaseをstatic guardが拒否する。
-    // その直前まで、strict fallbackのread順とwarning ownershipは保持される。
     expect_blocked_reason(
-            fallback,
-            AurUpdatePreparationReason::StaticWorkItemInvalid,
-            "package-to-Base fallback");
+            preparation,
+            AurUpdatePreparationReason::
+                    MultipleArtifactLifecycleNotConnected,
+            "split lifecycle boundary");
     expect(
-            stub::strict_preference_read_history() ==
-                    std::vector<std::string>{"split-cli", "split-suite"},
-            "PackageBase fallback read order differs");
+            preparation.issues.size() == 1 &&
+                    preparation.issues.front().package_name ==
+                            std::optional<std::string>{"split-cli"} &&
+                    preparation.issues.front().package_base ==
+                            std::optional<std::string>{"split-suite"},
+            "Singular split blocker lost legacy child attribution");
     expect(
-            fallback.warnings.size() == 2 &&
-                    fallback.warnings[0].preference_name == "split-cli" &&
-                    fallback.warnings[1].preference_name == "split-suite",
-            "PackageBase fallback warning order differs");
-    expect(stub::database_call_count() == 0, "Static split guard reached DB resolution");
+            preparation.projected_build_units.size() == 1 &&
+                    preparation.projected_build_units.front()
+                                    .required_target_attributions.size() == 1 &&
+                    preparation.projected_build_units.front()
+                                    .required_target_attributions.front()
+                                    .required_target.package_name ==
+                            "split-cli",
+            "Split lifecycle blocker lost its exact required target projection");
+    expect(
+            stub::strict_preference_read_history().empty() &&
+                    preparation.warnings.empty(),
+            "Split lifecycle blocker reached source preference IO");
+    expect(
+            stub::database_call_count() == 0,
+            "Split lifecycle blocker reached DB resolution");
     expect(
             stub::supported_options_guard_history().empty(),
-            "Update static validation was deferred into generic preparation");
-
-    stub::reset();
-    const SourcePreferenceFailure package_failure = preference_failure(
-            "split-cli", SourcePreferenceFailureKind::OpenFailed);
-    stub::enqueue_source_preference_result(
-            "split-cli", package_failure);
-    stub::enqueue_source_preference_result(
-            "split-suite",
-            loaded_preference(
-                    "split-suite", environment({{"CC", "clang"}})));
-    AurUpdateSourceBuildPreparation package_failed =
-            prepare_aur_update_source_build_invocation(
-                    single_root_preflight(
-                            "split-cli",
-                            DesiredInstallReason::Explicit,
-                            "split-suite"),
-                    false,
-                    config);
-    expect_blocked_reason(
-            package_failed,
-            AurUpdatePreparationReason::SourcePreferenceUnavailable,
-            "requested package preference failure");
-    expect(
-            stub::strict_preference_read_history() ==
-                    std::vector<std::string>{"split-cli"},
-            "Package failure incorrectly read PackageBase fallback");
-    expect(stub::database_call_count() == 0, "Package preference failure reached DB resolution");
-
-    stub::reset();
-    stub::enqueue_source_preference_result(
-            "split-cli", loaded_preference("split-cli"));
-    const SourcePreferenceFailure base_failure = preference_failure(
-            "split-suite", SourcePreferenceFailureKind::ReadFailed);
-    stub::enqueue_source_preference_result(
-            "split-suite", base_failure);
-    AurUpdateSourceBuildPreparation base_failed =
-            prepare_aur_update_source_build_invocation(
-                    single_root_preflight(
-                            "split-cli",
-                            DesiredInstallReason::Explicit,
-                            "split-suite"),
-                    false,
-                    config);
-    expect_blocked_reason(
-            base_failed,
-            AurUpdatePreparationReason::SourcePreferenceUnavailable,
-            "PackageBase preference failure");
-    const AurUpdatePreparationIssue& base_issue = require_issue(
-            base_failed,
-            AurUpdatePreparationReason::SourcePreferenceUnavailable,
-            "PackageBase typed failure");
-    expect(
-            base_issue.package_name ==
-                    std::optional<std::string>{"split-suite"} &&
-                    base_issue.source_preference_failure.has_value() &&
-                    base_issue.source_preference_failure->kind ==
-                            SourcePreferenceFailureKind::ReadFailed,
-            "PackageBase failure attribution differs");
-    expect(
-            stub::strict_preference_read_history() ==
-                    std::vector<std::string>{"split-cli", "split-suite"},
-            "PackageBase failure read order differs");
-    expect(stub::database_call_count() == 0, "PackageBase preference failure reached DB resolution");
+            "Split lifecycle blocker reached generic preparation");
 }
 
 void test_pkgdest_conflicts_stop_before_database() {
@@ -1588,6 +1697,34 @@ void test_result_state_helpers_reject_forbidden_combination() {
 
     stub::reset();
     const AppConfig config;
+    AurUpdateSourceBuildPreparation projection_corrupted =
+            prepare_aur_update_source_build_invocation(
+                    single_root_preflight("projection-corrupted-root"),
+                    false, config);
+    expect(
+            projection_corrupted.is_prepared(),
+            "Projection corruption fixture is not prepared");
+    projection_corrupted.projected_build_units.clear();
+    expect(
+            !projection_corrupted.is_prepared(),
+            "Prepared capability ignored a missing projected build unit");
+
+    stub::reset();
+    AurUpdateSourceBuildPreparation role_corrupted =
+            prepare_aur_update_source_build_invocation(
+                    single_root_preflight("role-corrupted-root"),
+                    false, config);
+    expect(
+            role_corrupted.is_prepared(),
+            "Role corruption fixture is not prepared");
+    role_corrupted.projected_build_units.front()
+            .required_target_attributions.front()
+            .roles.front() = PackageRole::BuildDependency;
+    expect(
+            !role_corrupted.is_prepared(),
+            "Prepared capability ignored a valid-but-different child role");
+
+    stub::reset();
     AurUpdateSourceBuildPreparation prepared =
             prepare_aur_update_source_build_invocation(
                     single_root_preflight("prepared-root"), false, config);
@@ -1660,6 +1797,12 @@ int main() {
                 "BuildPlan order, skipped exclusion, and install reasons",
                 test_build_plan_order_skip_exclusion_and_install_reasons);
         run_case(
+                "same-PackageBase child projection and lifecycle boundary",
+                test_same_package_base_projection_retains_exact_child_attribution);
+        run_case(
+                "incomplete same-PackageBase plan has no projection",
+                test_incomplete_same_package_base_plan_has_no_projection);
+        run_case(
                 "external satisfaction preserves original BuildPlan order",
                 test_external_satisfaction_overlay_preserves_original_order);
         run_case(
@@ -1675,8 +1818,8 @@ int main() {
                 "strict typed failures are not flattened",
                 test_strict_typed_failures_are_not_flattened);
         run_case(
-                "package to PackageBase fallback and failure order",
-                test_package_base_fallback_and_failure_order);
+                "split lifecycle stops before source preference",
+                test_split_lifecycle_stops_before_source_preference);
         run_case(
                 "PKGDEST conflicts stop before DB",
                 test_pkgdest_conflicts_stop_before_database);

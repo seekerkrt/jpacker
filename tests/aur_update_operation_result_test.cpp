@@ -549,6 +549,54 @@ void test_preflight_blocker_missing_snapshot_is_inconsistent() {
             "preflight blocker with missing target snapshot");
 }
 
+void test_projection_payload_snapshot_drift_is_inconsistent() {
+    AurUpdateExecutionTarget blocked = blocking_target(
+            0,
+            "projection-root",
+            AurUpdateExecutionTargetStatus::Incomplete,
+            AurUpdateExecutionReason::BuildPlanInconsistent);
+    blocked.issues.front().build_plan_projection_issue =
+            BuildPlanArtifactTargetProjectionIssue{
+                    BuildPlanArtifactTargetProjectionIssueKind::
+                            MissingPlannedPackageTarget,
+                    std::size_t{0},
+                    std::size_t{0},
+                    {0},
+                    std::string{"projection-base"},
+                    std::string{"projection-child"},
+                    {RootTargetIdentity{0, "projection-root"}},
+                    "Typed projection failure."};
+    const AurUpdateExecutionPreflight preflight =
+            preflight_with({std::move(blocked)});
+    preparation_stub::reset();
+    const AppConfig config;
+    AurUpdateSourceBuildPreparation preparation =
+            prepare_aur_update_source_build_invocation(
+                    preflight, false, config);
+    expect(
+            preparation.affected_update_targets.size() == 1 &&
+                    preparation.affected_update_targets.front()
+                            .issues.front()
+                            .build_plan_projection_issue.has_value(),
+            "Projection payload snapshot fixture was not retained");
+
+    preparation.affected_update_targets.front()
+            .issues.front()
+            .build_plan_projection_issue->package_target_indices.push_back(1);
+
+    const AurUpdateOperationResult result =
+            reduce_aur_update_operation_result(
+                    preflight, preparation, std::nullopt);
+
+    expect(
+            result.status == AurUpdateOperationStatus::InconsistentResult &&
+                    has_reduction_issue(
+                            result,
+                            AurUpdateOperationReductionReason::
+                                    PreparationTargetSnapshotInconsistent),
+            "Projection-only snapshot drift was accepted");
+}
+
 void test_preflight_blocker_with_invocation_is_inconsistent() {
     AurUpdateSourceBuildPreparation invocation_source = prepare_single_root(
             prepared_single_root_preflight("prepared-invocation"));
@@ -622,6 +670,149 @@ void test_target_attributed_preparation_failure() {
     expect(
             result.reduction_issues.empty(),
             "Normal target-attributed preparation failure was inconsistent");
+}
+
+void test_lifecycle_blocker_preserves_legacy_presentation_contract() {
+    AurUpdateExecutionPreflight preflight = preflight_with({
+            executable_target(0, "singular-child"),
+            executable_target(1, "multiple-child"),
+            executable_target(2, "multiple-suite"),
+    });
+    preflight.targets[0].update =
+            update_entry("singular-child", "singular-suite");
+    preflight.targets[1].update =
+            update_entry("multiple-child", "multiple-suite");
+    preflight.targets[2].update =
+            update_entry("multiple-suite", "multiple-suite");
+
+    const RootTargetIdentity singular_root{0, "singular-child"};
+    const RootTargetIdentity multiple_child_root{1, "multiple-child"};
+    const RootTargetIdentity multiple_base_root{2, "multiple-suite"};
+    BuildPlan plan;
+    plan.root_targets = {
+            singular_root,
+            multiple_child_root,
+            multiple_base_root,
+    };
+    plan.package_targets = {
+            PlannedPackageTarget{
+                    "singular-child", "singular-suite",
+                    {PackageRole::Root}, {singular_root}},
+            PlannedPackageTarget{
+                    "multiple-child", "multiple-suite",
+                    {PackageRole::Root}, {multiple_child_root}},
+            PlannedPackageTarget{
+                    "multiple-suite", "multiple-suite",
+                    {PackageRole::Root}, {multiple_base_root}},
+    };
+    plan.order = {
+            BuildPlanEntry{"singular-suite", {"singular-child"}},
+            BuildPlanEntry{
+                    "multiple-suite",
+                    {"multiple-child", "multiple-suite"}},
+    };
+    preflight.build_plan = std::move(plan);
+
+    preparation_stub::reset();
+    const AppConfig config;
+    const AurUpdateSourceBuildPreparation preparation =
+            prepare_aur_update_source_build_invocation(
+                    preflight, false, config);
+    expect(
+            preparation.is_blocked() &&
+                    preparation.projected_build_units.size() == 2 &&
+                    preparation.issues.size() == 3,
+            "Production lifecycle blocker fixture was not projected exactly");
+
+    const AurUpdateOperationResult result =
+            reduce_aur_update_operation_result(
+                    preflight, preparation, std::nullopt);
+
+    expect(
+            result.status ==
+                    AurUpdateOperationStatus::BlockedBeforeExecution,
+            "Lifecycle compatibility blocker operation status differs");
+    expect_target_statuses(
+            result,
+            {
+                    AurUpdateOperationTargetStatus::Unsupported,
+                    AurUpdateOperationTargetStatus::Unsupported,
+                    AurUpdateOperationTargetStatus::Unsupported,
+            },
+            "lifecycle compatibility blockers");
+    expect(
+            result.preparation_issues.size() == 4 &&
+                    std::all_of(
+                            result.preparation_issues.begin(),
+                            result.preparation_issues.end(),
+                            [](const AurUpdatePreparationIssue& issue) {
+                                return issue.reason ==
+                                               AurUpdatePreparationReason::
+                                                       BlockingPreflight &&
+                                        issue.preflight_issue.has_value();
+                            }) &&
+                    result.preparation_issues[0]
+                                    .preflight_issue->reason ==
+                            AurUpdateExecutionReason::
+                                    SplitPackageSelectionRequired &&
+                    result.preparation_issues[1]
+                                    .preflight_issue->reason ==
+                            AurUpdateExecutionReason::
+                                    SplitPackageSelectionRequired &&
+                    result.preparation_issues[2]
+                                    .preflight_issue->reason ==
+                            AurUpdateExecutionReason::
+                                    MultiplePackageTargetsForPackageBase &&
+                    result.preparation_issues[3]
+                                    .preflight_issue->reason ==
+                            AurUpdateExecutionReason::
+                                    MultiplePackageTargetsForPackageBase &&
+                    result.preparation_issues[0]
+                                    .affected_update_plan_indices ==
+                            std::vector<std::size_t>{0} &&
+                    result.preparation_issues[1]
+                                    .affected_update_plan_indices ==
+                            std::vector<std::size_t>{1} &&
+                    result.preparation_issues[2]
+                                    .affected_update_plan_indices ==
+                            std::vector<std::size_t>{1} &&
+                    result.preparation_issues[3]
+                                    .affected_update_plan_indices ==
+                            std::vector<std::size_t>{2} &&
+                    result.targets[0].preparation_issues.size() == 1 &&
+                    result.targets[1].preparation_issues.size() == 2 &&
+                    result.targets[2].preparation_issues.size() == 1,
+            "Lifecycle blocker did not restore the legacy BlockingPreflight snapshot");
+    expect(
+            result.targets[0].preflight_issues.size() == 1 &&
+                    result.targets[0].preflight_issues.front().reason ==
+                            AurUpdateExecutionReason::
+                                    SplitPackageSelectionRequired &&
+                    result.targets[0].preflight_issues.front().diagnostic ==
+                            "Split package artifact selection is not implemented.",
+            "Singular split blocker lost its legacy presentation contract");
+    expect(
+            result.targets[1].preflight_issues.size() == 2 &&
+                    result.targets[1].preflight_issues.front().reason ==
+                            AurUpdateExecutionReason::
+                                    SplitPackageSelectionRequired &&
+                    result.targets[1].preflight_issues[1].reason ==
+                            AurUpdateExecutionReason::
+                                    MultiplePackageTargetsForPackageBase &&
+                    result.targets[1].preflight_issues[1].diagnostic ==
+                            "PackageBase has multiple distinct package targets.",
+            "Split child lost its legacy child-first presentation contract");
+    expect(
+            result.targets[2].preflight_issues.size() == 1 &&
+                    result.targets[2].preflight_issues.front().reason ==
+                            AurUpdateExecutionReason::
+                                    MultiplePackageTargetsForPackageBase &&
+                    result.targets[2].preflight_issues.front().diagnostic ==
+                            "PackageBase has multiple distinct package targets.",
+            "PackageBase-named child lost its legacy multiple-target presentation contract");
+    expect(
+            result.reduction_issues.empty(),
+            "Lifecycle presentation compatibility introduced a reduction inconsistency");
 }
 
 void test_global_preparation_failure_stays_operation_level() {
@@ -1965,11 +2156,17 @@ int main() {
                 "preflight blocker missing snapshot is inconsistent",
                 test_preflight_blocker_missing_snapshot_is_inconsistent);
         run_case(
+                "projection payload snapshot drift is inconsistent",
+                test_projection_payload_snapshot_drift_is_inconsistent);
+        run_case(
                 "preflight blocker with invocation is inconsistent",
                 test_preflight_blocker_with_invocation_is_inconsistent);
         run_case(
                 "target-attributed preparation failure",
                 test_target_attributed_preparation_failure);
+        run_case(
+                "lifecycle blocker preserves legacy presentation",
+                test_lifecycle_blocker_preserves_legacy_presentation_contract);
         run_case(
                 "global preparation failure stays operation-level",
                 test_global_preparation_failure_stays_operation_level);
