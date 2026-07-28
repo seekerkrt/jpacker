@@ -292,6 +292,10 @@ ProductionSourceBuildWorkItem prepare_resolved_source_build_work_item(
     work_item.request.custom_environment = std::move(environment);
     work_item.request.only_if_updated = only_if_updated;
     work_item.request.needed = needed;
+    work_item.required_targets.push_back(RequiredPackageArtifactTarget{
+            identity.package_base,
+            identity.requested_name,
+            DesiredInstallReason::Explicit});
     work_item.uses_system_update_baseline =
             identity.source_kind == SourceBuildSourceKind::Repository;
     return work_item;

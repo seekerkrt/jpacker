@@ -5,7 +5,9 @@
 #include "artifact_workspace.hpp"
 #include "package_identifier.hpp"
 
+#include <algorithm>
 #include <stdexcept>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -15,27 +17,79 @@
 
 void require_static_production_source_build_work_item(
         const ProductionSourceBuildWorkItem& work_item) {
-    require_valid_package_name(work_item.request.package_name);
     require_valid_package_name(work_item.request.checkout_name);
-    if(work_item.request.package_name != work_item.request.checkout_name) {
-        throw std::runtime_error(
-                "Production separated source-build requires requested package and "
-                "PackageBase to match: " + work_item.request.package_name + " / " +
-                work_item.request.checkout_name + ".");
-    }
     if(work_item.request.git_url.empty()) {
         throw std::logic_error(
                 "Production source-build work item has an empty Git URL for " +
-                work_item.request.package_name + ".");
+                work_item.request.checkout_name + ".");
     }
-    switch(work_item.desired_reason) {
+
+    if(work_item.required_targets.empty()) {
+        throw std::logic_error(
+                "Production source-build work item has no required package target for PackageBase " +
+                work_item.request.checkout_name + ".");
+    }
+    for(std::size_t index = 0; index < work_item.required_targets.size();
+        ++index) {
+        const RequiredPackageArtifactTarget& target =
+                work_item.required_targets[index];
+        require_valid_package_name(target.package_base);
+        require_valid_package_name(target.package_name);
+        if(target.package_base != work_item.request.checkout_name) {
+            throw std::logic_error(
+                    "Production source-build required target has a mismatched PackageBase: " +
+                    target.package_name + " / " + target.package_base + ".");
+        }
+        if(std::any_of(
+                   work_item.required_targets.begin(),
+                   work_item.required_targets.begin() + index,
+                   [&target](const RequiredPackageArtifactTarget& existing) {
+                       return existing.package_name == target.package_name;
+                   })) {
+            throw std::logic_error(
+                    "Production source-build work item contains duplicate required package target: " +
+                    target.package_name + ".");
+        }
+        switch(target.desired_reason) {
         case DesiredInstallReason::Explicit:
         case DesiredInstallReason::Dependency:
             break;
         default:
             throw std::logic_error(
                     "Production source-build work item has an unknown install reason.");
+        }
     }
+
+    if(work_item.required_targets.size() == 1) {
+        require_valid_package_name(work_item.request.package_name);
+        if(work_item.request.package_name !=
+           work_item.required_targets.front().package_name) {
+            throw std::logic_error(
+                    "Production source-build singular request does not match its required package target: " +
+                    work_item.request.package_name + ".");
+        }
+    } else if(!work_item.request.package_name.empty()) {
+        throw std::logic_error(
+                "Production source-build multiple-target work item must not expose a singular requested package.");
+    }
+}
+
+const RequiredPackageArtifactTarget& require_singular_required_package_target(
+        const ProductionSourceBuildWorkItem& work_item) {
+    if(work_item.required_targets.size() != 1) {
+        throw std::logic_error(
+                "Production separated source-build requires exactly one required package target for PackageBase " +
+                work_item.request.checkout_name + ".");
+    }
+    const RequiredPackageArtifactTarget& target =
+            work_item.required_targets.front();
+    if(work_item.request.package_name != target.package_name ||
+       work_item.request.checkout_name != target.package_base) {
+        throw std::logic_error(
+                "Production separated source-build singular identity is inconsistent for PackageBase " +
+                work_item.request.checkout_name + ".");
+    }
+    return target;
 }
 
 void require_supported_production_source_build_options(
@@ -62,6 +116,14 @@ PreparedProductionSourceBuildInvocation prepare_production_source_build_invocati
     }
     for(const auto& work_item : work_items) {
         require_static_production_source_build_work_item(work_item);
+        const RequiredPackageArtifactTarget& target =
+                require_singular_required_package_target(work_item);
+        if(target.package_name != work_item.request.checkout_name) {
+            throw std::runtime_error(
+                    "Production separated source-build requires requested package and "
+                    "PackageBase to match: " + target.package_name + " / " +
+                    work_item.request.checkout_name + ".");
+        }
     }
 
     PacmanDatabasePaths database_paths = resolve_pacman_database_paths();

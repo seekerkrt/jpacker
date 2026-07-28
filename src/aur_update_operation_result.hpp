@@ -114,8 +114,9 @@ struct AurUpdateOperationResult {
     std::optional<AurUpdateInvocationExecutionStatus> execution_status;
     std::vector<AurUpdateWorkItemExecutionResult> execution_work_items;
 
-    // operation-level snapshotはglobal/target-attributedを分けず、入力順と
-    // nested typed failureをそのまま保持する。
+    // operation-level snapshotはglobal/target-attributedを分けずに保持する。
+    // 通常issueは入力順/nested typed failureを保ち、PR5a lifecycle blocker
+    // だけは従来表示と同じtarget順のBlockingPreflightへ正規化する。
     std::vector<AurUpdatePreparationIssue> preparation_issues;
     std::vector<AurUpdatePreparationWarning> preparation_warnings;
     std::vector<AurUpdateOperationReductionIssue> reduction_issues;

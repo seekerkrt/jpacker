@@ -333,21 +333,6 @@ std::vector<TypedPackageDependency> collect_typed_build_dependencies(const AurPa
     return dependencies;
 }
 
-DesiredInstallReason desired_install_reason(const PlannedPackageTarget& target) {
-    if(std::find(target.roles.begin(), target.roles.end(), PackageRole::Root) != target.roles.end()) {
-        return DesiredInstallReason::Explicit;
-    }
-
-    for(const auto role : target.roles) {
-        if(role == PackageRole::RuntimeDependency || role == PackageRole::BuildDependency ||
-           role == PackageRole::CheckDependency) {
-            return DesiredInstallReason::Dependency;
-        }
-    }
-
-    throw std::logic_error("Planned package target has no package role: " + target.package_name);
-}
-
 DependencyClassification classify_dependencies(const std::vector<std::string>& dependencies) {
     DependencyClassification result;
 
@@ -529,6 +514,15 @@ PlannedPackageTarget* find_package_target(
     return it == plan.package_targets.end() ? nullptr : &(*it);
 }
 
+const PlannedPackageTarget* find_package_target(
+        const BuildPlan& plan, const std::string& package_name) {
+    auto same_name = [&package_name](const PlannedPackageTarget& target) {
+        return target.package_name == package_name;
+    };
+    auto it = std::find_if(plan.package_targets.begin(), plan.package_targets.end(), same_name);
+    return it == plan.package_targets.end() ? nullptr : &(*it);
+}
+
 void add_planned_package_target(
         BuildPlan& plan, const AurPackageInfo& info,
         const std::vector<PackageRole>& roles, const RootTargetIdentity& root) {
@@ -583,7 +577,7 @@ std::optional<std::string> resolved_aur_dependency_name(
 }
 
 void propagate_root_identities(BuildPlan& plan) {
-    // WHY(#218): PackageBase visitedはlegacy orderを守るためinvocation-wideで共有する。
+    // WHY(#218/#268): package visitedはmetadata traversalの重複を止めるためinvocation-wideで共有する。
     // 後からrootになったvisited nodeの既存subtreeへは、queryを増やさずedge上でidentityを伝播する。
     for(const auto& root : plan.root_targets) {
         std::vector<std::string> pending = {root.requested_name};
@@ -660,12 +654,97 @@ void add_build_plan_entry(BuildPlan& plan, const AurPackageInfo& info) {
     std::string package_base = package_base_name(info);
     auto        same_base = [&package_base](const BuildPlanEntry& existing) { return existing.package_base == package_base; };
     auto        it = std::find_if(plan.order.begin(), plan.order.end(), same_base);
-    add_build_plan_split_package_target(plan, info);
     if(it == plan.order.end()) {
         plan.order.push_back(BuildPlanEntry{package_base, {info.Name}});
         return;
     }
     add_unique_value(it->package_names, info.Name);
+}
+
+const BuildPlanEntry* find_build_plan_entry(
+        const std::vector<BuildPlanEntry>& entries,
+        const std::string& package_base) {
+    auto same_base = [&package_base](const BuildPlanEntry& entry) {
+        return entry.package_base == package_base;
+    };
+    auto it = std::find_if(entries.begin(), entries.end(), same_base);
+    return it == entries.end() ? nullptr : &(*it);
+}
+
+std::optional<std::string> resolved_aur_dependency_package_base(
+        const BuildPlan& plan, const BuildPlanDependencyEdge& edge) {
+    if(edge.kind == DependencyKind::Aur &&
+       edge.resolved_package_base.has_value() &&
+       !edge.resolved_package_base->empty()) {
+        return edge.resolved_package_base;
+    }
+
+    std::optional<std::string> package_name =
+            resolved_aur_dependency_name(edge);
+    if(!package_name.has_value()) return std::nullopt;
+
+    const PlannedPackageTarget* target =
+            find_package_target(plan, package_name.value());
+    if(target == nullptr) return std::nullopt;
+    return target->package_base;
+}
+
+void append_build_plan_entry_postorder(
+        const std::string& package_base, BuildPlan& plan,
+        const std::vector<BuildPlanEntry>& aggregated_entries,
+        std::set<std::string>& ordered_package_bases,
+        std::set<std::string>& visiting_package_bases,
+        std::vector<BuildPlanEntry>& ordered_entries) {
+    if(ordered_package_bases.count(package_base) > 0) return;
+    if(!visiting_package_bases.insert(package_base).second) {
+        add_unique_value(plan.cycles, package_base);
+        return;
+    }
+
+    for(const auto& edge : plan.dependency_edges) {
+        if(edge.parent_package_base != package_base) continue;
+        std::optional<std::string> dependency_package_base =
+                resolved_aur_dependency_package_base(plan, edge);
+        if(!dependency_package_base.has_value() ||
+           dependency_package_base.value() == package_base ||
+           find_build_plan_entry(
+                   aggregated_entries, dependency_package_base.value()) == nullptr) {
+            continue;
+        }
+        append_build_plan_entry_postorder(
+                dependency_package_base.value(), plan, aggregated_entries,
+                ordered_package_bases, visiting_package_bases, ordered_entries);
+    }
+
+    visiting_package_bases.erase(package_base);
+    if(!ordered_package_bases.insert(package_base).second) return;
+
+    const BuildPlanEntry* entry =
+            find_build_plan_entry(aggregated_entries, package_base);
+    if(entry == nullptr) {
+        throw std::logic_error(
+                "PackageBase aggregation is missing during build plan ordering: " +
+                package_base);
+    }
+    ordered_entries.push_back(*entry);
+}
+
+void order_build_plan_entries(BuildPlan& plan) {
+    std::vector<BuildPlanEntry> aggregated_entries = std::move(plan.order);
+    std::vector<BuildPlanEntry> ordered_entries;
+    ordered_entries.reserve(aggregated_entries.size());
+    std::set<std::string> ordered_package_bases;
+    std::set<std::string> visiting_package_bases;
+
+    // POLICY(#268): first-seen PackageBase/edge orderを保ったpost-orderで、
+    // 全required childのdependencyより後に各execution unitを一度だけ置く。
+    for(const auto& entry : aggregated_entries) {
+        append_build_plan_entry_postorder(
+                entry.package_base, plan, aggregated_entries,
+                ordered_package_bases, visiting_package_bases, ordered_entries);
+    }
+
+    plan.order = std::move(ordered_entries);
 }
 
 void add_build_plan_provided_dependency(
@@ -687,8 +766,10 @@ void add_build_plan_ambiguous_provider(
 }
 
 void collect_aur_build_plan(
-        const std::string& package_name, BuildPlan& plan, std::set<std::string>& visited,
-        std::set<std::string>& visiting, const std::vector<PackageRole>& roles,
+        const std::string& package_name, BuildPlan& plan,
+        std::set<std::string>& visited_package_names,
+        std::set<std::string>& visiting_package_names,
+        const std::vector<PackageRole>& roles,
         const RootTargetIdentity& root, int depth, int max_depth,
         bool traverse_aur_providers, BuildPlanResolutionMode resolution_mode,
         const std::optional<std::string>& parent_package_name,
@@ -726,20 +807,21 @@ void collect_aur_build_plan(
         return;
     }
 
-    // POLICY(#150): visited PackageBase で再帰を打ち切る場合も、package 単位の raw metadata は先に保持する。
+    // POLICY(#150): visited packageで再帰を打ち切る場合も、package単位のraw metadataは先に保持する。
     add_build_plan_metadata_risk(plan, info.value());
-    // POLICY(#218): role/root metadataはPackageBase visitedより先にmergeする。
-    // legacy orderのpost-order追加はこの位置へ動かさない。
+    // POLICY(#218/#268): role/rootとPackageBase child identityはpackage visitedより先にmergeする。
     add_planned_package_target(plan, info.value(), roles, root);
+    add_build_plan_entry(plan, info.value());
 
     std::string build_unit = package_base_name(info.value());
-    if(visited.count(build_unit) > 0) return;
-    if(visiting.count(build_unit) > 0) {
+    std::string package_identity = info->Name;
+    if(visited_package_names.count(package_identity) > 0) return;
+    if(visiting_package_names.count(package_identity) > 0) {
         add_unique_value(plan.cycles, build_unit);
         return;
     }
 
-    visiting.insert(build_unit);
+    visiting_package_names.insert(package_identity);
 
     const std::vector<TypedPackageDependency> typed_dependencies =
             collect_typed_build_dependencies(info.value());
@@ -809,10 +891,12 @@ void collect_aur_build_plan(
         if(dependency_info.has_value()) {
             edge.kind = DependencyKind::Aur;
             edge.resolved_package_name = dependency_info->Name;
-            edge.resolved_package_base = dependency_info->PackageBase;
+            edge.resolved_package_base =
+                    package_base_name(dependency_info.value());
             add_build_plan_dependency_edges(plan, edge, matching_dependencies);
             collect_aur_build_plan(
-                    dep_name, plan, visited, visiting, dependency_roles, root,
+                    dep_name, plan, visited_package_names,
+                    visiting_package_names, dependency_roles, root,
                     depth + 1, max_depth, traverse_aur_providers,
                     resolution_mode, info->Name, build_unit, dependency);
             continue;
@@ -829,7 +913,8 @@ void collect_aur_build_plan(
             if(traverse_aur_providers &&
                std::holds_alternative<AurProviderOrigin>(provider.origin)) {
                 collect_aur_build_plan(
-                        provider.package_name, plan, visited, visiting, dependency_roles, root,
+                        provider.package_name, plan, visited_package_names,
+                        visiting_package_names, dependency_roles, root,
                         depth + 1, max_depth, traverse_aur_providers,
                         resolution_mode, info->Name, build_unit, dependency);
             }
@@ -843,9 +928,9 @@ void collect_aur_build_plan(
         }
     }
 
-    visiting.erase(build_unit);
-    visited.insert(build_unit);
-    add_build_plan_entry(plan, info.value());
+    visiting_package_names.erase(package_identity);
+    visited_package_names.insert(package_identity);
+    add_build_plan_split_package_target(plan, info.value());
 }
 
 BuildPlan resolve_build_plan_internal(
@@ -864,17 +949,19 @@ BuildPlan resolve_build_plan_internal(
     }
 
     BuildPlan             plan;
-    std::set<std::string> visited;
-    std::set<std::string> visiting;
+    std::set<std::string> visited_package_names;
+    std::set<std::string> visiting_package_names;
     const std::vector<PackageRole> root_roles = {PackageRole::Root};
     for(std::size_t i = 0; i < targets.size(); ++i) {
         RootTargetIdentity root{i, targets[i]};
         plan.root_targets.push_back(root);
         collect_aur_build_plan(
-                targets[i], plan, visited, visiting, root_roles, root, 0,
+                targets[i], plan, visited_package_names,
+                visiting_package_names, root_roles, root, 0,
                 MAX_RECURSIVE_DEP_DEPTH, true, resolution_mode,
                 std::nullopt, std::nullopt, std::nullopt);
     }
+    order_build_plan_entries(plan);
     propagate_root_identities(plan);
     propagate_resolution_failure_root_identities(plan);
     return plan;
@@ -907,16 +994,18 @@ BuildPlan resolve_fetch_plan(const std::string& target) {
     if(!AurClient::info(target).has_value()) throw std::runtime_error("AUR package not found: " + target);
 
     BuildPlan             plan;
-    std::set<std::string> visited;
-    std::set<std::string> visiting;
+    std::set<std::string> visited_package_names;
+    std::set<std::string> visiting_package_names;
     RootTargetIdentity    root{0, target};
     plan.root_targets.push_back(root);
     const std::vector<PackageRole> root_roles = {PackageRole::Root};
     // POLICY: fetch は取得対象の列挙まで。AUR provider を辿って暗黙に追加取得しない。
     collect_aur_build_plan(
-            target, plan, visited, visiting, root_roles, root, 0,
+            target, plan, visited_package_names, visiting_package_names,
+            root_roles, root, 0,
             MAX_RECURSIVE_DEP_DEPTH, false, BuildPlanResolutionMode::Legacy,
             std::nullopt, std::nullopt, std::nullopt);
+    order_build_plan_entries(plan);
     propagate_root_identities(plan);
     return plan;
 }

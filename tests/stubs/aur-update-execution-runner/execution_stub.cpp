@@ -53,6 +53,16 @@ void record_event(std::size_t call_index, stub::EventKind kind) {
             call.package_base});
 }
 
+std::vector<std::string> required_package_names(
+        const ProductionSourceBuildWorkItem& work_item) {
+    std::vector<std::string> package_names;
+    package_names.reserve(work_item.required_targets.size());
+    for(const auto& target : work_item.required_targets) {
+        package_names.push_back(target.package_name);
+    }
+    return package_names;
+}
+
 } // namespace
 
 namespace aur_update_execution_runner_test_stub {
@@ -137,6 +147,9 @@ execute_prepared_source_build_work_item(
         const ProductionSourceBuildWorkItem& work_item,
         const PacmanDatabasePaths& database_paths,
         const AppConfig& config) {
+    const RequiredPackageArtifactTarget& required_target =
+            require_singular_required_package_target(work_item);
+
     // POLICY(#267): by-value capabilityのmove元addressとは比較できないため、
     // runnerが全work itemへ渡したsnapshot参照同士の同一性をstub内で検証する。
     if(g_state.first_database_paths_address == nullptr) {
@@ -149,9 +162,9 @@ execute_prepared_source_build_work_item(
     const std::size_t call_index = g_state.calls.size();
     g_state.calls.push_back(stub::ExecutionCall{
             call_index,
-            work_item.request.package_name,
-            work_item.request.checkout_name,
-            work_item.plan_package_names,
+            required_target.package_name,
+            required_target.package_base,
+            required_package_names(work_item),
             database_paths,
             config,
             {}});

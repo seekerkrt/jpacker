@@ -1,5 +1,6 @@
 #pragma once
 
+#include "artifact_install_plan.hpp"
 #include "package_metadata.hpp"
 #include "source_build.hpp"
 
@@ -30,10 +31,11 @@ struct ResolvedSourceBuildIdentity {
 // Artifact path/identity/install directiveはPR4 lifecycle内部でだけ生成する。
 struct ProductionSourceBuildWorkItem {
     SourceBuildRequest             request;
-    DesiredInstallReason          desired_reason = DesiredInstallReason::Explicit;
+    // POLICY(#268): PackageBase execution unitのinstall対象とreasonはこのvectorが正本。
+    // singular executor用request.package_nameはsize 1の場合だけ設定する。
+    std::vector<RequiredPackageArtifactTarget> required_targets;
     bool                          is_build_plan_entry = false;
     bool                          uses_system_update_baseline = false;
-    std::vector<std::string>      plan_package_names;
 };
 
 // PacmanDatabasePathsはinvocationで1回だけ解決し、全build unitへvalueとして共有する。
@@ -44,6 +46,10 @@ struct PreparedProductionSourceBuildInvocation {
 
 // checkoutやmetadata queryより前に確認できるwork item単体のstatic契約。
 void require_static_production_source_build_work_item(
+        const ProductionSourceBuildWorkItem& work_item);
+
+// 現行single-artifact lifecycleのcompatibility境界。multipleを先頭要素へ潰さない。
+const RequiredPackageArtifactTarget& require_singular_required_package_target(
         const ProductionSourceBuildWorkItem& work_item);
 
 void require_supported_production_source_build_options(

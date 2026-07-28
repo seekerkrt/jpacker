@@ -1,11 +1,13 @@
 #pragma once
 
 #include "aur_update_plan.hpp"
+#include "build_plan_artifact_target_projection.hpp"
 #include "dependency_plan.hpp"
 
 #include <cstddef>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 enum class AurUpdateExecutionTargetStatus {
@@ -48,6 +50,27 @@ struct AurUpdateExecutionIssue {
     std::optional<std::string> package_base;
     std::optional<std::string> dependency_specification;
     std::string                diagnostic;
+    std::optional<BuildPlanArtifactTargetProjectionIssue>
+            build_plan_projection_issue;
+
+    AurUpdateExecutionIssue() = default;
+
+    AurUpdateExecutionIssue(
+            AurUpdateExecutionReason reason_value,
+            std::optional<std::string> package_name_value,
+            std::optional<std::string> package_base_value,
+            std::optional<std::string> dependency_specification_value,
+            std::string diagnostic_value,
+            std::optional<BuildPlanArtifactTargetProjectionIssue>
+                    projection_issue = std::nullopt)
+        : reason(reason_value),
+          package_name(std::move(package_name_value)),
+          package_base(std::move(package_base_value)),
+          dependency_specification(
+                  std::move(dependency_specification_value)),
+          diagnostic(std::move(diagnostic_value)),
+          build_plan_projection_issue(std::move(projection_issue)) {
+    }
 };
 
 struct AurUpdateExecutionTarget {

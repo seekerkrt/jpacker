@@ -493,6 +493,49 @@ void test_update_plan_and_build_plan_consistency() {
             "Duplicate BuildPlan target inconsistency is absent");
 }
 
+void test_projection_payload_keeps_distinct_target_indices() {
+    reset_preflight_stub();
+    AurUpdatePlan update_plan{{remote_entry(
+            "payload-root", InstalledPackageReason::Explicit)}};
+    const RootTargetIdentity root{0, "payload-root"};
+    BuildPlan plan;
+    plan.root_targets.push_back(root);
+    const PlannedPackageTarget duplicated_target{
+            "payload-root",
+            "payload-root",
+            {PackageRole::Root},
+            {root, root}};
+    plan.package_targets = {duplicated_target, duplicated_target};
+    plan.order.push_back(
+            BuildPlanEntry{"payload-root", {"payload-root"}});
+    return_build_plan(std::move(plan));
+
+    const AurUpdateExecutionPreflight preflight =
+            resolve_aur_update_execution_preflight(update_plan);
+    const AurUpdateExecutionTarget& target = preflight.targets.front();
+    std::vector<std::size_t> projection_target_indices;
+    for(const auto& issue : target.issues) {
+        if(!issue.build_plan_projection_issue.has_value()) continue;
+        const auto& projection = *issue.build_plan_projection_issue;
+        if(projection.kind !=
+                   BuildPlanArtifactTargetProjectionIssueKind::
+                           RootAttributionInconsistent ||
+           projection.package_target_indices.size() != 1) {
+            continue;
+        }
+        projection_target_indices.push_back(
+                projection.package_target_indices.front());
+    }
+
+    expect_status(
+            target,
+            AurUpdateExecutionTargetStatus::Incomplete,
+            "Projection payload distinction");
+    expect(
+            projection_target_indices == std::vector<std::size_t>{0, 1},
+            "Projection issues differing only by target index were deduplicated");
+}
+
 void test_incomplete_build_plan_issues_are_typed_and_deduplicated() {
     reset_preflight_stub();
     AurUpdatePlan update_plan{{remote_entry(
@@ -602,7 +645,7 @@ void test_incomplete_build_plan_issues_are_typed_and_deduplicated() {
             "Duplicate metadata failure produced duplicate target issues");
 }
 
-void test_unsupported_build_plan_issues_and_same_base_blind_spot() {
+void test_complete_split_build_plan_is_model_valid() {
     reset_preflight_stub();
     AurUpdatePlan split_root_plan{{remote_entry(
             "split-cli", InstalledPackageReason::Explicit,
@@ -618,15 +661,63 @@ void test_unsupported_build_plan_issues_and_same_base_blind_spot() {
             resolve_aur_update_execution_preflight(split_root_plan);
     expect_status(
             split_root.targets.front(),
-            AurUpdateExecutionTargetStatus::Unsupported,
+            AurUpdateExecutionTargetStatus::Executable,
             "Split update root");
     expect(
-            has_issue(
+            !has_issue(
                     split_root.targets.front(),
                     AurUpdateExecutionReason::SplitPackageSelectionRequired),
-            "Split root issue is missing");
+            "Complete split root retained a model-level split blocker");
 
     reset_preflight_stub();
+    AurUpdatePlan complete_multiple_plan{{remote_entry(
+            "complete-root", InstalledPackageReason::Explicit)}};
+    BuildPlan complete_multiple = build_plan_for({
+            {"complete-root", "complete-root", "complete-root"},
+    });
+    const RootTargetIdentity complete_root{0, "complete-root"};
+    add_dependency_target(
+            complete_multiple, "complete-child-a", "complete-suite",
+            {complete_root});
+    add_dependency_target(
+            complete_multiple, "complete-child-b", "complete-suite",
+            {complete_root});
+    complete_multiple.order.push_back(BuildPlanEntry{
+            "complete-suite", {"complete-child-a", "complete-child-b"}});
+    for(const char* child : {"complete-child-a", "complete-child-b"}) {
+        complete_multiple.dependency_edges.push_back(BuildPlanDependencyEdge{
+                "complete-root",
+                "complete-root",
+                child,
+                PackageRole::RuntimeDependency,
+                DependencyKind::Aur,
+                std::optional<std::string>{child},
+                std::optional<std::string>{"complete-suite"},
+                std::nullopt});
+    }
+    return_build_plan(std::move(complete_multiple));
+
+    AurUpdateExecutionPreflight complete_preflight =
+            resolve_aur_update_execution_preflight(complete_multiple_plan);
+    expect_status(
+            complete_preflight.targets.front(),
+            AurUpdateExecutionTargetStatus::Executable,
+            "Complete same-Base multiple target plan");
+    expect(
+            !has_issue(
+                    complete_preflight.targets.front(),
+                    AurUpdateExecutionReason::BuildPlanInconsistent),
+            "Complete same-Base coverage was marked inconsistent");
+    expect(
+            !has_issue(
+                    complete_preflight.targets.front(),
+                    AurUpdateExecutionReason::MultiplePackageTargetsForPackageBase),
+            "Complete same-Base coverage retained a multiple-target blocker");
+}
+
+void test_incomplete_same_base_coverage_is_typed_failure() {
+    reset_preflight_stub();
+
     AurUpdatePlan update_plan{{remote_entry(
             "unsupported-root", InstalledPackageReason::Explicit)}};
     BuildPlan plan = build_plan_for({
@@ -682,13 +773,13 @@ void test_unsupported_build_plan_issues_and_same_base_blind_spot() {
     const AurUpdateExecutionTarget& target = preflight.targets.front();
 
     expect_status(
-            target, AurUpdateExecutionTargetStatus::Unsupported,
-            "Unsupported dependency plan");
+            target, AurUpdateExecutionTargetStatus::Incomplete,
+            "Incomplete same-Base coverage plan");
     expect(
-            has_issue(
+            !has_issue(
                     target,
                     AurUpdateExecutionReason::SplitPackageSelectionRequired),
-            "Split dependency issue is missing");
+            "Incomplete coverage retained a split-only model blocker");
     expect(
             has_issue(target, AurUpdateExecutionReason::AmbiguousProvider),
             "Ambiguous provider issue is missing");
@@ -700,12 +791,36 @@ void test_unsupported_build_plan_issues_and_same_base_blind_spot() {
     expect(
             has_issue(
                     target,
+                    AurUpdateExecutionReason::BuildPlanInconsistent),
+            "Missing same-Base child coverage was not a typed inconsistency");
+    const auto uncovered_issue = std::find_if(
+            target.issues.begin(), target.issues.end(),
+            [](const AurUpdateExecutionIssue& issue) {
+                return issue.build_plan_projection_issue.has_value() &&
+                        issue.build_plan_projection_issue->kind ==
+                                BuildPlanArtifactTargetProjectionIssueKind::
+                                        UncoveredPlannedPackageTarget;
+            });
+    expect(
+            uncovered_issue != target.issues.end() &&
+                    uncovered_issue->build_plan_projection_issue
+                                    ->package_name ==
+                            std::optional<std::string>{"second-child"} &&
+                    uncovered_issue->build_plan_projection_issue
+                                    ->package_base ==
+                            std::optional<std::string>{"shared-suite"} &&
+                    uncovered_issue->build_plan_projection_issue
+                                    ->package_target_indices.size() == 1,
+            "Preflight lost the typed uncovered-target projection payload");
+    expect(
+            !has_issue(
+                    target,
                     AurUpdateExecutionReason::MultiplePackageTargetsForPackageBase),
-            "Same-PackageBase package_targets blind spot was not detected");
+            "Incomplete coverage was flattened to the legacy multiple-target blocker");
     expect(!can_execute(preflight), "Unsupported invocation was executable");
 }
 
-void test_incomplete_status_precedes_unsupported_and_preserves_both() {
+void test_incomplete_status_preserves_provider_failure_without_split_blocker() {
     reset_preflight_stub();
     AurUpdatePlan update_plan{{remote_entry(
             "mixed-root", InstalledPackageReason::Explicit)}};
@@ -737,10 +852,10 @@ void test_incomplete_status_precedes_unsupported_and_preserves_both() {
                     AurUpdateExecutionReason::ProviderMetadataUnavailable),
             "Incomplete issue was lost");
     expect(
-            has_issue(
+            !has_issue(
                     target,
                     AurUpdateExecutionReason::SplitPackageSelectionRequired),
-            "Unsupported issue was lost");
+            "Model-valid split summary retained a preflight split blocker");
 }
 
 void test_issue_attribution_and_global_fallback() {
@@ -1099,13 +1214,13 @@ void test_fail_closed_cross_field_consistency() {
             resolve_aur_update_execution_preflight(split_plan);
     expect_status(
             split_without_summary.targets.front(),
-            AurUpdateExecutionTargetStatus::Unsupported,
+            AurUpdateExecutionTargetStatus::Executable,
             "Split identity without summary");
     expect(
-            has_issue(
+            !has_issue(
                     split_without_summary.targets.front(),
                     AurUpdateExecutionReason::SplitPackageSelectionRequired),
-            "Split identity did not produce an unsupported issue");
+            "Split identity retained a preflight lifecycle blocker");
 
     reset_preflight_stub();
     BuildPlan rootless_dependency = build_plan_for({
@@ -1599,6 +1714,83 @@ void test_rooted_aur_dependency_graph() {
     }
 
     reset_preflight_stub();
+    AurUpdatePlan same_base_cycle_plan{{remote_entry(
+            "same-base-cycle-a", InstalledPackageReason::Explicit,
+            AurUpdateClassification::UpdateAvailable,
+            "same-base-cycle-a", "same-base-cycle-suite")}};
+    BuildPlan same_base_cycle = build_plan_for({
+            {"same-base-cycle-a", "same-base-cycle-a",
+             "same-base-cycle-suite"},
+    });
+    PlannedPackageTarget* same_base_cycle_a =
+            find_package_target(same_base_cycle, "same-base-cycle-a");
+    expect(
+            same_base_cycle_a != nullptr,
+            "Same-base cycle root fixture is missing");
+    same_base_cycle_a->roles.push_back(PackageRole::RuntimeDependency);
+    add_dependency_target(
+            same_base_cycle, "same-base-cycle-b",
+            "same-base-cycle-suite", {{0, "same-base-cycle-a"}});
+    same_base_cycle.order.front().package_names.push_back(
+            "same-base-cycle-b");
+    same_base_cycle.dependency_edges.push_back(BuildPlanDependencyEdge{
+            "same-base-cycle-a",
+            "same-base-cycle-suite",
+            "same-base-cycle-b",
+            PackageRole::RuntimeDependency,
+            DependencyKind::Aur,
+            std::optional<std::string>{"same-base-cycle-b"},
+            std::optional<std::string>{"same-base-cycle-suite"},
+            std::nullopt});
+    same_base_cycle.dependency_edges.push_back(BuildPlanDependencyEdge{
+            "same-base-cycle-b",
+            "same-base-cycle-suite",
+            "same-base-cycle-a",
+            PackageRole::RuntimeDependency,
+            DependencyKind::Aur,
+            std::optional<std::string>{"same-base-cycle-a"},
+            std::optional<std::string>{"same-base-cycle-suite"},
+            std::nullopt});
+
+    BuildPlan same_base_cycle_without_summary = same_base_cycle;
+    return_build_plan(std::move(same_base_cycle_without_summary));
+    AurUpdateExecutionPreflight missing_summary_preflight =
+            resolve_aur_update_execution_preflight(same_base_cycle_plan);
+    const AurUpdateExecutionTarget& missing_summary_target =
+            missing_summary_preflight.targets.front();
+    expect(
+            has_issue(
+                    missing_summary_target,
+                    AurUpdateExecutionReason::DependencyCycle) &&
+                    has_issue(
+                            missing_summary_target,
+                            AurUpdateExecutionReason::BuildPlanInconsistent),
+            "Same-base typed graph did not detect a missing cycle summary");
+
+    reset_preflight_stub();
+    same_base_cycle.cycles.push_back("same-base-cycle-suite");
+    return_build_plan(std::move(same_base_cycle));
+
+    AurUpdateExecutionPreflight same_base_cycle_preflight =
+            resolve_aur_update_execution_preflight(same_base_cycle_plan);
+    const AurUpdateExecutionTarget& same_base_cycle_target =
+            same_base_cycle_preflight.targets.front();
+    expect_status(
+            same_base_cycle_target,
+            AurUpdateExecutionTargetStatus::Incomplete,
+            "Same-base real dependency cycle");
+    expect(
+            has_issue(
+                    same_base_cycle_target,
+                    AurUpdateExecutionReason::DependencyCycle),
+            "Same-base real cycle was lost by PackageBase contraction");
+    expect(
+            !has_issue(
+                    same_base_cycle_target,
+                    AurUpdateExecutionReason::BuildPlanInconsistent),
+            "Same-base real cycle did not match its resolver summary");
+
+    reset_preflight_stub();
     AurUpdatePlan provider_plan{{remote_entry(
             "provider-root", InstalledPackageReason::Explicit)}};
     BuildPlan provider = build_plan_for({
@@ -1781,14 +1973,20 @@ int main() {
                 "update-plan and BuildPlan consistency",
                 test_update_plan_and_build_plan_consistency);
         run_case(
+                "projection payload keeps distinct target indices",
+                test_projection_payload_keeps_distinct_target_indices);
+        run_case(
                 "incomplete BuildPlan issues are typed and deduplicated",
                 test_incomplete_build_plan_issues_are_typed_and_deduplicated);
         run_case(
-                "unsupported BuildPlan issues and same-base blind spot",
-                test_unsupported_build_plan_issues_and_same_base_blind_spot);
+                "complete split BuildPlan is model-valid",
+                test_complete_split_build_plan_is_model_valid);
         run_case(
-                "incomplete status precedes unsupported and preserves both",
-                test_incomplete_status_precedes_unsupported_and_preserves_both);
+                "incomplete same-base coverage is typed failure",
+                test_incomplete_same_base_coverage_is_typed_failure);
+        run_case(
+                "incomplete status preserves provider failure without split blocker",
+                test_incomplete_status_preserves_provider_failure_without_split_blocker);
         run_case(
                 "issue attribution and global fallback",
                 test_issue_attribution_and_global_fallback);

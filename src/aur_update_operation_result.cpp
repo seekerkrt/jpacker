@@ -58,7 +58,9 @@ bool same_preflight_issue(
            lhs.package_name == rhs.package_name &&
            lhs.package_base == rhs.package_base &&
            lhs.dependency_specification == rhs.dependency_specification &&
-           lhs.diagnostic == rhs.diagnostic;
+           lhs.diagnostic == rhs.diagnostic &&
+           lhs.build_plan_projection_issue ==
+                   rhs.build_plan_projection_issue;
 }
 
 bool same_preflight_target_snapshot(
@@ -250,9 +252,49 @@ bool is_known_preparation_reason(AurUpdatePreparationReason reason) noexcept {
     case AurUpdatePreparationReason::GenericPreparationInconsistent:
     case AurUpdatePreparationReason::BuildUnitSelectionInconsistent:
     case AurUpdatePreparationReason::ExternalSatisfactionInconsistent:
+    case AurUpdatePreparationReason::MultipleArtifactLifecycleNotConnected:
         return true;
     }
     return false;
+}
+
+bool is_unconnected_artifact_lifecycle_issue(
+        const AurUpdatePreparationIssue& issue) noexcept {
+    return issue.reason == AurUpdatePreparationReason::
+                                   MultipleArtifactLifecycleNotConnected;
+}
+
+AurUpdateExecutionIssue legacy_lifecycle_preflight_issue(
+        const AurUpdatePreparationIssue& issue) {
+    const bool is_singular_split = issue.package_name.has_value();
+    return AurUpdateExecutionIssue{
+            is_singular_split
+                    ? AurUpdateExecutionReason::SplitPackageSelectionRequired
+                    : AurUpdateExecutionReason::
+                              MultiplePackageTargetsForPackageBase,
+            issue.package_name,
+            issue.package_base,
+            std::nullopt,
+            is_singular_split
+                    ? "Split package artifact selection is not implemented."
+                    : "PackageBase has multiple distinct package targets."};
+}
+
+AurUpdatePreparationIssue legacy_lifecycle_preparation_issue(
+        const AurUpdatePreparationIssue& issue,
+        std::size_t update_plan_index) {
+    AurUpdateExecutionIssue preflight_issue =
+            legacy_lifecycle_preflight_issue(issue);
+    AurUpdatePreparationIssue preparation_issue;
+    preparation_issue.reason =
+            AurUpdatePreparationReason::BlockingPreflight;
+    preparation_issue.affected_update_plan_indices.push_back(
+            update_plan_index);
+    preparation_issue.package_name = preflight_issue.package_name;
+    preparation_issue.package_base = preflight_issue.package_base;
+    preparation_issue.diagnostic = preflight_issue.diagnostic;
+    preparation_issue.preflight_issue = std::move(preflight_issue);
+    return preparation_issue;
 }
 
 bool is_known_source_preference_failure_kind(
@@ -719,11 +761,34 @@ bool AurUpdateOperationResult::has_blocking_targets() const noexcept {
 }
 
 AurUpdateOperationResult reduce_aur_update_operation_result(
-        const AurUpdateExecutionPreflight& preflight,
-        const AurUpdateSourceBuildPreparation& preparation,
-        const std::optional<AurUpdateSourceBuildExecutionResult>& execution) {
+    const AurUpdateExecutionPreflight& preflight,
+    const AurUpdateSourceBuildPreparation& preparation,
+    const std::optional<AurUpdateSourceBuildExecutionResult>& execution) {
     AurUpdateOperationResult result;
-    result.preparation_issues = preparation.issues;
+    for(const auto& issue : preparation.issues) {
+        // POLICY(#268): PR5aでblockerの内部phaseはpreparationへ移すが、
+        // operation/CLI snapshotは従来のsplit/multiple preflight categoryを保つ。
+        if(!is_unconnected_artifact_lifecycle_issue(issue)) {
+            result.preparation_issues.push_back(issue);
+        }
+    }
+    // legacy preparationはtarget順にBlockingPreflightを複製していた。
+    // child-first issue順とtarget groupingの両方をoperation snapshotで復元する。
+    for(const auto& target : preflight.targets) {
+        for(const auto& issue : preparation.issues) {
+            if(!is_unconnected_artifact_lifecycle_issue(issue) ||
+               std::find(
+                       issue.affected_update_plan_indices.begin(),
+                       issue.affected_update_plan_indices.end(),
+                       target.update_plan_index) ==
+                       issue.affected_update_plan_indices.end()) {
+                continue;
+            }
+            result.preparation_issues.push_back(
+                    legacy_lifecycle_preparation_issue(
+                            issue, target.update_plan_index));
+        }
+    }
     result.preparation_warnings = preparation.warnings;
     if(execution.has_value()) {
         result.execution_status = execution->status;
@@ -1024,10 +1089,25 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
                         "AUR update preparation issue is attributed to a target outside the current preparation phase.",
                         {update_plan_index}, {position->second});
             }
-            target.preparation_issues.push_back(issue);
-            if(apply_preparation_failures &&
-               executable_positions[position->second]) {
-                target.status = AurUpdateOperationTargetStatus::Failed;
+            if(is_unconnected_artifact_lifecycle_issue(issue)) {
+                AurUpdatePreparationIssue legacy_issue =
+                        legacy_lifecycle_preparation_issue(
+                                issue, update_plan_index);
+                target.preflight_issues.push_back(
+                        *legacy_issue.preflight_issue);
+                target.preparation_issues.push_back(
+                        std::move(legacy_issue));
+                if(apply_preparation_failures &&
+                   executable_positions[position->second]) {
+                    target.status =
+                            AurUpdateOperationTargetStatus::Unsupported;
+                }
+            } else {
+                target.preparation_issues.push_back(issue);
+                if(apply_preparation_failures &&
+                   executable_positions[position->second]) {
+                    target.status = AurUpdateOperationTargetStatus::Failed;
+                }
             }
         }
     }

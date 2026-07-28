@@ -444,6 +444,10 @@ std::string_view preparation_reason_label(AurUpdatePreparationReason reason) {
         return "build unit selection inconsistent";
     case AurUpdatePreparationReason::ExternalSatisfactionInconsistent:
         return "external satisfaction inconsistent";
+    case AurUpdatePreparationReason::MultipleArtifactLifecycleNotConnected:
+        // Defensive fallback。通常経路はoperation reducerがlegacy preflight
+        // categoryへ戻すため、このinternal blockerをcommandへ公開しない。
+        return "static work item invalid";
     }
     throw std::logic_error("Unknown AUR update preparation reason.");
 }

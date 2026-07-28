@@ -634,6 +634,10 @@ ProductionSourceBuildWorkItem prepare_resolved_source_build_work_item(
     work_item.request.custom_environment = std::move(environment);
     work_item.request.only_if_updated = only_if_updated;
     work_item.request.needed = needed;
+    work_item.required_targets.push_back(RequiredPackageArtifactTarget{
+            identity.package_base,
+            identity.requested_name,
+            DesiredInstallReason::Explicit});
     work_item.uses_system_update_baseline =
             identity.source_kind == SourceBuildSourceKind::Repository;
     return work_item;
@@ -919,6 +923,14 @@ execute_prepared_source_build_work_item(
         const ProductionSourceBuildWorkItem& work_item,
         const PacmanDatabasePaths& database_paths,
         const AppConfig& config) {
+    const RequiredPackageArtifactTarget& required_target =
+            require_singular_required_package_target(work_item);
+    std::vector<std::string> required_package_names;
+    required_package_names.reserve(work_item.required_targets.size());
+    for(const auto& target : work_item.required_targets) {
+        required_package_names.push_back(target.package_name);
+    }
+
     // POLICY(#267): runnerが全work itemへ同じdatabase snapshot参照を渡す契約を
     // lifecycle差し替え側でも検証する。
     if(g_state.first_aur_database_paths_address == nullptr) {
@@ -931,9 +943,9 @@ execute_prepared_source_build_work_item(
     const std::size_t call_index = g_state.aur_calls.size();
     g_state.aur_calls.push_back(stub::AurExecutionCall{
             call_index,
-            work_item.request.package_name,
-            work_item.request.checkout_name,
-            work_item.plan_package_names,
+            required_target.package_name,
+            required_target.package_base,
+            std::move(required_package_names),
             database_paths,
             snapshot_config(config),
             {}});

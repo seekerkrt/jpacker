@@ -11,6 +11,16 @@ namespace {
 constexpr const char* UNKNOWN_EXCEPTION_DIAGNOSTIC =
         "Prepared AUR update source-build work item failed with an unknown exception.";
 
+std::vector<std::string> required_package_names(
+        const ProductionSourceBuildWorkItem& work_item) {
+    std::vector<std::string> package_names;
+    package_names.reserve(work_item.required_targets.size());
+    for(const auto& target : work_item.required_targets) {
+        package_names.push_back(target.package_name);
+    }
+    return package_names;
+}
+
 void require_valid_prepared_invocation(
         const PreparedAurUpdateSourceBuildInvocation& invocation,
         const PreparedProductionSourceBuildInvocation& production_invocation) {
@@ -33,12 +43,14 @@ void require_valid_prepared_invocation(
                 production_invocation.work_items[index];
         const AurUpdatePreparedWorkItemAttribution& attribution =
                 attributions[index];
+        const RequiredPackageArtifactTarget& required_target =
+                require_singular_required_package_target(work_item);
         if(attribution.invocation_work_item_index != index ||
            (index > 0 &&
             attribution.build_plan_order_index <=
                     attributions[index - 1].build_plan_order_index) ||
-           attribution.package_name != work_item.request.package_name ||
-           attribution.package_base != work_item.request.checkout_name ||
+           attribution.package_name != required_target.package_name ||
+           attribution.package_base != required_target.package_base ||
            attribution.affected_update_plan_indices.empty() ||
            attribution.affected_roots.empty()) {
             throw std::logic_error(
@@ -77,7 +89,7 @@ AurUpdateWorkItemExecutionResult make_not_attempted_result(
             .build_plan_order_index = attribution.build_plan_order_index,
             .package_name = attribution.package_name,
             .package_base = attribution.package_base,
-            .plan_package_names = work_item.plan_package_names,
+            .plan_package_names = required_package_names(work_item),
             .affected_update_plan_indices =
                     attribution.affected_update_plan_indices,
             .affected_roots = attribution.affected_roots,
