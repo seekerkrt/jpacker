@@ -484,38 +484,6 @@ bool target_entry_is_selected(const UpgradeAllTargetPlanEntry& entry) {
     return entry.disposition == UpgradeAllTargetDisposition::Selected;
 }
 
-void reject_duplicate_selected_target_package_bases(UpgradeAllPlan& plan) {
-    std::map<std::string, std::vector<std::size_t>> entries_by_package_base;
-    for(std::size_t entry_index = 0; entry_index < plan.target_dispositions.size();
-        ++entry_index) {
-        const UpgradeAllTargetPlanEntry& entry = plan.target_dispositions[entry_index];
-        if(!target_entry_is_selected(entry)) continue;
-        const PackageBaseView package_base = inspect_package_base(entry.target.package_base);
-        if(!package_base.package_base.has_value()) {
-            throw std::logic_error(
-                    "Selected upgrade-all target has no resolved PackageBase.");
-        }
-        entries_by_package_base[*package_base.package_base].push_back(entry_index);
-    }
-
-    for(const auto& [package_base, entry_indexes] : entries_by_package_base) {
-        if(entry_indexes.size() < 2) continue;
-
-        std::vector<std::size_t> original_target_indexes;
-        for(const std::size_t entry_index : entry_indexes) {
-            UpgradeAllTargetPlanEntry& entry = plan.target_dispositions[entry_index];
-            entry.disposition =
-                    UpgradeAllTargetDisposition::ConflictingSelectedPackageBase;
-            original_target_indexes.push_back(entry.original_target_index);
-        }
-        add_issue(
-                plan,
-                UpgradeAllPlanningIssueKind::DuplicateSelectedTargetPackageBase,
-                {}, std::move(original_target_indexes), {}, std::nullopt,
-                package_base);
-    }
-}
-
 void populate_selected_targets(UpgradeAllPlan& plan) {
     plan.selected_targets.clear();
     plan.original_to_selected_index.assign(
@@ -788,7 +756,6 @@ UpgradeAllPlan make_upgrade_all_target_plan(
         plan.target_dispositions.push_back(std::move(entry));
     }
 
-    reject_duplicate_selected_target_package_bases(plan);
     populate_selected_targets(plan);
     return plan;
 }

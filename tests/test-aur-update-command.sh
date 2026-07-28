@@ -236,6 +236,7 @@ setup_case all-updated all-updated
 run_status 0 upgrade-aur
 assert_exact_line "AUR update: completed" "$stdout_file"
 assert_exact_line "updated-pkg: updated" "$stdout_file"
+assert_not_contains "PackageBase result:" "$stdout_file"
 assert_exact_line "query" "$command_log"
 assert_line_before "query" "preflight" "$command_log"
 prepare_line=$(grep -F "prepare needed=false" "$command_log" | sed -n '1p')
@@ -257,6 +258,7 @@ setup_case all-no-change all-no-change
 run_status 0 upgrade-aur
 assert_exact_line "AUR update: completed" "$stdout_file"
 assert_exact_line "no-change-pkg: no change" "$stdout_file"
+assert_not_contains "PackageBase result:" "$stdout_file"
 
 setup_case updated-no-change-mixed updated-no-change-mixed
 run_status 0 upgrade-aur
@@ -266,15 +268,125 @@ assert_exact_line "alpha-pkg: no change" "$stdout_file"
 assert_line_before \
     "zeta-pkg: updated" "alpha-pkg: no change" "$stdout_file"
 
+# PackageBase detail is child-authoritative and only appears when the ordinary
+# singular summary cannot explain the selected artifact set.
+setup_case split-child-success split-child-success
+run_status 0 upgrade-aur
+assert_exact_line "split-cli: updated" "$stdout_file"
+assert_exact_line "PackageBase result: split-suite" "$stdout_file"
+assert_exact_line \
+    "  required child: split-cli -> split-cli 2.4.1-3 (explicit): installed / updated" \
+    "$stdout_file"
+assert_line_before \
+    "split-cli: updated" "PackageBase result: split-suite" "$stdout_file"
+
+setup_case multiple-child-mixed multiple-child-mixed
+run_status 0 upgrade-aur
+assert_exact_line "split-main: updated" "$stdout_file"
+assert_exact_line "PackageBase result: split-suite" "$stdout_file"
+assert_exact_line \
+    "  required child: split-main -> split-main 3.7.0-2 (explicit): installed / updated" \
+    "$stdout_file"
+assert_exact_line \
+    "  required child: split-dependency -> split-dependency 3.7.0-2 (dependency): skipped as needed / no change" \
+    "$stdout_file"
+assert_exact_line \
+    "  produced artifact: split-sibling 3.7.0-2 (not selected; not installed)" \
+    "$stdout_file"
+assert_exact_line \
+    "  produced artifact: split-suite-debug 3.7.0-2 (not selected; not installed)" \
+    "$stdout_file"
+assert_line_before \
+    "  required child: split-main -> split-main 3.7.0-2 (explicit): installed / updated" \
+    "  required child: split-dependency -> split-dependency 3.7.0-2 (dependency): skipped as needed / no change" \
+    "$stdout_file"
+assert_line_before \
+    "  produced artifact: split-sibling 3.7.0-2 (not selected; not installed)" \
+    "  produced artifact: split-suite-debug 3.7.0-2 (not selected; not installed)" \
+    "$stdout_file"
+assert_not_contains "required child: split-sibling" "$stdout_file"
+assert_not_contains "required child: split-suite-debug" "$stdout_file"
+
+setup_case transaction-failure transaction-failure
+run_status 1 upgrade-aur
+assert_exact_line \
+    "tx-main: failed: package transaction failed (exit code 73)" "$stdout_file"
+assert_exact_line \
+    "tx-later: not attempted: prior work item stopped" "$stdout_file"
+assert_exact_line \
+    "  required child: tx-main (explicit): no successful outcome" "$stdout_file"
+assert_exact_line \
+    "  required child: tx-dependency (dependency): no successful outcome" \
+    "$stdout_file"
+assert_contains \
+    "execution failure for PackageBase tx-suite: package transaction failed (exit code 73)" \
+    "$stderr_file"
+assert_contains \
+    "transaction attempt: tx-main 4.0.0-1 (explicit)" "$stderr_file"
+assert_contains \
+    "transaction attempt: tx-dependency 4.0.0-1 (dependency)" "$stderr_file"
+assert_not_contains "required child: tx-main ->" "$stdout_file"
+assert_not_contains "/private/workspace/aur-cli-secret" "$stdout_file"
+assert_not_contains "/private/workspace/aur-cli-secret" "$stderr_file"
+assert_not_contains "/private/artifacts/" "$stdout_file"
+assert_not_contains "/private/artifacts/" "$stderr_file"
+
+setup_case transaction-process-exception transaction-process-exception
+run_status 1 upgrade-aur
+assert_exact_line \
+    "tx-main: failed: package transaction process exception" "$stdout_file"
+assert_contains \
+    "execution failure for PackageBase tx-suite: package transaction process exception" \
+    "$stderr_file"
+assert_not_contains "exit code" "$stdout_file"
+assert_not_contains "exit code" "$stderr_file"
+assert_not_contains "/private/workspace/aur-cli-secret" "$stdout_file"
+assert_not_contains "/private/workspace/aur-cli-secret" "$stderr_file"
+
+setup_case cleanup-mixed cleanup-mixed
+run_status 1 upgrade-aur
+assert_exact_line \
+    "cleanup-main: updated, but cleanup failed" "$stdout_file"
+assert_exact_line "PackageBase result: cleanup-suite" "$stdout_file"
+assert_exact_line \
+    "  required child: cleanup-main -> cleanup-main 5.1.0-4 (explicit): installed / updated, but cleanup failed" \
+    "$stdout_file"
+assert_exact_line \
+    "  required child: cleanup-dependency -> cleanup-dependency 5.1.0-4 (dependency): skipped as needed / no change, but cleanup failed" \
+    "$stdout_file"
+assert_exact_line \
+    "  produced artifact: cleanup-suite-debug 5.1.0-4 (not selected; not installed)" \
+    "$stdout_file"
+assert_exact_line \
+    "cleanup-later: not attempted: prior work item stopped" "$stdout_file"
+assert_contains \
+    "execution failure for PackageBase cleanup-suite: cleanup failure after successful package transaction" \
+    "$stderr_file"
+assert_not_contains "/private/workspace/aur-cli-secret" "$stdout_file"
+assert_not_contains "/private/workspace/aur-cli-secret" "$stderr_file"
+
+setup_case unknown-child-result unknown-child-result
+run_status 1 upgrade-aur
+assert_not_contains "AUR update:" "$stdout_file"
+assert_not_contains "defensive-split" "$stdout_file"
+assert_contains "Unknown AUR child execution status." "$stderr_file"
+
+setup_case incoherent-child-result incoherent-child-result
+run_status 1 upgrade-aur
+assert_not_contains "AUR update:" "$stdout_file"
+assert_not_contains "defensive-split" "$stdout_file"
+assert_contains \
+    "Completed AUR child has no selected artifact identity." "$stderr_file"
+
 # Fail-fast results must retain the decisive typed failure and partial state.
 setup_case ordinary-execution-failure ordinary-execution-failure
 run_status 1 upgrade-aur
 assert_exact_line \
     "AUR update: stopped after work-item failure" "$stdout_file"
 assert_exact_line \
-    "failed-pkg: failed: fixture build or install failed" "$stdout_file"
+    "failed-pkg: failed: build or install failure" "$stdout_file"
 assert_contains \
-    "  execution failure: build or install failed: fixture build or install failed" \
+    "  execution failure: build or install failure" \
     "$stderr_file"
 
 setup_case updated-cleanup-failure updated-cleanup-failure
@@ -284,7 +396,7 @@ assert_exact_line \
 assert_exact_line \
     "updated-cleanup-pkg: updated, but cleanup failed" "$stdout_file"
 assert_contains \
-    "  execution failure: cleanup failed after package transaction: fixture cleanup failed after update" \
+    "  execution failure: cleanup failure after successful package transaction" \
     "$stderr_file"
 assert_contains \
     "AUR update partially completed before failure." "$stdout_file"
@@ -298,7 +410,7 @@ assert_exact_line \
 assert_exact_line \
     "no-change-cleanup-pkg: no package change, but cleanup failed" "$stdout_file"
 assert_contains \
-    "  execution failure: cleanup failed after package transaction: fixture cleanup failed without package change" \
+    "  execution failure: cleanup failure after successful package transaction" \
     "$stderr_file"
 assert_contains \
     "AUR update cleanup failed after a package transaction." "$stdout_file"
@@ -311,15 +423,15 @@ assert_exact_line \
     "AUR update: stopped after work-item failure" "$stdout_file"
 assert_exact_line "first-pkg: updated" "$stdout_file"
 assert_exact_line \
-    "failed-pkg: failed: fixture second work item failed" "$stdout_file"
+    "failed-pkg: failed: build or install failure" "$stdout_file"
 assert_exact_line \
     "later-pkg: not attempted: prior work item stopped" "$stdout_file"
 assert_line_before "first-pkg: updated" \
-    "failed-pkg: failed: fixture second work item failed" "$stdout_file"
-assert_line_before "failed-pkg: failed: fixture second work item failed" \
+    "failed-pkg: failed: build or install failure" "$stdout_file"
+assert_line_before "failed-pkg: failed: build or install failure" \
     "later-pkg: not attempted: prior work item stopped" "$stdout_file"
 assert_contains \
-    "  execution failure: build or install failed: fixture second work item failed" \
+    "  execution failure: build or install failure" \
     "$stderr_file"
 assert_not_contains \
     "execution failure: prior work item stopped" "$stderr_file"
@@ -393,7 +505,7 @@ run_status 1 upgrade-aur
 assert_exact_line "AUR update: completed" "$stdout_file"
 assert_exact_line "defensive-pkg: updated" "$stdout_file"
 assert_contains \
-    "  execution failure: build or install failed: fixture completed execution failure" \
+    "  execution failure for PackageBase defensive-pkg: build or install failure" \
     "$stderr_file"
 
 # Invocation-level stopped states must independently fail even when every
@@ -425,7 +537,7 @@ assert_exact_line "AUR update: completed" "$stdout_file"
 assert_exact_line \
     "defensive-pkg: updated, but cleanup failed" "$stdout_file"
 assert_contains \
-    "  execution failure: cleanup failed after package transaction: fixture completed cleanup failure" \
+    "  execution failure: cleanup failure after successful package transaction" \
     "$stderr_file"
 assert_exact_line \
     "AUR update cleanup failed after a package transaction." "$stdout_file"
@@ -499,7 +611,7 @@ run_status 0 upgrade
 assert_exact_line "sudo pacman -Syu" "$command_log"
 assert_pipeline_absent
 
-if [ "$case_count" -ne 36 ]; then
+if [ "$case_count" -ne 43 ]; then
     fail_case "internal test case count changed: $case_count"
 fi
 echo "AUR update command integration tests passed ($case_count cases)."

@@ -85,9 +85,11 @@ struct SourceExecutionCall {
 
 struct AurExecutionCall {
     std::size_t              call_index = 0;
+    // singular compatibility field。multiple PackageBaseではempty。
     std::string              package_name;
     std::string              package_base;
     std::vector<std::string> plan_package_names;
+    std::vector<RequiredPackageArtifactTarget> required_targets;
     PacmanDatabasePaths      database_paths;
     ConfigSnapshot           config;
     std::vector<EventKind>   lifecycle_events;
@@ -167,9 +169,16 @@ void fail_pkgdest_guard_on_call(
 
 // AUR source-build lifecycle used by actual PR3 runner.
 void enqueue_aur_success(ArtifactInstallExecutionOutcome outcome);
+void enqueue_aur_successes(
+        std::vector<ArtifactInstallExecutionOutcome> child_outcomes,
+        std::vector<ArtifactPackageIdentity> unselected_artifacts = {});
 void enqueue_aur_ordinary_failure(std::string diagnostic);
 void enqueue_aur_cleanup_failure(
         ArtifactInstallExecutionOutcome outcome,
+        std::string diagnostic);
+void enqueue_aur_cleanup_failure(
+        std::vector<ArtifactInstallExecutionOutcome> child_outcomes,
+        std::vector<ArtifactPackageIdentity> unselected_artifacts,
         std::string diagnostic);
 void enqueue_aur_unknown_failure();
 

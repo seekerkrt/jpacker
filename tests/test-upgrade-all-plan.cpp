@@ -743,28 +743,28 @@ void test_original_to_selected_index_mapping_is_dense_and_unique() {
             "Selected-to-original mapping differs");
 }
 
-void test_duplicate_selected_target_package_base_is_rejected() {
+void test_same_package_base_targets_remain_selected() {
     const UpgradeAllPlan plan = make_upgrade_all_target_plan(
             {},
             {candidate("split-cli", "split-suite"),
              candidate("split-lib", "split-suite")});
 
+    expect_no_issues(plan);
     expect(
-            plan.selected_targets.empty(),
-            "Duplicate selected PackageBase remained executable");
+            plan.selected_targets.size() == 2 &&
+                    plan.original_to_selected_index ==
+                            std::vector<std::optional<std::size_t>>({0, 1}),
+            "Same-PackageBase targets were not selected densely");
     expect(
             target_at(plan, 0).disposition ==
-                    UpgradeAllTargetDisposition::ConflictingSelectedPackageBase &&
+                            UpgradeAllTargetDisposition::Selected &&
                     target_at(plan, 1).disposition ==
-                            UpgradeAllTargetDisposition::
-                                    ConflictingSelectedPackageBase,
-            "Duplicate selected targets did not fail closed");
-    const UpgradeAllPlanningIssue& issue = require_issue(
-            plan,
-            UpgradeAllPlanningIssueKind::DuplicateSelectedTargetPackageBase);
-    expect(
-            issue.original_target_indexes == std::vector<std::size_t>({0, 1}),
-            "Duplicate target issue attribution differs");
+                            UpgradeAllTargetDisposition::Selected &&
+                    plan.selected_targets[0].package_name == "split-cli" &&
+                    plan.selected_targets[1].package_name == "split-lib" &&
+                    plan.selected_targets[0].package_base == "split-suite" &&
+                    plan.selected_targets[1].package_base == "split-suite",
+            "Same-PackageBase target identity or disposition differs");
 }
 
 void test_duplicate_selected_build_unit_package_base_is_rejected() {
@@ -1045,8 +1045,8 @@ int main() {
                 "original-to-selected mapping is dense and unique",
                 test_original_to_selected_index_mapping_is_dense_and_unique);
         run_case(
-                "duplicate selected target PackageBase is rejected",
-                test_duplicate_selected_target_package_base_is_rejected);
+                "same PackageBase targets remain selected",
+                test_same_package_base_targets_remain_selected);
         run_case(
                 "duplicate selected build-unit PackageBase is rejected",
                 test_duplicate_selected_build_unit_package_base_is_rejected);

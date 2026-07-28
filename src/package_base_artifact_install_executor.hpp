@@ -7,7 +7,9 @@
 #include <cstddef>
 #include <filesystem>
 #include <optional>
+#include <stdexcept>
 #include <string>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -123,6 +125,24 @@ public:
     [[nodiscard]] const MixedPackageBaseInstallReasonUnsupported*
     mixed_reason_failure() const noexcept;
 
+#ifdef JPACKER_ENABLE_AUR_UPDATE_EXECUTION_RUNNER_TEST_HOOKS
+    // Runner fake-symbol testだけがclosed typed failureを組み立てるseam。
+    // production constructorやartifact capabilityは公開しない。
+    static PackageBaseArtifactInstallPreparationFailure
+    make_selection_failure_for_aur_update_runner_test(
+            PackageBaseArtifactIdentitySelectionFailure failure) {
+        return PackageBaseArtifactInstallPreparationFailure(
+                AurUpdateRunnerTestTag{}, std::move(failure));
+    }
+
+    static PackageBaseArtifactInstallPreparationFailure
+    make_mixed_reason_failure_for_aur_update_runner_test(
+            MixedPackageBaseInstallReasonUnsupported failure) {
+        return PackageBaseArtifactInstallPreparationFailure(
+                AurUpdateRunnerTestTag{}, std::move(failure));
+    }
+#endif
+
 private:
     explicit PackageBaseArtifactInstallPreparationFailure(
             PackageBaseArtifactIdentitySelectionFailure failure);
@@ -132,6 +152,28 @@ private:
     std::variant<PackageBaseArtifactIdentitySelectionFailure,
                  MixedPackageBaseInstallReasonUnsupported>
             failure_;
+
+#ifdef JPACKER_ENABLE_AUR_UPDATE_EXECUTION_RUNNER_TEST_HOOKS
+    struct AurUpdateRunnerTestTag {};
+
+    PackageBaseArtifactInstallPreparationFailure(
+            AurUpdateRunnerTestTag,
+            PackageBaseArtifactIdentitySelectionFailure failure)
+        : failure_(
+                  std::in_place_type<
+                          PackageBaseArtifactIdentitySelectionFailure>,
+                  std::move(failure)) {
+    }
+
+    PackageBaseArtifactInstallPreparationFailure(
+            AurUpdateRunnerTestTag,
+            MixedPackageBaseInstallReasonUnsupported failure)
+        : failure_(
+                  std::in_place_type<
+                          MixedPackageBaseInstallReasonUnsupported>,
+                  std::move(failure)) {
+    }
+#endif
 
     friend PackageBaseArtifactInstallPreparationResult
     prepare_package_base_artifact_install(
@@ -198,6 +240,96 @@ struct PackageBaseArtifactInstallExecutionArtifactResult {
     PackageBaseArtifactInstallExpectedOutcome outcome;
 };
 
+// pacman transactionを試行したselected childのsafe identity snapshot。
+// path、stable artifact index、directive、expected/success outcomeを持たない。
+struct PackageBaseArtifactInstallTransactionAttempt {
+    ArtifactPackageIdentity identity;
+    DesiredInstallReason    desired_reason;
+};
+
+enum class PackageBaseArtifactInstallTransactionFailureKind {
+    NonzeroExit,
+    ProcessException,
+    UnknownException,
+};
+
+// one-shot capability consume後のpacman transaction failure。
+// child successを表さず、安全なattempt identityとfailure categoryだけを保持する。
+class PackageBaseArtifactInstallTransactionError final
+    : public std::runtime_error {
+    PackageBaseArtifactInstallTransactionFailureKind failure_kind_;
+    std::string                                      package_base_;
+    std::vector<PackageBaseArtifactInstallTransactionAttempt> attempts_;
+    std::optional<int> exit_code_;
+
+    PackageBaseArtifactInstallTransactionError(
+            PackageBaseArtifactInstallTransactionFailureKind failure_kind,
+            std::string package_base,
+            std::vector<PackageBaseArtifactInstallTransactionAttempt>
+                    attempts,
+            std::optional<int> exit_code,
+            const std::string& diagnostic);
+
+    friend PackageBaseArtifactInstallExecutionResult
+    execute_prepared_package_base_artifact_install(
+            PreparedPackageBaseArtifactInstall& install,
+            const ArtifactInstallExecutionOptions& options);
+
+#ifdef JPACKER_ENABLE_AUR_UPDATE_EXECUTION_RUNNER_TEST_HOOKS
+    struct AurUpdateRunnerTestTag {};
+
+    PackageBaseArtifactInstallTransactionError(
+            AurUpdateRunnerTestTag,
+            PackageBaseArtifactInstallTransactionFailureKind failure_kind,
+            std::string package_base,
+            std::vector<PackageBaseArtifactInstallTransactionAttempt>
+                    attempts,
+            std::optional<int> exit_code,
+            const std::string& diagnostic)
+        : std::runtime_error(diagnostic), failure_kind_(failure_kind),
+          package_base_(std::move(package_base)),
+          attempts_(std::move(attempts)), exit_code_(exit_code) {
+    }
+#endif
+
+public:
+    PackageBaseArtifactInstallTransactionError(
+            const PackageBaseArtifactInstallTransactionError&) = default;
+    PackageBaseArtifactInstallTransactionError(
+            PackageBaseArtifactInstallTransactionError&&) noexcept = default;
+    PackageBaseArtifactInstallTransactionError& operator=(
+            const PackageBaseArtifactInstallTransactionError&) = delete;
+    PackageBaseArtifactInstallTransactionError& operator=(
+            PackageBaseArtifactInstallTransactionError&&) noexcept = delete;
+    ~PackageBaseArtifactInstallTransactionError() = default;
+
+    PackageBaseArtifactInstallTransactionFailureKind failure_kind()
+            const noexcept;
+    const std::string& package_base() const noexcept;
+    const std::vector<PackageBaseArtifactInstallTransactionAttempt>&
+    attempts() const noexcept;
+    const std::optional<int>& exit_code() const noexcept;
+
+    std::vector<PackageBaseArtifactInstallTransactionAttempt>
+    release_attempts() && noexcept;
+
+#ifdef JPACKER_ENABLE_AUR_UPDATE_EXECUTION_RUNNER_TEST_HOOKS
+    static PackageBaseArtifactInstallTransactionError
+    make_for_aur_update_runner_test(
+            PackageBaseArtifactInstallTransactionFailureKind failure_kind,
+            std::string package_base,
+            std::vector<PackageBaseArtifactInstallTransactionAttempt>
+                    attempts,
+            std::optional<int> exit_code,
+            const std::string& diagnostic) {
+        return PackageBaseArtifactInstallTransactionError(
+                AurUpdateRunnerTestTag{}, failure_kind,
+                std::move(package_base), std::move(attempts), exit_code,
+                diagnostic);
+    }
+#endif
+};
+
 class PackageBaseArtifactInstallExecutionResult final {
 public:
     PackageBaseArtifactInstallExecutionResult() = delete;
@@ -215,6 +347,12 @@ public:
     const std::vector<PackageBaseArtifactInstallExecutionArtifactResult>&
     selected_artifacts() const noexcept;
     bool is_success() const noexcept;
+
+    // Outer lifecycleがtransaction成功後のtyped resultへallocationなしで
+    // 昇格するためのrvalue-only ownership transfer。
+    std::string release_package_base() && noexcept;
+    std::vector<PackageBaseArtifactInstallExecutionArtifactResult>
+    release_selected_artifacts() && noexcept;
 
 private:
     PackageBaseArtifactInstallExecutionResult(

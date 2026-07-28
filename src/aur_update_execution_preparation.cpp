@@ -826,21 +826,32 @@ bool collect_work_item_drafts(
 
         if(selection_entry.status == AurUpdateBuildUnitSelectionStatus::
                                              ExternallySatisfiedByExplicitSourcePackageBase) {
-            if(draft.required_target_attributions.size() == 1) {
+            const bool is_singular =
+                    draft.required_target_attributions.size() == 1;
+            std::string compatibility_package_name;
+            std::vector<PackageRole> compatibility_roles;
+            std::optional<DesiredInstallReason> compatibility_reason;
+            if(is_singular) {
                 const AurUpdateRequiredTargetAttribution& child =
                         draft.required_target_attributions.front();
-                preparation.externally_satisfied_build_units.push_back(
-                        AurUpdateExternallySatisfiedBuildUnit{
-                                order_index,
-                                child.required_target.package_name,
-                                entry.package_base,
-                                entry.package_names,
-                                draft.affected_update_plan_indices,
-                                draft.affected_roots,
-                                child.roles,
-                                child.required_target.desired_reason,
-                                *selection_entry.external_satisfaction});
+                compatibility_package_name =
+                        child.required_target.package_name;
+                compatibility_roles = child.roles;
+                compatibility_reason =
+                        child.required_target.desired_reason;
             }
+            preparation.externally_satisfied_build_units.push_back(
+                    AurUpdateExternallySatisfiedBuildUnit{
+                            order_index,
+                            std::move(compatibility_package_name),
+                            entry.package_base,
+                            entry.package_names,
+                            draft.required_target_attributions,
+                            draft.affected_update_plan_indices,
+                            draft.affected_roots,
+                            std::move(compatibility_roles),
+                            compatibility_reason,
+                            *selection_entry.external_satisfaction});
             continue;
         }
 
@@ -883,53 +894,6 @@ bool collect_work_item_drafts(
     return preparation.issues.empty();
 }
 
-bool retain_unconnected_artifact_lifecycle_blockers(
-        AurUpdateSourceBuildPreparation& preparation) {
-    for(const auto& build_unit : preparation.projected_build_units) {
-        const bool has_singular_base_target =
-                build_unit.required_target_attributions.size() == 1 &&
-                build_unit.required_target_attributions.front()
-                                .required_target.package_name ==
-                        build_unit.package_base;
-        if(has_singular_base_target) continue;
-
-        // POLICY(#268): internal blockerはpreparationへ集約する一方、旧preflight
-        // と同じchild-first orderingを復元できるexact attributionを保持する。
-        for(const auto& attribution :
-            build_unit.required_target_attributions) {
-            if(attribution.required_target.package_name ==
-               build_unit.package_base) {
-                continue;
-            }
-
-            AurUpdatePreparationIssue split_issue = make_issue(
-                    AurUpdatePreparationReason::
-                            MultipleArtifactLifecycleNotConnected,
-                    "PackageBase required artifact targets are complete, but the multiple-artifact production lifecycle is not connected.");
-            split_issue.package_name =
-                    attribution.required_target.package_name;
-            split_issue.package_base = build_unit.package_base;
-            split_issue.affected_update_plan_indices =
-                    attribution.affected_update_plan_indices;
-            split_issue.affected_roots = attribution.affected_roots;
-            preparation.issues.push_back(std::move(split_issue));
-        }
-
-        if(build_unit.required_target_attributions.size() > 1) {
-            AurUpdatePreparationIssue multiple_issue = make_issue(
-                    AurUpdatePreparationReason::
-                            MultipleArtifactLifecycleNotConnected,
-                    "PackageBase required artifact targets are complete, but the multiple-artifact production lifecycle is not connected.");
-            multiple_issue.package_base = build_unit.package_base;
-            multiple_issue.affected_update_plan_indices =
-                    build_unit.affected_update_plan_indices;
-            multiple_issue.affected_roots = build_unit.affected_roots;
-            preparation.issues.push_back(std::move(multiple_issue));
-        }
-    }
-    return !preparation.issues.empty();
-}
-
 void retain_loaded_warnings(
         const std::string& preference_name,
         const SourcePreferenceLoaded& loaded,
@@ -958,6 +922,7 @@ std::optional<SourceBuildEnvironment> read_strict_environment(
                 "Strict source preference reader threw an unexpected exception: " +
                         std::string(error.what()));
         issue.package_name = preference_name;
+        issue.package_base = draft.work_item.request.checkout_name;
         attribute_issue_to_draft(issue, draft);
         preparation.issues.push_back(std::move(issue));
         return std::nullopt;
@@ -966,6 +931,7 @@ std::optional<SourceBuildEnvironment> read_strict_environment(
                 AurUpdatePreparationReason::GenericPreparationInconsistent,
                 "Strict source preference reader threw an unknown exception.");
         issue.package_name = preference_name;
+        issue.package_base = draft.work_item.request.checkout_name;
         attribute_issue_to_draft(issue, draft);
         preparation.issues.push_back(std::move(issue));
         return std::nullopt;
@@ -986,6 +952,7 @@ std::optional<SourceBuildEnvironment> read_strict_environment(
             AurUpdatePreparationReason::SourcePreferenceUnavailable,
             failure.diagnostic);
     issue.package_name = preference_name;
+    issue.package_base = draft.work_item.request.checkout_name;
     issue.source_preference_failure = failure;
     attribute_issue_to_draft(issue, draft);
     preparation.issues.push_back(std::move(issue));
@@ -996,21 +963,23 @@ void consume_strict_source_preferences(
         std::vector<UpdateWorkItemDraft>& drafts,
         AurUpdateSourceBuildPreparation& preparation) {
     for(auto& draft : drafts) {
-        const std::string& package_name =
-                draft.work_item.request.package_name;
+        const bool is_singular = draft.work_item.required_targets.size() == 1;
         const std::string& package_base =
                 draft.work_item.request.checkout_name;
+        const std::string& preference_name = is_singular
+                ? draft.work_item.request.package_name
+                : package_base;
 
         std::optional<SourceBuildEnvironment> selected_environment =
                 read_strict_environment(
-                        package_name, draft, preparation);
+                        preference_name, draft, preparation);
         if(!selected_environment.has_value()) continue;
 
         // POLICY(#242,#267): fallback eligibilityはforward可能なnonempty assignment、
         // PKGDEST definition、requested/Base identityの3条件を既存順で判定する。
         if(!selected_environment->has_forwarded_nonempty_assignment() &&
            !selected_environment->defines("PKGDEST") &&
-           package_name != package_base) {
+           is_singular && preference_name != package_base) {
             selected_environment = read_strict_environment(
                     package_base, draft, preparation);
             if(!selected_environment.has_value()) continue;
@@ -1020,7 +989,7 @@ void consume_strict_source_preferences(
             AurUpdatePreparationIssue issue = make_issue(
                     AurUpdatePreparationReason::SourcePreferencePkgdestConflict,
                     "Source preference defines invocation-owned PKGDEST.");
-            issue.package_name = package_name;
+            issue.package_name = preference_name;
             issue.package_base = package_base;
             attribute_issue_to_draft(issue, draft);
             preparation.issues.push_back(std::move(issue));
@@ -1243,6 +1212,33 @@ bool has_exact_required_target_attributions(
     return true;
 }
 
+bool has_compatible_singular_package_name(
+        const std::string& package_name,
+        const std::vector<std::string>& package_names) noexcept {
+    if(package_names.size() == 1) {
+        return package_name == package_names.front();
+    }
+    return package_name.empty();
+}
+
+bool has_exact_external_compatibility_fields(
+        const AurUpdateExternallySatisfiedBuildUnit& external,
+        const AurUpdateProjectedBuildUnit& projected) noexcept {
+    if(projected.required_target_attributions.size() == 1) {
+        const AurUpdateRequiredTargetAttribution& child =
+                projected.required_target_attributions.front();
+        return external.package_name ==
+                        child.required_target.package_name &&
+                external.roles == child.roles &&
+                external.desired_install_reason ==
+                        child.required_target.desired_reason;
+    }
+
+    // multipleではlegacy singular fieldsをidentity/reason authorityにしない。
+    return external.package_name.empty() && external.roles.empty() &&
+            !external.desired_install_reason.has_value();
+}
+
 bool has_exact_build_unit_selection_correlation(
         const std::vector<AurUpdatePreparedWorkItemAttribution>& attributions,
         const AurUpdateSourceBuildPreparation& preparation) noexcept {
@@ -1256,11 +1252,13 @@ bool has_exact_build_unit_selection_correlation(
         const AurUpdateBuildUnitSelectionEntry& selection_entry =
                 preparation.build_unit_selection.entries[order_index];
         if(selection_entry.build_plan_order_index != order_index ||
-           selection_entry.package_names.size() != 1 ||
+           selection_entry.package_names.empty() ||
            selection_entry.package_base.empty() ||
            !is_known_selection_status(selection_entry.status)) {
             return false;
         }
+        const AurUpdateProjectedBuildUnit& projected =
+                preparation.projected_build_units[order_index];
 
         if(selection_entry.status == AurUpdateBuildUnitSelectionStatus::
                                               SelectedForAurExecution) {
@@ -1271,21 +1269,18 @@ bool has_exact_build_unit_selection_correlation(
             }
             const AurUpdatePreparedWorkItemAttribution& attribution =
                     attributions[selected_index];
-            const AurUpdateRequiredTargetAttribution& projected_child =
-                    preparation.projected_build_units[order_index]
-                            .required_target_attributions.front();
             if(attribution.invocation_work_item_index != selected_index ||
                attribution.build_plan_order_index != order_index ||
-               attribution.package_name !=
-                       selection_entry.package_names.front() ||
+               !has_compatible_singular_package_name(
+                       attribution.package_name,
+                       selection_entry.package_names) ||
                attribution.package_base != selection_entry.package_base ||
                !has_exact_required_target_attributions(
                        attribution.required_target_attributions,
-                       preparation.projected_build_units[order_index]
-                               .required_target_attributions) ||
+                       projected.required_target_attributions) ||
                attribution.affected_update_plan_indices !=
-                       projected_child.affected_update_plan_indices ||
-               attribution.affected_roots != projected_child.affected_roots) {
+                       projected.affected_update_plan_indices ||
+               attribution.affected_roots != projected.affected_roots) {
                 return false;
             }
             ++selected_index;
@@ -1300,15 +1295,14 @@ bool has_exact_build_unit_selection_correlation(
         }
         const AurUpdateExternallySatisfiedBuildUnit& external =
                 preparation.externally_satisfied_build_units[external_index];
-        const AurUpdateRequiredTargetAttribution& projected_child =
-                preparation.projected_build_units[order_index]
-                        .required_target_attributions.front();
         if(external.build_plan_order_index != order_index ||
-           external.package_name != selection_entry.package_names.front() ||
            external.package_base != selection_entry.package_base ||
            external.plan_package_names != selection_entry.package_names ||
+           !has_exact_required_target_attributions(
+                   external.required_target_attributions,
+                   projected.required_target_attributions) ||
            external.affected_update_plan_indices.empty() ||
-           external.affected_roots.empty() || external.roles.empty() ||
+           external.affected_roots.empty() ||
            has_duplicate_value(external.affected_update_plan_indices) ||
            has_duplicate_value(external.affected_roots) ||
            !std::all_of(
@@ -1324,17 +1318,10 @@ bool has_exact_build_unit_selection_correlation(
                    [&preparation](const RootTargetIdentity& root) {
                        return has_root_snapshot(preparation, root);
                    }) ||
-           !std::all_of(
-                   external.roles.begin(), external.roles.end(),
-                   is_known_role) ||
-           !is_known_desired_install_reason(
-                   external.desired_install_reason) ||
            external.affected_update_plan_indices !=
-                   projected_child.affected_update_plan_indices ||
-           external.affected_roots != projected_child.affected_roots ||
-           external.roles != projected_child.roles ||
-           external.desired_install_reason !=
-                   projected_child.required_target.desired_reason ||
+                   projected.affected_update_plan_indices ||
+           external.affected_roots != projected.affected_roots ||
+           !has_exact_external_compatibility_fields(external, projected) ||
            external.external_satisfaction !=
                    *selection_entry.external_satisfaction) {
             return false;
@@ -1592,12 +1579,6 @@ AurUpdateSourceBuildPreparation prepare_aur_update_source_build_invocation(
     if(!collect_work_item_drafts(
                plan, build_unit_selection, bindings, preparation, drafts,
                needed)) {
-        return preparation;
-    }
-
-    // POLICY(#268): exact child projectionはpublishするが、PR5aではmultiple/split
-    // lifecycleをpreference IO、Pacman DB、generic invocationへ進めない。
-    if(retain_unconnected_artifact_lifecycle_blockers(preparation)) {
         return preparation;
     }
 

@@ -17,6 +17,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -55,31 +56,37 @@ std::string canonical_source_key(
     throw std::logic_error("Unknown source-build source kind.");
 }
 
-void require_supported_build_source_install_target(
+void require_supported_registered_source_install_target(
         const ResolvedSourceBuildIdentity& source) {
-    // POLICY(#98,#242): productionのsingle-artifact selectionではsplit packageの
-    // install対象を個別選択できないため、requested nameとPackageBaseが異なる
-    // AUR targetは安全側で停止する。
+    // POLICY(#98,#268): registered source upgradeのlegacy singular lifecycleは
+    // requested split childを個別選択できないため安全側で停止する。
     if(source.source_kind == SourceBuildSourceKind::Aur &&
        source.has_distinct_package_base) {
         throw std::runtime_error(
-                "Cannot build/install split AUR package " + source.requested_name + " from PackageBase " +
-                source.package_base + "; explicit split package install target selection is not implemented.");
+                "Registered source upgrade does not support split AUR preference " +
+                source.requested_name + " from PackageBase " +
+                source.package_base +
+                "; this route requires a singular package identity.");
     }
 }
 
 DesiredInstallReason resolve_source_target_reason(
-        const ResolvedSourceBuildIdentity& source) {
+        const ResolvedSourceBuildIdentity& source,
+        bool use_package_base_lifecycle) {
     if(source.source_kind != SourceBuildSourceKind::Aur) {
         return DesiredInstallReason::Explicit;
     }
 
-    // POLICY(#174,#242): dependency graph全体のRPC schemaを解決してから
-    // split/executable guardへ進む。upgradeのsystem transaction前preflightでも
-    // malformed dependencyをtarget-local split diagnosticで隠さない。
+    // POLICY(#174,#268): dependency graph全体のRPC schemaを解決してから
+    // route固有のexecutable guardへ進む。registered source upgradeのlegacy
+    // singular ownerだけはsplit selection guardを維持する。
     BuildPlan plan = resolve_build_plan(source.requested_name);
-    require_supported_build_source_install_target(source);
-    require_executable_install_plan(source.requested_name, plan);
+    if(use_package_base_lifecycle) {
+        require_executable_build_plan(source.requested_name, plan);
+    } else {
+        require_supported_registered_source_install_target(source);
+        require_executable_install_plan(source.requested_name, plan);
+    }
     BuildPlanArtifactTargetProjectionResult projection =
             project_build_plan_required_artifact_targets(plan);
     if(!projection.is_success()) {
@@ -120,7 +127,8 @@ ProductionSourceBuildWorkItem make_direct_source_build_work_item(
         SourceBuildEnvironment environment,
         SourceEnvironmentEmptyValuePolicy empty_value_policy,
         bool only_if_updated,
-        bool needed) {
+        bool needed,
+        bool use_package_base_lifecycle) {
     ProductionSourceBuildWorkItem work_item;
     work_item.request.package_name = source.requested_name;
     work_item.request.checkout_name = source.package_base;
@@ -132,7 +140,9 @@ ProductionSourceBuildWorkItem make_direct_source_build_work_item(
     work_item.required_targets.push_back(RequiredPackageArtifactTarget{
             source.package_base,
             source.requested_name,
-            resolve_source_target_reason(source)});
+            resolve_source_target_reason(
+                    source, use_package_base_lifecycle)});
+    work_item.is_build_plan_entry = use_package_base_lifecycle;
     work_item.uses_system_update_baseline =
             source.source_kind == SourceBuildSourceKind::Repository;
     require_static_production_source_build_work_item(work_item);
@@ -151,6 +161,81 @@ std::optional<ArtifactInstallExecutionOutcome> flatten_source_build_result(
             return std::nullopt;
     }
     throw std::logic_error("Unknown source-build execution status.");
+}
+
+std::string_view install_reason_label(DesiredInstallReason reason) {
+    switch(reason) {
+        case DesiredInstallReason::Explicit:
+            return "explicit";
+        case DesiredInstallReason::Dependency:
+            return "dependency";
+    }
+    throw std::logic_error("Unknown desired install reason.");
+}
+
+std::string_view install_outcome_label(
+        ArtifactInstallExecutionOutcome outcome) {
+    switch(outcome) {
+        case ArtifactInstallExecutionOutcome::Installed:
+            return "installed";
+        case ArtifactInstallExecutionOutcome::SkippedAsNeeded:
+            return "skipped as needed (--needed)";
+    }
+    throw std::logic_error("Unknown artifact install execution outcome.");
+}
+
+bool should_present_package_base_result(
+        const ProductionSourceBuildWorkItem& work_item,
+        const PackageBaseSourceBuildExecutionResult& result) noexcept {
+    return work_item.required_targets.size() != 1 ||
+           work_item.required_targets.front().package_name !=
+                   work_item.request.checkout_name ||
+           !result.unselected_artifacts().empty();
+}
+
+void present_package_base_result(
+        const ProductionSourceBuildWorkItem& work_item,
+        const PackageBaseSourceBuildExecutionResult& result) {
+    if(!should_present_package_base_result(work_item, result)) return;
+    if(result.package_base() != work_item.request.checkout_name ||
+       result.selected_children().size() !=
+               work_item.required_targets.size()) {
+        throw std::logic_error(
+                "PackageBase source-build result is incoherent for presentation.");
+    }
+
+    Logger::info("PackageBase result: " + result.package_base());
+    for(std::size_t index = 0;
+        index < result.selected_children().size(); ++index) {
+        const RequiredPackageArtifactTarget& required =
+                work_item.required_targets[index];
+        const PackageBaseSourceBuildSelectedResult& child =
+                result.selected_children()[index];
+        if(child.identity.package_name != required.package_name ||
+           child.identity.full_version.empty() ||
+           child.desired_reason != required.desired_reason) {
+            throw std::logic_error(
+                    "PackageBase source-build child result is incoherent for presentation.");
+        }
+        Logger::info(
+                "  required child: " + required.package_name + " -> " +
+                child.identity.package_name + " " +
+                child.identity.full_version + " (" +
+                std::string(install_reason_label(child.desired_reason)) +
+                "): " + std::string(install_outcome_label(child.outcome)));
+    }
+    for(const ArtifactPackageIdentity& unselected :
+        result.unselected_artifacts()) {
+        if(unselected.package_name.empty() ||
+           unselected.full_version.empty()) {
+            throw std::logic_error(
+                    "PackageBase unselected artifact identity is incoherent for presentation.");
+        }
+        Logger::info(
+                "  produced artifact: " + unselected.package_name + " " +
+                unselected.full_version +
+                " (not selected; not installed)");
+    }
 }
 
 } // namespace
@@ -213,7 +298,8 @@ void build_source_target(
             resolve_source_build_identity(package_name);
     ProductionSourceBuildWorkItem work_item = make_direct_source_build_work_item(
             source, custom_environment,
-            SourceEnvironmentEmptyValuePolicy::Forward, false, false);
+            SourceEnvironmentEmptyValuePolicy::Forward, false, false,
+            source.source_kind == SourceBuildSourceKind::Aur);
     std::vector<ProductionSourceBuildWorkItem> work_items;
     work_items.push_back(std::move(work_item));
     PreparedProductionSourceBuildInvocation invocation =
@@ -229,7 +315,8 @@ ProductionSourceBuildWorkItem prepare_resolved_source_build_work_item(
         bool needed) {
     return make_direct_source_build_work_item(
             identity, std::move(environment),
-            SourceEnvironmentEmptyValuePolicy::Omit, only_if_updated, needed);
+            SourceEnvironmentEmptyValuePolicy::Omit, only_if_updated, needed,
+            false);
 }
 
 std::vector<ProductionSourceBuildWorkItem> prepare_aur_source_build_work_items(
@@ -295,6 +382,33 @@ ProductionSourceBuildWorkItem prepare_smart_source_build_work_item(
             identity, std::move(environment), only_if_updated, needed);
 }
 
+PackageBaseSourceBuildExecutionResult
+execute_prepared_package_base_source_build_work_item_typed(
+        const ProductionSourceBuildWorkItem& work_item,
+        const PacmanDatabasePaths& database_paths,
+        const AppConfig& config) {
+    // set ownerはAUR BuildPlanから必要childを確定したwork itemに限定する。
+    require_static_production_source_build_work_item(work_item);
+    if(!work_item.is_build_plan_entry) {
+        throw std::logic_error(
+                "PackageBase set source-build execution requires an AUR BuildPlan work item.");
+    }
+    if(work_item.request.only_if_updated) {
+        throw std::logic_error(
+                "PackageBase set source-build execution does not support only-if-updated requests.");
+    }
+
+    Logger::info(
+            "Building AUR PackageBase: " +
+            work_item.request.checkout_name);
+    Logger::info(
+            "Target package(s): " +
+            join_required_package_names(work_item.required_targets));
+    return execute_source_build_package_base_typed(
+            work_item.request, work_item.required_targets,
+            database_paths, config);
+}
+
 SourceBuildExecutionResult execute_prepared_source_build_work_item_typed(
         const ProductionSourceBuildWorkItem& work_item,
         const PacmanDatabasePaths& database_paths,
@@ -340,7 +454,21 @@ void execute_prepared_source_build_invocation(
         const PreparedProductionSourceBuildInvocation& invocation,
         const AppConfig& config) {
     for(const auto& work_item : invocation.work_items) {
-        execute_prepared_source_build_work_item(
-                work_item, invocation.database_paths, config);
+        if(work_item.is_build_plan_entry) {
+            try {
+                PackageBaseSourceBuildExecutionResult result =
+                        execute_prepared_package_base_source_build_work_item_typed(
+                                work_item, invocation.database_paths, config);
+                present_package_base_result(work_item, result);
+            } catch(const SeparatedPackageBaseSourceBuildCleanupError& error) {
+                // Transaction完了済みのchild outcomeを失わず表示し、
+                // callerがcleanup failureを成功と扱わないようtypedで再throwする。
+                present_package_base_result(work_item, error.result());
+                throw;
+            }
+        } else {
+            execute_prepared_source_build_work_item(
+                    work_item, invocation.database_paths, config);
+        }
     }
 }

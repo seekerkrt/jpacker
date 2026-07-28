@@ -66,8 +66,6 @@ enum class AurUpdatePreparationReason {
     GenericPreparationInconsistent,
     BuildUnitSelectionInconsistent,
     ExternalSatisfactionInconsistent,
-    // Temporary PR5a boundary. PR5b connects this projected model to lifecycle.
-    MultipleArtifactLifecycleNotConnected,
 };
 
 // preparation issueは表示文字列ではなくreasonと既存typed failureを正本にする。
@@ -114,7 +112,7 @@ struct AurUpdatePreparedWorkItemAttribution {
     std::vector<RootTargetIdentity> affected_roots;
 };
 
-// execution capabilityを持たないPR5a projection。multiple blocker時にも保持する。
+// BuildPlan unitごとのordered child attributionをexecution capabilityと独立に保持する。
 struct AurUpdateProjectedBuildUnit {
     std::size_t build_plan_order_index = 0;
     std::string package_base;
@@ -127,14 +125,17 @@ struct AurUpdateProjectedBuildUnit {
 // execution capabilityを持たないbuild unitも、元BuildPlan上の位置とroot/roleを失わない。
 struct AurUpdateExternallySatisfiedBuildUnit {
     std::size_t                     build_plan_order_index = 0;
+    // singular compatibility field。multipleではemptyにし、child vectorを正本にする。
     std::string                     package_name;
     std::string                     package_base;
     std::vector<std::string>        plan_package_names;
+    std::vector<AurUpdateRequiredTargetAttribution>
+            required_target_attributions;
     std::vector<std::size_t>        affected_update_plan_indices;
     std::vector<RootTargetIdentity> affected_roots;
+    // singular compatibility fields。multipleのrole/reasonはchild vectorだけが正本。
     std::vector<PackageRole>        roles;
-    DesiredInstallReason desired_install_reason =
-            DesiredInstallReason::Dependency;
+    std::optional<DesiredInstallReason> desired_install_reason;
     AurUpdateExternalSatisfactionAttribution external_satisfaction;
 };
 

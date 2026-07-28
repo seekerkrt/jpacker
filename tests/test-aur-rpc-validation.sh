@@ -68,6 +68,7 @@ setup_case() {
     unset JPACKER_TEST_GIT_CLONE_SYMLINK_TARGET
     unset JPACKER_TEST_GIT_CLONE_FIXTURE_DIR
     unset JPACKER_TEST_MAKEPKG_EXIT_CODE
+    unset JPACKER_TEST_MAKEPKG_ARTIFACT_IDENTITIES
 }
 
 run_ok() {
@@ -475,12 +476,20 @@ assert_contains "unresolved dependencies remain" "$output_file"
 
 setup_case split
 run_ok plan valid-split
-assert_contains "split package install target selection is not implemented" "$output_file"
+assert_contains "Split package install targets:" "$output_file"
+assert_contains "valid-split (base: valid-split-base)" "$output_file"
+assert_not_contains "Plan status: incomplete" "$output_file"
 
 setup_case normal-fetch
 run_ok fetch valid-root
 assert_command "git clone https://aur.archlinux.org/valid-dep.git valid-dep"
 assert_command "git clone https://aur.archlinux.org/valid-root.git valid-root"
+
+setup_case split-fetch
+run_ok fetch valid-split
+assert_command "git clone https://aur.archlinux.org/valid-split-base.git valid-split-base"
+assert_not_contains "makepkg " "$command_log"
+assert_not_contains "sudo " "$command_log"
 
 setup_case normal-build
 run_fail --noedit build valid-minimal
@@ -500,11 +509,22 @@ export JPACKER_TEST_SUDO_EXIT_CODE=0
 run_fail upgrade
 assert_validation_error "package info upgrade-split-malformed"
 assert_contains "field Conflicts expected array or null, got string" "$output_file"
-assert_not_contains "split package install target selection is not implemented" "$output_file"
 assert_no_mutation_commands
 assert_cache_entry_absent upgrade-split-root
 assert_cache_entry_absent upgrade-split-base
 assert_cache_entry_absent upgrade-split-malformed
+
+# registered source upgradeはtarget-less legacy singular lifecycleのため、
+# requested split childをsystem mutation前に引き続き拒否する。
+setup_case upgrade-registered-split-guard
+prepare_source_preferences valid-split
+export JPACKER_TEST_SUDO_EXIT_CODE=0
+run_fail upgrade
+assert_contains "Registered source upgrade does not support split AUR preference valid-split from PackageBase valid-split-base" "$output_file"
+assert_contains "this route requires a singular package identity" "$output_file"
+assert_no_mutation_commands
+assert_cache_entry_absent valid-split
+assert_cache_entry_absent valid-split-base
 
 # 全targetのplan preflight中、最後のRPCでschema errorを検出しても
 # system/source mutationへ進まない。directory iteratorの順序には依存させない。

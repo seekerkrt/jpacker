@@ -305,6 +305,42 @@ AurUpdateExecutionPreflight same_package_base_multiple_preflight() {
     return preflight;
 }
 
+AurUpdateExecutionPreflight external_multiple_dependency_preflight() {
+    const RootTargetIdentity application_root{0, "application"};
+
+    BuildPlan plan;
+    plan.root_targets.push_back(application_root);
+    plan.package_targets = {
+            PlannedPackageTarget{
+                    "split-runtime",
+                    "split-suite",
+                    {PackageRole::RuntimeDependency},
+                    {application_root}},
+            PlannedPackageTarget{
+                    "split-tools",
+                    "split-suite",
+                    {PackageRole::BuildDependency},
+                    {application_root}},
+            PlannedPackageTarget{
+                    "application",
+                    "application",
+                    {PackageRole::Root},
+                    {application_root}},
+    };
+    plan.order = {
+            BuildPlanEntry{
+                    "split-suite", {"split-runtime", "split-tools"}},
+            BuildPlanEntry{"application", {"application"}},
+    };
+
+    AurUpdateExecutionPreflight preflight;
+    preflight.targets.push_back(executable_target(
+            0, 0, "application", DesiredInstallReason::Explicit,
+            "application"));
+    preflight.build_plan = std::move(plan);
+    return preflight;
+}
+
 AurUpdateBuildUnitSelection build_unit_selection_with_external(
         const AurUpdateExecutionPreflight& preflight,
         std::size_t external_order_index,
@@ -1069,27 +1105,11 @@ void test_same_package_base_projection_retains_exact_child_attribution() {
             prepare_aur_update_source_build_invocation(
                     same_package_base_multiple_preflight(), false, config);
 
-    expect_blocked_reason(
-            preparation,
-            AurUpdatePreparationReason::
-                    MultipleArtifactLifecycleNotConnected,
-            "same-PackageBase multiple lifecycle boundary");
+    expect_result_invariant(
+            preparation, "same-PackageBase multiple preparation");
     expect(
-            preparation.issues.size() == 3 &&
-                    preparation.issues[0].package_name ==
-                            std::optional<std::string>{"split-runtime"} &&
-                    preparation.issues[0].affected_update_plan_indices ==
-                            std::vector<std::size_t>{0, 2} &&
-                    preparation.issues[1].package_name ==
-                            std::optional<std::string>{"split-explicit"} &&
-                    preparation.issues[1].affected_update_plan_indices ==
-                            std::vector<std::size_t>{2} &&
-                    !preparation.issues[2].package_name.has_value() &&
-                    preparation.issues[2].package_base ==
-                            std::optional<std::string>{"split-suite"} &&
-                    preparation.issues[2].affected_update_plan_indices ==
-                            std::vector<std::size_t>{0, 2},
-            "Same-PackageBase lifecycle blocker lost legacy child-first attribution");
+            preparation.is_prepared() && preparation.issues.empty(),
+            "Same-PackageBase multiple work item was not prepared");
     expect(
             preparation.projected_build_units.size() == 1,
             "Same-PackageBase BuildPlan entry was not projected exactly once");
@@ -1151,8 +1171,62 @@ void test_same_package_base_projection_retains_exact_child_attribution() {
                                     {0, "split-runtime"},
                                     {1, "split-explicit"}},
             "Same-PackageBase build-unit attribution union differs");
-    expect_no_external_preparation_boundary(
-            "same-PackageBase multiple lifecycle boundary");
+    expect(
+            stub::strict_preference_read_history() ==
+                    std::vector<std::string>{"split-suite"},
+            "Multiple-child work item did not read PackageBase preference exactly once");
+
+    const PreparedProductionSourceBuildInvocation& production_invocation =
+            preparation.invocation->production_invocation_for_test();
+    expect(
+            production_invocation.work_items.size() == 1,
+            "Same-PackageBase projection created multiple work items");
+    const ProductionSourceBuildWorkItem& work_item =
+            production_invocation.work_items.front();
+    expect(
+            work_item.request.package_name.empty() &&
+                    work_item.request.checkout_name == "split-suite" &&
+                    work_item.required_targets.size() == 2 &&
+                    work_item.required_targets[0].package_name ==
+                            "split-runtime" &&
+                    work_item.required_targets[0].desired_reason ==
+                            DesiredInstallReason::Dependency &&
+                    work_item.required_targets[1].package_name ==
+                            "split-explicit" &&
+                    work_item.required_targets[1].desired_reason ==
+                            DesiredInstallReason::Explicit,
+            "Same-PackageBase work item lost ordered child identity or reason");
+    const AurUpdatePreparedWorkItemAttribution& attribution =
+            preparation.invocation->work_item_attributions().front();
+    expect(
+            attribution.package_name.empty() &&
+                    attribution.package_base == "split-suite" &&
+                    attribution.required_target_attributions.size() == 2 &&
+                    attribution.required_target_attributions[0]
+                                    .required_target.package_name ==
+                            dependency_child.required_target.package_name &&
+                    attribution.required_target_attributions[0]
+                                    .affected_update_plan_indices ==
+                            dependency_child.affected_update_plan_indices &&
+                    attribution.required_target_attributions[1]
+                                    .required_target.package_name ==
+                            explicit_child.required_target.package_name &&
+                    attribution.required_target_attributions[1]
+                                    .affected_update_plan_indices ==
+                            explicit_child.affected_update_plan_indices &&
+                    attribution.affected_update_plan_indices ==
+                            std::vector<std::size_t>{0, 2} &&
+                    attribution.affected_roots ==
+                            std::vector<RootTargetIdentity>{
+                                    {0, "split-runtime"},
+                                    {1, "split-explicit"}},
+            "Same-PackageBase prepared attribution differs from projection");
+    expect(
+            stub::supported_options_guard_history() ==
+                            std::vector<bool>{false} &&
+                    stub::pkgdest_guard_history().size() == 2 &&
+                    stub::database_call_count() == 1,
+            "Same-PackageBase preparation guard or DB snapshot count differs");
 }
 
 void test_incomplete_same_package_base_plan_has_no_projection() {
@@ -1253,6 +1327,10 @@ void test_external_satisfaction_overlay_preserves_original_order() {
             external.build_plan_order_index == 1 &&
                     external.package_name == "shared-dependency" &&
                     external.package_base == "shared-dependency" &&
+                    external.required_target_attributions.size() == 1 &&
+                    external.required_target_attributions.front()
+                                    .required_target.package_name ==
+                            "shared-dependency" &&
                     external.affected_update_plan_indices ==
                             std::vector<std::size_t>{0, 2} &&
                     external.affected_roots ==
@@ -1268,6 +1346,79 @@ void test_external_satisfaction_overlay_preserves_original_order() {
     expect(
             stub::database_call_count() == 1,
             "Filtered invocation did not retain one database snapshot");
+}
+
+void test_multiple_child_external_satisfaction_retains_child_snapshot() {
+    stub::reset();
+    AurUpdateExecutionPreflight preflight =
+            external_multiple_dependency_preflight();
+    const AurUpdateExternalSatisfactionAttribution expected_external =
+            external_satisfaction("split-suite");
+    const AurUpdateBuildUnitSelection selection =
+            build_unit_selection_with_external(
+                    preflight, 0, expected_external);
+    const AppConfig config;
+    const AurUpdateSourceBuildPreparation preparation =
+            prepare_aur_update_source_build_invocation(
+                    preflight, selection, false, config);
+
+    expect_result_invariant(
+            preparation, "multiple-child external satisfaction");
+    expect(
+            preparation.is_prepared() &&
+                    preparation.externally_satisfied_build_units.size() == 1,
+            "Multiple-child external unit blocked selected root preparation");
+    expect(
+            stub::strict_preference_read_history() ==
+                    std::vector<std::string>{"application"},
+            "External multiple-child unit reached source preference IO");
+
+    const AurUpdateExternallySatisfiedBuildUnit& external =
+            preparation.externally_satisfied_build_units.front();
+    expect(
+            external.build_plan_order_index == 0 &&
+                    external.package_name.empty() &&
+                    external.package_base == "split-suite" &&
+                    external.plan_package_names ==
+                            std::vector<std::string>{
+                                    "split-runtime", "split-tools"} &&
+                    external.required_target_attributions.size() == 2 &&
+                    external.affected_update_plan_indices ==
+                            std::vector<std::size_t>{0} &&
+                    external.affected_roots ==
+                            std::vector<RootTargetIdentity>{
+                                    {0, "application"}} &&
+                    external.roles.empty() &&
+                    !external.desired_install_reason.has_value() &&
+                    external.external_satisfaction == expected_external,
+            "External multiple-child aggregate snapshot differs");
+    expect(
+            external.required_target_attributions[0]
+                                    .required_target.package_name ==
+                            "split-runtime" &&
+                    external.required_target_attributions[0]
+                                    .required_target.desired_reason ==
+                            DesiredInstallReason::Dependency &&
+                    external.required_target_attributions[0].roles ==
+                            std::vector<PackageRole>{
+                                    PackageRole::RuntimeDependency} &&
+                    external.required_target_attributions[1]
+                                    .required_target.package_name ==
+                            "split-tools" &&
+                    external.required_target_attributions[1]
+                                    .required_target.desired_reason ==
+                            DesiredInstallReason::Dependency &&
+                    external.required_target_attributions[1].roles ==
+                            std::vector<PackageRole>{
+                                    PackageRole::BuildDependency},
+            "External multiple-child ordered attribution differs");
+    expect(
+            preparation.invocation->production_invocation_for_test()
+                            .work_items.size() == 1 &&
+                    preparation.invocation->production_invocation_for_test()
+                                    .work_items.front().request.package_name ==
+                            "application",
+            "External multiple-child unit retained an execution capability");
 }
 
 void test_invalid_selection_and_external_root_stop_before_io() {
@@ -1535,7 +1686,7 @@ void test_strict_typed_failures_are_not_flattened() {
     }
 }
 
-void test_split_lifecycle_stops_before_source_preference() {
+void test_split_child_uses_package_to_base_preference_fallback() {
     const AppConfig config;
 
     stub::reset();
@@ -1547,18 +1698,10 @@ void test_split_lifecycle_stops_before_source_preference() {
                             "split-suite"),
                     false,
                     config);
-    expect_blocked_reason(
-            preparation,
-            AurUpdatePreparationReason::
-                    MultipleArtifactLifecycleNotConnected,
-            "split lifecycle boundary");
+    expect_result_invariant(preparation, "requested split child preparation");
     expect(
-            preparation.issues.size() == 1 &&
-                    preparation.issues.front().package_name ==
-                            std::optional<std::string>{"split-cli"} &&
-                    preparation.issues.front().package_base ==
-                            std::optional<std::string>{"split-suite"},
-            "Singular split blocker lost legacy child attribution");
+            preparation.is_prepared() && preparation.issues.empty(),
+            "Requested split child did not produce a prepared invocation");
     expect(
             preparation.projected_build_units.size() == 1 &&
                     preparation.projected_build_units.front()
@@ -1567,17 +1710,36 @@ void test_split_lifecycle_stops_before_source_preference() {
                                     .required_target_attributions.front()
                                     .required_target.package_name ==
                             "split-cli",
-            "Split lifecycle blocker lost its exact required target projection");
+            "Requested split child lost its exact required target projection");
     expect(
-            stub::strict_preference_read_history().empty() &&
+            stub::strict_preference_read_history() ==
+                            std::vector<std::string>{
+                                    "split-cli", "split-suite"} &&
                     preparation.warnings.empty(),
-            "Split lifecycle blocker reached source preference IO");
+            "Requested split child preference fallback order differs");
     expect(
-            stub::database_call_count() == 0,
-            "Split lifecycle blocker reached DB resolution");
+            stub::database_call_count() == 1,
+            "Requested split child did not retain one DB snapshot");
     expect(
-            stub::supported_options_guard_history().empty(),
-            "Split lifecycle blocker reached generic preparation");
+            stub::supported_options_guard_history() ==
+                            std::vector<bool>{false} &&
+                    stub::pkgdest_guard_history().size() == 2,
+            "Requested split child generic preparation count differs");
+
+    const ProductionSourceBuildWorkItem& work_item =
+            preparation.invocation->production_invocation_for_test()
+                    .work_items.front();
+    expect(
+            work_item.request.package_name == "split-cli" &&
+                    work_item.request.checkout_name == "split-suite" &&
+                    work_item.required_targets.size() == 1 &&
+                    work_item.required_targets.front().package_name ==
+                            "split-cli" &&
+                    work_item.required_targets.front().package_base ==
+                            "split-suite" &&
+                    work_item.required_targets.front().desired_reason ==
+                            DesiredInstallReason::Explicit,
+            "Requested split child work item identity differs");
 }
 
 void test_pkgdest_conflicts_stop_before_database() {
@@ -1797,7 +1959,7 @@ int main() {
                 "BuildPlan order, skipped exclusion, and install reasons",
                 test_build_plan_order_skip_exclusion_and_install_reasons);
         run_case(
-                "same-PackageBase child projection and lifecycle boundary",
+                "same-PackageBase child projection and preparation",
                 test_same_package_base_projection_retains_exact_child_attribution);
         run_case(
                 "incomplete same-PackageBase plan has no projection",
@@ -1805,6 +1967,9 @@ int main() {
         run_case(
                 "external satisfaction preserves original BuildPlan order",
                 test_external_satisfaction_overlay_preserves_original_order);
+        run_case(
+                "multiple-child external satisfaction keeps child snapshot",
+                test_multiple_child_external_satisfaction_retains_child_snapshot);
         run_case(
                 "invalid selection and external root stop before IO",
                 test_invalid_selection_and_external_root_stop_before_io);
@@ -1818,8 +1983,8 @@ int main() {
                 "strict typed failures are not flattened",
                 test_strict_typed_failures_are_not_flattened);
         run_case(
-                "split lifecycle stops before source preference",
-                test_split_lifecycle_stops_before_source_preference);
+                "split child uses package-to-base preference fallback",
+                test_split_child_uses_package_to_base_preference_fallback);
         run_case(
                 "PKGDEST conflicts stop before DB",
                 test_pkgdest_conflicts_stop_before_database);

@@ -68,6 +68,7 @@ setup_case() {
     unset JPACKER_TEST_GIT_CLONE_FIXTURE_DIR
     unset JPACKER_TEST_MAKEPKG_EXIT_CODE
     unset JPACKER_TEST_MAKEPKG_PACKAGELIST_EXIT_CODE
+    unset JPACKER_TEST_MAKEPKG_ARTIFACT_IDENTITIES
     unset JPACKER_TEST_MAKEPKG_ENV_LOG
     unset JPACKER_TEST_MAKEPKG_ENV_KEYS
     unset JPACKER_TEST_PACKAGE_METADATA_PACMAN_CONF_EXIT_CODE
@@ -152,6 +153,22 @@ assert_line_before() {
     fi
 }
 
+assert_output_before() {
+    first=$1
+    second=$2
+    file=$3
+    assert_contains "$first" "$file"
+    assert_contains "$second" "$file"
+    first_line_number=$(grep -nF -- "$first" "$file" | sed -n '1s/:.*//p')
+    second_line_number=$(grep -nF -- "$second" "$file" | sed -n '1s/:.*//p')
+    if [ "$first_line_number" -ge "$second_line_number" ]; then
+        echo "unexpected output order: $first" >&2
+        echo "must appear before: $second" >&2
+        sed -n '1,240p' "$file" >&2
+        exit 1
+    fi
+}
+
 assert_not_contains() {
     pattern=$1
     file=$2
@@ -196,6 +213,15 @@ assert_command_pattern_count() {
     if [ "$actual_count" -ne "$expected_count" ]; then
         echo "unexpected command pattern count: $actual_count (expected $expected_count)" >&2
         echo "pattern: $expected_pattern" >&2
+        cat "$command_log" >&2
+        exit 1
+    fi
+}
+
+assert_command_pattern_absent() {
+    unexpected_pattern=$1
+    if grep -E -- "$unexpected_pattern" "$command_log" >/dev/null; then
+        echo "unexpected command pattern: $unexpected_pattern" >&2
         cat "$command_log" >&2
         exit 1
     fi
@@ -688,8 +714,57 @@ metadata-risk|risk-root|conflicts/replaces metadata requires manual review
 ambiguous-provider|ambiguous-root|ambiguous providers
 unresolved-dependency|unresolved-root|unresolved dependencies
 cyclic-plan|cycle-root|cyclic dependencies
-split-package|split-child|split package install target selection is not implemented
 AUR_GUARDS
+
+# Requested split childはPackageBase buildからmetadata identityで一件だけを
+# selectし、sibling/debug outputをtransactionへ渡さない。
+setup_case aur-install-split-child
+export JPACKER_TEST_MAKEPKG_ARTIFACT_IDENTITIES='split-base|split-sibling|2.4-1
+split-base|split-child|2.4-1
+split-base|split-child-debug|2.4-1'
+export JPACKER_TEST_MAKEPKG_EXIT_CODE=0
+run_ok --noedit --nodiff --noconfirm -S --aur split-child
+assert_command "git clone https://aur.archlinux.org/split-base.git split-base"
+assert_command_pattern_count 1 '^sudo pacman -U --noconfirm -- .*/split-child-2\.4-1-x86_64\.pkg\.tar\.zst$'
+assert_command_pattern_absent '^sudo pacman -U .*split-sibling'
+assert_command_pattern_absent '^sudo pacman -U .*split-child-debug'
+assert_contains "PackageBase result: split-base" "$output_file"
+assert_contains "  required child: split-child -> split-child 2.4-1 (explicit): installed" "$output_file"
+assert_output_before \
+    "  produced artifact: split-sibling 2.4-1 (not selected; not installed)" \
+    "  produced artifact: split-child-debug 2.4-1 (not selected; not installed)" \
+    "$output_file"
+
+# Auto routeはrequested child preferenceを先に読み、空ならPackageBaseへ
+# fallbackしたうえで同じselected-only lifecycleを使う。
+setup_case auto-install-split-child-package-base-preference
+prepare_source_preference split-base
+export JPACKER_TEST_MAKEPKG_ARTIFACT_IDENTITIES='split-base|split-child|2.5-2
+split-base|split-sibling|2.5-2'
+export JPACKER_TEST_MAKEPKG_EXIT_CODE=0
+run_ok --noedit --nodiff --noconfirm -S split-child
+assert_command "pacman -Si split-child"
+assert_command "git clone https://aur.archlinux.org/split-base.git split-base"
+assert_contains "Loading custom build flags from $JPACKER_TEST_PACKAGE_BUILD_DIR/split-base" "$output_file"
+assert_command_pattern_count 1 '^sudo pacman -U --noconfirm -- .*/split-child-2\.5-2-x86_64\.pkg\.tar\.zst$'
+assert_command_pattern_absent '^sudo pacman -U .*split-sibling'
+
+# 同じPackageBaseのdependency childrenはBuildPlan順で一つのtransactionへ
+# 入り、root packageとは別work itemになる。
+setup_case aur-install-same-package-base-dependency-children
+export JPACKER_TEST_MAKEPKG_ARTIFACT_IDENTITIES='split-suite|split-runtime|2.0-3
+split-suite|split-tools|2.0-3
+split-suite|split-suite-debug|2.0-3
+split-suite-root|split-suite-root|2.0-3'
+export JPACKER_TEST_MAKEPKG_EXIT_CODE=0
+run_ok --noedit --nodiff --noconfirm -S --aur split-suite-root
+assert_command_pattern_count 1 '^sudo pacman -U --noconfirm --asdeps -- .*/split-runtime-2\.0-3-x86_64\.pkg\.tar\.zst .*/split-tools-2\.0-3-x86_64\.pkg\.tar\.zst$'
+assert_command_pattern_absent '^sudo pacman -U .*split-suite-debug'
+assert_output_before \
+    "  required child: split-runtime -> split-runtime 2.0-3 (dependency): installed" \
+    "  required child: split-tools -> split-tools 2.0-3 (dependency): installed" \
+    "$output_file"
+assert_contains "  produced artifact: split-suite-debug 2.0-3 (not selected; not installed)" "$output_file"
 
 setup_case aur-install-unsupported-option
 run_fail -S --aur clean-root --config custom.conf

@@ -30,6 +30,7 @@ ARTIFACT_INSTALL_EXECUTOR_TEST_TARGET := build/tests/artifact-install-executor-t
 PACKAGE_BASE_ARTIFACT_INSTALL_PLAN_TEST_TARGET := build/tests/package-base-artifact-install-plan-test
 PACKAGE_BASE_ARTIFACT_INSTALL_EXECUTOR_TEST_TARGET := build/tests/package-base-artifact-install-executor-test
 SEPARATED_SOURCE_BUILD_TEST_TARGET := build/tests/separated-source-build-test
+SEPARATED_PACKAGE_BASE_SOURCE_BUILD_TEST_TARGET := build/tests/separated-package-base-source-build-test
 PRODUCTION_SOURCE_BUILD_TEST_TARGET := build/tests/production-source-build-test
 PROCESS_CAPTURE_TEST_TARGET := build/tests/process-capture-test
 PROCESS_STDIN_FD_TEST_TARGET := build/tests/process-stdin-fd-test
@@ -116,6 +117,7 @@ UPGRADE_ALL_COMMAND_TEST_SRCS := \
 UPGRADE_ALL_COMMAND_REQUIRED_TEST_SRCS := \
 	$(SRC_DIR)/jpacker.cpp \
 	$(SRC_DIR)/commands_upgrade_all.cpp \
+	$(SRC_DIR)/aur_update_cli_presentation.cpp \
 	$(SRC_DIR)/cli_parser.cpp \
 	$(SRC_DIR)/cli_routing.cpp \
 	$(SRC_DIR)/upgrade_all_operation_result.cpp
@@ -222,6 +224,20 @@ AUR_UPDATE_EXECUTION_RUNNER_TEST_SRCS := \
 	$(SRC_DIR)/package_identifier.cpp \
 	tests/stubs/aur-update-execution-preparation/preparation_stub.cpp \
 	tests/stubs/aur-update-execution-runner/execution_stub.cpp
+AUR_UPDATE_EXECUTION_RUNNER_REQUIRED_TEST_SRCS := \
+	$(SRC_DIR)/aur_update_execution_runner.cpp \
+	tests/stubs/aur-update-execution-runner/execution_stub.cpp
+AUR_UPDATE_EXECUTION_RUNNER_FORBIDDEN_TEST_SRCS := \
+	$(SRC_DIR)/process.cpp \
+	$(SRC_DIR)/checkout_fetch.cpp \
+	$(SRC_DIR)/persistent_checkout.cpp \
+	$(SRC_DIR)/artifact_workspace.cpp \
+	$(SRC_DIR)/separated_source_build.cpp \
+	$(SRC_DIR)/separated_package_base_source_build.cpp \
+	$(SRC_DIR)/artifact_install_executor.cpp \
+	$(SRC_DIR)/package_base_artifact_install_executor.cpp \
+	$(SRC_DIR)/source_build.cpp \
+	$(SRC_DIR)/source_install.cpp
 # POLICY(#267): reducer testはactual moved-from preparationだけをsafe
 # preparation seamで作り、execution/mutation TUをlinkしない。
 AUR_UPDATE_OPERATION_RESULT_TEST_SRCS := \
@@ -241,7 +257,9 @@ AUR_UPDATE_OPERATION_RESULT_FORBIDDEN_TEST_SRCS := \
 	$(SRC_DIR)/persistent_checkout.cpp \
 	$(SRC_DIR)/artifact_workspace.cpp \
 	$(SRC_DIR)/separated_source_build.cpp \
+	$(SRC_DIR)/separated_package_base_source_build.cpp \
 	$(SRC_DIR)/artifact_install_executor.cpp \
+	$(SRC_DIR)/package_base_artifact_install_executor.cpp \
 	$(SRC_DIR)/source_build.cpp \
 	$(SRC_DIR)/source_install.cpp
 # POLICY(#281): filtered operation testはactual orchestrationをlinkし、query
@@ -285,7 +303,9 @@ FILTERED_AUR_UPDATE_OPERATION_FORBIDDEN_TEST_SRCS := \
 	$(SRC_DIR)/persistent_checkout.cpp \
 	$(SRC_DIR)/artifact_workspace.cpp \
 	$(SRC_DIR)/separated_source_build.cpp \
+	$(SRC_DIR)/separated_package_base_source_build.cpp \
 	$(SRC_DIR)/artifact_install_executor.cpp \
+	$(SRC_DIR)/package_base_artifact_install_executor.cpp \
 	$(SRC_DIR)/source_build.cpp \
 	$(SRC_DIR)/source_install.cpp
 # POLICY(#281): aggregate testはPR2/PR3を含むproduction orchestrationをlinkし、
@@ -525,16 +545,49 @@ SEPARATED_SOURCE_BUILD_TEST_SRCS := \
 	$(SRC_DIR)/logging.cpp \
 	tests/stubs/package-metadata/alpm_stub.cpp \
 	tests/stubs/artifact-install-executor/process_stub.cpp
+# POLICY(#268): set-based PackageBase lifecycle testは新ownerとPR4
+# preparation/executor closureだけをexact linkし、production ownerやCLIを含めない。
+SEPARATED_PACKAGE_BASE_SOURCE_BUILD_ALLOWED_PRODUCTION_TEST_SRCS := \
+	$(SRC_DIR)/separated_package_base_source_build.cpp \
+	$(SRC_DIR)/package_base_artifact_install_executor.cpp \
+	$(SRC_DIR)/package_base_artifact_install_plan.cpp \
+	$(SRC_DIR)/artifact_install_executor.cpp \
+	$(SRC_DIR)/artifact_install_plan.cpp \
+	$(SRC_DIR)/artifact_identity.cpp \
+	$(SRC_DIR)/artifact_identity_set.cpp \
+	$(SRC_DIR)/artifact_identity_selection.cpp \
+	$(SRC_DIR)/artifact_workspace.cpp \
+	$(SRC_DIR)/package_metadata.cpp \
+	$(SRC_DIR)/trusted_cache.cpp \
+	$(SRC_DIR)/source_environment.cpp \
+	$(SRC_DIR)/package_identifier.cpp \
+	$(SRC_DIR)/shell_words.cpp \
+	$(SRC_DIR)/logging.cpp
+SEPARATED_PACKAGE_BASE_SOURCE_BUILD_TEST_SUPPORT_SRCS := \
+	tests/stubs/package-metadata/alpm_stub.cpp \
+	tests/stubs/artifact-install-executor/process_stub.cpp
+SEPARATED_PACKAGE_BASE_SOURCE_BUILD_TEST_SRCS := \
+	tests/separated_package_base_source_build_test.cpp \
+	$(SEPARATED_PACKAGE_BASE_SOURCE_BUILD_ALLOWED_PRODUCTION_TEST_SRCS) \
+	$(SEPARATED_PACKAGE_BASE_SOURCE_BUILD_TEST_SUPPORT_SRCS)
+SEPARATED_PACKAGE_BASE_SOURCE_BUILD_FORBIDDEN_TEST_SRCS := \
+	$(filter-out \
+		$(SEPARATED_PACKAGE_BASE_SOURCE_BUILD_ALLOWED_PRODUCTION_TEST_SRCS), \
+		$(SRCS))
 PRODUCTION_SOURCE_BUILD_TEST_SRCS := \
 	tests/production_source_build_test.cpp \
 	$(SRC_DIR)/source_install.cpp \
 	$(SRC_DIR)/source_install_preparation.cpp \
 	$(SRC_DIR)/source_build.cpp \
 	$(SRC_DIR)/separated_source_build.cpp \
+	$(SRC_DIR)/separated_package_base_source_build.cpp \
+	$(SRC_DIR)/package_base_artifact_install_executor.cpp \
+	$(SRC_DIR)/package_base_artifact_install_plan.cpp \
 	$(SRC_DIR)/artifact_install_executor.cpp \
 	$(SRC_DIR)/artifact_install_plan.cpp \
 	$(SRC_DIR)/artifact_identity.cpp \
 	$(SRC_DIR)/artifact_identity_set.cpp \
+	$(SRC_DIR)/artifact_identity_selection.cpp \
 	$(SRC_DIR)/artifact_workspace.cpp \
 	$(SRC_DIR)/package_metadata.cpp \
 	$(SRC_DIR)/trusted_cache.cpp \
@@ -589,12 +642,13 @@ LIBALPM_BUILD_TARGETS := \
 	$(ARTIFACT_INSTALL_EXECUTOR_TEST_TARGET) \
 	$(PACKAGE_BASE_ARTIFACT_INSTALL_EXECUTOR_TEST_TARGET) \
 	$(SEPARATED_SOURCE_BUILD_TEST_TARGET) \
+	$(SEPARATED_PACKAGE_BASE_SOURCE_BUILD_TEST_TARGET) \
 	$(PRODUCTION_SOURCE_BUILD_TEST_TARGET) \
 	$(REPOSITORY_QUERY_TEST_TARGET) \
 	$(AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION_TEST_TARGET) \
 	$(UPGRADE_BASELINE_METADATA_TEST_TARGET)
 
-.PHONY: all check-libalpm clean check-upgrade-all-plan-link-firewall check-system-source-upgrade-link-firewall check-aur-update-operation-result-link-firewall check-filtered-aur-update-operation-link-firewall check-upgrade-all-operation-link-firewall check-upgrade-all-command-link-firewall check-dependency-plan-model-link-firewall check-build-plan-artifact-target-projection-link-firewall check-artifact-selection-model-link-firewall check-artifact-identity-selection-link-firewall check-multiple-artifact-workspace-link-firewall check-multiple-artifact-identity-link-firewall check-package-base-artifact-install-plan-link-firewall check-package-base-artifact-install-executor-link-firewall test test-app-config test-package-identifier test-package-metadata test-package-metadata-integration test-repository-query test-shell-words test-source-environment test-artifact-workspace test-multiple-artifact-workspace test-artifact-identity test-multiple-artifact-identity test-artifact-install-executor test-package-base-artifact-install-plan test-package-base-artifact-install-executor test-separated-source-build test-production-source-build test-process-capture test-aur-update-plan test-upgrade-all-plan test-system-source-upgrade test-aur-update-query test-aur-update-command test-upgrade-all-command test-aur-update-execution-preflight test-aur-update-execution-preflight-integration test-aur-update-execution-preparation test-aur-update-execution-runner test-aur-update-operation-result test-filtered-aur-update-operation test-upgrade-all-operation test-dependency-plan-model test-build-plan-artifact-target-projection test-artifact-install-plan test-artifact-selection-model test-artifact-identity-selection test-command-stub-contract test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-commands-inspect test-commands-source-maintenance test-commands-sync test-conflicts-replaces test-install-layout test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check install uninstall
+.PHONY: all check-libalpm clean check-upgrade-all-plan-link-firewall check-system-source-upgrade-link-firewall check-aur-update-execution-runner-link-firewall check-aur-update-operation-result-link-firewall check-filtered-aur-update-operation-link-firewall check-upgrade-all-operation-link-firewall check-upgrade-all-command-link-firewall check-dependency-plan-model-link-firewall check-build-plan-artifact-target-projection-link-firewall check-artifact-selection-model-link-firewall check-artifact-identity-selection-link-firewall check-multiple-artifact-workspace-link-firewall check-multiple-artifact-identity-link-firewall check-package-base-artifact-install-plan-link-firewall check-package-base-artifact-install-executor-link-firewall check-separated-package-base-source-build-link-firewall test test-app-config test-package-identifier test-package-metadata test-package-metadata-integration test-repository-query test-shell-words test-source-environment test-artifact-workspace test-multiple-artifact-workspace test-artifact-identity test-multiple-artifact-identity test-artifact-install-executor test-package-base-artifact-install-plan test-package-base-artifact-install-executor test-separated-source-build test-separated-package-base-source-build test-production-source-build test-process-capture test-aur-update-plan test-upgrade-all-plan test-system-source-upgrade test-aur-update-query test-aur-update-command test-upgrade-all-command test-aur-update-execution-preflight test-aur-update-execution-preflight-integration test-aur-update-execution-preparation test-aur-update-execution-runner test-aur-update-operation-result test-filtered-aur-update-operation test-upgrade-all-operation test-dependency-plan-model test-build-plan-artifact-target-projection test-artifact-install-plan test-artifact-selection-model test-artifact-identity-selection test-command-stub-contract test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-commands-inspect test-commands-source-maintenance test-commands-sync test-conflicts-replaces test-install-layout test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check install uninstall
 
 all: $(TARGET) $(MANPAGE)
 
@@ -786,11 +840,21 @@ $(SEPARATED_SOURCE_BUILD_TEST_TARGET): $(SEPARATED_SOURCE_BUILD_TEST_SRCS) $(SRC
 		$(SEPARATED_SOURCE_BUILD_TEST_SRCS) \
 		-o $@
 
+$(SEPARATED_PACKAGE_BASE_SOURCE_BUILD_TEST_TARGET): $(SEPARATED_PACKAGE_BASE_SOURCE_BUILD_TEST_SRCS) $(HEADERS) tests/stubs/package-metadata/alpm_stub.hpp tests/stubs/artifact-install-executor/process_stub.hpp $(VERSION_FILE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling separated PackageBase source-build lifecycle fake-symbol test binary"
+	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
+		-DJPACKER_ENABLE_SEPARATED_PACKAGE_BASE_SOURCE_BUILD_TEST_HOOKS \
+		-I$(SRC_DIR) -Itests/stubs/package-metadata \
+		$(SEPARATED_PACKAGE_BASE_SOURCE_BUILD_TEST_SRCS) \
+		-o $@
+
 $(PRODUCTION_SOURCE_BUILD_TEST_TARGET): $(PRODUCTION_SOURCE_BUILD_TEST_SRCS) $(HEADERS) tests/stubs/package-metadata/alpm_stub.hpp tests/stubs/artifact-install-executor/process_stub.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling production source-build fake-symbol test binary"
 	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
 		-DJPACKER_ENABLE_SEPARATED_SOURCE_BUILD_TEST_HOOKS \
+		-DJPACKER_ENABLE_SEPARATED_PACKAGE_BASE_SOURCE_BUILD_TEST_HOOKS \
 		-DJPACKER_ENABLE_TEST_OVERRIDES \
 		-I$(SRC_DIR) -Itests/stubs/package-metadata \
 		$(PRODUCTION_SOURCE_BUILD_TEST_SRCS) \
@@ -873,6 +937,7 @@ $(AUR_UPDATE_EXECUTION_RUNNER_TEST_TARGET): $(AUR_UPDATE_EXECUTION_RUNNER_TEST_S
 	@echo ":: Compiling AUR update execution runner fake-symbol test binary"
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
 		-DJPACKER_ENABLE_AUR_UPDATE_EXECUTION_PREPARATION_TEST_HOOKS \
+		-DJPACKER_ENABLE_AUR_UPDATE_EXECUTION_RUNNER_TEST_HOOKS \
 		-I$(SRC_DIR) \
 		$(AUR_UPDATE_EXECUTION_RUNNER_TEST_SRCS) \
 		-o $@
@@ -890,6 +955,7 @@ $(FILTERED_AUR_UPDATE_OPERATION_TEST_TARGET): $(FILTERED_AUR_UPDATE_OPERATION_TE
 	@echo ":: Compiling filtered AUR update operation production-composition test binary"
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
 		-DJPACKER_ENABLE_AUR_UPDATE_EXECUTION_PREPARATION_TEST_HOOKS \
+		-DJPACKER_ENABLE_AUR_UPDATE_EXECUTION_RUNNER_TEST_HOOKS \
 		-I$(SRC_DIR) \
 		$(FILTERED_AUR_UPDATE_OPERATION_TEST_SRCS) \
 		-o $@
@@ -1087,6 +1153,32 @@ test-package-base-artifact-install-executor: check-package-base-artifact-install
 test-separated-source-build: $(SEPARATED_SOURCE_BUILD_TEST_TARGET)
 	$(abspath $(SEPARATED_SOURCE_BUILD_TEST_TARGET))
 
+check-separated-package-base-source-build-link-firewall:
+	@echo ":: Checking separated PackageBase source-build lifecycle link firewall"
+	@set -e; for source in $(SEPARATED_PACKAGE_BASE_SOURCE_BUILD_ALLOWED_PRODUCTION_TEST_SRCS); do \
+		count=$$(printf '%s\n' $(SEPARATED_PACKAGE_BASE_SOURCE_BUILD_TEST_SRCS) | \
+			awk -v expected="$$source" '$$0 == expected { count++ } END { print count + 0 }'); \
+		test "$$count" -eq 1 || { \
+			echo "error: separated PackageBase source-build test must link $$source exactly once" >&2; \
+			exit 1; \
+		}; \
+	done
+	@set -e; for source in $(SEPARATED_PACKAGE_BASE_SOURCE_BUILD_TEST_SUPPORT_SRCS); do \
+		count=$$(printf '%s\n' $(SEPARATED_PACKAGE_BASE_SOURCE_BUILD_TEST_SRCS) | \
+			awk -v expected="$$source" '$$0 == expected { count++ } END { print count + 0 }'); \
+		test "$$count" -eq 1 || { \
+			echo "error: separated PackageBase source-build test must link support $$source exactly once" >&2; \
+			exit 1; \
+		}; \
+	done
+	@test -z "$(filter $(SEPARATED_PACKAGE_BASE_SOURCE_BUILD_FORBIDDEN_TEST_SRCS),$(SEPARATED_PACKAGE_BASE_SOURCE_BUILD_TEST_SRCS))" || { \
+		echo "error: separated PackageBase source-build test links a forbidden production source" >&2; \
+		exit 1; \
+	}
+
+test-separated-package-base-source-build: check-separated-package-base-source-build-link-firewall $(SEPARATED_PACKAGE_BASE_SOURCE_BUILD_TEST_TARGET)
+	$(abspath $(SEPARATED_PACKAGE_BASE_SOURCE_BUILD_TEST_TARGET))
+
 test-production-source-build: $(PRODUCTION_SOURCE_BUILD_TEST_TARGET)
 	JPACKER_TEST_PACKAGE_BUILD_DIR=$(abspath $(BUILD_DIR)/tests/production-source-build-preferences) \
 		$(abspath $(PRODUCTION_SOURCE_BUILD_TEST_TARGET))
@@ -1160,7 +1252,22 @@ test-aur-update-execution-preparation: $(AUR_UPDATE_EXECUTION_PREPARATION_TEST_T
 		$(abspath $(AUR_UPDATE_EXECUTION_PREPARATION_INTEGRATION_TEST_TARGET)) \
 		$(abspath $(BUILD_DIR)/tests/aur-update-execution-preparation-fixture)
 
-test-aur-update-execution-runner: $(AUR_UPDATE_EXECUTION_RUNNER_TEST_TARGET)
+check-aur-update-execution-runner-link-firewall:
+	@echo ":: Checking AUR update execution runner link firewall"
+	@set -e; for source in $(AUR_UPDATE_EXECUTION_RUNNER_REQUIRED_TEST_SRCS); do \
+		count=$$(printf '%s\n' $(AUR_UPDATE_EXECUTION_RUNNER_TEST_SRCS) | \
+			grep -Fxc "$$source"); \
+		test "$$count" -eq 1 || { \
+			echo "error: AUR update execution runner test must link $$source exactly once (found $$count)" >&2; \
+			exit 1; \
+		}; \
+	done
+	@test -z "$(filter $(AUR_UPDATE_EXECUTION_RUNNER_FORBIDDEN_TEST_SRCS),$(AUR_UPDATE_EXECUTION_RUNNER_TEST_SRCS))" || { \
+		echo "error: AUR update execution runner test links a forbidden mutation source" >&2; \
+		exit 1; \
+	}
+
+test-aur-update-execution-runner: check-aur-update-execution-runner-link-firewall $(AUR_UPDATE_EXECUTION_RUNNER_TEST_TARGET)
 	$(abspath $(AUR_UPDATE_EXECUTION_RUNNER_TEST_TARGET))
 
 check-aur-update-operation-result-link-firewall:
@@ -1382,6 +1489,7 @@ test: \
 	test-artifact-install-executor \
 	test-package-base-artifact-install-executor \
 	test-separated-source-build \
+	test-separated-package-base-source-build \
 	test-production-source-build \
 	test-process-capture \
 	test-aur-update-plan \

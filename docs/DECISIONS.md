@@ -46,8 +46,8 @@ pacman、makepkg、git、および既存 jpacker CLI の操作、責務、挙動
 jpacker、または将来の pactune は、既存 component が所有する package-management 機能の不完全な再実装を増やさない。各 component の authoritative な結果と既存の責務境界を利用し、その上で必要な orchestration を行う。
 
 * Arch 固有の package metadata、dependency、provider、conflict などは、対応可能な範囲で libalpm を authoritative source とする。
-* system package transaction は pacman へ任せる。
-* source package の build と artifact install は makepkg へ任せる。
+* system package transaction と検証済みsource artifactのinstall transactionは pacman へ任せる。
+* source package artifact の build は makepkg へ任せる。
 * source repository の取得と更新は git へ任せる。
 * jpacker / future pactune は、orchestration、source-build policy、execution order、安全境界、diagnostic、および user intent の保全を所有する。
 
@@ -73,8 +73,8 @@ user intent は、command 名、指定された target と option、元 tool の
 | Component | 所有する責務 |
 | --- | --- |
 | libalpm | 対応範囲内の authoritative な Arch package metadata と package relationships。現在は read-only metadata に限り、transaction は所有しない |
-| pacman | system package transactions |
-| makepkg | source package build と artifact installation |
+| pacman | system package transactionsと検証済みsource artifactのinstall transactions |
+| makepkg | source package artifactsのbuild |
 | git | source repository retrieval と update |
 | jpacker / future pactune | orchestration、source-build policy、execution order、safety boundaries、diagnostics、user intent の保全 |
 
@@ -101,6 +101,17 @@ jpacker / future pactune が外部 component を呼び出すための順序、�
 licenseとnoticeの監査では、同じprogramへ組み込まれるdirect linked / header-compiled componentと、command line・stdin/stdout・exit statusを介するexternal programを分離して扱う。libraryのvendor、static link、binary bundle、新規linked/compiled dependencyを追加する場合は、配布前にlicense、notice、Corresponding Sourceを再監査する。
 
 version boundary、配布policy、component別の詳細は[docs/LICENSING.md](docs/LICENSING.md)をsource of truthとする。
+
+### 9. PackageBase buildとrequired child selectionの分離
+
+AUR source buildでは、PackageBaseをrepository / build / workspace / package transactionの単位、BuildPlanが必要とするpackage childをinstall-selectionの単位とする。この2つのidentityを単一のpackage nameへflattenしない。
+
+* 1 PackageBaseは1つのfresh artifact workspaceで1回buildする。expected outputは`makepkg --packagelist`からordered aggregateとして取得する。
+* required childのartifactはfilenameの推測ではなく、build後のpackage metadata identityでexactly one選択する。selected childの順序はBuildPlanのrequired-target orderに従う。
+* expectedだがrequiredでないsibling / debug artifactはunselected result dataとして保持する。install input、update target attribution、install outcomeは付与しない。
+* selected childrenは1 PackageBaseにつき1回のpacman transactionへ渡す。childごとのdesired install reasonからそのtransactionで表現できるpolicyを作れない場合は、部分的にinstallせずfail closedとする。
+* transaction failureはpackageごとのpartial successを証明しないため、child successを推測しない。safeなattempt identityはfailure evidenceとして成功outcomeから分離する。
+* workspace cleanupはtransaction成功後に限る。cleanup failureはtransaction failureへflattenせず、すべてのcompleted childの正確なoutcomeとunselected identityを保つpartial successとする。
 
 ---
 
@@ -146,8 +157,8 @@ The operations, responsibilities, and behavior of pacman, makepkg, git, and the 
 jpacker, or a future pactune, must not accumulate incomplete reimplementations of package-management capabilities owned by existing components. It should use their authoritative results and established responsibility boundaries, then provide the necessary orchestration around them.
 
 * Arch-specific package metadata, dependencies, providers, conflicts, and related information use libalpm as the authoritative source where supported.
-* System package transactions remain delegated to pacman.
-* Source package builds and artifact installation remain delegated to makepkg.
+* System package transactions and validated source-artifact installation transactions remain delegated to pacman.
+* Source package artifact builds remain delegated to makepkg.
 * Source repository retrieval and updates remain delegated to git.
 * jpacker / future pactune owns orchestration, source-build policy, execution order, safety boundaries, diagnostics, and preservation of user intent.
 
@@ -173,8 +184,8 @@ User intent is inferred from the command name, explicit targets and options, con
 | Component | Owned responsibility |
 | --- | --- |
 | libalpm | Authoritative Arch package metadata and package relationships where supported. Its current scope is read-only metadata; it does not own transactions |
-| pacman | System package transactions |
-| makepkg | Source package builds and artifact installation |
+| pacman | System package transactions and validated source-artifact installation transactions |
+| makepkg | Source package artifact builds |
 | git | Source repository retrieval and updates |
 | jpacker / future pactune | Orchestration, source-build policy, execution order, safety boundaries, diagnostics, and preservation of user intent |
 
@@ -201,3 +212,14 @@ The current v1.15.0 development series and v1.15.0 or later jpacker releases are
 License and notice audits distinguish direct linked or header-compiled components incorporated into the program from external programs communicating through command-line arguments, stdin/stdout, and exit status. Adding vendored libraries, static links, binary bundles, or a new linked/compiled dependency requires a new license, notice, and Corresponding Source audit before distribution.
 
 [docs/LICENSING.md](docs/LICENSING.md) is the source of truth for the version boundary, distribution policy, and component-level details.
+
+### 9. Separate PackageBase builds from required-child selection
+
+For AUR source builds, a PackageBase is the repository, build, workspace, and package-transaction unit. A package child required by the BuildPlan is the installation-selection unit. These two identities must not be flattened into one package name.
+
+* One PackageBase is built once in one fresh artifact workspace. Ordered expected outputs come from `makepkg --packagelist` as an aggregate.
+* A required child's artifact is selected exactly once by post-build package metadata identity, never by guessing from a filename. Selected-child order follows BuildPlan required-target order.
+* Expected but unrequired sibling or debug artifacts remain unselected result data. They receive no install input role, update-target attribution, or install outcome.
+* Selected children enter one pacman transaction per PackageBase. If the child-specific desired install reasons cannot form a policy representable by that transaction, processing fails closed instead of partially installing them.
+* A failed transaction does not prove per-package partial success, so no child success is inferred. Safe attempted identities remain failure evidence separate from successful outcomes.
+* Workspace cleanup occurs only after transaction success. Cleanup failure is not flattened into transaction failure: it is partial success retaining every completed child's exact outcome and all unselected identities.

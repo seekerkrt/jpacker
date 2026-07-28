@@ -2,13 +2,14 @@
 
 #include "dependency_plan.hpp"
 #include "package_metadata.hpp"
+#include "separated_package_base_source_build.hpp"
 #include "source_environment.hpp"
 
 #include <optional>
 #include <string>
+#include <vector>
 
 struct AppConfig;
-enum class ArtifactInstallExecutionOutcome;
 
 enum class SourceBuildExecutionStatus {
     Installed,
@@ -59,6 +60,15 @@ struct SourceBuildRequest {
 SourceBuildExecutionResult execute_source_build_typed(
         const SourceBuildRequest& request,
         DesiredInstallReason desired_reason,
+        const PacmanDatabasePaths& database_paths,
+        const AppConfig& config);
+
+// AUR PackageBase execution向け。ordered required_targetsを一つのfresh
+// workspace/transactionへ渡し、multipleではrequest.package_nameを使わない。
+PackageBaseSourceBuildExecutionResult
+execute_source_build_package_base_typed(
+        const SourceBuildRequest& request,
+        const std::vector<RequiredPackageArtifactTarget>& required_targets,
         const PacmanDatabasePaths& database_paths,
         const AppConfig& config);
 

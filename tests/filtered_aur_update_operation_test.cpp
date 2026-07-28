@@ -275,18 +275,97 @@ void return_build_plan(
             });
 }
 
-void enqueue_installed(std::size_t count) {
+const PreparedProductionSourceBuildInvocation& require_production_invocation(
+        const PreparedFilteredAurUpdateOperation& prepared) {
+    expect(
+            prepared.source_build_preparation().has_value() &&
+                    prepared.source_build_preparation()
+                            ->invocation.has_value(),
+            "Filtered operation fixture has no production invocation");
+    return prepared.source_build_preparation()
+            ->invocation->production_invocation_for_test();
+}
+
+execution_stub::ExpectedExecution expected_execution_at(
+        const PreparedFilteredAurUpdateOperation& prepared,
+        std::size_t work_item_index,
+        const AppConfig& config) {
+    const PreparedProductionSourceBuildInvocation& invocation =
+            require_production_invocation(prepared);
+    expect(
+            work_item_index < invocation.work_items.size(),
+            "Filtered operation execution expectation index is out of range");
+    const ProductionSourceBuildWorkItem& work_item =
+            invocation.work_items[work_item_index];
+    return execution_stub::ExpectedExecution{
+            work_item_index,
+            work_item.request.checkout_name,
+            work_item.required_targets,
+            work_item.request.needed,
+            invocation.database_paths,
+            config};
+}
+
+std::vector<PackageBaseSourceBuildSelectedResult> selected_children_at(
+        const PreparedFilteredAurUpdateOperation& prepared,
+        std::size_t work_item_index,
+        ArtifactInstallExecutionOutcome outcome) {
+    const PreparedProductionSourceBuildInvocation& invocation =
+            require_production_invocation(prepared);
+    expect(
+            work_item_index < invocation.work_items.size(),
+            "Filtered operation selected result index is out of range");
+    std::vector<PackageBaseSourceBuildSelectedResult> children;
+    for(const auto& target :
+        invocation.work_items[work_item_index].required_targets) {
+        children.push_back(PackageBaseSourceBuildSelectedResult{
+                ArtifactPackageIdentity{target.package_name, "2.0-1"},
+                target.desired_reason,
+                outcome});
+    }
+    return children;
+}
+
+void enqueue_outcome(
+        const PreparedFilteredAurUpdateOperation& prepared,
+        const AppConfig& config,
+        std::size_t count,
+        ArtifactInstallExecutionOutcome outcome) {
+    const PreparedProductionSourceBuildInvocation& invocation =
+            require_production_invocation(prepared);
+    expect(
+            count <= invocation.work_items.size(),
+            "Filtered operation execution expectation count is out of range");
     for(std::size_t index = 0; index < count; ++index) {
+        const std::string package_base =
+                invocation.work_items[index].request.checkout_name;
         execution_stub::enqueue_success(
-                ArtifactInstallExecutionOutcome::Installed);
+                expected_execution_at(prepared, index, config),
+                package_base,
+                selected_children_at(prepared, index, outcome));
     }
 }
 
-void enqueue_no_change(std::size_t count) {
-    for(std::size_t index = 0; index < count; ++index) {
-        execution_stub::enqueue_success(
-                ArtifactInstallExecutionOutcome::SkippedAsNeeded);
-    }
+void enqueue_installed(
+        const PreparedFilteredAurUpdateOperation& prepared,
+        const AppConfig& config,
+        std::size_t count) {
+    enqueue_outcome(
+            prepared,
+            config,
+            count,
+            ArtifactInstallExecutionOutcome::Installed);
+}
+
+void enqueue_no_change(
+        const PreparedFilteredAurUpdateOperation& prepared,
+        const AppConfig& config,
+        std::size_t count) {
+    enqueue_outcome(
+            prepared,
+            config,
+            count,
+            ArtifactInstallExecutionOutcome::SkippedAsNeeded);
 }
 
 bool has_operation_issue(
@@ -487,7 +566,7 @@ void test_real_query_wrapper_and_empty_explicit_set_match_legacy_path() {
                    std::vector<bool>{true},
            "rm_deps option did not reach preparation");
 
-    enqueue_installed(1);
+    enqueue_installed(prepared, config, 1);
     FilteredAurUpdateExecutionResult result =
             execute_prepared_filtered_aur_update_operation(
                     std::move(prepared), config);
@@ -527,7 +606,7 @@ void test_explicit_inventory_query_core_bypasses_inventory_wrapper() {
     PreparedFilteredAurUpdateOperation prepared =
             prepare_filtered_aur_update_operation(
                     std::move(query), {}, config);
-    enqueue_no_change(1);
+    enqueue_no_change(prepared, config, 1);
     FilteredAurUpdateExecutionResult result =
             execute_prepared_filtered_aur_update_operation(
                     std::move(prepared), config);
@@ -681,7 +760,7 @@ void test_original_filtered_and_preflight_index_mapping() {
                    std::vector<std::vector<std::string>>{{"beta"}},
            "Excluded root leaked into BuildPlan resolution");
 
-    enqueue_installed(1);
+    enqueue_installed(prepared, config, 1);
     FilteredAurUpdateExecutionResult result =
             execute_prepared_filtered_aur_update_operation(
                     std::move(prepared), config);
@@ -739,6 +818,10 @@ void test_transitive_external_satisfaction_keeps_selected_root_executable() {
                     ->externally_satisfied_build_units.front();
     expect(external.package_name == "external-library" &&
                    external.package_base == "external-library" &&
+                   external.required_target_attributions.size() == 1 &&
+                   external.required_target_attributions.front()
+                                   .required_target.package_name ==
+                           "external-library" &&
                    external.affected_update_plan_indices ==
                            std::vector<std::size_t>{0} &&
                    external.affected_roots ==
@@ -750,7 +833,7 @@ void test_transitive_external_satisfaction_keeps_selected_root_executable() {
                            std::optional<std::string>{"external-library"},
            "External satisfaction lost identity/root/role attribution");
 
-    enqueue_installed(2);
+    enqueue_installed(prepared, config, 2);
     FilteredAurUpdateExecutionResult result =
             execute_prepared_filtered_aur_update_operation(
                     std::move(prepared), config);
@@ -767,6 +850,84 @@ void test_transitive_external_satisfaction_keeps_selected_root_executable() {
                        return call.package_name == "external-library";
                    }),
            "External unit reached checkout/build/install/cleanup boundary");
+    execution_stub::require_script_consumed();
+}
+
+void test_multiple_child_external_satisfaction_keeps_set_snapshot() {
+    reset_stubs();
+    const AppConfig config;
+    BuildPlan plan = root_plan({{"application", "application"}});
+    add_aur_dependency(
+            plan, "application", "split-runtime", "split-suite");
+    add_aur_dependency(
+            plan, "application", "split-tools", "split-suite",
+            PackageRole::BuildDependency);
+    return_build_plan(std::move(plan), {"application"});
+
+    PreparedFilteredAurUpdateOperation prepared =
+            prepare_filtered_aur_update_operation(
+                    query_result({update_entry("application")}),
+                    {explicit_source("split-source", "split-suite")},
+                    config);
+    expect(
+            prepared.is_prepared(),
+            "Selected root with external multiple-child unit was blocked" +
+                    prepared_diagnostic(prepared));
+    expect(
+            prepared.target_and_build_unit_plan()
+                            .externally_satisfied_build_unit_indexes ==
+                            std::vector<std::size_t>{0} &&
+                    prepared.target_and_build_unit_plan()
+                                    .selected_build_units.size() == 1 &&
+                    prepared.source_build_preparation()
+                                    ->externally_satisfied_build_units.size() ==
+                            1,
+            "External multiple-child selection or dense execution order differs");
+
+    const AurUpdateExternallySatisfiedBuildUnit& external =
+            prepared.source_build_preparation()
+                    ->externally_satisfied_build_units.front();
+    expect(
+            external.package_name.empty() &&
+                    external.package_base == "split-suite" &&
+                    external.plan_package_names ==
+                            std::vector<std::string>{
+                                    "split-runtime", "split-tools"} &&
+                    external.required_target_attributions.size() == 2 &&
+                    external.required_target_attributions[0]
+                                    .required_target.package_name ==
+                            "split-runtime" &&
+                    external.required_target_attributions[0].roles ==
+                            std::vector<PackageRole>{
+                                    PackageRole::RuntimeDependency} &&
+                    external.required_target_attributions[1]
+                                    .required_target.package_name ==
+                            "split-tools" &&
+                    external.required_target_attributions[1].roles ==
+                            std::vector<PackageRole>{
+                                    PackageRole::BuildDependency} &&
+                    !external.desired_install_reason.has_value() &&
+                    external.affected_update_plan_indices ==
+                            std::vector<std::size_t>{0} &&
+                    external.affected_roots ==
+                            std::vector<RootTargetIdentity>{{0, "application"}},
+            "External multiple-child snapshot lost ordered child attribution");
+    expect(
+            preparation_stub::strict_preference_read_history() ==
+                    std::vector<std::string>{"application"},
+            "External multiple-child unit reached source preference IO");
+
+    enqueue_installed(prepared, config, 1);
+    FilteredAurUpdateExecutionResult result =
+            execute_prepared_filtered_aur_update_operation(
+                    std::move(prepared), config);
+    expect_statuses(
+            result,
+            {AurUpdateOperationTargetStatus::Updated},
+            "external multiple-child selected root");
+    expect_success_lifecycle(
+            execution_stub::call_history(), {"application"}, config,
+            "external multiple-child selected root");
     execution_stub::require_script_consumed();
 }
 
@@ -796,7 +957,11 @@ void test_one_external_unit_shared_by_multiple_roots() {
     const AurUpdateExternallySatisfiedBuildUnit& external =
             prepared.source_build_preparation()
                     ->externally_satisfied_build_units.front();
-    expect(external.affected_update_plan_indices ==
+    expect(external.required_target_attributions.size() == 1 &&
+                   external.required_target_attributions.front()
+                                   .required_target.package_name ==
+                           "shared-library" &&
+                   external.affected_update_plan_indices ==
                    std::vector<std::size_t>({0, 1}) &&
                    external.affected_roots ==
                            std::vector<RootTargetIdentity>({
@@ -804,7 +969,7 @@ void test_one_external_unit_shared_by_multiple_roots() {
                                    {1, "second-root"}}),
            "Shared external unit lost multi-root attribution");
 
-    enqueue_installed(2);
+    enqueue_installed(prepared, config, 2);
     FilteredAurUpdateExecutionResult result =
             execute_prepared_filtered_aur_update_operation(
                     std::move(prepared), config);
@@ -990,7 +1155,7 @@ void test_all_updated() {
                             update_entry("updated-a"),
                             update_entry("updated-b")}),
                     {}, config);
-    enqueue_installed(2);
+    enqueue_installed(prepared, config, 2);
 
     FilteredAurUpdateExecutionResult result =
             execute_prepared_filtered_aur_update_operation(
@@ -1021,7 +1186,7 @@ void test_all_no_change() {
                             update_entry("same-a"),
                             update_entry("same-b")}),
                     {}, config);
-    enqueue_no_change(2);
+    enqueue_no_change(prepared, config, 2);
 
     FilteredAurUpdateExecutionResult result =
             execute_prepared_filtered_aur_update_operation(
@@ -1033,6 +1198,123 @@ void test_all_no_change() {
             {AurUpdateOperationTargetStatus::NoChange,
              AurUpdateOperationTargetStatus::NoChange},
             "all no-change");
+    execution_stub::require_script_consumed();
+}
+
+void test_same_package_base_children_execute_once_with_mixed_outcomes() {
+    reset_stubs();
+    return_build_plan(
+            root_plan({
+                    {"split-runtime", "split-suite"},
+                    {"split-cli", "split-suite"}}),
+            {"split-runtime", "split-cli"});
+    const AppConfig config;
+    PreparedFilteredAurUpdateOperation prepared =
+            prepare_filtered_aur_update_operation(
+                    query_result({
+                            update_entry(
+                                    "split-runtime", "split-suite",
+                                    InstalledPackageReason::Dependency),
+                            update_entry("split-cli", "split-suite")}),
+                    {}, config);
+    expect(
+            prepared.is_prepared(),
+            "Same-PackageBase targets did not prepare" +
+                    prepared_diagnostic(prepared));
+    expect(
+            prepared.target_and_build_unit_plan().selected_targets.size() ==
+                            2 &&
+                    prepared.target_and_build_unit_plan()
+                                    .selected_build_units.size() == 1 &&
+                    require_production_invocation(prepared)
+                                    .work_items.size() == 1,
+            "Same-PackageBase targets did not compact to one work item");
+
+    const ProductionSourceBuildWorkItem& work_item =
+            require_production_invocation(prepared).work_items.front();
+    expect(
+            work_item.request.package_name.empty() &&
+                    work_item.request.checkout_name == "split-suite" &&
+                    work_item.required_targets.size() == 2 &&
+                    work_item.required_targets[0].package_name ==
+                            "split-runtime" &&
+                    work_item.required_targets[0].desired_reason ==
+                            DesiredInstallReason::Dependency &&
+                    work_item.required_targets[1].package_name ==
+                            "split-cli" &&
+                    work_item.required_targets[1].desired_reason ==
+                            DesiredInstallReason::Explicit &&
+                    preparation_stub::strict_preference_read_history() ==
+                            std::vector<std::string>{"split-suite"},
+            "Same-PackageBase work-item identity, reason, or preference differs");
+
+    execution_stub::enqueue_success(
+            expected_execution_at(prepared, 0, config),
+            "split-suite",
+            {
+                    PackageBaseSourceBuildSelectedResult{
+                            ArtifactPackageIdentity{
+                                    "split-runtime", "2.0-1"},
+                            DesiredInstallReason::Dependency,
+                            ArtifactInstallExecutionOutcome::Installed},
+                    PackageBaseSourceBuildSelectedResult{
+                            ArtifactPackageIdentity{
+                                    "split-cli", "2.0-1"},
+                            DesiredInstallReason::Explicit,
+                            ArtifactInstallExecutionOutcome::SkippedAsNeeded},
+            },
+            {ArtifactPackageIdentity{"split-debug", "2.0-1"}});
+
+    FilteredAurUpdateExecutionResult result =
+            execute_prepared_filtered_aur_update_operation(
+                    std::move(prepared), config);
+    expect(
+            result.is_success() && result.changed_package_state() &&
+                    !result.has_partial_completion(),
+            "Same-PackageBase mixed child outcome aggregate differs");
+    expect_statuses(
+            result,
+            {
+                    AurUpdateOperationTargetStatus::Updated,
+                    AurUpdateOperationTargetStatus::NoChange,
+            },
+            "same-PackageBase mixed child outcomes");
+    expect(
+            result.execution.has_value() &&
+                    result.execution->work_item_results.size() == 1 &&
+                    result.execution->work_item_results.front()
+                                    .child_results.size() == 2 &&
+                    result.execution->work_item_results.front()
+                                    .unselected_artifacts.size() == 1 &&
+                    result.execution->work_item_results.front()
+                                    .unselected_artifacts.front()
+                                    .package_name == "split-debug" &&
+                    result.execution->work_item_results.front()
+                                    .unselected_artifacts.front()
+                                    .full_version == "2.0-1" &&
+                    result.selected_target_results[0]
+                                    .operation_result
+                                    .execution_contributions.size() == 1 &&
+                    result.selected_target_results[1]
+                                    .operation_result
+                                    .execution_contributions.size() == 1,
+            "Same-PackageBase child or unselected snapshot was not retained exactly");
+
+    const std::vector<execution_stub::ExecutionCall>& calls =
+            execution_stub::call_history();
+    expect(
+            calls.size() == 1 && calls.front().package_name.empty() &&
+                    calls.front().package_base == "split-suite" &&
+                    calls.front().plan_package_names ==
+                            std::vector<std::string>{
+                                    "split-runtime", "split-cli"} &&
+                    calls.front().events ==
+                            std::vector<execution_stub::EventKind>{
+                                    execution_stub::EventKind::Checkout,
+                                    execution_stub::EventKind::Build,
+                                    execution_stub::EventKind::Install,
+                                    execution_stub::EventKind::Cleanup},
+            "Same-PackageBase set owner call count or lifecycle differs");
     execution_stub::require_script_consumed();
 }
 
@@ -1052,9 +1334,11 @@ void test_ordinary_failure_partial_completion_and_not_attempted() {
                             update_entry("middle-failure"),
                             update_entry("last-pending")}),
                     {}, config);
-    execution_stub::enqueue_success(
-            ArtifactInstallExecutionOutcome::Installed);
-    execution_stub::enqueue_ordinary_failure("fixture build failure");
+    enqueue_installed(prepared, config, 1);
+    execution_stub::enqueue_phase_failure(
+            expected_execution_at(prepared, 1, config),
+            SeparatedPackageBaseSourceBuildFailurePhase::Build,
+            "fixture build failure");
 
     FilteredAurUpdateExecutionResult result =
             execute_prepared_filtered_aur_update_operation(
@@ -1090,8 +1374,17 @@ void test_cleanup_failure_partial_completion_and_not_attempted() {
                             update_entry("cleanup-failure"),
                             update_entry("cleanup-pending")}),
                     {}, config);
+    const std::string package_base = require_production_invocation(prepared)
+            .work_items.front()
+            .request.checkout_name;
     execution_stub::enqueue_cleanup_failure(
-            ArtifactInstallExecutionOutcome::Installed,
+            expected_execution_at(prepared, 0, config),
+            package_base,
+            selected_children_at(
+                    prepared,
+                    0,
+                    ArtifactInstallExecutionOutcome::Installed),
+            {},
             "fixture cleanup failure");
 
     FilteredAurUpdateExecutionResult result =
@@ -1284,7 +1577,7 @@ void test_prepared_operation_replay_is_rejected() {
     PreparedFilteredAurUpdateOperation prepared =
             prepare_filtered_aur_update_operation(
                     query_result({update_entry("one-shot-root")}), {}, config);
-    enqueue_installed(1);
+    enqueue_installed(prepared, config, 1);
     FilteredAurUpdateExecutionResult first =
             execute_prepared_filtered_aur_update_operation(
                     std::move(prepared), config);
@@ -1313,7 +1606,7 @@ void test_reducer_inconsistency_is_retained() {
                     query_result({update_entry("reducer-root")}), {}, config);
     expect(prepared.is_prepared(), "Reducer fixture did not prepare");
 
-    enqueue_installed(1);
+    enqueue_installed(prepared, config, 1);
     FilteredAurUpdateExecutionResult result =
             execute_prepared_filtered_aur_update_operation(
                     std::move(prepared), config);
@@ -1371,6 +1664,9 @@ int main() {
                 "transitive external satisfaction",
                 test_transitive_external_satisfaction_keeps_selected_root_executable);
         run_case(
+                "multiple-child external satisfaction",
+                test_multiple_child_external_satisfaction_keeps_set_snapshot);
+        run_case(
                 "shared external unit",
                 test_one_external_unit_shared_by_multiple_roots);
         run_case(
@@ -1390,6 +1686,9 @@ int main() {
                 test_preparation_blocker_stops_before_mutation);
         run_case("all Updated", test_all_updated);
         run_case("all NoChange", test_all_no_change);
+        run_case(
+                "same PackageBase mixed child outcomes",
+                test_same_package_base_children_execute_once_with_mixed_outcomes);
         run_case(
                 "ordinary failure, partial completion, and NotAttempted",
                 test_ordinary_failure_partial_completion_and_not_attempted);

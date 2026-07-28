@@ -246,6 +246,11 @@ int cmd_build(
 
     try {
         build_source_target(pkg_name, custom_env, config);
+    } catch(const SeparatedPackageBaseSourceBuildCleanupError& error) {
+        // Direct buildはretained workspaceを手動確認できる既存contractを
+        // 維持し、transaction成功済みcleanup failureとしてそのまま表示する。
+        Logger::error(error.what());
+        return 1;
     } catch(const SeparatedSourceBuildCleanupError& error) {
         // Package transactionは成功済みなので、generic Build Error prefixを付けない。
         Logger::error(error.what());

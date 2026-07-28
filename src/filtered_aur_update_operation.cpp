@@ -96,6 +96,46 @@ bool same_preflight_target(
                    rhs.issues.begin(), same_preflight_issue);
 }
 
+bool has_compatible_singular_package_name(
+        const std::string& package_name,
+        const std::vector<std::string>& package_names) noexcept {
+    if(package_names.size() == 1) {
+        return package_name == package_names.front();
+    }
+    return package_name.empty();
+}
+
+bool has_exact_required_package_names(
+        const std::vector<AurUpdateRequiredTargetAttribution>& attributions,
+        const std::vector<std::string>& package_names) noexcept {
+    if(attributions.size() != package_names.size()) return false;
+    for(std::size_t index = 0; index < attributions.size(); ++index) {
+        if(attributions[index].required_target.package_name !=
+           package_names[index]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool has_exact_execution_child_names(
+        const AurUpdateWorkItemExecutionResult& work_item,
+        const std::vector<std::string>& package_names) noexcept {
+    if(work_item.child_results.size() != package_names.size()) return false;
+    for(std::size_t index = 0; index < work_item.child_results.size(); ++index) {
+        const AurUpdateChildExecutionResult& child =
+                work_item.child_results[index];
+        if(child.work_item_index != work_item.work_item_index ||
+           child.build_plan_order_index != work_item.build_plan_order_index ||
+           child.required_child_index != index ||
+           child.package_base != work_item.package_base ||
+           child.required_package_name != package_names[index]) {
+            return false;
+        }
+    }
+    return true;
+}
+
 FilteredAurUpdateOperationIssue& add_issue(
         std::vector<FilteredAurUpdateOperationIssue>& issues,
         FilteredAurUpdateOperationIssueKind kind,
@@ -1101,11 +1141,12 @@ void correlate_prepared_work_items(
                     correlations[attribution.build_plan_order_index];
             const bool identity_matches =
                     correlation.package_base == attribution.package_base &&
-                    std::find(
-                            correlation.package_names.begin(),
-                            correlation.package_names.end(),
-                            attribution.package_name) !=
-                            correlation.package_names.end() &&
+                    has_compatible_singular_package_name(
+                            attribution.package_name,
+                            correlation.package_names) &&
+                    has_exact_required_package_names(
+                            attribution.required_target_attributions,
+                            correlation.package_names) &&
                     correlation.selected_execution_index ==
                             attribution.invocation_work_item_index;
             if(!identity_matches ||
@@ -1147,10 +1188,11 @@ void correlate_prepared_work_items(
                 correlations[work_item.build_plan_order_index];
         if(correlation.invocation_work_item_index != work_item.work_item_index ||
            correlation.package_base != work_item.package_base ||
-           std::find(
-                   correlation.package_names.begin(),
-                   correlation.package_names.end(),
-                   work_item.package_name) == correlation.package_names.end()) {
+           correlation.package_names != work_item.plan_package_names ||
+           !has_compatible_singular_package_name(
+                   work_item.package_name, correlation.package_names) ||
+           !has_exact_execution_child_names(
+                   work_item, correlation.package_names)) {
             FilteredAurUpdateOperationIssue& issue = add_issue(
                     issues,
                     FilteredAurUpdateOperationIssueKind::

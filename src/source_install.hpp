@@ -2,6 +2,7 @@
 
 #include "artifact_install_plan.hpp"
 #include "package_metadata.hpp"
+#include "separated_package_base_source_build.hpp"
 #include "source_build.hpp"
 
 #include <optional>
@@ -34,6 +35,8 @@ struct ProductionSourceBuildWorkItem {
     // POLICY(#268): PackageBase execution unitのinstall対象とreasonはこのvectorが正本。
     // singular executor用request.package_nameはsize 1の場合だけ設定する。
     std::vector<RequiredPackageArtifactTarget> required_targets;
+    // AUR BuildPlanが確定したchild setをPackageBase ownerへ渡す。
+    // falseはofficial/generic/registered-source singular compatibility境界。
     bool                          is_build_plan_entry = false;
     bool                          uses_system_update_baseline = false;
 };
@@ -48,7 +51,8 @@ struct PreparedProductionSourceBuildInvocation {
 void require_static_production_source_build_work_item(
         const ProductionSourceBuildWorkItem& work_item);
 
-// 現行single-artifact lifecycleのcompatibility境界。multipleを先頭要素へ潰さない。
+// official/generic/registered-source singular lifecycleのcompatibility境界。
+// multipleを先頭要素へ潰さない。
 const RequiredPackageArtifactTarget& require_singular_required_package_target(
         const ProductionSourceBuildWorkItem& work_item);
 
@@ -84,6 +88,14 @@ PreparedProductionSourceBuildInvocation prepare_production_source_build_invocati
         std::vector<ProductionSourceBuildWorkItem> work_items,
         const AppConfig& config);
 
+// AUR PackageBase execution専用のset owner。required_targetsをauthorityにし、
+// child別outcomeとunselected artifact identityをflattenせず返す。
+PackageBaseSourceBuildExecutionResult
+execute_prepared_package_base_source_build_work_item_typed(
+        const ProductionSourceBuildWorkItem& work_item,
+        const PacmanDatabasePaths& database_paths,
+        const AppConfig& config);
+
 SourceBuildExecutionResult execute_prepared_source_build_work_item_typed(
         const ProductionSourceBuildWorkItem& work_item,
         const PacmanDatabasePaths& database_paths,
@@ -97,6 +109,8 @@ execute_prepared_source_build_work_item(
         const PacmanDatabasePaths& database_paths,
         const AppConfig& config);
 
+// AUR BuildPlan work itemはPackageBase set owner、それ以外はlegacy
+// singular ownerへroutingする。invocationのDB snapshotを再queryしない。
 void execute_prepared_source_build_invocation(
         const PreparedProductionSourceBuildInvocation& invocation,
         const AppConfig& config);

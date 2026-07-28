@@ -80,6 +80,22 @@
       "PackageBase": "split-base",
       "Version": "1.0-1"
     },
+    "split-suite-root": {
+      "Name": "split-suite-root",
+      "PackageBase": "split-suite-root",
+      "Version": "2.0-3",
+      "Depends": ["split-runtime", "split-tools"]
+    },
+    "split-runtime": {
+      "Name": "split-runtime",
+      "PackageBase": "split-suite",
+      "Version": "2.0-3"
+    },
+    "split-tools": {
+      "Name": "split-tools",
+      "PackageBase": "split-suite",
+      "Version": "2.0-3"
+    },
     "split-metadata-root": {
       "Name": "split-metadata-root",
       "PackageBase": "split-metadata-base",

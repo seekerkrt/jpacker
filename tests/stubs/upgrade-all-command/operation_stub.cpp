@@ -10,6 +10,7 @@
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include <variant>
 #include <vector>
 
 // CLI boundaryだけを決定的に検証するaggregate operation stub。
@@ -174,6 +175,19 @@ constexpr std::array AUR_REDUCTION_REASONS{
         AurUpdateOperationReductionReason::DuplicateExecutionAttribution,
         AurUpdateOperationReductionReason::UnknownExecutionUpdatePlanIndex,
         AurUpdateOperationReductionReason::MissingExecutionAttribution,
+        AurUpdateOperationReductionReason::
+                DuplicateExecutionChildAttribution,
+        AurUpdateOperationReductionReason::
+                MissingExecutionChildAttribution,
+        AurUpdateOperationReductionReason::
+                UnexpectedExecutionChildAttribution,
+        AurUpdateOperationReductionReason::
+                UnknownExecutionChildUpdatePlanIndex,
+        AurUpdateOperationReductionReason::
+                ExecutionChildSnapshotInconsistent,
+        AurUpdateOperationReductionReason::UnexpectedSelectedArtifact,
+        AurUpdateOperationReductionReason::
+                UnexpectedUnselectedArtifactIdentity,
         AurUpdateOperationReductionReason::
                 ExecutionResultWithPreparationIssues,
         AurUpdateOperationReductionReason::MissingExecutionResult,
@@ -423,6 +437,13 @@ void add_stopping_diagnostic(
             UpgradeAllOperationDiagnostic{phase, true, diagnostic});
 }
 
+AurUpdateWorkItemExecutionResult make_work_item_result(
+        std::size_t index,
+        const std::string& package_name,
+        AurUpdateWorkItemExecutionStatus status,
+        AurUpdateWorkItemFailureKind failure_kind,
+        std::optional<std::string> diagnostic);
+
 UpgradeAllOperationResult make_completed_changed_result() {
     UpgradeAllOperationResult result = make_success_result(
             UpgradeAllOperationStatus::Completed,
@@ -454,6 +475,20 @@ UpgradeAllOperationResult make_completed_changed_result() {
             make_aur_target(
                     "aur-no-change",
                     AurUpdateOperationTargetStatus::NoChange));
+    filtered.reduced_operation_result.execution_work_items.push_back(
+            make_work_item_result(
+                    0,
+                    "aur-updated",
+                    AurUpdateWorkItemExecutionStatus::Updated,
+                    AurUpdateWorkItemFailureKind::None,
+                    std::nullopt));
+    filtered.reduced_operation_result.execution_work_items.push_back(
+            make_work_item_result(
+                    1,
+                    "aur-no-change",
+                    AurUpdateWorkItemExecutionStatus::NoChange,
+                    AurUpdateWorkItemFailureKind::None,
+                    std::nullopt));
 
     result.warnings.push_back(UpgradeAllOperationWarning{
             UpgradeAllOperationWarningKind::RegisteredSourcePreference,
@@ -822,7 +857,125 @@ AurUpdateWorkItemExecutionResult make_work_item_result(
     work_item.status = status;
     work_item.failure_kind = failure_kind;
     work_item.diagnostic = std::move(diagnostic);
+
+    AurUpdateChildExecutionResult child;
+    child.work_item_index = index;
+    child.build_plan_order_index = index;
+    child.required_child_index = 0;
+    child.package_base = package_name;
+    child.required_package_name = package_name;
+    child.desired_install_reason = DesiredInstallReason::Explicit;
+    child.affected_update_plan_indices = {index};
+    child.affected_roots = {{index, package_name}};
+    child.roles = {PackageRole::Root};
+    switch(status) {
+    case AurUpdateWorkItemExecutionStatus::Updated:
+        child.selected_artifact =
+                ArtifactPackageIdentity{package_name, "2.0-1"};
+        child.status = AurUpdateChildExecutionStatus::Installed;
+        break;
+    case AurUpdateWorkItemExecutionStatus::NoChange:
+        child.selected_artifact =
+                ArtifactPackageIdentity{package_name, "2.0-1"};
+        child.status = AurUpdateChildExecutionStatus::SkippedAsNeeded;
+        break;
+    case AurUpdateWorkItemExecutionStatus::UpdatedCleanupFailed:
+        child.selected_artifact =
+                ArtifactPackageIdentity{package_name, "2.0-1"};
+        child.status =
+                AurUpdateChildExecutionStatus::InstalledCleanupFailed;
+        break;
+    case AurUpdateWorkItemExecutionStatus::NoChangeCleanupFailed:
+        child.selected_artifact =
+                ArtifactPackageIdentity{package_name, "2.0-1"};
+        child.status = AurUpdateChildExecutionStatus::
+                SkippedAsNeededCleanupFailed;
+        break;
+    case AurUpdateWorkItemExecutionStatus::Failed:
+    case AurUpdateWorkItemExecutionStatus::NotAttempted:
+        child.status = AurUpdateChildExecutionStatus::NotAttempted;
+        break;
+    }
+    work_item.child_results.push_back(std::move(child));
     return work_item;
+}
+
+AurUpdateChildExecutionResult make_child_result(
+        std::size_t work_item_index,
+        std::size_t required_child_index,
+        const std::string& package_base,
+        std::string package_name,
+        DesiredInstallReason desired_reason,
+        AurUpdateChildExecutionStatus status,
+        std::size_t update_plan_index,
+        std::string full_version) {
+    AurUpdateChildExecutionResult child;
+    child.work_item_index = work_item_index;
+    child.build_plan_order_index = work_item_index;
+    child.required_child_index = required_child_index;
+    child.package_base = package_base;
+    child.required_package_name = std::move(package_name);
+    child.desired_install_reason = desired_reason;
+    child.affected_update_plan_indices = {update_plan_index};
+    child.affected_roots = {{update_plan_index, child.required_package_name}};
+    child.roles = {desired_reason == DesiredInstallReason::Explicit
+                           ? PackageRole::Root
+                           : PackageRole::RuntimeDependency};
+    child.status = status;
+    if(status != AurUpdateChildExecutionStatus::NotAttempted) {
+        child.selected_artifact = ArtifactPackageIdentity{
+                child.required_package_name, std::move(full_version)};
+    }
+    return child;
+}
+
+AurUpdateWorkItemExecutionResult make_multi_child_work_item(
+        std::size_t work_item_index,
+        std::string package_base,
+        std::vector<AurUpdateChildExecutionResult> children,
+        AurUpdateWorkItemExecutionStatus status,
+        AurUpdateWorkItemFailureKind failure_kind,
+        std::optional<std::string> diagnostic = std::nullopt) {
+    AurUpdateWorkItemExecutionResult work_item;
+    work_item.work_item_index = work_item_index;
+    work_item.build_plan_order_index = work_item_index;
+    work_item.package_base = std::move(package_base);
+    work_item.status = status;
+    work_item.failure_kind = failure_kind;
+    work_item.diagnostic = std::move(diagnostic);
+    for(const AurUpdateChildExecutionResult& child : children) {
+        work_item.plan_package_names.push_back(child.required_package_name);
+        work_item.affected_update_plan_indices.insert(
+                work_item.affected_update_plan_indices.end(),
+                child.affected_update_plan_indices.begin(),
+                child.affected_update_plan_indices.end());
+        work_item.affected_roots.insert(
+                work_item.affected_roots.end(),
+                child.affected_roots.begin(), child.affected_roots.end());
+    }
+    if(children.size() == 1) {
+        work_item.package_name = children.front().required_package_name;
+    }
+    work_item.child_results = std::move(children);
+    return work_item;
+}
+
+AurUpdateOperationExecutionContribution make_child_contribution(
+        const AurUpdateChildExecutionResult& child,
+        AurUpdateWorkItemExecutionStatus status,
+        AurUpdateWorkItemFailureKind failure_kind) {
+    AurUpdateOperationExecutionContribution contribution;
+    contribution.work_item_index = child.work_item_index;
+    contribution.required_child_index = child.required_child_index;
+    contribution.package_name = child.required_package_name;
+    contribution.package_base = child.package_base;
+    contribution.selected_artifact = child.selected_artifact;
+    contribution.desired_install_reason = child.desired_install_reason;
+    contribution.affected_roots = child.affected_roots;
+    contribution.roles = child.roles;
+    contribution.status = status;
+    contribution.failure_kind = failure_kind;
+    return contribution;
 }
 
 UpgradeAllOperationResult make_aur_failure_result(bool cleanup_failure) {
@@ -867,7 +1020,7 @@ UpgradeAllOperationResult make_aur_failure_result(bool cleanup_failure) {
             : AurUpdateWorkItemFailureKind::BuildOrInstallFailed;
     failed.execution_diagnostic = cleanup_failure
             ? "fixture AUR cleanup failed"
-            : "fixture AUR build or install failed";
+            : "/private/workspace/upgrade-all-secret/transaction failed";
     filtered.reduced_operation_result.targets.push_back(std::move(failed));
 
     AurUpdateOperationTargetResult later = make_aur_target(
@@ -897,19 +1050,38 @@ UpgradeAllOperationResult make_aur_failure_result(bool cleanup_failure) {
                                       CleanupFailedAfterPackageTransaction
                             : AurUpdateWorkItemFailureKind::
                                       BuildOrInstallFailed,
-                    cleanup_failure ? "fixture AUR cleanup failed"
-                                    : "fixture AUR build or install failed"));
+                    cleanup_failure
+                            ? "fixture AUR cleanup failed"
+                            : "/private/workspace/upgrade-all-secret/transaction failed"));
     filtered.reduced_operation_result.execution_work_items.push_back(
             make_work_item_result(
                     2,
                     "aur-later",
                     AurUpdateWorkItemExecutionStatus::NotAttempted,
                     AurUpdateWorkItemFailureKind::PriorWorkItemStopped));
+    if(!cleanup_failure) {
+        AurUpdatePackageTransactionFailureSnapshot transaction;
+        transaction.category =
+                AurUpdatePackageTransactionFailureCategory::CommandFailed;
+        transaction.attempted_artifacts = {
+                {{"aur-failed", "4.2.0-1"},
+                 DesiredInstallReason::Explicit}};
+        transaction.exit_code = 86;
+        transaction.diagnostic =
+                "/private/artifacts/aur-failed-4.2.0-1.pkg.tar.zst";
+        AurUpdateWorkItemExecutionResult& failed_work_item =
+                filtered.reduced_operation_result.execution_work_items[1];
+        failed_work_item.transaction_failure = transaction;
+        failed_work_item.failure_detail = transaction;
+        AurUpdateOperationTargetResult& failed_target =
+                filtered.reduced_operation_result.targets[1];
+        failed_target.execution_failure_detail = transaction;
+    }
     add_stopping_diagnostic(
             result,
             UpgradeAllOperationPhase::AurExecution,
             cleanup_failure ? "fixture AUR cleanup failed"
-                            : "fixture AUR build or install failed");
+                            : "/private/workspace/upgrade-all-secret/transaction failed");
     return result;
 }
 
@@ -920,15 +1092,168 @@ UpgradeAllOperationResult make_aur_no_change_cleanup_failure_result() {
     AurUpdateOperationTargetResult& failed =
             filtered.reduced_operation_result.targets[1];
     failed.update.installed_name = "aur-no-change-cleanup-failed";
+    failed.update.aur_package->aur_name = "aur-no-change-cleanup-failed";
+    failed.update.aur_package->package_base =
+            "aur-no-change-cleanup-failed";
     failed.package_base = "aur-no-change-cleanup-failed";
     failed.status =
             AurUpdateOperationTargetStatus::NoChangeCleanupFailed;
-    filtered.reduced_operation_result.execution_work_items[1].package_name =
-            "aur-no-change-cleanup-failed";
-    filtered.reduced_operation_result.execution_work_items[1].package_base =
-            "aur-no-change-cleanup-failed";
-    filtered.reduced_operation_result.execution_work_items[1].status =
+    AurUpdateWorkItemExecutionResult& work_item =
+            filtered.reduced_operation_result.execution_work_items[1];
+    work_item.package_name = "aur-no-change-cleanup-failed";
+    work_item.package_base = "aur-no-change-cleanup-failed";
+    work_item.plan_package_names = {"aur-no-change-cleanup-failed"};
+    work_item.affected_roots = {{1, "aur-no-change-cleanup-failed"}};
+    work_item.status =
             AurUpdateWorkItemExecutionStatus::NoChangeCleanupFailed;
+    AurUpdateChildExecutionResult& child = work_item.child_results.front();
+    child.package_base = "aur-no-change-cleanup-failed";
+    child.required_package_name = "aur-no-change-cleanup-failed";
+    child.affected_roots = {{1, "aur-no-change-cleanup-failed"}};
+    child.selected_artifact = ArtifactPackageIdentity{
+            "aur-no-change-cleanup-failed", "2.0-1"};
+    child.status =
+            AurUpdateChildExecutionStatus::SkippedAsNeededCleanupFailed;
+    return result;
+}
+
+UpgradeAllOperationResult make_aur_split_multiple_result() {
+    UpgradeAllOperationResult result = make_completed_changed_result();
+    FilteredAurUpdateExecutionResult& filtered =
+            *result.aur.operation_result;
+
+    AurUpdateOperationTargetResult target = make_aur_target(
+            "aur-split-main",
+            AurUpdateOperationTargetStatus::Updated,
+            "aur-split-suite");
+    target.update_plan_index = 2;
+
+    AurUpdateWorkItemExecutionResult work_item = make_multi_child_work_item(
+            2,
+            "aur-split-suite",
+            {make_child_result(
+                     2,
+                     0,
+                     "aur-split-suite",
+                     "aur-split-main",
+                     DesiredInstallReason::Explicit,
+                     AurUpdateChildExecutionStatus::Installed,
+                     2,
+                     "7.0.1-2"),
+             make_child_result(
+                     2,
+                     1,
+                     "aur-split-suite",
+                     "aur-split-dependency",
+                     DesiredInstallReason::Dependency,
+                     AurUpdateChildExecutionStatus::SkippedAsNeeded,
+                     2,
+                     "7.0.1-2")},
+            AurUpdateWorkItemExecutionStatus::Updated,
+            AurUpdateWorkItemFailureKind::None);
+    work_item.unselected_artifacts = {
+            {"aur-split-sibling", "7.0.1-2"},
+            {"aur-split-suite-debug", "7.0.1-2"}};
+    target.execution_contributions.push_back(make_child_contribution(
+            work_item.child_results[0],
+            AurUpdateWorkItemExecutionStatus::Updated,
+            AurUpdateWorkItemFailureKind::None));
+    target.execution_contributions.push_back(make_child_contribution(
+            work_item.child_results[1],
+            AurUpdateWorkItemExecutionStatus::NoChange,
+            AurUpdateWorkItemFailureKind::None));
+    filtered.reduced_operation_result.targets.push_back(std::move(target));
+    filtered.reduced_operation_result.execution_work_items.push_back(
+            std::move(work_item));
+    return result;
+}
+
+UpgradeAllOperationResult make_aur_mixed_cleanup_failure_result() {
+    UpgradeAllOperationResult result = make_base_result(
+            UpgradeAllOperationStatus::StoppedAfterAurCleanupFailure,
+            PackageStateChange::Changed,
+            UpgradeAllAurPhaseStatus::StoppedAfterCleanupFailure,
+            AurUpdateOperationStatus::StoppedAfterPackageCleanupFailure);
+    result.stopped_phase = UpgradeAllOperationPhase::AurExecution;
+    FilteredAurUpdateExecutionResult& filtered =
+            *result.aur.operation_result;
+    filtered.reduced_operation_result.execution_status =
+            AurUpdateInvocationExecutionStatus::
+                    StoppedAfterPackageCleanupFailure;
+
+    AurUpdateOperationTargetResult target = make_aur_target(
+            "aur-cleanup-main",
+            AurUpdateOperationTargetStatus::UpdatedCleanupFailed,
+            "aur-cleanup-suite");
+    target.update_plan_index = 0;
+    target.execution_work_item_index = 0;
+    target.execution_failure_kind = AurUpdateWorkItemFailureKind::
+            CleanupFailedAfterPackageTransaction;
+    target.execution_failure_detail =
+            AurUpdateWorkItemFailureDetail{std::monostate{}};
+    target.execution_diagnostic =
+            "/private/workspace/upgrade-all-secret/cleanup failed";
+
+    AurUpdateWorkItemExecutionResult cleanup = make_multi_child_work_item(
+            0,
+            "aur-cleanup-suite",
+            {make_child_result(
+                     0,
+                     0,
+                     "aur-cleanup-suite",
+                     "aur-cleanup-main",
+                     DesiredInstallReason::Explicit,
+                     AurUpdateChildExecutionStatus::InstalledCleanupFailed,
+                     0,
+                     "8.3.0-5"),
+             make_child_result(
+                     0,
+                     1,
+                     "aur-cleanup-suite",
+                     "aur-cleanup-dependency",
+                     DesiredInstallReason::Dependency,
+                     AurUpdateChildExecutionStatus::
+                             SkippedAsNeededCleanupFailed,
+                     0,
+                     "8.3.0-5")},
+            AurUpdateWorkItemExecutionStatus::UpdatedCleanupFailed,
+            AurUpdateWorkItemFailureKind::
+                    CleanupFailedAfterPackageTransaction,
+            "/private/workspace/upgrade-all-secret/cleanup failed");
+    cleanup.unselected_artifacts = {
+            {"aur-cleanup-suite-debug", "8.3.0-5"}};
+    target.execution_contributions.push_back(make_child_contribution(
+            cleanup.child_results[0],
+            AurUpdateWorkItemExecutionStatus::UpdatedCleanupFailed,
+            AurUpdateWorkItemFailureKind::
+                    CleanupFailedAfterPackageTransaction));
+    target.execution_contributions.push_back(make_child_contribution(
+            cleanup.child_results[1],
+            AurUpdateWorkItemExecutionStatus::NoChangeCleanupFailed,
+            AurUpdateWorkItemFailureKind::
+                    CleanupFailedAfterPackageTransaction));
+    filtered.reduced_operation_result.targets.push_back(std::move(target));
+
+    AurUpdateOperationTargetResult later = make_aur_target(
+            "aur-cleanup-later",
+            AurUpdateOperationTargetStatus::NotAttempted);
+    later.update_plan_index = 1;
+    later.execution_work_item_index = 1;
+    later.execution_failure_kind =
+            AurUpdateWorkItemFailureKind::PriorWorkItemStopped;
+    filtered.reduced_operation_result.targets.push_back(std::move(later));
+    filtered.reduced_operation_result.execution_work_items.push_back(
+            std::move(cleanup));
+    filtered.reduced_operation_result.execution_work_items.push_back(
+            make_work_item_result(
+                    1,
+                    "aur-cleanup-later",
+                    AurUpdateWorkItemExecutionStatus::NotAttempted,
+                    AurUpdateWorkItemFailureKind::PriorWorkItemStopped));
+    add_stopping_diagnostic(
+            result,
+            UpgradeAllOperationPhase::AurExecution,
+            "/private/workspace/upgrade-all-secret/cleanup failed");
     return result;
 }
 
@@ -1514,6 +1839,9 @@ UpgradeAllOperationResult result_for_scenario(const std::string& scenario) {
     if(scenario == "completed-changed") {
         return make_completed_changed_result();
     }
+    if(scenario == "aur-split-multiple") {
+        return make_aur_split_multiple_result();
+    }
     if(scenario == "completed-no-change") {
         return make_success_result(
                 UpgradeAllOperationStatus::Completed,
@@ -1556,6 +1884,9 @@ UpgradeAllOperationResult result_for_scenario(const std::string& scenario) {
     }
     if(scenario == "stopped-after-aur-no-change-cleanup-failure") {
         return make_aur_no_change_cleanup_failure_result();
+    }
+    if(scenario == "stopped-after-aur-mixed-cleanup-failure") {
+        return make_aur_mixed_cleanup_failure_result();
     }
     if(scenario == "foreign-inventory-failure") {
         return make_foreign_inventory_failure_result();
