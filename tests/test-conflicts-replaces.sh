@@ -158,9 +158,11 @@ assert_contains "ambiguous providers are not selected" "$tmp_dir/ambiguous.out"
 run_ok "$tmp_dir/cycle.out" plan cycle-root
 assert_contains "cyclic dependencies detected" "$tmp_dir/cycle.out"
 run_ok "$tmp_dir/split.out" plan split-child
-assert_contains "split package install target selection is not implemented" "$tmp_dir/split.out"
+assert_contains "Split package install targets:" "$tmp_dir/split.out"
+assert_contains "split-child (base: split-base)" "$tmp_dir/split.out"
+assert_not_contains "Plan status: incomplete" "$tmp_dir/split.out"
 
-for guard_target in unresolved-root ambiguous-root cycle-root split-child; do
+for guard_target in unresolved-root ambiguous-root cycle-root; do
     : > "$command_log"
     run_fail "$tmp_dir/$guard_target-guard.out" build "$guard_target"
     if grep -E '^(git|makepkg|sudo) ' "$command_log" >/dev/null; then
@@ -169,5 +171,11 @@ for guard_target in unresolved-root ambiguous-root cycle-root split-child; do
         exit 1
     fi
 done
+
+: > "$command_log"
+run_ok "$tmp_dir/split-fetch.out" fetch split-child
+assert_contains "git clone https://aur.archlinux.org/split-base.git split-base" "$command_log"
+assert_not_contains "makepkg " "$command_log"
+assert_not_contains "sudo " "$command_log"
 
 echo "conflicts/replaces integration tests: all checks passed"

@@ -522,15 +522,13 @@ void print_build_plan(const BuildPlan& plan) {
         }
     }
 
-    if(!plan.unresolved.empty() || !plan.ambiguous_providers.empty() || !plan.cycles.empty() ||
-       !plan.split_package_targets.empty() || !plan.metadata_risks.empty()) {
+    if(!plan.unresolved.empty() || !plan.ambiguous_providers.empty() ||
+       !plan.cycles.empty() || !plan.metadata_risks.empty()) {
         std::cout << std::endl;
         std::cout << "Plan status: incomplete" << std::endl;
         if(!plan.unresolved.empty()) std::cout << "  unresolved dependencies remain" << std::endl;
         if(!plan.ambiguous_providers.empty()) std::cout << "  ambiguous providers are not selected" << std::endl;
         if(!plan.cycles.empty()) std::cout << "  cyclic dependencies detected" << std::endl;
-        if(!plan.split_package_targets.empty())
-            std::cout << "  split package install target selection is not implemented" << std::endl;
         if(!plan.metadata_risks.empty())
             std::cout << "  conflicts/replaces metadata is not resolved automatically" << std::endl;
     }

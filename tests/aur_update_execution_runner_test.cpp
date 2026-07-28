@@ -1,17 +1,17 @@
 #include "app_config.hpp"
-#include "artifact_install_executor.hpp"
 #include "aur_update_execution_runner.hpp"
 #include "stubs/aur-update-execution-preparation/preparation_stub.hpp"
 #include "stubs/aur-update-execution-runner/execution_stub.hpp"
 
-#include <algorithm>
 #include <filesystem>
 #include <iostream>
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <type_traits>
 #include <utility>
+#include <variant>
 #include <vector>
 
 using AurUpdateRunnerFunction = AurUpdateSourceBuildExecutionResult (*)(
@@ -40,24 +40,55 @@ static_assert(
 
 namespace {
 
-namespace fs = std::filesystem;
 namespace execution_stub = aur_update_execution_runner_test_stub;
 namespace preparation_stub = aur_update_execution_preparation_test_stub;
 
 constexpr const char* UNKNOWN_EXCEPTION_DIAGNOSTIC =
         "Prepared AUR update source-build work item failed with an unknown exception.";
 
-struct ExpectedWorkItem {
-    std::size_t                     index = 0;
-    std::string                     package_name;
-    std::string                     package_base;
-    std::vector<std::string>        plan_package_names;
-    std::vector<std::size_t>        affected_update_plan_indices;
-    std::vector<RootTargetIdentity> affected_roots;
-};
-
 void expect(bool condition, const std::string& diagnostic) {
     if(!condition) throw std::runtime_error(diagnostic);
+}
+
+AppConfig runner_config() {
+    AppConfig config;
+    config.no_edit = true;
+    config.no_diff = true;
+    config.no_confirm = true;
+    config.rebuild = true;
+    config.clean_build = true;
+    config.rm_deps = false;
+    config.editor = "runner-test-editor";
+    config.log_file = "/runner-test.log";
+    return config;
+}
+
+RequiredPackageArtifactTarget required_target(
+        const std::string& package_base,
+        const std::string& package_name,
+        DesiredInstallReason desired_reason) {
+    return RequiredPackageArtifactTarget{
+            package_base, package_name, desired_reason};
+}
+
+PackageBaseSourceBuildSelectedResult selected_child(
+        const std::string& package_name,
+        const std::string& full_version,
+        DesiredInstallReason desired_reason,
+        ArtifactInstallExecutionOutcome outcome) {
+    return PackageBaseSourceBuildSelectedResult{
+            ArtifactPackageIdentity{package_name, full_version},
+            desired_reason,
+            outcome};
+}
+
+PackageBaseArtifactInstallTransactionAttempt transaction_attempt(
+        const std::string& package_name,
+        const std::string& full_version,
+        DesiredInstallReason desired_reason) {
+    return PackageBaseArtifactInstallTransactionAttempt{
+            ArtifactPackageIdentity{package_name, full_version},
+            desired_reason};
 }
 
 AurUpdatePlanEntry update_entry(
@@ -82,12 +113,13 @@ AurUpdateExecutionTarget executable_target(
         std::size_t update_plan_index,
         std::size_t root_index,
         const std::string& package_name,
-        DesiredInstallReason desired_reason) {
+        DesiredInstallReason desired_reason,
+        const std::string& package_base) {
     AurUpdateExecutionTarget target;
     target.update_plan_index = update_plan_index;
     target.build_plan_root_index = root_index;
     target.update = update_entry(
-            package_name, desired_reason, package_name);
+            package_name, desired_reason, package_base);
     target.status = AurUpdateExecutionTargetStatus::Executable;
     target.desired_install_reason = desired_reason;
     return target;
@@ -118,9 +150,29 @@ AurUpdateExecutionTarget skipped_target(
     return target;
 }
 
-AurUpdateExecutionPreflight three_item_single_root_preflight() {
-    const RootTargetIdentity root{0, "root-package"};
+AurUpdateExecutionPreflight single_root_preflight(
+        const std::string& package_name,
+        DesiredInstallReason desired_reason,
+        const std::string& package_base) {
+    const RootTargetIdentity root{0, package_name};
+    BuildPlan plan;
+    plan.root_targets.push_back(root);
+    plan.package_targets.push_back(PlannedPackageTarget{
+            package_name,
+            package_base,
+            {PackageRole::Root},
+            {root}});
+    plan.order.push_back(BuildPlanEntry{package_base, {package_name}});
 
+    AurUpdateExecutionPreflight preflight;
+    preflight.targets.push_back(executable_target(
+            0, 0, package_name, desired_reason, package_base));
+    preflight.build_plan = std::move(plan);
+    return preflight;
+}
+
+AurUpdateExecutionPreflight three_singular_work_item_preflight() {
+    const RootTargetIdentity root{0, "runner-root"};
     BuildPlan plan;
     plan.root_targets.push_back(root);
     plan.package_targets = {
@@ -135,8 +187,8 @@ AurUpdateExecutionPreflight three_item_single_root_preflight() {
                     {PackageRole::RuntimeDependency},
                     {root}},
             PlannedPackageTarget{
-                    "root-package",
-                    "root-package",
+                    "runner-root",
+                    "runner-root",
                     {PackageRole::Root},
                     {root}},
     };
@@ -145,194 +197,139 @@ AurUpdateExecutionPreflight three_item_single_root_preflight() {
                     "first-dependency", {"first-dependency"}},
             BuildPlanEntry{
                     "second-dependency", {"second-dependency"}},
-            BuildPlanEntry{"root-package", {"root-package"}},
+            BuildPlanEntry{"runner-root", {"runner-root"}},
     };
 
     AurUpdateExecutionPreflight preflight;
     preflight.targets.push_back(executable_target(
-            0, 0, "root-package", DesiredInstallReason::Explicit));
+            0, 0, "runner-root", DesiredInstallReason::Explicit,
+            "runner-root"));
     preflight.build_plan = std::move(plan);
     return preflight;
 }
 
-AurUpdateExecutionPreflight ordered_multi_root_preflight() {
-    const RootTargetIdentity root_a{0, "root-a"};
-    const RootTargetIdentity root_b{1, "root-b"};
+AurUpdateExecutionPreflight same_package_base_multiple_preflight() {
+    const RootTargetIdentity dependency_installed_root{0, "split-runtime"};
+    const RootTargetIdentity explicit_root{1, "split-explicit"};
 
     BuildPlan plan;
-    plan.root_targets = {root_a, root_b};
+    plan.root_targets = {dependency_installed_root, explicit_root};
     plan.package_targets = {
             PlannedPackageTarget{
-                    "private-dependency",
-                    "private-dependency",
-                    {PackageRole::BuildDependency},
-                    {root_a}},
-            PlannedPackageTarget{
-                    "shared-dependency",
-                    "shared-dependency",
-                    {PackageRole::RuntimeDependency},
-                    {root_a, root_b}},
-            PlannedPackageTarget{
-                    "root-b",
-                    "root-b",
+                    "split-runtime",
+                    "split-suite",
                     {PackageRole::Root, PackageRole::RuntimeDependency},
-                    {root_a, root_b}},
+                    {dependency_installed_root, explicit_root}},
             PlannedPackageTarget{
-                    "root-a",
-                    "root-a",
+                    "split-explicit",
+                    "split-suite",
                     {PackageRole::Root},
-                    {root_a}},
+                    {explicit_root}},
+    };
+    plan.order.push_back(BuildPlanEntry{
+            "split-suite", {"split-runtime", "split-explicit"}});
+
+    AurUpdateExecutionPreflight preflight;
+    preflight.targets = {
+            executable_target(
+                    0, 0, "split-runtime",
+                    DesiredInstallReason::Dependency, "split-suite"),
+            skipped_target(1, "skipped-between-split-roots"),
+            executable_target(
+                    2, 1, "split-explicit",
+                    DesiredInstallReason::Explicit, "split-suite"),
+    };
+    preflight.build_plan = std::move(plan);
+    return preflight;
+}
+
+AurUpdateExecutionPreflight multiple_then_tail_preflight() {
+    const RootTargetIdentity dependency_installed_root{0, "split-runtime"};
+    const RootTargetIdentity explicit_root{1, "split-explicit"};
+    const RootTargetIdentity tail_root{2, "tail-root"};
+
+    BuildPlan plan;
+    plan.root_targets = {
+            dependency_installed_root, explicit_root, tail_root};
+    plan.package_targets = {
+            PlannedPackageTarget{
+                    "split-runtime",
+                    "split-suite",
+                    {PackageRole::Root, PackageRole::RuntimeDependency},
+                    {dependency_installed_root, explicit_root}},
+            PlannedPackageTarget{
+                    "split-explicit",
+                    "split-suite",
+                    {PackageRole::Root},
+                    {explicit_root}},
+            PlannedPackageTarget{
+                    "tail-root",
+                    "tail-root",
+                    {PackageRole::Root},
+                    {tail_root}},
     };
     plan.order = {
             BuildPlanEntry{
-                    "private-dependency", {"private-dependency"}},
-            BuildPlanEntry{
-                    "shared-dependency", {"shared-dependency"}},
-            BuildPlanEntry{"root-b", {"root-b"}},
-            BuildPlanEntry{"root-a", {"root-a"}},
+                    "split-suite", {"split-runtime", "split-explicit"}},
+            BuildPlanEntry{"tail-root", {"tail-root"}},
     };
 
     AurUpdateExecutionPreflight preflight;
     preflight.targets = {
             executable_target(
-                    0, 0, "root-a", DesiredInstallReason::Explicit),
-            skipped_target(1, "skipped-root"),
+                    0, 0, "split-runtime",
+                    DesiredInstallReason::Dependency, "split-suite"),
             executable_target(
-                    2, 1, "root-b", DesiredInstallReason::Dependency),
+                    1, 1, "split-explicit",
+                    DesiredInstallReason::Explicit, "split-suite"),
+            executable_target(
+                    2, 2, "tail-root",
+                    DesiredInstallReason::Explicit, "tail-root"),
     };
     preflight.build_plan = std::move(plan);
     return preflight;
 }
 
-AurUpdateBuildUnitSelection build_unit_selection_with_external(
-        const AurUpdateExecutionPreflight& preflight,
-        std::size_t external_order_index) {
-    const BuildPlan& plan = preflight.build_plan.value();
-    AurUpdateBuildUnitSelection selection;
-    selection.entries.reserve(plan.order.size());
-    std::size_t selected_execution_index = 0;
-    for(std::size_t order_index = 0; order_index < plan.order.size();
-        ++order_index) {
-        const BuildPlanEntry& entry = plan.order[order_index];
-        if(order_index == external_order_index) {
-            selection.entries.push_back(AurUpdateBuildUnitSelectionEntry{
-                    order_index,
-                    entry.package_base,
-                    entry.package_names,
-                    AurUpdateBuildUnitSelectionStatus::
-                            ExternallySatisfiedByExplicitSourcePackageBase,
-                    std::nullopt,
-                    AurUpdateExternalSatisfactionAttribution{
-                            {3},
-                            {"source://runner-external"},
-                            std::nullopt,
-                            entry.package_base}});
-            continue;
-        }
-        selection.entries.push_back(AurUpdateBuildUnitSelectionEntry{
-                order_index,
-                entry.package_base,
-                entry.package_names,
-                AurUpdateBuildUnitSelectionStatus::SelectedForAurExecution,
-                selected_execution_index,
-                std::nullopt});
-        ++selected_execution_index;
-    }
-    return selection;
-}
-
-std::vector<ExpectedWorkItem> single_root_expectations() {
-    const RootTargetIdentity root{0, "root-package"};
-    return {
-            ExpectedWorkItem{
-                    0,
-                    "first-dependency",
-                    "first-dependency",
-                    {"first-dependency"},
-                    {0},
-                    {root}},
-            ExpectedWorkItem{
-                    1,
-                    "second-dependency",
-                    "second-dependency",
-                    {"second-dependency"},
-                    {0},
-                    {root}},
-            ExpectedWorkItem{
-                    2,
-                    "root-package",
-                    "root-package",
-                    {"root-package"},
-                    {0},
-                    {root}},
-    };
-}
-
-std::vector<ExpectedWorkItem> multi_root_expectations() {
-    const RootTargetIdentity root_a{0, "root-a"};
-    const RootTargetIdentity root_b{1, "root-b"};
-    return {
-            ExpectedWorkItem{
-                    0,
-                    "private-dependency",
-                    "private-dependency",
-                    {"private-dependency"},
-                    {0},
-                    {root_a}},
-            ExpectedWorkItem{
-                    1,
-                    "shared-dependency",
-                    "shared-dependency",
-                    {"shared-dependency"},
-                    {0, 2},
-                    {root_a, root_b}},
-            ExpectedWorkItem{
-                    2,
-                    "root-b",
-                    "root-b",
-                    {"root-b"},
-                    {0, 2},
-                    {root_a, root_b}},
-            ExpectedWorkItem{
-                    3,
-                    "root-a",
-                    "root-a",
-                    {"root-a"},
-                    {0},
-                    {root_a}},
-    };
-}
-
 AurUpdateSourceBuildPreparation prepare_fixture(
         AurUpdateExecutionPreflight preflight,
+        bool needed,
         const AppConfig& config,
-        PacmanDatabasePaths database_paths,
-        bool needed = false) {
+        const PacmanDatabasePaths& database_paths) {
     preparation_stub::reset();
-    preparation_stub::set_database_paths(std::move(database_paths));
-
+    preparation_stub::set_database_paths(database_paths);
     AurUpdateSourceBuildPreparation preparation =
             prepare_aur_update_source_build_invocation(
                     preflight, needed, config);
-    expect(preparation.is_prepared(), "Runner fixture was not prepared");
-    expect(preparation.issues.empty(), "Runner fixture retained preparation issues");
+    expect(
+            preparation.is_prepared(),
+            preparation.issues.empty()
+                    ? "Runner fixture was not prepared"
+                    : "Runner fixture was not prepared: " +
+                              preparation.issues.front().diagnostic);
+    expect(preparation.issues.empty(), "Runner fixture retained issues");
     expect(
             preparation.invocation.has_value(),
-            "Runner fixture has no correlated invocation");
-
-    const PreparedAurUpdateSourceBuildInvocation& invocation =
-            *preparation.invocation;
-    expect(
-            !invocation.production_invocation_for_test().work_items.empty(),
-            "Runner fixture has no production work items");
-    expect(
-            invocation.production_invocation_for_test().work_items.size() ==
-                    invocation.work_item_attributions().size(),
-            "Runner fixture correlation count differs");
+            "Runner fixture lost its invocation");
     expect(
             preparation_stub::database_call_count() == 1,
-            "Runner fixture did not resolve its database snapshot exactly once");
+            "Runner fixture did not resolve exactly one DB snapshot");
     return preparation;
+}
+
+execution_stub::ExpectedExecution expected_execution(
+        std::size_t call_index,
+        const std::string& package_base,
+        std::vector<RequiredPackageArtifactTarget> ordered_required_targets,
+        bool needed,
+        const PacmanDatabasePaths& database_paths,
+        const AppConfig& config) {
+    return execution_stub::ExpectedExecution{
+            call_index,
+            package_base,
+            std::move(ordered_required_targets),
+            needed,
+            database_paths,
+            config};
 }
 
 AurUpdateSourceBuildExecutionResult execute_without_escape(
@@ -348,662 +345,1158 @@ AurUpdateSourceBuildExecutionResult execute_without_escape(
     }
 }
 
-void expect_result_identity(
-        const AurUpdateWorkItemExecutionResult& actual,
-        const ExpectedWorkItem& expected,
-        const std::string& context) {
-    expect(
-            actual.work_item_index == expected.index,
-            context + ": work item index differs");
-    expect(
-            actual.build_plan_order_index == expected.index,
-            context + ": BuildPlan order index differs");
-    expect(
-            actual.package_name == expected.package_name,
-            context + ": package name differs");
-    expect(
-            actual.package_base == expected.package_base,
-            context + ": PackageBase differs");
-    expect(
-            actual.plan_package_names == expected.plan_package_names,
-            context + ": plan package names differ");
-    expect(
-            actual.affected_update_plan_indices ==
-                    expected.affected_update_plan_indices,
-            context + ": affected update-plan indices differ");
-    expect(
-            actual.affected_roots == expected.affected_roots,
-            context + ": affected roots differ");
+bool same_identity(
+        const ArtifactPackageIdentity& actual,
+        const ArtifactPackageIdentity& expected) {
+    return actual.package_name == expected.package_name &&
+           actual.full_version == expected.full_version;
 }
 
-void expect_all_result_identities(
-        const AurUpdateSourceBuildExecutionResult& result,
-        const std::vector<ExpectedWorkItem>& expected,
+void expect_child(
+        const AurUpdateChildExecutionResult& child,
+        std::size_t work_item_index,
+        std::size_t build_plan_order_index,
+        std::size_t required_child_index,
+        const std::string& package_base,
+        const std::string& required_package_name,
+        DesiredInstallReason desired_reason,
+        const std::vector<std::size_t>& affected_update_plan_indices,
+        const std::vector<RootTargetIdentity>& affected_roots,
+        const std::vector<PackageRole>& roles,
+        AurUpdateChildExecutionStatus status,
+        const std::optional<ArtifactPackageIdentity>& selected_artifact,
         const std::string& context) {
+    expect(child.work_item_index == work_item_index,
+           context + ": work-item index differs");
+    expect(child.build_plan_order_index == build_plan_order_index,
+           context + ": BuildPlan order index differs");
+    expect(child.required_child_index == required_child_index,
+           context + ": required-child index differs");
+    expect(child.package_base == package_base,
+           context + ": PackageBase differs");
+    expect(child.required_package_name == required_package_name,
+           context + ": required package name differs");
+    expect(child.desired_install_reason == desired_reason,
+           context + ": desired install reason differs");
+    expect(child.affected_update_plan_indices == affected_update_plan_indices,
+           context + ": update target attribution differs");
+    expect(child.affected_roots == affected_roots,
+           context + ": root attribution differs");
+    expect(child.roles == roles, context + ": roles differ");
+    expect(child.status == status, context + ": status differs");
+    expect(child.selected_artifact.has_value() ==
+                   selected_artifact.has_value(),
+           context + ": selected artifact presence differs");
+    if(selected_artifact.has_value()) {
+        expect(
+                same_identity(*child.selected_artifact, *selected_artifact),
+                context + ": selected artifact identity differs");
+    }
+}
+
+void expect_no_fabricated_child_success(
+        const AurUpdateWorkItemExecutionResult& work_item,
+        const std::string& context) {
+    for(const auto& child : work_item.child_results) {
+        expect(
+                child.status == AurUpdateChildExecutionStatus::NotAttempted,
+                context + ": failure fabricated a completed child outcome");
+        expect(
+                !child.selected_artifact.has_value(),
+                context + ": failure fabricated a selected artifact");
+    }
     expect(
-            result.work_item_results.size() == expected.size(),
-            context + ": result count differs");
+            work_item.unselected_artifacts.empty(),
+            context + ": failure retained unselected artifacts as success");
+}
+
+void expect_events(
+        const std::vector<execution_stub::EventKind>& expected,
+        const std::string& context) {
+    const auto& events = execution_stub::event_history();
+    expect(events.size() == expected.size(),
+           context + ": event count differs");
     for(std::size_t index = 0; index < expected.size(); ++index) {
-        expect_result_identity(
-                result.work_item_results[index],
-                expected[index],
-                context + " item " + std::to_string(index));
+        expect(events[index].kind == expected[index],
+               context + ": event order differs at " +
+                       std::to_string(index));
     }
 }
 
-void expect_entry_state(
-        const AurUpdateWorkItemExecutionResult& result,
-        AurUpdateWorkItemExecutionStatus status,
-        AurUpdateWorkItemFailureKind failure_kind,
-        const std::optional<std::string>& diagnostic,
+template<typename Detail>
+const Detail& require_failure_detail(
+        const AurUpdateWorkItemExecutionResult& work_item,
         const std::string& context) {
-    expect(result.status == status, context + ": status differs");
-    expect(
-            result.failure_kind == failure_kind,
-            context + ": failure kind differs");
-    expect(
-            result.diagnostic == diagnostic,
-            context + ": diagnostic differs");
+    const Detail* detail = std::get_if<Detail>(&work_item.failure_detail);
+    expect(detail != nullptr, context + ": failure detail type differs");
+    return *detail;
 }
 
-void expect_stopped_result_entries(
-        const AurUpdateSourceBuildExecutionResult& result,
-        std::size_t stopped_index,
-        AurUpdateWorkItemExecutionStatus stopped_status,
-        AurUpdateWorkItemFailureKind stopped_failure_kind,
-        const std::string& stopped_diagnostic,
-        const std::string& context) {
-    for(std::size_t index = 0;
-        index < result.work_item_results.size(); ++index) {
-        if(index < stopped_index) {
-            expect_entry_state(
-                    result.work_item_results[index],
-                    AurUpdateWorkItemExecutionStatus::Updated,
-                    AurUpdateWorkItemFailureKind::None,
-                    std::nullopt,
-                    context + " updated item " + std::to_string(index));
-        } else if(index == stopped_index) {
-            expect_entry_state(
-                    result.work_item_results[index],
-                    stopped_status,
-                    stopped_failure_kind,
-                    stopped_diagnostic,
-                    context + " stopped item " + std::to_string(index));
-        } else {
-            expect_entry_state(
-                    result.work_item_results[index],
-                    AurUpdateWorkItemExecutionStatus::NotAttempted,
-                    AurUpdateWorkItemFailureKind::PriorWorkItemStopped,
-                    std::nullopt,
-                    context + " not-attempted item " +
-                            std::to_string(index));
-        }
-    }
-}
-
-void expect_execution_calls(
-        const std::vector<ExpectedWorkItem>& expected,
-        std::size_t expected_call_count,
-        const PacmanDatabasePaths& expected_database_paths,
-        const std::string& context) {
-    const std::vector<execution_stub::ExecutionCall>& calls =
-            execution_stub::call_history();
-    expect(
-            calls.size() == expected_call_count,
-            context + ": executor call count differs");
-    for(std::size_t index = 0; index < calls.size(); ++index) {
-        const execution_stub::ExecutionCall& call = calls[index];
-        expect(call.call_index == index, context + ": call index differs");
-        expect(
-                call.package_name == expected[index].package_name &&
-                        call.package_base == expected[index].package_base,
-                context + ": executor identity differs at " +
-                        std::to_string(index));
-        expect(
-                call.plan_package_names == expected[index].plan_package_names,
-                context + ": executor plan package names differ at " +
-                        std::to_string(index));
-        expect(
-                call.database_paths.root_dir ==
-                                expected_database_paths.root_dir &&
-                        call.database_paths.db_path ==
-                                expected_database_paths.db_path,
-                context + ": executor database snapshot differs at " +
-                        std::to_string(index));
-    }
-    execution_stub::require_script_consumed();
-}
-
-void enqueue_successes(
-        std::size_t count,
-        ArtifactInstallExecutionOutcome outcome =
-                ArtifactInstallExecutionOutcome::Installed) {
-    for(std::size_t index = 0; index < count; ++index) {
-        execution_stub::enqueue_success(outcome);
-    }
-}
-
-void test_all_success() {
-    const AppConfig config;
-    const PacmanDatabasePaths expected_database_paths{
-            "/runner/root", "/runner/database"};
-    const std::vector<ExpectedWorkItem> expected =
-            single_root_expectations();
-    AurUpdateSourceBuildPreparation preparation = prepare_fixture(
-            three_item_single_root_preflight(),
-            config,
-            expected_database_paths);
-
-    execution_stub::reset();
-    enqueue_successes(expected.size());
-    AurUpdateSourceBuildExecutionResult result = execute_without_escape(
-            std::move(*preparation.invocation),
-            config,
-            "all-success execution");
-
-    expect_all_result_identities(result, expected, "all-success result");
-    for(std::size_t index = 0;
-        index < result.work_item_results.size(); ++index) {
-        expect_entry_state(
-                result.work_item_results[index],
-                AurUpdateWorkItemExecutionStatus::Updated,
-                AurUpdateWorkItemFailureKind::None,
-                std::nullopt,
-                "all-success item " + std::to_string(index));
-    }
-    expect(
-            result.status == AurUpdateInvocationExecutionStatus::Completed,
-            "All-success invocation did not complete");
-    expect(result.is_success(), "All-success helper reported failure");
-    expect(
-            result.changed_package_state(),
-            "All-success changed-package-state helper lost the update");
-    expect(
-            !result.has_not_attempted_items(),
-            "All-success helper reported unattempted work");
-    expect(
-            !result.has_cleanup_failure(),
-            "All-success helper reported cleanup failure");
-    expect(
-            !result.stopped_work_item_index().has_value(),
-            "All-success helper reported a stop index");
-    expect_execution_calls(
-            expected,
-            expected.size(),
-            expected_database_paths,
-            "all-success calls");
-    expect(
-            preparation_stub::database_call_count() == 1,
-            "All-success runner re-resolved Pacman database paths");
-    expect(
-            preparation_stub::strict_preference_read_history() ==
-                    std::vector<std::string>{
-                            "first-dependency",
-                            "second-dependency",
-                            "root-package"},
-            "All-success runner re-read source preferences");
-}
-
-void test_no_change_and_mixed_success() {
-    const AppConfig config;
-    const std::vector<ExpectedWorkItem> expected =
-            single_root_expectations();
-
-    const PacmanDatabasePaths no_change_database_paths{
-            "/no-change/root", "/no-change/database"};
-    AurUpdateSourceBuildPreparation no_change_preparation = prepare_fixture(
-            three_item_single_root_preflight(),
-            config,
-            no_change_database_paths,
-            true);
-    execution_stub::reset();
-    enqueue_successes(
-            expected.size(),
-            ArtifactInstallExecutionOutcome::SkippedAsNeeded);
-    AurUpdateSourceBuildExecutionResult no_change_result =
-            execute_without_escape(
-                    std::move(*no_change_preparation.invocation),
-                    config,
-                    "all-no-change execution");
-
-    expect_all_result_identities(
-            no_change_result, expected, "all-no-change result");
-    for(std::size_t index = 0;
-        index < no_change_result.work_item_results.size(); ++index) {
-        expect_entry_state(
-                no_change_result.work_item_results[index],
-                AurUpdateWorkItemExecutionStatus::NoChange,
-                AurUpdateWorkItemFailureKind::None,
-                std::nullopt,
-                "all-no-change item " + std::to_string(index));
-    }
-    expect(
-            no_change_result.status ==
-                            AurUpdateInvocationExecutionStatus::Completed &&
-                    no_change_result.is_success(),
-            "All-no-change invocation did not complete successfully");
-    expect(
-            !no_change_result.changed_package_state(),
-            "All-no-change changed-package-state helper reported "
-            "a package state change");
-    expect(
-            !no_change_result.has_not_attempted_items() &&
-                    !no_change_result.has_cleanup_failure() &&
-                    !no_change_result.stopped_work_item_index().has_value(),
-            "All-no-change helpers reported a stopped execution");
-    expect_execution_calls(
-            expected,
-            expected.size(),
-            no_change_database_paths,
-            "all-no-change calls");
-
-    const PacmanDatabasePaths mixed_database_paths{
-            "/mixed/root", "/mixed/database"};
-    AurUpdateSourceBuildPreparation mixed_preparation = prepare_fixture(
-            three_item_single_root_preflight(),
-            config,
-            mixed_database_paths,
-            true);
-    execution_stub::reset();
-    execution_stub::enqueue_success(
-            ArtifactInstallExecutionOutcome::Installed);
-    execution_stub::enqueue_success(
-            ArtifactInstallExecutionOutcome::SkippedAsNeeded);
-    execution_stub::enqueue_success(
-            ArtifactInstallExecutionOutcome::SkippedAsNeeded);
-    AurUpdateSourceBuildExecutionResult mixed_result = execute_without_escape(
-            std::move(*mixed_preparation.invocation),
-            config,
-            "updated-then-no-change execution");
-
-    expect_all_result_identities(
-            mixed_result, expected, "updated-then-no-change result");
-    expect_entry_state(
-            mixed_result.work_item_results[0],
-            AurUpdateWorkItemExecutionStatus::Updated,
-            AurUpdateWorkItemFailureKind::None,
-            std::nullopt,
-            "updated-then-no-change first item");
-    for(std::size_t index = 1;
-        index < mixed_result.work_item_results.size(); ++index) {
-        expect_entry_state(
-                mixed_result.work_item_results[index],
-                AurUpdateWorkItemExecutionStatus::NoChange,
-                AurUpdateWorkItemFailureKind::None,
-                std::nullopt,
-                "updated-then-no-change item " + std::to_string(index));
-    }
-    expect(
-            mixed_result.status ==
-                            AurUpdateInvocationExecutionStatus::Completed &&
-                    mixed_result.is_success(),
-            "Updated/no-change invocation did not complete successfully");
-    expect(
-            mixed_result.changed_package_state(),
-            "Updated/no-change changed-package-state helper lost the earlier update");
-    expect_execution_calls(
-            expected,
-            expected.size(),
-            mixed_database_paths,
-            "updated-then-no-change calls");
-}
-
-void run_ordinary_failure_case(std::size_t failure_index) {
-    const std::string context =
-            "ordinary failure at " + std::to_string(failure_index);
-    const std::string diagnostic =
-            "scripted ordinary failure " + std::to_string(failure_index);
-    const AppConfig config;
-    const PacmanDatabasePaths expected_database_paths{
+void test_ordinary_size_one_uses_set_owner_strictly() {
+    const AppConfig config = runner_config();
+    const PacmanDatabasePaths database_paths{
             "/ordinary/root", "/ordinary/database"};
-    const std::vector<ExpectedWorkItem> expected =
-            single_root_expectations();
     AurUpdateSourceBuildPreparation preparation = prepare_fixture(
-            three_item_single_root_preflight(),
+            single_root_preflight(
+                    "ordinary-package",
+                    DesiredInstallReason::Explicit,
+                    "ordinary-package"),
+            false,
             config,
-            expected_database_paths);
+            database_paths);
 
     execution_stub::reset();
-    enqueue_successes(failure_index);
-    execution_stub::enqueue_ordinary_failure(diagnostic);
-    AurUpdateSourceBuildExecutionResult result = execute_without_escape(
-            std::move(*preparation.invocation), config, context);
+    execution_stub::enqueue_success(
+            expected_execution(
+                    0,
+                    "ordinary-package",
+                    {required_target(
+                            "ordinary-package",
+                            "ordinary-package",
+                            DesiredInstallReason::Explicit)},
+                    false,
+                    database_paths,
+                    config),
+            "ordinary-package",
+            {selected_child(
+                    "ordinary-package",
+                    "2.0-1",
+                    DesiredInstallReason::Explicit,
+                    ArtifactInstallExecutionOutcome::Installed)});
 
-    expect_all_result_identities(result, expected, context);
-    expect_stopped_result_entries(
-            result,
-            failure_index,
-            AurUpdateWorkItemExecutionStatus::Failed,
-            AurUpdateWorkItemFailureKind::BuildOrInstallFailed,
-            diagnostic,
-            context);
-    expect(
-            result.status == AurUpdateInvocationExecutionStatus::
-                    StoppedOnWorkItemFailure,
-            context + ": overall status differs");
-    expect(!result.is_success(), context + ": helper reported success");
-    expect(
-            result.changed_package_state() == (failure_index > 0),
-            context + ": changed-package-state helper differs");
-    expect(
-            result.has_not_attempted_items(),
-            context + ": helper lost unattempted work");
-    expect(
-            !result.has_cleanup_failure(),
-            context + ": helper reported cleanup failure");
-    expect(
-            result.stopped_work_item_index() == failure_index,
-            context + ": stop index differs");
-    expect_execution_calls(
-            expected,
-            failure_index + 1,
-            expected_database_paths,
-            context + " calls");
-    expect(
-            preparation_stub::database_call_count() == 1,
-            context + ": runner re-resolved Pacman database paths");
+    const AurUpdateSourceBuildExecutionResult result =
+            execute_without_escape(
+                    std::move(*preparation.invocation),
+                    config,
+                    "ordinary size-one");
+    execution_stub::require_script_consumed();
+
+    expect(result.status == AurUpdateInvocationExecutionStatus::Completed,
+           "Ordinary size-one invocation did not complete");
+    expect(result.is_success() && result.changed_package_state(),
+           "Ordinary size-one helpers differ");
+    expect(result.work_item_results.size() == 1,
+           "Ordinary size-one result count differs");
+    const auto& work_item = result.work_item_results.front();
+    expect(work_item.package_name == "ordinary-package" &&
+                   work_item.package_base == "ordinary-package" &&
+                   work_item.plan_package_names ==
+                           std::vector<std::string>{"ordinary-package"},
+           "Ordinary size-one compatibility identity differs");
+    expect(work_item.status == AurUpdateWorkItemExecutionStatus::Updated &&
+                   work_item.failure_kind ==
+                           AurUpdateWorkItemFailureKind::None,
+           "Ordinary size-one aggregate state differs");
+    expect(work_item.child_results.size() == 1,
+           "Ordinary size-one child count differs");
+    expect_child(
+            work_item.child_results.front(),
+            0,
+            0,
+            0,
+            "ordinary-package",
+            "ordinary-package",
+            DesiredInstallReason::Explicit,
+            {0},
+            {{0, "ordinary-package"}},
+            {PackageRole::Root},
+            AurUpdateChildExecutionStatus::Installed,
+            ArtifactPackageIdentity{"ordinary-package", "2.0-1"},
+            "ordinary size-one child");
+    expect_events(
+            {execution_stub::EventKind::Checkout,
+             execution_stub::EventKind::Build,
+             execution_stub::EventKind::Install,
+             execution_stub::EventKind::Cleanup},
+            "ordinary size-one");
 }
 
-void test_ordinary_failure_first_and_middle() {
-    run_ordinary_failure_case(0);
-    run_ordinary_failure_case(1);
-}
-
-void run_cleanup_failure_case(std::size_t failure_index) {
-    const std::string context =
-            "cleanup failure at " + std::to_string(failure_index);
-    const std::string diagnostic =
-            "scripted cleanup failure " + std::to_string(failure_index);
-    const AppConfig config;
-    const PacmanDatabasePaths expected_database_paths{
-            "/cleanup/root", "/cleanup/database"};
-    const std::vector<ExpectedWorkItem> expected =
-            single_root_expectations();
+void test_multiple_work_items_preserve_fifo_call_order_and_one_db_snapshot() {
+    const AppConfig config = runner_config();
+    const PacmanDatabasePaths database_paths{
+            "/ordered/root", "/ordered/database"};
     AurUpdateSourceBuildPreparation preparation = prepare_fixture(
-            three_item_single_root_preflight(),
+            three_singular_work_item_preflight(),
+            false,
             config,
-            expected_database_paths,
-            true);
+            database_paths);
 
     execution_stub::reset();
-    enqueue_successes(failure_index);
-    execution_stub::enqueue_cleanup_failure(
-            ArtifactInstallExecutionOutcome::Installed,
-            diagnostic);
-    AurUpdateSourceBuildExecutionResult result = execute_without_escape(
-            std::move(*preparation.invocation), config, context);
-
-    expect_all_result_identities(result, expected, context);
-    expect_stopped_result_entries(
-            result,
-            failure_index,
-            AurUpdateWorkItemExecutionStatus::UpdatedCleanupFailed,
-            AurUpdateWorkItemFailureKind::
-                    CleanupFailedAfterPackageTransaction,
-            diagnostic,
-            context);
-    expect(
-            result.status == AurUpdateInvocationExecutionStatus::
-                    StoppedAfterPackageCleanupFailure,
-            context + ": overall status differs");
-    expect(!result.is_success(), context + ": helper reported success");
-    expect(
-            result.changed_package_state(),
-            context +
-                    ": changed-package-state helper lost the completed installation");
-    expect(
-            result.has_not_attempted_items() ==
-                    (failure_index + 1 < expected.size()),
-            context + ": unattempted helper differs");
-    expect(
-            result.has_cleanup_failure(),
-            context + ": helper lost cleanup failure");
-    expect(
-            result.stopped_work_item_index() == failure_index,
-            context + ": stop index differs");
-    expect_execution_calls(
-            expected,
-            failure_index + 1,
-            expected_database_paths,
-            context + " calls");
-    expect(
-            preparation_stub::database_call_count() == 1,
-            context + ": runner re-resolved Pacman database paths");
-}
-
-void test_cleanup_partial_success_first_middle_and_last() {
-    run_cleanup_failure_case(0);
-    run_cleanup_failure_case(1);
-    run_cleanup_failure_case(2);
-}
-
-void run_no_change_cleanup_failure_case(bool has_prior_update) {
-    const std::size_t failure_index = has_prior_update ? 1 : 0;
-    const std::string context = has_prior_update
-            ? "updated then no-change cleanup failure"
-            : "no-change cleanup failure";
-    const std::string diagnostic = "scripted " + context;
-    const AppConfig config;
-    const PacmanDatabasePaths expected_database_paths{
-            "/no-change-cleanup/root",
-            "/no-change-cleanup/database"};
-    const std::vector<ExpectedWorkItem> expected =
-            single_root_expectations();
-    AurUpdateSourceBuildPreparation preparation = prepare_fixture(
-            three_item_single_root_preflight(),
-            config,
-            expected_database_paths,
-            true);
-
-    execution_stub::reset();
-    if(has_prior_update) {
+    const std::vector<std::pair<std::string, DesiredInstallReason>> expected{
+            {"first-dependency", DesiredInstallReason::Dependency},
+            {"second-dependency", DesiredInstallReason::Dependency},
+            {"runner-root", DesiredInstallReason::Explicit},
+    };
+    for(std::size_t index = 0; index < expected.size(); ++index) {
+        const auto& [package_name, desired_reason] = expected[index];
         execution_stub::enqueue_success(
-                ArtifactInstallExecutionOutcome::Installed);
+                expected_execution(
+                        index,
+                        package_name,
+                        {required_target(
+                                package_name,
+                                package_name,
+                                desired_reason)},
+                        false,
+                        database_paths,
+                        config),
+                package_name,
+                {selected_child(
+                        package_name,
+                        "2.0-1",
+                        desired_reason,
+                        ArtifactInstallExecutionOutcome::Installed)});
     }
-    execution_stub::enqueue_cleanup_failure(
-            ArtifactInstallExecutionOutcome::SkippedAsNeeded,
-            diagnostic);
-    AurUpdateSourceBuildExecutionResult result = execute_without_escape(
-            std::move(*preparation.invocation), config, context);
 
-    expect_all_result_identities(result, expected, context);
-    expect_stopped_result_entries(
-            result,
-            failure_index,
-            AurUpdateWorkItemExecutionStatus::NoChangeCleanupFailed,
-            AurUpdateWorkItemFailureKind::
-                    CleanupFailedAfterPackageTransaction,
-            diagnostic,
-            context);
-    expect(
-            result.status == AurUpdateInvocationExecutionStatus::
-                    StoppedAfterPackageCleanupFailure,
-            context + ": overall status differs");
-    expect(!result.is_success(), context + ": helper reported success");
-    expect(
-            result.changed_package_state() == has_prior_update,
-            context + ": changed-package-state helper differs");
-    expect(
-            result.has_not_attempted_items(),
-            context + ": helper lost the unattempted suffix");
-    expect(
-            result.has_cleanup_failure(),
-            context + ": helper lost cleanup failure");
-    expect(
-            result.stopped_work_item_index() == failure_index,
-            context + ": stop index differs");
-    expect_execution_calls(
-            expected,
-            failure_index + 1,
-            expected_database_paths,
-            context + " calls");
-}
-
-void test_no_change_cleanup_failure_with_and_without_prior_update() {
-    run_no_change_cleanup_failure_case(false);
-    run_no_change_cleanup_failure_case(true);
-}
-
-void test_unknown_exception_is_typed_and_contained() {
-    constexpr std::size_t FAILURE_INDEX = 1;
-    const AppConfig config;
-    const PacmanDatabasePaths expected_database_paths{
-            "/unknown/root", "/unknown/database"};
-    const std::vector<ExpectedWorkItem> expected =
-            single_root_expectations();
-    AurUpdateSourceBuildPreparation preparation = prepare_fixture(
-            three_item_single_root_preflight(),
-            config,
-            expected_database_paths);
-
-    execution_stub::reset();
-    enqueue_successes(FAILURE_INDEX);
-    execution_stub::enqueue_unknown_failure();
-    AurUpdateSourceBuildExecutionResult result = execute_without_escape(
+    const auto result = execute_without_escape(
             std::move(*preparation.invocation),
             config,
-            "unknown exception");
-
-    expect_all_result_identities(result, expected, "unknown exception");
-    expect_stopped_result_entries(
-            result,
-            FAILURE_INDEX,
-            AurUpdateWorkItemExecutionStatus::Failed,
-            AurUpdateWorkItemFailureKind::UnknownException,
-            UNKNOWN_EXCEPTION_DIAGNOSTIC,
-            "unknown exception");
-    expect(
-            result.status == AurUpdateInvocationExecutionStatus::
-                    StoppedOnWorkItemFailure,
-            "Unknown exception overall status differs");
-    expect(!result.is_success(), "Unknown exception helper reported success");
-    expect(
-            result.changed_package_state(),
-            "Unknown exception changed-package-state helper lost the earlier update");
-    expect(
-            result.has_not_attempted_items(),
-            "Unknown exception helper lost unattempted work");
-    expect(
-            !result.has_cleanup_failure(),
-            "Unknown exception helper reported cleanup failure");
-    expect(
-            result.stopped_work_item_index() == FAILURE_INDEX,
-            "Unknown exception stop index differs");
-    expect_execution_calls(
-            expected,
-            FAILURE_INDEX + 1,
-            expected_database_paths,
-            "unknown exception calls");
+            "ordered work items");
+    execution_stub::require_script_consumed();
+    expect(result.is_success() && result.work_item_results.size() == 3,
+           "Ordered work items did not complete");
+    const auto& calls = execution_stub::call_history();
+    expect(calls.size() == 3,
+           "Ordered work-item call count differs");
+    for(std::size_t index = 0; index < calls.size(); ++index) {
+        expect(calls[index].call_index == index &&
+                       calls[index].package_base == expected[index].first &&
+                       calls[index].database_paths.root_dir ==
+                               database_paths.root_dir &&
+                       calls[index].database_paths.db_path ==
+                               database_paths.db_path,
+               "Ordered work-item strict call snapshot differs at " +
+                       std::to_string(index));
+    }
+    expect(execution_stub::event_history().size() == 12,
+           "Ordered work-item lifecycle event count differs");
 }
 
-void test_external_unit_is_absent_from_dense_execution() {
-    const AppConfig config;
-    const PacmanDatabasePaths expected_database_paths{
-            "/filtered/root", "/filtered/database"};
-    AurUpdateExecutionPreflight preflight =
-            three_item_single_root_preflight();
-    const AurUpdateBuildUnitSelection selection =
-            build_unit_selection_with_external(preflight, 1);
-
-    preparation_stub::reset();
-    preparation_stub::set_database_paths(expected_database_paths);
-    AurUpdateSourceBuildPreparation preparation =
-            prepare_aur_update_source_build_invocation(
-                    preflight, selection, false, config);
-    expect(
-            preparation.is_prepared(),
-            "Filtered runner fixture was not prepared");
-    expect(
-            preparation.externally_satisfied_build_units.size() == 1,
-            "Filtered runner fixture lost external satisfaction");
+void test_requested_split_child_size_one_is_no_change() {
+    const AppConfig config = runner_config();
+    const PacmanDatabasePaths database_paths{
+            "/split-one/root", "/split-one/database"};
+    AurUpdateSourceBuildPreparation preparation = prepare_fixture(
+            single_root_preflight(
+                    "split-child",
+                    DesiredInstallReason::Dependency,
+                    "split-suite"),
+            true,
+            config,
+            database_paths);
 
     execution_stub::reset();
-    enqueue_successes(2);
-    const AurUpdateSourceBuildExecutionResult result = execute_without_escape(
-            std::move(*preparation.invocation), config,
-            "filtered execution");
+    execution_stub::enqueue_success(
+            expected_execution(
+                    0,
+                    "split-suite",
+                    {required_target(
+                            "split-suite",
+                            "split-child",
+                            DesiredInstallReason::Dependency)},
+                    true,
+                    database_paths,
+                    config),
+            "split-suite",
+            {selected_child(
+                    "split-child",
+                    "3.2-4",
+                    DesiredInstallReason::Dependency,
+                    ArtifactInstallExecutionOutcome::SkippedAsNeeded)},
+            {ArtifactPackageIdentity{"split-debug", "3.2-4"}});
 
-    expect(
-            result.status == AurUpdateInvocationExecutionStatus::Completed &&
-                    result.work_item_results.size() == 2,
-            "Filtered runner result did not complete densely");
-    expect(
-            result.work_item_results[0].work_item_index == 0 &&
-                    result.work_item_results[0].build_plan_order_index == 0 &&
-                    result.work_item_results[0].package_name ==
-                            "first-dependency" &&
-                    result.work_item_results[1].work_item_index == 1 &&
-                    result.work_item_results[1].build_plan_order_index == 2 &&
-                    result.work_item_results[1].package_name == "root-package",
-            "Filtered runner lost dense-to-original BuildPlan mapping");
+    const AurUpdateSourceBuildExecutionResult result =
+            execute_without_escape(
+                    std::move(*preparation.invocation),
+                    config,
+                    "requested split child size-one");
+    execution_stub::require_script_consumed();
 
-    const std::vector<execution_stub::ExecutionCall>& calls =
-            execution_stub::call_history();
-    expect(
-            calls.size() == 2 &&
-                    calls[0].package_name == "first-dependency" &&
-                    calls[1].package_name == "root-package" &&
-                    std::none_of(
-                            calls.begin(), calls.end(),
-                            [](const execution_stub::ExecutionCall& call) {
-                                return call.package_name ==
-                                        "second-dependency";
-                            }),
-            "Externally satisfied build unit reached the executor");
+    const auto& work_item = result.work_item_results.front();
+    expect(result.status == AurUpdateInvocationExecutionStatus::Completed &&
+                   result.is_success() &&
+                   !result.changed_package_state(),
+           "Requested split child result helpers differ");
+    expect(work_item.package_name == "split-child" &&
+                   work_item.package_base == "split-suite" &&
+                   work_item.status ==
+                           AurUpdateWorkItemExecutionStatus::NoChange,
+           "Requested split child aggregate differs");
+    expect(work_item.unselected_artifacts.size() == 1 &&
+                   same_identity(
+                           work_item.unselected_artifacts.front(),
+                           {"split-debug", "3.2-4"}),
+           "Requested split child lost its unselected sibling");
+    expect_child(
+            work_item.child_results.front(),
+            0,
+            0,
+            0,
+            "split-suite",
+            "split-child",
+            DesiredInstallReason::Dependency,
+            {0},
+            {{0, "split-child"}},
+            {PackageRole::Root},
+            AurUpdateChildExecutionStatus::SkippedAsNeeded,
+            ArtifactPackageIdentity{"split-child", "3.2-4"},
+            "requested split child");
+}
+
+void test_multiple_children_preserve_order_reason_outcome_and_attribution() {
+    const AppConfig config = runner_config();
+    const PacmanDatabasePaths database_paths{
+            "/multiple/root", "/multiple/database"};
+    AurUpdateSourceBuildPreparation preparation = prepare_fixture(
+            same_package_base_multiple_preflight(),
+            true,
+            config,
+            database_paths);
+
+    execution_stub::reset();
+    execution_stub::enqueue_success(
+            expected_execution(
+                    0,
+                    "split-suite",
+                    {required_target(
+                             "split-suite",
+                             "split-runtime",
+                             DesiredInstallReason::Dependency),
+                     required_target(
+                             "split-suite",
+                             "split-explicit",
+                             DesiredInstallReason::Explicit)},
+                    true,
+                    database_paths,
+                    config),
+            "split-suite",
+            {selected_child(
+                     "split-runtime",
+                     "5.1-2",
+                     DesiredInstallReason::Dependency,
+                     ArtifactInstallExecutionOutcome::Installed),
+             selected_child(
+                     "split-explicit",
+                     "5.1-2",
+                     DesiredInstallReason::Explicit,
+                     ArtifactInstallExecutionOutcome::SkippedAsNeeded)},
+            {ArtifactPackageIdentity{"split-debug", "5.1-2"},
+             ArtifactPackageIdentity{"split-docs", "5.1-2"}});
+
+    const AurUpdateSourceBuildExecutionResult result =
+            execute_without_escape(
+                    std::move(*preparation.invocation),
+                    config,
+                    "multiple child success");
+    execution_stub::require_script_consumed();
+
+    expect(result.status == AurUpdateInvocationExecutionStatus::Completed &&
+                   result.is_success() && result.changed_package_state(),
+           "Multiple child invocation helpers differ");
+    const auto& work_item = result.work_item_results.front();
+    expect(work_item.package_name.empty(),
+           "Multiple child result exposed a singular package name");
+    expect(work_item.package_base == "split-suite" &&
+                   work_item.plan_package_names ==
+                           std::vector<std::string>{
+                                   "split-runtime", "split-explicit"} &&
+                   work_item.affected_update_plan_indices ==
+                           std::vector<std::size_t>{0, 2} &&
+                   work_item.affected_roots ==
+                           std::vector<RootTargetIdentity>{
+                                   {0, "split-runtime"},
+                                   {1, "split-explicit"}} &&
+                   work_item.status ==
+                           AurUpdateWorkItemExecutionStatus::Updated,
+           "Multiple child aggregate identity differs");
+    expect(work_item.child_results.size() == 2,
+           "Multiple child result count differs");
+    expect_child(
+            work_item.child_results[0],
+            0,
+            0,
+            0,
+            "split-suite",
+            "split-runtime",
+            DesiredInstallReason::Dependency,
+            {0, 2},
+            {{0, "split-runtime"}, {1, "split-explicit"}},
+            {PackageRole::Root, PackageRole::RuntimeDependency},
+            AurUpdateChildExecutionStatus::Installed,
+            ArtifactPackageIdentity{"split-runtime", "5.1-2"},
+            "multiple dependency child");
+    expect_child(
+            work_item.child_results[1],
+            0,
+            0,
+            1,
+            "split-suite",
+            "split-explicit",
+            DesiredInstallReason::Explicit,
+            {2},
+            {{1, "split-explicit"}},
+            {PackageRole::Root},
+            AurUpdateChildExecutionStatus::SkippedAsNeeded,
+            ArtifactPackageIdentity{"split-explicit", "5.1-2"},
+            "multiple explicit child");
+    expect(work_item.unselected_artifacts.size() == 2 &&
+                   same_identity(
+                           work_item.unselected_artifacts[0],
+                           {"split-debug", "5.1-2"}) &&
+                   same_identity(
+                           work_item.unselected_artifacts[1],
+                           {"split-docs", "5.1-2"}),
+           "Multiple child result lost unselected produced order");
+    const auto& calls = execution_stub::call_history();
+    expect(calls.size() == 1 && calls.front().package_name.empty() &&
+                   calls.front().ordered_required_targets.size() == 2 &&
+                   calls.front().needed && calls.front().config.no_confirm,
+           "Strict set-owner call snapshot differs");
+}
+
+void run_returned_correlation_failure(
+        const std::string& context,
+        const std::string& returned_package_base,
+        std::vector<PackageBaseSourceBuildSelectedResult> selected_children,
+        std::vector<ArtifactPackageIdentity> unselected_artifacts,
+        AurUpdateExecutionCorrelationFailureReason expected_reason) {
+    const AppConfig config = runner_config();
+    const PacmanDatabasePaths database_paths{
+            "/correlation/root", "/correlation/database"};
+    AurUpdateSourceBuildPreparation preparation = prepare_fixture(
+            same_package_base_multiple_preflight(),
+            false,
+            config,
+            database_paths);
+    execution_stub::reset();
+    execution_stub::enqueue_success(
+            expected_execution(
+                    0,
+                    "split-suite",
+                    {required_target(
+                             "split-suite",
+                             "split-runtime",
+                             DesiredInstallReason::Dependency),
+                     required_target(
+                             "split-suite",
+                             "split-explicit",
+                             DesiredInstallReason::Explicit)},
+                    false,
+                    database_paths,
+                    config),
+            returned_package_base,
+            std::move(selected_children),
+            std::move(unselected_artifacts));
+
+    const AurUpdateSourceBuildExecutionResult result =
+            execute_without_escape(
+                    std::move(*preparation.invocation), config, context);
+    execution_stub::require_script_consumed();
+    expect(result.status == AurUpdateInvocationExecutionStatus::
+                                    StoppedOnWorkItemFailure,
+           context + ": invocation status differs");
+    const auto& work_item = result.work_item_results.front();
+    expect(work_item.status == AurUpdateWorkItemExecutionStatus::Failed &&
+                   work_item.failure_kind ==
+                           AurUpdateWorkItemFailureKind::BuildOrInstallFailed,
+           context + ": aggregate failure state differs");
+    const auto& detail =
+            require_failure_detail<AurUpdateExecutionCorrelationFailure>(
+                    work_item, context);
+    expect(detail.reason == expected_reason,
+           context + ": correlation reason differs");
+    expect_no_fabricated_child_success(work_item, context);
+}
+
+void test_returned_result_correlation_failures_are_fail_closed() {
+    const auto valid_children = []() {
+        return std::vector<PackageBaseSourceBuildSelectedResult>{
+                selected_child(
+                        "split-runtime",
+                        "6.0-1",
+                        DesiredInstallReason::Dependency,
+                        ArtifactInstallExecutionOutcome::Installed),
+                selected_child(
+                        "split-explicit",
+                        "6.0-1",
+                        DesiredInstallReason::Explicit,
+                        ArtifactInstallExecutionOutcome::SkippedAsNeeded)};
+    };
+
+    run_returned_correlation_failure(
+            "returned PackageBase mismatch",
+            "other-suite",
+            valid_children(),
+            {},
+            AurUpdateExecutionCorrelationFailureReason::PackageBaseMismatch);
+
+    auto reversed = valid_children();
+    std::swap(reversed[0], reversed[1]);
+    run_returned_correlation_failure(
+            "returned selected order mismatch",
+            "split-suite",
+            std::move(reversed),
+            {},
+            AurUpdateExecutionCorrelationFailureReason::
+                    SelectedArtifactIdentityMismatch);
+
+    auto wrong_reason = valid_children();
+    wrong_reason[0].desired_reason = DesiredInstallReason::Explicit;
+    run_returned_correlation_failure(
+            "returned reason mismatch",
+            "split-suite",
+            std::move(wrong_reason),
+            {},
+            AurUpdateExecutionCorrelationFailureReason::
+                    DesiredInstallReasonMismatch);
+
+    auto empty_version = valid_children();
+    empty_version[1].identity.full_version.clear();
+    run_returned_correlation_failure(
+            "returned empty version",
+            "split-suite",
+            std::move(empty_version),
+            {},
+            AurUpdateExecutionCorrelationFailureReason::
+                    EmptySelectedArtifactVersion);
+
+    auto missing = valid_children();
+    missing.pop_back();
+    run_returned_correlation_failure(
+            "returned missing selected child",
+            "split-suite",
+            std::move(missing),
+            {},
+            AurUpdateExecutionCorrelationFailureReason::MissingSelectedChild);
+
+    auto extra = valid_children();
+    extra.push_back(selected_child(
+            "split-extra",
+            "6.0-1",
+            DesiredInstallReason::Dependency,
+            ArtifactInstallExecutionOutcome::Installed));
+    run_returned_correlation_failure(
+            "returned extra selected child",
+            "split-suite",
+            std::move(extra),
+            {},
+            AurUpdateExecutionCorrelationFailureReason::ExtraSelectedChild);
+
+    auto duplicate = valid_children();
+    duplicate[1].identity.package_name = "split-runtime";
+    run_returned_correlation_failure(
+            "returned duplicate selected child",
+            "split-suite",
+            std::move(duplicate),
+            {},
+            AurUpdateExecutionCorrelationFailureReason::
+                    DuplicateSelectedChild);
+
+    auto unknown_outcome = valid_children();
+    unknown_outcome[0].outcome =
+            static_cast<ArtifactInstallExecutionOutcome>(-1);
+    run_returned_correlation_failure(
+            "returned unknown child outcome",
+            "split-suite",
+            std::move(unknown_outcome),
+            {},
+            AurUpdateExecutionCorrelationFailureReason::UnknownChildOutcome);
+
+    run_returned_correlation_failure(
+            "returned selected-unselected overlap",
+            "split-suite",
+            valid_children(),
+            {ArtifactPackageIdentity{"split-runtime", "6.0-1"}},
+            AurUpdateExecutionCorrelationFailureReason::
+                    SelectedAndUnselectedIdentityOverlap);
+
+    run_returned_correlation_failure(
+            "returned invalid unselected identity",
+            "split-suite",
+            valid_children(),
+            {ArtifactPackageIdentity{"split-debug", ""}},
+            AurUpdateExecutionCorrelationFailureReason::
+                    InvalidUnselectedArtifactIdentity);
+
+    run_returned_correlation_failure(
+            "returned duplicate unselected identity",
+            "split-suite",
+            valid_children(),
+            {ArtifactPackageIdentity{"split-debug", "6.0-1"},
+             ArtifactPackageIdentity{"split-debug", "6.0-1"}},
+            AurUpdateExecutionCorrelationFailureReason::
+                    DuplicateUnselectedArtifactIdentity);
+}
+
+void expect_typed_failure_base(
+        const AurUpdateSourceBuildExecutionResult& result,
+        const std::string& diagnostic,
+        const std::string& context) {
+    expect(result.status == AurUpdateInvocationExecutionStatus::
+                                    StoppedOnWorkItemFailure &&
+                   !result.is_success(),
+           context + ": invocation failure state differs");
+    expect(result.work_item_results.size() == 1,
+           context + ": work-item count differs");
+    const auto& work_item = result.work_item_results.front();
+    expect(work_item.status == AurUpdateWorkItemExecutionStatus::Failed &&
+                   work_item.failure_kind ==
+                           AurUpdateWorkItemFailureKind::BuildOrInstallFailed &&
+                   work_item.diagnostic ==
+                           std::optional<std::string>{diagnostic},
+           context + ": work-item failure state differs");
+    expect_no_fabricated_child_success(work_item, context);
+}
+
+template<typename Enqueue>
+AurUpdateSourceBuildExecutionResult run_one_multiple_failure(
+        const std::string& context,
+        Enqueue enqueue_failure) {
+    const AppConfig config = runner_config();
+    const PacmanDatabasePaths database_paths{
+            "/typed-failure/root", "/typed-failure/database"};
+    AurUpdateSourceBuildPreparation preparation = prepare_fixture(
+            same_package_base_multiple_preflight(),
+            false,
+            config,
+            database_paths);
+    execution_stub::reset();
+    enqueue_failure(expected_execution(
+            0,
+            "split-suite",
+            {required_target(
+                     "split-suite",
+                     "split-runtime",
+                     DesiredInstallReason::Dependency),
+             required_target(
+                     "split-suite",
+                     "split-explicit",
+                     DesiredInstallReason::Explicit)},
+            false,
+            database_paths,
+            config));
+    AurUpdateSourceBuildExecutionResult result = execute_without_escape(
+            std::move(*preparation.invocation), config, context);
+    execution_stub::require_script_consumed();
+    return result;
+}
+
+void test_selection_mixed_reason_metadata_and_phase_failures_are_typed() {
+    const std::string selection_context = "selection failure";
+    const std::string selection_diagnostic = "typed selection failure";
+    PackageBaseArtifactIdentitySelectionFailure selection_failure{};
+    selection_failure.package_base = "split-suite";
+    selection_failure.missing_required_artifacts.push_back(
+            MissingRequiredArtifact{
+                    1,
+                    required_target(
+                            "split-suite",
+                            "split-explicit",
+                            DesiredInstallReason::Explicit)});
+    const auto selection_result = run_one_multiple_failure(
+            selection_context,
+            [failure = std::move(selection_failure),
+             selection_diagnostic](
+                    execution_stub::ExpectedExecution expected) mutable {
+                execution_stub::enqueue_selection_failure(
+                        std::move(expected),
+                        std::move(failure),
+                        selection_diagnostic);
+            });
+    expect_typed_failure_base(
+            selection_result,
+            selection_diagnostic,
+            selection_context);
+    const auto& selection_detail = require_failure_detail<
+            PackageBaseArtifactIdentitySelectionFailure>(
+            selection_result.work_item_results.front(),
+            selection_context);
+    expect(selection_detail.package_base == "split-suite" &&
+                   selection_detail.missing_required_artifacts.size() == 1,
+           "Selection failure lost its typed detail");
+
+    const std::string mixed_diagnostic = "typed mixed reason failure";
+    MixedPackageBaseInstallReasonUnsupported mixed_failure{};
+    mixed_failure.package_base = "split-suite";
+    const auto mixed_result = run_one_multiple_failure(
+            "mixed reason failure",
+            [failure = std::move(mixed_failure), mixed_diagnostic](
+                    execution_stub::ExpectedExecution expected) mutable {
+                execution_stub::enqueue_mixed_reason_failure(
+                        std::move(expected),
+                        std::move(failure),
+                        mixed_diagnostic);
+            });
+    expect_typed_failure_base(
+            mixed_result, mixed_diagnostic, "mixed reason failure");
+    expect(require_failure_detail<
+                   MixedPackageBaseInstallReasonUnsupported>(
+                   mixed_result.work_item_results.front(),
+                   "mixed reason failure")
+                           .package_base == "split-suite",
+           "Mixed reason failure lost its typed detail");
+
+    PackageBaseArtifactIdentitySelectionFailure mismatched_selection{};
+    mismatched_selection.package_base = "other-suite";
+    const auto mismatched_selection_result = run_one_multiple_failure(
+            "selection failure PackageBase mismatch",
+            [failure = std::move(mismatched_selection)](
+                    execution_stub::ExpectedExecution expected) mutable {
+                execution_stub::enqueue_selection_failure(
+                        std::move(expected), std::move(failure),
+                        "mismatched selection failure");
+            });
+    expect(require_failure_detail<
+                   AurUpdateExecutionCorrelationFailure>(
+                   mismatched_selection_result.work_item_results.front(),
+                   "selection failure PackageBase mismatch")
+                           .reason ==
+                   AurUpdateExecutionCorrelationFailureReason::
+                           PackageBaseMismatch,
+           "Selection failure PackageBase mismatch was not fail-closed");
+
+    MixedPackageBaseInstallReasonUnsupported mismatched_mixed{};
+    mismatched_mixed.package_base = "other-suite";
+    const auto mismatched_mixed_result = run_one_multiple_failure(
+            "mixed reason failure PackageBase mismatch",
+            [failure = std::move(mismatched_mixed)](
+                    execution_stub::ExpectedExecution expected) mutable {
+                execution_stub::enqueue_mixed_reason_failure(
+                        std::move(expected), std::move(failure),
+                        "mismatched mixed reason failure");
+            });
+    expect(require_failure_detail<
+                   AurUpdateExecutionCorrelationFailure>(
+                   mismatched_mixed_result.work_item_results.front(),
+                   "mixed reason failure PackageBase mismatch")
+                           .reason ==
+                   AurUpdateExecutionCorrelationFailureReason::
+                           PackageBaseMismatch,
+           "Mixed reason failure PackageBase mismatch was not fail-closed");
+
+    const PackageMetadataFailure metadata_failure{
+            PackageMetadataErrorCode::QueryFailed,
+            "typed metadata failure"};
+    const auto metadata_result = run_one_multiple_failure(
+            "metadata failure",
+            [metadata_failure](execution_stub::ExpectedExecution expected) {
+                execution_stub::enqueue_metadata_failure(
+                        std::move(expected), metadata_failure);
+            });
+    expect_typed_failure_base(
+            metadata_result,
+            metadata_failure.diagnostic,
+            "metadata failure");
+    expect(require_failure_detail<PackageMetadataFailure>(
+                   metadata_result.work_item_results.front(),
+                   "metadata failure")
+                           .code == PackageMetadataErrorCode::QueryFailed,
+           "Metadata failure lost its typed code");
+
+    for(const auto& [phase, expected_category, diagnostic] :
+        std::vector<std::tuple<
+                SeparatedPackageBaseSourceBuildFailurePhase,
+                AurUpdateSourceBuildFailureCategory,
+                std::string>>{
+                {SeparatedPackageBaseSourceBuildFailurePhase::Build,
+                 AurUpdateSourceBuildFailureCategory::Build,
+                 "typed build failure"},
+                {SeparatedPackageBaseSourceBuildFailurePhase::
+                         ArtifactValidation,
+                 AurUpdateSourceBuildFailureCategory::ArtifactValidation,
+                 "typed artifact validation failure"},
+                {SeparatedPackageBaseSourceBuildFailurePhase::
+                         ArtifactIdentity,
+                 AurUpdateSourceBuildFailureCategory::ArtifactIdentity,
+                 "typed artifact identity failure"}}) {
+        const auto phase_result = run_one_multiple_failure(
+                diagnostic,
+                [phase, diagnostic](
+                        execution_stub::ExpectedExecution expected) {
+                    execution_stub::enqueue_phase_failure(
+                            std::move(expected), phase, diagnostic);
+                });
+        expect_typed_failure_base(phase_result, diagnostic, diagnostic);
+        expect(require_failure_detail<AurUpdateSourceBuildFailureSnapshot>(
+                       phase_result.work_item_results.front(), diagnostic)
+                               .category == expected_category,
+               diagnostic + ": category differs");
+    }
+}
+
+void test_transaction_failure_has_attempts_without_child_success_and_suffix() {
+    const std::string context = "transaction failure";
+    const AppConfig config = runner_config();
+    const PacmanDatabasePaths database_paths{
+            "/transaction/root", "/transaction/database"};
+    AurUpdateSourceBuildPreparation preparation = prepare_fixture(
+            multiple_then_tail_preflight(),
+            false,
+            config,
+            database_paths);
+    const std::vector<PackageBaseArtifactInstallTransactionAttempt> attempts{
+            transaction_attempt(
+                    "split-runtime",
+                    "7.0-1",
+                    DesiredInstallReason::Dependency),
+            transaction_attempt(
+                    "split-explicit",
+                    "7.0-1",
+                    DesiredInstallReason::Explicit)};
+    const std::string diagnostic = "pacman transaction failed";
+
+    execution_stub::reset();
+    execution_stub::enqueue_transaction_failure(
+            expected_execution(
+                    0,
+                    "split-suite",
+                    {required_target(
+                             "split-suite",
+                             "split-runtime",
+                             DesiredInstallReason::Dependency),
+                     required_target(
+                             "split-suite",
+                             "split-explicit",
+                             DesiredInstallReason::Explicit)},
+                    false,
+                    database_paths,
+                    config),
+            PackageBaseArtifactInstallTransactionFailureKind::NonzeroExit,
+            attempts,
+            1,
+            diagnostic);
+
+    const AurUpdateSourceBuildExecutionResult result =
+            execute_without_escape(
+                    std::move(*preparation.invocation),
+                    config,
+                    "transaction failure");
+    execution_stub::require_script_consumed();
+    expect(result.work_item_results.size() == 2,
+           "Transaction failure lost the planned suffix");
+    const auto& failed = result.work_item_results[0];
+    expect(failed.status == AurUpdateWorkItemExecutionStatus::Failed &&
+                   failed.diagnostic ==
+                           std::optional<std::string>{diagnostic},
+           "Transaction failure aggregate differs");
+    expect_no_fabricated_child_success(failed, "transaction failure");
+    expect(failed.transaction_failure.has_value() &&
+                   failed.transaction_failure->attempted_artifacts.size() == 2,
+           "Transaction failure lost safe attempt snapshots");
+    const auto& transaction_failure = *failed.transaction_failure;
+    expect(same_identity(
+                   transaction_failure.attempted_artifacts[0].identity,
+                   {"split-runtime", "7.0-1"}) &&
+                   transaction_failure.attempted_artifacts[0]
+                                   .desired_reason ==
+                           DesiredInstallReason::Dependency &&
+                   same_identity(
+                           transaction_failure.attempted_artifacts[1]
+                                   .identity,
+                           {"split-explicit", "7.0-1"}) &&
+                   transaction_failure.attempted_artifacts[1]
+                                   .desired_reason ==
+                           DesiredInstallReason::Explicit,
+           "Transaction attempt identity/reason differs");
+    const auto& detail = require_failure_detail<
+            AurUpdatePackageTransactionFailureSnapshot>(
+            failed, context);
+    expect(detail.category ==
+                           AurUpdatePackageTransactionFailureCategory::
+                                   CommandFailed &&
+                   detail.attempted_artifacts.size() == 2 &&
+                   detail.exit_code == std::optional<int>{1} &&
+                   transaction_failure.exit_code ==
+                           std::optional<int>{1},
+           "Transaction failure detail differs");
+
+    const auto& suffix = result.work_item_results[1];
+    expect(suffix.status == AurUpdateWorkItemExecutionStatus::NotAttempted &&
+                   suffix.failure_kind ==
+                           AurUpdateWorkItemFailureKind::PriorWorkItemStopped &&
+                   suffix.child_results.size() == 1,
+           "Transaction failure suffix aggregate differs");
+    expect_child(
+            suffix.child_results.front(),
+            1,
+            1,
+            0,
+            "tail-root",
+            "tail-root",
+            DesiredInstallReason::Explicit,
+            {2},
+            {{2, "tail-root"}},
+            {PackageRole::Root},
+            AurUpdateChildExecutionStatus::NotAttempted,
+            std::nullopt,
+            "transaction failure suffix child");
+    expect(execution_stub::call_history().size() == 1,
+           "Transaction failure executed a later work item");
+    expect_events(
+            {execution_stub::EventKind::Checkout,
+             execution_stub::EventKind::Build,
+             execution_stub::EventKind::Install},
+            "transaction failure");
+
+    AurUpdateSourceBuildPreparation mismatch_preparation = prepare_fixture(
+            multiple_then_tail_preflight(),
+            false,
+            config,
+            database_paths);
+    execution_stub::reset();
+    execution_stub::enqueue_transaction_failure(
+            expected_execution(
+                    0,
+                    "split-suite",
+                    {required_target(
+                             "split-suite",
+                             "split-runtime",
+                             DesiredInstallReason::Dependency),
+                     required_target(
+                             "split-suite",
+                             "split-explicit",
+                             DesiredInstallReason::Explicit)},
+                    false,
+                    database_paths,
+                    config),
+            PackageBaseArtifactInstallTransactionFailureKind::NonzeroExit,
+            attempts,
+            73,
+            "mismatched transaction failure",
+            "other-suite");
+    const std::string mismatch_context =
+            "transaction correlation mismatch";
+    const AurUpdateSourceBuildExecutionResult mismatch_result =
+            execute_without_escape(
+                    std::move(*mismatch_preparation.invocation),
+                    config,
+                    mismatch_context);
+    execution_stub::require_script_consumed();
+    const auto& mismatch = mismatch_result.work_item_results.front();
+    expect_no_fabricated_child_success(
+            mismatch, mismatch_context);
+    const auto& mismatch_detail = require_failure_detail<
+            AurUpdateExecutionCorrelationFailure>(
+            mismatch, mismatch_context);
+    expect(mismatch_detail.reason ==
+                           AurUpdateExecutionCorrelationFailureReason::
+                                   PackageBaseMismatch &&
+                   mismatch.transaction_failure.has_value() &&
+                   mismatch.transaction_failure->category ==
+                           AurUpdatePackageTransactionFailureCategory::
+                                   CommandFailed &&
+                   mismatch.transaction_failure->exit_code ==
+                           std::optional<int>{73} &&
+                   mismatch.transaction_failure->attempted_artifacts.size() ==
+                           2 &&
+                   mismatch_result.work_item_results[1].status ==
+                           AurUpdateWorkItemExecutionStatus::NotAttempted,
+           "Transaction correlation mismatch lost safe typed evidence");
+}
+
+void test_cleanup_failure_preserves_mixed_children_and_unselected_suffix() {
+    const AppConfig config = runner_config();
+    const PacmanDatabasePaths database_paths{
+            "/cleanup/root", "/cleanup/database"};
+    AurUpdateSourceBuildPreparation preparation = prepare_fixture(
+            multiple_then_tail_preflight(),
+            true,
+            config,
+            database_paths);
+    const std::string diagnostic = "aggregate cleanup failed";
+
+    execution_stub::reset();
+    execution_stub::enqueue_cleanup_failure(
+            expected_execution(
+                    0,
+                    "split-suite",
+                    {required_target(
+                             "split-suite",
+                             "split-runtime",
+                             DesiredInstallReason::Dependency),
+                     required_target(
+                             "split-suite",
+                             "split-explicit",
+                             DesiredInstallReason::Explicit)},
+                    true,
+                    database_paths,
+                    config),
+            "split-suite",
+            {selected_child(
+                     "split-runtime",
+                     "8.0-1",
+                     DesiredInstallReason::Dependency,
+                     ArtifactInstallExecutionOutcome::Installed),
+             selected_child(
+                     "split-explicit",
+                     "8.0-1",
+                     DesiredInstallReason::Explicit,
+                     ArtifactInstallExecutionOutcome::SkippedAsNeeded)},
+            {ArtifactPackageIdentity{"split-debug", "8.0-1"}},
+            diagnostic);
+
+    const AurUpdateSourceBuildExecutionResult result =
+            execute_without_escape(
+                    std::move(*preparation.invocation),
+                    config,
+                    "cleanup mixed children");
+    execution_stub::require_script_consumed();
+    expect(result.status == AurUpdateInvocationExecutionStatus::
+                                    StoppedAfterPackageCleanupFailure &&
+                   !result.is_success() && result.changed_package_state() &&
+                   result.has_cleanup_failure() &&
+                   result.has_not_attempted_items(),
+           "Cleanup failure invocation helpers differ");
+    expect(result.stopped_work_item_index() == 0,
+           "Cleanup failure stop index differs");
+
+    const auto& completed = result.work_item_results[0];
+    expect(completed.status ==
+                           AurUpdateWorkItemExecutionStatus::
+                                   UpdatedCleanupFailed &&
+                   completed.failure_kind ==
+                           AurUpdateWorkItemFailureKind::
+                                   CleanupFailedAfterPackageTransaction &&
+                   completed.diagnostic ==
+                           std::optional<std::string>{diagnostic},
+           "Cleanup failure aggregate differs");
+    expect(completed.child_results[0].status ==
+                           AurUpdateChildExecutionStatus::
+                                   InstalledCleanupFailed &&
+                   completed.child_results[1].status ==
+                           AurUpdateChildExecutionStatus::
+                                   SkippedAsNeededCleanupFailed,
+           "Cleanup failure flattened mixed child outcomes");
+    expect(completed.unselected_artifacts.size() == 1 &&
+                   same_identity(
+                           completed.unselected_artifacts.front(),
+                           {"split-debug", "8.0-1"}),
+           "Cleanup failure lost unselected identity snapshot");
+    const auto& suffix = result.work_item_results[1];
+    expect(suffix.status == AurUpdateWorkItemExecutionStatus::NotAttempted &&
+                   suffix.child_results.front().status ==
+                           AurUpdateChildExecutionStatus::NotAttempted &&
+                   !suffix.child_results.front().selected_artifact.has_value(),
+           "Cleanup failure executed or erased its suffix child");
+    expect(execution_stub::call_history().size() == 1,
+           "Cleanup failure executed a later work item");
+}
+
+void test_unknown_failure_is_contained_without_success() {
+    const AppConfig config = runner_config();
+    const PacmanDatabasePaths database_paths{
+            "/unknown/root", "/unknown/database"};
+    AurUpdateSourceBuildPreparation preparation = prepare_fixture(
+            single_root_preflight(
+                    "unknown-root",
+                    DesiredInstallReason::Explicit,
+                    "unknown-root"),
+            false,
+            config,
+            database_paths);
+    execution_stub::reset();
+    execution_stub::enqueue_unknown_failure(expected_execution(
+            0,
+            "unknown-root",
+            {required_target(
+                    "unknown-root",
+                    "unknown-root",
+                    DesiredInstallReason::Explicit)},
+            false,
+            database_paths,
+            config));
+
+    const auto result = execute_without_escape(
+            std::move(*preparation.invocation),
+            config,
+            "unknown failure");
+    execution_stub::require_script_consumed();
+    const auto& work_item = result.work_item_results.front();
+    expect(work_item.failure_kind ==
+                           AurUpdateWorkItemFailureKind::UnknownException &&
+                   work_item.diagnostic ==
+                           std::optional<std::string>{
+                                   UNKNOWN_EXCEPTION_DIAGNOSTIC},
+           "Unknown failure was not contained deterministically");
+    expect_no_fabricated_child_success(work_item, "unknown failure");
+}
+
+void test_prepared_correlation_is_rejected_before_first_executor_call() {
+    const AppConfig config = runner_config();
+    const PacmanDatabasePaths database_paths{
+            "/prevalidation/root", "/prevalidation/database"};
+    AurUpdateSourceBuildPreparation preparation = prepare_fixture(
+            three_singular_work_item_preflight(),
+            false,
+            config,
+            database_paths);
+
+    // Test hookから得たsnapshotを意図的に壊し、runner全件validationが
+    // executor callより前に走ることだけを検証する。
+    auto& production_invocation = const_cast<
+            PreparedProductionSourceBuildInvocation&>(
+            preparation.invocation->production_invocation_for_test());
+    production_invocation.work_items.back()
+            .required_targets.front()
+            .package_name = "corrupted-tail";
+
+    execution_stub::reset();
+    bool rejected = false;
+    try {
+        static_cast<void>(
+                execute_prepared_aur_update_source_build_invocation(
+                        std::move(*preparation.invocation), config));
+    } catch(const std::logic_error&) {
+        rejected = true;
+    } catch(...) {
+        throw std::runtime_error(
+                "Prepared correlation mismatch raised an unexpected exception");
+    }
+    expect(rejected,
+           "Prepared correlation mismatch was not rejected");
+    expect(execution_stub::call_history().empty() &&
+                   execution_stub::event_history().empty(),
+           "Prepared correlation mismatch reached the executor");
     execution_stub::require_script_consumed();
 }
 
-void test_multi_root_attribution_execution_order_and_one_shot() {
-    const AppConfig config;
-    const PacmanDatabasePaths expected_database_paths{
-            "/multi/root", "/multi/database"};
-    const std::vector<ExpectedWorkItem> expected =
-            multi_root_expectations();
+void test_moved_from_replay_and_unconsumed_expectation_are_rejected() {
+    const AppConfig config = runner_config();
+    const PacmanDatabasePaths database_paths{
+            "/replay/root", "/replay/database"};
     AurUpdateSourceBuildPreparation preparation = prepare_fixture(
-            ordered_multi_root_preflight(),
+            single_root_preflight(
+                    "replay-root",
+                    DesiredInstallReason::Explicit,
+                    "replay-root"),
+            false,
             config,
-            expected_database_paths);
-
+            database_paths);
     execution_stub::reset();
-    enqueue_successes(expected.size());
-    AurUpdateSourceBuildExecutionResult result = execute_without_escape(
-            std::move(*preparation.invocation),
-            config,
-            "multi-root attribution");
-
-    expect_all_result_identities(
-            result, expected, "multi-root attribution");
-    for(std::size_t index = 0;
-        index < result.work_item_results.size(); ++index) {
-        expect_entry_state(
-                result.work_item_results[index],
-                AurUpdateWorkItemExecutionStatus::Updated,
-                AurUpdateWorkItemFailureKind::None,
-                std::nullopt,
-                "multi-root item " + std::to_string(index));
-    }
-    expect(
-            result.status == AurUpdateInvocationExecutionStatus::Completed &&
-                    result.is_success(),
-            "Multi-root execution did not complete");
-    expect_execution_calls(
-            expected,
-            expected.size(),
-            expected_database_paths,
-            "multi-root calls");
-    expect(
-            preparation_stub::database_call_count() == 1,
-            "Multi-root runner re-resolved Pacman database paths");
-
-    // POLICY(#267): correlated capabilityのconsume後はpreparation側のmove元を
-    // invalid化し、replayは最初のexecutor callより前に拒否する。
-    expect(
-            !preparation.is_prepared(),
-            "Consumed preparation still reports a prepared invocation");
-    expect(
-            preparation.invocation.has_value() &&
-                    !preparation.invocation->is_valid(),
-            "Consumed preparation did not retain a typed moved-from state");
+    execution_stub::enqueue_success(
+            expected_execution(
+                    0,
+                    "replay-root",
+                    {required_target(
+                            "replay-root",
+                            "replay-root",
+                            DesiredInstallReason::Explicit)},
+                    false,
+                    database_paths,
+                    config),
+            "replay-root",
+            {selected_child(
+                    "replay-root",
+                    "9.0-1",
+                    DesiredInstallReason::Explicit,
+                    ArtifactInstallExecutionOutcome::Installed)});
+    const auto first = execute_without_escape(
+            std::move(*preparation.invocation), config, "first execution");
+    expect(first.is_success(), "First one-shot execution failed");
+    execution_stub::require_script_consumed();
+    expect(!preparation.is_prepared() &&
+                   !preparation.invocation->is_valid(),
+           "Consumed preparation retained an active capability");
 
     execution_stub::reset();
     bool replay_rejected = false;
@@ -1015,16 +1508,39 @@ void test_multi_root_attribution_execution_order_and_one_shot() {
         replay_rejected = true;
     } catch(...) {
         throw std::runtime_error(
-                "Moved-from invocation replay raised an unexpected exception");
+                "Moved-from replay raised an unexpected exception");
     }
-
-    expect(
-            replay_rejected,
-            "Moved-from invocation replay was not rejected");
-    expect(
-            execution_stub::call_history().empty(),
-            "Moved-from invocation replay reached the executor");
+    expect(replay_rejected, "Moved-from replay was not rejected");
+    expect(execution_stub::call_history().empty(),
+           "Moved-from replay reached the executor");
     execution_stub::require_script_consumed();
+
+    execution_stub::enqueue_success(
+            expected_execution(
+                    0,
+                    "never-called",
+                    {required_target(
+                            "never-called",
+                            "never-called",
+                            DesiredInstallReason::Explicit)},
+                    false,
+                    database_paths,
+                    config),
+            "never-called",
+            {selected_child(
+                    "never-called",
+                    "1-1",
+                    DesiredInstallReason::Explicit,
+                    ArtifactInstallExecutionOutcome::Installed)});
+    bool unconsumed_rejected = false;
+    try {
+        execution_stub::require_script_consumed();
+    } catch(const std::logic_error&) {
+        unconsumed_rejected = true;
+    }
+    expect(unconsumed_rejected,
+           "Strict stub accepted an unconsumed expectation");
+    execution_stub::reset();
 }
 
 template<typename Callable>
@@ -1037,28 +1553,39 @@ void run_case(const std::string& name, Callable callable) {
 
 int main() {
     try {
-        run_case("all success", test_all_success);
         run_case(
-                "no-change and mixed success",
-                test_no_change_and_mixed_success);
+                "ordinary size-one set owner",
+                test_ordinary_size_one_uses_set_owner_strictly);
         run_case(
-                "ordinary failure first and middle",
-                test_ordinary_failure_first_and_middle);
+                "multiple work-item FIFO and DB snapshot",
+                test_multiple_work_items_preserve_fifo_call_order_and_one_db_snapshot);
         run_case(
-                "cleanup partial-success first, middle, and last",
-                test_cleanup_partial_success_first_middle_and_last);
+                "requested split child size-one",
+                test_requested_split_child_size_one_is_no_change);
         run_case(
-                "no-change cleanup failure with and without prior update",
-                test_no_change_cleanup_failure_with_and_without_prior_update);
+                "multiple child exact result",
+                test_multiple_children_preserve_order_reason_outcome_and_attribution);
         run_case(
-                "unknown exception is typed and contained",
-                test_unknown_exception_is_typed_and_contained);
+                "returned result correlation failures",
+                test_returned_result_correlation_failures_are_fail_closed);
         run_case(
-                "external unit is absent from dense execution",
-                test_external_unit_is_absent_from_dense_execution);
+                "typed pre-transaction failures",
+                test_selection_mixed_reason_metadata_and_phase_failures_are_typed);
         run_case(
-                "multi-root attribution, execution order, and one-shot replay",
-                test_multi_root_attribution_execution_order_and_one_shot);
+                "transaction failure and NotAttempted suffix",
+                test_transaction_failure_has_attempts_without_child_success_and_suffix);
+        run_case(
+                "cleanup mixed children and NotAttempted suffix",
+                test_cleanup_failure_preserves_mixed_children_and_unselected_suffix);
+        run_case(
+                "unknown failure containment",
+                test_unknown_failure_is_contained_without_success);
+        run_case(
+                "prepared correlation prevalidation",
+                test_prepared_correlation_is_rejected_before_first_executor_call);
+        run_case(
+                "one-shot replay and strict expectation",
+                test_moved_from_replay_and_unconsumed_expectation_are_rejected);
     } catch(const std::exception& error) {
         std::cerr << error.what() << '\n';
         return 1;

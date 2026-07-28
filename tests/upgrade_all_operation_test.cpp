@@ -1333,6 +1333,81 @@ void test_aur_updated_only_and_fresh_inventory() {
     stub::require_script_consumed();
 }
 
+void test_split_package_base_executes_once_with_child_results() {
+    stub::reset();
+    stub::set_preference_directory(preference_directory({}));
+    const std::vector<std::string> roots = {
+            "split-runtime", "split-tools"};
+    stub::set_foreign_inventory(foreign_inventory(roots));
+    enqueue_aur_query({
+            {roots[0], "split-suite"},
+            {roots[1], "split-suite"}});
+    return_build_plan(
+            root_plan({
+                    {roots[0], "split-suite"},
+                    {roots[1], "split-suite"}}),
+            roots);
+    stub::enqueue_aur_successes(
+            {ArtifactInstallExecutionOutcome::Installed,
+             ArtifactInstallExecutionOutcome::SkippedAsNeeded},
+            {ArtifactPackageIdentity{"split-debug", "2.0-1"}});
+
+    const AppConfig config;
+    PreparedUpgradeAllOperation prepared = take_prepared(
+            prepare_upgrade_all_operation(config),
+            "split PackageBase fixture");
+    UpgradeAllOperationResult result =
+            execute_prepared_upgrade_all_operation(
+                    std::move(prepared), config);
+
+    expect(
+            result.is_success() && result.aur.operation_result.has_value() &&
+                    result.aur.operation_result->execution.has_value() &&
+                    result.aur.operation_result->execution->
+                                    work_item_results.size() == 1 &&
+                    result.aur.operation_result->reduced_operation_result.
+                                    targets.size() == 2 &&
+                    result.aur.operation_result->reduced_operation_result.
+                                    targets[0].status ==
+                            AurUpdateOperationTargetStatus::Updated &&
+                    result.aur.operation_result->reduced_operation_result.
+                                    targets[1].status ==
+                            AurUpdateOperationTargetStatus::NoChange,
+            "Split PackageBase child outcomes were not reduced independently");
+
+    const AurUpdateWorkItemExecutionResult& work_item =
+            result.aur.operation_result->execution->work_item_results.front();
+    expect(
+            work_item.package_name.empty() &&
+                    work_item.package_base == "split-suite" &&
+                    work_item.child_results.size() == 2 &&
+                    work_item.child_results[0].required_package_name ==
+                            roots[0] &&
+                    work_item.child_results[0].status ==
+                            AurUpdateChildExecutionStatus::Installed &&
+                    work_item.child_results[1].required_package_name ==
+                            roots[1] &&
+                    work_item.child_results[1].status ==
+                            AurUpdateChildExecutionStatus::SkippedAsNeeded &&
+                    work_item.unselected_artifacts.size() == 1 &&
+                    work_item.unselected_artifacts[0].package_name ==
+                            "split-debug" &&
+                    work_item.unselected_artifacts[0].full_version ==
+                            "2.0-1",
+            "Split PackageBase execution snapshot lost child or unselected identities");
+    expect(
+            stub::aur_execution_calls().size() == 1 &&
+                    stub::aur_execution_calls()[0].package_name.empty() &&
+                    stub::aur_execution_calls()[0].package_base ==
+                            "split-suite" &&
+                    stub::aur_execution_calls()[0].plan_package_names ==
+                            roots &&
+                    stub::aur_execution_calls()[0].required_targets.size() ==
+                            2,
+            "Split PackageBase did not use one ordered set-owner call");
+    stub::require_script_consumed();
+}
+
 void test_all_phases_changed_in_exact_order() {
     stub::reset();
     const std::vector<std::string> sources = {"source-root"};
@@ -1502,6 +1577,18 @@ void test_transitive_external_satisfaction_attribution() {
             result.externally_satisfied_aur_build_units.front();
     expect(
             external.operation_unit.package_base == "external-library" &&
+                    external.operation_unit.package_name ==
+                            "external-library" &&
+                    external.operation_unit.plan_package_names ==
+                            std::vector<std::string>{"external-library"} &&
+                    external.operation_unit.required_target_attributions
+                                    .size() == 1 &&
+                    external.operation_unit.required_target_attributions
+                                    .front().required_target.package_name ==
+                            "external-library" &&
+                    external.operation_unit.required_target_attributions
+                                    .front().required_target.package_base ==
+                            "external-library" &&
                     external.root_correlations.size() == 1 &&
                     external.root_correlations[0].original_query_plan_index ==
                             0 &&
@@ -1876,6 +1963,9 @@ int main() {
         run_case(
                 "AUR Updated only and fresh inventory",
                 test_aur_updated_only_and_fresh_inventory);
+        run_case(
+                "split PackageBase child execution",
+                test_split_package_base_executes_once_with_child_results);
         run_case(
                 "all phases Changed and exact order",
                 test_all_phases_changed_in_exact_order);

@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <optional>
 #include <string>
+#include <variant>
 #include <vector>
 
 struct AppConfig;
@@ -32,6 +33,94 @@ enum class AurUpdateInvocationExecutionStatus {
     StoppedAfterPackageCleanupFailure,
 };
 
+enum class AurUpdateChildExecutionStatus {
+    Installed,
+    SkippedAsNeeded,
+    InstalledCleanupFailed,
+    SkippedAsNeededCleanupFailed,
+    NotAttempted,
+};
+
+enum class AurUpdateSourceBuildFailureCategory {
+    Build,
+    ArtifactValidation,
+    ArtifactIdentity,
+    Other,
+};
+
+struct AurUpdateSourceBuildFailureSnapshot {
+    AurUpdateSourceBuildFailureCategory category =
+            AurUpdateSourceBuildFailureCategory::Other;
+    std::string diagnostic;
+};
+
+enum class AurUpdatePackageTransactionFailureCategory {
+    CommandFailed,
+    CommandExecutionFailed,
+    Other,
+};
+
+using AurUpdatePackageTransactionAttempt =
+        PackageBaseArtifactInstallTransactionAttempt;
+
+struct AurUpdatePackageTransactionFailureSnapshot {
+    AurUpdatePackageTransactionFailureCategory category =
+            AurUpdatePackageTransactionFailureCategory::Other;
+    std::vector<AurUpdatePackageTransactionAttempt> attempted_artifacts;
+    std::optional<int> exit_code;
+    std::string diagnostic;
+};
+
+enum class AurUpdateExecutionCorrelationFailureReason {
+    PackageBaseMismatch,
+    DesiredInstallReasonMismatch,
+    SelectedArtifactIdentityMismatch,
+    EmptySelectedArtifactVersion,
+    UnknownChildOutcome,
+    DuplicateSelectedChild,
+    MissingSelectedChild,
+    ExtraSelectedChild,
+    InvalidUnselectedArtifactIdentity,
+    SelectedAndUnselectedIdentityOverlap,
+    DuplicateUnselectedArtifactIdentity,
+};
+
+struct AurUpdateExecutionCorrelationFailure {
+    AurUpdateExecutionCorrelationFailureReason reason =
+            AurUpdateExecutionCorrelationFailureReason::
+                    PackageBaseMismatch;
+    std::optional<std::size_t> required_child_index;
+    std::optional<std::string> package_name;
+    std::string diagnostic;
+};
+
+using AurUpdateWorkItemFailureDetail = std::variant<
+        std::monostate,
+        PackageBaseArtifactIdentitySelectionFailure,
+        MixedPackageBaseInstallReasonUnsupported,
+        PackageMetadataFailure,
+        AurUpdateSourceBuildFailureSnapshot,
+        AurUpdatePackageTransactionFailureSnapshot,
+        AurUpdateExecutionCorrelationFailure>;
+
+// Preparationが確定したrequired child attributionを最初からowned保持し、
+// transaction成功時だけselected identity/outcomeを埋める。
+struct AurUpdateChildExecutionResult {
+    std::size_t work_item_index = 0;
+    std::size_t build_plan_order_index = 0;
+    std::size_t required_child_index = 0;
+    std::string package_base;
+    std::string required_package_name;
+    DesiredInstallReason desired_install_reason =
+            static_cast<DesiredInstallReason>(-1);
+    std::vector<std::size_t> affected_update_plan_indices;
+    std::vector<RootTargetIdentity> affected_roots;
+    std::vector<PackageRole> roles;
+    std::optional<ArtifactPackageIdentity> selected_artifact;
+    AurUpdateChildExecutionStatus status =
+            AurUpdateChildExecutionStatus::NotAttempted;
+};
+
 // 1 PackageBaseのexecution outcomeと、次段のtarget-level reducerに必要な
 // update target/root attributionをowned snapshotとして保持する。
 struct AurUpdateWorkItemExecutionResult {
@@ -44,10 +133,20 @@ struct AurUpdateWorkItemExecutionResult {
     std::vector<std::size_t>        affected_update_plan_indices;
     std::vector<RootTargetIdentity> affected_roots;
 
+    // child_resultsがtarget projectionのauthority。unselected artifactは
+    // attributionを持たず、diagnostic/presentation snapshotに限定する。
+    std::vector<AurUpdateChildExecutionResult> child_results;
+    std::vector<ArtifactPackageIdentity> unselected_artifacts;
+    // Transaction correlation failureでも、success outcomeとは独立したsafe
+    // attempt/category/exit snapshotを失わない。
+    std::optional<AurUpdatePackageTransactionFailureSnapshot>
+            transaction_failure;
+
     AurUpdateWorkItemExecutionStatus status =
             AurUpdateWorkItemExecutionStatus::NotAttempted;
     AurUpdateWorkItemFailureKind failure_kind =
             AurUpdateWorkItemFailureKind::PriorWorkItemStopped;
+    AurUpdateWorkItemFailureDetail failure_detail;
     std::optional<std::string> diagnostic;
 };
 

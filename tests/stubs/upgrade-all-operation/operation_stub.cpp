@@ -41,17 +41,17 @@ struct ScriptedSourceExecution {
 };
 
 enum class ScriptedAurExecutionKind {
-    Installed,
-    SkippedAsNeeded,
+    Success,
     OrdinaryFailure,
-    InstalledCleanupFailure,
-    SkippedAsNeededCleanupFailure,
+    CleanupFailure,
     UnknownFailure,
 };
 
 struct ScriptedAurExecution {
     ScriptedAurExecutionKind kind =
-            ScriptedAurExecutionKind::Installed;
+            ScriptedAurExecutionKind::Success;
+    std::vector<ArtifactInstallExecutionOutcome> child_outcomes;
+    std::vector<ArtifactPackageIdentity> unselected_artifacts;
     std::string diagnostic;
 };
 
@@ -212,14 +212,23 @@ void record_aur_lifecycle_event(
         stub::EventKind kind) {
     stub::AurExecutionCall& call = g_state.aur_calls.at(call_index);
     call.lifecycle_events.push_back(kind);
-    record_event(kind, call.package_name, call.plan_package_names);
+    record_event(
+            kind,
+            call.package_name.empty() ? call.package_base
+                                      : call.package_name,
+            call.plan_package_names);
 }
 
 void enqueue_aur_execution(
         ScriptedAurExecutionKind kind,
+        std::vector<ArtifactInstallExecutionOutcome> child_outcomes = {},
+        std::vector<ArtifactPackageIdentity> unselected_artifacts = {},
         std::string diagnostic = {}) {
     g_state.aur_executions.push_back(
-            ScriptedAurExecution{kind, std::move(diagnostic)});
+            ScriptedAurExecution{
+                    kind, std::move(child_outcomes),
+                    std::move(unselected_artifacts),
+                    std::move(diagnostic)});
 }
 
 } // namespace
@@ -408,43 +417,41 @@ void fail_pkgdest_guard_on_call(
 }
 
 void enqueue_aur_success(ArtifactInstallExecutionOutcome outcome) {
-    switch(outcome) {
-        case ArtifactInstallExecutionOutcome::Installed:
-            enqueue_aur_execution(ScriptedAurExecutionKind::Installed);
-            return;
-        case ArtifactInstallExecutionOutcome::SkippedAsNeeded:
-            enqueue_aur_execution(
-                    ScriptedAurExecutionKind::SkippedAsNeeded);
-            return;
-    }
-    throw std::logic_error(
-            "AUR execution stub received an unknown install outcome.");
+    enqueue_aur_successes({outcome});
+}
+
+void enqueue_aur_successes(
+        std::vector<ArtifactInstallExecutionOutcome> child_outcomes,
+        std::vector<ArtifactPackageIdentity> unselected_artifacts) {
+    enqueue_aur_execution(
+            ScriptedAurExecutionKind::Success,
+            std::move(child_outcomes),
+            std::move(unselected_artifacts));
 }
 
 void enqueue_aur_ordinary_failure(std::string diagnostic) {
     enqueue_aur_execution(
             ScriptedAurExecutionKind::OrdinaryFailure,
+            {}, {},
             std::move(diagnostic));
 }
 
 void enqueue_aur_cleanup_failure(
         ArtifactInstallExecutionOutcome outcome,
         std::string diagnostic) {
-    switch(outcome) {
-        case ArtifactInstallExecutionOutcome::Installed:
-            enqueue_aur_execution(
-                    ScriptedAurExecutionKind::InstalledCleanupFailure,
-                    std::move(diagnostic));
-            return;
-        case ArtifactInstallExecutionOutcome::SkippedAsNeeded:
-            enqueue_aur_execution(
-                    ScriptedAurExecutionKind::
-                            SkippedAsNeededCleanupFailure,
-                    std::move(diagnostic));
-            return;
-    }
-    throw std::logic_error(
-            "AUR execution stub received an unknown cleanup outcome.");
+    enqueue_aur_cleanup_failure(
+            {outcome}, {}, std::move(diagnostic));
+}
+
+void enqueue_aur_cleanup_failure(
+        std::vector<ArtifactInstallExecutionOutcome> child_outcomes,
+        std::vector<ArtifactPackageIdentity> unselected_artifacts,
+        std::string diagnostic) {
+    enqueue_aur_execution(
+            ScriptedAurExecutionKind::CleanupFailure,
+            std::move(child_outcomes),
+            std::move(unselected_artifacts),
+            std::move(diagnostic));
 }
 
 void enqueue_aur_unknown_failure() {
@@ -783,6 +790,15 @@ SourceBuildExecutionResult execute_prepared_source_build_work_item_typed(
         const ProductionSourceBuildWorkItem& work_item,
         const PacmanDatabasePaths& database_paths,
         const AppConfig& config) {
+    if(work_item.required_targets.size() != 1 ||
+       work_item.request.package_name.empty() ||
+       work_item.request.package_name !=
+               work_item.required_targets.front().package_name ||
+       work_item.request.checkout_name !=
+               work_item.required_targets.front().package_base) {
+        fail_unexpected(
+                "Upgrade-all registered-source singular execution received an inconsistent required target.");
+    }
     g_state.source_calls.push_back(stub::SourceExecutionCall{
             work_item.request.package_name,
             work_item.request.checkout_name,
@@ -918,18 +934,143 @@ BuildPlan resolve_build_plan_for_preflight(
     return g_state.resolver_handler(targets);
 }
 
-std::optional<ArtifactInstallExecutionOutcome>
-execute_prepared_source_build_work_item(
+const std::string&
+PackageBaseSourceBuildExecutionResult::package_base() const noexcept {
+    return package_base_;
+}
+
+const std::vector<PackageBaseSourceBuildSelectedResult>&
+PackageBaseSourceBuildExecutionResult::selected_children() const noexcept {
+    return selected_children_;
+}
+
+const std::vector<ArtifactPackageIdentity>&
+PackageBaseSourceBuildExecutionResult::unselected_artifacts() const noexcept {
+    return unselected_artifacts_;
+}
+
+bool PackageBaseSourceBuildExecutionResult::installed_any() const noexcept {
+    return std::any_of(
+            selected_children_.begin(), selected_children_.end(),
+            [](const PackageBaseSourceBuildSelectedResult& child) {
+                return child.outcome ==
+                        ArtifactInstallExecutionOutcome::Installed;
+            });
+}
+
+bool PackageBaseSourceBuildExecutionResult::all_skipped_as_needed()
+        const noexcept {
+    return !selected_children_.empty() && std::all_of(
+            selected_children_.begin(), selected_children_.end(),
+            [](const PackageBaseSourceBuildSelectedResult& child) {
+                return child.outcome ==
+                        ArtifactInstallExecutionOutcome::SkippedAsNeeded;
+            });
+}
+
+std::string
+PackageBaseSourceBuildExecutionResult::release_package_base() && noexcept {
+    return std::move(package_base_);
+}
+
+std::vector<PackageBaseSourceBuildSelectedResult>
+PackageBaseSourceBuildExecutionResult::release_selected_children() && noexcept {
+    return std::move(selected_children_);
+}
+
+std::vector<ArtifactPackageIdentity>
+PackageBaseSourceBuildExecutionResult::release_unselected_artifacts()
+        && noexcept {
+    return std::move(unselected_artifacts_);
+}
+
+SeparatedPackageBaseSourceBuildFailurePhase
+SeparatedPackageBaseSourceBuildPhaseError::phase() const noexcept {
+    return phase_;
+}
+
+const PackageBaseArtifactIdentitySelectionFailure*
+PackageBaseArtifactInstallPreparationFailure::selection_failure()
+        const noexcept {
+    return std::get_if<PackageBaseArtifactIdentitySelectionFailure>(&failure_);
+}
+
+const MixedPackageBaseInstallReasonUnsupported*
+PackageBaseArtifactInstallPreparationFailure::mixed_reason_failure()
+        const noexcept {
+    return std::get_if<MixedPackageBaseInstallReasonUnsupported>(&failure_);
+}
+
+const PackageBaseArtifactInstallPreparationFailure&
+SeparatedPackageBaseSourceBuildPreparationError::failure() const noexcept {
+    return failure_;
+}
+
+const PackageBaseArtifactIdentitySelectionFailure*
+SeparatedPackageBaseSourceBuildPreparationError::selection_failure()
+        const noexcept {
+    return failure_.selection_failure();
+}
+
+const MixedPackageBaseInstallReasonUnsupported*
+SeparatedPackageBaseSourceBuildPreparationError::mixed_reason_failure()
+        const noexcept {
+    return failure_.mixed_reason_failure();
+}
+
+const PackageBaseSourceBuildExecutionResult&
+SeparatedPackageBaseSourceBuildCleanupError::result() const noexcept {
+    return result_;
+}
+
+PackageBaseSourceBuildExecutionResult
+SeparatedPackageBaseSourceBuildCleanupError::release_result() && noexcept {
+    return std::move(result_);
+}
+
+PackageBaseArtifactInstallTransactionFailureKind
+PackageBaseArtifactInstallTransactionError::failure_kind() const noexcept {
+    return failure_kind_;
+}
+
+const std::string&
+PackageBaseArtifactInstallTransactionError::package_base() const noexcept {
+    return package_base_;
+}
+
+const std::vector<PackageBaseArtifactInstallTransactionAttempt>&
+PackageBaseArtifactInstallTransactionError::attempts() const noexcept {
+    return attempts_;
+}
+
+const std::optional<int>&
+PackageBaseArtifactInstallTransactionError::exit_code() const noexcept {
+    return exit_code_;
+}
+
+std::vector<PackageBaseArtifactInstallTransactionAttempt>
+PackageBaseArtifactInstallTransactionError::release_attempts() && noexcept {
+    return std::move(attempts_);
+}
+
+PackageBaseSourceBuildExecutionResult
+execute_prepared_package_base_source_build_work_item_typed(
         const ProductionSourceBuildWorkItem& work_item,
         const PacmanDatabasePaths& database_paths,
         const AppConfig& config) {
-    const RequiredPackageArtifactTarget& required_target =
-            require_singular_required_package_target(work_item);
+    if(work_item.required_targets.empty()) {
+        fail_unexpected(
+                "AUR set execution received no required package target.");
+    }
     std::vector<std::string> required_package_names;
     required_package_names.reserve(work_item.required_targets.size());
     for(const auto& target : work_item.required_targets) {
         required_package_names.push_back(target.package_name);
     }
+    const std::string compatibility_package_name =
+            work_item.required_targets.size() == 1
+            ? work_item.required_targets.front().package_name
+            : std::string{};
 
     // POLICY(#267): runnerが全work itemへ同じdatabase snapshot参照を渡す契約を
     // lifecycle差し替え側でも検証する。
@@ -943,9 +1084,10 @@ execute_prepared_source_build_work_item(
     const std::size_t call_index = g_state.aur_calls.size();
     g_state.aur_calls.push_back(stub::AurExecutionCall{
             call_index,
-            required_target.package_name,
-            required_target.package_base,
-            std::move(required_package_names),
+            compatibility_package_name,
+            work_item.request.checkout_name,
+            required_package_names,
+            work_item.required_targets,
             database_paths,
             snapshot_config(config),
             {}});
@@ -963,36 +1105,60 @@ execute_prepared_source_build_work_item(
     record_aur_lifecycle_event(call_index, stub::EventKind::AurCheckout);
     record_aur_lifecycle_event(call_index, stub::EventKind::AurBuild);
     switch(scripted.kind) {
-        case ScriptedAurExecutionKind::Installed:
+        case ScriptedAurExecutionKind::Success:
+        case ScriptedAurExecutionKind::CleanupFailure: {
+            if(scripted.child_outcomes.size() !=
+               work_item.required_targets.size()) {
+                fail_unexpected(
+                        "AUR set execution child outcome count differs from required targets.");
+            }
+            std::vector<PackageBaseSourceBuildSelectedResult>
+                    selected_children;
+            selected_children.reserve(scripted.child_outcomes.size());
+            for(std::size_t child_index = 0;
+                child_index < scripted.child_outcomes.size();
+                ++child_index) {
+                const ArtifactInstallExecutionOutcome outcome =
+                        scripted.child_outcomes[child_index];
+                switch(outcome) {
+                case ArtifactInstallExecutionOutcome::Installed:
+                case ArtifactInstallExecutionOutcome::SkippedAsNeeded:
+                    break;
+                default:
+                    fail_unexpected(
+                            "AUR set execution received an unknown child outcome.");
+                }
+                const RequiredPackageArtifactTarget& target =
+                        work_item.required_targets[child_index];
+                selected_children.push_back(
+                        PackageBaseSourceBuildSelectedResult{
+                                ArtifactPackageIdentity{
+                                        target.package_name, "2.0-1"},
+                                target.desired_reason,
+                                outcome});
+            }
+            PackageBaseSourceBuildExecutionResult result =
+                    PackageBaseSourceBuildExecutionResult::
+                            make_for_aur_update_runner_test(
+                                    work_item.request.checkout_name,
+                                    std::move(selected_children),
+                                    std::move(
+                                            scripted.unselected_artifacts));
             record_aur_lifecycle_event(
                     call_index, stub::EventKind::AurInstall);
             record_aur_lifecycle_event(
                     call_index, stub::EventKind::AurCleanup);
-            return ArtifactInstallExecutionOutcome::Installed;
-        case ScriptedAurExecutionKind::SkippedAsNeeded:
-            record_aur_lifecycle_event(
-                    call_index, stub::EventKind::AurInstall);
-            record_aur_lifecycle_event(
-                    call_index, stub::EventKind::AurCleanup);
-            return ArtifactInstallExecutionOutcome::SkippedAsNeeded;
+            if(scripted.kind ==
+               ScriptedAurExecutionKind::CleanupFailure) {
+                throw SeparatedPackageBaseSourceBuildCleanupError::
+                        make_for_aur_update_runner_test(
+                                std::move(result),
+                                scripted.diagnostic);
+            }
+            return result;
+        }
         case ScriptedAurExecutionKind::OrdinaryFailure:
             throw std::runtime_error(scripted.diagnostic);
-        case ScriptedAurExecutionKind::InstalledCleanupFailure:
-            record_aur_lifecycle_event(
-                    call_index, stub::EventKind::AurInstall);
-            record_aur_lifecycle_event(
-                    call_index, stub::EventKind::AurCleanup);
-            throw SeparatedSourceBuildCleanupError(
-                    ArtifactInstallExecutionOutcome::Installed,
-                    scripted.diagnostic);
-        case ScriptedAurExecutionKind::SkippedAsNeededCleanupFailure:
-            record_aur_lifecycle_event(
-                    call_index, stub::EventKind::AurInstall);
-            record_aur_lifecycle_event(
-                    call_index, stub::EventKind::AurCleanup);
-            throw SeparatedSourceBuildCleanupError(
-                    ArtifactInstallExecutionOutcome::SkippedAsNeeded,
-                    scripted.diagnostic);
         case ScriptedAurExecutionKind::UnknownFailure:
             throw UnknownAurExecutionFailure{};
     }

@@ -149,6 +149,20 @@ void append_source_build_work_items(
     }
 }
 
+int execute_sync_source_build_invocation(
+        const PreparedProductionSourceBuildInvocation& invocation,
+        const AppConfig& config) {
+    try {
+        execute_prepared_source_build_invocation(invocation, config);
+        return 0;
+    } catch(const SeparatedPackageBaseSourceBuildCleanupError& error) {
+        // Direct source routeは利用者がretained workspaceを手動確認できる
+        // 既存contractを維持する。AUR update resultのpath firewallとは別境界。
+        Logger::error(error.what());
+        return 1;
+    }
+}
+
 } // namespace
 
 int cmd_sync_search(
@@ -217,7 +231,7 @@ int cmd_sync_install(
         plans.reserve(parsed.targets.size());
         for(const auto& target : parsed.targets) {
             BuildPlan plan = resolve_build_plan(target);
-            require_executable_install_plan(target, plan);
+            require_executable_build_plan(target, plan);
             plans.push_back(std::move(plan));
         }
 
@@ -234,8 +248,7 @@ int cmd_sync_install(
         PreparedProductionSourceBuildInvocation invocation =
                 prepare_production_source_build_invocation(
                         std::move(work_items), config);
-        execute_prepared_source_build_invocation(invocation, config);
-        return 0;
+        return execute_sync_source_build_invocation(invocation, config);
     }
 
     if(parsed.targets.empty()) {
@@ -281,7 +294,7 @@ int cmd_sync_install(
         }
 
         BuildPlan plan = resolve_build_plan(package);
-        require_executable_install_plan(package, plan);
+        require_executable_build_plan(package, plan);
         append_source_build_work_items(
                 source_work_items,
                 prepare_aur_source_build_work_items(
@@ -301,7 +314,7 @@ int cmd_sync_install(
         }
     }
     if(source_invocation.has_value()) {
-        execute_prepared_source_build_invocation(
+        return execute_sync_source_build_invocation(
                 source_invocation.value(), config);
     }
     return 0;

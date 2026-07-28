@@ -416,6 +416,15 @@ SourceBuildExecutionResult execute_prepared_source_build_work_item_typed(
         const PacmanDatabasePaths& database_paths,
         const AppConfig& config) {
     static_cast<void>(database_paths);
+    if(work_item.required_targets.size() != 1 ||
+       work_item.request.package_name.empty() ||
+       work_item.request.package_name !=
+               work_item.required_targets.front().package_name ||
+       work_item.request.checkout_name !=
+               work_item.required_targets.front().package_base) {
+        fail_unexpected(
+                "System source upgrade singular execution received an inconsistent required target.");
+    }
     g_state.source_calls.push_back(stub::SourceExecutionCall{
             work_item.request.package_name,
             work_item.request.checkout_name,

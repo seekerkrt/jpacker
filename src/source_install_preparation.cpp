@@ -116,14 +116,6 @@ PreparedProductionSourceBuildInvocation prepare_production_source_build_invocati
     }
     for(const auto& work_item : work_items) {
         require_static_production_source_build_work_item(work_item);
-        const RequiredPackageArtifactTarget& target =
-                require_singular_required_package_target(work_item);
-        if(target.package_name != work_item.request.checkout_name) {
-            throw std::runtime_error(
-                    "Production separated source-build requires requested package and "
-                    "PackageBase to match: " + target.package_name + " / " +
-                    work_item.request.checkout_name + ".");
-        }
     }
 
     PacmanDatabasePaths database_paths = resolve_pacman_database_paths();

@@ -1113,8 +1113,8 @@ void require_executable_install_plan(const std::string& target, const BuildPlan&
     require_executable_build_plan(target, plan);
     if(!plan.split_package_targets.empty()) {
         throw std::runtime_error(
-                "Cannot execute install plan for " + target +
-                "; split package install target selection is not implemented: " +
+                "Cannot execute singular install plan for " + target +
+                "; split package targets require the PackageBase set lifecycle: " +
                 join_split_package_target_summaries(plan.split_package_targets));
     }
 }

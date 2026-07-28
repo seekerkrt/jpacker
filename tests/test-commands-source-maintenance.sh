@@ -122,6 +122,7 @@ setup_case() {
     unset JPACKER_TEST_MAKEPKG_ENV_LOG
     unset JPACKER_TEST_MAKEPKG_ENV_KEYS
     unset JPACKER_TEST_MAKEPKG_PACKAGELIST_EXIT_CODE
+    unset JPACKER_TEST_MAKEPKG_ARTIFACT_IDENTITIES
     unset JPACKER_TEST_SOURCE_MAINTENANCE_FAIL_SUBSTRING
     unset JPACKER_TEST_SOURCE_MAINTENANCE_PACMAN_SYU_Q_OUTPUT_FILE
     unset JPACKER_TEST_SOURCE_MAINTENANCE_PACMAN_SC_RACE_PATH
@@ -434,6 +435,27 @@ assert_command_prefix_count() {
     fi
 }
 
+assert_command_pattern_count() {
+    expected_pattern=$1
+    expected_count=$2
+    actual_count=$(grep -Ec -- "$expected_pattern" "$command_log" || true)
+    if [ "$actual_count" -ne "$expected_count" ]; then
+        echo "unexpected command pattern count: $actual_count (expected $expected_count)" >&2
+        echo "pattern: $expected_pattern" >&2
+        cat "$command_log" >&2
+        exit 1
+    fi
+}
+
+assert_command_pattern_absent() {
+    unexpected_pattern=$1
+    if grep -E -- "$unexpected_pattern" "$command_log" >/dev/null; then
+        echo "unexpected command pattern: $unexpected_pattern" >&2
+        cat "$command_log" >&2
+        exit 1
+    fi
+}
+
 assert_total_command_count() {
     expected=$1
     actual=$(wc -l < "$command_log")
@@ -687,28 +709,36 @@ assert_contains "Build Error: Package not found in repos or AUR: missing-source-
 assert_command_content_absent "git clone"
 assert_command_content_absent "makepkg"
 
-setup_case build-split-guard
-run_fail build split-child
-assert_contains "Build Error: Cannot build/install split AUR package split-child from PackageBase split-base" "$output_file"
-assert_command_content_absent "git clone"
-assert_command_content_absent "makepkg"
+setup_case build-split-child-selected-only
+export JPACKER_TEST_MAKEPKG_ARTIFACT_IDENTITIES='split-base|split-sibling|3.1-4
+split-base|split-child|3.1-4
+split-base|split-child-debug|3.1-4'
+run_ok --noedit --nodiff build split-child
+assert_command "git clone https://aur.archlinux.org/split-base.git split-base"
+assert_command_pattern_count \
+    '^sudo pacman -U -- .*/split-child-3\.1-4-x86_64\.pkg\.tar\.zst$' 1
+assert_command_pattern_absent '^sudo pacman -U .*split-sibling'
+assert_command_pattern_absent '^sudo pacman -U .*split-child-debug'
+assert_contains "PackageBase result: split-base" "$output_file"
+assert_contains "  required child: split-child -> split-child 3.1-4 (explicit): installed" "$output_file"
+assert_output_before \
+    "  produced artifact: split-sibling 3.1-4 (not selected; not installed)" \
+    "  produced artifact: split-child-debug 3.1-4 (not selected; not installed)" \
+    "$output_file"
 
 setup_case build-direct-split-priority
 run_fail build split-metadata-ambiguous-root
-assert_contains "Build Error: Cannot build/install split AUR package split-metadata-ambiguous-root from PackageBase split-metadata-ambiguous-base" "$output_file"
-assert_not_contains "ambiguous providers" "$output_file"
+assert_contains "ambiguous providers" "$output_file"
 assert_not_contains "conflicts/replaces metadata" "$output_file"
 
 setup_case sync-plan-metadata-before-split
 run_fail -S --aur split-metadata-root
 assert_contains "conflicts/replaces metadata requires manual review" "$output_file"
-assert_not_contains "split package install target selection is not implemented" "$output_file"
 
 setup_case sync-plan-provider-before-metadata-split
 run_fail -S --aur split-metadata-ambiguous-root
 assert_contains "ambiguous providers" "$output_file"
 assert_not_contains "conflicts/replaces metadata requires manual review" "$output_file"
-assert_not_contains "split package install target selection is not implemented" "$output_file"
 
 setup_case build-execution-failure
 export JPACKER_TEST_PACMAN_REPO_PACKAGES=clean-root
@@ -1943,7 +1973,7 @@ setup_case source-plan-failure-context
 export JPACKER_TEST_MAKEPKG_EXIT_CODE=42
 export JPACKER_TEST_MAKEPKG_PACKAGELIST_EXIT_CODE=0
 run_source_fail plan-failure
-assert_contains "Failed while building/installing PackageBase dep-target (dep-target): Build-only makepkg failed with exit code 42." "$output_file"
+assert_contains "Build-only makepkg failed with exit code 42." "$output_file"
 assert_command "git clone https://aur.archlinux.org/dep-target.git dep-target"
 assert_command_count "makepkg --packagelist" 1
 assert_command_count "makepkg -sc --noconfirm" 1

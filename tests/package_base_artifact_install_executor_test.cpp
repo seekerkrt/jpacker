@@ -63,6 +63,16 @@ concept HasArtifactIndex = requires(const Value& value) {
 };
 
 template <typename Value>
+concept HasDirectiveDataMember = requires(const Value& value) {
+    value.directive;
+};
+
+template <typename Value>
+concept HasOutcomeDataMember = requires(const Value& value) {
+    value.outcome;
+};
+
+template <typename Value>
 concept HasSelectedArtifacts = requires(const Value& value) {
     value.selected_artifacts;
 };
@@ -218,6 +228,21 @@ static_assert(
 static_assert(
         !HasPathDataMember<
                 MixedPackageBaseInstallReasonArtifact>);
+static_assert(std::is_base_of_v<
+              std::runtime_error,
+              PackageBaseArtifactInstallTransactionError>);
+static_assert(!HasPathDataMember<PackageBaseArtifactInstallTransactionAttempt>);
+static_assert(!HasArtifactPathDataMember<
+              PackageBaseArtifactInstallTransactionAttempt>);
+static_assert(!HasWorkspacePathDataMember<
+              PackageBaseArtifactInstallTransactionAttempt>);
+static_assert(!HasArtifactIndex<PackageBaseArtifactInstallTransactionAttempt>);
+static_assert(!HasDirectiveDataMember<
+              PackageBaseArtifactInstallTransactionAttempt>);
+static_assert(!HasOutcomeDataMember<
+              PackageBaseArtifactInstallTransactionAttempt>);
+static_assert(!CanCleanupWorkspace<
+              PackageBaseArtifactInstallTransactionAttempt>);
 
 namespace {
 
@@ -1811,21 +1836,42 @@ void test_move_replay_failure_and_cleanup_lifecycle() {
                 73);
         process_stub::set_run_hook(require_metadata_released_before_run);
 
-        const std::string diagnostic = expect_runtime_error(
-                [&prepared]() {
-                    static_cast<void>(
-                            execute_prepared_package_base_artifact_install(
-                                    prepared,
-                                    ArtifactInstallExecutionOptions{}));
-                },
-                "nonzero PackageBase pacman transaction");
+        bool transaction_failure_reported = false;
+        try {
+            static_cast<void>(
+                    execute_prepared_package_base_artifact_install(
+                            prepared,
+                            ArtifactInstallExecutionOptions{}));
+        } catch(const PackageBaseArtifactInstallTransactionError& error) {
+            transaction_failure_reported = true;
+            const std::string diagnostic = error.what();
+            expect(
+                    error.failure_kind() ==
+                            PackageBaseArtifactInstallTransactionFailureKind::
+                                    NonzeroExit &&
+                            error.package_base() == PACKAGE_BASE &&
+                            error.exit_code() == std::optional<int>{73},
+                    "Nonzero PackageBase transaction typed detail differs");
+            expect(
+                    error.attempts().size() == 1 &&
+                            error.attempts()[0].identity.package_name ==
+                                    "command-failure" &&
+                            error.attempts()[0].identity.full_version ==
+                                    "1-1" &&
+                            error.attempts()[0].desired_reason ==
+                                    DesiredInstallReason::Explicit,
+                    "Nonzero PackageBase transaction attempt snapshot differs");
+            expect(
+                    diagnostic == "pacman -U failed with exit code 73.",
+                    "Nonzero PackageBase transaction diagnostic differs");
+            expect(
+                    diagnostic.find(fixture.path_at(0).string()) ==
+                            std::string::npos,
+                    "Nonzero transaction diagnostic exposed an artifact path");
+        }
         expect(
-                diagnostic == "pacman -U failed with exit code 73.",
-                "Nonzero PackageBase transaction diagnostic differs");
-        expect(
-                diagnostic.find(fixture.path_at(0).string()) ==
-                        std::string::npos,
-                "Nonzero transaction diagnostic exposed an artifact path");
+                transaction_failure_reported,
+                "Nonzero PackageBase transaction did not report typed failure");
         expect(
                 process_stub::run_command_call_count() == 1 &&
                         prepared.selected_artifacts().size() == 1 &&

@@ -50,6 +50,13 @@ enum class AurUpdateOperationReductionReason {
     DuplicateExecutionAttribution,
     UnknownExecutionUpdatePlanIndex,
     MissingExecutionAttribution,
+    DuplicateExecutionChildAttribution,
+    MissingExecutionChildAttribution,
+    UnexpectedExecutionChildAttribution,
+    UnknownExecutionChildUpdatePlanIndex,
+    ExecutionChildSnapshotInconsistent,
+    UnexpectedSelectedArtifact,
+    UnexpectedUnselectedArtifactIdentity,
 
     ExecutionResultWithPreparationIssues,
     MissingExecutionResult,
@@ -75,12 +82,18 @@ struct AurUpdateOperationReductionIssue {
 // flattenする前のtyped outcomeもtarget単位でowned保持する。
 struct AurUpdateOperationExecutionContribution {
     std::size_t work_item_index = 0;
+    std::size_t required_child_index = 0;
     std::string package_name;
     std::string package_base;
+    std::optional<ArtifactPackageIdentity> selected_artifact;
+    std::optional<DesiredInstallReason> desired_install_reason;
+    std::vector<RootTargetIdentity> affected_roots;
+    std::vector<PackageRole> roles;
     AurUpdateWorkItemExecutionStatus status =
             AurUpdateWorkItemExecutionStatus::NotAttempted;
     AurUpdateWorkItemFailureKind failure_kind =
             AurUpdateWorkItemFailureKind::PriorWorkItemStopped;
+    AurUpdateWorkItemFailureDetail failure_detail;
     std::optional<std::string> diagnostic;
 };
 
@@ -98,6 +111,7 @@ struct AurUpdateOperationTargetResult {
     // final statusを決めたdecisive work itemのtyped detail。
     std::optional<std::size_t> execution_work_item_index;
     std::optional<AurUpdateWorkItemFailureKind> execution_failure_kind;
+    std::optional<AurUpdateWorkItemFailureDetail> execution_failure_detail;
     std::optional<std::string> execution_diagnostic;
 
     std::vector<AurUpdateOperationExecutionContribution>
@@ -114,9 +128,8 @@ struct AurUpdateOperationResult {
     std::optional<AurUpdateInvocationExecutionStatus> execution_status;
     std::vector<AurUpdateWorkItemExecutionResult> execution_work_items;
 
-    // operation-level snapshotはglobal/target-attributedを分けずに保持する。
-    // 通常issueは入力順/nested typed failureを保ち、PR5a lifecycle blocker
-    // だけは従来表示と同じtarget順のBlockingPreflightへ正規化する。
+    // operation-level snapshotはglobal/target-attributedを分けず、入力順と
+    // nested typed failureを保って保持する。
     std::vector<AurUpdatePreparationIssue> preparation_issues;
     std::vector<AurUpdatePreparationWarning> preparation_warnings;
     std::vector<AurUpdateOperationReductionIssue> reduction_issues;

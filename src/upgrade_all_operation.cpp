@@ -549,6 +549,50 @@ bool capture_duplicate_exclusions(
     return is_consistent;
 }
 
+bool has_exact_external_child_identity(
+        const AurUpdateExternallySatisfiedBuildUnit& unit,
+        const FilteredAurUpdateBuildUnitCorrelation& correlation) noexcept {
+    if(correlation.package_names.empty() ||
+       unit.plan_package_names != correlation.package_names ||
+       unit.required_target_attributions.size() !=
+               correlation.package_names.size()) {
+        return false;
+    }
+
+    const bool is_singular = correlation.package_names.size() == 1;
+    if((is_singular &&
+        unit.package_name != correlation.package_names.front()) ||
+       (!is_singular && !unit.package_name.empty())) {
+        return false;
+    }
+
+    for(std::size_t child_index = 0;
+        child_index < unit.required_target_attributions.size();
+        ++child_index) {
+        const RequiredPackageArtifactTarget& required_target =
+                unit.required_target_attributions[child_index]
+                        .required_target;
+        if(required_target.package_base != unit.package_base ||
+           required_target.package_name !=
+                   correlation.package_names[child_index] ||
+           std::find(
+                   correlation.package_names.begin(),
+                   correlation.package_names.begin() + child_index,
+                   required_target.package_name) !=
+                   correlation.package_names.begin() + child_index) {
+            return false;
+        }
+    }
+    return true;
+}
+
+std::optional<std::string> external_singular_package_name(
+        const AurUpdateExternallySatisfiedBuildUnit& unit) {
+    if(unit.required_target_attributions.size() != 1) return std::nullopt;
+    return unit.required_target_attributions.front()
+            .required_target.package_name;
+}
+
 bool capture_external_satisfaction(
         UpgradeAllOperationResult& aggregate,
         const FilteredAurUpdateExecutionResult& filtered) {
@@ -566,7 +610,7 @@ bool capture_external_satisfaction(
                     UpgradeAllOperationPhase::Reduction,
                     "Externally satisfied AUR build unit has no PR3 root-role correlation.");
             issue.build_plan_order_index = unit.build_plan_order_index;
-            issue.package_name = unit.package_name;
+            issue.package_name = external_singular_package_name(unit);
             aggregate.issues.push_back(std::move(issue));
             is_consistent = false;
             continue;
@@ -577,17 +621,14 @@ bool capture_external_satisfaction(
         if(correlation.original_build_plan_index !=
                    unit.build_plan_order_index ||
            correlation.package_base != unit.package_base ||
-           std::find(
-                   correlation.package_names.begin(),
-                   correlation.package_names.end(),
-                   unit.package_name) == correlation.package_names.end()) {
+           !has_exact_external_child_identity(unit, correlation)) {
             UpgradeAllOperationIssue issue = make_issue(
                     UpgradeAllOperationIssueKind::
                             ExternalSatisfactionCorrelationInconsistent,
                     UpgradeAllOperationPhase::Reduction,
-                    "Externally satisfied AUR build-unit identity differs from its PR3 correlation.");
+                    "Externally satisfied AUR build-unit child identity differs from its PR3 correlation.");
             issue.build_plan_order_index = unit.build_plan_order_index;
-            issue.package_name = unit.package_name;
+            issue.package_name = external_singular_package_name(unit);
             aggregate.issues.push_back(std::move(issue));
             is_consistent = false;
             continue;

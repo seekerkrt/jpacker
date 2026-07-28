@@ -346,11 +346,37 @@ assert_exact_line "registered source: source-updated: updated" "$stdout_file"
 assert_exact_line "registered source: source-no-change: no change" "$stdout_file"
 assert_exact_line "AUR target: aur-updated: updated" "$stdout_file"
 assert_exact_line "AUR target: aur-no-change: no change" "$stdout_file"
+assert_not_contains "PackageBase result:" "$stdout_file"
 assert_contains "fixture registered source warning" "$stdout_file"
 assert_contains "fixture AUR preparation warning" "$stdout_file"
 assert_not_contains "fixture registered source warning" "$stderr_file"
 assert_exact_line "upgrade-all completed" "$stdout_file"
 assert_exact_line "package state changed" "$stdout_file"
+
+setup_case aur-split-multiple aur-split-multiple
+run_status 0 upgrade-all
+assert_exact_line "registered source: source-updated: updated" "$stdout_file"
+assert_exact_line "AUR target: aur-updated: updated" "$stdout_file"
+assert_exact_line "AUR target: aur-split-main: updated" "$stdout_file"
+assert_exact_line "PackageBase result: aur-split-suite" "$stdout_file"
+assert_exact_line \
+    "  required child: aur-split-main -> aur-split-main 7.0.1-2 (explicit): installed / updated" \
+    "$stdout_file"
+assert_exact_line \
+    "  required child: aur-split-dependency -> aur-split-dependency 7.0.1-2 (dependency): skipped as needed / no change" \
+    "$stdout_file"
+assert_exact_line \
+    "  produced artifact: aur-split-sibling 7.0.1-2 (not selected; not installed)" \
+    "$stdout_file"
+assert_exact_line \
+    "  produced artifact: aur-split-suite-debug 7.0.1-2 (not selected; not installed)" \
+    "$stdout_file"
+assert_line_before \
+    "  required child: aur-split-main -> aur-split-main 7.0.1-2 (explicit): installed / updated" \
+    "  required child: aur-split-dependency -> aur-split-dependency 7.0.1-2 (dependency): skipped as needed / no change" \
+    "$stdout_file"
+assert_not_contains "required child: aur-split-sibling" "$stdout_file"
+assert_not_contains "required child: aur-split-suite-debug" "$stdout_file"
 
 setup_case completed-no-change completed-no-change
 run_status 0 upgrade-all
@@ -475,12 +501,24 @@ setup_case stopped-aur stopped-on-aur-failure
 run_status 1 upgrade-all
 assert_exact_line "AUR target: aur-first-updated: updated" "$stdout_file"
 assert_exact_line \
-    "AUR target: aur-failed: failed: fixture AUR build or install failed" \
+    "AUR target: aur-failed: failed: package transaction failed (exit code 86)" \
     "$stdout_file"
 assert_exact_line \
     "AUR target: aur-later: not attempted: prior work item stopped" \
     "$stdout_file"
-assert_contains "fixture AUR build or install failed" "$stderr_file"
+assert_contains \
+    "execution failure for PackageBase aur-failed: package transaction failed (exit code 86)" \
+    "$stderr_file"
+assert_contains \
+    "transaction attempt: aur-failed 4.2.0-1 (explicit)" "$stderr_file"
+assert_exact_line \
+    "  required child: aur-failed (explicit): no successful outcome" \
+    "$stdout_file"
+assert_not_contains "required child: aur-failed ->" "$stdout_file"
+assert_not_contains "/private/workspace/upgrade-all-secret" "$stdout_file"
+assert_not_contains "/private/workspace/upgrade-all-secret" "$stderr_file"
+assert_not_contains "/private/artifacts/" "$stdout_file"
+assert_not_contains "/private/artifacts/" "$stderr_file"
 assert_exact_line "upgrade-all stopped on AUR failure" "$stdout_file"
 assert_exact_line "partial completion" "$stdout_file"
 assert_exact_line "some phases were not attempted" "$stdout_file"
@@ -493,7 +531,9 @@ assert_exact_line \
 assert_exact_line \
     "upgrade-all stopped after AUR cleanup failure" "$stdout_file"
 assert_exact_line "cleanup failure occurred" "$stdout_file"
-assert_contains "fixture AUR cleanup failed" "$stderr_file"
+assert_contains \
+    "execution failure for PackageBase aur-cleanup-failed: cleanup failure after successful package transaction" \
+    "$stderr_file"
 
 setup_case stopped-aur-no-change-cleanup \
     stopped-after-aur-no-change-cleanup-failure
@@ -501,6 +541,33 @@ run_status 1 upgrade-all
 assert_exact_line \
     "AUR target: aur-no-change-cleanup-failed: no package change, but cleanup failed" \
     "$stdout_file"
+
+setup_case stopped-aur-mixed-cleanup \
+    stopped-after-aur-mixed-cleanup-failure
+run_status 1 upgrade-all
+assert_exact_line \
+    "AUR target: aur-cleanup-main: updated, but cleanup failed" "$stdout_file"
+assert_exact_line \
+    "AUR target: aur-cleanup-later: not attempted: prior work item stopped" \
+    "$stdout_file"
+assert_exact_line "PackageBase result: aur-cleanup-suite" "$stdout_file"
+assert_exact_line \
+    "  required child: aur-cleanup-main -> aur-cleanup-main 8.3.0-5 (explicit): installed / updated, but cleanup failed" \
+    "$stdout_file"
+assert_exact_line \
+    "  required child: aur-cleanup-dependency -> aur-cleanup-dependency 8.3.0-5 (dependency): skipped as needed / no change, but cleanup failed" \
+    "$stdout_file"
+assert_exact_line \
+    "  produced artifact: aur-cleanup-suite-debug 8.3.0-5 (not selected; not installed)" \
+    "$stdout_file"
+assert_contains \
+    "execution failure for PackageBase aur-cleanup-suite: cleanup failure after successful package transaction" \
+    "$stderr_file"
+assert_not_contains "/private/workspace/upgrade-all-secret" "$stdout_file"
+assert_not_contains "/private/workspace/upgrade-all-secret" "$stderr_file"
+assert_exact_line "partial completion" "$stdout_file"
+assert_exact_line "some phases were not attempted" "$stdout_file"
+assert_exact_line "cleanup failure occurred" "$stdout_file"
 
 setup_case foreign-inventory-failure foreign-inventory-failure
 run_status 1 upgrade-all
@@ -600,7 +667,9 @@ assert_exact_line \
     "AUR target: defensive-cleanup: no package change, but cleanup failed" \
     "$stdout_file"
 assert_exact_line "cleanup failure occurred" "$stdout_file"
-assert_contains "fixture completed cleanup failure" "$stderr_file"
+assert_contains \
+    "execution failure: cleanup failure after successful package transaction" \
+    "$stderr_file"
 
 setup_case defensive-not-attempted completed-not-attempted
 run_status 1 upgrade-all
@@ -658,9 +727,9 @@ run_matrix_table target-status 10 <<'EOF'
 0|AUR target: matrix-target: skipped: reason unavailable|-
 1|AUR target: matrix-target: unsupported: reason unavailable|upgrade-all result contains failure details despite a successful aggregate status.
 1|AUR target: matrix-target: incomplete: reason unavailable|upgrade-all result contains failure details despite a successful aggregate status.
-1|AUR target: matrix-target: failed: matrix execution diagnostic|AUR execution failure: build or install failed: matrix execution diagnostic
-1|AUR target: matrix-target: updated, but cleanup failed|AUR execution failure: cleanup failed after package transaction: matrix cleanup diagnostic
-1|AUR target: matrix-target: no package change, but cleanup failed|AUR execution failure: cleanup failed after package transaction: matrix cleanup diagnostic
+1|AUR target: matrix-target: failed: build or install failure|execution failure: build or install failure
+1|AUR target: matrix-target: updated, but cleanup failed|execution failure: cleanup failure after successful package transaction
+1|AUR target: matrix-target: no package change, but cleanup failed|execution failure: cleanup failure after successful package transaction
 1|AUR target: matrix-target: not attempted: prior work item stopped|upgrade-all result contains failure details despite a successful aggregate status.
 1|system: completed|Unexpected upgrade-all command failure: Unknown AUR update target status.
 EOF
@@ -719,12 +788,12 @@ run_matrix_table preparation-reason 16 <<'EOF'
 EOF
 
 run_matrix_table execution-failure-kind 6 <<'EOF'
-1|AUR target: matrix-target: failed: matrix execution diagnostic|upgrade-all result contains failure details despite a successful aggregate status.
-1|AUR target: matrix-target: failed: matrix execution diagnostic|AUR execution failure: build or install failed: matrix execution diagnostic
-1|AUR target: matrix-target: updated, but cleanup failed|AUR execution failure: cleanup failed after package transaction: matrix execution diagnostic
-1|AUR target: matrix-target: failed: matrix execution diagnostic|AUR execution failure: unknown exception: matrix execution diagnostic
+1|AUR target: matrix-target: failed: failure category unavailable|upgrade-all result contains failure details despite a successful aggregate status.
+1|AUR target: matrix-target: failed: build or install failure|execution failure: build or install failure
+1|AUR target: matrix-target: updated, but cleanup failed|execution failure: cleanup failure after successful package transaction
+1|AUR target: matrix-target: failed: unknown exception|execution failure: unknown exception
 1|AUR target: matrix-target: not attempted: prior work item stopped|upgrade-all result contains failure details despite a successful aggregate status.
-1|AUR target: matrix-target: failed: matrix execution diagnostic|Unexpected upgrade-all command failure: Unknown AUR execution failure kind.
+1|-|Unexpected upgrade-all command failure: Unknown AUR work-item failure kind.
 EOF
 
 run_matrix_table reduction-stage 4 <<'EOF'
@@ -734,7 +803,7 @@ run_matrix_table reduction-stage 4 <<'EOF'
 1|AUR phase: completed|Unexpected upgrade-all command failure: Unknown AUR reduction stage.
 EOF
 
-run_matrix_table reduction-reason 19 <<'EOF'
+run_matrix_table reduction-reason 26 <<'EOF'
 1|AUR phase: completed|AUR reduction issue: preflight: duplicate preflight update plan index: matrix reduction diagnostic
 1|AUR phase: completed|AUR reduction issue: preflight: out-of-range preflight update plan index: matrix reduction diagnostic
 1|AUR phase: completed|AUR reduction issue: preflight: preflight target order inconsistent: matrix reduction diagnostic
@@ -747,6 +816,13 @@ run_matrix_table reduction-reason 19 <<'EOF'
 1|AUR phase: completed|AUR reduction issue: preflight: duplicate execution attribution: matrix reduction diagnostic
 1|AUR phase: completed|AUR reduction issue: preflight: unknown execution update plan index: matrix reduction diagnostic
 1|AUR phase: completed|AUR reduction issue: preflight: missing execution attribution: matrix reduction diagnostic
+1|AUR phase: completed|AUR reduction issue: preflight: duplicate execution child attribution: matrix reduction diagnostic
+1|AUR phase: completed|AUR reduction issue: preflight: missing execution child attribution: matrix reduction diagnostic
+1|AUR phase: completed|AUR reduction issue: preflight: unexpected execution child attribution: matrix reduction diagnostic
+1|AUR phase: completed|AUR reduction issue: preflight: unknown execution child update plan index: matrix reduction diagnostic
+1|AUR phase: completed|AUR reduction issue: preflight: execution child snapshot inconsistent: matrix reduction diagnostic
+1|AUR phase: completed|AUR reduction issue: preflight: unexpected selected artifact: matrix reduction diagnostic
+1|AUR phase: completed|AUR reduction issue: preflight: unexpected unselected artifact identity: matrix reduction diagnostic
 1|AUR phase: completed|AUR reduction issue: preflight: execution result with preparation issues: matrix reduction diagnostic
 1|AUR phase: completed|AUR reduction issue: preflight: missing execution result: matrix reduction diagnostic
 1|AUR phase: completed|AUR reduction issue: preflight: unknown enum value: matrix reduction diagnostic
@@ -830,7 +906,7 @@ run_matrix_table external-attribution-missing 1 <<'EOF'
 1|AUR phase: completed|Unexpected upgrade-all command failure: External satisfaction has no explicit source identity.
 EOF
 
-if [ "$case_count" -ne 198 ]; then
+if [ "$case_count" -ne 207 ]; then
     echo "upgrade-all command test scenario count drifted: $case_count" >&2
     exit 1
 fi

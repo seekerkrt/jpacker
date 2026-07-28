@@ -17,7 +17,11 @@ is_typed_pacman_install() {
             shift
             ;;
     esac
-    [ "$#" -eq 2 ] && [ "${1:-}" = "--" ] && [ -n "${2:-}" ]
+    [ "$#" -ge 2 ] && [ "${1:-}" = "--" ] || return 1
+    shift
+    for install_artifact in "$@"; do
+        [ -n "$install_artifact" ] || return 1
+    done
 }
 
 require_known_pacman_argument_tail() {

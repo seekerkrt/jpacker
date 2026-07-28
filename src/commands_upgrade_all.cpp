@@ -1,6 +1,7 @@
 #include "commands_upgrade_all.hpp"
 
 #include "app_config.hpp"
+#include "aur_update_cli_presentation.hpp"
 #include "cli_parser.hpp"
 #include "logging.hpp"
 #include "upgrade_all_operation.hpp"
@@ -444,41 +445,8 @@ std::string_view preparation_reason_label(AurUpdatePreparationReason reason) {
         return "build unit selection inconsistent";
     case AurUpdatePreparationReason::ExternalSatisfactionInconsistent:
         return "external satisfaction inconsistent";
-    case AurUpdatePreparationReason::MultipleArtifactLifecycleNotConnected:
-        // Defensive fallback。通常経路はoperation reducerがlegacy preflight
-        // categoryへ戻すため、このinternal blockerをcommandへ公開しない。
-        return "static work item invalid";
     }
     throw std::logic_error("Unknown AUR update preparation reason.");
-}
-
-std::string_view execution_failure_label(AurUpdateWorkItemFailureKind kind) {
-    switch(kind) {
-    case AurUpdateWorkItemFailureKind::None:
-        return "none";
-    case AurUpdateWorkItemFailureKind::BuildOrInstallFailed:
-        return "build or install failed";
-    case AurUpdateWorkItemFailureKind::CleanupFailedAfterPackageTransaction:
-        return "cleanup failed after package transaction";
-    case AurUpdateWorkItemFailureKind::UnknownException:
-        return "unknown exception";
-    case AurUpdateWorkItemFailureKind::PriorWorkItemStopped:
-        return "prior work item stopped";
-    }
-    throw std::logic_error("Unknown AUR execution failure kind.");
-}
-
-bool should_print_execution_failure(AurUpdateWorkItemFailureKind kind) {
-    switch(kind) {
-    case AurUpdateWorkItemFailureKind::None:
-    case AurUpdateWorkItemFailureKind::PriorWorkItemStopped:
-        return false;
-    case AurUpdateWorkItemFailureKind::BuildOrInstallFailed:
-    case AurUpdateWorkItemFailureKind::CleanupFailedAfterPackageTransaction:
-    case AurUpdateWorkItemFailureKind::UnknownException:
-        return true;
-    }
-    throw std::logic_error("Unknown AUR execution failure kind.");
 }
 
 std::string_view reduction_stage_label(AurUpdateOperationReductionStage stage) {
@@ -526,6 +494,26 @@ std::string_view reduction_reason_label(
         return "unknown execution update plan index";
     case AurUpdateOperationReductionReason::MissingExecutionAttribution:
         return "missing execution attribution";
+    case AurUpdateOperationReductionReason::
+            DuplicateExecutionChildAttribution:
+        return "duplicate execution child attribution";
+    case AurUpdateOperationReductionReason::
+            MissingExecutionChildAttribution:
+        return "missing execution child attribution";
+    case AurUpdateOperationReductionReason::
+            UnexpectedExecutionChildAttribution:
+        return "unexpected execution child attribution";
+    case AurUpdateOperationReductionReason::
+            UnknownExecutionChildUpdatePlanIndex:
+        return "unknown execution child update plan index";
+    case AurUpdateOperationReductionReason::
+            ExecutionChildSnapshotInconsistent:
+        return "execution child snapshot inconsistent";
+    case AurUpdateOperationReductionReason::UnexpectedSelectedArtifact:
+        return "unexpected selected artifact";
+    case AurUpdateOperationReductionReason::
+            UnexpectedUnselectedArtifactIdentity:
+        return "unexpected unselected artifact identity";
     case AurUpdateOperationReductionReason::
             ExecutionResultWithPreparationIssues:
         return "execution result with preparation issues";
@@ -713,28 +701,6 @@ std::string target_reason_label(const AurUpdateOperationTargetResult& target) {
     return "reason unavailable";
 }
 
-std::string target_failure_diagnostic(
-        const AurUpdateOperationTargetResult& target) {
-    if(target.execution_diagnostic.has_value() &&
-       !target.execution_diagnostic->empty()) {
-        return *target.execution_diagnostic;
-    }
-    for(const AurUpdatePreparationIssue& issue : target.preparation_issues) {
-        if(!issue.diagnostic.empty()) return issue.diagnostic;
-    }
-    for(const AurUpdateExecutionIssue& issue : target.preflight_issues) {
-        if(!issue.diagnostic.empty()) return issue.diagnostic;
-    }
-    for(const AurUpdateOperationExecutionContribution& contribution :
-        target.execution_contributions) {
-        if(contribution.diagnostic.has_value() &&
-           !contribution.diagnostic->empty()) {
-            return *contribution.diagnostic;
-        }
-    }
-    return "diagnostic unavailable";
-}
-
 std::string aur_target_status_label(
         const AurUpdateOperationTargetResult& target,
         AurUpdateOperationStatus operation_status) {
@@ -750,7 +716,7 @@ std::string aur_target_status_label(
     case AurUpdateOperationTargetStatus::Incomplete:
         return "incomplete: " + target_reason_label(target);
     case AurUpdateOperationTargetStatus::Failed:
-        return "failed: " + target_failure_diagnostic(target);
+        return "failed: " + aur_update_cli_target_failure_summary(target);
     case AurUpdateOperationTargetStatus::UpdatedCleanupFailed:
         return "updated, but cleanup failed";
     case AurUpdateOperationTargetStatus::NoChangeCleanupFailed:
@@ -826,7 +792,9 @@ void print_registered_sources(const SystemSourceUpgradeResult& result) {
     }
 }
 
-void print_aur_phase(const UpgradeAllAurPhaseResult& aur) {
+void print_aur_phase(
+        const UpgradeAllAurPhaseResult& aur,
+        const AurUpdateCliPresentation* presentation) {
     if(aur.status == UpgradeAllAurPhaseStatus::NotAttempted) {
         if(!aur.not_attempted_reason.has_value()) {
             throw std::logic_error(
@@ -850,17 +818,21 @@ void print_aur_phase(const UpgradeAllAurPhaseResult& aur) {
             aur.operation_result->reduced_operation_result;
     if(operation.targets.empty()) {
         std::cout << "AUR targets: none" << std::endl;
-        return;
-    }
-    for(const AurUpdateOperationTargetResult& target : operation.targets) {
-        const std::string status =
-                aur_target_status_label(target, operation.status);
-        std::cout << "AUR target: " << target.update.installed_name << ": "
-                  << status << std::endl;
-        if(target.package_base.has_value()) {
-            std::cout << "  PackageBase: " << *target.package_base
-                      << std::endl;
+    } else {
+        for(const AurUpdateOperationTargetResult& target : operation.targets) {
+            const std::string status =
+                    aur_target_status_label(target, operation.status);
+            std::cout << "AUR target: " << target.update.installed_name << ": "
+                      << status << std::endl;
+            if(target.package_base.has_value()) {
+                std::cout << "  PackageBase: " << *target.package_base
+                          << std::endl;
+            }
         }
+    }
+    if(presentation == nullptr) return;
+    for(const std::string& line : presentation->summary_lines) {
+        std::cout << line << std::endl;
     }
 }
 
@@ -870,7 +842,9 @@ bool has_foreign_inventory_failure(
            inventory.failure.has_value() || inventory.diagnostic.has_value();
 }
 
-void print_aur_phase(const UpgradeAllOperationResult& result) {
+void print_aur_phase(
+        const UpgradeAllOperationResult& result,
+        const AurUpdateCliPresentation* presentation) {
     // POLICY(#281): inventory failureを含むsynthetic resultでも、AUR mutationが
     // 完了したような表示へ丸めない。直接fieldをtyped source of truthにする。
     if(has_foreign_inventory_failure(result.foreign_inventory)) {
@@ -878,7 +852,7 @@ void print_aur_phase(const UpgradeAllOperationResult& result) {
                   << std::endl;
         return;
     }
-    print_aur_phase(result.aur);
+    print_aur_phase(result.aur, presentation);
 }
 
 void print_duplicate_exclusions(const UpgradeAllOperationResult& result) {
@@ -1114,44 +1088,6 @@ void print_aur_preparation_details(
     }
 }
 
-void print_aur_execution_failures(const AurUpdateOperationResult& result) {
-    std::set<std::size_t> printed_work_items;
-    for(const AurUpdateOperationTargetResult& target : result.targets) {
-        if(!target.execution_failure_kind.has_value() ||
-           !should_print_execution_failure(
-                   *target.execution_failure_kind)) {
-            continue;
-        }
-        if(target.execution_work_item_index.has_value() &&
-           !printed_work_items.insert(
-                   *target.execution_work_item_index).second) {
-            continue;
-        }
-        Logger::error(
-                "AUR execution failure: " +
-                std::string(execution_failure_label(
-                        *target.execution_failure_kind)) +
-                ": " + target_failure_diagnostic(target));
-    }
-
-    for(const AurUpdateWorkItemExecutionResult& work_item :
-        result.execution_work_items) {
-        if(!should_print_execution_failure(work_item.failure_kind) ||
-           printed_work_items.contains(work_item.work_item_index)) {
-            continue;
-        }
-        const std::string diagnostic = work_item.diagnostic.has_value() &&
-                        !work_item.diagnostic->empty()
-                ? *work_item.diagnostic
-                : "diagnostic unavailable";
-        Logger::error(
-                "AUR execution failure: " +
-                std::string(execution_failure_label(
-                        work_item.failure_kind)) +
-                ": " + diagnostic);
-    }
-}
-
 void print_aur_reduction_issues(const AurUpdateOperationResult& result) {
     for(const AurUpdateOperationReductionIssue& issue :
         result.reduction_issues) {
@@ -1229,6 +1165,8 @@ void print_aggregate_warnings(
 void print_aggregate_issues_and_diagnostics(
         const UpgradeAllOperationResult& result,
         const std::set<std::string>& already_reported_diagnostics) {
+    const bool has_typed_aur_execution_snapshot =
+            result.aur.operation_result.has_value();
     std::set<std::string> issue_diagnostics;
     for(const UpgradeAllOperationIssue& issue : result.issues) {
         const bool already_reported =
@@ -1247,13 +1185,20 @@ void print_aggregate_issues_and_diagnostics(
                                       issue.package_metadata_failure->code)) +
                     "]";
         }
-        if(!issue.diagnostic.empty()) message += ": " + issue.diagnostic;
+        const bool suppress_raw_aur_execution_diagnostic =
+                has_typed_aur_execution_snapshot &&
+                issue.phase == UpgradeAllOperationPhase::AurExecution;
+        if(!issue.diagnostic.empty() &&
+           !suppress_raw_aur_execution_diagnostic) {
+            message += ": " + issue.diagnostic;
+        }
         if(!already_reported) Logger::error(message);
         issue_diagnostics.insert(diagnostic_key(
                 aggregate_phase_label(issue.phase), issue.diagnostic));
     }
 
-    if(result.aur.diagnostic.has_value() && !result.aur.diagnostic->empty()) {
+    if(!has_typed_aur_execution_snapshot &&
+       result.aur.diagnostic.has_value() && !result.aur.diagnostic->empty()) {
         const bool already_reported = std::any_of(
                 result.issues.begin(), result.issues.end(),
                 [&](const UpgradeAllOperationIssue& issue) {
@@ -1267,6 +1212,8 @@ void print_aggregate_issues_and_diagnostics(
     for(const UpgradeAllOperationDiagnostic& diagnostic :
         result.diagnostics) {
         if(diagnostic.diagnostic.empty() ||
+           (has_typed_aur_execution_snapshot &&
+            diagnostic.phase == UpgradeAllOperationPhase::AurExecution) ||
            (diagnostic.phase == UpgradeAllOperationPhase::ForeignInventory &&
             already_reported_diagnostics.contains(diagnostic.diagnostic)) ||
            issue_diagnostics.contains(diagnostic_key(
@@ -1281,7 +1228,9 @@ void print_aggregate_issues_and_diagnostics(
     }
 }
 
-void print_details(const UpgradeAllOperationResult& result) {
+void print_details(
+        const UpgradeAllOperationResult& result,
+        const AurUpdateCliPresentation* presentation) {
     std::set<std::string> printed_warning_keys;
     print_system_warnings(result.system_source, printed_warning_keys);
     print_system_failures(result.system_source);
@@ -1298,7 +1247,11 @@ void print_details(const UpgradeAllOperationResult& result) {
         print_aur_preparation_details(
                 filtered.reduced_operation_result,
                 printed_warning_keys);
-        print_aur_execution_failures(filtered.reduced_operation_result);
+        if(presentation != nullptr) {
+            for(const std::string& line : presentation->error_lines) {
+                Logger::error(line);
+            }
+        }
         print_aur_reduction_issues(filtered.reduced_operation_result);
     }
 
@@ -1337,13 +1290,23 @@ void print_aggregate_summary(const UpgradeAllOperationResult& result) {
 }
 
 void print_operation_result(const UpgradeAllOperationResult& result) {
+    // AUR child snapshotを最初に検証し、unknown enumやincoherent identityを
+    // 成功済みsummaryへ混ぜずfail-closedにする。
+    std::optional<AurUpdateCliPresentation> aur_presentation;
+    if(result.aur.operation_result.has_value()) {
+        aur_presentation.emplace(format_aur_update_cli_presentation(
+                result.aur.operation_result->reduced_operation_result));
+    }
+    const AurUpdateCliPresentation* presentation =
+            aur_presentation.has_value() ? &*aur_presentation : nullptr;
+
     // POLICY(#281): phase/target order is part of the public CLI contract.
     print_system_phase(result.system_source);
     print_registered_sources(result.system_source);
-    print_aur_phase(result);
+    print_aur_phase(result, presentation);
     print_duplicate_exclusions(result);
     print_external_satisfaction(result);
-    print_details(result);
+    print_details(result, presentation);
     print_aggregate_summary(result);
 }
 

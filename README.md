@@ -165,7 +165,9 @@ jpacker upgrade-aur
 
 この operation は `pacman -Syu` を実行せず、system package や source build preference だけで選ばれる package を更新しません。system upgrade は `jpacker -Syu`、system upgrade と登録済み source build preferences の rebuild は `jpacker upgrade` として別に実行してください。一括更新は独立した `jpacker upgrade-all` の契約であり、`upgrade-aur` の scope は変更しません。
 
-jpacker は AUR update plan 全体を source mutation 前に検証し、準備済み work items を順番に実行して最初の failure で停止します。すでに更新済みの package は rollback せず、後続は not attempted として表示します。partial completion、build/install failure、package transaction 成功後の workspace cleanup failure は non-zero です。target ごとの status / reason と、診断用に保持された workspace または cleanup failure を表示するため、同じ install を無条件に再試行しないでください。更新対象がない場合は成功し、git / makepkg / pacman / sudo を起動しません。
+jpacker は AUR update plan 全体を source mutation 前に検証し、準備済み PackageBase work items を順番に実行して最初の failure で停止します。表示はchild resultを正本とし、required package、selected artifact identity / full version、Explicit / Dependency、installed / no changeをchildごとに示し、unselected sibling / debug outputをnot selected / not installedとして区別します。すでに更新済みの package は rollback せず、後続child / work itemはnot attemptedとして表示します。
+
+partial completion、build/install failure、package transaction 成功後の workspace cleanup failure は non-zero です。transaction failureではselected attempt identity/versionとtyped categoryを表示してもchild successは表示しません。cleanup failureではtransaction成功済みのchild outcomeを保ち、updated but cleanup failed / no change but cleanup failedを区別するため、同じinstallを無条件に再試行しないでください。raw workspace / artifact pathはこのresult summaryに表示しません。更新対象がない場合は成功し、git / makepkg / pacman / sudo を起動しません。
 
 指定できる option は `--noedit`、`--nodiff`、`--noconfirm`、`--rebuild`、`--cleanbuild` です。package target、`--needed`、`--rmdeps`、`--aur`、`--repo` は未対応で、update execution 前に停止します。
 
@@ -183,7 +185,7 @@ jpacker upgrade-all
 
 `upgrade-all` は target を取らず、`system → registered source → fresh foreign inventory → filtered AUR` の順に実行します。explicit source preference は automatically detected AUR target より優先され、package name または PackageBase が explicit source package と重なる AUR target は除外されます。explicit source PackageBase が transitive AUR build unit を満たす場合も、その unit を externally satisfied として扱い、同じ source を二重に build / install しません。
 
-この operation は single atomic transaction ではありません。各 phase は最初の failure または cleanup failure で停止し、すでに更新済みの package を自動 rollback せず、後続 phase / work item を not attempted として報告します。一部更新後の failure と cleanup failure は non-zero です。
+この operation は single atomic transaction ではありません。各 phase は最初の failure または cleanup failure で停止し、すでに更新済みの package を自動 rollback せず、後続 phase / work item を not attempted として報告します。filtered AUR phaseのPackageBase detailはchildごとのselected identity、full version、desired reason、installed / no change outcomeを使います。生成されたsibling / debug artifactはunselectedと明記し、install outcomeを付与しません。一部更新後の failure と cleanup failure は non-zero です。
 
 指定できる option は `--noedit`、`--nodiff`、`--noconfirm`、`--rebuild`、`--cleanbuild` です。package target、opaque operand、`--needed`、`--rmdeps`、`--aur`、`--repo` は未対応で、default log / cache 初期化、source preference preparation、system upgrade、foreign inventory、AUR query より前に停止します。
 
@@ -246,7 +248,13 @@ known zero、not found、metadata unavailable は別の状態として表示し�
 
 AUR RPC の `PackageBase` は clone / fetch / build repository の単位で、package name は install 対象です。split package では、たとえば `Name=linux-mainline-headers` / `PackageBase=linux-mainline` のように一致しないことがあります。
 
-`jpacker plan <pkg>` は、このような split package target を `Split package install targets` として表示し、install target selection が未実装であるため incomplete plan として扱います。`jpacker -S <pkg>` や `jpacker build <pkg>` の build/install 実行経路では、`PackageBase` と package name が異なる AUR target を clone / build / install 前に停止します。`jpacker fetch <pkg>` は dependency plan の PackageBase 単位で internal cache へ取得します。read-only inspection の `-G` は root PackageBase repository を `./<PackageBase>` へ export し、`-Gp` はその root `PKGBUILD` だけを表示するため、requested name と PackageBase の相違自体では停止しません。
+`jpacker plan <pkg>` は、このような mapping を `Split package install targets` として表示しますが、split であることだけで plan を incomplete にしません。plain Auto の `jpacker -S <pkg>`、`jpacker -S --aur <pkg>`、`jpacker build <pkg>`、`upgrade-aur`、および `upgrade-all` の filtered AUR phase は requested split child を扱えます。`build` はその requested child 1件だけをrequired targetとします。`-S`とAUR update系routeでは、AUR BuildPlanが同じPackageBaseの複数childを必要とする場合、それらをordered required target setとして扱います。
+
+PackageBase は clone / fetch / build / fresh artifact workspace / package transaction の単位で、package name は install が必要な child です。1つの PackageBase から複数 artifact が生成されても、jpacker は `makepkg --packagelist` の expected output を build 後に検証し、package metadata identity が BuildPlan の required child と exactly one 一致する artifact だけを required-target order で選択します。selected children だけを1回の `pacman -U` transaction へ渡し、必要でない sibling / debug artifact は生成結果として明示しつつ、暗黙に install しません。root child と dependency child の install reason もchildごとに保持します。
+
+missing required identity、duplicate identity / required target、`makepkg --packagelist` にない unexpected output、freshness / containment / ownership violation、表現できないmixed install-reason policyでは transaction 前に fail closed で停止します。`pacman -U` transaction が失敗した場合はchildのpartial successを推測しません。transaction 成功後の cleanup failure だけは、完了済みchildの正確な outcome と unselected artifact identity を保つpartial successです。`--needed` で同一transaction内の一部childがskipされた場合も、installed / no changeをchildごとに区別します。
+
+`jpacker fetch <pkg>` は dependency plan の PackageBase 単位で internal cache へ取得します。`plan` / `deps` は build / install せず、`-G` は root PackageBase repository を `./<PackageBase>` へ export し、`-Gp` はその root `PKGBUILD` だけを表示します。これらのread-only / retrieval contractはrequested nameとPackageBaseが異なっても変わりません。一方、`jpacker upgrade`のregistered source preference phaseは現在もtarget-less `only_if_updated` singular lifecycleであり、registered preferenceがsplit childを指す場合はmutation前にunsupportedとして停止します。
 
 ### Source build preferences
 
@@ -366,7 +374,7 @@ jpacker -S google-chrome --noedit
 
 `--noedit` は `PKGBUILD` / `*.install` の review / edit prompt を skip します。`--nodiff` は既存 cache repository 更新時の git diff prompt を skip します。初回 clone には update diff がないため、`--nodiff` の有無に関わらず diff prompt は出ません。
 
-`--noconfirm` を指定すると、pacman execution と makepkg execution に `--noconfirm` を渡します。jpacker では「全部 yes」ではなく「対話で止まらない」指定として扱う方針です。ただし、unresolved dependencies や cyclic dependencies が残る AUR build plan は `--noconfirm` 指定時でも実行前に停止します。provider selection、split package selection、conflicts / replaces などの未実装判断を自動で進めるものではありません。option pass-through policy の詳細は [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) を参照してください。
+`--noconfirm` を指定すると、pacman execution と makepkg execution に `--noconfirm` を渡します。jpacker では「全部 yes」ではなく「対話で止まらない」指定として扱う方針です。ただし、unresolved dependencies や cyclic dependencies が残る AUR build plan は `--noconfirm` 指定時でも実行前に停止します。requested childからmetadata identityで一意に決まるsplit selectionは対話判断ではなく、`--noconfirm`の有無に依存しません。このoptionはprovider selection、conflicts / replaces、unknown / duplicate artifact identity、または表現できないmixed install reasonのguardを突破しません。option pass-through policy の詳細は [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) を参照してください。
 
 ```bash
 jpacker --noconfirm -S google-chrome
@@ -374,13 +382,13 @@ jpacker --noconfirm -S google-chrome
 
 `--needed` は jpacker global option ではなく、pacman-compatible option です。pacman-only 経路では argv を保ったまま pacman へ渡します。対応済みの `-S` install が AUR または source build preference 経路へ進む場合も、jpacker は `--needed` を理由とする build skip 判定を追加せず、最終 package install の要否だけを `sudo pacman -U --needed` に委ねます。AUR と official source build preference で意味は同じです。
 
-そのため `--needed` 自体を理由に、validation、AUR RPC / build plan、provider・split package・conflicts/replaces などの guard、clone/fetch、PKGBUILD / `.install` review、makepkg execution までの経路を省略しません。jpacker は installed version や local artifact を見た独自の build skip 判定を追加せず、各 PackageBase を fresh `PKGDEST` で build します。mixed official/AUR invocation では official pacman argv にも `--needed` を保持し、重複指定は pacman argv では保持、source-build 側の `pacman -U` では 1 回だけ渡します。
+そのため `--needed` 自体を理由に、validation、AUR RPC / build plan、provider・artifact identity・conflicts/replaces などの guard、clone/fetch、PKGBUILD / `.install` review、makepkg execution までの経路を省略しません。jpacker は installed version や local artifact を見た独自の build skip 判定を追加せず、各 PackageBase を fresh `PKGDEST` で build します。mixed official/AUR invocation では official pacman argv にも `--needed` を保持し、重複指定は pacman argv では保持、source-build 側の `pacman -U` では 1 回だけ渡します。
 
 `--rebuild` / `--cleanbuild` は build 方針、`--noconfirm` は prompt suppression であり、`--needed` の install-only policy と独立して併用できます。既存の plan / review / safety guard はどの組み合わせでも維持します。`--rmdeps` は separated source-build 経路では併用できません。target なしの pacman-compatible `jpacker -Syu --needed` はそのまま pacman へ渡し、target 付きの既存対応形で source route が生じる場合は同じ install-only policy を適用します。jpacker 固有の `upgrade --needed`、`upgrade-aur --needed`、`upgrade-all --needed` は未対応です。
 
-AUR / source build は、各 PackageBase に invocation-owned の fresh `PKGDEST` を作り、同じ environment で `makepkg --packagelist` により expected artifact を確定してから、build-only の `makepkg -sc` を実行します。artifact validation と installed metadata query の後、typed executor は検証済み artifact を `sudo pacman -U` で install します。makepkg 自身には install を委ねません。`--needed` は `pacman -U` だけに、`--noconfirm` は build-only makepkg と `pacman -U` の両方に渡します。`--rebuild` は makepkg へ `-f`、`--cleanbuild` は `-C` を追加します。
+AUR BuildPlan-backed source build は、各 PackageBase に invocation-owned の fresh `PKGDEST` を作り、同じ environment で `makepkg --packagelist` により ordered expected artifacts を確定してから、build-only の `makepkg -sc` を実行します。artifact validation、metadata identity selection、installed metadata query の後、typed executor は BuildPlan が必要とするselected childrenだけをrequired-target orderで1回の `sudo pacman -U` transaction へ渡します。makepkg 自身には install を委ねません。`--needed` は `pacman -U` だけに、`--noconfirm` は build-only makepkg と `pacman -U` の両方に渡します。`--rebuild` は makepkg へ `-f`、`--cleanbuild` は `-C` を追加します。official repository source preferenceとregistered source upgradeは、従来のsingular compatibility lifecycleを維持します。
 
-現時点で受け入れるのは PackageBase ごとに exactly one artifact だけです。split package の install target selection、sibling / debug package、multiple output は未対応であり、曖昧な artifact を選ばず fail closed で停止します。
+expectedだがrequiredでないsibling / debug artifactはunselected resultとして保持し、install inputにしません。required identityのmissing / duplicate、unexpected filesystem output、validation / identity failureはfail closedです。one PackageBase transactionの各childはdesired install reasonとexact `Installed` / `SkippedAsNeeded` outcomeを個別に保持します。transaction failureではpackageごとのpartial successを推測しません。
 
 build 後の validation、metadata query、または install が失敗した場合は、artifact workspace を診断用に保持します。この workspace は次回実行で自動再利用しません。`pacman -U` の成功後に workspace cleanup だけが失敗した場合、package は install 済みです。diagnostic を確認し、同じ package の install を無条件に再試行しないでください。
 
@@ -580,7 +588,9 @@ jpacker upgrade-aur
 
 This operation does not run `pacman -Syu`, update the system, or update packages selected only by source-build preferences. Run `jpacker -Syu` for a system upgrade, or `jpacker upgrade` for a system upgrade followed by configured source rebuilds. Combined updates use the separate `jpacker upgrade-all` contract and do not expand the scope of `upgrade-aur`.
 
-jpacker validates the complete AUR update plan before source mutation, executes prepared work items in order, and stops on the first failure. It does not roll back packages that were already updated, and reports later work as not attempted. Partial completion, a build/install failure, and a workspace cleanup failure after a successful package transaction all return non-zero. Per-target status and reason, plus retained or cleanup-failed workspace state, are displayed so the same installation is not retried blindly. If no update is available, the command succeeds without starting git, makepkg, pacman, or sudo.
+jpacker validates the complete AUR update plan before source mutation, executes prepared PackageBase work items in order, and stops on the first failure. Presentation is authoritative at the child level: it shows each required package, selected artifact identity and full version, Explicit or Dependency reason, and exact installed or no-change outcome, while marking unselected sibling/debug outputs as not selected and not installed. Packages already updated are not rolled back, and later children/work items are reported as not attempted.
+
+Partial completion, a build/install failure, and a workspace cleanup failure after a successful package transaction all return non-zero. A transaction failure may show safe attempted identities/versions and its typed category, but never a fabricated child success. A cleanup failure preserves and distinguishes each completed child's updated-but-cleanup-failed or no-change-but-cleanup-failed outcome, so the same installation is not retried blindly. Result summaries do not expose raw workspace or artifact paths. If no update is available, the command succeeds without starting git, makepkg, pacman, or sudo.
 
 Supported options are `--noedit`, `--nodiff`, `--noconfirm`, `--rebuild`, and `--cleanbuild`. Package targets, `--needed`, `--rmdeps`, `--aur`, and `--repo` are unsupported and stop before update execution.
 
@@ -598,7 +608,7 @@ jpacker upgrade-all
 
 `upgrade-all` takes no targets and runs `system → registered source → fresh foreign inventory → filtered AUR`. Explicit source preferences take precedence over automatically detected AUR targets. An AUR target whose package name or PackageBase is handled by an explicit source package is excluded. If an explicit source PackageBase satisfies a transitive AUR build unit, that unit is treated as externally satisfied instead of being built and installed twice.
 
-This operation is not a single atomic transaction. Each phase stops on the first failure or cleanup failure, packages already updated are not rolled back automatically, and later phases or work items are reported as not attempted. A failure after partial completion and a cleanup failure both return non-zero.
+This operation is not a single atomic transaction. Each phase stops on the first failure or cleanup failure, packages already updated are not rolled back automatically, and later phases or work items are reported as not attempted. In the filtered AUR phase, PackageBase details use child-specific selected identity, full version, desired reason, and installed/no-change outcome; produced sibling and debug artifacts are explicitly unselected and never receive an install outcome. A failure after partial completion and a cleanup failure both return non-zero.
 
 Supported options are `--noedit`, `--nodiff`, `--noconfirm`, `--rebuild`, and `--cleanbuild`. Package targets, opaque operands, `--needed`, `--rmdeps`, `--aur`, and `--repo` are unsupported and stop before default log/cache initialization, source preference preparation, the system upgrade, foreign inventory, or an AUR query.
 
@@ -661,7 +671,13 @@ Known zero, not found, and unavailable metadata remain distinct states. A metada
 
 In AUR metadata, `PackageBase` is the clone / fetch / build repository unit, while the package name is the install target. For split packages, they may differ, such as `Name=linux-mainline-headers` / `PackageBase=linux-mainline`.
 
-`jpacker plan <pkg>` shows such split package targets under `Split package install targets` and reports the plan as incomplete because install target selection is not implemented. Build/install execution paths such as `jpacker -S <pkg>` and `jpacker build <pkg>` stop before clone / build / install when the requested AUR target has a package name different from its `PackageBase`. `jpacker fetch <pkg>` retrieves the dependency plan by PackageBase into the internal cache. For read-only inspection, `-G` exports only the root PackageBase repository to `./<PackageBase>`, while `-Gp` prints its root `PKGBUILD`; neither stops merely because the requested name and PackageBase differ.
+`jpacker plan <pkg>` shows this mapping under `Split package install targets`, but being split does not by itself make the plan incomplete. Plain Auto `jpacker -S <pkg>`, `jpacker -S --aur <pkg>`, `jpacker build <pkg>`, `upgrade-aur`, and the filtered AUR phase of `upgrade-all` support a requested split child. `build` makes only that one requested child a required target. On the `-S` and AUR-update routes, if an AUR BuildPlan requires multiple children from the same PackageBase, they are kept as an ordered required-target set.
+
+The PackageBase is the clone, fetch, build, fresh artifact-workspace, and package-transaction unit; a package name is a required install child. When one PackageBase produces multiple artifacts, jpacker validates the outputs declared by `makepkg --packagelist`, then selects only the artifacts whose package metadata identity exactly and uniquely matches a BuildPlan-required child, in required-target order. Only selected children enter one `pacman -U` transaction. Other expected sibling or debug artifacts remain explicit produced-but-unselected results and are never installed implicitly. Root and dependency install reasons remain child-specific.
+
+A missing required identity, duplicate identity or required target, an unexpected output absent from `makepkg --packagelist`, a freshness/containment/ownership violation, or an install-reason policy that cannot be represented by one transaction fails closed. A failed `pacman -U` transaction does not create inferred per-package partial success. A cleanup failure after a successful transaction is different: it preserves the exact completed child outcomes and unselected identities. With `--needed`, mixed installed and skipped-as-needed outcomes in the same transaction remain distinct per child.
+
+`jpacker fetch <pkg>` retrieves the dependency plan by PackageBase into the internal cache. `plan` and `deps` do not build or install. `-G` exports only the root PackageBase repository to `./<PackageBase>`, and `-Gp` prints only its root `PKGBUILD`; these read-only/retrieval contracts remain valid when the requested name and PackageBase differ. The registered-source phase of `jpacker upgrade`, however, still uses a target-less `only_if_updated` singular lifecycle. A registered preference naming a split child is therefore rejected as unsupported before mutation.
 
 ### Source build preferences
 
@@ -781,7 +797,7 @@ jpacker -S google-chrome --noedit
 
 `--noedit` skips the `PKGBUILD` / `*.install` review and edit prompts. `--nodiff` skips the git diff prompt for existing cache repository updates. Initial clones do not have an update diff to show, regardless of `--nodiff`.
 
-`--noconfirm` passes `--noconfirm` to pacman and makepkg execution. jpacker treats it as a request to avoid interactive blocking, not as "yes to everything". It does not bypass unresolved dependency or cyclic dependency checks in AUR build plans, and it does not automatically decide unsupported provider selection, split package selection, conflicts, or replaces cases. See [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) for the option pass-through policy.
+`--noconfirm` passes `--noconfirm` to pacman and makepkg execution. jpacker treats it as a request to avoid interactive blocking, not as "yes to everything". It does not bypass unresolved dependency or cyclic dependency checks in AUR build plans. Deterministic split-child selection by metadata identity is not an interactive decision and does not depend on this option. `--noconfirm` does not bypass provider selection, conflicts/replaces, unknown or duplicate artifact identity, or an unrepresentable mixed install-reason guard. See [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) for the option pass-through policy.
 
 ```bash
 jpacker --noconfirm -S google-chrome
@@ -789,13 +805,13 @@ jpacker --noconfirm -S google-chrome
 
 `--needed` is a pacman-compatible option, not a jpacker global option. Pacman-only routes preserve it in the pacman argument vector. When a supported `-S` install uses AUR or an official source-build preference, jpacker does not add a build-skip decision for `--needed`; only final package installation is delegated to `sudo pacman -U --needed`. AUR and official source-build preference routes use the same meaning.
 
-`--needed` itself does not skip validation, AUR RPC and build planning, provider/split-package/conflicts/replaces guards, clone/fetch, PKGBUILD / `.install` review, or the path to makepkg execution. jpacker does not add an installed-version or local-artifact heuristic for skipping builds; each PackageBase is built into a fresh `PKGDEST`. In a mixed official/AUR invocation, `--needed` remains in the official pacman arguments. Duplicates remain in pacman's ordered arguments but produce one `--needed` on the source-build `pacman -U` side.
+`--needed` itself does not skip validation, AUR RPC and build planning, provider/artifact-identity/conflicts/replaces guards, clone/fetch, PKGBUILD / `.install` review, or the path to makepkg execution. jpacker does not add an installed-version or local-artifact heuristic for skipping builds; each PackageBase is built into a fresh `PKGDEST`. In a mixed official/AUR invocation, `--needed` remains in the official pacman arguments. Duplicates remain in pacman's ordered arguments but produce one `--needed` on the source-build `pacman -U` side.
 
 `--rebuild` / `--cleanbuild` control the build and `--noconfirm` suppresses prompts; each remains independent of the install-only `--needed` policy. Existing plan, review, and safety guards remain in force. `--rmdeps` cannot be combined with the separated source-build route. Target-less pacman-compatible `jpacker -Syu --needed` is passed through to pacman; if an existing supported target-bearing form selects a source route, the same install-only policy applies there. The jpacker-specific `upgrade --needed`, `upgrade-aur --needed`, and `upgrade-all --needed` remain unsupported.
 
-AUR/source builds create an invocation-owned fresh `PKGDEST` for each PackageBase, use the same environment to determine the expected artifact with `makepkg --packagelist`, and then run build-only `makepkg -sc`. After artifact validation and an installed metadata query, a typed executor installs the validated artifact with `sudo pacman -U`; makepkg itself does not perform installation. `--needed` is passed only to `pacman -U`, while `--noconfirm` is passed to both build-only makepkg and `pacman -U`. `--rebuild` adds `-f` to makepkg and `--cleanbuild` adds `-C`.
+AUR BuildPlan-backed source builds create an invocation-owned fresh `PKGDEST` for each PackageBase, use the same environment to determine ordered expected artifacts with `makepkg --packagelist`, and then run build-only `makepkg -sc`. After artifact validation, metadata-identity selection, and installed metadata queries, a typed executor passes only BuildPlan-required children, in required-target order, to one `sudo pacman -U` transaction. makepkg itself does not perform installation. `--needed` is passed only to `pacman -U`, while `--noconfirm` is passed to both build-only makepkg and `pacman -U`. `--rebuild` adds `-f` to makepkg and `--cleanbuild` adds `-C`. Official-repository source preferences and registered source upgrades retain their existing singular compatibility lifecycle.
 
-The current route accepts exactly one artifact per PackageBase. Split-package install-target selection, sibling or debug packages, and multiple outputs are unsupported; jpacker fails closed instead of choosing an ambiguous artifact.
+Expected but unrequired sibling or debug artifacts are retained as unselected result data and are not installation inputs. Missing or duplicate required identities, unexpected filesystem outputs, and validation or identity failures stop closed. Each selected child retains its desired install reason and exact `Installed` or `SkippedAsNeeded` outcome. A transaction failure does not invent per-package partial success.
 
 If post-build validation, a metadata query, or installation fails, jpacker retains the artifact workspace for diagnostics. A retained workspace is not reused automatically by a later invocation. If only workspace cleanup fails after a successful `pacman -U` transaction, the package is already installed; inspect the diagnostic and do not blindly retry the same installation.
 

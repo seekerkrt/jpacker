@@ -563,6 +563,56 @@ bool PackageBaseArtifactInstallExecutionResult::is_success() const noexcept {
     return is_success_;
 }
 
+PackageBaseArtifactInstallTransactionError::
+        PackageBaseArtifactInstallTransactionError(
+                PackageBaseArtifactInstallTransactionFailureKind failure_kind,
+                std::string package_base,
+                std::vector<PackageBaseArtifactInstallTransactionAttempt>
+                        attempts,
+                std::optional<int> exit_code,
+                const std::string& diagnostic)
+    : std::runtime_error(diagnostic), failure_kind_(failure_kind),
+      package_base_(std::move(package_base)), attempts_(std::move(attempts)),
+      exit_code_(exit_code) {
+}
+
+PackageBaseArtifactInstallTransactionFailureKind
+PackageBaseArtifactInstallTransactionError::failure_kind() const noexcept {
+    return failure_kind_;
+}
+
+const std::string&
+PackageBaseArtifactInstallTransactionError::package_base() const noexcept {
+    return package_base_;
+}
+
+const std::vector<PackageBaseArtifactInstallTransactionAttempt>&
+PackageBaseArtifactInstallTransactionError::attempts() const noexcept {
+    return attempts_;
+}
+
+const std::optional<int>&
+PackageBaseArtifactInstallTransactionError::exit_code() const noexcept {
+    return exit_code_;
+}
+
+std::vector<PackageBaseArtifactInstallTransactionAttempt>
+PackageBaseArtifactInstallTransactionError::release_attempts() && noexcept {
+    return std::move(attempts_);
+}
+
+std::string
+PackageBaseArtifactInstallExecutionResult::release_package_base()
+        && noexcept {
+    return std::move(package_base_);
+}
+
+std::vector<PackageBaseArtifactInstallExecutionArtifactResult>
+PackageBaseArtifactInstallExecutionResult::release_selected_artifacts()
+        && noexcept {
+    return std::move(selected_artifacts_);
+}
+
 PackageBaseArtifactInstallExecutionResult
 execute_prepared_package_base_artifact_install(
         PreparedPackageBaseArtifactInstall& install,
@@ -579,15 +629,22 @@ execute_prepared_package_base_artifact_install(
     std::vector<PackageBaseArtifactInstallExecutionArtifactResult>
             artifact_results;
     artifact_results.reserve(install.selected_artifacts_.size());
+    std::vector<PackageBaseArtifactInstallTransactionAttempt>
+            transaction_attempts;
+    transaction_attempts.reserve(install.selected_artifacts_.size());
     for(const PreparedPackageBaseArtifactInstallSelectedArtifact& artifact :
         install.selected_artifacts_) {
         artifact_results.push_back(
                 PackageBaseArtifactInstallExecutionArtifactResult{
                         artifact.artifact_index, artifact.identity,
                         artifact.desired_reason, artifact.expected_outcome});
+        transaction_attempts.push_back(
+                PackageBaseArtifactInstallTransactionAttempt{
+                        artifact.identity, artifact.desired_reason});
     }
     PackageBaseArtifactInstallExecutionResult execution_result(
             install.package_base_, std::move(artifact_results));
+    std::string transaction_package_base = install.package_base_;
 
     std::vector<std::string> arguments;
     arguments.reserve(7 + install.selected_artifacts_.size());
@@ -627,11 +684,32 @@ execute_prepared_package_base_artifact_install(
 
     // LANDMINE(#268): process boundaryがthrow/nonzeroでも再実行を許さない。
     install.state_ = PreparedPackageBaseArtifactInstall::State::Consumed;
-    const int exit_code = run_command(command);
+    int exit_code = 0;
+    try {
+        exit_code = run_command(command);
+    } catch(const std::exception&) {
+        throw PackageBaseArtifactInstallTransactionError(
+                PackageBaseArtifactInstallTransactionFailureKind::
+                        ProcessException,
+                std::move(transaction_package_base),
+                std::move(transaction_attempts), std::nullopt,
+                "pacman -U transaction execution threw an exception.");
+    } catch(...) {
+        throw PackageBaseArtifactInstallTransactionError(
+                PackageBaseArtifactInstallTransactionFailureKind::
+                        UnknownException,
+                std::move(transaction_package_base),
+                std::move(transaction_attempts), std::nullopt,
+                "pacman -U transaction execution failed with an unknown exception.");
+    }
     if(exit_code != 0) {
-        throw std::runtime_error(
+        throw PackageBaseArtifactInstallTransactionError(
+                PackageBaseArtifactInstallTransactionFailureKind::
+                        NonzeroExit,
+                std::move(transaction_package_base),
+                std::move(transaction_attempts), exit_code,
                 "pacman -U failed with exit code " +
-                std::to_string(exit_code) + ".");
+                        std::to_string(exit_code) + ".");
     }
     return execution_result;
 }
