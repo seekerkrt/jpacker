@@ -1,11 +1,13 @@
 #include "artifact_identity.hpp"
 
+#include "artifact_workspace.hpp"
 #include "logging.hpp"
 #include "package_identifier.hpp"
 #include "process.hpp"
 #include "shell_words.hpp"
 
 #include <cstddef>
+#include <filesystem>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -65,13 +67,8 @@ ArtifactPackageIdentity parse_artifact_package_identity(
             std::move(package_name), std::move(full_version)};
 }
 
-} // namespace
-
-ArtifactPackageIdentity query_artifact_package_identity(
-        const ValidatedPackageArtifactPath& artifact) {
-    // LANDMINE: pacmanへpathを渡す直前とstdoutを信用する直前の両方で、同じartifactを再証明する。
-    artifact.require_validity();
-
+CapturedCommandResult capture_artifact_package_identity_output(
+        const std::filesystem::path& artifact_path) {
     const std::vector<std::string> arguments = {
             "pacman",
             "-U",
@@ -79,17 +76,57 @@ ArtifactPackageIdentity query_artifact_package_identity(
             "--print-format",
             ARTIFACT_IDENTITY_FORMAT,
             "--",
-            artifact.path().string(),
+            artifact_path.string(),
     };
     const std::string command = "LC_ALL=C " + shell_words::join(arguments);
     Logger::raw_cmd(command);
-    CapturedCommandResult result = capture_command_output_raw(command.c_str());
+    return capture_command_output_raw(command.c_str());
+}
 
-    artifact.require_validity();
+ArtifactPackageIdentity require_artifact_package_identity(
+        const CapturedCommandResult& result) {
     if(result.exit_code != 0) {
         throw std::runtime_error(
                 "pacman failed to read package artifact identity with exit code " +
                 std::to_string(result.exit_code) + ".");
     }
     return parse_artifact_package_identity(result.output);
+}
+
+} // namespace
+
+ArtifactPackageIdentity query_artifact_package_identity(
+        const ValidatedPackageArtifactPath& artifact) {
+    // LANDMINE: pacmanへpathを渡す直前とstdoutを信用する直前の両方で、同じartifactを再証明する。
+    artifact.require_validity();
+
+    CapturedCommandResult result =
+            capture_artifact_package_identity_output(artifact.path());
+
+    artifact.require_validity();
+    return require_artifact_package_identity(result);
+}
+
+ArtifactPackageIdentitySet query_artifact_package_identities(
+        const ValidatedPackageArtifactSet& artifacts) {
+    // LANDMINE(#268): individual pathではなくaggregate全体を、最初のcommandより前から
+    // result返却直前まで各boundaryで再証明する。途中まで得たidentityは公開しない。
+    artifacts.require_validity();
+    const std::size_t artifact_count = artifacts.size();
+
+    std::vector<ArtifactPackageIdentity> identities;
+    identities.reserve(artifact_count);
+    for(std::size_t index = 0; index < artifact_count; ++index) {
+        artifacts.require_validity();
+        CapturedCommandResult result =
+                capture_artifact_package_identity_output(
+                        artifacts.path_at(index));
+        artifacts.require_validity();
+        identities.push_back(require_artifact_package_identity(result));
+    }
+
+    artifacts.require_validity();
+    ArtifactPackageIdentitySet identity_set(std::move(identities));
+    artifacts.require_validity();
+    return identity_set;
 }

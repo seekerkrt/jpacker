@@ -25,6 +25,7 @@ SOURCE_ENVIRONMENT_TEST_TARGET := build/tests/source-environment-test
 ARTIFACT_WORKSPACE_TEST_TARGET := build/tests/artifact-workspace-test
 MULTIPLE_ARTIFACT_WORKSPACE_TEST_TARGET := build/tests/multiple-artifact-workspace-test
 ARTIFACT_IDENTITY_TEST_TARGET := build/tests/artifact-identity-test
+MULTIPLE_ARTIFACT_IDENTITY_TEST_TARGET := build/tests/multiple-artifact-identity-test
 ARTIFACT_INSTALL_EXECUTOR_TEST_TARGET := build/tests/artifact-install-executor-test
 SEPARATED_SOURCE_BUILD_TEST_TARGET := build/tests/separated-source-build-test
 PRODUCTION_SOURCE_BUILD_TEST_TARGET := build/tests/production-source-build-test
@@ -46,6 +47,7 @@ DEPENDENCY_PLAN_MODEL_TEST_TARGET := $(BUILD_DIR)/tests/dependency-plan-model-te
 REPOSITORY_QUERY_TEST_TARGET := $(BUILD_DIR)/tests/repository-query-test
 ARTIFACT_INSTALL_PLAN_TEST_TARGET := $(BUILD_DIR)/tests/artifact-install-plan-test
 ARTIFACT_SELECTION_MODEL_TEST_TARGET := $(BUILD_DIR)/tests/artifact-selection-model-test
+ARTIFACT_IDENTITY_SELECTION_TEST_TARGET := $(BUILD_DIR)/tests/artifact-identity-selection-test
 PACKAGE_METADATA_TEST_TARGET := $(BUILD_DIR)/tests/package-metadata-test
 PACKAGE_METADATA_INTEGRATION_TEST_TARGET := $(BUILD_DIR)/tests/package-metadata-integration-test
 UPGRADE_BASELINE_METADATA_TEST_TARGET := $(BUILD_DIR)/tests/jpacker-upgrade-baseline-metadata-test
@@ -336,6 +338,20 @@ ARTIFACT_SELECTION_MODEL_TEST_SRCS := \
 	$(ARTIFACT_SELECTION_MODEL_ALLOWED_PRODUCTION_TEST_SRCS)
 ARTIFACT_SELECTION_MODEL_FORBIDDEN_TEST_SRCS := \
 	$(filter-out $(ARTIFACT_SELECTION_MODEL_ALLOWED_PRODUCTION_TEST_SRCS),$(SRCS))
+# POLICY(#268): identity correlation testはpure adapter/value model、
+# PR1 selector、validatorだけをlinkし、process/filesystem/install lifecycle TUを持ち込まない。
+ARTIFACT_IDENTITY_SELECTION_ALLOWED_PRODUCTION_TEST_SRCS := \
+	$(SRC_DIR)/artifact_identity_selection.cpp \
+	$(SRC_DIR)/artifact_identity_set.cpp \
+	$(SRC_DIR)/artifact_install_plan.cpp \
+	$(SRC_DIR)/package_identifier.cpp
+ARTIFACT_IDENTITY_SELECTION_TEST_SRCS := \
+	tests/artifact_identity_selection_test.cpp \
+	$(ARTIFACT_IDENTITY_SELECTION_ALLOWED_PRODUCTION_TEST_SRCS)
+ARTIFACT_IDENTITY_SELECTION_FORBIDDEN_TEST_SRCS := \
+	$(filter-out \
+		$(ARTIFACT_IDENTITY_SELECTION_ALLOWED_PRODUCTION_TEST_SRCS), \
+		$(SRCS))
 ARTIFACT_WORKSPACE_TEST_SRCS := \
 	tests/artifact_workspace_test.cpp \
 	$(SRC_DIR)/artifact_workspace.cpp \
@@ -363,6 +379,7 @@ MULTIPLE_ARTIFACT_WORKSPACE_FORBIDDEN_TEST_SRCS := \
 ARTIFACT_IDENTITY_TEST_SRCS := \
 	tests/artifact_identity_test.cpp \
 	$(SRC_DIR)/artifact_identity.cpp \
+	$(SRC_DIR)/artifact_identity_set.cpp \
 	$(SRC_DIR)/artifact_workspace.cpp \
 	$(SRC_DIR)/trusted_cache.cpp \
 	$(SRC_DIR)/source_environment.cpp \
@@ -370,11 +387,31 @@ ARTIFACT_IDENTITY_TEST_SRCS := \
 	$(SRC_DIR)/shell_words.cpp \
 	$(SRC_DIR)/logging.cpp \
 	tests/stubs/artifact-identity/process_stub.cpp
+# POLICY(#268): multiple identity query testはaggregate filesystem capability、
+# identity query owner、その既存support TUだけをlinkする。
+MULTIPLE_ARTIFACT_IDENTITY_ALLOWED_PRODUCTION_TEST_SRCS := \
+	$(SRC_DIR)/artifact_identity.cpp \
+	$(SRC_DIR)/artifact_identity_set.cpp \
+	$(SRC_DIR)/artifact_workspace.cpp \
+	$(SRC_DIR)/trusted_cache.cpp \
+	$(SRC_DIR)/source_environment.cpp \
+	$(SRC_DIR)/package_identifier.cpp \
+	$(SRC_DIR)/shell_words.cpp \
+	$(SRC_DIR)/logging.cpp
+MULTIPLE_ARTIFACT_IDENTITY_TEST_SRCS := \
+	tests/multiple_artifact_identity_test.cpp \
+	$(MULTIPLE_ARTIFACT_IDENTITY_ALLOWED_PRODUCTION_TEST_SRCS) \
+	tests/stubs/artifact-identity/process_stub.cpp
+MULTIPLE_ARTIFACT_IDENTITY_FORBIDDEN_TEST_SRCS := \
+	$(filter-out \
+		$(MULTIPLE_ARTIFACT_IDENTITY_ALLOWED_PRODUCTION_TEST_SRCS), \
+		$(SRCS))
 ARTIFACT_INSTALL_EXECUTOR_TEST_SRCS := \
 	tests/artifact_install_executor_test.cpp \
 	$(SRC_DIR)/artifact_install_executor.cpp \
 	$(SRC_DIR)/artifact_install_plan.cpp \
 	$(SRC_DIR)/artifact_identity.cpp \
+	$(SRC_DIR)/artifact_identity_set.cpp \
 	$(SRC_DIR)/artifact_workspace.cpp \
 	$(SRC_DIR)/package_metadata.cpp \
 	$(SRC_DIR)/trusted_cache.cpp \
@@ -390,6 +427,7 @@ SEPARATED_SOURCE_BUILD_TEST_SRCS := \
 	$(SRC_DIR)/artifact_install_executor.cpp \
 	$(SRC_DIR)/artifact_install_plan.cpp \
 	$(SRC_DIR)/artifact_identity.cpp \
+	$(SRC_DIR)/artifact_identity_set.cpp \
 	$(SRC_DIR)/artifact_workspace.cpp \
 	$(SRC_DIR)/package_metadata.cpp \
 	$(SRC_DIR)/trusted_cache.cpp \
@@ -408,6 +446,7 @@ PRODUCTION_SOURCE_BUILD_TEST_SRCS := \
 	$(SRC_DIR)/artifact_install_executor.cpp \
 	$(SRC_DIR)/artifact_install_plan.cpp \
 	$(SRC_DIR)/artifact_identity.cpp \
+	$(SRC_DIR)/artifact_identity_set.cpp \
 	$(SRC_DIR)/artifact_workspace.cpp \
 	$(SRC_DIR)/package_metadata.cpp \
 	$(SRC_DIR)/trusted_cache.cpp \
@@ -464,7 +503,7 @@ LIBALPM_BUILD_TARGETS := \
 	$(AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION_TEST_TARGET) \
 	$(UPGRADE_BASELINE_METADATA_TEST_TARGET)
 
-.PHONY: all check-libalpm clean check-upgrade-all-plan-link-firewall check-system-source-upgrade-link-firewall check-aur-update-operation-result-link-firewall check-filtered-aur-update-operation-link-firewall check-upgrade-all-operation-link-firewall check-upgrade-all-command-link-firewall check-artifact-selection-model-link-firewall check-multiple-artifact-workspace-link-firewall test test-app-config test-package-identifier test-package-metadata test-package-metadata-integration test-repository-query test-shell-words test-source-environment test-artifact-workspace test-multiple-artifact-workspace test-artifact-identity test-artifact-install-executor test-separated-source-build test-production-source-build test-process-capture test-aur-update-plan test-upgrade-all-plan test-system-source-upgrade test-aur-update-query test-aur-update-command test-upgrade-all-command test-aur-update-execution-preflight test-aur-update-execution-preflight-integration test-aur-update-execution-preparation test-aur-update-execution-runner test-aur-update-operation-result test-filtered-aur-update-operation test-upgrade-all-operation test-dependency-plan-model test-artifact-install-plan test-artifact-selection-model test-command-stub-contract test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-commands-inspect test-commands-source-maintenance test-commands-sync test-conflicts-replaces test-install-layout test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check install uninstall
+.PHONY: all check-libalpm clean check-upgrade-all-plan-link-firewall check-system-source-upgrade-link-firewall check-aur-update-operation-result-link-firewall check-filtered-aur-update-operation-link-firewall check-upgrade-all-operation-link-firewall check-upgrade-all-command-link-firewall check-artifact-selection-model-link-firewall check-artifact-identity-selection-link-firewall check-multiple-artifact-workspace-link-firewall check-multiple-artifact-identity-link-firewall test test-app-config test-package-identifier test-package-metadata test-package-metadata-integration test-repository-query test-shell-words test-source-environment test-artifact-workspace test-multiple-artifact-workspace test-artifact-identity test-multiple-artifact-identity test-artifact-install-executor test-separated-source-build test-production-source-build test-process-capture test-aur-update-plan test-upgrade-all-plan test-system-source-upgrade test-aur-update-query test-aur-update-command test-upgrade-all-command test-aur-update-execution-preflight test-aur-update-execution-preflight-integration test-aur-update-execution-preparation test-aur-update-execution-runner test-aur-update-operation-result test-filtered-aur-update-operation test-upgrade-all-operation test-dependency-plan-model test-artifact-install-plan test-artifact-selection-model test-artifact-identity-selection test-command-stub-contract test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-commands-inspect test-commands-source-maintenance test-commands-sync test-conflicts-replaces test-install-layout test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check install uninstall
 
 all: $(TARGET) $(MANPAGE)
 
@@ -612,6 +651,14 @@ $(ARTIFACT_IDENTITY_TEST_TARGET): $(ARTIFACT_IDENTITY_TEST_SRCS) $(SRC_DIR)/arti
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
 		-I$(SRC_DIR) \
 		$(ARTIFACT_IDENTITY_TEST_SRCS) \
+		-o $@
+
+$(MULTIPLE_ARTIFACT_IDENTITY_TEST_TARGET): $(MULTIPLE_ARTIFACT_IDENTITY_TEST_SRCS) $(SRC_DIR)/artifact_identity.hpp $(SRC_DIR)/artifact_workspace.hpp $(SRC_DIR)/trusted_cache.hpp $(SRC_DIR)/source_environment.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/shell_words.hpp $(SRC_DIR)/process.hpp $(SRC_DIR)/logging.hpp tests/stubs/artifact-identity/process_stub.hpp $(VERSION_FILE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling multiple artifact identity test binary"
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
+		-I$(SRC_DIR) \
+		$(MULTIPLE_ARTIFACT_IDENTITY_TEST_SRCS) \
 		-o $@
 
 $(ARTIFACT_INSTALL_EXECUTOR_TEST_TARGET): $(ARTIFACT_INSTALL_EXECUTOR_TEST_SRCS) $(SRC_DIR)/artifact_install_executor.hpp $(SRC_DIR)/artifact_install_plan.hpp $(SRC_DIR)/artifact_identity.hpp $(SRC_DIR)/artifact_workspace.hpp $(SRC_DIR)/package_metadata.hpp $(SRC_DIR)/installed_package.hpp $(SRC_DIR)/dependency_plan.hpp $(SRC_DIR)/dependency_provider.hpp $(SRC_DIR)/trusted_cache.hpp $(SRC_DIR)/source_environment.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/shell_words.hpp $(SRC_DIR)/process.hpp $(SRC_DIR)/logging.hpp tests/stubs/package-metadata/alpm_stub.hpp tests/stubs/artifact-install-executor/process_stub.hpp $(VERSION_FILE)
@@ -772,6 +819,15 @@ $(ARTIFACT_SELECTION_MODEL_TEST_TARGET): $(ARTIFACT_SELECTION_MODEL_TEST_SRCS) $
 	@echo ":: Compiling artifact selection model test binary"
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -I$(SRC_DIR) $(ARTIFACT_SELECTION_MODEL_TEST_SRCS) -o $@
 
+$(ARTIFACT_IDENTITY_SELECTION_TEST_TARGET): $(ARTIFACT_IDENTITY_SELECTION_TEST_SRCS) $(SRC_DIR)/artifact_identity_selection.hpp $(SRC_DIR)/artifact_identity.hpp $(SRC_DIR)/artifact_install_plan.hpp $(SRC_DIR)/dependency_plan.hpp $(SRC_DIR)/dependency_provider.hpp $(SRC_DIR)/aur_rpc.hpp $(SRC_DIR)/repository_query.hpp $(SRC_DIR)/package_identifier.hpp $(VERSION_FILE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling artifact identity selection test binary"
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
+		-DJPACKER_ENABLE_ARTIFACT_IDENTITY_TEST_HOOKS \
+		-I$(SRC_DIR) \
+		$(ARTIFACT_IDENTITY_SELECTION_TEST_SRCS) \
+		-o $@
+
 $(PACKAGE_METADATA_TEST_TARGET): $(PACKAGE_METADATA_TEST_SRCS) $(SRC_DIR)/package_metadata.hpp $(SRC_DIR)/installed_package.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/process.hpp tests/stubs/package-metadata/alpm_stub.hpp tests/stubs/package-metadata/process_stub.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling package metadata fake-symbol test binary"
@@ -844,6 +900,24 @@ test-multiple-artifact-workspace: check-multiple-artifact-workspace-link-firewal
 
 test-artifact-identity: $(ARTIFACT_IDENTITY_TEST_TARGET)
 	$(abspath $(ARTIFACT_IDENTITY_TEST_TARGET))
+
+check-multiple-artifact-identity-link-firewall:
+	@echo ":: Checking multiple artifact identity link firewall"
+	@set -e; for source in $(MULTIPLE_ARTIFACT_IDENTITY_ALLOWED_PRODUCTION_TEST_SRCS); do \
+		count=$$(printf '%s\n' $(MULTIPLE_ARTIFACT_IDENTITY_TEST_SRCS) | \
+			awk -v expected="$$source" '$$0 == expected { count++ } END { print count + 0 }'); \
+		test "$$count" -eq 1 || { \
+			echo "error: multiple artifact identity test must link $$source exactly once" >&2; \
+			exit 1; \
+		}; \
+	done
+	@test -z "$(filter $(MULTIPLE_ARTIFACT_IDENTITY_FORBIDDEN_TEST_SRCS),$(MULTIPLE_ARTIFACT_IDENTITY_TEST_SRCS))" || { \
+		echo "error: multiple artifact identity test links a forbidden production source" >&2; \
+		exit 1; \
+	}
+
+test-multiple-artifact-identity: check-multiple-artifact-identity-link-firewall $(MULTIPLE_ARTIFACT_IDENTITY_TEST_TARGET)
+	$(abspath $(MULTIPLE_ARTIFACT_IDENTITY_TEST_TARGET))
 
 test-artifact-install-executor: $(ARTIFACT_INSTALL_EXECUTOR_TEST_TARGET)
 	$(abspath $(ARTIFACT_INSTALL_EXECUTOR_TEST_TARGET))
@@ -1016,6 +1090,24 @@ check-artifact-selection-model-link-firewall:
 test-artifact-selection-model: check-artifact-selection-model-link-firewall $(ARTIFACT_SELECTION_MODEL_TEST_TARGET)
 	$(abspath $(ARTIFACT_SELECTION_MODEL_TEST_TARGET))
 
+check-artifact-identity-selection-link-firewall:
+	@echo ":: Checking artifact identity selection link firewall"
+	@set -e; for source in $(ARTIFACT_IDENTITY_SELECTION_ALLOWED_PRODUCTION_TEST_SRCS); do \
+		count=$$(printf '%s\n' $(ARTIFACT_IDENTITY_SELECTION_TEST_SRCS) | \
+			awk -v expected="$$source" '$$0 == expected { count++ } END { print count + 0 }'); \
+		test "$$count" -eq 1 || { \
+			echo "error: artifact identity selection test must link $$source exactly once" >&2; \
+			exit 1; \
+		}; \
+	done
+	@test -z "$(filter $(ARTIFACT_IDENTITY_SELECTION_FORBIDDEN_TEST_SRCS),$(ARTIFACT_IDENTITY_SELECTION_TEST_SRCS))" || { \
+		echo "error: artifact identity selection test links a forbidden production source" >&2; \
+		exit 1; \
+	}
+
+test-artifact-identity-selection: check-artifact-identity-selection-link-firewall $(ARTIFACT_IDENTITY_SELECTION_TEST_TARGET)
+	$(abspath $(ARTIFACT_IDENTITY_SELECTION_TEST_TARGET))
+
 test-command-stub-contract:
 	sh tests/test-command-stub-contract.sh
 
@@ -1078,6 +1170,7 @@ test: \
 	test-artifact-workspace \
 	test-multiple-artifact-workspace \
 	test-artifact-identity \
+	test-multiple-artifact-identity \
 	test-artifact-install-executor \
 	test-separated-source-build \
 	test-production-source-build \
@@ -1098,6 +1191,7 @@ test: \
 	test-dependency-plan-model \
 	test-artifact-install-plan \
 	test-artifact-selection-model \
+	test-artifact-identity-selection \
 	test-command-stub-contract \
 	test-aur-rpc-validation \
 	test-build-cache-symlink \
