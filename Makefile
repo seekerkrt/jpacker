@@ -27,6 +27,8 @@ MULTIPLE_ARTIFACT_WORKSPACE_TEST_TARGET := build/tests/multiple-artifact-workspa
 ARTIFACT_IDENTITY_TEST_TARGET := build/tests/artifact-identity-test
 MULTIPLE_ARTIFACT_IDENTITY_TEST_TARGET := build/tests/multiple-artifact-identity-test
 ARTIFACT_INSTALL_EXECUTOR_TEST_TARGET := build/tests/artifact-install-executor-test
+PACKAGE_BASE_ARTIFACT_INSTALL_PLAN_TEST_TARGET := build/tests/package-base-artifact-install-plan-test
+PACKAGE_BASE_ARTIFACT_INSTALL_EXECUTOR_TEST_TARGET := build/tests/package-base-artifact-install-executor-test
 SEPARATED_SOURCE_BUILD_TEST_TARGET := build/tests/separated-source-build-test
 PRODUCTION_SOURCE_BUILD_TEST_TARGET := build/tests/production-source-build-test
 PROCESS_CAPTURE_TEST_TARGET := build/tests/process-capture-test
@@ -406,6 +408,19 @@ MULTIPLE_ARTIFACT_IDENTITY_FORBIDDEN_TEST_SRCS := \
 	$(filter-out \
 		$(MULTIPLE_ARTIFACT_IDENTITY_ALLOWED_PRODUCTION_TEST_SRCS), \
 		$(SRCS))
+# POLICY(#268): transaction-wide reason policyはpure TUと既存per-artifact
+# reducer/validatorだけをlinkし、filesystem/process/metadata ownerを持ち込まない。
+PACKAGE_BASE_ARTIFACT_INSTALL_PLAN_ALLOWED_PRODUCTION_TEST_SRCS := \
+	$(SRC_DIR)/package_base_artifact_install_plan.cpp \
+	$(SRC_DIR)/artifact_install_plan.cpp \
+	$(SRC_DIR)/package_identifier.cpp
+PACKAGE_BASE_ARTIFACT_INSTALL_PLAN_TEST_SRCS := \
+	tests/package_base_artifact_install_plan_test.cpp \
+	$(PACKAGE_BASE_ARTIFACT_INSTALL_PLAN_ALLOWED_PRODUCTION_TEST_SRCS)
+PACKAGE_BASE_ARTIFACT_INSTALL_PLAN_FORBIDDEN_TEST_SRCS := \
+	$(filter-out \
+		$(PACKAGE_BASE_ARTIFACT_INSTALL_PLAN_ALLOWED_PRODUCTION_TEST_SRCS), \
+		$(SRCS))
 ARTIFACT_INSTALL_EXECUTOR_TEST_SRCS := \
 	tests/artifact_install_executor_test.cpp \
 	$(SRC_DIR)/artifact_install_executor.cpp \
@@ -421,6 +436,34 @@ ARTIFACT_INSTALL_EXECUTOR_TEST_SRCS := \
 	$(SRC_DIR)/logging.cpp \
 	tests/stubs/package-metadata/alpm_stub.cpp \
 	tests/stubs/artifact-install-executor/process_stub.cpp
+# POLICY(#268): fused preparation/executor testはmultiple capabilityの最小closureを
+# exact linkし、production source-build/CLI/orchestration ownerをallowlist外へ置く。
+PACKAGE_BASE_ARTIFACT_INSTALL_EXECUTOR_ALLOWED_PRODUCTION_TEST_SRCS := \
+	$(SRC_DIR)/package_base_artifact_install_executor.cpp \
+	$(SRC_DIR)/package_base_artifact_install_plan.cpp \
+	$(SRC_DIR)/artifact_install_executor.cpp \
+	$(SRC_DIR)/artifact_install_plan.cpp \
+	$(SRC_DIR)/artifact_identity.cpp \
+	$(SRC_DIR)/artifact_identity_set.cpp \
+	$(SRC_DIR)/artifact_identity_selection.cpp \
+	$(SRC_DIR)/artifact_workspace.cpp \
+	$(SRC_DIR)/package_metadata.cpp \
+	$(SRC_DIR)/trusted_cache.cpp \
+	$(SRC_DIR)/source_environment.cpp \
+	$(SRC_DIR)/package_identifier.cpp \
+	$(SRC_DIR)/shell_words.cpp \
+	$(SRC_DIR)/logging.cpp
+PACKAGE_BASE_ARTIFACT_INSTALL_EXECUTOR_TEST_SUPPORT_SRCS := \
+	tests/stubs/package-metadata/alpm_stub.cpp \
+	tests/stubs/artifact-install-executor/process_stub.cpp
+PACKAGE_BASE_ARTIFACT_INSTALL_EXECUTOR_TEST_SRCS := \
+	tests/package_base_artifact_install_executor_test.cpp \
+	$(PACKAGE_BASE_ARTIFACT_INSTALL_EXECUTOR_ALLOWED_PRODUCTION_TEST_SRCS) \
+	$(PACKAGE_BASE_ARTIFACT_INSTALL_EXECUTOR_TEST_SUPPORT_SRCS)
+PACKAGE_BASE_ARTIFACT_INSTALL_EXECUTOR_FORBIDDEN_TEST_SRCS := \
+	$(filter-out \
+		$(PACKAGE_BASE_ARTIFACT_INSTALL_EXECUTOR_ALLOWED_PRODUCTION_TEST_SRCS), \
+		$(SRCS))
 SEPARATED_SOURCE_BUILD_TEST_SRCS := \
 	tests/separated_source_build_test.cpp \
 	$(SRC_DIR)/separated_source_build.cpp \
@@ -497,13 +540,14 @@ LIBALPM_BUILD_TARGETS := \
 	$(PACKAGE_METADATA_TEST_TARGET) \
 	$(PACKAGE_METADATA_INTEGRATION_TEST_TARGET) \
 	$(ARTIFACT_INSTALL_EXECUTOR_TEST_TARGET) \
+	$(PACKAGE_BASE_ARTIFACT_INSTALL_EXECUTOR_TEST_TARGET) \
 	$(SEPARATED_SOURCE_BUILD_TEST_TARGET) \
 	$(PRODUCTION_SOURCE_BUILD_TEST_TARGET) \
 	$(REPOSITORY_QUERY_TEST_TARGET) \
 	$(AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION_TEST_TARGET) \
 	$(UPGRADE_BASELINE_METADATA_TEST_TARGET)
 
-.PHONY: all check-libalpm clean check-upgrade-all-plan-link-firewall check-system-source-upgrade-link-firewall check-aur-update-operation-result-link-firewall check-filtered-aur-update-operation-link-firewall check-upgrade-all-operation-link-firewall check-upgrade-all-command-link-firewall check-artifact-selection-model-link-firewall check-artifact-identity-selection-link-firewall check-multiple-artifact-workspace-link-firewall check-multiple-artifact-identity-link-firewall test test-app-config test-package-identifier test-package-metadata test-package-metadata-integration test-repository-query test-shell-words test-source-environment test-artifact-workspace test-multiple-artifact-workspace test-artifact-identity test-multiple-artifact-identity test-artifact-install-executor test-separated-source-build test-production-source-build test-process-capture test-aur-update-plan test-upgrade-all-plan test-system-source-upgrade test-aur-update-query test-aur-update-command test-upgrade-all-command test-aur-update-execution-preflight test-aur-update-execution-preflight-integration test-aur-update-execution-preparation test-aur-update-execution-runner test-aur-update-operation-result test-filtered-aur-update-operation test-upgrade-all-operation test-dependency-plan-model test-artifact-install-plan test-artifact-selection-model test-artifact-identity-selection test-command-stub-contract test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-commands-inspect test-commands-source-maintenance test-commands-sync test-conflicts-replaces test-install-layout test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check install uninstall
+.PHONY: all check-libalpm clean check-upgrade-all-plan-link-firewall check-system-source-upgrade-link-firewall check-aur-update-operation-result-link-firewall check-filtered-aur-update-operation-link-firewall check-upgrade-all-operation-link-firewall check-upgrade-all-command-link-firewall check-artifact-selection-model-link-firewall check-artifact-identity-selection-link-firewall check-multiple-artifact-workspace-link-firewall check-multiple-artifact-identity-link-firewall check-package-base-artifact-install-plan-link-firewall check-package-base-artifact-install-executor-link-firewall test test-app-config test-package-identifier test-package-metadata test-package-metadata-integration test-repository-query test-shell-words test-source-environment test-artifact-workspace test-multiple-artifact-workspace test-artifact-identity test-multiple-artifact-identity test-artifact-install-executor test-package-base-artifact-install-plan test-package-base-artifact-install-executor test-separated-source-build test-production-source-build test-process-capture test-aur-update-plan test-upgrade-all-plan test-system-source-upgrade test-aur-update-query test-aur-update-command test-upgrade-all-command test-aur-update-execution-preflight test-aur-update-execution-preflight-integration test-aur-update-execution-preparation test-aur-update-execution-runner test-aur-update-operation-result test-filtered-aur-update-operation test-upgrade-all-operation test-dependency-plan-model test-artifact-install-plan test-artifact-selection-model test-artifact-identity-selection test-command-stub-contract test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-commands-inspect test-commands-source-maintenance test-commands-sync test-conflicts-replaces test-install-layout test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check install uninstall
 
 all: $(TARGET) $(MANPAGE)
 
@@ -661,12 +705,29 @@ $(MULTIPLE_ARTIFACT_IDENTITY_TEST_TARGET): $(MULTIPLE_ARTIFACT_IDENTITY_TEST_SRC
 		$(MULTIPLE_ARTIFACT_IDENTITY_TEST_SRCS) \
 		-o $@
 
+$(PACKAGE_BASE_ARTIFACT_INSTALL_PLAN_TEST_TARGET): $(PACKAGE_BASE_ARTIFACT_INSTALL_PLAN_TEST_SRCS) $(SRC_DIR)/package_base_artifact_install_plan.hpp $(SRC_DIR)/artifact_install_plan.hpp $(SRC_DIR)/artifact_identity.hpp $(SRC_DIR)/dependency_plan.hpp $(SRC_DIR)/package_identifier.hpp $(VERSION_FILE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling PackageBase artifact install reason plan test binary"
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
+		-I$(SRC_DIR) \
+		$(PACKAGE_BASE_ARTIFACT_INSTALL_PLAN_TEST_SRCS) \
+		-o $@
+
 $(ARTIFACT_INSTALL_EXECUTOR_TEST_TARGET): $(ARTIFACT_INSTALL_EXECUTOR_TEST_SRCS) $(SRC_DIR)/artifact_install_executor.hpp $(SRC_DIR)/artifact_install_plan.hpp $(SRC_DIR)/artifact_identity.hpp $(SRC_DIR)/artifact_workspace.hpp $(SRC_DIR)/package_metadata.hpp $(SRC_DIR)/installed_package.hpp $(SRC_DIR)/dependency_plan.hpp $(SRC_DIR)/dependency_provider.hpp $(SRC_DIR)/trusted_cache.hpp $(SRC_DIR)/source_environment.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/shell_words.hpp $(SRC_DIR)/process.hpp $(SRC_DIR)/logging.hpp tests/stubs/package-metadata/alpm_stub.hpp tests/stubs/artifact-install-executor/process_stub.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling artifact install executor fake-symbol test binary"
 	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
 		-I$(SRC_DIR) -Itests/stubs/package-metadata \
 		$(ARTIFACT_INSTALL_EXECUTOR_TEST_SRCS) \
+		-o $@
+
+$(PACKAGE_BASE_ARTIFACT_INSTALL_EXECUTOR_TEST_TARGET): $(PACKAGE_BASE_ARTIFACT_INSTALL_EXECUTOR_TEST_SRCS) $(HEADERS) tests/stubs/package-metadata/alpm_stub.hpp tests/stubs/artifact-install-executor/process_stub.hpp $(VERSION_FILE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling PackageBase artifact install executor fake-symbol test binary"
+	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
+		-DJPACKER_ENABLE_PACKAGE_BASE_ARTIFACT_INSTALL_PLAN_TEST_HOOKS \
+		-I$(SRC_DIR) -Itests/stubs/package-metadata \
+		$(PACKAGE_BASE_ARTIFACT_INSTALL_EXECUTOR_TEST_SRCS) \
 		-o $@
 
 $(SEPARATED_SOURCE_BUILD_TEST_TARGET): $(SEPARATED_SOURCE_BUILD_TEST_SRCS) $(SRC_DIR)/separated_source_build.hpp $(SRC_DIR)/artifact_install_executor.hpp $(SRC_DIR)/artifact_install_plan.hpp $(SRC_DIR)/artifact_identity.hpp $(SRC_DIR)/artifact_workspace.hpp $(SRC_DIR)/package_metadata.hpp $(SRC_DIR)/installed_package.hpp $(SRC_DIR)/dependency_plan.hpp $(SRC_DIR)/dependency_provider.hpp $(SRC_DIR)/trusted_cache.hpp $(SRC_DIR)/source_environment.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/shell_words.hpp $(SRC_DIR)/process.hpp $(SRC_DIR)/logging.hpp tests/stubs/package-metadata/alpm_stub.hpp tests/stubs/artifact-install-executor/process_stub.hpp $(VERSION_FILE)
@@ -919,8 +980,56 @@ check-multiple-artifact-identity-link-firewall:
 test-multiple-artifact-identity: check-multiple-artifact-identity-link-firewall $(MULTIPLE_ARTIFACT_IDENTITY_TEST_TARGET)
 	$(abspath $(MULTIPLE_ARTIFACT_IDENTITY_TEST_TARGET))
 
+check-package-base-artifact-install-plan-link-firewall:
+	@echo ":: Checking PackageBase artifact install reason plan link firewall"
+	@set -e; for source in $(PACKAGE_BASE_ARTIFACT_INSTALL_PLAN_ALLOWED_PRODUCTION_TEST_SRCS); do \
+		count=$$(printf '%s\n' $(PACKAGE_BASE_ARTIFACT_INSTALL_PLAN_TEST_SRCS) | \
+			awk -v expected="$$source" '$$0 == expected { count++ } END { print count + 0 }'); \
+		test "$$count" -eq 1 || { \
+			echo "error: PackageBase artifact install plan test must link $$source exactly once" >&2; \
+			exit 1; \
+		}; \
+	done
+	@test -z "$(filter $(PACKAGE_BASE_ARTIFACT_INSTALL_PLAN_FORBIDDEN_TEST_SRCS),$(PACKAGE_BASE_ARTIFACT_INSTALL_PLAN_TEST_SRCS))" || { \
+		echo "error: PackageBase artifact install plan test links a forbidden production source" >&2; \
+		exit 1; \
+	}
+	@test -z "$(filter tests/stubs/%,$(PACKAGE_BASE_ARTIFACT_INSTALL_PLAN_TEST_SRCS))" || { \
+		echo "error: PackageBase artifact install plan test links a test stub" >&2; \
+		exit 1; \
+	}
+
+test-package-base-artifact-install-plan: check-package-base-artifact-install-plan-link-firewall $(PACKAGE_BASE_ARTIFACT_INSTALL_PLAN_TEST_TARGET)
+	$(abspath $(PACKAGE_BASE_ARTIFACT_INSTALL_PLAN_TEST_TARGET))
+
 test-artifact-install-executor: $(ARTIFACT_INSTALL_EXECUTOR_TEST_TARGET)
 	$(abspath $(ARTIFACT_INSTALL_EXECUTOR_TEST_TARGET))
+
+check-package-base-artifact-install-executor-link-firewall:
+	@echo ":: Checking PackageBase artifact install executor link firewall"
+	@set -e; for source in $(PACKAGE_BASE_ARTIFACT_INSTALL_EXECUTOR_ALLOWED_PRODUCTION_TEST_SRCS); do \
+		count=$$(printf '%s\n' $(PACKAGE_BASE_ARTIFACT_INSTALL_EXECUTOR_TEST_SRCS) | \
+			awk -v expected="$$source" '$$0 == expected { count++ } END { print count + 0 }'); \
+		test "$$count" -eq 1 || { \
+			echo "error: PackageBase artifact install executor test must link $$source exactly once" >&2; \
+			exit 1; \
+		}; \
+	done
+	@set -e; for source in $(PACKAGE_BASE_ARTIFACT_INSTALL_EXECUTOR_TEST_SUPPORT_SRCS); do \
+		count=$$(printf '%s\n' $(PACKAGE_BASE_ARTIFACT_INSTALL_EXECUTOR_TEST_SRCS) | \
+			awk -v expected="$$source" '$$0 == expected { count++ } END { print count + 0 }'); \
+		test "$$count" -eq 1 || { \
+			echo "error: PackageBase artifact install executor test must link support $$source exactly once" >&2; \
+			exit 1; \
+		}; \
+	done
+	@test -z "$(filter $(PACKAGE_BASE_ARTIFACT_INSTALL_EXECUTOR_FORBIDDEN_TEST_SRCS),$(PACKAGE_BASE_ARTIFACT_INSTALL_EXECUTOR_TEST_SRCS))" || { \
+		echo "error: PackageBase artifact install executor test links a forbidden production source" >&2; \
+		exit 1; \
+	}
+
+test-package-base-artifact-install-executor: check-package-base-artifact-install-executor-link-firewall $(PACKAGE_BASE_ARTIFACT_INSTALL_EXECUTOR_TEST_TARGET)
+	$(abspath $(PACKAGE_BASE_ARTIFACT_INSTALL_EXECUTOR_TEST_TARGET))
 
 test-separated-source-build: $(SEPARATED_SOURCE_BUILD_TEST_TARGET)
 	$(abspath $(SEPARATED_SOURCE_BUILD_TEST_TARGET))
@@ -1172,6 +1281,7 @@ test: \
 	test-artifact-identity \
 	test-multiple-artifact-identity \
 	test-artifact-install-executor \
+	test-package-base-artifact-install-executor \
 	test-separated-source-build \
 	test-production-source-build \
 	test-process-capture \
@@ -1190,6 +1300,7 @@ test: \
 	test-upgrade-all-operation \
 	test-dependency-plan-model \
 	test-artifact-install-plan \
+	test-package-base-artifact-install-plan \
 	test-artifact-selection-model \
 	test-artifact-identity-selection \
 	test-command-stub-contract \

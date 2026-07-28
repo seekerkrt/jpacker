@@ -39,11 +39,22 @@ constexpr std::size_t ARTIFACT_DIAGNOSTIC_VALUE_LIMIT = 96;
 #ifdef JPACKER_ENABLE_ARTIFACT_WORKSPACE_TEST_HOOKS
 MultipleArtifactValidationObserverForTest
         g_multiple_artifact_validation_observer = nullptr;
+MultipleArtifactCleanupObserverForTest
+        g_multiple_artifact_cleanup_observer = nullptr;
 
 void notify_multiple_artifact_validation_for_test(
         const fs::path& workspace_path) {
     if(g_multiple_artifact_validation_observer != nullptr)
         g_multiple_artifact_validation_observer(workspace_path);
+}
+
+void notify_multiple_artifact_cleanup_for_test(
+        const fs::path& workspace_path,
+        const std::vector<int>& retained_descriptors) {
+    if(g_multiple_artifact_cleanup_observer != nullptr) {
+        g_multiple_artifact_cleanup_observer(
+                workspace_path, retained_descriptors);
+    }
 }
 #else
 void notify_multiple_artifact_validation_for_test(const fs::path&) {
@@ -1708,13 +1719,21 @@ ValidatedPackageArtifactSet::ValidatedPackageArtifactSet(
         ValidatedPackageArtifactSet&& other) noexcept
     : workspace_(std::move(other.workspace_)),
       records_(std::move(other.records_)),
-      is_active_(std::exchange(other.is_active_, false)) {
+      ownership_state_(std::exchange(
+              other.ownership_state_, OwnershipState::Inactive)) {
 }
 
 void ValidatedPackageArtifactSet::require_active() const {
-    if(!is_active_ || records_.empty()) {
+    if(ownership_state_ != OwnershipState::Active || records_.empty()) {
         throw std::runtime_error(
                 "Validated package artifact set is no longer owned.");
+    }
+}
+
+void ValidatedPackageArtifactSet::require_workspace_ownership() const {
+    if(ownership_state_ == OwnershipState::Inactive) {
+        throw std::runtime_error(
+                "Validated package artifact set workspace is no longer owned.");
     }
 }
 
@@ -1730,7 +1749,7 @@ const fs::path& ValidatedPackageArtifactSet::path_at(
 }
 
 const fs::path& ValidatedPackageArtifactSet::workspace_path() const {
-    require_active();
+    require_workspace_ownership();
     return workspace_.path();
 }
 
@@ -1916,15 +1935,39 @@ void ValidatedPackageArtifactSet::require_validity() const {
 }
 
 void ValidatedPackageArtifactSet::retain_workspace_for_diagnostics() {
-    require_active();
+    require_workspace_ownership();
     workspace_.retain_for_diagnostics();
 }
 
 void ValidatedPackageArtifactSet::cleanup_workspace() {
-    require_active();
+    require_workspace_ownership();
+    if(ownership_state_ == OwnershipState::Active) {
+        // POLICY(#268): cleanup entryでaggregate全体を再証明した後だけ、
+        // retained artifact/signature descriptorを閉じる。
+        require_validity();
+#ifdef JPACKER_ENABLE_ARTIFACT_WORKSPACE_TEST_HOOKS
+        std::vector<int> retained_descriptors;
+        retained_descriptors.reserve(records_.size() * 2);
+        for(const Record& record : records_) {
+            if(record.artifact_descriptor >= 0) {
+                retained_descriptors.push_back(record.artifact_descriptor);
+            }
+            if(record.signature_descriptor >= 0) {
+                retained_descriptors.push_back(record.signature_descriptor);
+            }
+        }
+#endif
+        // ここからvalidated artifact capabilityは失効させるが、workspace
+        // ownershipはdiagnostic retentionとcleanup retryのため保持する。
+        records_.clear();
+        ownership_state_ = OwnershipState::WorkspaceCleanupPending;
+#ifdef JPACKER_ENABLE_ARTIFACT_WORKSPACE_TEST_HOOKS
+        notify_multiple_artifact_cleanup_for_test(
+                workspace_.path(), retained_descriptors);
+#endif
+    }
     workspace_.cleanup();
-    records_.clear();
-    is_active_ = false;
+    ownership_state_ = OwnershipState::Inactive;
 }
 
 ValidatedPackageArtifactSet validate_post_build_package_artifacts(
@@ -1957,6 +2000,11 @@ ValidatedPackageArtifactPath validate_post_build_package_artifact_for_test(
 void set_multiple_artifact_validation_observer_for_test(
         MultipleArtifactValidationObserverForTest observer) {
     g_multiple_artifact_validation_observer = observer;
+}
+
+void set_multiple_artifact_cleanup_observer_for_test(
+        MultipleArtifactCleanupObserverForTest observer) {
+    g_multiple_artifact_cleanup_observer = observer;
 }
 
 ValidatedPackageArtifactSet validate_post_build_package_artifacts_for_test(
