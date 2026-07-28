@@ -39,6 +39,16 @@ void preserve_error_on_next_package_query();
 void set_package_metadata(
         const std::string& name, const std::string& version,
         alpm_pkgreason_t reason);
+void enqueue_local_package_query_present(
+        std::string expected_package_name,
+        std::string returned_name,
+        std::string version,
+        alpm_pkgreason_t reason);
+void enqueue_local_package_query_absent(std::string expected_package_name);
+void enqueue_local_package_query_failure(
+        std::string expected_package_name,
+        alpm_errno_t error = ALPM_ERR_DB_OPEN);
+void require_local_package_query_expectations_consumed();
 void set_local_packages(const std::vector<LocalPackageMetadata>& packages);
 void set_local_package_cache_entry_null(std::size_t package_index);
 void set_local_package_name_null(std::size_t package_index);
@@ -109,6 +119,7 @@ std::size_t release_count_for_handle(std::size_t creation_index);
 std::string last_initialize_root();
 std::string last_initialize_database_path();
 std::string last_queried_package_name();
+std::vector<std::string> local_package_query_history();
 
 std::vector<SyncDatabaseRegistration> sync_database_registration_history();
 std::vector<std::string> sync_database_operation_history();

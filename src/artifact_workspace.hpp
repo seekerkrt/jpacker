@@ -397,6 +397,12 @@ ValidatedPackageArtifactPath validate_post_build_package_artifact(
 // 複数のvalidated artifact recordとexactly one workspaceを一括所有する。
 // 個別recordへcleanup/retention ownershipを分配しない。
 class ValidatedPackageArtifactSet final {
+    enum class OwnershipState {
+        Active,
+        WorkspaceCleanupPending,
+        Inactive,
+    };
+
     struct Record {
         std::filesystem::path path;
         std::string           leaf_name;
@@ -429,15 +435,18 @@ class ValidatedPackageArtifactSet final {
         ~Record() noexcept;
     };
 
+    // LANDMINE(#268): 通常のmember破棄でもrecord FDを閉じてからworkspace
+    // cleanupへ進むため、records_をworkspace_より後ろへ保つ。
     ArtifactWorkspace   workspace_;
     std::vector<Record> records_;
-    bool                is_active_ = true;
+    OwnershipState      ownership_state_ = OwnershipState::Active;
 
     ValidatedPackageArtifactSet(
             ArtifactWorkspace&& workspace,
             std::vector<Record>&& records) noexcept;
 
     void require_active() const;
+    void require_workspace_ownership() const;
     void require_validity_for_owner(
             std::uintmax_t expected_effective_user) const;
     static ValidatedPackageArtifactSet validate_for_owners(
@@ -505,6 +514,13 @@ using MultipleArtifactValidationObserverForTest =
 
 void set_multiple_artifact_validation_observer_for_test(
         MultipleArtifactValidationObserverForTest observer);
+
+using MultipleArtifactCleanupObserverForTest = void (*)(
+        const std::filesystem::path& workspace_path,
+        const std::vector<int>& retained_descriptors);
+
+void set_multiple_artifact_cleanup_observer_for_test(
+        MultipleArtifactCleanupObserverForTest observer);
 
 ValidatedPackageArtifactSet validate_post_build_package_artifacts_for_test(
         ArtifactWorkspace&& workspace,

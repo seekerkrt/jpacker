@@ -1,8 +1,10 @@
 #include "artifact_workspace.hpp"
 
+#include <cerrno>
 #include <cstdlib>
 #include <exception>
 #include <filesystem>
+#include <fcntl.h>
 #include <fstream>
 #include <initializer_list>
 #include <iostream>
@@ -315,6 +317,10 @@ bool     g_replacement_observer_called = false;
 fs::path g_replaced_workspace_original;
 bool     g_workspace_replacement_observer_called = false;
 
+fs::path g_cleanup_original_workspace;
+fs::path g_cleanup_replacement_sentinel;
+bool     g_cleanup_observer_called = false;
+
 void replace_artifact_during_validation(const fs::path& workspace_path) {
     if(workspace_path != g_replacement_target.parent_path() ||
        g_replacement_observer_called) {
@@ -341,6 +347,47 @@ void replace_workspace_during_validation(const fs::path& workspace_path) {
             fs::perm_options::replace);
 }
 
+void observe_closed_descriptors_and_replace_workspace(
+        const fs::path& workspace_path,
+        const std::vector<int>& retained_descriptors) {
+    if(g_cleanup_observer_called) return;
+    g_cleanup_observer_called = true;
+
+    expect(
+            retained_descriptors.size() == 3,
+            "Cleanup observer did not receive both artifacts and signature");
+    for(int descriptor : retained_descriptors) {
+        errno = 0;
+        expect(
+                fcntl(descriptor, F_GETFD) == -1 && errno == EBADF,
+                "Retained artifact descriptor remained open at workspace cleanup");
+    }
+
+    std::size_t entry_count = 0;
+    for(const auto& entry : fs::directory_iterator(workspace_path)) {
+        static_cast<void>(entry);
+        ++entry_count;
+    }
+    expect(
+            entry_count == 3,
+            "Workspace cleanup began before retained descriptors were closed");
+
+    g_cleanup_original_workspace = workspace_path;
+    g_cleanup_original_workspace += ".cleanup-original";
+    fs::rename(workspace_path, g_cleanup_original_workspace);
+    fs::create_directory(workspace_path);
+    fs::permissions(
+            workspace_path, fs::perms::owner_all,
+            fs::perm_options::replace);
+    g_cleanup_replacement_sentinel = workspace_path / "do-not-delete";
+    write_file(g_cleanup_replacement_sentinel);
+}
+
+void mark_cleanup_observer_called(
+        const fs::path&, const std::vector<int>&) {
+    g_cleanup_observer_called = true;
+}
+
 class ScopedMultipleArtifactValidationObserver final {
 public:
     explicit ScopedMultipleArtifactValidationObserver(
@@ -355,6 +402,23 @@ public:
 
     ~ScopedMultipleArtifactValidationObserver() noexcept {
         set_multiple_artifact_validation_observer_for_test(nullptr);
+    }
+};
+
+class ScopedMultipleArtifactCleanupObserver final {
+public:
+    explicit ScopedMultipleArtifactCleanupObserver(
+            MultipleArtifactCleanupObserverForTest observer) {
+        set_multiple_artifact_cleanup_observer_for_test(observer);
+    }
+
+    ScopedMultipleArtifactCleanupObserver(
+            const ScopedMultipleArtifactCleanupObserver&) = delete;
+    ScopedMultipleArtifactCleanupObserver& operator=(
+            const ScopedMultipleArtifactCleanupObserver&) = delete;
+
+    ~ScopedMultipleArtifactCleanupObserver() noexcept {
+        set_multiple_artifact_cleanup_observer_for_test(nullptr);
     }
 };
 
@@ -1191,27 +1255,99 @@ void test_cleanup_failure_refuses_replacement(
             {"cleanup-failure-one.pkg.tar.zst",
              "cleanup-failure-two.pkg.tar.zst"});
     write_all_expected_artifacts(expected);
+    write_file(signature_path(expected.path_at(1)), "signature");
     ValidatedPackageArtifactSet validated =
             validate_post_build_package_artifacts(
                     std::move(workspace), expected);
 
     const fs::path workspace_path = validated.workspace_path();
-    fs::path original_workspace = workspace_path;
-    original_workspace += ".cleanup-original";
-    fs::rename(workspace_path, original_workspace);
-    fs::create_directory(workspace_path);
-    fs::permissions(
-            workspace_path, fs::perms::owner_all,
-            fs::perm_options::replace);
-    const fs::path replacement_sentinel = workspace_path / "do-not-delete";
-    write_file(replacement_sentinel);
+    g_cleanup_original_workspace.clear();
+    g_cleanup_replacement_sentinel.clear();
+    g_cleanup_observer_called = false;
+    {
+        ScopedMultipleArtifactCleanupObserver observer(
+                observe_closed_descriptors_and_replace_workspace);
+        expect_runtime_error(
+                [&validated]() { validated.cleanup_workspace(); },
+                "aggregate cleanup workspace replacement");
+    }
+    expect(
+            g_cleanup_observer_called,
+            "Aggregate cleanup observer was not called");
+    expect(
+            fs::is_regular_file(g_cleanup_replacement_sentinel),
+            "Aggregate cleanup deleted replacement workspace contents");
+    expect(
+            validated.workspace_path() == workspace_path,
+            "Cleanup failure lost aggregate workspace diagnostic path");
+    expect_runtime_error(
+            [&validated]() { static_cast<void>(validated.size()); },
+            "cleanup-pending validated set size query");
+    expect_runtime_error(
+            [&validated]() { static_cast<void>(validated.path_at(0)); },
+            "cleanup-pending validated set path query");
+    expect_runtime_error(
+            [&validated]() { validated.require_validity(); },
+            "cleanup-pending validated set validity");
+    validated.retain_workspace_for_diagnostics();
 
+    expect(
+            fs::remove(g_cleanup_replacement_sentinel),
+            "Cleanup replacement sentinel was not removed");
+    expect(
+            fs::remove(workspace_path),
+            "Cleanup replacement workspace was not removed");
+    fs::rename(g_cleanup_original_workspace, workspace_path);
+    validated.cleanup_workspace();
+    expect(
+            !fs::exists(workspace_path),
+            "Cleanup retry left aggregate workspace behind");
+    expect_runtime_error(
+            [&validated]() { static_cast<void>(validated.workspace_path()); },
+            "cleanup retry result workspace query");
+    expect_runtime_error(
+            [&validated]() { validated.retain_workspace_for_diagnostics(); },
+            "cleanup retry result retention");
     expect_runtime_error(
             [&validated]() { validated.cleanup_workspace(); },
-            "aggregate cleanup workspace replacement");
+            "cleanup retry replay");
+}
+
+void test_cleanup_revalidates_before_closing_descriptors(
+        const ValidatedCacheRoot& root) {
+    ArtifactWorkspace workspace = create_test_artifact_workspace(root);
+    ExpectedPackageArtifactSet expected = declare_expected_artifacts(
+            workspace,
+            {"cleanup-revalidate-one.pkg.tar.zst",
+             "cleanup-revalidate-two.pkg.tar.zst"});
+    write_all_expected_artifacts(expected);
+    ValidatedPackageArtifactSet validated =
+            validate_post_build_package_artifacts(
+                    std::move(workspace), expected);
+
+    const fs::path replacement_target = validated.path_at(1);
     expect(
-            fs::is_regular_file(replacement_sentinel),
-            "Aggregate cleanup deleted replacement workspace contents");
+            fs::remove(replacement_target),
+            "Cleanup revalidation target was not removed");
+    write_file(replacement_target, "replacement");
+
+    g_cleanup_observer_called = false;
+    {
+        ScopedMultipleArtifactCleanupObserver observer(
+                mark_cleanup_observer_called);
+        expect_runtime_error(
+                [&validated]() { validated.cleanup_workspace(); },
+                "aggregate cleanup precondition revalidation");
+    }
+    expect(
+            !g_cleanup_observer_called,
+            "Cleanup closed descriptors before aggregate revalidation");
+    expect(
+            validated.size() == 2,
+            "Failed cleanup precondition consumed validated records");
+    expect(
+            validated.path_at(1) == replacement_target,
+            "Failed cleanup precondition lost validated record paths");
     validated.retain_workspace_for_diagnostics();
 }
 
@@ -1263,6 +1399,7 @@ int main(int argc, char* argv[]) {
         test_replacement_after_validation(root);
         test_signature_changes_after_validation(root);
         test_default_cleanup_retention_and_explicit_cleanup(root);
+        test_cleanup_revalidates_before_closing_descriptors(root);
         test_cleanup_failure_refuses_replacement(root);
     } catch(const std::exception& error) {
         std::cerr << "multiple artifact workspace test failed: "
