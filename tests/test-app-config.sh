@@ -115,6 +115,7 @@ syntax_output=$tmp_dir/syntax.out
     printf '%s\n' '   '
     printf '%s\n' '  NoEdIt = "YeS"   # trailing comment'
     printf '%s\n' "  nodiff = 'TrUe'"
+    printf '%s\n' '  RmDePs = "yes"'
     printf '%s\n' '  EdItOr = "editor # literal = value" # comment outside quotes'
     printf '%s\n' "  LogFile = '/tmp/log # literal=still-value' # trailing comment"
     printf '%s\n' 'UNKNOWN_KEY=ignored'
@@ -128,7 +129,7 @@ assert_line "NODIFF=true" "$syntax_output"
 assert_line "NOCONFIRM=false" "$syntax_output"
 assert_line "REBUILD=false" "$syntax_output"
 assert_line "CLEANBUILD=false" "$syntax_output"
-assert_line "RMDEPS=false" "$syntax_output"
+assert_line "RMDEPS=true" "$syntax_output"
 assert_line "EDITOR=editor # literal = value" "$syntax_output"
 assert_line "LOGFILE=/tmp/log # literal=still-value" "$syntax_output"
 assert_config_field_count "$syntax_output"
@@ -138,6 +139,7 @@ invalid_output=$tmp_dir/invalid.out
 {
     printf '%s\n' 'NOEDIT=not-a-boolean'
     printf '%s\n' 'NODIFF=false'
+    printf '%s\n' 'RMDEPS=not-a-boolean'
     printf '%s\n' 'EDITOR='
     printf '%s\n' 'LOGFILE=""'
 } > "$invalid_config"
@@ -315,6 +317,13 @@ fi
 # resolver/checkout/workspace/makepkg/sudoより前に拒否する。
 setup_integration_case rmdeps-rejection
 run_integration_fail --rmdeps --rmdeps -S --aur clean-root
+assert_contains "Separated build/install does not support --rmdeps." "$output_file"
+assert_command_log_empty
+
+# config由来のRMDEPSもsilent ignoreせず、CLI optionなしで同じguardへ到達する。
+setup_integration_case config-rmdeps-rejection
+printf '%s\n' 'RMDEPS=true' >> "$config_file"
+run_integration_fail --noconfirm -S --aur clean-root
 assert_contains "Separated build/install does not support --rmdeps." "$output_file"
 assert_command_log_empty
 

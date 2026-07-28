@@ -379,6 +379,7 @@ InstallReasonDirective resolve_install_reason_directive(
 void require_supported_separated_install_options(bool rm_deps) {
     if(!rm_deps) return;
 
-    // LANDMINE(#218): build-onlyのmakepkg -rは、artifact install前にruntime dependencyも削除し得る。
+    // POLICY(#269): separated lifecycleは今回導入したdependencyのexact setを
+    // 所有しない。cleanupを推測したりmakepkg -rへ変換したりせずfail closedとする。
     throw std::runtime_error("Separated build/install does not support --rmdeps.");
 }

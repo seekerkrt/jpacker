@@ -113,6 +113,26 @@ AUR source buildでは、PackageBaseをrepository / build / workspace / package 
 * transaction failureはpackageごとのpartial successを証明しないため、child successを推測しない。safeなattempt identityはfailure evidenceとして成功outcomeから分離する。
 * workspace cleanupはtransaction成功後に限る。cleanup failureはtransaction failureへflattenせず、すべてのcompleted childの正確なoutcomeとunselected identityを保つpartial successとする。
 
+### 10. separated source-build上の`--rmdeps`はv1.xでunsupportedとする
+
+#123の旧combined lifecycleでは、`makepkg -sicr`がdependency同期、source artifactのbuild、package install、dependency cleanupを一続きで所有していた。#242ではこの責務を、build-only makepkg、invocation-ownedのfresh `PKGDEST`、検証済みartifactを扱うtyped `pacman -U` install transactionへ分離した。この移行後のjpackerは、今回のinvocationだけが新規導入したmake / check dependencyの集合をauthoritativeに所有していない。
+
+build前後のinstalled package差分だけでは、並行package transaction、pre-existing dependency、Explicit package、install reasonの変化、`base-devel`、およびinvocation外で導入または変更されたpackageを安全に区別できない。`pacman -Qdt`や`pacman -Rns`によるsystem-wideなorphan cleanupは、このoptionの責務でもない。そのためv1.xでは、separated AUR / source-build lifecycle上の`--rmdeps`を正式にunsupportedとする。
+
+このunsupported decisionはsilent ignoreではない。source-build routeでは、cleanup ownershipを証明できないまま削除へ進む代わりに、各callerの既存preflight contractに従ってexternal mutationより前にfailureとする。`makepkg -r`、pacman removal、独自orphan cleanup、automatic rollbackへ変換しない。`--noconfirm`はpackage削除を暗黙に許可せず、このfailureを突破しない。pacman-only routeではjpacker global optionとして消費するが、作用させずpacmanへも転送しない。
+
+将来dependency cleanupを実装する場合は、少なくとも次を満たす設計が必要である。これは実装方法を確定するものではなく、安全にsupportできると判断するための必要条件である。
+
+* authoritativeなbuild前installed package / install reason snapshotを持つこと。
+* dependency installation transactionが今回のinvocationに所有されていることを証明できること。
+* 今回新規導入されたDependency-reason packageのexact setを特定できること。
+* concurrent package transactionを排除または検出できること。
+* pre-existing package、Explicit package、`base-devel`、およびinvocation外で導入または変更されたpackageをcleanup対象から保護すること。
+* cleanup planを実行前にpreviewし、必要なconfirmationを得ること。
+* build、install、cleanupの成功または失敗を別resultとして保持すること。
+* cleanup failure後も、すでに成功したpackage installを失敗へflattenしたり無条件に再実行したりしないこと。
+* package削除を実systemへ向けずに検証できるstrict stub / isolated testを備えること。
+
 ---
 
 ## English
@@ -223,3 +243,23 @@ For AUR source builds, a PackageBase is the repository, build, workspace, and pa
 * Selected children enter one pacman transaction per PackageBase. If the child-specific desired install reasons cannot form a policy representable by that transaction, processing fails closed instead of partially installing them.
 * A failed transaction does not prove per-package partial success, so no child success is inferred. Safe attempted identities remain failure evidence separate from successful outcomes.
 * Workspace cleanup occurs only after transaction success. Cleanup failure is not flattened into transaction failure: it is partial success retaining every completed child's exact outcome and all unselected identities.
+
+### 10. `--rmdeps` is unsupported on separated source builds in v1.x
+
+Under the former combined lifecycle from #123, `makepkg -sicr` owned dependency synchronization, source-artifact building, package installation, and dependency cleanup as one continuous operation. #242 separated those responsibilities into build-only makepkg, an invocation-owned fresh `PKGDEST`, and a typed `pacman -U` installation transaction over validated artifacts. After that transition, jpacker no longer authoritatively owns the set of make and check dependencies introduced only by the current invocation.
+
+A pre/post installed-package difference alone cannot safely distinguish concurrent package transactions, pre-existing dependencies, Explicit packages, install-reason changes, `base-devel`, or packages introduced or changed outside the invocation. System-wide orphan cleanup through `pacman -Qdt` or `pacman -Rns` is also outside this option's responsibility. Therefore v1.x formally treats `--rmdeps` as unsupported on the separated AUR/source-build lifecycle.
+
+This unsupported decision is not silent ignore. On a source-build route, each caller follows its existing preflight contract and fails before external mutation instead of deleting packages whose cleanup ownership is unproven. The option is not translated into `makepkg -r`, pacman removal, custom orphan cleanup, or automatic rollback. `--noconfirm` does not implicitly authorize package removal and cannot bypass this failure. On a pacman-only route, jpacker consumes the global option but gives it no effect and does not forward it to pacman.
+
+Any future dependency-cleanup implementation would need a design that satisfies at least the following conditions. These are necessary conditions for deciding that support is safe, not a commitment to a particular implementation:
+
+* An authoritative pre-build snapshot of installed packages and install reasons.
+* Proof that the dependency installation transaction is owned by the current invocation.
+* The exact set of Dependency-reason packages newly introduced by this invocation.
+* A mechanism that excludes or detects concurrent package transactions.
+* Protection for pre-existing packages, Explicit packages, `base-devel`, and packages introduced or changed outside the invocation.
+* Preview and required confirmation of the cleanup plan before execution.
+* Separate results for build, installation, and cleanup success or failure.
+* Preservation of an already successful package installation after cleanup failure, without flattening it into failure or blindly retrying it.
+* Strict stubs and isolated tests that verify removal behavior without targeting the real system.

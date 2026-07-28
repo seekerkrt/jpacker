@@ -212,9 +212,21 @@ selected childはrequired-target order、unselected artifactはproduced aggregat
 
 `--rebuild` / `--cleanbuild` が未指定の場合、jpacker は既存の package artifact や `src/` directory がある場面で、必要に応じて default no の prompt で rebuild / cleanbuild を確認する。cleanbuild を有効にし、同じ package directory に既存 package artifact がある場合は `-f` も有効にする。`--noconfirm` 指定時は prompt を出さず、未指定の rebuild / cleanbuild は no として扱う。
 
-`--rmdeps` は jpacker 固有 option として認識するが、separated AUR / source-build 経路では未対応とする。source target を含む invocation では all-target preflight で拒否し、artifact workspace 作成、makepkg、installed metadata query、sudo のいずれも開始しない。`upgrade-aur` と `upgrade-all` では update target の有無より前に拒否する。`makepkg -r` へは変換せず、`--noconfirm` を併記しても拒否を突破しない。
+`--rmdeps` は jpacker 固有 option として認識するが、v1.xのseparated AUR / source-build lifecycleでは正式にunsupportedとする。#123の旧combined lifecycleでは`makepkg -sicr`がdependency同期、build、install、cleanupを一続きで所有していたが、#242でbuild-only makepkg、fresh `PKGDEST`、typed `pacman -U` installへ責務を分離した。現行jpackerは今回のinvocationだけが新規導入したmake / check dependencyのexact setをauthoritativeに所有せず、pre/post installed package差分だけではpre-existing / Explicit / `base-devel`、reason変化、並行transaction、invocation外の変更を安全に区別できない。
 
-jpacker は `pacman -Rns`、`pacman -Qdt`、独自 orphan cleanup を追加しない。pacman-only 経路や official repository package の通常 install では `--rmdeps` を pacman へ渡さず、作用させない。
+unsupportedはsilent ignoreではなく、source routeではfail-closed failureである。CLIの`--rmdeps`とconfig fileの`RMDEPS=true`は同じpolicyを使い、`--noconfirm`を併記しても拒否を突破しない。current route matrixは次のとおり。
+
+| Route | `--rmdeps` contract |
+| --- | --- |
+| 明示的なAUR / source-build install、`build` | source resolutionより前のguardを持つcallerではその時点で拒否する。Auto `-S`のようにroute判定が必要なcallerは、その既存probe後、checkout mutation、artifact workspace、makepkg、artifact identity query、installed metadata query、pacman / sudo transactionより前に拒否する |
+| singular / PackageBase separated lifecycle、prepared production invocation | workspace / process / metadata / transactionより前に拒否する。production invocationではdatabase resolverより前の既存preflight orderも維持する |
+| `upgrade-aur` | update queryとdefault log / cache初期化より前に拒否する。update targetが0件でもno-op成功へ変換しない |
+| `upgrade-all` | default log / cache初期化、source preparation、system upgrade、foreign inventory、AUR queryより前に拒否する。全phaseがno-opでも成功へ変換しない |
+| registered `upgrade`にregularかつvalidなsource targetがある | source preparationの既存boundaryで、source mutationとsystem mutationより前に拒否する |
+| registered `upgrade`にsource targetがなく、pacman-only system upgradeへ縮退する | 作用させず、system `pacman -Syu`へ転送しない |
+| その他のpacman-only route | jpacker global optionとして消費するが作用させず、pacmanへ転送しない |
+
+jpackerは`--rmdeps`を`makepkg -r`、`pacman -Rns`、`pacman -Qdt`、独自orphan cleanup、automatic rollbackへ変換しない。Bash / zsh / fish completionでparserが認識するglobal option候補として表示されることは、source routeでのsupportを意味しない。将来実装に必要なownership、protected state、preview / confirmation、result分離、testの条件は[DECISIONS.md](DECISIONS.md)のdecision 10を正とする。
 
 `--aur` / `--repo` は package source を invocation 単位で限定する selector である。pacman / makepkg へは渡さず、下記の source selection policy に従って jpacker が routing に使う。
 

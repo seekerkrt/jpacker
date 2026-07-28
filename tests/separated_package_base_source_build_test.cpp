@@ -1078,6 +1078,31 @@ void test_static_request_failures_before_workspace(
     }
 }
 
+void test_rmdeps_rejected_before_workspace(
+        const TemporaryTestEnvironment& environment) {
+    LifecycleScenario scenario;
+    scenario.options.no_confirm = true;
+    scenario.options.rm_deps = true;
+    scenario.required_targets = {target("rmdeps-child")};
+    scenario.produced_artifacts = {artifact("rmdeps-child")};
+    scenario.expect_install = false;
+    activate_scenario(scenario, environment);
+
+    static_cast<void>(expect_runtime_error(
+            [&]() {
+                static_cast<void>(execute_scenario(environment, scenario));
+            },
+            "--rmdeps set preflight",
+            "Separated build/install does not support --rmdeps."));
+    expect(
+            scenario.workspace_path.empty() &&
+                    process_stub::capture_command_call_count() == 0 &&
+                    process_stub::run_command_call_count() == 0 &&
+                    metadata_stub::initialize_call_count() == 0,
+            "--rmdeps set preflight crossed an external boundary");
+    finish_scenario(scenario, 0);
+}
+
 void test_identity_and_metadata_failures(
         const TemporaryTestEnvironment& environment) {
     {
@@ -1431,6 +1456,9 @@ int main() {
         });
         run_case("static request failures before workspace", [&]() {
             test_static_request_failures_before_workspace(environment);
+        });
+        run_case("rmdeps rejection before workspace", [&]() {
+            test_rmdeps_rejected_before_workspace(environment);
         });
         run_case("identity and metadata failures", [&]() {
             test_identity_and_metadata_failures(environment);
