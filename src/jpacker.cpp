@@ -11,6 +11,7 @@
 // このファイルは、jpacker の CLI 入口、pacman wrapper、AUR/source build 補助をまとめる実装単位。
 // 関数宣言と詳細実装は、将来の分割候補が見えるように section comment で大まかな責務ごとに分類する。
 
+#include "application_identity.hpp"
 #include "app_config.hpp"
 #include "aur_rpc.hpp"
 #include "cli_parser.hpp"
@@ -41,17 +42,6 @@
 #include <unistd.h>
 
 namespace fs = std::filesystem;
-
-// --- 設定 ---
-#ifndef JPACKER_VERSION
-#define JPACKER_VERSION "unknown"
-#endif
-
-namespace {
-
-const std::string VERSION = JPACKER_VERSION;
-
-} // namespace
 
 namespace {
 
@@ -236,7 +226,9 @@ int run_jpacker(int argc, char* argv[]) {
             log_path = expand_config_path(g_config.log_file);
         }
         Logger::init(log_path);
-        Logger::info("Started jpacker v" + VERSION);
+        Logger::info(
+                "Started jpacker v" +
+                std::string(application_identity::VERSION));
     } catch(const std::exception& e) {
         std::cerr << "Warning: Failed to initialize log: " << e.what() << std::endl;
     } catch(...) {
@@ -382,7 +374,8 @@ int main(int argc, char* argv[]) {
 
 // CLI入口 / help
 void print_help() {
-    std::cout << "\033[1;36mjpacker\033[0m v" << VERSION << "\n"
+    std::cout << "\033[1;36mjpacker\033[0m v"
+              << application_identity::VERSION << "\n"
               << std::endl;
     std::cout << "\033[1mUSAGE\033[0m" << std::endl;
     std::cout << "    jpacker <op> [options] [targets...]\n"
@@ -457,7 +450,7 @@ bool handle_info_only_option(int argc, char* argv[]) {
             return true;
         }
         if(arg == "-V" || arg == "--version") {
-            std::cout << "jpacker v" << VERSION << std::endl;
+            std::cout << "jpacker v" << application_identity::VERSION << std::endl;
             return true;
         }
         // POLICY(#173): help/versionはoperation位置だけで扱い、option valueやopaque operandを横取りしない。
