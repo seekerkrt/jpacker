@@ -1,14 +1,17 @@
 #include "app_config.hpp"
 #include "dependency_plan.hpp"
 #include "process.hpp"
+#include "separated_package_base_source_build.hpp"
 #include "separated_source_build.hpp"
 #include "source_install.hpp"
+#include "source_preference.hpp"
 #include "trusted_cache.hpp"
 
 #include "stubs/artifact-install-executor/process_stub.hpp"
 #include "stubs/package-metadata/alpm_stub.hpp"
 
 #include <algorithm>
+#include <cerrno>
 #include <cstdlib>
 #include <exception>
 #include <filesystem>
@@ -21,6 +24,8 @@
 #include <utility>
 #include <vector>
 
+#include <fcntl.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 // process.cppをlinkしないfake-symbol binaryでも、production checkout ownerが使う
@@ -89,13 +94,19 @@ std::string expect_runtime_error(
     throw std::runtime_error(context + ": expected runtime_error");
 }
 
+struct CleanupErrorObservation {
+    ArtifactInstallExecutionOutcome install_outcome;
+    std::string                     diagnostic;
+};
+
 template <typename Callable>
-std::string expect_cleanup_error(
+CleanupErrorObservation expect_cleanup_error(
         Callable&& callable, const std::string& context) {
     try {
         std::forward<Callable>(callable)();
     } catch(const SeparatedSourceBuildCleanupError& error) {
-        return error.what();
+        return CleanupErrorObservation{
+                error.install_outcome(), error.what()};
     } catch(const std::exception& error) {
         throw std::runtime_error(
                 context + ": cleanup partial-success was flattened: " +
@@ -233,6 +244,130 @@ public:
     }
 };
 
+class ScopedUmask final {
+    mode_t previous_mode_;
+
+public:
+    explicit ScopedUmask(mode_t mode) noexcept : previous_mode_(umask(mode)) {
+    }
+
+    ScopedUmask(const ScopedUmask&) = delete;
+    ScopedUmask& operator=(const ScopedUmask&) = delete;
+
+    ~ScopedUmask() noexcept {
+        static_cast<void>(umask(previous_mode_));
+    }
+};
+
+class ScopedSourcePreferenceEntry final {
+    fs::path root_;
+    fs::path entry_;
+
+public:
+    ScopedSourcePreferenceEntry(
+            const std::string& package_name,
+            const std::string& contents)
+        : root_(source_preference_root()),
+          entry_(root_ / package_name) {
+        fs::create_directories(root_);
+        write_file(entry_, contents);
+    }
+
+    ScopedSourcePreferenceEntry(const ScopedSourcePreferenceEntry&) = delete;
+    ScopedSourcePreferenceEntry& operator=(
+            const ScopedSourcePreferenceEntry&) = delete;
+
+    ~ScopedSourcePreferenceEntry() noexcept {
+        std::error_code error;
+        fs::remove(entry_, error);
+        error.clear();
+        // rootそのものはemptyの場合だけ除去し、広いpathをrecursiveに消さない。
+        fs::remove(root_, error);
+    }
+};
+
+class ScopedStdinReplacement final {
+    int saved_stdin_ = -1;
+    int replacement_fd_ = -1;
+    int peer_fd_ = -1;
+
+    ScopedStdinReplacement(
+            int replacement_fd, int peer_fd)
+        : replacement_fd_(replacement_fd), peer_fd_(peer_fd) {
+        saved_stdin_ = dup(STDIN_FILENO);
+        if(saved_stdin_ == -1 || dup2(replacement_fd_, STDIN_FILENO) == -1) {
+            const int saved_error = errno;
+            if(saved_stdin_ != -1) close(saved_stdin_);
+            close(replacement_fd_);
+            if(peer_fd_ != -1) close(peer_fd_);
+            throw std::runtime_error(
+                    "Failed to replace stdin for production source-build test: " +
+                    std::to_string(saved_error));
+        }
+    }
+
+public:
+    static ScopedStdinReplacement noninteractive() {
+        int descriptors[2];
+        if(pipe(descriptors) != 0) {
+            throw std::runtime_error(
+                    "Failed to create non-interactive stdin fixture.");
+        }
+        close(descriptors[1]);
+        return ScopedStdinReplacement(descriptors[0], -1);
+    }
+
+    static ScopedStdinReplacement terminal_with_input(
+            const std::string& input) {
+        const int master_fd = posix_openpt(O_RDWR | O_NOCTTY);
+        if(master_fd == -1 || grantpt(master_fd) != 0 ||
+           unlockpt(master_fd) != 0) {
+            if(master_fd != -1) close(master_fd);
+            throw std::runtime_error(
+                    "Failed to create terminal stdin fixture.");
+        }
+        const char* slave_name = ptsname(master_fd);
+        if(slave_name == nullptr) {
+            close(master_fd);
+            throw std::runtime_error(
+                    "Failed to resolve terminal stdin fixture path.");
+        }
+        const int slave_fd = open(slave_name, O_RDWR | O_NOCTTY);
+        if(slave_fd == -1) {
+            close(master_fd);
+            throw std::runtime_error(
+                    "Failed to open terminal stdin fixture.");
+        }
+        if(write(
+                   master_fd, input.data(),
+                   static_cast<size_t>(input.size())) !=
+           static_cast<ssize_t>(input.size())) {
+            close(slave_fd);
+            close(master_fd);
+            throw std::runtime_error(
+                    "Failed to seed terminal stdin fixture.");
+        }
+        return ScopedStdinReplacement(slave_fd, master_fd);
+    }
+
+    ScopedStdinReplacement(const ScopedStdinReplacement&) = delete;
+    ScopedStdinReplacement& operator=(const ScopedStdinReplacement&) = delete;
+    ScopedStdinReplacement(ScopedStdinReplacement&& other) noexcept
+        : saved_stdin_(std::exchange(other.saved_stdin_, -1)),
+          replacement_fd_(std::exchange(other.replacement_fd_, -1)),
+          peer_fd_(std::exchange(other.peer_fd_, -1)) {}
+    ScopedStdinReplacement& operator=(ScopedStdinReplacement&&) = delete;
+
+    ~ScopedStdinReplacement() noexcept {
+        if(saved_stdin_ != -1) {
+            static_cast<void>(dup2(saved_stdin_, STDIN_FILENO));
+            close(saved_stdin_);
+        }
+        if(replacement_fd_ != -1) close(replacement_fd_);
+        if(peer_fd_ != -1) close(peer_fd_);
+    }
+};
+
 class TemporaryProductionEnvironment final {
     fs::path                   original_working_directory_;
     fs::path                   path_;
@@ -298,6 +433,8 @@ public:
 
     ~TemporaryProductionEnvironment() noexcept {
         set_separated_source_build_workspace_observer_for_test(nullptr);
+        set_separated_package_base_source_build_workspace_observer_for_test(
+                nullptr);
         process_stub::set_capture_hook(nullptr);
         process_stub::set_run_hook(nullptr);
         std::error_code working_directory_error;
@@ -397,7 +534,34 @@ ProductionSourceBuildWorkItem make_work_item(
     work_item.request.checkout_name = package_name;
     work_item.request.git_url =
             "https://aur.archlinux.org/" + package_name + ".git";
-    work_item.desired_reason = desired_reason;
+    work_item.required_targets.push_back(RequiredPackageArtifactTarget{
+            package_name, package_name, desired_reason});
+    return work_item;
+}
+
+ProductionSourceBuildWorkItem make_package_base_work_item(
+        const std::string& package_base,
+        std::vector<RequiredPackageArtifactTarget> required_targets) {
+    ProductionSourceBuildWorkItem work_item;
+    if(required_targets.size() == 1) {
+        work_item.request.package_name =
+                required_targets.front().package_name;
+    }
+    work_item.request.checkout_name = package_base;
+    work_item.request.git_url =
+            "https://aur.archlinux.org/" + package_base + ".git";
+    work_item.required_targets = std::move(required_targets);
+    work_item.is_build_plan_entry = true;
+    return work_item;
+}
+
+ProductionSourceBuildWorkItem make_update_check_work_item(
+        const std::string& package_name,
+        const std::string& installed_version) {
+    ProductionSourceBuildWorkItem work_item = make_work_item(package_name);
+    work_item.request.only_if_updated = true;
+    work_item.request.installed_snapshot =
+            SourceInstalledSnapshot{installed_version};
     return work_item;
 }
 
@@ -420,6 +584,47 @@ BuildPlan two_entry_plan() {
     return plan;
 }
 
+BuildPlan ordinary_single_entry_plan() {
+    BuildPlan plan;
+    const RootTargetIdentity root_identity{0, "ordinary-set-root"};
+    plan.root_targets.push_back(root_identity);
+    plan.package_targets.push_back(PlannedPackageTarget{
+            "ordinary-set-root", "ordinary-set-root",
+            {PackageRole::Root}, {root_identity}});
+    plan.order.push_back(BuildPlanEntry{
+            "ordinary-set-root", {"ordinary-set-root"}});
+    return plan;
+}
+
+BuildPlan same_package_base_plan() {
+    BuildPlan plan;
+    const RootTargetIdentity root_identity{0, "split-explicit"};
+    plan.root_targets.push_back(root_identity);
+    plan.package_targets.push_back(PlannedPackageTarget{
+            "split-explicit", "split-suite",
+            {PackageRole::RuntimeDependency, PackageRole::Root},
+            {root_identity}});
+    plan.package_targets.push_back(PlannedPackageTarget{
+            "split-dependency", "split-suite",
+            {PackageRole::RuntimeDependency}, {root_identity}});
+    plan.order.push_back(BuildPlanEntry{
+            "split-suite", {"split-explicit", "split-dependency"}});
+    return plan;
+}
+
+void expect_required_target(
+        const RequiredPackageArtifactTarget& target,
+        const std::string& package_base,
+        const std::string& package_name,
+        DesiredInstallReason desired_reason,
+        const std::string& context) {
+    expect(target.package_base == package_base, context + ": PackageBase differs");
+    expect(target.package_name == package_name, context + ": package name differs");
+    expect(
+            target.desired_reason == desired_reason,
+            context + ": desired install reason differs");
+}
+
 AppConfig noninteractive_config() {
     AppConfig config;
     config.no_edit = true;
@@ -430,12 +635,22 @@ AppConfig noninteractive_config() {
 enum class MetadataMode {
     Absent,
     ExistingDependency,
+    ExistingExplicitDifferentVersion,
+    ExistingExplicitSameVersion,
     QueryFailure,
+};
+
+struct ProducedArtifactPlan {
+    std::string package_name;
+    std::string full_version = ARTIFACT_VERSION;
 };
 
 struct UnitPlan {
     std::string                       package_name;
+    std::string                       package_base;
     std::string                       git_url;
+    std::vector<RequiredPackageArtifactTarget> required_targets;
+    std::vector<ProducedArtifactPlan> produced_artifacts;
     SourceBuildEnvironment            source_environment;
     SourceEnvironmentEmptyValuePolicy empty_value_policy =
             SourceEnvironmentEmptyValuePolicy::Omit;
@@ -458,6 +673,7 @@ struct ProductionScenario {
 
     std::vector<fs::path> workspace_paths;
     std::vector<fs::path> artifact_paths;
+    std::vector<std::vector<fs::path>> produced_artifact_paths;
     std::vector<fs::path> displaced_workspace_paths;
     std::vector<std::string> install_attempt_order;
 
@@ -513,9 +729,52 @@ std::string expected_identity_command(const fs::path& artifact_path) {
              "--", artifact_path.string()});
 }
 
+std::vector<fs::path> produced_artifact_paths(
+        const UnitPlan& unit, const fs::path& workspace_path) {
+    std::vector<fs::path> paths;
+    paths.reserve(unit.produced_artifacts.size());
+    for(const ProducedArtifactPlan& artifact : unit.produced_artifacts) {
+        paths.push_back(
+                workspace_path /
+                (artifact.package_name + "-" + artifact.full_version +
+                 "-x86_64.pkg.tar.zst"));
+    }
+    return paths;
+}
+
+std::vector<fs::path> selected_artifact_paths(
+        const UnitPlan& unit,
+        const std::vector<fs::path>& produced_paths) {
+    expect(
+            produced_paths.size() == unit.produced_artifacts.size(),
+            "Produced artifact fixture path count differs");
+
+    std::vector<fs::path> selected_paths;
+    selected_paths.reserve(unit.required_targets.size());
+    for(const RequiredPackageArtifactTarget& target : unit.required_targets) {
+        std::optional<std::size_t> selected_index;
+        for(std::size_t index = 0;
+            index < unit.produced_artifacts.size(); ++index) {
+            if(unit.produced_artifacts[index].package_name !=
+               target.package_name) {
+                continue;
+            }
+            expect(
+                    !selected_index.has_value(),
+                    "Produced artifact fixture contains a duplicate selected identity");
+            selected_index = index;
+        }
+        expect(
+                selected_index.has_value(),
+                "Produced artifact fixture omitted a required identity");
+        selected_paths.push_back(produced_paths[*selected_index]);
+    }
+    return selected_paths;
+}
+
 std::string expected_install_command(
         const ProductionScenario& scenario, const UnitPlan& unit,
-        const fs::path& artifact_path) {
+        const std::vector<fs::path>& artifact_paths) {
     std::vector<std::string> arguments{"sudo", "pacman", "-U"};
     if(scenario.config.no_confirm) arguments.emplace_back("--noconfirm");
     if(unit.needed) arguments.emplace_back("--needed");
@@ -523,7 +782,9 @@ std::string expected_install_command(
         arguments.emplace_back(unit.install_reason_option);
     }
     arguments.emplace_back("--");
-    arguments.push_back(artifact_path.string());
+    for(const fs::path& artifact_path : artifact_paths) {
+        arguments.push_back(artifact_path.string());
+    }
     return shell_join(arguments);
 }
 
@@ -532,6 +793,16 @@ void expect_database_paths(int exit_code = 0) {
             PACMAN_DATABASE_PATH_COMMAND,
             CapturedCommandResult{
                     "RootDir = /\nDBPath = /var/lib/pacman\n", exit_code});
+}
+
+void expect_version_comparison(
+        const std::string& candidate_version,
+        const std::string& installed_version,
+        const std::string& result) {
+    process_stub::expect_capture_command(
+            "vercmp " + shell_quote(candidate_version) + " " +
+                    shell_quote(installed_version) + " 2>/dev/null",
+            CapturedCommandResult{result + "\n", 0});
 }
 
 void schedule_source_unit(std::size_t unit_index) {
@@ -565,6 +836,15 @@ void configure_metadata(const UnitPlan& unit) {
         metadata_stub::set_package_metadata(
                 unit.package_name, "0.9-1", ALPM_PKG_REASON_DEPEND);
         return;
+    case MetadataMode::ExistingExplicitDifferentVersion:
+        metadata_stub::set_package_metadata(
+                unit.package_name, "0.9-1", ALPM_PKG_REASON_EXPLICIT);
+        return;
+    case MetadataMode::ExistingExplicitSameVersion:
+        metadata_stub::set_package_metadata(
+                unit.package_name, ARTIFACT_VERSION,
+                ALPM_PKG_REASON_EXPLICIT);
+        return;
     case MetadataMode::QueryFailure:
         metadata_stub::set_package_query_failure(ALPM_ERR_DB_OPEN);
         return;
@@ -589,30 +869,45 @@ void observe_workspace(const fs::path& workspace_path) {
             "Workspace was created before checkout preparation completed");
 
     const UnitPlan& unit = scenario.units[unit_index];
-    const fs::path artifact_path =
-            workspace_path /
-            (unit.package_name + "-1.0-1-x86_64.pkg.tar.zst");
+    const std::vector<fs::path> artifact_paths =
+            produced_artifact_paths(unit, workspace_path);
+    expect(
+            !artifact_paths.empty(),
+            "Production fixture has no produced artifact");
     scenario.workspace_paths.push_back(workspace_path);
-    scenario.artifact_paths.push_back(artifact_path);
+    scenario.artifact_paths.push_back(artifact_paths.front());
+    scenario.produced_artifact_paths.push_back(artifact_paths);
     scenario.displaced_workspace_paths.emplace_back();
     configure_metadata(unit);
 
+    std::string packagelist_output;
+    for(const fs::path& artifact_path : artifact_paths) {
+        packagelist_output += artifact_path.string() + "\n";
+    }
     process_stub::expect_capture_command(
             expected_packagelist_command(unit, workspace_path),
-            CapturedCommandResult{artifact_path.string() + "\n", 0});
+            CapturedCommandResult{std::move(packagelist_output), 0});
     process_stub::expect_run_command(
             expected_build_command(scenario, unit, workspace_path),
             unit.build_exit_code);
     if(unit.expect_identity) {
-        process_stub::expect_capture_command(
-                expected_identity_command(artifact_path),
-                CapturedCommandResult{
-                        unit.package_name + "\t" + ARTIFACT_VERSION + "\n",
-                        0});
+        for(std::size_t index = 0;
+            index < unit.produced_artifacts.size(); ++index) {
+            const ProducedArtifactPlan& artifact =
+                    unit.produced_artifacts[index];
+            process_stub::expect_capture_command(
+                    expected_identity_command(artifact_paths[index]),
+                    CapturedCommandResult{
+                            artifact.package_name + "\t" +
+                                    artifact.full_version + "\n",
+                            0});
+        }
     }
     if(unit.expect_install) {
+        const std::vector<fs::path> selected_paths =
+                selected_artifact_paths(unit, artifact_paths);
         process_stub::expect_run_command(
-                expected_install_command(scenario, unit, artifact_path),
+                expected_install_command(scenario, unit, selected_paths),
                 unit.install_exit_code);
     }
 }
@@ -653,15 +948,23 @@ void observe_capture_command() {
                 "Branch query did not run from the scheduled checkout");
         return;
     }
+    if(command.starts_with("vercmp ")) {
+        expect(
+                fs::current_path() == unit.checkout_path,
+                "Source update version comparison did not run from the scheduled checkout");
+        return;
+    }
     if(command.starts_with("LC_ALL=C ")) {
         ++scenario.identity_calls;
         expect(
                 fs::current_path() == scenario.caller_working_directory,
                 "Artifact identity query leaked the makepkg working directory");
-        expect(
-                fs::is_regular_file(
-                        scenario.artifact_paths.at(scenario.active_unit)),
-                "Artifact identity query started before the build output existed");
+        for(const fs::path& artifact_path :
+            scenario.produced_artifact_paths.at(scenario.active_unit)) {
+            expect(
+                    fs::is_regular_file(artifact_path),
+                    "Artifact identity query started before all build outputs existed");
+        }
         return;
     }
     if(command.find("'makepkg' '--packagelist'") != std::string::npos) {
@@ -669,10 +972,12 @@ void observe_capture_command() {
         expect(
                 fs::current_path() == unit.checkout_path,
                 "makepkg --packagelist did not run from the scheduled checkout");
-        expect(
-                !fs::exists(
-                        scenario.artifact_paths.at(scenario.active_unit)),
-                "Fresh workspace contained an artifact before the build");
+        for(const fs::path& artifact_path :
+            scenario.produced_artifact_paths.at(scenario.active_unit)) {
+            expect(
+                    !fs::exists(artifact_path),
+                    "Fresh workspace contained an artifact before the build");
+        }
         return;
     }
     throw std::logic_error("Unknown production capture command category.");
@@ -735,9 +1040,10 @@ void observe_run_command() {
                 fs::current_path() == unit.checkout_path,
                 "Build-only makepkg did not run from the scheduled checkout");
         if(unit.build_exit_code == 0) {
-            write_file(
-                    scenario.artifact_paths.at(scenario.active_unit),
-                    "built package artifact\n");
+            for(const fs::path& artifact_path :
+                scenario.produced_artifact_paths.at(scenario.active_unit)) {
+                write_file(artifact_path, "built package artifact\n");
+            }
         }
         return;
     }
@@ -747,7 +1053,7 @@ void observe_run_command() {
                 fs::current_path() == scenario.caller_working_directory,
                 "sudo pacman ran before restoring the caller directory");
         require_metadata_released_before_install();
-        scenario.install_attempt_order.push_back(unit.package_name);
+        scenario.install_attempt_order.push_back(unit.package_base);
 
         if(unit.replace_workspace_after_install) {
             fs::path displaced =
@@ -778,6 +1084,7 @@ void activate_scenario(ProductionScenario& scenario) {
     metadata_stub::reset_alpm_stub();
     scenario.workspace_paths.clear();
     scenario.artifact_paths.clear();
+    scenario.produced_artifact_paths.clear();
     scenario.displaced_workspace_paths.clear();
     scenario.install_attempt_order.clear();
     scenario.active_unit = 0;
@@ -793,12 +1100,16 @@ void activate_scenario(ProductionScenario& scenario) {
 
     g_scenario = &scenario;
     set_separated_source_build_workspace_observer_for_test(observe_workspace);
+    set_separated_package_base_source_build_workspace_observer_for_test(
+            observe_workspace);
     process_stub::set_capture_hook(observe_capture_command);
     process_stub::set_run_hook(observe_run_command);
 }
 
 void deactivate_scenario() {
     set_separated_source_build_workspace_observer_for_test(nullptr);
+    set_separated_package_base_source_build_workspace_observer_for_test(
+            nullptr);
     process_stub::set_capture_hook(nullptr);
     process_stub::set_run_hook(nullptr);
     g_scenario = nullptr;
@@ -832,7 +1143,14 @@ ProductionScenario make_execution_scenario(
     for(const ProductionSourceBuildWorkItem& work_item : work_items) {
         UnitPlan unit;
         unit.package_name = work_item.request.package_name;
+        unit.package_base = work_item.request.checkout_name;
         unit.git_url = work_item.request.git_url;
+        unit.required_targets = work_item.required_targets;
+        for(const RequiredPackageArtifactTarget& target :
+            work_item.required_targets) {
+            unit.produced_artifacts.push_back(ProducedArtifactPlan{
+                    target.package_name, ARTIFACT_VERSION});
+        }
         unit.source_environment = work_item.request.custom_environment;
         unit.empty_value_policy = work_item.request.empty_value_policy;
         unit.needed = work_item.request.needed;
@@ -879,6 +1197,78 @@ void execute_invocation(
     expect(
             fs::current_path() == scenario.caller_working_directory,
             "Production success leaked a changed working directory");
+}
+
+std::optional<ArtifactInstallExecutionOutcome> execute_work_item(
+        const PreparedProductionSourceBuildInvocation& invocation,
+        std::size_t work_item_index,
+        ProductionScenario& scenario) {
+    expect(
+            fs::current_path() == scenario.caller_working_directory,
+            "Production work-item execution started from a drifted working directory");
+    try {
+        std::optional<ArtifactInstallExecutionOutcome> outcome =
+                execute_prepared_source_build_work_item(
+                        invocation.work_items.at(work_item_index),
+                        invocation.database_paths, scenario.config);
+        expect(
+                fs::current_path() == scenario.caller_working_directory,
+                "Production work-item success leaked a changed working directory");
+        return outcome;
+    } catch(...) {
+        expect(
+                fs::current_path() == scenario.caller_working_directory,
+                "Production work-item failure leaked a changed working directory");
+        throw;
+    }
+}
+
+SourceBuildExecutionResult execute_work_item_typed(
+        const PreparedProductionSourceBuildInvocation& invocation,
+        std::size_t work_item_index,
+        ProductionScenario& scenario) {
+    expect(
+            fs::current_path() == scenario.caller_working_directory,
+            "Typed production work-item execution started from a drifted working directory");
+    try {
+        SourceBuildExecutionResult result =
+                execute_prepared_source_build_work_item_typed(
+                        invocation.work_items.at(work_item_index),
+                        invocation.database_paths, scenario.config);
+        expect(
+                fs::current_path() == scenario.caller_working_directory,
+                "Typed production work-item success leaked a changed working directory");
+        return result;
+    } catch(...) {
+        expect(
+                fs::current_path() == scenario.caller_working_directory,
+                "Typed production work-item failure leaked a changed working directory");
+        throw;
+    }
+}
+
+PackageBaseSourceBuildExecutionResult execute_package_base_work_item_typed(
+        const PreparedProductionSourceBuildInvocation& invocation,
+        std::size_t work_item_index,
+        ProductionScenario& scenario) {
+    expect(
+            fs::current_path() == scenario.caller_working_directory,
+            "PackageBase production execution started from a drifted working directory");
+    try {
+        PackageBaseSourceBuildExecutionResult result =
+                execute_prepared_package_base_source_build_work_item_typed(
+                        invocation.work_items.at(work_item_index),
+                        invocation.database_paths, scenario.config);
+        expect(
+                fs::current_path() == scenario.caller_working_directory,
+                "PackageBase production success leaked a changed working directory");
+        return result;
+    } catch(...) {
+        expect(
+                fs::current_path() == scenario.caller_working_directory,
+                "PackageBase production failure leaked a changed working directory");
+        throw;
+    }
 }
 
 struct PreflightFilesystemSnapshot {
@@ -1015,15 +1405,281 @@ void test_build_plan_projection() {
             work_items[0].request.package_name == "dependency-package" &&
                     work_items[1].request.package_name == "root-package",
             "BuildPlan::order was not preserved by production work-item preparation");
-    expect(
-            work_items[0].desired_reason == DesiredInstallReason::Dependency,
-            "Dependency role was not projected to DesiredInstallReason::Dependency");
-    expect(
-            work_items[1].desired_reason == DesiredInstallReason::Explicit,
-            "Root role did not retain BuildPlan's explicit-priority result");
+    expect(work_items[0].required_targets.size() == 1,
+           "Ordinary dependency work item did not retain one required target");
+    expect(work_items[1].required_targets.size() == 1,
+           "Ordinary root work item did not retain one required target");
+    expect_required_target(
+            require_singular_required_package_target(work_items[0]),
+            "dependency-package", "dependency-package",
+            DesiredInstallReason::Dependency,
+            "ordinary dependency BuildPlan projection");
+    expect_required_target(
+            require_singular_required_package_target(work_items[1]),
+            "root-package", "root-package",
+            DesiredInstallReason::Explicit,
+            "ordinary root BuildPlan projection");
     expect(
             work_items[0].request.needed && work_items[1].request.needed,
             "--needed was not projected to every BuildPlan unit");
+}
+
+void test_same_package_base_projection_preserves_required_children() {
+    const std::vector<ProductionSourceBuildWorkItem> work_items =
+            prepare_aur_source_build_work_items(
+                    same_package_base_plan(), false, false);
+
+    expect(
+            work_items.size() == 1,
+            "Same-PackageBase children were not aggregated into one work item");
+    const ProductionSourceBuildWorkItem& work_item = work_items.front();
+    expect(
+            work_item.request.package_name.empty(),
+            "Multiple required children were flattened into a singular request");
+    expect(
+            work_item.request.checkout_name == "split-suite",
+            "Same-PackageBase work item lost its execution identity");
+    expect(
+            work_item.required_targets.size() == 2,
+            "Same-PackageBase work item lost a required child");
+    expect_required_target(
+            work_item.required_targets[0], "split-suite", "split-explicit",
+            DesiredInstallReason::Explicit,
+            "first same-PackageBase required target");
+    expect_required_target(
+            work_item.required_targets[1], "split-suite", "split-dependency",
+            DesiredInstallReason::Dependency,
+            "second same-PackageBase required target");
+    require_static_production_source_build_work_item(work_item);
+    expect_logic_error(
+            [&work_item]() {
+                static_cast<void>(
+                        require_singular_required_package_target(work_item));
+            },
+            "multiple required target compatibility accessor",
+            "exactly one required package target");
+}
+
+void test_same_package_base_source_preference_route() {
+    const ScopedSourcePreferenceEntry preference(
+            "split-suite", "MAKEFLAGS=-j7\n");
+    const std::vector<ProductionSourceBuildWorkItem> work_items =
+            prepare_aur_source_build_work_items(
+                    same_package_base_plan(), true, false);
+
+    expect(
+            work_items.size() == 1 &&
+                    work_items.front().required_targets.size() == 2,
+            "Source-preference route lost same-PackageBase required targets");
+    const ProductionSourceBuildWorkItem& work_item = work_items.front();
+    expect(
+            work_item.request.package_name.empty() &&
+                    work_item.request.checkout_name == "split-suite",
+            "Source-preference route flattened the multiple-target identity");
+    expect(
+            work_item.request.custom_environment.ordered_assignments.size() ==
+                            1 &&
+                    work_item.request.custom_environment
+                                    .ordered_assignments.front()
+                                    .key == "MAKEFLAGS" &&
+                    work_item.request.custom_environment
+                                    .ordered_assignments.front()
+                                    .value == "-j7",
+            "Source-preference route did not use the PackageBase preference");
+    expect_required_target(
+            work_item.required_targets[0], "split-suite", "split-explicit",
+            DesiredInstallReason::Explicit,
+            "source-preference first required target");
+    expect_required_target(
+            work_item.required_targets[1], "split-suite", "split-dependency",
+            DesiredInstallReason::Dependency,
+            "source-preference second required target");
+}
+
+void test_resolved_repository_identity_and_owned_environment_preparation() {
+    process_stub::reset_process_stub();
+    process_stub::expect_run_command(
+            "pacman -Si 'identity-repository' > /dev/null 2>&1", 0);
+
+    const ResolvedSourceBuildIdentity identity =
+            resolve_source_build_identity("identity-repository");
+    expect(
+            identity.requested_name == "identity-repository" &&
+                    identity.package_base == "identity-repository",
+            "Repository source identity lost requested/PackageBase correlation");
+    expect(
+            identity.canonical_source_key ==
+                    "repository:identity-repository",
+            "Repository source identity key differs");
+    expect(
+            identity.git_url ==
+                    "https://gitlab.archlinux.org/archlinux/packaging/packages/identity-repository.git",
+            "Repository source identity Git URL differs");
+    expect(
+            identity.source_kind == SourceBuildSourceKind::Repository &&
+                    !identity.has_distinct_package_base,
+            "Repository source kind flags differ");
+
+    SourceBuildEnvironment environment;
+    environment.ordered_assignments.push_back(
+            SourceEnvironmentAssignment{"CFLAGS", "-O1"});
+    const ProductionSourceBuildWorkItem work_item =
+            prepare_resolved_source_build_work_item(
+                    identity, std::move(environment), true, true);
+    expect(
+            work_item.request.package_name == identity.requested_name &&
+                    work_item.request.checkout_name == identity.package_base &&
+                    work_item.request.git_url == identity.git_url,
+            "Resolved source identity was not projected to the work item");
+    expect(
+            work_item.request.custom_environment.ordered_assignments.size() ==
+                            1 &&
+                    work_item.request.custom_environment.ordered_assignments[0]
+                                    .key == "CFLAGS" &&
+                    work_item.request.custom_environment.ordered_assignments[0]
+                                    .value == "-O1",
+            "Caller-owned strict source environment was not preserved");
+    expect(
+            work_item.request.only_if_updated && work_item.request.needed &&
+                    work_item.uses_system_update_baseline,
+            "Resolved repository work-item policy differs");
+    expect(
+            work_item.required_targets.size() == 1,
+            "Resolved source work item did not retain one required target");
+    expect_required_target(
+            require_singular_required_package_target(work_item),
+            "identity-repository", "identity-repository",
+            DesiredInstallReason::Explicit,
+            "resolved source required target");
+    process_stub::require_process_expectations_consumed();
+    process_stub::reset_process_stub();
+}
+
+void test_set_static_preparation_accepts_split_and_multiple(
+        const TemporaryProductionEnvironment& environment) {
+    ProductionScenario scenario;
+    scenario.caller_working_directory =
+            environment.original_working_directory();
+    scenario.config = noninteractive_config();
+    activate_scenario(scenario);
+    expect_database_paths();
+    const PreflightFilesystemSnapshot before =
+            snapshot_preflight_filesystem(
+                    environment,
+                    {"split-static-base", "multiple-static-base"},
+                    "set static preparation acceptance");
+
+    std::vector<ProductionSourceBuildWorkItem> work_items;
+    work_items.push_back(make_package_base_work_item(
+            "split-static-base",
+            {RequiredPackageArtifactTarget{
+                    "split-static-base", "split-static-child",
+                    DesiredInstallReason::Explicit}}));
+    work_items.push_back(make_package_base_work_item(
+            "multiple-static-base",
+            {RequiredPackageArtifactTarget{
+                     "multiple-static-base", "multiple-static-first",
+                     DesiredInstallReason::Explicit},
+             RequiredPackageArtifactTarget{
+                     "multiple-static-base", "multiple-static-second",
+                     DesiredInstallReason::Dependency}}));
+
+    PreparedProductionSourceBuildInvocation invocation =
+            prepare_production_source_build_invocation(
+                    std::move(work_items), scenario.config);
+    expect(
+            invocation.work_items.size() == 2,
+            "Set static preparation changed work-item count");
+    expect(
+            invocation.work_items[0].request.package_name ==
+                            "split-static-child" &&
+                    invocation.work_items[0].request.checkout_name ==
+                            "split-static-base",
+            "Set static preparation rejected or rewrote a requested split child");
+    expect(
+            invocation.work_items[1].request.package_name.empty() &&
+                    invocation.work_items[1].required_targets.size() == 2,
+            "Set static preparation exposed a singular name for multiple children");
+    expect(
+            scenario.resolver_calls == 1,
+            "Set static preparation did not resolve Pacman DB after all validation");
+    expect_zero_mutation_state(
+            environment, before, scenario,
+            "set static preparation acceptance");
+    process_stub::require_process_expectations_consumed();
+    deactivate_scenario();
+}
+
+void expect_set_static_preparation_rejection(
+        const TemporaryProductionEnvironment& environment,
+        ProductionSourceBuildWorkItem work_item,
+        const std::string& expected_fragment,
+        const std::string& context) {
+    ProductionScenario scenario;
+    scenario.caller_working_directory =
+            environment.original_working_directory();
+    scenario.config = noninteractive_config();
+    activate_scenario(scenario);
+    const PreflightFilesystemSnapshot before =
+            snapshot_preflight_filesystem(
+                    environment,
+                    {"valid-before-invalid-set",
+                     work_item.request.checkout_name},
+                    context);
+
+    std::vector<ProductionSourceBuildWorkItem> work_items;
+    work_items.push_back(make_work_item("valid-before-invalid-set"));
+    work_items.push_back(std::move(work_item));
+    static_cast<void>(expect_logic_error(
+            [&]() {
+                static_cast<void>(prepare_production_source_build_invocation(
+                        std::move(work_items), scenario.config));
+            },
+            context, expected_fragment));
+
+    expect(
+            scenario.resolver_calls == 0,
+            context + ": invalid set reached Pacman DB resolution");
+    expect_zero_mutation_state(environment, before, scenario, context);
+    process_stub::require_process_expectations_consumed();
+    deactivate_scenario();
+}
+
+void test_set_static_preparation_rejects_invalid_sets_before_mutation(
+        const TemporaryProductionEnvironment& environment) {
+    expect_set_static_preparation_rejection(
+            environment,
+            make_package_base_work_item(
+                    "duplicate-static-base",
+                    {RequiredPackageArtifactTarget{
+                             "duplicate-static-base", "duplicate-static-child",
+                             DesiredInstallReason::Explicit},
+                     RequiredPackageArtifactTarget{
+                             "duplicate-static-base", "duplicate-static-child",
+                             DesiredInstallReason::Explicit}}),
+            "duplicate required package target",
+            "duplicate set static rejection");
+
+    expect_set_static_preparation_rejection(
+            environment,
+            make_package_base_work_item(
+                    "mismatch-static-base",
+                    {RequiredPackageArtifactTarget{
+                            "other-static-base", "mismatch-static-child",
+                            DesiredInstallReason::Explicit}}),
+            "mismatched PackageBase",
+            "PackageBase mismatch static rejection");
+
+    expect_set_static_preparation_rejection(
+            environment,
+            make_package_base_work_item(
+                    "unknown-reason-static-base",
+                    {RequiredPackageArtifactTarget{
+                            "unknown-reason-static-base",
+                            "unknown-reason-static-child",
+                            static_cast<DesiredInstallReason>(999)}}),
+            "unknown install reason",
+            "unknown reason static rejection");
 }
 
 void test_rmdeps_global_rejection(
@@ -1158,6 +1814,584 @@ void test_database_resolver_failure_stops_all_targets(
             environment, before, scenario, "database resolver failure");
     process_stub::require_process_expectations_consumed();
     deactivate_scenario();
+}
+
+void test_unsafe_existing_cache_root_stops_before_checkout_mutation() {
+    TemporaryProductionEnvironment environment;
+    AppConfig config = noninteractive_config();
+    std::vector<ProductionSourceBuildWorkItem> work_items;
+    work_items.push_back(make_package_base_work_item(
+            "unsafe-root-order",
+            {RequiredPackageArtifactTarget{
+                    "unsafe-root-order", "unsafe-root-order",
+                    DesiredInstallReason::Explicit}}));
+    ProductionScenario scenario =
+            make_execution_scenario(environment, work_items, config);
+    const fs::path cache_root =
+            scenario.units.front().checkout_path.parent_path();
+    if(chmod(cache_root.c_str(), 0775) != 0) {
+        throw std::runtime_error(
+                "Failed to make the production cache root unsafe.");
+    }
+
+    activate_scenario(scenario);
+    expect_database_paths();
+    PreparedProductionSourceBuildInvocation invocation =
+            prepare_production_source_build_invocation(
+                    std::move(work_items), scenario.config);
+    static_cast<void>(expect_runtime_error(
+            [&]() { execute_invocation(invocation, scenario); },
+            "unsafe production cache root ordering",
+            "group/world writable"));
+
+    expect(
+            scenario.resolver_calls == 1,
+            "Unsafe production cache root changed invocation preflight order");
+    expect(
+            scenario.git_remote_calls == 0 &&
+                    scenario.git_fetch_calls == 0 &&
+                    scenario.git_branch_calls == 0 &&
+                    scenario.git_reset_calls == 0,
+            "Unsafe production cache root reached Git checkout inspection or mutation");
+    expect(
+            process_stub::capture_command_call_count() == 1 &&
+                    process_stub::run_command_call_count() == 0,
+            "Unsafe production cache root reached an external checkout mutation");
+    expect(
+            scenario.workspace_paths.empty() &&
+                    metadata_stub::initialize_call_count() == 0,
+            "Unsafe production cache root reached workspace or metadata work");
+    struct stat root_status {};
+    expect(
+            stat(cache_root.c_str(), &root_status) == 0 &&
+                    (root_status.st_mode & 07777) == 0775,
+            "Unsafe production cache root was silently repaired");
+    process_stub::require_process_expectations_consumed();
+    deactivate_scenario();
+}
+
+void expect_single_work_item_outcome(
+        const TemporaryProductionEnvironment& environment,
+        const std::string& package_name,
+        bool needed,
+        MetadataMode metadata_mode,
+        ArtifactInstallExecutionOutcome expected_outcome,
+        const std::string& context) {
+    AppConfig config = noninteractive_config();
+    std::vector<ProductionSourceBuildWorkItem> work_items;
+    work_items.push_back(make_work_item(package_name));
+    work_items[0].request.needed = needed;
+    ProductionScenario scenario =
+            make_execution_scenario(environment, work_items, config);
+    scenario.units[0].metadata_mode = metadata_mode;
+
+    PreparedProductionSourceBuildInvocation invocation = prepare_execution(
+            std::move(work_items), scenario);
+    const std::optional<ArtifactInstallExecutionOutcome> outcome =
+            execute_work_item(invocation, 0, scenario);
+
+    expect(outcome.has_value(), context + ": typed outcome was omitted");
+    expect(
+            *outcome == expected_outcome,
+            context + ": typed outcome differs");
+    expect(
+            scenario.install_attempt_order ==
+                    std::vector<std::string>{package_name},
+            context + ": successful pacman -U was not observed");
+    expect(
+            !fs::exists(scenario.workspace_paths.at(0)),
+            context + ": successful execution retained its workspace");
+    require_scenario_complete(scenario, 1, context);
+}
+
+void test_work_item_typed_install_outcomes(
+        const TemporaryProductionEnvironment& environment) {
+    expect_single_work_item_outcome(
+            environment, "outcome-needed-false", false,
+            MetadataMode::Absent,
+            ArtifactInstallExecutionOutcome::Installed,
+            "needed=false install outcome");
+    expect_single_work_item_outcome(
+            environment, "outcome-needed-different", true,
+            MetadataMode::ExistingExplicitDifferentVersion,
+            ArtifactInstallExecutionOutcome::Installed,
+            "different-version --needed install outcome");
+    expect_single_work_item_outcome(
+            environment, "outcome-needed-same", true,
+            MetadataMode::ExistingExplicitSameVersion,
+            ArtifactInstallExecutionOutcome::SkippedAsNeeded,
+            "same-version --needed install outcome");
+}
+
+void expect_extended_work_item_outcome(
+        const TemporaryProductionEnvironment& environment,
+        const std::string& package_name,
+        bool needed,
+        MetadataMode metadata_mode,
+        SourceBuildExecutionStatus expected_status,
+        const std::string& context) {
+    AppConfig config = noninteractive_config();
+    std::vector<ProductionSourceBuildWorkItem> work_items;
+    work_items.push_back(make_work_item(package_name));
+    work_items[0].request.needed = needed;
+    ProductionScenario scenario =
+            make_execution_scenario(environment, work_items, config);
+    scenario.units[0].metadata_mode = metadata_mode;
+
+    PreparedProductionSourceBuildInvocation invocation = prepare_execution(
+            std::move(work_items), scenario);
+    const SourceBuildExecutionResult result =
+            execute_work_item_typed(invocation, 0, scenario);
+
+    expect(result.status == expected_status, context + ": status differs");
+    expect(
+            !result.update_status_unknown_skip_reason.has_value(),
+            context + ": unexpected update-status skip reason");
+    expect(result.diagnostic.empty(), context + ": unexpected diagnostic");
+    expect(
+            scenario.install_attempt_order ==
+                    std::vector<std::string>{package_name},
+            context + ": successful pacman -U was not observed");
+    require_scenario_complete(scenario, 1, context);
+}
+
+void test_extended_work_item_install_outcomes(
+        const TemporaryProductionEnvironment& environment) {
+    expect_extended_work_item_outcome(
+            environment, "extended-installed", false,
+            MetadataMode::Absent,
+            SourceBuildExecutionStatus::Installed,
+            "extended installed outcome");
+    expect_extended_work_item_outcome(
+            environment, "extended-needed-skip", true,
+            MetadataMode::ExistingExplicitSameVersion,
+            SourceBuildExecutionStatus::SkippedAsNeeded,
+            "extended --needed skip outcome");
+}
+
+void test_up_to_date_outcome_and_legacy_flattening(
+        const TemporaryProductionEnvironment& environment) {
+    {
+        AppConfig config = noninteractive_config();
+        std::vector<ProductionSourceBuildWorkItem> work_items;
+        work_items.push_back(make_update_check_work_item(
+                "typed-up-to-date", ARTIFACT_VERSION));
+        ProductionScenario scenario =
+                make_execution_scenario(environment, work_items, config);
+        write_file(
+                scenario.units[0].checkout_path / ".SRCINFO",
+                "pkgver = 1.0\npkgrel = 1\n");
+
+        PreparedProductionSourceBuildInvocation invocation = prepare_execution(
+                std::move(work_items), scenario);
+        expect_version_comparison(
+                ARTIFACT_VERSION, ARTIFACT_VERSION, "0");
+        const SourceBuildExecutionResult result =
+                execute_work_item_typed(invocation, 0, scenario);
+
+        expect(
+                result.status == SourceBuildExecutionStatus::UpToDate,
+                "Up-to-date source result was flattened");
+        expect(
+                !result.update_status_unknown_skip_reason.has_value(),
+                "Up-to-date source result acquired an unknown-status reason");
+        expect(
+                result.diagnostic ==
+                        "typed-up-to-date is up to date (1.0-1). Skipping.",
+                "Up-to-date source diagnostic differs");
+        expect(
+                scenario.install_attempt_order.empty(),
+                "Up-to-date source result reached package installation");
+        require_scenario_complete(
+                scenario, 0, "typed up-to-date source result");
+    }
+
+    {
+        AppConfig config = noninteractive_config();
+        std::vector<ProductionSourceBuildWorkItem> work_items;
+        work_items.push_back(make_update_check_work_item(
+                "legacy-up-to-date", ARTIFACT_VERSION));
+        ProductionScenario scenario =
+                make_execution_scenario(environment, work_items, config);
+        write_file(
+                scenario.units[0].checkout_path / ".SRCINFO",
+                "pkgver = 1.0\npkgrel = 1\n");
+
+        PreparedProductionSourceBuildInvocation invocation = prepare_execution(
+                std::move(work_items), scenario);
+        expect_version_comparison(
+                ARTIFACT_VERSION, ARTIFACT_VERSION, "0");
+        const std::optional<ArtifactInstallExecutionOutcome> outcome =
+                execute_work_item(invocation, 0, scenario);
+
+        expect(
+                !outcome.has_value(),
+                "Legacy source-build API did not flatten up-to-date to nullopt");
+        require_scenario_complete(
+                scenario, 0, "legacy up-to-date flattening");
+    }
+}
+
+void test_unknown_update_status_no_confirm_outcome(
+        const TemporaryProductionEnvironment& environment) {
+    AppConfig config = noninteractive_config();
+    config.no_confirm = true;
+    std::vector<ProductionSourceBuildWorkItem> work_items;
+    work_items.push_back(make_update_check_work_item(
+            "unknown-no-confirm", ARTIFACT_VERSION));
+    ProductionScenario scenario =
+            make_execution_scenario(environment, work_items, config);
+    PreparedProductionSourceBuildInvocation invocation = prepare_execution(
+            std::move(work_items), scenario);
+
+    const SourceBuildExecutionResult result =
+            execute_work_item_typed(invocation, 0, scenario);
+    expect(
+            result.status ==
+                    SourceBuildExecutionStatus::UpdateStatusUnknownSkipped &&
+                    result.update_status_unknown_skip_reason ==
+                            SourceBuildUpdateStatusUnknownSkipReason::NoConfirm,
+            "Unknown update status --noconfirm reason differs");
+    expect(
+            result.diagnostic ==
+                    "Skipping unknown-no-confirm: update status is unknown and --noconfirm is set.",
+            "Unknown update status --noconfirm diagnostic differs");
+    expect(
+            scenario.install_attempt_order.empty(),
+            "Unknown update status --noconfirm skip reached installation");
+    require_scenario_complete(
+            scenario, 0, "unknown update status --noconfirm skip");
+}
+
+void test_unknown_update_status_noninteractive_outcome(
+        const TemporaryProductionEnvironment& environment) {
+    AppConfig config = noninteractive_config();
+    std::vector<ProductionSourceBuildWorkItem> work_items;
+    work_items.push_back(make_update_check_work_item(
+            "unknown-noninteractive", ARTIFACT_VERSION));
+    ProductionScenario scenario =
+            make_execution_scenario(environment, work_items, config);
+    PreparedProductionSourceBuildInvocation invocation = prepare_execution(
+            std::move(work_items), scenario);
+
+    const ScopedStdinReplacement stdin_fixture =
+            ScopedStdinReplacement::noninteractive();
+    static_cast<void>(stdin_fixture);
+    const SourceBuildExecutionResult result =
+            execute_work_item_typed(invocation, 0, scenario);
+    expect(
+            result.status ==
+                    SourceBuildExecutionStatus::UpdateStatusUnknownSkipped &&
+                    result.update_status_unknown_skip_reason ==
+                            SourceBuildUpdateStatusUnknownSkipReason::
+                                    NonInteractiveStdin,
+            "Unknown update status non-interactive reason differs");
+    expect(
+            result.diagnostic ==
+                    "Skipping unknown-noninteractive: update status is unknown and stdin is non-interactive.",
+            "Unknown update status non-interactive diagnostic differs");
+    require_scenario_complete(
+            scenario, 0, "unknown update status non-interactive skip");
+}
+
+void test_unknown_update_status_user_decline_outcome(
+        const TemporaryProductionEnvironment& environment) {
+    AppConfig config = noninteractive_config();
+    std::vector<ProductionSourceBuildWorkItem> work_items;
+    work_items.push_back(make_update_check_work_item(
+            "unknown-declined", ARTIFACT_VERSION));
+    ProductionScenario scenario =
+            make_execution_scenario(environment, work_items, config);
+    PreparedProductionSourceBuildInvocation invocation = prepare_execution(
+            std::move(work_items), scenario);
+
+    const ScopedStdinReplacement stdin_fixture =
+            ScopedStdinReplacement::terminal_with_input("n\n");
+    static_cast<void>(stdin_fixture);
+    const SourceBuildExecutionResult result =
+            execute_work_item_typed(invocation, 0, scenario);
+    expect(
+            result.status ==
+                    SourceBuildExecutionStatus::UpdateStatusUnknownSkipped &&
+                    result.update_status_unknown_skip_reason ==
+                            SourceBuildUpdateStatusUnknownSkipReason::UserDeclined,
+            "Unknown update status user-decline reason differs");
+    expect(
+            result.diagnostic ==
+                    "Skipping unknown-declined: update status is unknown and the user declined to continue.",
+            "Unknown update status user-decline diagnostic differs");
+    require_scenario_complete(
+            scenario, 0, "unknown update status user-decline skip");
+}
+
+void expect_selected_child_result(
+        const PackageBaseSourceBuildSelectedResult& child,
+        const std::string& package_name,
+        const std::string& full_version,
+        DesiredInstallReason desired_reason,
+        ArtifactInstallExecutionOutcome outcome,
+        const std::string& context) {
+    expect(
+            child.identity.package_name == package_name,
+            context + ": selected package name differs");
+    expect(
+            child.identity.full_version == full_version,
+            context + ": selected package version differs");
+    expect(
+            child.desired_reason == desired_reason,
+            context + ": selected desired reason differs");
+    expect(child.outcome == outcome, context + ": selected outcome differs");
+}
+
+void expect_unselected_identity(
+        const ArtifactPackageIdentity& artifact,
+        const std::string& package_name,
+        const std::string& full_version,
+        const std::string& context) {
+    expect(
+            artifact.package_name == package_name,
+            context + ": unselected package name differs");
+    expect(
+            artifact.full_version == full_version,
+            context + ": unselected package version differs");
+}
+
+void test_ordinary_build_plan_unit_uses_set_owner(
+        const TemporaryProductionEnvironment& environment) {
+    AppConfig config = noninteractive_config();
+    std::vector<ProductionSourceBuildWorkItem> work_items =
+            prepare_aur_source_build_work_items(
+                    ordinary_single_entry_plan(), false, false);
+    expect(
+            work_items.size() == 1 &&
+                    work_items.front().is_build_plan_entry,
+            "Ordinary AUR BuildPlan did not produce one set-owned work item");
+    ProductionScenario scenario =
+            make_execution_scenario(environment, work_items, config);
+
+    PreparedProductionSourceBuildInvocation invocation = prepare_execution(
+            std::move(work_items), scenario);
+    PackageBaseSourceBuildExecutionResult result =
+            execute_package_base_work_item_typed(invocation, 0, scenario);
+
+    expect(
+            result.package_base() == "ordinary-set-root",
+            "Ordinary AUR set result lost PackageBase identity");
+    expect(
+            result.selected_children().size() == 1 &&
+                    result.unselected_artifacts().empty(),
+            "Ordinary AUR set result changed selected/unselected cardinality");
+    expect_selected_child_result(
+            result.selected_children().front(), "ordinary-set-root",
+            ARTIFACT_VERSION, DesiredInstallReason::Explicit,
+            ArtifactInstallExecutionOutcome::Installed,
+            "ordinary AUR set owner");
+    expect(
+            result.installed_any() && !result.all_skipped_as_needed(),
+            "Ordinary AUR set aggregate outcome differs");
+    expect(
+            scenario.install_attempt_order ==
+                    std::vector<std::string>{"ordinary-set-root"},
+            "Ordinary AUR BuildPlan did not reach one PackageBase transaction");
+    require_scenario_complete(
+            scenario, 1, "ordinary AUR BuildPlan set owner");
+}
+
+void test_requested_split_child_uses_set_owner(
+        const TemporaryProductionEnvironment& environment) {
+    AppConfig config = noninteractive_config();
+    std::vector<ProductionSourceBuildWorkItem> work_items;
+    work_items.push_back(make_package_base_work_item(
+            "requested-split-base",
+            {RequiredPackageArtifactTarget{
+                    "requested-split-base", "requested-split-child",
+                    DesiredInstallReason::Dependency}}));
+    ProductionScenario scenario =
+            make_execution_scenario(environment, work_items, config);
+    scenario.units[0].install_reason_option = "--asdeps";
+
+    PreparedProductionSourceBuildInvocation invocation = prepare_execution(
+            std::move(work_items), scenario);
+    PackageBaseSourceBuildExecutionResult result =
+            execute_package_base_work_item_typed(invocation, 0, scenario);
+
+    expect(
+            result.package_base() == "requested-split-base" &&
+                    result.selected_children().size() == 1 &&
+                    result.unselected_artifacts().empty(),
+            "Requested split child set result has inconsistent aggregate identity");
+    expect_selected_child_result(
+            result.selected_children().front(), "requested-split-child",
+            ARTIFACT_VERSION, DesiredInstallReason::Dependency,
+            ArtifactInstallExecutionOutcome::Installed,
+            "requested split child set owner");
+    expect(
+            scenario.install_attempt_order ==
+                    std::vector<std::string>{"requested-split-base"},
+            "Requested split child did not execute by checkout PackageBase");
+    require_scenario_complete(
+            scenario, 1, "requested split child set owner");
+}
+
+void test_multiple_required_children_return_typed_set_result(
+        const TemporaryProductionEnvironment& environment) {
+    AppConfig config = noninteractive_config();
+    std::vector<ProductionSourceBuildWorkItem> work_items;
+    work_items.push_back(make_package_base_work_item(
+            "multiple-result-base",
+            {RequiredPackageArtifactTarget{
+                     "multiple-result-base", "multiple-result-second",
+                     DesiredInstallReason::Explicit},
+             RequiredPackageArtifactTarget{
+                     "multiple-result-base", "multiple-result-first",
+                     DesiredInstallReason::Explicit}}));
+    expect(
+            work_items.front().request.package_name.empty(),
+            "Multiple-result fixture unexpectedly has a singular package name");
+    ProductionScenario scenario =
+            make_execution_scenario(environment, work_items, config);
+    // produced order intentionally differs from required order and includes
+    // both an ordinary sibling and a debug artifact.
+    scenario.units[0].produced_artifacts = {
+            ProducedArtifactPlan{"multiple-result-sibling", "2.0-1"},
+            ProducedArtifactPlan{"multiple-result-first", "1.1-1"},
+            ProducedArtifactPlan{"multiple-result-debug", "1.1-1"},
+            ProducedArtifactPlan{"multiple-result-second", "1.2-1"},
+    };
+
+    PreparedProductionSourceBuildInvocation invocation = prepare_execution(
+            std::move(work_items), scenario);
+    PackageBaseSourceBuildExecutionResult result =
+            execute_package_base_work_item_typed(invocation, 0, scenario);
+
+    expect(
+            result.package_base() == "multiple-result-base",
+            "Multiple set result lost PackageBase identity");
+    expect(
+            result.selected_children().size() == 2,
+            "Multiple set result lost a selected required child");
+    expect_selected_child_result(
+            result.selected_children()[0], "multiple-result-second",
+            "1.2-1", DesiredInstallReason::Explicit,
+            ArtifactInstallExecutionOutcome::Installed,
+            "multiple required-order second child");
+    expect_selected_child_result(
+            result.selected_children()[1], "multiple-result-first",
+            "1.1-1", DesiredInstallReason::Explicit,
+            ArtifactInstallExecutionOutcome::Installed,
+            "multiple required-order first child");
+    expect(
+            result.unselected_artifacts().size() == 2,
+            "Multiple set result lost an unselected artifact identity");
+    expect_unselected_identity(
+            result.unselected_artifacts()[0], "multiple-result-sibling",
+            "2.0-1", "multiple produced-order sibling");
+    expect_unselected_identity(
+            result.unselected_artifacts()[1], "multiple-result-debug",
+            "1.1-1", "multiple produced-order debug artifact");
+    expect(
+            metadata_stub::local_package_query_history() ==
+                    std::vector<std::string>{
+                            "multiple-result-second",
+                            "multiple-result-first"},
+            "Multiple set metadata queries did not preserve required child order");
+    expect(
+            scenario.identity_calls == 4 && scenario.install_calls == 1 &&
+                    scenario.install_attempt_order ==
+                            std::vector<std::string>{"multiple-result-base"},
+            "Multiple set execution did not use one selected-only transaction");
+    expect(
+            result.installed_any() && !result.all_skipped_as_needed(),
+            "Multiple set aggregate outcome differs");
+    require_scenario_complete(
+            scenario, 1, "multiple required child typed set result");
+}
+
+void test_package_base_transaction_failure_preserves_attempt_snapshot(
+        const TemporaryProductionEnvironment& environment) {
+    AppConfig config = noninteractive_config();
+    std::vector<ProductionSourceBuildWorkItem> work_items;
+    work_items.push_back(make_package_base_work_item(
+            "transaction-attempt-base",
+            {RequiredPackageArtifactTarget{
+                     "transaction-attempt-base",
+                     "transaction-attempt-second",
+                     DesiredInstallReason::Explicit},
+             RequiredPackageArtifactTarget{
+                     "transaction-attempt-base",
+                     "transaction-attempt-first",
+                     DesiredInstallReason::Explicit}}));
+    ProductionScenario scenario =
+            make_execution_scenario(environment, work_items, config);
+    scenario.units[0].produced_artifacts = {
+            ProducedArtifactPlan{"transaction-attempt-sibling", "9-1"},
+            ProducedArtifactPlan{"transaction-attempt-first", "1-1"},
+            ProducedArtifactPlan{"transaction-attempt-second", "2-1"},
+    };
+    scenario.units[0].install_exit_code = 73;
+
+    PreparedProductionSourceBuildInvocation invocation = prepare_execution(
+            std::move(work_items), scenario);
+    std::optional<PackageBaseSourceBuildExecutionResult> public_result;
+    bool transaction_failure_reported = false;
+    try {
+        public_result.emplace(
+                execute_package_base_work_item_typed(
+                        invocation, 0, scenario));
+    } catch(const PackageBaseArtifactInstallTransactionError& error) {
+        transaction_failure_reported = true;
+        expect(
+                error.failure_kind() ==
+                                PackageBaseArtifactInstallTransactionFailureKind::
+                                        NonzeroExit &&
+                        error.package_base() == "transaction-attempt-base" &&
+                        error.exit_code() == std::optional<int>{73},
+                "PackageBase production transaction failure detail differs");
+        expect(
+                error.attempts().size() == 2 &&
+                        error.attempts()[0].identity.package_name ==
+                                "transaction-attempt-second" &&
+                        error.attempts()[0].identity.full_version == "2-1" &&
+                        error.attempts()[0].desired_reason ==
+                                DesiredInstallReason::Explicit &&
+                        error.attempts()[1].identity.package_name ==
+                                "transaction-attempt-first" &&
+                        error.attempts()[1].identity.full_version == "1-1" &&
+                        error.attempts()[1].desired_reason ==
+                                DesiredInstallReason::Explicit,
+                "PackageBase production transaction attempt order differs");
+        expect(
+                std::none_of(
+                        error.attempts().begin(), error.attempts().end(),
+                        [](const PackageBaseArtifactInstallTransactionAttempt&
+                                   attempt) {
+                            return attempt.identity.package_name ==
+                                    "transaction-attempt-sibling";
+                        }),
+                "Unselected sibling leaked into transaction attempts");
+        expect(
+                std::string(error.what()).find(
+                        scenario.produced_artifact_paths[0][1].string()) ==
+                        std::string::npos,
+                "PackageBase transaction failure exposed an artifact path");
+    }
+    expect(
+            transaction_failure_reported,
+            "PackageBase production did not preserve typed transaction failure");
+    expect(
+            !public_result.has_value(),
+            "PackageBase production transaction failure fabricated child success");
+    expect(
+            scenario.install_attempt_order ==
+                            std::vector<std::string>{
+                                    "transaction-attempt-base"} &&
+                    scenario.install_calls == 1 &&
+                    fs::is_regular_file(
+                            scenario.produced_artifact_paths[0][1]),
+            "PackageBase production transaction failure lost retained state");
+    require_scenario_complete(
+            scenario, 1,
+            "PackageBase production transaction attempt snapshot");
 }
 
 void test_single_aur_root_uses_shared_lifecycle(
@@ -1326,18 +2560,23 @@ void test_cleanup_partial_success_stays_distinct_and_stops(
 
     PreparedProductionSourceBuildInvocation invocation = prepare_execution(
             std::move(work_items), scenario);
-    const std::string diagnostic = expect_cleanup_error(
+    const CleanupErrorObservation cleanup_error = expect_cleanup_error(
             [&]() { execute_invocation(invocation, scenario); },
             "production cleanup partial-success");
 
     expect(
-            diagnostic.find("Package installation succeeded") !=
+            cleanup_error.install_outcome ==
+                    ArtifactInstallExecutionOutcome::Installed,
+            "Cleanup error lost the completed install outcome");
+    expect(
+            cleanup_error.diagnostic.find("Package installation succeeded") !=
                     std::string::npos,
             "Cleanup error omitted successful package installation");
     expect(
-            diagnostic.find("Failed while building/installing") ==
+            cleanup_error.diagnostic.find("Failed while building/installing") ==
                     std::string::npos &&
-                    diagnostic.find("pacman -U failed") == std::string::npos,
+                    cleanup_error.diagnostic.find("pacman -U failed") ==
+                            std::string::npos,
             "Cleanup partial-success was flattened to transaction failure");
     expect(
             scenario.workspace_paths.size() == 1 &&
@@ -1353,23 +2592,89 @@ void test_cleanup_partial_success_stays_distinct_and_stops(
             scenario, 1, "production cleanup partial-success");
 }
 
+void test_needed_same_version_cleanup_failure_preserves_no_change(
+        const TemporaryProductionEnvironment& environment) {
+    AppConfig config = noninteractive_config();
+    std::vector<ProductionSourceBuildWorkItem> work_items;
+    work_items.push_back(make_work_item("cleanup-no-change"));
+    work_items[0].request.needed = true;
+    ProductionScenario scenario =
+            make_execution_scenario(environment, work_items, config);
+    scenario.units[0].metadata_mode =
+            MetadataMode::ExistingExplicitSameVersion;
+    scenario.units[0].replace_workspace_after_install = true;
+
+    PreparedProductionSourceBuildInvocation invocation = prepare_execution(
+            std::move(work_items), scenario);
+    const CleanupErrorObservation cleanup_error = expect_cleanup_error(
+            [&]() {
+                static_cast<void>(execute_work_item(invocation, 0, scenario));
+            },
+            "same-version --needed cleanup failure");
+
+    expect(
+            cleanup_error.install_outcome ==
+                    ArtifactInstallExecutionOutcome::SkippedAsNeeded,
+            "Cleanup error flattened same-version --needed skip to install");
+    expect(
+            cleanup_error.diagnostic.find("Package installation succeeded") !=
+                    std::string::npos,
+            "No-change cleanup error changed the existing diagnostic");
+    expect(
+            scenario.install_attempt_order ==
+                    std::vector<std::string>{"cleanup-no-change"},
+            "No-change cleanup failure did not reach successful pacman -U");
+    expect(
+            fs::is_regular_file(
+                    scenario.displaced_workspace_paths.at(0) /
+                    "cleanup-no-change-1.0-1-x86_64.pkg.tar.zst"),
+            "No-change cleanup failure lost its diagnostic artifact workspace");
+    require_scenario_complete(
+            scenario, 1, "same-version --needed cleanup failure");
+}
+
 } // namespace
 
 int main() {
     try {
         test_process_stub_rejects_cross_kind_reordering();
         test_build_plan_projection();
-        TemporaryProductionEnvironment environment;
-        test_rmdeps_global_rejection(environment);
-        test_inherited_pkgdest_global_rejection(environment);
-        test_later_target_pkgdest_global_rejection(environment);
-        test_database_resolver_failure_stops_all_targets(environment);
-        test_single_aur_root_uses_shared_lifecycle(environment);
-        test_multi_unit_options_roles_and_order(environment);
-        test_build_failure_does_not_reach_sudo(environment);
-        test_metadata_failure_does_not_reach_sudo(environment);
-        test_pacman_failure_stops_later_unit(environment);
-        test_cleanup_partial_success_stays_distinct_and_stops(environment);
+        test_same_package_base_projection_preserves_required_children();
+        test_same_package_base_source_preference_route();
+        test_resolved_repository_identity_and_owned_environment_preparation();
+        {
+            // Production must remain private-first even when the caller's
+            // ordinary collaborative umask would make a legacy mkdir 0775.
+            ScopedUmask scoped_umask(0002);
+            test_unsafe_existing_cache_root_stops_before_checkout_mutation();
+            TemporaryProductionEnvironment environment;
+            test_set_static_preparation_accepts_split_and_multiple(environment);
+            test_set_static_preparation_rejects_invalid_sets_before_mutation(
+                    environment);
+            test_rmdeps_global_rejection(environment);
+            test_inherited_pkgdest_global_rejection(environment);
+            test_later_target_pkgdest_global_rejection(environment);
+            test_database_resolver_failure_stops_all_targets(environment);
+            test_work_item_typed_install_outcomes(environment);
+            test_extended_work_item_install_outcomes(environment);
+            test_up_to_date_outcome_and_legacy_flattening(environment);
+            test_unknown_update_status_no_confirm_outcome(environment);
+            test_unknown_update_status_noninteractive_outcome(environment);
+            test_unknown_update_status_user_decline_outcome(environment);
+            test_ordinary_build_plan_unit_uses_set_owner(environment);
+            test_requested_split_child_uses_set_owner(environment);
+            test_multiple_required_children_return_typed_set_result(environment);
+            test_package_base_transaction_failure_preserves_attempt_snapshot(
+                    environment);
+            test_single_aur_root_uses_shared_lifecycle(environment);
+            test_multi_unit_options_roles_and_order(environment);
+            test_build_failure_does_not_reach_sudo(environment);
+            test_metadata_failure_does_not_reach_sudo(environment);
+            test_pacman_failure_stops_later_unit(environment);
+            test_cleanup_partial_success_stays_distinct_and_stops(environment);
+            test_needed_same_version_cleanup_failure_preserves_no_change(
+                    environment);
+        }
         std::cout << "production source-build tests passed\n";
         return 0;
     } catch(const std::exception& error) {

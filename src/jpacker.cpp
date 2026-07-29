@@ -15,12 +15,15 @@
 #include "aur_rpc.hpp"
 #include "cli_parser.hpp"
 #include "cli_routing.hpp"
+#include "commands_aur_update.hpp"
 #include "commands_inspect.hpp"
 #include "commands_source_maintenance.hpp"
 #include "commands_sync.hpp"
+#include "commands_upgrade_all.hpp"
 #include "logging.hpp"
 #include "process.hpp"
 #include "shell_words.hpp"
+#include "source_install.hpp"
 #include "trusted_cache.hpp"
 
 #include <algorithm>
@@ -137,6 +140,28 @@ int run_jpacker(int argc, char* argv[]) {
     apply_cli_overrides(config, parsed.cli_overrides);
     g_config = std::move(config);
 
+    if(parsed.operation == "upgrade-all") {
+        // POLICY(#281): upgrade-all is target-less and does not inherit
+        // pacman operands. Reject misuse before log/cache initialization or
+        // any source/inventory/AUR preparation.
+        const std::vector<std::string> validation_errors =
+                validate_upgrade_all_invocation(parsed);
+        if(!validation_errors.empty()) {
+            for(const std::string& error : validation_errors) {
+                Logger::error(error);
+            }
+            return 1;
+        }
+        try {
+            // Config-file RMDEPS must also fail before preparation, including
+            // invocations with no registered source preferences.
+            require_supported_production_source_build_options(g_config);
+        } catch(const std::exception& error) {
+            Logger::error(error.what());
+            return 1;
+        }
+    }
+
     std::optional<PkgbuildExportMode> export_mode = pkgbuild_export_mode(parsed);
     if(export_mode.has_value()) {
         // POLICY(#167): export/print は cache log 初期化より前に分岐し、内部 build cache を作らない。
@@ -168,8 +193,23 @@ int run_jpacker(int argc, char* argv[]) {
         return 1;
     }
 
+    if(parsed.operation == "upgrade-aur") {
+        if(!parsed.targets.empty()) {
+            Logger::error("upgrade-aur does not accept target operands.");
+            return 1;
+        }
+        try {
+            // POLICY(#267): NoUpdatesでも--rmdepsを成功扱いせず、queryやlog/cache
+            // 初期化より前に既存separated lifecycleのoption契約で拒否する。
+            require_supported_production_source_build_options(g_config);
+        } catch(const std::exception& error) {
+            Logger::error(error.what());
+            return 1;
+        }
+    }
+
     const std::vector<std::string> optionless_operations = {
-            "build", "upgrade", "clean", "add-src", "del-src", "revert", "edit-src", "list-src"};
+            "build", "upgrade", "upgrade-aur", "upgrade-all", "clean", "add-src", "del-src", "revert", "edit-src", "list-src"};
     if(std::find(optionless_operations.begin(), optionless_operations.end(), parsed.operation) !=
                        optionless_operations.end() &&
        !validate_optionless_jpacker_operation(parsed.operation, parsed.flags)) {
@@ -214,6 +254,12 @@ int run_jpacker(int argc, char* argv[]) {
         }
         if(operation == "upgrade") {
             return cmd_upgrade(g_config);
+        }
+        if(operation == "upgrade-aur") {
+            return cmd_upgrade_aur(g_config);
+        }
+        if(operation == "upgrade-all") {
+            return cmd_upgrade_all(g_config);
         }
         if(operation == "clean") {
             return cmd_clean(g_config);
@@ -345,6 +391,11 @@ void print_help() {
     std::cout << "    \033[1mbuild\033[0m <pkg> [V=K]  One-off source build" << std::endl;
     std::cout << "    \033[1mupgrade\033[0m              System update and configured rebuilds" << std::endl;
     std::cout << "                              Checks registered source-build preferences after -Syu" << std::endl;
+    std::cout << "    \033[1mupgrade-aur\033[0m          Update installed AUR packages only" << std::endl;
+    std::cout << "                              Does not run -Syu; source-build preferences are optional" << std::endl;
+    std::cout << "    \033[1mupgrade-all\033[0m          Update system, registered source packages, and remaining installed AUR packages" << std::endl;
+    std::cout << "                              Explicit source preferences take priority and prevent duplicate package/PackageBase builds" << std::endl;
+    std::cout << "                              Accepts --noedit, --nodiff, --noconfirm, --rebuild, --cleanbuild; no target operands" << std::endl;
     std::cout << "    \033[1mclean\033[0m                Clean package/build caches" << std::endl;
     std::cout << std::endl;
     std::cout << "\033[1mAUR INSPECTION\033[0m" << std::endl;
@@ -371,6 +422,8 @@ void print_help() {
     std::cout << "    \033[1m-Qua\033[0m                 Check AUR/foreign updates" << std::endl;
     std::cout << std::endl;
     std::cout << "\033[1mOPTIONS\033[0m" << std::endl;
+    std::cout << "    \033[1m-h, --help\033[0m          Show this help message and exit" << std::endl;
+    std::cout << "    \033[1m-V, --version\033[0m       Show version information and exit" << std::endl;
     std::cout << "    \033[1m--noedit\033[0m             Skip PKGBUILD/.install review" << std::endl;
     std::cout << "    \033[1m--nodiff\033[0m             Skip update diff prompt" << std::endl;
     std::cout << "    \033[1m--noconfirm\033[0m         Pass --noconfirm to pacman/makepkg" << std::endl;
@@ -378,11 +431,11 @@ void print_help() {
     std::cout << "                              Adds no jpacker build/review/plan skip" << std::endl;
     std::cout << "    \033[1m--rebuild\033[0m           Pass -f to build-only makepkg" << std::endl;
     std::cout << "    \033[1m--cleanbuild\033[0m        Pass -C to build-only makepkg" << std::endl;
-    std::cout << "    \033[1m--rmdeps\033[0m            Unsupported for separated source builds" << std::endl;
+    std::cout << "    \033[1m--rmdeps\033[0m            Unsupported for separated source builds; no dependency cleanup is performed" << std::endl;
     std::cout << "    \033[1m--aur\033[0m               Limit -S/-Ss/-Si to AUR; no repository fallback" << std::endl;
     std::cout << "    \033[1m--repo\033[0m              Limit -S/-Ss/-Si to official binary repositories; no AUR/source-build fallback" << std::endl;
     std::cout << "\033[1mCONFIG\033[0m" << std::endl;
-    std::cout << "    jpacker.conf: EDITOR=..., LOGFILE=..., NOEDIT=..., NODIFF=..." << std::endl;
+    std::cout << "    jpacker.conf: EDITOR=..., LOGFILE=..., NOEDIT=..., NODIFF=..., RMDEPS=..." << std::endl;
 }
 
 bool argv_requests_pkgbuild_export_diagnostics(int argc, char* argv[]) {

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <map>
 #include <optional>
 #include <stdexcept>
@@ -42,7 +43,17 @@ class AurClient {
 public:
     static std::vector<AurPackageInfo> search(const std::string& query);
     static std::vector<std::string> search_names_by_provides(const std::string& provided_name);
+    static std::vector<std::string> search_names_by_provides_strict(const std::string& provided_name);
     static std::optional<AurPackageInfo> info(const std::string& pkg_name);
     static std::optional<AurPackageInfo> info_strict(const std::string& pkg_name);
     static std::map<std::string, AurPackageInfo> info_many(const std::vector<std::string>& pkg_names);
 };
+
+#ifdef JPACKER_ENABLE_AUR_RPC_TEST_HOOKS
+void set_aur_rpc_write_append_failure_for_test(bool should_fail) noexcept;
+void set_aur_rpc_encode_failure_package_for_test(
+        const std::string& package_name);
+std::size_t invoke_aur_rpc_write_callback_for_test(
+        char* contents, std::size_t size, std::size_t nmemb,
+        std::string& buffer) noexcept;
+#endif

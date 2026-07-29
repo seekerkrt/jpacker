@@ -88,6 +88,9 @@ AppConfig load_app_config(const std::filesystem::path& config_path) {
             } else if(key == "nodiff") {
                 std::string v = to_lower(val);
                 if(v == "true" || v == "1" || v == "yes") config.no_diff = true;
+            } else if(key == "rmdeps") {
+                std::string v = to_lower(val);
+                if(v == "true" || v == "1" || v == "yes") config.rm_deps = true;
             } else if(key == "editor") {
                 if(!val.empty()) config.editor = val;
             } else if(key == "logfile") {

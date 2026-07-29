@@ -1,5 +1,6 @@
 #include "repository_query.hpp"
 
+#include "dependency_provider.hpp"
 #include "package_identifier.hpp"
 #include "process.hpp"
 #include "shell_words.hpp"
@@ -35,28 +36,48 @@ bool is_repo_package(const std::string& package_name) {
                    " > /dev/null 2>&1") == 0;
 }
 
+StrictRepositoryPackageQueryResult query_repository_package_strict(
+        const std::string& package_name) {
+    require_valid_package_name(package_name);
+    return RepositoryPackageNotFound{};
+}
+
 std::vector<ProvidedDependency> find_repo_providers(
         const std::string& dependency_name) {
     if(!is_valid_package_name(dependency_name)) return {};
 
     if(dependency_name == "identity-same-virtual") {
-        return {ProvidedDependency{"extra", "same-package"}};
+        return {ProvidedDependency::from_repository(
+                "extra", "same-package")};
     }
     if(dependency_name == "identity-different-virtual") {
-        return {ProvidedDependency{"extra", "different-package"}};
+        return {ProvidedDependency::from_repository(
+                "extra", "different-package")};
     }
     if(dependency_name == "identity-stale-virtual") {
-        return {ProvidedDependency{"stale", "stale-package"}};
+        return {ProvidedDependency::from_repository(
+                "stale", "stale-package")};
+    }
+    if(dependency_name == "identity-repository-aur-virtual") {
+        return {ProvidedDependency::from_repository(
+                "aur", "repository-aur-package")};
     }
     if(dependency_name == "identity-ambiguous-virtual" ||
        dependency_name == "ambiguous-only-virtual") {
         return {
-                ProvidedDependency{"core", "ambiguous-provider-a"},
-                ProvidedDependency{"extra", "ambiguous-provider-b"}};
+                ProvidedDependency::from_repository(
+                        "core", "ambiguous-provider-a"),
+                ProvidedDependency::from_repository(
+                        "extra", "ambiguous-provider-b")};
     }
 
     // AUR provider/unknown fixturesと既存provider-order fixtureは、AUR seamへ委譲する。
     return {};
+}
+
+StrictRepositoryProvidersQueryResult query_repository_providers_strict(
+        const std::string& dependency_name) {
+    return find_repo_providers(dependency_name);
 }
 
 std::vector<InstalledPackage> get_foreign_packages() {

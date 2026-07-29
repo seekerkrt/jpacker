@@ -1,14 +1,17 @@
 # jpacker_completion.bash
 
 _jpacker() {
-    local cur prev opts deps_opts
+    local cur prev opts deps_opts targetless_upgrade_opts jpacker_global_opts
+    local upgrade_all_selected option used word_index remaining_upgrade_all_opts
     COMPREPLY=()
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
 
     # 主要コマンドとオプション
-    opts="build upgrade clean deps plan fetch add-src del-src edit-src list-src revert -G -Gp -S -Syu -Ss -Si -R -Rs -Rns -Q -Qua -h --help --noedit --nodiff --noconfirm --rebuild --cleanbuild --rmdeps --aur --repo"
+    opts="build upgrade upgrade-aur upgrade-all clean deps plan fetch add-src del-src edit-src list-src revert -G -Gp -S -Syu -Ss -Si -R -Rs -Rns -Q -Qua -h --help -V --version --noedit --nodiff --noconfirm --rebuild --cleanbuild --rmdeps --aur --repo"
     deps_opts="--recursive"
+    targetless_upgrade_opts="--noedit --nodiff --noconfirm --rebuild --cleanbuild"
+    jpacker_global_opts="${targetless_upgrade_opts} --rmdeps --aur --repo"
 
     # 第1引数（コマンド）の補完
     if [[ ${COMP_CWORD} -eq 1 ]]; then
@@ -16,10 +19,51 @@ _jpacker() {
         return 0
     fi
 
+    # upgrade-allはtargetを取らないため、複数option入力後もcommand contextを維持し、
+    # 未使用の対応optionだけを提示する。既存commandの補完経路には影響させない。
+    upgrade_all_selected=false
+    for ((word_index = 1; word_index < COMP_CWORD; ++word_index)); do
+        if [[ " ${jpacker_global_opts} " == *" ${COMP_WORDS[word_index]} "* ]]; then
+            continue
+        fi
+        if [[ ${COMP_WORDS[word_index]} == upgrade-all ]]; then
+            upgrade_all_selected=true
+        fi
+        # parserと同じく、最初のnon-global tokenだけをcommandとして扱う。
+        break
+    done
+
+    if [[ ${upgrade_all_selected} == true ]]; then
+        remaining_upgrade_all_opts=""
+        for option in ${targetless_upgrade_opts}; do
+            used=false
+            for ((word_index = 1; word_index < COMP_CWORD; ++word_index)); do
+                if [[ ${COMP_WORDS[word_index]} == "${option}" ]]; then
+                    used=true
+                    break
+                fi
+            done
+
+            if [[ ${used} == false ]]; then
+                remaining_upgrade_all_opts+=" ${option}"
+            fi
+        done
+
+        if [[ -n ${remaining_upgrade_all_opts} ]]; then
+            COMPREPLY=( $(compgen -W "${remaining_upgrade_all_opts}" -- ${cur}) )
+        fi
+        return 0
+    fi
+
     # 直前が特定のコマンドだった場合の挙動
     case "${prev}" in
         deps)
             COMPREPLY=( $(compgen -W "${deps_opts}" -- ${cur}) )
+            return 0
+            ;;
+        upgrade-aur)
+            # targetを取らず、AUR update lifecycleで意味を保てるoptionだけを提示する。
+            COMPREPLY=( $(compgen -W "${targetless_upgrade_opts}" -- ${cur}) )
             return 0
             ;;
         -G|-Gp)

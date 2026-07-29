@@ -19,6 +19,7 @@ require_exact_test_command makepkg "$repo_root/tests/stubs/makepkg"
 require_exact_test_command pacman "$repo_root/tests/stubs/pacman"
 require_exact_test_command sudo "$repo_root/tests/stubs/sudo"
 require_exact_test_command git "$repo_root/tests/stubs/git"
+require_exact_test_command vercmp "$repo_root/tests/stubs/vercmp"
 
 setup_case() {
     case_name=$1
@@ -59,6 +60,7 @@ extra'
     unset JPACKER_TEST_PACKAGE_METADATA_INITIALIZE_FAILURE_AT
     unset JPACKER_TEST_PACKAGE_METADATA_QUERY_FAILURE_PACKAGE
     unset JPACKER_TEST_PACKAGE_METADATA_QUERY_FAILURE_AT
+    unset JPACKER_TEST_FOREIGN_PACKAGE_INVENTORY_STATE_FILE
     unset JPACKER_TEST_PACKAGE_METADATA_PACMAN_CONF_EXIT_CODE
     unset JPACKER_TEST_PACKAGE_METADATA_PACMAN_CONF_FAILURE_AT
     unset JPACKER_TEST_PACMAN_CONF_REPOSITORY_LIST_EXIT_CODE
@@ -139,6 +141,22 @@ assert_exact_line_count() {
     fi
 }
 
+assert_file_line_count() {
+    expected=$1
+    file=$2
+    actual=$(wc -l < "$file" | tr -d ' ')
+    if [ "$actual" -ne "$expected" ]; then
+        fail_case "expected $expected line(s) in $file, got $actual"
+    fi
+}
+
+assert_empty_file() {
+    file=$1
+    if [ -s "$file" ]; then
+        fail_case "expected empty file: $file"
+    fi
+}
+
 assert_line_immediately_after() {
     first=$1
     second=$2
@@ -213,23 +231,38 @@ assert_no_git_mutation() {
     fi
 }
 
+assert_no_foreign_update_mutation() {
+    if grep -E '^(git|makepkg|sudo)( |$)' "$command_log" >/dev/null ||
+       grep -E '^pacman( |$)' "$command_log" >/dev/null; then
+        fail_case "foreign update query unexpectedly ran a forbidden command"
+    fi
+}
+
+set_foreign_inventory() {
+    inventory_state=$case_dir/foreign-inventory.state
+    printf '%s\n' "$1" > "$inventory_state"
+    export JPACKER_TEST_FOREIGN_PACKAGE_INVENTORY_STATE_FILE=$inventory_state
+}
+
+set_empty_foreign_inventory() {
+    inventory_state=$case_dir/foreign-inventory.state
+    : > "$inventory_state"
+    export JPACKER_TEST_FOREIGN_PACKAGE_INVENTORY_STATE_FILE=$inventory_state
+}
+
 set_foreign_packages_101() {
-    qm_output=
+    inventory_state=$case_dir/foreign-inventory.state
+    : > "$inventory_state"
     expected_updates_file=$case_dir/expected-updates
     : > "$expected_updates_file"
     package_index=1
     while [ "$package_index" -le 101 ]; do
         package_name=$(printf 'foreign-%03d' "$package_index")
-        if [ -z "$qm_output" ]; then
-            qm_output="$package_name 1.0-1"
-        else
-            qm_output="$qm_output
-$package_name 1.0-1"
-        fi
+        printf '%s 1.0-1 explicit\n' "$package_name" >> "$inventory_state"
         printf '%s 1.0-1 -> 2.0-1\n' "$package_name" >> "$expected_updates_file"
         package_index=$((package_index + 1))
     done
-    export JPACKER_TEST_PACMAN_QM_OUTPUT=$qm_output
+    export JPACKER_TEST_FOREIGN_PACKAGE_INVENTORY_STATE_FILE=$inventory_state
 }
 
 assert_numbered_foreign_batches() {
@@ -348,31 +381,49 @@ echo "  ok: plan repository metadata preserves zero, absence, failure, and malfo
 # semantic lookupは(exact repository, package)、成功表示はreturned repo/packageでdedupeする。
 setup_case plan-repository-size-identities
 export JPACKER_TEST_INSPECTION_SCENARIO=plan-repository-size-identities
-JPACKER_TEST_PACMAN_REPO_PACKAGES='same-package different-package same-semantic'
+JPACKER_TEST_PACMAN_CONF_REPOSITORY_LIST='core
+extra
+aur'
+export JPACKER_TEST_PACMAN_CONF_REPOSITORY_LIST
+JPACKER_TEST_PACMAN_REPO_PACKAGES='same-package different-package same-semantic repository-aur-package'
 export JPACKER_TEST_PACMAN_REPO_PACKAGES
 set_repository_metadata extra same-package 1024 2048
 set_repository_metadata core different-package 2048 3072
 set_repository_metadata extra different-package 4096 5120
 set_repository_metadata core same-semantic 6144 7168
+set_repository_metadata aur repository-aur-package 8192 9216
 run_ok plan plan-identity-root
 assert_exact_line_count 1 "  extra/same-package" "$stdout_file"
 assert_exact_line_count 1 "  core/different-package" "$stdout_file"
 assert_exact_line_count 1 "  extra/different-package" "$stdout_file"
 assert_exact_line_count 1 "  core/same-semantic" "$stdout_file"
+assert_exact_line_count 1 "  aur/repository-aur-package" "$stdout_file"
+assert_exact_line "  - identity-repository-aur-virtual -> aur/repository-aur-package" "$stdout_file"
+assert_exact_line "  - identity-aur-virtual -> aur/identity-aur-provider" "$stdout_file"
 assert_before "  extra/same-package" "  core/different-package" "$stdout_file"
 assert_before "  core/different-package" "  extra/different-package" "$stdout_file"
 assert_before "  extra/different-package" "  core/same-semantic" "$stdout_file"
+assert_before "  core/same-semantic" "  aur/repository-aur-package" "$stdout_file"
 assert_exact_line_count 1 "alpm sync-query core/same-package" "$command_log"
 assert_exact_line_count 2 "alpm sync-query extra/same-package" "$command_log"
 assert_exact_line_count 1 "alpm sync-query core/different-package" "$command_log"
 assert_exact_line_count 1 "alpm sync-query extra/different-package" "$command_log"
 assert_exact_line_count 1 "alpm sync-query core/same-semantic" "$command_log"
+assert_exact_line_count 1 "alpm sync-query aur/repository-aur-package" "$command_log"
 assert_not_contains "alpm sync-query stale/" "$command_log"
 assert_not_contains "alpm sync-query core/identity-aur-provider" "$command_log"
 assert_not_contains "alpm sync-query extra/identity-aur-provider" "$command_log"
+assert_not_contains "alpm sync-query aur/identity-aur-provider" "$command_log"
 assert_not_exact_line "  aur/identity-aur-provider" "$stdout_file"
 assert_not_exact_line "  stale/stale-package" "$stdout_file"
 echo "  ok: plan lookup/cache/display identities remain distinct and first-seen"
+
+setup_case deps-typed-provider-display
+export JPACKER_TEST_INSPECTION_SCENARIO=plan-repository-size-identities
+run_ok deps --recursive plan-identity-root
+assert_exact_line "  - identity-repository-aur-virtual [provided] by aur/repository-aur-package" "$stdout_file"
+assert_exact_line "  - identity-aur-virtual [provided] by aur/identity-aur-provider" "$stdout_file"
+echo "  ok: recursive dependency display preserves typed provider labels"
 
 # AUR build units、AUR provider、ambiguous/unknown edgeだけならmetadata contextを起動しない。
 setup_case plan-repository-size-no-candidates
@@ -532,6 +583,35 @@ if [ -z "$last_plan_line" ] || [ -z "$first_fetch_line" ] || [ "$last_plan_line"
 fi
 echo "  ok: fetch entry failure continues through the plan and later roots"
 
+# foreign inventoryが空ならAUR queryへ進まず、従来messageとstatus 0を維持する。
+setup_case foreign-empty
+set_empty_foreign_inventory
+run_ok -Qua
+assert_contains "No foreign packages found." "$stdout_file"
+assert_file_line_count 2 "$stdout_file"
+assert_empty_file "$stderr_file"
+assert_not_exact_line "pacman -Qm" "$command_log"
+assert_exact_line_count 1 "alpm release" "$command_log"
+assert_not_contains "aur " "$command_log"
+assert_not_contains "Checking package" "$stdout_file"
+assert_no_foreign_update_mutation
+echo "  ok: empty foreign inventory returns success without AUR queries"
+
+# inventory failureは正常emptyへ落とさず、AUR RPCとvercmpを開始しない。
+setup_case foreign-inventory-failure
+set_foreign_inventory 'foreign-never-queried 1.0-1 explicit'
+export JPACKER_TEST_PACKAGE_METADATA_INITIALIZE_FAILURE=1
+run_fail -Qua
+assert_contains "Failed to initialize foreign package inventory" "$stderr_file"
+assert_file_line_count 1 "$stdout_file"
+assert_file_line_count 1 "$stderr_file"
+assert_not_contains "No foreign packages found." "$stdout_file"
+assert_not_contains "aur " "$command_log"
+assert_not_contains "vercmp " "$command_log"
+assert_not_contains "Checking package" "$stdout_file"
+assert_no_foreign_update_mutation
+echo "  ok: foreign inventory failure stops before AUR query"
+
 # P0-3: 101 packageを100+1へ分け、emptyだったbatchだけper-package fallbackする。
 setup_case foreign-batch-fallback
 export JPACKER_TEST_INSPECTION_SCENARIO=foreign-fallback
@@ -539,11 +619,13 @@ set_foreign_packages_101
 run_ok -Qua
 assert_exact_line "aur info-many 100 foreign-001 foreign-100" "$command_log"
 assert_exact_line "aur info-many 1 foreign-101 foreign-101" "$command_log"
+assert_exact_command_before "alpm release" "aur info-many 100 foreign-001 foreign-100"
+assert_not_exact_line "pacman -Qm" "$command_log"
 assert_numbered_foreign_batches
-assert_exact_command_before "aur info-many 100 foreign-001 foreign-100" "aur info foreign-001"
-assert_exact_command_before "aur info foreign-100" "aur info-many 1 foreign-101 foreign-101"
-assert_not_contains "aur info foreign-101" "$command_log"
-fallback_count=$(grep -c '^aur info ' "$command_log" || true)
+assert_exact_command_before "aur info-many 100 foreign-001 foreign-100" "aur info-strict foreign-001"
+assert_exact_command_before "aur info-strict foreign-100" "aur info-many 1 foreign-101 foreign-101"
+assert_not_contains "aur info-strict foreign-101" "$command_log"
+fallback_count=$(grep -c '^aur info-strict ' "$command_log" || true)
 if [ "$fallback_count" -ne 100 ]; then
     fail_case "expected 100 per-package fallback calls, got $fallback_count"
 fi
@@ -553,6 +635,23 @@ if ! diff -u "$expected_updates_file" "$actual_updates_file"; then
     fail_case "foreign updates did not preserve installed package order"
 fi
 echo "  ok: foreign query batches 101 packages and scopes empty-result fallback"
+
+# fallback中のschema/semantic response errorもordinary failureへ落とさず即時伝播する。
+setup_case foreign-fallback-schema-failure
+export JPACKER_TEST_INSPECTION_SCENARIO=foreign-fallback-schema-failure
+set_foreign_packages_101
+run_fail -Qua
+assert_contains "schema fallback failure" "$stderr_file"
+assert_not_contains "Failed to fetch AUR info:" "$stderr_file"
+assert_exact_line "aur info-many 100 foreign-001 foreign-100" "$command_log"
+assert_exact_line "aur info-strict foreign-001" "$command_log"
+assert_not_contains "aur info-strict foreign-002" "$command_log"
+fallback_schema_info_many_count=$(grep -c '^aur info-many ' "$command_log" || true)
+if [ "$fallback_schema_info_many_count" -ne 1 ]; then
+    fail_case "fallback AurRpcResponseError should stop before the second batch"
+fi
+assert_not_contains "Checking package" "$stdout_file"
+echo "  ok: foreign fallback AurRpcResponseError escapes the batch loop"
 
 # ordinary batch failureはaggregate failureにしつつ、次batchと最終package走査を続ける。
 setup_case foreign-ordinary-failure
@@ -564,9 +663,12 @@ assert_exact_line "aur info-many 100 foreign-001 foreign-100" "$command_log"
 assert_exact_line "aur info-many 1 foreign-101 foreign-101" "$command_log"
 assert_numbered_foreign_batches
 assert_exact_command_before "aur info-many 100 foreign-001 foreign-100" "aur info-many 1 foreign-101 foreign-101"
-if grep '^aur info ' "$command_log" >/dev/null; then
+if grep -E '^aur info(-strict)? ' "$command_log" >/dev/null; then
     fail_case "ordinary batch failure unexpectedly entered per-package fallback"
 fi
+assert_contains "Checking package 1/101: foreign-001" "$stdout_file"
+assert_contains "Foreign package not found in AUR: foreign-001" "$stdout_file"
+assert_before "Foreign package not found in AUR: foreign-001" "Checking package 101/101: foreign-101" "$stdout_file"
 assert_exact_line "foreign-101 1.0-1 -> 2.0-1" "$stdout_file"
 echo "  ok: foreign ordinary batch failure continues with aggregate failure"
 
@@ -584,13 +686,12 @@ fi
 assert_not_contains "Checking package" "$stdout_file"
 echo "  ok: foreign AurRpcResponseError escapes the batch loop"
 
-# result mapのkey順ではなく、pacman -Qmから得たinstalled package順でwarning/updateを表示する。
+# result mapのkey順ではなく、libalpm local inventory順でwarning/updateを表示する。
 setup_case foreign-display-order
 export JPACKER_TEST_INSPECTION_SCENARIO=foreign-order
-JPACKER_TEST_PACMAN_QM_OUTPUT='foreign-order-z 1.0-1
+set_foreign_inventory 'foreign-order-z 1.0-1 explicit
 foreign-order-missing 1.0-1
 foreign-order-a 1.0-1'
-export JPACKER_TEST_PACMAN_QM_OUTPUT
 run_ok -Qua
 assert_before "Checking package 1/3: foreign-order-z" "Checking package 2/3: foreign-order-missing" "$stdout_file"
 assert_before "Checking package 2/3: foreign-order-missing" "Checking package 3/3: foreign-order-a" "$stdout_file"
@@ -610,5 +711,37 @@ if ! diff -u "$expected_updates_file" "$actual_updates_file"; then
     fail_case "foreign update lines did not preserve installed package order"
 fi
 echo "  ok: foreign warning and update display preserves installed order"
+
+# up-to-dateとAUR非存在を同じbatchで分類し、query-only境界を維持する。
+setup_case foreign-classification
+export JPACKER_TEST_INSPECTION_SCENARIO=foreign-classification
+set_foreign_inventory 'foreign-up-to-date 2.0-1 dependency
+foreign-non-aur 1.0-1'
+export JPACKER_TEST_VERCMP_OUTPUT=0
+run_ok -Qua
+assert_exact_line_count 0 "pacman -Qm" "$command_log"
+assert_exact_line_count 1 "aur info-many 2 foreign-up-to-date foreign-non-aur" "$command_log"
+assert_not_contains "aur info-strict foreign-" "$command_log"
+assert_exact_line "vercmp 2.0-1 2.0-1" "$command_log"
+assert_not_contains "foreign-up-to-date 2.0-1 ->" "$stdout_file"
+assert_contains "Foreign package not found in AUR: foreign-non-aur" "$stdout_file"
+assert_file_line_count 6 "$stdout_file"
+assert_empty_file "$stderr_file"
+assert_no_foreign_update_mutation
+echo "  ok: foreign query classifies up-to-date and non-AUR without mutation"
+
+# vercmp parse failureはwarningを出し、fail-closedでupdateに分類しない。
+setup_case foreign-invalid-vercmp
+export JPACKER_TEST_INSPECTION_SCENARIO=foreign-classification
+set_foreign_inventory 'foreign-up-to-date 1.0-1 unknown
+foreign-non-aur 1.0-1'
+export JPACKER_TEST_VERCMP_OUTPUT=invalid
+run_ok -Qua
+assert_exact_line "vercmp 2.0-1 1.0-1" "$command_log"
+assert_contains "Failed to compare versions: 1.0-1 -> 2.0-1" "$stdout_file"
+assert_not_contains "foreign-up-to-date 1.0-1 ->" "$stdout_file"
+assert_contains "Foreign package not found in AUR: foreign-non-aur" "$stdout_file"
+assert_no_foreign_update_mutation
+echo "  ok: foreign version parse failure remains fail-closed"
 
 echo "command inspection characterization tests: all checks passed"

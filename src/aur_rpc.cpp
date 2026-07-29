@@ -23,6 +23,14 @@ using json = nlohmann::json;
 const std::string VERSION = JPACKER_VERSION;
 const std::string AUR_RPC_DEFAULT_BASE_URL = "https://aur.archlinux.org/rpc/";
 const std::string USER_AGENT = "jpacker/" + VERSION;
+const long long   AUR_RPC_PROTOCOL_VERSION = 5;
+const std::string AUR_RPC_INFO_RESPONSE_TYPE = "multiinfo";
+const std::string AUR_RPC_SEARCH_RESPONSE_TYPE = "search";
+
+#ifdef JPACKER_ENABLE_AUR_RPC_TEST_HOOKS
+bool        g_should_fail_write_append_for_test = false;
+std::string g_encode_failure_package_for_test;
+#endif
 
 // CURL easy handle の確保と解放を 1 request の寿命に束ねる RAII wrapper。
 class CurlHandle {
@@ -71,10 +79,55 @@ std::string aur_rpc_info_url() {
     return aur_rpc_base_url() + "?v=5&type=info&arg%5B%5D=";
 }
 
-size_t WriteCallback(void* contents, size_t size, size_t nmemb, void* userp) {
-    size_t total_size = size * nmemb;
-    auto*  buffer = static_cast<std::string*>(userp);
-    buffer->append(static_cast<char*>(contents), total_size);
+char* escape_info_many_package_name(
+        CURL* handle, const std::string& package_name) {
+#ifdef JPACKER_ENABLE_AUR_RPC_TEST_HOOKS
+    const char* environment_failure =
+            std::getenv("JPACKER_TEST_AUR_RPC_ENCODE_FAILURE_PACKAGE");
+    if(package_name == g_encode_failure_package_for_test ||
+       (environment_failure != nullptr &&
+        package_name == environment_failure)) {
+        return nullptr;
+    }
+#endif
+    return curl_easy_escape(
+            handle, package_name.c_str(),
+            static_cast<int>(package_name.length()));
+}
+
+std::size_t write_callback_failure_result(std::size_t total_size) noexcept {
+#ifdef CURL_WRITEFUNC_ERROR
+    static_cast<void>(total_size);
+    return CURL_WRITEFUNC_ERROR;
+#else
+    // libcurl treats any value other than the supplied byte count as a write
+    // error. Preserve that mismatch even for a zero-byte callback.
+    return total_size == 0 ? 1 : 0;
+#endif
+}
+
+void append_write_response(
+        std::string& buffer, char* contents, std::size_t total_size) {
+#ifdef JPACKER_ENABLE_AUR_RPC_TEST_HOOKS
+    if(g_should_fail_write_append_for_test) {
+        throw std::runtime_error("Injected AUR response append failure.");
+    }
+#endif
+    buffer.append(contents, total_size);
+}
+
+std::size_t WriteCallback(
+        void* contents, std::size_t size, std::size_t nmemb,
+        void* userp) noexcept {
+    const std::size_t total_size = size * nmemb;
+    auto*             buffer = static_cast<std::string*>(userp);
+    try {
+        append_write_response(
+                *buffer, static_cast<char*>(contents), total_size);
+    } catch(...) {
+        // C callbacks must not allow any C++ exception to cross libcurl's ABI.
+        return write_callback_failure_result(total_size);
+    }
     return total_size;
 }
 
@@ -168,6 +221,31 @@ std::optional<long long> optional_json_integer(
     if(value->is_number_unsigned()) {
         auto unsigned_value = value->get<unsigned long long>();
         if(unsigned_value > static_cast<unsigned long long>(std::numeric_limits<long long>::max())) {
+            throw_aur_rpc_validation_error(
+                    context, "field " + key + " integer is outside supported range");
+        }
+        return static_cast<long long>(unsigned_value);
+    }
+    return value->get<long long>();
+}
+
+long long required_json_integer(
+        const json& obj, const std::string& key, const std::string& context) {
+    auto value = obj.find(key);
+    if(value == obj.end()) {
+        throw_aur_rpc_validation_error(
+                context, "field " + key + " expected integer, got missing");
+    }
+    if(!value->is_number_integer()) {
+        throw_aur_rpc_validation_error(
+                context, "field " + key + " expected integer, got " +
+                                 std::string(value->type_name()));
+    }
+
+    if(value->is_number_unsigned()) {
+        auto unsigned_value = value->get<unsigned long long>();
+        if(unsigned_value >
+           static_cast<unsigned long long>(std::numeric_limits<long long>::max())) {
             throw_aur_rpc_validation_error(
                     context, "field " + key + " integer is outside supported range");
         }
@@ -273,6 +351,77 @@ std::vector<AurPackageInfo> parse_aur_rpc_package_results(
     return packages;
 }
 
+const json& strict_aur_rpc_results_array(
+        const json& response, const std::string& context,
+        const std::string& expected_response_type,
+        std::optional<std::size_t> maximum_result_count) {
+    auto error = response.find("error");
+    if(error != response.end()) {
+        if(!error->is_string()) {
+            throw_aur_rpc_validation_error(
+                    context, "field error expected string, got " +
+                                     std::string(error->type_name()));
+        }
+        throw_aur_rpc_validation_error(
+                context, "field error reported " + error->dump());
+    }
+
+    long long version = required_json_integer(response, "version", context);
+    if(version != AUR_RPC_PROTOCOL_VERSION) {
+        throw_aur_rpc_validation_error(
+                context, "field version expected " +
+                                 std::to_string(AUR_RPC_PROTOCOL_VERSION) + ", got " +
+                                 std::to_string(version));
+    }
+
+    std::string response_type = required_json_string(response, "type", context);
+    if(response_type != expected_response_type) {
+        throw_aur_rpc_validation_error(
+                context, "field type expected " +
+                                 json_value_for_error(expected_response_type) + ", got " +
+                                 json_value_for_error(response_type));
+    }
+
+    long long result_count = required_json_integer(response, "resultcount", context);
+    if(result_count < 0) {
+        throw_aur_rpc_validation_error(
+                context, "field resultcount expected non-negative integer, got " +
+                                 std::to_string(result_count));
+    }
+
+    const json& results = aur_rpc_results_array(response, context);
+    if(static_cast<unsigned long long>(result_count) !=
+       static_cast<unsigned long long>(results.size())) {
+        throw_aur_rpc_validation_error(
+                context, "field resultcount was " + std::to_string(result_count) +
+                                 " but results contained " +
+                                 std::to_string(results.size()) + " entries");
+    }
+    if(maximum_result_count.has_value() &&
+       results.size() > maximum_result_count.value()) {
+        throw_aur_rpc_validation_error(
+                context, "expected zero or one result, got " +
+                                 std::to_string(results.size()));
+    }
+    return results;
+}
+
+std::vector<AurPackageInfo> parse_strict_aur_rpc_package_results(
+        const std::string& response, const std::string& context,
+        const std::string& expected_response_type,
+        std::optional<std::size_t> maximum_result_count = std::nullopt) {
+    json parsed = parse_aur_rpc_response(response, context);
+    const json& results = strict_aur_rpc_results_array(
+            parsed, context, expected_response_type, maximum_result_count);
+
+    std::vector<AurPackageInfo> packages;
+    packages.reserve(results.size());
+    for(std::size_t i = 0; i < results.size(); ++i) {
+        packages.push_back(parse_aur_rpc_package_info(results[i], context, i));
+    }
+    return packages;
+}
+
 std::optional<AurPackageInfo> parse_single_aur_info_response(
         const std::string& response, const std::string& pkg_name) {
     std::string                 context = "package info " + pkg_name;
@@ -289,7 +438,39 @@ std::optional<AurPackageInfo> parse_single_aur_info_response(
     return results.front();
 }
 
+std::optional<AurPackageInfo> parse_single_strict_aur_info_response(
+        const std::string& response, const std::string& pkg_name) {
+    std::string                 context = "package info " + pkg_name;
+    std::vector<AurPackageInfo> results =
+            parse_strict_aur_rpc_package_results(
+                    response, context, AUR_RPC_INFO_RESPONSE_TYPE, 1);
+    if(results.empty()) return std::nullopt;
+    if(results.front().Name != pkg_name) {
+        throw_aur_rpc_validation_error(
+                context, "requested " + pkg_name + " but response Name was " +
+                                 results.front().Name);
+    }
+    return results.front();
+}
+
 } // namespace
+
+#ifdef JPACKER_ENABLE_AUR_RPC_TEST_HOOKS
+void set_aur_rpc_write_append_failure_for_test(bool should_fail) noexcept {
+    g_should_fail_write_append_for_test = should_fail;
+}
+
+void set_aur_rpc_encode_failure_package_for_test(
+        const std::string& package_name) {
+    g_encode_failure_package_for_test = package_name;
+}
+
+std::size_t invoke_aur_rpc_write_callback_for_test(
+        char* contents, std::size_t size, std::size_t nmemb,
+        std::string& buffer) noexcept {
+    return WriteCallback(contents, size, nmemb, &buffer);
+}
+#endif
 
 CurlGlobal::CurlGlobal() {
     curl_global_init(CURL_GLOBAL_DEFAULT);
@@ -382,6 +563,29 @@ std::vector<std::string> AurClient::search_names_by_provides(const std::string& 
     return names;
 }
 
+std::vector<std::string> AurClient::search_names_by_provides_strict(
+        const std::string& provided_name) {
+    std::vector<std::string> names;
+    CurlHandle               handle;
+    char* escaped = curl_easy_escape(
+            handle.get(), provided_name.c_str(),
+            static_cast<int>(provided_name.length()));
+    if(!escaped) {
+        throw std::runtime_error(
+                "Failed to encode AUR provided name: " + provided_name);
+    }
+    std::string url = aur_rpc_search_url() + escaped + "?by=provides";
+    curl_free(escaped);
+
+    std::string response = get_url_strict(url);
+    std::vector<AurPackageInfo> results =
+            parse_strict_aur_rpc_package_results(
+                    response, "provides search " + provided_name,
+                    AUR_RPC_SEARCH_RESPONSE_TYPE);
+    for(const auto& info : results) names.push_back(info.Name);
+    return names;
+}
+
 std::optional<AurPackageInfo> AurClient::info(const std::string& pkg_name) {
     CurlHandle handle;
     char*      escaped = curl_easy_escape(handle.get(), pkg_name.c_str(), static_cast<int>(pkg_name.length()));
@@ -406,7 +610,7 @@ std::optional<AurPackageInfo> AurClient::info_strict(const std::string& pkg_name
     curl_free(escaped);
 
     std::string response = get_url_strict(url);
-    return parse_single_aur_info_response(response, pkg_name);
+    return parse_single_strict_aur_info_response(response, pkg_name);
 }
 
 std::map<std::string, AurPackageInfo> AurClient::info_many(const std::vector<std::string>& pkg_names) {
@@ -421,17 +625,18 @@ std::map<std::string, AurPackageInfo> AurClient::info_many(const std::vector<std
 
     CurlHandle  handle;
     std::string url = aur_rpc_base_url() + "?v=5&type=info";
-    bool        has_arg = false;
     for(size_t i = 0; i < pkg_names.size(); ++i) {
-        char* escaped = curl_easy_escape(handle.get(), pkg_names[i].c_str(), static_cast<int>(pkg_names[i].length()));
-        if(!escaped) continue;
+        char* escaped = escape_info_many_package_name(
+                handle.get(), pkg_names[i]);
+        if(!escaped) {
+            throw std::runtime_error(
+                    "Failed to encode AUR package name: " + pkg_names[i]);
+        }
         url += "&";
         url += "arg%5B%5D=";
         url += escaped;
-        has_arg = true;
         curl_free(escaped);
     }
-    if(!has_arg) return results;
 
     std::string response = get_url(url);
     if(response.empty()) return results;

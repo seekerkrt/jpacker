@@ -27,7 +27,7 @@ using ArtifactInstallPreparationFactory = PreparedArtifactInstall (*)(
         DesiredInstallReason,
         const ArtifactInstallPreparationOptions&,
         const PacmanDatabasePaths&);
-using PreparedArtifactInstallExecutor = void (*)(
+using PreparedArtifactInstallExecutor = ArtifactInstallExecutionOutcome (*)(
         PreparedArtifactInstall&,
         const ArtifactInstallExecutionOptions&);
 
@@ -1068,36 +1068,54 @@ void test_rmdeps_guard() {
 }
 
 struct ExecutionCase {
-    const char*          name;
-    DesiredInstallReason desired_reason;
-    bool                 installed;
-    const char*          installed_version;
-    alpm_pkgreason_t     installed_reason;
-    bool                 needed;
-    bool                 no_confirm;
-    const char*          expected_reason_option;
-    const char*          artifact_leaf_name;
+    const char*                     name;
+    DesiredInstallReason            desired_reason;
+    bool                            installed;
+    const char*                     installed_version;
+    alpm_pkgreason_t                installed_reason;
+    bool                            needed;
+    bool                            no_confirm;
+    const char*                     expected_reason_option;
+    ArtifactInstallExecutionOutcome expected_outcome;
+    const char*                     artifact_leaf_name;
 };
 
 void test_exact_pacman_argv_and_session_boundary() {
     const std::vector<ExecutionCase> cases = {
             {"default", DesiredInstallReason::Explicit, false, "",
              ALPM_PKG_REASON_EXPLICIT, false, false, nullptr,
+             ArtifactInstallExecutionOutcome::Installed,
              "default.pkg.tar.zst"},
+            {"same installed version without needed",
+             DesiredInstallReason::Explicit, true, ARTIFACT_VERSION,
+             ALPM_PKG_REASON_EXPLICIT, false, false, nullptr,
+             ArtifactInstallExecutionOutcome::Installed,
+             "same-without-needed.pkg.tar.zst"},
             {"asexplicit and space", DesiredInstallReason::Explicit, true,
              "2:1.4.0-2", ALPM_PKG_REASON_DEPEND, false, false,
-             "--asexplicit", "artifact with space.pkg.tar.zst"},
+             "--asexplicit", ArtifactInstallExecutionOutcome::Installed,
+             "artifact with space.pkg.tar.zst"},
             {"asdeps and apostrophe", DesiredInstallReason::Dependency, false,
              "", ALPM_PKG_REASON_EXPLICIT, false, false, "--asdeps",
+             ArtifactInstallExecutionOutcome::Installed,
              "artifact'quote.pkg.tar.zst"},
             {"noconfirm and leading dash", DesiredInstallReason::Explicit,
              false, "", ALPM_PKG_REASON_EXPLICIT, false, true, nullptr,
+             ArtifactInstallExecutionOutcome::Installed,
              "-leading-dash.pkg.tar.zst"},
-            {"needed", DesiredInstallReason::Explicit, false, "",
+            {"needed with different installed version",
+             DesiredInstallReason::Explicit, true, "2:1.4.0-2",
              ALPM_PKG_REASON_EXPLICIT, true, false, nullptr,
-             "needed.pkg.tar.zst"},
+             ArtifactInstallExecutionOutcome::Installed,
+             "needed-different.pkg.tar.zst"},
+            {"needed with same installed version",
+             DesiredInstallReason::Explicit, true, ARTIFACT_VERSION,
+             ALPM_PKG_REASON_EXPLICIT, true, false, nullptr,
+             ArtifactInstallExecutionOutcome::SkippedAsNeeded,
+             "needed-same.pkg.tar.zst"},
             {"noconfirm and needed", DesiredInstallReason::Explicit, false,
              "", ALPM_PKG_REASON_EXPLICIT, true, true, nullptr,
+             ArtifactInstallExecutionOutcome::Installed,
              "both-options.pkg.tar.zst"},
     };
 
@@ -1122,9 +1140,11 @@ void test_exact_pacman_argv_and_session_boundary() {
         process_stub::expect_run_command(expected_command, 0);
         process_stub::set_run_hook(require_all_metadata_sessions_released_before_run);
 
-        execute_prepared_artifact_install(
-                install,
-                ArtifactInstallExecutionOptions{test_case.no_confirm});
+        const ArtifactInstallExecutionOutcome outcome =
+                execute_prepared_artifact_install(
+                        install,
+                        ArtifactInstallExecutionOptions{
+                                test_case.no_confirm});
 
         const std::string command = process_stub::last_run_command();
         expect(
@@ -1150,6 +1170,10 @@ void test_exact_pacman_argv_and_session_boundary() {
                 metadata_call_counts() == before_execute,
                 std::string(test_case.name) +
                         ": final executor called libalpm metadata functions");
+        expect(
+                outcome == test_case.expected_outcome,
+                std::string(test_case.name) +
+                        ": typed install outcome differs");
         expect(
                 fs::is_regular_file(artifact_path),
                 std::string(test_case.name) +

@@ -90,6 +90,7 @@ setup_case() {
     unset JPACKER_TEST_GIT_CLONE_FIXTURE_DIR
     unset JPACKER_TEST_PACKAGE_METADATA_PACMAN_CONF_EXIT_CODE
     unset JPACKER_TEST_PACKAGE_METADATA_PACMAN_CONF_FAILURE_AT
+    unset JPACKER_TEST_MAKEPKG_ARTIFACT_IDENTITIES
 }
 
 run_ok() {
@@ -601,8 +602,26 @@ metadata-risk|risk-root|conflicts/replaces metadata requires manual review
 unresolved|unresolved-root|unresolved dependencies
 ambiguous-provider|ambiguous-root|ambiguous providers
 cycle|cycle-root|cyclic dependencies
-split|split-child|split package install target selection is not implemented
 GUARDS
+
+setup_case split-child-needed-selected-only
+export JPACKER_TEST_MAKEPKG_ARTIFACT_IDENTITIES='split-base|split-child|4.0-2
+split-base|split-sibling|4.0-2
+split-base|split-child-debug|4.0-2'
+run_ok --noedit --nodiff -S --aur --needed split-child
+assert_command_count "makepkg --packagelist" 1
+assert_command_count "makepkg -sc" 1
+assert_command_prefix_count "pacman -U --print --print-format " 3
+assert_command_prefix_count "sudo pacman -U --needed -- " 1
+if ! grep -E '^sudo pacman -U --needed -- .*/split-child-4\.0-2-x86_64\.pkg\.tar\.zst$' \
+    "$command_log" >/dev/null; then
+    echo "split --needed transaction did not contain exactly the selected child" >&2
+    cat "$command_log" >&2
+    exit 1
+fi
+assert_contains "  required child: split-child -> split-child 4.0-2 (explicit): installed" "$output_file"
+assert_contains "  produced artifact: split-sibling 4.0-2 (not selected; not installed)" "$output_file"
+assert_contains "  produced artifact: split-child-debug 4.0-2 (not selected; not installed)" "$output_file"
 
 setup_case guard-invalid-identifier
 run_fail -S --aur --needed ../escape
@@ -624,11 +643,18 @@ assert_no_mutation_commands
 assert_cache_entry_absent invalid-root-preflight
 assert_schema_request_log_nonempty
 
-# Matrix I: custom upgradeはoptionless、generic -Syuはpacman-onlyという境界を固定する。
+# Matrix I: custom upgrade/upgrade-aurは--neededを受けず、generic -Syuはpacman-onlyという境界を固定する。
 setup_case custom-upgrade-rejects-needed
 prepare_source_preference clean-root
 run_fail upgrade --needed
 assert_contains "Unsupported upgrade option: --needed" "$output_file"
+assert_command_log_empty
+assert_cache_root_absent
+assert_normal_request_log_empty
+
+setup_case aur-update-rejects-needed
+run_fail upgrade-aur --needed
+assert_contains "Unsupported upgrade-aur option: --needed" "$output_file"
 assert_command_log_empty
 assert_cache_root_absent
 assert_normal_request_log_empty

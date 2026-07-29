@@ -1,16 +1,16 @@
 #include "commands_inspect.hpp"
 
 #include "aur_rpc.hpp"
+#include "aur_update_query.hpp"
 #include "checkout_fetch.hpp"
 #include "dependency_plan.hpp"
+#include "dependency_provider.hpp"
 #include "dependency_spec.hpp"
 #include "logging.hpp"
 #include "package_identifier.hpp"
 #include "package_metadata.hpp"
 #include "pkgbuild_export.hpp"
-#include "process.hpp"
 #include "repository_query.hpp"
-#include "shell_words.hpp"
 
 #include <algorithm>
 #include <array>
@@ -83,10 +83,13 @@ std::vector<RepositoryPackageLookup> collect_repository_package_lookups(
         }
 
         if(edge.kind != DependencyKind::Provided ||
-           !edge.resolved_provider.has_value() ||
-           edge.resolved_provider->repository == "aur") {
+           !edge.resolved_provider.has_value()) {
             continue;
         }
+
+        const auto* repository = std::get_if<RepositoryProviderOrigin>(
+                &edge.resolved_provider->origin);
+        if(repository == nullptr) continue;
 
         // Configured membershipはpacman-confの正本をresolveした後で確認する。
         // 現行provider resolverが返し得るunconfigured/stale repositoryはここではまだ保持する。
@@ -94,7 +97,7 @@ std::vector<RepositoryPackageLookup> collect_repository_package_lookups(
                 lookups, seen_lookups,
                 RepositoryPackageLookup{
                         edge.resolved_provider->package_name,
-                        edge.resolved_provider->repository});
+                        repository->repository_name});
     }
     return lookups;
 }
@@ -339,22 +342,6 @@ std::string aur_git_url_for_package_base(const std::string& package_base) {
     return AUR_BASE_URL + package_base + ".git";
 }
 
-bool aur_version_is_newer(const std::string& aur_version, const std::string& installed_version) {
-    std::string cmp_cmd = "vercmp " + shell_words::quote(aur_version) + " " + shell_words::quote(installed_version);
-    std::string cmp_res = exec_command(cmp_cmd.c_str());
-
-    try {
-        return std::stoi(cmp_res) > 0;
-    } catch(...) {
-        Logger::warn("Failed to compare versions: " + installed_version + " -> " + aur_version);
-        return false;
-    }
-}
-
-std::string provider_display(const ProvidedDependency& provider) {
-    return provider.repository + "/" + provider.package_name;
-}
-
 std::string dependency_display_name(const std::string& dependency, const std::string& package_name) {
     std::string display;
     if(package_name.empty() || dependency == package_name)
@@ -388,13 +375,15 @@ void print_recursive_dependency_node(const RecursiveDependencyNode& node, size_t
         std::cout << " base: " << node.package_base;
     }
     if(node.provided_by.has_value()) {
-        std::cout << " by " << node.provided_by->repository << "/" << node.provided_by->package_name;
+        std::cout << " by "
+                  << provided_dependency_display(node.provided_by.value());
     }
     if(!node.provider_candidates.empty()) {
         std::cout << " candidates: ";
         for(size_t i = 0; i < node.provider_candidates.size(); ++i) {
             if(i > 0) std::cout << ", ";
-            std::cout << provider_display(node.provider_candidates[i]);
+            std::cout << provided_dependency_display(
+                    node.provider_candidates[i]);
         }
     }
     if(node.already_visited) std::cout << " (already visited)";
@@ -447,7 +436,9 @@ void print_ambiguous_provider_group(
                   << std::endl;
         std::cout << "    candidates:" << std::endl;
         for(size_t i = 0; i < dependency.candidates.size(); ++i) {
-            std::cout << "      " << (i + 1) << ". " << provider_display(dependency.candidates[i]) << std::endl;
+            std::cout << "      " << (i + 1) << ". "
+                      << provided_dependency_display(dependency.candidates[i])
+                      << std::endl;
         }
     }
 }
@@ -492,7 +483,7 @@ void print_build_plan(const BuildPlan& plan) {
         for(const auto& dependency : plan.provided) {
             std::cout << "  - "
                       << dependency_display_with_constraint_note(dependency.dependency, dependency.dependency)
-                      << " -> " << dependency.provider.repository << "/" << dependency.provider.package_name
+                      << " -> " << provided_dependency_display(dependency.provider)
                       << std::endl;
         }
     }
@@ -531,15 +522,13 @@ void print_build_plan(const BuildPlan& plan) {
         }
     }
 
-    if(!plan.unresolved.empty() || !plan.ambiguous_providers.empty() || !plan.cycles.empty() ||
-       !plan.split_package_targets.empty() || !plan.metadata_risks.empty()) {
+    if(!plan.unresolved.empty() || !plan.ambiguous_providers.empty() ||
+       !plan.cycles.empty() || !plan.metadata_risks.empty()) {
         std::cout << std::endl;
         std::cout << "Plan status: incomplete" << std::endl;
         if(!plan.unresolved.empty()) std::cout << "  unresolved dependencies remain" << std::endl;
         if(!plan.ambiguous_providers.empty()) std::cout << "  ambiguous providers are not selected" << std::endl;
         if(!plan.cycles.empty()) std::cout << "  cyclic dependencies detected" << std::endl;
-        if(!plan.split_package_targets.empty())
-            std::cout << "  split package install target selection is not implemented" << std::endl;
         if(!plan.metadata_risks.empty())
             std::cout << "  conflicts/replaces metadata is not resolved automatically" << std::endl;
     }
@@ -766,63 +755,43 @@ int cmd_print_pkgbuild(const std::string& target) {
 }
 
 int cmd_query_foreign_updates() {
-    bool failed = false;
-
-    std::vector<InstalledPackage> packages = get_foreign_packages();
-    if(packages.empty()) {
+    AurUpdateQueryResult query_result = query_installed_aur_updates();
+    if(query_result.plan.entries.empty()) {
         Logger::info("No foreign packages found.");
-        return 0;
+        return query_result.recoverable_failures.empty() ? 0 : 1;
     }
 
-    std::vector<std::string> package_names;
-    for(const auto& local_pkg : packages) {
-        package_names.push_back(local_pkg.name);
-    }
+    for(size_t i = 0; i < query_result.plan.entries.size(); ++i) {
+        const AurUpdatePlanEntry& entry = query_result.plan.entries[i];
+        Logger::info(
+                "Checking package " + std::to_string(i + 1) + "/" +
+                std::to_string(query_result.plan.entries.size()) + ": " +
+                entry.installed_name);
 
-    Logger::info("Checking AUR updates for " + std::to_string(packages.size()) + " foreign packages...");
-
-    std::map<std::string, AurPackageInfo> aur_packages;
-    const size_t                          batch_size = 100;
-    for(size_t offset = 0; offset < package_names.size(); offset += batch_size) {
-        size_t end = std::min(offset + batch_size, package_names.size());
-        Logger::info("Fetching AUR info for packages " + std::to_string(offset + 1) + "-" + std::to_string(end) + " of " +
-                     std::to_string(package_names.size()) + "...");
-
-        std::vector<std::string> batch(package_names.begin() + offset, package_names.begin() + end);
-        try {
-            std::map<std::string, AurPackageInfo> batch_results = AurClient::info_many(batch);
-            if(batch_results.empty()) {
-                Logger::warn("Bulk AUR info returned no results. Falling back to per-package checks for this batch.");
-                for(const auto& package_name : batch) {
-                    std::optional<AurPackageInfo> aur_pkg = AurClient::info(package_name);
-                    if(aur_pkg.has_value()) {
-                        batch_results[aur_pkg->Name] = aur_pkg.value();
-                    }
-                }
-            }
-            aur_packages.insert(batch_results.begin(), batch_results.end());
-        } catch(const AurRpcResponseError&) {
-            throw;
-        } catch(const std::exception& e) {
-            Logger::error("Failed to fetch AUR info: " + std::string(e.what()));
-            failed = true;
+        switch(entry.classification) {
+        case AurUpdateClassification::NonAurForeign:
+        case AurUpdateClassification::MetadataUnavailable:
+            // POLICY(#266): failed batchも従来のnot-found warningを維持するが、
+            // pure modelではconfirmed absenceとquery failureを同一視しない。
+            Logger::warn(
+                    "Foreign package not found in AUR: " +
+                    entry.installed_name);
+            break;
+        case AurUpdateClassification::UpdateAvailable:
+            std::cout << entry.installed_name << " " << entry.installed_version
+                      << " -> " << entry.aur_package->version << std::endl;
+            break;
+        case AurUpdateClassification::UpToDate:
+            break;
+        case AurUpdateClassification::VersionComparisonUnavailable:
+            Logger::warn(
+                    "Failed to compare versions: " + entry.installed_version +
+                    " -> " + entry.aur_package->version);
+            break;
+        default:
+            throw std::logic_error("Unknown AUR update classification.");
         }
     }
 
-    for(size_t i = 0; i < packages.size(); ++i) {
-        const auto& local_pkg = packages[i];
-        Logger::info("Checking package " + std::to_string(i + 1) + "/" + std::to_string(packages.size()) + ": " + local_pkg.name);
-
-        auto aur_pkg = aur_packages.find(local_pkg.name);
-        if(aur_pkg == aur_packages.end()) {
-            Logger::warn("Foreign package not found in AUR: " + local_pkg.name);
-            continue;
-        }
-
-        if(aur_version_is_newer(aur_pkg->second.Version, local_pkg.version)) {
-            std::cout << local_pkg.name << " " << local_pkg.version << " -> " << aur_pkg->second.Version << std::endl;
-        }
-    }
-
-    return failed ? 1 : 0;
+    return query_result.recoverable_failures.empty() ? 0 : 1;
 }

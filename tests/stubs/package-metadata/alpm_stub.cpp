@@ -4,10 +4,12 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <deque>
 #include <fstream>
 #include <map>
 #include <memory>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -33,6 +35,8 @@ struct _alpm_pkg_t {
     AlpmStubDatabaseKind kind;
     std::string          repository_name;
     std::string          lookup_name;
+    std::size_t          local_package_index;
+    bool                 has_handle_owned_local_metadata = false;
 };
 
 namespace {
@@ -47,11 +51,36 @@ enum class PackageLookupMode {
 struct SyncDatabaseBehavior {
     bool         register_fails = false;
     alpm_errno_t register_error = ALPM_ERR_DB_OPEN;
+    bool         should_preserve_register_error = false;
+    alpm_errno_t preserved_register_error = ALPM_ERR_DB_OPEN;
     bool         validation_fails = false;
     alpm_errno_t validation_error = ALPM_ERR_DB_INVALID;
     bool         cache_fails = false;
     alpm_errno_t cache_error = ALPM_ERR_DB_OPEN;
     bool         cache_empty = false;
+    bool         should_preserve_cache_error = false;
+    alpm_errno_t preserved_cache_error = ALPM_ERR_DB_OPEN;
+    std::size_t  cache_calls = 0;
+};
+
+struct LocalPackageState {
+    std::string       name = "test-package";
+    std::string       version = "1.0-1";
+    alpm_pkgreason_t reason = ALPM_PKG_REASON_EXPLICIT;
+    bool              name_is_null = false;
+    bool              version_is_null = false;
+};
+
+struct LocalPackageQueryExpectation {
+    std::string       expected_package_name;
+    PackageLookupMode lookup_mode;
+    LocalPackageState returned_package;
+    alpm_errno_t      query_error = ALPM_ERR_DB_OPEN;
+};
+
+struct HandleOwnedLocalPackageRecord {
+    LocalPackageState state;
+    alpm_pkg_t        package;
 };
 
 struct RepositoryPackageState {
@@ -76,17 +105,38 @@ struct SyncDatabaseRecord {
 };
 
 struct HandleRecord {
-    explicit HandleRecord(std::size_t creation_index)
+    HandleRecord(std::size_t creation_index, std::size_t local_package_count)
         : handle{creation_index, ALPM_ERR_OK},
-          database{&handle, AlpmStubDatabaseKind::Local, ""},
-          package{&handle, AlpmStubDatabaseKind::Local, "", ""},
-          cache_node{&package, nullptr, nullptr} {}
+          database{&handle, AlpmStubDatabaseKind::Local, ""} {
+        local_packages.reserve(local_package_count);
+        local_cache_nodes.reserve(local_package_count);
+        for(std::size_t index = 0; index < local_package_count; ++index) {
+            local_packages.push_back(std::make_unique<alpm_pkg_t>(alpm_pkg_t{
+                    &handle,
+                    AlpmStubDatabaseKind::Local,
+                    "",
+                    "",
+                    index}));
+            local_cache_nodes.push_back(std::make_unique<alpm_list_t>(alpm_list_t{
+                    local_packages.back().get(), nullptr, nullptr}));
+        }
+        for(std::size_t index = 0; index < local_cache_nodes.size(); ++index) {
+            local_cache_nodes[index]->prev =
+                    index == 0 ? nullptr : local_cache_nodes[index - 1].get();
+            local_cache_nodes[index]->next =
+                    index + 1 == local_cache_nodes.size()
+                            ? nullptr
+                            : local_cache_nodes[index + 1].get();
+        }
+    }
 
     alpm_handle_t handle;
     alpm_db_t     database;
-    alpm_pkg_t    package;
-    alpm_list_t   cache_node;
     std::size_t   release_count = 0;
+    std::vector<std::unique_ptr<alpm_pkg_t>> local_packages;
+    std::vector<std::unique_ptr<alpm_list_t>> local_cache_nodes;
+    std::vector<std::unique_ptr<HandleOwnedLocalPackageRecord>>
+            strict_local_packages;
     std::vector<std::unique_ptr<SyncDatabaseRecord>> sync_databases;
 };
 
@@ -102,15 +152,21 @@ struct AlpmStubState {
     bool         package_cache_fails = false;
     bool         package_cache_empty = false;
     alpm_errno_t package_cache_error = ALPM_ERR_DB_OPEN;
+    bool         should_preserve_package_cache_error = false;
+    alpm_errno_t preserved_package_cache_error = ALPM_ERR_DB_OPEN;
+
+    bool         should_preserve_local_database_error = false;
+    alpm_errno_t preserved_local_database_error = ALPM_ERR_DB_OPEN;
 
     PackageLookupMode package_lookup_mode = PackageLookupMode::Present;
     alpm_errno_t      package_query_error = ALPM_ERR_SYSTEM;
     bool              should_preserve_package_query_error = false;
-    std::string       package_name = "test-package";
-    std::string       package_version = "1.0-1";
-    alpm_pkgreason_t  package_reason = ALPM_PKG_REASON_EXPLICIT;
-    bool              package_name_is_null = false;
-    bool              package_version_is_null = false;
+    std::vector<LocalPackageState> local_packages = {LocalPackageState{}};
+
+    bool local_package_query_strict_mode = false;
+    std::deque<LocalPackageQueryExpectation> local_package_query_expectations;
+    std::vector<std::string> local_package_queries;
+    const char* local_package_query_expectation_failure = nullptr;
 
     std::size_t initialize_calls = 0;
     std::size_t local_database_calls = 0;
@@ -135,6 +191,101 @@ struct AlpmStubState {
 };
 
 AlpmStubState g_state;
+
+HandleRecord* record_for_handle(alpm_handle_t* handle);
+void set_handle_error(alpm_handle_t* handle, alpm_errno_t error);
+
+LocalPackageState& primary_local_package_state() {
+    if(g_state.local_packages.empty()) {
+        g_state.local_packages.push_back(LocalPackageState{});
+    }
+    return g_state.local_packages.front();
+}
+
+LocalPackageState* local_package_state(alpm_pkg_t* package) {
+    if(package == nullptr || package->kind != AlpmStubDatabaseKind::Local) return nullptr;
+    if(package->has_handle_owned_local_metadata) {
+        HandleRecord* record = record_for_handle(package->handle);
+        if(record == nullptr ||
+           package->local_package_index >=
+                   record->strict_local_packages.size()) {
+            return nullptr;
+        }
+        return &record->strict_local_packages[package->local_package_index]->state;
+    }
+    if(package->local_package_index >= g_state.local_packages.size()) return nullptr;
+    return &g_state.local_packages[package->local_package_index];
+}
+
+[[noreturn]] void fail_local_package_query_expectation(
+        const char* diagnostic) {
+    // POLICY: fixed diagnosticだけを保持し、package-controlled nameを埋め込まない。
+    g_state.local_package_query_expectation_failure = diagnostic;
+    throw std::logic_error(diagnostic);
+}
+
+alpm_pkg_t* consume_local_package_query_expectation(
+        alpm_db_t* database,
+        const std::string& package_name) {
+    if(g_state.local_package_query_expectation_failure != nullptr) {
+        fail_local_package_query_expectation(
+                g_state.local_package_query_expectation_failure);
+    }
+    if(g_state.local_package_query_expectations.empty()) {
+        fail_local_package_query_expectation(
+                "Package metadata stub received an unexpected local package query "
+                "with no pending expectation.");
+    }
+
+    const LocalPackageQueryExpectation& expectation =
+            g_state.local_package_query_expectations.front();
+    if(package_name != expectation.expected_package_name) {
+        fail_local_package_query_expectation(
+                "Package metadata stub local package query did not match the next "
+                "expectation.");
+    }
+
+    switch(expectation.lookup_mode) {
+        case PackageLookupMode::Present: {
+            HandleRecord* record = record_for_handle(database->handle);
+            if(record == nullptr) {
+                set_handle_error(database->handle, ALPM_ERR_HANDLE_NULL);
+                return nullptr;
+            }
+
+            const std::size_t package_index =
+                    record->strict_local_packages.size();
+            auto package = std::make_unique<HandleOwnedLocalPackageRecord>(
+                    HandleOwnedLocalPackageRecord{
+                            expectation.returned_package,
+                            alpm_pkg_t{
+                                    database->handle,
+                                    AlpmStubDatabaseKind::Local,
+                                    "",
+                                    "",
+                                    package_index,
+                                    true}});
+            record->strict_local_packages.push_back(std::move(package));
+            g_state.local_package_query_expectations.pop_front();
+            return &record->strict_local_packages.back()->package;
+        }
+        case PackageLookupMode::Absent:
+            g_state.local_package_query_expectations.pop_front();
+            set_handle_error(database->handle, ALPM_ERR_PKG_NOT_FOUND);
+            return nullptr;
+        case PackageLookupMode::Failure: {
+            const alpm_errno_t query_error = expectation.query_error;
+            g_state.local_package_query_expectations.pop_front();
+            set_handle_error(database->handle, query_error);
+            return nullptr;
+        }
+        case PackageLookupMode::NullWithoutError:
+            g_state.local_package_query_expectations.pop_front();
+            return nullptr;
+    }
+    fail_local_package_query_expectation(
+            "Local package query expectation has an unknown lookup mode.");
+}
 
 void append_alpm_event(
         const char* event,
@@ -194,6 +345,73 @@ bool environment_requests_unknown_reason(const char* package_name) noexcept {
            std::strcmp(unknown_reason_package, package_name) == 0;
 }
 
+void configure_foreign_inventory_from_environment() {
+    const char* state_file_path =
+            std::getenv("JPACKER_TEST_FOREIGN_PACKAGE_INVENTORY_STATE_FILE");
+    if(state_file_path == nullptr) return;
+
+    std::ifstream state_file(state_file_path);
+    if(!state_file) {
+        g_state.local_packages.clear();
+        g_state.package_cache_fails = true;
+        g_state.package_cache_error = ALPM_ERR_DB_OPEN;
+        return;
+    }
+
+    std::vector<LocalPackageState> packages;
+    std::string line;
+    while(std::getline(state_file, line)) {
+        if(line.empty()) continue;
+
+        std::istringstream fields(line);
+        std::string package_name;
+        std::string package_version;
+        std::string reason_text;
+        std::string unexpected_field;
+        if(!(fields >> package_name >> package_version) ||
+           ((fields >> reason_text) && (fields >> unexpected_field))) {
+            g_state.local_packages.clear();
+            g_state.package_cache_fails = true;
+            g_state.package_cache_error = ALPM_ERR_DB_OPEN;
+            return;
+        }
+
+        alpm_pkgreason_t reason = ALPM_PKG_REASON_EXPLICIT;
+        if(!reason_text.empty()) {
+            if(reason_text == "explicit") {
+                reason = ALPM_PKG_REASON_EXPLICIT;
+            } else if(reason_text == "dependency") {
+                reason = ALPM_PKG_REASON_DEPEND;
+            } else if(reason_text == "unknown") {
+                reason = ALPM_PKG_REASON_UNKNOWN;
+            } else {
+                g_state.local_packages.clear();
+                g_state.package_cache_fails = true;
+                g_state.package_cache_error = ALPM_ERR_DB_OPEN;
+                return;
+            }
+        }
+
+        packages.push_back(LocalPackageState{
+                std::move(package_name),
+                std::move(package_version),
+                reason,
+                false,
+                false});
+    }
+
+    if(state_file.bad()) {
+        g_state.local_packages.clear();
+        g_state.package_cache_fails = true;
+        g_state.package_cache_error = ALPM_ERR_DB_OPEN;
+        return;
+    }
+
+    g_state.local_packages = std::move(packages);
+    g_state.package_cache_empty = false;
+    g_state.package_cache_fails = false;
+}
+
 void configure_package_lookup_from_environment(
         const char* queried_package_name,
         PackageLookupMode& lookup_mode,
@@ -221,14 +439,15 @@ void configure_package_lookup_from_environment(
         if(package_name != queried_package_name) continue;
 
         lookup_mode = PackageLookupMode::Present;
-        g_state.package_name = std::move(package_name);
-        g_state.package_version = std::move(package_version);
-        g_state.package_reason =
+        LocalPackageState& package = primary_local_package_state();
+        package.name = std::move(package_name);
+        package.version = std::move(package_version);
+        package.reason =
                 environment_requests_unknown_reason(queried_package_name)
                         ? ALPM_PKG_REASON_UNKNOWN
                         : ALPM_PKG_REASON_EXPLICIT;
-        g_state.package_name_is_null = false;
-        g_state.package_version_is_null = false;
+        package.name_is_null = false;
+        package.version_is_null = false;
         return;
     }
 
@@ -365,21 +584,116 @@ void set_package_metadata(
         const std::string& name, const std::string& version,
         alpm_pkgreason_t reason) {
     g_state.package_lookup_mode = PackageLookupMode::Present;
-    g_state.package_name = name;
-    g_state.package_version = version;
-    g_state.package_reason = reason;
-    g_state.package_name_is_null = false;
-    g_state.package_version_is_null = false;
+    LocalPackageState& package = primary_local_package_state();
+    package.name = name;
+    package.version = version;
+    package.reason = reason;
+    package.name_is_null = false;
+    package.version_is_null = false;
+}
+
+void enqueue_local_package_query_present(
+        std::string expected_package_name,
+        std::string returned_name,
+        std::string version,
+        alpm_pkgreason_t reason) {
+    g_state.local_package_query_expectations.push_back(
+            LocalPackageQueryExpectation{
+                    std::move(expected_package_name),
+                    PackageLookupMode::Present,
+                    LocalPackageState{
+                            std::move(returned_name),
+                            std::move(version),
+                            reason,
+                            false,
+                            false},
+                    ALPM_ERR_OK});
+    g_state.local_package_query_strict_mode = true;
+}
+
+void enqueue_local_package_query_absent(std::string expected_package_name) {
+    g_state.local_package_query_expectations.push_back(
+            LocalPackageQueryExpectation{
+                    std::move(expected_package_name),
+                    PackageLookupMode::Absent,
+                    LocalPackageState{},
+                    ALPM_ERR_PKG_NOT_FOUND});
+    g_state.local_package_query_strict_mode = true;
+}
+
+void enqueue_local_package_query_failure(
+        std::string expected_package_name,
+        alpm_errno_t error) {
+    g_state.local_package_query_expectations.push_back(
+            LocalPackageQueryExpectation{
+                    std::move(expected_package_name),
+                    PackageLookupMode::Failure,
+                    LocalPackageState{},
+                    error});
+    g_state.local_package_query_strict_mode = true;
+}
+
+void require_local_package_query_expectations_consumed() {
+    if(g_state.local_package_query_expectation_failure != nullptr) {
+        throw std::logic_error(
+                g_state.local_package_query_expectation_failure);
+    }
+    if(!g_state.local_package_query_expectations.empty()) {
+        throw std::logic_error(
+                "Package metadata stub has unconsumed local package query expectations.");
+    }
+}
+
+void set_local_packages(const std::vector<LocalPackageMetadata>& packages) {
+    g_state.package_lookup_mode = PackageLookupMode::Present;
+    g_state.package_cache_empty = false;
+    g_state.local_packages.clear();
+    g_state.local_packages.reserve(packages.size());
+    for(const LocalPackageMetadata& package : packages) {
+        g_state.local_packages.push_back(LocalPackageState{
+                package.name,
+                package.version,
+                package.reason,
+                false,
+                false});
+    }
+}
+
+void set_local_package_cache_entry_null(std::size_t package_index) {
+    if(g_state.handles.empty()) return;
+    auto& cache_nodes = g_state.handles.back()->local_cache_nodes;
+    if(package_index >= cache_nodes.size()) return;
+    cache_nodes[package_index]->data = nullptr;
+}
+
+void set_local_package_name_null(std::size_t package_index) {
+    if(package_index >= g_state.local_packages.size()) return;
+    g_state.local_packages[package_index].name_is_null = true;
+}
+
+void set_local_package_version_null(std::size_t package_index) {
+    if(package_index >= g_state.local_packages.size()) return;
+    g_state.local_packages[package_index].version_is_null = true;
 }
 
 void set_null_package_name() {
     g_state.package_lookup_mode = PackageLookupMode::Present;
-    g_state.package_name_is_null = true;
+    primary_local_package_state().name_is_null = true;
 }
 
 void set_null_package_version() {
     g_state.package_lookup_mode = PackageLookupMode::Present;
-    g_state.package_version_is_null = true;
+    primary_local_package_state().version_is_null = true;
+}
+
+void preserve_error_on_next_local_database(alpm_errno_t stale_error) {
+    g_state.should_preserve_local_database_error = true;
+    g_state.preserved_local_database_error = stale_error;
+}
+
+void preserve_error_on_next_package_cache(alpm_errno_t stale_error) {
+    g_state.should_preserve_package_cache_error = true;
+    g_state.preserved_package_cache_error = stale_error;
 }
 
 void set_sync_database_register_failure(
@@ -411,6 +725,24 @@ void set_sync_database_cache_failure(
 
 void set_sync_database_empty_cache(const std::string& repository_name) {
     g_state.sync_database_behaviors[repository_name].cache_empty = true;
+}
+
+void preserve_error_on_next_sync_database_registration(
+        const std::string& repository_name,
+        alpm_errno_t stale_error) {
+    SyncDatabaseBehavior& behavior =
+            g_state.sync_database_behaviors[repository_name];
+    behavior.should_preserve_register_error = true;
+    behavior.preserved_register_error = stale_error;
+}
+
+void preserve_error_on_next_sync_database_cache(
+        const std::string& repository_name,
+        alpm_errno_t stale_error) {
+    SyncDatabaseBehavior& behavior =
+            g_state.sync_database_behaviors[repository_name];
+    behavior.should_preserve_cache_error = true;
+    behavior.preserved_cache_error = stale_error;
 }
 
 void set_repository_package_absent(
@@ -505,6 +837,13 @@ std::size_t package_query_call_count() {
     return g_state.package_query_calls;
 }
 
+std::size_t sync_package_cache_call_count(
+        const std::string& repository_name) {
+    auto behavior = g_state.sync_database_behaviors.find(repository_name);
+    if(behavior == g_state.sync_database_behaviors.end()) return 0;
+    return behavior->second.cache_calls;
+}
+
 std::size_t created_handle_count() {
     return g_state.handles.size();
 }
@@ -530,6 +869,10 @@ std::string last_initialize_database_path() {
 
 std::string last_queried_package_name() {
     return g_state.queried_package_name;
+}
+
+std::vector<std::string> local_package_query_history() {
+    return g_state.local_package_queries;
 }
 
 std::vector<SyncDatabaseRegistration> sync_database_registration_history() {
@@ -568,7 +911,16 @@ alpm_handle_t* alpm_initialize(
         return nullptr;
     }
 
-    auto record = std::make_unique<HandleRecord>(g_state.handles.size());
+    try {
+        configure_foreign_inventory_from_environment();
+    } catch(...) {
+        g_state.local_packages.clear();
+        g_state.package_cache_fails = true;
+        g_state.package_cache_error = ALPM_ERR_DB_OPEN;
+    }
+
+    auto record = std::make_unique<HandleRecord>(
+            g_state.handles.size(), g_state.local_packages.size());
     alpm_handle_t* handle = &record->handle;
     g_state.handles.push_back(std::move(record));
     if(error != nullptr) *error = ALPM_ERR_OK;
@@ -615,10 +967,15 @@ alpm_db_t* alpm_get_localdb(alpm_handle_t* handle) {
     ++g_state.local_database_calls;
     HandleRecord* record = record_for_handle(handle);
     if(record == nullptr) return nullptr;
-    set_handle_error(handle, ALPM_ERR_OK);
     if(!g_state.local_database_available) {
         set_handle_error(handle, g_state.local_database_error);
         return nullptr;
+    }
+    if(g_state.should_preserve_local_database_error) {
+        set_handle_error(handle, g_state.preserved_local_database_error);
+        g_state.should_preserve_local_database_error = false;
+    } else {
+        set_handle_error(handle, ALPM_ERR_OK);
     }
     return &record->database;
 }
@@ -646,7 +1003,12 @@ alpm_db_t* alpm_register_syncdb(
         return nullptr;
     }
 
-    set_handle_error(handle, ALPM_ERR_OK);
+    if(behavior.should_preserve_register_error) {
+        set_handle_error(handle, behavior.preserved_register_error);
+        behavior.should_preserve_register_error = false;
+    } else {
+        set_handle_error(handle, ALPM_ERR_OK);
+    }
     auto sync_database = std::make_unique<SyncDatabaseRecord>(handle, repository);
     alpm_db_t* database = &sync_database->database;
     handle_record->sync_databases.push_back(std::move(sync_database));
@@ -684,13 +1046,19 @@ alpm_list_t* alpm_db_get_pkgcache(alpm_db_t* database) {
         append_alpm_event("alpm sync-cache", database->repository_name.c_str());
         g_state.sync_database_operations.push_back(
                 "cache " + database->repository_name);
-        set_handle_error(database->handle, ALPM_ERR_OK);
 
         SyncDatabaseBehavior& behavior =
                 g_state.sync_database_behaviors[database->repository_name];
+        ++behavior.cache_calls;
         if(behavior.cache_fails) {
             set_handle_error(database->handle, behavior.cache_error);
             return nullptr;
+        }
+        if(behavior.should_preserve_cache_error) {
+            set_handle_error(database->handle, behavior.preserved_cache_error);
+            behavior.should_preserve_cache_error = false;
+        } else {
+            set_handle_error(database->handle, ALPM_ERR_OK);
         }
         if(behavior.cache_empty) return nullptr;
 
@@ -700,15 +1068,21 @@ alpm_list_t* alpm_db_get_pkgcache(alpm_db_t* database) {
 
     ++g_state.package_cache_calls;
     if(database == nullptr) return nullptr;
-    set_handle_error(database->handle, ALPM_ERR_OK);
     if(g_state.package_cache_fails) {
         set_handle_error(database->handle, g_state.package_cache_error);
         return nullptr;
     }
+    if(g_state.should_preserve_package_cache_error) {
+        set_handle_error(database->handle, g_state.preserved_package_cache_error);
+        g_state.should_preserve_package_cache_error = false;
+    } else {
+        set_handle_error(database->handle, ALPM_ERR_OK);
+    }
     if(g_state.package_cache_empty) return nullptr;
 
     HandleRecord* record = record_for_handle(database->handle);
-    return record == nullptr ? nullptr : &record->cache_node;
+    if(record == nullptr || record->local_cache_nodes.empty()) return nullptr;
+    return record->local_cache_nodes.front().get();
 }
 
 alpm_pkg_t* alpm_db_get_pkg(alpm_db_t* database, const char* name) {
@@ -717,6 +1091,8 @@ alpm_pkg_t* alpm_db_get_pkg(alpm_db_t* database, const char* name) {
         const std::string query_identity =
                 database->repository_name + "/" + package_name;
         append_alpm_event("alpm sync-query", query_identity.c_str());
+        g_state.sync_database_operations.push_back(
+                "query " + query_identity);
         g_state.repository_package_queries.push_back(
                 package_metadata_test_stub::RepositoryPackageQuery{
                         database->repository_name, package_name});
@@ -757,7 +1133,8 @@ alpm_pkg_t* alpm_db_get_pkg(alpm_db_t* database, const char* name) {
                             database->handle,
                             AlpmStubDatabaseKind::Sync,
                             database->repository_name,
-                            package_name});
+                            package_name,
+                            0});
                 }
                 return package.get();
             }
@@ -782,6 +1159,12 @@ alpm_pkg_t* alpm_db_get_pkg(alpm_db_t* database, const char* name) {
         set_handle_error(database->handle, ALPM_ERR_OK);
     }
     g_state.queried_package_name = name == nullptr ? "" : name;
+    g_state.local_package_queries.push_back(g_state.queried_package_name);
+
+    if(g_state.local_package_query_strict_mode) {
+        return consume_local_package_query_expectation(
+                database, g_state.queried_package_name);
+    }
 
     if(name == nullptr || name[0] == '\0') {
         set_handle_error(database->handle, ALPM_ERR_WRONG_ARGS);
@@ -801,7 +1184,8 @@ alpm_pkg_t* alpm_db_get_pkg(alpm_db_t* database, const char* name) {
     switch(lookup_mode) {
         case PackageLookupMode::Present: {
             HandleRecord* record = record_for_handle(database->handle);
-            return record == nullptr ? nullptr : &record->package;
+            if(record == nullptr || record->local_packages.empty()) return nullptr;
+            return record->local_packages.front().get();
         }
         case PackageLookupMode::Absent:
             set_handle_error(database->handle, ALPM_ERR_PKG_NOT_FOUND);
@@ -824,15 +1208,17 @@ const char* alpm_pkg_get_name(alpm_pkg_t* package) {
     }
 
     set_handle_error(package->handle, ALPM_ERR_OK);
-    if(g_state.package_name_is_null) return nullptr;
-    return g_state.package_name.c_str();
+    LocalPackageState* package_state = local_package_state(package);
+    if(package_state == nullptr || package_state->name_is_null) return nullptr;
+    return package_state->name.c_str();
 }
 
 const char* alpm_pkg_get_version(alpm_pkg_t* package) {
     if(package == nullptr) return nullptr;
     set_handle_error(package->handle, ALPM_ERR_OK);
-    if(g_state.package_version_is_null) return nullptr;
-    return g_state.package_version.c_str();
+    LocalPackageState* package_state = local_package_state(package);
+    if(package_state == nullptr || package_state->version_is_null) return nullptr;
+    return package_state->version.c_str();
 }
 
 off_t alpm_pkg_get_size(alpm_pkg_t* package) {
@@ -850,7 +1236,10 @@ off_t alpm_pkg_get_isize(alpm_pkg_t* package) {
 alpm_pkgreason_t alpm_pkg_get_reason(alpm_pkg_t* package) {
     if(package == nullptr) return static_cast<alpm_pkgreason_t>(-1);
     set_handle_error(package->handle, ALPM_ERR_OK);
-    return g_state.package_reason;
+    LocalPackageState* package_state = local_package_state(package);
+    return package_state == nullptr
+            ? static_cast<alpm_pkgreason_t>(-1)
+            : package_state->reason;
 }
 
 } // extern "C"

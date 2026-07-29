@@ -9,9 +9,12 @@
 #include <algorithm>
 #include <exception>
 #include <iostream>
+#include <sstream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <variant>
+#include <vector>
 
 namespace {
 
@@ -93,6 +96,67 @@ void run_repository_metadata_smoke_test() {
             "missing repository package was not reported as not found");
 }
 
+struct PacmanForeignPackage {
+    std::string name;
+    std::string version;
+};
+
+std::vector<PacmanForeignPackage> query_pacman_foreign_packages() {
+    CapturedCommandResult result =
+            capture_command_output_raw("pacman -Qm 2>/dev/null");
+    if(result.exit_code != 0) {
+        throw std::runtime_error(
+                "pacman -Qm failed with exit code " +
+                std::to_string(result.exit_code));
+    }
+
+    std::vector<PacmanForeignPackage> packages;
+    std::stringstream                 output_stream(result.output);
+    std::string                       line;
+    while(std::getline(output_stream, line)) {
+        if(line.empty()) {
+            throw std::runtime_error("pacman -Qm returned an empty output line");
+        }
+
+        std::stringstream line_stream(line);
+        PacmanForeignPackage package;
+        std::string          unexpected_field;
+        if(!(line_stream >> package.name >> package.version) ||
+           (line_stream >> unexpected_field)) {
+            throw std::runtime_error("pacman -Qm returned a malformed output line");
+        }
+        packages.push_back(std::move(package));
+    }
+    return packages;
+}
+
+void run_foreign_package_inventory_compatibility_test() {
+    std::vector<PacmanForeignPackage> pacman_packages =
+            query_pacman_foreign_packages();
+    PacmanRepositoryConfiguration configuration =
+            resolve_pacman_repository_configuration();
+    ForeignPackageInventoryResult result =
+            query_foreign_package_inventory(configuration);
+    if(const auto* failure = std::get_if<PackageMetadataFailure>(&result)) {
+        throw std::runtime_error(
+                "foreign package inventory failed: " + failure->diagnostic);
+    }
+
+    const ForeignPackageInventory& inventory =
+            std::get<ForeignPackageInventory>(result);
+    expect(
+            inventory.size() == pacman_packages.size(),
+            "foreign package inventory count differs from pacman -Qm");
+    for(std::size_t index = 0; index < inventory.size(); ++index) {
+        expect(
+                inventory[index].name == pacman_packages[index].name,
+                "foreign package inventory name/order differs from pacman -Qm");
+        expect(
+                inventory[index].version == pacman_packages[index].version,
+                "foreign package inventory version differs from pacman -Qm");
+    }
+}
+
 } // namespace
 
 int main() {
@@ -100,6 +164,7 @@ int main() {
         test_raw_capture_preserves_boundary_whitespace();
         run_pacman_metadata_smoke_test();
         run_repository_metadata_smoke_test();
+        run_foreign_package_inventory_compatibility_test();
     } catch(const std::exception& error) {
         std::cerr << error.what() << '\n';
         return 1;

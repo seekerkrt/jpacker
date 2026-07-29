@@ -246,9 +246,9 @@ PreparedPrivateCacheRootState prepare_private_cache_root_path() {
     fs::path root_path = absolute_cache_path(get_cache_dir());
     fs::path parent_path = root_path.parent_path();
 
-    // POLICY(#242): legacy root factoryは触らず、private factoryだけがfinal
-    // componentをmkdirat(0700)する。上位parentの作成は既存no-symlink契約で再検証する。
-    require_no_symlink_components(parent_path, false);
+    // POLICY(#242): legacy/privateのどちらが先でも、final componentは
+    // mkdirat(0700)で作る。上位parentの作成は既存no-symlink契約で再検証する。
+    require_no_symlink_components(root_path, false);
     std::error_code parent_error;
     fs::create_directories(parent_path, parent_error);
     if(parent_error) {
@@ -256,7 +256,7 @@ PreparedPrivateCacheRootState prepare_private_cache_root_path() {
                 "Failed to create jpacker cache parent " +
                 parent_path.string() + ": " + parent_error.message());
     }
-    require_no_symlink_components(parent_path, false);
+    require_no_symlink_components(root_path, false);
     fs::file_status parent_status = cache_symlink_status(parent_path, root_path);
     if(!fs::is_directory(parent_status)) {
         throw std::runtime_error(
@@ -572,8 +572,10 @@ void require_private_cache_root_identity_for_test(
 #endif
 
 ValidatedCacheRoot prepare_trusted_cache_root() {
-    ValidatedCacheRootState root = validate_cache_root_path(get_cache_dir(), true);
-    return ValidatedCacheRoot(std::move(root.path), std::move(root.canonical_path));
+    PreparedPrivateCacheRootState prepared = prepare_private_cache_root_path();
+    return ValidatedCacheRoot(
+            std::move(prepared.trusted_state.path),
+            std::move(prepared.trusted_state.canonical_path));
 }
 
 ValidatedCacheRoot require_unchanged_cache_root(const ValidatedCacheRoot& expected_root) {

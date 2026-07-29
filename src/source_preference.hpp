@@ -2,8 +2,13 @@
 
 #include "source_environment.hpp"
 
+#include <cstddef>
 #include <filesystem>
+#include <optional>
 #include <string>
+#include <system_error>
+#include <variant>
+#include <vector>
 
 // source preferenceのread時messageはconsumerが表示し、moduleはLoggerへ依存しない。
 using SourcePreferenceLoadHandler = void (*)(const std::filesystem::path& path);
@@ -17,7 +22,59 @@ std::filesystem::path source_preference_entry_path(const std::string& package_na
 // POLICY: sortやpackage validationを加えず、consumer固有の列挙policyを維持する。
 std::filesystem::directory_iterator source_preference_entries();
 
+// system/source upgrade preparationが最初のdirectory iteration順をowned化する。
+// regular-file判定は列挙時点の観測値であり、strict readerが実体を再検証する。
+struct SourcePreferenceEntrySnapshot {
+    std::size_t           original_index = 0;
+    std::filesystem::path entry_path;
+    std::string           package_name;
+    bool                  is_regular_file = false;
+};
+
+struct SourcePreferenceDirectorySnapshot {
+    bool                                       root_exists = false;
+    std::vector<SourcePreferenceEntrySnapshot> entries;
+};
+
+SourcePreferenceDirectorySnapshot snapshot_source_preference_directory();
+
 bool is_force_source(const std::string& package_name);
+
+struct SourcePreferenceAbsent {
+    bool operator==(const SourcePreferenceAbsent&) const = default;
+};
+
+struct SourcePreferenceLoaded {
+    std::filesystem::path entry_path;
+    SourceBuildEnvironment environment;
+    std::vector<std::string> warnings;
+};
+
+enum class SourcePreferenceFailureKind {
+    StatusUnavailable,
+    UnsupportedFileType,
+    OpenFailed,
+    ReadFailed,
+};
+
+// Status/Open/Read failureはsystem_error、unsupported typeはobserved_file_typeを正本にする。
+struct SourcePreferenceFailure {
+    SourcePreferenceFailureKind kind;
+    std::filesystem::path entry_path;
+    std::optional<std::error_code> system_error;
+    std::optional<std::filesystem::file_type> observed_file_type;
+    // diagnosticは表示用の補助情報であり、control flowはkindとtyped fieldで行う。
+    std::string diagnostic;
+};
+
+using StrictSourcePreferenceResult = std::variant<
+        SourcePreferenceAbsent,
+        SourcePreferenceLoaded,
+        SourcePreferenceFailure>;
+
+// Absentはentryが実在しない場合だけ。regular fileは全byte read後にowned resultへparseする。
+StrictSourcePreferenceResult read_source_preference_strict(
+        const std::string& package_name);
 
 SourceBuildEnvironment get_package_env(
         const std::string& package_name, SourcePreferenceLoadHandler on_load,
@@ -26,3 +83,17 @@ SourceBuildEnvironment get_package_env(
 // list-src向けに、quote-aware comment除去後のnonblank lineをread順で通知する。
 void read_source_preference_entry(
         const std::filesystem::path& entry_path, SourcePreferenceLineHandler on_line);
+
+#ifdef JPACKER_ENABLE_SOURCE_PREFERENCE_TEST_HOOKS
+enum class SourcePreferenceTestFailurePoint {
+    Status,
+    Open,
+    Read,
+};
+
+// Strict readerの一回限りのfailureだけを注入し、production IO APIは差し替えない。
+void fail_next_source_preference_operation_for_test(
+        const std::string& package_name,
+        SourcePreferenceTestFailurePoint failure_point);
+void reset_source_preference_test_hooks();
+#endif

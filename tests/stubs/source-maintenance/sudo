@@ -17,7 +17,22 @@ is_typed_pacman_install() {
             shift
             ;;
     esac
-    [ "$#" -eq 2 ] && [ "${1:-}" = "--" ] && [ -n "${2:-}" ]
+    [ "$#" -ge 2 ] && [ "${1:-}" = "--" ] || return 1
+    shift
+    for install_artifact in "$@"; do
+        [ -n "$install_artifact" ] || return 1
+    done
+}
+
+install_artifacts() {
+    after_separator=0
+    for install_argument in "$@"; do
+        if [ "$after_separator" -eq 1 ]; then
+            printf '%s\n' "$install_argument"
+        elif [ "$install_argument" = "--" ]; then
+            after_separator=1
+        fi
+    done
 }
 
 require_source_maintenance_repo_install_argv() {
@@ -133,17 +148,15 @@ if is_typed_pacman_install "$@"; then
         /usr/bin/cp -- "$state_after_success_file" "$metadata_state_file" || exit 1
     fi
 
-    installed_artifact=
-    for install_argument in "$@"; do
-        installed_artifact=$install_argument
-    done
+    installed_artifacts=$(install_artifacts "$@") || exit 1
+    installed_artifact=$(printf '%s\n' "$installed_artifacts" | /usr/bin/sed -n '1p') || exit 1
     install_success_log=${JPACKER_TEST_PACMAN_U_SUCCESS_LOG:-}
     if [ -n "$install_success_log" ]; then
         if [ ! -f "$install_success_log" ] || [ -L "$install_success_log" ] ||
            [ "${install_success_log%/*}" != "$XDG_CACHE_HOME" ]; then
             exit 1
         fi
-        printf '%s\n' "$installed_artifact" > "$install_success_log" || exit 1
+        printf '%s\n' "$installed_artifacts" > "$install_success_log" || exit 1
     fi
 
     if [ "${JPACKER_TEST_REPLACE_WORKSPACE_AFTER_PACMAN_U:-0}" = "1" ]; then

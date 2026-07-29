@@ -28,6 +28,14 @@ require_text() {
         fail "$file is missing required text: $expected"
 }
 
+reject_pattern() {
+    file=$1
+    rejected=$2
+    if grep -E -- "$rejected" "$file" >/dev/null; then
+        fail "$file contains version-dependent current-series wording: $rejected"
+    fi
+}
+
 require_value_text() {
     label=$1
     value=$2
@@ -138,18 +146,36 @@ do
 done
 
 require_text docs/LICENSING.md \
-    "The current v1.15.0 development series and v1.15.0 or later releases are distributed under GPL-3.0-or-later."
+    "The current GPL-licensed development series and v1.15.0 or later releases are distributed under GPL-3.0-or-later."
 require_text docs/LICENSING.md \
     "jpacker v1.14.0 and earlier releases were distributed under the MIT License."
 require_text docs/LICENSING.md \
     "Those historical releases remain available under their original license."
-require_text README.md '現在のv1.15.0開発系列とv1.15.0以降のjpackerは、`GPL-3.0-or-later`で提供します。'
+require_text README.md '現在のGPLライセンス開発系列とv1.15.0以降のjpackerは、`GPL-3.0-or-later`で提供します。'
 require_text README.md "v1.14.0以前のreleaseはMIT License"
-require_text README.md 'The current v1.15.0 development series and v1.15.0 or later releases are distributed under `GPL-3.0-or-later`.'
+require_text README.md 'The current GPL-licensed development series and v1.15.0 or later releases are distributed under `GPL-3.0-or-later`.'
 require_text README.md "jpacker v1.14.0 and earlier releases"
 require_text README.md "[LICENSE](LICENSE)"
 require_text README.md "[docs/LICENSING.md](docs/LICENSING.md)"
 require_text README.md "[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)"
+require_text THIRD_PARTY_NOTICES.md \
+    "the current GPL-licensed jpacker development series"
+require_text docs/DECISIONS.md \
+    '現在のGPLライセンス開発系列とv1.15.0以降のjpackerは`GPL-3.0-or-later`で提供する。'
+require_text docs/DECISIONS.md \
+    'The current GPL-licensed development series and v1.15.0 or later jpacker releases are distributed under `GPL-3.0-or-later`.'
+
+for current_series_file in \
+    README.md \
+    THIRD_PARTY_NOTICES.md \
+    docs/DECISIONS.md \
+    docs/LICENSING.md
+do
+    reject_pattern "$current_series_file" \
+        'current( jpacker)? v[0-9]+\.[0-9]+\.[0-9]+ development series'
+    reject_pattern "$current_series_file" \
+        '現在のv[0-9]+\.[0-9]+\.[0-9]+開発系列'
+done
 pass "project notice and README preserve the version boundary"
 
 for heading in \

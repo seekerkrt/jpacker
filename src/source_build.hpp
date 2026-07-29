@@ -2,12 +2,37 @@
 
 #include "dependency_plan.hpp"
 #include "package_metadata.hpp"
+#include "separated_package_base_source_build.hpp"
 #include "source_environment.hpp"
 
 #include <optional>
 #include <string>
+#include <vector>
 
 struct AppConfig;
+
+enum class SourceBuildExecutionStatus {
+    Installed,
+    SkippedAsNeeded,
+    UpToDate,
+    UpdateStatusUnknownSkipped,
+};
+
+enum class SourceBuildUpdateStatusUnknownSkipReason {
+    NoConfirm,
+    NonInteractiveStdin,
+    UserDeclined,
+};
+
+// generic source-buildの正常終了を、package transactionの有無まで潰さず返す。
+// diagnosticはCLI出力の解析用ではなく、上位phaseがowned detailを保持するための値。
+struct SourceBuildExecutionResult {
+    SourceBuildExecutionStatus status =
+            SourceBuildExecutionStatus::UpdateStatusUnknownSkipped;
+    std::optional<SourceBuildUpdateStatusUnknownSkipReason>
+            update_status_unknown_skip_reason;
+    std::string diagnostic;
+};
 
 // upgrade baselineの有無と、snapshot時点の未installを別状態として保持する。
 struct SourceUpdateBaseline {
@@ -32,7 +57,24 @@ struct SourceBuildRequest {
     bool        needed = false;
 };
 
-void execute_source_build(
+SourceBuildExecutionResult execute_source_build_typed(
+        const SourceBuildRequest& request,
+        DesiredInstallReason desired_reason,
+        const PacmanDatabasePaths& database_paths,
+        const AppConfig& config);
+
+// AUR PackageBase execution向け。ordered required_targetsを一つのfresh
+// workspace/transactionへ渡し、multipleではrequest.package_nameを使わない。
+PackageBaseSourceBuildExecutionResult
+execute_source_build_package_base_typed(
+        const SourceBuildRequest& request,
+        const std::vector<RequiredPackageArtifactTarget>& required_targets,
+        const PacmanDatabasePaths& database_paths,
+        const AppConfig& config);
+
+// generic only-if-updated経路がinstall前に正常skipした場合だけnulloptを返す。
+// artifact transaction成功後はpackage stateのtyped outcomeを返すlegacy wrapper。
+std::optional<ArtifactInstallExecutionOutcome> execute_source_build(
         const SourceBuildRequest& request,
         DesiredInstallReason desired_reason,
         const PacmanDatabasePaths& database_paths,

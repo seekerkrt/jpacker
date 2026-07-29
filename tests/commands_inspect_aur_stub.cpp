@@ -51,9 +51,11 @@ AurPackageInfo package_info(
 
 bool is_graph_scenario(const std::string& scenario) {
     return scenario != "foreign-fallback" &&
+           scenario != "foreign-fallback-schema-failure" &&
            scenario != "foreign-ordinary-failure" &&
            scenario != "foreign-schema-failure" &&
-           scenario != "foreign-order";
+           scenario != "foreign-order" &&
+           scenario != "foreign-classification";
 }
 
 bool is_numbered_foreign_package(const std::string& package_name) {
@@ -132,7 +134,8 @@ std::optional<AurPackageInfo> graph_info(const std::string& package_name) {
                 package_name,
                 {"same-package", "identity-same-virtual", "different-package",
                  "identity-different-virtual", "same-semantic",
-                 "identity-stale-virtual", "identity-aur-virtual",
+                 "identity-stale-virtual",
+                 "identity-repository-aur-virtual", "identity-aur-virtual",
                  "identity-ambiguous-virtual", "identity-unknown-virtual",
                  "identity-aur-child"});
         info.MakeDepends = {"same-semantic"};
@@ -175,6 +178,7 @@ std::optional<AurPackageInfo> graph_info(const std::string& package_name) {
     if(package_name == "identity-same-virtual" ||
        package_name == "identity-different-virtual" ||
        package_name == "identity-stale-virtual" ||
+       package_name == "identity-repository-aur-virtual" ||
        package_name == "identity-aur-virtual" ||
        package_name == "identity-ambiguous-virtual" ||
        package_name == "identity-unknown-virtual" ||
@@ -198,6 +202,11 @@ std::map<std::string, AurPackageInfo> foreign_info_many(
                    package_names, 1, "foreign-101", "foreign-101")) {
             return {{"foreign-101", package_info("foreign-101")}};
         }
+    } else if(scenario == "foreign-fallback-schema-failure") {
+        if(is_expected_numbered_batch(
+                   package_names, 100, "foreign-001", "foreign-100")) {
+            return {};
+        }
     } else if(scenario == "foreign-ordinary-failure") {
         if(is_expected_numbered_batch(
                    package_names, 100, "foreign-001", "foreign-100")) {
@@ -219,6 +228,12 @@ std::map<std::string, AurPackageInfo> foreign_info_many(
             return {
                     {"foreign-order-z", package_info("foreign-order-z")},
                     {"foreign-order-a", package_info("foreign-order-a")}};
+        }
+    } else if(scenario == "foreign-classification") {
+        const std::vector<std::string> expected = {
+                "foreign-up-to-date", "foreign-non-aur"};
+        if(package_names == expected) {
+            return {{"foreign-up-to-date", package_info("foreign-up-to-date")}};
         }
     }
 
@@ -262,16 +277,16 @@ std::vector<std::string> AurClient::search_names_by_provides(
             "Unexpected inspection search-provides call: " + provided_name);
 }
 
+std::vector<std::string> AurClient::search_names_by_provides_strict(
+        const std::string& provided_name) {
+    return search_names_by_provides(provided_name);
+}
+
 std::optional<AurPackageInfo> AurClient::info(const std::string& package_name) {
     append_command_log("aur info " + package_name);
     const std::string scenario = inspection_scenario();
 
     if(is_graph_scenario(scenario)) return graph_info(package_name);
-
-    if(scenario == "foreign-fallback" && is_numbered_foreign_package(package_name) &&
-       package_name != "foreign-101") {
-        return package_info(package_name);
-    }
 
     throw std::runtime_error(
             "Unexpected inspection info call for scenario " + scenario + ": " +
@@ -280,7 +295,21 @@ std::optional<AurPackageInfo> AurClient::info(const std::string& package_name) {
 
 std::optional<AurPackageInfo> AurClient::info_strict(const std::string& package_name) {
     append_command_log("aur info-strict " + package_name);
-    throw std::runtime_error("Unexpected inspection info_strict call: " + package_name);
+    const std::string scenario = inspection_scenario();
+
+    if(scenario == "foreign-fallback" &&
+       is_numbered_foreign_package(package_name) &&
+       package_name != "foreign-101") {
+        return package_info(package_name);
+    }
+    if(scenario == "foreign-fallback-schema-failure" &&
+       package_name == "foreign-001") {
+        throw AurRpcResponseError("schema fallback failure");
+    }
+
+    throw std::runtime_error(
+            "Unexpected inspection info_strict call for scenario " + scenario +
+            ": " + package_name);
 }
 
 std::map<std::string, AurPackageInfo> AurClient::info_many(

@@ -2,6 +2,7 @@
 set -eu
 
 test_binary=$1
+envelope_test_binary=$2
 repo_root=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
 JPACKER_TEST_REPOSITORY_ROOT=$repo_root
 export JPACKER_TEST_REPOSITORY_ROOT
@@ -19,8 +20,11 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 port_file=$tmp_dir/port
+request_log=$tmp_dir/requests.log
+: > "$request_log"
 python3 "$repo_root/tests/aur_rpc_fixture_server.py" \
-    "$repo_root/tests/fixtures/aur-rpc-validation.json" "$port_file" &
+    "$repo_root/tests/fixtures/aur-rpc-validation.json" "$port_file" \
+    "$request_log" &
 server_pid=$!
 
 attempt=0
@@ -50,9 +54,14 @@ setup_case() {
 
     mkdir -p "$case_dir/home" "$case_dir/xdg-cache"
     : > "$command_log"
+    : > "$request_log"
+    inventory_state=$case_dir/foreign-inventory.state
+    : > "$inventory_state"
     export HOME=$case_dir/home
     export XDG_CACHE_HOME=$case_dir/xdg-cache
     export JPACKER_TEST_COMMAND_LOG=$command_log
+    export JPACKER_TEST_FOREIGN_PACKAGE_INVENTORY_STATE_FILE=$inventory_state
+    export JPACKER_TEST_PACMAN_CONF_REPOSITORY_LIST=core
     export JPACKER_TEST_PACMAN_EXIT_CODE=1
     export JPACKER_TEST_SUDO_EXIT_CODE=99
     unset JPACKER_TEST_PACMAN_QM_OUTPUT
@@ -63,6 +72,8 @@ setup_case() {
     unset JPACKER_TEST_GIT_CLONE_SYMLINK_TARGET
     unset JPACKER_TEST_GIT_CLONE_FIXTURE_DIR
     unset JPACKER_TEST_MAKEPKG_EXIT_CODE
+    unset JPACKER_TEST_MAKEPKG_ARTIFACT_IDENTITIES
+    unset JPACKER_TEST_AUR_RPC_ENCODE_FAILURE_PACKAGE
 }
 
 run_ok() {
@@ -79,6 +90,26 @@ run_fail() {
     : > "$command_log"
     if "$test_binary" "$@" > "$output_file" 2>&1; then
         echo "expected command to fail: $*" >&2
+        sed -n '1,240p' "$output_file" >&2
+        cat "$command_log" >&2
+        exit 1
+    fi
+}
+
+run_envelope_ok() {
+    : > "$command_log"
+    if ! "$envelope_test_binary" "$@" > "$output_file" 2>&1; then
+        echo "expected strict envelope command to succeed: $*" >&2
+        sed -n '1,240p' "$output_file" >&2
+        cat "$command_log" >&2
+        exit 1
+    fi
+}
+
+run_envelope_fail() {
+    : > "$command_log"
+    if "$envelope_test_binary" "$@" > "$output_file" 2>&1; then
+        echo "expected strict envelope command to fail: $*" >&2
         sed -n '1,240p' "$output_file" >&2
         cat "$command_log" >&2
         exit 1
@@ -122,9 +153,39 @@ assert_no_mutation_commands() {
     fi
 }
 
+assert_no_pacman_command() {
+    if grep -E '^pacman( |$)' "$command_log" >/dev/null; then
+        echo "foreign update validation unexpectedly ran pacman" >&2
+        cat "$command_log" >&2
+        exit 1
+    fi
+}
+
+set_foreign_inventory() {
+    printf '%s\n' "$1" > "$inventory_state"
+}
+
 assert_command_log_empty() {
     if [ -s "$command_log" ]; then
         echo "external command ran before AUR RPC schema preflight completed" >&2
+        cat "$command_log" >&2
+        exit 1
+    fi
+}
+
+assert_request_count() {
+    expected=$1
+    actual=$(wc -l < "$request_log")
+    if [ "$actual" -ne "$expected" ]; then
+        echo "unexpected AUR fixture request count: expected $expected, got $actual" >&2
+        cat "$request_log" >&2
+        exit 1
+    fi
+}
+
+assert_no_version_comparison() {
+    if grep -E '^vercmp( |$)' "$command_log" >/dev/null; then
+        echo "AUR encode failure returned a partial batch result" >&2
         cat "$command_log" >&2
         exit 1
     fi
@@ -151,6 +212,102 @@ prepare_source_preferences() {
     done
     export JPACKER_TEST_PACKAGE_BUILD_DIR=$preference_dir
 }
+
+# strict APIだけがAUR RPC v5 envelopeを検証する。legacy APIのpermissive境界は維持する。
+setup_case strict-envelope-valid-info
+run_envelope_ok info-strict valid-minimal
+assert_contains "valid-minimal" "$output_file"
+assert_command_log_empty
+
+setup_case write-callback-contract
+run_envelope_ok write-callback-contract unused
+assert_contains "write-callback-contract-ok" "$output_file"
+assert_command_log_empty
+
+setup_case write-callback-exception
+run_envelope_fail write-failure-strict valid-minimal
+assert_contains "AUR request failed:" "$output_file"
+assert_not_contains "AUR request returned an empty response." "$output_file"
+assert_not_contains "valid-minimal" "$output_file"
+assert_command_log_empty
+
+setup_case info-many-normal
+run_envelope_ok info-many-normal unused
+assert_contains "valid-minimal" "$output_file"
+assert_contains "arrays-null" "$output_file"
+assert_request_count 1
+
+setup_case info-many-encode-failure-first
+run_envelope_fail info-many-fail-first unused
+assert_contains "Failed to encode AUR package name: valid-minimal" "$output_file"
+assert_not_contains "arrays-null" "$output_file"
+assert_request_count 0
+
+setup_case info-many-encode-failure-middle
+run_envelope_fail info-many-fail-middle unused
+assert_contains "Failed to encode AUR package name: arrays-null" "$output_file"
+assert_not_contains "valid-minimal" "$output_file"
+assert_not_contains "arrays-empty" "$output_file"
+assert_request_count 0
+
+setup_case strict-envelope-valid-not-found
+run_envelope_ok info-strict strict-not-found
+assert_contains "not-found" "$output_file"
+assert_command_log_empty
+
+setup_case strict-envelope-valid-search
+run_envelope_ok provides-strict virtual-one
+assert_contains "provider-one" "$output_file"
+assert_command_log_empty
+
+setup_case strict-envelope-valid-empty-search
+run_envelope_ok provides-strict strict-search-empty
+if [ -s "$output_file" ]; then
+    echo "valid empty strict provider search returned output" >&2
+    cat "$output_file" >&2
+    exit 1
+fi
+assert_command_log_empty
+
+while IFS='|' read -r package detail; do
+    setup_case "strict-envelope-$package"
+    run_envelope_fail info-strict "$package"
+    assert_validation_error "package info $package"
+    assert_contains "$detail" "$output_file"
+    assert_command_log_empty
+done <<'CASES'
+strict-error-string|field error reported "fixture AUR RPC failure"
+strict-error-number|field error expected string, got number
+strict-version-missing|field version expected integer, got missing
+strict-version-string|field version expected integer, got string
+strict-version-unsupported|field version expected 5, got 4
+strict-type-missing|field type expected string, got missing
+strict-type-number|field type expected string, got number
+strict-type-wrong|field type expected "multiinfo", got "search"
+strict-resultcount-missing|field resultcount expected integer, got missing
+strict-resultcount-string|field resultcount expected integer, got string
+strict-resultcount-negative|field resultcount expected non-negative integer, got -1
+strict-resultcount-mismatch|field resultcount was 1 but results contained 0 entries
+strict-results-missing|field results expected array, got missing
+strict-results-object|field results expected array, got object
+strict-info-multiple|expected zero or one result, got 2
+CASES
+
+setup_case strict-envelope-search-type
+run_envelope_fail provides-strict strict-search-wrong-type
+assert_validation_error "provides search strict-search-wrong-type"
+assert_contains 'field type expected "search", got "multiinfo"' "$output_file"
+assert_command_log_empty
+
+setup_case legacy-envelope-info
+run_envelope_ok info-legacy legacy-envelope-permissive
+assert_contains "not-found" "$output_file"
+assert_command_log_empty
+
+setup_case legacy-envelope-search
+run_envelope_ok provides-legacy strict-search-wrong-type
+assert_contains "provider-one" "$output_file"
+assert_command_log_empty
 
 # missing/null/emptyはoptional arrayの正常契約。全fieldを同じentryで通す。
 for package in valid-minimal arrays-null arrays-empty arrays-valid valid-split; do
@@ -320,30 +477,45 @@ assert_command_log_empty
 
 # info_manyはrequested setとのmappingとduplicateを厳格に確認する。
 setup_case multi-duplicate
-JPACKER_TEST_PACMAN_QM_OUTPUT='multi-dup-a 1.0-1
+set_foreign_inventory 'multi-dup-a 1.0-1
 multi-dup-b 1.0-1'
-export JPACKER_TEST_PACMAN_QM_OUTPUT
 run_fail -Qua
 assert_validation_error multiinfo
 assert_contains "duplicate response Name multi-dup-a" "$output_file"
 assert_no_mutation_commands
+assert_no_pacman_command
 
 setup_case multi-unrequested
-JPACKER_TEST_PACMAN_QM_OUTPUT='multi-unrequested-a 1.0-1
+set_foreign_inventory 'multi-unrequested-a 1.0-1
 multi-unrequested-b 1.0-1'
-export JPACKER_TEST_PACMAN_QM_OUTPUT
 run_fail -Qua
 assert_validation_error multiinfo
 assert_contains "response Name multi-outside was not requested" "$output_file"
 assert_no_mutation_commands
+assert_no_pacman_command
 
 setup_case multi-missing-allowed
-JPACKER_TEST_PACMAN_QM_OUTPUT='multi-present 1.0-1
+set_foreign_inventory 'multi-present 1.0-1
 multi-missing 1.0-1'
-export JPACKER_TEST_PACMAN_QM_OUTPUT
 run_ok -Qua
 assert_contains "Foreign package not found in AUR: multi-missing" "$output_file"
 assert_no_mutation_commands
+assert_no_pacman_command
+
+setup_case multi-encode-failure
+set_foreign_inventory 'valid-minimal 0.9-1
+arrays-null 0.9-1
+arrays-empty 0.9-1'
+export JPACKER_TEST_AUR_RPC_ENCODE_FAILURE_PACKAGE=arrays-null
+run_fail -Qua
+unset JPACKER_TEST_AUR_RPC_ENCODE_FAILURE_PACKAGE
+assert_contains \
+    "Failed to fetch AUR info: Failed to encode AUR package name: arrays-null" \
+    "$output_file"
+assert_request_count 0
+assert_no_version_comparison
+assert_no_mutation_commands
+assert_no_pacman_command
 
 # 正常schemaの主要CLIと既存のprovider/split/cycle/unresolved guardをsmoke確認する。
 setup_case normal-deps
@@ -373,12 +545,20 @@ assert_contains "unresolved dependencies remain" "$output_file"
 
 setup_case split
 run_ok plan valid-split
-assert_contains "split package install target selection is not implemented" "$output_file"
+assert_contains "Split package install targets:" "$output_file"
+assert_contains "valid-split (base: valid-split-base)" "$output_file"
+assert_not_contains "Plan status: incomplete" "$output_file"
 
 setup_case normal-fetch
 run_ok fetch valid-root
 assert_command "git clone https://aur.archlinux.org/valid-dep.git valid-dep"
 assert_command "git clone https://aur.archlinux.org/valid-root.git valid-root"
+
+setup_case split-fetch
+run_ok fetch valid-split
+assert_command "git clone https://aur.archlinux.org/valid-split-base.git valid-split-base"
+assert_not_contains "makepkg " "$command_log"
+assert_not_contains "sudo " "$command_log"
 
 setup_case normal-build
 run_fail --noedit build valid-minimal
@@ -398,11 +578,22 @@ export JPACKER_TEST_SUDO_EXIT_CODE=0
 run_fail upgrade
 assert_validation_error "package info upgrade-split-malformed"
 assert_contains "field Conflicts expected array or null, got string" "$output_file"
-assert_not_contains "split package install target selection is not implemented" "$output_file"
 assert_no_mutation_commands
 assert_cache_entry_absent upgrade-split-root
 assert_cache_entry_absent upgrade-split-base
 assert_cache_entry_absent upgrade-split-malformed
+
+# registered source upgradeはtarget-less legacy singular lifecycleのため、
+# requested split childをsystem mutation前に引き続き拒否する。
+setup_case upgrade-registered-split-guard
+prepare_source_preferences valid-split
+export JPACKER_TEST_SUDO_EXIT_CODE=0
+run_fail upgrade
+assert_contains "Registered source upgrade does not support split AUR preference valid-split from PackageBase valid-split-base" "$output_file"
+assert_contains "this route requires a singular package identity" "$output_file"
+assert_no_mutation_commands
+assert_cache_entry_absent valid-split
+assert_cache_entry_absent valid-split-base
 
 # 全targetのplan preflight中、最後のRPCでschema errorを検出しても
 # system/source mutationへ進まない。directory iteratorの順序には依存させない。

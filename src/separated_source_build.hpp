@@ -31,15 +31,24 @@ struct SeparatedSourceBuildUnitOptions {
     bool clean_build = false;
 };
 
-// pacman transaction成功後のworkspace cleanup failureをtransaction failureと分ける。
+// pacman transaction成功後のworkspace cleanup failureをtransaction failureと分け、
+// package install/--needed skipのoutcomeも失わず保持する。
 class SeparatedSourceBuildCleanupError : public std::runtime_error {
+    ArtifactInstallExecutionOutcome install_outcome_;
+
 public:
-    explicit SeparatedSourceBuildCleanupError(const std::string& diagnostic);
+    SeparatedSourceBuildCleanupError(
+            ArtifactInstallExecutionOutcome install_outcome,
+            const std::string& diagnostic);
+
+    ArtifactInstallExecutionOutcome install_outcome() const noexcept {
+        return install_outcome_;
+    }
 };
 
 // POLICY(#242): production callerはこのshared lifecycleだけを呼び、artifact pathや
-// lower-level install primitiveを組み替えない。
-void execute_separated_source_build_unit(
+// lower-level install primitiveを組み替えない。戻り値はcleanup完了後のinstall outcome。
+ArtifactInstallExecutionOutcome execute_separated_source_build_unit(
         SeparatedSourceBuildUnitRequest request,
         const SeparatedSourceBuildUnitOptions& options);
 

@@ -4,10 +4,13 @@ local -a _jpacker_operations
 local -a _jpacker_global_options
 local -a _jpacker_deps_options
 local -a _jpacker_sync_needed_option
+local -a _jpacker_targetless_upgrade_options
 
 _jpacker_operations=(
     build
-    upgrade
+    'upgrade:System update and registered source packages'
+    'upgrade-aur:Update installed AUR packages only'
+    'upgrade-all:System update, registered source packages, and remaining installed AUR packages'
     clean
     deps
     plan
@@ -33,6 +36,8 @@ _jpacker_operations=(
 _jpacker_global_options=(
     --help
     -h
+    --version
+    -V
     --noedit
     --nodiff
     --noconfirm
@@ -51,8 +56,16 @@ _jpacker_sync_needed_option=(
     --needed
 )
 
+_jpacker_targetless_upgrade_options=(
+    --noedit
+    --nodiff
+    --noconfirm
+    --rebuild
+    --cleanbuild
+)
+
 _jpacker_complete_operations() {
-    compadd -Q -- "${_jpacker_operations[@]}"
+    _describe -t operations 'jpacker operation' _jpacker_operations
 }
 
 _jpacker_complete_global_options() {
@@ -65,6 +78,10 @@ _jpacker_complete_deps_options() {
 
 _jpacker_complete_sync_needed_option() {
     compadd -Q -- "${_jpacker_sync_needed_option[@]}"
+}
+
+_jpacker_complete_targetless_upgrade_options() {
+    compadd -Q -- "${_jpacker_targetless_upgrade_options[@]}"
 }
 
 _jpacker_source_preferences() {
@@ -89,7 +106,7 @@ _jpacker_find_operation() {
     for (( i = 2; i < CURRENT; i++ )); do
         word=${words[i]}
         case $word in
-            --help|-h|--noedit|--nodiff|--noconfirm|--rebuild|--cleanbuild|--rmdeps|--aur|--repo)
+            --help|-h|--version|-V|--noedit|--nodiff|--noconfirm|--rebuild|--cleanbuild|--rmdeps|--aur|--repo)
                 ;;
             *)
                 reply=("$word")
@@ -114,6 +131,9 @@ if [[ -z $operation ]]; then
 fi
 
 case $operation in
+    upgrade-aur|upgrade-all)
+        _jpacker_complete_targetless_upgrade_options
+        ;;
     deps)
         _alternative \
             'deps-options:deps option:_jpacker_complete_deps_options' \
