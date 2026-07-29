@@ -14,7 +14,7 @@ enum class PackageSourceSelection {
 };
 
 enum class CliTokenRole {
-    JpackerGlobalOption,
+    MoguetGlobalOption,
     Operation,
     PacmanOption,
     PacmanOptionValue,
@@ -54,7 +54,7 @@ struct ParsedCliArguments {
     CliOverrides                     cli_overrides;
 };
 
-bool is_jpacker_global_option(const std::string& arg);
+bool is_moguet_global_option(const std::string& arg);
 bool pacman_option_takes_value(const std::string& arg);
 // POLICY: global optionだけのargvもempty operationを持つparse成功として返す。
 // usage表示とexit statusはrunnerが決める。

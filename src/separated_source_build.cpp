@@ -7,7 +7,7 @@
 
 namespace {
 
-#ifdef JPACKER_ENABLE_SEPARATED_SOURCE_BUILD_TEST_HOOKS
+#ifdef MOGUET_ENABLE_SEPARATED_SOURCE_BUILD_TEST_HOOKS
 SeparatedSourceBuildWorkspaceObserverForTest g_workspace_observer = nullptr;
 
 void notify_workspace_created_for_test(
@@ -102,7 +102,7 @@ ArtifactInstallExecutionOutcome execute_separated_source_build_unit(
     return install_outcome;
 }
 
-#ifdef JPACKER_ENABLE_SEPARATED_SOURCE_BUILD_TEST_HOOKS
+#ifdef MOGUET_ENABLE_SEPARATED_SOURCE_BUILD_TEST_HOOKS
 void set_separated_source_build_workspace_observer_for_test(
         SeparatedSourceBuildWorkspaceObserverForTest observer) {
     g_workspace_observer = observer;

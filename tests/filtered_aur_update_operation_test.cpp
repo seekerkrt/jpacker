@@ -138,7 +138,7 @@ AurPackageInfo package_info(
     info.PackageBase = package_base.empty() ? package_name : package_base;
     info.Version = version;
     info.Description = "filtered AUR operation fixture";
-    info.Maintainer = "jpacker-test";
+    info.Maintainer = "moguet-test";
     return info;
 }
 

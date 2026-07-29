@@ -336,7 +336,7 @@ public:
 
         std::string template_path =
                 (proc_file_descriptor_path(retained_parent.get()) /
-                 ".jpacker-pkgbuild-XXXXXX")
+                 ".moguet-pkgbuild-XXXXXX")
                         .string();
         std::vector<char> path_buffer(template_path.begin(), template_path.end());
         path_buffer.push_back('\0');

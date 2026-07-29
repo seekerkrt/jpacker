@@ -101,13 +101,13 @@ require_sudo_argv() {
     esac
 }
 
-printf 'sudo %s\n' "$*" >> "$JPACKER_TEST_COMMAND_LOG"
+printf 'sudo %s\n' "$*" >> "$MOGUET_TEST_COMMAND_LOG"
 require_sudo_argv "$@"
 
-exit_code=${JPACKER_TEST_SUDO_EXIT_CODE:-99}
+exit_code=${MOGUET_TEST_SUDO_EXIT_CODE:-99}
 if [ "$exit_code" -eq 0 ] && is_typed_pacman_install "$@"; then
-    state_after_success_file=${JPACKER_TEST_MAKEPKG_PACKAGE_METADATA_STATE_AFTER_SUCCESS_FILE:-}
-    metadata_state_file=${JPACKER_TEST_PACKAGE_METADATA_STATE_FILE:-}
+    state_after_success_file=${MOGUET_TEST_MAKEPKG_PACKAGE_METADATA_STATE_AFTER_SUCCESS_FILE:-}
+    metadata_state_file=${MOGUET_TEST_PACKAGE_METADATA_STATE_FILE:-}
     if [ -n "$state_after_success_file" ]; then
         if [ -z "$metadata_state_file" ] || [ ! -f "$state_after_success_file" ]; then
             exit 1

@@ -249,11 +249,11 @@ public:
     bool is_valid() const noexcept;
     const UpgradeAllOperationPreparedSnapshot* snapshot() const noexcept;
 
-#ifdef JPACKER_ENABLE_UPGRADE_ALL_OPERATION_TEST_HOOKS
+#ifdef MOGUET_ENABLE_UPGRADE_ALL_OPERATION_TEST_HOOKS
     void make_source_snapshot_inconsistent_for_test();
     void make_explicit_source_correlation_inconsistent_for_test();
     void make_nested_system_source_correlation_inconsistent_for_test();
-#ifdef JPACKER_ENABLE_SYSTEM_SOURCE_UPGRADE_TEST_HOOKS
+#ifdef MOGUET_ENABLE_SYSTEM_SOURCE_UPGRADE_TEST_HOOKS
     void set_nested_system_source_unexpected_exception_for_test(
             SystemSourceUpgradeUnexpectedExceptionPoint point,
             bool unknown_exception = false);

@@ -52,8 +52,8 @@ require_exact_test_command() {
         exit 1
     fi
 
-    test_repository_root=${JPACKER_TEST_REPOSITORY_ROOT:-}
-    test_case_stub_root=${JPACKER_TEST_CASE_STUB_ROOT:-}
+    test_repository_root=${MOGUET_TEST_REPOSITORY_ROOT:-}
+    test_case_stub_root=${MOGUET_TEST_CASE_STUB_ROOT:-}
     resolved_repository_root=
     resolved_case_stub_root=
     if [ -n "$test_repository_root" ]; then

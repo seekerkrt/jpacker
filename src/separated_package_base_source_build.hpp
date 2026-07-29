@@ -8,7 +8,7 @@
 #include <utility>
 #include <vector>
 
-#ifdef JPACKER_ENABLE_SEPARATED_PACKAGE_BASE_SOURCE_BUILD_TEST_HOOKS
+#ifdef MOGUET_ENABLE_SEPARATED_PACKAGE_BASE_SOURCE_BUILD_TEST_HOOKS
 #include <filesystem>
 #endif
 
@@ -45,8 +45,8 @@ class PackageBaseSourceBuildExecutionResult final {
             std::vector<ArtifactPackageIdentity> unselected_artifacts)
             noexcept;
 
-#if defined(JPACKER_ENABLE_AUR_UPDATE_EXECUTION_RUNNER_TEST_HOOKS) || \
-        defined(JPACKER_ENABLE_UPGRADE_ALL_OPERATION_TEST_HOOKS)
+#if defined(MOGUET_ENABLE_AUR_UPDATE_EXECUTION_RUNNER_TEST_HOOKS) || \
+        defined(MOGUET_ENABLE_UPGRADE_ALL_OPERATION_TEST_HOOKS)
     struct AurUpdateRunnerTestTag {};
 
     PackageBaseSourceBuildExecutionResult(
@@ -95,8 +95,8 @@ public:
     std::vector<ArtifactPackageIdentity>
     release_unselected_artifacts() && noexcept;
 
-#if defined(JPACKER_ENABLE_AUR_UPDATE_EXECUTION_RUNNER_TEST_HOOKS) || \
-        defined(JPACKER_ENABLE_UPGRADE_ALL_OPERATION_TEST_HOOKS)
+#if defined(MOGUET_ENABLE_AUR_UPDATE_EXECUTION_RUNNER_TEST_HOOKS) || \
+        defined(MOGUET_ENABLE_UPGRADE_ALL_OPERATION_TEST_HOOKS)
     static PackageBaseSourceBuildExecutionResult
     make_for_aur_update_runner_test(
             std::string package_base,
@@ -123,7 +123,7 @@ class SeparatedPackageBaseSourceBuildPhaseError final
     : public std::runtime_error {
     SeparatedPackageBaseSourceBuildFailurePhase phase_;
 
-#ifdef JPACKER_ENABLE_AUR_UPDATE_EXECUTION_RUNNER_TEST_HOOKS
+#ifdef MOGUET_ENABLE_AUR_UPDATE_EXECUTION_RUNNER_TEST_HOOKS
     struct AurUpdateRunnerTestTag {};
 
     SeparatedPackageBaseSourceBuildPhaseError(
@@ -141,7 +141,7 @@ public:
 
     SeparatedPackageBaseSourceBuildFailurePhase phase() const noexcept;
 
-#ifdef JPACKER_ENABLE_AUR_UPDATE_EXECUTION_RUNNER_TEST_HOOKS
+#ifdef MOGUET_ENABLE_AUR_UPDATE_EXECUTION_RUNNER_TEST_HOOKS
     static SeparatedPackageBaseSourceBuildPhaseError
     make_for_aur_update_runner_test(
             SeparatedPackageBaseSourceBuildFailurePhase phase,
@@ -158,7 +158,7 @@ class SeparatedPackageBaseSourceBuildPreparationError final
     : public std::runtime_error {
     PackageBaseArtifactInstallPreparationFailure failure_;
 
-#ifdef JPACKER_ENABLE_AUR_UPDATE_EXECUTION_RUNNER_TEST_HOOKS
+#ifdef MOGUET_ENABLE_AUR_UPDATE_EXECUTION_RUNNER_TEST_HOOKS
     struct AurUpdateRunnerTestTag {};
 
     SeparatedPackageBaseSourceBuildPreparationError(
@@ -181,7 +181,7 @@ public:
     const MixedPackageBaseInstallReasonUnsupported* mixed_reason_failure()
             const noexcept;
 
-#ifdef JPACKER_ENABLE_AUR_UPDATE_EXECUTION_RUNNER_TEST_HOOKS
+#ifdef MOGUET_ENABLE_AUR_UPDATE_EXECUTION_RUNNER_TEST_HOOKS
     static SeparatedPackageBaseSourceBuildPreparationError
     make_selection_failure_for_aur_update_runner_test(
             PackageBaseArtifactIdentitySelectionFailure failure,
@@ -214,8 +214,8 @@ class SeparatedPackageBaseSourceBuildCleanupError final
     : public std::runtime_error {
     PackageBaseSourceBuildExecutionResult result_;
 
-#if defined(JPACKER_ENABLE_AUR_UPDATE_EXECUTION_RUNNER_TEST_HOOKS) || \
-        defined(JPACKER_ENABLE_UPGRADE_ALL_OPERATION_TEST_HOOKS)
+#if defined(MOGUET_ENABLE_AUR_UPDATE_EXECUTION_RUNNER_TEST_HOOKS) || \
+        defined(MOGUET_ENABLE_UPGRADE_ALL_OPERATION_TEST_HOOKS)
     struct AurUpdateRunnerTestTag {};
 
     SeparatedPackageBaseSourceBuildCleanupError(
@@ -234,8 +234,8 @@ public:
     const PackageBaseSourceBuildExecutionResult& result() const noexcept;
     PackageBaseSourceBuildExecutionResult release_result() && noexcept;
 
-#if defined(JPACKER_ENABLE_AUR_UPDATE_EXECUTION_RUNNER_TEST_HOOKS) || \
-        defined(JPACKER_ENABLE_UPGRADE_ALL_OPERATION_TEST_HOOKS)
+#if defined(MOGUET_ENABLE_AUR_UPDATE_EXECUTION_RUNNER_TEST_HOOKS) || \
+        defined(MOGUET_ENABLE_UPGRADE_ALL_OPERATION_TEST_HOOKS)
     static SeparatedPackageBaseSourceBuildCleanupError
     make_for_aur_update_runner_test(
             PackageBaseSourceBuildExecutionResult result,
@@ -251,7 +251,7 @@ execute_separated_package_base_source_build(
         SeparatedPackageBaseSourceBuildRequest request,
         const SeparatedSourceBuildUnitOptions& options);
 
-#ifdef JPACKER_ENABLE_SEPARATED_PACKAGE_BASE_SOURCE_BUILD_TEST_HOOKS
+#ifdef MOGUET_ENABLE_SEPARATED_PACKAGE_BASE_SOURCE_BUILD_TEST_HOOKS
 using SeparatedPackageBaseSourceBuildWorkspaceObserverForTest =
         void (*)(const std::filesystem::path& workspace_path);
 

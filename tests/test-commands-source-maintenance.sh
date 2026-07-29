@@ -5,8 +5,8 @@ test_binary=$1
 source_install_test_binary=$2
 upgrade_metadata_test_binary=$3
 repo_root=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
-JPACKER_TEST_REPOSITORY_ROOT=$repo_root
-export JPACKER_TEST_REPOSITORY_ROOT
+MOGUET_TEST_REPOSITORY_ROOT=$repo_root
+export MOGUET_TEST_REPOSITORY_ROOT
 . "$repo_root/tests/test-command-safety.sh"
 tmp_dir=$(mktemp -d)
 server_pid=
@@ -50,8 +50,8 @@ require_exact_test_command makepkg "$repo_root/tests/stubs/makepkg"
 require_exact_test_command pacman "$repo_root/tests/stubs/pacman"
 require_exact_test_command sudo "$repo_root/tests/stubs/source-maintenance/sudo"
 require_exact_test_command git "$repo_root/tests/stubs/git"
-require_exact_test_command jpacker-test-editor \
-    "$repo_root/tests/stubs/source-maintenance/jpacker-test-editor"
+require_exact_test_command moguet-test-editor \
+    "$repo_root/tests/stubs/source-maintenance/moguet-test-editor"
 upgrade_metadata_path=$repo_root/tests/stubs/upgrade-baseline-metadata:$PATH
 (
     PATH=$upgrade_metadata_path
@@ -59,7 +59,7 @@ upgrade_metadata_path=$repo_root/tests/stubs/upgrade-baseline-metadata:$PATH
     require_exact_test_command pacman-conf \
         "$repo_root/tests/stubs/upgrade-baseline-metadata/pacman-conf"
 )
-export JPACKER_TEST_AUR_RPC_BASE_URL=http://127.0.0.1:$port/rpc/
+export MOGUET_TEST_AUR_RPC_BASE_URL=http://127.0.0.1:$port/rpc/
 
 setup_case() {
     case_name=$1
@@ -80,70 +80,70 @@ setup_case() {
     : > "$sudo_failures"
     : > "$package_metadata_state"
     {
-        printf 'EDITOR=jpacker-test-editor --config\n'
+        printf 'EDITOR=moguet-test-editor --config\n'
         printf 'LOGFILE=%s\n' "$case_dir/jpacker.log"
     } > "$config_file"
 
     export HOME=$case_dir/home
     export XDG_CACHE_HOME=$case_dir/xdg-cache
-    export JPACKER_TEST_COMMAND_LOG=$command_log
-    export JPACKER_TEST_PACKAGE_BUILD_DIR=$preference_dir
-    export JPACKER_TEST_CONFIG_FILE=$config_file
-    export JPACKER_TEST_SOURCE_MAINTENANCE_SUDO_MUTATE=1
-    export JPACKER_TEST_SOURCE_MAINTENANCE_FAIL_EXACT_FILE=$sudo_failures
-    export JPACKER_TEST_PACMAN_EXIT_CODE=1
-    export JPACKER_TEST_SUDO_EXIT_CODE=0
-    export JPACKER_TEST_MAKEPKG_EXIT_CODE=0
-    export JPACKER_TEST_PACKAGE_METADATA_STATE_FILE=$package_metadata_state
-    export JPACKER_TEST_PACKAGE_METADATA_EVENT_LOG=$command_log
+    export MOGUET_TEST_COMMAND_LOG=$command_log
+    export MOGUET_TEST_PACKAGE_BUILD_DIR=$preference_dir
+    export MOGUET_TEST_CONFIG_FILE=$config_file
+    export MOGUET_TEST_SOURCE_MAINTENANCE_SUDO_MUTATE=1
+    export MOGUET_TEST_SOURCE_MAINTENANCE_FAIL_EXACT_FILE=$sudo_failures
+    export MOGUET_TEST_PACMAN_EXIT_CODE=1
+    export MOGUET_TEST_SUDO_EXIT_CODE=0
+    export MOGUET_TEST_MAKEPKG_EXIT_CODE=0
+    export MOGUET_TEST_PACKAGE_METADATA_STATE_FILE=$package_metadata_state
+    export MOGUET_TEST_PACKAGE_METADATA_EVENT_LOG=$command_log
 
-    unset JPACKER_TEST_PACMAN_REPO_PACKAGES
-    unset JPACKER_TEST_PACMAN_Q_OUTPUT
-    unset JPACKER_TEST_PACMAN_Q_OUTPUT_FILE
-    unset JPACKER_TEST_PACMAN_Q_EXIT_CODE
-    unset JPACKER_TEST_PACMAN_QM_OUTPUT
-    unset JPACKER_TEST_APP_CONFIG_CASE
-    unset JPACKER_TEST_GIT_REMOTE_URL
-    unset JPACKER_TEST_GIT_CLONE_EXIT_CODE
-    unset JPACKER_TEST_GIT_CLONE_FAIL_DESTINATION
-    unset JPACKER_TEST_GIT_CLONE_FAIL_DESTINATION_EXIT_CODE
-    unset JPACKER_TEST_GIT_CLONE_SYMLINK_TARGET
-    unset JPACKER_TEST_GIT_CLONE_FIXTURE_DIR
-    unset JPACKER_TEST_GIT_RESET_SRCINFO_FIXTURE
-    unset JPACKER_TEST_GIT_SYMBOLIC_REF
-    unset JPACKER_TEST_GIT_SYMBOLIC_REF_EXIT_CODE
-    unset JPACKER_TEST_GIT_MAIN_REF_EXIT_CODE
-    unset JPACKER_TEST_GIT_MASTER_REF_EXIT_CODE
-    unset JPACKER_TEST_VERCMP_OUTPUT
-    unset JPACKER_TEST_VERCMP_EXIT_CODE
-    unset JPACKER_TEST_VERCMP_ARGV_LOG
-    unset JPACKER_TEST_MAKEPKG_ARGV_LOG
-    unset JPACKER_TEST_MAKEPKG_CWD_LOG
-    unset JPACKER_TEST_MAKEPKG_ENV_LOG
-    unset JPACKER_TEST_MAKEPKG_ENV_KEYS
-    unset JPACKER_TEST_MAKEPKG_PACKAGELIST_EXIT_CODE
-    unset JPACKER_TEST_MAKEPKG_ARTIFACT_IDENTITIES
-    unset JPACKER_TEST_SOURCE_MAINTENANCE_FAIL_SUBSTRING
-    unset JPACKER_TEST_SOURCE_MAINTENANCE_PACMAN_SYU_Q_OUTPUT_FILE
-    unset JPACKER_TEST_SOURCE_MAINTENANCE_PACMAN_SC_RACE_PATH
-    unset JPACKER_TEST_SOURCE_MAINTENANCE_PACMAN_SC_RACE_TARGET
-    unset JPACKER_TEST_SOURCE_MAINTENANCE_EDITOR_SNAPSHOT_FILE
-    unset JPACKER_TEST_SOURCE_MAINTENANCE_EDITOR_APPEND_LINE
-    unset JPACKER_TEST_SOURCE_MAINTENANCE_EDITOR_FAIL_SUBSTRING
-    unset JPACKER_TEST_SOURCE_MAINTENANCE_EDITOR_REPLACEMENT_KIND
-    unset JPACKER_TEST_SOURCE_MAINTENANCE_EDITOR_REPLACEMENT_SUBSTRING
-    unset JPACKER_TEST_SOURCE_MAINTENANCE_EDITOR_REPLACEMENT_TARGET
-    unset JPACKER_TEST_SOURCE_MAINTENANCE_EDITOR_REPLACEMENT_SOURCE
-    unset JPACKER_TEST_PACKAGE_METADATA_INITIALIZE_FAILURE
-    unset JPACKER_TEST_PACKAGE_METADATA_INITIALIZE_FAILURE_AT
-    unset JPACKER_TEST_PACKAGE_METADATA_QUERY_FAILURE_PACKAGE
-    unset JPACKER_TEST_PACKAGE_METADATA_QUERY_FAILURE_AT
-    unset JPACKER_TEST_PACKAGE_METADATA_UNKNOWN_REASON_PACKAGE
-    unset JPACKER_TEST_PACKAGE_METADATA_PACMAN_CONF_EXIT_CODE
-    unset JPACKER_TEST_PACKAGE_METADATA_PACMAN_CONF_FAILURE_AT
-    unset JPACKER_TEST_MAKEPKG_PACKAGE_METADATA_STATE_AFTER_SUCCESS_FILE
-    unset JPACKER_TEST_PACMAN_U_SUCCESS_LOG
-    unset JPACKER_TEST_REPLACE_WORKSPACE_AFTER_PACMAN_U
+    unset MOGUET_TEST_PACMAN_REPO_PACKAGES
+    unset MOGUET_TEST_PACMAN_Q_OUTPUT
+    unset MOGUET_TEST_PACMAN_Q_OUTPUT_FILE
+    unset MOGUET_TEST_PACMAN_Q_EXIT_CODE
+    unset MOGUET_TEST_PACMAN_QM_OUTPUT
+    unset MOGUET_TEST_APP_CONFIG_CASE
+    unset MOGUET_TEST_GIT_REMOTE_URL
+    unset MOGUET_TEST_GIT_CLONE_EXIT_CODE
+    unset MOGUET_TEST_GIT_CLONE_FAIL_DESTINATION
+    unset MOGUET_TEST_GIT_CLONE_FAIL_DESTINATION_EXIT_CODE
+    unset MOGUET_TEST_GIT_CLONE_SYMLINK_TARGET
+    unset MOGUET_TEST_GIT_CLONE_FIXTURE_DIR
+    unset MOGUET_TEST_GIT_RESET_SRCINFO_FIXTURE
+    unset MOGUET_TEST_GIT_SYMBOLIC_REF
+    unset MOGUET_TEST_GIT_SYMBOLIC_REF_EXIT_CODE
+    unset MOGUET_TEST_GIT_MAIN_REF_EXIT_CODE
+    unset MOGUET_TEST_GIT_MASTER_REF_EXIT_CODE
+    unset MOGUET_TEST_VERCMP_OUTPUT
+    unset MOGUET_TEST_VERCMP_EXIT_CODE
+    unset MOGUET_TEST_VERCMP_ARGV_LOG
+    unset MOGUET_TEST_MAKEPKG_ARGV_LOG
+    unset MOGUET_TEST_MAKEPKG_CWD_LOG
+    unset MOGUET_TEST_MAKEPKG_ENV_LOG
+    unset MOGUET_TEST_MAKEPKG_ENV_KEYS
+    unset MOGUET_TEST_MAKEPKG_PACKAGELIST_EXIT_CODE
+    unset MOGUET_TEST_MAKEPKG_ARTIFACT_IDENTITIES
+    unset MOGUET_TEST_SOURCE_MAINTENANCE_FAIL_SUBSTRING
+    unset MOGUET_TEST_SOURCE_MAINTENANCE_PACMAN_SYU_Q_OUTPUT_FILE
+    unset MOGUET_TEST_SOURCE_MAINTENANCE_PACMAN_SC_RACE_PATH
+    unset MOGUET_TEST_SOURCE_MAINTENANCE_PACMAN_SC_RACE_TARGET
+    unset MOGUET_TEST_SOURCE_MAINTENANCE_EDITOR_SNAPSHOT_FILE
+    unset MOGUET_TEST_SOURCE_MAINTENANCE_EDITOR_APPEND_LINE
+    unset MOGUET_TEST_SOURCE_MAINTENANCE_EDITOR_FAIL_SUBSTRING
+    unset MOGUET_TEST_SOURCE_MAINTENANCE_EDITOR_REPLACEMENT_KIND
+    unset MOGUET_TEST_SOURCE_MAINTENANCE_EDITOR_REPLACEMENT_SUBSTRING
+    unset MOGUET_TEST_SOURCE_MAINTENANCE_EDITOR_REPLACEMENT_TARGET
+    unset MOGUET_TEST_SOURCE_MAINTENANCE_EDITOR_REPLACEMENT_SOURCE
+    unset MOGUET_TEST_PACKAGE_METADATA_INITIALIZE_FAILURE
+    unset MOGUET_TEST_PACKAGE_METADATA_INITIALIZE_FAILURE_AT
+    unset MOGUET_TEST_PACKAGE_METADATA_QUERY_FAILURE_PACKAGE
+    unset MOGUET_TEST_PACKAGE_METADATA_QUERY_FAILURE_AT
+    unset MOGUET_TEST_PACKAGE_METADATA_UNKNOWN_REASON_PACKAGE
+    unset MOGUET_TEST_PACKAGE_METADATA_PACMAN_CONF_EXIT_CODE
+    unset MOGUET_TEST_PACKAGE_METADATA_PACMAN_CONF_FAILURE_AT
+    unset MOGUET_TEST_MAKEPKG_PACKAGE_METADATA_STATE_AFTER_SUCCESS_FILE
+    unset MOGUET_TEST_PACMAN_U_SUCCESS_LOG
+    unset MOGUET_TEST_REPLACE_WORKSPACE_AFTER_PACMAN_U
     unset EMPTY
     unset PKGDEST
     unset EDITOR
@@ -590,7 +590,7 @@ prepare_upgrade_source_checkout() {
     printf 'pkgname=%s\npkgver=%s\npkgrel=1\n' \
         "$source_package" "$source_version" > "$source_checkout/PKGBUILD"
     printf 'https://gitlab.archlinux.org/archlinux/packaging/packages/%s.git\n' \
-        "$source_package" > "$source_checkout/.git/.jpacker-test-remote-url"
+        "$source_package" > "$source_checkout/.git/.moguet-test-remote-url"
 }
 
 capture_two_source_preference_order() {
@@ -640,7 +640,7 @@ setup_upgrade_transition_case() {
     mkdir -p "$checkout_dir/.git"
     cp "$initial_srcinfo" "$checkout_dir/.SRCINFO"
     printf 'pkgname=%s\npkgver=1.0\npkgrel=1\n' "$upgrade_package" > "$checkout_dir/PKGBUILD"
-    printf '%s\n' "$source_git_url" > "$checkout_dir/.git/.jpacker-test-remote-url"
+    printf '%s\n' "$source_git_url" > "$checkout_dir/.git/.moguet-test-remote-url"
 
     if [ "$source_preference_state" = enabled ]; then
         : > "$preference_dir/$upgrade_package"
@@ -648,12 +648,12 @@ setup_upgrade_transition_case() {
 
     : > "$vercmp_argv_log"
     : > "$makepkg_argv_log"
-    export JPACKER_TEST_PACMAN_Q_OUTPUT_FILE=$installed_version_state
-    export JPACKER_TEST_PACKAGE_METADATA_STATE_FILE=$installed_version_state
-    export JPACKER_TEST_SOURCE_MAINTENANCE_PACMAN_SYU_Q_OUTPUT_FILE=$installed_version_after
-    export JPACKER_TEST_GIT_RESET_SRCINFO_FIXTURE=$remote_srcinfo
-    export JPACKER_TEST_VERCMP_ARGV_LOG=$vercmp_argv_log
-    export JPACKER_TEST_MAKEPKG_ARGV_LOG=$makepkg_argv_log
+    export MOGUET_TEST_PACMAN_Q_OUTPUT_FILE=$installed_version_state
+    export MOGUET_TEST_PACKAGE_METADATA_STATE_FILE=$installed_version_state
+    export MOGUET_TEST_SOURCE_MAINTENANCE_PACMAN_SYU_Q_OUTPUT_FILE=$installed_version_after
+    export MOGUET_TEST_GIT_RESET_SRCINFO_FIXTURE=$remote_srcinfo
+    export MOGUET_TEST_VERCMP_ARGV_LOG=$vercmp_argv_log
+    export MOGUET_TEST_MAKEPKG_ARGV_LOG=$makepkg_argv_log
 }
 
 # P0-1: build handler parsing, validation, catch boundary, and source request mapping.
@@ -674,7 +674,7 @@ assert_not_contains "Build Error:" "$output_file"
 assert_total_command_count 0
 
 setup_case build-environment-order
-export JPACKER_TEST_PACMAN_REPO_PACKAGES=clean-root
+export MOGUET_TEST_PACMAN_REPO_PACKAGES=clean-root
 run_fail --noedit --nodiff --noconfirm build \
     FIRST=one clean-root "SECOND=two words" FIRST=last EMPTY= \
     PKGDEST=first-path PKGDEST= ignored
@@ -687,7 +687,7 @@ assert_command_content_absent "makepkg"
 assert_command_content_absent "pacman -U"
 
 setup_case build-inherited-pkgdest
-export JPACKER_TEST_PACMAN_REPO_PACKAGES=clean-root
+export MOGUET_TEST_PACMAN_REPO_PACKAGES=clean-root
 export PKGDEST=
 run_fail --noedit --nodiff --noconfirm build clean-root
 assert_contains "Inherited PKGDEST conflicts with invocation-owned artifact workspace." "$output_file"
@@ -710,7 +710,7 @@ assert_command_content_absent "git clone"
 assert_command_content_absent "makepkg"
 
 setup_case build-split-child-selected-only
-export JPACKER_TEST_MAKEPKG_ARTIFACT_IDENTITIES='split-base|split-sibling|3.1-4
+export MOGUET_TEST_MAKEPKG_ARTIFACT_IDENTITIES='split-base|split-sibling|3.1-4
 split-base|split-child|3.1-4
 split-base|split-child-debug|3.1-4'
 run_ok --noedit --nodiff build split-child
@@ -741,9 +741,9 @@ assert_contains "ambiguous providers" "$output_file"
 assert_not_contains "conflicts/replaces metadata requires manual review" "$output_file"
 
 setup_case build-execution-failure
-export JPACKER_TEST_PACMAN_REPO_PACKAGES=clean-root
-export JPACKER_TEST_MAKEPKG_EXIT_CODE=42
-export JPACKER_TEST_MAKEPKG_PACKAGELIST_EXIT_CODE=0
+export MOGUET_TEST_PACMAN_REPO_PACKAGES=clean-root
+export MOGUET_TEST_MAKEPKG_EXIT_CODE=42
+export MOGUET_TEST_MAKEPKG_PACKAGELIST_EXIT_CODE=0
 run_fail --noedit --nodiff build clean-root
 assert_contains "Build Error: Failed while building/installing PackageBase clean-root (clean-root): Build-only makepkg failed with exit code 42." "$output_file"
 assert_command "makepkg --packagelist"
@@ -755,10 +755,10 @@ installed_after_success=$case_dir/installed-after-success
 install_success_log=$XDG_CACHE_HOME/pacman-u-success.log
 printf 'clean-root 1.0-1\n' > "$installed_after_success"
 : > "$install_success_log"
-export JPACKER_TEST_PACMAN_REPO_PACKAGES=clean-root
-export JPACKER_TEST_MAKEPKG_PACKAGE_METADATA_STATE_AFTER_SUCCESS_FILE=$installed_after_success
-export JPACKER_TEST_PACMAN_U_SUCCESS_LOG=$install_success_log
-export JPACKER_TEST_REPLACE_WORKSPACE_AFTER_PACMAN_U=1
+export MOGUET_TEST_PACMAN_REPO_PACKAGES=clean-root
+export MOGUET_TEST_MAKEPKG_PACKAGE_METADATA_STATE_AFTER_SUCCESS_FILE=$installed_after_success
+export MOGUET_TEST_PACMAN_U_SUCCESS_LOG=$install_success_log
+export MOGUET_TEST_REPLACE_WORKSPACE_AFTER_PACMAN_U=1
 run_fail --noedit --nodiff --noconfirm build clean-root
 assert_contains "Package installation succeeded, but artifact workspace cleanup failed:" "$output_file"
 assert_not_contains "Build Error:" "$output_file"
@@ -855,12 +855,12 @@ echo "  ok: P0-2 cmd_add_src"
 setup_case edit-src-config-editor
 printf 'CFLAGS=-Oexisting\n' > "$preference_dir/alpha"
 printf 'CFLAGS=-Oexisting\n' > "$case_dir/existing.expected"
-export JPACKER_TEST_SOURCE_MAINTENANCE_EDITOR_SNAPSHOT_FILE=$case_dir/editor.snapshot
-export JPACKER_TEST_SOURCE_MAINTENANCE_EDITOR_APPEND_LINE='LDFLAGS=-Wl,--as-needed'
+export MOGUET_TEST_SOURCE_MAINTENANCE_EDITOR_SNAPSHOT_FILE=$case_dir/editor.snapshot
+export MOGUET_TEST_SOURCE_MAINTENANCE_EDITOR_APPEND_LINE='LDFLAGS=-Wl,--as-needed'
 run_ok edit-src alpha
 editor_command=$(sed -n '1p' "$command_log")
 case $editor_command in
-    "jpacker-test-editor --config /tmp/jpacker-edit-src-alpha."??????)
+    "moguet-test-editor --config /tmp/moguet-edit-src-alpha."??????)
         ;;
     *)
         echo "unexpected config editor command: $editor_command" >&2
@@ -895,11 +895,11 @@ assert_path_absent "$edit_temp_path"
 
 setup_case edit-src-environment-editor
 printf 'CFLAGS=-Oexisting\n' > "$preference_dir/alpha"
-export EDITOR='jpacker-test-editor --environment'
+export EDITOR='moguet-test-editor --environment'
 run_ok edit-src alpha
 editor_command=$(sed -n '1p' "$command_log")
 case $editor_command in
-    "jpacker-test-editor --environment /tmp/jpacker-edit-src-alpha."??????)
+    "moguet-test-editor --environment /tmp/moguet-edit-src-alpha."??????)
         ;;
     *)
         echo "EDITOR did not override configured editor: $editor_command" >&2
@@ -910,8 +910,8 @@ esac
 assert_command_at 2 "sudo install -Dm644 -- /dev/stdin $preference_dir/alpha"
 
 setup_case edit-src-create-missing-preference
-export EDITOR=jpacker-test-editor
-export JPACKER_TEST_SOURCE_MAINTENANCE_EDITOR_APPEND_LINE='CREATED=yes'
+export EDITOR=moguet-test-editor
+export MOGUET_TEST_SOURCE_MAINTENANCE_EDITOR_APPEND_LINE='CREATED=yes'
 run_ok edit-src alpha
 editor_command=$(sed -n '1p' "$command_log")
 edit_temp_path=${editor_command##* }
@@ -922,9 +922,9 @@ assert_path_absent "$edit_temp_path"
 
 setup_case edit-src-empty-content
 : > "$case_dir/replacement-content"
-export EDITOR=jpacker-test-editor
-export JPACKER_TEST_SOURCE_MAINTENANCE_EDITOR_REPLACEMENT_KIND=regular
-export JPACKER_TEST_SOURCE_MAINTENANCE_EDITOR_REPLACEMENT_SOURCE=$case_dir/replacement-content
+export EDITOR=moguet-test-editor
+export MOGUET_TEST_SOURCE_MAINTENANCE_EDITOR_REPLACEMENT_KIND=regular
+export MOGUET_TEST_SOURCE_MAINTENANCE_EDITOR_REPLACEMENT_SOURCE=$case_dir/replacement-content
 run_ok edit-src alpha
 editor_command=$(sed -n '1p' "$command_log")
 edit_temp_path=${editor_command##* }
@@ -933,24 +933,24 @@ assert_path_absent "$edit_temp_path"
 
 setup_case edit-src-no-final-newline
 printf 'NO_FINAL_NEWLINE' > "$case_dir/replacement-content"
-export EDITOR=jpacker-test-editor
-export JPACKER_TEST_SOURCE_MAINTENANCE_EDITOR_REPLACEMENT_KIND=regular
-export JPACKER_TEST_SOURCE_MAINTENANCE_EDITOR_REPLACEMENT_SOURCE=$case_dir/replacement-content
+export EDITOR=moguet-test-editor
+export MOGUET_TEST_SOURCE_MAINTENANCE_EDITOR_REPLACEMENT_KIND=regular
+export MOGUET_TEST_SOURCE_MAINTENANCE_EDITOR_REPLACEMENT_SOURCE=$case_dir/replacement-content
 run_ok edit-src alpha
 assert_file_equals "$case_dir/replacement-content" "$preference_dir/alpha"
 
 setup_case edit-src-binary-regular-replacement
 printf 'BINARY\000PAYLOAD\n' > "$case_dir/replacement-content"
-export EDITOR=jpacker-test-editor
-export JPACKER_TEST_SOURCE_MAINTENANCE_EDITOR_REPLACEMENT_KIND=regular
-export JPACKER_TEST_SOURCE_MAINTENANCE_EDITOR_REPLACEMENT_SOURCE=$case_dir/replacement-content
+export EDITOR=moguet-test-editor
+export MOGUET_TEST_SOURCE_MAINTENANCE_EDITOR_REPLACEMENT_KIND=regular
+export MOGUET_TEST_SOURCE_MAINTENANCE_EDITOR_REPLACEMENT_SOURCE=$case_dir/replacement-content
 run_ok edit-src alpha
 assert_file_equals "$case_dir/replacement-content" "$preference_dir/alpha"
 
 setup_case edit-src-editor-failure
 printf 'CFLAGS=-Oexisting\n' > "$preference_dir/alpha"
-export EDITOR=jpacker-test-editor
-export JPACKER_TEST_SOURCE_MAINTENANCE_EDITOR_FAIL_SUBSTRING=jpacker-edit-src-alpha.
+export EDITOR=moguet-test-editor
+export MOGUET_TEST_SOURCE_MAINTENANCE_EDITOR_FAIL_SUBSTRING=moguet-edit-src-alpha.
 run_fail edit-src alpha
 editor_command=$(sed -n '1p' "$command_log")
 edit_temp_path=${editor_command##* }
@@ -962,9 +962,9 @@ setup_case edit-src-reject-symlink
 printf 'ORIGINAL=yes\n' > "$preference_dir/alpha"
 printf 'ORIGINAL=yes\n' > "$case_dir/original.expected"
 printf 'UNREVIEWED=yes\n' > "$case_dir/symlink-target"
-export EDITOR=jpacker-test-editor
-export JPACKER_TEST_SOURCE_MAINTENANCE_EDITOR_REPLACEMENT_KIND=symlink
-export JPACKER_TEST_SOURCE_MAINTENANCE_EDITOR_REPLACEMENT_TARGET=$case_dir/symlink-target
+export EDITOR=moguet-test-editor
+export MOGUET_TEST_SOURCE_MAINTENANCE_EDITOR_REPLACEMENT_KIND=symlink
+export MOGUET_TEST_SOURCE_MAINTENANCE_EDITOR_REPLACEMENT_TARGET=$case_dir/symlink-target
 run_fail edit-src alpha
 editor_command=$(sed -n '1p' "$command_log")
 edit_temp_path=${editor_command##* }
@@ -975,8 +975,8 @@ assert_file_equals "$case_dir/original.expected" "$preference_dir/alpha"
 
 setup_case edit-src-reject-directory
 printf 'ORIGINAL=yes\n' > "$preference_dir/alpha"
-export EDITOR=jpacker-test-editor
-export JPACKER_TEST_SOURCE_MAINTENANCE_EDITOR_REPLACEMENT_KIND=directory
+export EDITOR=moguet-test-editor
+export MOGUET_TEST_SOURCE_MAINTENANCE_EDITOR_REPLACEMENT_KIND=directory
 run_fail edit-src alpha
 editor_command=$(sed -n '1p' "$command_log")
 edit_temp_path=${editor_command##* }
@@ -986,8 +986,8 @@ assert_path_absent "$edit_temp_path"
 
 setup_case edit-src-reject-fifo-without-blocking
 printf 'ORIGINAL=yes\n' > "$preference_dir/alpha"
-export EDITOR=jpacker-test-editor
-export JPACKER_TEST_SOURCE_MAINTENANCE_EDITOR_REPLACEMENT_KIND=fifo
+export EDITOR=moguet-test-editor
+export MOGUET_TEST_SOURCE_MAINTENANCE_EDITOR_REPLACEMENT_KIND=fifo
 run_fail_nonblocking edit-src alpha
 editor_command=$(sed -n '1p' "$command_log")
 edit_temp_path=${editor_command##* }
@@ -997,8 +997,8 @@ assert_path_absent "$edit_temp_path"
 
 setup_case edit-src-reject-missing-source
 printf 'ORIGINAL=yes\n' > "$preference_dir/alpha"
-export EDITOR=jpacker-test-editor
-export JPACKER_TEST_SOURCE_MAINTENANCE_EDITOR_REPLACEMENT_KIND=missing
+export EDITOR=moguet-test-editor
+export MOGUET_TEST_SOURCE_MAINTENANCE_EDITOR_REPLACEMENT_KIND=missing
 run_fail edit-src alpha
 editor_command=$(sed -n '1p' "$command_log")
 edit_temp_path=${editor_command##* }
@@ -1009,9 +1009,9 @@ assert_path_absent "$edit_temp_path"
 setup_case edit-src-install-failure
 printf 'CFLAGS=-Oexisting\n' > "$preference_dir/alpha"
 printf 'CFLAGS=-Oexisting\n' > "$case_dir/existing.expected"
-export EDITOR=jpacker-test-editor
-export JPACKER_TEST_SOURCE_MAINTENANCE_EDITOR_APPEND_LINE='EDITED=yes'
-export JPACKER_TEST_SOURCE_MAINTENANCE_FAIL_SUBSTRING='install -Dm644'
+export EDITOR=moguet-test-editor
+export MOGUET_TEST_SOURCE_MAINTENANCE_EDITOR_APPEND_LINE='EDITED=yes'
+export MOGUET_TEST_SOURCE_MAINTENANCE_FAIL_SUBSTRING='install -Dm644'
 run_fail edit-src alpha
 editor_command=$(sed -n '1p' "$command_log")
 edit_temp_path=${editor_command##* }
@@ -1028,16 +1028,16 @@ rm -f "$edit_temp_path"
 setup_case edit-src-editor-failure-continues
 printf 'FIRST=original\n' > "$preference_dir/first"
 printf 'SECOND=original\n' > "$preference_dir/second"
-export EDITOR=jpacker-test-editor
-export JPACKER_TEST_SOURCE_MAINTENANCE_EDITOR_APPEND_LINE='EDITED=yes'
-export JPACKER_TEST_SOURCE_MAINTENANCE_EDITOR_FAIL_SUBSTRING=jpacker-edit-src-first.
+export EDITOR=moguet-test-editor
+export MOGUET_TEST_SOURCE_MAINTENANCE_EDITOR_APPEND_LINE='EDITED=yes'
+export MOGUET_TEST_SOURCE_MAINTENANCE_EDITOR_FAIL_SUBSTRING=moguet-edit-src-first.
 run_fail edit-src first second
 first_editor_command=$(sed -n '1p' "$command_log")
 second_editor_command=$(sed -n '2p' "$command_log")
 first_temp_path=${first_editor_command##* }
 second_temp_path=${second_editor_command##* }
 case $second_editor_command in
-    "jpacker-test-editor /tmp/jpacker-edit-src-second."??????)
+    "moguet-test-editor /tmp/moguet-edit-src-second."??????)
         ;;
     *)
         echo "edit-src did not continue after editor failure" >&2
@@ -1054,11 +1054,11 @@ setup_case edit-src-source-validation-continues
 printf 'FIRST=original\n' > "$preference_dir/first"
 printf 'SECOND=original\n' > "$preference_dir/second"
 printf 'UNREVIEWED=yes\n' > "$case_dir/symlink-target"
-export EDITOR=jpacker-test-editor
-export JPACKER_TEST_SOURCE_MAINTENANCE_EDITOR_APPEND_LINE='EDITED=yes'
-export JPACKER_TEST_SOURCE_MAINTENANCE_EDITOR_REPLACEMENT_KIND=symlink
-export JPACKER_TEST_SOURCE_MAINTENANCE_EDITOR_REPLACEMENT_SUBSTRING=jpacker-edit-src-first.
-export JPACKER_TEST_SOURCE_MAINTENANCE_EDITOR_REPLACEMENT_TARGET=$case_dir/symlink-target
+export EDITOR=moguet-test-editor
+export MOGUET_TEST_SOURCE_MAINTENANCE_EDITOR_APPEND_LINE='EDITED=yes'
+export MOGUET_TEST_SOURCE_MAINTENANCE_EDITOR_REPLACEMENT_KIND=symlink
+export MOGUET_TEST_SOURCE_MAINTENANCE_EDITOR_REPLACEMENT_SUBSTRING=moguet-edit-src-first.
+export MOGUET_TEST_SOURCE_MAINTENANCE_EDITOR_REPLACEMENT_TARGET=$case_dir/symlink-target
 run_fail edit-src first second
 first_editor_command=$(sed -n '1p' "$command_log")
 second_editor_command=$(sed -n '2p' "$command_log")
@@ -1073,12 +1073,12 @@ assert_contains "EDITED=yes" "$preference_dir/second"
 setup_case edit-src-source-fd-zero
 : > "$case_dir/log-parent"
 {
-    printf 'EDITOR=jpacker-test-editor\n'
+    printf 'EDITOR=moguet-test-editor\n'
     printf 'LOGFILE=%s\n' "$case_dir/log-parent/jpacker.log"
 } > "$config_file"
 printf 'FD_ZERO\000PAYLOAD' > "$case_dir/replacement-content"
-export JPACKER_TEST_SOURCE_MAINTENANCE_EDITOR_REPLACEMENT_KIND=regular
-export JPACKER_TEST_SOURCE_MAINTENANCE_EDITOR_REPLACEMENT_SOURCE=$case_dir/replacement-content
+export MOGUET_TEST_SOURCE_MAINTENANCE_EDITOR_REPLACEMENT_KIND=regular
+export MOGUET_TEST_SOURCE_MAINTENANCE_EDITOR_REPLACEMENT_SOURCE=$case_dir/replacement-content
 run_ok_stdin_closed edit-src alpha
 assert_command_at 2 "sudo install -Dm644 -- /dev/stdin $preference_dir/alpha"
 assert_file_equals "$case_dir/replacement-content" "$preference_dir/alpha"
@@ -1110,7 +1110,7 @@ for package in official-a remove-fail aur-a; do
     printf 'SOURCE=yes\n' > "$preference_dir/$package"
 done
 printf 'rm -f %s\n' "$preference_dir/remove-fail" > "$sudo_failures"
-export JPACKER_TEST_PACMAN_REPO_PACKAGES='official-a official-b remove-fail'
+export MOGUET_TEST_PACMAN_REPO_PACKAGES='official-a official-b remove-fail'
 run_fail --noconfirm revert official-a remove-fail aur-a official-b
 assert_command_at 1 "sudo rm -f $preference_dir/official-a"
 assert_command_at 2 "pacman -Si official-a"
@@ -1140,7 +1140,7 @@ printf 'SOURCE=yes\n' > "$preference_dir/official-a"
     printf 'rm -f %s\n' "$preference_dir/delete-fail"
     printf 'pacman -S official-a\n'
 } > "$sudo_failures"
-export JPACKER_TEST_PACMAN_REPO_PACKAGES=official-a
+export MOGUET_TEST_PACMAN_REPO_PACKAGES=official-a
 run_fail revert delete-fail official-a
 assert_contains "Failed to reinstall binaries." "$output_file"
 assert_not_contains "Failed to revert one or more packages." "$output_file"
@@ -1176,21 +1176,21 @@ run_clean_tty_ok y
 assert_command "sudo pacman -Sc"
 assert_path_absent "$cache_root/alpha"
 assert_path_absent "$cache_root/beta"
-assert_contains "jpacker cache cleaned." "$output_file"
+assert_contains "Moguet cache cleaned." "$output_file"
 
 setup_case clean-pacman-failure-continues
 mkdir -p "$cache_root/alpha" "$cache_root/beta"
 printf 'pacman -Sc\n' > "$sudo_failures"
 run_clean_tty_fail y
 assert_contains "Pacman clean failed or cancelled." "$output_file"
-assert_contains "jpacker cache cleaned." "$output_file"
+assert_contains "Moguet cache cleaned." "$output_file"
 assert_path_absent "$cache_root/alpha"
 assert_path_absent "$cache_root/beta"
 
 setup_case clean-partial-removal
 mkdir -p "$cache_root/alpha" "$cache_root/beta" "$case_dir/outside"
-export JPACKER_TEST_SOURCE_MAINTENANCE_PACMAN_SC_RACE_PATH=$cache_root/alpha
-export JPACKER_TEST_SOURCE_MAINTENANCE_PACMAN_SC_RACE_TARGET=$case_dir/outside
+export MOGUET_TEST_SOURCE_MAINTENANCE_PACMAN_SC_RACE_PATH=$cache_root/alpha
+export MOGUET_TEST_SOURCE_MAINTENANCE_PACMAN_SC_RACE_TARGET=$case_dir/outside
 run_clean_tty_fail y
 if [ ! -L "$cache_root/alpha" ]; then
     echo "clean race fixture did not replace the first target" >&2
@@ -1198,7 +1198,7 @@ if [ ! -L "$cache_root/alpha" ]; then
 fi
 assert_path_absent "$cache_root/beta"
 assert_contains "Failed to remove $cache_root/alpha" "$output_file"
-assert_contains "jpacker cache cleanup was incomplete." "$output_file"
+assert_contains "Moguet cache cleanup was incomplete." "$output_file"
 
 setup_case clean-prompt-no
 mkdir -p "$cache_root/alpha"
@@ -1207,20 +1207,20 @@ if [ ! -d "$cache_root/alpha" ]; then
     echo "clean removed cache after a no answer" >&2
     exit 1
 fi
-assert_contains "Skipped jpacker cache cleaning." "$output_file"
+assert_contains "Skipped Moguet cache cleaning." "$output_file"
 
 setup_case clean-empty-cache
 mkdir -p "$cache_root"
 run_ok clean
 assert_command "sudo pacman -Sc"
-assert_contains "jpacker cache is empty." "$output_file"
+assert_contains "Moguet cache is empty." "$output_file"
 
 setup_case clean-no-confirm-default
 mkdir -p "$cache_root/alpha"
 run_ok --noconfirm clean
 assert_command "sudo pacman -Sc --noconfirm"
-assert_contains "Skipping prompt (--noconfirm): Clean jpacker build cache ($cache_root)? -> no" "$output_file"
-assert_contains "Skipped jpacker cache cleaning." "$output_file"
+assert_contains "Skipping prompt (--noconfirm): Clean Moguet build cache ($cache_root)? -> no" "$output_file"
+assert_contains "Skipped Moguet cache cleaning." "$output_file"
 if [ ! -d "$cache_root/alpha" ]; then
     echo "--noconfirm changed the clean prompt default" >&2
     exit 1
@@ -1307,7 +1307,7 @@ assert_output_before "System upgrade..." "Ignoring invalid source-build preferen
 setup_case upgrade-multi-source-pkgdest-before-syu
 : > "$preference_dir/alpha"
 printf 'PKGDEST=\n' > "$preference_dir/beta"
-export JPACKER_TEST_PACMAN_REPO_PACKAGES='alpha beta'
+export MOGUET_TEST_PACMAN_REPO_PACKAGES='alpha beta'
 mkdir -p "$cache_root/preflight-sentinel"
 printf 'stable upgrade preflight fixture\n' > \
     "$cache_root/preflight-sentinel/state"
@@ -1340,8 +1340,8 @@ fi
 
 setup_case upgrade-metadata-resolver-failure
 : > "$preference_dir/alpha"
-export JPACKER_TEST_PACMAN_REPO_PACKAGES=alpha
-export JPACKER_TEST_PACKAGE_METADATA_PACMAN_CONF_EXIT_CODE=42
+export MOGUET_TEST_PACMAN_REPO_PACKAGES=alpha
+export MOGUET_TEST_PACKAGE_METADATA_PACMAN_CONF_EXIT_CODE=42
 run_upgrade_fail --noconfirm upgrade
 assert_contains "pacman-conf failed with exit code 42." "$output_file"
 assert_command_count "pacman-conf --verbose RootDir DBPath" 1
@@ -1353,8 +1353,8 @@ assert_command_content_absent "makepkg "
 setup_case upgrade-metadata-session-open-failure
 : > "$preference_dir/alpha"
 printf 'alpha 1.0-1\n' > "$package_metadata_state"
-export JPACKER_TEST_PACMAN_REPO_PACKAGES=alpha
-export JPACKER_TEST_PACKAGE_METADATA_INITIALIZE_FAILURE=1
+export MOGUET_TEST_PACMAN_REPO_PACKAGES=alpha
+export MOGUET_TEST_PACKAGE_METADATA_INITIALIZE_FAILURE=1
 run_upgrade_fail --noconfirm upgrade
 assert_contains "Failed to initialize package metadata session: system error." "$output_file"
 assert_command_count "pacman-conf --verbose RootDir DBPath" 1
@@ -1368,8 +1368,8 @@ assert_command_content_absent "makepkg "
 setup_case upgrade-metadata-query-failure
 : > "$preference_dir/alpha"
 printf 'alpha 1.0-1\n' > "$package_metadata_state"
-export JPACKER_TEST_PACMAN_REPO_PACKAGES=alpha
-export JPACKER_TEST_PACKAGE_METADATA_QUERY_FAILURE_PACKAGE=alpha
+export MOGUET_TEST_PACMAN_REPO_PACKAGES=alpha
+export MOGUET_TEST_PACKAGE_METADATA_QUERY_FAILURE_PACKAGE=alpha
 run_upgrade_fail --noconfirm upgrade
 assert_contains "Failed to query installed package metadata for alpha: Installed package query failed: database open failed." "$output_file"
 assert_command_count "pacman-conf --verbose RootDir DBPath" 1
@@ -1385,8 +1385,8 @@ for package in alpha beta gamma; do
     : > "$preference_dir/$package"
     printf '%s 1.0-1\n' "$package" >> "$package_metadata_state"
 done
-export JPACKER_TEST_PACMAN_REPO_PACKAGES='alpha beta gamma'
-export JPACKER_TEST_PACKAGE_METADATA_QUERY_FAILURE_AT=2
+export MOGUET_TEST_PACMAN_REPO_PACKAGES='alpha beta gamma'
+export MOGUET_TEST_PACKAGE_METADATA_QUERY_FAILURE_AT=2
 run_upgrade_fail --noconfirm upgrade
 assert_contains "Failed to query installed package metadata for " "$output_file"
 assert_command_count "pacman-conf --verbose RootDir DBPath" 1
@@ -1400,9 +1400,9 @@ assert_command_content_absent "makepkg "
 setup_case upgrade-database-paths-resolved-once
 : > "$preference_dir/alpha"
 printf 'alpha 1.0-1\n' > "$package_metadata_state"
-export JPACKER_TEST_PACMAN_REPO_PACKAGES=alpha
-export JPACKER_TEST_PACKAGE_METADATA_PACMAN_CONF_EXIT_CODE=42
-export JPACKER_TEST_PACKAGE_METADATA_PACMAN_CONF_FAILURE_AT=2
+export MOGUET_TEST_PACMAN_REPO_PACKAGES=alpha
+export MOGUET_TEST_PACKAGE_METADATA_PACMAN_CONF_EXIT_CODE=42
+export MOGUET_TEST_PACKAGE_METADATA_PACMAN_CONF_FAILURE_AT=2
 run_upgrade_ok --noedit --nodiff --noconfirm upgrade
 assert_command_count "pacman-conf --verbose RootDir DBPath" 1
 assert_command_count "alpm initialize" 2
@@ -1418,8 +1418,8 @@ assert_command_content_absent "pacman -U"
 setup_case upgrade-post-metadata-session-open-failure
 : > "$preference_dir/alpha"
 printf 'alpha 1.0-1\n' > "$package_metadata_state"
-export JPACKER_TEST_PACMAN_REPO_PACKAGES=alpha
-export JPACKER_TEST_PACKAGE_METADATA_INITIALIZE_FAILURE_AT=2
+export MOGUET_TEST_PACMAN_REPO_PACKAGES=alpha
+export MOGUET_TEST_PACKAGE_METADATA_INITIALIZE_FAILURE_AT=2
 run_upgrade_fail --noconfirm upgrade
 post_snapshot_failure_prefix="System upgrade completed, but post-upgrade package metadata snapshot failed: "
 post_initialize_failure_diagnostic="${post_snapshot_failure_prefix}Failed to initialize package metadata session: system error."
@@ -1439,8 +1439,8 @@ assert_command_content_absent "makepkg "
 setup_case upgrade-post-metadata-query-failure
 : > "$preference_dir/alpha"
 printf 'alpha 1.0-1\n' > "$package_metadata_state"
-export JPACKER_TEST_PACMAN_REPO_PACKAGES=alpha
-export JPACKER_TEST_PACKAGE_METADATA_QUERY_FAILURE_AT=2
+export MOGUET_TEST_PACMAN_REPO_PACKAGES=alpha
+export MOGUET_TEST_PACKAGE_METADATA_QUERY_FAILURE_AT=2
 run_upgrade_fail --noedit --nodiff --noconfirm upgrade
 post_query_failure_diagnostic="System upgrade completed, but post-upgrade package metadata query failed for alpha: Installed package query failed: database open failed. Source processing did not start."
 assert_contains "$post_query_failure_diagnostic" "$output_file"
@@ -1465,10 +1465,10 @@ for package in alpha beta gamma; do
     : > "$preference_dir/$package"
     printf '%s 1.0-1\n' "$package" >> "$package_metadata_state"
 done
-export JPACKER_TEST_PACMAN_REPO_PACKAGES='alpha beta gamma'
-export JPACKER_TEST_PACKAGE_METADATA_QUERY_FAILURE_AT=5
-export JPACKER_TEST_GIT_CLONE_FIXTURE_DIR=$multi_checkout_fixture
-export JPACKER_TEST_VERCMP_OUTPUT=1
+export MOGUET_TEST_PACMAN_REPO_PACKAGES='alpha beta gamma'
+export MOGUET_TEST_PACKAGE_METADATA_QUERY_FAILURE_AT=5
+export MOGUET_TEST_GIT_CLONE_FIXTURE_DIR=$multi_checkout_fixture
+export MOGUET_TEST_VERCMP_OUTPUT=1
 run_upgrade_fail --noedit --nodiff --noconfirm upgrade
 failed_package=$(awk '
     $1 == "alpm" && $2 == "query" {
@@ -1549,8 +1549,8 @@ done
 capture_two_source_preference_order
 makepkg_cwd_log=$case_dir/makepkg-cwd.log
 : > "$makepkg_cwd_log"
-export JPACKER_TEST_MAKEPKG_CWD_LOG=$makepkg_cwd_log
-export JPACKER_TEST_PACMAN_REPO_PACKAGES='alpha beta'
+export MOGUET_TEST_MAKEPKG_CWD_LOG=$makepkg_cwd_log
+export MOGUET_TEST_PACMAN_REPO_PACKAGES='alpha beta'
 run_upgrade_ok --noedit --nodiff --noconfirm upgrade
 assert_output_before "System upgrade..." "Processing $preference_first..." "$output_file"
 assert_output_before "Processing $preference_first..." "Processing $preference_second..." "$output_file"
@@ -1572,8 +1572,8 @@ for package in beta alpha; do
     printf '%s 1.0-1\n' "$package" >> "$package_metadata_state"
 done
 capture_two_source_preference_order
-export JPACKER_TEST_PACMAN_REPO_PACKAGES='alpha beta'
-export JPACKER_TEST_GIT_CLONE_FAIL_DESTINATION=$preference_first
+export MOGUET_TEST_PACMAN_REPO_PACKAGES='alpha beta'
+export MOGUET_TEST_GIT_CLONE_FAIL_DESTINATION=$preference_first
 run_upgrade_fail --noedit --nodiff --noconfirm upgrade
 assert_command "sudo pacman -Syu --noconfirm"
 assert_command "git clone https://gitlab.archlinux.org/archlinux/packaging/packages/$preference_first.git $preference_first"
@@ -1594,9 +1594,9 @@ done
 capture_two_source_preference_order
 install_success_log=$XDG_CACHE_HOME/pacman-u-success.log
 : > "$install_success_log"
-export JPACKER_TEST_PACMAN_REPO_PACKAGES='alpha beta'
-export JPACKER_TEST_PACMAN_U_SUCCESS_LOG=$install_success_log
-export JPACKER_TEST_REPLACE_WORKSPACE_AFTER_PACMAN_U=1
+export MOGUET_TEST_PACMAN_REPO_PACKAGES='alpha beta'
+export MOGUET_TEST_PACMAN_U_SUCCESS_LOG=$install_success_log
+export MOGUET_TEST_REPLACE_WORKSPACE_AFTER_PACMAN_U=1
 run_upgrade_fail --noedit --nodiff --noconfirm upgrade
 assert_command "sudo pacman -Syu --noconfirm"
 assert_contains "Processing $preference_first..." "$output_file"
@@ -1613,7 +1613,7 @@ setup_upgrade_transition_case \
     upgrade-unreadable-preference-stops-before-mutation \
     1.0-1 1.0-1 enabled \
     https://gitlab.archlinux.org/archlinux/packaging/packages/clean-root.git
-export JPACKER_TEST_PACMAN_REPO_PACKAGES=$upgrade_package
+export MOGUET_TEST_PACMAN_REPO_PACKAGES=$upgrade_package
 chmod 000 "$preference_dir/$upgrade_package"
 run_upgrade_fail --noedit --nodiff --noconfirm upgrade
 chmod 600 "$preference_dir/$upgrade_package"
@@ -1631,7 +1631,7 @@ setup_upgrade_transition_case \
     upgrade-rebuild-cleanbuild-option-propagation \
     1.0-1 1.0-1 enabled \
     https://gitlab.archlinux.org/archlinux/packaging/packages/clean-root.git
-export JPACKER_TEST_PACMAN_REPO_PACKAGES=$upgrade_package
+export MOGUET_TEST_PACMAN_REPO_PACKAGES=$upgrade_package
 run_upgrade_ok --noedit --nodiff --noconfirm --rebuild --cleanbuild upgrade
 assert_command "sudo pacman -Syu --noconfirm"
 assert_command_count "makepkg -sc --noconfirm -f -C" 1
@@ -1647,7 +1647,7 @@ aur_source_url=https://aur.archlinux.org/clean-root.git
 setup_upgrade_transition_case \
     issue-215-case-1-rebuild-after-official-binary-replacement \
     1.0-1 2.0-1 enabled "$official_source_url"
-export JPACKER_TEST_PACMAN_REPO_PACKAGES=$upgrade_package
+export MOGUET_TEST_PACMAN_REPO_PACKAGES=$upgrade_package
 assert_file_equals "$installed_version_before" "$installed_version_state"
 run_upgrade_ok --noedit --nodiff --noconfirm upgrade
 assert_file_equals "$installed_version_after" "$installed_version_state"
@@ -1686,7 +1686,7 @@ assert_request_log_empty
 setup_upgrade_transition_case \
     issue-215-case-2-official-version-unchanged \
     1.0-1 1.0-1 enabled "$official_source_url"
-export JPACKER_TEST_PACMAN_REPO_PACKAGES=$upgrade_package
+export MOGUET_TEST_PACMAN_REPO_PACKAGES=$upgrade_package
 assert_file_equals "$installed_version_before" "$installed_version_state"
 run_upgrade_ok --noedit --nodiff --noconfirm upgrade
 assert_file_equals "$installed_version_after" "$installed_version_state"
@@ -1722,7 +1722,7 @@ assert_request_log_empty
 setup_upgrade_transition_case \
     issue-215-case-3-no-source-preference \
     1.0-1 2.0-1 disabled "$official_source_url"
-export JPACKER_TEST_PACMAN_REPO_PACKAGES=$upgrade_package
+export MOGUET_TEST_PACMAN_REPO_PACKAGES=$upgrade_package
 assert_file_equals "$installed_version_before" "$installed_version_state"
 run_upgrade_ok --noedit --nodiff --noconfirm upgrade
 assert_file_equals "$installed_version_after" "$installed_version_state"
@@ -1783,7 +1783,7 @@ fi
 setup_upgrade_transition_case \
     issue-215-case-5-equal-version-without-transaction-change \
     2.0-1 2.0-1 enabled "$official_source_url"
-export JPACKER_TEST_PACMAN_REPO_PACKAGES=$upgrade_package
+export MOGUET_TEST_PACMAN_REPO_PACKAGES=$upgrade_package
 assert_file_equals "$installed_version_before" "$installed_version_state"
 run_upgrade_ok --noedit --nodiff --noconfirm upgrade
 assert_file_equals "$installed_version_after" "$installed_version_state"
@@ -1808,7 +1808,7 @@ assert_request_log_empty
 setup_upgrade_transition_case \
     issue-215-case-6-older-source-does-not-downgrade \
     1.0-1 3.0-1 enabled "$official_source_url"
-export JPACKER_TEST_PACMAN_REPO_PACKAGES=$upgrade_package
+export MOGUET_TEST_PACMAN_REPO_PACKAGES=$upgrade_package
 assert_file_equals "$installed_version_before" "$installed_version_state"
 run_upgrade_ok --noedit --nodiff --noconfirm upgrade
 assert_file_equals "$installed_version_after" "$installed_version_state"
@@ -1833,7 +1833,7 @@ assert_request_log_empty
 setup_upgrade_transition_case \
     issue-215-case-7-installed-by-system-transaction \
     not-installed 2.0-1 enabled "$official_source_url"
-export JPACKER_TEST_PACMAN_REPO_PACKAGES=$upgrade_package
+export MOGUET_TEST_PACMAN_REPO_PACKAGES=$upgrade_package
 assert_file_empty "$installed_version_state"
 run_upgrade_ok --noedit --nodiff --noconfirm upgrade
 assert_file_equals "$installed_version_after" "$installed_version_state"
@@ -1867,7 +1867,7 @@ assert_request_log_empty
 setup_upgrade_transition_case \
     issue-152-post-upgrade-package-absent \
     1.0-1 not-installed enabled "$official_source_url"
-export JPACKER_TEST_PACMAN_REPO_PACKAGES=$upgrade_package
+export MOGUET_TEST_PACMAN_REPO_PACKAGES=$upgrade_package
 run_upgrade_ok --noedit --nodiff --noconfirm upgrade
 assert_file_empty "$installed_version_state"
 assert_single_package_metadata_snapshots_around_syu "$upgrade_package"
@@ -1885,8 +1885,8 @@ assert_command_occurrence_before "git reset --hard origin/main" 1 "makepkg --pac
 setup_upgrade_transition_case \
     issue-152-post-upgrade-unknown-install-reason \
     2.0-1 2.0-1 enabled "$official_source_url"
-export JPACKER_TEST_PACMAN_REPO_PACKAGES=$upgrade_package
-export JPACKER_TEST_PACKAGE_METADATA_UNKNOWN_REASON_PACKAGE=$upgrade_package
+export MOGUET_TEST_PACMAN_REPO_PACKAGES=$upgrade_package
+export MOGUET_TEST_PACKAGE_METADATA_UNKNOWN_REASON_PACKAGE=$upgrade_package
 run_upgrade_ok --noedit --nodiff --noconfirm upgrade
 assert_contains "$upgrade_package is up to date (2.0-1). Skipping." "$output_file"
 assert_single_package_metadata_snapshots_around_syu "$upgrade_package" 2
@@ -1898,7 +1898,7 @@ setup_upgrade_transition_case \
     issue-152-mixed-valid-and-invalid-post-entries \
     2.0-1 2.0-1 enabled "$official_source_url"
 : > "$preference_dir/bad name"
-export JPACKER_TEST_PACMAN_REPO_PACKAGES=$upgrade_package
+export MOGUET_TEST_PACMAN_REPO_PACKAGES=$upgrade_package
 run_upgrade_fail --noedit --nodiff --noconfirm upgrade
 assert_contains "Ignoring invalid source-build preference filename: bad name" "$output_file"
 assert_output_line_count "Ignoring invalid source-build preference filename: bad name" 1 "$output_file"
@@ -1924,12 +1924,12 @@ for package in alpha beta; do
     mkdir -p "$package_checkout/.git"
     write_upgrade_srcinfo "$package_checkout/.SRCINFO" 2.0 1
     printf 'pkgname=%s\npkgver=2.0\npkgrel=1\n' "$package" > "$package_checkout/PKGBUILD"
-    printf 'https://gitlab.archlinux.org/archlinux/packaging/packages/%s.git\n' "$package" > "$package_checkout/.git/.jpacker-test-remote-url"
+    printf 'https://gitlab.archlinux.org/archlinux/packaging/packages/%s.git\n' "$package" > "$package_checkout/.git/.moguet-test-remote-url"
 done
-export JPACKER_TEST_PACMAN_REPO_PACKAGES='alpha beta'
-export JPACKER_TEST_PACMAN_Q_OUTPUT_FILE=$package_metadata_state
-export JPACKER_TEST_SOURCE_MAINTENANCE_PACMAN_SYU_Q_OUTPUT_FILE=$post_syu_metadata_state
-export JPACKER_TEST_MAKEPKG_PACKAGE_METADATA_STATE_AFTER_SUCCESS_FILE=$live_metadata_after_first_makepkg
+export MOGUET_TEST_PACMAN_REPO_PACKAGES='alpha beta'
+export MOGUET_TEST_PACMAN_Q_OUTPUT_FILE=$package_metadata_state
+export MOGUET_TEST_SOURCE_MAINTENANCE_PACMAN_SYU_Q_OUTPUT_FILE=$post_syu_metadata_state
+export MOGUET_TEST_MAKEPKG_PACKAGE_METADATA_STATE_AFTER_SUCCESS_FILE=$live_metadata_after_first_makepkg
 run_upgrade_ok --noedit --nodiff --noconfirm upgrade
 assert_file_equals "$live_metadata_after_first_makepkg" "$package_metadata_state"
 assert_command_count "pacman-conf --verbose RootDir DBPath" 1
@@ -1970,8 +1970,8 @@ assert_command_prefix_count "sudo pacman -U --noconfirm --needed -- " 1
 assert_separated_source_commands 2
 
 setup_case source-plan-failure-context
-export JPACKER_TEST_MAKEPKG_EXIT_CODE=42
-export JPACKER_TEST_MAKEPKG_PACKAGELIST_EXIT_CODE=0
+export MOGUET_TEST_MAKEPKG_EXIT_CODE=42
+export MOGUET_TEST_MAKEPKG_PACKAGELIST_EXIT_CODE=0
 run_source_fail plan-failure
 assert_contains "Build-only makepkg failed with exit code 42." "$output_file"
 assert_command "git clone https://aur.archlinux.org/dep-target.git dep-target"
@@ -2018,7 +2018,7 @@ assert_separated_source_commands 1
 
 setup_case smart-source-order
 printf 'SMART=preference\n' > "$preference_dir/clean-root"
-export JPACKER_TEST_PACMAN_REPO_PACKAGES=clean-root
+export MOGUET_TEST_PACMAN_REPO_PACKAGES=clean-root
 run_source_ok smart-source
 assert_output_before \
     "Loading custom build flags from $preference_dir/clean-root" \
@@ -2031,7 +2031,7 @@ assert_command_count "makepkg -sc --noconfirm" 1
 assert_separated_source_commands 1
 
 setup_case smart-source-missing-post-snapshot
-export JPACKER_TEST_PACMAN_REPO_PACKAGES=clean-root
+export MOGUET_TEST_PACMAN_REPO_PACKAGES=clean-root
 run_source_fail smart-source-missing-post-snapshot
 assert_contains "Authoritative installed package snapshot was not supplied for clean-root." "$output_file"
 assert_command "pacman -Si clean-root"

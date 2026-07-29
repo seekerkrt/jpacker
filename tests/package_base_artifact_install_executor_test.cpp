@@ -303,7 +303,7 @@ public:
     TemporaryCacheHome() {
         const std::string template_text =
                 (fs::temp_directory_path() /
-                 "jpacker-package-base-install-test-XXXXXX")
+                 "moguet-package-base-install-test-XXXXXX")
                         .string();
         std::vector<char> path_template(
                 template_text.begin(), template_text.end());

@@ -309,7 +309,7 @@ int cmd_edit_src(
     std::string editor_cmd = (env_editor) ? std::string(env_editor) : config.editor;
     for(const auto& pkg : targets) {
         fs::path    p = source_preference_entry_path(pkg);
-        std::string temp_template = "/tmp/jpacker-edit-src-" + pkg + ".XXXXXX";
+        std::string temp_template = "/tmp/moguet-edit-src-" + pkg + ".XXXXXX";
         std::vector<char> temp_name(temp_template.begin(), temp_template.end());
         temp_name.push_back('\0');
 
@@ -497,7 +497,7 @@ void cmd_revert(
 
 int cmd_clean(const AppConfig& config) {
     // POLICY(#175): validate every cache deletion target before pacman mutation, then revalidate before remove_all.
-    // Safe-path UX remains pacman clean -> jpacker cache prompt; unsafe cache state stops before either mutation.
+    // Safe-path UX remains pacman clean -> Moguet cache prompt; unsafe cache state stops before either mutation.
     ValidatedCacheRoot              cache = prepare_trusted_cache_root();
     std::vector<ValidatedCachePath> cleanup_targets = preflight_cache_cleanup(cache);
     bool                            cache_has_entries = !fs::is_empty(cache.canonical_path());
@@ -508,7 +508,7 @@ int cmd_clean(const AppConfig& config) {
         failed = true;
     }
     if(cache_has_entries) {
-        if(ask_user("Clean jpacker build cache (" + cache.path().string() + ")?", PromptDefault::No, config)) {
+        if(ask_user("Clean Moguet build cache (" + cache.path().string() + ")?", PromptDefault::No, config)) {
             Logger::info("Removing cached build files...");
             bool cleanup_failed = false;
             for(const auto& target : cleanup_targets) {
@@ -521,14 +521,14 @@ int cmd_clean(const AppConfig& config) {
             }
             if(cleanup_failed) {
                 failed = true;
-                Logger::warn("jpacker cache cleanup was incomplete.");
+                Logger::warn("Moguet cache cleanup was incomplete.");
             } else {
-                Logger::info("jpacker cache cleaned.");
+                Logger::info("Moguet cache cleaned.");
             }
         } else
-            Logger::info("Skipped jpacker cache cleaning.");
+            Logger::info("Skipped Moguet cache cleaning.");
     } else
-        Logger::info("jpacker cache is empty.");
+        Logger::info("Moguet cache is empty.");
     return failed ? 1 : 0;
 }
 

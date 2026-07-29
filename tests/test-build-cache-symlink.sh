@@ -3,8 +3,8 @@ set -eu
 
 test_binary=$1
 repo_root=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
-JPACKER_TEST_REPOSITORY_ROOT=$repo_root
-export JPACKER_TEST_REPOSITORY_ROOT
+MOGUET_TEST_REPOSITORY_ROOT=$repo_root
+export MOGUET_TEST_REPOSITORY_ROOT
 . "$repo_root/tests/test-command-safety.sh"
 tmp_dir=$(mktemp -d)
 server_pid=
@@ -24,8 +24,8 @@ if ! command -v script >/dev/null 2>&1; then
     echo "script(1) is required for build cache cleanup tests" >&2
     exit 1
 fi
-ln -s "$test_binary" "$tmp_dir/jpacker-test"
-test_runner=$tmp_dir/jpacker-test
+ln -s "$test_binary" "$tmp_dir/moguet-test"
+test_runner=$tmp_dir/moguet-test
 
 port_file=$tmp_dir/port
 python3 "$repo_root/tests/aur_rpc_fixture_server.py" \
@@ -49,9 +49,9 @@ require_exact_test_command makepkg "$repo_root/tests/stubs/makepkg"
 require_exact_test_command pacman "$repo_root/tests/stubs/pacman"
 require_exact_test_command sudo "$repo_root/tests/stubs/sudo"
 require_exact_test_command git "$repo_root/tests/stubs/git"
-export JPACKER_TEST_AUR_RPC_BASE_URL=http://127.0.0.1:$port/rpc/
-export JPACKER_TEST_PACMAN_EXIT_CODE=1
-export JPACKER_TEST_SUDO_EXIT_CODE=0
+export MOGUET_TEST_AUR_RPC_BASE_URL=http://127.0.0.1:$port/rpc/
+export MOGUET_TEST_PACMAN_EXIT_CODE=1
+export MOGUET_TEST_SUDO_EXIT_CODE=0
 
 fail() {
     echo "$*" >&2
@@ -72,20 +72,20 @@ setup_case() {
     : > "$editor_argv_log"
     export HOME=$home_dir
     export XDG_CACHE_HOME=$xdg_cache_dir
-    export JPACKER_TEST_COMMAND_LOG=$command_log
-    export JPACKER_TEST_EDITOR_ARGV_LOG=$editor_argv_log
-    unset JPACKER_TEST_GIT_REMOTE_URL
-    unset JPACKER_TEST_GIT_CLONE_EXIT_CODE
-    unset JPACKER_TEST_GIT_CLONE_SYMLINK_TARGET
-    unset JPACKER_TEST_GIT_CLONE_FIXTURE_DIR
-    unset JPACKER_TEST_EDITOR_REPLACE_TARGET
-    unset JPACKER_TEST_EDITOR_REMOVE_TARGET
-    unset JPACKER_TEST_EDITOR_SYMLINK_TARGET
-    unset JPACKER_TEST_EDITOR_EXIT_CODE
-    unset JPACKER_TEST_PACMAN_QM_OUTPUT
-    unset JPACKER_TEST_PACMAN_REPO_PACKAGES
-    unset JPACKER_TEST_PACKAGE_BUILD_DIR
-    unset JPACKER_TEST_MAKEPKG_EXIT_CODE
+    export MOGUET_TEST_COMMAND_LOG=$command_log
+    export MOGUET_TEST_EDITOR_ARGV_LOG=$editor_argv_log
+    unset MOGUET_TEST_GIT_REMOTE_URL
+    unset MOGUET_TEST_GIT_CLONE_EXIT_CODE
+    unset MOGUET_TEST_GIT_CLONE_SYMLINK_TARGET
+    unset MOGUET_TEST_GIT_CLONE_FIXTURE_DIR
+    unset MOGUET_TEST_EDITOR_REPLACE_TARGET
+    unset MOGUET_TEST_EDITOR_REMOVE_TARGET
+    unset MOGUET_TEST_EDITOR_SYMLINK_TARGET
+    unset MOGUET_TEST_EDITOR_EXIT_CODE
+    unset MOGUET_TEST_PACMAN_QM_OUTPUT
+    unset MOGUET_TEST_PACMAN_REPO_PACKAGES
+    unset MOGUET_TEST_PACKAGE_BUILD_DIR
+    unset MOGUET_TEST_MAKEPKG_EXIT_CODE
     unset EDITOR
 
     cache_root=$XDG_CACHE_HOME/jpacker
@@ -251,7 +251,7 @@ assert_log_empty() {
 }
 
 assert_no_cache_mutation_commands() {
-    if grep -E '^(git|jpacker-test-editor|makepkg|sudo) ' "$command_log" >/dev/null; then
+    if grep -E '^(git|moguet-test-editor|makepkg|sudo) ' "$command_log" >/dev/null; then
         echo "unsafe cache path reached a git/build/install command" >&2
         cat "$command_log" >&2
         exit 1
@@ -335,14 +335,14 @@ create_checkout() {
 create_regular_repo() {
     repo_dir=$1
     mkdir -p "$repo_dir/.git"
-    printf 'pkgname=jpacker-test-fixture\npkgver=1\npkgrel=1\n' > "$repo_dir/PKGBUILD"
+    printf 'pkgname=moguet-test-fixture\npkgver=1\npkgrel=1\n' > "$repo_dir/PKGBUILD"
 }
 
 create_clone_fixture() {
     clone_fixture=$case_dir/clone-fixture
     mkdir -p "$clone_fixture/.git"
-    printf 'pkgname=jpacker-test-fixture\npkgver=1\npkgrel=1\n' > "$clone_fixture/PKGBUILD"
-    export JPACKER_TEST_GIT_CLONE_FIXTURE_DIR=$clone_fixture
+    printf 'pkgname=moguet-test-fixture\npkgver=1\npkgrel=1\n' > "$clone_fixture/PKGBUILD"
+    export MOGUET_TEST_GIT_CLONE_FIXTURE_DIR=$clone_fixture
 }
 
 snapshot_directory() {
@@ -419,7 +419,8 @@ assert_symlink "$entry_path"
 assert_directory_unchanged "$outside_dir" "$case_dir/before.snapshot"
 
 # This case is the direct canonical escape reproducer: the lexical package entry
-# is below jpacker, while its resolved checkout is outside the trusted root.
+# is below the legacy jpacker path component, while its resolved checkout is
+# outside the trusted root.
 setup_case fetch-canonical-outside
 mkdir -p "$cache_root"
 create_checkout "$outside_dir/canonical-outside"
@@ -432,7 +433,8 @@ assert_symlink "$entry_path"
 assert_directory_unchanged "$outside_dir" "$case_dir/before.snapshot"
 
 # A string-prefix check would incorrectly accept jpacker-escape as being below
-# jpacker. Component-based containment and the symlink policy must reject it.
+# the legacy jpacker path component. Component-based containment and the
+# symlink policy must reject it.
 setup_case fetch-prefix-lookalike
 mkdir -p "$cache_root"
 prefix_sibling=$XDG_CACHE_HOME/jpacker-escape
@@ -589,7 +591,7 @@ mkdir -p "$cache_root"
 create_checkout "$outside_dir/checkout"
 snapshot_directory "$outside_dir" "$case_dir/before.snapshot"
 ln -s "$outside_dir/checkout" "$entry_path"
-export JPACKER_TEST_GIT_REMOTE_URL=https://example.invalid/wrong.git
+export MOGUET_TEST_GIT_REMOTE_URL=https://example.invalid/wrong.git
 run_fail "$case_dir/output" --noedit --nodiff build clean-root
 assert_symlink_rejection "$case_dir/output" "$entry_path"
 assert_no_cache_mutation_commands
@@ -602,13 +604,13 @@ setup_case build-review-pkgbuild-replaced
 create_regular_repo "$entry_path"
 printf 'external reviewed artifact\n' > "$outside_dir/PKGBUILD"
 snapshot_directory "$outside_dir" "$case_dir/before.snapshot"
-export EDITOR=$repo_root/tests/stubs/jpacker-test-editor
-export JPACKER_TEST_EDITOR_REPLACE_TARGET=./PKGBUILD
-export JPACKER_TEST_EDITOR_SYMLINK_TARGET=$outside_dir/PKGBUILD
+export EDITOR=$repo_root/tests/stubs/moguet-test-editor
+export MOGUET_TEST_EDITOR_REPLACE_TARGET=./PKGBUILD
+export MOGUET_TEST_EDITOR_SYMLINK_TARGET=$outside_dir/PKGBUILD
 run_build_tty_fail "$case_dir/output" 'y\n'
 assert_descendant_rejection "$case_dir/output" "$entry_path/PKGBUILD" "symlink."
-assert_command "jpacker-test-editor ./PKGBUILD"
-assert_command_before "git reset --hard origin/main" "jpacker-test-editor ./PKGBUILD"
+assert_command "moguet-test-editor ./PKGBUILD"
+assert_command_before "git reset --hard origin/main" "moguet-test-editor ./PKGBUILD"
 assert_no_build_or_install_commands
 assert_symlink "$entry_path/PKGBUILD"
 assert_directory_unchanged "$outside_dir" "$case_dir/before.snapshot"
@@ -616,12 +618,12 @@ assert_directory_unchanged "$outside_dir" "$case_dir/before.snapshot"
 setup_case build-review-install-removed
 create_regular_repo "$entry_path"
 printf 'post_install() { :; }\n' > "$entry_path/clean-root.install"
-export EDITOR=$repo_root/tests/stubs/jpacker-test-editor
-export JPACKER_TEST_EDITOR_REMOVE_TARGET=clean-root.install
+export EDITOR=$repo_root/tests/stubs/moguet-test-editor
+export MOGUET_TEST_EDITOR_REMOVE_TARGET=clean-root.install
 run_build_tty_fail "$case_dir/output" 'y\n'
 assert_descendant_rejection "$case_dir/output" "$entry_path/clean-root.install" "non-regular file."
-assert_command "jpacker-test-editor ./PKGBUILD"
-assert_command_absent "jpacker-test-editor ./clean-root.install"
+assert_command "moguet-test-editor ./PKGBUILD"
+assert_command_absent "moguet-test-editor ./clean-root.install"
 assert_no_build_or_install_commands
 assert_path_absent "$entry_path/clean-root.install"
 
@@ -701,7 +703,7 @@ setup_case fetch-clone-remote-mismatch-rollback
 create_clone_fixture
 printf 'outside sibling marker\n' > "$outside_dir/marker"
 snapshot_directory "$outside_dir" "$case_dir/before.snapshot"
-export JPACKER_TEST_GIT_REMOTE_URL=https://example.invalid/wrong.git
+export MOGUET_TEST_GIT_REMOTE_URL=https://example.invalid/wrong.git
 run_fail "$case_dir/output" fetch clean-root
 assert_contains "Remote URL mismatch for clean-root: https://example.invalid/wrong.git" "$case_dir/output"
 assert_command "git clone https://aur.archlinux.org/clean-root.git clean-root"
@@ -709,7 +711,7 @@ assert_command "git config --get remote.origin.url"
 assert_command_before "git clone https://aur.archlinux.org/clean-root.git clean-root" "git config --get remote.origin.url"
 assert_command_absent "git fetch origin"
 assert_command_absent "git reset --hard origin/main"
-assert_command_absent "jpacker-test-editor ./PKGBUILD"
+assert_command_absent "moguet-test-editor ./PKGBUILD"
 assert_no_build_or_install_commands
 assert_path_absent "$entry_path"
 assert_directory_unchanged "$outside_dir" "$case_dir/before.snapshot"
@@ -718,7 +720,7 @@ setup_case build-clone-remote-mismatch-rollback
 create_clone_fixture
 printf 'outside sibling marker\n' > "$outside_dir/marker"
 snapshot_directory "$outside_dir" "$case_dir/before.snapshot"
-export JPACKER_TEST_GIT_REMOTE_URL=https://example.invalid/wrong.git
+export MOGUET_TEST_GIT_REMOTE_URL=https://example.invalid/wrong.git
 run_fail "$case_dir/output" --noedit --nodiff build clean-root
 assert_contains "Remote URL mismatch for clean-root" "$case_dir/output"
 assert_command "git clone https://aur.archlinux.org/clean-root.git clean-root"
@@ -726,7 +728,7 @@ assert_command "git config --get remote.origin.url"
 assert_command_before "git clone https://aur.archlinux.org/clean-root.git clean-root" "git config --get remote.origin.url"
 assert_command_absent "git fetch origin"
 assert_command_absent "git reset --hard origin/main"
-assert_command_absent "jpacker-test-editor ./PKGBUILD"
+assert_command_absent "moguet-test-editor ./PKGBUILD"
 assert_no_build_or_install_commands
 assert_path_absent "$entry_path"
 assert_directory_unchanged "$outside_dir" "$case_dir/before.snapshot"
@@ -734,7 +736,7 @@ assert_directory_unchanged "$outside_dir" "$case_dir/before.snapshot"
 setup_case build-clone-valid-descendants
 create_clone_fixture
 printf 'post_install() { :; }\n' > "$clone_fixture/clean-root.install"
-export JPACKER_TEST_MAKEPKG_EXIT_CODE=0
+export MOGUET_TEST_MAKEPKG_EXIT_CODE=0
 run_ok "$case_dir/output" --noedit --nodiff build clean-root
 assert_command "git clone https://aur.archlinux.org/clean-root.git clean-root"
 assert_command "git config --get remote.origin.url"
@@ -758,7 +760,7 @@ assert_command "git fetch origin"
 assert_command_before "git config --get remote.origin.url" "git fetch origin"
 assert_command_absent "git clone https://aur.archlinux.org/clean-root.git clean-root"
 assert_command_absent "git reset --hard origin/main"
-assert_command_absent "jpacker-test-editor ./PKGBUILD"
+assert_command_absent "moguet-test-editor ./PKGBUILD"
 assert_no_build_or_install_commands
 
 setup_case regular-missing-fetch
@@ -768,7 +770,7 @@ assert_command "git config --get remote.origin.url"
 assert_command_before "git clone https://aur.archlinux.org/clean-root.git clean-root" "git config --get remote.origin.url"
 assert_command_absent "git fetch origin"
 assert_command_absent "git reset --hard origin/main"
-assert_command_absent "jpacker-test-editor ./PKGBUILD"
+assert_command_absent "moguet-test-editor ./PKGBUILD"
 assert_no_build_or_install_commands
 if [ ! -d "$entry_path/.git" ] || [ -L "$entry_path/.git" ] ||
    [ ! -f "$entry_path/PKGBUILD" ] || [ -L "$entry_path/PKGBUILD" ]; then
@@ -789,18 +791,18 @@ assert_command_before "git reset --hard origin/main" "makepkg --packagelist"
 setup_case regular-existing-review
 create_regular_repo "$entry_path"
 printf 'post_install() { :; }\n' > "$entry_path/clean-root.install"
-export EDITOR=$repo_root/tests/stubs/jpacker-test-editor
-export JPACKER_TEST_MAKEPKG_EXIT_CODE=0
+export EDITOR=$repo_root/tests/stubs/moguet-test-editor
+export MOGUET_TEST_MAKEPKG_EXIT_CODE=0
 run_build_tty_ok "$case_dir/output" 'y\ny\ny\n'
 assert_contains "Review target: PKGBUILD" "$case_dir/output"
 assert_contains "clean-root.install" "$case_dir/output"
-assert_command "jpacker-test-editor ./PKGBUILD"
-assert_command "jpacker-test-editor ./clean-root.install"
+assert_command "moguet-test-editor ./PKGBUILD"
+assert_command "moguet-test-editor ./clean-root.install"
 assert_command "makepkg --packagelist"
 assert_command "makepkg -sc"
-assert_command_before "git reset --hard origin/main" "jpacker-test-editor ./PKGBUILD"
-assert_command_before "jpacker-test-editor ./PKGBUILD" "jpacker-test-editor ./clean-root.install"
-assert_command_before "jpacker-test-editor ./clean-root.install" "makepkg --packagelist"
+assert_command_before "git reset --hard origin/main" "moguet-test-editor ./PKGBUILD"
+assert_command_before "moguet-test-editor ./PKGBUILD" "moguet-test-editor ./clean-root.install"
+assert_command_before "moguet-test-editor ./clean-root.install" "makepkg --packagelist"
 assert_editor_argv_log 'argv-begin
 arg[0]=<./PKGBUILD>
 target=<./PKGBUILD>
@@ -814,16 +816,16 @@ assert_editor_targets_not_option_like
 setup_case regular-existing-leading-hyphen-review
 create_regular_repo "$entry_path"
 printf 'post_install() { :; }\n' > "$entry_path/-option.install"
-export EDITOR=$repo_root/tests/stubs/jpacker-test-editor
-export JPACKER_TEST_MAKEPKG_EXIT_CODE=0
+export EDITOR=$repo_root/tests/stubs/moguet-test-editor
+export MOGUET_TEST_MAKEPKG_EXIT_CODE=0
 run_build_tty_ok "$case_dir/output" 'y\ny\ny\n'
 assert_contains "-option.install" "$case_dir/output"
-assert_command "jpacker-test-editor ./PKGBUILD"
-assert_command "jpacker-test-editor ./-option.install"
+assert_command "moguet-test-editor ./PKGBUILD"
+assert_command "moguet-test-editor ./-option.install"
 assert_command "makepkg --packagelist"
 assert_command "makepkg -sc"
-assert_command_before "jpacker-test-editor ./PKGBUILD" "jpacker-test-editor ./-option.install"
-assert_command_before "jpacker-test-editor ./-option.install" "makepkg --packagelist"
+assert_command_before "moguet-test-editor ./PKGBUILD" "moguet-test-editor ./-option.install"
+assert_command_before "moguet-test-editor ./-option.install" "makepkg --packagelist"
 assert_editor_argv_log 'argv-begin
 arg[0]=<./PKGBUILD>
 target=<./PKGBUILD>
@@ -837,11 +839,11 @@ assert_editor_targets_not_option_like
 setup_case regular-existing-leading-hyphen-editor-failure
 create_regular_repo "$entry_path"
 printf 'post_install() { :; }\n' > "$entry_path/-option.install"
-export EDITOR=$repo_root/tests/stubs/jpacker-test-editor
-export JPACKER_TEST_EDITOR_EXIT_CODE=42
+export EDITOR=$repo_root/tests/stubs/moguet-test-editor
+export MOGUET_TEST_EDITOR_EXIT_CODE=42
 run_build_tty_fail "$case_dir/output" 'n\ny\n'
 assert_contains "Editor failed." "$case_dir/output"
-assert_command "jpacker-test-editor ./-option.install"
+assert_command "moguet-test-editor ./-option.install"
 assert_no_build_or_install_commands
 assert_editor_argv_log 'argv-begin
 arg[0]=<./-option.install>
@@ -852,14 +854,14 @@ assert_editor_targets_not_option_like
 setup_case fetch-existing-remote-mismatch
 create_regular_repo "$entry_path"
 printf 'old clone marker\n' > "$entry_path/old-marker"
-printf 'https://example.invalid/wrong.git\n' > "$entry_path/.git/.jpacker-test-remote-url"
+printf 'https://example.invalid/wrong.git\n' > "$entry_path/.git/.moguet-test-remote-url"
 run_fail "$case_dir/output" fetch clean-root
 assert_contains "Remote URL mismatch for clean-root: https://example.invalid/wrong.git" "$case_dir/output"
 assert_command "git config --get remote.origin.url"
 assert_command_absent "git clone https://aur.archlinux.org/clean-root.git clean-root"
 assert_command_absent "git fetch origin"
 assert_command_absent "git reset --hard origin/main"
-assert_command_absent "jpacker-test-editor ./PKGBUILD"
+assert_command_absent "moguet-test-editor ./PKGBUILD"
 assert_no_build_or_install_commands
 assert_contains "old clone marker" "$entry_path/old-marker"
 if [ ! -d "$entry_path/.git" ]; then
@@ -869,7 +871,7 @@ fi
 setup_case build-existing-remote-mismatch
 create_regular_repo "$entry_path"
 printf 'old clone marker\n' > "$entry_path/old-marker"
-printf 'https://example.invalid/wrong.git\n' > "$entry_path/.git/.jpacker-test-remote-url"
+printf 'https://example.invalid/wrong.git\n' > "$entry_path/.git/.moguet-test-remote-url"
 run_fail "$case_dir/output" --noedit --nodiff build clean-root
 assert_contains "Remote URL mismatch. Re-cloning..." "$case_dir/output"
 assert_output_before "Remote URL mismatch. Re-cloning..." "Running: git clone" "$case_dir/output"
@@ -891,7 +893,7 @@ fi
 setup_case fetch-clone-failure-rollback
 printf 'outside sibling marker\n' > "$outside_dir/marker"
 snapshot_directory "$outside_dir" "$case_dir/before.snapshot"
-export JPACKER_TEST_GIT_CLONE_EXIT_CODE=42
+export MOGUET_TEST_GIT_CLONE_EXIT_CODE=42
 run_fail "$case_dir/output" fetch clean-root
 assert_command "git clone https://aur.archlinux.org/clean-root.git clean-root"
 assert_path_absent "$entry_path"
@@ -900,7 +902,7 @@ assert_directory_unchanged "$outside_dir" "$case_dir/before.snapshot"
 setup_case build-clone-failure-rollback
 printf 'outside sibling marker\n' > "$outside_dir/marker"
 snapshot_directory "$outside_dir" "$case_dir/before.snapshot"
-export JPACKER_TEST_GIT_CLONE_EXIT_CODE=42
+export MOGUET_TEST_GIT_CLONE_EXIT_CODE=42
 run_fail "$case_dir/output" --noedit --nodiff build clean-root
 assert_command "git clone https://aur.archlinux.org/clean-root.git clean-root"
 assert_command_absent "makepkg --packagelist"
@@ -912,8 +914,8 @@ assert_directory_unchanged "$outside_dir" "$case_dir/before.snapshot"
 setup_case fetch-clone-symlink-rollback-refusal
 create_checkout "$outside_dir/checkout"
 snapshot_directory "$outside_dir" "$case_dir/before.snapshot"
-export JPACKER_TEST_GIT_CLONE_SYMLINK_TARGET=$outside_dir/checkout
-export JPACKER_TEST_GIT_CLONE_EXIT_CODE=42
+export MOGUET_TEST_GIT_CLONE_SYMLINK_TARGET=$outside_dir/checkout
+export MOGUET_TEST_GIT_CLONE_EXIT_CODE=42
 run_fail "$case_dir/output" fetch clean-root
 assert_command "git clone https://aur.archlinux.org/clean-root.git clean-root"
 assert_contains "Refusing unsafe clone rollback" "$case_dir/output"
@@ -951,9 +953,9 @@ run_clean_tty_ok "$case_dir/output"
 assert_only_command "sudo pacman -Sc"
 assert_path_absent "$cache_root/regular-entry"
 if [ ! -f "$cache_root/jpacker.log" ]; then
-    fail "regular clean removed the jpacker log"
+    fail "regular clean removed the legacy jpacker.log file"
 fi
-assert_contains "jpacker cache cleaned." "$case_dir/output"
-assert_output_before "Running: sudo pacman" "Clean jpacker build cache" "$case_dir/output"
+assert_contains "Moguet cache cleaned." "$case_dir/output"
+assert_output_before "Running: sudo pacman" "Clean Moguet build cache" "$case_dir/output"
 
 echo "build cache symlink integration tests: all checks passed"

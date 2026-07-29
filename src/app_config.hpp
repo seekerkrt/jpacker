@@ -3,7 +3,7 @@
 #include <filesystem>
 #include <string>
 
-// jpacker.conf と runner の CLI override 合成後に、1回の実行で参照する設定状態。
+// legacy jpacker.conf と runner の CLI override 合成後に、1回の実行で参照する設定状態。
 struct AppConfig {
     bool        no_edit = false;
     bool        no_diff = false;

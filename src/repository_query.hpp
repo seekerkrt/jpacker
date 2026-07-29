@@ -59,7 +59,7 @@ StrictRepositoryProvidersQueryResult query_repository_providers_strict(
 std::vector<InstalledPackage> get_foreign_packages();
 std::set<std::string> get_foreign_package_names();
 
-#ifdef JPACKER_ENABLE_REPOSITORY_QUERY_TEST_HOOKS
+#ifdef MOGUET_ENABLE_REPOSITORY_QUERY_TEST_HOOKS
 std::vector<ProvidedDependency>
 parse_legacy_repository_provider_candidates_for_test(
         const std::string& description,

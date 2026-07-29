@@ -4,8 +4,8 @@ set -eu
 module_test_binary=$1
 integration_test_binary=$2
 repo_root=$(CDPATH='' cd "$(dirname "$0")/.." && pwd)
-JPACKER_TEST_REPOSITORY_ROOT=$repo_root
-export JPACKER_TEST_REPOSITORY_ROOT
+MOGUET_TEST_REPOSITORY_ROOT=$repo_root
+export MOGUET_TEST_REPOSITORY_ROOT
 . "$repo_root/tests/test-command-safety.sh"
 export PATH="$repo_root/tests/stubs:/usr/bin:/bin"
 require_exact_test_command pacman-conf "$repo_root/tests/stubs/pacman-conf"
@@ -200,7 +200,7 @@ while [ ! -s "$port_file" ]; do
 done
 
 port=$(cat "$port_file")
-export JPACKER_TEST_AUR_RPC_BASE_URL="http://127.0.0.1:$port/rpc/"
+export MOGUET_TEST_AUR_RPC_BASE_URL="http://127.0.0.1:$port/rpc/"
 
 setup_integration_case() {
     case_name=$1
@@ -219,19 +219,19 @@ setup_integration_case() {
 
     export HOME="$case_dir/home"
     export XDG_CACHE_HOME="$case_dir/xdg-cache"
-    export JPACKER_TEST_CONFIG_FILE="$config_file"
-    export JPACKER_TEST_COMMAND_LOG="$command_log"
-    export JPACKER_TEST_PACKAGE_BUILD_DIR="$case_dir/package.build"
-    export JPACKER_TEST_PACMAN_EXIT_CODE=1
-    export JPACKER_TEST_SUDO_EXIT_CODE=0
-    export JPACKER_TEST_MAKEPKG_EXIT_CODE=0
+    export MOGUET_TEST_CONFIG_FILE="$config_file"
+    export MOGUET_TEST_COMMAND_LOG="$command_log"
+    export MOGUET_TEST_PACKAGE_BUILD_DIR="$case_dir/package.build"
+    export MOGUET_TEST_PACMAN_EXIT_CODE=1
+    export MOGUET_TEST_SUDO_EXIT_CODE=0
+    export MOGUET_TEST_MAKEPKG_EXIT_CODE=0
     unset EDITOR
-    unset JPACKER_TEST_PACMAN_QM_OUTPUT
-    unset JPACKER_TEST_PACMAN_REPO_PACKAGES
-    unset JPACKER_TEST_GIT_REMOTE_URL
-    unset JPACKER_TEST_GIT_CLONE_EXIT_CODE
-    unset JPACKER_TEST_GIT_CLONE_SYMLINK_TARGET
-    unset JPACKER_TEST_GIT_CLONE_FIXTURE_DIR
+    unset MOGUET_TEST_PACMAN_QM_OUTPUT
+    unset MOGUET_TEST_PACMAN_REPO_PACKAGES
+    unset MOGUET_TEST_GIT_REMOTE_URL
+    unset MOGUET_TEST_GIT_CLONE_EXIT_CODE
+    unset MOGUET_TEST_GIT_CLONE_SYMLINK_TARGET
+    unset MOGUET_TEST_GIT_CLONE_FIXTURE_DIR
 }
 
 run_integration_ok() {
@@ -370,7 +370,7 @@ fi
 # registered source targetがあるupgradeはsource/system mutationの前に拒否する。
 setup_integration_case config-rmdeps-upgrade-with-source
 enable_config_rmdeps
-: > "$JPACKER_TEST_PACKAGE_BUILD_DIR/clean-root"
+: > "$MOGUET_TEST_PACKAGE_BUILD_DIR/clean-root"
 run_integration_fail upgrade
 assert_contains "Separated build/install does not support --rmdeps." "$output_file"
 assert_command_log_empty
@@ -386,9 +386,9 @@ assert_command_absent " -r"
 # 同一processでparse failure後のg_configを検査し、途中までのCLI overrideがpublishされないことを固定する。
 setup_integration_case parse-failure
 : > "$config_file"
-export JPACKER_TEST_APP_CONFIG_CASE=parse-failure-cli-overrides
+export MOGUET_TEST_APP_CONFIG_CASE=parse-failure-cli-overrides
 run_integration_ok
-unset JPACKER_TEST_APP_CONFIG_CASE
+unset MOGUET_TEST_APP_CONFIG_CASE
 assert_contains "Missing value for option --config" "$output_file"
 assert_command_log_empty
 if [ -e "$HOME/config-log/jpacker.log" ]; then

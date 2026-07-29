@@ -3,8 +3,8 @@ set -eu
 
 test_binary=$1
 repo_root=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
-JPACKER_TEST_REPOSITORY_ROOT=$repo_root
-export JPACKER_TEST_REPOSITORY_ROOT
+MOGUET_TEST_REPOSITORY_ROOT=$repo_root
+export MOGUET_TEST_REPOSITORY_ROOT
 . "$repo_root/tests/test-command-safety.sh"
 tmp_dir=$(mktemp -d)
 case_count=0
@@ -39,12 +39,12 @@ setup_case() {
 
     export HOME=$case_dir/home
     export XDG_CACHE_HOME=$case_dir/xdg-cache
-    export JPACKER_TEST_CONFIG_FILE=$config_file
-    export JPACKER_TEST_PACKAGE_BUILD_DIR=$case_dir/package.build
-    export JPACKER_TEST_COMMAND_LOG=$command_log
-    export JPACKER_TEST_AUR_UPDATE_SCENARIO=$scenario_name
-    export JPACKER_TEST_PACMAN_EXIT_CODE=91
-    export JPACKER_TEST_SUDO_EXIT_CODE=92
+    export MOGUET_TEST_CONFIG_FILE=$config_file
+    export MOGUET_TEST_PACKAGE_BUILD_DIR=$case_dir/package.build
+    export MOGUET_TEST_COMMAND_LOG=$command_log
+    export MOGUET_TEST_AUR_UPDATE_SCENARIO=$scenario_name
+    export MOGUET_TEST_PACMAN_EXIT_CODE=91
+    export MOGUET_TEST_SUDO_EXIT_CODE=92
     case_count=$((case_count + 1))
 }
 
@@ -112,7 +112,7 @@ assert_line_before() {
 
 assert_cache_absent() {
     if [ -e "$XDG_CACHE_HOME/jpacker" ]; then
-        fail_case "invalid invocation initialized the jpacker cache"
+        fail_case "invalid invocation initialized the legacy jpacker cache"
     fi
 }
 
@@ -600,13 +600,13 @@ assert_cache_absent
 
 # Existing system routes remain exact and never enter the new pipeline.
 setup_case syu-routing-unchanged no-installed-foreign
-export JPACKER_TEST_SUDO_EXIT_CODE=0
+export MOGUET_TEST_SUDO_EXIT_CODE=0
 run_status 0 -Syu
 assert_exact_line "sudo pacman -Syu" "$command_log"
 assert_pipeline_absent
 
 setup_case upgrade-routing-unchanged no-installed-foreign
-export JPACKER_TEST_SUDO_EXIT_CODE=0
+export MOGUET_TEST_SUDO_EXIT_CODE=0
 run_status 0 upgrade
 assert_exact_line "sudo pacman -Syu" "$command_log"
 assert_pipeline_absent

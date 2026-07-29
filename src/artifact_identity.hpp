@@ -62,7 +62,7 @@ class ArtifactPackageIdentitySet final {
 
     friend ArtifactPackageIdentitySet query_artifact_package_identities(
             const ValidatedPackageArtifactSet& artifacts);
-#ifdef JPACKER_ENABLE_ARTIFACT_IDENTITY_TEST_HOOKS
+#ifdef MOGUET_ENABLE_ARTIFACT_IDENTITY_TEST_HOOKS
     friend ArtifactPackageIdentitySet
     make_artifact_package_identity_set_for_test(
             std::vector<ArtifactPackageIdentity> identities);
@@ -93,7 +93,7 @@ ArtifactPackageIdentity query_artifact_package_identity(
 ArtifactPackageIdentitySet query_artifact_package_identities(
         const ValidatedPackageArtifactSet& artifacts);
 
-#ifdef JPACKER_ENABLE_ARTIFACT_IDENTITY_TEST_HOOKS
+#ifdef MOGUET_ENABLE_ARTIFACT_IDENTITY_TEST_HOOKS
 // Pure adapter test用。filesystem capabilityやpathを生成せず、indexはvector順に固定する。
 inline ArtifactPackageIdentitySet make_artifact_package_identity_set_for_test(
         std::vector<ArtifactPackageIdentity> identities) {

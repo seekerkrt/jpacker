@@ -12,7 +12,7 @@
 
 namespace {
 
-#ifdef JPACKER_ENABLE_SEPARATED_PACKAGE_BASE_SOURCE_BUILD_TEST_HOOKS
+#ifdef MOGUET_ENABLE_SEPARATED_PACKAGE_BASE_SOURCE_BUILD_TEST_HOOKS
 SeparatedPackageBaseSourceBuildWorkspaceObserverForTest
         g_workspace_observer = nullptr;
 
@@ -411,7 +411,7 @@ execute_separated_package_base_source_build(
     return result;
 }
 
-#ifdef JPACKER_ENABLE_SEPARATED_PACKAGE_BASE_SOURCE_BUILD_TEST_HOOKS
+#ifdef MOGUET_ENABLE_SEPARATED_PACKAGE_BASE_SOURCE_BUILD_TEST_HOOKS
 void set_separated_package_base_source_build_workspace_observer_for_test(
         SeparatedPackageBaseSourceBuildWorkspaceObserverForTest observer) {
     g_workspace_observer = observer;

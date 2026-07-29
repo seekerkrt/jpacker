@@ -11,18 +11,18 @@ SRC_DIR   := src
 BUILD_DIR := build
 MANPAGE   := man/jpacker.8
 MANPAGE_IN := man/jpacker.8.in
-TEST_TARGET := build/tests/jpacker-test
+TEST_TARGET := build/tests/moguet-test
 APPLICATION_IDENTITY_TEST_TARGET := $(BUILD_DIR)/tests/application-identity-test
-ROOT_EXECUTION_IDENTITY_TEST_TARGET := $(BUILD_DIR)/tests/jpacker-root-execution-identity-test
-COMMANDS_INSPECT_TEST_TARGET := build/tests/jpacker-commands-inspect-test
-AUR_UPDATE_COMMAND_TEST_TARGET := build/tests/jpacker-aur-update-command-test
-UPGRADE_ALL_COMMAND_TEST_TARGET := build/tests/jpacker-upgrade-all-command-test
-AUR_RPC_VALIDATION_TEST_TARGET := build/tests/jpacker-aur-rpc-validation-test
+ROOT_EXECUTION_IDENTITY_TEST_TARGET := $(BUILD_DIR)/tests/moguet-root-execution-identity-test
+COMMANDS_INSPECT_TEST_TARGET := build/tests/moguet-commands-inspect-test
+AUR_UPDATE_COMMAND_TEST_TARGET := build/tests/moguet-aur-update-command-test
+UPGRADE_ALL_COMMAND_TEST_TARGET := build/tests/moguet-upgrade-all-command-test
+AUR_RPC_VALIDATION_TEST_TARGET := build/tests/moguet-aur-rpc-validation-test
 AUR_RPC_ENVELOPE_VALIDATION_TEST_TARGET := build/tests/aur-rpc-envelope-validation-test
-COMMANDS_SYNC_TEST_TARGET := build/tests/jpacker-commands-sync-test
-SOURCE_INSTALL_CHARACTERIZATION_TEST_TARGET := build/tests/jpacker-source-install-characterization-test
+COMMANDS_SYNC_TEST_TARGET := build/tests/moguet-commands-sync-test
+SOURCE_INSTALL_CHARACTERIZATION_TEST_TARGET := build/tests/moguet-source-install-characterization-test
 APP_CONFIG_MODULE_TEST_TARGET := build/tests/app-config-test
-APP_CONFIG_INTEGRATION_TEST_TARGET := build/tests/jpacker-app-config-test
+APP_CONFIG_INTEGRATION_TEST_TARGET := build/tests/moguet-app-config-test
 PACKAGE_IDENTIFIER_TEST_TARGET := build/tests/package-identifier-test
 SHELL_WORDS_TEST_TARGET := build/tests/shell-words-test
 SOURCE_ENVIRONMENT_TEST_TARGET := build/tests/source-environment-test
@@ -58,7 +58,7 @@ ARTIFACT_SELECTION_MODEL_TEST_TARGET := $(BUILD_DIR)/tests/artifact-selection-mo
 ARTIFACT_IDENTITY_SELECTION_TEST_TARGET := $(BUILD_DIR)/tests/artifact-identity-selection-test
 PACKAGE_METADATA_TEST_TARGET := $(BUILD_DIR)/tests/package-metadata-test
 PACKAGE_METADATA_INTEGRATION_TEST_TARGET := $(BUILD_DIR)/tests/package-metadata-integration-test
-UPGRADE_BASELINE_METADATA_TEST_TARGET := $(BUILD_DIR)/tests/jpacker-upgrade-baseline-metadata-test
+UPGRADE_BASELINE_METADATA_TEST_TARGET := $(BUILD_DIR)/tests/moguet-upgrade-baseline-metadata-test
 
 # --- インストール先設定 ---
 PREFIX      ?= /usr/local
@@ -653,7 +653,7 @@ LIBALPM_BUILD_TARGETS := \
 	$(AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION_TEST_TARGET) \
 	$(UPGRADE_BASELINE_METADATA_TEST_TARGET)
 
-.PHONY: all check-libalpm clean check-upgrade-all-plan-link-firewall check-system-source-upgrade-link-firewall check-aur-update-execution-runner-link-firewall check-aur-update-operation-result-link-firewall check-filtered-aur-update-operation-link-firewall check-upgrade-all-operation-link-firewall check-upgrade-all-command-link-firewall check-dependency-plan-model-link-firewall check-build-plan-artifact-target-projection-link-firewall check-artifact-selection-model-link-firewall check-artifact-identity-selection-link-firewall check-multiple-artifact-workspace-link-firewall check-multiple-artifact-identity-link-firewall check-package-base-artifact-install-plan-link-firewall check-package-base-artifact-install-executor-link-firewall check-separated-package-base-source-build-link-firewall test test-application-identity test-runtime-identity test-app-config test-package-identifier test-package-metadata test-package-metadata-integration test-repository-query test-shell-words test-source-environment test-artifact-workspace test-multiple-artifact-workspace test-artifact-identity test-multiple-artifact-identity test-artifact-install-executor test-package-base-artifact-install-plan test-package-base-artifact-install-executor test-separated-source-build test-separated-package-base-source-build test-production-source-build test-process-capture test-aur-update-plan test-upgrade-all-plan test-system-source-upgrade test-aur-update-query test-aur-update-command test-upgrade-all-command test-aur-update-execution-preflight test-aur-update-execution-preflight-integration test-aur-update-execution-preparation test-aur-update-execution-runner test-aur-update-operation-result test-filtered-aur-update-operation test-upgrade-all-operation test-dependency-plan-model test-build-plan-artifact-target-projection test-artifact-install-plan test-artifact-selection-model test-artifact-identity-selection test-command-stub-contract test-markdown-links test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-commands-inspect test-commands-source-maintenance test-commands-sync test-conflicts-replaces test-install-layout test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check install uninstall
+.PHONY: all check-libalpm clean check-upgrade-all-plan-link-firewall check-system-source-upgrade-link-firewall check-aur-update-execution-runner-link-firewall check-aur-update-operation-result-link-firewall check-filtered-aur-update-operation-link-firewall check-upgrade-all-operation-link-firewall check-upgrade-all-command-link-firewall check-dependency-plan-model-link-firewall check-build-plan-artifact-target-projection-link-firewall check-artifact-selection-model-link-firewall check-artifact-identity-selection-link-firewall check-multiple-artifact-workspace-link-firewall check-multiple-artifact-identity-link-firewall check-package-base-artifact-install-plan-link-firewall check-package-base-artifact-install-executor-link-firewall check-separated-package-base-source-build-link-firewall test test-internal-identity test-application-identity test-runtime-identity test-app-config test-package-identifier test-package-metadata test-package-metadata-integration test-repository-query test-shell-words test-source-environment test-artifact-workspace test-multiple-artifact-workspace test-artifact-identity test-multiple-artifact-identity test-artifact-install-executor test-package-base-artifact-install-plan test-package-base-artifact-install-executor test-separated-source-build test-separated-package-base-source-build test-production-source-build test-process-capture test-aur-update-plan test-upgrade-all-plan test-system-source-upgrade test-aur-update-query test-aur-update-command test-upgrade-all-command test-aur-update-execution-preflight test-aur-update-execution-preflight-integration test-aur-update-execution-preparation test-aur-update-execution-runner test-aur-update-operation-result test-filtered-aur-update-operation test-upgrade-all-operation test-dependency-plan-model test-build-plan-artifact-target-projection test-artifact-install-plan test-artifact-selection-model test-artifact-identity-selection test-command-stub-contract test-markdown-links test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-commands-inspect test-commands-source-maintenance test-commands-sync test-conflicts-replaces test-install-layout test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check install uninstall
 
 all: $(TARGET) $(MANPAGE)
 
@@ -710,24 +710,24 @@ $(ROOT_EXECUTION_IDENTITY_TEST_TARGET): $(OBJS) tests/stubs/runtime-identity/get
 $(TEST_TARGET): $(SRCS) $(HEADERS) $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling isolated integration test binary"
-	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -DJPACKER_ENABLE_TEST_OVERRIDES $(SRCS) -o $@ $(MY_LDLIBS) $(LIBALPM_LDLIBS)
+	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -DMOGUET_ENABLE_TEST_OVERRIDES $(SRCS) -o $@ $(MY_LDLIBS) $(LIBALPM_LDLIBS)
 
 $(COMMANDS_INSPECT_TEST_TARGET): $(COMMANDS_INSPECT_TEST_SRCS) $(HEADERS) tests/stubs/package-metadata/alpm_stub.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling command inspection characterization test binary"
-	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -DJPACKER_ENABLE_TEST_OVERRIDES -I$(SRC_DIR) -Itests/stubs/package-metadata $(COMMANDS_INSPECT_TEST_SRCS) -o $@ $(MY_LDLIBS)
+	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -DMOGUET_ENABLE_TEST_OVERRIDES -I$(SRC_DIR) -Itests/stubs/package-metadata $(COMMANDS_INSPECT_TEST_SRCS) -o $@ $(MY_LDLIBS)
 
 $(AUR_UPDATE_COMMAND_TEST_TARGET): $(AUR_UPDATE_COMMAND_TEST_SRCS) $(HEADERS) tests/stubs/package-metadata/alpm_stub.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling AUR update command integration test binary"
-	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -DJPACKER_ENABLE_TEST_OVERRIDES -DJPACKER_ENABLE_TEST_CONFIG_PATH -I$(SRC_DIR) -Itests/stubs/package-metadata $(AUR_UPDATE_COMMAND_TEST_SRCS) -o $@ $(MY_LDLIBS)
+	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -DMOGUET_ENABLE_TEST_OVERRIDES -DMOGUET_ENABLE_TEST_CONFIG_PATH -I$(SRC_DIR) -Itests/stubs/package-metadata $(AUR_UPDATE_COMMAND_TEST_SRCS) -o $@ $(MY_LDLIBS)
 
 $(UPGRADE_ALL_COMMAND_TEST_TARGET): $(UPGRADE_ALL_COMMAND_TEST_SRCS) $(HEADERS) tests/stubs/package-metadata/alpm_stub.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling upgrade-all command integration test binary"
 	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-DJPACKER_ENABLE_TEST_OVERRIDES \
-		-DJPACKER_ENABLE_TEST_CONFIG_PATH \
+		-DMOGUET_ENABLE_TEST_OVERRIDES \
+		-DMOGUET_ENABLE_TEST_CONFIG_PATH \
 		-I$(SRC_DIR) \
 		-Itests/stubs/package-metadata \
 		$(UPGRADE_ALL_COMMAND_TEST_SRCS) \
@@ -736,22 +736,22 @@ $(UPGRADE_ALL_COMMAND_TEST_TARGET): $(UPGRADE_ALL_COMMAND_TEST_SRCS) $(HEADERS) 
 $(AUR_RPC_VALIDATION_TEST_TARGET): $(AUR_RPC_VALIDATION_TEST_SRCS) $(HEADERS) tests/stubs/package-metadata/alpm_stub.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling AUR RPC validation fake-symbol test binary"
-	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -DJPACKER_ENABLE_TEST_OVERRIDES -DJPACKER_ENABLE_AUR_RPC_TEST_HOOKS -I$(SRC_DIR) -Itests/stubs/package-metadata $(AUR_RPC_VALIDATION_TEST_SRCS) -o $@ $(MY_LDLIBS)
+	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -DMOGUET_ENABLE_TEST_OVERRIDES -DMOGUET_ENABLE_AUR_RPC_TEST_HOOKS -I$(SRC_DIR) -Itests/stubs/package-metadata $(AUR_RPC_VALIDATION_TEST_SRCS) -o $@ $(MY_LDLIBS)
 
 $(AUR_RPC_ENVELOPE_VALIDATION_TEST_TARGET): $(AUR_RPC_ENVELOPE_VALIDATION_TEST_SRCS) $(SRC_DIR)/aur_rpc.hpp $(SRC_DIR)/dependency_spec.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/logging.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling AUR RPC envelope validation test binary"
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -DJPACKER_ENABLE_TEST_OVERRIDES -DJPACKER_ENABLE_AUR_RPC_TEST_HOOKS -I$(SRC_DIR) $(AUR_RPC_ENVELOPE_VALIDATION_TEST_SRCS) -o $@ $(MY_LDLIBS)
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -DMOGUET_ENABLE_TEST_OVERRIDES -DMOGUET_ENABLE_AUR_RPC_TEST_HOOKS -I$(SRC_DIR) $(AUR_RPC_ENVELOPE_VALIDATION_TEST_SRCS) -o $@ $(MY_LDLIBS)
 
 $(COMMANDS_SYNC_TEST_TARGET): $(COMMANDS_SYNC_TEST_SRCS) $(HEADERS) $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling sync command characterization test binary"
-	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -DJPACKER_ENABLE_TEST_OVERRIDES -DJPACKER_ENABLE_TEST_CONFIG_PATH -I$(SRC_DIR) $(COMMANDS_SYNC_TEST_SRCS) -o $@ $(MY_LDLIBS) $(LIBALPM_LDLIBS)
+	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -DMOGUET_ENABLE_TEST_OVERRIDES -DMOGUET_ENABLE_TEST_CONFIG_PATH -I$(SRC_DIR) $(COMMANDS_SYNC_TEST_SRCS) -o $@ $(MY_LDLIBS) $(LIBALPM_LDLIBS)
 
 $(SOURCE_INSTALL_CHARACTERIZATION_TEST_TARGET): tests/source_install_characterization.cpp $(SRCS) $(HEADERS) $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling shared source-install characterization test binary"
-	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -DJPACKER_ENABLE_TEST_OVERRIDES -I$(SRC_DIR) tests/source_install_characterization.cpp $(SOURCE_INSTALL_CHARACTERIZATION_TEST_SRCS) -o $@ $(MY_LDLIBS) $(LIBALPM_LDLIBS)
+	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -DMOGUET_ENABLE_TEST_OVERRIDES -I$(SRC_DIR) tests/source_install_characterization.cpp $(SOURCE_INSTALL_CHARACTERIZATION_TEST_SRCS) -o $@ $(MY_LDLIBS) $(LIBALPM_LDLIBS)
 
 $(APP_CONFIG_MODULE_TEST_TARGET): tests/app_config_test.cpp $(SRC_DIR)/app_config.cpp $(SRC_DIR)/app_config.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
@@ -761,7 +761,7 @@ $(APP_CONFIG_MODULE_TEST_TARGET): tests/app_config_test.cpp $(SRC_DIR)/app_confi
 $(APP_CONFIG_INTEGRATION_TEST_TARGET): $(SRCS) $(HEADERS) $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling app config integration test binary"
-	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -DJPACKER_ENABLE_TEST_OVERRIDES -DJPACKER_ENABLE_TEST_CONFIG_PATH -DJPACKER_ENABLE_APP_CONFIG_TEST_HOOKS $(SRCS) -o $@ $(MY_LDLIBS) $(LIBALPM_LDLIBS)
+	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -DMOGUET_ENABLE_TEST_OVERRIDES -DMOGUET_ENABLE_TEST_CONFIG_PATH -DMOGUET_ENABLE_APP_CONFIG_TEST_HOOKS $(SRCS) -o $@ $(MY_LDLIBS) $(LIBALPM_LDLIBS)
 
 $(PACKAGE_IDENTIFIER_TEST_TARGET): tests/package_identifier_test.cpp $(SRC_DIR)/package_identifier.cpp $(SRC_DIR)/package_identifier.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
@@ -781,8 +781,8 @@ $(SOURCE_ENVIRONMENT_TEST_TARGET): tests/source_environment_test.cpp $(SRC_DIR)/
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling source environment test binary"
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-DJPACKER_ENABLE_TEST_OVERRIDES \
-		-DJPACKER_ENABLE_SOURCE_PREFERENCE_TEST_HOOKS \
+		-DMOGUET_ENABLE_TEST_OVERRIDES \
+		-DMOGUET_ENABLE_SOURCE_PREFERENCE_TEST_HOOKS \
 		-I$(SRC_DIR) \
 		tests/source_environment_test.cpp \
 		$(SRC_DIR)/source_environment.cpp \
@@ -795,8 +795,8 @@ $(ARTIFACT_WORKSPACE_TEST_TARGET): $(ARTIFACT_WORKSPACE_TEST_SRCS) $(SRC_DIR)/ar
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling artifact workspace test binary"
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-DJPACKER_ENABLE_ARTIFACT_WORKSPACE_TEST_HOOKS \
-		-DJPACKER_ENABLE_TRUSTED_CACHE_TEST_HOOKS \
+		-DMOGUET_ENABLE_ARTIFACT_WORKSPACE_TEST_HOOKS \
+		-DMOGUET_ENABLE_TRUSTED_CACHE_TEST_HOOKS \
 		-I$(SRC_DIR) \
 		$(ARTIFACT_WORKSPACE_TEST_SRCS) \
 		-o $@
@@ -805,8 +805,8 @@ $(MULTIPLE_ARTIFACT_WORKSPACE_TEST_TARGET): $(MULTIPLE_ARTIFACT_WORKSPACE_TEST_S
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling multiple artifact workspace test binary"
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-DJPACKER_ENABLE_ARTIFACT_WORKSPACE_TEST_HOOKS \
-		-DJPACKER_ENABLE_TRUSTED_CACHE_TEST_HOOKS \
+		-DMOGUET_ENABLE_ARTIFACT_WORKSPACE_TEST_HOOKS \
+		-DMOGUET_ENABLE_TRUSTED_CACHE_TEST_HOOKS \
 		-I$(SRC_DIR) \
 		$(MULTIPLE_ARTIFACT_WORKSPACE_TEST_SRCS) \
 		-o $@
@@ -847,7 +847,7 @@ $(PACKAGE_BASE_ARTIFACT_INSTALL_EXECUTOR_TEST_TARGET): $(PACKAGE_BASE_ARTIFACT_I
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling PackageBase artifact install executor fake-symbol test binary"
 	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-DJPACKER_ENABLE_PACKAGE_BASE_ARTIFACT_INSTALL_PLAN_TEST_HOOKS \
+		-DMOGUET_ENABLE_PACKAGE_BASE_ARTIFACT_INSTALL_PLAN_TEST_HOOKS \
 		-I$(SRC_DIR) -Itests/stubs/package-metadata \
 		$(PACKAGE_BASE_ARTIFACT_INSTALL_EXECUTOR_TEST_SRCS) \
 		-o $@
@@ -856,7 +856,7 @@ $(SEPARATED_SOURCE_BUILD_TEST_TARGET): $(SEPARATED_SOURCE_BUILD_TEST_SRCS) $(SRC
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling separated source-build lifecycle fake-symbol test binary"
 	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-DJPACKER_ENABLE_SEPARATED_SOURCE_BUILD_TEST_HOOKS \
+		-DMOGUET_ENABLE_SEPARATED_SOURCE_BUILD_TEST_HOOKS \
 		-I$(SRC_DIR) -Itests/stubs/package-metadata \
 		$(SEPARATED_SOURCE_BUILD_TEST_SRCS) \
 		-o $@
@@ -865,7 +865,7 @@ $(SEPARATED_PACKAGE_BASE_SOURCE_BUILD_TEST_TARGET): $(SEPARATED_PACKAGE_BASE_SOU
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling separated PackageBase source-build lifecycle fake-symbol test binary"
 	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-DJPACKER_ENABLE_SEPARATED_PACKAGE_BASE_SOURCE_BUILD_TEST_HOOKS \
+		-DMOGUET_ENABLE_SEPARATED_PACKAGE_BASE_SOURCE_BUILD_TEST_HOOKS \
 		-I$(SRC_DIR) -Itests/stubs/package-metadata \
 		$(SEPARATED_PACKAGE_BASE_SOURCE_BUILD_TEST_SRCS) \
 		-o $@
@@ -874,9 +874,9 @@ $(PRODUCTION_SOURCE_BUILD_TEST_TARGET): $(PRODUCTION_SOURCE_BUILD_TEST_SRCS) $(H
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling production source-build fake-symbol test binary"
 	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-DJPACKER_ENABLE_SEPARATED_SOURCE_BUILD_TEST_HOOKS \
-		-DJPACKER_ENABLE_SEPARATED_PACKAGE_BASE_SOURCE_BUILD_TEST_HOOKS \
-		-DJPACKER_ENABLE_TEST_OVERRIDES \
+		-DMOGUET_ENABLE_SEPARATED_SOURCE_BUILD_TEST_HOOKS \
+		-DMOGUET_ENABLE_SEPARATED_PACKAGE_BASE_SOURCE_BUILD_TEST_HOOKS \
+		-DMOGUET_ENABLE_TEST_OVERRIDES \
 		-I$(SRC_DIR) -Itests/stubs/package-metadata \
 		$(PRODUCTION_SOURCE_BUILD_TEST_SRCS) \
 		-o $@ $(MY_LDLIBS)
@@ -908,7 +908,7 @@ $(SYSTEM_SOURCE_UPGRADE_TEST_TARGET): $(SYSTEM_SOURCE_UPGRADE_TEST_SRCS) $(HEADE
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling system/source upgrade phase fake-symbol test binary"
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-DJPACKER_ENABLE_SYSTEM_SOURCE_UPGRADE_TEST_HOOKS \
+		-DMOGUET_ENABLE_SYSTEM_SOURCE_UPGRADE_TEST_HOOKS \
 		-I$(SRC_DIR) \
 		$(SYSTEM_SOURCE_UPGRADE_TEST_SRCS) \
 		-o $@
@@ -937,7 +937,7 @@ $(AUR_UPDATE_EXECUTION_PREPARATION_TEST_TARGET): $(AUR_UPDATE_EXECUTION_PREPARAT
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling AUR update execution preparation fake-symbol test binary"
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-DJPACKER_ENABLE_AUR_UPDATE_EXECUTION_PREPARATION_TEST_HOOKS \
+		-DMOGUET_ENABLE_AUR_UPDATE_EXECUTION_PREPARATION_TEST_HOOKS \
 		-I$(SRC_DIR) \
 		$(AUR_UPDATE_EXECUTION_PREPARATION_TEST_SRCS) \
 		-o $@
@@ -946,9 +946,9 @@ $(AUR_UPDATE_EXECUTION_PREPARATION_INTEGRATION_TEST_TARGET): $(AUR_UPDATE_EXECUT
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling AUR update execution preparation production-reader composition test binary"
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-DJPACKER_ENABLE_TEST_OVERRIDES \
-		-DJPACKER_ENABLE_AUR_UPDATE_EXECUTION_PREPARATION_TEST_HOOKS \
-		-DJPACKER_ENABLE_SOURCE_PREFERENCE_TEST_HOOKS \
+		-DMOGUET_ENABLE_TEST_OVERRIDES \
+		-DMOGUET_ENABLE_AUR_UPDATE_EXECUTION_PREPARATION_TEST_HOOKS \
+		-DMOGUET_ENABLE_SOURCE_PREFERENCE_TEST_HOOKS \
 		-I$(SRC_DIR) \
 		$(AUR_UPDATE_EXECUTION_PREPARATION_INTEGRATION_TEST_SRCS) \
 		-o $@
@@ -957,8 +957,8 @@ $(AUR_UPDATE_EXECUTION_RUNNER_TEST_TARGET): $(AUR_UPDATE_EXECUTION_RUNNER_TEST_S
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling AUR update execution runner fake-symbol test binary"
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-DJPACKER_ENABLE_AUR_UPDATE_EXECUTION_PREPARATION_TEST_HOOKS \
-		-DJPACKER_ENABLE_AUR_UPDATE_EXECUTION_RUNNER_TEST_HOOKS \
+		-DMOGUET_ENABLE_AUR_UPDATE_EXECUTION_PREPARATION_TEST_HOOKS \
+		-DMOGUET_ENABLE_AUR_UPDATE_EXECUTION_RUNNER_TEST_HOOKS \
 		-I$(SRC_DIR) \
 		$(AUR_UPDATE_EXECUTION_RUNNER_TEST_SRCS) \
 		-o $@
@@ -975,8 +975,8 @@ $(FILTERED_AUR_UPDATE_OPERATION_TEST_TARGET): $(FILTERED_AUR_UPDATE_OPERATION_TE
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling filtered AUR update operation production-composition test binary"
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-DJPACKER_ENABLE_AUR_UPDATE_EXECUTION_PREPARATION_TEST_HOOKS \
-		-DJPACKER_ENABLE_AUR_UPDATE_EXECUTION_RUNNER_TEST_HOOKS \
+		-DMOGUET_ENABLE_AUR_UPDATE_EXECUTION_PREPARATION_TEST_HOOKS \
+		-DMOGUET_ENABLE_AUR_UPDATE_EXECUTION_RUNNER_TEST_HOOKS \
 		-I$(SRC_DIR) \
 		$(FILTERED_AUR_UPDATE_OPERATION_TEST_SRCS) \
 		-o $@
@@ -985,8 +985,8 @@ $(UPGRADE_ALL_OPERATION_TEST_TARGET): $(UPGRADE_ALL_OPERATION_TEST_SRCS) $(HEADE
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling upgrade-all operation production-composition test binary"
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-DJPACKER_ENABLE_UPGRADE_ALL_OPERATION_TEST_HOOKS \
-		-DJPACKER_ENABLE_SYSTEM_SOURCE_UPGRADE_TEST_HOOKS \
+		-DMOGUET_ENABLE_UPGRADE_ALL_OPERATION_TEST_HOOKS \
+		-DMOGUET_ENABLE_SYSTEM_SOURCE_UPGRADE_TEST_HOOKS \
 		-I$(SRC_DIR) \
 		$(UPGRADE_ALL_OPERATION_TEST_SRCS) \
 		-o $@
@@ -1005,7 +1005,7 @@ $(REPOSITORY_QUERY_TEST_TARGET): $(REPOSITORY_QUERY_TEST_SRCS) $(SRC_DIR)/reposi
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling repository query fake-symbol test binary"
 	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-DJPACKER_ENABLE_REPOSITORY_QUERY_TEST_HOOKS \
+		-DMOGUET_ENABLE_REPOSITORY_QUERY_TEST_HOOKS \
 		-I$(SRC_DIR) -Itests/stubs/package-metadata \
 		$(REPOSITORY_QUERY_TEST_SRCS) \
 		-o $@
@@ -1024,7 +1024,7 @@ $(ARTIFACT_IDENTITY_SELECTION_TEST_TARGET): $(ARTIFACT_IDENTITY_SELECTION_TEST_S
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling artifact identity selection test binary"
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-DJPACKER_ENABLE_ARTIFACT_IDENTITY_TEST_HOOKS \
+		-DMOGUET_ENABLE_ARTIFACT_IDENTITY_TEST_HOOKS \
 		-I$(SRC_DIR) \
 		$(ARTIFACT_IDENTITY_SELECTION_TEST_SRCS) \
 		-o $@
@@ -1049,12 +1049,15 @@ $(UPGRADE_BASELINE_METADATA_TEST_TARGET): $(UPGRADE_BASELINE_METADATA_TEST_SRCS)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling upgrade baseline metadata fake-symbol test binary"
 	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-DJPACKER_ENABLE_TEST_OVERRIDES \
-		-DJPACKER_ENABLE_TEST_CONFIG_PATH \
-		-DJPACKER_ENABLE_APP_CONFIG_TEST_HOOKS \
+		-DMOGUET_ENABLE_TEST_OVERRIDES \
+		-DMOGUET_ENABLE_TEST_CONFIG_PATH \
+		-DMOGUET_ENABLE_APP_CONFIG_TEST_HOOKS \
 		-I$(SRC_DIR) -Itests/stubs/package-metadata \
 		$(UPGRADE_BASELINE_METADATA_TEST_SRCS) \
 		-o $@ $(MY_LDLIBS)
+
+test-internal-identity:
+	python3 scripts/check-internal-identity.py
 
 test-application-identity: $(APPLICATION_IDENTITY_TEST_TARGET)
 	$(abspath $(APPLICATION_IDENTITY_TEST_TARGET)) "$(VERSION)"
@@ -1080,12 +1083,12 @@ test-shell-words: $(SHELL_WORDS_TEST_TARGET)
 	$(abspath $(SHELL_WORDS_TEST_TARGET))
 
 test-source-environment: $(SOURCE_ENVIRONMENT_TEST_TARGET)
-	JPACKER_TEST_PACKAGE_BUILD_DIR=$(abspath $(BUILD_DIR)/tests/source-environment-fixture) \
+	MOGUET_TEST_PACKAGE_BUILD_DIR=$(abspath $(BUILD_DIR)/tests/source-environment-fixture) \
 		$(abspath $(SOURCE_ENVIRONMENT_TEST_TARGET)) \
 		$(abspath $(BUILD_DIR)/tests/source-environment-fixture)
 
 test-artifact-workspace: $(ARTIFACT_WORKSPACE_TEST_TARGET)
-	JPACKER_TEST_MAKEPKG_STUB=$(abspath tests/stubs/makepkg) \
+	MOGUET_TEST_MAKEPKG_STUB=$(abspath tests/stubs/makepkg) \
 		$(abspath $(ARTIFACT_WORKSPACE_TEST_TARGET))
 
 check-multiple-artifact-workspace-link-firewall:
@@ -1104,7 +1107,7 @@ check-multiple-artifact-workspace-link-firewall:
 	}
 
 test-multiple-artifact-workspace: check-multiple-artifact-workspace-link-firewall $(MULTIPLE_ARTIFACT_WORKSPACE_TEST_TARGET)
-	JPACKER_TEST_MAKEPKG_STUB=$(abspath tests/stubs/makepkg) \
+	MOGUET_TEST_MAKEPKG_STUB=$(abspath tests/stubs/makepkg) \
 		$(abspath $(MULTIPLE_ARTIFACT_WORKSPACE_TEST_TARGET))
 
 test-artifact-identity: $(ARTIFACT_IDENTITY_TEST_TARGET)
@@ -1209,7 +1212,7 @@ test-separated-package-base-source-build: check-separated-package-base-source-bu
 	$(abspath $(SEPARATED_PACKAGE_BASE_SOURCE_BUILD_TEST_TARGET))
 
 test-production-source-build: $(PRODUCTION_SOURCE_BUILD_TEST_TARGET)
-	JPACKER_TEST_PACKAGE_BUILD_DIR=$(abspath $(BUILD_DIR)/tests/production-source-build-preferences) \
+	MOGUET_TEST_PACKAGE_BUILD_DIR=$(abspath $(BUILD_DIR)/tests/production-source-build-preferences) \
 		$(abspath $(PRODUCTION_SOURCE_BUILD_TEST_TARGET))
 
 test-process-capture: $(PROCESS_CAPTURE_TEST_TARGET)
@@ -1277,7 +1280,7 @@ test-aur-update-execution-preflight-integration: $(AUR_UPDATE_EXECUTION_PREFLIGH
 
 test-aur-update-execution-preparation: $(AUR_UPDATE_EXECUTION_PREPARATION_TEST_TARGET) $(AUR_UPDATE_EXECUTION_PREPARATION_INTEGRATION_TEST_TARGET)
 	$(abspath $(AUR_UPDATE_EXECUTION_PREPARATION_TEST_TARGET))
-	JPACKER_TEST_PACKAGE_BUILD_DIR=$(abspath $(BUILD_DIR)/tests/aur-update-execution-preparation-fixture) \
+	MOGUET_TEST_PACKAGE_BUILD_DIR=$(abspath $(BUILD_DIR)/tests/aur-update-execution-preparation-fixture) \
 		$(abspath $(AUR_UPDATE_EXECUTION_PREPARATION_INTEGRATION_TEST_TARGET)) \
 		$(abspath $(BUILD_DIR)/tests/aur-update-execution-preparation-fixture)
 
@@ -1509,6 +1512,7 @@ test-pkgbuild-export: $(TEST_TARGET)
 	sh tests/test-pkgbuild-export.sh $(abspath $(TEST_TARGET))
 
 test: \
+	test-internal-identity \
 	test-application-identity \
 	test-runtime-identity \
 	test-app-config \
@@ -1563,7 +1567,7 @@ test: \
 	test-source-build \
 	test-source-selection
 
-release-check: test-application-identity test-runtime-identity
+release-check: test-internal-identity test-application-identity test-runtime-identity
 	@echo ":: Checking release version consistency"
 	sh scripts/check-release-version.sh
 	@echo ":: Checking license compliance"

@@ -99,7 +99,7 @@ public:
     TemporaryCacheHome() {
         const std::string template_text =
                 (fs::temp_directory_path() /
-                 "jpacker-multiple-artifact-identity-test-XXXXXX")
+                 "moguet-multiple-artifact-identity-test-XXXXXX")
                         .string();
         std::vector<char> path_template(
                 template_text.begin(), template_text.end());

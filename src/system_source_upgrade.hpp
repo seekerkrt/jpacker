@@ -103,7 +103,7 @@ enum class SystemSourceUpgradeEventKind {
     InvalidPreferenceWarning,
 };
 
-#ifdef JPACKER_ENABLE_SYSTEM_SOURCE_UPGRADE_TEST_HOOKS
+#ifdef MOGUET_ENABLE_SYSTEM_SOURCE_UPGRADE_TEST_HOOKS
 enum class SystemSourceUpgradeUnexpectedExceptionPoint {
     SystemPhaseStarted,
     SystemPhaseCompleted,
@@ -251,7 +251,7 @@ public:
     bool is_valid() const noexcept;
     const SystemSourceUpgradePreparedSnapshot* snapshot() const noexcept;
 
-#ifdef JPACKER_ENABLE_SYSTEM_SOURCE_UPGRADE_TEST_HOOKS
+#ifdef MOGUET_ENABLE_SYSTEM_SOURCE_UPGRADE_TEST_HOOKS
     void make_first_source_correlation_inconsistent_for_test();
     void set_unexpected_exception_for_test(
             SystemSourceUpgradeUnexpectedExceptionPoint point,

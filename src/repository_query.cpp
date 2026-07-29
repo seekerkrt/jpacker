@@ -397,7 +397,7 @@ const StrictRepositoryMetadataSnapshotResult& strict_repository_metadata_snapsho
 
 } // namespace
 
-#ifdef JPACKER_ENABLE_REPOSITORY_QUERY_TEST_HOOKS
+#ifdef MOGUET_ENABLE_REPOSITORY_QUERY_TEST_HOOKS
 std::vector<ProvidedDependency>
 parse_legacy_repository_provider_candidates_for_test(
         const std::string& description,

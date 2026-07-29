@@ -9,8 +9,8 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-JPACKER_TEST_REPOSITORY_ROOT=$repo_root
-export JPACKER_TEST_REPOSITORY_ROOT
+MOGUET_TEST_REPOSITORY_ROOT=$repo_root
+export MOGUET_TEST_REPOSITORY_ROOT
 . "$repo_root/tests/test-command-safety.sh"
 
 fail() {
@@ -52,9 +52,9 @@ fi
 printf '%s\n' '#!/bin/sh' 'exit 0' > "$tmp_dir/non-executable/pacman-conf"
 chmod 644 "$tmp_dir/non-executable/pacman-conf"
 if (
-    JPACKER_TEST_CASE_STUB_ROOT=$tmp_dir/non-executable
+    MOGUET_TEST_CASE_STUB_ROOT=$tmp_dir/non-executable
     PATH=$tmp_dir/non-executable:/usr/bin:/bin
-    export JPACKER_TEST_CASE_STUB_ROOT PATH
+    export MOGUET_TEST_CASE_STUB_ROOT PATH
     require_exact_test_command pacman-conf \
         "$tmp_dir/non-executable/pacman-conf"
 ) >/dev/null 2>&1; then
@@ -63,9 +63,9 @@ fi
 
 ln -s /usr/bin/true "$tmp_dir/symlink/pacman-conf"
 if (
-    JPACKER_TEST_CASE_STUB_ROOT=$tmp_dir/symlink
+    MOGUET_TEST_CASE_STUB_ROOT=$tmp_dir/symlink
     PATH=$tmp_dir/symlink:/usr/bin:/bin
-    export JPACKER_TEST_CASE_STUB_ROOT PATH
+    export MOGUET_TEST_CASE_STUB_ROOT PATH
     require_exact_test_command pacman-conf "$tmp_dir/symlink/pacman-conf"
 ) >/dev/null 2>&1; then
     fail 'stub symlink resolving outside its allowed root was not rejected'
@@ -73,10 +73,10 @@ fi
 
 command_log=$tmp_dir/commands.log
 : > "$command_log"
-export JPACKER_TEST_COMMAND_LOG=$command_log
-export JPACKER_TEST_MAKEPKG_EXIT_CODE=0
-export JPACKER_TEST_PACMAN_EXIT_CODE=0
-export JPACKER_TEST_SUDO_EXIT_CODE=0
+export MOGUET_TEST_COMMAND_LOG=$command_log
+export MOGUET_TEST_MAKEPKG_EXIT_CODE=0
+export MOGUET_TEST_PACMAN_EXIT_CODE=0
+export MOGUET_TEST_SUDO_EXIT_CODE=0
 
 expect_rejected 'legacy makepkg install argv' \
     "$repo_root/tests/stubs/makepkg" -sic

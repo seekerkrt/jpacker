@@ -8,7 +8,7 @@
 
 namespace {
 
-enum class JpackerGlobalOption {
+enum class MoguetGlobalOption {
     NoEdit,
     NoDiff,
     NoConfirm,
@@ -19,22 +19,22 @@ enum class JpackerGlobalOption {
     Repo,
 };
 
-const std::array<std::pair<const char*, JpackerGlobalOption>, 8> JPACKER_GLOBAL_OPTIONS = {{
-        {"--noedit", JpackerGlobalOption::NoEdit},
-        {"--nodiff", JpackerGlobalOption::NoDiff},
-        {"--noconfirm", JpackerGlobalOption::NoConfirm},
-        {"--rebuild", JpackerGlobalOption::Rebuild},
-        {"--cleanbuild", JpackerGlobalOption::CleanBuild},
-        {"--rmdeps", JpackerGlobalOption::RmDeps},
-        {"--aur", JpackerGlobalOption::Aur},
-        {"--repo", JpackerGlobalOption::Repo},
+const std::array<std::pair<const char*, MoguetGlobalOption>, 8> MOGUET_GLOBAL_OPTIONS = {{
+        {"--noedit", MoguetGlobalOption::NoEdit},
+        {"--nodiff", MoguetGlobalOption::NoDiff},
+        {"--noconfirm", MoguetGlobalOption::NoConfirm},
+        {"--rebuild", MoguetGlobalOption::Rebuild},
+        {"--cleanbuild", MoguetGlobalOption::CleanBuild},
+        {"--rmdeps", MoguetGlobalOption::RmDeps},
+        {"--aur", MoguetGlobalOption::Aur},
+        {"--repo", MoguetGlobalOption::Repo},
 }};
 
-std::optional<JpackerGlobalOption> jpacker_global_option_kind(const std::string& arg) {
+std::optional<MoguetGlobalOption> moguet_global_option_kind(const std::string& arg) {
     auto option = std::find_if(
-            JPACKER_GLOBAL_OPTIONS.begin(), JPACKER_GLOBAL_OPTIONS.end(),
+            MOGUET_GLOBAL_OPTIONS.begin(), MOGUET_GLOBAL_OPTIONS.end(),
             [&arg](const auto& entry) { return arg == entry.first; });
-    if(option == JPACKER_GLOBAL_OPTIONS.end()) return std::nullopt;
+    if(option == MOGUET_GLOBAL_OPTIONS.end()) return std::nullopt;
     return option->second;
 }
 
@@ -43,37 +43,37 @@ void report_parse_error(const std::string& message) {
     std::cerr << "\033[1;31m:: Error:\033[0m " << message << std::endl;
 }
 
-bool apply_jpacker_global_option(const std::string& arg, ParsedCliArguments& parsed) {
-    std::optional<JpackerGlobalOption> option = jpacker_global_option_kind(arg);
-    if(!option.has_value()) throw std::logic_error("Unknown jpacker global option: " + arg);
+bool apply_moguet_global_option(const std::string& arg, ParsedCliArguments& parsed) {
+    std::optional<MoguetGlobalOption> option = moguet_global_option_kind(arg);
+    if(!option.has_value()) throw std::logic_error("Unknown Moguet global option: " + arg);
 
     switch(option.value()) {
-    case JpackerGlobalOption::NoEdit:
+    case MoguetGlobalOption::NoEdit:
         parsed.cli_overrides.no_edit = true;
         break;
-    case JpackerGlobalOption::NoDiff:
+    case MoguetGlobalOption::NoDiff:
         parsed.cli_overrides.no_diff = true;
         break;
-    case JpackerGlobalOption::NoConfirm:
+    case MoguetGlobalOption::NoConfirm:
         parsed.cli_overrides.no_confirm = true;
         break;
-    case JpackerGlobalOption::Rebuild:
+    case MoguetGlobalOption::Rebuild:
         parsed.cli_overrides.rebuild = true;
         break;
-    case JpackerGlobalOption::CleanBuild:
+    case MoguetGlobalOption::CleanBuild:
         parsed.cli_overrides.clean_build = true;
         break;
-    case JpackerGlobalOption::RmDeps:
+    case MoguetGlobalOption::RmDeps:
         parsed.cli_overrides.rm_deps = true;
         break;
-    case JpackerGlobalOption::Aur:
+    case MoguetGlobalOption::Aur:
         if(parsed.source_selection == PackageSourceSelection::RepoOnly) {
             report_parse_error("Cannot combine --aur and --repo.");
             return false;
         }
         parsed.source_selection = PackageSourceSelection::AurOnly;
         break;
-    case JpackerGlobalOption::Repo:
+    case MoguetGlobalOption::Repo:
         if(parsed.source_selection == PackageSourceSelection::AurOnly) {
             report_parse_error("Cannot combine --aur and --repo.");
             return false;
@@ -86,8 +86,8 @@ bool apply_jpacker_global_option(const std::string& arg, ParsedCliArguments& par
 
 } // namespace
 
-bool is_jpacker_global_option(const std::string& arg) {
-    return jpacker_global_option_kind(arg).has_value();
+bool is_moguet_global_option(const std::string& arg) {
+    return moguet_global_option_kind(arg).has_value();
 }
 
 bool pacman_option_takes_value(const std::string& arg) {
@@ -115,10 +115,10 @@ std::optional<ParsedCliArguments> parse_cli_arguments(int argc, char* argv[]) {
         }
 
         if(!has_operation) {
-            if(is_jpacker_global_option(arg)) {
-                if(!apply_jpacker_global_option(arg, parsed)) return std::nullopt;
+            if(is_moguet_global_option(arg)) {
+                if(!apply_moguet_global_option(arg, parsed)) return std::nullopt;
                 parsed.tokens.push_back(
-                        ParsedCliToken{arg, static_cast<std::size_t>(i), CliTokenRole::JpackerGlobalOption});
+                        ParsedCliToken{arg, static_cast<std::size_t>(i), CliTokenRole::MoguetGlobalOption});
                 parsed.consumed_global_options.push_back(arg);
                 continue;
             }
@@ -132,7 +132,7 @@ std::optional<ParsedCliArguments> parse_cli_arguments(int argc, char* argv[]) {
             continue;
         }
 
-        // POLICY(#173): pacmanの構文状態を確定してから、通常位置のjpacker optionだけを消費する。
+        // POLICY(#173): pacmanの構文状態を確定してから、通常位置のMoguet optionだけを消費する。
         if(parsed.pending_option.has_value()) {
             parsed.tokens.push_back(
                     ParsedCliToken{arg, static_cast<std::size_t>(i), CliTokenRole::PacmanOptionValue});
@@ -158,10 +158,10 @@ std::optional<ParsedCliArguments> parse_cli_arguments(int argc, char* argv[]) {
             parsed.end_of_options = true;
             continue;
         }
-        if(is_jpacker_global_option(arg)) {
-            if(!apply_jpacker_global_option(arg, parsed)) return std::nullopt;
+        if(is_moguet_global_option(arg)) {
+            if(!apply_moguet_global_option(arg, parsed)) return std::nullopt;
             parsed.tokens.push_back(
-                    ParsedCliToken{arg, static_cast<std::size_t>(i), CliTokenRole::JpackerGlobalOption});
+                    ParsedCliToken{arg, static_cast<std::size_t>(i), CliTokenRole::MoguetGlobalOption});
             parsed.consumed_global_options.push_back(arg);
             continue;
         }
@@ -195,7 +195,7 @@ std::vector<std::string> ordered_pacman_args_excluding_targets(
     std::vector<std::string> args;
     for(std::size_t i = 0; i < parsed.tokens.size(); ++i) {
         const ParsedCliToken& token = parsed.tokens[i];
-        if(token.role == CliTokenRole::JpackerGlobalOption) continue;
+        if(token.role == CliTokenRole::MoguetGlobalOption) continue;
         if((token.role == CliTokenRole::Target || token.role == CliTokenRole::OpaqueOperand) &&
            excluded_target_token_indices.contains(i)) {
             continue;

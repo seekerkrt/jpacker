@@ -12,8 +12,8 @@
 // linkから外した専用binaryへ、この決定的なtest seamを差し込む。
 namespace {
 
-const char* INSPECTION_SCENARIO_ENV = "JPACKER_TEST_INSPECTION_SCENARIO";
-const char* COMMAND_LOG_ENV = "JPACKER_TEST_COMMAND_LOG";
+const char* INSPECTION_SCENARIO_ENV = "MOGUET_TEST_INSPECTION_SCENARIO";
+const char* COMMAND_LOG_ENV = "MOGUET_TEST_COMMAND_LOG";
 
 std::string required_environment_value(const char* name) {
     const char* value = std::getenv(name);
@@ -45,7 +45,7 @@ AurPackageInfo package_info(
     info.Description = "inspection characterization fixture";
     info.Depends = depends;
     info.Provides = provides;
-    info.Maintainer = "jpacker-test";
+    info.Maintainer = "moguet-test";
     return info;
 }
 
@@ -89,13 +89,13 @@ std::optional<AurPackageInfo> graph_info(const std::string& package_name) {
     }
 
     if(package_name == "provider-root" || package_name == "deps-provider-root") {
-        return package_info(package_name, {"jpacker-inspect-203-virtual-provider"});
+        return package_info(package_name, {"moguet-inspect-203-virtual-provider"});
     }
-    if(package_name == "jpacker-inspect-203-virtual-provider") {
+    if(package_name == "moguet-inspect-203-virtual-provider") {
         return std::nullopt;
     }
     if(package_name == "provider-z" || package_name == "provider-a") {
-        return package_info(package_name, {}, {"jpacker-inspect-203-virtual-provider"});
+        return package_info(package_name, {}, {"moguet-inspect-203-virtual-provider"});
     }
 
     if(package_name == "fetch-preflight-root") {
@@ -259,7 +259,7 @@ std::vector<std::string> AurClient::search_names_by_provides(
         throw std::runtime_error(
                 "Unexpected inspection search-provides call: " + provided_name);
     }
-    if(provided_name == "jpacker-inspect-203-virtual-provider") {
+    if(provided_name == "moguet-inspect-203-virtual-provider") {
         // POLICY: AUR RPC order is significant to the provider presentation contract.
         return {"provider-z", "provider-a"};
     }

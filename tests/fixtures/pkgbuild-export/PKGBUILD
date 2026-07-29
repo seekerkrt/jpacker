@@ -1,4 +1,4 @@
-# Maintainer: jpacker test fixture <fixture@example.invalid>
+# Maintainer: Moguet test fixture <fixture@example.invalid>
 pkgname=('clean-root' 'clean-root-cli')
 pkgver=1.0
 pkgrel=1
@@ -10,5 +10,4 @@ sha256sums=('SKIP')
 package_clean-root() {
     printf '%s\n' "fixture $pkgver" > "$pkgdir/exported.txt"
 }
-
 

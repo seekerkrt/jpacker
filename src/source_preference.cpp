@@ -26,9 +26,9 @@
 namespace {
 
 // POLICY: test overrideもproduction rootもmain前にprocessごとに一度だけcaptureする。
-#ifdef JPACKER_ENABLE_TEST_OVERRIDES
+#ifdef MOGUET_ENABLE_TEST_OVERRIDES
 const std::string PACKAGE_BUILD_DIR = [] {
-    const char* test_package_build_dir = std::getenv("JPACKER_TEST_PACKAGE_BUILD_DIR");
+    const char* test_package_build_dir = std::getenv("MOGUET_TEST_PACKAGE_BUILD_DIR");
     if(test_package_build_dir && test_package_build_dir[0] != '\0') {
         return std::string(test_package_build_dir);
     }
@@ -58,7 +58,7 @@ public:
     }
 };
 
-#ifdef JPACKER_ENABLE_SOURCE_PREFERENCE_TEST_HOOKS
+#ifdef MOGUET_ENABLE_SOURCE_PREFERENCE_TEST_HOOKS
 struct SourcePreferenceInjectedFailure {
     std::filesystem::path            entry_path;
     SourcePreferenceTestFailurePoint failure_point;
@@ -308,7 +308,7 @@ StrictSourcePreferenceResult read_source_preference_strict(
 
     std::error_code status_error;
     std::filesystem::file_status entry_status;
-#ifdef JPACKER_ENABLE_SOURCE_PREFERENCE_TEST_HOOKS
+#ifdef MOGUET_ENABLE_SOURCE_PREFERENCE_TEST_HOOKS
     if(consume_source_preference_failure_for_test(
                entry_path, SourcePreferenceTestFailurePoint::Status)) {
         status_error = std::make_error_code(std::errc::permission_denied);
@@ -337,7 +337,7 @@ StrictSourcePreferenceResult read_source_preference_strict(
     // object typeを再検査する。parent directory pin、in-place rewrite、version tokenは
     // このreaderのthreat model外とする。
     int raw_descriptor = -1;
-#ifdef JPACKER_ENABLE_SOURCE_PREFERENCE_TEST_HOOKS
+#ifdef MOGUET_ENABLE_SOURCE_PREFERENCE_TEST_HOOKS
     if(consume_source_preference_failure_for_test(
                entry_path, SourcePreferenceTestFailurePoint::Open)) {
         errno = EACCES;
@@ -379,7 +379,7 @@ StrictSourcePreferenceResult read_source_preference_strict(
     std::array<char, 4096> buffer{};
     while(true) {
         ssize_t read_size = 0;
-#ifdef JPACKER_ENABLE_SOURCE_PREFERENCE_TEST_HOOKS
+#ifdef MOGUET_ENABLE_SOURCE_PREFERENCE_TEST_HOOKS
         read_size = read_source_preference_bytes_for_test(
                 entry_path, descriptor.get(), buffer.data(), buffer.size());
 #else
@@ -437,7 +437,7 @@ void read_source_preference_entry(
     }
 }
 
-#ifdef JPACKER_ENABLE_SOURCE_PREFERENCE_TEST_HOOKS
+#ifdef MOGUET_ENABLE_SOURCE_PREFERENCE_TEST_HOOKS
 void fail_next_source_preference_operation_for_test(
         const std::string& package_name,
         SourcePreferenceTestFailurePoint failure_point) {

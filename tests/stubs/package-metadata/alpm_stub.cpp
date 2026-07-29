@@ -291,7 +291,7 @@ void append_alpm_event(
         const char* event,
         const char* detail = nullptr) noexcept {
     const char* event_log_path =
-            std::getenv("JPACKER_TEST_PACKAGE_METADATA_EVENT_LOG");
+            std::getenv("MOGUET_TEST_PACKAGE_METADATA_EVENT_LOG");
     if(event_log_path == nullptr || event_log_path[0] == '\0') return;
 
     // POLICY: alpm_release()はnoexcept destructorから呼ばれるため、test観測もC stdioで閉じる。
@@ -327,27 +327,27 @@ bool environment_ordinal_matches(
 
 bool environment_requests_query_failure(const char* package_name) noexcept {
     const char* failure_package =
-            std::getenv("JPACKER_TEST_PACKAGE_METADATA_QUERY_FAILURE_PACKAGE");
+            std::getenv("MOGUET_TEST_PACKAGE_METADATA_QUERY_FAILURE_PACKAGE");
     if(failure_package != nullptr && package_name != nullptr &&
        std::strcmp(failure_package, package_name) == 0) {
         return true;
     }
 
     return environment_ordinal_matches(
-            "JPACKER_TEST_PACKAGE_METADATA_QUERY_FAILURE_AT",
+            "MOGUET_TEST_PACKAGE_METADATA_QUERY_FAILURE_AT",
             g_state.package_query_calls);
 }
 
 bool environment_requests_unknown_reason(const char* package_name) noexcept {
     const char* unknown_reason_package =
-            std::getenv("JPACKER_TEST_PACKAGE_METADATA_UNKNOWN_REASON_PACKAGE");
+            std::getenv("MOGUET_TEST_PACKAGE_METADATA_UNKNOWN_REASON_PACKAGE");
     return unknown_reason_package != nullptr && package_name != nullptr &&
            std::strcmp(unknown_reason_package, package_name) == 0;
 }
 
 void configure_foreign_inventory_from_environment() {
     const char* state_file_path =
-            std::getenv("JPACKER_TEST_FOREIGN_PACKAGE_INVENTORY_STATE_FILE");
+            std::getenv("MOGUET_TEST_FOREIGN_PACKAGE_INVENTORY_STATE_FILE");
     if(state_file_path == nullptr) return;
 
     std::ifstream state_file(state_file_path);
@@ -423,7 +423,7 @@ void configure_package_lookup_from_environment(
     }
 
     const char* state_file_path =
-            std::getenv("JPACKER_TEST_PACKAGE_METADATA_STATE_FILE");
+            std::getenv("MOGUET_TEST_PACKAGE_METADATA_STATE_FILE");
     if(state_file_path == nullptr) return;
 
     std::ifstream state_file(state_file_path);
@@ -464,7 +464,7 @@ void configure_repository_package_from_environment(
         const std::string& package_name,
         RepositoryPackageState& package_state) {
     const char* state_file_path =
-            std::getenv("JPACKER_TEST_REPOSITORY_METADATA_STATE_FILE");
+            std::getenv("MOGUET_TEST_REPOSITORY_METADATA_STATE_FILE");
     if(state_file_path == nullptr) return;
 
     std::ifstream state_file(state_file_path);
@@ -900,9 +900,9 @@ alpm_handle_t* alpm_initialize(
 
     bool environment_failure =
             environment_flag_is_enabled(
-                    "JPACKER_TEST_PACKAGE_METADATA_INITIALIZE_FAILURE") ||
+                    "MOGUET_TEST_PACKAGE_METADATA_INITIALIZE_FAILURE") ||
             environment_ordinal_matches(
-                    "JPACKER_TEST_PACKAGE_METADATA_INITIALIZE_FAILURE_AT",
+                    "MOGUET_TEST_PACKAGE_METADATA_INITIALIZE_FAILURE_AT",
                     g_state.initialize_calls);
     if(environment_failure || g_state.initialize_fails) {
         if(error != nullptr) {

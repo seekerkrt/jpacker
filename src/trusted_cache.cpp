@@ -105,22 +105,22 @@ void require_private_cache_root_status(
         bool require_new_root_mode) {
     if(!S_ISDIR(status.st_mode)) {
         throw std::runtime_error(
-                "Private jpacker cache root must be a directory: " +
+                "Private Moguet cache root must be a directory: " +
                 root_path.string());
     }
     if(cache_status_owner(status) != expected_effective_user) {
         throw std::runtime_error(
-                "Private jpacker cache root owner must match the effective user: " +
+                "Private Moguet cache root owner must match the effective user: " +
                 root_path.string());
     }
     if(require_new_root_mode && (status.st_mode & 07777) != 0700) {
         throw std::runtime_error(
-                "New private jpacker cache root must have mode 0700: " +
+                "New private Moguet cache root must have mode 0700: " +
                 root_path.string());
     }
     if(!has_private_cache_root_mode(status)) {
         throw std::runtime_error(
-                "Private jpacker cache root is group/world writable without the "
+                "Private Moguet cache root is group/world writable without the "
                 "sticky bit; set its mode to 0700 explicitly: " +
                 root_path.string());
     }
@@ -144,14 +144,14 @@ fs::path absolute_cache_path(const fs::path& path) {
     fs::path        absolute_path = fs::absolute(path, ec);
     if(ec) {
         throw std::runtime_error(
-                "Unable to resolve jpacker cache path " + path.string() + ": " + ec.message());
+                "Unable to resolve Moguet cache path " + path.string() + ": " + ec.message());
     }
 
     // LANDMINE(#175): lexical normalization before this check could erase a symlink/.. boundary.
     for(const auto& component : absolute_path.relative_path()) {
         if(component == "." || component == "..") {
             throw std::runtime_error(
-                    "Unsafe jpacker cache path " + absolute_path.string() +
+                    "Unsafe Moguet cache path " + absolute_path.string() +
                     ": dot path components are not allowed.");
         }
     }
@@ -166,7 +166,7 @@ fs::file_status cache_symlink_status(const fs::path& component, const fs::path& 
     }
     if(ec) {
         throw std::runtime_error(
-                "Unable to inspect jpacker cache path " + target_path.string() + " at " +
+                "Unable to inspect Moguet cache path " + target_path.string() + " at " +
                 component.string() + ": " + ec.message());
     }
     return status;
@@ -182,7 +182,7 @@ void require_no_symlink_components(const fs::path& absolute_path, bool final_may
         fs::file_status status = cache_symlink_status(current_path, absolute_path);
         if(fs::is_symlink(status)) {
             throw std::runtime_error(
-                    "Unsafe jpacker cache path " + absolute_path.string() +
+                    "Unsafe Moguet cache path " + absolute_path.string() +
                     ": symlink component is not allowed: " + current_path.string());
         }
 
@@ -192,7 +192,7 @@ void require_no_symlink_components(const fs::path& absolute_path, bool final_may
         if(fs::exists(status) && (!is_final_component || !final_may_be_nondirectory) &&
            !fs::is_directory(status)) {
             throw std::runtime_error(
-                    "Unsafe jpacker cache path " + absolute_path.string() +
+                    "Unsafe Moguet cache path " + absolute_path.string() +
                     ": non-directory path component: " + current_path.string());
         }
     }
@@ -214,14 +214,14 @@ ValidatedCacheRootState validate_cache_root_path(const fs::path& raw_root, bool 
     fs::file_status root_status = cache_symlink_status(root_path, root_path);
     if(!fs::exists(root_status)) {
         if(!create_if_missing) {
-            throw std::runtime_error("Trusted jpacker cache root is missing: " + root_path.string());
+            throw std::runtime_error("Trusted Moguet cache root is missing: " + root_path.string());
         }
 
         std::error_code ec;
         fs::create_directories(root_path, ec);
         if(ec) {
             throw std::runtime_error(
-                    "Failed to create jpacker cache root " + root_path.string() + ": " + ec.message());
+                    "Failed to create Moguet cache root " + root_path.string() + ": " + ec.message());
         }
 
         // POLICY(#175): creation is followed by the same no-follow component check before trust is granted.
@@ -230,14 +230,14 @@ ValidatedCacheRootState validate_cache_root_path(const fs::path& raw_root, bool 
     }
     if(!fs::is_directory(root_status)) {
         throw std::runtime_error(
-                "Unsafe jpacker cache root " + root_path.string() + ": expected a regular directory.");
+                "Unsafe Moguet cache root " + root_path.string() + ": expected a regular directory.");
     }
 
     std::error_code ec;
     fs::path        canonical_root = fs::canonical(root_path, ec);
     if(ec) {
         throw std::runtime_error(
-                "Failed to canonicalize jpacker cache root " + root_path.string() + ": " + ec.message());
+                "Failed to canonicalize Moguet cache root " + root_path.string() + ": " + ec.message());
     }
     return ValidatedCacheRootState{root_path, canonical_root};
 }
@@ -253,14 +253,14 @@ PreparedPrivateCacheRootState prepare_private_cache_root_path() {
     fs::create_directories(parent_path, parent_error);
     if(parent_error) {
         throw std::runtime_error(
-                "Failed to create jpacker cache parent " +
+                "Failed to create Moguet cache parent " +
                 parent_path.string() + ": " + parent_error.message());
     }
     require_no_symlink_components(root_path, false);
     fs::file_status parent_status = cache_symlink_status(parent_path, root_path);
     if(!fs::is_directory(parent_status)) {
         throw std::runtime_error(
-                "Private jpacker cache root requires an existing directory parent: " +
+                "Private Moguet cache root requires an existing directory parent: " +
                 parent_path.string());
     }
 
@@ -269,7 +269,7 @@ PreparedPrivateCacheRootState prepare_private_cache_root_path() {
             O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
     if(parent_descriptor < 0) {
         throw std::runtime_error(
-                "Failed to retain private jpacker cache parent " +
+                "Failed to retain private Moguet cache parent " +
                 parent_path.string() + ": " + std::strerror(errno));
     }
     OwnedCacheRootDescriptor opened_parent(parent_descriptor);
@@ -282,14 +282,14 @@ PreparedPrivateCacheRootState prepare_private_cache_root_path() {
                AT_SYMLINK_NOFOLLOW) != 0 ||
        !same_cache_root_identity(opened_parent_status, named_parent_status)) {
         throw std::runtime_error(
-                "Private jpacker cache parent changed during validation: " +
+                "Private Moguet cache parent changed during validation: " +
                 parent_path.string());
     }
 
     const std::string root_leaf = root_path.filename().string();
     if(root_leaf.empty()) {
         throw std::logic_error(
-                "Private jpacker cache root must have a final path component.");
+                "Private Moguet cache root must have a final path component.");
     }
 
     std::optional<struct stat> created_status;
@@ -299,7 +299,7 @@ PreparedPrivateCacheRootState prepare_private_cache_root_path() {
                AT_SYMLINK_NOFOLLOW) != 0) {
         if(errno != ENOENT) {
             throw std::runtime_error(
-                    "Failed to inspect private jpacker cache root " +
+                    "Failed to inspect private Moguet cache root " +
                     root_path.string() + ": " + std::strerror(errno));
         }
 
@@ -310,13 +310,13 @@ PreparedPrivateCacheRootState prepare_private_cache_root_path() {
                        &created_candidate, AT_SYMLINK_NOFOLLOW) != 0) {
                 // POLICY(#242): identityを証明できないpersistent root候補は削除しない。
                 throw std::runtime_error(
-                        "Failed to inspect newly created private jpacker cache root " +
+                        "Failed to inspect newly created private Moguet cache root " +
                         root_path.string() + ": " + std::strerror(errno));
             }
             created_status = created_candidate;
         } else if(errno != EEXIST) {
             throw std::runtime_error(
-                    "Failed to create private jpacker cache root " +
+                    "Failed to create private Moguet cache root " +
                     root_path.string() + ": " + std::strerror(errno));
         }
     }
@@ -337,7 +337,7 @@ OpenedPrivateCacheRootState open_private_cache_root(
             O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
     if(root_descriptor < 0) {
         throw std::runtime_error(
-                "Failed to retain private jpacker cache root " +
+                "Failed to retain private Moguet cache root " +
                 trusted_root.canonical_path().string() + ": " +
                 std::strerror(errno));
     }
@@ -346,7 +346,7 @@ OpenedPrivateCacheRootState open_private_cache_root(
     struct stat opened_status {};
     if(fstat(opened_root.get(), &opened_status) != 0) {
         throw std::runtime_error(
-                "Failed to inspect retained private jpacker cache root " +
+                "Failed to inspect retained private Moguet cache root " +
                 trusted_root.canonical_path().string() + ": " +
                 std::strerror(errno));
     }
@@ -360,7 +360,7 @@ OpenedPrivateCacheRootState open_private_cache_root(
                AT_SYMLINK_NOFOLLOW) != 0 ||
        !same_cache_root_identity(opened_status, named_status)) {
         throw std::runtime_error(
-                "Private jpacker cache root path changed identity: " +
+                "Private Moguet cache root path changed identity: " +
                 trusted_root.canonical_path().string());
     }
     require_private_cache_root_status(
@@ -371,7 +371,7 @@ OpenedPrivateCacheRootState open_private_cache_root(
        !same_cache_root_identity(created_status.value(), opened_status)) {
         // mkdiratで作成したcandidateとretained FDが一致しなければ、replacementを所有しない。
         throw std::runtime_error(
-                "New private jpacker cache root changed identity before validation: " +
+                "New private Moguet cache root changed identity before validation: " +
                 trusted_root.canonical_path().string());
     }
 
@@ -395,15 +395,15 @@ ValidatedCachePathState validate_cache_path_against_root(
     bool            path_is_directory = path_exists && fs::is_directory(status);
 
     if(requirement == CachePathRequirement::Existing && !path_exists) {
-        throw std::runtime_error("Trusted jpacker cache path is missing: " + path.string());
+        throw std::runtime_error("Trusted Moguet cache path is missing: " + path.string());
     }
     if(requirement == CachePathRequirement::ExistingDirectory && !path_is_directory) {
         throw std::runtime_error(
-                "Unsafe jpacker cache path " + path.string() + ": expected an existing directory.");
+                "Unsafe Moguet cache path " + path.string() + ": expected an existing directory.");
     }
     if(requirement == CachePathRequirement::Missing && path_exists) {
         throw std::runtime_error(
-                "Unsafe jpacker cache path " + path.string() + ": expected the path to be missing.");
+                "Unsafe Moguet cache path " + path.string() + ": expected the path to be missing.");
     }
 
     fs::path resolved_path;
@@ -412,7 +412,7 @@ ValidatedCachePathState validate_cache_path_against_root(
         resolved_path = fs::canonical(path, ec);
         if(ec) {
             throw std::runtime_error(
-                    "Failed to canonicalize jpacker cache path " + path.string() + ": " + ec.message());
+                    "Failed to canonicalize Moguet cache path " + path.string() + ": " + ec.message());
         }
     } else {
         fs::path parent_path = path.parent_path();
@@ -420,7 +420,7 @@ ValidatedCachePathState validate_cache_path_against_root(
         fs::file_status parent_status = cache_symlink_status(parent_path, path);
         if(!fs::is_directory(parent_status)) {
             throw std::runtime_error(
-                    "Unsafe jpacker cache path " + path.string() +
+                    "Unsafe Moguet cache path " + path.string() +
                     ": existing parent directory is required before creation.");
         }
 
@@ -428,11 +428,11 @@ ValidatedCachePathState validate_cache_path_against_root(
         fs::path        canonical_parent = fs::canonical(parent_path, ec);
         if(ec) {
             throw std::runtime_error(
-                    "Failed to canonicalize jpacker cache parent " + parent_path.string() + ": " + ec.message());
+                    "Failed to canonicalize Moguet cache parent " + parent_path.string() + ": " + ec.message());
         }
         if(!is_path_contained(root.canonical_path(), canonical_parent, true)) {
             throw std::runtime_error(
-                    "Unsafe jpacker cache path " + path.string() +
+                    "Unsafe Moguet cache path " + path.string() +
                     ": parent resolves outside trusted cache root " + root.canonical_path().string());
         }
 
@@ -440,14 +440,14 @@ ValidatedCachePathState validate_cache_path_against_root(
         resolved_path = fs::weakly_canonical(path, ec);
         if(ec) {
             throw std::runtime_error(
-                    "Failed to resolve missing jpacker cache path " + path.string() + ": " + ec.message());
+                    "Failed to resolve missing Moguet cache path " + path.string() + ": " + ec.message());
         }
     }
 
     // POLICY(#175): containment is path-component based; similarly prefixed sibling directories are not trusted.
     if(!is_path_contained(root.canonical_path(), resolved_path, false)) {
         throw std::runtime_error(
-                "Unsafe jpacker cache path " + path.string() + ": canonical path " +
+                "Unsafe Moguet cache path " + path.string() + ": canonical path " +
                 resolved_path.string() + " is outside trusted cache root " +
                 root.canonical_path().string());
     }
@@ -498,7 +498,7 @@ void ValidatedPrivateCacheRoot::require_unchanged_identity_for_owner(
         std::uintmax_t expected_effective_user) const {
     if(directory_descriptor_ < 0) {
         throw std::runtime_error(
-                "Private jpacker cache root is no longer owned.");
+                "Private Moguet cache root is no longer owned.");
     }
 
     ValidatedCacheRoot current_root =
@@ -506,7 +506,7 @@ void ValidatedPrivateCacheRoot::require_unchanged_identity_for_owner(
     struct stat retained_status {};
     if(fstat(directory_descriptor_, &retained_status) != 0) {
         throw std::runtime_error(
-                "Failed to inspect retained private jpacker cache root " +
+                "Failed to inspect retained private Moguet cache root " +
                 current_root.canonical_path().string() + ": " +
                 std::strerror(errno));
     }
@@ -516,7 +516,7 @@ void ValidatedPrivateCacheRoot::require_unchanged_identity_for_owner(
        cache_status_owner(retained_status) != owner_ ||
        owner_ != expected_effective_user) {
         throw std::runtime_error(
-                "Retained private jpacker cache root changed identity or owner: " +
+                "Retained private Moguet cache root changed identity or owner: " +
                 current_root.canonical_path().string());
     }
     require_private_cache_root_status(
@@ -532,7 +532,7 @@ void ValidatedPrivateCacheRoot::require_unchanged_identity_for_owner(
        cache_status_inode(named_status) != inode_ ||
        cache_status_owner(named_status) != owner_) {
         throw std::runtime_error(
-                "Private jpacker cache root path changed identity or owner: " +
+                "Private Moguet cache root path changed identity or owner: " +
                 current_root.canonical_path().string());
     }
     require_private_cache_root_status(
@@ -563,7 +563,7 @@ ValidatedPrivateCacheRoot prepare_private_trusted_cache_root() {
     return private_root;
 }
 
-#ifdef JPACKER_ENABLE_TRUSTED_CACHE_TEST_HOOKS
+#ifdef MOGUET_ENABLE_TRUSTED_CACHE_TEST_HOOKS
 void require_private_cache_root_identity_for_test(
         const ValidatedPrivateCacheRoot& root,
         std::uintmax_t expected_effective_user) {
@@ -582,7 +582,7 @@ ValidatedCacheRoot require_unchanged_cache_root(const ValidatedCacheRoot& expect
     ValidatedCacheRootState current_root = validate_cache_root_path(expected_root.path(), false);
     if(current_root.canonical_path != expected_root.canonical_path()) {
         throw std::runtime_error(
-                "Unsafe jpacker cache root " + expected_root.path().string() +
+                "Unsafe Moguet cache root " + expected_root.path().string() +
                 ": canonical path changed after validation.");
     }
     return ValidatedCacheRoot(std::move(current_root.path), std::move(current_root.canonical_path));
@@ -606,7 +606,7 @@ ValidatedCachePath revalidate_trusted_cache_path(
             expected_path.root_, expected_path.path_, requirement);
     if(current_path.canonical_path() != expected_path.canonical_path_) {
         throw std::runtime_error(
-                "Unsafe jpacker cache path " + expected_path.path_.string() +
+                "Unsafe Moguet cache path " + expected_path.path_.string() +
                 ": canonical path changed after validation.");
     }
     return current_path;
@@ -619,7 +619,7 @@ void remove_trusted_cache_path(const ValidatedCachePath& expected_path) {
     fs::remove_all(current_path.canonical_path(), ec);
     if(ec) {
         throw std::runtime_error(
-                "Failed to remove trusted jpacker cache path " + current_path.path().string() +
+                "Failed to remove trusted Moguet cache path " + current_path.path().string() +
                 ": " + ec.message());
     }
 }

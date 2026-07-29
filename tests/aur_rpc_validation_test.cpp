@@ -26,7 +26,7 @@ void print_info_map(const std::map<std::string, AurPackageInfo>& packages) {
     }
 }
 
-#ifdef JPACKER_ENABLE_AUR_RPC_TEST_HOOKS
+#ifdef MOGUET_ENABLE_AUR_RPC_TEST_HOOKS
 void test_write_callback_contract() {
     char        payload[] = "abc";
     std::string buffer = "prefix:";
@@ -81,7 +81,7 @@ int main(int argc, char* argv[]) {
             print_names(AurClient::search_names_by_provides_strict(subject));
         } else if(operation == "provides-legacy") {
             print_names(AurClient::search_names_by_provides(subject));
-#ifdef JPACKER_ENABLE_AUR_RPC_TEST_HOOKS
+#ifdef MOGUET_ENABLE_AUR_RPC_TEST_HOOKS
         } else if(operation == "write-callback-contract") {
             test_write_callback_contract();
         } else if(operation == "write-failure-strict") {

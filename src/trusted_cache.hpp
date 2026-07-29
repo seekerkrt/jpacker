@@ -68,7 +68,7 @@ class ValidatedPrivateCacheRoot final {
     friend class ArtifactWorkspace;
     friend ArtifactWorkspace create_artifact_workspace(
             ValidatedPrivateCacheRoot root);
-#ifdef JPACKER_ENABLE_TRUSTED_CACHE_TEST_HOOKS
+#ifdef MOGUET_ENABLE_TRUSTED_CACHE_TEST_HOOKS
     friend void require_private_cache_root_identity_for_test(
             const ValidatedPrivateCacheRoot& root,
             std::uintmax_t expected_effective_user);
@@ -150,7 +150,7 @@ ValidatedCacheRoot require_unchanged_cache_root(const ValidatedCacheRoot& root);
 // group/world writable rootはsticky bitがentry renameを防ぐ場合だけ許容する。
 ValidatedPrivateCacheRoot prepare_private_trusted_cache_root();
 
-#ifdef JPACKER_ENABLE_TRUSTED_CACHE_TEST_HOOKS
+#ifdef MOGUET_ENABLE_TRUSTED_CACHE_TEST_HOOKS
 void require_private_cache_root_identity_for_test(
         const ValidatedPrivateCacheRoot& root,
         std::uintmax_t expected_effective_user);

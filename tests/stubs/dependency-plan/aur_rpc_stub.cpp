@@ -23,7 +23,7 @@ AurPackageInfo package_info(
     info.MakeDepends = make_depends;
     info.CheckDepends = check_depends;
     info.Provides = provides;
-    info.Maintainer = "jpacker-test";
+    info.Maintainer = "moguet-test";
     return info;
 }
 

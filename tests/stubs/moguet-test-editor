@@ -1,0 +1,35 @@
+#!/bin/sh
+set -eu
+
+printf 'moguet-test-editor %s\n' "$*" >> "$MOGUET_TEST_COMMAND_LOG"
+
+target=
+argument_index=0
+if [ -n "${MOGUET_TEST_EDITOR_ARGV_LOG:-}" ]; then
+    printf 'argv-begin\n' >> "$MOGUET_TEST_EDITOR_ARGV_LOG"
+fi
+for editor_arg in "$@"; do
+    target=$editor_arg
+    if [ -n "${MOGUET_TEST_EDITOR_ARGV_LOG:-}" ]; then
+        printf 'arg[%s]=<%s>\n' "$argument_index" "$editor_arg" >> "$MOGUET_TEST_EDITOR_ARGV_LOG"
+    fi
+    argument_index=$((argument_index + 1))
+done
+if [ -n "${MOGUET_TEST_EDITOR_ARGV_LOG:-}" ]; then
+    printf 'target=<%s>\n' "$target" >> "$MOGUET_TEST_EDITOR_ARGV_LOG"
+    printf 'argv-end\n' >> "$MOGUET_TEST_EDITOR_ARGV_LOG"
+fi
+
+if [ -n "${MOGUET_TEST_EDITOR_EXIT_CODE:-}" ]; then
+    exit "$MOGUET_TEST_EDITOR_EXIT_CODE"
+fi
+
+if [ -n "${MOGUET_TEST_EDITOR_REPLACE_TARGET:-}" ] &&
+   [ "$target" = "$MOGUET_TEST_EDITOR_REPLACE_TARGET" ]; then
+    rm -f -- "$target"
+    ln -s "$MOGUET_TEST_EDITOR_SYMLINK_TARGET" "$target"
+fi
+
+if [ -n "${MOGUET_TEST_EDITOR_REMOVE_TARGET:-}" ]; then
+    rm -f -- "$MOGUET_TEST_EDITOR_REMOVE_TARGET"
+fi

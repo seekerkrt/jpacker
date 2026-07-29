@@ -1,20 +1,20 @@
 #!/bin/sh
-printf 'vercmp %s\n' "$*" >> "$JPACKER_TEST_COMMAND_LOG"
+printf 'vercmp %s\n' "$*" >> "$MOGUET_TEST_COMMAND_LOG"
 argument_index=0
-if [ -n "${JPACKER_TEST_VERCMP_ARGV_LOG:-}" ]; then
-    printf 'argv-begin\n' >> "$JPACKER_TEST_VERCMP_ARGV_LOG"
+if [ -n "${MOGUET_TEST_VERCMP_ARGV_LOG:-}" ]; then
+    printf 'argv-begin\n' >> "$MOGUET_TEST_VERCMP_ARGV_LOG"
 fi
 for vercmp_arg in "$@"; do
-    if [ -n "${JPACKER_TEST_VERCMP_ARGV_LOG:-}" ]; then
-        printf 'arg[%s]=<%s>\n' "$argument_index" "$vercmp_arg" >> "$JPACKER_TEST_VERCMP_ARGV_LOG"
+    if [ -n "${MOGUET_TEST_VERCMP_ARGV_LOG:-}" ]; then
+        printf 'arg[%s]=<%s>\n' "$argument_index" "$vercmp_arg" >> "$MOGUET_TEST_VERCMP_ARGV_LOG"
     fi
     argument_index=$((argument_index + 1))
 done
-if [ -n "${JPACKER_TEST_VERCMP_ARGV_LOG:-}" ]; then
-    printf 'argv-end\n' >> "$JPACKER_TEST_VERCMP_ARGV_LOG"
+if [ -n "${MOGUET_TEST_VERCMP_ARGV_LOG:-}" ]; then
+    printf 'argv-end\n' >> "$MOGUET_TEST_VERCMP_ARGV_LOG"
 fi
-if [ -n "${JPACKER_TEST_VERCMP_OUTPUT:-}" ]; then
-    printf '%s\n' "$JPACKER_TEST_VERCMP_OUTPUT"
-    exit "${JPACKER_TEST_VERCMP_EXIT_CODE:-0}"
+if [ -n "${MOGUET_TEST_VERCMP_OUTPUT:-}" ]; then
+    printf '%s\n' "$MOGUET_TEST_VERCMP_OUTPUT"
+    exit "${MOGUET_TEST_VERCMP_EXIT_CODE:-0}"
 fi
 exec /usr/bin/vercmp "$@"

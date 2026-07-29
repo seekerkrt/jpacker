@@ -929,7 +929,7 @@ PreparedUpgradeAllOperation::snapshot() const noexcept {
     return impl_ == nullptr ? nullptr : &impl_->snapshot;
 }
 
-#ifdef JPACKER_ENABLE_UPGRADE_ALL_OPERATION_TEST_HOOKS
+#ifdef MOGUET_ENABLE_UPGRADE_ALL_OPERATION_TEST_HOOKS
 void PreparedUpgradeAllOperation::
 make_source_snapshot_inconsistent_for_test() {
     if(impl_ == nullptr ||
@@ -951,7 +951,7 @@ make_explicit_source_correlation_inconsistent_for_test() {
 
 void PreparedUpgradeAllOperation::
 make_nested_system_source_correlation_inconsistent_for_test() {
-#ifdef JPACKER_ENABLE_SYSTEM_SOURCE_UPGRADE_TEST_HOOKS
+#ifdef MOGUET_ENABLE_SYSTEM_SOURCE_UPGRADE_TEST_HOOKS
     if(impl_ != nullptr) {
         impl_->system_source.
                 make_first_source_correlation_inconsistent_for_test();
@@ -959,7 +959,7 @@ make_nested_system_source_correlation_inconsistent_for_test() {
 #endif
 }
 
-#ifdef JPACKER_ENABLE_SYSTEM_SOURCE_UPGRADE_TEST_HOOKS
+#ifdef MOGUET_ENABLE_SYSTEM_SOURCE_UPGRADE_TEST_HOOKS
 void PreparedUpgradeAllOperation::
 set_nested_system_source_unexpected_exception_for_test(
         SystemSourceUpgradeUnexpectedExceptionPoint point,
