@@ -32,6 +32,27 @@ void expect_path(
     }
 }
 
+void expect_creation_boundary(
+        const xdg_paths::DirectoryCreationBoundary& boundary,
+        xdg_paths::DirectorySource expected_source,
+        const fs::path& expected_base_directory,
+        const fs::path& expected_existing_anchor,
+        const std::vector<std::string>& expected_creatable_components,
+        const std::string& context) {
+    expect(
+            boundary.source == expected_source,
+            context + ": unexpected directory source.");
+    expect_path(
+            boundary.base_directory, expected_base_directory,
+            context + " base directory");
+    expect_path(
+            boundary.existing_anchor, expected_existing_anchor,
+            context + " existing anchor");
+    expect(
+            boundary.creatable_components == expected_creatable_components,
+            context + ": unexpected creatable components.");
+}
+
 template <typename Callable>
 void expect_resolution_error(
         Callable callable,
@@ -100,6 +121,21 @@ void test_explicit_xdg_values() {
     const xdg_paths::ResolvedPaths paths =
             xdg_paths::resolve(explicit_environment());
     expect_explicit_paths(paths);
+    expect_creation_boundary(
+            paths.config.creation_boundary,
+            xdg_paths::DirectorySource::ExplicitXdg,
+            "/xdg/config-base", "/xdg/config-base", {"moguet"},
+            "Explicit config creation boundary");
+    expect_creation_boundary(
+            paths.state.creation_boundary,
+            xdg_paths::DirectorySource::ExplicitXdg,
+            "/xdg/state-base", "/xdg/state-base", {"moguet"},
+            "Explicit state creation boundary");
+    expect_creation_boundary(
+            paths.cache.creation_boundary,
+            xdg_paths::DirectorySource::ExplicitXdg,
+            "/xdg/cache-base", "/xdg/cache-base", {"moguet"},
+            "Explicit cache creation boundary");
 }
 
 void test_unset_xdg_values_use_home_fallback() {
@@ -120,6 +156,24 @@ void test_unset_xdg_values_use_home_fallback() {
     expect_path(
             paths.cache.directory, "/home/test-user/.cache/moguet",
             "Unset XDG cache fallback");
+    expect_creation_boundary(
+            paths.config.creation_boundary,
+            xdg_paths::DirectorySource::HomeFallback,
+            "/home/test-user/.config", "/home/test-user",
+            {".config", "moguet"},
+            "HOME config creation boundary");
+    expect_creation_boundary(
+            paths.state.creation_boundary,
+            xdg_paths::DirectorySource::HomeFallback,
+            "/home/test-user/.local/state", "/home/test-user",
+            {".local", "state", "moguet"},
+            "HOME state creation boundary");
+    expect_creation_boundary(
+            paths.cache.creation_boundary,
+            xdg_paths::DirectorySource::HomeFallback,
+            "/home/test-user/.cache", "/home/test-user",
+            {".cache", "moguet"},
+            "HOME cache creation boundary");
 }
 
 void test_empty_xdg_values_use_home_fallback() {
@@ -309,6 +363,22 @@ void test_redundant_separators_are_normalized() {
     expect_path(
             paths.cache.directory, "/normal/home/user/.cache/moguet",
             "Normalized HOME fallback");
+    expect_creation_boundary(
+            paths.config.creation_boundary,
+            xdg_paths::DirectorySource::ExplicitXdg,
+            "/normal/config/base", "/normal/config/base", {"moguet"},
+            "Normalized explicit config creation boundary");
+    expect_creation_boundary(
+            paths.state.creation_boundary,
+            xdg_paths::DirectorySource::ExplicitXdg,
+            "/normal/state/base", "/normal/state/base", {"moguet"},
+            "Normalized explicit state creation boundary");
+    expect_creation_boundary(
+            paths.cache.creation_boundary,
+            xdg_paths::DirectorySource::HomeFallback,
+            "/normal/home/user/.cache", "/normal/home/user",
+            {".cache", "moguet"},
+            "Normalized HOME cache creation boundary");
 }
 
 void test_dot_components_are_rejected_before_normalization() {
