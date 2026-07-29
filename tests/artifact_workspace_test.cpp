@@ -500,14 +500,12 @@ void test_legacy_trusted_cache_root_compatibility(
         ValidatedCacheRoot root = prepare_trusted_cache_root();
         const struct stat status = require_path_status(root.path());
         expect(
-                (status.st_mode & S_IWGRP) != 0,
-                "Legacy trusted cache root unexpectedly adopted private mode");
+                (status.st_mode & 07777) == 0700,
+                "Legacy-first cache root creation did not establish mode 0700");
         static_cast<void>(prepare_trusted_cache_root());
-        expect_runtime_error(
-                []() {
-                    static_cast<void>(prepare_private_trusted_cache_root());
-                },
-                "private upgrade of legacy group-writable root", "sticky bit");
+        ValidatedPrivateCacheRoot private_root =
+                prepare_private_trusted_cache_root();
+        private_root.require_unchanged_identity();
     }
     expect(
             read_process_umask() == original_mask,

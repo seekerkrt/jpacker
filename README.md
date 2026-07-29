@@ -420,7 +420,7 @@ default では logs は次の path に保存されます。
 
 ### License
 
-現在のv1.15.0開発系列とv1.15.0以降のjpackerは、`GPL-3.0-or-later`で提供します。v1.14.0以前のreleaseはMIT Licenseで提供されており、そのhistorical releaseは元のlicenseのまま利用できます。過去のtag、release、permissionは変更しません。
+現在のGPLライセンス開発系列とv1.15.0以降のjpackerは、`GPL-3.0-or-later`で提供します。v1.14.0以前のreleaseはMIT Licenseで提供されており、そのhistorical releaseは元のlicenseのまま利用できます。過去のtag、release、permissionは変更しません。
 
 * GNU GPL version 3正式全文: [LICENSE](LICENSE)
 * version boundaryと配布policy: [docs/LICENSING.md](docs/LICENSING.md)
@@ -849,7 +849,7 @@ This project uses MAJOR.MINOR.PATCH version numbers with a SemVer-like policy. F
 
 ### License
 
-The current v1.15.0 development series and v1.15.0 or later releases are distributed under `GPL-3.0-or-later`. jpacker v1.14.0 and earlier releases were distributed under the MIT License. Those historical releases remain available under their original license; their tags, releases, and granted permissions are not changed.
+The current GPL-licensed development series and v1.15.0 or later releases are distributed under `GPL-3.0-or-later`. jpacker v1.14.0 and earlier releases were distributed under the MIT License. Those historical releases remain available under their original license; their tags, releases, and granted permissions are not changed.
 
 * GNU GPL version 3 full text: [LICENSE](LICENSE)
 * Version boundary and distribution policy: [docs/LICENSING.md](docs/LICENSING.md)

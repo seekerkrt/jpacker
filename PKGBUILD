@@ -31,6 +31,9 @@ depends=('curl' 'pacman' 'libalpm.so' 'git')
 # ビルド時に必要なパッケージ ('git' が必須)
 makedepends=('git' 'nlohmann-json' 'base-devel')
 
+# pacman-managed config upgrade/remove semantics
+backup=('etc/jpacker/jpacker.conf')
+
 # GitHub release tag をソースとして指定
 source=("jpacker-src::git+https://github.com/seekerkrt/jpacker.git#tag=v${pkgver}")
 

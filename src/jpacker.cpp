@@ -422,6 +422,8 @@ void print_help() {
     std::cout << "    \033[1m-Qua\033[0m                 Check AUR/foreign updates" << std::endl;
     std::cout << std::endl;
     std::cout << "\033[1mOPTIONS\033[0m" << std::endl;
+    std::cout << "    \033[1m-h, --help\033[0m          Show this help message and exit" << std::endl;
+    std::cout << "    \033[1m-V, --version\033[0m       Show version information and exit" << std::endl;
     std::cout << "    \033[1m--noedit\033[0m             Skip PKGBUILD/.install review" << std::endl;
     std::cout << "    \033[1m--nodiff\033[0m             Skip update diff prompt" << std::endl;
     std::cout << "    \033[1m--noconfirm\033[0m         Pass --noconfirm to pacman/makepkg" << std::endl;

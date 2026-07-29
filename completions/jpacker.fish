@@ -28,6 +28,8 @@ set -l jpacker_operations \
 set -l jpacker_global_options \
     --help \
     -h \
+    --version \
+    -V \
     --noedit \
     --nodiff \
     --noconfirm \
@@ -49,7 +51,7 @@ function __fish_jpacker_seen_operation
 
     for token in $tokens[2..-1]
         switch $token
-            case --help -h --noedit --nodiff --noconfirm --rebuild --cleanbuild --rmdeps --aur --repo
+            case --help -h --version -V --noedit --nodiff --noconfirm --rebuild --cleanbuild --rmdeps --aur --repo
                 continue
             case '*'
                 echo $token

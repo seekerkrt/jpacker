@@ -12,7 +12,7 @@
 
 現在の project 名は jpacker であり、pactune は将来の発展先としてのみ記載する。この文書は rename の決定や実施を意味しない。
 
-この文書は、現在の全 CLI 挙動を列挙する互換性仕様でも、未実装機能を実装済みとみなす保証でもない。現在の command routing と個別の互換性契約は [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) を参照する。個別仕様を追加・変更するときは、この上位ポリシーに沿って、対象となる behavior と検証範囲を別途明示する。
+この文書は、現在の全 CLI 挙動を列挙する互換性仕様でも、未実装機能を実装済みとみなす保証でもない。現在の command routing と個別の互換性契約は [docs/COMPATIBILITY.md](COMPATIBILITY.md) を参照する。個別仕様を追加・変更するときは、この上位ポリシーに沿って、対象となる behavior と検証範囲を別途明示する。
 
 ### 1. 一貫性
 
@@ -96,11 +96,11 @@ jpacker / future pactune が外部 component を呼び出すための順序、�
 
 ### 8. Licenseとthird-party compliance
 
-現在のv1.15.0開発系列とv1.15.0以降のjpackerは`GPL-3.0-or-later`で提供する。v1.14.0以前のreleaseはMIT Licenseのまま維持し、過去のtag、release、permissionを書き換えない。
+現在のGPLライセンス開発系列とv1.15.0以降のjpackerは`GPL-3.0-or-later`で提供する。v1.14.0以前のreleaseはMIT Licenseのまま維持し、過去のtag、release、permissionを書き換えない。
 
 licenseとnoticeの監査では、同じprogramへ組み込まれるdirect linked / header-compiled componentと、command line・stdin/stdout・exit statusを介するexternal programを分離して扱う。libraryのvendor、static link、binary bundle、新規linked/compiled dependencyを追加する場合は、配布前にlicense、notice、Corresponding Sourceを再監査する。
 
-version boundary、配布policy、component別の詳細は[docs/LICENSING.md](docs/LICENSING.md)をsource of truthとする。
+version boundary、配布policy、component別の詳細は[docs/LICENSING.md](LICENSING.md)をsource of truthとする。
 
 ### 9. PackageBase buildとrequired child selectionの分離
 
@@ -143,7 +143,7 @@ This document is the detailed canonical source for the high-level design policy 
 
 The current project name is jpacker. pactune is mentioned only as a possible future evolution; this document neither decides nor performs a rename.
 
-This document is not a compatibility specification enumerating all current CLI behavior, and it does not claim that unimplemented features already exist. See [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) for current command-routing details and specific compatibility contracts. When a specific contract is added or changed, the affected behavior and verification scope must be stated separately in accordance with this policy.
+This document is not a compatibility specification enumerating all current CLI behavior, and it does not claim that unimplemented features already exist. See [docs/COMPATIBILITY.md](COMPATIBILITY.md) for current command-routing details and specific compatibility contracts. When a specific contract is added or changed, the affected behavior and verification scope must be stated separately in accordance with this policy.
 
 ### 1. Consistency
 
@@ -227,11 +227,11 @@ If these questions cannot be answered with a clear explanation and verification 
 
 ### 8. Licensing and third-party compliance
 
-The current v1.15.0 development series and v1.15.0 or later jpacker releases are distributed under `GPL-3.0-or-later`. Releases through v1.14.0 remain under the MIT License; their historical tags, releases, and granted permissions are not rewritten.
+The current GPL-licensed development series and v1.15.0 or later jpacker releases are distributed under `GPL-3.0-or-later`. Releases through v1.14.0 remain under the MIT License; their historical tags, releases, and granted permissions are not rewritten.
 
 License and notice audits distinguish direct linked or header-compiled components incorporated into the program from external programs communicating through command-line arguments, stdin/stdout, and exit status. Adding vendored libraries, static links, binary bundles, or a new linked/compiled dependency requires a new license, notice, and Corresponding Source audit before distribution.
 
-[docs/LICENSING.md](docs/LICENSING.md) is the source of truth for the version boundary, distribution policy, and component-level details.
+[docs/LICENSING.md](LICENSING.md) is the source of truth for the version boundary, distribution policy, and component-level details.
 
 ### 9. Separate PackageBase builds from required-child selection
 

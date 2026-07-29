@@ -19,6 +19,48 @@ void print_names(const std::vector<std::string>& names) {
     for(const auto& name : names) std::cout << name << '\n';
 }
 
+void print_info_map(const std::map<std::string, AurPackageInfo>& packages) {
+    for(const auto& [name, package] : packages) {
+        static_cast<void>(package);
+        std::cout << name << '\n';
+    }
+}
+
+#ifdef JPACKER_ENABLE_AUR_RPC_TEST_HOOKS
+void test_write_callback_contract() {
+    char        payload[] = "abc";
+    std::string buffer = "prefix:";
+
+    set_aur_rpc_write_append_failure_for_test(false);
+    const std::size_t success_result =
+            invoke_aur_rpc_write_callback_for_test(
+                    payload, 1, 3, buffer);
+    if(success_result != 3 || buffer != "prefix:abc") {
+        throw std::runtime_error(
+                "AUR write callback changed successful append behavior.");
+    }
+
+    buffer = "unchanged";
+    set_aur_rpc_write_append_failure_for_test(true);
+    const std::size_t failure_result =
+            invoke_aur_rpc_write_callback_for_test(
+                    payload, 1, 3, buffer);
+    const std::size_t zero_byte_failure_result =
+            invoke_aur_rpc_write_callback_for_test(
+                    payload, 0, 0, buffer);
+    set_aur_rpc_write_append_failure_for_test(false);
+    if(failure_result == 3 || zero_byte_failure_result == 0) {
+        throw std::runtime_error(
+                "AUR write callback did not return a libcurl write failure.");
+    }
+    if(buffer != "unchanged") {
+        throw std::runtime_error(
+                "AUR write callback treated an append exception as partial success.");
+    }
+    std::cout << "write-callback-contract-ok\n";
+}
+#endif
+
 } // namespace
 
 int main(int argc, char* argv[]) {
@@ -39,6 +81,24 @@ int main(int argc, char* argv[]) {
             print_names(AurClient::search_names_by_provides_strict(subject));
         } else if(operation == "provides-legacy") {
             print_names(AurClient::search_names_by_provides(subject));
+#ifdef JPACKER_ENABLE_AUR_RPC_TEST_HOOKS
+        } else if(operation == "write-callback-contract") {
+            test_write_callback_contract();
+        } else if(operation == "write-failure-strict") {
+            set_aur_rpc_write_append_failure_for_test(true);
+            print_info(AurClient::info_strict(subject));
+        } else if(operation == "info-many-normal") {
+            print_info_map(AurClient::info_many(
+                    {"valid-minimal", "arrays-null"}));
+        } else if(operation == "info-many-fail-first") {
+            set_aur_rpc_encode_failure_package_for_test("valid-minimal");
+            print_info_map(AurClient::info_many(
+                    {"valid-minimal", "arrays-null"}));
+        } else if(operation == "info-many-fail-middle") {
+            set_aur_rpc_encode_failure_package_for_test("arrays-null");
+            print_info_map(AurClient::info_many(
+                    {"valid-minimal", "arrays-null", "arrays-empty"}));
+#endif
         } else {
             throw std::invalid_argument("unknown test operation: " + operation);
         }
