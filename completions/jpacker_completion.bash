@@ -8,7 +8,7 @@ _jpacker() {
     prev="${COMP_WORDS[COMP_CWORD-1]}"
 
     # 主要コマンドとオプション
-    opts="build upgrade upgrade-aur upgrade-all clean deps plan fetch add-src del-src edit-src list-src revert -G -Gp -S -Syu -Ss -Si -R -Rs -Rns -Q -Qua -h --help --noedit --nodiff --noconfirm --rebuild --cleanbuild --rmdeps --aur --repo"
+    opts="build upgrade upgrade-aur upgrade-all clean deps plan fetch add-src del-src edit-src list-src revert -G -Gp -S -Syu -Ss -Si -R -Rs -Rns -Q -Qua -h --help -V --version --noedit --nodiff --noconfirm --rebuild --cleanbuild --rmdeps --aur --repo"
     deps_opts="--recursive"
     targetless_upgrade_opts="--noedit --nodiff --noconfirm --rebuild --cleanbuild"
     jpacker_global_opts="${targetless_upgrade_opts} --rmdeps --aur --repo"

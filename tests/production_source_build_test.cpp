@@ -25,6 +25,7 @@
 #include <vector>
 
 #include <fcntl.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 // process.cppをlinkしないfake-symbol binaryでも、production checkout ownerが使う
@@ -240,6 +241,21 @@ public:
         } else {
             static_cast<void>(unsetenv(key_.c_str()));
         }
+    }
+};
+
+class ScopedUmask final {
+    mode_t previous_mode_;
+
+public:
+    explicit ScopedUmask(mode_t mode) noexcept : previous_mode_(umask(mode)) {
+    }
+
+    ScopedUmask(const ScopedUmask&) = delete;
+    ScopedUmask& operator=(const ScopedUmask&) = delete;
+
+    ~ScopedUmask() noexcept {
+        static_cast<void>(umask(previous_mode_));
     }
 };
 
@@ -1800,6 +1816,60 @@ void test_database_resolver_failure_stops_all_targets(
     deactivate_scenario();
 }
 
+void test_unsafe_existing_cache_root_stops_before_checkout_mutation() {
+    TemporaryProductionEnvironment environment;
+    AppConfig config = noninteractive_config();
+    std::vector<ProductionSourceBuildWorkItem> work_items;
+    work_items.push_back(make_package_base_work_item(
+            "unsafe-root-order",
+            {RequiredPackageArtifactTarget{
+                    "unsafe-root-order", "unsafe-root-order",
+                    DesiredInstallReason::Explicit}}));
+    ProductionScenario scenario =
+            make_execution_scenario(environment, work_items, config);
+    const fs::path cache_root =
+            scenario.units.front().checkout_path.parent_path();
+    if(chmod(cache_root.c_str(), 0775) != 0) {
+        throw std::runtime_error(
+                "Failed to make the production cache root unsafe.");
+    }
+
+    activate_scenario(scenario);
+    expect_database_paths();
+    PreparedProductionSourceBuildInvocation invocation =
+            prepare_production_source_build_invocation(
+                    std::move(work_items), scenario.config);
+    static_cast<void>(expect_runtime_error(
+            [&]() { execute_invocation(invocation, scenario); },
+            "unsafe production cache root ordering",
+            "group/world writable"));
+
+    expect(
+            scenario.resolver_calls == 1,
+            "Unsafe production cache root changed invocation preflight order");
+    expect(
+            scenario.git_remote_calls == 0 &&
+                    scenario.git_fetch_calls == 0 &&
+                    scenario.git_branch_calls == 0 &&
+                    scenario.git_reset_calls == 0,
+            "Unsafe production cache root reached Git checkout inspection or mutation");
+    expect(
+            process_stub::capture_command_call_count() == 1 &&
+                    process_stub::run_command_call_count() == 0,
+            "Unsafe production cache root reached an external checkout mutation");
+    expect(
+            scenario.workspace_paths.empty() &&
+                    metadata_stub::initialize_call_count() == 0,
+            "Unsafe production cache root reached workspace or metadata work");
+    struct stat root_status {};
+    expect(
+            stat(cache_root.c_str(), &root_status) == 0 &&
+                    (root_status.st_mode & 07777) == 0775,
+            "Unsafe production cache root was silently repaired");
+    process_stub::require_process_expectations_consumed();
+    deactivate_scenario();
+}
+
 void expect_single_work_item_outcome(
         const TemporaryProductionEnvironment& environment,
         const std::string& package_name,
@@ -2572,33 +2642,39 @@ int main() {
         test_same_package_base_projection_preserves_required_children();
         test_same_package_base_source_preference_route();
         test_resolved_repository_identity_and_owned_environment_preparation();
-        TemporaryProductionEnvironment environment;
-        test_set_static_preparation_accepts_split_and_multiple(environment);
-        test_set_static_preparation_rejects_invalid_sets_before_mutation(
-                environment);
-        test_rmdeps_global_rejection(environment);
-        test_inherited_pkgdest_global_rejection(environment);
-        test_later_target_pkgdest_global_rejection(environment);
-        test_database_resolver_failure_stops_all_targets(environment);
-        test_work_item_typed_install_outcomes(environment);
-        test_extended_work_item_install_outcomes(environment);
-        test_up_to_date_outcome_and_legacy_flattening(environment);
-        test_unknown_update_status_no_confirm_outcome(environment);
-        test_unknown_update_status_noninteractive_outcome(environment);
-        test_unknown_update_status_user_decline_outcome(environment);
-        test_ordinary_build_plan_unit_uses_set_owner(environment);
-        test_requested_split_child_uses_set_owner(environment);
-        test_multiple_required_children_return_typed_set_result(environment);
-        test_package_base_transaction_failure_preserves_attempt_snapshot(
-                environment);
-        test_single_aur_root_uses_shared_lifecycle(environment);
-        test_multi_unit_options_roles_and_order(environment);
-        test_build_failure_does_not_reach_sudo(environment);
-        test_metadata_failure_does_not_reach_sudo(environment);
-        test_pacman_failure_stops_later_unit(environment);
-        test_cleanup_partial_success_stays_distinct_and_stops(environment);
-        test_needed_same_version_cleanup_failure_preserves_no_change(
-                environment);
+        {
+            // Production must remain private-first even when the caller's
+            // ordinary collaborative umask would make a legacy mkdir 0775.
+            ScopedUmask scoped_umask(0002);
+            test_unsafe_existing_cache_root_stops_before_checkout_mutation();
+            TemporaryProductionEnvironment environment;
+            test_set_static_preparation_accepts_split_and_multiple(environment);
+            test_set_static_preparation_rejects_invalid_sets_before_mutation(
+                    environment);
+            test_rmdeps_global_rejection(environment);
+            test_inherited_pkgdest_global_rejection(environment);
+            test_later_target_pkgdest_global_rejection(environment);
+            test_database_resolver_failure_stops_all_targets(environment);
+            test_work_item_typed_install_outcomes(environment);
+            test_extended_work_item_install_outcomes(environment);
+            test_up_to_date_outcome_and_legacy_flattening(environment);
+            test_unknown_update_status_no_confirm_outcome(environment);
+            test_unknown_update_status_noninteractive_outcome(environment);
+            test_unknown_update_status_user_decline_outcome(environment);
+            test_ordinary_build_plan_unit_uses_set_owner(environment);
+            test_requested_split_child_uses_set_owner(environment);
+            test_multiple_required_children_return_typed_set_result(environment);
+            test_package_base_transaction_failure_preserves_attempt_snapshot(
+                    environment);
+            test_single_aur_root_uses_shared_lifecycle(environment);
+            test_multi_unit_options_roles_and_order(environment);
+            test_build_failure_does_not_reach_sudo(environment);
+            test_metadata_failure_does_not_reach_sudo(environment);
+            test_pacman_failure_stops_later_unit(environment);
+            test_cleanup_partial_success_stays_distinct_and_stops(environment);
+            test_needed_same_version_cleanup_failure_preserves_no_change(
+                    environment);
+        }
         std::cout << "production source-build tests passed\n";
         return 0;
     } catch(const std::exception& error) {

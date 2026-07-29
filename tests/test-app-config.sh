@@ -274,10 +274,24 @@ assert_command_absent() {
 
 assert_command_log_empty() {
     if [ -s "$command_log" ]; then
-        echo "external command ran before CLI parse completed" >&2
+        echo "unexpected external command ran before the tested guard" >&2
         cat "$command_log" >&2
         exit 1
     fi
+}
+
+assert_only_command() {
+    expected=$1
+    assert_command "$expected"
+    if [ "$(wc -l < "$command_log")" -ne 1 ]; then
+        echo "unexpected additional command(s)" >&2
+        cat "$command_log" >&2
+        exit 1
+    fi
+}
+
+enable_config_rmdeps() {
+    printf '%s\n' 'RMDEPS=true' >> "$config_file"
 }
 
 setup_integration_case precedence
@@ -322,10 +336,52 @@ assert_command_log_empty
 
 # config由来のRMDEPSもsilent ignoreせず、CLI optionなしで同じguardへ到達する。
 setup_integration_case config-rmdeps-rejection
-printf '%s\n' 'RMDEPS=true' >> "$config_file"
+enable_config_rmdeps
 run_integration_fail --noconfirm -S --aur clean-root
 assert_contains "Separated build/install does not support --rmdeps." "$output_file"
 assert_command_log_empty
+
+# target-less AUR updateはtarget有無にかかわらず、log/cache/queryより前に拒否する。
+setup_integration_case config-rmdeps-upgrade-aur
+enable_config_rmdeps
+run_integration_fail upgrade-aur
+assert_contains "Separated build/install does not support --rmdeps." "$output_file"
+assert_command_log_empty
+if [ -e "$HOME/config-log/jpacker.log" ]; then
+    fail "config RMDEPS upgrade-aur guard ran after log initialization"
+fi
+if [ -e "$XDG_CACHE_HOME/jpacker" ]; then
+    fail "config RMDEPS upgrade-aur guard initialized the default cache"
+fi
+
+# aggregate側もupdate target 0件をno-op成功へ丸めず、全phaseより前に拒否する。
+setup_integration_case config-rmdeps-upgrade-all-no-updates
+enable_config_rmdeps
+run_integration_fail upgrade-all
+assert_contains "Separated build/install does not support --rmdeps." "$output_file"
+assert_command_log_empty
+if [ -e "$HOME/config-log/jpacker.log" ]; then
+    fail "config RMDEPS upgrade-all guard ran after log initialization"
+fi
+if [ -e "$XDG_CACHE_HOME/jpacker" ]; then
+    fail "config RMDEPS upgrade-all guard initialized the default cache"
+fi
+
+# registered source targetがあるupgradeはsource/system mutationの前に拒否する。
+setup_integration_case config-rmdeps-upgrade-with-source
+enable_config_rmdeps
+: > "$JPACKER_TEST_PACKAGE_BUILD_DIR/clean-root"
+run_integration_fail upgrade
+assert_contains "Separated build/install does not support --rmdeps." "$output_file"
+assert_command_log_empty
+
+# source targetがなければpacman-onlyへ縮退し、config requestを転送しない。
+setup_integration_case config-rmdeps-upgrade-without-source
+enable_config_rmdeps
+run_integration_ok upgrade
+assert_only_command "sudo pacman -Syu"
+assert_command_absent "--rmdeps"
+assert_command_absent " -r"
 
 # 同一processでparse failure後のg_configを検査し、途中までのCLI overrideがpublishされないことを固定する。
 setup_integration_case parse-failure

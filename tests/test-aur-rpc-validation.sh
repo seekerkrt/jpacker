@@ -20,8 +20,11 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 port_file=$tmp_dir/port
+request_log=$tmp_dir/requests.log
+: > "$request_log"
 python3 "$repo_root/tests/aur_rpc_fixture_server.py" \
-    "$repo_root/tests/fixtures/aur-rpc-validation.json" "$port_file" &
+    "$repo_root/tests/fixtures/aur-rpc-validation.json" "$port_file" \
+    "$request_log" &
 server_pid=$!
 
 attempt=0
@@ -51,6 +54,7 @@ setup_case() {
 
     mkdir -p "$case_dir/home" "$case_dir/xdg-cache"
     : > "$command_log"
+    : > "$request_log"
     inventory_state=$case_dir/foreign-inventory.state
     : > "$inventory_state"
     export HOME=$case_dir/home
@@ -69,6 +73,7 @@ setup_case() {
     unset JPACKER_TEST_GIT_CLONE_FIXTURE_DIR
     unset JPACKER_TEST_MAKEPKG_EXIT_CODE
     unset JPACKER_TEST_MAKEPKG_ARTIFACT_IDENTITIES
+    unset JPACKER_TEST_AUR_RPC_ENCODE_FAILURE_PACKAGE
 }
 
 run_ok() {
@@ -168,6 +173,24 @@ assert_command_log_empty() {
     fi
 }
 
+assert_request_count() {
+    expected=$1
+    actual=$(wc -l < "$request_log")
+    if [ "$actual" -ne "$expected" ]; then
+        echo "unexpected AUR fixture request count: expected $expected, got $actual" >&2
+        cat "$request_log" >&2
+        exit 1
+    fi
+}
+
+assert_no_version_comparison() {
+    if grep -E '^vercmp( |$)' "$command_log" >/dev/null; then
+        echo "AUR encode failure returned a partial batch result" >&2
+        cat "$command_log" >&2
+        exit 1
+    fi
+}
+
 assert_validation_error() {
     context=$1
     assert_contains "AUR RPC response validation failed for $context" "$output_file"
@@ -195,6 +218,37 @@ setup_case strict-envelope-valid-info
 run_envelope_ok info-strict valid-minimal
 assert_contains "valid-minimal" "$output_file"
 assert_command_log_empty
+
+setup_case write-callback-contract
+run_envelope_ok write-callback-contract unused
+assert_contains "write-callback-contract-ok" "$output_file"
+assert_command_log_empty
+
+setup_case write-callback-exception
+run_envelope_fail write-failure-strict valid-minimal
+assert_contains "AUR request failed:" "$output_file"
+assert_not_contains "AUR request returned an empty response." "$output_file"
+assert_not_contains "valid-minimal" "$output_file"
+assert_command_log_empty
+
+setup_case info-many-normal
+run_envelope_ok info-many-normal unused
+assert_contains "valid-minimal" "$output_file"
+assert_contains "arrays-null" "$output_file"
+assert_request_count 1
+
+setup_case info-many-encode-failure-first
+run_envelope_fail info-many-fail-first unused
+assert_contains "Failed to encode AUR package name: valid-minimal" "$output_file"
+assert_not_contains "arrays-null" "$output_file"
+assert_request_count 0
+
+setup_case info-many-encode-failure-middle
+run_envelope_fail info-many-fail-middle unused
+assert_contains "Failed to encode AUR package name: arrays-null" "$output_file"
+assert_not_contains "valid-minimal" "$output_file"
+assert_not_contains "arrays-empty" "$output_file"
+assert_request_count 0
 
 setup_case strict-envelope-valid-not-found
 run_envelope_ok info-strict strict-not-found
@@ -445,6 +499,21 @@ set_foreign_inventory 'multi-present 1.0-1
 multi-missing 1.0-1'
 run_ok -Qua
 assert_contains "Foreign package not found in AUR: multi-missing" "$output_file"
+assert_no_mutation_commands
+assert_no_pacman_command
+
+setup_case multi-encode-failure
+set_foreign_inventory 'valid-minimal 0.9-1
+arrays-null 0.9-1
+arrays-empty 0.9-1'
+export JPACKER_TEST_AUR_RPC_ENCODE_FAILURE_PACKAGE=arrays-null
+run_fail -Qua
+unset JPACKER_TEST_AUR_RPC_ENCODE_FAILURE_PACKAGE
+assert_contains \
+    "Failed to fetch AUR info: Failed to encode AUR package name: arrays-null" \
+    "$output_file"
+assert_request_count 0
+assert_no_version_comparison
 assert_no_mutation_commands
 assert_no_pacman_command
 

@@ -1,4 +1,4 @@
-.TH JPACKER 8 "June 2026" "jpacker @VERSION@" "System Administration Utilities"
+.TH JPACKER 8 "July 2026" "jpacker @VERSION@" "System Administration Utilities"
 .SH NAME
 jpacker \- A robust Pacman wrapper and AUR helper with source-based build management
 .SH SYNOPSIS
@@ -173,6 +173,9 @@ jpacker v1.x does not compare AUR conflicts/replaces metadata with installed or 
 .TP
 .BR \-h , \ \-\-help
 Display the help message and exit.
+.TP
+.BR \-V , \ \-\-version
+Display version information and exit.
 
 .SH CONFIGURATION
 The main configuration file is located at \fI/etc/jpacker/jpacker.conf\fR.

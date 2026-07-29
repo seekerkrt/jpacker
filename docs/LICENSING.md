@@ -8,10 +8,10 @@ jpackerのライセンス境界は次のとおりです。
 
 > jpacker v1.14.0 and earlier releases were distributed under the MIT License.
 > Those historical releases remain available under their original license.
-> The current v1.15.0 development series and v1.15.0 or later releases are distributed under GPL-3.0-or-later.
+> The current GPL-licensed development series and v1.15.0 or later releases are distributed under GPL-3.0-or-later.
 
 - v1.14.0以前のtag、release、git historyは変更しません。既にMIT Licenseで提供したcopyのpermissionを取り消しません。
-- 現在のv1.15.0開発系列とv1.15.0以降のreleaseには`GPL-3.0-or-later`を適用します。
+- 現在のGPLライセンス開発系列とv1.15.0以降のreleaseには`GPL-3.0-or-later`を適用します。
 - v1.14.0以前に適用したMIT全文は、historical noticeとしてsource treeの[`LICENSES/jpacker-MIT-legacy.txt`](../LICENSES/jpacker-MIT-legacy.txt)へ改変せず保持します。install後は`${PREFIX}/share/licenses/jpacker/jpacker-MIT-legacy.txt`、Arch packageでは`/usr/share/licenses/jpacker/jpacker-MIT-legacy.txt`です。
 
 ## Project notice
@@ -20,7 +20,7 @@ jpackerのライセンス境界は次のとおりです。
 jpacker - an Arch Linux pacman wrapper with AUR and source-build support
 Copyright (C) 2025-2026 seekerkrt
 
-The current v1.15.0 development series and v1.15.0 or later releases are
+The current GPL-licensed development series and v1.15.0 or later releases are
 free software: you can redistribute them and/or modify them under the terms
 of the GNU General Public License as published by the Free Software
 Foundation, either version 3 of the License, or (at your option) any later

@@ -678,6 +678,10 @@ SourceBuildExecutionResult execute_source_build_typed(
         const AppConfig& config) {
     // generic/direct/system compatibility pathはsingular identityを引き続き要求する。
     require_valid_package_name(request.package_name);
+    // POLICY: checkoutのclone/fetch/resetより先に、artifact ownerと同じ
+    // private cache contractを証明してinvocation中保持する。
+    ValidatedPrivateCacheRoot artifact_root =
+            prepare_private_trusted_cache_root();
     SourceBuildCheckoutPreparation preparation =
             prepare_source_build_checkout(
                     request, request.package_name, config);
@@ -688,8 +692,6 @@ SourceBuildExecutionResult execute_source_build_typed(
     PreparedSourceBuildCheckout prepared = std::move(
             std::get<PreparedSourceBuildCheckout>(preparation));
 
-    ValidatedPrivateCacheRoot artifact_root =
-            prepare_private_trusted_cache_root();
     return source_build_result_from_artifact_outcome(
             execute_separated_source_build_unit(
                     SeparatedSourceBuildUnitRequest{
@@ -720,6 +722,20 @@ execute_source_build_package_base_typed(
     require_package_base_source_build_request(request, required_targets);
     require_supported_separated_install_options(config.rm_deps);
     require_unclaimed_artifact_pkgdest(request.custom_environment);
+    ValidatedPrivateCacheRoot artifact_root = [&]() {
+        try {
+            return prepare_private_trusted_cache_root();
+        } catch(const std::exception& error) {
+            throw SeparatedPackageBaseSourceBuildPhaseError(
+                    SeparatedPackageBaseSourceBuildFailurePhase::Build,
+                    "PackageBase private artifact workspace preparation failed: " +
+                            std::string(error.what()));
+        } catch(...) {
+            throw SeparatedPackageBaseSourceBuildPhaseError(
+                    SeparatedPackageBaseSourceBuildFailurePhase::Build,
+                    "PackageBase private artifact workspace preparation failed.");
+        }
+    }();
     SourceBuildCheckoutPreparation preparation = [&]() {
         try {
             return prepare_source_build_checkout(
@@ -744,20 +760,6 @@ execute_source_build_package_base_typed(
     PreparedSourceBuildCheckout prepared = std::move(
             std::get<PreparedSourceBuildCheckout>(preparation));
 
-    ValidatedPrivateCacheRoot artifact_root = [&]() {
-        try {
-            return prepare_private_trusted_cache_root();
-        } catch(const std::exception& error) {
-            throw SeparatedPackageBaseSourceBuildPhaseError(
-                    SeparatedPackageBaseSourceBuildFailurePhase::Build,
-                    "PackageBase private artifact workspace preparation failed: " +
-                            std::string(error.what()));
-        } catch(...) {
-            throw SeparatedPackageBaseSourceBuildPhaseError(
-                    SeparatedPackageBaseSourceBuildFailurePhase::Build,
-                    "PackageBase private artifact workspace preparation failed.");
-        }
-    }();
     return execute_separated_package_base_source_build(
             SeparatedPackageBaseSourceBuildRequest{
                     prepared.checkout,

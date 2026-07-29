@@ -27,6 +27,11 @@ const long long   AUR_RPC_PROTOCOL_VERSION = 5;
 const std::string AUR_RPC_INFO_RESPONSE_TYPE = "multiinfo";
 const std::string AUR_RPC_SEARCH_RESPONSE_TYPE = "search";
 
+#ifdef JPACKER_ENABLE_AUR_RPC_TEST_HOOKS
+bool        g_should_fail_write_append_for_test = false;
+std::string g_encode_failure_package_for_test;
+#endif
+
 // CURL easy handle の確保と解放を 1 request の寿命に束ねる RAII wrapper。
 class CurlHandle {
     CURL* curl_;
@@ -74,10 +79,55 @@ std::string aur_rpc_info_url() {
     return aur_rpc_base_url() + "?v=5&type=info&arg%5B%5D=";
 }
 
-size_t WriteCallback(void* contents, size_t size, size_t nmemb, void* userp) {
-    size_t total_size = size * nmemb;
-    auto*  buffer = static_cast<std::string*>(userp);
-    buffer->append(static_cast<char*>(contents), total_size);
+char* escape_info_many_package_name(
+        CURL* handle, const std::string& package_name) {
+#ifdef JPACKER_ENABLE_AUR_RPC_TEST_HOOKS
+    const char* environment_failure =
+            std::getenv("JPACKER_TEST_AUR_RPC_ENCODE_FAILURE_PACKAGE");
+    if(package_name == g_encode_failure_package_for_test ||
+       (environment_failure != nullptr &&
+        package_name == environment_failure)) {
+        return nullptr;
+    }
+#endif
+    return curl_easy_escape(
+            handle, package_name.c_str(),
+            static_cast<int>(package_name.length()));
+}
+
+std::size_t write_callback_failure_result(std::size_t total_size) noexcept {
+#ifdef CURL_WRITEFUNC_ERROR
+    static_cast<void>(total_size);
+    return CURL_WRITEFUNC_ERROR;
+#else
+    // libcurl treats any value other than the supplied byte count as a write
+    // error. Preserve that mismatch even for a zero-byte callback.
+    return total_size == 0 ? 1 : 0;
+#endif
+}
+
+void append_write_response(
+        std::string& buffer, char* contents, std::size_t total_size) {
+#ifdef JPACKER_ENABLE_AUR_RPC_TEST_HOOKS
+    if(g_should_fail_write_append_for_test) {
+        throw std::runtime_error("Injected AUR response append failure.");
+    }
+#endif
+    buffer.append(contents, total_size);
+}
+
+std::size_t WriteCallback(
+        void* contents, std::size_t size, std::size_t nmemb,
+        void* userp) noexcept {
+    const std::size_t total_size = size * nmemb;
+    auto*             buffer = static_cast<std::string*>(userp);
+    try {
+        append_write_response(
+                *buffer, static_cast<char*>(contents), total_size);
+    } catch(...) {
+        // C callbacks must not allow any C++ exception to cross libcurl's ABI.
+        return write_callback_failure_result(total_size);
+    }
     return total_size;
 }
 
@@ -405,6 +455,23 @@ std::optional<AurPackageInfo> parse_single_strict_aur_info_response(
 
 } // namespace
 
+#ifdef JPACKER_ENABLE_AUR_RPC_TEST_HOOKS
+void set_aur_rpc_write_append_failure_for_test(bool should_fail) noexcept {
+    g_should_fail_write_append_for_test = should_fail;
+}
+
+void set_aur_rpc_encode_failure_package_for_test(
+        const std::string& package_name) {
+    g_encode_failure_package_for_test = package_name;
+}
+
+std::size_t invoke_aur_rpc_write_callback_for_test(
+        char* contents, std::size_t size, std::size_t nmemb,
+        std::string& buffer) noexcept {
+    return WriteCallback(contents, size, nmemb, &buffer);
+}
+#endif
+
 CurlGlobal::CurlGlobal() {
     curl_global_init(CURL_GLOBAL_DEFAULT);
 }
@@ -558,17 +625,18 @@ std::map<std::string, AurPackageInfo> AurClient::info_many(const std::vector<std
 
     CurlHandle  handle;
     std::string url = aur_rpc_base_url() + "?v=5&type=info";
-    bool        has_arg = false;
     for(size_t i = 0; i < pkg_names.size(); ++i) {
-        char* escaped = curl_easy_escape(handle.get(), pkg_names[i].c_str(), static_cast<int>(pkg_names[i].length()));
-        if(!escaped) continue;
+        char* escaped = escape_info_many_package_name(
+                handle.get(), pkg_names[i]);
+        if(!escaped) {
+            throw std::runtime_error(
+                    "Failed to encode AUR package name: " + pkg_names[i]);
+        }
         url += "&";
         url += "arg%5B%5D=";
         url += escaped;
-        has_arg = true;
         curl_free(escaped);
     }
-    if(!has_arg) return results;
 
     std::string response = get_url(url);
     if(response.empty()) return results;

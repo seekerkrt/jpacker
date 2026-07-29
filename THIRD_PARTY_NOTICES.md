@@ -1,6 +1,6 @@
 # Third-Party Notices
 
-This document records components used by the current jpacker v1.15.0 development series. It distinguishes code linked or compiled into jpacker from programs invoked across a process boundary. The project licensing policy is in [`docs/LICENSING.md`](docs/LICENSING.md) in the source tree and `${PREFIX}/share/doc/jpacker/LICENSING.md` after installation (`/usr/share/doc/jpacker/LICENSING.md` in the Arch package).
+This document records components used by the current GPL-licensed jpacker development series. It distinguishes code linked or compiled into jpacker from programs invoked across a process boundary. The project licensing policy is in [`docs/LICENSING.md`](docs/LICENSING.md) in the source tree and `${PREFIX}/share/doc/jpacker/LICENSING.md` after installation (`/usr/share/doc/jpacker/LICENSING.md` in the Arch package).
 
 ## Linked or compiled components
 
