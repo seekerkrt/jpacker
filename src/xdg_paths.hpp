@@ -4,6 +4,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 namespace xdg_paths {
 
@@ -18,6 +19,11 @@ enum class EnvironmentVariable {
     XdgStateHome,
     XdgCacheHome,
     Home,
+};
+
+enum class DirectorySource {
+    ExplicitXdg,
+    HomeFallback,
 };
 
 enum class ResolutionErrorCode {
@@ -55,18 +61,30 @@ struct EnvironmentSnapshot {
     std::optional<std::string> home;
 };
 
+// Directory safety capabilityがenvironmentやpath suffixを再解決せずに使う、
+// resolver-ownedの作成境界。existing_anchor自体は作成対象に含めない。
+struct DirectoryCreationBoundary {
+    DirectorySource         source = DirectorySource::ExplicitXdg;
+    std::filesystem::path   base_directory;
+    std::filesystem::path   existing_anchor;
+    std::vector<std::string> creatable_components;
+};
+
 struct ConfigPaths {
     std::filesystem::path directory;
     std::filesystem::path config_file;
+    DirectoryCreationBoundary creation_boundary;
 };
 
 struct StatePaths {
     std::filesystem::path directory;
     std::filesystem::path default_log_file;
+    DirectoryCreationBoundary creation_boundary;
 };
 
 struct CachePaths {
     std::filesystem::path directory;
+    DirectoryCreationBoundary creation_boundary;
 };
 
 struct ResolvedPaths {

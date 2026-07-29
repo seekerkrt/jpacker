@@ -48,9 +48,16 @@ setup_case() {
     command_log=$case_dir/commands.log
     output_file=$case_dir/output
 
-    mkdir -p "$case_dir/home" "$case_dir/xdg-cache" "$case_dir/package.build"
+    mkdir -p \
+        "$case_dir/home" \
+        "$case_dir/xdg-config" \
+        "$case_dir/xdg-state" \
+        "$case_dir/xdg-cache" \
+        "$case_dir/package.build"
     : > "$command_log"
     export HOME=$case_dir/home
+    export XDG_CONFIG_HOME=$case_dir/xdg-config
+    export XDG_STATE_HOME=$case_dir/xdg-state
     export XDG_CACHE_HOME=$case_dir/xdg-cache
     export MOGUET_TEST_COMMAND_LOG=$command_log
     export MOGUET_TEST_PACMAN_EXIT_CODE=0
@@ -155,18 +162,29 @@ assert_command_log_empty() {
     fi
 }
 
-assert_cache_root_absent() {
+assert_storage_roots_absent() {
     if [ -e "$XDG_CACHE_HOME/jpacker" ] || [ -L "$XDG_CACHE_HOME/jpacker" ]; then
         echo "default cache/log initialization ran before entry validation completed" >&2
         find "$XDG_CACHE_HOME/jpacker" -maxdepth 2 -print >&2 || true
         exit 1
     fi
+    for directory in \
+        "$XDG_CONFIG_HOME/moguet" \
+        "$XDG_STATE_HOME/moguet" \
+        "$XDG_CACHE_HOME/moguet"
+    do
+        if [ -e "$directory" ] || [ -L "$directory" ]; then
+            echo "XDG directory preparation ran before entry validation completed" >&2
+            find "$directory" -maxdepth 2 -print >&2 || true
+            exit 1
+        fi
+    done
 }
 
 assert_pre_log_exit() {
     assert_command_log_empty
     assert_not_contains "Started Moguet v" "$output_file"
-    assert_cache_root_absent
+    assert_storage_roots_absent
 }
 
 assert_no_mutation_commands() {

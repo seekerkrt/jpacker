@@ -18,6 +18,13 @@ namespace fs = std::filesystem;
 constexpr std::string_view CONFIG_FILE_NAME = "config.toml";
 constexpr std::string_view DEFAULT_LOG_FILE_SUFFIX = ".log";
 
+struct ResolvedBaseDirectory {
+    fs::path                 directory;
+    DirectorySource         source = DirectorySource::ExplicitXdg;
+    fs::path                 existing_anchor;
+    std::vector<std::string> creatable_components;
+};
+
 std::string_view directory_kind_name(DirectoryKind directory_kind) {
     switch(directory_kind) {
     case DirectoryKind::Config:
@@ -138,7 +145,12 @@ fs::path require_absolute_base_path(
                         ResolutionErrorCode::DotComponent);
             }
         }
-        return path.lexically_normal();
+        fs::path normalized = path.lexically_normal();
+        if(normalized != normalized.root_path() &&
+           normalized.filename().empty()) {
+            normalized = normalized.parent_path();
+        }
+        return normalized;
     } catch(const fs::filesystem_error&) {
         throw_resolution_error(
                 directory_kind, environment_variable,
@@ -146,16 +158,25 @@ fs::path require_absolute_base_path(
     }
 }
 
-fs::path resolve_base_directory(
+std::vector<std::string> path_components(const fs::path& path) {
+    std::vector<std::string> components;
+    for(const auto& component : path) components.push_back(component.string());
+    return components;
+}
+
+ResolvedBaseDirectory resolve_base_directory(
         const std::optional<std::string>& xdg_value,
         const std::optional<std::string>& home_value,
         DirectoryKind directory_kind,
         const fs::path& fallback_suffix) {
     // XDG Base Directory Specification: defined-empty is the same as unset.
     if(xdg_value.has_value() && !xdg_value->empty()) {
-        return require_absolute_base_path(
+        fs::path base_directory = require_absolute_base_path(
                 *xdg_value, directory_kind,
                 xdg_environment_variable(directory_kind));
+        return ResolvedBaseDirectory{
+                base_directory, DirectorySource::ExplicitXdg,
+                std::move(base_directory), {}};
     }
 
     if(!home_value.has_value()) {
@@ -171,7 +192,20 @@ fs::path resolve_base_directory(
 
     fs::path home = require_absolute_base_path(
             *home_value, directory_kind, EnvironmentVariable::Home);
-    return (home / fallback_suffix).lexically_normal();
+    return ResolvedBaseDirectory{
+            (home / fallback_suffix).lexically_normal(),
+            DirectorySource::HomeFallback, std::move(home),
+            path_components(fallback_suffix)};
+}
+
+DirectoryCreationBoundary make_creation_boundary(
+        ResolvedBaseDirectory base_directory,
+        const std::string& application_component) {
+    base_directory.creatable_components.push_back(application_component);
+    return DirectoryCreationBoundary{
+            base_directory.source, std::move(base_directory.directory),
+            std::move(base_directory.existing_anchor),
+            std::move(base_directory.creatable_components)};
 }
 
 std::optional<std::string> process_environment_value(const char* name) {
@@ -187,21 +221,21 @@ ResolutionError::ResolutionError(ResolutionFailure failure)
 }
 
 ResolvedPaths resolve(const EnvironmentSnapshot& environment) {
-    const fs::path config_base = resolve_base_directory(
+    ResolvedBaseDirectory config_base = resolve_base_directory(
             environment.xdg_config_home, environment.home,
             DirectoryKind::Config, ".config");
-    const fs::path state_base = resolve_base_directory(
+    ResolvedBaseDirectory state_base = resolve_base_directory(
             environment.xdg_state_home, environment.home,
             DirectoryKind::State, fs::path(".local") / "state");
-    const fs::path cache_base = resolve_base_directory(
+    ResolvedBaseDirectory cache_base = resolve_base_directory(
             environment.xdg_cache_home, environment.home,
             DirectoryKind::Cache, ".cache");
 
-    const fs::path application_component(
-            std::string(application_identity::XDG_IDENTITY));
-    const fs::path config_directory = config_base / application_component;
-    const fs::path state_directory = state_base / application_component;
-    const fs::path cache_directory = cache_base / application_component;
+    const std::string application_component(application_identity::XDG_IDENTITY);
+    const fs::path config_directory =
+            config_base.directory / application_component;
+    const fs::path state_directory = state_base.directory / application_component;
+    const fs::path cache_directory = cache_base.directory / application_component;
 
     fs::path default_log_file = state_directory / application_component;
     default_log_file += DEFAULT_LOG_FILE_SUFFIX;
@@ -209,9 +243,17 @@ ResolvedPaths resolve(const EnvironmentSnapshot& environment) {
     return ResolvedPaths{
             ConfigPaths{
                     config_directory,
-                    config_directory / std::string(CONFIG_FILE_NAME)},
-            StatePaths{state_directory, std::move(default_log_file)},
-            CachePaths{cache_directory}};
+                    config_directory / std::string(CONFIG_FILE_NAME),
+                    make_creation_boundary(
+                            std::move(config_base), application_component)},
+            StatePaths{
+                    state_directory, std::move(default_log_file),
+                    make_creation_boundary(
+                            std::move(state_base), application_component)},
+            CachePaths{
+                    cache_directory,
+                    make_creation_boundary(
+                            std::move(cache_base), application_component)}};
 }
 
 ResolvedPaths resolve_process_environment() {
