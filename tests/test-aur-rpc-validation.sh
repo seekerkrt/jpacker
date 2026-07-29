@@ -21,10 +21,12 @@ trap cleanup EXIT INT TERM
 
 port_file=$tmp_dir/port
 request_log=$tmp_dir/requests.log
+user_agent_log=$tmp_dir/user-agents.log
 : > "$request_log"
+: > "$user_agent_log"
 python3 "$repo_root/tests/aur_rpc_fixture_server.py" \
     "$repo_root/tests/fixtures/aur-rpc-validation.json" "$port_file" \
-    "$request_log" &
+    "$request_log" "$user_agent_log" &
 server_pid=$!
 
 attempt=0
@@ -55,6 +57,7 @@ setup_case() {
     mkdir -p "$case_dir/home" "$case_dir/xdg-cache"
     : > "$command_log"
     : > "$request_log"
+    : > "$user_agent_log"
     inventory_state=$case_dir/foreign-inventory.state
     : > "$inventory_state"
     export HOME=$case_dir/home
@@ -183,6 +186,22 @@ assert_request_count() {
     fi
 }
 
+assert_moguet_user_agents() {
+    expected_user_agent="moguet/$(tr -d '[:space:]' < "$repo_root/VERSION")"
+    if [ ! -s "$user_agent_log" ]; then
+        echo "AUR fixture did not observe a User-Agent header" >&2
+        exit 1
+    fi
+    unexpected_user_agent_count=$(
+        grep -Fvxc -- "$expected_user_agent" "$user_agent_log" || true
+    )
+    if [ "$unexpected_user_agent_count" -ne 0 ]; then
+        echo "unexpected AUR RPC User-Agent; expected $expected_user_agent" >&2
+        cat "$user_agent_log" >&2
+        exit 1
+    fi
+}
+
 assert_no_version_comparison() {
     if grep -E '^vercmp( |$)' "$command_log" >/dev/null; then
         echo "AUR encode failure returned a partial batch result" >&2
@@ -236,6 +255,7 @@ run_envelope_ok info-many-normal unused
 assert_contains "valid-minimal" "$output_file"
 assert_contains "arrays-null" "$output_file"
 assert_request_count 1
+assert_moguet_user_agents
 
 setup_case info-many-encode-failure-first
 run_envelope_fail info-many-fail-first unused
@@ -521,6 +541,7 @@ assert_no_pacman_command
 setup_case normal-deps
 run_ok deps valid-root
 assert_contains "valid-dep" "$output_file"
+assert_moguet_user_agents
 
 setup_case normal-plan
 run_ok plan valid-root

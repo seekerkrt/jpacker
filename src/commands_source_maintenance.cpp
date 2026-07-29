@@ -1,5 +1,6 @@
 #include "commands_source_maintenance.hpp"
 
+#include "application_identity.hpp"
 #include "app_config.hpp"
 #include "logging.hpp"
 #include "package_metadata.hpp"
@@ -221,7 +222,9 @@ int cmd_build(
         const std::vector<std::string>& args,
         const AppConfig& config) {
     if(args.empty()) {
-        Logger::error("Usage: jpacker build <pkg> [VAR=VAL...]");
+        Logger::error(
+                "Usage: " + std::string(application_identity::COMMAND_NAME) +
+                " build <pkg> [VAR=VAL...]");
         return 1;
     }
     std::string            pkg_name;

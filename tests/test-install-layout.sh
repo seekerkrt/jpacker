@@ -23,7 +23,8 @@ run_make() {
 
 set_stage() {
     stage_dir=$stage_root/$1
-    binary_file=$stage_dir/usr/bin/jpacker
+    binary_file=$stage_dir/usr/bin/moguet
+    legacy_binary_file=$stage_dir/usr/bin/jpacker
     config_dir=$stage_dir/etc/jpacker
     config_file=$config_dir/jpacker.conf
     preference_dir=$config_dir/package.build
@@ -161,7 +162,8 @@ assert_compliance_absent() {
 }
 
 assert_package_artifacts_installed() {
-    assert_installed_file "$repo_root/jpacker" "$binary_file" 755
+    assert_installed_file "$repo_root/moguet" "$binary_file" 755
+    assert_absent "$legacy_binary_file"
     assert_installed_file "$repo_root/completions/jpacker_completion.bash" \
         "$bash_completion_file"
     assert_installed_file "$repo_root/completions/_jpacker" \
@@ -174,6 +176,7 @@ assert_package_artifacts_installed() {
 
 assert_package_artifacts_absent() {
     assert_absent "$binary_file"
+    assert_absent "$legacy_binary_file"
     assert_absent "$bash_completion_file"
     assert_absent "$zsh_completion_file"
     assert_absent "$fish_completion_file"

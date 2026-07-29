@@ -1,5 +1,6 @@
 #include "commands_inspect.hpp"
 
+#include "application_identity.hpp"
 #include "aur_rpc.hpp"
 #include "aur_update_query.hpp"
 #include "checkout_fetch.hpp"
@@ -33,6 +34,15 @@
 namespace {
 
 const std::string AUR_BASE_URL = "https://aur.archlinux.org/";
+const std::string DEPS_USAGE =
+        "Usage: " + std::string(application_identity::COMMAND_NAME) +
+        " deps [--recursive] <pkg>";
+const std::string PLAN_USAGE =
+        "Usage: " + std::string(application_identity::COMMAND_NAME) +
+        " plan <pkg>";
+const std::string FETCH_USAGE =
+        "Usage: " + std::string(application_identity::COMMAND_NAME) +
+        " fetch <pkg>";
 
 using RepositoryPackageLookupIdentity =
         std::pair<std::optional<std::string>, std::string>;
@@ -586,12 +596,12 @@ int cmd_deps(const std::vector<std::string>& targets, const std::vector<std::str
             continue;
         }
         Logger::error("Unsupported deps option: " + flag);
-        Logger::error("Usage: jpacker deps [--recursive] <pkg>");
+        Logger::error(DEPS_USAGE);
         return 1;
     }
 
     if(targets.empty()) {
-        Logger::error("Usage: jpacker deps [--recursive] <pkg>");
+        Logger::error(DEPS_USAGE);
         return 1;
     }
 
@@ -651,12 +661,12 @@ int cmd_plan(const std::vector<std::string>& targets, const std::vector<std::str
     for(const auto& flag : flags) {
         if(flag == "plan") continue;
         Logger::error("Unsupported plan option: " + flag);
-        Logger::error("Usage: jpacker plan <pkg>");
+        Logger::error(PLAN_USAGE);
         return 1;
     }
 
     if(targets.empty()) {
-        Logger::error("Usage: jpacker plan <pkg>");
+        Logger::error(PLAN_USAGE);
         return 1;
     }
 
@@ -685,12 +695,12 @@ int cmd_fetch(const std::vector<std::string>& targets, const std::vector<std::st
     for(const auto& flag : flags) {
         if(flag == "fetch") continue;
         Logger::error("Unsupported fetch option: " + flag);
-        Logger::error("Usage: jpacker fetch <pkg>");
+        Logger::error(FETCH_USAGE);
         return 1;
     }
 
     if(targets.empty()) {
-        Logger::error("Usage: jpacker fetch <pkg>");
+        Logger::error(FETCH_USAGE);
         return 1;
     }
 

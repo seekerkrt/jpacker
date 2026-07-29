@@ -62,7 +62,7 @@ assert_occurrence_count 1 '-V, --version' "$tmp_dir/help-short"
 cmp -s "$tmp_dir/version-short" "$tmp_dir/version-long" ||
     fail "-V and --version output differ."
 version=$(tr -d '[:space:]' < "$repo_root/VERSION")
-[ "$(cat "$tmp_dir/version-short")" = "jpacker v$version" ] ||
+[ "$(cat "$tmp_dir/version-short")" = "Moguet v$version" ] ||
     fail "version output does not match VERSION."
 
 sed "s/@VERSION@/$version/g" "$repo_root/man/jpacker.8.in" > \

@@ -659,7 +659,7 @@ setup_upgrade_transition_case() {
 # P0-1: build handler parsing, validation, catch boundary, and source request mapping.
 setup_case build-missing-argument
 run_fail build
-assert_contains "Usage: jpacker build <pkg> [VAR=VAL...]" "$output_file"
+assert_contains "Usage: moguet build <pkg> [VAR=VAL...]" "$output_file"
 assert_total_command_count 0
 
 setup_case build-environment-without-package

@@ -1,5 +1,7 @@
 #include "cli_routing.hpp"
 
+#include "application_identity.hpp"
+
 #include <algorithm>
 #include <stdexcept>
 
@@ -38,7 +40,8 @@ std::vector<std::string> validate_pkgbuild_export_invocation(
     if(parsed.targets.size() != 1) {
         return {
                 "Operation " + parsed.operation + " requires exactly one AUR package target.",
-                "Usage: jpacker " + parsed.operation + " <pkg>"};
+                "Usage: " + std::string(application_identity::COMMAND_NAME) +
+                        " " + parsed.operation + " <pkg>"};
     }
 
     return {};

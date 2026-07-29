@@ -280,12 +280,14 @@ assert_fixture_tree() {
 setup_case cli-validation
 run_fail -G
 assert_contains "requires exactly one AUR package target" "$stderr_file"
+assert_contains "Usage: moguet -G <pkg>" "$stderr_file"
 assert_command_log_empty
 assert_normal_request_log_empty
 assert_cache_root_absent
 
 run_fail -Gp
 assert_contains "requires exactly one AUR package target" "$stderr_file"
+assert_contains "Usage: moguet -Gp <pkg>" "$stderr_file"
 assert_stdout_empty
 assert_command_log_empty
 assert_normal_request_log_empty
@@ -400,7 +402,7 @@ assert_contains "Export one AUR PackageBase repository" "$stdout_file"
 assert_contains "Print only one AUR PackageBase PKGBUILD" "$stdout_file"
 assert_command_log_empty
 run_ok --version
-assert_contains "jpacker v" "$stdout_file"
+assert_contains "Moguet v" "$stdout_file"
 assert_command_log_empty
 run_fail -Gp --help
 assert_contains "Unsupported option --help for operation -Gp" "$stderr_file"
@@ -674,7 +676,7 @@ if ! cmp -s "$fixture_dir/PKGBUILD" "$stdout_file"; then
     cmp -l "$fixture_dir/PKGBUILD" "$stdout_file" >&2 || true
     exit 1
 fi
-assert_not_contains "Started jpacker" "$stdout_file"
+assert_not_contains "Started Moguet" "$stdout_file"
 assert_not_contains "Running:" "$stdout_file"
 assert_export_git_commands clean-root
 assert_exact_info_request clean-root

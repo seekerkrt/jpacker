@@ -11,6 +11,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 fixture_path = Path(sys.argv[1])
 port_path = Path(sys.argv[2])
 request_log_path = Path(sys.argv[3]) if len(sys.argv) >= 4 else None
+user_agent_log_path = Path(sys.argv[4]) if len(sys.argv) >= 5 else None
 fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
 info_sequence_group_counts = {}
 info_sequence_group_lock = threading.Lock()
@@ -54,10 +55,14 @@ def apply_response_override(response, override):
 
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
-        if request_log_path is not None:
+        if request_log_path is not None or user_agent_log_path is not None:
             with request_log_lock:
-                with request_log_path.open("a", encoding="utf-8") as request_log:
-                    request_log.write(f"{self.path}\n")
+                if request_log_path is not None:
+                    with request_log_path.open("a", encoding="utf-8") as request_log:
+                        request_log.write(f"{self.path}\n")
+                if user_agent_log_path is not None:
+                    with user_agent_log_path.open("a", encoding="utf-8") as user_agent_log:
+                        user_agent_log.write(f"{self.headers.get('User-Agent', '')}\n")
 
         parsed = urlparse(self.path)
         query = parse_qs(parsed.query)

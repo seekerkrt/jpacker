@@ -6,6 +6,7 @@
 # Project build outputs
 /build/
 /jpacker
+/moguet
 
 # Local editor settings
 .vscode/
