@@ -137,7 +137,7 @@ private:
 class TemporaryDirectory {
 public:
     TemporaryDirectory() {
-        char directory_template[] = "/tmp/jpacker-process-stdin-fd.XXXXXX";
+        char directory_template[] = "/tmp/moguet-process-stdin-fd.XXXXXX";
         char* created_path = mkdtemp(directory_template);
         if(created_path == nullptr) {
             throw std::system_error(errno, std::generic_category(), "mkdtemp");

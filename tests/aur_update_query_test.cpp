@@ -101,7 +101,7 @@ AurPackageInfo package_info(
     info.PackageBase = package_base.empty() ? name : package_base;
     info.Version = version;
     info.Description = "AUR update query fixture";
-    info.Maintainer = "jpacker-test";
+    info.Maintainer = "moguet-test";
     return info;
 }
 

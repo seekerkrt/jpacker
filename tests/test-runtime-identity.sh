@@ -45,7 +45,7 @@ help_output=$tmp_dir/help.out
 "$production_binary" --help > "$help_output" 2>&1
 assert_contains "Moguet" "$help_output"
 assert_contains "    moguet <op> [options] [targets...]" "$help_output"
-assert_contains "    jpacker.conf: EDITOR=" "$help_output"
+assert_contains "    legacy jpacker.conf: EDITOR=" "$help_output"
 grep -Fv 'jpacker.conf:' "$help_output" > "$tmp_dir/help-without-legacy-config"
 if grep -Fi -- 'jpacker' "$tmp_dir/help-without-legacy-config" >/dev/null; then
     fail "help retains an unintended jpacker project identity."
@@ -79,8 +79,8 @@ if [ -e "$root_case_dir/xdg-cache/jpacker" ] || \
     fail "root guard allowed legacy cache/log initialization."
 fi
 
-JPACKER_TEST_REPOSITORY_ROOT=$repo_root
-export JPACKER_TEST_REPOSITORY_ROOT
+MOGUET_TEST_REPOSITORY_ROOT=$repo_root
+export MOGUET_TEST_REPOSITORY_ROOT
 PATH=$repo_root/tests/stubs:/usr/bin:/bin
 export PATH
 . "$repo_root/tests/test-command-safety.sh"
@@ -91,8 +91,8 @@ mkdir -p "$startup_case_dir/home" "$startup_case_dir/xdg-cache"
 startup_output=$startup_case_dir/output
 command_log=$startup_case_dir/commands.log
 : > "$command_log"
-export JPACKER_TEST_COMMAND_LOG=$command_log
-export JPACKER_TEST_PACMAN_EXIT_CODE=0
+export MOGUET_TEST_COMMAND_LOG=$command_log
+export MOGUET_TEST_PACMAN_EXIT_CODE=0
 HOME=$startup_case_dir/home XDG_CACHE_HOME=$startup_case_dir/xdg-cache \
     "$production_binary" -Q filesystem > "$startup_output" 2>&1 ||
     fail "safe startup identity command failed."

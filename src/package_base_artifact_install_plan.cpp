@@ -9,7 +9,7 @@
 
 namespace {
 
-#ifdef JPACKER_ENABLE_PACKAGE_BASE_ARTIFACT_INSTALL_PLAN_TEST_HOOKS
+#ifdef MOGUET_ENABLE_PACKAGE_BASE_ARTIFACT_INSTALL_PLAN_TEST_HOOKS
 PackageBaseArtifactInstallReasonPlanObserverForTest
         g_reason_plan_observer = nullptr;
 
@@ -240,7 +240,7 @@ resolve_package_base_artifact_install_reason_plan(
     return PackageBaseArtifactInstallReasonPlanResult(std::move(plan));
 }
 
-#ifdef JPACKER_ENABLE_PACKAGE_BASE_ARTIFACT_INSTALL_PLAN_TEST_HOOKS
+#ifdef MOGUET_ENABLE_PACKAGE_BASE_ARTIFACT_INSTALL_PLAN_TEST_HOOKS
 void set_package_base_artifact_install_reason_plan_observer_for_test(
         PackageBaseArtifactInstallReasonPlanObserverForTest observer) {
     g_reason_plan_observer = observer;

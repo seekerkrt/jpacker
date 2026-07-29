@@ -3,8 +3,8 @@ set -eu
 
 test_binary=$1
 repo_root=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
-JPACKER_TEST_REPOSITORY_ROOT=$repo_root
-export JPACKER_TEST_REPOSITORY_ROOT
+MOGUET_TEST_REPOSITORY_ROOT=$repo_root
+export MOGUET_TEST_REPOSITORY_ROOT
 . "$repo_root/tests/test-command-safety.sh"
 
 tmp_dir=$(mktemp -d)
@@ -42,16 +42,16 @@ setup_case() {
 
     export HOME=$case_dir/home
     export XDG_CACHE_HOME=$case_dir/xdg-cache
-    export JPACKER_TEST_CONFIG_FILE=$config_file
-    export JPACKER_TEST_PACKAGE_BUILD_DIR=$case_dir/package.build
-    export JPACKER_TEST_COMMAND_LOG=$command_log
-    export JPACKER_TEST_PACKAGE_METADATA_EVENT_LOG=$command_log
-    export JPACKER_TEST_FOREIGN_PACKAGE_INVENTORY_STATE_FILE=$foreign_inventory_file
-    export JPACKER_TEST_PACMAN_CONF_REPOSITORY_LIST=core
-    export JPACKER_TEST_UPGRADE_ALL_SCENARIO=$scenario_name
-    export JPACKER_TEST_AUR_UPDATE_SCENARIO=no-installed-foreign
-    export JPACKER_TEST_PACMAN_EXIT_CODE=91
-    export JPACKER_TEST_SUDO_EXIT_CODE=92
+    export MOGUET_TEST_CONFIG_FILE=$config_file
+    export MOGUET_TEST_PACKAGE_BUILD_DIR=$case_dir/package.build
+    export MOGUET_TEST_COMMAND_LOG=$command_log
+    export MOGUET_TEST_PACKAGE_METADATA_EVENT_LOG=$command_log
+    export MOGUET_TEST_FOREIGN_PACKAGE_INVENTORY_STATE_FILE=$foreign_inventory_file
+    export MOGUET_TEST_PACMAN_CONF_REPOSITORY_LIST=core
+    export MOGUET_TEST_UPGRADE_ALL_SCENARIO=$scenario_name
+    export MOGUET_TEST_AUR_UPDATE_SCENARIO=no-installed-foreign
+    export MOGUET_TEST_PACMAN_EXIT_CODE=91
+    export MOGUET_TEST_SUDO_EXIT_CODE=92
     case_count=$((case_count + 1))
 }
 
@@ -186,8 +186,8 @@ run_matrix_case() {
     setup_case \
         "matrix-$matrix_kind-$matrix_index" \
         aur-presentation-matrix
-    export JPACKER_TEST_UPGRADE_ALL_MATRIX_KIND=$matrix_kind
-    export JPACKER_TEST_UPGRADE_ALL_MATRIX_INDEX=$matrix_index
+    export MOGUET_TEST_UPGRADE_ALL_MATRIX_KIND=$matrix_kind
+    export MOGUET_TEST_UPGRADE_ALL_MATRIX_INDEX=$matrix_index
     run_status "$expected_matrix_status" upgrade-all
 
     if [ "$expected_stdout_fragment" != "-" ]; then
@@ -247,7 +247,7 @@ assert_no_external_mutation
 
 # 2-5: existing route compatibility.
 setup_case legacy-upgrade no-updates
-export JPACKER_TEST_SUDO_EXIT_CODE=0
+export MOGUET_TEST_SUDO_EXIT_CODE=0
 run_status 0 upgrade
 assert_exact_line "sudo pacman -Syu" "$command_log"
 assert_aggregate_absent
@@ -258,7 +258,7 @@ assert_exact_line "AUR update: no updates" "$stdout_file"
 assert_aggregate_absent
 
 setup_case generic-syu no-updates
-export JPACKER_TEST_SUDO_EXIT_CODE=0
+export MOGUET_TEST_SUDO_EXIT_CODE=0
 run_status 0 -Syu
 assert_exact_line "sudo pacman -Syu" "$command_log"
 assert_aggregate_absent

@@ -5,8 +5,8 @@ test_binary=$1
 config_test_binary=$2
 upgrade_metadata_test_binary=$3
 repo_root=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
-JPACKER_TEST_REPOSITORY_ROOT=$repo_root
-export JPACKER_TEST_REPOSITORY_ROOT
+MOGUET_TEST_REPOSITORY_ROOT=$repo_root
+export MOGUET_TEST_REPOSITORY_ROOT
 . "$repo_root/tests/test-command-safety.sh"
 tmp_dir=$(mktemp -d)
 
@@ -21,12 +21,12 @@ if ! command -v script >/dev/null 2>&1; then
     echo "script(1) is required for source-build tests" >&2
     exit 1
 fi
-ln -s "$test_binary" "$tmp_dir/jpacker-test"
-ln -s "$config_test_binary" "$tmp_dir/jpacker-config-test"
-ln -s "$upgrade_metadata_test_binary" "$tmp_dir/jpacker-upgrade-metadata-test"
-test_runner=$tmp_dir/jpacker-test
-config_test_runner=$tmp_dir/jpacker-config-test
-upgrade_metadata_test_runner=$tmp_dir/jpacker-upgrade-metadata-test
+ln -s "$test_binary" "$tmp_dir/moguet-test"
+ln -s "$config_test_binary" "$tmp_dir/moguet-config-test"
+ln -s "$upgrade_metadata_test_binary" "$tmp_dir/moguet-upgrade-metadata-test"
+test_runner=$tmp_dir/moguet-test
+config_test_runner=$tmp_dir/moguet-config-test
+upgrade_metadata_test_runner=$tmp_dir/moguet-upgrade-metadata-test
 
 export PATH=$repo_root/tests/stubs:/usr/bin:/bin
 require_exact_test_command pacman-conf "$repo_root/tests/stubs/pacman-conf"
@@ -59,62 +59,62 @@ setup_case() {
     : > "$package_metadata_state"
     export HOME=$case_dir/home
     export XDG_CACHE_HOME=$case_dir/xdg-cache
-    export JPACKER_TEST_COMMAND_LOG=$command_log
-    export JPACKER_TEST_PACKAGE_BUILD_DIR=$case_dir/package.build
-    export JPACKER_TEST_PACMAN_REPO_PACKAGES=clean-root
-    export JPACKER_TEST_PACMAN_EXIT_CODE=1
-    export JPACKER_TEST_SUDO_EXIT_CODE=0
-    export JPACKER_TEST_MAKEPKG_EXIT_CODE=0
-    export JPACKER_TEST_PACKAGE_METADATA_STATE_FILE=$package_metadata_state
-    export JPACKER_TEST_PACKAGE_METADATA_EVENT_LOG=$command_log
-    unset JPACKER_TEST_PACMAN_Q_OUTPUT
-    unset JPACKER_TEST_PACMAN_Q_EXIT_CODE
-    unset JPACKER_TEST_PACMAN_QM_OUTPUT
-    unset JPACKER_TEST_GIT_REMOTE_URL
-    unset JPACKER_TEST_GIT_CLONE_EXIT_CODE
-    unset JPACKER_TEST_GIT_CLONE_SYMLINK_TARGET
-    unset JPACKER_TEST_GIT_CLONE_FIXTURE_DIR
-    unset JPACKER_TEST_GIT_SYMBOLIC_REF
-    unset JPACKER_TEST_GIT_SYMBOLIC_REF_EXIT_CODE
-    unset JPACKER_TEST_GIT_MAIN_REF_EXIT_CODE
-    unset JPACKER_TEST_GIT_MASTER_REF_EXIT_CODE
-    unset JPACKER_TEST_GIT_DIFF_QUIET_EXIT_CODE
-    unset JPACKER_TEST_GIT_DIFF_NAME_ONLY_EXIT_CODE
-    unset JPACKER_TEST_GIT_DIFF_COLOR_EXIT_CODE
-    unset JPACKER_TEST_GIT_CHANGED_FILES
-    unset JPACKER_TEST_VERCMP_OUTPUT
-    unset JPACKER_TEST_VERCMP_EXIT_CODE
+    export MOGUET_TEST_COMMAND_LOG=$command_log
+    export MOGUET_TEST_PACKAGE_BUILD_DIR=$case_dir/package.build
+    export MOGUET_TEST_PACMAN_REPO_PACKAGES=clean-root
+    export MOGUET_TEST_PACMAN_EXIT_CODE=1
+    export MOGUET_TEST_SUDO_EXIT_CODE=0
+    export MOGUET_TEST_MAKEPKG_EXIT_CODE=0
+    export MOGUET_TEST_PACKAGE_METADATA_STATE_FILE=$package_metadata_state
+    export MOGUET_TEST_PACKAGE_METADATA_EVENT_LOG=$command_log
+    unset MOGUET_TEST_PACMAN_Q_OUTPUT
+    unset MOGUET_TEST_PACMAN_Q_EXIT_CODE
+    unset MOGUET_TEST_PACMAN_QM_OUTPUT
+    unset MOGUET_TEST_GIT_REMOTE_URL
+    unset MOGUET_TEST_GIT_CLONE_EXIT_CODE
+    unset MOGUET_TEST_GIT_CLONE_SYMLINK_TARGET
+    unset MOGUET_TEST_GIT_CLONE_FIXTURE_DIR
+    unset MOGUET_TEST_GIT_SYMBOLIC_REF
+    unset MOGUET_TEST_GIT_SYMBOLIC_REF_EXIT_CODE
+    unset MOGUET_TEST_GIT_MAIN_REF_EXIT_CODE
+    unset MOGUET_TEST_GIT_MASTER_REF_EXIT_CODE
+    unset MOGUET_TEST_GIT_DIFF_QUIET_EXIT_CODE
+    unset MOGUET_TEST_GIT_DIFF_NAME_ONLY_EXIT_CODE
+    unset MOGUET_TEST_GIT_DIFF_COLOR_EXIT_CODE
+    unset MOGUET_TEST_GIT_CHANGED_FILES
+    unset MOGUET_TEST_VERCMP_OUTPUT
+    unset MOGUET_TEST_VERCMP_EXIT_CODE
     unset EDITOR
-    unset JPACKER_TEST_CONFIG_FILE
-    unset JPACKER_TEST_EDITOR_ARGV_LOG
-    unset JPACKER_TEST_EDITOR_EXIT_CODE
-    unset JPACKER_TEST_EDITOR_REPLACE_TARGET
-    unset JPACKER_TEST_EDITOR_REMOVE_TARGET
-    unset JPACKER_TEST_EDITOR_SYMLINK_TARGET
-    unset JPACKER_TEST_APP_CONFIG_CASE
-    unset JPACKER_TEST_PACKAGE_METADATA_INITIALIZE_FAILURE
-    unset JPACKER_TEST_PACKAGE_METADATA_INITIALIZE_FAILURE_AT
-    unset JPACKER_TEST_PACKAGE_METADATA_QUERY_FAILURE_PACKAGE
-    unset JPACKER_TEST_PACKAGE_METADATA_QUERY_FAILURE_AT
-    unset JPACKER_TEST_PACKAGE_METADATA_UNKNOWN_REASON_PACKAGE
-    unset JPACKER_TEST_PACKAGE_METADATA_PACMAN_CONF_EXIT_CODE
-    unset JPACKER_TEST_PACKAGE_METADATA_PACMAN_CONF_FAILURE_AT
-    unset JPACKER_TEST_MAKEPKG_PACKAGE_METADATA_STATE_AFTER_SUCCESS_FILE
-    unset JPACKER_TEST_MAKEPKG_PACKAGELIST_EXIT_CODE
-    unset JPACKER_TEST_MAKEPKG_PACKAGELIST_OUTPUT_FILE
+    unset MOGUET_TEST_CONFIG_FILE
+    unset MOGUET_TEST_EDITOR_ARGV_LOG
+    unset MOGUET_TEST_EDITOR_EXIT_CODE
+    unset MOGUET_TEST_EDITOR_REPLACE_TARGET
+    unset MOGUET_TEST_EDITOR_REMOVE_TARGET
+    unset MOGUET_TEST_EDITOR_SYMLINK_TARGET
+    unset MOGUET_TEST_APP_CONFIG_CASE
+    unset MOGUET_TEST_PACKAGE_METADATA_INITIALIZE_FAILURE
+    unset MOGUET_TEST_PACKAGE_METADATA_INITIALIZE_FAILURE_AT
+    unset MOGUET_TEST_PACKAGE_METADATA_QUERY_FAILURE_PACKAGE
+    unset MOGUET_TEST_PACKAGE_METADATA_QUERY_FAILURE_AT
+    unset MOGUET_TEST_PACKAGE_METADATA_UNKNOWN_REASON_PACKAGE
+    unset MOGUET_TEST_PACKAGE_METADATA_PACMAN_CONF_EXIT_CODE
+    unset MOGUET_TEST_PACKAGE_METADATA_PACMAN_CONF_FAILURE_AT
+    unset MOGUET_TEST_MAKEPKG_PACKAGE_METADATA_STATE_AFTER_SUCCESS_FILE
+    unset MOGUET_TEST_MAKEPKG_PACKAGELIST_EXIT_CODE
+    unset MOGUET_TEST_MAKEPKG_PACKAGELIST_OUTPUT_FILE
 }
 
 create_existing_checkout() {
     mkdir -p "$checkout_dir/.git"
     printf 'pkgname=clean-root\npkgver=1\npkgrel=1\n' > "$checkout_dir/PKGBUILD"
-    printf '%s\n' "$official_url" > "$checkout_dir/.git/.jpacker-test-remote-url"
+    printf '%s\n' "$official_url" > "$checkout_dir/.git/.moguet-test-remote-url"
 }
 
 prepare_upgrade_case() {
     create_existing_checkout
-    : > "$JPACKER_TEST_PACKAGE_BUILD_DIR/clean-root"
+    : > "$MOGUET_TEST_PACKAGE_BUILD_DIR/clean-root"
     printf 'clean-root 1.0-1\n' > "$package_metadata_state"
-    export JPACKER_TEST_PACMAN_Q_OUTPUT='clean-root 1.0-1'
+    export MOGUET_TEST_PACMAN_Q_OUTPUT='clean-root 1.0-1'
 }
 
 write_srcinfo() {
@@ -330,7 +330,7 @@ assert_checkout_retained() {
 # P0-1: origin/HEAD takes precedence, followed by main and then master.
 setup_case branch-origin-head
 create_existing_checkout
-export JPACKER_TEST_GIT_SYMBOLIC_REF=origin/trunk
+export MOGUET_TEST_GIT_SYMBOLIC_REF=origin/trunk
 run_ok --noedit --nodiff build clean-root
 assert_contains "Detected branch: trunk" "$output_file"
 assert_command "git reset --hard origin/trunk"
@@ -344,7 +344,7 @@ assert_command "git reset --hard origin/main"
 
 setup_case branch-master
 create_existing_checkout
-export JPACKER_TEST_GIT_MAIN_REF_EXIT_CODE=1
+export MOGUET_TEST_GIT_MAIN_REF_EXIT_CODE=1
 run_ok --noedit --nodiff build clean-root
 assert_contains "Detected branch: master" "$output_file"
 assert_command "git show-ref --verify --quiet refs/remotes/origin/main"
@@ -354,8 +354,8 @@ assert_command "git reset --hard origin/master"
 # P0-2: the changed-diff prompt controls display only; reset always follows.
 setup_case changed-diff-yes
 create_existing_checkout
-export JPACKER_TEST_GIT_DIFF_QUIET_EXIT_CODE=1
-export JPACKER_TEST_GIT_CHANGED_FILES='PKGBUILD\nclean-root.install\n'
+export MOGUET_TEST_GIT_DIFF_QUIET_EXIT_CODE=1
+export MOGUET_TEST_GIT_CHANGED_FILES='PKGBUILD\nclean-root.install\n'
 run_tty_ok 'y\n' --noedit build clean-root
 assert_contains "Update diff range: HEAD..origin/main (existing cache repository)." "$output_file"
 assert_contains "Review-sensitive file changes: PKGBUILD, clean-root.install" "$output_file"
@@ -366,8 +366,8 @@ assert_command_before "git diff HEAD..origin/main --color=always" "git reset --h
 
 setup_case changed-diff-no
 create_existing_checkout
-export JPACKER_TEST_GIT_DIFF_QUIET_EXIT_CODE=1
-export JPACKER_TEST_GIT_CHANGED_FILES='PKGBUILD\n'
+export MOGUET_TEST_GIT_DIFF_QUIET_EXIT_CODE=1
+export MOGUET_TEST_GIT_CHANGED_FILES='PKGBUILD\n'
 run_tty_ok 'n\n' --noedit build clean-root
 assert_contains "Update diff range: HEAD..origin/main (existing cache repository)." "$output_file"
 assert_contains "Updates detected in existing cache repository. View git diff?" "$output_file"
@@ -376,8 +376,8 @@ assert_command "git reset --hard origin/main"
 
 setup_case changed-diff-nodiff
 create_existing_checkout
-export JPACKER_TEST_GIT_DIFF_QUIET_EXIT_CODE=1
-export JPACKER_TEST_GIT_CHANGED_FILES='PKGBUILD\n'
+export MOGUET_TEST_GIT_DIFF_QUIET_EXIT_CODE=1
+export MOGUET_TEST_GIT_CHANGED_FILES='PKGBUILD\n'
 run_ok --noedit --nodiff build clean-root
 assert_not_contains "Update diff range:" "$output_file"
 assert_not_contains "Updates detected in existing cache repository. View git diff?" "$output_file"
@@ -388,7 +388,7 @@ assert_command "git reset --hard origin/main"
 setup_case update-newer
 prepare_upgrade_case
 write_srcinfo 2.0 1
-export JPACKER_TEST_VERCMP_OUTPUT=1
+export MOGUET_TEST_VERCMP_OUTPUT=1
 run_upgrade_ok --noedit --nodiff upgrade
 assert_command_count "pacman-conf --verbose RootDir DBPath" 1
 assert_command_count "alpm initialize" 3
@@ -414,7 +414,7 @@ assert_command_before "vercmp 2.0-1 1.0-1" "makepkg --packagelist"
 setup_case update-up-to-date
 prepare_upgrade_case
 write_srcinfo 1.0 1
-export JPACKER_TEST_VERCMP_OUTPUT=0
+export MOGUET_TEST_VERCMP_OUTPUT=0
 run_upgrade_ok --noedit --nodiff upgrade
 assert_command "git fetch origin"
 assert_command "git reset --hard origin/main"
@@ -422,7 +422,7 @@ assert_command "vercmp 1.0-1 1.0-1"
 assert_command_absent "pacman -Q clean-root"
 assert_contains "clean-root is up to date (1.0-1). Skipping." "$output_file"
 assert_command_prefix_absent "makepkg "
-assert_command_prefix_absent "jpacker-test-editor "
+assert_command_prefix_absent "moguet-test-editor "
 
 setup_case update-unknown-noconfirm
 prepare_upgrade_case
@@ -462,8 +462,8 @@ assert_command_before "git reset --hard origin/main" "makepkg --packagelist"
 
 # P0-4: clone ownership ends after validation; a later makepkg failure keeps the checkout.
 setup_case makepkg-failure-retains-checkout
-export JPACKER_TEST_MAKEPKG_EXIT_CODE=42
-export JPACKER_TEST_MAKEPKG_PACKAGELIST_EXIT_CODE=0
+export MOGUET_TEST_MAKEPKG_EXIT_CODE=42
+export MOGUET_TEST_MAKEPKG_PACKAGELIST_EXIT_CODE=0
 run_fail --noedit --nodiff build clean-root
 assert_contains "Build-only makepkg failed with exit code 42." "$output_file"
 assert_command "git clone $official_url clean-root"
@@ -476,16 +476,16 @@ assert_checkout_retained
 setup_case editor-configured-argv
 create_existing_checkout
 printf 'post_install() { :; }\n' > "$checkout_dir/-option.install"
-write_editor_config 'jpacker-test-editor --configured-option'
-export JPACKER_TEST_CONFIG_FILE="$config_file"
-export JPACKER_TEST_EDITOR_ARGV_LOG="$editor_argv_log"
+write_editor_config 'moguet-test-editor --configured-option'
+export MOGUET_TEST_CONFIG_FILE="$config_file"
+export MOGUET_TEST_EDITOR_ARGV_LOG="$editor_argv_log"
 run_config_tty_ok 'y\ny\ny\n' build clean-root
-assert_command "jpacker-test-editor --configured-option ./PKGBUILD"
-assert_command "jpacker-test-editor --configured-option ./-option.install"
+assert_command "moguet-test-editor --configured-option ./PKGBUILD"
+assert_command "moguet-test-editor --configured-option ./-option.install"
 assert_command "makepkg --packagelist"
 assert_command "makepkg -sc"
-assert_command_before "jpacker-test-editor --configured-option ./PKGBUILD" "jpacker-test-editor --configured-option ./-option.install"
-assert_command_before "jpacker-test-editor --configured-option ./-option.install" "makepkg --packagelist"
+assert_command_before "moguet-test-editor --configured-option ./PKGBUILD" "moguet-test-editor --configured-option ./-option.install"
+assert_command_before "moguet-test-editor --configured-option ./-option.install" "makepkg --packagelist"
 assert_editor_argv_log 'argv-begin
 arg[0]=<--configured-option>
 arg[1]=<./PKGBUILD>
@@ -500,19 +500,19 @@ argv-end'
 setup_case editor-environment-override-argv
 create_existing_checkout
 printf 'post_install() { :; }\n' > "$checkout_dir/-option.install"
-write_editor_config 'jpacker-test-editor --configured-option'
-export JPACKER_TEST_CONFIG_FILE="$config_file"
-export JPACKER_TEST_EDITOR_ARGV_LOG="$editor_argv_log"
-export EDITOR='jpacker-test-editor --environment-option'
+write_editor_config 'moguet-test-editor --configured-option'
+export MOGUET_TEST_CONFIG_FILE="$config_file"
+export MOGUET_TEST_EDITOR_ARGV_LOG="$editor_argv_log"
+export EDITOR='moguet-test-editor --environment-option'
 run_config_tty_ok 'y\ny\ny\n' build clean-root
-assert_command "jpacker-test-editor --environment-option ./PKGBUILD"
-assert_command "jpacker-test-editor --environment-option ./-option.install"
-assert_command_prefix_absent "jpacker-test-editor --configured-option"
+assert_command "moguet-test-editor --environment-option ./PKGBUILD"
+assert_command "moguet-test-editor --environment-option ./-option.install"
+assert_command_prefix_absent "moguet-test-editor --configured-option"
 assert_not_contains "--configured-option" "$editor_argv_log"
 assert_command "makepkg --packagelist"
 assert_command "makepkg -sc"
-assert_command_before "jpacker-test-editor --environment-option ./PKGBUILD" "jpacker-test-editor --environment-option ./-option.install"
-assert_command_before "jpacker-test-editor --environment-option ./-option.install" "makepkg --packagelist"
+assert_command_before "moguet-test-editor --environment-option ./PKGBUILD" "moguet-test-editor --environment-option ./-option.install"
+assert_command_before "moguet-test-editor --environment-option ./-option.install" "makepkg --packagelist"
 assert_editor_argv_log 'argv-begin
 arg[0]=<--environment-option>
 arg[1]=<./PKGBUILD>
@@ -527,15 +527,15 @@ argv-end'
 setup_case editor-configured-failure
 create_existing_checkout
 printf 'post_install() { :; }\n' > "$checkout_dir/-option.install"
-write_editor_config 'jpacker-test-editor --configured-option'
-export JPACKER_TEST_CONFIG_FILE="$config_file"
-export JPACKER_TEST_EDITOR_ARGV_LOG="$editor_argv_log"
-export JPACKER_TEST_EDITOR_EXIT_CODE=42
+write_editor_config 'moguet-test-editor --configured-option'
+export MOGUET_TEST_CONFIG_FILE="$config_file"
+export MOGUET_TEST_EDITOR_ARGV_LOG="$editor_argv_log"
+export MOGUET_TEST_EDITOR_EXIT_CODE=42
 run_config_tty_fail 'y\n' build clean-root
 assert_contains "Build Error: Failed while building/installing PackageBase clean-root (clean-root): Editor failed." "$output_file"
 assert_not_contains "Edit install script -option.install?" "$output_file"
-assert_command "jpacker-test-editor --configured-option ./PKGBUILD"
-assert_command_absent "jpacker-test-editor --configured-option ./-option.install"
+assert_command "moguet-test-editor --configured-option ./PKGBUILD"
+assert_command_absent "moguet-test-editor --configured-option ./-option.install"
 assert_command_prefix_absent "makepkg "
 assert_checkout_retained
 if [ ! -f "$checkout_dir/-option.install" ] || [ -L "$checkout_dir/-option.install" ]; then

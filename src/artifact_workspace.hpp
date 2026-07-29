@@ -72,7 +72,7 @@ class ArtifactWorkspace final {
     friend ValidatedPackageArtifactSet validate_post_build_package_artifacts(
             ArtifactWorkspace&& workspace,
             const ExpectedPackageArtifactSet& expected);
-#ifdef JPACKER_ENABLE_ARTIFACT_WORKSPACE_TEST_HOOKS
+#ifdef MOGUET_ENABLE_ARTIFACT_WORKSPACE_TEST_HOOKS
     friend void require_artifact_workspace_identity_for_test(
             const ArtifactWorkspace& workspace,
             std::uintmax_t expected_effective_user);
@@ -247,7 +247,7 @@ class ExpectedPackageArtifactPath final {
     friend ValidatedPackageArtifactPath validate_post_build_package_artifact(
             ArtifactWorkspace&& workspace,
             const ExpectedPackageArtifactPath& expected);
-#ifdef JPACKER_ENABLE_ARTIFACT_WORKSPACE_TEST_HOOKS
+#ifdef MOGUET_ENABLE_ARTIFACT_WORKSPACE_TEST_HOOKS
     friend ValidatedPackageArtifactPath
     validate_post_build_package_artifact_for_test(
             ArtifactWorkspace&& workspace,
@@ -357,7 +357,7 @@ class ValidatedPackageArtifactPath final {
     friend ValidatedPackageArtifactPath validate_post_build_package_artifact(
             ArtifactWorkspace&& workspace,
             const ExpectedPackageArtifactPath& expected);
-#ifdef JPACKER_ENABLE_ARTIFACT_WORKSPACE_TEST_HOOKS
+#ifdef MOGUET_ENABLE_ARTIFACT_WORKSPACE_TEST_HOOKS
     friend ValidatedPackageArtifactPath
     validate_post_build_package_artifact_for_test(
             ArtifactWorkspace&& workspace,
@@ -459,7 +459,7 @@ class ValidatedPackageArtifactSet final {
     friend ValidatedPackageArtifactSet validate_post_build_package_artifacts(
             ArtifactWorkspace&& workspace,
             const ExpectedPackageArtifactSet& expected);
-#ifdef JPACKER_ENABLE_ARTIFACT_WORKSPACE_TEST_HOOKS
+#ifdef MOGUET_ENABLE_ARTIFACT_WORKSPACE_TEST_HOOKS
     friend ValidatedPackageArtifactSet
     validate_post_build_package_artifacts_for_test(
             ArtifactWorkspace&& workspace,
@@ -499,7 +499,7 @@ ValidatedPackageArtifactSet validate_post_build_package_artifacts(
         ArtifactWorkspace&& workspace,
         const ExpectedPackageArtifactSet& expected);
 
-#ifdef JPACKER_ENABLE_ARTIFACT_WORKSPACE_TEST_HOOKS
+#ifdef MOGUET_ENABLE_ARTIFACT_WORKSPACE_TEST_HOOKS
 void require_artifact_workspace_identity_for_test(
         const ArtifactWorkspace& workspace,
         std::uintmax_t expected_effective_user);

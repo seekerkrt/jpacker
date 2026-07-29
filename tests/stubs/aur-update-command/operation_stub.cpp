@@ -22,10 +22,10 @@ namespace {
 
 const std::string& scenario() {
     static const std::string s_scenario = [] {
-        const char* value = std::getenv("JPACKER_TEST_AUR_UPDATE_SCENARIO");
+        const char* value = std::getenv("MOGUET_TEST_AUR_UPDATE_SCENARIO");
         if(value == nullptr || value[0] == '\0') {
             throw std::logic_error(
-                    "JPACKER_TEST_AUR_UPDATE_SCENARIO is required.");
+                    "MOGUET_TEST_AUR_UPDATE_SCENARIO is required.");
         }
         return std::string(value);
     }();
@@ -33,9 +33,9 @@ const std::string& scenario() {
 }
 
 void append_event(const std::string& event) {
-    const char* event_log_path = std::getenv("JPACKER_TEST_COMMAND_LOG");
+    const char* event_log_path = std::getenv("MOGUET_TEST_COMMAND_LOG");
     if(event_log_path == nullptr || event_log_path[0] == '\0') {
-        throw std::logic_error("JPACKER_TEST_COMMAND_LOG is required.");
+        throw std::logic_error("MOGUET_TEST_COMMAND_LOG is required.");
     }
 
     std::ofstream event_log(event_log_path, std::ios::app);

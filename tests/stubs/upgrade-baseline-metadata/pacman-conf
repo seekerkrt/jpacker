@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-printf 'pacman-conf %s\n' "$*" >> "$JPACKER_TEST_COMMAND_LOG"
+printf 'pacman-conf %s\n' "$*" >> "$MOGUET_TEST_COMMAND_LOG"
 
 if [ "$#" -ne 3 ] ||
    [ "${1:-}" != "--verbose" ] ||
@@ -10,8 +10,8 @@ if [ "$#" -ne 3 ] ||
     exit 2
 fi
 
-exit_code=${JPACKER_TEST_PACKAGE_METADATA_PACMAN_CONF_EXIT_CODE:-0}
-failure_at=${JPACKER_TEST_PACKAGE_METADATA_PACMAN_CONF_FAILURE_AT:-}
+exit_code=${MOGUET_TEST_PACKAGE_METADATA_PACMAN_CONF_EXIT_CODE:-0}
+failure_at=${MOGUET_TEST_PACKAGE_METADATA_PACMAN_CONF_FAILURE_AT:-}
 case $failure_at in
     '')
         should_fail=1
@@ -20,7 +20,7 @@ case $failure_at in
         exit 2
         ;;
     *)
-        call_count=$(grep -Fxc -- 'pacman-conf --verbose RootDir DBPath' "$JPACKER_TEST_COMMAND_LOG")
+        call_count=$(grep -Fxc -- 'pacman-conf --verbose RootDir DBPath' "$MOGUET_TEST_COMMAND_LOG")
         if [ "$call_count" -eq "$failure_at" ]; then
             should_fail=1
         else

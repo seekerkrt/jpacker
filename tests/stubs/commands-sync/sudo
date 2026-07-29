@@ -83,16 +83,16 @@ require_commands_sync_sudo_argv() {
     esac
 }
 
-printf 'sudo %s\n' "$*" >> "$JPACKER_TEST_COMMAND_LOG"
+printf 'sudo %s\n' "$*" >> "$MOGUET_TEST_COMMAND_LOG"
 require_commands_sync_sudo_argv "$@"
 
-if [ -n "${JPACKER_TEST_SUDO_MAIN_OUTPUT:-}" ]; then
-    printf '%s\n' "$JPACKER_TEST_SUDO_MAIN_OUTPUT"
+if [ -n "${MOGUET_TEST_SUDO_MAIN_OUTPUT:-}" ]; then
+    printf '%s\n' "$MOGUET_TEST_SUDO_MAIN_OUTPUT"
 fi
-exit_code=${JPACKER_TEST_SUDO_MAIN_STATUS:-99}
+exit_code=${MOGUET_TEST_SUDO_MAIN_STATUS:-99}
 if [ "$exit_code" -eq 0 ] && is_typed_pacman_install "$@"; then
-    state_after_success_file=${JPACKER_TEST_MAKEPKG_PACKAGE_METADATA_STATE_AFTER_SUCCESS_FILE:-}
-    metadata_state_file=${JPACKER_TEST_PACKAGE_METADATA_STATE_FILE:-}
+    state_after_success_file=${MOGUET_TEST_MAKEPKG_PACKAGE_METADATA_STATE_AFTER_SUCCESS_FILE:-}
+    metadata_state_file=${MOGUET_TEST_PACKAGE_METADATA_STATE_FILE:-}
     if [ -n "$state_after_success_file" ]; then
         if [ -z "$metadata_state_file" ] || [ ! -f "$state_after_success_file" ]; then
             exit 1
@@ -102,7 +102,7 @@ if [ "$exit_code" -eq 0 ] && is_typed_pacman_install "$@"; then
 
     installed_artifacts=$(install_artifacts "$@") || exit 1
     installed_artifact=$(printf '%s\n' "$installed_artifacts" | /usr/bin/sed -n '1p') || exit 1
-    install_success_log=${JPACKER_TEST_PACMAN_U_SUCCESS_LOG:-}
+    install_success_log=${MOGUET_TEST_PACMAN_U_SUCCESS_LOG:-}
     if [ -n "$install_success_log" ]; then
         if [ ! -f "$install_success_log" ] || [ -L "$install_success_log" ] ||
            [ "${install_success_log%/*}" != "$XDG_CACHE_HOME" ]; then
@@ -111,7 +111,7 @@ if [ "$exit_code" -eq 0 ] && is_typed_pacman_install "$@"; then
         printf '%s\n' "$installed_artifacts" > "$install_success_log" || exit 1
     fi
 
-    if [ "${JPACKER_TEST_REPLACE_WORKSPACE_AFTER_PACMAN_U:-0}" = "1" ]; then
+    if [ "${MOGUET_TEST_REPLACE_WORKSPACE_AFTER_PACMAN_U:-0}" = "1" ]; then
         workspace_path=${installed_artifact%/*}
         workspace_parent=${workspace_path%/*}
         workspace_leaf=${workspace_path##*/}

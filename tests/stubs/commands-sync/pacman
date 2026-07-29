@@ -63,12 +63,12 @@ require_commands_sync_pacman_argv() {
     esac
 }
 
-printf 'pacman %s\n' "$*" >> "$JPACKER_TEST_COMMAND_LOG"
+printf 'pacman %s\n' "$*" >> "$MOGUET_TEST_COMMAND_LOG"
 require_commands_sync_pacman_argv "$@"
 
 if is_artifact_identity_query "$@"; then
     artifact_path=$6
-    identity_status=${JPACKER_TEST_PACMAN_ARTIFACT_IDENTITY_EXIT_CODE:-0}
+    identity_status=${MOGUET_TEST_PACMAN_ARTIFACT_IDENTITY_EXIT_CODE:-0}
     if [ "$identity_status" -ne 0 ]; then
         exit "$identity_status"
     fi
@@ -80,11 +80,11 @@ if is_artifact_identity_query "$@"; then
     exit $?
 fi
 
-main_output=${JPACKER_TEST_PACMAN_MAIN_OUTPUT:-}
-main_status=${JPACKER_TEST_PACMAN_MAIN_STATUS:-1}
+main_output=${MOGUET_TEST_PACMAN_MAIN_OUTPUT:-}
+main_status=${MOGUET_TEST_PACMAN_MAIN_STATUS:-1}
 
-if [ -n "${JPACKER_TEST_PACMAN_MAIN_COMMAND:-}" ] &&
-   [ "$*" = "$JPACKER_TEST_PACMAN_MAIN_COMMAND" ]; then
+if [ -n "${MOGUET_TEST_PACMAN_MAIN_COMMAND:-}" ] &&
+   [ "$*" = "$MOGUET_TEST_PACMAN_MAIN_COMMAND" ]; then
     if [ -n "$main_output" ]; then
         printf '%s\n' "$main_output"
     fi
@@ -93,13 +93,13 @@ fi
 
 case ${1:-} in
     -Qm)
-        if [ -n "${JPACKER_TEST_PACMAN_QM_OUTPUT:-}" ]; then
-            printf '%s\n' "$JPACKER_TEST_PACMAN_QM_OUTPUT"
+        if [ -n "${MOGUET_TEST_PACMAN_QM_OUTPUT:-}" ]; then
+            printf '%s\n' "$MOGUET_TEST_PACMAN_QM_OUTPUT"
         fi
         exit 0
         ;;
     -Q)
-        for package in ${JPACKER_TEST_PACMAN_INSTALLED_PACKAGES:-}; do
+        for package in ${MOGUET_TEST_PACMAN_INSTALLED_PACKAGES:-}; do
             if [ "${2:-}" = "$package" ]; then
                 exit 0
             fi
@@ -107,7 +107,7 @@ case ${1:-} in
         exit 1
         ;;
     -Si)
-        for package in ${JPACKER_TEST_PACMAN_REPO_PACKAGES:-}; do
+        for package in ${MOGUET_TEST_PACMAN_REPO_PACKAGES:-}; do
             if [ "${2:-}" = "$package" ]; then
                 exit 0
             fi

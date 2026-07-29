@@ -3,8 +3,8 @@ set -eu
 
 test_binary=$1
 repo_root=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
-JPACKER_TEST_REPOSITORY_ROOT=$repo_root
-export JPACKER_TEST_REPOSITORY_ROOT
+MOGUET_TEST_REPOSITORY_ROOT=$repo_root
+export MOGUET_TEST_REPOSITORY_ROOT
 . "$repo_root/tests/test-command-safety.sh"
 tmp_dir=$(mktemp -d)
 server_pid=
@@ -40,7 +40,7 @@ require_exact_test_command makepkg "$repo_root/tests/stubs/makepkg"
 require_exact_test_command pacman "$repo_root/tests/stubs/pacman"
 require_exact_test_command sudo "$repo_root/tests/stubs/sudo"
 require_exact_test_command git "$repo_root/tests/stubs/git"
-export JPACKER_TEST_AUR_RPC_BASE_URL=http://127.0.0.1:$port/rpc/
+export MOGUET_TEST_AUR_RPC_BASE_URL=http://127.0.0.1:$port/rpc/
 
 setup_case() {
     case_name=$1
@@ -52,19 +52,19 @@ setup_case() {
     : > "$command_log"
     export HOME=$case_dir/home
     export XDG_CACHE_HOME=$case_dir/xdg-cache
-    export JPACKER_TEST_COMMAND_LOG=$command_log
-    export JPACKER_TEST_PACMAN_EXIT_CODE=0
-    export JPACKER_TEST_SUDO_EXIT_CODE=0
-    export JPACKER_TEST_PACKAGE_BUILD_DIR=$case_dir/package.build
-    unset JPACKER_TEST_PACMAN_QM_OUTPUT
-    unset JPACKER_TEST_PACMAN_REPO_PACKAGES
-    unset JPACKER_TEST_GIT_REMOTE_URL
-    unset JPACKER_TEST_GIT_CLONE_EXIT_CODE
-    unset JPACKER_TEST_GIT_CLONE_SYMLINK_TARGET
-    unset JPACKER_TEST_GIT_CLONE_FIXTURE_DIR
-    unset JPACKER_TEST_MAKEPKG_EXIT_CODE
-    unset JPACKER_TEST_MAKEPKG_PACKAGELIST_EXIT_CODE
-    unset JPACKER_TEST_MAKEPKG_PACKAGELIST_OUTPUT_FILE
+    export MOGUET_TEST_COMMAND_LOG=$command_log
+    export MOGUET_TEST_PACMAN_EXIT_CODE=0
+    export MOGUET_TEST_SUDO_EXIT_CODE=0
+    export MOGUET_TEST_PACKAGE_BUILD_DIR=$case_dir/package.build
+    unset MOGUET_TEST_PACMAN_QM_OUTPUT
+    unset MOGUET_TEST_PACMAN_REPO_PACKAGES
+    unset MOGUET_TEST_GIT_REMOTE_URL
+    unset MOGUET_TEST_GIT_CLONE_EXIT_CODE
+    unset MOGUET_TEST_GIT_CLONE_SYMLINK_TARGET
+    unset MOGUET_TEST_GIT_CLONE_FIXTURE_DIR
+    unset MOGUET_TEST_MAKEPKG_EXIT_CODE
+    unset MOGUET_TEST_MAKEPKG_PACKAGELIST_EXIT_CODE
+    unset MOGUET_TEST_MAKEPKG_PACKAGELIST_OUTPUT_FILE
 }
 
 run_ok() {
@@ -348,44 +348,44 @@ run_exact version-as-opaque-operand \
 
 # Matrix I: official transactionはAUR targetだけを元indexで除外し、残りの順序を保つ。
 setup_case official-sync-order
-export JPACKER_TEST_PACMAN_REPO_PACKAGES='official-a official-b'
+export MOGUET_TEST_PACMAN_REPO_PACKAGES='official-a official-b'
 run_ok -S official-a --config custom.conf official-b
 assert_only_sudo_command "sudo pacman -S official-a --config custom.conf official-b"
 assert_command_absent "sudo pacman -S --config custom.conf official-a official-b"
 
 setup_case official-sync-generated-option
-export JPACKER_TEST_PACMAN_REPO_PACKAGES='official-a official-b'
+export MOGUET_TEST_PACMAN_REPO_PACKAGES='official-a official-b'
 run_ok --noconfirm -S official-a --config custom.conf official-b
 assert_only_sudo_command "sudo pacman -S --noconfirm official-a --config custom.conf official-b"
 
 setup_case mixed-sync-unsupported
-export JPACKER_TEST_PACMAN_REPO_PACKAGES='official-a official-c'
+export MOGUET_TEST_PACMAN_REPO_PACKAGES='official-a official-c'
 run_fail -S official-a --config custom.conf clean-root official-c
 assert_contains "Unsupported pacman option for AUR/source-build target: --config" "$output_file"
 assert_no_mutation_commands
 
 setup_case mixed-sync-supported
-export JPACKER_TEST_PACMAN_REPO_PACKAGES='official-a official-c'
+export MOGUET_TEST_PACMAN_REPO_PACKAGES='official-a official-c'
 run_fail --noconfirm --noedit -S official-a clean-root official-c
 assert_only_sudo_command "sudo pacman -S --noconfirm official-a official-c"
 assert_command_absent "sudo pacman -S --noconfirm official-a clean-root official-c"
 
 # 同名option valueとAUR targetを文字列一致でまとめて削除しない。
 setup_case info-removes-target-by-index
-export JPACKER_TEST_PACMAN_REPO_PACKAGES='official-a'
+export MOGUET_TEST_PACMAN_REPO_PACKAGES='official-a'
 run_ok -Si official-a --config clean-root clean-root
 assert_command_count "pacman -Si official-a --config clean-root" 1
 assert_command_absent "pacman -Si official-a --config"
 
 # Matrix J: 通常位置のglobalはAUR/makepkgへ反映し、value/opaque位置では反映しない。
 setup_case aur-global-options
-export JPACKER_TEST_PACMAN_REPO_PACKAGES='official-only'
-export JPACKER_TEST_MAKEPKG_PACKAGELIST_EXIT_CODE=0
+export MOGUET_TEST_PACMAN_REPO_PACKAGES='official-only'
+export MOGUET_TEST_MAKEPKG_PACKAGELIST_EXIT_CODE=0
 run_fail --noedit --nodiff --noconfirm --rebuild --cleanbuild -S clean-root
 assert_command_count "makepkg -sc --noconfirm -f -C" 1
 
 setup_case aur-global-rmdeps
-export JPACKER_TEST_PACMAN_REPO_PACKAGES='official-only'
+export MOGUET_TEST_PACMAN_REPO_PACKAGES='official-only'
 run_fail --noedit --nodiff --noconfirm --rebuild --cleanbuild --rmdeps -S clean-root
 assert_contains "Separated build/install does not support --rmdeps." "$output_file"
 assert_command "pacman -Si clean-root"
@@ -393,7 +393,7 @@ assert_command_absent "pacman-conf --verbose RootDir DBPath"
 assert_no_mutation_commands
 
 setup_case aur-trailing-rmdeps
-export JPACKER_TEST_PACMAN_REPO_PACKAGES='official-only'
+export MOGUET_TEST_PACMAN_REPO_PACKAGES='official-only'
 run_fail -S clean-root --rmdeps --noedit --noconfirm
 assert_contains "Separated build/install does not support --rmdeps." "$output_file"
 assert_command "pacman -Si clean-root"
@@ -401,13 +401,13 @@ assert_command_absent "pacman-conf --verbose RootDir DBPath"
 assert_no_mutation_commands
 
 setup_case aur-global-name-as-option-value
-export JPACKER_TEST_PACMAN_REPO_PACKAGES='official-only'
+export MOGUET_TEST_PACMAN_REPO_PACKAGES='official-only'
 run_fail -S --root --rmdeps clean-root
 assert_contains "Unsupported pacman option for AUR/source-build target: --root" "$output_file"
 assert_no_mutation_commands
 
 setup_case aur-global-name-as-opaque-target
-export JPACKER_TEST_PACMAN_REPO_PACKAGES='official-only'
+export MOGUET_TEST_PACMAN_REPO_PACKAGES='official-only'
 run_fail -S -- --rmdeps
 assert_contains "Invalid package name: --rmdeps" "$output_file"
 assert_command_log_empty

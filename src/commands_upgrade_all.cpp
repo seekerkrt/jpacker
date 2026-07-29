@@ -1327,7 +1327,7 @@ std::vector<std::string> validate_upgrade_all_invocation(
         switch(token.role) {
         case CliTokenRole::Operation:
             break;
-        case CliTokenRole::JpackerGlobalOption:
+        case CliTokenRole::MoguetGlobalOption:
             if(!is_supported_upgrade_all_global_option(token.value)) {
                 errors.push_back(
                         "Unsupported upgrade-all option: " + token.value);

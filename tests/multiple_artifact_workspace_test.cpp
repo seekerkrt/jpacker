@@ -160,7 +160,7 @@ public:
     explicit TestEnvironment(const fs::path& makepkg_stub_directory) {
         const std::string template_text =
                 (fs::temp_directory_path() /
-                 "jpacker-multiple-artifact-workspace-test-XXXXXX")
+                 "moguet-multiple-artifact-workspace-test-XXXXXX")
                         .string();
         std::vector<char> path_template(
                 template_text.begin(), template_text.end());
@@ -199,16 +199,16 @@ public:
             set_variable("XDG_CACHE_HOME", (path_ / "cache-home").string());
             set_variable("PATH", command_path);
             set_variable("PKGDEST", std::nullopt);
-            set_variable("JPACKER_TEST_COMMAND_LOG", command_log_.string());
-            set_variable("JPACKER_TEST_MAKEPKG_ARGV_LOG", argv_log_.string());
-            set_variable("JPACKER_TEST_MAKEPKG_CWD_LOG", cwd_log_.string());
+            set_variable("MOGUET_TEST_COMMAND_LOG", command_log_.string());
+            set_variable("MOGUET_TEST_MAKEPKG_ARGV_LOG", argv_log_.string());
+            set_variable("MOGUET_TEST_MAKEPKG_CWD_LOG", cwd_log_.string());
             set_variable(
-                    "JPACKER_TEST_MAKEPKG_PACKAGELIST_OUTPUT_FILE",
+                    "MOGUET_TEST_MAKEPKG_PACKAGELIST_OUTPUT_FILE",
                     packagelist_output_file_.string());
             set_variable(
-                    "JPACKER_TEST_MAKEPKG_PACKAGELIST_EXIT_CODE",
+                    "MOGUET_TEST_MAKEPKG_PACKAGELIST_EXIT_CODE",
                     std::string("0"));
-            set_variable("JPACKER_TEST_MAKEPKG_EXIT_CODE", std::string("0"));
+            set_variable("MOGUET_TEST_MAKEPKG_EXIT_CODE", std::string("0"));
         } catch(...) {
             variables_.clear();
             std::error_code error;
@@ -1356,7 +1356,7 @@ void test_cleanup_revalidates_before_closing_descriptors(
 int main(int argc, char* argv[]) {
     try {
         const char* configured_stub =
-                std::getenv("JPACKER_TEST_MAKEPKG_STUB");
+                std::getenv("MOGUET_TEST_MAKEPKG_STUB");
         const fs::path makepkg_stub_directory =
                 argc >= 2
                         ? fs::path(argv[1])

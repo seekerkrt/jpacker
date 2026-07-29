@@ -201,7 +201,7 @@ run_make install
 assert_file_text "$preference_file" "$preference_text"
 
 modified_config_text='NOEDIT=true
-LOGFILE=/tmp/jpacker-preserved.log'
+LOGFILE=/tmp/moguet-preserved.log'
 preference_sentinel=$preference_dir/foreign-file.keep
 config_sentinel=$config_dir/foreign-file.keep
 printf '%s\n' "$modified_config_text" > "$config_file"
@@ -223,8 +223,8 @@ assert_directory "$stage_dir/usr/share/licenses"
 assert_directory "$stage_dir/usr/share/doc"
 assert_no_symlinks
 
-# Phase 2: only empty jpacker-specific directories are removed; shared parents
-# and foreign files in other package directories remain.
+# Phase 2: only empty legacy jpacker package directories are removed; shared
+# parents and foreign files in other package directories remain.
 set_stage empty-config-directories
 run_make install
 assert_package_artifacts_installed

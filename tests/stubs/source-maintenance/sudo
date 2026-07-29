@@ -101,11 +101,11 @@ require_source_maintenance_sudo_argv() {
 }
 
 command_text=$*
-printf 'sudo %s\n' "$command_text" >> "$JPACKER_TEST_COMMAND_LOG"
+printf 'sudo %s\n' "$command_text" >> "$MOGUET_TEST_COMMAND_LOG"
 require_source_maintenance_sudo_argv "$@"
 
-fail_exact_file=${JPACKER_TEST_SOURCE_MAINTENANCE_FAIL_EXACT_FILE:-}
-fail_substring=${JPACKER_TEST_SOURCE_MAINTENANCE_FAIL_SUBSTRING:-}
+fail_exact_file=${MOGUET_TEST_SOURCE_MAINTENANCE_FAIL_EXACT_FILE:-}
+fail_substring=${MOGUET_TEST_SOURCE_MAINTENANCE_FAIL_SUBSTRING:-}
 
 if [ -n "$fail_exact_file" ] && [ -f "$fail_exact_file" ]; then
     if grep -Fx -- "$command_text" "$fail_exact_file" >/dev/null 2>&1 ||
@@ -120,14 +120,14 @@ if [ -n "$fail_substring" ]; then
     esac
 fi
 
-default_exit_code=${JPACKER_TEST_SUDO_EXIT_CODE:-0}
+default_exit_code=${MOGUET_TEST_SUDO_EXIT_CODE:-0}
 if [ "$default_exit_code" -ne 0 ]; then
     exit "$default_exit_code"
 fi
 
 if [ "${1:-}" = "pacman" ] && [ "${2:-}" = "-Syu" ]; then
-    installed_output_file=${JPACKER_TEST_PACMAN_Q_OUTPUT_FILE:-}
-    post_upgrade_output_file=${JPACKER_TEST_SOURCE_MAINTENANCE_PACMAN_SYU_Q_OUTPUT_FILE:-}
+    installed_output_file=${MOGUET_TEST_PACMAN_Q_OUTPUT_FILE:-}
+    post_upgrade_output_file=${MOGUET_TEST_SOURCE_MAINTENANCE_PACMAN_SYU_Q_OUTPUT_FILE:-}
     if [ -n "$post_upgrade_output_file" ]; then
         if [ -z "$installed_output_file" ] || [ ! -f "$post_upgrade_output_file" ]; then
             exit 1
@@ -138,8 +138,8 @@ if [ "${1:-}" = "pacman" ] && [ "${2:-}" = "-Syu" ]; then
 fi
 
 if is_typed_pacman_install "$@"; then
-    state_after_success_file=${JPACKER_TEST_MAKEPKG_PACKAGE_METADATA_STATE_AFTER_SUCCESS_FILE:-}
-    metadata_state_file=${JPACKER_TEST_PACKAGE_METADATA_STATE_FILE:-}
+    state_after_success_file=${MOGUET_TEST_MAKEPKG_PACKAGE_METADATA_STATE_AFTER_SUCCESS_FILE:-}
+    metadata_state_file=${MOGUET_TEST_PACKAGE_METADATA_STATE_FILE:-}
     if [ -n "$state_after_success_file" ]; then
         if [ -z "$metadata_state_file" ] || [ ! -f "$state_after_success_file" ]; then
             exit 1
@@ -150,7 +150,7 @@ if is_typed_pacman_install "$@"; then
 
     installed_artifacts=$(install_artifacts "$@") || exit 1
     installed_artifact=$(printf '%s\n' "$installed_artifacts" | /usr/bin/sed -n '1p') || exit 1
-    install_success_log=${JPACKER_TEST_PACMAN_U_SUCCESS_LOG:-}
+    install_success_log=${MOGUET_TEST_PACMAN_U_SUCCESS_LOG:-}
     if [ -n "$install_success_log" ]; then
         if [ ! -f "$install_success_log" ] || [ -L "$install_success_log" ] ||
            [ "${install_success_log%/*}" != "$XDG_CACHE_HOME" ]; then
@@ -159,7 +159,7 @@ if is_typed_pacman_install "$@"; then
         printf '%s\n' "$installed_artifacts" > "$install_success_log" || exit 1
     fi
 
-    if [ "${JPACKER_TEST_REPLACE_WORKSPACE_AFTER_PACMAN_U:-0}" = "1" ]; then
+    if [ "${MOGUET_TEST_REPLACE_WORKSPACE_AFTER_PACMAN_U:-0}" = "1" ]; then
         workspace_path=${installed_artifact%/*}
         workspace_parent=${workspace_path%/*}
         workspace_leaf=${workspace_path##*/}
@@ -184,15 +184,15 @@ if is_typed_pacman_install "$@"; then
 fi
 
 if [ "${1:-}" = "pacman" ] && [ "${2:-}" = "-Sc" ]; then
-    race_path=${JPACKER_TEST_SOURCE_MAINTENANCE_PACMAN_SC_RACE_PATH:-}
-    race_target=${JPACKER_TEST_SOURCE_MAINTENANCE_PACMAN_SC_RACE_TARGET:-}
+    race_path=${MOGUET_TEST_SOURCE_MAINTENANCE_PACMAN_SC_RACE_PATH:-}
+    race_target=${MOGUET_TEST_SOURCE_MAINTENANCE_PACMAN_SC_RACE_TARGET:-}
     if [ -n "$race_path" ] && [ -n "$race_target" ]; then
         /usr/bin/rm -rf -- "$race_path"
         /usr/bin/ln -s -- "$race_target" "$race_path"
     fi
 fi
 
-mutate_filesystem=${JPACKER_TEST_SOURCE_MAINTENANCE_SUDO_MUTATE:-0}
+mutate_filesystem=${MOGUET_TEST_SOURCE_MAINTENANCE_SUDO_MUTATE:-0}
 if [ "$mutate_filesystem" != "1" ]; then
     exit 0
 fi

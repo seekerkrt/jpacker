@@ -182,7 +182,7 @@ public:
             PreparedAurUpdateSourceBuildInvocation&&) = delete;
     ~PreparedAurUpdateSourceBuildInvocation() noexcept = default;
 
-#ifdef JPACKER_ENABLE_AUR_UPDATE_EXECUTION_PREPARATION_TEST_HOOKS
+#ifdef MOGUET_ENABLE_AUR_UPDATE_EXECUTION_PREPARATION_TEST_HOOKS
     // preparationのexact field assertion専用。production buildではgeneric
     // executorへ渡せる内部snapshotを公開しない。
     const PreparedProductionSourceBuildInvocation&

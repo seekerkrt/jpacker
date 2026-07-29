@@ -13,7 +13,7 @@
 // 切り離したisolated integration binaryで決定的にcharacterizeする。
 namespace {
 
-const char* COMMAND_LOG_ENV = "JPACKER_TEST_COMMAND_LOG";
+const char* COMMAND_LOG_ENV = "MOGUET_TEST_COMMAND_LOG";
 
 int g_search_deferred_call_count = 0;
 
@@ -39,7 +39,7 @@ AurPackageInfo package_info(const std::string& name) {
     info.PackageBase = name;
     info.Version = "1.0-1";
     info.Description = "commands sync fixture";
-    info.Maintainer = "jpacker-test";
+    info.Maintainer = "moguet-test";
     return info;
 }
 

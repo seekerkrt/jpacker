@@ -66,9 +66,9 @@ bool validate_optionless_moguet_operation(const std::string& operation, const st
 namespace {
 
 AppConfig load_invocation_app_config() {
-#ifdef JPACKER_ENABLE_TEST_CONFIG_PATH
+#ifdef MOGUET_ENABLE_TEST_CONFIG_PATH
     // POLICY: productionはfixed pathを使い、専用test binaryだけが正規の明示path loaderを選ぶ。
-    const char* test_config_path = std::getenv("JPACKER_TEST_CONFIG_FILE");
+    const char* test_config_path = std::getenv("MOGUET_TEST_CONFIG_FILE");
     if(test_config_path && test_config_path[0] != '\0') {
         return load_app_config(test_config_path);
     }
@@ -224,7 +224,7 @@ int run_moguet(int argc, char* argv[]) {
                     CachePathRequirement::ExistingOrMissing);
             if(cache_log.exists() && !fs::is_regular_file(cache_log.canonical_path())) {
                 throw std::runtime_error(
-                        "Unsafe jpacker cache log path " + cache_log.path().string() +
+                        "Unsafe Moguet cache log path " + cache_log.path().string() +
                         ": expected a regular file.");
             }
             log_path = cache_log.canonical_path();
@@ -334,11 +334,11 @@ int run_moguet(int argc, char* argv[]) {
     }
 }
 
-#ifdef JPACKER_ENABLE_APP_CONFIG_TEST_HOOKS
+#ifdef MOGUET_ENABLE_APP_CONFIG_TEST_HOOKS
 namespace {
 
 int verify_parse_failure_does_not_publish_cli_overrides() {
-    char program[] = "jpacker";
+    char program[] = "moguet";
     char no_edit[] = "--noedit";
     char no_diff[] = "--nodiff";
     char no_confirm[] = "--noconfirm";
@@ -367,8 +367,8 @@ int verify_parse_failure_does_not_publish_cli_overrides() {
 #endif
 
 int main(int argc, char* argv[]) {
-#ifdef JPACKER_ENABLE_APP_CONFIG_TEST_HOOKS
-    const char* app_config_test_case = std::getenv("JPACKER_TEST_APP_CONFIG_CASE");
+#ifdef MOGUET_ENABLE_APP_CONFIG_TEST_HOOKS
+    const char* app_config_test_case = std::getenv("MOGUET_TEST_APP_CONFIG_CASE");
     if(app_config_test_case && std::string(app_config_test_case) == "parse-failure-cli-overrides") {
         return verify_parse_failure_does_not_publish_cli_overrides();
     }
@@ -438,14 +438,14 @@ void print_help() {
     std::cout << "    \033[1m--aur\033[0m               Limit -S/-Ss/-Si to AUR; no repository fallback" << std::endl;
     std::cout << "    \033[1m--repo\033[0m              Limit -S/-Ss/-Si to official binary repositories; no AUR/source-build fallback" << std::endl;
     std::cout << "\033[1mCONFIG\033[0m" << std::endl;
-    std::cout << "    jpacker.conf: EDITOR=..., LOGFILE=..., NOEDIT=..., NODIFF=..., RMDEPS=..." << std::endl;
+    std::cout << "    legacy jpacker.conf: EDITOR=..., LOGFILE=..., NOEDIT=..., NODIFF=..., RMDEPS=..." << std::endl;
 }
 
 bool argv_requests_pkgbuild_export_diagnostics(int argc, char* argv[]) {
     // POLICY(#173): operation 前のglobal optionだけを飛ばし、option value/opaque operandは見ない。
     for(int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
-        if(is_jpacker_global_option(arg)) continue;
+        if(is_moguet_global_option(arg)) continue;
         return arg == "-G" || arg == "-Gp";
     }
     return false;
@@ -454,7 +454,7 @@ bool argv_requests_pkgbuild_export_diagnostics(int argc, char* argv[]) {
 bool handle_info_only_option(int argc, char* argv[]) {
     for(int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
-        if(is_jpacker_global_option(arg)) continue;
+        if(is_moguet_global_option(arg)) continue;
         if(arg == "-h" || arg == "--help") {
             print_help();
             return true;

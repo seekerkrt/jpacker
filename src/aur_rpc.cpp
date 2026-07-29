@@ -25,7 +25,7 @@ const long long   AUR_RPC_PROTOCOL_VERSION = 5;
 const std::string AUR_RPC_INFO_RESPONSE_TYPE = "multiinfo";
 const std::string AUR_RPC_SEARCH_RESPONSE_TYPE = "search";
 
-#ifdef JPACKER_ENABLE_AUR_RPC_TEST_HOOKS
+#ifdef MOGUET_ENABLE_AUR_RPC_TEST_HOOKS
 bool        g_should_fail_write_append_for_test = false;
 std::string g_encode_failure_package_for_test;
 #endif
@@ -57,9 +57,9 @@ std::string trim(const std::string& str) {
 
 // AUR RPC / JSON解析
 std::string aur_rpc_base_url() {
-#ifdef JPACKER_ENABLE_TEST_OVERRIDES
+#ifdef MOGUET_ENABLE_TEST_OVERRIDES
     // POLICY: local fixture injection は isolated test binary 限定。production の endpoint は固定する。
-    const char* test_base_url = std::getenv("JPACKER_TEST_AUR_RPC_BASE_URL");
+    const char* test_base_url = std::getenv("MOGUET_TEST_AUR_RPC_BASE_URL");
     if(test_base_url && test_base_url[0] != '\0') {
         std::string base_url = test_base_url;
         if(base_url.back() != '/') base_url += '/';
@@ -79,9 +79,9 @@ std::string aur_rpc_info_url() {
 
 char* escape_info_many_package_name(
         CURL* handle, const std::string& package_name) {
-#ifdef JPACKER_ENABLE_AUR_RPC_TEST_HOOKS
+#ifdef MOGUET_ENABLE_AUR_RPC_TEST_HOOKS
     const char* environment_failure =
-            std::getenv("JPACKER_TEST_AUR_RPC_ENCODE_FAILURE_PACKAGE");
+            std::getenv("MOGUET_TEST_AUR_RPC_ENCODE_FAILURE_PACKAGE");
     if(package_name == g_encode_failure_package_for_test ||
        (environment_failure != nullptr &&
         package_name == environment_failure)) {
@@ -106,7 +106,7 @@ std::size_t write_callback_failure_result(std::size_t total_size) noexcept {
 
 void append_write_response(
         std::string& buffer, char* contents, std::size_t total_size) {
-#ifdef JPACKER_ENABLE_AUR_RPC_TEST_HOOKS
+#ifdef MOGUET_ENABLE_AUR_RPC_TEST_HOOKS
     if(g_should_fail_write_append_for_test) {
         throw std::runtime_error("Injected AUR response append failure.");
     }
@@ -453,7 +453,7 @@ std::optional<AurPackageInfo> parse_single_strict_aur_info_response(
 
 } // namespace
 
-#ifdef JPACKER_ENABLE_AUR_RPC_TEST_HOOKS
+#ifdef MOGUET_ENABLE_AUR_RPC_TEST_HOOKS
 void set_aur_rpc_write_append_failure_for_test(bool should_fail) noexcept {
     g_should_fail_write_append_for_test = should_fail;
 }

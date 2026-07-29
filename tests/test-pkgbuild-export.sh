@@ -3,8 +3,8 @@ set -eu
 
 test_binary=$1
 repo_root=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
-JPACKER_TEST_REPOSITORY_ROOT=$repo_root
-export JPACKER_TEST_REPOSITORY_ROOT
+MOGUET_TEST_REPOSITORY_ROOT=$repo_root
+export MOGUET_TEST_REPOSITORY_ROOT
 . "$repo_root/tests/test-command-safety.sh"
 fixture_dir=$repo_root/tests/fixtures/pkgbuild-export
 tmp_dir=$(mktemp -d)
@@ -88,18 +88,18 @@ setup_case() {
     export HOME=$case_dir/home
     export XDG_CACHE_HOME=$case_dir/xdg-cache
     export TMPDIR=$case_dir/tmp
-    export JPACKER_TEST_AUR_RPC_BASE_URL=$normal_rpc_url
-    export JPACKER_TEST_COMMAND_LOG=$command_log
-    export JPACKER_TEST_PACKAGE_BUILD_DIR=$case_dir/package.build
-    export JPACKER_TEST_GIT_CLONE_FIXTURE_DIR=$git_fixture_dir
-    export JPACKER_TEST_PACMAN_EXIT_CODE=1
-    export JPACKER_TEST_SUDO_EXIT_CODE=99
-    export JPACKER_TEST_MAKEPKG_EXIT_CODE=99
-    unset JPACKER_TEST_PACMAN_QM_OUTPUT
-    unset JPACKER_TEST_PACMAN_REPO_PACKAGES
-    unset JPACKER_TEST_GIT_REMOTE_URL
-    unset JPACKER_TEST_GIT_CLONE_EXIT_CODE
-    unset JPACKER_TEST_GIT_CLONE_SYMLINK_TARGET
+    export MOGUET_TEST_AUR_RPC_BASE_URL=$normal_rpc_url
+    export MOGUET_TEST_COMMAND_LOG=$command_log
+    export MOGUET_TEST_PACKAGE_BUILD_DIR=$case_dir/package.build
+    export MOGUET_TEST_GIT_CLONE_FIXTURE_DIR=$git_fixture_dir
+    export MOGUET_TEST_PACMAN_EXIT_CODE=1
+    export MOGUET_TEST_SUDO_EXIT_CODE=99
+    export MOGUET_TEST_MAKEPKG_EXIT_CODE=99
+    unset MOGUET_TEST_PACMAN_QM_OUTPUT
+    unset MOGUET_TEST_PACMAN_REPO_PACKAGES
+    unset MOGUET_TEST_GIT_REMOTE_URL
+    unset MOGUET_TEST_GIT_CLONE_EXIT_CODE
+    unset MOGUET_TEST_GIT_CLONE_SYMLINK_TARGET
 }
 
 run_ok() {
@@ -220,25 +220,25 @@ assert_no_fetch_update_commands() {
 
 assert_cache_root_absent() {
     if [ -e "$XDG_CACHE_HOME/jpacker" ] || [ -L "$XDG_CACHE_HOME/jpacker" ]; then
-        echo "PKGBUILD export changed the jpacker cache root" >&2
+        echo "PKGBUILD export changed the legacy jpacker cache root" >&2
         find "$XDG_CACHE_HOME/jpacker" -maxdepth 2 -print >&2 || true
         exit 1
     fi
 }
 
 assert_source_preference_unchanged() {
-    preference_file=$JPACKER_TEST_PACKAGE_BUILD_DIR/clean-root
-    if [ "$(find "$JPACKER_TEST_PACKAGE_BUILD_DIR" -mindepth 1 -maxdepth 1 -print | wc -l)" -ne 1 ] ||
+    preference_file=$MOGUET_TEST_PACKAGE_BUILD_DIR/clean-root
+    if [ "$(find "$MOGUET_TEST_PACKAGE_BUILD_DIR" -mindepth 1 -maxdepth 1 -print | wc -l)" -ne 1 ] ||
        [ "$(cat "$preference_file")" != "source preference marker" ]; then
         echo "PKGBUILD export changed source-build preferences" >&2
-        find "$JPACKER_TEST_PACKAGE_BUILD_DIR" -maxdepth 1 -print >&2 || true
+        find "$MOGUET_TEST_PACKAGE_BUILD_DIR" -maxdepth 1 -print >&2 || true
         exit 1
     fi
 }
 
 assert_no_temporary_artifacts() {
     temporary_artifact=$(find "$work_dir" "$TMPDIR" -maxdepth 1 \
-        -name '.jpacker-pkgbuild-*' -print -quit)
+        -name '.moguet-pkgbuild-*' -print -quit)
     if [ -n "$temporary_artifact" ]; then
         echo "temporary clone artifact remains: $temporary_artifact" >&2
         exit 1
@@ -369,7 +369,7 @@ assert_command_log_empty
 assert_normal_request_log_empty
 
 setup_case parser-role-query
-export JPACKER_TEST_PACMAN_EXIT_CODE=0
+export MOGUET_TEST_PACMAN_EXIT_CODE=0
 run_ok -Q --root -Gp filesystem
 if ! grep -Fx -- "pacman -Q --root -Gp filesystem" "$command_log" >/dev/null; then
     echo "-Gp option value was not preserved for pacman" >&2
@@ -378,7 +378,7 @@ if ! grep -Fx -- "pacman -Q --root -Gp filesystem" "$command_log" >/dev/null; th
 fi
 
 setup_case parser-role-opaque
-export JPACKER_TEST_SUDO_EXIT_CODE=0
+export MOGUET_TEST_SUDO_EXIT_CODE=0
 run_ok -U -- -G
 if ! grep -Fx -- "sudo pacman -U -- -G" "$command_log" >/dev/null; then
     echo "-G opaque operand was not preserved for pacman" >&2
@@ -387,7 +387,7 @@ if ! grep -Fx -- "sudo pacman -U -- -G" "$command_log" >/dev/null; then
 fi
 
 setup_case exact-operation
-export JPACKER_TEST_PACMAN_EXIT_CODE=0
+export MOGUET_TEST_PACMAN_EXIT_CODE=0
 run_ok -Gx clean-root
 if ! grep -Fx -- "pacman -Gx clean-root" "$command_log" >/dev/null; then
     echo "non-exact -G operation was incorrectly transformed" >&2
@@ -421,7 +421,7 @@ assert_cache_root_absent
 for schema_target in \
     id-base-empty id-base-invalid single-mismatch-request depends-scalar-string; do
     setup_case "schema-$schema_target"
-    export JPACKER_TEST_AUR_RPC_BASE_URL=$schema_rpc_url
+    export MOGUET_TEST_AUR_RPC_BASE_URL=$schema_rpc_url
     run_fail -Gp "$schema_target"
     assert_contains "Failed to resolve AUR package" "$stderr_file"
     assert_stdout_empty
@@ -432,8 +432,8 @@ done
 
 # Matrix C: -Gはcwd直下へroot PackageBaseだけをatomic exportする。
 setup_case export-root
-export JPACKER_TEST_GIT_REMOTE_URL=https://aur.archlinux.org/clean-root.git
-export JPACKER_TEST_PACMAN_REPO_PACKAGES=clean-root
+export MOGUET_TEST_GIT_REMOTE_URL=https://aur.archlinux.org/clean-root.git
+export MOGUET_TEST_PACMAN_REPO_PACKAGES=clean-root
 run_ok -G clean-root
 assert_stdout_empty
 assert_fixture_tree "$work_dir/clean-root"
@@ -444,7 +444,7 @@ assert_source_preference_unchanged
 assert_no_temporary_artifacts
 
 setup_case export-root-only
-export JPACKER_TEST_GIT_REMOTE_URL=https://aur.archlinux.org/risk-root.git
+export MOGUET_TEST_GIT_REMOTE_URL=https://aur.archlinux.org/risk-root.git
 run_ok -G risk-root
 assert_fixture_tree "$work_dir/risk-root"
 assert_export_git_commands risk-root 2
@@ -458,7 +458,7 @@ assert_cache_root_absent
 assert_no_temporary_artifacts
 
 setup_case export-split
-export JPACKER_TEST_GIT_REMOTE_URL=https://aur.archlinux.org/split-base.git
+export MOGUET_TEST_GIT_REMOTE_URL=https://aur.archlinux.org/split-base.git
 run_ok -G split-child
 assert_fixture_tree "$work_dir/split-base"
 if [ -e "$work_dir/split-child" ] || [ -L "$work_dir/split-child" ]; then
@@ -475,7 +475,7 @@ setup_case export-does-not-use-cache
 mkdir -p "$XDG_CACHE_HOME/jpacker/clean-root/.git"
 printf 'cache marker\n' > "$XDG_CACHE_HOME/jpacker/clean-root/marker"
 cache_checksum=$(cksum "$XDG_CACHE_HOME/jpacker/clean-root/marker")
-export JPACKER_TEST_GIT_REMOTE_URL=https://aur.archlinux.org/clean-root.git
+export MOGUET_TEST_GIT_REMOTE_URL=https://aur.archlinux.org/clean-root.git
 run_ok -G clean-root
 assert_fixture_tree "$work_dir/clean-root"
 if [ "$(cksum "$XDG_CACHE_HOME/jpacker/clean-root/marker")" != "$cache_checksum" ]; then
@@ -517,7 +517,7 @@ for destination_kind in empty-dir non-git-dir matching-git file symlink dangling
             ;;
     esac
 
-    export JPACKER_TEST_GIT_REMOTE_URL=https://aur.archlinux.org/clean-root.git
+    export MOGUET_TEST_GIT_REMOTE_URL=https://aur.archlinux.org/clean-root.git
     run_fail -G clean-root
     assert_contains "Export destination already exists" "$stderr_file"
     assert_command_log_empty
@@ -559,8 +559,8 @@ assert_normal_request_log_empty
 
 # Matrix E: clone/post-clone failureはfinal pathとtemporary pathを残さない。
 setup_case clone-failure
-export JPACKER_TEST_GIT_REMOTE_URL=https://aur.archlinux.org/clean-root.git
-export JPACKER_TEST_GIT_CLONE_EXIT_CODE=42
+export MOGUET_TEST_GIT_REMOTE_URL=https://aur.archlinux.org/clean-root.git
+export MOGUET_TEST_GIT_CLONE_EXIT_CODE=42
 run_fail -G clean-root
 assert_contains "Failed to clone AUR PackageBase clean-root" "$stderr_file"
 assert_stdout_empty
@@ -570,7 +570,7 @@ assert_cache_root_absent
 assert_no_package_commands
 
 setup_case remote-mismatch
-export JPACKER_TEST_GIT_REMOTE_URL=https://example.invalid/wrong.git
+export MOGUET_TEST_GIT_REMOTE_URL=https://example.invalid/wrong.git
 run_fail -G clean-root
 assert_contains "Remote URL mismatch" "$stderr_file"
 assert_stdout_empty
@@ -579,7 +579,7 @@ assert_no_temporary_artifacts
 assert_cache_root_absent
 
 setup_case missing-local-remote
-: > "$git_fixture_dir/.jpacker-test-missing-remote"
+: > "$git_fixture_dir/.moguet-test-missing-remote"
 run_fail -G clean-root
 assert_contains "Failed to read local remote.origin.url" "$stderr_file"
 assert_stdout_empty
@@ -589,7 +589,7 @@ assert_cache_root_absent
 
 setup_case missing-git-directory
 rm -rf "$git_fixture_dir/.git"
-export JPACKER_TEST_GIT_REMOTE_URL=https://aur.archlinux.org/clean-root.git
+export MOGUET_TEST_GIT_REMOTE_URL=https://aur.archlinux.org/clean-root.git
 run_fail -G clean-root
 assert_contains "missing a regular .git directory" "$stderr_file"
 [ ! -e "$work_dir/clean-root" ]
@@ -601,7 +601,7 @@ mkdir "$outside_git_dir"
 printf 'outside git marker\n' > "$outside_git_dir/marker"
 rm -rf "$git_fixture_dir/.git"
 ln -s "$outside_git_dir" "$git_fixture_dir/.git"
-export JPACKER_TEST_GIT_REMOTE_URL=https://aur.archlinux.org/clean-root.git
+export MOGUET_TEST_GIT_REMOTE_URL=https://aur.archlinux.org/clean-root.git
 run_fail -G clean-root
 assert_contains "missing a regular .git directory" "$stderr_file"
 assert_contains "outside git marker" "$outside_git_dir/marker"
@@ -610,7 +610,7 @@ assert_no_temporary_artifacts
 
 setup_case missing-pkgbuild
 rm -f "$git_fixture_dir/PKGBUILD"
-export JPACKER_TEST_GIT_REMOTE_URL=https://aur.archlinux.org/clean-root.git
+export MOGUET_TEST_GIT_REMOTE_URL=https://aur.archlinux.org/clean-root.git
 run_fail -G clean-root
 assert_contains "PKGBUILD is not a regular non-symlink file" "$stderr_file"
 [ ! -e "$work_dir/clean-root" ]
@@ -619,23 +619,23 @@ assert_no_temporary_artifacts
 setup_case symlink-pkgbuild
 rm -f "$git_fixture_dir/PKGBUILD"
 ln -s clean-root.install "$git_fixture_dir/PKGBUILD"
-export JPACKER_TEST_GIT_REMOTE_URL=https://aur.archlinux.org/clean-root.git
+export MOGUET_TEST_GIT_REMOTE_URL=https://aur.archlinux.org/clean-root.git
 run_fail -G clean-root
 assert_contains "PKGBUILD is not a regular non-symlink file" "$stderr_file"
 [ ! -e "$work_dir/clean-root" ]
 assert_no_temporary_artifacts
 
 setup_case publish-destination-race
-printf 'clean-root\n' > "$git_fixture_dir/.jpacker-test-final-destination"
-export JPACKER_TEST_GIT_REMOTE_URL=https://aur.archlinux.org/clean-root.git
+printf 'clean-root\n' > "$git_fixture_dir/.moguet-test-final-destination"
+export MOGUET_TEST_GIT_REMOTE_URL=https://aur.archlinux.org/clean-root.git
 run_fail -G clean-root
 assert_contains "Export destination already exists" "$stderr_file"
 assert_contains "concurrent user path" "$work_dir/clean-root/user-file"
 assert_no_temporary_artifacts
 
 setup_case current-directory-rename
-: > "$git_fixture_dir/.jpacker-test-rename-cwd"
-export JPACKER_TEST_GIT_REMOTE_URL=https://aur.archlinux.org/clean-root.git
+: > "$git_fixture_dir/.moguet-test-rename-cwd"
+export MOGUET_TEST_GIT_REMOTE_URL=https://aur.archlinux.org/clean-root.git
 run_ok -G clean-root
 assert_fixture_tree "$work_dir-moved/clean-root"
 if [ -e "$work_dir/clean-root" ] || [ -L "$work_dir/clean-root" ]; then
@@ -647,13 +647,13 @@ assert_cache_root_absent
 assert_no_temporary_artifacts
 
 setup_case temporary-identity-swap
-: > "$git_fixture_dir/.jpacker-test-swap-temp-identity"
-export JPACKER_TEST_GIT_REMOTE_URL=https://aur.archlinux.org/clean-root.git
+: > "$git_fixture_dir/.moguet-test-swap-temp-identity"
+export MOGUET_TEST_GIT_REMOTE_URL=https://aur.archlinux.org/clean-root.git
 run_fail -G clean-root
 assert_contains "Refusing changed temporary directory path" "$stderr_file"
 assert_stdout_empty
 replacement_temporary=$(find "$work_dir" -maxdepth 1 -type d \
-    -name '.jpacker-pkgbuild-*' ! -name '*.owned-original' -print -quit)
+    -name '.moguet-pkgbuild-*' ! -name '*.owned-original' -print -quit)
 if [ -z "$replacement_temporary" ]; then
     echo "temporary identity replacement was unexpectedly removed" >&2
     exit 1
@@ -669,7 +669,7 @@ assert_cache_root_absent
 
 # Matrix F: -Gp stdoutはcleanup後のPKGBUILD bytesだけに限定する。
 setup_case print-root
-export JPACKER_TEST_GIT_REMOTE_URL=https://aur.archlinux.org/clean-root.git
+export MOGUET_TEST_GIT_REMOTE_URL=https://aur.archlinux.org/clean-root.git
 run_ok -Gp clean-root
 if ! cmp -s "$fixture_dir/PKGBUILD" "$stdout_file"; then
     echo "-Gp stdout did not exactly match PKGBUILD bytes" >&2
@@ -686,13 +686,13 @@ assert_source_preference_unchanged
 assert_no_temporary_artifacts
 
 setup_case print-temporary-identity-swap
-: > "$git_fixture_dir/.jpacker-test-swap-temp-identity"
-export JPACKER_TEST_GIT_REMOTE_URL=https://aur.archlinux.org/clean-root.git
+: > "$git_fixture_dir/.moguet-test-swap-temp-identity"
+export MOGUET_TEST_GIT_REMOTE_URL=https://aur.archlinux.org/clean-root.git
 run_fail -Gp clean-root
 assert_contains "Refusing changed temporary directory path" "$stderr_file"
 assert_stdout_empty
 replacement_temporary=$(find "$TMPDIR" -maxdepth 1 -type d \
-    -name '.jpacker-pkgbuild-*' ! -name '*.owned-original' -print -quit)
+    -name '.moguet-pkgbuild-*' ! -name '*.owned-original' -print -quit)
 if [ -z "$replacement_temporary" ]; then
     echo "-Gp temporary identity replacement was unexpectedly removed" >&2
     exit 1
@@ -712,12 +712,12 @@ mkdir "$outside_cache_dir"
 printf 'outside cache marker\n' > "$outside_cache_dir/marker"
 ln -s "$outside_cache_dir" "$XDG_CACHE_HOME/jpacker"
 outside_cache_checksum=$(cksum "$outside_cache_dir/marker")
-export JPACKER_TEST_GIT_REMOTE_URL=https://aur.archlinux.org/clean-root.git
+export MOGUET_TEST_GIT_REMOTE_URL=https://aur.archlinux.org/clean-root.git
 run_ok -Gp clean-root
 cmp -s "$fixture_dir/PKGBUILD" "$stdout_file"
 if [ "$(cksum "$outside_cache_dir/marker")" != "$outside_cache_checksum" ] ||
    [ "$(find "$outside_cache_dir" -mindepth 1 -maxdepth 1 -print | wc -l)" -ne 1 ]; then
-    echo "-Gp followed or changed the jpacker cache symlink" >&2
+    echo "-Gp followed or changed the legacy jpacker cache symlink" >&2
     find "$outside_cache_dir" -maxdepth 2 -print >&2 || true
     exit 1
 fi
@@ -725,7 +725,7 @@ assert_export_git_commands clean-root
 assert_no_temporary_artifacts
 
 setup_case print-split
-export JPACKER_TEST_GIT_REMOTE_URL=https://aur.archlinux.org/split-base.git
+export MOGUET_TEST_GIT_REMOTE_URL=https://aur.archlinux.org/split-base.git
 run_ok -Gp split-child
 cmp -s "$fixture_dir/PKGBUILD" "$stdout_file"
 assert_contains "split-child -> PackageBase split-base" "$stderr_file"
@@ -736,8 +736,8 @@ assert_no_temporary_artifacts
 
 # Matrix G: -Gp failureはstdoutを空に保ち、secret/special fileを読まない。
 setup_case print-clone-failure
-export JPACKER_TEST_GIT_REMOTE_URL=https://aur.archlinux.org/clean-root.git
-export JPACKER_TEST_GIT_CLONE_EXIT_CODE=42
+export MOGUET_TEST_GIT_REMOTE_URL=https://aur.archlinux.org/clean-root.git
+export MOGUET_TEST_GIT_CLONE_EXIT_CODE=42
 run_fail -Gp clean-root
 assert_stdout_empty
 assert_contains "Failed to clone" "$stderr_file"
@@ -745,7 +745,7 @@ assert_no_temporary_artifacts
 assert_cache_root_absent
 
 setup_case print-remote-mismatch
-export JPACKER_TEST_GIT_REMOTE_URL=https://example.invalid/wrong.git
+export MOGUET_TEST_GIT_REMOTE_URL=https://example.invalid/wrong.git
 run_fail -Gp clean-root
 assert_stdout_empty
 assert_contains "Remote URL mismatch" "$stderr_file"
@@ -754,7 +754,7 @@ assert_cache_root_absent
 
 setup_case print-missing-git
 rm -rf "$git_fixture_dir/.git"
-export JPACKER_TEST_GIT_REMOTE_URL=https://aur.archlinux.org/clean-root.git
+export MOGUET_TEST_GIT_REMOTE_URL=https://aur.archlinux.org/clean-root.git
 run_fail -Gp clean-root
 assert_stdout_empty
 assert_contains "missing a regular .git directory" "$stderr_file"
@@ -763,7 +763,7 @@ assert_cache_root_absent
 
 setup_case print-missing-pkgbuild
 rm -f "$git_fixture_dir/PKGBUILD"
-export JPACKER_TEST_GIT_REMOTE_URL=https://aur.archlinux.org/clean-root.git
+export MOGUET_TEST_GIT_REMOTE_URL=https://aur.archlinux.org/clean-root.git
 run_fail -Gp clean-root
 assert_stdout_empty
 assert_contains "PKGBUILD is not a regular non-symlink file" "$stderr_file"
@@ -775,7 +775,7 @@ secret_file=$case_dir/secret
 printf 'secret must not reach stdout\n' > "$secret_file"
 rm -f "$git_fixture_dir/PKGBUILD"
 ln -s "$secret_file" "$git_fixture_dir/PKGBUILD"
-export JPACKER_TEST_GIT_REMOTE_URL=https://aur.archlinux.org/clean-root.git
+export MOGUET_TEST_GIT_REMOTE_URL=https://aur.archlinux.org/clean-root.git
 run_fail -Gp clean-root
 assert_stdout_empty
 assert_contains "PKGBUILD is not a regular non-symlink file" "$stderr_file"
@@ -787,7 +787,7 @@ assert_cache_root_absent
 setup_case print-pkgbuild-directory
 rm -f "$git_fixture_dir/PKGBUILD"
 mkdir "$git_fixture_dir/PKGBUILD"
-export JPACKER_TEST_GIT_REMOTE_URL=https://aur.archlinux.org/clean-root.git
+export MOGUET_TEST_GIT_REMOTE_URL=https://aur.archlinux.org/clean-root.git
 run_fail -Gp clean-root
 assert_stdout_empty
 assert_contains "PKGBUILD is not a regular non-symlink file" "$stderr_file"
@@ -795,8 +795,8 @@ assert_no_temporary_artifacts
 assert_cache_root_absent
 
 setup_case print-pkgbuild-unreadable
-: > "$git_fixture_dir/.jpacker-test-pkgbuild-unreadable"
-export JPACKER_TEST_GIT_REMOTE_URL=https://aur.archlinux.org/clean-root.git
+: > "$git_fixture_dir/.moguet-test-pkgbuild-unreadable"
+export MOGUET_TEST_GIT_REMOTE_URL=https://aur.archlinux.org/clean-root.git
 run_fail -Gp clean-root
 assert_stdout_empty
 assert_contains "Failed to open PKGBUILD" "$stderr_file"
@@ -804,7 +804,7 @@ assert_no_temporary_artifacts
 assert_cache_root_absent
 
 setup_case print-network-failure
-export JPACKER_TEST_AUR_RPC_BASE_URL=http://127.0.0.1:9/rpc/
+export MOGUET_TEST_AUR_RPC_BASE_URL=http://127.0.0.1:9/rpc/
 run_fail -Gp clean-root
 assert_stdout_empty
 assert_contains "AUR request failed" "$stderr_file"
@@ -814,7 +814,7 @@ assert_cache_root_absent
 
 # Matrix H: existing fetchは依存込みinternal cache、-G/-Gpはroot-only export/temporary clone。
 setup_case fetch-regression
-unset JPACKER_TEST_GIT_REMOTE_URL
+unset MOGUET_TEST_GIT_REMOTE_URL
 run_ok fetch risk-root
 if [ ! -d "$XDG_CACHE_HOME/jpacker/risk-dep/.git" ] || \
    [ ! -d "$XDG_CACHE_HOME/jpacker/risk-root/.git" ]; then

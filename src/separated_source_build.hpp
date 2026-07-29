@@ -52,7 +52,7 @@ ArtifactInstallExecutionOutcome execute_separated_source_build_unit(
         SeparatedSourceBuildUnitRequest request,
         const SeparatedSourceBuildUnitOptions& options);
 
-#ifdef JPACKER_ENABLE_SEPARATED_SOURCE_BUILD_TEST_HOOKS
+#ifdef MOGUET_ENABLE_SEPARATED_SOURCE_BUILD_TEST_HOOKS
 using SeparatedSourceBuildWorkspaceObserverForTest =
         void (*)(const std::filesystem::path& workspace_path);
 

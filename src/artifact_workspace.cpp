@@ -36,7 +36,7 @@ constexpr mode_t ARTIFACT_WORKSPACE_MODE = 0700;
 constexpr char ARTIFACT_WORKSPACE_PREFIX[] = ".artifact-workspace~-";
 constexpr std::size_t ARTIFACT_DIAGNOSTIC_VALUE_LIMIT = 96;
 
-#ifdef JPACKER_ENABLE_ARTIFACT_WORKSPACE_TEST_HOOKS
+#ifdef MOGUET_ENABLE_ARTIFACT_WORKSPACE_TEST_HOOKS
 MultipleArtifactValidationObserverForTest
         g_multiple_artifact_validation_observer = nullptr;
 MultipleArtifactCleanupObserverForTest
@@ -1945,7 +1945,7 @@ void ValidatedPackageArtifactSet::cleanup_workspace() {
         // POLICY(#268): cleanup entryでaggregate全体を再証明した後だけ、
         // retained artifact/signature descriptorを閉じる。
         require_validity();
-#ifdef JPACKER_ENABLE_ARTIFACT_WORKSPACE_TEST_HOOKS
+#ifdef MOGUET_ENABLE_ARTIFACT_WORKSPACE_TEST_HOOKS
         std::vector<int> retained_descriptors;
         retained_descriptors.reserve(records_.size() * 2);
         for(const Record& record : records_) {
@@ -1961,7 +1961,7 @@ void ValidatedPackageArtifactSet::cleanup_workspace() {
         // ownershipはdiagnostic retentionとcleanup retryのため保持する。
         records_.clear();
         ownership_state_ = OwnershipState::WorkspaceCleanupPending;
-#ifdef JPACKER_ENABLE_ARTIFACT_WORKSPACE_TEST_HOOKS
+#ifdef MOGUET_ENABLE_ARTIFACT_WORKSPACE_TEST_HOOKS
         notify_multiple_artifact_cleanup_for_test(
                 workspace_.path(), retained_descriptors);
 #endif
@@ -1980,7 +1980,7 @@ ValidatedPackageArtifactSet validate_post_build_package_artifacts(
             effective_user, effective_user, effective_user);
 }
 
-#ifdef JPACKER_ENABLE_ARTIFACT_WORKSPACE_TEST_HOOKS
+#ifdef MOGUET_ENABLE_ARTIFACT_WORKSPACE_TEST_HOOKS
 void require_artifact_workspace_identity_for_test(
         const ArtifactWorkspace& workspace,
         std::uintmax_t expected_effective_user) {

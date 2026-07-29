@@ -42,7 +42,7 @@ class TestDatabase final {
 public:
     explicit TestDatabase(bool create_sync_directory = true) {
         std::string template_text =
-                (fs::temp_directory_path() / "jpacker-repository-query-test-XXXXXX")
+                (fs::temp_directory_path() / "moguet-repository-query-test-XXXXXX")
                         .string();
         std::vector<char> path_template(
                 template_text.begin(), template_text.end());

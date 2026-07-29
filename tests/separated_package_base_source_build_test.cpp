@@ -188,7 +188,7 @@ public:
         : original_working_directory_(fs::current_path()) {
         const std::string template_text =
                 (fs::temp_directory_path() /
-                 "jpacker-package-base-source-build-test-XXXXXX")
+                 "moguet-package-base-source-build-test-XXXXXX")
                         .string();
         std::vector<char> path_template(
                 template_text.begin(), template_text.end());

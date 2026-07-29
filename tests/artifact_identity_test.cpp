@@ -54,7 +54,7 @@ public:
         std::vector<char> path_template;
         const std::string template_text =
                 (fs::temp_directory_path() /
-                 "jpacker-artifact-identity-test-XXXXXX")
+                 "moguet-artifact-identity-test-XXXXXX")
                         .string();
         path_template.assign(template_text.begin(), template_text.end());
         path_template.push_back('\0');

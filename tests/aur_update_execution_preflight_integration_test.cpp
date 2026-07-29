@@ -56,7 +56,7 @@ public:
     explicit FixtureRoot(const std::string& case_name)
         : original_working_directory_(fs::current_path()),
           root_(fs::temp_directory_path() /
-                ("jpacker-aur-update-preflight-integration-" + case_name + "-" +
+                ("moguet-aur-update-preflight-integration-" + case_name + "-" +
                  std::to_string(static_cast<long long>(getpid())))) {
         if(fs::exists(root_)) {
             throw std::runtime_error("Integration fixture root already exists: " + root_.string());

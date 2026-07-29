@@ -52,7 +52,7 @@ struct SystemSourceUpgradePreparationState {
     std::vector<SystemSourceUpgradeWarning> warnings;
     std::vector<SystemSourceUpgradeIssue> issues;
     std::vector<SystemSourceUpgradeDiagnostic> diagnostics;
-#ifdef JPACKER_ENABLE_SYSTEM_SOURCE_UPGRADE_TEST_HOOKS
+#ifdef MOGUET_ENABLE_SYSTEM_SOURCE_UPGRADE_TEST_HOOKS
     std::optional<SystemSourceUpgradeUnexpectedExceptionPoint>
             unexpected_exception_point;
     bool unexpected_exception_is_unknown = false;
@@ -218,7 +218,7 @@ SystemSourceUpgradeDiagnostic make_diagnostic(
     return detail;
 }
 
-#ifdef JPACKER_ENABLE_SYSTEM_SOURCE_UPGRADE_TEST_HOOKS
+#ifdef MOGUET_ENABLE_SYSTEM_SOURCE_UPGRADE_TEST_HOOKS
 struct UnknownSystemSourceTestException {};
 
 void throw_unexpected_exception_for_test(
@@ -703,7 +703,7 @@ PreparedSystemSourceUpgrade::snapshot() const noexcept {
     return impl_ == nullptr ? nullptr : &impl_->state.snapshot;
 }
 
-#ifdef JPACKER_ENABLE_SYSTEM_SOURCE_UPGRADE_TEST_HOOKS
+#ifdef MOGUET_ENABLE_SYSTEM_SOURCE_UPGRADE_TEST_HOOKS
 void PreparedSystemSourceUpgrade::
 make_first_source_correlation_inconsistent_for_test() {
     if(impl_ == nullptr || impl_->state.correlations.empty()) return;
@@ -1083,7 +1083,7 @@ SystemSourceUpgradeResult execute_prepared_system_source_upgrade(
             std::nullopt,
             std::nullopt,
             {}});
-#ifdef JPACKER_ENABLE_SYSTEM_SOURCE_UPGRADE_TEST_HOOKS
+#ifdef MOGUET_ENABLE_SYSTEM_SOURCE_UPGRADE_TEST_HOOKS
         throw_unexpected_exception_for_test(
                 state,
                 SystemSourceUpgradeUnexpectedExceptionPoint::
@@ -1129,7 +1129,7 @@ SystemSourceUpgradeResult execute_prepared_system_source_upgrade(
             return result;
         }
         result.system.status = SystemUpgradePhaseStatus::Completed;
-#ifdef JPACKER_ENABLE_SYSTEM_SOURCE_UPGRADE_TEST_HOOKS
+#ifdef MOGUET_ENABLE_SYSTEM_SOURCE_UPGRADE_TEST_HOOKS
         throw_unexpected_exception_for_test(
                 state,
                 SystemSourceUpgradeUnexpectedExceptionPoint::
@@ -1367,7 +1367,7 @@ SystemSourceUpgradeResult execute_prepared_system_source_upgrade(
                                     work_item.request.package_name));
 
             active_source_position = source_position;
-#ifdef JPACKER_ENABLE_SYSTEM_SOURCE_UPGRADE_TEST_HOOKS
+#ifdef MOGUET_ENABLE_SYSTEM_SOURCE_UPGRADE_TEST_HOOKS
             throw_unexpected_exception_for_test(
                     state,
                     SystemSourceUpgradeUnexpectedExceptionPoint::
@@ -1459,7 +1459,7 @@ SystemSourceUpgradeResult execute_prepared_system_source_upgrade(
                         SystemSourceUpgradePhase::RegisteredSource;
                 return result;
             }
-#ifdef JPACKER_ENABLE_SYSTEM_SOURCE_UPGRADE_TEST_HOOKS
+#ifdef MOGUET_ENABLE_SYSTEM_SOURCE_UPGRADE_TEST_HOOKS
             throw_unexpected_exception_for_test(
                     state,
                     SystemSourceUpgradeUnexpectedExceptionPoint::

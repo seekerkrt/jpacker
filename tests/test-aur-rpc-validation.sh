@@ -4,8 +4,8 @@ set -eu
 test_binary=$1
 envelope_test_binary=$2
 repo_root=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
-JPACKER_TEST_REPOSITORY_ROOT=$repo_root
-export JPACKER_TEST_REPOSITORY_ROOT
+MOGUET_TEST_REPOSITORY_ROOT=$repo_root
+export MOGUET_TEST_REPOSITORY_ROOT
 . "$repo_root/tests/test-command-safety.sh"
 tmp_dir=$(mktemp -d)
 server_pid=
@@ -46,7 +46,7 @@ require_exact_test_command makepkg "$repo_root/tests/stubs/makepkg"
 require_exact_test_command pacman "$repo_root/tests/stubs/pacman"
 require_exact_test_command sudo "$repo_root/tests/stubs/sudo"
 require_exact_test_command git "$repo_root/tests/stubs/git"
-export JPACKER_TEST_AUR_RPC_BASE_URL=http://127.0.0.1:$port/rpc/
+export MOGUET_TEST_AUR_RPC_BASE_URL=http://127.0.0.1:$port/rpc/
 
 setup_case() {
     case_name=$1
@@ -62,21 +62,21 @@ setup_case() {
     : > "$inventory_state"
     export HOME=$case_dir/home
     export XDG_CACHE_HOME=$case_dir/xdg-cache
-    export JPACKER_TEST_COMMAND_LOG=$command_log
-    export JPACKER_TEST_FOREIGN_PACKAGE_INVENTORY_STATE_FILE=$inventory_state
-    export JPACKER_TEST_PACMAN_CONF_REPOSITORY_LIST=core
-    export JPACKER_TEST_PACMAN_EXIT_CODE=1
-    export JPACKER_TEST_SUDO_EXIT_CODE=99
-    unset JPACKER_TEST_PACMAN_QM_OUTPUT
-    unset JPACKER_TEST_PACMAN_REPO_PACKAGES
-    unset JPACKER_TEST_PACKAGE_BUILD_DIR
-    unset JPACKER_TEST_GIT_REMOTE_URL
-    unset JPACKER_TEST_GIT_CLONE_EXIT_CODE
-    unset JPACKER_TEST_GIT_CLONE_SYMLINK_TARGET
-    unset JPACKER_TEST_GIT_CLONE_FIXTURE_DIR
-    unset JPACKER_TEST_MAKEPKG_EXIT_CODE
-    unset JPACKER_TEST_MAKEPKG_ARTIFACT_IDENTITIES
-    unset JPACKER_TEST_AUR_RPC_ENCODE_FAILURE_PACKAGE
+    export MOGUET_TEST_COMMAND_LOG=$command_log
+    export MOGUET_TEST_FOREIGN_PACKAGE_INVENTORY_STATE_FILE=$inventory_state
+    export MOGUET_TEST_PACMAN_CONF_REPOSITORY_LIST=core
+    export MOGUET_TEST_PACMAN_EXIT_CODE=1
+    export MOGUET_TEST_SUDO_EXIT_CODE=99
+    unset MOGUET_TEST_PACMAN_QM_OUTPUT
+    unset MOGUET_TEST_PACMAN_REPO_PACKAGES
+    unset MOGUET_TEST_PACKAGE_BUILD_DIR
+    unset MOGUET_TEST_GIT_REMOTE_URL
+    unset MOGUET_TEST_GIT_CLONE_EXIT_CODE
+    unset MOGUET_TEST_GIT_CLONE_SYMLINK_TARGET
+    unset MOGUET_TEST_GIT_CLONE_FIXTURE_DIR
+    unset MOGUET_TEST_MAKEPKG_EXIT_CODE
+    unset MOGUET_TEST_MAKEPKG_ARTIFACT_IDENTITIES
+    unset MOGUET_TEST_AUR_RPC_ENCODE_FAILURE_PACKAGE
 }
 
 run_ok() {
@@ -229,7 +229,7 @@ prepare_source_preferences() {
     for package in "$@"; do
         : > "$preference_dir/$package"
     done
-    export JPACKER_TEST_PACKAGE_BUILD_DIR=$preference_dir
+    export MOGUET_TEST_PACKAGE_BUILD_DIR=$preference_dir
 }
 
 # strict APIだけがAUR RPC v5 envelopeを検証する。legacy APIのpermissive境界は維持する。
@@ -481,15 +481,15 @@ assert_contains "search-valid-result" "$output_file"
 assert_command "pacman -Ss search-valid-query"
 
 setup_case malformed-search
-export JPACKER_TEST_PACMAN_EXIT_CODE=0
+export MOGUET_TEST_PACMAN_EXIT_CODE=0
 run_fail -Ss search-invalid-query
 assert_validation_error "search query search-invalid-query"
 assert_contains "field Description expected string or null, got object" "$output_file"
 assert_no_mutation_commands
 
 setup_case malformed-refresh-search
-export JPACKER_TEST_PACMAN_EXIT_CODE=0
-export JPACKER_TEST_SUDO_EXIT_CODE=0
+export MOGUET_TEST_PACMAN_EXIT_CODE=0
+export MOGUET_TEST_SUDO_EXIT_CODE=0
 run_fail -Ssy search-invalid-query
 assert_validation_error "search query search-invalid-query"
 assert_contains "field Description expected string or null, got object" "$output_file"
@@ -526,9 +526,9 @@ setup_case multi-encode-failure
 set_foreign_inventory 'valid-minimal 0.9-1
 arrays-null 0.9-1
 arrays-empty 0.9-1'
-export JPACKER_TEST_AUR_RPC_ENCODE_FAILURE_PACKAGE=arrays-null
+export MOGUET_TEST_AUR_RPC_ENCODE_FAILURE_PACKAGE=arrays-null
 run_fail -Qua
-unset JPACKER_TEST_AUR_RPC_ENCODE_FAILURE_PACKAGE
+unset MOGUET_TEST_AUR_RPC_ENCODE_FAILURE_PACKAGE
 assert_contains \
     "Failed to fetch AUR info: Failed to encode AUR package name: arrays-null" \
     "$output_file"
@@ -595,7 +595,7 @@ assert_no_mutation_commands
 # upgrade preflightはsplit install guardより先にdependency/provider schemaを全走査する。
 setup_case upgrade-split-dependency-preflight
 prepare_source_preferences upgrade-split-root
-export JPACKER_TEST_SUDO_EXIT_CODE=0
+export MOGUET_TEST_SUDO_EXIT_CODE=0
 run_fail upgrade
 assert_validation_error "package info upgrade-split-malformed"
 assert_contains "field Conflicts expected array or null, got string" "$output_file"
@@ -608,7 +608,7 @@ assert_cache_entry_absent upgrade-split-malformed
 # requested split childをsystem mutation前に引き続き拒否する。
 setup_case upgrade-registered-split-guard
 prepare_source_preferences valid-split
-export JPACKER_TEST_SUDO_EXIT_CODE=0
+export MOGUET_TEST_SUDO_EXIT_CODE=0
 run_fail upgrade
 assert_contains "Registered source upgrade does not support split AUR preference valid-split from PackageBase valid-split-base" "$output_file"
 assert_contains "this route requires a singular package identity" "$output_file"
@@ -620,7 +620,7 @@ assert_cache_entry_absent valid-split-base
 # system/source mutationへ進まない。directory iteratorの順序には依存させない。
 setup_case upgrade-later-preflight-schema-stops-all-source
 prepare_source_preferences upgrade-sequence-a upgrade-sequence-b
-export JPACKER_TEST_SUDO_EXIT_CODE=0
+export MOGUET_TEST_SUDO_EXIT_CODE=0
 run_fail upgrade
 assert_validation_error "package info upgrade-sequence-"
 assert_contains "field Depends expected array or null, got string" "$output_file"

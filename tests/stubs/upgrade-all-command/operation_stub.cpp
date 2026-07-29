@@ -21,30 +21,30 @@ namespace {
 struct UnknownFixtureException {};
 
 std::string current_scenario() {
-    const char* value = std::getenv("JPACKER_TEST_UPGRADE_ALL_SCENARIO");
+    const char* value = std::getenv("MOGUET_TEST_UPGRADE_ALL_SCENARIO");
     if(value == nullptr || value[0] == '\0') {
         throw std::logic_error(
-                "JPACKER_TEST_UPGRADE_ALL_SCENARIO is required.");
+                "MOGUET_TEST_UPGRADE_ALL_SCENARIO is required.");
     }
     return value;
 }
 
 std::string current_matrix_kind() {
     const char* value =
-            std::getenv("JPACKER_TEST_UPGRADE_ALL_MATRIX_KIND");
+            std::getenv("MOGUET_TEST_UPGRADE_ALL_MATRIX_KIND");
     if(value == nullptr || value[0] == '\0') {
         throw std::logic_error(
-                "JPACKER_TEST_UPGRADE_ALL_MATRIX_KIND is required.");
+                "MOGUET_TEST_UPGRADE_ALL_MATRIX_KIND is required.");
     }
     return value;
 }
 
 std::size_t current_matrix_index() {
     const char* value =
-            std::getenv("JPACKER_TEST_UPGRADE_ALL_MATRIX_INDEX");
+            std::getenv("MOGUET_TEST_UPGRADE_ALL_MATRIX_INDEX");
     if(value == nullptr || value[0] == '\0') {
         throw std::logic_error(
-                "JPACKER_TEST_UPGRADE_ALL_MATRIX_INDEX is required.");
+                "MOGUET_TEST_UPGRADE_ALL_MATRIX_INDEX is required.");
     }
 
     std::size_t parsed_length = 0;
@@ -53,7 +53,7 @@ std::size_t current_matrix_index() {
     if(value[parsed_length] != '\0' ||
        parsed > std::numeric_limits<std::size_t>::max()) {
         throw std::logic_error(
-                "JPACKER_TEST_UPGRADE_ALL_MATRIX_INDEX is invalid.");
+                "MOGUET_TEST_UPGRADE_ALL_MATRIX_INDEX is invalid.");
     }
     return static_cast<std::size_t>(parsed);
 }
@@ -265,9 +265,9 @@ constexpr std::array UPGRADE_ALL_BUILD_UNIT_ROLES{
         UpgradeAllBuildUnitRole::CheckDependency};
 
 void append_event(const std::string& event) {
-    const char* event_log_path = std::getenv("JPACKER_TEST_COMMAND_LOG");
+    const char* event_log_path = std::getenv("MOGUET_TEST_COMMAND_LOG");
     if(event_log_path == nullptr || event_log_path[0] == '\0') {
-        throw std::logic_error("JPACKER_TEST_COMMAND_LOG is required.");
+        throw std::logic_error("MOGUET_TEST_COMMAND_LOG is required.");
     }
 
     std::ofstream event_log(event_log_path, std::ios::app);

@@ -52,7 +52,7 @@ std::string dependency_constraint_note(const std::string& dependency) {
 std::string dependency_constraint_unresolved_reason(const std::string& dependency) {
     ParsedDependency parsed = parse_dependency_string(dependency);
     if(parsed.has_malformed_constraint()) return parsed.raw + " (invalid version constraint)";
-    // POLICY(#96): dependency の version constraint は表示・警告まで。jpacker 側で比較解決しない。
+    // POLICY(#96): dependency の version constraint は表示・警告まで。Moguet 側で比較解決しない。
     if(parsed.has_constraint()) return parsed.raw + " (version constraint is not verified)";
     return parsed.raw;
 }

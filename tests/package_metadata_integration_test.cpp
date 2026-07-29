@@ -85,7 +85,7 @@ void run_repository_metadata_smoke_test() {
 
     RepositoryPackageQueryResult missing_result = session.query_repository_package(
             RepositoryPackageLookup{
-                    "jpacker-issue-125-package-that-does-not-exist",
+                    "moguet-issue-125-package-that-does-not-exist",
                     std::nullopt});
     if(const auto* failure = std::get_if<PackageMetadataFailure>(&missing_result)) {
         throw std::runtime_error(
