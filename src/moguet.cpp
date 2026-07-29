@@ -1,5 +1,5 @@
 /**
- * jpacker - A full-featured Pacman wrapper and AUR helper
+ * Moguet - A full-featured Pacman wrapper and AUR helper
  *
  * Features:
  * - Smart Upgrade: Skips rebuilding packages if the version hasn't changed during 'upgrade'.
@@ -8,7 +8,7 @@
  * - '--noconfirm' option support.
  */
 
-// このファイルは、jpacker の CLI 入口、pacman wrapper、AUR/source build 補助をまとめる実装単位。
+// このファイルは、Moguet の CLI 入口、pacman wrapper、AUR/source build 補助をまとめる実装単位。
 // 関数宣言と詳細実装は、将来の分割候補が見えるように section comment で大まかな責務ごとに分類する。
 
 #include "application_identity.hpp"
@@ -52,7 +52,7 @@ AppConfig g_config;
 // --- 関数宣言 ---
 
 // CLI入口 / help
-int run_jpacker(int argc, char* argv[]);
+int run_moguet(int argc, char* argv[]);
 void print_help();
 bool handle_info_only_option(int argc, char* argv[]);
 bool argv_requests_pkgbuild_export_diagnostics(int argc, char* argv[]);
@@ -62,7 +62,7 @@ std::vector<std::string> pacman_args_with_global_options(std::vector<std::string
 std::string join_pacman_args(const std::vector<std::string>& args);
 
 // pacman / repository補助
-bool validate_optionless_jpacker_operation(const std::string& operation, const std::vector<std::string>& flags);
+bool validate_optionless_moguet_operation(const std::string& operation, const std::vector<std::string>& flags);
 namespace {
 
 AppConfig load_invocation_app_config() {
@@ -89,7 +89,7 @@ void apply_cli_overrides(AppConfig& config, const CliOverrides& overrides) {
 } // namespace
 
 // --- CLI 入口 ---
-int run_jpacker(int argc, char* argv[]) {
+int run_moguet(int argc, char* argv[]) {
     if(handle_info_only_option(argc, argv)) return 0;
 
     // POLICY(#167): parser/root-check failureも -Gp のmachine-readable stdoutへ混ぜない。
@@ -98,8 +98,14 @@ int run_jpacker(int argc, char* argv[]) {
     }
 
     if(geteuid() == 0) {
-        Logger::error("Do not run jpacker as root or with sudo.");
-        Logger::error("Run jpacker as a normal user; jpacker will invoke sudo/pacman when needed.");
+        Logger::error(
+                "Do not run " + std::string(application_identity::PROJECT_NAME) +
+                " as root or with sudo.");
+        Logger::error(
+                "Run " + std::string(application_identity::COMMAND_NAME) +
+                " as a normal user; " +
+                std::string(application_identity::PROJECT_NAME) +
+                " will invoke sudo/pacman when needed.");
         return 1;
     }
 
@@ -202,7 +208,7 @@ int run_jpacker(int argc, char* argv[]) {
             "build", "upgrade", "upgrade-aur", "upgrade-all", "clean", "add-src", "del-src", "revert", "edit-src", "list-src"};
     if(std::find(optionless_operations.begin(), optionless_operations.end(), parsed.operation) !=
                        optionless_operations.end() &&
-       !validate_optionless_jpacker_operation(parsed.operation, parsed.flags)) {
+       !validate_optionless_moguet_operation(parsed.operation, parsed.flags)) {
         // POLICY(#169): unsupported custom-operation options must stop before cache or source mutation.
         return 1;
     }
@@ -227,7 +233,7 @@ int run_jpacker(int argc, char* argv[]) {
         }
         Logger::init(log_path);
         Logger::info(
-                "Started jpacker v" +
+                "Started " + std::string(application_identity::PROJECT_NAME) + " v" +
                 std::string(application_identity::VERSION));
     } catch(const std::exception& e) {
         std::cerr << "Warning: Failed to initialize log: " << e.what() << std::endl;
@@ -345,7 +351,7 @@ int verify_parse_failure_does_not_publish_cli_overrides() {
             program, no_edit, no_diff, no_confirm, rebuild,
             clean_build, rm_deps, operation, missing_value_option};
 
-    if(run_jpacker(static_cast<int>(parse_failure_argv.size()), parse_failure_argv.data()) != 1) {
+    if(run_moguet(static_cast<int>(parse_failure_argv.size()), parse_failure_argv.data()) != 1) {
         std::cerr << "Expected CLI parse failure." << std::endl;
         return 1;
     }
@@ -367,18 +373,20 @@ int main(int argc, char* argv[]) {
         return verify_parse_failure_does_not_publish_cli_overrides();
     }
 #endif
-    return run_jpacker(argc, argv);
+    return run_moguet(argc, argv);
 }
 
 // --- 関数実装 ---
 
 // CLI入口 / help
 void print_help() {
-    std::cout << "\033[1;36mjpacker\033[0m v"
+    std::cout << "\033[1;36m" << application_identity::PROJECT_NAME
+              << "\033[0m v"
               << application_identity::VERSION << "\n"
               << std::endl;
     std::cout << "\033[1mUSAGE\033[0m" << std::endl;
-    std::cout << "    jpacker <op> [options] [targets...]\n"
+    std::cout << "    " << application_identity::COMMAND_NAME
+              << " <op> [options] [targets...]\n"
               << std::endl;
     std::cout << "\033[1mOPERATIONS\033[0m" << std::endl;
     std::cout << "    \033[1mbuild\033[0m <pkg> [V=K]  One-off source build" << std::endl;
@@ -421,7 +429,9 @@ void print_help() {
     std::cout << "    \033[1m--nodiff\033[0m             Skip update diff prompt" << std::endl;
     std::cout << "    \033[1m--noconfirm\033[0m         Pass --noconfirm to pacman/makepkg" << std::endl;
     std::cout << "    \033[1m--needed\033[0m            Pass to pacman; AUR/source -S applies it only to final install" << std::endl;
-    std::cout << "                              Adds no jpacker build/review/plan skip" << std::endl;
+    std::cout << "                              Adds no "
+              << application_identity::PROJECT_NAME
+              << " build/review/plan skip" << std::endl;
     std::cout << "    \033[1m--rebuild\033[0m           Pass -f to build-only makepkg" << std::endl;
     std::cout << "    \033[1m--cleanbuild\033[0m        Pass -C to build-only makepkg" << std::endl;
     std::cout << "    \033[1m--rmdeps\033[0m            Unsupported for separated source builds; no dependency cleanup is performed" << std::endl;
@@ -450,7 +460,8 @@ bool handle_info_only_option(int argc, char* argv[]) {
             return true;
         }
         if(arg == "-V" || arg == "--version") {
-            std::cout << "jpacker v" << application_identity::VERSION << std::endl;
+            std::cout << application_identity::PROJECT_NAME << " v"
+                      << application_identity::VERSION << std::endl;
             return true;
         }
         // POLICY(#173): help/versionはoperation位置だけで扱い、option valueやopaque operandを横取りしない。
@@ -477,7 +488,7 @@ std::string join_pacman_args(const std::vector<std::string>& args) {
 }
 
 // pacman / repository補助
-bool validate_optionless_jpacker_operation(const std::string& operation, const std::vector<std::string>& flags) {
+bool validate_optionless_moguet_operation(const std::string& operation, const std::vector<std::string>& flags) {
     for(const auto& flag : flags) {
         if(flag == operation) continue;
 

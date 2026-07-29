@@ -508,30 +508,30 @@ echo "  ok: pacman -Ss/-Si routes do not initialize repository metadata"
 # Handler-owned usage/option messagesも、抽出でrunner側へずらさない。
 setup_case deps-empty
 run_fail deps
-assert_contains "Usage: jpacker deps [--recursive] <pkg>" "$stderr_file"
+assert_contains "Usage: moguet deps [--recursive] <pkg>" "$stderr_file"
 
 setup_case deps-unsupported
 run_fail deps --unsupported deps-first
 assert_contains "Unsupported deps option: --unsupported" "$stderr_file"
-assert_contains "Usage: jpacker deps [--recursive] <pkg>" "$stderr_file"
+assert_contains "Usage: moguet deps [--recursive] <pkg>" "$stderr_file"
 
 setup_case plan-empty
 run_fail plan
-assert_contains "Usage: jpacker plan <pkg>" "$stderr_file"
+assert_contains "Usage: moguet plan <pkg>" "$stderr_file"
 
 setup_case plan-unsupported
 run_fail plan --unsupported plan-first
 assert_contains "Unsupported plan option: --unsupported" "$stderr_file"
-assert_contains "Usage: jpacker plan <pkg>" "$stderr_file"
+assert_contains "Usage: moguet plan <pkg>" "$stderr_file"
 
 setup_case fetch-empty
 run_fail fetch
-assert_contains "Usage: jpacker fetch <pkg>" "$stderr_file"
+assert_contains "Usage: moguet fetch <pkg>" "$stderr_file"
 
 setup_case fetch-unsupported
 run_fail fetch --unsupported fetch-preflight-root
 assert_contains "Unsupported fetch option: --unsupported" "$stderr_file"
-assert_contains "Usage: jpacker fetch <pkg>" "$stderr_file"
+assert_contains "Usage: moguet fetch <pkg>" "$stderr_file"
 
 setup_case fetch-validation-position
 export JPACKER_TEST_INSPECTION_SCENARIO=fetch-validation-position

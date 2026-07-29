@@ -165,7 +165,7 @@ assert_cache_root_absent() {
 
 assert_pre_log_exit() {
     assert_command_log_empty
-    assert_not_contains "Started jpacker v" "$output_file"
+    assert_not_contains "Started Moguet v" "$output_file"
     assert_cache_root_absent
 }
 
@@ -317,7 +317,7 @@ assert_pre_log_exit
 
 setup_case version-after-global
 run_ok --noedit --version
-assert_contains "jpacker v" "$output_file"
+assert_contains "Moguet v" "$output_file"
 assert_pre_log_exit
 
 setup_case help-operation
@@ -330,7 +330,7 @@ assert_pre_log_exit
 
 setup_case version-operation
 run_ok --version
-assert_contains "jpacker v" "$output_file"
+assert_contains "Moguet v" "$output_file"
 assert_pre_log_exit
 
 run_exact help-as-option-value \

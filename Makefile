@@ -1,5 +1,7 @@
 # --- プロジェクト情報 ---
-TARGET    := jpacker
+TARGET    := moguet
+LEGACY_PRODUCTION_TARGET := jpacker
+PACKAGE_NAME := jpacker
 VERSION_FILE := VERSION
 VERSION   := $(strip $(shell cat $(VERSION_FILE) 2>/dev/null))
 ifeq ($(VERSION),)
@@ -11,6 +13,7 @@ MANPAGE   := man/jpacker.8
 MANPAGE_IN := man/jpacker.8.in
 TEST_TARGET := build/tests/jpacker-test
 APPLICATION_IDENTITY_TEST_TARGET := $(BUILD_DIR)/tests/application-identity-test
+ROOT_EXECUTION_IDENTITY_TEST_TARGET := $(BUILD_DIR)/tests/jpacker-root-execution-identity-test
 COMMANDS_INSPECT_TEST_TARGET := build/tests/jpacker-commands-inspect-test
 AUR_UPDATE_COMMAND_TEST_TARGET := build/tests/jpacker-aur-update-command-test
 UPGRADE_ALL_COMMAND_TEST_TARGET := build/tests/jpacker-upgrade-all-command-test
@@ -65,8 +68,8 @@ COMPDIR     ?= /usr/share/bash-completion/completions
 ZSHCOMPDIR  ?= /usr/share/zsh/site-functions
 FISHCOMPDIR ?= /usr/share/fish/vendor_completions.d
 MANDIR      ?= $(PREFIX)/share/man/man8
-LICENSEDIR  ?= $(PREFIX)/share/licenses/$(TARGET)
-DOCDIR      ?= $(PREFIX)/share/doc/$(TARGET)
+LICENSEDIR  ?= $(PREFIX)/share/licenses/$(PACKAGE_NAME)
+DOCDIR      ?= $(PREFIX)/share/doc/$(PACKAGE_NAME)
 
 PROJECT_LICENSE_FILES := \
 	LICENSE \
@@ -116,7 +119,7 @@ UPGRADE_ALL_COMMAND_TEST_SRCS := \
 	tests/stubs/upgrade-all-command/operation_stub.cpp \
 	tests/stubs/package-metadata/alpm_stub.cpp
 UPGRADE_ALL_COMMAND_REQUIRED_TEST_SRCS := \
-	$(SRC_DIR)/jpacker.cpp \
+	$(SRC_DIR)/moguet.cpp \
 	$(SRC_DIR)/commands_upgrade_all.cpp \
 	$(SRC_DIR)/aur_update_cli_presentation.cpp \
 	$(SRC_DIR)/cli_parser.cpp \
@@ -134,7 +137,7 @@ AUR_RPC_ENVELOPE_VALIDATION_TEST_SRCS := \
 	$(SRC_DIR)/package_identifier.cpp \
 	$(SRC_DIR)/logging.cpp
 COMMANDS_SYNC_TEST_SRCS := $(filter-out $(SRC_DIR)/aur_rpc.cpp,$(SRCS)) tests/stubs/commands-sync/aur_rpc_stub.cpp
-SOURCE_INSTALL_CHARACTERIZATION_TEST_SRCS := $(filter-out $(SRC_DIR)/jpacker.cpp,$(SRCS))
+SOURCE_INSTALL_CHARACTERIZATION_TEST_SRCS := $(filter-out $(SRC_DIR)/moguet.cpp,$(SRCS))
 AUR_UPDATE_PLAN_TEST_SRCS := \
 	tests/aur_update_plan_test.cpp \
 	$(SRC_DIR)/aur_update_plan.cpp
@@ -630,6 +633,7 @@ OBJS      := $(SRCS:$(SRC_DIR)/%.cpp=$(BUILD_DIR)/%.o)
 DEPS      := $(OBJS:.o=.d)
 LIBALPM_BUILD_TARGETS := \
 	$(TARGET) \
+	$(ROOT_EXECUTION_IDENTITY_TEST_TARGET) \
 	$(TEST_TARGET) \
 	$(COMMANDS_INSPECT_TEST_TARGET) \
 	$(AUR_UPDATE_COMMAND_TEST_TARGET) \
@@ -649,7 +653,7 @@ LIBALPM_BUILD_TARGETS := \
 	$(AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION_TEST_TARGET) \
 	$(UPGRADE_BASELINE_METADATA_TEST_TARGET)
 
-.PHONY: all check-libalpm clean check-upgrade-all-plan-link-firewall check-system-source-upgrade-link-firewall check-aur-update-execution-runner-link-firewall check-aur-update-operation-result-link-firewall check-filtered-aur-update-operation-link-firewall check-upgrade-all-operation-link-firewall check-upgrade-all-command-link-firewall check-dependency-plan-model-link-firewall check-build-plan-artifact-target-projection-link-firewall check-artifact-selection-model-link-firewall check-artifact-identity-selection-link-firewall check-multiple-artifact-workspace-link-firewall check-multiple-artifact-identity-link-firewall check-package-base-artifact-install-plan-link-firewall check-package-base-artifact-install-executor-link-firewall check-separated-package-base-source-build-link-firewall test test-application-identity test-app-config test-package-identifier test-package-metadata test-package-metadata-integration test-repository-query test-shell-words test-source-environment test-artifact-workspace test-multiple-artifact-workspace test-artifact-identity test-multiple-artifact-identity test-artifact-install-executor test-package-base-artifact-install-plan test-package-base-artifact-install-executor test-separated-source-build test-separated-package-base-source-build test-production-source-build test-process-capture test-aur-update-plan test-upgrade-all-plan test-system-source-upgrade test-aur-update-query test-aur-update-command test-upgrade-all-command test-aur-update-execution-preflight test-aur-update-execution-preflight-integration test-aur-update-execution-preparation test-aur-update-execution-runner test-aur-update-operation-result test-filtered-aur-update-operation test-upgrade-all-operation test-dependency-plan-model test-build-plan-artifact-target-projection test-artifact-install-plan test-artifact-selection-model test-artifact-identity-selection test-command-stub-contract test-markdown-links test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-commands-inspect test-commands-source-maintenance test-commands-sync test-conflicts-replaces test-install-layout test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check install uninstall
+.PHONY: all check-libalpm clean check-upgrade-all-plan-link-firewall check-system-source-upgrade-link-firewall check-aur-update-execution-runner-link-firewall check-aur-update-operation-result-link-firewall check-filtered-aur-update-operation-link-firewall check-upgrade-all-operation-link-firewall check-upgrade-all-command-link-firewall check-dependency-plan-model-link-firewall check-build-plan-artifact-target-projection-link-firewall check-artifact-selection-model-link-firewall check-artifact-identity-selection-link-firewall check-multiple-artifact-workspace-link-firewall check-multiple-artifact-identity-link-firewall check-package-base-artifact-install-plan-link-firewall check-package-base-artifact-install-executor-link-firewall check-separated-package-base-source-build-link-firewall test test-application-identity test-runtime-identity test-app-config test-package-identifier test-package-metadata test-package-metadata-integration test-repository-query test-shell-words test-source-environment test-artifact-workspace test-multiple-artifact-workspace test-artifact-identity test-multiple-artifact-identity test-artifact-install-executor test-package-base-artifact-install-plan test-package-base-artifact-install-executor test-separated-source-build test-separated-package-base-source-build test-production-source-build test-process-capture test-aur-update-plan test-upgrade-all-plan test-system-source-upgrade test-aur-update-query test-aur-update-command test-upgrade-all-command test-aur-update-execution-preflight test-aur-update-execution-preflight-integration test-aur-update-execution-preparation test-aur-update-execution-runner test-aur-update-operation-result test-filtered-aur-update-operation test-upgrade-all-operation test-dependency-plan-model test-build-plan-artifact-target-projection test-artifact-install-plan test-artifact-selection-model test-artifact-identity-selection test-command-stub-contract test-markdown-links test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-commands-inspect test-commands-source-maintenance test-commands-sync test-conflicts-replaces test-install-layout test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check install uninstall
 
 all: $(TARGET) $(MANPAGE)
 
@@ -685,7 +689,8 @@ $(MANPAGE): $(MANPAGE_IN) $(VERSION_FILE)
 
 clean:
 	@echo ":: Cleaning up"
-	rm -rf $(BUILD_DIR) $(TARGET)
+	rm -rf $(BUILD_DIR)
+	rm -f $(TARGET) $(LEGACY_PRODUCTION_TARGET)
 
 $(APPLICATION_IDENTITY_TEST_TARGET): tests/application_identity_test.cpp $(SRC_DIR)/application_identity.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
@@ -694,6 +699,13 @@ $(APPLICATION_IDENTITY_TEST_TARGET): tests/application_identity_test.cpp $(SRC_D
 		-I$(SRC_DIR) \
 		tests/application_identity_test.cpp \
 		-o $@
+
+$(ROOT_EXECUTION_IDENTITY_TEST_TARGET): $(OBJS) tests/stubs/runtime-identity/geteuid_stub.cpp $(VERSION_FILE)
+	@mkdir -p $(dir $@)
+	@echo ":: Linking root execution identity test binary"
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) $(LDFLAGS) \
+		$(OBJS) tests/stubs/runtime-identity/geteuid_stub.cpp \
+		-Wl,--wrap=geteuid -o $@ $(MY_LDLIBS) $(LIBALPM_LDLIBS)
 
 $(TEST_TARGET): $(SRCS) $(HEADERS) $(VERSION_FILE)
 	@mkdir -p $(dir $@)
@@ -1046,6 +1058,11 @@ $(UPGRADE_BASELINE_METADATA_TEST_TARGET): $(UPGRADE_BASELINE_METADATA_TEST_SRCS)
 
 test-application-identity: $(APPLICATION_IDENTITY_TEST_TARGET)
 	$(abspath $(APPLICATION_IDENTITY_TEST_TARGET)) "$(VERSION)"
+
+test-runtime-identity: $(TARGET) $(ROOT_EXECUTION_IDENTITY_TEST_TARGET)
+	sh tests/test-runtime-identity.sh \
+		$(abspath $(TARGET)) \
+		$(abspath $(ROOT_EXECUTION_IDENTITY_TEST_TARGET))
 
 test-app-config: $(APP_CONFIG_MODULE_TEST_TARGET) $(APP_CONFIG_INTEGRATION_TEST_TARGET)
 	sh tests/test-app-config.sh $(abspath $(APP_CONFIG_MODULE_TEST_TARGET)) $(abspath $(APP_CONFIG_INTEGRATION_TEST_TARGET))
@@ -1493,6 +1510,7 @@ test-pkgbuild-export: $(TEST_TARGET)
 
 test: \
 	test-application-identity \
+	test-runtime-identity \
 	test-app-config \
 	test-package-identifier \
 	test-package-metadata \
@@ -1545,7 +1563,7 @@ test: \
 	test-source-build \
 	test-source-selection
 
-release-check: test-application-identity
+release-check: test-application-identity test-runtime-identity
 	@echo ":: Checking release version consistency"
 	sh scripts/check-release-version.sh
 	@echo ":: Checking license compliance"

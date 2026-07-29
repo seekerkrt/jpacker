@@ -19,7 +19,8 @@ using json = nlohmann::json;
 
 const std::string AUR_RPC_DEFAULT_BASE_URL = "https://aur.archlinux.org/rpc/";
 const std::string USER_AGENT =
-        "jpacker/" + std::string(application_identity::VERSION);
+        std::string(application_identity::COMMAND_NAME) + "/" +
+        std::string(application_identity::VERSION);
 const long long   AUR_RPC_PROTOCOL_VERSION = 5;
 const std::string AUR_RPC_INFO_RESPONSE_TYPE = "multiinfo";
 const std::string AUR_RPC_SEARCH_RESPONSE_TYPE = "search";
