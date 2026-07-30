@@ -952,13 +952,15 @@ ArtifactWorkspace::~ArtifactWorkspace() noexcept {
         try {
             cleanup();
         } catch(const std::exception& error) {
-            Logger::warn(
-                    "Refusing unsafe artifact workspace cleanup for " +
-                    path_.string() + ": " + error.what());
+            Logger::warn_noexcept([this, &error]() {
+                return "Refusing unsafe artifact workspace cleanup for " +
+                       path_.string() + ": " + error.what();
+            });
         } catch(...) {
-            Logger::warn(
-                    "Refusing unsafe artifact workspace cleanup for " +
-                    path_.string() + ": unknown error");
+            Logger::warn_noexcept([this]() {
+                return "Refusing unsafe artifact workspace cleanup for " +
+                       path_.string() + ": unknown error";
+            });
         }
     }
     if(directory_descriptor_ >= 0) close(directory_descriptor_);

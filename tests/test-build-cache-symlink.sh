@@ -62,15 +62,17 @@ setup_case() {
     case_name=$1
     case_dir=$tmp_dir/cases/$case_name
     home_dir=$case_dir/home
+    xdg_state_dir=$case_dir/xdg-state
     xdg_cache_dir=$case_dir/xdg-cache
     outside_dir=$case_dir/outside
     command_log=$case_dir/commands.log
     editor_argv_log=$case_dir/editor-argv.log
 
-    mkdir -p "$home_dir" "$xdg_cache_dir" "$outside_dir"
+    mkdir -p "$home_dir" "$xdg_state_dir" "$xdg_cache_dir" "$outside_dir"
     : > "$command_log"
     : > "$editor_argv_log"
     export HOME=$home_dir
+    export XDG_STATE_HOME=$xdg_state_dir
     export XDG_CACHE_HOME=$xdg_cache_dir
     export MOGUET_TEST_COMMAND_LOG=$command_log
     export MOGUET_TEST_EDITOR_ARGV_LOG=$editor_argv_log
@@ -949,11 +951,26 @@ assert_directory_unchanged "$outside_dir" "$case_dir/before.snapshot"
 setup_case regular-clean
 mkdir -p "$cache_root/regular-entry"
 printf 'cached build content\n' > "$cache_root/regular-entry/artifact"
+legacy_log=$cache_root/jpacker.log
+printf 'legacy log sentinel\n' > "$legacy_log"
+chmod 0640 "$legacy_log"
+legacy_log_checksum=$(cksum "$legacy_log")
+legacy_log_mode=$(stat -c '%a' -- "$legacy_log")
+legacy_log_identity=$(stat -c '%d:%i' -- "$legacy_log")
 run_clean_tty_ok "$case_dir/output"
 assert_only_command "sudo pacman -Sc"
 assert_path_absent "$cache_root/regular-entry"
-if [ ! -f "$cache_root/jpacker.log" ]; then
+if [ ! -f "$legacy_log" ]; then
     fail "regular clean removed the legacy jpacker.log file"
+fi
+if [ "$(cksum "$legacy_log")" != "$legacy_log_checksum" ]; then
+    fail "regular clean changed the legacy jpacker.log content"
+fi
+if [ "$(stat -c '%a' -- "$legacy_log")" != "$legacy_log_mode" ]; then
+    fail "regular clean changed the legacy jpacker.log mode"
+fi
+if [ "$(stat -c '%d:%i' -- "$legacy_log")" != "$legacy_log_identity" ]; then
+    fail "regular clean replaced the legacy jpacker.log inode"
 fi
 assert_contains "Moguet cache cleaned." "$case_dir/output"
 assert_output_before "Running: sudo pacman" "Clean Moguet build cache" "$case_dir/output"

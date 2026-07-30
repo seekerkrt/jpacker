@@ -467,15 +467,20 @@ public:
         owns_path_ = false;
     }
 
-    ~TemporaryDirectoryGuard() {
+    ~TemporaryDirectoryGuard() noexcept {
         if(!owns_path_) return;
         try {
             cleanup();
         } catch(const std::exception& e) {
-            Logger::warn(e.what());
+            Logger::warn_noexcept([&e]() {
+                return std::string(e.what());
+            });
         } catch(...) {
-            Logger::warn(
-                    "Refusing unsafe temporary directory cleanup: unknown error");
+            Logger::warn_noexcept([]() {
+                return std::string(
+                        "Refusing unsafe temporary directory cleanup: "
+                        "unknown error");
+            });
         }
     }
 };

@@ -193,5 +193,5 @@ public:
     DirCleanupGuard(DirCleanupGuard&&) = delete;
     DirCleanupGuard& operator=(DirCleanupGuard&&) = delete;
     void commit();
-    ~DirCleanupGuard();
+    ~DirCleanupGuard() noexcept;
 };

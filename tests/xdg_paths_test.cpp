@@ -567,6 +567,61 @@ void test_process_adapter_ignores_sudo_user_and_root_inference() {
             "SUDO_USER-independent cache directory");
 }
 
+void test_state_only_resolver_ignores_unrelated_xdg_values() {
+    const xdg_paths::EnvironmentSnapshot environment{
+            .xdg_config_home = "relative/config-secret",
+            .xdg_state_home = "/state-only/base",
+            .xdg_cache_home = "relative/cache-secret",
+            .home = std::nullopt,
+    };
+    const xdg_paths::StatePaths paths =
+            xdg_paths::resolve_state(environment);
+
+    expect_path(
+            paths.directory, "/state-only/base/moguet",
+            "State-only explicit directory");
+    expect_path(
+            paths.default_log_file,
+            "/state-only/base/moguet/moguet.log",
+            "State-only explicit default log");
+    expect_creation_boundary(
+            paths.creation_boundary,
+            xdg_paths::DirectorySource::ExplicitXdg,
+            "/state-only/base", "/state-only/base", {"moguet"},
+            "State-only explicit creation boundary");
+}
+
+void test_state_process_adapter_reads_only_state_authority() {
+    TemporaryDirectory temporary_directory;
+    const fs::path state_home = temporary_directory.path() / "state-home";
+
+    ScopedEnvironmentVariable config_home(
+            "XDG_CONFIG_HOME",
+            std::optional<std::string>{"relative/config-secret"});
+    ScopedEnvironmentVariable state_environment(
+            "XDG_STATE_HOME",
+            std::optional<std::string>{state_home.string()});
+    ScopedEnvironmentVariable cache_home(
+            "XDG_CACHE_HOME",
+            std::optional<std::string>{"relative/cache-secret"});
+    ScopedEnvironmentVariable home("HOME", std::nullopt);
+    ScopedEnvironmentVariable sudo_user(
+            "SUDO_USER", std::optional<std::string>{"different-user"});
+
+    const xdg_paths::StatePaths paths =
+            xdg_paths::resolve_state_process_environment();
+    expect_path(
+            paths.directory, state_home / "moguet",
+            "State process adapter directory");
+    expect_path(
+            paths.default_log_file,
+            state_home / "moguet" / "moguet.log",
+            "State process adapter default log");
+    expect(
+            !fs::exists(state_home),
+            "State process adapter mutated the filesystem.");
+}
+
 std::string read_file(const fs::path& path) {
     std::ifstream file(path, std::ios::binary);
     if(!file) {
@@ -696,6 +751,12 @@ int main() {
         run_case(
                 "process adapter ignores sudo user and root inference",
                 test_process_adapter_ignores_sudo_user_and_root_inference);
+        run_case(
+                "state-only resolver ignores unrelated XDG values",
+                test_state_only_resolver_ignores_unrelated_xdg_values);
+        run_case(
+                "state process adapter reads only state authority",
+                test_state_process_adapter_reads_only_state_authority);
         run_case(
                 "resolution does not mutate filesystem",
                 test_resolution_does_not_mutate_filesystem);

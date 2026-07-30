@@ -75,8 +75,9 @@ setup_case() {
     git_fixture_dir=$case_dir/git-fixture
 
     mkdir -p \
-        "$case_dir/home" "$case_dir/xdg-cache" "$case_dir/package.build" \
-        "$case_dir/tmp" "$work_dir" "$git_fixture_dir/.git"
+        "$case_dir/home" "$case_dir/xdg-state" "$case_dir/xdg-cache" \
+        "$case_dir/package.build" "$case_dir/tmp" "$work_dir" \
+        "$git_fixture_dir/.git"
     cp -a "$fixture_dir/." "$git_fixture_dir/"
     printf 'source preference marker\n' > "$case_dir/package.build/clean-root"
     : > "$command_log"
@@ -86,6 +87,7 @@ setup_case() {
     : > "$schema_request_log"
 
     export HOME=$case_dir/home
+    export XDG_STATE_HOME=$case_dir/xdg-state
     export XDG_CACHE_HOME=$case_dir/xdg-cache
     export TMPDIR=$case_dir/tmp
     export MOGUET_TEST_AUR_RPC_BASE_URL=$normal_rpc_url
