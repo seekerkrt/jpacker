@@ -32,7 +32,8 @@ setup_case() {
     config_file=$case_dir/jpacker.conf
 
     mkdir -p \
-        "$case_dir/home" "$case_dir/xdg-state" "$case_dir/work" \
+        "$case_dir/home" "$case_dir/xdg-state" "$case_dir/xdg-cache" \
+        "$case_dir/work" \
         "$case_dir/package.build"
     : > "$stdout_file"
     : > "$stderr_file"
@@ -114,8 +115,8 @@ assert_line_before() {
 }
 
 assert_cache_absent() {
-    if [ -e "$XDG_CACHE_HOME/jpacker" ]; then
-        fail_case "invalid invocation initialized the legacy jpacker cache"
+    if [ -e "$XDG_CACHE_HOME/moguet" ]; then
+        fail_case "invalid invocation initialized the Moguet cache"
     fi
 }
 

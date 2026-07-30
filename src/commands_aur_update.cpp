@@ -2,6 +2,7 @@
 
 #include "app_config.hpp"
 #include "aur_update_cli_presentation.hpp"
+#include "cache_authority.hpp"
 #include "filtered_aur_update_operation.hpp"
 #include "logging.hpp"
 #include "source_install.hpp"
@@ -376,10 +377,13 @@ int cmd_upgrade_aur(const AppConfig& config) {
     // POLICY(#267): NoUpdatesでもunsupported optionを成功へ落とさない。
     require_supported_production_source_build_options(config);
 
+    // Validなupgrade-aurはcache-capable mutation routeである。query/curlより
+    // 前にauthorityを確定し、NoUpdatesでも同じfail-closed順序を保つ。
+    ValidatedCacheRoot cache_root = prepare_process_cache_root();
     AurUpdateQueryResult query_result = query_installed_aur_updates();
     PreparedFilteredAurUpdateOperation prepared =
             prepare_filtered_aur_update_operation(
-                    std::move(query_result), {}, config);
+                    std::move(query_result), {}, config, cache_root);
     FilteredAurUpdateExecutionResult result =
             execute_prepared_filtered_aur_update_operation(
                     std::move(prepared), config);

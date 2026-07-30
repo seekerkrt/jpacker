@@ -10,6 +10,8 @@
 #include <cstring>
 #include <dirent.h>
 #include <fcntl.h>
+#include <linux/openat2.h>
+#include <map>
 #include <memory>
 #include <optional>
 #include <set>
@@ -17,6 +19,7 @@
 #include <string>
 #include <string_view>
 #include <sys/stat.h>
+#include <sys/syscall.h>
 #include <unistd.h>
 #include <utility>
 #include <vector>
@@ -41,6 +44,12 @@ MultipleArtifactValidationObserverForTest
         g_multiple_artifact_validation_observer = nullptr;
 MultipleArtifactCleanupObserverForTest
         g_multiple_artifact_cleanup_observer = nullptr;
+ArtifactWorkspaceCreationObserverForTest
+        g_artifact_workspace_creation_observer = nullptr;
+ArtifactWorkspaceCleanupPreDeleteObserverForTest
+        g_artifact_workspace_cleanup_pre_delete_observer = nullptr;
+ArtifactWorkspaceCleanupChildOpenForTest
+        g_artifact_workspace_cleanup_child_open = nullptr;
 
 void notify_multiple_artifact_validation_for_test(
         const fs::path& workspace_path) {
@@ -56,8 +65,26 @@ void notify_multiple_artifact_cleanup_for_test(
                 workspace_path, retained_descriptors);
     }
 }
+
+void notify_artifact_workspace_creation_for_test(
+        const fs::path& workspace_path) {
+    if(g_artifact_workspace_creation_observer != nullptr)
+        g_artifact_workspace_creation_observer(workspace_path);
+}
+
+void notify_artifact_workspace_cleanup_pre_delete_for_test(
+        const fs::path& workspace_path) {
+    if(g_artifact_workspace_cleanup_pre_delete_observer != nullptr)
+        g_artifact_workspace_cleanup_pre_delete_observer(workspace_path);
+}
 #else
 void notify_multiple_artifact_validation_for_test(const fs::path&) {
+}
+
+void notify_artifact_workspace_creation_for_test(const fs::path&) {
+}
+
+void notify_artifact_workspace_cleanup_pre_delete_for_test(const fs::path&) {
 }
 #endif
 
@@ -117,8 +144,16 @@ public:
             const FileDescriptorWorkDirGuard&) = delete;
 
     ~FileDescriptorWorkDirGuard() noexcept {
-        if(original_directory_.get() >= 0)
-            static_cast<void>(fchdir(original_directory_.get()));
+        if(original_directory_.get() < 0 ||
+           fchdir(original_directory_.get()) == 0) {
+            return;
+        }
+        const int restore_error = errno;
+        Logger::warn_noexcept([restore_error]() {
+            return "Failed to restore the working directory after an "
+                   "artifact makepkg operation: " +
+                   std::string(std::strerror(restore_error));
+        });
     }
 };
 
@@ -218,11 +253,59 @@ std::optional<struct stat> entry_status_at(
             std::strerror(errno));
 }
 
-void remove_directory_contents_at(
+struct CleanupEntryPlan {
+    std::string                   leaf_name;
+    fs::path                      display_path;
+    struct stat                   expected_status {};
+    OwnedFileDescriptor           directory_descriptor;
+    std::vector<CleanupEntryPlan> children;
+
+    bool is_directory() const noexcept {
+        return S_ISDIR(expected_status.st_mode);
+    }
+};
+
+int open_cleanup_child_directory_without_mount_crossing(
+        int parent_descriptor, const std::string& leaf_name) noexcept {
+    struct open_how how {};
+    how.flags = O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW;
+    how.resolve = RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS | RESOLVE_NO_XDEV;
+#ifdef MOGUET_ENABLE_ARTIFACT_WORKSPACE_TEST_HOOKS
+    if(g_artifact_workspace_cleanup_child_open != nullptr) {
+        return g_artifact_workspace_cleanup_child_open(
+                parent_descriptor, leaf_name, how.flags, how.resolve);
+    }
+#endif
+    return static_cast<int>(syscall(
+            SYS_openat2, parent_descriptor, leaf_name.c_str(), &how,
+            sizeof(how)));
+}
+
+CleanupEntryPlan preflight_directory_contents_at(
         int directory_descriptor, const fs::path& display_path,
+        const struct stat& expected_directory_status,
         std::uintmax_t workspace_device) {
-    int scan_descriptor = openat(
+    int retained_descriptor = openat(
             directory_descriptor, ".",
+            O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+    if(retained_descriptor < 0) {
+        throw std::runtime_error(
+                "Failed to retain artifact workspace directory " +
+                display_path.string() + ": " + std::strerror(errno));
+    }
+    OwnedFileDescriptor retained(retained_descriptor);
+    const struct stat retained_status = require_descriptor_status(
+            retained.get(),
+            "artifact workspace directory " + display_path.string());
+    if(!same_filesystem_identity(
+               expected_directory_status, retained_status)) {
+        throw std::runtime_error(
+                "Refusing changed artifact workspace directory: " +
+                display_path.string());
+    }
+
+    int scan_descriptor = openat(
+            retained.get(), ".",
             O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
     if(scan_descriptor < 0) {
         throw std::runtime_error(
@@ -239,6 +322,9 @@ void remove_directory_contents_at(
                 ": " + std::strerror(open_error));
     }
     std::unique_ptr<DIR, int (*)(DIR*)> stream(raw_stream, closedir);
+    CleanupEntryPlan plan{
+            "", display_path, expected_directory_status,
+            std::move(retained), {}};
 
     while(true) {
         errno = 0;
@@ -258,11 +344,11 @@ void remove_directory_contents_at(
 
         struct stat observed_status {};
         if(fstatat(
-                   directory_descriptor, leaf_name.c_str(), &observed_status,
+                   plan.directory_descriptor.get(), leaf_name.c_str(),
+                   &observed_status,
                    AT_SYMLINK_NOFOLLOW) != 0) {
-            if(errno == ENOENT) continue;
             throw std::runtime_error(
-                    "Failed to inspect artifact workspace entry " +
+                    "Refusing changed artifact workspace entry " +
                     entry_path.string() + ": " + std::strerror(errno));
         }
 
@@ -274,13 +360,20 @@ void remove_directory_contents_at(
                         entry_path.string());
             }
 
-            int child_descriptor = openat(
-                    directory_descriptor, leaf_name.c_str(),
-                    O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+            int child_descriptor =
+                    open_cleanup_child_directory_without_mount_crossing(
+                            plan.directory_descriptor.get(), leaf_name);
             if(child_descriptor < 0) {
+                const int open_error = errno;
+                if(open_error == EXDEV) {
+                    throw std::runtime_error(
+                            "Refusing to cross filesystem boundary while cleaning " +
+                            entry_path.string());
+                }
                 throw std::runtime_error(
                         "Refusing changed artifact workspace directory " +
-                        entry_path.string() + ": " + std::strerror(errno));
+                        entry_path.string() + ": " +
+                        std::strerror(open_error));
             }
             OwnedFileDescriptor child(child_descriptor);
 
@@ -292,57 +385,197 @@ void remove_directory_contents_at(
                         entry_path.string());
             }
 
-            remove_directory_contents_at(
-                    child.get(), entry_path, workspace_device);
+            CleanupEntryPlan child_plan = preflight_directory_contents_at(
+                    child.get(), entry_path, opened_status,
+                    workspace_device);
+            child_plan.leaf_name = std::move(leaf_name);
+            plan.children.push_back(std::move(child_plan));
+            continue;
+        }
 
-            struct stat final_status {};
-            if(fstatat(
-                       directory_descriptor, leaf_name.c_str(), &final_status,
-                       AT_SYMLINK_NOFOLLOW) != 0 ||
-               !same_filesystem_identity(opened_status, final_status)) {
+        plan.children.push_back(CleanupEntryPlan{
+                std::move(leaf_name), std::move(entry_path), observed_status,
+                OwnedFileDescriptor(), {}});
+    }
+
+    return plan;
+}
+
+void require_cleanup_directory_descriptor_unchanged(
+        const CleanupEntryPlan& directory_plan) {
+    if(!directory_plan.is_directory() ||
+       directory_plan.directory_descriptor.get() < 0) {
+        throw std::logic_error(
+                "Artifact workspace cleanup plan lost a directory descriptor.");
+    }
+    const struct stat descriptor_status = require_descriptor_status(
+            directory_plan.directory_descriptor.get(),
+            "artifact workspace directory " +
+                    directory_plan.display_path.string());
+    if(!same_filesystem_identity(
+               directory_plan.expected_status, descriptor_status)) {
+        throw std::runtime_error(
+                "Refusing changed artifact workspace directory: " +
+                directory_plan.display_path.string());
+    }
+}
+
+void require_cleanup_entry_unchanged(
+        const CleanupEntryPlan& parent_plan,
+        const CleanupEntryPlan& entry_plan) {
+    require_cleanup_directory_descriptor_unchanged(parent_plan);
+
+    struct stat current_status {};
+    if(fstatat(
+               parent_plan.directory_descriptor.get(),
+               entry_plan.leaf_name.c_str(), &current_status,
+               AT_SYMLINK_NOFOLLOW) != 0 ||
+       !same_filesystem_identity(
+               entry_plan.expected_status, current_status)) {
+        throw std::runtime_error(
+                "Refusing changed artifact workspace entry: " +
+                entry_plan.display_path.string());
+    }
+    if(entry_plan.is_directory())
+        require_cleanup_directory_descriptor_unchanged(entry_plan);
+}
+
+void require_cleanup_plan_unchanged(
+        const CleanupEntryPlan& directory_plan) {
+    require_cleanup_directory_descriptor_unchanged(directory_plan);
+
+    std::map<std::string, const CleanupEntryPlan*> remaining_entries;
+    for(const CleanupEntryPlan& entry : directory_plan.children) {
+        if(!remaining_entries.emplace(entry.leaf_name, &entry).second) {
+            throw std::logic_error(
+                    "Artifact workspace cleanup plan contains a duplicate entry.");
+        }
+    }
+
+    int scan_descriptor = openat(
+            directory_plan.directory_descriptor.get(), ".",
+            O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+    if(scan_descriptor < 0) {
+        throw std::runtime_error(
+                "Failed to rescan artifact workspace " +
+                directory_plan.display_path.string() + ": " +
+                std::strerror(errno));
+    }
+    DIR* raw_stream = fdopendir(scan_descriptor);
+    if(!raw_stream) {
+        const int open_error = errno;
+        close(scan_descriptor);
+        throw std::runtime_error(
+                "Failed to reread artifact workspace " +
+                directory_plan.display_path.string() + ": " +
+                std::strerror(open_error));
+    }
+    std::unique_ptr<DIR, int (*)(DIR*)> stream(raw_stream, closedir);
+
+    while(true) {
+        errno = 0;
+        dirent* entry = readdir(stream.get());
+        if(!entry) {
+            if(errno != 0) {
                 throw std::runtime_error(
-                        "Refusing changed artifact workspace directory: " +
-                        entry_path.string());
+                        "Failed while rereading artifact workspace " +
+                        directory_plan.display_path.string() + ": " +
+                        std::strerror(errno));
             }
+            break;
+        }
+
+        const std::string leaf_name = entry->d_name;
+        if(leaf_name == "." || leaf_name == "..") continue;
+        auto planned_entry = remaining_entries.find(leaf_name);
+        if(planned_entry == remaining_entries.end()) {
+            throw std::runtime_error(
+                    "Refusing changed artifact workspace entry: " +
+                    (directory_plan.display_path / leaf_name).string());
+        }
+        require_cleanup_entry_unchanged(
+                directory_plan, *planned_entry->second);
+        if(planned_entry->second->is_directory())
+            require_cleanup_plan_unchanged(*planned_entry->second);
+        remaining_entries.erase(planned_entry);
+    }
+
+    if(!remaining_entries.empty()) {
+        throw std::runtime_error(
+                "Refusing changed artifact workspace entry: " +
+                remaining_entries.begin()->second->display_path.string());
+    }
+}
+
+using CleanupDirectoryLineage = std::vector<
+        std::pair<const CleanupEntryPlan*, const CleanupEntryPlan*>>;
+
+void require_cleanup_target_unchanged(
+        const ArtifactWorkspace& workspace,
+        const CleanupEntryPlan& root_plan,
+        const CleanupDirectoryLineage& lineage,
+        const CleanupEntryPlan& parent_plan,
+        const CleanupEntryPlan& target_plan) {
+    workspace.require_unchanged_identity();
+    require_cleanup_directory_descriptor_unchanged(root_plan);
+    for(const auto& [ancestor, descendant] : lineage)
+        require_cleanup_entry_unchanged(*ancestor, *descendant);
+    require_cleanup_entry_unchanged(parent_plan, target_plan);
+}
+
+void remove_preflighted_directory_contents(
+        const ArtifactWorkspace& workspace,
+        const CleanupEntryPlan& root_plan,
+        const CleanupEntryPlan& directory_plan,
+        CleanupDirectoryLineage& lineage) {
+    for(const CleanupEntryPlan& entry_plan : directory_plan.children) {
+        require_cleanup_target_unchanged(
+                workspace, root_plan, lineage, directory_plan, entry_plan);
+        if(entry_plan.is_directory()) {
+            lineage.emplace_back(&directory_plan, &entry_plan);
+            remove_preflighted_directory_contents(
+                    workspace, root_plan, entry_plan, lineage);
+            lineage.pop_back();
+            require_cleanup_target_unchanged(
+                    workspace, root_plan, lineage, directory_plan,
+                    entry_plan);
             if(unlinkat(
-                       directory_descriptor, leaf_name.c_str(),
-                       AT_REMOVEDIR) != 0) {
+                       directory_plan.directory_descriptor.get(),
+                       entry_plan.leaf_name.c_str(), AT_REMOVEDIR) != 0) {
                 throw std::runtime_error(
                         "Failed to remove artifact workspace directory " +
-                        entry_path.string() + ": " + std::strerror(errno));
+                        entry_plan.display_path.string() + ": " +
+                        std::strerror(errno));
             }
             continue;
         }
 
-        struct stat final_status {};
-        if(fstatat(
-                   directory_descriptor, leaf_name.c_str(), &final_status,
-                   AT_SYMLINK_NOFOLLOW) != 0 ||
-           !same_filesystem_identity(observed_status, final_status)) {
-            throw std::runtime_error(
-                    "Refusing changed artifact workspace entry: " +
-                    entry_path.string());
-        }
-        // Symlinkやspecial fileもfollowせず、workspace内のdirectory entryだけを外す。
-        if(unlinkat(directory_descriptor, leaf_name.c_str(), 0) != 0) {
+        // Symlinkやspecial fileもfollowせず、検証済みdirectory entryだけを外す。
+        if(unlinkat(
+                   directory_plan.directory_descriptor.get(),
+                   entry_plan.leaf_name.c_str(), 0) != 0) {
             throw std::runtime_error(
                     "Failed to remove artifact workspace entry " +
-                    entry_path.string() + ": " + std::strerror(errno));
+                    entry_plan.display_path.string() + ": " +
+                    std::strerror(errno));
         }
     }
 }
 
 class CreatedWorkspaceRollback final {
-    int         root_descriptor_ = -1;
-    std::string leaf_name_;
-    struct stat created_status_ {};
-    bool        active_ = true;
+    const ValidatedPrivateCacheRoot& root_;
+    int                              root_descriptor_ = -1;
+    std::string                      leaf_name_;
+    struct stat                      created_status_ {};
+    bool                             active_ = true;
 
 public:
     CreatedWorkspaceRollback(
-            int root_descriptor, std::string leaf_name,
+            const ValidatedPrivateCacheRoot& root, int root_descriptor,
+            std::string leaf_name,
             const struct stat& created_status)
-        : root_descriptor_(root_descriptor), leaf_name_(std::move(leaf_name)),
+        : root_(root), root_descriptor_(root_descriptor),
+          leaf_name_(std::move(leaf_name)),
           created_status_(created_status) {
     }
 
@@ -355,12 +588,43 @@ public:
 
     ~CreatedWorkspaceRollback() noexcept {
         if(!active_) return;
-        struct stat current_status {};
-        if(fstatat(
-                   root_descriptor_, leaf_name_.c_str(), &current_status,
-                   AT_SYMLINK_NOFOLLOW) == 0 &&
-           same_filesystem_identity(created_status_, current_status)) {
-            unlinkat(root_descriptor_, leaf_name_.c_str(), AT_REMOVEDIR);
+        try {
+            root_.require_unchanged_identity();
+            struct stat current_status {};
+            if(fstatat(
+                       root_descriptor_, leaf_name_.c_str(),
+                       &current_status, AT_SYMLINK_NOFOLLOW) != 0) {
+                throw std::runtime_error(
+                        "unable to inspect the created directory: " +
+                        std::string(std::strerror(errno)));
+            }
+            if(!same_filesystem_identity(
+                       created_status_, current_status) ||
+               status_owner(created_status_) != status_owner(current_status) ||
+               (created_status_.st_mode & 07777) !=
+                       (current_status.st_mode & 07777)) {
+                throw std::runtime_error(
+                        "the created directory changed identity, owner, or mode");
+            }
+            if(unlinkat(
+                       root_descriptor_, leaf_name_.c_str(),
+                       AT_REMOVEDIR) != 0) {
+                throw std::runtime_error(
+                        "unable to remove the created directory: " +
+                        std::string(std::strerror(errno)));
+            }
+        } catch(const std::exception& error) {
+            // LANDMINE: unwind中の元failureを保ち、pending state-log failureも
+            // shutdown()で報告できるようwarn_noexceptへ委ねる。
+            Logger::warn_noexcept([this, &error]() {
+                return "Refusing unsafe artifact workspace creation rollback for " +
+                       leaf_name_ + ": " + error.what();
+            });
+        } catch(...) {
+            Logger::warn_noexcept([this]() {
+                return "Refusing unsafe artifact workspace creation rollback for " +
+                       leaf_name_ + ": unknown error";
+            });
         }
     }
 };
@@ -1028,11 +1292,25 @@ void ArtifactWorkspace::retain_for_diagnostics() noexcept {
 
 void ArtifactWorkspace::cleanup() {
     if(!owns_path_) return;
-    // POLICY(#242): cleanup entry時にidentityを証明できなければ何も削除しない。
-    // NOTE: same-euid processによるcheck後の同時mutationまでは脅威modelに含めない。
+    // POLICY(#242): tree全体のdescriptor/identityをpreflightし、削除直前の
+    // 再検証も全件成功しなければ一件も削除しない。
+    // NOTE: same-euid processによる各final checkとunlinkatの間の同時mutationは
+    // kernelにcompare-and-unlinkがないため脅威modelに含めない。
     require_unchanged_identity();
-    remove_directory_contents_at(
-            directory_descriptor_, canonical_path_, device_);
+    const struct stat workspace_status = require_descriptor_status(
+            directory_descriptor_, "artifact workspace " + path_.string());
+    CleanupEntryPlan cleanup_plan = preflight_directory_contents_at(
+            directory_descriptor_, canonical_path_, workspace_status,
+            device_);
+    require_unchanged_identity();
+    require_cleanup_plan_unchanged(cleanup_plan);
+    notify_artifact_workspace_cleanup_pre_delete_for_test(canonical_path_);
+    require_unchanged_identity();
+    require_cleanup_plan_unchanged(cleanup_plan);
+
+    CleanupDirectoryLineage lineage;
+    remove_preflighted_directory_contents(
+            *this, cleanup_plan, cleanup_plan, lineage);
     require_unchanged_identity();
     if(unlinkat(
                root_.directory_descriptor(), leaf_name_.c_str(),
@@ -1080,9 +1358,6 @@ ArtifactWorkspace create_artifact_workspace(
                 display_path.string() + ": " +
                 std::strerror(inspect_error));
     }
-    CreatedWorkspaceRollback rollback(
-            root_descriptor, leaf_name, created_status);
-
     if(!S_ISDIR(created_status.st_mode) || S_ISLNK(created_status.st_mode) ||
        status_owner(created_status) !=
                static_cast<std::uintmax_t>(geteuid()) ||
@@ -1097,6 +1372,8 @@ ArtifactWorkspace create_artifact_workspace(
                 "Artifact workspace namespace collides with package identifiers: " +
                 leaf_name);
     }
+    CreatedWorkspaceRollback rollback(
+            root, root_descriptor, leaf_name, created_status);
 
     int directory_descriptor = openat(
             root_descriptor, leaf_name.c_str(),
@@ -1123,6 +1400,7 @@ ArtifactWorkspace create_artifact_workspace(
                 "Created artifact workspace is outside the trusted cache root: " +
                 display_path.string());
     }
+    notify_artifact_workspace_creation_for_test(display_path);
 
     ArtifactWorkspace workspace(
             std::move(root), std::move(display_path),
@@ -1146,18 +1424,14 @@ void require_unclaimed_artifact_pkgdest(
 }
 
 ArtifactMakepkgContext::ArtifactMakepkgContext(
-        ValidatedCachePath checkout,
+        RetainedTrustedCacheDirectory checkout,
         SourceBuildEnvironment command_environment,
         SourceEnvironmentEmptyValuePolicy empty_value_policy,
-        int checkout_descriptor, std::uintmax_t checkout_device,
-        std::uintmax_t checkout_inode,
         fs::path workspace_path, std::uintmax_t workspace_device,
         std::uintmax_t workspace_inode)
     : checkout_(std::move(checkout)),
       command_environment_(std::move(command_environment)),
       empty_value_policy_(empty_value_policy),
-      checkout_descriptor_(checkout_descriptor),
-      checkout_device_(checkout_device), checkout_inode_(checkout_inode),
       provenance_(std::make_shared<const ArtifactMakepkgContextProvenance>()),
       workspace_path_(std::move(workspace_path)),
       workspace_device_(workspace_device), workspace_inode_(workspace_inode) {
@@ -1168,45 +1442,16 @@ ArtifactMakepkgContext::ArtifactMakepkgContext(
     : checkout_(std::move(other.checkout_)),
       command_environment_(std::move(other.command_environment_)),
       empty_value_policy_(other.empty_value_policy_),
-      checkout_descriptor_(std::exchange(other.checkout_descriptor_, -1)),
-      checkout_device_(other.checkout_device_),
-      checkout_inode_(other.checkout_inode_),
       provenance_(std::move(other.provenance_)),
       workspace_path_(std::move(other.workspace_path_)),
       workspace_device_(other.workspace_device_),
       workspace_inode_(other.workspace_inode_) {
 }
 
-ArtifactMakepkgContext::~ArtifactMakepkgContext() noexcept {
-    if(checkout_descriptor_ >= 0) close(checkout_descriptor_);
-}
+ArtifactMakepkgContext::~ArtifactMakepkgContext() noexcept = default;
 
 void ArtifactMakepkgContext::require_unchanged_checkout() const {
-    if(checkout_descriptor_ < 0) {
-        throw std::runtime_error("Artifact makepkg checkout is no longer owned.");
-    }
-
-    ValidatedCachePath current_checkout = revalidate_trusted_cache_path(
-            checkout_, CachePathRequirement::ExistingDirectory);
-    struct stat retained_status = require_descriptor_status(
-            checkout_descriptor_, "retained source checkout " +
-                                          checkout_.canonical_path().string());
-    DirectoryIdentity expected_checkout{checkout_device_, checkout_inode_};
-    if(!same_directory_identity(expected_checkout, retained_status)) {
-        throw std::runtime_error(
-                "Retained source checkout changed identity: " +
-                checkout_.canonical_path().string());
-    }
-
-    struct stat named_status {};
-    if(fstatat(
-               AT_FDCWD, current_checkout.canonical_path().c_str(),
-               &named_status, AT_SYMLINK_NOFOLLOW) != 0 ||
-       !same_directory_identity(expected_checkout, named_status)) {
-        throw std::runtime_error(
-                "Source checkout path changed identity: " +
-                checkout_.canonical_path().string());
-    }
+    checkout_.require_unchanged_identity();
 }
 
 void ArtifactMakepkgContext::require_matching_workspace(
@@ -1242,7 +1487,7 @@ CapturedCommandResult ArtifactMakepkgContext::capture_makepkg_output(
     require_no_inherited_pkgdest();
     require_matching_workspace(workspace);
     require_unchanged_checkout();
-    FileDescriptorWorkDirGuard working_directory(checkout_descriptor_);
+    FileDescriptorWorkDirGuard working_directory(checkout_.descriptor_);
     std::string command = makepkg_command(makepkg_arguments);
     Logger::raw_cmd(command);
     CapturedCommandResult result = capture_command_output_raw(command.c_str());
@@ -1259,7 +1504,7 @@ int ArtifactMakepkgContext::run_makepkg_build_only(
     require_matching_workspace(workspace);
     expected.require_matching_makepkg_context(*this);
     require_unchanged_checkout();
-    FileDescriptorWorkDirGuard working_directory(checkout_descriptor_);
+    FileDescriptorWorkDirGuard working_directory(checkout_.descriptor_);
     std::vector<std::string> arguments = {"-sc"};
     if(options.no_confirm) arguments.emplace_back("--noconfirm");
     if(options.rebuild) arguments.emplace_back("-f");
@@ -1279,7 +1524,7 @@ int ArtifactMakepkgContext::run_makepkg_build_only(
     expected.require_matching_workspace(workspace);
     expected.require_matching_makepkg_context(*this);
     require_unchanged_checkout();
-    FileDescriptorWorkDirGuard working_directory(checkout_descriptor_);
+    FileDescriptorWorkDirGuard working_directory(checkout_.descriptor_);
     std::vector<std::string> arguments = {"-sc"};
     if(options.no_confirm) arguments.emplace_back("--noconfirm");
     if(options.rebuild) arguments.emplace_back("-f");
@@ -1302,41 +1547,16 @@ ArtifactMakepkgContext prepare_artifact_makepkg_context(
         throw std::logic_error("Artifact workspace path must be absolute.");
     }
 
-    ValidatedCachePath current_checkout = revalidate_trusted_cache_path(
-            checkout, CachePathRequirement::ExistingDirectory);
-    int checkout_descriptor = open(
-            current_checkout.canonical_path().c_str(),
-            O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
-    if(checkout_descriptor < 0) {
-        throw std::runtime_error(
-                "Failed to retain source checkout " +
-                current_checkout.canonical_path().string() + ": " +
-                std::strerror(errno));
-    }
-    OwnedFileDescriptor opened_checkout(checkout_descriptor);
-    struct stat checkout_status = require_descriptor_status(
-            opened_checkout.get(), "source checkout " +
-                                           current_checkout.canonical_path().string());
-    struct stat named_checkout_status {};
-    if(!S_ISDIR(checkout_status.st_mode) ||
-       fstatat(
-               AT_FDCWD, current_checkout.canonical_path().c_str(),
-               &named_checkout_status, AT_SYMLINK_NOFOLLOW) != 0 ||
-       !same_filesystem_identity(checkout_status, named_checkout_status)) {
-        throw std::runtime_error(
-                "Source checkout changed while preparing artifact makepkg context: " +
-                current_checkout.canonical_path().string());
-    }
+    RetainedTrustedCacheDirectory retained_checkout =
+            retain_trusted_cache_directory(checkout);
     SourceBuildEnvironment command_environment = environment;
     command_environment.ordered_assignments.push_back(
             SourceEnvironmentAssignment{
                     "PKGDEST", workspace.canonical_path().string()});
     ArtifactMakepkgContext context(
-            std::move(current_checkout), std::move(command_environment),
-            empty_value_policy, opened_checkout.get(),
-            status_device(checkout_status), status_inode(checkout_status),
+            std::move(retained_checkout), std::move(command_environment),
+            empty_value_policy,
             workspace.canonical_path(), workspace.device_, workspace.inode_);
-    static_cast<void>(opened_checkout.release());
     return context;
 }
 
@@ -2007,6 +2227,21 @@ void set_multiple_artifact_validation_observer_for_test(
 void set_multiple_artifact_cleanup_observer_for_test(
         MultipleArtifactCleanupObserverForTest observer) {
     g_multiple_artifact_cleanup_observer = observer;
+}
+
+void set_artifact_workspace_creation_observer_for_test(
+        ArtifactWorkspaceCreationObserverForTest observer) {
+    g_artifact_workspace_creation_observer = observer;
+}
+
+void set_artifact_workspace_cleanup_pre_delete_observer_for_test(
+        ArtifactWorkspaceCleanupPreDeleteObserverForTest observer) {
+    g_artifact_workspace_cleanup_pre_delete_observer = observer;
+}
+
+void set_artifact_workspace_cleanup_child_open_for_test(
+        ArtifactWorkspaceCleanupChildOpenForTest open_child) noexcept {
+    g_artifact_workspace_cleanup_child_open = open_child;
 }
 
 ValidatedPackageArtifactSet validate_post_build_package_artifacts_for_test(

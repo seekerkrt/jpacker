@@ -50,7 +50,7 @@ setup_case() {
     editor_argv_log=$case_dir/editor-argv.log
     output_file=$case_dir/output
     config_file=$case_dir/jpacker.conf
-    checkout_dir=$case_dir/xdg-cache/jpacker/clean-root
+    checkout_dir=$case_dir/xdg-cache/moguet/clean-root
     package_metadata_state=$case_dir/package-metadata-state
 
     mkdir -p \

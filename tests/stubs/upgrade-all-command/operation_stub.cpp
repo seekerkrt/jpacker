@@ -86,6 +86,7 @@ constexpr std::array UPGRADE_ALL_NOT_ATTEMPTED_REASONS{
         UpgradeAllNotAttemptedReason::SourceCleanupFailure,
         UpgradeAllNotAttemptedReason::SystemSourceIncomplete,
         UpgradeAllNotAttemptedReason::ForeignInventoryFailure,
+        UpgradeAllNotAttemptedReason::CacheAuthorityFailure,
         UpgradeAllNotAttemptedReason::PriorAggregateInconsistency};
 
 constexpr std::array AUR_TARGET_STATUSES{

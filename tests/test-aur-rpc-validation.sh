@@ -217,7 +217,7 @@ assert_validation_error() {
 }
 
 assert_cache_entry_absent() {
-    entry=$XDG_CACHE_HOME/jpacker/$1
+    entry=$XDG_CACHE_HOME/moguet/$1
     if [ -e "$entry" ] || [ -L "$entry" ]; then
         echo "cache entry was created before metadata preflight completed: $entry" >&2
         exit 1

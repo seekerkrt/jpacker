@@ -1,6 +1,7 @@
 #include "upgrade_all_operation.hpp"
 
 #include "app_config.hpp"
+#include "cache_authority.hpp"
 
 #include <algorithm>
 #include <exception>
@@ -309,6 +310,35 @@ void append_adapter_issues(
     }
 }
 
+const SystemSourceUpgradeIssue* find_system_source_cache_issue(
+        const SystemSourceUpgradeResult& result) {
+    const auto issue = std::find_if(
+            result.issues.begin(), result.issues.end(),
+            [](const SystemSourceUpgradeIssue& candidate) {
+                return candidate.kind ==
+                        SystemSourceUpgradeIssueKind::CacheAuthorityInvalid;
+            });
+    return issue == result.issues.end() ? nullptr : &*issue;
+}
+
+void append_system_source_cache_issue(
+        UpgradeAllOperationResult& result,
+        const SystemSourceUpgradeIssue& source_issue,
+        UpgradeAllOperationPhase phase) {
+    UpgradeAllOperationIssue issue = make_issue(
+            UpgradeAllOperationIssueKind::CacheAuthorityInvalid,
+            phase, source_issue.diagnostic);
+    issue.original_preference_index =
+            source_issue.original_preference_index;
+    issue.package_name = source_issue.preference_package_name;
+    issue.cache_resolution_failure =
+            source_issue.cache_resolution_failure;
+    issue.cache_preparation_failure =
+            source_issue.cache_preparation_failure;
+    issue.trusted_cache_failure = source_issue.trusted_cache_failure;
+    result.issues.push_back(std::move(issue));
+}
+
 UpgradeAllOperationResult make_blocked_preparation_result(
         SystemSourceUpgradeResult source_result) {
     UpgradeAllOperationResult result;
@@ -320,8 +350,22 @@ UpgradeAllOperationResult make_blocked_preparation_result(
     result.system_source = std::move(source_result);
     append_adapter_issues(
             result, result.prepared_snapshot.explicit_source_adapter);
-    set_not_attempted_after(
-            result, UpgradeAllNotAttemptedReason::PreparationBlocked);
+    const SystemSourceUpgradeIssue* cache_issue =
+            find_system_source_cache_issue(result.system_source);
+    if(cache_issue != nullptr) {
+        append_system_source_cache_issue(
+                result, *cache_issue,
+                UpgradeAllOperationPhase::Preparation);
+        add_stopping_diagnostic(
+                result, UpgradeAllOperationPhase::Preparation,
+                cache_issue->diagnostic);
+        set_not_attempted_after(
+                result,
+                UpgradeAllNotAttemptedReason::CacheAuthorityFailure);
+    } else {
+        set_not_attempted_after(
+                result, UpgradeAllNotAttemptedReason::PreparationBlocked);
+    }
     return result;
 }
 
@@ -373,6 +417,26 @@ bool has_non_successful_source(
 }
 
 bool stop_after_system_source_failure(UpgradeAllOperationResult& result) {
+    const SystemSourceUpgradeIssue* cache_issue =
+            find_system_source_cache_issue(result.system_source);
+    if(cache_issue != nullptr) {
+        const UpgradeAllOperationPhase stopped_phase =
+                aggregate_phase_for_system_source(cache_issue->phase);
+        result.status = result.system_source.status ==
+                                SystemSourceUpgradeStatus::BlockedBeforeMutation
+                ? UpgradeAllOperationStatus::BlockedBeforeMutation
+                : UpgradeAllOperationStatus::StoppedOnSourceFailure;
+        result.stopped_phase = stopped_phase;
+        append_system_source_cache_issue(
+                result, *cache_issue, stopped_phase);
+        add_stopping_diagnostic(
+                result, stopped_phase, cache_issue->diagnostic);
+        set_not_attempted_after(
+                result,
+                UpgradeAllNotAttemptedReason::CacheAuthorityFailure);
+        return true;
+    }
+
     switch(result.system_source.status) {
         case SystemSourceUpgradeStatus::Completed:
             break;
@@ -478,6 +542,30 @@ void stop_for_inventory_failure(
     result.aur.status = UpgradeAllAurPhaseStatus::NotAttempted;
     result.aur.not_attempted_reason =
             UpgradeAllNotAttemptedReason::ForeignInventoryFailure;
+}
+
+void stop_for_cache_authority_failure(
+        UpgradeAllOperationResult& result,
+        UpgradeAllOperationPhase stopped_phase,
+        const std::string& diagnostic,
+        std::optional<TrustedCacheFailure> trusted_failure = std::nullopt) {
+    result.status = UpgradeAllOperationStatus::StoppedBeforeAurExecution;
+    result.stopped_phase = stopped_phase;
+    UpgradeAllOperationIssue issue = make_issue(
+            UpgradeAllOperationIssueKind::CacheAuthorityInvalid,
+            stopped_phase, diagnostic);
+    issue.trusted_cache_failure = std::move(trusted_failure);
+    result.issues.push_back(std::move(issue));
+    add_stopping_diagnostic(result, stopped_phase, diagnostic);
+    if(stopped_phase == UpgradeAllOperationPhase::ForeignInventory) {
+        result.foreign_inventory.status =
+                UpgradeAllForeignInventoryPhaseStatus::NotAttempted;
+        result.foreign_inventory.not_attempted_reason =
+                UpgradeAllNotAttemptedReason::CacheAuthorityFailure;
+    }
+    result.aur.status = UpgradeAllAurPhaseStatus::NotAttempted;
+    result.aur.not_attempted_reason =
+            UpgradeAllNotAttemptedReason::CacheAuthorityFailure;
 }
 
 bool capture_duplicate_exclusions(
@@ -794,23 +882,28 @@ bool qualifies_as_no_updates(
 struct PreparedUpgradeAllOperation::Impl {
     Impl(
             UpgradeAllOperationPreparedSnapshot prepared_snapshot,
-            PreparedSystemSourceUpgrade prepared_system_source)
+            PreparedSystemSourceUpgrade prepared_system_source,
+            ValidatedCacheRoot prepared_cache_root)
         : snapshot(std::move(prepared_snapshot)),
-          system_source(std::move(prepared_system_source)) {
+          system_source(std::move(prepared_system_source)),
+          cache_root(std::move(prepared_cache_root)) {
     }
 
     UpgradeAllOperationPreparedSnapshot snapshot;
     PreparedSystemSourceUpgrade system_source;
+    ValidatedCacheRoot cache_root;
 };
 
 struct UpgradeAllOperationPreparationAccess {
     static PreparedUpgradeAllOperation make(
             UpgradeAllOperationPreparedSnapshot snapshot,
-            PreparedSystemSourceUpgrade system_source) {
+            PreparedSystemSourceUpgrade system_source,
+            ValidatedCacheRoot cache_root) {
         return PreparedUpgradeAllOperation(
                 std::make_unique<PreparedUpgradeAllOperation::Impl>(
                         std::move(snapshot),
-                        std::move(system_source)));
+                        std::move(system_source),
+                        std::move(cache_root)));
     }
 };
 
@@ -974,8 +1067,13 @@ set_nested_system_source_unexpected_exception_for_test(
 UpgradeAllOperationPreparation prepare_upgrade_all_operation(
         const AppConfig& config) {
     try {
+        // Static option guards remain before filesystem mutation. A valid
+        // upgrade-all route is cache-capable, so one authority is retained
+        // across registered-source and filtered-AUR phases before system sudo.
+        require_supported_production_source_build_options(config);
+        ValidatedCacheRoot cache_root = prepare_process_cache_root();
         SystemSourceUpgradePreparation source_preparation =
-                prepare_system_source_upgrade(config);
+                prepare_system_source_upgrade(config, {}, cache_root);
         if(auto* blocked =
                    std::get_if<SystemSourceUpgradeResult>(
                            &source_preparation)) {
@@ -1010,7 +1108,38 @@ UpgradeAllOperationPreparation prepare_upgrade_all_operation(
         }
 
         return UpgradeAllOperationPreparationAccess::make(
-                std::move(snapshot), std::move(prepared_source));
+                std::move(snapshot), std::move(prepared_source),
+                std::move(cache_root));
+    } catch(const xdg_paths::ResolutionError& error) {
+        UpgradeAllOperationResult result = make_preexecution_rejection(
+                {}, UpgradeAllOperationIssueKind::CacheAuthorityInvalid,
+                error.what(),
+                UpgradeAllOperationStatus::BlockedBeforeMutation);
+        result.issues.back().cache_resolution_failure = error.failure();
+        set_not_attempted_after(
+                result,
+                UpgradeAllNotAttemptedReason::CacheAuthorityFailure);
+        return result;
+    } catch(const xdg_directory_safety::PreparationError& error) {
+        UpgradeAllOperationResult result = make_preexecution_rejection(
+                {}, UpgradeAllOperationIssueKind::CacheAuthorityInvalid,
+                error.what(),
+                UpgradeAllOperationStatus::BlockedBeforeMutation);
+        result.issues.back().cache_preparation_failure = error.failure();
+        set_not_attempted_after(
+                result,
+                UpgradeAllNotAttemptedReason::CacheAuthorityFailure);
+        return result;
+    } catch(const TrustedCacheError& error) {
+        UpgradeAllOperationResult result = make_preexecution_rejection(
+                {}, UpgradeAllOperationIssueKind::CacheAuthorityInvalid,
+                error.what(),
+                UpgradeAllOperationStatus::BlockedBeforeMutation);
+        result.issues.back().trusted_cache_failure = error.failure();
+        set_not_attempted_after(
+                result,
+                UpgradeAllNotAttemptedReason::CacheAuthorityFailure);
+        return result;
     } catch(const std::exception& error) {
         UpgradeAllOperationResult result = make_preexecution_rejection(
                 {},
@@ -1063,6 +1192,33 @@ UpgradeAllOperationResult execute_prepared_upgrade_all_operation(
                 UpgradeAllOperationIssueKind::
                         ExplicitSourceCorrelationInconsistent,
                 SOURCE_CORRELATION_MISMATCH_DIAGNOSTIC);
+    }
+
+    try {
+        // A prepared capability can outlive a pathname replacement. Revoke it
+        // before the nested system phase starts any pacman/sudo mutation.
+        prepared.impl_->cache_root.require_unchanged_identity();
+    } catch(const TrustedCacheError& error) {
+        UpgradeAllOperationResult result = make_preexecution_rejection(
+                std::move(snapshot),
+                UpgradeAllOperationIssueKind::CacheAuthorityInvalid,
+                error.what(),
+                UpgradeAllOperationStatus::BlockedBeforeMutation);
+        result.issues.back().trusted_cache_failure = error.failure();
+        set_not_attempted_after(
+                result,
+                UpgradeAllNotAttemptedReason::CacheAuthorityFailure);
+        return result;
+    } catch(const std::exception& error) {
+        UpgradeAllOperationResult result = make_preexecution_rejection(
+                std::move(snapshot),
+                UpgradeAllOperationIssueKind::CacheAuthorityInvalid,
+                error.what(),
+                UpgradeAllOperationStatus::BlockedBeforeMutation);
+        set_not_attempted_after(
+                result,
+                UpgradeAllNotAttemptedReason::CacheAuthorityFailure);
+        return result;
     }
 
     std::vector<UpgradeAllExplicitSourceIdentity> explicit_sources =
@@ -1169,6 +1325,22 @@ UpgradeAllOperationResult execute_prepared_upgrade_all_operation(
     if(stop_after_system_source_failure(result)) return result;
 
     try {
+        // The system/source phase may be long-running. Revalidate the same
+        // retained authority before pacman-conf/inventory work for AUR.
+        prepared.impl_->cache_root.require_unchanged_identity();
+    } catch(const TrustedCacheError& error) {
+        stop_for_cache_authority_failure(
+                result, UpgradeAllOperationPhase::ForeignInventory,
+                error.what(), error.failure());
+        return result;
+    } catch(const std::exception& error) {
+        stop_for_cache_authority_failure(
+                result, UpgradeAllOperationPhase::ForeignInventory,
+                error.what());
+        return result;
+    }
+
+    try {
         result.foreign_inventory.repository_configuration =
                 resolve_pacman_repository_configuration();
     } catch(const PackageMetadataError& error) {
@@ -1241,6 +1413,20 @@ UpgradeAllOperationResult execute_prepared_upgrade_all_operation(
 
     AurUpdateQueryResult query_result;
     try {
+        // Inventory resolution can run external pacman metadata queries. A
+        // replacement during that phase must still stop before AUR curl.
+        prepared.impl_->cache_root.require_unchanged_identity();
+    } catch(const TrustedCacheError& error) {
+        stop_for_cache_authority_failure(
+                result, UpgradeAllOperationPhase::AurQuery, error.what(),
+                error.failure());
+        return result;
+    } catch(const std::exception& error) {
+        stop_for_cache_authority_failure(
+                result, UpgradeAllOperationPhase::AurQuery, error.what());
+        return result;
+    }
+    try {
         // LANDMINE(#281): result snapshotを残すためinventoryをcopyで渡す。
         // query_installed_aur_updates()による再取得は禁止する。
         query_result = query_aur_updates_for_foreign_inventory(
@@ -1278,16 +1464,38 @@ UpgradeAllOperationResult execute_prepared_upgrade_all_operation(
     }
 
     try {
+        // AUR curl can be long-running. Do not let a replacement observed
+        // during the query reach filtered pacman/source preparation.
+        prepared.impl_->cache_root.require_unchanged_identity();
+    } catch(const TrustedCacheError& error) {
+        stop_for_cache_authority_failure(
+                result, UpgradeAllOperationPhase::AurPreparation,
+                error.what(), error.failure());
+        return result;
+    } catch(const std::exception& error) {
+        stop_for_cache_authority_failure(
+                result, UpgradeAllOperationPhase::AurPreparation,
+                error.what());
+        return result;
+    }
+
+    try {
         PreparedFilteredAurUpdateOperation filtered_preparation =
                 prepare_filtered_aur_update_operation(
                         std::move(query_result),
                         std::move(explicit_sources),
-                        config);
+                        config,
+                        prepared.impl_->cache_root);
         // PR3 consume boundaryはblocked/no-op時にrunnerを呼ばず、正確な
         // correlation/reducer resultだけをmaterializeする。
         result.aur.operation_result.emplace(
                 execute_prepared_filtered_aur_update_operation(
                         std::move(filtered_preparation), config));
+    } catch(const TrustedCacheError& error) {
+        stop_for_cache_authority_failure(
+                result, UpgradeAllOperationPhase::AurPreparation,
+                error.what(), error.failure());
+        return result;
     } catch(const std::logic_error& error) {
         result.status = UpgradeAllOperationStatus::InconsistentResult;
         result.stopped_phase = UpgradeAllOperationPhase::AurPreparation;

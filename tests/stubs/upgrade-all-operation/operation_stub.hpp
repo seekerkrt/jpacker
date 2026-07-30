@@ -127,8 +127,12 @@ void enqueue_metadata_session(MetadataSessionScript script);
 // System mutation and registered-source lifecycle.
 void set_system_command_exit_status(int exit_status);
 void fail_system_command(std::string diagnostic);
+void set_after_system_command_hook(std::function<void()> hook);
+void fail_cache_seed();
+void fail_cache_activation();
 void enqueue_source_success(SourceBuildExecutionResult result);
 void enqueue_source_failure(std::string diagnostic);
+void enqueue_source_cache_failure();
 void enqueue_source_cleanup_failure(
         ArtifactInstallExecutionOutcome outcome,
         std::string diagnostic);
@@ -143,6 +147,7 @@ void set_foreign_inventory_failure(PackageMetadataFailure failure);
 
 void enqueue_info_many_result(
         std::map<std::string, AurPackageInfo> result);
+void set_after_info_many_hook(std::function<void()> hook);
 void enqueue_info_many_failure(std::string diagnostic);
 void enqueue_info_many_response_failure(std::string diagnostic);
 void enqueue_info_strict_result(std::optional<AurPackageInfo> result);

@@ -1,6 +1,7 @@
 #include "system_source_upgrade.hpp"
 
 #include "app_config.hpp"
+#include "cache_authority.hpp"
 #include "package_identifier.hpp"
 #include "process.hpp"
 #include "separated_source_build.hpp"
@@ -329,6 +330,23 @@ SystemSourceUpgradeResult block_preparation(
         source_result.diagnostic = result.diagnostics.back().diagnostic;
     }
     return result;
+}
+
+SystemSourceUpgradeIssue make_cache_authority_issue(
+        std::string diagnostic) {
+    return make_issue(
+            SystemSourceUpgradeIssueKind::CacheAuthorityInvalid,
+            SystemSourceUpgradeIssueImpact::BlocksExecution,
+            SystemSourceUpgradePhase::Preparation,
+            std::move(diagnostic));
+}
+
+SystemSourceUpgradeResult block_cache_authority_preparation(
+        SystemSourceUpgradePreparationState&& state,
+        SystemSourceUpgradeIssue issue) {
+    return block_preparation(
+            std::move(state), std::move(issue), std::nullopt,
+            RegisteredSourceUpgradeFailureKind::CacheAuthorityFailure);
 }
 
 void record_system_snapshot_failure(
@@ -721,7 +739,8 @@ void PreparedSystemSourceUpgrade::set_unexpected_exception_for_test(
 
 SystemSourceUpgradePreparation prepare_system_source_upgrade(
         const AppConfig& config,
-        const SystemSourceUpgradeEventObserver& observer) {
+        const SystemSourceUpgradeEventObserver& observer,
+        std::optional<ValidatedCacheRoot> cache_root) {
     SystemSourceUpgradePreparationState state;
     state.snapshot.options = snapshot_options(config);
 
@@ -787,10 +806,11 @@ SystemSourceUpgradePreparation prepare_system_source_upgrade(
                     std::move(state), std::move(issue), std::nullopt,
                     RegisteredSourceUpgradeFailureKind::BuildOrInstallFailed);
         }
+
     }
 
-    std::vector<ProductionSourceBuildWorkItem> source_work_items;
-    std::vector<std::string> package_names;
+    // Local preference failureはcache mutationより前に全件確定する。identity
+    // resolutionはpacman/curlへ進み得るため、次のphaseでcacheを先にadoptする。
     for(std::size_t source_position = 0;
         source_position < state.snapshot.registered_sources.size();
         ++source_position) {
@@ -828,26 +848,67 @@ SystemSourceUpgradePreparation prepare_system_source_upgrade(
                         source.entry_path,
                         warning_text});
             }
-        } else {
-            SystemSourceUpgradeIssue issue = make_issue(
-                    SystemSourceUpgradeIssueKind::PreferenceUnavailable,
-                    SystemSourceUpgradeIssueImpact::BlocksExecution,
-                    SystemSourceUpgradePhase::Preparation,
-                    {});
-            attribute_issue_to_source(issue, source);
-            if(const auto* failure =
-                       std::get_if<SourcePreferenceFailure>(&preference)) {
-                issue.source_preference_failure = *failure;
-                issue.diagnostic = failure->diagnostic;
-            } else {
-                issue.diagnostic =
-                        "Registered source preference disappeared before preparation: " +
-                        source.entry_path.string();
-            }
-            return block_preparation(
-                    std::move(state), std::move(issue), source_position,
-                    RegisteredSourceUpgradeFailureKind::PreferenceUnavailable);
+            continue;
         }
+
+        SystemSourceUpgradeIssue issue = make_issue(
+                SystemSourceUpgradeIssueKind::PreferenceUnavailable,
+                SystemSourceUpgradeIssueImpact::BlocksExecution,
+                SystemSourceUpgradePhase::Preparation,
+                {});
+        attribute_issue_to_source(issue, source);
+        if(const auto* failure =
+                   std::get_if<SourcePreferenceFailure>(&preference)) {
+            issue.source_preference_failure = *failure;
+            issue.diagnostic = failure->diagnostic;
+        } else {
+            issue.diagnostic =
+                    "Registered source preference disappeared before preparation: " +
+                    source.entry_path.string();
+        }
+        return block_preparation(
+                std::move(state), std::move(issue), source_position,
+                RegisteredSourceUpgradeFailureKind::PreferenceUnavailable);
+    }
+
+    if(has_valid_source) {
+        try {
+            if(cache_root.has_value()) {
+                cache_root->require_unchanged_identity();
+            } else {
+                cache_root = prepare_process_cache_root();
+            }
+        } catch(const xdg_paths::ResolutionError& error) {
+            SystemSourceUpgradeIssue issue =
+                    make_cache_authority_issue(error.what());
+            issue.cache_resolution_failure = error.failure();
+            return block_cache_authority_preparation(
+                    std::move(state), std::move(issue));
+        } catch(const xdg_directory_safety::PreparationError& error) {
+            SystemSourceUpgradeIssue issue =
+                    make_cache_authority_issue(error.what());
+            issue.cache_preparation_failure = error.failure();
+            return block_cache_authority_preparation(
+                    std::move(state), std::move(issue));
+        } catch(const TrustedCacheError& error) {
+            SystemSourceUpgradeIssue issue =
+                    make_cache_authority_issue(error.what());
+            issue.trusted_cache_failure = error.failure();
+            return block_cache_authority_preparation(
+                    std::move(state), std::move(issue));
+        }
+    }
+
+    std::vector<ProductionSourceBuildWorkItem> source_work_items;
+    std::vector<std::string> package_names;
+    for(std::size_t source_position = 0;
+        source_position < state.snapshot.registered_sources.size();
+        ++source_position) {
+        RegisteredSourceCorrelation& correlation =
+                state.correlations[source_position];
+        RegisteredSourcePreferenceSnapshot& source =
+                state.snapshot.registered_sources[source_position];
+        if(!correlation.has_valid_package_name) continue;
 
         ResolvedSourceBuildIdentity identity;
         try {
@@ -919,6 +980,14 @@ SystemSourceUpgradePreparation prepare_system_source_upgrade(
             state.source_invocation =
                     prepare_production_source_build_invocation(
                             std::move(source_work_items), config);
+            seed_production_source_build_cache(
+                    state.source_invocation.value(), cache_root.value());
+        } catch(const TrustedCacheError& error) {
+            SystemSourceUpgradeIssue issue =
+                    make_cache_authority_issue(error.what());
+            issue.trusted_cache_failure = error.failure();
+            return block_cache_authority_preparation(
+                    std::move(state), std::move(issue));
         } catch(const std::exception& error) {
             SystemSourceUpgradeIssue issue = make_issue(
                     SystemSourceUpgradeIssueKind::
@@ -1064,6 +1133,26 @@ SystemSourceUpgradeResult execute_prepared_system_source_upgrade(
                 SystemSourceUpgradePhase::Preparation,
                 "Prepared system/source upgrade source correlation is inconsistent.");
         return result;
+    }
+
+    // Registered source workがある場合はsystem pacmanより前にcache authorityを
+    // 1回だけ確定し、typed failureをresultへ保持する。
+    if(state.source_invocation.has_value()) {
+        try {
+            activate_production_source_build_cache(
+                    state.source_invocation.value());
+        } catch(const TrustedCacheError& error) {
+            SystemSourceUpgradeIssue issue = make_issue(
+                    SystemSourceUpgradeIssueKind::CacheAuthorityInvalid,
+                    SystemSourceUpgradeIssueImpact::BlocksExecution,
+                    SystemSourceUpgradePhase::Preparation,
+                    error.what());
+            issue.trusted_cache_failure = error.failure();
+            return block_preparation(
+                    std::move(state), std::move(issue), std::nullopt,
+                    RegisteredSourceUpgradeFailureKind::
+                            CacheAuthorityFailure);
+        }
     }
 
     // public snapshot/result detailだけを移し、executionに必要なprepared
@@ -1411,6 +1500,44 @@ SystemSourceUpgradeResult execute_prepared_system_source_upgrade(
                 result.diagnostics.push_back(std::move(detail));
                 result.status = SystemSourceUpgradeStatus::
                         StoppedAfterSourceCleanupFailure;
+                result.stopped_phase =
+                        SystemSourceUpgradePhase::RegisteredSource;
+                return result;
+            } catch(const TrustedCacheError& error) {
+                source_result.status = RegisteredSourceUpgradeStatus::Failed;
+                source_result.failure_kind =
+                        RegisteredSourceUpgradeFailureKind::
+                                CacheAuthorityFailure;
+                source_result.package_state_change =
+                        PackageStateChange::Unknown;
+                source_result.diagnostic = error.what();
+
+                SystemSourceUpgradeIssue issue = make_issue(
+                        SystemSourceUpgradeIssueKind::CacheAuthorityInvalid,
+                        SystemSourceUpgradeIssueImpact::BlocksExecution,
+                        SystemSourceUpgradePhase::RegisteredSource,
+                        error.what());
+                issue.original_preference_index =
+                        source_result.original_preference_index;
+                issue.preference_package_name =
+                        source_result.preference_package_name;
+                issue.resolved_package_base =
+                        source_result.resolved_package_base;
+                issue.trusted_cache_failure = error.failure();
+                result.issues.push_back(std::move(issue));
+
+                SystemSourceUpgradeDiagnostic detail = make_diagnostic(
+                        SystemSourceUpgradePhase::RegisteredSource,
+                        error.what(), true);
+                detail.original_preference_index =
+                        source_result.original_preference_index;
+                detail.preference_package_name =
+                        source_result.preference_package_name;
+                detail.resolved_package_base =
+                        source_result.resolved_package_base;
+                result.diagnostics.push_back(std::move(detail));
+                result.status =
+                        SystemSourceUpgradeStatus::StoppedOnSourceFailure;
                 result.stopped_phase =
                         SystemSourceUpgradePhase::RegisteredSource;
                 return result;

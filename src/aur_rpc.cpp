@@ -30,12 +30,17 @@ bool        g_should_fail_write_append_for_test = false;
 std::string g_encode_failure_package_for_test;
 #endif
 
+void ensure_curl_global_initialized() {
+    static CurlGlobal global;
+}
+
 // CURL easy handle の確保と解放を 1 request の寿命に束ねる RAII wrapper。
 class CurlHandle {
     CURL* curl_;
 
 public:
     CurlHandle() {
+        ensure_curl_global_initialized();
         curl_ = curl_easy_init();
         if(!curl_) throw std::runtime_error("Failed to initialize cURL handle.");
     }

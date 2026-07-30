@@ -253,7 +253,7 @@ assert_schema_request_log_nonempty() {
 }
 
 assert_cache_entry_absent() {
-    entry=$XDG_CACHE_HOME/jpacker/$1
+    entry=$XDG_CACHE_HOME/moguet/$1
     if [ -e "$entry" ] || [ -L "$entry" ]; then
         echo "cache entry was created before all preflight guards passed: $entry" >&2
         exit 1
@@ -261,8 +261,8 @@ assert_cache_entry_absent() {
 }
 
 assert_cache_root_absent() {
-    if [ -e "$XDG_CACHE_HOME/jpacker" ] || [ -L "$XDG_CACHE_HOME/jpacker" ]; then
-        echo "legacy jpacker cache root was created before CLI validation completed" >&2
+    if [ -e "$XDG_CACHE_HOME/moguet" ] || [ -L "$XDG_CACHE_HOME/moguet" ]; then
+        echo "Moguet cache root was created before CLI validation completed" >&2
         exit 1
     fi
 }
@@ -463,9 +463,9 @@ assert_no_installed_version_precheck
 assert_normal_request_log_nonempty
 
 setup_case local-artifact
-mkdir -p "$XDG_CACHE_HOME/jpacker/clean-root/.git"
-: > "$XDG_CACHE_HOME/jpacker/clean-root/PKGBUILD"
-: > "$XDG_CACHE_HOME/jpacker/clean-root/clean-root-1.0-1-any.pkg.tar.zst"
+mkdir -p "$XDG_CACHE_HOME/moguet/clean-root/.git"
+: > "$XDG_CACHE_HOME/moguet/clean-root/PKGBUILD"
+: > "$XDG_CACHE_HOME/moguet/clean-root/clean-root-1.0-1-any.pkg.tar.zst"
 run_ok --noedit --nodiff --noconfirm -S --aur --needed clean-root
 assert_command "git fetch origin"
 assert_command "git reset --hard origin/main"

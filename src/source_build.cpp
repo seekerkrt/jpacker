@@ -8,19 +8,24 @@
 #include "separated_package_base_source_build.hpp"
 #include "separated_source_build.hpp"
 #include "shell_words.hpp"
+#include "trusted_git.hpp"
 #include "trusted_cache.hpp"
 
 #include <algorithm>
 #include <cctype>
+#include <cerrno>
 #include <cstdlib>
 #include <exception>
+#include <fcntl.h>
 #include <filesystem>
-#include <fstream>
 #include <iostream>
+#include <linux/openat2.h>
 #include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <sys/stat.h>
+#include <sys/syscall.h>
 #include <unistd.h>
 #include <utility>
 #include <variant>
@@ -33,6 +38,21 @@ namespace {
 struct MakepkgBuildOptions {
     bool rebuild = false;
     bool clean_build = false;
+};
+
+class ScopedPrivateUmask final {
+    mode_t previous_;
+
+public:
+    ScopedPrivateUmask() noexcept : previous_(umask(0077)) {
+    }
+
+    ScopedPrivateUmask(const ScopedPrivateUmask&) = delete;
+    ScopedPrivateUmask& operator=(const ScopedPrivateUmask&) = delete;
+
+    ~ScopedPrivateUmask() noexcept {
+        static_cast<void>(umask(previous_));
+    }
 };
 
 enum class PromptDefault {
@@ -212,17 +232,6 @@ std::string build_editor_command(const std::string& editor, const fs::path& targ
     return shell_words::join(args);
 }
 
-std::string get_git_branch() {
-    std::string remote_head = exec_command("git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null");
-    const std::string prefix = "origin/";
-    if(remote_head.starts_with(prefix) && remote_head.length() > prefix.length()) {
-        return remote_head.substr(prefix.length());
-    }
-    if(command_status("git show-ref --verify --quiet refs/remotes/origin/main") == 0) return "main";
-    if(command_status("git show-ref --verify --quiet refs/remotes/origin/master") == 0) return "master";
-    return "master";
-}
-
 std::vector<std::string> split_lines(const std::string& text) {
     std::vector<std::string> lines;
     std::stringstream        stream(text);
@@ -234,9 +243,12 @@ std::vector<std::string> split_lines(const std::string& text) {
     return lines;
 }
 
-std::vector<std::string> git_changed_files(const std::string& range) {
-    std::string cmd = "git diff --name-only " + shell_words::quote(range) + " 2>/dev/null";
-    return split_lines(exec_command(cmd.c_str()));
+std::vector<std::string> git_changed_files(
+        const ValidatedCachePath& checkout,
+        const std::string& expected_remote_url,
+        const std::string& branch) {
+    return split_lines(trusted_git_diff_name_only(
+            checkout, expected_remote_url, branch));
 }
 
 bool is_review_sensitive_file(const std::string& path) {
@@ -244,8 +256,13 @@ bool is_review_sensitive_file(const std::string& path) {
     return file_path.filename() == "PKGBUILD" || file_path.extension() == ".install";
 }
 
-void log_update_diff_guidance(const std::string& range) {
-    std::vector<std::string> changed_files = git_changed_files(range);
+void log_update_diff_guidance(
+        const ValidatedCachePath& checkout,
+        const std::string& expected_remote_url,
+        const std::string& branch) {
+    const std::string range = "HEAD..origin/" + branch;
+    std::vector<std::string> changed_files = git_changed_files(
+            checkout, expected_remote_url, branch);
     if(changed_files.empty()) return;
 
     Logger::info("Update diff range: " + range + " (existing cache repository).");
@@ -315,13 +332,46 @@ void review_build_files(
     if(edited && !ask_user("Proceed with build?", PromptDefault::Yes, config)) throw std::runtime_error("Aborted.");
 }
 
-std::optional<std::string> read_srcinfo_version(const fs::path& pkg_dir) {
-    fs::path        srcinfo_path = pkg_dir / ".SRCINFO";
-    std::error_code ec;
-    if(!fs::is_regular_file(srcinfo_path, ec) || ec) return std::nullopt;
+std::optional<std::string> read_nofollow_regular_file(
+        const fs::path& path) {
+    struct open_how how {};
+    how.flags = O_RDONLY | O_CLOEXEC | O_NOFOLLOW;
+    how.resolve = RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS | RESOLVE_NO_XDEV;
+    const int descriptor = static_cast<int>(syscall(
+            SYS_openat2, AT_FDCWD, path.c_str(), &how, sizeof(how)));
+    if(descriptor < 0) return std::nullopt;
 
-    std::ifstream file(srcinfo_path);
-    if(!file) return std::nullopt;
+    struct stat status {};
+    if(fstat(descriptor, &status) != 0 || !S_ISREG(status.st_mode) ||
+       status.st_uid != geteuid() ||
+       (status.st_mode & (S_IWGRP | S_IWOTH)) != 0) {
+        static_cast<void>(close(descriptor));
+        return std::nullopt;
+    }
+
+    std::string contents;
+    char        buffer[4096];
+    while(true) {
+        const ssize_t read_size = read(descriptor, buffer, sizeof(buffer));
+        if(read_size > 0) {
+            contents.append(buffer, static_cast<std::size_t>(read_size));
+            continue;
+        }
+        if(read_size == 0) break;
+        if(errno == EINTR) continue;
+        static_cast<void>(close(descriptor));
+        return std::nullopt;
+    }
+    if(close(descriptor) != 0) return std::nullopt;
+    return contents;
+}
+
+std::optional<std::string> read_srcinfo_version(const fs::path& pkg_dir) {
+    std::optional<std::string> contents =
+            read_nofollow_regular_file(pkg_dir / ".SRCINFO");
+    if(!contents.has_value()) return std::nullopt;
+
+    std::istringstream file(contents.value());
 
     std::string pkgver;
     std::string pkgrel;
@@ -390,21 +440,36 @@ UpdateCheckResult check_update_status(
 }
 
 bool has_local_package_artifact(const fs::path& pkg_dir) {
-    if(!fs::exists(pkg_dir) || !fs::is_directory(pkg_dir)) return false;
+    std::error_code directory_error;
+    fs::file_status directory_status =
+            fs::symlink_status(pkg_dir, directory_error);
+    if(directory_error || !fs::is_directory(directory_status)) return false;
 
-    for(const auto& entry : fs::directory_iterator(pkg_dir)) {
-        if(!entry.is_regular_file()) continue;
+    fs::directory_iterator entry(pkg_dir, directory_error);
+    const fs::directory_iterator end;
+    while(!directory_error && entry != end) {
+        std::error_code status_error;
+        const fs::file_status status = entry->symlink_status(status_error);
+        if(!status_error && fs::is_regular_file(status)) {
+            std::string filename = entry->path().filename().string();
+            if(filename.size() < 4 ||
+               filename.substr(filename.size() - 4) != ".sig") {
+                if(filename.find(".pkg.tar") != std::string::npos) {
+                    return true;
+                }
+            }
+        }
 
-        std::string filename = entry.path().filename().string();
-        if(filename.size() >= 4 && filename.substr(filename.size() - 4) == ".sig") continue;
-        if(filename.find(".pkg.tar") != std::string::npos) return true;
+        entry.increment(directory_error);
     }
     return false;
 }
 
 bool has_local_srcdir(const fs::path& pkg_dir) {
-    fs::path src_dir = pkg_dir / "src";
-    return fs::exists(src_dir) && fs::is_directory(src_dir);
+    std::error_code ec;
+    const fs::file_status status =
+            fs::symlink_status(pkg_dir / "src", ec);
+    return !ec && fs::is_directory(status);
 }
 
 MakepkgBuildOptions resolve_makepkg_build_options(
@@ -440,6 +505,7 @@ using SourceBuildCheckoutPreparation =
 SourceBuildCheckoutPreparation prepare_source_build_checkout(
         const SourceBuildRequest& request,
         const std::string& display_name,
+        const ValidatedCacheRoot& build_root,
         const AppConfig& config) {
     require_valid_package_name(request.checkout_name);
     if(request.only_if_updated && !request.installed_snapshot.has_value()) {
@@ -448,7 +514,6 @@ SourceBuildCheckoutPreparation prepare_source_build_checkout(
                 request.package_name + ".");
     }
     Logger::info("Processing " + display_name + "...");
-    ValidatedCacheRoot build_root = prepare_trusted_cache_root();
     ValidatedCachePath pkg_path = require_trusted_cache_path(
             build_root, request.checkout_name,
             CachePathRequirement::ExistingOrMissing);
@@ -462,7 +527,8 @@ SourceBuildCheckoutPreparation prepare_source_build_checkout(
             require_safe_persistent_checkout_descendants(pkg_path);
             {
                 WorkDirGuard wd_repo(pkg_path);
-                std::string  current_url = exec_command("git config --get remote.origin.url");
+                std::string current_url =
+                        trusted_git_remote_origin_url(pkg_path);
                 if(!remote_url_matches_expected(current_url, request.git_url)) {
                     Logger::warn("Remote URL mismatch. Re-cloning...");
                 } else {
@@ -476,21 +542,36 @@ SourceBuildCheckoutPreparation prepare_source_build_checkout(
                 pkg_path = revalidate_trusted_cache_path(
                         pkg_path, CachePathRequirement::ExistingDirectory);
                 require_safe_persistent_checkout_descendants(pkg_path);
-                if(run_command("git fetch origin") != 0) throw std::runtime_error("Failed to fetch updates.");
+                {
+                    ScopedPrivateUmask private_umask;
+                    if(trusted_git_fetch_origin(
+                               pkg_path, request.git_url) != 0) {
+                        throw std::runtime_error("Failed to fetch updates.");
+                    }
+                }
 
-                std::string branch = get_git_branch();
+                // fetch中にcheckoutまたはreview対象が差し替えられた場合、
+                // branch検出を含む後続git commandへ進む前にauthorityを失効させる。
+                pkg_path = revalidate_trusted_cache_path(
+                        pkg_path, CachePathRequirement::ExistingDirectory);
+                require_safe_persistent_checkout_descendants(pkg_path);
+
+                std::string branch = trusted_git_detect_remote_branch(
+                        pkg_path, request.git_url);
                 Logger::info("Detected branch: " + branch);
 
                 if(!config.no_diff) {
-                    std::string remote_ref = "origin/" + branch;
-                    int diff_ret = run_command("git diff --quiet " + shell_words::quote("HEAD.." + remote_ref));
+                    int diff_ret = trusted_git_diff_quiet(
+                            pkg_path, request.git_url, branch);
                     if(diff_ret > 1) {
                         throw std::runtime_error("Failed to compare repository changes.");
                     }
                     if(diff_ret == 1) {
-                        log_update_diff_guidance("HEAD.." + remote_ref);
+                        log_update_diff_guidance(
+                                pkg_path, request.git_url, branch);
                         if(ask_user("Updates detected in existing cache repository. View git diff?", PromptDefault::No, config)) {
-                            run_command("git diff " + shell_words::quote("HEAD.." + remote_ref) + " --color=always");
+                            static_cast<void>(trusted_git_show_diff(
+                                    pkg_path, request.git_url, branch));
                         }
                     }
                 }
@@ -499,8 +580,13 @@ SourceBuildCheckoutPreparation prepare_source_build_checkout(
                 pkg_path = revalidate_trusted_cache_path(
                         pkg_path, CachePathRequirement::ExistingDirectory);
                 require_safe_persistent_checkout_descendants(pkg_path);
-                if(run_command("git reset --hard " + shell_words::quote("origin/" + branch)) != 0) {
-                    throw std::runtime_error("Failed to reset repository.");
+                {
+                    ScopedPrivateUmask private_umask;
+                    if(trusted_git_reset_hard(
+                               pkg_path, request.git_url, branch) != 0) {
+                        throw std::runtime_error(
+                                "Failed to reset repository.");
+                    }
                 }
                 pkg_path = revalidate_trusted_cache_path(
                         pkg_path, CachePathRequirement::ExistingDirectory);
@@ -513,25 +599,34 @@ SourceBuildCheckoutPreparation prepare_source_build_checkout(
                 // POLICY(#175): remote mismatch/non-repository cleanup is limited to the validated cache entry.
                 remove_trusted_cache_path(pkg_path);
             }
-            pkg_path = require_trusted_cache_path(
-                    build_root, request.checkout_name, CachePathRequirement::Missing);
+            pkg_path = create_trusted_cache_directory(
+                    build_root, request.checkout_name);
             Logger::info("Cloning repository...");
             DirCleanupGuard cleanup_guard(pkg_path);
-            if(run_command("git clone " + shell_words::quote(request.git_url) + " " + shell_words::quote(request.checkout_name)) != 0) {
-                throw std::runtime_error("Failed to clone " + request.checkout_name);
+            {
+                ScopedPrivateUmask private_umask;
+                if(trusted_git_clone_persistent_checkout(
+                           pkg_path, request.git_url) != 0) {
+                    throw std::runtime_error(
+                            "Failed to clone " + request.checkout_name);
+                }
             }
 
-            pkg_path = require_trusted_cache_path(
-                    build_root, request.checkout_name, CachePathRequirement::ExistingDirectory);
+            pkg_path = revalidate_trusted_cache_path(
+                    pkg_path, CachePathRequirement::ExistingDirectory);
             require_safe_persistent_checkout_descendants(pkg_path);
             {
                 WorkDirGuard wd_repo(pkg_path);
-                std::string  current_url = trim(exec_command("git config --get remote.origin.url"));
+                std::string current_url = trim(
+                        trusted_git_remote_origin_url(pkg_path));
                 if(current_url.empty()) throw std::runtime_error("Missing remote.origin.url for " + request.checkout_name + ".");
                 if(!remote_url_matches_expected(current_url, request.git_url)) {
-                    throw std::runtime_error("Remote URL mismatch for " + request.checkout_name + ": " + current_url);
+                    throw std::runtime_error("Remote URL mismatch for " + request.checkout_name + ".");
                 }
             }
+            pkg_path = revalidate_trusted_cache_path(
+                    pkg_path, CachePathRequirement::ExistingDirectory);
+            require_safe_persistent_checkout_descendants(pkg_path);
             cleanup_guard.commit();
         }
     }
@@ -545,9 +640,11 @@ SourceBuildCheckoutPreparation prepare_source_build_checkout(
 
         if(request.only_if_updated) {
             UpdateCheckResult update_check = check_update_status(
-                    request.package_name, pkg_path.canonical_path(),
+                    request.package_name, ".",
                     request.installed_snapshot.value(), request.update_baseline);
             if(update_check == UpdateCheckResult::UpToDate) {
+                static_cast<void>(revalidate_trusted_cache_path(
+                        pkg_path, CachePathRequirement::ExistingDirectory));
                 return SourceBuildExecutionResult{
                         SourceBuildExecutionStatus::UpToDate,
                         std::nullopt,
@@ -564,6 +661,9 @@ SourceBuildCheckoutPreparation prepare_source_build_checkout(
                     std::string diagnostic = unknown_update_skip_diagnostic(
                             request.package_name, reason);
                     Logger::warn(diagnostic);
+                    static_cast<void>(revalidate_trusted_cache_path(
+                            pkg_path,
+                            CachePathRequirement::ExistingDirectory));
                     return SourceBuildExecutionResult{
                             SourceBuildExecutionStatus::UpdateStatusUnknownSkipped,
                             reason,
@@ -575,6 +675,9 @@ SourceBuildCheckoutPreparation prepare_source_build_checkout(
                     std::string diagnostic = unknown_update_skip_diagnostic(
                             request.package_name, reason);
                     Logger::warn(diagnostic);
+                    static_cast<void>(revalidate_trusted_cache_path(
+                            pkg_path,
+                            CachePathRequirement::ExistingDirectory));
                     return SourceBuildExecutionResult{
                             SourceBuildExecutionStatus::UpdateStatusUnknownSkipped,
                             reason,
@@ -584,6 +687,9 @@ SourceBuildCheckoutPreparation prepare_source_build_checkout(
                             PromptDefault::No, config)) {
                     const SourceBuildUpdateStatusUnknownSkipReason reason =
                             SourceBuildUpdateStatusUnknownSkipReason::UserDeclined;
+                    static_cast<void>(revalidate_trusted_cache_path(
+                            pkg_path,
+                            CachePathRequirement::ExistingDirectory));
                     return SourceBuildExecutionResult{
                             SourceBuildExecutionStatus::UpdateStatusUnknownSkipped,
                             reason,
@@ -594,8 +700,7 @@ SourceBuildCheckoutPreparation prepare_source_build_checkout(
         }
 
         review_build_files(pkg_path, config);
-        makepkg_options = resolve_makepkg_build_options(
-                pkg_path.canonical_path(), config);
+        makepkg_options = resolve_makepkg_build_options(".", config);
     }
 
     const std::string custom_environment = serialize_source_build_environment(
@@ -673,6 +778,7 @@ void require_package_base_source_build_request(
 
 SourceBuildExecutionResult execute_source_build_typed(
         const SourceBuildRequest& request,
+        const ValidatedCacheRoot& cache_root,
         DesiredInstallReason desired_reason,
         const PacmanDatabasePaths& database_paths,
         const AppConfig& config) {
@@ -681,10 +787,10 @@ SourceBuildExecutionResult execute_source_build_typed(
     // POLICY: checkoutのclone/fetch/resetより先に、artifact ownerと同じ
     // private cache contractを証明してinvocation中保持する。
     ValidatedPrivateCacheRoot artifact_root =
-            prepare_private_trusted_cache_root();
+            prepare_private_trusted_cache_root(cache_root);
     SourceBuildCheckoutPreparation preparation =
             prepare_source_build_checkout(
-                    request, request.package_name, config);
+                    request, request.package_name, cache_root, config);
     if(const auto* skipped =
                std::get_if<SourceBuildExecutionResult>(&preparation)) {
         return *skipped;
@@ -716,6 +822,7 @@ PackageBaseSourceBuildExecutionResult
 execute_source_build_package_base_typed(
         const SourceBuildRequest& request,
         const std::vector<RequiredPackageArtifactTarget>& required_targets,
+        const ValidatedCacheRoot& cache_root,
         const PacmanDatabasePaths& database_paths,
         const AppConfig& config) {
     // request/target correlationはcheckout/cache mutationより前に再証明する。
@@ -724,7 +831,9 @@ execute_source_build_package_base_typed(
     require_unclaimed_artifact_pkgdest(request.custom_environment);
     ValidatedPrivateCacheRoot artifact_root = [&]() {
         try {
-            return prepare_private_trusted_cache_root();
+            return prepare_private_trusted_cache_root(cache_root);
+        } catch(const TrustedCacheError&) {
+            throw;
         } catch(const std::exception& error) {
             throw SeparatedPackageBaseSourceBuildPhaseError(
                     SeparatedPackageBaseSourceBuildFailurePhase::Build,
@@ -739,7 +848,9 @@ execute_source_build_package_base_typed(
     SourceBuildCheckoutPreparation preparation = [&]() {
         try {
             return prepare_source_build_checkout(
-                    request, request.checkout_name, config);
+                    request, request.checkout_name, cache_root, config);
+        } catch(const TrustedCacheError&) {
+            throw;
         } catch(const std::exception& error) {
             // AUR update presentationはtyped categoryだけを表示する一方、direct
             // build/sync routeは既存のcheckout safety detailを失わない。
@@ -779,11 +890,12 @@ execute_source_build_package_base_typed(
 
 std::optional<ArtifactInstallExecutionOutcome> execute_source_build(
         const SourceBuildRequest& request,
+        const ValidatedCacheRoot& cache_root,
         DesiredInstallReason desired_reason,
         const PacmanDatabasePaths& database_paths,
         const AppConfig& config) {
     const SourceBuildExecutionResult result = execute_source_build_typed(
-            request, desired_reason, database_paths, config);
+            request, cache_root, desired_reason, database_paths, config);
     switch(result.status) {
         case SourceBuildExecutionStatus::Installed:
             return ArtifactInstallExecutionOutcome::Installed;

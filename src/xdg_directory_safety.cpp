@@ -72,6 +72,13 @@ struct OpenedDirectory {
     struct stat         status {};
 };
 
+struct RetainedDirectoryState {
+    OwnedFileDescriptor descriptor;
+    std::string         leaf_name;
+    struct stat         status {};
+    bool                requires_security_validation = false;
+};
+
 struct PreparedDirectoryState {
     OwnedFileDescriptor parent_descriptor;
     OwnedFileDescriptor directory_descriptor;
@@ -79,6 +86,7 @@ struct PreparedDirectoryState {
     struct stat         status {};
     std::uintmax_t      observed_owner = 0;
     std::size_t         created_component_count = 0;
+    std::vector<RetainedDirectoryState> retained_lineage;
 };
 
 #ifdef MOGUET_TEST_XDG_DIRECTORY_SAFETY_HOOKS
@@ -537,106 +545,40 @@ OpenedDirectory open_observed_directory(
     return OpenedDirectory{std::move(opened), opened_status};
 }
 
-OpenedDirectory reopen_absolute_directory(
-        const fs::path& path,
-        const fs::path& security_anchor,
-        xdg_paths::DirectoryKind directory_kind,
-        std::uintmax_t expected_owner,
-        const TestOverrides* overrides,
-        bool validate_security,
-        const std::vector<struct stat>* expected_security_statuses) {
-    const int root_descriptor = open(
-            "/", O_PATH | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
-    if(root_descriptor < 0) {
-        const int open_error = errno;
+OwnedFileDescriptor duplicate_lineage_descriptor(
+        int descriptor, xdg_paths::DirectoryKind directory_kind,
+        PreparationStage stage, std::size_t component_index) {
+    const int duplicated = fcntl(descriptor, F_DUPFD_CLOEXEC, 0);
+    if(duplicated < 0) {
+        const int duplication_error = errno;
         throw_preparation_error(
-                directory_kind, PreparationStage::DirectoryRevalidation,
-                is_permission_error(open_error)
+                directory_kind, stage,
+                is_permission_error(duplication_error)
                         ? PreparationErrorCode::PermissionDenied
                         : PreparationErrorCode::MetadataFailure,
-                open_error);
+                duplication_error, component_index);
     }
-    OwnedFileDescriptor current_directory(root_descriptor);
-    struct stat final_status {};
+    return OwnedFileDescriptor(duplicated);
+}
 
-    fs::path current_path("/");
-    std::size_t component_index = 0;
-    std::optional<std::size_t> security_component_index;
-    for(const auto& path_component : path.relative_path()) {
-        const std::string leaf_name = path_component.string();
-        struct stat observed_status {};
-        if(fstatat(
-                   current_directory.get(), leaf_name.c_str(),
-                   &observed_status, AT_SYMLINK_NOFOLLOW) != 0) {
-            const int metadata_error = errno;
-            throw_preparation_error(
-                    directory_kind,
-                    PreparationStage::DirectoryRevalidation,
-                    is_replacement_error(metadata_error)
-                            ? PreparationErrorCode::ConcurrentReplacement
-                            : (is_permission_error(metadata_error)
-                                       ? PreparationErrorCode::PermissionDenied
-                                       : PreparationErrorCode::MetadataFailure),
-                    metadata_error, component_index);
-        }
-        current_path /= leaf_name;
-        if(current_path == security_anchor) {
-            security_component_index = 0;
-        } else if(security_component_index.has_value()) {
-            ++security_component_index.value();
-        }
-        validate_directory_type(
-                observed_status, directory_kind,
-                PreparationStage::DirectoryRevalidation,
-                component_index, true);
-
-        OpenedDirectory opened = open_observed_directory(
-                current_directory.get(), leaf_name, observed_status,
-                directory_kind, PreparationStage::DirectoryRevalidation,
-                PreparationStage::DirectoryRevalidation,
-                component_index, expected_owner, overrides,
-                false,
-                validate_security && security_component_index.has_value(),
-                false);
-        if(expected_security_statuses != nullptr &&
-           security_component_index.has_value()) {
-            const std::size_t security_index =
-                    security_component_index.value();
-            if(security_index >= expected_security_statuses->size() ||
-               !same_filesystem_identity(
-                       expected_security_statuses->at(security_index),
-                       opened.status)) {
-                throw_preparation_error(
-                        directory_kind,
-                        PreparationStage::DirectoryRevalidation,
-                        PreparationErrorCode::ConcurrentReplacement,
-                        std::nullopt, component_index);
-            }
-        }
-        current_directory = std::move(opened.descriptor);
-        final_status = opened.status;
-        ++component_index;
-    }
-    if(validate_security && !security_component_index.has_value()) {
-        throw_preparation_error(
-                directory_kind, PreparationStage::DirectoryRevalidation,
-                PreparationErrorCode::InvalidCreationBoundary);
-    }
-    if(expected_security_statuses != nullptr &&
-       (!security_component_index.has_value() ||
-        security_component_index.value() + 1 !=
-                expected_security_statuses->size())) {
-        throw_preparation_error(
-                directory_kind, PreparationStage::DirectoryRevalidation,
-                PreparationErrorCode::ConcurrentReplacement);
-    }
-    return OpenedDirectory{std::move(current_directory), final_status};
+RetainedDirectoryState retain_directory_identity(
+        int descriptor, std::string leaf_name,
+        const struct stat& status,
+        xdg_paths::DirectoryKind directory_kind,
+        PreparationStage stage, std::size_t component_index,
+        bool requires_security_validation) {
+    return RetainedDirectoryState{
+            duplicate_lineage_descriptor(
+                    descriptor, directory_kind, stage, component_index),
+            std::move(leaf_name), status,
+            requires_security_validation};
 }
 
 OpenedDirectory open_existing_anchor(
         const DirectoryRequest& request,
         std::uintmax_t expected_effective_user,
-        const TestOverrides* overrides) {
+        const TestOverrides* overrides,
+        std::vector<RetainedDirectoryState>& retained_lineage) {
     const int root_descriptor = open(
             "/", O_PATH | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
     if(root_descriptor < 0) {
@@ -651,6 +593,23 @@ OpenedDirectory open_existing_anchor(
     }
     OwnedFileDescriptor current_directory(root_descriptor);
     struct stat current_status {};
+    if(fstat(current_directory.get(), &current_status) != 0) {
+        const int metadata_error = errno;
+        throw_preparation_error(
+                request.directory_kind,
+                PreparationStage::FilesystemRootOpen,
+                is_permission_error(metadata_error)
+                        ? PreparationErrorCode::PermissionDenied
+                        : PreparationErrorCode::MetadataFailure,
+                metadata_error);
+    }
+    validate_directory_type(
+            current_status, request.directory_kind,
+            PreparationStage::FilesystemRootOpen, 0, true);
+    retained_lineage.push_back(retain_directory_identity(
+            current_directory.get(), {}, current_status,
+            request.directory_kind,
+            PreparationStage::FilesystemRootOpen, 0, false));
 
     fs::path current_path("/");
     std::size_t component_index = 0;
@@ -715,6 +674,13 @@ OpenedDirectory open_existing_anchor(
                 expected_effective_user, overrides, false,
                 is_final_anchor_component,
                 false);
+        retained_lineage.push_back(retain_directory_identity(
+                opened.descriptor.get(), leaf_name, opened.status,
+                request.directory_kind,
+                is_final_anchor_component
+                        ? PreparationStage::AnchorValidation
+                        : PreparationStage::AnchorTraversal,
+                component_index, is_final_anchor_component));
         current_directory = std::move(opened.descriptor);
         current_status = opened.status;
         ++component_index;
@@ -768,10 +734,11 @@ PreparedDirectoryState prepare_directory_state(
     validate_creation_boundary(request);
     const std::uintmax_t expected_effective_user =
             effective_user(overrides);
+    std::vector<RetainedDirectoryState> retained_lineage;
     OpenedDirectory anchor = open_existing_anchor(
-            request, expected_effective_user, overrides);
+            request, expected_effective_user, overrides,
+            retained_lineage);
     OwnedFileDescriptor current_directory = std::move(anchor.descriptor);
-    std::vector<struct stat> security_statuses{anchor.status};
 
     fs::path current_path = request.creation_boundary.existing_anchor;
     std::size_t created_component_count = 0;
@@ -804,6 +771,11 @@ PreparedDirectoryState prepare_directory_state(
 #else
             const bool injected_creation_failure = false;
 #endif
+            // THREAT MODEL: mkdirat() and the first descriptor acquisition
+            // cannot be one atomic Linux operation. A hostile same-euid
+            // process can race this creation-to-open interval. Once the
+            // descriptor is acquired below, nofollow validation, retained
+            // identity, and root-relative named-lineage checks apply.
             if(injected_creation_failure ||
                mkdirat(
                        current_directory.get(), leaf_name.c_str(),
@@ -874,6 +846,11 @@ PreparedDirectoryState prepare_directory_state(
                 PreparationStage::ComponentValidation, component_index,
                 expected_effective_user, overrides, true, true,
                 was_created);
+        retained_lineage.push_back(retain_directory_identity(
+                opened.descriptor.get(), leaf_name, opened.status,
+                request.directory_kind,
+                PreparationStage::ComponentValidation,
+                component_index, true));
 
         const bool is_final_component =
                 component_index + 1 ==
@@ -884,25 +861,13 @@ PreparedDirectoryState prepare_directory_state(
             final_observed_owner = observed_owner(opened.status, overrides);
         }
         current_directory = std::move(opened.descriptor);
-        security_statuses.push_back(opened.status);
-    }
-
-    OpenedDirectory named_directory = reopen_absolute_directory(
-            request.directory, request.creation_boundary.existing_anchor,
-            request.directory_kind, expected_effective_user, overrides,
-            true, &security_statuses);
-    if(!same_filesystem_identity(final_status, named_directory.status)) {
-        throw_preparation_error(
-                request.directory_kind,
-                PreparationStage::DirectoryRevalidation,
-                PreparationErrorCode::ConcurrentReplacement);
     }
 
     return PreparedDirectoryState{
             std::move(final_parent), std::move(current_directory),
             request.creation_boundary.creatable_components.back(),
             final_status, final_observed_owner,
-            created_component_count};
+            created_component_count, std::move(retained_lineage)};
 }
 
 std::uintmax_t status_permissions(const struct stat& status) {
@@ -950,35 +915,41 @@ PreparationError::PreparationError(PreparationFailure failure)
 
 PreparedDirectory::PreparedDirectory(
         xdg_paths::DirectoryKind directory_kind, fs::path path,
-        fs::path security_anchor,
         int parent_descriptor, int directory_descriptor,
         std::string leaf_name, std::uintmax_t device,
         std::uintmax_t inode, std::uintmax_t owner,
         std::uintmax_t filesystem_owner, std::uintmax_t permissions,
-        std::size_t created_component_count) noexcept
+        std::size_t created_component_count,
+        std::vector<RetainedDirectoryIdentity> retained_lineage) noexcept
     : directory_kind_(directory_kind), path_(std::move(path)),
-      security_anchor_(std::move(security_anchor)),
       parent_descriptor_(parent_descriptor),
       directory_descriptor_(directory_descriptor),
       leaf_name_(std::move(leaf_name)), device_(device), inode_(inode),
       owner_(owner), filesystem_owner_(filesystem_owner),
       permissions_(permissions),
-      created_component_count_(created_component_count) {
+      created_component_count_(created_component_count),
+      retained_lineage_(std::move(retained_lineage)) {
 }
 
 PreparedDirectory::PreparedDirectory(PreparedDirectory&& other) noexcept
     : directory_kind_(other.directory_kind_), path_(std::move(other.path_)),
-      security_anchor_(std::move(other.security_anchor_)),
       parent_descriptor_(std::exchange(other.parent_descriptor_, -1)),
       directory_descriptor_(std::exchange(other.directory_descriptor_, -1)),
       leaf_name_(std::move(other.leaf_name_)), device_(other.device_),
       inode_(other.inode_), owner_(other.owner_),
       filesystem_owner_(other.filesystem_owner_),
       permissions_(other.permissions_),
-      created_component_count_(other.created_component_count_) {
+      created_component_count_(other.created_component_count_),
+      retained_lineage_(std::move(other.retained_lineage_)) {
+    for(RetainedDirectoryIdentity& identity : other.retained_lineage_)
+        identity.descriptor = -1;
 }
 
 PreparedDirectory::~PreparedDirectory() noexcept {
+    for(const RetainedDirectoryIdentity& identity : retained_lineage_) {
+        if(identity.descriptor >= 0)
+            static_cast<void>(close(identity.descriptor));
+    }
     if(directory_descriptor_ >= 0)
         static_cast<void>(close(directory_descriptor_));
     if(parent_descriptor_ >= 0)
@@ -992,33 +963,152 @@ struct DirectorySafetyAccess {
         PreparedDirectoryState state =
                 prepare_directory_state(request, overrides);
         fs::path prepared_path = request.directory;
-        fs::path security_anchor =
-                request.creation_boundary.existing_anchor;
+        std::vector<PreparedDirectory::RetainedDirectoryIdentity>
+                retained_lineage;
+        retained_lineage.reserve(state.retained_lineage.size());
+        for(const RetainedDirectoryState& identity :
+            state.retained_lineage) {
+            retained_lineage.push_back(
+                    PreparedDirectory::RetainedDirectoryIdentity{
+                            -1, identity.leaf_name,
+                            status_device(identity.status),
+                            status_inode(identity.status),
+                            static_cast<std::uintmax_t>(
+                                    identity.status.st_uid),
+                            identity.requires_security_validation});
+        }
+        for(std::size_t index = 0; index < retained_lineage.size(); ++index) {
+            retained_lineage[index].descriptor =
+                    state.retained_lineage[index].descriptor.release();
+        }
         PreparedDirectory prepared(
                 request.directory_kind, std::move(prepared_path),
-                std::move(security_anchor),
                 state.parent_descriptor.get(),
                 state.directory_descriptor.get(),
                 std::move(state.leaf_name), status_device(state.status),
                 status_inode(state.status), state.observed_owner,
                 static_cast<std::uintmax_t>(state.status.st_uid),
                 status_permissions(state.status),
-                state.created_component_count);
+                state.created_component_count,
+                std::move(retained_lineage));
         static_cast<void>(state.parent_descriptor.release());
         static_cast<void>(state.directory_descriptor.release());
+        prepared.require_unchanged_identity();
         return prepared;
     }
 };
 
 void PreparedDirectory::require_unchanged_identity() const {
-    if(parent_descriptor_ < 0 || directory_descriptor_ < 0) {
+    if(parent_descriptor_ < 0 || directory_descriptor_ < 0 ||
+       retained_lineage_.size() < 2) {
         throw_preparation_error(
                 directory_kind_, PreparationStage::DirectoryRevalidation,
                 PreparationErrorCode::MetadataFailure);
     }
 
+    const auto validate_current_security =
+            [this](const struct stat& status,
+                   std::uintmax_t expected_owner) {
+        if(static_cast<std::uintmax_t>(status.st_uid) != expected_owner) {
+            throw_preparation_error(
+                    directory_kind_,
+                    PreparationStage::DirectoryRevalidation,
+                    PreparationErrorCode::OwnershipMismatch);
+        }
+        const mode_t permissions = status.st_mode & 07777;
+        if((permissions & REQUIRED_OWNER_PERMISSIONS) !=
+                   REQUIRED_OWNER_PERMISSIONS ||
+           (permissions & FORBIDDEN_WRITE_PERMISSIONS) != 0) {
+            throw_preparation_error(
+                    directory_kind_,
+                    PreparationStage::DirectoryRevalidation,
+                    PreparationErrorCode::UnsafePermissions);
+        }
+    };
+
+    for(std::size_t index = 0; index < retained_lineage_.size(); ++index) {
+        const RetainedDirectoryIdentity& identity = retained_lineage_[index];
+        if(identity.descriptor < 0 ||
+           (index == 0 ? !identity.leaf_name.empty()
+                       : identity.leaf_name.empty())) {
+            throw_preparation_error(
+                    directory_kind_,
+                    PreparationStage::DirectoryRevalidation,
+                    PreparationErrorCode::MetadataFailure);
+        }
+
+        struct stat retained_lineage_status {};
+        if(fstat(identity.descriptor, &retained_lineage_status) != 0) {
+            const int metadata_error = errno;
+            throw_preparation_error(
+                    directory_kind_,
+                    PreparationStage::DirectoryRevalidation,
+                    is_permission_error(metadata_error)
+                            ? PreparationErrorCode::PermissionDenied
+                            : PreparationErrorCode::MetadataFailure,
+                    metadata_error, index);
+        }
+        if(!S_ISDIR(retained_lineage_status.st_mode) ||
+           status_device(retained_lineage_status) != identity.device ||
+           status_inode(retained_lineage_status) != identity.inode) {
+            throw_preparation_error(
+                    directory_kind_,
+                    PreparationStage::DirectoryRevalidation,
+                    PreparationErrorCode::ConcurrentReplacement,
+                    std::nullopt, index);
+        }
+
+        if(index == 0) continue;
+
+        const RetainedDirectoryIdentity& parent =
+                retained_lineage_[index - 1];
+        struct stat named_lineage_status {};
+        if(fstatat(
+                   parent.descriptor, identity.leaf_name.c_str(),
+                   &named_lineage_status, AT_SYMLINK_NOFOLLOW) != 0) {
+            const int metadata_error = errno;
+            throw_preparation_error(
+                    directory_kind_,
+                    PreparationStage::DirectoryRevalidation,
+                    is_replacement_error(metadata_error)
+                            ? PreparationErrorCode::ConcurrentReplacement
+                            : (is_permission_error(metadata_error)
+                                       ? PreparationErrorCode::PermissionDenied
+                                       : PreparationErrorCode::MetadataFailure),
+                    metadata_error, index);
+        }
+        if(!S_ISDIR(named_lineage_status.st_mode) ||
+           !same_filesystem_identity(
+                   retained_lineage_status, named_lineage_status)) {
+            throw_preparation_error(
+                    directory_kind_,
+                    PreparationStage::DirectoryRevalidation,
+                    PreparationErrorCode::ConcurrentReplacement,
+                    std::nullopt, index);
+        }
+        if(identity.requires_security_validation) {
+            validate_current_security(
+                    retained_lineage_status,
+                    identity.filesystem_owner);
+            validate_current_security(
+                    named_lineage_status,
+                    identity.filesystem_owner);
+        }
+    }
+
     struct stat retained_status {};
     if(fstat(directory_descriptor_, &retained_status) != 0) {
+        const int metadata_error = errno;
+        throw_preparation_error(
+                directory_kind_, PreparationStage::DirectoryRevalidation,
+                is_permission_error(metadata_error)
+                        ? PreparationErrorCode::PermissionDenied
+                        : PreparationErrorCode::MetadataFailure,
+                metadata_error);
+    }
+
+    struct stat retained_parent_status {};
+    if(fstat(parent_descriptor_, &retained_parent_status) != 0) {
         const int metadata_error = errno;
         throw_preparation_error(
                 directory_kind_, PreparationStage::DirectoryRevalidation,
@@ -1043,44 +1133,27 @@ void PreparedDirectory::require_unchanged_identity() const {
                 metadata_error);
     }
 
-    if(!S_ISDIR(retained_status.st_mode) ||
+    const RetainedDirectoryIdentity& lineage_parent =
+            retained_lineage_[retained_lineage_.size() - 2];
+    const RetainedDirectoryIdentity& lineage_directory =
+            retained_lineage_.back();
+    if(lineage_directory.leaf_name != leaf_name_ ||
+       !S_ISDIR(retained_status.st_mode) ||
+       !S_ISDIR(retained_parent_status.st_mode) ||
        !same_filesystem_identity(retained_status, named_status) ||
        status_device(retained_status) != device_ ||
-       status_inode(retained_status) != inode_) {
+       status_inode(retained_status) != inode_ ||
+       status_device(retained_status) != lineage_directory.device ||
+       status_inode(retained_status) != lineage_directory.inode ||
+       status_device(retained_parent_status) != lineage_parent.device ||
+       status_inode(retained_parent_status) != lineage_parent.inode) {
         throw_preparation_error(
                 directory_kind_, PreparationStage::DirectoryRevalidation,
                 PreparationErrorCode::ConcurrentReplacement);
     }
 
-    const auto validate_current_security = [this](const struct stat& status) {
-        if(static_cast<std::uintmax_t>(status.st_uid) != filesystem_owner_) {
-            throw_preparation_error(
-                    directory_kind_,
-                    PreparationStage::DirectoryRevalidation,
-                    PreparationErrorCode::OwnershipMismatch);
-        }
-        const mode_t permissions = status.st_mode & 07777;
-        if((permissions & REQUIRED_OWNER_PERMISSIONS) !=
-                   REQUIRED_OWNER_PERMISSIONS ||
-           (permissions & FORBIDDEN_WRITE_PERMISSIONS) != 0) {
-            throw_preparation_error(
-                    directory_kind_,
-                    PreparationStage::DirectoryRevalidation,
-                    PreparationErrorCode::UnsafePermissions);
-        }
-    };
-    validate_current_security(retained_status);
-    validate_current_security(named_status);
-
-    OpenedDirectory absolute_directory = reopen_absolute_directory(
-            path_, security_anchor_, directory_kind_, filesystem_owner_,
-            nullptr, true, nullptr);
-    if(!same_filesystem_identity(
-               retained_status, absolute_directory.status)) {
-        throw_preparation_error(
-                directory_kind_, PreparationStage::DirectoryRevalidation,
-                PreparationErrorCode::ConcurrentReplacement);
-    }
+    validate_current_security(retained_status, filesystem_owner_);
+    validate_current_security(named_status, filesystem_owner_);
 }
 
 PreparedDirectory prepare_directory(const xdg_paths::ConfigPaths& paths) {

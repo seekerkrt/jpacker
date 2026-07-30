@@ -1,6 +1,7 @@
 #include "preparation_stub.hpp"
 
 #include "source_environment.hpp"
+#include "source_install.hpp"
 
 #include <cstdlib>
 #include <optional>
@@ -85,5 +86,14 @@ void require_unclaimed_artifact_pkgdest(
     if(std::getenv("PKGDEST") != nullptr) {
         throw std::runtime_error(
                 "Inherited PKGDEST conflicts with invocation-owned artifact workspace.");
+    }
+}
+
+void seed_production_source_build_cache(
+        PreparedProductionSourceBuildInvocation& invocation,
+        const ValidatedCacheRoot& cache_root) {
+    invocation.cache_root = cache_root;
+    for(auto& work_item : invocation.work_items) {
+        work_item.cache_root = cache_root;
     }
 }

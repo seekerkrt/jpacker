@@ -15,6 +15,31 @@
 // POLICY(#267): execution symbolをこのTUへ持ち込まず、preparation-only binaryから
 // checkout/build/install側をlinkしない境界を維持する。
 
+namespace {
+
+std::optional<ValidatedCacheRoot> shared_prepared_cache_root(
+        const std::vector<ProductionSourceBuildWorkItem>& work_items) {
+    std::optional<ValidatedCacheRoot> shared_root;
+    bool                              saw_missing_root = false;
+    for(const auto& work_item : work_items) {
+        if(!work_item.cache_root.has_value()) {
+            saw_missing_root = true;
+            continue;
+        }
+        if(!shared_root.has_value()) {
+            shared_root = work_item.cache_root.value();
+            continue;
+        }
+    }
+    if(shared_root.has_value() && saw_missing_root) {
+        throw std::logic_error(
+                "Production source-build work items have a partial cache authority.");
+    }
+    return shared_root;
+}
+
+} // namespace
+
 void require_static_production_source_build_work_item(
         const ProductionSourceBuildWorkItem& work_item) {
     require_valid_package_name(work_item.request.checkout_name);
@@ -118,7 +143,12 @@ PreparedProductionSourceBuildInvocation prepare_production_source_build_invocati
         require_static_production_source_build_work_item(work_item);
     }
 
+    // Explicit build/sync routeがnetwork前に準備済みならcapabilityを保持する。
+    // Update preparationはfilesystem mutationを行わず、execution ownerがactivateする。
+    std::optional<ValidatedCacheRoot> supplied_cache_root =
+            shared_prepared_cache_root(work_items);
     PacmanDatabasePaths database_paths = resolve_pacman_database_paths();
     return PreparedProductionSourceBuildInvocation{
-            std::move(work_items), std::move(database_paths)};
+            std::move(work_items), std::move(database_paths),
+            std::move(supplied_cache_root)};
 }

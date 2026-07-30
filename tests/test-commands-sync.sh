@@ -303,7 +303,7 @@ assert_no_mutation_events() {
 }
 
 assert_cache_entry_absent() {
-    entry=$XDG_CACHE_HOME/jpacker/$1
+    entry=$XDG_CACHE_HOME/moguet/$1
     if [ -e "$entry" ] || [ -L "$entry" ]; then
         echo "unexpected cache entry in case $case_name: $entry" >&2
         exit 1
@@ -311,9 +311,11 @@ assert_cache_entry_absent() {
 }
 
 assert_cache_entry_present() {
-    entry=$XDG_CACHE_HOME/jpacker/$1
+    entry=$XDG_CACHE_HOME/moguet/$1
     if [ ! -d "$entry" ]; then
         echo "missing cache entry in case $case_name: $entry" >&2
+        find "$XDG_CACHE_HOME" -maxdepth 3 -print >&2 || true
+        sed -n '1,200p' "$output_file" >&2
         exit 1
     fi
 }
@@ -655,11 +657,9 @@ assert_event_prefix_absent '^aur '
 assert_event_prefix_absent '^pacman '
 assert_event_prefix_absent '^(git|makepkg) '
 
-setup_case auto-install-target-validation-and-classification-order
+setup_case auto-install-validates-all-targets-before-classification
 run_status 1 -S source-a core/filesystem source-b
-assert_event_at 1 "pacman -Si source-a"
-assert_event_count 1 "pacman -Si source-a"
-assert_event_absent "pacman -Si source-b"
+assert_event_prefix_absent '^pacman '
 assert_event_prefix_absent '^aur '
 assert_no_mutation_events
 assert_contains "Invalid package name: core/filesystem" "$output_file"
@@ -692,11 +692,11 @@ setup_case auto-install-later-source-pkgdest-before-official-transaction
 printf 'PKGDEST=\n' > "$MOGUET_TEST_PACKAGE_BUILD_DIR/source-b"
 printf 'LOGFILE=%s\n' "$case_dir/jpacker.log" > "$config_file"
 export MOGUET_TEST_PACMAN_REPO_PACKAGES='official-a'
-mkdir -p "$XDG_CACHE_HOME/jpacker/preflight-sentinel"
+mkdir -p "$XDG_CACHE_HOME/moguet/preflight-sentinel"
 printf 'stable auto preflight fixture\n' > \
-    "$XDG_CACHE_HOME/jpacker/preflight-sentinel/state"
+    "$XDG_CACHE_HOME/moguet/preflight-sentinel/state"
 auto_preflight_checksum=$(cksum \
-    "$XDG_CACHE_HOME/jpacker/preflight-sentinel/state")
+    "$XDG_CACHE_HOME/moguet/preflight-sentinel/state")
 run_status 1 --noedit --nodiff --noconfirm -S official-a source-a source-b
 assert_contains "Source environment PKGDEST conflicts with invocation-owned artifact workspace." "$output_file"
 assert_event_count 0 "pacman-conf --verbose RootDir DBPath"
@@ -706,8 +706,8 @@ assert_event_pattern_count 0 '^pacman -U '
 assert_cache_entry_absent source-a
 assert_cache_entry_absent source-b
 auto_preflight_after=$(cksum \
-    "$XDG_CACHE_HOME/jpacker/preflight-sentinel/state")
-auto_preflight_entry_count=$(find "$XDG_CACHE_HOME/jpacker" \
+    "$XDG_CACHE_HOME/moguet/preflight-sentinel/state")
+auto_preflight_entry_count=$(find "$XDG_CACHE_HOME/moguet" \
     -mindepth 1 -maxdepth 1 -print | wc -l)
 if [ "$auto_preflight_after" != "$auto_preflight_checksum" ] ||
    [ "$auto_preflight_entry_count" -ne 1 ]; then

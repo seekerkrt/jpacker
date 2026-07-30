@@ -3,8 +3,7 @@
 #include "aur_rpc.hpp"
 #include "logging.hpp"
 #include "package_identifier.hpp"
-#include "process.hpp"
-#include "shell_words.hpp"
+#include "trusted_git.hpp"
 
 #include <array>
 #include <cerrno>
@@ -623,25 +622,23 @@ void validate_aur_export_checkout(
         const AurExportSource& source, const TemporaryDirectoryGuard& checkout) {
     checkout.require_owned_identity();
     require_export_git_directory(checkout);
-    std::string remote_command =
-            "git -C " + shell_words::quote(checkout.anchored_path().string()) +
-            " config --local --get remote.origin.url 2>/dev/null";
-    CapturedCommandResult remote_result =
-            capture_command_output(remote_command.c_str());
-    if(remote_result.exit_code != 0) {
+    std::string current_remote_url;
+    try {
+        current_remote_url = trusted_git_aur_export_remote_origin_url(
+                checkout.anchored_path());
+    } catch(const std::exception&) {
         throw std::runtime_error(
                 "Failed to read local remote.origin.url for AUR PackageBase " +
-                source.package_base + " (git config exit " +
-                std::to_string(remote_result.exit_code) + ").");
+                source.package_base + ".");
     }
-    if(remote_result.output.empty()) {
+    if(current_remote_url.empty()) {
         throw std::runtime_error(
                 "Missing remote.origin.url for AUR PackageBase " + source.package_base + ".");
     }
-    if(!remote_url_matches_expected(remote_result.output, source.git_url)) {
+    if(!remote_url_matches_expected(current_remote_url, source.git_url)) {
         throw std::runtime_error(
-                "Remote URL mismatch for AUR PackageBase " + source.package_base +
-                ": " + remote_result.output);
+                "Remote URL mismatch for AUR PackageBase " +
+                source.package_base + ".");
     }
 
     require_regular_export_pkgbuild(
@@ -652,10 +649,8 @@ void validate_aur_export_checkout(
 void clone_and_validate_aur_export(
         const AurExportSource& source, const TemporaryDirectoryGuard& checkout) {
     checkout.require_owned_identity();
-    std::string clone_command =
-            "git clone --quiet -- " + shell_words::quote(source.git_url) + " " +
-            shell_words::quote(checkout.anchored_path().string()) + " > /dev/null";
-    if(run_command(clone_command) != 0) {
+    if(trusted_git_clone_aur_export(
+               source.git_url, checkout.anchored_path()) != 0) {
         throw std::runtime_error("Failed to clone AUR PackageBase " + source.package_base + ".");
     }
     validate_aur_export_checkout(source, checkout);

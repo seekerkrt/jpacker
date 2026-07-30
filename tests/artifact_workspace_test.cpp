@@ -1,16 +1,21 @@
 #include "artifact_workspace.hpp"
 
 #include "package_identifier.hpp"
+#include "trusted_cache_test_support.hpp"
 
 #include <algorithm>
+#include <cerrno>
 #include <cstdlib>
 #include <exception>
+#include <fcntl.h>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <linux/openat2.h>
 #include <memory>
 #include <optional>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <sys/stat.h>
@@ -109,6 +114,21 @@ public:
     }
 };
 
+class ScopedCleanupChildOpen final {
+public:
+    explicit ScopedCleanupChildOpen(
+            ArtifactWorkspaceCleanupChildOpenForTest open_child) noexcept {
+        set_artifact_workspace_cleanup_child_open_for_test(open_child);
+    }
+
+    ScopedCleanupChildOpen(const ScopedCleanupChildOpen&) = delete;
+    ScopedCleanupChildOpen& operator=(const ScopedCleanupChildOpen&) = delete;
+
+    ~ScopedCleanupChildOpen() noexcept {
+        set_artifact_workspace_cleanup_child_open_for_test(nullptr);
+    }
+};
+
 void write_file(const fs::path& path, const std::string& contents = "fixture") {
     std::ofstream file(path, std::ios::binary | std::ios::trunc);
     if(!file) {
@@ -143,6 +163,14 @@ struct stat require_path_status(const fs::path& path) {
     return status;
 }
 
+bool path_exists_no_follow(const fs::path& path) {
+    struct stat status {};
+    if(lstat(path.c_str(), &status) == 0) return true;
+    if(errno == ENOENT) return false;
+    throw std::runtime_error(
+            "Failed to inspect test fixture path: " + path.string());
+}
+
 class ScopedEnvironmentVariable final {
     std::string                key_;
     std::optional<std::string> previous_value_;
@@ -173,6 +201,28 @@ public:
                     key_.c_str(), previous_value_->c_str(), 1));
         else
             static_cast<void>(unsetenv(key_.c_str()));
+    }
+};
+
+class ScopedStreamCapture final {
+    std::ostream&       stream_;
+    std::ostringstream buffer_;
+    std::streambuf*     previous_buffer_ = nullptr;
+
+public:
+    explicit ScopedStreamCapture(std::ostream& stream)
+        : stream_(stream), previous_buffer_(stream_.rdbuf(buffer_.rdbuf())) {
+    }
+
+    ScopedStreamCapture(const ScopedStreamCapture&) = delete;
+    ScopedStreamCapture& operator=(const ScopedStreamCapture&) = delete;
+
+    ~ScopedStreamCapture() noexcept {
+        stream_.rdbuf(previous_buffer_);
+    }
+
+    std::string str() const {
+        return buffer_.str();
     }
 };
 
@@ -225,6 +275,10 @@ public:
             write_file(argv_log_, "");
             write_file(environment_log_, "");
             write_file(cwd_log_, "");
+            fs::create_directory(path_ / "cache-home");
+            fs::permissions(
+                    path_ / "cache-home", fs::perms::owner_all,
+                    fs::perm_options::replace);
 
             std::string command_path = absolute_stub_directory.string();
             const char* previous_path = std::getenv("PATH");
@@ -302,6 +356,109 @@ public:
     }
 };
 
+enum class WorkspaceCreationObserverAction {
+    ThrowOnly,
+    LeaveNonEmpty,
+    ReplaceWithSymlink,
+    MoveOutside,
+};
+
+WorkspaceCreationObserverAction g_workspace_creation_observer_action =
+        WorkspaceCreationObserverAction::ThrowOnly;
+fs::path g_workspace_creation_observed_path;
+fs::path g_workspace_creation_auxiliary_path;
+bool     g_workspace_creation_observer_called = false;
+
+void fail_workspace_creation_for_test(const fs::path& workspace_path) {
+    g_workspace_creation_observer_called = true;
+    g_workspace_creation_observed_path = workspace_path;
+
+    switch(g_workspace_creation_observer_action) {
+    case WorkspaceCreationObserverAction::ThrowOnly:
+        break;
+    case WorkspaceCreationObserverAction::LeaveNonEmpty:
+        write_file(workspace_path / "rollback-blocker");
+        break;
+    case WorkspaceCreationObserverAction::ReplaceWithSymlink: {
+        fs::path moved_original = workspace_path;
+        moved_original += ".rollback-original";
+        fs::rename(workspace_path, moved_original);
+        write_file(moved_original / "original-sentinel");
+        fs::create_directory_symlink(
+                g_workspace_creation_auxiliary_path, workspace_path);
+        break;
+    }
+    case WorkspaceCreationObserverAction::MoveOutside:
+        fs::rename(workspace_path, g_workspace_creation_auxiliary_path);
+        write_file(
+                g_workspace_creation_auxiliary_path / "original-sentinel");
+        break;
+    }
+
+    throw std::runtime_error(
+            "Injected artifact workspace creation failure.");
+}
+
+class ScopedArtifactWorkspaceCreationObserver final {
+public:
+    explicit ScopedArtifactWorkspaceCreationObserver(
+            ArtifactWorkspaceCreationObserverForTest observer) {
+        set_artifact_workspace_creation_observer_for_test(observer);
+    }
+
+    ScopedArtifactWorkspaceCreationObserver(
+            const ScopedArtifactWorkspaceCreationObserver&) = delete;
+    ScopedArtifactWorkspaceCreationObserver& operator=(
+            const ScopedArtifactWorkspaceCreationObserver&) = delete;
+
+    ~ScopedArtifactWorkspaceCreationObserver() noexcept {
+        set_artifact_workspace_creation_observer_for_test(nullptr);
+    }
+};
+
+fs::path g_cleanup_observer_target;
+fs::path g_cleanup_observer_destination;
+bool     g_cleanup_observer_called = false;
+
+void replace_cleanup_file_with_symlink_for_test(
+        const fs::path& workspace_path) {
+    g_cleanup_observer_called = true;
+    const fs::path target = workspace_path / g_cleanup_observer_target;
+    fs::remove(target);
+    fs::create_symlink(g_cleanup_observer_destination, target);
+}
+
+void move_cleanup_directory_outside_for_test(
+        const fs::path& workspace_path) {
+    g_cleanup_observer_called = true;
+    const fs::path target = workspace_path / g_cleanup_observer_target;
+    fs::rename(target, g_cleanup_observer_destination);
+    fs::create_directory_symlink(g_cleanup_observer_destination, target);
+}
+
+void move_cleanup_workspace_outside_for_test(
+        const fs::path& workspace_path) {
+    g_cleanup_observer_called = true;
+    fs::rename(workspace_path, g_cleanup_observer_destination);
+}
+
+class ScopedArtifactWorkspaceCleanupObserver final {
+public:
+    explicit ScopedArtifactWorkspaceCleanupObserver(
+            ArtifactWorkspaceCleanupPreDeleteObserverForTest observer) {
+        set_artifact_workspace_cleanup_pre_delete_observer_for_test(observer);
+    }
+
+    ScopedArtifactWorkspaceCleanupObserver(
+            const ScopedArtifactWorkspaceCleanupObserver&) = delete;
+    ScopedArtifactWorkspaceCleanupObserver& operator=(
+            const ScopedArtifactWorkspaceCleanupObserver&) = delete;
+
+    ~ScopedArtifactWorkspaceCleanupObserver() noexcept {
+        set_artifact_workspace_cleanup_pre_delete_observer_for_test(nullptr);
+    }
+};
+
 ValidatedCachePath prepare_checkout(const ValidatedCacheRoot& root) {
     fs::path checkout_path = root.path() / "source-checkout";
     fs::create_directory(checkout_path);
@@ -316,10 +473,11 @@ std::uintmax_t different_user_id() {
 
 ArtifactWorkspace create_test_artifact_workspace(
         const ValidatedCacheRoot& expected_root) {
-    ValidatedPrivateCacheRoot root = prepare_private_trusted_cache_root();
+    ValidatedPrivateCacheRoot root =
+            prepare_private_trusted_cache_root(expected_root);
     expect(
             root.canonical_path() == expected_root.canonical_path(),
-            "Private and legacy cache root paths differ");
+            "Private and trusted cache root paths differ");
     return create_artifact_workspace(std::move(root));
 }
 
@@ -396,11 +554,15 @@ void test_private_cache_root_umask_matrix(const fs::path& test_root) {
             fs::path cache_home =
                     test_root / ("private-root-umask-" +
                                  std::to_string(mask));
+            fs::create_directory(cache_home);
+            set_path_mode(cache_home, 0700);
             ScopedEnvironmentVariable cache_home_environment(
                     "XDG_CACHE_HOME", cache_home.string());
             ScopedUmask scoped_umask(mask);
+            ValidatedCacheRoot trusted_root =
+                    prepare_test_trusted_cache_root();
             ValidatedPrivateCacheRoot root =
-                    prepare_private_trusted_cache_root();
+                    prepare_private_trusted_cache_root(trusted_root);
             const struct stat status = require_path_status(root.path());
             expect(
                     (status.st_mode & 07777) == 0700,
@@ -415,29 +577,32 @@ void test_private_cache_root_umask_matrix(const fs::path& test_root) {
 
 void test_existing_private_cache_root_modes(const fs::path& test_root) {
     const std::vector<std::pair<mode_t, bool>> cases = {
-            {0700, true}, {0755, true}, {0775, false}, {01775, true}};
+            {0700, true}, {0755, true}, {0775, false}, {01775, false}};
     for(const auto& [mode, should_accept] : cases) {
         fs::path cache_home =
                 test_root / ("private-root-existing-" +
                              std::to_string(mode));
-        fs::path root_path = cache_home / "jpacker";
+        fs::path root_path = cache_home / "moguet";
         fs::create_directories(root_path);
+        set_path_mode(cache_home, 0700);
         set_path_mode(root_path, mode);
         ScopedEnvironmentVariable cache_home_environment(
                 "XDG_CACHE_HOME", cache_home.string());
 
         if(should_accept) {
+            ValidatedCacheRoot trusted_root =
+                    prepare_test_trusted_cache_root();
             ValidatedPrivateCacheRoot root =
-                    prepare_private_trusted_cache_root();
+                    prepare_private_trusted_cache_root(trusted_root);
             root.require_unchanged_identity();
         } else {
             expect_runtime_error(
                     []() {
                         static_cast<void>(
-                                prepare_private_trusted_cache_root());
+                                prepare_test_trusted_cache_root());
                     },
                     "unsafe existing private cache root mode",
-                    "sticky bit");
+                    "permissions are unsafe");
             expect(
                     (require_path_status(root_path).st_mode & 07777) == mode,
                     "Private cache root factory silently changed an unsafe mode");
@@ -447,9 +612,13 @@ void test_existing_private_cache_root_modes(const fs::path& test_root) {
 
 void test_private_cache_root_wrong_owner_seam(const fs::path& test_root) {
     fs::path cache_home = test_root / "private-root-wrong-owner";
+    fs::create_directory(cache_home);
+    set_path_mode(cache_home, 0700);
     ScopedEnvironmentVariable cache_home_environment(
             "XDG_CACHE_HOME", cache_home.string());
-    ValidatedPrivateCacheRoot root = prepare_private_trusted_cache_root();
+    ValidatedCacheRoot trusted_root = prepare_test_trusted_cache_root();
+    ValidatedPrivateCacheRoot root =
+            prepare_private_trusted_cache_root(trusted_root);
     expect_runtime_error(
             [&root]() {
                 require_private_cache_root_identity_for_test(
@@ -461,23 +630,28 @@ void test_private_cache_root_wrong_owner_seam(const fs::path& test_root) {
 void test_private_cache_root_symlink_rejected(const fs::path& test_root) {
     fs::path cache_home = test_root / "private-root-symlink";
     fs::path target = test_root / "private-root-symlink-target";
-    fs::create_directories(cache_home);
+    fs::create_directory(cache_home);
+    set_path_mode(cache_home, 0700);
     fs::create_directory(target);
-    fs::create_directory_symlink(target, cache_home / "jpacker");
+    fs::create_directory_symlink(target, cache_home / "moguet");
     ScopedEnvironmentVariable cache_home_environment(
             "XDG_CACHE_HOME", cache_home.string());
     expect_runtime_error(
             []() {
-                static_cast<void>(prepare_private_trusted_cache_root());
+                static_cast<void>(prepare_test_trusted_cache_root());
             },
             "private cache root symlink", "symlink");
 }
 
 void test_private_cache_root_replacement_rejected(const fs::path& test_root) {
     fs::path cache_home = test_root / "private-root-replacement";
+    fs::create_directory(cache_home);
+    set_path_mode(cache_home, 0700);
     ScopedEnvironmentVariable cache_home_environment(
             "XDG_CACHE_HOME", cache_home.string());
-    ValidatedPrivateCacheRoot root = prepare_private_trusted_cache_root();
+    ValidatedCacheRoot trusted_root = prepare_test_trusted_cache_root();
+    ValidatedPrivateCacheRoot root =
+            prepare_private_trusted_cache_root(trusted_root);
     fs::path moved_root = root.path();
     moved_root += ".original";
     fs::rename(root.path(), moved_root);
@@ -486,30 +660,35 @@ void test_private_cache_root_replacement_rejected(const fs::path& test_root) {
 
     expect_runtime_error(
             [&root]() { root.require_unchanged_identity(); },
-            "private cache root replacement", "changed identity");
+            "private cache root replacement", "concurrent replacement");
 }
 
-void test_legacy_trusted_cache_root_compatibility(
+void test_trusted_and_private_cache_root_identity(
         const fs::path& test_root) {
     const mode_t original_mask = read_process_umask();
     {
-        fs::path cache_home = test_root / "legacy-root-umask-0002";
+        fs::path cache_home = test_root / "shared-root-umask-0002";
+        fs::create_directory(cache_home);
+        set_path_mode(cache_home, 0700);
         ScopedEnvironmentVariable cache_home_environment(
                 "XDG_CACHE_HOME", cache_home.string());
         ScopedUmask scoped_umask(0002);
-        ValidatedCacheRoot root = prepare_trusted_cache_root();
+        ValidatedCacheRoot root = prepare_test_trusted_cache_root();
         const struct stat status = require_path_status(root.path());
         expect(
                 (status.st_mode & 07777) == 0700,
-                "Legacy-first cache root creation did not establish mode 0700");
-        static_cast<void>(prepare_trusted_cache_root());
+                "Trusted cache root creation did not establish mode 0700");
         ValidatedPrivateCacheRoot private_root =
-                prepare_private_trusted_cache_root();
+                prepare_private_trusted_cache_root(root);
+        expect(
+                private_root.device() == root.device() &&
+                        private_root.inode() == root.inode(),
+                "Private cache root did not retain the trusted root identity");
         private_root.require_unchanged_identity();
     }
     expect(
             read_process_umask() == original_mask,
-            "Legacy compatibility test did not restore the process umask");
+            "Trusted/private identity test did not restore the process umask");
 }
 
 void test_workspace_symlink_rejected(const ValidatedCacheRoot& root) {
@@ -607,6 +786,350 @@ void test_cleanup_identity_mismatch_refuses_delete(
             fs::is_directory(original_path),
             "Cleanup deleted the original workspace reached by its descriptor");
     workspace.retain_for_diagnostics();
+}
+
+void test_cleanup_preflight_failure_deletes_zero_entries(
+        const ValidatedCacheRoot& root) {
+    ArtifactWorkspace workspace = create_test_artifact_workspace(root);
+    const fs::path     preserved_file = workspace.path() / "preserved-file";
+    const fs::path     blocked_directory = workspace.path() / "blocked";
+    write_file(preserved_file, "preserve-on-preflight-failure");
+    fs::create_directory(blocked_directory);
+    write_file(blocked_directory / "nested-sentinel");
+    fs::permissions(
+            blocked_directory, fs::perms::none,
+            fs::perm_options::replace);
+
+    expect_runtime_error(
+            [&workspace]() { workspace.cleanup(); },
+            "cleanup full-tree preflight failure", "workspace directory");
+    expect(
+            path_exists_no_follow(preserved_file),
+            "Cleanup preflight failure deleted an already scanned entry");
+    expect(
+            path_exists_no_follow(blocked_directory),
+            "Cleanup preflight failure deleted the blocked directory");
+
+    fs::permissions(
+            blocked_directory, fs::perms::owner_all,
+            fs::perm_options::replace);
+    workspace.cleanup();
+}
+
+bool          g_cleanup_child_open_called = false;
+std::string   g_cleanup_child_open_leaf;
+std::uint64_t g_cleanup_child_open_flags = 0;
+std::uint64_t g_cleanup_child_open_resolve = 0;
+
+int refuse_cleanup_child_open_as_mount_for_test(
+        int, const std::string& leaf_name, std::uint64_t flags,
+        std::uint64_t resolve) {
+    g_cleanup_child_open_called = true;
+    g_cleanup_child_open_leaf = leaf_name;
+    g_cleanup_child_open_flags = flags;
+    g_cleanup_child_open_resolve = resolve;
+    errno = EXDEV;
+    return -1;
+}
+
+void test_cleanup_mount_boundary_refuses_before_delete(
+        const ValidatedCacheRoot& root) {
+    ArtifactWorkspace workspace = create_test_artifact_workspace(root);
+    const fs::path nested = workspace.path() / "mounted-directory";
+    const fs::path sibling = workspace.path() / "ordinary-sibling";
+    fs::create_directory(nested);
+    write_file(nested / "outside-sentinel", "preserved");
+    write_file(sibling, "preserved");
+    g_cleanup_child_open_called = false;
+    g_cleanup_child_open_leaf.clear();
+    g_cleanup_child_open_flags = 0;
+    g_cleanup_child_open_resolve = 0;
+
+    {
+        ScopedCleanupChildOpen mount_boundary(
+                refuse_cleanup_child_open_as_mount_for_test);
+        expect_runtime_error(
+                [&workspace]() { workspace.cleanup(); },
+                "cleanup mount boundary", "filesystem boundary");
+    }
+
+    expect(
+            g_cleanup_child_open_called &&
+                    g_cleanup_child_open_leaf == "mounted-directory",
+            "Cleanup did not inspect the simulated mount boundary.");
+    const std::uint64_t expected_flags =
+            O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW;
+    const std::uint64_t expected_resolve =
+            RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS | RESOLVE_NO_XDEV;
+    expect(
+            g_cleanup_child_open_flags == expected_flags &&
+                    g_cleanup_child_open_resolve == expected_resolve,
+            "Cleanup child open did not request the no-follow/no-xdev boundary.");
+    expect(
+            read_file(nested / "outside-sentinel") == "preserved",
+            "Cleanup crossed the simulated bind-mount boundary.");
+    expect(
+            read_file(sibling) == "preserved",
+            "Cleanup deleted an entry before mount-boundary preflight finished.");
+    workspace.cleanup();
+}
+
+void test_cleanup_predelete_symlink_replacement_deletes_zero_entries(
+        const ValidatedCacheRoot& root, const fs::path& outside_root) {
+    const fs::path outside_target =
+            outside_root / "cleanup-symlink-outside-target";
+    write_file(outside_target, "outside-sentinel");
+
+    ArtifactWorkspace workspace = create_test_artifact_workspace(root);
+    const fs::path     preserved_file = workspace.path() / "preserved-file";
+    const fs::path     replaced_file = workspace.path() / "replace-me";
+    write_file(preserved_file, "preserved");
+    write_file(replaced_file, "original");
+
+    g_cleanup_observer_target = "replace-me";
+    g_cleanup_observer_destination = outside_target;
+    g_cleanup_observer_called = false;
+    {
+        ScopedArtifactWorkspaceCleanupObserver observer(
+                replace_cleanup_file_with_symlink_for_test);
+        expect_runtime_error(
+                [&workspace]() { workspace.cleanup(); },
+                "cleanup pre-delete symlink replacement", "changed");
+    }
+
+    expect(
+            g_cleanup_observer_called,
+            "Cleanup pre-delete replacement observer was not called");
+    expect(
+            path_exists_no_follow(preserved_file),
+            "Cleanup deleted an unrelated entry before refusing replacement");
+    expect(
+            S_ISLNK(require_path_status(replaced_file).st_mode),
+            "Cleanup deleted the symlink replacement");
+    expect_equal(
+            "cleanup outside symlink target", read_file(outside_target),
+            "outside-sentinel");
+    workspace.retain_for_diagnostics();
+    fs::remove(replaced_file);
+    fs::remove_all(workspace.path());
+    fs::remove(outside_target);
+}
+
+void test_cleanup_predelete_nested_root_out_deletes_zero_entries(
+        const ValidatedCacheRoot& root, const fs::path& outside_root) {
+    const fs::path moved_directory =
+            outside_root / "cleanup-nested-moved-outside";
+    ArtifactWorkspace workspace = create_test_artifact_workspace(root);
+    const fs::path     preserved_file = workspace.path() / "preserved-file";
+    const fs::path     nested_directory = workspace.path() / "nested";
+    write_file(preserved_file, "preserved");
+    fs::create_directory(nested_directory);
+    write_file(nested_directory / "nested-sentinel", "nested-preserved");
+
+    g_cleanup_observer_target = "nested";
+    g_cleanup_observer_destination = moved_directory;
+    g_cleanup_observer_called = false;
+    {
+        ScopedArtifactWorkspaceCleanupObserver observer(
+                move_cleanup_directory_outside_for_test);
+        expect_runtime_error(
+                [&workspace]() { workspace.cleanup(); },
+                "cleanup nested root-out replacement", "changed");
+    }
+
+    expect(
+            g_cleanup_observer_called,
+            "Cleanup nested root-out observer was not called");
+    expect(
+            path_exists_no_follow(preserved_file),
+            "Cleanup deleted an unrelated entry before refusing nested move");
+    expect(
+            S_ISLNK(require_path_status(nested_directory).st_mode),
+            "Cleanup deleted the nested symlink replacement");
+    expect_equal(
+            "moved nested directory sentinel",
+            read_file(moved_directory / "nested-sentinel"),
+            "nested-preserved");
+    workspace.retain_for_diagnostics();
+    fs::remove(nested_directory);
+    fs::remove_all(workspace.path());
+    fs::remove_all(moved_directory);
+}
+
+void test_cleanup_predelete_workspace_root_out_deletes_zero_entries(
+        const ValidatedCacheRoot& root, const fs::path& outside_root) {
+    const fs::path moved_workspace =
+            outside_root / "cleanup-workspace-moved-outside";
+    ArtifactWorkspace workspace = create_test_artifact_workspace(root);
+    const fs::path     original_workspace_path = workspace.path();
+    write_file(workspace.path() / "workspace-sentinel", "root-preserved");
+
+    g_cleanup_observer_destination = moved_workspace;
+    g_cleanup_observer_called = false;
+    {
+        ScopedArtifactWorkspaceCleanupObserver observer(
+                move_cleanup_workspace_outside_for_test);
+        expect_runtime_error(
+                [&workspace]() { workspace.cleanup(); },
+                "cleanup workspace root-out", "changed");
+    }
+
+    expect(
+            g_cleanup_observer_called,
+            "Cleanup workspace root-out observer was not called");
+    expect(
+            !path_exists_no_follow(original_workspace_path),
+            "Cleanup workspace root-out test unexpectedly restored the name");
+    expect_equal(
+            "moved workspace sentinel",
+            read_file(moved_workspace / "workspace-sentinel"),
+            "root-preserved");
+    workspace.retain_for_diagnostics();
+    fs::remove_all(moved_workspace);
+}
+
+void test_failed_creation_rollback_success(
+        const ValidatedCacheRoot& root) {
+    g_workspace_creation_observer_action =
+            WorkspaceCreationObserverAction::ThrowOnly;
+    g_workspace_creation_observed_path.clear();
+    g_workspace_creation_observer_called = false;
+    {
+        ScopedArtifactWorkspaceCreationObserver observer(
+                fail_workspace_creation_for_test);
+        expect_runtime_error(
+                [&root]() {
+                    static_cast<void>(create_test_artifact_workspace(root));
+                },
+                "failed workspace creation rollback",
+                "Injected artifact workspace creation failure");
+    }
+
+    expect(
+            g_workspace_creation_observer_called,
+            "Workspace creation failure observer was not called");
+    expect(
+            !path_exists_no_follow(g_workspace_creation_observed_path),
+            "Failed workspace creation rollback left its original directory");
+}
+
+void test_failed_creation_rollback_failure_is_noexcept_and_warned(
+        const ValidatedCacheRoot& root) {
+    g_workspace_creation_observer_action =
+            WorkspaceCreationObserverAction::LeaveNonEmpty;
+    g_workspace_creation_observed_path.clear();
+    g_workspace_creation_observer_called = false;
+    ScopedStreamCapture warning_capture(std::cout);
+    {
+        ScopedArtifactWorkspaceCreationObserver observer(
+                fail_workspace_creation_for_test);
+        expect_runtime_error(
+                [&root]() {
+                    static_cast<void>(create_test_artifact_workspace(root));
+                },
+                "failed nonempty workspace creation rollback",
+                "Injected artifact workspace creation failure");
+    }
+
+    expect(
+            g_workspace_creation_observer_called,
+            "Nonempty creation rollback observer was not called");
+    expect(
+            path_exists_no_follow(
+                    g_workspace_creation_observed_path / "rollback-blocker"),
+            "Failed creation rollback removed a nonempty original directory");
+    expect(
+            warning_capture.str().find(
+                    "Refusing unsafe artifact workspace creation rollback") !=
+                    std::string::npos,
+            "Failed creation rollback did not emit a noexcept warning");
+    expect(
+            warning_capture.str().find(root.path().string()) ==
+                    std::string::npos,
+            "Failed creation rollback warning disclosed the cache root");
+    fs::remove_all(g_workspace_creation_observed_path);
+}
+
+void test_failed_creation_rollback_symlink_replacement_is_preserved(
+        const ValidatedCacheRoot& root, const fs::path& outside_root) {
+    const fs::path outside_target =
+            outside_root / "creation-rollback-symlink-target";
+    fs::create_directory(outside_target);
+    write_file(outside_target / "outside-sentinel", "outside-preserved");
+    g_workspace_creation_observer_action =
+            WorkspaceCreationObserverAction::ReplaceWithSymlink;
+    g_workspace_creation_auxiliary_path = outside_target;
+    g_workspace_creation_observed_path.clear();
+    g_workspace_creation_observer_called = false;
+    ScopedStreamCapture warning_capture(std::cout);
+    {
+        ScopedArtifactWorkspaceCreationObserver observer(
+                fail_workspace_creation_for_test);
+        expect_runtime_error(
+                [&root]() {
+                    static_cast<void>(create_test_artifact_workspace(root));
+                },
+                "failed creation rollback symlink replacement",
+                "Injected artifact workspace creation failure");
+    }
+
+    fs::path moved_original = g_workspace_creation_observed_path;
+    moved_original += ".rollback-original";
+    expect(
+            S_ISLNK(require_path_status(
+                            g_workspace_creation_observed_path)
+                            .st_mode),
+            "Failed creation rollback deleted the symlink replacement");
+    expect_equal(
+            "failed creation rollback original sentinel",
+            read_file(moved_original / "original-sentinel"), "fixture");
+    expect_equal(
+            "failed creation rollback outside sentinel",
+            read_file(outside_target / "outside-sentinel"),
+            "outside-preserved");
+    expect(
+            warning_capture.str().find(
+                    "Refusing unsafe artifact workspace creation rollback") !=
+                    std::string::npos,
+            "Symlink creation rollback refusal did not emit a warning");
+    fs::remove(g_workspace_creation_observed_path);
+    fs::remove_all(moved_original);
+    fs::remove_all(outside_target);
+}
+
+void test_failed_creation_rollback_root_out_is_preserved(
+        const ValidatedCacheRoot& root, const fs::path& outside_root) {
+    const fs::path moved_workspace =
+            outside_root / "creation-rollback-moved-outside";
+    g_workspace_creation_observer_action =
+            WorkspaceCreationObserverAction::MoveOutside;
+    g_workspace_creation_auxiliary_path = moved_workspace;
+    g_workspace_creation_observed_path.clear();
+    g_workspace_creation_observer_called = false;
+    ScopedStreamCapture warning_capture(std::cout);
+    {
+        ScopedArtifactWorkspaceCreationObserver observer(
+                fail_workspace_creation_for_test);
+        expect_runtime_error(
+                [&root]() {
+                    static_cast<void>(create_test_artifact_workspace(root));
+                },
+                "failed creation rollback root-out",
+                "Injected artifact workspace creation failure");
+    }
+
+    expect(
+            !path_exists_no_follow(g_workspace_creation_observed_path),
+            "Failed creation rollback followed a moved directory by name");
+    expect_equal(
+            "failed creation rollback moved sentinel",
+            read_file(moved_workspace / "original-sentinel"), "fixture");
+    expect(
+            warning_capture.str().find(
+                    "Refusing unsafe artifact workspace creation rollback") !=
+                    std::string::npos,
+            "Root-out creation rollback refusal did not emit a warning");
+    fs::remove_all(moved_workspace);
 }
 
 void test_default_scope_cleanup(const ValidatedCacheRoot& root) {
@@ -898,7 +1421,7 @@ void test_makepkg_context_rejects_checkout_replacement(
                 static_cast<void>(context.run_makepkg_build_only(
                         workspace, expected, ArtifactMakepkgBuildOptions{}));
             },
-            "checkout replacement", "checkout path changed identity");
+            "checkout replacement", "concurrent replacement");
     expect_equal(
             "checkout replacement command count",
             read_file(test_environment.command_log()), "");
@@ -1448,17 +1971,19 @@ int main(int argc, char* argv[]) {
         test_private_cache_root_symlink_rejected(test_environment.path());
         test_private_cache_root_replacement_rejected(
                 test_environment.path());
-        test_legacy_trusted_cache_root_compatibility(
+        test_trusted_and_private_cache_root_identity(
                 test_environment.path());
 
-        // Test processをumask 0002で起動しても、default fixture rootはprivate
-        // factoryが0700で確立してからlegacy viewを作る。
+        // Test processをumask 0002で起動しても、default fixture rootはXDG
+        // preparationが0700で確立し、private capabilityは同じinodeを保持する。
         {
+            ValidatedCacheRoot trusted_root =
+                    prepare_test_trusted_cache_root();
             ValidatedPrivateCacheRoot private_root =
-                    prepare_private_trusted_cache_root();
+                    prepare_private_trusted_cache_root(trusted_root);
             private_root.require_unchanged_identity();
         }
-        ValidatedCacheRoot root = prepare_trusted_cache_root();
+        ValidatedCacheRoot root = prepare_test_trusted_cache_root();
         ValidatedCachePath checkout = prepare_checkout(root);
 
         test_workspace_creation_contract(root);
@@ -1471,6 +1996,20 @@ int main(int argc, char* argv[]) {
         test_workspace_owner_test_seam(root);
         test_explicit_cleanup_success(root);
         test_cleanup_identity_mismatch_refuses_delete(root);
+        test_cleanup_preflight_failure_deletes_zero_entries(root);
+        test_cleanup_mount_boundary_refuses_before_delete(root);
+        test_cleanup_predelete_symlink_replacement_deletes_zero_entries(
+                root, test_environment.path());
+        test_cleanup_predelete_nested_root_out_deletes_zero_entries(
+                root, test_environment.path());
+        test_cleanup_predelete_workspace_root_out_deletes_zero_entries(
+                root, test_environment.path());
+        test_failed_creation_rollback_success(root);
+        test_failed_creation_rollback_failure_is_noexcept_and_warned(root);
+        test_failed_creation_rollback_symlink_replacement_is_preserved(
+                root, test_environment.path());
+        test_failed_creation_rollback_root_out_is_preserved(
+                root, test_environment.path());
         test_default_scope_cleanup(root);
         test_explicit_retention(root);
         test_retained_workspace_is_not_reused(root);

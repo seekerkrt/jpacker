@@ -4,6 +4,8 @@
 #include "separated_source_build.hpp"
 
 #include <deque>
+#include <cstdlib>
+#include <filesystem>
 #include <memory>
 #include <stdexcept>
 #include <utility>
@@ -15,6 +17,7 @@ namespace stub = system_source_upgrade_test_stub;
 enum class ScriptedSourceExecutionKind {
     Success,
     Failure,
+    CacheFailure,
     CleanupFailure,
     UnknownFailure,
 };
@@ -38,6 +41,8 @@ struct PhaseStubState {
     std::map<std::string, std::string> work_item_failures;
     std::optional<std::string> invocation_failure;
     std::optional<std::string> supported_options_failure;
+    bool cache_seed_failure = false;
+    bool cache_activation_failure = false;
     std::deque<stub::MetadataSessionScript> metadata_sessions;
     int system_exit_status = 0;
     std::optional<std::string> system_failure;
@@ -83,6 +88,33 @@ ResolvedSourceBuildIdentity default_identity(
 }
 
 } // namespace
+
+void activate_production_source_build_cache(
+        PreparedProductionSourceBuildInvocation&) {
+    // Phase tests isolate cache/filesystem mutation behind this seam.
+    if(g_state.cache_activation_failure) {
+        throw TrustedCacheError(TrustedCacheFailure{
+                TrustedCacheStage::RootRevalidation,
+                TrustedCacheErrorCode::ConcurrentReplacement,
+                std::nullopt});
+    }
+}
+
+void seed_production_source_build_cache(
+        PreparedProductionSourceBuildInvocation& invocation,
+        const ValidatedCacheRoot& cache_root) {
+    if(g_state.cache_seed_failure) {
+        throw TrustedCacheError(TrustedCacheFailure{
+                TrustedCacheStage::RootRevalidation,
+                TrustedCacheErrorCode::ConcurrentReplacement,
+                std::nullopt});
+    }
+    cache_root.require_unchanged_identity();
+    invocation.cache_root = cache_root;
+    for(auto& work_item : invocation.work_items) {
+        work_item.cache_root = cache_root;
+    }
+}
 
 namespace system_source_upgrade_test_stub {
 
@@ -132,6 +164,14 @@ void fail_supported_options(std::string diagnostic) {
     g_state.supported_options_failure = std::move(diagnostic);
 }
 
+void fail_cache_seed() {
+    g_state.cache_seed_failure = true;
+}
+
+void fail_cache_activation() {
+    g_state.cache_activation_failure = true;
+}
+
 void enqueue_metadata_session(MetadataSessionScript script) {
     g_state.metadata_sessions.push_back(std::move(script));
 }
@@ -156,6 +196,12 @@ void enqueue_source_failure(std::string diagnostic) {
     ScriptedSourceExecution execution;
     execution.kind = ScriptedSourceExecutionKind::Failure;
     execution.diagnostic = std::move(diagnostic);
+    g_state.source_executions.push_back(std::move(execution));
+}
+
+void enqueue_source_cache_failure() {
+    ScriptedSourceExecution execution;
+    execution.kind = ScriptedSourceExecutionKind::CacheFailure;
     g_state.source_executions.push_back(std::move(execution));
 }
 
@@ -259,6 +305,13 @@ void require_supported_production_source_build_options(
 
 ResolvedSourceBuildIdentity resolve_source_build_identity(
         const std::string& package_name) {
+    const char* cache_home = std::getenv("XDG_CACHE_HOME");
+    if(cache_home == nullptr ||
+       !std::filesystem::is_directory(
+               std::filesystem::path(cache_home) / "moguet")) {
+        fail_unexpected(
+                "Source identity resolution started before cache authority preparation.");
+    }
     g_state.events.push_back(stub::Event{
             stub::EventKind::SourceIdentityResolution,
             package_name});
@@ -314,7 +367,8 @@ prepare_production_source_build_invocation(
     }
     return PreparedProductionSourceBuildInvocation{
             std::move(work_items),
-            PacmanDatabasePaths{"/stub/root", "/stub/database"}};
+            PacmanDatabasePaths{"/stub/root", "/stub/database"},
+            std::nullopt};
 }
 
 PackageMetadataError::PackageMetadataError(PackageMetadataFailure failure)
@@ -447,6 +501,11 @@ SourceBuildExecutionResult execute_prepared_source_build_work_item_typed(
             return execution.result;
         case ScriptedSourceExecutionKind::Failure:
             throw std::runtime_error(execution.diagnostic);
+        case ScriptedSourceExecutionKind::CacheFailure:
+            throw TrustedCacheError(TrustedCacheFailure{
+                    TrustedCacheStage::RootRevalidation,
+                    TrustedCacheErrorCode::ConcurrentReplacement,
+                    std::nullopt});
         case ScriptedSourceExecutionKind::CleanupFailure:
             throw SeparatedSourceBuildCleanupError(
                     execution.cleanup_outcome,

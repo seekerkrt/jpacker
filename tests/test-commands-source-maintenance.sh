@@ -69,7 +69,7 @@ setup_case() {
     stdout_file=$case_dir/stdout
     stderr_file=$case_dir/stderr
     preference_dir=$case_dir/package.build
-    cache_root=$case_dir/xdg-cache/jpacker
+    cache_root=$case_dir/xdg-cache/moguet
     sudo_failures=$case_dir/sudo-failures
     config_file=$case_dir/jpacker.conf
     package_metadata_state=$case_dir/package-metadata-state
@@ -165,6 +165,21 @@ run_fail() {
     : > "$request_log"
     if "$test_binary" "$@" > "$output_file" 2>&1; then
         echo "expected command to fail: $*" >&2
+        sed -n '1,260p' "$output_file" >&2
+        cat "$command_log" >&2
+        exit 1
+    fi
+}
+
+run_clean_low_nofile_fail() {
+    soft_limit=$1
+    : > "$command_log"
+    : > "$request_log"
+    if (
+        ulimit -n "$soft_limit"
+        "$test_binary" --noconfirm clean > "$output_file" 2>&1
+    ); then
+        echo "expected clean preflight to fail with low RLIMIT_NOFILE" >&2
         sed -n '1,260p' "$output_file" >&2
         cat "$command_log" >&2
         exit 1
@@ -1159,7 +1174,7 @@ setup_case clean-unsafe-preflight
 mkdir -p "$cache_root/preflighted-safe" "$case_dir/outside"
 ln -s "$case_dir/outside" "$cache_root/unsafe"
 run_fail clean
-assert_contains "symlink component is not allowed" "$output_file"
+assert_contains "Trusted Moguet cache cleanup preflight failed: symlink refused." "$output_file"
 assert_total_command_count 0
 if [ ! -d "$cache_root/preflighted-safe" ]; then
     echo "clean mutated a safe target before all cache targets passed preflight" >&2
@@ -1167,6 +1182,22 @@ if [ ! -d "$cache_root/preflighted-safe" ]; then
 fi
 if [ ! -L "$cache_root/unsafe" ]; then
     echo "clean mutated the unsafe target after preflight failed" >&2
+    exit 1
+fi
+
+setup_case clean-fd-exhaustion-before-pacman
+mkdir -p "$cache_root"
+fd_entry=0
+while [ "$fd_entry" -lt 64 ]; do
+    mkdir "$cache_root/entry-$fd_entry"
+    fd_entry=$((fd_entry + 1))
+done
+run_clean_low_nofile_fail 24
+assert_contains "Too many open files" "$output_file"
+assert_not_contains "Cleaning package caches..." "$output_file"
+assert_total_command_count 0
+if [ "$(find "$cache_root" -mindepth 1 -maxdepth 1 -type d | wc -l)" -ne 64 ]; then
+    echo "low-RLIMIT cleanup preflight mutated cache entries" >&2
     exit 1
 fi
 
@@ -1187,7 +1218,7 @@ assert_contains "Moguet cache cleaned." "$output_file"
 assert_path_absent "$cache_root/alpha"
 assert_path_absent "$cache_root/beta"
 
-setup_case clean-partial-removal
+setup_case clean-concurrent-replacement
 mkdir -p "$cache_root/alpha" "$cache_root/beta" "$case_dir/outside"
 export MOGUET_TEST_SOURCE_MAINTENANCE_PACMAN_SC_RACE_PATH=$cache_root/alpha
 export MOGUET_TEST_SOURCE_MAINTENANCE_PACMAN_SC_RACE_TARGET=$case_dir/outside
@@ -1196,8 +1227,11 @@ if [ ! -L "$cache_root/alpha" ]; then
     echo "clean race fixture did not replace the first target" >&2
     exit 1
 fi
-assert_path_absent "$cache_root/beta"
-assert_contains "Failed to remove $cache_root/alpha" "$output_file"
+if [ ! -d "$cache_root/beta" ]; then
+    echo "clean continued deleting after concurrent replacement" >&2
+    exit 1
+fi
+assert_contains "Failed to clean Moguet cache" "$output_file"
 assert_contains "Moguet cache cleanup was incomplete." "$output_file"
 
 setup_case clean-prompt-no
@@ -1214,6 +1248,23 @@ mkdir -p "$cache_root"
 run_ok clean
 assert_command "sudo pacman -Sc"
 assert_contains "Moguet cache is empty." "$output_file"
+
+setup_case clean-missing-cache-root-and-repeat
+assert_path_absent "$cache_root"
+run_ok clean
+assert_command "sudo pacman -Sc"
+assert_contains "Moguet cache is empty." "$output_file"
+if [ ! -d "$cache_root" ] || [ "$(stat -c '%a' "$cache_root")" != 700 ]; then
+    echo "clean did not lazily prepare a 0700 Moguet cache root" >&2
+    exit 1
+fi
+run_ok clean
+assert_command "sudo pacman -Sc"
+assert_contains "Moguet cache is empty." "$output_file"
+if [ "$(stat -c '%a' "$cache_root")" != 700 ]; then
+    echo "repeated clean changed the existing safe cache mode" >&2
+    exit 1
+fi
 
 setup_case clean-no-confirm-default
 mkdir -p "$cache_root/alpha"

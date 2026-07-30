@@ -170,6 +170,9 @@ class PreparedAurUpdateSourceBuildInvocation final {
     execute_prepared_aur_update_source_build_invocation(
             PreparedAurUpdateSourceBuildInvocation invocation,
             const AppConfig& config);
+    friend void seed_aur_update_source_build_cache(
+            AurUpdateSourceBuildPreparation& preparation,
+            const ValidatedCacheRoot& cache_root);
 
 public:
     PreparedAurUpdateSourceBuildInvocation(
@@ -216,6 +219,12 @@ struct AurUpdateSourceBuildPreparation {
     bool is_noop() const noexcept;
     bool is_blocked() const noexcept;
 };
+
+// Aggregate/command boundaryで先に準備したcache capabilityを、存在する
+// execution invocationへ配る。blocked/no-op preparationでは再resolveしない。
+void seed_aur_update_source_build_cache(
+        AurUpdateSourceBuildPreparation& preparation,
+        const ValidatedCacheRoot& cache_root);
 
 // Update preflightを、executionへ接続しないowned invocation snapshotへ射影する。
 AurUpdateSourceBuildPreparation prepare_aur_update_source_build_invocation(

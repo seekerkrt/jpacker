@@ -59,6 +59,7 @@ struct SourceBuildRequest {
 
 SourceBuildExecutionResult execute_source_build_typed(
         const SourceBuildRequest& request,
+        const ValidatedCacheRoot& cache_root,
         DesiredInstallReason desired_reason,
         const PacmanDatabasePaths& database_paths,
         const AppConfig& config);
@@ -69,6 +70,7 @@ PackageBaseSourceBuildExecutionResult
 execute_source_build_package_base_typed(
         const SourceBuildRequest& request,
         const std::vector<RequiredPackageArtifactTarget>& required_targets,
+        const ValidatedCacheRoot& cache_root,
         const PacmanDatabasePaths& database_paths,
         const AppConfig& config);
 
@@ -76,6 +78,7 @@ execute_source_build_package_base_typed(
 // artifact transaction成功後はpackage stateのtyped outcomeを返すlegacy wrapper。
 std::optional<ArtifactInstallExecutionOutcome> execute_source_build(
         const SourceBuildRequest& request,
+        const ValidatedCacheRoot& cache_root,
         DesiredInstallReason desired_reason,
         const PacmanDatabasePaths& database_paths,
         const AppConfig& config);

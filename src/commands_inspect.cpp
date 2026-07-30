@@ -3,6 +3,7 @@
 #include "application_identity.hpp"
 #include "aur_rpc.hpp"
 #include "aur_update_query.hpp"
+#include "cache_authority.hpp"
 #include "checkout_fetch.hpp"
 #include "dependency_plan.hpp"
 #include "dependency_provider.hpp"
@@ -12,6 +13,7 @@
 #include "package_metadata.hpp"
 #include "pkgbuild_export.hpp"
 #include "repository_query.hpp"
+#include "trusted_cache.hpp"
 
 #include <algorithm>
 #include <array>
@@ -704,12 +706,17 @@ int cmd_fetch(const std::vector<std::string>& targets, const std::vector<std::st
         return 1;
     }
 
+    // Invalid targetはcache mutationより前に全件拒否する。fetch routeへ入った後は
+    // AUR/network queryより先にcache-only authorityを1回だけadoptする。
+    for(const auto& target : targets) {
+        require_valid_package_name(target);
+    }
+    ValidatedCacheRoot cache_root = prepare_process_cache_root();
+
     bool                                           failed = false;
     std::vector<std::pair<std::string, BuildPlan>> plans;
     for(size_t i = 0; i < targets.size(); ++i) {
         const auto& target = targets[i];
-        require_valid_package_name(target);
-
         try {
             BuildPlan plan = resolve_fetch_plan(target);
 
@@ -731,6 +738,7 @@ int cmd_fetch(const std::vector<std::string>& targets, const std::vector<std::st
         for(const auto& entry : plan.order) {
             try {
                 fetch_persistent_checkout(
+                        cache_root,
                         entry.package_base,
                         aur_git_url_for_package_base(entry.package_base));
             } catch(const std::exception& e) {

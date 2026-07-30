@@ -1456,8 +1456,12 @@ bool PreparedFilteredAurUpdateOperation::is_blocked() const noexcept {
 PreparedFilteredAurUpdateOperation prepare_filtered_aur_update_operation(
         AurUpdateQueryResult query_result,
         std::vector<UpgradeAllExplicitSourceIdentity> explicit_sources,
-        const AppConfig& config) {
+        const AppConfig& config,
+        std::optional<ValidatedCacheRoot> cache_root) {
     PreparedFilteredAurUpdateOperation operation;
+    if(cache_root.has_value()) {
+        cache_root->require_unchanged_identity();
+    }
     operation.query_result = std::move(query_result);
     operation.target_adapter = adapt_aur_update_plan_for_upgrade_all(
             operation.query_result.plan, operation.issues);
@@ -1489,6 +1493,11 @@ PreparedFilteredAurUpdateOperation prepare_filtered_aur_update_operation(
             operation.upgrade_all_plan,
             operation.build_unit_correlations,
             operation.issues);
+    if(cache_root.has_value()) {
+        // Preflight/planning can be non-trivial. Revoke a moved cache root
+        // before strict preference and pacman database preparation begins.
+        cache_root->require_unchanged_identity();
+    }
     if(has_operation_planning_issue(operation) &&
        has_executable_target(operation.preflight) &&
        !has_blocking_targets(operation.preflight)) {
@@ -1503,6 +1512,10 @@ PreparedFilteredAurUpdateOperation prepare_filtered_aur_update_operation(
         operation.preparation.emplace(
                 prepare_aur_update_source_build_invocation(
                         operation.preflight, selection, false, config));
+    }
+    if(cache_root.has_value()) {
+        seed_aur_update_source_build_cache(
+                operation.preparation.value(), cache_root.value());
     }
     return operation;
 }

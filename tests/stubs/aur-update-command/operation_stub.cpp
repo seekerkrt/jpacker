@@ -1398,11 +1398,17 @@ bool PreparedFilteredAurUpdateOperation::is_blocked() const noexcept {
 PreparedFilteredAurUpdateOperation prepare_filtered_aur_update_operation(
         AurUpdateQueryResult query_result,
         std::vector<UpgradeAllExplicitSourceIdentity> explicit_sources,
-        const AppConfig& config) {
+        const AppConfig& config,
+        std::optional<ValidatedCacheRoot> cache_root) {
     if(!explicit_sources.empty()) {
         throw std::logic_error(
                 "AUR update command stub only supports an empty explicit source set.");
     }
+    if(!cache_root.has_value()) {
+        throw std::logic_error(
+                "AUR update command did not supply cache authority before query execution.");
+    }
+    cache_root->require_unchanged_identity();
 
     PreparedFilteredAurUpdateOperation prepared;
     prepared.query_result = std::move(query_result);

@@ -1,5 +1,7 @@
 #include "artifact_workspace.hpp"
 
+#include "trusted_cache_test_support.hpp"
+
 #include <cerrno>
 #include <cstdlib>
 #include <exception>
@@ -188,6 +190,10 @@ public:
             write_file(command_log_, "");
             write_file(argv_log_, "");
             write_file(cwd_log_, "");
+            fs::create_directory(path_ / "cache-home");
+            fs::permissions(
+                    path_ / "cache-home", fs::perms::owner_all,
+                    fs::perm_options::replace);
 
             std::string command_path = absolute_stub_directory.string();
             const char* previous_path = std::getenv("PATH");
@@ -262,10 +268,11 @@ ValidatedCachePath prepare_checkout(const ValidatedCacheRoot& root) {
 
 ArtifactWorkspace create_test_artifact_workspace(
         const ValidatedCacheRoot& expected_root) {
-    ValidatedPrivateCacheRoot root = prepare_private_trusted_cache_root();
+    ValidatedPrivateCacheRoot root =
+            prepare_private_trusted_cache_root(expected_root);
     expect(
             root.canonical_path() == expected_root.canonical_path(),
-            "Private and legacy cache root paths differ");
+            "Private and trusted cache root paths differ");
     return create_artifact_workspace(std::move(root));
 }
 
@@ -1371,11 +1378,13 @@ int main(int argc, char* argv[]) {
 
         TestEnvironment test_environment(makepkg_stub_directory);
         {
+            ValidatedCacheRoot trusted_root =
+                    prepare_test_trusted_cache_root();
             ValidatedPrivateCacheRoot private_root =
-                    prepare_private_trusted_cache_root();
+                    prepare_private_trusted_cache_root(trusted_root);
             private_root.require_unchanged_identity();
         }
-        ValidatedCacheRoot root = prepare_trusted_cache_root();
+        ValidatedCacheRoot root = prepare_test_trusted_cache_root();
         ValidatedCachePath checkout = prepare_checkout(root);
 
         test_packagelist_single_multiple_and_order(root);
