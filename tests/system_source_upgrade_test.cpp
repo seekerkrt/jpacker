@@ -1,9 +1,11 @@
 #include "artifact_install_executor.hpp"
+#include "cache_authority.hpp"
 #include "system_source_upgrade.hpp"
 #include "stubs/system-source-upgrade/phase_stub.hpp"
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdlib>
 #include <filesystem>
 #include <iostream>
 #include <optional>
@@ -42,6 +44,67 @@ namespace {
 
 namespace fs = std::filesystem;
 namespace stub = system_source_upgrade_test_stub;
+
+class ScopedEnvironmentVariable final {
+    std::string                name_;
+    std::optional<std::string> original_value_;
+
+public:
+    ScopedEnvironmentVariable(std::string name, std::string value)
+        : name_(std::move(name)) {
+        const char* original = std::getenv(name_.c_str());
+        if(original != nullptr) original_value_ = original;
+        if(setenv(name_.c_str(), value.c_str(), 1) != 0) {
+            throw std::runtime_error(
+                    "Failed to set scoped test environment variable.");
+        }
+    }
+
+    ScopedEnvironmentVariable(const ScopedEnvironmentVariable&) = delete;
+    ScopedEnvironmentVariable& operator=(
+            const ScopedEnvironmentVariable&) = delete;
+
+    ~ScopedEnvironmentVariable() noexcept {
+        if(original_value_.has_value()) {
+            static_cast<void>(setenv(
+                    name_.c_str(), original_value_->c_str(), 1));
+        } else {
+            static_cast<void>(unsetenv(name_.c_str()));
+        }
+    }
+};
+
+class TemporaryCacheEnvironment final {
+    fs::path root_;
+
+public:
+    TemporaryCacheEnvironment() {
+        std::string path_template =
+                "/tmp/moguet-system-source-cache-test-XXXXXX";
+        std::vector<char> writable(
+                path_template.begin(), path_template.end());
+        writable.push_back('\0');
+        char* created = mkdtemp(writable.data());
+        if(created == nullptr) {
+            throw std::runtime_error(
+                    "Failed to create system/source cache test directory.");
+        }
+        root_ = created;
+        if(setenv("XDG_CACHE_HOME", root_.c_str(), 1) != 0) {
+            throw std::runtime_error(
+                    "Failed to set system/source cache test environment.");
+        }
+    }
+
+    TemporaryCacheEnvironment(const TemporaryCacheEnvironment&) = delete;
+    TemporaryCacheEnvironment& operator=(
+            const TemporaryCacheEnvironment&) = delete;
+
+    ~TemporaryCacheEnvironment() noexcept {
+        std::error_code cleanup_error;
+        fs::remove_all(root_, cleanup_error);
+    }
+};
 
 constexpr const char* SYSTEM_COMMAND =
         "sudo pacman '-Syu' '--noconfirm'";
@@ -613,6 +676,72 @@ void test_first_source_failure_stops_suffix() {
     stub::require_script_consumed();
 }
 
+void test_cache_activation_failure_blocks_system_mutation() {
+    stub::reset();
+    const std::vector<std::string> packages = {"cache-activation"};
+    const AppConfig config = full_option_config();
+    PreparedSystemSourceUpgrade prepared = prepare_sources(packages, config);
+    stub::fail_cache_activation();
+
+    SystemSourceUpgradeResult result =
+            execute_prepared_system_source_upgrade(
+                    std::move(prepared), config, OBSERVER);
+    expect(
+            result.status ==
+                            SystemSourceUpgradeStatus::BlockedBeforeMutation &&
+                    result.system.status ==
+                            SystemUpgradePhaseStatus::NotAttempted,
+            "Cache activation failure did not block before system mutation");
+    expect(
+            !result.issues.empty() &&
+                    result.issues.back().kind ==
+                            SystemSourceUpgradeIssueKind::
+                                    CacheAuthorityInvalid &&
+                    result.issues.back().trusted_cache_failure.has_value() &&
+                    result.issues.back().trusted_cache_failure->code ==
+                            TrustedCacheErrorCode::ConcurrentReplacement,
+            "Cache activation failure lost typed detail");
+    expect(stub::system_commands().empty(),
+           "Cache activation failure reached the system command");
+    expect(stub::source_execution_calls().empty(),
+           "Cache activation failure reached source execution");
+    stub::require_script_consumed();
+}
+
+void test_source_cache_failure_is_typed() {
+    stub::reset();
+    const std::vector<std::string> packages = {"cache-replaced"};
+    const AppConfig config = full_option_config();
+    PreparedSystemSourceUpgrade prepared = prepare_sources(packages, config);
+    enqueue_post_metadata(packages);
+    stub::enqueue_source_cache_failure();
+
+    SystemSourceUpgradeResult result =
+            execute_prepared_system_source_upgrade(
+                    std::move(prepared), config, OBSERVER);
+    expect(
+            result.status ==
+                            SystemSourceUpgradeStatus::StoppedOnSourceFailure &&
+                    result.system.status ==
+                            SystemUpgradePhaseStatus::Completed,
+            "Source cache failure lost completed system phase");
+    expect(
+            result.registered_source_results.front().failure_kind ==
+                    RegisteredSourceUpgradeFailureKind::
+                            CacheAuthorityFailure,
+            "Source cache failure was flattened to build/install failure");
+    expect(
+            !result.issues.empty() &&
+                    result.issues.back().kind ==
+                            SystemSourceUpgradeIssueKind::
+                                    CacheAuthorityInvalid &&
+                    result.issues.back().trusted_cache_failure.has_value() &&
+                    result.issues.back().trusted_cache_failure->code ==
+                            TrustedCacheErrorCode::ConcurrentReplacement,
+            "Source cache failure lost typed detail");
+    stub::require_script_consumed();
+}
+
 void test_partial_source_completion() {
     stub::reset();
     const std::vector<std::string> packages = {"first", "second", "third"};
@@ -707,6 +836,13 @@ void test_no_change_cleanup_failure() {
 }
 
 void test_preference_read_failure_blocks_before_mutation() {
+    const char* xdg_cache_home = std::getenv("XDG_CACHE_HOME");
+    expect(xdg_cache_home != nullptr,
+           "System/source cache test environment is unavailable");
+    const fs::path cache_root = fs::path(xdg_cache_home) / "moguet";
+    expect(!fs::exists(cache_root),
+           "Cache root existed before strict preference validation");
+
     stub::reset();
     stub::set_preference_directory(preference_directory({"broken"}));
     SourcePreferenceFailure failure{
@@ -739,6 +875,158 @@ void test_preference_read_failure_blocks_before_mutation() {
            "Preference failure reached system mutation");
     expect(stub::source_execution_calls().empty(),
            "Preference failure reached source mutation");
+    expect(!fs::exists(cache_root),
+           "Preference failure created the Moguet cache root");
+    stub::require_script_consumed();
+}
+
+void test_initial_cache_resolution_failure_is_typed() {
+    stub::reset();
+    configure_preferences({"cache-resolution"});
+    ScopedEnvironmentVariable cache_environment(
+            "XDG_CACHE_HOME", "relative-cache-home");
+
+    SystemSourceUpgradeResult result = take_blocked(
+            prepare_system_source_upgrade(full_option_config(), OBSERVER));
+    expect(
+            result.status ==
+                            SystemSourceUpgradeStatus::BlockedBeforeMutation &&
+                    result.system.status ==
+                            SystemUpgradePhaseStatus::NotAttempted &&
+                    !result.issues.empty() &&
+                    result.issues.back().kind ==
+                            SystemSourceUpgradeIssueKind::
+                                    CacheAuthorityInvalid,
+            "Relative XDG cache path did not produce a typed blocker");
+    expect(
+            result.issues.back().cache_resolution_failure.has_value() &&
+                    result.issues.back().cache_resolution_failure->code ==
+                            xdg_paths::ResolutionErrorCode::RelativePath &&
+                    !result.issues.back().cache_preparation_failure.has_value() &&
+                    !result.issues.back().trusted_cache_failure.has_value(),
+            "Cache resolution failure lost or mixed typed detail");
+    expect(stub::system_commands().empty() &&
+                   stub::source_execution_calls().empty(),
+           "Cache resolution failure reached external mutation");
+    stub::require_script_consumed();
+}
+
+void test_initial_cache_preparation_failure_is_typed() {
+    const char* xdg_cache_home = std::getenv("XDG_CACHE_HOME");
+    expect(xdg_cache_home != nullptr,
+           "System/source cache test environment is unavailable");
+    const fs::path missing_anchor =
+            fs::path(xdg_cache_home) / "missing-explicit-cache-anchor";
+    expect(!fs::exists(missing_anchor),
+           "Missing cache anchor fixture already exists");
+
+    stub::reset();
+    configure_preferences({"cache-preparation"});
+    ScopedEnvironmentVariable cache_environment(
+            "XDG_CACHE_HOME", missing_anchor.string());
+
+    SystemSourceUpgradeResult result = take_blocked(
+            prepare_system_source_upgrade(full_option_config(), OBSERVER));
+    expect(
+            result.status ==
+                            SystemSourceUpgradeStatus::BlockedBeforeMutation &&
+                    result.system.status ==
+                            SystemUpgradePhaseStatus::NotAttempted &&
+                    !result.issues.empty() &&
+                    result.issues.back().kind ==
+                            SystemSourceUpgradeIssueKind::
+                                    CacheAuthorityInvalid,
+            "Missing explicit cache anchor did not produce a typed blocker");
+    expect(
+            result.issues.back().cache_preparation_failure.has_value() &&
+                    result.issues.back().cache_preparation_failure->code ==
+                            xdg_directory_safety::PreparationErrorCode::
+                                    MissingAnchor &&
+                    !result.issues.back().cache_resolution_failure.has_value() &&
+                    !result.issues.back().trusted_cache_failure.has_value(),
+            "Cache preparation failure lost or mixed typed detail");
+    expect(!fs::exists(missing_anchor),
+           "Cache preparation failure created a missing explicit anchor");
+    expect(stub::system_commands().empty() &&
+                   stub::source_execution_calls().empty(),
+           "Cache preparation failure reached external mutation");
+    stub::require_script_consumed();
+}
+
+void test_initial_trusted_cache_failure_is_typed() {
+    stub::reset();
+    configure_preferences({"trusted-cache-preparation"});
+    ValidatedCacheRoot cache_root = prepare_process_cache_root();
+    const fs::path active_path = cache_root.path();
+    const fs::path moved_path =
+            active_path.parent_path() / "moguet-revoked-preparation";
+
+    std::error_code rename_error;
+    fs::rename(active_path, moved_path, rename_error);
+    expect(!rename_error,
+           "Failed to revoke trusted cache preparation fixture");
+
+    std::optional<SystemSourceUpgradePreparation> preparation;
+    try {
+        preparation.emplace(prepare_system_source_upgrade(
+                full_option_config(), OBSERVER, cache_root));
+    } catch(...) {
+        std::error_code restore_error;
+        fs::rename(moved_path, active_path, restore_error);
+        throw;
+    }
+    fs::rename(moved_path, active_path, rename_error);
+    expect(!rename_error,
+           "Failed to restore trusted cache preparation fixture");
+
+    SystemSourceUpgradeResult result =
+            take_blocked(std::move(preparation.value()));
+    expect(
+            result.status ==
+                            SystemSourceUpgradeStatus::BlockedBeforeMutation &&
+                    result.system.status ==
+                            SystemUpgradePhaseStatus::NotAttempted &&
+                    !result.issues.empty() &&
+                    result.issues.back().kind ==
+                            SystemSourceUpgradeIssueKind::
+                                    CacheAuthorityInvalid,
+            "Revoked trusted cache did not produce a typed blocker");
+    expect(
+            result.issues.back().trusted_cache_failure.has_value() &&
+                    result.issues.back().trusted_cache_failure->code ==
+                            TrustedCacheErrorCode::ConcurrentReplacement &&
+                    !result.issues.back().cache_resolution_failure.has_value() &&
+                    !result.issues.back().cache_preparation_failure.has_value(),
+            "Trusted cache preparation failure lost or mixed typed detail");
+    expect(stub::system_commands().empty() &&
+                   stub::source_execution_calls().empty(),
+           "Trusted cache preparation failure reached external mutation");
+    stub::require_script_consumed();
+}
+
+void test_cache_seed_failure_is_typed() {
+    stub::reset();
+    configure_preferences({"cache-seed"});
+    stub::fail_cache_seed();
+
+    SystemSourceUpgradeResult result = take_blocked(
+            prepare_system_source_upgrade(full_option_config(), OBSERVER));
+    expect(
+            result.status ==
+                            SystemSourceUpgradeStatus::BlockedBeforeMutation &&
+                    result.system.status ==
+                            SystemUpgradePhaseStatus::NotAttempted &&
+                    !result.issues.empty() &&
+                    result.issues.back().kind ==
+                            SystemSourceUpgradeIssueKind::
+                                    CacheAuthorityInvalid &&
+                    result.issues.back().trusted_cache_failure.has_value() &&
+                    result.issues.back().trusted_cache_failure->code ==
+                            TrustedCacheErrorCode::ConcurrentReplacement,
+            "Cache seed failure was flattened to invocation preparation");
+    expect(stub::system_commands().empty() &&
+                   stub::source_execution_calls().empty(),
+           "Cache seed failure reached external mutation");
     stub::require_script_consumed();
 }
 
@@ -1094,10 +1382,31 @@ void run_case(
 
 int main() {
     try {
+        TemporaryCacheEnvironment cache_environment;
         std::size_t completed_cases = 0;
         run_case(
                 "empty registered source snapshot",
                 test_empty_registered_snapshot,
+                completed_cases);
+        run_case(
+                "preference read failure blocks mutation and cache creation",
+                test_preference_read_failure_blocks_before_mutation,
+                completed_cases);
+        run_case(
+                "initial cache resolution failure remains typed",
+                test_initial_cache_resolution_failure_is_typed,
+                completed_cases);
+        run_case(
+                "initial cache preparation failure remains typed",
+                test_initial_cache_preparation_failure_is_typed,
+                completed_cases);
+        run_case(
+                "initial trusted cache failure remains typed",
+                test_initial_trusted_cache_failure_is_typed,
+                completed_cases);
+        run_case(
+                "cache seed failure remains typed",
+                test_cache_seed_failure_is_typed,
                 completed_cases);
         run_case(
                 "all sources success, order, options, and package change",
@@ -1124,6 +1433,14 @@ int main() {
                 test_first_source_failure_stops_suffix,
                 completed_cases);
         run_case(
+                "cache activation failure blocks system mutation",
+                test_cache_activation_failure_blocks_system_mutation,
+                completed_cases);
+        run_case(
+                "source cache failure remains typed",
+                test_source_cache_failure_is_typed,
+                completed_cases);
+        run_case(
                 "partial source completion",
                 test_partial_source_completion,
                 completed_cases);
@@ -1134,10 +1451,6 @@ int main() {
         run_case(
                 "no-change cleanup failure",
                 test_no_change_cleanup_failure,
-                completed_cases);
-        run_case(
-                "preference read failure blocks mutation",
-                test_preference_read_failure_blocks_before_mutation,
                 completed_cases);
         run_case(
                 "registered preference disappearance blocks mutation",

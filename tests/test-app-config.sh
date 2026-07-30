@@ -310,7 +310,7 @@ if [ ! -f "$HOME/config-log/jpacker.log" ]; then
     fail "config LOGFILE was not expanded and initialized"
 fi
 if [ -e "$XDG_CACHE_HOME/jpacker/jpacker.log" ]; then
-    fail "config LOGFILE was replaced by the default cache log"
+    fail "config LOGFILE was replaced by the legacy default cache log"
 fi
 if [ -e "$XDG_STATE_HOME/moguet" ] || [ -L "$XDG_STATE_HOME/moguet" ]; then
     fail "explicit legacy LOGFILE also initialized the default state log"
@@ -385,7 +385,8 @@ assert_command_log_empty
 if [ -e "$HOME/config-log/jpacker.log" ]; then
     fail "config RMDEPS upgrade-aur guard ran after log initialization"
 fi
-if [ -e "$XDG_CACHE_HOME/jpacker" ]; then
+if [ -e "$XDG_CACHE_HOME/moguet" ] || [ -L "$XDG_CACHE_HOME/moguet" ] ||
+   [ -e "$XDG_CACHE_HOME/jpacker" ] || [ -L "$XDG_CACHE_HOME/jpacker" ]; then
     fail "config RMDEPS upgrade-aur guard initialized the default cache"
 fi
 if [ -e "$XDG_STATE_HOME/moguet" ] || [ -L "$XDG_STATE_HOME/moguet" ]; then
@@ -401,7 +402,8 @@ assert_command_log_empty
 if [ -e "$HOME/config-log/jpacker.log" ]; then
     fail "config RMDEPS upgrade-all guard ran after log initialization"
 fi
-if [ -e "$XDG_CACHE_HOME/jpacker" ]; then
+if [ -e "$XDG_CACHE_HOME/moguet" ] || [ -L "$XDG_CACHE_HOME/moguet" ] ||
+   [ -e "$XDG_CACHE_HOME/jpacker" ] || [ -L "$XDG_CACHE_HOME/jpacker" ]; then
     fail "config RMDEPS upgrade-all guard initialized the default cache"
 fi
 if [ -e "$XDG_STATE_HOME/moguet" ] || [ -L "$XDG_STATE_HOME/moguet" ]; then
@@ -435,7 +437,8 @@ assert_command_log_empty
 if [ -e "$HOME/config-log/jpacker.log" ]; then
     fail "CLI parse failure initialized the config log"
 fi
-if [ -e "$XDG_CACHE_HOME/jpacker" ]; then
+if [ -e "$XDG_CACHE_HOME/moguet" ] || [ -L "$XDG_CACHE_HOME/moguet" ] ||
+   [ -e "$XDG_CACHE_HOME/jpacker" ] || [ -L "$XDG_CACHE_HOME/jpacker" ]; then
     fail "CLI parse failure initialized the default cache"
 fi
 if [ -e "$XDG_STATE_HOME/moguet" ] || [ -L "$XDG_STATE_HOME/moguet" ]; then

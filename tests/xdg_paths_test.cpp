@@ -591,6 +591,149 @@ void test_state_only_resolver_ignores_unrelated_xdg_values() {
             "State-only explicit creation boundary");
 }
 
+void test_cache_only_resolver_uses_explicit_value() {
+    const xdg_paths::EnvironmentSnapshot environment{
+            .xdg_config_home = "relative/config-secret",
+            .xdg_state_home = "relative/state-secret",
+            .xdg_cache_home = "/cache-only/base",
+            .home = "relative/unused-home",
+    };
+    const xdg_paths::CachePaths paths =
+            xdg_paths::resolve_cache(environment);
+
+    expect_path(
+            paths.directory, "/cache-only/base/moguet",
+            "Cache-only explicit directory");
+    expect_creation_boundary(
+            paths.creation_boundary,
+            xdg_paths::DirectorySource::ExplicitXdg,
+            "/cache-only/base", "/cache-only/base", {"moguet"},
+            "Cache-only explicit creation boundary");
+}
+
+void test_cache_only_resolver_uses_home_fallback() {
+    const xdg_paths::EnvironmentSnapshot environment{
+            .xdg_config_home = "relative/config-secret",
+            .xdg_state_home = "relative/state-secret",
+            .xdg_cache_home = std::nullopt,
+            .home = "/cache-only/home",
+    };
+    const xdg_paths::CachePaths paths =
+            xdg_paths::resolve_cache(environment);
+
+    expect_path(
+            paths.directory, "/cache-only/home/.cache/moguet",
+            "Cache-only HOME fallback directory");
+    expect_creation_boundary(
+            paths.creation_boundary,
+            xdg_paths::DirectorySource::HomeFallback,
+            "/cache-only/home/.cache", "/cache-only/home",
+            {".cache", "moguet"},
+            "Cache-only HOME fallback creation boundary");
+}
+
+void test_cache_only_resolver_treats_empty_xdg_as_unset() {
+    const xdg_paths::EnvironmentSnapshot environment{
+            .xdg_config_home = "relative/config-secret",
+            .xdg_state_home = "relative/state-secret",
+            .xdg_cache_home = "",
+            .home = "/cache-only/empty-xdg-home",
+    };
+    const xdg_paths::CachePaths paths =
+            xdg_paths::resolve_cache(environment);
+
+    expect_path(
+            paths.directory,
+            "/cache-only/empty-xdg-home/.cache/moguet",
+            "Cache-only empty XDG fallback directory");
+    expect_creation_boundary(
+            paths.creation_boundary,
+            xdg_paths::DirectorySource::HomeFallback,
+            "/cache-only/empty-xdg-home/.cache",
+            "/cache-only/empty-xdg-home", {".cache", "moguet"},
+            "Cache-only empty XDG fallback creation boundary");
+}
+
+void test_cache_only_resolver_rejects_relative_xdg_value() {
+    const xdg_paths::EnvironmentSnapshot environment{
+            .xdg_config_home = std::nullopt,
+            .xdg_state_home = std::nullopt,
+            .xdg_cache_home = "relative/cache-secret",
+            .home = "/valid/fallback",
+    };
+    expect_resolution_error(
+            [&environment]() {
+                static_cast<void>(xdg_paths::resolve_cache(environment));
+            },
+            xdg_paths::DirectoryKind::Cache,
+            xdg_paths::EnvironmentVariable::XdgCacheHome,
+            xdg_paths::ResolutionErrorCode::RelativePath,
+            "XDG_CACHE_HOME must be an absolute path",
+            "relative/cache-secret");
+}
+
+void test_cache_process_adapter_reads_only_cache_authority() {
+    TemporaryDirectory temporary_directory;
+    const fs::path cache_home = temporary_directory.path() / "cache-home";
+
+    ScopedEnvironmentVariable config_home(
+            "XDG_CONFIG_HOME",
+            std::optional<std::string>{"relative/config-secret"});
+    ScopedEnvironmentVariable state_home(
+            "XDG_STATE_HOME",
+            std::optional<std::string>{"relative/state-secret"});
+    ScopedEnvironmentVariable cache_environment(
+            "XDG_CACHE_HOME",
+            std::optional<std::string>{cache_home.string()});
+    ScopedEnvironmentVariable home(
+            "HOME", std::optional<std::string>{"relative/unused-home"});
+    ScopedEnvironmentVariable sudo_user(
+            "SUDO_USER", std::optional<std::string>{"ordinary-user"});
+    ScopedEnvironmentVariable user(
+            "USER", std::optional<std::string>{"unrelated-user"});
+    ScopedEnvironmentVariable logname(
+            "LOGNAME", std::optional<std::string>{"another-user"});
+
+    const xdg_paths::CachePaths paths =
+            xdg_paths::resolve_cache_process_environment();
+    expect_path(
+            paths.directory, cache_home / "moguet",
+            "Cache process adapter directory");
+    expect(
+            !fs::exists(cache_home),
+            "Cache process adapter mutated the filesystem.");
+}
+
+void test_cache_process_adapter_uses_home_without_identity_inference() {
+    TemporaryDirectory temporary_directory;
+    const fs::path home_path = temporary_directory.path() / "effective-home";
+
+    ScopedEnvironmentVariable config_home(
+            "XDG_CONFIG_HOME",
+            std::optional<std::string>{"relative/config-secret"});
+    ScopedEnvironmentVariable state_home(
+            "XDG_STATE_HOME",
+            std::optional<std::string>{"relative/state-secret"});
+    ScopedEnvironmentVariable cache_home("XDG_CACHE_HOME", std::nullopt);
+    ScopedEnvironmentVariable home(
+            "HOME", std::optional<std::string>{home_path.string()});
+    ScopedEnvironmentVariable sudo_user(
+            "SUDO_USER", std::optional<std::string>{"inferred-user"});
+    ScopedEnvironmentVariable user(
+            "USER", std::optional<std::string>{"different-user"});
+    ScopedEnvironmentVariable logname(
+            "LOGNAME", std::optional<std::string>{"third-user"});
+
+    const xdg_paths::CachePaths paths =
+            xdg_paths::resolve_cache_process_environment();
+    expect_path(
+            paths.directory, home_path / ".cache" / "moguet",
+            "Cache process adapter HOME fallback directory");
+    expect(
+            !fs::exists(home_path),
+            "Cache process adapter created the HOME fallback tree.");
+}
+
 void test_state_process_adapter_reads_only_state_authority() {
     TemporaryDirectory temporary_directory;
     const fs::path state_home = temporary_directory.path() / "state-home";
@@ -704,6 +847,54 @@ void test_resolution_does_not_mutate_filesystem() {
             "XDG path resolution created the default log file.");
 }
 
+void test_cache_only_resolution_does_not_mutate_filesystem() {
+    TemporaryDirectory temporary_directory;
+    const fs::path sentinel_directory =
+            temporary_directory.path() / "sentinel";
+    const fs::path sentinel_file = sentinel_directory / "keep";
+    fs::create_directory(sentinel_directory);
+    {
+        std::ofstream file(sentinel_file, std::ios::binary);
+        if(!file) {
+            throw std::runtime_error(
+                    "Failed to create cache-only XDG test sentinel.");
+        }
+        file << "unchanged-cache-only-sentinel";
+    }
+
+    const fs::path config_base = temporary_directory.path() / "config-base";
+    const fs::path state_base = temporary_directory.path() / "state-base";
+    const fs::path cache_base = temporary_directory.path() / "cache-base";
+    const std::vector<std::string> before =
+            snapshot_tree(temporary_directory.path());
+    const xdg_paths::EnvironmentSnapshot environment{
+            .xdg_config_home = config_base.string(),
+            .xdg_state_home = state_base.string(),
+            .xdg_cache_home = cache_base.string(),
+            .home = std::nullopt,
+    };
+    const xdg_paths::CachePaths paths =
+            xdg_paths::resolve_cache(environment);
+    const std::vector<std::string> after =
+            snapshot_tree(temporary_directory.path());
+
+    expect(
+            before == after,
+            "Cache-only XDG path resolution changed the filesystem tree.");
+    expect(
+            read_file(sentinel_file) == "unchanged-cache-only-sentinel",
+            "Cache-only XDG path resolution changed the sentinel.");
+    expect(
+            !fs::exists(paths.directory),
+            "Cache-only XDG path resolution created the cache directory.");
+    expect(
+            !fs::exists(config_base),
+            "Cache-only XDG path resolution created the config directory.");
+    expect(
+            !fs::exists(state_base),
+            "Cache-only XDG path resolution created the state directory.");
+}
+
 template <typename Callable>
 void run_case(const std::string& name, Callable callable) {
     callable();
@@ -755,11 +946,32 @@ int main() {
                 "state-only resolver ignores unrelated XDG values",
                 test_state_only_resolver_ignores_unrelated_xdg_values);
         run_case(
+                "cache-only resolver uses explicit value",
+                test_cache_only_resolver_uses_explicit_value);
+        run_case(
+                "cache-only resolver uses HOME fallback",
+                test_cache_only_resolver_uses_home_fallback);
+        run_case(
+                "cache-only resolver treats empty XDG as unset",
+                test_cache_only_resolver_treats_empty_xdg_as_unset);
+        run_case(
+                "cache-only resolver rejects relative XDG value",
+                test_cache_only_resolver_rejects_relative_xdg_value);
+        run_case(
+                "cache process adapter reads only cache authority",
+                test_cache_process_adapter_reads_only_cache_authority);
+        run_case(
+                "cache process adapter uses HOME without identity inference",
+                test_cache_process_adapter_uses_home_without_identity_inference);
+        run_case(
                 "state process adapter reads only state authority",
                 test_state_process_adapter_reads_only_state_authority);
         run_case(
                 "resolution does not mutate filesystem",
                 test_resolution_does_not_mutate_filesystem);
+        run_case(
+                "cache-only resolution does not mutate filesystem",
+                test_cache_only_resolution_does_not_mutate_filesystem);
     } catch(const std::exception& error) {
         std::cerr << error.what() << '\n';
         return 1;

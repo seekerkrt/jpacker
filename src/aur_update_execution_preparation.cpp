@@ -1482,6 +1482,14 @@ bool AurUpdateSourceBuildPreparation::is_blocked() const noexcept {
     return !invocation.has_value() && !issues.empty();
 }
 
+void seed_aur_update_source_build_cache(
+        AurUpdateSourceBuildPreparation& preparation,
+        const ValidatedCacheRoot& cache_root) {
+    if(!preparation.invocation.has_value()) return;
+    seed_production_source_build_cache(
+            preparation.invocation->production_invocation_, cache_root);
+}
+
 AurUpdateSourceBuildPreparation prepare_aur_update_source_build_invocation(
         const AurUpdateExecutionPreflight& preflight,
         const AurUpdateBuildUnitSelection& build_unit_selection,

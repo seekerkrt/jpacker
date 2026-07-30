@@ -1421,6 +1421,62 @@ void test_unknown_failure_is_contained_without_success() {
     expect_no_fabricated_child_success(work_item, "unknown failure");
 }
 
+void test_trusted_cache_failure_escapes_with_typed_detail() {
+    const AppConfig config = runner_config();
+    const PacmanDatabasePaths database_paths{
+            "/trusted-cache/root", "/trusted-cache/database"};
+    AurUpdateSourceBuildPreparation preparation = prepare_fixture(
+            single_root_preflight(
+                    "trusted-cache-root",
+                    DesiredInstallReason::Explicit,
+                    "trusted-cache-root"),
+            false,
+            config,
+            database_paths);
+    execution_stub::reset();
+    execution_stub::enqueue_trusted_cache_failure(
+            expected_execution(
+                    0,
+                    "trusted-cache-root",
+                    {required_target(
+                            "trusted-cache-root",
+                            "trusted-cache-root",
+                            DesiredInstallReason::Explicit)},
+                    false,
+                    database_paths,
+                    config),
+            TrustedCacheFailure{
+                    TrustedCacheStage::ChildValidation,
+                    TrustedCacheErrorCode::ConcurrentReplacement,
+                    std::nullopt});
+
+    std::optional<TrustedCacheFailure> observed_failure;
+    try {
+        static_cast<void>(
+                execute_prepared_aur_update_source_build_invocation(
+                        std::move(*preparation.invocation), config));
+    } catch(const TrustedCacheError& error) {
+        observed_failure = error.failure();
+    } catch(const std::exception& error) {
+        throw std::runtime_error(
+                "Trusted cache failure was flattened by the AUR update runner: " +
+                std::string(error.what()));
+    }
+
+    expect(
+            observed_failure.has_value() &&
+                    observed_failure->stage ==
+                            TrustedCacheStage::ChildValidation &&
+                    observed_failure->code ==
+                            TrustedCacheErrorCode::ConcurrentReplacement &&
+                    !observed_failure->system_error.has_value(),
+            "AUR update runner changed trusted cache failure detail");
+    expect(
+            execution_stub::call_history().size() == 1,
+            "Trusted cache failure crossed an unexpected runner boundary");
+    execution_stub::require_script_consumed();
+}
+
 void test_prepared_correlation_is_rejected_before_first_executor_call() {
     const AppConfig config = runner_config();
     const PacmanDatabasePaths database_paths{
@@ -1580,6 +1636,9 @@ int main() {
         run_case(
                 "unknown failure containment",
                 test_unknown_failure_is_contained_without_success);
+        run_case(
+                "trusted cache failure propagation",
+                test_trusted_cache_failure_escapes_with_typed_detail);
         run_case(
                 "prepared correlation prevalidation",
                 test_prepared_correlation_is_rejected_before_first_executor_call);

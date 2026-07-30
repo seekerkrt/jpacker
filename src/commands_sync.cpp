@@ -2,6 +2,7 @@
 
 #include "app_config.hpp"
 #include "aur_rpc.hpp"
+#include "cache_authority.hpp"
 #include "cli_routing.hpp"
 #include "dependency_plan.hpp"
 #include "logging.hpp"
@@ -11,6 +12,7 @@
 #include "shell_words.hpp"
 #include "source_install.hpp"
 #include "source_preference.hpp"
+#include "trusted_cache.hpp"
 
 #include <algorithm>
 #include <cstddef>
@@ -149,6 +151,18 @@ void append_source_build_work_items(
     }
 }
 
+ValidatedCacheRoot prepare_sync_source_build_cache_root() {
+    return prepare_process_cache_root();
+}
+
+void assign_source_build_cache_root(
+        std::vector<ProductionSourceBuildWorkItem>& work_items,
+        const ValidatedCacheRoot& cache_root) {
+    for(auto& work_item : work_items) {
+        work_item.cache_root = cache_root;
+    }
+}
+
 int execute_sync_source_build_invocation(
         const PreparedProductionSourceBuildInvocation& invocation,
         const AppConfig& config) {
@@ -226,6 +240,8 @@ int cmd_sync_install(
             return 1;
         }
         require_supported_production_source_build_options(config);
+        ValidatedCacheRoot cache_root =
+                prepare_sync_source_build_cache_root();
 
         std::vector<BuildPlan> plans;
         plans.reserve(parsed.targets.size());
@@ -242,6 +258,7 @@ int cmd_sync_install(
                     prepare_aur_source_build_work_items(
                             plan, false, source_sync_options.needed));
         }
+        assign_source_build_cache_root(work_items, cache_root);
         // POLICY(#168,#242): every per-root plan keeps its existing order, while
         // all roots complete static preflight and one database-path resolution
         // before the first checkout/workspace/build/install mutation.
@@ -259,9 +276,11 @@ int cmd_sync_install(
     std::vector<std::string> repo_targets;
     std::vector<std::string> aur_targets;
     std::set<size_t>         aur_target_token_indices;
+    for(const std::string& target : parsed.targets) {
+        require_valid_package_name(target);
+    }
     for(size_t i = 0; i < parsed.targets.size(); ++i) {
         const std::string& target = parsed.targets[i];
-        require_valid_package_name(target);
         if(is_force_source(target)) {
             aur_targets.push_back(target);
             aur_target_token_indices.insert(parsed.target_token_indices[i]);
@@ -284,6 +303,10 @@ int cmd_sync_install(
         }
         require_supported_production_source_build_options(config);
     }
+    std::optional<ValidatedCacheRoot> cache_root;
+    if(!aur_targets.empty()) {
+        cache_root = prepare_sync_source_build_cache_root();
+    }
     std::vector<ProductionSourceBuildWorkItem> source_work_items;
     for(const auto& package : aur_targets) {
         if(is_repo_package(package)) {
@@ -302,6 +325,8 @@ int cmd_sync_install(
     }
     std::optional<PreparedProductionSourceBuildInvocation> source_invocation;
     if(!source_work_items.empty()) {
+        assign_source_build_cache_root(
+                source_work_items, cache_root.value());
         source_invocation = prepare_production_source_build_invocation(
                 std::move(source_work_items), config);
     }

@@ -2,57 +2,208 @@
 
 #include "logging.hpp"
 
+#include <algorithm>
 #include <cerrno>
-#include <cstdlib>
 #include <cstring>
+#include <cstdlib>
+#include <dirent.h>
 #include <filesystem>
 #include <fcntl.h>
+#include <linux/fs.h>
+#include <linux/openat2.h>
+#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <sys/stat.h>
+#include <sys/syscall.h>
 #include <system_error>
 #include <unistd.h>
 #include <utility>
 #include <vector>
 
-// trusted cache root / entryのcanonical containment、cwd ownership、failed-clone rollbackを所有する。
-// POLICY(#197): persistent checkout descendant policyはconsumer側で検証する。
-namespace {
-
 namespace fs = std::filesystem;
 
-struct ValidatedCacheRootState {
-    fs::path path;
-    fs::path canonical_path;
+struct ValidatedCacheRoot::State {
+    struct RetainedDirectoryIdentity final {
+        int            descriptor = -1;
+        std::string    leaf_name;
+        std::uintmax_t device = 0;
+        std::uintmax_t inode = 0;
+        std::uintmax_t owner = 0;
+        bool           requires_security_validation = false;
+
+        RetainedDirectoryIdentity(
+                int retained_descriptor, std::string retained_leaf_name,
+                std::uintmax_t retained_device,
+                std::uintmax_t retained_inode,
+                std::uintmax_t retained_owner,
+                bool retained_requires_security_validation) noexcept
+            : descriptor(retained_descriptor),
+              leaf_name(std::move(retained_leaf_name)),
+              device(retained_device), inode(retained_inode),
+              owner(retained_owner),
+              requires_security_validation(
+                      retained_requires_security_validation) {
+        }
+
+        RetainedDirectoryIdentity(const RetainedDirectoryIdentity&) = delete;
+        RetainedDirectoryIdentity& operator=(
+                const RetainedDirectoryIdentity&) = delete;
+
+        RetainedDirectoryIdentity(
+                RetainedDirectoryIdentity&& other) noexcept
+            : descriptor(std::exchange(other.descriptor, -1)),
+              leaf_name(std::move(other.leaf_name)),
+              device(other.device), inode(other.inode), owner(other.owner),
+              requires_security_validation(
+                      other.requires_security_validation) {
+        }
+
+        RetainedDirectoryIdentity& operator=(
+                RetainedDirectoryIdentity&&) = delete;
+
+        ~RetainedDirectoryIdentity() noexcept {
+            if(descriptor >= 0) static_cast<void>(close(descriptor));
+        }
+    };
+
+    fs::path       path;
+    int            parent_descriptor = -1;
+    int            directory_descriptor = -1;
+    std::string    leaf_name;
+    std::uintmax_t device = 0;
+    std::uintmax_t inode = 0;
+    std::uintmax_t owner = 0;
+    std::uintmax_t permissions = 0;
+    std::vector<RetainedDirectoryIdentity> retained_lineage;
+
+    State(
+            fs::path logical_path, int retained_parent_descriptor,
+            int retained_directory_descriptor, std::string retained_leaf_name,
+            std::uintmax_t retained_device, std::uintmax_t retained_inode,
+            std::uintmax_t retained_owner,
+            std::uintmax_t retained_permissions,
+            std::vector<RetainedDirectoryIdentity>
+                    retained_directory_lineage) noexcept
+        : path(std::move(logical_path)),
+          parent_descriptor(retained_parent_descriptor),
+          directory_descriptor(retained_directory_descriptor),
+          leaf_name(std::move(retained_leaf_name)), device(retained_device),
+          inode(retained_inode), owner(retained_owner),
+          permissions(retained_permissions),
+          retained_lineage(std::move(retained_directory_lineage)) {
+    }
+
+    State(const State&) = delete;
+    State& operator=(const State&) = delete;
+
+    ~State() noexcept {
+        if(directory_descriptor >= 0) {
+            static_cast<void>(close(directory_descriptor));
+        }
+        if(parent_descriptor >= 0) {
+            static_cast<void>(close(parent_descriptor));
+        }
+    }
 };
 
-struct ValidatedCachePathState {
-    fs::path path;
-    fs::path canonical_path;
-    bool     exists = false;
-    bool     is_directory = false;
+struct TrustedCacheAccess {
+    static const std::shared_ptr<ValidatedCacheRoot::State>& state(
+            const ValidatedCacheRoot& root) noexcept {
+        return root.state_;
+    }
+
+    static ValidatedCacheRoot make_root(
+            std::shared_ptr<ValidatedCacheRoot::State> state) {
+        return ValidatedCacheRoot(std::move(state));
+    }
+
+    static ValidatedCachePath make_path(
+            ValidatedCacheRoot root, fs::path path, std::string leaf,
+            bool exists, bool is_directory, std::uintmax_t device,
+            std::uintmax_t inode, std::uintmax_t owner,
+            std::uintmax_t permissions) {
+        return ValidatedCachePath(
+                std::move(root), std::move(path), std::move(leaf), exists,
+                is_directory, device, inode, owner, permissions);
+    }
+
+    static const ValidatedCacheRoot& root(
+            const ValidatedCachePath& path) noexcept {
+        return path.root_;
+    }
+
+    static const std::string& leaf(
+            const ValidatedCachePath& path) noexcept {
+        return path.leaf_name_;
+    }
+
+    static std::uintmax_t device(const ValidatedCachePath& path) noexcept {
+        return path.device_;
+    }
+
+    static std::uintmax_t inode(const ValidatedCachePath& path) noexcept {
+        return path.inode_;
+    }
+
+    static std::uintmax_t owner(const ValidatedCachePath& path) noexcept {
+        return path.owner_;
+    }
+
+    static std::uintmax_t permissions(
+            const ValidatedCachePath& path) noexcept {
+        return path.permissions_;
+    }
 };
 
-class OwnedCacheRootDescriptor final {
+namespace {
+
+constexpr mode_t REQUIRED_DIRECTORY_OWNER_PERMISSIONS =
+        S_IRUSR | S_IWUSR | S_IXUSR;
+constexpr mode_t FORBIDDEN_WRITE_PERMISSIONS = S_IWGRP | S_IWOTH;
+
+#ifdef MOGUET_ENABLE_TRUSTED_CACHE_TEST_HOOKS
+TrustedCacheRemovalTestHook removal_test_hook;
+TrustedCacheStagedDirectoryTestHook staged_directory_test_hook;
+
+void notify_removal_test_hook(std::size_t depth) {
+    if(removal_test_hook) removal_test_hook(depth);
+}
+
+void notify_staged_directory_test_hook(const fs::path& path) {
+    if(staged_directory_test_hook) staged_directory_test_hook(path);
+}
+#else
+void notify_removal_test_hook(std::size_t) {
+}
+#endif
+
+class OwnedFileDescriptor final {
     int descriptor_ = -1;
 
 public:
-    explicit OwnedCacheRootDescriptor(int descriptor = -1) noexcept
+    explicit OwnedFileDescriptor(int descriptor = -1) noexcept
         : descriptor_(descriptor) {
     }
 
-    OwnedCacheRootDescriptor(const OwnedCacheRootDescriptor&) = delete;
-    OwnedCacheRootDescriptor& operator=(const OwnedCacheRootDescriptor&) = delete;
+    OwnedFileDescriptor(const OwnedFileDescriptor&) = delete;
+    OwnedFileDescriptor& operator=(const OwnedFileDescriptor&) = delete;
 
-    OwnedCacheRootDescriptor(OwnedCacheRootDescriptor&& other) noexcept
+    OwnedFileDescriptor(OwnedFileDescriptor&& other) noexcept
         : descriptor_(std::exchange(other.descriptor_, -1)) {
     }
 
-    OwnedCacheRootDescriptor& operator=(OwnedCacheRootDescriptor&&) = delete;
+    OwnedFileDescriptor& operator=(OwnedFileDescriptor&& other) noexcept {
+        if(this == &other) return *this;
+        if(descriptor_ >= 0) static_cast<void>(close(descriptor_));
+        descriptor_ = std::exchange(other.descriptor_, -1);
+        return *this;
+    }
 
-    ~OwnedCacheRootDescriptor() noexcept {
-        if(descriptor_ >= 0) close(descriptor_);
+    ~OwnedFileDescriptor() noexcept {
+        if(descriptor_ >= 0) static_cast<void>(close(descriptor_));
     }
 
     int get() const noexcept {
@@ -64,423 +215,1297 @@ public:
     }
 };
 
-struct PreparedPrivateCacheRootState {
-    ValidatedCacheRootState     trusted_state;
-    std::optional<struct stat> created_status;
+struct DirectoryStreamCloser {
+    void operator()(DIR* directory) const noexcept {
+        if(directory != nullptr) static_cast<void>(closedir(directory));
+    }
 };
 
-struct OpenedPrivateCacheRootState {
-    OwnedCacheRootDescriptor descriptor;
-    struct stat              status {};
-};
+std::string_view stage_name(TrustedCacheStage stage) {
+    switch(stage) {
+    case TrustedCacheStage::RootAdoption:
+        return "root adoption";
+    case TrustedCacheStage::RootRevalidation:
+        return "root revalidation";
+    case TrustedCacheStage::ChildValidation:
+        return "child validation";
+    case TrustedCacheStage::ChildCreation:
+        return "child creation";
+    case TrustedCacheStage::ChildOpen:
+        return "child open";
+    case TrustedCacheStage::CleanupPreflight:
+        return "cleanup preflight";
+    case TrustedCacheStage::RecursiveRemoval:
+        return "recursive removal";
+    case TrustedCacheStage::Rollback:
+        return "rollback";
+    }
+    throw std::logic_error("Unknown trusted cache stage.");
+}
 
-std::uintmax_t cache_status_device(const struct stat& status) {
+std::string_view error_name(TrustedCacheErrorCode code) {
+    switch(code) {
+    case TrustedCacheErrorCode::InvalidBoundary:
+        return "invalid cache boundary";
+    case TrustedCacheErrorCode::Symlink:
+        return "symlink refused";
+    case TrustedCacheErrorCode::NotDirectory:
+        return "directory required";
+    case TrustedCacheErrorCode::NotRegularFile:
+        return "unsupported cache entry type";
+    case TrustedCacheErrorCode::OwnershipMismatch:
+        return "owner mismatch";
+    case TrustedCacheErrorCode::UnsafePermissions:
+        return "unsafe permissions";
+    case TrustedCacheErrorCode::PermissionDenied:
+        return "permission denied";
+    case TrustedCacheErrorCode::MetadataFailure:
+        return "metadata failure";
+    case TrustedCacheErrorCode::ConcurrentReplacement:
+        return "concurrent replacement";
+    case TrustedCacheErrorCode::ChildEscape:
+        return "child escape";
+    case TrustedCacheErrorCode::CreationFailure:
+        return "creation failure";
+    case TrustedCacheErrorCode::CleanupPreflightFailure:
+        return "cleanup preflight failure";
+    case TrustedCacheErrorCode::RemovalFailure:
+        return "removal failure";
+    case TrustedCacheErrorCode::RollbackRefusal:
+        return "rollback refusal";
+    }
+    throw std::logic_error("Unknown trusted cache error code.");
+}
+
+std::string trusted_cache_diagnostic(const TrustedCacheFailure& failure) {
+    std::string diagnostic =
+            "Trusted Moguet cache " + std::string(stage_name(failure.stage)) +
+            " failed: " + std::string(error_name(failure.code)) + ".";
+    if(failure.system_error.has_value()) {
+        diagnostic += " (" + failure.system_error->message() + ")";
+    }
+    return diagnostic;
+}
+
+[[noreturn]] void throw_cache_error(
+        TrustedCacheStage stage, TrustedCacheErrorCode code,
+        std::optional<int> error_number = std::nullopt) {
+    TrustedCacheFailure failure{stage, code, std::nullopt};
+    if(error_number.has_value()) {
+        failure.system_error = std::error_code(
+                error_number.value(), std::generic_category());
+    }
+    throw TrustedCacheError(std::move(failure));
+}
+
+bool is_permission_error(int error_number) noexcept {
+    return error_number == EACCES || error_number == EPERM;
+}
+
+int open_child_directory_without_mount_crossing(
+        int parent_descriptor, const std::string& name) noexcept {
+    struct open_how how {};
+    how.flags = O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW;
+    how.resolve = RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS | RESOLVE_NO_XDEV;
+    return static_cast<int>(syscall(
+            SYS_openat2, parent_descriptor, name.c_str(), &how,
+            sizeof(how)));
+}
+
+int open_removal_node_without_mount_crossing(
+        int parent_descriptor, const std::string& name) noexcept {
+    struct open_how how {};
+    how.flags = O_PATH | O_CLOEXEC | O_NOFOLLOW;
+    how.resolve = RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS | RESOLVE_NO_XDEV;
+    return static_cast<int>(syscall(
+            SYS_openat2, parent_descriptor, name.c_str(), &how,
+            sizeof(how)));
+}
+
+TrustedCacheErrorCode child_directory_open_error_code(
+        int error_number) noexcept {
+    if(error_number == EXDEV) return TrustedCacheErrorCode::ChildEscape;
+    if(error_number == ELOOP) return TrustedCacheErrorCode::Symlink;
+    if(error_number == ENOENT || error_number == ENOTDIR) {
+        return TrustedCacheErrorCode::ConcurrentReplacement;
+    }
+    if(is_permission_error(error_number)) {
+        return TrustedCacheErrorCode::PermissionDenied;
+    }
+    return TrustedCacheErrorCode::MetadataFailure;
+}
+
+std::uintmax_t status_device(const struct stat& status) noexcept {
     return static_cast<std::uintmax_t>(status.st_dev);
 }
 
-std::uintmax_t cache_status_inode(const struct stat& status) {
+std::uintmax_t status_inode(const struct stat& status) noexcept {
     return static_cast<std::uintmax_t>(status.st_ino);
 }
 
-std::uintmax_t cache_status_owner(const struct stat& status) {
+std::uintmax_t status_owner(const struct stat& status) noexcept {
     return static_cast<std::uintmax_t>(status.st_uid);
 }
 
-bool same_cache_root_identity(
-        const struct stat& expected, const struct stat& actual) {
-    return S_ISDIR(expected.st_mode) && S_ISDIR(actual.st_mode) &&
-           expected.st_dev == actual.st_dev && expected.st_ino == actual.st_ino;
+std::uintmax_t status_permissions(const struct stat& status) noexcept {
+    return static_cast<std::uintmax_t>(status.st_mode & 07777);
 }
 
-bool has_private_cache_root_mode(const struct stat& status) {
-    const bool is_group_or_world_writable =
-            (status.st_mode & (S_IWGRP | S_IWOTH)) != 0;
-    const bool has_sticky_bit = (status.st_mode & S_ISVTX) != 0;
-    return !is_group_or_world_writable || has_sticky_bit;
+bool same_identity_and_type(
+        const struct stat& expected, const struct stat& actual) noexcept {
+    return (expected.st_mode & S_IFMT) == (actual.st_mode & S_IFMT) &&
+           expected.st_dev == actual.st_dev &&
+           expected.st_ino == actual.st_ino;
 }
 
-void require_private_cache_root_status(
-        const struct stat& status, const fs::path& root_path,
-        std::uintmax_t expected_effective_user,
-        bool require_new_root_mode) {
-    if(!S_ISDIR(status.st_mode)) {
-        throw std::runtime_error(
-                "Private Moguet cache root must be a directory: " +
-                root_path.string());
-    }
-    if(cache_status_owner(status) != expected_effective_user) {
-        throw std::runtime_error(
-                "Private Moguet cache root owner must match the effective user: " +
-                root_path.string());
-    }
-    if(require_new_root_mode && (status.st_mode & 07777) != 0700) {
-        throw std::runtime_error(
-                "New private Moguet cache root must have mode 0700: " +
-                root_path.string());
-    }
-    if(!has_private_cache_root_mode(status)) {
-        throw std::runtime_error(
-                "Private Moguet cache root is group/world writable without the "
-                "sticky bit; set its mode to 0700 explicitly: " +
-                root_path.string());
+bool same_identity(
+        const struct stat& status, std::uintmax_t expected_device,
+        std::uintmax_t expected_inode) noexcept {
+    return status_device(status) == expected_device &&
+           status_inode(status) == expected_inode;
+}
+
+void require_safe_directory_permissions(
+        const struct stat& status, TrustedCacheStage stage) {
+    const mode_t permissions = status.st_mode & 07777;
+    if((permissions & REQUIRED_DIRECTORY_OWNER_PERMISSIONS) !=
+               REQUIRED_DIRECTORY_OWNER_PERMISSIONS ||
+       (permissions & FORBIDDEN_WRITE_PERMISSIONS) != 0) {
+        throw_cache_error(stage, TrustedCacheErrorCode::UnsafePermissions);
     }
 }
 
-fs::path get_cache_dir() {
-    const char* xdg_cache = std::getenv("XDG_CACHE_HOME");
-    fs::path    base;
-    if(xdg_cache && std::string(xdg_cache).length() > 0) {
-        base = xdg_cache;
-    } else {
-        const char* home = std::getenv("HOME");
-        if(!home) throw std::runtime_error("HOME environment variable not set.");
-        base = fs::path(home) / ".cache";
+void require_safe_direct_child_status(
+        const struct stat& status, std::uintmax_t expected_owner,
+        std::uintmax_t expected_device, TrustedCacheStage stage) {
+    if(S_ISLNK(status.st_mode)) {
+        throw_cache_error(stage, TrustedCacheErrorCode::Symlink);
     }
-    return base / "jpacker";
-}
-
-fs::path absolute_cache_path(const fs::path& path) {
-    std::error_code ec;
-    fs::path        absolute_path = fs::absolute(path, ec);
-    if(ec) {
-        throw std::runtime_error(
-                "Unable to resolve Moguet cache path " + path.string() + ": " + ec.message());
+    if(!S_ISDIR(status.st_mode) && !S_ISREG(status.st_mode)) {
+        throw_cache_error(stage, TrustedCacheErrorCode::NotRegularFile);
     }
-
-    // LANDMINE(#175): lexical normalization before this check could erase a symlink/.. boundary.
-    for(const auto& component : absolute_path.relative_path()) {
-        if(component == "." || component == "..") {
-            throw std::runtime_error(
-                    "Unsafe Moguet cache path " + absolute_path.string() +
-                    ": dot path components are not allowed.");
-        }
+    if(status_owner(status) != expected_owner) {
+        throw_cache_error(stage, TrustedCacheErrorCode::OwnershipMismatch);
     }
-    return absolute_path.lexically_normal();
-}
-
-fs::file_status cache_symlink_status(const fs::path& component, const fs::path& target_path) {
-    std::error_code ec;
-    fs::file_status status = fs::symlink_status(component, ec);
-    if(ec == std::errc::no_such_file_or_directory) {
-        return fs::file_status(fs::file_type::not_found);
+    if(status_device(status) != expected_device) {
+        throw_cache_error(stage, TrustedCacheErrorCode::ChildEscape);
     }
-    if(ec) {
-        throw std::runtime_error(
-                "Unable to inspect Moguet cache path " + target_path.string() + " at " +
-                component.string() + ": " + ec.message());
+    if((status.st_mode & FORBIDDEN_WRITE_PERMISSIONS) != 0) {
+        throw_cache_error(stage, TrustedCacheErrorCode::UnsafePermissions);
     }
-    return status;
-}
-
-void require_no_symlink_components(const fs::path& absolute_path, bool final_may_be_nondirectory) {
-    fs::path current_path = absolute_path.root_path();
-    fs::path relative_path = absolute_path.relative_path();
-    auto     component = relative_path.begin();
-    auto     end = relative_path.end();
-    for(; component != end; ++component) {
-        current_path /= *component;
-        fs::file_status status = cache_symlink_status(current_path, absolute_path);
-        if(fs::is_symlink(status)) {
-            throw std::runtime_error(
-                    "Unsafe Moguet cache path " + absolute_path.string() +
-                    ": symlink component is not allowed: " + current_path.string());
-        }
-
-        auto next = component;
-        ++next;
-        bool is_final_component = next == end;
-        if(fs::exists(status) && (!is_final_component || !final_may_be_nondirectory) &&
-           !fs::is_directory(status)) {
-            throw std::runtime_error(
-                    "Unsafe Moguet cache path " + absolute_path.string() +
-                    ": non-directory path component: " + current_path.string());
-        }
+    if(S_ISDIR(status.st_mode)) {
+        require_safe_directory_permissions(status, stage);
     }
 }
 
-bool is_path_contained(const fs::path& root, const fs::path& candidate, bool allow_root) {
-    auto root_component = root.begin();
-    auto candidate_component = candidate.begin();
-    for(; root_component != root.end(); ++root_component, ++candidate_component) {
-        if(candidate_component == candidate.end() || *root_component != *candidate_component) return false;
+void require_safe_removal_node_status(
+        const struct stat& status, std::uintmax_t expected_owner,
+        std::uintmax_t expected_device, TrustedCacheStage stage) {
+    if(status_device(status) != expected_device) {
+        throw_cache_error(stage, TrustedCacheErrorCode::ChildEscape);
     }
-    return allow_root || candidate_component != candidate.end();
+    if(status_owner(status) != expected_owner) {
+        throw_cache_error(stage, TrustedCacheErrorCode::OwnershipMismatch);
+    }
+    if(!S_ISDIR(status.st_mode) && !S_ISREG(status.st_mode) &&
+       !S_ISLNK(status.st_mode)) {
+        throw_cache_error(stage, TrustedCacheErrorCode::NotRegularFile);
+    }
+    if(!S_ISLNK(status.st_mode) &&
+       (status.st_mode & FORBIDDEN_WRITE_PERMISSIONS) != 0) {
+        throw_cache_error(stage, TrustedCacheErrorCode::UnsafePermissions);
+    }
+    if(S_ISDIR(status.st_mode)) {
+        require_safe_directory_permissions(status, stage);
+    }
 }
 
-ValidatedCacheRootState validate_cache_root_path(const fs::path& raw_root, bool create_if_missing) {
-    fs::path root_path = absolute_cache_path(raw_root);
-    require_no_symlink_components(root_path, false);
-
-    fs::file_status root_status = cache_symlink_status(root_path, root_path);
-    if(!fs::exists(root_status)) {
-        if(!create_if_missing) {
-            throw std::runtime_error("Trusted Moguet cache root is missing: " + root_path.string());
-        }
-
-        std::error_code ec;
-        fs::create_directories(root_path, ec);
-        if(ec) {
-            throw std::runtime_error(
-                    "Failed to create Moguet cache root " + root_path.string() + ": " + ec.message());
-        }
-
-        // POLICY(#175): creation is followed by the same no-follow component check before trust is granted.
-        require_no_symlink_components(root_path, false);
-        root_status = cache_symlink_status(root_path, root_path);
+OwnedFileDescriptor duplicate_descriptor(
+        int descriptor, TrustedCacheStage stage) {
+    const int duplicated = fcntl(descriptor, F_DUPFD_CLOEXEC, 0);
+    if(duplicated < 0) {
+        const int duplication_error = errno;
+        throw_cache_error(
+                stage,
+                is_permission_error(duplication_error)
+                        ? TrustedCacheErrorCode::PermissionDenied
+                        : TrustedCacheErrorCode::MetadataFailure,
+                duplication_error);
     }
-    if(!fs::is_directory(root_status)) {
-        throw std::runtime_error(
-                "Unsafe Moguet cache root " + root_path.string() + ": expected a regular directory.");
-    }
-
-    std::error_code ec;
-    fs::path        canonical_root = fs::canonical(root_path, ec);
-    if(ec) {
-        throw std::runtime_error(
-                "Failed to canonicalize Moguet cache root " + root_path.string() + ": " + ec.message());
-    }
-    return ValidatedCacheRootState{root_path, canonical_root};
+    return OwnedFileDescriptor(duplicated);
 }
 
-PreparedPrivateCacheRootState prepare_private_cache_root_path() {
-    fs::path root_path = absolute_cache_path(get_cache_dir());
-    fs::path parent_path = root_path.parent_path();
+void require_root_unchanged(
+        const ValidatedCacheRoot& root, TrustedCacheStage stage);
 
-    // POLICY(#242): legacy/privateのどちらが先でも、final componentは
-    // mkdirat(0700)で作る。上位parentの作成は既存no-symlink契約で再検証する。
-    require_no_symlink_components(root_path, false);
-    std::error_code parent_error;
-    fs::create_directories(parent_path, parent_error);
-    if(parent_error) {
-        throw std::runtime_error(
-                "Failed to create Moguet cache parent " +
-                parent_path.string() + ": " + parent_error.message());
+void rollback_staged_cache_directory_noexcept(
+        const ValidatedCacheRoot& root, int root_descriptor,
+        const std::string& leaf_name,
+        const struct stat& expected_status) noexcept {
+    try {
+        require_root_unchanged(root, TrustedCacheStage::Rollback);
+    } catch(...) {
+        Logger::warn_noexcept([]() {
+            return "Refusing staged cache rollback after root authority was "
+                   "revoked.";
+        });
+        return;
     }
-    require_no_symlink_components(root_path, false);
-    fs::file_status parent_status = cache_symlink_status(parent_path, root_path);
-    if(!fs::is_directory(parent_status)) {
-        throw std::runtime_error(
-                "Private Moguet cache root requires an existing directory parent: " +
-                parent_path.string());
-    }
-
-    int parent_descriptor = open(
-            parent_path.c_str(),
-            O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
-    if(parent_descriptor < 0) {
-        throw std::runtime_error(
-                "Failed to retain private Moguet cache parent " +
-                parent_path.string() + ": " + std::strerror(errno));
-    }
-    OwnedCacheRootDescriptor opened_parent(parent_descriptor);
-
-    struct stat opened_parent_status {};
-    struct stat named_parent_status {};
-    if(fstat(opened_parent.get(), &opened_parent_status) != 0 ||
-       fstatat(
-               AT_FDCWD, parent_path.c_str(), &named_parent_status,
-               AT_SYMLINK_NOFOLLOW) != 0 ||
-       !same_cache_root_identity(opened_parent_status, named_parent_status)) {
-        throw std::runtime_error(
-                "Private Moguet cache parent changed during validation: " +
-                parent_path.string());
-    }
-
-    const std::string root_leaf = root_path.filename().string();
-    if(root_leaf.empty()) {
-        throw std::logic_error(
-                "Private Moguet cache root must have a final path component.");
-    }
-
-    std::optional<struct stat> created_status;
-    struct stat                initial_status {};
+    struct stat current_status {};
     if(fstatat(
-               opened_parent.get(), root_leaf.c_str(), &initial_status,
+               root_descriptor, leaf_name.c_str(), &current_status,
                AT_SYMLINK_NOFOLLOW) != 0) {
-        if(errno != ENOENT) {
-            throw std::runtime_error(
-                    "Failed to inspect private Moguet cache root " +
-                    root_path.string() + ": " + std::strerror(errno));
-        }
-
-        if(mkdirat(opened_parent.get(), root_leaf.c_str(), 0700) == 0) {
-            struct stat created_candidate {};
-            if(fstatat(
-                       opened_parent.get(), root_leaf.c_str(),
-                       &created_candidate, AT_SYMLINK_NOFOLLOW) != 0) {
-                // POLICY(#242): identityを証明できないpersistent root候補は削除しない。
-                throw std::runtime_error(
-                        "Failed to inspect newly created private Moguet cache root " +
-                        root_path.string() + ": " + std::strerror(errno));
-            }
-            created_status = created_candidate;
-        } else if(errno != EEXIST) {
-            throw std::runtime_error(
-                    "Failed to create private Moguet cache root " +
-                    root_path.string() + ": " + std::strerror(errno));
-        }
+        if(errno == ENOENT) return;
+        Logger::warn_noexcept([]() {
+            return "Unable to inspect a staged trusted cache directory "
+                   "during rollback.";
+        });
+        return;
     }
-
-    // Creation raceのEEXISTもexisting pathとして、同じno-follow contractへ通す。
-    ValidatedCacheRootState trusted_state =
-            validate_cache_root_path(root_path, false);
-    return PreparedPrivateCacheRootState{
-            std::move(trusted_state), std::move(created_status)};
+    if(!same_identity_and_type(expected_status, current_status) ||
+       !S_ISDIR(current_status.st_mode) ||
+       status_device(expected_status) != root.device() ||
+       status_device(current_status) != root.device() ||
+       status_owner(expected_status) != root.owner() ||
+       status_owner(current_status) != root.owner() ||
+       status_owner(current_status) !=
+               static_cast<std::uintmax_t>(geteuid()) ||
+       status_permissions(expected_status) !=
+               status_permissions(current_status) ||
+       status_permissions(current_status) != 0700 ||
+       (current_status.st_mode & FORBIDDEN_WRITE_PERMISSIONS) != 0) {
+        Logger::warn_noexcept([]() {
+            return "Refusing rollback of a replaced or unsafe staged "
+                   "trusted cache directory.";
+        });
+        return;
+    }
+    if(unlinkat(root_descriptor, leaf_name.c_str(), AT_REMOVEDIR) != 0) {
+        Logger::warn_noexcept([]() {
+            return "Unable to remove a staged trusted cache directory during "
+                   "rollback.";
+        });
+    }
 }
 
-OpenedPrivateCacheRootState open_private_cache_root(
-        const ValidatedCacheRoot& trusted_root,
-        std::uintmax_t expected_effective_user,
-        const std::optional<struct stat>& created_status = std::nullopt) {
-    int root_descriptor = open(
-            trusted_root.canonical_path().c_str(),
-            O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
-    if(root_descriptor < 0) {
-        throw std::runtime_error(
-                "Failed to retain private Moguet cache root " +
-                trusted_root.canonical_path().string() + ": " +
-                std::strerror(errno));
-    }
-    OwnedCacheRootDescriptor opened_root(root_descriptor);
+void restore_working_directory_noexcept(int descriptor) noexcept {
+    if(descriptor < 0 || fchdir(descriptor) == 0) return;
+    const int restore_error = errno;
+    Logger::warn_noexcept([restore_error]() {
+        return "Failed to restore the working directory after a trusted "
+               "cache operation: " +
+               std::string(std::strerror(restore_error));
+    });
+}
 
-    struct stat opened_status {};
-    if(fstat(opened_root.get(), &opened_status) != 0) {
-        throw std::runtime_error(
-                "Failed to inspect retained private Moguet cache root " +
-                trusted_root.canonical_path().string() + ": " +
-                std::strerror(errno));
+const auto& require_root_state(
+        const ValidatedCacheRoot& root, TrustedCacheStage stage) {
+    const auto& state = TrustedCacheAccess::state(root);
+    if(!state || state->parent_descriptor < 0 ||
+       state->directory_descriptor < 0 || state->leaf_name.empty() ||
+       state->retained_lineage.size() < 2) {
+        throw_cache_error(stage, TrustedCacheErrorCode::InvalidBoundary);
     }
-    require_private_cache_root_status(
-            opened_status, trusted_root.canonical_path(),
-            expected_effective_user, created_status.has_value());
+    return state;
+}
+
+void require_root_unchanged(
+        const ValidatedCacheRoot& root, TrustedCacheStage stage) {
+    const auto& state = require_root_state(root, stage);
+    const std::uintmax_t current_effective_user =
+            static_cast<std::uintmax_t>(geteuid());
+
+    for(std::size_t index = 0; index < state->retained_lineage.size();
+        ++index) {
+        const auto& identity = state->retained_lineage[index];
+        if(identity.descriptor < 0 ||
+           (index == 0 ? !identity.leaf_name.empty()
+                       : identity.leaf_name.empty())) {
+            throw_cache_error(stage, TrustedCacheErrorCode::InvalidBoundary);
+        }
+
+        struct stat retained_lineage_status {};
+        if(fstat(identity.descriptor, &retained_lineage_status) != 0) {
+            const int metadata_error = errno;
+            throw_cache_error(
+                    stage,
+                    is_permission_error(metadata_error)
+                            ? TrustedCacheErrorCode::PermissionDenied
+                            : TrustedCacheErrorCode::MetadataFailure,
+                    metadata_error);
+        }
+        if(!S_ISDIR(retained_lineage_status.st_mode) ||
+           !same_identity(
+                   retained_lineage_status, identity.device,
+                   identity.inode)) {
+            throw_cache_error(
+                    stage, TrustedCacheErrorCode::ConcurrentReplacement);
+        }
+
+        if(index == 0) continue;
+
+        const auto& parent = state->retained_lineage[index - 1];
+        struct stat named_lineage_status {};
+        if(fstatat(
+                   parent.descriptor, identity.leaf_name.c_str(),
+                   &named_lineage_status, AT_SYMLINK_NOFOLLOW) != 0) {
+            const int metadata_error = errno;
+            const bool was_replaced =
+                    metadata_error == ENOENT || metadata_error == ENOTDIR ||
+                    metadata_error == ELOOP;
+            throw_cache_error(
+                    stage,
+                    was_replaced
+                            ? TrustedCacheErrorCode::ConcurrentReplacement
+                            : (is_permission_error(metadata_error)
+                                       ? TrustedCacheErrorCode::PermissionDenied
+                                       : TrustedCacheErrorCode::MetadataFailure),
+                    metadata_error);
+        }
+        if(!S_ISDIR(named_lineage_status.st_mode) ||
+           !same_identity_and_type(
+                   retained_lineage_status, named_lineage_status)) {
+            throw_cache_error(
+                    stage, TrustedCacheErrorCode::ConcurrentReplacement);
+        }
+        if(identity.requires_security_validation) {
+            if(status_owner(retained_lineage_status) != identity.owner ||
+               status_owner(named_lineage_status) != identity.owner ||
+               identity.owner != current_effective_user) {
+                throw_cache_error(
+                        stage, TrustedCacheErrorCode::OwnershipMismatch);
+            }
+            require_safe_directory_permissions(
+                    retained_lineage_status, stage);
+            require_safe_directory_permissions(named_lineage_status, stage);
+        }
+    }
+
+    struct stat retained_status {};
+    if(fstat(state->directory_descriptor, &retained_status) != 0) {
+        const int metadata_error = errno;
+        throw_cache_error(
+                stage,
+                is_permission_error(metadata_error)
+                        ? TrustedCacheErrorCode::PermissionDenied
+                        : TrustedCacheErrorCode::MetadataFailure,
+                metadata_error);
+    }
+
+    struct stat retained_parent_status {};
+    if(fstat(state->parent_descriptor, &retained_parent_status) != 0) {
+        const int metadata_error = errno;
+        throw_cache_error(
+                stage,
+                is_permission_error(metadata_error)
+                        ? TrustedCacheErrorCode::PermissionDenied
+                        : TrustedCacheErrorCode::MetadataFailure,
+                metadata_error);
+    }
 
     struct stat named_status {};
     if(fstatat(
-               AT_FDCWD, trusted_root.canonical_path().c_str(), &named_status,
-               AT_SYMLINK_NOFOLLOW) != 0 ||
-       !same_cache_root_identity(opened_status, named_status)) {
-        throw std::runtime_error(
-                "Private Moguet cache root path changed identity: " +
-                trusted_root.canonical_path().string());
-    }
-    require_private_cache_root_status(
-            named_status, trusted_root.canonical_path(),
-            expected_effective_user, created_status.has_value());
-
-    if(created_status.has_value() &&
-       !same_cache_root_identity(created_status.value(), opened_status)) {
-        // mkdiratで作成したcandidateとretained FDが一致しなければ、replacementを所有しない。
-        throw std::runtime_error(
-                "New private Moguet cache root changed identity before validation: " +
-                trusted_root.canonical_path().string());
+               state->parent_descriptor, state->leaf_name.c_str(),
+               &named_status, AT_SYMLINK_NOFOLLOW) != 0) {
+        const int metadata_error = errno;
+        throw_cache_error(
+                stage,
+                metadata_error == ENOENT
+                        ? TrustedCacheErrorCode::ConcurrentReplacement
+                        : (is_permission_error(metadata_error)
+                                   ? TrustedCacheErrorCode::PermissionDenied
+                                   : TrustedCacheErrorCode::MetadataFailure),
+                metadata_error);
     }
 
-    return OpenedPrivateCacheRootState{
-            std::move(opened_root), opened_status};
+    const auto& lineage_parent =
+            state->retained_lineage[state->retained_lineage.size() - 2];
+    const auto& lineage_directory = state->retained_lineage.back();
+    if(lineage_directory.leaf_name != state->leaf_name ||
+       !S_ISDIR(retained_status.st_mode) ||
+       !S_ISDIR(retained_parent_status.st_mode) ||
+       !same_identity_and_type(retained_status, named_status) ||
+       !same_identity(retained_status, state->device, state->inode) ||
+       !same_identity(
+               retained_status, lineage_directory.device,
+               lineage_directory.inode) ||
+       !same_identity(
+               retained_parent_status, lineage_parent.device,
+               lineage_parent.inode)) {
+        throw_cache_error(
+                stage, TrustedCacheErrorCode::ConcurrentReplacement);
+    }
+    if(status_owner(retained_status) != state->owner ||
+       status_owner(named_status) != state->owner ||
+       state->owner != static_cast<std::uintmax_t>(geteuid())) {
+        throw_cache_error(stage, TrustedCacheErrorCode::OwnershipMismatch);
+    }
+    require_safe_directory_permissions(retained_status, stage);
+    require_safe_directory_permissions(named_status, stage);
 }
 
-fs::path cache_path_for_root(const ValidatedCacheRoot& root, const fs::path& path) {
-    if(path.is_absolute()) return path;
-    return root.path() / path;
+std::string validated_child_leaf(
+        const ValidatedCacheRoot& root, const fs::path& raw_path) {
+    if(raw_path.empty()) {
+        throw_cache_error(
+                TrustedCacheStage::ChildValidation,
+                TrustedCacheErrorCode::ChildEscape);
+    }
+    const std::string native = raw_path.string();
+    if(native.find('\0') != std::string::npos) {
+        throw_cache_error(
+                TrustedCacheStage::ChildValidation,
+                TrustedCacheErrorCode::ChildEscape);
+    }
+
+    fs::path leaf_path;
+    if(raw_path.is_absolute()) {
+        if(raw_path.parent_path() != root.path()) {
+            throw_cache_error(
+                    TrustedCacheStage::ChildValidation,
+                    TrustedCacheErrorCode::ChildEscape);
+        }
+        leaf_path = raw_path.filename();
+    } else {
+        auto component = raw_path.begin();
+        if(component == raw_path.end()) {
+            throw_cache_error(
+                    TrustedCacheStage::ChildValidation,
+                    TrustedCacheErrorCode::ChildEscape);
+        }
+        leaf_path = *component;
+        ++component;
+        if(component != raw_path.end()) {
+            throw_cache_error(
+                    TrustedCacheStage::ChildValidation,
+                    TrustedCacheErrorCode::ChildEscape);
+        }
+    }
+
+    const std::string leaf = leaf_path.string();
+    if(leaf.empty() || leaf == "." || leaf == ".." ||
+       leaf.find('/') != std::string::npos ||
+       leaf.find('\0') != std::string::npos) {
+        throw_cache_error(
+                TrustedCacheStage::ChildValidation,
+                TrustedCacheErrorCode::ChildEscape);
+    }
+    return leaf;
 }
 
-ValidatedCachePathState validate_cache_path_against_root(
+ValidatedCachePath inspect_cache_child(
         const ValidatedCacheRoot& root, const fs::path& raw_path,
         CachePathRequirement requirement) {
-    fs::path path = absolute_cache_path(raw_path);
-    require_no_symlink_components(path, true);
+    require_root_unchanged(root, TrustedCacheStage::RootRevalidation);
+    const auto& state = require_root_state(
+            root, TrustedCacheStage::ChildValidation);
+    const std::string leaf = validated_child_leaf(root, raw_path);
 
-    fs::file_status status = cache_symlink_status(path, path);
-    bool            path_exists = fs::exists(status);
-    bool            path_is_directory = path_exists && fs::is_directory(status);
-
-    if(requirement == CachePathRequirement::Existing && !path_exists) {
-        throw std::runtime_error("Trusted Moguet cache path is missing: " + path.string());
-    }
-    if(requirement == CachePathRequirement::ExistingDirectory && !path_is_directory) {
-        throw std::runtime_error(
-                "Unsafe Moguet cache path " + path.string() + ": expected an existing directory.");
-    }
-    if(requirement == CachePathRequirement::Missing && path_exists) {
-        throw std::runtime_error(
-                "Unsafe Moguet cache path " + path.string() + ": expected the path to be missing.");
-    }
-
-    fs::path resolved_path;
-    if(path_exists) {
-        std::error_code ec;
-        resolved_path = fs::canonical(path, ec);
-        if(ec) {
-            throw std::runtime_error(
-                    "Failed to canonicalize Moguet cache path " + path.string() + ": " + ec.message());
+    struct stat status {};
+    if(fstatat(
+               state->directory_descriptor, leaf.c_str(), &status,
+               AT_SYMLINK_NOFOLLOW) != 0) {
+        const int metadata_error = errno;
+        if(metadata_error != ENOENT) {
+            throw_cache_error(
+                    TrustedCacheStage::ChildValidation,
+                    is_permission_error(metadata_error)
+                            ? TrustedCacheErrorCode::PermissionDenied
+                            : TrustedCacheErrorCode::MetadataFailure,
+                    metadata_error);
         }
-    } else {
-        fs::path parent_path = path.parent_path();
-        require_no_symlink_components(parent_path, false);
-        fs::file_status parent_status = cache_symlink_status(parent_path, path);
-        if(!fs::is_directory(parent_status)) {
-            throw std::runtime_error(
-                    "Unsafe Moguet cache path " + path.string() +
-                    ": existing parent directory is required before creation.");
+        if(requirement == CachePathRequirement::Existing ||
+           requirement == CachePathRequirement::ExistingDirectory) {
+            throw_cache_error(
+                    TrustedCacheStage::ChildValidation,
+                    TrustedCacheErrorCode::ConcurrentReplacement,
+                    metadata_error);
         }
-
-        std::error_code ec;
-        fs::path        canonical_parent = fs::canonical(parent_path, ec);
-        if(ec) {
-            throw std::runtime_error(
-                    "Failed to canonicalize Moguet cache parent " + parent_path.string() + ": " + ec.message());
-        }
-        if(!is_path_contained(root.canonical_path(), canonical_parent, true)) {
-            throw std::runtime_error(
-                    "Unsafe Moguet cache path " + path.string() +
-                    ": parent resolves outside trusted cache root " + root.canonical_path().string());
-        }
-
-        // POLICY(#175): weakly_canonical is used only for a missing leaf whose existing parent was verified above.
-        resolved_path = fs::weakly_canonical(path, ec);
-        if(ec) {
-            throw std::runtime_error(
-                    "Failed to resolve missing Moguet cache path " + path.string() + ": " + ec.message());
-        }
+        return TrustedCacheAccess::make_path(
+                root, root.path() / leaf, leaf, false, false, 0, 0, 0, 0);
     }
 
-    // POLICY(#175): containment is path-component based; similarly prefixed sibling directories are not trusted.
-    if(!is_path_contained(root.canonical_path(), resolved_path, false)) {
-        throw std::runtime_error(
-                "Unsafe Moguet cache path " + path.string() + ": canonical path " +
-                resolved_path.string() + " is outside trusted cache root " +
-                root.canonical_path().string());
+    if(requirement == CachePathRequirement::Missing) {
+        throw_cache_error(
+                TrustedCacheStage::ChildValidation,
+                TrustedCacheErrorCode::ConcurrentReplacement);
+    }
+    require_safe_direct_child_status(
+            status, state->owner, state->device,
+            TrustedCacheStage::ChildValidation);
+    if(requirement == CachePathRequirement::ExistingDirectory &&
+       !S_ISDIR(status.st_mode)) {
+        throw_cache_error(
+                TrustedCacheStage::ChildValidation,
+                TrustedCacheErrorCode::NotDirectory);
     }
 
-    return ValidatedCachePathState{path, resolved_path, path_exists, path_is_directory};
+    return TrustedCacheAccess::make_path(
+            root, root.path() / leaf, leaf, true, S_ISDIR(status.st_mode),
+            status_device(status), status_inode(status), status_owner(status),
+            status_permissions(status));
+}
+
+void require_same_cache_path_identity(
+        const ValidatedCachePath& expected,
+        const ValidatedCachePath& current,
+        TrustedCacheStage stage) {
+    if(expected.exists() != current.exists()) {
+        throw_cache_error(stage, TrustedCacheErrorCode::ConcurrentReplacement);
+    }
+    if(!expected.exists()) return;
+    if(expected.is_directory() != current.is_directory() ||
+       TrustedCacheAccess::device(expected) !=
+               TrustedCacheAccess::device(current) ||
+       TrustedCacheAccess::inode(expected) !=
+               TrustedCacheAccess::inode(current) ||
+       TrustedCacheAccess::owner(expected) !=
+               TrustedCacheAccess::owner(current)) {
+        throw_cache_error(stage, TrustedCacheErrorCode::ConcurrentReplacement);
+    }
+}
+
+OwnedFileDescriptor open_validated_child_directory(
+        const ValidatedCachePath& expected, TrustedCacheStage stage) {
+    ValidatedCachePath current = inspect_cache_child(
+            TrustedCacheAccess::root(expected),
+            TrustedCacheAccess::leaf(expected),
+            CachePathRequirement::ExistingDirectory);
+    require_same_cache_path_identity(expected, current, stage);
+
+    const auto& root_state = require_root_state(
+            TrustedCacheAccess::root(expected), stage);
+    const int descriptor = open_child_directory_without_mount_crossing(
+            root_state->directory_descriptor,
+            TrustedCacheAccess::leaf(expected));
+    if(descriptor < 0) {
+        const int open_error = errno;
+        throw_cache_error(
+                stage,
+                child_directory_open_error_code(open_error),
+                open_error);
+    }
+    OwnedFileDescriptor opened(descriptor);
+
+    struct stat opened_status {};
+    struct stat named_status {};
+    if(fstat(opened.get(), &opened_status) != 0 ||
+       fstatat(
+               root_state->directory_descriptor,
+               TrustedCacheAccess::leaf(expected).c_str(), &named_status,
+               AT_SYMLINK_NOFOLLOW) != 0) {
+        const int metadata_error = errno;
+        throw_cache_error(
+                stage,
+                is_permission_error(metadata_error)
+                        ? TrustedCacheErrorCode::PermissionDenied
+                        : TrustedCacheErrorCode::MetadataFailure,
+                metadata_error);
+    }
+    if(!S_ISDIR(opened_status.st_mode) ||
+       !same_identity_and_type(opened_status, named_status) ||
+       !same_identity(
+               opened_status, TrustedCacheAccess::device(expected),
+               TrustedCacheAccess::inode(expected))) {
+        throw_cache_error(stage, TrustedCacheErrorCode::ConcurrentReplacement);
+    }
+    require_safe_direct_child_status(
+            opened_status, root_state->owner, root_state->device, stage);
+    require_safe_direct_child_status(
+            named_status, root_state->owner, root_state->device, stage);
+    return opened;
+}
+
+struct RemovalNode {
+    std::string              name;
+    struct stat              status {};
+    // Pin the preflighted inode until the plan is destroyed. This descriptor
+    // is identity evidence only; mutation always rebuilds the named lineage.
+    OwnedFileDescriptor      retained_descriptor;
+    std::vector<RemovalNode> children;
+};
+
+struct RemovalPlan {
+    ValidatedCachePath target;
+    RemovalNode        root;
+};
+
+std::vector<std::string> directory_entry_names(
+        int directory_descriptor, TrustedCacheStage stage) {
+    struct stat retained_status {};
+    if(fstat(directory_descriptor, &retained_status) != 0) {
+        const int metadata_error = errno;
+        throw_cache_error(
+                stage,
+                is_permission_error(metadata_error)
+                        ? TrustedCacheErrorCode::PermissionDenied
+                        : TrustedCacheErrorCode::MetadataFailure,
+                metadata_error);
+    }
+    const int scan_descriptor = openat(
+            directory_descriptor, ".",
+            O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+    if(scan_descriptor < 0) {
+        const int open_error = errno;
+        throw_cache_error(
+                stage,
+                is_permission_error(open_error)
+                        ? TrustedCacheErrorCode::PermissionDenied
+                        : TrustedCacheErrorCode::MetadataFailure,
+                open_error);
+    }
+    OwnedFileDescriptor scan(scan_descriptor);
+    struct stat scan_status {};
+    if(fstat(scan.get(), &scan_status) != 0) {
+        const int metadata_error = errno;
+        throw_cache_error(
+                stage, TrustedCacheErrorCode::MetadataFailure,
+                metadata_error);
+    }
+    if(!same_identity_and_type(retained_status, scan_status)) {
+        throw_cache_error(
+                stage, TrustedCacheErrorCode::ConcurrentReplacement);
+    }
+
+    DIR* directory = fdopendir(scan.get());
+    if(directory == nullptr) {
+        const int open_error = errno;
+        throw_cache_error(
+                stage,
+                is_permission_error(open_error)
+                        ? TrustedCacheErrorCode::PermissionDenied
+                        : TrustedCacheErrorCode::MetadataFailure,
+                open_error);
+    }
+    static_cast<void>(scan.release());
+    std::unique_ptr<DIR, DirectoryStreamCloser> owned_directory(directory);
+
+    std::vector<std::string> names;
+    errno = 0;
+    while(dirent* entry = readdir(owned_directory.get())) {
+        const std::string name(entry->d_name);
+        if(name != "." && name != "..") names.push_back(name);
+        errno = 0;
+    }
+    const int read_error = errno;
+    DIR* raw_directory = owned_directory.release();
+    const int close_status = closedir(raw_directory);
+    const int close_error = close_status == 0 ? 0 : errno;
+    if(read_error == 0 && close_status != 0) {
+        throw_cache_error(stage, TrustedCacheErrorCode::MetadataFailure,
+                          close_error);
+    }
+    if(read_error != 0) {
+        throw_cache_error(
+                stage,
+                is_permission_error(read_error)
+                        ? TrustedCacheErrorCode::PermissionDenied
+                        : TrustedCacheErrorCode::MetadataFailure,
+                read_error);
+    }
+    std::sort(names.begin(), names.end());
+    return names;
+}
+
+RemovalNode preflight_removal_node(
+        int parent_descriptor, const std::string& name,
+        std::uintmax_t root_device, std::uintmax_t root_owner,
+        TrustedCacheStage stage) {
+    struct stat status {};
+    if(fstatat(
+               parent_descriptor, name.c_str(), &status,
+               AT_SYMLINK_NOFOLLOW) != 0) {
+        const int metadata_error = errno;
+        throw_cache_error(
+                stage,
+                metadata_error == ENOENT
+                        ? TrustedCacheErrorCode::ConcurrentReplacement
+                        : (is_permission_error(metadata_error)
+                                   ? TrustedCacheErrorCode::PermissionDenied
+                                   : TrustedCacheErrorCode::MetadataFailure),
+                metadata_error);
+    }
+    require_safe_removal_node_status(
+            status, root_owner, root_device, stage);
+
+    const int retained_descriptor = open_removal_node_without_mount_crossing(
+            parent_descriptor, name);
+    if(retained_descriptor < 0) {
+        const int open_error = errno;
+        throw_cache_error(
+                stage,
+                open_error == ENOENT || open_error == ELOOP ||
+                                open_error == ENOTDIR
+                        ? TrustedCacheErrorCode::ConcurrentReplacement
+                        : (open_error == EXDEV
+                                   ? TrustedCacheErrorCode::ChildEscape
+                                   : (is_permission_error(open_error)
+                                              ? TrustedCacheErrorCode::PermissionDenied
+                                              : TrustedCacheErrorCode::MetadataFailure)),
+                open_error);
+    }
+    OwnedFileDescriptor retained(retained_descriptor);
+    struct stat retained_status {};
+    if(fstat(retained.get(), &retained_status) != 0) {
+        const int metadata_error = errno;
+        throw_cache_error(
+                stage,
+                is_permission_error(metadata_error)
+                        ? TrustedCacheErrorCode::PermissionDenied
+                        : TrustedCacheErrorCode::MetadataFailure,
+                metadata_error);
+    }
+    if(!same_identity_and_type(status, retained_status) ||
+       status_owner(status) != status_owner(retained_status) ||
+       status_permissions(status) != status_permissions(retained_status)) {
+        throw_cache_error(stage, TrustedCacheErrorCode::ConcurrentReplacement);
+    }
+    require_safe_removal_node_status(
+            retained_status, root_owner, root_device, stage);
+
+    RemovalNode node{name, status, std::move(retained), {}};
+    if(!S_ISDIR(status.st_mode)) return node;
+
+    const int child_descriptor =
+            open_child_directory_without_mount_crossing(
+                    parent_descriptor, name);
+    if(child_descriptor < 0) {
+        const int open_error = errno;
+        throw_cache_error(
+                stage,
+                child_directory_open_error_code(open_error),
+                open_error);
+    }
+    OwnedFileDescriptor opened_child(child_descriptor);
+    struct stat opened_status {};
+    if(fstat(opened_child.get(), &opened_status) != 0) {
+        const int metadata_error = errno;
+        throw_cache_error(stage, TrustedCacheErrorCode::MetadataFailure,
+                          metadata_error);
+    }
+    if(!same_identity_and_type(status, opened_status) ||
+       status_owner(status) != status_owner(opened_status) ||
+       status_permissions(status) != status_permissions(opened_status)) {
+        throw_cache_error(stage, TrustedCacheErrorCode::ConcurrentReplacement);
+    }
+    require_safe_removal_node_status(
+            opened_status, root_owner, root_device, stage);
+
+    for(const std::string& child_name :
+        directory_entry_names(opened_child.get(), stage)) {
+        node.children.push_back(preflight_removal_node(
+                opened_child.get(), child_name, root_device, root_owner,
+                stage));
+    }
+    return node;
+}
+
+void require_expected_removal_node_status(
+        const RemovalNode& node, const struct stat& current_status,
+        std::uintmax_t root_device, std::uintmax_t root_owner,
+        TrustedCacheStage stage) {
+    if(!same_identity_and_type(node.status, current_status)) {
+        throw_cache_error(stage, TrustedCacheErrorCode::ConcurrentReplacement);
+    }
+    if(status_device(current_status) != root_device) {
+        throw_cache_error(stage, TrustedCacheErrorCode::ChildEscape);
+    }
+    if(status_owner(current_status) != status_owner(node.status) ||
+       status_owner(current_status) != root_owner) {
+        throw_cache_error(stage, TrustedCacheErrorCode::OwnershipMismatch);
+    }
+    require_safe_removal_node_status(
+            current_status, root_owner, root_device, stage);
+    if(status_permissions(current_status) !=
+       status_permissions(node.status)) {
+        throw_cache_error(stage, TrustedCacheErrorCode::ConcurrentReplacement);
+    }
+}
+
+struct stat retained_removal_node_status(
+        const RemovalNode& node, std::uintmax_t root_device,
+        std::uintmax_t root_owner, TrustedCacheStage stage) {
+    struct stat retained_status {};
+    if(node.retained_descriptor.get() < 0 ||
+       fstat(node.retained_descriptor.get(), &retained_status) != 0) {
+        const int metadata_error = node.retained_descriptor.get() < 0
+                                           ? EBADF
+                                           : errno;
+        throw_cache_error(
+                stage,
+                is_permission_error(metadata_error)
+                        ? TrustedCacheErrorCode::PermissionDenied
+                        : TrustedCacheErrorCode::MetadataFailure,
+                metadata_error);
+    }
+    require_expected_removal_node_status(
+            node, retained_status, root_device, root_owner, stage);
+    return retained_status;
+}
+
+void require_named_removal_node_identity(
+        int parent_descriptor, const RemovalNode& node,
+        std::uintmax_t root_device, std::uintmax_t root_owner,
+        TrustedCacheStage stage) {
+    const struct stat retained_status = retained_removal_node_status(
+            node, root_device, root_owner, stage);
+    struct stat named_status {};
+    if(fstatat(
+               parent_descriptor, node.name.c_str(), &named_status,
+               AT_SYMLINK_NOFOLLOW) != 0) {
+        const int metadata_error = errno;
+        throw_cache_error(
+                stage,
+                metadata_error == ENOENT
+                        ? TrustedCacheErrorCode::ConcurrentReplacement
+                        : (is_permission_error(metadata_error)
+                                   ? TrustedCacheErrorCode::PermissionDenied
+                                   : TrustedCacheErrorCode::MetadataFailure),
+                metadata_error);
+    }
+    require_expected_removal_node_status(
+            node, named_status, root_device, root_owner, stage);
+    if(!same_identity_and_type(retained_status, named_status) ||
+       status_owner(retained_status) != status_owner(named_status) ||
+       status_permissions(retained_status) !=
+               status_permissions(named_status)) {
+        throw_cache_error(stage, TrustedCacheErrorCode::ConcurrentReplacement);
+    }
+}
+
+void revalidate_removal_node(
+        int parent_descriptor, const RemovalNode& node,
+        std::uintmax_t root_device, std::uintmax_t root_owner,
+        TrustedCacheStage stage) {
+    require_named_removal_node_identity(
+            parent_descriptor, node, root_device, root_owner, stage);
+    if(!S_ISDIR(node.status.st_mode)) return;
+
+    const int descriptor = open_child_directory_without_mount_crossing(
+            parent_descriptor, node.name);
+    if(descriptor < 0) {
+        const int open_error = errno;
+        throw_cache_error(
+                stage,
+                open_error == ENOENT || open_error == ELOOP ||
+                                open_error == ENOTDIR
+                        ? TrustedCacheErrorCode::ConcurrentReplacement
+                        : child_directory_open_error_code(open_error),
+                open_error);
+    }
+    OwnedFileDescriptor opened(descriptor);
+    struct stat opened_status {};
+    if(fstat(opened.get(), &opened_status) != 0) {
+        const int metadata_error = errno;
+        throw_cache_error(
+                stage,
+                is_permission_error(metadata_error)
+                        ? TrustedCacheErrorCode::PermissionDenied
+                        : TrustedCacheErrorCode::MetadataFailure,
+                metadata_error);
+    }
+    require_expected_removal_node_status(
+            node, opened_status, root_device, root_owner, stage);
+    const std::vector<std::string> current_names =
+            directory_entry_names(opened.get(), stage);
+    std::vector<std::string> expected_names;
+    expected_names.reserve(node.children.size());
+    for(const RemovalNode& child : node.children) {
+        expected_names.push_back(child.name);
+    }
+    if(current_names != expected_names) {
+        throw_cache_error(stage, TrustedCacheErrorCode::ConcurrentReplacement);
+    }
+    for(const RemovalNode& child : node.children) {
+        revalidate_removal_node(
+                opened.get(), child, root_device, root_owner, stage);
+    }
+}
+
+using RemovalDirectoryLineage = std::vector<const RemovalNode*>;
+
+OwnedFileDescriptor open_removal_parent_lineage(
+        const ValidatedCacheRoot& root,
+        const RemovalDirectoryLineage& lineage,
+        TrustedCacheStage stage) {
+    require_root_unchanged(root, stage);
+    const auto& root_state = require_root_state(root, stage);
+    OwnedFileDescriptor current = duplicate_descriptor(
+            root_state->directory_descriptor, stage);
+
+    for(const RemovalNode* ancestor : lineage) {
+        if(ancestor == nullptr || !S_ISDIR(ancestor->status.st_mode)) {
+            throw_cache_error(stage, TrustedCacheErrorCode::InvalidBoundary);
+        }
+        require_named_removal_node_identity(
+                current.get(), *ancestor, root_state->device,
+                root_state->owner, stage);
+        const int descriptor = open_child_directory_without_mount_crossing(
+                current.get(), ancestor->name);
+        if(descriptor < 0) {
+            const int open_error = errno;
+            throw_cache_error(
+                    stage,
+                    open_error == ENOENT || open_error == ELOOP ||
+                                    open_error == ENOTDIR
+                            ? TrustedCacheErrorCode::ConcurrentReplacement
+                            : child_directory_open_error_code(open_error),
+                    open_error);
+        }
+        OwnedFileDescriptor opened(descriptor);
+        struct stat opened_status {};
+        if(fstat(opened.get(), &opened_status) != 0) {
+            const int metadata_error = errno;
+            throw_cache_error(
+                    stage,
+                    is_permission_error(metadata_error)
+                            ? TrustedCacheErrorCode::PermissionDenied
+                            : TrustedCacheErrorCode::MetadataFailure,
+                    metadata_error);
+        }
+        require_expected_removal_node_status(
+                *ancestor, opened_status, root_state->device,
+                root_state->owner, stage);
+        current = std::move(opened);
+    }
+    return current;
+}
+
+void remove_removal_node(
+        const ValidatedCacheRoot& root, const RemovalNode& node,
+        RemovalDirectoryLineage& lineage) {
+    notify_removal_test_hook(lineage.size());
+    const auto& root_state = require_root_state(
+            root, TrustedCacheStage::RecursiveRemoval);
+    OwnedFileDescriptor parent = open_removal_parent_lineage(
+            root, lineage, TrustedCacheStage::RecursiveRemoval);
+    revalidate_removal_node(
+            parent.get(), node, root_state->device, root_state->owner,
+            TrustedCacheStage::RecursiveRemoval);
+
+    if(S_ISDIR(node.status.st_mode)) {
+        lineage.push_back(&node);
+        try {
+            for(const RemovalNode& child : node.children) {
+                remove_removal_node(root, child, lineage);
+            }
+        } catch(...) {
+            lineage.pop_back();
+            throw;
+        }
+        lineage.pop_back();
+
+        // The retained FD pins the preflighted inode but is never destructive
+        // authority. Rebuild the named lineage from the trusted root so an
+        // original moved outside the cache is not followed and deleted.
+        parent = open_removal_parent_lineage(
+                root, lineage, TrustedCacheStage::RecursiveRemoval);
+        require_named_removal_node_identity(
+                parent.get(), node, root_state->device, root_state->owner,
+                TrustedCacheStage::RecursiveRemoval);
+        // Linux has no atomic compare-and-unlink operation. The checks above
+        // fail closed for observed replacement, but cannot exclude a hostile
+        // same-euid mutation between this point and unlinkat().
+        if(unlinkat(parent.get(), node.name.c_str(), AT_REMOVEDIR) != 0) {
+            const int removal_error = errno;
+            throw_cache_error(
+                    TrustedCacheStage::RecursiveRemoval,
+                    removal_error == ENOTEMPTY || removal_error == ENOENT
+                            ? TrustedCacheErrorCode::ConcurrentReplacement
+                            : (is_permission_error(removal_error)
+                                       ? TrustedCacheErrorCode::PermissionDenied
+                                       : TrustedCacheErrorCode::RemovalFailure),
+                    removal_error);
+        }
+        return;
+    }
+
+    // Regular/symlink leaves use the same root-relative authority. Their
+    // retained O_PATH descriptors pin identity only and never authorize
+    // deletion through a lineage that has moved outside the cache.
+    parent = open_removal_parent_lineage(
+            root, lineage, TrustedCacheStage::RecursiveRemoval);
+    require_named_removal_node_identity(
+            parent.get(), node, root_state->device, root_state->owner,
+            TrustedCacheStage::RecursiveRemoval);
+    // As above, replacement observable before this final syscall is refused;
+    // atomic compare-and-unlink against a same-euid adversary is unavailable.
+    if(unlinkat(parent.get(), node.name.c_str(), 0) != 0) {
+        const int removal_error = errno;
+        throw_cache_error(
+                TrustedCacheStage::RecursiveRemoval,
+                removal_error == ENOENT
+                        ? TrustedCacheErrorCode::ConcurrentReplacement
+                        : (is_permission_error(removal_error)
+                                   ? TrustedCacheErrorCode::PermissionDenied
+                                   : TrustedCacheErrorCode::RemovalFailure),
+                removal_error);
+    }
+}
+
+RemovalPlan make_removal_plan(
+        const ValidatedCachePath& expected, TrustedCacheStage stage) {
+    if(!expected.exists()) {
+        throw_cache_error(stage, TrustedCacheErrorCode::ConcurrentReplacement);
+    }
+    ValidatedCachePath current = inspect_cache_child(
+            TrustedCacheAccess::root(expected),
+            TrustedCacheAccess::leaf(expected),
+            expected.is_directory() ? CachePathRequirement::ExistingDirectory
+                                    : CachePathRequirement::Existing);
+    require_same_cache_path_identity(expected, current, stage);
+    const auto& root_state = require_root_state(
+            TrustedCacheAccess::root(expected), stage);
+    RemovalNode root_node = preflight_removal_node(
+            root_state->directory_descriptor,
+            TrustedCacheAccess::leaf(expected), root_state->device,
+            root_state->owner, stage);
+    if(!same_identity(root_node.status, expected.device(), expected.inode())) {
+        throw_cache_error(stage, TrustedCacheErrorCode::ConcurrentReplacement);
+    }
+    return RemovalPlan{expected, std::move(root_node)};
+}
+
+void require_cleanup_root_lineage(
+        const ValidatedCacheRoot& expected_root,
+        const std::vector<RemovalPlan>& plans) {
+    for(const RemovalPlan& plan : plans) {
+        const ValidatedCacheRoot& root =
+                TrustedCacheAccess::root(plan.target);
+        if(root.device() != expected_root.device() ||
+           root.inode() != expected_root.inode()) {
+            throw_cache_error(
+                    TrustedCacheStage::CleanupPreflight,
+                    TrustedCacheErrorCode::InvalidBoundary);
+        }
+    }
+}
+
+[[noreturn]] void throw_cleanup_preflight_failure(
+        const TrustedCacheError& error) {
+    throw TrustedCacheError(TrustedCacheFailure{
+            TrustedCacheStage::CleanupPreflight,
+            error.failure().code,
+            error.failure().system_error});
 }
 
 bool rollback_trusted_cache_path(
-        const ValidatedCacheRoot& expected_root, const fs::path& expected_path,
-        const ValidatedCachePath& expected_capability) {
-    require_unchanged_cache_root(expected_root);
-    fs::file_status status = cache_symlink_status(expected_path, expected_path);
-    if(!fs::exists(status)) return false;
+        const ValidatedCachePath& expected, int retained_descriptor,
+        std::uintmax_t retained_device, std::uintmax_t retained_inode,
+        std::uintmax_t retained_owner,
+        std::uintmax_t retained_permissions) {
+    try {
+        const auto& root_state = require_root_state(
+                TrustedCacheAccess::root(expected),
+                TrustedCacheStage::Rollback);
+        struct stat retained_status {};
+        if(retained_descriptor < 0 ||
+           fstat(retained_descriptor, &retained_status) != 0) {
+            const int metadata_error = retained_descriptor < 0 ? EBADF : errno;
+            throw_cache_error(
+                    TrustedCacheStage::Rollback,
+                    TrustedCacheErrorCode::RollbackRefusal,
+                    metadata_error);
+        }
+        if(!S_ISDIR(retained_status.st_mode) ||
+           status_device(retained_status) != retained_device ||
+           status_inode(retained_status) != retained_inode ||
+           status_owner(retained_status) != retained_owner ||
+           status_permissions(retained_status) != retained_permissions ||
+           retained_device != root_state->device ||
+           retained_owner != root_state->owner ||
+           retained_owner != static_cast<std::uintmax_t>(geteuid()) ||
+           retained_permissions != 0700) {
+            throw_cache_error(
+                    TrustedCacheStage::Rollback,
+                    TrustedCacheErrorCode::RollbackRefusal);
+        }
 
-    remove_trusted_cache_path(expected_capability);
-    return true;
-}
-
-fs::path change_working_directory(const fs::path& target_path) {
-    fs::path original_path = fs::current_path();
-    fs::current_path(target_path);
-    return original_path;
+        struct stat named_status {};
+        if(fstatat(
+                   root_state->directory_descriptor,
+                   TrustedCacheAccess::leaf(expected).c_str(), &named_status,
+                   AT_SYMLINK_NOFOLLOW) != 0) {
+            if(errno == ENOENT && retained_status.st_nlink == 0) return false;
+            const int metadata_error = errno;
+            throw_cache_error(
+                    TrustedCacheStage::Rollback,
+                    TrustedCacheErrorCode::RollbackRefusal,
+                    metadata_error);
+        }
+        if(!same_identity_and_type(retained_status, named_status) ||
+           !S_ISDIR(named_status.st_mode) ||
+           status_owner(named_status) != retained_owner ||
+           status_permissions(named_status) != retained_permissions ||
+           !same_identity(
+                   named_status, TrustedCacheAccess::device(expected),
+                   TrustedCacheAccess::inode(expected))) {
+            throw_cache_error(
+                    TrustedCacheStage::Rollback,
+                    TrustedCacheErrorCode::RollbackRefusal);
+        }
+        RemovalPlan plan = make_removal_plan(
+                expected, TrustedCacheStage::Rollback);
+        revalidate_removal_node(
+                root_state->directory_descriptor, plan.root,
+                root_state->device, root_state->owner,
+                TrustedCacheStage::Rollback);
+        RemovalDirectoryLineage lineage;
+        remove_removal_node(
+                TrustedCacheAccess::root(expected), plan.root, lineage);
+        return true;
+    } catch(const TrustedCacheError& error) {
+        if(error.failure().code == TrustedCacheErrorCode::RollbackRefusal) {
+            throw;
+        }
+        throw TrustedCacheError(TrustedCacheFailure{
+                TrustedCacheStage::Rollback,
+                TrustedCacheErrorCode::RollbackRefusal,
+                error.failure().system_error});
+    }
 }
 
 } // namespace
+
+struct PreparedCacheCleanup::State {
+    ValidatedCacheRoot       root;
+    std::vector<RemovalPlan> plans;
+
+    State(
+            ValidatedCacheRoot trusted_root,
+            std::vector<RemovalPlan> removal_plans) noexcept
+        : root(std::move(trusted_root)), plans(std::move(removal_plans)) {
+    }
+};
+
+TrustedCacheError::TrustedCacheError(TrustedCacheFailure failure)
+    : std::runtime_error(trusted_cache_diagnostic(failure)),
+      failure_(std::move(failure)) {
+}
+
+struct TrustedCacheDirectoryAccess {
+    static ValidatedCacheRoot adopt(
+            const xdg_paths::CachePaths& paths,
+            xdg_directory_safety::PreparedDirectory directory) {
+        if(directory.directory_kind_ != xdg_paths::DirectoryKind::Cache ||
+           directory.path_ != paths.directory ||
+           directory.parent_descriptor_ < 0 ||
+           directory.directory_descriptor_ < 0 ||
+           directory.retained_lineage_.size() < 2 ||
+           paths.creation_boundary.creatable_components.empty() ||
+           directory.leaf_name_ !=
+                   paths.creation_boundary.creatable_components.back()) {
+            throw_cache_error(
+                    TrustedCacheStage::RootAdoption,
+                    TrustedCacheErrorCode::InvalidBoundary);
+        }
+        directory.require_unchanged_identity();
+
+        // Mutation用root descriptorだけではancestor renameを検出できない。
+        // PreparedDirectoryのprivate lineageを複製し、capability lifetime全体で
+        // filesystem-root-relativeのnamed linkを再証明する。
+        std::vector<ValidatedCacheRoot::State::RetainedDirectoryIdentity>
+                retained_lineage;
+        retained_lineage.reserve(directory.retained_lineage_.size());
+        for(const auto& identity : directory.retained_lineage_) {
+            OwnedFileDescriptor duplicated = duplicate_descriptor(
+                    identity.descriptor, TrustedCacheStage::RootAdoption);
+            retained_lineage.emplace_back(
+                    duplicated.get(), identity.leaf_name,
+                    identity.device, identity.inode,
+                    identity.filesystem_owner,
+                    identity.requires_security_validation);
+            static_cast<void>(duplicated.release());
+        }
+
+        OwnedFileDescriptor parent = duplicate_descriptor(
+                directory.parent_descriptor_,
+                TrustedCacheStage::RootAdoption);
+        const int root_descriptor = openat(
+                directory.directory_descriptor_, ".",
+                O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+        if(root_descriptor < 0) {
+            const int open_error = errno;
+            throw_cache_error(
+                    TrustedCacheStage::RootAdoption,
+                    is_permission_error(open_error)
+                            ? TrustedCacheErrorCode::PermissionDenied
+                            : TrustedCacheErrorCode::MetadataFailure,
+                    open_error);
+        }
+        OwnedFileDescriptor root(root_descriptor);
+
+        struct stat status {};
+        if(fstat(root.get(), &status) != 0) {
+            const int metadata_error = errno;
+            throw_cache_error(
+                    TrustedCacheStage::RootAdoption,
+                    TrustedCacheErrorCode::MetadataFailure,
+                    metadata_error);
+        }
+        if(!S_ISDIR(status.st_mode) ||
+           status_device(status) != directory.device_ ||
+           status_inode(status) != directory.inode_) {
+            throw_cache_error(
+                    TrustedCacheStage::RootAdoption,
+                    TrustedCacheErrorCode::ConcurrentReplacement);
+        }
+        if(status_owner(status) != directory.filesystem_owner_) {
+            throw_cache_error(
+                    TrustedCacheStage::RootAdoption,
+                    TrustedCacheErrorCode::OwnershipMismatch);
+        }
+        require_safe_directory_permissions(
+                status, TrustedCacheStage::RootAdoption);
+
+        auto state = std::make_shared<ValidatedCacheRoot::State>(
+                paths.directory, parent.get(), root.get(),
+                directory.leaf_name_, status_device(status),
+                status_inode(status), status_owner(status),
+                status_permissions(status),
+                std::move(retained_lineage));
+        static_cast<void>(parent.release());
+        static_cast<void>(root.release());
+        ValidatedCacheRoot adopted =
+                TrustedCacheAccess::make_root(std::move(state));
+        require_root_unchanged(
+                adopted, TrustedCacheStage::RootAdoption);
+        return adopted;
+    }
+};
+
+const fs::path& ValidatedCacheRoot::path() const noexcept {
+    static const fs::path EMPTY_PATH;
+    return state_ ? state_->path : EMPTY_PATH;
+}
+
+const fs::path& ValidatedCacheRoot::canonical_path() const noexcept {
+    return path();
+}
+
+std::uintmax_t ValidatedCacheRoot::device() const noexcept {
+    return state_ ? state_->device : 0;
+}
+
+std::uintmax_t ValidatedCacheRoot::inode() const noexcept {
+    return state_ ? state_->inode : 0;
+}
+
+std::uintmax_t ValidatedCacheRoot::owner() const noexcept {
+    return state_ ? state_->owner : 0;
+}
+
+void ValidatedCacheRoot::require_unchanged_identity() const {
+    require_root_unchanged(*this, TrustedCacheStage::RootRevalidation);
+}
 
 ValidatedPrivateCacheRoot::ValidatedPrivateCacheRoot(
         ValidatedCacheRoot trusted_root, int directory_descriptor,
         std::uintmax_t device, std::uintmax_t inode,
         std::uintmax_t owner) noexcept
     : trusted_root_(std::move(trusted_root)),
-      directory_descriptor_(directory_descriptor), device_(device), inode_(inode),
-      owner_(owner) {
+      directory_descriptor_(directory_descriptor), device_(device),
+      inode_(inode), owner_(owner) {
 }
 
 ValidatedPrivateCacheRoot::ValidatedPrivateCacheRoot(
@@ -491,53 +1516,39 @@ ValidatedPrivateCacheRoot::ValidatedPrivateCacheRoot(
 }
 
 ValidatedPrivateCacheRoot::~ValidatedPrivateCacheRoot() noexcept {
-    if(directory_descriptor_ >= 0) close(directory_descriptor_);
+    if(directory_descriptor_ >= 0) {
+        static_cast<void>(close(directory_descriptor_));
+    }
 }
 
 void ValidatedPrivateCacheRoot::require_unchanged_identity_for_owner(
         std::uintmax_t expected_effective_user) const {
+    trusted_root_.require_unchanged_identity();
     if(directory_descriptor_ < 0) {
-        throw std::runtime_error(
-                "Private Moguet cache root is no longer owned.");
+        throw_cache_error(
+                TrustedCacheStage::RootRevalidation,
+                TrustedCacheErrorCode::InvalidBoundary);
     }
-
-    ValidatedCacheRoot current_root =
-            require_unchanged_cache_root(trusted_root_);
-    struct stat retained_status {};
-    if(fstat(directory_descriptor_, &retained_status) != 0) {
-        throw std::runtime_error(
-                "Failed to inspect retained private Moguet cache root " +
-                current_root.canonical_path().string() + ": " +
-                std::strerror(errno));
+    struct stat status {};
+    if(fstat(directory_descriptor_, &status) != 0) {
+        const int metadata_error = errno;
+        throw_cache_error(
+                TrustedCacheStage::RootRevalidation,
+                TrustedCacheErrorCode::MetadataFailure,
+                metadata_error);
     }
-    if(!S_ISDIR(retained_status.st_mode) ||
-       cache_status_device(retained_status) != device_ ||
-       cache_status_inode(retained_status) != inode_ ||
-       cache_status_owner(retained_status) != owner_ ||
-       owner_ != expected_effective_user) {
-        throw std::runtime_error(
-                "Retained private Moguet cache root changed identity or owner: " +
-                current_root.canonical_path().string());
+    if(!S_ISDIR(status.st_mode) || !same_identity(status, device_, inode_)) {
+        throw_cache_error(
+                TrustedCacheStage::RootRevalidation,
+                TrustedCacheErrorCode::ConcurrentReplacement);
     }
-    require_private_cache_root_status(
-            retained_status, current_root.canonical_path(),
-            expected_effective_user, false);
-
-    struct stat named_status {};
-    if(fstatat(
-               AT_FDCWD, current_root.canonical_path().c_str(), &named_status,
-               AT_SYMLINK_NOFOLLOW) != 0 ||
-       !same_cache_root_identity(retained_status, named_status) ||
-       cache_status_device(named_status) != device_ ||
-       cache_status_inode(named_status) != inode_ ||
-       cache_status_owner(named_status) != owner_) {
-        throw std::runtime_error(
-                "Private Moguet cache root path changed identity or owner: " +
-                current_root.canonical_path().string());
+    if(status_owner(status) != owner_ || owner_ != expected_effective_user) {
+        throw_cache_error(
+                TrustedCacheStage::RootRevalidation,
+                TrustedCacheErrorCode::OwnershipMismatch);
     }
-    require_private_cache_root_status(
-            named_status, current_root.canonical_path(),
-            expected_effective_user, false);
+    require_safe_directory_permissions(
+            status, TrustedCacheStage::RootRevalidation);
 }
 
 void ValidatedPrivateCacheRoot::require_unchanged_identity() const {
@@ -545,21 +1556,44 @@ void ValidatedPrivateCacheRoot::require_unchanged_identity() const {
             static_cast<std::uintmax_t>(geteuid()));
 }
 
-ValidatedPrivateCacheRoot prepare_private_trusted_cache_root() {
-    PreparedPrivateCacheRootState prepared = prepare_private_cache_root_path();
-    ValidatedCacheRoot trusted_root(
-            std::move(prepared.trusted_state.path),
-            std::move(prepared.trusted_state.canonical_path));
-    OpenedPrivateCacheRootState opened = open_private_cache_root(
-            trusted_root, static_cast<std::uintmax_t>(geteuid()),
-            prepared.created_status);
+ValidatedCacheRoot adopt_trusted_cache_root(
+        const xdg_paths::CachePaths& paths,
+        xdg_directory_safety::PreparedDirectory directory) {
+    return TrustedCacheDirectoryAccess::adopt(
+            paths, std::move(directory));
+}
 
+ValidatedCacheRoot require_unchanged_cache_root(
+        const ValidatedCacheRoot& root) {
+    root.require_unchanged_identity();
+    return root;
+}
+
+ValidatedPrivateCacheRoot prepare_private_trusted_cache_root(
+        const ValidatedCacheRoot& root) {
+    root.require_unchanged_identity();
+    const auto& state = require_root_state(
+            root, TrustedCacheStage::RootAdoption);
+    OwnedFileDescriptor duplicated = duplicate_descriptor(
+            state->directory_descriptor, TrustedCacheStage::RootAdoption);
+    struct stat status {};
+    if(fstat(duplicated.get(), &status) != 0) {
+        const int metadata_error = errno;
+        throw_cache_error(
+                TrustedCacheStage::RootAdoption,
+                TrustedCacheErrorCode::MetadataFailure,
+                metadata_error);
+    }
+    if(!S_ISDIR(status.st_mode) ||
+       !same_identity(status, state->device, state->inode)) {
+        throw_cache_error(
+                TrustedCacheStage::RootAdoption,
+                TrustedCacheErrorCode::ConcurrentReplacement);
+    }
     ValidatedPrivateCacheRoot private_root(
-            std::move(trusted_root), opened.descriptor.get(),
-            cache_status_device(opened.status),
-            cache_status_inode(opened.status),
-            cache_status_owner(opened.status));
-    static_cast<void>(opened.descriptor.release());
+            root, duplicated.get(), status_device(status),
+            status_inode(status), status_owner(status));
+    static_cast<void>(duplicated.release());
     return private_root;
 }
 
@@ -569,120 +1603,517 @@ void require_private_cache_root_identity_for_test(
         std::uintmax_t expected_effective_user) {
     root.require_unchanged_identity_for_owner(expected_effective_user);
 }
+
+void set_trusted_cache_removal_test_hook(
+        TrustedCacheRemovalTestHook hook) {
+    removal_test_hook = std::move(hook);
+}
+
+void set_trusted_cache_staged_directory_test_hook(
+        TrustedCacheStagedDirectoryTestHook hook) {
+    staged_directory_test_hook = std::move(hook);
+}
 #endif
-
-ValidatedCacheRoot prepare_trusted_cache_root() {
-    PreparedPrivateCacheRootState prepared = prepare_private_cache_root_path();
-    return ValidatedCacheRoot(
-            std::move(prepared.trusted_state.path),
-            std::move(prepared.trusted_state.canonical_path));
-}
-
-ValidatedCacheRoot require_unchanged_cache_root(const ValidatedCacheRoot& expected_root) {
-    ValidatedCacheRootState current_root = validate_cache_root_path(expected_root.path(), false);
-    if(current_root.canonical_path != expected_root.canonical_path()) {
-        throw std::runtime_error(
-                "Unsafe Moguet cache root " + expected_root.path().string() +
-                ": canonical path changed after validation.");
-    }
-    return ValidatedCacheRoot(std::move(current_root.path), std::move(current_root.canonical_path));
-}
 
 ValidatedCachePath require_trusted_cache_path(
         const ValidatedCacheRoot& root, const fs::path& path,
         CachePathRequirement requirement) {
-    ValidatedCacheRoot      current_root = require_unchanged_cache_root(root);
-    ValidatedCachePathState current_path = validate_cache_path_against_root(
-            current_root, cache_path_for_root(current_root, path), requirement);
-    return ValidatedCachePath(
-            std::move(current_root), std::move(current_path.path),
-            std::move(current_path.canonical_path), current_path.exists,
-            current_path.is_directory);
+    return inspect_cache_child(root, path, requirement);
 }
 
 ValidatedCachePath revalidate_trusted_cache_path(
-        const ValidatedCachePath& expected_path, CachePathRequirement requirement) {
-    ValidatedCachePath current_path = require_trusted_cache_path(
-            expected_path.root_, expected_path.path_, requirement);
-    if(current_path.canonical_path() != expected_path.canonical_path_) {
-        throw std::runtime_error(
-                "Unsafe Moguet cache path " + expected_path.path_.string() +
-                ": canonical path changed after validation.");
+        const ValidatedCachePath& expected,
+        CachePathRequirement requirement) {
+    ValidatedCachePath current = inspect_cache_child(
+            TrustedCacheAccess::root(expected),
+            TrustedCacheAccess::leaf(expected), requirement);
+    require_same_cache_path_identity(
+            expected, current, TrustedCacheStage::ChildValidation);
+    return current;
+}
+
+RetainedTrustedCacheDirectory::RetainedTrustedCacheDirectory(
+        ValidatedCachePath path, int descriptor,
+        std::uintmax_t device, std::uintmax_t inode) noexcept
+    : path_(std::move(path)), descriptor_(descriptor), device_(device),
+      inode_(inode) {
+}
+
+RetainedTrustedCacheDirectory::RetainedTrustedCacheDirectory(
+        RetainedTrustedCacheDirectory&& other) noexcept
+    : path_(std::move(other.path_)),
+      descriptor_(std::exchange(other.descriptor_, -1)),
+      device_(other.device_), inode_(other.inode_) {
+}
+
+RetainedTrustedCacheDirectory::~RetainedTrustedCacheDirectory() noexcept {
+    if(descriptor_ >= 0) static_cast<void>(close(descriptor_));
+}
+
+void RetainedTrustedCacheDirectory::require_unchanged_identity() const {
+    if(descriptor_ < 0) {
+        throw_cache_error(
+                TrustedCacheStage::ChildOpen,
+                TrustedCacheErrorCode::InvalidBoundary);
     }
-    return current_path;
-}
-
-void remove_trusted_cache_path(const ValidatedCachePath& expected_path) {
-    ValidatedCachePath current_path =
-            revalidate_trusted_cache_path(expected_path, CachePathRequirement::Existing);
-    std::error_code ec;
-    fs::remove_all(current_path.canonical_path(), ec);
-    if(ec) {
-        throw std::runtime_error(
-                "Failed to remove trusted Moguet cache path " + current_path.path().string() +
-                ": " + ec.message());
+    ValidatedCachePath current = revalidate_trusted_cache_path(
+            path_, CachePathRequirement::ExistingDirectory);
+    struct stat retained_status {};
+    if(fstat(descriptor_, &retained_status) != 0) {
+        const int metadata_error = errno;
+        throw_cache_error(
+                TrustedCacheStage::ChildOpen,
+                is_permission_error(metadata_error)
+                        ? TrustedCacheErrorCode::PermissionDenied
+                        : TrustedCacheErrorCode::MetadataFailure,
+                metadata_error);
     }
-}
-
-std::vector<ValidatedCachePath> preflight_cache_cleanup(
-        const ValidatedCacheRoot& expected_root) {
-    ValidatedCacheRoot              root = require_unchanged_cache_root(expected_root);
-    std::vector<ValidatedCachePath> targets;
-    for(const auto& entry : fs::directory_iterator(root.canonical_path())) {
-        fs::path filename = entry.path().filename();
-        if(filename == "jpacker.log") continue;
-        targets.push_back(require_trusted_cache_path(
-                root, filename, CachePathRequirement::Existing));
+    if(!S_ISDIR(retained_status.st_mode) ||
+       !same_identity(retained_status, device_, inode_) ||
+       current.device() != device_ || current.inode() != inode_) {
+        throw_cache_error(
+                TrustedCacheStage::ChildOpen,
+                TrustedCacheErrorCode::ConcurrentReplacement);
     }
-    return targets;
+    const auto& root_state = require_root_state(
+            TrustedCacheAccess::root(current),
+            TrustedCacheStage::ChildOpen);
+    require_safe_direct_child_status(
+            retained_status, root_state->owner, root_state->device,
+            TrustedCacheStage::ChildOpen);
 }
 
-WorkDirGuard::WorkDirGuard(const ValidatedCacheRoot& target)
-    : original_path_(change_working_directory(
-              require_unchanged_cache_root(target).canonical_path())) {
+RetainedTrustedCacheDirectory retain_trusted_cache_directory(
+        const ValidatedCachePath& path) {
+    ValidatedCachePath current = revalidate_trusted_cache_path(
+            path, CachePathRequirement::ExistingDirectory);
+    OwnedFileDescriptor retained = open_validated_child_directory(
+            current, TrustedCacheStage::ChildOpen);
+    RetainedTrustedCacheDirectory directory(
+            std::move(current), retained.get(), path.device(), path.inode());
+    static_cast<void>(retained.release());
+    directory.require_unchanged_identity();
+    return directory;
 }
 
-WorkDirGuard::WorkDirGuard(const ValidatedCachePath& target)
-    : original_path_(change_working_directory(
-              revalidate_trusted_cache_path(
-                      target, CachePathRequirement::ExistingDirectory)
-                      .canonical_path())) {
-}
+ValidatedCachePath create_trusted_cache_directory(
+        const ValidatedCacheRoot& root, const fs::path& path) {
+    ValidatedCachePath missing = inspect_cache_child(
+            root, path, CachePathRequirement::Missing);
+    const auto& state = require_root_state(
+            root, TrustedCacheStage::ChildCreation);
+    std::string staging_template =
+            "/proc/self/fd/" +
+            std::to_string(state->directory_descriptor) +
+            "/.moguet-cache-create-XXXXXX";
+    std::vector<char> writable_template(
+            staging_template.begin(), staging_template.end());
+    writable_template.push_back('\0');
+    // THREAT MODEL: Linux cannot atomically combine name creation with the
+    // first retained descriptor acquisition. A hostile same-euid process can
+    // race mkdtemp() -> openat2(); while the descriptor acquired below stays
+    // open, nofollow checks and named identity comparisons pin and validate
+    // the observed inode. This function returns a path capability, so a later
+    // DirCleanupGuard starts a separate retained interval. We do not claim
+    // atomic ownership from creation time or across those intervals.
+    char* created_path = mkdtemp(writable_template.data());
+    if(created_path == nullptr) {
+        const int creation_error = errno;
+        throw_cache_error(
+                TrustedCacheStage::ChildCreation,
+                is_permission_error(creation_error)
+                        ? TrustedCacheErrorCode::PermissionDenied
+                        : TrustedCacheErrorCode::CreationFailure,
+                creation_error);
+    }
 
-WorkDirGuard::~WorkDirGuard() {
+    std::string staging_leaf =
+            fs::path(created_path).filename().string();
+    struct stat created_status {};
+    if(fstatat(
+               state->directory_descriptor, staging_leaf.c_str(),
+               &created_status, AT_SYMLINK_NOFOLLOW) != 0) {
+        const int metadata_error = errno;
+        Logger::warn_noexcept([]() {
+            return "Unable to prove ownership of a newly staged trusted "
+                   "cache directory; leaving it untouched.";
+        });
+        throw_cache_error(
+                TrustedCacheStage::ChildCreation,
+                is_permission_error(metadata_error)
+                        ? TrustedCacheErrorCode::PermissionDenied
+                        : TrustedCacheErrorCode::MetadataFailure,
+                metadata_error);
+    }
+
+    bool rollback_required = true;
     try {
-        if(fs::exists(original_path_)) fs::current_path(original_path_);
+        require_safe_direct_child_status(
+                created_status, state->owner, state->device,
+                TrustedCacheStage::ChildCreation);
+        if(status_permissions(created_status) != 0700) {
+            throw_cache_error(
+                    TrustedCacheStage::ChildCreation,
+                    TrustedCacheErrorCode::UnsafePermissions);
+        }
+
+        const int staging_descriptor =
+                open_child_directory_without_mount_crossing(
+                        state->directory_descriptor, staging_leaf);
+        if(staging_descriptor < 0) {
+            const int open_error = errno;
+            throw_cache_error(
+                    TrustedCacheStage::ChildCreation,
+                    child_directory_open_error_code(open_error), open_error);
+        }
+        OwnedFileDescriptor opened_staging(staging_descriptor);
+        struct stat opened_status {};
+        if(fstat(opened_staging.get(), &opened_status) != 0) {
+            const int metadata_error = errno;
+            throw_cache_error(
+                    TrustedCacheStage::ChildCreation,
+                    TrustedCacheErrorCode::MetadataFailure,
+                    metadata_error);
+        }
+        if(!same_identity_and_type(created_status, opened_status)) {
+            throw_cache_error(
+                    TrustedCacheStage::ChildCreation,
+                    TrustedCacheErrorCode::ConcurrentReplacement);
+        }
+
+#ifdef MOGUET_ENABLE_TRUSTED_CACHE_TEST_HOOKS
+        notify_staged_directory_test_hook(root.path() / staging_leaf);
+#endif
+        require_root_unchanged(root, TrustedCacheStage::ChildCreation);
+        struct stat named_staging_status {};
+        if(fstatat(
+                   state->directory_descriptor, staging_leaf.c_str(),
+                   &named_staging_status, AT_SYMLINK_NOFOLLOW) != 0) {
+            const int metadata_error = errno;
+            throw_cache_error(
+                    TrustedCacheStage::ChildCreation,
+                    metadata_error == ENOENT
+                            ? TrustedCacheErrorCode::ConcurrentReplacement
+                            : (is_permission_error(metadata_error)
+                                       ? TrustedCacheErrorCode::PermissionDenied
+                                       : TrustedCacheErrorCode::MetadataFailure),
+                    metadata_error);
+        }
+        if(!same_identity_and_type(opened_status, named_staging_status)) {
+            throw_cache_error(
+                    TrustedCacheStage::ChildCreation,
+                    TrustedCacheErrorCode::ConcurrentReplacement);
+        }
+        require_safe_direct_child_status(
+                named_staging_status, state->owner, state->device,
+                TrustedCacheStage::ChildCreation);
+        if(status_permissions(named_staging_status) != 0700) {
+            throw_cache_error(
+                    TrustedCacheStage::ChildCreation,
+                    TrustedCacheErrorCode::UnsafePermissions);
+        }
+        const std::string final_leaf = TrustedCacheAccess::leaf(missing);
+        if(syscall(
+                   SYS_renameat2, state->directory_descriptor,
+                   staging_leaf.c_str(), state->directory_descriptor,
+                   final_leaf.c_str(), RENAME_NOREPLACE) != 0) {
+            const int rename_error = errno;
+            throw_cache_error(
+                    TrustedCacheStage::ChildCreation,
+                    rename_error == EEXIST
+                            ? TrustedCacheErrorCode::ConcurrentReplacement
+                            : (is_permission_error(rename_error)
+                                       ? TrustedCacheErrorCode::PermissionDenied
+                                       : TrustedCacheErrorCode::CreationFailure),
+                    rename_error);
+        }
+        staging_leaf = final_leaf;
+
+        ValidatedCachePath created = TrustedCacheAccess::make_path(
+                root, root.path() / final_leaf, final_leaf, true, true,
+                status_device(created_status), status_inode(created_status),
+                status_owner(created_status),
+                status_permissions(created_status));
+        created = revalidate_trusted_cache_path(
+                created, CachePathRequirement::ExistingDirectory);
+        rollback_required = false;
+        return created;
     } catch(...) {
+        if(rollback_required) {
+            rollback_staged_cache_directory_noexcept(
+                    root, state->directory_descriptor, staging_leaf,
+                    created_status);
+        }
+        throw;
     }
 }
 
-DirCleanupGuard::DirCleanupGuard(const ValidatedCachePath& path) : path_(path) {
+void remove_trusted_cache_path(const ValidatedCachePath& expected) {
+    RemovalPlan plan = make_removal_plan(
+            expected, TrustedCacheStage::RecursiveRemoval);
+    RemovalDirectoryLineage lineage;
+    remove_removal_node(
+            TrustedCacheAccess::root(expected), plan.root, lineage);
 }
 
-void DirCleanupGuard::commit() {
+PreparedCacheCleanup::PreparedCacheCleanup(
+        std::unique_ptr<State> state) noexcept
+    : state_(std::move(state)) {
+}
+
+PreparedCacheCleanup::PreparedCacheCleanup(
+        PreparedCacheCleanup&& other) noexcept = default;
+
+PreparedCacheCleanup::~PreparedCacheCleanup() noexcept = default;
+
+bool PreparedCacheCleanup::empty() const noexcept {
+    return state_ == nullptr || state_->plans.empty();
+}
+
+std::size_t PreparedCacheCleanup::size() const noexcept {
+    return state_ == nullptr ? 0 : state_->plans.size();
+}
+
+const fs::path& PreparedCacheCleanup::cache_path() const {
+    if(state_ == nullptr) {
+        throw_cache_error(
+                TrustedCacheStage::CleanupPreflight,
+                TrustedCacheErrorCode::InvalidBoundary);
+    }
+    return state_->root.path();
+}
+
+PreparedCacheCleanup preflight_cache_cleanup(
+        const ValidatedCacheRoot& root) {
+    try {
+        root.require_unchanged_identity();
+        const auto& state = require_root_state(
+                root, TrustedCacheStage::CleanupPreflight);
+        const std::vector<std::string> names = directory_entry_names(
+                state->directory_descriptor,
+                TrustedCacheStage::CleanupPreflight);
+        std::vector<RemovalPlan> plans;
+        plans.reserve(names.size());
+        for(const std::string& name : names) {
+            ValidatedCachePath target = inspect_cache_child(
+                    root, name, CachePathRequirement::Existing);
+            plans.push_back(make_removal_plan(
+                    target, TrustedCacheStage::CleanupPreflight));
+        }
+        return PreparedCacheCleanup(std::make_unique<PreparedCacheCleanup::State>(
+                root, std::move(plans)));
+    } catch(const TrustedCacheError& error) {
+        throw_cleanup_preflight_failure(error);
+    }
+}
+
+void remove_preflighted_cache_paths(PreparedCacheCleanup cleanup) {
+    if(cleanup.state_ == nullptr) {
+        throw_cache_error(
+                TrustedCacheStage::CleanupPreflight,
+                TrustedCacheErrorCode::InvalidBoundary);
+    }
+    if(cleanup.state_->plans.empty()) return;
+    try {
+        require_cleanup_root_lineage(
+                cleanup.state_->root, cleanup.state_->plans);
+        cleanup.state_->root.require_unchanged_identity();
+        for(const RemovalPlan& plan : cleanup.state_->plans) {
+            const auto& state = require_root_state(
+                    TrustedCacheAccess::root(plan.target),
+                    TrustedCacheStage::CleanupPreflight);
+            revalidate_removal_node(
+                    state->directory_descriptor, plan.root, state->device,
+                    state->owner, TrustedCacheStage::CleanupPreflight);
+        }
+    } catch(const TrustedCacheError& error) {
+        throw_cleanup_preflight_failure(error);
+    }
+
+    for(const RemovalPlan& plan : cleanup.state_->plans) {
+        RemovalDirectoryLineage lineage;
+        remove_removal_node(
+                TrustedCacheAccess::root(plan.target), plan.root, lineage);
+    }
+}
+
+WorkDirGuard::WorkDirGuard(const ValidatedCacheRoot& target) {
+    target.require_unchanged_identity();
+    const auto& state = require_root_state(
+            target, TrustedCacheStage::ChildOpen);
+    original_descriptor_ = open(".", O_PATH | O_DIRECTORY | O_CLOEXEC);
+    if(original_descriptor_ < 0) {
+        const int open_error = errno;
+        throw_cache_error(
+                TrustedCacheStage::ChildOpen,
+                TrustedCacheErrorCode::MetadataFailure, open_error);
+    }
+    try {
+        target_descriptor_ = duplicate_descriptor(
+                state->directory_descriptor,
+                TrustedCacheStage::ChildOpen)
+                                     .release();
+        if(fchdir(target_descriptor_) != 0) {
+            const int directory_error = errno;
+            throw_cache_error(
+                    TrustedCacheStage::ChildOpen,
+                    is_permission_error(directory_error)
+                            ? TrustedCacheErrorCode::PermissionDenied
+                            : TrustedCacheErrorCode::MetadataFailure,
+                    directory_error);
+        }
+        target.require_unchanged_identity();
+    } catch(...) {
+        restore_working_directory_noexcept(original_descriptor_);
+        if(target_descriptor_ >= 0) {
+            static_cast<void>(close(target_descriptor_));
+            target_descriptor_ = -1;
+        }
+        static_cast<void>(close(original_descriptor_));
+        original_descriptor_ = -1;
+        throw;
+    }
+}
+
+WorkDirGuard::WorkDirGuard(const ValidatedCachePath& target) {
+    original_descriptor_ = open(".", O_PATH | O_DIRECTORY | O_CLOEXEC);
+    if(original_descriptor_ < 0) {
+        const int open_error = errno;
+        throw_cache_error(
+                TrustedCacheStage::ChildOpen,
+                TrustedCacheErrorCode::MetadataFailure, open_error);
+    }
+    try {
+        target_descriptor_ = open_validated_child_directory(
+                                     target,
+                                     TrustedCacheStage::ChildOpen)
+                                     .release();
+        if(fchdir(target_descriptor_) != 0) {
+            const int directory_error = errno;
+            throw_cache_error(
+                    TrustedCacheStage::ChildOpen,
+                    is_permission_error(directory_error)
+                            ? TrustedCacheErrorCode::PermissionDenied
+                            : TrustedCacheErrorCode::MetadataFailure,
+                    directory_error);
+        }
+        static_cast<void>(revalidate_trusted_cache_path(
+                target, CachePathRequirement::ExistingDirectory));
+    } catch(...) {
+        restore_working_directory_noexcept(original_descriptor_);
+        if(target_descriptor_ >= 0) {
+            static_cast<void>(close(target_descriptor_));
+            target_descriptor_ = -1;
+        }
+        static_cast<void>(close(original_descriptor_));
+        original_descriptor_ = -1;
+        throw;
+    }
+}
+
+WorkDirGuard::~WorkDirGuard() noexcept {
+    restore_working_directory_noexcept(original_descriptor_);
+    if(target_descriptor_ >= 0) {
+        static_cast<void>(close(target_descriptor_));
+    }
+    if(original_descriptor_ >= 0) {
+        static_cast<void>(close(original_descriptor_));
+    }
+}
+
+DirCleanupGuard::DirCleanupGuard(const ValidatedCachePath& path)
+    : path_(path) {
+    if(!path_.exists() || !path_.is_directory()) {
+        throw std::invalid_argument(
+                "Clone rollback requires an existing validated directory.");
+    }
+
+    ValidatedCachePath current = inspect_cache_child(
+            TrustedCacheAccess::root(path_), TrustedCacheAccess::leaf(path_),
+            CachePathRequirement::ExistingDirectory);
+    require_same_cache_path_identity(
+            path_, current, TrustedCacheStage::Rollback);
+    const auto& root_state = require_root_state(
+            TrustedCacheAccess::root(path_), TrustedCacheStage::Rollback);
+    const int descriptor = open_removal_node_without_mount_crossing(
+            root_state->directory_descriptor,
+            TrustedCacheAccess::leaf(path_));
+    if(descriptor < 0) {
+        const int open_error = errno;
+        throw_cache_error(
+                TrustedCacheStage::Rollback,
+                open_error == EXDEV
+                        ? TrustedCacheErrorCode::ChildEscape
+                        : (is_permission_error(open_error)
+                                   ? TrustedCacheErrorCode::PermissionDenied
+                                   : TrustedCacheErrorCode::RollbackRefusal),
+                open_error);
+    }
+    OwnedFileDescriptor retained(descriptor);
+    struct stat retained_status {};
+    struct stat named_status {};
+    if(fstat(retained.get(), &retained_status) != 0 ||
+       fstatat(
+               root_state->directory_descriptor,
+               TrustedCacheAccess::leaf(path_).c_str(), &named_status,
+               AT_SYMLINK_NOFOLLOW) != 0) {
+        const int metadata_error = errno;
+        throw_cache_error(
+                TrustedCacheStage::Rollback,
+                TrustedCacheErrorCode::RollbackRefusal,
+                metadata_error);
+    }
+    if(!S_ISDIR(retained_status.st_mode) ||
+       !same_identity_and_type(retained_status, named_status) ||
+       !same_identity(
+               retained_status, path_.device_, path_.inode_) ||
+       status_owner(retained_status) != path_.owner_ ||
+       status_owner(named_status) != path_.owner_ ||
+       status_permissions(retained_status) != path_.permissions_ ||
+       status_permissions(named_status) != path_.permissions_ ||
+       status_device(retained_status) != root_state->device ||
+       status_owner(retained_status) != root_state->owner ||
+       status_owner(retained_status) !=
+               static_cast<std::uintmax_t>(geteuid()) ||
+       status_permissions(retained_status) != 0700) {
+        throw_cache_error(
+                TrustedCacheStage::Rollback,
+                TrustedCacheErrorCode::RollbackRefusal);
+    }
+    retained_descriptor_ = retained.release();
+    retained_device_ = status_device(retained_status);
+    retained_inode_ = status_inode(retained_status);
+    retained_owner_ = status_owner(retained_status);
+    retained_permissions_ = status_permissions(retained_status);
+}
+
+void DirCleanupGuard::commit() noexcept {
     committed_ = true;
 }
 
 DirCleanupGuard::~DirCleanupGuard() noexcept {
-    if(committed_) return;
-
-    // LANDMINE(#175): clone前に検証したpathを再検証できた場合だけrollbackする。
-    try {
-        if(rollback_trusted_cache_path(path_.root_, path_.path_, path_)) {
-            Logger::warn_noexcept([this]() {
-                return "Rolled back failed clone: cleaned up " +
-                       path_.path_.string();
+    if(!committed_) {
+        try {
+            if(rollback_trusted_cache_path(
+                       path_, retained_descriptor_, retained_device_,
+                       retained_inode_, retained_owner_,
+                       retained_permissions_)) {
+                Logger::warn_noexcept([]() {
+                    return "Rolled back a failed clone cache entry.";
+                });
+            }
+        } catch(const std::exception& error) {
+            Logger::warn_noexcept([&error]() {
+                return "Refusing unsafe clone rollback: " +
+                       std::string(error.what());
+            });
+        } catch(...) {
+            Logger::warn_noexcept([]() {
+                return "Refusing unsafe clone rollback: unknown error";
             });
         }
-    } catch(const std::exception& e) {
-        Logger::warn_noexcept([this, &e]() {
-            return "Refusing unsafe clone rollback for " +
-                   path_.path_.string() + ": " + e.what();
-        });
-    } catch(...) {
-        Logger::warn_noexcept([this]() {
-            return "Refusing unsafe clone rollback for " +
-                   path_.path_.string() + ": unknown error";
-        });
+    }
+    if(retained_descriptor_ >= 0) {
+        static_cast<void>(close(retained_descriptor_));
     }
 }

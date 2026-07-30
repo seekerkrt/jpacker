@@ -100,11 +100,18 @@ ResolvedPaths resolve(const EnvironmentSnapshot& environment);
 // 取り込まず、state pathだけを解決するpure resolver。
 StatePaths resolve_state(const EnvironmentSnapshot& environment);
 
+// Cache consumerが無関係なconfig/state environmentをauthorityへ
+// 取り込まず、cache pathだけを解決するpure resolver。
+CachePaths resolve_cache(const EnvironmentSnapshot& environment);
+
 // Production adapter。実processのXDG_CONFIG_HOME / XDG_STATE_HOME /
 // XDG_CACHE_HOME / HOMEだけをsnapshot化し、pure resolverへ渡す。
 ResolvedPaths resolve_process_environment();
 
 // Default state log専用adapter。XDG_STATE_HOME / HOMEだけをsnapshot化する。
 StatePaths resolve_state_process_environment();
+
+// Cache consumer専用adapter。XDG_CACHE_HOME / HOMEだけをsnapshot化する。
+CachePaths resolve_cache_process_environment();
 
 } // namespace xdg_paths

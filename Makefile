@@ -16,6 +16,8 @@ APPLICATION_IDENTITY_TEST_TARGET := $(BUILD_DIR)/tests/application-identity-test
 XDG_PATHS_TEST_TARGET := $(BUILD_DIR)/tests/xdg-paths-test
 XDG_DIRECTORY_SAFETY_TEST_TARGET := $(BUILD_DIR)/tests/xdg-directory-safety-test
 XDG_STATE_LOG_TEST_TARGET := $(BUILD_DIR)/tests/xdg-state-log-test
+TRUSTED_CACHE_TEST_TARGET := $(BUILD_DIR)/tests/trusted-cache-test
+TRUSTED_CACHE_SUPPORT_HEADER := tests/trusted_cache_test_support.hpp
 ROOT_EXECUTION_IDENTITY_TEST_TARGET := $(BUILD_DIR)/tests/moguet-root-execution-identity-test
 COMMANDS_INSPECT_TEST_TARGET := build/tests/moguet-commands-inspect-test
 AUR_UPDATE_COMMAND_TEST_TARGET := build/tests/moguet-aur-update-command-test
@@ -156,13 +158,23 @@ UPGRADE_ALL_PLAN_FORBIDDEN_TEST_SRCS := \
 SYSTEM_SOURCE_UPGRADE_TEST_SRCS := \
 	tests/system_source_upgrade_test.cpp \
 	$(SRC_DIR)/system_source_upgrade.cpp \
+	$(SRC_DIR)/cache_authority.cpp \
+	$(SRC_DIR)/trusted_cache.cpp \
+	$(SRC_DIR)/xdg_directory_safety.cpp \
+	$(SRC_DIR)/xdg_paths.cpp \
 	$(SRC_DIR)/package_identifier.cpp \
 	$(SRC_DIR)/shell_words.cpp \
+	$(SRC_DIR)/logging.cpp \
 	tests/stubs/system-source-upgrade/phase_stub.cpp
 SYSTEM_SOURCE_UPGRADE_ALLOWED_PRODUCTION_TEST_SRCS := \
 	$(SRC_DIR)/system_source_upgrade.cpp \
+	$(SRC_DIR)/cache_authority.cpp \
+	$(SRC_DIR)/trusted_cache.cpp \
+	$(SRC_DIR)/xdg_directory_safety.cpp \
+	$(SRC_DIR)/xdg_paths.cpp \
 	$(SRC_DIR)/package_identifier.cpp \
-	$(SRC_DIR)/shell_words.cpp
+	$(SRC_DIR)/shell_words.cpp \
+	$(SRC_DIR)/logging.cpp
 SYSTEM_SOURCE_UPGRADE_FORBIDDEN_TEST_SRCS := \
 	$(filter-out \
 		$(SYSTEM_SOURCE_UPGRADE_ALLOWED_PRODUCTION_TEST_SRCS), \
@@ -321,6 +333,10 @@ UPGRADE_ALL_OPERATION_ALLOWED_PRODUCTION_TEST_SRCS := \
 	$(SRC_DIR)/upgrade_all_operation.cpp \
 	$(SRC_DIR)/upgrade_all_operation_result.cpp \
 	$(SRC_DIR)/system_source_upgrade.cpp \
+	$(SRC_DIR)/cache_authority.cpp \
+	$(SRC_DIR)/trusted_cache.cpp \
+	$(SRC_DIR)/xdg_directory_safety.cpp \
+	$(SRC_DIR)/xdg_paths.cpp \
 	$(SRC_DIR)/filtered_aur_update_operation.cpp \
 	$(SRC_DIR)/upgrade_all_plan.cpp \
 	$(SRC_DIR)/aur_update_query.cpp \
@@ -345,6 +361,7 @@ UPGRADE_ALL_OPERATION_REQUIRED_TEST_SRCS := \
 	$(SRC_DIR)/upgrade_all_operation.cpp \
 	$(SRC_DIR)/upgrade_all_operation_result.cpp \
 	$(SRC_DIR)/system_source_upgrade.cpp \
+	$(SRC_DIR)/cache_authority.cpp \
 	$(SRC_DIR)/filtered_aur_update_operation.cpp \
 	$(SRC_DIR)/aur_update_query.cpp \
 	$(SRC_DIR)/aur_update_execution_preflight.cpp \
@@ -412,6 +429,10 @@ ARTIFACT_SELECTION_MODEL_TEST_SRCS := \
 	$(ARTIFACT_SELECTION_MODEL_ALLOWED_PRODUCTION_TEST_SRCS)
 ARTIFACT_SELECTION_MODEL_FORBIDDEN_TEST_SRCS := \
 	$(filter-out $(ARTIFACT_SELECTION_MODEL_ALLOWED_PRODUCTION_TEST_SRCS),$(SRCS))
+TRUSTED_CACHE_SRCS := \
+	$(SRC_DIR)/trusted_cache.cpp \
+	$(SRC_DIR)/xdg_directory_safety.cpp \
+	$(SRC_DIR)/xdg_paths.cpp
 # POLICY(#268): identity correlation testはpure adapter/value model、
 # PR1 selector、validatorだけをlinkし、process/filesystem/install lifecycle TUを持ち込まない。
 ARTIFACT_IDENTITY_SELECTION_ALLOWED_PRODUCTION_TEST_SRCS := \
@@ -429,7 +450,7 @@ ARTIFACT_IDENTITY_SELECTION_FORBIDDEN_TEST_SRCS := \
 ARTIFACT_WORKSPACE_TEST_SRCS := \
 	tests/artifact_workspace_test.cpp \
 	$(SRC_DIR)/artifact_workspace.cpp \
-	$(SRC_DIR)/trusted_cache.cpp \
+	$(TRUSTED_CACHE_SRCS) \
 	$(SRC_DIR)/source_environment.cpp \
 	$(SRC_DIR)/package_identifier.cpp \
 	$(SRC_DIR)/shell_words.cpp \
@@ -439,7 +460,7 @@ ARTIFACT_WORKSPACE_TEST_SRCS := \
 # 既存support translation unitだけをlinkする。
 MULTIPLE_ARTIFACT_WORKSPACE_ALLOWED_PRODUCTION_TEST_SRCS := \
 	$(SRC_DIR)/artifact_workspace.cpp \
-	$(SRC_DIR)/trusted_cache.cpp \
+	$(TRUSTED_CACHE_SRCS) \
 	$(SRC_DIR)/source_environment.cpp \
 	$(SRC_DIR)/package_identifier.cpp \
 	$(SRC_DIR)/shell_words.cpp \
@@ -455,7 +476,7 @@ ARTIFACT_IDENTITY_TEST_SRCS := \
 	$(SRC_DIR)/artifact_identity.cpp \
 	$(SRC_DIR)/artifact_identity_set.cpp \
 	$(SRC_DIR)/artifact_workspace.cpp \
-	$(SRC_DIR)/trusted_cache.cpp \
+	$(TRUSTED_CACHE_SRCS) \
 	$(SRC_DIR)/source_environment.cpp \
 	$(SRC_DIR)/package_identifier.cpp \
 	$(SRC_DIR)/shell_words.cpp \
@@ -467,7 +488,7 @@ MULTIPLE_ARTIFACT_IDENTITY_ALLOWED_PRODUCTION_TEST_SRCS := \
 	$(SRC_DIR)/artifact_identity.cpp \
 	$(SRC_DIR)/artifact_identity_set.cpp \
 	$(SRC_DIR)/artifact_workspace.cpp \
-	$(SRC_DIR)/trusted_cache.cpp \
+	$(TRUSTED_CACHE_SRCS) \
 	$(SRC_DIR)/source_environment.cpp \
 	$(SRC_DIR)/package_identifier.cpp \
 	$(SRC_DIR)/shell_words.cpp \
@@ -501,7 +522,7 @@ ARTIFACT_INSTALL_EXECUTOR_TEST_SRCS := \
 	$(SRC_DIR)/artifact_identity_set.cpp \
 	$(SRC_DIR)/artifact_workspace.cpp \
 	$(SRC_DIR)/package_metadata.cpp \
-	$(SRC_DIR)/trusted_cache.cpp \
+	$(TRUSTED_CACHE_SRCS) \
 	$(SRC_DIR)/source_environment.cpp \
 	$(SRC_DIR)/package_identifier.cpp \
 	$(SRC_DIR)/shell_words.cpp \
@@ -520,7 +541,7 @@ PACKAGE_BASE_ARTIFACT_INSTALL_EXECUTOR_ALLOWED_PRODUCTION_TEST_SRCS := \
 	$(SRC_DIR)/artifact_identity_selection.cpp \
 	$(SRC_DIR)/artifact_workspace.cpp \
 	$(SRC_DIR)/package_metadata.cpp \
-	$(SRC_DIR)/trusted_cache.cpp \
+	$(TRUSTED_CACHE_SRCS) \
 	$(SRC_DIR)/source_environment.cpp \
 	$(SRC_DIR)/package_identifier.cpp \
 	$(SRC_DIR)/shell_words.cpp \
@@ -545,7 +566,7 @@ SEPARATED_SOURCE_BUILD_TEST_SRCS := \
 	$(SRC_DIR)/artifact_identity_set.cpp \
 	$(SRC_DIR)/artifact_workspace.cpp \
 	$(SRC_DIR)/package_metadata.cpp \
-	$(SRC_DIR)/trusted_cache.cpp \
+	$(TRUSTED_CACHE_SRCS) \
 	$(SRC_DIR)/source_environment.cpp \
 	$(SRC_DIR)/package_identifier.cpp \
 	$(SRC_DIR)/shell_words.cpp \
@@ -565,7 +586,7 @@ SEPARATED_PACKAGE_BASE_SOURCE_BUILD_ALLOWED_PRODUCTION_TEST_SRCS := \
 	$(SRC_DIR)/artifact_identity_selection.cpp \
 	$(SRC_DIR)/artifact_workspace.cpp \
 	$(SRC_DIR)/package_metadata.cpp \
-	$(SRC_DIR)/trusted_cache.cpp \
+	$(TRUSTED_CACHE_SRCS) \
 	$(SRC_DIR)/source_environment.cpp \
 	$(SRC_DIR)/package_identifier.cpp \
 	$(SRC_DIR)/shell_words.cpp \
@@ -584,6 +605,7 @@ SEPARATED_PACKAGE_BASE_SOURCE_BUILD_FORBIDDEN_TEST_SRCS := \
 PRODUCTION_SOURCE_BUILD_TEST_SRCS := \
 	tests/production_source_build_test.cpp \
 	$(SRC_DIR)/source_install.cpp \
+	$(SRC_DIR)/cache_authority.cpp \
 	$(SRC_DIR)/source_install_preparation.cpp \
 	$(SRC_DIR)/source_build.cpp \
 	$(SRC_DIR)/separated_source_build.cpp \
@@ -597,8 +619,9 @@ PRODUCTION_SOURCE_BUILD_TEST_SRCS := \
 	$(SRC_DIR)/artifact_identity_selection.cpp \
 	$(SRC_DIR)/artifact_workspace.cpp \
 	$(SRC_DIR)/package_metadata.cpp \
-	$(SRC_DIR)/trusted_cache.cpp \
+	$(TRUSTED_CACHE_SRCS) \
 	$(SRC_DIR)/persistent_checkout.cpp \
+	tests/stubs/trusted-git/process_stub.cpp \
 	$(SRC_DIR)/source_environment.cpp \
 	$(SRC_DIR)/source_preference.cpp \
 	$(SRC_DIR)/build_plan_artifact_target_projection.cpp \
@@ -656,7 +679,7 @@ LIBALPM_BUILD_TARGETS := \
 	$(AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION_TEST_TARGET) \
 	$(UPGRADE_BASELINE_METADATA_TEST_TARGET)
 
-.PHONY: all check-libalpm clean check-upgrade-all-plan-link-firewall check-system-source-upgrade-link-firewall check-aur-update-execution-runner-link-firewall check-aur-update-operation-result-link-firewall check-filtered-aur-update-operation-link-firewall check-upgrade-all-operation-link-firewall check-upgrade-all-command-link-firewall check-dependency-plan-model-link-firewall check-build-plan-artifact-target-projection-link-firewall check-artifact-selection-model-link-firewall check-artifact-identity-selection-link-firewall check-multiple-artifact-workspace-link-firewall check-multiple-artifact-identity-link-firewall check-package-base-artifact-install-plan-link-firewall check-package-base-artifact-install-executor-link-firewall check-separated-package-base-source-build-link-firewall test test-internal-identity test-application-identity test-xdg-paths test-xdg-directory-safety test-xdg-state-log test-runtime-identity test-app-config test-package-identifier test-package-metadata test-package-metadata-integration test-repository-query test-shell-words test-source-environment test-artifact-workspace test-multiple-artifact-workspace test-artifact-identity test-multiple-artifact-identity test-artifact-install-executor test-package-base-artifact-install-plan test-package-base-artifact-install-executor test-separated-source-build test-separated-package-base-source-build test-production-source-build test-process-capture test-aur-update-plan test-upgrade-all-plan test-system-source-upgrade test-aur-update-query test-aur-update-command test-upgrade-all-command test-aur-update-execution-preflight test-aur-update-execution-preflight-integration test-aur-update-execution-preparation test-aur-update-execution-runner test-aur-update-operation-result test-filtered-aur-update-operation test-upgrade-all-operation test-dependency-plan-model test-build-plan-artifact-target-projection test-artifact-install-plan test-artifact-selection-model test-artifact-identity-selection test-command-stub-contract test-markdown-links test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-commands-inspect test-commands-source-maintenance test-commands-sync test-conflicts-replaces test-install-layout test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check install uninstall
+.PHONY: all check-libalpm clean check-upgrade-all-plan-link-firewall check-system-source-upgrade-link-firewall check-aur-update-execution-runner-link-firewall check-aur-update-operation-result-link-firewall check-filtered-aur-update-operation-link-firewall check-upgrade-all-operation-link-firewall check-upgrade-all-command-link-firewall check-dependency-plan-model-link-firewall check-build-plan-artifact-target-projection-link-firewall check-artifact-selection-model-link-firewall check-artifact-identity-selection-link-firewall check-multiple-artifact-workspace-link-firewall check-multiple-artifact-identity-link-firewall check-package-base-artifact-install-plan-link-firewall check-package-base-artifact-install-executor-link-firewall check-separated-package-base-source-build-link-firewall test test-internal-identity test-application-identity test-xdg-paths test-xdg-directory-safety test-xdg-state-log test-trusted-cache test-runtime-identity test-app-config test-package-identifier test-package-metadata test-package-metadata-integration test-repository-query test-shell-words test-source-environment test-artifact-workspace test-multiple-artifact-workspace test-artifact-identity test-multiple-artifact-identity test-artifact-install-executor test-package-base-artifact-install-plan test-package-base-artifact-install-executor test-separated-source-build test-separated-package-base-source-build test-production-source-build test-process-capture test-aur-update-plan test-upgrade-all-plan test-system-source-upgrade test-aur-update-query test-aur-update-command test-upgrade-all-command test-aur-update-execution-preflight test-aur-update-execution-preflight-integration test-aur-update-execution-preparation test-aur-update-execution-runner test-aur-update-operation-result test-filtered-aur-update-operation test-upgrade-all-operation test-dependency-plan-model test-build-plan-artifact-target-projection test-artifact-install-plan test-artifact-selection-model test-artifact-identity-selection test-command-stub-contract test-markdown-links test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-commands-inspect test-commands-source-maintenance test-commands-sync test-conflicts-replaces test-install-layout test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check install uninstall
 
 all: $(TARGET) $(MANPAGE)
 
@@ -731,6 +754,19 @@ $(XDG_STATE_LOG_TEST_TARGET): tests/xdg_state_log_test.cpp $(SRC_DIR)/xdg_state_
 		-I$(SRC_DIR) \
 		tests/xdg_state_log_test.cpp \
 		$(SRC_DIR)/xdg_state_log.cpp \
+		$(SRC_DIR)/xdg_directory_safety.cpp \
+		$(SRC_DIR)/xdg_paths.cpp \
+		$(SRC_DIR)/logging.cpp \
+		-o $@
+
+$(TRUSTED_CACHE_TEST_TARGET): tests/trusted_cache_test.cpp $(SRC_DIR)/trusted_cache.cpp $(SRC_DIR)/trusted_cache.hpp $(SRC_DIR)/xdg_directory_safety.cpp $(SRC_DIR)/xdg_directory_safety.hpp $(SRC_DIR)/xdg_paths.cpp $(SRC_DIR)/xdg_paths.hpp $(SRC_DIR)/logging.cpp $(SRC_DIR)/logging.hpp $(VERSION_FILE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling trusted cache test binary"
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
+		-DMOGUET_ENABLE_TRUSTED_CACHE_TEST_HOOKS \
+		-I$(SRC_DIR) \
+		tests/trusted_cache_test.cpp \
+		$(SRC_DIR)/trusted_cache.cpp \
 		$(SRC_DIR)/xdg_directory_safety.cpp \
 		$(SRC_DIR)/xdg_paths.cpp \
 		$(SRC_DIR)/logging.cpp \
@@ -827,7 +863,7 @@ $(SOURCE_ENVIRONMENT_TEST_TARGET): tests/source_environment_test.cpp $(SRC_DIR)/
 		$(SRC_DIR)/shell_words.cpp \
 		-o $@
 
-$(ARTIFACT_WORKSPACE_TEST_TARGET): $(ARTIFACT_WORKSPACE_TEST_SRCS) $(SRC_DIR)/artifact_workspace.hpp $(SRC_DIR)/trusted_cache.hpp $(SRC_DIR)/source_environment.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/shell_words.hpp $(SRC_DIR)/process.hpp $(SRC_DIR)/logging.hpp tests/stubs/makepkg $(VERSION_FILE)
+$(ARTIFACT_WORKSPACE_TEST_TARGET): $(ARTIFACT_WORKSPACE_TEST_SRCS) $(SRC_DIR)/artifact_workspace.hpp $(SRC_DIR)/trusted_cache.hpp $(SRC_DIR)/source_environment.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/shell_words.hpp $(SRC_DIR)/process.hpp $(SRC_DIR)/logging.hpp $(TRUSTED_CACHE_SUPPORT_HEADER) tests/stubs/makepkg $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling artifact workspace test binary"
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
@@ -837,7 +873,7 @@ $(ARTIFACT_WORKSPACE_TEST_TARGET): $(ARTIFACT_WORKSPACE_TEST_SRCS) $(SRC_DIR)/ar
 		$(ARTIFACT_WORKSPACE_TEST_SRCS) \
 		-o $@
 
-$(MULTIPLE_ARTIFACT_WORKSPACE_TEST_TARGET): $(MULTIPLE_ARTIFACT_WORKSPACE_TEST_SRCS) $(SRC_DIR)/artifact_workspace.hpp $(SRC_DIR)/trusted_cache.hpp $(SRC_DIR)/source_environment.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/shell_words.hpp $(SRC_DIR)/process.hpp $(SRC_DIR)/logging.hpp tests/stubs/makepkg $(VERSION_FILE)
+$(MULTIPLE_ARTIFACT_WORKSPACE_TEST_TARGET): $(MULTIPLE_ARTIFACT_WORKSPACE_TEST_SRCS) $(SRC_DIR)/artifact_workspace.hpp $(SRC_DIR)/trusted_cache.hpp $(SRC_DIR)/source_environment.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/shell_words.hpp $(SRC_DIR)/process.hpp $(SRC_DIR)/logging.hpp $(TRUSTED_CACHE_SUPPORT_HEADER) tests/stubs/makepkg $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling multiple artifact workspace test binary"
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
@@ -847,7 +883,7 @@ $(MULTIPLE_ARTIFACT_WORKSPACE_TEST_TARGET): $(MULTIPLE_ARTIFACT_WORKSPACE_TEST_S
 		$(MULTIPLE_ARTIFACT_WORKSPACE_TEST_SRCS) \
 		-o $@
 
-$(ARTIFACT_IDENTITY_TEST_TARGET): $(ARTIFACT_IDENTITY_TEST_SRCS) $(SRC_DIR)/artifact_identity.hpp $(SRC_DIR)/artifact_workspace.hpp $(SRC_DIR)/trusted_cache.hpp $(SRC_DIR)/source_environment.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/shell_words.hpp $(SRC_DIR)/process.hpp $(SRC_DIR)/logging.hpp tests/stubs/artifact-identity/process_stub.hpp $(VERSION_FILE)
+$(ARTIFACT_IDENTITY_TEST_TARGET): $(ARTIFACT_IDENTITY_TEST_SRCS) $(SRC_DIR)/artifact_identity.hpp $(SRC_DIR)/artifact_workspace.hpp $(SRC_DIR)/trusted_cache.hpp $(SRC_DIR)/source_environment.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/shell_words.hpp $(SRC_DIR)/process.hpp $(SRC_DIR)/logging.hpp $(TRUSTED_CACHE_SUPPORT_HEADER) tests/stubs/artifact-identity/process_stub.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling artifact identity test binary"
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
@@ -855,7 +891,7 @@ $(ARTIFACT_IDENTITY_TEST_TARGET): $(ARTIFACT_IDENTITY_TEST_SRCS) $(SRC_DIR)/arti
 		$(ARTIFACT_IDENTITY_TEST_SRCS) \
 		-o $@
 
-$(MULTIPLE_ARTIFACT_IDENTITY_TEST_TARGET): $(MULTIPLE_ARTIFACT_IDENTITY_TEST_SRCS) $(SRC_DIR)/artifact_identity.hpp $(SRC_DIR)/artifact_workspace.hpp $(SRC_DIR)/trusted_cache.hpp $(SRC_DIR)/source_environment.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/shell_words.hpp $(SRC_DIR)/process.hpp $(SRC_DIR)/logging.hpp tests/stubs/artifact-identity/process_stub.hpp $(VERSION_FILE)
+$(MULTIPLE_ARTIFACT_IDENTITY_TEST_TARGET): $(MULTIPLE_ARTIFACT_IDENTITY_TEST_SRCS) $(SRC_DIR)/artifact_identity.hpp $(SRC_DIR)/artifact_workspace.hpp $(SRC_DIR)/trusted_cache.hpp $(SRC_DIR)/source_environment.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/shell_words.hpp $(SRC_DIR)/process.hpp $(SRC_DIR)/logging.hpp $(TRUSTED_CACHE_SUPPORT_HEADER) tests/stubs/artifact-identity/process_stub.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling multiple artifact identity test binary"
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
@@ -871,7 +907,7 @@ $(PACKAGE_BASE_ARTIFACT_INSTALL_PLAN_TEST_TARGET): $(PACKAGE_BASE_ARTIFACT_INSTA
 		$(PACKAGE_BASE_ARTIFACT_INSTALL_PLAN_TEST_SRCS) \
 		-o $@
 
-$(ARTIFACT_INSTALL_EXECUTOR_TEST_TARGET): $(ARTIFACT_INSTALL_EXECUTOR_TEST_SRCS) $(SRC_DIR)/artifact_install_executor.hpp $(SRC_DIR)/artifact_install_plan.hpp $(SRC_DIR)/artifact_identity.hpp $(SRC_DIR)/artifact_workspace.hpp $(SRC_DIR)/package_metadata.hpp $(SRC_DIR)/installed_package.hpp $(SRC_DIR)/dependency_plan.hpp $(SRC_DIR)/dependency_provider.hpp $(SRC_DIR)/trusted_cache.hpp $(SRC_DIR)/source_environment.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/shell_words.hpp $(SRC_DIR)/process.hpp $(SRC_DIR)/logging.hpp tests/stubs/package-metadata/alpm_stub.hpp tests/stubs/artifact-install-executor/process_stub.hpp $(VERSION_FILE)
+$(ARTIFACT_INSTALL_EXECUTOR_TEST_TARGET): $(ARTIFACT_INSTALL_EXECUTOR_TEST_SRCS) $(SRC_DIR)/artifact_install_executor.hpp $(SRC_DIR)/artifact_install_plan.hpp $(SRC_DIR)/artifact_identity.hpp $(SRC_DIR)/artifact_workspace.hpp $(SRC_DIR)/package_metadata.hpp $(SRC_DIR)/installed_package.hpp $(SRC_DIR)/dependency_plan.hpp $(SRC_DIR)/dependency_provider.hpp $(SRC_DIR)/trusted_cache.hpp $(SRC_DIR)/source_environment.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/shell_words.hpp $(SRC_DIR)/process.hpp $(SRC_DIR)/logging.hpp $(TRUSTED_CACHE_SUPPORT_HEADER) tests/stubs/package-metadata/alpm_stub.hpp tests/stubs/artifact-install-executor/process_stub.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling artifact install executor fake-symbol test binary"
 	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
@@ -879,7 +915,7 @@ $(ARTIFACT_INSTALL_EXECUTOR_TEST_TARGET): $(ARTIFACT_INSTALL_EXECUTOR_TEST_SRCS)
 		$(ARTIFACT_INSTALL_EXECUTOR_TEST_SRCS) \
 		-o $@
 
-$(PACKAGE_BASE_ARTIFACT_INSTALL_EXECUTOR_TEST_TARGET): $(PACKAGE_BASE_ARTIFACT_INSTALL_EXECUTOR_TEST_SRCS) $(HEADERS) tests/stubs/package-metadata/alpm_stub.hpp tests/stubs/artifact-install-executor/process_stub.hpp $(VERSION_FILE)
+$(PACKAGE_BASE_ARTIFACT_INSTALL_EXECUTOR_TEST_TARGET): $(PACKAGE_BASE_ARTIFACT_INSTALL_EXECUTOR_TEST_SRCS) $(HEADERS) $(TRUSTED_CACHE_SUPPORT_HEADER) tests/stubs/package-metadata/alpm_stub.hpp tests/stubs/artifact-install-executor/process_stub.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling PackageBase artifact install executor fake-symbol test binary"
 	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
@@ -888,7 +924,7 @@ $(PACKAGE_BASE_ARTIFACT_INSTALL_EXECUTOR_TEST_TARGET): $(PACKAGE_BASE_ARTIFACT_I
 		$(PACKAGE_BASE_ARTIFACT_INSTALL_EXECUTOR_TEST_SRCS) \
 		-o $@
 
-$(SEPARATED_SOURCE_BUILD_TEST_TARGET): $(SEPARATED_SOURCE_BUILD_TEST_SRCS) $(SRC_DIR)/separated_source_build.hpp $(SRC_DIR)/artifact_install_executor.hpp $(SRC_DIR)/artifact_install_plan.hpp $(SRC_DIR)/artifact_identity.hpp $(SRC_DIR)/artifact_workspace.hpp $(SRC_DIR)/package_metadata.hpp $(SRC_DIR)/installed_package.hpp $(SRC_DIR)/dependency_plan.hpp $(SRC_DIR)/dependency_provider.hpp $(SRC_DIR)/trusted_cache.hpp $(SRC_DIR)/source_environment.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/shell_words.hpp $(SRC_DIR)/process.hpp $(SRC_DIR)/logging.hpp tests/stubs/package-metadata/alpm_stub.hpp tests/stubs/artifact-install-executor/process_stub.hpp $(VERSION_FILE)
+$(SEPARATED_SOURCE_BUILD_TEST_TARGET): $(SEPARATED_SOURCE_BUILD_TEST_SRCS) $(SRC_DIR)/separated_source_build.hpp $(SRC_DIR)/artifact_install_executor.hpp $(SRC_DIR)/artifact_install_plan.hpp $(SRC_DIR)/artifact_identity.hpp $(SRC_DIR)/artifact_workspace.hpp $(SRC_DIR)/package_metadata.hpp $(SRC_DIR)/installed_package.hpp $(SRC_DIR)/dependency_plan.hpp $(SRC_DIR)/dependency_provider.hpp $(SRC_DIR)/trusted_cache.hpp $(SRC_DIR)/source_environment.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/shell_words.hpp $(SRC_DIR)/process.hpp $(SRC_DIR)/logging.hpp $(TRUSTED_CACHE_SUPPORT_HEADER) tests/stubs/package-metadata/alpm_stub.hpp tests/stubs/artifact-install-executor/process_stub.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling separated source-build lifecycle fake-symbol test binary"
 	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
@@ -897,7 +933,7 @@ $(SEPARATED_SOURCE_BUILD_TEST_TARGET): $(SEPARATED_SOURCE_BUILD_TEST_SRCS) $(SRC
 		$(SEPARATED_SOURCE_BUILD_TEST_SRCS) \
 		-o $@
 
-$(SEPARATED_PACKAGE_BASE_SOURCE_BUILD_TEST_TARGET): $(SEPARATED_PACKAGE_BASE_SOURCE_BUILD_TEST_SRCS) $(HEADERS) tests/stubs/package-metadata/alpm_stub.hpp tests/stubs/artifact-install-executor/process_stub.hpp $(VERSION_FILE)
+$(SEPARATED_PACKAGE_BASE_SOURCE_BUILD_TEST_TARGET): $(SEPARATED_PACKAGE_BASE_SOURCE_BUILD_TEST_SRCS) $(HEADERS) $(TRUSTED_CACHE_SUPPORT_HEADER) tests/stubs/package-metadata/alpm_stub.hpp tests/stubs/artifact-install-executor/process_stub.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling separated PackageBase source-build lifecycle fake-symbol test binary"
 	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
@@ -1106,6 +1142,9 @@ test-xdg-directory-safety: $(XDG_DIRECTORY_SAFETY_TEST_TARGET)
 
 test-xdg-state-log: $(XDG_STATE_LOG_TEST_TARGET)
 	$(abspath $(XDG_STATE_LOG_TEST_TARGET))
+
+test-trusted-cache: $(TRUSTED_CACHE_TEST_TARGET)
+	$(abspath $(TRUSTED_CACHE_TEST_TARGET))
 
 test-runtime-identity: $(TARGET) $(ROOT_EXECUTION_IDENTITY_TEST_TARGET) $(APP_CONFIG_INTEGRATION_TEST_TARGET)
 	sh tests/test-runtime-identity.sh \
@@ -1563,6 +1602,7 @@ test: \
 	test-xdg-paths \
 	test-xdg-directory-safety \
 	test-xdg-state-log \
+	test-trusted-cache \
 	test-runtime-identity \
 	test-app-config \
 	test-package-identifier \
@@ -1616,7 +1656,7 @@ test: \
 	test-source-build \
 	test-source-selection
 
-release-check: test-internal-identity test-application-identity test-xdg-paths test-xdg-directory-safety test-xdg-state-log test-runtime-identity
+release-check: test-internal-identity test-application-identity test-xdg-paths test-xdg-directory-safety test-xdg-state-log test-trusted-cache test-runtime-identity
 	@echo ":: Checking release version consistency"
 	sh scripts/check-release-version.sh
 	@echo ":: Checking license compliance"

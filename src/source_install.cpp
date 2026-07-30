@@ -3,6 +3,7 @@
 #include "app_config.hpp"
 #include "aur_rpc.hpp"
 #include "build_plan_artifact_target_projection.hpp"
+#include "cache_authority.hpp"
 #include "dependency_plan.hpp"
 #include "logging.hpp"
 #include "package_identifier.hpp"
@@ -240,6 +241,75 @@ void present_package_base_result(
 
 } // namespace
 
+void seed_production_source_build_cache(
+        PreparedProductionSourceBuildInvocation& invocation,
+        const ValidatedCacheRoot& cache_root) {
+    if(invocation.work_items.empty()) {
+        throw std::logic_error(
+                "Cannot seed cache for an empty source-build invocation.");
+    }
+
+    cache_root.require_unchanged_identity();
+    std::optional<ValidatedCacheRoot> existing_root = invocation.cache_root;
+    for(const auto& work_item : invocation.work_items) {
+        if(!work_item.cache_root.has_value()) continue;
+        work_item.cache_root->require_unchanged_identity();
+        if(!existing_root.has_value()) {
+            existing_root = work_item.cache_root.value();
+            continue;
+        }
+        existing_root->require_unchanged_identity();
+        if(existing_root->device() != work_item.cache_root->device() ||
+           existing_root->inode() != work_item.cache_root->inode() ||
+           existing_root->owner() != work_item.cache_root->owner()) {
+            throw std::logic_error(
+                    "Production source-build work items use different cache authorities.");
+        }
+    }
+
+    if(existing_root.has_value() &&
+       (existing_root->device() != cache_root.device() ||
+        existing_root->inode() != cache_root.inode() ||
+        existing_root->owner() != cache_root.owner())) {
+        throw std::logic_error(
+                "Production source-build invocation cache authority changed.");
+    }
+
+    invocation.cache_root = cache_root;
+    for(auto& work_item : invocation.work_items) {
+        work_item.cache_root = cache_root;
+    }
+}
+
+void activate_production_source_build_cache(
+        PreparedProductionSourceBuildInvocation& invocation) {
+    if(invocation.work_items.empty()) {
+        throw std::logic_error(
+                "Cannot activate cache for an empty source-build invocation.");
+    }
+    std::optional<ValidatedCacheRoot> shared_root = invocation.cache_root;
+    for(const auto& work_item : invocation.work_items) {
+        if(!work_item.cache_root.has_value()) continue;
+        if(!shared_root.has_value()) shared_root = work_item.cache_root;
+    }
+    if(!shared_root.has_value()) shared_root = prepare_process_cache_root();
+    seed_production_source_build_cache(invocation, shared_root.value());
+}
+
+namespace {
+
+const ValidatedCacheRoot& require_prepared_cache_root(
+        const ProductionSourceBuildWorkItem& work_item) {
+    if(!work_item.cache_root.has_value()) {
+        throw std::logic_error(
+                "Production source-build work item has no prepared cache authority.");
+    }
+    work_item.cache_root->require_unchanged_identity();
+    return work_item.cache_root.value();
+}
+
+} // namespace
+
 ResolvedSourceBuildIdentity resolve_source_build_identity(
         const std::string& package_name) {
     require_valid_package_name(package_name);
@@ -294,12 +364,15 @@ void build_source_target(
         const AppConfig& config) {
     // --rmdepsはAUR/repository probeより前に、invocation optionとして拒否する。
     require_supported_production_source_build_options(config);
+    require_valid_package_name(package_name);
+    ValidatedCacheRoot cache_root = prepare_process_cache_root();
     ResolvedSourceBuildIdentity source =
             resolve_source_build_identity(package_name);
     ProductionSourceBuildWorkItem work_item = make_direct_source_build_work_item(
             source, custom_environment,
             SourceEnvironmentEmptyValuePolicy::Forward, false, false,
             source.source_kind == SourceBuildSourceKind::Aur);
+    work_item.cache_root = cache_root;
     std::vector<ProductionSourceBuildWorkItem> work_items;
     work_items.push_back(std::move(work_item));
     PreparedProductionSourceBuildInvocation invocation =
@@ -406,6 +479,7 @@ execute_prepared_package_base_source_build_work_item_typed(
             join_required_package_names(work_item.required_targets));
     return execute_source_build_package_base_typed(
             work_item.request, work_item.required_targets,
+            require_prepared_cache_root(work_item),
             database_paths, config);
 }
 
@@ -426,11 +500,16 @@ SourceBuildExecutionResult execute_prepared_source_build_work_item_typed(
 
     try {
         return execute_source_build_typed(
-                work_item.request, target.desired_reason,
+                work_item.request, require_prepared_cache_root(work_item),
+                target.desired_reason,
                 database_paths, config);
     } catch(const SeparatedSourceBuildCleanupError&) {
         // POLICY(#242): install成功後cleanup失敗の型とdiagnosticをgeneric
         // build/install failureへflattenしない。
+        throw;
+    } catch(const TrustedCacheError&) {
+        // Cache authority failureはtyped callerがphase/codeを保持できるよう、
+        // generic build/install diagnosticへwrapしない。
         throw;
     } catch(const std::exception& error) {
         throw std::runtime_error(
@@ -451,8 +530,9 @@ execute_prepared_source_build_work_item(
 }
 
 void execute_prepared_source_build_invocation(
-        const PreparedProductionSourceBuildInvocation& invocation,
+        PreparedProductionSourceBuildInvocation invocation,
         const AppConfig& config) {
+    activate_production_source_build_cache(invocation);
     for(const auto& work_item : invocation.work_items) {
         if(work_item.is_build_plan_entry) {
             try {

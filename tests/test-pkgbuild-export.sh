@@ -221,11 +221,13 @@ assert_no_fetch_update_commands() {
 }
 
 assert_cache_root_absent() {
-    if [ -e "$XDG_CACHE_HOME/jpacker" ] || [ -L "$XDG_CACHE_HOME/jpacker" ]; then
-        echo "PKGBUILD export changed the legacy jpacker cache root" >&2
-        find "$XDG_CACHE_HOME/jpacker" -maxdepth 2 -print >&2 || true
-        exit 1
-    fi
+    for cache_root in "$XDG_CACHE_HOME/moguet" "$XDG_CACHE_HOME/jpacker"; do
+        if [ -e "$cache_root" ] || [ -L "$cache_root" ]; then
+            echo "PKGBUILD export changed a cache root: $cache_root" >&2
+            find "$cache_root" -maxdepth 2 -print >&2 || true
+            exit 1
+        fi
+    done
 }
 
 assert_source_preference_unchanged() {
@@ -474,13 +476,13 @@ assert_cache_root_absent
 assert_no_temporary_artifacts
 
 setup_case export-does-not-use-cache
-mkdir -p "$XDG_CACHE_HOME/jpacker/clean-root/.git"
-printf 'cache marker\n' > "$XDG_CACHE_HOME/jpacker/clean-root/marker"
-cache_checksum=$(cksum "$XDG_CACHE_HOME/jpacker/clean-root/marker")
+mkdir -p "$XDG_CACHE_HOME/moguet/clean-root/.git"
+printf 'cache marker\n' > "$XDG_CACHE_HOME/moguet/clean-root/marker"
+cache_checksum=$(cksum "$XDG_CACHE_HOME/moguet/clean-root/marker")
 export MOGUET_TEST_GIT_REMOTE_URL=https://aur.archlinux.org/clean-root.git
 run_ok -G clean-root
 assert_fixture_tree "$work_dir/clean-root"
-if [ "$(cksum "$XDG_CACHE_HOME/jpacker/clean-root/marker")" != "$cache_checksum" ]; then
+if [ "$(cksum "$XDG_CACHE_HOME/moguet/clean-root/marker")" != "$cache_checksum" ]; then
     echo "-G changed an existing cache repository" >&2
     exit 1
 fi
@@ -708,19 +710,29 @@ rm -rf "$replacement_temporary" "$replacement_temporary.owned-original"
 assert_no_temporary_artifacts
 assert_cache_root_absent
 
-setup_case print-ignores-cache-symlink
+setup_case print-ignores-cache-symlinks
 outside_cache_dir=$case_dir/outside-cache
-mkdir "$outside_cache_dir"
+legacy_outside_cache_dir=$case_dir/legacy-outside-cache
+mkdir "$outside_cache_dir" "$legacy_outside_cache_dir"
 printf 'outside cache marker\n' > "$outside_cache_dir/marker"
-ln -s "$outside_cache_dir" "$XDG_CACHE_HOME/jpacker"
+printf 'legacy outside cache marker\n' > "$legacy_outside_cache_dir/marker"
+ln -s "$outside_cache_dir" "$XDG_CACHE_HOME/moguet"
+ln -s "$legacy_outside_cache_dir" "$XDG_CACHE_HOME/jpacker"
 outside_cache_checksum=$(cksum "$outside_cache_dir/marker")
+legacy_outside_cache_checksum=$(cksum "$legacy_outside_cache_dir/marker")
 export MOGUET_TEST_GIT_REMOTE_URL=https://aur.archlinux.org/clean-root.git
 run_ok -Gp clean-root
 cmp -s "$fixture_dir/PKGBUILD" "$stdout_file"
 if [ "$(cksum "$outside_cache_dir/marker")" != "$outside_cache_checksum" ] ||
    [ "$(find "$outside_cache_dir" -mindepth 1 -maxdepth 1 -print | wc -l)" -ne 1 ]; then
-    echo "-Gp followed or changed the legacy jpacker cache symlink" >&2
+    echo "-Gp followed or changed the active Moguet cache symlink" >&2
     find "$outside_cache_dir" -maxdepth 2 -print >&2 || true
+    exit 1
+fi
+if [ "$(cksum "$legacy_outside_cache_dir/marker")" != "$legacy_outside_cache_checksum" ] ||
+   [ "$(find "$legacy_outside_cache_dir" -mindepth 1 -maxdepth 1 -print | wc -l)" -ne 1 ]; then
+    echo "-Gp followed or changed the legacy jpacker cache symlink" >&2
+    find "$legacy_outside_cache_dir" -maxdepth 2 -print >&2 || true
     exit 1
 fi
 assert_export_git_commands clean-root
@@ -818,8 +830,8 @@ assert_cache_root_absent
 setup_case fetch-regression
 unset MOGUET_TEST_GIT_REMOTE_URL
 run_ok fetch risk-root
-if [ ! -d "$XDG_CACHE_HOME/jpacker/risk-dep/.git" ] || \
-   [ ! -d "$XDG_CACHE_HOME/jpacker/risk-root/.git" ]; then
+if [ ! -d "$XDG_CACHE_HOME/moguet/risk-dep/.git" ] || \
+   [ ! -d "$XDG_CACHE_HOME/moguet/risk-root/.git" ]; then
     echo "existing fetch no longer cloned dependency/root into internal cache" >&2
     find "$XDG_CACHE_HOME" -maxdepth 3 -print >&2 || true
     exit 1

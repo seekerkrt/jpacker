@@ -82,6 +82,8 @@ void fail_source_work_item(
         std::string diagnostic);
 void fail_source_invocation(std::string diagnostic);
 void fail_supported_options(std::string diagnostic);
+void fail_cache_seed();
+void fail_cache_activation();
 
 void enqueue_metadata_session(MetadataSessionScript script);
 
@@ -89,6 +91,7 @@ void set_system_command_exit_status(int exit_status);
 void fail_system_command(std::string diagnostic);
 void enqueue_source_success(SourceBuildExecutionResult result);
 void enqueue_source_failure(std::string diagnostic);
+void enqueue_source_cache_failure();
 void enqueue_source_cleanup_failure(
         ArtifactInstallExecutionOutcome outcome,
         std::string diagnostic);

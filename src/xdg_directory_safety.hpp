@@ -9,6 +9,7 @@
 #include <stdexcept>
 #include <string>
 #include <system_error>
+#include <vector>
 
 #ifdef MOGUET_TEST_XDG_DIRECTORY_SAFETY_HOOKS
 #include <functional>
@@ -17,6 +18,8 @@
 namespace xdg_state_log {
 struct StateLogDirectoryAccess;
 }
+
+struct TrustedCacheDirectoryAccess;
 
 namespace xdg_directory_safety {
 
@@ -66,12 +69,21 @@ public:
     }
 };
 
-// Validation後のapplication directoryとretained descriptorを一体で保持する。
-// 作成済みcomponentはfailure時にもrollbackせず、安全なpartial stateとして残す。
+// Validation後のapplication directoryと、filesystem rootから各named linkを
+// 再証明するprivate descriptor lineageを一体で保持する。作成済みcomponentは
+// failure時にもrollbackせず、安全なpartial stateとして残す。
 class PreparedDirectory final {
+    struct RetainedDirectoryIdentity {
+        int            descriptor = -1;
+        std::string    leaf_name;
+        std::uintmax_t device = 0;
+        std::uintmax_t inode = 0;
+        std::uintmax_t filesystem_owner = 0;
+        bool           requires_security_validation = false;
+    };
+
     xdg_paths::DirectoryKind directory_kind_;
     std::filesystem::path    path_;
-    std::filesystem::path    security_anchor_;
     int                      parent_descriptor_ = -1;
     int                      directory_descriptor_ = -1;
     std::string              leaf_name_;
@@ -80,17 +92,18 @@ class PreparedDirectory final {
     std::uintmax_t           owner_ = 0;
     std::uintmax_t           filesystem_owner_ = 0;
     std::uintmax_t           permissions_ = 0;
-    std::size_t              created_component_count_ = 0;
+    std::size_t created_component_count_ = 0;
+    std::vector<RetainedDirectoryIdentity> retained_lineage_;
 
     PreparedDirectory(
             xdg_paths::DirectoryKind directory_kind,
-            std::filesystem::path path,
-            std::filesystem::path security_anchor, int parent_descriptor,
+            std::filesystem::path path, int parent_descriptor,
             int directory_descriptor, std::string leaf_name,
             std::uintmax_t device, std::uintmax_t inode,
             std::uintmax_t owner, std::uintmax_t filesystem_owner,
             std::uintmax_t permissions,
-            std::size_t created_component_count) noexcept;
+            std::size_t created_component_count,
+            std::vector<RetainedDirectoryIdentity> retained_lineage) noexcept;
 
     friend PreparedDirectory prepare_directory(
             const xdg_paths::ConfigPaths& paths);
@@ -101,6 +114,7 @@ class PreparedDirectory final {
 
     friend struct DirectorySafetyAccess;
     friend struct xdg_state_log::StateLogDirectoryAccess;
+    friend struct ::TrustedCacheDirectoryAccess;
 
 public:
     PreparedDirectory(const PreparedDirectory&) = delete;

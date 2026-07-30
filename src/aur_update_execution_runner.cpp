@@ -1,5 +1,7 @@
 #include "aur_update_execution_runner.hpp"
 
+#include "trusted_cache.hpp"
+
 #include <algorithm>
 #include <exception>
 #include <set>
@@ -627,9 +629,12 @@ execute_prepared_aur_update_source_build_invocation(
         const AppConfig& config) {
     // POLICY(#267): capability validity/correlationは最初のexecutor callより前に
     // 全件検証し、moved-from/replayed snapshotをempty successへ潰さない。
-    const PreparedProductionSourceBuildInvocation& production_invocation =
+    PreparedProductionSourceBuildInvocation& production_invocation =
             invocation.production_invocation_;
     require_valid_prepared_invocation(invocation, production_invocation);
+    // Selected update build units exist: activate one shared cache capability
+    // before the first checkout/workspace/build mutation.
+    activate_production_source_build_cache(production_invocation);
     const std::vector<AurUpdatePreparedWorkItemAttribution>& attributions =
             invocation.work_item_attributions();
 
@@ -718,6 +723,10 @@ execute_prepared_aur_update_source_build_invocation(
             result.status = AurUpdateInvocationExecutionStatus::
                     StoppedOnWorkItemFailure;
             return result;
+        } catch(const TrustedCacheError&) {
+            // Aggregate ownerがcache authorityのtyped payloadを転写できるよう、
+            // ordinary work-item failureへcontainせずrethrowする。
+            throw;
         } catch(const std::exception& error) {
             work_item_result.status = AurUpdateWorkItemExecutionStatus::Failed;
             work_item_result.failure_kind =

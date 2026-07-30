@@ -1074,6 +1074,70 @@ void test_retained_descriptor_detects_later_replacement() {
             safety::PreparationStage::DirectoryRevalidation);
 }
 
+void test_retained_lineage_detects_anchor_and_ancestor_replacement() {
+    {
+        TemporaryDirectory temporary_directory;
+        create_explicit_anchors(temporary_directory.path());
+        const xdg_paths::ResolvedPaths paths =
+                resolve_explicit(temporary_directory.path());
+        safety::PreparedDirectory prepared =
+                safety::prepare_directory(paths.cache);
+        const fs::path moved_anchor =
+                temporary_directory.path() / "moved-cache-anchor";
+        fs::rename(paths.cache.creation_boundary.existing_anchor, moved_anchor);
+        create_test_directory(
+                paths.cache.creation_boundary.existing_anchor);
+        create_test_directory(paths.cache.directory);
+
+        expect_preparation_error(
+                [&prepared]() {
+                    prepared.require_unchanged_identity();
+                    return 0;
+                },
+                xdg_paths::DirectoryKind::Cache,
+                safety::PreparationErrorCode::ConcurrentReplacement,
+                safety::PreparationStage::DirectoryRevalidation,
+                std::nullopt,
+                paths.cache.creation_boundary.existing_anchor.string());
+        expect(
+                fs::is_directory(moved_anchor / "moguet"),
+                "Revalidation changed the original cache root after its "
+                "anchor moved.");
+    }
+
+    {
+        TemporaryDirectory temporary_directory;
+        const fs::path authority_parent =
+                temporary_directory.path() / "authority-parent";
+        create_test_directory(authority_parent);
+        create_explicit_anchors(authority_parent);
+        const xdg_paths::ResolvedPaths paths =
+                resolve_explicit(authority_parent);
+        safety::PreparedDirectory prepared =
+                safety::prepare_directory(paths.cache);
+        const fs::path moved_parent =
+                temporary_directory.path() / "moved-authority-parent";
+        fs::rename(authority_parent, moved_parent);
+        create_test_directory(authority_parent);
+        create_explicit_anchors(authority_parent);
+        create_test_directory(paths.cache.directory);
+
+        expect_preparation_error(
+                [&prepared]() {
+                    prepared.require_unchanged_identity();
+                    return 0;
+                },
+                xdg_paths::DirectoryKind::Cache,
+                safety::PreparationErrorCode::ConcurrentReplacement,
+                safety::PreparationStage::DirectoryRevalidation,
+                std::nullopt, authority_parent.string());
+        expect(
+                fs::is_directory(moved_parent / "cache" / "moguet"),
+                "Revalidation followed an application root whose ancestor "
+                "moved outside its authoritative lineage.");
+    }
+}
+
 void test_retained_directory_rejects_later_security_changes() {
     {
         TemporaryDirectory temporary_directory;
@@ -1175,6 +1239,9 @@ int main() {
         run_case(
                 "retained descriptor detects replacement",
                 test_retained_descriptor_detects_later_replacement);
+        run_case(
+                "retained lineage detects anchor and ancestor replacement",
+                test_retained_lineage_detects_anchor_and_ancestor_replacement);
         run_case(
                 "retained directory rejects security changes",
                 test_retained_directory_rejects_later_security_changes);

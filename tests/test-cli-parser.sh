@@ -163,9 +163,9 @@ assert_command_log_empty() {
 }
 
 assert_storage_roots_absent() {
-    if [ -e "$XDG_CACHE_HOME/jpacker" ] || [ -L "$XDG_CACHE_HOME/jpacker" ]; then
+    if [ -e "$XDG_CACHE_HOME/moguet" ] || [ -L "$XDG_CACHE_HOME/moguet" ]; then
         echo "default cache/log initialization ran before entry validation completed" >&2
-        find "$XDG_CACHE_HOME/jpacker" -maxdepth 2 -print >&2 || true
+        find "$XDG_CACHE_HOME/moguet" -maxdepth 2 -print >&2 || true
         exit 1
     fi
     for directory in \

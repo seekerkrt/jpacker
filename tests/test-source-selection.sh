@@ -286,8 +286,8 @@ assert_request_log_nonempty() {
 }
 
 assert_cache_root_absent() {
-    if [ -e "$XDG_CACHE_HOME/jpacker" ] || [ -L "$XDG_CACHE_HOME/jpacker" ]; then
-        echo "legacy jpacker cache root was created before source selection validation completed" >&2
+    if [ -e "$XDG_CACHE_HOME/moguet" ] || [ -L "$XDG_CACHE_HOME/moguet" ]; then
+        echo "Moguet cache root was created before source selection validation completed" >&2
         exit 1
     fi
 }
@@ -325,7 +325,7 @@ assert_no_source_build_commands() {
 }
 
 assert_cache_entry_absent() {
-    entry=$XDG_CACHE_HOME/jpacker/$1
+    entry=$XDG_CACHE_HOME/moguet/$1
     if [ -e "$entry" ] || [ -L "$entry" ]; then
         echo "cache entry was created before all targets passed preflight: $entry" >&2
         exit 1

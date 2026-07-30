@@ -108,6 +108,8 @@ std::string_view not_attempted_reason_label(
         return "system/source phase incomplete";
     case UpgradeAllNotAttemptedReason::ForeignInventoryFailure:
         return "foreign inventory failure";
+    case UpgradeAllNotAttemptedReason::CacheAuthorityFailure:
+        return "cache authority failure";
     case UpgradeAllNotAttemptedReason::PriorAggregateInconsistency:
         return "prior aggregate inconsistency";
     }
@@ -157,6 +159,8 @@ std::string_view source_failure_label(
         return "source preference unavailable";
     case RegisteredSourceUpgradeFailureKind::PackageMetadataUnavailable:
         return "package metadata unavailable";
+    case RegisteredSourceUpgradeFailureKind::CacheAuthorityFailure:
+        return "cache authority failure";
     case RegisteredSourceUpgradeFailureKind::BuildOrInstallFailed:
         return "build or install failed";
     case RegisteredSourceUpgradeFailureKind::
@@ -235,6 +239,8 @@ std::string_view system_issue_kind_label(SystemSourceUpgradeIssueKind kind) {
         return "system package snapshot unavailable";
     case SystemSourceUpgradeIssueKind::PostSystemSourceSnapshotUnavailable:
         return "post-system/source snapshot unavailable";
+    case SystemSourceUpgradeIssueKind::CacheAuthorityInvalid:
+        return "cache authority invalid";
     case SystemSourceUpgradeIssueKind::InvalidPreferenceName:
         return "invalid source preference name";
     case SystemSourceUpgradeIssueKind::OptionSnapshotMismatch:
@@ -329,6 +335,8 @@ std::string_view aggregate_issue_kind_label(
         return "foreign inventory configuration failed";
     case UpgradeAllOperationIssueKind::ForeignInventoryReadFailed:
         return "foreign inventory read failed";
+    case UpgradeAllOperationIssueKind::CacheAuthorityInvalid:
+        return "cache authority invalid";
     case UpgradeAllOperationIssueKind::AurQueryFailed:
         return "AUR query failed";
     case UpgradeAllOperationIssueKind::FilteredAurPreparationFailed:

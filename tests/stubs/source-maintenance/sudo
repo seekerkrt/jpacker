@@ -166,7 +166,7 @@ if is_typed_pacman_install "$@"; then
         displaced_workspace=${workspace_path}.installed-before-cleanup
         if [ -z "$install_success_log" ] ||
            [ "$workspace_path" = "$installed_artifact" ] ||
-           [ "$workspace_parent" != "$XDG_CACHE_HOME/jpacker" ] ||
+           [ "$workspace_parent" != "$XDG_CACHE_HOME/moguet" ] ||
            [ ! -d "$workspace_path" ] || [ -L "$workspace_path" ] ||
            [ ! -f "$installed_artifact" ] || [ -L "$installed_artifact" ] ||
            [ -e "$displaced_workspace" ] || [ -L "$displaced_workspace" ]; then

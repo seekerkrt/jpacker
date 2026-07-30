@@ -44,6 +44,10 @@ struct ScriptedMetadataFailure {
     PackageMetadataFailure failure;
 };
 
+struct ScriptedTrustedCacheFailure {
+    TrustedCacheFailure failure;
+};
+
 struct ScriptedTransactionFailure {
     PackageBaseArtifactInstallTransactionFailureKind failure_kind =
             PackageBaseArtifactInstallTransactionFailureKind::NonzeroExit;
@@ -62,6 +66,7 @@ using ScriptedOutcome = std::variant<
         ScriptedSelectionFailure,
         ScriptedMixedReasonFailure,
         ScriptedMetadataFailure,
+        ScriptedTrustedCacheFailure,
         ScriptedTransactionFailure,
         ScriptedUnknownFailure>;
 
@@ -206,6 +211,11 @@ void enqueue(stub::ExpectedExecution expected, Outcome outcome) {
 
 } // namespace
 
+void activate_production_source_build_cache(
+        PreparedProductionSourceBuildInvocation&) {
+    // Runner tests isolate cache/filesystem mutation behind this seam.
+}
+
 namespace aur_update_execution_runner_test_stub {
 
 void reset() {
@@ -277,6 +287,14 @@ void enqueue_metadata_failure(
             ScriptedMetadataFailure{std::move(failure)});
 }
 
+void enqueue_trusted_cache_failure(
+        ExpectedExecution expected,
+        TrustedCacheFailure failure) {
+    enqueue(
+            std::move(expected),
+            ScriptedTrustedCacheFailure{std::move(failure)});
+}
+
 void enqueue_transaction_failure(
         ExpectedExecution expected,
         PackageBaseArtifactInstallTransactionFailureKind failure_kind,
@@ -323,6 +341,11 @@ void require_script_consumed() {
 
 // The runner target intentionally does not link the production lifecycle TU.
 // Define only the owned-value observers needed by the fake set-owner boundary.
+TrustedCacheError::TrustedCacheError(TrustedCacheFailure failure)
+    : std::runtime_error("scripted trusted cache failure"),
+      failure_(std::move(failure)) {
+}
+
 const std::string&
 PackageBaseSourceBuildExecutionResult::package_base() const noexcept {
     return package_base_;
@@ -522,6 +545,10 @@ execute_prepared_package_base_source_build_work_item_typed(
     if(auto* metadata =
                std::get_if<ScriptedMetadataFailure>(&scripted.outcome)) {
         throw PackageMetadataError(std::move(metadata->failure));
+    }
+    if(auto* cache =
+               std::get_if<ScriptedTrustedCacheFailure>(&scripted.outcome)) {
+        throw TrustedCacheError(std::move(cache->failure));
     }
     if(auto* transaction =
                std::get_if<ScriptedTransactionFailure>(&scripted.outcome)) {

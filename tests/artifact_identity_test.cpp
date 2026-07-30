@@ -3,6 +3,7 @@
 #include "artifact_workspace.hpp"
 #include "stubs/artifact-identity/process_stub.hpp"
 #include "trusted_cache.hpp"
+#include "trusted_cache_test_support.hpp"
 
 #include <cstdlib>
 #include <exception>
@@ -96,7 +97,8 @@ class ArtifactFixture final {
 public:
     explicit ArtifactFixture(const std::string& artifact_leaf_name) {
         ArtifactWorkspace workspace = create_artifact_workspace(
-                prepare_private_trusted_cache_root());
+                prepare_private_trusted_cache_root(
+                        prepare_test_trusted_cache_root()));
         fs::path           artifact_path = workspace.path() / artifact_leaf_name;
 
         ExpectedPackageArtifactPath expected =

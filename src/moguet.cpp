@@ -211,7 +211,6 @@ int run_moguet(int argc, char* argv[]) {
             return 1;
         }
 
-        CurlGlobal curl_global;
         try {
             if(export_mode.value() == PkgbuildExportMode::Tree) {
                 return cmd_export_pkgbuild_tree(parsed.targets.front());
@@ -305,8 +304,6 @@ int run_moguet(int argc, char* argv[]) {
                       << std::endl;
         }
     }
-
-    CurlGlobal curl_global;
 
     const std::string&               operation = parsed.operation;
     const std::vector<std::string>&  args = parsed.ordered_pacman_args;

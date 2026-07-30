@@ -3,6 +3,7 @@
 #include "stubs/artifact-install-executor/process_stub.hpp"
 #include "stubs/package-metadata/alpm_stub.hpp"
 #include "trusted_cache.hpp"
+#include "trusted_cache_test_support.hpp"
 
 #include <algorithm>
 #include <cstdlib>
@@ -230,7 +231,7 @@ public:
         }
 
         try {
-            ValidatedCacheRoot root = prepare_trusted_cache_root();
+            ValidatedCacheRoot root = prepare_test_trusted_cache_root();
             checkout_path_ = root.path() / "source-checkout";
             fs::create_directory(checkout_path_);
             fs::permissions(
@@ -270,13 +271,13 @@ public:
             const SourceBuildEnvironment& source_environment,
             SourceEnvironmentEmptyValuePolicy empty_value_policy,
             DesiredInstallReason desired_reason) const {
-        ValidatedCacheRoot root = prepare_trusted_cache_root();
+        ValidatedCacheRoot root = prepare_test_trusted_cache_root();
         ValidatedCachePath checkout = require_trusted_cache_path(
                 root, checkout_path_,
                 CachePathRequirement::ExistingDirectory);
         return SeparatedSourceBuildUnitRequest{
                 std::move(checkout),
-                prepare_private_trusted_cache_root(),
+                prepare_private_trusted_cache_root(root),
                 PACKAGE_NAME,
                 PACKAGE_NAME,
                 desired_reason,
@@ -287,7 +288,7 @@ public:
 
     std::vector<fs::path> artifact_workspaces() const {
         std::vector<fs::path> workspaces;
-        ValidatedCacheRoot root = prepare_trusted_cache_root();
+        ValidatedCacheRoot root = prepare_test_trusted_cache_root();
         for(const fs::directory_entry& entry :
             fs::directory_iterator(root.canonical_path())) {
             if(entry.path().filename().string().starts_with(

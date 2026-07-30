@@ -3,6 +3,7 @@
 #include "stubs/artifact-install-executor/process_stub.hpp"
 #include "stubs/package-metadata/alpm_stub.hpp"
 #include "trusted_cache.hpp"
+#include "trusted_cache_test_support.hpp"
 
 #include <algorithm>
 #include <cstdlib>
@@ -212,7 +213,7 @@ public:
         }
 
         try {
-            ValidatedCacheRoot root = prepare_trusted_cache_root();
+            ValidatedCacheRoot root = prepare_test_trusted_cache_root();
             checkout_path_ = root.path() / "source-checkout";
             fs::create_directory(checkout_path_);
             fs::permissions(
@@ -252,13 +253,13 @@ public:
             const SourceBuildEnvironment& source_environment = {},
             SourceEnvironmentEmptyValuePolicy empty_value_policy =
                     SourceEnvironmentEmptyValuePolicy::Omit) const {
-        ValidatedCacheRoot root = prepare_trusted_cache_root();
+        ValidatedCacheRoot root = prepare_test_trusted_cache_root();
         ValidatedCachePath checkout = require_trusted_cache_path(
                 root, checkout_path_,
                 CachePathRequirement::ExistingDirectory);
         return SeparatedPackageBaseSourceBuildRequest{
                 std::move(checkout),
-                prepare_private_trusted_cache_root(),
+                prepare_private_trusted_cache_root(root),
                 package_base,
                 required_targets,
                 source_environment,

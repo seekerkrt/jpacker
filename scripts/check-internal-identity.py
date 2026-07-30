@@ -217,17 +217,11 @@ ACTIVE_LEGACY_ALLOWANCES: dict[str, tuple[LegacyAllowance, ...]] = {
     ),
     "src/moguet.cpp": allowances(
         "storage-path",
-        rf'"{legacy}\.log"',
         rf"legacy {legacy}\.conf{identity_end}",
     ),
     "src/source_preference.cpp": allowances(
         "storage-path",
         rf"/etc/{legacy}/package\.build",
-    ),
-    "src/trusted_cache.cpp": allowances(
-        "storage-path",
-        rf'base / "{legacy}"',
-        rf'filename == "{legacy}\.log"',
     ),
     "tests/test-help-man-completion.sh": allowances(
         "deferred-artifact-contract-test",
@@ -260,9 +254,18 @@ ACTIVE_LEGACY_ALLOWANCES: dict[str, tuple[LegacyAllowance, ...]] = {
         config_filename,
         legacy_cache_phrase,
     ),
-    "tests/artifact_workspace_test.cpp": allowances(
-        "storage-fixture",
-        rf'cache_home / "{legacy}"',
+    "tests/trusted_cache_test.cpp": (
+        allowances(
+            "legacy-cache-preservation-fixture",
+            rf'cache_home / "{legacy}"',
+            rf'legacy_root / "{legacy}\.log"',
+            rf'create_symlink\("{legacy}\.log"',
+            rf'Legacy {legacy} cache tree changed\.',
+        )
+        + allowances(
+            "new-cache-ordinary-legacy-name-fixture",
+            rf'root\.path\(\) / "{legacy}\.log"',
+        )
     ),
     "tests/test-commands-sync.sh": allowances(
         "storage-fixture",
@@ -426,7 +429,7 @@ def extract_test_hook_tokens(text: str) -> set[str]:
 
 def check_classifier_contract() -> None:
     allowed_categories = legacy_categories_for_line(
-        "src/moguet.cpp", f'cache_root, "{LEGACY_NAME}.log",'
+        "src/moguet.cpp", f'legacy {LEGACY_NAME}.conf: LOGFILE=...'
     )
     if allowed_categories != ["storage-path"]:
         fail("internal legacy-storage classifier self-test failed")
@@ -437,12 +440,12 @@ def check_classifier_contract() -> None:
     if rejected_categories != [None]:
         fail("internal active-identity classifier is too broad")
 
-    mixed_categories = legacy_categories_for_line(
+    active_cache_categories = legacy_categories_for_line(
         "src/trusted_cache.cpp",
-        f'return base / "{LEGACY_NAME}"; // Started {LEGACY_NAME}',
+        f'return base / "{LEGACY_NAME}";',
     )
-    if mixed_categories != ["storage-path", None]:
-        fail("internal occurrence classifier is too broad")
+    if active_cache_categories != [None]:
+        fail("internal active cache classifier is too broad")
 
     artifact_categories = legacy_categories_for_line(
         "tests/test-install-layout.sh",

@@ -133,6 +133,24 @@ build前後のinstalled package差分だけでは、並行package transaction、
 * cleanup failure後も、すでに成功したpackage installを失敗へflattenしたり無条件に再実行したりしないこと。
 * package削除を実systemへ向けずに検証できるstrict stub / isolated testを備えること。
 
+### 11. XDG cache cutoverの安全契約と実装の比例性
+
+#302のMoguet v2 roadmapにおける#305は、XDG準拠のcache rootへの切替とlegacy jpacker cacheの非破壊を当初の中心としていた。一方、対象operationにはpersistent checkout、artifact workspace、rollback、reclone、recursive cleanupが含まれ、利用者所有のfilesystem entryを作成、置換、削除する。
+
+MoguetはOSSであり、maintainer自身が把握する環境だけでなく、未知の利用者と実行環境でも利用され得る。#75のdecision authorityの下で、decision 4 / 6の責務境界とdecision 5 / 7のmutation前停止をこのfilesystem / Git execution境界へ適用し、最小限のpath cutoverより保守的に、現実的に到達可能な脆弱性をfail-closedに扱う設計を採用する。これは安全性を優先した意図的なtrade-offである。
+
+将来implementationを統合、縮小、または置換する場合も、少なくとも次の契約を維持する。
+
+* destructive operationをtrusted root内へ限定する。
+* symlinkまたはroot escapeをfollowしない。
+* 通常のidentity replacementを検出し、fail-closedとする。
+* rollbackはownershipとidentityを証明できるentryだけを対象にする。
+* cache cleanupは全targetのpreflightが完了する前に削除を開始しない。
+* legacy jpacker cacheを自動的に読み込み、移行、変更、削除しない。
+* Git executionは、危険なparent-process routingまたはconfig environmentを暗黙に継承しない。
+
+このdecisionが固定するのは上記の安全契約であり、現在のmodule、type、capability plumbing、trusted Git policy、removal planningを恒久的architectureとして固定するものではない。現在のproject規模に対して、実装、理解、test、将来追従のcostが不釣り合いになる可能性を認識する。実際の保守でその負担が明らかになった場合は、安全契約を維持したまま、より小さく規模に比例したarchitectureへ統合、縮小、または置換してよい。その簡素化はこのdecisionの撤回ではなく、安全性と保守性を両立するための正当な調整である。
+
 ---
 
 ## English
@@ -263,3 +281,21 @@ Any future dependency-cleanup implementation would need a design that satisfies 
 * Separate results for build, installation, and cleanup success or failure.
 * Preservation of an already successful package installation after cleanup failure, without flattening it into failure or blindly retrying it.
 * Strict stubs and isolated tests that verify removal behavior without targeting the real system.
+
+### 11. Safety contract and implementation proportionality for the XDG cache cutover
+
+Under the Moguet v2 roadmap in #302, #305 originally centered on moving the cache root to an XDG-compliant location while leaving the legacy jpacker cache untouched. The affected operations also include persistent checkouts, artifact workspaces, rollback, reclone, and recursive cleanup, all of which create, replace, or remove user-owned filesystem entries.
+
+Moguet is open source and may be used by unknown users in execution environments beyond those known to the maintainer. Under the decision authority in #75, the responsibility boundaries in decisions 4 and 6 and the pre-mutation stop rules in decisions 5 and 7 are applied to this filesystem and Git execution boundary. The adopted design is more conservative than the minimum path cutover and fails closed for realistically reachable vulnerabilities. This is a deliberate safety-first trade-off.
+
+Any future consolidation, reduction, or replacement of the implementation must preserve at least these contracts:
+
+* Destructive operations remain confined to a trusted root.
+* Symlinks and root escapes are not followed.
+* Ordinary identity replacement is detected and fails closed.
+* Rollback targets only entries whose ownership and identity can be proven.
+* Cache cleanup does not begin deletion until every target has completed preflight.
+* The legacy jpacker cache is never read, migrated, modified, or removed automatically.
+* Git execution does not implicitly inherit dangerous parent-process routing or configuration environment.
+
+This decision fixes those safety contracts, not the current modules, types, capability plumbing, trusted Git policy, or removal-planning structure as permanent architecture. Their implementation, comprehension, testing, and future adaptation costs may prove disproportionate to the current project scale. If maintenance demonstrates that burden, the implementation may be consolidated, reduced, or replaced with a smaller architecture proportional to the project, provided the safety contracts remain intact. Such simplification is a legitimate adjustment that balances safety and maintainability, not a reversal of this decision.

@@ -539,10 +539,15 @@ export MOGUET_TEST_INSPECTION_SCENARIO=fetch-validation-position
 run_fail fetch fetch-preflight-root invalid/name fetch-after-root
 assert_contains "Invalid package name: invalid/name" "$stderr_file"
 assert_not_contains "Failed to fetch repositories for invalid/name" "$stderr_file"
-assert_exact_line "aur info fetch-preflight-root" "$command_log"
+if [ -s "$command_log" ]; then
+    fail_case "fetch queried external metadata before all targets were valid"
+fi
+if [ -e "$XDG_CACHE_HOME/moguet" ] || [ -L "$XDG_CACHE_HOME/moguet" ]; then
+    fail_case "fetch created the cache before all targets were valid"
+fi
 assert_not_contains "aur info fetch-after-root" "$command_log"
 assert_no_git_mutation
-echo "  ok: fetch target validation remains outside the target catch"
+echo "  ok: fetch validates every target before cache/network preparation"
 
 # P0-2: planning/guardは全rootを先に走査し、1件でも失敗すればmutationを開始しない。
 setup_case fetch-preflight-barrier

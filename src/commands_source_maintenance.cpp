@@ -2,6 +2,7 @@
 
 #include "application_identity.hpp"
 #include "app_config.hpp"
+#include "cache_authority.hpp"
 #include "logging.hpp"
 #include "package_metadata.hpp"
 #include "package_identifier.hpp"
@@ -496,33 +497,39 @@ void cmd_revert(
 }
 
 int cmd_clean(const AppConfig& config) {
-    // POLICY(#175): validate every cache deletion target before pacman mutation, then revalidate before remove_all.
-    // Safe-path UX remains pacman clean -> Moguet cache prompt; unsafe cache state stops before either mutation.
-    ValidatedCacheRoot              cache = prepare_trusted_cache_root();
-    std::vector<ValidatedCachePath> cleanup_targets = preflight_cache_cleanup(cache);
-    bool                            cache_has_entries = !fs::is_empty(cache.canonical_path());
-    bool                            failed = false;
+    // POLICY(#175,#305): new Moguet XDG cache rootだけをadoptし、全targetの
+    // descriptor-relative preflight capabilityをpacman/promptより前に構築する。
+    // 同じmove-only capabilityをconsumeまで保持し、original inodeをpinする。
+    ValidatedCacheRoot cache = prepare_process_cache_root();
+    PreparedCacheCleanup cleanup =
+            preflight_cache_cleanup(cache);
+    const bool cache_has_entries = !cleanup.empty();
+    bool       failed = false;
     Logger::info("Cleaning package caches...");
     if(run_command("sudo pacman " + join_pacman_args({"-Sc"}, config)) != 0) {
         Logger::warn("Pacman clean failed or cancelled.");
         failed = true;
     }
     if(cache_has_entries) {
-        if(ask_user("Clean Moguet build cache (" + cache.path().string() + ")?", PromptDefault::No, config)) {
+        if(ask_user(
+                   "Clean Moguet build cache (" +
+                           cleanup.cache_path().string() + ")?",
+                   PromptDefault::No, config)) {
             Logger::info("Removing cached build files...");
             bool cleanup_failed = false;
-            for(const auto& target : cleanup_targets) {
-                try {
-                    remove_trusted_cache_path(target);
-                } catch(const std::exception& e) {
-                    Logger::error("Failed to remove " + target.path().string() + ": " + e.what());
-                    cleanup_failed = true;
-                }
-            }
-            if(cleanup_failed) {
+            try {
+                // new root内のlegacy-named logもordinary cache entry。legacy sibling
+                // rootやXDG state/configは列挙・削除対象へ入らない。
+                remove_preflighted_cache_paths(std::move(cleanup));
+            } catch(const std::exception& e) {
+                Logger::error(
+                        "Failed to clean Moguet cache: " +
+                        std::string(e.what()));
                 failed = true;
+                cleanup_failed = true;
                 Logger::warn("Moguet cache cleanup was incomplete.");
-            } else {
+            }
+            if(!cleanup_failed) {
                 Logger::info("Moguet cache cleaned.");
             }
         } else

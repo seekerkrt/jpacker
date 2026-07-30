@@ -34,7 +34,8 @@ setup_case() {
     foreign_inventory_file=$case_dir/foreign-packages
 
     mkdir -p \
-        "$case_dir/home" "$case_dir/xdg-state" "$case_dir/work" \
+        "$case_dir/home" "$case_dir/xdg-state" "$case_dir/xdg-cache" \
+        "$case_dir/work" \
         "$case_dir/package.build"
     : > "$stdout_file"
     : > "$stderr_file"
@@ -148,7 +149,7 @@ assert_event_count() {
 }
 
 assert_cache_absent() {
-    if [ -e "$XDG_CACHE_HOME/jpacker" ]; then
+    if [ -e "$XDG_CACHE_HOME/moguet" ]; then
         fail_case "invalid upgrade-all invocation initialized the cache"
     fi
 }
@@ -713,13 +714,14 @@ run_matrix_table aur-phase-status 8 <<'EOF'
 1|system: completed|Unexpected upgrade-all command failure: Unknown upgrade-all AUR phase status.
 EOF
 
-run_matrix_table not-attempted-reason 8 <<'EOF'
+run_matrix_table not-attempted-reason 9 <<'EOF'
 1|AUR phase not attempted: preparation blocked|upgrade-all result contains failure details despite a successful aggregate status.
 1|AUR phase not attempted: system failure|upgrade-all result contains failure details despite a successful aggregate status.
 1|AUR phase not attempted: source failure|upgrade-all result contains failure details despite a successful aggregate status.
 1|AUR phase not attempted: source cleanup failure|upgrade-all result contains failure details despite a successful aggregate status.
 1|AUR phase not attempted: system/source phase incomplete|upgrade-all result contains failure details despite a successful aggregate status.
 1|AUR phase not attempted: foreign inventory failure|upgrade-all result contains failure details despite a successful aggregate status.
+1|AUR phase not attempted: cache authority failure|upgrade-all result contains failure details despite a successful aggregate status.
 1|AUR phase not attempted: prior aggregate inconsistency|upgrade-all result contains failure details despite a successful aggregate status.
 1|system: completed|Unexpected upgrade-all command failure: Unknown upgrade-all NotAttempted reason.
 EOF
@@ -909,7 +911,7 @@ run_matrix_table external-attribution-missing 1 <<'EOF'
 1|AUR phase: completed|Unexpected upgrade-all command failure: External satisfaction has no explicit source identity.
 EOF
 
-if [ "$case_count" -ne 207 ]; then
+if [ "$case_count" -ne 208 ]; then
     echo "upgrade-all command test scenario count drifted: $case_count" >&2
     exit 1
 fi
