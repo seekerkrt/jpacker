@@ -341,7 +341,10 @@ ACTIVE_LEGACY_ALLOWANCES: dict[str, tuple[LegacyAllowance, ...]] = {
         allowances(
             "storage-fixture",
             config_filename,
+            log_filename,
             rf"\$root_case_dir/xdg-cache/{legacy}(?=/|[\"']|\s|$)",
+            rf"\$startup_case_dir/xdg-cache/{legacy}(?=/|[\"']|\s|$)",
+            rf"\$fallback_case_dir/xdg-cache/{legacy}(?=/|[\"']|\s|$)",
         )
         + allowances(
             "negative-runtime-assertion",

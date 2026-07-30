@@ -54,13 +54,14 @@ setup_case() {
     command_log=$case_dir/commands.log
     output_file=$case_dir/output
 
-    mkdir -p "$case_dir/home" "$case_dir/xdg-cache"
+    mkdir -p "$case_dir/home" "$case_dir/xdg-state" "$case_dir/xdg-cache"
     : > "$command_log"
     : > "$request_log"
     : > "$user_agent_log"
     inventory_state=$case_dir/foreign-inventory.state
     : > "$inventory_state"
     export HOME=$case_dir/home
+    export XDG_STATE_HOME=$case_dir/xdg-state
     export XDG_CACHE_HOME=$case_dir/xdg-cache
     export MOGUET_TEST_COMMAND_LOG=$command_log
     export MOGUET_TEST_FOREIGN_PACKAGE_INVENTORY_STATE_FILE=$inventory_state

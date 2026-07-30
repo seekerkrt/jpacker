@@ -25,13 +25,14 @@
 #include "process.hpp"
 #include "shell_words.hpp"
 #include "source_install.hpp"
-#include "trusted_cache.hpp"
+#include "xdg_directory_safety.hpp"
+#include "xdg_paths.hpp"
+#include "xdg_state_log.hpp"
 
 #include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstdlib>
-#include <filesystem>
 #include <iostream>
 #include <optional>
 #include <stdexcept>
@@ -40,8 +41,6 @@
 #include <vector>
 
 #include <unistd.h>
-
-namespace fs = std::filesystem;
 
 namespace {
 
@@ -84,6 +83,48 @@ void apply_cli_overrides(AppConfig& config, const CliOverrides& overrides) {
     if(overrides.rebuild) config.rebuild = true;
     if(overrides.clean_build) config.clean_build = true;
     if(overrides.rm_deps) config.rm_deps = true;
+}
+
+bool is_known_moguet_operation(const std::string& operation) {
+    static const std::vector<std::string> s_operations = {
+            "build", "upgrade", "upgrade-aur", "upgrade-all", "clean",
+            "deps", "plan", "fetch", "add-src", "del-src", "revert",
+            "edit-src", "list-src"};
+    return std::find(
+                   s_operations.begin(), s_operations.end(), operation) !=
+           s_operations.end();
+}
+
+bool operation_requires_target(const std::string& operation) {
+    static const std::vector<std::string> s_target_operations = {
+            "build", "deps", "plan", "fetch", "add-src", "del-src",
+            "revert", "edit-src"};
+    return std::find(
+                   s_target_operations.begin(), s_target_operations.end(),
+                   operation) != s_target_operations.end();
+}
+
+bool validate_pre_log_operation_route(const ParsedCliArguments& parsed) {
+    if(!parsed.operation.empty() && parsed.operation.front() != '-' &&
+       !is_known_moguet_operation(parsed.operation)) {
+        Logger::error("Unknown operation: " + parsed.operation);
+        return false;
+    }
+    if(operation_requires_target(parsed.operation) && parsed.targets.empty()) {
+        if(parsed.operation == "build") {
+            Logger::error("Usage: moguet build <pkg> [VAR=VAL...]");
+        } else if(parsed.operation == "deps") {
+            Logger::error("Usage: moguet deps [--recursive] <pkg>");
+        } else if(parsed.operation == "plan") {
+            Logger::error("Usage: moguet plan <pkg>");
+        } else if(parsed.operation == "fetch") {
+            Logger::error("Usage: moguet fetch <pkg>");
+        } else {
+            Logger::error("Missing target for " + parsed.operation);
+        }
+        return false;
+    }
+    return true;
 }
 
 } // namespace
@@ -138,8 +179,8 @@ int run_moguet(int argc, char* argv[]) {
 
     if(parsed.operation == "upgrade-all") {
         // POLICY(#281): upgrade-all is target-less and does not inherit
-        // pacman operands. Reject misuse before log/cache initialization or
-        // any source/inventory/AUR preparation.
+        // pacman operands. Reject misuse before default state log
+        // initialization or any source/cache/inventory/AUR preparation.
         const std::vector<std::string> validation_errors =
                 validate_upgrade_all_invocation(parsed);
         if(!validation_errors.empty()) {
@@ -160,7 +201,8 @@ int run_moguet(int argc, char* argv[]) {
 
     std::optional<PkgbuildExportMode> export_mode = pkgbuild_export_mode(parsed);
     if(export_mode.has_value()) {
-        // POLICY(#167): export/print は cache log 初期化より前に分岐し、内部 build cache を作らない。
+        // POLICY(#167,#305): export/print はdefault state log初期化より前に
+        // 分岐し、内部build cacheを作らない。
         Logger::set_diagnostics_to_stderr();
         const std::vector<std::string> validation_errors =
                 validate_pkgbuild_export_invocation(parsed);
@@ -181,7 +223,8 @@ int run_moguet(int argc, char* argv[]) {
         }
     }
 
-    // POLICY(#168): selector conflict / scope errors must stop before the default log creates the cache root.
+    // POLICY(#168,#305): selector conflict / scope errors must stop before
+    // the default state directory or log file is created.
     std::optional<std::string> source_selection_error =
             validate_source_selection_operation(parsed);
     if(source_selection_error.has_value()) {
@@ -213,125 +256,166 @@ int run_moguet(int argc, char* argv[]) {
         return 1;
     }
 
-    CurlGlobal curl_global;
-    try {
-        fs::path log_path;
-        if(g_config.log_file.empty()) {
-            // POLICY(#175): default log must not create or open a file through an unsafe cache root/symlink.
-            ValidatedCacheRoot cache_root = prepare_trusted_cache_root();
-            ValidatedCachePath cache_log = require_trusted_cache_path(
-                    cache_root, "jpacker.log",
-                    CachePathRequirement::ExistingOrMissing);
-            if(cache_log.exists() && !fs::is_regular_file(cache_log.canonical_path())) {
-                throw std::runtime_error(
-                        "Unsafe Moguet cache log path " + cache_log.path().string() +
-                        ": expected a regular file.");
-            }
-            log_path = cache_log.canonical_path();
-        } else {
-            log_path = expand_config_path(g_config.log_file);
+    if(!validate_pre_log_operation_route(parsed)) return 1;
+
+    if(g_config.log_file.empty()) {
+        try {
+            // POLICY(#305): stateだけを解決し、validated directory descriptor
+            // からfixed default logをopenしてLoggerへownershipを移す。
+            xdg_paths::StatePaths state_paths =
+                    xdg_paths::resolve_state_process_environment();
+            xdg_directory_safety::PreparedDirectory state_directory =
+                    xdg_directory_safety::prepare_directory(state_paths);
+            xdg_state_log::PreparedLogFile state_log =
+                    xdg_state_log::open_default_state_log(
+                            state_paths, state_directory);
+            Logger::init(
+                    std::move(state_log),
+                    "Started " +
+                            std::string(application_identity::PROJECT_NAME) +
+                            " v" +
+                            std::string(application_identity::VERSION));
+        } catch(const std::exception& error) {
+            // Default state authorityのfailureはoperation dispatch前にfatal。
+            // Logger adoption後のwrite failureでも同じbackendへ再書込しない。
+            std::cerr << "\033[1;31m:: Error:\033[0m " << error.what()
+                      << std::endl;
+            return 1;
+        } catch(...) {
+            std::cerr
+                    << "\033[1;31m:: Error:\033[0m Cannot initialize "
+                    << application_identity::PROJECT_NAME
+                    << " default state log: unknown error." << std::endl;
+            return 1;
         }
-        Logger::init(log_path);
-        Logger::info(
-                "Started " + std::string(application_identity::PROJECT_NAME) + " v" +
-                std::string(application_identity::VERSION));
-    } catch(const std::exception& e) {
-        std::cerr << "Warning: Failed to initialize log: " << e.what() << std::endl;
-    } catch(...) {
-        std::cerr << "Warning: Failed to initialize log: unknown error." << std::endl;
+    } else {
+        // Transitional compatibility: explicit legacy LOGFILE keeps the
+        // existing path-based, best-effort Logger contract until Issue #306.
+        try {
+            Logger::init(expand_config_path(g_config.log_file));
+            Logger::info(
+                    "Started " +
+                    std::string(application_identity::PROJECT_NAME) + " v" +
+                    std::string(application_identity::VERSION));
+        } catch(const std::exception& error) {
+            std::cerr << "Warning: Failed to initialize log: "
+                      << error.what() << std::endl;
+        } catch(...) {
+            std::cerr << "Warning: Failed to initialize log: unknown error."
+                      << std::endl;
+        }
     }
+
+    CurlGlobal curl_global;
 
     const std::string&               operation = parsed.operation;
     const std::vector<std::string>&  args = parsed.ordered_pacman_args;
     const std::vector<std::string>&  targets = parsed.targets;
     const std::vector<std::string>&  flags = parsed.flags;
 
-    try {
-        if(operation == "build") {
-            return cmd_build(targets, g_config);
-        }
-        if(operation == "upgrade") {
-            return cmd_upgrade(g_config);
-        }
-        if(operation == "upgrade-aur") {
-            return cmd_upgrade_aur(g_config);
-        }
-        if(operation == "upgrade-all") {
-            return cmd_upgrade_all(g_config);
-        }
-        if(operation == "clean") {
-            return cmd_clean(g_config);
-        }
-        if(operation == "deps") {
-            return cmd_deps(targets, flags);
-        }
-        if(operation == "plan") {
-            return cmd_plan(targets, flags);
-        }
-        if(operation == "fetch") {
-            return cmd_fetch(targets, flags);
-        }
-        if((operation == "add-src" || operation == "del-src" || operation == "revert" || operation == "edit-src") && targets.empty()) {
-            Logger::error("Missing target for " + operation);
+    const int operation_status = [&]() -> int {
+        try {
+            if(operation == "build") {
+                return cmd_build(targets, g_config);
+            }
+            if(operation == "upgrade") {
+                return cmd_upgrade(g_config);
+            }
+            if(operation == "upgrade-aur") {
+                return cmd_upgrade_aur(g_config);
+            }
+            if(operation == "upgrade-all") {
+                return cmd_upgrade_all(g_config);
+            }
+            if(operation == "clean") {
+                return cmd_clean(g_config);
+            }
+            if(operation == "deps") {
+                return cmd_deps(targets, flags);
+            }
+            if(operation == "plan") {
+                return cmd_plan(targets, flags);
+            }
+            if(operation == "fetch") {
+                return cmd_fetch(targets, flags);
+            }
+            if(operation == "add-src" && !targets.empty()) {
+                return cmd_add_src(targets);
+            }
+            if(operation == "del-src" && !targets.empty()) {
+                return cmd_del_src(targets);
+            }
+            if(operation == "revert" && !targets.empty()) {
+                cmd_revert(targets, g_config);
+                return 0;
+            }
+            if(operation == "edit-src" && !targets.empty()) {
+                return cmd_edit_src(targets, g_config);
+            }
+            if(operation == "list-src") {
+                cmd_list_src();
+                return 0;
+            }
+
+            bool requests_refresh = pacman_operation_requests_refresh(operation, flags);
+            bool is_sync = operation.starts_with("-S");
+            bool is_query = operation.starts_with("-Q");
+            bool is_foreign_updates = (is_query && operation.find('u') != std::string::npos && operation.find('a') != std::string::npos);
+            SourceSelectableSyncOperation selected_sync_operation = source_selectable_sync_operation(parsed);
+            bool is_search = parsed.source_selection == PackageSourceSelection::Auto
+                                     ? (is_sync && operation.find('s') != std::string::npos)
+                                     : selected_sync_operation == SourceSelectableSyncOperation::Search;
+            bool is_info = parsed.source_selection == PackageSourceSelection::Auto
+                                   ? (is_sync && operation.find('i') != std::string::npos)
+                                   : selected_sync_operation == SourceSelectableSyncOperation::Info;
+            bool is_clean = (is_sync && operation.find('c') != std::string::npos);
+            bool is_sys_upgrade = (is_sync && (operation.find('u') != std::string::npos || operation.find('y') != std::string::npos));
+            bool needs_sudo =
+                    is_sync || operation.starts_with("-R") || operation.starts_with("-U") ||
+                    operation.starts_with("-D") || (operation.starts_with("-F") && requests_refresh);
+
+            if(is_foreign_updates) return cmd_query_foreign_updates();
+
+            if(is_search) {
+                return cmd_sync_search(
+                        parsed, requests_refresh, parsed.source_selection, g_config);
+            }
+            if(is_info) {
+                return cmd_sync_info(
+                        parsed, requests_refresh, parsed.source_selection, g_config);
+            }
+            if(is_clean) return run_command("sudo pacman " + join_pacman_args(args));
+
+            if(is_sync) {
+                return cmd_sync_install(
+                        parsed, is_sys_upgrade, parsed.source_selection, g_config);
+            }
+            std::string cmd_prefix = needs_sudo ? "sudo pacman " : "pacman ";
+            return run_command(cmd_prefix + join_pacman_args(args));
+        } catch(const std::exception& e) {
+            try {
+                Logger::error(e.what());
+            } catch(...) {
+                // A pending checked state-log failure is reported by shutdown().
+            }
             return 1;
         }
-        if(operation == "add-src" && !targets.empty()) {
-            return cmd_add_src(targets);
-        }
-        if(operation == "del-src" && !targets.empty()) {
-            return cmd_del_src(targets);
-        }
-        if(operation == "revert" && !targets.empty()) {
-            cmd_revert(targets, g_config);
-            return 0;
-        }
-        if(operation == "edit-src" && !targets.empty()) {
-            return cmd_edit_src(targets, g_config);
-        }
-        if(operation == "list-src") {
-            cmd_list_src();
-            return 0;
-        }
+    }();
 
-        bool requests_refresh = pacman_operation_requests_refresh(operation, flags);
-        bool is_sync = operation.starts_with("-S");
-        bool is_query = operation.starts_with("-Q");
-        bool is_foreign_updates = (is_query && operation.find('u') != std::string::npos && operation.find('a') != std::string::npos);
-        SourceSelectableSyncOperation selected_sync_operation = source_selectable_sync_operation(parsed);
-        bool is_search = parsed.source_selection == PackageSourceSelection::Auto
-                                 ? (is_sync && operation.find('s') != std::string::npos)
-                                 : selected_sync_operation == SourceSelectableSyncOperation::Search;
-        bool is_info = parsed.source_selection == PackageSourceSelection::Auto
-                               ? (is_sync && operation.find('i') != std::string::npos)
-                               : selected_sync_operation == SourceSelectableSyncOperation::Info;
-        bool is_clean = (is_sync && operation.find('c') != std::string::npos);
-        bool is_sys_upgrade = (is_sync && (operation.find('u') != std::string::npos || operation.find('y') != std::string::npos));
-        bool needs_sudo =
-                is_sync || operation.starts_with("-R") || operation.starts_with("-U") ||
-                operation.starts_with("-D") || (operation.starts_with("-F") && requests_refresh);
-
-        if(is_foreign_updates) return cmd_query_foreign_updates();
-
-        if(is_search) {
-            return cmd_sync_search(
-                    parsed, requests_refresh, parsed.source_selection, g_config);
-        }
-        if(is_info) {
-            return cmd_sync_info(
-                    parsed, requests_refresh, parsed.source_selection, g_config);
-        }
-        if(is_clean) return run_command("sudo pacman " + join_pacman_args(args));
-
-        if(is_sync) {
-            return cmd_sync_install(
-                    parsed, is_sys_upgrade, parsed.source_selection, g_config);
-        }
-        std::string cmd_prefix = needs_sudo ? "sudo pacman " : "pacman ";
-        return run_command(cmd_prefix + join_pacman_args(args));
-    } catch(const std::exception& e) {
-        Logger::error(e.what());
+    try {
+        Logger::shutdown();
+    } catch(const std::exception& error) {
+        std::cerr << "\033[1;31m:: Error:\033[0m " << error.what()
+                  << std::endl;
+        return 1;
+    } catch(...) {
+        std::cerr
+                << "\033[1;31m:: Error:\033[0m Cannot finalize "
+                << application_identity::PROJECT_NAME
+                << " default state log: unknown error." << std::endl;
         return 1;
     }
+    return operation_status;
 }
 
 #ifdef MOGUET_ENABLE_APP_CONFIG_TEST_HOOKS

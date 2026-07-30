@@ -29,10 +29,11 @@ setup_case() {
     command_log=$case_dir/commands.log
     repository_metadata_state=$case_dir/repository-metadata.state
 
-    mkdir -p "$case_dir/home" "$case_dir/xdg-cache"
+    mkdir -p "$case_dir/home" "$case_dir/xdg-state" "$case_dir/xdg-cache"
     : > "$command_log"
     : > "$repository_metadata_state"
     export HOME=$case_dir/home
+    export XDG_STATE_HOME=$case_dir/xdg-state
     export XDG_CACHE_HOME=$case_dir/xdg-cache
     export MOGUET_TEST_COMMAND_LOG=$command_log
     export MOGUET_TEST_PACKAGE_METADATA_EVENT_LOG=$command_log

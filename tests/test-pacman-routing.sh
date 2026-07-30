@@ -18,7 +18,9 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-mkdir -p "$tmp_dir/cache" "$tmp_dir/home" "$tmp_dir/package.build"
+mkdir -p \
+    "$tmp_dir/cache" "$tmp_dir/home" "$tmp_dir/state" \
+    "$tmp_dir/package.build"
 command_log=$tmp_dir/commands.log
 : > "$command_log"
 
@@ -39,6 +41,7 @@ done
 
 port=$(cat "$port_file")
 export HOME=$tmp_dir/home
+export XDG_STATE_HOME=$tmp_dir/state
 export XDG_CACHE_HOME=$tmp_dir/cache
 export PATH=$repo_root/tests/stubs:/usr/bin:/bin
 require_exact_test_command pacman-conf "$repo_root/tests/stubs/pacman-conf"

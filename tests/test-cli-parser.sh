@@ -351,6 +351,16 @@ run_ok --version
 assert_contains "Moguet v" "$output_file"
 assert_pre_log_exit
 
+setup_case unknown-custom-operation
+run_fail unknown-operation
+assert_contains "Unknown operation: unknown-operation" "$output_file"
+assert_pre_log_exit
+
+setup_case targetless-custom-operation
+run_fail plan
+assert_contains "Usage: moguet plan <pkg>" "$output_file"
+assert_pre_log_exit
+
 run_exact help-as-option-value \
     "pacman -Q --root --help filesystem" \
     -Q --root --help filesystem

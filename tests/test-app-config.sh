@@ -209,7 +209,11 @@ setup_integration_case() {
     output_file=$case_dir/output
     config_file=$case_dir/jpacker.conf
 
-    mkdir -p "$case_dir/home" "$case_dir/xdg-cache" "$case_dir/package.build"
+    mkdir -p \
+        "$case_dir/home" \
+        "$case_dir/xdg-state" \
+        "$case_dir/xdg-cache" \
+        "$case_dir/package.build"
     : > "$command_log"
     {
         printf '%s\n' 'NOEDIT=true'
@@ -218,6 +222,7 @@ setup_integration_case() {
     } > "$config_file"
 
     export HOME="$case_dir/home"
+    export XDG_STATE_HOME="$case_dir/xdg-state"
     export XDG_CACHE_HOME="$case_dir/xdg-cache"
     export MOGUET_TEST_CONFIG_FILE="$config_file"
     export MOGUET_TEST_COMMAND_LOG="$command_log"
@@ -307,6 +312,9 @@ fi
 if [ -e "$XDG_CACHE_HOME/jpacker/jpacker.log" ]; then
     fail "config LOGFILE was replaced by the default cache log"
 fi
+if [ -e "$XDG_STATE_HOME/moguet" ] || [ -L "$XDG_STATE_HOME/moguet" ]; then
+    fail "explicit legacy LOGFILE also initialized the default state log"
+fi
 
 # 2回目はexisting cache routeへ入り、config由来NODIFFがgit diffを抑止する。
 run_integration_ok --noconfirm --rebuild --cleanbuild -S --aur clean-root
@@ -325,6 +333,33 @@ if [ "$makepkg_count" -ne 1 ]; then
     echo "repeated CLI option changed the makepkg option multiplicity" >&2
     cat "$command_log" >&2
     exit 1
+fi
+
+# explicit legacy LOGFILEはstate resolverより優先する。Issue #306までは
+# path-based compatibility contractを維持し、不正なunused state値も参照しない。
+setup_integration_case legacy-logfile-invalid-state
+XDG_STATE_HOME=relative/state-secret
+export XDG_STATE_HOME
+export MOGUET_TEST_PACMAN_EXIT_CODE=0
+run_integration_ok -Q filesystem
+assert_only_command "pacman -Q filesystem"
+if [ ! -f "$HOME/config-log/jpacker.log" ]; then
+    fail "legacy LOGFILE override was not selected before XDG state"
+fi
+assert_contains "[INFO] Started Moguet v" "$HOME/config-log/jpacker.log"
+
+# legacy overrideのopen失敗も従来どおりbest-effortでoperationを続け、
+# default state logへ暗黙fallbackしない。
+setup_integration_case legacy-logfile-open-failure
+not_a_directory=$case_dir/not-a-directory
+printf '%s\n' 'legacy-path-parent-sentinel' > "$not_a_directory"
+printf 'LOGFILE=%s/blocked.log\n' "$not_a_directory" >> "$config_file"
+export MOGUET_TEST_PACMAN_EXIT_CODE=0
+run_integration_ok -Q filesystem
+assert_only_command "pacman -Q filesystem"
+assert_line "legacy-path-parent-sentinel" "$not_a_directory"
+if [ -e "$XDG_STATE_HOME/moguet" ] || [ -L "$XDG_STATE_HOME/moguet" ]; then
+    fail "failed legacy LOGFILE override fell back to the default state log"
 fi
 
 # --rmdepsもenable-onlyでmergeされるが、separated source routeでは
@@ -353,6 +388,9 @@ fi
 if [ -e "$XDG_CACHE_HOME/jpacker" ]; then
     fail "config RMDEPS upgrade-aur guard initialized the default cache"
 fi
+if [ -e "$XDG_STATE_HOME/moguet" ] || [ -L "$XDG_STATE_HOME/moguet" ]; then
+    fail "config RMDEPS upgrade-aur guard initialized the default state log"
+fi
 
 # aggregate側もupdate target 0件をno-op成功へ丸めず、全phaseより前に拒否する。
 setup_integration_case config-rmdeps-upgrade-all-no-updates
@@ -365,6 +403,9 @@ if [ -e "$HOME/config-log/jpacker.log" ]; then
 fi
 if [ -e "$XDG_CACHE_HOME/jpacker" ]; then
     fail "config RMDEPS upgrade-all guard initialized the default cache"
+fi
+if [ -e "$XDG_STATE_HOME/moguet" ] || [ -L "$XDG_STATE_HOME/moguet" ]; then
+    fail "config RMDEPS upgrade-all guard initialized the default state log"
 fi
 
 # registered source targetがあるupgradeはsource/system mutationの前に拒否する。
@@ -396,4 +437,7 @@ if [ -e "$HOME/config-log/jpacker.log" ]; then
 fi
 if [ -e "$XDG_CACHE_HOME/jpacker" ]; then
     fail "CLI parse failure initialized the default cache"
+fi
+if [ -e "$XDG_STATE_HOME/moguet" ] || [ -L "$XDG_STATE_HOME/moguet" ]; then
+    fail "CLI parse failure initialized the default state log"
 fi

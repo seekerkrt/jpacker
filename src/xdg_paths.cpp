@@ -256,6 +256,21 @@ ResolvedPaths resolve(const EnvironmentSnapshot& environment) {
                             std::move(cache_base), application_component)}};
 }
 
+StatePaths resolve_state(const EnvironmentSnapshot& environment) {
+    ResolvedBaseDirectory state_base = resolve_base_directory(
+            environment.xdg_state_home, environment.home,
+            DirectoryKind::State, fs::path(".local") / "state");
+    const std::string application_component(application_identity::XDG_IDENTITY);
+    const fs::path state_directory =
+            state_base.directory / application_component;
+    fs::path default_log_file = state_directory / application_component;
+    default_log_file += DEFAULT_LOG_FILE_SUFFIX;
+    return StatePaths{
+            state_directory, std::move(default_log_file),
+            make_creation_boundary(
+                    std::move(state_base), application_component)};
+}
+
 ResolvedPaths resolve_process_environment() {
     const EnvironmentSnapshot environment{
             .xdg_config_home = process_environment_value("XDG_CONFIG_HOME"),
@@ -264,6 +279,16 @@ ResolvedPaths resolve_process_environment() {
             .home = process_environment_value("HOME"),
     };
     return resolve(environment);
+}
+
+StatePaths resolve_state_process_environment() {
+    const EnvironmentSnapshot environment{
+            .xdg_config_home = std::nullopt,
+            .xdg_state_home = process_environment_value("XDG_STATE_HOME"),
+            .xdg_cache_home = std::nullopt,
+            .home = process_environment_value("HOME"),
+    };
+    return resolve_state(environment);
 }
 
 } // namespace xdg_paths

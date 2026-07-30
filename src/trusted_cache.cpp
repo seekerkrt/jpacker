@@ -663,17 +663,26 @@ void DirCleanupGuard::commit() {
     committed_ = true;
 }
 
-DirCleanupGuard::~DirCleanupGuard() {
+DirCleanupGuard::~DirCleanupGuard() noexcept {
     if(committed_) return;
 
     // LANDMINE(#175): clone前に検証したpathを再検証できた場合だけrollbackする。
     try {
         if(rollback_trusted_cache_path(path_.root_, path_.path_, path_)) {
-            Logger::warn("Rolled back failed clone: cleaned up " + path_.path_.string());
+            Logger::warn_noexcept([this]() {
+                return "Rolled back failed clone: cleaned up " +
+                       path_.path_.string();
+            });
         }
     } catch(const std::exception& e) {
-        Logger::warn("Refusing unsafe clone rollback for " + path_.path_.string() + ": " + e.what());
+        Logger::warn_noexcept([this, &e]() {
+            return "Refusing unsafe clone rollback for " +
+                   path_.path_.string() + ": " + e.what();
+        });
     } catch(...) {
-        Logger::warn("Refusing unsafe clone rollback for " + path_.path_.string() + ": unknown error");
+        Logger::warn_noexcept([this]() {
+            return "Refusing unsafe clone rollback for " +
+                   path_.path_.string() + ": unknown error";
+        });
     }
 }

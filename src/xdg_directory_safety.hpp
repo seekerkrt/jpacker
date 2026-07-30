@@ -14,6 +14,10 @@
 #include <functional>
 #endif
 
+namespace xdg_state_log {
+struct StateLogDirectoryAccess;
+}
+
 namespace xdg_directory_safety {
 
 enum class PreparationStage {
@@ -96,6 +100,7 @@ class PreparedDirectory final {
             const xdg_paths::CachePaths& paths);
 
     friend struct DirectorySafetyAccess;
+    friend struct xdg_state_log::StateLogDirectoryAccess;
 
 public:
     PreparedDirectory(const PreparedDirectory&) = delete;

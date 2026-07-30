@@ -27,11 +27,15 @@ setup_case() {
     output_file=$case_dir/output
     config_file=$case_dir/jpacker.conf
 
-    mkdir -p "$case_dir/work" "$case_dir/xdg-cache" "$case_dir/package.build"
+    mkdir -p \
+        "$case_dir/home" "$case_dir/xdg-state" "$case_dir/work" \
+        "$case_dir/xdg-cache" "$case_dir/package.build"
     : > "$command_log"
     : > "$output_file"
     : > "$config_file"
 
+    export HOME=$case_dir/home
+    export XDG_STATE_HOME=$case_dir/xdg-state
     export XDG_CACHE_HOME=$case_dir/xdg-cache
     export MOGUET_TEST_COMMAND_LOG=$command_log
     export MOGUET_TEST_CONFIG_FILE=$config_file

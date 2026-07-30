@@ -15,6 +15,7 @@ TEST_TARGET := build/tests/moguet-test
 APPLICATION_IDENTITY_TEST_TARGET := $(BUILD_DIR)/tests/application-identity-test
 XDG_PATHS_TEST_TARGET := $(BUILD_DIR)/tests/xdg-paths-test
 XDG_DIRECTORY_SAFETY_TEST_TARGET := $(BUILD_DIR)/tests/xdg-directory-safety-test
+XDG_STATE_LOG_TEST_TARGET := $(BUILD_DIR)/tests/xdg-state-log-test
 ROOT_EXECUTION_IDENTITY_TEST_TARGET := $(BUILD_DIR)/tests/moguet-root-execution-identity-test
 COMMANDS_INSPECT_TEST_TARGET := build/tests/moguet-commands-inspect-test
 AUR_UPDATE_COMMAND_TEST_TARGET := build/tests/moguet-aur-update-command-test
@@ -655,7 +656,7 @@ LIBALPM_BUILD_TARGETS := \
 	$(AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION_TEST_TARGET) \
 	$(UPGRADE_BASELINE_METADATA_TEST_TARGET)
 
-.PHONY: all check-libalpm clean check-upgrade-all-plan-link-firewall check-system-source-upgrade-link-firewall check-aur-update-execution-runner-link-firewall check-aur-update-operation-result-link-firewall check-filtered-aur-update-operation-link-firewall check-upgrade-all-operation-link-firewall check-upgrade-all-command-link-firewall check-dependency-plan-model-link-firewall check-build-plan-artifact-target-projection-link-firewall check-artifact-selection-model-link-firewall check-artifact-identity-selection-link-firewall check-multiple-artifact-workspace-link-firewall check-multiple-artifact-identity-link-firewall check-package-base-artifact-install-plan-link-firewall check-package-base-artifact-install-executor-link-firewall check-separated-package-base-source-build-link-firewall test test-internal-identity test-application-identity test-xdg-paths test-xdg-directory-safety test-runtime-identity test-app-config test-package-identifier test-package-metadata test-package-metadata-integration test-repository-query test-shell-words test-source-environment test-artifact-workspace test-multiple-artifact-workspace test-artifact-identity test-multiple-artifact-identity test-artifact-install-executor test-package-base-artifact-install-plan test-package-base-artifact-install-executor test-separated-source-build test-separated-package-base-source-build test-production-source-build test-process-capture test-aur-update-plan test-upgrade-all-plan test-system-source-upgrade test-aur-update-query test-aur-update-command test-upgrade-all-command test-aur-update-execution-preflight test-aur-update-execution-preflight-integration test-aur-update-execution-preparation test-aur-update-execution-runner test-aur-update-operation-result test-filtered-aur-update-operation test-upgrade-all-operation test-dependency-plan-model test-build-plan-artifact-target-projection test-artifact-install-plan test-artifact-selection-model test-artifact-identity-selection test-command-stub-contract test-markdown-links test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-commands-inspect test-commands-source-maintenance test-commands-sync test-conflicts-replaces test-install-layout test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check install uninstall
+.PHONY: all check-libalpm clean check-upgrade-all-plan-link-firewall check-system-source-upgrade-link-firewall check-aur-update-execution-runner-link-firewall check-aur-update-operation-result-link-firewall check-filtered-aur-update-operation-link-firewall check-upgrade-all-operation-link-firewall check-upgrade-all-command-link-firewall check-dependency-plan-model-link-firewall check-build-plan-artifact-target-projection-link-firewall check-artifact-selection-model-link-firewall check-artifact-identity-selection-link-firewall check-multiple-artifact-workspace-link-firewall check-multiple-artifact-identity-link-firewall check-package-base-artifact-install-plan-link-firewall check-package-base-artifact-install-executor-link-firewall check-separated-package-base-source-build-link-firewall test test-internal-identity test-application-identity test-xdg-paths test-xdg-directory-safety test-xdg-state-log test-runtime-identity test-app-config test-package-identifier test-package-metadata test-package-metadata-integration test-repository-query test-shell-words test-source-environment test-artifact-workspace test-multiple-artifact-workspace test-artifact-identity test-multiple-artifact-identity test-artifact-install-executor test-package-base-artifact-install-plan test-package-base-artifact-install-executor test-separated-source-build test-separated-package-base-source-build test-production-source-build test-process-capture test-aur-update-plan test-upgrade-all-plan test-system-source-upgrade test-aur-update-query test-aur-update-command test-upgrade-all-command test-aur-update-execution-preflight test-aur-update-execution-preflight-integration test-aur-update-execution-preparation test-aur-update-execution-runner test-aur-update-operation-result test-filtered-aur-update-operation test-upgrade-all-operation test-dependency-plan-model test-build-plan-artifact-target-projection test-artifact-install-plan test-artifact-selection-model test-artifact-identity-selection test-command-stub-contract test-markdown-links test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-commands-inspect test-commands-source-maintenance test-commands-sync test-conflicts-replaces test-install-layout test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check install uninstall
 
 all: $(TARGET) $(MANPAGE)
 
@@ -720,6 +721,19 @@ $(XDG_DIRECTORY_SAFETY_TEST_TARGET): tests/xdg_directory_safety_test.cpp $(SRC_D
 		tests/xdg_directory_safety_test.cpp \
 		$(SRC_DIR)/xdg_directory_safety.cpp \
 		$(SRC_DIR)/xdg_paths.cpp \
+		-o $@
+
+$(XDG_STATE_LOG_TEST_TARGET): tests/xdg_state_log_test.cpp $(SRC_DIR)/xdg_state_log.cpp $(SRC_DIR)/xdg_state_log.hpp $(SRC_DIR)/xdg_directory_safety.cpp $(SRC_DIR)/xdg_directory_safety.hpp $(SRC_DIR)/xdg_paths.cpp $(SRC_DIR)/xdg_paths.hpp $(SRC_DIR)/logging.cpp $(SRC_DIR)/logging.hpp $(SRC_DIR)/application_identity.hpp $(VERSION_FILE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling XDG state log test binary"
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) $(LDFLAGS) \
+		-DMOGUET_TEST_XDG_STATE_LOG_HOOKS \
+		-I$(SRC_DIR) \
+		tests/xdg_state_log_test.cpp \
+		$(SRC_DIR)/xdg_state_log.cpp \
+		$(SRC_DIR)/xdg_directory_safety.cpp \
+		$(SRC_DIR)/xdg_paths.cpp \
+		$(SRC_DIR)/logging.cpp \
 		-o $@
 
 $(ROOT_EXECUTION_IDENTITY_TEST_TARGET): $(OBJS) tests/stubs/runtime-identity/geteuid_stub.cpp $(VERSION_FILE)
@@ -1090,10 +1104,14 @@ test-xdg-paths: $(XDG_PATHS_TEST_TARGET)
 test-xdg-directory-safety: $(XDG_DIRECTORY_SAFETY_TEST_TARGET)
 	$(abspath $(XDG_DIRECTORY_SAFETY_TEST_TARGET))
 
-test-runtime-identity: $(TARGET) $(ROOT_EXECUTION_IDENTITY_TEST_TARGET)
+test-xdg-state-log: $(XDG_STATE_LOG_TEST_TARGET)
+	$(abspath $(XDG_STATE_LOG_TEST_TARGET))
+
+test-runtime-identity: $(TARGET) $(ROOT_EXECUTION_IDENTITY_TEST_TARGET) $(APP_CONFIG_INTEGRATION_TEST_TARGET)
 	sh tests/test-runtime-identity.sh \
 		$(abspath $(TARGET)) \
-		$(abspath $(ROOT_EXECUTION_IDENTITY_TEST_TARGET))
+		$(abspath $(ROOT_EXECUTION_IDENTITY_TEST_TARGET)) \
+		$(abspath $(APP_CONFIG_INTEGRATION_TEST_TARGET))
 
 test-app-config: $(APP_CONFIG_MODULE_TEST_TARGET) $(APP_CONFIG_INTEGRATION_TEST_TARGET)
 	sh tests/test-app-config.sh $(abspath $(APP_CONFIG_MODULE_TEST_TARGET)) $(abspath $(APP_CONFIG_INTEGRATION_TEST_TARGET))
@@ -1544,6 +1562,7 @@ test: \
 	test-application-identity \
 	test-xdg-paths \
 	test-xdg-directory-safety \
+	test-xdg-state-log \
 	test-runtime-identity \
 	test-app-config \
 	test-package-identifier \
@@ -1597,7 +1616,7 @@ test: \
 	test-source-build \
 	test-source-selection
 
-release-check: test-internal-identity test-application-identity test-xdg-paths test-xdg-directory-safety test-runtime-identity
+release-check: test-internal-identity test-application-identity test-xdg-paths test-xdg-directory-safety test-xdg-state-log test-runtime-identity
 	@echo ":: Checking release version consistency"
 	sh scripts/check-release-version.sh
 	@echo ":: Checking license compliance"
