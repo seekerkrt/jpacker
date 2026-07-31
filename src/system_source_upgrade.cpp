@@ -73,11 +73,11 @@ void notify(
 
 SystemSourceUpgradeOptionSnapshot snapshot_options(const AppConfig& config) {
     return SystemSourceUpgradeOptionSnapshot{
-            config.no_edit,
-            config.no_diff,
+            config.user_config.review.pkgbuild == ReviewPolicy::Skip,
+            config.user_config.review.diff == ReviewPolicy::Skip,
             config.no_confirm,
-            config.rebuild,
-            config.clean_build,
+            config.user_config.build.mode == BuildMode::Rebuild,
+            config.user_config.build.mode == BuildMode::Clean,
             config.rm_deps,
             config.editor};
 }
@@ -85,11 +85,15 @@ SystemSourceUpgradeOptionSnapshot snapshot_options(const AppConfig& config) {
 bool options_match(
         const SystemSourceUpgradeOptionSnapshot& snapshot,
         const AppConfig& config) noexcept {
-    return snapshot.no_edit == config.no_edit &&
-           snapshot.no_diff == config.no_diff &&
+    return snapshot.no_edit ==
+                   (config.user_config.review.pkgbuild == ReviewPolicy::Skip) &&
+           snapshot.no_diff ==
+                   (config.user_config.review.diff == ReviewPolicy::Skip) &&
            snapshot.no_confirm == config.no_confirm &&
-           snapshot.rebuild == config.rebuild &&
-           snapshot.clean_build == config.clean_build &&
+           snapshot.rebuild ==
+                   (config.user_config.build.mode == BuildMode::Rebuild) &&
+           snapshot.clean_build ==
+                   (config.user_config.build.mode == BuildMode::Clean) &&
            snapshot.rm_deps == config.rm_deps &&
            snapshot.editor == config.editor;
 }

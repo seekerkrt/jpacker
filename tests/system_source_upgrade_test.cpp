@@ -115,22 +115,21 @@ void expect(bool condition, const std::string& diagnostic) {
 
 AppConfig full_option_config() {
     AppConfig config;
-    config.no_edit = true;
-    config.no_diff = true;
+    config.user_config.review.pkgbuild = ReviewPolicy::Skip;
+    config.user_config.review.diff = ReviewPolicy::Skip;
+    config.user_config.build.mode = BuildMode::Clean;
     config.no_confirm = true;
-    config.rebuild = true;
-    config.clean_build = true;
     config.editor = "test-editor";
     return config;
 }
 
 stub::ConfigSnapshot snapshot_config(const AppConfig& config) {
     return stub::ConfigSnapshot{
-            config.no_edit,
-            config.no_diff,
+            config.user_config.review.pkgbuild == ReviewPolicy::Skip,
+            config.user_config.review.diff == ReviewPolicy::Skip,
             config.no_confirm,
-            config.rebuild,
-            config.clean_build,
+            config.user_config.build.mode == BuildMode::Rebuild,
+            config.user_config.build.mode == BuildMode::Clean,
             config.rm_deps,
             config.editor};
 }
@@ -351,12 +350,18 @@ void test_all_sources_success_order_options_and_change() {
             prepared.snapshot();
     expect(prepared_snapshot != nullptr,
            "Prepared source snapshot is unavailable before execution");
-    expect(prepared_snapshot->options.no_edit == config.no_edit &&
-                   prepared_snapshot->options.no_diff == config.no_diff &&
+    expect(prepared_snapshot->options.no_edit ==
+                           (config.user_config.review.pkgbuild ==
+                            ReviewPolicy::Skip) &&
+                   prepared_snapshot->options.no_diff ==
+                           (config.user_config.review.diff ==
+                            ReviewPolicy::Skip) &&
                    prepared_snapshot->options.no_confirm == config.no_confirm &&
-                   prepared_snapshot->options.rebuild == config.rebuild &&
+                   prepared_snapshot->options.rebuild ==
+                           (config.user_config.build.mode ==
+                            BuildMode::Rebuild) &&
                    prepared_snapshot->options.clean_build ==
-                           config.clean_build &&
+                           (config.user_config.build.mode == BuildMode::Clean) &&
                    prepared_snapshot->options.rm_deps == config.rm_deps &&
                    prepared_snapshot->options.editor == config.editor,
            "Options were not frozen during preparation");
@@ -474,14 +479,20 @@ void test_source_options_propagate_independently() {
         void (*enable)(AppConfig& config);
     };
     const std::vector<OptionCase> cases = {
-            {"noedit", [](AppConfig& config) { config.no_edit = true; }},
-            {"nodiff", [](AppConfig& config) { config.no_diff = true; }},
+            {"noedit", [](AppConfig& config) {
+                 config.user_config.review.pkgbuild = ReviewPolicy::Skip;
+             }},
+            {"nodiff", [](AppConfig& config) {
+                 config.user_config.review.diff = ReviewPolicy::Skip;
+             }},
             {"noconfirm", [](AppConfig& config) {
                  config.no_confirm = true;
              }},
-            {"rebuild", [](AppConfig& config) { config.rebuild = true; }},
+            {"rebuild", [](AppConfig& config) {
+                 config.user_config.build.mode = BuildMode::Rebuild;
+             }},
             {"cleanbuild", [](AppConfig& config) {
-                 config.clean_build = true;
+                 config.user_config.build.mode = BuildMode::Clean;
              }},
     };
 

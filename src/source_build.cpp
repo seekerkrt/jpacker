@@ -296,7 +296,7 @@ void review_build_files(
     std::vector<fs::path> install_scripts =
             require_safe_persistent_checkout_descendants(checkout);
 
-    if(config.no_edit) {
+    if(config.user_config.review.pkgbuild == ReviewPolicy::Skip) {
         Logger::info("Skipping PKGBUILD/.install review (--noedit).");
         return;
     }
@@ -477,13 +477,13 @@ MakepkgBuildOptions resolve_makepkg_build_options(
     MakepkgBuildOptions options;
     bool                has_artifact = has_local_package_artifact(pkg_dir);
 
-    if(config.clean_build) {
+    if(config.user_config.build.mode == BuildMode::Clean) {
         options.clean_build = true;
     } else if(has_local_srcdir(pkg_dir)) {
         options.clean_build = ask_user("Clean build existing build directory?", PromptDefault::No, config);
     }
 
-    if(config.rebuild) {
+    if(config.user_config.build.mode == BuildMode::Rebuild) {
         options.rebuild = true;
     } else if(options.clean_build && has_artifact) {
         options.rebuild = true;
@@ -560,7 +560,7 @@ SourceBuildCheckoutPreparation prepare_source_build_checkout(
                         pkg_path, request.git_url);
                 Logger::info("Detected branch: " + branch);
 
-                if(!config.no_diff) {
+                if(config.user_config.review.diff == ReviewPolicy::Prompt) {
                     int diff_ret = trusted_git_diff_quiet(
                             pkg_path, request.git_url, branch);
                     if(diff_ret > 1) {

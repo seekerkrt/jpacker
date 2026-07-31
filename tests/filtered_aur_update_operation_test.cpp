@@ -414,13 +414,14 @@ void expect_statuses(
 }
 
 bool same_config(const AppConfig& lhs, const AppConfig& rhs) {
-    return lhs.no_edit == rhs.no_edit &&
-           lhs.no_diff == rhs.no_diff &&
+    return lhs.user_config.schema_version == rhs.user_config.schema_version &&
+           lhs.user_config.review.pkgbuild ==
+                   rhs.user_config.review.pkgbuild &&
+           lhs.user_config.review.diff == rhs.user_config.review.diff &&
+           lhs.user_config.build.mode == rhs.user_config.build.mode &&
            lhs.no_confirm == rhs.no_confirm &&
-           lhs.rebuild == rhs.rebuild &&
-           lhs.clean_build == rhs.clean_build &&
            lhs.rm_deps == rhs.rm_deps &&
-           lhs.editor == rhs.editor && lhs.log_file == rhs.log_file;
+           lhs.editor == rhs.editor;
 }
 
 std::string prepared_diagnostic(
@@ -540,14 +541,12 @@ void test_real_query_wrapper_and_empty_explicit_set_match_legacy_path() {
             root_plan({{"legacy-root", "legacy-root"}}),
             {"legacy-root"});
     AppConfig config;
-    config.no_edit = true;
-    config.no_diff = true;
+    config.user_config.review.pkgbuild = ReviewPolicy::Skip;
+    config.user_config.review.diff = ReviewPolicy::Skip;
+    config.user_config.build.mode = BuildMode::Clean;
     config.no_confirm = true;
-    config.rebuild = true;
-    config.clean_build = true;
     config.rm_deps = true;
     config.editor = "fixture-editor";
-    config.log_file = "/fixture/log";
 
     PreparedFilteredAurUpdateOperation prepared =
             prepare_filtered_aur_update_operation(

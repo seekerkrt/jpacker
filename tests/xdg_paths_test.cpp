@@ -567,6 +567,125 @@ void test_process_adapter_ignores_sudo_user_and_root_inference() {
             "SUDO_USER-independent cache directory");
 }
 
+void test_config_only_resolver_uses_explicit_value() {
+    const xdg_paths::EnvironmentSnapshot environment{
+            .xdg_config_home = "/config-only/base",
+            .xdg_state_home = "relative/state-secret",
+            .xdg_cache_home = "relative/cache-secret",
+            .home = "relative/unused-home",
+    };
+    const xdg_paths::ConfigPaths paths =
+            xdg_paths::resolve_config(environment);
+
+    expect_path(
+            paths.directory, "/config-only/base/moguet",
+            "Config-only explicit directory");
+    expect_path(
+            paths.config_file, "/config-only/base/moguet/config.toml",
+            "Config-only explicit config file");
+    expect_creation_boundary(
+            paths.creation_boundary,
+            xdg_paths::DirectorySource::ExplicitXdg,
+            "/config-only/base", "/config-only/base", {"moguet"},
+            "Config-only explicit creation boundary");
+}
+
+void test_config_only_resolver_uses_home_fallback() {
+    const xdg_paths::EnvironmentSnapshot environment{
+            .xdg_config_home = std::nullopt,
+            .xdg_state_home = "relative/state-secret",
+            .xdg_cache_home = "relative/cache-secret",
+            .home = "/config-only/home",
+    };
+    const xdg_paths::ConfigPaths paths =
+            xdg_paths::resolve_config(environment);
+
+    expect_path(
+            paths.directory, "/config-only/home/.config/moguet",
+            "Config-only HOME fallback directory");
+    expect_path(
+            paths.config_file,
+            "/config-only/home/.config/moguet/config.toml",
+            "Config-only HOME fallback config file");
+    expect_creation_boundary(
+            paths.creation_boundary,
+            xdg_paths::DirectorySource::HomeFallback,
+            "/config-only/home/.config", "/config-only/home",
+            {".config", "moguet"},
+            "Config-only HOME fallback creation boundary");
+}
+
+void test_config_only_resolver_treats_empty_xdg_as_unset() {
+    const xdg_paths::EnvironmentSnapshot environment{
+            .xdg_config_home = "",
+            .xdg_state_home = "relative/state-secret",
+            .xdg_cache_home = "relative/cache-secret",
+            .home = "/config-only/empty-xdg-home",
+    };
+    const xdg_paths::ConfigPaths paths =
+            xdg_paths::resolve_config(environment);
+
+    expect_path(
+            paths.directory,
+            "/config-only/empty-xdg-home/.config/moguet",
+            "Config-only empty XDG fallback directory");
+    expect_creation_boundary(
+            paths.creation_boundary,
+            xdg_paths::DirectorySource::HomeFallback,
+            "/config-only/empty-xdg-home/.config",
+            "/config-only/empty-xdg-home", {".config", "moguet"},
+            "Config-only empty XDG fallback creation boundary");
+}
+
+void test_config_only_resolver_rejects_relative_xdg_value() {
+    const xdg_paths::EnvironmentSnapshot environment{
+            .xdg_config_home = "relative/config-secret",
+            .xdg_state_home = std::nullopt,
+            .xdg_cache_home = std::nullopt,
+            .home = "/valid/fallback",
+    };
+    expect_resolution_error(
+            [&environment]() {
+                static_cast<void>(xdg_paths::resolve_config(environment));
+            },
+            xdg_paths::DirectoryKind::Config,
+            xdg_paths::EnvironmentVariable::XdgConfigHome,
+            xdg_paths::ResolutionErrorCode::RelativePath,
+            "XDG_CONFIG_HOME must be an absolute path",
+            "relative/config-secret");
+}
+
+void test_config_process_adapter_reads_only_config_authority() {
+    TemporaryDirectory temporary_directory;
+    const fs::path config_home = temporary_directory.path() / "config-home";
+
+    ScopedEnvironmentVariable config_environment(
+            "XDG_CONFIG_HOME",
+            std::optional<std::string>{config_home.string()});
+    ScopedEnvironmentVariable state_home(
+            "XDG_STATE_HOME",
+            std::optional<std::string>{"relative/state-secret"});
+    ScopedEnvironmentVariable cache_home(
+            "XDG_CACHE_HOME",
+            std::optional<std::string>{"relative/cache-secret"});
+    ScopedEnvironmentVariable home(
+            "HOME", std::optional<std::string>{"relative/unused-home"});
+    ScopedEnvironmentVariable sudo_user(
+            "SUDO_USER", std::optional<std::string>{"ordinary-user"});
+
+    const xdg_paths::ConfigPaths paths =
+            xdg_paths::resolve_config_process_environment();
+    expect_path(
+            paths.directory, config_home / "moguet",
+            "Config process adapter directory");
+    expect_path(
+            paths.config_file, config_home / "moguet" / "config.toml",
+            "Config process adapter config file");
+    expect(
+            !fs::exists(config_home),
+            "Config process adapter mutated the filesystem.");
+}
+
 void test_state_only_resolver_ignores_unrelated_xdg_values() {
     const xdg_paths::EnvironmentSnapshot environment{
             .xdg_config_home = "relative/config-secret",
@@ -847,6 +966,57 @@ void test_resolution_does_not_mutate_filesystem() {
             "XDG path resolution created the default log file.");
 }
 
+void test_config_only_resolution_does_not_mutate_filesystem() {
+    TemporaryDirectory temporary_directory;
+    const fs::path sentinel_directory =
+            temporary_directory.path() / "sentinel";
+    const fs::path sentinel_file = sentinel_directory / "keep";
+    fs::create_directory(sentinel_directory);
+    {
+        std::ofstream file(sentinel_file, std::ios::binary);
+        if(!file) {
+            throw std::runtime_error(
+                    "Failed to create config-only XDG test sentinel.");
+        }
+        file << "unchanged-config-only-sentinel";
+    }
+
+    const fs::path config_base = temporary_directory.path() / "config-base";
+    const fs::path state_base = temporary_directory.path() / "state-base";
+    const fs::path cache_base = temporary_directory.path() / "cache-base";
+    const std::vector<std::string> before =
+            snapshot_tree(temporary_directory.path());
+    const xdg_paths::EnvironmentSnapshot environment{
+            .xdg_config_home = config_base.string(),
+            .xdg_state_home = state_base.string(),
+            .xdg_cache_home = cache_base.string(),
+            .home = std::nullopt,
+    };
+    const xdg_paths::ConfigPaths paths =
+            xdg_paths::resolve_config(environment);
+    const std::vector<std::string> after =
+            snapshot_tree(temporary_directory.path());
+
+    expect(
+            before == after,
+            "Config-only XDG path resolution changed the filesystem tree.");
+    expect(
+            read_file(sentinel_file) == "unchanged-config-only-sentinel",
+            "Config-only XDG path resolution changed the sentinel.");
+    expect(
+            !fs::exists(paths.directory),
+            "Config-only XDG path resolution created the config directory.");
+    expect(
+            !fs::exists(paths.config_file),
+            "Config-only XDG path resolution created the config file.");
+    expect(
+            !fs::exists(state_base),
+            "Config-only XDG path resolution created the state directory.");
+    expect(
+            !fs::exists(cache_base),
+            "Config-only XDG path resolution created the cache directory.");
+}
+
 void test_cache_only_resolution_does_not_mutate_filesystem() {
     TemporaryDirectory temporary_directory;
     const fs::path sentinel_directory =
@@ -943,6 +1113,21 @@ int main() {
                 "process adapter ignores sudo user and root inference",
                 test_process_adapter_ignores_sudo_user_and_root_inference);
         run_case(
+                "config-only resolver uses explicit value",
+                test_config_only_resolver_uses_explicit_value);
+        run_case(
+                "config-only resolver uses HOME fallback",
+                test_config_only_resolver_uses_home_fallback);
+        run_case(
+                "config-only resolver treats empty XDG as unset",
+                test_config_only_resolver_treats_empty_xdg_as_unset);
+        run_case(
+                "config-only resolver rejects relative XDG value",
+                test_config_only_resolver_rejects_relative_xdg_value);
+        run_case(
+                "config process adapter reads only config authority",
+                test_config_process_adapter_reads_only_config_authority);
+        run_case(
                 "state-only resolver ignores unrelated XDG values",
                 test_state_only_resolver_ignores_unrelated_xdg_values);
         run_case(
@@ -969,6 +1154,9 @@ int main() {
         run_case(
                 "resolution does not mutate filesystem",
                 test_resolution_does_not_mutate_filesystem);
+        run_case(
+                "config-only resolution does not mutate filesystem",
+                test_config_only_resolution_does_not_mutate_filesystem);
         run_case(
                 "cache-only resolution does not mutate filesystem",
                 test_cache_only_resolution_does_not_mutate_filesystem);

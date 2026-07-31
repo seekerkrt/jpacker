@@ -52,14 +52,12 @@ void expect(bool condition, const std::string& diagnostic) {
 
 AppConfig runner_config() {
     AppConfig config;
-    config.no_edit = true;
-    config.no_diff = true;
+    config.user_config.review.pkgbuild = ReviewPolicy::Skip;
+    config.user_config.review.diff = ReviewPolicy::Skip;
+    config.user_config.build.mode = BuildMode::Clean;
     config.no_confirm = true;
-    config.rebuild = true;
-    config.clean_build = true;
     config.rm_deps = false;
     config.editor = "runner-test-editor";
-    config.log_file = "/runner-test.log";
     return config;
 }
 

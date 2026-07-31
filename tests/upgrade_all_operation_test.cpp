@@ -101,14 +101,12 @@ void remove_cache_fixture(const fs::path& path) noexcept {
 
 AppConfig full_option_config() {
     AppConfig config;
-    config.no_edit = true;
-    config.no_diff = true;
+    config.user_config.review.pkgbuild = ReviewPolicy::Skip;
+    config.user_config.review.diff = ReviewPolicy::Skip;
+    config.user_config.build.mode = BuildMode::Clean;
     config.no_confirm = true;
-    config.rebuild = true;
-    config.clean_build = true;
     config.rm_deps = true;
     config.editor = "upgrade-all-test-editor";
-    config.log_file = "/upgrade-all-test/log";
     return config;
 }
 
@@ -499,7 +497,9 @@ void test_empty_source_preparation_snapshot() {
                     snapshot->explicit_source_adapter.is_valid(),
             "Empty registered-source intent changed during preparation");
     expect(
-            snapshot->system_source.options.no_edit == config.no_edit &&
+            snapshot->system_source.options.no_edit ==
+                            (config.user_config.review.pkgbuild ==
+                             ReviewPolicy::Skip) &&
                     snapshot->system_source.options.rm_deps ==
                             config.rm_deps &&
                     snapshot->system_source.options.editor == config.editor,

@@ -111,14 +111,17 @@ bool same_database_paths(
 }
 
 bool same_config(const AppConfig& actual, const AppConfig& expected) noexcept {
-    return actual.no_edit == expected.no_edit &&
-           actual.no_diff == expected.no_diff &&
+    return actual.user_config.schema_version ==
+                   expected.user_config.schema_version &&
+           actual.user_config.review.pkgbuild ==
+                   expected.user_config.review.pkgbuild &&
+           actual.user_config.review.diff ==
+                   expected.user_config.review.diff &&
+           actual.user_config.build.mode ==
+                   expected.user_config.build.mode &&
            actual.no_confirm == expected.no_confirm &&
-           actual.rebuild == expected.rebuild &&
-           actual.clean_build == expected.clean_build &&
            actual.rm_deps == expected.rm_deps &&
-           actual.editor == expected.editor &&
-           actual.log_file == expected.log_file;
+           actual.editor == expected.editor;
 }
 
 std::vector<std::string> required_package_names(

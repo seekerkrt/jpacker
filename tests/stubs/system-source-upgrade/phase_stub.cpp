@@ -62,11 +62,11 @@ PhaseStubState g_state;
 
 stub::ConfigSnapshot snapshot_config(const AppConfig& config) {
     return stub::ConfigSnapshot{
-            config.no_edit,
-            config.no_diff,
+            config.user_config.review.pkgbuild == ReviewPolicy::Skip,
+            config.user_config.review.diff == ReviewPolicy::Skip,
             config.no_confirm,
-            config.rebuild,
-            config.clean_build,
+            config.user_config.build.mode == BuildMode::Rebuild,
+            config.user_config.build.mode == BuildMode::Clean,
             config.rm_deps,
             config.editor};
 }

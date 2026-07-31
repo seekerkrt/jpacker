@@ -96,6 +96,10 @@ struct ResolvedPaths {
 // Pure resolver。filesystemの参照・作成やcurrent working directory補正を行わない。
 ResolvedPaths resolve(const EnvironmentSnapshot& environment);
 
+// Config consumerが無関係なstate/cache environmentをauthorityへ
+// 取り込まず、config pathだけを解決するpure resolver。
+ConfigPaths resolve_config(const EnvironmentSnapshot& environment);
+
 // State log consumerが無関係なconfig/cache environmentをauthorityへ
 // 取り込まず、state pathだけを解決するpure resolver。
 StatePaths resolve_state(const EnvironmentSnapshot& environment);
@@ -107,6 +111,9 @@ CachePaths resolve_cache(const EnvironmentSnapshot& environment);
 // Production adapter。実processのXDG_CONFIG_HOME / XDG_STATE_HOME /
 // XDG_CACHE_HOME / HOMEだけをsnapshot化し、pure resolverへ渡す。
 ResolvedPaths resolve_process_environment();
+
+// Config consumer専用adapter。XDG_CONFIG_HOME / HOMEだけをsnapshot化する。
+ConfigPaths resolve_config_process_environment();
 
 // Default state log専用adapter。XDG_STATE_HOME / HOMEだけをsnapshot化する。
 StatePaths resolve_state_process_environment();

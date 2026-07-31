@@ -50,11 +50,19 @@ const char* bool_text(bool value) {
 }
 
 std::string config_snapshot(const AppConfig& config) {
-    return "noedit=" + std::string(bool_text(config.no_edit)) +
-            " nodiff=" + bool_text(config.no_diff) +
+    return "noedit=" + std::string(bool_text(
+                                   config.user_config.review.pkgbuild ==
+                                   ReviewPolicy::Skip)) +
+            " nodiff=" + bool_text(
+                                config.user_config.review.diff ==
+                                ReviewPolicy::Skip) +
             " noconfirm=" + bool_text(config.no_confirm) +
-            " rebuild=" + bool_text(config.rebuild) +
-            " cleanbuild=" + bool_text(config.clean_build) +
+            " rebuild=" + bool_text(
+                                  config.user_config.build.mode ==
+                                  BuildMode::Rebuild) +
+            " cleanbuild=" + bool_text(
+                                     config.user_config.build.mode ==
+                                     BuildMode::Clean) +
             " rmdeps=" + bool_text(config.rm_deps);
 }
 

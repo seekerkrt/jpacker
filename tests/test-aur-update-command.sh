@@ -29,7 +29,7 @@ setup_case() {
     stdout_file=$case_dir/stdout
     stderr_file=$case_dir/stderr
     command_log=$case_dir/commands.log
-    config_file=$case_dir/jpacker.conf
+    config_file=$case_dir/config.toml
 
     mkdir -p \
         "$case_dir/home" "$case_dir/xdg-state" "$case_dir/xdg-cache" \
@@ -38,7 +38,7 @@ setup_case() {
     : > "$stdout_file"
     : > "$stderr_file"
     : > "$command_log"
-    : > "$config_file"
+    printf '%s\n' 'schema_version = 1' > "$config_file"
 
     export HOME=$case_dir/home
     export XDG_STATE_HOME=$case_dir/xdg-state

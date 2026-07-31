@@ -3,7 +3,7 @@
  *
  * Features:
  * - Smart Upgrade: Skips rebuilding packages if the version hasn't changed during 'upgrade'.
- * - Variable expansion support in config files.
+ * - Strict typed user configuration with CLI override composition.
  * - '--nodiff' option support.
  * - '--noconfirm' option support.
  */
@@ -25,6 +25,7 @@
 #include "process.hpp"
 #include "shell_words.hpp"
 #include "source_install.hpp"
+#include "user_config.hpp"
 #include "xdg_directory_safety.hpp"
 #include "xdg_paths.hpp"
 #include "xdg_state_log.hpp"
@@ -64,45 +65,18 @@ std::string join_pacman_args(const std::vector<std::string>& args);
 bool validate_optionless_moguet_operation(const std::string& operation, const std::vector<std::string>& flags);
 namespace {
 
-AppConfig load_invocation_app_config() {
+UserConfig load_invocation_user_config() {
 #ifdef MOGUET_ENABLE_TEST_CONFIG_PATH
-    // POLICY: productionはfixed pathを使い、専用test binaryだけが正規の明示path loaderを選ぶ。
+    // POLICY: productionはXDG authorityを使い、専用test binaryだけが
+    // strict TOML loaderの明示pathを選ぶ。
     const char* test_config_path = std::getenv("MOGUET_TEST_CONFIG_FILE");
     if(test_config_path && test_config_path[0] != '\0') {
-        return load_app_config(test_config_path);
+        return load_user_config(test_config_path);
     }
 #endif
-    return load_default_app_config();
-}
-
-void apply_cli_overrides(AppConfig& config, const CliOverrides& overrides) {
-    // Transitional bridge: typed final valuesをlegacy consumerのbooleanへ投影する。
-    if(overrides.review_pkgbuild.has_value()) {
-        config.no_edit =
-                overrides.review_pkgbuild.value() == ReviewPolicy::Skip;
-    }
-    if(overrides.review_diff.has_value()) {
-        config.no_diff =
-                overrides.review_diff.value() == ReviewPolicy::Skip;
-    }
-    if(overrides.build_mode.has_value()) {
-        switch(overrides.build_mode.value()) {
-        case BuildMode::Normal:
-            config.rebuild = false;
-            config.clean_build = false;
-            break;
-        case BuildMode::Rebuild:
-            config.rebuild = true;
-            config.clean_build = false;
-            break;
-        case BuildMode::Clean:
-            config.rebuild = false;
-            config.clean_build = true;
-            break;
-        }
-    }
-    if(overrides.no_confirm) config.no_confirm = true;
-    if(overrides.rm_deps) config.rm_deps = true;
+    const xdg_paths::ConfigPaths config_paths =
+            xdg_paths::resolve_config_process_environment();
+    return load_user_config(config_paths.config_file);
 }
 
 bool is_known_moguet_operation(const std::string& operation) {
@@ -175,14 +149,17 @@ int run_moguet(int argc, char* argv[]) {
         return 1;
     }
 
-    // Configはparse成功までlocalに保持し、invalid CLIから最終実行設定へのpartial publishを防ぐ。
-    AppConfig config;
+    // Configはparse成功までlocalに保持し、invalid inputから最終実行設定への
+    // partial publishを防ぐ。missing leafだけがbuilt-in defaultになる。
+    UserConfig user_config;
     try {
-        config = load_invocation_app_config();
+        user_config = load_invocation_user_config();
     } catch(const std::exception& e) {
-        std::cerr << "Warning: Failed to load config: " << e.what() << std::endl;
+        Logger::error(e.what());
+        return 1;
     } catch(...) {
-        std::cerr << "Warning: Failed to load config: unknown error." << std::endl;
+        Logger::error("Failed to load user config: unknown error.");
+        return 1;
     }
 
     std::optional<ParsedCliArguments> parsed_result = parse_cli_arguments(argc, argv);
@@ -194,8 +171,12 @@ int run_moguet(int argc, char* argv[]) {
         print_help();
         return 1;
     }
-    apply_cli_overrides(config, parsed.cli_overrides);
-    g_config = std::move(config);
+    UserConfig final_user_config = compose_user_config(
+            std::move(user_config), parsed.cli_overrides);
+    g_config = make_app_config(
+            std::move(final_user_config),
+            parsed.cli_overrides.no_confirm,
+            parsed.cli_overrides.rm_deps);
 
     if(parsed.operation == "upgrade-all") {
         // POLICY(#281): upgrade-all is target-less and does not inherit
@@ -277,53 +258,57 @@ int run_moguet(int argc, char* argv[]) {
 
     if(!validate_pre_log_operation_route(parsed)) return 1;
 
-    if(g_config.log_file.empty()) {
+    try {
+        // POLICY(#305,#306): stateだけを解決し、validated directory
+        // descriptorからfixed default logをopenしてLoggerへownershipを移す。
+        xdg_paths::StatePaths state_paths =
+                xdg_paths::resolve_state_process_environment();
+        xdg_directory_safety::PreparedDirectory state_directory =
+                xdg_directory_safety::prepare_directory(state_paths);
+        xdg_state_log::PreparedLogFile state_log =
+                xdg_state_log::open_default_state_log(
+                        state_paths, state_directory);
+        Logger::init(
+                std::move(state_log),
+                "Started " +
+                        std::string(application_identity::PROJECT_NAME) +
+                        " v" +
+                        std::string(application_identity::VERSION));
+    } catch(const std::exception& error) {
+        // Default state authorityのfailureはoperation dispatch前にfatal。
+        // Logger adoption後のwrite failureでも同じbackendへ再書込しない。
+        std::cerr << "\033[1;31m:: Error:\033[0m " << error.what()
+                  << std::endl;
+        return 1;
+    } catch(...) {
+        std::cerr
+                << "\033[1;31m:: Error:\033[0m Cannot initialize "
+                << application_identity::PROJECT_NAME
+                << " default state log: unknown error." << std::endl;
+        return 1;
+    }
+
+#ifdef MOGUET_ENABLE_APP_CONFIG_TEST_HOOKS
+    // Test-only seam: closed-stdin regression cases need fd 0 to become
+    // available again after production state-log initialization.
+    const char* release_state_log =
+            std::getenv("MOGUET_TEST_RELEASE_STATE_LOG_BEFORE_DISPATCH");
+    if(release_state_log && release_state_log[0] != '\0') {
         try {
-            // POLICY(#305): stateだけを解決し、validated directory descriptor
-            // からfixed default logをopenしてLoggerへownershipを移す。
-            xdg_paths::StatePaths state_paths =
-                    xdg_paths::resolve_state_process_environment();
-            xdg_directory_safety::PreparedDirectory state_directory =
-                    xdg_directory_safety::prepare_directory(state_paths);
-            xdg_state_log::PreparedLogFile state_log =
-                    xdg_state_log::open_default_state_log(
-                            state_paths, state_directory);
-            Logger::init(
-                    std::move(state_log),
-                    "Started " +
-                            std::string(application_identity::PROJECT_NAME) +
-                            " v" +
-                            std::string(application_identity::VERSION));
+            Logger::shutdown();
         } catch(const std::exception& error) {
-            // Default state authorityのfailureはoperation dispatch前にfatal。
-            // Logger adoption後のwrite failureでも同じbackendへ再書込しない。
             std::cerr << "\033[1;31m:: Error:\033[0m " << error.what()
                       << std::endl;
             return 1;
         } catch(...) {
             std::cerr
-                    << "\033[1;31m:: Error:\033[0m Cannot initialize "
+                    << "\033[1;31m:: Error:\033[0m Cannot release "
                     << application_identity::PROJECT_NAME
-                    << " default state log: unknown error." << std::endl;
+                    << " test state log: unknown error." << std::endl;
             return 1;
         }
-    } else {
-        // Transitional compatibility: explicit legacy LOGFILE keeps the
-        // existing path-based, best-effort Logger contract until Issue #306.
-        try {
-            Logger::init(expand_config_path(g_config.log_file));
-            Logger::info(
-                    "Started " +
-                    std::string(application_identity::PROJECT_NAME) + " v" +
-                    std::string(application_identity::VERSION));
-        } catch(const std::exception& error) {
-            std::cerr << "Warning: Failed to initialize log: "
-                      << error.what() << std::endl;
-        } catch(...) {
-            std::cerr << "Warning: Failed to initialize log: unknown error."
-                      << std::endl;
-        }
     }
+#endif
 
     const std::string&               operation = parsed.operation;
     const std::vector<std::string>&  args = parsed.ordered_pacman_args;
@@ -456,8 +441,10 @@ int verify_parse_failure_does_not_publish_cli_overrides() {
         std::cerr << "Expected CLI parse failure." << std::endl;
         return 1;
     }
-    if(g_config.no_edit || g_config.no_diff || g_config.no_confirm || g_config.rebuild ||
-       g_config.clean_build || g_config.rm_deps) {
+    if(g_config.user_config.review.pkgbuild != ReviewPolicy::Prompt ||
+       g_config.user_config.review.diff != ReviewPolicy::Prompt ||
+       g_config.user_config.build.mode != BuildMode::Normal ||
+       g_config.no_confirm || g_config.rm_deps) {
         std::cerr << "CLI parse failure published partial config overrides." << std::endl;
         return 1;
     }
