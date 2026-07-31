@@ -29,7 +29,7 @@ unset _license_version_comparison
 depends=('curl' 'pacman' 'libalpm.so' 'git')
 
 # ビルド時に必要なパッケージ ('git' が必須)
-makedepends=('git' 'nlohmann-json' 'base-devel')
+makedepends=('git' 'nlohmann-json' 'tomlplusplus' 'base-devel')
 
 # pacman-managed config upgrade/remove semantics
 backup=('etc/jpacker/jpacker.conf')

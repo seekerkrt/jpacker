@@ -77,13 +77,13 @@ projectまたはdownstreamがbinaryを配布する場合は、そのbinaryと同
 | 分類 | 現在のcomponent | 境界 |
 | --- | --- | --- |
 | Direct dynamic link | libalpm、libcurl | jpackerと同じprocessでAPIを呼び、ELF runtime dependencyになる |
-| Header-only compiled code | nlohmann-json | system headerの実装がjpacker object codeへcompileされる |
+| Header-only compiled code | nlohmann-json、toml++ | system headerの実装がjpacker object codeへcompileされる |
 | External command | pacman、pacman-conf、makepkg、git、vercmp、その他NOTICE記載のprogram | command line、stdin/stdout、exit statusを介する別processであり、jpackerへlinkしない |
 | System/toolchain runtime | glibc、libstdc++、libgcc_s、libmなど | compiler/OSが提供するruntime。applicationが直接採用したlibraryと混同しない |
 
 ## System packages and bundling policy
 
-現在のjpacker repositoryとpackageは、libalpm、libcurl、nlohmann-jsonのsource treeやlibrary binaryをbundleしていません。build時とruntimeにArch system packagesから取得します。`ldd`に現れるtransitive dependencyを、jpackerが直接利用・再配布するcomponentとして無差別に列挙しません。
+現在のjpacker repositoryとpackageは、libalpm、libcurl、nlohmann-json、toml++のsource treeやlibrary binaryをbundleしていません。libalpmとlibcurlはbuild / runtime、nlohmann-jsonとtoml++はbuild時にArch system packagesから取得します。`ldd`に現れるtransitive dependencyを、jpackerが直接利用・再配布するcomponentとして無差別に列挙しません。
 
 この前提が変わる場合はnoticeをそのまま流用しません。特に次の変更では、source提供、license compatibility、copyright notice、package layoutを改めて監査します。
 
@@ -104,3 +104,5 @@ projectまたはdownstreamがbinaryを配布する場合は、そのbinaryと同
 - [Arch Linux pacman package](https://archlinux.org/packages/core/x86_64/pacman/)
 - [curl license](https://curl.se/docs/copyright.html)
 - [nlohmann-json v3.12.0 license information](https://github.com/nlohmann/json/tree/v3.12.0#license)
+- [toml++ project and license](https://github.com/marzer/tomlplusplus#license)
+- [Bjoern Hoehrmann UTF-8 decoder and license](https://bjoern.hoehrmann.de/utf-8/decoder/dfa/)

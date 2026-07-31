@@ -59,6 +59,32 @@ payload_config=$stage_root/etc/jpacker/jpacker.conf
 cmp -s "$source_config" "$payload_config" ||
     fail "package payload config differs from config/jpacker.conf."
 
+tomlplusplus_makedepends_count=$(awk '
+    $1 == "makedepends" && $2 == "=" && $3 == "tomlplusplus" {
+        count++
+    }
+    END { print count + 0 }
+' "$srcinfo_file")
+[ "$tomlplusplus_makedepends_count" -eq 1 ] ||
+    fail "tomlplusplus must appear exactly once as a build dependency."
+
+tomlplusplus_depends_count=$(awk '
+    $1 == "depends" && $2 == "=" && $3 == "tomlplusplus" { count++ }
+    END { print count + 0 }
+' "$srcinfo_file")
+[ "$tomlplusplus_depends_count" -eq 0 ] ||
+    fail "tomlplusplus must not be a runtime dependency."
+
+for forbidden_tomlplusplus_flag in \
+    -ltomlplusplus \
+    TOML_HEADER_ONLY=0 \
+    TOML_SHARED_LIB=1
+do
+    if grep -F -- "$forbidden_tomlplusplus_flag" "$repo_root/Makefile" >/dev/null; then
+        fail "Makefile enables toml++ shared-library mode: $forbidden_tomlplusplus_flag"
+    fi
+done
+
 payload_matches=$(find "$stage_root" \( -type f -o -type l \) \
     -name jpacker.conf -print)
 [ "$payload_matches" = "$payload_config" ] ||

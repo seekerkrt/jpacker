@@ -117,6 +117,10 @@ assert_compliance_install() {
         "$license_dir/curl.txt"
     assert_installed_file "$repo_root/LICENSES/nlohmann-json-MIT.txt" \
         "$license_dir/nlohmann-json-MIT.txt"
+    assert_installed_file "$repo_root/LICENSES/tomlplusplus-MIT.txt" \
+        "$license_dir/tomlplusplus-MIT.txt"
+    assert_installed_file "$repo_root/LICENSES/bjoern-hoehrmann-utf8-MIT.txt" \
+        "$license_dir/bjoern-hoehrmann-utf8-MIT.txt"
     assert_installed_file "$repo_root/THIRD_PARTY_NOTICES.md" \
         "$doc_dir/THIRD_PARTY_NOTICES.md"
     assert_installed_file "$repo_root/docs/LICENSING.md" \
@@ -136,6 +140,10 @@ assert_compliance_install() {
         '/usr/share/licenses/jpacker/curl.txt'
     assert_installed_text "$doc_dir/THIRD_PARTY_NOTICES.md" \
         '/usr/share/licenses/jpacker/nlohmann-json-MIT.txt'
+    assert_installed_text "$doc_dir/THIRD_PARTY_NOTICES.md" \
+        '/usr/share/licenses/jpacker/tomlplusplus-MIT.txt'
+    assert_installed_text "$doc_dir/THIRD_PARTY_NOTICES.md" \
+        '/usr/share/licenses/jpacker/bjoern-hoehrmann-utf8-MIT.txt'
 
     assert_unique_basename LICENSE "$license_dir/LICENSE"
     assert_unique_basename jpacker-MIT-legacy.txt \
@@ -143,6 +151,10 @@ assert_compliance_install() {
     assert_unique_basename curl.txt "$license_dir/curl.txt"
     assert_unique_basename nlohmann-json-MIT.txt \
         "$license_dir/nlohmann-json-MIT.txt"
+    assert_unique_basename tomlplusplus-MIT.txt \
+        "$license_dir/tomlplusplus-MIT.txt"
+    assert_unique_basename bjoern-hoehrmann-utf8-MIT.txt \
+        "$license_dir/bjoern-hoehrmann-utf8-MIT.txt"
     assert_unique_basename THIRD_PARTY_NOTICES.md \
         "$doc_dir/THIRD_PARTY_NOTICES.md"
     assert_unique_basename LICENSING.md "$doc_dir/LICENSING.md"
@@ -157,6 +169,8 @@ assert_compliance_absent() {
     assert_absent "$license_dir/jpacker-MIT-legacy.txt"
     assert_absent "$license_dir/curl.txt"
     assert_absent "$license_dir/nlohmann-json-MIT.txt"
+    assert_absent "$license_dir/tomlplusplus-MIT.txt"
+    assert_absent "$license_dir/bjoern-hoehrmann-utf8-MIT.txt"
     assert_absent "$doc_dir/THIRD_PARTY_NOTICES.md"
     assert_absent "$doc_dir/LICENSING.md"
 }
