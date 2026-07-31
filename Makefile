@@ -13,6 +13,8 @@ MANPAGE   := man/jpacker.8
 MANPAGE_IN := man/jpacker.8.in
 TEST_TARGET := build/tests/moguet-test
 APPLICATION_IDENTITY_TEST_TARGET := $(BUILD_DIR)/tests/application-identity-test
+LOCALIZATION_TEST_TARGET := $(BUILD_DIR)/tests/localization-test
+LOCALIZATION_MISSING_CATALOG_TEST_TARGET := $(BUILD_DIR)/tests/localization-missing-catalog-test
 XDG_PATHS_TEST_TARGET := $(BUILD_DIR)/tests/xdg-paths-test
 XDG_DIRECTORY_SAFETY_TEST_TARGET := $(BUILD_DIR)/tests/xdg-directory-safety-test
 XDG_STATE_LOG_TEST_TARGET := $(BUILD_DIR)/tests/xdg-state-log-test
@@ -76,6 +78,23 @@ FISHCOMPDIR ?= /usr/share/fish/vendor_completions.d
 MANDIR      ?= $(PREFIX)/share/man/man8
 LICENSEDIR  ?= $(PREFIX)/share/licenses/$(PACKAGE_NAME)
 DOCDIR      ?= $(PREFIX)/share/doc/$(PACKAGE_NAME)
+LOCALEDIR   ?= /usr/share/locale
+
+GETTEXT_DOMAIN := moguet
+PO_DIR := po
+POTFILES_FILE := $(PO_DIR)/POTFILES.in
+LINGUAS_FILE := $(PO_DIR)/LINGUAS
+POT_FILE := $(PO_DIR)/$(GETTEXT_DOMAIN).pot
+LINGUAS := $(strip $(shell sed 's/[[:space:]]*\#.*//' $(LINGUAS_FILE) 2>/dev/null))
+LOCALE_BUILD_DIR := $(BUILD_DIR)/locale
+MO_FILES := $(foreach locale,$(LINGUAS),$(LOCALE_BUILD_DIR)/$(locale)/LC_MESSAGES/$(GETTEXT_DOMAIN).mo)
+MOGUET_TEST_CATALOG_DIR := $(abspath $(LOCALE_BUILD_DIR))
+LOCALIZATION_MISSING_CATALOG_DIR := $(abspath $(BUILD_DIR)/tests/missing-locale)
+MOGUET_TEST_ZZ_PO := tests/fixtures/localization/zz.po
+MOGUET_TEST_ZZ_MO := $(LOCALE_BUILD_DIR)/zz/LC_MESSAGES/$(GETTEXT_DOMAIN).mo
+LOCALIZATION_INVALID_FORMAT_PO := tests/fixtures/localization/invalid-format.po
+MOGUET_TEST_BROKEN_MO := $(LOCALE_BUILD_DIR)/broken/LC_MESSAGES/$(GETTEXT_DOMAIN).mo
+LOCALIZATION_CONFIG_HEADER := $(BUILD_DIR)/generated/localization_config.hpp
 
 PROJECT_LICENSE_FILES := \
 	LICENSE \
@@ -94,10 +113,28 @@ CXXFLAGS  ?= -O2 -pipe
 LDFLAGS   ?=
 CPPFLAGS  ?=
 PKG_CONFIG ?= pkg-config
+XGETTEXT ?= xgettext
+MSGMERGE ?= msgmerge
+MSGFMT ?= msgfmt
 LIBALPM_CPPFLAGS = $(shell $(PKG_CONFIG) --cflags libalpm)
 LIBALPM_LDLIBS   = $(shell $(PKG_CONFIG) --libs libalpm)
-MY_CXXFLAGS := -std=c++20 -Wall -Wextra -DMOGUET_VERSION=\"$(VERSION)\"
+BASE_CXXFLAGS := -std=c++20 -Wall -Wextra -DMOGUET_VERSION=\"$(VERSION)\"
+MY_CXXFLAGS = $(BASE_CXXFLAGS) -I$(BUILD_DIR)/generated
 MY_LDLIBS   := -lcurl
+XGETTEXT_OPTIONS := \
+	--language=C++ \
+	--from-code=UTF-8 \
+	--keyword=translate_message:1 \
+	--keyword=translate_plural_message:1,2 \
+	--keyword=format_translated_message:1 \
+	--keyword=format_translated_plural_message:1,2 \
+	--flag=format_translated_message:1:c++-format \
+	--flag=format_translated_plural_message:1:c++-format \
+	--flag=format_translated_plural_message:2:c++-format \
+	--add-comments=TRANSLATORS: \
+	--package-name=Moguet \
+	--package-version=$(VERSION) \
+	--no-wrap
 SRCS      := $(wildcard $(SRC_DIR)/*.cpp)
 HEADERS   := $(wildcard $(SRC_DIR)/*.hpp)
 COMMANDS_INSPECT_TEST_SRCS := \
@@ -683,8 +720,47 @@ LIBALPM_BUILD_TARGETS := \
 	$(UPGRADE_BASELINE_METADATA_TEST_TARGET)
 
 .PHONY: all check-libalpm clean check-upgrade-all-plan-link-firewall check-system-source-upgrade-link-firewall check-aur-update-execution-runner-link-firewall check-aur-update-operation-result-link-firewall check-filtered-aur-update-operation-link-firewall check-upgrade-all-operation-link-firewall check-upgrade-all-command-link-firewall check-dependency-plan-model-link-firewall check-build-plan-artifact-target-projection-link-firewall check-artifact-selection-model-link-firewall check-artifact-identity-selection-link-firewall check-multiple-artifact-workspace-link-firewall check-multiple-artifact-identity-link-firewall check-package-base-artifact-install-plan-link-firewall check-package-base-artifact-install-executor-link-firewall check-separated-package-base-source-build-link-firewall test test-internal-identity test-application-identity test-xdg-paths test-xdg-directory-safety test-xdg-state-log test-trusted-cache test-runtime-identity test-app-config test-user-config test-package-identifier test-package-metadata test-package-metadata-integration test-repository-query test-shell-words test-source-environment test-artifact-workspace test-multiple-artifact-workspace test-artifact-identity test-multiple-artifact-identity test-artifact-install-executor test-package-base-artifact-install-plan test-package-base-artifact-install-executor test-separated-source-build test-separated-package-base-source-build test-production-source-build test-process-capture test-aur-update-plan test-upgrade-all-plan test-system-source-upgrade test-aur-update-query test-aur-update-command test-upgrade-all-command test-aur-update-execution-preflight test-aur-update-execution-preflight-integration test-aur-update-execution-preparation test-aur-update-execution-runner test-aur-update-operation-result test-filtered-aur-update-operation test-upgrade-all-operation test-dependency-plan-model test-build-plan-artifact-target-projection test-artifact-install-plan test-artifact-selection-model test-artifact-identity-selection test-command-stub-contract test-markdown-links test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-commands-inspect test-commands-source-maintenance test-commands-sync test-conflicts-replaces test-install-layout test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check install uninstall
+.PHONY: FORCE catalogs check-catalogs check-localization-config check-pot update-po update-pot test-localization
 
-all: $(TARGET) $(MANPAGE)
+all: $(TARGET) $(MANPAGE) catalogs
+
+check-localization-config:
+	@case '$(LOCALEDIR)' in \
+		/*) ;; \
+		*) echo "error: LOCALEDIR must be an absolute path: $(LOCALEDIR)" >&2; exit 1 ;; \
+	esac
+	@test -n "$(LINGUAS)" || { \
+		echo "error: $(LINGUAS_FILE) must declare at least one locale" >&2; \
+		exit 1; \
+	}
+	@set -e; for locale in $(LINGUAS); do \
+		case "$$locale" in \
+			.|..|*[!A-Za-z0-9_.@-]*) \
+				echo "error: invalid locale token in $(LINGUAS_FILE): $$locale" >&2; \
+				exit 1 ;; \
+		esac; \
+		test -f "$(PO_DIR)/$$locale.po" || { \
+			echo "error: missing catalog source: $(PO_DIR)/$$locale.po" >&2; \
+			exit 1; \
+		}; \
+	done
+
+$(LOCALIZATION_CONFIG_HEADER): FORCE | check-localization-config
+	@mkdir -p $(dir $@)
+	@set -eu; \
+		tmp_file='$@.tmp'; \
+		rm -f "$$tmp_file"; \
+		trap 'rm -f "$$tmp_file"' EXIT HUP INT TERM; \
+		printf '%s\n' \
+			'#pragma once' \
+			'' \
+			'#define MOGUET_LOCALE_DIRECTORY "$(LOCALEDIR)"' \
+			> "$$tmp_file"; \
+		if ! cmp -s "$$tmp_file" "$@"; then \
+			mv "$$tmp_file" "$@"; \
+		fi
+
+FORCE:
 
 check-libalpm:
 	@test -n "$(strip $(PKG_CONFIG))" && command -v "$(firstword $(PKG_CONFIG))" >/dev/null 2>&1 || { \
@@ -701,7 +777,8 @@ check-libalpm:
 		exit 1; \
 	}
 
-$(OBJS) $(LIBALPM_BUILD_TARGETS): | check-libalpm
+$(OBJS) $(LIBALPM_BUILD_TARGETS): | check-libalpm check-localization-config
+$(BUILD_DIR)/localization.o $(LIBALPM_BUILD_TARGETS): $(LOCALIZATION_CONFIG_HEADER)
 
 $(TARGET): $(OBJS)
 	@echo ":: Linking $@"
@@ -716,6 +793,59 @@ $(MANPAGE): $(MANPAGE_IN) $(VERSION_FILE)
 	@echo ":: Generating $@ (v$(VERSION))"
 	sed 's/@VERSION@/$(VERSION)/g' $(MANPAGE_IN) > $@
 
+catalogs: check-localization-config $(MO_FILES)
+
+$(LOCALE_BUILD_DIR)/%/LC_MESSAGES/$(GETTEXT_DOMAIN).mo: $(PO_DIR)/%.po
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling message catalog $<"
+	@set -eu; \
+		tmp_file='$@.tmp'; \
+		rm -f "$$tmp_file"; \
+		trap 'rm -f "$$tmp_file"' EXIT HUP INT TERM; \
+		$(MSGFMT) --check --check-format --check-domain \
+			--output-file="$$tmp_file" "$<"; \
+		mv "$$tmp_file" "$@"
+
+check-catalogs: check-localization-config
+	@set -e; for locale in $(LINGUAS); do \
+		$(MSGFMT) --check --check-format --check-domain \
+			--output-file=/dev/null "$(PO_DIR)/$$locale.po"; \
+	done
+
+update-pot: $(POTFILES_FILE) $(VERSION_FILE)
+	@mkdir -p $(BUILD_DIR)/po
+	@echo ":: Updating $(POT_FILE)"
+	@set -eu; \
+		tmp_file='$(BUILD_DIR)/po/$(GETTEXT_DOMAIN).pot.tmp'; \
+		rm -f "$$tmp_file"; \
+		trap 'rm -f "$$tmp_file"' EXIT HUP INT TERM; \
+		$(XGETTEXT) $(XGETTEXT_OPTIONS) \
+			--files-from=$(POTFILES_FILE) --output="$$tmp_file"; \
+		mv "$$tmp_file" "$(POT_FILE)"
+
+update-po: update-pot check-localization-config
+	@set -e; for locale in $(LINGUAS); do \
+		$(MSGMERGE) --update --backup=none --no-wrap \
+			"$(PO_DIR)/$$locale.po" "$(POT_FILE)"; \
+	done
+
+check-pot: $(POT_FILE) $(POTFILES_FILE) $(VERSION_FILE)
+	@mkdir -p $(BUILD_DIR)/po-check
+	@echo ":: Checking $(POT_FILE) extraction drift"
+	@set -eu; \
+		candidate='$(BUILD_DIR)/po-check/$(GETTEXT_DOMAIN).pot'; \
+		candidate_normalized="$$candidate.normalized"; \
+		tracked_normalized='$(BUILD_DIR)/po-check/tracked-$(GETTEXT_DOMAIN).pot.normalized'; \
+		$(XGETTEXT) $(XGETTEXT_OPTIONS) \
+			--files-from=$(POTFILES_FILE) --output="$$candidate"; \
+		sed '/^"POT-Creation-Date:/d' "$$candidate" > "$$candidate_normalized"; \
+		sed '/^"POT-Creation-Date:/d' "$(POT_FILE)" > "$$tracked_normalized"; \
+		if ! cmp -s "$$tracked_normalized" "$$candidate_normalized"; then \
+			diff -u "$$tracked_normalized" "$$candidate_normalized" || true; \
+			echo "error: $(POT_FILE) is stale; run 'make update-pot'" >&2; \
+			exit 1; \
+		fi
+
 clean:
 	@echo ":: Cleaning up"
 	rm -rf $(BUILD_DIR)
@@ -728,6 +858,46 @@ $(APPLICATION_IDENTITY_TEST_TARGET): tests/application_identity_test.cpp $(SRC_D
 		-I$(SRC_DIR) \
 		tests/application_identity_test.cpp \
 		-o $@
+
+$(LOCALIZATION_TEST_TARGET): tests/localization_test.cpp $(SRC_DIR)/localization.cpp $(SRC_DIR)/localization.hpp $(SRC_DIR)/application_identity.hpp $(VERSION_FILE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling localization test binary"
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(BASE_CXXFLAGS) \
+		-DMOGUET_LOCALE_DIRECTORY=\"$(MOGUET_TEST_CATALOG_DIR)\" \
+		-I$(SRC_DIR) \
+		tests/localization_test.cpp $(SRC_DIR)/localization.cpp \
+		-o $@
+
+$(LOCALIZATION_MISSING_CATALOG_TEST_TARGET): tests/localization_test.cpp $(SRC_DIR)/localization.cpp $(SRC_DIR)/localization.hpp $(SRC_DIR)/application_identity.hpp $(VERSION_FILE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling missing-catalog localization test binary"
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(BASE_CXXFLAGS) \
+		-DMOGUET_LOCALE_DIRECTORY=\"$(LOCALIZATION_MISSING_CATALOG_DIR)\" \
+		-I$(SRC_DIR) \
+		tests/localization_test.cpp $(SRC_DIR)/localization.cpp \
+		-o $@
+
+$(MOGUET_TEST_ZZ_MO): $(MOGUET_TEST_ZZ_PO)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling test-only message catalog $<"
+	@set -eu; \
+		tmp_file='$@.tmp'; \
+		rm -f "$$tmp_file"; \
+		trap 'rm -f "$$tmp_file"' EXIT HUP INT TERM; \
+		$(MSGFMT) --check --check-format --check-domain \
+			--output-file="$$tmp_file" "$<"; \
+		mv "$$tmp_file" "$@"
+
+$(MOGUET_TEST_BROKEN_MO): $(LOCALIZATION_INVALID_FORMAT_PO)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling intentionally invalid runtime catalog $<"
+	@set -eu; \
+		tmp_file='$@.tmp'; \
+		rm -f "$$tmp_file"; \
+		trap 'rm -f "$$tmp_file"' EXIT HUP INT TERM; \
+		$(MSGFMT) --check-header --check-domain \
+			--output-file="$$tmp_file" "$<"; \
+		mv "$$tmp_file" "$@"
 
 $(XDG_PATHS_TEST_TARGET): tests/xdg_paths_test.cpp $(SRC_DIR)/xdg_paths.cpp $(SRC_DIR)/xdg_paths.hpp $(SRC_DIR)/application_identity.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
@@ -1145,6 +1315,15 @@ test-internal-identity:
 
 test-application-identity: $(APPLICATION_IDENTITY_TEST_TARGET)
 	$(abspath $(APPLICATION_IDENTITY_TEST_TARGET)) "$(VERSION)"
+
+test-localization: check-catalogs $(LOCALIZATION_TEST_TARGET) $(LOCALIZATION_MISSING_CATALOG_TEST_TARGET) $(MO_FILES) $(MOGUET_TEST_ZZ_MO) $(MOGUET_TEST_BROKEN_MO) $(LOCALIZATION_INVALID_FORMAT_PO)
+	sh tests/test-localization.sh \
+		$(abspath $(LOCALIZATION_TEST_TARGET)) \
+		$(abspath $(LOCALIZATION_MISSING_CATALOG_TEST_TARGET)) \
+		$(MOGUET_TEST_CATALOG_DIR) \
+		$(LOCALIZATION_MISSING_CATALOG_DIR) \
+		$(abspath $(LOCALIZATION_INVALID_FORMAT_PO)) \
+		"$(MSGFMT)"
 
 test-xdg-paths: $(XDG_PATHS_TEST_TARGET)
 	$(abspath $(XDG_PATHS_TEST_TARGET))
@@ -1614,6 +1793,7 @@ test-pkgbuild-export: $(TEST_TARGET)
 test: \
 	test-internal-identity \
 	test-application-identity \
+	test-localization \
 	test-xdg-paths \
 	test-xdg-directory-safety \
 	test-xdg-state-log \
@@ -1672,7 +1852,7 @@ test: \
 	test-source-build \
 	test-source-selection
 
-release-check: test-internal-identity test-application-identity test-xdg-paths test-xdg-directory-safety test-xdg-state-log test-trusted-cache test-runtime-identity
+release-check: check-pot check-catalogs test-localization test-internal-identity test-application-identity test-xdg-paths test-xdg-directory-safety test-xdg-state-log test-trusted-cache test-runtime-identity
 	@echo ":: Checking release version consistency"
 	sh scripts/check-release-version.sh
 	@echo ":: Checking license compliance"
@@ -1682,9 +1862,16 @@ release-check: test-internal-identity test-application-identity test-xdg-paths t
 	@echo ":: Checking tracked Markdown links"
 	sh scripts/check-markdown-links.sh
 
-install: $(TARGET) $(MANPAGE) $(PROJECT_LICENSE_FILES) $(COMPLIANCE_DOC_FILES)
+install: check-localization-config $(TARGET) $(MANPAGE) $(MO_FILES) $(PROJECT_LICENSE_FILES) $(COMPLIANCE_DOC_FILES)
 	@echo ":: Installing binary..."
 	install -Dm755 $(TARGET) $(DESTDIR)$(BINDIR)/$(TARGET)
+
+	@echo ":: Installing message catalogs..."
+	@set -e; for locale in $(LINGUAS); do \
+		install -Dm644 \
+			"$(LOCALE_BUILD_DIR)/$$locale/LC_MESSAGES/$(GETTEXT_DOMAIN).mo" \
+			"$(DESTDIR)$(LOCALEDIR)/$$locale/LC_MESSAGES/$(GETTEXT_DOMAIN).mo"; \
+	done
 
 	@echo ":: Installing configs..."
 	install -Dm644 config/jpacker.conf $(DESTDIR)$(SYSCONFDIR)/jpacker/jpacker.conf
@@ -1714,9 +1901,16 @@ install: $(TARGET) $(MANPAGE) $(PROJECT_LICENSE_FILES) $(COMPLIANCE_DOC_FILES)
 	install -Dm644 THIRD_PARTY_NOTICES.md $(DESTDIR)$(DOCDIR)/THIRD_PARTY_NOTICES.md
 	install -Dm644 docs/LICENSING.md $(DESTDIR)$(DOCDIR)/LICENSING.md
 
-uninstall:
+uninstall: check-localization-config
 	@echo ":: Removing binary..."
 	rm -f $(DESTDIR)$(BINDIR)/$(TARGET)
+
+	@echo ":: Removing message catalogs..."
+	@set -e; for locale in $(LINGUAS); do \
+		rm -f "$(DESTDIR)$(LOCALEDIR)/$$locale/LC_MESSAGES/$(GETTEXT_DOMAIN).mo"; \
+		rmdir "$(DESTDIR)$(LOCALEDIR)/$$locale/LC_MESSAGES" 2>/dev/null || true; \
+		rmdir "$(DESTDIR)$(LOCALEDIR)/$$locale" 2>/dev/null || true; \
+	done
 
 	@echo ":: Preserving configs and removing empty config directories..."
 	@rmdir $(DESTDIR)$(SYSCONFDIR)/jpacker/package.build 2>/dev/null || true

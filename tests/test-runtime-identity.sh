@@ -2,6 +2,12 @@
 
 set -eu
 
+# English identity assertions must not depend on an installed Moguet catalog
+# or the developer machine's ambient message locale.
+LC_ALL=C
+LANGUAGE=
+export LC_ALL LANGUAGE
+
 production_binary=$1
 root_test_binary=$2
 default_test_binary=$3

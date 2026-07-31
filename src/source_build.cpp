@@ -1,6 +1,7 @@
 #include "source_build.hpp"
 
 #include "app_config.hpp"
+#include "localization.hpp"
 #include "logging.hpp"
 #include "package_identifier.hpp"
 #include "persistent_checkout.hpp"
@@ -485,7 +486,9 @@ MakepkgBuildOptions resolve_makepkg_build_options(
     } else if(options.clean_build && has_artifact) {
         options.rebuild = true;
     } else if(has_artifact) {
-        options.rebuild = ask_user("Rebuild package?", PromptDefault::No, config);
+        options.rebuild = ask_user(
+                localization::translate_message("Rebuild package?"),
+                PromptDefault::No, config);
     }
 
     return options;
