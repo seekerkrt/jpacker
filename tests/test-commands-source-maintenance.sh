@@ -145,6 +145,7 @@ setup_case() {
     unset EMPTY
     unset PKGDEST
     unset EDITOR
+    unset VISUAL
 }
 
 run_ok() {

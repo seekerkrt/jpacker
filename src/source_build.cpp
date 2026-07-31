@@ -14,7 +14,6 @@
 #include <algorithm>
 #include <cctype>
 #include <cerrno>
-#include <cstdlib>
 #include <exception>
 #include <fcntl.h>
 #include <filesystem>
@@ -303,13 +302,11 @@ void review_build_files(
 
     log_review_targets(pkg_dir, install_scripts);
 
-    const char* env_editor = std::getenv("EDITOR");
-    std::string editor_cmd = (env_editor) ? std::string(env_editor) : config.editor;
-    bool        edited = false;
+    bool edited = false;
 
     if(ask_user("Edit PKGBUILD?", PromptDefault::No, config)) {
         require_safe_persistent_checkout_review_targets(checkout, install_scripts);
-        if(run_command(build_editor_command(editor_cmd, "PKGBUILD")) != 0) {
+        if(run_command(build_editor_command(config.editor, "PKGBUILD")) != 0) {
             throw std::runtime_error("Editor failed.");
         }
         require_safe_persistent_checkout_review_targets(checkout, install_scripts);
@@ -319,7 +316,7 @@ void review_build_files(
     for(const auto& install_script : install_scripts) {
         if(ask_user("Edit install script " + install_script.string() + "?", PromptDefault::No, config)) {
             require_safe_persistent_checkout_review_targets(checkout, install_scripts);
-            if(run_command(build_editor_command(editor_cmd, install_script)) != 0) {
+            if(run_command(build_editor_command(config.editor, install_script)) != 0) {
                 throw std::runtime_error("Editor failed.");
             }
             require_safe_persistent_checkout_review_targets(checkout, install_scripts);
