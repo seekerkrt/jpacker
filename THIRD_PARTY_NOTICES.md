@@ -35,6 +35,7 @@ Because no libalpm source or binary copy is included in the jpacker source or pa
 - **Provider:** The Arch Linux `nlohmann-json` package at build time.
 - **Bundled source tree:** No.
 - **Required notice:** [`LICENSES/nlohmann-json-MIT.txt`](LICENSES/nlohmann-json-MIT.txt) in the source tree; `${PREFIX}/share/licenses/jpacker/nlohmann-json-MIT.txt` after installation (`/usr/share/licenses/jpacker/nlohmann-json-MIT.txt` in the Arch package).
+- **UTF-8 decoder notice:** [`LICENSES/bjoern-hoehrmann-utf8-MIT.txt`](LICENSES/bjoern-hoehrmann-utf8-MIT.txt) covers the attributed decoder code in the compiled header closure.
 
 The audit used Arch `nlohmann-json` 3.12.0-2 and the matching upstream v3.12.0 tag. The C++20 include closure contained 46 nlohmann headers; every actual file carried `SPDX-License-Identifier: MIT`. The notice preserves the following copyright provenance found in compiled headers:
 
@@ -46,6 +47,20 @@ The audit used Arch `nlohmann-json` 3.12.0-2 and the matching upstream v3.12.0 t
 The upstream README records the Hedley origin as CC0-1.0. The actual v3.12.0 `thirdparty/hedley/hedley.hpp` file compiled by jpacker carries the Evan Nemerson copyright and an MIT SPDX identifier, and it matches the installed Arch header. This provenance is retained here; jpacker does not bundle a separate Hedley source copy or rely on a separately redistributed CC0 work, so a CC0 full text is not installed.
 
 `detail/meta/cpp_future.hpp` also contains an Apache-2.0-attributed Abseil fallback for pre-C++14 builds. jpacker is built as C++20, where that fallback branch is excluded from the preprocessed source. No Abseil fallback code or nlohmann upstream test/tool component is compiled or bundled, so an Apache-2.0 full text is not installed for the current build. Changing the C++ baseline, vendoring headers, or using an amalgamated header requires this decision to be re-audited.
+
+### toml++
+
+- **Purpose:** Parse TOML syntax for the typed user configuration model.
+- **Relationship:** The system `<toml++/toml.hpp>` header is used at build time with toml++'s default header-only configuration. Its parser implementation is compiled into the jpacker binary. jpacker does not use the Arch package's shared-library mode or link with `-ltomlplusplus`.
+- **License for the compiled header closure:** MIT.
+- **Provider:** The Arch Linux `tomlplusplus` package at build time.
+- **Bundled source tree:** No.
+- **Required notice:** [`LICENSES/tomlplusplus-MIT.txt`](LICENSES/tomlplusplus-MIT.txt) in the source tree; `${PREFIX}/share/licenses/jpacker/tomlplusplus-MIT.txt` after installation (`/usr/share/licenses/jpacker/tomlplusplus-MIT.txt` in the Arch package).
+- **UTF-8 decoder notice:** [`LICENSES/bjoern-hoehrmann-utf8-MIT.txt`](LICENSES/bjoern-hoehrmann-utf8-MIT.txt) in the source tree; `${PREFIX}/share/licenses/jpacker/bjoern-hoehrmann-utf8-MIT.txt` after installation (`/usr/share/licenses/jpacker/bjoern-hoehrmann-utf8-MIT.txt` in the Arch package).
+
+The offline audit used Arch `tomlplusplus` 3.4.0-2 and the project's C++20 build flags. With no toml++ configuration macro defined, the effective configuration selected `TOML_HEADER_ONLY=1`, `TOML_IMPLEMENTATION=1`, `TOML_SHARED_LIB=0`, and `TOML_EXCEPTIONS=1`. The `<toml++/toml.hpp>` include closure contained 49 toml++ files. Forty-seven carried the MIT SPDX identifier and Mark Gillard notice; the reusable `header_start.hpp` / `header_end.hpp` implementation fragments carried no individual license marker. `unicode.hpp` records that its compiled UTF-8 decoder is based on Bjoern Hoehrmann's DFA decoder and retains his 2008-2009 copyright attribution. The separate Hoehrmann permission notice is preserved from the decoder's primary source.
+
+`LICENSES/tomlplusplus-MIT.txt` is an exact copy of the MIT notice installed by the audited Arch package. A parse/link probe succeeded without `-ltomlplusplus`, and its ELF had no libtomlplusplus `DT_NEEDED` entry. Changing toml++ compile-mode macros, the exception or C++ mode, vendoring headers, or using a different package/header form requires this decision to be re-audited.
 
 ## External programs invoked
 
@@ -77,7 +92,7 @@ On the audited Arch system, the jpacker ELF had direct `DT_NEEDED` entries for `
 ## Distribution notes
 
 - The jpacker repository contains no vendored third-party library source, library archive, shared library binary, or third-party test fixture.
-- libalpm and libcurl are obtained as dynamic dependencies from Arch system packages. nlohmann-json is obtained as a system build dependency.
+- libalpm and libcurl are obtained as dynamic dependencies from Arch system packages. nlohmann-json and toml++ are obtained as system build dependencies.
 - For v1.15.0 and later, `make install` is the single owner of the audited license and notice layout used by the Arch `PKGBUILD`. When packaging a pre-v1.15 tag whose Makefile predates that layout, `PKGBUILD` installs only the tag's legacy MIT `LICENSE` as a compatibility fallback.
 - External program license texts are not duplicated because no copy of those programs is distributed with jpacker.
-- Vendoring, static linking, binary bundling, a new linked/compiled dependency, a different nlohmann header form, or a project-built binary distribution requires a fresh notice and source-availability audit.
+- Vendoring, static linking, binary bundling, a new linked/compiled dependency, a different nlohmann-json or toml++ header form, or a project-built binary distribution requires a fresh notice and source-availability audit.

@@ -99,6 +99,8 @@ for file in \
     LICENSES/jpacker-MIT-legacy.txt \
     LICENSES/curl.txt \
     LICENSES/nlohmann-json-MIT.txt \
+    LICENSES/tomlplusplus-MIT.txt \
+    LICENSES/bjoern-hoehrmann-utf8-MIT.txt \
     THIRD_PARTY_NOTICES.md \
     docs/LICENSING.md
 do
@@ -125,10 +127,15 @@ check_sha256 LICENSES/curl.txt \
     82f2f4427d6545ee5aaac4f0b80428da6cc8ba41c2cf5da3a03680ec327b9681
 check_sha256 LICENSES/nlohmann-json-MIT.txt \
     46a65cffd1ea955132d95a8dd921640714a8d6b537d2e4e482d31145ae95b603
+check_sha256 LICENSES/tomlplusplus-MIT.txt \
+    529bc3900a9571e49db285b0df432397e70b881cc3bf48de6667ae74ff4b06d8
+check_sha256 LICENSES/bjoern-hoehrmann-utf8-MIT.txt \
+    065815f7f977a41b56bae26957d355a318a6962efcff0e789824d24b29274a35
 
 for installed_notice in \
     /usr/share/licenses/curl/COPYING \
-    /usr/share/licenses/nlohmann-json/LICENSE.MIT
+    /usr/share/licenses/nlohmann-json/LICENSE.MIT \
+    /usr/share/licenses/tomlplusplus/LICENSE
 do
     if [ -f "$installed_notice" ]; then
         case "$installed_notice" in
@@ -137,6 +144,9 @@ do
                 ;;
             */nlohmann-json/LICENSE.MIT)
                 repository_notice=LICENSES/nlohmann-json-MIT.txt
+                ;;
+            */tomlplusplus/LICENSE)
+                repository_notice=LICENSES/tomlplusplus-MIT.txt
                 ;;
         esac
         cmp -s "$repository_notice" "$installed_notice" ||
@@ -185,7 +195,8 @@ for heading in \
     "## Distribution notes" \
     "### libalpm" \
     "### libcurl" \
-    "### nlohmann-json"
+    "### nlohmann-json" \
+    "### toml++"
 do
     require_text THIRD_PARTY_NOTICES.md "$heading"
 done
@@ -193,6 +204,8 @@ require_text THIRD_PARTY_NOTICES.md '`GPL-2.0-or-later`'
 require_text THIRD_PARTY_NOTICES.md '`curl` (SPDX identifier)'
 require_text THIRD_PARTY_NOTICES.md '[`LICENSES/curl.txt`](LICENSES/curl.txt)'
 require_text THIRD_PARTY_NOTICES.md '[`LICENSES/nlohmann-json-MIT.txt`](LICENSES/nlohmann-json-MIT.txt)'
+require_text THIRD_PARTY_NOTICES.md '[`LICENSES/tomlplusplus-MIT.txt`](LICENSES/tomlplusplus-MIT.txt)'
+require_text THIRD_PARTY_NOTICES.md '[`LICENSES/bjoern-hoehrmann-utf8-MIT.txt`](LICENSES/bjoern-hoehrmann-utf8-MIT.txt)'
 require_text THIRD_PARTY_NOTICES.md "Every entry below is a separately installed program"
 require_text THIRD_PARTY_NOTICES.md "It is not linked into jpacker and is not bundled with jpacker."
 
@@ -201,7 +214,7 @@ linked_headings=$(awk '
     /^## / && in_section { exit }
     in_section && /^### / { print }
 ' THIRD_PARTY_NOTICES.md)
-expected_linked_headings=$(printf '%s\n' '### libalpm' '### libcurl' '### nlohmann-json')
+expected_linked_headings=$(printf '%s\n' '### libalpm' '### libcurl' '### nlohmann-json' '### toml++')
 [ "$linked_headings" = "$expected_linked_headings" ] ||
     fail "linked/compiled component headings contain an unexpected classification."
 

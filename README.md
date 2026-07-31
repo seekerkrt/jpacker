@@ -77,6 +77,7 @@ behavior、architecture、dependency、public contractに関わる変更や大�
 * `git`
 * `curl`
 * `nlohmann-json`
+* `tomlplusplus`
 * `pacman`（`pacman-conf` と `libalpm` を提供）
 * `pkgconf`（Arch Linux の `pkg-config` provider）
 
@@ -427,7 +428,7 @@ default では logs は次の path に保存されます。
 * linked/compiled componentとexternal program: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
 * v1.14.0以前のMIT全文: [LICENSES/jpacker-MIT-legacy.txt](LICENSES/jpacker-MIT-legacy.txt)
 
-jpackerはlibalpmとlibcurlへ直接動的linkし、nlohmann-jsonのsystem header実装をbinaryへcompileします。一方、pacman、pacman-conf、makepkg、git、vercmp等はcommand lineとprocess boundaryを介して呼び出す別programであり、jpackerへlinkまたはbundleしません。
+jpackerはlibalpmとlibcurlへ直接動的linkし、nlohmann-jsonとtoml++のsystem header実装をbinaryへcompileします。一方、pacman、pacman-conf、makepkg、git、vercmp等はcommand lineとprocess boundaryを介して呼び出す別programであり、jpackerへlinkまたはbundleしません。
 
 ---
 
@@ -504,6 +505,7 @@ This is a personal project, so response times, reviews, and merges aren't guaran
 * `git`
 * `curl`
 * `nlohmann-json`
+* `tomlplusplus`
 * `pacman` (provides `pacman-conf` and `libalpm`)
 * `pkgconf` (the Arch Linux `pkg-config` provider)
 
@@ -856,4 +858,4 @@ The current GPL-licensed development series and v1.15.0 or later releases are di
 * Linked/compiled components and external programs: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
 * Historical MIT text for v1.14.0 and earlier: [LICENSES/jpacker-MIT-legacy.txt](LICENSES/jpacker-MIT-legacy.txt)
 
-jpacker directly and dynamically links libalpm and libcurl, and compiles the system nlohmann-json headers into its binary. In contrast, pacman, pacman-conf, makepkg, git, vercmp, and the other programs listed in the notices are separate programs invoked across a command-line/process boundary; they are not linked into or bundled with jpacker.
+jpacker directly and dynamically links libalpm and libcurl, and compiles the system nlohmann-json and toml++ headers into its binary. In contrast, pacman, pacman-conf, makepkg, git, vercmp, and the other programs listed in the notices are separate programs invoked across a command-line/process boundary; they are not linked into or bundled with jpacker.
