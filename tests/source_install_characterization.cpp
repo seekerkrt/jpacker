@@ -22,8 +22,8 @@ namespace {
 
 AppConfig characterization_config() {
     AppConfig config;
-    config.no_edit = true;
-    config.no_diff = true;
+    config.user_config.review.pkgbuild = ReviewPolicy::Skip;
+    config.user_config.review.diff = ReviewPolicy::Skip;
     config.no_confirm = true;
     return config;
 }

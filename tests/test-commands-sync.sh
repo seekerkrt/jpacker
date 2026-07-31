@@ -25,14 +25,14 @@ setup_case() {
     case_dir=$tmp_dir/cases/$case_name
     command_log=$case_dir/commands.log
     output_file=$case_dir/output
-    config_file=$case_dir/jpacker.conf
+    config_file=$case_dir/config.toml
 
     mkdir -p \
         "$case_dir/home" "$case_dir/xdg-state" "$case_dir/work" \
         "$case_dir/xdg-cache" "$case_dir/package.build"
     : > "$command_log"
     : > "$output_file"
-    : > "$config_file"
+    printf '%s\n' 'schema_version = 1' > "$config_file"
 
     export HOME=$case_dir/home
     export XDG_STATE_HOME=$case_dir/xdg-state
@@ -690,7 +690,6 @@ assert_cache_entry_absent plan-missing
 
 setup_case auto-install-later-source-pkgdest-before-official-transaction
 printf 'PKGDEST=\n' > "$MOGUET_TEST_PACKAGE_BUILD_DIR/source-b"
-printf 'LOGFILE=%s\n' "$case_dir/jpacker.log" > "$config_file"
 export MOGUET_TEST_PACMAN_REPO_PACKAGES='official-a'
 mkdir -p "$XDG_CACHE_HOME/moguet/preflight-sentinel"
 printf 'stable auto preflight fixture\n' > \

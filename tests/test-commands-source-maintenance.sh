@@ -71,7 +71,7 @@ setup_case() {
     preference_dir=$case_dir/package.build
     cache_root=$case_dir/xdg-cache/moguet
     sudo_failures=$case_dir/sudo-failures
-    config_file=$case_dir/jpacker.conf
+    config_file=$case_dir/config.toml
     package_metadata_state=$case_dir/package-metadata-state
 
     mkdir -p "$case_dir/home" "$case_dir/xdg-cache" "$preference_dir"
@@ -79,10 +79,7 @@ setup_case() {
     : > "$request_log"
     : > "$sudo_failures"
     : > "$package_metadata_state"
-    {
-        printf 'EDITOR=moguet-test-editor --config\n'
-        printf 'LOGFILE=%s\n' "$case_dir/jpacker.log"
-    } > "$config_file"
+    printf '%s\n' 'schema_version = 1' > "$config_file"
 
     export HOME=$case_dir/home
     export XDG_CACHE_HOME=$case_dir/xdg-cache
@@ -103,6 +100,7 @@ setup_case() {
     unset MOGUET_TEST_PACMAN_Q_EXIT_CODE
     unset MOGUET_TEST_PACMAN_QM_OUTPUT
     unset MOGUET_TEST_APP_CONFIG_CASE
+    unset MOGUET_TEST_RELEASE_STATE_LOG_BEFORE_DISPATCH
     unset MOGUET_TEST_GIT_REMOTE_URL
     unset MOGUET_TEST_GIT_CLONE_EXIT_CODE
     unset MOGUET_TEST_GIT_CLONE_FAIL_DESTINATION
@@ -867,18 +865,19 @@ assert_file_equals "$case_dir/alpha.expected" "$preference_dir/beta"
 echo "  ok: P0-2 cmd_add_src"
 
 # P0-3: edit-src pins the user-opened source fd and gives root only /dev/stdin + destination.
-setup_case edit-src-config-editor
+setup_case edit-src-editor-arguments
 printf 'CFLAGS=-Oexisting\n' > "$preference_dir/alpha"
 printf 'CFLAGS=-Oexisting\n' > "$case_dir/existing.expected"
+export EDITOR='moguet-test-editor --environment'
 export MOGUET_TEST_SOURCE_MAINTENANCE_EDITOR_SNAPSHOT_FILE=$case_dir/editor.snapshot
 export MOGUET_TEST_SOURCE_MAINTENANCE_EDITOR_APPEND_LINE='LDFLAGS=-Wl,--as-needed'
 run_ok edit-src alpha
 editor_command=$(sed -n '1p' "$command_log")
 case $editor_command in
-    "moguet-test-editor --config /tmp/moguet-edit-src-alpha."??????)
+    "moguet-test-editor --environment /tmp/moguet-edit-src-alpha."??????)
         ;;
     *)
-        echo "unexpected config editor command: $editor_command" >&2
+        echo "unexpected editor command: $editor_command" >&2
         cat "$command_log" >&2
         exit 1
         ;;
@@ -907,22 +906,6 @@ if [ "$(stat -c '%a' "$preference_dir/alpha")" != "644" ]; then
     exit 1
 fi
 assert_path_absent "$edit_temp_path"
-
-setup_case edit-src-environment-editor
-printf 'CFLAGS=-Oexisting\n' > "$preference_dir/alpha"
-export EDITOR='moguet-test-editor --environment'
-run_ok edit-src alpha
-editor_command=$(sed -n '1p' "$command_log")
-case $editor_command in
-    "moguet-test-editor --environment /tmp/moguet-edit-src-alpha."??????)
-        ;;
-    *)
-        echo "EDITOR did not override configured editor: $editor_command" >&2
-        cat "$command_log" >&2
-        exit 1
-        ;;
-esac
-assert_command_at 2 "sudo install -Dm644 -- /dev/stdin $preference_dir/alpha"
 
 setup_case edit-src-create-missing-preference
 export EDITOR=moguet-test-editor
@@ -1086,11 +1069,8 @@ assert_path_absent "$second_temp_path"
 assert_contains "EDITED=yes" "$preference_dir/second"
 
 setup_case edit-src-source-fd-zero
-: > "$case_dir/log-parent"
-{
-    printf 'EDITOR=moguet-test-editor\n'
-    printf 'LOGFILE=%s\n' "$case_dir/log-parent/jpacker.log"
-} > "$config_file"
+export EDITOR=moguet-test-editor
+export MOGUET_TEST_RELEASE_STATE_LOG_BEFORE_DISPATCH=1
 printf 'FD_ZERO\000PAYLOAD' > "$case_dir/replacement-content"
 export MOGUET_TEST_SOURCE_MAINTENANCE_EDITOR_REPLACEMENT_KIND=regular
 export MOGUET_TEST_SOURCE_MAINTENANCE_EDITOR_REPLACEMENT_SOURCE=$case_dir/replacement-content

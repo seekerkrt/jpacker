@@ -30,7 +30,7 @@ setup_case() {
     stdout_file=$case_dir/stdout
     stderr_file=$case_dir/stderr
     command_log=$case_dir/events.log
-    config_file=$case_dir/jpacker.conf
+    config_file=$case_dir/config.toml
     foreign_inventory_file=$case_dir/foreign-packages
 
     mkdir -p \
@@ -40,7 +40,7 @@ setup_case() {
     : > "$stdout_file"
     : > "$stderr_file"
     : > "$command_log"
-    : > "$config_file"
+    printf '%s\n' 'schema_version = 1' > "$config_file"
     : > "$foreign_inventory_file"
 
     export HOME=$case_dir/home

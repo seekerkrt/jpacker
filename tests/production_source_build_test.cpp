@@ -662,8 +662,8 @@ void expect_required_target(
 
 AppConfig noninteractive_config() {
     AppConfig config;
-    config.no_edit = true;
-    config.no_diff = true;
+    config.user_config.review.pkgbuild = ReviewPolicy::Skip;
+    config.user_config.review.diff = ReviewPolicy::Skip;
     return config;
 }
 
@@ -752,8 +752,12 @@ std::string expected_build_command(
         const fs::path& workspace_path) {
     std::vector<std::string> arguments{"makepkg", "-sc"};
     if(scenario.config.no_confirm) arguments.emplace_back("--noconfirm");
-    if(scenario.config.rebuild) arguments.emplace_back("-f");
-    if(scenario.config.clean_build) arguments.emplace_back("-C");
+    if(scenario.config.user_config.build.mode == BuildMode::Rebuild) {
+        arguments.emplace_back("-f");
+    }
+    if(scenario.config.user_config.build.mode == BuildMode::Clean) {
+        arguments.emplace_back("-C");
+    }
     return source_environment_prefix(unit, workspace_path) +
            shell_join(arguments);
 }
@@ -2631,8 +2635,7 @@ void test_multi_unit_options_roles_and_order(
         const TemporaryProductionEnvironment& environment) {
     AppConfig config = noninteractive_config();
     config.no_confirm = true;
-    config.rebuild = true;
-    config.clean_build = true;
+    config.user_config.build.mode = BuildMode::Clean;
     const BuildPlan plan = two_entry_plan();
     std::vector<ProductionSourceBuildWorkItem> work_items =
             prepare_aur_source_build_work_items(plan, false, true);

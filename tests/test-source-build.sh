@@ -49,7 +49,7 @@ setup_case() {
     command_log=$case_dir/commands.log
     editor_argv_log=$case_dir/editor-argv.log
     output_file=$case_dir/output
-    config_file=$case_dir/jpacker.conf
+    config_file=$case_dir/config.toml
     checkout_dir=$case_dir/xdg-cache/moguet/clean-root
     package_metadata_state=$case_dir/package-metadata-state
 
@@ -59,6 +59,7 @@ setup_case() {
     : > "$command_log"
     : > "$editor_argv_log"
     : > "$package_metadata_state"
+    printf '%s\n' 'schema_version = 1' > "$config_file"
     export HOME=$case_dir/home
     export XDG_STATE_HOME=$case_dir/xdg-state
     export XDG_CACHE_HOME=$case_dir/xdg-cache
@@ -128,14 +129,6 @@ write_srcinfo() {
         printf 'pkgver = %s\n' "$version"
         printf 'pkgrel = %s\n' "$release"
     } > "$checkout_dir/.SRCINFO"
-}
-
-write_editor_config() {
-    editor_command=$1
-    {
-        printf 'EDITOR=%s\n' "$editor_command"
-        printf '%s\n' 'NODIFF=true'
-    } > "$config_file"
 }
 
 run_ok() {
@@ -475,43 +468,16 @@ assert_command "makepkg -sc"
 assert_command_before "git clone $official_url clean-root" "makepkg --packagelist"
 assert_checkout_retained
 
-# Issue #226: configured editor / environment overrideの優先順位と実argv境界を固定する。
-setup_case editor-configured-argv
+# Issue #226: EDITOR環境変数の実argv境界を固定する。
+setup_case editor-environment-argv
 create_existing_checkout
 printf 'post_install() { :; }\n' > "$checkout_dir/-option.install"
-write_editor_config 'moguet-test-editor --configured-option'
-export MOGUET_TEST_CONFIG_FILE="$config_file"
-export MOGUET_TEST_EDITOR_ARGV_LOG="$editor_argv_log"
-run_config_tty_ok 'y\ny\ny\n' build clean-root
-assert_command "moguet-test-editor --configured-option ./PKGBUILD"
-assert_command "moguet-test-editor --configured-option ./-option.install"
-assert_command "makepkg --packagelist"
-assert_command "makepkg -sc"
-assert_command_before "moguet-test-editor --configured-option ./PKGBUILD" "moguet-test-editor --configured-option ./-option.install"
-assert_command_before "moguet-test-editor --configured-option ./-option.install" "makepkg --packagelist"
-assert_editor_argv_log 'argv-begin
-arg[0]=<--configured-option>
-arg[1]=<./PKGBUILD>
-target=<./PKGBUILD>
-argv-end
-argv-begin
-arg[0]=<--configured-option>
-arg[1]=<./-option.install>
-target=<./-option.install>
-argv-end'
-
-setup_case editor-environment-override-argv
-create_existing_checkout
-printf 'post_install() { :; }\n' > "$checkout_dir/-option.install"
-write_editor_config 'moguet-test-editor --configured-option'
 export MOGUET_TEST_CONFIG_FILE="$config_file"
 export MOGUET_TEST_EDITOR_ARGV_LOG="$editor_argv_log"
 export EDITOR='moguet-test-editor --environment-option'
 run_config_tty_ok 'y\ny\ny\n' build clean-root
 assert_command "moguet-test-editor --environment-option ./PKGBUILD"
 assert_command "moguet-test-editor --environment-option ./-option.install"
-assert_command_prefix_absent "moguet-test-editor --configured-option"
-assert_not_contains "--configured-option" "$editor_argv_log"
 assert_command "makepkg --packagelist"
 assert_command "makepkg -sc"
 assert_command_before "moguet-test-editor --environment-option ./PKGBUILD" "moguet-test-editor --environment-option ./-option.install"
@@ -527,18 +493,18 @@ arg[1]=<./-option.install>
 target=<./-option.install>
 argv-end'
 
-setup_case editor-configured-failure
+setup_case editor-environment-failure
 create_existing_checkout
 printf 'post_install() { :; }\n' > "$checkout_dir/-option.install"
-write_editor_config 'moguet-test-editor --configured-option'
 export MOGUET_TEST_CONFIG_FILE="$config_file"
 export MOGUET_TEST_EDITOR_ARGV_LOG="$editor_argv_log"
+export EDITOR='moguet-test-editor --environment-option'
 export MOGUET_TEST_EDITOR_EXIT_CODE=42
 run_config_tty_fail 'y\n' build clean-root
 assert_contains "Build Error: Failed while building/installing PackageBase clean-root (clean-root): Editor failed." "$output_file"
 assert_not_contains "Edit install script -option.install?" "$output_file"
-assert_command "moguet-test-editor --configured-option ./PKGBUILD"
-assert_command_absent "moguet-test-editor --configured-option ./-option.install"
+assert_command "moguet-test-editor --environment-option ./PKGBUILD"
+assert_command_absent "moguet-test-editor --environment-option ./-option.install"
 assert_command_prefix_absent "makepkg "
 assert_checkout_retained
 if [ ! -f "$checkout_dir/-option.install" ] || [ -L "$checkout_dir/-option.install" ]; then
@@ -546,7 +512,7 @@ if [ ! -f "$checkout_dir/-option.install" ] || [ -L "$checkout_dir/-option.insta
     exit 1
 fi
 assert_editor_argv_log 'argv-begin
-arg[0]=<--configured-option>
+arg[0]=<--environment-option>
 arg[1]=<./PKGBUILD>
 target=<./PKGBUILD>
 argv-end'

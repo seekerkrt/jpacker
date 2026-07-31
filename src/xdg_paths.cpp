@@ -256,6 +256,20 @@ ResolvedPaths resolve(const EnvironmentSnapshot& environment) {
                             std::move(cache_base), application_component)}};
 }
 
+ConfigPaths resolve_config(const EnvironmentSnapshot& environment) {
+    ResolvedBaseDirectory config_base = resolve_base_directory(
+            environment.xdg_config_home, environment.home,
+            DirectoryKind::Config, ".config");
+    const std::string application_component(application_identity::XDG_IDENTITY);
+    const fs::path config_directory =
+            config_base.directory / application_component;
+    return ConfigPaths{
+            config_directory,
+            config_directory / std::string(CONFIG_FILE_NAME),
+            make_creation_boundary(
+                    std::move(config_base), application_component)};
+}
+
 StatePaths resolve_state(const EnvironmentSnapshot& environment) {
     ResolvedBaseDirectory state_base = resolve_base_directory(
             environment.xdg_state_home, environment.home,
@@ -292,6 +306,16 @@ ResolvedPaths resolve_process_environment() {
             .home = process_environment_value("HOME"),
     };
     return resolve(environment);
+}
+
+ConfigPaths resolve_config_process_environment() {
+    const EnvironmentSnapshot environment{
+            .xdg_config_home = process_environment_value("XDG_CONFIG_HOME"),
+            .xdg_state_home = std::nullopt,
+            .xdg_cache_home = std::nullopt,
+            .home = process_environment_value("HOME"),
+    };
+    return resolve_config(environment);
 }
 
 StatePaths resolve_state_process_environment() {

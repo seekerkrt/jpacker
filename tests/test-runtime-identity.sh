@@ -143,9 +143,9 @@ legacy_checksum_before=$(cksum "$legacy_log")
 legacy_identity_before=$(stat -c '%d:%i:%a' "$legacy_log")
 export MOGUET_TEST_COMMAND_LOG=$command_log
 export MOGUET_TEST_PACMAN_EXIT_CODE=0
-empty_config=$tmp_dir/empty-config.conf
-: > "$empty_config"
-export MOGUET_TEST_CONFIG_FILE=$empty_config
+default_config=$tmp_dir/config.toml
+printf '%s\n' 'schema_version = 1' > "$default_config"
+export MOGUET_TEST_CONFIG_FILE=$default_config
 HOME=$startup_case_dir/home \
 XDG_CONFIG_HOME=$startup_case_dir/xdg-config \
 XDG_STATE_HOME=$startup_case_dir/xdg-state \
