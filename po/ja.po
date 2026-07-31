@@ -1,0 +1,31 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: Moguet 1.16.0\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-07-31 19:52+0900\n"
+"PO-Revision-Date: 2026-07-31 19:50+0900\n"
+"Last-Translator: Moguet contributors\n"
+"Language-Team: Japanese\n"
+"Language: ja\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+
+#: src/moguet.cpp:139
+#, c++-format
+msgid "Do not run {} as root or with sudo."
+msgstr "{}をrootまたはsudoで実行しないでください。"
+
+#: src/moguet.cpp:143
+#, c++-format
+msgid "Run {} as a normal user; {} will invoke sudo/pacman when needed."
+msgstr "{}を通常ユーザーとして実行してください。必要な場合は{}がsudo/pacmanを呼び出します。"
+
+#: src/moguet.cpp:522
+msgid "Show this help message and exit"
+msgstr "このヘルプを表示して終了"
+
+#: src/source_build.cpp:490
+msgid "Rebuild package?"
+msgstr "パッケージを再ビルドしますか？"

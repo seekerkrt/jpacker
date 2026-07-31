@@ -1,0 +1,36 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: Moguet localization test\n"
+"Report-Msgid-Bugs-To: \n"
+"PO-Revision-Date: 2026-07-31 19:50+0900\n"
+"Last-Translator: Moguet test suite\n"
+"Language-Team: Test\n"
+"Language: zz\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid "Show this help message and exit"
+msgstr "ZZ help"
+
+#, c++-format
+msgid "Do not run {} as root or with sudo."
+msgstr "ZZ do not run {}"
+
+#, c++-format
+msgid "Run {} as a normal user; {} will invoke sudo/pacman when needed."
+msgstr "ZZ run {}; {} uses sudo/pacman"
+
+msgid "Rebuild package?"
+msgstr "ZZ rebuild?"
+
+#, c++-format
+msgid "Selected package: {}"
+msgstr "ZZ selected: {}"
+
+#, c++-format
+msgid "Processed {} package."
+msgid_plural "Processed {} packages."
+msgstr[0] "ZZ processed {} package."
+msgstr[1] "ZZ processed {} packages."

@@ -21,6 +21,7 @@
 #include "commands_source_maintenance.hpp"
 #include "commands_sync.hpp"
 #include "commands_upgrade_all.hpp"
+#include "localization.hpp"
 #include "logging.hpp"
 #include "process.hpp"
 #include "shell_words.hpp"
@@ -134,13 +135,14 @@ int run_moguet(int argc, char* argv[]) {
 
     if(geteuid() == 0) {
         Logger::error(
-                "Do not run " + std::string(application_identity::PROJECT_NAME) +
-                " as root or with sudo.");
+                localization::format_translated_message(
+                        "Do not run {} as root or with sudo.",
+                        application_identity::PROJECT_NAME));
         Logger::error(
-                "Run " + std::string(application_identity::COMMAND_NAME) +
-                " as a normal user; " +
-                std::string(application_identity::PROJECT_NAME) +
-                " will invoke sudo/pacman when needed.");
+                localization::format_translated_message(
+                        "Run {} as a normal user; {} will invoke sudo/pacman when needed.",
+                        application_identity::COMMAND_NAME,
+                        application_identity::PROJECT_NAME));
         return 1;
     }
 
@@ -455,6 +457,10 @@ int verify_parse_failure_does_not_publish_cli_overrides() {
 #endif
 
 int main(int argc, char* argv[]) {
+    if(!localization::initialize_runtime_catalog()) {
+        Logger::error("Failed to initialize the Moguet message catalog.");
+        return 1;
+    }
 #ifdef MOGUET_ENABLE_APP_CONFIG_TEST_HOOKS
     const char* app_config_test_case = std::getenv("MOGUET_TEST_APP_CONFIG_CASE");
     if(app_config_test_case && std::string(app_config_test_case) == "parse-failure-cli-overrides") {
@@ -511,7 +517,10 @@ void print_help() {
     std::cout << "    \033[1m-Qua\033[0m                 Check AUR/foreign updates" << std::endl;
     std::cout << std::endl;
     std::cout << "\033[1mOPTIONS\033[0m" << std::endl;
-    std::cout << "    \033[1m-h, --help\033[0m          Show this help message and exit" << std::endl;
+    std::cout << "    \033[1m-h, --help\033[0m          "
+              << localization::translate_message(
+                         "Show this help message and exit")
+              << std::endl;
     std::cout << "    \033[1m-V, --version\033[0m       Show version information and exit" << std::endl;
     std::cout << "    \033[1m--noedit\033[0m             Skip PKGBUILD/.install review" << std::endl;
     std::cout << "    \033[1m--nodiff\033[0m             Skip update diff prompt" << std::endl;

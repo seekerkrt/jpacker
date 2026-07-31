@@ -32,6 +32,13 @@ set_stage() {
     zsh_completion_file=$stage_dir/usr/share/zsh/site-functions/_jpacker
     fish_completion_file=$stage_dir/usr/share/fish/vendor_completions.d/jpacker.fish
     man_file=$stage_dir/usr/share/man/man8/jpacker.8
+    locale_root=$stage_dir/usr/share/locale
+    locale_dir=$locale_root/ja
+    locale_messages_dir=$locale_dir/LC_MESSAGES
+    catalog_file=$locale_messages_dir/moguet.mo
+    legacy_v1_catalog_file=$locale_messages_dir/j""packer.mo
+    former_candidate_catalog_file=$locale_messages_dir/pac""tune.mo
+    built_catalog_file=$repo_root/build/locale/ja/LC_MESSAGES/moguet.mo
     license_dir=$stage_dir/usr/share/licenses/jpacker
     doc_dir=$stage_dir/usr/share/doc/jpacker
 }
@@ -104,6 +111,18 @@ assert_unique_basename() {
     [ "$matches" = "$expected_path" ] || {
         printf 'install-layout-test: unexpected locations for %s:\n%s\n' \
             "$basename" "$matches" >&2
+        exit 1
+    }
+}
+
+assert_unique_basename_under() {
+    root=$1
+    basename=$2
+    expected_path=$3
+    matches=$(find "$root" -type f -name "$basename" -print)
+    [ "$matches" = "$expected_path" ] || {
+        printf 'install-layout-test: unexpected locations for %s under %s:\n%s\n' \
+            "$basename" "$root" "$matches" >&2
         exit 1
     }
 }
@@ -185,6 +204,10 @@ assert_package_artifacts_installed() {
     assert_installed_file "$repo_root/completions/jpacker.fish" \
         "$fish_completion_file"
     assert_installed_file "$repo_root/man/jpacker.8" "$man_file"
+    assert_installed_file "$built_catalog_file" "$catalog_file"
+    assert_absent "$legacy_v1_catalog_file"
+    assert_absent "$former_candidate_catalog_file"
+    assert_unique_basename_under "$locale_dir" moguet.mo "$catalog_file"
     assert_compliance_install
 }
 
@@ -195,6 +218,9 @@ assert_package_artifacts_absent() {
     assert_absent "$zsh_completion_file"
     assert_absent "$fish_completion_file"
     assert_absent "$man_file"
+    assert_absent "$catalog_file"
+    assert_absent "$legacy_v1_catalog_file"
+    assert_absent "$former_candidate_catalog_file"
     assert_compliance_absent
 }
 
@@ -218,23 +244,28 @@ modified_config_text='NOEDIT=true
 LOGFILE=/tmp/moguet-preserved.log'
 preference_sentinel=$preference_dir/foreign-file.keep
 config_sentinel=$config_dir/foreign-file.keep
+foreign_catalog_file=$locale_messages_dir/foreign-domain.mo
 printf '%s\n' "$modified_config_text" > "$config_file"
 printf '%s\n' 'preference sentinel' > "$preference_sentinel"
 printf '%s\n' 'config sentinel' > "$config_sentinel"
+printf '%s\n' 'foreign catalog sentinel' > "$foreign_catalog_file"
 
 run_make uninstall
 assert_file_text "$preference_file" "$preference_text"
 assert_file_text "$config_file" "$modified_config_text"
 assert_file_text "$preference_sentinel" 'preference sentinel'
 assert_file_text "$config_sentinel" 'config sentinel'
+assert_file_text "$foreign_catalog_file" 'foreign catalog sentinel'
 assert_directory "$preference_dir"
 assert_directory "$config_dir"
+assert_directory "$locale_messages_dir"
 assert_package_artifacts_absent
 assert_absent "$license_dir"
 assert_absent "$doc_dir"
 assert_directory "$stage_dir/etc"
 assert_directory "$stage_dir/usr/share/licenses"
 assert_directory "$stage_dir/usr/share/doc"
+assert_directory "$locale_root"
 assert_no_symlinks
 
 # Phase 2: only empty legacy jpacker package directories are removed; shared
@@ -255,12 +286,15 @@ run_make uninstall
 assert_package_artifacts_absent
 assert_absent "$preference_dir"
 assert_absent "$config_dir"
+assert_absent "$locale_messages_dir"
+assert_absent "$locale_dir"
 assert_directory "$stage_dir/etc"
 
 assert_file_text "$license_dir/foreign-file.keep" 'license sentinel'
 assert_file_text "$doc_dir/foreign-file.keep" 'documentation sentinel'
 assert_directory "$stage_dir/usr/share/licenses"
 assert_directory "$stage_dir/usr/share/doc"
+assert_directory "$locale_root"
 assert_no_symlinks
 
 printf 'install-layout-test: all checks passed\n'
