@@ -557,14 +557,25 @@ assert_not_contains \
     "execution failure: prior work item stopped" "$stderr_file"
 assert_not_contains "diagnostic unavailable" "$stderr_file"
 
-# All supported global options reach both preparation and execution unchanged.
-setup_case option-propagation options-propagation
-run_status 0 --noedit upgrade-aur --nodiff --noconfirm --rebuild --cleanbuild
+# Typed skip/rebuild options and an equivalent alias reach both boundaries once.
+setup_case option-propagation-rebuild options-propagation
+run_status 0 --noedit upgrade-aur --nodiff --noconfirm \
+    --build-mode=rebuild --rebuild
 assert_exact_line \
-    "prepare needed=false noedit=true nodiff=true noconfirm=true rebuild=true cleanbuild=true rmdeps=false" \
+    "prepare needed=false noedit=true nodiff=true noconfirm=true rebuild=true cleanbuild=false rmdeps=false" \
     "$command_log"
 assert_exact_line \
-    "execute noedit=true nodiff=true noconfirm=true rebuild=true cleanbuild=true rmdeps=false" \
+    "execute noedit=true nodiff=true noconfirm=true rebuild=true cleanbuild=false rmdeps=false" \
+    "$command_log"
+
+# Prompt/clean final values and the cleanbuild alias use the opposite legacy projection.
+setup_case option-propagation-clean options-propagation
+run_status 0 --edit upgrade-aur --diff --build-mode=clean --cleanbuild
+assert_exact_line \
+    "prepare needed=false noedit=false nodiff=false noconfirm=false rebuild=false cleanbuild=true rmdeps=false" \
+    "$command_log"
+assert_exact_line \
+    "execute noedit=false nodiff=false noconfirm=false rebuild=false cleanbuild=true rmdeps=false" \
     "$command_log"
 
 # Misuse is rejected before query and before default cache/log initialization.
@@ -615,7 +626,7 @@ run_status 0 upgrade
 assert_exact_line "sudo pacman -Syu" "$command_log"
 assert_pipeline_absent
 
-if [ "$case_count" -ne 43 ]; then
+if [ "$case_count" -ne 44 ]; then
     fail_case "internal test case count changed: $case_count"
 fi
 echo "AUR update command integration tests passed ($case_count cases)."

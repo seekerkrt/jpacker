@@ -92,6 +92,11 @@ output=$tmp_dir/output
 run_ok "$output" defaults
 assert_config "$output" prompt prompt normal
 
+run_ok "$output" composition
+if [ -s "$output" ]; then
+    fail "pure config composition emitted unexpected output"
+fi
+
 missing_parent=$tmp_dir/missing-parent
 missing_config=$missing_parent/config.toml
 run_ok "$output" load "$missing_config"

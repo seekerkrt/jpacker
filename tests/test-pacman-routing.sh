@@ -158,15 +158,15 @@ run_ok "$tmp_dir/info.out" -Si filesystem
 assert_command "pacman -Si filesystem"
 assert_no_sudo
 
-run_ok "$tmp_dir/moguet-options.out" \
-    --noedit --nodiff --rebuild --cleanbuild --rmdeps -Q filesystem
-assert_command "pacman -Q filesystem"
-for moguet_option in --noedit --nodiff --rebuild --cleanbuild --rmdeps; do
-    if grep -F -- "$moguet_option" "$command_log" >/dev/null; then
-        echo "Moguet option leaked to pacman: $moguet_option" >&2
-        cat "$command_log" >&2
-        exit 1
-    fi
+option_index=0
+for moguet_option in \
+    --edit --noedit --diff --nodiff \
+    --build-mode=normal --build-mode=rebuild --build-mode=clean \
+    --rebuild --cleanbuild --rmdeps; do
+    option_index=$((option_index + 1))
+    run_ok "$tmp_dir/moguet-option-$option_index.out" \
+        "$moguet_option" -Q filesystem
+    assert_only_command "pacman -Q filesystem"
 done
 
 # custom upgradeとgeneric -Syuの既存routingを保ち、upgrade-aurはpacmanへ委譲しない。

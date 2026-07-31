@@ -304,14 +304,28 @@ run_status 1 upgrade-all --repo
 assert_validation_rejected_without_work \
     "Unsupported upgrade-all option: --repo"
 
-# 12-16: supported options are independently propagated to both aggregate
+# 12-21: supported typed and invocation-only options are independently propagated to both aggregate
 # boundaries without CLI-side reinterpretation.
+setup_case option-edit no-updates
+run_status 0 upgrade-all --edit
+assert_event_count 1 \
+    "upgrade-all prepare noedit=false nodiff=false noconfirm=false rebuild=false cleanbuild=false rmdeps=false"
+assert_event_count 1 \
+    "upgrade-all execute noedit=false nodiff=false noconfirm=false rebuild=false cleanbuild=false rmdeps=false"
+
 setup_case option-noedit no-updates
 run_status 0 upgrade-all --noedit
 assert_event_count 1 \
     "upgrade-all prepare noedit=true nodiff=false noconfirm=false rebuild=false cleanbuild=false rmdeps=false"
 assert_event_count 1 \
     "upgrade-all execute noedit=true nodiff=false noconfirm=false rebuild=false cleanbuild=false rmdeps=false"
+
+setup_case option-diff no-updates
+run_status 0 upgrade-all --diff
+assert_event_count 1 \
+    "upgrade-all prepare noedit=false nodiff=false noconfirm=false rebuild=false cleanbuild=false rmdeps=false"
+assert_event_count 1 \
+    "upgrade-all execute noedit=false nodiff=false noconfirm=false rebuild=false cleanbuild=false rmdeps=false"
 
 setup_case option-nodiff no-updates
 run_status 0 upgrade-all --nodiff
@@ -327,12 +341,33 @@ assert_event_count 1 \
 assert_event_count 1 \
     "upgrade-all execute noedit=false nodiff=false noconfirm=true rebuild=false cleanbuild=false rmdeps=false"
 
+setup_case option-build-mode-normal no-updates
+run_status 0 upgrade-all --build-mode=normal
+assert_event_count 1 \
+    "upgrade-all prepare noedit=false nodiff=false noconfirm=false rebuild=false cleanbuild=false rmdeps=false"
+assert_event_count 1 \
+    "upgrade-all execute noedit=false nodiff=false noconfirm=false rebuild=false cleanbuild=false rmdeps=false"
+
+setup_case option-build-mode-rebuild no-updates
+run_status 0 upgrade-all --build-mode=rebuild
+assert_event_count 1 \
+    "upgrade-all prepare noedit=false nodiff=false noconfirm=false rebuild=true cleanbuild=false rmdeps=false"
+assert_event_count 1 \
+    "upgrade-all execute noedit=false nodiff=false noconfirm=false rebuild=true cleanbuild=false rmdeps=false"
+
 setup_case option-rebuild no-updates
 run_status 0 upgrade-all --rebuild
 assert_event_count 1 \
     "upgrade-all prepare noedit=false nodiff=false noconfirm=false rebuild=true cleanbuild=false rmdeps=false"
 assert_event_count 1 \
     "upgrade-all execute noedit=false nodiff=false noconfirm=false rebuild=true cleanbuild=false rmdeps=false"
+
+setup_case option-build-mode-clean no-updates
+run_status 0 upgrade-all --build-mode=clean
+assert_event_count 1 \
+    "upgrade-all prepare noedit=false nodiff=false noconfirm=false rebuild=false cleanbuild=true rmdeps=false"
+assert_event_count 1 \
+    "upgrade-all execute noedit=false nodiff=false noconfirm=false rebuild=false cleanbuild=true rmdeps=false"
 
 setup_case option-cleanbuild no-updates
 run_status 0 upgrade-all --cleanbuild
@@ -341,7 +376,7 @@ assert_event_count 1 \
 assert_event_count 1 \
     "upgrade-all execute noedit=false nodiff=false noconfirm=false rebuild=false cleanbuild=true rmdeps=false"
 
-# 17-22: success matrix and normal detailed presentation.
+# 22-27: success matrix and normal detailed presentation.
 setup_case completed-changed completed-changed
 run_status 0 upgrade-all
 assert_exact_line "system: completed" "$stdout_file"
@@ -911,7 +946,7 @@ run_matrix_table external-attribution-missing 1 <<'EOF'
 1|AUR phase: completed|Unexpected upgrade-all command failure: External satisfaction has no explicit source identity.
 EOF
 
-if [ "$case_count" -ne 208 ]; then
+if [ "$case_count" -ne 213 ]; then
     echo "upgrade-all command test scenario count drifted: $case_count" >&2
     exit 1
 fi

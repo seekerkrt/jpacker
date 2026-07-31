@@ -490,7 +490,7 @@ run_aur_combination() {
 run_aur_combination rebuild \
     "makepkg -sc -f" \
     "sudo pacman -U --needed -- " \
-    --needed --rebuild
+    --needed --build-mode=rebuild
 run_aur_combination cleanbuild \
     "makepkg -sc -C" \
     "sudo pacman -U --needed -- " \
@@ -499,10 +499,10 @@ run_aur_combination noconfirm \
     "makepkg -sc --noconfirm" \
     "sudo pacman -U --noconfirm --needed -- " \
     --needed --noconfirm
-run_aur_combination all-supported \
-    "makepkg -sc --noconfirm -f -C" \
+run_aur_combination cleanbuild-equivalent-duplicates \
+    "makepkg -sc --noconfirm -C" \
     "sudo pacman -U --noconfirm --needed -- " \
-    --needed --rebuild --cleanbuild --noconfirm
+    --needed --build-mode=clean --cleanbuild --noconfirm
 
 setup_case combination-rmdeps
 run_fail --noedit --nodiff -S --aur --needed --rmdeps clean-root
@@ -513,7 +513,7 @@ assert_normal_request_log_empty
 
 setup_case combination-rmdeps-all
 run_fail --noedit --nodiff -S --aur \
-    --needed --rebuild --cleanbuild --rmdeps --noconfirm clean-root
+    --needed --build-mode=rebuild --rebuild --rmdeps --noconfirm clean-root
 assert_contains "Separated build/install does not support --rmdeps." "$output_file"
 assert_command_log_empty
 assert_cache_entry_absent clean-root

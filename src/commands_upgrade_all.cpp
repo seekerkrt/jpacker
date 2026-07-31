@@ -1319,9 +1319,11 @@ void print_operation_result(const UpgradeAllOperationResult& result) {
 }
 
 bool is_supported_upgrade_all_global_option(const std::string& option) {
-    return option == "--noedit" || option == "--nodiff" ||
+    return option == "--edit" || option == "--noedit" ||
+           option == "--diff" || option == "--nodiff" ||
            option == "--noconfirm" || option == "--rebuild" ||
-           option == "--cleanbuild";
+           option == "--cleanbuild" ||
+           option.starts_with("--build-mode=");
 }
 
 } // namespace
