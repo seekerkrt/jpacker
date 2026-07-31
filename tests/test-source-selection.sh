@@ -84,6 +84,7 @@ setup_case() {
     unset EMPTY
     unset UNDEFINED
     unset EDITOR
+    unset VISUAL
 }
 
 run_ok() {

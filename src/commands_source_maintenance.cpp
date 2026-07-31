@@ -305,9 +305,7 @@ int cmd_add_src(const std::vector<std::string>& args) {
 int cmd_edit_src(
         const std::vector<std::string>& targets,
         const AppConfig& config) {
-    bool        failed = false;
-    const char* env_editor = std::getenv("EDITOR");
-    std::string editor_cmd = (env_editor) ? std::string(env_editor) : config.editor;
+    bool failed = false;
     for(const auto& pkg : targets) {
         fs::path    p = source_preference_entry_path(pkg);
         std::string temp_template = "/tmp/moguet-edit-src-" + pkg + ".XXXXXX";
@@ -363,7 +361,7 @@ int cmd_edit_src(
             }
         }
 
-        if(run_command(build_editor_command(editor_cmd, temp_path)) != 0) {
+        if(run_command(build_editor_command(config.editor, temp_path)) != 0) {
             Logger::error("Editor failed for " + p.string());
             failed = true;
             cleanup_temp();

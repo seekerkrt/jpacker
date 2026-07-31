@@ -69,6 +69,7 @@ assert_app_config() {
     mode=$4
     no_confirm=$5
     rm_deps=$6
+    editor=$7
 
     assert_line "SCHEMA_VERSION=1" "$file"
     assert_line "REVIEW_PKGBUILD=$pkgbuild" "$file"
@@ -76,7 +77,7 @@ assert_app_config() {
     assert_line "BUILD_MODE=$mode" "$file"
     assert_line "NOCONFIRM=$no_confirm" "$file"
     assert_line "RMDEPS=$rm_deps" "$file"
-    assert_line "EDITOR=nano" "$file"
+    assert_line "EDITOR=$editor" "$file"
     if [ "$(wc -l < "$file")" -ne 7 ]; then
         echo "AppConfig output did not contain exactly seven fields" >&2
         sed -n '1,240p' "$file" >&2
@@ -95,11 +96,42 @@ run_module_ok() {
 }
 
 module_output=$tmp_dir/module-output
+unset EDITOR
+unset VISUAL
 run_module_ok "$module_output" defaults
-assert_app_config "$module_output" prompt prompt normal false false
+assert_app_config "$module_output" prompt prompt normal false false nano
 
 run_module_ok "$module_output" projection
-assert_app_config "$module_output" skip skip clean true true
+assert_app_config "$module_output" skip skip clean true true nano
+
+# VISUALはEDITORより優先する。
+export VISUAL='visual-editor --visual-option'
+export EDITOR='editor-editor --editor-option'
+run_module_ok "$module_output" projection
+assert_app_config \
+    "$module_output" skip skip clean true true \
+    'visual-editor --visual-option'
+
+# VISUAL未指定時はEDITORを使う。
+unset VISUAL
+run_module_ok "$module_output" projection
+assert_app_config \
+    "$module_output" skip skip clean true true \
+    'editor-editor --editor-option'
+
+# EmptyなVISUALも未指定としてEDITORへfallbackする。
+VISUAL=
+export VISUAL
+run_module_ok "$module_output" projection
+assert_app_config \
+    "$module_output" skip skip clean true true \
+    'editor-editor --editor-option'
+
+# 両方emptyならbuilt-inのnanoへfallbackする。
+EDITOR=
+export EDITOR
+run_module_ok "$module_output" projection
+assert_app_config "$module_output" skip skip clean true true nano
 
 # Source-build consumerをlocalhost fixtureだけで観測する。
 port_file=$tmp_dir/port
