@@ -76,12 +76,32 @@ AppConfig load_invocation_app_config() {
 }
 
 void apply_cli_overrides(AppConfig& config, const CliOverrides& overrides) {
-    // POLICY: CLI global optionはenable-only。未指定fieldでconfig fileのtrueを消さない。
-    if(overrides.no_edit) config.no_edit = true;
-    if(overrides.no_diff) config.no_diff = true;
+    // Transitional bridge: typed final valuesをlegacy consumerのbooleanへ投影する。
+    if(overrides.review_pkgbuild.has_value()) {
+        config.no_edit =
+                overrides.review_pkgbuild.value() == ReviewPolicy::Skip;
+    }
+    if(overrides.review_diff.has_value()) {
+        config.no_diff =
+                overrides.review_diff.value() == ReviewPolicy::Skip;
+    }
+    if(overrides.build_mode.has_value()) {
+        switch(overrides.build_mode.value()) {
+        case BuildMode::Normal:
+            config.rebuild = false;
+            config.clean_build = false;
+            break;
+        case BuildMode::Rebuild:
+            config.rebuild = true;
+            config.clean_build = false;
+            break;
+        case BuildMode::Clean:
+            config.rebuild = false;
+            config.clean_build = true;
+            break;
+        }
+    }
     if(overrides.no_confirm) config.no_confirm = true;
-    if(overrides.rebuild) config.rebuild = true;
-    if(overrides.clean_build) config.clean_build = true;
     if(overrides.rm_deps) config.rm_deps = true;
 }
 
@@ -423,14 +443,14 @@ int verify_parse_failure_does_not_publish_cli_overrides() {
     char no_edit[] = "--noedit";
     char no_diff[] = "--nodiff";
     char no_confirm[] = "--noconfirm";
-    char rebuild[] = "--rebuild";
-    char clean_build[] = "--cleanbuild";
+    char build_mode[] = "--build-mode=rebuild";
+    char rebuild_alias[] = "--rebuild";
     char rm_deps[] = "--rmdeps";
     char operation[] = "-Q";
     char missing_value_option[] = "--config";
     std::array<char*, 9> parse_failure_argv = {
-            program, no_edit, no_diff, no_confirm, rebuild,
-            clean_build, rm_deps, operation, missing_value_option};
+            program, no_edit, no_diff, no_confirm, build_mode,
+            rebuild_alias, rm_deps, operation, missing_value_option};
 
     if(run_moguet(static_cast<int>(parse_failure_argv.size()), parse_failure_argv.data()) != 1) {
         std::cerr << "Expected CLI parse failure." << std::endl;

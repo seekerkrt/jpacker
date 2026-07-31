@@ -4,14 +4,18 @@
 #include <array>
 #include <iostream>
 #include <stdexcept>
+#include <string_view>
 #include <utility>
 
 namespace {
 
 enum class MoguetGlobalOption {
+    Edit,
     NoEdit,
+    Diff,
     NoDiff,
     NoConfirm,
+    BuildMode,
     Rebuild,
     CleanBuild,
     RmDeps,
@@ -19,8 +23,13 @@ enum class MoguetGlobalOption {
     Repo,
 };
 
-const std::array<std::pair<const char*, MoguetGlobalOption>, 8> MOGUET_GLOBAL_OPTIONS = {{
+constexpr std::string_view BUILD_MODE_OPTION = "--build-mode";
+constexpr std::string_view BUILD_MODE_OPTION_PREFIX = "--build-mode=";
+
+const std::array<std::pair<const char*, MoguetGlobalOption>, 10> MOGUET_GLOBAL_OPTIONS = {{
+        {"--edit", MoguetGlobalOption::Edit},
         {"--noedit", MoguetGlobalOption::NoEdit},
+        {"--diff", MoguetGlobalOption::Diff},
         {"--nodiff", MoguetGlobalOption::NoDiff},
         {"--noconfirm", MoguetGlobalOption::NoConfirm},
         {"--rebuild", MoguetGlobalOption::Rebuild},
@@ -31,6 +40,10 @@ const std::array<std::pair<const char*, MoguetGlobalOption>, 8> MOGUET_GLOBAL_OP
 }};
 
 std::optional<MoguetGlobalOption> moguet_global_option_kind(const std::string& arg) {
+    if(arg == BUILD_MODE_OPTION || arg.starts_with(BUILD_MODE_OPTION_PREFIX)) {
+        return MoguetGlobalOption::BuildMode;
+    }
+
     auto option = std::find_if(
             MOGUET_GLOBAL_OPTIONS.begin(), MOGUET_GLOBAL_OPTIONS.end(),
             [&arg](const auto& entry) { return arg == entry.first; });
@@ -43,26 +56,112 @@ void report_parse_error(const std::string& message) {
     std::cerr << "\033[1;31m:: Error:\033[0m " << message << std::endl;
 }
 
+std::string_view review_policy_name(ReviewPolicy policy) {
+    switch(policy) {
+    case ReviewPolicy::Prompt:
+        return "prompt";
+    case ReviewPolicy::Skip:
+        return "skip";
+    }
+    throw std::logic_error("Unknown review policy.");
+}
+
+std::string_view build_mode_name(BuildMode mode) {
+    switch(mode) {
+    case BuildMode::Normal:
+        return "normal";
+    case BuildMode::Rebuild:
+        return "rebuild";
+    case BuildMode::Clean:
+        return "clean";
+    }
+    throw std::logic_error("Unknown build mode.");
+}
+
+template <typename Value, typename ValueName>
+bool apply_final_value_override(
+        std::optional<Value>& current, Value requested,
+        std::string_view setting, ValueName value_name) {
+    if(!current.has_value()) {
+        current = requested;
+        return true;
+    }
+    if(current.value() == requested) return true;
+
+    report_parse_error(
+            "Conflicting CLI overrides for " + std::string(setting) +
+            ": values '" + std::string(value_name(current.value())) +
+            "' and '" + std::string(value_name(requested)) +
+            "' were both requested.");
+    return false;
+}
+
+bool apply_build_mode_option(
+        const std::string& arg, ParsedCliArguments& parsed) {
+    if(arg == BUILD_MODE_OPTION) {
+        report_parse_error(
+                "Option --build-mode requires an attached value: "
+                "normal, rebuild, or clean.");
+        return false;
+    }
+
+    const std::string_view value =
+            std::string_view(arg).substr(BUILD_MODE_OPTION_PREFIX.size());
+    std::optional<BuildMode> mode;
+    if(value == "normal")
+        mode = BuildMode::Normal;
+    else if(value == "rebuild")
+        mode = BuildMode::Rebuild;
+    else if(value == "clean")
+        mode = BuildMode::Clean;
+
+    if(!mode.has_value()) {
+        report_parse_error(
+                "Invalid value for --build-mode: '" + std::string(value) +
+                "'; expected normal, rebuild, or clean.");
+        return false;
+    }
+    return apply_final_value_override(
+            parsed.cli_overrides.build_mode, mode.value(), "build.mode",
+            build_mode_name);
+}
+
 bool apply_moguet_global_option(const std::string& arg, ParsedCliArguments& parsed) {
     std::optional<MoguetGlobalOption> option = moguet_global_option_kind(arg);
     if(!option.has_value()) throw std::logic_error("Unknown Moguet global option: " + arg);
 
     switch(option.value()) {
+    case MoguetGlobalOption::Edit:
+        return apply_final_value_override(
+                parsed.cli_overrides.review_pkgbuild,
+                ReviewPolicy::Prompt, "review.pkgbuild",
+                review_policy_name);
     case MoguetGlobalOption::NoEdit:
-        parsed.cli_overrides.no_edit = true;
-        break;
+        return apply_final_value_override(
+                parsed.cli_overrides.review_pkgbuild,
+                ReviewPolicy::Skip, "review.pkgbuild",
+                review_policy_name);
+    case MoguetGlobalOption::Diff:
+        return apply_final_value_override(
+                parsed.cli_overrides.review_diff,
+                ReviewPolicy::Prompt, "review.diff", review_policy_name);
     case MoguetGlobalOption::NoDiff:
-        parsed.cli_overrides.no_diff = true;
-        break;
+        return apply_final_value_override(
+                parsed.cli_overrides.review_diff,
+                ReviewPolicy::Skip, "review.diff", review_policy_name);
     case MoguetGlobalOption::NoConfirm:
         parsed.cli_overrides.no_confirm = true;
         break;
+    case MoguetGlobalOption::BuildMode:
+        return apply_build_mode_option(arg, parsed);
     case MoguetGlobalOption::Rebuild:
-        parsed.cli_overrides.rebuild = true;
-        break;
+        return apply_final_value_override(
+                parsed.cli_overrides.build_mode, BuildMode::Rebuild,
+                "build.mode", build_mode_name);
     case MoguetGlobalOption::CleanBuild:
-        parsed.cli_overrides.clean_build = true;
-        break;
+        return apply_final_value_override(
+                parsed.cli_overrides.build_mode, BuildMode::Clean,
+                "build.mode", build_mode_name);
     case MoguetGlobalOption::RmDeps:
         parsed.cli_overrides.rm_deps = true;
         break;
@@ -88,6 +187,21 @@ bool apply_moguet_global_option(const std::string& arg, ParsedCliArguments& pars
 
 bool is_moguet_global_option(const std::string& arg) {
     return moguet_global_option_kind(arg).has_value();
+}
+
+UserConfig compose_user_config(
+        UserConfig user_config, const CliOverrides& cli_overrides) {
+    if(cli_overrides.review_pkgbuild.has_value()) {
+        user_config.review.pkgbuild =
+                cli_overrides.review_pkgbuild.value();
+    }
+    if(cli_overrides.review_diff.has_value()) {
+        user_config.review.diff = cli_overrides.review_diff.value();
+    }
+    if(cli_overrides.build_mode.has_value()) {
+        user_config.build.mode = cli_overrides.build_mode.value();
+    }
+    return user_config;
 }
 
 bool pacman_option_takes_value(const std::string& arg) {

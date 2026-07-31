@@ -1679,14 +1679,15 @@ assert_command_content_absent "pacman -U"
 assert_total_command_count 0
 
 setup_upgrade_transition_case \
-    upgrade-rebuild-cleanbuild-option-propagation \
+    upgrade-rebuild-option-propagation \
     1.0-1 1.0-1 enabled \
     https://gitlab.archlinux.org/archlinux/packaging/packages/clean-root.git
 export MOGUET_TEST_PACMAN_REPO_PACKAGES=$upgrade_package
-run_upgrade_ok --noedit --nodiff --noconfirm --rebuild --cleanbuild upgrade
+run_upgrade_ok --noedit --nodiff --noconfirm \
+    --build-mode=rebuild --rebuild upgrade
 assert_command "sudo pacman -Syu --noconfirm"
-assert_command_count "makepkg -sc --noconfirm -f -C" 1
-assert_command_absent "sudo pacman -Syu --noconfirm -f -C"
+assert_command_count "makepkg -sc --noconfirm -f" 1
+assert_command_absent "sudo pacman -Syu --noconfirm -f"
 assert_contains "Skipping PKGBUILD/.install review (--noedit)." "$output_file"
 assert_command_content_absent "git diff"
 

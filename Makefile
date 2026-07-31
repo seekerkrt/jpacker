@@ -833,10 +833,14 @@ $(APP_CONFIG_MODULE_TEST_TARGET): tests/app_config_test.cpp $(SRC_DIR)/app_confi
 	@echo ":: Compiling app config module test binary"
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -I$(SRC_DIR) tests/app_config_test.cpp $(SRC_DIR)/app_config.cpp -o $@
 
-$(USER_CONFIG_MODULE_TEST_TARGET): tests/user_config_test.cpp $(SRC_DIR)/user_config.cpp $(SRC_DIR)/user_config.hpp $(VERSION_FILE)
+$(USER_CONFIG_MODULE_TEST_TARGET): tests/user_config_test.cpp $(SRC_DIR)/user_config.cpp $(SRC_DIR)/user_config.hpp $(SRC_DIR)/cli_parser.cpp $(SRC_DIR)/cli_parser.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling user config module test binary"
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -I$(SRC_DIR) tests/user_config_test.cpp $(SRC_DIR)/user_config.cpp -o $@
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -I$(SRC_DIR) \
+		tests/user_config_test.cpp \
+		$(SRC_DIR)/user_config.cpp \
+		$(SRC_DIR)/cli_parser.cpp \
+		-o $@
 
 $(APP_CONFIG_INTEGRATION_TEST_TARGET): $(SRCS) $(HEADERS) $(VERSION_FILE)
 	@mkdir -p $(dir $@)

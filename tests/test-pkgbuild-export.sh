@@ -309,7 +309,9 @@ assert_command_log_empty
 assert_normal_request_log_empty
 
 for global_option in \
-    --noedit --nodiff --noconfirm --rebuild --cleanbuild --rmdeps --aur --repo; do
+    --edit --noedit --diff --nodiff --noconfirm \
+    --build-mode=normal --build-mode=rebuild --build-mode=clean \
+    --rebuild --cleanbuild --rmdeps --aur --repo; do
     run_fail "$global_option" -G clean-root
     assert_contains "$global_option" "$stderr_file"
     assert_contains "-G" "$stderr_file"

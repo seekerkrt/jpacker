@@ -300,9 +300,9 @@ enable_config_rmdeps() {
 }
 
 setup_integration_case precedence
-run_integration_ok --noconfirm --rebuild --cleanbuild -S --aur clean-root
+run_integration_ok --noconfirm --build-mode=clean --cleanbuild -S --aur clean-root
 assert_line "git clone https://aur.archlinux.org/clean-root.git clean-root" "$command_log"
-assert_command "makepkg -sc --noconfirm -f -C"
+assert_command "makepkg -sc --noconfirm -C"
 assert_contains "sudo pacman -U --noconfirm -- " "$command_log"
 assert_contains "Skipping PKGBUILD/.install review (--noedit)." "$output_file"
 assert_not_contains "Review target: PKGBUILD" "$output_file"
@@ -317,18 +317,26 @@ if [ -e "$XDG_STATE_HOME/moguet" ] || [ -L "$XDG_STATE_HOME/moguet" ]; then
 fi
 
 # 2回目はexisting cache routeへ入り、config由来NODIFFがgit diffを抑止する。
-run_integration_ok --noconfirm --rebuild --cleanbuild -S --aur clean-root
+run_integration_ok --noconfirm --build-mode=clean --cleanbuild -S --aur clean-root
 assert_command "git fetch origin"
 assert_command "git reset --hard origin/main"
-assert_command "makepkg -sc --noconfirm -f -C"
+assert_command "makepkg -sc --noconfirm -C"
 assert_command_absent "git diff"
 
-# repeated enable-only optionも1回分の最終policyとしてmergeされる。
+# legacy NOEDIT/NODIFF=trueもCLIのtyped final-valueで反転できる。
 run_integration_ok \
-    --noconfirm --noconfirm --rebuild --rebuild \
+    --edit --diff --noconfirm --build-mode=normal -S --aur clean-root
+assert_command "git diff --quiet HEAD..origin/main"
+assert_contains "Review target: PKGBUILD" "$output_file"
+assert_not_contains "Skipping PKGBUILD/.install review (--noedit)." "$output_file"
+assert_command "makepkg -sc --noconfirm"
+
+# 同じ最終値のcanonical option / compatibility alias重複は1件のpolicyへ合成する。
+run_integration_ok \
+    --noconfirm --noconfirm --build-mode=clean \
     --cleanbuild --cleanbuild -S --aur clean-root
-assert_command "makepkg -sc --noconfirm -f -C"
-makepkg_count=$(grep -Fxc -- "makepkg -sc --noconfirm -f -C" "$command_log" || true)
+assert_command "makepkg -sc --noconfirm -C"
+makepkg_count=$(grep -Fxc -- "makepkg -sc --noconfirm -C" "$command_log" || true)
 if [ "$makepkg_count" -ne 1 ]; then
     echo "repeated CLI option changed the makepkg option multiplicity" >&2
     cat "$command_log" >&2

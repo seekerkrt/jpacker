@@ -234,6 +234,18 @@ run_exact value-short-dbpath-noedit \
 run_exact value-short-root-nodiff \
     "pacman -Q -r --nodiff filesystem" \
     -Q -r --nodiff filesystem
+run_exact value-root-edit \
+    "pacman -Q --root --edit filesystem" \
+    -Q --root --edit filesystem
+run_exact value-config-diff \
+    "pacman -Q --config --diff filesystem" \
+    -Q --config --diff filesystem
+run_exact value-dbpath-build-mode \
+    "pacman -Q --dbpath --build-mode=clean filesystem" \
+    -Q --dbpath --build-mode=clean filesystem
+run_exact invalid-build-mode-as-option-value \
+    "pacman -Q --root --build-mode=cleanbuild filesystem" \
+    -Q --root --build-mode=cleanbuild filesystem
 
 # Parser分離時のtable移し忘れを検出するため、未coverageのvalue-taking long optionを全件固定する。
 for value_option in \
@@ -247,10 +259,19 @@ do
 done
 
 # Matrix B: semantic `--`後は全tokenをopaque operandとして保持する。
-for global_option in --rmdeps --noconfirm --rebuild --cleanbuild --noedit --nodiff; do
+for global_option in \
+    --rmdeps --noconfirm --edit --noedit --diff --nodiff \
+    --build-mode=normal --build-mode=rebuild --build-mode=clean \
+    --rebuild --cleanbuild; do
     case_name=opaque-${global_option#--}
     run_exact "$case_name" "sudo pacman -U -- $global_option" -U -- "$global_option"
 done
+run_exact opaque-conflicting-review-values \
+    "sudo pacman -U -- --edit --noedit" \
+    -U -- --edit --noedit
+run_exact opaque-invalid-build-mode \
+    "sudo pacman -U -- --build-mode=cleanbuild" \
+    -U -- --build-mode=cleanbuild
 
 # Matrix C/D: 通常位置のglobalだけを消費し、generated optionはoperation直後へ1件置く。
 run_exact global-leading-noconfirm \
@@ -259,9 +280,34 @@ run_exact global-leading-noconfirm \
 run_exact global-trailing-noconfirm \
     "pacman -Q --noconfirm filesystem" \
     -Q filesystem --noconfirm
-run_exact global-build-options-do-not-leak \
+global_option_index=0
+for global_option in \
+    --edit --noedit --diff --nodiff \
+    --build-mode=normal --build-mode=rebuild --build-mode=clean \
+    --rebuild --cleanbuild --rmdeps; do
+    global_option_index=$((global_option_index + 1))
+    run_exact "global-option-$global_option_index" \
+        "pacman -Q filesystem" \
+        "$global_option" -Q filesystem
+done
+run_exact global-prompt-duplicates \
     "pacman -Q filesystem" \
-    --noedit --nodiff --rebuild --cleanbuild --rmdeps -Q filesystem
+    --edit --edit --diff --diff -Q filesystem
+run_exact global-skip-duplicates \
+    "pacman -Q filesystem" \
+    --noedit --noedit --nodiff --nodiff -Q filesystem
+run_exact global-normal-duplicates \
+    "pacman -Q filesystem" \
+    --build-mode=normal --build-mode=normal -Q filesystem
+run_exact global-rebuild-equivalent-duplicates \
+    "pacman -Q filesystem" \
+    --build-mode=rebuild --rebuild --rebuild -Q filesystem
+run_exact global-clean-equivalent-duplicates \
+    "pacman -Q filesystem" \
+    --build-mode=clean --cleanbuild --cleanbuild -Q filesystem
+run_exact option-value-does-not-conflict-with-global \
+    "pacman -Q --root --edit filesystem" \
+    -Q --root --edit --noedit filesystem
 run_exact generated-before-marker-leading \
     "pacman -Q --noconfirm -- filesystem" \
     --noconfirm -Q -- filesystem
@@ -308,7 +354,55 @@ run_exact marker-after-root-value \
     "pacman -Q --root -- -- filesystem" \
     -Q --root -- -- filesystem
 
-# Matrix H: direct route / file routeでも非global argvの相対順を維持する。
+# Matrix H: typed final-value overrideは同じsettingへ異なる値を要求した時点で拒否する。
+assert_cli_override_conflict() {
+    case_name=$1
+    setting=$2
+    first_option=$3
+    second_option=$4
+
+    setup_case "$case_name"
+    run_fail "$first_option" "$second_option" -Q filesystem
+    assert_contains "Conflicting CLI overrides for $setting" "$output_file"
+    assert_pre_log_exit
+}
+
+assert_cli_override_conflict conflict-edit-noedit \
+    review.pkgbuild --edit --noedit
+assert_cli_override_conflict conflict-noedit-edit \
+    review.pkgbuild --noedit --edit
+assert_cli_override_conflict conflict-diff-nodiff \
+    review.diff --diff --nodiff
+assert_cli_override_conflict conflict-nodiff-diff \
+    review.diff --nodiff --diff
+assert_cli_override_conflict conflict-normal-rebuild \
+    build.mode --build-mode=normal --build-mode=rebuild
+assert_cli_override_conflict conflict-rebuild-normal \
+    build.mode --rebuild --build-mode=normal
+assert_cli_override_conflict conflict-normal-clean \
+    build.mode --build-mode=normal --cleanbuild
+assert_cli_override_conflict conflict-clean-normal \
+    build.mode --build-mode=clean --build-mode=normal
+assert_cli_override_conflict conflict-rebuild-clean \
+    build.mode --rebuild --cleanbuild
+assert_cli_override_conflict conflict-clean-rebuild \
+    build.mode --cleanbuild --build-mode=rebuild
+
+setup_case bare-build-mode
+run_fail --build-mode -Q filesystem
+assert_contains "Option --build-mode requires an attached value" "$output_file"
+assert_pre_log_exit
+
+invalid_build_mode_index=0
+for invalid_build_mode in --build-mode= --build-mode=cleanbuild; do
+    invalid_build_mode_index=$((invalid_build_mode_index + 1))
+    setup_case "invalid-build-mode-$invalid_build_mode_index"
+    run_fail "$invalid_build_mode" -Q filesystem
+    assert_contains "Invalid value for --build-mode" "$output_file"
+    assert_pre_log_exit
+done
+
+# Matrix I: direct route / file routeでも非global argvの相対順を維持する。
 run_exact query-relative-order \
     "pacman -Q target-a --config custom.conf target-b" \
     -Q target-a --config custom.conf target-b
@@ -374,7 +468,7 @@ run_exact version-as-opaque-operand \
     "sudo pacman -U -- --version" \
     -U -- --version
 
-# Matrix I: official transactionはAUR targetだけを元indexで除外し、残りの順序を保つ。
+# Matrix J: official transactionはAUR targetだけを元indexで除外し、残りの順序を保つ。
 setup_case official-sync-order
 export MOGUET_TEST_PACMAN_REPO_PACKAGES='official-a official-b'
 run_ok -S official-a --config custom.conf official-b
@@ -405,16 +499,18 @@ run_ok -Si official-a --config clean-root clean-root
 assert_command_count "pacman -Si official-a --config clean-root" 1
 assert_command_absent "pacman -Si official-a --config"
 
-# Matrix J: 通常位置のglobalはAUR/makepkgへ反映し、value/opaque位置では反映しない。
+# Matrix K: 通常位置のglobalはAUR/makepkgへ反映し、value/opaque位置では反映しない。
 setup_case aur-global-options
 export MOGUET_TEST_PACMAN_REPO_PACKAGES='official-only'
 export MOGUET_TEST_MAKEPKG_PACKAGELIST_EXIT_CODE=0
-run_fail --noedit --nodiff --noconfirm --rebuild --cleanbuild -S clean-root
-assert_command_count "makepkg -sc --noconfirm -f -C" 1
+run_fail --noedit --nodiff --noconfirm \
+    --build-mode=clean --cleanbuild -S clean-root
+assert_command_count "makepkg -sc --noconfirm -C" 1
 
 setup_case aur-global-rmdeps
 export MOGUET_TEST_PACMAN_REPO_PACKAGES='official-only'
-run_fail --noedit --nodiff --noconfirm --rebuild --cleanbuild --rmdeps -S clean-root
+run_fail --noedit --nodiff --noconfirm \
+    --build-mode=rebuild --rebuild --rmdeps -S clean-root
 assert_contains "Separated build/install does not support --rmdeps." "$output_file"
 assert_command "pacman -Si clean-root"
 assert_command_absent "pacman-conf --verbose RootDir DBPath"
@@ -440,14 +536,16 @@ run_fail -S -- --rmdeps
 assert_contains "Invalid package name: --rmdeps" "$output_file"
 assert_command_log_empty
 
-# Matrix K: upgrade-aurはglobal optionを消費するが、targetやopaque operandは受けない。
+# Matrix L: upgrade-aurはglobal optionを消費するが、targetやopaque operandは受けない。
 setup_case upgrade-aur-global-options-with-target
-run_fail --noedit upgrade-aur --nodiff --noconfirm --rebuild --cleanbuild clean-root
+run_fail --noedit upgrade-aur --nodiff --noconfirm \
+    --build-mode=clean --cleanbuild clean-root
 assert_contains "upgrade-aur does not accept target operands." "$output_file"
 assert_command_log_empty
 
 setup_case upgrade-aur-rejects-rmdeps
-run_fail --noedit --nodiff --noconfirm --rebuild --cleanbuild --rmdeps upgrade-aur
+run_fail --noedit --nodiff --noconfirm \
+    --build-mode=rebuild --rebuild --rmdeps upgrade-aur
 assert_contains "Separated build/install does not support --rmdeps." "$output_file"
 assert_command_log_empty
 
