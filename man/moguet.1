@@ -1,0 +1,608 @@
+.TH MOGUET 1 "August 2026" "Moguet 1.16.0" "User Commands"
+.\" parity:name
+.SH NAME
+moguet \- pacman-first AUR helper with verified source builds
+.
+.\" parity:synopsis
+.SH SYNOPSIS
+.B moguet
+.I operation
+.RI [ options ]
+.RI [ targets... ]
+.
+.B moguet
+.BR -h | --help
+.
+.B moguet
+.BR -V | --version
+.
+.\" parity:description
+.SH DESCRIPTION
+.B Moguet
+is a pacman-first AUR helper for Arch Linux with verified source builds and
+per-package build preferences.
+It keeps package transactions with
+.BR pacman (8),
+package builds with
+.BR makepkg (8),
+and repository transport with
+.BR git (1).
+Moguet owns planning, review, artifact validation, and the safe hand-off
+between those tools.
+.
+.PP
+Run
+.B moguet
+as a normal user.
+It invokes
+.B sudo pacman
+only for operations that require a system package transaction.
+AUR source retrieval, review, and builds are not run as root.
+Moguet is not an official Arch Linux, pacman, or AUR project, an independent
+package manager, or a complete clone of another AUR helper.
+.
+.PP
+The name combines the Japanese expression \(dqもぐもぐ\(dq and the English
+diminutive suffix
+.IR -let ,
+then shapes the resulting Mogulet toward lowercase French
+.IR muguet ,
+meaning lily of the valley.
+The flower is small and modest but poisonous, reflecting a helper that warns
+about danger or ambiguity and stops before unprovable mutation.
+The formal reading is \(dqモグエット\(dq.
+.B MU\%GUET
+and \(dqミュ\%ゲ\(dq are not aliases.
+.
+.PP
+Operations handled entirely by pacman preserve compatible pacman arguments
+that Moguet does not consume.
+When a target enters an AUR or source-build route, an option whose meaning
+cannot be preserved is rejected before external mutation instead of being
+silently ignored.
+Command and option tokens are locale-independent.
+.
+.\" parity:commands
+.SH COMMANDS
+.\" PUBLIC COMMANDS BEGIN
+.TP
+.B "build <pkg> [V=K]"
+Build one official-repository or AUR package from source without saving a
+source-build preference.
+The package is reviewed and its produced artifacts are validated before any
+selected artifact is handed to pacman.
+.
+.TP
+.B "upgrade"
+Run the pacman-compatible system upgrade, then inspect registered source-build
+preferences and rebuild configured packages when the existing update contract
+requires it.
+Use
+.B -Syu
+instead when registered source preferences must not be scanned.
+.
+.TP
+.B "upgrade-aur"
+Update installed packages that still resolve to exact AUR packages.
+This target-less operation does not run
+.B pacman -Syu
+and does not update packages selected only by source-build preferences.
+.
+.TP
+.B "upgrade-all"
+Run the system, registered-source, fresh foreign-inventory, and filtered AUR
+phases in that order.
+Explicit source preferences take priority over duplicate AUR targets.
+This is not one atomic transaction: execution stops on the first failure,
+does not roll back completed package transactions, and reports later work as
+not attempted.
+.
+.TP
+.B "clean"
+Clean the official package cache through
+.B sudo pacman -Sc
+and, after confirmation, the resolved Moguet cache.
+The state log is not part of the reproducible cache.
+.
+.TP
+.B "-G <pkg>"
+Export exactly one AUR package's complete PackageBase repository to
+.IR ./<PackageBase> .
+An existing destination of any type is a hard failure.
+The command does not use the build cache, evaluate PKGBUILD, retrieve
+dependencies, build, or install.
+Global and pacman options are unsupported for this operation.
+.
+.TP
+.B "-Gp <pkg>"
+Print only the root PKGBUILD bytes for exactly one AUR package's PackageBase
+to standard output.
+Diagnostics and PackageBase mapping go to standard error.
+The command uses a temporary checkout and does not keep a repository, evaluate
+PKGBUILD, retrieve dependencies, build, or install.
+Global and pacman options are unsupported.
+.
+.TP
+.B "deps [--recursive] <pkg>"
+Classify AUR runtime, make, and check dependencies.
+With
+.BR --recursive ,
+traverse AUR dependencies while displaying official, uniquely provided,
+ambiguous, and unresolved dependencies without traversing those categories.
+This command does not clone, build, install, or calculate a build order.
+.
+.TP
+.B "plan <pkg>"
+Display an AUR build-order plan and direct official repository package sizes.
+Unknown dependencies, ambiguous providers, cycles, and conflicts/replacements
+that Moguet cannot resolve make the plan incomplete.
+Metadata-size unavailability does not suppress the plan body.
+This command does not clone, build, or install.
+.
+.TP
+.B "fetch <pkg>"
+Retrieve the AUR PackageBase repositories needed by a complete inspection
+plan.
+Missing repositories are cloned.
+An existing clone runs only
+.BR "git fetch origin" ;
+Moguet does not pull, merge, reset, advance the working tree, build, or
+install.
+.
+.TP
+.B "add-src <pkg> [V=K]"
+Register a source-build preference and optional build environment assignments
+for one package.
+The v2 configuration file is not a source-preference table.
+.
+.TP
+.B "edit-src <pkg>"
+Edit an existing source-build preference using
+.B VISUAL
+or
+.BR EDITOR .
+.
+.TP
+.B "list-src"
+List registered source-build preferences and their visible environment
+assignments.
+.
+.TP
+.B "del-src <pkg>"
+Remove one source-build preference without reinstalling the binary package.
+.
+.TP
+.B "revert <pkg>"
+Remove one source-build preference and reinstall the official binary package
+when the target exists in configured official repositories.
+Review the displayed pacman transaction before confirming it.
+.
+.TP
+.B "-S <pkg>"
+Install packages.
+Auto routing uses official repositories first, honors an applicable source
+preference, and otherwise considers AUR.
+.B --aur
+forces the supported target route to AUR without repository fallback;
+.B --repo
+forces official binary repositories without AUR or source-build fallback.
+.
+.TP
+.B "-Syu"
+Perform a pacman-compatible system upgrade.
+This form does not scan every registered source-build preference.
+Use
+.B upgrade
+for that additional scope.
+.
+.TP
+.B "-Ss <query>"
+Search packages.
+Auto mode combines official repository and AUR results.
+.B --aur
+uses only AUR and does not refresh pacman databases;
+.B --repo
+uses only official repositories.
+.
+.TP
+.B "-Si <pkg>"
+Show package information.
+Auto mode prefers official repository information and falls back to exact AUR
+metadata when the package is absent.
+Source selectors restrict the lookup to their named source.
+.
+.TP
+.B "-Qua"
+Ask pacman for foreign-package updates, including installed packages that may
+have AUR updates.
+This remains a pacman-compatible query and is distinct from executing
+.BR upgrade-aur .
+.\" PUBLIC COMMANDS END
+.
+.\" parity:options
+.SH OPTIONS
+.\" PUBLIC OPTIONS BEGIN
+.TP
+.B "-h, --help"
+Show localized help and exit without creating XDG directories.
+.
+.TP
+.B "-V, --version"
+Show
+.B Moguet
+and the program version, then exit without creating XDG directories.
+.
+.TP
+.B "--edit"
+Select the prompt policy for PKGBUILD and detected top-level
+.I *.install
+review for this invocation.
+This overrides
+.BR review.pkgbuild .
+.
+.TP
+.B "--noedit"
+Select the skip policy for PKGBUILD and detected top-level
+.I *.install
+review for this invocation.
+It does not disable source, artifact, identity, or transaction validation.
+.
+.TP
+.B "--diff"
+Select the prompt policy for viewing repository update diffs.
+This overrides
+.BR review.diff .
+.
+.TP
+.B "--nodiff"
+Skip the repository update diff prompt.
+It does not authorize discarding user modifications or destructive Git
+operations.
+.
+.TP
+.B "--noconfirm"
+Pass non-confirmation behavior to supported pacman and makepkg execution and
+avoid Moguet prompts by using their defined defaults.
+This is not \(dqyes to everything\(dq and does not bypass unresolved or
+ambiguous dependencies, cycles, source selection, conflicts/replacements,
+artifact identity, ownership, or other safety guards.
+.
+.TP
+.B "--needed"
+Treat this as a pacman-compatible option.
+Pacman-only routes keep it in the ordered argument list.
+On supported AUR or source-build
+.B -S
+routes, apply it only once to final
+.B pacman -U
+installation.
+It does not skip planning, clone/fetch, review, validation, or build.
+.
+.TP
+.B "--build-mode=normal|rebuild|clean"
+Select the source-build mode for this invocation.
+The built-in default is
+.BR normal .
+The
+.B rebuild
+mode permits rebuilding an existing artifact; the
+.B clean
+mode also requests a clean source build.
+.
+.TP
+.B "--rebuild"
+Compatibility alias for
+.BR --build-mode=rebuild .
+.
+.TP
+.B "--cleanbuild"
+Compatibility alias for
+.BR --build-mode=clean .
+.
+.TP
+.B "--rmdeps"
+Recognize the legacy cleanup request but reject it on separated source-build
+routes before mutation.
+Moguet cannot prove the exact dependency set owned by the invocation and does
+not translate this option to
+.BR "makepkg -r" ,
+.BR "pacman -Rns" ,
+or custom orphan cleanup.
+.
+.TP
+.B "--aur"
+Limit supported
+.BR -S ,
+.BR -Ss ,
+and
+.B -Si
+forms to AUR, without official repository fallback.
+It is not supported for target-less upgrades or Moguet-specific inspection
+commands.
+.
+.TP
+.B "--repo"
+Limit supported
+.BR -S ,
+.BR -Ss ,
+and
+.B -Si
+forms to official binary repositories, without AUR or source-build fallback.
+It does not delete an existing source preference.
+.\" PUBLIC OPTIONS END
+.
+.PP
+Repeating the same source selector is allowed.
+Combining
+.B --aur
+and
+.B --repo
+fails before an external command or AUR query.
+Conflicting review, diff, or build-mode overrides fail before mutation rather
+than using last-one-wins behavior.
+.
+.\" parity:configuration
+.SH CONFIGURATION
+Moguet reads one optional, user-owned TOML file:
+.
+.nf
+$XDG_CONFIG_HOME/moguet/config.toml
+fallback: ~/.config/moguet/config.toml
+.fi
+.
+.PP
+The v2.0.0 schema and built-in defaults are:
+.
+.nf
+schema_version = 1
+
+[review]
+pkgbuild = "prompt"
+diff = "prompt"
+
+[build]
+mode = "normal"
+.fi
+.
+.PP
+Values are composed in this order:
+.
+.nf
+built-in defaults -> user config -> CLI override
+.fi
+.
+.PP
+A missing file is normal.
+An existing file requires integer
+.B schema_version = 1
+and is validated strictly.
+Invalid TOML, unknown keys, type errors, invalid enum values, and unsupported
+future schema versions stop before external mutation.
+Moguet treats the file as read-only input and does not create, rewrite, or
+migrate it automatically.
+It does not create or read
+.I /etc/moguet
+as a system-wide configuration layer.
+.
+.\" parity:files
+.SH FILES
+.TP
+.I $XDG_CONFIG_HOME/moguet/config.toml
+Optional user configuration.
+The fallback is
+.IR ~/.config/moguet/config.toml .
+.
+.TP
+.I /etc/jpacker/package.build/
+Current source-build preference store and a compatibility boundary separate
+from the user TOML configuration.
+Existing entries are read in place and are not copied to XDG storage.
+.
+.TP
+.I $XDG_STATE_HOME/moguet/moguet.log
+Default human-readable log.
+The fallback is
+.IR ~/.local/state/moguet/moguet.log .
+.
+.TP
+.I $XDG_CACHE_HOME/moguet/
+Reproducible repository and build cache.
+The fallback is
+.IR ~/.cache/moguet/ .
+Cache is not authoritative state.
+.
+.TP
+.I /usr/share/man/man1/moguet.1
+English authority man page.
+.
+.TP
+.I /usr/share/man/ja/man1/moguet.1
+Formal Japanese translation of this man page.
+.
+.TP
+.I /usr/share/bash-completion/completions/moguet
+Bash completion for the public CLI schema.
+.
+.TP
+.I /usr/share/zsh/site-functions/_moguet
+zsh completion for the public CLI schema.
+.
+.TP
+.I /usr/share/fish/vendor_completions.d/moguet.fish
+fish completion for the public CLI schema.
+.
+.TP
+.I /usr/share/locale/ja/LC_MESSAGES/moguet.mo
+Japanese GNU gettext runtime catalog.
+.
+.\" parity:environment
+.SH ENVIRONMENT
+.TP
+.B XDG_CONFIG_HOME
+Absolute base directory for user configuration.
+An unset or empty value falls back to
+.IR $HOME/.config .
+.
+.TP
+.B XDG_STATE_HOME
+Absolute base directory for persistent runtime state and the default log.
+An unset or empty value falls back to
+.IR $HOME/.local/state .
+.
+.TP
+.B XDG_CACHE_HOME
+Absolute base directory for reproducible cache.
+An unset or empty value falls back to
+.IR $HOME/.cache .
+.
+.TP
+.B HOME
+Used only for standard XDG fallbacks when the corresponding XDG variable is
+unset or empty.
+An unusable home or unsafe path fails closed.
+.
+.TP
+.B VISUAL
+Preferred editor.
+Resolution order is
+.B VISUAL
+then
+.B EDITOR
+then
+.BR nano .
+.
+.TP
+.B EDITOR
+Second editor choice when
+.B VISUAL
+is unset or empty.
+.
+.TP
+.BR LC_ALL , " LC_MESSAGES" , " LANG" , " LANGUAGE"
+Standard process-locale inputs used by GNU gettext.
+English is the source authority and fallback; Japanese is a formally supported
+translation.
+There is no
+.B --lang
+option or TOML language key.
+.
+.\" parity:safety
+.SH SAFETY
+Moguet stops before the relevant external mutation when it cannot determine
+dependency, provider, PackageBase, source, artifact, ownership, or transaction
+state authoritatively.
+It does not use
+.B --noconfirm
+to cross such a guard.
+.
+.PP
+.B deps
+and
+.B plan
+do not clone, build, or install.
+.B fetch
+does not update an existing working tree.
+The export commands do not build or install.
+External commands and privilege escalation remain visible to the user.
+.
+.PP
+Source-build PackageBase work uses a fresh artifact destination, validates all
+expected outputs, selects only required child package identities, and hands
+validated artifacts to one pacman transaction per PackageBase.
+Unknown, missing, duplicate, unexpected, or unrepresentable identities fail
+closed.
+.
+.PP
+Multi-phase updates are not atomic.
+A failure does not automatically roll back already completed package
+transactions.
+A cleanup failure after successful installation is partial success and must not
+be retried blindly.
+.
+.\" parity:examples
+.SH EXAMPLES
+.TP
+Install an AUR package without repository fallback:
+.RS
+.B moguet -S --aur google-chrome
+.RE
+.
+.TP
+Install an official binary while ignoring a source preference for this run:
+.RS
+.B moguet -S --repo fastfetch
+.RE
+.
+.TP
+Inspect an AUR dependency graph without cloning or building:
+.RS
+.B moguet deps --recursive google-chrome
+.RE
+.
+.TP
+View a build plan without mutation:
+.RS
+.B moguet plan mongodb-bin
+.RE
+.
+.TP
+Update all supported scopes in the documented phase order:
+.RS
+.B moguet upgrade-all
+.RE
+.
+.TP
+Temporarily restore review and normal build defaults over user config:
+.RS
+.B moguet --edit --diff --build-mode=normal -S google-chrome
+.RE
+.
+.\" parity:migration
+.SH MIGRATION
+Moguet v2 does not read
+.I /etc/jpacker/jpacker.conf
+as a normal configuration layer and does not automatically copy, rewrite, or
+delete
+.IR /etc/jpacker .
+Root-owned legacy data is not assigned to a user by inference.
+The existing
+.I /etc/jpacker/package.build/
+source-preference store is a separate compatibility boundary and is read in
+place; do not replay its entries through source-preference commands as a
+config migration step.
+.
+.PP
+Back up jpacker v1.16.0 data, remove the v1 package, install the validated
+Moguet package, and map only understood settings by hand.
+.B NOEDIT
+maps to
+.BR review.pkgbuild ;
+.B NODIFF
+maps to
+.BR review.diff ;
+legacy
+.BR EDITOR ,
+.BR LOGFILE ,
+and
+.B RMDEPS
+are not copied into TOML.
+Consult
+.I docs/migration/v1-to-v2.md
+or the migration guide shipped by the package for backup, completion/man
+verification, and rollback instructions.
+.
+.\" parity:see-also
+.SH SEE ALSO
+.BR pacman (8),
+.BR makepkg (8),
+.BR git (1)
+.
+.\" parity:license
+.SH LICENSE
+Moguet is distributed under GPL-3.0-or-later.
+jpacker v1.14.0 and earlier historical releases retain their original MIT
+license.
+.
+.\" parity:author
+.SH AUTHOR
+Maintained by the Moguet project.

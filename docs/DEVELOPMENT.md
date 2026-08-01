@@ -92,7 +92,7 @@ PR merge 後:
     make clean && make
     git diff --check
 
-    git add VERSION man/jpacker.8 README.md docs/
+    git add VERSION man/moguet.1 man/ja/moguet.1 README.md README.ja.md docs/
     git commit -m "vX.Y.Z release準備"
     git push -u origin release/vX.Y.Z
 

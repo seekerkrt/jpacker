@@ -31,10 +31,13 @@ expected_binary_version="Moguet v$version"
     fail "./moguet --version mismatch: expected '$expected_binary_version', got '$binary_version'"
 pass "./moguet --version matches VERSION"
 
-[ -f man/jpacker.8 ] || fail "man/jpacker.8 is missing; run make first."
-grep -Fq "\"jpacker $version\"" man/jpacker.8 ||
-    fail "man/jpacker.8 does not contain generated version 'jpacker $version'."
-pass "man/jpacker.8 contains VERSION"
+for manpage in man/moguet.1 man/ja/moguet.1
+do
+    [ -f "$manpage" ] || fail "$manpage is missing; run make first."
+    grep -Fq "\"Moguet $version\"" "$manpage" ||
+        fail "$manpage does not contain generated version 'Moguet $version'."
+    pass "$manpage contains VERSION"
+done
 
 [ -f PKGBUILD ] || fail "PKGBUILD is missing."
 grep -Fq 'pkgver=$(_read_version_file VERSION)' PKGBUILD ||

@@ -161,13 +161,16 @@ require_text docs/LICENSING.md \
     "jpacker v1.14.0 and earlier releases were distributed under the MIT License."
 require_text docs/LICENSING.md \
     "Those historical releases remain available under their original license."
-require_text README.md '現在のGPLライセンス開発系列とv1.15.0以降のjpackerは、`GPL-3.0-or-later`で提供します。'
-require_text README.md "v1.14.0以前のreleaseはMIT License"
 require_text README.md 'The current GPL-licensed development series and v1.15.0 or later releases are distributed under `GPL-3.0-or-later`.'
 require_text README.md "jpacker v1.14.0 and earlier releases"
-require_text README.md "[LICENSE](LICENSE)"
-require_text README.md "[docs/LICENSING.md](docs/LICENSING.md)"
-require_text README.md "[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)"
+require_text README.ja.md '現在のGPLライセンス開発系列とv1.15.0以降のjpackerは、`GPL-3.0-or-later`で提供します。'
+require_text README.ja.md "v1.14.0以前のreleaseはMIT License"
+for readme in README.md README.ja.md
+do
+    require_text "$readme" "[LICENSE](LICENSE)"
+    require_text "$readme" "[docs/LICENSING.md](docs/LICENSING.md)"
+    require_text "$readme" "[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)"
+done
 require_text THIRD_PARTY_NOTICES.md \
     "the current GPL-licensed jpacker development series"
 require_text docs/DECISIONS.md \
@@ -177,6 +180,7 @@ require_text docs/DECISIONS.md \
 
 for current_series_file in \
     README.md \
+    README.ja.md \
     THIRD_PARTY_NOTICES.md \
     docs/DECISIONS.md \
     docs/LICENSING.md
@@ -270,9 +274,12 @@ require_text PKGBUILD \
     'install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"'
 pass "PKGBUILD retains the pre-v1.15 MIT license-file fallback"
 
-if grep -Fx -- "MIT License" README.md >/dev/null; then
-    fail "README still contains the stale standalone current-project MIT label."
-fi
-pass "PKGBUILD metadata and current-project README follow the license boundary"
+for readme in README.md README.ja.md
+do
+    if grep -Fx -- "MIT License" "$readme" >/dev/null; then
+        fail "$readme still contains the stale standalone current-project MIT label."
+    fi
+done
+pass "PKGBUILD metadata and current-project READMEs follow the license boundary"
 
 printf 'license-check: all checks passed\n'
