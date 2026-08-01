@@ -1,6 +1,12 @@
 #!/bin/sh
 set -eu
 
+# English diagnostic assertions must not depend on an installed Moguet catalog
+# or the developer machine's ambient message locale.
+LC_ALL=C
+LANGUAGE=
+export LC_ALL LANGUAGE
+
 module_test_binary=$1
 integration_test_binary=$2
 repo_root=$(CDPATH='' cd "$(dirname "$0")/.." && pwd)

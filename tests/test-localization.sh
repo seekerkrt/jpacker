@@ -134,6 +134,48 @@ run_list_sources_case() {
     printf '%s\n' "$output_file"
 }
 
+run_xdg_resolution_case() {
+    case_name=$1
+    process_locale=$2
+    language=$3
+    output_file=$tmp_dir/$case_name.out
+    xdg_root=$tmp_dir/$case_name-xdg
+    empty_path=$xdg_root/empty-path
+    work_dir=$xdg_root/work
+
+    mkdir -p \
+        "$xdg_root/state" "$xdg_root/cache" "$empty_path" "$work_dir"
+    set +e
+    (
+        CDPATH= cd "$work_dir"
+        LOCPATH=$locale_root \
+        LANG=$process_locale \
+        LC_ALL=$process_locale \
+        LANGUAGE=$language \
+        HOME=$test_home \
+        XDG_CONFIG_HOME=relative/config-secret \
+        XDG_STATE_HOME=$xdg_root/state \
+        XDG_CACHE_HOME=$xdg_root/cache \
+        PATH=$empty_path \
+            "$cli_binary" -Q filesystem
+    ) > "$output_file" 2>&1
+    exit_status=$?
+    set -e
+
+    [ "$exit_status" -eq 1 ] || {
+        sed -n '1,200p' "$output_file" >&2
+        fail "$case_name returned $exit_status instead of 1."
+    }
+    [ ! -e "$xdg_root/state/moguet" ] &&
+        [ ! -L "$xdg_root/state/moguet" ] &&
+        [ ! -e "$xdg_root/cache/moguet" ] &&
+        [ ! -L "$xdg_root/cache/moguet" ] &&
+        [ ! -e "$work_dir/relative" ] &&
+        [ ! -L "$work_dir/relative" ] ||
+        fail "$case_name mutated XDG storage before path rejection."
+    printf '%s\n' "$output_file"
+}
+
 strip_ansi() {
     input_file=$1
     output_file=$2
@@ -232,6 +274,27 @@ assert_line '$XDG_CONFIG_HOME/moguet/config.toml' "$ja_help_tokens"
 [ ! -e "$tmp_dir/config" ] && [ ! -e "$tmp_dir/state" ] &&
     [ ! -e "$tmp_dir/cache" ] ||
     fail 'help-only CLI localization cases created XDG consumer directories.'
+
+c_xdg_resolution=$(run_xdg_resolution_case \
+    cli-xdg-resolution-c C '')
+assert_contains \
+    'Cannot resolve Moguet config directory: XDG_CONFIG_HOME must be an absolute path.' \
+    "$c_xdg_resolution"
+assert_not_contains 'relative/config-secret' "$c_xdg_resolution"
+
+ja_xdg_resolution=$(run_xdg_resolution_case \
+    cli-xdg-resolution-ja en_US.UTF-8 ja)
+assert_contains \
+    'Moguetのconfigディレクトリを解決できません: XDG_CONFIG_HOMEは絶対パスである必要があります。' \
+    "$ja_xdg_resolution"
+assert_not_contains 'relative/config-secret' "$ja_xdg_resolution"
+
+zz_xdg_resolution=$(run_xdg_resolution_case \
+    cli-xdg-resolution-missing-translation en_US.UTF-8 zz)
+assert_contains \
+    'Cannot resolve Moguet config directory: XDG_CONFIG_HOME must be an absolute path.' \
+    "$zz_xdg_resolution"
+assert_not_contains 'relative/config-secret' "$zz_xdg_resolution"
 
 missing_preference_root=$tmp_dir/missing-package.build
 empty_preference_root=$tmp_dir/empty-package.build

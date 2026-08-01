@@ -1,6 +1,7 @@
 #include "xdg_paths.hpp"
 
 #include "application_identity.hpp"
+#include "localization.hpp"
 
 #include <cstdlib>
 #include <filesystem>
@@ -65,37 +66,66 @@ EnvironmentVariable xdg_environment_variable(DirectoryKind directory_kind) {
 }
 
 std::string resolution_diagnostic(const ResolutionFailure& failure) {
-    const std::string prefix =
-            "Cannot resolve " +
-            std::string(application_identity::PROJECT_NAME) + " " +
-            std::string(directory_kind_name(failure.directory_kind)) +
-            " directory: ";
-    const std::string variable =
-            std::string(environment_variable_name(failure.environment_variable));
+    const std::string_view directory_kind =
+            directory_kind_name(failure.directory_kind);
+    const std::string_view variable =
+            environment_variable_name(failure.environment_variable);
 
     switch(failure.code) {
     case ResolutionErrorCode::MissingHome:
-        return prefix +
-                std::string(environment_variable_name(
-                        xdg_environment_variable(failure.directory_kind))) +
-                " is unset or empty, and HOME is not set.";
+        return localization::format_translated_message(
+                // TRANSLATORS: The placeholders are the Moguet project identity,
+                // literal config/state/cache kind, and environment-variable identities.
+                "Cannot resolve {} {} directory: {} is unset or empty, and {} is not set.",
+                application_identity::PROJECT_NAME, directory_kind,
+                environment_variable_name(
+                        xdg_environment_variable(failure.directory_kind)),
+                environment_variable_name(EnvironmentVariable::Home));
     case ResolutionErrorCode::EmptyHome:
-        return prefix +
-                std::string(environment_variable_name(
-                        xdg_environment_variable(failure.directory_kind))) +
-                " is unset or empty, and HOME is empty.";
+        return localization::format_translated_message(
+                // TRANSLATORS: The placeholders are the Moguet project identity,
+                // literal config/state/cache kind, and environment-variable identities.
+                "Cannot resolve {} {} directory: {} is unset or empty, and {} is empty.",
+                application_identity::PROJECT_NAME, directory_kind,
+                environment_variable_name(
+                        xdg_environment_variable(failure.directory_kind)),
+                environment_variable_name(EnvironmentVariable::Home));
     case ResolutionErrorCode::RelativePath:
-        return prefix + variable + " must be an absolute path.";
+        return localization::format_translated_message(
+                // TRANSLATORS: The placeholders are the Moguet project identity,
+                // literal config/state/cache kind, and environment-variable identity.
+                "Cannot resolve {} {} directory: {} must be an absolute path.",
+                application_identity::PROJECT_NAME, directory_kind, variable);
     case ResolutionErrorCode::DotComponent:
-        return prefix + variable +
-                " contains a '.' or '..' path component.";
+        return localization::format_translated_message(
+                // TRANSLATORS: The placeholders are the Moguet project identity,
+                // literal config/state/cache kind, environment-variable identity, and
+                // literal path components.
+                "Cannot resolve {} {} directory: {} contains a '{}' or '{}' path component.",
+                application_identity::PROJECT_NAME, directory_kind, variable,
+                ".", "..");
     case ResolutionErrorCode::AmbiguousLeadingDoubleSlash:
-        return prefix + variable +
-                " begins with the implementation-defined '//' form.";
+        return localization::format_translated_message(
+                // TRANSLATORS: The placeholders are the Moguet project identity,
+                // literal config/state/cache kind, environment-variable identity, and
+                // literal double-slash token.
+                "Cannot resolve {} {} directory: {} begins with the implementation-defined '{}' form.",
+                application_identity::PROJECT_NAME, directory_kind, variable,
+                "//");
     case ResolutionErrorCode::EmbeddedNull:
-        return prefix + variable + " contains an embedded NUL byte.";
+        return localization::format_translated_message(
+                // TRANSLATORS: The placeholders are the Moguet project identity,
+                // literal config/state/cache kind, environment-variable identity, and
+                // literal NUL token.
+                "Cannot resolve {} {} directory: {} contains an embedded {} byte.",
+                application_identity::PROJECT_NAME, directory_kind, variable,
+                "NUL");
     case ResolutionErrorCode::MalformedPath:
-        return prefix + variable + " is not a valid native path.";
+        return localization::format_translated_message(
+                // TRANSLATORS: The placeholders are the Moguet project identity,
+                // literal config/state/cache kind, and environment-variable identity.
+                "Cannot resolve {} {} directory: {} is not a valid native path.",
+                application_identity::PROJECT_NAME, directory_kind, variable);
     }
     throw std::logic_error("Unknown XDG path resolution error code.");
 }
