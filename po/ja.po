@@ -2,7 +2,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Moguet 1.16.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-01 11:39+0900\n"
+"POT-Creation-Date: 2026-08-01 14:27+0900\n"
 "PO-Revision-Date: 2026-08-01 11:39+0900\n"
 "Last-Translator: Moguet contributors\n"
 "Language-Team: Japanese\n"
@@ -281,3 +281,15 @@ msgstr "ソースビルドモード"
 #: src/source_build.cpp:490
 msgid "Rebuild package?"
 msgstr "パッケージを再ビルドしますか？"
+
+#: src/commands_source_maintenance.cpp:434
+msgid "No source-build packages registered."
+msgstr "ソースビルド対象のパッケージは登録されていません。"
+
+#: src/commands_source_maintenance.cpp:440
+msgid "Registered Source Packages:"
+msgstr "登録済みソースパッケージ:"
+
+#: src/commands_source_maintenance.cpp:456
+msgid "(none)"
+msgstr "（なし）"

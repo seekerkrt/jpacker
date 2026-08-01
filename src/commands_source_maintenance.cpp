@@ -3,6 +3,7 @@
 #include "application_identity.hpp"
 #include "app_config.hpp"
 #include "cache_authority.hpp"
+#include "localization.hpp"
 #include "logging.hpp"
 #include "package_metadata.hpp"
 #include "package_identifier.hpp"
@@ -429,10 +430,15 @@ int cmd_edit_src(
 
 void cmd_list_src() {
     if(!fs::exists(source_preference_root())) {
-        std::cout << "No source-build packages registered." << std::endl;
+        std::cout << localization::translate_message(
+                             "No source-build packages registered.")
+                  << std::endl;
         return;
     }
-    std::cout << "\033[1mRegistered Source Packages:\033[0m" << std::endl;
+    std::cout << "\033[1m"
+              << localization::translate_message(
+                         "Registered Source Packages:")
+              << "\033[0m" << std::endl;
     bool found = false;
     for(const auto& entry : source_preference_entries()) {
         if(entry.is_regular_file()) {
@@ -446,7 +452,10 @@ void cmd_list_src() {
                     });
         }
     }
-    if(!found) std::cout << "  (none)" << std::endl;
+    if(!found) {
+        std::cout << "  " << localization::translate_message("(none)")
+                  << std::endl;
+    }
 }
 
 int cmd_del_src(const std::vector<std::string>& targets) {
