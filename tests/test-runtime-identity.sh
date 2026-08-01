@@ -62,9 +62,8 @@ XDG_CACHE_HOME=$info_case_dir/xdg-cache \
     "$production_binary" --help > "$help_output" 2>&1
 assert_contains "Moguet" "$help_output"
 assert_contains "    moguet <op> [options] [targets...]" "$help_output"
-assert_contains "    legacy jpacker.conf: EDITOR=" "$help_output"
-grep -Fv 'jpacker.conf:' "$help_output" > "$tmp_dir/help-without-legacy-config"
-if grep -Fi -- 'jpacker' "$tmp_dir/help-without-legacy-config" >/dev/null; then
+assert_contains '$XDG_CONFIG_HOME/moguet/config.toml' "$help_output"
+if grep -Fi -- 'jpacker' "$help_output" >/dev/null; then
     fail "help retains an unintended jpacker project identity."
 fi
 

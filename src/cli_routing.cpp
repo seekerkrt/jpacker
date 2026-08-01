@@ -1,6 +1,7 @@
 #include "cli_routing.hpp"
 
 #include "application_identity.hpp"
+#include "cli_authority.hpp"
 
 #include <algorithm>
 #include <stdexcept>
@@ -22,8 +23,8 @@ std::string package_source_selection_option(PackageSourceSelection selection) {
 } // namespace
 
 std::optional<PkgbuildExportMode> pkgbuild_export_mode(const ParsedCliArguments& parsed) {
-    if(parsed.operation == "-G") return PkgbuildExportMode::Tree;
-    if(parsed.operation == "-Gp") return PkgbuildExportMode::PkgbuildStdout;
+    if(parsed.operation == cli_authority::PKGBUILD_EXPORT_OPERATION) return PkgbuildExportMode::Tree;
+    if(parsed.operation == cli_authority::PKGBUILD_PRINT_OPERATION) return PkgbuildExportMode::PkgbuildStdout;
     return std::nullopt;
 }
 

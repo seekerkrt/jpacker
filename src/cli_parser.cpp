@@ -1,7 +1,8 @@
 #include "cli_parser.hpp"
 
+#include "cli_authority.hpp"
+
 #include <algorithm>
-#include <array>
 #include <iostream>
 #include <stdexcept>
 #include <string_view>
@@ -9,46 +10,12 @@
 
 namespace {
 
-enum class MoguetGlobalOption {
-    Edit,
-    NoEdit,
-    Diff,
-    NoDiff,
-    NoConfirm,
-    BuildMode,
-    Rebuild,
-    CleanBuild,
-    RmDeps,
-    Aur,
-    Repo,
-};
-
-constexpr std::string_view BUILD_MODE_OPTION = "--build-mode";
-constexpr std::string_view BUILD_MODE_OPTION_PREFIX = "--build-mode=";
-
-const std::array<std::pair<const char*, MoguetGlobalOption>, 10> MOGUET_GLOBAL_OPTIONS = {{
-        {"--edit", MoguetGlobalOption::Edit},
-        {"--noedit", MoguetGlobalOption::NoEdit},
-        {"--diff", MoguetGlobalOption::Diff},
-        {"--nodiff", MoguetGlobalOption::NoDiff},
-        {"--noconfirm", MoguetGlobalOption::NoConfirm},
-        {"--rebuild", MoguetGlobalOption::Rebuild},
-        {"--cleanbuild", MoguetGlobalOption::CleanBuild},
-        {"--rmdeps", MoguetGlobalOption::RmDeps},
-        {"--aur", MoguetGlobalOption::Aur},
-        {"--repo", MoguetGlobalOption::Repo},
-}};
-
-std::optional<MoguetGlobalOption> moguet_global_option_kind(const std::string& arg) {
-    if(arg == BUILD_MODE_OPTION || arg.starts_with(BUILD_MODE_OPTION_PREFIX)) {
-        return MoguetGlobalOption::BuildMode;
-    }
-
-    auto option = std::find_if(
-            MOGUET_GLOBAL_OPTIONS.begin(), MOGUET_GLOBAL_OPTIONS.end(),
-            [&arg](const auto& entry) { return arg == entry.first; });
-    if(option == MOGUET_GLOBAL_OPTIONS.end()) return std::nullopt;
-    return option->second;
+std::optional<cli_authority::GlobalOptionId> moguet_global_option_kind(
+        const std::string& argument) {
+    const cli_authority::GlobalOptionSpec* option =
+            cli_authority::find_moguet_global_option(argument);
+    if(option == nullptr) return std::nullopt;
+    return option->id;
 }
 
 void report_parse_error(const std::string& message) {
@@ -98,7 +65,11 @@ bool apply_final_value_override(
 
 bool apply_build_mode_option(
         const std::string& arg, ParsedCliArguments& parsed) {
-    if(arg == BUILD_MODE_OPTION) {
+    const std::string_view option =
+            cli_authority::global_option_spec(
+                    cli_authority::GlobalOptionId::BuildMode)
+                    .token;
+    if(arg == option) {
         report_parse_error(
                 "Option --build-mode requires an attached value: "
                 "normal, rebuild, or clean.");
@@ -106,13 +77,13 @@ bool apply_build_mode_option(
     }
 
     const std::string_view value =
-            std::string_view(arg).substr(BUILD_MODE_OPTION_PREFIX.size());
+            std::string_view(arg).substr(option.size() + 1);
     std::optional<BuildMode> mode;
-    if(value == "normal")
+    if(value == cli_authority::BUILD_MODE_NORMAL)
         mode = BuildMode::Normal;
-    else if(value == "rebuild")
+    else if(value == cli_authority::BUILD_MODE_REBUILD)
         mode = BuildMode::Rebuild;
-    else if(value == "clean")
+    else if(value == cli_authority::BUILD_MODE_CLEAN)
         mode = BuildMode::Clean;
 
     if(!mode.has_value()) {
@@ -127,58 +98,61 @@ bool apply_build_mode_option(
 }
 
 bool apply_moguet_global_option(const std::string& arg, ParsedCliArguments& parsed) {
-    std::optional<MoguetGlobalOption> option = moguet_global_option_kind(arg);
+    std::optional<cli_authority::GlobalOptionId> option =
+            moguet_global_option_kind(arg);
     if(!option.has_value()) throw std::logic_error("Unknown Moguet global option: " + arg);
 
     switch(option.value()) {
-    case MoguetGlobalOption::Edit:
+    case cli_authority::GlobalOptionId::Edit:
         return apply_final_value_override(
                 parsed.cli_overrides.review_pkgbuild,
                 ReviewPolicy::Prompt, "review.pkgbuild",
                 review_policy_name);
-    case MoguetGlobalOption::NoEdit:
+    case cli_authority::GlobalOptionId::NoEdit:
         return apply_final_value_override(
                 parsed.cli_overrides.review_pkgbuild,
                 ReviewPolicy::Skip, "review.pkgbuild",
                 review_policy_name);
-    case MoguetGlobalOption::Diff:
+    case cli_authority::GlobalOptionId::Diff:
         return apply_final_value_override(
                 parsed.cli_overrides.review_diff,
                 ReviewPolicy::Prompt, "review.diff", review_policy_name);
-    case MoguetGlobalOption::NoDiff:
+    case cli_authority::GlobalOptionId::NoDiff:
         return apply_final_value_override(
                 parsed.cli_overrides.review_diff,
                 ReviewPolicy::Skip, "review.diff", review_policy_name);
-    case MoguetGlobalOption::NoConfirm:
+    case cli_authority::GlobalOptionId::NoConfirm:
         parsed.cli_overrides.no_confirm = true;
         break;
-    case MoguetGlobalOption::BuildMode:
+    case cli_authority::GlobalOptionId::BuildMode:
         return apply_build_mode_option(arg, parsed);
-    case MoguetGlobalOption::Rebuild:
+    case cli_authority::GlobalOptionId::Rebuild:
         return apply_final_value_override(
                 parsed.cli_overrides.build_mode, BuildMode::Rebuild,
                 "build.mode", build_mode_name);
-    case MoguetGlobalOption::CleanBuild:
+    case cli_authority::GlobalOptionId::CleanBuild:
         return apply_final_value_override(
                 parsed.cli_overrides.build_mode, BuildMode::Clean,
                 "build.mode", build_mode_name);
-    case MoguetGlobalOption::RmDeps:
+    case cli_authority::GlobalOptionId::RmDeps:
         parsed.cli_overrides.rm_deps = true;
         break;
-    case MoguetGlobalOption::Aur:
+    case cli_authority::GlobalOptionId::Aur:
         if(parsed.source_selection == PackageSourceSelection::RepoOnly) {
             report_parse_error("Cannot combine --aur and --repo.");
             return false;
         }
         parsed.source_selection = PackageSourceSelection::AurOnly;
         break;
-    case MoguetGlobalOption::Repo:
+    case cli_authority::GlobalOptionId::Repo:
         if(parsed.source_selection == PackageSourceSelection::AurOnly) {
             report_parse_error("Cannot combine --aur and --repo.");
             return false;
         }
         parsed.source_selection = PackageSourceSelection::RepoOnly;
         break;
+    case cli_authority::GlobalOptionId::Count:
+        throw std::logic_error("Invalid Moguet global option authority entry.");
     }
     return true;
 }

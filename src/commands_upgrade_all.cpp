@@ -2,6 +2,7 @@
 
 #include "app_config.hpp"
 #include "aur_update_cli_presentation.hpp"
+#include "cli_authority.hpp"
 #include "cli_parser.hpp"
 #include "logging.hpp"
 #include "upgrade_all_operation.hpp"
@@ -1319,18 +1320,39 @@ void print_operation_result(const UpgradeAllOperationResult& result) {
 }
 
 bool is_supported_upgrade_all_global_option(const std::string& option) {
-    return option == "--edit" || option == "--noedit" ||
-           option == "--diff" || option == "--nodiff" ||
-           option == "--noconfirm" || option == "--rebuild" ||
-           option == "--cleanbuild" ||
-           option.starts_with("--build-mode=");
+    const cli_authority::GlobalOptionSpec* spec =
+            cli_authority::find_moguet_global_option(option);
+    if(spec == nullptr) return false;
+
+    switch(spec->id) {
+    case cli_authority::GlobalOptionId::Edit:
+    case cli_authority::GlobalOptionId::NoEdit:
+    case cli_authority::GlobalOptionId::Diff:
+    case cli_authority::GlobalOptionId::NoDiff:
+    case cli_authority::GlobalOptionId::NoConfirm:
+    case cli_authority::GlobalOptionId::BuildMode:
+    case cli_authority::GlobalOptionId::Rebuild:
+    case cli_authority::GlobalOptionId::CleanBuild:
+        return true;
+    case cli_authority::GlobalOptionId::RmDeps:
+    case cli_authority::GlobalOptionId::Aur:
+    case cli_authority::GlobalOptionId::Repo:
+    case cli_authority::GlobalOptionId::Count:
+        return false;
+    }
+    return false;
 }
 
 } // namespace
 
 std::vector<std::string> validate_upgrade_all_invocation(
         const ParsedCliArguments& parsed) {
-    if(parsed.operation != "upgrade-all") return {};
+    if(parsed.operation !=
+       cli_authority::operation_spec(
+               cli_authority::OperationId::UpgradeAll)
+               .token) {
+        return {};
+    }
 
     std::vector<std::string> errors;
     for(const ParsedCliToken& token : parsed.tokens) {

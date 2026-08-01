@@ -15,6 +15,7 @@ TEST_TARGET := build/tests/moguet-test
 APPLICATION_IDENTITY_TEST_TARGET := $(BUILD_DIR)/tests/application-identity-test
 LOCALIZATION_TEST_TARGET := $(BUILD_DIR)/tests/localization-test
 LOCALIZATION_MISSING_CATALOG_TEST_TARGET := $(BUILD_DIR)/tests/localization-missing-catalog-test
+CLI_LOCALIZATION_TEST_TARGET := $(BUILD_DIR)/tests/moguet-cli-localization-test
 XDG_PATHS_TEST_TARGET := $(BUILD_DIR)/tests/xdg-paths-test
 XDG_DIRECTORY_SAFETY_TEST_TARGET := $(BUILD_DIR)/tests/xdg-directory-safety-test
 XDG_STATE_LOG_TEST_TARGET := $(BUILD_DIR)/tests/xdg-state-log-test
@@ -822,6 +823,11 @@ check-catalogs: check-localization-config $(POT_FILE)
 			--output-file="$$pot_format_messages" "$$pot_utf8"; \
 		for locale in $(LINGUAS); do \
 			po_file="$(PO_DIR)/$$locale.po"; \
+			if ! $(MSGCMP) --no-fuzzy-matching \
+					"$$po_file" "$$pot_utf8"; then \
+				echo "error: $$po_file has untranslated or fuzzy messages required by $(POT_FILE); run 'make update-po' and complete the translations" >&2; \
+				exit 1; \
+			fi; \
 			po_format_messages="$$metadata_dir/$$locale-c++-format.po"; \
 			rm -f "$$po_format_messages"; \
 			$(MSGGREP) --sticky-flag=c++-format --force-po --no-location --no-wrap \
@@ -906,6 +912,14 @@ $(LOCALIZATION_MISSING_CATALOG_TEST_TARGET): tests/localization_test.cpp $(SRC_D
 		-I$(SRC_DIR) \
 		tests/localization_test.cpp $(SRC_DIR)/localization.cpp \
 		-o $@
+
+$(CLI_LOCALIZATION_TEST_TARGET): $(SRCS) $(HEADERS) $(VERSION_FILE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling CLI localization integration test binary"
+	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
+		-DMOGUET_LOCALE_DIRECTORY=\"$(MOGUET_TEST_CATALOG_DIR)\" \
+		-DMOGUET_ENABLE_TEST_OVERRIDES \
+		$(SRCS) -o $@ $(MY_LDLIBS) $(LIBALPM_LDLIBS)
 
 $(MOGUET_TEST_ZZ_MO): $(MOGUET_TEST_ZZ_PO)
 	@mkdir -p $(dir $@)
@@ -1346,14 +1360,15 @@ test-internal-identity:
 test-application-identity: $(APPLICATION_IDENTITY_TEST_TARGET)
 	$(abspath $(APPLICATION_IDENTITY_TEST_TARGET)) "$(VERSION)"
 
-test-localization: check-catalogs $(LOCALIZATION_TEST_TARGET) $(LOCALIZATION_MISSING_CATALOG_TEST_TARGET) $(MO_FILES) $(MOGUET_TEST_ZZ_MO) $(MOGUET_TEST_BROKEN_MO) $(LOCALIZATION_INVALID_FORMAT_PO)
+test-localization: check-catalogs $(LOCALIZATION_TEST_TARGET) $(LOCALIZATION_MISSING_CATALOG_TEST_TARGET) $(CLI_LOCALIZATION_TEST_TARGET) $(MO_FILES) $(MOGUET_TEST_ZZ_MO) $(MOGUET_TEST_BROKEN_MO) $(LOCALIZATION_INVALID_FORMAT_PO)
 	sh tests/test-localization.sh \
 		$(abspath $(LOCALIZATION_TEST_TARGET)) \
 		$(abspath $(LOCALIZATION_MISSING_CATALOG_TEST_TARGET)) \
 		$(MOGUET_TEST_CATALOG_DIR) \
 		$(LOCALIZATION_MISSING_CATALOG_DIR) \
 		$(abspath $(LOCALIZATION_INVALID_FORMAT_PO)) \
-		"$(MSGFMT)"
+		"$(MSGFMT)" \
+		$(abspath $(CLI_LOCALIZATION_TEST_TARGET))
 
 test-catalog-metadata-gate: $(PO_DIR)/ja.po $(POT_FILE) $(LINGUAS_FILE) $(POTFILES_FILE)
 	sh tests/test-catalog-metadata-gate.sh \
