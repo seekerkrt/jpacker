@@ -1,5 +1,6 @@
 #include "source_preference.hpp"
 
+#include "localization.hpp"
 #include "package_identifier.hpp"
 
 #include <array>
@@ -199,8 +200,11 @@ SourceBuildEnvironment parse_source_preference(
                 value = expand_config_vars(value, variables);
             } catch(const std::exception& error) {
                 if(should_emit_warnings) {
-                    on_warning(
-                            "Failed to expand variables for " + key + ": " + error.what());
+                    // TRANSLATORS: The placeholders are an environment key and
+                    // the expansion failure detail.
+                    on_warning(localization::format_translated_message(
+                            "Failed to expand variables for {}: {}", key,
+                            error.what()));
                 }
             }
             variables[key] = value;
@@ -208,7 +212,10 @@ SourceBuildEnvironment parse_source_preference(
             // emptyも含めてread順のまま保持する。
             environment.ordered_assignments.push_back({key, value});
         } else if(line.find('=') != std::string::npos && should_emit_warnings) {
-            on_warning("Ignoring invalid environment assignment: " + trim(line));
+            // TRANSLATORS: The placeholder is the literal invalid assignment.
+            on_warning(localization::format_translated_message(
+                    "Ignoring invalid environment assignment: {}",
+                    trim(line)));
         }
     }
     return environment;
@@ -219,25 +226,41 @@ std::error_code current_system_error() {
 }
 
 std::string source_preference_system_diagnostic(
-        const std::string& operation,
+        SourcePreferenceFailureKind kind,
         const std::filesystem::path& entry_path,
         const std::error_code& error) {
-    return operation + " source preference entry " + entry_path.string() + ": " +
-            error.message();
+    switch(kind) {
+    case SourcePreferenceFailureKind::StatusUnavailable:
+        return localization::format_translated_message(
+                "Failed to inspect source preference entry {}: {}",
+                entry_path.string(), error.message());
+    case SourcePreferenceFailureKind::OpenFailed:
+        return localization::format_translated_message(
+                "Failed to open source preference entry {}: {}",
+                entry_path.string(), error.message());
+    case SourcePreferenceFailureKind::ReadFailed:
+        return localization::format_translated_message(
+                "Failed to read source preference entry {}: {}",
+                entry_path.string(), error.message());
+    case SourcePreferenceFailureKind::UnsupportedFileType:
+        break;
+    }
+    return localization::format_translated_message(
+            "Source preference entry {} failed with an unknown error: {}",
+            entry_path.string(), error.message());
 }
 
 SourcePreferenceFailure source_preference_system_failure(
         SourcePreferenceFailureKind kind,
         const std::filesystem::path& entry_path,
-        const std::error_code& error,
-        const std::string& operation) {
+        const std::error_code& error) {
     return {
             .kind = kind,
             .entry_path = entry_path,
             .system_error = error,
             .observed_file_type = std::nullopt,
             .diagnostic = source_preference_system_diagnostic(
-                    operation, entry_path, error),
+                    kind, entry_path, error),
     };
 }
 
@@ -260,8 +283,9 @@ SourcePreferenceFailure source_preference_file_type_failure(
             .entry_path = entry_path,
             .system_error = std::nullopt,
             .observed_file_type = observed_file_type,
-            .diagnostic = "Source preference entry is not a regular file: " +
-                    entry_path.string(),
+            .diagnostic = localization::format_translated_message(
+                    "Source preference entry is not a regular file: {}",
+                    entry_path.string()),
     };
 }
 
@@ -323,7 +347,7 @@ StrictSourcePreferenceResult read_source_preference_strict(
         }
         return source_preference_system_failure(
                 SourcePreferenceFailureKind::StatusUnavailable,
-                entry_path, status_error, "Failed to inspect");
+                entry_path, status_error);
     }
     if(entry_status.type() == std::filesystem::file_type::not_found) {
         return SourcePreferenceAbsent{};
@@ -353,7 +377,7 @@ StrictSourcePreferenceResult read_source_preference_strict(
         const std::error_code error = current_system_error();
         return source_preference_system_failure(
                 SourcePreferenceFailureKind::OpenFailed,
-                entry_path, error, "Failed to open");
+                entry_path, error);
     }
     SourcePreferenceDescriptor descriptor(raw_descriptor);
 
@@ -366,7 +390,7 @@ StrictSourcePreferenceResult read_source_preference_strict(
         const std::error_code error = current_system_error();
         return source_preference_system_failure(
                 SourcePreferenceFailureKind::StatusUnavailable,
-                entry_path, error, "Failed to inspect opened");
+                entry_path, error);
     }
     const std::filesystem::file_type opened_file_type =
             file_type_from_mode(opened_status.st_mode);
@@ -395,7 +419,7 @@ StrictSourcePreferenceResult read_source_preference_strict(
         const std::error_code error = current_system_error();
         return source_preference_system_failure(
                 SourcePreferenceFailureKind::ReadFailed,
-                entry_path, error, "Failed to read");
+                entry_path, error);
     }
 
     std::vector<std::string> warnings;

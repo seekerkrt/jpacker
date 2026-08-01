@@ -2,6 +2,7 @@
 
 #include "app_config.hpp"
 #include "cache_authority.hpp"
+#include "localization.hpp"
 
 #include <algorithm>
 #include <exception>
@@ -11,14 +12,37 @@
 
 namespace {
 
-constexpr const char* CONSUMED_CAPABILITY_DIAGNOSTIC =
-        "Prepared upgrade-all operation is invalid or has already been consumed.";
-constexpr const char* OPTION_MISMATCH_DIAGNOSTIC =
-        "Prepared upgrade-all options differ from execution options.";
-constexpr const char* SOURCE_SNAPSHOT_MISMATCH_DIAGNOSTIC =
-        "Prepared upgrade-all source snapshot differs from its nested system/source capability.";
-constexpr const char* SOURCE_CORRELATION_MISMATCH_DIAGNOSTIC =
-        "Prepared upgrade-all explicit source correlation is inconsistent.";
+constexpr const char* AUR_SERVICE = "AUR";
+constexpr const char* COMMAND_NAME = "upgrade-all";
+constexpr const char* COMMAND_SENTENCE_NAME = "Upgrade-all";
+constexpr const char* PACKAGE_BASE_FIELD = "PackageBase";
+
+std::string consumed_capability_diagnostic() {
+    // TRANSLATORS: The placeholder is the literal command name "upgrade-all".
+    return localization::format_translated_message(
+            "Prepared {} operation is invalid or has already been consumed.",
+            COMMAND_NAME);
+}
+
+std::string option_mismatch_diagnostic() {
+    // TRANSLATORS: The placeholder is the literal command name "upgrade-all".
+    return localization::format_translated_message(
+            "Prepared {} options differ from execution options.", COMMAND_NAME);
+}
+
+std::string source_snapshot_mismatch_diagnostic() {
+    // TRANSLATORS: The placeholder is the literal command name "upgrade-all".
+    return localization::format_translated_message(
+            "Prepared {} source snapshot differs from its nested system/source capability.",
+            COMMAND_NAME);
+}
+
+std::string source_correlation_mismatch_diagnostic() {
+    // TRANSLATORS: The placeholder is the literal command name "upgrade-all".
+    return localization::format_translated_message(
+            "Prepared {} explicit source correlation is inconsistent.",
+            COMMAND_NAME);
+}
 
 bool options_match(
         const SystemSourceUpgradeOptionSnapshot& snapshot,
@@ -222,9 +246,9 @@ SystemSourceUpgradeResult make_unavailable_system_source_result(
     if(observed_phase == SystemSourceUpgradePhase::System) {
         result.system.status = SystemUpgradePhaseStatus::Failed;
         result.system.package_state_change = PackageStateChange::Unknown;
-        result.system.diagnostic =
-                "System result unavailable after phase started due to an unexpected exception: " +
-                diagnostic;
+        result.system.diagnostic = localization::format_translated_message(
+                "The system result is unavailable because an unexpected exception occurred after the phase started: {}",
+                diagnostic);
     } else if(observed_phase ==
               SystemSourceUpgradePhase::RegisteredSource) {
         result.system.status = SystemUpgradePhaseStatus::Completed;
@@ -235,9 +259,9 @@ SystemSourceUpgradeResult make_unavailable_system_source_result(
             source.failure_kind =
                     RegisteredSourceUpgradeFailureKind::UnknownException;
             source.package_state_change = PackageStateChange::Unknown;
-            source.diagnostic =
-                    "Registered source result unavailable after phase started due to an unexpected exception: " +
-                    diagnostic;
+            source.diagnostic = localization::format_translated_message(
+                    "The registered source result is unavailable because an unexpected exception occurred after the phase started: {}",
+                    diagnostic);
         }
     }
     return result;
@@ -499,8 +523,10 @@ bool stop_after_system_source_failure(UpgradeAllOperationResult& result) {
         return true;
     }
 
-    const std::string diagnostic =
-            "System/source phase completed without a fully successful typed result; AUR processing did not start.";
+    // TRANSLATORS: The placeholder is the literal service name "AUR".
+    const std::string diagnostic = localization::format_translated_message(
+            "The system/source phase completed without a fully successful typed result; {} processing did not start.",
+            AUR_SERVICE);
     result.status =
             UpgradeAllOperationStatus::StoppedBeforeAurExecution;
     result.stopped_phase = UpgradeAllOperationPhase::System;
@@ -588,7 +614,11 @@ bool capture_duplicate_exclusions(
                     UpgradeAllOperationIssueKind::
                             DuplicateExclusionCorrelationInconsistent,
                     UpgradeAllOperationPhase::Reduction,
-                    "Duplicate-excluded AUR target has no planner/query correlation.");
+                    localization::format_translated_message(
+                            // TRANSLATORS: The placeholder is the literal
+                            // service name "AUR".
+                            "The duplicate-excluded {} target has no planner/query correlation.",
+                            AUR_SERVICE));
             issue.adapter_index = planner_index;
             aggregate.issues.push_back(std::move(issue));
             is_consistent = false;
@@ -604,7 +634,11 @@ bool capture_duplicate_exclusions(
                     UpgradeAllOperationIssueKind::
                             DuplicateExclusionCorrelationInconsistent,
                     UpgradeAllOperationPhase::Reduction,
-                    "Duplicate-excluded AUR target maps outside the original query plan.");
+                    localization::format_translated_message(
+                            // TRANSLATORS: The placeholder is the literal
+                            // service name "AUR".
+                            "The duplicate-excluded {} target maps outside the original query plan.",
+                            AUR_SERVICE));
             issue.adapter_index = planner_index;
             issue.original_query_plan_index = original_query_index;
             aggregate.issues.push_back(std::move(issue));
@@ -622,7 +656,11 @@ bool capture_duplicate_exclusions(
                     UpgradeAllOperationIssueKind::
                             DuplicateExclusionCorrelationInconsistent,
                     UpgradeAllOperationPhase::Reduction,
-                    "Duplicate-excluded AUR target identity differs from its original query entry.");
+                    localization::format_translated_message(
+                            // TRANSLATORS: The placeholder is the literal
+                            // service name "AUR".
+                            "The duplicate-excluded {} target identity differs from its original query entry.",
+                            AUR_SERVICE));
             issue.adapter_index = planner_index;
             issue.original_query_plan_index = original_query_index;
             issue.package_name = query_entry.installed_name;
@@ -700,7 +738,11 @@ bool capture_external_satisfaction(
                     UpgradeAllOperationIssueKind::
                             ExternalSatisfactionCorrelationInconsistent,
                     UpgradeAllOperationPhase::Reduction,
-                    "Externally satisfied AUR build unit has no PR3 root-role correlation.");
+                    localization::format_translated_message(
+                            // TRANSLATORS: The placeholders are the literal
+                            // service name "AUR" and correlation label "PR3".
+                            "The externally satisfied {} build unit has no {} root-role correlation.",
+                            AUR_SERVICE, "PR3"));
             issue.build_plan_order_index = unit.build_plan_order_index;
             issue.package_name = external_singular_package_name(unit);
             aggregate.issues.push_back(std::move(issue));
@@ -718,7 +760,11 @@ bool capture_external_satisfaction(
                     UpgradeAllOperationIssueKind::
                             ExternalSatisfactionCorrelationInconsistent,
                     UpgradeAllOperationPhase::Reduction,
-                    "Externally satisfied AUR build-unit child identity differs from its PR3 correlation.");
+                    localization::format_translated_message(
+                            // TRANSLATORS: The placeholders are the literal
+                            // service name "AUR" and correlation label "PR3".
+                            "The externally satisfied {} build-unit child identity differs from its {} correlation.",
+                            AUR_SERVICE, "PR3"));
             issue.build_plan_order_index = unit.build_plan_order_index;
             issue.package_name = external_singular_package_name(unit);
             aggregate.issues.push_back(std::move(issue));
@@ -780,8 +826,10 @@ void map_filtered_result_status(UpgradeAllOperationResult& aggregate) {
         aggregate.stopped_phase = UpgradeAllOperationPhase::AurQuery;
         aggregate.aur.status =
                 UpgradeAllAurPhaseStatus::BlockedBeforeExecution;
-        aggregate.aur.diagnostic =
-                "AUR update query completed with recoverable failures; filtered execution did not start.";
+        // TRANSLATORS: The placeholder is the literal service name "AUR".
+        aggregate.aur.diagnostic = localization::format_translated_message(
+                "The {} update query completed with recoverable failures; filtered execution did not start.",
+                AUR_SERVICE);
         return;
     }
 
@@ -947,7 +995,8 @@ adapt_prepared_source_identities_for_upgrade_all(
                             PreferencePackageNameMissing,
                     adapter_index,
                     source,
-                    "Registered source preference has no package name."));
+                    localization::translate_message(
+                            "The registered source preference has no package name.")));
         }
 
         UpgradeAllPackageBaseIdentity package_base =
@@ -962,7 +1011,11 @@ adapt_prepared_source_identities_for_upgrade_all(
                             PackageBaseUnavailable,
                     adapter_index,
                     source,
-                    "Registered source preference has no prepared PackageBase identity."));
+                    localization::format_translated_message(
+                            // TRANSLATORS: The placeholder is the literal
+                            // field name "PackageBase".
+                            "The registered source preference has no prepared {} identity.",
+                            PACKAGE_BASE_FIELD)));
         }
 
         UpgradeAllSourceIdentity source_identity =
@@ -977,7 +1030,8 @@ adapt_prepared_source_identities_for_upgrade_all(
                             CanonicalSourceIdentityUnavailable,
                     adapter_index,
                     source,
-                    "Registered source preference has no prepared canonical source identity."));
+                    localization::translate_message(
+                            "The registered source preference has no prepared canonical source identity.")));
         }
 
         if(!original_preference_indexes.insert(
@@ -987,7 +1041,8 @@ adapt_prepared_source_identities_for_upgrade_all(
                             DuplicateOriginalPreferenceIndex,
                     adapter_index,
                     source,
-                    "Registered source preferences contain a duplicate original index."));
+                    localization::translate_message(
+                            "The registered source preferences contain a duplicate original index.")));
         }
 
         UpgradeAllExplicitSourceIdentity planner_identity{
@@ -1093,7 +1148,7 @@ UpgradeAllOperationPreparation prepare_upgrade_all_operation(
                     {},
                     UpgradeAllOperationIssueKind::
                             PreparedCapabilityConsumed,
-                    CONSUMED_CAPABILITY_DIAGNOSTIC);
+                    consumed_capability_diagnostic());
         }
 
         UpgradeAllOperationPreparedSnapshot snapshot =
@@ -1103,7 +1158,11 @@ UpgradeAllOperationPreparation prepare_upgrade_all_operation(
                     std::move(snapshot),
                     UpgradeAllOperationIssueKind::
                             ExplicitSourceAdapterInvalid,
-                    "Prepared registered source identity cannot be adapted safely for upgrade-all planning.",
+                    localization::format_translated_message(
+                            // TRANSLATORS: The placeholder is the literal
+                            // command name "upgrade-all".
+                            "The prepared registered source identity cannot be adapted safely for {} planning.",
+                            COMMAND_NAME),
                     UpgradeAllOperationStatus::BlockedBeforeMutation);
             append_adapter_issues(
                     result,
@@ -1155,7 +1214,11 @@ UpgradeAllOperationPreparation prepare_upgrade_all_operation(
         UpgradeAllOperationResult result = make_preexecution_rejection(
                 {},
                 UpgradeAllOperationIssueKind::UnknownFailure,
-                "Upgrade-all preparation failed with an unknown exception.",
+                localization::format_translated_message(
+                        // TRANSLATORS: The placeholder is the display spelling
+                        // of the literal command name "upgrade-all".
+                        "{} preparation failed with an unknown exception.",
+                        COMMAND_SENTENCE_NAME),
                 UpgradeAllOperationStatus::BlockedBeforeMutation);
         return result;
     }
@@ -1168,7 +1231,7 @@ UpgradeAllOperationResult execute_prepared_upgrade_all_operation(
         return make_preexecution_rejection(
                 {},
                 UpgradeAllOperationIssueKind::PreparedCapabilityConsumed,
-                CONSUMED_CAPABILITY_DIAGNOSTIC);
+                consumed_capability_diagnostic());
     }
 
     UpgradeAllOperationPreparedSnapshot snapshot =
@@ -1179,14 +1242,14 @@ UpgradeAllOperationResult execute_prepared_upgrade_all_operation(
         return make_preexecution_rejection(
                 std::move(snapshot),
                 UpgradeAllOperationIssueKind::OptionSnapshotMismatch,
-                OPTION_MISMATCH_DIAGNOSTIC);
+                option_mismatch_diagnostic());
     }
     if(nested_snapshot == nullptr ||
        !source_snapshots_match(snapshot.system_source, *nested_snapshot)) {
         return make_preexecution_rejection(
                 std::move(snapshot),
                 UpgradeAllOperationIssueKind::SourceSnapshotMismatch,
-                SOURCE_SNAPSHOT_MISMATCH_DIAGNOSTIC);
+                source_snapshot_mismatch_diagnostic());
     }
     if(!adapter_matches_snapshot(
                snapshot.explicit_source_adapter,
@@ -1195,7 +1258,7 @@ UpgradeAllOperationResult execute_prepared_upgrade_all_operation(
                 std::move(snapshot),
                 UpgradeAllOperationIssueKind::
                         ExplicitSourceCorrelationInconsistent,
-                SOURCE_CORRELATION_MISMATCH_DIAGNOSTIC);
+                source_correlation_mismatch_diagnostic());
     }
 
     try {
@@ -1281,8 +1344,8 @@ UpgradeAllOperationResult execute_prepared_upgrade_all_operation(
                 UpgradeAllNotAttemptedReason::PriorAggregateInconsistency);
         return result;
     } catch(...) {
-        const std::string diagnostic =
-                "System/source execution failed with an unknown exception.";
+        const std::string diagnostic = localization::translate_message(
+                "System/source execution failed with an unknown exception.");
         const UpgradeAllOperationPhase stopped_phase =
                 aggregate_phase_for_system_source(
                         observed_system_source_phase);
@@ -1308,8 +1371,12 @@ UpgradeAllOperationResult execute_prepared_upgrade_all_operation(
     if(!source_snapshots_match(
                result.system_source.prepared_snapshot,
                snapshot.system_source)) {
+        // TRANSLATORS: The placeholder is the literal command name
+        // "upgrade-all".
         const std::string diagnostic =
-                "System/source result no longer matches the prepared upgrade-all source intent snapshot.";
+                localization::format_translated_message(
+                        "The system/source result no longer matches the prepared {} source intent snapshot.",
+                        COMMAND_NAME);
         result.status = UpgradeAllOperationStatus::InconsistentResult;
         result.stopped_phase = UpgradeAllOperationPhase::RegisteredSource;
         result.issues.push_back(make_issue(
@@ -1370,7 +1437,8 @@ UpgradeAllOperationResult execute_prepared_upgrade_all_operation(
                         ForeignInventoryConfigurationFailed,
                 generic_metadata_failure(
                         PackageMetadataErrorCode::ConfigurationUnavailable,
-                        "Foreign inventory configuration resolution failed with an unknown exception."));
+                        localization::translate_message(
+                                "Foreign inventory configuration resolution failed with an unknown exception.")));
         return result;
     }
 
@@ -1398,7 +1466,8 @@ UpgradeAllOperationResult execute_prepared_upgrade_all_operation(
                 UpgradeAllOperationIssueKind::ForeignInventoryReadFailed,
                 generic_metadata_failure(
                         PackageMetadataErrorCode::QueryFailed,
-                        "Foreign inventory read failed with an unknown exception."));
+                        localization::translate_message(
+                                "Foreign inventory read failed with an unknown exception.")));
         return result;
     }
     if(const auto* failure =
@@ -1450,8 +1519,11 @@ UpgradeAllOperationResult execute_prepared_upgrade_all_operation(
                 result, UpgradeAllOperationPhase::AurQuery, error.what());
         return result;
     } catch(...) {
+        // TRANSLATORS: The placeholder is the literal service name "AUR".
         const std::string diagnostic =
-                "AUR update query failed with an unknown exception.";
+                localization::format_translated_message(
+                        "The {} update query failed with an unknown exception.",
+                        AUR_SERVICE);
         result.status =
                 UpgradeAllOperationStatus::StoppedBeforeAurExecution;
         result.stopped_phase = UpgradeAllOperationPhase::AurQuery;
@@ -1531,8 +1603,11 @@ UpgradeAllOperationResult execute_prepared_upgrade_all_operation(
                 error.what());
         return result;
     } catch(...) {
+        // TRANSLATORS: The placeholder is the literal service name "AUR".
         const std::string diagnostic =
-                "Filtered AUR operation failed with an unknown exception.";
+                localization::format_translated_message(
+                        "The filtered {} operation failed with an unknown exception.",
+                        AUR_SERVICE);
         result.status = UpgradeAllOperationStatus::InconsistentResult;
         result.stopped_phase = UpgradeAllOperationPhase::AurPreparation;
         result.aur.status = UpgradeAllAurPhaseStatus::InconsistentResult;

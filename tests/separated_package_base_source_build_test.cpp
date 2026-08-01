@@ -1261,7 +1261,7 @@ void test_transaction_failures_have_no_public_result(
                     "pacman exception typed detail differs");
             expect(
                     std::string(error.what()) ==
-                            "pacman -U transaction execution threw an exception.",
+                            "The pacman -U transaction execution threw an exception.",
                     "pacman exception safe diagnostic differs");
         }
         expect(
@@ -1354,7 +1354,7 @@ void test_build_and_validation_failures_retain_diagnostics(
                             SeparatedPackageBaseSourceBuildFailurePhase::
                                             Build &&
                             std::string(error.what()) ==
-                                    "Build-only makepkg failed with exit code 47.",
+                                    "The build-only makepkg command failed with exit code 47.",
                     "Build nonzero typed failure differs");
         }
         expect(
@@ -1384,7 +1384,7 @@ void test_build_and_validation_failures_retain_diagnostics(
                             SeparatedPackageBaseSourceBuildFailurePhase::
                                             Build &&
                             std::string(error.what()) ==
-                                    "PackageBase build-only makepkg execution failed.",
+                                    "The PackageBase build-only makepkg execution failed.",
                     "Build exception typed failure differs");
         }
         expect(

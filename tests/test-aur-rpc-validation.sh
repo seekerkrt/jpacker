@@ -293,7 +293,7 @@ assert_command_log_empty
 while IFS='|' read -r package detail; do
     setup_case "strict-envelope-$package"
     run_envelope_fail info-strict "$package"
-    assert_validation_error "package info $package"
+    assert_validation_error "info[package=\"$package\"]"
     assert_contains "$detail" "$output_file"
     assert_command_log_empty
 done <<'CASES'
@@ -316,7 +316,7 @@ CASES
 
 setup_case strict-envelope-search-type
 run_envelope_fail provides-strict strict-search-wrong-type
-assert_validation_error "provides search strict-search-wrong-type"
+assert_validation_error "search[provides=\"strict-search-wrong-type\"]"
 assert_contains 'field type expected "search", got "multiinfo"' "$output_file"
 assert_command_log_empty
 
@@ -345,7 +345,7 @@ done
 while IFS='|' read -r package detail; do
     setup_case "array-$package"
     run_fail -Si "$package"
-    assert_validation_error "package info $package"
+    assert_validation_error "info[package=\"$package\"]"
     assert_contains "$detail" "$output_file"
     assert_no_mutation_commands
 done <<'CASES'
@@ -362,7 +362,7 @@ CASES
 while IFS='|' read -r package detail; do
     setup_case "identifier-$package"
     run_fail -Si "$package"
-    assert_validation_error "package info $package"
+    assert_validation_error "info[package=\"$package\"]"
     assert_contains "$detail" "$output_file"
 done <<'CASES'
 id-name-missing|field Name expected string, got missing
@@ -384,7 +384,7 @@ CASES
 while IFS='|' read -r package detail; do
     setup_case "scalar-$package"
     run_fail -Si "$package"
-    assert_validation_error "package info $package"
+    assert_validation_error "info[package=\"$package\"]"
     assert_contains "$detail" "$output_file"
 done <<'CASES'
 version-missing|field Version expected string, got missing
@@ -400,7 +400,7 @@ CASES
 while IFS='|' read -r package detail; do
     setup_case "semantic-$package"
     run_fail -Si "$package"
-    assert_validation_error "package info $package"
+    assert_validation_error "info[package=\"$package\"]"
     assert_contains "$detail" "$output_file"
 done <<'CASES'
 semantic-depends|field Depends[0] contains invalid package identifier "../escape"
@@ -414,21 +414,21 @@ CASES
 # read-only inspection経路のgeneric catchがschema errorをunknown/unresolvedへ潰さないことを確認する。
 setup_case direct-deps
 run_fail deps direct-root
-assert_validation_error "package info malformed-direct"
+assert_validation_error "info[package=\"malformed-direct\"]"
 assert_not_contains "Unknown dependencies:" "$output_file"
 
 setup_case recursive-deps
 run_fail deps --recursive recursive-root
-assert_validation_error "package info recursive-malformed"
+assert_validation_error "info[package=\"recursive-malformed\"]"
 
 setup_case direct-plan
 run_fail plan direct-root
-assert_validation_error "package info malformed-direct"
+assert_validation_error "info[package=\"malformed-direct\"]"
 assert_not_contains "unresolved dependencies remain" "$output_file"
 
 setup_case recursive-plan
 run_fail plan recursive-root
-assert_validation_error "package info recursive-malformed"
+assert_validation_error "info[package=\"recursive-malformed\"]"
 assert_not_contains "unresolved dependencies remain" "$output_file"
 
 while IFS='|' read -r root context detail; do
@@ -438,17 +438,17 @@ while IFS='|' read -r root context detail; do
     assert_contains "$detail" "$output_file"
     assert_not_contains "unresolved dependencies remain" "$output_file"
 done <<'CASES'
-provider-name-root|provides search virtual-provider-name|invalid Name "../provider"
-provider-base-root|provides search virtual-provider-base|invalid PackageBase "../provider-base"
-provider-provides-root|provides search virtual-provider-provides|field Provides expected array or null, got string
-provider-candidate-root|package info provider-candidate|field Depends expected array or null, got number
-provider-mismatch-root|package info provider-mismatch|requested provider-mismatch but response Name was other-provider
+provider-name-root|search[provides="virtual-provider-name"]|invalid Name "../provider"
+provider-base-root|search[provides="virtual-provider-base"]|invalid PackageBase "../provider-base"
+provider-provides-root|search[provides="virtual-provider-provides"]|field Provides expected array or null, got string
+provider-candidate-root|info[package="provider-candidate"]|field Depends expected array or null, got number
+provider-mismatch-root|info[package="provider-mismatch"]|requested provider-mismatch but response Name was other-provider
 CASES
 
 # mutation-capable commandはplan全体のvalidation完了前にclone/build/installへ進めない。
 setup_case preflight-fetch-root
 run_fail fetch invalid-root-preflight
-assert_validation_error "package info invalid-root-preflight"
+assert_validation_error "info[package=\"invalid-root-preflight\"]"
 assert_no_mutation_commands
 assert_cache_entry_absent valid-dep
 assert_cache_entry_absent invalid-root-preflight
@@ -456,7 +456,7 @@ assert_not_contains "Review target:" "$output_file"
 
 setup_case preflight-fetch-multiple-targets
 run_fail fetch valid-minimal invalid-root-preflight
-assert_validation_error "package info invalid-root-preflight"
+assert_validation_error "info[package=\"invalid-root-preflight\"]"
 assert_no_mutation_commands
 assert_cache_entry_absent valid-minimal
 assert_cache_entry_absent valid-dep
@@ -469,10 +469,10 @@ while IFS='|' read -r case_name root context; do
     assert_no_mutation_commands
     assert_not_contains "Review target:" "$output_file"
 done <<'CASES'
-preflight-sync-root|invalid-root-preflight|package info invalid-root-preflight
-preflight-sync-direct|direct-root|package info malformed-direct
-preflight-sync-recursive|recursive-root|package info recursive-malformed
-preflight-sync-provider|provider-candidate-root|package info provider-candidate
+preflight-sync-root|invalid-root-preflight|info[package="invalid-root-preflight"]
+preflight-sync-direct|direct-root|info[package="malformed-direct"]
+preflight-sync-recursive|recursive-root|info[package="recursive-malformed"]
+preflight-sync-provider|provider-candidate-root|info[package="provider-candidate"]
 CASES
 
 # AUR search側のschema errorは、read-only pacman searchが成功してもcommand全体を成功扱いしない。
@@ -484,7 +484,7 @@ assert_command "pacman -Ss search-valid-query"
 setup_case malformed-search
 export MOGUET_TEST_PACMAN_EXIT_CODE=0
 run_fail -Ss search-invalid-query
-assert_validation_error "search query search-invalid-query"
+assert_validation_error "search[query=\"search-invalid-query\"]"
 assert_contains "field Description expected string or null, got object" "$output_file"
 assert_no_mutation_commands
 
@@ -492,7 +492,7 @@ setup_case malformed-refresh-search
 export MOGUET_TEST_PACMAN_EXIT_CODE=0
 export MOGUET_TEST_SUDO_EXIT_CODE=0
 run_fail -Ssy search-invalid-query
-assert_validation_error "search query search-invalid-query"
+assert_validation_error "search[query=\"search-invalid-query\"]"
 assert_contains "field Description expected string or null, got object" "$output_file"
 assert_command_log_empty
 
@@ -598,7 +598,7 @@ setup_case upgrade-split-dependency-preflight
 prepare_source_preferences upgrade-split-root
 export MOGUET_TEST_SUDO_EXIT_CODE=0
 run_fail upgrade
-assert_validation_error "package info upgrade-split-malformed"
+assert_validation_error "info[package=\"upgrade-split-malformed\"]"
 assert_contains "field Conflicts expected array or null, got string" "$output_file"
 assert_no_mutation_commands
 assert_cache_entry_absent upgrade-split-root
@@ -623,7 +623,7 @@ setup_case upgrade-later-preflight-schema-stops-all-source
 prepare_source_preferences upgrade-sequence-a upgrade-sequence-b
 export MOGUET_TEST_SUDO_EXIT_CODE=0
 run_fail upgrade
-assert_validation_error "package info upgrade-sequence-"
+assert_validation_error "info[package=\"upgrade-sequence-"
 assert_contains "field Depends expected array or null, got string" "$output_file"
 assert_no_mutation_commands
 assert_cache_entry_absent upgrade-sequence-a

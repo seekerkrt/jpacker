@@ -1,5 +1,7 @@
 #include "aur_update_operation_result.hpp"
 
+#include "localization.hpp"
+
 #include <algorithm>
 #include <map>
 #include <set>
@@ -22,6 +24,24 @@ void add_reduction_issue(
             std::move(preflight_target_positions),
             execution_work_item_index,
             std::move(diagnostic)});
+}
+
+// Diagnostic literals stay at their construction sites for extraction while
+// this typed reducer keeps the translation lookup out of every call's noise.
+template<std::size_t Size>
+void add_reduction_issue(
+        AurUpdateOperationResult& result,
+        AurUpdateOperationReductionReason reason,
+        AurUpdateOperationReductionStage stage,
+        const char (&diagnostic)[Size],
+        std::vector<std::size_t> affected_update_plan_indices = {},
+        std::vector<std::size_t> preflight_target_positions = {},
+        std::optional<std::size_t> execution_work_item_index = std::nullopt) {
+    add_reduction_issue(
+            result, reason, stage,
+            localization::translate_message(diagnostic),
+            std::move(affected_update_plan_indices),
+            std::move(preflight_target_positions), execution_work_item_index);
 }
 
 std::optional<std::string> package_base_for_target(
@@ -692,7 +712,10 @@ void fold_execution_contributions(
                 result,
                 AurUpdateOperationReductionReason::WorkItemResultInconsistent,
                 AurUpdateOperationReductionStage::Execution,
-                "Terminal execution outcomes from multiple work items were attributed to one AUR update target.",
+                localization::format_translated_message(
+                        // TRANSLATORS: AUR is a runtime project identity.
+                        "Terminal execution outcomes from multiple work items were attributed to one {} update target.",
+                        "AUR"),
                 {target.update_plan_index}, {},
                 terminal == nullptr
                         ? std::nullopt
@@ -1109,7 +1132,10 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
                     result,
                     AurUpdateOperationReductionReason::UnknownEnumValue,
                     AurUpdateOperationReductionStage::Preflight,
-                    "AUR update preflight target has an unknown status.",
+                    localization::format_translated_message(
+                            // TRANSLATORS: AUR is a runtime project identity.
+                            "{} update preflight target has an unknown status.",
+                            "AUR"),
                     {input.update_plan_index}, {position});
             all_targets_are_skipped = false;
         } else {
@@ -1132,7 +1158,10 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
                         result,
                         AurUpdateOperationReductionReason::UnknownEnumValue,
                         AurUpdateOperationReductionStage::Preflight,
-                        "AUR update preflight issue has an unknown reason.",
+                        localization::format_translated_message(
+                                // TRANSLATORS: AUR is a runtime project identity.
+                                "{} update preflight issue has an unknown reason.",
+                                "AUR"),
                         {input.update_plan_index}, {position});
             }
             if(input.status == AurUpdateExecutionTargetStatus::Executable &&
@@ -1142,7 +1171,10 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
                         AurUpdateOperationReductionReason::
                                 OtherCorrelationInconsistent,
                         AurUpdateOperationReductionStage::Preflight,
-                        "Executable AUR update target retains a blocking preflight issue.",
+                        localization::format_translated_message(
+                                // TRANSLATORS: AUR is a runtime project identity.
+                                "Executable {} update target retains a blocking preflight issue.",
+                                "AUR"),
                         {input.update_plan_index}, {position});
             }
         }
@@ -1153,7 +1185,10 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
                     result,
                     AurUpdateOperationReductionReason::UnknownEnumValue,
                     AurUpdateOperationReductionStage::Preflight,
-                    "AUR update target has an unknown installed package reason.",
+                    localization::format_translated_message(
+                            // TRANSLATORS: AUR is a runtime project identity.
+                            "{} update target has an unknown installed package reason.",
+                            "AUR"),
                     {input.update_plan_index}, {position});
         }
         if(!is_known_update_classification(input.update.classification)) {
@@ -1162,7 +1197,10 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
                     result,
                     AurUpdateOperationReductionReason::UnknownEnumValue,
                     AurUpdateOperationReductionStage::Preflight,
-                    "AUR update target has an unknown update classification.",
+                    localization::format_translated_message(
+                            // TRANSLATORS: AUR is a runtime project identity.
+                            "{} update target has an unknown update classification.",
+                            "AUR"),
                     {input.update_plan_index}, {position});
         }
         if(input.update.aur_package.has_value() &&
@@ -1173,7 +1211,10 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
                     result,
                     AurUpdateOperationReductionReason::UnknownEnumValue,
                     AurUpdateOperationReductionStage::Preflight,
-                    "AUR update target has an unknown version relation.",
+                    localization::format_translated_message(
+                            // TRANSLATORS: AUR is a runtime project identity.
+                            "{} update target has an unknown version relation.",
+                            "AUR"),
                     {input.update_plan_index}, {position});
         }
         if(input.desired_install_reason.has_value() &&
@@ -1184,7 +1225,10 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
                     result,
                     AurUpdateOperationReductionReason::UnknownEnumValue,
                     AurUpdateOperationReductionStage::Preflight,
-                    "AUR update target has an unknown desired install reason.",
+                    localization::format_translated_message(
+                            // TRANSLATORS: AUR is a runtime project identity.
+                            "{} update target has an unknown desired install reason.",
+                            "AUR"),
                     {input.update_plan_index}, {position});
         }
         if(input.status == AurUpdateExecutionTargetStatus::Skipped &&
@@ -1195,7 +1239,10 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
                     AurUpdateOperationReductionReason::
                             OtherCorrelationInconsistent,
                     AurUpdateOperationReductionStage::Preflight,
-                    "Skipped AUR update target cannot be confirmed as a normal skip.",
+                    localization::format_translated_message(
+                            // TRANSLATORS: AUR is a runtime project identity.
+                            "Skipped {} update target cannot be confirmed as a normal skip.",
+                            "AUR"),
                     {input.update_plan_index}, {position});
             result.targets[position].status =
                     AurUpdateOperationTargetStatus::Incomplete;
@@ -1208,7 +1255,10 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
                     AurUpdateOperationReductionReason::
                             OutOfRangePreflightUpdatePlanIndex,
                     AurUpdateOperationReductionStage::Preflight,
-                    "AUR update preflight target has an out-of-range update plan index.",
+                    localization::format_translated_message(
+                            // TRANSLATORS: AUR is a runtime project identity.
+                            "{} update preflight target has an out-of-range update plan index.",
+                            "AUR"),
                     {input.update_plan_index}, {position});
             if(executable_positions[position]) {
                 result.targets[position].status =
@@ -1221,7 +1271,10 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
                     AurUpdateOperationReductionReason::
                             PreflightTargetOrderInconsistent,
                     AurUpdateOperationReductionStage::Preflight,
-                    "AUR update preflight target index differs from its original-order position.",
+                    localization::format_translated_message(
+                            // TRANSLATORS: AUR is a runtime project identity.
+                            "{} update preflight target index differs from its original-order position.",
+                            "AUR"),
                     {input.update_plan_index}, {position});
         }
     }
@@ -1235,7 +1288,10 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
                     AurUpdateOperationReductionReason::
                             DuplicatePreflightUpdatePlanIndex,
                     AurUpdateOperationReductionStage::Preflight,
-                    "AUR update preflight contains a duplicate update plan index.",
+                    localization::format_translated_message(
+                            // TRANSLATORS: AUR is a runtime project identity.
+                            "{} update preflight contains a duplicate update plan index.",
+                            "AUR"),
                     {update_plan_index}, positions);
             for(const std::size_t position : positions) {
                 if(executable_positions[position]) {
@@ -1292,7 +1348,10 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
                     result,
                     AurUpdateOperationReductionReason::UnknownEnumValue,
                     AurUpdateOperationReductionStage::Preparation,
-                    "AUR update preparation issue has an unknown reason.",
+                    localization::format_translated_message(
+                            // TRANSLATORS: AUR is a runtime project identity.
+                            "{} update preparation issue has an unknown reason.",
+                            "AUR"),
                     issue.affected_update_plan_indices);
         } else if(issue.reason == AurUpdatePreparationReason::None) {
             add_reduction_issue(
@@ -1300,7 +1359,10 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
                     AurUpdateOperationReductionReason::
                             OtherCorrelationInconsistent,
                     AurUpdateOperationReductionStage::Preparation,
-                    "AUR update preparation issue has no typed reason.",
+                    localization::format_translated_message(
+                            // TRANSLATORS: AUR is a runtime project identity.
+                            "{} update preparation issue has no typed reason.",
+                            "AUR"),
                     issue.affected_update_plan_indices);
         }
         if(issue.preflight_issue.has_value() &&
@@ -1309,7 +1371,10 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
                     result,
                     AurUpdateOperationReductionReason::UnknownEnumValue,
                     AurUpdateOperationReductionStage::Preparation,
-                    "Nested AUR update preflight issue has an unknown reason.",
+                    localization::format_translated_message(
+                            // TRANSLATORS: AUR is a runtime project identity.
+                            "Nested {} update preflight issue has an unknown reason.",
+                            "AUR"),
                     issue.affected_update_plan_indices);
         }
         if(issue.source_preference_failure.has_value() &&
@@ -1319,7 +1384,10 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
                     result,
                     AurUpdateOperationReductionReason::UnknownEnumValue,
                     AurUpdateOperationReductionStage::Preparation,
-                    "AUR update preparation issue has an unknown source preference failure kind.",
+                    localization::format_translated_message(
+                            // TRANSLATORS: AUR is a runtime project identity.
+                            "{} update preparation issue has an unknown source preference failure kind.",
+                            "AUR"),
                     issue.affected_update_plan_indices);
         }
         if(issue.package_metadata_failure.has_value() &&
@@ -1329,7 +1397,10 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
                     result,
                     AurUpdateOperationReductionReason::UnknownEnumValue,
                     AurUpdateOperationReductionStage::Preparation,
-                    "AUR update preparation issue has an unknown package metadata error code.",
+                    localization::format_translated_message(
+                            // TRANSLATORS: AUR is a runtime project identity.
+                            "{} update preparation issue has an unknown package metadata error code.",
+                            "AUR"),
                     issue.affected_update_plan_indices);
         }
         std::set<std::size_t> seen_indices;
@@ -1341,7 +1412,10 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
                         AurUpdateOperationReductionReason::
                                 DuplicatePreparationAttribution,
                         AurUpdateOperationReductionStage::Preparation,
-                        "AUR update preparation issue contains duplicate target attribution.",
+                        localization::format_translated_message(
+                                // TRANSLATORS: AUR is a runtime project identity.
+                                "{} update preparation issue contains duplicate target attribution.",
+                                "AUR"),
                         {update_plan_index});
                 continue;
             }
@@ -1355,7 +1429,10 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
                         AurUpdateOperationReductionReason::
                                 UnknownPreparationUpdatePlanIndex,
                         AurUpdateOperationReductionStage::Preparation,
-                        "AUR update preparation issue refers to an unknown update plan index.",
+                        localization::format_translated_message(
+                                // TRANSLATORS: AUR is a runtime project identity.
+                                "{} update preparation issue refers to an unknown update plan index.",
+                                "AUR"),
                         {update_plan_index});
                 continue;
             }
@@ -1370,7 +1447,10 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
                         AurUpdateOperationReductionReason::
                                 PreparationAttributionInconsistent,
                         AurUpdateOperationReductionStage::Preparation,
-                        "AUR update preparation issue is attributed to a target outside the current preparation phase.",
+                        localization::format_translated_message(
+                                // TRANSLATORS: AUR is a runtime project identity.
+                                "{} update preparation issue is attributed to a target outside the current preparation phase.",
+                                "AUR"),
                         {update_plan_index}, {position->second});
             }
             target.preparation_issues.push_back(issue);
@@ -1389,7 +1469,10 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
                     AurUpdateOperationReductionReason::
                             PreparationAttributionInconsistent,
                     AurUpdateOperationReductionStage::Preparation,
-                    "AUR update preparation warning has root attribution without update target attribution.");
+                    localization::format_translated_message(
+                            // TRANSLATORS: AUR is a runtime project identity.
+                            "{} update preparation warning has root attribution without update target attribution.",
+                            "AUR"));
         }
         std::set<std::size_t> seen_indices;
         for(const std::size_t update_plan_index :
@@ -1400,7 +1483,10 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
                         AurUpdateOperationReductionReason::
                                 DuplicatePreparationAttribution,
                         AurUpdateOperationReductionStage::Preparation,
-                        "AUR update preparation warning contains duplicate target attribution.",
+                        localization::format_translated_message(
+                                // TRANSLATORS: AUR is a runtime project identity.
+                                "{} update preparation warning contains duplicate target attribution.",
+                                "AUR"),
                         {update_plan_index});
                 continue;
             }
@@ -1411,7 +1497,10 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
                         AurUpdateOperationReductionReason::
                                 UnknownPreparationUpdatePlanIndex,
                         AurUpdateOperationReductionStage::Preparation,
-                        "AUR update preparation warning refers to an unknown update plan index.",
+                        localization::format_translated_message(
+                                // TRANSLATORS: AUR is a runtime project identity.
+                                "{} update preparation warning refers to an unknown update plan index.",
+                                "AUR"),
                         {update_plan_index});
                 continue;
             }
@@ -1427,7 +1516,10 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
                         AurUpdateOperationReductionReason::
                                 PreparationAttributionInconsistent,
                         AurUpdateOperationReductionStage::Preparation,
-                        "AUR update preparation warning is attributed to a target outside the warning-producing phase.",
+                        localization::format_translated_message(
+                                // TRANSLATORS: AUR is a runtime project identity.
+                                "{} update preparation warning is attributed to a target outside the warning-producing phase.",
+                                "AUR"),
                         {update_plan_index}, {target_position});
             }
         }
@@ -1449,7 +1541,10 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
                     AurUpdateOperationReductionReason::
                             OtherCorrelationInconsistent,
                     AurUpdateOperationReductionStage::Preparation,
-                    "AUR update preparation contains both an invocation and blocking issues.");
+                    localization::format_translated_message(
+                            // TRANSLATORS: AUR is a runtime project identity.
+                            "{} update preparation contains both an invocation and blocking issues.",
+                            "AUR"));
         } else if(
                 preparation_phase ==
                         PreparationCorrelationPhase::PreflightBlocked &&
@@ -1475,7 +1570,10 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
                     result,
                     AurUpdateOperationReductionReason::MissingExecutionResult,
                     AurUpdateOperationReductionStage::Execution,
-                    "Prepared AUR update targets have no execution result.",
+                    localization::format_translated_message(
+                            // TRANSLATORS: AUR is a runtime project identity.
+                            "Prepared {} update targets have no execution result.",
+                            "AUR"),
                     std::move(missing_indices));
         }
     } else {
@@ -1485,17 +1583,33 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
                     AurUpdateOperationReductionReason::
                             ExecutionResultWithPreparationIssues,
                     AurUpdateOperationReductionStage::Execution,
-                    "AUR update execution result exists together with preparation issues.");
+                    localization::format_translated_message(
+                            // TRANSLATORS: AUR is a runtime project identity.
+                            "{} update execution result exists together with preparation issues.",
+                            "AUR"));
         }
         if(has_preflight_blocker || !has_executable_target) {
-            add_reduction_issue(
-                    result,
-                    AurUpdateOperationReductionReason::
-                            OtherCorrelationInconsistent,
-                    AurUpdateOperationReductionStage::Execution,
-                    has_preflight_blocker
-                            ? "AUR update execution result exists for a preflight-blocked operation."
-                            : "AUR update execution result exists without an executable preflight target.");
+            if(has_preflight_blocker) {
+                add_reduction_issue(
+                        result,
+                        AurUpdateOperationReductionReason::
+                                OtherCorrelationInconsistent,
+                        AurUpdateOperationReductionStage::Execution,
+                        localization::format_translated_message(
+                                // TRANSLATORS: AUR is a runtime project identity.
+                                "{} update execution result exists for a preflight-blocked operation.",
+                                "AUR"));
+            } else {
+                add_reduction_issue(
+                        result,
+                        AurUpdateOperationReductionReason::
+                                OtherCorrelationInconsistent,
+                        AurUpdateOperationReductionStage::Execution,
+                        localization::format_translated_message(
+                                // TRANSLATORS: AUR is a runtime project identity.
+                                "{} update execution result exists without an executable preflight target.",
+                                "AUR"));
+            }
         }
 
         auto project_contribution =
@@ -1511,7 +1625,10 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
                                     AurUpdateOperationReductionReason::
                                             DuplicateExecutionChildAttribution,
                                     AurUpdateOperationReductionStage::Execution,
-                                    "AUR update execution child contains duplicate target attribution.",
+                                    localization::format_translated_message(
+                                            // TRANSLATORS: AUR is a runtime project identity.
+                                            "{} update execution child contains duplicate target attribution.",
+                                            "AUR"),
                                     {update_plan_index}, {},
                                     work_item.work_item_index);
                             continue;
@@ -1527,7 +1644,10 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
                                     AurUpdateOperationReductionReason::
                                             UnknownExecutionChildUpdatePlanIndex,
                                     AurUpdateOperationReductionStage::Execution,
-                                    "AUR update execution child refers to an unknown update plan index.",
+                                    localization::format_translated_message(
+                                            // TRANSLATORS: AUR is a runtime project identity.
+                                            "{} update execution child refers to an unknown update plan index.",
+                                            "AUR"),
                                     {update_plan_index}, {},
                                     work_item.work_item_index);
                             continue;
@@ -1543,7 +1663,10 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
                                     AurUpdateOperationReductionReason::
                                             OtherCorrelationInconsistent,
                                     AurUpdateOperationReductionStage::Execution,
-                                    "AUR update execution child is attributed to a non-executable preflight target.",
+                                    localization::format_translated_message(
+                                            // TRANSLATORS: AUR is a runtime project identity.
+                                            "{} update execution child is attributed to a non-executable preflight target.",
+                                            "AUR"),
                                     {update_plan_index}, {target_position},
                                     work_item.work_item_index);
                         }
@@ -1566,7 +1689,10 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
                         AurUpdateOperationReductionReason::
                                 DuplicateExecutionWorkItemIndex,
                         AurUpdateOperationReductionStage::Execution,
-                        "AUR update execution result contains a duplicate work item index.",
+                        localization::format_translated_message(
+                                // TRANSLATORS: AUR is a runtime project identity.
+                                "{} update execution result contains a duplicate work item index.",
+                                "AUR"),
                         {}, {}, work_item.work_item_index);
             }
             if(work_item.work_item_index != result_position) {
@@ -1575,7 +1701,10 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
                         AurUpdateOperationReductionReason::
                                 ExecutionWorkItemOrderInconsistent,
                         AurUpdateOperationReductionStage::Execution,
-                        "AUR update execution work item index differs from result order.",
+                        localization::format_translated_message(
+                                // TRANSLATORS: AUR is a runtime project identity.
+                                "{} update execution work item index differs from result order.",
+                                "AUR"),
                         {}, {}, work_item.work_item_index);
             }
 
@@ -1588,7 +1717,10 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
                         result,
                         AurUpdateOperationReductionReason::UnknownEnumValue,
                         AurUpdateOperationReductionStage::Execution,
-                        "AUR update work item result has an unknown status.",
+                        localization::format_translated_message(
+                                // TRANSLATORS: AUR is a runtime project identity.
+                                "{} update work item result has an unknown status.",
+                                "AUR"),
                         work_item.affected_update_plan_indices, {},
                         work_item.work_item_index);
             }
@@ -1597,7 +1729,10 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
                         result,
                         AurUpdateOperationReductionReason::UnknownEnumValue,
                         AurUpdateOperationReductionStage::Execution,
-                        "AUR update work item result has an unknown failure kind.",
+                        localization::format_translated_message(
+                                // TRANSLATORS: AUR is a runtime project identity.
+                                "{} update work item result has an unknown failure kind.",
+                                "AUR"),
                         work_item.affected_update_plan_indices, {},
                         work_item.work_item_index);
             }
@@ -1609,7 +1744,10 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
                         AurUpdateOperationReductionReason::
                                 WorkItemResultInconsistent,
                         AurUpdateOperationReductionStage::Execution,
-                        "AUR update work item status and failure kind disagree.",
+                        localization::format_translated_message(
+                                // TRANSLATORS: AUR is a runtime project identity.
+                                "{} update work item status and failure kind disagree.",
+                                "AUR"),
                         work_item.affected_update_plan_indices, {},
                         work_item.work_item_index);
             }
@@ -1620,7 +1758,10 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
                         AurUpdateOperationReductionReason::
                                 WorkItemResultInconsistent,
                         AurUpdateOperationReductionStage::Execution,
-                        "AUR update work item failure detail or transaction attempt snapshot is inconsistent.",
+                        localization::format_translated_message(
+                                // TRANSLATORS: AUR is a runtime project identity.
+                                "{} update work item failure detail or transaction attempt snapshot is inconsistent.",
+                                "AUR"),
                         work_item.affected_update_plan_indices, {},
                         work_item.work_item_index);
             }
@@ -1630,7 +1771,10 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
                         AurUpdateOperationReductionReason::
                                 WorkItemResultInconsistent,
                         AurUpdateOperationReductionStage::Execution,
-                        "AUR update work item result has no target attribution.",
+                        localization::format_translated_message(
+                                // TRANSLATORS: AUR is a runtime project identity.
+                                "{} update work item result has no target attribution.",
+                                "AUR"),
                         {}, {}, work_item.work_item_index);
             }
 
@@ -1647,7 +1791,10 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
                             AurUpdateOperationReductionReason::
                                     WorkItemResultInconsistent,
                             AurUpdateOperationReductionStage::Execution,
-                            "AUR update execution work item cannot be correlated to one selected projected build unit.",
+                            localization::format_translated_message(
+                                    // TRANSLATORS: AUR is a runtime project identity.
+                                    "{} update execution work item cannot be correlated to one selected projected build unit.",
+                                    "AUR"),
                             work_item.affected_update_plan_indices, {},
                             work_item.work_item_index);
                 }
@@ -1663,7 +1810,10 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
                                 AurUpdateOperationReductionReason::
                                         DuplicateExecutionChildAttribution,
                                 AurUpdateOperationReductionStage::Execution,
-                                "AUR update execution result contains a duplicate required child index.",
+                                localization::format_translated_message(
+                                        // TRANSLATORS: AUR is a runtime project identity.
+                                        "{} update execution result contains a duplicate required child index.",
+                                        "AUR"),
                                 child.affected_update_plan_indices, {},
                                 work_item.work_item_index);
                         continue;
@@ -1674,7 +1824,10 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
                                 AurUpdateOperationReductionReason::
                                         ExecutionChildSnapshotInconsistent,
                                 AurUpdateOperationReductionStage::Execution,
-                                "Uncorrelated AUR update execution child has an inconsistent outcome.",
+                                localization::format_translated_message(
+                                        // TRANSLATORS: AUR is a runtime project identity.
+                                        "Uncorrelated {} update execution child has an inconsistent outcome.",
+                                        "AUR"),
                                 child.affected_update_plan_indices, {},
                                 work_item.work_item_index);
                         continue;
@@ -1695,7 +1848,10 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
                                 AurUpdateOperationReductionReason::
                                         ExecutionChildSnapshotInconsistent,
                                 AurUpdateOperationReductionStage::Execution,
-                                "Uncorrelated AUR update execution child has an inconsistent outcome.",
+                                localization::format_translated_message(
+                                        // TRANSLATORS: AUR is a runtime project identity.
+                                        "Uncorrelated {} update execution child has an inconsistent outcome.",
+                                        "AUR"),
                                 child.affected_update_plan_indices, {},
                                 work_item.work_item_index);
                         continue;
@@ -1714,7 +1870,10 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
                                 AurUpdateOperationReductionReason::
                                         UnexpectedSelectedArtifact,
                                 AurUpdateOperationReductionStage::Execution,
-                                "Uncorrelated AUR update execution child has an inconsistent selected artifact.",
+                                localization::format_translated_message(
+                                        // TRANSLATORS: AUR is a runtime project identity.
+                                        "Uncorrelated {} update execution child has an inconsistent selected artifact.",
+                                        "AUR"),
                                 child.affected_update_plan_indices, {},
                                 work_item.work_item_index);
                         continue;
@@ -1751,7 +1910,10 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
                         AurUpdateOperationReductionReason::
                                 WorkItemResultInconsistent,
                         AurUpdateOperationReductionStage::Execution,
-                        "AUR update execution work-item aggregate snapshot differs from preparation.",
+                        localization::format_translated_message(
+                                // TRANSLATORS: AUR is a runtime project identity.
+                                "{} update execution work-item aggregate snapshot differs from preparation.",
+                                "AUR"),
                         work_item.affected_update_plan_indices, {},
                         work_item.work_item_index);
             }
@@ -1761,7 +1923,10 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
                         AurUpdateOperationReductionReason::
                                 ExecutionChildSnapshotInconsistent,
                         AurUpdateOperationReductionStage::Execution,
-                        "AUR update execution child outcomes do not agree with the work-item aggregate state.",
+                        localization::format_translated_message(
+                                // TRANSLATORS: AUR is a runtime project identity.
+                                "{} update execution child outcomes do not agree with the work-item aggregate state.",
+                                "AUR"),
                         work_item.affected_update_plan_indices, {},
                         work_item.work_item_index);
             }
@@ -1782,7 +1947,10 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
                                 AurUpdateOperationReductionReason::
                                         UnknownExecutionChildUpdatePlanIndex,
                                 AurUpdateOperationReductionStage::Execution,
-                                "AUR update execution child refers to an unknown update plan index.",
+                                localization::format_translated_message(
+                                        // TRANSLATORS: AUR is a runtime project identity.
+                                        "{} update execution child refers to an unknown update plan index.",
+                                        "AUR"),
                                 {update_plan_index}, {},
                                 work_item.work_item_index);
                     }
@@ -1794,7 +1962,10 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
                             AurUpdateOperationReductionReason::
                                     UnknownEnumValue,
                             AurUpdateOperationReductionStage::Execution,
-                            "AUR update execution child has an unknown status.",
+                            localization::format_translated_message(
+                                    // TRANSLATORS: AUR is a runtime project identity.
+                                    "{} update execution child has an unknown status.",
+                                    "AUR"),
                             child.affected_update_plan_indices, {},
                             work_item.work_item_index);
                     continue;
@@ -1805,7 +1976,10 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
                             AurUpdateOperationReductionReason::
                                     UnexpectedExecutionChildAttribution,
                             AurUpdateOperationReductionStage::Execution,
-                            "AUR update execution result contains an extra required child.",
+                            localization::format_translated_message(
+                                    // TRANSLATORS: AUR is a runtime project identity.
+                                    "{} update execution result contains an extra required child.",
+                                    "AUR"),
                             child.affected_update_plan_indices, {},
                             work_item.work_item_index);
                     continue;
@@ -1817,7 +1991,10 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
                             AurUpdateOperationReductionReason::
                                     DuplicateExecutionChildAttribution,
                             AurUpdateOperationReductionStage::Execution,
-                            "AUR update execution result contains a duplicate required child index.",
+                            localization::format_translated_message(
+                                    // TRANSLATORS: AUR is a runtime project identity.
+                                    "{} update execution result contains a duplicate required child index.",
+                                    "AUR"),
                             child.affected_update_plan_indices, {},
                             work_item.work_item_index);
                     continue;
@@ -1833,7 +2010,10 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
                             AurUpdateOperationReductionReason::
                                     ExecutionChildSnapshotInconsistent,
                             AurUpdateOperationReductionStage::Execution,
-                            "AUR update execution required child snapshot differs from preparation.",
+                            localization::format_translated_message(
+                                    // TRANSLATORS: AUR is a runtime project identity.
+                                    "{} update execution required child snapshot differs from preparation.",
+                                    "AUR"),
                             child.affected_update_plan_indices, {},
                             work_item.work_item_index);
                     continue;
@@ -1854,7 +2034,10 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
                             AurUpdateOperationReductionReason::
                                     UnexpectedSelectedArtifact,
                             AurUpdateOperationReductionStage::Execution,
-                            "AUR update execution child selected artifact is missing or inconsistent.",
+                            localization::format_translated_message(
+                                    // TRANSLATORS: AUR is a runtime project identity.
+                                    "{} update execution child selected artifact is missing or inconsistent.",
+                                    "AUR"),
                             child.affected_update_plan_indices, {},
                             work_item.work_item_index);
                     continue;
@@ -1867,7 +2050,10 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
                             AurUpdateOperationReductionReason::
                                     UnexpectedSelectedArtifact,
                             AurUpdateOperationReductionStage::Execution,
-                            "AUR update execution result contains a duplicate selected artifact identity.",
+                            localization::format_translated_message(
+                                    // TRANSLATORS: AUR is a runtime project identity.
+                                    "{} update execution result contains a duplicate selected artifact identity.",
+                                    "AUR"),
                             child.affected_update_plan_indices, {},
                             work_item.work_item_index);
                     continue;
@@ -1879,7 +2065,10 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
                             AurUpdateOperationReductionReason::
                                     ExecutionChildSnapshotInconsistent,
                             AurUpdateOperationReductionStage::Execution,
-                            "AUR update execution child outcome disagrees with the work-item state.",
+                            localization::format_translated_message(
+                                    // TRANSLATORS: AUR is a runtime project identity.
+                                    "{} update execution child outcome disagrees with the work-item state.",
+                                    "AUR"),
                             child.affected_update_plan_indices, {},
                             work_item.work_item_index);
                     continue;
@@ -1908,7 +2097,10 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
                         AurUpdateOperationReductionReason::
                                 MissingExecutionChildAttribution,
                         AurUpdateOperationReductionStage::Execution,
-                        "AUR update execution result is missing a prepared required child.",
+                        localization::format_translated_message(
+                                // TRANSLATORS: AUR is a runtime project identity.
+                                "{} update execution result is missing a prepared required child.",
+                                "AUR"),
                         planned_children[child_index]
                                 .affected_update_plan_indices,
                         {}, work_item.work_item_index);
@@ -1924,7 +2116,10 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
                         AurUpdateOperationReductionReason::
                                 UnexpectedUnselectedArtifactIdentity,
                         AurUpdateOperationReductionStage::Execution,
-                        "Failed or not-attempted AUR update work item unexpectedly contains unselected artifact identities.",
+                        localization::format_translated_message(
+                                // TRANSLATORS: AUR is a runtime project identity.
+                                "Failed or not-attempted {} update work item unexpectedly contains unselected artifact identities.",
+                                "AUR"),
                         work_item.affected_update_plan_indices, {},
                         work_item.work_item_index);
             }
@@ -1939,7 +2134,10 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
                             AurUpdateOperationReductionReason::
                                     UnexpectedUnselectedArtifactIdentity,
                             AurUpdateOperationReductionStage::Execution,
-                            "AUR update work-item unselected artifact identity is invalid or overlaps a selected child.",
+                            localization::format_translated_message(
+                                    // TRANSLATORS: AUR is a runtime project identity.
+                                    "{} update work-item unselected artifact identity is invalid or overlaps a selected child.",
+                                    "AUR"),
                             {}, {}, work_item.work_item_index);
                 }
             }
@@ -1962,7 +2160,10 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
                             AurUpdateOperationReductionReason::
                                     UnexpectedUnselectedArtifactIdentity,
                             AurUpdateOperationReductionStage::Execution,
-                            "AUR update work-item contains a duplicate unselected artifact identity.",
+                            localization::format_translated_message(
+                                    // TRANSLATORS: AUR is a runtime project identity.
+                                    "{} update work-item contains a duplicate unselected artifact identity.",
+                                    "AUR"),
                             {}, {}, work_item.work_item_index);
                 }
             }
@@ -1997,7 +2198,10 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
                             AurUpdateOperationReductionReason::
                                     MissingExecutionAttribution,
                             AurUpdateOperationReductionStage::Execution,
-                            "Executable AUR update target has no execution attribution.",
+                            localization::format_translated_message(
+                                    // TRANSLATORS: AUR is a runtime project identity.
+                                    "Executable {} update target has no execution attribution.",
+                                    "AUR"),
                             {update_plan_index}, {position});
                 }
                 continue;
@@ -2010,14 +2214,20 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
                     result,
                     AurUpdateOperationReductionReason::UnknownEnumValue,
                     AurUpdateOperationReductionStage::Execution,
-                    "AUR update invocation result has an unknown status.");
+                    localization::format_translated_message(
+                            // TRANSLATORS: AUR is a runtime project identity.
+                            "{} update invocation result has an unknown status.",
+                            "AUR"));
         } else if(!invocation_result_is_consistent(*execution)) {
             add_reduction_issue(
                     result,
                     AurUpdateOperationReductionReason::
                             InvocationResultInconsistent,
                     AurUpdateOperationReductionStage::Execution,
-                    "AUR update invocation status and work item outcomes disagree.");
+                    localization::format_translated_message(
+                            // TRANSLATORS: AUR is a runtime project identity.
+                            "{} update invocation status and work item outcomes disagree.",
+                            "AUR"));
         }
     }
 
@@ -2037,7 +2247,10 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
                 AurUpdateOperationReductionReason::
                         OtherCorrelationInconsistent,
                 AurUpdateOperationReductionStage::Execution,
-                "AUR update operation could not be reduced to a known status.");
+                localization::format_translated_message(
+                        // TRANSLATORS: AUR is a runtime project identity.
+                        "{} update operation could not be reduced to a known status.",
+                        "AUR"));
         result.status = AurUpdateOperationStatus::InconsistentResult;
     }
     return result;

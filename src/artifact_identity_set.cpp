@@ -1,5 +1,7 @@
 #include "artifact_identity.hpp"
 
+#include "localization.hpp"
+
 #include <cstddef>
 #include <stdexcept>
 #include <utility>
@@ -13,8 +15,8 @@ IndexedArtifactPackageIdentity::IndexedArtifactPackageIdentity(
 ArtifactPackageIdentitySet::ArtifactPackageIdentitySet(
         std::vector<ArtifactPackageIdentity> identities) {
     if(identities.empty()) {
-        throw std::logic_error(
-                "Artifact package identity set must not be empty.");
+        throw std::logic_error(localization::translate_message(
+                "Artifact package identity set must not be empty."));
     }
 
     entries_.reserve(identities.size());
@@ -26,8 +28,8 @@ ArtifactPackageIdentitySet::ArtifactPackageIdentitySet(
 
 void ArtifactPackageIdentitySet::require_active() const {
     if(!is_active_ || entries_.empty()) {
-        throw std::runtime_error(
-                "Artifact package identity set is no longer active.");
+        throw std::runtime_error(localization::translate_message(
+                "Artifact package identity set is no longer active."));
     }
 }
 

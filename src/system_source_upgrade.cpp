@@ -2,6 +2,7 @@
 
 #include "app_config.hpp"
 #include "cache_authority.hpp"
+#include "localization.hpp"
 #include "package_identifier.hpp"
 #include "process.hpp"
 #include "separated_source_build.hpp"
@@ -22,12 +23,22 @@
 
 namespace {
 
-constexpr const char* POST_UPGRADE_SNAPSHOT_FAILURE_PREFIX =
-        "System upgrade completed, but post-upgrade package metadata snapshot failed: ";
-constexpr const char* UNKNOWN_SYSTEM_FAILURE_DIAGNOSTIC =
-        "System upgrade failed with an unknown exception.";
-constexpr const char* UNKNOWN_SOURCE_FAILURE_DIAGNOSTIC =
-        "Registered source package processing failed with an unknown exception.";
+std::string unknown_system_failure_diagnostic() {
+    return localization::translate_message(
+            "The system upgrade failed with an unknown exception.");
+}
+
+std::string unknown_source_failure_diagnostic() {
+    return localization::translate_message(
+            "Registered source package processing failed with an unknown exception.");
+}
+
+std::string post_upgrade_snapshot_failure_diagnostic(
+        const std::string& detail) {
+    return localization::format_translated_message(
+            "The system upgrade completed, but the post-upgrade package metadata snapshot failed: {}",
+            detail);
+}
 
 using SourceUpdateBaselines = std::map<std::string, SourceUpdateBaseline>;
 using SourceInstalledSnapshotResult = std::variant<
@@ -130,8 +141,9 @@ std::optional<SourceBaselineFailure> snapshot_source_update_baselines(
                     index,
                     PackageMetadataFailure{
                             failure->code,
-                            "Failed to query installed package metadata for " +
-                                    package_name + ": " + failure->diagnostic}};
+                            localization::format_translated_message(
+                                    "Failed to query installed package metadata for {}: {}",
+                                    package_name, failure->diagnostic)}};
         }
 
         const auto& snapshot =
@@ -236,6 +248,7 @@ void throw_unexpected_exception_for_test(
     if(state.unexpected_exception_is_unknown) {
         throw UnknownSystemSourceTestException{};
     }
+    // NO_TRANSLATE(Issue #308): this is a test-only injected exception value.
     throw std::runtime_error(
             "fixture unexpected system/source execution exception");
 }
@@ -250,19 +263,21 @@ void record_unexpected_execution_failure(
     result.status = SystemSourceUpgradeStatus::InconsistentResult;
     result.stopped_phase = active_phase;
 
-    std::string diagnostic =
-            "System/source result inconsistent after unexpected exception";
-    if(!exception_diagnostic.empty()) {
-        diagnostic += ": " + exception_diagnostic;
-    }
+    std::string diagnostic = exception_diagnostic.empty()
+            ? localization::translate_message(
+                      "The system/source result is inconsistent after an unexpected exception.")
+            : localization::format_translated_message(
+                      "The system/source result is inconsistent after an unexpected exception: {}",
+                      exception_diagnostic);
 
     if(active_phase == SystemSourceUpgradePhase::System &&
        result.system.status == SystemUpgradePhaseStatus::NotAttempted) {
-        const std::string unavailable =
-                "System result unavailable after phase started due to an unexpected exception" +
-                (exception_diagnostic.empty()
-                         ? std::string{}
-                         : ": " + exception_diagnostic);
+        const std::string unavailable = exception_diagnostic.empty()
+                ? localization::translate_message(
+                          "The system result is unavailable because an unexpected exception occurred after the phase started.")
+                : localization::format_translated_message(
+                          "The system result is unavailable because an unexpected exception occurred after the phase started: {}",
+                          exception_diagnostic);
         result.system.status = SystemUpgradePhaseStatus::Failed;
         result.system.package_state_change = PackageStateChange::Unknown;
         result.system.diagnostic = unavailable;
@@ -280,11 +295,12 @@ void record_unexpected_execution_failure(
         RegisteredSourceUpgradeResult& source =
                 result.registered_source_results[*active_source_position];
         if(source.status == RegisteredSourceUpgradeStatus::NotAttempted) {
-            const std::string unavailable =
-                    "Registered source result unavailable after phase started due to an unexpected exception" +
-                    (exception_diagnostic.empty()
-                             ? std::string{}
-                             : ": " + exception_diagnostic);
+            const std::string unavailable = exception_diagnostic.empty()
+                    ? localization::translate_message(
+                              "The registered source result is unavailable because an unexpected exception occurred after the phase started.")
+                    : localization::format_translated_message(
+                              "The registered source result is unavailable because an unexpected exception occurred after the phase started: {}",
+                              exception_diagnostic);
             source.status = RegisteredSourceUpgradeStatus::Incomplete;
             source.failure_kind =
                     RegisteredSourceUpgradeFailureKind::UnknownException;
@@ -357,8 +373,9 @@ void record_system_snapshot_failure(
         SystemSourceUpgradePreparationState& state,
         PackageMetadataFailure failure) {
     const std::string diagnostic =
-            "Failed to snapshot local package versions before system upgrade: " +
-            failure.diagnostic;
+            localization::format_translated_message(
+                    "Failed to snapshot local package versions before the system upgrade: {}",
+                    failure.diagnostic);
     state.system.before_snapshot_failure = failure;
 
     SystemSourceUpgradeIssue issue = make_issue(
@@ -378,8 +395,9 @@ void record_post_system_snapshot_failure(
         SystemSourceUpgradeResult& result,
         PackageMetadataFailure failure) {
     const std::string diagnostic =
-            "Failed to snapshot local package versions after system upgrade: " +
-            failure.diagnostic;
+            localization::format_translated_message(
+                    "Failed to snapshot local package versions after the system upgrade: {}",
+                    failure.diagnostic);
     result.system.after_snapshot_failure = failure;
     result.system.package_state_change = PackageStateChange::Unknown;
 
@@ -559,7 +577,8 @@ void map_source_execution_result(
             result.package_state_change = PackageStateChange::NoChange;
             return;
     }
-    throw std::logic_error("Unknown source-build execution status.");
+    throw std::logic_error(localization::translate_message(
+            "Unknown source-build execution status."));
 }
 
 void map_cleanup_failure(
@@ -767,7 +786,8 @@ SystemSourceUpgradePreparation prepare_system_source_upgrade(
                         PreferenceEnumerationUnavailable,
                 SystemSourceUpgradeIssueImpact::BlocksExecution,
                 SystemSourceUpgradePhase::Preparation,
-                "Source preference enumeration failed with an unknown exception.");
+                localization::translate_message(
+                        "Source preference enumeration failed with an unknown exception."));
         return block_preparation(
                 std::move(state), std::move(issue), std::nullopt,
                 RegisteredSourceUpgradeFailureKind::UnknownException);
@@ -866,9 +886,9 @@ SystemSourceUpgradePreparation prepare_system_source_upgrade(
             issue.source_preference_failure = *failure;
             issue.diagnostic = failure->diagnostic;
         } else {
-            issue.diagnostic =
-                    "Registered source preference disappeared before preparation: " +
-                    source.entry_path.string();
+            issue.diagnostic = localization::format_translated_message(
+                    "The registered source preference disappeared before preparation: {}",
+                    source.entry_path.string());
         }
         return block_preparation(
                 std::move(state), std::move(issue), source_position,
@@ -938,7 +958,8 @@ SystemSourceUpgradePreparation prepare_system_source_upgrade(
                             SourceIdentityResolutionFailed,
                     SystemSourceUpgradeIssueImpact::BlocksExecution,
                     SystemSourceUpgradePhase::Preparation,
-                    "Source identity resolution failed with an unknown exception.");
+                    localization::translate_message(
+                            "Source identity resolution failed with an unknown exception."));
             attribute_issue_to_source(issue, source);
             return block_preparation(
                     std::move(state), std::move(issue), source_position,
@@ -971,7 +992,8 @@ SystemSourceUpgradePreparation prepare_system_source_upgrade(
                             SourceWorkItemPreparationFailed,
                     SystemSourceUpgradeIssueImpact::BlocksExecution,
                     SystemSourceUpgradePhase::Preparation,
-                    "Source work-item preparation failed with an unknown exception.");
+                    localization::translate_message(
+                            "Source work-item preparation failed with an unknown exception."));
             attribute_issue_to_source(issue, source);
             return block_preparation(
                     std::move(state), std::move(issue), source_position,
@@ -1008,7 +1030,8 @@ SystemSourceUpgradePreparation prepare_system_source_upgrade(
                             SourceInvocationPreparationFailed,
                     SystemSourceUpgradeIssueImpact::BlocksExecution,
                     SystemSourceUpgradePhase::Preparation,
-                    "Source invocation preparation failed with an unknown exception.");
+                    localization::translate_message(
+                            "Source invocation preparation failed with an unknown exception."));
             return block_preparation(
                     std::move(state), std::move(issue), std::nullopt,
                     RegisteredSourceUpgradeFailureKind::UnknownException);
@@ -1106,7 +1129,8 @@ SystemSourceUpgradeResult execute_prepared_system_source_upgrade(
                 result,
                 SystemSourceUpgradeIssueKind::PreparedCapabilityConsumed,
                 SystemSourceUpgradePhase::Preparation,
-                "Prepared system/source upgrade is invalid or has already been consumed.");
+                localization::translate_message(
+                        "The prepared system/source upgrade is invalid or has already been consumed."));
         return result;
     }
 
@@ -1120,7 +1144,8 @@ SystemSourceUpgradeResult execute_prepared_system_source_upgrade(
                 result,
                 SystemSourceUpgradeIssueKind::OptionSnapshotMismatch,
                 SystemSourceUpgradePhase::Preparation,
-                "Prepared system/source upgrade options differ from execution options.");
+                localization::translate_message(
+                        "The prepared system/source upgrade options differ from the execution options."));
         return result;
     }
     if(!validate_prepared_correlation(
@@ -1135,7 +1160,8 @@ SystemSourceUpgradeResult execute_prepared_system_source_upgrade(
                 result,
                 SystemSourceUpgradeIssueKind::PreparedCorrelationInconsistent,
                 SystemSourceUpgradePhase::Preparation,
-                "Prepared system/source upgrade source correlation is inconsistent.");
+                localization::translate_message(
+                        "The prepared system/source upgrade source correlation is inconsistent."));
         return result;
     }
 
@@ -1199,12 +1225,12 @@ SystemSourceUpgradeResult execute_prepared_system_source_upgrade(
         } catch(...) {
             result.system.status = SystemUpgradePhaseStatus::Failed;
             result.system.package_state_change = PackageStateChange::Unknown;
-            result.system.diagnostic = UNKNOWN_SYSTEM_FAILURE_DIAGNOSTIC;
+            result.system.diagnostic = unknown_system_failure_diagnostic();
             result.status = SystemSourceUpgradeStatus::StoppedOnSystemFailure;
             result.stopped_phase = SystemSourceUpgradePhase::System;
             result.diagnostics.push_back(make_diagnostic(
                     SystemSourceUpgradePhase::System,
-                    UNKNOWN_SYSTEM_FAILURE_DIAGNOSTIC,
+                    unknown_system_failure_diagnostic(),
                     true));
             return result;
         }
@@ -1212,12 +1238,13 @@ SystemSourceUpgradeResult execute_prepared_system_source_upgrade(
         if(system_exit_status != 0) {
             result.system.status = SystemUpgradePhaseStatus::Failed;
             result.system.package_state_change = PackageStateChange::Unknown;
-            result.system.diagnostic = "Update failed.";
+            result.system.diagnostic = localization::translate_message(
+                    "The update failed.");
             result.status = SystemSourceUpgradeStatus::StoppedOnSystemFailure;
             result.stopped_phase = SystemSourceUpgradePhase::System;
             result.diagnostics.push_back(make_diagnostic(
                     SystemSourceUpgradePhase::System,
-                    "Update failed.",
+                    localization::translate_message("The update failed."),
                     true));
             return result;
         }
@@ -1292,8 +1319,8 @@ SystemSourceUpgradeResult execute_prepared_system_source_upgrade(
                 }
                 if(has_source_work_items) {
                     const std::string diagnostic =
-                            std::string(POST_UPGRADE_SNAPSHOT_FAILURE_PREFIX) +
-                            error.failure().diagnostic;
+                            post_upgrade_snapshot_failure_diagnostic(
+                                    error.failure().diagnostic);
                     stop_for_global_source_metadata_failure(
                             result, error.failure(), diagnostic);
                     return result;
@@ -1314,13 +1341,13 @@ SystemSourceUpgradeResult execute_prepared_system_source_upgrade(
                     stop_for_global_source_metadata_failure(
                             result,
                             std::nullopt,
-                            std::string(POST_UPGRADE_SNAPSHOT_FAILURE_PREFIX) +
-                                    error.what());
+                            post_upgrade_snapshot_failure_diagnostic(
+                                    error.what()));
                     return result;
                 }
             } catch(...) {
-                const std::string diagnostic =
-                        "Post-upgrade package metadata snapshot failed with an unknown exception.";
+                const std::string diagnostic = localization::translate_message(
+                        "The post-upgrade package metadata snapshot failed with an unknown exception.");
                 if(!system_package_state_finalized) {
                     if(state.before_system_snapshot.has_value()) {
                         record_post_system_snapshot_failure(
@@ -1336,8 +1363,8 @@ SystemSourceUpgradeResult execute_prepared_system_source_upgrade(
                     stop_for_global_source_metadata_failure(
                             result,
                             std::nullopt,
-                            std::string(POST_UPGRADE_SNAPSHOT_FAILURE_PREFIX) +
-                                    diagnostic);
+                            post_upgrade_snapshot_failure_diagnostic(
+                                    diagnostic));
                     return result;
                 }
             }
@@ -1363,7 +1390,8 @@ SystemSourceUpgradeResult execute_prepared_system_source_upgrade(
                         SystemSourceUpgradeIssueKind::
                                 PreparedCorrelationInconsistent,
                         SystemSourceUpgradePhase::RegisteredSource,
-                        "Prepared source work item is missing after system upgrade.");
+                        localization::translate_message(
+                                "The prepared source work item is missing after the system upgrade."));
                 return result;
             }
 
@@ -1378,19 +1406,19 @@ SystemSourceUpgradeResult execute_prepared_system_source_upgrade(
                         SystemSourceUpgradeIssueKind::
                                 PreparedCorrelationInconsistent,
                         SystemSourceUpgradePhase::RegisteredSource,
-                        "System upgrade completed, but authoritative post-upgrade installed package snapshot is missing for " +
-                                work_item.request.package_name +
-                                "; source processing did not start.");
+                        localization::format_translated_message(
+                                "The system upgrade completed, but the authoritative post-upgrade installed package snapshot is missing for {}; source processing did not start.",
+                                work_item.request.package_name));
                 return result;
             }
             if(const auto* metadata_failure =
                        std::get_if<PackageMetadataFailure>(
                                &installed_snapshot->second)) {
                 const std::string diagnostic =
-                        "System upgrade completed, but post-upgrade package metadata query failed for " +
-                        work_item.request.package_name + ": " +
-                        metadata_failure->diagnostic +
-                        " Source processing did not start.";
+                        localization::format_translated_message(
+                                "The system upgrade completed, but the post-upgrade package metadata query failed for {}: {} Source processing did not start.",
+                                work_item.request.package_name,
+                                metadata_failure->diagnostic);
                 stop_for_source_metadata_failure(
                         result,
                         source_position,
@@ -1409,8 +1437,9 @@ SystemSourceUpgradeResult execute_prepared_system_source_upgrade(
                     result.registered_source_results[source_position];
             if(!correlation.has_valid_package_name) {
                 const std::string diagnostic =
-                        "Ignoring invalid source-build preference filename: " +
-                        source_result.preference_package_name;
+                        localization::format_translated_message(
+                                "Ignoring invalid source-build preference filename: {}",
+                                source_result.preference_package_name);
                 source_result.status = RegisteredSourceUpgradeStatus::Unsupported;
                 source_result.failure_kind =
                         RegisteredSourceUpgradeFailureKind::InvalidPreferenceName;
@@ -1572,10 +1601,11 @@ SystemSourceUpgradeResult execute_prepared_system_source_upgrade(
                 source_result.failure_kind =
                         RegisteredSourceUpgradeFailureKind::UnknownException;
                 source_result.package_state_change = PackageStateChange::Unknown;
-                source_result.diagnostic = UNKNOWN_SOURCE_FAILURE_DIAGNOSTIC;
+                source_result.diagnostic =
+                        unknown_source_failure_diagnostic();
                 SystemSourceUpgradeDiagnostic detail = make_diagnostic(
                         SystemSourceUpgradePhase::RegisteredSource,
-                        UNKNOWN_SOURCE_FAILURE_DIAGNOSTIC,
+                        unknown_source_failure_diagnostic(),
                         true);
                 detail.original_preference_index =
                         source_result.original_preference_index;
@@ -1614,7 +1644,8 @@ SystemSourceUpgradeResult execute_prepared_system_source_upgrade(
                 active_phase,
                 active_source_position,
                 system_package_state_finalized,
-                "unknown exception");
+                localization::translate_message(
+                        "An unknown exception occurred."));
         return result;
     }
 }

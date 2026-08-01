@@ -1,5 +1,7 @@
 #include "logging.hpp"
 
+#include "localization.hpp"
+
 #include <cerrno>
 #include <chrono>
 #include <ctime>
@@ -74,6 +76,7 @@ void Logger::adopt_state_log_backend(
     diagnostic_stream() << "\033[1;32m::\033[0m " << initial_info_message
                         << std::endl;
     try {
+        // NO_TRANSLATE: INFO is a stable state-log schema token.
         state_log_backend->append_record(
                 make_log_record("INFO", initial_info_message));
     } catch(...) {
@@ -129,15 +132,24 @@ void Logger::write_log_record(
 
 void Logger::info(const std::string& msg) {
     diagnostic_stream() << "\033[1;32m::\033[0m " << msg << std::endl;
+    // NO_TRANSLATE: INFO is a stable state-log schema token.
     write_log_record("INFO", msg);
 }
 
 void Logger::warn(const std::string& msg) {
-    diagnostic_stream() << "\033[1;33m:: Warning:\033[0m " << msg << std::endl;
+    // TRANSLATORS: The placeholder is a complete warning diagnostic.
+    diagnostic_stream() << "\033[1;33m::\033[0m "
+                        << localization::format_translated_message(
+                                   "Warning: {}", msg)
+                        << std::endl;
+    // NO_TRANSLATE: WARN is a stable state-log schema token.
     write_log_record("WARN", msg);
 }
 
 void Logger::write_noexcept_warning_fallback() noexcept {
+    // NO_TRANSLATE: This allocation-free raw-write fallback is used only when
+    // message construction or logging itself has failed; gettext is not safe
+    // inside this noexcept recovery boundary.
     static constexpr char FALLBACK_DIAGNOSTIC[] =
             "\033[1;31m:: Error:\033[0m Cleanup warning could not be "
             "constructed or logged safely.\n";
@@ -158,12 +170,22 @@ void Logger::write_noexcept_warning_fallback() noexcept {
 }
 
 void Logger::error(const std::string& msg) {
-    std::cerr << "\033[1;31m:: Error:\033[0m " << msg << std::endl;
+    // TRANSLATORS: The placeholder is a complete error diagnostic.
+    std::cerr << "\033[1;31m::\033[0m "
+              << localization::format_translated_message("Error: {}", msg)
+              << std::endl;
+    // NO_TRANSLATE: ERROR is a stable state-log schema token.
     write_log_record("ERROR", msg);
 }
 
 void Logger::raw_cmd(const std::string& cmd) {
-    diagnostic_stream() << "\033[1;33m::\033[0m Running: " << cmd << std::endl;
+    // TRANSLATORS: The placeholder is an exact shell command and must remain
+    // byte-for-byte locale-neutral.
+    diagnostic_stream() << "\033[1;33m::\033[0m "
+                        << localization::format_translated_message(
+                                   "Running: {}", cmd)
+                        << std::endl;
+    // NO_TRANSLATE: EXEC is a stable state-log schema token.
     write_log_record("EXEC", cmd);
 }
 

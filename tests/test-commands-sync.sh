@@ -637,7 +637,7 @@ assert_not_contains "Build Error:" "$output_file"
 assert_not_contains "Failed while building/installing PackageBase" "$output_file"
 assert_not_contains "Pacman failed." "$output_file"
 assert_not_contains "pacman -U failed" "$output_file"
-assert_not_contains "Update failed" "$output_file"
+assert_not_contains "The update failed." "$output_file"
 assert_event_pattern_count 1 '^pacman -U --print --print-format '
 assert_event_pattern_count 1 '^sudo pacman -U --noconfirm -- '
 assert_event_absent "git clone https://aur.archlinux.org/plan-b.git plan-b"
@@ -697,7 +697,7 @@ printf 'stable auto preflight fixture\n' > \
 auto_preflight_checksum=$(cksum \
     "$XDG_CACHE_HOME/moguet/preflight-sentinel/state")
 run_status 1 --noedit --nodiff --noconfirm -S official-a source-a source-b
-assert_contains "Source environment PKGDEST conflicts with invocation-owned artifact workspace." "$output_file"
+assert_contains "Source environment PKGDEST conflicts with the invocation-owned artifact workspace." "$output_file"
 assert_event_count 0 "pacman-conf --verbose RootDir DBPath"
 assert_event_prefix_absent '^sudo '
 assert_event_prefix_absent '^(git|makepkg) '
@@ -738,7 +738,7 @@ assert_event_absent "sudo pacman -S --noconfirm official-a --needed source-a for
 assert_event_absent "sudo pacman -S --noconfirm source-a"
 assert_event_absent "sudo pacman -S --noconfirm forced-official"
 assert_event_absent "sudo pacman -S --noconfirm source-b"
-assert_contains "Loading custom build flags from $MOGUET_TEST_PACKAGE_BUILD_DIR/forced-official" "$output_file"
+assert_contains "Loading custom build flags from $MOGUET_TEST_PACKAGE_BUILD_DIR/forced-official." "$output_file"
 assert_cache_entry_present source-a
 assert_cache_entry_present forced-official
 assert_cache_entry_present source-b

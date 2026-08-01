@@ -4,190 +4,226 @@
 #include "aur_update_cli_presentation.hpp"
 #include "cache_authority.hpp"
 #include "filtered_aur_update_operation.hpp"
+#include "localization.hpp"
 #include "logging.hpp"
 #include "source_install.hpp"
 
 #include <iostream>
 #include <stdexcept>
 #include <string>
-#include <string_view>
 #include <utility>
 #include <vector>
 
 namespace {
 
-std::string_view operation_status_label(AurUpdateOperationStatus status) {
+std::string operation_status_label(AurUpdateOperationStatus status) {
     switch(status) {
     case AurUpdateOperationStatus::NoUpdates:
-        return "no updates";
+        return localization::translate_message("no updates");
     case AurUpdateOperationStatus::Completed:
-        return "completed";
+        return localization::translate_message("completed");
     case AurUpdateOperationStatus::BlockedBeforeExecution:
-        return "blocked before execution";
+        return localization::translate_message("blocked before execution");
     case AurUpdateOperationStatus::StoppedOnWorkItemFailure:
-        return "stopped after work-item failure";
+        return localization::translate_message(
+                "stopped after work-item failure");
     case AurUpdateOperationStatus::StoppedAfterPackageCleanupFailure:
-        return "stopped after cleanup failure";
+        return localization::translate_message(
+                "stopped after cleanup failure");
     case AurUpdateOperationStatus::InconsistentResult:
-        return "inconsistent result";
+        return localization::translate_message("inconsistent result");
     }
-    throw std::logic_error("Unknown AUR update operation status.");
+    throw std::logic_error(localization::format_translated_message(
+            // TRANSLATORS: AUR is a runtime project identity.
+            "Unknown {} update operation status.", "AUR"));
 }
 
-std::string_view preflight_reason_label(AurUpdateExecutionReason reason) {
+std::string preflight_reason_label(AurUpdateExecutionReason reason) {
     switch(reason) {
     case AurUpdateExecutionReason::None:
-        return "none";
+        return localization::translate_message("none");
     case AurUpdateExecutionReason::UpToDate:
-        return "up to date";
+        return localization::translate_message("up to date");
     case AurUpdateExecutionReason::NonAurForeign:
-        return "non-AUR foreign";
+        return localization::format_translated_message(
+                // TRANSLATORS: AUR is a runtime project identity.
+                "non-{} foreign", "AUR");
     case AurUpdateExecutionReason::AurMetadataUnavailable:
-        return "AUR metadata unavailable";
+        return localization::format_translated_message(
+                // TRANSLATORS: AUR is a runtime project identity.
+                "{} metadata unavailable", "AUR");
     case AurUpdateExecutionReason::VersionComparisonUnavailable:
-        return "version comparison unavailable";
+        return localization::translate_message(
+                "version comparison unavailable");
     case AurUpdateExecutionReason::InstalledReasonUnknown:
-        return "installed reason unknown";
+        return localization::translate_message("installed reason unknown");
     case AurUpdateExecutionReason::UpdatePlanInconsistent:
-        return "update plan inconsistent";
+        return localization::translate_message("update plan inconsistent");
     case AurUpdateExecutionReason::DuplicateUpdateTarget:
-        return "duplicate update target";
+        return localization::translate_message("duplicate update target");
     case AurUpdateExecutionReason::RepositoryMetadataUnavailable:
-        return "repository metadata unavailable";
+        return localization::translate_message(
+                "repository metadata unavailable");
     case AurUpdateExecutionReason::AurDependencyMetadataUnavailable:
-        return "AUR dependency metadata unavailable";
+        return localization::format_translated_message(
+                // TRANSLATORS: AUR is a runtime project identity.
+                "{} dependency metadata unavailable", "AUR");
     case AurUpdateExecutionReason::ProviderMetadataUnavailable:
-        return "provider metadata unavailable";
+        return localization::translate_message(
+                "provider metadata unavailable");
     case AurUpdateExecutionReason::UnresolvedDependency:
-        return "unresolved dependency";
+        return localization::translate_message("unresolved dependency");
     case AurUpdateExecutionReason::VersionConstraintUnverified:
-        return "version constraint unverified";
+        return localization::translate_message(
+                "version constraint unverified");
     case AurUpdateExecutionReason::DependencyCycle:
-        return "dependency cycle";
+        return localization::translate_message("dependency cycle");
     case AurUpdateExecutionReason::BuildPlanInconsistent:
-        return "build plan inconsistent";
+        return localization::translate_message("build plan inconsistent");
     case AurUpdateExecutionReason::PackageBaseMismatch:
-        return "package base mismatch";
+        return localization::translate_message("package base mismatch");
     case AurUpdateExecutionReason::SplitPackageSelectionRequired:
-        return "split package selection required";
+        return localization::translate_message(
+                "split package selection required");
     case AurUpdateExecutionReason::MultiplePackageTargetsForPackageBase:
-        return "multiple package targets for package base";
+        return localization::translate_message(
+                "multiple package targets for package base");
     case AurUpdateExecutionReason::AmbiguousProvider:
-        return "ambiguous provider";
+        return localization::translate_message("ambiguous provider");
     case AurUpdateExecutionReason::ConflictsOrReplacesUnresolved:
-        return "conflicts/replaces unresolved";
+        return localization::translate_message(
+                "conflicts/replaces unresolved");
     }
-    throw std::logic_error("Unknown AUR update preflight reason.");
+    throw std::logic_error(localization::format_translated_message(
+            // TRANSLATORS: AUR is a runtime project identity.
+            "Unknown {} update preflight reason.", "AUR"));
 }
 
-std::string_view preparation_reason_label(AurUpdatePreparationReason reason) {
+std::string preparation_reason_label(AurUpdatePreparationReason reason) {
     switch(reason) {
     case AurUpdatePreparationReason::None:
-        return "none";
+        return localization::translate_message("none");
     case AurUpdatePreparationReason::BlockingPreflight:
-        return "blocking preflight";
+        return localization::translate_message("blocking preflight");
     case AurUpdatePreparationReason::PreflightInconsistent:
-        return "preflight inconsistent";
+        return localization::translate_message("preflight inconsistent");
     case AurUpdatePreparationReason::BuildPlanMissing:
-        return "build plan missing";
+        return localization::translate_message("build plan missing");
     case AurUpdatePreparationReason::BuildPlanOrderEmpty:
-        return "build plan order empty";
+        return localization::translate_message("build plan order empty");
     case AurUpdatePreparationReason::RootAttributionInconsistent:
-        return "root attribution inconsistent";
+        return localization::translate_message(
+                "root attribution inconsistent");
     case AurUpdatePreparationReason::PackageTargetAttributionInconsistent:
-        return "package target attribution inconsistent";
+        return localization::translate_message(
+                "package target attribution inconsistent");
     case AurUpdatePreparationReason::DesiredInstallReasonMissing:
-        return "desired install reason missing";
+        return localization::translate_message(
+                "desired install reason missing");
     case AurUpdatePreparationReason::SourcePreferenceUnavailable:
-        return "source preference unavailable";
+        return localization::translate_message(
+                "source preference unavailable");
     case AurUpdatePreparationReason::SourcePreferencePkgdestConflict:
-        return "source preference PKGDEST conflict";
+        return localization::format_translated_message(
+                // TRANSLATORS: PKGDEST is a runtime environment-key identity.
+                "source preference {} conflict", "PKGDEST");
     case AurUpdatePreparationReason::StaticWorkItemInvalid:
-        return "static work item invalid";
+        return localization::translate_message("static work item invalid");
     case AurUpdatePreparationReason::PacmanDatabaseUnavailable:
-        return "pacman database unavailable";
+        return localization::format_translated_message(
+                // TRANSLATORS: pacman is a runtime command identity.
+                "{} database unavailable", "pacman");
     case AurUpdatePreparationReason::GenericPreparationInconsistent:
-        return "generic preparation inconsistent";
+        return localization::translate_message(
+                "generic preparation inconsistent");
     case AurUpdatePreparationReason::BuildUnitSelectionInconsistent:
-        return "build unit selection inconsistent";
+        return localization::translate_message(
+                "build unit selection inconsistent");
     case AurUpdatePreparationReason::ExternalSatisfactionInconsistent:
-        return "external satisfaction inconsistent";
+        return localization::translate_message(
+                "external satisfaction inconsistent");
     }
-    throw std::logic_error("Unknown AUR update preparation reason.");
+    throw std::logic_error(localization::format_translated_message(
+            // TRANSLATORS: AUR is a runtime project identity.
+            "Unknown {} update preparation reason.", "AUR"));
 }
 
-std::string_view reduction_stage_label(AurUpdateOperationReductionStage stage) {
+std::string reduction_stage_label(AurUpdateOperationReductionStage stage) {
     switch(stage) {
     case AurUpdateOperationReductionStage::Preflight:
-        return "preflight";
+        return localization::translate_message("preflight");
     case AurUpdateOperationReductionStage::Preparation:
-        return "preparation";
+        return localization::translate_message("preparation");
     case AurUpdateOperationReductionStage::Execution:
-        return "execution";
+        return localization::translate_message("execution");
     }
-    throw std::logic_error("Unknown AUR update reduction stage.");
+    throw std::logic_error(localization::format_translated_message(
+            // TRANSLATORS: AUR is a runtime project identity.
+            "Unknown {} update reduction stage.", "AUR"));
 }
 
-std::string_view reduction_reason_label(AurUpdateOperationReductionReason reason) {
+std::string reduction_reason_label(AurUpdateOperationReductionReason reason) {
     switch(reason) {
     case AurUpdateOperationReductionReason::DuplicatePreflightUpdatePlanIndex:
-        return "duplicate preflight update plan index";
+        return localization::translate_message("duplicate preflight update plan index");
     case AurUpdateOperationReductionReason::OutOfRangePreflightUpdatePlanIndex:
-        return "out-of-range preflight update plan index";
+        return localization::translate_message("out-of-range preflight update plan index");
     case AurUpdateOperationReductionReason::PreflightTargetOrderInconsistent:
-        return "preflight target order inconsistent";
+        return localization::translate_message("preflight target order inconsistent");
     case AurUpdateOperationReductionReason::DuplicatePreparationAttribution:
-        return "duplicate preparation attribution";
+        return localization::translate_message("duplicate preparation attribution");
     case AurUpdateOperationReductionReason::UnknownPreparationUpdatePlanIndex:
-        return "unknown preparation update plan index";
+        return localization::translate_message("unknown preparation update plan index");
     case AurUpdateOperationReductionReason::PreparationAttributionInconsistent:
-        return "preparation attribution inconsistent";
+        return localization::translate_message("preparation attribution inconsistent");
     case AurUpdateOperationReductionReason::PreparationTargetSnapshotInconsistent:
-        return "preparation target snapshot inconsistent";
+        return localization::translate_message("preparation target snapshot inconsistent");
     case AurUpdateOperationReductionReason::DuplicateExecutionWorkItemIndex:
-        return "duplicate execution work item index";
+        return localization::translate_message("duplicate execution work item index");
     case AurUpdateOperationReductionReason::ExecutionWorkItemOrderInconsistent:
-        return "execution work item order inconsistent";
+        return localization::translate_message("execution work item order inconsistent");
     case AurUpdateOperationReductionReason::DuplicateExecutionAttribution:
-        return "duplicate execution attribution";
+        return localization::translate_message("duplicate execution attribution");
     case AurUpdateOperationReductionReason::UnknownExecutionUpdatePlanIndex:
-        return "unknown execution update plan index";
+        return localization::translate_message("unknown execution update plan index");
     case AurUpdateOperationReductionReason::MissingExecutionAttribution:
-        return "missing execution attribution";
+        return localization::translate_message("missing execution attribution");
     case AurUpdateOperationReductionReason::
             DuplicateExecutionChildAttribution:
-        return "duplicate execution child attribution";
+        return localization::translate_message("duplicate execution child attribution");
     case AurUpdateOperationReductionReason::
             MissingExecutionChildAttribution:
-        return "missing execution child attribution";
+        return localization::translate_message("missing execution child attribution");
     case AurUpdateOperationReductionReason::
             UnexpectedExecutionChildAttribution:
-        return "unexpected execution child attribution";
+        return localization::translate_message("unexpected execution child attribution");
     case AurUpdateOperationReductionReason::
             UnknownExecutionChildUpdatePlanIndex:
-        return "unknown execution child update plan index";
+        return localization::translate_message("unknown execution child update plan index");
     case AurUpdateOperationReductionReason::
             ExecutionChildSnapshotInconsistent:
-        return "execution child snapshot inconsistent";
+        return localization::translate_message("execution child snapshot inconsistent");
     case AurUpdateOperationReductionReason::UnexpectedSelectedArtifact:
-        return "unexpected selected artifact";
+        return localization::translate_message("unexpected selected artifact");
     case AurUpdateOperationReductionReason::
             UnexpectedUnselectedArtifactIdentity:
-        return "unexpected unselected artifact identity";
+        return localization::translate_message("unexpected unselected artifact identity");
     case AurUpdateOperationReductionReason::ExecutionResultWithPreparationIssues:
-        return "execution result with preparation issues";
+        return localization::translate_message("execution result with preparation issues");
     case AurUpdateOperationReductionReason::MissingExecutionResult:
-        return "missing execution result";
+        return localization::translate_message("missing execution result");
     case AurUpdateOperationReductionReason::UnknownEnumValue:
-        return "unknown enum value";
+        return localization::translate_message("unknown enum value");
     case AurUpdateOperationReductionReason::WorkItemResultInconsistent:
-        return "work item result inconsistent";
+        return localization::translate_message("work item result inconsistent");
     case AurUpdateOperationReductionReason::InvocationResultInconsistent:
-        return "invocation result inconsistent";
+        return localization::translate_message("invocation result inconsistent");
     case AurUpdateOperationReductionReason::OtherCorrelationInconsistent:
-        return "other correlation inconsistency";
+        return localization::translate_message("other correlation inconsistency");
     }
-    throw std::logic_error("Unknown AUR update reduction reason.");
+    throw std::logic_error(localization::format_translated_message(
+            // TRANSLATORS: AUR is a runtime project identity.
+            "Unknown {} update reduction reason.", "AUR"));
 }
 
 std::string target_reason_label(const AurUpdateOperationTargetResult& target) {
@@ -199,7 +235,7 @@ std::string target_reason_label(const AurUpdateOperationTargetResult& target) {
         return std::string(preparation_reason_label(
                 target.preparation_issues.front().reason));
     }
-    return "reason unavailable";
+    return localization::translate_message("reason unavailable");
 }
 
 std::string target_status_label(
@@ -207,36 +243,42 @@ std::string target_status_label(
         AurUpdateOperationStatus operation_status) {
     switch(target.status) {
     case AurUpdateOperationTargetStatus::Updated:
-        return "updated";
+        return localization::translate_message("updated");
     case AurUpdateOperationTargetStatus::NoChange:
-        return "no change";
+        return localization::translate_message("no change");
     case AurUpdateOperationTargetStatus::Skipped:
-        return "skipped: " + target_reason_label(target);
+        return localization::translate_message("skipped") + ": " +
+                target_reason_label(target);
     case AurUpdateOperationTargetStatus::Unsupported:
-        return "unsupported: " + target_reason_label(target);
+        return localization::translate_message("unsupported") + ": " +
+                target_reason_label(target);
     case AurUpdateOperationTargetStatus::Incomplete:
-        return "incomplete: " + target_reason_label(target);
+        return localization::translate_message("incomplete") + ": " +
+                target_reason_label(target);
     case AurUpdateOperationTargetStatus::Failed:
-        return "failed: " + aur_update_cli_target_failure_summary(target);
+        return localization::translate_message("failed") + ": " +
+                aur_update_cli_target_failure_summary(target);
     case AurUpdateOperationTargetStatus::UpdatedCleanupFailed:
-        return "updated, but cleanup failed";
+        return localization::translate_message("updated, but cleanup failed");
     case AurUpdateOperationTargetStatus::NoChangeCleanupFailed:
-        return "no package change, but cleanup failed";
+        return localization::translate_message("no package change, but cleanup failed");
     case AurUpdateOperationTargetStatus::NotAttempted:
         if(target.execution_failure_kind ==
            AurUpdateWorkItemFailureKind::PriorWorkItemStopped) {
-            return "not attempted: prior work item stopped";
+            return localization::translate_message("not attempted: prior work item stopped");
         }
         if(operation_status ==
            AurUpdateOperationStatus::BlockedBeforeExecution) {
-            return "not attempted: operation blocked before execution";
+            return localization::translate_message("not attempted: operation blocked before execution");
         }
         if(operation_status == AurUpdateOperationStatus::InconsistentResult) {
-            return "not attempted: result inconsistent";
+            return localization::translate_message("not attempted: result inconsistent");
         }
-        return "not attempted: prior work item stopped";
+        return localization::translate_message("not attempted: prior work item stopped");
     }
-    throw std::logic_error("Unknown AUR update target status.");
+    throw std::logic_error(localization::format_translated_message(
+            // TRANSLATORS: AUR is a runtime project identity.
+            "Unknown {} update target status.", "AUR"));
 }
 
 bool is_normal_skip_reason(AurUpdateExecutionReason reason) {
@@ -264,12 +306,12 @@ bool is_normal_skip_reason(AurUpdateExecutionReason reason) {
     case AurUpdateExecutionReason::ConflictsOrReplacesUnresolved:
         return false;
     }
-    throw std::logic_error("Unknown AUR update preflight reason.");
+    throw std::logic_error(localization::format_translated_message(
+            // TRANSLATORS: AUR is a runtime project identity.
+            "Unknown {} update preflight reason.", "AUR"));
 }
 
 std::string join_package_names(const std::vector<std::string>& package_names) {
-    if(package_names.empty()) return "unknown packages";
-
     std::string joined;
     for(std::size_t index = 0; index < package_names.size(); ++index) {
         if(index != 0) joined += ", ";
@@ -282,10 +324,10 @@ void print_preflight_issues(const AurUpdateOperationResult& result) {
     for(const auto& target : result.targets) {
         for(const auto& issue : target.preflight_issues) {
             if(is_normal_skip_reason(issue.reason)) continue;
-            Logger::error(
-                    "  preflight issue: " +
-                    std::string(preflight_reason_label(issue.reason)) +
-                    ": " + issue.diagnostic);
+            Logger::error("  " + localization::translate_message(
+                                          "preflight issue") +
+                    ": " + preflight_reason_label(issue.reason) + ": " +
+                    issue.diagnostic);
         }
     }
 }
@@ -293,36 +335,46 @@ void print_preflight_issues(const AurUpdateOperationResult& result) {
 void print_preparation_details(const AurUpdateOperationResult& result) {
     for(const auto& warning : result.preparation_warnings) {
         const std::string preference = warning.preference_name.empty()
-                ? "unknown preference"
+                ? localization::translate_message("unknown preference")
                 : warning.preference_name;
-        Logger::warn(
-                "  preparation warning: " + preference + ": " +
-                warning.diagnostic);
+        Logger::warn("  " + localization::translate_message(
+                                     "preparation warning") +
+                ": " + preference + ": " + warning.diagnostic);
     }
     for(const auto& issue : result.preparation_issues) {
-        Logger::error(
-                "  preparation issue: " +
-                std::string(preparation_reason_label(issue.reason)) + ": " +
+        Logger::error("  " + localization::translate_message(
+                                          "preparation issue") +
+                ": " + preparation_reason_label(issue.reason) + ": " +
                 issue.diagnostic);
     }
 }
 
 void print_reduction_issues(const AurUpdateOperationResult& result) {
     for(const auto& issue : result.reduction_issues) {
-        Logger::error(
-                "  reduction issue: " +
-                std::string(reduction_stage_label(issue.stage)) + ": " +
-                std::string(reduction_reason_label(issue.reason)) + ": " +
+        Logger::error("  " + localization::translate_message(
+                                          "reduction issue") +
+                ": " + reduction_stage_label(issue.stage) + ": " +
+                reduction_reason_label(issue.reason) + ": " +
                 issue.diagnostic);
     }
 }
 
 void print_query_failures(const AurUpdateQueryResult& query_result) {
     for(const auto& failure : query_result.recoverable_failures) {
-        Logger::error(
-                "AUR update query failure for " +
-                join_package_names(failure.package_names) + ": " +
-                failure.diagnostic);
+        if(failure.package_names.empty()) {
+            Logger::error(localization::format_translated_message(
+                    // TRANSLATORS: The placeholders are the AUR project identity
+                    // and an upstream diagnostic.
+                    "{} update query failure for unknown packages: {}", "AUR",
+                    failure.diagnostic));
+            continue;
+        }
+        Logger::error(localization::format_translated_message(
+                // TRANSLATORS: The placeholders are the AUR project identity,
+                // package identities, and an upstream diagnostic.
+                "{} update query failure for {}: {}", "AUR",
+                join_package_names(failure.package_names),
+                failure.diagnostic));
     }
 }
 
@@ -334,11 +386,15 @@ void print_operation_result(
     const AurUpdateCliPresentation execution_presentation =
             format_aur_update_cli_presentation(result);
 
-    std::cout << "AUR update: " << operation_status_label(result.status)
+    std::cout << localization::format_translated_message(
+                         // TRANSLATORS: AUR is a runtime project identity.
+                         "{} update:", "AUR")
+              << " " << operation_status_label(result.status)
               << std::endl;
     for(const auto& target : result.targets) {
         std::cout << target.update.installed_name << ": "
-                  << target_status_label(target, result.status) << std::endl;
+                  << target_status_label(target, result.status)
+                  << std::endl;
     }
     for(const std::string& line : execution_presentation.summary_lines) {
         std::cout << line << std::endl;
@@ -352,22 +408,33 @@ void print_operation_result(
     print_reduction_issues(result);
 
     if(result.has_partial_completion()) {
-        std::cout << "AUR update partially completed before failure."
+        std::cout << localization::format_translated_message(
+                             // TRANSLATORS: AUR is a runtime project identity.
+                             "{} update partially completed before failure.",
+                             "AUR")
                   << std::endl;
     }
     if(result.has_cleanup_failure()) {
-        std::cout << "AUR update cleanup failed after a package transaction."
+        std::cout << localization::format_translated_message(
+                             // TRANSLATORS: AUR is a runtime project identity.
+                             "{} update cleanup failed after a package transaction.",
+                             "AUR")
                   << std::endl;
     }
     if(result.has_not_attempted_targets()) {
-        std::cout << "AUR update has targets that were not attempted."
+        std::cout << localization::format_translated_message(
+                             // TRANSLATORS: AUR is a runtime project identity.
+                             "{} update has targets that were not attempted.",
+                             "AUR")
                   << std::endl;
     }
 
     print_query_failures(query_result);
     if(!query_result.recoverable_failures.empty() && result.is_success()) {
-        Logger::error(
-                "AUR update completed, but query failures were reported.");
+        Logger::error(localization::format_translated_message(
+                // TRANSLATORS: AUR is a runtime project identity.
+                "{} update completed, but query failures were reported.",
+                "AUR"));
     }
 }
 

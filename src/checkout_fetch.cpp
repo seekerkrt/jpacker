@@ -1,6 +1,7 @@
 #include "checkout_fetch.hpp"
 
 #include "logging.hpp"
+#include "localization.hpp"
 #include "package_identifier.hpp"
 #include "persistent_checkout.hpp"
 #include "trusted_git.hpp"
@@ -63,19 +64,31 @@ void fetch_persistent_checkout(
             WorkDirGuard wd_repo(repo_path);
             current_url = trim(trusted_git_remote_origin_url(repo_path));
         }
-        if(current_url.empty()) throw std::runtime_error("Missing remote.origin.url for " + package_base + ".");
+        if(current_url.empty()) {
+            // TRANSLATORS: remote.origin.url is a literal Git configuration
+            // key; the placeholder is a PackageBase identity.
+            throw std::runtime_error(localization::format_translated_message(
+                    "Missing {} for {}.",
+                    "remote.origin.url", package_base));
+        }
         if(!remote_url_matches_expected(current_url, expected_remote_url)) {
-            throw std::runtime_error("Remote URL mismatch for " + package_base + ".");
+            // TRANSLATORS: The placeholder is a PackageBase identity.
+            throw std::runtime_error(localization::format_translated_message(
+                    "Remote URL mismatch for {}.", package_base));
         }
 
-        Logger::info("Fetching " + package_base + "...");
+        // TRANSLATORS: The placeholder is a PackageBase identity.
+        Logger::info(localization::format_translated_message(
+                "Fetching {}...", package_base));
         repo_path = revalidate_trusted_cache_path(
                 repo_path, CachePathRequirement::ExistingDirectory);
         require_safe_persistent_checkout_descendants(repo_path);
         WorkDirGuard wd_repo(repo_path);
         ScopedPrivateUmask private_umask;
         if(trusted_git_fetch_origin(repo_path, expected_remote_url) != 0) {
-            throw std::runtime_error("Failed to fetch " + package_base + ".");
+            // TRANSLATORS: The placeholder is a PackageBase identity.
+            throw std::runtime_error(localization::format_translated_message(
+                    "Failed to fetch {}.", package_base));
         }
         repo_path = revalidate_trusted_cache_path(
                 repo_path, CachePathRequirement::ExistingDirectory);
@@ -83,7 +96,9 @@ void fetch_persistent_checkout(
         return;
     }
 
-    Logger::info("Cloning " + package_base + "...");
+    // TRANSLATORS: The placeholder is a PackageBase identity.
+    Logger::info(localization::format_translated_message(
+            "Cloning {}...", package_base));
     revalidate_trusted_cache_path(repo_path, CachePathRequirement::Missing);
     ValidatedCachePath clone_path = create_trusted_cache_directory(
             cache_root, package_base);
@@ -92,7 +107,9 @@ void fetch_persistent_checkout(
     ScopedPrivateUmask private_umask;
     if(trusted_git_clone_persistent_checkout(
                clone_path, expected_remote_url) != 0) {
-        throw std::runtime_error("Failed to clone " + package_base + ".");
+        // TRANSLATORS: The placeholder is a PackageBase identity.
+        throw std::runtime_error(localization::format_translated_message(
+                "Failed to clone {}.", package_base));
     }
 
     // POLICY(#175): clone が生成した entry も、成功扱いする前に同じ cache boundary で検証する。
@@ -103,9 +120,17 @@ void fetch_persistent_checkout(
         WorkDirGuard wd_repo(cloned_path);
         std::string current_url = trim(
                 trusted_git_remote_origin_url(cloned_path));
-        if(current_url.empty()) throw std::runtime_error("Missing remote.origin.url for " + package_base + ".");
+        if(current_url.empty()) {
+            // TRANSLATORS: remote.origin.url is a literal Git configuration
+            // key; the placeholder is a PackageBase identity.
+            throw std::runtime_error(localization::format_translated_message(
+                    "Missing {} for {}.",
+                    "remote.origin.url", package_base));
+        }
         if(!remote_url_matches_expected(current_url, expected_remote_url)) {
-            throw std::runtime_error("Remote URL mismatch for " + package_base + ".");
+            // TRANSLATORS: The placeholder is a PackageBase identity.
+            throw std::runtime_error(localization::format_translated_message(
+                    "Remote URL mismatch for {}.", package_base));
         }
     }
     cloned_path = revalidate_trusted_cache_path(

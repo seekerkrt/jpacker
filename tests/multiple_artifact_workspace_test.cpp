@@ -1002,11 +1002,11 @@ void test_signature_owner_mismatch(const ValidatedCacheRoot& root) {
                                 different_user_id()));
             },
             "signature owner mismatch",
-            "Package signature owner does not match");
+            "Artifact entry owner does not match the effective user");
     expect(
-            error.find("Package artifact owner does not match") ==
+            error.find("signed-owner-two.pkg.tar.zst.sig") !=
                     std::string::npos,
-            "Signature owner mismatch stopped at artifact owner validation");
+            "Signature owner mismatch did not identify the signature path");
     expect_workspace_remains_caller_owned(
             workspace, "signature owner mismatch");
 }
@@ -1051,7 +1051,7 @@ void test_replacement_during_validation(const ValidatedCacheRoot& root) {
                                         std::move(workspace), expected));
                     },
                     "artifact replacement during validation",
-                    "Refusing changed package artifact");
+                    "Refusing changed artifact entry");
         }
         expect(
                 g_replacement_observer_called,
@@ -1079,7 +1079,7 @@ void test_replacement_during_validation(const ValidatedCacheRoot& root) {
                                         std::move(workspace), expected));
                     },
                     "signature replacement during validation",
-                    "Refusing changed package signature");
+                    "Refusing changed artifact entry");
         }
         expect(
                 g_replacement_observer_called,

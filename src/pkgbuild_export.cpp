@@ -1,6 +1,7 @@
 #include "pkgbuild_export.hpp"
 
 #include "aur_rpc.hpp"
+#include "localization.hpp"
 #include "logging.hpp"
 #include "package_identifier.hpp"
 #include "trusted_git.hpp"
@@ -28,6 +29,7 @@ namespace {
 
 namespace fs = std::filesystem;
 
+// NO_TRANSLATE: Protocol endpoint identity.
 const std::string AUR_BASE_URL = "https://aur.archlinux.org/";
 
 // export lifecycleをpersistent source checkoutから独立させるためのlocal security guard群。
@@ -62,8 +64,10 @@ void require_valid_aur_export_target(
         const std::string& target, const std::string& operation) {
     if(target.find('/') != std::string::npos || !is_valid_aur_export_identifier(target)) {
         // POLICY(#196): validation ownerをmoduleへ移しても既存CLI diagnosticは変えない。
-        throw std::runtime_error(
-                "Invalid AUR target for operation " + operation + ": " + target);
+        // TRANSLATORS: The placeholders are the literal AUR identity, a literal CLI operation, and an AUR package target.
+        throw std::runtime_error(localization::format_translated_message(
+                "Invalid {} target for operation {}: {}",
+                "AUR", operation, target));
     }
 }
 
@@ -103,13 +107,70 @@ struct DirectoryIdentity {
     ino_t inode;
 };
 
-DirectoryIdentity require_directory_identity(int descriptor, const std::string& context) {
+enum class DirectoryIdentityContext {
+    CurrentExport,
+    TemporaryParent,
+    TemporaryExport,
+    ExportedGit,
+};
+
+DirectoryIdentity require_directory_identity(
+        int descriptor,
+        DirectoryIdentityContext context,
+        const fs::path& display_path) {
     struct stat status {};
     if(fstat(descriptor, &status) != 0) {
-        throw std::runtime_error("Failed to inspect " + context + ": " + std::strerror(errno));
+        switch(context) {
+            case DirectoryIdentityContext::CurrentExport:
+                // TRANSLATORS: The placeholder is a system error message.
+                throw std::runtime_error(localization::format_translated_message(
+                        "Failed to inspect the current export directory: {}",
+                        std::strerror(errno)));
+            case DirectoryIdentityContext::TemporaryParent:
+                // TRANSLATORS: The placeholders are a directory path and a system error message.
+                throw std::runtime_error(localization::format_translated_message(
+                        "Failed to inspect temporary directory parent {}: {}",
+                        display_path.string(),
+                        std::strerror(errno)));
+            case DirectoryIdentityContext::TemporaryExport:
+                // TRANSLATORS: The placeholders are a directory path and a system error message.
+                throw std::runtime_error(localization::format_translated_message(
+                        "Failed to inspect temporary export directory {}: {}",
+                        display_path.string(),
+                        std::strerror(errno)));
+            case DirectoryIdentityContext::ExportedGit:
+                // TRANSLATORS: The placeholders are the literal .git name, its directory path, and a system error message.
+                throw std::runtime_error(localization::format_translated_message(
+                        "Failed to inspect exported {} directory {}: {}",
+                        ".git", display_path.string(),
+                        std::strerror(errno)));
+        }
+        throw std::logic_error(localization::translate_message(
+                "Unknown export directory identity context."));
     }
     if(!S_ISDIR(status.st_mode)) {
-        throw std::runtime_error(context + " is not a directory.");
+        switch(context) {
+            case DirectoryIdentityContext::CurrentExport:
+                throw std::runtime_error(localization::translate_message(
+                        "The current export directory is not a directory."));
+            case DirectoryIdentityContext::TemporaryParent:
+                // TRANSLATORS: The placeholder is a directory path.
+                throw std::runtime_error(localization::format_translated_message(
+                        "Temporary directory parent {} is not a directory.",
+                        display_path.string()));
+            case DirectoryIdentityContext::TemporaryExport:
+                // TRANSLATORS: The placeholder is a directory path.
+                throw std::runtime_error(localization::format_translated_message(
+                        "Temporary export path {} is not a directory.",
+                        display_path.string()));
+            case DirectoryIdentityContext::ExportedGit:
+                // TRANSLATORS: The placeholders are the literal .git name and its path.
+                throw std::runtime_error(localization::format_translated_message(
+                        "Exported {} path {} is not a directory.",
+                        ".git", display_path.string()));
+        }
+        throw std::logic_error(localization::translate_message(
+                "Unknown export directory identity context."));
     }
     return DirectoryIdentity{status.st_dev, status.st_ino};
 }
@@ -145,26 +206,34 @@ public:
     AnchoredDirectory(const AnchoredDirectory&) = delete;
     AnchoredDirectory& operator=(const AnchoredDirectory&) = delete;
 
-    static AnchoredDirectory open_path(
-            const fs::path& path, const std::string& context) {
+    static AnchoredDirectory open_temporary_parent(const fs::path& path) {
         int descriptor = open(path.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
         if(descriptor < 0) {
-            throw std::runtime_error(
-                    "Failed to open " + context + " " + path.string() + ": " +
-                    std::strerror(errno));
+            // TRANSLATORS: The placeholders are a directory path and a system error message.
+            throw std::runtime_error(localization::format_translated_message(
+                    "Failed to open temporary directory parent {}: {}",
+                    path.string(),
+                    std::strerror(errno)));
         }
         OwnedFileDescriptor opened_directory(descriptor);
-        DirectoryIdentity identity = require_directory_identity(descriptor, context);
+        DirectoryIdentity identity = require_directory_identity(
+                descriptor,
+                DirectoryIdentityContext::TemporaryParent,
+                path);
 
         struct stat named_status {};
         if(fstatat(AT_FDCWD, path.c_str(), &named_status, AT_SYMLINK_NOFOLLOW) != 0) {
-            throw std::runtime_error(
-                    "Failed to revalidate " + context + " " + path.string() + ": " +
-                    std::strerror(errno));
+            // TRANSLATORS: The placeholders are a directory path and a system error message.
+            throw std::runtime_error(localization::format_translated_message(
+                    "Failed to revalidate temporary directory parent {}: {}",
+                    path.string(),
+                    std::strerror(errno)));
         }
         if(!directory_identity_matches(identity, named_status)) {
-            throw std::runtime_error(
-                    "Refusing changed " + context + " path: " + path.string());
+            // TRANSLATORS: The placeholder is a directory path.
+            throw std::runtime_error(localization::format_translated_message(
+                    "Refusing changed temporary directory parent path: {}",
+                    path.string()));
         }
 
         return AnchoredDirectory(path, opened_directory.release(), identity);
@@ -194,18 +263,22 @@ void remove_directory_contents_at(
             directory_descriptor, ".",
             O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
     if(scan_descriptor < 0) {
-        throw std::runtime_error(
-                "Failed to scan temporary directory " + display_path.string() + ": " +
-                std::strerror(errno));
+        // TRANSLATORS: The placeholders are a temporary directory path and a system error message.
+        throw std::runtime_error(localization::format_translated_message(
+                "Failed to scan temporary directory {}: {}",
+                display_path.string(),
+                std::strerror(errno)));
     }
 
     DIR* raw_stream = fdopendir(scan_descriptor);
     if(!raw_stream) {
         int error = errno;
         close(scan_descriptor);
-        throw std::runtime_error(
-                "Failed to read temporary directory " + display_path.string() + ": " +
-                std::strerror(error));
+        // TRANSLATORS: The placeholders are a temporary directory path and a system error message.
+        throw std::runtime_error(localization::format_translated_message(
+                "Failed to read temporary directory {}: {}",
+                display_path.string(),
+                std::strerror(error)));
     }
     std::unique_ptr<DIR, int (*)(DIR*)> stream(raw_stream, closedir);
 
@@ -214,9 +287,11 @@ void remove_directory_contents_at(
         dirent* entry = readdir(stream.get());
         if(!entry) {
             if(errno != 0) {
-                throw std::runtime_error(
-                        "Failed while reading temporary directory " +
-                        display_path.string() + ": " + std::strerror(errno));
+                // TRANSLATORS: The placeholders are a temporary directory path and a system error message.
+                throw std::runtime_error(localization::format_translated_message(
+                        "Failed while reading temporary directory {}: {}",
+                        display_path.string(),
+                        std::strerror(errno)));
             }
             break;
         }
@@ -230,9 +305,11 @@ void remove_directory_contents_at(
                    directory_descriptor, leaf_name.c_str(), &observed_status,
                    AT_SYMLINK_NOFOLLOW) != 0) {
             if(errno == ENOENT) continue;
-            throw std::runtime_error(
-                    "Failed to inspect temporary entry " +
-                    entry_display_path.string() + ": " + std::strerror(errno));
+            // TRANSLATORS: The placeholders are a temporary entry path and a system error message.
+            throw std::runtime_error(localization::format_translated_message(
+                    "Failed to inspect temporary entry {}: {}",
+                    entry_display_path.string(),
+                    std::strerror(errno)));
         }
 
         if(S_ISDIR(observed_status.st_mode)) {
@@ -240,18 +317,21 @@ void remove_directory_contents_at(
                     directory_descriptor, leaf_name.c_str(),
                     O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
             if(child_descriptor < 0) {
-                throw std::runtime_error(
-                        "Refusing changed temporary directory entry " +
-                        entry_display_path.string() + ": " + std::strerror(errno));
+                // TRANSLATORS: The placeholders are a temporary entry path and a system error message.
+                throw std::runtime_error(localization::format_translated_message(
+                        "Refusing changed temporary directory entry {}: {}",
+                        entry_display_path.string(),
+                        std::strerror(errno)));
             }
             OwnedFileDescriptor child(child_descriptor);
 
             struct stat opened_status {};
             if(fstat(child.get(), &opened_status) != 0 ||
                !filesystem_identity_matches(observed_status, opened_status)) {
-                throw std::runtime_error(
-                        "Refusing changed temporary directory entry: " +
-                        entry_display_path.string());
+                // TRANSLATORS: The placeholder is a temporary directory entry path.
+                throw std::runtime_error(localization::format_translated_message(
+                        "Refusing changed temporary directory entry: {}",
+                        entry_display_path.string()));
             }
 
             remove_directory_contents_at(child.get(), entry_display_path);
@@ -261,14 +341,17 @@ void remove_directory_contents_at(
                        directory_descriptor, leaf_name.c_str(), &final_status,
                        AT_SYMLINK_NOFOLLOW) != 0 ||
                !filesystem_identity_matches(opened_status, final_status)) {
-                throw std::runtime_error(
-                        "Refusing changed temporary directory entry: " +
-                        entry_display_path.string());
+                // TRANSLATORS: The placeholder is a temporary directory entry path.
+                throw std::runtime_error(localization::format_translated_message(
+                        "Refusing changed temporary directory entry: {}",
+                        entry_display_path.string()));
             }
             if(unlinkat(directory_descriptor, leaf_name.c_str(), AT_REMOVEDIR) != 0) {
-                throw std::runtime_error(
-                        "Failed to remove temporary directory entry " +
-                        entry_display_path.string() + ": " + std::strerror(errno));
+                // TRANSLATORS: The placeholders are a temporary directory entry path and a system error message.
+                throw std::runtime_error(localization::format_translated_message(
+                        "Failed to remove temporary directory entry {}: {}",
+                        entry_display_path.string(),
+                        std::strerror(errno)));
             }
             continue;
         }
@@ -278,14 +361,17 @@ void remove_directory_contents_at(
                    directory_descriptor, leaf_name.c_str(), &final_status,
                    AT_SYMLINK_NOFOLLOW) != 0 ||
            !filesystem_identity_matches(observed_status, final_status)) {
-            throw std::runtime_error(
-                    "Refusing changed temporary entry: " +
-                    entry_display_path.string());
+            // TRANSLATORS: The placeholder is a temporary entry path.
+            throw std::runtime_error(localization::format_translated_message(
+                    "Refusing changed temporary entry: {}",
+                    entry_display_path.string()));
         }
         if(unlinkat(directory_descriptor, leaf_name.c_str(), 0) != 0) {
-            throw std::runtime_error(
-                    "Failed to remove temporary entry " + entry_display_path.string() +
-                    ": " + std::strerror(errno));
+            // TRANSLATORS: The placeholders are a temporary entry path and a system error message.
+            throw std::runtime_error(localization::format_translated_message(
+                    "Failed to remove temporary entry {}: {}",
+                    entry_display_path.string(),
+                    std::strerror(errno)));
         }
     }
 }
@@ -319,18 +405,23 @@ public:
         int retained_parent_descriptor =
                 fcntl(parent.descriptor(), F_DUPFD_CLOEXEC, 0);
         if(retained_parent_descriptor < 0) {
-            throw std::runtime_error(
-                    "Failed to retain temporary directory parent " +
-                    parent.display_path().string() + ": " + std::strerror(errno));
+            // TRANSLATORS: The placeholders are a directory path and a system error message.
+            throw std::runtime_error(localization::format_translated_message(
+                    "Failed to retain temporary directory parent {}: {}",
+                    parent.display_path().string(),
+                    std::strerror(errno)));
         }
         OwnedFileDescriptor retained_parent(retained_parent_descriptor);
         DirectoryIdentity retained_parent_identity = require_directory_identity(
-                retained_parent.get(), "temporary directory parent");
+                retained_parent.get(),
+                DirectoryIdentityContext::TemporaryParent,
+                parent.display_path());
         if(retained_parent_identity.device != parent.identity().device ||
            retained_parent_identity.inode != parent.identity().inode) {
-            throw std::runtime_error(
-                    "Temporary directory parent changed identity: " +
-                    parent.display_path().string());
+            // TRANSLATORS: The placeholder is a directory path.
+            throw std::runtime_error(localization::format_translated_message(
+                    "Temporary directory parent changed identity: {}",
+                    parent.display_path().string()));
         }
 
         std::string template_path =
@@ -342,9 +433,11 @@ public:
 
         char* created_path = mkdtemp(path_buffer.data());
         if(!created_path) {
-            throw std::runtime_error(
-                    "Failed to create temporary directory under " +
-                    parent.display_path().string() + ": " + std::strerror(errno));
+            // TRANSLATORS: The placeholders are a parent directory path and a system error message.
+            throw std::runtime_error(localization::format_translated_message(
+                    "Failed to create a temporary directory under {}: {}",
+                    parent.display_path().string(),
+                    std::strerror(errno)));
         }
 
         std::string leaf_name = fs::path(created_path).filename().string();
@@ -353,9 +446,10 @@ public:
                    retained_parent.get(), leaf_name.c_str(), &created_status,
                    AT_SYMLINK_NOFOLLOW) != 0 ||
            !S_ISDIR(created_status.st_mode)) {
-            throw std::runtime_error(
-                    "Failed to inspect created temporary directory " +
-                    (parent.display_path() / leaf_name).string());
+            // TRANSLATORS: The placeholder is a temporary directory path.
+            throw std::runtime_error(localization::format_translated_message(
+                    "Failed to inspect created temporary directory {}.",
+                    (parent.display_path() / leaf_name).string()));
         }
 
         int directory_descriptor = openat(
@@ -370,14 +464,17 @@ public:
                filesystem_identity_matches(created_status, current_status)) {
                 unlinkat(retained_parent.get(), leaf_name.c_str(), AT_REMOVEDIR);
             }
-            throw std::runtime_error(
-                    "Failed to open temporary directory " +
-                    (parent.display_path() / leaf_name).string() + ": " +
-                    std::strerror(open_error));
+            // TRANSLATORS: The placeholders are a temporary directory path and a system error message.
+            throw std::runtime_error(localization::format_translated_message(
+                    "Failed to open temporary directory {}: {}",
+                    (parent.display_path() / leaf_name).string(),
+                    std::strerror(open_error)));
         }
         OwnedFileDescriptor opened_directory(directory_descriptor);
         DirectoryIdentity directory_identity = require_directory_identity(
-                directory_descriptor, "temporary export directory");
+                directory_descriptor,
+                DirectoryIdentityContext::TemporaryExport,
+                parent.display_path() / leaf_name);
 
         struct stat named_status {};
         if(fstatat(
@@ -385,9 +482,10 @@ public:
                    AT_SYMLINK_NOFOLLOW) != 0 ||
            !directory_identity_matches(directory_identity, named_status) ||
            !filesystem_identity_matches(created_status, named_status)) {
-            throw std::runtime_error(
-                    "Refusing changed temporary directory path: " +
-                    (parent.display_path() / leaf_name).string());
+            // TRANSLATORS: The placeholder is a temporary directory path.
+            throw std::runtime_error(localization::format_translated_message(
+                    "Refusing changed temporary directory path: {}",
+                    (parent.display_path() / leaf_name).string()));
         }
 
         return TemporaryDirectoryGuard(
@@ -418,31 +516,38 @@ public:
 
     void require_owned_identity() const {
         DirectoryIdentity parent_identity = require_directory_identity(
-                parent_descriptor_.get(), "temporary directory parent");
+                parent_descriptor_.get(),
+                DirectoryIdentityContext::TemporaryParent,
+                display_path_.parent_path());
         if(parent_identity.device != parent_identity_.device ||
            parent_identity.inode != parent_identity_.inode) {
-            throw std::runtime_error(
-                    "Temporary directory parent changed identity: " +
-                    display_path_.parent_path().string());
+            // TRANSLATORS: The placeholder is a directory path.
+            throw std::runtime_error(localization::format_translated_message(
+                    "Temporary directory parent changed identity: {}",
+                    display_path_.parent_path().string()));
         }
 
         DirectoryIdentity open_identity = require_directory_identity(
-                directory_descriptor_.get(), "temporary export directory");
+                directory_descriptor_.get(),
+                DirectoryIdentityContext::TemporaryExport,
+                display_path_);
         if(open_identity.device != directory_identity_.device ||
            open_identity.inode != directory_identity_.inode) {
-            throw std::runtime_error(
-                    "Temporary export directory descriptor changed identity: " +
-                    display_path_.string());
+            // TRANSLATORS: The placeholder is a temporary export directory path.
+            throw std::runtime_error(localization::format_translated_message(
+                    "Temporary export directory descriptor changed identity: {}",
+                    display_path_.string()));
         }
 
         struct stat named_status {};
         if(fstatat(
                    parent_descriptor_.get(), leaf_name_.c_str(), &named_status,
                    AT_SYMLINK_NOFOLLOW) != 0 ||
-           !directory_identity_matches(directory_identity_, named_status)) {
-            throw std::runtime_error(
-                    "Refusing changed temporary directory path: " +
-                    display_path_.string());
+               !directory_identity_matches(directory_identity_, named_status)) {
+            // TRANSLATORS: The placeholder is a temporary directory path.
+            throw std::runtime_error(localization::format_translated_message(
+                    "Refusing changed temporary directory path: {}",
+                    display_path_.string()));
         }
     }
 
@@ -459,9 +564,11 @@ public:
         if(unlinkat(
                    parent_descriptor_.get(), leaf_name_.c_str(),
                    AT_REMOVEDIR) != 0) {
-            throw std::runtime_error(
-                    "Failed to remove temporary directory " + display_path_.string() +
-                    ": " + std::strerror(errno));
+            // TRANSLATORS: The placeholders are a temporary directory path and a system error message.
+            throw std::runtime_error(localization::format_translated_message(
+                    "Failed to remove temporary directory {}: {}",
+                    display_path_.string(),
+                    std::strerror(errno)));
         }
         owns_path_ = false;
     }
@@ -476,9 +583,8 @@ public:
             });
         } catch(...) {
             Logger::warn_noexcept([]() {
-                return std::string(
-                        "Refusing unsafe temporary directory cleanup: "
-                        "unknown error");
+                return localization::translate_message(
+                        "Refusing unsafe temporary directory cleanup because of an unknown error.");
             });
         }
     }
@@ -494,9 +600,11 @@ std::optional<struct stat> export_entry_status_at(
         return status;
     }
     if(errno == ENOENT) return std::nullopt;
-    throw std::runtime_error(
-            "Unable to inspect export path " + display_path.string() + ": " +
-            std::strerror(errno));
+    // TRANSLATORS: The placeholders are an export path and a system error message.
+    throw std::runtime_error(localization::format_translated_message(
+            "Unable to inspect export path {}: {}",
+            display_path.string(),
+            std::strerror(errno)));
 }
 
 void require_regular_export_pkgbuild(
@@ -504,9 +612,10 @@ void require_regular_export_pkgbuild(
     std::optional<struct stat> status = export_entry_status_at(
             checkout_descriptor, "PKGBUILD", pkgbuild_path);
     if(!status.has_value() || !S_ISREG(status->st_mode)) {
-        throw std::runtime_error(
-                "Exported PKGBUILD is not a regular non-symlink file: " +
-                pkgbuild_path.string());
+        // TRANSLATORS: The placeholders are the literal PKGBUILD name and its path.
+        throw std::runtime_error(localization::format_translated_message(
+                "Exported {} is not a regular non-symlink file: {}",
+                "PKGBUILD", pkgbuild_path.string()));
     }
 }
 
@@ -516,13 +625,17 @@ void require_export_git_directory(const TemporaryDirectoryGuard& checkout) {
             checkout.directory_descriptor(), ".git",
             O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
     if(git_descriptor < 0) {
-        throw std::runtime_error(
-                "Cloned AUR repository is missing a regular .git directory: " +
-                checkout.display_path().string());
+        // TRANSLATORS: The placeholders are the literal AUR and .git identities and an AUR checkout directory path.
+        throw std::runtime_error(localization::format_translated_message(
+                "Cloned {} repository is missing a regular {} directory: {}",
+                "AUR", ".git",
+                checkout.display_path().string()));
     }
     OwnedFileDescriptor git_directory(git_descriptor);
     require_directory_identity(
-            git_directory.get(), "exported .git directory " + git_path.string());
+            git_directory.get(),
+            DirectoryIdentityContext::ExportedGit,
+            git_path);
 }
 
 AurExportSource resolve_aur_export_source(const std::string& target) {
@@ -530,14 +643,21 @@ AurExportSource resolve_aur_export_source(const std::string& target) {
     try {
         info = AurClient::info_strict(target);
     } catch(const std::exception& e) {
-        throw std::runtime_error("Failed to resolve AUR package " + target + ": " + e.what());
+        // TRANSLATORS: The placeholders are the literal AUR identity, an AUR package name, and an AUR diagnostic.
+        throw std::runtime_error(localization::format_translated_message(
+                "Failed to resolve {} package {}: {}",
+                "AUR", target, e.what()));
     }
     if(!info.has_value()) {
-        throw std::runtime_error("AUR package not found: " + target);
+        // TRANSLATORS: The placeholders are the literal AUR identity and an AUR package name.
+        throw std::runtime_error(localization::format_translated_message(
+                "{} package not found: {}", "AUR", target));
     }
     if(!is_valid_aur_export_identifier(info->PackageBase)) {
-        throw std::runtime_error(
-                "Invalid AUR PackageBase for export: " + info->PackageBase);
+        // TRANSLATORS: The placeholders are the literal AUR and PackageBase identities and a PackageBase name.
+        throw std::runtime_error(localization::format_translated_message(
+                "Invalid {} {} for export: {}",
+                "AUR", "PackageBase", info->PackageBase));
     }
 
     return AurExportSource{
@@ -547,35 +667,47 @@ AurExportSource resolve_aur_export_source(const std::string& target) {
 AnchoredDirectory require_export_current_directory() {
     int descriptor = open(".", O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
     if(descriptor < 0) {
-        throw std::runtime_error(
-                "Unable to open current directory: " + std::string(std::strerror(errno)));
+        // TRANSLATORS: The placeholder is a system error message.
+        throw std::runtime_error(localization::format_translated_message(
+                "Unable to open the current directory: {}",
+                std::strerror(errno)));
     }
     OwnedFileDescriptor current_directory_descriptor(descriptor);
     DirectoryIdentity current_identity = require_directory_identity(
-            descriptor, "current export directory");
+            descriptor,
+            DirectoryIdentityContext::CurrentExport,
+            ".");
 
     std::error_code ec;
     fs::path        current_directory = fs::current_path(ec);
     if(ec) {
-        throw std::runtime_error("Unable to read current directory: " + ec.message());
+        // TRANSLATORS: The placeholder is a system error message.
+        throw std::runtime_error(localization::format_translated_message(
+                "Unable to read the current directory: {}", ec.message()));
     }
     current_directory = fs::canonical(current_directory, ec);
     if(ec) {
-        throw std::runtime_error("Unable to canonicalize current directory: " + ec.message());
+        // TRANSLATORS: The placeholder is a system error message.
+        throw std::runtime_error(localization::format_translated_message(
+                "Unable to canonicalize the current directory: {}",
+                ec.message()));
     }
 
     struct stat named_status {};
     if(fstatat(
                AT_FDCWD, current_directory.c_str(), &named_status,
                AT_SYMLINK_NOFOLLOW) != 0) {
-        throw std::runtime_error(
-                "Unable to revalidate current directory " + current_directory.string() +
-                ": " + std::strerror(errno));
+        // TRANSLATORS: The placeholders are the current directory path and a system error message.
+        throw std::runtime_error(localization::format_translated_message(
+                "Unable to revalidate current directory {}: {}",
+                current_directory.string(),
+                std::strerror(errno)));
     }
     if(!directory_identity_matches(current_identity, named_status)) {
-        throw std::runtime_error(
-                "Refusing changed current directory path: " +
-                current_directory.string());
+        // TRANSLATORS: The placeholder is the current directory path.
+        throw std::runtime_error(localization::format_translated_message(
+                "Refusing changed current directory path: {}",
+                current_directory.string()));
     }
     return AnchoredDirectory::adopt_current_directory(
             current_directory, current_directory_descriptor.release(), current_identity);
@@ -585,19 +717,27 @@ AnchoredDirectory require_export_temporary_parent() {
     std::error_code ec;
     fs::path temporary_parent = fs::temp_directory_path(ec);
     if(ec) {
-        throw std::runtime_error("Unable to resolve temporary directory: " + ec.message());
+        // TRANSLATORS: The placeholder is a system error message.
+        throw std::runtime_error(localization::format_translated_message(
+                "Unable to resolve the temporary directory: {}", ec.message()));
     }
     temporary_parent = fs::canonical(temporary_parent, ec);
     if(ec) {
-        throw std::runtime_error("Unable to canonicalize temporary directory: " + ec.message());
+        // TRANSLATORS: The placeholder is a system error message.
+        throw std::runtime_error(localization::format_translated_message(
+                "Unable to canonicalize the temporary directory: {}",
+                ec.message()));
     }
-    return AnchoredDirectory::open_path(temporary_parent, "temporary directory");
+    return AnchoredDirectory::open_temporary_parent(temporary_parent);
 }
 
 fs::path require_missing_export_destination(
         const AnchoredDirectory& current_directory, const std::string& package_base) {
     if(!is_valid_aur_export_identifier(package_base)) {
-        throw std::runtime_error("Invalid AUR PackageBase for export: " + package_base);
+        // TRANSLATORS: The placeholders are the literal AUR and PackageBase identities and a PackageBase name.
+        throw std::runtime_error(localization::format_translated_message(
+                "Invalid {} {} for export: {}",
+                "AUR", "PackageBase", package_base));
     }
 
     fs::path destination_path =
@@ -605,15 +745,20 @@ fs::path require_missing_export_destination(
     // POLICY(#167): export destination は command 開始時 cwd の direct child に固定する。
     if(destination_path.parent_path() != current_directory.display_path() ||
        !is_path_contained(current_directory.display_path(), destination_path, false)) {
-        throw std::runtime_error(
-                "Export destination resolves outside current directory: " + destination_path.string());
+        // TRANSLATORS: The placeholder is an export destination path.
+        throw std::runtime_error(localization::format_translated_message(
+                "Export destination resolves outside the current directory: {}",
+                destination_path.string()));
     }
 
     if(export_entry_status_at(
                current_directory.descriptor(), package_base,
                destination_path)
                .has_value()) {
-        throw std::runtime_error("Export destination already exists: " + destination_path.string());
+        // TRANSLATORS: The placeholder is an export destination path.
+        throw std::runtime_error(localization::format_translated_message(
+                "Export destination already exists: {}",
+                destination_path.string()));
     }
     return destination_path;
 }
@@ -627,18 +772,24 @@ void validate_aur_export_checkout(
         current_remote_url = trusted_git_aur_export_remote_origin_url(
                 checkout.anchored_path());
     } catch(const std::exception&) {
-        throw std::runtime_error(
-                "Failed to read local remote.origin.url for AUR PackageBase " +
-                source.package_base + ".");
+        // TRANSLATORS: The placeholders are the literal remote.origin.url, AUR, and PackageBase identities and a PackageBase name.
+        throw std::runtime_error(localization::format_translated_message(
+                "Failed to read local {} for {} {} {}.",
+                "remote.origin.url", "AUR", "PackageBase",
+                source.package_base));
     }
     if(current_remote_url.empty()) {
-        throw std::runtime_error(
-                "Missing remote.origin.url for AUR PackageBase " + source.package_base + ".");
+        // TRANSLATORS: The placeholders are the literal AUR and PackageBase identities, a PackageBase name, and the literal remote.origin.url key.
+        throw std::runtime_error(localization::format_translated_message(
+                "{} {} {} has no {}.",
+                "AUR", "PackageBase", source.package_base,
+                "remote.origin.url"));
     }
     if(!remote_url_matches_expected(current_remote_url, source.git_url)) {
-        throw std::runtime_error(
-                "Remote URL mismatch for AUR PackageBase " +
-                source.package_base + ".");
+        // TRANSLATORS: The placeholders are the literal AUR and PackageBase identities and a PackageBase name.
+        throw std::runtime_error(localization::format_translated_message(
+                "Remote URL mismatch for {} {} {}.",
+                "AUR", "PackageBase", source.package_base));
     }
 
     require_regular_export_pkgbuild(
@@ -651,7 +802,10 @@ void clone_and_validate_aur_export(
     checkout.require_owned_identity();
     if(trusted_git_clone_aur_export(
                source.git_url, checkout.anchored_path()) != 0) {
-        throw std::runtime_error("Failed to clone AUR PackageBase " + source.package_base + ".");
+        // TRANSLATORS: The placeholders are the literal AUR and PackageBase identities and a PackageBase name.
+        throw std::runtime_error(localization::format_translated_message(
+                "Failed to clone {} {} {}.",
+                "AUR", "PackageBase", source.package_base));
     }
     validate_aur_export_checkout(source, checkout);
 }
@@ -665,19 +819,27 @@ std::string read_pkgbuild_bytes(const TemporaryDirectoryGuard& checkout) {
             checkout.directory_descriptor(), "PKGBUILD",
             O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
     if(descriptor < 0) {
-        throw std::runtime_error(
-                "Failed to open PKGBUILD " + pkgbuild_path.string() + ": " + std::strerror(errno));
+        // TRANSLATORS: The placeholders are the literal PKGBUILD name, its path, and a system error message.
+        throw std::runtime_error(localization::format_translated_message(
+                "Failed to open {} {}: {}",
+                "PKGBUILD", pkgbuild_path.string(),
+                std::strerror(errno)));
     }
     OwnedFileDescriptor file(descriptor);
 
     struct stat file_status {};
     if(fstat(file.get(), &file_status) != 0) {
-        throw std::runtime_error(
-                "Failed to inspect PKGBUILD " + pkgbuild_path.string() + ": " + std::strerror(errno));
+        // TRANSLATORS: The placeholders are the literal PKGBUILD name, its path, and a system error message.
+        throw std::runtime_error(localization::format_translated_message(
+                "Failed to inspect {} {}: {}",
+                "PKGBUILD", pkgbuild_path.string(),
+                std::strerror(errno)));
     }
     if(!S_ISREG(file_status.st_mode)) {
-        throw std::runtime_error(
-                "Exported PKGBUILD is not a regular file: " + pkgbuild_path.string());
+        // TRANSLATORS: The placeholders are the literal PKGBUILD name and its path.
+        throw std::runtime_error(localization::format_translated_message(
+                "Exported {} is not a regular file: {}",
+                "PKGBUILD", pkgbuild_path.string()));
     }
 
     std::string contents;
@@ -696,8 +858,11 @@ std::string read_pkgbuild_bytes(const TemporaryDirectoryGuard& checkout) {
         }
         if(bytes_read == 0) break;
         if(errno == EINTR) continue;
-        throw std::runtime_error(
-                "Failed to read PKGBUILD " + pkgbuild_path.string() + ": " + std::strerror(errno));
+        // TRANSLATORS: The placeholders are the literal PKGBUILD name, its path, and a system error message.
+        throw std::runtime_error(localization::format_translated_message(
+                "Failed to read {} {}: {}",
+                "PKGBUILD", pkgbuild_path.string(),
+                std::strerror(errno)));
     }
     checkout.require_owned_identity();
     return contents;
@@ -711,9 +876,10 @@ void rename_export_without_replacement(
                destination_parent.descriptor(), destination_name,
                destination_display_path)
                .has_value()) {
-        throw std::runtime_error(
-                "Export destination already exists: " +
-                destination_display_path.string());
+        // TRANSLATORS: The placeholder is an export destination path.
+        throw std::runtime_error(localization::format_translated_message(
+                "Export destination already exists: {}",
+                destination_display_path.string()));
     }
     temporary_directory.require_owned_identity();
 
@@ -724,13 +890,16 @@ void rename_export_without_replacement(
                temporary_directory.leaf_name().c_str(), destination_parent.descriptor(),
                destination_name.c_str(), RENAME_NOREPLACE) != 0) {
         if(errno == EEXIST || errno == ENOTEMPTY) {
-            throw std::runtime_error(
-                    "Export destination already exists: " +
-                    destination_display_path.string());
+            // TRANSLATORS: The placeholder is an export destination path.
+            throw std::runtime_error(localization::format_translated_message(
+                    "Export destination already exists: {}",
+                    destination_display_path.string()));
         }
-        throw std::runtime_error(
-                "Failed to publish AUR export to " + destination_display_path.string() + ": " +
-                std::strerror(errno));
+        // TRANSLATORS: The placeholders are the literal AUR identity, an export destination path, and a system error message.
+        throw std::runtime_error(localization::format_translated_message(
+                "Failed to publish the {} export to {}: {}",
+                "AUR", destination_display_path.string(),
+                std::strerror(errno)));
     }
     temporary_directory.release();
 }
@@ -746,8 +915,12 @@ void export_pkgbuild_tree(const std::string& target) {
             require_missing_export_destination(current_directory, source.package_base);
 
     if(source.requested_name != source.package_base) {
-        Logger::info(
-                source.requested_name + " -> PackageBase " + source.package_base);
+        // TRANSLATORS: The placeholders are the literal AUR identity, an AUR package name, the literal PackageBase identity, and its name.
+        Logger::info(localization::format_translated_message(
+                "{} package mapping: {} -> {} {}.",
+                "AUR", source.requested_name,
+                "PackageBase",
+                source.package_base));
     }
 
     TemporaryDirectoryGuard temporary_directory =
@@ -759,17 +932,22 @@ void export_pkgbuild_tree(const std::string& target) {
             temporary_directory, current_directory, source.package_base,
             destination_path);
 
-    Logger::info(
-            "Exported AUR PackageBase " + source.package_base +
-            " in the command-start current directory.");
+    // TRANSLATORS: The placeholders are the literal AUR and PackageBase identities and a PackageBase name.
+    Logger::info(localization::format_translated_message(
+            "Exported {} {} {} in the command-start current directory.",
+            "AUR", "PackageBase", source.package_base));
 }
 
 std::string load_pkgbuild_for_stdout(const std::string& target) {
     require_valid_aur_export_target(target, "-Gp");
     AurExportSource source = resolve_aur_export_source(target);
     if(source.requested_name != source.package_base) {
-        Logger::info(
-                source.requested_name + " -> PackageBase " + source.package_base);
+        // TRANSLATORS: The placeholders are the literal AUR identity, an AUR package name, the literal PackageBase identity, and its name.
+        Logger::info(localization::format_translated_message(
+                "{} package mapping: {} -> {} {}.",
+                "AUR", source.requested_name,
+                "PackageBase",
+                source.package_base));
     }
 
     AnchoredDirectory temporary_parent = require_export_temporary_parent();

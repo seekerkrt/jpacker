@@ -70,7 +70,11 @@ enum class UpdateCheckResult {
 std::string up_to_date_diagnostic(
         const std::string& package_name,
         const std::string& installed_version) {
-    return package_name + " is up to date (" + installed_version + "). Skipping.";
+    // TRANSLATORS: The placeholders are a package name and version.
+    return localization::format_translated_message(
+            "{} is up to date ({}). Skipping.",
+            package_name,
+            installed_version);
 }
 
 std::string unknown_update_skip_diagnostic(
@@ -78,16 +82,24 @@ std::string unknown_update_skip_diagnostic(
         SourceBuildUpdateStatusUnknownSkipReason reason) {
     switch(reason) {
         case SourceBuildUpdateStatusUnknownSkipReason::NoConfirm:
-            return "Skipping " + package_name +
-                   ": update status is unknown and --noconfirm is set.";
+            // TRANSLATORS: The placeholders are a package name and the literal --noconfirm option.
+            return localization::format_translated_message(
+                    "Skipping {}: update status is unknown and {} is set.",
+                    package_name,
+                    "--noconfirm");
         case SourceBuildUpdateStatusUnknownSkipReason::NonInteractiveStdin:
-            return "Skipping " + package_name +
-                   ": update status is unknown and stdin is non-interactive.";
+            // TRANSLATORS: The placeholders are a package name and the literal stdin identity.
+            return localization::format_translated_message(
+                    "Skipping {}: update status is unknown and {} is non-interactive.",
+                    package_name, "stdin");
         case SourceBuildUpdateStatusUnknownSkipReason::UserDeclined:
-            return "Skipping " + package_name +
-                   ": update status is unknown and the user declined to continue.";
+            // TRANSLATORS: The placeholder is a package name.
+            return localization::format_translated_message(
+                    "Skipping {}: update status is unknown and the user declined to continue.",
+                    package_name);
     }
-    throw std::logic_error("Unknown source-build update-status skip reason.");
+    throw std::logic_error(localization::translate_message(
+            "Unknown source-build update-status skip reason."));
 }
 
 SourceBuildExecutionResult source_build_result_from_artifact_outcome(
@@ -100,7 +112,8 @@ SourceBuildExecutionResult source_build_result_from_artifact_outcome(
             return SourceBuildExecutionResult{
                     SourceBuildExecutionStatus::SkippedAsNeeded, std::nullopt, {}};
     }
-    throw std::logic_error("Unknown artifact install execution outcome.");
+    throw std::logic_error(localization::translate_message(
+            "Unknown artifact install execution outcome."));
 }
 
 std::string trim(const std::string& str) {
@@ -131,12 +144,15 @@ std::vector<std::string> split_command_words(const std::string& command) {
     std::vector<std::string> words;
     while(ss >> word) {
         if(!is_safe_command_token(word)) {
-            throw std::runtime_error("Unsafe command token: " + word);
+            // TRANSLATORS: The placeholder is an editor command token.
+            throw std::runtime_error(localization::format_translated_message(
+                    "Unsafe command token: {}", word));
         }
         words.push_back(word);
     }
     if(words.empty()) {
-        throw std::runtime_error("Editor command is empty.");
+        throw std::runtime_error(localization::translate_message(
+                "Editor command is empty."));
     }
     return words;
 }
@@ -163,6 +179,7 @@ std::optional<bool> prompt_default_value(PromptDefault default_answer) {
 }
 
 std::string prompt_suffix(PromptDefault default_answer) {
+    // NO_TRANSLATE: These tokens define the accepted/default prompt input.
     switch(default_answer) {
         case PromptDefault::Yes:
             return "[Y/n]";
@@ -174,10 +191,6 @@ std::string prompt_suffix(PromptDefault default_answer) {
     return "[y/n]";
 }
 
-std::string prompt_answer_label(bool answer) {
-    return answer ? "yes" : "no";
-}
-
 bool ask_user(
         const std::string& question, PromptDefault default_answer,
         const AppConfig& config) {
@@ -186,38 +199,66 @@ bool ask_user(
     if(config.no_confirm) {
         // POLICY: --noconfirm でも default を持たない prompt は自動回答しない。
         if(default_value.has_value()) {
-            Logger::info("Skipping prompt (--noconfirm): " + question + " -> " + prompt_answer_label(default_value.value()));
+            if(default_value.value()) {
+                // TRANSLATORS: The placeholders are the literal --noconfirm option and a complete prompt question.
+                Logger::info(localization::format_translated_message(
+                        "Skipping prompt ({}): {} -> yes",
+                        "--noconfirm",
+                        question));
+            } else {
+                // TRANSLATORS: The placeholders are the literal --noconfirm option and a complete prompt question.
+                Logger::info(localization::format_translated_message(
+                        "Skipping prompt ({}): {} -> no",
+                        "--noconfirm",
+                        question));
+            }
             return default_value.value();
         }
-        throw std::runtime_error("Cannot answer prompt without interaction (--noconfirm): " + question);
+        // TRANSLATORS: The placeholders are the literal --noconfirm option and a complete prompt question.
+        throw std::runtime_error(localization::format_translated_message(
+                "Cannot answer prompt without interaction ({}): {}",
+                "--noconfirm",
+                question));
     }
 
     if(!isatty(STDIN_FILENO)) {
         // LANDMINE: 非対話 stdin では、破壊的になり得る yes default を安全に選べない。
         if(default_value.has_value() && default_value.value() == false) {
-            Logger::info("Skipping prompt (non-interactive stdin): " + question + " -> no");
+            // TRANSLATORS: The placeholders are the literal stdin identity and a complete prompt question.
+            Logger::info(localization::format_translated_message(
+                    "Skipping prompt (non-interactive {}): {} -> no",
+                    "stdin", question));
             return false;
         }
-        throw std::runtime_error("Cannot safely answer prompt with non-interactive stdin: " + question);
+        // TRANSLATORS: The placeholder is a complete prompt question.
+        throw std::runtime_error(localization::format_translated_message(
+                "Cannot safely answer prompt with non-interactive standard input: {}",
+                question));
     }
 
     for(;;) {
+        // NO_TRANSLATE: Prompt framing and response tokens are fixed UI syntax;
+        // question is a complete translated sentence.
         std::cout << ":: " << question << " " << prompt_suffix(default_answer) << " ";
         std::string input;
         if(!std::getline(std::cin, input)) {
-            throw std::runtime_error("Failed to read prompt input: " + question);
+            // TRANSLATORS: The placeholder is a complete prompt question.
+            throw std::runtime_error(localization::format_translated_message(
+                    "Failed to read the answer to this prompt: {}", question));
         }
 
         input = to_lower(trim(input));
         if(input.empty()) {
             if(default_value.has_value()) return default_value.value();
-            Logger::warn("Please answer yes or no.");
+            Logger::warn(localization::translate_message(
+                    "Please answer yes or no."));
             continue;
         }
         if(input == "y" || input == "yes") return true;
         if(input == "n" || input == "no") return false;
 
-        Logger::warn("Please answer yes or no.");
+        Logger::warn(localization::translate_message(
+                "Please answer yes or no."));
     }
 }
 
@@ -265,19 +306,27 @@ void log_update_diff_guidance(
             checkout, expected_remote_url, branch);
     if(changed_files.empty()) return;
 
-    Logger::info("Update diff range: " + range + " (existing cache repository).");
+    // TRANSLATORS: The placeholder is a literal Git revision range.
+    Logger::info(localization::format_translated_message(
+            "Update diff range: {} (existing cache repository).",
+            range));
 
     std::vector<std::string> review_sensitive_files;
     for(const auto& file : changed_files) {
         if(is_review_sensitive_file(file)) review_sensitive_files.push_back(file);
     }
     if(!review_sensitive_files.empty()) {
-        Logger::warn("Review-sensitive file changes: " + join_comma_display_values(review_sensitive_files));
+        // TRANSLATORS: The placeholder is a comma-separated list of file paths.
+        Logger::warn(localization::format_translated_message(
+                "Review-sensitive file changes: {}",
+                join_comma_display_values(review_sensitive_files)));
     }
 }
 
 void log_review_targets(const fs::path& pkg_dir, const std::vector<fs::path>& install_scripts) {
-    Logger::info("Review target: PKGBUILD");
+    // TRANSLATORS: The placeholder is the literal PKGBUILD artifact name.
+    Logger::info(localization::format_translated_message(
+            "Review target: {}", "PKGBUILD"));
     if(install_scripts.empty()) return;
 
     std::vector<std::string> names;
@@ -285,8 +334,13 @@ void log_review_targets(const fs::path& pkg_dir, const std::vector<fs::path>& in
         names.push_back(script.string());
     }
     // POLICY: PKGBUILD はここで評価しない。作業ツリーにある *.install だけを、見落とし防止として案内する。
-    Logger::warn("Install script(s) present; review before build: " + join_comma_display_values(names));
-    Logger::info("Review directory: " + pkg_dir.string());
+    // TRANSLATORS: The placeholder is a comma-separated list of install script paths.
+    Logger::warn(localization::format_translated_message(
+            "Install script(s) present; review before build: {}",
+            join_comma_display_values(names)));
+    // TRANSLATORS: The placeholder is a package checkout directory path.
+    Logger::info(localization::format_translated_message(
+            "Review directory: {}", pkg_dir.string()));
 }
 
 void review_build_files(
@@ -297,7 +351,10 @@ void review_build_files(
             require_safe_persistent_checkout_descendants(checkout);
 
     if(config.user_config.review.pkgbuild == ReviewPolicy::Skip) {
-        Logger::info("Skipping PKGBUILD/.install review (--noedit).");
+        // TRANSLATORS: The placeholders are literal artifact names and the --noedit option.
+        Logger::info(localization::format_translated_message(
+                "Skipping {}/{} review ({}).",
+                "PKGBUILD", ".install", "--noedit"));
         return;
     }
 
@@ -305,20 +362,32 @@ void review_build_files(
 
     bool edited = false;
 
-    if(ask_user("Edit PKGBUILD?", PromptDefault::No, config)) {
+    // TRANSLATORS: The placeholder is the literal PKGBUILD artifact name.
+    const std::string edit_pkgbuild_question =
+            localization::format_translated_message(
+                    "Edit {}?", "PKGBUILD");
+    if(ask_user(
+               edit_pkgbuild_question,
+               PromptDefault::No,
+               config)) {
         require_safe_persistent_checkout_review_targets(checkout, install_scripts);
         if(run_command(build_editor_command(config.editor, "PKGBUILD")) != 0) {
-            throw std::runtime_error("Editor failed.");
+            throw std::runtime_error(localization::translate_message(
+                    "Editor failed."));
         }
         require_safe_persistent_checkout_review_targets(checkout, install_scripts);
         edited = true;
     }
 
     for(const auto& install_script : install_scripts) {
-        if(ask_user("Edit install script " + install_script.string() + "?", PromptDefault::No, config)) {
+        // TRANSLATORS: The placeholder is an install script path.
+        const std::string edit_question = localization::format_translated_message(
+                "Edit install script {}?", install_script.string());
+        if(ask_user(edit_question, PromptDefault::No, config)) {
             require_safe_persistent_checkout_review_targets(checkout, install_scripts);
             if(run_command(build_editor_command(config.editor, install_script)) != 0) {
-                throw std::runtime_error("Editor failed.");
+                throw std::runtime_error(localization::translate_message(
+                        "Editor failed."));
             }
             require_safe_persistent_checkout_review_targets(checkout, install_scripts);
             edited = true;
@@ -327,7 +396,14 @@ void review_build_files(
 
     // LANDMINE(#197): editor はreview対象を置換できるため、review開始時の検証結果を持ち越さない。
     require_safe_persistent_checkout_review_targets(checkout, install_scripts);
-    if(edited && !ask_user("Proceed with build?", PromptDefault::Yes, config)) throw std::runtime_error("Aborted.");
+    if(edited &&
+       !ask_user(
+               localization::translate_message("Proceed with build?"),
+               PromptDefault::Yes,
+               config)) {
+        throw std::runtime_error(localization::translate_message(
+                "Aborted."));
+    }
 }
 
 std::optional<std::string> read_nofollow_regular_file(
@@ -416,15 +492,18 @@ UpdateCheckResult check_update_status(
             if(!pre_upgrade_version.has_value() ||
                pre_upgrade_version.value() != installed_version.value()) {
                 if(pre_upgrade_version.has_value()) {
-                    Logger::info(
-                            pkg_name + " was updated by the system transaction (" +
-                            pre_upgrade_version.value() + " -> " + installed_version.value() +
-                            "); rebuilding the preferred source package.");
+                    // TRANSLATORS: The placeholders are a package name, its previous version, and its installed version.
+                    Logger::info(localization::format_translated_message(
+                            "{} was updated by the system transaction ({} -> {}); rebuilding the preferred source package.",
+                            pkg_name,
+                            pre_upgrade_version.value(),
+                            installed_version.value()));
                 } else {
-                    Logger::info(
-                            pkg_name + " was installed by the system transaction as " +
-                            installed_version.value() +
-                            "; rebuilding the preferred source package.");
+                    // TRANSLATORS: The placeholders are a package name and its installed version.
+                    Logger::info(localization::format_translated_message(
+                            "{} was installed by the system transaction at version {}; rebuilding the preferred source package.",
+                            pkg_name,
+                            installed_version.value()));
                 }
                 return UpdateCheckResult::NeedsBuild;
             }
@@ -478,7 +557,11 @@ MakepkgBuildOptions resolve_makepkg_build_options(
     if(config.user_config.build.mode == BuildMode::Clean) {
         options.clean_build = true;
     } else if(has_local_srcdir(pkg_dir)) {
-        options.clean_build = ask_user("Clean build existing build directory?", PromptDefault::No, config);
+        options.clean_build = ask_user(
+                localization::translate_message(
+                        "Clean build existing build directory?"),
+                PromptDefault::No,
+                config);
     }
 
     if(config.user_config.build.mode == BuildMode::Rebuild) {
@@ -509,11 +592,14 @@ SourceBuildCheckoutPreparation prepare_source_build_checkout(
         const AppConfig& config) {
     require_valid_package_name(request.checkout_name);
     if(request.only_if_updated && !request.installed_snapshot.has_value()) {
-        throw std::runtime_error(
-                "Authoritative installed package snapshot was not supplied for " +
-                request.package_name + ".");
+        // TRANSLATORS: The placeholder is a package name.
+        throw std::runtime_error(localization::format_translated_message(
+                "No authoritative installed package snapshot was supplied for {}.",
+                request.package_name));
     }
-    Logger::info("Processing " + display_name + "...");
+    // TRANSLATORS: The placeholder is a package or PackageBase name.
+    Logger::info(localization::format_translated_message(
+            "Processing {}...", display_name));
     ValidatedCachePath pkg_path = require_trusted_cache_path(
             build_root, request.checkout_name,
             CachePathRequirement::ExistingOrMissing);
@@ -530,14 +616,16 @@ SourceBuildCheckoutPreparation prepare_source_build_checkout(
                 std::string current_url =
                         trusted_git_remote_origin_url(pkg_path);
                 if(!remote_url_matches_expected(current_url, request.git_url)) {
-                    Logger::warn("Remote URL mismatch. Re-cloning...");
+                    Logger::warn(localization::translate_message(
+                            "Remote URL mismatch. Re-cloning..."));
                 } else {
                     needs_clone = false;
                 }
             }
 
             if(!needs_clone) {
-                Logger::info("Updating repository...");
+                Logger::info(localization::translate_message(
+                        "Updating repository..."));
                 WorkDirGuard wd_repo(pkg_path);
                 pkg_path = revalidate_trusted_cache_path(
                         pkg_path, CachePathRequirement::ExistingDirectory);
@@ -546,7 +634,8 @@ SourceBuildCheckoutPreparation prepare_source_build_checkout(
                     ScopedPrivateUmask private_umask;
                     if(trusted_git_fetch_origin(
                                pkg_path, request.git_url) != 0) {
-                        throw std::runtime_error("Failed to fetch updates.");
+                        throw std::runtime_error(localization::translate_message(
+                                "Failed to fetch updates."));
                     }
                 }
 
@@ -558,18 +647,26 @@ SourceBuildCheckoutPreparation prepare_source_build_checkout(
 
                 std::string branch = trusted_git_detect_remote_branch(
                         pkg_path, request.git_url);
-                Logger::info("Detected branch: " + branch);
+                // TRANSLATORS: The placeholder is a literal Git branch name.
+                Logger::info(localization::format_translated_message(
+                        "Detected branch: {}", branch));
 
                 if(config.user_config.review.diff == ReviewPolicy::Prompt) {
                     int diff_ret = trusted_git_diff_quiet(
                             pkg_path, request.git_url, branch);
                     if(diff_ret > 1) {
-                        throw std::runtime_error("Failed to compare repository changes.");
+                        throw std::runtime_error(localization::translate_message(
+                                "Failed to compare repository changes."));
                     }
                     if(diff_ret == 1) {
                         log_update_diff_guidance(
                                 pkg_path, request.git_url, branch);
-                        if(ask_user("Updates detected in existing cache repository. View git diff?", PromptDefault::No, config)) {
+                        if(ask_user(
+                                   localization::format_translated_message(
+                                           "Updates were detected in the existing cache repository. View the {} diff?",
+                                           "Git"),
+                                   PromptDefault::No,
+                                   config)) {
                             static_cast<void>(trusted_git_show_diff(
                                     pkg_path, request.git_url, branch));
                         }
@@ -585,7 +682,8 @@ SourceBuildCheckoutPreparation prepare_source_build_checkout(
                     if(trusted_git_reset_hard(
                                pkg_path, request.git_url, branch) != 0) {
                         throw std::runtime_error(
-                                "Failed to reset repository.");
+                                localization::translate_message(
+                                        "Failed to reset repository."));
                     }
                 }
                 pkg_path = revalidate_trusted_cache_path(
@@ -601,14 +699,17 @@ SourceBuildCheckoutPreparation prepare_source_build_checkout(
             }
             pkg_path = create_trusted_cache_directory(
                     build_root, request.checkout_name);
-            Logger::info("Cloning repository...");
+            Logger::info(localization::translate_message(
+                    "Cloning repository..."));
             DirCleanupGuard cleanup_guard(pkg_path);
             {
                 ScopedPrivateUmask private_umask;
                 if(trusted_git_clone_persistent_checkout(
                            pkg_path, request.git_url) != 0) {
-                    throw std::runtime_error(
-                            "Failed to clone " + request.checkout_name);
+                    // TRANSLATORS: The placeholder is a package checkout name.
+                    throw std::runtime_error(localization::format_translated_message(
+                            "Failed to clone {}",
+                            request.checkout_name));
                 }
             }
 
@@ -619,9 +720,18 @@ SourceBuildCheckoutPreparation prepare_source_build_checkout(
                 WorkDirGuard wd_repo(pkg_path);
                 std::string current_url = trim(
                         trusted_git_remote_origin_url(pkg_path));
-                if(current_url.empty()) throw std::runtime_error("Missing remote.origin.url for " + request.checkout_name + ".");
+                if(current_url.empty()) {
+                    // TRANSLATORS: The placeholders are a literal Git configuration key and a package checkout name.
+                    throw std::runtime_error(localization::format_translated_message(
+                            "Missing {} for {}.",
+                            "remote.origin.url",
+                            request.checkout_name));
+                }
                 if(!remote_url_matches_expected(current_url, request.git_url)) {
-                    throw std::runtime_error("Remote URL mismatch for " + request.checkout_name + ".");
+                    // TRANSLATORS: The placeholder is a package checkout name.
+                    throw std::runtime_error(localization::format_translated_message(
+                            "Remote URL mismatch for {}.",
+                            request.checkout_name));
                 }
             }
             pkg_path = revalidate_trusted_cache_path(
@@ -653,8 +763,14 @@ SourceBuildCheckoutPreparation prepare_source_build_checkout(
                                 request.installed_snapshot->installed_version.value())};
             }
             if(update_check == UpdateCheckResult::Unknown) {
-                Logger::warn("Unable to determine update status from .SRCINFO for " + request.package_name + ".");
-                Logger::warn("Skipping pre-review PKGBUILD evaluation.");
+                // TRANSLATORS: The placeholders are the literal .SRCINFO file name and a package name.
+                Logger::warn(localization::format_translated_message(
+                        "Unable to determine update status from {} for {}.",
+                        ".SRCINFO",
+                        request.package_name));
+                // TRANSLATORS: The placeholder is the literal PKGBUILD artifact name.
+                Logger::warn(localization::format_translated_message(
+                        "Skipping pre-review {} evaluation.", "PKGBUILD"));
                 if(config.no_confirm) {
                     const SourceBuildUpdateStatusUnknownSkipReason reason =
                             SourceBuildUpdateStatusUnknownSkipReason::NoConfirm;
@@ -683,8 +799,12 @@ SourceBuildCheckoutPreparation prepare_source_build_checkout(
                             reason,
                             std::move(diagnostic)};
                 }
-                if(!ask_user("Update status is unknown because .SRCINFO is missing or incomplete. Continue to review/build?",
-                            PromptDefault::No, config)) {
+                if(!ask_user(
+                           localization::format_translated_message(
+                                   "Update status is unknown because {} is missing or incomplete. Continue to review/build?",
+                                   ".SRCINFO"),
+                           PromptDefault::No,
+                           config)) {
                     const SourceBuildUpdateStatusUnknownSkipReason reason =
                             SourceBuildUpdateStatusUnknownSkipReason::UserDeclined;
                     static_cast<void>(revalidate_trusted_cache_path(
@@ -706,9 +826,13 @@ SourceBuildCheckoutPreparation prepare_source_build_checkout(
     const std::string custom_environment = serialize_source_build_environment(
             request.custom_environment, request.empty_value_policy);
     if(!trim(custom_environment).empty()) {
-        Logger::info("Applying custom build flags: " + custom_environment);
+        // TRANSLATORS: The placeholder is a literal serialized environment assignment list.
+        Logger::info(localization::format_translated_message(
+                "Applying custom build flags: {}", custom_environment));
     } else {
-        Logger::info("Using default makepkg.conf settings.");
+        // TRANSLATORS: The placeholder is the literal makepkg.conf file name.
+        Logger::info(localization::format_translated_message(
+                "Using default {} settings.", "makepkg.conf"));
     }
 
     // LANDMINE(#175,#197,#242,#268): review/editor後のcheckoutだけを
@@ -726,15 +850,21 @@ void require_package_base_source_build_request(
     require_valid_package_name(request.checkout_name);
     if(request.git_url.empty()) {
         throw std::logic_error(
-                "PackageBase set source-build request has an empty Git URL.");
+                localization::format_translated_message(
+                        "{} set source-build request has an empty {} URL.",
+                        "PackageBase", "Git"));
     }
     if(request.only_if_updated) {
         throw std::logic_error(
-                "PackageBase set source-build does not support only-if-updated execution.");
+                localization::format_translated_message(
+                        "{} set source-build does not support only-if-updated execution.",
+                        "PackageBase"));
     }
     if(required_targets.empty()) {
         throw std::logic_error(
-                "PackageBase set source-build requires at least one required package target.");
+                localization::format_translated_message(
+                        "{} set source-build requires at least one required package target.",
+                        "PackageBase"));
     }
     for(std::size_t index = 0; index < required_targets.size(); ++index) {
         const RequiredPackageArtifactTarget& target = required_targets[index];
@@ -742,7 +872,9 @@ void require_package_base_source_build_request(
         require_valid_package_name(target.package_name);
         if(target.package_base != request.checkout_name) {
             throw std::logic_error(
-                    "PackageBase set source-build required target attribution is inconsistent.");
+                    localization::format_translated_message(
+                            "{} set source-build required target attribution is inconsistent.",
+                            "PackageBase"));
         }
         if(std::any_of(
                    required_targets.begin(),
@@ -751,7 +883,9 @@ void require_package_base_source_build_request(
                        return existing.package_name == target.package_name;
                    })) {
             throw std::logic_error(
-                    "PackageBase set source-build contains a duplicate required package target.");
+                    localization::format_translated_message(
+                            "{} set source-build contains a duplicate required package target.",
+                            "PackageBase"));
         }
         switch(target.desired_reason) {
         case DesiredInstallReason::Explicit:
@@ -759,18 +893,24 @@ void require_package_base_source_build_request(
             break;
         default:
             throw std::logic_error(
-                    "PackageBase set source-build has an unknown install reason.");
+                    localization::format_translated_message(
+                            "{} set source-build has an unknown install reason.",
+                            "PackageBase"));
         }
     }
     if(required_targets.size() == 1) {
         require_valid_package_name(request.package_name);
         if(request.package_name != required_targets.front().package_name) {
             throw std::logic_error(
-                    "PackageBase set source-build singular request identity is inconsistent.");
+                    localization::format_translated_message(
+                            "{} set source-build singular request identity is inconsistent.",
+                            "PackageBase"));
         }
     } else if(!request.package_name.empty()) {
         throw std::logic_error(
-                "PackageBase set source-build multiple request must not expose a singular package name.");
+                localization::format_translated_message(
+                        "{} set source-build multiple request must not expose a singular package name.",
+                        "PackageBase"));
     }
 }
 
@@ -837,12 +977,17 @@ execute_source_build_package_base_typed(
         } catch(const std::exception& error) {
             throw SeparatedPackageBaseSourceBuildPhaseError(
                     SeparatedPackageBaseSourceBuildFailurePhase::Build,
-                    "PackageBase private artifact workspace preparation failed: " +
-                            std::string(error.what()));
+                    // TRANSLATORS: The placeholders are the PackageBase identity and a private workspace preparation diagnostic.
+                    localization::format_translated_message(
+                            "{} private artifact workspace preparation failed: {}",
+                            "PackageBase",
+                            error.what()));
         } catch(...) {
             throw SeparatedPackageBaseSourceBuildPhaseError(
                     SeparatedPackageBaseSourceBuildFailurePhase::Build,
-                    "PackageBase private artifact workspace preparation failed.");
+                    localization::format_translated_message(
+                            "{} private artifact workspace preparation failed.",
+                            "PackageBase"));
         }
     }();
     SourceBuildCheckoutPreparation preparation = [&]() {
@@ -856,17 +1001,24 @@ execute_source_build_package_base_typed(
             // build/sync routeは既存のcheckout safety detailを失わない。
             throw SeparatedPackageBaseSourceBuildPhaseError(
                     SeparatedPackageBaseSourceBuildFailurePhase::Build,
-                    "PackageBase source checkout or build preparation failed: " +
-                            std::string(error.what()));
+                    // TRANSLATORS: The placeholders are the PackageBase identity and a checkout or build preparation diagnostic.
+                    localization::format_translated_message(
+                            "{} source checkout or build preparation failed: {}",
+                            "PackageBase",
+                            error.what()));
         } catch(...) {
             throw SeparatedPackageBaseSourceBuildPhaseError(
                     SeparatedPackageBaseSourceBuildFailurePhase::Build,
-                    "PackageBase source checkout or build preparation failed.");
+                    localization::format_translated_message(
+                            "{} source checkout or build preparation failed.",
+                            "PackageBase"));
         }
     }();
     if(std::holds_alternative<SourceBuildExecutionResult>(preparation)) {
         throw std::logic_error(
-                "PackageBase set source-build unexpectedly produced a singular update-status result.");
+                localization::format_translated_message(
+                        "{} set source-build unexpectedly produced a singular update-status result.",
+                        "PackageBase"));
     }
     PreparedSourceBuildCheckout prepared = std::move(
             std::get<PreparedSourceBuildCheckout>(preparation));
@@ -905,5 +1057,6 @@ std::optional<ArtifactInstallExecutionOutcome> execute_source_build(
         case SourceBuildExecutionStatus::UpdateStatusUnknownSkipped:
             return std::nullopt;
     }
-    throw std::logic_error("Unknown source-build execution status.");
+    throw std::logic_error(localization::translate_message(
+            "Unknown source-build execution status."));
 }

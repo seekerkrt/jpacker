@@ -15,12 +15,12 @@ msgid "Show this help message and exit"
 msgstr "ZZ help"
 
 #, c++-format
-msgid "Do not run {} as root or with sudo."
-msgstr "ZZ do not run {}"
+msgid "Do not run {} as {} or with {}."
+msgstr "ZZ do not run {} as {} or with {}"
 
 #, c++-format
-msgid "Run {} as a normal user; {} will invoke sudo/pacman when needed."
-msgstr "ZZ run {}; {} uses sudo/pacman"
+msgid "Run {} as a normal user; {} will invoke {}/{} when needed."
+msgstr "ZZ run {}; {} uses {}/{}"
 
 msgid "Rebuild package?"
 msgstr "ZZ rebuild?"

@@ -756,7 +756,7 @@ export MOGUET_TEST_MAKEPKG_EXIT_CODE=0
 run_ok --noedit --nodiff --noconfirm -S split-child
 assert_command "pacman -Si split-child"
 assert_command "git clone https://aur.archlinux.org/split-base.git split-base"
-assert_contains "Loading custom build flags from $MOGUET_TEST_PACKAGE_BUILD_DIR/split-base" "$output_file"
+assert_contains "Loading custom build flags from $MOGUET_TEST_PACKAGE_BUILD_DIR/split-base." "$output_file"
 assert_command_pattern_count 1 '^sudo pacman -U --noconfirm -- .*/split-child-2\.5-2-x86_64\.pkg\.tar\.zst$'
 assert_command_pattern_absent '^sudo pacman -U .*split-sibling'
 
@@ -878,7 +878,7 @@ assert_command "makepkg --packagelist"
 assert_command "makepkg -sc --noconfirm"
 assert_command_pattern '^pacman -U --print --print-format .* -- .*/clean-root-1\.0-1-x86_64\.pkg\.tar\.zst$'
 assert_command_pattern '^sudo pacman -U --noconfirm -- .*/clean-root-1\.0-1-x86_64\.pkg\.tar\.zst$'
-assert_contains "Loading custom build flags from $MOGUET_TEST_PACKAGE_BUILD_DIR/clean-root" "$output_file"
+assert_contains "Loading custom build flags from $MOGUET_TEST_PACKAGE_BUILD_DIR/clean-root." "$output_file"
 assert_contains "Applying custom build flags: FIRST='alpha value' QUOTED='quoted # value' DUP='first' DUP='second' BRACED='alpha value/brace' SIMPLE='second/simple'" "$output_file"
 assert_contains "Ignoring invalid environment assignment: 9INVALID=value" "$output_file"
 assert_not_contains "UNDEFINED=" "$output_file"

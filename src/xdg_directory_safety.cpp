@@ -1,6 +1,7 @@
 #include "xdg_directory_safety.hpp"
 
 #include "application_identity.hpp"
+#include "localization.hpp"
 
 #include <cerrno>
 #include <cstring>
@@ -97,6 +98,8 @@ struct TestOverrides final {};
 
 std::string_view directory_kind_name(
         xdg_paths::DirectoryKind directory_kind) {
+    // NO_TRANSLATE: These values are stable XDG directory-kind tokens and are
+    // passed as runtime data to complete diagnostic msgids.
     switch(directory_kind) {
     case xdg_paths::DirectoryKind::Config:
         return "config";
@@ -105,69 +108,129 @@ std::string_view directory_kind_name(
     case xdg_paths::DirectoryKind::Cache:
         return "cache";
     }
-    throw std::logic_error("Unknown XDG directory kind.");
+    throw std::logic_error(localization::format_translated_message(
+            "Unknown {} directory kind.", "XDG"));
 }
 
 std::string_view preparation_stage_name(PreparationStage stage) {
+    // NO_TRANSLATE: These values are stable internal stage tokens and are
+    // passed as runtime data to complete diagnostic msgids.
     switch(stage) {
     case PreparationStage::BoundaryValidation:
-        return "creation-boundary validation";
+        return "boundary-validation";
     case PreparationStage::FilesystemRootOpen:
-        return "filesystem-root open";
+        return "filesystem-root-open";
     case PreparationStage::AnchorTraversal:
-        return "anchor traversal";
+        return "anchor-traversal";
     case PreparationStage::AnchorValidation:
-        return "anchor validation";
+        return "anchor-validation";
     case PreparationStage::ComponentInspection:
-        return "component inspection";
+        return "component-inspection";
     case PreparationStage::ComponentCreation:
-        return "component creation";
+        return "component-creation";
     case PreparationStage::ComponentOpen:
-        return "component open";
+        return "component-open";
     case PreparationStage::ComponentValidation:
-        return "component validation";
+        return "component-validation";
     case PreparationStage::DirectoryRevalidation:
-        return "directory revalidation";
+        return "directory-revalidation";
     }
-    throw std::logic_error("Unknown XDG directory preparation stage.");
-}
-
-std::string_view preparation_error_description(PreparationErrorCode code) {
-    switch(code) {
-    case PreparationErrorCode::MissingAnchor:
-        return "the required existing anchor is missing";
-    case PreparationErrorCode::Symlink:
-        return "a symlink component is not allowed";
-    case PreparationErrorCode::NotDirectory:
-        return "a path component is not a directory";
-    case PreparationErrorCode::OwnershipMismatch:
-        return "directory ownership does not match the effective user";
-    case PreparationErrorCode::UnsafePermissions:
-        return "directory permissions are unsafe";
-    case PreparationErrorCode::PermissionDenied:
-        return "filesystem permission was denied";
-    case PreparationErrorCode::CreationFailed:
-        return "directory creation failed";
-    case PreparationErrorCode::MetadataFailure:
-        return "filesystem metadata could not be obtained safely";
-    case PreparationErrorCode::ConcurrentReplacement:
-        return "a path component changed during validation";
-    case PreparationErrorCode::InvalidCreationBoundary:
-        return "the resolved creation boundary is invalid";
-    }
-    throw std::logic_error("Unknown XDG directory preparation error code.");
+    throw std::logic_error(localization::format_translated_message(
+            "Unknown {} directory preparation stage.", "XDG"));
 }
 
 std::string preparation_diagnostic(const PreparationFailure& failure) {
-    std::string diagnostic =
-            "Cannot prepare " +
-            std::string(application_identity::PROJECT_NAME) + " " +
-            std::string(directory_kind_name(failure.directory_kind)) +
-            " directory during " +
-            std::string(preparation_stage_name(failure.stage)) + ": " +
-            std::string(preparation_error_description(failure.code)) + ".";
+    std::string diagnostic;
+    switch(failure.code) {
+    case PreparationErrorCode::MissingAnchor:
+        // TRANSLATORS: The placeholders are the project identity, an XDG directory-kind token, and a stable stage token.
+        diagnostic = localization::format_translated_message(
+                "Cannot prepare the {} {} directory during stage {}: the required existing anchor is missing.",
+                application_identity::PROJECT_NAME,
+                directory_kind_name(failure.directory_kind),
+                preparation_stage_name(failure.stage));
+        break;
+    case PreparationErrorCode::Symlink:
+        // TRANSLATORS: The placeholders are the project identity, an XDG directory-kind token, and a stable stage token.
+        diagnostic = localization::format_translated_message(
+                "Cannot prepare the {} {} directory during stage {}: a symlink component is not allowed.",
+                application_identity::PROJECT_NAME,
+                directory_kind_name(failure.directory_kind),
+                preparation_stage_name(failure.stage));
+        break;
+    case PreparationErrorCode::NotDirectory:
+        // TRANSLATORS: The placeholders are the project identity, an XDG directory-kind token, and a stable stage token.
+        diagnostic = localization::format_translated_message(
+                "Cannot prepare the {} {} directory during stage {}: a path component is not a directory.",
+                application_identity::PROJECT_NAME,
+                directory_kind_name(failure.directory_kind),
+                preparation_stage_name(failure.stage));
+        break;
+    case PreparationErrorCode::OwnershipMismatch:
+        // TRANSLATORS: The placeholders are the project identity, an XDG directory-kind token, and a stable stage token.
+        diagnostic = localization::format_translated_message(
+                "Cannot prepare the {} {} directory during stage {}: directory ownership does not match the effective user.",
+                application_identity::PROJECT_NAME,
+                directory_kind_name(failure.directory_kind),
+                preparation_stage_name(failure.stage));
+        break;
+    case PreparationErrorCode::UnsafePermissions:
+        // TRANSLATORS: The placeholders are the project identity, an XDG directory-kind token, and a stable stage token.
+        diagnostic = localization::format_translated_message(
+                "Cannot prepare the {} {} directory during stage {}: directory permissions are unsafe.",
+                application_identity::PROJECT_NAME,
+                directory_kind_name(failure.directory_kind),
+                preparation_stage_name(failure.stage));
+        break;
+    case PreparationErrorCode::PermissionDenied:
+        // TRANSLATORS: The placeholders are the project identity, an XDG directory-kind token, and a stable stage token.
+        diagnostic = localization::format_translated_message(
+                "Cannot prepare the {} {} directory during stage {}: filesystem permission was denied.",
+                application_identity::PROJECT_NAME,
+                directory_kind_name(failure.directory_kind),
+                preparation_stage_name(failure.stage));
+        break;
+    case PreparationErrorCode::CreationFailed:
+        // TRANSLATORS: The placeholders are the project identity, an XDG directory-kind token, and a stable stage token.
+        diagnostic = localization::format_translated_message(
+                "Cannot prepare the {} {} directory during stage {}: directory creation failed.",
+                application_identity::PROJECT_NAME,
+                directory_kind_name(failure.directory_kind),
+                preparation_stage_name(failure.stage));
+        break;
+    case PreparationErrorCode::MetadataFailure:
+        // TRANSLATORS: The placeholders are the project identity, an XDG directory-kind token, and a stable stage token.
+        diagnostic = localization::format_translated_message(
+                "Cannot prepare the {} {} directory during stage {}: filesystem metadata could not be obtained safely.",
+                application_identity::PROJECT_NAME,
+                directory_kind_name(failure.directory_kind),
+                preparation_stage_name(failure.stage));
+        break;
+    case PreparationErrorCode::ConcurrentReplacement:
+        // TRANSLATORS: The placeholders are the project identity, an XDG directory-kind token, and a stable stage token.
+        diagnostic = localization::format_translated_message(
+                "Cannot prepare the {} {} directory during stage {}: a path component changed during validation.",
+                application_identity::PROJECT_NAME,
+                directory_kind_name(failure.directory_kind),
+                preparation_stage_name(failure.stage));
+        break;
+    case PreparationErrorCode::InvalidCreationBoundary:
+        // TRANSLATORS: The placeholders are the project identity, an XDG directory-kind token, and a stable stage token.
+        diagnostic = localization::format_translated_message(
+                "Cannot prepare the {} {} directory during stage {}: the resolved creation boundary is invalid.",
+                application_identity::PROJECT_NAME,
+                directory_kind_name(failure.directory_kind),
+                preparation_stage_name(failure.stage));
+        break;
+    }
+    if(diagnostic.empty()) {
+        throw std::logic_error(localization::format_translated_message(
+                "Unknown {} directory preparation error code.", "XDG"));
+    }
     if(failure.system_error.has_value()) {
-        diagnostic += " System error: " + failure.system_error->message() + ".";
+        // TRANSLATORS: The placeholder is an operating-system error message.
+        diagnostic += " " + localization::format_translated_message(
+                "System error: {}.", failure.system_error->message());
     }
     return diagnostic;
 }
@@ -231,7 +294,8 @@ std::vector<std::string> expected_fallback_components(
     case xdg_paths::DirectoryKind::Cache:
         return {".cache", application_component};
     }
-    throw std::logic_error("Unknown XDG directory kind.");
+    throw std::logic_error(localization::format_translated_message(
+            "Unknown {} directory kind.", "XDG"));
 }
 
 void validate_creation_boundary(const DirectoryRequest& request) {

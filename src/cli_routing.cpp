@@ -2,6 +2,7 @@
 
 #include "application_identity.hpp"
 #include "cli_authority.hpp"
+#include "localization.hpp"
 
 #include <algorithm>
 #include <stdexcept>
@@ -11,13 +12,15 @@ namespace {
 std::string package_source_selection_option(PackageSourceSelection selection) {
     switch(selection) {
     case PackageSourceSelection::Auto:
-        return "automatic source selection";
+        throw std::logic_error(localization::translate_message(
+                "Automatic source selection has no explicit option."));
     case PackageSourceSelection::AurOnly:
         return "--aur";
     case PackageSourceSelection::RepoOnly:
         return "--repo";
     }
-    throw std::logic_error("Unknown package source selection.");
+    throw std::logic_error(localization::translate_message(
+            "Unknown package source selection."));
 }
 
 } // namespace
@@ -34,15 +37,23 @@ std::vector<std::string> validate_pkgbuild_export_invocation(
     for(const auto& token : parsed.tokens) {
         if(token.role == CliTokenRole::Operation || token.role == CliTokenRole::Target) continue;
 
-        return {
-                "Unsupported option " + token.value + " for operation " + parsed.operation + "."};
+        // TRANSLATORS: The placeholders are literal CLI tokens.
+        return {localization::format_translated_message(
+                "Unsupported option {} for operation {}.", token.value,
+                parsed.operation)};
     }
 
     if(parsed.targets.size() != 1) {
-        return {
-                "Operation " + parsed.operation + " requires exactly one AUR package target.",
-                "Usage: " + std::string(application_identity::COMMAND_NAME) +
-                        " " + parsed.operation + " <pkg>"};
+        // TRANSLATORS: The placeholders are a literal CLI operation and the AUR project identity.
+        const std::string target_error =
+                localization::format_translated_message(
+                        "Operation {} requires exactly one {} package target.",
+                        parsed.operation, "AUR");
+        // TRANSLATORS: The placeholders are literal command, operation, and operand tokens.
+        const std::string usage = localization::format_translated_message(
+                "Usage: {} {} {}", application_identity::COMMAND_NAME,
+                parsed.operation, "<pkg>");
+        return {target_error, usage};
     }
 
     return {};
@@ -146,11 +157,18 @@ std::optional<std::string> validate_source_selection_operation(
     SourceSelectableSyncOperation sync_operation = source_selectable_sync_operation(parsed);
 
     if(parsed.source_selection == PackageSourceSelection::AurOnly && requests_refresh) {
-        return "Cannot combine --aur with pacman refresh for operation " + parsed.operation + ".";
+        // TRANSLATORS: The placeholders are literal CLI/program tokens.
+        return localization::format_translated_message(
+                "Cannot combine {} with {} refresh for operation {}.",
+                "--aur", "pacman", parsed.operation);
     }
     if(sync_operation == SourceSelectableSyncOperation::Unsupported ||
        (sync_operation == SourceSelectableSyncOperation::Install && requests_refresh)) {
-        return selector + " is not supported for operation " + parsed.operation + ".";
+        // TRANSLATORS: The placeholders are a source selector description or
+        // literal option and a literal CLI operation.
+        return localization::format_translated_message(
+                "{} is not supported for operation {}.", selector,
+                parsed.operation);
     }
     return std::nullopt;
 }

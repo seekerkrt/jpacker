@@ -1,5 +1,7 @@
 #include "trusted_cache.hpp"
 
+#include "application_identity.hpp"
+#include "localization.hpp"
 #include "logging.hpp"
 
 #include <algorithm>
@@ -222,67 +224,148 @@ struct DirectoryStreamCloser {
 };
 
 std::string_view stage_name(TrustedCacheStage stage) {
+    // NO_TRANSLATE: These values are stable internal stage tokens and are
+    // passed as runtime data to complete diagnostic msgids.
     switch(stage) {
     case TrustedCacheStage::RootAdoption:
-        return "root adoption";
+        return "root-adoption";
     case TrustedCacheStage::RootRevalidation:
-        return "root revalidation";
+        return "root-revalidation";
     case TrustedCacheStage::ChildValidation:
-        return "child validation";
+        return "child-validation";
     case TrustedCacheStage::ChildCreation:
-        return "child creation";
+        return "child-creation";
     case TrustedCacheStage::ChildOpen:
-        return "child open";
+        return "child-open";
     case TrustedCacheStage::CleanupPreflight:
-        return "cleanup preflight";
+        return "cleanup-preflight";
     case TrustedCacheStage::RecursiveRemoval:
-        return "recursive removal";
+        return "recursive-removal";
     case TrustedCacheStage::Rollback:
         return "rollback";
     }
-    throw std::logic_error("Unknown trusted cache stage.");
-}
-
-std::string_view error_name(TrustedCacheErrorCode code) {
-    switch(code) {
-    case TrustedCacheErrorCode::InvalidBoundary:
-        return "invalid cache boundary";
-    case TrustedCacheErrorCode::Symlink:
-        return "symlink refused";
-    case TrustedCacheErrorCode::NotDirectory:
-        return "directory required";
-    case TrustedCacheErrorCode::NotRegularFile:
-        return "unsupported cache entry type";
-    case TrustedCacheErrorCode::OwnershipMismatch:
-        return "owner mismatch";
-    case TrustedCacheErrorCode::UnsafePermissions:
-        return "unsafe permissions";
-    case TrustedCacheErrorCode::PermissionDenied:
-        return "permission denied";
-    case TrustedCacheErrorCode::MetadataFailure:
-        return "metadata failure";
-    case TrustedCacheErrorCode::ConcurrentReplacement:
-        return "concurrent replacement";
-    case TrustedCacheErrorCode::ChildEscape:
-        return "child escape";
-    case TrustedCacheErrorCode::CreationFailure:
-        return "creation failure";
-    case TrustedCacheErrorCode::CleanupPreflightFailure:
-        return "cleanup preflight failure";
-    case TrustedCacheErrorCode::RemovalFailure:
-        return "removal failure";
-    case TrustedCacheErrorCode::RollbackRefusal:
-        return "rollback refusal";
-    }
-    throw std::logic_error("Unknown trusted cache error code.");
+    throw std::logic_error(localization::translate_message(
+            "Unknown trusted cache stage."));
 }
 
 std::string trusted_cache_diagnostic(const TrustedCacheFailure& failure) {
-    std::string diagnostic =
-            "Trusted Moguet cache " + std::string(stage_name(failure.stage)) +
-            " failed: " + std::string(error_name(failure.code)) + ".";
+    if(failure.stage == TrustedCacheStage::CleanupPreflight &&
+       failure.code == TrustedCacheErrorCode::Symlink &&
+       !failure.system_error.has_value()) {
+        return localization::format_translated_message(
+                "Trusted {} cache cleanup preflight failed: symlink refused.",
+                application_identity::PROJECT_NAME);
+    }
+
+    std::string diagnostic;
+    switch(failure.code) {
+    case TrustedCacheErrorCode::InvalidBoundary:
+        // TRANSLATORS: The placeholders are the project identity and a stable internal cache stage token.
+        diagnostic = localization::format_translated_message(
+                "The trusted {} cache operation failed during stage {}: invalid cache boundary.",
+                application_identity::PROJECT_NAME,
+                stage_name(failure.stage));
+        break;
+    case TrustedCacheErrorCode::Symlink:
+        // TRANSLATORS: The placeholders are the project identity and a stable internal cache stage token.
+        diagnostic = localization::format_translated_message(
+                "The trusted {} cache operation failed during stage {}: symlink refused.",
+                application_identity::PROJECT_NAME,
+                stage_name(failure.stage));
+        break;
+    case TrustedCacheErrorCode::NotDirectory:
+        // TRANSLATORS: The placeholders are the project identity and a stable internal cache stage token.
+        diagnostic = localization::format_translated_message(
+                "The trusted {} cache operation failed during stage {}: directory required.",
+                application_identity::PROJECT_NAME,
+                stage_name(failure.stage));
+        break;
+    case TrustedCacheErrorCode::NotRegularFile:
+        // TRANSLATORS: The placeholders are the project identity and a stable internal cache stage token.
+        diagnostic = localization::format_translated_message(
+                "The trusted {} cache operation failed during stage {}: unsupported cache entry type.",
+                application_identity::PROJECT_NAME,
+                stage_name(failure.stage));
+        break;
+    case TrustedCacheErrorCode::OwnershipMismatch:
+        // TRANSLATORS: The placeholders are the project identity and a stable internal cache stage token.
+        diagnostic = localization::format_translated_message(
+                "The trusted {} cache operation failed during stage {}: owner mismatch.",
+                application_identity::PROJECT_NAME,
+                stage_name(failure.stage));
+        break;
+    case TrustedCacheErrorCode::UnsafePermissions:
+        // TRANSLATORS: The placeholders are the project identity and a stable internal cache stage token.
+        diagnostic = localization::format_translated_message(
+                "The trusted {} cache operation failed during stage {}: unsafe permissions.",
+                application_identity::PROJECT_NAME,
+                stage_name(failure.stage));
+        break;
+    case TrustedCacheErrorCode::PermissionDenied:
+        // TRANSLATORS: The placeholders are the project identity and a stable internal cache stage token.
+        diagnostic = localization::format_translated_message(
+                "The trusted {} cache operation failed during stage {}: permission denied.",
+                application_identity::PROJECT_NAME,
+                stage_name(failure.stage));
+        break;
+    case TrustedCacheErrorCode::MetadataFailure:
+        // TRANSLATORS: The placeholders are the project identity and a stable internal cache stage token.
+        diagnostic = localization::format_translated_message(
+                "The trusted {} cache operation failed during stage {}: metadata failure.",
+                application_identity::PROJECT_NAME,
+                stage_name(failure.stage));
+        break;
+    case TrustedCacheErrorCode::ConcurrentReplacement:
+        // TRANSLATORS: The placeholders are the project identity and a stable internal cache stage token.
+        diagnostic = localization::format_translated_message(
+                "The trusted {} cache operation failed during stage {}: concurrent replacement.",
+                application_identity::PROJECT_NAME,
+                stage_name(failure.stage));
+        break;
+    case TrustedCacheErrorCode::ChildEscape:
+        // TRANSLATORS: The placeholders are the project identity and a stable internal cache stage token.
+        diagnostic = localization::format_translated_message(
+                "The trusted {} cache operation failed during stage {}: child escape.",
+                application_identity::PROJECT_NAME,
+                stage_name(failure.stage));
+        break;
+    case TrustedCacheErrorCode::CreationFailure:
+        // TRANSLATORS: The placeholders are the project identity and a stable internal cache stage token.
+        diagnostic = localization::format_translated_message(
+                "The trusted {} cache operation failed during stage {}: creation failure.",
+                application_identity::PROJECT_NAME,
+                stage_name(failure.stage));
+        break;
+    case TrustedCacheErrorCode::CleanupPreflightFailure:
+        // TRANSLATORS: The placeholders are the project identity and a stable internal cache stage token.
+        diagnostic = localization::format_translated_message(
+                "The trusted {} cache operation failed during stage {}: cleanup preflight failure.",
+                application_identity::PROJECT_NAME,
+                stage_name(failure.stage));
+        break;
+    case TrustedCacheErrorCode::RemovalFailure:
+        // TRANSLATORS: The placeholders are the project identity and a stable internal cache stage token.
+        diagnostic = localization::format_translated_message(
+                "The trusted {} cache operation failed during stage {}: removal failure.",
+                application_identity::PROJECT_NAME,
+                stage_name(failure.stage));
+        break;
+    case TrustedCacheErrorCode::RollbackRefusal:
+        // TRANSLATORS: The placeholders are the project identity and a stable internal cache stage token.
+        diagnostic = localization::format_translated_message(
+                "The trusted {} cache operation failed during stage {}: rollback refusal.",
+                application_identity::PROJECT_NAME,
+                stage_name(failure.stage));
+        break;
+    }
+    if(diagnostic.empty()) {
+        throw std::logic_error(localization::translate_message(
+                "Unknown trusted cache error code."));
+    }
     if(failure.system_error.has_value()) {
-        diagnostic += " (" + failure.system_error->message() + ")";
+        // TRANSLATORS: The placeholder is an operating-system error message.
+        diagnostic += " " + localization::format_translated_message(
+                "System error: {}.", failure.system_error->message());
     }
     return diagnostic;
 }
@@ -446,8 +529,8 @@ void rollback_staged_cache_directory_noexcept(
         require_root_unchanged(root, TrustedCacheStage::Rollback);
     } catch(...) {
         Logger::warn_noexcept([]() {
-            return "Refusing staged cache rollback after root authority was "
-                   "revoked.";
+            return localization::translate_message(
+                    "Refusing staged cache rollback after root authority was revoked.");
         });
         return;
     }
@@ -457,8 +540,8 @@ void rollback_staged_cache_directory_noexcept(
                AT_SYMLINK_NOFOLLOW) != 0) {
         if(errno == ENOENT) return;
         Logger::warn_noexcept([]() {
-            return "Unable to inspect a staged trusted cache directory "
-                   "during rollback.";
+            return localization::translate_message(
+                    "Unable to inspect a staged trusted cache directory during rollback.");
         });
         return;
     }
@@ -475,15 +558,15 @@ void rollback_staged_cache_directory_noexcept(
        status_permissions(current_status) != 0700 ||
        (current_status.st_mode & FORBIDDEN_WRITE_PERMISSIONS) != 0) {
         Logger::warn_noexcept([]() {
-            return "Refusing rollback of a replaced or unsafe staged "
-                   "trusted cache directory.";
+            return localization::translate_message(
+                    "Refusing rollback of a replaced or unsafe staged trusted cache directory.");
         });
         return;
     }
     if(unlinkat(root_descriptor, leaf_name.c_str(), AT_REMOVEDIR) != 0) {
         Logger::warn_noexcept([]() {
-            return "Unable to remove a staged trusted cache directory during "
-                   "rollback.";
+            return localization::translate_message(
+                    "Unable to remove a staged trusted cache directory during rollback.");
         });
     }
 }
@@ -492,9 +575,9 @@ void restore_working_directory_noexcept(int descriptor) noexcept {
     if(descriptor < 0 || fchdir(descriptor) == 0) return;
     const int restore_error = errno;
     Logger::warn_noexcept([restore_error]() {
-        return "Failed to restore the working directory after a trusted "
-               "cache operation: " +
-               std::string(std::strerror(restore_error));
+        return localization::format_translated_message(
+                "Failed to restore the working directory after a trusted cache operation: {}",
+                std::string_view(std::strerror(restore_error)));
     });
 }
 
@@ -1735,8 +1818,8 @@ ValidatedCachePath create_trusted_cache_directory(
                &created_status, AT_SYMLINK_NOFOLLOW) != 0) {
         const int metadata_error = errno;
         Logger::warn_noexcept([]() {
-            return "Unable to prove ownership of a newly staged trusted "
-                   "cache directory; leaving it untouched.";
+            return localization::translate_message(
+                    "Unable to prove ownership of a newly staged trusted cache directory; leaving it untouched.");
         });
         throw_cache_error(
                 TrustedCacheStage::ChildCreation,
@@ -2024,8 +2107,8 @@ WorkDirGuard::~WorkDirGuard() noexcept {
 DirCleanupGuard::DirCleanupGuard(const ValidatedCachePath& path)
     : path_(path) {
     if(!path_.exists() || !path_.is_directory()) {
-        throw std::invalid_argument(
-                "Clone rollback requires an existing validated directory.");
+        throw std::invalid_argument(localization::translate_message(
+                "Clone rollback requires an existing validated directory."));
     }
 
     ValidatedCachePath current = inspect_cache_child(
@@ -2099,17 +2182,19 @@ DirCleanupGuard::~DirCleanupGuard() noexcept {
                        retained_inode_, retained_owner_,
                        retained_permissions_)) {
                 Logger::warn_noexcept([]() {
-                    return "Rolled back a failed clone cache entry.";
+                    return localization::translate_message(
+                            "Rolled back a failed clone cache entry.");
                 });
             }
         } catch(const std::exception& error) {
             Logger::warn_noexcept([&error]() {
-                return "Refusing unsafe clone rollback: " +
-                       std::string(error.what());
+                return localization::format_translated_message(
+                        "Refusing unsafe clone rollback: {}", error.what());
             });
         } catch(...) {
             Logger::warn_noexcept([]() {
-                return "Refusing unsafe clone rollback: unknown error";
+                return localization::translate_message(
+                        "Refusing unsafe clone rollback: unknown error.");
             });
         }
     }

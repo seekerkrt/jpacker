@@ -1,5 +1,6 @@
 #include "package_base_artifact_install_executor.hpp"
 
+#include "localization.hpp"
 #include "process.hpp"
 #include "shell_words.hpp"
 
@@ -14,8 +15,10 @@
 namespace {
 
 [[noreturn]] void throw_incoherent_package_base_install() {
-    throw std::logic_error(
-            "Prepared PackageBase artifact install is incoherent.");
+    throw std::logic_error(localization::format_translated_message(
+            // TRANSLATORS: The placeholder is the literal Arch field name
+            // "PackageBase".
+            "Prepared {} artifact install is incoherent.", "PackageBase"));
 }
 
 bool same_identity(
@@ -144,8 +147,11 @@ void require_correlated_selection_success(
     artifacts.require_validity();
     const std::size_t artifact_count = artifacts.size();
     if(required_targets.empty() || selection.selected_artifacts.empty()) {
-        throw std::runtime_error(
-                "PackageBase artifact install requires at least one selected artifact.");
+        throw std::runtime_error(localization::format_translated_message(
+                // TRANSLATORS: The placeholder is the literal Arch field name
+                // "PackageBase".
+                "{} artifact install requires at least one selected artifact.",
+                "PackageBase"));
     }
     if(selection.package_base != package_base ||
        selection.selected_artifacts.size() != required_targets.size() ||
@@ -247,16 +253,22 @@ PreparedPackageBaseArtifactInstall::PreparedPackageBaseArtifactInstall(
 
 void PreparedPackageBaseArtifactInstall::require_not_moved_from() const {
     if(state_ == State::MovedFrom) {
-        throw std::runtime_error(
-                "Prepared PackageBase artifact install was moved from.");
+        throw std::runtime_error(localization::format_translated_message(
+                // TRANSLATORS: The placeholder is the literal Arch field name
+                // "PackageBase".
+                "Prepared {} artifact install was moved from.",
+                "PackageBase"));
     }
 }
 
 void PreparedPackageBaseArtifactInstall::require_active_for_execution() const {
     require_not_moved_from();
     if(state_ != State::Active) {
-        throw std::runtime_error(
-                "Prepared PackageBase artifact install is no longer executable.");
+        throw std::runtime_error(localization::format_translated_message(
+                // TRANSLATORS: The placeholder is the literal Arch field name
+                // "PackageBase".
+                "Prepared {} artifact install is no longer executable.",
+                "PackageBase"));
     }
 }
 
@@ -300,8 +312,11 @@ const std::filesystem::path&
 PreparedPackageBaseArtifactInstall::workspace_path() const {
     require_not_moved_from();
     if(state_ == State::Cleaned) {
-        throw std::runtime_error(
-                "Prepared PackageBase artifact install workspace was cleaned.");
+        throw std::runtime_error(localization::format_translated_message(
+                // TRANSLATORS: The placeholder is the literal Arch field name
+                // "PackageBase".
+                "Prepared {} artifact install workspace was cleaned.",
+                "PackageBase"));
     }
     return artifacts_.workspace_path();
 }
@@ -309,8 +324,11 @@ PreparedPackageBaseArtifactInstall::workspace_path() const {
 void PreparedPackageBaseArtifactInstall::retain_workspace_for_diagnostics() {
     require_not_moved_from();
     if(state_ == State::Cleaned) {
-        throw std::runtime_error(
-                "Prepared PackageBase artifact install workspace was cleaned.");
+        throw std::runtime_error(localization::format_translated_message(
+                // TRANSLATORS: The placeholder is the literal Arch field name
+                // "PackageBase".
+                "Prepared {} artifact install workspace was cleaned.",
+                "PackageBase"));
     }
     artifacts_.retain_workspace_for_diagnostics();
 }
@@ -318,8 +336,11 @@ void PreparedPackageBaseArtifactInstall::retain_workspace_for_diagnostics() {
 void PreparedPackageBaseArtifactInstall::cleanup_workspace() {
     require_not_moved_from();
     if(state_ == State::Cleaned) {
-        throw std::runtime_error(
-                "Prepared PackageBase artifact install workspace was already cleaned.");
+        throw std::runtime_error(localization::format_translated_message(
+                // TRANSLATORS: The placeholder is the literal Arch field name
+                // "PackageBase".
+                "Prepared {} artifact install workspace was already cleaned.",
+                "PackageBase"));
     }
 
     // LANDMINE(#268): cleanupがthrowしてもtransaction capabilityを復活させない。
@@ -622,8 +643,11 @@ execute_prepared_package_base_artifact_install(
         install.require_execution_coherence();
     } catch(const std::exception&) {
         // package-controlled artifact/workspace pathをpublic diagnosticへ出さない。
-        throw std::runtime_error(
-                "Prepared PackageBase artifact install failed validation before transaction.");
+        throw std::runtime_error(localization::format_translated_message(
+                // TRANSLATORS: The placeholder is the literal Arch field name
+                // "PackageBase".
+                "Prepared {} artifact install failed validation before transaction.",
+                "PackageBase"));
     }
 
     std::vector<PackageBaseArtifactInstallExecutionArtifactResult>
@@ -663,8 +687,11 @@ execute_prepared_package_base_artifact_install(
         arguments.emplace_back("--asdeps");
         break;
     default:
-        throw std::logic_error(
-                "Prepared PackageBase artifact install has an unknown transaction directive.");
+        throw std::logic_error(localization::format_translated_message(
+                // TRANSLATORS: The placeholder is the literal Arch field name
+                // "PackageBase".
+                "Prepared {} artifact install has an unknown transaction directive.",
+                "PackageBase"));
     }
     arguments.emplace_back("--");
     for(const PreparedPackageBaseArtifactInstallSelectedArtifact& artifact :
@@ -678,8 +705,11 @@ execute_prepared_package_base_artifact_install(
         // command構築中のreplacementも、mutation capabilityをconsumeする直前に拒否する。
         install.require_execution_coherence();
     } catch(const std::exception&) {
-        throw std::runtime_error(
-                "Prepared PackageBase artifact install failed validation before transaction.");
+        throw std::runtime_error(localization::format_translated_message(
+                // TRANSLATORS: The placeholder is the literal Arch field name
+                // "PackageBase".
+                "Prepared {} artifact install failed validation before transaction.",
+                "PackageBase"));
     }
 
     // LANDMINE(#268): process boundaryがthrow/nonzeroでも再実行を許さない。
@@ -693,14 +723,20 @@ execute_prepared_package_base_artifact_install(
                         ProcessException,
                 std::move(transaction_package_base),
                 std::move(transaction_attempts), std::nullopt,
-                "pacman -U transaction execution threw an exception.");
+                localization::format_translated_message(
+                        // TRANSLATORS: {} is the literal command "pacman -U".
+                        "The {} transaction execution threw an exception.",
+                        "pacman -U"));
     } catch(...) {
         throw PackageBaseArtifactInstallTransactionError(
                 PackageBaseArtifactInstallTransactionFailureKind::
                         UnknownException,
                 std::move(transaction_package_base),
                 std::move(transaction_attempts), std::nullopt,
-                "pacman -U transaction execution failed with an unknown exception.");
+                localization::format_translated_message(
+                        // TRANSLATORS: {} is the literal command "pacman -U".
+                        "The {} transaction execution failed with an unknown exception.",
+                        "pacman -U"));
     }
     if(exit_code != 0) {
         throw PackageBaseArtifactInstallTransactionError(
@@ -708,8 +744,11 @@ execute_prepared_package_base_artifact_install(
                         NonzeroExit,
                 std::move(transaction_package_base),
                 std::move(transaction_attempts), exit_code,
-                "pacman -U failed with exit code " +
-                        std::to_string(exit_code) + ".");
+                localization::format_translated_message(
+                        // TRANSLATORS: The first placeholder is the literal
+                        // command "pacman -U"; the second is its exit code.
+                        "{} failed with exit code {}.", "pacman -U",
+                        exit_code));
     }
     return execution_result;
 }

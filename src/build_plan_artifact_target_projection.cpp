@@ -1,5 +1,6 @@
 #include "build_plan_artifact_target_projection.hpp"
 
+#include "localization.hpp"
 #include "package_identifier.hpp"
 
 #include <algorithm>
@@ -98,7 +99,8 @@ bool validate_target_root_attribution(
     BuildPlanArtifactTargetProjectionIssue issue = make_issue(
             BuildPlanArtifactTargetProjectionIssueKind::
                     RootAttributionInconsistent,
-            "Planned package target root attribution is inconsistent.");
+            localization::translate_message(
+                    "Planned package target root attribution is inconsistent."));
     issue.package_target_indices.push_back(target_index);
     issue.package_base = target.package_base;
     issue.package_name = target.package_name;
@@ -134,7 +136,9 @@ void validate_plan_root_coverage(
         BuildPlanArtifactTargetProjectionIssue issue = make_issue(
                 BuildPlanArtifactTargetProjectionIssueKind::
                         RootAttributionInconsistent,
-                "BuildPlan root does not have exactly one self-attributed planned package target.");
+                localization::format_translated_message(
+                        "{} root does not have exactly one self-attributed planned package target.",
+                        "BuildPlan"));
         issue.package_target_indices = std::move(matching_target_indices);
         issue.package_name = root.requested_name;
         issue.roots.push_back(root);
@@ -152,7 +156,9 @@ void validate_order_entries(
             BuildPlanArtifactTargetProjectionIssue issue = make_issue(
                     BuildPlanArtifactTargetProjectionIssueKind::
                             InvalidPackageBase,
-                    "BuildPlan entry has an invalid PackageBase.");
+                    localization::format_translated_message(
+                            "{} entry has an invalid {}.", "BuildPlan",
+                            "PackageBase"));
             issue.build_plan_order_index = order_index;
             issue.package_base = entry.package_base;
             failure.issues.push_back(std::move(issue));
@@ -161,7 +167,9 @@ void validate_order_entries(
             BuildPlanArtifactTargetProjectionIssue issue = make_issue(
                     BuildPlanArtifactTargetProjectionIssueKind::
                             EmptyEntryPackageNames,
-                    "BuildPlan entry has no required package names.");
+                    localization::format_translated_message(
+                            "{} entry has no required package names.",
+                            "BuildPlan"));
             issue.build_plan_order_index = order_index;
             issue.package_base = entry.package_base;
             failure.issues.push_back(std::move(issue));
@@ -183,7 +191,9 @@ void validate_order_entries(
                 BuildPlanArtifactTargetProjectionIssue issue = make_issue(
                         BuildPlanArtifactTargetProjectionIssueKind::
                                 DuplicatePackageBaseEntry,
-                        "PackageBase appears more than once in BuildPlan execution order.");
+                        localization::format_translated_message(
+                                "{} appears more than once in {} execution order.",
+                                "PackageBase", "BuildPlan"));
                 issue.build_plan_order_index = order_index;
                 issue.package_base = entry.package_base;
                 failure.issues.push_back(std::move(issue));
@@ -197,7 +207,9 @@ void validate_order_entries(
                 BuildPlanArtifactTargetProjectionIssue issue = make_issue(
                         BuildPlanArtifactTargetProjectionIssueKind::
                                 InvalidPackageName,
-                        "BuildPlan entry has an invalid required package name.");
+                        localization::format_translated_message(
+                                "{} entry has an invalid required package name.",
+                                "BuildPlan"));
                 issue.build_plan_order_index = order_index;
                 issue.entry_package_name_index = name_index;
                 issue.package_base = entry.package_base;
@@ -217,7 +229,9 @@ void validate_order_entries(
             BuildPlanArtifactTargetProjectionIssue issue = make_issue(
                     BuildPlanArtifactTargetProjectionIssueKind::
                             DuplicateEntryPackageName,
-                    "BuildPlan entry contains a duplicate required package name.");
+                    localization::format_translated_message(
+                            "{} entry contains a duplicate required package name.",
+                            "BuildPlan"));
             issue.build_plan_order_index = order_index;
             issue.entry_package_name_index = name_index;
             issue.package_base = entry.package_base;
@@ -237,7 +251,9 @@ void validate_package_targets(
             BuildPlanArtifactTargetProjectionIssue issue = make_issue(
                     BuildPlanArtifactTargetProjectionIssueKind::
                             InvalidPackageBase,
-                    "Planned package target has an invalid PackageBase.");
+                    localization::format_translated_message(
+                            "Planned package target has an invalid {}.",
+                            "PackageBase"));
             issue.package_target_indices.push_back(target_index);
             issue.package_base = target.package_base;
             issue.package_name = target.package_name;
@@ -247,7 +263,8 @@ void validate_package_targets(
             BuildPlanArtifactTargetProjectionIssue issue = make_issue(
                     BuildPlanArtifactTargetProjectionIssueKind::
                             InvalidPackageName,
-                    "Planned package target has an invalid package name.");
+                    localization::translate_message(
+                            "Planned package target has an invalid package name."));
             issue.package_target_indices.push_back(target_index);
             issue.package_base = target.package_base;
             issue.package_name = target.package_name;
@@ -287,8 +304,12 @@ void validate_package_targets(
                         : BuildPlanArtifactTargetProjectionIssueKind::
                                   PackageBaseMismatch,
                 all_bases_match
-                        ? "BuildPlan contains duplicate planned package targets."
-                        : "One package name is attributed to multiple PackageBases.");
+                        ? localization::format_translated_message(
+                                  "{} contains duplicate planned package targets.",
+                                  "BuildPlan")
+                        : localization::format_translated_message(
+                                  "One package name is attributed to multiple {}.",
+                                  "PackageBases"));
         issue.package_target_indices = std::move(same_name_indices);
         issue.package_base = target.package_base;
         issue.package_name = target.package_name;
@@ -327,8 +348,12 @@ void add_missing_or_mismatched_target_issue(
                     : BuildPlanArtifactTargetProjectionIssueKind::
                               MissingPlannedPackageTarget,
             has_mismatched_target
-                    ? "Required package name is attributed to a different PackageBase."
-                    : "BuildPlan entry has no matching planned package target.");
+                    ? localization::format_translated_message(
+                              "Required package name is attributed to a different {}.",
+                              "PackageBase")
+                    : localization::format_translated_message(
+                              "{} entry has no matching planned package target.",
+                              "BuildPlan"));
     issue.build_plan_order_index = order_index;
     issue.entry_package_name_index = name_index;
     issue.package_target_indices = std::move(same_name_indices);
@@ -345,7 +370,8 @@ std::optional<DesiredInstallReason> project_desired_install_reason(
         BuildPlanArtifactTargetProjectionIssue issue = make_issue(
                 BuildPlanArtifactTargetProjectionIssueKind::
                         DesiredInstallReasonUnavailable,
-                "Planned package target has no complete known package-role set.");
+                localization::translate_message(
+                        "Planned package target has no complete known package-role set."));
         issue.build_plan_order_index = order_index;
         issue.entry_package_name_index = name_index;
         issue.package_target_indices.push_back(target_index);
@@ -366,7 +392,8 @@ std::optional<DesiredInstallReason> project_desired_install_reason(
     BuildPlanArtifactTargetProjectionIssue issue = make_issue(
             BuildPlanArtifactTargetProjectionIssueKind::
                     DesiredInstallReasonUnavailable,
-            "Planned package target desired install reason is unavailable.");
+            localization::translate_message(
+                    "Planned package target desired install reason is unavailable."));
     issue.build_plan_order_index = order_index;
     issue.entry_package_name_index = name_index;
     issue.package_target_indices.push_back(target_index);
@@ -438,7 +465,9 @@ void validate_reverse_coverage(
         BuildPlanArtifactTargetProjectionIssue issue = make_issue(
                 BuildPlanArtifactTargetProjectionIssueKind::
                         UncoveredPlannedPackageTarget,
-                "Planned package target is absent from BuildPlan execution order.");
+                localization::format_translated_message(
+                        "Planned package target is absent from {} execution order.",
+                        "BuildPlan"));
         issue.package_target_indices.push_back(target_index);
         issue.package_base = target.package_base;
         issue.package_name = target.package_name;

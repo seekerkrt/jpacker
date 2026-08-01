@@ -1,5 +1,6 @@
 #include "package_metadata.hpp"
 
+#include "localization.hpp"
 #include "package_identifier.hpp"
 #include "process.hpp"
 
@@ -43,12 +44,16 @@ fs::path normalize_absolute_path(
     if(path.empty() || !path.is_absolute()) {
         throw_package_metadata_error(
                 PackageMetadataErrorCode::ConfigurationMalformed,
-                field_name + " must be an absolute path.");
+                localization::format_translated_message(
+                        // TRANSLATORS: The placeholder is a pacman configuration key.
+                        "{} must be an absolute path.", field_name));
     }
     if(path.string().find('\0') != std::string::npos) {
         throw_package_metadata_error(
                 PackageMetadataErrorCode::ConfigurationMalformed,
-                field_name + " must not contain a null byte.");
+                localization::format_translated_message(
+                        // TRANSLATORS: The placeholder is a pacman configuration key.
+                        "{} must not contain a null byte.", field_name));
     }
 
     fs::path normalized = path.lexically_normal();
@@ -78,7 +83,9 @@ PacmanDatabasePaths parse_pacman_database_paths(const std::string& output) {
         if(line.empty() || line.find('\r') != std::string::npos) {
             throw_package_metadata_error(
                     PackageMetadataErrorCode::ConfigurationMalformed,
-                    "pacman-conf returned a malformed database path line.");
+                    localization::format_translated_message(
+                            "{} returned a malformed database path line.",
+                            "pacman-conf"));
         }
 
         const std::string separator = " = ";
@@ -86,7 +93,9 @@ PacmanDatabasePaths parse_pacman_database_paths(const std::string& output) {
         if(separator_position == std::string::npos) {
             throw_package_metadata_error(
                     PackageMetadataErrorCode::ConfigurationMalformed,
-                    "pacman-conf returned a malformed database path line.");
+                    localization::format_translated_message(
+                            "{} returned a malformed database path line.",
+                            "pacman-conf"));
         }
 
         std::string key = line.substr(0, separator_position);
@@ -94,14 +103,18 @@ PacmanDatabasePaths parse_pacman_database_paths(const std::string& output) {
         if(value.empty()) {
             throw_package_metadata_error(
                     PackageMetadataErrorCode::ConfigurationMalformed,
-                    "pacman-conf returned an empty database path.");
+                    localization::format_translated_message(
+                            "{} returned an empty database path.",
+                            "pacman-conf"));
         }
 
         if(key == "RootDir") {
             if(has_root_dir) {
                 throw_package_metadata_error(
                         PackageMetadataErrorCode::ConfigurationMalformed,
-                        "pacman-conf returned RootDir more than once.");
+                        localization::format_translated_message(
+                                "{} returned {} more than once.",
+                                "pacman-conf", "RootDir"));
             }
             has_root_dir = true;
             root_dir = std::move(value);
@@ -109,21 +122,27 @@ PacmanDatabasePaths parse_pacman_database_paths(const std::string& output) {
             if(has_db_path) {
                 throw_package_metadata_error(
                         PackageMetadataErrorCode::ConfigurationMalformed,
-                        "pacman-conf returned DBPath more than once.");
+                        localization::format_translated_message(
+                                "{} returned {} more than once.",
+                                "pacman-conf", "DBPath"));
             }
             has_db_path = true;
             db_path = std::move(value);
         } else {
             throw_package_metadata_error(
                     PackageMetadataErrorCode::ConfigurationMalformed,
-                    "pacman-conf returned an unexpected database path key.");
+                    localization::format_translated_message(
+                            "{} returned an unexpected database path key.",
+                            "pacman-conf"));
         }
     }
 
     if(!has_root_dir || !has_db_path) {
         throw_package_metadata_error(
                 PackageMetadataErrorCode::ConfigurationMalformed,
-                "pacman-conf did not return both RootDir and DBPath.");
+                localization::format_translated_message(
+                        "{} did not return both {} and {}.", "pacman-conf",
+                        "RootDir", "DBPath"));
     }
 
     return normalize_pacman_database_paths(
@@ -143,12 +162,14 @@ void validate_repository_names(const std::vector<std::string>& repository_names)
         if(repository_name.empty() || contains_control_character(repository_name)) {
             throw_package_metadata_error(
                     PackageMetadataErrorCode::ConfigurationMalformed,
-                    "Repository configuration contains an invalid repository name.");
+                    localization::translate_message(
+                            "Repository configuration contains an invalid repository name."));
         }
         if(!seen_repository_names.insert(repository_name).second) {
             throw_package_metadata_error(
                     PackageMetadataErrorCode::ConfigurationMalformed,
-                    "Repository configuration contains a duplicate repository name.");
+                    localization::translate_message(
+                            "Repository configuration contains a duplicate repository name."));
         }
     }
 }
@@ -162,7 +183,9 @@ std::vector<std::string> parse_pacman_repository_names(
         if(line.empty() || contains_control_character(line)) {
             throw_package_metadata_error(
                     PackageMetadataErrorCode::ConfigurationMalformed,
-                    "pacman-conf returned a malformed repository list.");
+                    localization::format_translated_message(
+                            "{} returned a malformed repository list.",
+                            "pacman-conf"));
         }
         repository_names.push_back(std::move(line));
     }
@@ -180,7 +203,7 @@ PacmanRepositoryConfiguration normalize_pacman_repository_configuration(
 
 std::string bounded_alpm_error_text(alpm_errno_t error_code) {
     const char* raw_text = alpm_strerror(error_code);
-    if(raw_text == nullptr || raw_text[0] == '\0') return "unknown libalpm error";
+    if(raw_text == nullptr || raw_text[0] == '\0') return "";
 
     std::string bounded_text;
     for(std::size_t index = 0;
@@ -193,13 +216,221 @@ std::string bounded_alpm_error_text(alpm_errno_t error_code) {
     return bounded_text;
 }
 
+struct AlpmFailureDiagnostics {
+    std::string no_error_detail;
+    std::string unknown_error;
+    std::string external_error;
+};
+
 std::string alpm_failure_diagnostic(
-        const std::string& context,
-        alpm_errno_t error_code) {
-    if(error_code == ALPM_ERR_OK) {
-        return context + ": libalpm reported no error detail.";
+        alpm_errno_t error_code, AlpmFailureDiagnostics diagnostics) {
+    if(error_code == ALPM_ERR_OK) return diagnostics.no_error_detail;
+    if(bounded_alpm_error_text(error_code).empty()) {
+        return diagnostics.unknown_error;
     }
-    return context + ": " + bounded_alpm_error_text(error_code) + ".";
+    return diagnostics.external_error;
+}
+
+std::string repository_package_query_failure(alpm_errno_t error_code) {
+    return alpm_failure_diagnostic(
+            error_code,
+            AlpmFailureDiagnostics{
+                    localization::format_translated_message(
+                            "Repository package query failed: {} reported no error detail.",
+                            "libalpm"),
+                    localization::format_translated_message(
+                            "Repository package query failed: unknown {} error.",
+                            "libalpm"),
+                    localization::format_translated_message(
+                            "Repository package query failed: {}.",
+                            bounded_alpm_error_text(error_code))});
+}
+
+std::string foreign_inventory_initialization_failure(
+        alpm_errno_t error_code) {
+    return alpm_failure_diagnostic(
+            error_code,
+            AlpmFailureDiagnostics{
+                    localization::format_translated_message(
+                            "Failed to initialize foreign package inventory: {} reported no error detail.",
+                            "libalpm"),
+                    localization::format_translated_message(
+                            "Failed to initialize foreign package inventory: unknown {} error.",
+                            "libalpm"),
+                    localization::format_translated_message(
+                            "Failed to initialize foreign package inventory: {}.",
+                            bounded_alpm_error_text(error_code))});
+}
+
+std::string local_database_access_failure(alpm_errno_t error_code) {
+    return alpm_failure_diagnostic(
+            error_code,
+            AlpmFailureDiagnostics{
+                    localization::format_translated_message(
+                            "Failed to access the local package database: {} reported no error detail.",
+                            "libalpm"),
+                    localization::format_translated_message(
+                            "Failed to access the local package database: unknown {} error.",
+                            "libalpm"),
+                    localization::format_translated_message(
+                            "Failed to access the local package database: {}.",
+                            bounded_alpm_error_text(error_code))});
+}
+
+std::string local_database_validation_failure(alpm_errno_t error_code) {
+    return alpm_failure_diagnostic(
+            error_code,
+            AlpmFailureDiagnostics{
+                    localization::format_translated_message(
+                            "Local package database validation failed: {} reported no error detail.",
+                            "libalpm"),
+                    localization::format_translated_message(
+                            "Local package database validation failed: unknown {} error.",
+                            "libalpm"),
+                    localization::format_translated_message(
+                            "Local package database validation failed: {}.",
+                            bounded_alpm_error_text(error_code))});
+}
+
+std::string named_repository_database_registration_failure(
+        const std::string& repository_name, alpm_errno_t error_code) {
+    return alpm_failure_diagnostic(
+            error_code,
+            AlpmFailureDiagnostics{
+                    localization::format_translated_message(
+                            "Failed to register repository package database '{}': {} reported no error detail.",
+                            repository_name, "libalpm"),
+                    localization::format_translated_message(
+                            "Failed to register repository package database '{}': unknown {} error.",
+                            repository_name, "libalpm"),
+                    localization::format_translated_message(
+                            "Failed to register repository package database '{}': {}.",
+                            repository_name,
+                            bounded_alpm_error_text(error_code))});
+}
+
+std::string repository_database_validation_failure(
+        alpm_errno_t error_code) {
+    return alpm_failure_diagnostic(
+            error_code,
+            AlpmFailureDiagnostics{
+                    localization::format_translated_message(
+                            "Repository package database validation failed: {} reported no error detail.",
+                            "libalpm"),
+                    localization::format_translated_message(
+                            "Repository package database validation failed: unknown {} error.",
+                            "libalpm"),
+                    localization::format_translated_message(
+                            "Repository package database validation failed: {}.",
+                            bounded_alpm_error_text(error_code))});
+}
+
+std::string local_database_load_failure(alpm_errno_t error_code) {
+    return alpm_failure_diagnostic(
+            error_code,
+            AlpmFailureDiagnostics{
+                    localization::format_translated_message(
+                            "Failed to load the local package database: {} reported no error detail.",
+                            "libalpm"),
+                    localization::format_translated_message(
+                            "Failed to load the local package database: unknown {} error.",
+                            "libalpm"),
+                    localization::format_translated_message(
+                            "Failed to load the local package database: {}.",
+                            bounded_alpm_error_text(error_code))});
+}
+
+std::string repository_database_load_failure(alpm_errno_t error_code) {
+    return alpm_failure_diagnostic(
+            error_code,
+            AlpmFailureDiagnostics{
+                    localization::format_translated_message(
+                            "Failed to load a repository package database: {} reported no error detail.",
+                            "libalpm"),
+                    localization::format_translated_message(
+                            "Failed to load a repository package database: unknown {} error.",
+                            "libalpm"),
+                    localization::format_translated_message(
+                            "Failed to load a repository package database: {}.",
+                            bounded_alpm_error_text(error_code))});
+}
+
+std::string repository_membership_query_failure(alpm_errno_t error_code) {
+    return alpm_failure_diagnostic(
+            error_code,
+            AlpmFailureDiagnostics{
+                    localization::format_translated_message(
+                            "Repository package membership query failed: {} reported no error detail.",
+                            "libalpm"),
+                    localization::format_translated_message(
+                            "Repository package membership query failed: unknown {} error.",
+                            "libalpm"),
+                    localization::format_translated_message(
+                            "Repository package membership query failed: {}.",
+                            bounded_alpm_error_text(error_code))});
+}
+
+std::string package_metadata_session_initialization_failure(
+        alpm_errno_t error_code) {
+    return alpm_failure_diagnostic(
+            error_code,
+            AlpmFailureDiagnostics{
+                    localization::format_translated_message(
+                            "Failed to initialize package metadata session: {} reported no error detail.",
+                            "libalpm"),
+                    localization::format_translated_message(
+                            "Failed to initialize package metadata session: unknown {} error.",
+                            "libalpm"),
+                    localization::format_translated_message(
+                            "Failed to initialize package metadata session: {}.",
+                            bounded_alpm_error_text(error_code))});
+}
+
+std::string installed_package_query_failure(alpm_errno_t error_code) {
+    return alpm_failure_diagnostic(
+            error_code,
+            AlpmFailureDiagnostics{
+                    localization::format_translated_message(
+                            "Installed package query failed: {} reported no error detail.",
+                            "libalpm"),
+                    localization::format_translated_message(
+                            "Installed package query failed: unknown {} error.",
+                            "libalpm"),
+                    localization::format_translated_message(
+                            "Installed package query failed: {}.",
+                            bounded_alpm_error_text(error_code))});
+}
+
+std::string repository_metadata_session_initialization_failure(
+        alpm_errno_t error_code) {
+    return alpm_failure_diagnostic(
+            error_code,
+            AlpmFailureDiagnostics{
+                    localization::format_translated_message(
+                            "Failed to initialize repository package metadata session: {} reported no error detail.",
+                            "libalpm"),
+                    localization::format_translated_message(
+                            "Failed to initialize repository package metadata session: unknown {} error.",
+                            "libalpm"),
+                    localization::format_translated_message(
+                            "Failed to initialize repository package metadata session: {}.",
+                            bounded_alpm_error_text(error_code))});
+}
+
+std::string repository_database_registration_failure(
+        alpm_errno_t error_code) {
+    return alpm_failure_diagnostic(
+            error_code,
+            AlpmFailureDiagnostics{
+                    localization::format_translated_message(
+                            "Failed to register a repository package database: {} reported no error detail.",
+                            "libalpm"),
+                    localization::format_translated_message(
+                            "Failed to register a repository package database: unknown {} error.",
+                            "libalpm"),
+                    localization::format_translated_message(
+                            "Failed to register a repository package database: {}.",
+                            bounded_alpm_error_text(error_code))});
 }
 
 struct AlpmHandleReleaser {
@@ -240,9 +471,7 @@ RepositoryPackageQueryResult query_repository_database(
         if(query_error == ALPM_ERR_PKG_NOT_FOUND) return PackageNotFound{};
         return query_failure(
                 PackageMetadataErrorCode::QueryFailed,
-                alpm_failure_diagnostic(
-                        "Repository package query failed",
-                        query_error));
+                repository_package_query_failure(query_error));
     }
 
     // POLICY: libalpmのnonnull returnがquery成功であり、以前の失敗errnoは参照しない。
@@ -250,7 +479,8 @@ RepositoryPackageQueryResult query_repository_database(
     if(returned_name == nullptr || package_name != returned_name) {
         return query_failure(
                 PackageMetadataErrorCode::MalformedMetadata,
-                "Repository package metadata contains an invalid package name.");
+                localization::translate_message(
+                        "Repository package metadata contains an invalid package name."));
     }
 
     off_t package_size = alpm_pkg_get_size(package);
@@ -259,7 +489,8 @@ RepositoryPackageQueryResult query_repository_database(
        installed_size < static_cast<off_t>(0)) {
         return query_failure(
                 PackageMetadataErrorCode::MalformedMetadata,
-                "Repository package metadata contains an invalid package size.");
+                localization::translate_message(
+                        "Repository package metadata contains an invalid package size."));
     }
 
     return RepositoryPackageMetadata{
@@ -276,7 +507,8 @@ ForeignPackageInventory query_foreign_package_inventory_read_phase(
     if(normalized_configuration.repository_names.empty()) {
         throw_package_metadata_error(
                 PackageMetadataErrorCode::RepositoryNotConfigured,
-                "No package repositories are configured for foreign package inventory.");
+                localization::translate_message(
+                        "No package repositories are configured for foreign package inventory."));
     }
 
     std::string root_dir = normalized_configuration.database_paths.root_dir.string();
@@ -288,8 +520,7 @@ ForeignPackageInventory query_foreign_package_inventory_read_phase(
     if(raw_handle == nullptr) {
         throw_package_metadata_error(
                 PackageMetadataErrorCode::InitializationFailed,
-                alpm_failure_diagnostic(
-                        "Failed to initialize foreign package inventory",
+                foreign_inventory_initialization_failure(
                         initialization_error));
     }
     UniqueAlpmHandle handle(raw_handle);
@@ -300,17 +531,13 @@ ForeignPackageInventory query_foreign_package_inventory_read_phase(
     if(local_db == nullptr) {
         throw_package_metadata_error(
                 PackageMetadataErrorCode::LocalDatabaseUnavailable,
-                alpm_failure_diagnostic(
-                        "Failed to access the local package database",
-                        alpm_errno(handle.get())));
+                local_database_access_failure(alpm_errno(handle.get())));
     }
 
     if(alpm_db_get_valid(local_db) != 0) {
         throw_package_metadata_error(
                 PackageMetadataErrorCode::LocalDatabaseUnavailable,
-                alpm_failure_diagnostic(
-                        "Local package database validation failed",
-                        alpm_errno(handle.get())));
+                local_database_validation_failure(alpm_errno(handle.get())));
     }
 
     std::vector<alpm_db_t*> sync_databases;
@@ -322,10 +549,8 @@ ForeignPackageInventory query_foreign_package_inventory_read_phase(
         if(database == nullptr) {
             throw_package_metadata_error(
                     PackageMetadataErrorCode::SyncDatabaseUnavailable,
-                    alpm_failure_diagnostic(
-                            "Failed to register repository package database '" +
-                                    repository_name + "'",
-                            alpm_errno(handle.get())));
+                    named_repository_database_registration_failure(
+                            repository_name, alpm_errno(handle.get())));
         }
         sync_databases.push_back(database);
     }
@@ -334,8 +559,7 @@ ForeignPackageInventory query_foreign_package_inventory_read_phase(
         if(alpm_db_get_valid(database) != 0) {
             throw_package_metadata_error(
                     PackageMetadataErrorCode::SyncDatabaseUnavailable,
-                    alpm_failure_diagnostic(
-                            "Repository package database validation failed",
+                    repository_database_validation_failure(
                             alpm_errno(handle.get())));
         }
     }
@@ -348,9 +572,7 @@ ForeignPackageInventory query_foreign_package_inventory_read_phase(
         if(package_cache_error != ALPM_ERR_OK) {
             throw_package_metadata_error(
                     PackageMetadataErrorCode::LocalDatabaseUnavailable,
-                    alpm_failure_diagnostic(
-                            "Failed to load the local package database",
-                            package_cache_error));
+                    local_database_load_failure(package_cache_error));
         }
     }
 
@@ -361,8 +583,7 @@ ForeignPackageInventory query_foreign_package_inventory_read_phase(
             if(package_cache_error != ALPM_ERR_OK) {
                 throw_package_metadata_error(
                         PackageMetadataErrorCode::SyncDatabaseUnavailable,
-                        alpm_failure_diagnostic(
-                                "Failed to load a repository package database",
+                        repository_database_load_failure(
                                 package_cache_error));
             }
         }
@@ -374,7 +595,8 @@ ForeignPackageInventory query_foreign_package_inventory_read_phase(
         if(node->data == nullptr) {
             throw_package_metadata_error(
                     PackageMetadataErrorCode::QueryFailed,
-                    "Local package cache contains an invalid package entry.");
+                    localization::translate_message(
+                            "Local package cache contains an invalid package entry."));
         }
 
         auto* local_package = static_cast<alpm_pkg_t*>(node->data);
@@ -382,14 +604,16 @@ ForeignPackageInventory query_foreign_package_inventory_read_phase(
         if(raw_package_name == nullptr || raw_package_name[0] == '\0') {
             throw_package_metadata_error(
                     PackageMetadataErrorCode::MalformedMetadata,
-                    "Local package metadata contains an invalid package name.");
+                    localization::translate_message(
+                            "Local package metadata contains an invalid package name."));
         }
 
         std::string package_name(raw_package_name);
         if(!is_valid_package_name(package_name)) {
             throw_package_metadata_error(
                     PackageMetadataErrorCode::MalformedMetadata,
-                    "Local package metadata contains an invalid package name.");
+                    localization::translate_message(
+                            "Local package metadata contains an invalid package name."));
         }
 
         bool is_native_package = false;
@@ -401,23 +625,23 @@ ForeignPackageInventory query_foreign_package_inventory_read_phase(
                 if(query_error == ALPM_ERR_PKG_NOT_FOUND) continue;
                 throw_package_metadata_error(
                         PackageMetadataErrorCode::QueryFailed,
-                        alpm_failure_diagnostic(
-                                "Repository package membership query failed",
-                                query_error));
+                        repository_membership_query_failure(query_error));
             }
 
             const char* returned_name = alpm_pkg_get_name(sync_package);
             if(returned_name == nullptr || returned_name[0] == '\0') {
                 throw_package_metadata_error(
                         PackageMetadataErrorCode::MalformedMetadata,
-                        "Repository package metadata contains an invalid package name.");
+                        localization::translate_message(
+                                "Repository package metadata contains an invalid package name."));
             }
             std::string returned_package_name(returned_name);
             if(!is_valid_package_name(returned_package_name) ||
                package_name != returned_package_name) {
                 throw_package_metadata_error(
                         PackageMetadataErrorCode::MalformedMetadata,
-                        "Repository package metadata contains an invalid package name.");
+                        localization::translate_message(
+                                "Repository package metadata contains an invalid package name."));
             }
             is_native_package = true;
             break;
@@ -428,7 +652,8 @@ ForeignPackageInventory query_foreign_package_inventory_read_phase(
         if(installed_version == nullptr || installed_version[0] == '\0') {
             throw_package_metadata_error(
                     PackageMetadataErrorCode::MalformedMetadata,
-                    "Foreign package metadata contains an invalid version.");
+                    localization::translate_message(
+                            "Foreign package metadata contains an invalid version."));
         }
 
         inventory.push_back(InstalledPackageMetadata{
@@ -454,8 +679,9 @@ PacmanDatabasePaths resolve_pacman_database_paths() {
     if(command_result.exit_code != 0) {
         throw_package_metadata_error(
                 PackageMetadataErrorCode::ConfigurationUnavailable,
-                "pacman-conf failed with exit code " +
-                        std::to_string(command_result.exit_code) + ".");
+                localization::format_translated_message(
+                        "{} failed with exit code {}.", "pacman-conf",
+                        command_result.exit_code));
     }
     return parse_pacman_database_paths(command_result.output);
 }
@@ -468,8 +694,9 @@ PacmanRepositoryConfiguration resolve_pacman_repository_configuration() {
     if(command_result.exit_code != 0) {
         throw_package_metadata_error(
                 PackageMetadataErrorCode::ConfigurationUnavailable,
-                "pacman-conf repository list failed with exit code " +
-                        std::to_string(command_result.exit_code) + ".");
+                localization::format_translated_message(
+                        "{} repository list failed with exit code {}.",
+                        "pacman-conf", command_result.exit_code));
     }
 
     return PacmanRepositoryConfiguration{
@@ -525,8 +752,7 @@ PackageMetadataSession PackageMetadataSession::open(
     if(raw_handle == nullptr) {
         throw_package_metadata_error(
                 PackageMetadataErrorCode::InitializationFailed,
-                alpm_failure_diagnostic(
-                        "Failed to initialize package metadata session",
+                package_metadata_session_initialization_failure(
                         initialization_error));
     }
 
@@ -534,8 +760,7 @@ PackageMetadataSession PackageMetadataSession::open(
     if(initialization_error != ALPM_ERR_OK) {
         throw_package_metadata_error(
                 PackageMetadataErrorCode::InitializationFailed,
-                alpm_failure_diagnostic(
-                        "Failed to initialize package metadata session",
+                package_metadata_session_initialization_failure(
                         initialization_error));
     }
 
@@ -544,9 +769,7 @@ PackageMetadataSession PackageMetadataSession::open(
     if(local_db == nullptr || local_db_error != ALPM_ERR_OK) {
         throw_package_metadata_error(
                 PackageMetadataErrorCode::LocalDatabaseUnavailable,
-                alpm_failure_diagnostic(
-                        "Failed to access the local package database",
-                        local_db_error));
+                local_database_access_failure(local_db_error));
     }
 
     int validation_result = alpm_db_get_valid(local_db);
@@ -554,9 +777,7 @@ PackageMetadataSession PackageMetadataSession::open(
     if(validation_result != 0 || validation_error != ALPM_ERR_OK) {
         throw_package_metadata_error(
                 PackageMetadataErrorCode::LocalDatabaseUnavailable,
-                alpm_failure_diagnostic(
-                        "Local package database validation failed",
-                        validation_error));
+                local_database_validation_failure(validation_error));
     }
 
     // LANDMINE: libalpm 16 maps a cache-load failure inside alpm_db_get_pkg() to
@@ -567,9 +788,7 @@ PackageMetadataSession PackageMetadataSession::open(
     if(package_cache_error != ALPM_ERR_OK) {
         throw_package_metadata_error(
                 PackageMetadataErrorCode::LocalDatabaseUnavailable,
-                alpm_failure_diagnostic(
-                        "Failed to load the local package database",
-                        package_cache_error));
+                local_database_load_failure(package_cache_error));
     }
 
     auto impl = std::make_unique<Impl>(
@@ -582,12 +801,13 @@ InstalledPackageQueryResult PackageMetadataSession::query_installed_package(
     if(impl_ == nullptr) {
         return query_failure(
                 PackageMetadataErrorCode::QueryFailed,
-                "Package metadata session is not open.");
+                localization::translate_message(
+                        "Package metadata session is not open."));
     }
     if(!is_valid_package_name(package_name)) {
         return query_failure(
                 PackageMetadataErrorCode::InvalidPackageName,
-                "Package name is invalid.");
+                localization::translate_message("Package name is invalid."));
     }
 
     alpm_pkg_t* package = alpm_db_get_pkg(impl_->local_db, package_name.c_str());
@@ -596,9 +816,7 @@ InstalledPackageQueryResult PackageMetadataSession::query_installed_package(
         if(query_error == ALPM_ERR_PKG_NOT_FOUND) return PackageNotFound{};
         return query_failure(
                 PackageMetadataErrorCode::QueryFailed,
-                alpm_failure_diagnostic(
-                        "Installed package query failed",
-                        query_error));
+                installed_package_query_failure(query_error));
     }
 
     // POLICY: libalpmのpublic contractではnonnull returnが成功を表す。
@@ -608,14 +826,16 @@ InstalledPackageQueryResult PackageMetadataSession::query_installed_package(
     if(returned_name == nullptr || package_name != returned_name) {
         return query_failure(
                 PackageMetadataErrorCode::MalformedMetadata,
-                "Installed package metadata contains an invalid package name.");
+                localization::translate_message(
+                        "Installed package metadata contains an invalid package name."));
     }
 
     const char* installed_version = alpm_pkg_get_version(package);
     if(installed_version == nullptr || installed_version[0] == '\0') {
         return query_failure(
                 PackageMetadataErrorCode::MalformedMetadata,
-                "Installed package metadata contains an invalid version.");
+                localization::translate_message(
+                        "Installed package metadata contains an invalid version."));
     }
 
     return InstalledPackageMetadata{
@@ -629,7 +849,8 @@ PackageMetadataSession::snapshot_local_package_versions() const {
     if(impl_ == nullptr) {
         return query_failure(
                 PackageMetadataErrorCode::QueryFailed,
-                "Package metadata session is not open.");
+                localization::translate_message(
+                        "Package metadata session is not open."));
     }
 
     LocalPackageVersionSnapshot snapshot;
@@ -641,7 +862,8 @@ PackageMetadataSession::snapshot_local_package_versions() const {
         if(node->data == nullptr) {
             return query_failure(
                     PackageMetadataErrorCode::QueryFailed,
-                    "Local package cache contains an invalid package entry.");
+                    localization::translate_message(
+                            "Local package cache contains an invalid package entry."));
         }
 
         auto* package = static_cast<alpm_pkg_t*>(node->data);
@@ -649,21 +871,24 @@ PackageMetadataSession::snapshot_local_package_versions() const {
         if(raw_package_name == nullptr || raw_package_name[0] == '\0') {
             return query_failure(
                     PackageMetadataErrorCode::MalformedMetadata,
-                    "Local package metadata contains an invalid package name.");
+                    localization::translate_message(
+                            "Local package metadata contains an invalid package name."));
         }
 
         std::string package_name(raw_package_name);
         if(!is_valid_package_name(package_name)) {
             return query_failure(
                     PackageMetadataErrorCode::MalformedMetadata,
-                    "Local package metadata contains an invalid package name.");
+                    localization::translate_message(
+                            "Local package metadata contains an invalid package name."));
         }
 
         const char* package_version = alpm_pkg_get_version(package);
         if(package_version == nullptr || package_version[0] == '\0') {
             return query_failure(
                     PackageMetadataErrorCode::MalformedMetadata,
-                    "Local package metadata contains an invalid version.");
+                    localization::translate_message(
+                            "Local package metadata contains an invalid version."));
         }
 
         bool inserted = snapshot.emplace(
@@ -671,7 +896,8 @@ PackageMetadataSession::snapshot_local_package_versions() const {
         if(!inserted) {
             return query_failure(
                     PackageMetadataErrorCode::MalformedMetadata,
-                    "Local package metadata contains a duplicate package name.");
+                    localization::translate_message(
+                            "Local package metadata contains a duplicate package name."));
         }
     }
     return snapshot;
@@ -718,8 +944,7 @@ RepositoryPackageMetadataSession RepositoryPackageMetadataSession::open(
     if(raw_handle == nullptr) {
         throw_package_metadata_error(
                 PackageMetadataErrorCode::InitializationFailed,
-                alpm_failure_diagnostic(
-                        "Failed to initialize repository package metadata session",
+                repository_metadata_session_initialization_failure(
                         initialization_error));
     }
 
@@ -727,8 +952,7 @@ RepositoryPackageMetadataSession RepositoryPackageMetadataSession::open(
     if(initialization_error != ALPM_ERR_OK) {
         throw_package_metadata_error(
                 PackageMetadataErrorCode::InitializationFailed,
-                alpm_failure_diagnostic(
-                        "Failed to initialize repository package metadata session",
+                repository_metadata_session_initialization_failure(
                         initialization_error));
     }
 
@@ -742,8 +966,7 @@ RepositoryPackageMetadataSession RepositoryPackageMetadataSession::open(
         if(database == nullptr || registration_error != ALPM_ERR_OK) {
             throw_package_metadata_error(
                     PackageMetadataErrorCode::SyncDatabaseUnavailable,
-                    alpm_failure_diagnostic(
-                            "Failed to register a repository package database",
+                    repository_database_registration_failure(
                             registration_error));
         }
 
@@ -752,8 +975,7 @@ RepositoryPackageMetadataSession RepositoryPackageMetadataSession::open(
         if(validation_result != 0 || validation_error != ALPM_ERR_OK) {
             throw_package_metadata_error(
                     PackageMetadataErrorCode::SyncDatabaseUnavailable,
-                    alpm_failure_diagnostic(
-                            "Repository package database validation failed",
+                    repository_database_validation_failure(
                             validation_error));
         }
 
@@ -764,8 +986,7 @@ RepositoryPackageMetadataSession RepositoryPackageMetadataSession::open(
         if(package_cache_error != ALPM_ERR_OK) {
             throw_package_metadata_error(
                     PackageMetadataErrorCode::SyncDatabaseUnavailable,
-                    alpm_failure_diagnostic(
-                            "Failed to load a repository package database",
+                    repository_database_load_failure(
                             package_cache_error));
         }
 
@@ -781,12 +1002,13 @@ RepositoryPackageQueryResult RepositoryPackageMetadataSession::query_repository_
     if(impl_ == nullptr) {
         return query_failure(
                 PackageMetadataErrorCode::QueryFailed,
-                "Repository package metadata session is not open.");
+                localization::translate_message(
+                        "Repository package metadata session is not open."));
     }
     if(!is_valid_package_name(lookup.package_name)) {
         return query_failure(
                 PackageMetadataErrorCode::InvalidPackageName,
-                "Package name is invalid.");
+                localization::translate_message("Package name is invalid."));
     }
 
     if(lookup.exact_repository_name.has_value()) {
@@ -798,7 +1020,8 @@ RepositoryPackageQueryResult RepositoryPackageMetadataSession::query_repository_
         }
         return query_failure(
                 PackageMetadataErrorCode::RepositoryNotConfigured,
-                "Requested repository is not configured.");
+                localization::translate_message(
+                        "Requested repository is not configured."));
     }
 
     for(const auto& repository : impl_->repositories) {

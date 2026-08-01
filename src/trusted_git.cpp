@@ -1,5 +1,6 @@
 #include "trusted_git.hpp"
 
+#include "localization.hpp"
 #include "logging.hpp"
 #include "persistent_checkout.hpp"
 #include "process.hpp"
@@ -46,10 +47,10 @@ constexpr std::array<const char*, 4> TRUSTED_CA_ENVIRONMENT_VARIABLES{
 class TrustedGitEnvironmentError final : public std::runtime_error {
 public:
     explicit TrustedGitEnvironmentError(const std::string& variable_name)
-        : std::runtime_error(
-                  "Refusing non-absolute custom CA path in trusted Git "
-                  "environment: " +
-                  variable_name + ".") {}
+        // TRANSLATORS: The placeholders are the Git program identity and an environment variable name. Its value is intentionally not exposed.
+        : std::runtime_error(localization::format_translated_message(
+                  "Refusing a non-absolute custom CA path in the trusted {} environment variable {}.",
+                  "Git", variable_name)) {}
 };
 
 bool is_absolute_ssl_cert_directory_list(std::string_view value) {
@@ -95,8 +96,9 @@ std::string to_lower(std::string value) {
 
 [[noreturn]] void throw_unsafe_local_configuration() {
     // Do not include config values or the checkout/cache path in diagnostics.
-    throw std::runtime_error(
-            "Refusing unsafe local Git configuration in managed checkout.");
+    throw std::runtime_error(localization::format_translated_message(
+            "Refusing unsafe local {} configuration in the managed checkout.",
+            "Git"));
 }
 
 bool is_boolean_value(const std::string& value) {
@@ -347,6 +349,7 @@ std::string trusted_git_executable() {
         if(candidate.is_absolute() && access(candidate.c_str(), X_OK) == 0) {
             return candidate.string();
         }
+        // NO_TRANSLATE: Test-only override validation; unreachable in production builds.
         throw std::runtime_error("Invalid trusted Git test executable.");
     }
 
@@ -371,6 +374,7 @@ std::string trusted_git_executable() {
             offset = end + 1;
         }
     }
+    // NO_TRANSLATE: Test-only harness setup failure; unreachable in production builds.
     throw std::runtime_error("Unable to locate trusted Git test executable.");
 #else
     return "/usr/bin/git";
@@ -453,8 +457,9 @@ void require_expected_remote(
         const std::string& expected_remote_url) {
     if(!remote_url_matches_expected(
                configuration.remote_origin_url, expected_remote_url)) {
-        throw std::runtime_error(
-                "Remote URL changed before managed Git operation.");
+        throw std::runtime_error(localization::format_translated_message(
+                "The remote URL changed before the managed {} operation.",
+                "Git"));
     }
 }
 
@@ -514,12 +519,15 @@ int run_managed_git(
 
 std::string remote_ref_for_branch(const std::string& branch) {
     if(!is_safe_branch_component(branch)) {
-        throw std::runtime_error("Refusing invalid managed Git branch name.");
+        throw std::runtime_error(localization::format_translated_message(
+                "Refusing an invalid managed {} branch name.", "Git"));
     }
+    // NO_TRANSLATE: Literal Git remote-ref identity.
     return "origin/" + branch;
 }
 
 std::string diff_range_for_branch(const std::string& branch) {
+    // NO_TRANSLATE: Literal Git revision range.
     return "HEAD.." + remote_ref_for_branch(branch);
 }
 

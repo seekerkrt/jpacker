@@ -935,7 +935,7 @@ void test_build_failure_retains_workspace(
 
     static_cast<void>(expect_runtime_error(
             [&]() { execute_scenario(environment, scenario); },
-            "build-only failure", "Build-only makepkg failed with exit code 47."));
+            "build-only failure", "The build-only makepkg command failed with exit code 47."));
 
     expect_process_counts(1, 1, "build-only failure");
     expect_metadata_counts(0, 0, 0, "build-only failure");
@@ -1157,7 +1157,7 @@ void test_same_version_needed_promotion_rejected_before_transaction(
 
     static_cast<void>(expect_runtime_error(
             [&]() { execute_scenario(environment, scenario); },
-            "same-version needed promotion", "Cannot change install reason"));
+            "same-version needed promotion", "Cannot change the install reason"));
 
     // --needed belongs only to PreparedArtifactInstall; exact build expectation
     // above rejects accidental propagation into makepkg.
@@ -1259,7 +1259,7 @@ void test_makepkg_build_options_are_projected_independently(
         static_cast<void>(expect_runtime_error(
                 [&]() { execute_scenario(environment, scenario); },
                 test_case.context,
-                "Build-only makepkg failed with exit code 47."));
+                "The build-only makepkg command failed with exit code 47."));
 
         const std::string expected_command =
                 expected_environment_prefix(

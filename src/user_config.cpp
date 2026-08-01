@@ -1,5 +1,7 @@
 #include "user_config.hpp"
 
+#include "localization.hpp"
+
 #include <array>
 #include <fstream>
 #include <sstream>
@@ -16,65 +18,63 @@ namespace fs = std::filesystem;
 
 constexpr std::int64_t SUPPORTED_SCHEMA_VERSION = 1;
 
-std::string diagnostic_prefix(const fs::path& config_path) {
-    return "User config error: '" + config_path.string() + "'";
-}
-
-std::string source_location(const toml::source_region& source) {
-    if(!source.begin) return "";
-
-    std::ostringstream location;
-    location << " (line " << source.begin.line << ", column "
-             << source.begin.column << ')';
-    return location.str();
-}
-
 std::string node_type_name(const toml::node& node) {
     std::ostringstream type;
     type << node.type();
     return type.str();
 }
 
-std::string file_type_name(fs::file_type type) {
+[[noreturn]] void throw_config_path_type_error(
+        const fs::path& config_path, fs::file_type type) {
+    const std::string path = config_path.string();
     switch(type) {
-        case fs::file_type::none:
-            return "unknown file type";
-        case fs::file_type::not_found:
-            return "missing target";
-        case fs::file_type::regular:
-            return "regular file";
-        case fs::file_type::directory:
-            return "directory";
-        case fs::file_type::symlink:
-            return "symbolic link";
-        case fs::file_type::block:
-            return "block device";
-        case fs::file_type::character:
-            return "character device";
-        case fs::file_type::fifo:
-            return "FIFO";
-        case fs::file_type::socket:
-            return "socket";
-        case fs::file_type::unknown:
-            return "unknown file type";
+    case fs::file_type::not_found:
+        throw UserConfigError(localization::format_translated_message(
+                "User config error: '{}': config path must resolve to a readable regular file; got missing target",
+                path));
+    case fs::file_type::directory:
+        throw UserConfigError(localization::format_translated_message(
+                "User config error: '{}': config path must resolve to a readable regular file; got directory",
+                path));
+    case fs::file_type::symlink:
+        throw UserConfigError(localization::format_translated_message(
+                "User config error: '{}': config path must resolve to a readable regular file; got symbolic link",
+                path));
+    case fs::file_type::block:
+        throw UserConfigError(localization::format_translated_message(
+                "User config error: '{}': config path must resolve to a readable regular file; got block device",
+                path));
+    case fs::file_type::character:
+        throw UserConfigError(localization::format_translated_message(
+                "User config error: '{}': config path must resolve to a readable regular file; got character device",
+                path));
+    case fs::file_type::fifo:
+        throw UserConfigError(localization::format_translated_message(
+                "User config error: '{}': config path must resolve to a readable regular file; got {}",
+                path, "FIFO"));
+    case fs::file_type::socket:
+        throw UserConfigError(localization::format_translated_message(
+                "User config error: '{}': config path must resolve to a readable regular file; got socket",
+                path));
+    case fs::file_type::regular:
+        throw UserConfigError(localization::format_translated_message(
+                "User config error: '{}': config path must resolve to a readable regular file; got regular file",
+                path));
+    case fs::file_type::none:
+    case fs::file_type::unknown:
+        throw UserConfigError(localization::format_translated_message(
+                "User config error: '{}': config path must resolve to a readable regular file; got unknown file type",
+                path));
     }
-    return "unknown file type";
+    throw UserConfigError(localization::format_translated_message(
+            "User config error: '{}': config path must resolve to a readable regular file; got unknown file type",
+            path));
 }
 
-[[noreturn]] void throw_path_error(
-        const fs::path& config_path, const std::string& problem) {
-    throw UserConfigError(diagnostic_prefix(config_path) + ": " + problem);
-}
-
-[[noreturn]] void throw_validation_error(
-        const fs::path& config_path, const std::string& subject,
-        const std::string& problem,
-        const toml::source_region* source = nullptr) {
-    std::string diagnostic =
-            diagnostic_prefix(config_path) + ": " + subject;
-    if(source != nullptr) diagnostic += source_location(*source);
-    diagnostic += ": " + problem;
-    throw UserConfigError(std::move(diagnostic));
+std::string source_index_text(const toml::source_index& index) {
+    std::ostringstream text;
+    text << index;
+    return text.str();
 }
 
 bool require_regular_config_file(const fs::path& config_path) {
@@ -82,23 +82,20 @@ bool require_regular_config_file(const fs::path& config_path) {
     const fs::file_status entry_status = fs::symlink_status(config_path, error);
     if(error == std::errc::no_such_file_or_directory) return false;
     if(error) {
-        throw_path_error(
-                config_path,
-                "unable to inspect config path: " + error.message());
+        throw UserConfigError(localization::format_translated_message(
+                "User config error: '{}': unable to inspect config path: {}",
+                config_path.string(), error.message()));
     }
     if(entry_status.type() == fs::file_type::not_found) return false;
 
     const fs::file_status target_status = fs::status(config_path, error);
     if(error) {
-        throw_path_error(
-                config_path,
-                "unable to inspect config target: " + error.message());
+        throw UserConfigError(localization::format_translated_message(
+                "User config error: '{}': unable to inspect config target: {}",
+                config_path.string(), error.message()));
     }
     if(!fs::is_regular_file(target_status)) {
-        throw_path_error(
-                config_path,
-                "config path must resolve to a readable regular file; got " +
-                        file_type_name(target_status.type()));
+        throw_config_path_type_error(config_path, target_status.type());
     }
     return true;
 }
@@ -106,7 +103,9 @@ bool require_regular_config_file(const fs::path& config_path) {
 std::string read_config_file(const fs::path& config_path) {
     std::ifstream file(config_path, std::ios::binary);
     if(!file.is_open()) {
-        throw_path_error(config_path, "unable to open config file for reading");
+        throw UserConfigError(localization::format_translated_message(
+                "User config error: '{}': unable to open config file for reading",
+                config_path.string()));
     }
 
     std::string              contents;
@@ -120,7 +119,9 @@ std::string read_config_file(const fs::path& config_path) {
     }
 
     if(file.bad() || (file.fail() && !file.eof())) {
-        throw_path_error(config_path, "unable to read config file");
+        throw UserConfigError(localization::format_translated_message(
+                "User config error: '{}': unable to read config file",
+                config_path.string()));
     }
     return contents;
 }
@@ -130,11 +131,21 @@ toml::table parse_config_file(const fs::path& config_path) {
     try {
         return toml::parse(contents, config_path.string());
     } catch(const toml::parse_error& error) {
-        std::string diagnostic =
-                diagnostic_prefix(config_path) + ": TOML parse error" +
-                source_location(error.source()) + ": " +
-                std::string(error.description());
-        throw UserConfigError(std::move(diagnostic));
+        const toml::source_region& source = error.source();
+        if(source.begin) {
+            // TRANSLATORS: The placeholders are a path, the literal TOML
+            // identity, source line and column, and the parser's diagnostic.
+            throw UserConfigError(localization::format_translated_message(
+                    "User config error: '{}': {} parse error (line {}, column {}): {}",
+                    config_path.string(), "TOML",
+                    source_index_text(source.begin.line),
+                    source_index_text(source.begin.column),
+                    std::string(error.description())));
+        }
+        throw UserConfigError(localization::format_translated_message(
+                "User config error: '{}': {} parse error: {}",
+                config_path.string(), "TOML",
+                std::string(error.description())));
     }
 }
 
@@ -147,18 +158,23 @@ void validate_top_level_keys(
         }
 
         if(node.is_table()) {
-            throw_validation_error(
-                    config_path,
-                    "top-level section '" + std::string(name) + "'",
-                    "unknown top-level section; accepted entries: "
-                    "schema_version, review, build",
-                    &key.source());
+            // TRANSLATORS: The placeholders are a config path, a TOML section
+            // name, source line/column, and literal accepted TOML keys.
+            throw UserConfigError(localization::format_translated_message(
+                    "User config error: '{}': top-level section '{}' (line {}, column {}): unknown top-level section; accepted entries: {}, {}, {}",
+                    config_path.string(), name,
+                    source_index_text(key.source().begin.line),
+                    source_index_text(key.source().begin.column),
+                    "schema_version", "review", "build"));
         }
-        throw_validation_error(
-                config_path, "top-level key '" + std::string(name) + "'",
-                "unknown top-level key; accepted entries: "
-                "schema_version, review, build",
-                &key.source());
+        // TRANSLATORS: The placeholders are a config path, a TOML key, source
+        // line/column, and literal accepted TOML keys.
+        throw UserConfigError(localization::format_translated_message(
+                "User config error: '{}': top-level key '{}' (line {}, column {}): unknown top-level key; accepted entries: {}, {}, {}",
+                config_path.string(), name,
+                source_index_text(key.source().begin.line),
+                source_index_text(key.source().begin.column),
+                "schema_version", "review", "build"));
     }
 }
 
@@ -166,24 +182,34 @@ std::int64_t parse_schema_version(
         const toml::table& root, const fs::path& config_path) {
     const toml::node* version_node = root.get("schema_version");
     if(version_node == nullptr) {
-        throw_validation_error(
-                config_path, "key 'schema_version'",
-                "missing required key; expected integer 1");
+        // TRANSLATORS: schema_version is a literal TOML key.
+        throw UserConfigError(localization::format_translated_message(
+                "User config error: '{}': key '{}': missing required key; expected integer {}",
+                config_path.string(), "schema_version",
+                SUPPORTED_SCHEMA_VERSION));
     }
 
     const auto version = version_node->value_exact<std::int64_t>();
     if(!version) {
-        throw_validation_error(
-                config_path, "key 'schema_version'",
-                "expected integer 1; got " + node_type_name(*version_node),
-                &version_node->source());
+        // TRANSLATORS: schema_version is a literal TOML key; the remaining
+        // placeholders are the supported integer, actual TOML type, and source
+        // line/column.
+        throw UserConfigError(localization::format_translated_message(
+                "User config error: '{}': key '{}' (line {}, column {}): expected integer {}; got {}",
+                config_path.string(), "schema_version",
+                source_index_text(version_node->source().begin.line),
+                source_index_text(version_node->source().begin.column),
+                SUPPORTED_SCHEMA_VERSION, node_type_name(*version_node)));
     }
     if(*version != SUPPORTED_SCHEMA_VERSION) {
-        throw_validation_error(
-                config_path, "key 'schema_version'",
-                "unsupported schema version " + std::to_string(*version) +
-                        "; expected integer 1",
-                &version_node->source());
+        // TRANSLATORS: schema_version is a literal TOML key; the remaining
+        // placeholders are the actual/supported versions and source location.
+        throw UserConfigError(localization::format_translated_message(
+                "User config error: '{}': key '{}' (line {}, column {}): unsupported schema version {}; expected integer {}",
+                config_path.string(), "schema_version",
+                source_index_text(version_node->source().begin.line),
+                source_index_text(version_node->source().begin.column),
+                *version, SUPPORTED_SCHEMA_VERSION));
     }
     return *version;
 }
@@ -196,11 +222,14 @@ const toml::table* optional_section(
 
     const toml::table* section = section_node->as_table();
     if(section == nullptr) {
-        throw_validation_error(
-                config_path,
-                "section '" + std::string(section_name) + "'",
-                "expected table; got " + node_type_name(*section_node),
-                &section_node->source());
+        // TRANSLATORS: The placeholders are a TOML section name, config path,
+        // actual TOML type, and source location.
+        throw UserConfigError(localization::format_translated_message(
+                "User config error: '{}': section '{}' (line {}, column {}): expected table; got {}",
+                config_path.string(), section_name,
+                source_index_text(section_node->source().begin.line),
+                source_index_text(section_node->source().begin.column),
+                node_type_name(*section_node)));
     }
     return section;
 }
@@ -212,11 +241,15 @@ void validate_review_keys(
         const std::string_view name = key.str();
         if(name == "pkgbuild" || name == "diff") continue;
 
-        throw_validation_error(
-                config_path,
-                "section 'review', key '" + std::string(name) + "'",
-                "unknown key; accepted keys: pkgbuild, diff",
-                &key.source());
+        // TRANSLATORS: review, pkgbuild, and diff are literal TOML keys; the
+        // other placeholders are a config path, unknown key, and source
+        // location.
+        throw UserConfigError(localization::format_translated_message(
+                "User config error: '{}': section '{}', key '{}' (line {}, column {}): unknown key; accepted keys: {}, {}",
+                config_path.string(), "review", name,
+                source_index_text(key.source().begin.line),
+                source_index_text(key.source().begin.column), "pkgbuild",
+                "diff"));
     }
 }
 
@@ -227,10 +260,13 @@ void validate_build_keys(
         const std::string_view name = key.str();
         if(name == "mode") continue;
 
-        throw_validation_error(
-                config_path,
-                "section 'build', key '" + std::string(name) + "'",
-                "unknown key; accepted key: mode", &key.source());
+        // TRANSLATORS: build and mode are literal TOML keys; the other
+        // placeholders are a config path, unknown key, and source location.
+        throw UserConfigError(localization::format_translated_message(
+                "User config error: '{}': section '{}', key '{}' (line {}, column {}): unknown key; accepted key: {}",
+                config_path.string(), "build", name,
+                source_index_text(key.source().begin.line),
+                source_index_text(key.source().begin.column), "mode"));
     }
 }
 
@@ -239,40 +275,53 @@ ReviewPolicy parse_review_policy(
         std::string_view key_name) {
     const auto value = node.value_exact<std::string>();
     if(!value) {
-        throw_validation_error(
-                config_path, "key '" + std::string(key_name) + "'",
-                "expected string; accepted values: prompt, skip; got " +
-                        node_type_name(node),
-                &node.source());
+        // TRANSLATORS: The placeholders are a literal TOML key, config path,
+        // literal accepted values, actual TOML type, and source location.
+        throw UserConfigError(localization::format_translated_message(
+                "User config error: '{}': key '{}' (line {}, column {}): expected string; accepted values: {}, {}; got {}",
+                config_path.string(), key_name,
+                source_index_text(node.source().begin.line),
+                source_index_text(node.source().begin.column),
+                "prompt", "skip", node_type_name(node)));
     }
     if(*value == "prompt") return ReviewPolicy::Prompt;
     if(*value == "skip") return ReviewPolicy::Skip;
 
-    throw_validation_error(
-            config_path, "key '" + std::string(key_name) + "'",
-            "unsupported value; accepted values: prompt, skip",
-            &node.source());
+    // TRANSLATORS: The placeholders are a literal TOML key, config path,
+    // actual value, literal accepted values, and source location.
+    throw UserConfigError(localization::format_translated_message(
+            "User config error: '{}': key '{}' (line {}, column {}): unsupported value '{}'; accepted values: {}, {}",
+            config_path.string(), key_name,
+            source_index_text(node.source().begin.line),
+            source_index_text(node.source().begin.column),
+            *value, "prompt", "skip"));
 }
 
 BuildMode parse_build_mode(
         const toml::node& node, const fs::path& config_path) {
     const auto value = node.value_exact<std::string>();
     if(!value) {
-        throw_validation_error(
-                config_path, "key 'build.mode'",
-                "expected string; accepted values: normal, rebuild, clean; "
-                "got " +
-                        node_type_name(node),
-                &node.source());
+        // TRANSLATORS: The placeholders are the literal TOML key, config path,
+        // literal accepted values, actual TOML type, and source location.
+        throw UserConfigError(localization::format_translated_message(
+                "User config error: '{}': key '{}' (line {}, column {}): expected string; accepted values: {}, {}, {}; got {}",
+                config_path.string(), "build.mode",
+                source_index_text(node.source().begin.line),
+                source_index_text(node.source().begin.column),
+                "normal", "rebuild", "clean", node_type_name(node)));
     }
     if(*value == "normal") return BuildMode::Normal;
     if(*value == "rebuild") return BuildMode::Rebuild;
     if(*value == "clean") return BuildMode::Clean;
 
-    throw_validation_error(
-            config_path, "key 'build.mode'",
-            "unsupported value; accepted values: normal, rebuild, clean",
-            &node.source());
+    // TRANSLATORS: The placeholders are the literal TOML key, config path,
+    // actual value, literal accepted values, and source location.
+    throw UserConfigError(localization::format_translated_message(
+            "User config error: '{}': key '{}' (line {}, column {}): unsupported value '{}'; accepted values: {}, {}, {}",
+            config_path.string(), "build.mode",
+            source_index_text(node.source().begin.line),
+            source_index_text(node.source().begin.column), *value, "normal",
+            "rebuild", "clean"));
 }
 
 void apply_review_config(

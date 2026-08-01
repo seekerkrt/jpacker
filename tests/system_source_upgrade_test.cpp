@@ -618,7 +618,7 @@ void test_system_failure_keeps_all_sources_not_attempted() {
     expect(result.stopped_phase == SystemSourceUpgradePhase::System,
            "System failure stopped phase was not retained");
     expect(result.failure_diagnostic() ==
-                   std::optional<std::string>("Update failed."),
+                   std::optional<std::string>("The update failed."),
            "System failure diagnostic was lost");
     expect(
             result.system.package_state_change == PackageStateChange::Unknown,
@@ -1059,7 +1059,7 @@ void test_registered_preference_disappearance_blocks_before_mutation() {
             "Disappeared preference was not retained as Incomplete");
     expect(result.failure_diagnostic() ==
                    std::optional<std::string>(
-                           "Registered source preference disappeared before preparation: /preferences/vanished"),
+                           "The registered source preference disappeared before preparation: /preferences/vanished"),
            "Disappeared preference diagnostic was lost");
     expect(stub::system_commands().empty(),
            "Disappeared preference reached system mutation");

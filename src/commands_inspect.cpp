@@ -9,6 +9,7 @@
 #include "dependency_plan.hpp"
 #include "dependency_provider.hpp"
 #include "dependency_spec.hpp"
+#include "localization.hpp"
 #include "logging.hpp"
 #include "package_identifier.hpp"
 #include "package_metadata.hpp"
@@ -37,15 +38,27 @@
 namespace {
 
 const std::string AUR_BASE_URL = "https://aur.archlinux.org/";
-const std::string DEPS_USAGE =
-        "Usage: " + std::string(application_identity::COMMAND_NAME) +
-        " deps [--recursive] <pkg>";
-const std::string PLAN_USAGE =
-        "Usage: " + std::string(application_identity::COMMAND_NAME) +
-        " plan <pkg>";
-const std::string FETCH_USAGE =
-        "Usage: " + std::string(application_identity::COMMAND_NAME) +
-        " fetch <pkg>";
+
+std::string deps_usage() {
+    return localization::format_translated_message(
+            // TRANSLATORS: The placeholders are the command, operation, option, and operand tokens.
+            "Usage: {} {} [{}] {}", application_identity::COMMAND_NAME,
+            "deps", "--recursive", "<pkg>");
+}
+
+std::string plan_usage() {
+    return localization::format_translated_message(
+            // TRANSLATORS: The placeholders are the command, operation, and operand tokens.
+            "Usage: {} {} {}", application_identity::COMMAND_NAME, "plan",
+            "<pkg>");
+}
+
+std::string fetch_usage() {
+    return localization::format_translated_message(
+            // TRANSLATORS: The placeholders are the command, operation, and operand tokens.
+            "Usage: {} {} {}", application_identity::COMMAND_NAME, "fetch",
+            "<pkg>");
+}
 
 using RepositoryPackageLookupIdentity =
         std::pair<std::optional<std::string>, std::string>;
@@ -190,28 +203,39 @@ const RepositoryPackageQueryResult& query_repository_package_cached(
     return inserted.first->second;
 }
 
-std::string repository_metadata_failure_reason(PackageMetadataErrorCode code) {
+std::string repository_metadata_unavailable_display(
+        PackageMetadataErrorCode code) {
     switch(code) {
     case PackageMetadataErrorCode::ConfigurationUnavailable:
-        return "configuration unavailable";
+        return localization::translate_message(
+                "Metadata       : unavailable (configuration unavailable)");
     case PackageMetadataErrorCode::ConfigurationMalformed:
-        return "configuration malformed";
+        return localization::translate_message(
+                "Metadata       : unavailable (configuration malformed)");
     case PackageMetadataErrorCode::InitializationFailed:
-        return "initialization failed";
+        return localization::translate_message(
+                "Metadata       : unavailable (initialization failed)");
     case PackageMetadataErrorCode::LocalDatabaseUnavailable:
-        return "local database unavailable";
+        return localization::translate_message(
+                "Metadata       : unavailable (local database unavailable)");
     case PackageMetadataErrorCode::InvalidPackageName:
-        return "invalid package name";
+        return localization::translate_message(
+                "Metadata       : unavailable (invalid package name)");
     case PackageMetadataErrorCode::QueryFailed:
-        return "query failed";
+        return localization::translate_message(
+                "Metadata       : unavailable (query failed)");
     case PackageMetadataErrorCode::MalformedMetadata:
-        return "invalid metadata";
+        return localization::translate_message(
+                "Metadata       : unavailable (invalid metadata)");
     case PackageMetadataErrorCode::SyncDatabaseUnavailable:
-        return "sync database unavailable";
+        return localization::translate_message(
+                "Metadata       : unavailable (sync database unavailable)");
     case PackageMetadataErrorCode::RepositoryNotConfigured:
-        return "repository not configured";
+        return localization::translate_message(
+                "Metadata       : unavailable (repository not configured)");
     }
-    return "metadata failure";
+    return localization::translate_message(
+            "Metadata       : unavailable (metadata failure)");
 }
 
 std::string repository_package_lookup_display(
@@ -270,9 +294,11 @@ std::string format_iec_bytes(std::uint64_t bytes) {
 void print_repository_metadata_unavailable(
         const PackageMetadataFailure& failure) {
     std::cout << std::endl;
-    std::cout << "Repository package sizes:" << std::endl;
-    std::cout << "  Metadata       : unavailable ("
-              << repository_metadata_failure_reason(failure.code) << ")"
+    std::cout << localization::translate_message(
+                         "Repository package sizes:")
+              << std::endl;
+    std::cout << "  "
+              << repository_metadata_unavailable_display(failure.code)
               << std::endl;
 }
 
@@ -299,7 +325,9 @@ void print_repository_package_sizes(
     }
 
     std::cout << std::endl;
-    std::cout << "Repository package sizes:" << std::endl;
+    std::cout << localization::translate_message(
+                         "Repository package sizes:")
+              << std::endl;
     std::set<RepositoryPackageDisplayIdentity> displayed_packages;
     for(const auto& lookup : lookups) {
         const RepositoryPackageQueryResult& result =
@@ -312,23 +340,31 @@ void print_repository_package_sizes(
 
             std::cout << "  " << metadata->repository_name << "/"
                       << metadata->package_name << std::endl;
-            std::cout << "    Package size   : "
-                      << format_iec_bytes(metadata->package_size_bytes) << std::endl;
-            std::cout << "    Installed size : "
-                      << format_iec_bytes(metadata->installed_size_bytes) << std::endl;
+            std::cout << localization::format_translated_message(
+                                 "    Package size   : {}",
+                                 format_iec_bytes(
+                                         metadata->package_size_bytes))
+                      << std::endl;
+            std::cout << localization::format_translated_message(
+                                 "    Installed size : {}",
+                                 format_iec_bytes(
+                                         metadata->installed_size_bytes))
+                      << std::endl;
             continue;
         }
 
         std::cout << "  " << repository_package_lookup_display(lookup) << std::endl;
         if(std::holds_alternative<PackageNotFound>(result)) {
-            std::cout << "    Metadata       : not found" << std::endl;
+            std::cout << localization::translate_message(
+                                 "    Metadata       : not found")
+                      << std::endl;
             continue;
         }
 
         const PackageMetadataFailure& failure =
                 std::get<PackageMetadataFailure>(result);
-        std::cout << "    Metadata       : unavailable ("
-                  << repository_metadata_failure_reason(failure.code) << ")"
+        std::cout << "    "
+                  << repository_metadata_unavailable_display(failure.code)
                   << std::endl;
     }
 }
@@ -365,6 +401,8 @@ std::string dependency_display_name(const std::string& dependency, const std::st
 }
 
 std::string dependency_kind_display(DependencyKind kind) {
+    // NO_TRANSLATE(Issue #308): These values are stable dependency-kind tokens
+    // in the recursive inspection format, not human-readable prose labels.
     switch(kind) {
     case DependencyKind::Repo:
         return "repo";
@@ -385,22 +423,32 @@ void print_recursive_dependency_node(const RecursiveDependencyNode& node, size_t
               << dependency_display_name(node.dependency, node.package_name) << " ["
               << dependency_kind_display(node.kind) << "]";
     if(node.kind == DependencyKind::Aur && !node.package_base.empty() && node.package_base != node.package_name) {
-        std::cout << " base: " << node.package_base;
+        std::cout << " " << localization::format_translated_message(
+                                      "base: {}", node.package_base);
     }
     if(node.provided_by.has_value()) {
-        std::cout << " by "
-                  << provided_dependency_display(node.provided_by.value());
+        std::cout << " " << localization::format_translated_message(
+                                      "by {}", provided_dependency_display(
+                                                       node.provided_by.value()));
     }
     if(!node.provider_candidates.empty()) {
-        std::cout << " candidates: ";
+        std::vector<std::string> candidates;
         for(size_t i = 0; i < node.provider_candidates.size(); ++i) {
-            if(i > 0) std::cout << ", ";
-            std::cout << provided_dependency_display(
-                    node.provider_candidates[i]);
+            candidates.push_back(provided_dependency_display(
+                    node.provider_candidates[i]));
         }
+        std::cout << " " << localization::format_translated_message(
+                                      "candidates: {}",
+                                      join_comma_display_values(candidates));
     }
-    if(node.already_visited) std::cout << " (already visited)";
-    if(node.max_depth_reached) std::cout << " (max depth reached)";
+    if(node.already_visited) {
+        std::cout << " " << localization::translate_message(
+                                      "(already visited)");
+    }
+    if(node.max_depth_reached) {
+        std::cout << " " << localization::translate_message(
+                                      "(max depth reached)");
+    }
     std::cout << std::endl;
 
     for(const auto& child : node.children) {
@@ -409,9 +457,11 @@ void print_recursive_dependency_node(const RecursiveDependencyNode& node, size_t
 }
 
 void print_recursive_dependency_tree(const std::vector<RecursiveDependencyNode>& nodes) {
-    std::cout << "Recursive dependency tree:" << std::endl;
+    std::cout << localization::translate_message(
+                         "Recursive dependency tree:")
+              << std::endl;
     if(nodes.empty()) {
-        std::cout << "  None" << std::endl;
+        std::cout << localization::translate_message("  None") << std::endl;
         return;
     }
     for(const auto& node : nodes) {
@@ -428,7 +478,7 @@ void add_unique_value(std::vector<std::string>& values, const std::string& value
 void print_dependency_group(const std::string& label, const std::vector<std::string>& dependencies) {
     std::cout << label << std::endl;
     if(dependencies.empty()) {
-        std::cout << "  None" << std::endl;
+        std::cout << localization::translate_message("  None") << std::endl;
         return;
     }
     for(const auto& dep : dependencies) {
@@ -440,14 +490,15 @@ void print_ambiguous_provider_group(
         const std::string& label, const std::vector<AmbiguousProvidedDependency>& dependencies) {
     std::cout << label << std::endl;
     if(dependencies.empty()) {
-        std::cout << "  None" << std::endl;
+        std::cout << localization::translate_message("  None") << std::endl;
         return;
     }
 
     for(const auto& dependency : dependencies) {
         std::cout << "  " << dependency_display_with_constraint_note(dependency.dependency, dependency.dependency)
                   << std::endl;
-        std::cout << "    candidates:" << std::endl;
+        std::cout << localization::translate_message("    candidates:")
+                  << std::endl;
         for(size_t i = 0; i < dependency.candidates.size(); ++i) {
             std::cout << "      " << (i + 1) << ". "
                       << provided_dependency_display(dependency.candidates[i])
@@ -457,22 +508,35 @@ void print_ambiguous_provider_group(
 }
 
 void print_metadata_risk_group(const std::vector<BuildPlanMetadataRisk>& risks) {
-    std::cout << "Metadata conflicts/replaces:" << std::endl;
+    std::cout << localization::translate_message(
+                         "Metadata conflicts/replaces:")
+              << std::endl;
     for(const auto& risk : risks) {
-        std::cout << "  " << risk.package_name;
-        if(risk.package_base != risk.package_name) std::cout << " (base: " << risk.package_base << ")";
-        std::cout << std::endl;
+        if(risk.package_base != risk.package_name) {
+            std::cout << localization::format_translated_message(
+                                 "  {} (base: {})", risk.package_name,
+                                 risk.package_base)
+                      << std::endl;
+        } else {
+            std::cout << "  " << risk.package_name << std::endl;
+        }
         if(!risk.conflicts.empty())
-            std::cout << "    conflicts: " << join_comma_display_values(risk.conflicts) << std::endl;
+            std::cout << localization::format_translated_message(
+                                 "    conflicts: {}",
+                                 join_comma_display_values(risk.conflicts))
+                      << std::endl;
         if(!risk.replaces.empty())
-            std::cout << "    replaces: " << join_comma_display_values(risk.replaces) << std::endl;
+            std::cout << localization::format_translated_message(
+                                 "    replaces: {}",
+                                 join_comma_display_values(risk.replaces))
+                      << std::endl;
     }
 }
 
 void print_build_plan(const BuildPlan& plan) {
-    std::cout << "Build plan:" << std::endl;
+    std::cout << localization::translate_message("Build plan:") << std::endl;
     if(plan.order.empty()) {
-        std::cout << "  None" << std::endl;
+        std::cout << localization::translate_message("  None") << std::endl;
     } else {
         for(size_t i = 0; i < plan.order.size(); ++i) {
             const BuildPlanEntry& entry = plan.order[i];
@@ -483,34 +547,51 @@ void print_build_plan(const BuildPlan& plan) {
                 if(package_name != entry.package_base) add_unique_value(distinct_targets, package_name);
             }
             if(!distinct_targets.empty()) {
-                std::cout << "     target package";
-                if(distinct_targets.size() > 1) std::cout << "s";
-                std::cout << ": " << join_comma_display_values(distinct_targets) << std::endl;
+                std::cout << localization::format_translated_plural_message(
+                                     "     target package: {}",
+                                     "     target packages: {}",
+                                     distinct_targets.size(),
+                                     join_comma_display_values(
+                                             distinct_targets))
+                          << std::endl;
             }
         }
     }
 
     if(!plan.provided.empty()) {
         std::cout << std::endl;
-        std::cout << "Provided dependencies:" << std::endl;
+        std::cout << localization::translate_message(
+                             "Provided dependencies:")
+                  << std::endl;
         for(const auto& dependency : plan.provided) {
             std::cout << "  - "
-                      << dependency_display_with_constraint_note(dependency.dependency, dependency.dependency)
-                      << " -> " << provided_dependency_display(dependency.provider)
+                      << dependency_display_with_constraint_note(
+                                 dependency.dependency,
+                                 dependency.dependency)
+                      << " -> "
+                      << provided_dependency_display(dependency.provider)
                       << std::endl;
         }
     }
 
     if(!plan.ambiguous_providers.empty()) {
         std::cout << std::endl;
-        print_ambiguous_provider_group("Ambiguous provided dependencies:", plan.ambiguous_providers);
+        print_ambiguous_provider_group(
+                localization::translate_message(
+                        "Ambiguous provided dependencies:"),
+                plan.ambiguous_providers);
     }
 
     if(!plan.split_package_targets.empty()) {
         std::cout << std::endl;
-        std::cout << "Split package install targets:" << std::endl;
+        std::cout << localization::translate_message(
+                             "Split package install targets:")
+                  << std::endl;
         for(const auto& target : plan.split_package_targets) {
-            std::cout << "  - " << target.package_name << " (base: " << target.package_base << ")" << std::endl;
+            std::cout << localization::format_translated_message(
+                                 "  - {} (base: {})", target.package_name,
+                                 target.package_base)
+                      << std::endl;
         }
     }
 
@@ -521,7 +602,9 @@ void print_build_plan(const BuildPlan& plan) {
 
     if(!plan.unresolved.empty()) {
         std::cout << std::endl;
-        std::cout << "Unresolved dependencies:" << std::endl;
+        std::cout << localization::translate_message(
+                             "Unresolved dependencies:")
+                  << std::endl;
         for(const auto& dependency : plan.unresolved) {
             std::cout << "  - " << dependency << std::endl;
         }
@@ -529,7 +612,9 @@ void print_build_plan(const BuildPlan& plan) {
 
     if(!plan.cycles.empty()) {
         std::cout << std::endl;
-        std::cout << "Cyclic dependencies:" << std::endl;
+        std::cout << localization::translate_message(
+                             "Cyclic dependencies:")
+                  << std::endl;
         for(const auto& dependency : plan.cycles) {
             std::cout << "  - " << dependency << std::endl;
         }
@@ -538,19 +623,33 @@ void print_build_plan(const BuildPlan& plan) {
     if(!plan.unresolved.empty() || !plan.ambiguous_providers.empty() ||
        !plan.cycles.empty() || !plan.metadata_risks.empty()) {
         std::cout << std::endl;
-        std::cout << "Plan status: incomplete" << std::endl;
-        if(!plan.unresolved.empty()) std::cout << "  unresolved dependencies remain" << std::endl;
-        if(!plan.ambiguous_providers.empty()) std::cout << "  ambiguous providers are not selected" << std::endl;
-        if(!plan.cycles.empty()) std::cout << "  cyclic dependencies detected" << std::endl;
+        std::cout << localization::translate_message(
+                             "Plan status: incomplete")
+                  << std::endl;
+        if(!plan.unresolved.empty())
+            std::cout << localization::translate_message(
+                                 "  unresolved dependencies remain")
+                      << std::endl;
+        if(!plan.ambiguous_providers.empty())
+            std::cout << localization::translate_message(
+                                 "  ambiguous providers are not selected")
+                      << std::endl;
+        if(!plan.cycles.empty())
+            std::cout << localization::translate_message(
+                                 "  cyclic dependencies detected")
+                      << std::endl;
         if(!plan.metadata_risks.empty())
-            std::cout << "  conflicts/replaces metadata is not resolved automatically" << std::endl;
+            std::cout << localization::translate_message(
+                                 "  conflicts/replaces metadata is not resolved automatically")
+                      << std::endl;
     }
 }
 
 void print_fetch_plan(const BuildPlan& plan) {
-    std::cout << "Fetch targets:" << std::endl;
+    std::cout << localization::translate_message("Fetch targets:")
+              << std::endl;
     if(plan.order.empty()) {
-        std::cout << "  None" << std::endl;
+        std::cout << localization::translate_message("  None") << std::endl;
     } else {
         for(size_t i = 0; i < plan.order.size(); ++i) {
             const BuildPlanEntry& entry = plan.order[i];
@@ -561,7 +660,9 @@ void print_fetch_plan(const BuildPlan& plan) {
 
     if(!plan.unresolved.empty()) {
         std::cout << std::endl;
-        std::cout << "Unresolved dependencies:" << std::endl;
+        std::cout << localization::translate_message(
+                             "Unresolved dependencies:")
+                  << std::endl;
         for(const auto& dependency : plan.unresolved) {
             Logger::warn(dependency);
         }
@@ -569,12 +670,17 @@ void print_fetch_plan(const BuildPlan& plan) {
 
     if(!plan.ambiguous_providers.empty()) {
         std::cout << std::endl;
-        print_ambiguous_provider_group("Ambiguous provided dependencies:", plan.ambiguous_providers);
+        print_ambiguous_provider_group(
+                localization::translate_message(
+                        "Ambiguous provided dependencies:"),
+                plan.ambiguous_providers);
     }
 
     if(!plan.cycles.empty()) {
         std::cout << std::endl;
-        std::cout << "Cyclic dependencies:" << std::endl;
+        std::cout << localization::translate_message(
+                             "Cyclic dependencies:")
+                  << std::endl;
         for(const auto& dependency : plan.cycles) {
             Logger::warn(dependency);
         }
@@ -583,8 +689,8 @@ void print_fetch_plan(const BuildPlan& plan) {
     if(!plan.metadata_risks.empty()) {
         std::cout << std::endl;
         print_metadata_risk_group(plan.metadata_risks);
-        Logger::warn(
-                "Conflicts/replaces metadata requires manual review before build/install; fetch is allowed.");
+        Logger::warn(localization::translate_message(
+                "Conflicts/replaces metadata requires manual review before build/install; fetch is allowed."));
     }
 }
 
@@ -603,13 +709,14 @@ int cmd_deps(const std::vector<std::string>& targets, const std::vector<std::str
             recursive = true;
             continue;
         }
-        Logger::error("Unsupported deps option: " + flag);
-        Logger::error(DEPS_USAGE);
+        Logger::error(localization::format_translated_message(
+                "Unsupported {} option: {}", "deps", flag));
+        Logger::error(deps_usage());
         return 1;
     }
 
     if(targets.empty()) {
-        Logger::error(DEPS_USAGE);
+        Logger::error(deps_usage());
         return 1;
     }
 
@@ -621,7 +728,8 @@ int cmd_deps(const std::vector<std::string>& targets, const std::vector<std::str
         try {
             std::optional<AurPackageInfo> info = AurClient::info(target);
             if(!info.has_value()) {
-                Logger::error("AUR package not found: " + target);
+                Logger::error(localization::format_translated_message(
+                        "{} package not found: {}", "AUR", target));
                 failed = true;
                 continue;
             }
@@ -630,25 +738,47 @@ int cmd_deps(const std::vector<std::string>& targets, const std::vector<std::str
             DependencyClassification classified = classify_dependencies(dependencies);
 
             if(i > 0) std::cout << std::endl;
-            std::cout << "Package         : " << info->Name << std::endl;
-            std::cout << "Package Base    : " << info->PackageBase << std::endl;
-            std::cout << "Dependencies    : " << dependencies.size() << std::endl;
+            std::cout << localization::format_translated_message(
+                                 "Package         : {}", info->Name)
+                      << std::endl;
+            std::cout << localization::format_translated_message(
+                                 "Package Base    : {}", info->PackageBase)
+                      << std::endl;
+            std::cout << localization::format_translated_message(
+                                 "Dependencies    : {}", dependencies.size())
+                      << std::endl;
             std::cout << std::endl;
-            print_dependency_group("Official repo dependencies:", classified.repo);
+            print_dependency_group(
+                    localization::format_translated_message(
+                            "Official {} dependencies:", "repo"),
+                    classified.repo);
             std::cout << std::endl;
-            print_dependency_group("AUR dependencies:", classified.aur);
+            print_dependency_group(
+                    localization::format_translated_message(
+                            "{} dependencies:", "AUR"),
+                    classified.aur);
             std::cout << std::endl;
-            print_dependency_group("Provided dependencies:", classified.provided);
+            print_dependency_group(
+                    localization::translate_message(
+                            "Provided dependencies:"),
+                    classified.provided);
             std::cout << std::endl;
-            print_ambiguous_provider_group("Ambiguous provided dependencies:", classified.ambiguous_providers);
+            print_ambiguous_provider_group(
+                    localization::translate_message(
+                            "Ambiguous provided dependencies:"),
+                    classified.ambiguous_providers);
             std::cout << std::endl;
-            print_dependency_group("Unknown dependencies:", classified.unknown);
+            print_dependency_group(
+                    localization::translate_message(
+                            "Unknown dependencies:"),
+                    classified.unknown);
             std::vector<BuildPlanMetadataRisk> metadata_risks =
                     collect_build_plan_metadata_risks(info.value());
             if(!metadata_risks.empty()) {
                 std::cout << std::endl;
                 print_metadata_risk_group(metadata_risks);
-                Logger::warn("Conflicts/replaces metadata is separate from dependency resolution and requires manual review.");
+                Logger::warn(localization::translate_message(
+                        "Conflicts/replaces metadata is separate from dependency resolution and requires manual review."));
             }
             if(recursive) {
                 std::vector<RecursiveDependencyNode> recursive_nodes =
@@ -657,7 +787,9 @@ int cmd_deps(const std::vector<std::string>& targets, const std::vector<std::str
                 print_recursive_dependency_tree(recursive_nodes);
             }
         } catch(const std::exception& e) {
-            Logger::error("Failed to inspect dependencies for " + target + ": " + e.what());
+            Logger::error(localization::format_translated_message(
+                    "Failed to inspect dependencies for {}: {}", target,
+                    e.what()));
             failed = true;
         }
     }
@@ -673,13 +805,14 @@ int cmd_plan(const std::vector<std::string>& targets, const std::vector<std::str
                    .token) {
             continue;
         }
-        Logger::error("Unsupported plan option: " + flag);
-        Logger::error(PLAN_USAGE);
+        Logger::error(localization::format_translated_message(
+                "Unsupported {} option: {}", "plan", flag));
+        Logger::error(plan_usage());
         return 1;
     }
 
     if(targets.empty()) {
-        Logger::error(PLAN_USAGE);
+        Logger::error(plan_usage());
         return 1;
     }
 
@@ -696,7 +829,9 @@ int cmd_plan(const std::vector<std::string>& targets, const std::vector<std::str
             print_build_plan(plan);
             print_repository_package_sizes(plan, metadata_context);
         } catch(const std::exception& e) {
-            Logger::error("Failed to plan build order for " + target + ": " + e.what());
+            Logger::error(localization::format_translated_message(
+                    "Failed to plan build order for {}: {}", target,
+                    e.what()));
             failed = true;
         }
     }
@@ -712,13 +847,14 @@ int cmd_fetch(const std::vector<std::string>& targets, const std::vector<std::st
                    .token) {
             continue;
         }
-        Logger::error("Unsupported fetch option: " + flag);
-        Logger::error(FETCH_USAGE);
+        Logger::error(localization::format_translated_message(
+                "Unsupported {} option: {}", "fetch", flag));
+        Logger::error(fetch_usage());
         return 1;
     }
 
     if(targets.empty()) {
-        Logger::error(FETCH_USAGE);
+        Logger::error(fetch_usage());
         return 1;
     }
 
@@ -742,7 +878,9 @@ int cmd_fetch(const std::vector<std::string>& targets, const std::vector<std::st
             require_fetchable_build_plan(target, plan);
             plans.emplace_back(target, std::move(plan));
         } catch(const std::exception& e) {
-            Logger::error("Failed to fetch repositories for " + target + ": " + e.what());
+            Logger::error(localization::format_translated_message(
+                    "Failed to fetch repositories for {}: {}", target,
+                    e.what()));
             failed = true;
         }
     }
@@ -758,7 +896,9 @@ int cmd_fetch(const std::vector<std::string>& targets, const std::vector<std::st
                         entry.package_base,
                         aur_git_url_for_package_base(entry.package_base));
             } catch(const std::exception& e) {
-                Logger::error("Failed to fetch repositories for " + target + ": " + e.what());
+                Logger::error(localization::format_translated_message(
+                        "Failed to fetch repositories for {}: {}", target,
+                        e.what()));
                 failed = true;
             }
         }
@@ -776,14 +916,17 @@ int cmd_print_pkgbuild(const std::string& target) {
     std::string pkgbuild = load_pkgbuild_for_stdout(target);
     if(pkgbuild.size() >
        static_cast<size_t>(std::numeric_limits<std::streamsize>::max())) {
-        throw std::runtime_error("PKGBUILD is too large to write to stdout.");
+        throw std::runtime_error(localization::format_translated_message(
+                "{} is too large to write to {}.",
+                "PKGBUILD", "stdout"));
     }
 
     // POLICY(#167/#196): moduleがtemporary checkoutをcleanupしてから返したbytesだけを出力する。
     std::cout.write(pkgbuild.data(), static_cast<std::streamsize>(pkgbuild.size()));
     std::cout.flush();
     if(!std::cout) {
-        throw std::runtime_error("Failed to write PKGBUILD to stdout.");
+        throw std::runtime_error(localization::format_translated_message(
+                "Failed to write {} to {}.", "PKGBUILD", "stdout"));
     }
     return 0;
 }
@@ -791,25 +934,25 @@ int cmd_print_pkgbuild(const std::string& target) {
 int cmd_query_foreign_updates() {
     AurUpdateQueryResult query_result = query_installed_aur_updates();
     if(query_result.plan.entries.empty()) {
-        Logger::info("No foreign packages found.");
+        Logger::info(localization::translate_message(
+                "No foreign packages found."));
         return query_result.recoverable_failures.empty() ? 0 : 1;
     }
 
     for(size_t i = 0; i < query_result.plan.entries.size(); ++i) {
         const AurUpdatePlanEntry& entry = query_result.plan.entries[i];
-        Logger::info(
-                "Checking package " + std::to_string(i + 1) + "/" +
-                std::to_string(query_result.plan.entries.size()) + ": " +
-                entry.installed_name);
+        Logger::info(localization::format_translated_message(
+                "Checking package {}/{}: {}", i + 1,
+                query_result.plan.entries.size(), entry.installed_name));
 
         switch(entry.classification) {
         case AurUpdateClassification::NonAurForeign:
         case AurUpdateClassification::MetadataUnavailable:
             // POLICY(#266): failed batchも従来のnot-found warningを維持するが、
             // pure modelではconfirmed absenceとquery failureを同一視しない。
-            Logger::warn(
-                    "Foreign package not found in AUR: " +
-                    entry.installed_name);
+            Logger::warn(localization::format_translated_message(
+                    "Foreign package not found in {}: {}",
+                    "AUR", entry.installed_name));
             break;
         case AurUpdateClassification::UpdateAvailable:
             std::cout << entry.installed_name << " " << entry.installed_version
@@ -818,12 +961,14 @@ int cmd_query_foreign_updates() {
         case AurUpdateClassification::UpToDate:
             break;
         case AurUpdateClassification::VersionComparisonUnavailable:
-            Logger::warn(
-                    "Failed to compare versions: " + entry.installed_version +
-                    " -> " + entry.aur_package->version);
+            Logger::warn(localization::format_translated_message(
+                    "Failed to compare versions: {} -> {}",
+                    entry.installed_version,
+                    entry.aur_package->version));
             break;
         default:
-            throw std::logic_error("Unknown AUR update classification.");
+            throw std::logic_error(localization::format_translated_message(
+                    "Unknown {} update classification.", "AUR"));
         }
     }
 

@@ -1,5 +1,6 @@
 #include "separated_package_base_source_build.hpp"
 
+#include "localization.hpp"
 #include "package_identifier.hpp"
 
 #include <algorithm>
@@ -29,8 +30,11 @@ void require_valid_set_request(
         const SeparatedPackageBaseSourceBuildRequest& request) {
     require_valid_package_name(request.package_base);
     if(request.required_targets.empty()) {
-        throw std::logic_error(
-                "Separated PackageBase source-build requires at least one required package target.");
+        throw std::logic_error(localization::format_translated_message(
+                // TRANSLATORS: The placeholder is the literal Arch field name
+                // "PackageBase".
+                "Separated {} source-build requires at least one required package target.",
+                "PackageBase"));
     }
 
     for(std::size_t index = 0; index < request.required_targets.size();
@@ -40,8 +44,11 @@ void require_valid_set_request(
         require_valid_package_name(target.package_base);
         require_valid_package_name(target.package_name);
         if(target.package_base != request.package_base) {
-            throw std::logic_error(
-                    "Separated PackageBase source-build required target has a mismatched PackageBase.");
+            throw std::logic_error(localization::format_translated_message(
+                    // TRANSLATORS: Both placeholders are the literal Arch
+                    // field name "PackageBase".
+                    "Separated {} source-build required target has a mismatched {}.",
+                    "PackageBase", "PackageBase"));
         }
         if(std::any_of(
                    request.required_targets.begin(),
@@ -50,16 +57,22 @@ void require_valid_set_request(
                            const RequiredPackageArtifactTarget& existing) {
                        return existing.package_name == target.package_name;
                    })) {
-            throw std::logic_error(
-                    "Separated PackageBase source-build contains a duplicate required package target.");
+            throw std::logic_error(localization::format_translated_message(
+                    // TRANSLATORS: The placeholder is the literal Arch field
+                    // name "PackageBase".
+                    "Separated {} source-build contains a duplicate required package target.",
+                    "PackageBase"));
         }
         switch(target.desired_reason) {
         case DesiredInstallReason::Explicit:
         case DesiredInstallReason::Dependency:
             break;
         default:
-            throw std::logic_error(
-                    "Separated PackageBase source-build has an unknown install reason.");
+            throw std::logic_error(localization::format_translated_message(
+                    // TRANSLATORS: The placeholder is the literal Arch field
+                    // name "PackageBase".
+                    "Separated {} source-build has an unknown install reason.",
+                    "PackageBase"));
         }
     }
 }
@@ -121,13 +134,24 @@ void promote_successful_result(
 std::string preparation_failure_diagnostic(
         const PackageBaseArtifactInstallPreparationFailure& failure) {
     if(failure.selection_failure() != nullptr) {
-        return "PackageBase artifact selection failed before package transaction.";
+        return localization::format_translated_message(
+                // TRANSLATORS: The placeholder is the literal Arch field name
+                // "PackageBase".
+                "{} artifact selection failed before package transaction.",
+                "PackageBase");
     }
     if(failure.mixed_reason_failure() != nullptr) {
-        return "PackageBase artifact install reasons cannot be represented by one package transaction.";
+        return localization::format_translated_message(
+                // TRANSLATORS: The placeholder is the literal Arch field name
+                // "PackageBase".
+                "{} artifact install reasons cannot be represented by one package transaction.",
+                "PackageBase");
     }
-    throw std::logic_error(
-            "Unknown PackageBase artifact install preparation failure.");
+    throw std::logic_error(localization::format_translated_message(
+            // TRANSLATORS: The placeholder is the literal Arch field name
+            // "PackageBase".
+            "Unknown {} artifact install preparation failure.",
+            "PackageBase"));
 }
 
 } // namespace
@@ -271,7 +295,11 @@ execute_separated_package_base_source_build(
             workspace.retain_for_diagnostics();
             throw SeparatedPackageBaseSourceBuildPhaseError(
                     SeparatedPackageBaseSourceBuildFailurePhase::Build,
-                    "PackageBase source-build context preparation failed.");
+                    localization::format_translated_message(
+                            // TRANSLATORS: The placeholder is the literal Arch
+                            // field name "PackageBase".
+                            "{} source-build context preparation failed.",
+                            "PackageBase"));
         }
     }();
     ExpectedPackageArtifactSet expected = [&]() {
@@ -281,7 +309,12 @@ execute_separated_package_base_source_build(
             workspace.retain_for_diagnostics();
             throw SeparatedPackageBaseSourceBuildPhaseError(
                     SeparatedPackageBaseSourceBuildFailurePhase::Build,
-                    "PackageBase makepkg artifact-list query failed.");
+                    localization::format_translated_message(
+                            // TRANSLATORS: The placeholders are the literal
+                            // Arch field name "PackageBase" and command name
+                            // "makepkg".
+                            "{} {} artifact-list query failed.",
+                            "PackageBase", "makepkg"));
         }
     }();
 
@@ -298,7 +331,11 @@ execute_separated_package_base_source_build(
         workspace.retain_for_diagnostics();
         throw SeparatedPackageBaseSourceBuildPhaseError(
                 SeparatedPackageBaseSourceBuildFailurePhase::Build,
-                "PackageBase build-only makepkg execution failed.");
+                localization::format_translated_message(
+                        // TRANSLATORS: The placeholders are the literal Arch
+                        // field name "PackageBase" and command name "makepkg".
+                        "The {} build-only {} execution failed.",
+                        "PackageBase", "makepkg"));
     }
 
     // LANDMINE(#268): command statusやaggregate validationより先にretainする。
@@ -307,8 +344,11 @@ execute_separated_package_base_source_build(
     if(build_exit_code != 0) {
         throw SeparatedPackageBaseSourceBuildPhaseError(
                 SeparatedPackageBaseSourceBuildFailurePhase::Build,
-                "Build-only makepkg failed with exit code " +
-                        std::to_string(build_exit_code) + ".");
+                localization::format_translated_message(
+                        // TRANSLATORS: The first placeholder is the literal
+                        // command name "makepkg"; the second is its exit code.
+                        "The build-only {} command failed with exit code {}.",
+                        "makepkg", build_exit_code));
     }
 
     ValidatedPackageArtifactSet artifacts = [&]() {
@@ -319,7 +359,11 @@ execute_separated_package_base_source_build(
             throw SeparatedPackageBaseSourceBuildPhaseError(
                     SeparatedPackageBaseSourceBuildFailurePhase::
                             ArtifactValidation,
-                    "PackageBase artifact aggregate validation failed.");
+                    localization::format_translated_message(
+                            // TRANSLATORS: The placeholder is the literal Arch
+                            // field name "PackageBase".
+                            "{} artifact aggregate validation failed.",
+                            "PackageBase"));
         }
     }();
     PackageBaseArtifactInstallPreparationResult preparation = [&]() {
@@ -338,14 +382,21 @@ execute_separated_package_base_source_build(
             throw SeparatedPackageBaseSourceBuildPhaseError(
                     SeparatedPackageBaseSourceBuildFailurePhase::
                             ArtifactIdentity,
-                    "PackageBase artifact identity or validation failed before install preparation.");
+                    localization::format_translated_message(
+                            // TRANSLATORS: The placeholder is the literal Arch
+                            // field name "PackageBase".
+                            "{} artifact identity or validation failed before install preparation.",
+                            "PackageBase"));
         }
     }();
     if(!preparation.is_prepared()) {
         if(preparation.prepared() != nullptr ||
            preparation.failure() == nullptr) {
-            throw std::logic_error(
-                    "PackageBase artifact install preparation result is incoherent.");
+            throw std::logic_error(localization::format_translated_message(
+                    // TRANSLATORS: The placeholder is the literal Arch field
+                    // name "PackageBase".
+                    "{} artifact install preparation result is incoherent.",
+                    "PackageBase"));
         }
         artifacts.retain_workspace_for_diagnostics();
         PackageBaseArtifactInstallPreparationFailure failure =
@@ -357,8 +408,11 @@ execute_separated_package_base_source_build(
     }
     if(preparation.prepared() == nullptr ||
        preparation.failure() != nullptr) {
-        throw std::logic_error(
-                "PackageBase artifact install preparation result is incoherent.");
+        throw std::logic_error(localization::format_translated_message(
+                // TRANSLATORS: The placeholder is the literal Arch field name
+                // "PackageBase".
+                "{} artifact install preparation result is incoherent.",
+                "PackageBase"));
     }
 
     PreparedPackageBaseArtifactInstall& prepared =
@@ -378,7 +432,11 @@ execute_separated_package_base_source_build(
             throw SeparatedPackageBaseSourceBuildPhaseError(
                     SeparatedPackageBaseSourceBuildFailurePhase::
                             ArtifactValidation,
-                    "Prepared PackageBase artifact install failed validation before transaction.");
+                    localization::format_translated_message(
+                            // TRANSLATORS: The placeholder is the literal Arch
+                            // field name "PackageBase".
+                            "Prepared {} artifact install failed validation before transaction.",
+                            "PackageBase"));
         }
     }();
 
@@ -401,12 +459,14 @@ execute_separated_package_base_source_build(
     } catch(const std::exception& error) {
         throw SeparatedPackageBaseSourceBuildCleanupError(
                 std::move(result),
-                "Package installation succeeded, but artifact workspace cleanup failed: " +
-                        std::string(error.what()));
+                localization::format_translated_message(
+                        "Package installation succeeded, but artifact workspace cleanup failed: {}",
+                        error.what()));
     } catch(...) {
         throw SeparatedPackageBaseSourceBuildCleanupError(
                 std::move(result),
-                "Package installation succeeded, but artifact workspace cleanup failed with an unknown error.");
+                localization::translate_message(
+                        "Package installation succeeded, but artifact workspace cleanup failed with an unknown error."));
     }
     return result;
 }

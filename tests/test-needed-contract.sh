@@ -641,7 +641,7 @@ assert_normal_request_log_empty
 setup_case guard-schema
 export MOGUET_TEST_AUR_RPC_BASE_URL=$schema_rpc_url
 run_fail --noedit --nodiff -S --aur --needed invalid-root-preflight
-assert_contains "AUR RPC response validation failed for package info invalid-root-preflight" "$output_file"
+assert_contains "AUR RPC response validation failed for info[package=\"invalid-root-preflight\"]" "$output_file"
 assert_no_mutation_commands
 assert_cache_entry_absent invalid-root-preflight
 assert_schema_request_log_nonempty

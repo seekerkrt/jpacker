@@ -356,7 +356,7 @@ export MOGUET_TEST_GIT_CHANGED_FILES='PKGBUILD\nclean-root.install\n'
 run_tty_ok 'y\n' --noedit build clean-root
 assert_contains "Update diff range: HEAD..origin/main (existing cache repository)." "$output_file"
 assert_contains "Review-sensitive file changes: PKGBUILD, clean-root.install" "$output_file"
-assert_contains "Updates detected in existing cache repository. View git diff?" "$output_file"
+assert_contains "Updates were detected in the existing cache repository. View the Git diff?" "$output_file"
 assert_command "git diff HEAD..origin/main --color=always"
 assert_command "git reset --hard origin/main"
 assert_command_before "git diff HEAD..origin/main --color=always" "git reset --hard origin/main"
@@ -367,7 +367,7 @@ export MOGUET_TEST_GIT_DIFF_QUIET_EXIT_CODE=1
 export MOGUET_TEST_GIT_CHANGED_FILES='PKGBUILD\n'
 run_tty_ok 'n\n' --noedit build clean-root
 assert_contains "Update diff range: HEAD..origin/main (existing cache repository)." "$output_file"
-assert_contains "Updates detected in existing cache repository. View git diff?" "$output_file"
+assert_contains "Updates were detected in the existing cache repository. View the Git diff?" "$output_file"
 assert_command_absent "git diff HEAD..origin/main --color=always"
 assert_command "git reset --hard origin/main"
 
@@ -377,7 +377,7 @@ export MOGUET_TEST_GIT_DIFF_QUIET_EXIT_CODE=1
 export MOGUET_TEST_GIT_CHANGED_FILES='PKGBUILD\n'
 run_ok --noedit --nodiff build clean-root
 assert_not_contains "Update diff range:" "$output_file"
-assert_not_contains "Updates detected in existing cache repository. View git diff?" "$output_file"
+assert_not_contains "Updates were detected in the existing cache repository. View the Git diff?" "$output_file"
 assert_command_prefix_absent "git diff "
 assert_command "git reset --hard origin/main"
 
@@ -462,7 +462,7 @@ setup_case makepkg-failure-retains-checkout
 export MOGUET_TEST_MAKEPKG_EXIT_CODE=42
 export MOGUET_TEST_MAKEPKG_PACKAGELIST_EXIT_CODE=0
 run_fail --noedit --nodiff build clean-root
-assert_contains "Build-only makepkg failed with exit code 42." "$output_file"
+assert_contains "The build-only makepkg command failed with exit code 42." "$output_file"
 assert_command "git clone $official_url clean-root"
 assert_command "makepkg --packagelist"
 assert_command "makepkg -sc"

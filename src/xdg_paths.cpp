@@ -35,7 +35,9 @@ std::string_view directory_kind_name(DirectoryKind directory_kind) {
     case DirectoryKind::Cache:
         return "cache";
     }
-    throw std::logic_error("Unknown XDG directory kind.");
+    throw std::logic_error(localization::format_translated_message(
+            // TRANSLATORS: The placeholder is the literal XDG standard identity.
+            "Unknown {} directory kind.", "XDG"));
 }
 
 std::string_view environment_variable_name(
@@ -50,7 +52,9 @@ std::string_view environment_variable_name(
     case EnvironmentVariable::Home:
         return "HOME";
     }
-    throw std::logic_error("Unknown XDG environment variable.");
+    throw std::logic_error(localization::format_translated_message(
+            // TRANSLATORS: The placeholder is the literal XDG standard identity.
+            "Unknown {} environment variable.", "XDG"));
 }
 
 EnvironmentVariable xdg_environment_variable(DirectoryKind directory_kind) {
@@ -62,7 +66,9 @@ EnvironmentVariable xdg_environment_variable(DirectoryKind directory_kind) {
     case DirectoryKind::Cache:
         return EnvironmentVariable::XdgCacheHome;
     }
-    throw std::logic_error("Unknown XDG directory kind.");
+    throw std::logic_error(localization::format_translated_message(
+            // TRANSLATORS: The placeholder is the literal XDG standard identity.
+            "Unknown {} directory kind.", "XDG"));
 }
 
 std::string resolution_diagnostic(const ResolutionFailure& failure) {
@@ -127,7 +133,9 @@ std::string resolution_diagnostic(const ResolutionFailure& failure) {
                 "Cannot resolve {} {} directory: {} is not a valid native path.",
                 application_identity::PROJECT_NAME, directory_kind, variable);
     }
-    throw std::logic_error("Unknown XDG path resolution error code.");
+    throw std::logic_error(localization::format_translated_message(
+            // TRANSLATORS: The placeholder is the literal XDG standard identity.
+            "Unknown {} path resolution error code.", "XDG"));
 }
 
 [[noreturn]] void throw_resolution_error(
