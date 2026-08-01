@@ -28,10 +28,15 @@ set_stage() {
     config_dir=$stage_dir/etc/jpacker
     config_file=$config_dir/jpacker.conf
     preference_dir=$config_dir/package.build
-    bash_completion_file=$stage_dir/usr/share/bash-completion/completions/jpacker
-    zsh_completion_file=$stage_dir/usr/share/zsh/site-functions/_jpacker
-    fish_completion_file=$stage_dir/usr/share/fish/vendor_completions.d/jpacker.fish
-    man_file=$stage_dir/usr/share/man/man8/jpacker.8
+    bash_completion_file=$stage_dir/usr/share/bash-completion/completions/moguet
+    zsh_completion_file=$stage_dir/usr/share/zsh/site-functions/_moguet
+    fish_completion_file=$stage_dir/usr/share/fish/vendor_completions.d/moguet.fish
+    english_man_file=$stage_dir/usr/share/man/man1/moguet.1
+    japanese_man_file=$stage_dir/usr/share/man/ja/man1/moguet.1
+    legacy_bash_completion_file=$stage_dir/usr/share/bash-completion/completions/jpacker
+    legacy_zsh_completion_file=$stage_dir/usr/share/zsh/site-functions/_jpacker
+    legacy_fish_completion_file=$stage_dir/usr/share/fish/vendor_completions.d/jpacker.fish
+    legacy_man_file=$stage_dir/usr/share/man/man8/jpacker.8
     locale_root=$stage_dir/usr/share/locale
     locale_dir=$locale_root/ja
     locale_messages_dir=$locale_dir/LC_MESSAGES
@@ -197,13 +202,18 @@ assert_compliance_absent() {
 assert_package_artifacts_installed() {
     assert_installed_file "$repo_root/moguet" "$binary_file" 755
     assert_absent "$legacy_binary_file"
-    assert_installed_file "$repo_root/completions/jpacker_completion.bash" \
+    assert_installed_file "$repo_root/completions/moguet.bash" \
         "$bash_completion_file"
-    assert_installed_file "$repo_root/completions/_jpacker" \
+    assert_installed_file "$repo_root/completions/_moguet" \
         "$zsh_completion_file"
-    assert_installed_file "$repo_root/completions/jpacker.fish" \
+    assert_installed_file "$repo_root/completions/moguet.fish" \
         "$fish_completion_file"
-    assert_installed_file "$repo_root/man/jpacker.8" "$man_file"
+    assert_installed_file "$repo_root/man/moguet.1" "$english_man_file"
+    assert_installed_file "$repo_root/man/ja/moguet.1" "$japanese_man_file"
+    assert_absent "$legacy_bash_completion_file"
+    assert_absent "$legacy_zsh_completion_file"
+    assert_absent "$legacy_fish_completion_file"
+    assert_absent "$legacy_man_file"
     assert_installed_file "$built_catalog_file" "$catalog_file"
     assert_absent "$legacy_v1_catalog_file"
     assert_absent "$former_candidate_catalog_file"
@@ -217,7 +227,12 @@ assert_package_artifacts_absent() {
     assert_absent "$bash_completion_file"
     assert_absent "$zsh_completion_file"
     assert_absent "$fish_completion_file"
-    assert_absent "$man_file"
+    assert_absent "$english_man_file"
+    assert_absent "$japanese_man_file"
+    assert_absent "$legacy_bash_completion_file"
+    assert_absent "$legacy_zsh_completion_file"
+    assert_absent "$legacy_fish_completion_file"
+    assert_absent "$legacy_man_file"
     assert_absent "$catalog_file"
     assert_absent "$legacy_v1_catalog_file"
     assert_absent "$former_candidate_catalog_file"
@@ -245,10 +260,20 @@ LOGFILE=/tmp/moguet-preserved.log'
 preference_sentinel=$preference_dir/foreign-file.keep
 config_sentinel=$config_dir/foreign-file.keep
 foreign_catalog_file=$locale_messages_dir/foreign-domain.mo
+foreign_bash_completion_file=$(dirname "$bash_completion_file")/foreign-command
+foreign_zsh_completion_file=$(dirname "$zsh_completion_file")/_foreign-command
+foreign_fish_completion_file=$(dirname "$fish_completion_file")/foreign-command.fish
+foreign_english_man_file=$(dirname "$english_man_file")/foreign-command.1
+foreign_japanese_man_file=$(dirname "$japanese_man_file")/foreign-command.1
 printf '%s\n' "$modified_config_text" > "$config_file"
 printf '%s\n' 'preference sentinel' > "$preference_sentinel"
 printf '%s\n' 'config sentinel' > "$config_sentinel"
 printf '%s\n' 'foreign catalog sentinel' > "$foreign_catalog_file"
+printf '%s\n' 'foreign bash completion sentinel' > "$foreign_bash_completion_file"
+printf '%s\n' 'foreign zsh completion sentinel' > "$foreign_zsh_completion_file"
+printf '%s\n' 'foreign fish completion sentinel' > "$foreign_fish_completion_file"
+printf '%s\n' 'foreign English man sentinel' > "$foreign_english_man_file"
+printf '%s\n' 'foreign Japanese man sentinel' > "$foreign_japanese_man_file"
 
 run_make uninstall
 assert_file_text "$preference_file" "$preference_text"
@@ -256,6 +281,11 @@ assert_file_text "$config_file" "$modified_config_text"
 assert_file_text "$preference_sentinel" 'preference sentinel'
 assert_file_text "$config_sentinel" 'config sentinel'
 assert_file_text "$foreign_catalog_file" 'foreign catalog sentinel'
+assert_file_text "$foreign_bash_completion_file" 'foreign bash completion sentinel'
+assert_file_text "$foreign_zsh_completion_file" 'foreign zsh completion sentinel'
+assert_file_text "$foreign_fish_completion_file" 'foreign fish completion sentinel'
+assert_file_text "$foreign_english_man_file" 'foreign English man sentinel'
+assert_file_text "$foreign_japanese_man_file" 'foreign Japanese man sentinel'
 assert_directory "$preference_dir"
 assert_directory "$config_dir"
 assert_directory "$locale_messages_dir"

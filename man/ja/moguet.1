@@ -1,0 +1,597 @@
+.TH MOGUET 1 "August 2026" "Moguet 1.16.0" "ユーザーコマンド"
+.\" parity:name
+.SH 名前
+.na
+moguet \- 検証済みsource buildを備えたpacman-first AUR helper
+.
+.\" parity:synopsis
+.SH 書式
+.na
+.B moguet
+.I operation
+.RI [ options ]
+.RI [ targets... ]
+.
+.B moguet
+.BR -h | --help
+.
+.B moguet
+.BR -V | --version
+.
+.\" parity:description
+.SH 説明
+.na
+.B Moguet
+は、検証済みsource buildとpackageごとのbuild preferenceを提供する、
+Arch Linux向けのpacman-first AUR helperです。
+package transactionは
+.BR pacman (8)、
+package buildは
+.BR makepkg (8)、
+repository取得は
+.BR git (1)
+へ委ねます。
+Moguetはplan、review、artifact validationと各tool間の安全な引き渡しを担います。
+.
+.PP
+.B moguet
+は通常ユーザーで実行してください。
+system package transactionが必要な操作だけ
+.B sudo pacman
+を呼び出します。
+AUR sourceの取得・review・buildはrootで実行しません。
+MoguetはArch Linux、pacman、AURの公式projectでも、独立したpackage managerでも、
+既存AUR helperの完全なcloneでもありません。
+.
+.PP
+.na
+名称は日本語の「もぐもぐ」と、小さなものを表す英語の接尾辞
+.I -let
+を組み合わせ、そこから生まれたMoguletを、フランス語で「すずらん」を意味する
+lowercaseの
+.I muguet
+へ寄せたものです。
+小さく慎ましい姿でありながら毒を持つ花の性質を、危険や曖昧さを警告し、
+証明できないmutation前に停止するhelperへ重ねています。
+正式な読みは「モグエット」です。
+.B MU\%GUET
+と「ミュ\%ゲ」はaliasではありません。
+.
+.PP
+pacmanだけで完結するoperationは、Moguetが消費しないcompatibleなpacman argumentを
+保持します。
+targetがAUR / source-build routeへ進む場合、意味を維持できないoptionは黙って
+無視せずexternal mutation前に拒否します。
+command / option tokenはlocale非依存です。
+.
+.\" parity:commands
+.SH コマンド
+.na
+.\" PUBLIC COMMANDS BEGIN
+.TP
+.B "build <pkg> [V=K]"
+source-build preferenceを保存せず、official repositoryまたはAURのpackageを1つsource
+からbuildします。
+packageをreviewし、生成artifactをvalidationしてから、selected artifactだけをpacmanへ
+渡します。
+.
+.TP
+.B "upgrade"
+pacman-compatible system upgradeを実行した後、registered source-build preferenceを
+調査し、既存update契約が必要とするpackageをrebuildします。
+registered source preferenceを走査しない場合は
+.B -Syu
+を使います。
+.
+.TP
+.B "upgrade-aur"
+installed packageのうち、現在もexact AUR packageへ解決できるものを更新します。
+このtarget-less operationは
+.B pacman -Syu
+を実行せず、source-build preferenceだけで選ばれるpackageを更新しません。
+.
+.TP
+.B "upgrade-all"
+system、registered source、fresh foreign inventory、filtered AURの各phaseをこの順で
+実行します。
+explicit source preferenceは重複するAUR targetより優先します。
+単一atomic transactionではなく、最初のfailureで停止し、完了済みpackage
+transactionをrollbackせず、後続作業をnot attemptedとして報告します。
+.
+.TP
+.B "clean"
+.B sudo pacman -Sc
+でofficial package cacheをcleanし、confirm後にresolved Moguet cacheをcleanします。
+state logは再生成可能cacheに含みません。
+.
+.TP
+.B "-G <pkg>"
+exactly one AUR packageの完全なPackageBase repositoryを
+.I ./<PackageBase>
+へexportします。
+種類を問わずdestinationが存在すればhard failureです。
+build cacheを使わず、PKGBUILD評価、dependency取得、build、installを行いません。
+このoperationではglobal / pacman optionはunsupportedです。
+.
+.TP
+.B "-Gp <pkg>"
+exactly one AUR packageのPackageBase rootにあるPKGBUILD byteだけをstandard outputへ
+表示します。
+diagnosticとPackageBase mappingはstandard errorへ出力します。
+temporary checkoutを使い、repositoryを保持せず、PKGBUILD評価、dependency取得、
+build、installを行いません。
+global / pacman optionはunsupportedです。
+.
+.TP
+.B "deps [--recursive] <pkg>"
+AURのruntime、make、check dependencyを分類します。
+.B --recursive
+を付けるとAUR dependencyを再帰的に辿り、official、unique provider、ambiguous、
+unresolved dependencyは表示しますが、そのcategoryをさらに辿りません。
+clone、build、install、build order計算は行いません。
+.
+.TP
+.B "plan <pkg>"
+AUR build-order planとdirect official repository package sizeを表示します。
+unknown dependency、ambiguous provider、cycle、安全に解決できないconflicts /
+replacesがあるplanはincompleteです。
+size metadataが利用できなくてもplan bodyを省略しません。
+clone、build、installは行いません。
+.
+.TP
+.B "fetch <pkg>"
+complete inspection planが必要とするAUR PackageBase repositoryを取得します。
+未取得repositoryはcloneします。
+既存cloneでは
+.B "git fetch origin"
+だけを実行し、pull、merge、reset、working tree更新、build、installを行いません。
+.
+.TP
+.B "add-src <pkg> [V=K]"
+package 1件のsource-build preferenceとoptional build environment assignmentを
+登録します。
+v2 config fileはsource-preference tableではありません。
+.
+.TP
+.B "edit-src <pkg>"
+.B VISUAL
+または
+.B EDITOR
+を使って既存source-build preferenceを編集します。
+.
+.TP
+.B "list-src"
+registered source-build preferenceと表示可能なenvironment assignmentを一覧します。
+.
+.TP
+.B "del-src <pkg>"
+binary packageをreinstallせず、source-build preference 1件を削除します。
+.
+.TP
+.B "revert <pkg>"
+source-build preference 1件を削除し、configured official repositoryにtargetがあれば
+official binary packageをreinstallします。
+confirm前に表示されたpacman transactionをreviewしてください。
+.
+.TP
+.B "-S <pkg>"
+packageをinstallします。
+Auto routingはofficial repositoryを優先し、適用可能なsource preferenceを尊重し、
+それ以外ではAURを検討します。
+.B --aur
+は対応target routeをrepository fallbackなしのAURへ固定し、
+.B --repo
+はAUR / source-build fallbackなしのofficial binary repositoryへ固定します。
+.
+.TP
+.B "-Syu"
+pacman-compatible system upgradeを実行します。
+この形式はregistered source-build preference全体を走査しません。
+そのscopeも必要な場合は
+.B upgrade
+を使います。
+.
+.TP
+.B "-Ss <query>"
+packageを検索します。
+Auto modeはofficial repositoryとAURのresultを組み合わせます。
+.B --aur
+はAURだけを使いpacman databaseをrefreshせず、
+.B --repo
+はofficial repositoryだけを使います。
+.
+.TP
+.B "-Si <pkg>"
+package情報を表示します。
+Auto modeはofficial repository情報を優先し、packageが存在しない場合だけexact AUR
+metadataへfallbackします。
+source selectorはlookupを指定sourceへ限定します。
+.
+.TP
+.B "-Qua"
+pacmanへforeign-package updateを問い合わせ、AUR update候補になり得るinstalled
+packageも表示します。
+pacman-compatible queryであり、
+.B upgrade-aur
+の実行とは別です。
+.\" PUBLIC COMMANDS END
+.
+.\" parity:options
+.SH オプション
+.na
+.\" PUBLIC OPTIONS BEGIN
+.TP
+.B "-h, --help"
+localized helpを表示し、XDG directoryを作成せず終了します。
+.
+.TP
+.B "-V, --version"
+.B Moguet
+とprogram versionを表示し、XDG directoryを作成せず終了します。
+.
+.TP
+.B "--edit"
+今回のinvocationで、PKGBUILDと検出済みtop-level
+.I *.install
+のreview prompt policyを選びます。
+.B review.pkgbuild
+をoverrideします。
+.
+.TP
+.B "--noedit"
+今回のinvocationで、PKGBUILDと検出済みtop-level
+.I *.install
+のreviewをskipします。
+source、artifact、identity、transaction validationは無効化しません。
+.
+.TP
+.B "--diff"
+repository update diff表示のprompt policyを選びます。
+.B review.diff
+をoverrideします。
+.
+.TP
+.B "--nodiff"
+repository update diff promptをskipします。
+user modificationの破棄やdestructive Git operationを許可しません。
+.
+.TP
+.B "--noconfirm"
+対応するpacman / makepkg executionへnon-confirmation behaviorを渡し、定義済みdefaultを
+使ってMoguetのpromptによる停止を避けます。
+「すべてyes」ではなく、unresolved / ambiguous dependency、cycle、source selection、
+conflicts / replaces、artifact identity、ownership等のsafety guardを突破しません。
+.
+.TP
+.B "--needed"
+pacman-compatible optionとして扱います。
+pacman-only routeではordered argument listに保持します。
+対応するAUR / source-build
+.B -S
+routeではfinal
+.B pacman -U
+installへ1回だけ適用します。
+plan、clone/fetch、review、validation、buildをskipしません。
+.
+.TP
+.B "--build-mode=normal|rebuild|clean"
+今回のinvocationのsource-build modeを選びます。
+built-in defaultは
+.B normal
+です。
+.B rebuild
+はexisting artifactのrebuildを許可し、
+.B clean
+はclean source buildも要求します。
+.
+.TP
+.B "--rebuild"
+.B --build-mode=rebuild
+のcompatibility aliasです。
+.
+.TP
+.B "--cleanbuild"
+.B --build-mode=clean
+のcompatibility aliasです。
+.
+.TP
+.B "--rmdeps"
+legacy cleanup requestとして認識しますが、separated source-build routeではmutation前に
+拒否します。
+Moguetはinvocationが所有するexact dependency setを証明できないため、
+.BR "makepkg -r" 、
+.BR "pacman -Rns" 、
+custom orphan cleanupへ変換しません。
+.
+.TP
+.B "--aur"
+対応する
+.BR -S 、
+.BR -Ss 、
+.B -Si
+をofficial repository fallbackなしのAURへ限定します。
+target-less upgradeやMoguet固有inspection commandではunsupportedです。
+.
+.TP
+.B "--repo"
+対応する
+.BR -S 、
+.BR -Ss 、
+.B -Si
+をAUR / source-build fallbackなしのofficial binary repositoryへ限定します。
+既存source preferenceを削除しません。
+.\" PUBLIC OPTIONS END
+.
+.PP
+同じsource selectorの繰り返しは許可します。
+.B --aur
+と
+.B --repo
+の併用はexternal commandやAUR queryより前に失敗します。
+review、diff、build-modeのconflicting overrideはlast-one-winsにせずmutation前に
+失敗します。
+.
+.\" parity:configuration
+.SH 設定
+.na
+Moguetはoptionalなuser-owned TOML fileを1つ読みます。
+.
+.nf
+$XDG_CONFIG_HOME/moguet/config.toml
+fallback: ~/.config/moguet/config.toml
+.fi
+.
+.PP
+v2.0.0 schemaとbuilt-in defaultは次のとおりです。
+.
+.nf
+schema_version = 1
+
+[review]
+pkgbuild = "prompt"
+diff = "prompt"
+
+[build]
+mode = "normal"
+.fi
+.
+.PP
+値は次の順で合成します。
+.
+.nf
+built-in default -> user config -> CLI override
+.fi
+.
+.PP
+fileがない状態は正常です。
+fileが存在する場合はinteger
+.B schema_version = 1
+が必須で、strictにvalidateします。
+invalid TOML、unknown key、type error、invalid enum、unsupported future schema versionは
+external mutation前に停止します。
+fileはread-only inputであり、自動作成・rewrite・migrationしません。
+.I /etc/moguet
+をsystem-wide config layerとして作成・参照しません。
+.
+.\" parity:files
+.SH ファイル
+.na
+.TP
+.I $XDG_CONFIG_HOME/moguet/config.toml
+optional user configです。
+fallbackは
+.I ~/.config/moguet/config.toml
+です。
+.
+.TP
+.I /etc/jpacker/package.build/
+user TOML configとは別のcompatibility境界である、現行source-build preference storeです。
+既存entryはその場で読み、XDG storageへcopyしません。
+.
+.TP
+.I $XDG_STATE_HOME/moguet/moguet.log
+default human-readable logです。
+fallbackは
+.I ~/.local/state/moguet/moguet.log
+です。
+.
+.TP
+.I $XDG_CACHE_HOME/moguet/
+再生成可能なrepository / build cacheです。
+fallbackは
+.I ~/.cache/moguet/
+です。
+cacheはauthoritative stateではありません。
+.
+.TP
+.I /usr/share/man/man1/moguet.1
+English authority man pageです。
+.
+.TP
+.I /usr/share/man/ja/man1/moguet.1
+このman pageの正式な日本語翻訳です。
+.
+.TP
+.I /usr/share/bash-completion/completions/moguet
+public CLI schema用Bash completionです。
+.
+.TP
+.I /usr/share/zsh/site-functions/_moguet
+public CLI schema用zsh completionです。
+.
+.TP
+.I /usr/share/fish/vendor_completions.d/moguet.fish
+public CLI schema用fish completionです。
+.
+.TP
+.I /usr/share/locale/ja/LC_MESSAGES/moguet.mo
+Japanese GNU gettext runtime catalogです。
+.
+.\" parity:environment
+.SH 環境変数
+.na
+.TP
+.B XDG_CONFIG_HOME
+user configのabsolute base directoryです。
+unsetまたはemptyなら
+.I $HOME/.config
+へfallbackします。
+.
+.TP
+.B XDG_STATE_HOME
+persistent runtime stateとdefault logのabsolute base directoryです。
+unsetまたはemptyなら
+.I $HOME/.local/state
+へfallbackします。
+.
+.TP
+.B XDG_CACHE_HOME
+reproducible cacheのabsolute base directoryです。
+unsetまたはemptyなら
+.I $HOME/.cache
+へfallbackします。
+.
+.TP
+.B HOME
+対応するXDG variableがunsetまたはemptyの場合だけstandard fallbackに使います。
+homeを安全に使用できない場合はfail closedとします。
+.
+.TP
+.B VISUAL
+preferred editorです。
+解決順は
+.BR VISUAL 、
+.BR EDITOR 、
+.B nano
+です。
+.
+.TP
+.B EDITOR
+.B VISUAL
+がunsetまたはemptyの場合の2番目のeditor候補です。
+.
+.TP
+.BR LC_ALL , " LC_MESSAGES" , " LANG" , " LANGUAGE"
+GNU gettextが使用するstandard process-locale inputです。
+英語がsource authority / fallbackで、日本語が正式対応です。
+.B --lang
+optionやTOML language keyはありません。
+.
+.\" parity:safety
+.SH 安全性
+.na
+dependency、provider、PackageBase、source、artifact、ownership、transaction stateを
+authoritativeに確定できなければ、対応するexternal mutation前に停止します。
+.B --noconfirm
+でguardを突破しません。
+.
+.PP
+.B deps
+と
+.B plan
+はclone、build、installしません。
+.B fetch
+は既存working treeを更新しません。
+export commandはbuild / installしません。
+external commandとprivilege escalationは利用者から見える形を維持します。
+.
+.PP
+source-build PackageBase workはfresh artifact destinationを使い、expected output全体を
+validateし、required child package identityだけを選択し、PackageBaseごとに1回のpacman
+transactionへvalidated artifactを渡します。
+unknown、missing、duplicate、unexpected、表現不能なidentityはfail closedです。
+.
+.PP
+複数phase updateはatomicではありません。
+failureは完了済みpackage transactionを自動rollbackしません。
+install成功後のcleanup failureはpartial successであり、盲目的に再試行してはいけません。
+.
+.\" parity:examples
+.SH 例
+.na
+.TP
+repository fallbackなしでAUR packageをinstallする:
+.RS
+.B moguet -S --aur google-chrome
+.RE
+.
+.TP
+今回だけsource preferenceを無視してofficial binaryをinstallする:
+.RS
+.B moguet -S --repo fastfetch
+.RE
+.
+.TP
+clone / buildせずAUR dependency graphを調査する:
+.RS
+.B moguet deps --recursive google-chrome
+.RE
+.
+.TP
+mutationなしでbuild planを表示する:
+.RS
+.B moguet plan mongodb-bin
+.RE
+.
+.TP
+documented phase orderですべての対応scopeを更新する:
+.RS
+.B moguet upgrade-all
+.RE
+.
+.TP
+user configよりreviewとnormal build defaultを今回だけ優先する:
+.RS
+.B moguet --edit --diff --build-mode=normal -S google-chrome
+.RE
+.
+.\" parity:migration
+.SH MIGRATION
+.na
+Moguet v2は
+.I /etc/jpacker/jpacker.conf
+を通常config layerとして読まず、
+.I /etc/jpacker
+を自動copy・rewrite・deleteしません。
+root-owned legacy dataの移行先userを推測しません。
+既存の
+.I /etc/jpacker/package.build/
+source-preference storeは別のcompatibility境界としてその場で読みます。config migration
+としてsource-preference commandからentryを再登録しないでください。
+.
+.PP
+jpacker v1.16.0 dataをbackupし、v1 packageをremoveし、validated Moguet packageを
+installしてから、理解できるsettingだけを手動で対応付けます。
+.B NOEDIT
+は
+.BR review.pkgbuild 、
+.B NODIFF
+は
+.B review.diff
+へ対応します。
+legacy
+.BR EDITOR 、
+.BR LOGFILE 、
+.B RMDEPS
+はTOMLへcopyしません。
+backup、completion / man確認、rollback手順は
+.I docs/migration/v1-to-v2.ja.md
+またはpackageに同梱されたMigration Guideを参照してください。
+.
+.\" parity:see-also
+.SH 関連項目
+.na
+.BR pacman (8)、
+.BR makepkg (8)、
+.BR git (1)
+.
+.\" parity:license
+.SH LICENSE
+.na
+MoguetはGPL-3.0-or-laterで配布します。
+jpacker v1.14.0以前のhistorical releaseは元のMIT Licenseを維持します。
+.
+.\" parity:author
+.SH AUTHOR
+.na
+Moguet projectがmaintenanceしています。

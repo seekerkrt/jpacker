@@ -1,0 +1,561 @@
+#!/usr/bin/env python3
+
+from __future__ import annotations
+
+import argparse
+from collections import Counter
+from dataclasses import dataclass
+from pathlib import Path
+import re
+import sys
+
+from generate_completions import (
+    REPOSITORY_ROOT,
+    generated_files,
+    load_descriptions,
+    load_schema,
+)
+
+
+ANSI_HELP_ENTRY = re.compile(r"^    \x1b\[1m(.*?)\x1b\[0m", re.MULTILINE)
+LONG_TOKEN = re.compile(r"(?<![A-Za-z0-9-])--[a-z][a-z0-9-]*(?![A-Za-z0-9-])")
+SHORT_TOKEN = re.compile(r"(?<![A-Za-z0-9-])-(?!-)[A-Za-z][A-Za-z]*(?![A-Za-z0-9-])")
+MARKDOWN_MARKER = re.compile(r"^<!-- parity:([a-z0-9][a-z0-9-]*) -->\s*$")
+MAN_MARKER = re.compile(r'^\.\\" parity:([a-z0-9][a-z0-9-]*)\s*$')
+README_SECTION_SLUGS = (
+    "overview",
+    "name",
+    "status",
+    "safety",
+    "installation",
+    "usage",
+    "configuration",
+    "xdg",
+    "localization",
+    "compatibility",
+    "development",
+    "license",
+)
+MIGRATION_SECTION_SLUGS = (
+    "overview",
+    "preparation",
+    "identity",
+    "backup",
+    "remove-v1",
+    "install-v2",
+    "configuration",
+    "legacy-data",
+    "verification",
+    "rollback",
+    "maintenance",
+)
+MAN_SECTION_SLUGS = (
+    "name",
+    "synopsis",
+    "description",
+    "commands",
+    "options",
+    "configuration",
+    "files",
+    "environment",
+    "safety",
+    "examples",
+    "migration",
+    "see-also",
+    "license",
+    "author",
+)
+
+
+@dataclass(frozen=True)
+class PublicSurface:
+    operations: frozenset[str]
+    options: frozenset[str]
+
+
+def fail(message: str) -> None:
+    print(f"public-documentation-check: {message}", file=sys.stderr)
+    raise SystemExit(1)
+
+
+def read_text(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        fail(f"missing required file: {path.relative_to(REPOSITORY_ROOT)}")
+
+
+def expected_surface() -> PublicSurface:
+    schema = load_schema()
+    return PublicSurface(
+        frozenset(operation.token for operation in schema.operations),
+        frozenset(option.token for option in schema.options),
+    )
+
+
+def format_tokens(tokens: frozenset[str] | set[str]) -> str:
+    return ", ".join(sorted(tokens)) if tokens else "(none)"
+
+
+def assert_surface(label: str, actual: PublicSurface, expected: PublicSurface) -> None:
+    missing_operations = expected.operations - actual.operations
+    extra_operations = actual.operations - expected.operations
+    missing_options = expected.options - actual.options
+    extra_options = actual.options - expected.options
+    if not any((missing_operations, extra_operations, missing_options, extra_options)):
+        return
+
+    details = []
+    if missing_operations:
+        details.append("missing operations: " + format_tokens(missing_operations))
+    if extra_operations:
+        details.append("extra operations: " + format_tokens(extra_operations))
+    if missing_options:
+        details.append("missing options: " + format_tokens(missing_options))
+    if extra_options:
+        details.append("extra options: " + format_tokens(extra_options))
+    fail(f"{label} differs from src/cli_authority.hpp ({'; '.join(details)})")
+
+
+def help_surface(path: Path, expected: PublicSurface) -> PublicSurface:
+    entries = ANSI_HELP_ENTRY.findall(read_text(path))
+    if not entries:
+        fail(f"no formatted help entries found in {path}")
+
+    operation_tokens: set[str] = set()
+    option_tokens: set[str] = set()
+    unknown_tokens: set[str] = set()
+    all_expected_operations = expected.operations
+    all_expected_options = expected.options
+
+    for entry in entries:
+        dash_tokens = set(LONG_TOKEN.findall(entry)) | set(SHORT_TOKEN.findall(entry))
+        for token in dash_tokens:
+            if token in all_expected_operations:
+                operation_tokens.add(token)
+            elif token in all_expected_options:
+                option_tokens.add(token)
+            else:
+                unknown_tokens.add(token)
+
+        word_operation = re.match(r"^([a-z][a-z0-9-]*)(?=\s|$)", entry)
+        if word_operation is not None:
+            token = word_operation.group(1)
+            if token in all_expected_operations:
+                operation_tokens.add(token)
+            else:
+                unknown_tokens.add(token)
+
+    if unknown_tokens:
+        fail(
+            f"{path} exposes tokens outside src/cli_authority.hpp: "
+            + format_tokens(unknown_tokens)
+        )
+    return PublicSurface(frozenset(operation_tokens), frozenset(option_tokens))
+
+
+def markdown_code_fragments(text: str) -> str:
+    fragments: list[str] = []
+    in_fence = False
+    for line in text.splitlines():
+        if line.startswith("```"):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            fragments.append(line)
+        fragments.extend(re.findall(r"(?<!`)`([^`\n]+)`(?!`)", line))
+    return "\n".join(fragments)
+
+
+def man_code_fragments(text: str) -> str:
+    normalized = text.replace(r"\-", "-")
+    fragments = re.findall(r"\\fB(.*?)\\f[PR]", normalized, flags=re.DOTALL)
+    for line in normalized.splitlines():
+        if re.match(r"^\.(?:B|BI|BR|RB|IR)\s+", line):
+            fragments.append(re.sub(r"^\.[A-Z]+\s+", "", line))
+    return "\n".join(fragments)
+
+
+def man_public_region(text: str, category: str, path: Path) -> str:
+    begin_marker = f'.\\" PUBLIC {category} BEGIN'
+    end_marker = f'.\\" PUBLIC {category} END'
+    begin_count = text.count(begin_marker)
+    end_count = text.count(end_marker)
+    if begin_count != 1 or end_count != 1:
+        fail(
+            f"{path.relative_to(REPOSITORY_ROOT)} must contain exactly one "
+            f"{begin_marker!r} and {end_marker!r} marker"
+        )
+    begin = text.index(begin_marker) + len(begin_marker)
+    end = text.index(end_marker, begin)
+    return text[begin:end]
+
+
+def man_public_entry_payloads(region: str, category: str, path: Path) -> list[str]:
+    lines = region.replace(r"\-", "-").splitlines()
+    payloads: list[str] = []
+    for index, line in enumerate(lines):
+        if line.strip() != ".TP":
+            continue
+        for candidate in lines[index + 1 :]:
+            stripped = candidate.strip()
+            if not stripped or stripped.startswith(r'.\"'):
+                continue
+            match = re.match(r"^\.(?:B|BI|BR|RB|IR)\s+(.+)$", stripped)
+            if match is None:
+                fail(
+                    f"{path.relative_to(REPOSITORY_ROOT)} PUBLIC {category} "
+                    f"entry after .TP does not start with a supported bold macro: {stripped}"
+                )
+            payloads.append(match.group(1).replace('"', ""))
+            break
+        else:
+            fail(
+                f"{path.relative_to(REPOSITORY_ROOT)} PUBLIC {category} has an unterminated .TP entry"
+            )
+    if not payloads:
+        fail(
+            f"{path.relative_to(REPOSITORY_ROOT)} PUBLIC {category} region has no .TP entries"
+        )
+    return payloads
+
+
+def exact_man_public_surface(
+    path: Path, expected: PublicSurface
+) -> PublicSurface:
+    text = read_text(path)
+    operation_counts: Counter[str] = Counter()
+    option_counts: Counter[str] = Counter()
+    unknown_commands: set[str] = set()
+    unknown_options: set[str] = set()
+
+    command_region = man_public_region(text, "COMMANDS", path)
+    for payload in man_public_entry_payloads(command_region, "COMMANDS", path):
+        dash_tokens = set(LONG_TOKEN.findall(payload)) | set(SHORT_TOKEN.findall(payload))
+        for token in dash_tokens:
+            if token in expected.operations:
+                operation_counts[token] += 1
+            elif token in expected.options:
+                # Operation-specific syntax such as `deps --recursive` owns a
+                # public option even though it is not repeated in OPTIONS.
+                option_counts[token] += 1
+            else:
+                unknown_commands.add(token)
+
+        command_payload = payload.strip()
+        if command_payload.startswith("moguet "):
+            command_payload = command_payload[len("moguet ") :].lstrip()
+        if not command_payload.startswith("-"):
+            word = re.match(r"([a-z][a-z0-9-]*)(?=\s|$)", command_payload)
+            if word is not None:
+                token = word.group(1)
+                if token in expected.operations:
+                    operation_counts[token] += 1
+                else:
+                    unknown_commands.add(token)
+
+    option_region = man_public_region(text, "OPTIONS", path)
+    for payload in man_public_entry_payloads(option_region, "OPTIONS", path):
+        dash_tokens = set(LONG_TOKEN.findall(payload)) | set(SHORT_TOKEN.findall(payload))
+        if not dash_tokens:
+            unknown_options.add(payload.strip())
+        for token in dash_tokens:
+            if token in expected.options:
+                option_counts[token] += 1
+            else:
+                unknown_options.add(token)
+
+    if unknown_commands:
+        fail(
+            f"{path.relative_to(REPOSITORY_ROOT)} PUBLIC COMMANDS contains "
+            f"tokens outside src/cli_authority.hpp: {format_tokens(unknown_commands)}"
+        )
+    if unknown_options:
+        fail(
+            f"{path.relative_to(REPOSITORY_ROOT)} PUBLIC OPTIONS contains "
+            f"tokens outside src/cli_authority.hpp: {format_tokens(unknown_options)}"
+        )
+
+    duplicate_operations = {token for token, count in operation_counts.items() if count != 1}
+    duplicate_options = {token for token, count in option_counts.items() if count != 1}
+    if duplicate_operations:
+        fail(
+            f"{path.relative_to(REPOSITORY_ROOT)} PUBLIC COMMANDS repeats: "
+            + format_tokens(duplicate_operations)
+        )
+    if duplicate_options:
+        fail(
+            f"{path.relative_to(REPOSITORY_ROOT)} PUBLIC OPTIONS repeats: "
+            + format_tokens(duplicate_options)
+        )
+
+    actual = PublicSurface(
+        frozenset(operation_counts), frozenset(option_counts)
+    )
+    assert_surface(str(path.relative_to(REPOSITORY_ROOT)), actual, expected)
+    return actual
+
+
+def documented_surface(text: str, kind: str, expected: PublicSurface) -> PublicSurface:
+    normalized = text.replace(r"\-", "-") if kind == "man" else text
+    formatted = man_code_fragments(text) if kind == "man" else markdown_code_fragments(text)
+
+    operations: set[str] = set()
+    options: set[str] = set()
+    for token in expected.operations:
+        haystack = normalized if token.startswith("-") else formatted
+        if re.search(
+            rf"(?<![A-Za-z0-9-]){re.escape(token)}(?![A-Za-z0-9-])",
+            haystack,
+        ):
+            operations.add(token)
+    for token in expected.options:
+        if re.search(
+            rf"(?<![A-Za-z0-9-]){re.escape(token)}(?![A-Za-z0-9-])",
+            normalized,
+        ):
+            options.add(token)
+    return PublicSurface(frozenset(operations), frozenset(options))
+
+
+def marked_regions(path: Path, marker: re.Pattern[str]) -> list[tuple[str, str]]:
+    regions: list[tuple[str, list[str]]] = []
+    for line in read_text(path).splitlines():
+        match = marker.match(line)
+        if match is not None:
+            slug = match.group(1)
+            if any(existing_slug == slug for existing_slug, _ in regions):
+                fail(f"duplicate parity marker '{slug}' in {path.relative_to(REPOSITORY_ROOT)}")
+            regions.append((slug, []))
+        elif regions:
+            regions[-1][1].append(line)
+
+    if not regions:
+        fail(f"no parity markers found in {path.relative_to(REPOSITORY_ROOT)}")
+    return [(slug, "\n".join(lines)) for slug, lines in regions]
+
+
+def validate_marked_regions(
+    path: Path,
+    regions: list[tuple[str, str]],
+    kind: str,
+    expected_slugs: tuple[str, ...],
+) -> None:
+    actual_slugs = tuple(slug for slug, _ in regions)
+    if actual_slugs != expected_slugs:
+        fail(
+            f"{path.relative_to(REPOSITORY_ROOT)} major sections differ: "
+            f"actual={actual_slugs}, expected={expected_slugs}"
+        )
+
+    for slug, body in regions:
+        lines = [line.strip() for line in body.splitlines() if line.strip()]
+        expected_heading_prefix = "## " if kind == "markdown" else ".SH "
+        if not lines or not lines[0].startswith(expected_heading_prefix):
+            fail(
+                f"{path.relative_to(REPOSITORY_ROOT)} parity region '{slug}' "
+                f"must start with {expected_heading_prefix.strip()!r}"
+            )
+
+        if kind == "markdown":
+            substantive_lines = [
+                line
+                for line in lines[1:]
+                if not line.startswith(("#", "<!--", "```"))
+            ]
+        else:
+            structural_macros = {
+                ".",
+                ".TP",
+                ".PP",
+                ".RS",
+                ".RE",
+                ".nf",
+                ".fi",
+                ".na",
+                ".ad",
+            }
+            substantive_lines = [
+                line
+                for line in lines[1:]
+                if line not in structural_macros and not line.startswith(r'.\"')
+            ]
+        if not substantive_lines:
+            fail(
+                f"{path.relative_to(REPOSITORY_ROOT)} parity region '{slug}' "
+                "has no substantive body"
+            )
+
+
+def compare_marked_documents(
+    label: str,
+    english_path: Path,
+    japanese_path: Path,
+    marker: re.Pattern[str],
+    kind: str,
+    expected: PublicSurface,
+    expected_slugs: tuple[str, ...],
+    require_full_surface: bool = False,
+) -> None:
+    english_regions = marked_regions(english_path, marker)
+    japanese_regions = marked_regions(japanese_path, marker)
+    validate_marked_regions(english_path, english_regions, kind, expected_slugs)
+    validate_marked_regions(japanese_path, japanese_regions, kind, expected_slugs)
+    english_slugs = [slug for slug, _ in english_regions]
+    japanese_slugs = [slug for slug, _ in japanese_regions]
+    if english_slugs != japanese_slugs:
+        fail(
+            f"{label} parity marker order differs: "
+            f"English={english_slugs}, Japanese={japanese_slugs}"
+        )
+
+    english_union_operations: set[str] = set()
+    english_union_options: set[str] = set()
+    japanese_union_operations: set[str] = set()
+    japanese_union_options: set[str] = set()
+    for (slug, english), (_, japanese) in zip(english_regions, japanese_regions, strict=True):
+        english_tokens = documented_surface(english, kind, expected)
+        japanese_tokens = documented_surface(japanese, kind, expected)
+        if english_tokens != japanese_tokens:
+            missing_ja_operations = english_tokens.operations - japanese_tokens.operations
+            extra_ja_operations = japanese_tokens.operations - english_tokens.operations
+            missing_ja_options = english_tokens.options - japanese_tokens.options
+            extra_ja_options = japanese_tokens.options - english_tokens.options
+            details = []
+            if missing_ja_operations:
+                details.append("Japanese missing operations: " + format_tokens(missing_ja_operations))
+            if extra_ja_operations:
+                details.append("Japanese extra operations: " + format_tokens(extra_ja_operations))
+            if missing_ja_options:
+                details.append("Japanese missing options: " + format_tokens(missing_ja_options))
+            if extra_ja_options:
+                details.append("Japanese extra options: " + format_tokens(extra_ja_options))
+            fail(f"{label} parity region '{slug}' differs ({'; '.join(details)})")
+
+        english_union_operations.update(english_tokens.operations)
+        english_union_options.update(english_tokens.options)
+        japanese_union_operations.update(japanese_tokens.operations)
+        japanese_union_options.update(japanese_tokens.options)
+
+    if require_full_surface:
+        assert_surface(
+            f"English {label}",
+            PublicSurface(
+                frozenset(english_union_operations), frozenset(english_union_options)
+            ),
+            expected,
+        )
+        assert_surface(
+            f"Japanese {label}",
+            PublicSurface(
+                frozenset(japanese_union_operations), frozenset(japanese_union_options)
+            ),
+            expected,
+        )
+
+
+def check_generated_man(source: Path, generated: Path, version: str) -> None:
+    expected = read_text(source).replace("@VERSION@", version)
+    actual = read_text(generated)
+    if expected != actual:
+        fail(
+            f"{generated.relative_to(REPOSITORY_ROOT)} differs from "
+            f"{source.relative_to(REPOSITORY_ROOT)} with @VERSION@={version}"
+        )
+
+
+def check_generated_completions() -> None:
+    schema = load_schema()
+    descriptions = load_descriptions(schema, "en")
+    outputs = generated_files(
+        schema, descriptions, "en", REPOSITORY_ROOT / "completions"
+    )
+    stale = [
+        path.relative_to(REPOSITORY_ROOT)
+        for path, expected in outputs.items()
+        if read_text(path) != expected
+    ]
+    if stale:
+        fail(
+            "tracked completion differs from its generator output: "
+            + ", ".join(str(path) for path in stale)
+        )
+
+
+def parse_arguments() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Check bilingual public-document and CLI schema parity."
+    )
+    parser.add_argument("--help-en", type=Path, required=True)
+    parser.add_argument("--help-ja", type=Path, required=True)
+    return parser.parse_args()
+
+
+def main() -> int:
+    arguments = parse_arguments()
+    expected = expected_surface()
+
+    english_help = help_surface(arguments.help_en, expected)
+    japanese_help = help_surface(arguments.help_ja, expected)
+    assert_surface("English runtime help", english_help, expected)
+    assert_surface("Japanese runtime help", japanese_help, expected)
+    if english_help != japanese_help:
+        fail("English and Japanese runtime help token sets differ")
+
+    version = read_text(REPOSITORY_ROOT / "VERSION").strip()
+    if not version:
+        fail("VERSION is empty")
+    check_generated_man(
+        REPOSITORY_ROOT / "man/moguet.1.in",
+        REPOSITORY_ROOT / "man/moguet.1",
+        version,
+    )
+    check_generated_man(
+        REPOSITORY_ROOT / "man/ja/moguet.1.in",
+        REPOSITORY_ROOT / "man/ja/moguet.1",
+        version,
+    )
+    compare_marked_documents(
+        "man page",
+        REPOSITORY_ROOT / "man/moguet.1.in",
+        REPOSITORY_ROOT / "man/ja/moguet.1.in",
+        MAN_MARKER,
+        "man",
+        expected,
+        MAN_SECTION_SLUGS,
+    )
+    english_man_surface = exact_man_public_surface(
+        REPOSITORY_ROOT / "man/moguet.1.in", expected
+    )
+    japanese_man_surface = exact_man_public_surface(
+        REPOSITORY_ROOT / "man/ja/moguet.1.in", expected
+    )
+    if english_man_surface != japanese_man_surface:
+        fail("English and Japanese man PUBLIC token sets differ")
+
+    compare_marked_documents(
+        "README",
+        REPOSITORY_ROOT / "README.md",
+        REPOSITORY_ROOT / "README.ja.md",
+        MARKDOWN_MARKER,
+        "markdown",
+        expected,
+        README_SECTION_SLUGS,
+    )
+    compare_marked_documents(
+        "migration guide",
+        REPOSITORY_ROOT / "docs/migration/v1-to-v2.md",
+        REPOSITORY_ROOT / "docs/migration/v1-to-v2.ja.md",
+        MARKDOWN_MARKER,
+        "markdown",
+        expected,
+        MIGRATION_SECTION_SLUGS,
+    )
+
+    check_generated_completions()
+    print("public-documentation-check: all checks passed")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

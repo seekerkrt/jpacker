@@ -96,6 +96,7 @@ DEFERRED_GENERAL_DOCUMENTS = {
     "CLAUDE.md",
     "CONTRIBUTING.md",
     "README.md",
+    "README.ja.md",
     "docs/CODING_CONVENTIONS.md",
     "docs/COMPATIBILITY.md",
     "docs/DECISIONS.md",
@@ -103,6 +104,16 @@ DEFERRED_GENERAL_DOCUMENTS = {
     "docs/LICENSING.md",
     "docs/PROJECT_STANCE.md",
     "docs/VERSIONING.md",
+}
+MIGRATION_DOCUMENTS = {
+    "docs/migration/v1-to-v2.md",
+    "docs/migration/v1-to-v2.ja.md",
+}
+PUBLIC_MAN_DOCUMENTS = {
+    "man/moguet.1",
+    "man/moguet.1.in",
+    "man/ja/moguet.1",
+    "man/ja/moguet.1.in",
 }
 HISTORICAL_DOCUMENTS = {
     "docs/audit/v1.8.0-claude-code.md",
@@ -379,6 +390,10 @@ def classify_legacy_reference(
         return "historical-audit-record"
     if path in DEFERRED_GENERAL_DOCUMENTS:
         return "deferred-general-documentation"
+    if path in MIGRATION_DOCUMENTS:
+        return "migration-documentation"
+    if path in PUBLIC_MAN_DOCUMENTS:
+        return "public-man-migration-context"
     if path in DEFERRED_MAN_AND_COMPLETION:
         return "deferred-man-completion"
     if path in DEFERRED_PACKAGING_AND_LICENSE:
@@ -628,7 +643,16 @@ def main() -> int:
     )
     deferred_candidate_count = 0
     for check, rejected_name, allowed_paths in rejected_names:
-        pattern = re.compile(re.escape(rejected_name), re.IGNORECASE)
+        if check == "rejected-romanization":
+            # POLICY(#35,#309): the lowercase French source word is legitimate
+            # only as naming-origin prose. Uppercase and title-case forms remain
+            # rejected alternate project spellings.
+            pattern = re.compile(
+                rf"\b(?:{re.escape(REJECTED_ROMANIZATION)}|"
+                rf"{re.escape(REJECTED_ROMANIZATION.capitalize())})\b"
+            )
+        else:
+            pattern = re.compile(re.escape(rejected_name), re.IGNORECASE)
         for path, text in texts.items():
             if pattern.search(path):
                 if allowed_paths is not None and path in allowed_paths:
