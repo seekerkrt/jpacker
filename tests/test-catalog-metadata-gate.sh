@@ -36,9 +36,12 @@ show_log_and_fail() {
 }
 
 assert_target_rejects_catalog() {
-    target_name=$1
-    target_log=$tmp_dir/$target_name.log
-    target_build_dir=$tmp_dir/build-$target_name
+    case_name=$1
+    target_name=$2
+    expected_error=$3
+    failure_reason=$4
+    target_log=$tmp_dir/$case_name-$target_name.log
+    target_build_dir=$tmp_dir/build-$case_name-$target_name
 
     # release-check owns this negative test, so its child invocation skips
     # only this phony target to avoid recursively running the same assertion.
@@ -52,19 +55,23 @@ assert_target_rejects_catalog() {
             MSGGREP="$msggrep_command" \
             "$target_name" > "$target_log" 2>&1; then
         show_log_and_fail "$target_log" \
-            "$target_name accepted a catalog with missing c++-format metadata."
+            "$target_name accepted the $case_name catalog."
     fi
 
-    expected_error="error: c++-format metadata missing from $fixture_po_dir/ja.po for messages required by $fixture_po_dir/moguet.pot; run 'make update-po'"
     grep -Fqx "$expected_error" "$target_log" ||
         show_log_and_fail "$target_log" \
-            "$target_name failed without detecting catalog metadata drift."
+            "$target_name failed without detecting $failure_reason."
 
-    printf '  ok: %s rejects c++-format metadata drift\n' "$target_name"
+    printf '  ok: %s rejects %s\n' "$target_name" "$failure_reason"
 }
 
-mkdir -p "$fixture_po_dir"
-cp -R "$source_po_dir"/. "$fixture_po_dir"
+restore_catalog_fixture() {
+    rm -rf "$fixture_po_dir"
+    mkdir -p "$fixture_po_dir"
+    cp -R "$source_po_dir"/. "$fixture_po_dir"
+}
+
+restore_catalog_fixture
 
 awk '
     BEGIN {
@@ -106,7 +113,64 @@ if ! "$msgfmt_command" --check --check-format --check-domain \
 fi
 printf '  ok: msgfmt accepts the flag-removed control catalog\n'
 
-assert_target_rejects_catalog check-catalogs
-assert_target_rejects_catalog release-check
+format_metadata_error="error: c++-format metadata missing from $fixture_po_dir/ja.po for messages required by $fixture_po_dir/moguet.pot; run 'make update-po'"
+assert_target_rejects_catalog \
+    missing-format-metadata check-catalogs \
+    "$format_metadata_error" 'c++-format metadata drift'
+assert_target_rejects_catalog \
+    missing-format-metadata release-check \
+    "$format_metadata_error" 'c++-format metadata drift'
+
+restore_catalog_fixture
+awk '
+    BEGIN {
+        target_msgid = "msgid \"Show this help message and exit\""
+    }
+    $0 == target_msgid {
+        replace_translation = 1
+        print
+        next
+    }
+    replace_translation && /^msgstr / {
+        print "msgstr \"\""
+        replace_translation = 0
+        next
+    }
+    { print }
+' "$source_po_dir/ja.po" > "$fixture_po_dir/ja.po"
+
+grep -A1 -F 'msgid "Show this help message and exit"' \
+    "$fixture_po_dir/ja.po" | grep -Fqx 'msgstr ""' ||
+    fail 'failed to create the untranslated catalog fixture.'
+
+coverage_error="error: $fixture_po_dir/ja.po has untranslated or fuzzy messages required by $fixture_po_dir/moguet.pot; run 'make update-po' and complete the translations"
+assert_target_rejects_catalog \
+    untranslated-message check-catalogs \
+    "$coverage_error" 'untranslated catalog coverage'
+assert_target_rejects_catalog \
+    untranslated-message release-check \
+    "$coverage_error" 'untranslated catalog coverage'
+
+restore_catalog_fixture
+awk '
+    BEGIN {
+        target_msgid = "msgid \"Show this help message and exit\""
+    }
+    $0 == target_msgid {
+        print "#, fuzzy"
+    }
+    { print }
+' "$source_po_dir/ja.po" > "$fixture_po_dir/ja.po"
+
+grep -B1 -F 'msgid "Show this help message and exit"' \
+    "$fixture_po_dir/ja.po" | grep -Fqx '#, fuzzy' ||
+    fail 'failed to create the fuzzy catalog fixture.'
+
+assert_target_rejects_catalog \
+    fuzzy-message check-catalogs \
+    "$coverage_error" 'fuzzy catalog coverage'
+assert_target_rejects_catalog \
+    fuzzy-message release-check \
+    "$coverage_error" 'fuzzy catalog coverage'
 
 printf 'catalog-metadata-gate-test: all checks passed\n'

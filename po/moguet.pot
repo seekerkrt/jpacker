@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Moguet 1.16.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-07-31 19:52+0900\n"
+"POT-Creation-Date: 2026-08-01 11:39+0900\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -17,18 +17,270 @@ msgstr ""
 "Content-Type: text/plain; charset=CHARSET\n"
 "Content-Transfer-Encoding: 8bit\n"
 
-#: src/moguet.cpp:139
+#: src/moguet.cpp:168
 #, c++-format
 msgid "Do not run {} as root or with sudo."
 msgstr ""
 
-#: src/moguet.cpp:143
+#: src/moguet.cpp:172
 #, c++-format
 msgid "Run {} as a normal user; {} will invoke sudo/pacman when needed."
 msgstr ""
 
-#: src/moguet.cpp:522
+#: src/moguet.cpp:562
+msgid "USAGE"
+msgstr ""
+
+#: src/moguet.cpp:566
+msgid "OPERATIONS"
+msgstr ""
+
+#: src/moguet.cpp:570
+msgid "Build one package from source without saving a preference"
+msgstr ""
+
+#: src/moguet.cpp:574
+msgid "Update the system and rebuild configured source packages"
+msgstr ""
+
+#. TRANSLATORS: The placeholder is the literal pacman-compatible -Syu token.
+#: src/moguet.cpp:578
+#, c++-format
+msgid "Check registered source-build preferences after {}"
+msgstr ""
+
+#. TRANSLATORS: The placeholder is the AUR project identity.
+#: src/moguet.cpp:584
+#, c++-format
+msgid "Update installed {} packages only"
+msgstr ""
+
+#. TRANSLATORS: The placeholder is the literal pacman-compatible -Syu token.
+#: src/moguet.cpp:588
+#, c++-format
+msgid "Do not run {}; source-build preferences are optional"
+msgstr ""
+
+#. TRANSLATORS: The placeholder is the AUR project identity.
+#: src/moguet.cpp:594
+#, c++-format
+msgid "Update the system, registered source packages, and remaining installed {} packages"
+msgstr ""
+
+#. TRANSLATORS: The placeholder is the literal PackageBase identity.
+#: src/moguet.cpp:599
+#, c++-format
+msgid "Give explicit source preferences priority and avoid duplicate package/{} builds"
+msgstr ""
+
+#: src/moguet.cpp:602
+msgid "Do not accept target operands"
+msgstr ""
+
+#: src/moguet.cpp:605
+msgid "Clean package and build caches"
+msgstr ""
+
+#. TRANSLATORS: The placeholder is the AUR project identity.
+#: src/moguet.cpp:610
+#, c++-format
+msgid "{} INSPECTION"
+msgstr ""
+
+#. TRANSLATORS: AUR, PackageBase, and the destination path are literal identities.
+#: src/moguet.cpp:615
+#, c++-format
+msgid "Export one {} {} repository to {} without building or installing"
+msgstr ""
+
+#. TRANSLATORS: AUR, PackageBase, PKGBUILD, and stdout are literal identities.
+#: src/moguet.cpp:621
+#, c++-format
+msgid "Print one {} {} {} to {} without keeping a checkout"
+msgstr ""
+
+#. TRANSLATORS: The placeholder is the AUR project identity.
+#: src/moguet.cpp:627
+#, c++-format
+msgid "Classify {} dependencies"
+msgstr ""
+
+#. TRANSLATORS: The placeholder is the AUR project identity.
+#: src/moguet.cpp:632
+#, c++-format
+msgid "Show the {} build-order plan"
+msgstr ""
+
+#. TRANSLATORS: The placeholders are literal git commands and the AUR identity.
+#: src/moguet.cpp:637
+#, c++-format
+msgid "Safely run {} or {} for {} build repositories"
+msgstr ""
+
+#. TRANSLATORS: The placeholders are literal git commands.
+#: src/moguet.cpp:642
+#, c++-format
+msgid "For existing clones, run {} only; do not update the working tree or run {}, {}, build, or install"
+msgstr ""
+
+#: src/moguet.cpp:646
+msgid "SOURCE BUILD PREFERENCES"
+msgstr ""
+
+#: src/moguet.cpp:650
+msgid "Enable a source-build preference for a package"
+msgstr ""
+
+#: src/moguet.cpp:654
+msgid "Edit a source-build preference"
+msgstr ""
+
+#: src/moguet.cpp:658
+msgid "List source-build preferences"
+msgstr ""
+
+#: src/moguet.cpp:662
+msgid "Remove a source-build preference"
+msgstr ""
+
+#: src/moguet.cpp:666
+msgid "Remove a preference and reinstall the binary package"
+msgstr ""
+
+#. TRANSLATORS: The placeholder is the literal pacman program identity.
+#: src/moguet.cpp:671
+#, c++-format
+msgid "{} COMPATIBILITY"
+msgstr ""
+
+#: src/moguet.cpp:674
+msgid "Install packages"
+msgstr ""
+
+#: src/moguet.cpp:677
+msgid "Upgrade the system"
+msgstr ""
+
+#. TRANSLATORS: The placeholder is the literal pacman program identity.
+#: src/moguet.cpp:681
+#, c++-format
+msgid "Remain compatible with {}; do not scan all source-build preferences"
+msgstr ""
+
+#: src/moguet.cpp:685
+msgid "Search for packages"
+msgstr ""
+
+#: src/moguet.cpp:688
+msgid "Show package information"
+msgstr ""
+
+#. TRANSLATORS: The placeholder is the AUR project identity.
+#: src/moguet.cpp:693
+#, c++-format
+msgid "Check {} and foreign-package updates"
+msgstr ""
+
+#: src/moguet.cpp:695
+msgid "OPTIONS"
+msgstr ""
+
+#: src/moguet.cpp:699
 msgid "Show this help message and exit"
+msgstr ""
+
+#: src/moguet.cpp:703
+msgid "Show version information and exit"
+msgstr ""
+
+#. TRANSLATORS: PKGBUILD and .install are literal artifact names.
+#: src/moguet.cpp:708
+#, c++-format
+msgid "Prompt to review {} and {} files"
+msgstr ""
+
+#. TRANSLATORS: PKGBUILD and .install are literal artifact names.
+#: src/moguet.cpp:713
+#, c++-format
+msgid "Skip {} and {} review"
+msgstr ""
+
+#: src/moguet.cpp:717
+msgid "Prompt to view repository update diffs"
+msgstr ""
+
+#: src/moguet.cpp:721
+msgid "Skip the repository update diff prompt"
+msgstr ""
+
+#. TRANSLATORS: pacman and makepkg are literal external-program identities.
+#: src/moguet.cpp:726
+#, c++-format
+msgid "Pass this option to {} and {}"
+msgstr ""
+
+#. TRANSLATORS: pacman, AUR, and -S are literal identities or CLI tokens.
+#: src/moguet.cpp:731
+#, c++-format
+msgid "Pass this option to {}; on {} or source-build {} routes, apply it only to final installation"
+msgstr ""
+
+#. TRANSLATORS: The placeholder is the literal Moguet project identity.
+#: src/moguet.cpp:736
+#, c++-format
+msgid "Do not skip {} build, review, or plan steps"
+msgstr ""
+
+#: src/moguet.cpp:740
+msgid "Select the source-build mode"
+msgstr ""
+
+#. TRANSLATORS: The placeholder is a literal compatibility option form.
+#: src/moguet.cpp:745 src/moguet.cpp:751
+#, c++-format
+msgid "Compatibility alias for {}"
+msgstr ""
+
+#: src/moguet.cpp:756
+msgid "Unsupported for separated source builds; no dependency cleanup is performed"
+msgstr ""
+
+#. TRANSLATORS: -S, -Ss, -Si, and AUR are literal CLI/project identities.
+#: src/moguet.cpp:761
+#, c++-format
+msgid "Limit {}, {}, and {} to {}; do not fall back to repositories"
+msgstr ""
+
+#. TRANSLATORS: -S, -Ss, -Si, and AUR are literal CLI/project identities.
+#: src/moguet.cpp:767
+#, c++-format
+msgid "Limit {}, {}, and {} to official binary repositories; do not use {} or source builds"
+msgstr ""
+
+#: src/moguet.cpp:770
+msgid "CONFIGURATION"
+msgstr ""
+
+#: src/moguet.cpp:774
+msgid "Read-only typed configuration; a missing file uses built-in defaults"
+msgstr ""
+
+#: src/moguet.cpp:777
+msgid "Required schema version"
+msgstr ""
+
+#. TRANSLATORS: The placeholder is the literal PKGBUILD artifact identity.
+#: src/moguet.cpp:782
+#, c++-format
+msgid "{} review policy"
+msgstr ""
+
+#: src/moguet.cpp:785
+msgid "Repository update diff policy"
+msgstr ""
+
+#: src/moguet.cpp:788
+msgid "Source-build mode"
 msgstr ""
 
 #: src/source_build.cpp:490

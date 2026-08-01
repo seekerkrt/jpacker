@@ -405,7 +405,7 @@ assert_normal_request_log_empty
 setup_case help-version
 run_ok --help
 assert_contains "Export one AUR PackageBase repository" "$stdout_file"
-assert_contains "Print only one AUR PackageBase PKGBUILD" "$stdout_file"
+assert_contains "Print one AUR PackageBase PKGBUILD to stdout" "$stdout_file"
 assert_command_log_empty
 run_ok --version
 assert_contains "Moguet v" "$stdout_file"

@@ -5,6 +5,7 @@
 #include "aur_update_query.hpp"
 #include "cache_authority.hpp"
 #include "checkout_fetch.hpp"
+#include "cli_authority.hpp"
 #include "dependency_plan.hpp"
 #include "dependency_provider.hpp"
 #include "dependency_spec.hpp"
@@ -592,7 +593,12 @@ void print_fetch_plan(const BuildPlan& plan) {
 int cmd_deps(const std::vector<std::string>& targets, const std::vector<std::string>& flags) {
     bool recursive = false;
     for(const auto& flag : flags) {
-        if(flag == "deps") continue;
+        if(flag ==
+           cli_authority::operation_spec(
+                   cli_authority::OperationId::Deps)
+                   .token) {
+            continue;
+        }
         if(flag == "--recursive") {
             recursive = true;
             continue;
@@ -661,7 +667,12 @@ int cmd_deps(const std::vector<std::string>& targets, const std::vector<std::str
 
 int cmd_plan(const std::vector<std::string>& targets, const std::vector<std::string>& flags) {
     for(const auto& flag : flags) {
-        if(flag == "plan") continue;
+        if(flag ==
+           cli_authority::operation_spec(
+                   cli_authority::OperationId::Plan)
+                   .token) {
+            continue;
+        }
         Logger::error("Unsupported plan option: " + flag);
         Logger::error(PLAN_USAGE);
         return 1;
@@ -695,7 +706,12 @@ int cmd_plan(const std::vector<std::string>& targets, const std::vector<std::str
 
 int cmd_fetch(const std::vector<std::string>& targets, const std::vector<std::string>& flags) {
     for(const auto& flag : flags) {
-        if(flag == "fetch") continue;
+        if(flag ==
+           cli_authority::operation_spec(
+                   cli_authority::OperationId::Fetch)
+                   .token) {
+            continue;
+        }
         Logger::error("Unsupported fetch option: " + flag);
         Logger::error(FETCH_USAGE);
         return 1;

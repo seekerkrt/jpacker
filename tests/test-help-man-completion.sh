@@ -56,6 +56,10 @@ cmp -s "$tmp_dir/help-short" "$tmp_dir/help-long" ||
     fail "-h and --help output differ."
 assert_occurrence_count 1 '-h, --help' "$tmp_dir/help-short"
 assert_occurrence_count 1 '-V, --version' "$tmp_dir/help-short"
+assert_occurrence_count 1 '--edit' "$tmp_dir/help-short"
+assert_occurrence_count 1 '--diff' "$tmp_dir/help-short"
+assert_occurrence_count 1 '--build-mode=normal|rebuild|clean' \
+    "$tmp_dir/help-short"
 
 "$test_binary" -V > "$tmp_dir/version-short" 2>&1
 "$test_binary" --version > "$tmp_dir/version-long" 2>&1

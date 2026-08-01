@@ -14,6 +14,7 @@
 #include "application_identity.hpp"
 #include "app_config.hpp"
 #include "aur_rpc.hpp"
+#include "cli_authority.hpp"
 #include "cli_parser.hpp"
 #include "cli_routing.hpp"
 #include "commands_aur_update.hpp"
@@ -31,7 +32,6 @@
 #include "xdg_paths.hpp"
 #include "xdg_state_log.hpp"
 
-#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstdlib>
@@ -39,6 +39,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -47,6 +48,31 @@
 namespace {
 
 AppConfig g_config;
+
+constexpr std::size_t HELP_DESCRIPTION_COLUMN = 42;
+
+void print_help_section(const std::string& heading) {
+    std::cout << "\033[1m" << heading << "\033[0m" << std::endl;
+}
+
+void print_help_entry(
+        std::string_view syntax, const std::string& description) {
+    std::cout << "    \033[1m" << syntax << "\033[0m";
+    const std::size_t visible_width = 4 + syntax.size();
+    if(visible_width >= HELP_DESCRIPTION_COLUMN) {
+        std::cout << '\n'
+                  << std::string(HELP_DESCRIPTION_COLUMN, ' ');
+    } else {
+        std::cout << std::string(
+                HELP_DESCRIPTION_COLUMN - visible_width, ' ');
+    }
+    std::cout << description << std::endl;
+}
+
+void print_help_continuation(const std::string& description) {
+    std::cout << std::string(HELP_DESCRIPTION_COLUMN, ' ')
+              << description << std::endl;
+}
 
 } // namespace
 
@@ -81,22 +107,13 @@ UserConfig load_invocation_user_config() {
 }
 
 bool is_known_moguet_operation(const std::string& operation) {
-    static const std::vector<std::string> s_operations = {
-            "build", "upgrade", "upgrade-aur", "upgrade-all", "clean",
-            "deps", "plan", "fetch", "add-src", "del-src", "revert",
-            "edit-src", "list-src"};
-    return std::find(
-                   s_operations.begin(), s_operations.end(), operation) !=
-           s_operations.end();
+    return cli_authority::find_moguet_operation(operation) != nullptr;
 }
 
 bool operation_requires_target(const std::string& operation) {
-    static const std::vector<std::string> s_target_operations = {
-            "build", "deps", "plan", "fetch", "add-src", "del-src",
-            "revert", "edit-src"};
-    return std::find(
-                   s_target_operations.begin(), s_target_operations.end(),
-                   operation) != s_target_operations.end();
+    const cli_authority::OperationSpec* spec =
+            cli_authority::find_moguet_operation(operation);
+    return spec != nullptr && spec->requires_target;
 }
 
 bool validate_pre_log_operation_route(const ParsedCliArguments& parsed) {
@@ -106,13 +123,25 @@ bool validate_pre_log_operation_route(const ParsedCliArguments& parsed) {
         return false;
     }
     if(operation_requires_target(parsed.operation) && parsed.targets.empty()) {
-        if(parsed.operation == "build") {
+        if(parsed.operation ==
+           cli_authority::operation_spec(
+                   cli_authority::OperationId::Build)
+                   .token) {
             Logger::error("Usage: moguet build <pkg> [VAR=VAL...]");
-        } else if(parsed.operation == "deps") {
+        } else if(parsed.operation ==
+                  cli_authority::operation_spec(
+                          cli_authority::OperationId::Deps)
+                          .token) {
             Logger::error("Usage: moguet deps [--recursive] <pkg>");
-        } else if(parsed.operation == "plan") {
+        } else if(parsed.operation ==
+                  cli_authority::operation_spec(
+                          cli_authority::OperationId::Plan)
+                          .token) {
             Logger::error("Usage: moguet plan <pkg>");
-        } else if(parsed.operation == "fetch") {
+        } else if(parsed.operation ==
+                  cli_authority::operation_spec(
+                          cli_authority::OperationId::Fetch)
+                          .token) {
             Logger::error("Usage: moguet fetch <pkg>");
         } else {
             Logger::error("Missing target for " + parsed.operation);
@@ -180,7 +209,10 @@ int run_moguet(int argc, char* argv[]) {
             parsed.cli_overrides.no_confirm,
             parsed.cli_overrides.rm_deps);
 
-    if(parsed.operation == "upgrade-all") {
+    if(parsed.operation ==
+       cli_authority::operation_spec(
+               cli_authority::OperationId::UpgradeAll)
+               .token) {
         // POLICY(#281): upgrade-all is target-less and does not inherit
         // pacman operands. Reject misuse before default state log
         // initialization or any source/cache/inventory/AUR preparation.
@@ -234,7 +266,10 @@ int run_moguet(int argc, char* argv[]) {
         return 1;
     }
 
-    if(parsed.operation == "upgrade-aur") {
+    if(parsed.operation ==
+       cli_authority::operation_spec(
+               cli_authority::OperationId::UpgradeAur)
+               .token) {
         if(!parsed.targets.empty()) {
             Logger::error("upgrade-aur does not accept target operands.");
             return 1;
@@ -249,10 +284,10 @@ int run_moguet(int argc, char* argv[]) {
         }
     }
 
-    const std::vector<std::string> optionless_operations = {
-            "build", "upgrade", "upgrade-aur", "upgrade-all", "clean", "add-src", "del-src", "revert", "edit-src", "list-src"};
-    if(std::find(optionless_operations.begin(), optionless_operations.end(), parsed.operation) !=
-                       optionless_operations.end() &&
+    const cli_authority::OperationSpec* custom_operation =
+            cli_authority::find_moguet_operation(parsed.operation);
+    if(custom_operation != nullptr &&
+       custom_operation->rejects_options_before_dispatch &&
        !validate_optionless_moguet_operation(parsed.operation, parsed.flags)) {
         // POLICY(#169): unsupported custom-operation options must stop before cache or source mutation.
         return 1;
@@ -319,44 +354,87 @@ int run_moguet(int argc, char* argv[]) {
 
     const int operation_status = [&]() -> int {
         try {
-            if(operation == "build") {
+            if(operation ==
+               cli_authority::operation_spec(
+                       cli_authority::OperationId::Build)
+                       .token) {
                 return cmd_build(targets, g_config);
             }
-            if(operation == "upgrade") {
+            if(operation ==
+               cli_authority::operation_spec(
+                       cli_authority::OperationId::Upgrade)
+                       .token) {
                 return cmd_upgrade(g_config);
             }
-            if(operation == "upgrade-aur") {
+            if(operation ==
+               cli_authority::operation_spec(
+                       cli_authority::OperationId::UpgradeAur)
+                       .token) {
                 return cmd_upgrade_aur(g_config);
             }
-            if(operation == "upgrade-all") {
+            if(operation ==
+               cli_authority::operation_spec(
+                       cli_authority::OperationId::UpgradeAll)
+                       .token) {
                 return cmd_upgrade_all(g_config);
             }
-            if(operation == "clean") {
+            if(operation ==
+               cli_authority::operation_spec(
+                       cli_authority::OperationId::Clean)
+                       .token) {
                 return cmd_clean(g_config);
             }
-            if(operation == "deps") {
+            if(operation ==
+               cli_authority::operation_spec(
+                       cli_authority::OperationId::Deps)
+                       .token) {
                 return cmd_deps(targets, flags);
             }
-            if(operation == "plan") {
+            if(operation ==
+               cli_authority::operation_spec(
+                       cli_authority::OperationId::Plan)
+                       .token) {
                 return cmd_plan(targets, flags);
             }
-            if(operation == "fetch") {
+            if(operation ==
+               cli_authority::operation_spec(
+                       cli_authority::OperationId::Fetch)
+                       .token) {
                 return cmd_fetch(targets, flags);
             }
-            if(operation == "add-src" && !targets.empty()) {
+            if(operation ==
+                       cli_authority::operation_spec(
+                               cli_authority::OperationId::AddSource)
+                               .token &&
+               !targets.empty()) {
                 return cmd_add_src(targets);
             }
-            if(operation == "del-src" && !targets.empty()) {
+            if(operation ==
+                       cli_authority::operation_spec(
+                               cli_authority::OperationId::DeleteSource)
+                               .token &&
+               !targets.empty()) {
                 return cmd_del_src(targets);
             }
-            if(operation == "revert" && !targets.empty()) {
+            if(operation ==
+                       cli_authority::operation_spec(
+                               cli_authority::OperationId::Revert)
+                               .token &&
+               !targets.empty()) {
                 cmd_revert(targets, g_config);
                 return 0;
             }
-            if(operation == "edit-src" && !targets.empty()) {
+            if(operation ==
+                       cli_authority::operation_spec(
+                               cli_authority::OperationId::EditSource)
+                               .token &&
+               !targets.empty()) {
                 return cmd_edit_src(targets, g_config);
             }
-            if(operation == "list-src") {
+            if(operation ==
+               cli_authority::operation_spec(
+                       cli_authority::OperationId::ListSources)
+                       .token) {
                 cmd_list_src();
                 return 0;
             }
@@ -474,68 +552,240 @@ int main(int argc, char* argv[]) {
 
 // CLI入口 / help
 void print_help() {
+    using cli_authority::GlobalOptionId;
+    using cli_authority::OperationId;
+
     std::cout << "\033[1;36m" << application_identity::PROJECT_NAME
               << "\033[0m v"
               << application_identity::VERSION << "\n"
               << std::endl;
-    std::cout << "\033[1mUSAGE\033[0m" << std::endl;
+    print_help_section(localization::translate_message("USAGE"));
     std::cout << "    " << application_identity::COMMAND_NAME
               << " <op> [options] [targets...]\n"
               << std::endl;
-    std::cout << "\033[1mOPERATIONS\033[0m" << std::endl;
-    std::cout << "    \033[1mbuild\033[0m <pkg> [V=K]  One-off source build" << std::endl;
-    std::cout << "    \033[1mupgrade\033[0m              System update and configured rebuilds" << std::endl;
-    std::cout << "                              Checks registered source-build preferences after -Syu" << std::endl;
-    std::cout << "    \033[1mupgrade-aur\033[0m          Update installed AUR packages only" << std::endl;
-    std::cout << "                              Does not run -Syu; source-build preferences are optional" << std::endl;
-    std::cout << "    \033[1mupgrade-all\033[0m          Update system, registered source packages, and remaining installed AUR packages" << std::endl;
-    std::cout << "                              Explicit source preferences take priority and prevent duplicate package/PackageBase builds" << std::endl;
-    std::cout << "                              Accepts --noedit, --nodiff, --noconfirm, --rebuild, --cleanbuild; no target operands" << std::endl;
-    std::cout << "    \033[1mclean\033[0m                Clean package/build caches" << std::endl;
+    print_help_section(localization::translate_message("OPERATIONS"));
+    print_help_entry(
+            cli_authority::operation_spec(OperationId::Build).help_syntax,
+            localization::translate_message(
+                    "Build one package from source without saving a preference"));
+    print_help_entry(
+            cli_authority::operation_spec(OperationId::Upgrade).help_syntax,
+            localization::translate_message(
+                    "Update the system and rebuild configured source packages"));
+    print_help_continuation(
+            localization::format_translated_message(
+                    // TRANSLATORS: The placeholder is the literal pacman-compatible -Syu token.
+                    "Check registered source-build preferences after {}",
+                    cli_authority::PACMAN_SYSTEM_UPGRADE_SYNTAX));
+    print_help_entry(
+            cli_authority::operation_spec(OperationId::UpgradeAur).help_syntax,
+            localization::format_translated_message(
+                    // TRANSLATORS: The placeholder is the AUR project identity.
+                    "Update installed {} packages only", "AUR"));
+    print_help_continuation(
+            localization::format_translated_message(
+                    // TRANSLATORS: The placeholder is the literal pacman-compatible -Syu token.
+                    "Do not run {}; source-build preferences are optional",
+                    cli_authority::PACMAN_SYSTEM_UPGRADE_SYNTAX));
+    print_help_entry(
+            cli_authority::operation_spec(OperationId::UpgradeAll).help_syntax,
+            localization::format_translated_message(
+                    // TRANSLATORS: The placeholder is the AUR project identity.
+                    "Update the system, registered source packages, and remaining installed {} packages",
+                    "AUR"));
+    print_help_continuation(
+            localization::format_translated_message(
+                    // TRANSLATORS: The placeholder is the literal PackageBase identity.
+                    "Give explicit source preferences priority and avoid duplicate package/{} builds",
+                    "PackageBase"));
+    print_help_continuation(localization::translate_message(
+            "Do not accept target operands"));
+    print_help_entry(
+            cli_authority::operation_spec(OperationId::Clean).help_syntax,
+            localization::translate_message("Clean package and build caches"));
     std::cout << std::endl;
-    std::cout << "\033[1mAUR INSPECTION\033[0m" << std::endl;
-    std::cout << "    \033[1m-G\033[0m <pkg>             Export one AUR PackageBase repository to ./<PackageBase> (no build/install)" << std::endl;
-    std::cout << "    \033[1m-Gp\033[0m <pkg>            Print only one AUR PackageBase PKGBUILD to stdout (no persistent checkout)" << std::endl;
-    std::cout << "    \033[1mdeps\033[0m [--recursive] <pkg> Classify AUR dependencies" << std::endl;
-    std::cout << "    \033[1mplan\033[0m <pkg>           Show AUR build order plan" << std::endl;
-    std::cout << "    \033[1mfetch\033[0m <pkg>          Safely clone/fetch AUR build repositories" << std::endl;
-    std::cout << "                              Existing clones: git fetch only; no worktree update/pull/reset/build/install" << std::endl;
+    print_help_section(
+            localization::format_translated_message(
+                    // TRANSLATORS: The placeholder is the AUR project identity.
+                    "{} INSPECTION", "AUR"));
+    print_help_entry(
+            cli_authority::PKGBUILD_EXPORT_SYNTAX,
+            localization::format_translated_message(
+                    // TRANSLATORS: AUR, PackageBase, and the destination path are literal identities.
+                    "Export one {} {} repository to {} without building or installing",
+                    "AUR", "PackageBase", "./<PackageBase>"));
+    print_help_entry(
+            cli_authority::PKGBUILD_PRINT_SYNTAX,
+            localization::format_translated_message(
+                    // TRANSLATORS: AUR, PackageBase, PKGBUILD, and stdout are literal identities.
+                    "Print one {} {} {} to {} without keeping a checkout",
+                    "AUR", "PackageBase", "PKGBUILD", "stdout"));
+    print_help_entry(
+            cli_authority::operation_spec(OperationId::Deps).help_syntax,
+            localization::format_translated_message(
+                    // TRANSLATORS: The placeholder is the AUR project identity.
+                    "Classify {} dependencies", "AUR"));
+    print_help_entry(
+            cli_authority::operation_spec(OperationId::Plan).help_syntax,
+            localization::format_translated_message(
+                    // TRANSLATORS: The placeholder is the AUR project identity.
+                    "Show the {} build-order plan", "AUR"));
+    print_help_entry(
+            cli_authority::operation_spec(OperationId::Fetch).help_syntax,
+            localization::format_translated_message(
+                    // TRANSLATORS: The placeholders are literal git commands and the AUR identity.
+                    "Safely run {} or {} for {} build repositories",
+                    "git clone", "git fetch", "AUR"));
+    print_help_continuation(
+            localization::format_translated_message(
+                    // TRANSLATORS: The placeholders are literal git commands.
+                    "For existing clones, run {} only; do not update the working tree or run {}, {}, build, or install",
+                    "git fetch", "git pull", "git reset"));
     std::cout << std::endl;
-    std::cout << "\033[1mSOURCE BUILD PREFERENCES\033[0m" << std::endl;
-    std::cout << "    \033[1madd-src\033[0m <pkg> [V=K]  Enable source-build preference for pkg" << std::endl;
-    std::cout << "    \033[1medit-src\033[0m <pkg>       Edit source-build preference" << std::endl;
-    std::cout << "    \033[1mlist-src\033[0m             List source-build preferences" << std::endl;
-    std::cout << "    \033[1mdel-src\033[0m <pkg>        Remove source-build preference" << std::endl;
-    std::cout << "    \033[1mrevert\033[0m <pkg>         Remove preference and reinstall binary package" << std::endl;
+    print_help_section(
+            localization::translate_message("SOURCE BUILD PREFERENCES"));
+    print_help_entry(
+            cli_authority::operation_spec(OperationId::AddSource).help_syntax,
+            localization::translate_message(
+                    "Enable a source-build preference for a package"));
+    print_help_entry(
+            cli_authority::operation_spec(OperationId::EditSource).help_syntax,
+            localization::translate_message(
+                    "Edit a source-build preference"));
+    print_help_entry(
+            cli_authority::operation_spec(OperationId::ListSources).help_syntax,
+            localization::translate_message(
+                    "List source-build preferences"));
+    print_help_entry(
+            cli_authority::operation_spec(OperationId::DeleteSource).help_syntax,
+            localization::translate_message(
+                    "Remove a source-build preference"));
+    print_help_entry(
+            cli_authority::operation_spec(OperationId::Revert).help_syntax,
+            localization::translate_message(
+                    "Remove a preference and reinstall the binary package"));
     std::cout << std::endl;
-    std::cout << "\033[1mPACMAN COMPATIBILITY\033[0m" << std::endl;
-    std::cout << "    \033[1m-S\033[0m <pkg>              Install package" << std::endl;
-    std::cout << "    \033[1m-Syu\033[0m                  System upgrade" << std::endl;
-    std::cout << "                              Pacman-compatible; does not scan all source-build preferences" << std::endl;
-    std::cout << "    \033[1m-Ss\033[0m <query>          Search packages" << std::endl;
-    std::cout << "    \033[1m-Si\033[0m <pkg>             Show package info" << std::endl;
-    std::cout << "    \033[1m-Qua\033[0m                 Check AUR/foreign updates" << std::endl;
+    print_help_section(
+            localization::format_translated_message(
+                    // TRANSLATORS: The placeholder is the literal pacman program identity.
+                    "{} COMPATIBILITY", "pacman"));
+    print_help_entry(
+            cli_authority::PACMAN_SYNC_INSTALL_SYNTAX,
+            localization::translate_message("Install packages"));
+    print_help_entry(
+            cli_authority::PACMAN_SYSTEM_UPGRADE_SYNTAX,
+            localization::translate_message("Upgrade the system"));
+    print_help_continuation(
+            localization::format_translated_message(
+                    // TRANSLATORS: The placeholder is the literal pacman program identity.
+                    "Remain compatible with {}; do not scan all source-build preferences",
+                    "pacman"));
+    print_help_entry(
+            cli_authority::PACMAN_SYNC_SEARCH_SYNTAX,
+            localization::translate_message("Search for packages"));
+    print_help_entry(
+            cli_authority::PACMAN_SYNC_INFO_SYNTAX,
+            localization::translate_message("Show package information"));
+    print_help_entry(
+            cli_authority::PACMAN_FOREIGN_UPDATES_SYNTAX,
+            localization::format_translated_message(
+                    // TRANSLATORS: The placeholder is the AUR project identity.
+                    "Check {} and foreign-package updates", "AUR"));
     std::cout << std::endl;
-    std::cout << "\033[1mOPTIONS\033[0m" << std::endl;
-    std::cout << "    \033[1m-h, --help\033[0m          "
-              << localization::translate_message(
-                         "Show this help message and exit")
-              << std::endl;
-    std::cout << "    \033[1m-V, --version\033[0m       Show version information and exit" << std::endl;
-    std::cout << "    \033[1m--noedit\033[0m             Skip PKGBUILD/.install review" << std::endl;
-    std::cout << "    \033[1m--nodiff\033[0m             Skip update diff prompt" << std::endl;
-    std::cout << "    \033[1m--noconfirm\033[0m         Pass --noconfirm to pacman/makepkg" << std::endl;
-    std::cout << "    \033[1m--needed\033[0m            Pass to pacman; AUR/source -S applies it only to final install" << std::endl;
-    std::cout << "                              Adds no "
-              << application_identity::PROJECT_NAME
-              << " build/review/plan skip" << std::endl;
-    std::cout << "    \033[1m--rebuild\033[0m           Pass -f to build-only makepkg" << std::endl;
-    std::cout << "    \033[1m--cleanbuild\033[0m        Pass -C to build-only makepkg" << std::endl;
-    std::cout << "    \033[1m--rmdeps\033[0m            Unsupported for separated source builds; no dependency cleanup is performed" << std::endl;
-    std::cout << "    \033[1m--aur\033[0m               Limit -S/-Ss/-Si to AUR; no repository fallback" << std::endl;
-    std::cout << "    \033[1m--repo\033[0m              Limit -S/-Ss/-Si to official binary repositories; no AUR/source-build fallback" << std::endl;
-    std::cout << "\033[1mCONFIG\033[0m" << std::endl;
-    std::cout << "    legacy jpacker.conf: EDITOR=..., LOGFILE=..., NOEDIT=..., NODIFF=..., RMDEPS=..." << std::endl;
+    print_help_section(localization::translate_message("OPTIONS"));
+    print_help_entry(
+            cli_authority::HELP_OPTION_SYNTAX,
+            localization::translate_message(
+                    "Show this help message and exit"));
+    print_help_entry(
+            cli_authority::VERSION_OPTION_SYNTAX,
+            localization::translate_message(
+                    "Show version information and exit"));
+    print_help_entry(
+            cli_authority::global_option_spec(GlobalOptionId::Edit).help_syntax,
+            localization::format_translated_message(
+                    // TRANSLATORS: PKGBUILD and .install are literal artifact names.
+                    "Prompt to review {} and {} files", "PKGBUILD", ".install"));
+    print_help_entry(
+            cli_authority::global_option_spec(GlobalOptionId::NoEdit).help_syntax,
+            localization::format_translated_message(
+                    // TRANSLATORS: PKGBUILD and .install are literal artifact names.
+                    "Skip {} and {} review", "PKGBUILD", ".install"));
+    print_help_entry(
+            cli_authority::global_option_spec(GlobalOptionId::Diff).help_syntax,
+            localization::translate_message(
+                    "Prompt to view repository update diffs"));
+    print_help_entry(
+            cli_authority::global_option_spec(GlobalOptionId::NoDiff).help_syntax,
+            localization::translate_message(
+                    "Skip the repository update diff prompt"));
+    print_help_entry(
+            cli_authority::global_option_spec(GlobalOptionId::NoConfirm).help_syntax,
+            localization::format_translated_message(
+                    // TRANSLATORS: pacman and makepkg are literal external-program identities.
+                    "Pass this option to {} and {}", "pacman", "makepkg"));
+    print_help_entry(
+            cli_authority::PACMAN_NEEDED_OPTION_SYNTAX,
+            localization::format_translated_message(
+                    // TRANSLATORS: pacman, AUR, and -S are literal identities or CLI tokens.
+                    "Pass this option to {}; on {} or source-build {} routes, apply it only to final installation",
+                    "pacman", "AUR", "-S"));
+    print_help_continuation(
+            localization::format_translated_message(
+                    // TRANSLATORS: The placeholder is the literal Moguet project identity.
+                    "Do not skip {} build, review, or plan steps",
+                    application_identity::PROJECT_NAME));
+    print_help_entry(
+            cli_authority::global_option_spec(GlobalOptionId::BuildMode).help_syntax,
+            localization::translate_message("Select the source-build mode"));
+    print_help_entry(
+            cli_authority::global_option_spec(GlobalOptionId::Rebuild).help_syntax,
+            localization::format_translated_message(
+                    // TRANSLATORS: The placeholder is a literal compatibility option form.
+                    "Compatibility alias for {}",
+                    cli_authority::BUILD_MODE_REBUILD_OPTION));
+    print_help_entry(
+            cli_authority::global_option_spec(GlobalOptionId::CleanBuild).help_syntax,
+            localization::format_translated_message(
+                    // TRANSLATORS: The placeholder is a literal compatibility option form.
+                    "Compatibility alias for {}",
+                    cli_authority::BUILD_MODE_CLEAN_OPTION));
+    print_help_entry(
+            cli_authority::global_option_spec(GlobalOptionId::RmDeps).help_syntax,
+            localization::translate_message(
+                    "Unsupported for separated source builds; no dependency cleanup is performed"));
+    print_help_entry(
+            cli_authority::global_option_spec(GlobalOptionId::Aur).help_syntax,
+            localization::format_translated_message(
+                    // TRANSLATORS: -S, -Ss, -Si, and AUR are literal CLI/project identities.
+                    "Limit {}, {}, and {} to {}; do not fall back to repositories",
+                    "-S", "-Ss", "-Si", "AUR"));
+    print_help_entry(
+            cli_authority::global_option_spec(GlobalOptionId::Repo).help_syntax,
+            localization::format_translated_message(
+                    // TRANSLATORS: -S, -Ss, -Si, and AUR are literal CLI/project identities.
+                    "Limit {}, {}, and {} to official binary repositories; do not use {} or source builds",
+                    "-S", "-Ss", "-Si", "AUR"));
+    std::cout << std::endl;
+    print_help_section(localization::translate_message("CONFIGURATION"));
+    print_help_entry(
+            "$XDG_CONFIG_HOME/moguet/config.toml",
+            localization::translate_message(
+                    "Read-only typed configuration; a missing file uses built-in defaults"));
+    print_help_entry(
+            "schema_version = 1",
+            localization::translate_message("Required schema version"));
+    print_help_entry(
+            "review.pkgbuild = prompt|skip",
+            localization::format_translated_message(
+                    // TRANSLATORS: The placeholder is the literal PKGBUILD artifact identity.
+                    "{} review policy", "PKGBUILD"));
+    print_help_entry(
+            "review.diff = prompt|skip",
+            localization::translate_message("Repository update diff policy"));
+    print_help_entry(
+            "build.mode = normal|rebuild|clean",
+            localization::translate_message("Source-build mode"));
 }
 
 bool argv_requests_pkgbuild_export_diagnostics(int argc, char* argv[]) {
@@ -543,7 +793,8 @@ bool argv_requests_pkgbuild_export_diagnostics(int argc, char* argv[]) {
     for(int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
         if(is_moguet_global_option(arg)) continue;
-        return arg == "-G" || arg == "-Gp";
+        return arg == cli_authority::PKGBUILD_EXPORT_OPERATION ||
+               arg == cli_authority::PKGBUILD_PRINT_OPERATION;
     }
     return false;
 }
@@ -552,11 +803,13 @@ bool handle_info_only_option(int argc, char* argv[]) {
     for(int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
         if(is_moguet_global_option(arg)) continue;
-        if(arg == "-h" || arg == "--help") {
+        if(arg == cli_authority::HELP_SHORT_OPTION ||
+           arg == cli_authority::HELP_LONG_OPTION) {
             print_help();
             return true;
         }
-        if(arg == "-V" || arg == "--version") {
+        if(arg == cli_authority::VERSION_SHORT_OPTION ||
+           arg == cli_authority::VERSION_LONG_OPTION) {
             std::cout << application_identity::PROJECT_NAME << " v"
                       << application_identity::VERSION << std::endl;
             return true;

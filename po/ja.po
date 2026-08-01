@@ -2,8 +2,8 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Moguet 1.16.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-07-31 19:52+0900\n"
-"PO-Revision-Date: 2026-07-31 19:50+0900\n"
+"POT-Creation-Date: 2026-08-01 11:39+0900\n"
+"PO-Revision-Date: 2026-08-01 11:39+0900\n"
 "Last-Translator: Moguet contributors\n"
 "Language-Team: Japanese\n"
 "Language: ja\n"
@@ -12,19 +12,271 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=1; plural=0;\n"
 
-#: src/moguet.cpp:139
+#: src/moguet.cpp:168
 #, c++-format
 msgid "Do not run {} as root or with sudo."
 msgstr "{}をrootまたはsudoで実行しないでください。"
 
-#: src/moguet.cpp:143
+#: src/moguet.cpp:172
 #, c++-format
 msgid "Run {} as a normal user; {} will invoke sudo/pacman when needed."
 msgstr "{}を通常ユーザーとして実行してください。必要な場合は{}がsudo/pacmanを呼び出します。"
 
-#: src/moguet.cpp:522
+#: src/moguet.cpp:562
+msgid "USAGE"
+msgstr "使用方法"
+
+#: src/moguet.cpp:566
+msgid "OPERATIONS"
+msgstr "操作"
+
+#: src/moguet.cpp:570
+msgid "Build one package from source without saving a preference"
+msgstr "設定を保存せず、パッケージを1つソースからビルド"
+
+#: src/moguet.cpp:574
+msgid "Update the system and rebuild configured source packages"
+msgstr "システムを更新し、設定済みソースパッケージを再ビルド"
+
+#. TRANSLATORS: The placeholder is the literal pacman-compatible -Syu token.
+#: src/moguet.cpp:578
+#, c++-format
+msgid "Check registered source-build preferences after {}"
+msgstr "{}の後に登録済みソースビルド設定を確認"
+
+#. TRANSLATORS: The placeholder is the AUR project identity.
+#: src/moguet.cpp:584
+#, c++-format
+msgid "Update installed {} packages only"
+msgstr "インストール済みの{}パッケージだけを更新"
+
+#. TRANSLATORS: The placeholder is the literal pacman-compatible -Syu token.
+#: src/moguet.cpp:588
+#, c++-format
+msgid "Do not run {}; source-build preferences are optional"
+msgstr "{}は実行しません。ソースビルド設定は任意です"
+
+#. TRANSLATORS: The placeholder is the AUR project identity.
+#: src/moguet.cpp:594
+#, c++-format
+msgid "Update the system, registered source packages, and remaining installed {} packages"
+msgstr "システム、登録済みのソースパッケージ、その他のインストール済み{}パッケージを更新"
+
+#. TRANSLATORS: The placeholder is the literal PackageBase identity.
+#: src/moguet.cpp:599
+#, c++-format
+msgid "Give explicit source preferences priority and avoid duplicate package/{} builds"
+msgstr "明示的なソースビルド設定を優先し、パッケージ/{}単位での重複ビルドを回避"
+
+#: src/moguet.cpp:602
+msgid "Do not accept target operands"
+msgstr "対象引数は受け付けません"
+
+#: src/moguet.cpp:605
+msgid "Clean package and build caches"
+msgstr "パッケージとビルドのキャッシュを削除"
+
+#. TRANSLATORS: The placeholder is the AUR project identity.
+#: src/moguet.cpp:610
+#, c++-format
+msgid "{} INSPECTION"
+msgstr "{}の調査"
+
+#. TRANSLATORS: AUR, PackageBase, and the destination path are literal identities.
+#: src/moguet.cpp:615
+#, c++-format
+msgid "Export one {} {} repository to {} without building or installing"
+msgstr "1つの{} {}リポジトリを{}へエクスポート（ビルドやインストールは行いません）"
+
+#. TRANSLATORS: AUR, PackageBase, PKGBUILD, and stdout are literal identities.
+#: src/moguet.cpp:621
+#, c++-format
+msgid "Print one {} {} {} to {} without keeping a checkout"
+msgstr "1つの{} {}の{}を{}へ出力（チェックアウトは保存しません）"
+
+#. TRANSLATORS: The placeholder is the AUR project identity.
+#: src/moguet.cpp:627
+#, c++-format
+msgid "Classify {} dependencies"
+msgstr "{}の依存関係を分類"
+
+#. TRANSLATORS: The placeholder is the AUR project identity.
+#: src/moguet.cpp:632
+#, c++-format
+msgid "Show the {} build-order plan"
+msgstr "{}のビルド順序を表示"
+
+#. TRANSLATORS: The placeholders are literal git commands and the AUR identity.
+#: src/moguet.cpp:637
+#, c++-format
+msgid "Safely run {} or {} for {} build repositories"
+msgstr "{}または{}を使用して{}ビルドリポジトリを安全に取得"
+
+#. TRANSLATORS: The placeholders are literal git commands.
+#: src/moguet.cpp:642
+#, c++-format
+msgid "For existing clones, run {} only; do not update the working tree or run {}, {}, build, or install"
+msgstr "既存のチェックアウトでは{}だけを実行し、作業ツリーの更新、{}、{}、ビルド、インストールは行いません"
+
+#: src/moguet.cpp:646
+msgid "SOURCE BUILD PREFERENCES"
+msgstr "ソースビルド設定"
+
+#: src/moguet.cpp:650
+msgid "Enable a source-build preference for a package"
+msgstr "パッケージのソースビルド設定を有効化"
+
+#: src/moguet.cpp:654
+msgid "Edit a source-build preference"
+msgstr "ソースビルド設定を編集"
+
+#: src/moguet.cpp:658
+msgid "List source-build preferences"
+msgstr "ソースビルド設定を一覧表示"
+
+#: src/moguet.cpp:662
+msgid "Remove a source-build preference"
+msgstr "ソースビルド設定を削除"
+
+#: src/moguet.cpp:666
+msgid "Remove a preference and reinstall the binary package"
+msgstr "設定を削除してバイナリパッケージを再インストール"
+
+#. TRANSLATORS: The placeholder is the literal pacman program identity.
+#: src/moguet.cpp:671
+#, c++-format
+msgid "{} COMPATIBILITY"
+msgstr "{}互換"
+
+#: src/moguet.cpp:674
+msgid "Install packages"
+msgstr "パッケージをインストール"
+
+#: src/moguet.cpp:677
+msgid "Upgrade the system"
+msgstr "システムをアップグレード"
+
+#. TRANSLATORS: The placeholder is the literal pacman program identity.
+#: src/moguet.cpp:681
+#, c++-format
+msgid "Remain compatible with {}; do not scan all source-build preferences"
+msgstr "{}互換を維持し、登録済みソースビルド設定をすべて走査しません"
+
+#: src/moguet.cpp:685
+msgid "Search for packages"
+msgstr "パッケージを検索"
+
+#: src/moguet.cpp:688
+msgid "Show package information"
+msgstr "パッケージ情報を表示"
+
+#. TRANSLATORS: The placeholder is the AUR project identity.
+#: src/moguet.cpp:693
+#, c++-format
+msgid "Check {} and foreign-package updates"
+msgstr "{}および外部パッケージの更新を確認"
+
+#: src/moguet.cpp:695
+msgid "OPTIONS"
+msgstr "オプション"
+
+#: src/moguet.cpp:699
 msgid "Show this help message and exit"
 msgstr "このヘルプを表示して終了"
+
+#: src/moguet.cpp:703
+msgid "Show version information and exit"
+msgstr "バージョン情報を表示して終了"
+
+#. TRANSLATORS: PKGBUILD and .install are literal artifact names.
+#: src/moguet.cpp:708
+#, c++-format
+msgid "Prompt to review {} and {} files"
+msgstr "{}および{}の確認を促します"
+
+#. TRANSLATORS: PKGBUILD and .install are literal artifact names.
+#: src/moguet.cpp:713
+#, c++-format
+msgid "Skip {} and {} review"
+msgstr "{}および{}の確認を省略"
+
+#: src/moguet.cpp:717
+msgid "Prompt to view repository update diffs"
+msgstr "リポジトリ更新差分の表示を促します"
+
+#: src/moguet.cpp:721
+msgid "Skip the repository update diff prompt"
+msgstr "リポジトリ更新差分の確認を省略"
+
+#. TRANSLATORS: pacman and makepkg are literal external-program identities.
+#: src/moguet.cpp:726
+#, c++-format
+msgid "Pass this option to {} and {}"
+msgstr "このオプションを{}と{}へ渡します"
+
+#. TRANSLATORS: pacman, AUR, and -S are literal identities or CLI tokens.
+#: src/moguet.cpp:731
+#, c++-format
+msgid "Pass this option to {}; on {} or source-build {} routes, apply it only to final installation"
+msgstr "このオプションを{}へ渡し、{}またはソースビルドの{}経路では最後のインストールだけに適用"
+
+#. TRANSLATORS: The placeholder is the literal Moguet project identity.
+#: src/moguet.cpp:736
+#, c++-format
+msgid "Do not skip {} build, review, or plan steps"
+msgstr "{}のビルド、確認、計画段階は省略しません"
+
+#: src/moguet.cpp:740
+msgid "Select the source-build mode"
+msgstr "ソースビルドモードを選択"
+
+#. TRANSLATORS: The placeholder is a literal compatibility option form.
+#: src/moguet.cpp:745 src/moguet.cpp:751
+#, c++-format
+msgid "Compatibility alias for {}"
+msgstr "{}との互換性を保つための別名"
+
+#: src/moguet.cpp:756
+msgid "Unsupported for separated source builds; no dependency cleanup is performed"
+msgstr "分離されたソースビルドでは未対応です。依存パッケージは削除しません"
+
+#. TRANSLATORS: -S, -Ss, -Si, and AUR are literal CLI/project identities.
+#: src/moguet.cpp:761
+#, c++-format
+msgid "Limit {}, {}, and {} to {}; do not fall back to repositories"
+msgstr "{}、{}、{}を{}に限定し、リポジトリへフォールバックしません"
+
+#. TRANSLATORS: -S, -Ss, -Si, and AUR are literal CLI/project identities.
+#: src/moguet.cpp:767
+#, c++-format
+msgid "Limit {}, {}, and {} to official binary repositories; do not use {} or source builds"
+msgstr "{}、{}、{}を公式バイナリリポジトリに限定し、{}やソースビルドを使用しません"
+
+#: src/moguet.cpp:770
+msgid "CONFIGURATION"
+msgstr "設定"
+
+#: src/moguet.cpp:774
+msgid "Read-only typed configuration; a missing file uses built-in defaults"
+msgstr "型付きの読み取り専用設定。ファイルがない場合は組み込みの既定値を使用"
+
+#: src/moguet.cpp:777
+msgid "Required schema version"
+msgstr "必須のスキーマバージョン"
+
+#. TRANSLATORS: The placeholder is the literal PKGBUILD artifact identity.
+#: src/moguet.cpp:782
+#, c++-format
+msgid "{} review policy"
+msgstr "{}の確認方針"
+
+#: src/moguet.cpp:785
+msgid "Repository update diff policy"
+msgstr "リポジトリ更新差分の確認方針"
+
+#: src/moguet.cpp:788
+msgid "Source-build mode"
+msgstr "ソースビルドモード"
 
 #: src/source_build.cpp:490
 msgid "Rebuild package?"

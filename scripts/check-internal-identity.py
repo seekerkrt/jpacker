@@ -357,6 +357,10 @@ ACTIVE_LEGACY_ALLOWANCES: dict[str, tuple[LegacyAllowance, ...]] = {
             rf"assert_not_contains \"Started {legacy}\"",
         )
     ),
+    "tests/test-localization.sh": allowances(
+        "negative-runtime-assertion",
+        rf"assert_not_contains 'legacy {legacy}\.conf'{identity_end}",
+    ),
 }
 
 
@@ -484,6 +488,10 @@ def check_classifier_contract() -> None:
         (
             "tests/test-runtime-identity.sh",
             f'assert_contains "Started {LEGACY_NAME}" "$output"',
+        ),
+        (
+            "tests/test-localization.sh",
+            f"assert_not_contains 'legacy {LEGACY_NAME}.conf-helper' \"$output\"",
         ),
         (
             "scripts/check-license-compliance.sh",
@@ -750,11 +758,13 @@ def main() -> int:
         "apply_moguet_global_option",
         "is_moguet_global_option",
     )
-    parser_text = texts.get("src/cli_parser.cpp", "") + texts.get(
-        "src/cli_parser.hpp", ""
+    cli_authority_text = (
+        texts.get("src/cli_authority.hpp", "")
+        + texts.get("src/cli_parser.cpp", "")
+        + texts.get("src/cli_parser.hpp", "")
     )
     for symbol in required_internal_symbols:
-        if symbol not in parser_text:
+        if symbol not in cli_authority_text:
             findings.append(
                 Finding("missing-moguet-internal-symbol", "src/cli_parser.cpp", 0, symbol)
             )
