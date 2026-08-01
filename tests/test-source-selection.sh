@@ -352,7 +352,7 @@ run_exact() {
 # Source preferenceのpath/read契約。列挙順はfilesystem依存なので固定しない。
 setup_case list-src-missing-root
 export MOGUET_TEST_PACKAGE_BUILD_DIR=$case_dir/missing-package.build
-run_ok list-src
+LC_ALL=C LANGUAGE= run_ok list-src
 assert_contains "No source-build packages registered." "$output_file"
 assert_command_log_empty
 assert_request_log_empty
@@ -371,7 +371,7 @@ SOURCE_PREFERENCE
 printf '%s\n' "LDFLAGS='-Wl,--as-needed'" > "$MOGUET_TEST_PACKAGE_BUILD_DIR/zeta"
 mkdir "$MOGUET_TEST_PACKAGE_BUILD_DIR/ignored-directory"
 printf 'nested entry\n' > "$MOGUET_TEST_PACKAGE_BUILD_DIR/ignored-directory/not-an-entry"
-run_ok list-src
+LC_ALL=C LANGUAGE= run_ok list-src
 assert_contains "Registered Source Packages:" "$output_file"
 assert_contains "alpha" "$output_file"
 assert_line_before '    CFLAGS = "-O2 # kept quoted"' \
@@ -382,6 +382,13 @@ assert_not_contains "removed trailing comment" "$output_file"
 assert_not_contains "removed raw comment" "$output_file"
 assert_not_contains "ignored-directory" "$output_file"
 assert_not_contains "not-an-entry" "$output_file"
+assert_command_log_empty
+assert_request_log_empty
+
+setup_case list-src-empty-root
+LC_ALL=C LANGUAGE= run_ok list-src
+assert_contains "Registered Source Packages:" "$output_file"
+assert_contains "  (none)" "$output_file"
 assert_command_log_empty
 assert_request_log_empty
 
