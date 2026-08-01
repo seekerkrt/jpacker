@@ -5,6 +5,7 @@
 #include "build_plan_artifact_target_projection.hpp"
 #include "cache_authority.hpp"
 #include "dependency_plan.hpp"
+#include "localization.hpp"
 #include "logging.hpp"
 #include "package_identifier.hpp"
 #include "repository_query.hpp"
@@ -26,6 +27,7 @@ namespace fs = std::filesystem;
 
 namespace {
 
+// NO_TRANSLATE: These are protocol endpoint identities, not user-facing prose.
 const std::string AUR_BASE_URL = "https://aur.archlinux.org/";
 const std::string ARCH_GIT_BASE = "https://gitlab.archlinux.org/archlinux/packaging/packages/";
 
@@ -34,7 +36,10 @@ SourceBuildEnvironment load_source_preference_environment(
     return get_package_env(
             package_name,
             [](const fs::path& entry_path) {
-                Logger::info("Loading custom build flags from " + entry_path.string());
+                // TRANSLATORS: The placeholder is a source preference file path.
+                Logger::info(localization::format_translated_message(
+                        "Loading custom build flags from {}.",
+                        entry_path.string()));
             },
             [](const std::string& warning) {
                 Logger::warn(warning);
@@ -50,11 +55,14 @@ std::string canonical_source_key(
         const std::string& package_base) {
     switch(source_kind) {
         case SourceBuildSourceKind::Repository:
+            // NO_TRANSLATE: Stable internal source identity key.
             return "repository:" + package_base;
         case SourceBuildSourceKind::Aur:
+            // NO_TRANSLATE: Stable internal source identity key.
             return "aur:" + package_base;
     }
-    throw std::logic_error("Unknown source-build source kind.");
+    throw std::logic_error(localization::translate_message(
+            "Unknown source-build source kind."));
 }
 
 void require_supported_registered_source_install_target(
@@ -63,11 +71,13 @@ void require_supported_registered_source_install_target(
     // requested split childを個別選択できないため安全側で停止する。
     if(source.source_kind == SourceBuildSourceKind::Aur &&
        source.has_distinct_package_base) {
-        throw std::runtime_error(
-                "Registered source upgrade does not support split AUR preference " +
-                source.requested_name + " from PackageBase " +
-                source.package_base +
-                "; this route requires a singular package identity.");
+        // TRANSLATORS: The placeholders are the AUR identity, a requested package name, the PackageBase field identity, and its value.
+        throw std::runtime_error(localization::format_translated_message(
+                "Registered source upgrade does not support split {} preference {} from {} {}; this route requires a singular package identity.",
+                "AUR",
+                source.requested_name,
+                "PackageBase",
+                source.package_base));
     }
 }
 
@@ -91,9 +101,10 @@ DesiredInstallReason resolve_source_target_reason(
     BuildPlanArtifactTargetProjectionResult projection =
             project_build_plan_required_artifact_targets(plan);
     if(!projection.is_success()) {
-        throw std::logic_error(
-                "BuildPlan required artifact target projection failed for " +
-                source.requested_name + ".");
+        // TRANSLATORS: The placeholders are the literal BuildPlan identity and a requested package name.
+        throw std::logic_error(localization::format_translated_message(
+                "{} required artifact target projection failed for {}.",
+                "BuildPlan", source.requested_name));
     }
     for(const auto& unit : projection.success()->build_units) {
         if(unit.package_base != source.package_base) continue;
@@ -103,9 +114,10 @@ DesiredInstallReason resolve_source_target_reason(
             }
         }
     }
-    throw std::logic_error(
-            "BuildPlan required artifact target projection omitted " +
-            source.requested_name + ".");
+    // TRANSLATORS: The placeholders are the literal BuildPlan identity and a requested package name.
+    throw std::logic_error(localization::format_translated_message(
+            "{} required artifact target projection omitted {}.",
+            "BuildPlan", source.requested_name));
 }
 
 std::string join_required_package_names(
@@ -161,28 +173,8 @@ std::optional<ArtifactInstallExecutionOutcome> flatten_source_build_result(
         case SourceBuildExecutionStatus::UpdateStatusUnknownSkipped:
             return std::nullopt;
     }
-    throw std::logic_error("Unknown source-build execution status.");
-}
-
-std::string_view install_reason_label(DesiredInstallReason reason) {
-    switch(reason) {
-        case DesiredInstallReason::Explicit:
-            return "explicit";
-        case DesiredInstallReason::Dependency:
-            return "dependency";
-    }
-    throw std::logic_error("Unknown desired install reason.");
-}
-
-std::string_view install_outcome_label(
-        ArtifactInstallExecutionOutcome outcome) {
-    switch(outcome) {
-        case ArtifactInstallExecutionOutcome::Installed:
-            return "installed";
-        case ArtifactInstallExecutionOutcome::SkippedAsNeeded:
-            return "skipped as needed (--needed)";
-    }
-    throw std::logic_error("Unknown artifact install execution outcome.");
+    throw std::logic_error(localization::translate_message(
+            "Unknown source-build execution status."));
 }
 
 bool should_present_package_base_result(
@@ -202,10 +194,14 @@ void present_package_base_result(
        result.selected_children().size() !=
                work_item.required_targets.size()) {
         throw std::logic_error(
-                "PackageBase source-build result is incoherent for presentation.");
+                localization::format_translated_message(
+                        "{} source-build result is incoherent for presentation.",
+                        "PackageBase"));
     }
 
-    Logger::info("PackageBase result: " + result.package_base());
+    // TRANSLATORS: The placeholders are the PackageBase field identity and an AUR PackageBase name.
+    Logger::info(localization::format_translated_message(
+            "{} result: {}", "PackageBase", result.package_base()));
     for(std::size_t index = 0;
         index < result.selected_children().size(); ++index) {
         const RequiredPackageArtifactTarget& required =
@@ -216,26 +212,66 @@ void present_package_base_result(
            child.identity.full_version.empty() ||
            child.desired_reason != required.desired_reason) {
             throw std::logic_error(
-                    "PackageBase source-build child result is incoherent for presentation.");
+                    localization::format_translated_message(
+                            "{} source-build child result is incoherent for presentation.",
+                            "PackageBase"));
         }
-        Logger::info(
-                "  required child: " + required.package_name + " -> " +
-                child.identity.package_name + " " +
-                child.identity.full_version + " (" +
-                std::string(install_reason_label(child.desired_reason)) +
-                "): " + std::string(install_outcome_label(child.outcome)));
+        if(child.desired_reason == DesiredInstallReason::Explicit &&
+           child.outcome == ArtifactInstallExecutionOutcome::Installed) {
+            // TRANSLATORS: The placeholders are the requested package, produced package, and full version.
+            Logger::info(localization::format_translated_message(
+                    "  required child: {} -> {} {} (explicit): installed",
+                    required.package_name,
+                    child.identity.package_name,
+                    child.identity.full_version));
+        } else if(child.desired_reason == DesiredInstallReason::Explicit &&
+                  child.outcome ==
+                          ArtifactInstallExecutionOutcome::SkippedAsNeeded) {
+            // TRANSLATORS: The placeholders are the requested package, produced package, full version, and literal --needed option.
+            Logger::info(localization::format_translated_message(
+                    "  required child: {} -> {} {} (explicit): skipped as needed ({})",
+                    required.package_name,
+                    child.identity.package_name,
+                    child.identity.full_version,
+                    "--needed"));
+        } else if(child.desired_reason == DesiredInstallReason::Dependency &&
+                  child.outcome == ArtifactInstallExecutionOutcome::Installed) {
+            // TRANSLATORS: The placeholders are the requested package, produced package, and full version.
+            Logger::info(localization::format_translated_message(
+                    "  required child: {} -> {} {} (dependency): installed",
+                    required.package_name,
+                    child.identity.package_name,
+                    child.identity.full_version));
+        } else if(child.desired_reason == DesiredInstallReason::Dependency &&
+                  child.outcome ==
+                          ArtifactInstallExecutionOutcome::SkippedAsNeeded) {
+            // TRANSLATORS: The placeholders are the requested package, produced package, full version, and literal --needed option.
+            Logger::info(localization::format_translated_message(
+                    "  required child: {} -> {} {} (dependency): skipped as needed ({})",
+                    required.package_name,
+                    child.identity.package_name,
+                    child.identity.full_version,
+                    "--needed"));
+        } else {
+            throw std::logic_error(localization::format_translated_message(
+                    "{} source-build child result has an unknown install reason or outcome.",
+                    "PackageBase"));
+        }
     }
     for(const ArtifactPackageIdentity& unselected :
         result.unselected_artifacts()) {
         if(unselected.package_name.empty() ||
            unselected.full_version.empty()) {
             throw std::logic_error(
-                    "PackageBase unselected artifact identity is incoherent for presentation.");
+                    localization::format_translated_message(
+                            "{} unselected artifact identity is incoherent for presentation.",
+                            "PackageBase"));
         }
-        Logger::info(
-                "  produced artifact: " + unselected.package_name + " " +
-                unselected.full_version +
-                " (not selected; not installed)");
+        // TRANSLATORS: The placeholders are a produced package name and full version.
+        Logger::info(localization::format_translated_message(
+                "  produced artifact: {} {} (not selected; not installed)",
+                unselected.package_name,
+                unselected.full_version));
     }
 }
 
@@ -246,7 +282,8 @@ void seed_production_source_build_cache(
         const ValidatedCacheRoot& cache_root) {
     if(invocation.work_items.empty()) {
         throw std::logic_error(
-                "Cannot seed cache for an empty source-build invocation.");
+                localization::translate_message(
+                        "Cannot seed cache for an empty source-build invocation."));
     }
 
     cache_root.require_unchanged_identity();
@@ -263,7 +300,8 @@ void seed_production_source_build_cache(
            existing_root->inode() != work_item.cache_root->inode() ||
            existing_root->owner() != work_item.cache_root->owner()) {
             throw std::logic_error(
-                    "Production source-build work items use different cache authorities.");
+                    localization::translate_message(
+                            "Production source-build work items use different cache authorities."));
         }
     }
 
@@ -272,7 +310,8 @@ void seed_production_source_build_cache(
         existing_root->inode() != cache_root.inode() ||
         existing_root->owner() != cache_root.owner())) {
         throw std::logic_error(
-                "Production source-build invocation cache authority changed.");
+                localization::translate_message(
+                        "Production source-build invocation cache authority changed."));
     }
 
     invocation.cache_root = cache_root;
@@ -285,7 +324,8 @@ void activate_production_source_build_cache(
         PreparedProductionSourceBuildInvocation& invocation) {
     if(invocation.work_items.empty()) {
         throw std::logic_error(
-                "Cannot activate cache for an empty source-build invocation.");
+                localization::translate_message(
+                        "Cannot activate cache for an empty source-build invocation."));
     }
     std::optional<ValidatedCacheRoot> shared_root = invocation.cache_root;
     for(const auto& work_item : invocation.work_items) {
@@ -302,7 +342,8 @@ const ValidatedCacheRoot& require_prepared_cache_root(
         const ProductionSourceBuildWorkItem& work_item) {
     if(!work_item.cache_root.has_value()) {
         throw std::logic_error(
-                "Production source-build work item has no prepared cache authority.");
+                localization::translate_message(
+                        "Production source-build work item has no prepared cache authority."));
     }
     work_item.cache_root->require_unchanged_identity();
     return work_item.cache_root.value();
@@ -332,19 +373,26 @@ ResolvedSourceBuildIdentity resolve_source_build_identity(
     } catch(const AurRpcResponseError&) {
         throw;
     } catch(const std::exception& error) {
-        throw std::runtime_error(
-                "Failed to fetch AUR info for " + package_name + ": " +
-                error.what());
+        // TRANSLATORS: The placeholders are the AUR identity, a package name, and an AUR diagnostic.
+        throw std::runtime_error(localization::format_translated_message(
+                "Failed to fetch {} info for {}: {}",
+                "AUR",
+                package_name,
+                error.what()));
     }
 
     if(!info.has_value()) {
-        throw std::runtime_error(
-                "Package not found in repos or AUR: " + package_name);
+        // TRANSLATORS: The placeholders are the AUR identity and a package name.
+        throw std::runtime_error(localization::format_translated_message(
+                "Package not found in repos or {}: {}",
+                "AUR",
+                package_name));
     }
     if(info->PackageBase.empty()) {
-        throw std::runtime_error(
-                "AUR info for " + package_name +
-                " does not include PackageBase.");
+        // TRANSLATORS: The placeholders are the AUR identity, package name, and PackageBase field identity.
+        throw std::runtime_error(localization::format_translated_message(
+                "{} info for {} does not include {}.",
+                "AUR", package_name, "PackageBase"));
     }
     require_valid_package_name(info->PackageBase);
 
@@ -399,8 +447,10 @@ std::vector<ProductionSourceBuildWorkItem> prepare_aur_source_build_work_items(
     BuildPlanArtifactTargetProjectionResult projection =
             project_build_plan_required_artifact_targets(plan);
     if(!projection.is_success()) {
-        throw std::logic_error(
-                "BuildPlan required artifact target projection failed before source-build work-item preparation.");
+        // TRANSLATORS: The placeholder is the literal BuildPlan identity.
+        throw std::logic_error(localization::format_translated_message(
+                "{} required artifact target projection failed before source-build work-item preparation.",
+                "BuildPlan"));
     }
 
     std::vector<ProductionSourceBuildWorkItem> work_items;
@@ -463,20 +513,27 @@ execute_prepared_package_base_source_build_work_item_typed(
     // set ownerはAUR BuildPlanから必要childを確定したwork itemに限定する。
     require_static_production_source_build_work_item(work_item);
     if(!work_item.is_build_plan_entry) {
+        // TRANSLATORS: The placeholders are the literal PackageBase, AUR, and BuildPlan identities.
         throw std::logic_error(
-                "PackageBase set source-build execution requires an AUR BuildPlan work item.");
+                localization::format_translated_message(
+                        "{} set source-build execution requires an {} {} work item.",
+                        "PackageBase", "AUR", "BuildPlan"));
     }
     if(work_item.request.only_if_updated) {
         throw std::logic_error(
-                "PackageBase set source-build execution does not support only-if-updated requests.");
+                localization::format_translated_message(
+                        "{} set source-build execution does not support only-if-updated requests.",
+                        "PackageBase"));
     }
 
-    Logger::info(
-            "Building AUR PackageBase: " +
-            work_item.request.checkout_name);
-    Logger::info(
-            "Target package(s): " +
-            join_required_package_names(work_item.required_targets));
+    // TRANSLATORS: The placeholders are AUR and PackageBase identities and an AUR PackageBase name.
+    Logger::info(localization::format_translated_message(
+            "Building {} {}: {}", "AUR", "PackageBase",
+            work_item.request.checkout_name));
+    // TRANSLATORS: The placeholder is a comma-separated list of package names.
+    Logger::info(localization::format_translated_message(
+            "Target package(s): {}",
+            join_required_package_names(work_item.required_targets)));
     return execute_source_build_package_base_typed(
             work_item.request, work_item.required_targets,
             require_prepared_cache_root(work_item),
@@ -490,12 +547,14 @@ SourceBuildExecutionResult execute_prepared_source_build_work_item_typed(
     const RequiredPackageArtifactTarget& target =
             require_singular_required_package_target(work_item);
     if(work_item.is_build_plan_entry) {
-        Logger::info(
-                "Building AUR PackageBase: " +
-                work_item.request.checkout_name);
-        Logger::info(
-                "Target package(s): " +
-                join_required_package_names(work_item.required_targets));
+        // TRANSLATORS: The placeholders are AUR and PackageBase identities and an AUR PackageBase name.
+        Logger::info(localization::format_translated_message(
+                "Building {} {}: {}", "AUR", "PackageBase",
+                work_item.request.checkout_name));
+        // TRANSLATORS: The placeholder is a comma-separated list of package names.
+        Logger::info(localization::format_translated_message(
+                "Target package(s): {}",
+                join_required_package_names(work_item.required_targets)));
     }
 
     try {
@@ -512,10 +571,13 @@ SourceBuildExecutionResult execute_prepared_source_build_work_item_typed(
         // generic build/install diagnosticへwrapしない。
         throw;
     } catch(const std::exception& error) {
-        throw std::runtime_error(
-                "Failed while building/installing PackageBase " +
-                work_item.request.checkout_name + " (" +
-                work_item.request.package_name + "): " + error.what());
+        // TRANSLATORS: The placeholders are the PackageBase identity, an AUR PackageBase name, package name, and build/install diagnostic.
+        throw std::runtime_error(localization::format_translated_message(
+                "Failed while building/installing {} {} ({}): {}",
+                "PackageBase",
+                work_item.request.checkout_name,
+                work_item.request.package_name,
+                error.what()));
     }
 }
 

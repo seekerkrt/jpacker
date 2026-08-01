@@ -57,6 +57,8 @@ void print_help_section(const std::string& heading) {
 
 void print_help_entry(
         std::string_view syntax, const std::string& description) {
+    // NO_TRANSLATE: Help syntax and ANSI/layout bytes are locale-independent
+    // CLI grammar; each human-readable description is translated by its caller.
     std::cout << "    \033[1m" << syntax << "\033[0m";
     const std::size_t visible_width = 4 + syntax.size();
     if(visible_width >= HELP_DESCRIPTION_COLUMN) {
@@ -72,6 +74,14 @@ void print_help_entry(
 void print_help_continuation(const std::string& description) {
     std::cout << std::string(HELP_DESCRIPTION_COLUMN, ' ')
               << description << std::endl;
+}
+
+void report_direct_error(const std::string& diagnostic) {
+    // TRANSLATORS: The placeholder is a complete startup or shutdown diagnostic.
+    std::cerr << "\033[1;31m::\033[0m "
+              << localization::format_translated_message(
+                         "Error: {}", diagnostic)
+              << std::endl;
 }
 
 } // namespace
@@ -119,7 +129,9 @@ bool operation_requires_target(const std::string& operation) {
 bool validate_pre_log_operation_route(const ParsedCliArguments& parsed) {
     if(!parsed.operation.empty() && parsed.operation.front() != '-' &&
        !is_known_moguet_operation(parsed.operation)) {
-        Logger::error("Unknown operation: " + parsed.operation);
+        // TRANSLATORS: The placeholder is a literal CLI operation token.
+        Logger::error(localization::format_translated_message(
+                "Unknown operation: {}", parsed.operation));
         return false;
     }
     if(operation_requires_target(parsed.operation) && parsed.targets.empty()) {
@@ -127,24 +139,42 @@ bool validate_pre_log_operation_route(const ParsedCliArguments& parsed) {
            cli_authority::operation_spec(
                    cli_authority::OperationId::Build)
                    .token) {
-            Logger::error("Usage: moguet build <pkg> [VAR=VAL...]");
+            // TRANSLATORS: The placeholders are literal CLI command, operation, and operand syntax tokens.
+            Logger::error(localization::format_translated_message(
+                    "Usage: {} {} {} {}",
+                    application_identity::COMMAND_NAME,
+                    "build", "<pkg>", "[VAR=VAL...]"));
         } else if(parsed.operation ==
                   cli_authority::operation_spec(
                           cli_authority::OperationId::Deps)
                           .token) {
-            Logger::error("Usage: moguet deps [--recursive] <pkg>");
+            // TRANSLATORS: The placeholders are literal CLI command, operation, option, and operand syntax tokens.
+            Logger::error(localization::format_translated_message(
+                    "Usage: {} {} {} {}",
+                    application_identity::COMMAND_NAME,
+                    "deps", "[--recursive]", "<pkg>"));
         } else if(parsed.operation ==
                   cli_authority::operation_spec(
                           cli_authority::OperationId::Plan)
                           .token) {
-            Logger::error("Usage: moguet plan <pkg>");
+            // TRANSLATORS: The placeholders are literal CLI command, operation, and operand syntax tokens.
+            Logger::error(localization::format_translated_message(
+                    "Usage: {} {} {}",
+                    application_identity::COMMAND_NAME,
+                    "plan", "<pkg>"));
         } else if(parsed.operation ==
                   cli_authority::operation_spec(
                           cli_authority::OperationId::Fetch)
                           .token) {
-            Logger::error("Usage: moguet fetch <pkg>");
+            // TRANSLATORS: The placeholders are literal CLI command, operation, and operand syntax tokens.
+            Logger::error(localization::format_translated_message(
+                    "Usage: {} {} {}",
+                    application_identity::COMMAND_NAME,
+                    "fetch", "<pkg>"));
         } else {
-            Logger::error("Missing target for " + parsed.operation);
+            // TRANSLATORS: The placeholder is a literal CLI operation token.
+            Logger::error(localization::format_translated_message(
+                    "Operation {} requires a target.", parsed.operation));
         }
         return false;
     }
@@ -165,13 +195,15 @@ int run_moguet(int argc, char* argv[]) {
     if(geteuid() == 0) {
         Logger::error(
                 localization::format_translated_message(
-                        "Do not run {} as root or with sudo.",
-                        application_identity::PROJECT_NAME));
+                        "Do not run {} as {} or with {}.",
+                        application_identity::PROJECT_NAME,
+                        "root", "sudo"));
         Logger::error(
                 localization::format_translated_message(
-                        "Run {} as a normal user; {} will invoke sudo/pacman when needed.",
+                        "Run {} as a normal user; {} will invoke {}/{} when needed.",
                         application_identity::COMMAND_NAME,
-                        application_identity::PROJECT_NAME));
+                        application_identity::PROJECT_NAME,
+                        "sudo", "pacman"));
         return 1;
     }
 
@@ -189,7 +221,8 @@ int run_moguet(int argc, char* argv[]) {
         Logger::error(e.what());
         return 1;
     } catch(...) {
-        Logger::error("Failed to load user config: unknown error.");
+        Logger::error(localization::translate_message(
+                "Failed to load the user configuration because of an unknown error."));
         return 1;
     }
 
@@ -271,7 +304,12 @@ int run_moguet(int argc, char* argv[]) {
                cli_authority::OperationId::UpgradeAur)
                .token) {
         if(!parsed.targets.empty()) {
-            Logger::error("upgrade-aur does not accept target operands.");
+            // TRANSLATORS: The placeholder is the literal upgrade-aur operation token.
+            Logger::error(localization::format_translated_message(
+                    "Operation {} does not accept target operands.",
+                    cli_authority::operation_spec(
+                            cli_authority::OperationId::UpgradeAur)
+                            .token));
             return 1;
         }
         try {
@@ -307,21 +345,22 @@ int run_moguet(int argc, char* argv[]) {
                         state_paths, state_directory);
         Logger::init(
                 std::move(state_log),
-                "Started " +
-                        std::string(application_identity::PROJECT_NAME) +
-                        " v" +
-                        std::string(application_identity::VERSION));
+                // TRANSLATORS: The placeholders are the project name and version.
+                localization::format_translated_message(
+                        "Started {} v{}.",
+                        application_identity::PROJECT_NAME,
+                        application_identity::VERSION));
     } catch(const std::exception& error) {
         // Default state authorityのfailureはoperation dispatch前にfatal。
         // Logger adoption後のwrite failureでも同じbackendへ再書込しない。
-        std::cerr << "\033[1;31m:: Error:\033[0m " << error.what()
-                  << std::endl;
+        report_direct_error(error.what());
         return 1;
     } catch(...) {
-        std::cerr
-                << "\033[1;31m:: Error:\033[0m Cannot initialize "
-                << application_identity::PROJECT_NAME
-                << " default state log: unknown error." << std::endl;
+        // TRANSLATORS: The placeholder is the project name.
+        const std::string diagnostic = localization::format_translated_message(
+                "Cannot initialize the {} default state log because of an unknown error.",
+                application_identity::PROJECT_NAME);
+        report_direct_error(diagnostic);
         return 1;
     }
 
@@ -334,10 +373,12 @@ int run_moguet(int argc, char* argv[]) {
         try {
             Logger::shutdown();
         } catch(const std::exception& error) {
+            // NO_TRANSLATE: The colored prefix and this branch are a test-only seam.
             std::cerr << "\033[1;31m:: Error:\033[0m " << error.what()
                       << std::endl;
             return 1;
         } catch(...) {
+            // NO_TRANSLATE: Test-only hook failure, unreachable in production builds.
             std::cerr
                     << "\033[1;31m:: Error:\033[0m Cannot release "
                     << application_identity::PROJECT_NAME
@@ -487,14 +528,14 @@ int run_moguet(int argc, char* argv[]) {
     try {
         Logger::shutdown();
     } catch(const std::exception& error) {
-        std::cerr << "\033[1;31m:: Error:\033[0m " << error.what()
-                  << std::endl;
+        report_direct_error(error.what());
         return 1;
     } catch(...) {
-        std::cerr
-                << "\033[1;31m:: Error:\033[0m Cannot finalize "
-                << application_identity::PROJECT_NAME
-                << " default state log: unknown error." << std::endl;
+        // TRANSLATORS: The placeholder is the project name.
+        const std::string diagnostic = localization::format_translated_message(
+                "Cannot finalize the {} default state log because of an unknown error.",
+                application_identity::PROJECT_NAME);
+        report_direct_error(diagnostic);
         return 1;
     }
     return operation_status;
@@ -518,6 +559,7 @@ int verify_parse_failure_does_not_publish_cli_overrides() {
             rebuild_alias, rm_deps, operation, missing_value_option};
 
     if(run_moguet(static_cast<int>(parse_failure_argv.size()), parse_failure_argv.data()) != 1) {
+        // NO_TRANSLATE: Test-hook assertion diagnostic, unreachable in production builds.
         std::cerr << "Expected CLI parse failure." << std::endl;
         return 1;
     }
@@ -525,6 +567,7 @@ int verify_parse_failure_does_not_publish_cli_overrides() {
        g_config.user_config.review.diff != ReviewPolicy::Prompt ||
        g_config.user_config.build.mode != BuildMode::Normal ||
        g_config.no_confirm || g_config.rm_deps) {
+        // NO_TRANSLATE: Test-hook assertion diagnostic, unreachable in production builds.
         std::cerr << "CLI parse failure published partial config overrides." << std::endl;
         return 1;
     }
@@ -536,6 +579,7 @@ int verify_parse_failure_does_not_publish_cli_overrides() {
 
 int main(int argc, char* argv[]) {
     if(!localization::initialize_runtime_catalog()) {
+        // NO_TRANSLATE: The message catalog is unavailable, so this bootstrap failure cannot be translated.
         Logger::error("Failed to initialize the Moguet message catalog.");
         return 1;
     }
@@ -555,6 +599,8 @@ void print_help() {
     using cli_authority::GlobalOptionId;
     using cli_authority::OperationId;
 
+    // NO_TRANSLATE: Product/version identity and CLI grammar tokens are
+    // locale-independent; surrounding headings and descriptions are msgids.
     std::cout << "\033[1;36m" << application_identity::PROJECT_NAME
               << "\033[0m v"
               << application_identity::VERSION << "\n"
@@ -810,6 +856,7 @@ bool handle_info_only_option(int argc, char* argv[]) {
         }
         if(arg == cli_authority::VERSION_SHORT_OPTION ||
            arg == cli_authority::VERSION_LONG_OPTION) {
+            // NO_TRANSLATE: Product/version identity is locale-independent.
             std::cout << application_identity::PROJECT_NAME << " v"
                       << application_identity::VERSION << std::endl;
             return true;
@@ -842,7 +889,9 @@ bool validate_optionless_moguet_operation(const std::string& operation, const st
     for(const auto& flag : flags) {
         if(flag == operation) continue;
 
-        Logger::error("Unsupported " + operation + " option: " + flag);
+        // TRANSLATORS: The placeholders are literal CLI operation and option tokens.
+        Logger::error(localization::format_translated_message(
+                "Unsupported {} option: {}", operation, flag));
         return false;
     }
     return true;

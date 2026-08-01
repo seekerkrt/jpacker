@@ -1,5 +1,7 @@
 #include "aur_update_plan.hpp"
 
+#include "localization.hpp"
+
 #include <stdexcept>
 
 AurUpdatePlanEntry classify_aur_update(const AurUpdatePlanInput& input) {
@@ -17,7 +19,9 @@ AurUpdatePlanEntry classify_aur_update(const AurUpdatePlanInput& input) {
             classification = AurUpdateClassification::VersionComparisonUnavailable;
             break;
         default:
-            throw std::logic_error("Unknown AUR version relation.");
+            throw std::logic_error(localization::format_translated_message(
+                    // TRANSLATORS: AUR is a runtime project identity.
+                    "Unknown {} version relation.", "AUR"));
         }
 
         return AurUpdatePlanEntry{
@@ -46,7 +50,9 @@ AurUpdatePlanEntry classify_aur_update(const AurUpdatePlanInput& input) {
                 AurUpdateClassification::MetadataUnavailable};
     }
 
-    throw std::logic_error("Unknown AUR update metadata result.");
+    throw std::logic_error(localization::format_translated_message(
+            // TRANSLATORS: AUR is a runtime project identity.
+            "Unknown {} update metadata result.", "AUR"));
 }
 
 AurUpdatePlan make_aur_update_plan(const std::vector<AurUpdatePlanInput>& inputs) {

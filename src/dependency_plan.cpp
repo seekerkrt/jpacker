@@ -2,6 +2,7 @@
 
 #include "dependency_provider.hpp"
 #include "dependency_spec.hpp"
+#include "localization.hpp"
 #include "logging.hpp"
 #include "package_identifier.hpp"
 #include "repository_query.hpp"
@@ -170,7 +171,9 @@ std::vector<ProvidedDependency> find_aur_providers(
                 failure_context,
                 BuildPlanResolutionFailureKind::ProviderSearchUnavailable,
                 dependency_name, e.what());
-        Logger::warn("Failed to search AUR providers for " + dependency_name + ": " + e.what());
+        Logger::warn(localization::format_translated_message(
+                "Failed to search {} providers for {}: {}",
+                "AUR", dependency_name, e.what()));
         return providers;
     }
     for(const auto& candidate : candidates) {
@@ -186,7 +189,9 @@ std::vector<ProvidedDependency> find_aur_providers(
                         failure_context,
                         BuildPlanResolutionFailureKind::ProviderCandidateMetadataUnavailable,
                         candidate,
-                        "AUR provider candidate metadata was not returned.");
+                        localization::format_translated_message(
+                                "{} provider candidate metadata was not returned.",
+                                "AUR"));
             }
         } catch(const AurRpcResponseError&) {
             throw;
@@ -195,7 +200,9 @@ std::vector<ProvidedDependency> find_aur_providers(
                     failure_context,
                     BuildPlanResolutionFailureKind::ProviderCandidateMetadataUnavailable,
                     candidate, e.what());
-            Logger::warn("Failed to check AUR provider " + candidate + ": " + e.what());
+            Logger::warn(localization::format_translated_message(
+                    "Failed to check {} provider {}: {}",
+                    "AUR", candidate, e.what()));
         }
     }
 
@@ -267,15 +274,22 @@ void add_classified_aur_dependency(
         display = dependency;
     else
         display = dependency + " (" + info.Name + ")";
-    if(has_distinct_package_base(info)) display += " (base: " + info.PackageBase + ")";
+    if(has_distinct_package_base(info)) {
+        // NO_TRANSLATE(Issue #308): "base" is a stable BuildPlan relationship
+        // token joining package identities, not human-readable prose.
+        display += " (base: " + info.PackageBase + ")";
+    }
     dependencies.push_back(dependency_display_with_constraint_note(display, dependency));
 }
 
 std::string provided_dependency_resolution_display(
         const std::string& dependency, const ProvidedDependency& provider) {
-    return dependency + " [provided by " +
-           provided_dependency_display(provider) + "]" +
-           dependency_constraint_note(dependency);
+    return dependency_display_with_constraint_note(
+            localization::format_translated_message(
+                    // TRANSLATORS: The placeholders are dependency and provider identities.
+                    "{} [provided by {}]", dependency,
+                    provided_dependency_display(provider)),
+            dependency);
 }
 
 void add_ambiguous_provider_dependency(
@@ -301,7 +315,9 @@ void add_ambiguous_provider_dependency(
 void warn_unverified_version_constraint(const std::string& dependency) {
     ParsedDependency parsed = parse_dependency_string(dependency);
     if(!parsed.has_parseable_constraint()) return;
-    Logger::warn("version constraint for " + parsed.raw + " is not verified");
+    Logger::warn(localization::format_translated_message(
+            // TRANSLATORS: The placeholder is a dependency specification.
+            "version constraint for {} is not verified", parsed.raw));
 }
 
 } // namespace
@@ -372,7 +388,9 @@ DependencyClassification classify_dependencies(const std::vector<std::string>& d
         } catch(const AurRpcResponseError&) {
             throw;
         } catch(const std::exception& e) {
-            Logger::warn("Failed to check AUR dependency " + package_name + ": " + e.what());
+            Logger::warn(localization::format_translated_message(
+                    "Failed to check {} dependency {}: {}",
+                    "AUR", package_name, e.what()));
             std::vector<ProvidedDependency> providers = find_repo_providers(package_name);
             if(providers.size() == 1)
                 result.provided.push_back(
@@ -425,7 +443,9 @@ RecursiveDependencyNode resolve_recursive_dependency(
     } catch(const AurRpcResponseError&) {
         throw;
     } catch(const std::exception& e) {
-        Logger::warn("Failed to check AUR dependency " + node.package_name + ": " + e.what());
+        Logger::warn(localization::format_translated_message(
+                "Failed to check {} dependency {}: {}",
+                "AUR", node.package_name, e.what()));
         node.kind = DependencyKind::Unknown;
         return node;
     }
@@ -480,7 +500,8 @@ int package_role_rank(PackageRole role) {
     case PackageRole::CheckDependency:
         return 3;
     }
-    throw std::logic_error("Unknown package role.");
+    throw std::logic_error(
+            localization::translate_message("Unknown package role."));
 }
 
 void add_package_role(std::vector<PackageRole>& roles, PackageRole role) {
@@ -722,9 +743,9 @@ void append_build_plan_entry_postorder(
     const BuildPlanEntry* entry =
             find_build_plan_entry(aggregated_entries, package_base);
     if(entry == nullptr) {
-        throw std::logic_error(
-                "PackageBase aggregation is missing during build plan ordering: " +
-                package_base);
+        throw std::logic_error(localization::format_translated_message(
+                "{} aggregation is missing during build plan ordering: {}",
+                "PackageBase", package_base));
     }
     ordered_entries.push_back(*entry);
 }
@@ -776,7 +797,10 @@ void collect_aur_build_plan(
         const std::optional<std::string>& parent_package_base,
         const std::optional<std::string>& dependency_specification) {
     if(depth > max_depth) {
-        add_unique_value(plan.unresolved, package_name + " (max depth reached)");
+        add_unique_value(
+                plan.unresolved,
+                localization::format_translated_message(
+                        "{} (max depth reached)", package_name));
         return;
     }
 
@@ -797,7 +821,9 @@ void collect_aur_build_plan(
                 failure_context,
                 BuildPlanResolutionFailureKind::AurPackageMetadataUnavailable,
                 package_name, e.what());
-        Logger::warn("Failed to fetch AUR info for " + package_name + ": " + e.what());
+        Logger::warn(localization::format_translated_message(
+                "Failed to fetch {} info for {}: {}",
+                "AUR", package_name, e.what()));
         add_unique_value(plan.unresolved, package_name);
         return;
     }
@@ -829,7 +855,9 @@ void collect_aur_build_plan(
         std::vector<TypedPackageDependency> matching_dependencies =
                 typed_dependencies_for_specification(typed_dependencies, dependency);
         if(matching_dependencies.empty()) {
-            throw std::logic_error("Build dependency is missing its package role: " + dependency);
+            throw std::logic_error(localization::format_translated_message(
+                    "Build dependency is missing its package role: {}",
+                    dependency));
         }
         std::vector<PackageRole> dependency_roles =
                 package_roles_for_dependencies(matching_dependencies);
@@ -885,7 +913,9 @@ void collect_aur_build_plan(
                     dependency_failure_sink,
                     BuildPlanResolutionFailureKind::AurPackageMetadataUnavailable,
                     dep_name, e.what());
-            Logger::warn("Failed to check AUR dependency " + dep_name + ": " + e.what());
+            Logger::warn(localization::format_translated_message(
+                    "Failed to check {} dependency {}: {}",
+                    "AUR", dep_name, e.what()));
         }
 
         if(dependency_info.has_value()) {
@@ -936,14 +966,20 @@ void collect_aur_build_plan(
 BuildPlan resolve_build_plan_internal(
         const std::vector<std::string>& targets,
         BuildPlanResolutionMode resolution_mode) {
-    if(targets.empty()) throw std::invalid_argument("Build plan targets must not be empty.");
+    if(targets.empty()) {
+        throw std::invalid_argument(localization::translate_message(
+                "Build plan targets must not be empty."));
+    }
 
     for(const auto& target : targets) require_valid_package_name(target);
     if(resolution_mode == BuildPlanResolutionMode::Legacy) {
         // POLICY: legacy resolverの事前存在確認と例外境界は通常-S consumerの契約。
         for(const auto& target : targets) {
             if(!AurClient::info(target).has_value()) {
-                throw std::runtime_error("AUR package not found: " + target);
+                throw std::runtime_error(
+                        localization::format_translated_message(
+                                "{} package not found: {}",
+                                "AUR", target));
             }
         }
     }
@@ -991,7 +1027,10 @@ BuildPlan resolve_build_plan_for_preflight(
 
 BuildPlan resolve_fetch_plan(const std::string& target) {
     require_valid_package_name(target);
-    if(!AurClient::info(target).has_value()) throw std::runtime_error("AUR package not found: " + target);
+    if(!AurClient::info(target).has_value()) {
+        throw std::runtime_error(localization::format_translated_message(
+                "{} package not found: {}", "AUR", target));
+    }
 
     BuildPlan             plan;
     std::set<std::string> visited_package_names;
@@ -1030,7 +1069,8 @@ std::string ambiguous_provider_dependency_summary(const AmbiguousProvidedDepende
     for(const auto& candidate : dependency.candidates) {
         candidates.push_back(provider_summary(candidate));
     }
-    return dependency.dependency + " (" + join_guard_summary_values(candidates) + ")";
+    return dependency.dependency + " (" +
+           join_guard_summary_values(candidates) + ")";
 }
 
 std::string join_ambiguous_provider_summaries(const std::vector<AmbiguousProvidedDependency>& dependencies) {
@@ -1042,6 +1082,8 @@ std::string join_ambiguous_provider_summaries(const std::vector<AmbiguousProvide
 }
 
 std::string split_package_target_summary(const BuildPlanSplitPackageTarget& target) {
+    // NO_TRANSLATE(Issue #308): This guard summary is a stable structured
+    // package identity; "base" names its BuildPlan relationship.
     return target.package_name + " (base: " + target.package_base + ")";
 }
 
@@ -1054,20 +1096,29 @@ std::string join_split_package_target_summaries(const std::vector<BuildPlanSplit
 }
 
 std::string metadata_risk_summary(const BuildPlanMetadataRisk& risk) {
+    // NO_TRANSLATE(Issue #308): These are stable BuildPlan metadata field
+    // tokens surrounding package identities, not human-readable prose.
     std::vector<std::string> metadata;
-    if(!risk.conflicts.empty()) metadata.push_back("conflicts: " + join_guard_summary_values(risk.conflicts));
-    if(!risk.replaces.empty()) metadata.push_back("replaces: " + join_guard_summary_values(risk.replaces));
-
-    std::stringstream summary;
-    summary << risk.package_name;
-    if(risk.package_base != risk.package_name) summary << " (base: " << risk.package_base << ")";
-    summary << " [";
-    for(size_t i = 0; i < metadata.size(); ++i) {
-        if(i > 0) summary << "; ";
-        summary << metadata[i];
+    if(!risk.conflicts.empty()) {
+        metadata.push_back(
+                "conflicts: " + join_guard_summary_values(risk.conflicts));
     }
-    summary << "]";
-    return summary.str();
+    if(!risk.replaces.empty()) {
+        metadata.push_back(
+                "replaces: " + join_guard_summary_values(risk.replaces));
+    }
+
+    std::string package_display = risk.package_name;
+    if(risk.package_base != risk.package_name) {
+        package_display += " (base: " + risk.package_base + ")";
+    }
+
+    std::stringstream metadata_summary;
+    for(size_t i = 0; i < metadata.size(); ++i) {
+        if(i > 0) metadata_summary << "; ";
+        metadata_summary << metadata[i];
+    }
+    return package_display + " [" + metadata_summary.str() + "]";
 }
 
 std::string join_metadata_risk_summaries(const std::vector<BuildPlanMetadataRisk>& risks) {
@@ -1082,29 +1133,31 @@ std::string join_metadata_risk_summaries(const std::vector<BuildPlanMetadataRisk
 
 void require_fetchable_build_plan(const std::string& target, const BuildPlan& plan) {
     if(!plan.unresolved.empty()) {
-        throw std::runtime_error(
-                "Cannot execute build plan for " + target + "; unresolved dependencies: " +
-                join_guard_summary_values(plan.unresolved));
+        throw std::runtime_error(localization::format_translated_message(
+                "Cannot execute build plan for {}; unresolved dependencies: {}",
+                target, join_guard_summary_values(plan.unresolved)));
     }
     if(!plan.ambiguous_providers.empty()) {
-        throw std::runtime_error(
-                "Cannot execute build plan for " + target + "; ambiguous providers: " +
-                join_ambiguous_provider_summaries(plan.ambiguous_providers));
+        throw std::runtime_error(localization::format_translated_message(
+                "Cannot execute build plan for {}; ambiguous providers: {}",
+                target,
+                join_ambiguous_provider_summaries(
+                        plan.ambiguous_providers)));
     }
     if(!plan.cycles.empty()) {
-        throw std::runtime_error(
-                "Cannot execute build plan for " + target + "; cyclic dependencies: " +
-                join_guard_summary_values(plan.cycles));
+        throw std::runtime_error(localization::format_translated_message(
+                "Cannot execute build plan for {}; cyclic dependencies: {}",
+                target, join_guard_summary_values(plan.cycles)));
     }
 }
 
 void require_executable_build_plan(const std::string& target, const BuildPlan& plan) {
     require_fetchable_build_plan(target, plan);
     if(!plan.metadata_risks.empty()) {
-        throw std::runtime_error(
-                "Cannot execute build plan for " + target +
-                "; conflicts/replaces metadata requires manual review: " +
-                join_metadata_risk_summaries(plan.metadata_risks));
+        throw std::runtime_error(localization::format_translated_message(
+                "Cannot execute build plan for {}; conflicts/replaces metadata requires manual review: {}",
+                target,
+                join_metadata_risk_summaries(plan.metadata_risks)));
     }
 }
 
@@ -1112,9 +1165,10 @@ void require_executable_install_plan(const std::string& target, const BuildPlan&
     // POLICY: 段階的なguard呼び出し順は、複数の問題があるplanで最初に報告するcategoryの契約。
     require_executable_build_plan(target, plan);
     if(!plan.split_package_targets.empty()) {
-        throw std::runtime_error(
-                "Cannot execute singular install plan for " + target +
-                "; split package targets require the PackageBase set lifecycle: " +
-                join_split_package_target_summaries(plan.split_package_targets));
+        throw std::runtime_error(localization::format_translated_message(
+                "Cannot execute singular install plan for {}; split package targets require the {} set lifecycle: {}",
+                target, "PackageBase",
+                join_split_package_target_summaries(
+                        plan.split_package_targets)));
     }
 }

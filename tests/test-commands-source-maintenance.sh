@@ -693,7 +693,7 @@ run_fail --noedit --nodiff --noconfirm build \
     FIRST=one clean-root "SECOND=two words" FIRST=last EMPTY= \
     PKGDEST=first-path PKGDEST= ignored
 assert_contains "Ignoring extra arg 'ignored'" "$output_file"
-assert_contains "Source environment PKGDEST conflicts with invocation-owned artifact workspace." "$output_file"
+assert_contains "Source environment PKGDEST conflicts with the invocation-owned artifact workspace." "$output_file"
 assert_command "pacman -Si clean-root"
 assert_command_count "pacman-conf --verbose RootDir DBPath" 0
 assert_command_content_absent "git clone"
@@ -704,7 +704,7 @@ setup_case build-inherited-pkgdest
 export MOGUET_TEST_PACMAN_REPO_PACKAGES=clean-root
 export PKGDEST=
 run_fail --noedit --nodiff --noconfirm build clean-root
-assert_contains "Inherited PKGDEST conflicts with invocation-owned artifact workspace." "$output_file"
+assert_contains "Inherited PKGDEST conflicts with the invocation-owned artifact workspace." "$output_file"
 assert_command "pacman -Si clean-root"
 assert_command_count "pacman-conf --verbose RootDir DBPath" 0
 assert_command_content_absent "git clone"
@@ -759,7 +759,7 @@ export MOGUET_TEST_PACMAN_REPO_PACKAGES=clean-root
 export MOGUET_TEST_MAKEPKG_EXIT_CODE=42
 export MOGUET_TEST_MAKEPKG_PACKAGELIST_EXIT_CODE=0
 run_fail --noedit --nodiff build clean-root
-assert_contains "Build Error: Failed while building/installing PackageBase clean-root (clean-root): Build-only makepkg failed with exit code 42." "$output_file"
+assert_contains "Build Error: Failed while building/installing PackageBase clean-root (clean-root): The build-only makepkg command failed with exit code 42." "$output_file"
 assert_command "makepkg --packagelist"
 assert_command "makepkg -sc"
 assert_command_content_absent "sudo pacman -U"
@@ -1015,7 +1015,7 @@ run_fail edit-src alpha
 editor_command=$(sed -n '1p' "$command_log")
 edit_temp_path=${editor_command##* }
 assert_command_at 2 "sudo install -Dm644 -- /dev/stdin $preference_dir/alpha"
-assert_contains "edited file kept at $edit_temp_path" "$output_file"
+assert_contains "edited file was kept at $edit_temp_path" "$output_file"
 if [ ! -f "$edit_temp_path" ]; then
     echo "edit-src removed the retained file after install failure" >&2
     exit 1
@@ -1212,7 +1212,7 @@ if [ ! -d "$cache_root/beta" ]; then
     echo "clean continued deleting after concurrent replacement" >&2
     exit 1
 fi
-assert_contains "Failed to clean Moguet cache" "$output_file"
+assert_contains "Failed to clean the Moguet cache" "$output_file"
 assert_contains "Moguet cache cleanup was incomplete." "$output_file"
 
 setup_case clean-prompt-no
@@ -1302,8 +1302,8 @@ printf 'pacman -Syu --noconfirm\n' > "$sudo_failures"
 run_upgrade_split_fail --noconfirm upgrade
 assert_contains "System upgrade..." "$stdout_file"
 assert_contains "Running: sudo pacman '-Syu' '--noconfirm'" "$stdout_file"
-assert_not_contains "Update failed." "$stdout_file"
-assert_contains "Update failed." "$stderr_file"
+assert_not_contains "The update failed." "$stdout_file"
+assert_contains "The update failed." "$stderr_file"
 assert_command "sudo pacman -Syu --noconfirm"
 
 setup_case upgrade-metadata-no-preference-root
@@ -1346,7 +1346,7 @@ printf 'stable upgrade preflight fixture\n' > \
 upgrade_preflight_checksum=$(cksum \
     "$cache_root/preflight-sentinel/state")
 run_upgrade_fail --noedit --nodiff --noconfirm upgrade
-assert_contains "Source environment PKGDEST conflicts with invocation-owned artifact workspace." "$output_file"
+assert_contains "Source environment PKGDEST conflicts with the invocation-owned artifact workspace." "$output_file"
 assert_command_count "pacman -Si alpha" 1
 assert_command_count "pacman -Si beta" 1
 assert_command_count "pacman-conf --verbose RootDir DBPath" 0
@@ -1453,7 +1453,7 @@ printf 'alpha 1.0-1\n' > "$package_metadata_state"
 export MOGUET_TEST_PACMAN_REPO_PACKAGES=alpha
 export MOGUET_TEST_PACKAGE_METADATA_INITIALIZE_FAILURE_AT=2
 run_upgrade_fail --noconfirm upgrade
-post_snapshot_failure_prefix="System upgrade completed, but post-upgrade package metadata snapshot failed: "
+post_snapshot_failure_prefix="The system upgrade completed, but the post-upgrade package metadata snapshot failed: "
 post_initialize_failure_diagnostic="${post_snapshot_failure_prefix}Failed to initialize package metadata session: system error."
 assert_contains "$post_initialize_failure_diagnostic" "$output_file"
 assert_output_line_count "$post_initialize_failure_diagnostic" 1 "$output_file"
@@ -1474,7 +1474,7 @@ printf 'alpha 1.0-1\n' > "$package_metadata_state"
 export MOGUET_TEST_PACMAN_REPO_PACKAGES=alpha
 export MOGUET_TEST_PACKAGE_METADATA_QUERY_FAILURE_AT=2
 run_upgrade_fail --noedit --nodiff --noconfirm upgrade
-post_query_failure_diagnostic="System upgrade completed, but post-upgrade package metadata query failed for alpha: Installed package query failed: database open failed. Source processing did not start."
+post_query_failure_diagnostic="The system upgrade completed, but the post-upgrade package metadata query failed for alpha: Installed package query failed: database open failed. Source processing did not start."
 assert_contains "$post_query_failure_diagnostic" "$output_file"
 assert_output_line_count "$post_query_failure_diagnostic" 1 "$output_file"
 assert_command_count "pacman-conf --verbose RootDir DBPath" 1
@@ -1526,7 +1526,7 @@ for package in alpha beta gamma; do
     assert_command_occurrence_before "alpm query $package" 2 "alpm release" 2
     assert_command_count "pacman -Si $package" 1
 done
-multi_query_failure_diagnostic="System upgrade completed, but post-upgrade package metadata query failed for $failed_package: Installed package query failed: database open failed. Source processing did not start."
+multi_query_failure_diagnostic="The system upgrade completed, but the post-upgrade package metadata query failed for $failed_package: Installed package query failed: database open failed. Source processing did not start."
 assert_contains "$multi_query_failure_diagnostic" "$output_file"
 assert_output_line_count "$multi_query_failure_diagnostic" 1 "$output_file"
 
@@ -1554,7 +1554,7 @@ assert_command_count "alpm release" 1
 assert_command_absent "pacman -Q clean-root"
 assert_command "sudo pacman -Syu --noconfirm"
 assert_command_before "alpm release" "sudo pacman -Syu --noconfirm"
-assert_contains "Update failed." "$output_file"
+assert_contains "The update failed." "$output_file"
 assert_command_content_absent "git clone"
 assert_command_content_absent "makepkg"
 
@@ -1650,7 +1650,7 @@ chmod 000 "$preference_dir/$upgrade_package"
 run_upgrade_fail --noedit --nodiff --noconfirm upgrade
 chmod 600 "$preference_dir/$upgrade_package"
 assert_contains "Failed to open source preference entry $preference_dir/$upgrade_package: Permission denied" "$output_file"
-assert_not_contains "Loading custom build flags from $preference_dir/$upgrade_package" "$output_file"
+assert_not_contains "Loading custom build flags from $preference_dir/$upgrade_package." "$output_file"
 assert_command_absent "sudo pacman -Syu --noconfirm"
 assert_command_content_absent "pacman-conf "
 assert_command_content_absent "alpm "
@@ -1685,7 +1685,7 @@ assert_file_equals "$installed_version_before" "$installed_version_state"
 run_upgrade_ok --noedit --nodiff --noconfirm upgrade
 assert_file_equals "$installed_version_after" "$installed_version_state"
 assert_file_equals "$remote_srcinfo" "$checkout_dir/.SRCINFO"
-assert_contains "Loading custom build flags from $preference_dir/$upgrade_package" "$output_file"
+assert_contains "Loading custom build flags from $preference_dir/$upgrade_package." "$output_file"
 assert_contains "$upgrade_package was updated by the system transaction (1.0-1 -> 2.0-1); rebuilding the preferred source package." "$output_file"
 assert_not_contains "$upgrade_package is up to date (2.0-1). Skipping." "$output_file"
 assert_command_count "pacman -Si $upgrade_package" 1
@@ -1724,7 +1724,7 @@ assert_file_equals "$installed_version_before" "$installed_version_state"
 run_upgrade_ok --noedit --nodiff --noconfirm upgrade
 assert_file_equals "$installed_version_after" "$installed_version_state"
 assert_file_equals "$remote_srcinfo" "$checkout_dir/.SRCINFO"
-assert_contains "Loading custom build flags from $preference_dir/$upgrade_package" "$output_file"
+assert_contains "Loading custom build flags from $preference_dir/$upgrade_package." "$output_file"
 assert_not_contains "rebuilding the preferred source package." "$output_file"
 assert_command_count "pacman -Si $upgrade_package" 1
 assert_command "sudo pacman -Syu --noconfirm"
@@ -1781,7 +1781,7 @@ assert_file_equals "$installed_version_before" "$installed_version_state"
 run_upgrade_ok --noedit --nodiff --noconfirm upgrade
 assert_file_equals "$installed_version_after" "$installed_version_state"
 assert_file_equals "$remote_srcinfo" "$checkout_dir/.SRCINFO"
-assert_contains "Loading custom build flags from $preference_dir/$upgrade_package" "$output_file"
+assert_contains "Loading custom build flags from $preference_dir/$upgrade_package." "$output_file"
 assert_not_contains "rebuilding the preferred source package." "$output_file"
 assert_command_count "pacman -Si $upgrade_package" 1
 assert_command "sudo pacman -Syu --noconfirm"
@@ -1871,7 +1871,7 @@ assert_file_empty "$installed_version_state"
 run_upgrade_ok --noedit --nodiff --noconfirm upgrade
 assert_file_equals "$installed_version_after" "$installed_version_state"
 assert_file_equals "$remote_srcinfo" "$checkout_dir/.SRCINFO"
-assert_contains "$upgrade_package was installed by the system transaction as 2.0-1; rebuilding the preferred source package." "$output_file"
+assert_contains "$upgrade_package was installed by the system transaction at version 2.0-1; rebuilding the preferred source package." "$output_file"
 assert_not_contains "$upgrade_package is up to date (2.0-1). Skipping." "$output_file"
 assert_command_count "pacman -Si $upgrade_package" 1
 assert_command_absent "pacman -Q $upgrade_package"
@@ -2006,7 +2006,7 @@ setup_case source-plan-failure-context
 export MOGUET_TEST_MAKEPKG_EXIT_CODE=42
 export MOGUET_TEST_MAKEPKG_PACKAGELIST_EXIT_CODE=0
 run_source_fail plan-failure
-assert_contains "Build-only makepkg failed with exit code 42." "$output_file"
+assert_contains "The build-only makepkg command failed with exit code 42." "$output_file"
 assert_command "git clone https://aur.archlinux.org/dep-target.git dep-target"
 assert_command_count "makepkg --packagelist" 1
 assert_command_count "makepkg -sc --noconfirm" 1
@@ -2016,8 +2016,8 @@ assert_command_content_absent "sudo pacman -U"
 setup_case source-preference-pkgdest-conflict
 printf 'FALLBACK=base-value\nPKGDEST=owned-elsewhere\n' > "$preference_dir/base-target"
 run_source_fail fallback
-assert_contains "Loading custom build flags from $preference_dir/base-target" "$output_file"
-assert_contains "Source environment PKGDEST conflicts with invocation-owned artifact workspace." "$output_file"
+assert_contains "Loading custom build flags from $preference_dir/base-target." "$output_file"
+assert_contains "Source environment PKGDEST conflicts with the invocation-owned artifact workspace." "$output_file"
 assert_command_count "pacman-conf --verbose RootDir DBPath" 0
 assert_command_content_absent "git clone"
 assert_command_content_absent "makepkg"
@@ -2026,7 +2026,7 @@ assert_command_content_absent "pacman -U"
 setup_case source-preference-forwarded
 printf 'REQUESTED=requested-value\n' > "$preference_dir/base-target"
 run_source_ok fallback
-assert_contains "Loading custom build flags from $preference_dir/base-target" "$output_file"
+assert_contains "Loading custom build flags from $preference_dir/base-target." "$output_file"
 assert_contains "Applying custom build flags: REQUESTED='requested-value' " "$output_file"
 assert_command "makepkg -sc --noconfirm"
 assert_separated_source_commands 1
@@ -2034,8 +2034,8 @@ assert_separated_source_commands 1
 setup_case source-preference-empty-pkgdest-conflict
 printf 'PKGDEST=\nEMPTY=""\n' > "$preference_dir/base-target"
 run_source_fail fallback
-assert_contains "Loading custom build flags from $preference_dir/base-target" "$output_file"
-assert_contains "Source environment PKGDEST conflicts with invocation-owned artifact workspace." "$output_file"
+assert_contains "Loading custom build flags from $preference_dir/base-target." "$output_file"
+assert_contains "Source environment PKGDEST conflicts with the invocation-owned artifact workspace." "$output_file"
 assert_command_count "pacman-conf --verbose RootDir DBPath" 0
 assert_command_content_absent "git clone"
 assert_command_content_absent "makepkg"
@@ -2044,7 +2044,7 @@ assert_command_content_absent "pacman -U"
 setup_case source-preference-invalid-assignment-ignored
 printf '9INVALID=value\nignored without equals\n' > "$preference_dir/base-target"
 run_source_ok fallback
-assert_contains "Loading custom build flags from $preference_dir/base-target" "$output_file"
+assert_contains "Loading custom build flags from $preference_dir/base-target." "$output_file"
 assert_contains "Ignoring invalid environment assignment: 9INVALID=value" "$output_file"
 assert_command_count "makepkg -sc --noconfirm" 1
 assert_separated_source_commands 1
@@ -2054,7 +2054,7 @@ printf 'SMART=preference\n' > "$preference_dir/clean-root"
 export MOGUET_TEST_PACMAN_REPO_PACKAGES=clean-root
 run_source_ok smart-source
 assert_output_before \
-    "Loading custom build flags from $preference_dir/clean-root" \
+    "Loading custom build flags from $preference_dir/clean-root." \
     "Processing clean-root..." "$output_file"
 assert_command_before \
     "pacman -Si clean-root" \
@@ -2066,7 +2066,7 @@ assert_separated_source_commands 1
 setup_case smart-source-missing-post-snapshot
 export MOGUET_TEST_PACMAN_REPO_PACKAGES=clean-root
 run_source_fail smart-source-missing-post-snapshot
-assert_contains "Authoritative installed package snapshot was not supplied for clean-root." "$output_file"
+assert_contains "No authoritative installed package snapshot was supplied for clean-root." "$output_file"
 assert_command "pacman -Si clean-root"
 assert_command_count "pacman-conf --verbose RootDir DBPath" 1
 assert_command_content_absent "git clone"

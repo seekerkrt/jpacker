@@ -1,6 +1,7 @@
 #include "xdg_state_log.hpp"
 
 #include "application_identity.hpp"
+#include "localization.hpp"
 #include "logging.hpp"
 #include "xdg_directory_safety.hpp"
 
@@ -90,90 +91,152 @@ std::string default_log_filename() {
 }
 
 std::string_view state_log_stage_name(StateLogStage stage) {
+    // NO_TRANSLATE: These values are stable internal stage tokens and are
+    // passed as runtime data to complete diagnostic msgids.
     switch(stage) {
     case StateLogStage::BoundaryValidation:
-        return "boundary validation";
+        return "boundary-validation";
     case StateLogStage::DirectoryRevalidation:
-        return "state-directory revalidation";
+        return "directory-revalidation";
     case StateLogStage::DirectoryDescriptorDuplication:
-        return "state-directory descriptor duplication";
+        return "directory-descriptor-duplication";
     case StateLogStage::FileInspection:
-        return "file inspection";
+        return "file-inspection";
     case StateLogStage::FileCreation:
-        return "file creation";
+        return "file-creation";
     case StateLogStage::FileOpen:
-        return "file open";
+        return "file-open";
     case StateLogStage::DescriptorValidation:
-        return "descriptor validation";
+        return "descriptor-validation";
     case StateLogStage::NameRevalidation:
-        return "parent-relative name revalidation";
+        return "name-revalidation";
     case StateLogStage::DescriptorAdoption:
-        return "logger descriptor adoption";
+        return "descriptor-adoption";
     case StateLogStage::RecordWrite:
-        return "log record write";
+        return "record-write";
     case StateLogStage::DescriptorClose:
-        return "descriptor close";
+        return "descriptor-close";
     }
-    throw std::logic_error("Unknown state log stage.");
-}
-
-std::string_view state_log_error_description(StateLogErrorCode code) {
-    switch(code) {
-    case StateLogErrorCode::InvalidStateLogBoundary:
-        return "the state log boundary is invalid";
-    case StateLogErrorCode::Symlink:
-        return "the default state log must not be a symlink";
-    case StateLogErrorCode::NotRegularFile:
-        return "the default state log is not a regular file";
-    case StateLogErrorCode::OwnershipMismatch:
-        return "file ownership does not match the state-directory authority";
-    case StateLogErrorCode::UnsafePermissions:
-        return "file permissions are not private mode 0600";
-    case StateLogErrorCode::MultipleHardLinks:
-        return "the default state log has multiple hard links";
-    case StateLogErrorCode::PermissionDenied:
-        return "filesystem permission was denied";
-    case StateLogErrorCode::OpenFailed:
-        return "the default state log could not be opened safely";
-    case StateLogErrorCode::MetadataFailure:
-        return "filesystem metadata could not be obtained safely";
-    case StateLogErrorCode::ConcurrentReplacement:
-        return "the default state log changed during validation";
-    case StateLogErrorCode::DescriptorAdoptionFailure:
-        return "the validated descriptor cannot be adopted by the logger";
-    case StateLogErrorCode::WriteFailure:
-        return "the validated descriptor could not accept a log record";
-    case StateLogErrorCode::CloseFailure:
-        return "the validated descriptor could not be closed cleanly";
-    }
-    throw std::logic_error("Unknown state log error code.");
+    throw std::logic_error(localization::translate_message(
+            "Unknown state log stage."));
 }
 
 std::string state_log_diagnostic(const StateLogFailure& failure) {
-    std::string description;
-    if(failure.code == StateLogErrorCode::OwnershipMismatch &&
-       (failure.stage == StateLogStage::DirectoryRevalidation ||
-        failure.stage == StateLogStage::DirectoryDescriptorDuplication)) {
-        description =
-                "state-directory ownership no longer matches its authority";
-    } else if(
-            failure.code == StateLogErrorCode::UnsafePermissions &&
-            (failure.stage == StateLogStage::DirectoryRevalidation ||
-             failure.stage ==
-                     StateLogStage::DirectoryDescriptorDuplication)) {
-        description = "state-directory permissions are unsafe";
-    } else {
-        description = state_log_error_description(failure.code);
+    const bool is_directory_stage =
+            failure.stage == StateLogStage::DirectoryRevalidation ||
+            failure.stage == StateLogStage::DirectoryDescriptorDuplication;
+    std::string diagnostic;
+    switch(failure.code) {
+    case StateLogErrorCode::InvalidStateLogBoundary:
+        // TRANSLATORS: The placeholders are the project identity and a stable state-log stage token.
+        diagnostic = localization::format_translated_message(
+                "Cannot safely use the {} default state log during stage {}: the state log boundary is invalid.",
+                application_identity::PROJECT_NAME,
+                state_log_stage_name(failure.stage));
+        break;
+    case StateLogErrorCode::Symlink:
+        // TRANSLATORS: The placeholders are the project identity and a stable state-log stage token.
+        diagnostic = localization::format_translated_message(
+                "Cannot safely use the {} default state log during stage {}: the default state log must not be a symlink.",
+                application_identity::PROJECT_NAME,
+                state_log_stage_name(failure.stage));
+        break;
+    case StateLogErrorCode::NotRegularFile:
+        // TRANSLATORS: The placeholders are the project identity and a stable state-log stage token.
+        diagnostic = localization::format_translated_message(
+                "Cannot safely use the {} default state log during stage {}: the default state log is not a regular file.",
+                application_identity::PROJECT_NAME,
+                state_log_stage_name(failure.stage));
+        break;
+    case StateLogErrorCode::OwnershipMismatch:
+        // TRANSLATORS: The placeholders are the project identity and a stable state-log stage token.
+        diagnostic = is_directory_stage
+                ? localization::format_translated_message(
+                          "Cannot safely use the {} default state log during stage {}: state-directory ownership no longer matches its authority.",
+                          application_identity::PROJECT_NAME,
+                          state_log_stage_name(failure.stage))
+                : localization::format_translated_message(
+                          "Cannot safely use the {} default state log during stage {}: file ownership does not match the state-directory authority.",
+                          application_identity::PROJECT_NAME,
+                          state_log_stage_name(failure.stage));
+        break;
+    case StateLogErrorCode::UnsafePermissions:
+        // TRANSLATORS: The placeholders are the project identity, a stable state-log stage token, and, for the file case, the literal mode 0600.
+        diagnostic = is_directory_stage
+                ? localization::format_translated_message(
+                          "Cannot safely use the {} default state log during stage {}: state-directory permissions are unsafe.",
+                          application_identity::PROJECT_NAME,
+                          state_log_stage_name(failure.stage))
+                : localization::format_translated_message(
+                          "Cannot safely use the {} default state log during stage {}: file permissions are not private mode {}.",
+                          application_identity::PROJECT_NAME,
+                          state_log_stage_name(failure.stage), "0600");
+        break;
+    case StateLogErrorCode::MultipleHardLinks:
+        // TRANSLATORS: The placeholders are the project identity and a stable state-log stage token.
+        diagnostic = localization::format_translated_message(
+                "Cannot safely use the {} default state log during stage {}: the default state log has multiple hard links.",
+                application_identity::PROJECT_NAME,
+                state_log_stage_name(failure.stage));
+        break;
+    case StateLogErrorCode::PermissionDenied:
+        // TRANSLATORS: The placeholders are the project identity and a stable state-log stage token.
+        diagnostic = localization::format_translated_message(
+                "Cannot safely use the {} default state log during stage {}: filesystem permission was denied.",
+                application_identity::PROJECT_NAME,
+                state_log_stage_name(failure.stage));
+        break;
+    case StateLogErrorCode::OpenFailed:
+        // TRANSLATORS: The placeholders are the project identity and a stable state-log stage token.
+        diagnostic = localization::format_translated_message(
+                "Cannot safely use the {} default state log during stage {}: the default state log could not be opened safely.",
+                application_identity::PROJECT_NAME,
+                state_log_stage_name(failure.stage));
+        break;
+    case StateLogErrorCode::MetadataFailure:
+        // TRANSLATORS: The placeholders are the project identity and a stable state-log stage token.
+        diagnostic = localization::format_translated_message(
+                "Cannot safely use the {} default state log during stage {}: filesystem metadata could not be obtained safely.",
+                application_identity::PROJECT_NAME,
+                state_log_stage_name(failure.stage));
+        break;
+    case StateLogErrorCode::ConcurrentReplacement:
+        // TRANSLATORS: The placeholders are the project identity and a stable state-log stage token.
+        diagnostic = localization::format_translated_message(
+                "Cannot safely use the {} default state log during stage {}: the default state log changed during validation.",
+                application_identity::PROJECT_NAME,
+                state_log_stage_name(failure.stage));
+        break;
+    case StateLogErrorCode::DescriptorAdoptionFailure:
+        // TRANSLATORS: The placeholders are the project identity and a stable state-log stage token.
+        diagnostic = localization::format_translated_message(
+                "Cannot safely use the {} default state log during stage {}: the validated descriptor cannot be adopted by the logger.",
+                application_identity::PROJECT_NAME,
+                state_log_stage_name(failure.stage));
+        break;
+    case StateLogErrorCode::WriteFailure:
+        // TRANSLATORS: The placeholders are the project identity and a stable state-log stage token.
+        diagnostic = localization::format_translated_message(
+                "Cannot safely use the {} default state log during stage {}: the validated descriptor could not accept a log record.",
+                application_identity::PROJECT_NAME,
+                state_log_stage_name(failure.stage));
+        break;
+    case StateLogErrorCode::CloseFailure:
+        // TRANSLATORS: The placeholders are the project identity and a stable state-log stage token.
+        diagnostic = localization::format_translated_message(
+                "Cannot safely use the {} default state log during stage {}: the validated descriptor could not be closed cleanly.",
+                application_identity::PROJECT_NAME,
+                state_log_stage_name(failure.stage));
+        break;
     }
-    std::string diagnostic =
-            "Cannot safely use " +
-            std::string(application_identity::PROJECT_NAME) +
-            " default state log during " +
-            std::string(state_log_stage_name(failure.stage)) + ": " +
-            description + ".";
+    if(diagnostic.empty()) {
+        throw std::logic_error(localization::translate_message(
+                "Unknown state log error code."));
+    }
     if(failure.system_error.has_value()) {
-        diagnostic +=
-                " System error: " + failure.system_error->message() + ".";
+        // TRANSLATORS: The placeholder is an operating-system error message.
+        diagnostic += " " + localization::format_translated_message(
+                "System error: {}.", failure.system_error->message());
     }
     return diagnostic;
 }

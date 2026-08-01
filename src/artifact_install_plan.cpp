@@ -1,6 +1,7 @@
 #include "artifact_install_plan.hpp"
 
 #include "dependency_plan.hpp"
+#include "localization.hpp"
 #include "package_identifier.hpp"
 
 #include <cstddef>
@@ -17,19 +18,20 @@ void require_consistent_install_reason_input(
     switch(version_state) {
     case InstalledVersionState::NotInstalled:
         if(existing_reason.has_value()) {
-            throw std::logic_error(
-                    "Not-installed package must not have an existing install reason.");
+            throw std::logic_error(localization::translate_message(
+                    "Not-installed package must not have an existing install reason."));
         }
         break;
     case InstalledVersionState::SameVersion:
     case InstalledVersionState::DifferentVersion:
         if(!existing_reason.has_value()) {
-            throw std::logic_error(
-                    "Installed package must have an existing install reason.");
+            throw std::logic_error(localization::translate_message(
+                    "Installed package must have an existing install reason."));
         }
         break;
     default:
-        throw std::logic_error("Unknown installed version state.");
+        throw std::logic_error(localization::translate_message(
+                "Unknown installed version state."));
     }
 
     if(!existing_reason.has_value()) return;
@@ -39,7 +41,8 @@ void require_consistent_install_reason_input(
         return;
     }
 
-    throw std::logic_error("Unknown existing install reason.");
+    throw std::logic_error(localization::translate_message(
+            "Unknown existing install reason."));
 }
 
 bool is_known_desired_install_reason(DesiredInstallReason reason) noexcept {
@@ -297,14 +300,20 @@ ValidatedArtifactInstallTarget validate_single_output_artifact(
         const ArtifactSelectionRequest& request) {
     switch(request.source_pkgdest_state) {
     case SourcePkgdestState::Unchecked:
-        throw std::logic_error("Source PKGDEST state has not been checked.");
+        throw std::logic_error(localization::format_translated_message(
+                // TRANSLATORS: {} is the literal environment key "PKGDEST".
+                "Source {} state has not been checked.", "PKGDEST"));
     case SourcePkgdestState::NotDefined:
         break;
     case SourcePkgdestState::Defined:
-        throw std::runtime_error(
-                "Source environment PKGDEST conflicts with invocation-owned artifact workspace.");
+        throw std::runtime_error(localization::format_translated_message(
+                // TRANSLATORS: {} is the literal environment key "PKGDEST".
+                "Source environment {} conflicts with the invocation-owned artifact workspace.",
+                "PKGDEST"));
     default:
-        throw std::logic_error("Unknown source PKGDEST state.");
+        throw std::logic_error(localization::format_translated_message(
+                // TRANSLATORS: {} is the literal environment key "PKGDEST".
+                "Unknown source {} state.", "PKGDEST"));
     }
 
     // POLICY(#218): shared directoryには以前の生成物が混在し得るため、今回の出力として採用しない。
@@ -312,30 +321,34 @@ ValidatedArtifactInstallTarget validate_single_output_artifact(
     case ArtifactWorkspaceOwnership::InvocationOwnedFresh:
         break;
     case ArtifactWorkspaceOwnership::ExternalOrShared:
-        throw std::runtime_error(
-                "Artifact workspace must be invocation-owned and fresh.");
+        throw std::runtime_error(localization::translate_message(
+                "Artifact workspace must be invocation-owned and fresh."));
     default:
-        throw std::logic_error("Unknown artifact workspace ownership.");
+        throw std::logic_error(localization::translate_message(
+                "Unknown artifact workspace ownership."));
     }
 
     if(request.package_base != request.requested_name) {
-        throw std::runtime_error(
-                "PackageBase does not match the requested package: " +
-                request.package_base + " != " + request.requested_name + ".");
+        throw std::runtime_error(localization::format_translated_message(
+                // TRANSLATORS: The first placeholder is the literal Arch
+                // field name "PackageBase"; the others are package identities.
+                "{} does not match the requested package: {} != {}.",
+                "PackageBase", request.package_base, request.requested_name));
     }
 
     // POLICY(#218): split/sibling/debug outputを暗黙選択せず、single-output migrationだけを許可する。
     if(request.artifacts.size() != 1) {
-        throw std::runtime_error(
-                "Expected exactly one produced package artifact, got " +
-                std::to_string(request.artifacts.size()) + ".");
+        throw std::runtime_error(localization::format_translated_message(
+                "Expected exactly one produced package artifact, got {}.",
+                request.artifacts.size()));
     }
 
     const ProducedPackageArtifact& artifact = request.artifacts.front();
     if(artifact.package_name != request.requested_name) {
-        throw std::runtime_error(
-                "Produced artifact package name does not match the requested package: " +
-                artifact.package_name + " != " + request.requested_name + ".");
+        throw std::runtime_error(localization::format_translated_message(
+                // TRANSLATORS: The placeholders are produced and requested package identities.
+                "Produced artifact package name does not match the requested package: {} != {}.",
+                artifact.package_name, request.requested_name));
     }
 
     return ValidatedArtifactInstallTarget{artifact.package_name};
@@ -363,14 +376,17 @@ InstallReasonDirective resolve_install_reason_directive(
         // POLICY(#218): 既存explicit packageは、dependencyとして要求されても暗黙降格しない。
         break;
     default:
-        throw std::logic_error("Unknown desired install reason.");
+        throw std::logic_error(localization::translate_message(
+                "Unknown desired install reason."));
     }
 
     // LANDMINE(#218): same-version installがskipされる場合、reason変更を成功扱いできない。
     if(version_state == InstalledVersionState::SameVersion && needed &&
        directive != InstallReasonDirective::Default) {
-        throw std::runtime_error(
-                "Cannot change install reason because --needed may skip the same-version install.");
+        throw std::runtime_error(localization::format_translated_message(
+                // TRANSLATORS: {} is the literal CLI option "--needed".
+                "Cannot change the install reason because {} may skip the same-version install.",
+                "--needed"));
     }
 
     return directive;
@@ -381,5 +397,7 @@ void require_supported_separated_install_options(bool rm_deps) {
 
     // POLICY(#269): separated lifecycleは今回導入したdependencyのexact setを
     // 所有しない。cleanupを推測したりmakepkg -rへ変換したりせずfail closedとする。
-    throw std::runtime_error("Separated build/install does not support --rmdeps.");
+    throw std::runtime_error(localization::format_translated_message(
+            // TRANSLATORS: {} is the literal CLI option "--rmdeps".
+            "Separated build/install does not support {}.", "--rmdeps"));
 }

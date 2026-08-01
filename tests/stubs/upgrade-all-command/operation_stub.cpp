@@ -1347,7 +1347,7 @@ UpgradeAllOperationResult make_nested_system_unavailable_result() {
     result.system_source.system.package_state_change =
             PackageStateChange::Unknown;
     result.system_source.system.diagnostic =
-            "System result unavailable after phase started due to an unexpected exception";
+            "The system result is unavailable because an unexpected exception occurred after the phase started.";
     add_source(
             result,
             make_source_result(
@@ -1393,7 +1393,7 @@ UpgradeAllOperationResult make_nested_source_preserved_result() {
                     RegisteredSourceUpgradeStatus::Incomplete,
                     RegisteredSourceUpgradeFailureKind::UnknownException,
                     PackageStateChange::Unknown,
-                    "Registered source result unavailable after phase started due to an unexpected exception"));
+                    "The registered source result is unavailable because an unexpected exception occurred after the phase started."));
     add_source(
             result,
             make_source_result(

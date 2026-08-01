@@ -2692,7 +2692,7 @@ void test_build_failure_does_not_reach_sudo(
             std::move(work_items), scenario);
     static_cast<void>(expect_runtime_error(
             [&]() { execute_invocation(invocation, scenario); },
-            "production build failure", "Build-only makepkg failed with exit code 37"));
+            "production build failure", "The build-only makepkg command failed with exit code 37"));
 
     expect(
             scenario.install_calls == 0 &&

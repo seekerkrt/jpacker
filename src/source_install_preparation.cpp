@@ -14,6 +14,8 @@
 // production source-buildのmutation前検証とPacman DB snapshotだけを所有する。
 // POLICY(#267): execution symbolをこのTUへ持ち込まず、preparation-only binaryから
 // checkout/build/install側をlinkしない境界を維持する。
+// NO_TRANSLATE(Issue #308): diagnostics in this translation unit describe
+// internal capability/work-item correlation contract violations.
 
 namespace {
 

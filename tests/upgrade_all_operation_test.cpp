@@ -818,7 +818,7 @@ void test_unexpected_exception_after_system_start_is_not_unattempted() {
                             PackageStateChange::Unknown &&
                     result.system_source.system.diagnostic.has_value() &&
                     result.system_source.system.diagnostic->find(
-                            "System result unavailable after phase started") !=
+                            "The system result is unavailable because an unexpected exception occurred after the phase started") !=
                             std::string::npos,
             "System-start exception was falsely reported as NotAttempted");
     expect(
@@ -890,7 +890,7 @@ void test_unexpected_exception_after_source_start_is_incomplete() {
                                     UnknownException &&
                     source.diagnostic.has_value() &&
                     source.diagnostic->find(
-                            "Registered source result unavailable after phase started") !=
+                            "The registered source result is unavailable because an unexpected exception occurred after the phase started") !=
                             std::string::npos &&
                     result.has_partial_completion(),
             "Source-start exception was falsely reported as NotAttempted");

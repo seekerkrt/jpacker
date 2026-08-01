@@ -211,6 +211,32 @@ assert_identity_contract() {
     assert_line 'external=pacman output' "$output_file"
 }
 
+assert_remaining_scope_english() {
+    output_file=$1
+    assert_line 'owner_logging=Error: {runtime-diagnostic}' "$output_file"
+    assert_line "owner_config=User config error: '/tmp/{config}': key 'schema_version': missing required key; expected integer 1" "$output_file"
+    assert_line 'owner_process=Failed to ignore SIGINT while waiting for an explicit process: {signal-error}' "$output_file"
+    assert_line 'owner_artifact=Failed to inspect the descriptor for /tmp/{artifact}: {artifact-error}' "$output_file"
+    assert_line 'owner_metadata=Repository package query failed: libalpm reported no error detail.' "$output_file"
+    assert_line 'owner_inspect=Recursive dependency tree:' "$output_file"
+    assert_line 'owner_sync=Repository      : aur' "$output_file"
+    assert_line 'owner_aur=Checking AUR updates for 7 foreign packages...' "$output_file"
+    assert_line 'owner_upgrade=excluded from AUR update: {package-name}' "$output_file"
+}
+
+assert_remaining_scope_japanese() {
+    output_file=$1
+    assert_line 'owner_logging=エラー: {runtime-diagnostic}' "$output_file"
+    assert_line "owner_config=ユーザー設定エラー: '/tmp/{config}': キー'schema_version': 必須キーがありません。整数1が必要です" "$output_file"
+    assert_line 'owner_process=明示的プロセスの待機中に SIGINT を無視する設定へ変更できませんでした: {signal-error}' "$output_file"
+    assert_line 'owner_artifact=/tmp/{artifact} のディスクリプターを検査できませんでした: {artifact-error}' "$output_file"
+    assert_line 'owner_metadata=リポジトリパッケージの照会に失敗しました: libalpm からエラーの詳細が報告されませんでした。' "$output_file"
+    assert_line 'owner_inspect=再帰的な依存関係ツリー:' "$output_file"
+    assert_line 'owner_sync=リポジトリ        : aur' "$output_file"
+    assert_line 'owner_aur=AURの更新を外部パッケージ7個について確認しています...' "$output_file"
+    assert_line 'owner_upgrade=AUR更新から除外: {package-name}' "$output_file"
+}
+
 assert_english_messages() {
     output_file=$1
     assert_line 'help=Show this help message and exit' "$output_file"
@@ -220,6 +246,7 @@ assert_english_messages() {
     assert_line 'missing=Missing catalog entry.' "$output_file"
     assert_line 'braces=Use {name} as data.' "$output_file"
     assert_line 'data=Selected package: {danger}' "$output_file"
+    assert_remaining_scope_english "$output_file"
     assert_line 'plural=Processed 2 packages.' "$output_file"
 }
 
@@ -352,12 +379,13 @@ assert_identity_contract "$ja_output"
 assert_line "locale_directory=$catalog_dir" "$ja_output"
 assert_not_line 'message_locale=C' "$ja_output"
 assert_line 'help=このヘルプを表示して終了' "$ja_output"
-assert_line 'diagnostic_project=Moguetをrootまたはsudoで実行しないでください。' "$ja_output"
-assert_line 'diagnostic_command=moguetを通常ユーザーとして実行してください。必要な場合はMoguetがsudo/pacmanを呼び出します。' "$ja_output"
+assert_line 'diagnostic_project=Moguetをrootとして、またはsudo経由で実行しないでください。' "$ja_output"
+assert_line 'diagnostic_command=moguetは通常ユーザーとして実行してください。Moguetは必要に応じてsudo/pacmanを呼び出します。' "$ja_output"
 assert_line 'prompt=パッケージを再ビルドしますか？' "$ja_output"
 assert_line 'missing=Missing catalog entry.' "$ja_output"
 assert_line 'braces=Use {name} as data.' "$ja_output"
 assert_line 'data=Selected package: {danger}' "$ja_output"
+assert_remaining_scope_japanese "$ja_output"
 assert_line 'plural=Processed 2 packages.' "$ja_output"
 
 missing_output=$(run_case missing-catalog "$missing_binary" en_US.UTF-8 ja two)
@@ -372,8 +400,9 @@ assert_english_messages "$unsupported_output"
 
 zz_one_output=$(run_case additional-locale-one "$valid_binary" en_US.UTF-8 zz one)
 assert_identity_contract "$zz_one_output"
+assert_remaining_scope_english "$zz_one_output"
 assert_line 'help=ZZ help' "$zz_one_output"
-assert_line 'diagnostic_project=ZZ do not run Moguet' "$zz_one_output"
+assert_line 'diagnostic_project=ZZ do not run Moguet as root or with sudo' "$zz_one_output"
 assert_line 'diagnostic_command=ZZ run moguet; Moguet uses sudo/pacman' "$zz_one_output"
 assert_line 'prompt=ZZ rebuild?' "$zz_one_output"
 assert_line 'data=ZZ selected: {danger}' "$zz_one_output"

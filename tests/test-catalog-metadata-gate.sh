@@ -75,7 +75,7 @@ restore_catalog_fixture
 
 awk '
     BEGIN {
-        target_msgid = "msgid \"Do not run {} as root or with sudo.\""
+        target_msgid = "msgid \"Do not run {} as {} or with {}.\""
     }
     $0 == "#, c++-format" {
         pending_format_flag = $0
@@ -96,11 +96,11 @@ awk '
 ' "$source_po_dir/ja.po" > "$tmp_dir/ja-without-format-flag.po"
 
 sed \
-    's/^msgstr "{}をrootまたはsudoで実行しないでください。"$/msgstr "Moguetをrootまたはsudoで実行しないでください。"/' \
+    's/^msgstr "{}を{}として、または{}経由で実行しないでください。"$/msgstr "Moguetをrootとして、またはsudo経由で実行しないでください。"/' \
     "$tmp_dir/ja-without-format-flag.po" > "$fixture_po_dir/ja.po"
 
 grep -Fqx \
-    'msgstr "Moguetをrootまたはsudoで実行しないでください。"' \
+    'msgstr "Moguetをrootとして、またはsudo経由で実行しないでください。"' \
     "$fixture_po_dir/ja.po" ||
     fail 'failed to hardcode the identity in the invalid metadata catalog.'
 

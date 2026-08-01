@@ -158,7 +158,7 @@ XDG_CACHE_HOME=$startup_case_dir/xdg-cache \
 SUDO_USER=untrusted-other-user \
     "$default_test_binary" -Q filesystem > "$startup_output" 2>&1 ||
     fail "safe startup identity command failed."
-assert_contains "Started Moguet v$version" "$startup_output"
+assert_contains "Started Moguet v$version." "$startup_output"
 assert_not_contains "Started jpacker" "$startup_output"
 [ "$(cat "$command_log")" = "pacman -Q filesystem" ] ||
     fail "startup identity check did not stay on the safe pacman stub route."
@@ -168,7 +168,7 @@ state_log=$startup_case_dir/xdg-state/moguet/moguet.log
     fail "new explicit XDG state log mode is not 0600."
 [ "$(stat -c '%u' "$state_log")" = "$(id -u)" ] ||
     fail "new explicit XDG state log owner is not the effective user."
-assert_contains "[INFO] Started Moguet v$version" "$state_log"
+assert_contains "[INFO] Started Moguet v$version." "$state_log"
 if [ -e "$startup_case_dir/xdg-config/moguet" ] || \
    [ -L "$startup_case_dir/xdg-config/moguet" ] || \
    [ -e "$startup_case_dir/xdg-cache/moguet" ] || \
@@ -232,7 +232,7 @@ fallback_log=$fallback_case_dir/home/.local/state/moguet/moguet.log
 [ -f "$fallback_log" ] || fail "HOME fallback state log was not created."
 [ "$(stat -c '%a' "$fallback_log")" = 600 ] ||
     fail "new HOME fallback state log mode is not 0600."
-assert_contains "[INFO] Started Moguet v$version" "$fallback_log"
+assert_contains "[INFO] Started Moguet v$version." "$fallback_log"
 [ "$(cat "$command_log")" = "pacman -Q filesystem" ] ||
     fail "HOME fallback check left the safe pacman stub route."
 if [ -e "$fallback_case_dir/xdg-config/moguet" ] || \

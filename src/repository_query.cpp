@@ -1,6 +1,7 @@
 #include "repository_query.hpp"
 
 #include "dependency_spec.hpp"
+#include "localization.hpp"
 #include "package_identifier.hpp"
 #include "package_metadata.hpp"
 #include "process.hpp"
@@ -171,16 +172,19 @@ std::optional<RepositoryMetadataFailure> parse_repo_sync_desc_strict(
         if(!record.active) return std::nullopt;
         if(!record.filename.has_value() || record.filename->empty()) {
             return malformed(
-                    "Repository sync metadata is missing a package filename.");
+                    localization::translate_message(
+                            "Repository sync metadata is missing a package filename."));
         }
         if(!record.package_name.has_value() ||
            !is_valid_package_name(record.package_name.value())) {
             return malformed(
-                    "Repository sync metadata contains an invalid package name.");
+                    localization::translate_message(
+                            "Repository sync metadata contains an invalid package name."));
         }
         if(!repository_package_names.insert(record.package_name.value()).second) {
             return malformed(
-                    "Repository sync metadata contains a duplicate package name.");
+                    localization::translate_message(
+                            "Repository sync metadata contains a duplicate package name."));
         }
 
         for(const auto& provided : record.package_provides) {
@@ -188,7 +192,8 @@ std::optional<RepositoryMetadataFailure> parse_repo_sync_desc_strict(
             if(!is_valid_package_name(parsed.name) ||
                parsed.has_malformed_constraint()) {
                 return malformed(
-                        "Repository sync metadata contains an invalid provided dependency.");
+                        localization::translate_message(
+                                "Repository sync metadata contains an invalid provided dependency."));
             }
         }
 
@@ -212,7 +217,8 @@ std::optional<RepositoryMetadataFailure> parse_repo_sync_desc_strict(
     while(std::getline(stream, line)) {
         if(line.find('\r') != std::string::npos) {
             return malformed(
-                    "Repository sync metadata contains a control character.");
+                    localization::translate_message(
+                            "Repository sync metadata contains a control character."));
         }
         line = trim(line);
         if(line.empty()) continue;
@@ -226,7 +232,8 @@ std::optional<RepositoryMetadataFailure> parse_repo_sync_desc_strict(
                 record.active = true;
             } else if(!record.active) {
                 return malformed(
-                        "Repository sync metadata does not start with a package filename.");
+                        localization::translate_message(
+                                "Repository sync metadata does not start with a package filename."));
             }
             section = line;
             continue;
@@ -234,18 +241,21 @@ std::optional<RepositoryMetadataFailure> parse_repo_sync_desc_strict(
 
         if(!record.active || section.empty()) {
             return malformed(
-                    "Repository sync metadata contains a value outside a section.");
+                    localization::translate_message(
+                            "Repository sync metadata contains a value outside a section."));
         }
         if(section == "%FILENAME%") {
             if(record.filename.has_value()) {
                 return malformed(
-                        "Repository sync metadata contains multiple package filenames.");
+                        localization::translate_message(
+                                "Repository sync metadata contains multiple package filenames."));
             }
             record.filename = line;
         } else if(section == "%NAME%") {
             if(record.package_name.has_value()) {
                 return malformed(
-                        "Repository sync metadata contains multiple package names.");
+                        localization::translate_message(
+                                "Repository sync metadata contains multiple package names."));
             }
             record.package_name = line;
         } else if(section == "%PROVIDES%") {
@@ -256,7 +266,8 @@ std::optional<RepositoryMetadataFailure> parse_repo_sync_desc_strict(
     if(auto failure = flush_package(); failure.has_value()) return failure;
     if(!parsed_package && !trim(desc).empty()) {
         return malformed(
-                "Repository sync metadata does not contain a package entry.");
+                localization::translate_message(
+                        "Repository sync metadata does not contain a package entry."));
     }
     return std::nullopt;
 }
@@ -341,8 +352,10 @@ StrictRepositoryMetadataSnapshotResult load_strict_repository_metadata_snapshot(
         return repository_metadata_failure(
                 RepositoryMetadataFailureKind::SyncDatabaseUnavailable,
                 std::nullopt,
-                "Repository sync database directory is unavailable: " +
-                        sync_directory.string());
+                localization::format_translated_message(
+                        // TRANSLATORS: The placeholder is a filesystem path.
+                        "Repository sync database directory is unavailable: {}",
+                        sync_directory.string()));
     }
 
     for(const auto& repository_name : configuration.repository_names) {
@@ -350,7 +363,8 @@ StrictRepositoryMetadataSnapshotResult load_strict_repository_metadata_snapshot(
             return repository_metadata_failure(
                     RepositoryMetadataFailureKind::ConfigurationMalformed,
                     repository_name,
-                    "Repository configuration contains a name that is not a safe path component.");
+                    localization::translate_message(
+                            "Repository configuration contains a name that is not a safe path component."));
         }
 
         fs::path database_path = sync_directory / (repository_name + ".db");
@@ -361,8 +375,10 @@ StrictRepositoryMetadataSnapshotResult load_strict_repository_metadata_snapshot(
             return repository_metadata_failure(
                     RepositoryMetadataFailureKind::SyncDatabaseUnavailable,
                     repository_name,
-                    "Configured repository sync database is unavailable: " +
-                            database_path.string());
+                    localization::format_translated_message(
+                            // TRANSLATORS: The placeholder is a filesystem path.
+                            "Configured repository sync database is unavailable: {}",
+                            database_path.string()));
         }
 
         std::string command =
@@ -374,8 +390,9 @@ StrictRepositoryMetadataSnapshotResult load_strict_repository_metadata_snapshot(
             return repository_metadata_failure(
                     RepositoryMetadataFailureKind::SyncDatabaseUnavailable,
                     repository_name,
-                    "Failed to read configured repository sync database with exit code " +
-                            std::to_string(command_result.exit_code) + ".");
+                    localization::format_translated_message(
+                            "Failed to read configured repository sync database with exit code {}.",
+                            command_result.exit_code));
         }
 
         if(auto failure = parse_repo_sync_desc_strict(

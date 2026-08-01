@@ -175,7 +175,7 @@ assert_only_command "sudo pacman -Syu"
 run_ok "$tmp_dir/generic-system-upgrade.out" -Syu
 assert_only_command "sudo pacman -Syu"
 run_fail "$tmp_dir/upgrade-aur-target.out" upgrade-aur unexpected-target
-assert_contains "upgrade-aur does not accept target operands." "$tmp_dir/upgrade-aur-target.out"
+assert_contains "Operation upgrade-aur does not accept target operands." "$tmp_dir/upgrade-aur-target.out"
 assert_log_empty
 
 run_fail "$tmp_dir/aur-refresh.out" -Siy risk-root

@@ -595,7 +595,7 @@ assert_cache_absent
 setup_case positional-target-rejection all-updated
 run_status 1 upgrade-aur unexpected-target
 assert_contains \
-    "upgrade-aur does not accept target operands." "$stderr_file"
+    "Operation upgrade-aur does not accept target operands." "$stderr_file"
 assert_pipeline_absent
 assert_cache_absent
 

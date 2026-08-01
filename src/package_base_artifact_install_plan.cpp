@@ -9,6 +9,8 @@
 
 namespace {
 
+// NO_TRANSLATE(Issue #308): logic_error text in this translation unit reports
+// internal policy/reducer invariant violations, not user-facing policy failures.
 #ifdef MOGUET_ENABLE_PACKAGE_BASE_ARTIFACT_INSTALL_PLAN_TEST_HOOKS
 PackageBaseArtifactInstallReasonPlanObserverForTest
         g_reason_plan_observer = nullptr;

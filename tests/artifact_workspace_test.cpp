@@ -1705,7 +1705,7 @@ void test_packagelist_parser_preexisting_paths(
                     static_cast<void>(validate_makepkg_packagelist_output(
                             workspace, artifact_path.string() + "\n"));
                 },
-                "preexisting artifact", "already exists before build");
+                "preexisting artifact", "already exists before the build");
     }
     {
         ArtifactWorkspace workspace = create_test_artifact_workspace(root);

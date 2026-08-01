@@ -1,6 +1,7 @@
 #include "aur_update_query.hpp"
 
 #include "aur_rpc.hpp"
+#include "localization.hpp"
 #include "logging.hpp"
 #include "package_metadata.hpp"
 #include "process.hpp"
@@ -108,9 +109,10 @@ AurUpdateQueryResult query_aur_updates_for_foreign_inventory(
         package_names.push_back(installed_package.name);
     }
 
-    Logger::info(
-            "Checking AUR updates for " +
-            std::to_string(installed_packages.size()) + " foreign packages...");
+    Logger::info(localization::format_translated_message(
+            // TRANSLATORS: The placeholders are the AUR project identity and a package count.
+            "Checking {} updates for {} foreign packages...", "AUR",
+            installed_packages.size()));
 
     std::map<std::string, AurPackageInfo> aur_packages;
     std::set<std::string> metadata_unavailable_packages;
@@ -119,10 +121,11 @@ AurUpdateQueryResult query_aur_updates_for_foreign_inventory(
         offset += AUR_INFO_BATCH_SIZE) {
         std::size_t end =
                 std::min(offset + AUR_INFO_BATCH_SIZE, package_names.size());
-        Logger::info(
-                "Fetching AUR info for packages " +
-                std::to_string(offset + 1) + "-" + std::to_string(end) +
-                " of " + std::to_string(package_names.size()) + "...");
+        Logger::info(localization::format_translated_message(
+                // TRANSLATORS: The placeholders are the AUR project identity,
+                // first package number, last package number, and total package count.
+                "Fetching {} info for packages {}-{} of {}...", "AUR",
+                offset + 1, end, package_names.size()));
 
         std::vector<std::string> batch(
                 package_names.begin() + offset, package_names.begin() + end);
@@ -132,9 +135,10 @@ AurUpdateQueryResult query_aur_updates_for_foreign_inventory(
             if(batch_results.empty()) {
                 // POLICY(#266): non-empty partial responseは追加queryせず正本とする。
                 // 全件emptyの場合だけstrict queryでabsenceとtransport failureを分ける。
-                Logger::warn(
-                        "Bulk AUR info returned no results. Falling back to "
-                        "per-package checks for this batch.");
+                Logger::warn(localization::format_translated_message(
+                        // TRANSLATORS: AUR is a runtime project identity.
+                        "Bulk {} info returned no results. Falling back to per-package checks for this batch.",
+                        "AUR"));
                 for(const auto& package_name : batch) {
                     std::optional<AurPackageInfo> aur_package =
                             AurClient::info_strict(package_name);
@@ -148,9 +152,9 @@ AurUpdateQueryResult query_aur_updates_for_foreign_inventory(
             // schema/semantic violationはrecoverableなtransport failureへ落とさない。
             throw;
         } catch(const std::exception& error) {
-            Logger::error(
-                    "Failed to fetch AUR info: " +
-                    std::string(error.what()));
+            Logger::error(localization::format_translated_message(
+                    // TRANSLATORS: The placeholders are the AUR project identity and an upstream failure detail.
+                    "Failed to fetch {} info: {}", "AUR", error.what()));
             metadata_unavailable_packages.insert(batch.begin(), batch.end());
             recoverable_failures.push_back(
                     AurUpdateQueryFailure{batch, error.what()});

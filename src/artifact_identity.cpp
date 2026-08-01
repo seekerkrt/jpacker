@@ -1,6 +1,7 @@
 #include "artifact_identity.hpp"
 
 #include "artifact_workspace.hpp"
+#include "localization.hpp"
 #include "logging.hpp"
 #include "package_identifier.hpp"
 #include "process.hpp"
@@ -19,7 +20,9 @@ constexpr const char* ARTIFACT_IDENTITY_FORMAT = "%n\t%v";
 
 [[noreturn]] void throw_malformed_artifact_identity() {
     // POLICY: package-controlled stdoutをdiagnosticへ埋め込まず、control characterも漏らさない。
-    throw std::runtime_error("pacman returned malformed package artifact identity.");
+    throw std::runtime_error(localization::format_translated_message(
+            // TRANSLATORS: {} is the literal command name "pacman".
+            "{} returned malformed package artifact identity.", "pacman"));
 }
 
 bool is_ascii_control(unsigned char character) {
@@ -29,7 +32,9 @@ bool is_ascii_control(unsigned char character) {
 ArtifactPackageIdentity parse_artifact_package_identity(
         const std::string& raw_output) {
     if(raw_output.empty()) {
-        throw std::runtime_error("pacman returned no package artifact identity.");
+        throw std::runtime_error(localization::format_translated_message(
+                // TRANSLATORS: {} is the literal command name "pacman".
+                "{} returned no package artifact identity.", "pacman"));
     }
     if(raw_output.find('\r') != std::string::npos) {
         throw_malformed_artifact_identity();
@@ -60,7 +65,10 @@ ArtifactPackageIdentity parse_artifact_package_identity(
         if(is_ascii_control(character)) throw_malformed_artifact_identity();
     }
     if(!is_valid_package_name(package_name)) {
-        throw std::runtime_error("pacman returned an invalid package name for the artifact.");
+        throw std::runtime_error(localization::format_translated_message(
+                // TRANSLATORS: {} is the literal command name "pacman".
+                "{} returned an invalid package name for the artifact.",
+                "pacman"));
     }
 
     return ArtifactPackageIdentity{
@@ -86,9 +94,11 @@ CapturedCommandResult capture_artifact_package_identity_output(
 ArtifactPackageIdentity require_artifact_package_identity(
         const CapturedCommandResult& result) {
     if(result.exit_code != 0) {
-        throw std::runtime_error(
-                "pacman failed to read package artifact identity with exit code " +
-                std::to_string(result.exit_code) + ".");
+        throw std::runtime_error(localization::format_translated_message(
+                // TRANSLATORS: The first placeholder is the literal command
+                // name "pacman"; the second is its numeric exit code.
+                "{} failed to read package artifact identity with exit code {}.",
+                "pacman", result.exit_code));
     }
     return parse_artifact_package_identity(result.output);
 }

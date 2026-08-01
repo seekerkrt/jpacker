@@ -1,5 +1,7 @@
 #include "separated_source_build.hpp"
 
+#include "localization.hpp"
+
 #include <exception>
 #include <stdexcept>
 #include <string>
@@ -67,9 +69,11 @@ ArtifactInstallExecutionOutcome execute_separated_source_build_unit(
     // ここから先のfailureは、生成済みartifactを自動cleanupしてはならない。
     workspace.retain_for_diagnostics();
     if(build_exit_code != 0) {
-        throw std::runtime_error(
-                "Build-only makepkg failed with exit code " +
-                std::to_string(build_exit_code) + ".");
+        throw std::runtime_error(localization::format_translated_message(
+                // TRANSLATORS: The first placeholder is the literal command
+                // name "makepkg"; the second is its numeric exit code.
+                "The build-only {} command failed with exit code {}.",
+                "makepkg", build_exit_code));
     }
 
     ValidatedPackageArtifactPath artifact =
@@ -92,12 +96,14 @@ ArtifactInstallExecutionOutcome execute_separated_source_build_unit(
     } catch(const std::exception& error) {
         throw SeparatedSourceBuildCleanupError(
                 install_outcome,
-                "Package installation succeeded, but artifact workspace cleanup failed: " +
-                std::string(error.what()));
+                localization::format_translated_message(
+                        "Package installation succeeded, but artifact workspace cleanup failed: {}",
+                        error.what()));
     } catch(...) {
         throw SeparatedSourceBuildCleanupError(
                 install_outcome,
-                "Package installation succeeded, but artifact workspace cleanup failed with an unknown error.");
+                localization::translate_message(
+                        "Package installation succeeded, but artifact workspace cleanup failed with an unknown error."));
     }
     return install_outcome;
 }

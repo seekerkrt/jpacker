@@ -1,5 +1,6 @@
 #include "aur_update_execution_runner.hpp"
 
+#include "localization.hpp"
 #include "trusted_cache.hpp"
 
 #include <algorithm>
@@ -7,12 +8,20 @@
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 
 namespace {
 
-constexpr const char* UNKNOWN_EXCEPTION_DIAGNOSTIC =
-        "Prepared AUR update source-build work item failed with an unknown exception.";
+constexpr std::string_view AUR_SERVICE_NAME = "AUR";
+constexpr std::string_view PACKAGE_BASE_FIELD_NAME = "PackageBase";
+
+std::string unknown_exception_diagnostic() {
+    return localization::format_translated_message(
+            // TRANSLATORS: {} is the literal service name "AUR".
+            "Prepared {} update source-build work item failed with an unknown exception.",
+            AUR_SERVICE_NAME);
+}
 
 template<typename Value>
 bool has_duplicate_value(const std::vector<Value>& values) noexcept {
@@ -71,8 +80,10 @@ void require_valid_prepared_child_attribution(
         const AurUpdatePreparedWorkItemAttribution& attribution) {
     if(attribution.required_target_attributions.size() !=
        work_item.required_targets.size()) {
-        throw std::logic_error(
-                "Prepared AUR update source-build child correlation count is inconsistent.");
+        throw std::logic_error(localization::format_translated_message(
+                // TRANSLATORS: {} is the literal service name "AUR".
+                "Prepared {} update source-build child correlation count is inconsistent.",
+                AUR_SERVICE_NAME));
     }
 
     std::vector<std::size_t> aggregate_update_plan_indices;
@@ -97,8 +108,10 @@ void require_valid_prepared_child_attribution(
                    child.roles.begin(), child.roles.end(),
                    is_known_package_role) ||
            !package_names.insert(child.required_target.package_name).second) {
-            throw std::logic_error(
-                    "Prepared AUR update source-build required child attribution is inconsistent.");
+            throw std::logic_error(localization::format_translated_message(
+                    // TRANSLATORS: {} is the literal service name "AUR".
+                    "Prepared {} update source-build required child attribution is inconsistent.",
+                    AUR_SERVICE_NAME));
         }
         for(const std::size_t update_plan_index :
             child.affected_update_plan_indices) {
@@ -112,8 +125,10 @@ void require_valid_prepared_child_attribution(
     if(aggregate_update_plan_indices !=
                attribution.affected_update_plan_indices ||
        aggregate_roots != attribution.affected_roots) {
-        throw std::logic_error(
-                "Prepared AUR update source-build aggregate child attribution is inconsistent.");
+        throw std::logic_error(localization::format_translated_message(
+                // TRANSLATORS: {} is the literal service name "AUR".
+                "Prepared {} update source-build aggregate child attribution is inconsistent.",
+                AUR_SERVICE_NAME));
     }
 }
 
@@ -121,16 +136,20 @@ void require_valid_prepared_invocation(
         const PreparedAurUpdateSourceBuildInvocation& invocation,
         const PreparedProductionSourceBuildInvocation& production_invocation) {
     if(!invocation.is_valid()) {
-        throw std::logic_error(
-                "Prepared AUR update source-build invocation is invalid or has already been consumed.");
+        throw std::logic_error(localization::format_translated_message(
+                // TRANSLATORS: {} is the literal service name "AUR".
+                "Prepared {} update source-build invocation is invalid or has already been consumed.",
+                AUR_SERVICE_NAME));
     }
 
     const std::vector<AurUpdatePreparedWorkItemAttribution>& attributions =
             invocation.work_item_attributions();
     if(production_invocation.work_items.empty() ||
        attributions.size() != production_invocation.work_items.size()) {
-        throw std::logic_error(
-                "Prepared AUR update source-build invocation correlation count is inconsistent.");
+        throw std::logic_error(localization::format_translated_message(
+                // TRANSLATORS: {} is the literal service name "AUR".
+                "Prepared {} update source-build invocation correlation count is inconsistent.",
+                AUR_SERVICE_NAME));
     }
 
     for(std::size_t index = 0;
@@ -157,8 +176,10 @@ void require_valid_prepared_invocation(
                     work_item.required_targets.front().package_name) ||
            (!is_singular && !attribution.package_name.empty()) ||
            attribution.package_name != work_item.request.package_name) {
-            throw std::logic_error(
-                    "Prepared AUR update source-build invocation work-item correlation is inconsistent.");
+            throw std::logic_error(localization::format_translated_message(
+                    // TRANSLATORS: {} is the literal service name "AUR".
+                    "Prepared {} update source-build invocation work-item correlation is inconsistent.",
+                    AUR_SERVICE_NAME));
         }
         require_valid_prepared_child_attribution(work_item, attribution);
     }
@@ -237,7 +258,12 @@ validate_completed_package_base_result(
         return correlation_failure(
                 AurUpdateExecutionCorrelationFailureReason::
                         PackageBaseMismatch,
-                "PackageBase source-build result does not match the prepared PackageBase.");
+                localization::format_translated_message(
+                        // TRANSLATORS: Both placeholders are the literal field
+                        // name "PackageBase".
+                        "{} source-build result does not match the prepared {}.",
+                        PACKAGE_BASE_FIELD_NAME,
+                        PACKAGE_BASE_FIELD_NAME));
     }
 
     const auto& selected = completed.selected_children();
@@ -249,7 +275,10 @@ validate_completed_package_base_result(
                                   MissingSelectedChild
                         : AurUpdateExecutionCorrelationFailureReason::
                                   ExtraSelectedChild,
-                "PackageBase source-build selected child count does not match the prepared required children.");
+                localization::format_translated_message(
+                        // TRANSLATORS: {} is the literal field name "PackageBase".
+                        "{} source-build selected child count does not match the prepared required children.",
+                        PACKAGE_BASE_FIELD_NAME));
     }
 
     std::set<std::string> selected_names;
@@ -263,28 +292,34 @@ validate_completed_package_base_result(
             return correlation_failure(
                     AurUpdateExecutionCorrelationFailureReason::
                             DuplicateSelectedChild,
-                    "PackageBase source-build result contains a duplicate selected child.",
+                    localization::format_translated_message(
+                            // TRANSLATORS: {} is the literal field name "PackageBase".
+                            "{} source-build result contains a duplicate selected child.",
+                            PACKAGE_BASE_FIELD_NAME),
                     child_index, actual.identity.package_name);
         }
         if(actual.identity.package_name != expected.required_package_name) {
             return correlation_failure(
                     AurUpdateExecutionCorrelationFailureReason::
                             SelectedArtifactIdentityMismatch,
-                    "Selected artifact identity does not match the prepared required child order.",
+                    localization::translate_message(
+                            "Selected artifact identity does not match the prepared required child order."),
                     child_index, actual.identity.package_name);
         }
         if(actual.identity.full_version.empty()) {
             return correlation_failure(
                     AurUpdateExecutionCorrelationFailureReason::
                             EmptySelectedArtifactVersion,
-                    "Selected artifact result has an empty full version.",
+                    localization::translate_message(
+                            "Selected artifact result has an empty full version."),
                     child_index, actual.identity.package_name);
         }
         if(actual.desired_reason != expected.desired_install_reason) {
             return correlation_failure(
                     AurUpdateExecutionCorrelationFailureReason::
                             DesiredInstallReasonMismatch,
-                    "Selected artifact desired install reason does not match preparation.",
+                    localization::translate_message(
+                            "Selected artifact desired install reason does not match preparation."),
                     child_index, actual.identity.package_name);
         }
         switch(actual.outcome) {
@@ -295,7 +330,8 @@ validate_completed_package_base_result(
             return correlation_failure(
                     AurUpdateExecutionCorrelationFailureReason::
                             UnknownChildOutcome,
-                    "Selected artifact result has an unknown execution outcome.",
+                    localization::translate_message(
+                            "Selected artifact result has an unknown execution outcome."),
                     child_index, actual.identity.package_name);
         }
     }
@@ -307,21 +343,26 @@ validate_completed_package_base_result(
             return correlation_failure(
                     AurUpdateExecutionCorrelationFailureReason::
                             InvalidUnselectedArtifactIdentity,
-                    "Unselected artifact identity has an empty package name or full version.",
+                    localization::translate_message(
+                            "Unselected artifact identity has an empty package name or full version."),
                     std::nullopt, identity.package_name);
         }
         if(selected_names.contains(identity.package_name)) {
             return correlation_failure(
                     AurUpdateExecutionCorrelationFailureReason::
                             SelectedAndUnselectedIdentityOverlap,
-                    "Unselected artifact identity overlaps a selected child.",
+                    localization::translate_message(
+                            "Unselected artifact identity overlaps a selected child."),
                     std::nullopt, identity.package_name);
         }
         if(!unselected_names.insert(identity.package_name).second) {
             return correlation_failure(
                     AurUpdateExecutionCorrelationFailureReason::
                             DuplicateUnselectedArtifactIdentity,
-                    "PackageBase source-build result contains a duplicate unselected artifact identity.",
+                    localization::format_translated_message(
+                            // TRANSLATORS: {} is the literal field name "PackageBase".
+                            "{} source-build result contains a duplicate unselected artifact identity.",
+                            PACKAGE_BASE_FIELD_NAME),
                     std::nullopt, identity.package_name);
         }
     }
@@ -336,7 +377,10 @@ validate_package_transaction_failure(
         return correlation_failure(
                 AurUpdateExecutionCorrelationFailureReason::
                         PackageBaseMismatch,
-                "Package transaction failure does not match the prepared PackageBase.");
+                localization::format_translated_message(
+                        // TRANSLATORS: {} is the literal field name "PackageBase".
+                        "Package transaction failure does not match the prepared {}.",
+                        PACKAGE_BASE_FIELD_NAME));
     }
     if(error.attempts().size() != planned.child_results.size()) {
         return correlation_failure(
@@ -345,7 +389,8 @@ validate_package_transaction_failure(
                                   MissingSelectedChild
                         : AurUpdateExecutionCorrelationFailureReason::
                                   ExtraSelectedChild,
-                "Package transaction attempt count does not match the prepared required children.");
+                localization::translate_message(
+                        "Package transaction attempt count does not match the prepared required children."));
     }
 
     std::set<std::string> attempted_names;
@@ -359,28 +404,32 @@ validate_package_transaction_failure(
             return correlation_failure(
                     AurUpdateExecutionCorrelationFailureReason::
                             DuplicateSelectedChild,
-                    "Package transaction failure contains a duplicate attempted child.",
+                    localization::translate_message(
+                            "Package transaction failure contains a duplicate attempted child."),
                     child_index, attempt.identity.package_name);
         }
         if(attempt.identity.package_name != expected.required_package_name) {
             return correlation_failure(
                     AurUpdateExecutionCorrelationFailureReason::
                             SelectedArtifactIdentityMismatch,
-                    "Package transaction attempted identity does not match the prepared required child order.",
+                    localization::translate_message(
+                            "Package transaction attempted identity does not match the prepared required child order."),
                     child_index, attempt.identity.package_name);
         }
         if(attempt.identity.full_version.empty()) {
             return correlation_failure(
                     AurUpdateExecutionCorrelationFailureReason::
                             EmptySelectedArtifactVersion,
-                    "Package transaction attempt has an empty full version.",
+                    localization::translate_message(
+                            "Package transaction attempt has an empty full version."),
                     child_index, attempt.identity.package_name);
         }
         if(attempt.desired_reason != expected.desired_install_reason) {
             return correlation_failure(
                     AurUpdateExecutionCorrelationFailureReason::
                             DesiredInstallReasonMismatch,
-                    "Package transaction attempt desired reason does not match preparation.",
+                    localization::translate_message(
+                            "Package transaction attempt desired reason does not match preparation."),
                     child_index, attempt.identity.package_name);
         }
     }
@@ -427,7 +476,8 @@ AurUpdateChildExecutionStatus completed_child_status(
                 ? AurUpdateChildExecutionStatus::SkippedAsNeededCleanupFailed
                 : AurUpdateChildExecutionStatus::SkippedAsNeeded;
     }
-    throw std::logic_error("Unknown artifact install execution outcome.");
+    throw std::logic_error(localization::translate_message(
+            "Unknown artifact install execution outcome."));
 }
 
 void promote_completed_result(
@@ -495,7 +545,12 @@ validate_preparation_failure(
     }
     return correlation_failure(
             AurUpdateExecutionCorrelationFailureReason::PackageBaseMismatch,
-            "PackageBase install preparation failure does not match the prepared PackageBase.",
+            localization::format_translated_message(
+                    // TRANSLATORS: Both placeholders are the literal field
+                    // name "PackageBase".
+                    "{} install preparation failure does not match the prepared {}.",
+                    PACKAGE_BASE_FIELD_NAME,
+                    PACKAGE_BASE_FIELD_NAME),
             std::nullopt, *failure_package_base);
 }
 
@@ -745,7 +800,7 @@ execute_prepared_aur_update_source_build_invocation(
             work_item_result.failure_kind =
                     AurUpdateWorkItemFailureKind::UnknownException;
             work_item_result.failure_detail = std::monostate{};
-            work_item_result.diagnostic = UNKNOWN_EXCEPTION_DIAGNOSTIC;
+            work_item_result.diagnostic = unknown_exception_diagnostic();
             result.status = AurUpdateInvocationExecutionStatus::
                     StoppedOnWorkItemFailure;
             return result;

@@ -540,7 +540,7 @@ assert_command_log_empty
 setup_case upgrade-aur-global-options-with-target
 run_fail --noedit upgrade-aur --nodiff --noconfirm \
     --build-mode=clean --cleanbuild clean-root
-assert_contains "upgrade-aur does not accept target operands." "$output_file"
+assert_contains "Operation upgrade-aur does not accept target operands." "$output_file"
 assert_command_log_empty
 
 setup_case upgrade-aur-rejects-rmdeps
@@ -551,7 +551,7 @@ assert_command_log_empty
 
 setup_case upgrade-aur-needed-as-opaque-target
 run_fail upgrade-aur -- --needed
-assert_contains "upgrade-aur does not accept target operands." "$output_file"
+assert_contains "Operation upgrade-aur does not accept target operands." "$output_file"
 assert_not_contains "Unsupported upgrade-aur option: --needed" "$output_file"
 assert_command_log_empty
 

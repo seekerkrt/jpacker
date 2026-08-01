@@ -779,15 +779,19 @@ def main() -> int:
                 "test argv[0] must be moguet",
             )
         )
-    if "Clean Moguet build cache" not in texts.get(
-        "src/commands_source_maintenance.cpp", ""
-    ):
+    source_maintenance = texts.get("src/commands_source_maintenance.cpp", "")
+    cache_prompt_pattern = re.compile(
+        r'"Clean \{\} build cache \(\{\}\)\?",\s*'
+        r"application_identity::PROJECT_NAME,\s*"
+        r"cleanup\.cache_path\(\)\.string\(\)"
+    )
+    if cache_prompt_pattern.search(source_maintenance) is None:
         findings.append(
             Finding(
                 "moguet-cache-presentation",
                 "src/commands_source_maintenance.cpp",
                 0,
-                "Moguet cache prompt is missing",
+                "Moguet cache prompt must keep the project identity as runtime data",
             )
         )
 

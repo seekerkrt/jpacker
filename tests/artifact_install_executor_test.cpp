@@ -871,7 +871,7 @@ void test_preparation_failures_preserve_artifact() {
                 "same-version needed reason change");
         expect(
                 message ==
-                        "Cannot change install reason because --needed may skip "
+                        "Cannot change the install reason because --needed may skip "
                         "the same-version install.",
                 "Same-version --needed reducer diagnostic differs");
         expect_caller_still_owns_valid_artifact(

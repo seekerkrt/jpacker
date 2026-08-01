@@ -1,11 +1,13 @@
 #include "filtered_aur_update_operation.hpp"
 
 #include "dependency_spec.hpp"
+#include "localization.hpp"
 
 #include <algorithm>
 #include <map>
 #include <set>
 #include <stdexcept>
+#include <string_view>
 #include <utility>
 #include <variant>
 
@@ -48,6 +50,12 @@ struct FilteredAurUpdateOperationMutableAccess {
 // POLICY(#281): 各段のdense indexはidentityの代用にせず、名前とPackageBaseを
 // 照合したcorrelation recordを介してのみ次段へ渡す。
 namespace {
+
+constexpr std::string_view AUR_SERVICE_NAME = "AUR";
+constexpr std::string_view AUR_UPDATE_PLAN_TYPE_NAME = "AurUpdatePlan";
+constexpr std::string_view BUILD_PLAN_TYPE_NAME = "BuildPlan";
+constexpr std::string_view ROOT_ROLE_NAME = "Root";
+constexpr std::string_view UPGRADE_ALL_COMMAND_NAME = "upgrade-all";
 
 bool same_remote_package(
         const std::optional<AurUpdateRemotePackage>& lhs,
@@ -136,7 +144,7 @@ bool has_exact_execution_child_names(
     return true;
 }
 
-FilteredAurUpdateOperationIssue& add_issue(
+FilteredAurUpdateOperationIssue& add_localized_operation_issue(
         std::vector<FilteredAurUpdateOperationIssue>& issues,
         FilteredAurUpdateOperationIssueKind kind,
         std::string diagnostic) {
@@ -145,6 +153,15 @@ FilteredAurUpdateOperationIssue& add_issue(
     issue.diagnostic = std::move(diagnostic);
     issues.push_back(std::move(issue));
     return issues.back();
+}
+
+template<std::size_t Size>
+FilteredAurUpdateOperationIssue& add_localized_operation_issue(
+        std::vector<FilteredAurUpdateOperationIssue>& issues,
+        FilteredAurUpdateOperationIssueKind kind,
+        const char (&diagnostic)[Size]) {
+    return add_localized_operation_issue(
+            issues, kind, localization::translate_message(diagnostic));
 }
 
 UpgradeAllPackageBaseIdentity package_base_identity(
@@ -231,11 +248,14 @@ UpgradeAllBuildUnitRole map_build_unit_role(
         return UpgradeAllBuildUnitRole::CheckDependency;
     }
 
-    FilteredAurUpdateOperationIssue& issue = add_issue(
+    FilteredAurUpdateOperationIssue& issue = add_localized_operation_issue(
             issues,
             FilteredAurUpdateOperationIssueKind::
                     BuildUnitRootAttributionInconsistent,
-            "BuildPlan package target contains an unknown package role.");
+            localization::format_translated_message(
+                    // TRANSLATORS: {} is the literal internal type name "BuildPlan".
+                    "{} package target contains an unknown package role.",
+                    BUILD_PLAN_TYPE_NAME));
     issue.build_plan_order_index = build_plan_order_index;
     return UpgradeAllBuildUnitRole::Root;
 }
@@ -325,11 +345,17 @@ std::vector<ExactDependencyEdge> collect_exact_dependency_edges(
                     contains_all_roots(target.roots, parent.roots);
         }
         if(!is_consistent) {
-            FilteredAurUpdateOperationIssue& issue = add_issue(
+            FilteredAurUpdateOperationIssue& issue = add_localized_operation_issue(
                     issues,
                     FilteredAurUpdateOperationIssueKind::
                             BuildUnitRootAttributionInconsistent,
-                    "BuildPlan AUR dependency edge cannot be correlated by exact package identity.");
+                    localization::format_translated_message(
+                            // TRANSLATORS: The placeholders are the literal
+                            // internal type name "BuildPlan" and service name
+                            // "AUR", respectively.
+                            "{} {} dependency edge cannot be correlated by exact package identity.",
+                            BUILD_PLAN_TYPE_NAME,
+                            AUR_SERVICE_NAME));
             issue.package_name = edge.resolved_package_name;
             issue.package_base = edge.resolved_package_base;
             continue;
@@ -357,11 +383,17 @@ std::vector<std::vector<DerivedRootRole>> derive_root_roles(
                    plan.package_targets[*root_target_index],
                    PackageRole::Root) ||
            !contains_root(plan.package_targets[*root_target_index], root)) {
-            FilteredAurUpdateOperationIssue& issue = add_issue(
+            FilteredAurUpdateOperationIssue& issue = add_localized_operation_issue(
                     issues,
                     FilteredAurUpdateOperationIssueKind::
                             BuildUnitRootAttributionInconsistent,
-                    "BuildPlan root does not have one exact Root package target.");
+                    localization::format_translated_message(
+                            // TRANSLATORS: The placeholders are the literal
+                            // internal type name "BuildPlan" and enum value
+                            // "Root", respectively.
+                            "{} root does not have one exact {} package target.",
+                            BUILD_PLAN_TYPE_NAME,
+                            ROOT_ROLE_NAME));
             issue.preflight_invocation_index = root.invocation_index;
             issue.package_name = root.requested_name;
             continue;
@@ -404,11 +436,14 @@ std::vector<std::vector<DerivedRootRole>> derive_root_roles(
             continue;
         }
 
-        FilteredAurUpdateOperationIssue& issue = add_issue(
+        FilteredAurUpdateOperationIssue& issue = add_localized_operation_issue(
                 issues,
                 FilteredAurUpdateOperationIssueKind::
                         BuildUnitRootAttributionInconsistent,
-                "BuildPlan package target roles/roots differ from rooted dependency graph attribution.");
+                localization::format_translated_message(
+                        // TRANSLATORS: {} is the literal internal type name "BuildPlan".
+                        "{} package target roles/roots differ from rooted dependency graph attribution.",
+                        BUILD_PLAN_TYPE_NAME));
         issue.package_name = target.package_name;
         issue.package_base = target.package_base;
     }
@@ -480,11 +515,14 @@ BuildUnitAdapterResult adapt_build_plan(
             }
         }
         if(!order_identity_is_consistent) {
-            FilteredAurUpdateOperationIssue& issue = add_issue(
+            FilteredAurUpdateOperationIssue& issue = add_localized_operation_issue(
                     issues,
                     FilteredAurUpdateOperationIssueKind::
                             BuildUnitOrderIdentityMismatch,
-                    "BuildPlan order entry does not map exactly to planned package targets.");
+                    localization::format_translated_message(
+                            // TRANSLATORS: {} is the literal internal type name "BuildPlan".
+                            "{} order entry does not map exactly to planned package targets.",
+                            BUILD_PLAN_TYPE_NAME));
             issue.build_plan_order_index = order_index;
             issue.package_base = order_entry.package_base;
         }
@@ -496,11 +534,14 @@ BuildUnitAdapterResult adapt_build_plan(
                         find_target_correlation(
                                 target_correlations, attribution.root);
                 if(target == nullptr) {
-                    FilteredAurUpdateOperationIssue& issue = add_issue(
+                    FilteredAurUpdateOperationIssue& issue = add_localized_operation_issue(
                             issues,
                             FilteredAurUpdateOperationIssueKind::
                                     BuildUnitRootAttributionInconsistent,
-                            "BuildPlan unit root cannot be mapped to a selected filtered target identity.");
+                            localization::format_translated_message(
+                                    // TRANSLATORS: {} is the literal internal type name "BuildPlan".
+                                    "{} unit root cannot be mapped to a selected filtered target identity.",
+                                    BUILD_PLAN_TYPE_NAME));
                     issue.build_plan_order_index = order_index;
                     issue.preflight_invocation_index =
                             attribution.root.invocation_index;
@@ -584,7 +625,7 @@ void build_filtered_update_plan(
                     *adapter_entry.planner_target_index;
             if(planner_index >=
                state.upgrade_all_plan.target_dispositions.size()) {
-                FilteredAurUpdateOperationIssue& issue = add_issue(
+                FilteredAurUpdateOperationIssue& issue = add_localized_operation_issue(
                         state.issues,
                         FilteredAurUpdateOperationIssueKind::
                                 TargetPlannerMappingInconsistent,
@@ -628,7 +669,7 @@ void build_filtered_update_plan(
                            .original_to_selected_index.size() ||
            state.upgrade_all_plan.original_to_selected_index
                            [selected.original_target_index] != position) {
-            FilteredAurUpdateOperationIssue& issue = add_issue(
+            FilteredAurUpdateOperationIssue& issue = add_localized_operation_issue(
                     state.issues,
                     FilteredAurUpdateOperationIssueKind::
                             TargetPlannerMappingInconsistent,
@@ -647,7 +688,7 @@ void build_filtered_update_plan(
                    state.original_query_plan_to_filtered_index.size() ||
            !state.original_query_plan_to_filtered_index[original_index]
                     .has_value()) {
-            FilteredAurUpdateOperationIssue& issue = add_issue(
+            FilteredAurUpdateOperationIssue& issue = add_localized_operation_issue(
                     state.issues,
                     FilteredAurUpdateOperationIssueKind::
                             FilteredTargetMappingInconsistent,
@@ -665,7 +706,7 @@ void build_filtered_update_plan(
                 original.aur_package->aur_name == selected.package_name &&
                 original.aur_package->package_base == selected.package_base;
         if(!identity_matches) {
-            FilteredAurUpdateOperationIssue& issue = add_issue(
+            FilteredAurUpdateOperationIssue& issue = add_localized_operation_issue(
                     state.issues,
                     FilteredAurUpdateOperationIssueKind::
                             FilteredTargetMappingInconsistent,
@@ -699,11 +740,14 @@ bool correlate_root_invocation_identity(
         std::size_t root_index) {
     auto state = FilteredAurUpdateOperationMutableAccess::snapshot(operation);
     if(root.invocation_index >= state.target_correlations.size()) {
-        FilteredAurUpdateOperationIssue& issue = add_issue(
+        FilteredAurUpdateOperationIssue& issue = add_localized_operation_issue(
                 state.issues,
                 FilteredAurUpdateOperationIssueKind::
                         PreflightInvocationIndexOutOfRange,
-                "BuildPlan root invocation index maps outside the selected target snapshot.");
+                localization::format_translated_message(
+                        // TRANSLATORS: {} is the literal internal type name "BuildPlan".
+                        "{} root invocation index maps outside the selected target snapshot.",
+                        BUILD_PLAN_TYPE_NAME));
         issue.original_query_plan_index =
                 correlation.original_query_plan_index;
         issue.selected_target_index = correlation.selected_target_index;
@@ -714,11 +758,14 @@ bool correlate_root_invocation_identity(
     }
     if(root.invocation_index != correlation.selected_target_index ||
        root.requested_name != correlation.package_name) {
-        FilteredAurUpdateOperationIssue& issue = add_issue(
+        FilteredAurUpdateOperationIssue& issue = add_localized_operation_issue(
                 state.issues,
                 FilteredAurUpdateOperationIssueKind::
                         PreflightInvocationIdentityMismatch,
-                "BuildPlan root invocation identity differs from the selected target identity.");
+                localization::format_translated_message(
+                        // TRANSLATORS: {} is the literal internal type name "BuildPlan".
+                        "{} root invocation identity differs from the selected target identity.",
+                        BUILD_PLAN_TYPE_NAME));
         issue.original_query_plan_index =
                 correlation.original_query_plan_index;
         issue.selected_target_index = correlation.selected_target_index;
@@ -735,7 +782,7 @@ void correlate_preflight(
     auto state = FilteredAurUpdateOperationMutableAccess::snapshot(operation);
     if(state.preflight.targets.size() !=
        state.filtered_update_plan.entries.size()) {
-        add_issue(
+        add_localized_operation_issue(
                 state.issues,
                 FilteredAurUpdateOperationIssueKind::
                         PreflightTargetMappingInconsistent,
@@ -754,7 +801,7 @@ void correlate_preflight(
                    state.filtered_update_plan.entries[position])) {
             continue;
         }
-        FilteredAurUpdateOperationIssue& issue = add_issue(
+        FilteredAurUpdateOperationIssue& issue = add_localized_operation_issue(
                 state.issues,
                 FilteredAurUpdateOperationIssueKind::
                         PreflightTargetMappingInconsistent,
@@ -777,7 +824,7 @@ void correlate_preflight(
         state.target_correlations) {
         if(correlation.filtered_update_plan_index >=
            state.preflight.targets.size()) {
-            FilteredAurUpdateOperationIssue& issue = add_issue(
+            FilteredAurUpdateOperationIssue& issue = add_localized_operation_issue(
                     state.issues,
                     FilteredAurUpdateOperationIssueKind::
                             PreflightTargetMappingInconsistent,
@@ -797,7 +844,7 @@ void correlate_preflight(
            target.update.aur_package->aur_name != correlation.package_name ||
            target.update.aur_package->package_base !=
                    correlation.package_base) {
-            FilteredAurUpdateOperationIssue& issue = add_issue(
+            FilteredAurUpdateOperationIssue& issue = add_localized_operation_issue(
                     state.issues,
                     FilteredAurUpdateOperationIssueKind::
                             PreflightTargetMappingInconsistent,
@@ -813,11 +860,14 @@ void correlate_preflight(
         }
 
         if(!state.preflight.build_plan.has_value()) {
-            FilteredAurUpdateOperationIssue& issue = add_issue(
+            FilteredAurUpdateOperationIssue& issue = add_localized_operation_issue(
                     state.issues,
                     FilteredAurUpdateOperationIssueKind::
                             BuildPlanRootIndexOutOfRange,
-                    "Selected preflight target has no BuildPlan snapshot.");
+                    localization::format_translated_message(
+                            // TRANSLATORS: {} is the literal internal type name "BuildPlan".
+                            "Selected preflight target has no {} snapshot.",
+                            BUILD_PLAN_TYPE_NAME));
             issue.original_query_plan_index =
                     correlation.original_query_plan_index;
             issue.selected_target_index = correlation.selected_target_index;
@@ -829,11 +879,14 @@ void correlate_preflight(
 
         const BuildPlan& plan = *state.preflight.build_plan;
         if(!target.build_plan_root_index.has_value()) {
-            FilteredAurUpdateOperationIssue& issue = add_issue(
+            FilteredAurUpdateOperationIssue& issue = add_localized_operation_issue(
                     state.issues,
                     FilteredAurUpdateOperationIssueKind::
                             BuildPlanRootIndexMissing,
-                    "Selected preflight target has no BuildPlan root index.");
+                    localization::format_translated_message(
+                            // TRANSLATORS: {} is the literal internal type name "BuildPlan".
+                            "Selected preflight target has no {} root index.",
+                            BUILD_PLAN_TYPE_NAME));
             issue.original_query_plan_index =
                     correlation.original_query_plan_index;
             issue.selected_target_index = correlation.selected_target_index;
@@ -846,11 +899,14 @@ void correlate_preflight(
             const std::size_t expected_root_index =
                     correlation.selected_target_index;
             if(expected_root_index >= plan.root_targets.size()) {
-                FilteredAurUpdateOperationIssue& range_issue = add_issue(
+                FilteredAurUpdateOperationIssue& range_issue = add_localized_operation_issue(
                         state.issues,
                         FilteredAurUpdateOperationIssueKind::
                                 BuildPlanRootIndexOutOfRange,
-                        "Selected target position maps outside the BuildPlan root snapshot.");
+                        localization::format_translated_message(
+                                // TRANSLATORS: {} is the literal internal type name "BuildPlan".
+                                "Selected target position maps outside the {} root snapshot.",
+                                BUILD_PLAN_TYPE_NAME));
                 range_issue.original_query_plan_index =
                         correlation.original_query_plan_index;
                 range_issue.selected_target_index =
@@ -867,11 +923,14 @@ void correlate_preflight(
 
         const std::size_t root_index = *target.build_plan_root_index;
         if(root_index >= plan.root_targets.size()) {
-            FilteredAurUpdateOperationIssue& issue = add_issue(
+            FilteredAurUpdateOperationIssue& issue = add_localized_operation_issue(
                     state.issues,
                     FilteredAurUpdateOperationIssueKind::
                             BuildPlanRootIndexOutOfRange,
-                    "Selected preflight target has an out-of-range BuildPlan root index.");
+                    localization::format_translated_message(
+                            // TRANSLATORS: {} is the literal internal type name "BuildPlan".
+                            "Selected preflight target has an out-of-range {} root index.",
+                            BUILD_PLAN_TYPE_NAME));
             issue.original_query_plan_index =
                     correlation.original_query_plan_index;
             issue.selected_target_index = correlation.selected_target_index;
@@ -881,11 +940,14 @@ void correlate_preflight(
 
         const RootTargetIdentity& root = plan.root_targets[root_index];
         if(root_index != correlation.selected_target_index) {
-            FilteredAurUpdateOperationIssue& issue = add_issue(
+            FilteredAurUpdateOperationIssue& issue = add_localized_operation_issue(
                     state.issues,
                     FilteredAurUpdateOperationIssueKind::
                             BuildPlanRootIdentityMismatch,
-                    "BuildPlan root position differs from the selected target mapping.");
+                    localization::format_translated_message(
+                            // TRANSLATORS: {} is the literal internal type name "BuildPlan".
+                            "{} root position differs from the selected target mapping.",
+                            BUILD_PLAN_TYPE_NAME));
             issue.original_query_plan_index =
                     correlation.original_query_plan_index;
             issue.selected_target_index = correlation.selected_target_index;
@@ -909,11 +971,17 @@ void correlate_preflight(
                 plan.package_targets[*root_target_index].package_base ==
                         correlation.package_base;
         if(!root_package_matches) {
-            FilteredAurUpdateOperationIssue& issue = add_issue(
+            FilteredAurUpdateOperationIssue& issue = add_localized_operation_issue(
                     state.issues,
                     FilteredAurUpdateOperationIssueKind::
                             BuildPlanRootPackageIdentityMismatch,
-                    "BuildPlan root package target differs from the selected AUR target identity.");
+                    localization::format_translated_message(
+                            // TRANSLATORS: The placeholders are the literal
+                            // internal type name "BuildPlan" and service name
+                            // "AUR", respectively.
+                            "{} root package target differs from the selected {} target identity.",
+                            BUILD_PLAN_TYPE_NAME,
+                            AUR_SERVICE_NAME));
             issue.original_query_plan_index =
                     correlation.original_query_plan_index;
             issue.selected_target_index = correlation.selected_target_index;
@@ -970,11 +1038,14 @@ void validate_preparation_snapshot_before_execution(
     }
     if(snapshot_matches) return;
 
-    add_issue(
+    add_localized_operation_issue(
             state.issues,
             FilteredAurUpdateOperationIssueKind::
                     PreflightTargetMappingInconsistent,
-            "Prepared filtered AUR operation preflight snapshot changed after preparation.");
+            localization::format_translated_message(
+                    // TRANSLATORS: {} is the literal service name "AUR".
+                    "Prepared filtered {} operation preflight snapshot changed after preparation.",
+                    AUR_SERVICE_NAME));
 }
 
 bool has_executable_target(
@@ -1003,8 +1074,10 @@ AurUpdateSourceBuildPreparation make_planning_blocker(
 
     AurUpdatePreparationIssue issue;
     issue.reason = AurUpdatePreparationReason::BuildUnitSelectionInconsistent;
-    issue.diagnostic =
-            "Filtered AUR operation planning or correlation failed before mutation preparation.";
+    issue.diagnostic = localization::format_translated_message(
+            // TRANSLATORS: {} is the literal service name "AUR".
+            "Filtered {} operation planning or correlation failed before mutation preparation.",
+            AUR_SERVICE_NAME);
     for(const AurUpdateExecutionTarget& target :
         preparation.affected_update_targets) {
         issue.affected_update_plan_indices.push_back(
@@ -1028,11 +1101,14 @@ AurUpdateBuildUnitSelection make_build_unit_selection(
         if(planned.original_build_plan_index != position ||
            position >= correlations.size() ||
            correlations[position].original_build_plan_index != position) {
-            FilteredAurUpdateOperationIssue& issue = add_issue(
+            FilteredAurUpdateOperationIssue& issue = add_localized_operation_issue(
                     issues,
                     FilteredAurUpdateOperationIssueKind::
                             BuildUnitSelectionMappingInconsistent,
-                    "Build-unit planner result order differs from BuildPlan order.");
+                    localization::format_translated_message(
+                            // TRANSLATORS: {} is the literal internal type name "BuildPlan".
+                            "Build-unit planner result order differs from {} order.",
+                            BUILD_PLAN_TYPE_NAME));
             issue.build_plan_order_index = position;
             continue;
         }
@@ -1048,7 +1124,7 @@ AurUpdateBuildUnitSelection make_build_unit_selection(
             entry.selected_execution_index =
                     planned.selected_execution_index;
             if(!entry.selected_execution_index.has_value()) {
-                FilteredAurUpdateOperationIssue& issue = add_issue(
+                FilteredAurUpdateOperationIssue& issue = add_localized_operation_issue(
                         issues,
                         FilteredAurUpdateOperationIssueKind::
                                 BuildUnitSelectionMappingInconsistent,
@@ -1061,7 +1137,7 @@ AurUpdateBuildUnitSelection make_build_unit_selection(
             entry.status = AurUpdateBuildUnitSelectionStatus::
                     ExternallySatisfiedByExplicitSourcePackageBase;
             if(!planned.explicit_source.has_value()) {
-                FilteredAurUpdateOperationIssue& issue = add_issue(
+                FilteredAurUpdateOperationIssue& issue = add_localized_operation_issue(
                         issues,
                         FilteredAurUpdateOperationIssueKind::
                                 BuildUnitSelectionMappingInconsistent,
@@ -1082,11 +1158,14 @@ AurUpdateBuildUnitSelection make_build_unit_selection(
         case UpgradeAllBuildUnitDisposition::
                 ConflictingExplicitSourceIdentity:
         case UpgradeAllBuildUnitDisposition::ConflictingSelectedPackageBase: {
-            FilteredAurUpdateOperationIssue& issue = add_issue(
+            FilteredAurUpdateOperationIssue& issue = add_localized_operation_issue(
                     issues,
                     FilteredAurUpdateOperationIssueKind::
                             BuildUnitSelectionMappingInconsistent,
-                    "Filtered preflight BuildPlan contains a non-executable build-unit disposition.");
+                    localization::format_translated_message(
+                            // TRANSLATORS: {} is the literal internal type name "BuildPlan".
+                            "Filtered preflight {} contains a non-executable build-unit disposition.",
+                            BUILD_PLAN_TYPE_NAME));
             issue.build_plan_order_index = position;
             issue.package_base = correlations[position].package_base;
             break;
@@ -1104,11 +1183,14 @@ void map_selected_execution_indices(
     for(const UpgradeAllBuildUnitPlanEntry& entry :
         plan.build_unit_dispositions) {
         if(entry.original_build_plan_index >= correlations.size()) {
-            FilteredAurUpdateOperationIssue& issue = add_issue(
+            FilteredAurUpdateOperationIssue& issue = add_localized_operation_issue(
                     issues,
                     FilteredAurUpdateOperationIssueKind::
                             BuildUnitSelectionMappingInconsistent,
-                    "Build-unit planner result maps outside the BuildPlan correlation snapshot.");
+                    localization::format_translated_message(
+                            // TRANSLATORS: {} is the literal internal type name "BuildPlan".
+                            "Build-unit planner result maps outside the {} correlation snapshot.",
+                            BUILD_PLAN_TYPE_NAME));
             issue.build_plan_order_index = entry.original_build_plan_index;
             continue;
         }
@@ -1126,11 +1208,14 @@ void correlate_prepared_work_items(
         for(const AurUpdatePreparedWorkItemAttribution& attribution :
             preparation.invocation->work_item_attributions()) {
             if(attribution.build_plan_order_index >= correlations.size()) {
-                FilteredAurUpdateOperationIssue& issue = add_issue(
+                FilteredAurUpdateOperationIssue& issue = add_localized_operation_issue(
                         issues,
                         FilteredAurUpdateOperationIssueKind::
                                 ExecutionBuildUnitMappingInconsistent,
-                        "Prepared work item maps outside the BuildPlan correlation snapshot.");
+                        localization::format_translated_message(
+                                // TRANSLATORS: {} is the literal internal type name "BuildPlan".
+                                "Prepared work item maps outside the {} correlation snapshot.",
+                                BUILD_PLAN_TYPE_NAME));
                 issue.build_plan_order_index =
                         attribution.build_plan_order_index;
                 issue.invocation_work_item_index =
@@ -1153,7 +1238,7 @@ void correlate_prepared_work_items(
                (correlation.invocation_work_item_index.has_value() &&
                 correlation.invocation_work_item_index !=
                         attribution.invocation_work_item_index)) {
-                FilteredAurUpdateOperationIssue& issue = add_issue(
+                FilteredAurUpdateOperationIssue& issue = add_localized_operation_issue(
                         issues,
                         FilteredAurUpdateOperationIssueKind::
                                 ExecutionBuildUnitMappingInconsistent,
@@ -1175,11 +1260,14 @@ void correlate_prepared_work_items(
     for(const AurUpdateWorkItemExecutionResult& work_item :
         execution->work_item_results) {
         if(work_item.build_plan_order_index >= correlations.size()) {
-            FilteredAurUpdateOperationIssue& issue = add_issue(
+            FilteredAurUpdateOperationIssue& issue = add_localized_operation_issue(
                     issues,
                     FilteredAurUpdateOperationIssueKind::
                             ExecutionBuildUnitMappingInconsistent,
-                    "Execution work item maps outside the BuildPlan correlation snapshot.");
+                    localization::format_translated_message(
+                            // TRANSLATORS: {} is the literal internal type name "BuildPlan".
+                            "Execution work item maps outside the {} correlation snapshot.",
+                            BUILD_PLAN_TYPE_NAME));
             issue.build_plan_order_index = work_item.build_plan_order_index;
             issue.invocation_work_item_index = work_item.work_item_index;
             continue;
@@ -1193,7 +1281,7 @@ void correlate_prepared_work_items(
                    work_item.package_name, correlation.package_names) ||
            !has_exact_execution_child_names(
                    work_item, correlation.package_names)) {
-            FilteredAurUpdateOperationIssue& issue = add_issue(
+            FilteredAurUpdateOperationIssue& issue = add_localized_operation_issue(
                     issues,
                     FilteredAurUpdateOperationIssueKind::
                             ExecutionBuildUnitMappingInconsistent,
@@ -1223,7 +1311,7 @@ std::vector<FilteredAurUpdateSelectedTargetResult> map_selected_results(
                 match->update.installed_name == correlation.package_name &&
                 match->package_base == correlation.package_base;
         if(!identity_matches) {
-            FilteredAurUpdateOperationIssue& issue = add_issue(
+            FilteredAurUpdateOperationIssue& issue = add_localized_operation_issue(
                     issues,
                     FilteredAurUpdateOperationIssueKind::
                             ReducedTargetMappingInconsistent,
@@ -1310,29 +1398,46 @@ FilteredAurUpdateTargetAdapter adapt_aur_update_plan_for_upgrade_all(
                     ? UpgradeAllAurTargetStatus::Candidate
                     : UpgradeAllAurTargetStatus::Incomplete;
             status_detail = update.aur_package.has_value()
-                    ? "AUR update candidate"
-                    : "AUR update candidate has no remote package identity";
+                    ? localization::format_translated_message(
+                              // TRANSLATORS: {} is the literal service name "AUR".
+                              "{} update candidate",
+                              AUR_SERVICE_NAME)
+                    : localization::format_translated_message(
+                              // TRANSLATORS: {} is the literal service name "AUR".
+                              "{} update candidate has no remote package identity",
+                              AUR_SERVICE_NAME);
             break;
         case AurUpdateClassification::MetadataUnavailable:
             status = UpgradeAllAurTargetStatus::Incomplete;
-            status_detail = "AUR metadata unavailable";
+            status_detail = localization::format_translated_message(
+                    // TRANSLATORS: {} is the literal service name "AUR".
+                    "{} metadata unavailable", AUR_SERVICE_NAME);
             break;
         case AurUpdateClassification::VersionComparisonUnavailable:
             status = UpgradeAllAurTargetStatus::Incomplete;
-            status_detail = "AUR version comparison unavailable";
+            status_detail = localization::format_translated_message(
+                    // TRANSLATORS: {} is the literal service name "AUR".
+                    "{} version comparison unavailable", AUR_SERVICE_NAME);
             break;
         case AurUpdateClassification::UpToDate:
         case AurUpdateClassification::NonAurForeign:
-            throw std::logic_error(
-                    "Normal skip unexpectedly reached the upgrade-all target adapter.");
+            throw std::logic_error(localization::format_translated_message(
+                    // TRANSLATORS: {} is the literal command name "upgrade-all".
+                    "Normal skip unexpectedly reached the {} target adapter.",
+                    UPGRADE_ALL_COMMAND_NAME));
         default: {
             status = UpgradeAllAurTargetStatus::Incomplete;
-            status_detail = "Unknown AUR update classification";
-            FilteredAurUpdateOperationIssue& issue = add_issue(
+            status_detail = localization::format_translated_message(
+                    // TRANSLATORS: {} is the literal service name "AUR".
+                    "Unknown {} update classification", AUR_SERVICE_NAME);
+            FilteredAurUpdateOperationIssue& issue = add_localized_operation_issue(
                     issues,
                     FilteredAurUpdateOperationIssueKind::
                             UnknownUpdateClassification,
-                    "AurUpdatePlan entry has an unknown classification.");
+                    localization::format_translated_message(
+                            // TRANSLATORS: {} is the literal internal type name "AurUpdatePlan".
+                            "{} entry has an unknown classification.",
+                            AUR_UPDATE_PLAN_TYPE_NAME));
             issue.original_query_plan_index = original_index;
             issue.package_name = update.installed_name;
             break;
@@ -1524,12 +1629,16 @@ FilteredAurUpdateExecutionResult execute_prepared_filtered_aur_update_operation(
         PreparedFilteredAurUpdateOperation prepared,
         const AppConfig& config) {
     if(!prepared.valid_) {
-        throw std::logic_error(
-                "Prepared filtered AUR update operation is invalid or has already been consumed.");
+        throw std::logic_error(localization::format_translated_message(
+                // TRANSLATORS: {} is the literal service name "AUR".
+                "Prepared filtered {} update operation is invalid or has already been consumed.",
+                AUR_SERVICE_NAME));
     }
     if(!prepared.preparation.has_value()) {
-        throw std::logic_error(
-                "Prepared filtered AUR update operation lost its source-build preparation snapshot.");
+        throw std::logic_error(localization::format_translated_message(
+                // TRANSLATORS: {} is the literal service name "AUR".
+                "Prepared filtered {} update operation lost its source-build preparation snapshot.",
+                AUR_SERVICE_NAME));
     }
 
     if(prepared.is_prepared()) {
