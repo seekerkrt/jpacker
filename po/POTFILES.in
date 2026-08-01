@@ -1,3 +1,4 @@
 src/moguet.cpp
 src/source_build.cpp
 src/commands_source_maintenance.cpp
+src/xdg_paths.cpp

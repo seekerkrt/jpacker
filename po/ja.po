@@ -2,7 +2,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Moguet 1.16.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-01 14:27+0900\n"
+"POT-Creation-Date: 2026-08-01 15:47+0900\n"
 "PO-Revision-Date: 2026-08-01 11:39+0900\n"
 "Last-Translator: Moguet contributors\n"
 "Language-Team: Japanese\n"
@@ -293,3 +293,55 @@ msgstr "登録済みソースパッケージ:"
 #: src/commands_source_maintenance.cpp:456
 msgid "(none)"
 msgstr "（なし）"
+
+#. TRANSLATORS: The placeholders are the Moguet project identity,
+#. literal config/state/cache kind, and environment-variable identities.
+#: src/xdg_paths.cpp:79
+#, c++-format
+msgid "Cannot resolve {} {} directory: {} is unset or empty, and {} is not set."
+msgstr "{}の{}ディレクトリを解決できません: {}が未設定または空で、{}が設定されていません。"
+
+#. TRANSLATORS: The placeholders are the Moguet project identity,
+#. literal config/state/cache kind, and environment-variable identities.
+#: src/xdg_paths.cpp:88
+#, c++-format
+msgid "Cannot resolve {} {} directory: {} is unset or empty, and {} is empty."
+msgstr "{}の{}ディレクトリを解決できません: {}が未設定または空で、{}が空です。"
+
+#. TRANSLATORS: The placeholders are the Moguet project identity,
+#. literal config/state/cache kind, and environment-variable identity.
+#: src/xdg_paths.cpp:97
+#, c++-format
+msgid "Cannot resolve {} {} directory: {} must be an absolute path."
+msgstr "{}の{}ディレクトリを解決できません: {}は絶対パスである必要があります。"
+
+#. TRANSLATORS: The placeholders are the Moguet project identity,
+#. literal config/state/cache kind, environment-variable identity, and
+#. literal path components.
+#: src/xdg_paths.cpp:104
+#, c++-format
+msgid "Cannot resolve {} {} directory: {} contains a '{}' or '{}' path component."
+msgstr "{}の{}ディレクトリを解決できません: {}に'{}'または'{}'のパス要素が含まれています。"
+
+#. TRANSLATORS: The placeholders are the Moguet project identity,
+#. literal config/state/cache kind, environment-variable identity, and
+#. literal double-slash token.
+#: src/xdg_paths.cpp:112
+#, c++-format
+msgid "Cannot resolve {} {} directory: {} begins with the implementation-defined '{}' form."
+msgstr "{}の{}ディレクトリを解決できません: {}が処理系定義の'{}'形式で始まっています。"
+
+#. TRANSLATORS: The placeholders are the Moguet project identity,
+#. literal config/state/cache kind, environment-variable identity, and
+#. literal NUL token.
+#: src/xdg_paths.cpp:120
+#, c++-format
+msgid "Cannot resolve {} {} directory: {} contains an embedded {} byte."
+msgstr "{}の{}ディレクトリを解決できません: {}に{}バイトが埋め込まれています。"
+
+#. TRANSLATORS: The placeholders are the Moguet project identity,
+#. literal config/state/cache kind, and environment-variable identity.
+#: src/xdg_paths.cpp:127
+#, c++-format
+msgid "Cannot resolve {} {} directory: {} is not a valid native path."
+msgstr "{}の{}ディレクトリを解決できません: {}は有効なネイティブパスではありません。"
