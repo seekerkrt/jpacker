@@ -13,7 +13,7 @@ pkgver=$(_read_version_file VERSION)
 pkgrel=1
 pkgdesc="A pacman-first AUR helper for Arch Linux with verified source builds and per-package build preferences"
 arch=('x86_64')
-url="https://github.com/seekerkrt/jpacker"
+url="https://github.com/seekerkrt/moguet"
 license=('GPL-3.0-or-later')
 
 # Directly linked libraries and production external commands.
@@ -29,7 +29,7 @@ makedepends=('nlohmann-json' 'tomlplusplus')
 # is supported, and replacement would remove the rollback package implicitly.
 
 # GitHub release tag をソースとして指定
-source=("moguet-src::git+https://github.com/seekerkrt/jpacker.git#tag=v${pkgver}")
+source=("moguet-src::git+https://github.com/seekerkrt/moguet.git#tag=v${pkgver}")
 
 # Gitリポジトリの場合はチェックサムをSKIPにするのが通例
 sha256sums=('SKIP')

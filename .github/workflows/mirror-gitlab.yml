@@ -41,8 +41,10 @@ jobs:
             repository.git
 
           git -C repository.git remote add gitlab \
-            "git@gitlab.com:seekerkrt/jpacker.git"
+            "git@gitlab.com:seekerkrt/moguet.git"
 
-          git -C repository.git push --force --prune gitlab \
-            'refs/heads/*:refs/heads/*' \
+          git -C repository.git push --prune gitlab \
+            'refs/heads/*:refs/heads/*'
+
+          git -C repository.git push gitlab \
             'refs/tags/*:refs/tags/*'

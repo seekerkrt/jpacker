@@ -1,25 +1,25 @@
-# jpacker バージョン運用方針
+# Moguet バージョン運用方針
 
-このドキュメントでは、jpacker のバージョン番号の付け方とリリース範囲の判断基準を定義する。
+このドキュメントでは、Moguet のバージョン番号の付け方とリリース範囲の判断基準を定義する。
 
-jpacker は `MAJOR.MINOR.PATCH` 形式のバージョン番号を使う。ただし、厳密な Semantic Versioning
+Moguet は `MAJOR.MINOR.PATCH` 形式のバージョン番号を使う。ただし、厳密な Semantic Versioning
 準拠とは名乗らない。基本判断は Semantic Versioning に近づけ、破壊的変更は `MAJOR`、後方互換な
 機能追加や対応範囲の拡大は `MINOR`、bug fix や小さな補正は `PATCH` として扱う。
 
-バージョンの正本はリポジトリルートの `VERSION` ファイルとする。Git tag は `v1.4.0` のように
+バージョンの正本はリポジトリルートの `VERSION` ファイルとする。Git tag は `v2.0.0` のように
 `v` prefix を付ける。
 
 ## 互換性の判断対象
 
-jpacker は CLI ツールなので、互換性は内部 C++ API ではなく、ユーザーから見える挙動を基準に判断する。
+Moguet は CLI ツールなので、互換性は内部 C++ API ではなく、ユーザーから見える挙動を基準に判断する。
 
 互換性の判断対象には、次を含める。
 
 - コマンド名、オプション、引数、その意味
 - ユーザーやスクリプトが依存しうる出力形式
 - 終了コード
-- `/etc/jpacker/jpacker.conf` などの config file format
-- `/etc/jpacker/package.build/` などの config / state directory
+- MoguetのXDG config / state / cache layout
+- jpacker v1.16.0から継承する`/etc/jpacker/package.build/`等のlegacy compatibility boundary
 - pacman、makepkg、git、AUR repository を使う package build の期待挙動
 - inspection-only command と build / install / update / reset などを行う command の安全境界
 
@@ -40,8 +40,8 @@ jpacker は CLI ツールなので、互換性は内部 C++ API ではなく、�
 - 安全境界を大きく変える
 - 新しい大テーマや product direction へ移行する
 
-`v2.0.0` は、`pactune` rename など、identity や workflow に関わる breaking release 候補を扱う
-場所として想定する。
+`v2.0.0`では、jpacker v1.16.0からMoguetへのidentity、storage、config、localization、
+packagingのbreaking transitionを行った。
 
 ## MINOR
 
@@ -88,7 +88,7 @@ PATCH は後方互換な変更だけを含める。ただし、後方互換で�
 - 新しい command / option
 - 既存 command の機能的変更
 - 対応 workflow の拡大
-- 将来の `pactune` transition のような breaking rename や identity change
+- breaking renameやproject identity change
 
 これらは、後方互換であれば新しい MINOR series、breaking change であれば MAJOR release として扱う。
 

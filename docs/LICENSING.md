@@ -1,6 +1,6 @@
 # Moguet licensing policy
 
-この文書は、Moguet本体とthird-party componentのライセンス運用に関するsource of truthです。ライセンス本文そのものの代替ではありません。Moguet本体へ適用するGNU General Public License version 3の正式全文は、source treeではrepository rootの[`LICENSE`](https://github.com/seekerkrt/jpacker/blob/develop/LICENSE)、install後は`${PREFIX}/share/licenses/moguet/LICENSE`を参照してください。Arch packageでは`/usr/share/licenses/moguet/LICENSE`へ配置します。
+この文書は、Moguet本体とthird-party componentのライセンス運用に関するsource of truthです。ライセンス本文そのものの代替ではありません。Moguet本体へ適用するGNU General Public License version 3の正式全文は、source treeではrepository rootの[`LICENSE`](https://github.com/seekerkrt/moguet/blob/develop/LICENSE)、install後は`${PREFIX}/share/licenses/moguet/LICENSE`を参照してください。Arch packageでは`/usr/share/licenses/moguet/LICENSE`へ配置します。
 
 ## Version boundary
 
@@ -12,7 +12,7 @@ Moguetと、その前身であるjpackerのライセンス境界は次のとお�
 
 - v1.14.0以前のtag、release、git historyは変更しません。既にMIT Licenseで提供したcopyのpermissionを取り消しません。
 - jpacker v1.15.0以降とMoguetには`GPL-3.0-or-later`を適用します。
-- v1.14.0以前に適用したMIT全文は、historical noticeとしてsource treeの[`LICENSES/jpacker-MIT-legacy.txt`](https://github.com/seekerkrt/jpacker/blob/develop/LICENSES/jpacker-MIT-legacy.txt)へ改変せず保持します。Moguetへのinstall後は`${PREFIX}/share/licenses/moguet/jpacker-MIT-legacy.txt`、Arch packageでは`/usr/share/licenses/moguet/jpacker-MIT-legacy.txt`です。historical filenameは来歴を示すため変更しません。
+- v1.14.0以前に適用したMIT全文は、historical noticeとしてsource treeの[`LICENSES/jpacker-MIT-legacy.txt`](https://github.com/seekerkrt/moguet/blob/develop/LICENSES/jpacker-MIT-legacy.txt)へ改変せず保持します。Moguetへのinstall後は`${PREFIX}/share/licenses/moguet/jpacker-MIT-legacy.txt`、Arch packageでは`/usr/share/licenses/moguet/jpacker-MIT-legacy.txt`です。historical filenameは来歴を示すため変更しません。
 
 ## Project notice
 
@@ -40,7 +40,7 @@ Moguet. If not, see <https://www.gnu.org/licenses/>.
 
 Moguetへ取り込まれたproject-authored contributionは、Moguetの一部として`GPL-3.0-or-later`で配布されます。contributorが保有するcopyrightをMoguetへ譲渡することは求めません。現時点ではDCOやCLAも要求しません。
 
-詳しいcontribution processとthird-party materialの方針は、source treeの[`CONTRIBUTING.md`](https://github.com/seekerkrt/jpacker/blob/develop/CONTRIBUTING.md)を参照してください。
+詳しいcontribution processとthird-party materialの方針は、source treeの[`CONTRIBUTING.md`](https://github.com/seekerkrt/moguet/blob/develop/CONTRIBUTING.md)を参照してください。
 
 ## Why GPL-3.0-or-later
 
@@ -48,7 +48,7 @@ jpacker v1.15.0で導入された、Arch Linux `pacman` packageが提供する`l
 
 このためMoguetは、linked combination全体をGPL-covered workとして扱う保守的なproject compliance policyを採用し、later-version optionとの互換性と将来の明確さを優先して`GPL-3.0-or-later`を選択します。libalpmをread-only metadataへ限定し、transactionを`pacman`へ任せるarchitecture上のowner分離は維持しますが、その責務分離とlibrary linkのlicense分類は別の話です。
 
-GPLは商用利用を禁止するlicenseではありません。実行、調査、改変、originalまたはmodified copyの再配布を認めつつ、covered copyを配布する場合のsource提供、license・copyright noticeの保持、同じlicense上の権利の継承、追加制限の禁止などを定めます。正確な条件は必ずsource treeの[`LICENSE`](https://github.com/seekerkrt/jpacker/blob/develop/LICENSE)、またはinstall済みの`${PREFIX}/share/licenses/moguet/LICENSE`にある正式全文で確認してください。
+GPLは商用利用を禁止するlicenseではありません。実行、調査、改変、originalまたはmodified copyの再配布を認めつつ、covered copyを配布する場合のsource提供、license・copyright noticeの保持、同じlicense上の権利の継承、追加制限の禁止などを定めます。正確な条件は必ずsource treeの[`LICENSE`](https://github.com/seekerkrt/moguet/blob/develop/LICENSE)、またはinstall済みの`${PREFIX}/share/licenses/moguet/LICENSE`にある正式全文で確認してください。
 
 ## Source distributions
 

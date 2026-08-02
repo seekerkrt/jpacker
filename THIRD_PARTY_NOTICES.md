@@ -23,7 +23,7 @@ Because no libalpm source or binary copy is included in the Moguet source or pac
 - **License:** `curl` (SPDX identifier).
 - **Provider:** The Arch Linux `curl` package.
 - **Bundled:** No. Moguet does not copy or distribute the libcurl source tree or library binary.
-- **Required notice:** [`LICENSES/curl.txt`](https://github.com/seekerkrt/jpacker/blob/develop/LICENSES/curl.txt) in the source tree; `${PREFIX}/share/licenses/moguet/curl.txt` after installation (`/usr/share/licenses/moguet/curl.txt` in the Arch package).
+- **Required notice:** [`LICENSES/curl.txt`](https://github.com/seekerkrt/moguet/blob/develop/LICENSES/curl.txt) in the source tree; `${PREFIX}/share/licenses/moguet/curl.txt` after installation (`/usr/share/licenses/moguet/curl.txt` in the Arch package).
 
 `LICENSES/curl.txt` is an exact copy of the copyright and permission notice installed by Arch `curl` 8.21.0-1 and matches the [curl upstream license](https://curl.se/docs/copyright.html) for the audited release.
 
@@ -34,8 +34,8 @@ Because no libalpm source or binary copy is included in the Moguet source or pac
 - **License for the compiled header closure:** MIT.
 - **Provider:** The Arch Linux `nlohmann-json` package at build time.
 - **Bundled source tree:** No.
-- **Required notice:** [`LICENSES/nlohmann-json-MIT.txt`](https://github.com/seekerkrt/jpacker/blob/develop/LICENSES/nlohmann-json-MIT.txt) in the source tree; `${PREFIX}/share/licenses/moguet/nlohmann-json-MIT.txt` after installation (`/usr/share/licenses/moguet/nlohmann-json-MIT.txt` in the Arch package).
-- **UTF-8 decoder notice:** [`LICENSES/bjoern-hoehrmann-utf8-MIT.txt`](https://github.com/seekerkrt/jpacker/blob/develop/LICENSES/bjoern-hoehrmann-utf8-MIT.txt) covers the attributed decoder code in the compiled header closure.
+- **Required notice:** [`LICENSES/nlohmann-json-MIT.txt`](https://github.com/seekerkrt/moguet/blob/develop/LICENSES/nlohmann-json-MIT.txt) in the source tree; `${PREFIX}/share/licenses/moguet/nlohmann-json-MIT.txt` after installation (`/usr/share/licenses/moguet/nlohmann-json-MIT.txt` in the Arch package).
+- **UTF-8 decoder notice:** [`LICENSES/bjoern-hoehrmann-utf8-MIT.txt`](https://github.com/seekerkrt/moguet/blob/develop/LICENSES/bjoern-hoehrmann-utf8-MIT.txt) covers the attributed decoder code in the compiled header closure.
 
 The audit used Arch `nlohmann-json` 3.12.0-2 and the matching upstream v3.12.0 tag. The C++20 include closure contained 46 nlohmann headers; every actual file carried `SPDX-License-Identifier: MIT`. The notice preserves the following copyright provenance found in compiled headers:
 
@@ -55,8 +55,8 @@ The upstream README records the Hedley origin as CC0-1.0. The actual v3.12.0 `th
 - **License for the compiled header closure:** MIT.
 - **Provider:** The Arch Linux `tomlplusplus` package at build time.
 - **Bundled source tree:** No.
-- **Required notice:** [`LICENSES/tomlplusplus-MIT.txt`](https://github.com/seekerkrt/jpacker/blob/develop/LICENSES/tomlplusplus-MIT.txt) in the source tree; `${PREFIX}/share/licenses/moguet/tomlplusplus-MIT.txt` after installation (`/usr/share/licenses/moguet/tomlplusplus-MIT.txt` in the Arch package).
-- **UTF-8 decoder notice:** [`LICENSES/bjoern-hoehrmann-utf8-MIT.txt`](https://github.com/seekerkrt/jpacker/blob/develop/LICENSES/bjoern-hoehrmann-utf8-MIT.txt) in the source tree; `${PREFIX}/share/licenses/moguet/bjoern-hoehrmann-utf8-MIT.txt` after installation (`/usr/share/licenses/moguet/bjoern-hoehrmann-utf8-MIT.txt` in the Arch package).
+- **Required notice:** [`LICENSES/tomlplusplus-MIT.txt`](https://github.com/seekerkrt/moguet/blob/develop/LICENSES/tomlplusplus-MIT.txt) in the source tree; `${PREFIX}/share/licenses/moguet/tomlplusplus-MIT.txt` after installation (`/usr/share/licenses/moguet/tomlplusplus-MIT.txt` in the Arch package).
+- **UTF-8 decoder notice:** [`LICENSES/bjoern-hoehrmann-utf8-MIT.txt`](https://github.com/seekerkrt/moguet/blob/develop/LICENSES/bjoern-hoehrmann-utf8-MIT.txt) in the source tree; `${PREFIX}/share/licenses/moguet/bjoern-hoehrmann-utf8-MIT.txt` after installation (`/usr/share/licenses/moguet/bjoern-hoehrmann-utf8-MIT.txt` in the Arch package).
 
 The offline audit used Arch `tomlplusplus` 3.4.0-2 and the project's C++20 build flags. With no toml++ configuration macro defined, the effective configuration selected `TOML_HEADER_ONLY=1`, `TOML_IMPLEMENTATION=1`, `TOML_SHARED_LIB=0`, and `TOML_EXCEPTIONS=1`. The `<toml++/toml.hpp>` include closure contained 49 toml++ files. Forty-seven carried the MIT SPDX identifier and Mark Gillard notice; the reusable `header_start.hpp` / `header_end.hpp` implementation fragments carried no individual license marker. `unicode.hpp` records that its compiled UTF-8 decoder is based on Bjoern Hoehrmann's DFA decoder and retains his 2008-2009 copyright attribution. The separate Hoehrmann permission notice is preserved from the decoder's primary source.
 

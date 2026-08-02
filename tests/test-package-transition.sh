@@ -214,8 +214,8 @@ prepare_test_pkgbuild() {
     production_pkgbuild=$1
     source_repository=$2
     package_work=$3
+    production_source=$4
 
-    production_source='git+https://github.com/seekerkrt/jpacker.git'
     fixture_source=git+file://$source_repository
     mkdir -p "$package_work"
     cp "$production_pkgbuild" "$package_work/PKGBUILD"
@@ -355,7 +355,8 @@ legacy_version=$(tr -d '[:space:]' <"$v1_source/VERSION")
     fail "v1.16.0 archive reports VERSION=$legacy_version"
 initialize_fixture_repository "$v1_source" v1.16.0
 prepare_test_pkgbuild "$v1_source/PKGBUILD" "$v1_source" \
-    "$v1_makepkg_work"
+    "$v1_makepkg_work" \
+    'git+https://github.com/seekerkrt/jpacker.git'
 
 # Copy every present tracked or non-ignored untracked working-tree file. This
 # preserves the issue branch's dirty edits and tracked deletions while keeping
@@ -392,7 +393,8 @@ first_package_artifact=$(find "$v2_source" -type f \
 
 initialize_fixture_repository "$v2_source" v2.0.0
 prepare_test_pkgbuild "$repo_root/PKGBUILD" "$v2_source" \
-    "$v2_makepkg_work"
+    "$v2_makepkg_work" \
+    'git+https://github.com/seekerkrt/moguet.git'
 
 mkdir -p \
     "$v1_package_destination" \

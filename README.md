@@ -30,9 +30,8 @@ but poisonous; that combination reflects a small helper that warns about
 danger or ambiguity and stops before external mutation when it cannot make an
 authoritative decision.
 
-Moguet is a project-specific coined name.
-<code>MU<!-- rejected alternate spelling -->GUET</code> and the Japanese
-reading 「ミュ<!-- rejected alternate reading -->ゲ」 are not alternate names.
+Moguet is a project-specific coined name. Its formal project spelling is
+**Moguet**, and its formal Japanese reading is **モグエット**.
 
 <!-- parity:status -->
 ## Project status
@@ -41,15 +40,13 @@ Moguet v2.0.0 is a breaking identity, storage, configuration, localization,
 and packaging transition built on the jpacker v1.16.0 execution base. The
 local `moguet` binary, XDG paths, typed TOML configuration, and gettext-based
 English/Japanese CLI surface are implemented. The local package identity,
-payload, dependency metadata, documentation, and non-destructive jpacker v1
-transition are also fixed. External repository and publication cutovers remain
-a separate release gate.
+payload, dependency metadata, documentation, and non-destructive transition
+from jpacker v1.16.0 form the v2 release contract.
 
-The currently published repository and package endpoints may still use the
-legacy `jpacker` name until the separately validated release cutover is
-complete. The Moguet package does not provide a `jpacker` command alias. This
-document does not imply that an unpublished AUR endpoint, repository rename,
-or release already exists.
+The canonical repository identity is Moguet on GitHub, with a GitLab mirror.
+The Moguet package does not provide a `jpacker` command alias. AUR publication
+is a separate future decision; this document does not claim that an AUR
+endpoint exists.
 
 <!-- parity:safety -->
 ## Design and safety boundaries
@@ -76,9 +73,9 @@ or release already exists.
   retrying; the package may already be installed.
 
 The detailed compatibility and routing contract is in
-[docs/COMPATIBILITY.md](https://github.com/seekerkrt/jpacker/blob/develop/docs/COMPATIBILITY.md),
+[docs/COMPATIBILITY.md](https://github.com/seekerkrt/moguet/blob/develop/docs/COMPATIBILITY.md),
 and adopted design decisions are recorded in
-[docs/DECISIONS.md](https://github.com/seekerkrt/jpacker/blob/develop/docs/DECISIONS.md).
+[docs/DECISIONS.md](https://github.com/seekerkrt/moguet/blob/develop/docs/DECISIONS.md).
 
 <!-- parity:installation -->
 ## Installation
@@ -97,8 +94,8 @@ and adopted design decisions are recorded in
 Build and inspect the development tree with:
 
 ```bash
-git clone https://github.com/seekerkrt/jpacker.git
-cd jpacker
+git clone https://github.com/seekerkrt/moguet.git
+cd moguet
 make
 ./moguet --help
 ```
@@ -128,10 +125,10 @@ package is `nlohmann-json` and `tomlplusplus`. Arch package builds assume
 gettext supplies the catalog build tools; the runtime binary has no separate
 libintl dependency.
 
-The public Moguet package endpoint is part of the final release cutover. Until
-it is published, do not invent an AUR URL or install a development payload on
-the live system. See the [v1 to v2 Migration Guide](docs/migration/v1-to-v2.md)
-before changing an installed system.
+Moguet v2.0.0 does not include AUR publication. Do not invent an AUR URL or
+install a development payload on the live system. See the
+[v1 to v2 Migration Guide](docs/migration/v1-to-v2.md) before changing an
+installed system.
 
 <!-- parity:usage -->
 ## Basic usage
@@ -288,18 +285,17 @@ package does not own, migrate, or remove it.
 <!-- parity:development -->
 ## Development
 
-The canonical development repository is currently
-[GitHub](https://github.com/seekerkrt/jpacker), with a
-[GitLab mirror](https://gitlab.com/seekerkrt/jpacker). Those external names are
-intentionally unchanged until the final identity cutover is validated. Issues
-and pull requests are managed on GitHub.
+The canonical development repository is
+[GitHub](https://github.com/seekerkrt/moguet), with a
+[GitLab mirror](https://gitlab.com/seekerkrt/moguet). Issues and pull requests
+are managed on GitHub.
 
 The active integration branch is `develop`; stable releases are on `main`.
 See
-[CONTRIBUTING.md](https://github.com/seekerkrt/jpacker/blob/develop/CONTRIBUTING.md),
-[docs/DEVELOPMENT.md](https://github.com/seekerkrt/jpacker/blob/develop/docs/DEVELOPMENT.md),
+[CONTRIBUTING.md](https://github.com/seekerkrt/moguet/blob/develop/CONTRIBUTING.md),
+[docs/DEVELOPMENT.md](https://github.com/seekerkrt/moguet/blob/develop/docs/DEVELOPMENT.md),
 and
-[docs/VERSIONING.md](https://github.com/seekerkrt/jpacker/blob/develop/docs/VERSIONING.md).
+[docs/VERSIONING.md](https://github.com/seekerkrt/moguet/blob/develop/docs/VERSIONING.md).
 Moguet v2.x will add AUR-helper
 capabilities incrementally; advanced runtime-aware completion and the later
 build-profile system are separate work.
@@ -307,16 +303,16 @@ build-profile system are separate work.
 <!-- parity:license -->
 ## License
 
-The current GPL-licensed development series and v1.15.0 or later releases are distributed under `GPL-3.0-or-later`.
-jpacker v1.14.0 and earlier releases
-were distributed under the MIT License. Those historical releases remain
+Moguet releases and jpacker v1.15.0 through v1.16.0 are distributed under `GPL-3.0-or-later`.
+jpacker v1.14.0 and earlier releases were distributed under the MIT License.
+Those historical releases remain
 available under their original license; their tags, releases, and granted
 permissions are unchanged by the Moguet rename.
 
-- GNU GPL version 3 full text: [LICENSE](https://github.com/seekerkrt/jpacker/blob/develop/LICENSE)
+- GNU GPL version 3 full text: [LICENSE](https://github.com/seekerkrt/moguet/blob/develop/LICENSE)
 - Version boundary and distribution policy: [docs/LICENSING.md](docs/LICENSING.md)
 - Linked/compiled components and external programs: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
-- Historical MIT text for v1.14.0 and earlier: [LICENSES/jpacker-MIT-legacy.txt](https://github.com/seekerkrt/jpacker/blob/develop/LICENSES/jpacker-MIT-legacy.txt)
+- Historical MIT text for v1.14.0 and earlier: [LICENSES/jpacker-MIT-legacy.txt](https://github.com/seekerkrt/moguet/blob/develop/LICENSES/jpacker-MIT-legacy.txt)
 
 Moguet directly and dynamically links libalpm and libcurl and compiles the
 system nlohmann-json and toml++ headers into its binary. pacman, pacman-conf,

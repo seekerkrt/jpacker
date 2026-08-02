@@ -63,17 +63,17 @@ before using package removal commands.
 | Project environment prefix | legacy names | `MOGUET_*` |
 | Runtime localization | English-only legacy surface | English authority, Japanese formal translation |
 
-<code>MU<!-- rejected alternate spelling -->GUET</code> and the Japanese
-reading 「ミュ<!-- rejected alternate reading -->ゲ」 are not aliases. Command
-and option tokens are not translated. The formal v2 command is `moguet`; do not
-create a local `jpacker` symlink and assume that it has packaging support.
+The formal project spelling is `Moguet`, and its Japanese reading is
+`モグエット`. Command and option tokens are not translated. The formal v2
+command is `moguet`; do not create a local `jpacker` symlink and assume that it
+has packaging support.
 The package intentionally declares no `provides`, `conflicts`, or `replaces`
 relationship with `jpacker`: it neither implements the old command nor removes
 the rollback package as an implicit upgrade.
 
-The source/repository URLs may continue to contain `jpacker` until the final
-external identity cutover. Follow published release links rather than editing
-remotes or package sources in advance.
+The canonical source identity is now `seekerkrt/moguet` on GitHub and GitLab.
+The old `seekerkrt/jpacker` URLs are redirect-only legacy entry points and must
+not be reused for a different repository.
 
 <!-- parity:backup -->
 ## Back up v1 data
@@ -152,7 +152,7 @@ The package identity is `moguet` and its only executable is `/usr/bin/moguet`;
 there is no `/usr/bin/jpacker` alias. The package metadata has no `provides`,
 `conflicts`, or `replaces` entry for jpacker. Coexistence is a transition and
 rollback property, not a claim that Moguet provides the jpacker interface.
-Until the package endpoint is officially published, this guide intentionally
+Moguet v2.0.0 does not include AUR publication, so this guide intentionally
 does not invent an AUR URL or a `pacman -S` repository command. Do not stage a
 development `make install` over the old package as a substitute for the
 validated transition.
@@ -319,19 +319,39 @@ compare actual package database state rather than assuming the helper rollback
 changed installed packages.
 
 <!-- parity:maintenance -->
-## v1 maintenance and external cutover
+## v1 maintenance and repository remotes
 
-jpacker v1 remains under the `jpacker` identity and its v1 release tags. It is
-not relabeled as Moguet, and v1.16.0 does not receive the v2 XDG/config format
-through this migration guide.
+jpacker v1.16.0 remains under the `jpacker` identity in its immutable tag and
+Release. It is not relabeled as Moguet and does not receive the v2 XDG/config
+format through this migration guide. There is no permanent v1 maintenance
+branch. If a critical fix is required, its branch starts from the `v1.16.0`
+tag instead of treating `develop` as a v1 source.
 
-At the time this guide is prepared, the public repository has no dedicated v1
-maintenance branch; `develop` is the Moguet v2 integration branch and must not
-be treated as a v1 maintenance source. The final public location for v1
-maintenance packages/branches and any old-URL redirects is part of the
-external release cutover. Use the location named in the published v2.0.0
-release notes rather than guessing a branch or endpoint.
+The canonical repository URLs are:
+
+- GitHub: `https://github.com/seekerkrt/moguet`
+- GitLab mirror: `https://gitlab.com/seekerkrt/moguet`
+
+The former `https://github.com/seekerkrt/jpacker` and
+`https://gitlab.com/seekerkrt/jpacker` URLs are retained only as redirects.
+Do not create a new project at either old slug. Verify that an old bookmark or
+v1 Release link reaches the Moguet repository before relying on the redirect.
+
+For an existing clone, inspect its remotes and update each configured remote:
+
+```bash
+git remote -v
+git remote set-url origin https://github.com/seekerkrt/moguet.git
+git remote set-url gitlab https://gitlab.com/seekerkrt/moguet.git
+git remote get-url origin
+git remote get-url gitlab
+```
+
+If the clone uses SSH, use `git@github.com:seekerkrt/moguet.git` and
+`git@gitlab.com:seekerkrt/moguet.git` instead. Skip the `gitlab` commands when
+that remote is not configured. Changing a remote URL does not migrate package
+state or `/etc/jpacker` data.
 
 For the current source contracts, see [README.md](../../README.md),
 [README.ja.md](../../README.ja.md), and
-[COMPATIBILITY.md](https://github.com/seekerkrt/jpacker/blob/develop/docs/COMPATIBILITY.md).
+[COMPATIBILITY.md](https://github.com/seekerkrt/moguet/blob/develop/docs/COMPATIBILITY.md).

@@ -27,9 +27,8 @@ variableは`MOGUET_*` prefixを使います。
 曖昧さを警告し、authoritativeな判断ができなければexternal mutation前に停止する
 小さなhelperへ重ねています。
 
-Moguetはproject固有の造語です。
-<code>MU<!-- rejected alternate spelling -->GUET</code>や
-「ミュ<!-- rejected alternate reading -->ゲ」は別名・略称ではありません。
+Moguetはproject固有の造語です。正式なproject表記は **Moguet**、正式な読みは
+**モグエット** です。
 
 <!-- parity:status -->
 ## Project status
@@ -37,14 +36,12 @@ Moguetはproject固有の造語です。
 Moguet v2.0.0は、jpacker v1.16.0の実行基盤を土台に、identity、保存先、config、
 localization、packagingを移行するbreaking releaseです。localの`moguet` binary、
 XDG path、typed TOML config、gettextによる英日CLI surfaceは実装済みです。local
-package identity、payload、dependency metadata、documentation、非破壊なjpacker v1
-transitionも確定しました。external repositoryとpublicationのcutoverは別のrelease
-gateです。
+package identity、payload、dependency metadata、documentation、jpacker v1.16.0からの
+非破壊transitionをv2 release contractとして確定しました。
 
-現在公開されているrepositoryやpackage endpointは、別途検証するrelease cutoverが完了する
-まで旧`jpacker`名を使う場合があります。Moguet packageは`jpacker` command aliasを提供
-しません。この文書は、未公開AUR endpoint、repository rename、releaseが既に存在すると
-断定しません。
+canonical repository identityはGitHub上のMoguetで、GitLab mirrorを持ちます。Moguet
+packageは`jpacker` command aliasを提供しません。AUR publicationは将来の別判断であり、
+この文書はAUR endpointが存在すると断定しません。
 
 <!-- parity:safety -->
 ## 設計と安全境界
@@ -67,9 +64,9 @@ gateです。
   しないでください。
 
 詳細なcompatibility / routing契約は
-[docs/COMPATIBILITY.md](https://github.com/seekerkrt/jpacker/blob/develop/docs/COMPATIBILITY.md)、
+[docs/COMPATIBILITY.md](https://github.com/seekerkrt/moguet/blob/develop/docs/COMPATIBILITY.md)、
 採用済み設計判断は
-[docs/DECISIONS.md](https://github.com/seekerkrt/jpacker/blob/develop/docs/DECISIONS.md)を
+[docs/DECISIONS.md](https://github.com/seekerkrt/moguet/blob/develop/docs/DECISIONS.md)を
 参照してください。
 
 <!-- parity:installation -->
@@ -88,8 +85,8 @@ gateです。
 development treeは次のようにbuildして確認できます。
 
 ```bash
-git clone https://github.com/seekerkrt/jpacker.git
-cd jpacker
+git clone https://github.com/seekerkrt/moguet.git
+cd moguet
 make
 ./moguet --help
 ```
@@ -117,9 +114,8 @@ package runtime dependencyは`curl`、`git`、`libalpm.so`、`libarchive`、`nan
 とし、重複して列挙しません。gettextはcatalog build toolを提供し、runtime binaryは
 独立したlibintl dependencyを持ちません。
 
-publicなMoguet package endpointは最終release cutoverのscopeです。公開前にAUR URLを
-作り上げたり、development payloadをlive systemへinstallしたりしないでください。
-installed systemを変更する前に
+Moguet v2.0.0にはAUR publicationを含めません。AUR URLを作り上げたり、development
+payloadをlive systemへinstallしたりしないでください。installed systemを変更する前に
 [v1からv2へのMigration Guide](docs/migration/v1-to-v2.ja.md)を確認してください。
 
 <!-- parity:usage -->
@@ -266,15 +262,14 @@ compatibility境界として共有するため、両helperのmutating operation�
 <!-- parity:development -->
 ## 開発
 
-canonical development repositoryは現在
-[GitHub](https://github.com/seekerkrt/jpacker)、backup mirrorは
-[GitLab](https://gitlab.com/seekerkrt/jpacker)です。最終identity cutoverの検証完了まで、
-external nameを意図的に変更していません。Issueとpull requestはGitHubで管理します。
+canonical development repositoryは
+[GitHub](https://github.com/seekerkrt/moguet)、backup mirrorは
+[GitLab](https://gitlab.com/seekerkrt/moguet)です。Issueとpull requestはGitHubで管理します。
 
 active integration branchは`develop`、stable releaseは`main`です。
-[CONTRIBUTING.md](https://github.com/seekerkrt/jpacker/blob/develop/CONTRIBUTING.md)、
-[docs/DEVELOPMENT.md](https://github.com/seekerkrt/jpacker/blob/develop/docs/DEVELOPMENT.md)、
-[docs/VERSIONING.md](https://github.com/seekerkrt/jpacker/blob/develop/docs/VERSIONING.md)を
+[CONTRIBUTING.md](https://github.com/seekerkrt/moguet/blob/develop/CONTRIBUTING.md)、
+[docs/DEVELOPMENT.md](https://github.com/seekerkrt/moguet/blob/develop/docs/DEVELOPMENT.md)、
+[docs/VERSIONING.md](https://github.com/seekerkrt/moguet/blob/develop/docs/VERSIONING.md)を
 参照してください。Moguet v2.xではAUR helper
 機能を段階的に追加し、高度なruntime-aware completionと将来のbuild profile systemは
 別作業として扱います。
@@ -282,14 +277,15 @@ active integration branchは`develop`、stable releaseは`main`です。
 <!-- parity:license -->
 ## License
 
-現在のGPLライセンス開発系列とv1.15.0以降のjpackerは、`GPL-3.0-or-later`で提供します。
-v1.14.0以前のreleaseはMIT Licenseで提供されました。これらhistorical releaseは元の
-licenseのまま利用でき、Moguet renameによってtag、release、付与済みpermissionは変わりません。
+Moguet releaseとjpacker v1.15.0からv1.16.0は、`GPL-3.0-or-later`で提供します。
+jpacker v1.14.0以前のreleaseはMIT Licenseで提供されました。これらhistorical releaseは
+元のlicenseのまま利用でき、Moguet renameによってtag、release、付与済みpermissionは
+変わりません。
 
-- GNU GPL version 3全文: [LICENSE](https://github.com/seekerkrt/jpacker/blob/develop/LICENSE)
+- GNU GPL version 3全文: [LICENSE](https://github.com/seekerkrt/moguet/blob/develop/LICENSE)
 - version境界と配布方針: [docs/LICENSING.md](docs/LICENSING.md)
 - link / compile対象とexternal program: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
-- v1.14.0以前のhistorical MIT本文: [LICENSES/jpacker-MIT-legacy.txt](https://github.com/seekerkrt/jpacker/blob/develop/LICENSES/jpacker-MIT-legacy.txt)
+- v1.14.0以前のhistorical MIT本文: [LICENSES/jpacker-MIT-legacy.txt](https://github.com/seekerkrt/moguet/blob/develop/LICENSES/jpacker-MIT-legacy.txt)
 
 Moguetはlibalpmとlibcurlへ直接dynamic linkし、systemのnlohmann-jsonとtoml++ headerを
 binaryへcompileします。pacman、pacman-conf、makepkg、git、vercmp、およびnoticeに記載した
