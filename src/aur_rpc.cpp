@@ -1,6 +1,8 @@
 #include "aur_rpc.hpp"
 
+#include "application_identity.hpp"
 #include "dependency_spec.hpp"
+#include "localization.hpp"
 #include "logging.hpp"
 #include "package_identifier.hpp"
 
@@ -12,25 +14,26 @@
 #include <set>
 #include <string>
 
-#ifndef JPACKER_VERSION
-#define JPACKER_VERSION "unknown"
-#endif
-
 namespace {
 
 using json = nlohmann::json;
 
-const std::string VERSION = JPACKER_VERSION;
 const std::string AUR_RPC_DEFAULT_BASE_URL = "https://aur.archlinux.org/rpc/";
-const std::string USER_AGENT = "jpacker/" + VERSION;
+const std::string USER_AGENT =
+        std::string(application_identity::COMMAND_NAME) + "/" +
+        std::string(application_identity::VERSION);
 const long long   AUR_RPC_PROTOCOL_VERSION = 5;
 const std::string AUR_RPC_INFO_RESPONSE_TYPE = "multiinfo";
 const std::string AUR_RPC_SEARCH_RESPONSE_TYPE = "search";
 
-#ifdef JPACKER_ENABLE_AUR_RPC_TEST_HOOKS
+#ifdef MOGUET_ENABLE_AUR_RPC_TEST_HOOKS
 bool        g_should_fail_write_append_for_test = false;
 std::string g_encode_failure_package_for_test;
 #endif
+
+void ensure_curl_global_initialized() {
+    static CurlGlobal global;
+}
 
 // CURL easy handle の確保と解放を 1 request の寿命に束ねる RAII wrapper。
 class CurlHandle {
@@ -38,8 +41,12 @@ class CurlHandle {
 
 public:
     CurlHandle() {
+        ensure_curl_global_initialized();
         curl_ = curl_easy_init();
-        if(!curl_) throw std::runtime_error("Failed to initialize cURL handle.");
+        if(!curl_) {
+            throw std::runtime_error(localization::format_translated_message(
+                    "Failed to initialize the {} handle.", "cURL"));
+        }
     }
     ~CurlHandle() {
         if(curl_) curl_easy_cleanup(curl_);
@@ -59,9 +66,9 @@ std::string trim(const std::string& str) {
 
 // AUR RPC / JSON解析
 std::string aur_rpc_base_url() {
-#ifdef JPACKER_ENABLE_TEST_OVERRIDES
+#ifdef MOGUET_ENABLE_TEST_OVERRIDES
     // POLICY: local fixture injection は isolated test binary 限定。production の endpoint は固定する。
-    const char* test_base_url = std::getenv("JPACKER_TEST_AUR_RPC_BASE_URL");
+    const char* test_base_url = std::getenv("MOGUET_TEST_AUR_RPC_BASE_URL");
     if(test_base_url && test_base_url[0] != '\0') {
         std::string base_url = test_base_url;
         if(base_url.back() != '/') base_url += '/';
@@ -81,9 +88,9 @@ std::string aur_rpc_info_url() {
 
 char* escape_info_many_package_name(
         CURL* handle, const std::string& package_name) {
-#ifdef JPACKER_ENABLE_AUR_RPC_TEST_HOOKS
+#ifdef MOGUET_ENABLE_AUR_RPC_TEST_HOOKS
     const char* environment_failure =
-            std::getenv("JPACKER_TEST_AUR_RPC_ENCODE_FAILURE_PACKAGE");
+            std::getenv("MOGUET_TEST_AUR_RPC_ENCODE_FAILURE_PACKAGE");
     if(package_name == g_encode_failure_package_for_test ||
        (environment_failure != nullptr &&
         package_name == environment_failure)) {
@@ -108,8 +115,10 @@ std::size_t write_callback_failure_result(std::size_t total_size) noexcept {
 
 void append_write_response(
         std::string& buffer, char* contents, std::size_t total_size) {
-#ifdef JPACKER_ENABLE_AUR_RPC_TEST_HOOKS
+#ifdef MOGUET_ENABLE_AUR_RPC_TEST_HOOKS
     if(g_should_fail_write_append_for_test) {
+        // NO_TRANSLATE(Issue #308): Test-hook injection diagnostic, excluded
+        // from production builds.
         throw std::runtime_error("Injected AUR response append failure.");
     }
 #endif
@@ -137,13 +146,15 @@ json parse_aur_rpc_response(const std::string& response, const std::string& cont
         parsed = json::parse(response);
     } catch(const json::exception& e) {
         throw AurRpcResponseError(
-                "AUR RPC response parse failed for " + context + ": " + std::string(e.what()));
+                localization::format_translated_message(
+                        "{} {} response parse failed for {}: {}",
+                        "AUR", "RPC", context, e.what()));
     }
 
     if(!parsed.is_object()) {
-        throw AurRpcResponseError(
-                "AUR RPC response validation failed for " + context +
-                ": expected top-level object, got " + parsed.type_name());
+        throw AurRpcResponseError(localization::format_translated_message(
+                "{} {} response validation failed for {}: expected top-level object, got {}",
+                "AUR", "RPC", context, parsed.type_name()));
     }
     return parsed;
 }
@@ -151,21 +162,21 @@ json parse_aur_rpc_response(const std::string& response, const std::string& cont
 const json& aur_rpc_results_array(const json& response, const std::string& context) {
     auto results = response.find("results");
     if(results == response.end()) {
-        throw AurRpcResponseError(
-                "AUR RPC response validation failed for " + context +
-                ": field results expected array, got missing");
+        throw AurRpcResponseError(localization::format_translated_message(
+                "{} {} response validation failed for {}: field {} expected array, got missing",
+                "AUR", "RPC", context, "results"));
     }
     if(!results->is_array()) {
-        throw AurRpcResponseError(
-                "AUR RPC response validation failed for " + context +
-                ": field results expected array, got " + std::string(results->type_name()));
+        throw AurRpcResponseError(localization::format_translated_message(
+                "{} {} response validation failed for {}: field {} expected array, got {}",
+                "AUR", "RPC", context, "results", results->type_name()));
     }
     return *results;
 }
 
 [[noreturn]] void throw_aur_rpc_validation_error(
-        const std::string& context, const std::string& detail) {
-    throw AurRpcResponseError("AUR RPC response validation failed for " + context + ": " + detail);
+        const std::string& diagnostic) {
+    throw AurRpcResponseError(diagnostic);
 }
 
 std::string json_value_for_error(const std::string& value) {
@@ -174,24 +185,52 @@ std::string json_value_for_error(const std::string& value) {
 
 std::string aur_rpc_result_context(
         const std::string& context, size_t result_index) {
+    // NO_TRANSLATE(Issue #308): Query context and JSON result location are
+    // stable diagnostic identities, not human-readable prose.
     return context + " result[" + std::to_string(result_index) + "]";
+}
+
+std::string aur_rpc_info_context(const std::string& package_name) {
+    // NO_TRANSLATE(Issue #308): Keys and punctuation form a stable diagnostic
+    // identity; the quoted value is a package identity.
+    return "info[package=" + json_value_for_error(package_name) + "]";
+}
+
+std::string aur_rpc_search_context(const std::string& query) {
+    // NO_TRANSLATE(Issue #308): Keys and punctuation form a stable diagnostic
+    // identity; the quoted value is runtime query data.
+    return "search[query=" + json_value_for_error(query) + "]";
+}
+
+std::string aur_rpc_provides_context(const std::string& provided_name) {
+    // NO_TRANSLATE(Issue #308): Keys and punctuation form a stable diagnostic
+    // identity; the quoted value is a package identity.
+    return "search[provides=" + json_value_for_error(provided_name) + "]";
 }
 
 std::string required_json_string(
         const json& obj, const std::string& key, const std::string& context) {
     auto value = obj.find(key);
     if(value == obj.end()) {
-        throw_aur_rpc_validation_error(context, "field " + key + " expected string, got missing");
+        throw_aur_rpc_validation_error(
+                localization::format_translated_message(
+                        "{} {} response validation failed for {}: field {} expected string, got missing",
+                        "AUR", "RPC", context, key));
     }
     if(!value->is_string()) {
         throw_aur_rpc_validation_error(
-                context, "field " + key + " expected string, got " + std::string(value->type_name()));
+                localization::format_translated_message(
+                        "{} {} response validation failed for {}: field {} expected string, got {}",
+                        "AUR", "RPC", context, key,
+                        value->type_name()));
     }
 
     std::string result = value->get<std::string>();
     if(trim(result).empty()) {
         throw_aur_rpc_validation_error(
-                context, "field " + key + " expected non-empty string, got empty or whitespace-only string");
+                localization::format_translated_message(
+                        "{} {} response validation failed for {}: field {} expected non-empty string, got empty or whitespace-only string",
+                        "AUR", "RPC", context, key));
     }
     return result;
 }
@@ -202,8 +241,10 @@ std::string optional_json_string(
     if(value == obj.end() || value->is_null()) return "";
     if(!value->is_string()) {
         throw_aur_rpc_validation_error(
-                context, "field " + key + " expected string or null, got " +
-                                 std::string(value->type_name()));
+                localization::format_translated_message(
+                        "{} {} response validation failed for {}: field {} expected string or null, got {}",
+                        "AUR", "RPC", context, key,
+                        value->type_name()));
     }
     return value->get<std::string>();
 }
@@ -214,15 +255,19 @@ std::optional<long long> optional_json_integer(
     if(value == obj.end() || value->is_null()) return std::nullopt;
     if(!value->is_number_integer()) {
         throw_aur_rpc_validation_error(
-                context, "field " + key + " expected integer or null, got " +
-                                 std::string(value->type_name()));
+                localization::format_translated_message(
+                        "{} {} response validation failed for {}: field {} expected integer or null, got {}",
+                        "AUR", "RPC", context, key,
+                        value->type_name()));
     }
 
     if(value->is_number_unsigned()) {
         auto unsigned_value = value->get<unsigned long long>();
         if(unsigned_value > static_cast<unsigned long long>(std::numeric_limits<long long>::max())) {
             throw_aur_rpc_validation_error(
-                    context, "field " + key + " integer is outside supported range");
+                    localization::format_translated_message(
+                            "{} {} response validation failed for {}: field {} integer is outside supported range",
+                            "AUR", "RPC", context, key));
         }
         return static_cast<long long>(unsigned_value);
     }
@@ -234,12 +279,16 @@ long long required_json_integer(
     auto value = obj.find(key);
     if(value == obj.end()) {
         throw_aur_rpc_validation_error(
-                context, "field " + key + " expected integer, got missing");
+                localization::format_translated_message(
+                        "{} {} response validation failed for {}: field {} expected integer, got missing",
+                        "AUR", "RPC", context, key));
     }
     if(!value->is_number_integer()) {
         throw_aur_rpc_validation_error(
-                context, "field " + key + " expected integer, got " +
-                                 std::string(value->type_name()));
+                localization::format_translated_message(
+                        "{} {} response validation failed for {}: field {} expected integer, got {}",
+                        "AUR", "RPC", context, key,
+                        value->type_name()));
     }
 
     if(value->is_number_unsigned()) {
@@ -247,7 +296,9 @@ long long required_json_integer(
         if(unsigned_value >
            static_cast<unsigned long long>(std::numeric_limits<long long>::max())) {
             throw_aur_rpc_validation_error(
-                    context, "field " + key + " integer is outside supported range");
+                    localization::format_translated_message(
+                            "{} {} response validation failed for {}: field {} integer is outside supported range",
+                            "AUR", "RPC", context, key));
         }
         return static_cast<long long>(unsigned_value);
     }
@@ -260,8 +311,10 @@ std::vector<std::string> optional_json_string_array(
     if(value == obj.end() || value->is_null()) return {};
     if(!value->is_array()) {
         throw_aur_rpc_validation_error(
-                context, "field " + key + " expected array or null, got " +
-                                 std::string(value->type_name()));
+                localization::format_translated_message(
+                        "{} {} response validation failed for {}: field {} expected array or null, got {}",
+                        "AUR", "RPC", context, key,
+                        value->type_name()));
     }
 
     std::vector<std::string> values;
@@ -270,8 +323,10 @@ std::vector<std::string> optional_json_string_array(
         const json& item = (*value)[i];
         if(!item.is_string()) {
             throw_aur_rpc_validation_error(
-                    context, "field " + key + "[" + std::to_string(i) +
-                                     "] expected string, got " + item.type_name());
+                    localization::format_translated_message(
+                            "{} {} response validation failed for {}: field {}[{}] expected string, got {}",
+                            "AUR", "RPC", context, key, i,
+                            item.type_name()));
         }
         values.push_back(item.get<std::string>());
     }
@@ -282,7 +337,10 @@ void validate_package_identifier(
         const std::string& value, const std::string& field, const std::string& context) {
     if(!is_valid_package_name(value)) {
         throw_aur_rpc_validation_error(
-                context, "invalid " + field + " " + json_value_for_error(value));
+                localization::format_translated_message(
+                        "{} {} response validation failed for {}: invalid {} {}",
+                        "AUR", "RPC", context, field,
+                        json_value_for_error(value)));
     }
 }
 
@@ -293,9 +351,10 @@ void validate_metadata_identifiers(
         ParsedDependency parsed = parse_dependency_string(values[i]);
         if(!is_valid_package_name(parsed.name)) {
             throw_aur_rpc_validation_error(
-                    context, "field " + field + "[" + std::to_string(i) +
-                                     "] contains invalid package identifier " +
-                                     json_value_for_error(parsed.name));
+                    localization::format_translated_message(
+                            "{} {} response validation failed for {}: field {}[{}] contains invalid package identifier {}",
+                            "AUR", "RPC", context, field, i,
+                            json_value_for_error(parsed.name)));
         }
     }
 }
@@ -305,13 +364,17 @@ AurPackageInfo parse_aur_rpc_package_info(
     std::string entry_context = aur_rpc_result_context(context, result_index);
     if(!pkg.is_object()) {
         throw_aur_rpc_validation_error(
-                entry_context, "package entry expected object, got " + std::string(pkg.type_name()));
+                localization::format_translated_message(
+                        "{} {} response validation failed for {}: package entry expected object, got {}",
+                        "AUR", "RPC", entry_context, pkg.type_name()));
     }
 
     AurPackageInfo info;
     info.Name = required_json_string(pkg, "Name", entry_context);
     validate_package_identifier(info.Name, "Name", entry_context);
-    entry_context += " (package " + json_value_for_error(info.Name) + ")";
+    // NO_TRANSLATE(Issue #308): The key and punctuation extend the stable
+    // diagnostic identity; Name remains an AUR schema field token.
+    entry_context += "[Name=" + json_value_for_error(info.Name) + "]";
 
     info.PackageBase = required_json_string(pkg, "PackageBase", entry_context);
     validate_package_identifier(info.PackageBase, "PackageBase", entry_context);
@@ -359,49 +422,61 @@ const json& strict_aur_rpc_results_array(
     if(error != response.end()) {
         if(!error->is_string()) {
             throw_aur_rpc_validation_error(
-                    context, "field error expected string, got " +
-                                     std::string(error->type_name()));
+                    localization::format_translated_message(
+                            "{} {} response validation failed for {}: field {} expected string, got {}",
+                            "AUR", "RPC", context, "error",
+                            error->type_name()));
         }
         throw_aur_rpc_validation_error(
-                context, "field error reported " + error->dump());
+                localization::format_translated_message(
+                        "{} {} response validation failed for {}: field {} reported {}",
+                        "AUR", "RPC", context, "error", error->dump()));
     }
 
     long long version = required_json_integer(response, "version", context);
     if(version != AUR_RPC_PROTOCOL_VERSION) {
         throw_aur_rpc_validation_error(
-                context, "field version expected " +
-                                 std::to_string(AUR_RPC_PROTOCOL_VERSION) + ", got " +
-                                 std::to_string(version));
+                localization::format_translated_message(
+                        "{} {} response validation failed for {}: field {} expected {}, got {}",
+                        "AUR", "RPC", context, "version",
+                        AUR_RPC_PROTOCOL_VERSION,
+                        version));
     }
 
     std::string response_type = required_json_string(response, "type", context);
     if(response_type != expected_response_type) {
         throw_aur_rpc_validation_error(
-                context, "field type expected " +
-                                 json_value_for_error(expected_response_type) + ", got " +
-                                 json_value_for_error(response_type));
+                localization::format_translated_message(
+                        "{} {} response validation failed for {}: field {} expected {}, got {}",
+                        "AUR", "RPC", context, "type",
+                        json_value_for_error(expected_response_type),
+                        json_value_for_error(response_type)));
     }
 
     long long result_count = required_json_integer(response, "resultcount", context);
     if(result_count < 0) {
         throw_aur_rpc_validation_error(
-                context, "field resultcount expected non-negative integer, got " +
-                                 std::to_string(result_count));
+                localization::format_translated_message(
+                        "{} {} response validation failed for {}: field {} expected non-negative integer, got {}",
+                        "AUR", "RPC", context, "resultcount",
+                        result_count));
     }
 
     const json& results = aur_rpc_results_array(response, context);
     if(static_cast<unsigned long long>(result_count) !=
        static_cast<unsigned long long>(results.size())) {
         throw_aur_rpc_validation_error(
-                context, "field resultcount was " + std::to_string(result_count) +
-                                 " but results contained " +
-                                 std::to_string(results.size()) + " entries");
+                localization::format_translated_message(
+                        "{} {} response validation failed for {}: field {} was {} but {} contained {} entries",
+                        "AUR", "RPC", context, "resultcount",
+                        result_count, "results", results.size()));
     }
     if(maximum_result_count.has_value() &&
        results.size() > maximum_result_count.value()) {
         throw_aur_rpc_validation_error(
-                context, "expected zero or one result, got " +
-                                 std::to_string(results.size()));
+                localization::format_translated_message(
+                        "{} {} response validation failed for {}: expected zero or one result, got {}",
+                        "AUR", "RPC", context, results.size()));
     }
     return results;
 }
@@ -424,38 +499,45 @@ std::vector<AurPackageInfo> parse_strict_aur_rpc_package_results(
 
 std::optional<AurPackageInfo> parse_single_aur_info_response(
         const std::string& response, const std::string& pkg_name) {
-    std::string                 context = "package info " + pkg_name;
+    std::string context = aur_rpc_info_context(pkg_name);
     std::vector<AurPackageInfo> results = parse_aur_rpc_package_results(response, context);
     if(results.empty()) return std::nullopt;
     if(results.size() != 1) {
         throw_aur_rpc_validation_error(
-                context, "expected zero or one result, got " + std::to_string(results.size()));
+                localization::format_translated_message(
+                        "{} {} response validation failed for {}: expected zero or one result, got {}",
+                        "AUR", "RPC", context, results.size()));
     }
     if(results.front().Name != pkg_name) {
         throw_aur_rpc_validation_error(
-                context, "requested " + pkg_name + " but response Name was " + results.front().Name);
+                localization::format_translated_message(
+                        "{} {} response validation failed for {}: requested {} but response {} was {}",
+                        "AUR", "RPC", context, pkg_name, "Name",
+                        results.front().Name));
     }
     return results.front();
 }
 
 std::optional<AurPackageInfo> parse_single_strict_aur_info_response(
         const std::string& response, const std::string& pkg_name) {
-    std::string                 context = "package info " + pkg_name;
+    std::string context = aur_rpc_info_context(pkg_name);
     std::vector<AurPackageInfo> results =
             parse_strict_aur_rpc_package_results(
                     response, context, AUR_RPC_INFO_RESPONSE_TYPE, 1);
     if(results.empty()) return std::nullopt;
     if(results.front().Name != pkg_name) {
         throw_aur_rpc_validation_error(
-                context, "requested " + pkg_name + " but response Name was " +
-                                 results.front().Name);
+                localization::format_translated_message(
+                        "{} {} response validation failed for {}: requested {} but response {} was {}",
+                        "AUR", "RPC", context, pkg_name, "Name",
+                        results.front().Name));
     }
     return results.front();
 }
 
 } // namespace
 
-#ifdef JPACKER_ENABLE_AUR_RPC_TEST_HOOKS
+#ifdef MOGUET_ENABLE_AUR_RPC_TEST_HOOKS
 void set_aur_rpc_write_append_failure_for_test(bool should_fail) noexcept {
     g_should_fail_write_append_for_test = should_fail;
 }
@@ -495,17 +577,20 @@ std::string get_url_strict(const std::string& url) {
     CURLcode res = curl_easy_perform(handle.get());
     if(res != CURLE_OK) {
         std::string error = errorBuffer[0] ? errorBuffer : curl_easy_strerror(res);
-        throw std::runtime_error("AUR request failed: " + error);
+        throw std::runtime_error(localization::format_translated_message(
+                "{} request failed: {}", "AUR", error));
     }
 
     long response_code = 0;
     curl_easy_getinfo(handle.get(), CURLINFO_RESPONSE_CODE, &response_code);
     if(response_code < 200 || response_code >= 300) {
-        throw std::runtime_error(
-                "AUR request failed with HTTP status " + std::to_string(response_code) + ".");
+        throw std::runtime_error(localization::format_translated_message(
+                "{} request failed with {} status {}.",
+                "AUR", "HTTP", response_code));
     }
     if(readBuffer.empty()) {
-        throw std::runtime_error("AUR request returned an empty response.");
+        throw std::runtime_error(localization::format_translated_message(
+                "{} request returned an empty response.", "AUR"));
     }
     return readBuffer;
 }
@@ -523,7 +608,8 @@ std::string get_url(const std::string& url) {
     if(res != CURLE_OK) {
         // NOTE: 呼び出し側は空 response を「取得不能/未検出」として扱い、CLI 境界で文脈付きに変換する。
         std::string error = errorBuffer[0] ? errorBuffer : curl_easy_strerror(res);
-        Logger::warn("AUR request failed: " + error);
+        Logger::warn(localization::format_translated_message(
+                "{} request failed: {}", "AUR", error));
         return "";
     }
     return readBuffer;
@@ -541,7 +627,8 @@ std::vector<AurPackageInfo> AurClient::search(const std::string& query) {
 
     std::string response = get_url(url);
     if(response.empty()) return packages;
-    return parse_aur_rpc_package_results(response, "search query " + query);
+    return parse_aur_rpc_package_results(
+            response, aur_rpc_search_context(query));
 }
 
 std::vector<std::string> AurClient::search_names_by_provides(const std::string& provided_name) {
@@ -556,7 +643,8 @@ std::vector<std::string> AurClient::search_names_by_provides(const std::string& 
     if(response.empty()) return names;
 
     std::vector<AurPackageInfo> results =
-            parse_aur_rpc_package_results(response, "provides search " + provided_name);
+            parse_aur_rpc_package_results(
+                    response, aur_rpc_provides_context(provided_name));
     for(const auto& info : results) {
         names.push_back(info.Name);
     }
@@ -571,8 +659,9 @@ std::vector<std::string> AurClient::search_names_by_provides_strict(
             handle.get(), provided_name.c_str(),
             static_cast<int>(provided_name.length()));
     if(!escaped) {
-        throw std::runtime_error(
-                "Failed to encode AUR provided name: " + provided_name);
+        throw std::runtime_error(localization::format_translated_message(
+                "Failed to encode {} provided name: {}",
+                "AUR", provided_name));
     }
     std::string url = aur_rpc_search_url() + escaped + "?by=provides";
     curl_free(escaped);
@@ -580,7 +669,7 @@ std::vector<std::string> AurClient::search_names_by_provides_strict(
     std::string response = get_url_strict(url);
     std::vector<AurPackageInfo> results =
             parse_strict_aur_rpc_package_results(
-                    response, "provides search " + provided_name,
+                    response, aur_rpc_provides_context(provided_name),
                     AUR_RPC_SEARCH_RESPONSE_TYPE);
     for(const auto& info : results) names.push_back(info.Name);
     return names;
@@ -604,7 +693,8 @@ std::optional<AurPackageInfo> AurClient::info_strict(const std::string& pkg_name
     char*      escaped = curl_easy_escape(
             handle.get(), pkg_name.c_str(), static_cast<int>(pkg_name.length()));
     if(!escaped) {
-        throw std::runtime_error("Failed to encode AUR package name: " + pkg_name);
+        throw std::runtime_error(localization::format_translated_message(
+                "Failed to encode {} package name: {}", "AUR", pkg_name));
     }
     std::string url = aur_rpc_info_url() + escaped;
     curl_free(escaped);
@@ -629,8 +719,9 @@ std::map<std::string, AurPackageInfo> AurClient::info_many(const std::vector<std
         char* escaped = escape_info_many_package_name(
                 handle.get(), pkg_names[i]);
         if(!escaped) {
-            throw std::runtime_error(
-                    "Failed to encode AUR package name: " + pkg_names[i]);
+            throw std::runtime_error(localization::format_translated_message(
+                    "Failed to encode {} package name: {}",
+                    "AUR", pkg_names[i]));
         }
         url += "&";
         url += "arg%5B%5D=";
@@ -646,11 +737,17 @@ std::map<std::string, AurPackageInfo> AurClient::info_many(const std::vector<std
     for(const auto& pkg_info : aur_results) {
         if(!requested_names.contains(pkg_info.Name)) {
             throw_aur_rpc_validation_error(
-                    context, "response Name " + pkg_info.Name + " was not requested");
+                    localization::format_translated_message(
+                            "{} {} response validation failed for {}: response {} {} was not requested",
+                            "AUR", "RPC", context, "Name",
+                            pkg_info.Name));
         }
         if(!results.emplace(pkg_info.Name, pkg_info).second) {
             throw_aur_rpc_validation_error(
-                    context, "duplicate response Name " + pkg_info.Name);
+                    localization::format_translated_message(
+                            "{} {} response validation failed for {}: duplicate response {} {}",
+                            "AUR", "RPC", context, "Name",
+                            pkg_info.Name));
         }
     }
     return results;

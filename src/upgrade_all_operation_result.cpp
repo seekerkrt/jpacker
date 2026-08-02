@@ -178,6 +178,8 @@ bool UpgradeAllOperationResult::has_inconsistency() const noexcept {
                             ForeignInventoryConfigurationFailed:
                     case UpgradeAllOperationIssueKind::
                             ForeignInventoryReadFailed:
+                    case UpgradeAllOperationIssueKind::
+                            CacheAuthorityInvalid:
                     case UpgradeAllOperationIssueKind::AurQueryFailed:
                     case UpgradeAllOperationIssueKind::
                             FilteredAurPreparationFailed:

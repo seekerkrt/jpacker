@@ -6,6 +6,8 @@
 #include "source_install.hpp"
 #include "source_preference.hpp"
 #include "trusted_cache.hpp"
+#include "xdg_directory_safety.hpp"
+#include "xdg_paths.hpp"
 
 #include "stubs/artifact-install-executor/process_stub.hpp"
 #include "stubs/package-metadata/alpm_stub.hpp"
@@ -114,6 +116,21 @@ CleanupErrorObservation expect_cleanup_error(
     }
     throw std::runtime_error(
             context + ": expected SeparatedSourceBuildCleanupError");
+}
+
+template <typename Callable>
+TrustedCacheFailure expect_trusted_cache_error(
+        Callable&& callable, const std::string& context) {
+    try {
+        std::forward<Callable>(callable)();
+    } catch(const TrustedCacheError& error) {
+        return error.failure();
+    } catch(const std::exception& error) {
+        throw std::runtime_error(
+                context + ": trusted cache failure was flattened: " +
+                error.what());
+    }
+    throw std::runtime_error(context + ": expected TrustedCacheError");
 }
 
 template <typename Callable>
@@ -380,7 +397,7 @@ public:
         : original_working_directory_(fs::current_path()) {
         const std::string template_text =
                 (fs::temp_directory_path() /
-                 "jpacker-production-source-build-test-XXXXXX")
+                 "moguet-production-source-build-test-XXXXXX")
                         .string();
         std::vector<char> path_template(
                 template_text.begin(), template_text.end());
@@ -405,7 +422,12 @@ public:
         }
 
         try {
-            ValidatedCacheRoot root = prepare_trusted_cache_root();
+            xdg_paths::CachePaths cache_paths =
+                    xdg_paths::resolve_cache_process_environment();
+            xdg_directory_safety::PreparedDirectory cache_directory =
+                    xdg_directory_safety::prepare_directory(cache_paths);
+            ValidatedCacheRoot root = adopt_trusted_cache_root(
+                    cache_paths, std::move(cache_directory));
             cache_root_path_ = root.canonical_path();
 
             // POLICY: preflight snapshotはdirect entryだけでなく、file内容と
@@ -413,6 +435,9 @@ public:
             const fs::path snapshot_fixture =
                     cache_root_path_ / "preflight-snapshot-fixture";
             fs::create_directory(snapshot_fixture);
+            fs::permissions(
+                    snapshot_fixture, fs::perms::owner_all,
+                    fs::perm_options::replace);
             write_file(
                     snapshot_fixture / "state.txt",
                     "stable preflight fixture\n");
@@ -451,11 +476,21 @@ public:
         fs::path checkout_path = cache_root_path_ / package_name;
         if(!fs::exists(checkout_path)) {
             fs::create_directory(checkout_path);
+            fs::permissions(
+                    checkout_path, fs::perms::owner_all,
+                    fs::perm_options::replace);
             fs::create_directory(checkout_path / ".git");
+            fs::permissions(
+                    checkout_path / ".git", fs::perms::owner_all,
+                    fs::perm_options::replace);
             write_file(
                     checkout_path / "PKGBUILD",
                     "# production source-build fixture for " + package_name +
                             "\n# remote: " + git_url + "\n");
+            fs::permissions(
+                    checkout_path / "PKGBUILD",
+                    fs::perms::owner_read | fs::perms::owner_write,
+                    fs::perm_options::replace);
         }
         return fs::canonical(checkout_path);
     }
@@ -627,8 +662,8 @@ void expect_required_target(
 
 AppConfig noninteractive_config() {
     AppConfig config;
-    config.no_edit = true;
-    config.no_diff = true;
+    config.user_config.review.pkgbuild = ReviewPolicy::Skip;
+    config.user_config.review.diff = ReviewPolicy::Skip;
     return config;
 }
 
@@ -717,8 +752,12 @@ std::string expected_build_command(
         const fs::path& workspace_path) {
     std::vector<std::string> arguments{"makepkg", "-sc"};
     if(scenario.config.no_confirm) arguments.emplace_back("--noconfirm");
-    if(scenario.config.rebuild) arguments.emplace_back("-f");
-    if(scenario.config.clean_build) arguments.emplace_back("-C");
+    if(scenario.config.user_config.build.mode == BuildMode::Rebuild) {
+        arguments.emplace_back("-f");
+    }
+    if(scenario.config.user_config.build.mode == BuildMode::Clean) {
+        arguments.emplace_back("-C");
+    }
     return source_environment_prefix(unit, workspace_path) +
            shell_join(arguments);
 }
@@ -1170,6 +1209,7 @@ PreparedProductionSourceBuildInvocation prepare_execution(
     PreparedProductionSourceBuildInvocation invocation =
             prepare_production_source_build_invocation(
                     std::move(work_items), scenario.config);
+    activate_production_source_build_cache(invocation);
     expect(
             scenario.resolver_calls == 1,
             "Production resolver did not run exactly once during preflight");
@@ -1842,7 +1882,7 @@ void test_unsafe_existing_cache_root_stops_before_checkout_mutation() {
     static_cast<void>(expect_runtime_error(
             [&]() { execute_invocation(invocation, scenario); },
             "unsafe production cache root ordering",
-            "group/world writable"));
+            "directory permissions are unsafe"));
 
     expect(
             scenario.resolver_calls == 1,
@@ -1868,6 +1908,169 @@ void test_unsafe_existing_cache_root_stops_before_checkout_mutation() {
             "Unsafe production cache root was silently repaired");
     process_stub::require_process_expectations_consumed();
     deactivate_scenario();
+}
+
+PreparedProductionSourceBuildInvocation prepare_cache_failure_invocation(
+        std::vector<ProductionSourceBuildWorkItem> work_items,
+        ProductionScenario& scenario) {
+    activate_scenario(scenario);
+    expect_database_paths();
+    PreparedProductionSourceBuildInvocation invocation =
+            prepare_production_source_build_invocation(
+                    std::move(work_items), scenario.config);
+    activate_production_source_build_cache(invocation);
+    expect(
+            scenario.resolver_calls == 1 &&
+                    scenario.workspace_paths.empty(),
+            "Cache-failure fixture crossed its preparation boundary");
+    process_stub::require_process_expectations_consumed();
+    return invocation;
+}
+
+void test_singular_cache_failure_preserves_trusted_type() {
+    TemporaryProductionEnvironment environment;
+    AppConfig config = noninteractive_config();
+    std::vector<ProductionSourceBuildWorkItem> work_items;
+    work_items.push_back(make_work_item("typed-singular-cache"));
+    ProductionScenario scenario =
+            make_execution_scenario(environment, work_items, config);
+    PreparedProductionSourceBuildInvocation invocation =
+            prepare_cache_failure_invocation(
+                    std::move(work_items), scenario);
+
+    const fs::path cache_root =
+            environment.checkout_target_path("typed-singular-cache")
+                    .parent_path();
+    fs::path moved_root = cache_root;
+    moved_root += ".typed-singular-replaced";
+    fs::rename(cache_root, moved_root);
+    fs::create_directory(cache_root);
+    fs::permissions(
+            cache_root, fs::perms::owner_all,
+            fs::perm_options::replace);
+
+    const TrustedCacheFailure failure = expect_trusted_cache_error(
+            [&]() {
+                static_cast<void>(execute_work_item_typed(
+                        invocation, 0, scenario));
+            },
+            "singular production cache replacement");
+    expect(
+            failure.stage == TrustedCacheStage::RootRevalidation &&
+                    failure.code ==
+                            TrustedCacheErrorCode::ConcurrentReplacement,
+            "Singular production wrapper changed trusted cache failure detail");
+    expect(
+            scenario.git_remote_calls == 0 &&
+                    scenario.git_fetch_calls == 0 &&
+                    scenario.git_branch_calls == 0 &&
+                    scenario.git_reset_calls == 0 &&
+                    scenario.workspace_paths.empty() &&
+                    metadata_stub::initialize_call_count() == 0 &&
+                    process_stub::run_command_call_count() == 0,
+            "Singular production cache replacement reached source mutation");
+    process_stub::require_process_expectations_consumed();
+    deactivate_scenario();
+}
+
+void test_package_base_cache_failures_preserve_trusted_type() {
+    {
+        TemporaryProductionEnvironment environment;
+        AppConfig config = noninteractive_config();
+        std::vector<ProductionSourceBuildWorkItem> work_items;
+        work_items.push_back(make_package_base_work_item(
+                "typed-package-base-root",
+                {RequiredPackageArtifactTarget{
+                        "typed-package-base-root",
+                        "typed-package-base-root",
+                        DesiredInstallReason::Explicit}}));
+        ProductionScenario scenario =
+                make_execution_scenario(environment, work_items, config);
+        PreparedProductionSourceBuildInvocation invocation =
+                prepare_cache_failure_invocation(
+                        std::move(work_items), scenario);
+        const ValidatedCacheRoot cache_root =
+                invocation.cache_root.value();
+        fs::path moved_root = cache_root.path();
+        moved_root += ".typed-package-base-replaced";
+        fs::rename(cache_root.path(), moved_root);
+        fs::create_directory(cache_root.path());
+        fs::permissions(
+                cache_root.path(), fs::perms::owner_all,
+                fs::perm_options::replace);
+
+        const ProductionSourceBuildWorkItem& work_item =
+                invocation.work_items.front();
+        const TrustedCacheFailure failure = expect_trusted_cache_error(
+                [&]() {
+                    static_cast<void>(execute_source_build_package_base_typed(
+                            work_item.request, work_item.required_targets,
+                            cache_root, invocation.database_paths, config));
+                },
+                "PackageBase private-root cache replacement");
+        expect(
+                failure.stage == TrustedCacheStage::RootRevalidation &&
+                        failure.code ==
+                                TrustedCacheErrorCode::ConcurrentReplacement,
+                "PackageBase private-root wrapper changed trusted cache failure detail");
+        expect(
+                scenario.git_remote_calls == 0 &&
+                        scenario.git_fetch_calls == 0 &&
+                        scenario.git_branch_calls == 0 &&
+                        scenario.git_reset_calls == 0 &&
+                        scenario.workspace_paths.empty() &&
+                        metadata_stub::initialize_call_count() == 0 &&
+                        process_stub::run_command_call_count() == 0,
+                "PackageBase private-root failure reached source mutation");
+        process_stub::require_process_expectations_consumed();
+        deactivate_scenario();
+    }
+
+    {
+        TemporaryProductionEnvironment environment;
+        AppConfig config = noninteractive_config();
+        std::vector<ProductionSourceBuildWorkItem> work_items;
+        work_items.push_back(make_package_base_work_item(
+                "typed-package-base-checkout",
+                {RequiredPackageArtifactTarget{
+                        "typed-package-base-checkout",
+                        "typed-package-base-checkout",
+                        DesiredInstallReason::Explicit}}));
+        ProductionScenario scenario =
+                make_execution_scenario(environment, work_items, config);
+        PreparedProductionSourceBuildInvocation invocation =
+                prepare_cache_failure_invocation(
+                        std::move(work_items), scenario);
+
+        const fs::path checkout = environment.checkout_target_path(
+                "typed-package-base-checkout");
+        fs::path moved_checkout = checkout;
+        moved_checkout += ".typed-original";
+        fs::rename(checkout, moved_checkout);
+        fs::create_directory_symlink(moved_checkout, checkout);
+
+        const TrustedCacheFailure failure = expect_trusted_cache_error(
+                [&]() {
+                    static_cast<void>(execute_package_base_work_item_typed(
+                            invocation, 0, scenario));
+                },
+                "PackageBase checkout symlink");
+        expect(
+                failure.stage == TrustedCacheStage::ChildValidation &&
+                        failure.code == TrustedCacheErrorCode::Symlink,
+                "PackageBase checkout wrapper changed trusted cache failure detail");
+        expect(
+                scenario.git_remote_calls == 0 &&
+                        scenario.git_fetch_calls == 0 &&
+                        scenario.git_branch_calls == 0 &&
+                        scenario.git_reset_calls == 0 &&
+                        scenario.workspace_paths.empty() &&
+                        metadata_stub::initialize_call_count() == 0 &&
+                        process_stub::run_command_call_count() == 0,
+                "PackageBase checkout cache failure reached source mutation");
+        process_stub::require_process_expectations_consumed();
+        deactivate_scenario();
+    }
 }
 
 void expect_single_work_item_outcome(
@@ -1981,6 +2184,10 @@ void test_up_to_date_outcome_and_legacy_flattening(
         write_file(
                 scenario.units[0].checkout_path / ".SRCINFO",
                 "pkgver = 1.0\npkgrel = 1\n");
+        fs::permissions(
+                scenario.units[0].checkout_path / ".SRCINFO",
+                fs::perms::owner_read | fs::perms::owner_write,
+                fs::perm_options::replace);
 
         PreparedProductionSourceBuildInvocation invocation = prepare_execution(
                 std::move(work_items), scenario);
@@ -2016,6 +2223,10 @@ void test_up_to_date_outcome_and_legacy_flattening(
         write_file(
                 scenario.units[0].checkout_path / ".SRCINFO",
                 "pkgver = 1.0\npkgrel = 1\n");
+        fs::permissions(
+                scenario.units[0].checkout_path / ".SRCINFO",
+                fs::perms::owner_read | fs::perms::owner_write,
+                fs::perm_options::replace);
 
         PreparedProductionSourceBuildInvocation invocation = prepare_execution(
                 std::move(work_items), scenario);
@@ -2424,8 +2635,7 @@ void test_multi_unit_options_roles_and_order(
         const TemporaryProductionEnvironment& environment) {
     AppConfig config = noninteractive_config();
     config.no_confirm = true;
-    config.rebuild = true;
-    config.clean_build = true;
+    config.user_config.build.mode = BuildMode::Clean;
     const BuildPlan plan = two_entry_plan();
     std::vector<ProductionSourceBuildWorkItem> work_items =
             prepare_aur_source_build_work_items(plan, false, true);
@@ -2482,7 +2692,7 @@ void test_build_failure_does_not_reach_sudo(
             std::move(work_items), scenario);
     static_cast<void>(expect_runtime_error(
             [&]() { execute_invocation(invocation, scenario); },
-            "production build failure", "Build-only makepkg failed with exit code 37"));
+            "production build failure", "The build-only makepkg command failed with exit code 37"));
 
     expect(
             scenario.install_calls == 0 &&
@@ -2647,6 +2857,8 @@ int main() {
             // ordinary collaborative umask would make a legacy mkdir 0775.
             ScopedUmask scoped_umask(0002);
             test_unsafe_existing_cache_root_stops_before_checkout_mutation();
+            test_singular_cache_failure_preserves_trusted_type();
+            test_package_base_cache_failures_preserve_trusted_type();
             TemporaryProductionEnvironment environment;
             test_set_static_preparation_accepts_split_and_multiple(environment);
             test_set_static_preparation_rejects_invalid_sets_before_mutation(

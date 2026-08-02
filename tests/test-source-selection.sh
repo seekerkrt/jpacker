@@ -3,8 +3,8 @@ set -eu
 
 test_binary=$1
 repo_root=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
-JPACKER_TEST_REPOSITORY_ROOT=$repo_root
-export JPACKER_TEST_REPOSITORY_ROOT
+MOGUET_TEST_REPOSITORY_ROOT=$repo_root
+export MOGUET_TEST_REPOSITORY_ROOT
 . "$repo_root/tests/test-command-safety.sh"
 tmp_dir=$(mktemp -d)
 server_pid=
@@ -43,7 +43,7 @@ require_exact_test_command makepkg "$repo_root/tests/stubs/makepkg"
 require_exact_test_command pacman "$repo_root/tests/stubs/pacman"
 require_exact_test_command sudo "$repo_root/tests/stubs/sudo"
 require_exact_test_command git "$repo_root/tests/stubs/git"
-export JPACKER_TEST_AUR_RPC_BASE_URL=http://127.0.0.1:$port/rpc/
+export MOGUET_TEST_AUR_RPC_BASE_URL=http://127.0.0.1:$port/rpc/
 
 setup_case() {
     case_name=$1
@@ -51,36 +51,40 @@ setup_case() {
     command_log=$case_dir/commands.log
     output_file=$case_dir/output
 
-    mkdir -p "$case_dir/home" "$case_dir/xdg-cache" "$case_dir/package.build"
+    mkdir -p \
+        "$case_dir/home" "$case_dir/xdg-state" "$case_dir/xdg-cache" \
+        "$case_dir/package.build"
     : > "$command_log"
     : > "$request_log"
     export HOME=$case_dir/home
+    export XDG_STATE_HOME=$case_dir/xdg-state
     export XDG_CACHE_HOME=$case_dir/xdg-cache
-    export JPACKER_TEST_COMMAND_LOG=$command_log
-    export JPACKER_TEST_PACKAGE_BUILD_DIR=$case_dir/package.build
-    export JPACKER_TEST_PACMAN_EXIT_CODE=1
-    export JPACKER_TEST_SUDO_EXIT_CODE=0
-    unset JPACKER_TEST_PACMAN_QM_OUTPUT
-    unset JPACKER_TEST_PACMAN_REPO_PACKAGES
-    unset JPACKER_TEST_GIT_REMOTE_URL
-    unset JPACKER_TEST_GIT_CLONE_EXIT_CODE
-    unset JPACKER_TEST_GIT_CLONE_SYMLINK_TARGET
-    unset JPACKER_TEST_GIT_CLONE_FIXTURE_DIR
-    unset JPACKER_TEST_MAKEPKG_EXIT_CODE
-    unset JPACKER_TEST_MAKEPKG_PACKAGELIST_EXIT_CODE
-    unset JPACKER_TEST_MAKEPKG_ARTIFACT_IDENTITIES
-    unset JPACKER_TEST_MAKEPKG_ENV_LOG
-    unset JPACKER_TEST_MAKEPKG_ENV_KEYS
-    unset JPACKER_TEST_PACKAGE_METADATA_PACMAN_CONF_EXIT_CODE
-    unset JPACKER_TEST_PACKAGE_METADATA_PACMAN_CONF_FAILURE_AT
-    unset JPACKER_TEST_SOURCE_PREFERENCE_EXTERNAL
-    unset JPACKER_TEST_EDITOR_REPLACE_TARGET
-    unset JPACKER_TEST_EDITOR_SYMLINK_TARGET
-    unset JPACKER_TEST_EDITOR_REMOVE_TARGET
+    export MOGUET_TEST_COMMAND_LOG=$command_log
+    export MOGUET_TEST_PACKAGE_BUILD_DIR=$case_dir/package.build
+    export MOGUET_TEST_PACMAN_EXIT_CODE=1
+    export MOGUET_TEST_SUDO_EXIT_CODE=0
+    unset MOGUET_TEST_PACMAN_QM_OUTPUT
+    unset MOGUET_TEST_PACMAN_REPO_PACKAGES
+    unset MOGUET_TEST_GIT_REMOTE_URL
+    unset MOGUET_TEST_GIT_CLONE_EXIT_CODE
+    unset MOGUET_TEST_GIT_CLONE_SYMLINK_TARGET
+    unset MOGUET_TEST_GIT_CLONE_FIXTURE_DIR
+    unset MOGUET_TEST_MAKEPKG_EXIT_CODE
+    unset MOGUET_TEST_MAKEPKG_PACKAGELIST_EXIT_CODE
+    unset MOGUET_TEST_MAKEPKG_ARTIFACT_IDENTITIES
+    unset MOGUET_TEST_MAKEPKG_ENV_LOG
+    unset MOGUET_TEST_MAKEPKG_ENV_KEYS
+    unset MOGUET_TEST_PACKAGE_METADATA_PACMAN_CONF_EXIT_CODE
+    unset MOGUET_TEST_PACKAGE_METADATA_PACMAN_CONF_FAILURE_AT
+    unset MOGUET_TEST_SOURCE_PREFERENCE_EXTERNAL
+    unset MOGUET_TEST_EDITOR_REPLACE_TARGET
+    unset MOGUET_TEST_EDITOR_SYMLINK_TARGET
+    unset MOGUET_TEST_EDITOR_REMOVE_TARGET
     unset DUP
     unset EMPTY
     unset UNDEFINED
     unset EDITOR
+    unset VISUAL
 }
 
 run_ok() {
@@ -283,8 +287,8 @@ assert_request_log_nonempty() {
 }
 
 assert_cache_root_absent() {
-    if [ -e "$XDG_CACHE_HOME/jpacker" ] || [ -L "$XDG_CACHE_HOME/jpacker" ]; then
-        echo "jpacker cache root was created before source selection validation completed" >&2
+    if [ -e "$XDG_CACHE_HOME/moguet" ] || [ -L "$XDG_CACHE_HOME/moguet" ]; then
+        echo "Moguet cache root was created before source selection validation completed" >&2
         exit 1
     fi
 }
@@ -322,7 +326,7 @@ assert_no_source_build_commands() {
 }
 
 assert_cache_entry_absent() {
-    entry=$XDG_CACHE_HOME/jpacker/$1
+    entry=$XDG_CACHE_HOME/moguet/$1
     if [ -e "$entry" ] || [ -L "$entry" ]; then
         echo "cache entry was created before all targets passed preflight: $entry" >&2
         exit 1
@@ -331,7 +335,7 @@ assert_cache_entry_absent() {
 
 prepare_source_preference() {
     package=$1
-    printf 'CFLAGS=-Osource-selection-test\n' > "$JPACKER_TEST_PACKAGE_BUILD_DIR/$package"
+    printf 'CFLAGS=-Osource-selection-test\n' > "$MOGUET_TEST_PACKAGE_BUILD_DIR/$package"
 }
 
 run_exact() {
@@ -339,7 +343,7 @@ run_exact() {
     expected=$2
     shift 2
     setup_case "$case_name"
-    export JPACKER_TEST_PACMAN_EXIT_CODE=0
+    export MOGUET_TEST_PACMAN_EXIT_CODE=0
     run_ok "$@"
     assert_only_command "$expected"
     assert_request_log_empty
@@ -347,27 +351,27 @@ run_exact() {
 
 # Source preferenceのpath/read契約。列挙順はfilesystem依存なので固定しない。
 setup_case list-src-missing-root
-export JPACKER_TEST_PACKAGE_BUILD_DIR=$case_dir/missing-package.build
-run_ok list-src
+export MOGUET_TEST_PACKAGE_BUILD_DIR=$case_dir/missing-package.build
+LC_ALL=C LANGUAGE= run_ok list-src
 assert_contains "No source-build packages registered." "$output_file"
 assert_command_log_empty
 assert_request_log_empty
-if [ -e "$JPACKER_TEST_PACKAGE_BUILD_DIR" ] || [ -L "$JPACKER_TEST_PACKAGE_BUILD_DIR" ]; then
+if [ -e "$MOGUET_TEST_PACKAGE_BUILD_DIR" ] || [ -L "$MOGUET_TEST_PACKAGE_BUILD_DIR" ]; then
     echo "list-src created the missing source preference root" >&2
     exit 1
 fi
 
 setup_case list-src-regular-entries
-cat > "$JPACKER_TEST_PACKAGE_BUILD_DIR/alpha" <<'SOURCE_PREFERENCE'
+cat > "$MOGUET_TEST_PACKAGE_BUILD_DIR/alpha" <<'SOURCE_PREFERENCE'
   # comment-only line
     CFLAGS = "-O2 # kept quoted"   # removed trailing comment
     raw value without equals        # removed raw comment
 
 SOURCE_PREFERENCE
-printf '%s\n' "LDFLAGS='-Wl,--as-needed'" > "$JPACKER_TEST_PACKAGE_BUILD_DIR/zeta"
-mkdir "$JPACKER_TEST_PACKAGE_BUILD_DIR/ignored-directory"
-printf 'nested entry\n' > "$JPACKER_TEST_PACKAGE_BUILD_DIR/ignored-directory/not-an-entry"
-run_ok list-src
+printf '%s\n' "LDFLAGS='-Wl,--as-needed'" > "$MOGUET_TEST_PACKAGE_BUILD_DIR/zeta"
+mkdir "$MOGUET_TEST_PACKAGE_BUILD_DIR/ignored-directory"
+printf 'nested entry\n' > "$MOGUET_TEST_PACKAGE_BUILD_DIR/ignored-directory/not-an-entry"
+LC_ALL=C LANGUAGE= run_ok list-src
 assert_contains "Registered Source Packages:" "$output_file"
 assert_contains "alpha" "$output_file"
 assert_line_before '    CFLAGS = "-O2 # kept quoted"' \
@@ -381,9 +385,16 @@ assert_not_contains "not-an-entry" "$output_file"
 assert_command_log_empty
 assert_request_log_empty
 
+setup_case list-src-empty-root
+LC_ALL=C LANGUAGE= run_ok list-src
+assert_contains "Registered Source Packages:" "$output_file"
+assert_contains "  (none)" "$output_file"
+assert_command_log_empty
+assert_request_log_empty
+
 # Mutationとpresentationはhandler側のまま維持する。sudo stubはfilesystemを変更しない。
 setup_case add-src-handler
-add_src_path=$JPACKER_TEST_PACKAGE_BUILD_DIR/clean-root
+add_src_path=$MOGUET_TEST_PACKAGE_BUILD_DIR/clean-root
 run_ok add-src clean-root CFLAGS=-O2
 assert_contains "Added clean-root to source-build list." "$output_file"
 assert_contains "Appending CFLAGS=-O2 to $add_src_path" "$output_file"
@@ -396,12 +407,12 @@ if [ -e "$add_src_path" ] || [ -L "$add_src_path" ]; then
 fi
 
 setup_case edit-src-handler
-edit_src_path=$JPACKER_TEST_PACKAGE_BUILD_DIR/clean-root
+edit_src_path=$MOGUET_TEST_PACKAGE_BUILD_DIR/clean-root
 printf 'CFLAGS=-Oexisting\n' > "$edit_src_path"
-export EDITOR="jpacker-test-editor --wait"
+export EDITOR="moguet-test-editor --wait"
 run_ok edit-src clean-root
 editor_command=$(sed -n '1p' "$command_log")
-editor_prefix="jpacker-test-editor --wait /tmp/jpacker-edit-src-clean-root."
+editor_prefix="moguet-test-editor --wait /tmp/moguet-edit-src-clean-root."
 case $editor_command in
     "$editor_prefix"??????)
         ;;
@@ -411,7 +422,7 @@ case $editor_command in
         exit 1
         ;;
 esac
-edit_temp_path=${editor_command#jpacker-test-editor --wait }
+edit_temp_path=${editor_command#moguet-test-editor --wait }
 assert_command_at 2 "sudo install -Dm644 -- /dev/stdin $edit_src_path"
 privileged_command=$(sed -n '2p' "$command_log")
 case $privileged_command in
@@ -428,7 +439,7 @@ if [ -e "$edit_temp_path" ] || [ -L "$edit_temp_path" ]; then
 fi
 
 setup_case del-src-handler
-del_src_path=$JPACKER_TEST_PACKAGE_BUILD_DIR/clean-root
+del_src_path=$MOGUET_TEST_PACKAGE_BUILD_DIR/clean-root
 printf 'CFLAGS=-Oexisting\n' > "$del_src_path"
 run_ok del-src clean-root
 assert_contains "Removing clean-root from list..." "$output_file"
@@ -439,9 +450,9 @@ if [ ! -f "$del_src_path" ]; then
 fi
 
 setup_case revert-handler
-revert_src_path=$JPACKER_TEST_PACKAGE_BUILD_DIR/official-a
+revert_src_path=$MOGUET_TEST_PACKAGE_BUILD_DIR/official-a
 printf 'CFLAGS=-Oexisting\n' > "$revert_src_path"
-export JPACKER_TEST_PACMAN_REPO_PACKAGES=official-a
+export MOGUET_TEST_PACMAN_REPO_PACKAGES=official-a
 run_ok revert official-a
 assert_contains "Unmarking source-build for official-a" "$output_file"
 assert_contains "official-a exists in official repos. Will reinstall binary." "$output_file"
@@ -462,15 +473,15 @@ for dot_target in . ..; do
         ..) dot_target_label=dot-dot ;;
     esac
     setup_case "auto-install-reject-$dot_target_label"
-    printf 'SOURCE_PREFERENCE_GUARD=yes\n' > "$JPACKER_TEST_PACKAGE_BUILD_DIR/root-guard"
-    preference_checksum=$(cksum "$JPACKER_TEST_PACKAGE_BUILD_DIR/root-guard")
+    printf 'SOURCE_PREFERENCE_GUARD=yes\n' > "$MOGUET_TEST_PACKAGE_BUILD_DIR/root-guard"
+    preference_checksum=$(cksum "$MOGUET_TEST_PACKAGE_BUILD_DIR/root-guard")
 
     run_fail -S "$dot_target"
 
     assert_contains "Invalid package name: $dot_target" "$output_file"
     assert_command_log_empty
     assert_request_log_empty
-    if [ "$(cksum "$JPACKER_TEST_PACKAGE_BUILD_DIR/root-guard")" != "$preference_checksum" ]; then
+    if [ "$(cksum "$MOGUET_TEST_PACKAGE_BUILD_DIR/root-guard")" != "$preference_checksum" ]; then
         echo "source selection changed the source preference fixture for $dot_target" >&2
         exit 1
     fi
@@ -535,7 +546,7 @@ assert_command_log_empty
 assert_request_log_nonempty
 
 setup_case separated-repo-search-long
-export JPACKER_TEST_PACMAN_EXIT_CODE=0
+export MOGUET_TEST_PACMAN_EXIT_CODE=0
 run_ok -S --search --repo keyword
 assert_only_command "pacman -S --search keyword"
 assert_request_log_empty
@@ -547,7 +558,7 @@ assert_no_repo_info_command
 assert_request_log_nonempty
 
 setup_case separated-repo-info-short
-export JPACKER_TEST_PACMAN_EXIT_CODE=0
+export MOGUET_TEST_PACMAN_EXIT_CODE=0
 run_ok -S -i --repo filesystem
 assert_only_command "pacman -S -i filesystem"
 assert_request_log_empty
@@ -555,14 +566,14 @@ assert_request_log_empty
 # POLICY: Autoはoperation文字列だけでsearch/infoを分類し、separated modifierをinstall routeで扱う。
 # selector routeとの現行非対称を共通化しないため、official targetでcall pathを固定する。
 setup_case separated-auto-search-short
-export JPACKER_TEST_PACMAN_REPO_PACKAGES=official-a
+export MOGUET_TEST_PACMAN_REPO_PACKAGES=official-a
 run_ok -S -s official-a
 assert_command "pacman -Si official-a"
 assert_command "sudo pacman -S -s official-a"
 assert_request_log_empty
 
 setup_case separated-auto-info-short
-export JPACKER_TEST_PACMAN_REPO_PACKAGES=official-a
+export MOGUET_TEST_PACMAN_REPO_PACKAGES=official-a
 run_ok -S -i official-a
 assert_command "pacman -Si official-a"
 assert_command "sudo pacman -S -i official-a"
@@ -643,7 +654,7 @@ done
 
 # Matrix B: AurOnly install。root targetはrepo probe/preferenceを見ず、全件preflight後だけmutationする。
 setup_case aur-install-success
-export JPACKER_TEST_MAKEPKG_EXIT_CODE=0
+export MOGUET_TEST_MAKEPKG_EXIT_CODE=0
 run_ok --noedit --nodiff --noconfirm -S --aur clean-root
 assert_command "git clone https://aur.archlinux.org/clean-root.git clean-root"
 assert_command "pacman-conf --verbose RootDir DBPath"
@@ -660,8 +671,8 @@ assert_command_absent "pacman -Si clean-root"
 assert_request_log_nonempty
 
 setup_case aur-install-official-same-name
-export JPACKER_TEST_PACMAN_REPO_PACKAGES=clean-root
-export JPACKER_TEST_MAKEPKG_EXIT_CODE=0
+export MOGUET_TEST_PACMAN_REPO_PACKAGES=clean-root
+export MOGUET_TEST_MAKEPKG_EXIT_CODE=0
 run_ok --noedit --nodiff --noconfirm -S --aur clean-root
 assert_command "git clone https://aur.archlinux.org/clean-root.git clean-root"
 assert_command_absent "pacman -Si clean-root"
@@ -669,14 +680,14 @@ assert_request_log_nonempty
 
 setup_case aur-install-ignores-preference
 prepare_source_preference clean-root
-export JPACKER_TEST_PACMAN_REPO_PACKAGES=clean-root
-export JPACKER_TEST_MAKEPKG_EXIT_CODE=0
+export MOGUET_TEST_PACMAN_REPO_PACKAGES=clean-root
+export MOGUET_TEST_MAKEPKG_EXIT_CODE=0
 run_ok --noedit --nodiff --noconfirm -S --aur clean-root
 assert_command "git clone https://aur.archlinux.org/clean-root.git clean-root"
 assert_command_absent "git clone https://gitlab.archlinux.org/archlinux/packaging/packages/clean-root.git clean-root"
 assert_command_absent "pacman -Si clean-root"
 assert_request_log_nonempty
-if [ ! -f "$JPACKER_TEST_PACKAGE_BUILD_DIR/clean-root" ]; then
+if [ ! -f "$MOGUET_TEST_PACKAGE_BUILD_DIR/clean-root" ]; then
     echo "--aur changed the source-build preference file" >&2
     exit 1
 fi
@@ -719,10 +730,10 @@ AUR_GUARDS
 # Requested split childはPackageBase buildからmetadata identityで一件だけを
 # selectし、sibling/debug outputをtransactionへ渡さない。
 setup_case aur-install-split-child
-export JPACKER_TEST_MAKEPKG_ARTIFACT_IDENTITIES='split-base|split-sibling|2.4-1
+export MOGUET_TEST_MAKEPKG_ARTIFACT_IDENTITIES='split-base|split-sibling|2.4-1
 split-base|split-child|2.4-1
 split-base|split-child-debug|2.4-1'
-export JPACKER_TEST_MAKEPKG_EXIT_CODE=0
+export MOGUET_TEST_MAKEPKG_EXIT_CODE=0
 run_ok --noedit --nodiff --noconfirm -S --aur split-child
 assert_command "git clone https://aur.archlinux.org/split-base.git split-base"
 assert_command_pattern_count 1 '^sudo pacman -U --noconfirm -- .*/split-child-2\.4-1-x86_64\.pkg\.tar\.zst$'
@@ -739,24 +750,24 @@ assert_output_before \
 # fallbackしたうえで同じselected-only lifecycleを使う。
 setup_case auto-install-split-child-package-base-preference
 prepare_source_preference split-base
-export JPACKER_TEST_MAKEPKG_ARTIFACT_IDENTITIES='split-base|split-child|2.5-2
+export MOGUET_TEST_MAKEPKG_ARTIFACT_IDENTITIES='split-base|split-child|2.5-2
 split-base|split-sibling|2.5-2'
-export JPACKER_TEST_MAKEPKG_EXIT_CODE=0
+export MOGUET_TEST_MAKEPKG_EXIT_CODE=0
 run_ok --noedit --nodiff --noconfirm -S split-child
 assert_command "pacman -Si split-child"
 assert_command "git clone https://aur.archlinux.org/split-base.git split-base"
-assert_contains "Loading custom build flags from $JPACKER_TEST_PACKAGE_BUILD_DIR/split-base" "$output_file"
+assert_contains "Loading custom build flags from $MOGUET_TEST_PACKAGE_BUILD_DIR/split-base." "$output_file"
 assert_command_pattern_count 1 '^sudo pacman -U --noconfirm -- .*/split-child-2\.5-2-x86_64\.pkg\.tar\.zst$'
 assert_command_pattern_absent '^sudo pacman -U .*split-sibling'
 
 # 同じPackageBaseのdependency childrenはBuildPlan順で一つのtransactionへ
 # 入り、root packageとは別work itemになる。
 setup_case aur-install-same-package-base-dependency-children
-export JPACKER_TEST_MAKEPKG_ARTIFACT_IDENTITIES='split-suite|split-runtime|2.0-3
+export MOGUET_TEST_MAKEPKG_ARTIFACT_IDENTITIES='split-suite|split-runtime|2.0-3
 split-suite|split-tools|2.0-3
 split-suite|split-suite-debug|2.0-3
 split-suite-root|split-suite-root|2.0-3'
-export JPACKER_TEST_MAKEPKG_EXIT_CODE=0
+export MOGUET_TEST_MAKEPKG_EXIT_CODE=0
 run_ok --noedit --nodiff --noconfirm -S --aur split-suite-root
 assert_command_pattern_count 1 '^sudo pacman -U --noconfirm --asdeps -- .*/split-runtime-2\.0-3-x86_64\.pkg\.tar\.zst .*/split-tools-2\.0-3-x86_64\.pkg\.tar\.zst$'
 assert_command_pattern_absent '^sudo pacman -U .*split-suite-debug'
@@ -788,23 +799,23 @@ assert_request_log_empty
 
 setup_case repo-install-overrides-preference
 prepare_source_preference official-a
-preference_checksum=$(cksum "$JPACKER_TEST_PACKAGE_BUILD_DIR/official-a")
-export JPACKER_TEST_PACMAN_REPO_PACKAGES=official-a
+preference_checksum=$(cksum "$MOGUET_TEST_PACKAGE_BUILD_DIR/official-a")
+export MOGUET_TEST_PACMAN_REPO_PACKAGES=official-a
 run_ok -S --repo official-a
 assert_only_command "sudo pacman -S official-a"
 assert_no_source_build_commands
 assert_request_log_empty
-if [ ! -f "$JPACKER_TEST_PACKAGE_BUILD_DIR/official-a" ]; then
+if [ ! -f "$MOGUET_TEST_PACKAGE_BUILD_DIR/official-a" ]; then
     echo "--repo removed or changed the source-build preference" >&2
     exit 1
 fi
-if [ "$(cksum "$JPACKER_TEST_PACKAGE_BUILD_DIR/official-a")" != "$preference_checksum" ]; then
+if [ "$(cksum "$MOGUET_TEST_PACKAGE_BUILD_DIR/official-a")" != "$preference_checksum" ]; then
     echo "--repo changed the source-build preference content" >&2
     exit 1
 fi
 
 setup_case repo-install-missing
-export JPACKER_TEST_SUDO_EXIT_CODE=42
+export MOGUET_TEST_SUDO_EXIT_CODE=42
 run_fail -S --repo clean-root
 assert_only_command "sudo pacman -S clean-root"
 assert_no_source_build_commands
@@ -832,7 +843,7 @@ assert_request_log_empty
 
 # Auto install regression: selector未指定時のrepo/source-build/AUR分類と横断preflightを維持する。
 setup_case auto-install-official
-export JPACKER_TEST_PACMAN_REPO_PACKAGES=official-a
+export MOGUET_TEST_PACMAN_REPO_PACKAGES=official-a
 run_ok -S official-a
 assert_command "pacman -Si official-a"
 assert_command "sudo pacman -S official-a"
@@ -840,7 +851,7 @@ assert_no_source_build_commands
 assert_request_log_empty
 
 setup_case auto-install-preferred-official
-cat > "$JPACKER_TEST_PACKAGE_BUILD_DIR/clean-root" <<'SOURCE_PREFERENCE'
+cat > "$MOGUET_TEST_PACKAGE_BUILD_DIR/clean-root" <<'SOURCE_PREFERENCE'
   # whole-line comment
   FIRST = "alpha value" # stripped comment
   QUOTED = 'quoted # value' # stripped after the quoted hash
@@ -848,18 +859,18 @@ cat > "$JPACKER_TEST_PACKAGE_BUILD_DIR/clean-root" <<'SOURCE_PREFERENCE'
   DUP = second
   BRACED = ${FIRST}/brace
   SIMPLE = $DUP/simple
-  UNDEFINED = $JPACKER_TEST_SOURCE_PREFERENCE_EXTERNAL
+  UNDEFINED = $MOGUET_TEST_SOURCE_PREFERENCE_EXTERNAL
   EMPTY = ''
   9INVALID=value
   ignored without equals
 SOURCE_PREFERENCE
-export JPACKER_TEST_SOURCE_PREFERENCE_EXTERNAL=from-process-environment
-export JPACKER_TEST_PACMAN_REPO_PACKAGES=clean-root
-export JPACKER_TEST_MAKEPKG_EXIT_CODE=0
+export MOGUET_TEST_SOURCE_PREFERENCE_EXTERNAL=from-process-environment
+export MOGUET_TEST_PACMAN_REPO_PACKAGES=clean-root
+export MOGUET_TEST_MAKEPKG_EXIT_CODE=0
 makepkg_env_log=$case_dir/makepkg-env.log
 : > "$makepkg_env_log"
-export JPACKER_TEST_MAKEPKG_ENV_LOG=$makepkg_env_log
-export JPACKER_TEST_MAKEPKG_ENV_KEYS='DUP EMPTY UNDEFINED'
+export MOGUET_TEST_MAKEPKG_ENV_LOG=$makepkg_env_log
+export MOGUET_TEST_MAKEPKG_ENV_KEYS='DUP EMPTY UNDEFINED'
 run_ok --noedit --nodiff --noconfirm -S clean-root
 assert_command "git clone https://gitlab.archlinux.org/archlinux/packaging/packages/clean-root.git clean-root"
 assert_command "pacman-conf --verbose RootDir DBPath"
@@ -867,7 +878,7 @@ assert_command "makepkg --packagelist"
 assert_command "makepkg -sc --noconfirm"
 assert_command_pattern '^pacman -U --print --print-format .* -- .*/clean-root-1\.0-1-x86_64\.pkg\.tar\.zst$'
 assert_command_pattern '^sudo pacman -U --noconfirm -- .*/clean-root-1\.0-1-x86_64\.pkg\.tar\.zst$'
-assert_contains "Loading custom build flags from $JPACKER_TEST_PACKAGE_BUILD_DIR/clean-root" "$output_file"
+assert_contains "Loading custom build flags from $MOGUET_TEST_PACKAGE_BUILD_DIR/clean-root." "$output_file"
 assert_contains "Applying custom build flags: FIRST='alpha value' QUOTED='quoted # value' DUP='first' DUP='second' BRACED='alpha value/brace' SIMPLE='second/simple'" "$output_file"
 assert_contains "Ignoring invalid environment assignment: 9INVALID=value" "$output_file"
 assert_not_contains "UNDEFINED=" "$output_file"
@@ -887,7 +898,7 @@ env-end'
 assert_request_log_empty
 
 setup_case auto-install-aur
-export JPACKER_TEST_MAKEPKG_EXIT_CODE=0
+export MOGUET_TEST_MAKEPKG_EXIT_CODE=0
 run_ok --noedit --nodiff --noconfirm -S clean-root
 assert_command "pacman -Si clean-root"
 assert_command "git clone https://aur.archlinux.org/clean-root.git clean-root"
@@ -899,7 +910,7 @@ assert_command_pattern '^sudo pacman -U --noconfirm -- .*/clean-root-1\.0-1-x86_
 assert_request_log_nonempty
 
 setup_case auto-install-mixed-preflight
-export JPACKER_TEST_PACMAN_REPO_PACKAGES=official-a
+export MOGUET_TEST_PACMAN_REPO_PACKAGES=official-a
 run_fail --noedit --noconfirm -S official-a missing-aur-package
 assert_contains "not found" "$output_file"
 assert_no_mutation_commands
@@ -907,8 +918,8 @@ assert_request_log_nonempty
 assert_cache_entry_absent missing-aur-package
 
 setup_case auto-install-mixed-success
-export JPACKER_TEST_PACMAN_REPO_PACKAGES=official-a
-export JPACKER_TEST_MAKEPKG_EXIT_CODE=0
+export MOGUET_TEST_PACMAN_REPO_PACKAGES=official-a
+export MOGUET_TEST_MAKEPKG_EXIT_CODE=0
 run_ok --noedit --nodiff --noconfirm -S official-a clean-root
 assert_command "sudo pacman -S --noconfirm official-a"
 assert_command "git clone https://aur.archlinux.org/clean-root.git clean-root"
@@ -920,7 +931,7 @@ assert_command_pattern '^sudo pacman -U --noconfirm -- .*/clean-root-1\.0-1-x86_
 assert_request_log_nonempty
 
 setup_case auto-install-unsupported-option
-export JPACKER_TEST_PACMAN_REPO_PACKAGES=official-a
+export MOGUET_TEST_PACMAN_REPO_PACKAGES=official-a
 run_fail -S official-a --config custom.conf clean-root
 assert_contains "Unsupported pacman option for AUR/source-build target: --config" "$output_file"
 assert_no_mutation_commands
@@ -956,13 +967,13 @@ do
 done
 
 setup_case repo-search
-export JPACKER_TEST_PACMAN_EXIT_CODE=0
+export MOGUET_TEST_PACMAN_EXIT_CODE=0
 run_ok -Ss --repo keyword
 assert_only_command "pacman -Ss keyword"
 assert_request_log_empty
 
 setup_case repo-search-missing
-export JPACKER_TEST_PACMAN_EXIT_CODE=7
+export MOGUET_TEST_PACMAN_EXIT_CODE=7
 run_fail -Ss --repo keyword
 assert_only_command "pacman -Ss keyword"
 assert_request_log_empty
@@ -973,7 +984,7 @@ assert_only_command "sudo pacman -Ss --refresh keyword"
 assert_request_log_empty
 
 setup_case auto-search
-export JPACKER_TEST_PACMAN_EXIT_CODE=0
+export MOGUET_TEST_PACMAN_EXIT_CODE=0
 run_ok -Ss virtual-dep-150
 assert_command "pacman -Ss virtual-dep-150"
 assert_contains "provider-a" "$output_file"
@@ -992,7 +1003,7 @@ assert_no_repo_info_command
 assert_request_log_nonempty
 
 setup_case aur-info-official-same-name
-export JPACKER_TEST_PACMAN_REPO_PACKAGES=clean-root
+export MOGUET_TEST_PACMAN_REPO_PACKAGES=clean-root
 run_ok -Si --aur clean-root
 assert_contains "Name            : clean-root" "$output_file"
 assert_no_repo_info_command
@@ -1040,7 +1051,7 @@ assert_no_repo_info_command
 assert_request_log_nonempty
 
 setup_case repo-info
-export JPACKER_TEST_PACMAN_EXIT_CODE=0
+export MOGUET_TEST_PACMAN_EXIT_CODE=0
 run_ok -Si --repo filesystem
 assert_only_command "pacman -Si filesystem"
 assert_request_log_empty
@@ -1051,7 +1062,7 @@ assert_only_command "pacman -Si clean-root"
 assert_request_log_empty
 
 setup_case repo-info-qualified
-export JPACKER_TEST_PACMAN_EXIT_CODE=0
+export MOGUET_TEST_PACMAN_EXIT_CODE=0
 run_ok -Si --repo core/filesystem
 assert_only_command "pacman -Si core/filesystem"
 assert_request_log_empty
@@ -1062,19 +1073,19 @@ assert_only_command "sudo pacman -Si --refresh filesystem"
 assert_request_log_empty
 
 setup_case repo-info-multiple
-export JPACKER_TEST_PACMAN_EXIT_CODE=0
+export MOGUET_TEST_PACMAN_EXIT_CODE=0
 run_ok -Si --repo target-a target-b
 assert_only_command "pacman -Si target-a target-b"
 assert_request_log_empty
 
 setup_case auto-info-official
-export JPACKER_TEST_PACMAN_REPO_PACKAGES=filesystem
+export MOGUET_TEST_PACMAN_REPO_PACKAGES=filesystem
 run_ok -Si filesystem
 assert_command "pacman -Si filesystem"
 assert_request_log_empty
 
 setup_case auto-info-qualified
-export JPACKER_TEST_PACMAN_EXIT_CODE=0
+export MOGUET_TEST_PACMAN_EXIT_CODE=0
 run_ok -Si core/filesystem
 assert_only_command "pacman -Si core/filesystem"
 assert_request_log_empty

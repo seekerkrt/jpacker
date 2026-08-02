@@ -2,6 +2,7 @@
 
 #include "dependency_provider.hpp"
 #include "dependency_spec.hpp"
+#include "localization.hpp"
 #include "package_identifier.hpp"
 
 #include <algorithm>
@@ -11,11 +12,16 @@
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <variant>
 #include <vector>
 
 namespace {
+
+constexpr std::string_view AUR_SERVICE_NAME = "AUR";
+constexpr std::string_view BUILD_PLAN_TYPE_NAME = "BuildPlan";
+constexpr std::string_view PACKAGE_BASE_FIELD_NAME = "PackageBase";
 
 struct CandidateMapping {
     std::size_t candidate_index;
@@ -52,14 +58,26 @@ void add_issue(
     target.issues.push_back(std::move(issue));
 }
 
-AurUpdateExecutionIssue make_issue(
-        AurUpdateExecutionReason reason, const std::string& diagnostic,
+AurUpdateExecutionIssue make_localized_execution_issue(
+        AurUpdateExecutionReason reason, std::string diagnostic,
         std::optional<std::string> package_name = std::nullopt,
         std::optional<std::string> package_base = std::nullopt,
         std::optional<std::string> dependency_specification = std::nullopt) {
     return AurUpdateExecutionIssue{
             reason, std::move(package_name), std::move(package_base),
-            std::move(dependency_specification), diagnostic};
+            std::move(dependency_specification), std::move(diagnostic)};
+}
+
+template<std::size_t Size>
+AurUpdateExecutionIssue make_localized_execution_issue(
+        AurUpdateExecutionReason reason, const char (&diagnostic)[Size],
+        std::optional<std::string> package_name = std::nullopt,
+        std::optional<std::string> package_base = std::nullopt,
+        std::optional<std::string> dependency_specification = std::nullopt) {
+    return make_localized_execution_issue(
+            reason, localization::translate_message(diagnostic),
+            std::move(package_name), std::move(package_base),
+            std::move(dependency_specification));
 }
 
 bool is_unsupported_reason(AurUpdateExecutionReason reason) noexcept {
@@ -143,7 +161,7 @@ void add_initial_classification_issue(AurUpdateExecutionTarget& target) {
     case AurUpdateClassification::UpToDate:
         add_issue(
                 target,
-                make_issue(
+                make_localized_execution_issue(
                         AurUpdateExecutionReason::UpToDate,
                         "Installed package is already up to date.",
                         target.update.installed_name));
@@ -151,23 +169,29 @@ void add_initial_classification_issue(AurUpdateExecutionTarget& target) {
     case AurUpdateClassification::NonAurForeign:
         add_issue(
                 target,
-                make_issue(
+                make_localized_execution_issue(
                         AurUpdateExecutionReason::NonAurForeign,
-                        "Installed foreign package is not present in AUR.",
+                        localization::format_translated_message(
+                                // TRANSLATORS: {} is the literal service name "AUR".
+                                "Installed foreign package is not present in {}.",
+                                AUR_SERVICE_NAME),
                         target.update.installed_name));
         break;
     case AurUpdateClassification::MetadataUnavailable:
         add_issue(
                 target,
-                make_issue(
+                make_localized_execution_issue(
                         AurUpdateExecutionReason::AurMetadataUnavailable,
-                        "AUR update metadata is unavailable.",
+                        localization::format_translated_message(
+                                // TRANSLATORS: {} is the literal service name "AUR".
+                                "{} update metadata is unavailable.",
+                                AUR_SERVICE_NAME),
                         target.update.installed_name));
         break;
     case AurUpdateClassification::VersionComparisonUnavailable:
         add_issue(
                 target,
-                make_issue(
+                make_localized_execution_issue(
                         AurUpdateExecutionReason::VersionComparisonUnavailable,
                         "Installed and remote versions could not be compared.",
                         target.update.installed_name));
@@ -175,9 +199,12 @@ void add_initial_classification_issue(AurUpdateExecutionTarget& target) {
     default:
         add_issue(
                 target,
-                make_issue(
+                make_localized_execution_issue(
                         AurUpdateExecutionReason::UpdatePlanInconsistent,
-                        "AUR update classification is unknown.",
+                        localization::format_translated_message(
+                                // TRANSLATORS: {} is the literal service name "AUR".
+                                "{} update classification is unknown.",
+                                AUR_SERVICE_NAME),
                         target.update.installed_name));
         return;
     }
@@ -185,9 +212,12 @@ void add_initial_classification_issue(AurUpdateExecutionTarget& target) {
     if(!has_consistent_remote_metadata(target.update)) {
         add_issue(
                 target,
-                make_issue(
+                make_localized_execution_issue(
                         AurUpdateExecutionReason::UpdatePlanInconsistent,
-                        "AUR update classification and remote metadata disagree.",
+                        localization::format_translated_message(
+                                // TRANSLATORS: {} is the literal service name "AUR".
+                                "{} update classification and remote metadata disagree.",
+                                AUR_SERVICE_NAME),
                         target.update.installed_name));
     }
 
@@ -196,9 +226,12 @@ void add_initial_classification_issue(AurUpdateExecutionTarget& target) {
         !is_valid_package_name(target.update.aur_package->package_base))) {
         add_issue(
                 target,
-                make_issue(
+                make_localized_execution_issue(
                         AurUpdateExecutionReason::UpdatePlanInconsistent,
-                        "AUR update metadata contains an invalid package identity.",
+                        localization::format_translated_message(
+                                // TRANSLATORS: {} is the literal service name "AUR".
+                                "{} update metadata contains an invalid package identity.",
+                                AUR_SERVICE_NAME),
                         target.update.aur_package->aur_name,
                         target.update.aur_package->package_base));
     }
@@ -206,9 +239,12 @@ void add_initial_classification_issue(AurUpdateExecutionTarget& target) {
        target.update.aur_package->aur_name != target.update.installed_name) {
         add_issue(
                 target,
-                make_issue(
+                make_localized_execution_issue(
                         AurUpdateExecutionReason::UpdatePlanInconsistent,
-                        "Installed and AUR package names disagree.",
+                        localization::format_translated_message(
+                                // TRANSLATORS: {} is the literal service name "AUR".
+                                "Installed and {} package names disagree.",
+                                AUR_SERVICE_NAME),
                         target.update.aur_package->aur_name,
                         target.update.aur_package->package_base));
     }
@@ -667,7 +703,7 @@ void inspect_resolution_failures(
         }
         add_attributed_issue(
                 issues,
-                make_issue(
+                make_localized_execution_issue(
                         reason, failure.diagnostic, failure.subject,
                         std::nullopt, failure.dependency_specification),
                 std::move(roots));
@@ -773,10 +809,12 @@ void inspect_dependency_edges(
                     });
             add_attributed_issue(
                     issues,
-                    make_issue(
+                    make_localized_execution_issue(
                             AurUpdateExecutionReason::AmbiguousProvider,
-                            "Dependency has multiple provider candidates: " +
-                                    parsed.raw,
+                            localization::format_translated_message(
+                                    // TRANSLATORS: The placeholder is a literal dependency specification.
+                                    "Dependency has multiple provider candidates: {}",
+                                    parsed.raw),
                             edge.parent_package_name,
                             edge.parent_package_base,
                             edge.dependency_spec),
@@ -795,7 +833,7 @@ void inspect_dependency_edges(
         if(!edge_is_consistent) {
             add_attributed_issue(
                     issues,
-                    make_issue(
+                    make_localized_execution_issue(
                             AurUpdateExecutionReason::BuildPlanInconsistent,
                             "Dependency edge fields or root attribution are inconsistent.",
                             edge.parent_package_name,
@@ -809,9 +847,12 @@ void inspect_dependency_edges(
            edge.kind == DependencyKind::Unknown) {
             add_attributed_issue(
                     issues,
-                    make_issue(
+                    make_localized_execution_issue(
                             AurUpdateExecutionReason::UnresolvedDependency,
-                            "Dependency could not be resolved: " + parsed.raw,
+                            localization::format_translated_message(
+                                    // TRANSLATORS: The placeholder is a literal dependency specification.
+                                    "Dependency could not be resolved: {}",
+                                    parsed.raw),
                             edge.parent_package_name,
                             edge.parent_package_base,
                             edge.dependency_spec),
@@ -828,10 +869,12 @@ void inspect_dependency_edges(
         if(parsed.has_parseable_constraint()) {
             add_attributed_issue(
                     issues,
-                    make_issue(
+                    make_localized_execution_issue(
                             AurUpdateExecutionReason::VersionConstraintUnverified,
-                            "Dependency version constraint is not verified: " +
-                                    parsed.raw,
+                            localization::format_translated_message(
+                                    // TRANSLATORS: The placeholder is a literal dependency specification.
+                                    "Dependency version constraint is not verified: {}",
+                                    parsed.raw),
                             edge.parent_package_name,
                             edge.parent_package_base,
                             edge.dependency_spec),
@@ -858,10 +901,14 @@ void inspect_unresolved_cycles_and_risks(
         }
         add_attributed_issue(
                 issues,
-                make_issue(
+                make_localized_execution_issue(
                         AurUpdateExecutionReason::UnresolvedDependency,
-                        "BuildPlan contains an unresolved dependency: " +
-                                unresolved,
+                        localization::format_translated_message(
+                                // TRANSLATORS: The first placeholder is the literal
+                                // internal type name "BuildPlan"; the second is a
+                                // package or dependency identity.
+                                "{} contains an unresolved dependency: {}",
+                                BUILD_PLAN_TYPE_NAME, unresolved),
                         std::nullopt, std::nullopt, unresolved),
                 roots);
     }
@@ -876,16 +923,24 @@ void inspect_unresolved_cycles_and_risks(
                 roots_for_package(plan, std::nullopt, cycle);
         add_attributed_issue(
                 issues,
-                make_issue(
+                make_localized_execution_issue(
                         AurUpdateExecutionReason::DependencyCycle,
-                        "Dependency cycle contains PackageBase: " + cycle,
+                        localization::format_translated_message(
+                                // TRANSLATORS: The first placeholder is the literal
+                                // field name "PackageBase"; the second is that
+                                // field's package identity.
+                                "Dependency cycle contains {}: {}",
+                                PACKAGE_BASE_FIELD_NAME, cycle),
                         std::nullopt, cycle),
                 roots);
         add_attributed_issue(
                 issues,
-                make_issue(
+                make_localized_execution_issue(
                         AurUpdateExecutionReason::BuildPlanInconsistent,
-                        "BuildPlan cycle summary has no matching reachable dependency cycle.",
+                        localization::format_translated_message(
+                                // TRANSLATORS: {} is the literal internal type name "BuildPlan".
+                                "{} cycle summary has no matching reachable dependency cycle.",
+                                BUILD_PLAN_TYPE_NAME),
                         std::nullopt, cycle),
                 std::move(roots));
     }
@@ -903,18 +958,25 @@ void inspect_unresolved_cycles_and_risks(
                 : reachable_cycle.package_bases.front();
         add_attributed_issue(
                 issues,
-                make_issue(
+                make_localized_execution_issue(
                         AurUpdateExecutionReason::DependencyCycle,
-                        "Typed dependency graph contains a cycle at PackageBase: " +
-                                representative,
+                        localization::format_translated_message(
+                                // TRANSLATORS: The first placeholder is the literal
+                                // field name "PackageBase"; the second is that
+                                // field's package identity.
+                                "Typed dependency graph contains a cycle at {}: {}",
+                                PACKAGE_BASE_FIELD_NAME, representative),
                         std::nullopt, representative),
                 reachable_cycle.roots);
         if(is_summarized) continue;
         add_attributed_issue(
                 issues,
-                make_issue(
+                make_localized_execution_issue(
                         AurUpdateExecutionReason::BuildPlanInconsistent,
-                        "Reachable dependency cycle is missing from BuildPlan summary.",
+                        localization::format_translated_message(
+                                // TRANSLATORS: {} is the literal internal type name "BuildPlan".
+                                "Reachable dependency cycle is missing from {} summary.",
+                                BUILD_PLAN_TYPE_NAME),
                         std::nullopt, representative),
                 reachable_cycle.roots);
     }
@@ -940,10 +1002,12 @@ void inspect_unresolved_cycles_and_risks(
         if(!has_matching_edge) {
             add_attributed_issue(
                     issues,
-                    make_issue(
+                    make_localized_execution_issue(
                             AurUpdateExecutionReason::AmbiguousProvider,
-                            "Ambiguous provider summary has no matching dependency edge: " +
-                                    canonical_dependency,
+                            localization::format_translated_message(
+                                    // TRANSLATORS: The placeholder is a literal dependency specification.
+                                    "Ambiguous provider summary has no matching dependency edge: {}",
+                                    canonical_dependency),
                             std::nullopt, std::nullopt,
                             ambiguous.dependency),
                     roots);
@@ -953,7 +1017,7 @@ void inspect_unresolved_cycles_and_risks(
     for(const auto& risk : plan.metadata_risks) {
         add_attributed_issue(
                 issues,
-                make_issue(
+                make_localized_execution_issue(
                         AurUpdateExecutionReason::ConflictsOrReplacesUnresolved,
                         "Package declares conflicts or replaces metadata that requires policy.",
                         risk.package_name, risk.package_base),
@@ -972,7 +1036,7 @@ void inspect_package_targets_and_order(
             project_build_plan_required_artifact_targets(plan);
     if(!projection.is_success()) {
         for(const auto& projection_issue : projection.failure()->issues) {
-            AurUpdateExecutionIssue issue = make_issue(
+            AurUpdateExecutionIssue issue = make_localized_execution_issue(
                     projection_issue.kind ==
                                     BuildPlanArtifactTargetProjectionIssueKind::
                                             PackageBaseMismatch
@@ -1017,9 +1081,12 @@ void inspect_package_targets_and_order(
            !has_self_root) {
             add_attributed_issue(
                     issues,
-                    make_issue(
+                    make_localized_execution_issue(
                             AurUpdateExecutionReason::BuildPlanInconsistent,
-                            "BuildPlan package target identity or root ownership is inconsistent.",
+                            localization::format_translated_message(
+                                    // TRANSLATORS: {} is the literal internal type name "BuildPlan".
+                                    "{} package target identity or root ownership is inconsistent.",
+                                    BUILD_PLAN_TYPE_NAME),
                             target.package_name, target.package_base),
                     target.roots);
         }
@@ -1028,9 +1095,15 @@ void inspect_package_targets_and_order(
                    target, dependency_graph, root_reachability)) {
             add_attributed_issue(
                     issues,
-                    make_issue(
+                    make_localized_execution_issue(
                             AurUpdateExecutionReason::BuildPlanInconsistent,
-                            "BuildPlan AUR dependency target is not grounded in the rooted dependency graph.",
+                            localization::format_translated_message(
+                                    // TRANSLATORS: The placeholders are the literal
+                                    // internal type name "BuildPlan" and service
+                                    // name "AUR", respectively.
+                                    "{} {} dependency target is not grounded in the rooted dependency graph.",
+                                    BUILD_PLAN_TYPE_NAME,
+                                    AUR_SERVICE_NAME),
                             target.package_name, target.package_base),
                     target.roots);
         }
@@ -1111,9 +1184,12 @@ void apply_attributed_build_plan_issues(
             add_issue_to_all_candidates(preflight, candidates, attributed.issue);
             add_issue_to_all_candidates(
                     preflight, candidates,
-                    make_issue(
+                    make_localized_execution_issue(
                             AurUpdateExecutionReason::BuildPlanInconsistent,
-                            "A blocking BuildPlan issue could not be attributed to every affected root."));
+                            localization::format_translated_message(
+                                    // TRANSLATORS: {} is the literal internal type name "BuildPlan".
+                                    "A blocking {} issue could not be attributed to every affected root.",
+                                    BUILD_PLAN_TYPE_NAME)));
             continue;
         }
 
@@ -1130,9 +1206,12 @@ void inspect_combined_build_plan_consistency(
     if(plan.root_targets.size() != candidates.size()) {
         add_issue_to_all_candidates(
                 preflight, candidates,
-                make_issue(
+                make_localized_execution_issue(
                         AurUpdateExecutionReason::BuildPlanInconsistent,
-                        "Combined BuildPlan root count does not match the update candidate count."));
+                        localization::format_translated_message(
+                                // TRANSLATORS: {} is the literal internal type name "BuildPlan".
+                                "Combined {} root count does not match the update candidate count.",
+                                BUILD_PLAN_TYPE_NAME)));
     }
 
     for(const auto& candidate : candidates) {
@@ -1141,9 +1220,12 @@ void inspect_combined_build_plan_consistency(
         if(candidate.candidate_index >= plan.root_targets.size()) {
             add_issue(
                     target,
-                    make_issue(
+                    make_localized_execution_issue(
                             AurUpdateExecutionReason::BuildPlanInconsistent,
-                            "Combined BuildPlan is missing the candidate root.",
+                            localization::format_translated_message(
+                                    // TRANSLATORS: {} is the literal internal type name "BuildPlan".
+                                    "Combined {} is missing the candidate root.",
+                                    BUILD_PLAN_TYPE_NAME),
                             candidate.requested_name));
             continue;
         }
@@ -1154,9 +1236,12 @@ void inspect_combined_build_plan_consistency(
            root.requested_name != candidate.requested_name) {
             add_issue(
                     target,
-                    make_issue(
+                    make_localized_execution_issue(
                             AurUpdateExecutionReason::BuildPlanInconsistent,
-                            "Combined BuildPlan root identity or order differs from the candidate mapping.",
+                            localization::format_translated_message(
+                                    // TRANSLATORS: {} is the literal internal type name "BuildPlan".
+                                    "Combined {} root identity or order differs from the candidate mapping.",
+                                    BUILD_PLAN_TYPE_NAME),
                             candidate.requested_name));
             continue;
         }
@@ -1177,7 +1262,7 @@ void inspect_combined_build_plan_consistency(
         if(matching_root_targets.size() != 1) {
             add_issue(
                     target,
-                    make_issue(
+                    make_localized_execution_issue(
                             AurUpdateExecutionReason::BuildPlanInconsistent,
                             "Candidate root does not have exactly one matching planned package target.",
                             candidate.requested_name));
@@ -1193,9 +1278,15 @@ void inspect_combined_build_plan_consistency(
                    target.update.aur_package->package_base) {
             add_issue(
                     target,
-                    make_issue(
+                    make_localized_execution_issue(
                             AurUpdateExecutionReason::PackageBaseMismatch,
-                            "AUR update metadata and BuildPlan root identity differ.",
+                            localization::format_translated_message(
+                                    // TRANSLATORS: The placeholders are the literal
+                                    // service name "AUR" and internal type name
+                                    // "BuildPlan", respectively.
+                                    "{} update metadata and {} root identity differ.",
+                                    AUR_SERVICE_NAME,
+                                    BUILD_PLAN_TYPE_NAME),
                             package_target.package_name,
                             package_target.package_base));
         }
@@ -1206,9 +1297,12 @@ void inspect_combined_build_plan_consistency(
         if(package_target.roots.empty()) {
             add_issue_to_all_candidates(
                     preflight, candidates,
-                    make_issue(
+                    make_localized_execution_issue(
                             AurUpdateExecutionReason::BuildPlanInconsistent,
-                            "A BuildPlan root package target has no root identity.",
+                            localization::format_translated_message(
+                                    // TRANSLATORS: {} is the literal internal type name "BuildPlan".
+                                    "A {} root package target has no root identity.",
+                                    BUILD_PLAN_TYPE_NAME),
                             package_target.package_name,
                             package_target.package_base));
             continue;
@@ -1217,9 +1311,12 @@ void inspect_combined_build_plan_consistency(
             if(find_candidate_for_root(candidates, root) != nullptr) continue;
             add_issue_to_all_candidates(
                     preflight, candidates,
-                    make_issue(
+                    make_localized_execution_issue(
                             AurUpdateExecutionReason::BuildPlanInconsistent,
-                            "A BuildPlan root package target references an unknown candidate root.",
+                            localization::format_translated_message(
+                                    // TRANSLATORS: {} is the literal internal type name "BuildPlan".
+                                    "A {} root package target references an unknown candidate root.",
+                                    BUILD_PLAN_TYPE_NAME),
                             package_target.package_name,
                             package_target.package_base));
         }
@@ -1252,7 +1349,7 @@ AurUpdateExecutionPreflight resolve_aur_update_execution_preflight(
             if(!target.desired_install_reason.has_value()) {
                 add_issue(
                         target,
-                        make_issue(
+                        make_localized_execution_issue(
                                 AurUpdateExecutionReason::InstalledReasonUnknown,
                                 "Installed package reason is unknown.",
                                 target.update.installed_name));
@@ -1268,7 +1365,7 @@ AurUpdateExecutionPreflight resolve_aur_update_execution_preflight(
                 has_invalid_candidate_name = true;
                 add_issue(
                         target,
-                        make_issue(
+                        make_localized_execution_issue(
                                 AurUpdateExecutionReason::UpdatePlanInconsistent,
                                 "Update candidate has an invalid installed package name.",
                                 target.update.installed_name));
@@ -1286,7 +1383,7 @@ AurUpdateExecutionPreflight resolve_aur_update_execution_preflight(
         for(const auto plan_index : plan_indices) {
             add_issue(
                     preflight.targets[plan_index],
-                    make_issue(
+                    make_localized_execution_issue(
                             AurUpdateExecutionReason::DuplicateUpdateTarget,
                             "Update candidate occurs more than once in the invocation.",
                             package_name));
@@ -1301,9 +1398,12 @@ AurUpdateExecutionPreflight resolve_aur_update_execution_preflight(
     if(has_duplicate_candidate || has_invalid_candidate_name) {
         add_issue_to_all_candidates(
                 preflight, candidates,
-                make_issue(
+                make_localized_execution_issue(
                         AurUpdateExecutionReason::BuildPlanInconsistent,
-                        "Combined BuildPlan resolution was skipped because the candidate set is inconsistent."));
+                        localization::format_translated_message(
+                                // TRANSLATORS: {} is the literal internal type name "BuildPlan".
+                                "Combined {} resolution was skipped because the candidate set is inconsistent.",
+                                BUILD_PLAN_TYPE_NAME)));
         for(auto& target : preflight.targets) reduce_target_status(target);
         return preflight;
     }

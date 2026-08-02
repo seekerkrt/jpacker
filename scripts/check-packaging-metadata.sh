@@ -2,15 +2,15 @@
 
 set -eu
 
-repo_root=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
-srcinfo_file=$(mktemp)
-stage_root=$(mktemp -d)
-package_work=$(mktemp -d)
+repo_root=$(CDPATH='' cd "$(dirname "$0")/.." && pwd)
+tmp_dir=$(mktemp -d)
+srcinfo_file=$tmp_dir/.SRCINFO
+stage_root=$tmp_dir/stage
+package_work=$tmp_dir/package-work
+mkdir -p "$stage_root" "$package_work"
 
 cleanup() {
-    rm -f "$srcinfo_file"
-    rm -rf "$stage_root"
-    rm -rf "$package_work"
+    rm -rf "$tmp_dir"
 }
 trap cleanup EXIT INT TERM
 
@@ -19,28 +19,94 @@ fail() {
     exit 1
 }
 
+srcinfo_values() {
+    key=$1
+    awk -v key="$key" '$1 == key && $2 == "=" { print $3 }' "$srcinfo_file"
+}
+
+assert_single_value() {
+    key=$1
+    expected=$2
+    actual=$(srcinfo_values "$key")
+    [ "$actual" = "$expected" ] ||
+        fail "$key mismatch: expected '$expected', got '$actual'."
+}
+
+assert_no_values() {
+    key=$1
+    actual=$(srcinfo_values "$key")
+    [ -z "$actual" ] ||
+        fail "$key must be unset; found: $actual"
+}
+
+assert_value_set() {
+    key=$1
+    expected=$2
+    actual=$(srcinfo_values "$key" | LC_ALL=C sort)
+    [ "$actual" = "$expected" ] || {
+        printf 'packaging-metadata-check: %s mismatch\nexpected:\n%s\nactual:\n%s\n' \
+            "$key" "$expected" "$actual" >&2
+        exit 1
+    }
+}
+
 (
     cd "$repo_root"
     makepkg --printsrcinfo
 ) > "$srcinfo_file"
 
-backup_count=$(awk '$1 == "backup" && $2 == "=" { count++ } END { print count + 0 }' "$srcinfo_file")
-expected_backup_count=$(awk '
-    $1 == "backup" && $2 == "=" && NF == 3 &&
-        $3 == "etc/jpacker/jpacker.conf" { count++ }
-    END { print count + 0 }
-' "$srcinfo_file")
+assert_single_value pkgbase moguet
+assert_single_value pkgname moguet
+assert_single_value pkgver 2.0.0
+assert_single_value pkgrel 1
+assert_single_value arch x86_64
+assert_single_value license GPL-3.0-or-later
+assert_single_value source \
+    'moguet-src::git+https://github.com/seekerkrt/moguet.git#tag=v2.0.0'
+assert_single_value sha256sums SKIP
 
-[ "$backup_count" -eq 1 ] ||
-    fail "expected exactly one backup entry; found $backup_count."
-[ "$expected_backup_count" -eq 1 ] ||
-    fail "backup entry must be exactly etc/jpacker/jpacker.conf."
+expected_depends='curl
+git
+libalpm.so
+libarchive
+nano
+pacman
+sudo'
+assert_value_set depends "$expected_depends"
 
-source_config=$repo_root/config/jpacker.conf
-[ -f "$source_config" ] && [ ! -L "$source_config" ] ||
-    fail "config/jpacker.conf is missing or is not a regular source file."
+expected_makedepends='nlohmann-json
+tomlplusplus'
+assert_value_set makedepends "$expected_makedepends"
 
-ln -s "$repo_root" "$package_work/jpacker-src"
+# No system or user configuration belongs to the package. The disjoint v1/v2
+# payload and lack of a command alias make all four transition fields harmful.
+assert_no_values backup
+assert_no_values conflicts
+assert_no_values replaces
+assert_no_values provides
+assert_no_values optdepends
+
+for build_only_dependency in nlohmann-json tomlplusplus
+do
+    if srcinfo_values depends | grep -Fx -- "$build_only_dependency" >/dev/null; then
+        fail "$build_only_dependency must not be a runtime dependency."
+    fi
+done
+
+for forbidden_tomlplusplus_flag in \
+    -ltomlplusplus \
+    TOML_HEADER_ONLY=0 \
+    TOML_SHARED_LIB=1
+do
+    if grep -F -- "$forbidden_tomlplusplus_flag" "$repo_root/Makefile" >/dev/null; then
+        fail "Makefile enables toml++ shared-library mode: $forbidden_tomlplusplus_flag"
+    fi
+done
+
+# Evaluate the actual package() function against the current source tree. A
+# clean archive build uses an isolated local-tag fixture in the package
+# transition test because the public v2.0.0 tag belongs to the later cutover.
+ln -s "$repo_root" "$package_work/moguet-src"
 ln -s "$repo_root/VERSION" "$package_work/VERSION"
 bash -c '
     set -eu
@@ -53,15 +119,50 @@ bash -c '
     package
 ' bash "$package_work" "$stage_root" "$repo_root/PKGBUILD" >/dev/null
 
-payload_config=$stage_root/etc/jpacker/jpacker.conf
-[ -f "$payload_config" ] && [ ! -L "$payload_config" ] ||
-    fail "package payload is missing etc/jpacker/jpacker.conf."
-cmp -s "$source_config" "$payload_config" ||
-    fail "package payload config differs from config/jpacker.conf."
+expected_payload='/usr/bin/moguet
+/usr/share/bash-completion/completions/moguet
+/usr/share/doc/moguet/README.ja.md
+/usr/share/doc/moguet/README.md
+/usr/share/doc/moguet/THIRD_PARTY_NOTICES.md
+/usr/share/doc/moguet/docs/LICENSING.md
+/usr/share/doc/moguet/docs/migration/v1-to-v2.ja.md
+/usr/share/doc/moguet/docs/migration/v1-to-v2.md
+/usr/share/fish/vendor_completions.d/moguet.fish
+/usr/share/licenses/moguet/LICENSE
+/usr/share/licenses/moguet/bjoern-hoehrmann-utf8-MIT.txt
+/usr/share/licenses/moguet/curl.txt
+/usr/share/licenses/moguet/jpacker-MIT-legacy.txt
+/usr/share/licenses/moguet/nlohmann-json-MIT.txt
+/usr/share/licenses/moguet/tomlplusplus-MIT.txt
+/usr/share/locale/ja/LC_MESSAGES/moguet.mo
+/usr/share/man/ja/man1/moguet.1
+/usr/share/man/man1/moguet.1
+/usr/share/zsh/site-functions/_moguet'
+actual_payload=$(find "$stage_root" -type f -print |
+    sed "s|^$stage_root||" | LC_ALL=C sort)
+[ "$actual_payload" = "$expected_payload" ] || {
+    printf 'packaging-metadata-check: archive payload mismatch:\n%s\n' \
+        "$actual_payload" >&2
+    exit 1
+}
 
-payload_matches=$(find "$stage_root" \( -type f -o -type l \) \
-    -name jpacker.conf -print)
-[ "$payload_matches" = "$payload_config" ] ||
-    fail "package payload contains a duplicate or misplaced jpacker.conf."
+[ ! -e "$stage_root/usr/bin/jpacker" ] ||
+    fail "package must not provide a jpacker binary alias."
+[ ! -e "$stage_root/etc" ] ||
+    fail "package must not install /etc content."
+[ ! -e "$stage_root/home" ] ||
+    fail "package must not install user XDG content."
+
+command -v readelf >/dev/null 2>&1 ||
+    fail "readelf is required for runtime dependency verification."
+needed=$(LC_ALL=C readelf -d "$stage_root/usr/bin/moguet" |
+    sed -n 's/.*Shared library: \[\([^]]*\)\].*/\1/p')
+printf '%s\n' "$needed" | grep -Eq '^libcurl\.so(\.|$)' ||
+    fail "moguet ELF is missing the direct libcurl runtime dependency."
+printf '%s\n' "$needed" | grep -Eq '^libalpm\.so(\.|$)' ||
+    fail "moguet ELF is missing the direct libalpm runtime dependency."
+if printf '%s\n' "$needed" | grep -Eq '^libintl\.so(\.|$)'; then
+    fail "gettext unexpectedly became a linked runtime dependency."
+fi
 
 printf 'packaging-metadata-check: all checks passed\n'

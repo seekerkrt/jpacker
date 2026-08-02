@@ -2,8 +2,10 @@
 
 #include "app_config.hpp"
 #include "aur_rpc.hpp"
+#include "cache_authority.hpp"
 #include "cli_routing.hpp"
 #include "dependency_plan.hpp"
+#include "localization.hpp"
 #include "logging.hpp"
 #include "package_identifier.hpp"
 #include "process.hpp"
@@ -11,6 +13,7 @@
 #include "shell_words.hpp"
 #include "source_install.hpp"
 #include "source_preference.hpp"
+#include "trusted_cache.hpp"
 
 #include <algorithm>
 #include <cstddef>
@@ -75,16 +78,24 @@ bool search_aur(
         for(const auto& info : AurClient::search(pkg_name)) {
             found = true;
             const std::string& name = info.Name;
+            // NO_TRANSLATE(Issue #308): "aur/" is the stable repository
+            // namespace prefix; name and version are package identities.
             std::cout << "\033[1;35maur\033[0m/\033[1m" << name << "\033[0m \033[1;32m"
                       << info.Version << "\033[0m";
             if(installed_foreign_packages.contains(name)) {
-                std::cout << " \033[1;36m[installed]\033[0m";
+                std::cout << " \033[1;36m"
+                          << localization::translate_message("[installed]")
+                          << "\033[0m";
             }
             if(info.OutOfDate.has_value()) {
-                std::cout << " \033[1;31m[out-of-date]\033[0m";
+                std::cout << " \033[1;31m"
+                          << localization::translate_message("[out-of-date]")
+                          << "\033[0m";
             }
             if(is_orphaned(info)) {
-                std::cout << " \033[1;33m[orphaned]\033[0m";
+                std::cout << " \033[1;33m"
+                          << localization::translate_message("[orphaned]")
+                          << "\033[0m";
             }
             std::cout << std::endl;
             if(!info.Description.empty()) std::cout << "    " << info.Description << std::endl;
@@ -94,7 +105,7 @@ bool search_aur(
 }
 
 std::string join_display_values(const std::vector<std::string>& values) {
-    if(values.empty()) return "None";
+    if(values.empty()) return localization::translate_message("None");
     std::stringstream ss;
     for(size_t i = 0; i < values.size(); ++i) {
         if(i > 0) ss << "  ";
@@ -104,39 +115,96 @@ std::string join_display_values(const std::vector<std::string>& values) {
 }
 
 std::string installed_display(const AurPackageInfo& pkg) {
-    return is_installed_package(pkg.Name) ? "\033[1;36myes\033[0m" : "no";
+    if(!is_installed_package(pkg.Name)) {
+        return localization::translate_message("no");
+    }
+    return "\033[1;36m" + localization::translate_message("yes") +
+            "\033[0m";
 }
 
 std::string orphaned_display(const AurPackageInfo& pkg) {
-    return is_orphaned(pkg) ? "\033[1;33myes\033[0m" : "no";
+    if(!is_orphaned(pkg)) return localization::translate_message("no");
+    return "\033[1;33m" + localization::translate_message("yes") +
+            "\033[0m";
 }
 
 std::string out_of_date_display(const std::optional<long long>& out_of_date) {
-    return out_of_date.has_value() ? "\033[1;31myes\033[0m" : "no";
+    if(!out_of_date.has_value()) return localization::translate_message("no");
+    return "\033[1;31m" + localization::translate_message("yes") +
+            "\033[0m";
 }
 
 void print_aur_info(const AurPackageInfo& pkg) {
-    std::cout << "Repository      : aur" << std::endl;
-    std::cout << "Name            : " << pkg.Name << std::endl;
-    std::cout << "Package Base    : " << pkg.PackageBase << std::endl;
-    std::cout << "Version         : " << pkg.Version << std::endl;
-    std::cout << "Description     : " << (pkg.Description.empty() ? "None" : pkg.Description) << std::endl;
-    std::cout << "Depends On      : " << join_display_values(pkg.Depends) << std::endl;
-    std::cout << "Make Deps       : " << join_display_values(pkg.MakeDepends) << std::endl;
-    std::cout << "Check Deps      : " << join_display_values(pkg.CheckDepends) << std::endl;
-    std::cout << "Optional Deps   : " << join_display_values(pkg.OptDepends) << std::endl;
-    std::cout << "Provides        : " << join_display_values(pkg.Provides) << std::endl;
-    std::cout << "Conflicts With  : " << join_display_values(pkg.Conflicts) << std::endl;
-    std::cout << "Replaces        : " << join_display_values(pkg.Replaces) << std::endl;
-    std::cout << "Maintainer      : " << (pkg.Maintainer.empty() ? "None" : pkg.Maintainer) << std::endl;
-    std::cout << "Installed       : " << installed_display(pkg) << std::endl;
-    std::cout << "Orphaned        : " << orphaned_display(pkg) << std::endl;
-    std::cout << "Out of Date     : " << out_of_date_display(pkg.OutOfDate) << std::endl;
+    std::cout << localization::format_translated_message(
+                         "Repository      : {}", "aur")
+              << std::endl;
+    std::cout << localization::format_translated_message(
+                         "Name            : {}", pkg.Name)
+              << std::endl;
+    std::cout << localization::format_translated_message(
+                         "Package Base    : {}", pkg.PackageBase)
+              << std::endl;
+    std::cout << localization::format_translated_message(
+                         "Version         : {}", pkg.Version)
+              << std::endl;
+    std::cout << localization::format_translated_message(
+                         "Description     : {}",
+                         pkg.Description.empty()
+                                 ? localization::translate_message("None")
+                                 : pkg.Description)
+              << std::endl;
+    std::cout << localization::format_translated_message(
+                         "Depends On      : {}",
+                         join_display_values(pkg.Depends))
+              << std::endl;
+    std::cout << localization::format_translated_message(
+                         "Make Deps       : {}",
+                         join_display_values(pkg.MakeDepends))
+              << std::endl;
+    std::cout << localization::format_translated_message(
+                         "Check Deps      : {}",
+                         join_display_values(pkg.CheckDepends))
+              << std::endl;
+    std::cout << localization::format_translated_message(
+                         "Optional Deps   : {}",
+                         join_display_values(pkg.OptDepends))
+              << std::endl;
+    std::cout << localization::format_translated_message(
+                         "Provides        : {}",
+                         join_display_values(pkg.Provides))
+              << std::endl;
+    std::cout << localization::format_translated_message(
+                         "Conflicts With  : {}",
+                         join_display_values(pkg.Conflicts))
+              << std::endl;
+    std::cout << localization::format_translated_message(
+                         "Replaces        : {}",
+                         join_display_values(pkg.Replaces))
+              << std::endl;
+    std::cout << localization::format_translated_message(
+                         "Maintainer      : {}",
+                         pkg.Maintainer.empty()
+                                 ? localization::translate_message("None")
+                                 : pkg.Maintainer)
+              << std::endl;
+    std::cout << localization::format_translated_message(
+                         "Installed       : {}", installed_display(pkg))
+              << std::endl;
+    std::cout << localization::format_translated_message(
+                         "Orphaned        : {}", orphaned_display(pkg))
+              << std::endl;
+    std::cout << localization::format_translated_message(
+                         "Out of Date     : {}",
+                         out_of_date_display(pkg.OutOfDate))
+              << std::endl;
 }
 
 void require_valid_aur_package_target(const std::string& target) {
     if(target.find('/') != std::string::npos || !is_valid_package_name(target)) {
-        throw std::runtime_error("Invalid AUR package target: " + target);
+        throw std::runtime_error(
+                localization::format_translated_message(
+                        // TRANSLATORS: The placeholders are the literal AUR identity and a package target.
+                        "Invalid {} package target: {}", "AUR", target));
     }
 }
 
@@ -146,6 +214,18 @@ void append_source_build_work_items(
     destination.reserve(destination.size() + source.size());
     for(auto& work_item : source) {
         destination.push_back(std::move(work_item));
+    }
+}
+
+ValidatedCacheRoot prepare_sync_source_build_cache_root() {
+    return prepare_process_cache_root();
+}
+
+void assign_source_build_cache_root(
+        std::vector<ProductionSourceBuildWorkItem>& work_items,
+        const ValidatedCacheRoot& cache_root) {
+    for(auto& work_item : work_items) {
+        work_item.cache_root = cache_root;
     }
 }
 
@@ -169,7 +249,7 @@ int cmd_sync_search(
         const ParsedCliArguments& parsed, bool use_sudo,
         PackageSourceSelection source_selection, const AppConfig& config) {
     if(parsed.targets.empty()) {
-        Logger::error("Missing search query.");
+        Logger::error(localization::translate_message("Missing search query."));
         return 1;
     }
 
@@ -179,22 +259,27 @@ int cmd_sync_search(
         if(use_sudo) preflight_aur_search_schema(parsed.targets);
         int pacman_status =
                 run_command(pacman_prefix + join_pacman_args(parsed.ordered_pacman_args, config));
-        Logger::info("Searching AUR...");
+        Logger::info(localization::format_translated_message(
+                "Searching {}...", "AUR"));
         bool aur_found = search_aur(parsed.targets);
         return (pacman_status == 0 || aur_found) ? 0 : 1;
     }
     case PackageSourceSelection::AurOnly:
         if(parsed_has_semantic_pacman_option(parsed, "--needed")) {
-            Logger::error("Unsupported pacman option for AUR search: --needed");
+            Logger::error(localization::format_translated_message(
+                    "Unsupported {} option for {} search: {}",
+                    "pacman", "AUR", "--needed"));
             return 1;
         }
-        Logger::info("Searching AUR...");
+        Logger::info(localization::format_translated_message(
+                "Searching {}...", "AUR"));
         return search_aur(parsed.targets, false) ? 0 : 1;
     case PackageSourceSelection::RepoOnly:
         return run_command(
                 pacman_prefix + join_pacman_args(parsed.ordered_pacman_args, config));
     }
-    throw std::logic_error("Unknown package source selection.");
+    throw std::logic_error(localization::translate_message(
+            "Unknown package source selection."));
 }
 
 int cmd_sync_install(
@@ -210,7 +295,8 @@ int cmd_sync_install(
 
     if(source_selection == PackageSourceSelection::AurOnly) {
         if(parsed.targets.empty()) {
-            Logger::error("Missing AUR package target.");
+            Logger::error(localization::format_translated_message(
+                    "Missing {} package target.", "AUR"));
             return 1;
         }
         for(const auto& target : parsed.targets) {
@@ -219,13 +305,16 @@ int cmd_sync_install(
 
         std::optional<std::string> unsupported_option = unsupported_source_sync_option(parsed);
         if(unsupported_option.has_value()) {
-            Logger::error(
-                    "Unsupported pacman option for AUR/source-build target: " +
-                    unsupported_option.value());
-            Logger::error("Rerun --aur without this option.");
+            Logger::error(localization::format_translated_message(
+                    "Unsupported {} option for {}/source-build target: {}",
+                    "pacman", "AUR", unsupported_option.value()));
+            Logger::error(localization::format_translated_message(
+                    "Rerun {} without this option.", "--aur"));
             return 1;
         }
         require_supported_production_source_build_options(config);
+        ValidatedCacheRoot cache_root =
+                prepare_sync_source_build_cache_root();
 
         std::vector<BuildPlan> plans;
         plans.reserve(parsed.targets.size());
@@ -242,6 +331,7 @@ int cmd_sync_install(
                     prepare_aur_source_build_work_items(
                             plan, false, source_sync_options.needed));
         }
+        assign_source_build_cache_root(work_items, cache_root);
         // POLICY(#168,#242): every per-root plan keeps its existing order, while
         // all roots complete static preflight and one database-path resolution
         // before the first checkout/workspace/build/install mutation.
@@ -259,9 +349,11 @@ int cmd_sync_install(
     std::vector<std::string> repo_targets;
     std::vector<std::string> aur_targets;
     std::set<size_t>         aur_target_token_indices;
+    for(const std::string& target : parsed.targets) {
+        require_valid_package_name(target);
+    }
     for(size_t i = 0; i < parsed.targets.size(); ++i) {
         const std::string& target = parsed.targets[i];
-        require_valid_package_name(target);
         if(is_force_source(target)) {
             aur_targets.push_back(target);
             aur_target_token_indices.insert(parsed.target_token_indices[i]);
@@ -275,14 +367,19 @@ int cmd_sync_install(
     if(!aur_targets.empty()) {
         std::optional<std::string> unsupported_option = unsupported_source_sync_option(parsed);
         if(unsupported_option.has_value()) {
-            Logger::error(
-                    "Unsupported pacman option for AUR/source-build target: " +
-                    unsupported_option.value());
-            Logger::error(
-                    "Split official repository and AUR/source-build targets, or rerun without this option.");
+            Logger::error(localization::format_translated_message(
+                    "Unsupported {} option for {}/source-build target: {}",
+                    "pacman", "AUR", unsupported_option.value()));
+            Logger::error(localization::format_translated_message(
+                    "Split official repository and {}/source-build targets, or rerun without this option.",
+                    "AUR"));
             return 1;
         }
         require_supported_production_source_build_options(config);
+    }
+    std::optional<ValidatedCacheRoot> cache_root;
+    if(!aur_targets.empty()) {
+        cache_root = prepare_sync_source_build_cache_root();
     }
     std::vector<ProductionSourceBuildWorkItem> source_work_items;
     for(const auto& package : aur_targets) {
@@ -302,6 +399,8 @@ int cmd_sync_install(
     }
     std::optional<PreparedProductionSourceBuildInvocation> source_invocation;
     if(!source_work_items.empty()) {
+        assign_source_build_cache_root(
+                source_work_items, cache_root.value());
         source_invocation = prepare_production_source_build_invocation(
                 std::move(source_work_items), config);
     }
@@ -310,7 +409,8 @@ int cmd_sync_install(
         std::vector<std::string> pacman_args =
                 ordered_pacman_args_excluding_targets(parsed, aur_target_token_indices);
         if(run_command("sudo pacman " + join_pacman_args(pacman_args, config)) != 0) {
-            throw std::runtime_error("Pacman failed.");
+            throw std::runtime_error(localization::format_translated_message(
+                    "{} failed.", "Pacman"));
         }
     }
     if(source_invocation.has_value()) {
@@ -331,11 +431,12 @@ int cmd_sync_info(
         if(unqualified_target != parsed.targets.end()) {
             // POLICY(#172): refresh 後に AUR fallback すると official DB の更新だけが先行する。
             // refresh 付き info は repository-qualified target に限定し、分類前に停止する。
-            Logger::error(
-                    "Cannot combine pacman refresh with AUR info fallback for unqualified target: " +
-                    *unqualified_target);
-            Logger::error(
-                    "Use a repository-qualified target such as repo/package, or run refresh and -Si separately.");
+            Logger::error(localization::format_translated_message(
+                    "Cannot combine {} refresh with {} info fallback for unqualified target: {}",
+                    "pacman", "AUR", *unqualified_target));
+            Logger::error(localization::format_translated_message(
+                    "Use a repository-qualified target such as {}, or run refresh and {} separately.",
+                    "repo/package", "-Si"));
             return 1;
         }
     }
@@ -349,11 +450,14 @@ int cmd_sync_info(
 
     if(source_selection == PackageSourceSelection::AurOnly) {
         if(parsed_has_semantic_pacman_option(parsed, "--needed")) {
-            Logger::error("Unsupported pacman option for AUR info: --needed");
+            Logger::error(localization::format_translated_message(
+                    "Unsupported {} option for {} info: {}",
+                    "pacman", "AUR", "--needed"));
             return 1;
         }
         if(parsed.targets.empty()) {
-            Logger::error("Missing AUR package target.");
+            Logger::error(localization::format_translated_message(
+                    "Missing {} package target.", "AUR"));
             return 1;
         }
         for(const auto& target : parsed.targets) {
@@ -368,11 +472,14 @@ int cmd_sync_info(
                 if(info.has_value())
                     aur_infos.push_back(info.value());
                 else {
-                    Logger::error("AUR package not found: " + target);
+                    Logger::error(localization::format_translated_message(
+                            "{} package not found: {}", "AUR", target));
                     failed = true;
                 }
             } catch(const std::exception& e) {
-                Logger::error("Failed to fetch AUR info for " + target + ": " + e.what());
+                Logger::error(localization::format_translated_message(
+                        "Failed to fetch {} info for {}: {}",
+                        "AUR", target, e.what()));
                 failed = true;
             }
         }
@@ -412,12 +519,16 @@ int cmd_sync_info(
                 aur_infos.push_back(info.value());
                 aur_target_token_indices.insert(parsed.target_token_indices[i]);
             } else {
-                Logger::error("Package not found in repos or AUR: " + target);
+                Logger::error(localization::format_translated_message(
+                        "Package not found in repos or {}: {}",
+                        "AUR", target));
                 failed = true;
                 aur_target_token_indices.insert(parsed.target_token_indices[i]);
             }
         } catch(const std::exception& e) {
-            Logger::error("Failed to fetch AUR info for " + target + ": " + e.what());
+            Logger::error(localization::format_translated_message(
+                    "Failed to fetch {} info for {}: {}",
+                    "AUR", target, e.what()));
             failed = true;
             aur_target_token_indices.insert(parsed.target_token_indices[i]);
         }

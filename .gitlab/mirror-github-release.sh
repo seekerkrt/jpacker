@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-GITHUB_REPOSITORY='seekerkrt/jpacker'
+GITHUB_REPOSITORY='seekerkrt/moguet'
 
 : "${CI_API_V4_URL:?CI_API_V4_URL is required}"
 : "${CI_PROJECT_ID:?CI_PROJECT_ID is required}"

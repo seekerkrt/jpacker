@@ -72,7 +72,7 @@ class ArtifactWorkspace final {
     friend ValidatedPackageArtifactSet validate_post_build_package_artifacts(
             ArtifactWorkspace&& workspace,
             const ExpectedPackageArtifactSet& expected);
-#ifdef JPACKER_ENABLE_ARTIFACT_WORKSPACE_TEST_HOOKS
+#ifdef MOGUET_ENABLE_ARTIFACT_WORKSPACE_TEST_HOOKS
     friend void require_artifact_workspace_identity_for_test(
             const ArtifactWorkspace& workspace,
             std::uintmax_t expected_effective_user);
@@ -133,24 +133,18 @@ struct ArtifactMakepkgBuildOptions {
 // packagelistと後続build-only makepkgが共有するcheckout/environment境界。
 // owned PKGDESTはsource assignmentの順序を保った末尾へ一度だけ追加する。
 class ArtifactMakepkgContext final {
-    ValidatedCachePath                   checkout_;
+    RetainedTrustedCacheDirectory        checkout_;
     SourceBuildEnvironment               command_environment_;
     SourceEnvironmentEmptyValuePolicy    empty_value_policy_;
-    int                                  checkout_descriptor_ = -1;
-    std::uintmax_t                       checkout_device_ = 0;
-    std::uintmax_t                       checkout_inode_ = 0;
     std::shared_ptr<const ArtifactMakepkgContextProvenance> provenance_;
     std::filesystem::path                workspace_path_;
     std::uintmax_t                       workspace_device_ = 0;
     std::uintmax_t                       workspace_inode_ = 0;
 
     ArtifactMakepkgContext(
-            ValidatedCachePath checkout,
+            RetainedTrustedCacheDirectory checkout,
             SourceBuildEnvironment command_environment,
             SourceEnvironmentEmptyValuePolicy empty_value_policy,
-            int checkout_descriptor,
-            std::uintmax_t checkout_device,
-            std::uintmax_t checkout_inode,
             std::filesystem::path workspace_path,
             std::uintmax_t workspace_device,
             std::uintmax_t workspace_inode);
@@ -185,7 +179,7 @@ public:
     ~ArtifactMakepkgContext() noexcept;
 
     const std::filesystem::path& checkout_path() const noexcept {
-        return checkout_.canonical_path();
+        return checkout_.path().canonical_path();
     }
 
     const std::filesystem::path& workspace_path() const noexcept {
@@ -247,7 +241,7 @@ class ExpectedPackageArtifactPath final {
     friend ValidatedPackageArtifactPath validate_post_build_package_artifact(
             ArtifactWorkspace&& workspace,
             const ExpectedPackageArtifactPath& expected);
-#ifdef JPACKER_ENABLE_ARTIFACT_WORKSPACE_TEST_HOOKS
+#ifdef MOGUET_ENABLE_ARTIFACT_WORKSPACE_TEST_HOOKS
     friend ValidatedPackageArtifactPath
     validate_post_build_package_artifact_for_test(
             ArtifactWorkspace&& workspace,
@@ -357,7 +351,7 @@ class ValidatedPackageArtifactPath final {
     friend ValidatedPackageArtifactPath validate_post_build_package_artifact(
             ArtifactWorkspace&& workspace,
             const ExpectedPackageArtifactPath& expected);
-#ifdef JPACKER_ENABLE_ARTIFACT_WORKSPACE_TEST_HOOKS
+#ifdef MOGUET_ENABLE_ARTIFACT_WORKSPACE_TEST_HOOKS
     friend ValidatedPackageArtifactPath
     validate_post_build_package_artifact_for_test(
             ArtifactWorkspace&& workspace,
@@ -459,7 +453,7 @@ class ValidatedPackageArtifactSet final {
     friend ValidatedPackageArtifactSet validate_post_build_package_artifacts(
             ArtifactWorkspace&& workspace,
             const ExpectedPackageArtifactSet& expected);
-#ifdef JPACKER_ENABLE_ARTIFACT_WORKSPACE_TEST_HOOKS
+#ifdef MOGUET_ENABLE_ARTIFACT_WORKSPACE_TEST_HOOKS
     friend ValidatedPackageArtifactSet
     validate_post_build_package_artifacts_for_test(
             ArtifactWorkspace&& workspace,
@@ -499,7 +493,7 @@ ValidatedPackageArtifactSet validate_post_build_package_artifacts(
         ArtifactWorkspace&& workspace,
         const ExpectedPackageArtifactSet& expected);
 
-#ifdef JPACKER_ENABLE_ARTIFACT_WORKSPACE_TEST_HOOKS
+#ifdef MOGUET_ENABLE_ARTIFACT_WORKSPACE_TEST_HOOKS
 void require_artifact_workspace_identity_for_test(
         const ArtifactWorkspace& workspace,
         std::uintmax_t expected_effective_user);
@@ -521,6 +515,27 @@ using MultipleArtifactCleanupObserverForTest = void (*)(
 
 void set_multiple_artifact_cleanup_observer_for_test(
         MultipleArtifactCleanupObserverForTest observer);
+
+using ArtifactWorkspaceCreationObserverForTest =
+        void (*)(const std::filesystem::path& workspace_path);
+
+void set_artifact_workspace_creation_observer_for_test(
+        ArtifactWorkspaceCreationObserverForTest observer);
+
+using ArtifactWorkspaceCleanupPreDeleteObserverForTest =
+        void (*)(const std::filesystem::path& workspace_path);
+
+void set_artifact_workspace_cleanup_pre_delete_observer_for_test(
+        ArtifactWorkspaceCleanupPreDeleteObserverForTest observer);
+
+// openat2(RESOLVE_NO_XDEV)のrequestとmount-boundary refusalを、mount権限
+// なしでcleanup deletion orderまで検証するtest seam。
+using ArtifactWorkspaceCleanupChildOpenForTest = int (*)(
+        int parent_descriptor, const std::string& leaf_name,
+        std::uint64_t flags, std::uint64_t resolve);
+
+void set_artifact_workspace_cleanup_child_open_for_test(
+        ArtifactWorkspaceCleanupChildOpenForTest open_child) noexcept;
 
 ValidatedPackageArtifactSet validate_post_build_package_artifacts_for_test(
         ArtifactWorkspace&& workspace,

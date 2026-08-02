@@ -86,7 +86,7 @@ void test_source_pkgdest_rejected() {
 
     expect_exception<std::runtime_error>(
             [&request]() { static_cast<void>(validate_single_output_artifact(request)); },
-            "Source environment PKGDEST conflicts with invocation-owned artifact workspace.");
+            "Source environment PKGDEST conflicts with the invocation-owned artifact workspace.");
 }
 
 void test_unchecked_source_pkgdest_rejected() {
@@ -231,7 +231,7 @@ void test_same_version_needed_reason_change_rejected() {
                         InstalledVersionState::SameVersion,
                         ExistingInstallReason::Dependency, true));
             },
-            "Cannot change install reason because --needed may skip the same-version install.");
+            "Cannot change the install reason because --needed may skip the same-version install.");
 }
 
 void test_different_version_needed_reason_change_allowed() {

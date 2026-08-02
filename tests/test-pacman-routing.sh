@@ -3,8 +3,8 @@ set -eu
 
 test_binary=$1
 repo_root=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
-JPACKER_TEST_REPOSITORY_ROOT=$repo_root
-export JPACKER_TEST_REPOSITORY_ROOT
+MOGUET_TEST_REPOSITORY_ROOT=$repo_root
+export MOGUET_TEST_REPOSITORY_ROOT
 . "$repo_root/tests/test-command-safety.sh"
 tmp_dir=$(mktemp -d)
 server_pid=
@@ -18,7 +18,9 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-mkdir -p "$tmp_dir/cache" "$tmp_dir/home" "$tmp_dir/package.build"
+mkdir -p \
+    "$tmp_dir/cache" "$tmp_dir/home" "$tmp_dir/state" \
+    "$tmp_dir/package.build"
 command_log=$tmp_dir/commands.log
 : > "$command_log"
 
@@ -39,6 +41,7 @@ done
 
 port=$(cat "$port_file")
 export HOME=$tmp_dir/home
+export XDG_STATE_HOME=$tmp_dir/state
 export XDG_CACHE_HOME=$tmp_dir/cache
 export PATH=$repo_root/tests/stubs:/usr/bin:/bin
 require_exact_test_command pacman-conf "$repo_root/tests/stubs/pacman-conf"
@@ -46,15 +49,15 @@ require_exact_test_command makepkg "$repo_root/tests/stubs/makepkg"
 require_exact_test_command pacman "$repo_root/tests/stubs/pacman"
 require_exact_test_command sudo "$repo_root/tests/stubs/sudo"
 require_exact_test_command git "$repo_root/tests/stubs/git"
-export JPACKER_TEST_AUR_RPC_BASE_URL=http://127.0.0.1:$port/rpc/
-export JPACKER_TEST_COMMAND_LOG=$command_log
-export JPACKER_TEST_PACMAN_EXIT_CODE=0
-export JPACKER_TEST_SUDO_EXIT_CODE=0
-export JPACKER_TEST_PACKAGE_BUILD_DIR=$tmp_dir/package.build
-unset JPACKER_TEST_PACMAN_QM_OUTPUT
-unset JPACKER_TEST_PACMAN_REPO_PACKAGES
-unset JPACKER_TEST_MAKEPKG_EXIT_CODE
-unset JPACKER_TEST_GIT_CLONE_FIXTURE_DIR
+export MOGUET_TEST_AUR_RPC_BASE_URL=http://127.0.0.1:$port/rpc/
+export MOGUET_TEST_COMMAND_LOG=$command_log
+export MOGUET_TEST_PACMAN_EXIT_CODE=0
+export MOGUET_TEST_SUDO_EXIT_CODE=0
+export MOGUET_TEST_PACKAGE_BUILD_DIR=$tmp_dir/package.build
+unset MOGUET_TEST_PACMAN_QM_OUTPUT
+unset MOGUET_TEST_PACMAN_REPO_PACKAGES
+unset MOGUET_TEST_MAKEPKG_EXIT_CODE
+unset MOGUET_TEST_GIT_CLONE_FIXTURE_DIR
 
 run_ok() {
     output_file=$1
@@ -155,15 +158,15 @@ run_ok "$tmp_dir/info.out" -Si filesystem
 assert_command "pacman -Si filesystem"
 assert_no_sudo
 
-run_ok "$tmp_dir/jpacker-options.out" \
-    --noedit --nodiff --rebuild --cleanbuild --rmdeps -Q filesystem
-assert_command "pacman -Q filesystem"
-for jpacker_option in --noedit --nodiff --rebuild --cleanbuild --rmdeps; do
-    if grep -F -- "$jpacker_option" "$command_log" >/dev/null; then
-        echo "jpacker option leaked to pacman: $jpacker_option" >&2
-        cat "$command_log" >&2
-        exit 1
-    fi
+option_index=0
+for moguet_option in \
+    --edit --noedit --diff --nodiff \
+    --build-mode=normal --build-mode=rebuild --build-mode=clean \
+    --rebuild --cleanbuild --rmdeps; do
+    option_index=$((option_index + 1))
+    run_ok "$tmp_dir/moguet-option-$option_index.out" \
+        "$moguet_option" -Q filesystem
+    assert_only_command "pacman -Q filesystem"
 done
 
 # custom upgradeとgeneric -Syuの既存routingを保ち、upgrade-aurはpacmanへ委譲しない。
@@ -172,7 +175,7 @@ assert_only_command "sudo pacman -Syu"
 run_ok "$tmp_dir/generic-system-upgrade.out" -Syu
 assert_only_command "sudo pacman -Syu"
 run_fail "$tmp_dir/upgrade-aur-target.out" upgrade-aur unexpected-target
-assert_contains "upgrade-aur does not accept target operands." "$tmp_dir/upgrade-aur-target.out"
+assert_contains "Operation upgrade-aur does not accept target operands." "$tmp_dir/upgrade-aur-target.out"
 assert_log_empty
 
 run_fail "$tmp_dir/aur-refresh.out" -Siy risk-root

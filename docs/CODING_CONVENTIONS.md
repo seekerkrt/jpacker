@@ -1,9 +1,9 @@
-# jpacker固有 C++ コーディング規約
+# Moguet固有 C++ コーディング規約
 
 ## 位置づけと優先順位
 
 C/C++共通規約は`cpp-conventions` Skillを基準とする。
-この文書はjpacker固有の追加・上書き規約だけを定める。
+この文書はMoguet固有の追加・上書き規約だけを定める。
 
 矛盾する場合は、この文書と実際に使用されるbuild設定を優先する。ここに書かれていない共通規則は`cpp-conventions`へ従う。
 
@@ -20,10 +20,10 @@ transaction、互換性、project stance等の設計判断は対応する正式d
 
 ## File構成と分割
 
-現在の実装は`src/jpacker.cpp`だけの単一構成ではなく、CLI、設定、package metadata、plan、source build、process実行等を責務ごとの`.hpp` / `.cpp`へ分けている。
+現在の実装は`src/moguet.cpp`だけの単一構成ではなく、CLI、設定、package metadata、plan、source build、process実行等を責務ごとの`.hpp` / `.cpp`へ分けている。
 
 - 新しい非自明な型や複数箇所から使うinterfaceは、既存moduleと同様に宣言を`.hpp`、定義を`.cpp`へ分ける。
-- entry pointとtop-level CLI wiringは`src/jpacker.cpp`へ置き、domain実装を戻して肥大化させない。
+- entry pointとtop-level CLI wiringは`src/moguet.cpp`へ置き、domain実装を戻して肥大化させない。
 - 既存の責務pairへ収まる変更では、新しいgeneric moduleやwrapperを増やさない。
 - file分割そのものを目的に既存moduleを一括移動しない。
 - testは対象moduleと既存`tests/`の構成に対応させる。
@@ -50,11 +50,11 @@ transaction、互換性、project stance等の設計判断は対応する正式d
 
 ## pacman・makepkg・git・AUR境界
 
-- jpackerはpacman-first wrapperである。system package transactionやdatabase authorityを独自に持たない。
+- Moguetはpacman-first wrapperである。system package transactionやdatabase authorityを独自に持たない。
 - libalpmはquery / transaction契約に従って使用し、CLI都合の重複modelを増やさない。
 - makepkgのPKGBUILD評価、build、package artifact生成の意味を隠しすぎない。
 - git操作はsource取得に必要な範囲へ限定し、fetchとworking tree mutationを分ける。
-- AUR metadata、dependency、provider、conflictの事実と、jpackerが作るplanを区別する。
+- AUR metadata、dependency、provider、conflictの事実と、Moguetが作るplanを区別する。
 - `/etc/jpacker/package.build/`はsource-build preferenceの保存先であり、意味やlayoutの変更を互換性変更として扱う。
 
 ## External command・CLI出力
@@ -62,7 +62,7 @@ transaction、互換性、project stance等の設計判断は対応する正式d
 - external commandはargvを構造として保持できる既存経路を優先する。shell stringが避けられない場合は、既存のquoting方針とvalidation経路に従い、未検証の値を直接連結しない。
 - package nameやenvironment keyは、対応する既存validatorを通す。
 - sudo pacman、makepkg、git等、利用者に影響する主要commandとoptionは実行前に見える形で表示する。
-- jpacker全体をrootで動かす前提にせず、必要なpacman操作だけをsudo境界へ渡す。
+- Moguet全体をrootで動かす前提にせず、必要なpacman操作だけをsudo境界へ渡す。
 - user-facing failureは`Logger::error`、継続可能な注意は`Logger::warn`、通常進行は`Logger::info`という既存区分を維持する。
 - CLI option、output wording、machine-consumed output、終了codeを変える場合は、README / man page / testsへの影響を確認する。
 

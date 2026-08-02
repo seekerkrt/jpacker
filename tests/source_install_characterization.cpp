@@ -1,15 +1,15 @@
 #if __has_include("source_install.hpp")
 #include "dependency_plan.hpp"
 #include "source_install.hpp"
-#define JPACKER_HAS_EXTRACTED_SOURCE_INSTALL 1
+#define MOGUET_HAS_EXTRACTED_SOURCE_INSTALL 1
 #else
-#define JPACKER_HAS_EXTRACTED_SOURCE_INSTALL 0
+#define MOGUET_HAS_EXTRACTED_SOURCE_INSTALL 0
 #endif
 
 // POLICY(#203,#242): production ownerのprepared invocationをdirect実行し、
 // CLI wrapperを介さずall-target collectionとshared lifecycle接続をcharacterizeする。
-#define main jpacker_program_main
-#include "../src/jpacker.cpp"
+#define main moguet_program_main
+#include "../src/moguet.cpp"
 #undef main
 
 #include <exception>
@@ -22,8 +22,8 @@ namespace {
 
 AppConfig characterization_config() {
     AppConfig config;
-    config.no_edit = true;
-    config.no_diff = true;
+    config.user_config.review.pkgbuild = ReviewPolicy::Skip;
+    config.user_config.review.diff = ReviewPolicy::Skip;
     config.no_confirm = true;
     return config;
 }
@@ -59,7 +59,7 @@ BuildPlan fallback_plan() {
 void execute_characterized_plan(
         const BuildPlan& plan, bool use_source_build_preferences, bool needed,
         const AppConfig& config) {
-#if JPACKER_HAS_EXTRACTED_SOURCE_INSTALL
+#if MOGUET_HAS_EXTRACTED_SOURCE_INSTALL
     std::vector<ProductionSourceBuildWorkItem> work_items =
             prepare_aur_source_build_work_items(
                     plan, use_source_build_preferences, needed);
@@ -78,7 +78,7 @@ void execute_characterized_plan(
 void install_characterized_smart_source(
         const std::string& package_name, bool only_if_updated, bool needed,
         const AppConfig& config) {
-#if JPACKER_HAS_EXTRACTED_SOURCE_INSTALL
+#if MOGUET_HAS_EXTRACTED_SOURCE_INSTALL
     std::vector<ProductionSourceBuildWorkItem> work_items;
     work_items.push_back(prepare_smart_source_build_work_item(
             package_name, only_if_updated, needed));
@@ -127,7 +127,7 @@ int main(int argc, char* argv[]) {
     }
 
     AppConfig config = characterization_config();
-#if !JPACKER_HAS_EXTRACTED_SOURCE_INSTALL
+#if !MOGUET_HAS_EXTRACTED_SOURCE_INSTALL
     // 抽出前実装はrunner-private configを参照するため、比較用processへ同じ設定をpublishする。
     g_config = config;
 #endif

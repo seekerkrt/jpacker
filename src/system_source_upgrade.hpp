@@ -3,6 +3,9 @@
 #include "package_metadata.hpp"
 #include "source_environment.hpp"
 #include "source_preference.hpp"
+#include "trusted_cache.hpp"
+#include "xdg_directory_safety.hpp"
+#include "xdg_paths.hpp"
 
 #include <cstddef>
 #include <filesystem>
@@ -52,6 +55,7 @@ enum class RegisteredSourceUpgradeFailureKind {
     InvalidPreferenceName,
     PreferenceUnavailable,
     PackageMetadataUnavailable,
+    CacheAuthorityFailure,
     BuildOrInstallFailed,
     CleanupFailedAfterPackageTransaction,
     UpdateStatusUnknownSkipped,
@@ -77,6 +81,7 @@ enum class SystemSourceUpgradeIssueKind {
     SourceBaselineSnapshotUnavailable,
     SystemPackageSnapshotUnavailable,
     PostSystemSourceSnapshotUnavailable,
+    CacheAuthorityInvalid,
     InvalidPreferenceName,
     OptionSnapshotMismatch,
     PreparedCorrelationInconsistent,
@@ -103,7 +108,7 @@ enum class SystemSourceUpgradeEventKind {
     InvalidPreferenceWarning,
 };
 
-#ifdef JPACKER_ENABLE_SYSTEM_SOURCE_UPGRADE_TEST_HOOKS
+#ifdef MOGUET_ENABLE_SYSTEM_SOURCE_UPGRADE_TEST_HOOKS
 enum class SystemSourceUpgradeUnexpectedExceptionPoint {
     SystemPhaseStarted,
     SystemPhaseCompleted,
@@ -151,6 +156,10 @@ struct SystemSourceUpgradeIssue {
     std::optional<std::string> resolved_package_base;
     std::optional<SourcePreferenceFailure> source_preference_failure;
     std::optional<PackageMetadataFailure> package_metadata_failure;
+    std::optional<xdg_paths::ResolutionFailure> cache_resolution_failure;
+    std::optional<xdg_directory_safety::PreparationFailure>
+            cache_preparation_failure;
+    std::optional<TrustedCacheFailure> trusted_cache_failure;
     std::string diagnostic;
 };
 
@@ -251,7 +260,7 @@ public:
     bool is_valid() const noexcept;
     const SystemSourceUpgradePreparedSnapshot* snapshot() const noexcept;
 
-#ifdef JPACKER_ENABLE_SYSTEM_SOURCE_UPGRADE_TEST_HOOKS
+#ifdef MOGUET_ENABLE_SYSTEM_SOURCE_UPGRADE_TEST_HOOKS
     void make_first_source_correlation_inconsistent_for_test();
     void set_unexpected_exception_for_test(
             SystemSourceUpgradeUnexpectedExceptionPoint point,
@@ -266,7 +275,8 @@ using SystemSourceUpgradePreparation = std::variant<
 
 SystemSourceUpgradePreparation prepare_system_source_upgrade(
         const AppConfig& config,
-        const SystemSourceUpgradeEventObserver& observer = {});
+        const SystemSourceUpgradeEventObserver& observer = {},
+        std::optional<ValidatedCacheRoot> cache_root = std::nullopt);
 
 // by-value consumeにより、呼び出し元capabilityをmutation前にinvalid化する。
 SystemSourceUpgradeResult execute_prepared_system_source_upgrade(

@@ -1,5 +1,6 @@
 #include "artifact_install_executor.hpp"
 
+#include "localization.hpp"
 #include "process.hpp"
 #include "shell_words.hpp"
 
@@ -24,12 +25,12 @@ ExistingInstallReason map_existing_install_reason(
     case InstalledPackageReason::Dependency:
         return ExistingInstallReason::Dependency;
     case InstalledPackageReason::Unknown:
-        throw_malformed_installed_metadata(
-                "Installed package metadata contains an unknown install reason.");
+        throw_malformed_installed_metadata(localization::translate_message(
+                "Installed package metadata contains an unknown install reason."));
     }
 
-    throw_malformed_installed_metadata(
-            "Installed package metadata contains an invalid install reason.");
+    throw_malformed_installed_metadata(localization::translate_message(
+            "Installed package metadata contains an invalid install reason."));
 }
 
 } // namespace
@@ -51,15 +52,16 @@ InstalledArtifactPolicyState map_installed_artifact_policy_state(
     const auto* metadata =
             std::get_if<InstalledPackageMetadata>(&query_result);
     if(metadata == nullptr) {
-        throw std::logic_error("Unknown installed package query result.");
+        throw std::logic_error(localization::translate_message(
+                "Unknown installed package query result."));
     }
     if(metadata->name != identity.package_name) {
-        throw_malformed_installed_metadata(
-                "Installed package metadata name does not match the package artifact identity.");
+        throw_malformed_installed_metadata(localization::translate_message(
+                "Installed package metadata name does not match the package artifact identity."));
     }
     if(metadata->version.empty()) {
-        throw_malformed_installed_metadata(
-                "Installed package metadata contains an empty version.");
+        throw_malformed_installed_metadata(localization::translate_message(
+                "Installed package metadata contains an empty version."));
     }
 
     // POLICY: epoch/pkgrelを含むversionを加工せず、artifact identityとexact比較する。
@@ -160,7 +162,8 @@ ArtifactInstallExecutionOutcome execute_prepared_artifact_install(
         arguments.emplace_back("--asdeps");
         break;
     default:
-        throw std::logic_error("Unknown install reason directive.");
+        throw std::logic_error(localization::translate_message(
+                "Unknown install reason directive."));
     }
 
     arguments.emplace_back("--");
@@ -172,9 +175,10 @@ ArtifactInstallExecutionOutcome execute_prepared_artifact_install(
     int exit_code = run_command(command);
     if(exit_code != 0) {
         // package-controlled pathをtransaction diagnosticへ埋め込まない。
-        throw std::runtime_error(
-                "pacman -U failed with exit code " +
-                std::to_string(exit_code) + ".");
+        throw std::runtime_error(localization::format_translated_message(
+                // TRANSLATORS: The first placeholder is the literal command
+                // "pacman -U"; the second is its numeric exit code.
+                "{} failed with exit code {}.", "pacman -U", exit_code));
     }
 
     // POLICY(#267): --neededのskipはpacman outputではなく、transaction前に

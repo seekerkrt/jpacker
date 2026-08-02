@@ -2,6 +2,7 @@
 
 #include "artifact_install_plan.hpp"
 #include "artifact_workspace.hpp"
+#include "source_install.hpp"
 
 #include <deque>
 #include <map>
@@ -102,6 +103,9 @@ const std::vector<Event>& event_history() {
 
 } // namespace aur_update_execution_preparation_test_stub
 
+void ValidatedCacheRoot::require_unchanged_identity() const {
+}
+
 StrictSourcePreferenceResult read_source_preference_strict(
         const std::string& package_name) {
     g_state.preference_reads.push_back(package_name);
@@ -159,5 +163,14 @@ void require_unclaimed_artifact_pkgdest(
     if(g_state.pkgdest_failure_call.has_value() &&
        g_state.pkgdest_guards.size() == *g_state.pkgdest_failure_call) {
         throw std::runtime_error(g_state.pkgdest_failure_diagnostic);
+    }
+}
+
+void seed_production_source_build_cache(
+        PreparedProductionSourceBuildInvocation& invocation,
+        const ValidatedCacheRoot& cache_root) {
+    invocation.cache_root = cache_root;
+    for(auto& work_item : invocation.work_items) {
+        work_item.cache_root = cache_root;
     }
 }

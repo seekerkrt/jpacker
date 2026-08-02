@@ -49,7 +49,7 @@ public:
     static std::map<std::string, AurPackageInfo> info_many(const std::vector<std::string>& pkg_names);
 };
 
-#ifdef JPACKER_ENABLE_AUR_RPC_TEST_HOOKS
+#ifdef MOGUET_ENABLE_AUR_RPC_TEST_HOOKS
 void set_aur_rpc_write_append_failure_for_test(bool should_fail) noexcept;
 void set_aur_rpc_encode_failure_package_for_test(
         const std::string& package_name);

@@ -1,5 +1,7 @@
 #include "dependency_spec.hpp"
 
+#include "localization.hpp"
+
 namespace {
 
 // dependency parser をmonolithへ逆依存させず、汎用utilityを公開しないためのlocal helper。
@@ -46,17 +48,29 @@ std::string provided_dependency_name(const std::string& provided) {
 std::string dependency_constraint_note(const std::string& dependency) {
     ParsedDependency parsed = parse_dependency_string(dependency);
     if(!parsed.has_parseable_constraint()) return "";
-    return " [constraint: " + parsed.op.value() + " " + parsed.version.value() + ", not verified]";
+    return localization::format_translated_message(
+            // TRANSLATORS: The placeholders are a literal dependency operator and version.
+            "[constraint: {} {}, not verified]", parsed.op.value(),
+            parsed.version.value());
 }
 
 std::string dependency_constraint_unresolved_reason(const std::string& dependency) {
     ParsedDependency parsed = parse_dependency_string(dependency);
-    if(parsed.has_malformed_constraint()) return parsed.raw + " (invalid version constraint)";
-    // POLICY(#96): dependency の version constraint は表示・警告まで。jpacker 側で比較解決しない。
-    if(parsed.has_constraint()) return parsed.raw + " (version constraint is not verified)";
+    if(parsed.has_malformed_constraint()) {
+        return localization::format_translated_message(
+                // TRANSLATORS: The placeholder is a dependency specification.
+                "{} (invalid version constraint)", parsed.raw);
+    }
+    // POLICY(#96): dependency の version constraint は表示・警告まで。Moguet 側で比較解決しない。
+    if(parsed.has_constraint()) {
+        return localization::format_translated_message(
+                // TRANSLATORS: The placeholder is a dependency specification.
+                "{} (version constraint is not verified)", parsed.raw);
+    }
     return parsed.raw;
 }
 
 std::string dependency_display_with_constraint_note(const std::string& display, const std::string& dependency) {
-    return display + dependency_constraint_note(dependency);
+    std::string note = dependency_constraint_note(dependency);
+    return note.empty() ? display : display + " " + note;
 }

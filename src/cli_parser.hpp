@@ -1,5 +1,7 @@
 #pragma once
 
+#include "user_config.hpp"
+
 #include <cstddef>
 #include <optional>
 #include <set>
@@ -14,7 +16,7 @@ enum class PackageSourceSelection {
 };
 
 enum class CliTokenRole {
-    JpackerGlobalOption,
+    MoguetGlobalOption,
     Operation,
     PacmanOption,
     PacmanOptionValue,
@@ -29,14 +31,13 @@ struct ParsedCliToken {
     CliTokenRole role;
 };
 
-// CLIがAppConfigへ追加するenable-only override。未指定のfalseはconfig file値を消さない。
+// user config対象は最終値を保持し、invocation-only optionだけをbooleanで保持する。
 struct CliOverrides {
-    bool no_edit = false;
-    bool no_diff = false;
-    bool no_confirm = false;
-    bool rebuild = false;
-    bool clean_build = false;
-    bool rm_deps = false;
+    std::optional<ReviewPolicy> review_pkgbuild;
+    std::optional<ReviewPolicy> review_diff;
+    std::optional<BuildMode>    build_mode;
+    bool                        no_confirm = false;
+    bool                        rm_deps = false;
 };
 
 // CLI tokenの構文上の役割と、routing用view / pacman委譲用viewを同じparse結果に束ねる。
@@ -54,8 +55,11 @@ struct ParsedCliArguments {
     CliOverrides                     cli_overrides;
 };
 
-bool is_jpacker_global_option(const std::string& arg);
+bool is_moguet_global_option(const std::string& arg);
 bool pacman_option_takes_value(const std::string& arg);
+// load_user_config()が解決したbuilt-in→userの結果へ、CLIの最終値だけを重ねるpure境界。
+UserConfig compose_user_config(
+        UserConfig user_config, const CliOverrides& cli_overrides);
 // POLICY: global optionだけのargvもempty operationを持つparse成功として返す。
 // usage表示とexit statusはrunnerが決める。
 std::optional<ParsedCliArguments> parse_cli_arguments(int argc, char* argv[]);

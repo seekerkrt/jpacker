@@ -3,6 +3,7 @@
 #include "stubs/artifact-install-executor/process_stub.hpp"
 #include "stubs/package-metadata/alpm_stub.hpp"
 #include "trusted_cache.hpp"
+#include "trusted_cache_test_support.hpp"
 
 #include <algorithm>
 #include <cstdlib>
@@ -206,7 +207,7 @@ public:
         : original_working_directory_(fs::current_path()) {
         const std::string template_text =
                 (fs::temp_directory_path() /
-                 "jpacker-separated-source-build-test-XXXXXX")
+                 "moguet-separated-source-build-test-XXXXXX")
                         .string();
         std::vector<char> path_template(
                 template_text.begin(), template_text.end());
@@ -230,7 +231,7 @@ public:
         }
 
         try {
-            ValidatedCacheRoot root = prepare_trusted_cache_root();
+            ValidatedCacheRoot root = prepare_test_trusted_cache_root();
             checkout_path_ = root.path() / "source-checkout";
             fs::create_directory(checkout_path_);
             fs::permissions(
@@ -270,13 +271,13 @@ public:
             const SourceBuildEnvironment& source_environment,
             SourceEnvironmentEmptyValuePolicy empty_value_policy,
             DesiredInstallReason desired_reason) const {
-        ValidatedCacheRoot root = prepare_trusted_cache_root();
+        ValidatedCacheRoot root = prepare_test_trusted_cache_root();
         ValidatedCachePath checkout = require_trusted_cache_path(
                 root, checkout_path_,
                 CachePathRequirement::ExistingDirectory);
         return SeparatedSourceBuildUnitRequest{
                 std::move(checkout),
-                prepare_private_trusted_cache_root(),
+                prepare_private_trusted_cache_root(root),
                 PACKAGE_NAME,
                 PACKAGE_NAME,
                 desired_reason,
@@ -287,7 +288,7 @@ public:
 
     std::vector<fs::path> artifact_workspaces() const {
         std::vector<fs::path> workspaces;
-        ValidatedCacheRoot root = prepare_trusted_cache_root();
+        ValidatedCacheRoot root = prepare_test_trusted_cache_root();
         for(const fs::directory_entry& entry :
             fs::directory_iterator(root.canonical_path())) {
             if(entry.path().filename().string().starts_with(
@@ -934,7 +935,7 @@ void test_build_failure_retains_workspace(
 
     static_cast<void>(expect_runtime_error(
             [&]() { execute_scenario(environment, scenario); },
-            "build-only failure", "Build-only makepkg failed with exit code 47."));
+            "build-only failure", "The build-only makepkg command failed with exit code 47."));
 
     expect_process_counts(1, 1, "build-only failure");
     expect_metadata_counts(0, 0, 0, "build-only failure");
@@ -1156,7 +1157,7 @@ void test_same_version_needed_promotion_rejected_before_transaction(
 
     static_cast<void>(expect_runtime_error(
             [&]() { execute_scenario(environment, scenario); },
-            "same-version needed promotion", "Cannot change install reason"));
+            "same-version needed promotion", "Cannot change the install reason"));
 
     // --needed belongs only to PreparedArtifactInstall; exact build expectation
     // above rejects accidental propagation into makepkg.
@@ -1258,7 +1259,7 @@ void test_makepkg_build_options_are_projected_independently(
         static_cast<void>(expect_runtime_error(
                 [&]() { execute_scenario(environment, scenario); },
                 test_case.context,
-                "Build-only makepkg failed with exit code 47."));
+                "The build-only makepkg command failed with exit code 47."));
 
         const std::string expected_command =
                 expected_environment_prefix(

@@ -3,6 +3,7 @@
 #include "stubs/artifact-install-executor/process_stub.hpp"
 #include "stubs/package-metadata/alpm_stub.hpp"
 #include "trusted_cache.hpp"
+#include "trusted_cache_test_support.hpp"
 
 #include <algorithm>
 #include <cstdlib>
@@ -188,7 +189,7 @@ public:
         : original_working_directory_(fs::current_path()) {
         const std::string template_text =
                 (fs::temp_directory_path() /
-                 "jpacker-package-base-source-build-test-XXXXXX")
+                 "moguet-package-base-source-build-test-XXXXXX")
                         .string();
         std::vector<char> path_template(
                 template_text.begin(), template_text.end());
@@ -212,7 +213,7 @@ public:
         }
 
         try {
-            ValidatedCacheRoot root = prepare_trusted_cache_root();
+            ValidatedCacheRoot root = prepare_test_trusted_cache_root();
             checkout_path_ = root.path() / "source-checkout";
             fs::create_directory(checkout_path_);
             fs::permissions(
@@ -252,13 +253,13 @@ public:
             const SourceBuildEnvironment& source_environment = {},
             SourceEnvironmentEmptyValuePolicy empty_value_policy =
                     SourceEnvironmentEmptyValuePolicy::Omit) const {
-        ValidatedCacheRoot root = prepare_trusted_cache_root();
+        ValidatedCacheRoot root = prepare_test_trusted_cache_root();
         ValidatedCachePath checkout = require_trusted_cache_path(
                 root, checkout_path_,
                 CachePathRequirement::ExistingDirectory);
         return SeparatedPackageBaseSourceBuildRequest{
                 std::move(checkout),
-                prepare_private_trusted_cache_root(),
+                prepare_private_trusted_cache_root(root),
                 package_base,
                 required_targets,
                 source_environment,
@@ -1260,7 +1261,7 @@ void test_transaction_failures_have_no_public_result(
                     "pacman exception typed detail differs");
             expect(
                     std::string(error.what()) ==
-                            "pacman -U transaction execution threw an exception.",
+                            "The pacman -U transaction execution threw an exception.",
                     "pacman exception safe diagnostic differs");
         }
         expect(
@@ -1353,7 +1354,7 @@ void test_build_and_validation_failures_retain_diagnostics(
                             SeparatedPackageBaseSourceBuildFailurePhase::
                                             Build &&
                             std::string(error.what()) ==
-                                    "Build-only makepkg failed with exit code 47.",
+                                    "The build-only makepkg command failed with exit code 47.",
                     "Build nonzero typed failure differs");
         }
         expect(
@@ -1383,7 +1384,7 @@ void test_build_and_validation_failures_retain_diagnostics(
                             SeparatedPackageBaseSourceBuildFailurePhase::
                                             Build &&
                             std::string(error.what()) ==
-                                    "PackageBase build-only makepkg execution failed.",
+                                    "The PackageBase build-only makepkg execution failed.",
                     "Build exception typed failure differs");
         }
         expect(

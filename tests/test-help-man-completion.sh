@@ -2,6 +2,11 @@
 
 set -eu
 
+if [ "$#" -ne 1 ]; then
+    printf 'usage: test-help-man-completion.sh CLI_LOCALIZATION_BINARY\n' >&2
+    exit 2
+fi
+
 test_binary=$1
 repo_root=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
 tmp_dir=$(mktemp -d)
@@ -16,83 +21,96 @@ fail() {
     exit 1
 }
 
-count_occurrences() {
-    needle=$1
-    file=$2
-    NEEDLE=$needle awk '
-        BEGIN { needle = ENVIRON["NEEDLE"] }
-        {
-            rest = $0
-            while((position = index(rest, needle)) != 0) {
-                count++
-                rest = substr(rest, position + length(needle))
-            }
-        }
-        END { print count + 0 }
-    ' "$file"
-}
+for command_name in python3 bash zsh fish localedef; do
+    command -v "$command_name" >/dev/null 2>&1 ||
+        fail "$command_name is required."
+done
 
-assert_occurrence_count() {
-    expected=$1
-    needle=$2
-    file=$3
-    actual=$(count_occurrences "$needle" "$file")
-    [ "$actual" -eq "$expected" ] ||
-        fail "$file contains '$needle' $actual times; expected $expected."
-}
+PYTHONDONTWRITEBYTECODE=1 \
+    python3 "$repo_root/scripts/generate_completions.py" --check
+bash -n "$repo_root/completions/moguet.bash"
+zsh -n "$repo_root/completions/_moguet"
+fish --no-execute "$repo_root/completions/moguet.fish"
 
-assert_line_count() {
-    expected=$1
-    line=$2
-    file=$3
-    actual=$(grep -Fxc -- "$line" "$file" || true)
-    [ "$actual" -eq "$expected" ] ||
-        fail "$file contains exact line '$line' $actual times; expected $expected."
-}
+locale_root=$tmp_dir/locale
+test_home=$tmp_dir/home
+mkdir -p "$locale_root" "$test_home"
+localedef --no-archive -i en_US -f UTF-8 "$locale_root/en_US.UTF-8"
 
-"$test_binary" -h > "$tmp_dir/help-short" 2>&1
-"$test_binary" --help > "$tmp_dir/help-long" 2>&1
-cmp -s "$tmp_dir/help-short" "$tmp_dir/help-long" ||
-    fail "-h and --help output differ."
-assert_occurrence_count 1 '-h, --help' "$tmp_dir/help-short"
-assert_occurrence_count 1 '-V, --version' "$tmp_dir/help-short"
+english_help=$tmp_dir/help-en
+english_help_short=$tmp_dir/help-en-short
+japanese_help=$tmp_dir/help-ja
+japanese_help_short=$tmp_dir/help-ja-short
+HOME=$test_home \
+XDG_CONFIG_HOME=$tmp_dir/config \
+XDG_STATE_HOME=$tmp_dir/state \
+XDG_CACHE_HOME=$tmp_dir/cache \
+LC_ALL=C \
+LANGUAGE= \
+    "$test_binary" --help > "$english_help" 2>&1
 
-"$test_binary" -V > "$tmp_dir/version-short" 2>&1
-"$test_binary" --version > "$tmp_dir/version-long" 2>&1
-cmp -s "$tmp_dir/version-short" "$tmp_dir/version-long" ||
-    fail "-V and --version output differ."
+HOME=$test_home \
+XDG_CONFIG_HOME=$tmp_dir/config \
+XDG_STATE_HOME=$tmp_dir/state \
+XDG_CACHE_HOME=$tmp_dir/cache \
+LC_ALL=C \
+LANGUAGE= \
+    "$test_binary" -h > "$english_help_short" 2>&1
+cmp -s "$english_help" "$english_help_short" ||
+    fail 'English -h and --help output differ.'
+
+HOME=$test_home \
+XDG_CONFIG_HOME=$tmp_dir/config \
+XDG_STATE_HOME=$tmp_dir/state \
+XDG_CACHE_HOME=$tmp_dir/cache \
+LOCPATH=$locale_root \
+LANG=en_US.UTF-8 \
+LC_ALL=en_US.UTF-8 \
+LANGUAGE=ja \
+    "$test_binary" --help > "$japanese_help" 2>&1
+
+HOME=$test_home \
+XDG_CONFIG_HOME=$tmp_dir/config \
+XDG_STATE_HOME=$tmp_dir/state \
+XDG_CACHE_HOME=$tmp_dir/cache \
+LOCPATH=$locale_root \
+LANG=en_US.UTF-8 \
+LC_ALL=en_US.UTF-8 \
+LANGUAGE=ja \
+    "$test_binary" -h > "$japanese_help_short" 2>&1
+cmp -s "$japanese_help" "$japanese_help_short" ||
+    fail 'Japanese -h and --help output differ.'
+
+version_short=$tmp_dir/version-short
+version_long=$tmp_dir/version-long
+HOME=$test_home \
+XDG_CONFIG_HOME=$tmp_dir/config \
+XDG_STATE_HOME=$tmp_dir/state \
+XDG_CACHE_HOME=$tmp_dir/cache \
+LC_ALL=C \
+LANGUAGE= \
+    "$test_binary" -V > "$version_short" 2>&1
+HOME=$test_home \
+XDG_CONFIG_HOME=$tmp_dir/config \
+XDG_STATE_HOME=$tmp_dir/state \
+XDG_CACHE_HOME=$tmp_dir/cache \
+LC_ALL=C \
+LANGUAGE= \
+    "$test_binary" --version > "$version_long" 2>&1
+cmp -s "$version_short" "$version_long" ||
+    fail '-V and --version output differ.'
 version=$(tr -d '[:space:]' < "$repo_root/VERSION")
-[ "$(cat "$tmp_dir/version-short")" = "jpacker v$version" ] ||
-    fail "version output does not match VERSION."
+[ "$(cat "$version_short")" = "Moguet v$version" ] ||
+    fail 'version output does not match VERSION.'
 
-sed "s/@VERSION@/$version/g" "$repo_root/man/jpacker.8.in" > \
-    "$tmp_dir/generated-man"
-cmp -s "$tmp_dir/generated-man" "$repo_root/man/jpacker.8" ||
-    fail "man/jpacker.8 does not match the formal generator output."
-assert_occurrence_count 1 '.BR \-h , \ \-\-help' \
-    "$repo_root/man/jpacker.8.in"
-assert_occurrence_count 1 '.BR \-V , \ \-\-version' \
-    "$repo_root/man/jpacker.8.in"
+PYTHONDONTWRITEBYTECODE=1 \
+python3 "$repo_root/scripts/check_public_documentation.py" \
+    --help-en "$english_help" \
+    --help-ja "$japanese_help"
 
-grep '^    opts=' "$repo_root/completions/jpacker_completion.bash" > \
-    "$tmp_dir/bash-options"
-assert_occurrence_count 1 ' -h ' "$tmp_dir/bash-options"
-assert_occurrence_count 1 ' --help ' "$tmp_dir/bash-options"
-assert_occurrence_count 1 ' -V ' "$tmp_dir/bash-options"
-assert_occurrence_count 1 ' --version ' "$tmp_dir/bash-options"
-
-sed -n '/^_jpacker_global_options=(/,/^)/p' \
-    "$repo_root/completions/_jpacker" > "$tmp_dir/zsh-options"
-assert_line_count 1 '    -h' "$tmp_dir/zsh-options"
-assert_line_count 1 '    --help' "$tmp_dir/zsh-options"
-assert_line_count 1 '    -V' "$tmp_dir/zsh-options"
-assert_line_count 1 '    --version' "$tmp_dir/zsh-options"
-
-sed -n '/^set -l jpacker_global_options \\/,/^$/p' \
-    "$repo_root/completions/jpacker.fish" > "$tmp_dir/fish-options"
-assert_occurrence_count 1 '    -h ' "$tmp_dir/fish-options"
-assert_occurrence_count 1 '    --help ' "$tmp_dir/fish-options"
-assert_occurrence_count 1 '    -V ' "$tmp_dir/fish-options"
-assert_occurrence_count 1 '    --version ' "$tmp_dir/fish-options"
+[ ! -e "$tmp_dir/config" ] &&
+    [ ! -e "$tmp_dir/state" ] &&
+    [ ! -e "$tmp_dir/cache" ] ||
+    fail 'help-only checks created XDG consumer directories.'
 
 printf 'help-man-completion-test: all checks passed\n'

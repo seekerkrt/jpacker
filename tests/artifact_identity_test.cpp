@@ -3,6 +3,7 @@
 #include "artifact_workspace.hpp"
 #include "stubs/artifact-identity/process_stub.hpp"
 #include "trusted_cache.hpp"
+#include "trusted_cache_test_support.hpp"
 
 #include <cstdlib>
 #include <exception>
@@ -54,7 +55,7 @@ public:
         std::vector<char> path_template;
         const std::string template_text =
                 (fs::temp_directory_path() /
-                 "jpacker-artifact-identity-test-XXXXXX")
+                 "moguet-artifact-identity-test-XXXXXX")
                         .string();
         path_template.assign(template_text.begin(), template_text.end());
         path_template.push_back('\0');
@@ -96,7 +97,8 @@ class ArtifactFixture final {
 public:
     explicit ArtifactFixture(const std::string& artifact_leaf_name) {
         ArtifactWorkspace workspace = create_artifact_workspace(
-                prepare_private_trusted_cache_root());
+                prepare_private_trusted_cache_root(
+                        prepare_test_trusted_cache_root()));
         fs::path           artifact_path = workspace.path() / artifact_leaf_name;
 
         ExpectedPackageArtifactPath expected =

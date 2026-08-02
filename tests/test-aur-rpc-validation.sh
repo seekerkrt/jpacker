@@ -4,8 +4,8 @@ set -eu
 test_binary=$1
 envelope_test_binary=$2
 repo_root=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
-JPACKER_TEST_REPOSITORY_ROOT=$repo_root
-export JPACKER_TEST_REPOSITORY_ROOT
+MOGUET_TEST_REPOSITORY_ROOT=$repo_root
+export MOGUET_TEST_REPOSITORY_ROOT
 . "$repo_root/tests/test-command-safety.sh"
 tmp_dir=$(mktemp -d)
 server_pid=
@@ -21,10 +21,12 @@ trap cleanup EXIT INT TERM
 
 port_file=$tmp_dir/port
 request_log=$tmp_dir/requests.log
+user_agent_log=$tmp_dir/user-agents.log
 : > "$request_log"
+: > "$user_agent_log"
 python3 "$repo_root/tests/aur_rpc_fixture_server.py" \
     "$repo_root/tests/fixtures/aur-rpc-validation.json" "$port_file" \
-    "$request_log" &
+    "$request_log" "$user_agent_log" &
 server_pid=$!
 
 attempt=0
@@ -44,7 +46,7 @@ require_exact_test_command makepkg "$repo_root/tests/stubs/makepkg"
 require_exact_test_command pacman "$repo_root/tests/stubs/pacman"
 require_exact_test_command sudo "$repo_root/tests/stubs/sudo"
 require_exact_test_command git "$repo_root/tests/stubs/git"
-export JPACKER_TEST_AUR_RPC_BASE_URL=http://127.0.0.1:$port/rpc/
+export MOGUET_TEST_AUR_RPC_BASE_URL=http://127.0.0.1:$port/rpc/
 
 setup_case() {
     case_name=$1
@@ -52,28 +54,30 @@ setup_case() {
     command_log=$case_dir/commands.log
     output_file=$case_dir/output
 
-    mkdir -p "$case_dir/home" "$case_dir/xdg-cache"
+    mkdir -p "$case_dir/home" "$case_dir/xdg-state" "$case_dir/xdg-cache"
     : > "$command_log"
     : > "$request_log"
+    : > "$user_agent_log"
     inventory_state=$case_dir/foreign-inventory.state
     : > "$inventory_state"
     export HOME=$case_dir/home
+    export XDG_STATE_HOME=$case_dir/xdg-state
     export XDG_CACHE_HOME=$case_dir/xdg-cache
-    export JPACKER_TEST_COMMAND_LOG=$command_log
-    export JPACKER_TEST_FOREIGN_PACKAGE_INVENTORY_STATE_FILE=$inventory_state
-    export JPACKER_TEST_PACMAN_CONF_REPOSITORY_LIST=core
-    export JPACKER_TEST_PACMAN_EXIT_CODE=1
-    export JPACKER_TEST_SUDO_EXIT_CODE=99
-    unset JPACKER_TEST_PACMAN_QM_OUTPUT
-    unset JPACKER_TEST_PACMAN_REPO_PACKAGES
-    unset JPACKER_TEST_PACKAGE_BUILD_DIR
-    unset JPACKER_TEST_GIT_REMOTE_URL
-    unset JPACKER_TEST_GIT_CLONE_EXIT_CODE
-    unset JPACKER_TEST_GIT_CLONE_SYMLINK_TARGET
-    unset JPACKER_TEST_GIT_CLONE_FIXTURE_DIR
-    unset JPACKER_TEST_MAKEPKG_EXIT_CODE
-    unset JPACKER_TEST_MAKEPKG_ARTIFACT_IDENTITIES
-    unset JPACKER_TEST_AUR_RPC_ENCODE_FAILURE_PACKAGE
+    export MOGUET_TEST_COMMAND_LOG=$command_log
+    export MOGUET_TEST_FOREIGN_PACKAGE_INVENTORY_STATE_FILE=$inventory_state
+    export MOGUET_TEST_PACMAN_CONF_REPOSITORY_LIST=core
+    export MOGUET_TEST_PACMAN_EXIT_CODE=1
+    export MOGUET_TEST_SUDO_EXIT_CODE=99
+    unset MOGUET_TEST_PACMAN_QM_OUTPUT
+    unset MOGUET_TEST_PACMAN_REPO_PACKAGES
+    unset MOGUET_TEST_PACKAGE_BUILD_DIR
+    unset MOGUET_TEST_GIT_REMOTE_URL
+    unset MOGUET_TEST_GIT_CLONE_EXIT_CODE
+    unset MOGUET_TEST_GIT_CLONE_SYMLINK_TARGET
+    unset MOGUET_TEST_GIT_CLONE_FIXTURE_DIR
+    unset MOGUET_TEST_MAKEPKG_EXIT_CODE
+    unset MOGUET_TEST_MAKEPKG_ARTIFACT_IDENTITIES
+    unset MOGUET_TEST_AUR_RPC_ENCODE_FAILURE_PACKAGE
 }
 
 run_ok() {
@@ -183,6 +187,22 @@ assert_request_count() {
     fi
 }
 
+assert_moguet_user_agents() {
+    expected_user_agent="moguet/$(tr -d '[:space:]' < "$repo_root/VERSION")"
+    if [ ! -s "$user_agent_log" ]; then
+        echo "AUR fixture did not observe a User-Agent header" >&2
+        exit 1
+    fi
+    unexpected_user_agent_count=$(
+        grep -Fvxc -- "$expected_user_agent" "$user_agent_log" || true
+    )
+    if [ "$unexpected_user_agent_count" -ne 0 ]; then
+        echo "unexpected AUR RPC User-Agent; expected $expected_user_agent" >&2
+        cat "$user_agent_log" >&2
+        exit 1
+    fi
+}
+
 assert_no_version_comparison() {
     if grep -E '^vercmp( |$)' "$command_log" >/dev/null; then
         echo "AUR encode failure returned a partial batch result" >&2
@@ -197,7 +217,7 @@ assert_validation_error() {
 }
 
 assert_cache_entry_absent() {
-    entry=$XDG_CACHE_HOME/jpacker/$1
+    entry=$XDG_CACHE_HOME/moguet/$1
     if [ -e "$entry" ] || [ -L "$entry" ]; then
         echo "cache entry was created before metadata preflight completed: $entry" >&2
         exit 1
@@ -210,7 +230,7 @@ prepare_source_preferences() {
     for package in "$@"; do
         : > "$preference_dir/$package"
     done
-    export JPACKER_TEST_PACKAGE_BUILD_DIR=$preference_dir
+    export MOGUET_TEST_PACKAGE_BUILD_DIR=$preference_dir
 }
 
 # strict APIだけがAUR RPC v5 envelopeを検証する。legacy APIのpermissive境界は維持する。
@@ -236,6 +256,7 @@ run_envelope_ok info-many-normal unused
 assert_contains "valid-minimal" "$output_file"
 assert_contains "arrays-null" "$output_file"
 assert_request_count 1
+assert_moguet_user_agents
 
 setup_case info-many-encode-failure-first
 run_envelope_fail info-many-fail-first unused
@@ -272,7 +293,7 @@ assert_command_log_empty
 while IFS='|' read -r package detail; do
     setup_case "strict-envelope-$package"
     run_envelope_fail info-strict "$package"
-    assert_validation_error "package info $package"
+    assert_validation_error "info[package=\"$package\"]"
     assert_contains "$detail" "$output_file"
     assert_command_log_empty
 done <<'CASES'
@@ -295,7 +316,7 @@ CASES
 
 setup_case strict-envelope-search-type
 run_envelope_fail provides-strict strict-search-wrong-type
-assert_validation_error "provides search strict-search-wrong-type"
+assert_validation_error "search[provides=\"strict-search-wrong-type\"]"
 assert_contains 'field type expected "search", got "multiinfo"' "$output_file"
 assert_command_log_empty
 
@@ -324,7 +345,7 @@ done
 while IFS='|' read -r package detail; do
     setup_case "array-$package"
     run_fail -Si "$package"
-    assert_validation_error "package info $package"
+    assert_validation_error "info[package=\"$package\"]"
     assert_contains "$detail" "$output_file"
     assert_no_mutation_commands
 done <<'CASES'
@@ -341,7 +362,7 @@ CASES
 while IFS='|' read -r package detail; do
     setup_case "identifier-$package"
     run_fail -Si "$package"
-    assert_validation_error "package info $package"
+    assert_validation_error "info[package=\"$package\"]"
     assert_contains "$detail" "$output_file"
 done <<'CASES'
 id-name-missing|field Name expected string, got missing
@@ -363,7 +384,7 @@ CASES
 while IFS='|' read -r package detail; do
     setup_case "scalar-$package"
     run_fail -Si "$package"
-    assert_validation_error "package info $package"
+    assert_validation_error "info[package=\"$package\"]"
     assert_contains "$detail" "$output_file"
 done <<'CASES'
 version-missing|field Version expected string, got missing
@@ -379,7 +400,7 @@ CASES
 while IFS='|' read -r package detail; do
     setup_case "semantic-$package"
     run_fail -Si "$package"
-    assert_validation_error "package info $package"
+    assert_validation_error "info[package=\"$package\"]"
     assert_contains "$detail" "$output_file"
 done <<'CASES'
 semantic-depends|field Depends[0] contains invalid package identifier "../escape"
@@ -393,21 +414,21 @@ CASES
 # read-only inspection経路のgeneric catchがschema errorをunknown/unresolvedへ潰さないことを確認する。
 setup_case direct-deps
 run_fail deps direct-root
-assert_validation_error "package info malformed-direct"
+assert_validation_error "info[package=\"malformed-direct\"]"
 assert_not_contains "Unknown dependencies:" "$output_file"
 
 setup_case recursive-deps
 run_fail deps --recursive recursive-root
-assert_validation_error "package info recursive-malformed"
+assert_validation_error "info[package=\"recursive-malformed\"]"
 
 setup_case direct-plan
 run_fail plan direct-root
-assert_validation_error "package info malformed-direct"
+assert_validation_error "info[package=\"malformed-direct\"]"
 assert_not_contains "unresolved dependencies remain" "$output_file"
 
 setup_case recursive-plan
 run_fail plan recursive-root
-assert_validation_error "package info recursive-malformed"
+assert_validation_error "info[package=\"recursive-malformed\"]"
 assert_not_contains "unresolved dependencies remain" "$output_file"
 
 while IFS='|' read -r root context detail; do
@@ -417,17 +438,17 @@ while IFS='|' read -r root context detail; do
     assert_contains "$detail" "$output_file"
     assert_not_contains "unresolved dependencies remain" "$output_file"
 done <<'CASES'
-provider-name-root|provides search virtual-provider-name|invalid Name "../provider"
-provider-base-root|provides search virtual-provider-base|invalid PackageBase "../provider-base"
-provider-provides-root|provides search virtual-provider-provides|field Provides expected array or null, got string
-provider-candidate-root|package info provider-candidate|field Depends expected array or null, got number
-provider-mismatch-root|package info provider-mismatch|requested provider-mismatch but response Name was other-provider
+provider-name-root|search[provides="virtual-provider-name"]|invalid Name "../provider"
+provider-base-root|search[provides="virtual-provider-base"]|invalid PackageBase "../provider-base"
+provider-provides-root|search[provides="virtual-provider-provides"]|field Provides expected array or null, got string
+provider-candidate-root|info[package="provider-candidate"]|field Depends expected array or null, got number
+provider-mismatch-root|info[package="provider-mismatch"]|requested provider-mismatch but response Name was other-provider
 CASES
 
 # mutation-capable commandはplan全体のvalidation完了前にclone/build/installへ進めない。
 setup_case preflight-fetch-root
 run_fail fetch invalid-root-preflight
-assert_validation_error "package info invalid-root-preflight"
+assert_validation_error "info[package=\"invalid-root-preflight\"]"
 assert_no_mutation_commands
 assert_cache_entry_absent valid-dep
 assert_cache_entry_absent invalid-root-preflight
@@ -435,7 +456,7 @@ assert_not_contains "Review target:" "$output_file"
 
 setup_case preflight-fetch-multiple-targets
 run_fail fetch valid-minimal invalid-root-preflight
-assert_validation_error "package info invalid-root-preflight"
+assert_validation_error "info[package=\"invalid-root-preflight\"]"
 assert_no_mutation_commands
 assert_cache_entry_absent valid-minimal
 assert_cache_entry_absent valid-dep
@@ -448,10 +469,10 @@ while IFS='|' read -r case_name root context; do
     assert_no_mutation_commands
     assert_not_contains "Review target:" "$output_file"
 done <<'CASES'
-preflight-sync-root|invalid-root-preflight|package info invalid-root-preflight
-preflight-sync-direct|direct-root|package info malformed-direct
-preflight-sync-recursive|recursive-root|package info recursive-malformed
-preflight-sync-provider|provider-candidate-root|package info provider-candidate
+preflight-sync-root|invalid-root-preflight|info[package="invalid-root-preflight"]
+preflight-sync-direct|direct-root|info[package="malformed-direct"]
+preflight-sync-recursive|recursive-root|info[package="recursive-malformed"]
+preflight-sync-provider|provider-candidate-root|info[package="provider-candidate"]
 CASES
 
 # AUR search側のschema errorは、read-only pacman searchが成功してもcommand全体を成功扱いしない。
@@ -461,17 +482,17 @@ assert_contains "search-valid-result" "$output_file"
 assert_command "pacman -Ss search-valid-query"
 
 setup_case malformed-search
-export JPACKER_TEST_PACMAN_EXIT_CODE=0
+export MOGUET_TEST_PACMAN_EXIT_CODE=0
 run_fail -Ss search-invalid-query
-assert_validation_error "search query search-invalid-query"
+assert_validation_error "search[query=\"search-invalid-query\"]"
 assert_contains "field Description expected string or null, got object" "$output_file"
 assert_no_mutation_commands
 
 setup_case malformed-refresh-search
-export JPACKER_TEST_PACMAN_EXIT_CODE=0
-export JPACKER_TEST_SUDO_EXIT_CODE=0
+export MOGUET_TEST_PACMAN_EXIT_CODE=0
+export MOGUET_TEST_SUDO_EXIT_CODE=0
 run_fail -Ssy search-invalid-query
-assert_validation_error "search query search-invalid-query"
+assert_validation_error "search[query=\"search-invalid-query\"]"
 assert_contains "field Description expected string or null, got object" "$output_file"
 assert_command_log_empty
 
@@ -506,9 +527,9 @@ setup_case multi-encode-failure
 set_foreign_inventory 'valid-minimal 0.9-1
 arrays-null 0.9-1
 arrays-empty 0.9-1'
-export JPACKER_TEST_AUR_RPC_ENCODE_FAILURE_PACKAGE=arrays-null
+export MOGUET_TEST_AUR_RPC_ENCODE_FAILURE_PACKAGE=arrays-null
 run_fail -Qua
-unset JPACKER_TEST_AUR_RPC_ENCODE_FAILURE_PACKAGE
+unset MOGUET_TEST_AUR_RPC_ENCODE_FAILURE_PACKAGE
 assert_contains \
     "Failed to fetch AUR info: Failed to encode AUR package name: arrays-null" \
     "$output_file"
@@ -521,6 +542,7 @@ assert_no_pacman_command
 setup_case normal-deps
 run_ok deps valid-root
 assert_contains "valid-dep" "$output_file"
+assert_moguet_user_agents
 
 setup_case normal-plan
 run_ok plan valid-root
@@ -574,9 +596,9 @@ assert_no_mutation_commands
 # upgrade preflightはsplit install guardより先にdependency/provider schemaを全走査する。
 setup_case upgrade-split-dependency-preflight
 prepare_source_preferences upgrade-split-root
-export JPACKER_TEST_SUDO_EXIT_CODE=0
+export MOGUET_TEST_SUDO_EXIT_CODE=0
 run_fail upgrade
-assert_validation_error "package info upgrade-split-malformed"
+assert_validation_error "info[package=\"upgrade-split-malformed\"]"
 assert_contains "field Conflicts expected array or null, got string" "$output_file"
 assert_no_mutation_commands
 assert_cache_entry_absent upgrade-split-root
@@ -587,7 +609,7 @@ assert_cache_entry_absent upgrade-split-malformed
 # requested split childをsystem mutation前に引き続き拒否する。
 setup_case upgrade-registered-split-guard
 prepare_source_preferences valid-split
-export JPACKER_TEST_SUDO_EXIT_CODE=0
+export MOGUET_TEST_SUDO_EXIT_CODE=0
 run_fail upgrade
 assert_contains "Registered source upgrade does not support split AUR preference valid-split from PackageBase valid-split-base" "$output_file"
 assert_contains "this route requires a singular package identity" "$output_file"
@@ -599,9 +621,9 @@ assert_cache_entry_absent valid-split-base
 # system/source mutationへ進まない。directory iteratorの順序には依存させない。
 setup_case upgrade-later-preflight-schema-stops-all-source
 prepare_source_preferences upgrade-sequence-a upgrade-sequence-b
-export JPACKER_TEST_SUDO_EXIT_CODE=0
+export MOGUET_TEST_SUDO_EXIT_CODE=0
 run_fail upgrade
-assert_validation_error "package info upgrade-sequence-"
+assert_validation_error "info[package=\"upgrade-sequence-"
 assert_contains "field Depends expected array or null, got string" "$output_file"
 assert_no_mutation_commands
 assert_cache_entry_absent upgrade-sequence-a

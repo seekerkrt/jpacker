@@ -4,6 +4,7 @@
 #include "package_metadata.hpp"
 #include "separated_package_base_source_build.hpp"
 #include "source_build.hpp"
+#include "trusted_cache.hpp"
 
 #include <optional>
 #include <string>
@@ -39,12 +40,16 @@ struct ProductionSourceBuildWorkItem {
     // falseはofficial/generic/registered-source singular compatibility境界。
     bool                          is_build_plan_entry = false;
     bool                          uses_system_update_baseline = false;
+    // 1 invocationでadoptした同一cache-root capabilityを全build unitが共有する。
+    // static model生成中はemptyで、production invocation preparationだけが設定する。
+    std::optional<ValidatedCacheRoot> cache_root;
 };
 
 // PacmanDatabasePathsはinvocationで1回だけ解決し、全build unitへvalueとして共有する。
 struct PreparedProductionSourceBuildInvocation {
     std::vector<ProductionSourceBuildWorkItem> work_items;
     PacmanDatabasePaths                        database_paths;
+    std::optional<ValidatedCacheRoot>          cache_root;
 };
 
 // checkoutやmetadata queryより前に確認できるwork item単体のstatic契約。
@@ -88,6 +93,17 @@ PreparedProductionSourceBuildInvocation prepare_production_source_build_invocati
         std::vector<ProductionSourceBuildWorkItem> work_items,
         const AppConfig& config);
 
+// Higher-level operationが先に確定したcache capabilityを、generic invocation
+// と全work itemへ同一snapshotとして配る。environmentは再読込しない。
+void seed_production_source_build_cache(
+        PreparedProductionSourceBuildInvocation& invocation,
+        const ValidatedCacheRoot& cache_root);
+
+// Execution ownerが最初のexternal mutationより前に1回だけ呼び、invocation内の
+// 全work itemへ同じretained cache-root capabilityを配る。
+void activate_production_source_build_cache(
+        PreparedProductionSourceBuildInvocation& invocation);
+
 // AUR PackageBase execution専用のset owner。required_targetsをauthorityにし、
 // child別outcomeとunselected artifact identityをflattenせず返す。
 PackageBaseSourceBuildExecutionResult
@@ -112,5 +128,5 @@ execute_prepared_source_build_work_item(
 // AUR BuildPlan work itemはPackageBase set owner、それ以外はlegacy
 // singular ownerへroutingする。invocationのDB snapshotを再queryしない。
 void execute_prepared_source_build_invocation(
-        const PreparedProductionSourceBuildInvocation& invocation,
+        PreparedProductionSourceBuildInvocation invocation,
         const AppConfig& config);

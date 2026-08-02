@@ -7,10 +7,13 @@
 #include <exception>
 #include <filesystem>
 #include <iostream>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <sys/wait.h>
 #include <unistd.h>
+#include <utility>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -137,6 +140,18 @@ CapturedCommandResult capture_trimmed(
     return capture_command_output(command.c_str());
 }
 
+CapturedCommandResult capture_explicit(
+        const fs::path& executable_path,
+        const std::vector<std::string>& arguments,
+        std::optional<std::size_t> stdout_capture_limit = std::nullopt) {
+    std::vector<std::string> invocation_arguments{std::string(CHILD_MARKER)};
+    invocation_arguments.insert(
+            invocation_arguments.end(), arguments.begin(), arguments.end());
+    return capture_explicit_process_output_raw(ExplicitProcessInvocation{
+            executable_path.string(), std::move(invocation_arguments), {},
+            stdout_capture_limit});
+}
+
 void test_raw_chunk_boundaries(const fs::path& executable_path) {
     require_result("empty output", capture_raw(executable_path, {"empty"}), "", 0);
 
@@ -200,11 +215,71 @@ void test_decoded_exit_status(const fs::path& executable_path) {
             128 + SIGTERM);
 }
 
+void test_bounded_explicit_capture(const fs::path& executable_path) {
+    constexpr std::size_t LIMIT = 8192;
+
+    CapturedCommandResult exact = capture_explicit(
+            executable_path, {"size", std::to_string(LIMIT)}, LIMIT);
+    require_result(
+            "bounded exact limit", exact, repeated_output(LIMIT), 0);
+    require(
+            !exact.stdout_capture_limit_exceeded,
+            "Exact-limit output was incorrectly reported as oversized");
+
+    constexpr std::size_t OVERSIZED_OUTPUT_SIZE = LIMIT + 256 * 1024 + 1;
+    CapturedCommandResult oversized = capture_explicit(
+            executable_path,
+            {"size", std::to_string(OVERSIZED_OUTPUT_SIZE)}, LIMIT);
+    require_result(
+            "bounded oversized output", oversized, repeated_output(LIMIT), 0);
+    require(
+            oversized.stdout_capture_limit_exceeded,
+            "Oversized output did not set the capture limit flag");
+    require(
+            oversized.output.size() <= LIMIT,
+            "Bounded capture retained bytes beyond its storage limit");
+
+    CapturedCommandResult subsequent = capture_explicit(
+            executable_path, {"no-final-lf"}, LIMIT);
+    require_result("capture after overflow", subsequent, "line", 0);
+    require(
+            !subsequent.stdout_capture_limit_exceeded,
+            "Capture after overflow inherited stale limit state");
+
+    CapturedCommandResult signaled = capture_explicit(
+            executable_path, {"signal-term"}, LIMIT);
+    require_result(
+            "bounded signal termination", signaled, "", 128 + SIGTERM);
+    require(
+            !signaled.stdout_capture_limit_exceeded,
+            "Signal-terminated capture incorrectly reported overflow");
+
+    errno = 0;
+    require(
+            waitpid(-1, nullptr, WNOHANG) == -1 && errno == ECHILD,
+            "Bounded capture left a waitable child process");
+}
+
+void test_unbounded_explicit_capture_compatibility(
+        const fs::path& executable_path) {
+    constexpr std::size_t OUTPUT_SIZE = 12289;
+    CapturedCommandResult result = capture_explicit(
+            executable_path, {"size", std::to_string(OUTPUT_SIZE)});
+    require_result(
+            "unbounded explicit output", result,
+            repeated_output(OUTPUT_SIZE), 0);
+    require(
+            !result.stdout_capture_limit_exceeded,
+            "Unbounded capture reported a storage limit overflow");
+}
+
 void run_tests(const fs::path& executable_path) {
     test_raw_chunk_boundaries(executable_path);
     test_raw_byte_preservation(executable_path);
     test_trimmed_capture_compatibility(executable_path);
     test_decoded_exit_status(executable_path);
+    test_bounded_explicit_capture(executable_path);
+    test_unbounded_explicit_capture_compatibility(executable_path);
 }
 
 } // namespace

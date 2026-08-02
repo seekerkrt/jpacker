@@ -3,6 +3,7 @@
 #include "filtered_aur_update_operation.hpp"
 #include "package_metadata.hpp"
 #include "system_source_upgrade.hpp"
+#include "trusted_cache.hpp"
 
 #include <cstddef>
 #include <memory>
@@ -61,6 +62,7 @@ enum class UpgradeAllNotAttemptedReason {
     SourceCleanupFailure,
     SystemSourceIncomplete,
     ForeignInventoryFailure,
+    CacheAuthorityFailure,
     PriorAggregateInconsistency,
 };
 
@@ -131,6 +133,7 @@ enum class UpgradeAllOperationIssueKind {
     SystemSourcePhaseIncomplete,
     ForeignInventoryConfigurationFailed,
     ForeignInventoryReadFailed,
+    CacheAuthorityInvalid,
     AurQueryFailed,
     FilteredAurPreparationFailed,
     FilteredAurExecutionFailed,
@@ -149,6 +152,11 @@ struct UpgradeAllOperationIssue {
     std::optional<std::size_t> build_plan_order_index;
     std::optional<std::string> package_name;
     std::optional<PackageMetadataFailure> package_metadata_failure;
+    std::optional<xdg_paths::ResolutionFailure>
+            cache_resolution_failure;
+    std::optional<xdg_directory_safety::PreparationFailure>
+            cache_preparation_failure;
+    std::optional<TrustedCacheFailure> trusted_cache_failure;
     std::string diagnostic;
 };
 
@@ -249,11 +257,11 @@ public:
     bool is_valid() const noexcept;
     const UpgradeAllOperationPreparedSnapshot* snapshot() const noexcept;
 
-#ifdef JPACKER_ENABLE_UPGRADE_ALL_OPERATION_TEST_HOOKS
+#ifdef MOGUET_ENABLE_UPGRADE_ALL_OPERATION_TEST_HOOKS
     void make_source_snapshot_inconsistent_for_test();
     void make_explicit_source_correlation_inconsistent_for_test();
     void make_nested_system_source_correlation_inconsistent_for_test();
-#ifdef JPACKER_ENABLE_SYSTEM_SOURCE_UPGRADE_TEST_HOOKS
+#ifdef MOGUET_ENABLE_SYSTEM_SOURCE_UPGRADE_TEST_HOOKS
     void set_nested_system_source_unexpected_exception_for_test(
             SystemSourceUpgradeUnexpectedExceptionPoint point,
             bool unknown_exception = false);

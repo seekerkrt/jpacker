@@ -1,11 +1,19 @@
 #include "upgrade_all_plan.hpp"
 
+#include "localization.hpp"
+
 #include <algorithm>
 #include <map>
 #include <stdexcept>
+#include <string_view>
 #include <utility>
 
 namespace {
+
+constexpr std::string_view PACKAGE_BASE_FIELD = "PackageBase";
+constexpr std::string_view AUR_SERVICE = "AUR";
+constexpr std::string_view COMMAND_NAME = "upgrade-all";
+constexpr std::string_view COMMAND_SENTENCE_NAME = "Upgrade-all";
 
 enum class IdentityState {
     Resolved,
@@ -95,7 +103,11 @@ PackageBaseView inspect_package_base(const UpgradeAllPackageBaseIdentity& identi
     }
 
     // A valueless variant can only be introduced by violating the value-type contract.
-    throw std::logic_error("Unknown upgrade-all PackageBase identity state.");
+    throw std::logic_error(localization::format_translated_message(
+            // TRANSLATORS: The placeholders are the literal command name
+            // "upgrade-all" and field name "PackageBase".
+            "Unknown {} {} identity state.", COMMAND_NAME,
+            PACKAGE_BASE_FIELD));
 }
 
 SourceIdentityView inspect_source_identity(const UpgradeAllSourceIdentity& identity) {
@@ -112,7 +124,10 @@ SourceIdentityView inspect_source_identity(const UpgradeAllSourceIdentity& ident
         return SourceIdentityView{IdentityState::ResolutionFailed, std::nullopt};
     }
 
-    throw std::logic_error("Unknown upgrade-all source identity state.");
+    throw std::logic_error(localization::format_translated_message(
+            // TRANSLATORS: The placeholder is the literal command name
+            // "upgrade-all".
+            "Unknown {} source identity state.", COMMAND_NAME));
 }
 
 bool package_base_signatures_match(
@@ -145,7 +160,10 @@ void add_explicit_package_base_issue(
                 {explicit_source_index});
         return;
     default:
-        throw std::logic_error("Unknown explicit PackageBase state.");
+        throw std::logic_error(localization::format_translated_message(
+                // TRANSLATORS: The placeholder is the literal field name
+                // "PackageBase".
+                "Unknown explicit {} state.", PACKAGE_BASE_FIELD));
     }
 }
 
@@ -172,7 +190,8 @@ void add_explicit_source_identity_issue(
                 {explicit_source_index});
         return;
     default:
-        throw std::logic_error("Unknown explicit source identity state.");
+        throw std::logic_error(localization::translate_message(
+                "Unknown explicit source identity state."));
     }
 }
 
@@ -408,7 +427,10 @@ void validate_target_status(UpgradeAllAurTargetStatus status) {
     case UpgradeAllAurTargetStatus::Incomplete:
         return;
     default:
-        throw std::logic_error("Unknown upgrade-all AUR target status.");
+        throw std::logic_error(localization::format_translated_message(
+                // TRANSLATORS: The placeholders are the literal command name
+                // "upgrade-all" and service name "AUR".
+                "Unknown {} {} target status.", COMMAND_NAME, AUR_SERVICE));
     }
 }
 
@@ -420,7 +442,10 @@ void validate_build_unit_role(UpgradeAllBuildUnitRole role) {
     case UpgradeAllBuildUnitRole::CheckDependency:
         return;
     default:
-        throw std::logic_error("Unknown upgrade-all build-unit role.");
+        throw std::logic_error(localization::format_translated_message(
+                // TRANSLATORS: The placeholder is the literal command name
+                // "upgrade-all".
+                "Unknown {} build-unit role.", COMMAND_NAME));
     }
 }
 
@@ -448,7 +473,11 @@ std::optional<std::string> inspect_target_package_base(
                 {original_target_index});
         return std::nullopt;
     default:
-        throw std::logic_error("Unknown AUR target PackageBase state.");
+        throw std::logic_error(localization::format_translated_message(
+                // TRANSLATORS: The placeholders are the literal service name
+                // "AUR" and field name "PackageBase".
+                "Unknown {} target {} state.", AUR_SERVICE,
+                PACKAGE_BASE_FIELD));
     }
 }
 
@@ -476,7 +505,10 @@ std::optional<std::string> inspect_build_unit_package_base(
                 {}, {build_unit_index});
         return std::nullopt;
     default:
-        throw std::logic_error("Unknown build-unit PackageBase state.");
+        throw std::logic_error(localization::format_translated_message(
+                // TRANSLATORS: The placeholder is the literal field name
+                // "PackageBase".
+                "Unknown build-unit {} state.", PACKAGE_BASE_FIELD));
     }
 }
 
@@ -495,8 +527,11 @@ void populate_selected_targets(UpgradeAllPlan& plan) {
 
         const PackageBaseView package_base = inspect_package_base(entry.target.package_base);
         if(!package_base.package_base.has_value()) {
-            throw std::logic_error(
-                    "Selected upgrade-all target lost its resolved PackageBase.");
+            throw std::logic_error(localization::format_translated_message(
+                    // TRANSLATORS: The placeholders are the literal command
+                    // name "upgrade-all" and field name "PackageBase".
+                    "The selected {} target lost its resolved {}.",
+                    COMMAND_NAME, PACKAGE_BASE_FIELD));
         }
 
         const std::size_t selected_index = plan.selected_targets.size();
@@ -514,35 +549,56 @@ void validate_target_plan_for_completion(const UpgradeAllPlan& plan) {
     if(!plan.build_unit_dispositions.empty() || !plan.selected_build_units.empty() ||
        !plan.externally_satisfied_build_unit_indexes.empty() ||
        !plan.externally_satisfied_package_bases.empty()) {
-        throw std::logic_error(
-                "Upgrade-all target plan already contains build-unit planning results.");
+        throw std::logic_error(localization::format_translated_message(
+                // TRANSLATORS: The placeholder is the display spelling of the
+                // literal command name "upgrade-all" at sentence start.
+                "{} target plan already contains build-unit planning results.",
+                COMMAND_SENTENCE_NAME));
     }
     if(plan.target_dispositions.size() != plan.original_to_selected_index.size()) {
-        throw std::logic_error("Upgrade-all target index mapping size is inconsistent.");
+        throw std::logic_error(localization::format_translated_message(
+                // TRANSLATORS: The placeholder is the display spelling of the
+                // literal command name "upgrade-all" at sentence start.
+                "{} target index mapping size is inconsistent.",
+                COMMAND_SENTENCE_NAME));
     }
 
     std::size_t expected_selected_index = 0;
     for(std::size_t position = 0; position < plan.target_dispositions.size(); ++position) {
         const UpgradeAllTargetPlanEntry& entry = plan.target_dispositions[position];
         if(entry.original_target_index != position) {
-            throw std::logic_error("Upgrade-all original target order is inconsistent.");
+            throw std::logic_error(localization::format_translated_message(
+                    // TRANSLATORS: The placeholder is the display spelling of
+                    // the literal command name "upgrade-all" at sentence start.
+                    "{} original target order is inconsistent.",
+                    COMMAND_SENTENCE_NAME));
         }
 
         if(target_entry_is_selected(entry)) {
             if(entry.selected_index != expected_selected_index ||
                plan.original_to_selected_index[position] != expected_selected_index) {
-                throw std::logic_error(
-                        "Upgrade-all selected target mapping is inconsistent.");
+                throw std::logic_error(localization::format_translated_message(
+                        // TRANSLATORS: The placeholder is the display spelling
+                        // of the literal command name "upgrade-all".
+                        "{} selected target mapping is inconsistent.",
+                        COMMAND_SENTENCE_NAME));
             }
             ++expected_selected_index;
         } else if(entry.selected_index.has_value() ||
                   plan.original_to_selected_index[position].has_value()) {
-            throw std::logic_error(
-                    "Non-selected upgrade-all target has a selected index.");
+            throw std::logic_error(localization::format_translated_message(
+                    // TRANSLATORS: The placeholder is the literal command name
+                    // "upgrade-all".
+                    "Non-selected {} target has a selected index.",
+                    COMMAND_NAME));
         }
     }
     if(expected_selected_index != plan.selected_targets.size()) {
-        throw std::logic_error("Upgrade-all selected target list is inconsistent.");
+        throw std::logic_error(localization::format_translated_message(
+                // TRANSLATORS: The placeholder is the display spelling of the
+                // literal command name "upgrade-all" at sentence start.
+                "{} selected target list is inconsistent.",
+                COMMAND_SENTENCE_NAME));
     }
 }
 
@@ -559,8 +615,11 @@ void reject_duplicate_selected_build_unit_package_bases(UpgradeAllPlan& plan) {
         const PackageBaseView package_base = inspect_package_base(
                 entry.build_unit.package_base);
         if(!package_base.package_base.has_value()) {
-            throw std::logic_error(
-                    "Selected upgrade-all build unit has no resolved PackageBase.");
+            throw std::logic_error(localization::format_translated_message(
+                    // TRANSLATORS: The placeholders are the literal command
+                    // name "upgrade-all" and field name "PackageBase".
+                    "The selected {} build unit has no resolved {}.",
+                    COMMAND_NAME, PACKAGE_BASE_FIELD));
         }
         units_by_package_base[*package_base.package_base].push_back(entry_index);
     }
@@ -598,8 +657,11 @@ void populate_selected_build_units(UpgradeAllPlan& plan) {
         const PackageBaseView package_base = inspect_package_base(
                 entry.build_unit.package_base);
         if(!package_base.package_base.has_value()) {
-            throw std::logic_error(
-                    "Selected upgrade-all build unit lost its resolved PackageBase.");
+            throw std::logic_error(localization::format_translated_message(
+                    // TRANSLATORS: The placeholders are the literal command
+                    // name "upgrade-all" and field name "PackageBase".
+                    "The selected {} build unit lost its resolved {}.",
+                    COMMAND_NAME, PACKAGE_BASE_FIELD));
         }
 
         const std::size_t selected_index = plan.selected_build_units.size();

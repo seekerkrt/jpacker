@@ -4,6 +4,7 @@
 #include "stubs/artifact-install-executor/process_stub.hpp"
 #include "stubs/package-metadata/alpm_stub.hpp"
 #include "trusted_cache.hpp"
+#include "trusted_cache_test_support.hpp"
 
 #include <cstdlib>
 #include <exception>
@@ -303,7 +304,7 @@ public:
     TemporaryCacheHome() {
         const std::string template_text =
                 (fs::temp_directory_path() /
-                 "jpacker-package-base-install-test-XXXXXX")
+                 "moguet-package-base-install-test-XXXXXX")
                         .string();
         std::vector<char> path_template(
                 template_text.begin(), template_text.end());
@@ -377,7 +378,8 @@ public:
             const std::vector<std::string>& artifact_leaf_names,
             const std::vector<std::size_t>& signed_indices = {}) {
         ArtifactWorkspace workspace = create_artifact_workspace(
-                prepare_private_trusted_cache_root());
+                prepare_private_trusted_cache_root(
+                        prepare_test_trusted_cache_root()));
         workspace_path_ = workspace.path();
 
         std::string packagelist_output;

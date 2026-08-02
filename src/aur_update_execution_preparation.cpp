@@ -1,6 +1,7 @@
 #include "aur_update_execution_preparation.hpp"
 
 #include "app_config.hpp"
+#include "localization.hpp"
 #include "package_identifier.hpp"
 
 #include <algorithm>
@@ -9,6 +10,7 @@
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -18,6 +20,10 @@
 namespace {
 
 const std::string AUR_BASE_URL = "https://aur.archlinux.org/";
+constexpr std::string_view AUR_SERVICE_NAME = "AUR";
+constexpr std::string_view BUILD_PLAN_TYPE_NAME = "BuildPlan";
+constexpr std::string_view PKGDEST_ENVIRONMENT_KEY = "PKGDEST";
+constexpr std::string_view ROOT_ROLE_NAME = "Root";
 
 struct ExecutableRootBinding {
     const AurUpdateExecutionTarget* target = nullptr;
@@ -118,13 +124,21 @@ bool is_known_selection_status(
                              ExternallySatisfiedByExplicitSourcePackageBase;
 }
 
-AurUpdatePreparationIssue make_issue(
+AurUpdatePreparationIssue make_localized_preparation_issue(
         AurUpdatePreparationReason reason,
         std::string diagnostic) {
     AurUpdatePreparationIssue issue;
     issue.reason = reason;
     issue.diagnostic = std::move(diagnostic);
     return issue;
+}
+
+template<std::size_t Size>
+AurUpdatePreparationIssue make_localized_preparation_issue(
+        AurUpdatePreparationReason reason,
+        const char (&diagnostic)[Size]) {
+    return make_localized_preparation_issue(
+            reason, localization::translate_message(diagnostic));
 }
 
 void attribute_issue_to_target(
@@ -218,7 +232,7 @@ void retain_preflight_blockers(
         for(const auto& preflight_issue : target.issues) {
             if(preflight_issue.reason == AurUpdateExecutionReason::None) continue;
 
-            AurUpdatePreparationIssue issue = make_issue(
+            AurUpdatePreparationIssue issue = make_localized_preparation_issue(
                     AurUpdatePreparationReason::BlockingPreflight,
                     preflight_issue.diagnostic);
             attribute_issue_to_target(issue, target);
@@ -231,11 +245,17 @@ void retain_preflight_blockers(
 
         if(retained_typed_issue && is_known_status(target.status)) continue;
 
-        AurUpdatePreparationIssue issue = make_issue(
+        AurUpdatePreparationIssue issue = make_localized_preparation_issue(
                 AurUpdatePreparationReason::PreflightInconsistent,
                 is_known_status(target.status)
-                        ? "Blocking AUR update preflight target has no typed issue."
-                        : "AUR update preflight target has an unknown status.");
+                        ? localization::format_translated_message(
+                                  // TRANSLATORS: {} is the literal service name "AUR".
+                                  "Blocking {} update preflight target has no typed issue.",
+                                  AUR_SERVICE_NAME)
+                        : localization::format_translated_message(
+                                  // TRANSLATORS: {} is the literal service name "AUR".
+                                  "{} update preflight target has an unknown status.",
+                                  AUR_SERVICE_NAME));
         attribute_issue_to_target(issue, target);
         issue.package_name = target.update.installed_name;
         preparation.issues.push_back(std::move(issue));
@@ -256,10 +276,14 @@ void retain_executable_preflight_inconsistencies(
                 retained_target = true;
             }
 
-            AurUpdatePreparationIssue issue = make_issue(
+            AurUpdatePreparationIssue issue = make_localized_preparation_issue(
                     AurUpdatePreparationReason::PreflightInconsistent,
-                    "Executable AUR update target retains a blocking preflight issue: " +
-                            preflight_issue.diagnostic);
+                    localization::format_translated_message(
+                            // TRANSLATORS: The first placeholder is the literal
+                            // service name "AUR"; the second is a diagnostic.
+                            "Executable {} update target retains a blocking preflight issue: {}",
+                            AUR_SERVICE_NAME,
+                            preflight_issue.diagnostic));
             attribute_issue_to_target(issue, target);
             issue.preflight_issue = preflight_issue;
             issue.package_name = preflight_issue.package_name;
@@ -288,10 +312,14 @@ void retain_skipped_preflight_inconsistencies(
                 preparation.affected_update_targets.push_back(target);
                 retained_target = true;
             }
-            AurUpdatePreparationIssue issue = make_issue(
+            AurUpdatePreparationIssue issue = make_localized_preparation_issue(
                     AurUpdatePreparationReason::PreflightInconsistent,
-                    "Skipped AUR update target retains a non-skip preflight issue: " +
-                            preflight_issue.diagnostic);
+                    localization::format_translated_message(
+                            // TRANSLATORS: The first placeholder is the literal
+                            // service name "AUR"; the second is a diagnostic.
+                            "Skipped {} update target retains a non-skip preflight issue: {}",
+                            AUR_SERVICE_NAME,
+                            preflight_issue.diagnostic));
             attribute_issue_to_target(issue, target);
             issue.preflight_issue = preflight_issue;
             issue.package_name = preflight_issue.package_name;
@@ -303,9 +331,12 @@ void retain_skipped_preflight_inconsistencies(
 
         // POLICY(#267): reasonのないSkipped snapshotをnormal no-opとして受理しない。
         preparation.affected_update_targets.push_back(target);
-        AurUpdatePreparationIssue issue = make_issue(
+        AurUpdatePreparationIssue issue = make_localized_preparation_issue(
                 AurUpdatePreparationReason::PreflightInconsistent,
-                "Skipped AUR update target has no normal skip preflight issue.");
+                localization::format_translated_message(
+                        // TRANSLATORS: {} is the literal service name "AUR".
+                        "Skipped {} update target has no normal skip preflight issue.",
+                        AUR_SERVICE_NAME));
         attribute_issue_to_target(issue, target);
         issue.package_name = target.update.installed_name;
         preparation.issues.push_back(std::move(issue));
@@ -326,9 +357,12 @@ bool collect_executable_root_bindings(
         executable_targets.push_back(&target);
         preparation.affected_update_targets.push_back(target);
         if(target.update_plan_index != target_index) {
-            AurUpdatePreparationIssue issue = make_issue(
+            AurUpdatePreparationIssue issue = make_localized_preparation_issue(
                     AurUpdatePreparationReason::RootAttributionInconsistent,
-                    "Executable AUR update target index differs from its position in the preflight snapshot.");
+                    localization::format_translated_message(
+                            // TRANSLATORS: {} is the literal service name "AUR".
+                            "Executable {} update target index differs from its position in the preflight snapshot.",
+                            AUR_SERVICE_NAME));
             attribute_issue_to_target(issue, target);
             issue.package_name = target.update.installed_name;
             preparation.issues.push_back(std::move(issue));
@@ -336,9 +370,12 @@ bool collect_executable_root_bindings(
     }
 
     if(plan.root_targets.size() != executable_targets.size()) {
-        AurUpdatePreparationIssue issue = make_issue(
+        AurUpdatePreparationIssue issue = make_localized_preparation_issue(
                 AurUpdatePreparationReason::RootAttributionInconsistent,
-                "BuildPlan root count does not match the executable update target count.");
+                localization::format_translated_message(
+                        // TRANSLATORS: {} is the literal internal type name "BuildPlan".
+                        "{} root count does not match the executable update target count.",
+                        BUILD_PLAN_TYPE_NAME));
         attribute_issue_to_all_executable_targets(issue, preparation);
         preparation.issues.push_back(std::move(issue));
     }
@@ -347,18 +384,27 @@ bool collect_executable_root_bindings(
     std::set<std::size_t> seen_root_indices;
     for(const auto* target : executable_targets) {
         if(!seen_update_plan_indices.insert(target->update_plan_index).second) {
-            AurUpdatePreparationIssue issue = make_issue(
+            AurUpdatePreparationIssue issue = make_localized_preparation_issue(
                     AurUpdatePreparationReason::RootAttributionInconsistent,
-                    "Executable AUR update targets contain a duplicate update plan index.");
+                    localization::format_translated_message(
+                            // TRANSLATORS: {} is the literal service name "AUR".
+                            "Executable {} update targets contain a duplicate update plan index.",
+                            AUR_SERVICE_NAME));
             attribute_issue_to_target(issue, *target);
             issue.package_name = target->update.installed_name;
             preparation.issues.push_back(std::move(issue));
         }
 
         if(!target->build_plan_root_index.has_value()) {
-            AurUpdatePreparationIssue issue = make_issue(
+            AurUpdatePreparationIssue issue = make_localized_preparation_issue(
                     AurUpdatePreparationReason::RootAttributionInconsistent,
-                    "Executable AUR update target has no BuildPlan root index.");
+                    localization::format_translated_message(
+                            // TRANSLATORS: The placeholders are the literal
+                            // service name "AUR" and internal type name
+                            // "BuildPlan", respectively.
+                            "Executable {} update target has no {} root index.",
+                            AUR_SERVICE_NAME,
+                            BUILD_PLAN_TYPE_NAME));
             attribute_issue_to_target(issue, *target);
             issue.package_name = target->update.installed_name;
             preparation.issues.push_back(std::move(issue));
@@ -367,18 +413,30 @@ bool collect_executable_root_bindings(
 
         const std::size_t root_index = *target->build_plan_root_index;
         if(root_index >= plan.root_targets.size()) {
-            AurUpdatePreparationIssue issue = make_issue(
+            AurUpdatePreparationIssue issue = make_localized_preparation_issue(
                     AurUpdatePreparationReason::RootAttributionInconsistent,
-                    "Executable AUR update target refers to an out-of-range BuildPlan root index.");
+                    localization::format_translated_message(
+                            // TRANSLATORS: The placeholders are the literal
+                            // service name "AUR" and internal type name
+                            // "BuildPlan", respectively.
+                            "Executable {} update target refers to an out-of-range {} root index.",
+                            AUR_SERVICE_NAME,
+                            BUILD_PLAN_TYPE_NAME));
             attribute_issue_to_target(issue, *target);
             issue.package_name = target->update.installed_name;
             preparation.issues.push_back(std::move(issue));
             continue;
         }
         if(!seen_root_indices.insert(root_index).second) {
-            AurUpdatePreparationIssue issue = make_issue(
+            AurUpdatePreparationIssue issue = make_localized_preparation_issue(
                     AurUpdatePreparationReason::RootAttributionInconsistent,
-                    "Multiple executable AUR update targets refer to the same BuildPlan root index.");
+                    localization::format_translated_message(
+                            // TRANSLATORS: The placeholders are the literal
+                            // service name "AUR" and internal type name
+                            // "BuildPlan", respectively.
+                            "Multiple executable {} update targets refer to the same {} root index.",
+                            AUR_SERVICE_NAME,
+                            BUILD_PLAN_TYPE_NAME));
             attribute_issue_to_target(issue, *target);
             issue.package_name = target->update.installed_name;
             preparation.issues.push_back(std::move(issue));
@@ -388,9 +446,15 @@ bool collect_executable_root_bindings(
         const RootTargetIdentity& root = plan.root_targets[root_index];
         if(root.invocation_index != root_index ||
            root.requested_name != target->update.installed_name) {
-            AurUpdatePreparationIssue issue = make_issue(
+            AurUpdatePreparationIssue issue = make_localized_preparation_issue(
                     AurUpdatePreparationReason::RootAttributionInconsistent,
-                    "BuildPlan root identity does not match its executable AUR update target.");
+                    localization::format_translated_message(
+                            // TRANSLATORS: The placeholders are the literal
+                            // internal type name "BuildPlan" and service name
+                            // "AUR", respectively.
+                            "{} root identity does not match its executable {} update target.",
+                            BUILD_PLAN_TYPE_NAME,
+                            AUR_SERVICE_NAME));
             attribute_issue_to_target(issue, *target);
             issue.affected_roots.push_back(root);
             issue.package_name = target->update.installed_name;
@@ -399,9 +463,12 @@ bool collect_executable_root_bindings(
         }
 
         if(!target->desired_install_reason.has_value()) {
-            AurUpdatePreparationIssue issue = make_issue(
+            AurUpdatePreparationIssue issue = make_localized_preparation_issue(
                     AurUpdatePreparationReason::DesiredInstallReasonMissing,
-                    "Executable AUR update target has no desired install reason.");
+                    localization::format_translated_message(
+                            // TRANSLATORS: {} is the literal service name "AUR".
+                            "Executable {} update target has no desired install reason.",
+                            AUR_SERVICE_NAME));
             attribute_issue_to_target(issue, *target);
             issue.affected_roots.push_back(root);
             issue.package_name = target->update.installed_name;
@@ -412,9 +479,15 @@ bool collect_executable_root_bindings(
     }
 
     if(seen_root_indices.size() != plan.root_targets.size()) {
-        AurUpdatePreparationIssue issue = make_issue(
+        AurUpdatePreparationIssue issue = make_localized_preparation_issue(
                 AurUpdatePreparationReason::RootAttributionInconsistent,
-                "BuildPlan contains a root that is not attributed to an executable AUR update target.");
+                localization::format_translated_message(
+                        // TRANSLATORS: The placeholders are the literal internal
+                        // type name "BuildPlan" and service name "AUR",
+                        // respectively.
+                        "{} contains a root that is not attributed to an executable {} update target.",
+                        BUILD_PLAN_TYPE_NAME,
+                        AUR_SERVICE_NAME));
         attribute_issue_to_all_executable_targets(issue, preparation);
         preparation.issues.push_back(std::move(issue));
     }
@@ -456,9 +529,12 @@ bool require_root_package_attribution(
         }
         if(is_consistent) continue;
 
-        AurUpdatePreparationIssue issue = make_issue(
+        AurUpdatePreparationIssue issue = make_localized_preparation_issue(
                 AurUpdatePreparationReason::PackageTargetAttributionInconsistent,
-                "Executable AUR update root does not have exactly one matching planned package target.");
+                localization::format_translated_message(
+                        // TRANSLATORS: {} is the literal service name "AUR".
+                        "Executable {} update root does not have exactly one matching planned package target.",
+                        AUR_SERVICE_NAME));
         attribute_issue_to_target(issue, *binding.target);
         issue.affected_roots.push_back(binding.root);
         issue.package_name = binding.root.requested_name;
@@ -478,8 +554,8 @@ std::optional<DesiredInstallReason> desired_reason_for_package_target(
             continue;
         }
         if(update_root != nullptr) {
-            inconsistency.diagnostic =
-                    "Planned package target matches multiple executable update roots.";
+            inconsistency.diagnostic = localization::translate_message(
+                    "Planned package target matches multiple executable update roots.");
             return std::nullopt;
         }
         update_root = &binding;
@@ -489,7 +565,10 @@ std::optional<DesiredInstallReason> desired_reason_for_package_target(
         if(!has_role(package_target, PackageRole::Root) ||
            !update_root->target->desired_install_reason.has_value()) {
             inconsistency.diagnostic =
-                    "Planned update root lost its Root role or desired install reason.";
+                    localization::format_translated_message(
+                            // TRANSLATORS: {} is the literal enum value "Root".
+                            "Planned update root lost its {} role or desired install reason.",
+                            ROOT_ROLE_NAME);
             return std::nullopt;
         }
         // LANDMINE(#267): Root roleから再計算するとdependency-installed rootを
@@ -501,19 +580,20 @@ std::optional<DesiredInstallReason> desired_reason_for_package_target(
        !std::any_of(
                package_target.roles.begin(), package_target.roles.end(),
                is_dependency_role)) {
-        inconsistency.diagnostic =
-                "Non-root planned package target has no attributable dependency role.";
+        inconsistency.diagnostic = localization::translate_message(
+                "Non-root planned package target has no attributable dependency role.");
         return std::nullopt;
     }
     return DesiredInstallReason::Dependency;
 }
 
-void retain_build_unit_selection_issue(
+void retain_localized_build_unit_selection_issue(
         AurUpdateSourceBuildPreparation& preparation,
         AurUpdatePreparationReason reason,
-        const std::string& diagnostic,
+        std::string diagnostic,
         const AurUpdateBuildUnitSelectionEntry* selection_entry = nullptr) {
-    AurUpdatePreparationIssue issue = make_issue(reason, diagnostic);
+    AurUpdatePreparationIssue issue = make_localized_preparation_issue(
+            reason, std::move(diagnostic));
     if(selection_entry != nullptr) {
         issue.package_base = selection_entry->package_base;
         if(selection_entry->package_names.size() == 1) {
@@ -522,6 +602,17 @@ void retain_build_unit_selection_issue(
     }
     attribute_issue_to_all_executable_targets(issue, preparation);
     preparation.issues.push_back(std::move(issue));
+}
+
+template<std::size_t Size>
+void retain_localized_build_unit_selection_issue(
+        AurUpdateSourceBuildPreparation& preparation,
+        AurUpdatePreparationReason reason,
+        const char (&diagnostic)[Size],
+        const AurUpdateBuildUnitSelectionEntry* selection_entry = nullptr) {
+    retain_localized_build_unit_selection_issue(
+            preparation, reason,
+            localization::translate_message(diagnostic), selection_entry);
 }
 
 bool has_valid_external_satisfaction(
@@ -559,10 +650,13 @@ bool validate_build_unit_selection(
         const AurUpdateBuildUnitSelection& build_unit_selection,
         AurUpdateSourceBuildPreparation& preparation) {
     if(build_unit_selection.entries.size() != plan.order.size()) {
-        retain_build_unit_selection_issue(
+        retain_localized_build_unit_selection_issue(
                 preparation,
                 AurUpdatePreparationReason::BuildUnitSelectionInconsistent,
-                "Build-unit selection count does not match BuildPlan execution order.");
+                localization::format_translated_message(
+                        // TRANSLATORS: {} is the literal internal type name "BuildPlan".
+                        "Build-unit selection count does not match {} execution order.",
+                        BUILD_PLAN_TYPE_NAME));
     }
 
     std::size_t selected_execution_index = 0;
@@ -577,15 +671,18 @@ bool validate_build_unit_selection(
         if(selection_entry.build_plan_order_index != order_index ||
            selection_entry.package_base != plan_entry.package_base ||
            selection_entry.package_names != plan_entry.package_names) {
-            retain_build_unit_selection_issue(
+            retain_localized_build_unit_selection_issue(
                     preparation,
                     AurUpdatePreparationReason::BuildUnitSelectionInconsistent,
-                    "Build-unit selection identity or order differs from BuildPlan execution order.",
+                    localization::format_translated_message(
+                            // TRANSLATORS: {} is the literal internal type name "BuildPlan".
+                            "Build-unit selection identity or order differs from {} execution order.",
+                            BUILD_PLAN_TYPE_NAME),
                     &selection_entry);
         }
 
         if(!is_known_selection_status(selection_entry.status)) {
-            retain_build_unit_selection_issue(
+            retain_localized_build_unit_selection_issue(
                     preparation,
                     AurUpdatePreparationReason::BuildUnitSelectionInconsistent,
                     "Build-unit selection has an unknown status.",
@@ -598,7 +695,7 @@ bool validate_build_unit_selection(
             if(selection_entry.selected_execution_index !=
                        selected_execution_index ||
                selection_entry.external_satisfaction.has_value()) {
-                retain_build_unit_selection_issue(
+                retain_localized_build_unit_selection_issue(
                         preparation,
                         AurUpdatePreparationReason::
                                 BuildUnitSelectionInconsistent,
@@ -611,7 +708,7 @@ bool validate_build_unit_selection(
 
         if(selection_entry.selected_execution_index.has_value() ||
            !has_valid_external_satisfaction(selection_entry)) {
-            retain_build_unit_selection_issue(
+            retain_localized_build_unit_selection_issue(
                     preparation,
                     AurUpdatePreparationReason::
                             ExternalSatisfactionInconsistent,
@@ -653,19 +750,23 @@ bool collect_work_item_drafts(
                 continue;
             }
 
+            const bool diagnostic_covers_root_attribution =
+                    projection_issue.kind ==
+                    BuildPlanArtifactTargetProjectionIssueKind::
+                            RootAttributionInconsistent;
             std::string diagnostic = projection_issue.diagnostic;
-            if(projection_issue.kind ==
-               BuildPlanArtifactTargetProjectionIssueKind::
-                       RootAttributionInconsistent) {
-                diagnostic =
-                        "Planned package target roots cannot be attributed exactly to executable update targets.";
+            if(diagnostic_covers_root_attribution) {
+                diagnostic = localization::translate_message(
+                        "Planned package target roots cannot be attributed exactly to executable update targets.");
             } else if(projection_issue.kind ==
                       BuildPlanArtifactTargetProjectionIssueKind::
                               UncoveredPlannedPackageTarget) {
-                diagnostic =
-                        "Planned package target must occur exactly once in BuildPlan execution order.";
+                diagnostic = localization::format_translated_message(
+                        // TRANSLATORS: {} is the literal internal type name "BuildPlan".
+                        "Planned package target must occur exactly once in {} execution order.",
+                        BUILD_PLAN_TYPE_NAME);
             }
-            AurUpdatePreparationIssue issue = make_issue(
+            AurUpdatePreparationIssue issue = make_localized_preparation_issue(
                     AurUpdatePreparationReason::
                             PackageTargetAttributionInconsistent,
                     std::move(diagnostic));
@@ -686,10 +787,10 @@ bool collect_work_item_drafts(
                 add_unique(issue.affected_roots, root);
             }
             if(!roots_are_exact) {
-                if(issue.diagnostic.find("cannot be attributed exactly") ==
-                   std::string::npos) {
-                    issue.diagnostic +=
-                            " Its roots cannot be attributed exactly to executable update targets.";
+                if(!diagnostic_covers_root_attribution) {
+                    issue.diagnostic = localization::format_translated_message(
+                            "{} Its roots cannot be attributed exactly to executable update targets.",
+                            issue.diagnostic);
                 }
                 issue.affected_update_plan_indices.clear();
                 issue.affected_roots.clear();
@@ -740,7 +841,7 @@ bool collect_work_item_drafts(
                 package_target = &candidate;
             }
 
-            AurUpdatePreparationIssue target_issue = make_issue(
+            AurUpdatePreparationIssue target_issue = make_localized_preparation_issue(
                     AurUpdatePreparationReason::
                             PackageTargetAttributionInconsistent,
                     "Planned package target attribution is inconsistent.");
@@ -766,8 +867,10 @@ bool collect_work_item_drafts(
                             package_target->roles.end(), is_known_role);
             if(!roots_are_attributed || !roles_are_known) {
                 target_issue.diagnostic = !roots_are_attributed
-                        ? "Planned package target roots cannot be attributed exactly to executable update targets."
-                        : "Planned package target contains no known package role.";
+                        ? localization::translate_message(
+                                  "Planned package target roots cannot be attributed exactly to executable update targets.")
+                        : localization::translate_message(
+                                  "Planned package target contains no known package role.");
                 attribute_issue_to_all_executable_targets(
                         target_issue, preparation);
                 preparation.issues.push_back(std::move(target_issue));
@@ -883,9 +986,12 @@ bool collect_work_item_drafts(
                 });
         if(has_selected_root_work_item) continue;
 
-        AurUpdatePreparationIssue issue = make_issue(
+        AurUpdatePreparationIssue issue = make_localized_preparation_issue(
                 AurUpdatePreparationReason::BuildUnitSelectionInconsistent,
-                "Executable AUR update root has no selected build unit.");
+                localization::format_translated_message(
+                        // TRANSLATORS: {} is the literal service name "AUR".
+                        "Executable {} update root has no selected build unit.",
+                        AUR_SERVICE_NAME));
         attribute_issue_to_target(issue, *binding.target);
         issue.affected_roots.push_back(binding.root);
         issue.package_name = binding.root.requested_name;
@@ -917,17 +1023,18 @@ std::optional<SourceBuildEnvironment> read_strict_environment(
     try {
         result = read_source_preference_strict(preference_name);
     } catch(const std::exception& error) {
-        AurUpdatePreparationIssue issue = make_issue(
+        AurUpdatePreparationIssue issue = make_localized_preparation_issue(
                 AurUpdatePreparationReason::GenericPreparationInconsistent,
-                "Strict source preference reader threw an unexpected exception: " +
-                        std::string(error.what()));
+                localization::format_translated_message(
+                        "Strict source preference reader threw an unexpected exception: {}",
+                        error.what()));
         issue.package_name = preference_name;
         issue.package_base = draft.work_item.request.checkout_name;
         attribute_issue_to_draft(issue, draft);
         preparation.issues.push_back(std::move(issue));
         return std::nullopt;
     } catch(...) {
-        AurUpdatePreparationIssue issue = make_issue(
+        AurUpdatePreparationIssue issue = make_localized_preparation_issue(
                 AurUpdatePreparationReason::GenericPreparationInconsistent,
                 "Strict source preference reader threw an unknown exception.");
         issue.package_name = preference_name;
@@ -948,7 +1055,7 @@ std::optional<SourceBuildEnvironment> read_strict_environment(
 
     const SourcePreferenceFailure& failure =
             std::get<SourcePreferenceFailure>(result);
-    AurUpdatePreparationIssue issue = make_issue(
+    AurUpdatePreparationIssue issue = make_localized_preparation_issue(
             AurUpdatePreparationReason::SourcePreferenceUnavailable,
             failure.diagnostic);
     issue.package_name = preference_name;
@@ -986,9 +1093,12 @@ void consume_strict_source_preferences(
         }
 
         if(selected_environment->defines("PKGDEST")) {
-            AurUpdatePreparationIssue issue = make_issue(
+            AurUpdatePreparationIssue issue = make_localized_preparation_issue(
                     AurUpdatePreparationReason::SourcePreferencePkgdestConflict,
-                    "Source preference defines invocation-owned PKGDEST.");
+                    localization::format_translated_message(
+                            // TRANSLATORS: {} is the literal environment key "PKGDEST".
+                            "Source preference defines invocation-owned {}.",
+                            PKGDEST_ENVIRONMENT_KEY));
             issue.package_name = preference_name;
             issue.package_base = package_base;
             attribute_issue_to_draft(issue, draft);
@@ -1008,7 +1118,7 @@ void validate_static_work_items(
             require_static_production_source_build_work_item(
                     draft.work_item);
         } catch(const std::exception& error) {
-            AurUpdatePreparationIssue issue = make_issue(
+            AurUpdatePreparationIssue issue = make_localized_preparation_issue(
                     AurUpdatePreparationReason::StaticWorkItemInvalid,
                     error.what());
             issue.package_name = draft.work_item.request.package_name;
@@ -1016,7 +1126,7 @@ void validate_static_work_items(
             attribute_issue_to_draft(issue, draft);
             preparation.issues.push_back(std::move(issue));
         } catch(...) {
-            AurUpdatePreparationIssue issue = make_issue(
+            AurUpdatePreparationIssue issue = make_localized_preparation_issue(
                     AurUpdatePreparationReason::StaticWorkItemInvalid,
                     "Static production source-build work item validation threw an unknown exception.");
             issue.package_name = draft.work_item.request.package_name;
@@ -1482,6 +1592,14 @@ bool AurUpdateSourceBuildPreparation::is_blocked() const noexcept {
     return !invocation.has_value() && !issues.empty();
 }
 
+void seed_aur_update_source_build_cache(
+        AurUpdateSourceBuildPreparation& preparation,
+        const ValidatedCacheRoot& cache_root) {
+    if(!preparation.invocation.has_value()) return;
+    seed_production_source_build_cache(
+            preparation.invocation->production_invocation_, cache_root);
+}
+
 AurUpdateSourceBuildPreparation prepare_aur_update_source_build_invocation(
         const AurUpdateExecutionPreflight& preflight,
         const AurUpdateBuildUnitSelection& build_unit_selection,
@@ -1506,11 +1624,14 @@ AurUpdateSourceBuildPreparation prepare_aur_update_source_build_invocation(
         if(!build_unit_selection.entries.empty() ||
            (preflight.build_plan.has_value() &&
             !preflight.build_plan->order.empty())) {
-            retain_build_unit_selection_issue(
+            retain_localized_build_unit_selection_issue(
                     preparation,
                     AurUpdatePreparationReason::
                             BuildUnitSelectionInconsistent,
-                    "AUR update preflight has build-unit selection without an executable target.");
+                    localization::format_translated_message(
+                            // TRANSLATORS: {} is the literal service name "AUR".
+                            "{} update preflight has build-unit selection without an executable target.",
+                            AUR_SERVICE_NAME));
         }
         return preparation;
     }
@@ -1523,9 +1644,12 @@ AurUpdateSourceBuildPreparation prepare_aur_update_source_build_invocation(
         if(target.status == AurUpdateExecutionTargetStatus::Executable) continue;
         if(target.status == AurUpdateExecutionTargetStatus::Skipped) continue;
 
-        AurUpdatePreparationIssue issue = make_issue(
+        AurUpdatePreparationIssue issue = make_localized_preparation_issue(
                 AurUpdatePreparationReason::PreflightInconsistent,
-                "AUR update preflight contains an unexpected target status.");
+                localization::format_translated_message(
+                        // TRANSLATORS: {} is the literal service name "AUR".
+                        "{} update preflight contains an unexpected target status.",
+                        AUR_SERVICE_NAME));
         attribute_issue_to_target(issue, target);
         preparation.issues.push_back(std::move(issue));
     }
@@ -1537,9 +1661,15 @@ AurUpdateSourceBuildPreparation prepare_aur_update_source_build_invocation(
                 preparation.affected_update_targets.push_back(target);
             }
         }
-        AurUpdatePreparationIssue issue = make_issue(
+        AurUpdatePreparationIssue issue = make_localized_preparation_issue(
                 AurUpdatePreparationReason::BuildPlanMissing,
-                "Executable AUR update preflight has no combined BuildPlan.");
+                localization::format_translated_message(
+                        // TRANSLATORS: The placeholders are the literal service
+                        // name "AUR" and internal type name "BuildPlan",
+                        // respectively.
+                        "Executable {} update preflight has no combined {}.",
+                        AUR_SERVICE_NAME,
+                        BUILD_PLAN_TYPE_NAME));
         attribute_issue_to_all_executable_targets(issue, preparation);
         preparation.issues.push_back(std::move(issue));
         return preparation;
@@ -1552,9 +1682,15 @@ AurUpdateSourceBuildPreparation prepare_aur_update_source_build_invocation(
                 preparation.affected_update_targets.push_back(target);
             }
         }
-        AurUpdatePreparationIssue issue = make_issue(
+        AurUpdatePreparationIssue issue = make_localized_preparation_issue(
                 AurUpdatePreparationReason::BuildPlanOrderEmpty,
-                "Executable AUR update BuildPlan has an empty execution order.");
+                localization::format_translated_message(
+                        // TRANSLATORS: The placeholders are the literal service
+                        // name "AUR" and internal type name "BuildPlan",
+                        // respectively.
+                        "Executable {} update {} has an empty execution order.",
+                        AUR_SERVICE_NAME,
+                        BUILD_PLAN_TYPE_NAME));
         attribute_issue_to_all_executable_targets(issue, preparation);
         preparation.issues.push_back(std::move(issue));
         return preparation;
@@ -1598,8 +1734,10 @@ AurUpdateSourceBuildPreparation prepare_aur_update_source_build_invocation(
                 release_work_items(std::move(drafts)), config);
         if(!has_exact_prepared_correlation(
                    production_invocation, attributions, preparation)) {
-            throw std::logic_error(
-                    "Prepared AUR update source-build invocation correlation is inconsistent.");
+            throw std::logic_error(localization::format_translated_message(
+                    // TRANSLATORS: {} is the literal service name "AUR".
+                    "Prepared {} update source-build invocation correlation is inconsistent.",
+                    AUR_SERVICE_NAME));
         }
 
         // POLICY(#267): generic invocationとattributionの両方が完成してから、
@@ -1617,21 +1755,22 @@ AurUpdateSourceBuildPreparation prepare_aur_update_source_build_invocation(
                 std::optional<PreparedAurUpdateSourceBuildInvocation>{
                         std::move(prepared_invocation)}};
     } catch(const PackageMetadataError& error) {
-        AurUpdatePreparationIssue issue = make_issue(
+        AurUpdatePreparationIssue issue = make_localized_preparation_issue(
                 AurUpdatePreparationReason::PacmanDatabaseUnavailable,
                 error.failure().diagnostic);
         issue.package_metadata_failure = error.failure();
         attribute_issue_to_all_executable_targets(issue, preparation);
         preparation.issues.push_back(std::move(issue));
     } catch(const std::exception& error) {
-        AurUpdatePreparationIssue issue = make_issue(
+        AurUpdatePreparationIssue issue = make_localized_preparation_issue(
                 AurUpdatePreparationReason::GenericPreparationInconsistent,
-                "Generic production source-build preparation failed unexpectedly: " +
-                        std::string(error.what()));
+                localization::format_translated_message(
+                        "Generic production source-build preparation failed unexpectedly: {}",
+                        error.what()));
         attribute_issue_to_all_executable_targets(issue, preparation);
         preparation.issues.push_back(std::move(issue));
     } catch(...) {
-        AurUpdatePreparationIssue issue = make_issue(
+        AurUpdatePreparationIssue issue = make_localized_preparation_issue(
                 AurUpdatePreparationReason::GenericPreparationInconsistent,
                 "Generic production source-build preparation failed with an unknown exception.");
         attribute_issue_to_all_executable_targets(issue, preparation);

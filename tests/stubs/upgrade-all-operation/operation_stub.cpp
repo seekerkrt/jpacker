@@ -27,6 +27,7 @@ struct ResponseScriptFailure {
 enum class ScriptedSourceExecutionKind {
     Success,
     Failure,
+    CacheFailure,
     CleanupFailure,
     UnknownFailure,
 };
@@ -86,6 +87,9 @@ struct OperationStubState {
     std::deque<stub::MetadataSessionScript> metadata_sessions;
     int system_exit_status = 0;
     std::optional<std::string> system_failure;
+    std::function<void()> after_system_command_hook;
+    bool cache_seed_failure = false;
+    bool cache_activation_failure = false;
     std::deque<ScriptedSourceExecution> source_executions;
 
     RepositoryConfigurationScript repository_configuration =
@@ -96,6 +100,7 @@ struct OperationStubState {
                     {"upgrade-all-stub-repository"}};
     ForeignInventoryScript foreign_inventory = ForeignPackageInventory{};
     std::deque<InfoManyScript> info_many_scripts;
+    std::function<void()> after_info_many_hook;
     std::deque<InfoStrictScript> info_strict_scripts;
     std::deque<VercmpScript> vercmp_scripts;
 
@@ -137,11 +142,11 @@ OperationStubState g_state;
 
 stub::ConfigSnapshot snapshot_config(const AppConfig& config) {
     return stub::ConfigSnapshot{
-            config.no_edit,
-            config.no_diff,
+            config.user_config.review.pkgbuild == ReviewPolicy::Skip,
+            config.user_config.review.diff == ReviewPolicy::Skip,
             config.no_confirm,
-            config.rebuild,
-            config.clean_build,
+            config.user_config.build.mode == BuildMode::Rebuild,
+            config.user_config.build.mode == BuildMode::Clean,
             config.rm_deps,
             config.editor};
 }
@@ -292,6 +297,18 @@ void fail_system_command(std::string diagnostic) {
     g_state.system_failure = std::move(diagnostic);
 }
 
+void set_after_system_command_hook(std::function<void()> hook) {
+    g_state.after_system_command_hook = std::move(hook);
+}
+
+void fail_cache_seed() {
+    g_state.cache_seed_failure = true;
+}
+
+void fail_cache_activation() {
+    g_state.cache_activation_failure = true;
+}
+
 void enqueue_source_success(SourceBuildExecutionResult result) {
     ScriptedSourceExecution execution;
     execution.kind = ScriptedSourceExecutionKind::Success;
@@ -303,6 +320,12 @@ void enqueue_source_failure(std::string diagnostic) {
     ScriptedSourceExecution execution;
     execution.kind = ScriptedSourceExecutionKind::Failure;
     execution.diagnostic = std::move(diagnostic);
+    g_state.source_executions.push_back(std::move(execution));
+}
+
+void enqueue_source_cache_failure() {
+    ScriptedSourceExecution execution;
+    execution.kind = ScriptedSourceExecutionKind::CacheFailure;
     g_state.source_executions.push_back(std::move(execution));
 }
 
@@ -342,6 +365,10 @@ void set_foreign_inventory_failure(PackageMetadataFailure failure) {
 void enqueue_info_many_result(
         std::map<std::string, AurPackageInfo> result) {
     g_state.info_many_scripts.push_back(std::move(result));
+}
+
+void set_after_info_many_hook(std::function<void()> hook) {
+    g_state.after_info_many_hook = std::move(hook);
 }
 
 void enqueue_info_many_failure(std::string diagnostic) {
@@ -776,6 +803,11 @@ int run_command(const std::string& command) {
     if(g_state.system_failure.has_value()) {
         throw std::runtime_error(*g_state.system_failure);
     }
+    if(g_state.after_system_command_hook) {
+        std::function<void()> hook =
+                std::move(g_state.after_system_command_hook);
+        hook();
+    }
     return g_state.system_exit_status;
 }
 
@@ -823,6 +855,11 @@ SourceBuildExecutionResult execute_prepared_source_build_work_item_typed(
             return execution.result;
         case ScriptedSourceExecutionKind::Failure:
             throw std::runtime_error(execution.diagnostic);
+        case ScriptedSourceExecutionKind::CacheFailure:
+            throw TrustedCacheError(TrustedCacheFailure{
+                    TrustedCacheStage::RootRevalidation,
+                    TrustedCacheErrorCode::ConcurrentReplacement,
+                    std::nullopt});
         case ScriptedSourceExecutionKind::CleanupFailure:
             throw SeparatedSourceBuildCleanupError(
                     execution.cleanup_outcome,
@@ -878,8 +915,15 @@ std::map<std::string, AurPackageInfo> AurClient::info_many(
     if(const auto* failure = std::get_if<ResponseScriptFailure>(&script)) {
         throw AurRpcResponseError(failure->diagnostic);
     }
-    return std::get<std::map<std::string, AurPackageInfo>>(
-            std::move(script));
+    std::map<std::string, AurPackageInfo> result =
+            std::get<std::map<std::string, AurPackageInfo>>(
+                    std::move(script));
+    if(g_state.after_info_many_hook) {
+        std::function<void()> hook =
+                std::move(g_state.after_info_many_hook);
+        hook();
+    }
+    return result;
 }
 
 std::optional<AurPackageInfo> AurClient::info_strict(
@@ -1163,4 +1207,36 @@ execute_prepared_package_base_source_build_work_item_typed(
             throw UnknownAurExecutionFailure{};
     }
     throw std::logic_error("Unknown AUR execution script.");
+}
+
+void seed_production_source_build_cache(
+        PreparedProductionSourceBuildInvocation& invocation,
+        const ValidatedCacheRoot& cache_root) {
+    if(g_state.cache_seed_failure) {
+        throw TrustedCacheError(TrustedCacheFailure{
+                TrustedCacheStage::RootRevalidation,
+                TrustedCacheErrorCode::ConcurrentReplacement,
+                std::nullopt});
+    }
+    cache_root.require_unchanged_identity();
+    invocation.cache_root = cache_root;
+    for(auto& work_item : invocation.work_items) {
+        work_item.cache_root = cache_root;
+    }
+}
+
+void activate_production_source_build_cache(
+        PreparedProductionSourceBuildInvocation& invocation) {
+    if(g_state.cache_activation_failure) {
+        throw TrustedCacheError(TrustedCacheFailure{
+                TrustedCacheStage::RootRevalidation,
+                TrustedCacheErrorCode::ConcurrentReplacement,
+                std::nullopt});
+    }
+    if(!invocation.cache_root.has_value()) {
+        throw std::logic_error(
+                "Upgrade-all operation lost its shared cache authority.");
+    }
+    seed_production_source_build_cache(
+            invocation, invocation.cache_root.value());
 }

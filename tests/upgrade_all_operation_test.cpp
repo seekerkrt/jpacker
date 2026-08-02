@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdlib>
 #include <filesystem>
 #include <iostream>
 #include <map>
@@ -44,20 +45,68 @@ namespace {
 namespace fs = std::filesystem;
 namespace stub = upgrade_all_operation_test_stub;
 
+class TemporaryCacheEnvironment final {
+    fs::path root_;
+
+public:
+    TemporaryCacheEnvironment() {
+        std::string path_template =
+                "/tmp/moguet-upgrade-all-cache-test-XXXXXX";
+        std::vector<char> writable(
+                path_template.begin(), path_template.end());
+        writable.push_back('\0');
+        char* created = mkdtemp(writable.data());
+        if(created == nullptr) {
+            throw std::runtime_error(
+                    "Failed to create upgrade-all cache test directory.");
+        }
+        root_ = created;
+        if(setenv("XDG_CACHE_HOME", root_.c_str(), 1) != 0) {
+            throw std::runtime_error(
+                    "Failed to set upgrade-all cache test environment.");
+        }
+    }
+
+    TemporaryCacheEnvironment(const TemporaryCacheEnvironment&) = delete;
+    TemporaryCacheEnvironment& operator=(
+            const TemporaryCacheEnvironment&) = delete;
+
+    ~TemporaryCacheEnvironment() noexcept {
+        std::error_code cleanup_error;
+        fs::remove_all(root_, cleanup_error);
+    }
+};
+
 void expect(bool condition, const std::string& diagnostic) {
     if(!condition) throw std::runtime_error(diagnostic);
 }
 
+fs::path move_active_cache_root(const std::string& fixture_name) {
+    const char* raw_cache_home = std::getenv("XDG_CACHE_HOME");
+    expect(raw_cache_home != nullptr, "XDG cache test environment is unset");
+    const fs::path active = fs::path(raw_cache_home) / "moguet";
+    const fs::path moved =
+            fs::path(raw_cache_home) / ("moguet-revoked-" + fixture_name);
+    expect(fs::is_directory(active), "Active Moguet cache root is missing");
+    std::error_code rename_error;
+    fs::rename(active, moved, rename_error);
+    expect(!rename_error, "Failed to revoke Moguet cache root fixture");
+    return moved;
+}
+
+void remove_cache_fixture(const fs::path& path) noexcept {
+    std::error_code cleanup_error;
+    fs::remove_all(path, cleanup_error);
+}
+
 AppConfig full_option_config() {
     AppConfig config;
-    config.no_edit = true;
-    config.no_diff = true;
+    config.user_config.review.pkgbuild = ReviewPolicy::Skip;
+    config.user_config.review.diff = ReviewPolicy::Skip;
+    config.user_config.build.mode = BuildMode::Clean;
     config.no_confirm = true;
-    config.rebuild = true;
-    config.clean_build = true;
     config.rm_deps = true;
     config.editor = "upgrade-all-test-editor";
-    config.log_file = "/upgrade-all-test/log";
     return config;
 }
 
@@ -216,7 +265,7 @@ AurPackageInfo package_info(
     info.PackageBase = package_base.empty() ? package_name : package_base;
     info.Version = version;
     info.Description = "upgrade-all operation fixture";
-    info.Maintainer = "jpacker-test";
+    info.Maintainer = "moguet-test";
     return info;
 }
 
@@ -448,11 +497,106 @@ void test_empty_source_preparation_snapshot() {
                     snapshot->explicit_source_adapter.is_valid(),
             "Empty registered-source intent changed during preparation");
     expect(
-            snapshot->system_source.options.no_edit == config.no_edit &&
+            snapshot->system_source.options.no_edit ==
+                            (config.user_config.review.pkgbuild ==
+                             ReviewPolicy::Skip) &&
                     snapshot->system_source.options.rm_deps ==
                             config.rm_deps &&
                     snapshot->system_source.options.editor == config.editor,
             "Aggregate option fingerprint was not frozen");
+    stub::require_script_consumed();
+}
+
+void test_cache_replacement_before_execution_blocks_system() {
+    stub::reset();
+    stub::set_preference_directory(preference_directory({}));
+    const AppConfig config = full_option_config();
+    PreparedUpgradeAllOperation prepared = take_prepared(
+            prepare_upgrade_all_operation(config),
+            "cache replacement before execution");
+
+    const fs::path moved = move_active_cache_root("before-execution");
+    UpgradeAllOperationResult result =
+            execute_prepared_upgrade_all_operation(
+                    std::move(prepared), config);
+    expect(
+            result.status ==
+                            UpgradeAllOperationStatus::BlockedBeforeMutation &&
+                    result.stopped_phase ==
+                            UpgradeAllOperationPhase::Preparation &&
+                    has_issue(
+                            result,
+                            UpgradeAllOperationIssueKind::CacheAuthorityInvalid),
+            "Revoked prepared cache authority did not block execution");
+    expect(
+            !result.issues.empty() &&
+                    result.issues.front().trusted_cache_failure.has_value() &&
+                    result.issues.front().trusted_cache_failure->code ==
+                            TrustedCacheErrorCode::ConcurrentReplacement,
+            "Prepared cache replacement lost typed failure detail");
+    expect(
+            stub::system_commands().empty(),
+            "Revoked prepared cache authority reached system mutation");
+    expect(
+            result.foreign_inventory.status ==
+                            UpgradeAllForeignInventoryPhaseStatus::NotAttempted &&
+                    result.foreign_inventory.not_attempted_reason ==
+                            UpgradeAllNotAttemptedReason::CacheAuthorityFailure,
+            "Pre-system cache replacement lost foreign-inventory reason");
+    expect_aur_not_attempted(
+            result, UpgradeAllNotAttemptedReason::CacheAuthorityFailure,
+            "cache replacement before execution");
+    expect_no_inventory_or_aur("cache replacement before execution");
+    remove_cache_fixture(moved);
+    stub::require_script_consumed();
+}
+
+void test_cache_replacement_after_system_blocks_inventory_and_aur() {
+    stub::reset();
+    stub::set_preference_directory(preference_directory({}));
+    const AppConfig config = full_option_config();
+    PreparedUpgradeAllOperation prepared = take_prepared(
+            prepare_upgrade_all_operation(config),
+            "cache replacement after system");
+
+    fs::path moved;
+    stub::set_after_system_command_hook([&moved]() {
+        moved = move_active_cache_root("after-system");
+    });
+    UpgradeAllOperationResult result =
+            execute_prepared_upgrade_all_operation(
+                    std::move(prepared), config);
+    expect(
+            result.status ==
+                            UpgradeAllOperationStatus::StoppedBeforeAurExecution &&
+                    result.stopped_phase ==
+                            UpgradeAllOperationPhase::ForeignInventory &&
+                    has_issue(
+                            result,
+                            UpgradeAllOperationIssueKind::CacheAuthorityInvalid),
+            "Cache replacement after system did not stop before inventory");
+    expect(
+            result.system_source.system.status ==
+                            SystemUpgradePhaseStatus::Completed &&
+                    stub::system_commands().size() == 1,
+            "Cache replacement fixture did not occur after system completion");
+    expect(
+            !result.issues.empty() &&
+                    result.issues.back().trusted_cache_failure.has_value() &&
+                    result.issues.back().trusted_cache_failure->code ==
+                            TrustedCacheErrorCode::ConcurrentReplacement,
+            "Phase-boundary cache replacement lost typed failure detail");
+    expect_aur_not_attempted(
+            result, UpgradeAllNotAttemptedReason::CacheAuthorityFailure,
+            "cache replacement after system");
+    expect(
+            result.foreign_inventory.status ==
+                            UpgradeAllForeignInventoryPhaseStatus::NotAttempted &&
+                    result.foreign_inventory.not_attempted_reason ==
+                            UpgradeAllNotAttemptedReason::CacheAuthorityFailure,
+            "Post-system cache replacement lost foreign-inventory reason");
+    expect_no_inventory_or_aur("cache replacement after system");
+    remove_cache_fixture(moved);
     stub::require_script_consumed();
 }
 
@@ -674,7 +818,7 @@ void test_unexpected_exception_after_system_start_is_not_unattempted() {
                             PackageStateChange::Unknown &&
                     result.system_source.system.diagnostic.has_value() &&
                     result.system_source.system.diagnostic->find(
-                            "System result unavailable after phase started") !=
+                            "The system result is unavailable because an unexpected exception occurred after the phase started") !=
                             std::string::npos,
             "System-start exception was falsely reported as NotAttempted");
     expect(
@@ -746,7 +890,7 @@ void test_unexpected_exception_after_source_start_is_incomplete() {
                                     UnknownException &&
                     source.diagnostic.has_value() &&
                     source.diagnostic->find(
-                            "Registered source result unavailable after phase started") !=
+                            "The registered source result is unavailable because an unexpected exception occurred after the phase started") !=
                             std::string::npos &&
                     result.has_partial_completion(),
             "Source-start exception was falsely reported as NotAttempted");
@@ -820,6 +964,130 @@ void test_system_failure_is_fail_fast() {
     expect(stub::source_execution_calls().empty(),
            "System failure started source mutation");
     expect_no_inventory_or_aur("system failure");
+    stub::require_script_consumed();
+}
+
+void test_nested_cache_seed_failure_is_typed() {
+    stub::reset();
+    stub::set_preference_directory(
+            preference_directory({"cache-seed"}));
+    stub::enqueue_preference_result(
+            "cache-seed", loaded_preference("cache-seed"));
+    stub::fail_cache_seed();
+
+    UpgradeAllOperationResult result = take_blocked(
+            prepare_upgrade_all_operation(AppConfig{}),
+            "nested cache seed failure");
+    expect(
+            result.status ==
+                            UpgradeAllOperationStatus::BlockedBeforeMutation &&
+                    result.stopped_phase ==
+                            UpgradeAllOperationPhase::Preparation &&
+                    result.system_source.status ==
+                            SystemSourceUpgradeStatus::BlockedBeforeMutation &&
+                    has_issue(
+                            result,
+                            UpgradeAllOperationIssueKind::
+                                    CacheAuthorityInvalid),
+            "Nested cache seed failure was not typed by aggregate");
+    expect(
+            !result.system_source.issues.empty() &&
+                    result.system_source.issues.back().
+                            trusted_cache_failure.has_value() &&
+                    !result.issues.empty() &&
+                    result.issues.back().trusted_cache_failure.has_value() &&
+                    result.issues.back().trusted_cache_failure->code ==
+                            TrustedCacheErrorCode::ConcurrentReplacement,
+            "Nested cache seed failure lost transferred typed detail");
+    expect(
+            result.foreign_inventory.status ==
+                            UpgradeAllForeignInventoryPhaseStatus::
+                                    NotAttempted &&
+                    result.foreign_inventory.not_attempted_reason ==
+                            UpgradeAllNotAttemptedReason::
+                                    CacheAuthorityFailure,
+            "Nested cache seed failure lost inventory stop reason");
+    expect_aur_not_attempted(
+            result, UpgradeAllNotAttemptedReason::CacheAuthorityFailure,
+            "nested cache seed failure");
+    expect(stub::system_commands().empty(),
+           "Nested cache seed failure reached system mutation");
+    expect_no_inventory_or_aur("nested cache seed failure");
+    stub::require_script_consumed();
+}
+
+void test_nested_cache_activation_failure_is_typed() {
+    stub::reset();
+    const AppConfig config;
+    PreparedUpgradeAllOperation prepared =
+            prepare_sources({"cache-activation"}, config);
+    stub::fail_cache_activation();
+
+    UpgradeAllOperationResult result =
+            execute_prepared_upgrade_all_operation(
+                    std::move(prepared), config);
+    expect(
+            result.status ==
+                            UpgradeAllOperationStatus::BlockedBeforeMutation &&
+                    result.stopped_phase ==
+                            UpgradeAllOperationPhase::Preparation &&
+                    has_issue(
+                            result,
+                            UpgradeAllOperationIssueKind::
+                                    CacheAuthorityInvalid),
+            "Nested cache activation failure was not typed by aggregate");
+    expect(
+            !result.issues.empty() &&
+                    result.issues.back().trusted_cache_failure.has_value() &&
+                    result.issues.back().trusted_cache_failure->code ==
+                            TrustedCacheErrorCode::ConcurrentReplacement,
+            "Nested cache activation failure lost TrustedCacheFailure");
+    expect_aur_not_attempted(
+            result, UpgradeAllNotAttemptedReason::CacheAuthorityFailure,
+            "nested cache activation failure");
+    expect(stub::system_commands().empty(),
+           "Nested cache activation failure reached system mutation");
+    expect_no_inventory_or_aur("nested cache activation failure");
+    stub::require_script_consumed();
+}
+
+void test_registered_source_cache_failure_is_typed() {
+    stub::reset();
+    const std::vector<std::string> sources = {"cache-replaced"};
+    const AppConfig config;
+    PreparedUpgradeAllOperation prepared = prepare_sources(sources, config);
+    enqueue_post_source_metadata(sources);
+    stub::enqueue_source_cache_failure();
+
+    UpgradeAllOperationResult result =
+            execute_prepared_upgrade_all_operation(
+                    std::move(prepared), config);
+    expect(
+            result.status ==
+                            UpgradeAllOperationStatus::StoppedOnSourceFailure &&
+                    result.stopped_phase ==
+                            UpgradeAllOperationPhase::RegisteredSource &&
+                    result.system_source.registered_source_results.front().
+                                    failure_kind ==
+                            RegisteredSourceUpgradeFailureKind::
+                                    CacheAuthorityFailure,
+            "Registered-source cache failure was flattened");
+    expect(
+            !result.issues.empty() &&
+                    result.issues.back().kind ==
+                            UpgradeAllOperationIssueKind::
+                                    CacheAuthorityInvalid &&
+                    result.issues.back().trusted_cache_failure.has_value() &&
+                    result.issues.back().trusted_cache_failure->code ==
+                            TrustedCacheErrorCode::ConcurrentReplacement,
+            "Registered-source cache failure lost aggregate typed detail");
+    expect_aur_not_attempted(
+            result, UpgradeAllNotAttemptedReason::CacheAuthorityFailure,
+            "registered-source cache failure");
+    expect(stub::system_commands().size() == 1 &&
+                   stub::source_execution_calls().size() == 1,
+           "Registered-source cache failure fixture crossed wrong phase");
+    expect_no_inventory_or_aur("registered-source cache failure");
     stub::require_script_consumed();
 }
 
@@ -988,6 +1256,53 @@ void test_foreign_inventory_read_failure() {
     stub::require_script_consumed();
 }
 
+void test_cache_replacement_during_aur_query_blocks_preparation() {
+    stub::reset();
+    stub::set_preference_directory(preference_directory({}));
+    stub::set_foreign_inventory(foreign_inventory({"query-root"}));
+    enqueue_aur_query({{"query-root", "query-base"}});
+    const AppConfig config;
+    PreparedUpgradeAllOperation prepared = take_prepared(
+            prepare_upgrade_all_operation(config),
+            "AUR query cache replacement fixture");
+
+    fs::path moved;
+    stub::set_after_info_many_hook([&moved]() {
+        moved = move_active_cache_root("during-aur-query");
+    });
+    UpgradeAllOperationResult result =
+            execute_prepared_upgrade_all_operation(
+                    std::move(prepared), config);
+    expect(
+            result.status ==
+                            UpgradeAllOperationStatus::
+                                    StoppedBeforeAurExecution &&
+                    result.stopped_phase ==
+                            UpgradeAllOperationPhase::AurPreparation &&
+                    result.foreign_inventory.status ==
+                            UpgradeAllForeignInventoryPhaseStatus::Completed &&
+                    has_issue(
+                            result,
+                            UpgradeAllOperationIssueKind::
+                                    CacheAuthorityInvalid),
+            "AUR-query cache replacement was not stopped before preparation");
+    expect(
+            !result.issues.empty() &&
+                    result.issues.back().trusted_cache_failure.has_value() &&
+                    result.issues.back().trusted_cache_failure->code ==
+                            TrustedCacheErrorCode::ConcurrentReplacement,
+            "AUR-query cache replacement lost typed detail");
+    expect_aur_not_attempted(
+            result, UpgradeAllNotAttemptedReason::CacheAuthorityFailure,
+            "AUR-query cache replacement");
+    expect(stub::database_call_count() == 0 &&
+                   stub::resolver_call_count() == 0 &&
+                   stub::aur_execution_calls().empty(),
+           "AUR-query cache replacement reached filtered preparation");
+    remove_cache_fixture(moved);
+    stub::require_script_consumed();
+}
+
 void test_recoverable_aur_query_failure_blocks_mutation() {
     stub::reset();
     stub::set_preference_directory(preference_directory({}));
@@ -1153,33 +1468,26 @@ void test_preflight_blocker_stops_before_preparation_io() {
 
 void test_preparation_blocker_stops_before_aur_mutation() {
     stub::reset();
-    stub::set_preference_directory(preference_directory({}));
-    stub::set_foreign_inventory(foreign_inventory({"preparation-root"}));
-    enqueue_aur_query({{"preparation-root", "preparation-root"}});
-    return_build_plan(
-            root_plan({{"preparation-root", "preparation-root"}}),
-            {"preparation-root"});
     stub::fail_supported_options_guard("fixture AUR option guard failure");
     const AppConfig config;
-    PreparedUpgradeAllOperation prepared = take_prepared(
-            prepare_upgrade_all_operation(config),
-            "AUR preparation blocker fixture");
-
-    UpgradeAllOperationResult result =
-            execute_prepared_upgrade_all_operation(
-                    std::move(prepared), config);
+    UpgradeAllOperationPreparation preparation =
+            prepare_upgrade_all_operation(config);
+    expect(
+            std::holds_alternative<UpgradeAllOperationResult>(preparation),
+            "Static source option failure produced an executable aggregate capability");
+    UpgradeAllOperationResult result = std::move(
+            std::get<UpgradeAllOperationResult>(preparation));
     expect(
             result.status ==
-                            UpgradeAllOperationStatus::
-                                    StoppedBeforeAurExecution &&
-                    result.aur.status ==
-                            UpgradeAllAurPhaseStatus::BlockedBeforeExecution &&
-                    result.aur.operation_result.has_value() &&
-                    !result.aur.operation_result->reduced_operation_result.
-                            preparation_issues.empty(),
-            "AUR preparation blocker lost typed detail");
-    expect(stub::aur_execution_calls().empty(),
-           "AUR preparation blocker reached mutation");
+                            UpgradeAllOperationStatus::BlockedBeforeMutation &&
+                    !result.is_success() &&
+                    !result.issues.empty(),
+            "Static source option blocker was not rejected before mutation");
+    expect(stub::events().size() == 1 &&
+                   stub::events().front().kind ==
+                           stub::EventKind::SeparatedInstallOptionsGuard &&
+                   stub::aur_execution_calls().empty(),
+           "Static source option blocker crossed the early guard boundary");
     stub::require_script_consumed();
 }
 
@@ -1881,9 +2189,16 @@ void run_case(const std::string& name, Callable callable) {
 
 int main() {
     try {
+        TemporaryCacheEnvironment cache_environment;
         run_case(
                 "empty registered-source preparation snapshot",
                 test_empty_source_preparation_snapshot);
+        run_case(
+                "cache replacement before execution",
+                test_cache_replacement_before_execution_blocks_system);
+        run_case(
+                "cache replacement after system",
+                test_cache_replacement_after_system_blocks_inventory_and_aur);
         run_case(
                 "strict preference absence",
                 test_strict_preference_absence_blocks_without_mutation);
@@ -1922,6 +2237,15 @@ int main() {
                 test_unexpected_exception_preserves_recorded_source_result);
         run_case("system failure fail-fast", test_system_failure_is_fail_fast);
         run_case(
+                "nested cache seed failure",
+                test_nested_cache_seed_failure_is_typed);
+        run_case(
+                "nested cache activation failure",
+                test_nested_cache_activation_failure_is_typed);
+        run_case(
+                "registered-source cache failure",
+                test_registered_source_cache_failure_is_typed);
+        run_case(
                 "first source failure fail-fast",
                 test_first_source_failure_stops_remaining_and_aur);
         run_case(
@@ -1936,6 +2260,9 @@ int main() {
         run_case(
                 "foreign inventory read failure",
                 test_foreign_inventory_read_failure);
+        run_case(
+                "cache replacement during AUR query",
+                test_cache_replacement_during_aur_query_blocks_preparation);
         run_case(
                 "recoverable AUR query failure",
                 test_recoverable_aur_query_failure_blocks_mutation);

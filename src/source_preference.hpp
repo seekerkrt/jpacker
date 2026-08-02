@@ -84,7 +84,7 @@ SourceBuildEnvironment get_package_env(
 void read_source_preference_entry(
         const std::filesystem::path& entry_path, SourcePreferenceLineHandler on_line);
 
-#ifdef JPACKER_ENABLE_SOURCE_PREFERENCE_TEST_HOOKS
+#ifdef MOGUET_ENABLE_SOURCE_PREFERENCE_TEST_HOOKS
 enum class SourcePreferenceTestFailurePoint {
     Status,
     Open,

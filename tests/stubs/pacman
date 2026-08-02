@@ -74,12 +74,12 @@ require_read_only_pacman_argv() {
     esac
 }
 
-printf 'pacman %s\n' "$*" >> "$JPACKER_TEST_COMMAND_LOG"
+printf 'pacman %s\n' "$*" >> "$MOGUET_TEST_COMMAND_LOG"
 require_read_only_pacman_argv "$@"
 
 if is_artifact_identity_query "$@"; then
     artifact_path=$6
-    identity_exit_code=${JPACKER_TEST_PACMAN_ARTIFACT_IDENTITY_EXIT_CODE:-0}
+    identity_exit_code=${MOGUET_TEST_PACMAN_ARTIFACT_IDENTITY_EXIT_CODE:-0}
     if [ "$identity_exit_code" -ne 0 ]; then
         exit "$identity_exit_code"
     fi
@@ -90,32 +90,32 @@ if is_artifact_identity_query "$@"; then
         END { if (!found) exit 1 }' "$artifact_path"
     exit $?
 fi
-if [ "$1" = "-Qm" ] && [ -n "${JPACKER_TEST_PACMAN_QM_OUTPUT:-}" ]; then
-    printf '%s\n' "$JPACKER_TEST_PACMAN_QM_OUTPUT"
+if [ "$1" = "-Qm" ] && [ -n "${MOGUET_TEST_PACMAN_QM_OUTPUT:-}" ]; then
+    printf '%s\n' "$MOGUET_TEST_PACMAN_QM_OUTPUT"
 fi
-if [ "$1" = "-Q" ] && [ -n "${JPACKER_TEST_PACMAN_Q_OUTPUT:-}" ]; then
-    printf '%s\n' "$JPACKER_TEST_PACMAN_Q_OUTPUT"
-    exit "${JPACKER_TEST_PACMAN_Q_EXIT_CODE:-0}"
+if [ "$1" = "-Q" ] && [ -n "${MOGUET_TEST_PACMAN_Q_OUTPUT:-}" ]; then
+    printf '%s\n' "$MOGUET_TEST_PACMAN_Q_OUTPUT"
+    exit "${MOGUET_TEST_PACMAN_Q_EXIT_CODE:-0}"
 fi
-if [ "$1" = "-Q" ] && [ -n "${JPACKER_TEST_PACMAN_Q_OUTPUT_FILE:-}" ]; then
-    if [ -f "$JPACKER_TEST_PACMAN_Q_OUTPUT_FILE" ]; then
+if [ "$1" = "-Q" ] && [ -n "${MOGUET_TEST_PACMAN_Q_OUTPUT_FILE:-}" ]; then
+    if [ -f "$MOGUET_TEST_PACMAN_Q_OUTPUT_FILE" ]; then
         /usr/bin/awk -v package="${2:-}" '
             $1 == package { print; found = 1; exit }
             END { if (!found) exit 1 }
-        ' "$JPACKER_TEST_PACMAN_Q_OUTPUT_FILE"
+        ' "$MOGUET_TEST_PACMAN_Q_OUTPUT_FILE"
         query_exit_code=$?
         if [ "$query_exit_code" -eq 0 ]; then
-            exit "${JPACKER_TEST_PACMAN_Q_EXIT_CODE:-0}"
+            exit "${MOGUET_TEST_PACMAN_Q_EXIT_CODE:-0}"
         fi
     fi
     exit 1
 fi
-if [ "$1" = "-Si" ] && [ -n "${JPACKER_TEST_PACMAN_REPO_PACKAGES:-}" ]; then
-    for package in $JPACKER_TEST_PACMAN_REPO_PACKAGES; do
+if [ "$1" = "-Si" ] && [ -n "${MOGUET_TEST_PACMAN_REPO_PACKAGES:-}" ]; then
+    for package in $MOGUET_TEST_PACMAN_REPO_PACKAGES; do
         if [ "${2:-}" = "$package" ]; then
             exit 0
         fi
     done
     exit 1
 fi
-exit "${JPACKER_TEST_PACMAN_EXIT_CODE:-1}"
+exit "${MOGUET_TEST_PACMAN_EXIT_CODE:-1}"

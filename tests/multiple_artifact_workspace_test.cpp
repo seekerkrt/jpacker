@@ -1,5 +1,7 @@
 #include "artifact_workspace.hpp"
 
+#include "trusted_cache_test_support.hpp"
+
 #include <cerrno>
 #include <cstdlib>
 #include <exception>
@@ -160,7 +162,7 @@ public:
     explicit TestEnvironment(const fs::path& makepkg_stub_directory) {
         const std::string template_text =
                 (fs::temp_directory_path() /
-                 "jpacker-multiple-artifact-workspace-test-XXXXXX")
+                 "moguet-multiple-artifact-workspace-test-XXXXXX")
                         .string();
         std::vector<char> path_template(
                 template_text.begin(), template_text.end());
@@ -188,6 +190,10 @@ public:
             write_file(command_log_, "");
             write_file(argv_log_, "");
             write_file(cwd_log_, "");
+            fs::create_directory(path_ / "cache-home");
+            fs::permissions(
+                    path_ / "cache-home", fs::perms::owner_all,
+                    fs::perm_options::replace);
 
             std::string command_path = absolute_stub_directory.string();
             const char* previous_path = std::getenv("PATH");
@@ -199,16 +205,16 @@ public:
             set_variable("XDG_CACHE_HOME", (path_ / "cache-home").string());
             set_variable("PATH", command_path);
             set_variable("PKGDEST", std::nullopt);
-            set_variable("JPACKER_TEST_COMMAND_LOG", command_log_.string());
-            set_variable("JPACKER_TEST_MAKEPKG_ARGV_LOG", argv_log_.string());
-            set_variable("JPACKER_TEST_MAKEPKG_CWD_LOG", cwd_log_.string());
+            set_variable("MOGUET_TEST_COMMAND_LOG", command_log_.string());
+            set_variable("MOGUET_TEST_MAKEPKG_ARGV_LOG", argv_log_.string());
+            set_variable("MOGUET_TEST_MAKEPKG_CWD_LOG", cwd_log_.string());
             set_variable(
-                    "JPACKER_TEST_MAKEPKG_PACKAGELIST_OUTPUT_FILE",
+                    "MOGUET_TEST_MAKEPKG_PACKAGELIST_OUTPUT_FILE",
                     packagelist_output_file_.string());
             set_variable(
-                    "JPACKER_TEST_MAKEPKG_PACKAGELIST_EXIT_CODE",
+                    "MOGUET_TEST_MAKEPKG_PACKAGELIST_EXIT_CODE",
                     std::string("0"));
-            set_variable("JPACKER_TEST_MAKEPKG_EXIT_CODE", std::string("0"));
+            set_variable("MOGUET_TEST_MAKEPKG_EXIT_CODE", std::string("0"));
         } catch(...) {
             variables_.clear();
             std::error_code error;
@@ -262,10 +268,11 @@ ValidatedCachePath prepare_checkout(const ValidatedCacheRoot& root) {
 
 ArtifactWorkspace create_test_artifact_workspace(
         const ValidatedCacheRoot& expected_root) {
-    ValidatedPrivateCacheRoot root = prepare_private_trusted_cache_root();
+    ValidatedPrivateCacheRoot root =
+            prepare_private_trusted_cache_root(expected_root);
     expect(
             root.canonical_path() == expected_root.canonical_path(),
-            "Private and legacy cache root paths differ");
+            "Private and trusted cache root paths differ");
     return create_artifact_workspace(std::move(root));
 }
 
@@ -995,11 +1002,11 @@ void test_signature_owner_mismatch(const ValidatedCacheRoot& root) {
                                 different_user_id()));
             },
             "signature owner mismatch",
-            "Package signature owner does not match");
+            "Artifact entry owner does not match the effective user");
     expect(
-            error.find("Package artifact owner does not match") ==
+            error.find("signed-owner-two.pkg.tar.zst.sig") !=
                     std::string::npos,
-            "Signature owner mismatch stopped at artifact owner validation");
+            "Signature owner mismatch did not identify the signature path");
     expect_workspace_remains_caller_owned(
             workspace, "signature owner mismatch");
 }
@@ -1044,7 +1051,7 @@ void test_replacement_during_validation(const ValidatedCacheRoot& root) {
                                         std::move(workspace), expected));
                     },
                     "artifact replacement during validation",
-                    "Refusing changed package artifact");
+                    "Refusing changed artifact entry");
         }
         expect(
                 g_replacement_observer_called,
@@ -1072,7 +1079,7 @@ void test_replacement_during_validation(const ValidatedCacheRoot& root) {
                                         std::move(workspace), expected));
                     },
                     "signature replacement during validation",
-                    "Refusing changed package signature");
+                    "Refusing changed artifact entry");
         }
         expect(
                 g_replacement_observer_called,
@@ -1356,7 +1363,7 @@ void test_cleanup_revalidates_before_closing_descriptors(
 int main(int argc, char* argv[]) {
     try {
         const char* configured_stub =
-                std::getenv("JPACKER_TEST_MAKEPKG_STUB");
+                std::getenv("MOGUET_TEST_MAKEPKG_STUB");
         const fs::path makepkg_stub_directory =
                 argc >= 2
                         ? fs::path(argv[1])
@@ -1371,11 +1378,13 @@ int main(int argc, char* argv[]) {
 
         TestEnvironment test_environment(makepkg_stub_directory);
         {
+            ValidatedCacheRoot trusted_root =
+                    prepare_test_trusted_cache_root();
             ValidatedPrivateCacheRoot private_root =
-                    prepare_private_trusted_cache_root();
+                    prepare_private_trusted_cache_root(trusted_root);
             private_root.require_unchanged_identity();
         }
-        ValidatedCacheRoot root = prepare_trusted_cache_root();
+        ValidatedCacheRoot root = prepare_test_trusted_cache_root();
         ValidatedCachePath checkout = prepare_checkout(root);
 
         test_packagelist_single_multiple_and_order(root);

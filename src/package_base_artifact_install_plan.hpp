@@ -99,7 +99,7 @@ PackageBaseArtifactInstallReasonPlanResult
 resolve_package_base_artifact_install_reason_plan(
         const PackageBaseArtifactInstallReasonPolicyInput& input);
 
-#ifdef JPACKER_ENABLE_PACKAGE_BASE_ARTIFACT_INSTALL_PLAN_TEST_HOOKS
+#ifdef MOGUET_ENABLE_PACKAGE_BASE_ARTIFACT_INSTALL_PLAN_TEST_HOOKS
 using PackageBaseArtifactInstallReasonPlanObserverForTest = void (*)();
 
 void set_package_base_artifact_install_reason_plan_observer_for_test(

@@ -1,5 +1,6 @@
 #include "artifact_workspace.hpp"
 
+#include "localization.hpp"
 #include "logging.hpp"
 #include "package_identifier.hpp"
 #include "shell_words.hpp"
@@ -10,6 +11,8 @@
 #include <cstring>
 #include <dirent.h>
 #include <fcntl.h>
+#include <linux/openat2.h>
+#include <map>
 #include <memory>
 #include <optional>
 #include <set>
@@ -17,6 +20,7 @@
 #include <string>
 #include <string_view>
 #include <sys/stat.h>
+#include <sys/syscall.h>
 #include <unistd.h>
 #include <utility>
 #include <vector>
@@ -35,12 +39,20 @@ namespace fs = std::filesystem;
 constexpr mode_t ARTIFACT_WORKSPACE_MODE = 0700;
 constexpr char ARTIFACT_WORKSPACE_PREFIX[] = ".artifact-workspace~-";
 constexpr std::size_t ARTIFACT_DIAGNOSTIC_VALUE_LIMIT = 96;
+constexpr std::string_view MAKEPKG_PACKAGELIST_COMMAND =
+        "makepkg --packagelist";
 
-#ifdef JPACKER_ENABLE_ARTIFACT_WORKSPACE_TEST_HOOKS
+#ifdef MOGUET_ENABLE_ARTIFACT_WORKSPACE_TEST_HOOKS
 MultipleArtifactValidationObserverForTest
         g_multiple_artifact_validation_observer = nullptr;
 MultipleArtifactCleanupObserverForTest
         g_multiple_artifact_cleanup_observer = nullptr;
+ArtifactWorkspaceCreationObserverForTest
+        g_artifact_workspace_creation_observer = nullptr;
+ArtifactWorkspaceCleanupPreDeleteObserverForTest
+        g_artifact_workspace_cleanup_pre_delete_observer = nullptr;
+ArtifactWorkspaceCleanupChildOpenForTest
+        g_artifact_workspace_cleanup_child_open = nullptr;
 
 void notify_multiple_artifact_validation_for_test(
         const fs::path& workspace_path) {
@@ -56,8 +68,26 @@ void notify_multiple_artifact_cleanup_for_test(
                 workspace_path, retained_descriptors);
     }
 }
+
+void notify_artifact_workspace_creation_for_test(
+        const fs::path& workspace_path) {
+    if(g_artifact_workspace_creation_observer != nullptr)
+        g_artifact_workspace_creation_observer(workspace_path);
+}
+
+void notify_artifact_workspace_cleanup_pre_delete_for_test(
+        const fs::path& workspace_path) {
+    if(g_artifact_workspace_cleanup_pre_delete_observer != nullptr)
+        g_artifact_workspace_cleanup_pre_delete_observer(workspace_path);
+}
 #else
 void notify_multiple_artifact_validation_for_test(const fs::path&) {
+}
+
+void notify_artifact_workspace_creation_for_test(const fs::path&) {
+}
+
+void notify_artifact_workspace_cleanup_pre_delete_for_test(const fs::path&) {
 }
 #endif
 
@@ -101,14 +131,14 @@ public:
         : original_directory_(open(
                   ".", O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW)) {
         if(original_directory_.get() < 0) {
-            throw std::runtime_error(
-                    "Failed to retain the current working directory: " +
-                    std::string(std::strerror(errno)));
+            throw std::runtime_error(localization::format_translated_message(
+                    "Failed to retain the current working directory: {}",
+                    std::strerror(errno)));
         }
         if(fchdir(target_descriptor) != 0) {
-            throw std::runtime_error(
-                    "Failed to enter the retained source checkout: " +
-                    std::string(std::strerror(errno)));
+            throw std::runtime_error(localization::format_translated_message(
+                    "Failed to enter the retained source checkout: {}",
+                    std::strerror(errno)));
         }
     }
 
@@ -117,8 +147,18 @@ public:
             const FileDescriptorWorkDirGuard&) = delete;
 
     ~FileDescriptorWorkDirGuard() noexcept {
-        if(original_directory_.get() >= 0)
-            static_cast<void>(fchdir(original_directory_.get()));
+        if(original_directory_.get() < 0 ||
+           fchdir(original_directory_.get()) == 0) {
+            return;
+        }
+        const int restore_error = errno;
+        Logger::warn_noexcept([restore_error]() {
+            return localization::format_translated_message(
+                    // TRANSLATORS: The first placeholder is the literal
+                    // command name "makepkg"; the second is an error detail.
+                    "Failed to restore the working directory after an artifact {} operation: {}",
+                    "makepkg", std::strerror(restore_error));
+        });
     }
 };
 
@@ -152,11 +192,12 @@ bool same_directory_identity(
 }
 
 struct stat require_descriptor_status(
-        int descriptor, const std::string& context) {
+        int descriptor, const fs::path& display_path) {
     struct stat status {};
     if(fstat(descriptor, &status) != 0) {
-        throw std::runtime_error(
-                "Failed to inspect " + context + ": " + std::strerror(errno));
+        throw std::runtime_error(localization::format_translated_message(
+                "Failed to inspect the descriptor for {}: {}",
+                display_path.string(), std::strerror(errno)));
     }
     return status;
 }
@@ -169,8 +210,10 @@ fs::path proc_file_descriptor_path(int descriptor) {
 void require_no_inherited_pkgdest() {
     // getenv()はdefined-emptyでもnon-nullを返す。makepkg.confはこの境界では解析しない。
     if(std::getenv("PKGDEST") != nullptr) {
-        throw std::runtime_error(
-                "Inherited PKGDEST conflicts with invocation-owned artifact workspace.");
+        throw std::runtime_error(localization::format_translated_message(
+                // TRANSLATORS: {} is the literal environment key "PKGDEST".
+                "Inherited {} conflicts with the invocation-owned artifact workspace.",
+                "PKGDEST"));
     }
 }
 
@@ -212,42 +255,92 @@ std::optional<struct stat> entry_status_at(
         return status;
     }
     if(errno == ENOENT) return std::nullopt;
-    throw std::runtime_error(
-            "Unable to inspect artifact path " +
-            bounded_artifact_diagnostic_path(display_path) + ": " +
-            std::strerror(errno));
+    throw std::runtime_error(localization::format_translated_message(
+            "Unable to inspect artifact path {}: {}",
+            bounded_artifact_diagnostic_path(display_path),
+            std::strerror(errno)));
 }
 
-void remove_directory_contents_at(
+struct CleanupEntryPlan {
+    std::string                   leaf_name;
+    fs::path                      display_path;
+    struct stat                   expected_status {};
+    OwnedFileDescriptor           directory_descriptor;
+    std::vector<CleanupEntryPlan> children;
+
+    bool is_directory() const noexcept {
+        return S_ISDIR(expected_status.st_mode);
+    }
+};
+
+int open_cleanup_child_directory_without_mount_crossing(
+        int parent_descriptor, const std::string& leaf_name) noexcept {
+    struct open_how how {};
+    how.flags = O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW;
+    how.resolve = RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS | RESOLVE_NO_XDEV;
+#ifdef MOGUET_ENABLE_ARTIFACT_WORKSPACE_TEST_HOOKS
+    if(g_artifact_workspace_cleanup_child_open != nullptr) {
+        return g_artifact_workspace_cleanup_child_open(
+                parent_descriptor, leaf_name, how.flags, how.resolve);
+    }
+#endif
+    return static_cast<int>(syscall(
+            SYS_openat2, parent_descriptor, leaf_name.c_str(), &how,
+            sizeof(how)));
+}
+
+CleanupEntryPlan preflight_directory_contents_at(
         int directory_descriptor, const fs::path& display_path,
+        const struct stat& expected_directory_status,
         std::uintmax_t workspace_device) {
-    int scan_descriptor = openat(
+    int retained_descriptor = openat(
             directory_descriptor, ".",
             O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+    if(retained_descriptor < 0) {
+        throw std::runtime_error(localization::format_translated_message(
+                "Failed to retain artifact workspace directory {}: {}",
+                display_path.string(), std::strerror(errno)));
+    }
+    OwnedFileDescriptor retained(retained_descriptor);
+    const struct stat retained_status =
+            require_descriptor_status(retained.get(), display_path);
+    if(!same_filesystem_identity(
+               expected_directory_status, retained_status)) {
+        throw std::runtime_error(localization::format_translated_message(
+                "Refusing changed artifact workspace directory: {}",
+                display_path.string()));
+    }
+
+    int scan_descriptor = openat(
+            retained.get(), ".",
+            O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
     if(scan_descriptor < 0) {
-        throw std::runtime_error(
-                "Failed to scan artifact workspace " + display_path.string() +
-                ": " + std::strerror(errno));
+        throw std::runtime_error(localization::format_translated_message(
+                "Failed to scan artifact workspace {}: {}",
+                display_path.string(), std::strerror(errno)));
     }
 
     DIR* raw_stream = fdopendir(scan_descriptor);
     if(!raw_stream) {
         int open_error = errno;
         close(scan_descriptor);
-        throw std::runtime_error(
-                "Failed to read artifact workspace " + display_path.string() +
-                ": " + std::strerror(open_error));
+        throw std::runtime_error(localization::format_translated_message(
+                "Failed to read artifact workspace {}: {}",
+                display_path.string(), std::strerror(open_error)));
     }
     std::unique_ptr<DIR, int (*)(DIR*)> stream(raw_stream, closedir);
+    CleanupEntryPlan plan{
+            "", display_path, expected_directory_status,
+            std::move(retained), {}};
 
     while(true) {
         errno = 0;
         dirent* entry = readdir(stream.get());
         if(!entry) {
             if(errno != 0) {
-                throw std::runtime_error(
-                        "Failed while reading artifact workspace " +
-                        display_path.string() + ": " + std::strerror(errno));
+                throw std::runtime_error(localization::format_translated_message(
+                        "Failed while reading artifact workspace {}: {}",
+                        display_path.string(), std::strerror(errno)));
             }
             break;
         }
@@ -258,91 +351,232 @@ void remove_directory_contents_at(
 
         struct stat observed_status {};
         if(fstatat(
-                   directory_descriptor, leaf_name.c_str(), &observed_status,
+                   plan.directory_descriptor.get(), leaf_name.c_str(),
+                   &observed_status,
                    AT_SYMLINK_NOFOLLOW) != 0) {
-            if(errno == ENOENT) continue;
-            throw std::runtime_error(
-                    "Failed to inspect artifact workspace entry " +
-                    entry_path.string() + ": " + std::strerror(errno));
+            throw std::runtime_error(localization::format_translated_message(
+                    "Refusing changed artifact workspace entry {}: {}",
+                    entry_path.string(), std::strerror(errno)));
         }
 
         if(S_ISDIR(observed_status.st_mode)) {
             // LANDMINE(#242): mount boundaryをcleanupで横断しない。
             if(status_device(observed_status) != workspace_device) {
-                throw std::runtime_error(
-                        "Refusing to cross filesystem boundary while cleaning " +
-                        entry_path.string());
+                throw std::runtime_error(localization::format_translated_message(
+                        "Refusing to cross a filesystem boundary while cleaning {}.",
+                        entry_path.string()));
             }
 
-            int child_descriptor = openat(
-                    directory_descriptor, leaf_name.c_str(),
-                    O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+            int child_descriptor =
+                    open_cleanup_child_directory_without_mount_crossing(
+                            plan.directory_descriptor.get(), leaf_name);
             if(child_descriptor < 0) {
-                throw std::runtime_error(
-                        "Refusing changed artifact workspace directory " +
-                        entry_path.string() + ": " + std::strerror(errno));
+                const int open_error = errno;
+                if(open_error == EXDEV) {
+                    throw std::runtime_error(localization::format_translated_message(
+                            "Refusing to cross a filesystem boundary while cleaning {}.",
+                            entry_path.string()));
+                }
+                throw std::runtime_error(localization::format_translated_message(
+                        "Refusing changed artifact workspace directory {}: {}",
+                        entry_path.string(), std::strerror(open_error)));
             }
             OwnedFileDescriptor child(child_descriptor);
 
-            struct stat opened_status = require_descriptor_status(
-                    child.get(), "artifact workspace directory " + entry_path.string());
+            struct stat opened_status =
+                    require_descriptor_status(child.get(), entry_path);
             if(!same_filesystem_identity(observed_status, opened_status)) {
-                throw std::runtime_error(
-                        "Refusing changed artifact workspace directory: " +
-                        entry_path.string());
+                throw std::runtime_error(localization::format_translated_message(
+                        "Refusing changed artifact workspace directory: {}",
+                        entry_path.string()));
             }
 
-            remove_directory_contents_at(
-                    child.get(), entry_path, workspace_device);
+            CleanupEntryPlan child_plan = preflight_directory_contents_at(
+                    child.get(), entry_path, opened_status,
+                    workspace_device);
+            child_plan.leaf_name = std::move(leaf_name);
+            plan.children.push_back(std::move(child_plan));
+            continue;
+        }
 
-            struct stat final_status {};
-            if(fstatat(
-                       directory_descriptor, leaf_name.c_str(), &final_status,
-                       AT_SYMLINK_NOFOLLOW) != 0 ||
-               !same_filesystem_identity(opened_status, final_status)) {
-                throw std::runtime_error(
-                        "Refusing changed artifact workspace directory: " +
-                        entry_path.string());
+        plan.children.push_back(CleanupEntryPlan{
+                std::move(leaf_name), std::move(entry_path), observed_status,
+                OwnedFileDescriptor(), {}});
+    }
+
+    return plan;
+}
+
+void require_cleanup_directory_descriptor_unchanged(
+        const CleanupEntryPlan& directory_plan) {
+    if(!directory_plan.is_directory() ||
+       directory_plan.directory_descriptor.get() < 0) {
+        throw std::logic_error(localization::translate_message(
+                "Artifact workspace cleanup plan lost a directory descriptor."));
+    }
+    const struct stat descriptor_status = require_descriptor_status(
+            directory_plan.directory_descriptor.get(),
+            directory_plan.display_path);
+    if(!same_filesystem_identity(
+               directory_plan.expected_status, descriptor_status)) {
+        throw std::runtime_error(localization::format_translated_message(
+                "Refusing changed artifact workspace directory: {}",
+                directory_plan.display_path.string()));
+    }
+}
+
+void require_cleanup_entry_unchanged(
+        const CleanupEntryPlan& parent_plan,
+        const CleanupEntryPlan& entry_plan) {
+    require_cleanup_directory_descriptor_unchanged(parent_plan);
+
+    struct stat current_status {};
+    if(fstatat(
+               parent_plan.directory_descriptor.get(),
+               entry_plan.leaf_name.c_str(), &current_status,
+               AT_SYMLINK_NOFOLLOW) != 0 ||
+       !same_filesystem_identity(
+               entry_plan.expected_status, current_status)) {
+        throw std::runtime_error(localization::format_translated_message(
+                "Refusing changed artifact workspace entry: {}",
+                entry_plan.display_path.string()));
+    }
+    if(entry_plan.is_directory())
+        require_cleanup_directory_descriptor_unchanged(entry_plan);
+}
+
+void require_cleanup_plan_unchanged(
+        const CleanupEntryPlan& directory_plan) {
+    require_cleanup_directory_descriptor_unchanged(directory_plan);
+
+    std::map<std::string, const CleanupEntryPlan*> remaining_entries;
+    for(const CleanupEntryPlan& entry : directory_plan.children) {
+        if(!remaining_entries.emplace(entry.leaf_name, &entry).second) {
+            throw std::logic_error(localization::translate_message(
+                    "Artifact workspace cleanup plan contains a duplicate entry."));
+        }
+    }
+
+    int scan_descriptor = openat(
+            directory_plan.directory_descriptor.get(), ".",
+            O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+    if(scan_descriptor < 0) {
+        throw std::runtime_error(localization::format_translated_message(
+                "Failed to rescan artifact workspace {}: {}",
+                directory_plan.display_path.string(), std::strerror(errno)));
+    }
+    DIR* raw_stream = fdopendir(scan_descriptor);
+    if(!raw_stream) {
+        const int open_error = errno;
+        close(scan_descriptor);
+        throw std::runtime_error(localization::format_translated_message(
+                "Failed to reread artifact workspace {}: {}",
+                directory_plan.display_path.string(), std::strerror(open_error)));
+    }
+    std::unique_ptr<DIR, int (*)(DIR*)> stream(raw_stream, closedir);
+
+    while(true) {
+        errno = 0;
+        dirent* entry = readdir(stream.get());
+        if(!entry) {
+            if(errno != 0) {
+                throw std::runtime_error(localization::format_translated_message(
+                        "Failed while rereading artifact workspace {}: {}",
+                        directory_plan.display_path.string(),
+                        std::strerror(errno)));
             }
+            break;
+        }
+
+        const std::string leaf_name = entry->d_name;
+        if(leaf_name == "." || leaf_name == "..") continue;
+        auto planned_entry = remaining_entries.find(leaf_name);
+        if(planned_entry == remaining_entries.end()) {
+            throw std::runtime_error(localization::format_translated_message(
+                    "Refusing changed artifact workspace entry: {}",
+                    (directory_plan.display_path / leaf_name).string()));
+        }
+        require_cleanup_entry_unchanged(
+                directory_plan, *planned_entry->second);
+        if(planned_entry->second->is_directory())
+            require_cleanup_plan_unchanged(*planned_entry->second);
+        remaining_entries.erase(planned_entry);
+    }
+
+    if(!remaining_entries.empty()) {
+        throw std::runtime_error(localization::format_translated_message(
+                "Refusing changed artifact workspace entry: {}",
+                remaining_entries.begin()->second->display_path.string()));
+    }
+}
+
+using CleanupDirectoryLineage = std::vector<
+        std::pair<const CleanupEntryPlan*, const CleanupEntryPlan*>>;
+
+void require_cleanup_target_unchanged(
+        const ArtifactWorkspace& workspace,
+        const CleanupEntryPlan& root_plan,
+        const CleanupDirectoryLineage& lineage,
+        const CleanupEntryPlan& parent_plan,
+        const CleanupEntryPlan& target_plan) {
+    workspace.require_unchanged_identity();
+    require_cleanup_directory_descriptor_unchanged(root_plan);
+    for(const auto& [ancestor, descendant] : lineage)
+        require_cleanup_entry_unchanged(*ancestor, *descendant);
+    require_cleanup_entry_unchanged(parent_plan, target_plan);
+}
+
+void remove_preflighted_directory_contents(
+        const ArtifactWorkspace& workspace,
+        const CleanupEntryPlan& root_plan,
+        const CleanupEntryPlan& directory_plan,
+        CleanupDirectoryLineage& lineage) {
+    for(const CleanupEntryPlan& entry_plan : directory_plan.children) {
+        require_cleanup_target_unchanged(
+                workspace, root_plan, lineage, directory_plan, entry_plan);
+        if(entry_plan.is_directory()) {
+            lineage.emplace_back(&directory_plan, &entry_plan);
+            remove_preflighted_directory_contents(
+                    workspace, root_plan, entry_plan, lineage);
+            lineage.pop_back();
+            require_cleanup_target_unchanged(
+                    workspace, root_plan, lineage, directory_plan,
+                    entry_plan);
             if(unlinkat(
-                       directory_descriptor, leaf_name.c_str(),
-                       AT_REMOVEDIR) != 0) {
-                throw std::runtime_error(
-                        "Failed to remove artifact workspace directory " +
-                        entry_path.string() + ": " + std::strerror(errno));
+                       directory_plan.directory_descriptor.get(),
+                       entry_plan.leaf_name.c_str(), AT_REMOVEDIR) != 0) {
+                throw std::runtime_error(localization::format_translated_message(
+                        "Failed to remove artifact workspace directory {}: {}",
+                        entry_plan.display_path.string(), std::strerror(errno)));
             }
             continue;
         }
 
-        struct stat final_status {};
-        if(fstatat(
-                   directory_descriptor, leaf_name.c_str(), &final_status,
-                   AT_SYMLINK_NOFOLLOW) != 0 ||
-           !same_filesystem_identity(observed_status, final_status)) {
-            throw std::runtime_error(
-                    "Refusing changed artifact workspace entry: " +
-                    entry_path.string());
-        }
-        // Symlinkやspecial fileもfollowせず、workspace内のdirectory entryだけを外す。
-        if(unlinkat(directory_descriptor, leaf_name.c_str(), 0) != 0) {
-            throw std::runtime_error(
-                    "Failed to remove artifact workspace entry " +
-                    entry_path.string() + ": " + std::strerror(errno));
+        // Symlinkやspecial fileもfollowせず、検証済みdirectory entryだけを外す。
+        if(unlinkat(
+                   directory_plan.directory_descriptor.get(),
+                   entry_plan.leaf_name.c_str(), 0) != 0) {
+            throw std::runtime_error(localization::format_translated_message(
+                    "Failed to remove artifact workspace entry {}: {}",
+                    entry_plan.display_path.string(), std::strerror(errno)));
         }
     }
 }
 
 class CreatedWorkspaceRollback final {
-    int         root_descriptor_ = -1;
-    std::string leaf_name_;
-    struct stat created_status_ {};
-    bool        active_ = true;
+    const ValidatedPrivateCacheRoot& root_;
+    int                              root_descriptor_ = -1;
+    std::string                      leaf_name_;
+    struct stat                      created_status_ {};
+    bool                             active_ = true;
 
 public:
     CreatedWorkspaceRollback(
-            int root_descriptor, std::string leaf_name,
+            const ValidatedPrivateCacheRoot& root, int root_descriptor,
+            std::string leaf_name,
             const struct stat& created_status)
-        : root_descriptor_(root_descriptor), leaf_name_(std::move(leaf_name)),
+        : root_(root), root_descriptor_(root_descriptor),
+          leaf_name_(std::move(leaf_name)),
           created_status_(created_status) {
     }
 
@@ -355,12 +589,45 @@ public:
 
     ~CreatedWorkspaceRollback() noexcept {
         if(!active_) return;
-        struct stat current_status {};
-        if(fstatat(
-                   root_descriptor_, leaf_name_.c_str(), &current_status,
-                   AT_SYMLINK_NOFOLLOW) == 0 &&
-           same_filesystem_identity(created_status_, current_status)) {
-            unlinkat(root_descriptor_, leaf_name_.c_str(), AT_REMOVEDIR);
+        try {
+            root_.require_unchanged_identity();
+            struct stat current_status {};
+            if(fstatat(
+                       root_descriptor_, leaf_name_.c_str(),
+                       &current_status, AT_SYMLINK_NOFOLLOW) != 0) {
+                throw std::runtime_error(localization::format_translated_message(
+                        "Unable to inspect the created directory: {}",
+                        std::strerror(errno)));
+            }
+            if(!same_filesystem_identity(
+                       created_status_, current_status) ||
+               status_owner(created_status_) != status_owner(current_status) ||
+               (created_status_.st_mode & 07777) !=
+                       (current_status.st_mode & 07777)) {
+                throw std::runtime_error(localization::translate_message(
+                        "The created directory changed identity, owner, or mode."));
+            }
+            if(unlinkat(
+                       root_descriptor_, leaf_name_.c_str(),
+                       AT_REMOVEDIR) != 0) {
+                throw std::runtime_error(localization::format_translated_message(
+                        "Unable to remove the created directory: {}",
+                        std::strerror(errno)));
+            }
+        } catch(const std::exception& error) {
+            // LANDMINE: unwind中の元failureを保ち、pending state-log failureも
+            // shutdown()で報告できるようwarn_noexceptへ委ねる。
+            Logger::warn_noexcept([this, &error]() {
+                return localization::format_translated_message(
+                        "Refusing unsafe artifact workspace creation rollback for {}: {}",
+                        leaf_name_, error.what());
+            });
+        } catch(...) {
+            Logger::warn_noexcept([this]() {
+                return localization::format_translated_message(
+                        "Refusing unsafe artifact workspace creation rollback for {}: unknown error.",
+                        leaf_name_);
+            });
         }
     }
 };
@@ -375,12 +642,16 @@ std::vector<std::string> parse_packagelist_records(
         const std::string& raw_output) {
     for(unsigned char character : raw_output) {
         if(character == '\r') {
-            throw std::runtime_error(
-                    "makepkg --packagelist output contains a carriage return.");
+            throw std::runtime_error(localization::format_translated_message(
+                    // TRANSLATORS: {} is the literal command
+                    // "makepkg --packagelist".
+                    "{} output contains a carriage return.",
+                    MAKEPKG_PACKAGELIST_COMMAND));
         }
         if((character < 0x20 && character != '\n') || character == 0x7f) {
-            throw std::runtime_error(
-                    "makepkg --packagelist output contains an invalid control character.");
+            throw std::runtime_error(localization::format_translated_message(
+                    "{} output contains an invalid control character.",
+                    MAKEPKG_PACKAGELIST_COMMAND));
         }
     }
 
@@ -398,8 +669,9 @@ std::vector<std::string> parse_packagelist_records(
         if(!is_blank_packagelist_line(line)) {
             if(!seen_paths.insert(line).second) {
                 throw std::runtime_error(
-                        "makepkg --packagelist returned a duplicate artifact "
-                        "path at record " + std::to_string(line_number) + ".");
+                        localization::format_translated_message(
+                                "{} returned a duplicate artifact path at record {}.",
+                                MAKEPKG_PACKAGELIST_COMMAND, line_number));
             }
             records.push_back(std::move(line));
         }
@@ -413,21 +685,22 @@ std::vector<std::string> parse_packagelist_records(
 void require_direct_expected_path(
         const ArtifactWorkspace& workspace, const fs::path& candidate) {
     if(!candidate.is_absolute()) {
-        throw std::runtime_error(
-                "makepkg --packagelist returned a relative artifact path.");
+        throw std::runtime_error(localization::format_translated_message(
+                "{} returned a relative artifact path.",
+                MAKEPKG_PACKAGELIST_COMMAND));
     }
     for(const auto& component : candidate) {
         if(component == "." || component == "..") {
-            throw std::runtime_error(
-                    "makepkg --packagelist returned an artifact path with a "
-                    "dot component.");
+            throw std::runtime_error(localization::format_translated_message(
+                    "{} returned an artifact path with a dot component.",
+                    MAKEPKG_PACKAGELIST_COMMAND));
         }
     }
     if(candidate == workspace.canonical_path() || candidate.filename().empty() ||
        candidate.parent_path() != workspace.canonical_path()) {
-        throw std::runtime_error(
-                "makepkg --packagelist artifact is not a direct child of the "
-                "artifact workspace.");
+        throw std::runtime_error(localization::format_translated_message(
+                "The artifact returned by {} is not a direct child of the artifact workspace.",
+                MAKEPKG_PACKAGELIST_COMMAND));
     }
 }
 
@@ -457,40 +730,41 @@ public:
 
 void require_regular_owned_entry(
         const struct stat& status, std::uintmax_t expected_effective_user,
-        const fs::path& entry_path, const std::string& kind) {
+        const fs::path& entry_path) {
     if(S_ISLNK(status.st_mode)) {
-        throw std::runtime_error(
-                kind + " must not be a symlink: " + entry_path.string());
+        throw std::runtime_error(localization::format_translated_message(
+                "Artifact entry must not be a symlink: {}",
+                entry_path.string()));
     }
     if(!S_ISREG(status.st_mode)) {
-        throw std::runtime_error(
-                kind + " must be a regular file: " + entry_path.string());
+        throw std::runtime_error(localization::format_translated_message(
+                "Artifact entry must be a regular file: {}",
+                entry_path.string()));
     }
     if(status_owner(status) != expected_effective_user) {
-        throw std::runtime_error(
-                kind + " owner does not match the effective user: " +
-                entry_path.string());
+        throw std::runtime_error(localization::format_translated_message(
+                "Artifact entry owner does not match the effective user: {}",
+                entry_path.string()));
     }
 }
 
 OwnedFileDescriptor open_and_revalidate_regular_entry(
         int directory_descriptor, const std::string& leaf_name,
-        const struct stat& named_status, const fs::path& entry_path,
-        const std::string& kind) {
+        const struct stat& named_status, const fs::path& entry_path) {
     int descriptor = openat(
             directory_descriptor, leaf_name.c_str(),
             O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
     if(descriptor < 0) {
-        throw std::runtime_error(
-                "Failed to open " + kind + " " + entry_path.string() + ": " +
-                std::strerror(errno));
+        throw std::runtime_error(localization::format_translated_message(
+                "Failed to open artifact entry {}: {}", entry_path.string(),
+                std::strerror(errno)));
     }
     OwnedFileDescriptor opened(descriptor);
-    struct stat opened_status = require_descriptor_status(
-            opened.get(), kind + " " + entry_path.string());
+    struct stat opened_status =
+            require_descriptor_status(opened.get(), entry_path);
     if(!same_filesystem_identity(named_status, opened_status)) {
-        throw std::runtime_error(
-                "Refusing changed " + kind + ": " + entry_path.string());
+        throw std::runtime_error(localization::format_translated_message(
+                "Refusing changed artifact entry: {}", entry_path.string()));
     }
     return opened;
 }
@@ -502,17 +776,17 @@ void require_only_expected_workspace_entries(
             directory_descriptor, ".",
             O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
     if(scan_descriptor < 0) {
-        throw std::runtime_error(
-                "Failed to enumerate artifact workspace " +
-                workspace_path.string() + ": " + std::strerror(errno));
+        throw std::runtime_error(localization::format_translated_message(
+                "Failed to enumerate artifact workspace {}: {}",
+                workspace_path.string(), std::strerror(errno)));
     }
     DIR* raw_stream = fdopendir(scan_descriptor);
     if(!raw_stream) {
         int open_error = errno;
         close(scan_descriptor);
-        throw std::runtime_error(
-                "Failed to enumerate artifact workspace " +
-                workspace_path.string() + ": " + std::strerror(open_error));
+        throw std::runtime_error(localization::format_translated_message(
+                "Failed to enumerate artifact workspace {}: {}",
+                workspace_path.string(), std::strerror(open_error)));
     }
     std::unique_ptr<DIR, int (*)(DIR*)> stream(raw_stream, closedir);
 
@@ -522,8 +796,9 @@ void require_only_expected_workspace_entries(
         if(!entry) {
             if(errno != 0) {
                 throw std::runtime_error(
-                        "Failed while enumerating artifact workspace " +
-                        workspace_path.string() + ": " + std::strerror(errno));
+                        localization::format_translated_message(
+                                "Failed while enumerating artifact workspace {}: {}",
+                                workspace_path.string(), std::strerror(errno)));
             }
             break;
         }
@@ -539,23 +814,23 @@ void require_only_expected_workspace_entries(
                    directory_descriptor, leaf_name.c_str(), &extra_status,
                    AT_SYMLINK_NOFOLLOW) != 0) {
             if(errno == ENOENT) continue;
-            throw std::runtime_error(
-                    "Failed to inspect unexpected artifact workspace entry " +
-                    extra_path.string() + ": " + std::strerror(errno));
+            throw std::runtime_error(localization::format_translated_message(
+                    "Failed to inspect unexpected artifact workspace entry {}: {}",
+                    extra_path.string(), std::strerror(errno)));
         }
         if(S_ISDIR(extra_status.st_mode)) {
-            throw std::runtime_error(
-                    "Unexpected directory in artifact workspace: " +
-                    extra_path.string());
+            throw std::runtime_error(localization::format_translated_message(
+                    "Unexpected directory in artifact workspace: {}",
+                    extra_path.string()));
         }
         if(leaf_name.ends_with(".sig")) {
-            throw std::runtime_error(
-                    "Unmatched signature in artifact workspace: " +
-                    extra_path.string());
+            throw std::runtime_error(localization::format_translated_message(
+                    "Unmatched signature in artifact workspace: {}",
+                    extra_path.string()));
         }
-        throw std::runtime_error(
-                "Unexpected entry in artifact workspace: " +
-                extra_path.string());
+        throw std::runtime_error(localization::format_translated_message(
+                "Unexpected entry in artifact workspace: {}",
+                extra_path.string()));
     }
 }
 
@@ -567,16 +842,15 @@ InspectedArtifact inspect_post_build_artifact(
     std::optional<struct stat> artifact_status = entry_status_at(
             directory_descriptor, artifact_leaf, artifact_path);
     if(!artifact_status.has_value()) {
-        throw std::runtime_error(
-                "Expected package artifact is missing: " +
-                artifact_path.string());
+        throw std::runtime_error(localization::format_translated_message(
+                "Expected package artifact is missing: {}",
+                artifact_path.string()));
     }
     require_regular_owned_entry(
-            artifact_status.value(), expected_effective_user, artifact_path,
-            "Package artifact");
+            artifact_status.value(), expected_effective_user, artifact_path);
     OwnedFileDescriptor artifact_descriptor = open_and_revalidate_regular_entry(
             directory_descriptor, artifact_leaf, artifact_status.value(),
-            artifact_path, "package artifact");
+            artifact_path);
 
     std::string signature_leaf = artifact_leaf + ".sig";
     fs::path signature_path = workspace_path / signature_leaf;
@@ -585,11 +859,10 @@ InspectedArtifact inspect_post_build_artifact(
     if(signature_status.has_value()) {
         require_regular_owned_entry(
                 signature_status.value(), expected_effective_user,
-                signature_path, "Package signature");
+                signature_path);
         static_cast<void>(open_and_revalidate_regular_entry(
                 directory_descriptor, signature_leaf,
-                signature_status.value(), signature_path,
-                "package signature"));
+                signature_status.value(), signature_path));
     }
 
     require_only_expected_workspace_entries(
@@ -601,8 +874,9 @@ InspectedArtifact inspect_post_build_artifact(
     if(!final_artifact_status.has_value() ||
        !same_filesystem_identity(
                artifact_status.value(), final_artifact_status.value())) {
-        throw std::runtime_error(
-                "Refusing changed package artifact: " + artifact_path.string());
+        throw std::runtime_error(localization::format_translated_message(
+                "Refusing changed package artifact: {}",
+                artifact_path.string()));
     }
     std::optional<struct stat> final_signature_status = entry_status_at(
             directory_descriptor, signature_leaf, signature_path);
@@ -610,9 +884,9 @@ InspectedArtifact inspect_post_build_artifact(
        (signature_status.has_value() &&
         !same_filesystem_identity(
                 signature_status.value(), final_signature_status.value()))) {
-        throw std::runtime_error(
-                "Refusing changed package signature: " +
-                signature_path.string());
+        throw std::runtime_error(localization::format_translated_message(
+                "Refusing changed package signature: {}",
+                signature_path.string()));
     }
     return InspectedArtifact(
             artifact_descriptor.release(), artifact_status.value());
@@ -679,16 +953,15 @@ InspectedMultipleArtifact inspect_expected_artifact(
     std::optional<struct stat> artifact_status = entry_status_at(
             directory_descriptor, target.leaf_name, target.path);
     if(!artifact_status.has_value()) {
-        throw std::runtime_error(
-                "Expected package artifact is missing: " +
-                target.path.string());
+        throw std::runtime_error(localization::format_translated_message(
+                "Expected package artifact is missing: {}",
+                target.path.string()));
     }
     require_regular_owned_entry(
-            artifact_status.value(), expected_artifact_owner, target.path,
-            "Package artifact");
+            artifact_status.value(), expected_artifact_owner, target.path);
     OwnedFileDescriptor artifact_descriptor = open_and_revalidate_regular_entry(
             directory_descriptor, target.leaf_name, artifact_status.value(),
-            target.path, "package artifact");
+            target.path);
 
     const std::string signature_leaf = target.leaf_name + ".sig";
     const fs::path signature_path = workspace_path / signature_leaf;
@@ -698,11 +971,10 @@ InspectedMultipleArtifact inspect_expected_artifact(
     if(signature_status.has_value()) {
         require_regular_owned_entry(
                 signature_status.value(), expected_signature_owner,
-                signature_path, "Package signature");
+                signature_path);
         signature_descriptor.emplace(open_and_revalidate_regular_entry(
                 directory_descriptor, signature_leaf,
-                signature_status.value(), signature_path,
-                "package signature"));
+                signature_status.value(), signature_path));
     }
 
     return InspectedMultipleArtifact(
@@ -713,20 +985,20 @@ InspectedMultipleArtifact inspect_expected_artifact(
 void require_retained_entry_unchanged(
         int descriptor, const struct stat& expected_status,
         std::uintmax_t expected_effective_user,
-        const fs::path& entry_path, const std::string& kind) {
+        const fs::path& entry_path) {
     if(descriptor < 0) {
-        throw std::runtime_error(
-                "Retained " + kind + " descriptor is closed: " +
-                entry_path.string());
+        throw std::runtime_error(localization::format_translated_message(
+                "Retained artifact entry descriptor is closed: {}",
+                entry_path.string()));
     }
-    const struct stat retained_status = require_descriptor_status(
-            descriptor, "retained " + kind + " " + entry_path.string());
+    const struct stat retained_status =
+            require_descriptor_status(descriptor, entry_path);
     require_regular_owned_entry(
-            retained_status, expected_effective_user, entry_path, kind);
+            retained_status, expected_effective_user, entry_path);
     if(!same_filesystem_identity(expected_status, retained_status)) {
-        throw std::runtime_error(
-                "Refusing changed retained " + kind + ": " +
-                entry_path.string());
+        throw std::runtime_error(localization::format_translated_message(
+                "Refusing changed retained artifact entry: {}",
+                entry_path.string()));
     }
 }
 
@@ -734,18 +1006,19 @@ void require_named_entry_unchanged(
         int directory_descriptor, const std::string& leaf_name,
         const struct stat& expected_status,
         std::uintmax_t expected_effective_user,
-        const fs::path& entry_path, const std::string& kind) {
+        const fs::path& entry_path) {
     std::optional<struct stat> named_status = entry_status_at(
             directory_descriptor, leaf_name, entry_path);
     if(!named_status.has_value()) {
-        throw std::runtime_error(
-                "Expected " + kind + " is missing: " + entry_path.string());
+        throw std::runtime_error(localization::format_translated_message(
+                "Expected artifact entry is missing: {}",
+                entry_path.string()));
     }
     require_regular_owned_entry(
-            named_status.value(), expected_effective_user, entry_path, kind);
+            named_status.value(), expected_effective_user, entry_path);
     if(!same_filesystem_identity(expected_status, named_status.value())) {
-        throw std::runtime_error(
-                "Refusing changed " + kind + ": " + entry_path.string());
+        throw std::runtime_error(localization::format_translated_message(
+                "Refusing changed artifact entry: {}", entry_path.string()));
     }
 }
 
@@ -757,11 +1030,10 @@ void require_inspected_artifact_unchanged(
         std::uintmax_t expected_signature_owner) {
     require_retained_entry_unchanged(
             inspected.artifact_descriptor(), inspected.artifact_status,
-            expected_artifact_owner, target.path, "package artifact");
+            expected_artifact_owner, target.path);
     require_named_entry_unchanged(
             directory_descriptor, target.leaf_name,
-            inspected.artifact_status, expected_artifact_owner, target.path,
-            "package artifact");
+            inspected.artifact_status, expected_artifact_owner, target.path);
 
     const std::string signature_leaf = target.leaf_name + ".sig";
     const fs::path signature_path = workspace_path / signature_leaf;
@@ -769,20 +1041,20 @@ void require_inspected_artifact_unchanged(
             directory_descriptor, signature_leaf, signature_path);
     if(inspected.signature_status.has_value() !=
        named_signature_status.has_value()) {
-        throw std::runtime_error(
-                "Refusing changed package signature: " +
-                signature_path.string());
+        throw std::runtime_error(localization::format_translated_message(
+                "Refusing changed package signature: {}",
+                signature_path.string()));
     }
     if(!inspected.signature_status.has_value()) return;
 
     require_retained_entry_unchanged(
             inspected.signature_descriptor(),
             inspected.signature_status.value(), expected_signature_owner,
-            signature_path, "package signature");
+            signature_path);
     require_named_entry_unchanged(
             directory_descriptor, signature_leaf,
             inspected.signature_status.value(), expected_signature_owner,
-            signature_path, "package signature");
+            signature_path);
 }
 
 void require_only_expected_workspace_entries_for_set(
@@ -793,18 +1065,17 @@ void require_only_expected_workspace_entries_for_set(
             directory_descriptor, ".",
             O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
     if(scan_descriptor < 0) {
-        throw std::runtime_error(
-                "Failed to enumerate artifact workspace " +
-                workspace_path.string() + ": " + std::strerror(errno));
+        throw std::runtime_error(localization::format_translated_message(
+                "Failed to enumerate artifact workspace {}: {}",
+                workspace_path.string(), std::strerror(errno)));
     }
     DIR* raw_stream = fdopendir(scan_descriptor);
     if(!raw_stream) {
         const int open_error = errno;
         close(scan_descriptor);
-        throw std::runtime_error(
-                "Failed to enumerate artifact workspace " +
-                workspace_path.string() + ": " +
-                std::strerror(open_error));
+        throw std::runtime_error(localization::format_translated_message(
+                "Failed to enumerate artifact workspace {}: {}",
+                workspace_path.string(), std::strerror(open_error)));
     }
     std::unique_ptr<DIR, int (*)(DIR*)> stream(raw_stream, closedir);
 
@@ -814,9 +1085,9 @@ void require_only_expected_workspace_entries_for_set(
         if(!entry) {
             if(errno != 0) {
                 throw std::runtime_error(
-                        "Failed while enumerating artifact workspace " +
-                        workspace_path.string() + ": " +
-                        std::strerror(errno));
+                        localization::format_translated_message(
+                                "Failed while enumerating artifact workspace {}: {}",
+                                workspace_path.string(), std::strerror(errno)));
             }
             break;
         }
@@ -833,34 +1104,33 @@ void require_only_expected_workspace_entries_for_set(
         if(fstatat(
                    directory_descriptor, leaf_name.c_str(), &extra_status,
                    AT_SYMLINK_NOFOLLOW) != 0) {
-            throw std::runtime_error(
-                    "Unexpected artifact workspace entry changed during "
-                    "validation: " +
-                    extra_path.string());
+            throw std::runtime_error(localization::format_translated_message(
+                    "Unexpected artifact workspace entry changed during validation: {}",
+                    extra_path.string()));
         }
         if(S_ISDIR(extra_status.st_mode)) {
-            throw std::runtime_error(
-                    "Unexpected directory in artifact workspace: " +
-                    extra_path.string());
+            throw std::runtime_error(localization::format_translated_message(
+                    "Unexpected directory in artifact workspace: {}",
+                    extra_path.string()));
         }
         if(leaf_name.ends_with(".sig")) {
-            throw std::runtime_error(
-                    "Unmatched signature in artifact workspace: " +
-                    extra_path.string());
+            throw std::runtime_error(localization::format_translated_message(
+                    "Unmatched signature in artifact workspace: {}",
+                    extra_path.string()));
         }
         if(S_ISLNK(extra_status.st_mode)) {
-            throw std::runtime_error(
-                    "Unexpected symlink in artifact workspace: " +
-                    extra_path.string());
+            throw std::runtime_error(localization::format_translated_message(
+                    "Unexpected symlink in artifact workspace: {}",
+                    extra_path.string()));
         }
         if(!S_ISREG(extra_status.st_mode)) {
-            throw std::runtime_error(
-                    "Unexpected special file in artifact workspace: " +
-                    extra_path.string());
+            throw std::runtime_error(localization::format_translated_message(
+                    "Unexpected special file in artifact workspace: {}",
+                    extra_path.string()));
         }
-        throw std::runtime_error(
-                "Unexpected entry in artifact workspace: " +
-                extra_path.string());
+        throw std::runtime_error(localization::format_translated_message(
+                "Unexpected entry in artifact workspace: {}",
+                extra_path.string()));
     }
 }
 
@@ -871,23 +1141,23 @@ std::vector<InspectedMultipleArtifact> inspect_post_build_artifact_set(
         std::uintmax_t expected_signature_owner,
         bool should_notify_test_observer) {
     if(targets.empty()) {
-        throw std::runtime_error(
-                "Expected package artifact set must not be empty.");
+        throw std::runtime_error(localization::translate_message(
+                "Expected package artifact set must not be empty."));
     }
 
     std::set<std::string> artifact_leaves;
     std::set<std::string> signature_leaves;
     for(const ArtifactInspectionTarget& target : targets) {
         if(!artifact_leaves.insert(target.leaf_name).second) {
-            throw std::runtime_error(
-                    "Expected package artifact set contains a duplicate path.");
+            throw std::runtime_error(localization::translate_message(
+                    "Expected package artifact set contains a duplicate path."));
         }
         signature_leaves.insert(target.leaf_name + ".sig");
     }
     for(const std::string& signature_leaf : signature_leaves) {
         if(artifact_leaves.contains(signature_leaf)) {
-            throw std::runtime_error(
-                    "Expected package artifact and signature namespaces collide.");
+            throw std::runtime_error(localization::translate_message(
+                    "Expected package artifact and signature namespaces collide."));
         }
     }
 
@@ -952,13 +1222,17 @@ ArtifactWorkspace::~ArtifactWorkspace() noexcept {
         try {
             cleanup();
         } catch(const std::exception& error) {
-            Logger::warn(
-                    "Refusing unsafe artifact workspace cleanup for " +
-                    path_.string() + ": " + error.what());
+            Logger::warn_noexcept([this, &error]() {
+                return localization::format_translated_message(
+                        "Refusing unsafe artifact workspace cleanup for {}: {}",
+                        path_.string(), error.what());
+            });
         } catch(...) {
-            Logger::warn(
-                    "Refusing unsafe artifact workspace cleanup for " +
-                    path_.string() + ": unknown error");
+            Logger::warn_noexcept([this]() {
+                return localization::format_translated_message(
+                        "Refusing unsafe artifact workspace cleanup for {}: unknown error.",
+                        path_.string());
+            });
         }
     }
     if(directory_descriptor_ >= 0) close(directory_descriptor_);
@@ -967,29 +1241,29 @@ ArtifactWorkspace::~ArtifactWorkspace() noexcept {
 void ArtifactWorkspace::require_unchanged_identity_for_owner(
         std::uintmax_t expected_effective_user) const {
     if(!owns_path_ || directory_descriptor_ < 0) {
-        throw std::runtime_error(
-                "Artifact workspace is no longer owned: " + path_.string());
+        throw std::runtime_error(localization::format_translated_message(
+                "Artifact workspace is no longer owned: {}", path_.string()));
     }
 
     root_.require_unchanged_identity();
     if(path_.parent_path() != root_.canonical_path() ||
        canonical_path_.parent_path() != root_.canonical_path() ||
        path_.filename().string() != leaf_name_) {
-        throw std::runtime_error(
-                "Artifact workspace is not a direct child of the trusted cache root: " +
-                path_.string());
+        throw std::runtime_error(localization::format_translated_message(
+                "Artifact workspace is not a direct child of the trusted cache root: {}",
+                path_.string()));
     }
 
-    struct stat open_workspace_status = require_descriptor_status(
-            directory_descriptor_, "artifact workspace " + path_.string());
+    struct stat open_workspace_status =
+            require_descriptor_status(directory_descriptor_, path_);
     DirectoryIdentity expected_workspace{device_, inode_};
     if(!same_directory_identity(expected_workspace, open_workspace_status) ||
        status_owner(open_workspace_status) != owner_ ||
        owner_ != expected_effective_user ||
        (open_workspace_status.st_mode & 07777) != ARTIFACT_WORKSPACE_MODE) {
-        throw std::runtime_error(
-                "Artifact workspace descriptor changed identity, owner, or mode: " +
-                path_.string());
+        throw std::runtime_error(localization::format_translated_message(
+                "Artifact workspace descriptor changed identity, owner, or mode: {}",
+                path_.string()));
     }
 
     struct stat named_workspace_status {};
@@ -1000,18 +1274,18 @@ void ArtifactWorkspace::require_unchanged_identity_for_owner(
        !same_directory_identity(expected_workspace, named_workspace_status) ||
        status_owner(named_workspace_status) != owner_ ||
        (named_workspace_status.st_mode & 07777) != ARTIFACT_WORKSPACE_MODE) {
-        throw std::runtime_error(
-                "Artifact workspace path changed identity, owner, or mode: " +
-                path_.string());
+        throw std::runtime_error(localization::format_translated_message(
+                "Artifact workspace path changed identity, owner, or mode: {}",
+                path_.string()));
     }
 
     std::error_code canonical_error;
     fs::path current_canonical = fs::canonical(path_, canonical_error);
     if(canonical_error || current_canonical != canonical_path_ ||
        current_canonical.parent_path() != root_.canonical_path()) {
-        throw std::runtime_error(
-                "Artifact workspace canonical containment changed: " +
-                path_.string());
+        throw std::runtime_error(localization::format_translated_message(
+                "Artifact workspace canonical containment changed: {}",
+                path_.string()));
     }
 }
 
@@ -1026,18 +1300,32 @@ void ArtifactWorkspace::retain_for_diagnostics() noexcept {
 
 void ArtifactWorkspace::cleanup() {
     if(!owns_path_) return;
-    // POLICY(#242): cleanup entry時にidentityを証明できなければ何も削除しない。
-    // NOTE: same-euid processによるcheck後の同時mutationまでは脅威modelに含めない。
+    // POLICY(#242): tree全体のdescriptor/identityをpreflightし、削除直前の
+    // 再検証も全件成功しなければ一件も削除しない。
+    // NOTE: same-euid processによる各final checkとunlinkatの間の同時mutationは
+    // kernelにcompare-and-unlinkがないため脅威modelに含めない。
     require_unchanged_identity();
-    remove_directory_contents_at(
-            directory_descriptor_, canonical_path_, device_);
+    const struct stat workspace_status =
+            require_descriptor_status(directory_descriptor_, path_);
+    CleanupEntryPlan cleanup_plan = preflight_directory_contents_at(
+            directory_descriptor_, canonical_path_, workspace_status,
+            device_);
+    require_unchanged_identity();
+    require_cleanup_plan_unchanged(cleanup_plan);
+    notify_artifact_workspace_cleanup_pre_delete_for_test(canonical_path_);
+    require_unchanged_identity();
+    require_cleanup_plan_unchanged(cleanup_plan);
+
+    CleanupDirectoryLineage lineage;
+    remove_preflighted_directory_contents(
+            *this, cleanup_plan, cleanup_plan, lineage);
     require_unchanged_identity();
     if(unlinkat(
                root_.directory_descriptor(), leaf_name_.c_str(),
                AT_REMOVEDIR) != 0) {
-        throw std::runtime_error(
-                "Failed to remove artifact workspace " + path_.string() + ": " +
-                std::strerror(errno));
+        throw std::runtime_error(localization::format_translated_message(
+                "Failed to remove artifact workspace {}: {}", path_.string(),
+                std::strerror(errno)));
     }
     owns_path_ = false;
     if(directory_descriptor_ >= 0) {
@@ -1059,9 +1347,9 @@ ArtifactWorkspace create_artifact_workspace(
     path_buffer.push_back('\0');
     char* created_path = mkdtemp(path_buffer.data());
     if(!created_path) {
-        throw std::runtime_error(
-                "Failed to create artifact workspace under " +
-                root.canonical_path().string() + ": " + std::strerror(errno));
+        throw std::runtime_error(localization::format_translated_message(
+                "Failed to create artifact workspace under {}: {}",
+                root.canonical_path().string(), std::strerror(errno)));
     }
 
     std::string leaf_name = fs::path(created_path).filename().string();
@@ -1073,54 +1361,53 @@ ArtifactWorkspace create_artifact_workspace(
         int inspect_error = errno;
         // POLICY(#242): identityを一度も証明できていないnamed leafは削除しない。
         // replacementを消すより、fresh workspace候補をfail-safeに残す。
-        throw std::runtime_error(
-                "Failed to inspect created artifact workspace " +
-                display_path.string() + ": " +
-                std::strerror(inspect_error));
+        throw std::runtime_error(localization::format_translated_message(
+                "Failed to inspect created artifact workspace {}: {}",
+                display_path.string(), std::strerror(inspect_error)));
     }
-    CreatedWorkspaceRollback rollback(
-            root_descriptor, leaf_name, created_status);
-
     if(!S_ISDIR(created_status.st_mode) || S_ISLNK(created_status.st_mode) ||
        status_owner(created_status) !=
                static_cast<std::uintmax_t>(geteuid()) ||
        (created_status.st_mode & 07777) != ARTIFACT_WORKSPACE_MODE) {
-        throw std::runtime_error(
-                "Created artifact workspace has an unsafe type, owner, or mode: " +
-                display_path.string());
+        throw std::runtime_error(localization::format_translated_message(
+                "Created artifact workspace has an unsafe type, owner, or mode: {}",
+                display_path.string()));
     }
     if(!leaf_name.starts_with(ARTIFACT_WORKSPACE_PREFIX) ||
        is_valid_package_name(leaf_name)) {
-        throw std::logic_error(
-                "Artifact workspace namespace collides with package identifiers: " +
-                leaf_name);
+        throw std::logic_error(localization::format_translated_message(
+                "Artifact workspace namespace collides with package identifiers: {}",
+                leaf_name));
     }
+    CreatedWorkspaceRollback rollback(
+            root, root_descriptor, leaf_name, created_status);
 
     int directory_descriptor = openat(
             root_descriptor, leaf_name.c_str(),
             O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
     if(directory_descriptor < 0) {
-        throw std::runtime_error(
-                "Failed to open created artifact workspace " +
-                display_path.string() + ": " + std::strerror(errno));
+        throw std::runtime_error(localization::format_translated_message(
+                "Failed to open created artifact workspace {}: {}",
+                display_path.string(), std::strerror(errno)));
     }
     OwnedFileDescriptor opened_directory(directory_descriptor);
-    struct stat opened_status = require_descriptor_status(
-            opened_directory.get(), "artifact workspace " + display_path.string());
+    struct stat opened_status =
+            require_descriptor_status(opened_directory.get(), display_path);
     if(!same_filesystem_identity(created_status, opened_status)) {
-        throw std::runtime_error(
-                "Created artifact workspace changed identity: " +
-                display_path.string());
+        throw std::runtime_error(localization::format_translated_message(
+                "Created artifact workspace changed identity: {}",
+                display_path.string()));
     }
 
     std::error_code canonical_error;
     fs::path canonical_path = fs::canonical(display_path, canonical_error);
     if(canonical_error || canonical_path.parent_path() != root.canonical_path() ||
        canonical_path != display_path) {
-        throw std::runtime_error(
-                "Created artifact workspace is outside the trusted cache root: " +
-                display_path.string());
+        throw std::runtime_error(localization::format_translated_message(
+                "Created artifact workspace is outside the trusted cache root: {}",
+                display_path.string()));
     }
+    notify_artifact_workspace_creation_for_test(display_path);
 
     ArtifactWorkspace workspace(
             std::move(root), std::move(display_path),
@@ -1136,26 +1423,23 @@ ArtifactWorkspace create_artifact_workspace(
 void require_unclaimed_artifact_pkgdest(
         const SourceBuildEnvironment& environment) {
     if(environment.defines("PKGDEST")) {
-        throw std::runtime_error(
-                "Source environment PKGDEST conflicts with invocation-owned "
-                "artifact workspace.");
+        throw std::runtime_error(localization::format_translated_message(
+                // TRANSLATORS: {} is the literal environment key "PKGDEST".
+                "Source environment {} conflicts with the invocation-owned artifact workspace.",
+                "PKGDEST"));
     }
     require_no_inherited_pkgdest();
 }
 
 ArtifactMakepkgContext::ArtifactMakepkgContext(
-        ValidatedCachePath checkout,
+        RetainedTrustedCacheDirectory checkout,
         SourceBuildEnvironment command_environment,
         SourceEnvironmentEmptyValuePolicy empty_value_policy,
-        int checkout_descriptor, std::uintmax_t checkout_device,
-        std::uintmax_t checkout_inode,
         fs::path workspace_path, std::uintmax_t workspace_device,
         std::uintmax_t workspace_inode)
     : checkout_(std::move(checkout)),
       command_environment_(std::move(command_environment)),
       empty_value_policy_(empty_value_policy),
-      checkout_descriptor_(checkout_descriptor),
-      checkout_device_(checkout_device), checkout_inode_(checkout_inode),
       provenance_(std::make_shared<const ArtifactMakepkgContextProvenance>()),
       workspace_path_(std::move(workspace_path)),
       workspace_device_(workspace_device), workspace_inode_(workspace_inode) {
@@ -1166,45 +1450,16 @@ ArtifactMakepkgContext::ArtifactMakepkgContext(
     : checkout_(std::move(other.checkout_)),
       command_environment_(std::move(other.command_environment_)),
       empty_value_policy_(other.empty_value_policy_),
-      checkout_descriptor_(std::exchange(other.checkout_descriptor_, -1)),
-      checkout_device_(other.checkout_device_),
-      checkout_inode_(other.checkout_inode_),
       provenance_(std::move(other.provenance_)),
       workspace_path_(std::move(other.workspace_path_)),
       workspace_device_(other.workspace_device_),
       workspace_inode_(other.workspace_inode_) {
 }
 
-ArtifactMakepkgContext::~ArtifactMakepkgContext() noexcept {
-    if(checkout_descriptor_ >= 0) close(checkout_descriptor_);
-}
+ArtifactMakepkgContext::~ArtifactMakepkgContext() noexcept = default;
 
 void ArtifactMakepkgContext::require_unchanged_checkout() const {
-    if(checkout_descriptor_ < 0) {
-        throw std::runtime_error("Artifact makepkg checkout is no longer owned.");
-    }
-
-    ValidatedCachePath current_checkout = revalidate_trusted_cache_path(
-            checkout_, CachePathRequirement::ExistingDirectory);
-    struct stat retained_status = require_descriptor_status(
-            checkout_descriptor_, "retained source checkout " +
-                                          checkout_.canonical_path().string());
-    DirectoryIdentity expected_checkout{checkout_device_, checkout_inode_};
-    if(!same_directory_identity(expected_checkout, retained_status)) {
-        throw std::runtime_error(
-                "Retained source checkout changed identity: " +
-                checkout_.canonical_path().string());
-    }
-
-    struct stat named_status {};
-    if(fstatat(
-               AT_FDCWD, current_checkout.canonical_path().c_str(),
-               &named_status, AT_SYMLINK_NOFOLLOW) != 0 ||
-       !same_directory_identity(expected_checkout, named_status)) {
-        throw std::runtime_error(
-                "Source checkout path changed identity: " +
-                checkout_.canonical_path().string());
-    }
+    checkout_.require_unchanged_identity();
 }
 
 void ArtifactMakepkgContext::require_matching_workspace(
@@ -1213,8 +1468,11 @@ void ArtifactMakepkgContext::require_matching_workspace(
     if(workspace.path_ != workspace_path_ ||
        workspace.device_ != workspace_device_ ||
        workspace.inode_ != workspace_inode_) {
-        throw std::runtime_error(
-                "Artifact makepkg context does not match the supplied workspace.");
+        throw std::runtime_error(localization::format_translated_message(
+                // TRANSLATORS: The placeholder is the literal command name
+                // "makepkg".
+                "Artifact {} context does not match the supplied workspace.",
+                "makepkg"));
     }
 }
 
@@ -1240,7 +1498,7 @@ CapturedCommandResult ArtifactMakepkgContext::capture_makepkg_output(
     require_no_inherited_pkgdest();
     require_matching_workspace(workspace);
     require_unchanged_checkout();
-    FileDescriptorWorkDirGuard working_directory(checkout_descriptor_);
+    FileDescriptorWorkDirGuard working_directory(checkout_.descriptor_);
     std::string command = makepkg_command(makepkg_arguments);
     Logger::raw_cmd(command);
     CapturedCommandResult result = capture_command_output_raw(command.c_str());
@@ -1257,7 +1515,7 @@ int ArtifactMakepkgContext::run_makepkg_build_only(
     require_matching_workspace(workspace);
     expected.require_matching_makepkg_context(*this);
     require_unchanged_checkout();
-    FileDescriptorWorkDirGuard working_directory(checkout_descriptor_);
+    FileDescriptorWorkDirGuard working_directory(checkout_.descriptor_);
     std::vector<std::string> arguments = {"-sc"};
     if(options.no_confirm) arguments.emplace_back("--noconfirm");
     if(options.rebuild) arguments.emplace_back("-f");
@@ -1277,7 +1535,7 @@ int ArtifactMakepkgContext::run_makepkg_build_only(
     expected.require_matching_workspace(workspace);
     expected.require_matching_makepkg_context(*this);
     require_unchanged_checkout();
-    FileDescriptorWorkDirGuard working_directory(checkout_descriptor_);
+    FileDescriptorWorkDirGuard working_directory(checkout_.descriptor_);
     std::vector<std::string> arguments = {"-sc"};
     if(options.no_confirm) arguments.emplace_back("--noconfirm");
     if(options.rebuild) arguments.emplace_back("-f");
@@ -1297,44 +1555,20 @@ ArtifactMakepkgContext prepare_artifact_makepkg_context(
     require_unclaimed_artifact_pkgdest(environment);
     workspace.require_unchanged_identity();
     if(!workspace.path().is_absolute()) {
-        throw std::logic_error("Artifact workspace path must be absolute.");
+        throw std::logic_error(localization::translate_message(
+                "Artifact workspace path must be absolute."));
     }
 
-    ValidatedCachePath current_checkout = revalidate_trusted_cache_path(
-            checkout, CachePathRequirement::ExistingDirectory);
-    int checkout_descriptor = open(
-            current_checkout.canonical_path().c_str(),
-            O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
-    if(checkout_descriptor < 0) {
-        throw std::runtime_error(
-                "Failed to retain source checkout " +
-                current_checkout.canonical_path().string() + ": " +
-                std::strerror(errno));
-    }
-    OwnedFileDescriptor opened_checkout(checkout_descriptor);
-    struct stat checkout_status = require_descriptor_status(
-            opened_checkout.get(), "source checkout " +
-                                           current_checkout.canonical_path().string());
-    struct stat named_checkout_status {};
-    if(!S_ISDIR(checkout_status.st_mode) ||
-       fstatat(
-               AT_FDCWD, current_checkout.canonical_path().c_str(),
-               &named_checkout_status, AT_SYMLINK_NOFOLLOW) != 0 ||
-       !same_filesystem_identity(checkout_status, named_checkout_status)) {
-        throw std::runtime_error(
-                "Source checkout changed while preparing artifact makepkg context: " +
-                current_checkout.canonical_path().string());
-    }
+    RetainedTrustedCacheDirectory retained_checkout =
+            retain_trusted_cache_directory(checkout);
     SourceBuildEnvironment command_environment = environment;
     command_environment.ordered_assignments.push_back(
             SourceEnvironmentAssignment{
                     "PKGDEST", workspace.canonical_path().string()});
     ArtifactMakepkgContext context(
-            std::move(current_checkout), std::move(command_environment),
-            empty_value_policy, opened_checkout.get(),
-            status_device(checkout_status), status_inode(checkout_status),
+            std::move(retained_checkout), std::move(command_environment),
+            empty_value_policy,
             workspace.canonical_path(), workspace.device_, workspace.inode_);
-    static_cast<void>(opened_checkout.release());
     return context;
 }
 
@@ -1348,8 +1582,11 @@ ExpectedPackageArtifactPath::ExpectedPackageArtifactPath(
 void ExpectedPackageArtifactPath::bind_makepkg_context(
         const ArtifactMakepkgContext& context) {
     if(makepkg_context_bound_) {
-        throw std::logic_error(
-                "Expected artifact is already bound to a makepkg context.");
+        throw std::logic_error(localization::format_translated_message(
+                // TRANSLATORS: The placeholder is the literal command name
+                // "makepkg".
+                "Expected artifact is already bound to a {} context.",
+                "makepkg"));
     }
     makepkg_context_provenance_ = context.provenance_;
     makepkg_context_bound_ = true;
@@ -1362,8 +1599,11 @@ void ExpectedPackageArtifactPath::require_matching_makepkg_context(
        workspace_inode_ != context.workspace_inode_ ||
        !makepkg_context_provenance_ ||
        makepkg_context_provenance_ != context.provenance_) {
-        throw std::runtime_error(
-                "Expected artifact does not belong to this makepkg context.");
+        throw std::runtime_error(localization::format_translated_message(
+                // TRANSLATORS: The placeholder is the literal command name
+                // "makepkg".
+                "Expected artifact does not belong to this {} context.",
+                "makepkg"));
     }
 }
 
@@ -1372,9 +1612,9 @@ ExpectedPackageArtifactPath validate_makepkg_packagelist_output(
     workspace.require_unchanged_identity();
     std::vector<std::string> records = parse_packagelist_records(raw_output);
     if(records.size() != 1) {
-        throw std::runtime_error(
-                "Expected exactly one makepkg --packagelist artifact path, got " +
-                std::to_string(records.size()) + ".");
+        throw std::runtime_error(localization::format_translated_message(
+                "Expected exactly one artifact path from {}, but got {}.",
+                MAKEPKG_PACKAGELIST_COMMAND, records.size()));
     }
 
     fs::path candidate(records.front());
@@ -1383,8 +1623,8 @@ ExpectedPackageArtifactPath validate_makepkg_packagelist_output(
     if(entry_status_at(
                workspace.directory_descriptor_, leaf_name, candidate)
                .has_value()) {
-        throw std::runtime_error(
-                "Expected package artifact already exists before build.");
+        throw std::runtime_error(localization::translate_message(
+                "Expected package artifact already exists before the build."));
     }
 
     std::string signature_leaf = leaf_name + ".sig";
@@ -1393,8 +1633,8 @@ ExpectedPackageArtifactPath validate_makepkg_packagelist_output(
                workspace.directory_descriptor_, signature_leaf,
                signature_path)
                .has_value()) {
-        throw std::runtime_error(
-                "Expected package signature already exists before build.");
+        throw std::runtime_error(localization::translate_message(
+                "Expected package signature already exists before the build."));
     }
     workspace.require_unchanged_identity();
     return ExpectedPackageArtifactPath(
@@ -1408,9 +1648,9 @@ ExpectedPackageArtifactPath query_makepkg_packagelist(
     CapturedCommandResult result = context.capture_makepkg_output(
             workspace, {"--packagelist"});
     if(result.exit_code != 0) {
-        throw std::runtime_error(
-                "makepkg --packagelist failed with exit status " +
-                std::to_string(result.exit_code) + ".");
+        throw std::runtime_error(localization::format_translated_message(
+                "{} failed with exit status {}.",
+                MAKEPKG_PACKAGELIST_COMMAND, result.exit_code));
     }
     ExpectedPackageArtifactPath expected =
             validate_makepkg_packagelist_output(workspace, result.output);
@@ -1429,8 +1669,11 @@ ExpectedPackageArtifactSet::ExpectedPackageArtifactSet(
 void ExpectedPackageArtifactSet::bind_makepkg_context(
         const ArtifactMakepkgContext& context) {
     if(makepkg_context_bound_) {
-        throw std::logic_error(
-                "Expected artifact set is already bound to a makepkg context.");
+        throw std::logic_error(localization::format_translated_message(
+                // TRANSLATORS: The placeholder is the literal command name
+                // "makepkg".
+                "Expected artifact set is already bound to a {} context.",
+                "makepkg"));
     }
     makepkg_context_provenance_ = context.provenance_;
     makepkg_context_bound_ = true;
@@ -1443,8 +1686,11 @@ void ExpectedPackageArtifactSet::require_matching_makepkg_context(
        workspace_inode_ != context.workspace_inode_ ||
        !makepkg_context_provenance_ ||
        makepkg_context_provenance_ != context.provenance_) {
-        throw std::runtime_error(
-                "Expected artifact set does not belong to this makepkg context.");
+        throw std::runtime_error(localization::format_translated_message(
+                // TRANSLATORS: The placeholder is the literal command name
+                // "makepkg".
+                "Expected artifact set does not belong to this {} context.",
+                "makepkg"));
     }
 }
 
@@ -1453,8 +1699,8 @@ void ExpectedPackageArtifactSet::require_matching_workspace(
     workspace.require_unchanged_identity();
     if(entries_.empty() || workspace_device_ != workspace.device_ ||
        workspace_inode_ != workspace.inode_) {
-        throw std::runtime_error(
-                "Expected artifact set does not belong to this artifact workspace.");
+        throw std::runtime_error(localization::translate_message(
+                "Expected artifact set does not belong to this artifact workspace."));
     }
 
     std::set<std::string> artifact_leaves;
@@ -1464,15 +1710,15 @@ void ExpectedPackageArtifactSet::require_matching_workspace(
            entry.path.filename().string() != entry.leaf_name ||
            entry.leaf_name.empty() ||
            !artifact_leaves.insert(entry.leaf_name).second) {
-            throw std::runtime_error(
-                    "Expected artifact set does not belong to this artifact workspace.");
+            throw std::runtime_error(localization::translate_message(
+                    "Expected artifact set does not belong to this artifact workspace."));
         }
         signature_leaves.insert(entry.leaf_name + ".sig");
     }
     for(const std::string& signature_leaf : signature_leaves) {
         if(artifact_leaves.contains(signature_leaf)) {
-            throw std::runtime_error(
-                    "Expected package artifact and signature namespaces collide.");
+            throw std::runtime_error(localization::translate_message(
+                    "Expected package artifact and signature namespaces collide."));
         }
     }
 }
@@ -1488,8 +1734,9 @@ ExpectedPackageArtifactSet validate_makepkg_packagelist_output_set(
     workspace.require_unchanged_identity();
     std::vector<std::string> records = parse_packagelist_records(raw_output);
     if(records.empty()) {
-        throw std::runtime_error(
-                "Expected one or more makepkg --packagelist artifact paths, got 0.");
+        throw std::runtime_error(localization::format_translated_message(
+                "Expected one or more artifact paths from {}, but got 0.",
+                MAKEPKG_PACKAGELIST_COMMAND));
     }
 
     std::vector<ExpectedPackageArtifactSet::Entry> entries;
@@ -1501,8 +1748,9 @@ ExpectedPackageArtifactSet validate_makepkg_packagelist_output_set(
         require_direct_expected_path(workspace, candidate);
         std::string leaf_name = candidate.filename().string();
         if(!artifact_leaves.insert(leaf_name).second) {
-            throw std::runtime_error(
-                    "makepkg --packagelist returned a duplicate artifact path.");
+            throw std::runtime_error(localization::format_translated_message(
+                    "{} returned a duplicate artifact path.",
+                    MAKEPKG_PACKAGELIST_COMMAND));
         }
         signature_leaves.insert(leaf_name + ".sig");
         entries.push_back(ExpectedPackageArtifactSet::Entry{
@@ -1510,8 +1758,9 @@ ExpectedPackageArtifactSet validate_makepkg_packagelist_output_set(
     }
     for(const std::string& signature_leaf : signature_leaves) {
         if(artifact_leaves.contains(signature_leaf)) {
-            throw std::runtime_error(
-                    "makepkg --packagelist artifact and signature namespaces collide.");
+            throw std::runtime_error(localization::format_translated_message(
+                    "The artifact and signature namespaces returned by {} collide.",
+                    MAKEPKG_PACKAGELIST_COMMAND));
         }
     }
 
@@ -1520,8 +1769,8 @@ ExpectedPackageArtifactSet validate_makepkg_packagelist_output_set(
                    workspace.directory_descriptor_, entry.leaf_name,
                    entry.path)
                    .has_value()) {
-            throw std::runtime_error(
-                    "Expected package artifact already exists before build.");
+            throw std::runtime_error(localization::translate_message(
+                    "Expected package artifact already exists before the build."));
         }
 
         const std::string signature_leaf = entry.leaf_name + ".sig";
@@ -1531,8 +1780,8 @@ ExpectedPackageArtifactSet validate_makepkg_packagelist_output_set(
                    workspace.directory_descriptor_, signature_leaf,
                    signature_path)
                    .has_value()) {
-            throw std::runtime_error(
-                    "Expected package signature already exists before build.");
+            throw std::runtime_error(localization::translate_message(
+                    "Expected package signature already exists before the build."));
         }
     }
     workspace.require_unchanged_identity();
@@ -1546,9 +1795,9 @@ ExpectedPackageArtifactSet query_makepkg_packagelist_set(
     CapturedCommandResult result = context.capture_makepkg_output(
             workspace, {"--packagelist"});
     if(result.exit_code != 0) {
-        throw std::runtime_error(
-                "makepkg --packagelist failed with exit status " +
-                std::to_string(result.exit_code) + ".");
+        throw std::runtime_error(localization::format_translated_message(
+                "{} failed with exit status {}.",
+                MAKEPKG_PACKAGELIST_COMMAND, result.exit_code));
     }
     ExpectedPackageArtifactSet expected =
             validate_makepkg_packagelist_output_set(workspace, result.output);
@@ -1588,8 +1837,8 @@ ValidatedPackageArtifactPath ValidatedPackageArtifactPath::validate_for_owners(
        expected.workspace_inode_ != workspace.inode_ ||
        expected.path_.parent_path() != workspace.canonical_path_ ||
        expected.path_.filename().string() != expected.leaf_name_) {
-        throw std::runtime_error(
-                "Expected artifact path does not belong to this artifact workspace.");
+        throw std::runtime_error(localization::translate_message(
+                "Expected artifact path does not belong to this artifact workspace."));
     }
 
     InspectedArtifact inspected = inspect_post_build_artifact(
@@ -1612,21 +1861,21 @@ void ValidatedPackageArtifactPath::require_validity_for_owner(
         std::uintmax_t expected_effective_user) const {
     workspace_.require_unchanged_identity_for_owner(expected_effective_user);
     if(artifact_descriptor_ < 0) {
-        throw std::runtime_error(
-                "Validated package artifact descriptor is closed: " +
-                path_.string());
+        throw std::runtime_error(localization::format_translated_message(
+                "Validated package artifact descriptor is closed: {}",
+                path_.string()));
     }
 
-    struct stat retained_status = require_descriptor_status(
-            artifact_descriptor_, "validated package artifact " + path_.string());
+    struct stat retained_status =
+            require_descriptor_status(artifact_descriptor_, path_);
     if(!S_ISREG(retained_status.st_mode) ||
        status_device(retained_status) != device_ ||
        status_inode(retained_status) != inode_ ||
        status_owner(retained_status) != owner_ ||
        owner_ != expected_effective_user) {
-        throw std::runtime_error(
-                "Validated package artifact descriptor changed identity or owner: " +
-                path_.string());
+        throw std::runtime_error(localization::format_translated_message(
+                "Validated package artifact descriptor changed identity or owner: {}",
+                path_.string()));
     }
 
     InspectedArtifact inspected = inspect_post_build_artifact(
@@ -1635,9 +1884,9 @@ void ValidatedPackageArtifactPath::require_validity_for_owner(
     if(status_device(inspected.status) != device_ ||
        status_inode(inspected.status) != inode_ ||
        status_owner(inspected.status) != owner_) {
-        throw std::runtime_error(
-                "Validated package artifact path changed identity or owner: " +
-                path_.string());
+        throw std::runtime_error(localization::format_translated_message(
+                "Validated package artifact path changed identity or owner: {}",
+                path_.string()));
     }
     workspace_.require_unchanged_identity_for_owner(expected_effective_user);
 }
@@ -1725,15 +1974,15 @@ ValidatedPackageArtifactSet::ValidatedPackageArtifactSet(
 
 void ValidatedPackageArtifactSet::require_active() const {
     if(ownership_state_ != OwnershipState::Active || records_.empty()) {
-        throw std::runtime_error(
-                "Validated package artifact set is no longer owned.");
+        throw std::runtime_error(localization::translate_message(
+                "Validated package artifact set is no longer owned."));
     }
 }
 
 void ValidatedPackageArtifactSet::require_workspace_ownership() const {
     if(ownership_state_ == OwnershipState::Inactive) {
-        throw std::runtime_error(
-                "Validated package artifact set workspace is no longer owned.");
+        throw std::runtime_error(localization::translate_message(
+                "Validated package artifact set workspace is no longer owned."));
     }
 }
 
@@ -1826,28 +2075,27 @@ void ValidatedPackageArtifactSet::require_validity_for_owner(
         if(record.path.parent_path() != workspace_.canonical_path_ ||
            record.path.filename().string() != record.leaf_name ||
            record.leaf_name.empty()) {
-            throw std::runtime_error(
-                    "Validated package artifact set escaped its workspace.");
+            throw std::runtime_error(localization::translate_message(
+                    "Validated package artifact set escaped its workspace."));
         }
 
         if(record.artifact_descriptor < 0) {
-            throw std::runtime_error(
-                    "Validated package artifact descriptor is closed: " +
-                    record.path.string());
+            throw std::runtime_error(localization::format_translated_message(
+                    "Validated package artifact descriptor is closed: {}",
+                    record.path.string()));
         }
-        const struct stat retained_artifact_status = require_descriptor_status(
-                record.artifact_descriptor,
-                "validated package artifact " + record.path.string());
+        const struct stat retained_artifact_status =
+                require_descriptor_status(
+                        record.artifact_descriptor, record.path);
         require_regular_owned_entry(
                 retained_artifact_status, expected_effective_user,
-                record.path, "Package artifact");
+                record.path);
         if(status_device(retained_artifact_status) != record.artifact_device ||
            status_inode(retained_artifact_status) != record.artifact_inode ||
            status_owner(retained_artifact_status) != record.artifact_owner) {
-            throw std::runtime_error(
-                    "Validated package artifact descriptor changed identity "
-                    "or owner: " +
-                    record.path.string());
+            throw std::runtime_error(localization::format_translated_message(
+                    "Validated package artifact descriptor changed identity or owner: {}",
+                    record.path.string()));
         }
 
         const fs::path signature_path =
@@ -1855,17 +2103,16 @@ void ValidatedPackageArtifactSet::require_validity_for_owner(
         if(record.has_signature) {
             if(record.signature_descriptor < 0) {
                 throw std::runtime_error(
-                        "Validated package signature descriptor is closed: " +
-                        signature_path.string());
+                        localization::format_translated_message(
+                                "Validated package signature descriptor is closed: {}",
+                                signature_path.string()));
             }
             const struct stat retained_signature_status =
                     require_descriptor_status(
-                            record.signature_descriptor,
-                            "validated package signature " +
-                                    signature_path.string());
+                            record.signature_descriptor, signature_path);
             require_regular_owned_entry(
                     retained_signature_status, expected_effective_user,
-                    signature_path, "Package signature");
+                    signature_path);
             if(status_device(retained_signature_status) !=
                        record.signature_device ||
                status_inode(retained_signature_status) !=
@@ -1873,14 +2120,14 @@ void ValidatedPackageArtifactSet::require_validity_for_owner(
                status_owner(retained_signature_status) !=
                        record.signature_owner) {
                 throw std::runtime_error(
-                        "Validated package signature descriptor changed "
-                        "identity or owner: " +
-                        signature_path.string());
+                        localization::format_translated_message(
+                                "Validated package signature descriptor changed identity or owner: {}",
+                                signature_path.string()));
             }
         } else if(record.signature_descriptor >= 0) {
-            throw std::runtime_error(
-                    "Validated package signature state is inconsistent: " +
-                    signature_path.string());
+            throw std::runtime_error(localization::format_translated_message(
+                    "Validated package signature state is inconsistent: {}",
+                    signature_path.string()));
         }
         targets.push_back(
                 ArtifactInspectionTarget{record.path, record.leaf_name});
@@ -1899,18 +2146,17 @@ void ValidatedPackageArtifactSet::require_validity_for_owner(
                    record.artifact_inode ||
            status_owner(current[index].artifact_status) !=
                    record.artifact_owner) {
-            throw std::runtime_error(
-                    "Validated package artifact path changed identity or "
-                    "owner: " +
-                    record.path.string());
+            throw std::runtime_error(localization::format_translated_message(
+                    "Validated package artifact path changed identity or owner: {}",
+                    record.path.string()));
         }
         if(current[index].signature_status.has_value() !=
            record.has_signature) {
-            throw std::runtime_error(
-                    "Validated package signature presence changed: " +
+            throw std::runtime_error(localization::format_translated_message(
+                    "Validated package signature presence changed: {}",
                     (workspace_.canonical_path_ /
                      (record.leaf_name + ".sig"))
-                            .string());
+                            .string()));
         }
         if(record.has_signature &&
            (status_device(current[index].signature_status.value()) !=
@@ -1919,12 +2165,11 @@ void ValidatedPackageArtifactSet::require_validity_for_owner(
                     record.signature_inode ||
             status_owner(current[index].signature_status.value()) !=
                     record.signature_owner)) {
-            throw std::runtime_error(
-                    "Validated package signature path changed identity or "
-                    "owner: " +
+            throw std::runtime_error(localization::format_translated_message(
+                    "Validated package signature path changed identity or owner: {}",
                     (workspace_.canonical_path_ /
                      (record.leaf_name + ".sig"))
-                            .string());
+                            .string()));
         }
     }
     workspace_.require_unchanged_identity_for_owner(expected_effective_user);
@@ -1945,7 +2190,7 @@ void ValidatedPackageArtifactSet::cleanup_workspace() {
         // POLICY(#268): cleanup entryでaggregate全体を再証明した後だけ、
         // retained artifact/signature descriptorを閉じる。
         require_validity();
-#ifdef JPACKER_ENABLE_ARTIFACT_WORKSPACE_TEST_HOOKS
+#ifdef MOGUET_ENABLE_ARTIFACT_WORKSPACE_TEST_HOOKS
         std::vector<int> retained_descriptors;
         retained_descriptors.reserve(records_.size() * 2);
         for(const Record& record : records_) {
@@ -1961,7 +2206,7 @@ void ValidatedPackageArtifactSet::cleanup_workspace() {
         // ownershipはdiagnostic retentionとcleanup retryのため保持する。
         records_.clear();
         ownership_state_ = OwnershipState::WorkspaceCleanupPending;
-#ifdef JPACKER_ENABLE_ARTIFACT_WORKSPACE_TEST_HOOKS
+#ifdef MOGUET_ENABLE_ARTIFACT_WORKSPACE_TEST_HOOKS
         notify_multiple_artifact_cleanup_for_test(
                 workspace_.path(), retained_descriptors);
 #endif
@@ -1980,7 +2225,7 @@ ValidatedPackageArtifactSet validate_post_build_package_artifacts(
             effective_user, effective_user, effective_user);
 }
 
-#ifdef JPACKER_ENABLE_ARTIFACT_WORKSPACE_TEST_HOOKS
+#ifdef MOGUET_ENABLE_ARTIFACT_WORKSPACE_TEST_HOOKS
 void require_artifact_workspace_identity_for_test(
         const ArtifactWorkspace& workspace,
         std::uintmax_t expected_effective_user) {
@@ -2005,6 +2250,21 @@ void set_multiple_artifact_validation_observer_for_test(
 void set_multiple_artifact_cleanup_observer_for_test(
         MultipleArtifactCleanupObserverForTest observer) {
     g_multiple_artifact_cleanup_observer = observer;
+}
+
+void set_artifact_workspace_creation_observer_for_test(
+        ArtifactWorkspaceCreationObserverForTest observer) {
+    g_artifact_workspace_creation_observer = observer;
+}
+
+void set_artifact_workspace_cleanup_pre_delete_observer_for_test(
+        ArtifactWorkspaceCleanupPreDeleteObserverForTest observer) {
+    g_artifact_workspace_cleanup_pre_delete_observer = observer;
+}
+
+void set_artifact_workspace_cleanup_child_open_for_test(
+        ArtifactWorkspaceCleanupChildOpenForTest open_child) noexcept {
+    g_artifact_workspace_cleanup_child_open = open_child;
 }
 
 ValidatedPackageArtifactSet validate_post_build_package_artifacts_for_test(

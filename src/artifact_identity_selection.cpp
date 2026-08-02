@@ -8,6 +8,8 @@
 
 namespace {
 
+// NO_TRANSLATE(Issue #308): this diagnoses a closed-result coherence bug;
+// ordinary artifact selection failures leave this adapter as typed data.
 [[noreturn]] void throw_incoherent_selection_result() {
     throw std::logic_error(
             "Artifact identity selection returned an incoherent result.");

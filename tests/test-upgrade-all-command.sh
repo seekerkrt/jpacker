@@ -3,8 +3,8 @@ set -eu
 
 test_binary=$1
 repo_root=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
-JPACKER_TEST_REPOSITORY_ROOT=$repo_root
-export JPACKER_TEST_REPOSITORY_ROOT
+MOGUET_TEST_REPOSITORY_ROOT=$repo_root
+export MOGUET_TEST_REPOSITORY_ROOT
 . "$repo_root/tests/test-command-safety.sh"
 
 tmp_dir=$(mktemp -d)
@@ -30,28 +30,32 @@ setup_case() {
     stdout_file=$case_dir/stdout
     stderr_file=$case_dir/stderr
     command_log=$case_dir/events.log
-    config_file=$case_dir/jpacker.conf
+    config_file=$case_dir/config.toml
     foreign_inventory_file=$case_dir/foreign-packages
 
-    mkdir -p "$case_dir/home" "$case_dir/work" "$case_dir/package.build"
+    mkdir -p \
+        "$case_dir/home" "$case_dir/xdg-state" "$case_dir/xdg-cache" \
+        "$case_dir/work" \
+        "$case_dir/package.build"
     : > "$stdout_file"
     : > "$stderr_file"
     : > "$command_log"
-    : > "$config_file"
+    printf '%s\n' 'schema_version = 1' > "$config_file"
     : > "$foreign_inventory_file"
 
     export HOME=$case_dir/home
+    export XDG_STATE_HOME=$case_dir/xdg-state
     export XDG_CACHE_HOME=$case_dir/xdg-cache
-    export JPACKER_TEST_CONFIG_FILE=$config_file
-    export JPACKER_TEST_PACKAGE_BUILD_DIR=$case_dir/package.build
-    export JPACKER_TEST_COMMAND_LOG=$command_log
-    export JPACKER_TEST_PACKAGE_METADATA_EVENT_LOG=$command_log
-    export JPACKER_TEST_FOREIGN_PACKAGE_INVENTORY_STATE_FILE=$foreign_inventory_file
-    export JPACKER_TEST_PACMAN_CONF_REPOSITORY_LIST=core
-    export JPACKER_TEST_UPGRADE_ALL_SCENARIO=$scenario_name
-    export JPACKER_TEST_AUR_UPDATE_SCENARIO=no-installed-foreign
-    export JPACKER_TEST_PACMAN_EXIT_CODE=91
-    export JPACKER_TEST_SUDO_EXIT_CODE=92
+    export MOGUET_TEST_CONFIG_FILE=$config_file
+    export MOGUET_TEST_PACKAGE_BUILD_DIR=$case_dir/package.build
+    export MOGUET_TEST_COMMAND_LOG=$command_log
+    export MOGUET_TEST_PACKAGE_METADATA_EVENT_LOG=$command_log
+    export MOGUET_TEST_FOREIGN_PACKAGE_INVENTORY_STATE_FILE=$foreign_inventory_file
+    export MOGUET_TEST_PACMAN_CONF_REPOSITORY_LIST=core
+    export MOGUET_TEST_UPGRADE_ALL_SCENARIO=$scenario_name
+    export MOGUET_TEST_AUR_UPDATE_SCENARIO=no-installed-foreign
+    export MOGUET_TEST_PACMAN_EXIT_CODE=91
+    export MOGUET_TEST_SUDO_EXIT_CODE=92
     case_count=$((case_count + 1))
 }
 
@@ -145,7 +149,7 @@ assert_event_count() {
 }
 
 assert_cache_absent() {
-    if [ -e "$XDG_CACHE_HOME/jpacker" ]; then
+    if [ -e "$XDG_CACHE_HOME/moguet" ]; then
         fail_case "invalid upgrade-all invocation initialized the cache"
     fi
 }
@@ -186,8 +190,8 @@ run_matrix_case() {
     setup_case \
         "matrix-$matrix_kind-$matrix_index" \
         aur-presentation-matrix
-    export JPACKER_TEST_UPGRADE_ALL_MATRIX_KIND=$matrix_kind
-    export JPACKER_TEST_UPGRADE_ALL_MATRIX_INDEX=$matrix_index
+    export MOGUET_TEST_UPGRADE_ALL_MATRIX_KIND=$matrix_kind
+    export MOGUET_TEST_UPGRADE_ALL_MATRIX_INDEX=$matrix_index
     run_status "$expected_matrix_status" upgrade-all
 
     if [ "$expected_stdout_fragment" != "-" ]; then
@@ -247,7 +251,7 @@ assert_no_external_mutation
 
 # 2-5: existing route compatibility.
 setup_case legacy-upgrade no-updates
-export JPACKER_TEST_SUDO_EXIT_CODE=0
+export MOGUET_TEST_SUDO_EXIT_CODE=0
 run_status 0 upgrade
 assert_exact_line "sudo pacman -Syu" "$command_log"
 assert_aggregate_absent
@@ -258,7 +262,7 @@ assert_exact_line "AUR update: no updates" "$stdout_file"
 assert_aggregate_absent
 
 setup_case generic-syu no-updates
-export JPACKER_TEST_SUDO_EXIT_CODE=0
+export MOGUET_TEST_SUDO_EXIT_CODE=0
 run_status 0 -Syu
 assert_exact_line "sudo pacman -Syu" "$command_log"
 assert_aggregate_absent
@@ -300,14 +304,28 @@ run_status 1 upgrade-all --repo
 assert_validation_rejected_without_work \
     "Unsupported upgrade-all option: --repo"
 
-# 12-16: supported options are independently propagated to both aggregate
+# 12-21: supported typed and invocation-only options are independently propagated to both aggregate
 # boundaries without CLI-side reinterpretation.
+setup_case option-edit no-updates
+run_status 0 upgrade-all --edit
+assert_event_count 1 \
+    "upgrade-all prepare noedit=false nodiff=false noconfirm=false rebuild=false cleanbuild=false rmdeps=false"
+assert_event_count 1 \
+    "upgrade-all execute noedit=false nodiff=false noconfirm=false rebuild=false cleanbuild=false rmdeps=false"
+
 setup_case option-noedit no-updates
 run_status 0 upgrade-all --noedit
 assert_event_count 1 \
     "upgrade-all prepare noedit=true nodiff=false noconfirm=false rebuild=false cleanbuild=false rmdeps=false"
 assert_event_count 1 \
     "upgrade-all execute noedit=true nodiff=false noconfirm=false rebuild=false cleanbuild=false rmdeps=false"
+
+setup_case option-diff no-updates
+run_status 0 upgrade-all --diff
+assert_event_count 1 \
+    "upgrade-all prepare noedit=false nodiff=false noconfirm=false rebuild=false cleanbuild=false rmdeps=false"
+assert_event_count 1 \
+    "upgrade-all execute noedit=false nodiff=false noconfirm=false rebuild=false cleanbuild=false rmdeps=false"
 
 setup_case option-nodiff no-updates
 run_status 0 upgrade-all --nodiff
@@ -323,12 +341,33 @@ assert_event_count 1 \
 assert_event_count 1 \
     "upgrade-all execute noedit=false nodiff=false noconfirm=true rebuild=false cleanbuild=false rmdeps=false"
 
+setup_case option-build-mode-normal no-updates
+run_status 0 upgrade-all --build-mode=normal
+assert_event_count 1 \
+    "upgrade-all prepare noedit=false nodiff=false noconfirm=false rebuild=false cleanbuild=false rmdeps=false"
+assert_event_count 1 \
+    "upgrade-all execute noedit=false nodiff=false noconfirm=false rebuild=false cleanbuild=false rmdeps=false"
+
+setup_case option-build-mode-rebuild no-updates
+run_status 0 upgrade-all --build-mode=rebuild
+assert_event_count 1 \
+    "upgrade-all prepare noedit=false nodiff=false noconfirm=false rebuild=true cleanbuild=false rmdeps=false"
+assert_event_count 1 \
+    "upgrade-all execute noedit=false nodiff=false noconfirm=false rebuild=true cleanbuild=false rmdeps=false"
+
 setup_case option-rebuild no-updates
 run_status 0 upgrade-all --rebuild
 assert_event_count 1 \
     "upgrade-all prepare noedit=false nodiff=false noconfirm=false rebuild=true cleanbuild=false rmdeps=false"
 assert_event_count 1 \
     "upgrade-all execute noedit=false nodiff=false noconfirm=false rebuild=true cleanbuild=false rmdeps=false"
+
+setup_case option-build-mode-clean no-updates
+run_status 0 upgrade-all --build-mode=clean
+assert_event_count 1 \
+    "upgrade-all prepare noedit=false nodiff=false noconfirm=false rebuild=false cleanbuild=true rmdeps=false"
+assert_event_count 1 \
+    "upgrade-all execute noedit=false nodiff=false noconfirm=false rebuild=false cleanbuild=true rmdeps=false"
 
 setup_case option-cleanbuild no-updates
 run_status 0 upgrade-all --cleanbuild
@@ -337,7 +376,7 @@ assert_event_count 1 \
 assert_event_count 1 \
     "upgrade-all execute noedit=false nodiff=false noconfirm=false rebuild=false cleanbuild=true rmdeps=false"
 
-# 17-22: success matrix and normal detailed presentation.
+# 22-27: success matrix and normal detailed presentation.
 setup_case completed-changed completed-changed
 run_status 0 upgrade-all
 assert_exact_line "system: completed" "$stdout_file"
@@ -613,7 +652,7 @@ run_status 1 upgrade-all
 assert_exact_line "system: failed" "$stdout_file"
 assert_not_exact_line "system: not attempted" "$stdout_file"
 assert_contains \
-    "System result unavailable after phase started due to an unexpected exception" \
+    "The system result is unavailable because an unexpected exception occurred after the phase started." \
     "$stderr_file"
 assert_exact_line "upgrade-all result inconsistent" "$stdout_file"
 
@@ -624,7 +663,7 @@ assert_exact_line \
     "registered source: source-recorded-before-exception: updated" \
     "$stdout_file"
 assert_exact_line \
-    "registered source: source-unavailable-after-start: incomplete: Registered source result unavailable after phase started due to an unexpected exception" \
+    "registered source: source-unavailable-after-start: incomplete: The registered source result is unavailable because an unexpected exception occurred after the phase started." \
     "$stdout_file"
 assert_not_contains \
     "registered source: source-unavailable-after-start: not attempted" \
@@ -634,7 +673,7 @@ assert_exact_line \
     "$stdout_file"
 assert_exact_line "partial completion" "$stdout_file"
 assert_contains \
-    "Registered source result unavailable after phase started due to an unexpected exception" \
+    "The registered source result is unavailable because an unexpected exception occurred after the phase started." \
     "$stderr_file"
 
 # A synthetically successful aggregate status must never mask typed
@@ -700,24 +739,25 @@ assert_not_contains "upgrade-all completed" "$stdout_file"
 # stub; the last row of each enum table injects an unknown value and proves
 # that the command boundary fails closed.
 run_matrix_table aur-phase-status 8 <<'EOF'
-1|AUR phase not attempted: preparation blocked|upgrade-all result contains failure details despite a successful aggregate status.
+1|AUR phase not attempted: preparation blocked|The upgrade-all result contains failure details despite a successful aggregate status.
 0|AUR phase: no updates|-
 0|AUR phase: completed|-
-1|AUR phase: blocked before execution|upgrade-all result contains failure details despite a successful aggregate status.
-1|AUR phase: stopped on work-item failure|upgrade-all result contains failure details despite a successful aggregate status.
-1|AUR phase: stopped after cleanup failure|upgrade-all result contains failure details despite a successful aggregate status.
-1|AUR phase: inconsistent result|upgrade-all result contains failure details despite a successful aggregate status.
+1|AUR phase: blocked before execution|The upgrade-all result contains failure details despite a successful aggregate status.
+1|AUR phase: stopped on work-item failure|The upgrade-all result contains failure details despite a successful aggregate status.
+1|AUR phase: stopped after cleanup failure|The upgrade-all result contains failure details despite a successful aggregate status.
+1|AUR phase: inconsistent result|The upgrade-all result contains failure details despite a successful aggregate status.
 1|system: completed|Unexpected upgrade-all command failure: Unknown upgrade-all AUR phase status.
 EOF
 
-run_matrix_table not-attempted-reason 8 <<'EOF'
-1|AUR phase not attempted: preparation blocked|upgrade-all result contains failure details despite a successful aggregate status.
-1|AUR phase not attempted: system failure|upgrade-all result contains failure details despite a successful aggregate status.
-1|AUR phase not attempted: source failure|upgrade-all result contains failure details despite a successful aggregate status.
-1|AUR phase not attempted: source cleanup failure|upgrade-all result contains failure details despite a successful aggregate status.
-1|AUR phase not attempted: system/source phase incomplete|upgrade-all result contains failure details despite a successful aggregate status.
-1|AUR phase not attempted: foreign inventory failure|upgrade-all result contains failure details despite a successful aggregate status.
-1|AUR phase not attempted: prior aggregate inconsistency|upgrade-all result contains failure details despite a successful aggregate status.
+run_matrix_table not-attempted-reason 9 <<'EOF'
+1|AUR phase not attempted: preparation blocked|The upgrade-all result contains failure details despite a successful aggregate status.
+1|AUR phase not attempted: system failure|The upgrade-all result contains failure details despite a successful aggregate status.
+1|AUR phase not attempted: source failure|The upgrade-all result contains failure details despite a successful aggregate status.
+1|AUR phase not attempted: source cleanup failure|The upgrade-all result contains failure details despite a successful aggregate status.
+1|AUR phase not attempted: system/source phase incomplete|The upgrade-all result contains failure details despite a successful aggregate status.
+1|AUR phase not attempted: foreign inventory failure|The upgrade-all result contains failure details despite a successful aggregate status.
+1|AUR phase not attempted: cache authority failure|The upgrade-all result contains failure details despite a successful aggregate status.
+1|AUR phase not attempted: prior aggregate inconsistency|The upgrade-all result contains failure details despite a successful aggregate status.
 1|system: completed|Unexpected upgrade-all command failure: Unknown upgrade-all NotAttempted reason.
 EOF
 
@@ -725,22 +765,22 @@ run_matrix_table target-status 10 <<'EOF'
 0|AUR target: matrix-target: updated|-
 0|AUR target: matrix-target: no change|-
 0|AUR target: matrix-target: skipped: reason unavailable|-
-1|AUR target: matrix-target: unsupported: reason unavailable|upgrade-all result contains failure details despite a successful aggregate status.
-1|AUR target: matrix-target: incomplete: reason unavailable|upgrade-all result contains failure details despite a successful aggregate status.
+1|AUR target: matrix-target: unsupported: reason unavailable|The upgrade-all result contains failure details despite a successful aggregate status.
+1|AUR target: matrix-target: incomplete: reason unavailable|The upgrade-all result contains failure details despite a successful aggregate status.
 1|AUR target: matrix-target: failed: build or install failure|execution failure: build or install failure
 1|AUR target: matrix-target: updated, but cleanup failed|execution failure: cleanup failure after successful package transaction
 1|AUR target: matrix-target: no package change, but cleanup failed|execution failure: cleanup failure after successful package transaction
-1|AUR target: matrix-target: not attempted: prior work item stopped|upgrade-all result contains failure details despite a successful aggregate status.
+1|AUR target: matrix-target: not attempted: prior work item stopped|The upgrade-all result contains failure details despite a successful aggregate status.
 1|system: completed|Unexpected upgrade-all command failure: Unknown AUR update target status.
 EOF
 
 run_matrix_table operation-status 7 <<'EOF'
-1|AUR target: matrix-target: not attempted: result inconsistent|upgrade-all result contains failure details despite a successful aggregate status.
-1|AUR target: matrix-target: not attempted: result inconsistent|upgrade-all result contains failure details despite a successful aggregate status.
-1|AUR target: matrix-target: not attempted: operation blocked before execution|upgrade-all result contains failure details despite a successful aggregate status.
-1|AUR target: matrix-target: not attempted: prior work item stopped|upgrade-all result contains failure details despite a successful aggregate status.
-1|AUR target: matrix-target: not attempted: prior work item stopped|upgrade-all result contains failure details despite a successful aggregate status.
-1|AUR target: matrix-target: not attempted: result inconsistent|upgrade-all result contains failure details despite a successful aggregate status.
+1|AUR target: matrix-target: not attempted: result inconsistent|The upgrade-all result contains failure details despite a successful aggregate status.
+1|AUR target: matrix-target: not attempted: result inconsistent|The upgrade-all result contains failure details despite a successful aggregate status.
+1|AUR target: matrix-target: not attempted: operation blocked before execution|The upgrade-all result contains failure details despite a successful aggregate status.
+1|AUR target: matrix-target: not attempted: prior work item stopped|The upgrade-all result contains failure details despite a successful aggregate status.
+1|AUR target: matrix-target: not attempted: prior work item stopped|The upgrade-all result contains failure details despite a successful aggregate status.
+1|AUR target: matrix-target: not attempted: result inconsistent|The upgrade-all result contains failure details despite a successful aggregate status.
 1|AUR phase: completed|Unexpected upgrade-all command failure: Unknown AUR update operation status.
 EOF
 
@@ -788,11 +828,11 @@ run_matrix_table preparation-reason 16 <<'EOF'
 EOF
 
 run_matrix_table execution-failure-kind 6 <<'EOF'
-1|AUR target: matrix-target: failed: failure category unavailable|upgrade-all result contains failure details despite a successful aggregate status.
+1|AUR target: matrix-target: failed: failure category unavailable|The upgrade-all result contains failure details despite a successful aggregate status.
 1|AUR target: matrix-target: failed: build or install failure|execution failure: build or install failure
 1|AUR target: matrix-target: updated, but cleanup failed|execution failure: cleanup failure after successful package transaction
 1|AUR target: matrix-target: failed: unknown exception|execution failure: unknown exception
-1|AUR target: matrix-target: not attempted: prior work item stopped|upgrade-all result contains failure details despite a successful aggregate status.
+1|AUR target: matrix-target: not attempted: prior work item stopped|The upgrade-all result contains failure details despite a successful aggregate status.
 1|-|Unexpected upgrade-all command failure: Unknown AUR work-item failure kind.
 EOF
 
@@ -906,7 +946,7 @@ run_matrix_table external-attribution-missing 1 <<'EOF'
 1|AUR phase: completed|Unexpected upgrade-all command failure: External satisfaction has no explicit source identity.
 EOF
 
-if [ "$case_count" -ne 207 ]; then
+if [ "$case_count" -ne 213 ]; then
     echo "upgrade-all command test scenario count drifted: $case_count" >&2
     exit 1
 fi

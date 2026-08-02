@@ -4,6 +4,7 @@
 #include "stubs/artifact-install-executor/process_stub.hpp"
 #include "stubs/package-metadata/alpm_stub.hpp"
 #include "trusted_cache.hpp"
+#include "trusted_cache_test_support.hpp"
 
 #include <cstdlib>
 #include <exception>
@@ -153,7 +154,7 @@ public:
     TemporaryCacheHome() {
         const std::string template_text =
                 (fs::temp_directory_path() /
-                 "jpacker-artifact-install-executor-test-XXXXXX")
+                 "moguet-artifact-install-executor-test-XXXXXX")
                         .string();
         std::vector<char> path_template(
                 template_text.begin(), template_text.end());
@@ -212,7 +213,8 @@ class ArtifactFixture final {
 public:
     explicit ArtifactFixture(const std::string& artifact_leaf_name) {
         ArtifactWorkspace workspace = create_artifact_workspace(
-                prepare_private_trusted_cache_root());
+                prepare_private_trusted_cache_root(
+                        prepare_test_trusted_cache_root()));
         workspace_path_ = workspace.path();
         artifact_path_ = workspace.path() / artifact_leaf_name;
 
@@ -869,7 +871,7 @@ void test_preparation_failures_preserve_artifact() {
                 "same-version needed reason change");
         expect(
                 message ==
-                        "Cannot change install reason because --needed may skip "
+                        "Cannot change the install reason because --needed may skip "
                         "the same-version install.",
                 "Same-version --needed reducer diagnostic differs");
         expect_caller_still_owns_valid_artifact(

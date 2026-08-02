@@ -3,8 +3,8 @@ set -eu
 
 test_binary=$1
 repo_root=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
-JPACKER_TEST_REPOSITORY_ROOT=$repo_root
-export JPACKER_TEST_REPOSITORY_ROOT
+MOGUET_TEST_REPOSITORY_ROOT=$repo_root
+export MOGUET_TEST_REPOSITORY_ROOT
 . "$repo_root/tests/test-command-safety.sh"
 tmp_dir=$(mktemp -d)
 server_pid=
@@ -18,7 +18,7 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-mkdir -p "$tmp_dir/cache" "$tmp_dir/home"
+mkdir -p "$tmp_dir/cache" "$tmp_dir/home" "$tmp_dir/state"
 command_log=$tmp_dir/commands.log
 : > "$command_log"
 
@@ -39,6 +39,7 @@ done
 
 port=$(cat "$port_file")
 export HOME=$tmp_dir/home
+export XDG_STATE_HOME=$tmp_dir/state
 export XDG_CACHE_HOME=$tmp_dir/cache
 export PATH=$repo_root/tests/stubs:/usr/bin:/bin
 require_exact_test_command pacman-conf "$repo_root/tests/stubs/pacman-conf"
@@ -46,18 +47,18 @@ require_exact_test_command makepkg "$repo_root/tests/stubs/makepkg"
 require_exact_test_command pacman "$repo_root/tests/stubs/pacman"
 require_exact_test_command sudo "$repo_root/tests/stubs/sudo"
 require_exact_test_command git "$repo_root/tests/stubs/git"
-export JPACKER_TEST_AUR_RPC_BASE_URL=http://127.0.0.1:$port/rpc/
-export JPACKER_TEST_COMMAND_LOG=$command_log
-export JPACKER_TEST_PACMAN_EXIT_CODE=1
-export JPACKER_TEST_SUDO_EXIT_CODE=99
-unset JPACKER_TEST_PACMAN_QM_OUTPUT
-unset JPACKER_TEST_PACMAN_REPO_PACKAGES
-unset JPACKER_TEST_PACKAGE_BUILD_DIR
-unset JPACKER_TEST_GIT_REMOTE_URL
-unset JPACKER_TEST_GIT_CLONE_EXIT_CODE
-unset JPACKER_TEST_GIT_CLONE_SYMLINK_TARGET
-unset JPACKER_TEST_GIT_CLONE_FIXTURE_DIR
-unset JPACKER_TEST_MAKEPKG_EXIT_CODE
+export MOGUET_TEST_AUR_RPC_BASE_URL=http://127.0.0.1:$port/rpc/
+export MOGUET_TEST_COMMAND_LOG=$command_log
+export MOGUET_TEST_PACMAN_EXIT_CODE=1
+export MOGUET_TEST_SUDO_EXIT_CODE=99
+unset MOGUET_TEST_PACMAN_QM_OUTPUT
+unset MOGUET_TEST_PACMAN_REPO_PACKAGES
+unset MOGUET_TEST_PACKAGE_BUILD_DIR
+unset MOGUET_TEST_GIT_REMOTE_URL
+unset MOGUET_TEST_GIT_CLONE_EXIT_CODE
+unset MOGUET_TEST_GIT_CLONE_SYMLINK_TARGET
+unset MOGUET_TEST_GIT_CLONE_FIXTURE_DIR
+unset MOGUET_TEST_MAKEPKG_EXIT_CODE
 
 run_ok() {
     output_file=$1

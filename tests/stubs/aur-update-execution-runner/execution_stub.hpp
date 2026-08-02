@@ -2,6 +2,7 @@
 
 #include "app_config.hpp"
 #include "source_install.hpp"
+#include "trusted_cache.hpp"
 
 #include <cstddef>
 #include <optional>
@@ -85,6 +86,10 @@ void enqueue_mixed_reason_failure(
 void enqueue_metadata_failure(
         ExpectedExecution expected,
         PackageMetadataFailure failure);
+
+void enqueue_trusted_cache_failure(
+        ExpectedExecution expected,
+        TrustedCacheFailure failure);
 
 void enqueue_transaction_failure(
         ExpectedExecution expected,

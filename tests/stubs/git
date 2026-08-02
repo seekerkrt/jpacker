@@ -1,35 +1,121 @@
 #!/bin/sh
-printf 'git %s\n' "$*" >> "$JPACKER_TEST_COMMAND_LOG"
+
+if [ -n "${MOGUET_TEST_TRUSTED_GIT_BOUNDARY:-}" ]; then
+    unsafe_environment=
+    for variable_name in \
+        GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_OBJECT_DIRECTORY \
+        GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_INDEX_FILE GIT_NAMESPACE \
+        GIT_CONFIG GIT_CONFIG_PARAMETERS GIT_CONFIG_COUNT \
+        GIT_EXEC_PATH GIT_TEMPLATE_DIR GIT_SSH GIT_SSH_COMMAND \
+        GIT_PROXY_COMMAND XDG_CONFIG_HOME LD_PRELOAD LD_LIBRARY_PATH \
+        SHELL BASH_ENV ENV CDPATH GIT_SSL_NO_VERIFY CURL_CA_BUNDLE \
+        MOGUET_UNRECOGNIZED_ENVIRONMENT_SENTINEL; do
+        if /usr/bin/printenv "$variable_name" >/dev/null 2>&1; then
+            unsafe_environment=1
+        fi
+    done
+    if env | grep -E '^GIT_CONFIG_(KEY|VALUE)_[0-9]+=' >/dev/null; then
+        unsafe_environment=1
+    fi
+    if [ -n "${HOME+x}" ] ||
+       [ "${PATH:-}" != "/usr/bin:/bin" ] ||
+       [ "${GIT_CONFIG_NOSYSTEM:-}" != "1" ] ||
+       [ "${GIT_CONFIG_SYSTEM:-}" != "/dev/null" ] ||
+       [ "${GIT_CONFIG_GLOBAL:-}" != "/dev/null" ] ||
+       [ "${GIT_TERMINAL_PROMPT:-}" != "0" ] ||
+       [ "${GIT_ASKPASS:-}" != "/bin/false" ] ||
+       [ "${SSH_ASKPASS:-}" != "/bin/false" ]; then
+        unsafe_environment=1
+    fi
+    if [ -n "$unsafe_environment" ] &&
+       [ -n "${MOGUET_TEST_TRUSTED_GIT_UNSAFE_MARKER:-}" ]; then
+        printf 'unsafe inherited Git environment\n' > \
+            "$MOGUET_TEST_TRUSTED_GIT_UNSAFE_MARKER"
+    fi
+    if [ -n "${MOGUET_TEST_TRUSTED_GIT_DISPLAY_COMMAND:-}" ]; then
+        printf '%s\n' "$MOGUET_TEST_TRUSTED_GIT_DISPLAY_COMMAND" >> \
+            "$MOGUET_TEST_COMMAND_LOG"
+    fi
+    if [ -n "${MOGUET_TEST_TRUSTED_GIT_ENVIRONMENT_LOG:-}" ]; then
+        for variable_name in \
+            http_proxy https_proxy all_proxy no_proxy \
+            HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY \
+            SSL_CERT_FILE SSL_CERT_DIR GIT_SSL_CAINFO GIT_SSL_CAPATH; do
+            if /usr/bin/printenv "$variable_name" >/dev/null 2>&1; then
+                eval "variable_value=\${$variable_name-}"
+                printf '%s=%s\n' "$variable_name" "$variable_value" >> \
+                    "$MOGUET_TEST_TRUSTED_GIT_ENVIRONMENT_LOG"
+            fi
+        done
+    fi
+else
+    printf 'git %s\n' "$*" >> "$MOGUET_TEST_COMMAND_LOG"
+fi
+
+trusted_git_directory=
+trusted_git_worktree=
+while [ "$#" -gt 0 ]; do
+    case $1 in
+        --no-pager)
+            shift
+            ;;
+        -c)
+            [ "$#" -ge 2 ] || exit 127
+            shift 2
+            ;;
+        --git-dir=*)
+            trusted_git_directory=${1#--git-dir=}
+            shift
+            ;;
+        --work-tree=*)
+            trusted_git_worktree=${1#--work-tree=}
+            shift
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
+
+if [ -n "${MOGUET_TEST_TRUSTED_GIT_BOUNDARY:-}" ] &&
+   [ "${1:-}" != "clone" ] &&
+   { [ -z "$trusted_git_directory" ] || [ -z "$trusted_git_worktree" ]; } &&
+   [ -n "${MOGUET_TEST_TRUSTED_GIT_UNSAFE_MARKER:-}" ]; then
+    printf 'missing explicit repository/worktree binding\n' > \
+        "$MOGUET_TEST_TRUSTED_GIT_UNSAFE_MARKER"
+fi
+
+config_worktree=${trusted_git_worktree:-$PWD}
 if [ "$1" = "symbolic-ref" ]; then
-    if [ -n "${JPACKER_TEST_GIT_SYMBOLIC_REF:-}" ]; then
-        printf '%s\n' "$JPACKER_TEST_GIT_SYMBOLIC_REF"
+    if [ -n "${MOGUET_TEST_GIT_SYMBOLIC_REF:-}" ]; then
+        printf '%s\n' "$MOGUET_TEST_GIT_SYMBOLIC_REF"
         exit 0
     fi
-    exit "${JPACKER_TEST_GIT_SYMBOLIC_REF_EXIT_CODE:-1}"
+    exit "${MOGUET_TEST_GIT_SYMBOLIC_REF_EXIT_CODE:-1}"
 fi
 if [ "$1" = "show-ref" ]; then
     case ${4:-} in
         refs/remotes/origin/main)
-            exit "${JPACKER_TEST_GIT_MAIN_REF_EXIT_CODE:-0}"
+            exit "${MOGUET_TEST_GIT_MAIN_REF_EXIT_CODE:-0}"
             ;;
         refs/remotes/origin/master)
-            exit "${JPACKER_TEST_GIT_MASTER_REF_EXIT_CODE:-0}"
+            exit "${MOGUET_TEST_GIT_MASTER_REF_EXIT_CODE:-0}"
             ;;
     esac
 fi
 if [ "$1" = "diff" ]; then
     case ${2:-} in
         --quiet)
-            exit "${JPACKER_TEST_GIT_DIFF_QUIET_EXIT_CODE:-0}"
+            exit "${MOGUET_TEST_GIT_DIFF_QUIET_EXIT_CODE:-0}"
             ;;
         --name-only)
-            if [ -n "${JPACKER_TEST_GIT_CHANGED_FILES:-}" ]; then
-                printf '%b' "$JPACKER_TEST_GIT_CHANGED_FILES"
+            if [ -n "${MOGUET_TEST_GIT_CHANGED_FILES:-}" ]; then
+                printf '%b' "$MOGUET_TEST_GIT_CHANGED_FILES"
             fi
-            exit "${JPACKER_TEST_GIT_DIFF_NAME_ONLY_EXIT_CODE:-0}"
+            exit "${MOGUET_TEST_GIT_DIFF_NAME_ONLY_EXIT_CODE:-0}"
             ;;
     esac
-    exit "${JPACKER_TEST_GIT_DIFF_COLOR_EXIT_CODE:-0}"
+    exit "${MOGUET_TEST_GIT_DIFF_COLOR_EXIT_CODE:-0}"
 fi
 if [ "$1" = "clone" ]; then
     clone_url=
@@ -51,40 +137,72 @@ if [ "$1" = "clone" ]; then
         esac
         shift
     done
-    if [ -n "${JPACKER_TEST_GIT_CLONE_FAIL_DESTINATION:-}" ] &&
-       [ "$clone_destination" = "$JPACKER_TEST_GIT_CLONE_FAIL_DESTINATION" ]; then
-        exit "${JPACKER_TEST_GIT_CLONE_FAIL_DESTINATION_EXIT_CODE:-1}"
+    if [ -n "${MOGUET_TEST_GIT_CLONE_FAIL_DESTINATION:-}" ] &&
+       { [ "$clone_destination" = "$MOGUET_TEST_GIT_CLONE_FAIL_DESTINATION" ] ||
+         [ "$(basename "$clone_destination")" = "$MOGUET_TEST_GIT_CLONE_FAIL_DESTINATION" ]; }; then
+        exit "${MOGUET_TEST_GIT_CLONE_FAIL_DESTINATION_EXIT_CODE:-1}"
     fi
-    if [ -n "${JPACKER_TEST_GIT_CLONE_SYMLINK_TARGET:-}" ]; then
-        ln -s "$JPACKER_TEST_GIT_CLONE_SYMLINK_TARGET" "$clone_destination"
-        exit "${JPACKER_TEST_GIT_CLONE_EXIT_CODE:-1}"
+    if [ -n "${MOGUET_TEST_GIT_CLONE_SYMLINK_TARGET:-}" ]; then
+        # Production owns an empty 0700 destination before invoking git clone.
+        # Replace that exact directory so rollback exercises the named-path
+        # identity check instead of creating a symlink inside it.
+        if [ -d "$clone_destination" ] && [ ! -L "$clone_destination" ]; then
+            rmdir "$clone_destination" || exit 1
+        fi
+        ln -s "$MOGUET_TEST_GIT_CLONE_SYMLINK_TARGET" "$clone_destination"
+        exit "${MOGUET_TEST_GIT_CLONE_EXIT_CODE:-1}"
     fi
-    if [ -n "${JPACKER_TEST_GIT_CLONE_FIXTURE_DIR:-}" ]; then
+    if [ -n "${MOGUET_TEST_GIT_CLONE_FIXTURE_DIR:-}" ]; then
+        clone_destination_mode=$(
+            /usr/bin/stat --dereference --format='%a' -- "$clone_destination"
+        ) || exit 1
         mkdir -p "$clone_destination"
-        if ! cp -a "$JPACKER_TEST_GIT_CLONE_FIXTURE_DIR/." "$clone_destination/"; then
+        if ! cp -a "$MOGUET_TEST_GIT_CLONE_FIXTURE_DIR/." "$clone_destination/"; then
             exit 1
         fi
+        # Real Git preserves the caller-owned existing destination mode. cp -a
+        # otherwise copies the fixture root's mode onto that directory and
+        # fabricates a rollback refusal unrelated to clone behavior.
+        /usr/bin/chmod -- "$clone_destination_mode" "$clone_destination" || exit 1
         if [ -d "$clone_destination/.git" ] && [ ! -L "$clone_destination/.git" ]; then
-            printf '%s\n' "$clone_url" > "$clone_destination/.git/.jpacker-test-remote-url" || exit 1
+            printf '%s\n' "$clone_url" > "$clone_destination/.git/.moguet-test-remote-url" || exit 1
         fi
-        if [ -e "$clone_destination/.jpacker-test-pkgbuild-unreadable" ]; then
-            rm "$clone_destination/.jpacker-test-pkgbuild-unreadable" || exit 1
+        if [ -e "$clone_destination/.moguet-test-pkgbuild-unreadable" ]; then
+            rm "$clone_destination/.moguet-test-pkgbuild-unreadable" || exit 1
             chmod 000 "$clone_destination/PKGBUILD" || exit 1
         fi
-        if [ -f "$clone_destination/.jpacker-test-final-destination" ]; then
-            final_destination=$(cat "$clone_destination/.jpacker-test-final-destination") || exit 1
-            rm "$clone_destination/.jpacker-test-final-destination" || exit 1
-            mkdir "$PWD/$final_destination" || exit 1
-            printf 'concurrent user path\n' > "$PWD/$final_destination/user-file"
+        if [ -f "$clone_destination/.moguet-test-final-destination" ]; then
+            final_destination=$(cat "$clone_destination/.moguet-test-final-destination") || exit 1
+            rm "$clone_destination/.moguet-test-final-destination" || exit 1
+            case $clone_destination in
+                /proc/*/fd/*)
+                    # PKGBUILD export binds its already-open destination through
+                    # /proc.  The race fixture still targets the caller-visible
+                    # export parent, not the procfs descriptor directory.
+                    clone_parent=$PWD
+                    ;;
+                *)
+                    clone_parent=$(dirname "$clone_destination") || exit 1
+                    ;;
+            esac
+            mkdir "$clone_parent/$final_destination" || exit 1
+            printf 'concurrent user path\n' > "$clone_parent/$final_destination/user-file"
         fi
-        if [ -e "$clone_destination/.jpacker-test-rename-cwd" ]; then
-            rm "$clone_destination/.jpacker-test-rename-cwd" || exit 1
-            original_work_dir=$PWD
+        if [ -e "$clone_destination/.moguet-test-rename-cwd" ]; then
+            rm "$clone_destination/.moguet-test-rename-cwd" || exit 1
+            case $clone_destination in
+                /proc/*/fd/*)
+                    original_work_dir=$PWD
+                    ;;
+                *)
+                    original_work_dir=$(dirname "$clone_destination") || exit 1
+                    ;;
+            esac
             mv "$original_work_dir" "$original_work_dir-moved" || exit 1
             mkdir "$original_work_dir" || exit 1
         fi
-        if [ -e "$clone_destination/.jpacker-test-swap-temp-identity" ]; then
-            rm "$clone_destination/.jpacker-test-swap-temp-identity" || exit 1
+        if [ -e "$clone_destination/.moguet-test-swap-temp-identity" ]; then
+            rm "$clone_destination/.moguet-test-swap-temp-identity" || exit 1
             original_clone_path=$(readlink -f "$clone_destination") || exit 1
             mv "$original_clone_path" "$original_clone_path.owned-original" || exit 1
             mkdir "$original_clone_path" || exit 1
@@ -92,31 +210,84 @@ if [ "$1" = "clone" ]; then
         fi
     else
         mkdir -p "$clone_destination/.git"
-        printf 'pkgname=jpacker-test-fixture\npkgver=1\npkgrel=1\n' > "$clone_destination/PKGBUILD"
-        printf '%s\n' "$clone_url" > "$clone_destination/.git/.jpacker-test-remote-url"
+        printf 'pkgname=moguet-test-fixture\npkgver=1\npkgrel=1\n' > "$clone_destination/PKGBUILD"
+        printf '%s\n' "$clone_url" > "$clone_destination/.git/.moguet-test-remote-url"
     fi
-    exit "${JPACKER_TEST_GIT_CLONE_EXIT_CODE:-0}"
+    exit "${MOGUET_TEST_GIT_CLONE_EXIT_CODE:-0}"
 fi
 if [ "$1" = "reset" ] && [ "${2:-}" = "--hard" ] &&
-   [ -n "${JPACKER_TEST_GIT_RESET_SRCINFO_FIXTURE:-}" ]; then
+   [ -n "${MOGUET_TEST_GIT_RESET_SRCINFO_FIXTURE:-}" ]; then
     # resetだけがremote fixtureをworking treeへ反映する。
-    /usr/bin/cp -- "$JPACKER_TEST_GIT_RESET_SRCINFO_FIXTURE" "$PWD/.SRCINFO" || exit 1
+    /usr/bin/cp -- "$MOGUET_TEST_GIT_RESET_SRCINFO_FIXTURE" \
+        "$config_worktree/.SRCINFO" || exit 1
 fi
-config_worktree=$PWD
+if [ "$1" = "fetch" ] &&
+   [ -n "${MOGUET_TEST_GIT_FETCH_REPLACE_PKGBUILD_SYMLINK_TARGET:-}" ]; then
+    rm -f "$config_worktree/PKGBUILD" || exit 1
+    ln -s "$MOGUET_TEST_GIT_FETCH_REPLACE_PKGBUILD_SYMLINK_TARGET" \
+        "$config_worktree/PKGBUILD" || exit 1
+fi
+if [ "$1" = "fetch" ] &&
+   [ -n "${MOGUET_TEST_TRUSTED_GIT_FETCH_MARKER:-}" ]; then
+    printf 'trusted fetch target\n' > \
+        "$config_worktree/$MOGUET_TEST_TRUSTED_GIT_FETCH_MARKER" || exit 1
+fi
 if [ "$1" = "-C" ] && [ "${3:-}" = "config" ]; then
     config_worktree=$2
     shift 2
 fi
 if [ "$1" = "config" ]; then
-    if [ -e "$config_worktree/.jpacker-test-missing-remote" ]; then
-        exit 1
+    if [ -n "${MOGUET_TEST_GIT_CONFIG_REPLACE_PKGBUILD_SYMLINK_TARGET:-}" ]; then
+        rm -f "$config_worktree/PKGBUILD" || exit 1
+        ln -s "$MOGUET_TEST_GIT_CONFIG_REPLACE_PKGBUILD_SYMLINK_TARGET" \
+            "$config_worktree/PKGBUILD" || exit 1
     fi
-    if [ -n "${JPACKER_TEST_GIT_REMOTE_URL:-}" ]; then
-        printf '%s\n' "$JPACKER_TEST_GIT_REMOTE_URL"
+    is_null_list=
+    for config_argument in "$@"; do
+        case $config_argument in
+            --null|--list)
+                is_null_list=1
+                ;;
+        esac
+    done
+    if [ -n "$is_null_list" ]; then
+        if [ -n "${MOGUET_TEST_GIT_CONFIG_RAW_OUTPUT_FILE:-}" ]; then
+            /usr/bin/cat -- "$MOGUET_TEST_GIT_CONFIG_RAW_OUTPUT_FILE" || exit 1
+            exit "${MOGUET_TEST_GIT_CONFIG_RAW_OUTPUT_EXIT_CODE:-0}"
+        fi
+        if [ -f "$config_worktree/.git/config" ]; then
+            exec /usr/bin/git config \
+                --file "$config_worktree/.git/config" \
+                --no-includes --null --list
+        fi
+        printf 'core.repositoryformatversion\n0\0'
+        printf 'core.filemode\ntrue\0'
+        printf 'core.bare\nfalse\0'
+        printf 'core.logallrefupdates\ntrue\0'
+        if [ ! -e "$config_worktree/.moguet-test-missing-remote" ]; then
+            if [ -n "${MOGUET_TEST_GIT_REMOTE_URL:-}" ]; then
+                config_remote_url=$MOGUET_TEST_GIT_REMOTE_URL
+            elif [ -f "$config_worktree/.git/.moguet-test-remote-url" ]; then
+                config_remote_url=$(cat "$config_worktree/.git/.moguet-test-remote-url") || exit 1
+            else
+                config_remote_url=https://aur.archlinux.org/$(basename "$config_worktree").git
+            fi
+            printf 'remote.origin.url\n%s\0' "$config_remote_url"
+        fi
+        printf 'remote.origin.fetch\n+refs/heads/*:refs/remotes/origin/*\0'
+        printf 'branch.main.remote\norigin\0'
+        printf 'branch.main.merge\nrefs/heads/main\0'
         exit 0
     fi
-    if [ -f "$config_worktree/.git/.jpacker-test-remote-url" ]; then
-        cat "$config_worktree/.git/.jpacker-test-remote-url"
+    if [ -e "$config_worktree/.moguet-test-missing-remote" ]; then
+        exit 1
+    fi
+    if [ -n "${MOGUET_TEST_GIT_REMOTE_URL:-}" ]; then
+        printf '%s\n' "$MOGUET_TEST_GIT_REMOTE_URL"
+        exit 0
+    fi
+    if [ -f "$config_worktree/.git/.moguet-test-remote-url" ]; then
+        cat "$config_worktree/.git/.moguet-test-remote-url"
         exit 0
     fi
     printf 'https://aur.archlinux.org/%s.git\n' "$(basename "$config_worktree")"

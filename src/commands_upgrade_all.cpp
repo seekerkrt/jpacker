@@ -2,7 +2,9 @@
 
 #include "app_config.hpp"
 #include "aur_update_cli_presentation.hpp"
+#include "cli_authority.hpp"
 #include "cli_parser.hpp"
+#include "localization.hpp"
 #include "logging.hpp"
 #include "upgrade_all_operation.hpp"
 
@@ -19,157 +21,219 @@
 
 namespace {
 
-std::string_view package_state_label(PackageStateChange state) {
+constexpr std::string_view PACKAGE_BASE_FIELD = "PackageBase";
+constexpr std::string_view PKGDEST_KEY = "PKGDEST";
+constexpr std::string_view AUR_SERVICE = "AUR";
+constexpr std::string_view COMMAND_NAME = "upgrade-all";
+constexpr std::string_view PACMAN_COMMAND = "pacman";
+
+std::string package_state_label(PackageStateChange state) {
     switch(state) {
     case PackageStateChange::NoChange:
-        return "no change";
+        return localization::translate_message("no change");
     case PackageStateChange::Changed:
-        return "changed";
+        return localization::translate_message("changed");
     case PackageStateChange::Unknown:
-        return "unknown";
+        return localization::translate_message("unknown");
     }
-    throw std::logic_error("Unknown package-state change value.");
+    throw std::logic_error(localization::translate_message(
+            "Unknown package-state change value."));
 }
 
-std::string_view aggregate_package_state_label(PackageStateChange state) {
+std::string aggregate_package_state_label(PackageStateChange state) {
     switch(state) {
     case PackageStateChange::NoChange:
-        return "no package state change";
+        return localization::translate_message("no package state change");
     case PackageStateChange::Changed:
-        return "package state changed";
+        return localization::translate_message("package state changed");
     case PackageStateChange::Unknown:
-        return "package state change unknown";
+        return localization::translate_message("package state change unknown");
     }
-    throw std::logic_error("Unknown aggregate package-state change value.");
+    throw std::logic_error(localization::translate_message(
+            "Unknown aggregate package-state change value."));
 }
 
-std::string_view aggregate_status_label(UpgradeAllOperationStatus status) {
+std::string aggregate_status_label(UpgradeAllOperationStatus status) {
     switch(status) {
     case UpgradeAllOperationStatus::Completed:
-        return "upgrade-all completed";
+        // TRANSLATORS: The placeholder is the literal command name
+        // "upgrade-all".
+        return localization::format_translated_message("{} completed",
+                                                        COMMAND_NAME);
     case UpgradeAllOperationStatus::NoUpdates:
-        return "upgrade-all completed: no updates";
+        // TRANSLATORS: The placeholder is the literal command name
+        // "upgrade-all".
+        return localization::format_translated_message(
+                "{} completed: no updates", COMMAND_NAME);
     case UpgradeAllOperationStatus::BlockedBeforeMutation:
-        return "upgrade-all blocked before mutation";
+        // TRANSLATORS: The placeholder is the literal command name
+        // "upgrade-all".
+        return localization::format_translated_message(
+                "{} blocked before mutation", COMMAND_NAME);
     case UpgradeAllOperationStatus::StoppedOnSystemFailure:
-        return "upgrade-all stopped on system failure";
+        // TRANSLATORS: The placeholder is the literal command name
+        // "upgrade-all".
+        return localization::format_translated_message(
+                "{} stopped on system failure", COMMAND_NAME);
     case UpgradeAllOperationStatus::StoppedOnSourceFailure:
-        return "upgrade-all stopped on source failure";
+        // TRANSLATORS: The placeholder is the literal command name
+        // "upgrade-all".
+        return localization::format_translated_message(
+                "{} stopped on source failure", COMMAND_NAME);
     case UpgradeAllOperationStatus::StoppedAfterSourceCleanupFailure:
-        return "upgrade-all stopped after source cleanup failure";
+        // TRANSLATORS: The placeholder is the literal command name
+        // "upgrade-all".
+        return localization::format_translated_message(
+                "{} stopped after source cleanup failure", COMMAND_NAME);
     case UpgradeAllOperationStatus::StoppedBeforeAurExecution:
-        return "upgrade-all stopped before AUR execution";
+        // TRANSLATORS: The placeholders are the literal command name
+        // "upgrade-all" and service name "AUR".
+        return localization::format_translated_message(
+                "{} stopped before {} execution", COMMAND_NAME, AUR_SERVICE);
     case UpgradeAllOperationStatus::StoppedOnAurFailure:
-        return "upgrade-all stopped on AUR failure";
+        // TRANSLATORS: The placeholders are the literal command name
+        // "upgrade-all" and service name "AUR".
+        return localization::format_translated_message(
+                "{} stopped on {} failure", COMMAND_NAME, AUR_SERVICE);
     case UpgradeAllOperationStatus::StoppedAfterAurCleanupFailure:
-        return "upgrade-all stopped after AUR cleanup failure";
+        // TRANSLATORS: The placeholders are the literal command name
+        // "upgrade-all" and service name "AUR".
+        return localization::format_translated_message(
+                "{} stopped after {} cleanup failure", COMMAND_NAME,
+                AUR_SERVICE);
     case UpgradeAllOperationStatus::InconsistentResult:
-        return "upgrade-all result inconsistent";
+        // TRANSLATORS: The placeholder is the literal command name
+        // "upgrade-all".
+        return localization::format_translated_message(
+                "{} result inconsistent", COMMAND_NAME);
     }
-    throw std::logic_error("Unknown upgrade-all operation status.");
+    throw std::logic_error(localization::format_translated_message(
+            // TRANSLATORS: The placeholder is the literal command name
+            // "upgrade-all".
+            "Unknown {} operation status.", COMMAND_NAME));
 }
 
-std::string_view aggregate_phase_label(UpgradeAllOperationPhase phase) {
+std::string aggregate_phase_label(UpgradeAllOperationPhase phase) {
     switch(phase) {
     case UpgradeAllOperationPhase::None:
-        return "none";
+        return localization::translate_message("none");
     case UpgradeAllOperationPhase::Preparation:
-        return "preparation";
+        return localization::translate_message("preparation");
     case UpgradeAllOperationPhase::System:
-        return "system";
+        return localization::translate_message("system");
     case UpgradeAllOperationPhase::RegisteredSource:
-        return "registered source";
+        return localization::translate_message("registered source");
     case UpgradeAllOperationPhase::ForeignInventory:
-        return "foreign inventory";
+        return localization::translate_message("foreign inventory");
     case UpgradeAllOperationPhase::AurQuery:
-        return "AUR query";
+        // TRANSLATORS: The placeholder is the literal service name "AUR".
+        return localization::format_translated_message("{} query", AUR_SERVICE);
     case UpgradeAllOperationPhase::AurPreparation:
-        return "AUR preparation";
+        // TRANSLATORS: The placeholder is the literal service name "AUR".
+        return localization::format_translated_message("{} preparation",
+                                                        AUR_SERVICE);
     case UpgradeAllOperationPhase::AurExecution:
-        return "AUR execution";
+        // TRANSLATORS: The placeholder is the literal service name "AUR".
+        return localization::format_translated_message("{} execution",
+                                                        AUR_SERVICE);
     case UpgradeAllOperationPhase::Reduction:
-        return "reduction";
+        return localization::translate_message("reduction");
     }
-    throw std::logic_error("Unknown upgrade-all operation phase.");
+    throw std::logic_error(localization::format_translated_message(
+            // TRANSLATORS: The placeholder is the literal command name
+            // "upgrade-all".
+            "Unknown {} operation phase.", COMMAND_NAME));
 }
 
-std::string_view not_attempted_reason_label(
+std::string not_attempted_reason_label(
         UpgradeAllNotAttemptedReason reason) {
     switch(reason) {
     case UpgradeAllNotAttemptedReason::PreparationBlocked:
-        return "preparation blocked";
+        return localization::translate_message("preparation blocked");
     case UpgradeAllNotAttemptedReason::SystemFailure:
-        return "system failure";
+        return localization::translate_message("system failure");
     case UpgradeAllNotAttemptedReason::SourceFailure:
-        return "source failure";
+        return localization::translate_message("source failure");
     case UpgradeAllNotAttemptedReason::SourceCleanupFailure:
-        return "source cleanup failure";
+        return localization::translate_message("source cleanup failure");
     case UpgradeAllNotAttemptedReason::SystemSourceIncomplete:
-        return "system/source phase incomplete";
+        return localization::translate_message("system/source phase incomplete");
     case UpgradeAllNotAttemptedReason::ForeignInventoryFailure:
-        return "foreign inventory failure";
+        return localization::translate_message("foreign inventory failure");
+    case UpgradeAllNotAttemptedReason::CacheAuthorityFailure:
+        return localization::translate_message("cache authority failure");
     case UpgradeAllNotAttemptedReason::PriorAggregateInconsistency:
-        return "prior aggregate inconsistency";
+        return localization::translate_message("prior aggregate inconsistency");
     }
-    throw std::logic_error("Unknown upgrade-all NotAttempted reason.");
+    throw std::logic_error(localization::format_translated_message(
+            // TRANSLATORS: The placeholders are the literal command name
+            // "upgrade-all" and enum state "NotAttempted".
+            "Unknown {} {} reason.", COMMAND_NAME, "NotAttempted"));
 }
 
-std::string_view aur_phase_status_label(UpgradeAllAurPhaseStatus status) {
+std::string aur_phase_status_label(UpgradeAllAurPhaseStatus status) {
     switch(status) {
     case UpgradeAllAurPhaseStatus::NotAttempted:
-        return "not attempted";
+        return localization::translate_message("not attempted");
     case UpgradeAllAurPhaseStatus::NoUpdates:
-        return "no updates";
+        return localization::translate_message("no updates");
     case UpgradeAllAurPhaseStatus::Completed:
-        return "completed";
+        return localization::translate_message("completed");
     case UpgradeAllAurPhaseStatus::BlockedBeforeExecution:
-        return "blocked before execution";
+        return localization::translate_message("blocked before execution");
     case UpgradeAllAurPhaseStatus::StoppedOnWorkItemFailure:
-        return "stopped on work-item failure";
+        return localization::translate_message("stopped on work-item failure");
     case UpgradeAllAurPhaseStatus::StoppedAfterCleanupFailure:
-        return "stopped after cleanup failure";
+        return localization::translate_message("stopped after cleanup failure");
     case UpgradeAllAurPhaseStatus::InconsistentResult:
-        return "inconsistent result";
+        return localization::translate_message("inconsistent result");
     }
-    throw std::logic_error("Unknown upgrade-all AUR phase status.");
+    throw std::logic_error(localization::format_translated_message(
+            // TRANSLATORS: The placeholders are the literal command name
+            // "upgrade-all" and service name "AUR".
+            "Unknown {} {} phase status.", COMMAND_NAME, AUR_SERVICE));
 }
 
-std::string_view system_phase_status_label(SystemUpgradePhaseStatus status) {
+std::string system_phase_status_label(SystemUpgradePhaseStatus status) {
     switch(status) {
     case SystemUpgradePhaseStatus::NotAttempted:
-        return "not attempted";
+        return localization::translate_message("not attempted");
     case SystemUpgradePhaseStatus::Completed:
-        return "completed";
+        return localization::translate_message("completed");
     case SystemUpgradePhaseStatus::Failed:
-        return "failed";
+        return localization::translate_message("failed");
     }
-    throw std::logic_error("Unknown system upgrade phase status.");
+    throw std::logic_error(localization::translate_message(
+            "Unknown system upgrade phase status."));
 }
 
-std::string_view source_failure_label(
+std::string source_failure_label(
         RegisteredSourceUpgradeFailureKind kind) {
     switch(kind) {
     case RegisteredSourceUpgradeFailureKind::None:
-        return "reason unavailable";
+        return localization::translate_message("reason unavailable");
     case RegisteredSourceUpgradeFailureKind::InvalidPreferenceName:
-        return "invalid source preference name";
+        return localization::translate_message("invalid source preference name");
     case RegisteredSourceUpgradeFailureKind::PreferenceUnavailable:
-        return "source preference unavailable";
+        return localization::translate_message("source preference unavailable");
     case RegisteredSourceUpgradeFailureKind::PackageMetadataUnavailable:
-        return "package metadata unavailable";
+        return localization::translate_message("package metadata unavailable");
+    case RegisteredSourceUpgradeFailureKind::CacheAuthorityFailure:
+        return localization::translate_message("cache authority failure");
     case RegisteredSourceUpgradeFailureKind::BuildOrInstallFailed:
-        return "build or install failed";
+        return localization::translate_message("build or install failed");
     case RegisteredSourceUpgradeFailureKind::
             CleanupFailedAfterPackageTransaction:
-        return "cleanup failed after package transaction";
+        return localization::translate_message("cleanup failed after package transaction");
     case RegisteredSourceUpgradeFailureKind::UpdateStatusUnknownSkipped:
-        return "package update status unknown";
+        return localization::translate_message("package update status unknown");
     case RegisteredSourceUpgradeFailureKind::PriorPhaseStopped:
-        return "prior phase stopped";
+        return localization::translate_message("prior phase stopped");
     case RegisteredSourceUpgradeFailureKind::UnknownException:
-        return "unknown exception";
+        return localization::translate_message("unknown exception");
     }
-    throw std::logic_error("Unknown registered source failure kind.");
+    throw std::logic_error(localization::translate_message(
+            "Unknown registered source failure kind."));
 }
 
 std::string source_diagnostic_or_reason(
@@ -184,481 +248,588 @@ std::string source_status_label(
         const RegisteredSourceUpgradeResult& source) {
     switch(source.status) {
     case RegisteredSourceUpgradeStatus::Updated:
-        return "updated";
+        return localization::translate_message("updated");
     case RegisteredSourceUpgradeStatus::NoChange:
-        return "no change";
+        return localization::translate_message("no change");
     case RegisteredSourceUpgradeStatus::Failed:
-        return "failed: " + source_diagnostic_or_reason(source);
+        return localization::format_translated_message(
+                "failed: {}", source_diagnostic_or_reason(source));
     case RegisteredSourceUpgradeStatus::UpdatedCleanupFailed:
-        return "updated, but cleanup failed";
+        return localization::translate_message("updated, but cleanup failed");
     case RegisteredSourceUpgradeStatus::NoChangeCleanupFailed:
-        return "no package change, but cleanup failed";
+        return localization::translate_message("no package change, but cleanup failed");
     case RegisteredSourceUpgradeStatus::NotAttempted:
-        return "not attempted: " + source_diagnostic_or_reason(source);
+        return localization::format_translated_message(
+                "not attempted: {}", source_diagnostic_or_reason(source));
     case RegisteredSourceUpgradeStatus::Unsupported:
-        return "unsupported: " + source_diagnostic_or_reason(source);
+        return localization::format_translated_message(
+                "unsupported: {}", source_diagnostic_or_reason(source));
     case RegisteredSourceUpgradeStatus::Incomplete:
-        return "incomplete: " + source_diagnostic_or_reason(source);
+        return localization::format_translated_message(
+                "incomplete: {}", source_diagnostic_or_reason(source));
     }
-    throw std::logic_error("Unknown registered source status.");
+    throw std::logic_error(localization::translate_message(
+            "Unknown registered source status."));
 }
 
-std::string_view system_source_phase_label(SystemSourceUpgradePhase phase) {
+std::string system_source_phase_label(SystemSourceUpgradePhase phase) {
     switch(phase) {
     case SystemSourceUpgradePhase::None:
-        return "none";
+        return localization::translate_message("none");
     case SystemSourceUpgradePhase::Preparation:
-        return "preparation";
+        return localization::translate_message("preparation");
     case SystemSourceUpgradePhase::System:
-        return "system";
+        return localization::translate_message("system");
     case SystemSourceUpgradePhase::RegisteredSource:
-        return "registered source";
+        return localization::translate_message("registered source");
     }
-    throw std::logic_error("Unknown system/source phase.");
+    throw std::logic_error(localization::translate_message(
+            "Unknown system/source phase."));
 }
 
-std::string_view system_issue_kind_label(SystemSourceUpgradeIssueKind kind) {
+std::string system_issue_kind_label(SystemSourceUpgradeIssueKind kind) {
     switch(kind) {
     case SystemSourceUpgradeIssueKind::PreferenceEnumerationUnavailable:
-        return "source preference enumeration unavailable";
+        return localization::translate_message("source preference enumeration unavailable");
     case SystemSourceUpgradeIssueKind::PreferenceUnavailable:
-        return "source preference unavailable";
+        return localization::translate_message("source preference unavailable");
     case SystemSourceUpgradeIssueKind::SourceIdentityResolutionFailed:
-        return "source identity resolution failed";
+        return localization::translate_message("source identity resolution failed");
     case SystemSourceUpgradeIssueKind::SourceWorkItemPreparationFailed:
-        return "source work-item preparation failed";
+        return localization::translate_message("source work-item preparation failed");
     case SystemSourceUpgradeIssueKind::SourceInvocationPreparationFailed:
-        return "source invocation preparation failed";
+        return localization::translate_message("source invocation preparation failed");
     case SystemSourceUpgradeIssueKind::SourceBaselineSnapshotUnavailable:
-        return "source baseline snapshot unavailable";
+        return localization::translate_message("source baseline snapshot unavailable");
     case SystemSourceUpgradeIssueKind::SystemPackageSnapshotUnavailable:
-        return "system package snapshot unavailable";
+        return localization::translate_message("system package snapshot unavailable");
     case SystemSourceUpgradeIssueKind::PostSystemSourceSnapshotUnavailable:
-        return "post-system/source snapshot unavailable";
+        return localization::translate_message("post-system/source snapshot unavailable");
+    case SystemSourceUpgradeIssueKind::CacheAuthorityInvalid:
+        return localization::translate_message("cache authority invalid");
     case SystemSourceUpgradeIssueKind::InvalidPreferenceName:
-        return "invalid source preference name";
+        return localization::translate_message("invalid source preference name");
     case SystemSourceUpgradeIssueKind::OptionSnapshotMismatch:
-        return "option snapshot mismatch";
+        return localization::translate_message("option snapshot mismatch");
     case SystemSourceUpgradeIssueKind::PreparedCorrelationInconsistent:
-        return "prepared source correlation inconsistent";
+        return localization::translate_message("prepared source correlation inconsistent");
     case SystemSourceUpgradeIssueKind::PreparedCapabilityConsumed:
-        return "prepared source capability consumed";
+        return localization::translate_message("prepared source capability consumed");
     case SystemSourceUpgradeIssueKind::UnknownPreparationFailure:
-        return "unknown source preparation failure";
+        return localization::translate_message("unknown source preparation failure");
     }
-    throw std::logic_error("Unknown system/source issue kind.");
+    throw std::logic_error(localization::translate_message(
+            "Unknown system/source issue kind."));
 }
 
-std::string_view system_issue_impact_label(
+std::string system_issue_impact_label(
         SystemSourceUpgradeIssueImpact impact) {
     switch(impact) {
     case SystemSourceUpgradeIssueImpact::ObservabilityOnly:
-        return "observability only";
+        return localization::translate_message("observability only");
     case SystemSourceUpgradeIssueImpact::AffectsSuccess:
-        return "affects success";
+        return localization::translate_message("affects success");
     case SystemSourceUpgradeIssueImpact::BlocksExecution:
-        return "blocks execution";
+        return localization::translate_message("blocks execution");
     }
-    throw std::logic_error("Unknown system/source issue impact.");
+    throw std::logic_error(localization::translate_message(
+            "Unknown system/source issue impact."));
 }
 
-std::string_view system_warning_kind_label(
+std::string system_warning_kind_label(
         SystemSourceUpgradeWarningKind kind) {
     switch(kind) {
     case SystemSourceUpgradeWarningKind::SourcePreference:
-        return "source preference";
+        return localization::translate_message("source preference");
     case SystemSourceUpgradeWarningKind::InvalidPreferenceName:
-        return "invalid source preference name";
+        return localization::translate_message("invalid source preference name");
     }
-    throw std::logic_error("Unknown system/source warning kind.");
+    throw std::logic_error(localization::translate_message(
+            "Unknown system/source warning kind."));
 }
 
-std::string_view package_metadata_error_label(PackageMetadataErrorCode code) {
+std::string package_metadata_error_label(PackageMetadataErrorCode code) {
     switch(code) {
     case PackageMetadataErrorCode::ConfigurationUnavailable:
-        return "configuration unavailable";
+        return localization::translate_message("configuration unavailable");
     case PackageMetadataErrorCode::ConfigurationMalformed:
-        return "configuration malformed";
+        return localization::translate_message("configuration malformed");
     case PackageMetadataErrorCode::InitializationFailed:
-        return "database initialization failed";
+        return localization::translate_message("database initialization failed");
     case PackageMetadataErrorCode::LocalDatabaseUnavailable:
-        return "local database unavailable";
+        return localization::translate_message("local database unavailable");
     case PackageMetadataErrorCode::InvalidPackageName:
-        return "invalid package name";
+        return localization::translate_message("invalid package name");
     case PackageMetadataErrorCode::QueryFailed:
-        return "package query failed";
+        return localization::translate_message("package query failed");
     case PackageMetadataErrorCode::MalformedMetadata:
-        return "malformed package metadata";
+        return localization::translate_message("malformed package metadata");
     case PackageMetadataErrorCode::SyncDatabaseUnavailable:
-        return "sync database unavailable";
+        return localization::translate_message("sync database unavailable");
     case PackageMetadataErrorCode::RepositoryNotConfigured:
-        return "repository not configured";
+        return localization::translate_message("repository not configured");
     }
-    throw std::logic_error("Unknown package metadata error code.");
+    throw std::logic_error(localization::translate_message(
+            "Unknown package metadata error code."));
 }
 
-std::string_view aggregate_warning_kind_label(
+std::string aggregate_warning_kind_label(
         UpgradeAllOperationWarningKind kind) {
     switch(kind) {
     case UpgradeAllOperationWarningKind::RegisteredSourcePreference:
-        return "registered source preference";
+        return localization::translate_message("registered source preference");
     case UpgradeAllOperationWarningKind::AurPreparation:
-        return "AUR preparation";
+        // TRANSLATORS: The placeholder is the literal service name "AUR".
+        return localization::format_translated_message("{} preparation",
+                                                        AUR_SERVICE);
     }
-    throw std::logic_error("Unknown upgrade-all warning kind.");
+    throw std::logic_error(localization::format_translated_message(
+            // TRANSLATORS: The placeholder is the literal command name
+            // "upgrade-all".
+            "Unknown {} warning kind.", COMMAND_NAME));
 }
 
-std::string_view aggregate_issue_kind_label(
+std::string aggregate_issue_kind_label(
         UpgradeAllOperationIssueKind kind) {
     switch(kind) {
     case UpgradeAllOperationIssueKind::ExplicitSourceAdapterInvalid:
-        return "explicit source adapter invalid";
+        return localization::translate_message("explicit source adapter invalid");
     case UpgradeAllOperationIssueKind::OptionSnapshotMismatch:
-        return "option snapshot mismatch";
+        return localization::translate_message("option snapshot mismatch");
     case UpgradeAllOperationIssueKind::SourceSnapshotMismatch:
-        return "source snapshot mismatch";
+        return localization::translate_message("source snapshot mismatch");
     case UpgradeAllOperationIssueKind::ExplicitSourceCorrelationInconsistent:
-        return "explicit source correlation inconsistent";
+        return localization::translate_message("explicit source correlation inconsistent");
     case UpgradeAllOperationIssueKind::PreparedCapabilityConsumed:
-        return "prepared capability consumed";
+        return localization::translate_message("prepared capability consumed");
     case UpgradeAllOperationIssueKind::SystemSourceExecutionFailedUnexpectedly:
-        return "system/source execution failed unexpectedly";
+        return localization::translate_message("system/source execution failed unexpectedly");
     case UpgradeAllOperationIssueKind::SystemSourcePhaseIncomplete:
-        return "system/source phase incomplete";
+        return localization::translate_message("system/source phase incomplete");
     case UpgradeAllOperationIssueKind::ForeignInventoryConfigurationFailed:
-        return "foreign inventory configuration failed";
+        return localization::translate_message("foreign inventory configuration failed");
     case UpgradeAllOperationIssueKind::ForeignInventoryReadFailed:
-        return "foreign inventory read failed";
+        return localization::translate_message("foreign inventory read failed");
+    case UpgradeAllOperationIssueKind::CacheAuthorityInvalid:
+        return localization::translate_message("cache authority invalid");
     case UpgradeAllOperationIssueKind::AurQueryFailed:
-        return "AUR query failed";
+        // TRANSLATORS: The placeholder is the literal service name "AUR".
+        return localization::format_translated_message("{} query failed",
+                                                        AUR_SERVICE);
     case UpgradeAllOperationIssueKind::FilteredAurPreparationFailed:
-        return "filtered AUR preparation failed";
+        // TRANSLATORS: The placeholder is the literal service name "AUR".
+        return localization::format_translated_message(
+                "filtered {} preparation failed", AUR_SERVICE);
     case UpgradeAllOperationIssueKind::FilteredAurExecutionFailed:
-        return "filtered AUR execution failed";
+        // TRANSLATORS: The placeholder is the literal service name "AUR".
+        return localization::format_translated_message(
+                "filtered {} execution failed", AUR_SERVICE);
     case UpgradeAllOperationIssueKind::
             DuplicateExclusionCorrelationInconsistent:
-        return "duplicate exclusion correlation inconsistent";
+        return localization::translate_message("duplicate exclusion correlation inconsistent");
     case UpgradeAllOperationIssueKind::
             ExternalSatisfactionCorrelationInconsistent:
-        return "external satisfaction correlation inconsistent";
+        return localization::translate_message("external satisfaction correlation inconsistent");
     case UpgradeAllOperationIssueKind::UnknownFailure:
-        return "unknown aggregate failure";
+        return localization::translate_message("unknown aggregate failure");
     }
-    throw std::logic_error("Unknown upgrade-all issue kind.");
+    throw std::logic_error(localization::format_translated_message(
+            // TRANSLATORS: The placeholder is the literal command name
+            // "upgrade-all".
+            "Unknown {} issue kind.", COMMAND_NAME));
 }
 
-std::string_view adapter_issue_kind_label(
+std::string adapter_issue_kind_label(
         UpgradeAllExplicitSourceAdapterIssueKind kind) {
     switch(kind) {
     case UpgradeAllExplicitSourceAdapterIssueKind::PreferencePackageNameMissing:
-        return "preference package name missing";
+        return localization::translate_message("preference package name missing");
     case UpgradeAllExplicitSourceAdapterIssueKind::PackageBaseUnavailable:
-        return "PackageBase unavailable";
+        return localization::format_translated_message(
+                "{} unavailable", PACKAGE_BASE_FIELD);
     case UpgradeAllExplicitSourceAdapterIssueKind::
             CanonicalSourceIdentityUnavailable:
-        return "canonical source identity unavailable";
+        return localization::translate_message("canonical source identity unavailable");
     case UpgradeAllExplicitSourceAdapterIssueKind::
             DuplicateOriginalPreferenceIndex:
-        return "duplicate original preference index";
+        return localization::translate_message("duplicate original preference index");
     case UpgradeAllExplicitSourceAdapterIssueKind::
             AdapterCorrelationInconsistent:
-        return "adapter correlation inconsistent";
+        return localization::translate_message("adapter correlation inconsistent");
     }
-    throw std::logic_error("Unknown explicit source adapter issue kind.");
+    throw std::logic_error(localization::translate_message(
+            "Unknown explicit source adapter issue kind."));
 }
 
-std::string_view preflight_reason_label(AurUpdateExecutionReason reason) {
+std::string preflight_reason_label(AurUpdateExecutionReason reason) {
     switch(reason) {
     case AurUpdateExecutionReason::None:
-        return "none";
+        return localization::translate_message("none");
     case AurUpdateExecutionReason::UpToDate:
-        return "up to date";
+        return localization::translate_message("up to date");
     case AurUpdateExecutionReason::NonAurForeign:
-        return "non-AUR foreign";
+        // TRANSLATORS: The placeholder is the literal service name "AUR".
+        return localization::format_translated_message("non-{} foreign",
+                                                        AUR_SERVICE);
     case AurUpdateExecutionReason::AurMetadataUnavailable:
-        return "AUR metadata unavailable";
+        // TRANSLATORS: The placeholder is the literal service name "AUR".
+        return localization::format_translated_message(
+                "{} metadata unavailable", AUR_SERVICE);
     case AurUpdateExecutionReason::VersionComparisonUnavailable:
-        return "version comparison unavailable";
+        return localization::translate_message("version comparison unavailable");
     case AurUpdateExecutionReason::InstalledReasonUnknown:
-        return "installed reason unknown";
+        return localization::translate_message("installed reason unknown");
     case AurUpdateExecutionReason::UpdatePlanInconsistent:
-        return "update plan inconsistent";
+        return localization::translate_message("update plan inconsistent");
     case AurUpdateExecutionReason::DuplicateUpdateTarget:
-        return "duplicate update target";
+        return localization::translate_message("duplicate update target");
     case AurUpdateExecutionReason::RepositoryMetadataUnavailable:
-        return "repository metadata unavailable";
+        return localization::translate_message("repository metadata unavailable");
     case AurUpdateExecutionReason::AurDependencyMetadataUnavailable:
-        return "AUR dependency metadata unavailable";
+        // TRANSLATORS: The placeholder is the literal service name "AUR".
+        return localization::format_translated_message(
+                "{} dependency metadata unavailable", AUR_SERVICE);
     case AurUpdateExecutionReason::ProviderMetadataUnavailable:
-        return "provider metadata unavailable";
+        return localization::translate_message("provider metadata unavailable");
     case AurUpdateExecutionReason::UnresolvedDependency:
-        return "unresolved dependency";
+        return localization::translate_message("unresolved dependency");
     case AurUpdateExecutionReason::VersionConstraintUnverified:
-        return "version constraint unverified";
+        return localization::translate_message("version constraint unverified");
     case AurUpdateExecutionReason::DependencyCycle:
-        return "dependency cycle";
+        return localization::translate_message("dependency cycle");
     case AurUpdateExecutionReason::BuildPlanInconsistent:
-        return "build plan inconsistent";
+        return localization::translate_message("build plan inconsistent");
     case AurUpdateExecutionReason::PackageBaseMismatch:
-        return "package base mismatch";
+        return localization::translate_message("package base mismatch");
     case AurUpdateExecutionReason::SplitPackageSelectionRequired:
-        return "split package selection required";
+        return localization::translate_message("split package selection required");
     case AurUpdateExecutionReason::MultiplePackageTargetsForPackageBase:
-        return "multiple package targets for package base";
+        return localization::translate_message("multiple package targets for package base");
     case AurUpdateExecutionReason::AmbiguousProvider:
-        return "ambiguous provider";
+        return localization::translate_message("ambiguous provider");
     case AurUpdateExecutionReason::ConflictsOrReplacesUnresolved:
-        return "conflicts/replaces unresolved";
+        return localization::translate_message("conflicts/replaces unresolved");
     }
-    throw std::logic_error("Unknown AUR update preflight reason.");
+    throw std::logic_error(localization::format_translated_message(
+            // TRANSLATORS: The placeholder is the literal service name "AUR".
+            "Unknown {} update preflight reason.", AUR_SERVICE));
 }
 
-std::string_view preparation_reason_label(AurUpdatePreparationReason reason) {
+std::string preparation_reason_label(AurUpdatePreparationReason reason) {
     switch(reason) {
     case AurUpdatePreparationReason::None:
-        return "none";
+        return localization::translate_message("none");
     case AurUpdatePreparationReason::BlockingPreflight:
-        return "blocking preflight";
+        return localization::translate_message("blocking preflight");
     case AurUpdatePreparationReason::PreflightInconsistent:
-        return "preflight inconsistent";
+        return localization::translate_message("preflight inconsistent");
     case AurUpdatePreparationReason::BuildPlanMissing:
-        return "build plan missing";
+        return localization::translate_message("build plan missing");
     case AurUpdatePreparationReason::BuildPlanOrderEmpty:
-        return "build plan order empty";
+        return localization::translate_message("build plan order empty");
     case AurUpdatePreparationReason::RootAttributionInconsistent:
-        return "root attribution inconsistent";
+        return localization::translate_message("root attribution inconsistent");
     case AurUpdatePreparationReason::PackageTargetAttributionInconsistent:
-        return "package target attribution inconsistent";
+        return localization::translate_message("package target attribution inconsistent");
     case AurUpdatePreparationReason::DesiredInstallReasonMissing:
-        return "desired install reason missing";
+        return localization::translate_message("desired install reason missing");
     case AurUpdatePreparationReason::SourcePreferenceUnavailable:
-        return "source preference unavailable";
+        return localization::translate_message("source preference unavailable");
     case AurUpdatePreparationReason::SourcePreferencePkgdestConflict:
-        return "source preference PKGDEST conflict";
+        // TRANSLATORS: The placeholder is the literal environment key
+        // "PKGDEST".
+        return localization::format_translated_message(
+                "source preference {} conflict", PKGDEST_KEY);
     case AurUpdatePreparationReason::StaticWorkItemInvalid:
-        return "static work item invalid";
+        return localization::translate_message("static work item invalid");
     case AurUpdatePreparationReason::PacmanDatabaseUnavailable:
-        return "pacman database unavailable";
+        // TRANSLATORS: The placeholder is the literal command name "pacman".
+        return localization::format_translated_message(
+                "{} database unavailable", PACMAN_COMMAND);
     case AurUpdatePreparationReason::GenericPreparationInconsistent:
-        return "generic preparation inconsistent";
+        return localization::translate_message("generic preparation inconsistent");
     case AurUpdatePreparationReason::BuildUnitSelectionInconsistent:
-        return "build unit selection inconsistent";
+        return localization::translate_message("build unit selection inconsistent");
     case AurUpdatePreparationReason::ExternalSatisfactionInconsistent:
-        return "external satisfaction inconsistent";
+        return localization::translate_message("external satisfaction inconsistent");
     }
-    throw std::logic_error("Unknown AUR update preparation reason.");
+    throw std::logic_error(localization::format_translated_message(
+            // TRANSLATORS: The placeholder is the literal service name "AUR".
+            "Unknown {} update preparation reason.", AUR_SERVICE));
 }
 
-std::string_view reduction_stage_label(AurUpdateOperationReductionStage stage) {
+std::string reduction_stage_label(AurUpdateOperationReductionStage stage) {
     switch(stage) {
     case AurUpdateOperationReductionStage::Preflight:
-        return "preflight";
+        return localization::translate_message("preflight");
     case AurUpdateOperationReductionStage::Preparation:
-        return "preparation";
+        return localization::translate_message("preparation");
     case AurUpdateOperationReductionStage::Execution:
-        return "execution";
+        return localization::translate_message("execution");
     }
-    throw std::logic_error("Unknown AUR reduction stage.");
+    throw std::logic_error(localization::format_translated_message(
+            // TRANSLATORS: The placeholder is the literal service name "AUR".
+            "Unknown {} reduction stage.", AUR_SERVICE));
 }
 
-std::string_view reduction_reason_label(
+std::string reduction_reason_label(
         AurUpdateOperationReductionReason reason) {
     switch(reason) {
     case AurUpdateOperationReductionReason::
             DuplicatePreflightUpdatePlanIndex:
-        return "duplicate preflight update plan index";
+        return localization::translate_message("duplicate preflight update plan index");
     case AurUpdateOperationReductionReason::
             OutOfRangePreflightUpdatePlanIndex:
-        return "out-of-range preflight update plan index";
+        return localization::translate_message("out-of-range preflight update plan index");
     case AurUpdateOperationReductionReason::
             PreflightTargetOrderInconsistent:
-        return "preflight target order inconsistent";
+        return localization::translate_message("preflight target order inconsistent");
     case AurUpdateOperationReductionReason::DuplicatePreparationAttribution:
-        return "duplicate preparation attribution";
+        return localization::translate_message("duplicate preparation attribution");
     case AurUpdateOperationReductionReason::UnknownPreparationUpdatePlanIndex:
-        return "unknown preparation update plan index";
+        return localization::translate_message("unknown preparation update plan index");
     case AurUpdateOperationReductionReason::
             PreparationAttributionInconsistent:
-        return "preparation attribution inconsistent";
+        return localization::translate_message("preparation attribution inconsistent");
     case AurUpdateOperationReductionReason::
             PreparationTargetSnapshotInconsistent:
-        return "preparation target snapshot inconsistent";
+        return localization::translate_message("preparation target snapshot inconsistent");
     case AurUpdateOperationReductionReason::DuplicateExecutionWorkItemIndex:
-        return "duplicate execution work item index";
+        return localization::translate_message("duplicate execution work item index");
     case AurUpdateOperationReductionReason::
             ExecutionWorkItemOrderInconsistent:
-        return "execution work item order inconsistent";
+        return localization::translate_message("execution work item order inconsistent");
     case AurUpdateOperationReductionReason::DuplicateExecutionAttribution:
-        return "duplicate execution attribution";
+        return localization::translate_message("duplicate execution attribution");
     case AurUpdateOperationReductionReason::UnknownExecutionUpdatePlanIndex:
-        return "unknown execution update plan index";
+        return localization::translate_message("unknown execution update plan index");
     case AurUpdateOperationReductionReason::MissingExecutionAttribution:
-        return "missing execution attribution";
+        return localization::translate_message("missing execution attribution");
     case AurUpdateOperationReductionReason::
             DuplicateExecutionChildAttribution:
-        return "duplicate execution child attribution";
+        return localization::translate_message("duplicate execution child attribution");
     case AurUpdateOperationReductionReason::
             MissingExecutionChildAttribution:
-        return "missing execution child attribution";
+        return localization::translate_message("missing execution child attribution");
     case AurUpdateOperationReductionReason::
             UnexpectedExecutionChildAttribution:
-        return "unexpected execution child attribution";
+        return localization::translate_message("unexpected execution child attribution");
     case AurUpdateOperationReductionReason::
             UnknownExecutionChildUpdatePlanIndex:
-        return "unknown execution child update plan index";
+        return localization::translate_message("unknown execution child update plan index");
     case AurUpdateOperationReductionReason::
             ExecutionChildSnapshotInconsistent:
-        return "execution child snapshot inconsistent";
+        return localization::translate_message("execution child snapshot inconsistent");
     case AurUpdateOperationReductionReason::UnexpectedSelectedArtifact:
-        return "unexpected selected artifact";
+        return localization::translate_message("unexpected selected artifact");
     case AurUpdateOperationReductionReason::
             UnexpectedUnselectedArtifactIdentity:
-        return "unexpected unselected artifact identity";
+        return localization::translate_message("unexpected unselected artifact identity");
     case AurUpdateOperationReductionReason::
             ExecutionResultWithPreparationIssues:
-        return "execution result with preparation issues";
+        return localization::translate_message("execution result with preparation issues");
     case AurUpdateOperationReductionReason::MissingExecutionResult:
-        return "missing execution result";
+        return localization::translate_message("missing execution result");
     case AurUpdateOperationReductionReason::UnknownEnumValue:
-        return "unknown enum value";
+        return localization::translate_message("unknown enum value");
     case AurUpdateOperationReductionReason::WorkItemResultInconsistent:
-        return "work item result inconsistent";
+        return localization::translate_message("work item result inconsistent");
     case AurUpdateOperationReductionReason::InvocationResultInconsistent:
-        return "invocation result inconsistent";
+        return localization::translate_message("invocation result inconsistent");
     case AurUpdateOperationReductionReason::OtherCorrelationInconsistent:
-        return "other correlation inconsistency";
+        return localization::translate_message("other correlation inconsistency");
     }
-    throw std::logic_error("Unknown AUR reduction reason.");
+    throw std::logic_error(localization::format_translated_message(
+            // TRANSLATORS: The placeholder is the literal service name "AUR".
+            "Unknown {} reduction reason.", AUR_SERVICE));
 }
 
-std::string_view filtered_issue_kind_label(
+std::string filtered_issue_kind_label(
         FilteredAurUpdateOperationIssueKind kind) {
     switch(kind) {
     case FilteredAurUpdateOperationIssueKind::UnknownUpdateClassification:
-        return "unknown update classification";
+        return localization::translate_message("unknown update classification");
     case FilteredAurUpdateOperationIssueKind::TargetPlannerMappingInconsistent:
-        return "target/planner mapping inconsistent";
+        return localization::translate_message("target/planner mapping inconsistent");
     case FilteredAurUpdateOperationIssueKind::FilteredTargetMappingInconsistent:
-        return "filtered target mapping inconsistent";
+        return localization::translate_message("filtered target mapping inconsistent");
     case FilteredAurUpdateOperationIssueKind::
             PreflightTargetMappingInconsistent:
-        return "preflight target mapping inconsistent";
+        return localization::translate_message("preflight target mapping inconsistent");
     case FilteredAurUpdateOperationIssueKind::
             PreflightInvocationIndexOutOfRange:
-        return "preflight invocation index out of range";
+        return localization::translate_message("preflight invocation index out of range");
     case FilteredAurUpdateOperationIssueKind::
             PreflightInvocationIdentityMismatch:
-        return "preflight invocation identity mismatch";
+        return localization::translate_message("preflight invocation identity mismatch");
     case FilteredAurUpdateOperationIssueKind::BuildPlanRootIndexMissing:
-        return "build-plan root index missing";
+        return localization::translate_message("build-plan root index missing");
     case FilteredAurUpdateOperationIssueKind::BuildPlanRootIndexOutOfRange:
-        return "build-plan root index out of range";
+        return localization::translate_message("build-plan root index out of range");
     case FilteredAurUpdateOperationIssueKind::BuildPlanRootIdentityMismatch:
-        return "build-plan root identity mismatch";
+        return localization::translate_message("build-plan root identity mismatch");
     case FilteredAurUpdateOperationIssueKind::
             BuildPlanRootPackageIdentityMismatch:
-        return "build-plan root package identity mismatch";
+        return localization::translate_message("build-plan root package identity mismatch");
     case FilteredAurUpdateOperationIssueKind::BuildUnitOrderIdentityMismatch:
-        return "build-unit order identity mismatch";
+        return localization::translate_message("build-unit order identity mismatch");
     case FilteredAurUpdateOperationIssueKind::
             BuildUnitRootAttributionInconsistent:
-        return "build-unit root attribution inconsistent";
+        return localization::translate_message("build-unit root attribution inconsistent");
     case FilteredAurUpdateOperationIssueKind::
             BuildUnitSelectionMappingInconsistent:
-        return "build-unit selection mapping inconsistent";
+        return localization::translate_message("build-unit selection mapping inconsistent");
     case FilteredAurUpdateOperationIssueKind::
             ExecutionBuildUnitMappingInconsistent:
-        return "execution build-unit mapping inconsistent";
+        return localization::translate_message("execution build-unit mapping inconsistent");
     case FilteredAurUpdateOperationIssueKind::ReducedTargetMappingInconsistent:
-        return "reduced target mapping inconsistent";
+        return localization::translate_message("reduced target mapping inconsistent");
     }
-    throw std::logic_error("Unknown filtered AUR operation issue kind.");
+    throw std::logic_error(localization::format_translated_message(
+            // TRANSLATORS: The placeholder is the literal service name "AUR".
+            "Unknown filtered {} operation issue kind.", AUR_SERVICE));
 }
 
-std::string_view planning_issue_kind_label(UpgradeAllPlanningIssueKind kind) {
+std::string planning_issue_kind_label(UpgradeAllPlanningIssueKind kind) {
     switch(kind) {
     case UpgradeAllPlanningIssueKind::ExplicitPreferencePackageNameMissing:
-        return "explicit preference package name missing";
+        return localization::translate_message("explicit preference package name missing");
     case UpgradeAllPlanningIssueKind::ExplicitProducedPackageNameMissing:
-        return "explicit produced package name missing";
+        return localization::translate_message("explicit produced package name missing");
     case UpgradeAllPlanningIssueKind::ExplicitPackageBaseAbsent:
-        return "explicit PackageBase absent";
+        // TRANSLATORS: The placeholder is the literal field name
+        // "PackageBase".
+        return localization::format_translated_message(
+                "explicit {} absent", PACKAGE_BASE_FIELD);
     case UpgradeAllPlanningIssueKind::ExplicitPackageBaseResolutionFailed:
-        return "explicit PackageBase resolution failed";
+        // TRANSLATORS: The placeholder is the literal field name
+        // "PackageBase".
+        return localization::format_translated_message(
+                "explicit {} resolution failed", PACKAGE_BASE_FIELD);
     case UpgradeAllPlanningIssueKind::ExplicitPackageBaseEmpty:
-        return "explicit PackageBase empty";
+        // TRANSLATORS: The placeholder is the literal field name
+        // "PackageBase".
+        return localization::format_translated_message(
+                "explicit {} empty", PACKAGE_BASE_FIELD);
     case UpgradeAllPlanningIssueKind::ExplicitSourceIdentityAbsent:
-        return "explicit source identity absent";
+        return localization::translate_message("explicit source identity absent");
     case UpgradeAllPlanningIssueKind::ExplicitSourceIdentityResolutionFailed:
-        return "explicit source identity resolution failed";
+        return localization::translate_message("explicit source identity resolution failed");
     case UpgradeAllPlanningIssueKind::ExplicitSourceIdentityEmpty:
-        return "explicit source identity empty";
+        return localization::translate_message("explicit source identity empty");
     case UpgradeAllPlanningIssueKind::
             ConflictingExplicitSourceIdentityDefinition:
-        return "conflicting explicit source identity definition";
+        return localization::translate_message("conflicting explicit source identity definition");
     case UpgradeAllPlanningIssueKind::ConflictingExplicitPackageName:
-        return "conflicting explicit package name";
+        return localization::translate_message("conflicting explicit package name");
     case UpgradeAllPlanningIssueKind::ConflictingExplicitPackageBase:
-        return "conflicting explicit PackageBase";
+        // TRANSLATORS: The placeholder is the literal field name
+        // "PackageBase".
+        return localization::format_translated_message(
+                "conflicting explicit {}", PACKAGE_BASE_FIELD);
     case UpgradeAllPlanningIssueKind::AurTargetPackageNameMissing:
-        return "AUR target package name missing";
+        // TRANSLATORS: The placeholder is the literal service name "AUR".
+        return localization::format_translated_message(
+                "{} target package name missing", AUR_SERVICE);
     case UpgradeAllPlanningIssueKind::AurTargetPackageBaseAbsent:
-        return "AUR target PackageBase absent";
+        // TRANSLATORS: The placeholders are the literal service name "AUR"
+        // and field name "PackageBase".
+        return localization::format_translated_message(
+                "{} target {} absent", AUR_SERVICE, PACKAGE_BASE_FIELD);
     case UpgradeAllPlanningIssueKind::AurTargetPackageBaseResolutionFailed:
-        return "AUR target PackageBase resolution failed";
+        // TRANSLATORS: The placeholders are the literal service name "AUR"
+        // and field name "PackageBase".
+        return localization::format_translated_message(
+                "{} target {} resolution failed", AUR_SERVICE,
+                PACKAGE_BASE_FIELD);
     case UpgradeAllPlanningIssueKind::AurTargetPackageBaseEmpty:
-        return "AUR target PackageBase empty";
+        // TRANSLATORS: The placeholders are the literal service name "AUR"
+        // and field name "PackageBase".
+        return localization::format_translated_message(
+                "{} target {} empty", AUR_SERVICE, PACKAGE_BASE_FIELD);
     case UpgradeAllPlanningIssueKind::UnsupportedAurTarget:
-        return "unsupported AUR target";
+        // TRANSLATORS: The placeholder is the literal service name "AUR".
+        return localization::format_translated_message(
+                "unsupported {} target", AUR_SERVICE);
     case UpgradeAllPlanningIssueKind::IncompleteAurTarget:
-        return "incomplete AUR target";
+        // TRANSLATORS: The placeholder is the literal service name "AUR".
+        return localization::format_translated_message(
+                "incomplete {} target", AUR_SERVICE);
     case UpgradeAllPlanningIssueKind::BuildUnitPackageBaseAbsent:
-        return "build-unit PackageBase absent";
+        // TRANSLATORS: The placeholder is the literal field name
+        // "PackageBase".
+        return localization::format_translated_message(
+                "build-unit {} absent", PACKAGE_BASE_FIELD);
     case UpgradeAllPlanningIssueKind::BuildUnitPackageBaseResolutionFailed:
-        return "build-unit PackageBase resolution failed";
+        // TRANSLATORS: The placeholder is the literal field name
+        // "PackageBase".
+        return localization::format_translated_message(
+                "build-unit {} resolution failed", PACKAGE_BASE_FIELD);
     case UpgradeAllPlanningIssueKind::BuildUnitPackageBaseEmpty:
-        return "build-unit PackageBase empty";
+        // TRANSLATORS: The placeholder is the literal field name
+        // "PackageBase".
+        return localization::format_translated_message(
+                "build-unit {} empty", PACKAGE_BASE_FIELD);
     case UpgradeAllPlanningIssueKind::BuildUnitHasNoRootAttribution:
-        return "build unit has no root attribution";
+        return localization::translate_message("build unit has no root attribution");
     case UpgradeAllPlanningIssueKind::BuildUnitTargetIndexOutOfRange:
-        return "build-unit target index out of range";
+        return localization::translate_message("build-unit target index out of range");
     case UpgradeAllPlanningIssueKind::DuplicateSelectedTargetPackageBase:
-        return "duplicate selected target PackageBase";
+        // TRANSLATORS: The placeholder is the literal field name
+        // "PackageBase".
+        return localization::format_translated_message(
+                "duplicate selected target {}", PACKAGE_BASE_FIELD);
     case UpgradeAllPlanningIssueKind::DuplicateSelectedBuildUnitPackageBase:
-        return "duplicate selected build-unit PackageBase";
+        // TRANSLATORS: The placeholder is the literal field name
+        // "PackageBase".
+        return localization::format_translated_message(
+                "duplicate selected build-unit {}", PACKAGE_BASE_FIELD);
     }
-    throw std::logic_error("Unknown upgrade-all planning issue kind.");
+    throw std::logic_error(localization::format_translated_message(
+            // TRANSLATORS: The placeholder is the literal command name
+            // "upgrade-all".
+            "Unknown {} planning issue kind.", COMMAND_NAME));
 }
 
-std::string_view duplicate_reason_label(UpgradeAllTargetDisposition disposition) {
+std::string duplicate_reason_label(UpgradeAllTargetDisposition disposition) {
     switch(disposition) {
     case UpgradeAllTargetDisposition::ExcludedByExplicitPackageName:
-        return "package name handled by explicit source preference";
+        return localization::translate_message("package name handled by explicit source preference");
     case UpgradeAllTargetDisposition::ExcludedByExplicitPackageBase:
-        return "PackageBase handled by explicit source preference";
+        // TRANSLATORS: The placeholder is the literal field name
+        // "PackageBase".
+        return localization::format_translated_message(
+                "{} handled by explicit source preference",
+                PACKAGE_BASE_FIELD);
     case UpgradeAllTargetDisposition::Selected:
     case UpgradeAllTargetDisposition::Unsupported:
     case UpgradeAllTargetDisposition::IdentityIncomplete:
     case UpgradeAllTargetDisposition::ConflictingExplicitSourceIdentity:
     case UpgradeAllTargetDisposition::ConflictingSelectedPackageBase:
-        throw std::logic_error(
-                "Non-exclusion target disposition reached duplicate presentation.");
+        throw std::logic_error(localization::translate_message(
+                "Non-exclusion target disposition reached duplicate presentation."));
     }
-    throw std::logic_error("Unknown upgrade-all target disposition.");
+    throw std::logic_error(localization::format_translated_message(
+            // TRANSLATORS: The placeholder is the literal command name
+            // "upgrade-all".
+            "Unknown {} target disposition.", COMMAND_NAME));
 }
 
-std::string_view build_unit_role_label(UpgradeAllBuildUnitRole role) {
+std::string build_unit_role_label(UpgradeAllBuildUnitRole role) {
     switch(role) {
     case UpgradeAllBuildUnitRole::Root:
-        return "root";
+        return localization::translate_message("root");
     case UpgradeAllBuildUnitRole::RuntimeDependency:
-        return "runtime dependency";
+        return localization::translate_message("runtime dependency");
     case UpgradeAllBuildUnitRole::BuildDependency:
-        return "build dependency";
+        return localization::translate_message("build dependency");
     case UpgradeAllBuildUnitRole::CheckDependency:
-        return "check dependency";
+        return localization::translate_message("check dependency");
     }
-    throw std::logic_error("Unknown upgrade-all build-unit role.");
+    throw std::logic_error(localization::format_translated_message(
+            // TRANSLATORS: The placeholder is the literal command name
+            // "upgrade-all".
+            "Unknown {} build-unit role.", COMMAND_NAME));
 }
 
 bool is_normal_skip_reason(AurUpdateExecutionReason reason) {
@@ -686,7 +857,9 @@ bool is_normal_skip_reason(AurUpdateExecutionReason reason) {
     case AurUpdateExecutionReason::ConflictsOrReplacesUnresolved:
         return false;
     }
-    throw std::logic_error("Unknown AUR update preflight reason.");
+    throw std::logic_error(localization::format_translated_message(
+            // TRANSLATORS: The placeholder is the literal service name "AUR".
+            "Unknown {} update preflight reason.", AUR_SERVICE));
 }
 
 std::string target_reason_label(const AurUpdateOperationTargetResult& target) {
@@ -698,7 +871,7 @@ std::string target_reason_label(const AurUpdateOperationTargetResult& target) {
         return std::string(preparation_reason_label(
                 target.preparation_issues.front().reason));
     }
-    return "reason unavailable";
+    return localization::translate_message("reason unavailable");
 }
 
 std::string aur_target_status_label(
@@ -706,41 +879,55 @@ std::string aur_target_status_label(
         AurUpdateOperationStatus operation_status) {
     switch(target.status) {
     case AurUpdateOperationTargetStatus::Updated:
-        return "updated";
+        return localization::translate_message("updated");
     case AurUpdateOperationTargetStatus::NoChange:
-        return "no change";
+        return localization::translate_message("no change");
     case AurUpdateOperationTargetStatus::Skipped:
-        return "skipped: " + target_reason_label(target);
+        return localization::format_translated_message(
+                "skipped: {}", target_reason_label(target));
     case AurUpdateOperationTargetStatus::Unsupported:
-        return "unsupported: " + target_reason_label(target);
+        return localization::format_translated_message(
+                "unsupported: {}", target_reason_label(target));
     case AurUpdateOperationTargetStatus::Incomplete:
-        return "incomplete: " + target_reason_label(target);
+        return localization::format_translated_message(
+                "incomplete: {}", target_reason_label(target));
     case AurUpdateOperationTargetStatus::Failed:
-        return "failed: " + aur_update_cli_target_failure_summary(target);
+        return localization::format_translated_message(
+                "failed: {}", aur_update_cli_target_failure_summary(target));
     case AurUpdateOperationTargetStatus::UpdatedCleanupFailed:
-        return "updated, but cleanup failed";
+        return localization::translate_message("updated, but cleanup failed");
     case AurUpdateOperationTargetStatus::NoChangeCleanupFailed:
-        return "no package change, but cleanup failed";
+        return localization::translate_message("no package change, but cleanup failed");
     case AurUpdateOperationTargetStatus::NotAttempted:
         if(target.execution_failure_kind ==
            AurUpdateWorkItemFailureKind::PriorWorkItemStopped) {
-            return "not attempted: prior work item stopped";
+            return localization::translate_message(
+                    "not attempted: prior work item stopped");
         }
         switch(operation_status) {
         case AurUpdateOperationStatus::BlockedBeforeExecution:
-            return "not attempted: operation blocked before execution";
+            return localization::translate_message(
+                    "not attempted: operation blocked before execution");
         case AurUpdateOperationStatus::InconsistentResult:
-            return "not attempted: result inconsistent";
+            return localization::translate_message(
+                    "not attempted: result inconsistent");
         case AurUpdateOperationStatus::StoppedOnWorkItemFailure:
         case AurUpdateOperationStatus::StoppedAfterPackageCleanupFailure:
-            return "not attempted: prior work item stopped";
+            return localization::translate_message(
+                    "not attempted: prior work item stopped");
         case AurUpdateOperationStatus::NoUpdates:
         case AurUpdateOperationStatus::Completed:
-            return "not attempted: result inconsistent";
+            return localization::translate_message(
+                    "not attempted: result inconsistent");
         }
-        throw std::logic_error("Unknown AUR update operation status.");
+        throw std::logic_error(localization::format_translated_message(
+                // TRANSLATORS: The placeholder is the literal service name
+                // "AUR".
+                "Unknown {} update operation status.", AUR_SERVICE));
     }
-    throw std::logic_error("Unknown AUR update target status.");
+    throw std::logic_error(localization::format_translated_message(
+            // TRANSLATORS: The placeholder is the literal service name "AUR".
+            "Unknown {} update target status.", AUR_SERVICE));
 }
 
 std::string join_strings(const std::vector<std::string>& values) {
@@ -754,21 +941,26 @@ std::string join_strings(const std::vector<std::string>& values) {
 
 std::string join_query_package_names(
         const std::vector<std::string>& package_names) {
-    return package_names.empty() ? "unknown packages"
+    return package_names.empty() ? localization::translate_message("unknown packages")
                                  : join_strings(package_names);
 }
 
 void print_system_phase(const SystemSourceUpgradeResult& result) {
-    std::cout << "system: " << system_phase_status_label(result.system.status)
+    std::cout << localization::format_translated_message(
+                         "system: {}",
+                         system_phase_status_label(result.system.status))
               << std::endl;
-    std::cout << "package state: "
-              << package_state_label(result.system.package_state_change)
+    std::cout << localization::format_translated_message(
+                         "package state: {}",
+                         package_state_label(result.system.package_state_change))
               << std::endl;
 }
 
 void print_registered_sources(const SystemSourceUpgradeResult& result) {
     if(result.registered_source_results.empty()) {
-        std::cout << "registered source packages: none" << std::endl;
+        std::cout << localization::translate_message(
+                             "registered source packages: none")
+                  << std::endl;
         return;
     }
 
@@ -777,17 +969,23 @@ void print_registered_sources(const SystemSourceUpgradeResult& result) {
     for(const RegisteredSourceUpgradeResult& source :
         result.registered_source_results) {
         const std::string package_name = source.preference_package_name.empty()
-                ? "<unknown preference>"
+                ? localization::translate_message("<unknown preference>")
                 : source.preference_package_name;
-        std::cout << "registered source: " << package_name << ": "
-                  << source_status_label(source) << std::endl;
+        std::cout << localization::format_translated_message(
+                             "registered source: {}: {}", package_name,
+                             source_status_label(source))
+                  << std::endl;
         if(source.resolved_package_base.has_value()) {
-            std::cout << "  PackageBase: " << *source.resolved_package_base
-                      << std::endl;
+            // NO_TRANSLATE(Issue #308): PackageBase is a schema field name,
+            // and the value is a package identity.
+            std::cout << "  " << PACKAGE_BASE_FIELD << ": "
+                      << *source.resolved_package_base << std::endl;
         }
         if(source.canonical_source_identity_key.has_value()) {
-            std::cout << "  canonical source identity: "
-                      << *source.canonical_source_identity_key << std::endl;
+            std::cout << localization::format_translated_message(
+                                 "  canonical source identity: {}",
+                                 *source.canonical_source_identity_key)
+                      << std::endl;
         }
     }
 }
@@ -797,36 +995,58 @@ void print_aur_phase(
         const AurUpdateCliPresentation* presentation) {
     if(aur.status == UpgradeAllAurPhaseStatus::NotAttempted) {
         if(!aur.not_attempted_reason.has_value()) {
-            throw std::logic_error(
-                    "AUR phase is NotAttempted without a typed reason.");
+            throw std::logic_error(localization::format_translated_message(
+                    // TRANSLATORS: The placeholders are the literal service
+                    // name "AUR" and enum state "NotAttempted".
+                    "The {} phase is {} without a typed reason.", AUR_SERVICE,
+                    "NotAttempted"));
         }
-        const std::string_view reason =
+        const std::string reason =
                 not_attempted_reason_label(*aur.not_attempted_reason);
-        std::cout << "AUR phase not attempted: " << reason
+        // TRANSLATORS: The first placeholder is the literal service name
+        // "AUR"; the second is a localized reason.
+        std::cout << localization::format_translated_message(
+                             "{} phase not attempted: {}", AUR_SERVICE, reason)
                   << std::endl;
         return;
     }
 
-    const std::string_view phase_status = aur_phase_status_label(aur.status);
-    std::cout << "AUR phase: " << phase_status << std::endl;
+    const std::string phase_status = aur_phase_status_label(aur.status);
+    // TRANSLATORS: The first placeholder is the literal service name "AUR";
+    // the second is a localized phase status.
+    std::cout << localization::format_translated_message(
+                         "{} phase: {}", AUR_SERVICE, phase_status)
+              << std::endl;
     if(!aur.operation_result.has_value()) {
-        std::cout << "AUR targets: unavailable" << std::endl;
+        // TRANSLATORS: The placeholder is the literal service name "AUR".
+        std::cout << localization::format_translated_message(
+                             "{} targets: unavailable", AUR_SERVICE)
+                  << std::endl;
         return;
     }
 
     const AurUpdateOperationResult& operation =
             aur.operation_result->reduced_operation_result;
     if(operation.targets.empty()) {
-        std::cout << "AUR targets: none" << std::endl;
+        // TRANSLATORS: The placeholder is the literal service name "AUR".
+        std::cout << localization::format_translated_message(
+                             "{} targets: none", AUR_SERVICE)
+                  << std::endl;
     } else {
         for(const AurUpdateOperationTargetResult& target : operation.targets) {
             const std::string status =
                     aur_target_status_label(target, operation.status);
-            std::cout << "AUR target: " << target.update.installed_name << ": "
-                      << status << std::endl;
+            // TRANSLATORS: The first placeholder is the literal service name
+            // "AUR"; the others are a package name and localized status.
+            std::cout << localization::format_translated_message(
+                                 "{} target: {}: {}", AUR_SERVICE,
+                                 target.update.installed_name, status)
+                      << std::endl;
             if(target.package_base.has_value()) {
-                std::cout << "  PackageBase: " << *target.package_base
-                          << std::endl;
+                // NO_TRANSLATE(Issue #308): PackageBase is a schema field
+                // name, and the value is a package identity.
+                std::cout << "  " << PACKAGE_BASE_FIELD << ": "
+                          << *target.package_base << std::endl;
             }
         }
     }
@@ -848,7 +1068,10 @@ void print_aur_phase(
     // POLICY(#281): inventory failureを含むsynthetic resultでも、AUR mutationが
     // 完了したような表示へ丸めない。直接fieldをtyped source of truthにする。
     if(has_foreign_inventory_failure(result.foreign_inventory)) {
-        std::cout << "AUR phase not attempted: foreign inventory failure"
+        // TRANSLATORS: The placeholder is the literal service name "AUR".
+        std::cout << localization::format_translated_message(
+                             "{} phase not attempted: foreign inventory failure",
+                             AUR_SERVICE)
                   << std::endl;
         return;
     }
@@ -858,28 +1081,41 @@ void print_aur_phase(
 void print_duplicate_exclusions(const UpgradeAllOperationResult& result) {
     for(const UpgradeAllDuplicateExcludedAurTarget& exclusion :
         result.duplicate_excluded_aur_targets) {
-        const std::string_view reason = duplicate_reason_label(
+        const std::string reason = duplicate_reason_label(
                 exclusion.planner_entry.disposition);
-        std::cout << "excluded from AUR update: "
-                  << exclusion.query_entry.installed_name << std::endl;
-        std::cout << "reason: " << reason << std::endl;
+        // TRANSLATORS: The first placeholder is the literal service name
+        // "AUR"; the second is a package name.
+        std::cout << localization::format_translated_message(
+                             "excluded from {} update: {}", AUR_SERVICE,
+                             exclusion.query_entry.installed_name)
+                  << std::endl;
+        std::cout << localization::format_translated_message(
+                             "reason: {}", reason)
+                  << std::endl;
 
         if(!exclusion.planner_entry.explicit_source.has_value()) {
-            throw std::logic_error(
-                    "Duplicate exclusion has no explicit source attribution.");
+            throw std::logic_error(localization::translate_message(
+                    "The duplicate exclusion has no explicit source attribution."));
         }
         const UpgradeAllExplicitSourceAttribution& attribution =
                 *exclusion.planner_entry.explicit_source;
         if(attribution.matched_package_name.has_value()) {
-            std::cout << "matched explicit source package: "
-                      << *attribution.matched_package_name << std::endl;
+            std::cout << localization::format_translated_message(
+                                 "matched explicit source package: {}",
+                                 *attribution.matched_package_name)
+                      << std::endl;
         }
         if(attribution.matched_package_base.has_value()) {
-            std::cout << "matched PackageBase: "
-                      << *attribution.matched_package_base << std::endl;
+            // TRANSLATORS: The first placeholder is the literal field name
+            // "PackageBase"; the second is its runtime value.
+            std::cout << localization::format_translated_message(
+                                 "matched {}: {}", PACKAGE_BASE_FIELD,
+                                 *attribution.matched_package_base)
+                      << std::endl;
         }
         for(const std::string& identity : attribution.source_identity_keys) {
-            std::cout << "canonical source identity: " << identity
+            std::cout << localization::format_translated_message(
+                                 "canonical source identity: {}", identity)
                       << std::endl;
         }
     }
@@ -891,39 +1127,52 @@ void print_external_satisfaction(const UpgradeAllOperationResult& result) {
         const AurUpdateExternallySatisfiedBuildUnit& unit =
                 external.operation_unit;
         if(unit.external_satisfaction.source_identity_keys.empty()) {
-            throw std::logic_error(
-                    "External satisfaction has no explicit source identity.");
+            throw std::logic_error(localization::translate_message(
+                    "External satisfaction has no explicit source identity."));
         }
-        std::vector<std::string_view> role_labels;
+        std::vector<std::string> role_labels;
         role_labels.reserve(external.root_correlations.size());
         for(const FilteredAurUpdateBuildUnitRootCorrelation& root :
             external.root_correlations) {
             role_labels.push_back(build_unit_role_label(root.role));
         }
 
-        std::cout << "AUR build unit externally satisfied: "
-                  << unit.package_base << std::endl;
-        std::cout << "provided by explicit source preference: "
-                  << join_strings(
-                             unit.external_satisfaction.source_identity_keys)
+        // TRANSLATORS: The first placeholder is the literal service name
+        // "AUR"; the second is a package-base identity.
+        std::cout << localization::format_translated_message(
+                             "{} build unit externally satisfied: {}",
+                             AUR_SERVICE, unit.package_base)
+                  << std::endl;
+        std::cout << localization::format_translated_message(
+                             "provided by explicit source preference: {}",
+                             join_strings(
+                                     unit.external_satisfaction.source_identity_keys))
                   << std::endl;
         if(unit.external_satisfaction.matched_package_name.has_value()) {
-            std::cout << "matched explicit source package: "
-                      << *unit.external_satisfaction.matched_package_name
+            std::cout << localization::format_translated_message(
+                                 "matched explicit source package: {}",
+                                 *unit.external_satisfaction.matched_package_name)
                       << std::endl;
         }
         if(unit.external_satisfaction.matched_package_base.has_value()) {
-            std::cout << "matched PackageBase: "
-                      << *unit.external_satisfaction.matched_package_base
+            // TRANSLATORS: The first placeholder is the literal field name
+            // "PackageBase"; the second is its runtime value.
+            std::cout << localization::format_translated_message(
+                                 "matched {}: {}", PACKAGE_BASE_FIELD,
+                                 *unit.external_satisfaction.matched_package_base)
                       << std::endl;
         }
         for(std::size_t index = 0;
             index < external.root_correlations.size(); ++index) {
             const FilteredAurUpdateBuildUnitRootCorrelation& root =
                     external.root_correlations[index];
-            std::cout << "affected AUR root: "
-                      << root.preflight_root.requested_name << " ("
-                      << role_labels[index] << ")" << std::endl;
+            // TRANSLATORS: The first placeholder is the literal service name
+            // "AUR"; the others are a package name and localized role.
+            std::cout << localization::format_translated_message(
+                                 "affected {} root: {} ({})", AUR_SERVICE,
+                                 root.preflight_root.requested_name,
+                                 role_labels[index])
+                      << std::endl;
         }
     }
 }
@@ -938,11 +1187,12 @@ void print_system_warnings(
         std::set<std::string>& printed_warning_keys) {
     for(const SystemSourceUpgradeWarning& warning : result.warnings) {
         const std::string package_name =
-                warning.preference_package_name.value_or("unknown preference");
-        Logger::warn(
-                "system/source warning: " +
-                std::string(system_warning_kind_label(warning.kind)) + ": " +
-                package_name + ": " + warning.diagnostic);
+                warning.preference_package_name.value_or(
+                        localization::translate_message("unknown preference"));
+        Logger::warn(localization::format_translated_message(
+                "system/source warning: {}: {}: {}",
+                system_warning_kind_label(warning.kind), package_name,
+                warning.diagnostic));
         printed_warning_keys.insert(package_name + "\n" + warning.diagnostic);
     }
 }
@@ -950,7 +1200,8 @@ void print_system_warnings(
 void print_system_failures(const SystemSourceUpgradeResult& result) {
     if(result.system.diagnostic.has_value() &&
        !result.system.diagnostic->empty()) {
-        Logger::error("system failure: " + *result.system.diagnostic);
+        Logger::error(localization::format_translated_message(
+                "system failure: {}", *result.system.diagnostic));
     }
     for(const RegisteredSourceUpgradeResult& source :
         result.registered_source_results) {
@@ -958,10 +1209,9 @@ void print_system_failures(const SystemSourceUpgradeResult& result) {
             source.status == RegisteredSourceUpgradeStatus::Unsupported ||
             source.status == RegisteredSourceUpgradeStatus::Incomplete) &&
            source.diagnostic.has_value() && !source.diagnostic->empty()) {
-            Logger::error(
-                    "registered source failure: " +
-                    source.preference_package_name + ": " +
-                    *source.diagnostic);
+            Logger::error(localization::format_translated_message(
+                    "registered source failure: {}: {}",
+                    source.preference_package_name, *source.diagnostic));
         }
         if((source.status ==
                     RegisteredSourceUpgradeStatus::UpdatedCleanupFailed ||
@@ -969,10 +1219,10 @@ void print_system_failures(const SystemSourceUpgradeResult& result) {
                     RegisteredSourceUpgradeStatus::NoChangeCleanupFailed) &&
            source.cleanup_diagnostic.has_value() &&
            !source.cleanup_diagnostic->empty()) {
-            Logger::error(
-                    "registered source cleanup failure: " +
-                    source.preference_package_name + ": " +
-                    *source.cleanup_diagnostic);
+            Logger::error(localization::format_translated_message(
+                    "registered source cleanup failure: {}: {}",
+                    source.preference_package_name,
+                    *source.cleanup_diagnostic));
         }
     }
 }
@@ -981,20 +1231,56 @@ void print_system_issues_and_diagnostics(
         const SystemSourceUpgradeResult& result) {
     std::set<std::string> issue_diagnostics;
     for(const SystemSourceUpgradeIssue& issue : result.issues) {
-        std::string message =
-                "system/source issue: " +
-                std::string(system_issue_kind_label(issue.kind)) + " (" +
-                std::string(system_issue_impact_label(issue.impact)) + ", " +
-                std::string(system_source_phase_label(issue.phase)) + ")";
-        if(issue.preference_package_name.has_value()) {
-            message += ": " + *issue.preference_package_name;
+        const std::string kind = system_issue_kind_label(issue.kind);
+        const std::string impact = system_issue_impact_label(issue.impact);
+        const std::string phase = system_source_phase_label(issue.phase);
+        const bool has_package = issue.preference_package_name.has_value();
+        const bool has_metadata = issue.package_metadata_failure.has_value();
+        const bool has_diagnostic = !issue.diagnostic.empty();
+        std::string message;
+        if(has_package && has_metadata && has_diagnostic) {
+            message = localization::format_translated_message(
+                    "system/source issue: {} ({}, {}): {} [{}]: {}", kind,
+                    impact, phase, *issue.preference_package_name,
+                    package_metadata_error_label(
+                            issue.package_metadata_failure->code),
+                    issue.diagnostic);
+        } else if(has_package && has_metadata) {
+            message = localization::format_translated_message(
+                    "system/source issue: {} ({}, {}): {} [{}]", kind,
+                    impact, phase, *issue.preference_package_name,
+                    package_metadata_error_label(
+                            issue.package_metadata_failure->code));
+        } else if(has_package && has_diagnostic) {
+            message = localization::format_translated_message(
+                    "system/source issue: {} ({}, {}): {}: {}", kind,
+                    impact, phase, *issue.preference_package_name,
+                    issue.diagnostic);
+        } else if(has_metadata && has_diagnostic) {
+            message = localization::format_translated_message(
+                    "system/source issue: {} ({}, {}) [{}]: {}", kind,
+                    impact, phase,
+                    package_metadata_error_label(
+                            issue.package_metadata_failure->code),
+                    issue.diagnostic);
+        } else if(has_package) {
+            message = localization::format_translated_message(
+                    "system/source issue: {} ({}, {}): {}", kind, impact,
+                    phase, *issue.preference_package_name);
+        } else if(has_metadata) {
+            message = localization::format_translated_message(
+                    "system/source issue: {} ({}, {}) [{}]", kind, impact,
+                    phase,
+                    package_metadata_error_label(
+                            issue.package_metadata_failure->code));
+        } else if(has_diagnostic) {
+            message = localization::format_translated_message(
+                    "system/source issue: {} ({}, {}): {}", kind, impact,
+                    phase, issue.diagnostic);
+        } else {
+            message = localization::format_translated_message(
+                    "system/source issue: {} ({}, {})", kind, impact, phase);
         }
-        if(issue.package_metadata_failure.has_value()) {
-            message += " [" + std::string(package_metadata_error_label(
-                                      issue.package_metadata_failure->code)) +
-                    "]";
-        }
-        if(!issue.diagnostic.empty()) message += ": " + issue.diagnostic;
         Logger::error(message);
         issue_diagnostics.insert(diagnostic_key(
                 system_source_phase_label(issue.phase), issue.diagnostic));
@@ -1008,32 +1294,53 @@ void print_system_issues_and_diagnostics(
                    diagnostic.diagnostic))) {
             continue;
         }
-        Logger::error(
-                "system/source diagnostic: " +
-                std::string(system_source_phase_label(diagnostic.phase)) +
-                ": " + diagnostic.diagnostic);
+        Logger::error(localization::format_translated_message(
+                "system/source diagnostic: {}: {}",
+                system_source_phase_label(diagnostic.phase),
+                diagnostic.diagnostic));
     }
 }
 
 void print_aur_query_failures(const FilteredAurUpdateExecutionResult& result) {
     for(const AurUpdateQueryFailure& failure :
         result.query_result.recoverable_failures) {
-        Logger::error(
-                "AUR query failure for " +
-                join_query_package_names(failure.package_names) + ": " +
-                failure.diagnostic);
+        // TRANSLATORS: The first placeholder is the literal service name
+        // "AUR"; the others are package names and a runtime diagnostic.
+        Logger::error(localization::format_translated_message(
+                "{} query failure for {}: {}", AUR_SERVICE,
+                join_query_package_names(failure.package_names),
+                failure.diagnostic));
     }
 }
 
 void print_planning_issues(const UpgradeAllPlan& plan) {
     for(const UpgradeAllPlanningIssue& issue : plan.issues) {
-        std::string message = "AUR planner issue: " +
-                std::string(planning_issue_kind_label(issue.kind));
-        if(issue.package_name.has_value()) {
-            message += ": package " + *issue.package_name;
-        }
-        if(issue.package_base.has_value()) {
-            message += ": PackageBase " + *issue.package_base;
+        const std::string kind = planning_issue_kind_label(issue.kind);
+        std::string message;
+        if(issue.package_name.has_value() && issue.package_base.has_value()) {
+            // TRANSLATORS: The first placeholder is the literal service name
+            // "AUR"; the fourth is the literal field name "PackageBase".
+            message = localization::format_translated_message(
+                    "{} planner issue: {}: package {}: {} {}", AUR_SERVICE,
+                    kind, *issue.package_name, PACKAGE_BASE_FIELD,
+                    *issue.package_base);
+        } else if(issue.package_name.has_value()) {
+            // TRANSLATORS: The first placeholder is the literal service name
+            // "AUR"; the others are a localized kind and package name.
+            message = localization::format_translated_message(
+                    "{} planner issue: {}: package {}", AUR_SERVICE, kind,
+                    *issue.package_name);
+        } else if(issue.package_base.has_value()) {
+            // TRANSLATORS: The first placeholder is the literal service name
+            // "AUR"; the third is the literal field name "PackageBase".
+            message = localization::format_translated_message(
+                    "{} planner issue: {}: {} {}", AUR_SERVICE, kind,
+                    PACKAGE_BASE_FIELD, *issue.package_base);
+        } else {
+            // TRANSLATORS: The first placeholder is the literal service name
+            // "AUR"; the second is a localized issue kind.
+            message = localization::format_translated_message(
+                    "{} planner issue: {}", AUR_SERVICE, kind);
         }
         Logger::error(message);
     }
@@ -1042,15 +1349,62 @@ void print_planning_issues(const UpgradeAllPlan& plan) {
 void print_filtered_mapping_issues(
         const FilteredAurUpdateExecutionResult& result) {
     for(const FilteredAurUpdateOperationIssue& issue : result.issues) {
-        std::string message = "AUR mapping issue: " +
-                std::string(filtered_issue_kind_label(issue.kind));
-        if(issue.package_name.has_value()) {
-            message += ": package " + *issue.package_name;
+        const std::string kind = filtered_issue_kind_label(issue.kind);
+        const bool has_package = issue.package_name.has_value();
+        const bool has_base = issue.package_base.has_value();
+        const bool has_diagnostic = !issue.diagnostic.empty();
+        std::string message;
+        if(has_package && has_base && has_diagnostic) {
+            // TRANSLATORS: The first placeholder is the literal service name
+            // "AUR"; the fourth is the literal field name "PackageBase".
+            message = localization::format_translated_message(
+                    "{} mapping issue: {}: package {}: {} {}: {}", AUR_SERVICE,
+                    kind, *issue.package_name, PACKAGE_BASE_FIELD,
+                    *issue.package_base, issue.diagnostic);
+        } else if(has_package && has_base) {
+            // TRANSLATORS: The first placeholder is the literal service name
+            // "AUR"; the fourth is the literal field name "PackageBase".
+            message = localization::format_translated_message(
+                    "{} mapping issue: {}: package {}: {} {}", AUR_SERVICE,
+                    kind, *issue.package_name, PACKAGE_BASE_FIELD,
+                    *issue.package_base);
+        } else if(has_package && has_diagnostic) {
+            // TRANSLATORS: The first placeholder is the literal service name
+            // "AUR"; the others are a localized kind and runtime data.
+            message = localization::format_translated_message(
+                    "{} mapping issue: {}: package {}: {}", AUR_SERVICE, kind,
+                    *issue.package_name, issue.diagnostic);
+        } else if(has_base && has_diagnostic) {
+            // TRANSLATORS: The first placeholder is the literal service name
+            // "AUR"; the third is the literal field name "PackageBase".
+            message = localization::format_translated_message(
+                    "{} mapping issue: {}: {} {}: {}", AUR_SERVICE, kind,
+                    PACKAGE_BASE_FIELD, *issue.package_base,
+                    issue.diagnostic);
+        } else if(has_package) {
+            // TRANSLATORS: The first placeholder is the literal service name
+            // "AUR"; the others are a localized kind and package name.
+            message = localization::format_translated_message(
+                    "{} mapping issue: {}: package {}", AUR_SERVICE, kind,
+                    *issue.package_name);
+        } else if(has_base) {
+            // TRANSLATORS: The first placeholder is the literal service name
+            // "AUR"; the third is the literal field name "PackageBase".
+            message = localization::format_translated_message(
+                    "{} mapping issue: {}: {} {}", AUR_SERVICE, kind,
+                    PACKAGE_BASE_FIELD, *issue.package_base);
+        } else if(has_diagnostic) {
+            // TRANSLATORS: The first placeholder is the literal service name
+            // "AUR"; the others are a localized kind and runtime diagnostic.
+            message = localization::format_translated_message(
+                    "{} mapping issue: {}: {}", AUR_SERVICE, kind,
+                    issue.diagnostic);
+        } else {
+            // TRANSLATORS: The first placeholder is the literal service name
+            // "AUR"; the second is a localized issue kind.
+            message = localization::format_translated_message(
+                    "{} mapping issue: {}", AUR_SERVICE, kind);
         }
-        if(issue.package_base.has_value()) {
-            message += ": PackageBase " + *issue.package_base;
-        }
-        if(!issue.diagnostic.empty()) message += ": " + issue.diagnostic;
         Logger::error(message);
     }
 }
@@ -1059,10 +1413,11 @@ void print_aur_preflight_issues(const AurUpdateOperationResult& result) {
     for(const AurUpdateOperationTargetResult& target : result.targets) {
         for(const AurUpdateExecutionIssue& issue : target.preflight_issues) {
             if(is_normal_skip_reason(issue.reason)) continue;
-            Logger::error(
-                    "AUR preflight issue: " +
-                    std::string(preflight_reason_label(issue.reason)) +
-                    ": " + issue.diagnostic);
+            // TRANSLATORS: The first placeholder is the literal service name
+            // "AUR"; the others are a localized reason and diagnostic.
+            Logger::error(localization::format_translated_message(
+                    "{} preflight issue: {}: {}", AUR_SERVICE,
+                    preflight_reason_label(issue.reason), issue.diagnostic));
         }
     }
 }
@@ -1073,41 +1428,58 @@ void print_aur_preparation_details(
     for(const AurUpdatePreparationWarning& warning :
         result.preparation_warnings) {
         const std::string package_name = warning.preference_name.empty()
-                ? "unknown preference"
+                ? localization::translate_message("unknown preference")
                 : warning.preference_name;
-        Logger::warn(
-                "AUR preparation warning: " + package_name + ": " +
-                warning.diagnostic);
+        // TRANSLATORS: The first placeholder is the literal service name
+        // "AUR"; the others are a package name and runtime diagnostic.
+        Logger::warn(localization::format_translated_message(
+                "{} preparation warning: {}: {}", AUR_SERVICE, package_name,
+                warning.diagnostic));
         printed_warning_keys.insert(package_name + "\n" + warning.diagnostic);
     }
     for(const AurUpdatePreparationIssue& issue : result.preparation_issues) {
-        Logger::error(
-                "AUR preparation issue: " +
-                std::string(preparation_reason_label(issue.reason)) + ": " +
-                issue.diagnostic);
+        // TRANSLATORS: The first placeholder is the literal service name
+        // "AUR"; the others are a localized reason and diagnostic.
+        Logger::error(localization::format_translated_message(
+                "{} preparation issue: {}: {}", AUR_SERVICE,
+                preparation_reason_label(issue.reason), issue.diagnostic));
     }
 }
 
 void print_aur_reduction_issues(const AurUpdateOperationResult& result) {
     for(const AurUpdateOperationReductionIssue& issue :
         result.reduction_issues) {
-        Logger::error(
-                "AUR reduction issue: " +
-                std::string(reduction_stage_label(issue.stage)) + ": " +
-                std::string(reduction_reason_label(issue.reason)) + ": " +
-                issue.diagnostic);
+        // TRANSLATORS: The first placeholder is the literal service name
+        // "AUR"; the others are localized details and a runtime diagnostic.
+        Logger::error(localization::format_translated_message(
+                "{} reduction issue: {}: {}: {}", AUR_SERVICE,
+                reduction_stage_label(issue.stage),
+                reduction_reason_label(issue.reason), issue.diagnostic));
     }
 }
 
 void print_adapter_issues(const UpgradeAllOperationResult& result) {
     for(const UpgradeAllExplicitSourceAdapterIssue& issue :
         result.prepared_snapshot.explicit_source_adapter.issues) {
-        std::string message = "explicit source adapter issue: " +
-                std::string(adapter_issue_kind_label(issue.kind));
-        if(issue.preference_package_name.has_value()) {
-            message += ": " + *issue.preference_package_name;
+        const std::string kind = adapter_issue_kind_label(issue.kind);
+        std::string message;
+        if(issue.preference_package_name.has_value() &&
+           !issue.diagnostic.empty()) {
+            message = localization::format_translated_message(
+                    "explicit source adapter issue: {}: {}: {}", kind,
+                    *issue.preference_package_name, issue.diagnostic);
+        } else if(issue.preference_package_name.has_value()) {
+            message = localization::format_translated_message(
+                    "explicit source adapter issue: {}: {}", kind,
+                    *issue.preference_package_name);
+        } else if(!issue.diagnostic.empty()) {
+            message = localization::format_translated_message(
+                    "explicit source adapter issue: {}: {}", kind,
+                    issue.diagnostic);
+        } else {
+            message = localization::format_translated_message(
+                    "explicit source adapter issue: {}", kind);
         }
-        if(!issue.diagnostic.empty()) message += ": " + issue.diagnostic;
         Logger::error(message);
     }
 }
@@ -1120,12 +1492,17 @@ std::set<std::string> print_foreign_inventory_failure(
     }
 
     if(inventory.failure.has_value()) {
-        std::string message = "foreign inventory failure [" +
-                std::string(package_metadata_error_label(
-                        inventory.failure->code)) + "]";
+        std::string message;
         if(!inventory.failure->diagnostic.empty()) {
-            message += ": " + inventory.failure->diagnostic;
+            message = localization::format_translated_message(
+                    "foreign inventory failure [{}]: {}",
+                    package_metadata_error_label(inventory.failure->code),
+                    inventory.failure->diagnostic);
             printed_diagnostics.insert(inventory.failure->diagnostic);
+        } else {
+            message = localization::format_translated_message(
+                    "foreign inventory failure [{}]",
+                    package_metadata_error_label(inventory.failure->code));
         }
         Logger::error(message);
     }
@@ -1133,13 +1510,14 @@ std::set<std::string> print_foreign_inventory_failure(
     if(inventory.diagnostic.has_value() &&
        !inventory.diagnostic->empty() &&
        !printed_diagnostics.contains(*inventory.diagnostic)) {
-        Logger::error(
-                "foreign inventory diagnostic: " + *inventory.diagnostic);
+        Logger::error(localization::format_translated_message(
+                "foreign inventory diagnostic: {}", *inventory.diagnostic));
         printed_diagnostics.insert(*inventory.diagnostic);
     }
 
     if(!inventory.failure.has_value() && printed_diagnostics.empty()) {
-        Logger::error("foreign inventory failure: diagnostic unavailable");
+        Logger::error(localization::translate_message(
+                "foreign inventory failure: diagnostic unavailable"));
     }
     return printed_diagnostics;
 }
@@ -1149,15 +1527,17 @@ void print_aggregate_warnings(
         std::set<std::string>& printed_warning_keys) {
     for(const UpgradeAllOperationWarning& warning : result.warnings) {
         const std::string package_name =
-                warning.package_name.value_or("aggregate");
+                warning.package_name.value_or(
+                        localization::translate_message("aggregate"));
         const std::string key = package_name + "\n" + warning.diagnostic;
         if(printed_warning_keys.contains(key)) continue;
-        Logger::warn(
-                "upgrade-all warning: " +
-                std::string(aggregate_warning_kind_label(warning.kind)) +
-                " (" + std::string(aggregate_phase_label(warning.phase)) +
-                "): " +
-                package_name + ": " + warning.diagnostic);
+        // TRANSLATORS: The first placeholder is the literal command name
+        // "upgrade-all"; the others are localized or runtime details.
+        Logger::warn(localization::format_translated_message(
+                "{} warning: {} ({}): {}: {}", COMMAND_NAME,
+                aggregate_warning_kind_label(warning.kind),
+                aggregate_phase_label(warning.phase), package_name,
+                warning.diagnostic));
         printed_warning_keys.insert(key);
     }
 }
@@ -1173,24 +1553,71 @@ void print_aggregate_issues_and_diagnostics(
                 issue.phase == UpgradeAllOperationPhase::ForeignInventory &&
                 !issue.diagnostic.empty() &&
                 already_reported_diagnostics.contains(issue.diagnostic);
-        std::string message =
-                "upgrade-all issue: " +
-                std::string(aggregate_issue_kind_label(issue.kind)) + " (" +
-                std::string(aggregate_phase_label(issue.phase)) + ")";
-        if(issue.package_name.has_value()) {
-            message += ": " + *issue.package_name;
-        }
-        if(issue.package_metadata_failure.has_value()) {
-            message += " [" + std::string(package_metadata_error_label(
-                                      issue.package_metadata_failure->code)) +
-                    "]";
-        }
         const bool suppress_raw_aur_execution_diagnostic =
                 has_typed_aur_execution_snapshot &&
                 issue.phase == UpgradeAllOperationPhase::AurExecution;
-        if(!issue.diagnostic.empty() &&
-           !suppress_raw_aur_execution_diagnostic) {
-            message += ": " + issue.diagnostic;
+        const std::string kind = aggregate_issue_kind_label(issue.kind);
+        const std::string phase = aggregate_phase_label(issue.phase);
+        const bool has_package = issue.package_name.has_value();
+        const bool has_metadata = issue.package_metadata_failure.has_value();
+        const bool has_diagnostic = !issue.diagnostic.empty() &&
+                !suppress_raw_aur_execution_diagnostic;
+        std::string message;
+        if(has_package && has_metadata && has_diagnostic) {
+            // TRANSLATORS: The first placeholder is the literal command name
+            // "upgrade-all"; the others are localized or runtime details.
+            message = localization::format_translated_message(
+                    "{} issue: {} ({}): {} [{}]: {}", COMMAND_NAME, kind,
+                    phase, *issue.package_name,
+                    package_metadata_error_label(
+                            issue.package_metadata_failure->code),
+                    issue.diagnostic);
+        } else if(has_package && has_metadata) {
+            // TRANSLATORS: The first placeholder is the literal command name
+            // "upgrade-all"; the others are localized or runtime details.
+            message = localization::format_translated_message(
+                    "{} issue: {} ({}): {} [{}]", COMMAND_NAME, kind, phase,
+                    *issue.package_name,
+                    package_metadata_error_label(
+                            issue.package_metadata_failure->code));
+        } else if(has_package && has_diagnostic) {
+            // TRANSLATORS: The first placeholder is the literal command name
+            // "upgrade-all"; the others are localized or runtime details.
+            message = localization::format_translated_message(
+                    "{} issue: {} ({}): {}: {}", COMMAND_NAME, kind, phase,
+                    *issue.package_name, issue.diagnostic);
+        } else if(has_metadata && has_diagnostic) {
+            // TRANSLATORS: The first placeholder is the literal command name
+            // "upgrade-all"; the others are localized or runtime details.
+            message = localization::format_translated_message(
+                    "{} issue: {} ({}) [{}]: {}", COMMAND_NAME, kind, phase,
+                    package_metadata_error_label(
+                            issue.package_metadata_failure->code),
+                    issue.diagnostic);
+        } else if(has_package) {
+            // TRANSLATORS: The first placeholder is the literal command name
+            // "upgrade-all"; the others are localized or runtime details.
+            message = localization::format_translated_message(
+                    "{} issue: {} ({}): {}", COMMAND_NAME, kind, phase,
+                    *issue.package_name);
+        } else if(has_metadata) {
+            // TRANSLATORS: The first placeholder is the literal command name
+            // "upgrade-all"; the others are localized details.
+            message = localization::format_translated_message(
+                    "{} issue: {} ({}) [{}]", COMMAND_NAME, kind, phase,
+                    package_metadata_error_label(
+                            issue.package_metadata_failure->code));
+        } else if(has_diagnostic) {
+            // TRANSLATORS: The first placeholder is the literal command name
+            // "upgrade-all"; the others are localized or runtime details.
+            message = localization::format_translated_message(
+                    "{} issue: {} ({}): {}", COMMAND_NAME, kind, phase,
+                    issue.diagnostic);
+        } else {
+            // TRANSLATORS: The first placeholder is the literal command name
+            // "upgrade-all"; the others are localized details.
+            message = localization::format_translated_message(
+                    "{} issue: {} ({})", COMMAND_NAME, kind, phase);
         }
         if(!already_reported) Logger::error(message);
         issue_diagnostics.insert(diagnostic_key(
@@ -1203,9 +1630,13 @@ void print_aggregate_issues_and_diagnostics(
                 result.issues.begin(), result.issues.end(),
                 [&](const UpgradeAllOperationIssue& issue) {
                     return issue.diagnostic == *result.aur.diagnostic;
-                });
+        });
         if(!already_reported) {
-            Logger::error("AUR phase diagnostic: " + *result.aur.diagnostic);
+            // TRANSLATORS: The first placeholder is the literal service name
+            // "AUR"; the second is a runtime diagnostic.
+            Logger::error(localization::format_translated_message(
+                    "{} phase diagnostic: {}", AUR_SERVICE,
+                    *result.aur.diagnostic));
         }
     }
 
@@ -1221,10 +1652,12 @@ void print_aggregate_issues_and_diagnostics(
                    diagnostic.diagnostic))) {
             continue;
         }
-        Logger::error(
-                "upgrade-all diagnostic: " +
-                std::string(aggregate_phase_label(diagnostic.phase)) +
-                ": " + diagnostic.diagnostic);
+        // TRANSLATORS: The first placeholder is the literal command name
+        // "upgrade-all"; the others are a localized phase and diagnostic.
+        Logger::error(localization::format_translated_message(
+                "{} diagnostic: {}: {}", COMMAND_NAME,
+                aggregate_phase_label(diagnostic.phase),
+                diagnostic.diagnostic));
     }
 }
 
@@ -1266,26 +1699,39 @@ void print_aggregate_summary(const UpgradeAllOperationResult& result) {
     std::cout << aggregate_package_state_label(result.package_state_change())
               << std::endl;
     if(result.has_partial_completion()) {
-        std::cout << "partial completion" << std::endl;
+        std::cout << localization::translate_message("partial completion")
+                  << std::endl;
     }
     if(result.has_not_attempted_phase()) {
-        std::cout << "some phases were not attempted" << std::endl;
+        std::cout << localization::translate_message(
+                             "some phases were not attempted")
+                  << std::endl;
     }
     if(result.has_cleanup_failure()) {
-        std::cout << "cleanup failure occurred" << std::endl;
+        std::cout << localization::translate_message("cleanup failure occurred")
+                  << std::endl;
     }
     if(result.has_duplicate_exclusions()) {
-        std::cout << "duplicate AUR targets excluded" << std::endl;
+        // TRANSLATORS: The placeholder is the literal service name "AUR".
+        std::cout << localization::format_translated_message(
+                             "duplicate {} targets excluded", AUR_SERVICE)
+                  << std::endl;
     }
     if(result.has_external_satisfaction()) {
-        std::cout << "AUR build units externally satisfied" << std::endl;
+        // TRANSLATORS: The placeholder is the literal service name "AUR".
+        std::cout << localization::format_translated_message(
+                             "{} build units externally satisfied", AUR_SERVICE)
+                  << std::endl;
     }
 
     if((result.status == UpgradeAllOperationStatus::Completed ||
         result.status == UpgradeAllOperationStatus::NoUpdates) &&
        !result.is_success()) {
-        Logger::error(
-                "upgrade-all result contains failure details despite a successful aggregate status.");
+        Logger::error(localization::format_translated_message(
+                // TRANSLATORS: The placeholder is the literal command name
+                // "upgrade-all".
+                "The {} result contains failure details despite a successful aggregate status.",
+                COMMAND_NAME));
     }
 }
 
@@ -1311,50 +1757,88 @@ void print_operation_result(const UpgradeAllOperationResult& result) {
 }
 
 bool is_supported_upgrade_all_global_option(const std::string& option) {
-    return option == "--noedit" || option == "--nodiff" ||
-           option == "--noconfirm" || option == "--rebuild" ||
-           option == "--cleanbuild";
+    const cli_authority::GlobalOptionSpec* spec =
+            cli_authority::find_moguet_global_option(option);
+    if(spec == nullptr) return false;
+
+    switch(spec->id) {
+    case cli_authority::GlobalOptionId::Edit:
+    case cli_authority::GlobalOptionId::NoEdit:
+    case cli_authority::GlobalOptionId::Diff:
+    case cli_authority::GlobalOptionId::NoDiff:
+    case cli_authority::GlobalOptionId::NoConfirm:
+    case cli_authority::GlobalOptionId::BuildMode:
+    case cli_authority::GlobalOptionId::Rebuild:
+    case cli_authority::GlobalOptionId::CleanBuild:
+        return true;
+    case cli_authority::GlobalOptionId::RmDeps:
+    case cli_authority::GlobalOptionId::Aur:
+    case cli_authority::GlobalOptionId::Repo:
+    case cli_authority::GlobalOptionId::Count:
+        return false;
+    }
+    return false;
 }
 
 } // namespace
 
 std::vector<std::string> validate_upgrade_all_invocation(
         const ParsedCliArguments& parsed) {
-    if(parsed.operation != "upgrade-all") return {};
+    if(parsed.operation !=
+       cli_authority::operation_spec(
+               cli_authority::OperationId::UpgradeAll)
+               .token) {
+        return {};
+    }
 
     std::vector<std::string> errors;
     for(const ParsedCliToken& token : parsed.tokens) {
         switch(token.role) {
         case CliTokenRole::Operation:
             break;
-        case CliTokenRole::JpackerGlobalOption:
+        case CliTokenRole::MoguetGlobalOption:
             if(!is_supported_upgrade_all_global_option(token.value)) {
                 errors.push_back(
-                        "Unsupported upgrade-all option: " + token.value);
+                        localization::format_translated_message(
+                                // TRANSLATORS: The first placeholder is the
+                                // literal command name "upgrade-all"; the
+                                // second is a runtime option token.
+                                "Unsupported {} option: {}", COMMAND_NAME,
+                                token.value));
             }
             break;
         case CliTokenRole::Target:
-            errors.push_back(
-                    "upgrade-all does not accept target operands: " +
-                    token.value);
+            errors.push_back(localization::format_translated_message(
+                    // TRANSLATORS: The first placeholder is the literal
+                    // command name "upgrade-all"; the second is an operand.
+                    "{} does not accept target operands: {}", COMMAND_NAME,
+                    token.value));
             break;
         case CliTokenRole::OpaqueOperand:
-            errors.push_back(
-                    "upgrade-all does not accept opaque operands: " +
-                    token.value);
+            errors.push_back(localization::format_translated_message(
+                    // TRANSLATORS: The first placeholder is the literal
+                    // command name "upgrade-all"; the second is an operand.
+                    "{} does not accept opaque operands: {}", COMMAND_NAME,
+                    token.value));
             break;
         case CliTokenRole::PacmanOption:
         case CliTokenRole::PacmanOptionValue:
-            errors.push_back(
-                    "Unsupported upgrade-all option or operand: " +
-                    token.value);
+            errors.push_back(localization::format_translated_message(
+                    // TRANSLATORS: The first placeholder is the literal
+                    // command name "upgrade-all"; the second is a runtime
+                    // option or operand.
+                    "Unsupported {} option or operand: {}", COMMAND_NAME,
+                    token.value));
             break;
         case CliTokenRole::EndOfOptions:
             // `--` itself carries no target; any following opaque operand gets
             // its own diagnostic. A bare marker is still unsupported.
             if(parsed.targets.empty()) {
-                errors.push_back(
-                        "upgrade-all does not accept the -- operand marker.");
+                errors.push_back(localization::format_translated_message(
+                        // TRANSLATORS: The placeholders are the literal
+                        // command name "upgrade-all" and CLI marker "--".
+                        "{} does not accept the {} operand marker.",
+                        COMMAND_NAME, "--"));
             }
             break;
         }
@@ -1378,13 +1862,18 @@ int cmd_upgrade_all(const AppConfig& config) {
         print_operation_result(result);
         return result.is_success() ? 0 : 1;
     } catch(const std::exception& error) {
-        Logger::error(
-                "Unexpected upgrade-all command failure: " +
-                std::string(error.what()));
+        Logger::error(localization::format_translated_message(
+                // TRANSLATORS: The first placeholder is the literal command
+                // name "upgrade-all"; the second is a runtime diagnostic.
+                "Unexpected {} command failure: {}", COMMAND_NAME,
+                error.what()));
         return 1;
     } catch(...) {
-        Logger::error(
-                "Unexpected upgrade-all command failure: unknown exception.");
+        Logger::error(localization::format_translated_message(
+                // TRANSLATORS: The placeholder is the literal command name
+                // "upgrade-all".
+                "Unexpected {} command failure: unknown exception.",
+                COMMAND_NAME));
         return 1;
     }
 }

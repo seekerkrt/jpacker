@@ -125,7 +125,7 @@ public:
     [[nodiscard]] const MixedPackageBaseInstallReasonUnsupported*
     mixed_reason_failure() const noexcept;
 
-#ifdef JPACKER_ENABLE_AUR_UPDATE_EXECUTION_RUNNER_TEST_HOOKS
+#ifdef MOGUET_ENABLE_AUR_UPDATE_EXECUTION_RUNNER_TEST_HOOKS
     // Runner fake-symbol testだけがclosed typed failureを組み立てるseam。
     // production constructorやartifact capabilityは公開しない。
     static PackageBaseArtifactInstallPreparationFailure
@@ -153,7 +153,7 @@ private:
                  MixedPackageBaseInstallReasonUnsupported>
             failure_;
 
-#ifdef JPACKER_ENABLE_AUR_UPDATE_EXECUTION_RUNNER_TEST_HOOKS
+#ifdef MOGUET_ENABLE_AUR_UPDATE_EXECUTION_RUNNER_TEST_HOOKS
     struct AurUpdateRunnerTestTag {};
 
     PackageBaseArtifactInstallPreparationFailure(
@@ -275,7 +275,7 @@ class PackageBaseArtifactInstallTransactionError final
             PreparedPackageBaseArtifactInstall& install,
             const ArtifactInstallExecutionOptions& options);
 
-#ifdef JPACKER_ENABLE_AUR_UPDATE_EXECUTION_RUNNER_TEST_HOOKS
+#ifdef MOGUET_ENABLE_AUR_UPDATE_EXECUTION_RUNNER_TEST_HOOKS
     struct AurUpdateRunnerTestTag {};
 
     PackageBaseArtifactInstallTransactionError(
@@ -313,7 +313,7 @@ public:
     std::vector<PackageBaseArtifactInstallTransactionAttempt>
     release_attempts() && noexcept;
 
-#ifdef JPACKER_ENABLE_AUR_UPDATE_EXECUTION_RUNNER_TEST_HOOKS
+#ifdef MOGUET_ENABLE_AUR_UPDATE_EXECUTION_RUNNER_TEST_HOOKS
     static PackageBaseArtifactInstallTransactionError
     make_for_aur_update_runner_test(
             PackageBaseArtifactInstallTransactionFailureKind failure_kind,

@@ -22,10 +22,10 @@ namespace {
 
 const std::string& scenario() {
     static const std::string s_scenario = [] {
-        const char* value = std::getenv("JPACKER_TEST_AUR_UPDATE_SCENARIO");
+        const char* value = std::getenv("MOGUET_TEST_AUR_UPDATE_SCENARIO");
         if(value == nullptr || value[0] == '\0') {
             throw std::logic_error(
-                    "JPACKER_TEST_AUR_UPDATE_SCENARIO is required.");
+                    "MOGUET_TEST_AUR_UPDATE_SCENARIO is required.");
         }
         return std::string(value);
     }();
@@ -33,9 +33,9 @@ const std::string& scenario() {
 }
 
 void append_event(const std::string& event) {
-    const char* event_log_path = std::getenv("JPACKER_TEST_COMMAND_LOG");
+    const char* event_log_path = std::getenv("MOGUET_TEST_COMMAND_LOG");
     if(event_log_path == nullptr || event_log_path[0] == '\0') {
-        throw std::logic_error("JPACKER_TEST_COMMAND_LOG is required.");
+        throw std::logic_error("MOGUET_TEST_COMMAND_LOG is required.");
     }
 
     std::ofstream event_log(event_log_path, std::ios::app);
@@ -50,11 +50,19 @@ const char* bool_text(bool value) {
 }
 
 std::string config_snapshot(const AppConfig& config) {
-    return "noedit=" + std::string(bool_text(config.no_edit)) +
-            " nodiff=" + bool_text(config.no_diff) +
+    return "noedit=" + std::string(bool_text(
+                                   config.user_config.review.pkgbuild ==
+                                   ReviewPolicy::Skip)) +
+            " nodiff=" + bool_text(
+                                config.user_config.review.diff ==
+                                ReviewPolicy::Skip) +
             " noconfirm=" + bool_text(config.no_confirm) +
-            " rebuild=" + bool_text(config.rebuild) +
-            " cleanbuild=" + bool_text(config.clean_build) +
+            " rebuild=" + bool_text(
+                                  config.user_config.build.mode ==
+                                  BuildMode::Rebuild) +
+            " cleanbuild=" + bool_text(
+                                     config.user_config.build.mode ==
+                                     BuildMode::Clean) +
             " rmdeps=" + bool_text(config.rm_deps);
 }
 
@@ -1398,11 +1406,17 @@ bool PreparedFilteredAurUpdateOperation::is_blocked() const noexcept {
 PreparedFilteredAurUpdateOperation prepare_filtered_aur_update_operation(
         AurUpdateQueryResult query_result,
         std::vector<UpgradeAllExplicitSourceIdentity> explicit_sources,
-        const AppConfig& config) {
+        const AppConfig& config,
+        std::optional<ValidatedCacheRoot> cache_root) {
     if(!explicit_sources.empty()) {
         throw std::logic_error(
                 "AUR update command stub only supports an empty explicit source set.");
     }
+    if(!cache_root.has_value()) {
+        throw std::logic_error(
+                "AUR update command did not supply cache authority before query execution.");
+    }
+    cache_root->require_unchanged_identity();
 
     PreparedFilteredAurUpdateOperation prepared;
     prepared.query_result = std::move(query_result);

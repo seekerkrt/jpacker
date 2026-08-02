@@ -24,17 +24,20 @@ printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' ||
     fail "VERSION must look like X.Y.Z: $version"
 pass "VERSION=$version"
 
-[ -x ./jpacker ] || fail "./jpacker is missing or not executable; run make first."
-binary_version=$(./jpacker --version)
-expected_binary_version="jpacker v$version"
+[ -x ./moguet ] || fail "./moguet is missing or not executable; run make first."
+binary_version=$(./moguet --version)
+expected_binary_version="Moguet v$version"
 [ "$binary_version" = "$expected_binary_version" ] ||
-    fail "./jpacker --version mismatch: expected '$expected_binary_version', got '$binary_version'"
-pass "./jpacker --version matches VERSION"
+    fail "./moguet --version mismatch: expected '$expected_binary_version', got '$binary_version'"
+pass "./moguet --version matches VERSION"
 
-[ -f man/jpacker.8 ] || fail "man/jpacker.8 is missing; run make first."
-grep -Fq "\"jpacker $version\"" man/jpacker.8 ||
-    fail "man/jpacker.8 does not contain generated version 'jpacker $version'."
-pass "man/jpacker.8 contains VERSION"
+for manpage in man/moguet.1 man/ja/moguet.1
+do
+    [ -f "$manpage" ] || fail "$manpage is missing; run make first."
+    grep -Fq "\"Moguet $version\"" "$manpage" ||
+        fail "$manpage does not contain generated version 'Moguet $version'."
+    pass "$manpage contains VERSION"
+done
 
 [ -f PKGBUILD ] || fail "PKGBUILD is missing."
 grep -Fq 'pkgver=$(_read_version_file VERSION)' PKGBUILD ||

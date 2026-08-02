@@ -115,7 +115,8 @@ class PreparedFilteredAurUpdateOperation final {
     prepare_filtered_aur_update_operation(
             AurUpdateQueryResult query_result,
             std::vector<UpgradeAllExplicitSourceIdentity> explicit_sources,
-            const AppConfig& config);
+            const AppConfig& config,
+            std::optional<ValidatedCacheRoot> cache_root);
     friend FilteredAurUpdateExecutionResult
     execute_prepared_filtered_aur_update_operation(
             PreparedFilteredAurUpdateOperation prepared,
@@ -211,7 +212,8 @@ FilteredAurUpdateTargetAdapter adapt_aur_update_plan_for_upgrade_all(
 PreparedFilteredAurUpdateOperation prepare_filtered_aur_update_operation(
         AurUpdateQueryResult query_result,
         std::vector<UpgradeAllExplicitSourceIdentity> explicit_sources,
-        const AppConfig& config);
+        const AppConfig& config,
+        std::optional<ValidatedCacheRoot> cache_root = std::nullopt);
 
 // aggregateをby-valueでconsumeし、nested invocation capabilityだけをrunnerへmoveする。
 FilteredAurUpdateExecutionResult execute_prepared_filtered_aur_update_operation(

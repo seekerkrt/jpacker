@@ -19,6 +19,8 @@ DesiredInstallReason desired_install_reason(
         }
     }
 
+    // NO_TRANSLATE(Issue #308): production projection validates roles before
+    // this reducer and converts an unavailable reason to a typed issue.
     throw std::logic_error(
             "Planned package target has no package role: " +
             target.package_name);

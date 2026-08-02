@@ -31,7 +31,7 @@ AurPackageInfo package_info(
     info.PackageBase = name;
     info.Version = "2.0-1";
     info.Depends = dependencies;
-    info.Maintainer = "jpacker-test";
+    info.Maintainer = "moguet-test";
     return info;
 }
 

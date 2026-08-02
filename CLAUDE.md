@@ -2,14 +2,14 @@
 
 ## 位置づけ
 
-この文書は、jpacker repositoryで作業するときの入口・SSOT地図・固有の作業境界を定める。
+この文書は、Moguet repositoryで作業するときの入口・SSOT地図・固有の作業境界を定める。
 言語非依存の共通契約はClaude Codeのグローバル`CLAUDE.md`、C/C++共通規約は`cpp-conventions` Skillを基準とし、ここでは再掲しない。
 
-jpacker固有の指示、`docs/CODING_CONVENTIONS.md`、実際のbuild設定が共通規約と矛盾する場合は、より具体的なrepository側の契約を優先する。
+Moguet固有の指示、`docs/CODING_CONVENTIONS.md`、実際のbuild設定が共通規約と矛盾する場合は、より具体的なrepository側の契約を優先する。
 
 ## Repository概要と優先事項
 
-jpackerは、pacman、makepkg、AUR、gitの既存契約を尊重しながらArch package操作を補助するhosted C++ CLIである。
+Moguetは、pacman、makepkg、AUR、gitの既存契約を尊重しながらArch package操作を補助するhosted C++ CLIである。
 
 このrepositoryでは、特に次を優先する。
 
@@ -27,7 +27,7 @@ jpackerは、pacman、makepkg、AUR、gitの既存契約を尊重しながらArc
 - `docs/DEVELOPMENT.md`: branch、PR、mirror、release運用
 - `docs/VERSIONING.md`: version policy
 - `docs/LICENSING.md`: dependencyと配布物のlicense契約
-- `docs/CODING_CONVENTIONS.md`: jpacker固有のC++追加・上書き規約
+- `docs/CODING_CONVENTIONS.md`: Moguet固有のC++追加・上書き規約
 
 設計判断の詳細をこの文書やコーディング規約へ複製しない。変更対象に対応する正式文書を正とする。
 
@@ -37,8 +37,8 @@ jpackerは、pacman、makepkg、AUR、gitの既存契約を尊重しながらArc
 - fetchは取得段階であり、既存cloneでは`git fetch origin`までを境界とする。working tree更新、pull、merge、reset、build、installを暗黙に追加しない。
 - package transactionとsystem databaseのauthorityはpacman / libalpmへ委ねる。
 - PKGBUILD評価とpackage buildはmakepkg / Arch packaging契約を尊重する。
-- jpacker本体は通常userで動作し、必要なpacman操作だけを明示的なsudo境界へ渡す。
-- AUR/network側のfailure、local validation failure、jpacker内部failureをCLI上で区別する。
+- Moguet本体は通常userで動作し、必要なpacman操作だけを明示的なsudo境界へ渡す。
+- AUR/network側のfailure、local validation failure、Moguet内部failureをCLI上で区別する。
 - `--noconfirm`は対応経路のprompt省略であり、未解決dependency、ambiguous provider、conflict / replacement、削除、source selection等のguardを突破する許可ではない。
 
 ## Skill routing
@@ -65,7 +65,7 @@ CLI出力や終了codeを変えた場合は対象commandを直接確認する。
 - `main`は最新安定版、`develop`は次releaseのintegration branchである。
 - 通常の`feature/*`、`fix/*`、`docs/*`は`develop`から派生し、PRも`develop`をtargetとする。
 - release branch、main反映、tag、GitHub Release、mirror更新の手順は`docs/DEVELOPMENT.md`を正とする。
-- Issue、PR、commit message、release noteは日本語を主文とし、英語は必要な場合の補足とする。
+- Issue、PR、commit messageは日本語を主文とする。release noteはtracked `RELEASE_NOTES.md`でEnglish / Japanese sectionを同期する。
 
 ## Repository固有の慎重領域
 

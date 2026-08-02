@@ -3,8 +3,8 @@ set -eu
 
 test_binary=$1
 repo_root=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
-JPACKER_TEST_REPOSITORY_ROOT=$repo_root
-export JPACKER_TEST_REPOSITORY_ROOT
+MOGUET_TEST_REPOSITORY_ROOT=$repo_root
+export MOGUET_TEST_REPOSITORY_ROOT
 . "$repo_root/tests/test-command-safety.sh"
 tmp_dir=$(mktemp -d)
 case_count=0
@@ -29,22 +29,26 @@ setup_case() {
     stdout_file=$case_dir/stdout
     stderr_file=$case_dir/stderr
     command_log=$case_dir/commands.log
-    config_file=$case_dir/jpacker.conf
+    config_file=$case_dir/config.toml
 
-    mkdir -p "$case_dir/home" "$case_dir/work" "$case_dir/package.build"
+    mkdir -p \
+        "$case_dir/home" "$case_dir/xdg-state" "$case_dir/xdg-cache" \
+        "$case_dir/work" \
+        "$case_dir/package.build"
     : > "$stdout_file"
     : > "$stderr_file"
     : > "$command_log"
-    : > "$config_file"
+    printf '%s\n' 'schema_version = 1' > "$config_file"
 
     export HOME=$case_dir/home
+    export XDG_STATE_HOME=$case_dir/xdg-state
     export XDG_CACHE_HOME=$case_dir/xdg-cache
-    export JPACKER_TEST_CONFIG_FILE=$config_file
-    export JPACKER_TEST_PACKAGE_BUILD_DIR=$case_dir/package.build
-    export JPACKER_TEST_COMMAND_LOG=$command_log
-    export JPACKER_TEST_AUR_UPDATE_SCENARIO=$scenario_name
-    export JPACKER_TEST_PACMAN_EXIT_CODE=91
-    export JPACKER_TEST_SUDO_EXIT_CODE=92
+    export MOGUET_TEST_CONFIG_FILE=$config_file
+    export MOGUET_TEST_PACKAGE_BUILD_DIR=$case_dir/package.build
+    export MOGUET_TEST_COMMAND_LOG=$command_log
+    export MOGUET_TEST_AUR_UPDATE_SCENARIO=$scenario_name
+    export MOGUET_TEST_PACMAN_EXIT_CODE=91
+    export MOGUET_TEST_SUDO_EXIT_CODE=92
     case_count=$((case_count + 1))
 }
 
@@ -111,8 +115,8 @@ assert_line_before() {
 }
 
 assert_cache_absent() {
-    if [ -e "$XDG_CACHE_HOME/jpacker" ]; then
-        fail_case "invalid invocation initialized the jpacker cache"
+    if [ -e "$XDG_CACHE_HOME/moguet" ]; then
+        fail_case "invalid invocation initialized the Moguet cache"
     fi
 }
 
@@ -553,14 +557,25 @@ assert_not_contains \
     "execution failure: prior work item stopped" "$stderr_file"
 assert_not_contains "diagnostic unavailable" "$stderr_file"
 
-# All supported global options reach both preparation and execution unchanged.
-setup_case option-propagation options-propagation
-run_status 0 --noedit upgrade-aur --nodiff --noconfirm --rebuild --cleanbuild
+# Typed skip/rebuild options and an equivalent alias reach both boundaries once.
+setup_case option-propagation-rebuild options-propagation
+run_status 0 --noedit upgrade-aur --nodiff --noconfirm \
+    --build-mode=rebuild --rebuild
 assert_exact_line \
-    "prepare needed=false noedit=true nodiff=true noconfirm=true rebuild=true cleanbuild=true rmdeps=false" \
+    "prepare needed=false noedit=true nodiff=true noconfirm=true rebuild=true cleanbuild=false rmdeps=false" \
     "$command_log"
 assert_exact_line \
-    "execute noedit=true nodiff=true noconfirm=true rebuild=true cleanbuild=true rmdeps=false" \
+    "execute noedit=true nodiff=true noconfirm=true rebuild=true cleanbuild=false rmdeps=false" \
+    "$command_log"
+
+# Prompt/clean final values and the cleanbuild alias use the opposite legacy projection.
+setup_case option-propagation-clean options-propagation
+run_status 0 --edit upgrade-aur --diff --build-mode=clean --cleanbuild
+assert_exact_line \
+    "prepare needed=false noedit=false nodiff=false noconfirm=false rebuild=false cleanbuild=true rmdeps=false" \
+    "$command_log"
+assert_exact_line \
+    "execute noedit=false nodiff=false noconfirm=false rebuild=false cleanbuild=true rmdeps=false" \
     "$command_log"
 
 # Misuse is rejected before query and before default cache/log initialization.
@@ -580,7 +595,7 @@ assert_cache_absent
 setup_case positional-target-rejection all-updated
 run_status 1 upgrade-aur unexpected-target
 assert_contains \
-    "upgrade-aur does not accept target operands." "$stderr_file"
+    "Operation upgrade-aur does not accept target operands." "$stderr_file"
 assert_pipeline_absent
 assert_cache_absent
 
@@ -600,18 +615,18 @@ assert_cache_absent
 
 # Existing system routes remain exact and never enter the new pipeline.
 setup_case syu-routing-unchanged no-installed-foreign
-export JPACKER_TEST_SUDO_EXIT_CODE=0
+export MOGUET_TEST_SUDO_EXIT_CODE=0
 run_status 0 -Syu
 assert_exact_line "sudo pacman -Syu" "$command_log"
 assert_pipeline_absent
 
 setup_case upgrade-routing-unchanged no-installed-foreign
-export JPACKER_TEST_SUDO_EXIT_CODE=0
+export MOGUET_TEST_SUDO_EXIT_CODE=0
 run_status 0 upgrade
 assert_exact_line "sudo pacman -Syu" "$command_log"
 assert_pipeline_absent
 
-if [ "$case_count" -ne 43 ]; then
+if [ "$case_count" -ne 44 ]; then
     fail_case "internal test case count changed: $case_count"
 fi
 echo "AUR update command integration tests passed ($case_count cases)."

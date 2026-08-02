@@ -1,59 +1,58 @@
-# jpacker licensing policy
+# Moguet licensing policy
 
-この文書は、jpacker本体とthird-party componentのライセンス運用に関するsource of truthです。ライセンス本文そのものの代替ではありません。jpacker本体へ適用するGNU General Public License version 3の正式全文は、source treeではrepository rootの[`LICENSE`](../LICENSE)、install後は`${PREFIX}/share/licenses/jpacker/LICENSE`を参照してください。Arch packageでは`/usr/share/licenses/jpacker/LICENSE`へ配置します。
+この文書は、Moguet本体とthird-party componentのライセンス運用に関するsource of truthです。ライセンス本文そのものの代替ではありません。Moguet本体へ適用するGNU General Public License version 3の正式全文は、source treeではrepository rootの[`LICENSE`](https://github.com/seekerkrt/moguet/blob/develop/LICENSE)、install後は`${PREFIX}/share/licenses/moguet/LICENSE`を参照してください。Arch packageでは`/usr/share/licenses/moguet/LICENSE`へ配置します。
 
 ## Version boundary
 
-jpackerのライセンス境界は次のとおりです。
+Moguetと、その前身であるjpackerのライセンス境界は次のとおりです。
 
 > jpacker v1.14.0 and earlier releases were distributed under the MIT License.
 > Those historical releases remain available under their original license.
-> The current GPL-licensed development series and v1.15.0 or later releases are distributed under GPL-3.0-or-later.
+> jpacker v1.15.0 and later releases, and Moguet releases, are distributed under GPL-3.0-or-later.
 
 - v1.14.0以前のtag、release、git historyは変更しません。既にMIT Licenseで提供したcopyのpermissionを取り消しません。
-- 現在のGPLライセンス開発系列とv1.15.0以降のreleaseには`GPL-3.0-or-later`を適用します。
-- v1.14.0以前に適用したMIT全文は、historical noticeとしてsource treeの[`LICENSES/jpacker-MIT-legacy.txt`](../LICENSES/jpacker-MIT-legacy.txt)へ改変せず保持します。install後は`${PREFIX}/share/licenses/jpacker/jpacker-MIT-legacy.txt`、Arch packageでは`/usr/share/licenses/jpacker/jpacker-MIT-legacy.txt`です。
+- jpacker v1.15.0以降とMoguetには`GPL-3.0-or-later`を適用します。
+- v1.14.0以前に適用したMIT全文は、historical noticeとしてsource treeの[`LICENSES/jpacker-MIT-legacy.txt`](https://github.com/seekerkrt/moguet/blob/develop/LICENSES/jpacker-MIT-legacy.txt)へ改変せず保持します。Moguetへのinstall後は`${PREFIX}/share/licenses/moguet/jpacker-MIT-legacy.txt`、Arch packageでは`/usr/share/licenses/moguet/jpacker-MIT-legacy.txt`です。historical filenameは来歴を示すため変更しません。
 
 ## Project notice
 
 ```text
-jpacker - an Arch Linux pacman wrapper with AUR and source-build support
+Moguet - a pacman-first AUR helper for Arch Linux
 Copyright (C) 2025-2026 seekerkrt
 
-The current GPL-licensed development series and v1.15.0 or later releases are
-free software: you can redistribute them and/or modify them under the terms
+Moguet is free software: you can redistribute it and/or modify it under the terms
 of the GNU General Public License as published by the Free Software
 Foundation, either version 3 of the License, or (at your option) any later
 version.
 
-These versions of jpacker are distributed in the hope that they will be
-useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
+Moguet is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of
 MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General
 Public License for more details.
 
 You should have received a copy of the GNU General Public License along with
-jpacker. If not, see <https://www.gnu.org/licenses/>.
+Moguet. If not, see <https://www.gnu.org/licenses/>.
 ```
 
-`or later`は、recipientがGPL version 3、またはFree Software Foundationが将来公開するlater versionのいずれかを選べる、という意味です。GPL本文だけではjpackerに`or later`を指定したことにならないため、上記project noticeとpackage metadataで明示します。
+`or later`は、recipientがGPL version 3、またはFree Software Foundationが将来公開するlater versionのいずれかを選べる、という意味です。GPL本文だけではMoguetに`or later`を指定したことにならないため、上記project noticeとpackage metadataで明示します。
 
 ## Contributions
 
-jpackerへ取り込まれたproject-authored contributionは、jpackerの一部として`GPL-3.0-or-later`で配布されます。contributorが保有するcopyrightをjpackerへ譲渡することは求めません。現時点ではDCOやCLAも要求しません。
+Moguetへ取り込まれたproject-authored contributionは、Moguetの一部として`GPL-3.0-or-later`で配布されます。contributorが保有するcopyrightをMoguetへ譲渡することは求めません。現時点ではDCOやCLAも要求しません。
 
-詳しいcontribution processとthird-party materialの方針は、source treeの[`CONTRIBUTING.md`](../CONTRIBUTING.md)を参照してください。
+詳しいcontribution processとthird-party materialの方針は、source treeの[`CONTRIBUTING.md`](https://github.com/seekerkrt/moguet/blob/develop/CONTRIBUTING.md)を参照してください。
 
 ## Why GPL-3.0-or-later
 
-jpackerはv1.15.0開発系列から、Arch Linux `pacman` packageが提供する`libalpm` APIを直接利用し、動的にlinkしています。Arch package metadataは`libalpm`を含む`pacman`を`GPL-2.0-or-later`としており、GNU GPL FAQはGPL-covered libraryへlinkするprogramをcombined programとして扱う立場を示しています。
+jpacker v1.15.0で導入された、Arch Linux `pacman` packageが提供する`libalpm` APIへの直接dynamic linkをMoguetも継続しています。Arch package metadataは`libalpm`を含む`pacman`を`GPL-2.0-or-later`としており、GNU GPL FAQはGPL-covered libraryへlinkするprogramをcombined programとして扱う立場を示しています。
 
-このためjpackerは、linked combination全体をGPL-covered workとして扱う保守的なproject compliance policyを採用し、later-version optionとの互換性と将来の明確さを優先して`GPL-3.0-or-later`を選択します。libalpmをread-only metadataへ限定し、transactionを`pacman`へ任せるarchitecture上のowner分離は維持しますが、その責務分離とlibrary linkのlicense分類は別の話です。
+このためMoguetは、linked combination全体をGPL-covered workとして扱う保守的なproject compliance policyを採用し、later-version optionとの互換性と将来の明確さを優先して`GPL-3.0-or-later`を選択します。libalpmをread-only metadataへ限定し、transactionを`pacman`へ任せるarchitecture上のowner分離は維持しますが、その責務分離とlibrary linkのlicense分類は別の話です。
 
-GPLは商用利用を禁止するlicenseではありません。実行、調査、改変、originalまたはmodified copyの再配布を認めつつ、covered copyを配布する場合のsource提供、license・copyright noticeの保持、同じlicense上の権利の継承、追加制限の禁止などを定めます。正確な条件は必ずsource treeの[`LICENSE`](../LICENSE)、またはinstall済みの`${PREFIX}/share/licenses/jpacker/LICENSE`にある正式全文で確認してください。
+GPLは商用利用を禁止するlicenseではありません。実行、調査、改変、originalまたはmodified copyの再配布を認めつつ、covered copyを配布する場合のsource提供、license・copyright noticeの保持、同じlicense上の権利の継承、追加制限の禁止などを定めます。正確な条件は必ずsource treeの[`LICENSE`](https://github.com/seekerkrt/moguet/blob/develop/LICENSE)、またはinstall済みの`${PREFIX}/share/licenses/moguet/LICENSE`にある正式全文で確認してください。
 
 ## Source distributions
 
-v1.15.0開発系列以降のsource distributionには、少なくとも次を同じrevisionから含めます。
+Moguetのsource distributionには、少なくとも次を同じrevisionから含めます。
 
 - `LICENSE`
 - `docs/LICENSING.md`
@@ -66,24 +65,24 @@ modified sourceを配布する場合は、GPLv3が求める変更表示、日付
 
 ## Binary distributions and Corresponding Source
 
-projectまたはdownstreamがbinaryを配布する場合は、そのbinaryと同じversionをrebuildできるCorresponding Sourceを、GPLv3 section 6に沿った方法で提供する必要があります。project policyとして、少なくともexact release tag、jpacker source、build/install scripts、package metadata、必要なnoticeへbinaryのrecipientが明確に到達できる状態を維持します。単に別versionのrepository先頭を案内するだけでは、exact binaryのsource確認として扱いません。
+projectまたはdownstreamがbinaryを配布する場合は、そのbinaryと同じversionをrebuildできるCorresponding Sourceを、GPLv3 section 6に沿った方法で提供する必要があります。project policyとして、少なくともexact release tag、Moguet source、build/install scripts、package metadata、必要なnoticeへbinaryのrecipientが明確に到達できる状態を維持します。単に別versionのrepository先頭を案内するだけでは、exact binaryのsource確認として扱いません。
 
 2026-07-23の監査時点では、GitHub Releaseにproject-built binary assetはなく、GitLab Release mirrorもtag由来のsource archiveだけです。将来binary assetやpackage registryを追加する場合は、公開前にCorresponding Sourceの提供方法を再監査します。
 
 ## Linked/compiled components and external commands
 
-利用形態は次のように区別します。個別component、copyright notice、監査で除外したlicenseの理由は、source treeの[`THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md)、またはinstall済みの`${PREFIX}/share/doc/jpacker/THIRD_PARTY_NOTICES.md`を参照してください。Arch packageでのinstall先は`/usr/share/doc/jpacker/THIRD_PARTY_NOTICES.md`です。
+利用形態は次のように区別します。個別component、copyright notice、監査で除外したlicenseの理由は、source treeの[`THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md)、またはinstall済みの`${PREFIX}/share/doc/moguet/THIRD_PARTY_NOTICES.md`を参照してください。Arch packageでのinstall先は`/usr/share/doc/moguet/THIRD_PARTY_NOTICES.md`です。
 
 | 分類 | 現在のcomponent | 境界 |
 | --- | --- | --- |
-| Direct dynamic link | libalpm、libcurl | jpackerと同じprocessでAPIを呼び、ELF runtime dependencyになる |
-| Header-only compiled code | nlohmann-json | system headerの実装がjpacker object codeへcompileされる |
-| External command | pacman、pacman-conf、makepkg、git、vercmp、その他NOTICE記載のprogram | command line、stdin/stdout、exit statusを介する別processであり、jpackerへlinkしない |
+| Direct dynamic link | libalpm、libcurl | Moguetと同じprocessでAPIを呼び、ELF runtime dependencyになる |
+| Header-only compiled code | nlohmann-json、toml++ | system headerの実装がMoguet object codeへcompileされる |
+| External command | pacman、pacman-conf、makepkg、git、vercmp、その他NOTICE記載のprogram | command line、stdin/stdout、exit statusを介する別processであり、Moguetへlinkしない |
 | System/toolchain runtime | glibc、libstdc++、libgcc_s、libmなど | compiler/OSが提供するruntime。applicationが直接採用したlibraryと混同しない |
 
 ## System packages and bundling policy
 
-現在のjpacker repositoryとpackageは、libalpm、libcurl、nlohmann-jsonのsource treeやlibrary binaryをbundleしていません。build時とruntimeにArch system packagesから取得します。`ldd`に現れるtransitive dependencyを、jpackerが直接利用・再配布するcomponentとして無差別に列挙しません。
+現在のMoguet source treeとpackageは、libalpm、libcurl、nlohmann-json、toml++のsource treeやlibrary binaryをbundleしていません。libalpmとlibcurlはbuild / runtime、nlohmann-jsonとtoml++はbuild時にArch system packagesから取得します。`ldd`に現れるtransitive dependencyを、Moguetが直接利用・再配布するcomponentとして無差別に列挙しません。
 
 この前提が変わる場合はnoticeをそのまま流用しません。特に次の変更では、source提供、license compatibility、copyright notice、package layoutを改めて監査します。
 
@@ -104,3 +103,5 @@ projectまたはdownstreamがbinaryを配布する場合は、そのbinaryと同
 - [Arch Linux pacman package](https://archlinux.org/packages/core/x86_64/pacman/)
 - [curl license](https://curl.se/docs/copyright.html)
 - [nlohmann-json v3.12.0 license information](https://github.com/nlohmann/json/tree/v3.12.0#license)
+- [toml++ project and license](https://github.com/marzer/tomlplusplus#license)
+- [Bjoern Hoehrmann UTF-8 decoder and license](https://bjoern.hoehrmann.de/utf-8/decoder/dfa/)
