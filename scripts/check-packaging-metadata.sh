@@ -155,7 +155,7 @@ actual_payload=$(find "$stage_root" -type f -print |
 
 command -v readelf >/dev/null 2>&1 ||
     fail "readelf is required for runtime dependency verification."
-needed=$(readelf -d "$stage_root/usr/bin/moguet" |
+needed=$(LC_ALL=C readelf -d "$stage_root/usr/bin/moguet" |
     sed -n 's/.*Shared library: \[\([^]]*\)\].*/\1/p')
 printf '%s\n' "$needed" | grep -Eq '^libcurl\.so(\.|$)' ||
     fail "moguet ELF is missing the direct libcurl runtime dependency."

@@ -1,6 +1,9 @@
 #!/bin/sh
 set -eu
 
+LC_ALL=C
+export LC_ALL
+
 test_binary=$1
 source_install_test_binary=$2
 upgrade_metadata_test_binary=$3
