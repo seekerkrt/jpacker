@@ -13,10 +13,10 @@ This guide defines a non-destructive order:
 
 ```text
 inspect and back up jpacker v1 data
--> remove the jpacker v1.16.0 package
--> install the validated Moguet v2 package
+-> install the validated Moguet v2 package alongside jpacker
 -> migrate only understood settings by hand
 -> verify command, man, completion, locale, and paths
+-> optionally remove jpacker after rollback validation
 ```
 
 Moguet does not use `/etc/jpacker/jpacker.conf` as a normal configuration
@@ -32,9 +32,9 @@ compatibility boundary described below; it is not TOML configuration.
    another package helper is changing the system.
 2. Confirm that the installed legacy package is jpacker v1.16.0, and record
    how it was installed.
-3. Read the release-specific Moguet package instructions before removal. The
-   package conflict/coexistence policy and any temporary command alias are
-   packaging decisions; this guide does not assume them before publication.
+3. Read the release-specific Moguet package instructions. The v2 package has
+   no file conflict or metadata relationship with jpacker v1.16.0, so both may
+   remain installed during validation. It supplies no `jpacker` command alias.
 4. Keep a trusted jpacker v1.16.0 package or source archive available for
    rollback.
 5. Plan the migration separately for every local user. A root-owned legacy
@@ -67,6 +67,9 @@ before using package removal commands.
 reading 「ミュ<!-- rejected alternate reading -->ゲ」 are not aliases. Command
 and option tokens are not translated. The formal v2 command is `moguet`; do not
 create a local `jpacker` symlink and assume that it has packaging support.
+The package intentionally declares no `provides`, `conflicts`, or `replaces`
+relationship with `jpacker`: it neither implements the old command nor removes
+the rollback package as an implicit upgrade.
 
 The source/repository URLs may continue to contain `jpacker` until the final
 external identity cutover. Follow published release links rather than editing
@@ -75,7 +78,7 @@ remotes or package sources in advance.
 <!-- parity:backup -->
 ## Back up v1 data
 
-Create a private backup before removing the package. At minimum, preserve:
+Create a private backup before changing either package. At minimum, preserve:
 
 - the installed jpacker version and package metadata;
 - `/etc/jpacker/jpacker.conf`, if present;
@@ -112,11 +115,18 @@ ${XDG_CACHE_HOME:-$HOME/.cache}/moguet
 Do not merge those directories with `/etc/jpacker` during backup.
 
 <!-- parity:remove-v1 -->
-## Remove jpacker v1.16.0
+## Keep or explicitly remove jpacker v1.16.0
 
-After the backup is verified, remove the package with the same package manager
-that installed it. For a normal pacman-managed installation, the conservative
-form is:
+The validated Moguet and jpacker v1.16.0 payloads have no common file, so keep
+jpacker installed while checking Moguet when practical. This provides the
+shortest rollback: remove Moguet and continue with the unchanged `jpacker`
+command. Do not run mutating operations from the two helpers concurrently,
+because both use the existing `/etc/jpacker/package.build/` production
+preference store.
+
+After Moguet verification, you may explicitly remove jpacker with the same
+package manager that installed it. For a normal pacman-managed installation,
+the conservative form is:
 
 ```bash
 sudo pacman -R jpacker
@@ -134,11 +144,14 @@ migration and rollback validation are complete.
 <!-- parity:install-v2 -->
 ## Install Moguet v2
 
-Install Moguet only after the jpacker v1 package removal has completed and the
-v2 package source, signature/checksum, dependencies, file conflicts, and
-payload have been verified by the release-specific instructions.
+Install Moguet after the v2 package source, signature/checksum, dependencies,
+file-conflict audit, and payload have been verified by the release-specific
+instructions. jpacker does not need to be removed first.
 
-The package identity is `moguet` and the executable is `/usr/bin/moguet`.
+The package identity is `moguet` and its only executable is `/usr/bin/moguet`;
+there is no `/usr/bin/jpacker` alias. The package metadata has no `provides`,
+`conflicts`, or `replaces` entry for jpacker. Coexistence is a transition and
+rollback property, not a claim that Moguet provides the jpacker interface.
 Until the package endpoint is officially published, this guide intentionally
 does not invent an AUR URL or a `pacman -S` repository command. Do not stage a
 development `make install` over the old package as a substitute for the
@@ -204,9 +217,9 @@ implementation, `/etc/jpacker/package.build/` remains the source-build
 preference store and source operations read it directly. Its files are not
 TOML config tables. The `moguet add-src <pkg> [V=K]` interface writes to that
 same store, so do not replay existing entries through it as a migration step.
-Back up the store, preserve it unchanged, and follow the release-specific
-package transition instructions for its package ownership and coexistence
-handling.
+Back up the store and preserve it unchanged. It is a production compatibility
+boundary, but it is not part of the Moguet package payload or ownership. The
+Moguet installer and uninstaller do not create, copy, rewrite, or remove it.
 
 Moguet does not automatically:
 
@@ -257,6 +270,18 @@ Expected standard paths are:
 /usr/share/zsh/site-functions/_moguet
 /usr/share/fish/vendor_completions.d/moguet.fish
 /usr/share/locale/ja/LC_MESSAGES/moguet.mo
+/usr/share/licenses/moguet/LICENSE
+/usr/share/licenses/moguet/jpacker-MIT-legacy.txt
+/usr/share/licenses/moguet/curl.txt
+/usr/share/licenses/moguet/nlohmann-json-MIT.txt
+/usr/share/licenses/moguet/tomlplusplus-MIT.txt
+/usr/share/licenses/moguet/bjoern-hoehrmann-utf8-MIT.txt
+/usr/share/doc/moguet/README.md
+/usr/share/doc/moguet/README.ja.md
+/usr/share/doc/moguet/THIRD_PARTY_NOTICES.md
+/usr/share/doc/moguet/docs/LICENSING.md
+/usr/share/doc/moguet/docs/migration/v1-to-v2.md
+/usr/share/doc/moguet/docs/migration/v1-to-v2.ja.md
 ```
 
 Start a fresh shell, or reload only the completion mechanism documented by
@@ -280,8 +305,9 @@ rollback.
    for diagnostics.
 3. Remove the Moguet package using the package manager that installed it.
    Do not delete user XDG directories as part of package removal.
-4. Reinstall the trusted jpacker v1.16.0 package or source archive recorded
-   before migration.
+4. If jpacker was kept installed, verify that its package files and command are
+   unchanged. If it was removed, reinstall the trusted jpacker v1.16.0 package
+   or source archive recorded before migration.
 5. Restore `/etc/jpacker` only from the verified backup and only after checking
    the current destination. Do not overwrite a newer file blindly.
 6. Verify `jpacker --version`, the v1 man/completion surface, and a read-only
@@ -308,4 +334,4 @@ release notes rather than guessing a branch or endpoint.
 
 For the current source contracts, see [README.md](../../README.md),
 [README.ja.md](../../README.ja.md), and
-[COMPATIBILITY.md](../COMPATIBILITY.md).
+[COMPATIBILITY.md](https://github.com/seekerkrt/jpacker/blob/develop/docs/COMPATIBILITY.md).

@@ -40,15 +40,16 @@ reading 「ミュ<!-- rejected alternate reading -->ゲ」 are not alternate nam
 Moguet v2.0.0 is a breaking identity, storage, configuration, localization,
 and packaging transition built on the jpacker v1.16.0 execution base. The
 local `moguet` binary, XDG paths, typed TOML configuration, and gettext-based
-English/Japanese CLI surface are implemented. Public documentation and shell
-completion now match the final local identity; package and external repository
-cutovers remain separate release gates.
+English/Japanese CLI surface are implemented. The local package identity,
+payload, dependency metadata, documentation, and non-destructive jpacker v1
+transition are also fixed. External repository and publication cutovers remain
+a separate release gate.
 
 The currently published repository and package endpoints may still use the
-legacy `jpacker` name until the separately validated packaging and release
-cutovers are complete. This document does not imply that an unpublished
-package, compatibility alias, repository rename, or AUR endpoint already
-exists.
+legacy `jpacker` name until the separately validated release cutover is
+complete. The Moguet package does not provide a `jpacker` command alias. This
+document does not imply that an unpublished AUR endpoint, repository rename,
+or release already exists.
 
 <!-- parity:safety -->
 ## Design and safety boundaries
@@ -75,22 +76,23 @@ exists.
   retrying; the package may already be installed.
 
 The detailed compatibility and routing contract is in
-[docs/COMPATIBILITY.md](docs/COMPATIBILITY.md), and adopted design decisions
-are recorded in [docs/DECISIONS.md](docs/DECISIONS.md).
+[docs/COMPATIBILITY.md](https://github.com/seekerkrt/jpacker/blob/develop/docs/COMPATIBILITY.md),
+and adopted design decisions are recorded in
+[docs/DECISIONS.md](https://github.com/seekerkrt/jpacker/blob/develop/docs/DECISIONS.md).
 
 <!-- parity:installation -->
 ## Installation
 
 ### Build requirements
 
-- A C++20 compiler and `base-devel`
+- An Arch build environment with `base-devel` preinstalled; its current
+  members provide the C++ toolchain, `pkgconf`, and GNU gettext development
+  tools
 - `pacman`, `pacman-conf`, and libalpm development metadata
-- `pkgconf`
 - `git`
 - `curl`
 - `nlohmann-json`
 - `tomlplusplus`
-- GNU gettext development tools
 
 Build and inspect the development tree with:
 
@@ -109,12 +111,27 @@ make PREFIX=/usr DESTDIR="$stage_dir" install
 find "$stage_dir" -type f -print
 ```
 
-The v2.0.0 package is named `moguet`, but its final package metadata,
-conflict/coexistence policy with jpacker, and public download endpoint are
-validated separately. Until that cutover is published, do not infer an AUR
-package name or install the development payload over an existing jpacker
-package. See the [v1 to v2 Migration Guide](docs/migration/v1-to-v2.md) before
-changing an installed system.
+The v2.0.0 package and its only executable are named `moguet`; it does not
+install `/usr/bin/jpacker`. Its payload is disjoint from the jpacker v1.16.0
+package, so the metadata intentionally declares no `provides`, `conflicts`, or
+`replaces` relationship with `jpacker`. The packages may coexist while the
+manual migration and rollback are verified. They share the production
+source-preference compatibility store at `/etc/jpacker/package.build/`, but
+the Moguet package neither creates nor owns that directory.
+
+The package runtime dependencies are `curl`, `git`, `libalpm.so`, `libarchive`,
+`nano`, `pacman`, and `sudo`. The exact `makedepends` set recorded by the
+package is `nlohmann-json` and `tomlplusplus`. Arch package builds assume
+`base-devel` is preinstalled; its current membership supplies GNU gettext and
+`pkgconf`, so `base-devel`, `gettext`, and `pkgconf` are not listed in
+`makedepends`. `git` remains a runtime dependency and is not duplicated there.
+gettext supplies the catalog build tools; the runtime binary has no separate
+libintl dependency.
+
+The public Moguet package endpoint is part of the final release cutover. Until
+it is published, do not invent an AUR URL or install a development payload on
+the live system. See the [v1 to v2 Migration Guide](docs/migration/v1-to-v2.md)
+before changing an installed system.
 
 <!-- parity:usage -->
 ## Basic usage
@@ -204,7 +221,9 @@ Source-build preferences remain a separate compatibility boundary at
 `/etc/jpacker/package.build/` in this implementation. Those files are not
 TOML config and are not copied into the XDG config directory. The source
 preference commands operate on that existing store, so do not replay preserved
-entries as though they had moved during the v2 config migration.
+entries as though they had moved during the v2 config migration. This runtime
+compatibility does not make the directory part of the Moguet package payload;
+package install and uninstall do not create, migrate, or remove it.
 
 <!-- parity:xdg -->
 ## XDG config, state, and cache
@@ -259,10 +278,12 @@ state and follow the [English migration guide](docs/migration/v1-to-v2.md) or
 [Japanese migration guide](docs/migration/v1-to-v2.ja.md) for manual mapping
 and rollback.
 
-The formal v2 command is `moguet`. Whether packaging supplies any temporary
-`jpacker` alias, and whether the two packages can coexist, remains a packaging
-decision; scripts must not assume either behavior before that decision is
-published.
+The formal and only packaged v2 command is `moguet`; no `jpacker` binary alias
+is supplied. Moguet and jpacker v1.16.0 have disjoint package files and may be
+installed together for transition and rollback. Do not run mutating operations
+from both helpers concurrently: the existing `/etc/jpacker/package.build/`
+store remains a production compatibility boundary even though the Moguet
+package does not own, migrate, or remove it.
 
 <!-- parity:development -->
 ## Development
@@ -274,9 +295,12 @@ intentionally unchanged until the final identity cutover is validated. Issues
 and pull requests are managed on GitHub.
 
 The active integration branch is `develop`; stable releases are on `main`.
-See [CONTRIBUTING.md](CONTRIBUTING.md),
-[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md), and
-[docs/VERSIONING.md](docs/VERSIONING.md). Moguet v2.x will add AUR-helper
+See
+[CONTRIBUTING.md](https://github.com/seekerkrt/jpacker/blob/develop/CONTRIBUTING.md),
+[docs/DEVELOPMENT.md](https://github.com/seekerkrt/jpacker/blob/develop/docs/DEVELOPMENT.md),
+and
+[docs/VERSIONING.md](https://github.com/seekerkrt/jpacker/blob/develop/docs/VERSIONING.md).
+Moguet v2.x will add AUR-helper
 capabilities incrementally; advanced runtime-aware completion and the later
 build-profile system are separate work.
 
@@ -289,10 +313,10 @@ were distributed under the MIT License. Those historical releases remain
 available under their original license; their tags, releases, and granted
 permissions are unchanged by the Moguet rename.
 
-- GNU GPL version 3 full text: [LICENSE](LICENSE)
+- GNU GPL version 3 full text: [LICENSE](https://github.com/seekerkrt/jpacker/blob/develop/LICENSE)
 - Version boundary and distribution policy: [docs/LICENSING.md](docs/LICENSING.md)
 - Linked/compiled components and external programs: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
-- Historical MIT text for v1.14.0 and earlier: [LICENSES/jpacker-MIT-legacy.txt](LICENSES/jpacker-MIT-legacy.txt)
+- Historical MIT text for v1.14.0 and earlier: [LICENSES/jpacker-MIT-legacy.txt](https://github.com/seekerkrt/jpacker/blob/develop/LICENSES/jpacker-MIT-legacy.txt)
 
 Moguet directly and dynamically links libalpm and libcurl and compiles the
 system nlohmann-json and toml++ headers into its binary. pacman, pacman-conf,

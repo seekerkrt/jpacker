@@ -2,8 +2,8 @@
 
 set -eu
 
-script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)
-repo_root=$(CDPATH= cd "$script_dir/.." && pwd)
+script_dir=$(CDPATH='' cd "$(dirname "$0")" && pwd)
+repo_root=$(CDPATH='' cd "$script_dir/.." && pwd)
 
 fail() {
     printf 'license-check: %s\n' "$*" >&2
@@ -36,6 +36,14 @@ reject_pattern() {
     fi
 }
 
+reject_text() {
+    file=$1
+    rejected=$2
+    if grep -F -- "$rejected" "$file" >/dev/null; then
+        fail "$file contains obsolete text: $rejected"
+    fi
+}
+
 require_value_text() {
     label=$1
     value=$2
@@ -53,36 +61,50 @@ check_sha256() {
     pass "$file matches audited SHA-256"
 }
 
-check_pkgbuild_license_case() {
+check_pkgbuild_metadata() {
     case_version=$1
-    expected_license=$2
-    case_label=$3
 
     printf '%s\n' "$case_version" > "$pkgbuild_test_dir/VERSION"
-    if ! case_metadata=$(
+    if ! package_metadata=$(
         cd "$pkgbuild_test_dir"
         makepkg --printsrcinfo
     ); then
-        fail "PKGBUILD evaluation failed for $case_label."
+        fail "PKGBUILD evaluation failed for Moguet $case_version."
     fi
 
-    evaluated_version=$(printf '%s\n' "$case_metadata" |
+    evaluated_pkgbase=$(printf '%s\n' "$package_metadata" |
+        sed -n 's/^pkgbase = //p')
+    [ "$evaluated_pkgbase" = moguet ] ||
+        fail "PKGBUILD evaluated pkgbase=$evaluated_pkgbase; expected moguet."
+
+    evaluated_pkgname=$(printf '%s\n' "$package_metadata" |
+        sed -n 's/^pkgname = //p')
+    [ "$evaluated_pkgname" = moguet ] ||
+        fail "PKGBUILD evaluated pkgname=$evaluated_pkgname; expected moguet."
+
+    evaluated_version=$(printf '%s\n' "$package_metadata" |
         sed -n 's/^[[:space:]]*pkgver = //p')
     [ "$evaluated_version" = "$case_version" ] ||
-        fail "PKGBUILD $case_label evaluated pkgver=$evaluated_version; expected $case_version."
+        fail "PKGBUILD evaluated pkgver=$evaluated_version; expected $case_version."
 
-    evaluated_license=$(printf '%s\n' "$case_metadata" |
+    evaluated_license=$(printf '%s\n' "$package_metadata" |
         sed -n 's/^[[:space:]]*license = //p')
-    [ "$evaluated_license" = "$expected_license" ] ||
-        fail "PKGBUILD $case_label evaluated license=$evaluated_license; expected $expected_license."
+    [ "$evaluated_license" = GPL-3.0-or-later ] ||
+        fail "PKGBUILD evaluated license=$evaluated_license; expected GPL-3.0-or-later."
 
-    evaluated_source=$(printf '%s\n' "$case_metadata" |
+    evaluated_url=$(printf '%s\n' "$package_metadata" |
+        sed -n 's/^[[:space:]]*url = //p')
+    expected_url="https://github.com/seekerkrt/jpacker"
+    [ "$evaluated_url" = "$expected_url" ] ||
+        fail "PKGBUILD URL mismatch: expected $expected_url, got $evaluated_url."
+
+    evaluated_source=$(printf '%s\n' "$package_metadata" |
         sed -n 's/^[[:space:]]*source = //p')
-    expected_source="jpacker-src::git+https://github.com/seekerkrt/jpacker.git#tag=v$case_version"
+    expected_source="moguet-src::git+https://github.com/seekerkrt/jpacker.git#tag=v$case_version"
     [ "$evaluated_source" = "$expected_source" ] ||
-        fail "PKGBUILD $case_label source mismatch: expected $expected_source, got $evaluated_source."
+        fail "PKGBUILD source mismatch: expected $expected_source, got $evaluated_source."
 
-    pass "PKGBUILD $case_label -> $expected_license"
+    pass "PKGBUILD describes Moguet $case_version under GPL-3.0-or-later"
 }
 
 cd "$repo_root"
@@ -91,8 +113,6 @@ command -v sha256sum >/dev/null 2>&1 ||
     fail "sha256sum is required for offline canonical-text verification."
 command -v makepkg >/dev/null 2>&1 ||
     fail "makepkg is required for PKGBUILD metadata verification."
-command -v vercmp >/dev/null 2>&1 ||
-    fail "vercmp is required for PKGBUILD license boundary verification."
 
 for file in \
     LICENSE \
@@ -156,7 +176,7 @@ do
 done
 
 require_text docs/LICENSING.md \
-    "The current GPL-licensed development series and v1.15.0 or later releases are distributed under GPL-3.0-or-later."
+    "jpacker v1.15.0 and later releases, and Moguet releases, are distributed under GPL-3.0-or-later."
 require_text docs/LICENSING.md \
     "jpacker v1.14.0 and earlier releases were distributed under the MIT License."
 require_text docs/LICENSING.md \
@@ -167,12 +187,13 @@ require_text README.ja.md '現在のGPLライセンス開発系列とv1.15.0以�
 require_text README.ja.md "v1.14.0以前のreleaseはMIT License"
 for readme in README.md README.ja.md
 do
-    require_text "$readme" "[LICENSE](LICENSE)"
+    require_text "$readme" \
+        "[LICENSE](https://github.com/seekerkrt/jpacker/blob/develop/LICENSE)"
     require_text "$readme" "[docs/LICENSING.md](docs/LICENSING.md)"
     require_text "$readme" "[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)"
 done
 require_text THIRD_PARTY_NOTICES.md \
-    "the current GPL-licensed jpacker development series"
+    "the current GPL-licensed Moguet development series"
 require_text docs/DECISIONS.md \
     '現在のGPLライセンス開発系列とv1.15.0以降のjpackerは`GPL-3.0-or-later`で提供する。'
 require_text docs/DECISIONS.md \
@@ -186,7 +207,7 @@ for current_series_file in \
     docs/LICENSING.md
 do
     reject_pattern "$current_series_file" \
-        'current( jpacker)? v[0-9]+\.[0-9]+\.[0-9]+ development series'
+        'current( (jpacker|Moguet))? v[0-9]+\.[0-9]+\.[0-9]+ development series'
     reject_pattern "$current_series_file" \
         '現在のv[0-9]+\.[0-9]+\.[0-9]+開発系列'
 done
@@ -206,12 +227,18 @@ do
 done
 require_text THIRD_PARTY_NOTICES.md '`GPL-2.0-or-later`'
 require_text THIRD_PARTY_NOTICES.md '`curl` (SPDX identifier)'
-require_text THIRD_PARTY_NOTICES.md '[`LICENSES/curl.txt`](LICENSES/curl.txt)'
-require_text THIRD_PARTY_NOTICES.md '[`LICENSES/nlohmann-json-MIT.txt`](LICENSES/nlohmann-json-MIT.txt)'
-require_text THIRD_PARTY_NOTICES.md '[`LICENSES/tomlplusplus-MIT.txt`](LICENSES/tomlplusplus-MIT.txt)'
-require_text THIRD_PARTY_NOTICES.md '[`LICENSES/bjoern-hoehrmann-utf8-MIT.txt`](LICENSES/bjoern-hoehrmann-utf8-MIT.txt)'
+require_text THIRD_PARTY_NOTICES.md \
+    '[`LICENSES/curl.txt`](https://github.com/seekerkrt/jpacker/blob/develop/LICENSES/curl.txt)'
+require_text THIRD_PARTY_NOTICES.md \
+    '[`LICENSES/nlohmann-json-MIT.txt`](https://github.com/seekerkrt/jpacker/blob/develop/LICENSES/nlohmann-json-MIT.txt)'
+require_text THIRD_PARTY_NOTICES.md \
+    '[`LICENSES/tomlplusplus-MIT.txt`](https://github.com/seekerkrt/jpacker/blob/develop/LICENSES/tomlplusplus-MIT.txt)'
+require_text THIRD_PARTY_NOTICES.md \
+    '[`LICENSES/bjoern-hoehrmann-utf8-MIT.txt`](https://github.com/seekerkrt/jpacker/blob/develop/LICENSES/bjoern-hoehrmann-utf8-MIT.txt)'
 require_text THIRD_PARTY_NOTICES.md "Every entry below is a separately installed program"
-require_text THIRD_PARTY_NOTICES.md "It is not linked into jpacker and is not bundled with jpacker."
+require_text THIRD_PARTY_NOTICES.md "It is not linked into Moguet and is not bundled with Moguet."
+require_text THIRD_PARTY_NOTICES.md \
+    'GNU gettext tools (`xgettext`, `msgmerge`, and `msgfmt`)'
 
 linked_headings=$(awk '
     /^## Linked or compiled components$/ { in_section = 1; next }
@@ -244,16 +271,11 @@ pass "third-party components and external-process boundary are classified"
 require_regular_file VERSION
 require_regular_file PKGBUILD
 current_version=$(tr -d '[:space:]' < VERSION)
-[ -n "$current_version" ] || fail "VERSION is empty."
+[ "$current_version" = 2.0.0 ] ||
+    fail "VERSION must identify the Moguet v2.0.0 package; got $current_version."
 
-current_comparison=$(vercmp "$current_version" 1.15.0)
-if [ "$current_comparison" -lt 0 ]; then
-    current_expected_license=MIT
-else
-    current_expected_license=GPL-3.0-or-later
-fi
-
-# POLICY: Evaluate the actual makepkg metadata without rewriting repository VERSION.
+# POLICY(#310): The current PKGBUILD describes only Moguet v2.0.0. Historical
+# jpacker tags retain their own metadata; this validator does not reinterpret them.
 pkgbuild_test_dir=$(mktemp -d)
 cleanup_pkgbuild_test() {
     rm -rf "$pkgbuild_test_dir"
@@ -261,18 +283,12 @@ cleanup_pkgbuild_test() {
 trap cleanup_pkgbuild_test EXIT INT TERM
 cp PKGBUILD "$pkgbuild_test_dir/PKGBUILD"
 
-check_pkgbuild_license_case "$current_version" "$current_expected_license" \
-    "repository VERSION=$current_version"
-check_pkgbuild_license_case 1.14.0 MIT 1.14.0
-check_pkgbuild_license_case 1.14.1 MIT 1.14.1
-check_pkgbuild_license_case 1.15.0 GPL-3.0-or-later 1.15.0
-check_pkgbuild_license_case 1.15.1 GPL-3.0-or-later 1.15.1
-check_pkgbuild_license_case 1.100.0 GPL-3.0-or-later 1.100.0
+check_pkgbuild_metadata "$current_version"
 
-require_text PKGBUILD "if [[ \${license[0]} == 'MIT' ]]; then"
-require_text PKGBUILD \
-    'install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"'
-pass "PKGBUILD retains the pre-v1.15 MIT license-file fallback"
+reject_text PKGBUILD '_license_version_comparison'
+reject_text PKGBUILD 'if [[ ${license[0]} == '\''MIT'\'' ]]; then'
+reject_text PKGBUILD 'install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"'
+pass "PKGBUILD has no historical license evaluation or legacy file fallback"
 
 for readme in README.md README.ja.md
 do

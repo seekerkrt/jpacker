@@ -560,8 +560,13 @@ source-preference storeは別のcompatibility境界としてその場で読み�
 としてsource-preference commandからentryを再登録しないでください。
 .
 .PP
-jpacker v1.16.0 dataをbackupし、v1 packageをremoveし、validated Moguet packageを
-installしてから、理解できるsettingだけを手動で対応付けます。
+jpacker v1.16.0 dataをbackupし、validated Moguet packageをcoexistさせてinstallしてから、
+理解できるsettingだけを手動で対応付けます。両packageのpayloadは重複せず、provides、
+conflicts、replacesの関係もありません。Moguetは
+.B jpacker
+command aliasを提供しません。直接rollbackできるよう検証中はv1 packageを保持し、Moguetの
+確認後に必要な場合だけ明示的にremoveします。source-preference storeを共有するため、両helper
+のmutating operationを同時実行しないでください。
 .B NOEDIT
 は
 .BR review.pkgbuild 、
@@ -576,7 +581,9 @@ legacy
 はTOMLへcopyしません。
 backup、completion / man確認、rollback手順は
 .I docs/migration/v1-to-v2.ja.md
-またはpackageに同梱されたMigration Guideを参照してください。
+または
+.I /usr/share/doc/moguet/docs/migration/v1-to-v2.ja.md
+のMigration Guideを参照してください。
 .
 .\" parity:see-also
 .SH 関連項目

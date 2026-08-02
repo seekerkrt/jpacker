@@ -13,10 +13,10 @@ documentationをまとめて変更します。
 
 ```text
 jpacker v1 dataを調査・backup
--> jpacker v1.16.0 packageをremove
--> 検証済みMoguet v2 packageをinstall
+-> jpackerとcoexistさせて検証済みMoguet v2 packageをinstall
 -> 理解できる設定だけを手動移行
 -> command、man、completion、locale、pathを検証
+-> rollback検証後に必要ならjpackerをremove
 ```
 
 Moguetは`/etc/jpacker/jpacker.conf`を通常config layerとして使用しません。
@@ -30,9 +30,9 @@ Moguetは`/etc/jpacker/jpacker.conf`を通常config layerとして使用しま�
 1. package操作を完了または停止します。pacman、makepkg、他のpackage helperがsystemを
    変更している間にmigrationを始めないでください。
 2. installed legacy packageがjpacker v1.16.0であることと、そのinstall方法を記録します。
-3. remove前にrelease固有のMoguet package手順を確認します。packageのconflict /
-   coexistence policyと一時的command aliasの有無はpackaging decisionであり、公開前に
-   このGuideから仮定しません。
+3. release固有のMoguet package手順を確認します。v2 packageはjpacker v1.16.0とのfile
+   conflictやmetadata関係を持たないため、検証中は両方をinstallできます。`jpacker`
+   command aliasは提供しません。
 4. rollback用に、信頼できるjpacker v1.16.0 packageまたはsource archiveを確保します。
 5. local userごとにmigrationを分けます。root-owned legacy directoryだけでは移行先userを
    特定できません。
@@ -64,6 +64,8 @@ pacman -Qi jpacker
 「ミュ<!-- rejected alternate reading -->ゲ」はaliasではありません。command / option
 tokenは翻訳しません。正式なv2 commandは`moguet`です。localで`jpacker` symlinkを作り、
 packaging supportがあると仮定しないでください。
+packageは`jpacker`への`provides`、`conflicts`、`replaces`を意図的に宣言しません。旧commandを
+実装せず、rollback packageを暗黙のupgradeとして削除しないためです。
 
 source / repository URLは最終external identity cutoverまで`jpacker`を含む場合があります。
 remoteやpackage sourceを先行変更せず、公開済みrelease linkに従ってください。
@@ -71,7 +73,7 @@ remoteやpackage sourceを先行変更せず、公開済みrelease linkに従っ
 <!-- parity:backup -->
 ## v1 dataをbackupする
 
-packageをremoveする前にprivate backupを作成します。最低でも次を保持してください。
+どちらかのpackageを変更する前にprivate backupを作成します。最低でも次を保持してください。
 
 - installed jpacker versionとpackage metadata
 - `/etc/jpacker/jpacker.conf`（存在する場合）
@@ -107,10 +109,16 @@ ${XDG_CACHE_HOME:-$HOME/.cache}/moguet
 backup時にこれらを`/etc/jpacker`とmergeしないでください。
 
 <!-- parity:remove-v1 -->
-## jpacker v1.16.0をremoveする
+## jpacker v1.16.0を保持するか明示的にremoveする
 
-backupを検証したら、installに使ったpackage managerでpackageをremoveします。通常の
-pacman-managed installでは、慎重な形式は次です。
+検証済みMoguetとjpacker v1.16.0のpayloadに共通fileはありません。可能ならMoguetの確認中は
+jpackerをinstallしたまま保持してください。Moguetをremoveして変更前の`jpacker` commandへ
+戻れるため、最短のrollbackになります。ただし両helperは既存
+`/etc/jpacker/package.build/` production preference storeを使用するため、mutating
+operationを同時実行しないでください。
+
+Moguetの検証後、必要ならinstallに使ったpackage managerでjpackerを明示的にremoveできます。
+通常のpacman-managed installでは、慎重な形式は次です。
 
 ```bash
 sudo pacman -R jpacker
@@ -127,10 +135,13 @@ rollback validationの両方が完了するまで、backup、preserved `.pacsave
 <!-- parity:install-v2 -->
 ## Moguet v2をinstallする
 
-jpacker v1 packageのremoveが完了し、release固有手順でv2 package source、signature /
-checksum、dependency、file conflict、payloadを検証してからMoguetをinstallします。
+release固有手順でv2 package source、signature / checksum、dependency、file conflict監査、
+payloadを検証してからMoguetをinstallします。jpackerを先にremoveする必要はありません。
 
-package identityは`moguet`、executableは`/usr/bin/moguet`です。package endpointが正式公開
+package identityは`moguet`、唯一のexecutableは`/usr/bin/moguet`で、
+`/usr/bin/jpacker` aliasはありません。package metadataはjpackerへの`provides`、
+`conflicts`、`replaces`を持ちません。coexistenceはtransition / rollback特性であり、Moguetが
+jpacker interfaceを提供するという意味ではありません。package endpointが正式公開
 されるまで、このGuideはAUR URLや`pacman -S`のrepository commandを作りません。検証済み
 transitionの代わりにdevelopment treeの`make install`を旧packageへ重ねないでください。
 
@@ -192,8 +203,9 @@ external mutation前に失敗します。broken fileをrewriteしたり、黙っ
 `/etc/jpacker/package.build/`がsource-build preference storeとして残り、source operationが
 直接読みます。そのfileはTOML config tableではありません。
 `moguet add-src <pkg> [V=K]` interfaceも同じstoreへ書くため、既存entryをmigration手順として
-再登録しないでください。storeをbackupして変更せずに保持し、package ownershipと
-coexistenceの扱いはrelease固有のpackage transition手順に従ってください。
+再登録しないでください。storeをbackupして変更せずに保持します。これはproduction
+compatibility境界ですが、Moguet packageのpayload / ownershipではありません。Moguetの
+installer / uninstallerはこのstoreをcreate、copy、rewrite、removeしません。
 
 Moguetは次を自動実行しません。
 
@@ -244,6 +256,18 @@ LANG=ja_JP.UTF-8 man moguet
 /usr/share/zsh/site-functions/_moguet
 /usr/share/fish/vendor_completions.d/moguet.fish
 /usr/share/locale/ja/LC_MESSAGES/moguet.mo
+/usr/share/licenses/moguet/LICENSE
+/usr/share/licenses/moguet/jpacker-MIT-legacy.txt
+/usr/share/licenses/moguet/curl.txt
+/usr/share/licenses/moguet/nlohmann-json-MIT.txt
+/usr/share/licenses/moguet/tomlplusplus-MIT.txt
+/usr/share/licenses/moguet/bjoern-hoehrmann-utf8-MIT.txt
+/usr/share/doc/moguet/README.md
+/usr/share/doc/moguet/README.ja.md
+/usr/share/doc/moguet/THIRD_PARTY_NOTICES.md
+/usr/share/doc/moguet/docs/LICENSING.md
+/usr/share/doc/moguet/docs/migration/v1-to-v2.md
+/usr/share/doc/moguet/docs/migration/v1-to-v2.ja.md
 ```
 
 新しいshellを起動するか、使用shellがdocumentするcompletion mechanismだけをreloadします。
@@ -265,7 +289,9 @@ rollbackは明示的なpackage transitionであり、自動transaction rollback�
 2. userのMoguet configとstateをbackupします。cacheは診断に必要な場合だけ保持します。
 3. installに使ったpackage managerでMoguet packageをremoveします。package removalの一部
    としてuser XDG directoryを削除しません。
-4. migration前に記録した信頼できるjpacker v1.16.0 package / source archiveをreinstallします。
+4. jpackerを保持していた場合はpackage fileとcommandが変わっていないことを確認します。
+   removeしていた場合は、migration前に記録した信頼できるjpacker v1.16.0 package / source
+   archiveをreinstallします。
 5. current destinationを確認したうえで、verified backupからだけ`/etc/jpacker`をrestore
    します。新しいfileへ盲目的にoverwriteしないでください。
 6. package transaction前に`jpacker --version`、v1 man / completion、read-only operationを
@@ -289,4 +315,5 @@ release cutoverで確定します。branchやendpointを推測せず、公開済
 
 現在のsource contractは[README.md](../../README.md)、
 [README.ja.md](../../README.ja.md)、
-[COMPATIBILITY.md](../COMPATIBILITY.md)を参照してください。
+[COMPATIBILITY.md](https://github.com/seekerkrt/jpacker/blob/develop/docs/COMPATIBILITY.md)を
+参照してください。
