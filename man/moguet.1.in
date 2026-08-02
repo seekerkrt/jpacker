@@ -50,9 +50,7 @@ then shapes the resulting Mogulet toward lowercase French
 meaning lily of the valley.
 The flower is small and modest but poisonous, reflecting a helper that warns
 about danger or ambiguity and stops before unprovable mutation.
-The formal reading is \(dqモグエット\(dq.
-.B MU\%GUET
-and \(dqミュ\%ゲ\(dq are not aliases.
+The formal project name and reading are \(dqMoguet\(dq and \(dqモグエット\(dq.
 .
 .PP
 Operations handled entirely by pacman preserve compatible pacman arguments

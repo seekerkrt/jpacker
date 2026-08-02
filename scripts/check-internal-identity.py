@@ -91,19 +91,6 @@ def is_active_identity_path(path: str) -> bool:
     )
 
 
-DEFERRED_GENERAL_DOCUMENTS = {
-    "AGENTS.md",
-    "CLAUDE.md",
-    "CONTRIBUTING.md",
-    "README.md",
-    "README.ja.md",
-    "docs/CODING_CONVENTIONS.md",
-    "docs/COMPATIBILITY.md",
-    "docs/DECISIONS.md",
-    "docs/DEVELOPMENT.md",
-    "docs/PROJECT_STANCE.md",
-    "docs/VERSIONING.md",
-}
 MIGRATION_DOCUMENTS = {
     "docs/migration/v1-to-v2.md",
     "docs/migration/v1-to-v2.ja.md",
@@ -121,11 +108,6 @@ HISTORICAL_DOCUMENTS = {
 HISTORICAL_LEGACY_PATHS = {
     f"LICENSES/{LEGACY_NAME}-MIT-legacy.txt",
 }
-FORMER_CANDIDATE_DOCUMENTS = {
-    "docs/DECISIONS.md",
-    "docs/PROJECT_STANCE.md",
-    "docs/VERSIONING.md",
-}
 
 
 def allowances(category: str, *patterns: str) -> tuple[LegacyAllowance, ...]:
@@ -136,13 +118,16 @@ def allowances(category: str, *patterns: str) -> tuple[LegacyAllowance, ...]:
 
 legacy = re.escape(LEGACY_NAME)
 identity_start = r"(?<![A-Za-z0-9_.-])"
-identity_end = r"(?=$|/|[\"'\s,;:#)=}\]]|\.(?=[\"'\s]|$))"
-external_repository_url = rf"seekerkrt/{legacy}(?:\.git)?{identity_end}"
+identity_end = r"(?=$|/|[\"'`\s,;:#)=}\]]|\.(?=[\"'`\s]|$))"
 historical_license_filename = (
     rf"{identity_start}{legacy}-MIT-legacy\.txt(?![A-Za-z0-9_.-])"
 )
 historical_project_version = (
-    rf"{identity_start}{legacy} v1\.(?:14\.0|15\.0)(?![0-9.])"
+    rf"{identity_start}{legacy} v1\.(?:14\.0|15\.0|16\.0)"
+    rf"(?![0-9]|\.[0-9])"
+)
+legacy_repository_redirect = (
+    rf"seekerkrt/{legacy}(?:\.git)?{identity_end}"
 )
 legacy_etc_path = (
     rf"/etc/{legacy}(?:/[A-Za-z0-9@._+-]+)*(?![A-Za-z0-9_.-])"
@@ -157,7 +142,162 @@ legacy_cache_phrase = (
 )
 
 
+FINAL_REPOSITORY_TOKENS: dict[str, tuple[str, ...]] = {
+    "README.md": (
+        "https://github.com/seekerkrt/moguet",
+        "https://gitlab.com/seekerkrt/moguet",
+    ),
+    "README.ja.md": (
+        "https://github.com/seekerkrt/moguet",
+        "https://gitlab.com/seekerkrt/moguet",
+    ),
+    "RELEASE_NOTES.md": (
+        "https://github.com/seekerkrt/moguet",
+        "https://gitlab.com/seekerkrt/moguet",
+    ),
+    "CONTRIBUTING.md": ("https://github.com/seekerkrt/moguet/issues",),
+    "PKGBUILD": ("https://github.com/seekerkrt/moguet",),
+    "THIRD_PARTY_NOTICES.md": (
+        "https://github.com/seekerkrt/moguet/blob/develop/",
+    ),
+    "docs/DEVELOPMENT.md": (
+        "https://github.com/seekerkrt/moguet",
+        "https://gitlab.com/seekerkrt/moguet",
+    ),
+    "docs/LICENSING.md": (
+        "https://github.com/seekerkrt/moguet/blob/develop/",
+    ),
+    "docs/migration/v1-to-v2.md": (
+        "https://github.com/seekerkrt/moguet",
+        "https://gitlab.com/seekerkrt/moguet",
+    ),
+    "docs/migration/v1-to-v2.ja.md": (
+        "https://github.com/seekerkrt/moguet",
+        "https://gitlab.com/seekerkrt/moguet",
+    ),
+    "scripts/check-packaging-metadata.sh": (
+        "https://github.com/seekerkrt/moguet.git",
+    ),
+    "scripts/check-license-compliance.sh": (
+        "https://github.com/seekerkrt/moguet",
+    ),
+    "tests/test-package-transition.sh": (
+        "https://github.com/seekerkrt/moguet.git",
+    ),
+    ".github/workflows/mirror-gitlab.yml": (
+        "git@gitlab.com:seekerkrt/moguet.git",
+    ),
+    ".github/workflows/mirror-gitlab-release.yml": (
+        "seekerkrt%2Fmoguet",
+    ),
+    ".gitlab/mirror-github-release.sh": ("seekerkrt/moguet",),
+}
+
+FINAL_REPOSITORY_TOKEN_COUNTS = {
+    (".github/workflows/mirror-gitlab.yml", "seekerkrt/moguet"): 1,
+    (".github/workflows/mirror-gitlab-release.yml", "seekerkrt%2Fmoguet"): 2,
+    (".gitlab/mirror-github-release.sh", "seekerkrt/moguet"): 1,
+}
+
+
 ACTIVE_LEGACY_ALLOWANCES: dict[str, tuple[LegacyAllowance, ...]] = {
+    "AGENTS.md": allowances(
+        "legacy-storage-path",
+        legacy_etc_path,
+    ),
+    "CLAUDE.md": allowances(
+        "legacy-storage-path",
+        legacy_etc_path,
+    ),
+    "README.md": (
+        allowances(
+            "historical-project-version",
+            historical_project_version,
+        )
+        + allowances(
+            "historical-license-file",
+            historical_license_filename,
+        )
+        + allowances(
+            "legacy-storage-path",
+            legacy_etc_path,
+        )
+        + allowances(
+            "negative-package-assertion",
+            rf"/usr/bin/{legacy}{identity_end}",
+            rf"(?:no |provide a ){identity_start}`?{legacy}`? (?:command|binary) alias",
+            rf"relationship with `{legacy}`",
+        )
+    ),
+    "README.ja.md": (
+        allowances(
+            "historical-project-version",
+            historical_project_version,
+        )
+        + allowances(
+            "historical-license-file",
+            historical_license_filename,
+        )
+        + allowances(
+            "legacy-storage-path",
+            legacy_etc_path,
+        )
+        + allowances(
+            "negative-package-assertion",
+            rf"/usr/bin/{legacy}{identity_end}",
+            rf"`{legacy}` (?:command|binary) alias",
+            rf"`{legacy}`への`provides`",
+        )
+    ),
+    "RELEASE_NOTES.md": (
+        allowances(
+            "historical-project-version",
+            historical_project_version,
+        )
+        + allowances(
+            "legacy-storage-path",
+            legacy_etc_path,
+        )
+        + allowances(
+            "negative-package-assertion",
+            rf"no `{legacy}` command alias",
+            rf"`{legacy}` command alias",
+            rf"from `{legacy}` to `moguet`",
+            rf"名は`{legacy}`から`moguet`",
+        )
+        + allowances(
+            "legacy-repository-redirect",
+            legacy_repository_redirect,
+        )
+    ),
+    "docs/CODING_CONVENTIONS.md": allowances(
+        "legacy-storage-path",
+        legacy_etc_path,
+    ),
+    "docs/DECISIONS.md": (
+        allowances(
+            "historical-project-version",
+            historical_project_version,
+        )
+        + allowances(
+            "legacy-cache-preservation",
+            rf"legacy {legacy} cache(?![A-Za-z0-9_.-])",
+        )
+        + allowances(
+            "historical-license-version",
+            rf"{identity_start}{legacy} releases through v1\.14\.0",
+        )
+    ),
+    "docs/VERSIONING.md": (
+        allowances(
+            "historical-project-version",
+            historical_project_version,
+        )
+        + allowances(
+            "legacy-storage-path",
+            legacy_etc_path,
+        )
+    ),
     ".gitignore": allowances(
         "production-artifact-cleanup",
         rf"^\s*/{legacy}\s*$",
@@ -171,10 +311,6 @@ ACTIVE_LEGACY_ALLOWANCES: dict[str, tuple[LegacyAllowance, ...]] = {
         historical_license_filename,
     ),
     "PKGBUILD": allowances(
-        "external-repository-url",
-        external_repository_url,
-    )
-    + allowances(
         "historical-package-transition",
         rf"{identity_start}{legacy} v1\.16\.0(?![0-9.])",
     )
@@ -185,10 +321,6 @@ ACTIVE_LEGACY_ALLOWANCES: dict[str, tuple[LegacyAllowance, ...]] = {
     "THIRD_PARTY_NOTICES.md": allowances(
         "historical-package-version",
         rf"historical {legacy} versions{identity_end}",
-    )
-    + allowances(
-        "external-repository-url",
-        external_repository_url,
     ),
     "docs/LICENSING.md": allowances(
         "historical-project-identity",
@@ -198,16 +330,8 @@ ACTIVE_LEGACY_ALLOWANCES: dict[str, tuple[LegacyAllowance, ...]] = {
     + allowances(
         "historical-license-file",
         historical_license_filename,
-    )
-    + allowances(
-        "external-repository-url",
-        external_repository_url,
     ),
     "scripts/check-packaging-metadata.sh": allowances(
-        "external-repository-url",
-        external_repository_url,
-    )
-    + allowances(
         "historical-license-file",
         historical_license_filename,
     )
@@ -217,10 +341,6 @@ ACTIVE_LEGACY_ALLOWANCES: dict[str, tuple[LegacyAllowance, ...]] = {
         rf"{identity_start}{legacy} binary alias{identity_end}",
     ),
     "scripts/check-license-compliance.sh": allowances(
-        "external-repository-url",
-        external_repository_url,
-    )
-    + allowances(
         "historical-license-file",
         historical_license_filename,
     )
@@ -235,18 +355,6 @@ ACTIVE_LEGACY_ALLOWANCES: dict[str, tuple[LegacyAllowance, ...]] = {
     + allowances(
         "negative-identity-pattern",
         rf"current\( \({legacy}\|Moguet\)\)\?",
-    ),
-    ".github/workflows/mirror-gitlab-release.yml": allowances(
-        "deferred-repository-automation",
-        rf"seekerkrt%2F{legacy}{identity_end}",
-    ),
-    ".github/workflows/mirror-gitlab.yml": allowances(
-        "deferred-repository-automation",
-        rf"seekerkrt/{legacy}\.git{identity_end}",
-    ),
-    ".gitlab/mirror-github-release.sh": allowances(
-        "deferred-repository-automation",
-        rf"seekerkrt/{legacy}{identity_end}",
     ),
     "src/app_config.cpp": allowances(
         "storage-path",
@@ -306,8 +414,8 @@ ACTIVE_LEGACY_ALLOWANCES: dict[str, tuple[LegacyAllowance, ...]] = {
         rf"rollback {legacy} version{identity_end}",
     )
     + allowances(
-        "external-repository-url",
-        external_repository_url,
+        "historical-package-source",
+        rf"git\+https://github\.com/seekerkrt/{legacy}\.git{identity_end}",
     )
     + allowances(
         "historical-license-file",
@@ -449,8 +557,6 @@ def classify_legacy_reference(
 ) -> str | None:
     if path in HISTORICAL_DOCUMENTS:
         return "historical-audit-record"
-    if path in DEFERRED_GENERAL_DOCUMENTS:
-        return "deferred-general-documentation"
     if path in MIGRATION_DOCUMENTS:
         return "migration-documentation"
     if path in PUBLIC_MAN_DOCUMENTS:
@@ -509,11 +615,29 @@ def check_classifier_contract() -> None:
     if allowed_categories != ["storage-path"]:
         fail("internal legacy-storage classifier self-test failed")
 
-    external_url_categories = legacy_categories_for_line(
+    rejected_external_url_categories = legacy_categories_for_line(
         "PKGBUILD", f'https://github.com/seekerkrt/{LEGACY_NAME}.git#tag=v2.0.0'
     )
-    if external_url_categories != ["external-repository-url"]:
-        fail("internal external-repository classifier self-test failed")
+    if rejected_external_url_categories != [None]:
+        fail("internal legacy repository URL classifier is too broad")
+
+    historical_document_categories = legacy_categories_for_line(
+        "README.md", f"successor to {LEGACY_NAME} v1.16.0"
+    )
+    if historical_document_categories != ["historical-project-version"]:
+        fail("internal historical-document classifier self-test failed")
+
+    active_document_categories = legacy_categories_for_line(
+        "README.md", f"{LEGACY_NAME} is the current project"
+    )
+    if active_document_categories != [None]:
+        fail("internal current-document classifier is too broad")
+
+    redirect_categories = legacy_categories_for_line(
+        "RELEASE_NOTES.md", f"seekerkrt/{LEGACY_NAME} slugs remain redirects"
+    )
+    if redirect_categories != ["legacy-repository-redirect"]:
+        fail("internal legacy redirect classifier self-test failed")
 
     historical_license_categories = legacy_categories_for_line(
         "docs/LICENSING.md", f"LICENSES/{LEGACY_NAME}-MIT-legacy.txt"
@@ -533,6 +657,13 @@ def check_classifier_contract() -> None:
     )
     if negative_alias_categories != ["negative-alias-assertion"]:
         fail("internal negative-alias classifier self-test failed")
+
+    historical_package_source_categories = legacy_categories_for_line(
+        "tests/test-package-transition.sh",
+        f"git+https://github.com/seekerkrt/{LEGACY_NAME}.git",
+    )
+    if historical_package_source_categories != ["historical-package-source"]:
+        fail("internal historical-package-source classifier self-test failed")
 
     rejected_categories = legacy_categories_for_line(
         "src/moguet.cpp", f'char program[] = "{LEGACY_NAME}";'
@@ -619,6 +750,10 @@ def check_classifier_contract() -> None:
             f"the current package is {LEGACY_NAME}",
         ),
         (
+            ".github/workflows/mirror-gitlab.yml",
+            f"git@gitlab.com:seekerkrt/{LEGACY_NAME}.git",
+        ),
+        (
             "tests/test-help-man-completion.sh",
             f"x{LEGACY_NAME}_global_options",
         ),
@@ -630,12 +765,6 @@ def check_classifier_contract() -> None:
     for path, line in rejected_allowance_cases:
         if legacy_categories_for_line(path, line) != [None]:
             fail("internal active legacy classifier is too broad")
-
-    deferred_categories = legacy_categories_for_line(
-        "README.md", f"{LEGACY_NAME} command"
-    )
-    if deferred_categories != ["deferred-general-documentation"]:
-        fail("internal deferred-document classifier self-test failed")
 
     wrong_hooks = (
         "OTHER" + "_TEST_FAKE",
@@ -659,6 +788,31 @@ def main() -> int:
     findings: list[Finding] = []
     category_counts: Counter[str] = Counter()
     legacy_pattern = re.compile(re.escape(LEGACY_NAME), re.IGNORECASE)
+
+    for path, required_tokens in FINAL_REPOSITORY_TOKENS.items():
+        text = texts.get(path, "")
+        for required_token in required_tokens:
+            if required_token not in text:
+                findings.append(
+                    Finding(
+                        "missing-final-repository-identity",
+                        path,
+                        0,
+                        required_token,
+                    )
+                )
+
+    for (path, token), expected_count in FINAL_REPOSITORY_TOKEN_COUNTS.items():
+        actual_count = texts.get(path, "").count(token)
+        if actual_count != expected_count:
+            findings.append(
+                Finding(
+                    "repository-automation-identity-count",
+                    path,
+                    0,
+                    f"{token}: expected={expected_count}, actual={actual_count}",
+                )
+            )
 
     for path, text in texts.items():
         if legacy_pattern.search(path):
@@ -727,12 +881,11 @@ def main() -> int:
             findings.append(Finding("old-active-test-path", path, 0, path))
 
     rejected_names = (
-        ("rejected-romanization", REJECTED_ROMANIZATION, None),
-        ("rejected-japanese-name", REJECTED_JAPANESE_NAME, None),
-        ("former-name-candidate", FORMER_CANDIDATE, FORMER_CANDIDATE_DOCUMENTS),
+        ("rejected-romanization", REJECTED_ROMANIZATION),
+        ("rejected-japanese-name", REJECTED_JAPANESE_NAME),
+        ("former-name-candidate", FORMER_CANDIDATE),
     )
-    deferred_candidate_count = 0
-    for check, rejected_name, allowed_paths in rejected_names:
+    for check, rejected_name in rejected_names:
         if check == "rejected-romanization":
             # POLICY(#35,#309): the lowercase French source word is legitimate
             # only as naming-origin prose. Uppercase and title-case forms remain
@@ -745,16 +898,10 @@ def main() -> int:
             pattern = re.compile(re.escape(rejected_name), re.IGNORECASE)
         for path, text in texts.items():
             if pattern.search(path):
-                if allowed_paths is not None and path in allowed_paths:
-                    deferred_candidate_count += 1
-                else:
-                    findings.append(Finding(check + "-path", path, 0, path))
+                findings.append(Finding(check + "-path", path, 0, path))
             for line_number, line in enumerate(text.splitlines(), start=1):
                 matches = list(pattern.finditer(line))
                 if not matches:
-                    continue
-                if allowed_paths is not None and path in allowed_paths:
-                    deferred_candidate_count += len(matches)
                     continue
                 findings.append(finding_for_line(check, path, line_number, line))
 
@@ -957,10 +1104,6 @@ def main() -> int:
     )
     for category, count in sorted(category_counts.items()):
         print(f"internal-identity-audit: legacy {category}: {count}")
-    print(
-        "internal-identity-audit: legacy deferred-former-candidate-documentation: "
-        f"{deferred_candidate_count}"
-    )
     print("internal-identity-audit: all checks passed")
     return 0
 

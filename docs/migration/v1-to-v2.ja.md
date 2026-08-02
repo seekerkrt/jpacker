@@ -60,15 +60,15 @@ pacman -Qi jpacker
 | Project environment prefix | legacy name | `MOGUET_*` |
 | Runtime localization | legacy English-only surface | English authority、日本語正式翻訳 |
 
-<code>MU<!-- rejected alternate spelling -->GUET</code>と
-「ミュ<!-- rejected alternate reading -->ゲ」はaliasではありません。command / option
-tokenは翻訳しません。正式なv2 commandは`moguet`です。localで`jpacker` symlinkを作り、
-packaging supportがあると仮定しないでください。
+正式なproject表記は`Moguet`、読みは「モグエット」です。command / option tokenは
+翻訳しません。正式なv2 commandは`moguet`です。localで`jpacker` symlinkを作り、packaging
+supportがあると仮定しないでください。
 packageは`jpacker`への`provides`、`conflicts`、`replaces`を意図的に宣言しません。旧commandを
 実装せず、rollback packageを暗黙のupgradeとして削除しないためです。
 
-source / repository URLは最終external identity cutoverまで`jpacker`を含む場合があります。
-remoteやpackage sourceを先行変更せず、公開済みrelease linkに従ってください。
+canonical source identityはGitHub / GitLab上の`seekerkrt/moguet`です。旧
+`seekerkrt/jpacker` URLはredirect専用のlegacy entry pointであり、別repositoryへ再利用
+しません。
 
 <!-- parity:backup -->
 ## v1 dataをbackupする
@@ -141,8 +141,8 @@ payloadを検証してからMoguetをinstallします。jpackerを先にremove�
 package identityは`moguet`、唯一のexecutableは`/usr/bin/moguet`で、
 `/usr/bin/jpacker` aliasはありません。package metadataはjpackerへの`provides`、
 `conflicts`、`replaces`を持ちません。coexistenceはtransition / rollback特性であり、Moguetが
-jpacker interfaceを提供するという意味ではありません。package endpointが正式公開
-されるまで、このGuideはAUR URLや`pacman -S`のrepository commandを作りません。検証済み
+jpacker interfaceを提供するという意味ではありません。Moguet v2.0.0にはAUR publicationを
+含めないため、このGuideはAUR URLや`pacman -S`のrepository commandを作りません。検証済み
 transitionの代わりにdevelopment treeの`make install`を旧packageへ重ねないでください。
 
 package installは`/etc/moguet`、user XDG config file、user XDG state / cache directoryを
@@ -302,18 +302,37 @@ pacman transactionはhelperを切り替えても戻りません。helper rollbac
 変更したと仮定せず、実際のpackage database stateを比較してください。
 
 <!-- parity:maintenance -->
-## v1 maintenanceとexternal cutover
+## v1 maintenanceとrepository remote
 
-jpacker v1は`jpacker` identityとv1 release tagの下で維持します。Moguetへ名称変更せず、
-v1.16.0へこのGuideだけでv2 XDG / config形式を導入しません。
+jpacker v1.16.0はimmutableなtag / Releaseの`jpacker` identityで維持します。Moguetへ
+名称変更せず、このGuideだけでv2 XDG / config形式を導入しません。permanentなv1 maintenance
+branchは作りません。重大修正が必要な場合だけ`v1.16.0` tagからbranchを作成し、`develop`を
+v1 sourceとして扱いません。
 
-このGuide作成時点のpublic repositoryには専用v1 maintenance branchがありません。
-`develop`はMoguet v2 integration branchであり、v1 maintenance sourceとして扱わないで
-ください。v1 maintenance package / branchの最終公開位置とold URL redirectはexternal
-release cutoverで確定します。branchやendpointを推測せず、公開済みv2.0.0 release noteが
-指定する位置を使用してください。
+canonical repository URLは次のとおりです。
+
+- GitHub: `https://github.com/seekerkrt/moguet`
+- GitLab mirror: `https://gitlab.com/seekerkrt/moguet`
+
+旧`https://github.com/seekerkrt/jpacker`と`https://gitlab.com/seekerkrt/jpacker`は
+redirectとしてだけ保持します。old slugへ新しいprojectを作成しません。old bookmarkやv1
+Release linkを利用する前に、Moguet repositoryへ到達することを確認してください。
+
+既存cloneではremoteを調査し、設定済みremoteごとにURLを更新します。
+
+```bash
+git remote -v
+git remote set-url origin https://github.com/seekerkrt/moguet.git
+git remote set-url gitlab https://gitlab.com/seekerkrt/moguet.git
+git remote get-url origin
+git remote get-url gitlab
+```
+
+SSHを使うcloneでは、代わりに`git@github.com:seekerkrt/moguet.git`と
+`git@gitlab.com:seekerkrt/moguet.git`を使用します。`gitlab` remoteが未設定なら、該当commandは
+実行しません。remote URLの変更はpackage stateや`/etc/jpacker` dataを移行しません。
 
 現在のsource contractは[README.md](../../README.md)、
 [README.ja.md](../../README.ja.md)、
-[COMPATIBILITY.md](https://github.com/seekerkrt/jpacker/blob/develop/docs/COMPATIBILITY.md)を
+[COMPATIBILITY.md](https://github.com/seekerkrt/moguet/blob/develop/docs/COMPATIBILITY.md)を
 参照してください。

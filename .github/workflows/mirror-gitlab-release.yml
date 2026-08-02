@@ -79,7 +79,7 @@ jobs:
         run: |
           set -eu
 
-          project='seekerkrt%2Fjpacker'
+          project='seekerkrt%2Fmoguet'
           encoded_tag="$(jq -nr --arg value "$TAG" '$value | @uri')"
 
           for attempt in $(seq 1 24); do
@@ -111,4 +111,4 @@ jobs:
             --form 'ref=main' \
             --form "variables[MIRROR_RELEASE_ACTION]=${ACTION}" \
             --form "variables[MIRROR_RELEASE_TAG]=${TAG}" \
-            'https://gitlab.com/api/v4/projects/seekerkrt%2Fjpacker/trigger/pipeline'
+            'https://gitlab.com/api/v4/projects/seekerkrt%2Fmoguet/trigger/pipeline'

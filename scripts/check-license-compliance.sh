@@ -94,13 +94,13 @@ check_pkgbuild_metadata() {
 
     evaluated_url=$(printf '%s\n' "$package_metadata" |
         sed -n 's/^[[:space:]]*url = //p')
-    expected_url="https://github.com/seekerkrt/jpacker"
+    expected_url="https://github.com/seekerkrt/moguet"
     [ "$evaluated_url" = "$expected_url" ] ||
         fail "PKGBUILD URL mismatch: expected $expected_url, got $evaluated_url."
 
     evaluated_source=$(printf '%s\n' "$package_metadata" |
         sed -n 's/^[[:space:]]*source = //p')
-    expected_source="moguet-src::git+https://github.com/seekerkrt/jpacker.git#tag=v$case_version"
+    expected_source="moguet-src::git+https://github.com/seekerkrt/moguet.git#tag=v$case_version"
     [ "$evaluated_source" = "$expected_source" ] ||
         fail "PKGBUILD source mismatch: expected $expected_source, got $evaluated_source."
 
@@ -181,23 +181,23 @@ require_text docs/LICENSING.md \
     "jpacker v1.14.0 and earlier releases were distributed under the MIT License."
 require_text docs/LICENSING.md \
     "Those historical releases remain available under their original license."
-require_text README.md 'The current GPL-licensed development series and v1.15.0 or later releases are distributed under `GPL-3.0-or-later`.'
+require_text README.md 'Moguet releases and jpacker v1.15.0 through v1.16.0 are distributed under `GPL-3.0-or-later`.'
 require_text README.md "jpacker v1.14.0 and earlier releases"
-require_text README.ja.md '現在のGPLライセンス開発系列とv1.15.0以降のjpackerは、`GPL-3.0-or-later`で提供します。'
-require_text README.ja.md "v1.14.0以前のreleaseはMIT License"
+require_text README.ja.md 'Moguet releaseとjpacker v1.15.0からv1.16.0は、`GPL-3.0-or-later`で提供します。'
+require_text README.ja.md "jpacker v1.14.0以前のreleaseはMIT License"
 for readme in README.md README.ja.md
 do
     require_text "$readme" \
-        "[LICENSE](https://github.com/seekerkrt/jpacker/blob/develop/LICENSE)"
+        "[LICENSE](https://github.com/seekerkrt/moguet/blob/develop/LICENSE)"
     require_text "$readme" "[docs/LICENSING.md](docs/LICENSING.md)"
     require_text "$readme" "[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)"
 done
 require_text THIRD_PARTY_NOTICES.md \
     "the current GPL-licensed Moguet development series"
 require_text docs/DECISIONS.md \
-    '現在のGPLライセンス開発系列とv1.15.0以降のjpackerは`GPL-3.0-or-later`で提供する。'
+    'Moguet releaseとjpacker v1.15.0以降は`GPL-3.0-or-later`で提供する。'
 require_text docs/DECISIONS.md \
-    'The current GPL-licensed development series and v1.15.0 or later jpacker releases are distributed under `GPL-3.0-or-later`.'
+    'Moguet releases and jpacker v1.15.0 or later are distributed under `GPL-3.0-or-later`.'
 
 for current_series_file in \
     README.md \
@@ -228,13 +228,13 @@ done
 require_text THIRD_PARTY_NOTICES.md '`GPL-2.0-or-later`'
 require_text THIRD_PARTY_NOTICES.md '`curl` (SPDX identifier)'
 require_text THIRD_PARTY_NOTICES.md \
-    '[`LICENSES/curl.txt`](https://github.com/seekerkrt/jpacker/blob/develop/LICENSES/curl.txt)'
+    '[`LICENSES/curl.txt`](https://github.com/seekerkrt/moguet/blob/develop/LICENSES/curl.txt)'
 require_text THIRD_PARTY_NOTICES.md \
-    '[`LICENSES/nlohmann-json-MIT.txt`](https://github.com/seekerkrt/jpacker/blob/develop/LICENSES/nlohmann-json-MIT.txt)'
+    '[`LICENSES/nlohmann-json-MIT.txt`](https://github.com/seekerkrt/moguet/blob/develop/LICENSES/nlohmann-json-MIT.txt)'
 require_text THIRD_PARTY_NOTICES.md \
-    '[`LICENSES/tomlplusplus-MIT.txt`](https://github.com/seekerkrt/jpacker/blob/develop/LICENSES/tomlplusplus-MIT.txt)'
+    '[`LICENSES/tomlplusplus-MIT.txt`](https://github.com/seekerkrt/moguet/blob/develop/LICENSES/tomlplusplus-MIT.txt)'
 require_text THIRD_PARTY_NOTICES.md \
-    '[`LICENSES/bjoern-hoehrmann-utf8-MIT.txt`](https://github.com/seekerkrt/jpacker/blob/develop/LICENSES/bjoern-hoehrmann-utf8-MIT.txt)'
+    '[`LICENSES/bjoern-hoehrmann-utf8-MIT.txt`](https://github.com/seekerkrt/moguet/blob/develop/LICENSES/bjoern-hoehrmann-utf8-MIT.txt)'
 require_text THIRD_PARTY_NOTICES.md "Every entry below is a separately installed program"
 require_text THIRD_PARTY_NOTICES.md "It is not linked into Moguet and is not bundled with Moguet."
 require_text THIRD_PARTY_NOTICES.md \
