@@ -70,7 +70,7 @@ CLI出力や終了codeを変えた場合は対象commandを直接確認する。
 ## Repository固有の慎重領域
 
 - package transaction、dependency plan、provider / conflict / replaces判定
-- source-build preferenceと`/etc/jpacker/package.build/`
+- source-build preferenceと`${XDG_CONFIG_HOME:-$HOME/.config}/moguet/source-build.d/`
 - shell quoting、package name / environment key validation
 - temporary directory、current directory、partial clone / buildのcleanup
 - sudo境界と利用者へ表示するcommand

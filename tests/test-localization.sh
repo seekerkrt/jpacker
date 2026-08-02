@@ -16,7 +16,6 @@ msgfmt_command=$6
 cli_binary=$7
 tmp_dir=$(mktemp -d)
 locale_root=$tmp_dir/locales
-test_home=$tmp_dir/home
 
 cleanup() {
     rm -rf "$tmp_dir"
@@ -75,11 +74,21 @@ run_case() {
     language=$4
     count_case=$5
     output_file=$tmp_dir/$case_name.out
+    xdg_root=$tmp_dir/$case_name-xdg
+
+    mkdir -p \
+        "$xdg_root/home" "$xdg_root/config" \
+        "$xdg_root/state" "$xdg_root/cache"
+    chmod 0700 "$xdg_root/config"
 
     LOCPATH=$locale_root \
     LANG=$process_locale \
     LC_ALL=$process_locale \
     LANGUAGE=$language \
+    HOME=$xdg_root/home \
+    XDG_CONFIG_HOME=$xdg_root/config \
+    XDG_STATE_HOME=$xdg_root/state \
+    XDG_CACHE_HOME=$xdg_root/cache \
         "$binary" "$count_case" > "$output_file" 2>&1 || {
         sed -n '1,160p' "$output_file" >&2
         fail "$case_name execution failed."
@@ -93,15 +102,21 @@ run_help_case() {
     language=$3
     help_option=$4
     output_file=$tmp_dir/$case_name.out
+    xdg_root=$tmp_dir/$case_name-xdg
+
+    mkdir -p \
+        "$xdg_root/home" "$xdg_root/config" \
+        "$xdg_root/state" "$xdg_root/cache"
+    chmod 0700 "$xdg_root/config"
 
     LOCPATH=$locale_root \
     LANG=$process_locale \
     LC_ALL=$process_locale \
     LANGUAGE=$language \
-    HOME=$test_home \
-    XDG_CONFIG_HOME=$tmp_dir/config \
-    XDG_STATE_HOME=$tmp_dir/state \
-    XDG_CACHE_HOME=$tmp_dir/cache \
+    HOME=$xdg_root/home \
+    XDG_CONFIG_HOME=$xdg_root/config \
+    XDG_STATE_HOME=$xdg_root/state \
+    XDG_CACHE_HOME=$xdg_root/cache \
         "$cli_binary" "$help_option" > "$output_file" 2>&1 || {
         sed -n '1,200p' "$output_file" >&2
         fail "$case_name execution failed."
@@ -113,20 +128,41 @@ run_list_sources_case() {
     case_name=$1
     process_locale=$2
     language=$3
-    preference_root=$4
+    preference_kind=$4
     output_file=$tmp_dir/$case_name.out
     xdg_root=$tmp_dir/$case_name-xdg
+    preference_root=$xdg_root/config/moguet/source-build.d
 
-    mkdir -p "$xdg_root/config" "$xdg_root/state" "$xdg_root/cache"
+    mkdir -p \
+        "$xdg_root/home" "$xdg_root/config" \
+        "$xdg_root/state" "$xdg_root/cache"
+    chmod 0700 "$xdg_root/config"
+    case $preference_kind in
+        missing)
+            ;;
+        empty)
+            mkdir -p "$preference_root"
+            chmod 0700 "$preference_root"
+            ;;
+        regular)
+            mkdir -p "$preference_root"
+            chmod 0700 "$preference_root"
+            printf '%s\n' 'CFLAGS=-Oidentity' > \
+                "$preference_root/identity-package"
+            chmod 0600 "$preference_root/identity-package"
+            ;;
+        *)
+            fail "$case_name received unknown preference kind: $preference_kind"
+            ;;
+    esac
     LOCPATH=$locale_root \
     LANG=$process_locale \
     LC_ALL=$process_locale \
     LANGUAGE=$language \
-    HOME=$test_home \
+    HOME=$xdg_root/home \
     XDG_CONFIG_HOME=$xdg_root/config \
     XDG_STATE_HOME=$xdg_root/state \
     XDG_CACHE_HOME=$xdg_root/cache \
-    MOGUET_TEST_PACKAGE_BUILD_DIR=$preference_root \
         "$cli_binary" list-src > "$output_file" 2>&1 || {
         sed -n '1,200p' "$output_file" >&2
         fail "$case_name execution failed."
@@ -144,7 +180,8 @@ run_xdg_resolution_case() {
     work_dir=$xdg_root/work
 
     mkdir -p \
-        "$xdg_root/state" "$xdg_root/cache" "$empty_path" "$work_dir"
+        "$xdg_root/home" "$xdg_root/state" "$xdg_root/cache" \
+        "$empty_path" "$work_dir"
     set +e
     (
         CDPATH= cd "$work_dir"
@@ -152,7 +189,7 @@ run_xdg_resolution_case() {
         LANG=$process_locale \
         LC_ALL=$process_locale \
         LANGUAGE=$language \
-        HOME=$test_home \
+        HOME=$xdg_root/home \
         XDG_CONFIG_HOME=relative/config-secret \
         XDG_STATE_HOME=$xdg_root/state \
         XDG_CACHE_HOME=$xdg_root/cache \
@@ -253,7 +290,6 @@ assert_english_messages() {
 command -v localedef >/dev/null 2>&1 ||
     fail 'localedef is required for a controlled non-C LC_MESSAGES locale.'
 mkdir -p "$locale_root"
-mkdir -p "$test_home"
 localedef --no-archive -i en_US -f UTF-8 \
     "$locale_root/en_US.UTF-8"
 
@@ -298,9 +334,16 @@ assert_line '--diff' "$ja_help_tokens"
 assert_line '--build-mode=normal|rebuild|clean' "$ja_help_tokens"
 assert_line '$XDG_CONFIG_HOME/moguet/config.toml' "$ja_help_tokens"
 
-[ ! -e "$tmp_dir/config" ] && [ ! -e "$tmp_dir/state" ] &&
-    [ ! -e "$tmp_dir/cache" ] ||
-    fail 'help-only CLI localization cases created XDG consumer directories.'
+for help_xdg_root in "$tmp_dir"/cli-help-*-xdg; do
+    for consumer_directory in \
+        "$help_xdg_root/config/moguet" \
+        "$help_xdg_root/state/moguet" \
+        "$help_xdg_root/cache/moguet"
+    do
+        [ ! -e "$consumer_directory" ] && [ ! -L "$consumer_directory" ] ||
+            fail 'help-only CLI localization case created an XDG consumer directory.'
+    done
+done
 
 c_xdg_resolution=$(run_xdg_resolution_case \
     cli-xdg-resolution-c C '')
@@ -323,46 +366,39 @@ assert_contains \
     "$zz_xdg_resolution"
 assert_not_contains 'relative/config-secret' "$zz_xdg_resolution"
 
-missing_preference_root=$tmp_dir/missing-package.build
-empty_preference_root=$tmp_dir/empty-package.build
-regular_preference_root=$tmp_dir/regular-package.build
-mkdir -p "$empty_preference_root" "$regular_preference_root"
-printf '%s\n' 'CFLAGS=-Oidentity' > \
-    "$regular_preference_root/identity-package"
-
 c_list_missing=$(run_list_sources_case \
-    cli-list-sources-c-missing C '' "$missing_preference_root")
+    cli-list-sources-c-missing C '' missing)
 assert_contains 'No source-build packages registered.' "$c_list_missing"
 
 ja_list_missing=$(run_list_sources_case \
-    cli-list-sources-ja-missing en_US.UTF-8 ja "$missing_preference_root")
+    cli-list-sources-ja-missing en_US.UTF-8 ja missing)
 assert_contains 'ソースビルド対象のパッケージは登録されていません。' \
     "$ja_list_missing"
 
 c_list_empty=$(run_list_sources_case \
-    cli-list-sources-c-empty C '' "$empty_preference_root")
+    cli-list-sources-c-empty C '' empty)
 assert_contains 'Registered Source Packages:' "$c_list_empty"
 assert_contains '(none)' "$c_list_empty"
 
 ja_list_empty=$(run_list_sources_case \
-    cli-list-sources-ja-empty en_US.UTF-8 ja "$empty_preference_root")
+    cli-list-sources-ja-empty en_US.UTF-8 ja empty)
 assert_contains '登録済みソースパッケージ:' "$ja_list_empty"
 assert_contains '（なし）' "$ja_list_empty"
 
 zz_list_empty=$(run_list_sources_case \
     cli-list-sources-missing-translation en_US.UTF-8 zz \
-    "$empty_preference_root")
+    empty)
 assert_contains 'Registered Source Packages:' "$zz_list_empty"
 assert_contains '(none)' "$zz_list_empty"
 
 ja_list_regular=$(run_list_sources_case \
-    cli-list-sources-ja-regular en_US.UTF-8 ja "$regular_preference_root")
+    cli-list-sources-ja-regular en_US.UTF-8 ja regular)
 assert_contains '登録済みソースパッケージ:' "$ja_list_regular"
 assert_contains 'identity-package' "$ja_list_regular"
 assert_contains 'CFLAGS=-Oidentity' "$ja_list_regular"
 
-[ ! -e "$missing_preference_root" ] &&
-    [ ! -L "$missing_preference_root" ] ||
+[ ! -e "$tmp_dir/cli-list-sources-c-missing-xdg/config/moguet/source-build.d" ] &&
+    [ ! -L "$tmp_dir/cli-list-sources-c-missing-xdg/config/moguet/source-build.d" ] ||
     fail 'list-src localization case created the missing preference root.'
 
 [ ! -e "$missing_catalog_dir" ] && [ ! -L "$missing_catalog_dir" ] ||

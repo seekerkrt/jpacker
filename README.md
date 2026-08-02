@@ -43,6 +43,12 @@ English/Japanese CLI surface are implemented. The local package identity,
 payload, dependency metadata, documentation, and non-destructive transition
 from jpacker v1.16.0 form the v2 release contract.
 
+Moguet v2.0.1 completes the source-preference part of that adopted XDG storage
+contract. It corrects an implementation omission in v2.0.0 rather than adding
+a new storage direction: source-build preferences now use only the executing
+user's XDG config context, while the published v2.0.0 tag, Release, and release
+notes remain historical records.
+
 The canonical repository identity is Moguet on GitHub, with a GitLab mirror.
 The Moguet package does not provide a `jpacker` command alias. AUR publication
 is a separate future decision; this document does not claim that an AUR
@@ -112,9 +118,10 @@ The v2.0.0 package and its only executable are named `moguet`; it does not
 install `/usr/bin/jpacker`. Its payload is disjoint from the jpacker v1.16.0
 package, so the metadata intentionally declares no `provides`, `conflicts`, or
 `replaces` relationship with `jpacker`. The packages may coexist while the
-manual migration and rollback are verified. They share the production
-source-preference compatibility store at `/etc/jpacker/package.build/`, but
-the Moguet package neither creates nor owns that directory.
+manual migration and rollback are verified. Their source-preference stores are
+separate: Moguet uses its user-owned XDG config authority and does not read or
+modify the legacy `/etc/jpacker/package.build/` store. The Moguet package
+creates or owns neither user XDG data nor the legacy directory.
 
 The package runtime dependencies are `curl`, `git`, `libalpm.so`, `libarchive`,
 `nano`, `pacman`, and `sudo`. The exact `makedepends` set recorded by the
@@ -214,20 +221,28 @@ values, and unsupported future schema versions stop the invocation. Moguet
 does not create, rewrite, or migrate this file automatically, and it does not
 use `/etc/moguet` as a system-wide configuration layer.
 
-Source-build preferences remain a separate compatibility boundary at
-`/etc/jpacker/package.build/` in this implementation. Those files are not
-TOML config and are not copied into the XDG config directory. The source
-preference commands operate on that existing store, so do not replay preserved
-entries as though they had moved during the v2 config migration. This runtime
-compatibility does not make the directory part of the Moguet package payload;
-package install and uninstall do not create, migrate, or remove it.
+Source-build preferences are separate per-package files under:
+
+```text
+${XDG_CONFIG_HOME:-$HOME/.config}/moguet/source-build.d/<package-name>
+```
+
+They are not TOML config. `add-src`, `edit-src`, `list-src`, `del-src`,
+`revert`, and every build or upgrade reader use this one authority. A missing
+store or entry means no saved preference; an invalid name, unsafe entry,
+permission error, or I/O failure is a hard error. Read and list operations do
+not create directories. Only an `add-src` or `edit-src` that first needs
+storage creates the managed directories with mode `0700` and the entry with
+mode `0600`. Package install, reinstall, and uninstall do not create,
+migrate, or remove either XDG preferences or legacy data.
 
 <!-- parity:xdg -->
-## XDG config, state, and cache
+## XDG config, source preferences, state, and cache
 
 | Responsibility | XDG path | Fallback |
 | --- | --- | --- |
 | User configuration | `$XDG_CONFIG_HOME/moguet/` | `~/.config/moguet/` |
+| Source-build preferences | `$XDG_CONFIG_HOME/moguet/source-build.d/` | `~/.config/moguet/source-build.d/` |
 | Persistent runtime state and log | `$XDG_STATE_HOME/moguet/` | `~/.local/state/moguet/` |
 | Reproducible cache | `$XDG_CACHE_HOME/moguet/` | `~/.cache/moguet/` |
 
@@ -236,10 +251,15 @@ authoritative and may be regenerated; deleting cache must not delete config or
 persistent state. Directories are created only when a command needs them.
 Help and version output do not create XDG directories.
 
-Relative or otherwise unsafe XDG paths fail closed. When Moguet is run as
-root, root's own XDG context is used; Moguet does not infer a different user
-from `SUDO_USER` or write into that user's home. This path rule does not make
-AUR source builds as root acceptable.
+For source-preference access, an unset or empty `XDG_CONFIG_HOME` uses the HOME
+fallback. An explicit `XDG_CONFIG_HOME` must be absolute, already exist, and
+pass the ownership, type, and permission checks; Moguet creates only the
+managed `moguet/source-build.d` children when a write command first needs
+them. With the HOME fallback, the same source-preference safety boundary may
+create the required config hierarchy. Relative or otherwise unsafe XDG paths
+fail closed. When Moguet is run as root, root's own XDG context is used;
+Moguet does not infer a different user from `SUDO_USER` or write into that
+user's home. This path rule does not make AUR source builds as root acceptable.
 
 <!-- parity:localization -->
 ## Localization
@@ -268,19 +288,20 @@ does not consume. When Moguet takes responsibility for an AUR or source-build
 route, it preserves only options with an explicitly defined equivalent and
 fails before mutation for the rest.
 
-Moguet v2.0.0 does not read `/etc/jpacker/jpacker.conf` as a normal config
-layer and does not automatically copy, rewrite, or delete `/etc/jpacker`.
-Root-owned legacy data is not assigned to a user by guesswork. Back up the v1
-state and follow the [English migration guide](docs/migration/v1-to-v2.md) or
-[Japanese migration guide](docs/migration/v1-to-v2.ja.md) for manual mapping
-and rollback.
+Moguet does not read `/etc/jpacker/jpacker.conf` as a normal config layer or
+use `/etc/jpacker/package.build/` as a source-preference fallback. It does not
+automatically copy, merge, rewrite, or delete `/etc/jpacker`. Root-owned legacy
+data is not assigned to a user by guesswork. Back up the v1 state and follow
+the [English migration guide](docs/migration/v1-to-v2.md) or [Japanese
+migration guide](docs/migration/v1-to-v2.ja.md) to recreate understood entries
+manually for each target user and to preserve rollback data.
 
 The formal and only packaged v2 command is `moguet`; no `jpacker` binary alias
 is supplied. Moguet and jpacker v1.16.0 have disjoint package files and may be
 installed together for transition and rollback. Do not run mutating operations
-from both helpers concurrently: the existing `/etc/jpacker/package.build/`
-store remains a production compatibility boundary even though the Moguet
-package does not own, migrate, or remove it.
+from both helpers concurrently. Their preference stores are not shared. Moguet
+ignores and preserves the legacy store; only an explicit per-user migration
+changes the XDG authority.
 
 <!-- parity:development -->
 ## Development

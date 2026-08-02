@@ -24,6 +24,7 @@
 #include "commands_upgrade_all.hpp"
 #include "localization.hpp"
 #include "logging.hpp"
+#include "package_identifier.hpp"
 #include "process.hpp"
 #include "shell_words.hpp"
 #include "source_install.hpp"
@@ -126,6 +127,49 @@ bool operation_requires_target(const std::string& operation) {
     return spec != nullptr && spec->requires_target;
 }
 
+bool is_source_preference_target_operation(
+        const std::string& operation) {
+    return operation ==
+                   cli_authority::operation_spec(
+                           cli_authority::OperationId::AddSource)
+                           .token ||
+           operation ==
+                   cli_authority::operation_spec(
+                           cli_authority::OperationId::DeleteSource)
+                           .token ||
+           operation ==
+                   cli_authority::operation_spec(
+                           cli_authority::OperationId::Revert)
+                           .token ||
+           operation ==
+                   cli_authority::operation_spec(
+                           cli_authority::OperationId::EditSource)
+                           .token;
+}
+
+bool validate_pre_log_source_preference_targets(
+        const ParsedCliArguments& parsed) {
+    if(!is_source_preference_target_operation(parsed.operation)) return true;
+
+    const bool is_add_src =
+            parsed.operation ==
+            cli_authority::operation_spec(
+                    cli_authority::OperationId::AddSource)
+                    .token;
+    try {
+        for(const std::string& target : parsed.targets) {
+            // POLICY(#335): add-srcのV=K operandはpackageではない。
+            // handlerがassignment ordering/valueを検証する既存責務を維持する。
+            if(is_add_src && target.find('=') != std::string::npos) continue;
+            require_valid_package_name(target);
+        }
+    } catch(const std::exception& error) {
+        Logger::error(error.what());
+        return false;
+    }
+    return true;
+}
+
 bool validate_pre_log_operation_route(const ParsedCliArguments& parsed) {
     if(!parsed.operation.empty() && parsed.operation.front() != '-' &&
        !is_known_moguet_operation(parsed.operation)) {
@@ -178,7 +222,7 @@ bool validate_pre_log_operation_route(const ParsedCliArguments& parsed) {
         }
         return false;
     }
-    return true;
+    return validate_pre_log_source_preference_targets(parsed);
 }
 
 } // namespace
@@ -691,6 +735,12 @@ void print_help() {
     print_help_section(
             localization::translate_message("SOURCE BUILD PREFERENCES"));
     print_help_entry(
+            "${XDG_CONFIG_HOME:-$HOME/.config}/moguet/source-build.d/<package-name>",
+            localization::format_translated_message(
+                    // TRANSLATORS: The placeholder is the literal XDG identity.
+                    "Store each preference in the active user's {} config authority",
+                    "XDG"));
+    print_help_entry(
             cli_authority::operation_spec(OperationId::AddSource).help_syntax,
             localization::translate_message(
                     "Enable a source-build preference for a package"));
@@ -888,6 +938,12 @@ std::string join_pacman_args(const std::vector<std::string>& args) {
 bool validate_optionless_moguet_operation(const std::string& operation, const std::vector<std::string>& flags) {
     for(const auto& flag : flags) {
         if(flag == operation) continue;
+        // POLICY(#335): target-bearing source-preference operations alone use
+        // semantic `--` to pass a leading-hyphen operand to package validation.
+        if(flag == "--" &&
+           is_source_preference_target_operation(operation)) {
+            continue;
+        }
 
         // TRANSLATORS: The placeholders are literal CLI operation and option tokens.
         Logger::error(localization::format_translated_message(

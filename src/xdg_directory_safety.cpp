@@ -25,12 +25,21 @@ namespace fs = std::filesystem;
 constexpr mode_t NEW_DIRECTORY_MODE = 0700;
 constexpr mode_t REQUIRED_OWNER_PERMISSIONS = S_IRUSR | S_IWUSR | S_IXUSR;
 constexpr mode_t FORBIDDEN_WRITE_PERMISSIONS = S_IWGRP | S_IWOTH;
+constexpr std::string_view SOURCE_PREFERENCE_DIRECTORY_NAME =
+        "source-build.d";
 
 struct DirectoryRequest {
     xdg_paths::DirectoryKind directory_kind;
     const fs::path&          directory;
     const xdg_paths::DirectoryCreationBoundary& creation_boundary;
     bool derived_paths_match;
+    bool is_source_preference_directory = false;
+    bool final_directory_requires_private_mode = false;
+};
+
+enum class MissingManagedComponentPolicy {
+    Create,
+    ReturnAbsent,
 };
 
 class OwnedFileDescriptor final {
@@ -78,6 +87,7 @@ struct RetainedDirectoryState {
     std::string         leaf_name;
     struct stat         status {};
     bool                requires_security_validation = false;
+    bool                requires_private_mode = false;
 };
 
 struct PreparedDirectoryState {
@@ -284,18 +294,41 @@ bool is_safe_leaf_name(const std::string& component) {
 }
 
 std::vector<std::string> expected_fallback_components(
-        xdg_paths::DirectoryKind directory_kind) {
+        xdg_paths::DirectoryKind directory_kind,
+        bool is_source_preference_directory) {
     const std::string application_component(application_identity::XDG_IDENTITY);
+    std::vector<std::string> components;
     switch(directory_kind) {
     case xdg_paths::DirectoryKind::Config:
-        return {".config", application_component};
+        components = {".config", application_component};
+        break;
     case xdg_paths::DirectoryKind::State:
-        return {".local", "state", application_component};
+        components = {".local", "state", application_component};
+        break;
     case xdg_paths::DirectoryKind::Cache:
-        return {".cache", application_component};
+        components = {".cache", application_component};
+        break;
     }
-    throw std::logic_error(localization::format_translated_message(
-            "Unknown {} directory kind.", "XDG"));
+    if(components.empty()) {
+        throw std::logic_error(localization::format_translated_message(
+                "Unknown {} directory kind.", "XDG"));
+    }
+    if(is_source_preference_directory) {
+        components.push_back(
+                std::string(SOURCE_PREFERENCE_DIRECTORY_NAME));
+    }
+    return components;
+}
+
+std::vector<std::string> expected_explicit_components(
+        bool is_source_preference_directory) {
+    std::vector<std::string> components{
+            std::string(application_identity::XDG_IDENTITY)};
+    if(is_source_preference_directory) {
+        components.push_back(
+                std::string(SOURCE_PREFERENCE_DIRECTORY_NAME));
+    }
+    return components;
 }
 
 void validate_creation_boundary(const DirectoryRequest& request) {
@@ -324,27 +357,27 @@ void validate_creation_boundary(const DirectoryRequest& request) {
         }
     }
 
-    const std::string application_component(application_identity::XDG_IDENTITY);
-    if(boundary.creatable_components.back() != application_component) {
-        throw_preparation_error(
-                request.directory_kind,
-                PreparationStage::BoundaryValidation,
-                PreparationErrorCode::InvalidCreationBoundary);
-    }
-
     fs::path reconstructed_directory = boundary.existing_anchor;
     for(const std::string& component : boundary.creatable_components)
         reconstructed_directory /= component;
 
     fs::path reconstructed_base = boundary.existing_anchor;
-    for(std::size_t index = 0;
-        index + 1 < boundary.creatable_components.size(); ++index) {
+    const std::size_t managed_component_count =
+            request.is_source_preference_directory ? 2 : 1;
+    if(boundary.creatable_components.size() < managed_component_count) {
+        throw_preparation_error(
+                request.directory_kind,
+                PreparationStage::BoundaryValidation,
+                PreparationErrorCode::InvalidCreationBoundary);
+    }
+    const std::size_t base_component_count =
+            boundary.creatable_components.size() - managed_component_count;
+    for(std::size_t index = 0; index < base_component_count; ++index) {
         reconstructed_base /= boundary.creatable_components[index];
     }
 
     if(reconstructed_directory != request.directory ||
-       reconstructed_base != boundary.base_directory ||
-       request.directory.parent_path() != boundary.base_directory) {
+       reconstructed_base != boundary.base_directory) {
         throw_preparation_error(
                 request.directory_kind,
                 PreparationStage::BoundaryValidation,
@@ -354,7 +387,8 @@ void validate_creation_boundary(const DirectoryRequest& request) {
     if(boundary.source == xdg_paths::DirectorySource::ExplicitXdg) {
         if(boundary.existing_anchor != boundary.base_directory ||
            boundary.creatable_components !=
-                   std::vector<std::string>{application_component}) {
+                   expected_explicit_components(
+                           request.is_source_preference_directory)) {
             throw_preparation_error(
                     request.directory_kind,
                     PreparationStage::BoundaryValidation,
@@ -365,7 +399,9 @@ void validate_creation_boundary(const DirectoryRequest& request) {
 
     if(boundary.source != xdg_paths::DirectorySource::HomeFallback ||
        boundary.creatable_components !=
-               expected_fallback_components(request.directory_kind)) {
+               expected_fallback_components(
+                       request.directory_kind,
+                       request.is_source_preference_directory)) {
         throw_preparation_error(
                 request.directory_kind,
                 PreparationStage::BoundaryValidation,
@@ -473,7 +509,8 @@ void validate_directory_security(
         std::size_t component_index,
         std::uintmax_t expected_effective_user,
         const TestOverrides* overrides,
-        bool was_created) {
+        bool was_created,
+        bool requires_private_mode) {
     if(observed_owner(status, overrides) != expected_effective_user) {
         throw_preparation_error(
                 directory_kind, stage,
@@ -487,10 +524,11 @@ void validate_directory_security(
             REQUIRED_OWNER_PERMISSIONS;
     const bool has_forbidden_write_permissions =
             (permissions & FORBIDDEN_WRITE_PERMISSIONS) != 0;
-    const bool has_expected_created_mode =
-            !was_created || permissions == NEW_DIRECTORY_MODE;
+    const bool has_expected_mode =
+            (!was_created && !requires_private_mode) ||
+            permissions == NEW_DIRECTORY_MODE;
     if(!has_required_owner_permissions || has_forbidden_write_permissions ||
-       !has_expected_created_mode) {
+       !has_expected_mode) {
         throw_preparation_error(
                 directory_kind, stage,
                 PreparationErrorCode::UnsafePermissions,
@@ -509,7 +547,8 @@ OpenedDirectory open_observed_directory(
         const TestOverrides* overrides,
         bool allow_test_injection,
         bool validate_security,
-        bool was_created) {
+        bool was_created,
+        bool requires_private_mode) {
 #ifndef MOGUET_TEST_XDG_DIRECTORY_SAFETY_HOOKS
     static_cast<void>(allow_test_injection);
 #endif
@@ -600,11 +639,11 @@ OpenedDirectory open_observed_directory(
         validate_directory_security(
                 opened_status, directory_kind, validation_stage,
                 component_index, expected_effective_user, overrides,
-                was_created);
+                was_created, requires_private_mode);
         validate_directory_security(
                 revalidated_status, directory_kind, validation_stage,
                 component_index, expected_effective_user, overrides,
-                was_created);
+                was_created, requires_private_mode);
     }
     return OpenedDirectory{std::move(opened), opened_status};
 }
@@ -630,12 +669,98 @@ RetainedDirectoryState retain_directory_identity(
         const struct stat& status,
         xdg_paths::DirectoryKind directory_kind,
         PreparationStage stage, std::size_t component_index,
-        bool requires_security_validation) {
+        bool requires_security_validation,
+        bool requires_private_mode) {
     return RetainedDirectoryState{
             duplicate_lineage_descriptor(
                     descriptor, directory_kind, stage, component_index),
             std::move(leaf_name), status,
-            requires_security_validation};
+            requires_security_validation, requires_private_mode};
+}
+
+void require_retained_lineage_unchanged(
+        const std::vector<RetainedDirectoryState>& retained_lineage,
+        const DirectoryRequest& request,
+        std::uintmax_t expected_effective_user,
+        const TestOverrides* overrides) {
+    if(retained_lineage.empty()) {
+        throw_preparation_error(
+                request.directory_kind,
+                PreparationStage::DirectoryRevalidation,
+                PreparationErrorCode::MetadataFailure);
+    }
+
+    for(std::size_t index = 0; index < retained_lineage.size(); ++index) {
+        const RetainedDirectoryState& identity = retained_lineage[index];
+        if(identity.descriptor.get() < 0 ||
+           (index == 0 ? !identity.leaf_name.empty()
+                       : identity.leaf_name.empty())) {
+            throw_preparation_error(
+                    request.directory_kind,
+                    PreparationStage::DirectoryRevalidation,
+                    PreparationErrorCode::MetadataFailure,
+                    std::nullopt, index);
+        }
+
+        struct stat retained_status {};
+        if(fstat(identity.descriptor.get(), &retained_status) != 0) {
+            const int metadata_error = errno;
+            throw_preparation_error(
+                    request.directory_kind,
+                    PreparationStage::DirectoryRevalidation,
+                    is_permission_error(metadata_error)
+                            ? PreparationErrorCode::PermissionDenied
+                            : PreparationErrorCode::MetadataFailure,
+                    metadata_error, index);
+        }
+        if(!S_ISDIR(retained_status.st_mode) ||
+           !same_filesystem_identity(identity.status, retained_status)) {
+            throw_preparation_error(
+                    request.directory_kind,
+                    PreparationStage::DirectoryRevalidation,
+                    PreparationErrorCode::ConcurrentReplacement,
+                    std::nullopt, index);
+        }
+
+        if(index == 0) continue;
+
+        const RetainedDirectoryState& parent = retained_lineage[index - 1];
+        struct stat named_status {};
+        if(fstatat(
+                   parent.descriptor.get(), identity.leaf_name.c_str(),
+                   &named_status, AT_SYMLINK_NOFOLLOW) != 0) {
+            const int metadata_error = errno;
+            throw_preparation_error(
+                    request.directory_kind,
+                    PreparationStage::DirectoryRevalidation,
+                    is_replacement_error(metadata_error)
+                            ? PreparationErrorCode::ConcurrentReplacement
+                            : (is_permission_error(metadata_error)
+                                       ? PreparationErrorCode::PermissionDenied
+                                       : PreparationErrorCode::MetadataFailure),
+                    metadata_error, index);
+        }
+        if(!S_ISDIR(named_status.st_mode) ||
+           !same_filesystem_identity(retained_status, named_status)) {
+            throw_preparation_error(
+                    request.directory_kind,
+                    PreparationStage::DirectoryRevalidation,
+                    PreparationErrorCode::ConcurrentReplacement,
+                    std::nullopt, index);
+        }
+        if(identity.requires_security_validation) {
+            validate_directory_security(
+                    retained_status, request.directory_kind,
+                    PreparationStage::DirectoryRevalidation, index,
+                    expected_effective_user, overrides, false,
+                    identity.requires_private_mode);
+            validate_directory_security(
+                    named_status, request.directory_kind,
+                    PreparationStage::DirectoryRevalidation, index,
+                    expected_effective_user, overrides, false,
+                    identity.requires_private_mode);
+        }
+    }
 }
 
 OpenedDirectory open_existing_anchor(
@@ -673,7 +798,7 @@ OpenedDirectory open_existing_anchor(
     retained_lineage.push_back(retain_directory_identity(
             current_directory.get(), {}, current_status,
             request.directory_kind,
-            PreparationStage::FilesystemRootOpen, 0, false));
+            PreparationStage::FilesystemRootOpen, 0, false, false));
 
     fs::path current_path("/");
     std::size_t component_index = 0;
@@ -737,14 +862,14 @@ OpenedDirectory open_existing_anchor(
                 component_index,
                 expected_effective_user, overrides, false,
                 is_final_anchor_component,
-                false);
+                false, false);
         retained_lineage.push_back(retain_directory_identity(
                 opened.descriptor.get(), leaf_name, opened.status,
                 request.directory_kind,
                 is_final_anchor_component
                         ? PreparationStage::AnchorValidation
                         : PreparationStage::AnchorTraversal,
-                component_index, is_final_anchor_component));
+                component_index, is_final_anchor_component, false));
         current_directory = std::move(opened.descriptor);
         current_status = opened.status;
         ++component_index;
@@ -754,7 +879,7 @@ OpenedDirectory open_existing_anchor(
             current_status, request.directory_kind,
             PreparationStage::AnchorValidation,
             component_index == 0 ? 0 : component_index - 1,
-            expected_effective_user, overrides, false);
+            expected_effective_user, overrides, false, false);
     return OpenedDirectory{std::move(current_directory), current_status};
 }
 
@@ -793,8 +918,9 @@ std::optional<struct stat> inspect_managed_component(
             metadata_error, component_index);
 }
 
-PreparedDirectoryState prepare_directory_state(
-        const DirectoryRequest& request, const TestOverrides* overrides) {
+std::optional<PreparedDirectoryState> prepare_directory_state(
+        const DirectoryRequest& request, const TestOverrides* overrides,
+        MissingManagedComponentPolicy missing_component_policy) {
     validate_creation_boundary(request);
     const std::uintmax_t expected_effective_user =
             effective_user(overrides);
@@ -817,6 +943,12 @@ PreparedDirectoryState prepare_directory_state(
         const std::string& leaf_name =
                 request.creation_boundary
                         .creatable_components[component_index];
+        const bool is_final_component =
+                component_index + 1 ==
+                request.creation_boundary.creatable_components.size();
+        const bool requires_private_mode =
+                is_final_component &&
+                request.final_directory_requires_private_mode;
         current_path /= leaf_name;
         std::optional<struct stat> observed_status =
                 inspect_managed_component(
@@ -824,6 +956,39 @@ PreparedDirectoryState prepare_directory_state(
                         component_index, overrides);
         bool was_created = false;
         bool appeared_concurrently = false;
+
+        if(!observed_status.has_value() &&
+           missing_component_policy ==
+                   MissingManagedComponentPolicy::ReturnAbsent) {
+#ifdef MOGUET_TEST_XDG_DIRECTORY_SAFETY_HOOKS
+            emit_test_event(
+                    overrides,
+                    DirectorySafetyTestEvent::BeforeAbsentLineageRevalidation,
+                    request.directory_kind, component_index,
+                    current_path);
+#else
+            emit_test_event(
+                    overrides, request.directory_kind,
+                    component_index, current_path);
+#endif
+            require_retained_lineage_unchanged(
+                    retained_lineage, request,
+                    expected_effective_user, overrides);
+            observed_status = inspect_managed_component(
+                    current_directory.get(), leaf_name, request,
+                    component_index, overrides);
+            if(!observed_status.has_value()) {
+                // A finite second lineage proof distinguishes stable
+                // absence from an observed authority replacement. A
+                // non-cooperating same-euid process can still race the
+                // final check; complete pathname linearizability is not
+                // part of this boundary.
+                require_retained_lineage_unchanged(
+                        retained_lineage, request,
+                        expected_effective_user, overrides);
+                return std::nullopt;
+            }
+        }
 
         if(!observed_status.has_value()) {
 #ifdef MOGUET_TEST_XDG_DIRECTORY_SAFETY_HOOKS
@@ -901,7 +1066,8 @@ PreparedDirectoryState prepare_directory_state(
         validate_directory_security(
                 observed_status.value(), request.directory_kind,
                 PreparationStage::ComponentValidation, component_index,
-                expected_effective_user, overrides, was_created);
+                expected_effective_user, overrides, was_created,
+                requires_private_mode);
 
         OpenedDirectory opened = open_observed_directory(
                 current_directory.get(), leaf_name,
@@ -909,16 +1075,13 @@ PreparedDirectoryState prepare_directory_state(
                 PreparationStage::ComponentOpen,
                 PreparationStage::ComponentValidation, component_index,
                 expected_effective_user, overrides, true, true,
-                was_created);
+                was_created, requires_private_mode);
         retained_lineage.push_back(retain_directory_identity(
                 opened.descriptor.get(), leaf_name, opened.status,
                 request.directory_kind,
                 PreparationStage::ComponentValidation,
-                component_index, true));
+                component_index, true, requires_private_mode));
 
-        const bool is_final_component =
-                component_index + 1 ==
-                request.creation_boundary.creatable_components.size();
         if(is_final_component) {
             final_parent = std::move(current_directory);
             final_status = opened.status;
@@ -927,11 +1090,11 @@ PreparedDirectoryState prepare_directory_state(
         current_directory = std::move(opened.descriptor);
     }
 
-    return PreparedDirectoryState{
+    return std::optional<PreparedDirectoryState>{PreparedDirectoryState{
             std::move(final_parent), std::move(current_directory),
             request.creation_boundary.creatable_components.back(),
             final_status, final_observed_owner,
-            created_component_count, std::move(retained_lineage)};
+            created_component_count, std::move(retained_lineage)}};
 }
 
 std::uintmax_t status_permissions(const struct stat& status) {
@@ -950,7 +1113,8 @@ DirectoryRequest make_request(const xdg_paths::ConfigPaths& paths) {
     return DirectoryRequest{
             xdg_paths::DirectoryKind::Config, paths.directory,
             paths.creation_boundary,
-            paths.config_file == paths.directory / "config.toml"};
+            paths.config_file == paths.directory / "config.toml",
+            false, false};
 }
 
 DirectoryRequest make_request(const xdg_paths::StatePaths& paths) {
@@ -961,13 +1125,27 @@ DirectoryRequest make_request(const xdg_paths::StatePaths& paths) {
     return DirectoryRequest{
             xdg_paths::DirectoryKind::State, paths.directory,
             paths.creation_boundary,
-            paths.default_log_file == expected_log_file};
+            paths.default_log_file == expected_log_file,
+            false, false};
 }
 
 DirectoryRequest make_request(const xdg_paths::CachePaths& paths) {
     return DirectoryRequest{
             xdg_paths::DirectoryKind::Cache, paths.directory,
-            paths.creation_boundary, true};
+            paths.creation_boundary, true, false, false};
+}
+
+DirectoryRequest make_request(
+        const xdg_paths::SourcePreferencePaths& paths) {
+    const fs::path expected_directory =
+            paths.creation_boundary.base_directory /
+            std::string(application_identity::XDG_IDENTITY) /
+            std::string(SOURCE_PREFERENCE_DIRECTORY_NAME);
+    return DirectoryRequest{
+            xdg_paths::DirectoryKind::Config, paths.directory,
+            paths.creation_boundary,
+            paths.directory == expected_directory,
+            true, true};
 }
 
 } // namespace
@@ -1021,11 +1199,9 @@ PreparedDirectory::~PreparedDirectory() noexcept {
 }
 
 struct DirectorySafetyAccess {
-    static PreparedDirectory prepare(
+    static PreparedDirectory adopt(
             const DirectoryRequest& request,
-            const TestOverrides* overrides) {
-        PreparedDirectoryState state =
-                prepare_directory_state(request, overrides);
+            PreparedDirectoryState state) {
         fs::path prepared_path = request.directory;
         std::vector<PreparedDirectory::RetainedDirectoryIdentity>
                 retained_lineage;
@@ -1039,7 +1215,8 @@ struct DirectorySafetyAccess {
                             status_inode(identity.status),
                             static_cast<std::uintmax_t>(
                                     identity.status.st_uid),
-                            identity.requires_security_validation});
+                            identity.requires_security_validation,
+                            identity.requires_private_mode});
         }
         for(std::size_t index = 0; index < retained_lineage.size(); ++index) {
             retained_lineage[index].descriptor =
@@ -1060,6 +1237,34 @@ struct DirectorySafetyAccess {
         prepared.require_unchanged_identity();
         return prepared;
     }
+
+    static PreparedDirectory prepare(
+            const DirectoryRequest& request,
+            const TestOverrides* overrides) {
+        std::optional<PreparedDirectoryState> state =
+                prepare_directory_state(
+                        request, overrides,
+                        MissingManagedComponentPolicy::Create);
+        if(!state.has_value()) {
+            throw_preparation_error(
+                    request.directory_kind,
+                    PreparationStage::ComponentCreation,
+                    PreparationErrorCode::CreationFailed);
+        }
+        return adopt(request, std::move(state).value());
+    }
+
+    static std::optional<PreparedDirectory> open_existing(
+            const DirectoryRequest& request,
+            const TestOverrides* overrides) {
+        std::optional<PreparedDirectoryState> state =
+                prepare_directory_state(
+                        request, overrides,
+                        MissingManagedComponentPolicy::ReturnAbsent);
+        if(!state.has_value()) return std::nullopt;
+        return std::optional<PreparedDirectory>{
+                adopt(request, std::move(state).value())};
+    }
 };
 
 void PreparedDirectory::require_unchanged_identity() const {
@@ -1072,7 +1277,8 @@ void PreparedDirectory::require_unchanged_identity() const {
 
     const auto validate_current_security =
             [this](const struct stat& status,
-                   std::uintmax_t expected_owner) {
+                   std::uintmax_t expected_owner,
+                   bool requires_private_mode) {
         if(static_cast<std::uintmax_t>(status.st_uid) != expected_owner) {
             throw_preparation_error(
                     directory_kind_,
@@ -1082,7 +1288,9 @@ void PreparedDirectory::require_unchanged_identity() const {
         const mode_t permissions = status.st_mode & 07777;
         if((permissions & REQUIRED_OWNER_PERMISSIONS) !=
                    REQUIRED_OWNER_PERMISSIONS ||
-           (permissions & FORBIDDEN_WRITE_PERMISSIONS) != 0) {
+           (permissions & FORBIDDEN_WRITE_PERMISSIONS) != 0 ||
+           (requires_private_mode &&
+            permissions != NEW_DIRECTORY_MODE)) {
             throw_preparation_error(
                     directory_kind_,
                     PreparationStage::DirectoryRevalidation,
@@ -1153,10 +1361,12 @@ void PreparedDirectory::require_unchanged_identity() const {
         if(identity.requires_security_validation) {
             validate_current_security(
                     retained_lineage_status,
-                    identity.filesystem_owner);
+                    identity.filesystem_owner,
+                    identity.requires_private_mode);
             validate_current_security(
                     named_lineage_status,
-                    identity.filesystem_owner);
+                    identity.filesystem_owner,
+                    identity.requires_private_mode);
         }
     }
 
@@ -1216,8 +1426,12 @@ void PreparedDirectory::require_unchanged_identity() const {
                 PreparationErrorCode::ConcurrentReplacement);
     }
 
-    validate_current_security(retained_status, filesystem_owner_);
-    validate_current_security(named_status, filesystem_owner_);
+    validate_current_security(
+            retained_status, filesystem_owner_,
+            lineage_directory.requires_private_mode);
+    validate_current_security(
+            named_status, filesystem_owner_,
+            lineage_directory.requires_private_mode);
 }
 
 PreparedDirectory prepare_directory(const xdg_paths::ConfigPaths& paths) {
@@ -1233,6 +1447,18 @@ PreparedDirectory prepare_directory(const xdg_paths::StatePaths& paths) {
 PreparedDirectory prepare_directory(const xdg_paths::CachePaths& paths) {
     const DirectoryRequest request = make_request(paths);
     return DirectorySafetyAccess::prepare(request, nullptr);
+}
+
+PreparedDirectory prepare_directory(
+        const xdg_paths::SourcePreferencePaths& paths) {
+    const DirectoryRequest request = make_request(paths);
+    return DirectorySafetyAccess::prepare(request, nullptr);
+}
+
+std::optional<PreparedDirectory> open_existing_directory(
+        const xdg_paths::SourcePreferencePaths& paths) {
+    const DirectoryRequest request = make_request(paths);
+    return DirectorySafetyAccess::open_existing(request, nullptr);
 }
 
 #ifdef MOGUET_TEST_XDG_DIRECTORY_SAFETY_HOOKS
@@ -1252,6 +1478,19 @@ PreparedDirectory prepare_directory_for_test(
         const xdg_paths::CachePaths& paths,
         const DirectorySafetyTestOverrides& overrides) {
     return DirectorySafetyAccess::prepare(make_request(paths), &overrides);
+}
+
+PreparedDirectory prepare_directory_for_test(
+        const xdg_paths::SourcePreferencePaths& paths,
+        const DirectorySafetyTestOverrides& overrides) {
+    return DirectorySafetyAccess::prepare(make_request(paths), &overrides);
+}
+
+std::optional<PreparedDirectory> open_existing_directory_for_test(
+        const xdg_paths::SourcePreferencePaths& paths,
+        const DirectorySafetyTestOverrides& overrides) {
+    return DirectorySafetyAccess::open_existing(
+            make_request(paths), &overrides);
 }
 #endif
 

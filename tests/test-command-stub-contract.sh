@@ -92,6 +92,16 @@ expect_rejected 'unexpected sync pacman option through sudo' \
 expect_rejected 'unexpected source-maintenance pacman option through sudo' \
     "$repo_root/tests/stubs/source-maintenance/sudo" \
         pacman -S --unexpected target
+expect_rejected 'filesystem touch through generic sudo' \
+    "$repo_root/tests/stubs/sudo" touch "$tmp_dir/preference"
+expect_rejected 'filesystem tee through generic sudo' \
+    "$repo_root/tests/stubs/sudo" tee -a "$tmp_dir/preference"
+expect_rejected 'filesystem install through source-maintenance sudo' \
+    "$repo_root/tests/stubs/source-maintenance/sudo" \
+        install -Dm644 -- /dev/stdin "$tmp_dir/preference"
+expect_rejected 'filesystem rm through source-maintenance sudo' \
+    "$repo_root/tests/stubs/source-maintenance/sudo" \
+        rm -f "$tmp_dir/preference"
 expect_rejected 'unexpected read-only pacman option' \
     "$repo_root/tests/stubs/pacman" -Si target --unexpected
 expect_rejected 'unexpected sync read-only pacman option' \

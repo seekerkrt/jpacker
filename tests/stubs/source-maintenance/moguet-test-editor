@@ -78,4 +78,12 @@ if [ "$replace_target" -eq 1 ]; then
     esac
 fi
 
+concurrent_destination=${MOGUET_TEST_SOURCE_MAINTENANCE_EDITOR_CONCURRENT_DESTINATION:-}
+if [ -n "$concurrent_destination" ]; then
+    concurrent_contents=${MOGUET_TEST_SOURCE_MAINTENANCE_EDITOR_CONCURRENT_CONTENTS:-}
+    /usr/bin/rm -f -- "$concurrent_destination"
+    printf '%s\n' "$concurrent_contents" > "$concurrent_destination"
+    /usr/bin/chmod 600 -- "$concurrent_destination"
+fi
+
 exit 0

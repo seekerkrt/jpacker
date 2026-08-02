@@ -280,10 +280,22 @@ bool is_known_preparation_reason(AurUpdatePreparationReason reason) noexcept {
 bool is_known_source_preference_failure_kind(
         SourcePreferenceFailureKind kind) noexcept {
     switch(kind) {
+    case SourcePreferenceFailureKind::AuthorityUnavailable:
+    case SourcePreferenceFailureKind::DirectoryEnumerationFailed:
+    case SourcePreferenceFailureKind::InvalidEntryName:
     case SourcePreferenceFailureKind::StatusUnavailable:
     case SourcePreferenceFailureKind::UnsupportedFileType:
+    case SourcePreferenceFailureKind::OwnershipMismatch:
+    case SourcePreferenceFailureKind::UnsafePermissions:
     case SourcePreferenceFailureKind::OpenFailed:
+    case SourcePreferenceFailureKind::LockFailed:
     case SourcePreferenceFailureKind::ReadFailed:
+    case SourcePreferenceFailureKind::WriteFailed:
+    case SourcePreferenceFailureKind::SyncFailed:
+    case SourcePreferenceFailureKind::RenameFailed:
+    case SourcePreferenceFailureKind::RemoveFailed:
+    case SourcePreferenceFailureKind::ConcurrentReplacement:
+    case SourcePreferenceFailureKind::CloseFailed:
         return true;
     }
     return false;

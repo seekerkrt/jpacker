@@ -55,7 +55,7 @@ transaction、互換性、project stance等の設計判断は対応する正式d
 - makepkgのPKGBUILD評価、build、package artifact生成の意味を隠しすぎない。
 - git操作はsource取得に必要な範囲へ限定し、fetchとworking tree mutationを分ける。
 - AUR metadata、dependency、provider、conflictの事実と、Moguetが作るplanを区別する。
-- `/etc/jpacker/package.build/`はsource-build preferenceの保存先であり、意味やlayoutの変更を互換性変更として扱う。
+- `${XDG_CONFIG_HOME:-$HOME/.config}/moguet/source-build.d/`はsource-build preferenceの唯一のruntime authorityであり、意味やlayoutの変更を互換性変更として扱う。`/etc/jpacker`へのfallback、merge、自動migrationを追加しない。
 
 ## External command・CLI出力
 

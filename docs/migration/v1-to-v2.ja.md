@@ -20,9 +20,10 @@ jpacker v1 dataを調査・backup
 ```
 
 Moguetは`/etc/jpacker/jpacker.conf`を通常config layerとして使用しません。
-`/etc/jpacker`を自動copy・rewrite・deleteせず、root-owned dataを受け取るuserを
-推測しません。既存の`/etc/jpacker/package.build/` source-preference storeは後述する
-別のcompatibility境界であり、TOML configではありません。
+`/etc/jpacker`を自動copy・rewrite・merge・deleteせず、root-owned dataを受け取るuserを
+推測しません。v2.0.1以降、`/etc/jpacker/package.build/`も手動migration専用のlegacy
+inputです。Moguetはruntimeでこれをread / writeしません。v2.0.0のtag、Release、release
+notesは変更しないhistorical artifactとして維持します。
 
 <!-- parity:preparation -->
 ## 始める前に
@@ -113,9 +114,9 @@ backup時にこれらを`/etc/jpacker`とmergeしないでください。
 
 検証済みMoguetとjpacker v1.16.0のpayloadに共通fileはありません。可能ならMoguetの確認中は
 jpackerをinstallしたまま保持してください。Moguetをremoveして変更前の`jpacker` commandへ
-戻れるため、最短のrollbackになります。ただし両helperは既存
-`/etc/jpacker/package.build/` production preference storeを使用するため、mutating
-operationを同時実行しないでください。
+戻れるため、最短のrollbackになります。source-preference storeは別々ですが、両helperが
+同じsystem package toolを呼ぶ可能性があるため、package-mutating operationを同時実行しないで
+ください。
 
 Moguetの検証後、必要ならinstallに使ったpackage managerでjpackerを明示的にremoveできます。
 通常のpacman-managed installでは、慎重な形式は次です。
@@ -146,8 +147,8 @@ jpacker interfaceを提供するという意味ではありません。Moguet v2
 transitionの代わりにdevelopment treeの`make install`を旧packageへ重ねないでください。
 
 package installは`/etc/moguet`、user XDG config file、user XDG state / cache directoryを
-作成してはいけません。Moguetは実際のcommandが必要とするuser directoryだけを、その
-実行userのXDG context内へ作成します。
+作成せず、source-preference directoryも作成しません。commandは、そのoperationが実際に
+必要とするuser directoryだけを、実行user自身のXDG context内へ作成します。
 
 <!-- parity:configuration -->
 ## Configを手動移行する
@@ -199,30 +200,77 @@ external mutation前に失敗します。broken fileをrewriteしたり、黙っ
 <!-- parity:legacy-data -->
 ## Legacy preferenceとdataを扱う
 
-`/etc/jpacker`全体をMoguet XDG directoryへcopyしないでください。この実装では
-`/etc/jpacker/package.build/`がsource-build preference storeとして残り、source operationが
-直接読みます。そのfileはTOML config tableではありません。
-`moguet add-src <pkg> [V=K]` interfaceも同じstoreへ書くため、既存entryをmigration手順として
-再登録しないでください。storeをbackupして変更せずに保持します。これはproduction
-compatibility境界ですが、Moguet packageのpayload / ownershipではありません。Moguetの
-installer / uninstallerはこのstoreをcreate、copy、rewrite、removeしません。
+Moguetのcanonicalなsource-build preference entryは次です。
+
+```text
+${XDG_CONFIG_HOME:-$HOME/.config}/moguet/source-build.d/<package-name>
+```
+
+`XDG_CONFIG_HOME`がunsetまたはemptyなら`$HOME/.config`へfallbackします。明示した
+`XDG_CONFIG_HOME`はabsoluteで、安全かつ既存のdirectoryでなければならず、relativeまたは
+unsafeな値はfail-closedで拒否します。fallback pathは最初のwriteで必要になったときだけ
+安全に作成できます。rootでCLIを実行した場合も実行user自身のXDG contextを使い、
+`SUDO_USER`から別userを推測しません。
+
+全source-preference commandとbuild / upgrade readerはこのauthorityだけを使います。read、
+`moguet list-src`、missingな`moguet del-src` / `moguet revert`は、missingなsource-preference
+storeを作成しません。
+storageを最初に必要とする`moguet add-src <pkg> [V=K]`または
+`moguet edit-src <pkg>`だけがsource-preference operationとしてmanagedな
+`moguet/source-build.d`階層をmode `0700`で作成し、
+entryはmode `0600`にします。preferenceのfilesystem操作は`sudo`を使いません。
+`moguet revert`は別責務であるpacman transactionに限り`sudo`を使うことがあります。
+
+`/etc/jpacker/package.build/`は手動migration専用のlegacy inputとして扱います。Moguetは
+runtimeでread、fallback、merge、rewrite、deleteせず、legacy entryをXDG storeへ自動copy
+しません。package installer / reinstaller / uninstallerはlegacyとcanonicalの両entryを
+保持し、user XDG directoryをcreate / removeしません。
+
+理解した1 packageを、明示的に選んだ1 userについて順に移行します。
+
+1. 検証済みlegacy backupを保持し、legacy entryを変更せずに確認します。
+2. 対象userとしてcanonical destination entryがabsentであることを確認します。symlinkや
+   unexpected objectはabsent entryではなく、overwriteせずに調査します。
+3. `XDG_CONFIG_HOME`を明示する場合、Moguetを実行する前にbase directoryを別途作成・検証
+   します。relativeまたはshared directoryを指定しないでください。
+4. 理解したassignmentだけを、`sudo`なしで次のどちらかから再入力します。
+
+   ```bash
+   moguet add-src <package-name> [V=K ...]
+   moguet edit-src <package-name>
+   ```
+
+5. そのpackageを移行済みと判断する前に、結果のsnapshot全体を検証します。
+
+   ```bash
+   moguet list-src
+   ```
+
+bulk loopを自動化せず、canonical entryをoverwriteせず、未確認の値をmergeしないでください。
+package nameはdirectory作成やeditor実行より前に検証されます。missing store / entryだけが
+「absent」です。invalid entry name、symlink、non-regular file、ownership / mode違反、
+permission / I/O error、検出したraceはhard errorです。`moguet list-src`は何も出力する前に
+snapshot全体を検証するため、不正entryを含むpartial listingはtrusted resultになりません。
 
 Moguetは次を自動実行しません。
 
 - `/etc/jpacker/jpacker.conf`をconfig layerとして読む
 - `/etc/jpacker`を1人以上のuser homeへcopyする
-- legacy fileをdelete / rewriteする
+- legacy source-preference fileをread / merge / delete / rewriteする
 - `/etc/moguet`を作成・参照する
 - `LOGFILE`、`RMDEPS`、arbitrary editor command、credential、shell fragment、unknown
   uppercase keyを移行する
 - root ownership、`sudo`、`SUDO_USER`から移行先userを推測する
 
-config、state、cacheはv2で別の責務を持ちます。
+config、source preference、state、cacheはv2で別の責務を持ちます。
 
 ```text
-config: $XDG_CONFIG_HOME/moguet/  (fallback ~/.config/moguet/)
-state:  $XDG_STATE_HOME/moguet/   (fallback ~/.local/state/moguet/)
-cache:  $XDG_CACHE_HOME/moguet/   (fallback ~/.cache/moguet/)
+config:             $XDG_CONFIG_HOME/moguet/config.toml
+source preferences: $XDG_CONFIG_HOME/moguet/source-build.d/
+state:              $XDG_STATE_HOME/moguet/  (fallback ~/.local/state/moguet/)
+cache:              $XDG_CACHE_HOME/moguet/  (fallback ~/.cache/moguet/)
+
+config/source-preference fallback: ~/.config/moguet/
 ```
 
 cacheは再生成可能でありbackup先ではありません。Moguet uninstallをuser config、state、
@@ -276,9 +324,14 @@ systemがman page cacheを使う場合は、通常のpackage hookまたはadmini
 `--edit`、`--diff`、`--build-mode=normal|rebuild|clean`等のfinal optionを提示することを
 確認してください。
 
-最後に、意図したuserのresolved XDG pathを確認します。help / version確認だけではconfig、
-state、cache directoryは作られません。operationのexternal commandとpackage effectを
-reviewしてから実行testへ進んでください。
+最後に、意図したuserのresolved XDG pathを確認します。help / version確認はXDG consumer
+directoryを作りません。`moguet list-src`と、read / build / upgrade経路による
+source-preference readは、missingなsource-preference storeを作りません。ただしこれらは
+それ以外の点では通常commandです。既存のstate logging contractにより、`moguet list-src`を
+含む通常commandはstate directoryとlogを作成することがあります。preferenceを移行した場合、
+managed directoryがmode `0700`、entryがmode `0600`であること、legacy entryが未変更であること、
+完全な`moguet list-src`出力が意図したpackageと一致することを確認します。operationのexternal
+commandとpackage effectをreviewしてから実行testへ進んでください。
 
 <!-- parity:rollback -->
 ## jpacker v1.16.0へrollbackする
@@ -286,7 +339,8 @@ reviewしてから実行testへ進んでください。
 rollbackは明示的なpackage transitionであり、自動transaction rollbackではありません。
 
 1. Moguetを停止し、activeなpackage operationを完了します。
-2. userのMoguet configとstateをbackupします。cacheは診断に必要な場合だけ保持します。
+2. userのMoguet config、source preference、stateをbackupします。cacheは診断に必要な場合
+   だけ保持します。
 3. installに使ったpackage managerでMoguet packageをremoveします。package removalの一部
    としてuser XDG directoryを削除しません。
 4. jpackerを保持していた場合はpackage fileとcommandが変わっていないことを確認します。
@@ -297,9 +351,10 @@ rollbackは明示的なpackage transitionであり、自動transaction rollback�
 6. package transaction前に`jpacker --version`、v1 man / completion、read-only operationを
    検証します。
 
-MoguetのXDG dataをjpacker v1は解釈しないため、後の再試行用に保持できます。完了済み
-pacman transactionはhelperを切り替えても戻りません。helper rollbackがinstalled packageを
-変更したと仮定せず、実際のpackage database stateを比較してください。
+MoguetのXDG dataをjpacker v1は解釈しないため、後の再試行用に保持できます。
+`/etc/jpacker/package.build/`へ自動同期されることもありません。完了済みpacman transactionは
+helperを切り替えても戻りません。helper rollbackがinstalled packageを変更したと仮定せず、
+実際のpackage database stateを比較してください。
 
 <!-- parity:maintenance -->
 ## v1 maintenanceとrepository remote

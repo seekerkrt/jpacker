@@ -69,19 +69,21 @@ setup_case() {
     case_dir=$tmp_dir/cases/$case_name
     command_log=$case_dir/commands.log
     output_file=$case_dir/output
+    source_preference_dir=$case_dir/xdg-config/moguet/source-build.d
 
     mkdir -p \
-        "$case_dir/home" "$case_dir/xdg-state" "$case_dir/xdg-cache" \
-        "$case_dir/package.build"
+        "$case_dir/home" "$case_dir/xdg-config" \
+        "$case_dir/xdg-state" "$case_dir/xdg-cache"
+    chmod 0700 "$case_dir/xdg-config"
     : > "$command_log"
     : > "$normal_request_log"
     : > "$schema_request_log"
     export HOME=$case_dir/home
+    export XDG_CONFIG_HOME=$case_dir/xdg-config
     export XDG_STATE_HOME=$case_dir/xdg-state
     export XDG_CACHE_HOME=$case_dir/xdg-cache
     export MOGUET_TEST_AUR_RPC_BASE_URL=$normal_rpc_url
     export MOGUET_TEST_COMMAND_LOG=$command_log
-    export MOGUET_TEST_PACKAGE_BUILD_DIR=$case_dir/package.build
     export MOGUET_TEST_PACMAN_EXIT_CODE=1
     export MOGUET_TEST_SUDO_EXIT_CODE=0
     export MOGUET_TEST_MAKEPKG_EXIT_CODE=0
@@ -303,13 +305,16 @@ assert_separated_source_install() {
 
 prepare_source_preference() {
     package=$1
-    printf 'CFLAGS=-Oneeded-contract-test\n' > "$MOGUET_TEST_PACKAGE_BUILD_DIR/$package"
+    mkdir -p "$source_preference_dir"
+    chmod 0700 "$source_preference_dir"
+    printf 'CFLAGS=-Oneeded-contract-test\n' > "$source_preference_dir/$package"
+    chmod 0600 "$source_preference_dir/$package"
 }
 
 assert_preference_unchanged() {
     package=$1
     expected_checksum=$2
-    preference=$MOGUET_TEST_PACKAGE_BUILD_DIR/$package
+    preference=$source_preference_dir/$package
     if [ ! -f "$preference" ] || [ "$(cksum "$preference")" != "$expected_checksum" ]; then
         echo "source-build preference changed unexpectedly: $preference" >&2
         exit 1
@@ -396,7 +401,7 @@ assert_normal_request_log_nonempty
 
 setup_case preferred-official
 prepare_source_preference clean-root
-preference_checksum=$(cksum "$MOGUET_TEST_PACKAGE_BUILD_DIR/clean-root")
+preference_checksum=$(cksum "$source_preference_dir/clean-root")
 export MOGUET_TEST_PACMAN_REPO_PACKAGES=clean-root
 run_ok --noedit --nodiff -S --needed clean-root
 assert_command "git clone https://gitlab.archlinux.org/archlinux/packaging/packages/clean-root.git clean-root"
@@ -408,7 +413,7 @@ assert_normal_request_log_empty
 
 setup_case preferred-official-repo-override
 prepare_source_preference clean-root
-preference_checksum=$(cksum "$MOGUET_TEST_PACKAGE_BUILD_DIR/clean-root")
+preference_checksum=$(cksum "$source_preference_dir/clean-root")
 run_ok -S --repo --needed clean-root
 assert_only_command "sudo pacman -S --needed clean-root"
 assert_no_source_build_commands
@@ -664,7 +669,7 @@ assert_normal_request_log_empty
 
 setup_case generic-system-upgrade-separation
 prepare_source_preference clean-root
-preference_checksum=$(cksum "$MOGUET_TEST_PACKAGE_BUILD_DIR/clean-root")
+preference_checksum=$(cksum "$source_preference_dir/clean-root")
 run_ok -Syu --needed
 assert_only_command "sudo pacman -Syu --needed"
 assert_no_source_build_commands

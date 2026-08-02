@@ -76,6 +76,11 @@ struct ConfigPaths {
     DirectoryCreationBoundary creation_boundary;
 };
 
+struct SourcePreferencePaths {
+    std::filesystem::path directory;
+    DirectoryCreationBoundary creation_boundary;
+};
+
 struct StatePaths {
     std::filesystem::path directory;
     std::filesystem::path default_log_file;
@@ -100,6 +105,11 @@ ResolvedPaths resolve(const EnvironmentSnapshot& environment);
 // 取り込まず、config pathだけを解決するpure resolver。
 ConfigPaths resolve_config(const EnvironmentSnapshot& environment);
 
+// Source-build preference consumerがconfig authorityだけから
+// moguet/source-build.dを解決するpure resolver。
+SourcePreferencePaths resolve_source_preference(
+        const EnvironmentSnapshot& environment);
+
 // State log consumerが無関係なconfig/cache environmentをauthorityへ
 // 取り込まず、state pathだけを解決するpure resolver。
 StatePaths resolve_state(const EnvironmentSnapshot& environment);
@@ -114,6 +124,9 @@ ResolvedPaths resolve_process_environment();
 
 // Config consumer専用adapter。XDG_CONFIG_HOME / HOMEだけをsnapshot化する。
 ConfigPaths resolve_config_process_environment();
+
+// Source-build preference専用adapter。XDG_CONFIG_HOME / HOMEだけをsnapshot化する。
+SourcePreferencePaths resolve_source_preference_process_environment();
 
 // Default state log専用adapter。XDG_STATE_HOME / HOMEだけをsnapshot化する。
 StatePaths resolve_state_process_environment();

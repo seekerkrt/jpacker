@@ -157,9 +157,12 @@ SourcePreferenceLoaded loaded_preference(
             SourceEnvironmentAssignment{
                     "PACKAGE_NAME", package_name});
     return SourcePreferenceLoaded{
-            fs::path("/preferences") / package_name,
-            std::move(environment),
-            std::move(warnings)};
+            .entry_path = fs::path("/preferences") / package_name,
+            .environment = std::move(environment),
+            .warnings = std::move(warnings),
+            .raw_contents = {},
+            .identity = std::nullopt,
+    };
 }
 
 InstalledPackageMetadata installed_package(
@@ -529,44 +532,25 @@ void test_source_options_propagate_independently() {
     }
 }
 
-void test_nonregular_entries_preserve_original_preference_index() {
+void test_nonregular_preference_blocks_before_mutation() {
     stub::reset();
     SourcePreferenceDirectorySnapshot directory;
     directory.root_exists = true;
     directory.entries = {
             SourcePreferenceEntrySnapshot{
                     3, "/preferences/not-a-file", "not-a-file", false},
-            SourcePreferenceEntrySnapshot{
-                    8, "/preferences/source", "source", true},
     };
     stub::set_preference_directory(std::move(directory));
-    stub::enqueue_preference_result(
-            "source", loaded_preference("source"));
-    stub::enqueue_metadata_session(metadata_session(
-            {"source"}, LocalPackageVersionSnapshot{{"core", "1.0-1"}}));
-    AppConfig config = full_option_config();
-    SystemSourceUpgradePreparation preparation =
-            prepare_system_source_upgrade(config, OBSERVER);
-    expect(std::holds_alternative<PreparedSystemSourceUpgrade>(preparation),
-           "Non-regular preference entry blocked preparation");
-    PreparedSystemSourceUpgrade prepared = std::move(
-            std::get<PreparedSystemSourceUpgrade>(preparation));
-    const SystemSourceUpgradePreparedSnapshot* snapshot = prepared.snapshot();
-    expect(snapshot != nullptr && snapshot->registered_sources.size() == 1 &&
-                   snapshot->registered_sources.front().
-                           original_preference_index == 8,
-           "Preparation renumbered original preference index");
-    enqueue_post_metadata({"source"});
-    stub::enqueue_source_success(source_execution(
-            SourceBuildExecutionStatus::UpToDate));
-
-    SystemSourceUpgradeResult result =
-            execute_prepared_system_source_upgrade(
-                    std::move(prepared), config, OBSERVER);
-    expect(result.registered_source_results.size() == 1 &&
-                   result.registered_source_results.front().
-                           original_preference_index == 8,
-           "Result renumbered original preference index");
+    SystemSourceUpgradeResult result = take_blocked(
+            prepare_system_source_upgrade(full_option_config(), OBSERVER));
+    expect(
+            result.status == SystemSourceUpgradeStatus::BlockedBeforeMutation &&
+                    result.failure_diagnostic().has_value() &&
+                    result.failure_diagnostic()->find("non-regular") !=
+                            std::string::npos,
+            "Non-regular preference entry was not a hard preparation error");
+    expect(stub::system_commands().empty(),
+           "Non-regular preference entry reached system mutation");
     stub::require_script_consumed();
 }
 
@@ -1245,42 +1229,26 @@ void test_update_status_unknown_is_incomplete_but_continues() {
     stub::require_script_consumed();
 }
 
-void test_invalid_preference_is_unsupported_and_continues() {
+void test_invalid_preference_name_blocks_before_mutation() {
     stub::reset();
-    const std::vector<std::string> entries = {"bad name", "valid"};
-    stub::set_preference_directory(preference_directory(entries));
-    stub::enqueue_preference_result("valid", loaded_preference("valid"));
-    stub::enqueue_metadata_session(metadata_session(
-            {"valid"}, LocalPackageVersionSnapshot{{"core", "1.0-1"}}));
-    AppConfig config = full_option_config();
-    SystemSourceUpgradePreparation preparation =
-            prepare_system_source_upgrade(config, OBSERVER);
+    stub::set_preference_directory(preference_directory({"bad name", "valid"}));
+    SystemSourceUpgradeResult result = take_blocked(
+            prepare_system_source_upgrade(full_option_config(), OBSERVER));
     expect(
-            std::holds_alternative<PreparedSystemSourceUpgrade>(preparation),
-            "Invalid filename blocked system preparation");
-    PreparedSystemSourceUpgrade prepared = std::move(
-            std::get<PreparedSystemSourceUpgrade>(preparation));
-    enqueue_post_metadata({"valid"});
-    stub::enqueue_source_success(source_execution(
-            SourceBuildExecutionStatus::Installed));
-
-    SystemSourceUpgradeResult result =
-            execute_prepared_system_source_upgrade(
-                    std::move(prepared), config, OBSERVER);
-    expect_source_order(result, entries);
+            result.status == SystemSourceUpgradeStatus::BlockedBeforeMutation &&
+                    result.failure_diagnostic().has_value() &&
+                    result.failure_diagnostic()->find("invalid entry name") !=
+                            std::string::npos,
+            "Invalid preference name was not a hard preparation error");
     expect(
-            result.registered_source_results[0].status ==
-                    RegisteredSourceUpgradeStatus::Unsupported &&
-            result.registered_source_results[1].status ==
-                    RegisteredSourceUpgradeStatus::Updated,
-            "Invalid preference continue policy changed");
-    expect(!result.is_success(),
-           "Unsupported preference was rounded to success");
-    expect(stub::source_execution_calls().size() == 1,
-           "Invalid preference changed valid source execution count");
-    expect(event_position(stub::EventKind::Progress, "invalid:bad name") <
-                   event_position(stub::EventKind::SourceExecution, "valid"),
-           "Invalid warning moved after later source mutation");
+            std::none_of(
+                    stub::events().begin(), stub::events().end(),
+                    [](const stub::Event& event) {
+                        return event.kind == stub::EventKind::StrictPreferenceRead;
+                    }),
+            "Invalid preference name allowed a later preference read");
+    expect(stub::system_commands().empty(),
+           "Invalid preference name reached system mutation");
     stub::require_script_consumed();
 }
 
@@ -1428,8 +1396,8 @@ int main() {
                 test_source_options_propagate_independently,
                 completed_cases);
         run_case(
-                "non-regular entries preserve original preference index",
-                test_nonregular_entries_preserve_original_preference_index,
+                "non-regular preference blocks before mutation",
+                test_nonregular_preference_blocks_before_mutation,
                 completed_cases);
         run_case(
                 "source no-change and aggregate no-change",
@@ -1488,8 +1456,8 @@ int main() {
                 test_update_status_unknown_is_incomplete_but_continues,
                 completed_cases);
         run_case(
-                "invalid preference is Unsupported and continues",
-                test_invalid_preference_is_unsupported_and_continues,
+                "invalid preference name blocks before mutation",
+                test_invalid_preference_name_blocks_before_mutation,
                 completed_cases);
         run_case(
                 "prepared capability replay is rejected",

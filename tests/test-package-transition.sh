@@ -46,6 +46,14 @@ assert_text_file() {
         fail "$text_path changed unexpectedly"
 }
 
+assert_mode() {
+    mode_path=$1
+    expected_mode=$2
+    actual_mode=$(stat -c '%a' "$mode_path")
+    [ "$actual_mode" = "$expected_mode" ] ||
+        fail "$mode_path has mode $actual_mode; expected $expected_mode"
+}
+
 write_regular_manifest() {
     manifest_root=$1
     manifest_output=$2
@@ -577,9 +585,12 @@ bsdtar -xf "$v1_package_archive" -C "$coinstall_root" etc usr
 modified_legacy_config='NOEDIT=true
 NODIFF=true'
 legacy_preference='CFLAGS=-O3 -march=native'
+coinstall_config_dir=$coinstall_root/user-home/.config/moguet
+coinstall_source_preference_dir=$coinstall_config_dir/source-build.d
+coinstall_source_preference=$coinstall_source_preference_dir/fastfetch
 mkdir -p \
     "$coinstall_root/etc/jpacker/package.build" \
-    "$coinstall_root/user-home/.config/moguet" \
+    "$coinstall_config_dir" \
     "$coinstall_root/user-home/.local/state/moguet" \
     "$coinstall_root/user-home/.cache/moguet" \
     "$coinstall_root/usr/share/doc/moguet" \
@@ -591,7 +602,10 @@ printf '%s\n' "$legacy_preference" \
 printf '%s\n' 'legacy foreign data' \
     >"$coinstall_root/etc/jpacker/foreign-file.keep"
 printf '%s\n' 'schema_version = 1' \
-    >"$coinstall_root/user-home/.config/moguet/config.toml"
+    >"$coinstall_config_dir/config.toml"
+install -d -m700 "$coinstall_source_preference_dir"
+install -m600 /dev/null "$coinstall_source_preference"
+printf '%s\n' 'CFLAGS=-O2 -pipe' >"$coinstall_source_preference"
 printf '%s\n' 'persistent state' \
     >"$coinstall_root/user-home/.local/state/moguet/state.keep"
 printf '%s\n' 'reproducible cache fixture' \
@@ -618,20 +632,28 @@ assert_text_file "$coinstall_root/etc/jpacker/jpacker.conf" \
     "$modified_legacy_config"
 assert_text_file "$coinstall_root/etc/jpacker/package.build/fastfetch" \
     "$legacy_preference"
+assert_text_file "$coinstall_source_preference" 'CFLAGS=-O2 -pipe'
+assert_mode "$coinstall_source_preference_dir" 700
+assert_mode "$coinstall_source_preference" 600
 
 # Reinstalling the same archive restores only its exact payload and preserves
 # the v1 package, legacy data, user XDG data, and foreign files byte-for-byte.
 bsdtar -xf "$v2_package_archive" -C "$coinstall_root" usr
 assert_snapshot_matches "$coinstall_root" "$coinstall_baseline"
 assert_manifest_files_match "$v2_archive_root" "$coinstall_root" "$v2_manifest"
+assert_mode "$coinstall_source_preference_dir" 700
+assert_mode "$coinstall_source_preference" 600
 
 # Removing v1 follows its .PKGINFO backup contract: a modified package-owned
 # config becomes .pacsave, while runtime-managed and foreign legacy data stays.
 mkdir -p "$transition_root"
 bsdtar -xf "$v1_package_archive" -C "$transition_root" etc usr
+transition_config_dir=$transition_root/user-home/.config/moguet
+transition_source_preference_dir=$transition_config_dir/source-build.d
+transition_source_preference=$transition_source_preference_dir/fastfetch
 mkdir -p \
     "$transition_root/etc/jpacker/package.build" \
-    "$transition_root/user-home/.config/moguet" \
+    "$transition_config_dir" \
     "$transition_root/user-home/.local/state/moguet" \
     "$transition_root/user-home/.cache/moguet"
 printf '%s\n' "$modified_legacy_config" \
@@ -641,7 +663,10 @@ printf '%s\n' "$legacy_preference" \
 printf '%s\n' 'legacy transition sentinel' \
     >"$transition_root/etc/jpacker/foreign-file.keep"
 printf '%s\n' 'schema_version = 1' \
-    >"$transition_root/user-home/.config/moguet/config.toml"
+    >"$transition_config_dir/config.toml"
+install -d -m700 "$transition_source_preference_dir"
+install -m600 /dev/null "$transition_source_preference"
+printf '%s\n' 'CFLAGS=-O2 -pipe' >"$transition_source_preference"
 printf '%s\n' 'persistent transition state' \
     >"$transition_root/user-home/.local/state/moguet/state.keep"
 printf '%s\n' 'transition cache fixture' \
@@ -670,12 +695,17 @@ assert_snapshot_exact "$transition_root/etc/jpacker" \
 assert_snapshot_exact "$transition_root/user-home" "$xdg_transition_snapshot"
 assert_text_file "$transition_root/etc/jpacker/jpacker.conf.pacsave" \
     "$modified_legacy_config"
+assert_text_file "$transition_source_preference" 'CFLAGS=-O2 -pipe'
+assert_mode "$transition_source_preference_dir" 700
+assert_mode "$transition_source_preference" 600
 
 bsdtar -xf "$v2_package_archive" -C "$transition_root" usr
 assert_manifest_files_match "$v2_archive_root" "$transition_root" "$v2_manifest"
 assert_snapshot_exact "$transition_root/etc/jpacker" \
     "$legacy_transition_snapshot"
 assert_snapshot_exact "$transition_root/user-home" "$xdg_transition_snapshot"
+assert_mode "$transition_source_preference_dir" 700
+assert_mode "$transition_source_preference" 600
 
 # Rollback removes only archive-owned Moguet files, reinstalls the trusted v1
 # archive, then manually restores its pacsaved config over the package default.
@@ -698,6 +728,9 @@ assert_text_file "$transition_root/etc/jpacker/package.build/fastfetch" \
     "$legacy_preference"
 assert_text_file "$transition_root/etc/jpacker/foreign-file.keep" \
     'legacy transition sentinel'
+assert_text_file "$transition_source_preference" 'CFLAGS=-O2 -pipe'
+assert_mode "$transition_source_preference_dir" 700
+assert_mode "$transition_source_preference" 600
 
 rollback_version=$(LC_ALL=C \
     HOME="$tmp_dir/rollback-home" \

@@ -287,7 +287,17 @@ public:
         : root_(source_preference_root()),
           entry_(root_ / package_name) {
         fs::create_directories(root_);
+        fs::permissions(
+                root_.parent_path(), fs::perms::owner_all,
+                fs::perm_options::replace);
+        fs::permissions(
+                root_, fs::perms::owner_all,
+                fs::perm_options::replace);
         write_file(entry_, contents);
+        fs::permissions(
+                entry_,
+                fs::perms::owner_read | fs::perms::owner_write,
+                fs::perm_options::replace);
     }
 
     ScopedSourcePreferenceEntry(const ScopedSourcePreferenceEntry&) = delete;

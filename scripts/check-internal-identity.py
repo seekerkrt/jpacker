@@ -19,6 +19,12 @@ LEGACY_UPPER = LEGACY_NAME.upper()
 FORMER_CANDIDATE = "pac" + "tune"
 REJECTED_ROMANIZATION = "MUG" + "UET"
 REJECTED_JAPANESE_NAME = "\u30df\u30e5\u30b2"
+OBSOLETE_SOURCE_PREFERENCE_OVERRIDE = "MOGUET_TEST_" + "PACKAGE_BUILD_DIR"
+FORBIDDEN_RUNTIME_SYSTEM_PATHS = (
+    "/etc/" + LEGACY_NAME,
+    "/etc/moguet",
+)
+RUNTIME_AUTHORITY_PATHS = {"Makefile", "PKGBUILD"}
 
 
 @dataclass(frozen=True)
@@ -287,6 +293,15 @@ ACTIVE_LEGACY_ALLOWANCES: dict[str, tuple[LegacyAllowance, ...]] = {
             "historical-license-version",
             rf"{identity_start}{legacy} releases through v1\.14\.0",
         )
+        + allowances(
+            "legacy-storage-negative-contract",
+            rf"`/etc/{legacy}`と`/etc/moguet`はruntime",
+            rf"neither creates nor reads `/etc/{legacy}` or `/etc/moguet` at runtime",
+        )
+    ),
+    "docs/COMPATIBILITY.md": allowances(
+        "legacy-storage-negative-contract",
+        rf"`/etc/{legacy}`と`/etc/moguet`をruntime",
     ),
     "docs/VERSIONING.md": (
         allowances(
@@ -367,10 +382,6 @@ ACTIVE_LEGACY_ALLOWANCES: dict[str, tuple[LegacyAllowance, ...]] = {
     "src/moguet.cpp": allowances(
         "storage-path",
         rf"legacy {legacy}\.conf{identity_end}",
-    ),
-    "src/source_preference.cpp": allowances(
-        "storage-path",
-        rf"/etc/{legacy}/package\.build",
     ),
     "tests/test-help-man-completion.sh": allowances(
         "deferred-artifact-contract-test",
@@ -651,6 +662,23 @@ def check_classifier_contract() -> None:
     if storage_fixture_categories != ["legacy-storage-fixture"]:
         fail("internal package storage-fixture classifier self-test failed")
 
+    negative_storage_contract_categories = legacy_categories_for_line(
+        "docs/DECISIONS.md",
+        f"Moguet neither creates nor reads `/etc/{LEGACY_NAME}` or "
+        "`/etc/moguet` at runtime",
+    )
+    if negative_storage_contract_categories != [
+        "legacy-storage-negative-contract"
+    ]:
+        fail("internal negative storage-contract classifier self-test failed")
+
+    active_storage_claim_categories = legacy_categories_for_line(
+        "docs/DECISIONS.md",
+        f"Moguet reads `/etc/{LEGACY_NAME}` as its active store",
+    )
+    if active_storage_claim_categories != [None]:
+        fail("internal negative storage-contract classifier is too broad")
+
     negative_alias_categories = legacy_categories_for_line(
         "scripts/check-packaging-metadata.sh",
         f"package must not provide a {LEGACY_NAME} binary alias.",
@@ -838,6 +866,31 @@ def main() -> int:
                     )
                 else:
                     category_counts[category] += 1
+
+        if OBSOLETE_SOURCE_PREFERENCE_OVERRIDE in text:
+            for line_number, line in enumerate(text.splitlines(), start=1):
+                if OBSOLETE_SOURCE_PREFERENCE_OVERRIDE in line:
+                    findings.append(
+                        finding_for_line(
+                            "obsolete-source-preference-authority",
+                            path,
+                            line_number,
+                            line,
+                        )
+                    )
+
+        if path.startswith("src/") or path in RUNTIME_AUTHORITY_PATHS:
+            for line_number, line in enumerate(text.splitlines(), start=1):
+                for forbidden_path in FORBIDDEN_RUNTIME_SYSTEM_PATHS:
+                    if forbidden_path in line:
+                        findings.append(
+                            finding_for_line(
+                                "forbidden-runtime-system-authority",
+                                path,
+                                line_number,
+                                line,
+                            )
+                        )
 
     active_texts = {
         path: text for path, text in texts.items() if is_active_identity_path(path)
