@@ -1,4 +1,4 @@
-.TH MOGUET 1 "August 2026" "Moguet 1.16.0" "User Commands"
+.TH MOGUET 1 "August 2026" "Moguet 2.0.0" "User Commands"
 .\" parity:name
 .SH NAME
 moguet \- pacman-first AUR helper with verified source builds
@@ -572,8 +572,14 @@ place; do not replay its entries through source-preference commands as a
 config migration step.
 .
 .PP
-Back up jpacker v1.16.0 data, remove the v1 package, install the validated
-Moguet package, and map only understood settings by hand.
+Back up jpacker v1.16.0 data, install the validated Moguet package alongside it,
+and map only understood settings by hand.  The packages have disjoint payloads
+and no provides, conflicts, or replaces relationship.  Moguet supplies no
+.B jpacker
+command alias.  Keep the v1 package during verification for a direct rollback,
+or remove it explicitly only after the Moguet checks pass.  Do not run mutating
+operations from both helpers concurrently because the source-preference store
+is shared.
 .B NOEDIT
 maps to
 .BR review.pkgbuild ;
@@ -588,8 +594,10 @@ and
 are not copied into TOML.
 Consult
 .I docs/migration/v1-to-v2.md
-or the migration guide shipped by the package for backup, completion/man
-verification, and rollback instructions.
+or
+.I /usr/share/doc/moguet/docs/migration/v1-to-v2.md
+for backup, completion/man verification, optional v1 removal, and rollback
+instructions.
 .
 .\" parity:see-also
 .SH SEE ALSO

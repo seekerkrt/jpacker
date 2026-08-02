@@ -36,13 +36,15 @@ Moguetはproject固有の造語です。
 
 Moguet v2.0.0は、jpacker v1.16.0の実行基盤を土台に、identity、保存先、config、
 localization、packagingを移行するbreaking releaseです。localの`moguet` binary、
-XDG path、typed TOML config、gettextによる英日CLI surfaceは実装済みです。public
-documentationとshell completionも最終local identityへ揃いました。packageとexternal
-repositoryのcutoverは別のrelease gateです。
+XDG path、typed TOML config、gettextによる英日CLI surfaceは実装済みです。local
+package identity、payload、dependency metadata、documentation、非破壊なjpacker v1
+transitionも確定しました。external repositoryとpublicationのcutoverは別のrelease
+gateです。
 
-現在公開されているrepositoryやpackage endpointは、別途検証するpackaging / release
-cutoverが完了するまで旧`jpacker`名を使う場合があります。この文書は、未公開package、
-compatibility alias、repository rename、AUR endpointが既に存在すると断定しません。
+現在公開されているrepositoryやpackage endpointは、別途検証するrelease cutoverが完了する
+まで旧`jpacker`名を使う場合があります。Moguet packageは`jpacker` command aliasを提供
+しません。この文書は、未公開AUR endpoint、repository rename、releaseが既に存在すると
+断定しません。
 
 <!-- parity:safety -->
 ## 設計と安全境界
@@ -65,22 +67,23 @@ compatibility alias、repository rename、AUR endpointが既に存在すると�
   しないでください。
 
 詳細なcompatibility / routing契約は
-[docs/COMPATIBILITY.md](docs/COMPATIBILITY.md)、採用済み設計判断は
-[docs/DECISIONS.md](docs/DECISIONS.md)を参照してください。
+[docs/COMPATIBILITY.md](https://github.com/seekerkrt/jpacker/blob/develop/docs/COMPATIBILITY.md)、
+採用済み設計判断は
+[docs/DECISIONS.md](https://github.com/seekerkrt/jpacker/blob/develop/docs/DECISIONS.md)を
+参照してください。
 
 <!-- parity:installation -->
 ## インストール
 
 ### Build requirements
 
-- C++20 compilerと`base-devel`
+- `base-devel`を事前導入したArch build環境。現在の構成packageがC++ toolchain、
+  `pkgconf`、GNU gettext development toolを提供します
 - `pacman`、`pacman-conf`、libalpm development metadata
-- `pkgconf`
 - `git`
 - `curl`
 - `nlohmann-json`
 - `tomlplusplus`
-- GNU gettext development tools
 
 development treeは次のようにbuildして確認できます。
 
@@ -99,10 +102,24 @@ make PREFIX=/usr DESTDIR="$stage_dir" install
 find "$stage_dir" -type f -print
 ```
 
-v2.0.0のpackage名は`moguet`ですが、最終package metadata、jpackerとのconflict /
-coexistence policy、公開download endpointは別途検証します。cutoverの公開前にAUR
-package名を推測したり、development payloadを既存jpacker packageへ上書きしたり
-しないでください。installed systemを変更する前に
+v2.0.0のpackage名と唯一のexecutableは`moguet`で、`/usr/bin/jpacker`をinstall
+しません。payloadはjpacker v1.16.0 packageと重複しないため、metadataには
+`jpacker`への`provides`、`conflicts`、`replaces`を意図的に設定しません。manual
+migrationとrollbackを検証する間、両packageはcoexistできます。productionの
+source-preference compatibility store `/etc/jpacker/package.build/`は共有しますが、
+Moguet packageはそのdirectoryを作成・所有しません。
+
+package runtime dependencyは`curl`、`git`、`libalpm.so`、`libarchive`、`nano`、
+`pacman`、`sudo`です。package metadataへ記録するexactな`makedepends` setは
+`nlohmann-json`と`tomlplusplus`です。Arch package buildは`base-devel`の事前導入を
+前提とし、現在の構成packageがGNU gettextと`pkgconf`を提供するため、`base-devel`、
+`gettext`、`pkgconf`は`makedepends`へ含めません。`git`はruntime dependencyのまま
+とし、重複して列挙しません。gettextはcatalog build toolを提供し、runtime binaryは
+独立したlibintl dependencyを持ちません。
+
+publicなMoguet package endpointは最終release cutoverのscopeです。公開前にAUR URLを
+作り上げたり、development payloadをlive systemへinstallしたりしないでください。
+installed systemを変更する前に
 [v1からv2へのMigration Guide](docs/migration/v1-to-v2.ja.md)を確認してください。
 
 <!-- parity:usage -->
@@ -189,7 +206,9 @@ invocationを停止します。Moguetはfileを自動作成・rewrite・migratio
 source-build preferenceは、この実装では`/etc/jpacker/package.build/`に残る独立した
 compatibility境界です。これらのfileはTOML configではなく、XDG config directoryへ
 copyされません。source preference commandは既存storeを操作するため、v2 config
-migrationで保存済みentryが移動したものとして再登録しないでください。
+migrationで保存済みentryが移動したものとして再登録しないでください。このruntime
+compatibilityはMoguet packageによるdirectory ownershipを意味せず、package install /
+uninstallはこれをcreate、migrate、removeしません。
 
 <!-- parity:xdg -->
 ## XDG config・state・cache
@@ -238,9 +257,11 @@ Moguet v2.0.0は`/etc/jpacker/jpacker.conf`を通常config layerとして読ま�
 [日本語Migration Guide](docs/migration/v1-to-v2.ja.md)に従い、v1 stateをbackupして
 manual mappingとrollbackを行ってください。
 
-正式なv2 commandは`moguet`です。packagingが一時的な`jpacker` aliasを提供するか、
-2 packageがcoexistできるかはpackaging decisionとして残っているため、公開前にどちらの
-behaviorもscriptから仮定しないでください。
+正式かつpackageが提供する唯一のv2 commandは`moguet`で、`jpacker` binary aliasは
+ありません。Moguetとjpacker v1.16.0のpackage fileは重複せず、transition / rollback用に
+同時installできます。ただし既存`/etc/jpacker/package.build/` storeはproduction
+compatibility境界として共有するため、両helperのmutating operationを同時実行しないで
+ください。Moguet packageはこのstoreを所有・移行・削除しません。
 
 <!-- parity:development -->
 ## 開発
@@ -251,9 +272,10 @@ canonical development repositoryは現在
 external nameを意図的に変更していません。Issueとpull requestはGitHubで管理します。
 
 active integration branchは`develop`、stable releaseは`main`です。
-[CONTRIBUTING.md](CONTRIBUTING.md)、
-[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)、
-[docs/VERSIONING.md](docs/VERSIONING.md)を参照してください。Moguet v2.xではAUR helper
+[CONTRIBUTING.md](https://github.com/seekerkrt/jpacker/blob/develop/CONTRIBUTING.md)、
+[docs/DEVELOPMENT.md](https://github.com/seekerkrt/jpacker/blob/develop/docs/DEVELOPMENT.md)、
+[docs/VERSIONING.md](https://github.com/seekerkrt/jpacker/blob/develop/docs/VERSIONING.md)を
+参照してください。Moguet v2.xではAUR helper
 機能を段階的に追加し、高度なruntime-aware completionと将来のbuild profile systemは
 別作業として扱います。
 
@@ -264,10 +286,10 @@ active integration branchは`develop`、stable releaseは`main`です。
 v1.14.0以前のreleaseはMIT Licenseで提供されました。これらhistorical releaseは元の
 licenseのまま利用でき、Moguet renameによってtag、release、付与済みpermissionは変わりません。
 
-- GNU GPL version 3全文: [LICENSE](LICENSE)
+- GNU GPL version 3全文: [LICENSE](https://github.com/seekerkrt/jpacker/blob/develop/LICENSE)
 - version境界と配布方針: [docs/LICENSING.md](docs/LICENSING.md)
 - link / compile対象とexternal program: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
-- v1.14.0以前のhistorical MIT本文: [LICENSES/jpacker-MIT-legacy.txt](LICENSES/jpacker-MIT-legacy.txt)
+- v1.14.0以前のhistorical MIT本文: [LICENSES/jpacker-MIT-legacy.txt](https://github.com/seekerkrt/jpacker/blob/develop/LICENSES/jpacker-MIT-legacy.txt)
 
 Moguetはlibalpmとlibcurlへ直接dynamic linkし、systemのnlohmann-jsonとtoml++ headerを
 binaryへcompileします。pacman、pacman-conf、makepkg、git、vercmp、およびnoticeに記載した

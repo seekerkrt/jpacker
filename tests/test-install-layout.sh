@@ -2,9 +2,13 @@
 
 set -eu
 
-repo_root=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
+repo_root=$(CDPATH='' cd "$(dirname "$0")/.." && pwd)
 stage_root=$(mktemp -d)
-stage_dir=
+stage_dir=$stage_root/root
+test_home=$stage_dir/home/test-user
+xdg_config_home=$test_home/.config
+xdg_state_home=$test_home/.local/state
+xdg_cache_home=$test_home/.cache
 
 cleanup() {
     rm -rf "$stage_root"
@@ -17,36 +21,27 @@ fail() {
 }
 
 run_make() {
-    make -C "$repo_root" --no-print-directory \
-        PREFIX=/usr DESTDIR="$stage_dir" "$@"
+    HOME=$test_home \
+    XDG_CONFIG_HOME=$xdg_config_home \
+    XDG_STATE_HOME=$xdg_state_home \
+    XDG_CACHE_HOME=$xdg_cache_home \
+        make -C "$repo_root" --no-print-directory \
+            PREFIX=/usr DESTDIR="$stage_dir" "$@"
 }
 
-set_stage() {
-    stage_dir=$stage_root/$1
-    binary_file=$stage_dir/usr/bin/moguet
-    legacy_binary_file=$stage_dir/usr/bin/jpacker
-    config_dir=$stage_dir/etc/jpacker
-    config_file=$config_dir/jpacker.conf
-    preference_dir=$config_dir/package.build
-    bash_completion_file=$stage_dir/usr/share/bash-completion/completions/moguet
-    zsh_completion_file=$stage_dir/usr/share/zsh/site-functions/_moguet
-    fish_completion_file=$stage_dir/usr/share/fish/vendor_completions.d/moguet.fish
-    english_man_file=$stage_dir/usr/share/man/man1/moguet.1
-    japanese_man_file=$stage_dir/usr/share/man/ja/man1/moguet.1
-    legacy_bash_completion_file=$stage_dir/usr/share/bash-completion/completions/jpacker
-    legacy_zsh_completion_file=$stage_dir/usr/share/zsh/site-functions/_jpacker
-    legacy_fish_completion_file=$stage_dir/usr/share/fish/vendor_completions.d/jpacker.fish
-    legacy_man_file=$stage_dir/usr/share/man/man8/jpacker.8
-    locale_root=$stage_dir/usr/share/locale
-    locale_dir=$locale_root/ja
-    locale_messages_dir=$locale_dir/LC_MESSAGES
-    catalog_file=$locale_messages_dir/moguet.mo
-    legacy_v1_catalog_file=$locale_messages_dir/j""packer.mo
-    former_candidate_catalog_file=$locale_messages_dir/pac""tune.mo
-    built_catalog_file=$repo_root/build/locale/ja/LC_MESSAGES/moguet.mo
-    license_dir=$stage_dir/usr/share/licenses/jpacker
-    doc_dir=$stage_dir/usr/share/doc/jpacker
-}
+binary_file=$stage_dir/usr/bin/moguet
+legacy_binary_file=$stage_dir/usr/bin/jpacker
+bash_completion_file=$stage_dir/usr/share/bash-completion/completions/moguet
+zsh_completion_file=$stage_dir/usr/share/zsh/site-functions/_moguet
+fish_completion_file=$stage_dir/usr/share/fish/vendor_completions.d/moguet.fish
+english_man_file=$stage_dir/usr/share/man/man1/moguet.1
+japanese_man_file=$stage_dir/usr/share/man/ja/man1/moguet.1
+catalog_file=$stage_dir/usr/share/locale/ja/LC_MESSAGES/moguet.mo
+built_catalog_file=$repo_root/build/locale/ja/LC_MESSAGES/moguet.mo
+license_dir=$stage_dir/usr/share/licenses/moguet
+doc_dir=$stage_dir/usr/share/doc/moguet
+migration_dir=$doc_dir/docs/migration
+licensing_file=$doc_dir/docs/LICENSING.md
 
 assert_installed_file() {
     source_file=$1
@@ -66,23 +61,12 @@ assert_installed_file() {
         fail "$installed_file differs from $source_file."
 }
 
-assert_directory() {
-    directory=$1
-
-    [ -d "$directory" ] ||
-        fail "$directory is missing or is not a directory."
-    [ ! -L "$directory" ] ||
-        fail "$directory must not be a symbolic link."
-}
-
 assert_file_text() {
     text_file=$1
     expected_text=$2
 
-    [ -f "$text_file" ] ||
-        fail "$text_file is missing or is not a regular file."
-    [ ! -L "$text_file" ] ||
-        fail "$text_file must not be a symbolic link."
+    [ -f "$text_file" ] && [ ! -L "$text_file" ] ||
+        fail "$text_file is missing, not regular, or a symbolic link."
     actual_text=$(cat "$text_file")
     [ "$actual_text" = "$expected_text" ] ||
         fail "$text_file content changed unexpectedly."
@@ -103,100 +87,88 @@ assert_absent() {
     fi
 }
 
+assert_directory() {
+    directory=$1
+    [ -d "$directory" ] && [ ! -L "$directory" ] ||
+        fail "$directory is missing, not a directory, or a symbolic link."
+}
+
 assert_no_symlinks() {
     first_symlink=$(find "$stage_dir" -type l -print -quit)
     [ -z "$first_symlink" ] ||
         fail "staged tree contains a symbolic link: $first_symlink"
 }
 
-assert_unique_basename() {
-    basename=$1
-    expected_path=$2
-    matches=$(find "$stage_dir" -type f -name "$basename" -print)
-    [ "$matches" = "$expected_path" ] || {
-        printf 'install-layout-test: unexpected locations for %s:\n%s\n' \
-            "$basename" "$matches" >&2
+assert_exact_payload() {
+    expected_payload='/usr/bin/moguet
+/usr/share/bash-completion/completions/moguet
+/usr/share/doc/moguet/README.ja.md
+/usr/share/doc/moguet/README.md
+/usr/share/doc/moguet/THIRD_PARTY_NOTICES.md
+/usr/share/doc/moguet/docs/LICENSING.md
+/usr/share/doc/moguet/docs/migration/v1-to-v2.ja.md
+/usr/share/doc/moguet/docs/migration/v1-to-v2.md
+/usr/share/fish/vendor_completions.d/moguet.fish
+/usr/share/licenses/moguet/LICENSE
+/usr/share/licenses/moguet/bjoern-hoehrmann-utf8-MIT.txt
+/usr/share/licenses/moguet/curl.txt
+/usr/share/licenses/moguet/jpacker-MIT-legacy.txt
+/usr/share/licenses/moguet/nlohmann-json-MIT.txt
+/usr/share/licenses/moguet/tomlplusplus-MIT.txt
+/usr/share/locale/ja/LC_MESSAGES/moguet.mo
+/usr/share/man/ja/man1/moguet.1
+/usr/share/man/man1/moguet.1
+/usr/share/zsh/site-functions/_moguet'
+    actual_payload=$(find "$stage_dir" -type f -print |
+        sed "s|^$stage_dir||" | LC_ALL=C sort)
+    [ "$actual_payload" = "$expected_payload" ] || {
+        printf 'install-layout-test: unexpected payload:\n%s\n' \
+            "$actual_payload" >&2
         exit 1
     }
 }
 
-assert_unique_basename_under() {
-    root=$1
-    basename=$2
-    expected_path=$3
-    matches=$(find "$root" -type f -name "$basename" -print)
-    [ "$matches" = "$expected_path" ] || {
-        printf 'install-layout-test: unexpected locations for %s under %s:\n%s\n' \
-            "$basename" "$root" "$matches" >&2
-        exit 1
-    }
-}
+assert_installed_markdown_links() {
+    if ! python3 - "$doc_dir" <<'PY'
+import pathlib
+import re
+import sys
+import urllib.parse
 
-assert_compliance_install() {
-    assert_installed_file "$repo_root/LICENSE" \
-        "$license_dir/LICENSE"
-    assert_installed_file "$repo_root/LICENSES/jpacker-MIT-legacy.txt" \
-        "$license_dir/jpacker-MIT-legacy.txt"
-    assert_installed_file "$repo_root/LICENSES/curl.txt" \
-        "$license_dir/curl.txt"
-    assert_installed_file "$repo_root/LICENSES/nlohmann-json-MIT.txt" \
-        "$license_dir/nlohmann-json-MIT.txt"
-    assert_installed_file "$repo_root/LICENSES/tomlplusplus-MIT.txt" \
-        "$license_dir/tomlplusplus-MIT.txt"
-    assert_installed_file "$repo_root/LICENSES/bjoern-hoehrmann-utf8-MIT.txt" \
-        "$license_dir/bjoern-hoehrmann-utf8-MIT.txt"
-    assert_installed_file "$repo_root/THIRD_PARTY_NOTICES.md" \
-        "$doc_dir/THIRD_PARTY_NOTICES.md"
-    assert_installed_file "$repo_root/docs/LICENSING.md" \
-        "$doc_dir/LICENSING.md"
+doc_root = pathlib.Path(sys.argv[1]).resolve()
+link_pattern = re.compile(r"\[[^]]*\]\(([^)]+)\)")
 
-    # POLICY: Repository-relative links remain useful in source archives, while
-    # installed copies must also identify the split doc/license layout.
-    assert_installed_text "$doc_dir/LICENSING.md" \
-        '/usr/share/licenses/jpacker/LICENSE'
-    assert_installed_text "$doc_dir/LICENSING.md" \
-        '/usr/share/licenses/jpacker/jpacker-MIT-legacy.txt'
-    assert_installed_text "$doc_dir/LICENSING.md" \
-        '/usr/share/doc/jpacker/THIRD_PARTY_NOTICES.md'
-    assert_installed_text "$doc_dir/THIRD_PARTY_NOTICES.md" \
-        '/usr/share/doc/jpacker/LICENSING.md'
-    assert_installed_text "$doc_dir/THIRD_PARTY_NOTICES.md" \
-        '/usr/share/licenses/jpacker/curl.txt'
-    assert_installed_text "$doc_dir/THIRD_PARTY_NOTICES.md" \
-        '/usr/share/licenses/jpacker/nlohmann-json-MIT.txt'
-    assert_installed_text "$doc_dir/THIRD_PARTY_NOTICES.md" \
-        '/usr/share/licenses/jpacker/tomlplusplus-MIT.txt'
-    assert_installed_text "$doc_dir/THIRD_PARTY_NOTICES.md" \
-        '/usr/share/licenses/jpacker/bjoern-hoehrmann-utf8-MIT.txt'
-
-    assert_unique_basename LICENSE "$license_dir/LICENSE"
-    assert_unique_basename jpacker-MIT-legacy.txt \
-        "$license_dir/jpacker-MIT-legacy.txt"
-    assert_unique_basename curl.txt "$license_dir/curl.txt"
-    assert_unique_basename nlohmann-json-MIT.txt \
-        "$license_dir/nlohmann-json-MIT.txt"
-    assert_unique_basename tomlplusplus-MIT.txt \
-        "$license_dir/tomlplusplus-MIT.txt"
-    assert_unique_basename bjoern-hoehrmann-utf8-MIT.txt \
-        "$license_dir/bjoern-hoehrmann-utf8-MIT.txt"
-    assert_unique_basename THIRD_PARTY_NOTICES.md \
-        "$doc_dir/THIRD_PARTY_NOTICES.md"
-    assert_unique_basename LICENSING.md "$doc_dir/LICENSING.md"
-
-    [ ! -e "$stage_dir/usr/local" ] && [ ! -L "$stage_dir/usr/local" ] ||
-        fail "PREFIX=/usr install unexpectedly created /usr/local content."
-    assert_no_symlinks
-}
-
-assert_compliance_absent() {
-    assert_absent "$license_dir/LICENSE"
-    assert_absent "$license_dir/jpacker-MIT-legacy.txt"
-    assert_absent "$license_dir/curl.txt"
-    assert_absent "$license_dir/nlohmann-json-MIT.txt"
-    assert_absent "$license_dir/tomlplusplus-MIT.txt"
-    assert_absent "$license_dir/bjoern-hoehrmann-utf8-MIT.txt"
-    assert_absent "$doc_dir/THIRD_PARTY_NOTICES.md"
-    assert_absent "$doc_dir/LICENSING.md"
+for markdown_file in sorted(doc_root.rglob("*.md")):
+    text = markdown_file.read_text(encoding="utf-8")
+    for match in link_pattern.finditer(text):
+        raw_target = match.group(1).strip()
+        if not raw_target or raw_target.startswith("#"):
+            continue
+        parsed = urllib.parse.urlparse(raw_target)
+        if parsed.scheme or raw_target.startswith("/"):
+            continue
+        relative_target = urllib.parse.unquote(parsed.path)
+        resolved_target = (markdown_file.parent / relative_target).resolve()
+        try:
+            resolved_target.relative_to(doc_root)
+        except ValueError:
+            print(
+                f"{markdown_file}: relative link leaves packaged doc root: "
+                f"{raw_target}",
+                file=sys.stderr,
+            )
+            raise SystemExit(1)
+        if not resolved_target.is_file():
+            print(
+                f"{markdown_file}: missing packaged relative-link target: "
+                f"{raw_target}",
+                file=sys.stderr,
+            )
+            raise SystemExit(1)
+PY
+    then
+        fail 'installed Markdown contains an unresolved relative link.'
+    fi
 }
 
 assert_package_artifacts_installed() {
@@ -210,121 +182,155 @@ assert_package_artifacts_installed() {
         "$fish_completion_file"
     assert_installed_file "$repo_root/man/moguet.1" "$english_man_file"
     assert_installed_file "$repo_root/man/ja/moguet.1" "$japanese_man_file"
-    assert_absent "$legacy_bash_completion_file"
-    assert_absent "$legacy_zsh_completion_file"
-    assert_absent "$legacy_fish_completion_file"
-    assert_absent "$legacy_man_file"
     assert_installed_file "$built_catalog_file" "$catalog_file"
-    assert_absent "$legacy_v1_catalog_file"
-    assert_absent "$former_candidate_catalog_file"
-    assert_unique_basename_under "$locale_dir" moguet.mo "$catalog_file"
-    assert_compliance_install
+
+    assert_installed_file "$repo_root/LICENSE" "$license_dir/LICENSE"
+    assert_installed_file "$repo_root/LICENSES/jpacker-MIT-legacy.txt" \
+        "$license_dir/jpacker-MIT-legacy.txt"
+    assert_installed_file "$repo_root/LICENSES/curl.txt" \
+        "$license_dir/curl.txt"
+    assert_installed_file "$repo_root/LICENSES/nlohmann-json-MIT.txt" \
+        "$license_dir/nlohmann-json-MIT.txt"
+    assert_installed_file "$repo_root/LICENSES/tomlplusplus-MIT.txt" \
+        "$license_dir/tomlplusplus-MIT.txt"
+    assert_installed_file "$repo_root/LICENSES/bjoern-hoehrmann-utf8-MIT.txt" \
+        "$license_dir/bjoern-hoehrmann-utf8-MIT.txt"
+
+    assert_installed_file "$repo_root/README.md" "$doc_dir/README.md"
+    assert_installed_file "$repo_root/README.ja.md" "$doc_dir/README.ja.md"
+    assert_installed_file "$repo_root/THIRD_PARTY_NOTICES.md" \
+        "$doc_dir/THIRD_PARTY_NOTICES.md"
+    assert_installed_file "$repo_root/docs/LICENSING.md" \
+        "$licensing_file"
+    assert_installed_file "$repo_root/docs/migration/v1-to-v2.md" \
+        "$migration_dir/v1-to-v2.md"
+    assert_installed_file "$repo_root/docs/migration/v1-to-v2.ja.md" \
+        "$migration_dir/v1-to-v2.ja.md"
+
+    assert_installed_text "$licensing_file" \
+        '/usr/share/licenses/moguet/LICENSE'
+    assert_installed_text "$doc_dir/THIRD_PARTY_NOTICES.md" \
+        '/usr/share/licenses/moguet/tomlplusplus-MIT.txt'
+    assert_installed_text "$doc_dir/THIRD_PARTY_NOTICES.md" \
+        '/usr/share/doc/moguet/docs/LICENSING.md'
+    assert_installed_markdown_links
+    assert_no_symlinks
 }
 
 assert_package_artifacts_absent() {
-    assert_absent "$binary_file"
-    assert_absent "$legacy_binary_file"
-    assert_absent "$bash_completion_file"
-    assert_absent "$zsh_completion_file"
-    assert_absent "$fish_completion_file"
-    assert_absent "$english_man_file"
-    assert_absent "$japanese_man_file"
-    assert_absent "$legacy_bash_completion_file"
-    assert_absent "$legacy_zsh_completion_file"
-    assert_absent "$legacy_fish_completion_file"
-    assert_absent "$legacy_man_file"
-    assert_absent "$catalog_file"
-    assert_absent "$legacy_v1_catalog_file"
-    assert_absent "$former_candidate_catalog_file"
-    assert_compliance_absent
+    for path in \
+        "$binary_file" \
+        "$legacy_binary_file" \
+        "$bash_completion_file" \
+        "$zsh_completion_file" \
+        "$fish_completion_file" \
+        "$english_man_file" \
+        "$japanese_man_file" \
+        "$catalog_file" \
+        "$license_dir/LICENSE" \
+        "$license_dir/jpacker-MIT-legacy.txt" \
+        "$license_dir/curl.txt" \
+        "$license_dir/nlohmann-json-MIT.txt" \
+        "$license_dir/tomlplusplus-MIT.txt" \
+        "$license_dir/bjoern-hoehrmann-utf8-MIT.txt" \
+        "$doc_dir/README.md" \
+        "$doc_dir/README.ja.md" \
+        "$doc_dir/THIRD_PARTY_NOTICES.md" \
+        "$licensing_file" \
+        "$migration_dir/v1-to-v2.md" \
+        "$migration_dir/v1-to-v2.ja.md"
+    do
+        assert_absent "$path"
+    done
 }
 
-# Phase 1: uninstall preserves user state while removing package-owned artifacts.
-set_stage preserve-user-state
+# Fresh install: exact Moguet payload only, no legacy alias, /etc content, or
+# user XDG data. Version execution is also read-only with respect to XDG.
 run_make install
 assert_package_artifacts_installed
-assert_installed_file "$repo_root/config/jpacker.conf" "$config_file"
-assert_directory "$preference_dir"
+assert_exact_payload
+assert_absent "$stage_dir/etc"
+assert_absent "$xdg_config_home/moguet"
+assert_absent "$xdg_state_home/moguet"
+assert_absent "$xdg_cache_home/moguet"
+version_output=$(LC_ALL=C HOME=$test_home \
+    XDG_CONFIG_HOME=$xdg_config_home \
+    XDG_STATE_HOME=$xdg_state_home \
+    XDG_CACHE_HOME=$xdg_cache_home \
+    "$binary_file" --version)
+[ "$version_output" = 'Moguet v2.0.0' ] ||
+    fail "staged binary version mismatch: $version_output"
+assert_absent "$xdg_config_home/moguet"
+assert_absent "$xdg_state_home/moguet"
+assert_absent "$xdg_cache_home/moguet"
 
-preference_file=$preference_dir/fastfetch
-preference_text='CFLAGS=-O3 -march=native'
-printf '%s\n' "$preference_text" > "$preference_file"
+# Reinstall refreshes only package-owned files and leaves foreign/user/legacy
+# data untouched. These sentinels also cover uninstall preservation.
+legacy_config=$stage_dir/etc/jpacker/jpacker.conf
+legacy_preference=$stage_dir/etc/jpacker/package.build/fastfetch
+foreign_system_file=$stage_dir/etc/moguet/foreign-admin-file
+user_config=$xdg_config_home/moguet/config.toml
+user_state=$xdg_state_home/moguet/moguet.log
+user_cache=$xdg_cache_home/moguet/cache-entry
+foreign_doc=$doc_dir/foreign-file.keep
+foreign_license=$license_dir/foreign-file.keep
+foreign_completion=$(dirname "$bash_completion_file")/foreign-command
+foreign_catalog=$(dirname "$catalog_file")/foreign-domain.mo
 
-# POLICY: reinstall may refresh the main config template, but must not touch
-# runtime-managed source-build preference entries.
+install -Dm644 /dev/null "$legacy_config"
+printf '%s\n' 'NOEDIT=true' > "$legacy_config"
+install -Dm644 /dev/null "$legacy_preference"
+printf '%s\n' 'CFLAGS=-O3 -march=native' > "$legacy_preference"
+install -Dm644 /dev/null "$foreign_system_file"
+printf '%s\n' 'foreign admin data' > "$foreign_system_file"
+install -Dm600 /dev/null "$user_config"
+printf '%s\n' 'schema_version = 1' > "$user_config"
+install -Dm600 /dev/null "$user_state"
+printf '%s\n' 'user state' > "$user_state"
+install -Dm600 /dev/null "$user_cache"
+printf '%s\n' 'user cache' > "$user_cache"
+printf '%s\n' 'foreign documentation' > "$foreign_doc"
+printf '%s\n' 'foreign license' > "$foreign_license"
+printf '%s\n' 'foreign completion' > "$foreign_completion"
+printf '%s\n' 'foreign catalog' > "$foreign_catalog"
+
 run_make install
-assert_file_text "$preference_file" "$preference_text"
-
-modified_config_text='NOEDIT=true
-LOGFILE=/tmp/moguet-preserved.log'
-preference_sentinel=$preference_dir/foreign-file.keep
-config_sentinel=$config_dir/foreign-file.keep
-foreign_catalog_file=$locale_messages_dir/foreign-domain.mo
-foreign_bash_completion_file=$(dirname "$bash_completion_file")/foreign-command
-foreign_zsh_completion_file=$(dirname "$zsh_completion_file")/_foreign-command
-foreign_fish_completion_file=$(dirname "$fish_completion_file")/foreign-command.fish
-foreign_english_man_file=$(dirname "$english_man_file")/foreign-command.1
-foreign_japanese_man_file=$(dirname "$japanese_man_file")/foreign-command.1
-printf '%s\n' "$modified_config_text" > "$config_file"
-printf '%s\n' 'preference sentinel' > "$preference_sentinel"
-printf '%s\n' 'config sentinel' > "$config_sentinel"
-printf '%s\n' 'foreign catalog sentinel' > "$foreign_catalog_file"
-printf '%s\n' 'foreign bash completion sentinel' > "$foreign_bash_completion_file"
-printf '%s\n' 'foreign zsh completion sentinel' > "$foreign_zsh_completion_file"
-printf '%s\n' 'foreign fish completion sentinel' > "$foreign_fish_completion_file"
-printf '%s\n' 'foreign English man sentinel' > "$foreign_english_man_file"
-printf '%s\n' 'foreign Japanese man sentinel' > "$foreign_japanese_man_file"
+assert_package_artifacts_installed
+assert_file_text "$legacy_config" 'NOEDIT=true'
+assert_file_text "$legacy_preference" 'CFLAGS=-O3 -march=native'
+assert_file_text "$foreign_system_file" 'foreign admin data'
+assert_file_text "$user_config" 'schema_version = 1'
+assert_file_text "$user_state" 'user state'
+assert_file_text "$user_cache" 'user cache'
 
 run_make uninstall
-assert_file_text "$preference_file" "$preference_text"
-assert_file_text "$config_file" "$modified_config_text"
-assert_file_text "$preference_sentinel" 'preference sentinel'
-assert_file_text "$config_sentinel" 'config sentinel'
-assert_file_text "$foreign_catalog_file" 'foreign catalog sentinel'
-assert_file_text "$foreign_bash_completion_file" 'foreign bash completion sentinel'
-assert_file_text "$foreign_zsh_completion_file" 'foreign zsh completion sentinel'
-assert_file_text "$foreign_fish_completion_file" 'foreign fish completion sentinel'
-assert_file_text "$foreign_english_man_file" 'foreign English man sentinel'
-assert_file_text "$foreign_japanese_man_file" 'foreign Japanese man sentinel'
-assert_directory "$preference_dir"
-assert_directory "$config_dir"
-assert_directory "$locale_messages_dir"
 assert_package_artifacts_absent
-assert_absent "$license_dir"
-assert_absent "$doc_dir"
-assert_directory "$stage_dir/etc"
-assert_directory "$stage_dir/usr/share/licenses"
-assert_directory "$stage_dir/usr/share/doc"
-assert_directory "$locale_root"
+assert_file_text "$legacy_config" 'NOEDIT=true'
+assert_file_text "$legacy_preference" 'CFLAGS=-O3 -march=native'
+assert_file_text "$foreign_system_file" 'foreign admin data'
+assert_file_text "$user_config" 'schema_version = 1'
+assert_file_text "$user_state" 'user state'
+assert_file_text "$user_cache" 'user cache'
+assert_file_text "$foreign_doc" 'foreign documentation'
+assert_file_text "$foreign_license" 'foreign license'
+assert_file_text "$foreign_completion" 'foreign completion'
+assert_file_text "$foreign_catalog" 'foreign catalog'
+assert_directory "$stage_dir/etc/jpacker/package.build"
+assert_directory "$xdg_config_home/moguet"
+assert_directory "$xdg_state_home/moguet"
+assert_directory "$xdg_cache_home/moguet"
 assert_no_symlinks
 
-# Phase 2: only empty legacy jpacker package directories are removed; shared
-# parents and foreign files in other package directories remain.
-set_stage empty-config-directories
+# A final reinstall/uninstall cycle proves that retained foreign entries do not
+# prevent package-owned files from being restored or removed exactly.
 run_make install
 assert_package_artifacts_installed
-assert_installed_file "$repo_root/config/jpacker.conf" "$config_file"
-assert_directory "$preference_dir"
-printf '%s\n' 'license sentinel' > "$license_dir/foreign-file.keep"
-printf '%s\n' 'documentation sentinel' > "$doc_dir/foreign-file.keep"
-rm -f "$config_file"
-assert_absent "$config_file"
-[ -z "$(find "$preference_dir" -mindepth 1 -print -quit)" ] ||
-    fail "$preference_dir is not empty before the empty-directory uninstall case."
-
 run_make uninstall
 assert_package_artifacts_absent
-assert_absent "$preference_dir"
-assert_absent "$config_dir"
-assert_absent "$locale_messages_dir"
-assert_absent "$locale_dir"
-assert_directory "$stage_dir/etc"
-
-assert_file_text "$license_dir/foreign-file.keep" 'license sentinel'
-assert_file_text "$doc_dir/foreign-file.keep" 'documentation sentinel'
-assert_directory "$stage_dir/usr/share/licenses"
-assert_directory "$stage_dir/usr/share/doc"
-assert_directory "$locale_root"
+assert_file_text "$legacy_preference" 'CFLAGS=-O3 -march=native'
+assert_file_text "$user_config" 'schema_version = 1'
+assert_file_text "$foreign_doc" 'foreign documentation'
+assert_file_text "$foreign_license" 'foreign license'
 assert_no_symlinks
 
 printf 'install-layout-test: all checks passed\n'

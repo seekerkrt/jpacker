@@ -101,7 +101,6 @@ DEFERRED_GENERAL_DOCUMENTS = {
     "docs/COMPATIBILITY.md",
     "docs/DECISIONS.md",
     "docs/DEVELOPMENT.md",
-    "docs/LICENSING.md",
     "docs/PROJECT_STANCE.md",
     "docs/VERSIONING.md",
 }
@@ -119,17 +118,7 @@ HISTORICAL_DOCUMENTS = {
     "docs/audit/v1.8.0-claude-code.md",
     "docs/audit/v1.8.0-codex.md",
 }
-DEFERRED_MAN_AND_COMPLETION = {
-    f"completions/_{LEGACY_NAME}",
-    f"completions/{LEGACY_NAME}.fish",
-    f"completions/{LEGACY_NAME}_completion.bash",
-    f"man/{LEGACY_NAME}.8",
-    f"man/{LEGACY_NAME}.8.in",
-}
-DEFERRED_PACKAGING_AND_LICENSE = {
-    "PKGBUILD",
-    "THIRD_PARTY_NOTICES.md",
-    f"config/{LEGACY_NAME}.conf",
+HISTORICAL_LEGACY_PATHS = {
     f"LICENSES/{LEGACY_NAME}-MIT-legacy.txt",
 }
 FORMER_CANDIDATE_DOCUMENTS = {
@@ -148,6 +137,16 @@ def allowances(category: str, *patterns: str) -> tuple[LegacyAllowance, ...]:
 legacy = re.escape(LEGACY_NAME)
 identity_start = r"(?<![A-Za-z0-9_.-])"
 identity_end = r"(?=$|/|[\"'\s,;:#)=}\]]|\.(?=[\"'\s]|$))"
+external_repository_url = rf"seekerkrt/{legacy}(?:\.git)?{identity_end}"
+historical_license_filename = (
+    rf"{identity_start}{legacy}-MIT-legacy\.txt(?![A-Za-z0-9_.-])"
+)
+historical_project_version = (
+    rf"{identity_start}{legacy} v1\.(?:14\.0|15\.0)(?![0-9.])"
+)
+legacy_etc_path = (
+    rf"/etc/{legacy}(?:/[A-Za-z0-9@._+-]+)*(?![A-Za-z0-9_.-])"
+)
 config_filename = rf"{identity_start}{legacy}\.conf{identity_end}"
 log_filename = rf"{identity_start}{legacy}\.log{identity_end}"
 xdg_cache_component = rf"\$XDG_CACHE_HOME/{legacy}{identity_end}"
@@ -164,47 +163,78 @@ ACTIVE_LEGACY_ALLOWANCES: dict[str, tuple[LegacyAllowance, ...]] = {
         rf"^\s*/{legacy}\s*$",
     ),
     "Makefile": allowances(
-        "deferred-production-packaging",
+        "production-artifact-cleanup",
         rf"^\s*LEGACY_PRODUCTION_TARGET\s*:=\s*{legacy}\s*$",
-        rf"^\s*PACKAGE_NAME\s*:=\s*{legacy}\s*$",
-        rf"man/{legacy}\.8(?:\.in)?{identity_end}",
-        rf"config/{legacy}\.conf{identity_end}",
-        rf"completions/{legacy}(?:_completion\.bash|\.fish)?{identity_end}",
-        rf"completions/_{legacy}{identity_end}",
-        rf"LICENSES/{legacy}-MIT-legacy\.txt{identity_end}",
-        rf"SYSCONFDIR\)/{legacy}{identity_end}",
-        rf"COMPDIR\)/{legacy}{identity_end}",
-        rf"ZSHCOMPDIR\)/_{legacy}{identity_end}",
-        rf"FISHCOMPDIR\)/{legacy}\.fish{identity_end}",
-        rf"MANDIR\)/{legacy}\.8{identity_end}",
-        rf"LICENSEDIR\)/{legacy}-MIT-legacy\.txt{identity_end}",
-        config_filename,
+    )
+    + allowances(
+        "historical-license-file",
+        historical_license_filename,
     ),
-    "scripts/check-release-version.sh": allowances(
-        "deferred-release-metadata-check",
-        rf"man/{legacy}\.8{identity_end}",
-        rf"{identity_start}{legacy} \$version",
+    "PKGBUILD": allowances(
+        "external-repository-url",
+        external_repository_url,
+    )
+    + allowances(
+        "historical-package-transition",
+        rf"{identity_start}{legacy} v1\.16\.0(?![0-9.])",
+    )
+    + allowances(
+        "negative-alias-assertion",
+        rf"no {legacy} command alias{identity_end}",
+    ),
+    "THIRD_PARTY_NOTICES.md": allowances(
+        "historical-package-version",
+        rf"historical {legacy} versions{identity_end}",
+    )
+    + allowances(
+        "external-repository-url",
+        external_repository_url,
+    ),
+    "docs/LICENSING.md": allowances(
+        "historical-project-identity",
+        rf"前身である{legacy}(?=の)",
+        historical_project_version,
+    )
+    + allowances(
+        "historical-license-file",
+        historical_license_filename,
+    )
+    + allowances(
+        "external-repository-url",
+        external_repository_url,
     ),
     "scripts/check-packaging-metadata.sh": allowances(
-        "deferred-release-metadata-check",
-        rf"etc/{legacy}/{legacy}\.conf{identity_end}",
-        rf"config/{legacy}\.conf{identity_end}",
-        rf"{identity_start}{legacy}-src{identity_end}",
-        config_filename,
+        "external-repository-url",
+        external_repository_url,
+    )
+    + allowances(
+        "historical-license-file",
+        historical_license_filename,
+    )
+    + allowances(
+        "negative-alias-assertion",
+        rf"/usr/bin/{legacy}{identity_end}",
+        rf"{identity_start}{legacy} binary alias{identity_end}",
     ),
     "scripts/check-license-compliance.sh": allowances(
-        "deferred-release-metadata-check",
-        rf"{identity_start}{legacy}-src{identity_end}",
-        rf"seekerkrt/{legacy}(?:\.git)?{identity_end}",
-        rf"{identity_start}{legacy}-MIT-legacy\.txt{identity_end}",
-        rf"{identity_start}{legacy} v1\.14\.0",
+        "external-repository-url",
+        external_repository_url,
+    )
+    + allowances(
+        "historical-license-file",
+        historical_license_filename,
+    )
+    + allowances(
+        "historical-version-boundary",
+        historical_project_version,
         rf"v1\.15\.0[^\n]*{identity_start}{legacy}{identity_end}",
         rf"v1\.15\.0以降の{legacy}(?=は)",
-        rf"GPL-licensed {legacy} development series",
         rf"{identity_start}{legacy} releases",
-        rf"current\( {legacy}\)\?",
-        rf"linked into {legacy}{identity_end}",
-        rf"bundled with {legacy}{identity_end}",
+        rf"{identity_start}{legacy} tags{identity_end}",
+    )
+    + allowances(
+        "negative-identity-pattern",
+        rf"current\( \({legacy}\|Moguet\)\)\?",
     ),
     ".github/workflows/mirror-gitlab-release.yml": allowances(
         "deferred-repository-automation",
@@ -250,20 +280,53 @@ ACTIVE_LEGACY_ALLOWANCES: dict[str, tuple[LegacyAllowance, ...]] = {
         rf"run_completion\s+{legacy}(?=\s)",
     ),
     "tests/test-install-layout.sh": allowances(
-        "deferred-artifact-contract-test",
+        "negative-package-assertion",
         rf"/usr/bin/{legacy}{identity_end}",
-        rf"/etc/{legacy}{identity_end}",
-        rf"/completions/{legacy}{identity_end}",
-        rf"completions/{legacy}_completion\.bash{identity_end}",
-        rf"/_{legacy}{identity_end}",
-        rf"/{legacy}\.fish{identity_end}",
-        rf"/{legacy}\.8{identity_end}",
-        rf"/licenses/{legacy}{identity_end}",
-        rf"/doc/{legacy}{identity_end}",
-        rf"{identity_start}{legacy}-MIT-legacy\.txt{identity_end}",
+    )
+    + allowances(
+        "historical-license-file",
+        historical_license_filename,
+    )
+    + allowances(
+        "legacy-storage-fixture",
+        legacy_etc_path,
+    ),
+    "tests/test-package-transition.sh": allowances(
+        "historical-package-fixture",
+        rf"{identity_start}{legacy}-v1\.16\.0-(?:source(?:\.tar)?|stage|"
+        rf"payload(?:\.tar|\.sha256)?|files\.txt|removable-files\.txt|"
+        rf"makepkg|packages|archive-root|directories\.txt)"
+        rf"(?![A-Za-z0-9_.-])",
+        rf"{identity_start}{legacy}-1\.16\.0-1-x86_64\.pkg\.tar\.zst"
+        rf"(?![A-Za-z0-9_.-])",
+        rf"{identity_start}{legacy} v1\.16\.0(?![0-9.])",
+        rf"{identity_start}{legacy} package transition fixture{identity_end}",
+        rf"pkgname {legacy}{identity_end}",
+        rf"usr/bin/{legacy}{identity_end}",
+        rf"rollback {legacy} version{identity_end}",
+    )
+    + allowances(
+        "external-repository-url",
+        external_repository_url,
+    )
+    + allowances(
+        "historical-license-file",
+        historical_license_filename,
+    )
+    + allowances(
+        "negative-package-assertion",
+        rf"/(?:usr/bin/{legacy}|"
+        rf"usr/share/bash-completion/completions/{legacy}|"
+        rf"usr/share/zsh/site-functions/_{legacy}|"
+        rf"usr/share/fish/vendor_completions\.d/{legacy}\.fish|"
+        rf"usr/share/man/man8/{legacy}\.8(?:\.gz)?){identity_end}",
         rf"config/{legacy}\.conf{identity_end}",
-        config_filename,
-        legacy_cache_phrase,
+    )
+    + allowances(
+        "legacy-storage-fixture",
+        legacy_etc_path,
+        rf"etc/{legacy}/{legacy}\.conf{identity_end}",
+        rf"{identity_start}{legacy}\.conf(?:\.pacsave)?{identity_end}",
     ),
     "tests/trusted_cache_test.cpp": (
         allowances(
@@ -376,10 +439,8 @@ ACTIVE_LEGACY_ALLOWANCES: dict[str, tuple[LegacyAllowance, ...]] = {
 
 
 def classify_legacy_path(path: str) -> str | None:
-    if path in DEFERRED_MAN_AND_COMPLETION:
-        return "deferred-man-completion"
-    if path in DEFERRED_PACKAGING_AND_LICENSE:
-        return "deferred-packaging-license"
+    if path in HISTORICAL_LEGACY_PATHS:
+        return "historical-license-file"
     return None
 
 
@@ -394,11 +455,6 @@ def classify_legacy_reference(
         return "migration-documentation"
     if path in PUBLIC_MAN_DOCUMENTS:
         return "public-man-migration-context"
-    if path in DEFERRED_MAN_AND_COMPLETION:
-        return "deferred-man-completion"
-    if path in DEFERRED_PACKAGING_AND_LICENSE:
-        return "deferred-packaging-license"
-
     for allowance in ACTIVE_LEGACY_ALLOWANCES.get(path, ()):
         for context_match in allowance.pattern.finditer(line):
             if (
@@ -453,6 +509,31 @@ def check_classifier_contract() -> None:
     if allowed_categories != ["storage-path"]:
         fail("internal legacy-storage classifier self-test failed")
 
+    external_url_categories = legacy_categories_for_line(
+        "PKGBUILD", f'https://github.com/seekerkrt/{LEGACY_NAME}.git#tag=v2.0.0'
+    )
+    if external_url_categories != ["external-repository-url"]:
+        fail("internal external-repository classifier self-test failed")
+
+    historical_license_categories = legacy_categories_for_line(
+        "docs/LICENSING.md", f"LICENSES/{LEGACY_NAME}-MIT-legacy.txt"
+    )
+    if historical_license_categories != ["historical-license-file"]:
+        fail("internal historical-license classifier self-test failed")
+
+    storage_fixture_categories = legacy_categories_for_line(
+        "tests/test-install-layout.sh", f'legacy_config=/etc/{LEGACY_NAME}/config'
+    )
+    if storage_fixture_categories != ["legacy-storage-fixture"]:
+        fail("internal package storage-fixture classifier self-test failed")
+
+    negative_alias_categories = legacy_categories_for_line(
+        "scripts/check-packaging-metadata.sh",
+        f"package must not provide a {LEGACY_NAME} binary alias.",
+    )
+    if negative_alias_categories != ["negative-alias-assertion"]:
+        fail("internal negative-alias classifier self-test failed")
+
     rejected_categories = legacy_categories_for_line(
         "src/moguet.cpp", f'char program[] = "{LEGACY_NAME}";'
     )
@@ -482,6 +563,11 @@ def check_classifier_contract() -> None:
 
     if classify_legacy_path(f"tests/{LEGACY_NAME}-cli-stub") is not None:
         fail("internal legacy-path classifier is too broad")
+
+    if classify_legacy_path(f"LICENSES/{LEGACY_NAME}-MIT-legacy.txt") != (
+        "historical-license-file"
+    ):
+        fail("internal historical-license path classifier self-test failed")
 
     rejected_allowance_cases = (
         (
@@ -527,6 +613,10 @@ def check_classifier_contract() -> None:
         (
             "scripts/check-license-compliance.sh",
             f"x{LEGACY_NAME}-src",
+        ),
+        (
+            "PKGBUILD",
+            f"the current package is {LEGACY_NAME}",
         ),
         (
             "tests/test-help-man-completion.sh",
