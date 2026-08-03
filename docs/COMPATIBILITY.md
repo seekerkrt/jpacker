@@ -16,7 +16,7 @@ MoguetはArch Linux向けの **pacman-first wrapper** として扱う。
 - AUR / source build 経路では、pacman transaction option を無条件に makepkg へ置き換えない。
 - Moguet 固有 operation の未対応 option と、AUR / source build 経路へ安全に反映できない pacman option は、黙って無視せず実行前に停止する。
 - `--noconfirm` は「全部 yes」ではなく、「対話で止まらない」指定として扱う。
-- `--noconfirm` だけで rebuild / cleanbuild / provider selection / conflicts / replaces / ambiguous artifact selection / 未解決依存の突破を勝手に有効化しない。requested childとmetadata identityから一意に決るsplit selectionは対話承認ではない。
+- `--noconfirm` だけで rebuild / cleanbuild / provider selection / root package selection / conflicts / replaces / ambiguous artifact selection / 未解決依存の突破を勝手に有効化しない。requested childとmetadata identityから一意に決るsplit selectionは対話承認ではない。
 - 値を取る option は、値を target と誤認しないように扱う。値が欠けている場合は停止する。
 
 ---
@@ -150,6 +150,58 @@ selected repository providerの`pacman -S --asdeps --needed`成功だけでは�
 build / install / fetch 実行系では、選択されていないambiguous provider、unresolved dependency、cyclic dependency が残る plan は実行不可として停止する。`fetch`はselected AUR providerのPackageBase repositoryも取得し、selected repository providerは取得対象にしない。build / installではselected repository providerをexactな`repository/package` dependencyとして導入する。#96 の方針により、未検証 version constraint を理由に unresolved とした dependency も実行不可のまま扱う。
 
 `upgrade`と`upgrade-all`のregistered source phaseは既存のsingular source lifecycleを維持し、transitiveなselected AUR providerのPackageBaseをscheduleしない。このphaseで複数providerが残る場合は、candidateがすべてofficial repository由来のときだけinteractive selectionへ渡す。AUR providerを1件でも含むcandidate setはpromptせずambiguousのままfail-closedとし、system / registered-source executionを開始しない。standalone `upgrade`はこのprovider choiceとsource invocationのstatic preflightが完了するまでMoguet cache rootを作成しない。`upgrade-all`はaggregate全体で共有するcache authorityを先に確定する既存契約を維持するが、registered-source provider ambiguityが残る場合はsystem phaseを開始しない。
+
+---
+
+## 対話的root package discovery policy（#217、production未接続）
+
+この節は#217 Slice 1で採用したv2.1.0向けcontractを記録する。現在のproduction parser / helpにはまだ`--select`を接続せず、pure model、typed search adapter、interaction / routing、public surfaceが揃う後続sliceまで未実装として扱う。
+
+### CLI入口とoption境界
+
+正式入口は`moguet -S --select <query>`とする。`<query>`はexactly oneのtarget-role operandとし、ASCII whitespace trim後にnon-emptyでcontrol characterを含まないことを要求する。internal whitespaceを含む1つの検索語はshell上でquoteする。`--select`はMoguet global optionとして、pacman option value待ちでも`--`後でもない通常位置ならoperationの前後で認識し、canonicalなhelp表記だけをoperation直後へ置く。operation省略構文や新しいbare operationは追加せず、未知のbare tokenを`Unknown operation`として拒否する現行parser契約を維持する。通常の`-Ss`、`-Ss --aur`、`-Ss --repo`は従来どおり非対話の検索・表示だけを行い、install target selectionへ入らない。
+
+`--select`はplain `-S`だけで有効とし、`-Ss` / `-Si`、refresh / sysupgrade / clean / groups / list modifier、ほかのpacman operation、Moguet固有operationではqueryやexternal commandより前に拒否する。重複した`--select`はidempotentとする。`--aur`はAUR candidateだけ、`--repo`はofficial repository candidateだけにsourceを限定し、両方の指定は既存どおりconflictとする。selector未指定のAutoは両sourceを検索する。
+
+初期scopeでroot selectionとsource routeの両方へ同じ意味を保てるpacman optionは`--needed`だけとする。`--config`、`--dbpath`、`--root`、`--sysroot`を含むほかのpacman option、`--` marker、opaque operand、`--rmdeps`はcandidate queryより前に拒否し、検索metadataと最終transactionが異なるauthorityを見る状態を作らない。既存のreview / diff / build-mode CLI overrideはselected rootにAURが1件以上ある場合だけAUR routeへ従来の意味で渡し、repository rootだけのselectionでは判明した時点でmutation前に拒否する。`--noconfirm`は後述のinteractive gateで拒否し、downstream commandだけをnon-interactiveにしてroot choiceを飛ばす使い方は許可しない。
+
+### Typed candidate、search、group、順序
+
+repository root candidateは`source=repository`、package name、configured repository name、root roleを保持する。AUR root candidateは`source=AUR`、package name、PackageBase、root roleを保持する。identity fieldは既存のpackage / repository identifier契約でvalidateし、empty、control character、invalid identifierをcandidateへ公開しない。versionとdescriptionはpresentation metadataでありidentityではないが、valid UTF-8のsingle-line valueに限定し、control characterやinvalid encodingを含むsnapshotはprompt前に拒否する。candidate presentationはvalidated owned valueだけを書き出す。candidate行は`source=repository repository=<name> package=<name>`または`source=AUR package=<name> PackageBase=<base>`相当のfieldを明示し、repository名が`aur`でもsource kindを見分けられるようにする。selected rootも同じidentityを保持し、package名だけへ縮退しない。
+
+official candidateは、`pacman-conf`から解決した同じdatabase path、repository Usage、configured repository orderで開く1つのread-only libalpm sessionから取得する。候補対象はpacman configuration上でSearchとInstallの両方が有効なrepositoryに限り、そのconfigured orderを維持する。package searchには`alpm_db_search()`を使い、queryがconfigured official groupのexact nameでもある場合は`alpm_find_group_pkgs()`が返すmemberを追加する。pacmanのhuman-readable `-Ss` outputやsync `.db` archiveをroot searchの入力としてparseせず、refresh、transaction、database mutationを行わない。AUR candidateはtyped AUR search responseからowned valueへ変換する。
+
+Autoではofficial / AUR両query、source filter指定時は有効なsourceのqueryがすべて成功してからcandidate snapshotをpublishする。failureをempty resultへflattenせず、一方のsourceが失敗した不完全なAuto snapshotからselectionを続行しない。candidateが0件ならpromptを開始せずnon-zeroとする。
+
+candidateの重複排除identityはrepositoryなら`(repository, repository_name, package_name)`、AURなら`(AUR, package_name, PackageBase)`とする。searchとgroup expansionで同じidentityが現れた場合だけ1件へまとめ、group membershipはset unionする。同じidentityのversionまたはdescriptionが両方non-emptyかつ異なる場合はinvalid snapshotとし、一方だけがnon-emptyならその値を保持する。同名packageでもrepository名、source kind、PackageBaseのいずれかが異なれば別候補として残す。ただし、同じAUR package nameに異なるPackageBaseが現れる場合はAUR metadata inconsistencyとしてprompt前に停止する。
+
+表示順はlocaleやadapter返却順に依存しないstable tupleとし、(1) package nameのbytewise昇順、(2) 同名ではrepositoryをAURより先、(3) repository同士ではconfigured repository order、(4) 残るtieはrepository nameまたはPackageBaseのbytewise昇順、とする。この順序はpresentationとselection indexを固定するだけで、defaultや自動source priorityには使わない。
+
+Arch package groupの初期scopeは、queryとexact matchしたconfigured official groupだけとする。group memberは通常のsource-aware repository candidateとしてすべて表示する。`@<group-name>` selectorを作るのは、group nameがnon-emptyでcontrol character / ASCII whitespaceを含まず、既存package-name character setに収まるsafe tokenの場合だけとし、その表示済みmember集合を選択する。safe tokenでないgroupもmemberの番号選択は許可するが、raw group nameをpromptへ出さず`@group` selectorを作らない。`@group`はsource kindの表示group、AUR上のgroup、任意queryの省略形、未表示memberの暗黙追加を意味しない。`--aur`ではgroup selectorを作らない。
+
+### Selection grammar、cancel、終了status
+
+candidateは1-originの番号で表示する。input lineはASCII whitespaceでtoken分割し、次を初期scopeで受理する。
+
+- `1`: 1件
+- `1 3 5`: 複数番号
+- `2-5`: 昇順endpointsを持つinclusive range
+- `@base-devel`: 表示済みofficial groupの全member
+- `1 4-6 @base-devel`: 上記selectorの組み合わせ
+
+重複selectionはfull candidate identityで1件へまとめ、selected rootの順序はcandidate表示順とする。同じpackage nameについて異なるrepository、source kind、PackageBaseを持つ複数identityが同時に選ばれた場合はalternative sourceの競合とし、どちらかを暗黙に優先せずline全体を不採用にする。comma区切り、descending / open-ended range、exclusion、`all`、正規表現、fuzzy selectorは初期scopeへ含めない。line内にmalformed token、0、out-of-range番号、unknown group、alternative source conflictが1件でもあればline全体を不採用とし、partial selectionを保持せず同じsnapshotで再入力を求める。
+
+trim後のline全体がempty、またはcase-insensitiveに`q` / `quit` / `cancel`と一致する場合、およびEOFは取消とする。cancel tokenをほかのselectorと組み合わせたlineは取消やpartial selectionにせずinvalid inputとする。candidateが1件でも明示selectionを要求し、Enterや先頭候補をdefaultにしない。stdinがTTYでない場合または`--noconfirm`の場合はcandidate queryやpromptを開始せず、pipeをselection inputとして読まずnon-zeroで停止する。invalid inputはretryし、取消 / EOF / non-interactive gate / candidateなし / query failureはexit code 1かつexternal mutationなしとする。selection後はprojectした明示routeのaggregate resultが成功した場合だけ0とし、route failureやpartial completionはnon-zeroとする。
+
+### Selected root routingと#272境界
+
+全selected rootのselection、identity validation、repository / AUR route projection、既存static preflightが完了するまで、pacman、sudo、clone、git fetch、makepkg、artifact install、cache / workspace mutationを開始しない。selected repository rootはexactな`repository/package`としてRepoOnly相当のbinary install routeへ渡し、source-build preferenceでrouteを変更しない。selected AUR rootはpackage nameとPackageBaseを保持してAurOnly相当のbuild / install routeへ渡し、同名official packageへfallbackしない。mixed selectionをinvocation-wide Autoへpackage名だけで戻さない。
+
+route projectionはcandidate表示順を保ったままrepository rootsとAUR rootsへpartitionする。全routeのstatic preflight完了後、repository rootsをexact targetの1 pacman transactionとして先に実行し、成功した場合だけAUR rootsをそのrelative orderで既存source lifecycleへ渡す。repository transaction failureではAUR rootsを未実行とし、AUR failureでは完了済みrepository transactionをrollbackしない。repository transactionとAUR source build / installは既存ownerとfailure contractを維持し、cross-sourceのunified solver、single atomic transaction、automatic rollbackを追加しない。完了済み・失敗・未実行を区別してnon-zeroとする。
+
+#272の`ProviderSelectionSession`はcanonical dependency、`ProvidedDependency`、exactly-one choice、invocation-local choice共有を所有するため、root candidateやmultiple / range / group selectionを追加しない。共有するcontractはstdin TTYかつ`--noconfirm`なしというgate、trim / cancel token / EOF、invalid retry、no default、selection-before-mutationである。root selection expressionは別のpure parser / typed resultとして実装し、provider固有modelとroot roleを混ぜない。
+
+この初期scopeにdependency provider selectionやsplit artifact selectionの再設計・root selectorへの統合、conflicts / replaces解決、version solver、choice永続化、machine-readable non-interactive selection、fuzzy finder、GUI / TUI、高度なruntime completionを含めない。selected AUR routeが既存#272 / #268の選択・validationを必要とする場合は、root selectionとは別責務の後続preflightとして従来のcontractを適用する。
 
 ---
 
@@ -435,6 +487,7 @@ build 後の artifact validation、metadata query、または install が失敗�
 - 未解決依存を含む AUR build plan の実行
 - 循環依存を含む AUR build plan の実行
 - ambiguous provider の自動選択
+- root package candidate の自動選択
 - unknown / missing / duplicate artifact identityの自動選択
 - one transactionで表現できないmixed install reason
 - conflicts / replaces の自動判断
@@ -445,7 +498,7 @@ build 後の artifact validation、metadata query、または install が失敗�
 
 この方針は #83 の prompt helper 実装前提でもある。prompt helper では、単純に `--noconfirm` を「yes」として扱うのではなく、非対話時に安全に停止するもの、default を選べるもの、明示 option が必要なものを分ける。
 
-Moguet 独自 prompt はpromptごとにdefaultの有無を定める。`Updates detected in existing cache repository. View git diff?`、`Edit PKGBUILD?`、`Edit install script <file>?`、`Rebuild package?`、`Clean build existing build directory?`、`Clean Moguet build cache?` は default no とし、`Proceed with build?` は default yes とする。provider selectionだけはdefaultを持たず、`--noconfirm`やnon-TTYでdefaultへ置き換えない。defaultを持つpromptでもEOFや入力読み取り失敗はEnterと同一扱いにせず、stdinがTTYでない場合は危険側へ進まないように扱う。
+Moguet 独自 prompt はpromptごとにdefaultの有無を定める。`Updates detected in existing cache repository. View git diff?`、`Edit PKGBUILD?`、`Edit install script <file>?`、`Rebuild package?`、`Clean build existing build directory?`、`Clean Moguet build cache?` は default no とし、`Proceed with build?` は default yes とする。provider selectionとroot package selectionはdefaultを持たず、`--noconfirm`やnon-TTYでdefaultへ置き換えない。defaultを持つpromptでもEOFや入力読み取り失敗はEnterと同一扱いにせず、stdinがTTYでない場合は危険側へ進まないように扱う。
 
 ### `--needed`
 
@@ -579,7 +632,6 @@ Moguet が利用者に影響する主要な外部コマンドを実行する場�
 
 - pacman / 既存 AUR helper 完全互換の宣言
 - provider choice の永続化と non-interactive 自動選択
-- search結果からのroot package discovery
 - arbitrary multiple-output packageの全artifact自動install
 - debug packageのdefault install
 - conflicts / replaces の自動解決

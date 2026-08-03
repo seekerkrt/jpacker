@@ -173,6 +173,18 @@ selected AUR providerはPackageBase identityをBuildPlanのdependency edgeとbui
 
 対応phaseの全provider choiceとstatic preflightが完了するまで、このdependency transaction、Git checkout、makepkg、source artifact installを開始しない。transaction failure後はsource mutationへ進まず、すでに完了した別phaseやpackage transactionをrollbackしたとは扱わない。provider choiceの永続化、non-interactive自動選択、root discovery、完全なversion / conflict / replaces solverはこのdecisionへ含めない。
 
+### 14. root package discoveryは`-S --select`でsource-awareな明示選択とする
+
+#217では、通常のpacman-compatible `-Ss`を非対話の検索・表示として維持し、installを伴うroot package discoveryを専用の`moguet -S --select <query>`入口へ分離する。operation省略構文は採用せず、未知のbare tokenをunknown operationとして拒否する既存契約を保つ。`-S`がinstall intent、`--select`がexact targetではなく検索候補から選ぶintentを表し、候補が1件でもdefault選択しない。
+
+repository / AUR candidateとselected rootはpackage名へflattenせず、source kind、package名、repository packageのrepository名、AUR packageのPackageBase、root roleを保持する。同名packageもsource identityが異なれば別候補として提示し、候補順だけでsourceを決めない。official searchとArch package groupはread-only libalpm metadata、AUR searchはtyped AUR responseをauthorityとし、pacmanのhuman-readable search outputやsync database形式をroot candidateへparseしない。
+
+interactive stdinでだけ、番号、複数番号、inclusive range、および表示済みofficial groupを表す`@group` selectorを受け付ける。empty input、`q`、`quit`、`cancel`、EOF、non-TTY、`--noconfirm`では選択せずnon-zeroで停止する。invalidなselection expressionは一部だけを採用せず、同じcandidate snapshotに対して再入力を求める。#272と共有するのはTTY gate、cancel / retry / EOF、no-default、selection-before-mutationのinteraction contractであり、dependency provider固有のexactly-one sessionやchoice cacheをroot selectionへ混ぜない。
+
+selectionと全selected rootのstatic preflightが完了するまで、pacman、sudo、clone、build、install等のexternal mutationを開始しない。selected repository rootはexactな`repository/package`のbinary route、selected AUR rootはPackageBase identityを保持したAUR routeへ明示的にprojectし、Auto routingへpackage名だけを戻してsourceを再推定しない。transactionは引き続きpacman、source buildはmakepkgが所有し、cross-source atomic transactionやrollbackを新設しない。
+
+このdecisionは#217のproduction contractを固定するが、現在のCLIへ`--select`を実装済みとするものではない。pure model、typed adapter、interaction / routing、help / man / completion / localizationを後続sliceで揃え、不完全なproduction入口を有効化しない。
+
 ---
 
 ## English
@@ -343,3 +355,15 @@ Config-directory changes are normally excluded from PATCH releases. This is a na
 A selected AUR provider contributes its PackageBase identity to the BuildPlan dependency edge and build/fetch order. A selected repository provider is not treated as AUR source: before source checkout or build, its exact `repository/package` target enters a `pacman -S --asdeps --needed` transaction. Moguet owns candidate presentation, retained user choice, ordering, preflight, and diagnostics; pacman continues to own the dependency transaction itself.
 
 The corresponding phase does not begin that dependency transaction, Git checkout, makepkg, or source-artifact installation until all provider choices and static preflight for the phase are complete. A transaction failure stops source mutation and is not reported as rolling back package transactions or earlier phases that already completed. Persisted provider choices, non-interactive auto-selection, root discovery, and complete version/conflict/replaces solvers remain outside this decision.
+
+### 14. Root package discovery uses source-aware explicit selection through `-S --select`
+
+#217 keeps ordinary pacman-compatible `-Ss` as non-interactive search and presentation, and separates root package discovery that may install packages behind the dedicated `moguet -S --select <query>` entry point. Moguet does not adopt operation omission, so an unknown bare token remains an unknown-operation error. `-S` expresses install intent, `--select` expresses selection from search candidates rather than an exact target, and even a single candidate has no default.
+
+Repository and AUR candidates and selected roots are not flattened to package names. They retain the source kind, package name, repository name for repository packages, PackageBase for AUR packages, and the root role. Same-name packages with different source identities remain separate candidates, and candidate order never chooses a source. Read-only libalpm metadata is authoritative for official search and Arch package groups, while typed AUR responses are authoritative for AUR search. Moguet does not parse pacman's human-readable search output or the sync-database file format into root candidates.
+
+Only interactive stdin accepts package numbers, multiple numbers, inclusive ranges, and an `@group` selector for a displayed official group. Empty input, `q`, `quit`, `cancel`, EOF, non-TTY input, and `--noconfirm` make no selection and stop with a non-zero status. An invalid selection expression is rejected atomically and retried against the same candidate snapshot. #217 shares the TTY gate, cancellation/retry/EOF, no-default, and selection-before-mutation interaction contract with #272; it does not mix the dependency-provider-specific exactly-one session or choice cache into root selection.
+
+Pacman, sudo, clone, build, install, and other external mutation do not begin until selection and static preflight for every selected root complete. A selected repository root is projected explicitly to the exact `repository/package` binary route, while a selected AUR root is projected to the AUR route with its PackageBase identity intact. Moguet does not return package names to Auto routing and infer the source again. Pacman continues to own transactions and makepkg continues to own source builds; this decision adds no cross-source atomic transaction or rollback.
+
+This decision fixes the production contract for #217 but does not claim that `--select` is implemented in the current CLI. Later slices must complete the pure model, typed adapters, interaction/routing, help, man pages, completion, and localization before enabling the production entry point.
