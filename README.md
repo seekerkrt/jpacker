@@ -169,6 +169,14 @@ moguet -G <pkg>
 moguet -Gp <pkg>
 ```
 
+**Choosing an upgrade command:** For ordinary package installation, search,
+and system upgrades, use pacman-compatible operations such as `-S`, `-Ss`,
+and `-Syu`, as with pacman and other AUR helpers. Use the corresponding
+`upgrade`, `upgrade-aur`, or `upgrade-all` command when you intentionally want
+a Moguet-specific multi-phase workflow, such as applying saved source-build
+preferences or rebuilding installed AUR packages from source. These commands
+are not aliases for an ordinary `-Syu`.
+
 `--aur` limits supported `-S`, `-Ss`, and `-Si` forms to AUR. `--repo`
 limits them to official binary repositories. Combining the selectors is an
 error before an external command or AUR query. Pacman-only routes preserve
