@@ -269,10 +269,10 @@ pass "third-party components and external-process boundary are classified"
 require_regular_file VERSION
 require_regular_file PKGBUILD
 current_version=$(tr -d '[:space:]' < VERSION)
-[ "$current_version" = 2.0.0 ] ||
-    fail "VERSION must identify the Moguet v2.0.0 package; got $current_version."
+[ "$current_version" = 2.0.1 ] ||
+    fail "VERSION must identify the Moguet v2.0.1 package; got $current_version."
 
-# POLICY(#310): The current PKGBUILD describes only Moguet v2.0.0. Historical
+# POLICY(#310): The current PKGBUILD describes only Moguet v2.0.1. Historical
 # jpacker tags retain their own metadata; this validator does not reinterpret them.
 pkgbuild_test_dir=$(mktemp -d)
 cleanup_pkgbuild_test() {

@@ -336,20 +336,20 @@ v1_manifest=$tmp_dir/jpacker-v1.16.0-files.txt
 v1_directory_manifest=$tmp_dir/jpacker-v1.16.0-directories.txt
 v1_removable_manifest=$tmp_dir/jpacker-v1.16.0-removable-files.txt
 
-v2_source=$tmp_dir/moguet-v2.0.0-source
-v2_source_manifest=$tmp_dir/moguet-v2.0.0-source-files.txt
-v2_makepkg_work=$tmp_dir/moguet-v2.0.0-makepkg
-v2_package_destination=$tmp_dir/moguet-v2.0.0-packages
-v2_archive_root=$tmp_dir/moguet-v2.0.0-archive-root
-v2_manifest=$tmp_dir/moguet-v2.0.0-files.txt
-v2_directory_manifest=$tmp_dir/moguet-v2.0.0-directories.txt
+v2_source=$tmp_dir/moguet-v2.0.1-source
+v2_source_manifest=$tmp_dir/moguet-v2.0.1-source-files.txt
+v2_makepkg_work=$tmp_dir/moguet-v2.0.1-makepkg
+v2_package_destination=$tmp_dir/moguet-v2.0.1-packages
+v2_archive_root=$tmp_dir/moguet-v2.0.1-archive-root
+v2_manifest=$tmp_dir/moguet-v2.0.1-files.txt
+v2_directory_manifest=$tmp_dir/moguet-v2.0.1-directories.txt
 
 coinstall_root=$tmp_dir/coinstall-root
 transition_root=$tmp_dir/transition-root
 
 current_version=$(tr -d '[:space:]' <"$repo_root/VERSION")
-[ "$current_version" = 2.0.0 ] ||
-    fail "current VERSION is $current_version; expected 2.0.0"
+[ "$current_version" = 2.0.1 ] ||
+    fail "current VERSION is $current_version; expected 2.0.1"
 
 git -C "$repo_root" rev-parse --verify 'refs/tags/v1.16.0^{commit}' \
     >/dev/null || fail 'local tag v1.16.0 is unavailable'
@@ -399,7 +399,7 @@ first_package_artifact=$(find "$v2_source" -type f \
 [ -z "$first_package_artifact" ] ||
     fail "source fixture contains package artifact $first_package_artifact"
 
-initialize_fixture_repository "$v2_source" v2.0.0
+initialize_fixture_repository "$v2_source" v2.0.1
 prepare_test_pkgbuild "$repo_root/PKGBUILD" "$v2_source" \
     "$v2_makepkg_work" \
     'git+https://github.com/seekerkrt/moguet.git'
@@ -418,7 +418,7 @@ run_logged 'jpacker v1.16.0 clean package build' "$tmp_dir/v1-makepkg.log" \
         "$tmp_dir/v1-source-packages" \
         "$tmp_dir/v1-logs" \
         "$tmp_dir/v1-xdg-cache"
-run_logged 'Moguet v2.0.0 clean package build' "$tmp_dir/v2-makepkg.log" \
+run_logged 'Moguet v2.0.1 clean package build' "$tmp_dir/v2-makepkg.log" \
     run_makepkg_fixture \
         "$v2_makepkg_work" \
         "$tmp_dir/v2-build" \
@@ -429,7 +429,7 @@ run_logged 'Moguet v2.0.0 clean package build' "$tmp_dir/v2-makepkg.log" \
         "$tmp_dir/v2-xdg-cache"
 
 v1_package_archive=$v1_package_destination/jpacker-1.16.0-1-x86_64.pkg.tar.zst
-v2_package_archive=$v2_package_destination/moguet-2.0.0-1-x86_64.pkg.tar.zst
+v2_package_archive=$v2_package_destination/moguet-2.0.1-1-x86_64.pkg.tar.zst
 [ -f "$v1_package_archive" ] ||
     fail "expected package archive is missing: $v1_package_archive"
 [ -f "$v2_package_archive" ] ||
@@ -457,7 +457,7 @@ assert_metadata_single "$tmp_dir/v1.PKGINFO" backup \
     etc/jpacker/jpacker.conf
 
 assert_metadata_single "$tmp_dir/v2.PKGINFO" pkgname moguet
-assert_metadata_single "$tmp_dir/v2.PKGINFO" pkgver 2.0.0-1
+assert_metadata_single "$tmp_dir/v2.PKGINFO" pkgver 2.0.1-1
 assert_metadata_single "$tmp_dir/v2.PKGINFO" arch x86_64
 assert_metadata_single "$tmp_dir/v2.PKGINFO" license GPL-3.0-or-later
 for transition_key in backup conflict conflicts provides replaces
@@ -540,7 +540,7 @@ archive_version=$(LC_ALL=C \
     XDG_STATE_HOME="$archive_state_home" \
     XDG_CACHE_HOME="$archive_cache_home" \
     "$v2_archive_root/usr/bin/moguet" --version)
-[ "$archive_version" = 'Moguet v2.0.0' ] ||
+[ "$archive_version" = 'Moguet v2.0.1' ] ||
     fail "archived Moguet version mismatch: $archive_version"
 assert_absent "$archive_config_home"
 assert_absent "$archive_state_home"

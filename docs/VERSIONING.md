@@ -83,7 +83,7 @@ system storeをruntime authorityとして残した不具合を修正する。新
 完成させる変更であるため、v2.0.1の限定的なPATCH例外として扱う。
 
 この例外は、config / state / cache / source-preference directoryの変更を一般にPATCHへ含める
-precedentではない。v2.0.0のtag、GitHub Release、`RELEASE_NOTES.md`はhistorical artifactとして
+precedentではない。v2.0.0のtag、GitHub Release、公開済みrelease bodyはhistorical artifactとして
 変更せず、legacy dataの移行はMigration Guideに従う利用者の手動操作だけとする。
 
 ## PATCH に含めない変更
