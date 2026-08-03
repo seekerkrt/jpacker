@@ -156,6 +156,13 @@ moguet -G <pkg>
 moguet -Gp <pkg>
 ```
 
+**upgrade commandの選択:** 通常のpackage install、search、system upgradeでは、
+pacmanや他のAUR helperと同様に`-S`、`-Ss`、`-Syu`等のpacman-compatible
+operationを使用してください。保存済みsource-build preferenceの適用、installed AUR
+packageのsource build、またはそれらを組み合わせたMoguet固有のmulti-phase upgradeを
+明示的に実行する場合は、対応する`upgrade`、`upgrade-aur`、`upgrade-all`を使用します。
+これらは通常の`-Syu`の別名ではありません。
+
 `--aur`は対応する`-S`、`-Ss`、`-Si`をAURへ限定し、`--repo`はofficial binary
 repositoryへ限定します。両selectorの併用はexternal commandやAUR queryより前に
 失敗します。pacman-only routeではcompatibleなpacman optionを保持し、source-build
