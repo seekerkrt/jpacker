@@ -1,4 +1,4 @@
-.TH MOGUET 1 "August 2026" "Moguet 2.0.0" "User Commands"
+.TH MOGUET 1 "August 2026" "Moguet 2.0.1" "User Commands"
 .\" parity:name
 .SH NAME
 moguet \- pacman-first AUR helper with verified source builds
@@ -152,27 +152,34 @@ install.
 Register a source-build preference and optional build environment assignments
 for one package.
 The v2 configuration file is not a source-preference table.
+The first write creates the managed XDG directories when necessary.
 .
 .TP
 .B "edit-src <pkg>"
-Edit an existing source-build preference using
+Edit an existing source-build preference, or create a new one, using
 .B VISUAL
 or
 .BR EDITOR .
+If a failure occurs after the editor runs, Moguet retains the edited temporary
+file when safe and reports its path.
 .
 .TP
 .B "list-src"
 List registered source-build preferences and their visible environment
 assignments.
+The complete directory snapshot is validated before any entry is printed.
 .
 .TP
 .B "del-src <pkg>"
 Remove one source-build preference without reinstalling the binary package.
+A missing entry succeeds without creating preference directories.
 .
 .TP
 .B "revert <pkg>"
 Remove one source-build preference and reinstall the official binary package
 when the target exists in configured official repositories.
+A missing preference does not create directories and does not suppress the
+repository reinstall.
 Review the displayed pacman transaction before confirming it.
 .
 .TP
@@ -391,10 +398,12 @@ The fallback is
 .IR ~/.config/moguet/config.toml .
 .
 .TP
-.I /etc/jpacker/package.build/
-Current source-build preference store and a compatibility boundary separate
-from the user TOML configuration.
-Existing entries are read in place and are not copied to XDG storage.
+.I $XDG_CONFIG_HOME/moguet/source-build.d/<package-name>
+User-owned per-package source-build preference.
+The fallback is
+.IR $HOME/.config/moguet/source-build.d/<package-name> .
+The managed directories use mode 0700 and preference entries use mode 0600.
+All source-preference commands and build or upgrade readers use this authority.
 .
 .TP
 .I $XDG_STATE_HOME/moguet/moguet.log
@@ -440,6 +449,10 @@ Japanese GNU gettext runtime catalog.
 Absolute base directory for user configuration.
 An unset or empty value falls back to
 .IR $HOME/.config .
+For source-preference access, an explicit value must be absolute, must already
+exist, and must pass the ownership, type, and permission checks.
+Moguet creates only the source-preference managed children below that base when
+a write operation first needs them.
 .
 .TP
 .B XDG_STATE_HOME
@@ -458,6 +471,8 @@ An unset or empty value falls back to
 Used only for standard XDG fallbacks when the corresponding XDG variable is
 unset or empty.
 An unusable home or unsafe path fails closed.
+The source-preference write boundary may create the required fallback config
+hierarchy; read-only operations do not.
 .
 .TP
 .B VISUAL
@@ -557,17 +572,16 @@ Temporarily restore review and normal build defaults over user config:
 .
 .\" parity:migration
 .SH MIGRATION
-Moguet v2 does not read
+Starting with Moguet v2.0.1, Moguet does not read
 .I /etc/jpacker/jpacker.conf
-as a normal configuration layer and does not automatically copy, rewrite, or
-delete
+as a normal configuration layer or
+.I /etc/jpacker/package.build/
+as a source-preference fallback.  It does not automatically copy, merge,
+rewrite, or delete
 .IR /etc/jpacker .
 Root-owned legacy data is not assigned to a user by inference.
-The existing
-.I /etc/jpacker/package.build/
-source-preference store is a separate compatibility boundary and is read in
-place; do not replay its entries through source-preference commands as a
-config migration step.
+Legacy entries are ignored by Moguet and remain available for manual migration
+and rollback.
 .
 .PP
 Back up jpacker v1.16.0 data, install the validated Moguet package alongside it,
@@ -576,8 +590,12 @@ and no provides, conflicts, or replaces relationship.  Moguet supplies no
 .B jpacker
 command alias.  Keep the v1 package during verification for a direct rollback,
 or remove it explicitly only after the Moguet checks pass.  Do not run mutating
-operations from both helpers concurrently because the source-preference store
-is shared.
+package operations from both helpers concurrently, although their
+source-preference stores are not shared.  Recreate only understood legacy
+entries, one package and one explicitly selected target user at a time; do not
+overwrite an existing XDG entry or delete the legacy entry.  Run Moguet as that
+normal user, not through sudo.  Source-preference filesystem operations do not
+use sudo; a revert may still use sudo for its pacman package transaction.
 .B NOEDIT
 maps to
 .BR review.pkgbuild ;

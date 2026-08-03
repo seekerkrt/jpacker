@@ -29,10 +29,14 @@ setup_case() {
     command_log=$case_dir/commands.log
     repository_metadata_state=$case_dir/repository-metadata.state
 
-    mkdir -p "$case_dir/home" "$case_dir/xdg-state" "$case_dir/xdg-cache"
+    mkdir -p \
+        "$case_dir/home" "$case_dir/xdg-config" \
+        "$case_dir/xdg-state" "$case_dir/xdg-cache"
+    chmod 0700 "$case_dir/xdg-config"
     : > "$command_log"
     : > "$repository_metadata_state"
     export HOME=$case_dir/home
+    export XDG_CONFIG_HOME=$case_dir/xdg-config
     export XDG_STATE_HOME=$case_dir/xdg-state
     export XDG_CACHE_HOME=$case_dir/xdg-cache
     export MOGUET_TEST_COMMAND_LOG=$command_log
@@ -49,7 +53,6 @@ extra'
     unset MOGUET_TEST_PACMAN_Q_OUTPUT
     unset MOGUET_TEST_PACMAN_Q_EXIT_CODE
     unset MOGUET_TEST_PACMAN_REPO_PACKAGES
-    unset MOGUET_TEST_PACKAGE_BUILD_DIR
     unset MOGUET_TEST_GIT_REMOTE_URL
     unset MOGUET_TEST_GIT_CLONE_EXIT_CODE
     unset MOGUET_TEST_GIT_CLONE_FAIL_DESTINATION

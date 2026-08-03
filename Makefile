@@ -286,6 +286,8 @@ AUR_UPDATE_EXECUTION_PREPARATION_INTEGRATION_TEST_SRCS := \
 	$(SRC_DIR)/source_install_preparation.cpp \
 	$(SRC_DIR)/source_preference.cpp \
 	$(SRC_DIR)/source_environment.cpp \
+	$(SRC_DIR)/xdg_directory_safety.cpp \
+	$(SRC_DIR)/xdg_paths.cpp \
 	$(SRC_DIR)/shell_words.cpp \
 	$(SRC_DIR)/package_identifier.cpp \
 	tests/stubs/aur-update-execution-preparation-integration/preparation_stub.cpp
@@ -1096,7 +1098,7 @@ $(SHELL_WORDS_TEST_TARGET): tests/shell_words_test.cpp $(SRC_DIR)/shell_words.cp
 		$(SRC_DIR)/shell_words.cpp \
 		-o $@
 
-$(SOURCE_ENVIRONMENT_TEST_TARGET): tests/source_environment_test.cpp $(SRC_DIR)/source_environment.cpp $(SRC_DIR)/source_environment.hpp $(SRC_DIR)/source_preference.cpp $(SRC_DIR)/source_preference.hpp $(SRC_DIR)/package_identifier.cpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/shell_words.cpp $(SRC_DIR)/shell_words.hpp $(SRC_DIR)/localization.hpp $(VERSION_FILE)
+$(SOURCE_ENVIRONMENT_TEST_TARGET): tests/source_environment_test.cpp $(SRC_DIR)/source_environment.cpp $(SRC_DIR)/source_environment.hpp $(SRC_DIR)/source_preference.cpp $(SRC_DIR)/source_preference.hpp $(SRC_DIR)/xdg_directory_safety.cpp $(SRC_DIR)/xdg_directory_safety.hpp $(SRC_DIR)/xdg_paths.cpp $(SRC_DIR)/xdg_paths.hpp $(SRC_DIR)/package_identifier.cpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/shell_words.cpp $(SRC_DIR)/shell_words.hpp $(SRC_DIR)/localization.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling source environment test binary"
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
@@ -1106,6 +1108,8 @@ $(SOURCE_ENVIRONMENT_TEST_TARGET): tests/source_environment_test.cpp $(SRC_DIR)/
 		tests/source_environment_test.cpp \
 		$(SRC_DIR)/source_environment.cpp \
 		$(SRC_DIR)/source_preference.cpp \
+		$(SRC_DIR)/xdg_directory_safety.cpp \
+		$(SRC_DIR)/xdg_paths.cpp \
 		$(SRC_DIR)/package_identifier.cpp \
 		$(SRC_DIR)/shell_words.cpp \
 		-o $@
@@ -1441,9 +1445,10 @@ test-shell-words: $(SHELL_WORDS_TEST_TARGET)
 	$(abspath $(SHELL_WORDS_TEST_TARGET))
 
 test-source-environment: $(SOURCE_ENVIRONMENT_TEST_TARGET)
-	MOGUET_TEST_PACKAGE_BUILD_DIR=$(abspath $(BUILD_DIR)/tests/source-environment-fixture) \
+	XDG_CONFIG_HOME=$(abspath $(BUILD_DIR)/tests/source-environment-fixture/config) \
+		HOME=$(abspath $(BUILD_DIR)/tests/source-environment-fixture/home) \
 		$(abspath $(SOURCE_ENVIRONMENT_TEST_TARGET)) \
-		$(abspath $(BUILD_DIR)/tests/source-environment-fixture)
+		$(abspath $(BUILD_DIR)/tests/source-environment-fixture/config/moguet/source-build.d)
 
 test-artifact-workspace: $(ARTIFACT_WORKSPACE_TEST_TARGET)
 	MOGUET_TEST_MAKEPKG_STUB=$(abspath tests/stubs/makepkg) \
@@ -1570,7 +1575,8 @@ test-separated-package-base-source-build: check-separated-package-base-source-bu
 	$(abspath $(SEPARATED_PACKAGE_BASE_SOURCE_BUILD_TEST_TARGET))
 
 test-production-source-build: $(PRODUCTION_SOURCE_BUILD_TEST_TARGET)
-	MOGUET_TEST_PACKAGE_BUILD_DIR=$(abspath $(BUILD_DIR)/tests/production-source-build-preferences) \
+	XDG_CONFIG_HOME=$(abspath $(BUILD_DIR)/tests/production-source-build-preferences/config) \
+		HOME=$(abspath $(BUILD_DIR)/tests/production-source-build-preferences/home) \
 		$(abspath $(PRODUCTION_SOURCE_BUILD_TEST_TARGET))
 
 test-process-capture: $(PROCESS_CAPTURE_TEST_TARGET)
@@ -1637,9 +1643,10 @@ test-aur-update-execution-preflight-integration: $(AUR_UPDATE_EXECUTION_PREFLIGH
 
 test-aur-update-execution-preparation: $(AUR_UPDATE_EXECUTION_PREPARATION_TEST_TARGET) $(AUR_UPDATE_EXECUTION_PREPARATION_INTEGRATION_TEST_TARGET)
 	$(abspath $(AUR_UPDATE_EXECUTION_PREPARATION_TEST_TARGET))
-	MOGUET_TEST_PACKAGE_BUILD_DIR=$(abspath $(BUILD_DIR)/tests/aur-update-execution-preparation-fixture) \
+	XDG_CONFIG_HOME=$(abspath $(BUILD_DIR)/tests/aur-update-execution-preparation-fixture/config) \
+		HOME=$(abspath $(BUILD_DIR)/tests/aur-update-execution-preparation-fixture/home) \
 		$(abspath $(AUR_UPDATE_EXECUTION_PREPARATION_INTEGRATION_TEST_TARGET)) \
-		$(abspath $(BUILD_DIR)/tests/aur-update-execution-preparation-fixture)
+		$(abspath $(BUILD_DIR)/tests/aur-update-execution-preparation-fixture/config/moguet/source-build.d)
 
 check-aur-update-execution-runner-link-firewall:
 	@echo ":: Checking AUR update execution runner link firewall"
@@ -1940,7 +1947,7 @@ test: \
 	test-source-build \
 	test-source-selection
 
-release-check: check-pot check-catalogs test-localization test-catalog-metadata-gate test-cli-localization-surface test-internal-identity test-application-identity test-xdg-paths test-xdg-directory-safety test-xdg-state-log test-trusted-cache test-runtime-identity test-public-documentation test-install-layout test-package-transition
+release-check: check-pot check-catalogs test-localization test-catalog-metadata-gate test-cli-localization-surface test-internal-identity test-application-identity test-xdg-paths test-xdg-directory-safety test-source-environment test-xdg-state-log test-trusted-cache test-runtime-identity test-public-documentation test-install-layout test-package-transition
 	@echo ":: Checking release version consistency"
 	sh scripts/check-release-version.sh
 	@echo ":: Checking license compliance"

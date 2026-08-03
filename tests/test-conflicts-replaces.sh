@@ -18,7 +18,8 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-mkdir -p "$tmp_dir/cache" "$tmp_dir/home" "$tmp_dir/state"
+mkdir -p "$tmp_dir/cache" "$tmp_dir/config" "$tmp_dir/home" "$tmp_dir/state"
+chmod 0700 "$tmp_dir/config"
 command_log=$tmp_dir/commands.log
 : > "$command_log"
 
@@ -39,6 +40,7 @@ done
 
 port=$(cat "$port_file")
 export HOME=$tmp_dir/home
+export XDG_CONFIG_HOME=$tmp_dir/config
 export XDG_STATE_HOME=$tmp_dir/state
 export XDG_CACHE_HOME=$tmp_dir/cache
 export PATH=$repo_root/tests/stubs:/usr/bin:/bin
@@ -53,7 +55,6 @@ export MOGUET_TEST_PACMAN_EXIT_CODE=1
 export MOGUET_TEST_SUDO_EXIT_CODE=99
 unset MOGUET_TEST_PACMAN_QM_OUTPUT
 unset MOGUET_TEST_PACMAN_REPO_PACKAGES
-unset MOGUET_TEST_PACKAGE_BUILD_DIR
 unset MOGUET_TEST_GIT_REMOTE_URL
 unset MOGUET_TEST_GIT_CLONE_EXIT_CODE
 unset MOGUET_TEST_GIT_CLONE_SYMLINK_TARGET

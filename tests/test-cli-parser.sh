@@ -52,8 +52,8 @@ setup_case() {
         "$case_dir/home" \
         "$case_dir/xdg-config" \
         "$case_dir/xdg-state" \
-        "$case_dir/xdg-cache" \
-        "$case_dir/package.build"
+        "$case_dir/xdg-cache"
+    chmod 0700 "$case_dir/xdg-config"
     : > "$command_log"
     export HOME=$case_dir/home
     export XDG_CONFIG_HOME=$case_dir/xdg-config
@@ -62,7 +62,6 @@ setup_case() {
     export MOGUET_TEST_COMMAND_LOG=$command_log
     export MOGUET_TEST_PACMAN_EXIT_CODE=0
     export MOGUET_TEST_SUDO_EXIT_CODE=0
-    export MOGUET_TEST_PACKAGE_BUILD_DIR=$case_dir/package.build
     unset MOGUET_TEST_PACMAN_QM_OUTPUT
     unset MOGUET_TEST_PACMAN_REPO_PACKAGES
     unset MOGUET_TEST_GIT_REMOTE_URL
@@ -453,6 +452,26 @@ assert_pre_log_exit
 setup_case targetless-custom-operation
 run_fail plan
 assert_contains "Usage: moguet plan <pkg>" "$output_file"
+assert_pre_log_exit
+
+# POLICY(#335): semantic `--` is accepted only by target-bearing source-
+# preference operations so a leading-hyphen package reaches their validator.
+# Other optionless operations retain their unsupported-option behavior.
+for operation in clean list-src upgrade upgrade-aur; do
+    setup_case "$operation-rejects-end-of-options"
+    run_fail "$operation" --
+    assert_contains "Unsupported $operation option: --" "$output_file"
+    assert_pre_log_exit
+done
+
+setup_case upgrade-all-rejects-end-of-options
+run_fail upgrade-all --
+assert_contains "upgrade-all does not accept the -- operand marker." "$output_file"
+assert_pre_log_exit
+
+setup_case build-rejects-end-of-options
+run_fail build -- clean-root
+assert_contains "Unsupported build option: --" "$output_file"
 assert_pre_log_exit
 
 run_exact help-as-option-value \

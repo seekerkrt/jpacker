@@ -20,6 +20,7 @@ struct StateLogDirectoryAccess;
 }
 
 struct TrustedCacheDirectoryAccess;
+struct SourcePreferenceDirectoryAccess;
 
 namespace xdg_directory_safety {
 
@@ -80,6 +81,7 @@ class PreparedDirectory final {
         std::uintmax_t inode = 0;
         std::uintmax_t filesystem_owner = 0;
         bool           requires_security_validation = false;
+        bool           requires_private_mode = false;
     };
 
     xdg_paths::DirectoryKind directory_kind_;
@@ -111,10 +113,13 @@ class PreparedDirectory final {
             const xdg_paths::StatePaths& paths);
     friend PreparedDirectory prepare_directory(
             const xdg_paths::CachePaths& paths);
+    friend PreparedDirectory prepare_directory(
+            const xdg_paths::SourcePreferencePaths& paths);
 
     friend struct DirectorySafetyAccess;
     friend struct xdg_state_log::StateLogDirectoryAccess;
     friend struct ::TrustedCacheDirectoryAccess;
+    friend struct ::SourcePreferenceDirectoryAccess;
 
 public:
     PreparedDirectory(const PreparedDirectory&) = delete;
@@ -153,11 +158,19 @@ PreparedDirectory prepare_directory(const xdg_paths::ConfigPaths& paths);
 PreparedDirectory prepare_directory(const xdg_paths::StatePaths& paths);
 PreparedDirectory prepare_directory(const xdg_paths::CachePaths& paths);
 
+// Source preference directoryだけを対象とするcreation / read-only境界。
+// open_existing_directory()のnulloptはmanaged componentのmissingだけを表す。
+PreparedDirectory prepare_directory(
+        const xdg_paths::SourcePreferencePaths& paths);
+std::optional<PreparedDirectory> open_existing_directory(
+        const xdg_paths::SourcePreferencePaths& paths);
+
 #ifdef MOGUET_TEST_XDG_DIRECTORY_SAFETY_HOOKS
 enum class DirectorySafetyTestEvent {
     AfterAnchorMetadata,
     AfterManagedMetadata,
     AfterComponentCreation,
+    BeforeAbsentLineageRevalidation,
 };
 
 enum class DirectorySafetyTestFailurePoint {
@@ -195,6 +208,12 @@ PreparedDirectory prepare_directory_for_test(
         const DirectorySafetyTestOverrides& overrides);
 PreparedDirectory prepare_directory_for_test(
         const xdg_paths::CachePaths& paths,
+        const DirectorySafetyTestOverrides& overrides);
+PreparedDirectory prepare_directory_for_test(
+        const xdg_paths::SourcePreferencePaths& paths,
+        const DirectorySafetyTestOverrides& overrides);
+std::optional<PreparedDirectory> open_existing_directory_for_test(
+        const xdg_paths::SourcePreferencePaths& paths,
         const DirectorySafetyTestOverrides& overrides);
 #endif
 

@@ -248,6 +248,28 @@ xdg_paths::ResolvedPaths resolve_home_fallback(const fs::path& home) {
     });
 }
 
+xdg_paths::SourcePreferencePaths resolve_source_preference_explicit(
+        const fs::path& config_home) {
+    return xdg_paths::resolve_source_preference(
+            xdg_paths::EnvironmentSnapshot{
+                    .xdg_config_home = config_home.string(),
+                    .xdg_state_home = std::nullopt,
+                    .xdg_cache_home = std::nullopt,
+                    .home = std::nullopt,
+            });
+}
+
+xdg_paths::SourcePreferencePaths resolve_source_preference_fallback(
+        const fs::path& home) {
+    return xdg_paths::resolve_source_preference(
+            xdg_paths::EnvironmentSnapshot{
+                    .xdg_config_home = std::nullopt,
+                    .xdg_state_home = std::nullopt,
+                    .xdg_cache_home = std::nullopt,
+                    .home = home.string(),
+            });
+}
+
 template <typename Callable>
 safety::PreparationFailure expect_preparation_error(
         Callable callable, xdg_paths::DirectoryKind expected_kind,
@@ -384,6 +406,349 @@ void test_home_fallback_creates_only_resolver_owned_components() {
     expect_private_directory(paths.state.directory, "HOME state application directory");
     expect_private_directory(home / ".cache", "HOME .cache");
     expect_private_directory(paths.cache.directory, "HOME cache application directory");
+}
+
+void test_source_preference_explicit_preparation_and_existing_open() {
+    TemporaryDirectory temporary_directory;
+    const fs::path config_home = temporary_directory.path() / "config";
+    create_test_directory(config_home);
+    const xdg_paths::SourcePreferencePaths paths =
+            resolve_source_preference_explicit(config_home);
+
+    expect(
+            !fs::exists(paths.directory.parent_path()),
+            "Source preference resolver created the application directory.");
+    ScopedUmask permissive_umask(0000);
+    safety::PreparedDirectory prepared =
+            safety::prepare_directory(paths);
+    expect(
+            prepared.directory_kind() == xdg_paths::DirectoryKind::Config,
+            "Source preference preparation returned the wrong directory kind.");
+    expect_path(
+            prepared.path(), paths.directory,
+            "Prepared source preference directory");
+    expect(
+            prepared.created_component_count() == 2,
+            "Explicit source preference creation count mismatch.");
+    expect_private_directory(
+            paths.directory.parent_path(),
+            "Explicit source preference application directory");
+    expect_private_directory(
+            paths.directory,
+            "Explicit source preference directory");
+
+    std::optional<safety::PreparedDirectory> opened =
+            safety::open_existing_directory(paths);
+    expect(
+            opened.has_value(),
+            "Existing source preference directory was reported absent.");
+    expect(
+            opened->created_component_count() == 0,
+            "Read-only source preference open reported created components.");
+    opened->require_unchanged_identity();
+    prepared.require_unchanged_identity();
+}
+
+void test_source_preference_home_fallback_is_lazy() {
+    TemporaryDirectory temporary_directory;
+    const fs::path home = temporary_directory.path() / "home";
+    create_test_directory(home);
+    const xdg_paths::SourcePreferencePaths paths =
+            resolve_source_preference_fallback(home);
+
+    std::optional<safety::PreparedDirectory> missing =
+            safety::open_existing_directory(paths);
+    expect(
+            !missing.has_value(),
+            "Missing source preference directory was reported present.");
+    expect(
+            !fs::exists(home / ".config"),
+            "Read-only source preference open created HOME config state.");
+
+    safety::PreparedDirectory prepared =
+            safety::prepare_directory(paths);
+    expect(
+            prepared.created_component_count() == 3,
+            "HOME source preference creation count mismatch.");
+    expect_private_directory(home / ".config", "Source preference HOME .config");
+    expect_private_directory(
+            paths.directory.parent_path(),
+            "Source preference HOME application directory");
+    expect_private_directory(
+            paths.directory,
+            "Source preference HOME directory");
+}
+
+void test_source_preference_read_only_open_does_not_complete_partial_tree() {
+    TemporaryDirectory temporary_directory;
+    const fs::path config_home = temporary_directory.path() / "config";
+    create_test_directory(config_home);
+    const xdg_paths::SourcePreferencePaths paths =
+            resolve_source_preference_explicit(config_home);
+
+    std::optional<safety::PreparedDirectory> missing_application =
+            safety::open_existing_directory(paths);
+    expect(
+            !missing_application.has_value(),
+            "Missing source preference application directory was reported present.");
+    expect(
+            !fs::exists(paths.directory.parent_path()),
+            "Read-only open created a missing application directory.");
+
+    create_test_directory(paths.directory.parent_path(), 0755);
+    const PathMetadata application_before =
+            path_metadata(paths.directory.parent_path());
+    std::optional<safety::PreparedDirectory> missing_store =
+            safety::open_existing_directory(paths);
+    expect(
+            !missing_store.has_value(),
+            "Missing source preference store was reported present.");
+    expect(
+            !fs::exists(paths.directory),
+            "Read-only open created a missing source preference store.");
+    expect_metadata_unchanged(
+            application_before,
+            path_metadata(paths.directory.parent_path()),
+            "Read-only source preference application directory");
+}
+
+void test_source_preference_missing_component_is_reinspected_before_absent() {
+    TemporaryDirectory temporary_directory;
+    const fs::path config_home = temporary_directory.path() / "config";
+    create_test_directory(config_home);
+    const xdg_paths::SourcePreferencePaths paths =
+            resolve_source_preference_explicit(config_home);
+    bool missing_component_reappeared = false;
+
+    safety::DirectorySafetyTestOverrides overrides;
+    overrides.event_hook =
+            [&missing_component_reappeared](
+                    safety::DirectorySafetyTestEvent event,
+                    xdg_paths::DirectoryKind directory_kind,
+                    std::size_t component_index, const fs::path& path) {
+                if(missing_component_reappeared ||
+                   event != safety::DirectorySafetyTestEvent::BeforeAbsentLineageRevalidation ||
+                   directory_kind != xdg_paths::DirectoryKind::Config ||
+                   component_index != 0) {
+                    return;
+                }
+                create_test_directory(path);
+                create_test_directory(path / "source-build.d");
+                missing_component_reappeared = true;
+            };
+
+    std::optional<safety::PreparedDirectory> opened =
+            safety::open_existing_directory_for_test(paths, overrides);
+    expect(
+            missing_component_reappeared,
+            "Missing-component reappearance hook did not run.");
+    expect(
+            opened.has_value(),
+            "A source preference store that reappeared before the absence "
+            "proof was reported absent.");
+    expect(
+            opened->created_component_count() == 0,
+            "Read-only reinspection reported created components.");
+    opened->require_unchanged_identity();
+}
+
+void test_source_preference_absence_revalidation_detects_lineage_replacement() {
+    TemporaryDirectory temporary_directory;
+    const fs::path config_home = temporary_directory.path() / "config";
+    create_test_directory(config_home);
+    const xdg_paths::SourcePreferencePaths paths =
+            resolve_source_preference_explicit(config_home);
+    create_test_directory(paths.directory.parent_path());
+    const fs::path displaced_application =
+            config_home / "displaced-moguet";
+    bool lineage_replaced = false;
+
+    safety::DirectorySafetyTestOverrides overrides;
+    overrides.event_hook =
+            [&lineage_replaced, &displaced_application](
+                    safety::DirectorySafetyTestEvent event,
+                    xdg_paths::DirectoryKind directory_kind,
+                    std::size_t component_index, const fs::path& path) {
+                if(lineage_replaced ||
+                   event != safety::DirectorySafetyTestEvent::BeforeAbsentLineageRevalidation ||
+                   directory_kind != xdg_paths::DirectoryKind::Config ||
+                   component_index != 1) {
+                    return;
+                }
+                fs::rename(path.parent_path(), displaced_application);
+                create_test_directory(path.parent_path());
+                create_test_directory(path);
+                lineage_replaced = true;
+            };
+
+    expect_preparation_error(
+            [&paths, &overrides]() {
+                return safety::open_existing_directory_for_test(
+                        paths, overrides);
+            },
+            xdg_paths::DirectoryKind::Config,
+            safety::PreparationErrorCode::ConcurrentReplacement,
+            safety::PreparationStage::DirectoryRevalidation);
+    expect(
+            lineage_replaced,
+            "Absence-lineage replacement hook did not run.");
+    expect(
+            fs::is_directory(displaced_application),
+            "Absence revalidation modified the displaced application directory.");
+    expect(
+            fs::is_directory(paths.directory),
+            "Absence revalidation modified the replacement source preference store.");
+}
+
+void test_source_preference_requires_private_final_directory() {
+    TemporaryDirectory temporary_directory;
+    const fs::path config_home = temporary_directory.path() / "config";
+    create_test_directory(config_home, 0755);
+    const xdg_paths::SourcePreferencePaths paths =
+            resolve_source_preference_explicit(config_home);
+    create_test_directory(paths.directory.parent_path(), 0755);
+    create_test_directory(paths.directory, 0755);
+
+    expect_preparation_error(
+            [&paths]() {
+                return safety::open_existing_directory(paths);
+            },
+            xdg_paths::DirectoryKind::Config,
+            safety::PreparationErrorCode::UnsafePermissions,
+            safety::PreparationStage::ComponentValidation, 1);
+    expect(
+            path_metadata(paths.directory.parent_path()).permissions == 0755,
+            "Safe existing source preference ancestor was modified.");
+
+    set_mode(paths.directory, PRIVATE_DIRECTORY_MODE);
+    std::optional<safety::PreparedDirectory> opened =
+            safety::open_existing_directory(paths);
+    expect(
+            opened.has_value(),
+            "Private source preference directory was not accepted.");
+    expect(
+            opened->permissions() == PRIVATE_DIRECTORY_MODE,
+            "Source preference capability did not retain mode 0700.");
+}
+
+void test_source_preference_final_type_is_rejected() {
+    {
+        TemporaryDirectory temporary_directory;
+        const fs::path config_home = temporary_directory.path() / "config";
+        create_test_directory(config_home);
+        const xdg_paths::SourcePreferencePaths paths =
+                resolve_source_preference_explicit(config_home);
+        create_test_directory(paths.directory.parent_path());
+        const fs::path outside = temporary_directory.path() / "outside";
+        create_test_directory(outside);
+        fs::create_symlink(outside, paths.directory);
+
+        expect_preparation_error(
+                [&paths]() {
+                    return safety::open_existing_directory(paths);
+                },
+                xdg_paths::DirectoryKind::Config,
+                safety::PreparationErrorCode::Symlink,
+                safety::PreparationStage::ComponentValidation, 1);
+    }
+    {
+        TemporaryDirectory temporary_directory;
+        const fs::path config_home = temporary_directory.path() / "config";
+        create_test_directory(config_home);
+        const xdg_paths::SourcePreferencePaths paths =
+                resolve_source_preference_explicit(config_home);
+        create_test_directory(paths.directory.parent_path());
+        create_file(paths.directory);
+
+        expect_preparation_error(
+                [&paths]() {
+                    return safety::open_existing_directory(paths);
+                },
+                xdg_paths::DirectoryKind::Config,
+                safety::PreparationErrorCode::NotDirectory,
+                safety::PreparationStage::ComponentValidation, 1);
+    }
+}
+
+void test_source_preference_missing_explicit_anchor_is_hard_error() {
+    TemporaryDirectory temporary_directory;
+    const fs::path config_home = temporary_directory.path() / "missing-config";
+    const xdg_paths::SourcePreferencePaths paths =
+            resolve_source_preference_explicit(config_home);
+
+    expect_preparation_error(
+            [&paths]() {
+                return safety::open_existing_directory(paths);
+            },
+            xdg_paths::DirectoryKind::Config,
+            safety::PreparationErrorCode::MissingAnchor,
+            safety::PreparationStage::AnchorTraversal);
+    expect(
+            !fs::exists(config_home),
+            "Read-only source preference open created an explicit anchor.");
+}
+
+void test_source_preference_retained_mode_and_identity_are_revalidated() {
+    TemporaryDirectory temporary_directory;
+    const fs::path config_home = temporary_directory.path() / "config";
+    create_test_directory(config_home);
+    const xdg_paths::SourcePreferencePaths paths =
+            resolve_source_preference_explicit(config_home);
+    safety::PreparedDirectory prepared =
+            safety::prepare_directory(paths);
+
+    set_mode(paths.directory, 0755);
+    expect_preparation_error(
+            [&prepared]() {
+                prepared.require_unchanged_identity();
+                return 0;
+            },
+            xdg_paths::DirectoryKind::Config,
+            safety::PreparationErrorCode::UnsafePermissions,
+            safety::PreparationStage::DirectoryRevalidation);
+}
+
+void test_source_preference_nested_replacement_is_detected() {
+    TemporaryDirectory temporary_directory;
+    const fs::path config_home = temporary_directory.path() / "config";
+    create_test_directory(config_home);
+    const xdg_paths::SourcePreferencePaths paths =
+            resolve_source_preference_explicit(config_home);
+    safety::PreparedDirectory prepared =
+            safety::prepare_directory(paths);
+    static_cast<void>(prepared);
+    const fs::path displaced =
+            paths.directory.parent_path() / "displaced-source-build.d";
+    bool replacement_performed = false;
+
+    safety::DirectorySafetyTestOverrides overrides;
+    overrides.event_hook =
+            [&replacement_performed, &displaced](
+                    safety::DirectorySafetyTestEvent event,
+                    xdg_paths::DirectoryKind directory_kind,
+                    std::size_t component_index, const fs::path& path) {
+                if(replacement_performed ||
+                   event != safety::DirectorySafetyTestEvent::AfterManagedMetadata ||
+                   directory_kind != xdg_paths::DirectoryKind::Config ||
+                   component_index != 1) {
+                    return;
+                }
+                fs::rename(path, displaced);
+                create_test_directory(path);
+                replacement_performed = true;
+            };
+
+    expect_preparation_error(
+            [&paths, &overrides]() {
+                return safety::open_existing_directory_for_test(
+                        paths, overrides);
+            },
+            xdg_paths::DirectoryKind::Config,
+            safety::PreparationErrorCode::ConcurrentReplacement,
+            safety::PreparationStage::ComponentValidation, 1);
+    expect(
+            replacement_performed,
+            "Nested source preference replacement hook did not run.");
 }
 
 void test_execute_only_non_managed_ancestor_is_traversable() {
@@ -1193,6 +1558,36 @@ int main() {
         run_case(
                 "HOME fallback creation boundary",
                 test_home_fallback_creates_only_resolver_owned_components);
+        run_case(
+                "source preference explicit preparation and open",
+                test_source_preference_explicit_preparation_and_existing_open);
+        run_case(
+                "source preference HOME fallback is lazy",
+                test_source_preference_home_fallback_is_lazy);
+        run_case(
+                "source preference read-only open stays non-creating",
+                test_source_preference_read_only_open_does_not_complete_partial_tree);
+        run_case(
+                "source preference missing component is reinspected",
+                test_source_preference_missing_component_is_reinspected_before_absent);
+        run_case(
+                "source preference absence lineage replacement detected",
+                test_source_preference_absence_revalidation_detects_lineage_replacement);
+        run_case(
+                "source preference final directory is private",
+                test_source_preference_requires_private_final_directory);
+        run_case(
+                "source preference final type rejected",
+                test_source_preference_final_type_is_rejected);
+        run_case(
+                "source preference explicit anchor required",
+                test_source_preference_missing_explicit_anchor_is_hard_error);
+        run_case(
+                "source preference retained mode revalidated",
+                test_source_preference_retained_mode_and_identity_are_revalidated);
+        run_case(
+                "source preference nested replacement detected",
+                test_source_preference_nested_replacement_is_detected);
         run_case(
                 "execute-only non-managed ancestor traversal",
                 test_execute_only_non_managed_ancestor_is_traversable);

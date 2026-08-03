@@ -151,6 +151,20 @@ MoguetはOSSであり、maintainer自身が把握する環境だけでなく、�
 
 このdecisionが固定するのは上記の安全契約であり、現在のmodule、type、capability plumbing、trusted Git policy、removal planningを恒久的architectureとして固定するものではない。現在のproject規模に対して、実装、理解、test、将来追従のcostが不釣り合いになる可能性を認識する。実際の保守でその負担が明らかになった場合は、安全契約を維持したまま、より小さく規模に比例したarchitectureへ統合、縮小、または置換してよい。その簡素化はこのdecisionの撤回ではなく、安全性と保守性を両立するための正当な調整である。
 
+### 12. source-build preferenceのXDG authorityとv2.0.1 PATCH例外
+
+#335は、v2.0.0のXDG移行でsource-build preferenceだけがlegacy system storeに残った実装漏れを修正する。canonical authorityは`${XDG_CONFIG_HOME:-$HOME/.config}/moguet/source-build.d/<package-name>`とし、add / edit / list / delete / revertとbuild / upgrade側のreaderを原子的に同じauthorityへ切り替える。unsetまたはemptyな`XDG_CONFIG_HOME`は`$HOME/.config`へfallbackし、明示値はabsoluteかつ安全で既存のbase directoryでなければfail-closedとする。root実行でもroot自身のXDG contextを使い、`SUDO_USER`から別userを推測しない。
+
+readとmissing entryに対するdelete / revertはdirectoryを作らない。最初にstorageを必要とするadd / editだけが安全なcreation boundaryを通り、managed directoryをmode `0700`、entryをmode `0600`で作成する。source preferenceのfilesystem操作はdescriptor基準とし、final symlinkを拒否し、write / renameをatomicに行う。missing store / entryだけをabsenceとして扱い、invalid name、symlink、non-regular file、owner / mode違反、permission、I/O、raceはhard errorとする。listはsnapshot全体を検証してから出力する。filesystem操作から`sudo`を撤去するが、revert後のpacman transactionに必要な`sudo`は維持する。
+
+同じstoreを使うMoguet process同士のconcurrency contractは、directory descriptorへのcooperative flockで固定する。writerはmutation全体で`LOCK_EX`、strict single-entry readとsnapshot / list readerはreadとvalidationの全期間で`LOCK_SH`を保持する。これにより、正常なMoguet readerが別のMoguet writerのinternal temporary / tombstoneを観測しない。crash等でlock ownerが消えた後も残るinternal artifactはskipせず、invalid entryとしてhard errorにする。
+
+storeへaccessできる非協調same-euid processまたはrootが、最終identity checkとpathname syscallの間でentryを敵対的に置換する場合まで完全なrace-free保証は行わない。ただし、Moguetがidentity mismatchやexternal replacementを観測した後は、その正体を証明できないnameをunlink、exchange、restoreしない。cleanup / rollbackを安全に証明できない場合はmanual inspection用artifactを保持し、typed hard errorを返す。Linuxにinode条件付きunlinkがないことを過剰なrecheck chainで模倣しない。
+
+`/etc/jpacker`と`/etc/moguet`はruntimeで作成・参照せず、legacy storeへのfallback、merge、自動copy / rewrite / deleteを行わない。migrationは利用者がMigration Guideに従ってuserごとに手動実行する。package install / reinstall / uninstallはuser XDG directoryを作成・削除せず、canonical entryとlegacy entryの双方を保持する。
+
+通常、config directoryの変更はPATCHに含めない。しかしこれはv2.0.0で承認済みのuser XDG storage contractから漏れた一領域を、その同じauthorityへ揃える限定的なv2.0.1のbug fixとして扱う。新しいstorage移行をPATCHへ許可する一般的precedentにはしない。v2.0.0のtag、GitHub Release、公開済みrelease bodyはhistorical artifactとして変更しない。
+
 ---
 
 ## English
@@ -299,3 +313,17 @@ Any future consolidation, reduction, or replacement of the implementation must p
 * Git execution does not implicitly inherit dangerous parent-process routing or configuration environment.
 
 This decision fixes those safety contracts, not the current modules, types, capability plumbing, trusted Git policy, or removal-planning structure as permanent architecture. Their implementation, comprehension, testing, and future adaptation costs may prove disproportionate to the current project scale. If maintenance demonstrates that burden, the implementation may be consolidated, reduced, or replaced with a smaller architecture proportional to the project, provided the safety contracts remain intact. Such simplification is a legitimate adjustment that balances safety and maintainability, not a reversal of this decision.
+
+### 12. XDG authority for source-build preferences and the v2.0.1 PATCH exception
+
+#335 fixes an implementation omission that left source-build preferences in a legacy system store during the v2.0.0 XDG transition. The canonical authority is `${XDG_CONFIG_HOME:-$HOME/.config}/moguet/source-build.d/<package-name>`, and add, edit, list, delete, revert, and the build/upgrade readers move atomically to that one authority. An unset or empty `XDG_CONFIG_HOME` falls back to `$HOME/.config`; an explicit value fails closed unless it is an absolute, safe, existing base directory. Root execution uses root's own XDG context and never infers another user from `SUDO_USER`.
+
+Reads and deletion/revert of a missing entry do not create directories. Only the first add/edit that needs storage crosses the safe creation boundary, creating managed directories with mode `0700` and entries with mode `0600`. Source-preference filesystem operations are descriptor-based, reject a final symlink, and use atomic write/rename. Only a missing store or entry means absence; an invalid name, symlink, non-regular file, ownership/mode violation, permission or I/O error, or race is a hard error. Listing validates the complete snapshot before output. Filesystem operations no longer use `sudo`, while `sudo` remains for the pacman transaction after revert.
+
+The concurrency contract between Moguet processes using the same store is cooperative directory-descriptor flocking. A writer holds `LOCK_EX` for the complete mutation, while strict single-entry reads and snapshot/list readers hold `LOCK_SH` for their complete read and validation. A normal Moguet reader therefore does not observe another Moguet writer's internal temporary file or tombstone. An internal artifact left after its lock owner exits, for example after a crash, is not skipped and remains a hard invalid-entry error.
+
+Moguet does not promise complete race freedom against a non-cooperating same-euid process or root that can replace an entry between the final identity check and a pathname syscall. However, after Moguet observes an identity mismatch or external replacement, it does not unlink, exchange, or restore a name whose identity it cannot prove. If cleanup or rollback cannot be proven safe, Moguet retains the artifact for manual inspection and returns a typed hard error. It does not add an excessive recheck chain to imitate an inode-conditional unlink operation that Linux does not provide.
+
+Moguet neither creates nor reads `/etc/jpacker` or `/etc/moguet` at runtime, and it does not fall back to, merge, automatically copy, rewrite, or delete the legacy store. Migration is a per-user manual operation governed by the Migration Guide. Package installation, reinstallation, and removal neither create nor delete user XDG directories and preserve both canonical and legacy entries.
+
+Config-directory changes are normally excluded from PATCH releases. This is a narrow v2.0.1 bug-fix exception that completes one omitted part of the user-XDG storage contract already approved for v2.0.0; it is not a general precedent for storage migrations in PATCH releases. The v2.0.0 tag, GitHub Release, and published release body remain unchanged historical artifacts.

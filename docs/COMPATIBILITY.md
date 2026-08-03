@@ -232,6 +232,50 @@ Moguetは`--rmdeps`を`makepkg -r`、`pacman -Rns`、`pacman -Qdt`、独自orpha
 
 ---
 
+## Source-build preference authority policy
+
+source-build preferenceのcanonical authorityは次のuser XDG pathだけとする。
+
+```text
+${XDG_CONFIG_HOME:-$HOME/.config}/moguet/source-build.d/<package-name>
+```
+
+unsetまたはemptyな`XDG_CONFIG_HOME`は`$HOME/.config`へfallbackする。明示した
+`XDG_CONFIG_HOME`はabsoluteかつ安全で既存のbase directoryでなければfail-closedとし、その
+base自体はMoguetが作成しない。HOME fallbackでは既存のXDG safety contractに従って必要なconfig
+階層を作成できる。root実行時もroot自身のXDG contextを使い、`SUDO_USER`から別userを推測しない。
+
+`add-src`、`edit-src`、`list-src`、`del-src`、`revert`と、build / upgrade側の全readerは同じ
+authorityだけを使う。read / list / build / upgradeはdirectoryを作成せず、missingなdel / revertも
+作成しない。最初にstorageを必要とするadd / editだけがsafe creation boundaryを通り、managed
+directoryをmode `0700`、entryをmode `0600`で作成する。package name validationはdirectory作成と
+external commandより前に行う。
+
+preference filesystem操作はdescriptor基準とし、final symlinkを拒否し、write / renameをatomicに
+行い、failureをcallerへ伝播する。missing store / entryだけを正常なabsenceとして扱う。invalid
+entry name、symlink、non-regular file、owner / mode違反、permission、I/O、raceはhard errorである。
+`list-src`はsnapshot全体を検証してから出力し、不正entryがある場合にpartial listingを表示しない。
+edit failureでは、利用者が入力した一時内容を安全に保持できる場合は、その場所をdiagnosticで示す。
+
+同じstoreを使うMoguet process同士はdirectory descriptorのcooperative flockへ従う。writerはmutation
+全体で`LOCK_EX`、strict single-entry readとsnapshot / list readerはread / validation全体で`LOCK_SH`
+を保持する。正常なreaderはwriterのinternal temporary / tombstoneを観測しないが、crash後等に残った
+internal artifactはskipせずhard errorにする。
+
+非協調same-euid processまたはrootが最終identity checkとpathname syscallの間で行う置換まで完全に
+race-freeとはしない。ただし、identity mismatchを観測した後は正体を証明できないnameをunlink、
+exchange、restoreしない。safe cleanupを証明できないartifactは保持し、typed errorで停止する。
+
+source preferenceのfilesystem操作では`sudo`やshell command constructionを使わない。ただし
+`revert`がpreferenceを削除した後に行うpacman transactionは別責務であり、必要な`sudo`を維持する。
+
+Moguetは`/etc/jpacker`と`/etc/moguet`をruntimeで作成・参照せず、legacy storeへのfallback、merge、
+自動copy / rewrite / deleteを行わない。migrationはMigration Guideに従うuserごとの手動操作だけとする。
+package install / reinstall / uninstallはuser XDG directoryを作成・削除せず、canonical entryとlegacy
+entryの双方を保持する。
+
+---
+
 ## Package source selection policy
 
 source selection は排他的な 3 状態として扱う。

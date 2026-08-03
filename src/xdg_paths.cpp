@@ -18,6 +18,8 @@ namespace fs = std::filesystem;
 
 constexpr std::string_view CONFIG_FILE_NAME = "config.toml";
 constexpr std::string_view DEFAULT_LOG_FILE_SUFFIX = ".log";
+constexpr std::string_view SOURCE_PREFERENCE_DIRECTORY_NAME =
+        "source-build.d";
 
 struct ResolvedBaseDirectory {
     fs::path                 directory;
@@ -246,6 +248,18 @@ DirectoryCreationBoundary make_creation_boundary(
             std::move(base_directory.creatable_components)};
 }
 
+DirectoryCreationBoundary make_source_preference_creation_boundary(
+        ResolvedBaseDirectory base_directory,
+        const std::string& application_component) {
+    base_directory.creatable_components.push_back(application_component);
+    base_directory.creatable_components.push_back(
+            std::string(SOURCE_PREFERENCE_DIRECTORY_NAME));
+    return DirectoryCreationBoundary{
+            base_directory.source, std::move(base_directory.directory),
+            std::move(base_directory.existing_anchor),
+            std::move(base_directory.creatable_components)};
+}
+
 std::optional<std::string> process_environment_value(const char* name) {
     const char* value = std::getenv(name);
     if(value == nullptr) return std::nullopt;
@@ -308,6 +322,21 @@ ConfigPaths resolve_config(const EnvironmentSnapshot& environment) {
                     std::move(config_base), application_component)};
 }
 
+SourcePreferencePaths resolve_source_preference(
+        const EnvironmentSnapshot& environment) {
+    ResolvedBaseDirectory config_base = resolve_base_directory(
+            environment.xdg_config_home, environment.home,
+            DirectoryKind::Config, ".config");
+    const std::string application_component(application_identity::XDG_IDENTITY);
+    const fs::path directory =
+            config_base.directory / application_component /
+            std::string(SOURCE_PREFERENCE_DIRECTORY_NAME);
+    return SourcePreferencePaths{
+            directory,
+            make_source_preference_creation_boundary(
+                    std::move(config_base), application_component)};
+}
+
 StatePaths resolve_state(const EnvironmentSnapshot& environment) {
     ResolvedBaseDirectory state_base = resolve_base_directory(
             environment.xdg_state_home, environment.home,
@@ -354,6 +383,16 @@ ConfigPaths resolve_config_process_environment() {
             .home = process_environment_value("HOME"),
     };
     return resolve_config(environment);
+}
+
+SourcePreferencePaths resolve_source_preference_process_environment() {
+    const EnvironmentSnapshot environment{
+            .xdg_config_home = process_environment_value("XDG_CONFIG_HOME"),
+            .xdg_state_home = std::nullopt,
+            .xdg_cache_home = std::nullopt,
+            .home = process_environment_value("HOME"),
+    };
+    return resolve_source_preference(environment);
 }
 
 StatePaths resolve_state_process_environment() {

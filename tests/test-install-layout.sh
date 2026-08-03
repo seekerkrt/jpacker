@@ -93,6 +93,14 @@ assert_directory() {
         fail "$directory is missing, not a directory, or a symbolic link."
 }
 
+assert_mode() {
+    mode_path=$1
+    expected_mode=$2
+    actual_mode=$(stat -c '%a' "$mode_path")
+    [ "$actual_mode" = "$expected_mode" ] ||
+        fail "$mode_path has mode $actual_mode; expected $expected_mode."
+}
+
 assert_no_symlinks() {
     first_symlink=$(find "$stage_dir" -type l -print -quit)
     [ -z "$first_symlink" ] ||
@@ -258,7 +266,7 @@ version_output=$(LC_ALL=C HOME=$test_home \
     XDG_STATE_HOME=$xdg_state_home \
     XDG_CACHE_HOME=$xdg_cache_home \
     "$binary_file" --version)
-[ "$version_output" = 'Moguet v2.0.0' ] ||
+[ "$version_output" = 'Moguet v2.0.1' ] ||
     fail "staged binary version mismatch: $version_output"
 assert_absent "$xdg_config_home/moguet"
 assert_absent "$xdg_state_home/moguet"
@@ -270,6 +278,8 @@ legacy_config=$stage_dir/etc/jpacker/jpacker.conf
 legacy_preference=$stage_dir/etc/jpacker/package.build/fastfetch
 foreign_system_file=$stage_dir/etc/moguet/foreign-admin-file
 user_config=$xdg_config_home/moguet/config.toml
+canonical_preference_dir=$xdg_config_home/moguet/source-build.d
+canonical_preference=$canonical_preference_dir/fastfetch
 user_state=$xdg_state_home/moguet/moguet.log
 user_cache=$xdg_cache_home/moguet/cache-entry
 foreign_doc=$doc_dir/foreign-file.keep
@@ -285,6 +295,9 @@ install -Dm644 /dev/null "$foreign_system_file"
 printf '%s\n' 'foreign admin data' > "$foreign_system_file"
 install -Dm600 /dev/null "$user_config"
 printf '%s\n' 'schema_version = 1' > "$user_config"
+install -d -m700 "$canonical_preference_dir"
+install -m600 /dev/null "$canonical_preference"
+printf '%s\n' 'CFLAGS=-O2 -pipe' > "$canonical_preference"
 install -Dm600 /dev/null "$user_state"
 printf '%s\n' 'user state' > "$user_state"
 install -Dm600 /dev/null "$user_cache"
@@ -300,6 +313,9 @@ assert_file_text "$legacy_config" 'NOEDIT=true'
 assert_file_text "$legacy_preference" 'CFLAGS=-O3 -march=native'
 assert_file_text "$foreign_system_file" 'foreign admin data'
 assert_file_text "$user_config" 'schema_version = 1'
+assert_file_text "$canonical_preference" 'CFLAGS=-O2 -pipe'
+assert_mode "$canonical_preference_dir" 700
+assert_mode "$canonical_preference" 600
 assert_file_text "$user_state" 'user state'
 assert_file_text "$user_cache" 'user cache'
 
@@ -309,6 +325,9 @@ assert_file_text "$legacy_config" 'NOEDIT=true'
 assert_file_text "$legacy_preference" 'CFLAGS=-O3 -march=native'
 assert_file_text "$foreign_system_file" 'foreign admin data'
 assert_file_text "$user_config" 'schema_version = 1'
+assert_file_text "$canonical_preference" 'CFLAGS=-O2 -pipe'
+assert_mode "$canonical_preference_dir" 700
+assert_mode "$canonical_preference" 600
 assert_file_text "$user_state" 'user state'
 assert_file_text "$user_cache" 'user cache'
 assert_file_text "$foreign_doc" 'foreign documentation'
@@ -329,6 +348,9 @@ run_make uninstall
 assert_package_artifacts_absent
 assert_file_text "$legacy_preference" 'CFLAGS=-O3 -march=native'
 assert_file_text "$user_config" 'schema_version = 1'
+assert_file_text "$canonical_preference" 'CFLAGS=-O2 -pipe'
+assert_mode "$canonical_preference_dir" 700
+assert_mode "$canonical_preference" 600
 assert_file_text "$foreign_doc" 'foreign documentation'
 assert_file_text "$foreign_license" 'foreign license'
 assert_no_symlinks

@@ -73,13 +73,18 @@ setup_case() {
     stderr_file=$case_dir/stderr
     work_dir=$case_dir/work
     git_fixture_dir=$case_dir/git-fixture
+    source_preference_dir=$case_dir/xdg-config/moguet/source-build.d
 
     mkdir -p \
-        "$case_dir/home" "$case_dir/xdg-state" "$case_dir/xdg-cache" \
-        "$case_dir/package.build" "$case_dir/tmp" "$work_dir" \
+        "$case_dir/home" "$source_preference_dir" \
+        "$case_dir/xdg-state" "$case_dir/xdg-cache" \
+        "$case_dir/tmp" "$work_dir" \
         "$git_fixture_dir/.git"
+    chmod 0700 "$case_dir/xdg-config"
+    chmod 0700 "$source_preference_dir"
     cp -a "$fixture_dir/." "$git_fixture_dir/"
-    printf 'source preference marker\n' > "$case_dir/package.build/clean-root"
+    printf 'source preference marker\n' > "$source_preference_dir/clean-root"
+    chmod 0600 "$source_preference_dir/clean-root"
     : > "$command_log"
     : > "$stdout_file"
     : > "$stderr_file"
@@ -87,12 +92,12 @@ setup_case() {
     : > "$schema_request_log"
 
     export HOME=$case_dir/home
+    export XDG_CONFIG_HOME=$case_dir/xdg-config
     export XDG_STATE_HOME=$case_dir/xdg-state
     export XDG_CACHE_HOME=$case_dir/xdg-cache
     export TMPDIR=$case_dir/tmp
     export MOGUET_TEST_AUR_RPC_BASE_URL=$normal_rpc_url
     export MOGUET_TEST_COMMAND_LOG=$command_log
-    export MOGUET_TEST_PACKAGE_BUILD_DIR=$case_dir/package.build
     export MOGUET_TEST_GIT_CLONE_FIXTURE_DIR=$git_fixture_dir
     export MOGUET_TEST_PACMAN_EXIT_CODE=1
     export MOGUET_TEST_SUDO_EXIT_CODE=99
@@ -231,11 +236,11 @@ assert_cache_root_absent() {
 }
 
 assert_source_preference_unchanged() {
-    preference_file=$MOGUET_TEST_PACKAGE_BUILD_DIR/clean-root
-    if [ "$(find "$MOGUET_TEST_PACKAGE_BUILD_DIR" -mindepth 1 -maxdepth 1 -print | wc -l)" -ne 1 ] ||
+    preference_file=$source_preference_dir/clean-root
+    if [ "$(find "$source_preference_dir" -mindepth 1 -maxdepth 1 -print | wc -l)" -ne 1 ] ||
        [ "$(cat "$preference_file")" != "source preference marker" ]; then
         echo "PKGBUILD export changed source-build preferences" >&2
-        find "$MOGUET_TEST_PACKAGE_BUILD_DIR" -maxdepth 1 -print >&2 || true
+        find "$source_preference_dir" -maxdepth 1 -print >&2 || true
         exit 1
     fi
 }

@@ -19,8 +19,8 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 mkdir -p \
-    "$tmp_dir/cache" "$tmp_dir/home" "$tmp_dir/state" \
-    "$tmp_dir/package.build"
+    "$tmp_dir/cache" "$tmp_dir/config" "$tmp_dir/home" "$tmp_dir/state"
+chmod 0700 "$tmp_dir/config"
 command_log=$tmp_dir/commands.log
 : > "$command_log"
 
@@ -41,6 +41,7 @@ done
 
 port=$(cat "$port_file")
 export HOME=$tmp_dir/home
+export XDG_CONFIG_HOME=$tmp_dir/config
 export XDG_STATE_HOME=$tmp_dir/state
 export XDG_CACHE_HOME=$tmp_dir/cache
 export PATH=$repo_root/tests/stubs:/usr/bin:/bin
@@ -53,7 +54,6 @@ export MOGUET_TEST_AUR_RPC_BASE_URL=http://127.0.0.1:$port/rpc/
 export MOGUET_TEST_COMMAND_LOG=$command_log
 export MOGUET_TEST_PACMAN_EXIT_CODE=0
 export MOGUET_TEST_SUDO_EXIT_CODE=0
-export MOGUET_TEST_PACKAGE_BUILD_DIR=$tmp_dir/package.build
 unset MOGUET_TEST_PACMAN_QM_OUTPUT
 unset MOGUET_TEST_PACMAN_REPO_PACKAGES
 unset MOGUET_TEST_MAKEPKG_EXIT_CODE

@@ -24,7 +24,6 @@
 #include <cstring>
 #include <filesystem>
 #include <fcntl.h>
-#include <fstream>
 #include <iostream>
 #include <map>
 #include <optional>
@@ -53,6 +52,20 @@ std::string trim(const std::string& str) {
     if(first == std::string::npos) return "";
     size_t last = str.find_last_not_of(" \t\n\r");
     return str.substr(first, (last - first + 1));
+}
+
+bool same_temporary_file_state(
+        const struct stat& expected, const struct stat& actual) {
+    return expected.st_dev == actual.st_dev &&
+           expected.st_ino == actual.st_ino &&
+           (expected.st_mode & S_IFMT) == (actual.st_mode & S_IFMT) &&
+           expected.st_uid == actual.st_uid &&
+           (expected.st_mode & 07777) == (actual.st_mode & 07777) &&
+           expected.st_size == actual.st_size &&
+           expected.st_mtim.tv_sec == actual.st_mtim.tv_sec &&
+           expected.st_mtim.tv_nsec == actual.st_mtim.tv_nsec &&
+           expected.st_ctim.tv_sec == actual.st_ctim.tv_sec &&
+           expected.st_ctim.tv_nsec == actual.st_ctim.tv_nsec;
 }
 
 std::string to_lower(std::string str) {
@@ -113,6 +126,22 @@ std::string build_editor_command(const std::string& editor, const fs::path& targ
     std::vector<std::string> args = split_command_words(editor);
     args.push_back(target.string());
     return shell_words::join(args);
+}
+
+void require_valid_package_targets(
+        const std::vector<std::string>& targets) {
+    for(const std::string& target : targets) {
+        require_valid_package_name(target);
+    }
+}
+
+void require_valid_add_src_packages(
+        const std::vector<std::string>& args) {
+    for(const std::string& arg : args) {
+        if(arg.find('=') == std::string::npos) {
+            require_valid_package_name(arg);
+        }
+    }
 }
 
 std::optional<bool> prompt_default_value(PromptDefault default_answer) {
@@ -311,23 +340,22 @@ int cmd_build(
 }
 
 int cmd_add_src(const std::vector<std::string>& args) {
+    require_valid_add_src_packages(args);
     bool                     failed = false;
     std::vector<std::string> current_pkgs;
     for(const auto& arg : args) {
         std::string key, val;
         if(arg.find('=') == std::string::npos) {
             // POLICY: 1 package = 1 preference file。ファイル名は package name validation で固定する。
-            fs::path p = source_preference_entry_path(arg);
-            if(run_command("sudo touch " + shell_words::quote(p.string())) != 0) {
-                // TRANSLATORS: The placeholder is a package name.
-                Logger::error(localization::format_translated_message(
-                        "Failed to add {}", arg));
-                failed = true;
-            } else {
+            try {
+                create_source_preference_entry(arg);
                 // TRANSLATORS: The placeholder is a package name.
                 Logger::info(localization::format_translated_message(
                         "Added {} to source-build list.", arg));
-                current_pkgs.push_back(p.string());
+                current_pkgs.push_back(arg);
+            } catch(const std::exception& error) {
+                Logger::error(error.what());
+                failed = true;
             }
         } else if(split_env_assignment(arg, key, val)) {
             if(current_pkgs.empty()) {
@@ -338,16 +366,18 @@ int cmd_add_src(const std::vector<std::string>& args) {
                 failed = true;
                 continue;
             }
-            for(const auto& pkg_path : current_pkgs) {
+            for(const std::string& package_name : current_pkgs) {
+                const fs::path entry_path =
+                        source_preference_entry_path(package_name);
                 // TRANSLATORS: The placeholders are a literal environment assignment and a source preference file path.
                 Logger::info(localization::format_translated_message(
-                        "Appending {} to {}", arg, pkg_path));
-                if(run_command("printf '%s\\n' " + shell_words::quote(key + "=" + val) + " | sudo tee -a " + shell_words::quote(pkg_path) + " > /dev/null") != 0) {
-                    // TRANSLATORS: The placeholders are an environment key and a source preference file path.
-                    Logger::error(localization::format_translated_message(
-                            "Failed to append environment key {} to {}.",
-                            key,
-                            pkg_path));
+                        "Appending {} to {}", arg,
+                        entry_path.string()));
+                try {
+                    append_source_preference_assignment(
+                            package_name, key + "=" + val);
+                } catch(const std::exception& error) {
+                    Logger::error(error.what());
                     failed = true;
                 }
             }
@@ -364,9 +394,31 @@ int cmd_add_src(const std::vector<std::string>& args) {
 int cmd_edit_src(
         const std::vector<std::string>& targets,
         const AppConfig& config) {
+    require_valid_package_targets(targets);
     bool failed = false;
     for(const auto& pkg : targets) {
-        fs::path    p = source_preference_entry_path(pkg);
+        const fs::path p = source_preference_entry_path(pkg);
+        StrictSourcePreferenceResult current =
+                read_source_preference_strict(pkg);
+        std::string existing_contents;
+        std::optional<SourcePreferenceEntryIdentity> expected_identity;
+        if(const auto* failure =
+                   std::get_if<SourcePreferenceFailure>(&current)) {
+            Logger::error(failure->diagnostic);
+            failed = true;
+            continue;
+        }
+        if(auto* loaded = std::get_if<SourcePreferenceLoaded>(&current)) {
+            if(!loaded->identity.has_value()) {
+                throw std::logic_error(
+                        localization::format_translated_message(
+                                "Source preference reader did not return an entry identity for {}.",
+                                p.string()));
+            }
+            existing_contents = std::move(loaded->raw_contents);
+            expected_identity = loaded->identity;
+        }
+
         std::string temp_template = "/tmp/moguet-edit-src-" + pkg + ".XXXXXX";
         std::vector<char> temp_name(temp_template.begin(), temp_template.end());
         temp_name.push_back('\0');
@@ -382,18 +434,6 @@ int cmd_edit_src(
         }
 
         fs::path temp_path = temp_name.data();
-        if(close(fd) != 0) {
-            // TRANSLATORS: The placeholders are a temporary file path and a system error message.
-            Logger::error(localization::format_translated_message(
-                    "Failed to close temporary file {}: {}",
-                    temp_path.string(),
-                    std::strerror(errno)));
-            std::error_code ec;
-            fs::remove(temp_path, ec);
-            failed = true;
-            continue;
-        }
-
         auto cleanup_temp = [&temp_path]() {
             std::error_code ec;
             fs::remove(temp_path, ec);
@@ -406,54 +446,51 @@ int cmd_edit_src(
             }
         };
 
-        if(fs::exists(p)) {
-            std::ifstream src(p, std::ios::binary);
-            if(!src) {
-                // TRANSLATORS: The placeholder is a source preference file path.
-                Logger::error(localization::format_translated_message(
-                        "Failed to read source preference file {}.",
-                        p.string()));
-                cleanup_temp();
-                failed = true;
+        std::size_t copied_size = 0;
+        bool        copy_failed = false;
+        while(copied_size < existing_contents.size()) {
+            const ssize_t write_size = ::write(
+                    fd, existing_contents.data() + copied_size,
+                    existing_contents.size() - copied_size);
+            if(write_size > 0) {
+                copied_size += static_cast<std::size_t>(write_size);
                 continue;
             }
-
-            std::ofstream dst(temp_path, std::ios::binary | std::ios::trunc);
-            if(!dst) {
-                // TRANSLATORS: The placeholder is a temporary file path.
-                Logger::error(localization::format_translated_message(
-                        "Failed to write temporary file {}.",
-                        temp_path.string()));
-                cleanup_temp();
-                failed = true;
-                continue;
-            }
-
-            dst << src.rdbuf();
-            dst.close();
-            if(!dst) {
-                // TRANSLATORS: The placeholders are the source preference path and temporary file path.
-                Logger::error(localization::format_translated_message(
-                        "Failed to copy source preference file {} to temporary file {}.",
-                        p.string(),
-                        temp_path.string()));
-                cleanup_temp();
-                failed = true;
-                continue;
-            }
+            if(write_size < 0 && errno == EINTR) continue;
+            copy_failed = true;
+            break;
         }
-
-        if(run_command(build_editor_command(config.editor, temp_path)) != 0) {
-            // TRANSLATORS: The placeholder is a source preference file path.
+        if(copy_failed) {
+            // TRANSLATORS: The placeholders are the source preference path and temporary file path.
             Logger::error(localization::format_translated_message(
-                    "Editor failed for {}",
-                    p.string()));
-            failed = true;
+                    "Failed to copy source preference file {} to temporary file {}.",
+                    p.string(), temp_path.string()));
+            static_cast<void>(::close(fd));
             cleanup_temp();
+            failed = true;
+            continue;
+        }
+        if(::close(fd) != 0) {
+            // TRANSLATORS: The placeholders are a temporary file path and a system error message.
+            Logger::error(localization::format_translated_message(
+                    "Failed to close temporary file {}: {}",
+                    temp_path.string(),
+                    std::strerror(errno)));
+            cleanup_temp();
+            failed = true;
             continue;
         }
 
-        // POLICY: editorのrename型saveを許容しつつ、最終pathnameは権限昇格前にnofollowでpinする。
+        if(run_command(build_editor_command(config.editor, temp_path)) != 0) {
+            // TRANSLATORS: The placeholders are a source preference path and a retained temporary file path.
+            Logger::error(localization::format_translated_message(
+                    "Editor failed for {}; the edited file was kept at {}.",
+                    p.string(), temp_path.string()));
+            failed = true;
+            continue;
+        }
+
+        // POLICY: editorのrename型saveを許容しつつ、最終pathnameはnofollowでpinする。
         int source_fd = open(
                 temp_path.c_str(),
                 O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK);
@@ -465,7 +502,6 @@ int cmd_edit_src(
                     temp_path.string(),
                     std::strerror(open_error)));
             failed = true;
-            cleanup_temp();
             continue;
         }
 
@@ -490,7 +526,6 @@ int cmd_edit_src(
                     std::strerror(stat_error)));
             close_source();
             failed = true;
-            cleanup_temp();
             continue;
         }
         if(!S_ISREG(source_status.st_mode)) {
@@ -500,33 +535,101 @@ int cmd_edit_src(
                     temp_path.string()));
             close_source();
             failed = true;
-            cleanup_temp();
             continue;
         }
 
-        // POLICY: root側は固定済みstdinから読み、validated preference destinationへのwriteだけを担当する。
-        int install_status = run_command_with_stdin_fd(
-                "sudo install -Dm644 -- /dev/stdin " + shell_words::quote(p.string()),
-                source_fd);
-        bool source_closed = close_source();
-        if(install_status != 0) {
+        try {
+            replace_source_preference_entry_from_descriptor(
+                    pkg, source_fd, expected_identity);
+        } catch(const std::exception& error) {
+            const bool source_closed = close_source();
+            static_cast<void>(source_closed);
+            Logger::error(error.what());
             // TRANSLATORS: The placeholders are the destination and retained temporary file paths.
             Logger::error(localization::format_translated_message(
-                    "Failed to install the edited source-build preference at {}; the edited file was kept at {}.",
-                    p.string(),
-                    temp_path.string()));
+                        "Failed to install the edited source-build preference at {}; the edited file was kept at {}.",
+                        p.string(),
+                        temp_path.string()));
             failed = true;
             continue;
         }
 
-        if(!source_closed) failed = true;
-        cleanup_temp();
+        struct stat final_source_status {};
+        if(::fstat(source_fd, &final_source_status) != 0) {
+            const int stat_error = errno;
+            static_cast<void>(close_source());
+            // TRANSLATORS: The placeholders are a temporary file path and a system error message.
+            Logger::error(localization::format_translated_message(
+                    "Failed to inspect edited temporary file {}: {}",
+                    temp_path.string(),
+                    std::strerror(stat_error)));
+            failed = true;
+            continue;
+        }
+        if(!same_temporary_file_state(
+                   source_status, final_source_status)) {
+            // TRANSLATORS: The placeholder is a retained temporary file path.
+            Logger::error(localization::format_translated_message(
+                    "Edited temporary file changed during publication and was not removed: {}",
+                    temp_path.string()));
+            static_cast<void>(close_source());
+            failed = true;
+            continue;
+        }
+        struct stat named_source_status {};
+        int named_status_result = -1;
+        do {
+            named_status_result = ::lstat(
+                    temp_path.c_str(), &named_source_status);
+        } while(named_status_result != 0 && errno == EINTR);
+        if(named_status_result != 0 ||
+           !same_temporary_file_state(
+                   final_source_status, named_source_status)) {
+            // TRANSLATORS: The placeholder is a retained temporary file path.
+            Logger::error(localization::format_translated_message(
+                    "Edited temporary file changed during publication and was not removed: {}",
+                    temp_path.string()));
+            static_cast<void>(close_source());
+            failed = true;
+            continue;
+        }
+
+        if(!close_source()) {
+            failed = true;
+            continue;
+        }
+        do {
+            named_status_result = ::lstat(
+                    temp_path.c_str(), &named_source_status);
+        } while(named_status_result != 0 && errno == EINTR);
+        if(named_status_result != 0 ||
+           !same_temporary_file_state(
+                   final_source_status, named_source_status)) {
+            // TRANSLATORS: The placeholder is a retained temporary file path.
+            Logger::error(localization::format_translated_message(
+                    "Edited temporary file changed during publication and was not removed: {}",
+                    temp_path.string()));
+            failed = true;
+            continue;
+        }
+        if(::unlink(temp_path.c_str()) != 0) {
+            const int remove_error = errno;
+            // TRANSLATORS: The placeholders are a temporary file path and a system error message.
+            Logger::error(localization::format_translated_message(
+                    "Failed to remove temporary file {}: {}",
+                    temp_path.string(),
+                    std::strerror(remove_error)));
+            failed = true;
+            continue;
+        }
     }
     return failed ? 1 : 0;
 }
 
 void cmd_list_src() {
-    if(!fs::exists(source_preference_root())) {
+    const SourcePreferenceListSnapshot snapshot =
+            snapshot_source_preferences_for_listing();
+    if(!snapshot.root_exists) {
         std::cout << localization::translate_message(
                              "No source-build packages registered.")
                   << std::endl;
@@ -536,38 +639,32 @@ void cmd_list_src() {
               << localization::translate_message(
                          "Registered Source Packages:")
               << "\033[0m" << std::endl;
-    bool found = false;
-    for(const auto& entry : source_preference_entries()) {
-        if(entry.is_regular_file()) {
-            found = true;
-            std::string pkg = entry.path().filename().string();
-            // NO_TRANSLATE: Package identity and stored environment key/value
-            // lines are runtime data and must remain byte-for-byte unchanged.
-            std::cout << "  \033[1;36m" << pkg << "\033[0m" << std::endl;
-            read_source_preference_entry(
-                    entry.path(),
-                    [](const std::string& line) {
-                        std::cout << "    " << line << std::endl;
-                    });
+    for(const SourcePreferenceListEntrySnapshot& entry : snapshot.entries) {
+        // NO_TRANSLATE: Package identity and stored environment key/value
+        // lines are runtime data and must remain byte-for-byte unchanged.
+        std::cout << "  \033[1;36m" << entry.package_name
+                  << "\033[0m" << std::endl;
+        for(const std::string& line : entry.display_lines) {
+            std::cout << "    " << line << std::endl;
         }
     }
-    if(!found) {
+    if(snapshot.entries.empty()) {
         std::cout << "  " << localization::translate_message("(none)")
                   << std::endl;
     }
 }
 
 int cmd_del_src(const std::vector<std::string>& targets) {
+    require_valid_package_targets(targets);
     bool failed = false;
     for(const auto& pkg : targets) {
-        fs::path p = source_preference_entry_path(pkg);
         // TRANSLATORS: The placeholder is a package name.
         Logger::info(localization::format_translated_message(
                 "Removing {} from list...", pkg));
-        if(run_command("sudo rm -f " + shell_words::quote(p.string())) != 0) {
-            // TRANSLATORS: The placeholder is a package name.
-            Logger::error(localization::format_translated_message(
-                    "Failed to remove {}", pkg));
+        try {
+            static_cast<void>(remove_source_preference_entry(pkg));
+        } catch(const std::exception& error) {
+            Logger::error(error.what());
             failed = true;
         }
     }
@@ -577,22 +674,22 @@ int cmd_del_src(const std::vector<std::string>& targets) {
 void cmd_revert(
         const std::vector<std::string>& targets,
         const AppConfig& config) {
+    require_valid_package_targets(targets);
     bool                     failed = false;
     std::vector<std::string> reinstall_targets;
     for(const auto& pkg : targets) {
-        fs::path p = source_preference_entry_path(pkg);
-        if(fs::exists(p)) {
+        bool was_removed = false;
+        try {
+            was_removed = remove_source_preference_entry(pkg);
+        } catch(const std::exception& error) {
+            Logger::error(error.what());
+            failed = true;
+            continue;
+        }
+        if(was_removed) {
             // TRANSLATORS: The placeholder is a package name.
             Logger::info(localization::format_translated_message(
                     "Unmarking source-build for {}", pkg));
-            if(run_command("sudo rm -f " + shell_words::quote(p.string())) != 0) {
-                // TRANSLATORS: The placeholder is a package name.
-                Logger::error(localization::format_translated_message(
-                        "Failed to remove {}",
-                        pkg));
-                failed = true;
-                continue;
-            }
         } else {
             // TRANSLATORS: The placeholder is a package name.
             Logger::warn(localization::format_translated_message(

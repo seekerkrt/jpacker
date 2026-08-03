@@ -46,6 +46,14 @@ assert_text_file() {
         fail "$text_path changed unexpectedly"
 }
 
+assert_mode() {
+    mode_path=$1
+    expected_mode=$2
+    actual_mode=$(stat -c '%a' "$mode_path")
+    [ "$actual_mode" = "$expected_mode" ] ||
+        fail "$mode_path has mode $actual_mode; expected $expected_mode"
+}
+
 write_regular_manifest() {
     manifest_root=$1
     manifest_output=$2
@@ -328,20 +336,20 @@ v1_manifest=$tmp_dir/jpacker-v1.16.0-files.txt
 v1_directory_manifest=$tmp_dir/jpacker-v1.16.0-directories.txt
 v1_removable_manifest=$tmp_dir/jpacker-v1.16.0-removable-files.txt
 
-v2_source=$tmp_dir/moguet-v2.0.0-source
-v2_source_manifest=$tmp_dir/moguet-v2.0.0-source-files.txt
-v2_makepkg_work=$tmp_dir/moguet-v2.0.0-makepkg
-v2_package_destination=$tmp_dir/moguet-v2.0.0-packages
-v2_archive_root=$tmp_dir/moguet-v2.0.0-archive-root
-v2_manifest=$tmp_dir/moguet-v2.0.0-files.txt
-v2_directory_manifest=$tmp_dir/moguet-v2.0.0-directories.txt
+v2_source=$tmp_dir/moguet-v2.0.1-source
+v2_source_manifest=$tmp_dir/moguet-v2.0.1-source-files.txt
+v2_makepkg_work=$tmp_dir/moguet-v2.0.1-makepkg
+v2_package_destination=$tmp_dir/moguet-v2.0.1-packages
+v2_archive_root=$tmp_dir/moguet-v2.0.1-archive-root
+v2_manifest=$tmp_dir/moguet-v2.0.1-files.txt
+v2_directory_manifest=$tmp_dir/moguet-v2.0.1-directories.txt
 
 coinstall_root=$tmp_dir/coinstall-root
 transition_root=$tmp_dir/transition-root
 
 current_version=$(tr -d '[:space:]' <"$repo_root/VERSION")
-[ "$current_version" = 2.0.0 ] ||
-    fail "current VERSION is $current_version; expected 2.0.0"
+[ "$current_version" = 2.0.1 ] ||
+    fail "current VERSION is $current_version; expected 2.0.1"
 
 git -C "$repo_root" rev-parse --verify 'refs/tags/v1.16.0^{commit}' \
     >/dev/null || fail 'local tag v1.16.0 is unavailable'
@@ -391,7 +399,7 @@ first_package_artifact=$(find "$v2_source" -type f \
 [ -z "$first_package_artifact" ] ||
     fail "source fixture contains package artifact $first_package_artifact"
 
-initialize_fixture_repository "$v2_source" v2.0.0
+initialize_fixture_repository "$v2_source" v2.0.1
 prepare_test_pkgbuild "$repo_root/PKGBUILD" "$v2_source" \
     "$v2_makepkg_work" \
     'git+https://github.com/seekerkrt/moguet.git'
@@ -410,7 +418,7 @@ run_logged 'jpacker v1.16.0 clean package build' "$tmp_dir/v1-makepkg.log" \
         "$tmp_dir/v1-source-packages" \
         "$tmp_dir/v1-logs" \
         "$tmp_dir/v1-xdg-cache"
-run_logged 'Moguet v2.0.0 clean package build' "$tmp_dir/v2-makepkg.log" \
+run_logged 'Moguet v2.0.1 clean package build' "$tmp_dir/v2-makepkg.log" \
     run_makepkg_fixture \
         "$v2_makepkg_work" \
         "$tmp_dir/v2-build" \
@@ -421,7 +429,7 @@ run_logged 'Moguet v2.0.0 clean package build' "$tmp_dir/v2-makepkg.log" \
         "$tmp_dir/v2-xdg-cache"
 
 v1_package_archive=$v1_package_destination/jpacker-1.16.0-1-x86_64.pkg.tar.zst
-v2_package_archive=$v2_package_destination/moguet-2.0.0-1-x86_64.pkg.tar.zst
+v2_package_archive=$v2_package_destination/moguet-2.0.1-1-x86_64.pkg.tar.zst
 [ -f "$v1_package_archive" ] ||
     fail "expected package archive is missing: $v1_package_archive"
 [ -f "$v2_package_archive" ] ||
@@ -449,7 +457,7 @@ assert_metadata_single "$tmp_dir/v1.PKGINFO" backup \
     etc/jpacker/jpacker.conf
 
 assert_metadata_single "$tmp_dir/v2.PKGINFO" pkgname moguet
-assert_metadata_single "$tmp_dir/v2.PKGINFO" pkgver 2.0.0-1
+assert_metadata_single "$tmp_dir/v2.PKGINFO" pkgver 2.0.1-1
 assert_metadata_single "$tmp_dir/v2.PKGINFO" arch x86_64
 assert_metadata_single "$tmp_dir/v2.PKGINFO" license GPL-3.0-or-later
 for transition_key in backup conflict conflicts provides replaces
@@ -532,7 +540,7 @@ archive_version=$(LC_ALL=C \
     XDG_STATE_HOME="$archive_state_home" \
     XDG_CACHE_HOME="$archive_cache_home" \
     "$v2_archive_root/usr/bin/moguet" --version)
-[ "$archive_version" = 'Moguet v2.0.0' ] ||
+[ "$archive_version" = 'Moguet v2.0.1' ] ||
     fail "archived Moguet version mismatch: $archive_version"
 assert_absent "$archive_config_home"
 assert_absent "$archive_state_home"
@@ -577,9 +585,12 @@ bsdtar -xf "$v1_package_archive" -C "$coinstall_root" etc usr
 modified_legacy_config='NOEDIT=true
 NODIFF=true'
 legacy_preference='CFLAGS=-O3 -march=native'
+coinstall_config_dir=$coinstall_root/user-home/.config/moguet
+coinstall_source_preference_dir=$coinstall_config_dir/source-build.d
+coinstall_source_preference=$coinstall_source_preference_dir/fastfetch
 mkdir -p \
     "$coinstall_root/etc/jpacker/package.build" \
-    "$coinstall_root/user-home/.config/moguet" \
+    "$coinstall_config_dir" \
     "$coinstall_root/user-home/.local/state/moguet" \
     "$coinstall_root/user-home/.cache/moguet" \
     "$coinstall_root/usr/share/doc/moguet" \
@@ -591,7 +602,10 @@ printf '%s\n' "$legacy_preference" \
 printf '%s\n' 'legacy foreign data' \
     >"$coinstall_root/etc/jpacker/foreign-file.keep"
 printf '%s\n' 'schema_version = 1' \
-    >"$coinstall_root/user-home/.config/moguet/config.toml"
+    >"$coinstall_config_dir/config.toml"
+install -d -m700 "$coinstall_source_preference_dir"
+install -m600 /dev/null "$coinstall_source_preference"
+printf '%s\n' 'CFLAGS=-O2 -pipe' >"$coinstall_source_preference"
 printf '%s\n' 'persistent state' \
     >"$coinstall_root/user-home/.local/state/moguet/state.keep"
 printf '%s\n' 'reproducible cache fixture' \
@@ -618,20 +632,28 @@ assert_text_file "$coinstall_root/etc/jpacker/jpacker.conf" \
     "$modified_legacy_config"
 assert_text_file "$coinstall_root/etc/jpacker/package.build/fastfetch" \
     "$legacy_preference"
+assert_text_file "$coinstall_source_preference" 'CFLAGS=-O2 -pipe'
+assert_mode "$coinstall_source_preference_dir" 700
+assert_mode "$coinstall_source_preference" 600
 
 # Reinstalling the same archive restores only its exact payload and preserves
 # the v1 package, legacy data, user XDG data, and foreign files byte-for-byte.
 bsdtar -xf "$v2_package_archive" -C "$coinstall_root" usr
 assert_snapshot_matches "$coinstall_root" "$coinstall_baseline"
 assert_manifest_files_match "$v2_archive_root" "$coinstall_root" "$v2_manifest"
+assert_mode "$coinstall_source_preference_dir" 700
+assert_mode "$coinstall_source_preference" 600
 
 # Removing v1 follows its .PKGINFO backup contract: a modified package-owned
 # config becomes .pacsave, while runtime-managed and foreign legacy data stays.
 mkdir -p "$transition_root"
 bsdtar -xf "$v1_package_archive" -C "$transition_root" etc usr
+transition_config_dir=$transition_root/user-home/.config/moguet
+transition_source_preference_dir=$transition_config_dir/source-build.d
+transition_source_preference=$transition_source_preference_dir/fastfetch
 mkdir -p \
     "$transition_root/etc/jpacker/package.build" \
-    "$transition_root/user-home/.config/moguet" \
+    "$transition_config_dir" \
     "$transition_root/user-home/.local/state/moguet" \
     "$transition_root/user-home/.cache/moguet"
 printf '%s\n' "$modified_legacy_config" \
@@ -641,7 +663,10 @@ printf '%s\n' "$legacy_preference" \
 printf '%s\n' 'legacy transition sentinel' \
     >"$transition_root/etc/jpacker/foreign-file.keep"
 printf '%s\n' 'schema_version = 1' \
-    >"$transition_root/user-home/.config/moguet/config.toml"
+    >"$transition_config_dir/config.toml"
+install -d -m700 "$transition_source_preference_dir"
+install -m600 /dev/null "$transition_source_preference"
+printf '%s\n' 'CFLAGS=-O2 -pipe' >"$transition_source_preference"
 printf '%s\n' 'persistent transition state' \
     >"$transition_root/user-home/.local/state/moguet/state.keep"
 printf '%s\n' 'transition cache fixture' \
@@ -670,12 +695,17 @@ assert_snapshot_exact "$transition_root/etc/jpacker" \
 assert_snapshot_exact "$transition_root/user-home" "$xdg_transition_snapshot"
 assert_text_file "$transition_root/etc/jpacker/jpacker.conf.pacsave" \
     "$modified_legacy_config"
+assert_text_file "$transition_source_preference" 'CFLAGS=-O2 -pipe'
+assert_mode "$transition_source_preference_dir" 700
+assert_mode "$transition_source_preference" 600
 
 bsdtar -xf "$v2_package_archive" -C "$transition_root" usr
 assert_manifest_files_match "$v2_archive_root" "$transition_root" "$v2_manifest"
 assert_snapshot_exact "$transition_root/etc/jpacker" \
     "$legacy_transition_snapshot"
 assert_snapshot_exact "$transition_root/user-home" "$xdg_transition_snapshot"
+assert_mode "$transition_source_preference_dir" 700
+assert_mode "$transition_source_preference" 600
 
 # Rollback removes only archive-owned Moguet files, reinstalls the trusted v1
 # archive, then manually restores its pacsaved config over the package default.
@@ -698,6 +728,9 @@ assert_text_file "$transition_root/etc/jpacker/package.build/fastfetch" \
     "$legacy_preference"
 assert_text_file "$transition_root/etc/jpacker/foreign-file.keep" \
     'legacy transition sentinel'
+assert_text_file "$transition_source_preference" 'CFLAGS=-O2 -pipe'
+assert_mode "$transition_source_preference_dir" 700
+assert_mode "$transition_source_preference" 600
 
 rollback_version=$(LC_ALL=C \
     HOME="$tmp_dir/rollback-home" \

@@ -18,8 +18,8 @@ Moguet は CLI ツールなので、互換性は内部 C++ API ではなく、�
 - コマンド名、オプション、引数、その意味
 - ユーザーやスクリプトが依存しうる出力形式
 - 終了コード
-- MoguetのXDG config / state / cache layout
-- jpacker v1.16.0から継承する`/etc/jpacker/package.build/`等のlegacy compatibility boundary
+- MoguetのXDG config / source-preference / state / cache layout
+- jpacker v1.16.0のlegacy dataを自動移行・変更しないcompatibility boundary
 - pacman、makepkg、git、AUR repository を使う package build の期待挙動
 - inspection-only command と build / install / update / reset などを行う command の安全境界
 
@@ -74,6 +74,17 @@ AUR build plan execution のように、build / install の実行範囲や対応
 
 PATCH は後方互換な変更だけを含める。ただし、後方互換であっても、新しい command / option、既存 command の
 機能的変更、対応 workflow の拡大は原則として `MINOR` として扱う。
+
+### v2.0.1の限定例外
+
+#335は、v2.0.0で承認済みのXDG storage移行からsource-build preferenceだけが漏れ、legacy
+system storeをruntime authorityとして残した不具合を修正する。新しいstorage policyを導入する
+のではなく、`${XDG_CONFIG_HOME:-$HOME/.config}/moguet/source-build.d/`へ既存のv2 XDG契約を
+完成させる変更であるため、v2.0.1の限定的なPATCH例外として扱う。
+
+この例外は、config / state / cache / source-preference directoryの変更を一般にPATCHへ含める
+precedentではない。v2.0.0のtag、GitHub Release、公開済みrelease bodyはhistorical artifactとして
+変更せず、legacy dataの移行はMigration Guideに従う利用者の手動操作だけとする。
 
 ## PATCH に含めない変更
 

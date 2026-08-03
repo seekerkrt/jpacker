@@ -26,20 +26,22 @@ setup_case() {
     command_log=$case_dir/commands.log
     output_file=$case_dir/output
     config_file=$case_dir/config.toml
+    source_preference_dir=$case_dir/xdg-config/moguet/source-build.d
 
     mkdir -p \
-        "$case_dir/home" "$case_dir/xdg-state" "$case_dir/work" \
-        "$case_dir/xdg-cache" "$case_dir/package.build"
+        "$case_dir/home" "$case_dir/xdg-config" \
+        "$case_dir/xdg-state" "$case_dir/work" "$case_dir/xdg-cache"
+    chmod 0700 "$case_dir/xdg-config"
     : > "$command_log"
     : > "$output_file"
     printf '%s\n' 'schema_version = 1' > "$config_file"
 
     export HOME=$case_dir/home
+    export XDG_CONFIG_HOME=$case_dir/xdg-config
     export XDG_STATE_HOME=$case_dir/xdg-state
     export XDG_CACHE_HOME=$case_dir/xdg-cache
     export MOGUET_TEST_COMMAND_LOG=$command_log
     export MOGUET_TEST_CONFIG_FILE=$config_file
-    export MOGUET_TEST_PACKAGE_BUILD_DIR=$case_dir/package.build
     export MOGUET_TEST_PACMAN_MAIN_STATUS=1
     export MOGUET_TEST_SUDO_MAIN_STATUS=0
     export MOGUET_TEST_GIT_CLONE_EXIT_CODE=0
@@ -66,6 +68,15 @@ setup_case() {
     unset MOGUET_TEST_SOURCE_PREFERENCE_EXTERNAL
     unset MOGUET_TEST_PACMAN_U_SUCCESS_LOG
     unset MOGUET_TEST_REPLACE_WORKSPACE_AFTER_PACMAN_U
+}
+
+write_source_preference() {
+    package=$1
+    contents=$2
+    mkdir -p "$source_preference_dir"
+    chmod 0700 "$source_preference_dir"
+    printf '%s\n' "$contents" > "$source_preference_dir/$package"
+    chmod 0600 "$source_preference_dir/$package"
 }
 
 run_status() {
@@ -531,7 +542,7 @@ assert_one_blank_line_between_output_lines "repo info failed output" "Repository
 
 # P0-5/P0-6/P0-7: install transaction boundary, all-root/all-source barriers, ordering and failure stops.
 setup_case repo-install-one-ordered-transaction
-printf 'CFLAGS=-Oshould-not-load\n' > "$MOGUET_TEST_PACKAGE_BUILD_DIR/repo-a"
+write_source_preference repo-a 'CFLAGS=-Oshould-not-load'
 export MOGUET_TEST_SUDO_MAIN_STATUS=31
 run_status 31 --noconfirm -S --repo repo-a --config config-value repo-b
 assert_event_at 1 "sudo pacman -S --noconfirm repo-a --config config-value repo-b"
@@ -570,8 +581,8 @@ assert_cache_entry_absent plan-a
 assert_cache_entry_absent plan-missing
 
 setup_case aur-install-plan-order-needed-and-preferences-disabled
-printf 'CFLAGS=-Oaur-only-must-ignore\n' > "$MOGUET_TEST_PACKAGE_BUILD_DIR/plan-a"
-printf 'CFLAGS=-Oaur-only-must-ignore\n' > "$MOGUET_TEST_PACKAGE_BUILD_DIR/plan-b"
+write_source_preference plan-a 'CFLAGS=-Oaur-only-must-ignore'
+write_source_preference plan-b 'CFLAGS=-Oaur-only-must-ignore'
 run_status 0 --noedit --nodiff --noconfirm -S --aur --needed plan-a plan-b
 assert_event_at 1 "aur info plan-a"
 assert_event_at 2 "aur info plan-a"
@@ -689,7 +700,7 @@ assert_cache_entry_absent source-a
 assert_cache_entry_absent plan-missing
 
 setup_case auto-install-later-source-pkgdest-before-official-transaction
-printf 'PKGDEST=\n' > "$MOGUET_TEST_PACKAGE_BUILD_DIR/source-b"
+write_source_preference source-b 'PKGDEST='
 export MOGUET_TEST_PACMAN_REPO_PACKAGES='official-a'
 mkdir -p "$XDG_CACHE_HOME/moguet/preflight-sentinel"
 printf 'stable auto preflight fixture\n' > \
@@ -715,7 +726,7 @@ if [ "$auto_preflight_after" != "$auto_preflight_checksum" ] ||
 fi
 
 setup_case auto-install-mixed-order-filtering-and-source-asymmetry
-printf 'CFLAGS=-Oforced-official\n' > "$MOGUET_TEST_PACKAGE_BUILD_DIR/forced-official"
+write_source_preference forced-official 'CFLAGS=-Oforced-official'
 export MOGUET_TEST_PACMAN_REPO_PACKAGES='official-a forced-official'
 export MOGUET_TEST_SUDO_MAIN_STATUS=0
 run_status 0 --noedit --nodiff --noconfirm -S official-a --needed source-a forced-official source-b
@@ -738,7 +749,7 @@ assert_event_absent "sudo pacman -S --noconfirm official-a --needed source-a for
 assert_event_absent "sudo pacman -S --noconfirm source-a"
 assert_event_absent "sudo pacman -S --noconfirm forced-official"
 assert_event_absent "sudo pacman -S --noconfirm source-b"
-assert_contains "Loading custom build flags from $MOGUET_TEST_PACKAGE_BUILD_DIR/forced-official." "$output_file"
+assert_contains "Loading custom build flags from $source_preference_dir/forced-official." "$output_file"
 assert_cache_entry_present source-a
 assert_cache_entry_present forced-official
 assert_cache_entry_present source-b

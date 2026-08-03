@@ -597,7 +597,7 @@ void require_script_consumed() {
 SourcePreferenceDirectorySnapshot snapshot_source_preference_directory() {
     record_event(
             stub::EventKind::PreferenceDirectorySnapshot,
-            "package.build");
+            "source-build.d");
     if(g_state.preference_directory_failure.has_value()) {
         throw std::runtime_error(*g_state.preference_directory_failure);
     }

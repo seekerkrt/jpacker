@@ -138,6 +138,11 @@ public:
                     "Failed to write source preference fixture " +
                     path.string() + ".");
         }
+        output.close();
+        fs::permissions(
+                path,
+                fs::perms::owner_read | fs::perms::owner_write,
+                fs::perm_options::replace);
     }
 
     void create_directory_entry(const std::string& package_name) {
@@ -714,8 +719,14 @@ int main(int argc, char* argv[]) {
         const fs::path expected_root = fs::path(argv[1]).lexically_normal();
         expect(
                 source_preference_root().lexically_normal() == expected_root,
-                "Source preference test override was not captured before main");
+                "Source preference XDG authority did not resolve to the fixture root");
         fs::create_directories(expected_root);
+        fs::permissions(
+                expected_root.parent_path(), fs::perms::owner_all,
+                fs::perm_options::replace);
+        fs::permissions(
+                expected_root, fs::perms::owner_all,
+                fs::perm_options::replace);
 
         ScopedUnsetEnvironmentVariable inherited_pkgdest("PKGDEST");
         PreferenceFixture fixture;
