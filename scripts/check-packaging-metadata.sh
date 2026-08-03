@@ -57,12 +57,12 @@ assert_value_set() {
 
 assert_single_value pkgbase moguet
 assert_single_value pkgname moguet
-assert_single_value pkgver 2.0.0
+assert_single_value pkgver 2.0.1
 assert_single_value pkgrel 1
 assert_single_value arch x86_64
 assert_single_value license GPL-3.0-or-later
 assert_single_value source \
-    'moguet-src::git+https://github.com/seekerkrt/moguet.git#tag=v2.0.0'
+    'moguet-src::git+https://github.com/seekerkrt/moguet.git#tag=v2.0.1'
 assert_single_value sha256sums SKIP
 
 expected_depends='curl

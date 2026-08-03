@@ -163,7 +163,7 @@ storeへaccessできる非協調same-euid processまたはrootが、最終identi
 
 `/etc/jpacker`と`/etc/moguet`はruntimeで作成・参照せず、legacy storeへのfallback、merge、自動copy / rewrite / deleteを行わない。migrationは利用者がMigration Guideに従ってuserごとに手動実行する。package install / reinstall / uninstallはuser XDG directoryを作成・削除せず、canonical entryとlegacy entryの双方を保持する。
 
-通常、config directoryの変更はPATCHに含めない。しかしこれはv2.0.0で承認済みのuser XDG storage contractから漏れた一領域を、その同じauthorityへ揃える限定的なv2.0.1のbug fixとして扱う。新しいstorage移行をPATCHへ許可する一般的precedentにはしない。v2.0.0のtag、GitHub Release、`RELEASE_NOTES.md`はhistorical artifactとして変更しない。
+通常、config directoryの変更はPATCHに含めない。しかしこれはv2.0.0で承認済みのuser XDG storage contractから漏れた一領域を、その同じauthorityへ揃える限定的なv2.0.1のbug fixとして扱う。新しいstorage移行をPATCHへ許可する一般的precedentにはしない。v2.0.0のtag、GitHub Release、公開済みrelease bodyはhistorical artifactとして変更しない。
 
 ---
 
@@ -326,4 +326,4 @@ Moguet does not promise complete race freedom against a non-cooperating same-eui
 
 Moguet neither creates nor reads `/etc/jpacker` or `/etc/moguet` at runtime, and it does not fall back to, merge, automatically copy, rewrite, or delete the legacy store. Migration is a per-user manual operation governed by the Migration Guide. Package installation, reinstallation, and removal neither create nor delete user XDG directories and preserve both canonical and legacy entries.
 
-Config-directory changes are normally excluded from PATCH releases. This is a narrow v2.0.1 bug-fix exception that completes one omitted part of the user-XDG storage contract already approved for v2.0.0; it is not a general precedent for storage migrations in PATCH releases. The v2.0.0 tag, GitHub Release, and `RELEASE_NOTES.md` remain unchanged historical artifacts.
+Config-directory changes are normally excluded from PATCH releases. This is a narrow v2.0.1 bug-fix exception that completes one omitted part of the user-XDG storage contract already approved for v2.0.0; it is not a general precedent for storage migrations in PATCH releases. The v2.0.0 tag, GitHub Release, and published release body remain unchanged historical artifacts.
