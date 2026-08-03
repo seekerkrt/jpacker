@@ -547,12 +547,18 @@ void test_real_query_wrapper_and_empty_explicit_set_match_legacy_path() {
     config.no_confirm = true;
     config.rm_deps = true;
     config.editor = "fixture-editor";
+    config.provider_selection =
+            make_provider_selection_session(config.no_confirm);
 
     PreparedFilteredAurUpdateOperation prepared =
             prepare_filtered_aur_update_operation(
                     std::move(query), {}, config);
     expect(prepared.is_prepared(),
            "Empty explicit set did not prepare the legacy AUR update");
+    expect(
+            preflight_stub::resolver_selection_callback_presence() ==
+                    std::vector<bool>{true},
+            "Filtered operation did not forward the AppConfig provider-selection session");
     expect(prepared.filtered_plan().entries.size() == 1 &&
                    prepared.target_and_build_unit_plan()
                                    .selected_targets.size() == 1 &&

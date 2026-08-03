@@ -21,10 +21,82 @@ std::size_t strict_repo_provider_query_count();
 
 } // namespace dependency_plan_repository_query_stub
 
+namespace dependency_plan_aur_rpc_stub {
+
+void reset_selected_provider_identity_queries();
+
+} // namespace dependency_plan_aur_rpc_stub
+
 namespace {
 
 void expect(bool condition, const std::string& message) {
     if(!condition) throw std::runtime_error(message);
+}
+
+ProvidedDependency case7_aur_provider() {
+    return ProvidedDependency::from_aur(
+            "case7-provider-pkg", "case7-provider-pkg",
+            "case7-virtual-api", "case7-virtual-api",
+            std::optional<std::string>{"1.0-1"});
+}
+
+ProvidedDependency case8_repository_provider_a() {
+    return ProvidedDependency::from_repository(
+            "extra", "case8-provider-a", "case8-virtual",
+            "case8-virtual=2", std::optional<std::string>{"2.0-1"});
+}
+
+ProvidedDependency case8_repository_provider_b() {
+    return ProvidedDependency::from_repository(
+            "community", "case8-provider-b", "case8-virtual",
+            "case8-virtual=3", std::optional<std::string>{"3.0-1"});
+}
+
+ProvidedDependency case14_repository_provider() {
+    return ProvidedDependency::from_repository(
+            "aur", "case14-provider", "case14-virtual",
+            "case14-virtual=1", std::optional<std::string>{"1.0-1"});
+}
+
+ProvidedDependency case21_aur_provider_a() {
+    return ProvidedDependency::from_aur(
+            "case21-provider-a", "case21-provider-a", "case21-virtual",
+            "case21-virtual=1", std::optional<std::string>{"1.0-1"});
+}
+
+ProvidedDependency case21_aur_provider_b() {
+    return ProvidedDependency::from_aur(
+            "case21-provider-b", "case21-provider-suite", "case21-virtual",
+            "case21-virtual=2", std::optional<std::string>{"1.0-1"});
+}
+
+ProvidedDependency case22_aur_provider() {
+    return ProvidedDependency::from_aur(
+            "case22-provider", "case22-provider", "case22-virtual",
+            "case22-virtual", std::optional<std::string>{"1.0-1"});
+}
+
+ProviderSelectionCallback select_case21_provider(
+        std::size_t& invocation_count) {
+    return [&invocation_count](
+                   const std::string& dependency,
+                   const std::vector<ProvidedDependency>& candidates)
+                   -> std::optional<ProvidedDependency> {
+        ++invocation_count;
+        expect(
+                dependency == "case21-virtual",
+                "Case 21 selector dependency differs");
+        expect(
+                candidates == std::vector<ProvidedDependency>{
+                        case21_aur_provider_a(), case21_aur_provider_b()},
+                "Case 21 selector candidates differ");
+
+        // Selectorの返値はidentityだけをauthorityとし、補助metadataはresolver側を正とする。
+        return ProvidedDependency::from_aur(
+                "case21-provider-b", "case21-provider-suite",
+                "selector-tampered", "selector-tampered=999",
+                std::optional<std::string>{"999.0-1"});
+    };
 }
 
 const PlannedPackageTarget& require_package_target(
@@ -273,6 +345,9 @@ void expect_equivalent_plans(const BuildPlan& lhs, const BuildPlan& rhs) {
         expect(
                 left.resolved_provider == right.resolved_provider,
                 "Edge provider differs");
+        expect(
+                left.provider_resolution == right.provider_resolution,
+                "Edge provider resolution differs");
     }
 
     expect(
@@ -295,6 +370,9 @@ void expect_equivalent_plans(const BuildPlan& lhs, const BuildPlan& rhs) {
     for(std::size_t i = 0; i < lhs.provided.size(); ++i) {
         expect(lhs.provided[i].dependency == rhs.provided[i].dependency, "Provided dependency differs");
         expect(lhs.provided[i].provider == rhs.provided[i].provider, "Provider differs");
+        expect(
+                lhs.provided[i].resolution == rhs.provided[i].resolution,
+                "Provided dependency resolution differs");
     }
 
     expect(lhs.metadata_risks.size() == rhs.metadata_risks.size(), "BuildPlan::metadata_risks size differs");
@@ -506,8 +584,11 @@ void test_case_7_unique_aur_provider() {
     expect(edge.resolved_provider.has_value(), "Case 7 provider is missing");
     expect(
             edge.resolved_provider.value() ==
-                    ProvidedDependency::from_aur("case7-provider-pkg"),
+                    case7_aur_provider(),
             "Case 7 provider differs");
+    expect(
+            edge.provider_resolution == ProviderResolutionKind::Unique,
+            "Case 7 provider resolution differs");
     const PlannedPackageTarget& provider =
             require_package_target(plan, "case7-provider-pkg");
     expect_roles(provider, {PackageRole::RuntimeDependency});
@@ -516,8 +597,11 @@ void test_case_7_unique_aur_provider() {
     expect(plan.provided[0].dependency == "case7-virtual-api", "Case 7 legacy dependency differs");
     expect(
             plan.provided[0].provider ==
-                    ProvidedDependency::from_aur("case7-provider-pkg"),
+                    case7_aur_provider(),
             "Case 7 legacy provider differs");
+    expect(
+            plan.provided[0].resolution == ProviderResolutionKind::Unique,
+            "Case 7 legacy provider resolution differs");
     expect_legacy_order(plan, {"case7-provider-pkg", "case7-app"});
 }
 
@@ -531,12 +615,666 @@ void test_case_8_ambiguous_provider() {
     expect(!edge.resolved_provider.has_value(), "Case 8 provider must be empty");
     expect(plan.ambiguous_providers.size() == 1, "Case 8 ambiguous dependency count differs");
     expect(plan.ambiguous_providers[0].candidates.size() == 2, "Case 8 candidate count differs");
+    expect(
+            plan.ambiguous_providers[0].candidates ==
+                    std::vector<ProvidedDependency>{
+                            case8_repository_provider_a(),
+                            case8_repository_provider_b()},
+            "Case 8 candidate metadata differs");
     expect(package_target_count(plan, "case8-provider-a") == 0, "Case 8 selected a provider");
     expect(package_target_count(plan, "case8-provider-b") == 0, "Case 8 selected a provider");
     expect_exception(
             [&plan]() { require_fetchable_build_plan("case8-app", plan); },
             "Cannot execute build plan for case8-app; ambiguous providers: "
             "case8-virtual (extra/case8-provider-a, community/case8-provider-b)");
+}
+
+void test_case_8_selected_repository_provider() {
+    std::size_t invocation_count = 0;
+    ProviderSelectionCallback select_provider =
+            [&invocation_count](
+                    const std::string& dependency,
+                    const std::vector<ProvidedDependency>& candidates)
+                    -> std::optional<ProvidedDependency> {
+        ++invocation_count;
+        expect(
+                dependency == "case8-virtual",
+                "Case 8 selector dependency differs");
+        expect(
+                candidates == std::vector<ProvidedDependency>{
+                        case8_repository_provider_a(),
+                        case8_repository_provider_b()},
+                "Case 8 selector candidates differ");
+        return ProvidedDependency::from_repository(
+                "community", "case8-provider-b", "selector-tampered",
+                "selector-tampered=999",
+                std::optional<std::string>{"999.0-1"});
+    };
+
+    BuildPlan plan = resolve_build_plan("case8-app", select_provider);
+    expect(invocation_count == 1, "Case 8 selector invocation count differs");
+    expect(plan.ambiguous_providers.empty(), "Case 8 selection stayed ambiguous");
+    expect(plan.unresolved.empty(), "Case 8 selection became unresolved");
+
+    const BuildPlanDependencyEdge& edge = require_edge(
+            plan, "case8-app", "case8-virtual",
+            PackageRole::RuntimeDependency);
+    expect(edge.kind == DependencyKind::Provided, "Case 8 selected edge kind differs");
+    expect(
+            edge.resolved_provider ==
+                    std::optional<ProvidedDependency>{
+                            case8_repository_provider_b()},
+            "Case 8 selected edge lost resolver-owned metadata");
+    expect(
+            edge.provider_resolution == ProviderResolutionKind::UserSelected,
+            "Case 8 selected edge resolution differs");
+
+    expect(plan.provided.size() == 1, "Case 8 selected provider count differs");
+    expect(
+            plan.provided[0].dependency == "case8-virtual" &&
+                    plan.provided[0].provider ==
+                            case8_repository_provider_b() &&
+                    plan.provided[0].resolution ==
+                            ProviderResolutionKind::UserSelected,
+            "Case 8 selected provider record differs");
+    expect(
+            package_target_count(plan, "case8-provider-b") == 0,
+            "Case 8 repository provider leaked into source targets");
+    expect_legacy_order(plan, {"case8-app"});
+    require_fetchable_build_plan("case8-app", plan);
+}
+
+void test_case_8_cancel_and_unoffered_selection() {
+    BuildPlan without_selector = resolve_build_plan("case8-app");
+
+    std::size_t cancel_count = 0;
+    ProviderSelectionCallback cancel_selection =
+            [&cancel_count](
+                    const std::string&,
+                    const std::vector<ProvidedDependency>&)
+                    -> std::optional<ProvidedDependency> {
+        ++cancel_count;
+        return std::nullopt;
+    };
+    BuildPlan cancelled = resolve_build_plan("case8-app", cancel_selection);
+    expect(cancel_count == 1, "Case 8 cancel callback count differs");
+    expect_equivalent_plans(without_selector, cancelled);
+
+    ProviderSelectionCallback unoffered_selection = [](
+            const std::string&,
+            const std::vector<ProvidedDependency>&)
+            -> std::optional<ProvidedDependency> {
+        return ProvidedDependency::from_repository(
+                "testing", "case8-provider-missing", "case8-virtual",
+                "case8-virtual=999",
+                std::optional<std::string>{"999.0-1"});
+    };
+    expect_exception(
+            [&unoffered_selection]() {
+                static_cast<void>(resolve_build_plan(
+                        "case8-app", unoffered_selection));
+            },
+            "Provider selection returned a candidate that was not offered for "
+            "case8-virtual.");
+}
+
+void test_case_21_selected_aur_provider() {
+    std::size_t invocation_count = 0;
+    BuildPlan plan = resolve_build_plan(
+            "case21-app", select_case21_provider(invocation_count));
+    expect(invocation_count == 1, "Case 21 selector invocation count differs");
+    expect(plan.ambiguous_providers.empty(), "Case 21 selection stayed ambiguous");
+    expect(plan.unresolved.empty(), "Case 21 selection became unresolved");
+    expect(plan.cycles.empty(), "Case 21 selection produced a cycle");
+
+    const BuildPlanDependencyEdge& provider_edge = require_edge(
+            plan, "case21-app", "case21-virtual",
+            PackageRole::RuntimeDependency);
+    expect(
+            provider_edge.kind == DependencyKind::Provided,
+            "Case 21 selected edge kind differs");
+    expect(
+            provider_edge.resolved_provider ==
+                    std::optional<ProvidedDependency>{case21_aur_provider_b()},
+            "Case 21 selected edge lost resolver-owned metadata");
+    expect(
+            provider_edge.provider_resolution ==
+                    ProviderResolutionKind::UserSelected,
+            "Case 21 selected edge resolution differs");
+
+    expect(plan.provided.size() == 1, "Case 21 selected provider count differs");
+    expect(
+            plan.provided[0].dependency == "case21-virtual" &&
+                    plan.provided[0].provider == case21_aur_provider_b() &&
+                    plan.provided[0].resolution ==
+                            ProviderResolutionKind::UserSelected,
+            "Case 21 selected provider record differs");
+
+    const PlannedPackageTarget& provider =
+            require_package_target(plan, "case21-provider-b");
+    const PlannedPackageTarget& child =
+            require_package_target(plan, "case21-provider-child");
+    expect(
+            provider.package_base == "case21-provider-suite",
+            "Case 21 provider PackageBase differs");
+    expect_roles(provider, {PackageRole::RuntimeDependency});
+    expect_roles(child, {PackageRole::RuntimeDependency});
+    expect_roots(provider, {{0, "case21-app"}});
+    expect_roots(child, {{0, "case21-app"}});
+    expect(
+            require_build_plan_entry(plan, "case21-provider-suite").package_names ==
+                    std::vector<std::string>{"case21-provider-b"},
+            "Case 21 provider build unit differs");
+
+    const BuildPlanDependencyEdge& child_edge = require_edge(
+            plan, "case21-provider-b", "case21-provider-child",
+            PackageRole::RuntimeDependency);
+    expect_direct_aur_resolution(
+            child_edge, "case21-provider-child", "case21-provider-child");
+    expect_build_unit_before(
+            plan, "case21-provider-child", "case21-provider-suite");
+    expect_build_unit_before(
+            plan, "case21-provider-suite", "case21-app");
+    require_fetchable_build_plan("case21-app", plan);
+}
+
+void test_provider_candidates_dedupe_by_source_identity() {
+    std::size_t callback_count = 0;
+    ProviderSelectionCallback observe_candidates =
+            [&callback_count](
+                    const std::string& dependency,
+                    const std::vector<ProvidedDependency>& candidates)
+                    -> std::optional<ProvidedDependency> {
+        ++callback_count;
+        expect(
+                dependency == "case22-virtual",
+                "Identity dedupe selector dependency differs");
+        expect(
+                candidates == std::vector<ProvidedDependency>{
+                                      case22_aur_provider()},
+                "Identity dedupe retained duplicate presentation metadata");
+        return std::nullopt;
+    };
+
+    BuildPlan plan = resolve_build_plan(
+            "case22-app", observe_candidates);
+    expect(callback_count == 1, "Identity dedupe callback count differs");
+    const BuildPlanDependencyEdge& edge = require_edge(
+            plan, "case22-app", "case22-virtual",
+            PackageRole::RuntimeDependency);
+    expect(
+            edge.resolved_provider ==
+                            std::optional<ProvidedDependency>{
+                                    case22_aur_provider()} &&
+                    edge.provider_resolution == ProviderResolutionKind::Unique,
+            "Identity dedupe did not preserve first authoritative candidate");
+}
+
+BuildPlan selected_provider_identity_plan(
+        ProvidedDependency first,
+        ProvidedDependency second) {
+    BuildPlan plan;
+    plan.provided = {
+            BuildPlanProvidedDependency{
+                    "first-virtual", std::move(first),
+                    ProviderResolutionKind::UserSelected},
+            BuildPlanProvidedDependency{
+                    "second-virtual", std::move(second),
+                    ProviderResolutionKind::UserSelected},
+    };
+    return plan;
+}
+
+void test_selected_provider_package_identity_conflict_guard() {
+    const auto repository_provider = [](const std::string& repository) {
+        return ProvidedDependency::from_repository(
+                repository, "shared-selected-provider", "virtual-api",
+                "virtual-api=1", "1.0-1");
+    };
+    const auto aur_provider = [](const std::string& package_base) {
+        return ProvidedDependency::from_aur(
+                "shared-selected-provider", package_base, "virtual-api",
+                "virtual-api=1", "1.0-1");
+    };
+
+    BuildPlan repository_conflict = selected_provider_identity_plan(
+            repository_provider("extra"), repository_provider("core"));
+    expect_exception(
+            [&repository_conflict]() {
+                require_compatible_selected_provider_package_identities(
+                        repository_conflict);
+            },
+            "Selected providers use incompatible identities for package "
+            "shared-selected-provider: extra/shared-selected-provider and "
+            "core/shared-selected-provider.");
+
+    BuildPlan cross_source_conflict = selected_provider_identity_plan(
+            repository_provider("extra"),
+            aur_provider("shared-selected-provider-base"));
+    expect_exception(
+            [&cross_source_conflict]() {
+                require_fetchable_build_plan(
+                        "identity-conflict-root", cross_source_conflict);
+            },
+            "Selected providers use incompatible identities for package "
+            "shared-selected-provider: extra/shared-selected-provider and "
+            "aur/shared-selected-provider (PackageBase: "
+            "shared-selected-provider-base).");
+
+    BuildPlan aur_base_conflict = selected_provider_identity_plan(
+            aur_provider("first-selected-provider-base"),
+            aur_provider("second-selected-provider-base"));
+    expect_exception(
+            [&aur_base_conflict]() {
+                require_compatible_selected_provider_package_identities(
+                        aur_base_conflict);
+            },
+            "Selected providers use incompatible identities for package "
+            "shared-selected-provider: aur/shared-selected-provider "
+            "(PackageBase: first-selected-provider-base) and "
+            "aur/shared-selected-provider (PackageBase: "
+            "second-selected-provider-base).");
+
+    BuildPlan compatible_aliases = selected_provider_identity_plan(
+            repository_provider("extra"),
+            ProvidedDependency::from_repository(
+                    "extra", "shared-selected-provider", "other-virtual",
+                    "other-virtual=2", "2.0-1"));
+    require_compatible_selected_provider_package_identities(
+            compatible_aliases);
+    require_fetchable_build_plan(
+            "compatible-provider-alias-root", compatible_aliases);
+}
+
+void test_selected_aur_provider_revalidation_boundary() {
+    std::size_t callback_count = 0;
+    ProviderSelectionCallback select_changed_provider =
+            [&callback_count](
+                    const std::string& dependency,
+                    const std::vector<ProvidedDependency>& candidates)
+                    -> std::optional<ProvidedDependency> {
+        ++callback_count;
+        expect(
+                dependency == "selected-provider-identity-virtual" &&
+                        candidates.size() == 2 &&
+                        candidates[1].package_name ==
+                                "selected-provider-identity-b" &&
+                        candidates[1].package_base ==
+                                "selected-provider-original-base",
+                "Selected provider revalidation callback input differs");
+        return candidates[1];
+    };
+
+    const std::string diagnostic =
+            "AUR provider candidate changed during dependency resolution: "
+            "selected-provider-identity-b";
+
+    dependency_plan_aur_rpc_stub::reset_selected_provider_identity_queries();
+    expect_exception(
+            [&select_changed_provider]() {
+                static_cast<void>(resolve_build_plan(
+                        "selected-provider-identity-root",
+                        select_changed_provider));
+            },
+            diagnostic);
+    expect(callback_count == 1, "Build revalidation callback count differs");
+
+    callback_count = 0;
+    dependency_plan_aur_rpc_stub::reset_selected_provider_identity_queries();
+    expect_exception(
+            [&select_changed_provider]() {
+                static_cast<void>(resolve_fetch_plan(
+                        "selected-provider-identity-root",
+                        select_changed_provider));
+            },
+            diagnostic);
+    expect(callback_count == 1, "Fetch revalidation callback count differs");
+
+    callback_count = 0;
+    dependency_plan_aur_rpc_stub::reset_selected_provider_identity_queries();
+    BuildPlan preflight = resolve_build_plan_for_preflight(
+            {"selected-provider-identity-root"},
+            select_changed_provider);
+    expect(callback_count == 1, "Preflight revalidation callback count differs");
+    const BuildPlanResolutionFailure& failure = require_resolution_failure(
+            preflight,
+            BuildPlanResolutionFailureKind::ProviderCandidateMetadataUnavailable,
+            "selected-provider-identity-b");
+    expect_resolution_failure_context(
+            failure,
+            std::optional<std::string>{"selected-provider-identity-root"},
+            std::optional<std::string>{"selected-provider-identity-root"},
+            std::optional<std::string>{"selected-provider-identity-virtual"},
+            {{0, "selected-provider-identity-root"}}, diagnostic);
+    const BuildPlanDependencyEdge& edge = require_edge(
+            preflight, "selected-provider-identity-root",
+            "selected-provider-identity-virtual",
+            PackageRole::RuntimeDependency);
+    expect(
+            edge.kind == DependencyKind::Provided &&
+                    edge.provider_resolution ==
+                            ProviderResolutionKind::UserSelected &&
+                    edge.resolved_provider.has_value() &&
+                    edge.resolved_provider->package_base ==
+                            "selected-provider-original-base",
+            "Preflight lost the selected provider snapshot");
+    expect(
+            preflight.unresolved ==
+                    std::vector<std::string>{"selected-provider-identity-b"},
+            "Changed selected provider did not remain unresolved");
+    expect_legacy_order(preflight, {"selected-provider-identity-root"});
+
+    callback_count = 0;
+    dependency_plan_aur_rpc_stub::reset_selected_provider_identity_queries();
+    AurPackageInfo recursive_root;
+    recursive_root.Name = "selected-provider-identity-recursive-root";
+    recursive_root.PackageBase = recursive_root.Name;
+    recursive_root.Depends = {"selected-provider-identity-virtual"};
+    expect_exception(
+            [&recursive_root, &select_changed_provider]() {
+                static_cast<void>(resolve_recursive_dependencies(
+                        recursive_root, select_changed_provider));
+            },
+            diagnostic);
+    expect(callback_count == 1, "Recursive revalidation callback count differs");
+
+    std::size_t provides_callback_count = 0;
+    ProviderSelectionCallback select_removed_provider =
+            [&provides_callback_count](
+                    const std::string& dependency,
+                    const std::vector<ProvidedDependency>& candidates)
+                    -> std::optional<ProvidedDependency> {
+        ++provides_callback_count;
+        expect(
+                dependency == "selected-provider-provides-virtual" &&
+                        candidates.size() == 2,
+                "Removed Provides callback input differs");
+        return candidates[1];
+    };
+    dependency_plan_aur_rpc_stub::reset_selected_provider_identity_queries();
+    expect_exception(
+            [&select_removed_provider]() {
+                static_cast<void>(resolve_build_plan(
+                        "selected-provider-provides-root",
+                        select_removed_provider));
+            },
+            "AUR provider candidate changed during dependency resolution: "
+            "selected-provider-provides-b");
+    expect(
+            provides_callback_count == 1,
+            "Removed Provides callback count differs");
+
+    std::size_t metadata_callback_count = 0;
+    ProviderSelectionCallback select_updated_metadata =
+            [&metadata_callback_count](
+                    const std::string& dependency,
+                    const std::vector<ProvidedDependency>& candidates)
+                    -> std::optional<ProvidedDependency> {
+        ++metadata_callback_count;
+        expect(
+                dependency == "selected-provider-metadata-virtual" &&
+                        candidates.size() == 2,
+                "Updated provider metadata callback input differs");
+        return candidates[1];
+    };
+    dependency_plan_aur_rpc_stub::reset_selected_provider_identity_queries();
+    BuildPlan updated_metadata = resolve_build_plan(
+            "selected-provider-metadata-root", select_updated_metadata);
+    expect(
+            metadata_callback_count == 1,
+            "Updated provider metadata callback count differs");
+    const BuildPlanDependencyEdge& updated_edge = require_edge(
+            updated_metadata, "selected-provider-metadata-root",
+            "selected-provider-metadata-virtual",
+            PackageRole::RuntimeDependency);
+    expect(
+            updated_edge.resolved_provider.has_value(),
+            "Updated provider edge lost its selected candidate");
+    const ProvidedDependency& selected_snapshot =
+            updated_edge.resolved_provider.value();
+    expect(
+            selected_snapshot.package_version ==
+                            std::optional<std::string>{"1.0-1"} &&
+                    selected_snapshot.provided_dependency_specification ==
+                            "selected-provider-metadata-virtual=1",
+            "Selected edge did not retain its candidate snapshot");
+    expect_legacy_order(
+            updated_metadata,
+            {"selected-provider-metadata-b",
+             "selected-provider-metadata-root"});
+}
+
+void test_selection_enabled_metadata_failure_boundary() {
+    std::size_t callback_count = 0;
+    ProviderSelectionCallback select_provider =
+            [&callback_count](
+                    const std::string&,
+                    const std::vector<ProvidedDependency>&)
+                    -> std::optional<ProvidedDependency> {
+        ++callback_count;
+        return std::nullopt;
+    };
+
+    expect_exception(
+            [&select_provider]() {
+                static_cast<void>(resolve_build_plan(
+                        "preflight-dependency-failure-root",
+                        select_provider));
+            },
+            "strict dependency metadata failure");
+    expect_exception(
+            [&select_provider]() {
+                static_cast<void>(resolve_fetch_plan(
+                        "preflight-dependency-failure-root",
+                        select_provider));
+            },
+            "strict dependency metadata failure");
+    expect_exception(
+            [&select_provider]() {
+                static_cast<void>(classify_dependencies(
+                        {"preflight-dependency-failure-child"},
+                        select_provider));
+            },
+            "strict dependency metadata failure");
+
+    AurPackageInfo aur_failure_recursive_root;
+    aur_failure_recursive_root.Name =
+            "selection-enabled-aur-failure-recursive-root";
+    aur_failure_recursive_root.PackageBase =
+            aur_failure_recursive_root.Name;
+    aur_failure_recursive_root.Depends = {
+            "preflight-dependency-failure-child"};
+    expect_exception(
+            [&aur_failure_recursive_root, &select_provider]() {
+                static_cast<void>(resolve_recursive_dependencies(
+                        aur_failure_recursive_root, select_provider));
+            },
+            "strict dependency metadata failure");
+
+    expect_exception(
+            [&select_provider]() {
+                static_cast<void>(resolve_build_plan(
+                        "preflight-provider-search-root", select_provider));
+            },
+            "strict provider search failure");
+    expect_exception(
+            [&select_provider]() {
+                static_cast<void>(resolve_build_plan(
+                        "preflight-provider-candidate-root", select_provider));
+            },
+            "strict provider candidate failure");
+    expect_exception(
+            [&select_provider]() {
+                static_cast<void>(resolve_fetch_plan(
+                        "preflight-provider-search-root", select_provider));
+            },
+            "strict provider search failure");
+    expect_exception(
+            [&select_provider]() {
+                static_cast<void>(resolve_fetch_plan(
+                        "preflight-provider-candidate-root", select_provider));
+            },
+            "strict provider candidate failure");
+
+    expect_exception(
+            [&select_provider]() {
+                static_cast<void>(resolve_build_plan(
+                        "preflight-repository-exact-failure-root",
+                        select_provider));
+            },
+            "strict repository exact metadata failure");
+    expect_exception(
+            [&select_provider]() {
+                static_cast<void>(resolve_fetch_plan(
+                        "preflight-repository-exact-failure-root",
+                        select_provider));
+            },
+            "strict repository exact metadata failure");
+    expect_exception(
+            [&select_provider]() {
+                static_cast<void>(classify_dependencies(
+                        {"preflight-repository-exact-failure-child"},
+                        select_provider));
+            },
+            "strict repository exact metadata failure");
+
+    AurPackageInfo recursive_root;
+    recursive_root.Name = "selection-enabled-recursive-root";
+    recursive_root.PackageBase = recursive_root.Name;
+    recursive_root.Depends = {
+            "preflight-repository-exact-failure-child"};
+    expect_exception(
+            [&recursive_root, &select_provider]() {
+                static_cast<void>(resolve_recursive_dependencies(
+                        recursive_root, select_provider));
+            },
+            "strict repository exact metadata failure");
+
+    AurPackageInfo selected_provider_recursive_root;
+    selected_provider_recursive_root.Name =
+            "selection-enabled-selected-provider-recursive-root";
+    selected_provider_recursive_root.PackageBase =
+            selected_provider_recursive_root.Name;
+    selected_provider_recursive_root.Depends = {
+            "recursive-selected-provider-failure-virtual"};
+    ProviderSelectionCallback select_recursive_aur_provider =
+            [&callback_count](
+                    const std::string& dependency,
+                    const std::vector<ProvidedDependency>& candidates)
+                    -> std::optional<ProvidedDependency> {
+        ++callback_count;
+        expect(
+                dependency ==
+                                "recursive-selected-provider-failure-virtual" &&
+                        candidates.size() == 2,
+                "Recursive selected provider callback input differs");
+        return candidates[1];
+    };
+    expect_exception(
+            [&selected_provider_recursive_root,
+             &select_recursive_aur_provider]() {
+                static_cast<void>(resolve_recursive_dependencies(
+                        selected_provider_recursive_root,
+                        select_recursive_aur_provider));
+            },
+            "strict selected provider traversal metadata failure");
+
+    expect(
+            callback_count == 1,
+            "Selection callback ran outside the selected provider traversal case");
+}
+
+void test_single_provider_callback_contract() {
+    std::size_t invocation_count = 0;
+    ProviderSelectionCallback selected_unique =
+            [&invocation_count](
+                    const std::string& dependency,
+                    const std::vector<ProvidedDependency>& candidates)
+                    -> std::optional<ProvidedDependency> {
+        ++invocation_count;
+        expect(
+                dependency == "case14-virtual",
+                "Single provider callback dependency differs");
+        expect(
+                candidates == std::vector<ProvidedDependency>{
+                        case14_repository_provider()},
+                "Single provider callback candidates differ");
+        return case14_repository_provider();
+    };
+
+    BuildPlan selected = resolve_build_plan("case14-app", selected_unique);
+    expect(
+            invocation_count == 1,
+            "Single provider callback was not invoked");
+    const BuildPlanDependencyEdge& selected_edge = require_edge(
+            selected, "case14-app", "case14-virtual",
+            PackageRole::RuntimeDependency);
+    expect(
+            selected_edge.resolved_provider ==
+                    std::optional<ProvidedDependency>{
+                            case14_repository_provider()} &&
+                    selected_edge.provider_resolution ==
+                            ProviderResolutionKind::UserSelected,
+            "Single provider callback result was not retained as user-selected");
+    expect(
+            selected.provided.size() == 1 &&
+                    selected.provided[0].provider ==
+                            case14_repository_provider() &&
+                    selected.provided[0].resolution ==
+                            ProviderResolutionKind::UserSelected,
+            "Single provider plan record was not retained as user-selected");
+
+    ProviderSelectionCallback conflict = [](
+            const std::string& dependency,
+            const std::vector<ProvidedDependency>& candidates)
+            -> std::optional<ProvidedDependency> {
+        expect(
+                dependency == "case14-virtual" &&
+                        candidates == std::vector<ProvidedDependency>{
+                                case14_repository_provider()},
+                "Single provider conflict callback input differs");
+        throw std::runtime_error("simulated provider selection conflict");
+    };
+    expect_exception(
+            [&conflict]() {
+                static_cast<void>(resolve_build_plan("case14-app", conflict));
+            },
+            "simulated provider selection conflict");
+}
+
+void test_fetch_provider_traversal_boundary() {
+    BuildPlan unique = resolve_fetch_plan("case7-app");
+    expect_legacy_order(unique, {"case7-app"});
+    expect(
+            package_target_count(unique, "case7-provider-pkg") == 0,
+            "Fetch traversed a unique AUR provider");
+    expect(unique.provided.size() == 1, "Fetch unique provider record is missing");
+    expect(
+            unique.provided[0].provider == case7_aur_provider() &&
+                    unique.provided[0].resolution ==
+                            ProviderResolutionKind::Unique,
+            "Fetch unique provider record differs");
+
+    std::size_t invocation_count = 0;
+    BuildPlan selected = resolve_fetch_plan(
+            "case21-app", select_case21_provider(invocation_count));
+    expect(
+            invocation_count == 1,
+            "Fetch selected provider callback count differs");
+    expect(
+            package_target_count(selected, "case21-provider-b") == 1,
+            "Fetch did not traverse a user-selected AUR provider");
+    expect(
+            package_target_count(selected, "case21-provider-child") == 1,
+            "Fetch did not recurse through a selected AUR provider");
+    expect(
+            package_target_count(selected, "case21-provider-a") == 0,
+            "Fetch traversed an unselected AUR provider");
+    expect_build_unit_before(
+            selected, "case21-provider-child", "case21-provider-suite");
+    expect_build_unit_before(
+            selected, "case21-provider-suite", "case21-app");
+    require_fetchable_build_plan("case21-app", selected);
 }
 
 void test_case_9_unknown_dependency() {
@@ -630,8 +1368,7 @@ void test_supplemental_multi_root_contracts() {
     expect(provider_edge.resolved_provider.has_value(), "Repository provider is missing");
     expect(
             provider_edge.resolved_provider.value() ==
-                    ProvidedDependency::from_repository(
-                            "aur", "case14-provider"),
+                    case14_repository_provider(),
             "Repository provider result differs");
     const auto* repository_origin = std::get_if<RepositoryProviderOrigin>(
             &provider_edge.resolved_provider->origin);
@@ -918,6 +1655,48 @@ void test_preflight_dependency_and_provider_failures() {
                             .kind == DependencyKind::Unknown,
             "Dependency metadata failure was treated as resolved");
 
+    std::size_t fallback_callback_count = 0;
+    ProviderSelectionCallback reject_provider_fallback =
+            [&fallback_callback_count](
+                    const std::string&,
+                    const std::vector<ProvidedDependency>& candidates)
+                    -> std::optional<ProvidedDependency> {
+        ++fallback_callback_count;
+        return candidates.front();
+    };
+    BuildPlan exact_failure = resolve_build_plan_for_preflight(
+            {"preflight-exact-failure-no-provider-fallback-root"},
+            reject_provider_fallback);
+    expect(
+            fallback_callback_count == 0,
+            "Preflight prompted for a provider after exact metadata failure");
+    const BuildPlanResolutionFailure& exact_failure_record =
+            require_resolution_failure(
+                    exact_failure,
+                    BuildPlanResolutionFailureKind::AurPackageMetadataUnavailable,
+                    "preflight-exact-failure-no-provider-fallback");
+    expect_resolution_failure_context(
+            exact_failure_record,
+            std::optional<std::string>{
+                    "preflight-exact-failure-no-provider-fallback-root"},
+            std::optional<std::string>{
+                    "preflight-exact-failure-no-provider-fallback-root"},
+            std::optional<std::string>{
+                    "preflight-exact-failure-no-provider-fallback"},
+            {{0, "preflight-exact-failure-no-provider-fallback-root"}},
+            "strict exact metadata failure before provider fallback");
+    expect(
+            require_edge(
+                    exact_failure,
+                    "preflight-exact-failure-no-provider-fallback-root",
+                    "preflight-exact-failure-no-provider-fallback",
+                    PackageRole::RuntimeDependency)
+                            .kind == DependencyKind::Unknown,
+            "Preflight exact metadata failure fell back to a provider");
+    expect(
+            exact_failure.provided.empty(),
+            "Preflight retained a provider after exact metadata failure");
+
     BuildPlan provider_search = resolve_build_plan_for_preflight(
             {"preflight-provider-search-root"});
     expect(
@@ -936,8 +1715,18 @@ void test_preflight_dependency_and_provider_failures() {
             {{0, "preflight-provider-search-root"}},
             "strict provider search failure");
 
+    std::size_t partial_candidate_callback_count = 0;
+    ProviderSelectionCallback reject_partial_candidates =
+            [&partial_candidate_callback_count](
+                    const std::string&,
+                    const std::vector<ProvidedDependency>& candidates)
+                    -> std::optional<ProvidedDependency> {
+        ++partial_candidate_callback_count;
+        return candidates.front();
+    };
     BuildPlan provider_candidate = resolve_build_plan_for_preflight(
-            {"preflight-provider-candidate-root"});
+            {"preflight-provider-candidate-root"},
+            reject_partial_candidates);
     expect(
             provider_candidate.resolution_failures.size() == 1,
             "Unexpected provider candidate failure count");
@@ -953,20 +1742,21 @@ void test_preflight_dependency_and_provider_failures() {
             std::optional<std::string>{"preflight-provider-candidate-virtual"},
             {{0, "preflight-provider-candidate-root"}},
             "strict provider candidate failure");
+    expect(
+            partial_candidate_callback_count == 0,
+            "Preflight exposed a partial provider candidate set");
     const BuildPlanDependencyEdge& provider_edge = require_edge(
             provider_candidate, "preflight-provider-candidate-root",
             "preflight-provider-candidate-virtual",
             PackageRole::RuntimeDependency);
     expect(
-            provider_edge.kind == DependencyKind::Provided &&
-                    provider_edge.resolved_provider.has_value() &&
-                    provider_edge.resolved_provider.value() ==
-                            ProvidedDependency::from_aur(
-                                    "preflight-provider-good"),
-            "Known provider was lost after another candidate failed");
+            provider_edge.kind == DependencyKind::Unknown &&
+                    !provider_edge.resolved_provider.has_value(),
+            "Partial provider candidates were treated as authoritative");
     expect(
-            provider_candidate.unresolved.empty(),
-            "Known provider was incorrectly left unresolved");
+            provider_candidate.unresolved == std::vector<std::string>{
+                    "preflight-provider-candidate-virtual"},
+            "Incomplete provider candidates did not remain unresolved");
 }
 
 void test_preflight_shared_failure_root_attribution() {
@@ -1193,6 +1983,33 @@ int main() {
         run_case("Case 6 repository dependency", test_case_6_repository_dependency);
         run_case("Case 7 unique AUR provider", test_case_7_unique_aur_provider);
         run_case("Case 8 ambiguous provider", test_case_8_ambiguous_provider);
+        run_case(
+                "Case 8 selected repository provider",
+                test_case_8_selected_repository_provider);
+        run_case(
+                "Case 8 cancel and unoffered selection",
+                test_case_8_cancel_and_unoffered_selection);
+        run_case(
+                "Case 21 selected AUR provider",
+                test_case_21_selected_aur_provider);
+        run_case(
+                "provider candidates dedupe by source identity",
+                test_provider_candidates_dedupe_by_source_identity);
+        run_case(
+                "selected provider package identity conflict guard",
+                test_selected_provider_package_identity_conflict_guard);
+        run_case(
+                "selected AUR provider revalidation boundary",
+                test_selected_aur_provider_revalidation_boundary);
+        run_case(
+                "selection-enabled metadata failure boundary",
+                test_selection_enabled_metadata_failure_boundary);
+        run_case(
+                "single provider callback contract",
+                test_single_provider_callback_contract);
+        run_case(
+                "fetch provider traversal boundary",
+                test_fetch_provider_traversal_boundary);
         run_case("Case 9 unknown dependency", test_case_9_unknown_dependency);
         run_case("Case 10 dependency chain", test_case_10_dependency_chain);
         run_case("Case 11 single overload compatibility", test_case_11_single_overload_compatibility);

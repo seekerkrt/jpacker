@@ -3,6 +3,7 @@
 #include "artifact_install_executor.hpp"
 #include "separated_source_build.hpp"
 
+#include <algorithm>
 #include <deque>
 #include <cstdlib>
 #include <filesystem>
@@ -39,10 +40,17 @@ struct PhaseStubState {
     std::map<std::string, ResolvedSourceBuildIdentity> identities;
     std::map<std::string, std::string> identity_failures;
     std::map<std::string, std::string> work_item_failures;
+    std::map<std::string, std::vector<ProvidedDependency>>
+            selected_repository_providers;
+    std::map<std::string, std::vector<ProvidedDependency>>
+            provider_candidates;
+    ProviderSelectionCallback provider_selector;
+    std::optional<std::string> repository_provider_transaction_failure;
     std::optional<std::string> invocation_failure;
     std::optional<std::string> supported_options_failure;
     bool cache_seed_failure = false;
     bool cache_activation_failure = false;
+    bool repository_provider_cache_revalidation_failure = false;
     std::deque<stub::MetadataSessionScript> metadata_sessions;
     int system_exit_status = 0;
     std::optional<std::string> system_failure;
@@ -89,6 +97,10 @@ ResolvedSourceBuildIdentity default_identity(
 
 } // namespace
 
+ProviderSelectionCallback provider_selection_callback(const AppConfig&) {
+    return g_state.provider_selector;
+}
+
 void activate_production_source_build_cache(
         PreparedProductionSourceBuildInvocation&) {
     // Phase tests isolate cache/filesystem mutation behind this seam.
@@ -98,6 +110,36 @@ void activate_production_source_build_cache(
                 TrustedCacheErrorCode::ConcurrentReplacement,
                 std::nullopt});
     }
+}
+
+SelectedRepositoryProviderTransactionResult
+execute_selected_repository_provider_transaction(
+        const PreparedProductionSourceBuildInvocation& invocation,
+        const AppConfig&) {
+    SelectedRepositoryProviderTransactionResult result;
+    result.selected_providers = invocation.selected_repository_providers;
+    if(result.selected_providers.empty()) return result;
+    if(g_state.repository_provider_cache_revalidation_failure) {
+        throw TrustedCacheError(TrustedCacheFailure{
+                TrustedCacheStage::RootRevalidation,
+                TrustedCacheErrorCode::ConcurrentReplacement,
+                std::nullopt});
+    }
+    g_state.events.push_back(stub::Event{
+            stub::EventKind::RepositoryProviderTransaction,
+            "selected-repository-providers"});
+    if(g_state.repository_provider_transaction_failure.has_value()) {
+        result.status =
+                SelectedRepositoryProviderTransactionStatus::Failed;
+        result.package_state_change = PackageStateChange::Unknown;
+        result.diagnostic =
+                *g_state.repository_provider_transaction_failure;
+        return result;
+    }
+    result.status = SelectedRepositoryProviderTransactionStatus::Succeeded;
+    result.package_state_change = PackageStateChange::Unknown;
+    result.command_exit_status = 0;
+    return result;
 }
 
 void seed_production_source_build_cache(
@@ -156,6 +198,28 @@ void fail_source_work_item(
     g_state.work_item_failures[package_name] = std::move(diagnostic);
 }
 
+void set_selected_repository_provider(
+        const std::string& package_name,
+        ProvidedDependency provider) {
+    g_state.selected_repository_providers[package_name].push_back(
+            std::move(provider));
+}
+
+void set_provider_candidates(
+        const std::string& package_name,
+        std::vector<ProvidedDependency> candidates) {
+    g_state.provider_candidates[package_name] = std::move(candidates);
+}
+
+void set_provider_selector(ProviderSelectionCallback select_provider) {
+    g_state.provider_selector = std::move(select_provider);
+}
+
+void fail_repository_provider_transaction(std::string diagnostic) {
+    g_state.repository_provider_transaction_failure =
+            std::move(diagnostic);
+}
+
 void fail_source_invocation(std::string diagnostic) {
     g_state.invocation_failure = std::move(diagnostic);
 }
@@ -170,6 +234,10 @@ void fail_cache_seed() {
 
 void fail_cache_activation() {
     g_state.cache_activation_failure = true;
+}
+
+void fail_repository_provider_cache_revalidation() {
+    g_state.repository_provider_cache_revalidation_failure = true;
 }
 
 void enqueue_metadata_session(MetadataSessionScript script) {
@@ -305,13 +373,6 @@ void require_supported_production_source_build_options(
 
 ResolvedSourceBuildIdentity resolve_source_build_identity(
         const std::string& package_name) {
-    const char* cache_home = std::getenv("XDG_CACHE_HOME");
-    if(cache_home == nullptr ||
-       !std::filesystem::is_directory(
-               std::filesystem::path(cache_home) / "moguet")) {
-        fail_unexpected(
-                "Source identity resolution started before cache authority preparation.");
-    }
     g_state.events.push_back(stub::Event{
             stub::EventKind::SourceIdentityResolution,
             package_name});
@@ -354,6 +415,47 @@ ProductionSourceBuildWorkItem prepare_resolved_source_build_work_item(
     return work_item;
 }
 
+ProductionSourceBuildWorkItem prepare_resolved_source_build_work_item(
+        const ResolvedSourceBuildIdentity& identity,
+        SourceBuildEnvironment environment,
+        bool only_if_updated,
+        bool needed,
+        const ProviderSelectionCallback& select_provider) {
+    ProductionSourceBuildWorkItem work_item =
+            prepare_resolved_source_build_work_item(
+            identity, std::move(environment), only_if_updated, needed);
+    auto candidates = g_state.provider_candidates.find(
+            identity.requested_name);
+    if(candidates != g_state.provider_candidates.end()) {
+        if(!select_provider) {
+            throw std::runtime_error(
+                    "scripted registered-source provider remains ambiguous");
+        }
+        const std::optional<ProvidedDependency> selected =
+                select_provider(
+                        "scripted-registered-source-dependency",
+                        candidates->second);
+        if(!selected.has_value()) {
+            throw std::runtime_error(
+                    "scripted registered-source provider remains ambiguous");
+        }
+        if(std::holds_alternative<RepositoryProviderOrigin>(
+                   selected->origin)) {
+            work_item.selected_repository_providers.push_back(
+                    selected.value());
+        } else {
+            throw std::runtime_error(
+                    "scripted registered-source AUR provider is unsupported");
+        }
+    }
+    auto providers = g_state.selected_repository_providers.find(
+            identity.requested_name);
+    if(providers != g_state.selected_repository_providers.end()) {
+        work_item.selected_repository_providers = providers->second;
+    }
+    return work_item;
+}
+
 PreparedProductionSourceBuildInvocation
 prepare_production_source_build_invocation(
         std::vector<ProductionSourceBuildWorkItem> work_items,
@@ -365,8 +467,24 @@ prepare_production_source_build_invocation(
     if(g_state.invocation_failure.has_value()) {
         throw std::runtime_error(*g_state.invocation_failure);
     }
+    std::vector<ProvidedDependency> selected_repository_providers;
+    for(const auto& work_item : work_items) {
+        for(const auto& provider : work_item.selected_repository_providers) {
+            const auto same = [&provider](
+                                      const ProvidedDependency& existing) {
+                return same_provider_identity(existing, provider);
+            };
+            if(std::find_if(
+                       selected_repository_providers.begin(),
+                       selected_repository_providers.end(), same) ==
+               selected_repository_providers.end()) {
+                selected_repository_providers.push_back(provider);
+            }
+        }
+    }
     return PreparedProductionSourceBuildInvocation{
             std::move(work_items),
+            std::move(selected_repository_providers),
             PacmanDatabasePaths{"/stub/root", "/stub/database"},
             std::nullopt};
 }

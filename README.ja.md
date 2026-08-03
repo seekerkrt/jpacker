@@ -59,14 +59,30 @@ packageは`jpacker` command aliasを提供しません。AUR publicationは将�
 - `deps`と`plan`は調査・表示だけを行い、clone、build、installしません。`fetch`は
   未取得repositoryをcloneし、既存cloneでは`git fetch origin`だけを実行します。
   pull、merge、reset、working tree更新、build、installは行いません。
-- 未解決dependency、ambiguous provider、cycle、安全に解決できないconflicts /
+- 複数provider candidateが残る場合、interactive TTYではsource-aware candidateを番号付きで
+  表示し、exactly oneの明示選択を要求します。defaultはありません。empty input、`q`、
+  `quit`、`cancel`、EOFは選択を取り消し、invalid / out-of-range inputは再入力します。
+- non-TTYと`--noconfirm`ではprovider inputをstdinから読まず、candidateを自動選択しません。
+  未選択のambiguous providerはfail-closedで停止します。
+- provider choiceは現在のinvocation内だけで所有します。`deps` / `plan`はselectedと
+  ambiguous providerを区別し、selected AUR providerのPackageBaseはfetch / build planへ
+  渡し、selected repository providerはofficial `repository/package` dependencyとして
+  導入します。`deps --recursive`ではprovided dependencyのうちuser-selected AUR
+  providerだけをさらに辿り、unique providerとselected repository providerは終端の
+  まま表示します。
+- registered source phaseはsingular source lifecycleを維持します。candidateがすべて
+  official repository由来の場合だけprovider selectionを行い、AUR providerを含む
+  candidate setは、そのPackageBaseをこのphaseでscheduleできないためambiguousのまま
+  system / source execution前に停止します。
+- 未解決dependency、未選択のambiguous provider、cycle、安全に解決できないconflicts /
   replaces、証明できないartifact identityは、対応するmutation前に拒否します。
 - `--noconfirm`は対話停止を避ける指定であり、「すべてyes」ではありません。source
   selection、plan、identity、conflict、ownershipのguardを突破しません。
 - 複数phaseのupgradeは単一atomic transactionではありません。failure時は後続処理を
   止めますが、完了済みpackage transactionをrollbackしません。install成功後にcleanup
   だけ失敗した場合、packageはinstall済みの可能性があるため、結果を確認せず再試行
-  しないでください。
+  しないでください。`upgrade-all`のprovider selectionはfiltered AUR phaseのclone、build、
+  pacman、sudoより前に行いますが、それ以前のphaseは完了済みの場合があります。
 
 詳細なcompatibility / routing契約は
 [docs/COMPATIBILITY.md](https://github.com/seekerkrt/moguet/blob/develop/docs/COMPATIBILITY.md)、

@@ -181,6 +181,9 @@ std::string aur_phase_status_label(UpgradeAllAurPhaseStatus status) {
         return localization::translate_message("completed");
     case UpgradeAllAurPhaseStatus::BlockedBeforeExecution:
         return localization::translate_message("blocked before execution");
+    case UpgradeAllAurPhaseStatus::StoppedOnProviderTransactionFailure:
+        return localization::translate_message(
+                "stopped after repository provider transaction failure");
     case UpgradeAllAurPhaseStatus::StoppedOnWorkItemFailure:
         return localization::translate_message("stopped on work-item failure");
     case UpgradeAllAurPhaseStatus::StoppedAfterCleanupFailure:
@@ -899,6 +902,11 @@ std::string aur_target_status_label(
     case AurUpdateOperationTargetStatus::NoChangeCleanupFailed:
         return localization::translate_message("no package change, but cleanup failed");
     case AurUpdateOperationTargetStatus::NotAttempted:
+        if(operation_status == AurUpdateOperationStatus::
+                                       StoppedOnProviderTransactionFailure) {
+            return localization::translate_message(
+                    "not attempted: repository provider transaction failed");
+        }
         if(target.execution_failure_kind ==
            AurUpdateWorkItemFailureKind::PriorWorkItemStopped) {
             return localization::translate_message(
@@ -911,6 +919,10 @@ std::string aur_target_status_label(
         case AurUpdateOperationStatus::InconsistentResult:
             return localization::translate_message(
                     "not attempted: result inconsistent");
+        case AurUpdateOperationStatus::
+                StoppedOnProviderTransactionFailure:
+            return localization::translate_message(
+                    "not attempted: repository provider transaction failed");
         case AurUpdateOperationStatus::StoppedOnWorkItemFailure:
         case AurUpdateOperationStatus::StoppedAfterPackageCleanupFailure:
             return localization::translate_message(

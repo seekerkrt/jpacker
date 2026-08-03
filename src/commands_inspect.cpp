@@ -1,5 +1,6 @@
 #include "commands_inspect.hpp"
 
+#include "app_config.hpp"
 #include "application_identity.hpp"
 #include "aur_rpc.hpp"
 #include "aur_update_query.hpp"
@@ -507,6 +508,24 @@ void print_ambiguous_provider_group(
     }
 }
 
+void print_selected_provider_group(
+        const std::string& label,
+        const std::vector<SelectedProvidedDependency>& dependencies) {
+    std::cout << label << std::endl;
+    if(dependencies.empty()) {
+        std::cout << localization::translate_message("  None") << std::endl;
+        return;
+    }
+    for(const auto& dependency : dependencies) {
+        std::cout << "  "
+                  << dependency_display_with_constraint_note(
+                             dependency.dependency, dependency.dependency)
+                  << " -> "
+                  << provided_dependency_display(dependency.provider)
+                  << std::endl;
+    }
+}
+
 void print_metadata_risk_group(const std::vector<BuildPlanMetadataRisk>& risks) {
     std::cout << localization::translate_message(
                          "Metadata conflicts/replaces:")
@@ -570,6 +589,11 @@ void print_build_plan(const BuildPlan& plan) {
                                  dependency.dependency)
                       << " -> "
                       << provided_dependency_display(dependency.provider)
+                      << (dependency.resolution ==
+                                          ProviderResolutionKind::UserSelected
+                                  ? localization::translate_message(
+                                            " (selected)")
+                                  : "")
                       << std::endl;
         }
     }
@@ -658,6 +682,23 @@ void print_fetch_plan(const BuildPlan& plan) {
         }
     }
 
+    std::vector<SelectedProvidedDependency> selected_providers;
+    for(const auto& dependency : plan.provided) {
+        if(dependency.resolution !=
+           ProviderResolutionKind::UserSelected) {
+            continue;
+        }
+        selected_providers.push_back(SelectedProvidedDependency{
+                dependency.dependency, dependency.provider});
+    }
+    if(!selected_providers.empty()) {
+        std::cout << std::endl;
+        print_selected_provider_group(
+                localization::translate_message(
+                        "Selected provided dependencies:"),
+                selected_providers);
+    }
+
     if(!plan.unresolved.empty()) {
         std::cout << std::endl;
         std::cout << localization::translate_message(
@@ -696,7 +737,10 @@ void print_fetch_plan(const BuildPlan& plan) {
 
 } // namespace
 
-int cmd_deps(const std::vector<std::string>& targets, const std::vector<std::string>& flags) {
+int cmd_deps(
+        const std::vector<std::string>& targets,
+        const std::vector<std::string>& flags,
+        const AppConfig& config) {
     bool recursive = false;
     for(const auto& flag : flags) {
         if(flag ==
@@ -721,6 +765,8 @@ int cmd_deps(const std::vector<std::string>& targets, const std::vector<std::str
     }
 
     bool failed = false;
+    ProviderSelectionCallback select_provider =
+            provider_selection_callback(config);
     for(size_t i = 0; i < targets.size(); ++i) {
         const auto& target = targets[i];
         require_valid_package_name(target);
@@ -735,7 +781,8 @@ int cmd_deps(const std::vector<std::string>& targets, const std::vector<std::str
             }
 
             std::vector<std::string> dependencies = collect_build_dependencies(info.value());
-            DependencyClassification classified = classify_dependencies(dependencies);
+            DependencyClassification classified = classify_dependencies(
+                    dependencies, select_provider);
 
             if(i > 0) std::cout << std::endl;
             std::cout << localization::format_translated_message(
@@ -762,6 +809,13 @@ int cmd_deps(const std::vector<std::string>& targets, const std::vector<std::str
                     localization::translate_message(
                             "Provided dependencies:"),
                     classified.provided);
+            if(!classified.selected_providers.empty()) {
+                std::cout << std::endl;
+                print_selected_provider_group(
+                        localization::translate_message(
+                                "Selected provided dependencies:"),
+                        classified.selected_providers);
+            }
             std::cout << std::endl;
             print_ambiguous_provider_group(
                     localization::translate_message(
@@ -782,7 +836,8 @@ int cmd_deps(const std::vector<std::string>& targets, const std::vector<std::str
             }
             if(recursive) {
                 std::vector<RecursiveDependencyNode> recursive_nodes =
-                        resolve_recursive_dependencies(info.value());
+                        resolve_recursive_dependencies(
+                                info.value(), select_provider);
                 std::cout << std::endl;
                 print_recursive_dependency_tree(recursive_nodes);
             }
@@ -797,7 +852,10 @@ int cmd_deps(const std::vector<std::string>& targets, const std::vector<std::str
     return failed ? 1 : 0;
 }
 
-int cmd_plan(const std::vector<std::string>& targets, const std::vector<std::string>& flags) {
+int cmd_plan(
+        const std::vector<std::string>& targets,
+        const std::vector<std::string>& flags,
+        const AppConfig& config) {
     for(const auto& flag : flags) {
         if(flag ==
            cli_authority::operation_spec(
@@ -818,12 +876,14 @@ int cmd_plan(const std::vector<std::string>& targets, const std::vector<std::str
 
     bool                                  failed = false;
     RepositoryMetadataPresentationContext metadata_context;
+    ProviderSelectionCallback select_provider =
+            provider_selection_callback(config);
     for(size_t i = 0; i < targets.size(); ++i) {
         const auto& target = targets[i];
         require_valid_package_name(target);
 
         try {
-            BuildPlan plan = resolve_build_plan(target);
+            BuildPlan plan = resolve_build_plan(target, select_provider);
 
             if(i > 0) std::cout << std::endl;
             print_build_plan(plan);
@@ -839,7 +899,10 @@ int cmd_plan(const std::vector<std::string>& targets, const std::vector<std::str
     return failed ? 1 : 0;
 }
 
-int cmd_fetch(const std::vector<std::string>& targets, const std::vector<std::string>& flags) {
+int cmd_fetch(
+        const std::vector<std::string>& targets,
+        const std::vector<std::string>& flags,
+        const AppConfig& config) {
     for(const auto& flag : flags) {
         if(flag ==
            cli_authority::operation_spec(
@@ -858,19 +921,19 @@ int cmd_fetch(const std::vector<std::string>& targets, const std::vector<std::st
         return 1;
     }
 
-    // Invalid targetはcache mutationより前に全件拒否する。fetch routeへ入った後は
-    // AUR/network queryより先にcache-only authorityを1回だけadoptする。
+    // Invalid targetはprovider resolutionやcache mutationより前に全件拒否する。
     for(const auto& target : targets) {
         require_valid_package_name(target);
     }
-    ValidatedCacheRoot cache_root = prepare_process_cache_root();
 
     bool                                           failed = false;
     std::vector<std::pair<std::string, BuildPlan>> plans;
+    ProviderSelectionCallback select_provider =
+            provider_selection_callback(config);
     for(size_t i = 0; i < targets.size(); ++i) {
         const auto& target = targets[i];
         try {
-            BuildPlan plan = resolve_fetch_plan(target);
+            BuildPlan plan = resolve_fetch_plan(target, select_provider);
 
             if(i > 0) std::cout << std::endl;
             print_fetch_plan(plan);
@@ -885,9 +948,11 @@ int cmd_fetch(const std::vector<std::string>& targets, const std::vector<std::st
         }
     }
 
-    // POLICY(#174): 全targetのschema/semantic preflightが成功するまでclone/fetchへ進まない。
+    // POLICY(#174/#272): 全targetのprovider selectionとschema/semantic
+    // preflightが成功するまでcache preparationやclone/fetchへ進まない。
     if(failed) return 1;
 
+    ValidatedCacheRoot cache_root = prepare_process_cache_root();
     for(const auto& [target, plan] : plans) {
         for(const auto& entry : plan.order) {
             try {

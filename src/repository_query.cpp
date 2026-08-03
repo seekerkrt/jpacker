@@ -61,43 +61,57 @@ bool contains_control_character(const std::string& value) {
 void add_repo_provider_candidate(
         std::vector<ProvidedDependency>& candidates, const ProvidedDependency& provider) {
     auto same = [&provider](const ProvidedDependency& existing) {
-        return existing == provider;
+        return same_provider_identity(existing, provider);
     };
     if(std::find_if(candidates.begin(), candidates.end(), same) != candidates.end()) return;
     candidates.push_back(provider);
 }
 
+bool is_valid_repository_package_version(const std::string& package_version) {
+    return !package_version.empty() &&
+           !contains_control_character(package_version);
+}
+
 void add_repo_provider(
         std::map<std::string, std::vector<ProvidedDependency>>& providers, const std::string& provided,
-        const std::string& repository, const std::string& package_name) {
+        const std::string& repository, const std::string& package_name,
+        const std::optional<std::string>& package_version) {
     ParsedDependency parsed = parse_dependency_string(provided);
     if(repository.empty() || contains_control_character(repository) ||
        !is_valid_package_name(package_name) ||
-       !is_valid_package_name(parsed.name) || parsed.has_malformed_constraint()) {
+       !is_valid_package_name(parsed.name) || parsed.has_malformed_constraint() ||
+       contains_control_character(parsed.raw) ||
+       (package_version.has_value() &&
+        !is_valid_repository_package_version(package_version.value()))) {
         return;
     }
     add_repo_provider_candidate(
             providers[parsed.name],
-            ProvidedDependency::from_repository(repository, package_name));
+            ProvidedDependency::from_repository(
+                    repository, package_name, parsed.name, parsed.raw,
+                    package_version));
 }
 
 void parse_repo_sync_desc(
         const std::string& desc, const std::string& repository,
         std::map<std::string, std::vector<ProvidedDependency>>& providers) {
-    std::stringstream        ss(desc);
-    std::string              line;
-    std::string              package_name;
-    std::vector<std::string> package_provides;
-    std::string              section;
+    std::stringstream          ss(desc);
+    std::string                line;
+    std::string                package_name;
+    std::optional<std::string> package_version;
+    std::vector<std::string>   package_provides;
+    std::string                section;
 
     auto flush_package = [&]() {
         if(!package_name.empty()) {
             for(const auto& provided : package_provides) {
                 add_repo_provider(
-                        providers, provided, repository, package_name);
+                        providers, provided, repository, package_name,
+                        package_version);
             }
         }
         package_name.clear();
+        package_version.reset();
         package_provides.clear();
     };
 
@@ -118,6 +132,8 @@ void parse_repo_sync_desc(
 
         if(section == "%NAME%") {
             package_name = line;
+        } else if(section == "%VERSION%") {
+            if(!package_version.has_value()) package_version = line;
         } else if(section == "%PROVIDES%") {
             package_provides.push_back(line);
         }
@@ -149,6 +165,7 @@ struct StrictRepositoryDescriptionRecord {
     bool                       active = false;
     std::optional<std::string> filename;
     std::optional<std::string> package_name;
+    std::optional<std::string> package_version;
     std::vector<std::string>   package_provides;
 };
 
@@ -186,11 +203,23 @@ std::optional<RepositoryMetadataFailure> parse_repo_sync_desc_strict(
                     localization::translate_message(
                             "Repository sync metadata contains a duplicate package name."));
         }
+        if(!record.package_version.has_value()) {
+            return malformed(
+                    localization::translate_message(
+                            "Repository sync metadata is missing a package version."));
+        }
+        if(!is_valid_repository_package_version(
+                   record.package_version.value())) {
+            return malformed(
+                    localization::translate_message(
+                            "Repository sync metadata contains an invalid package version."));
+        }
 
         for(const auto& provided : record.package_provides) {
             ParsedDependency parsed = parse_dependency_string(provided);
             if(!is_valid_package_name(parsed.name) ||
-               parsed.has_malformed_constraint()) {
+               parsed.has_malformed_constraint() ||
+               contains_control_character(parsed.raw)) {
                 return malformed(
                         localization::translate_message(
                                 "Repository sync metadata contains an invalid provided dependency."));
@@ -205,7 +234,9 @@ std::optional<RepositoryMetadataFailure> parse_repo_sync_desc_strict(
             add_repo_provider_candidate(
                     snapshot.providers[provided_name],
                     ProvidedDependency::from_repository(
-                            repository, record.package_name.value()));
+                            repository, record.package_name.value(),
+                            provided_name, provided,
+                            record.package_version));
         }
 
         parsed_package = true;
@@ -258,6 +289,13 @@ std::optional<RepositoryMetadataFailure> parse_repo_sync_desc_strict(
                                 "Repository sync metadata contains multiple package names."));
             }
             record.package_name = line;
+        } else if(section == "%VERSION%") {
+            if(record.package_version.has_value()) {
+                return malformed(
+                        localization::translate_message(
+                                "Repository sync metadata contains multiple package versions."));
+            }
+            record.package_version = line;
         } else if(section == "%PROVIDES%") {
             record.package_provides.push_back(line);
         }

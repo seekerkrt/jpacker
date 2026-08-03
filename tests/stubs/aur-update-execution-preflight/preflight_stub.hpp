@@ -17,5 +17,6 @@ void set_resolver_handler(ResolverHandler handler);
 
 std::size_t resolver_call_count();
 const std::vector<std::vector<std::string>>& resolver_calls();
+const std::vector<bool>& resolver_selection_callback_presence();
 
 } // namespace aur_update_execution_preflight_test_stub

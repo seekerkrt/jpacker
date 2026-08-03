@@ -297,6 +297,8 @@ std::optional<AurPackageInfo> AurClient::info_strict(const std::string& package_
     append_command_log("aur info-strict " + package_name);
     const std::string scenario = inspection_scenario();
 
+    if(is_graph_scenario(scenario)) return graph_info(package_name);
+
     if(scenario == "foreign-fallback" &&
        is_numbered_foreign_package(package_name) &&
        package_name != "foreign-101") {

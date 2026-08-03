@@ -10,7 +10,12 @@ PackageStateChange aur_package_state_change(
 
     const FilteredAurUpdateExecutionResult& filtered =
             *aur.operation_result;
-    if(filtered.changed_package_state()) return PackageStateChange::Changed;
+    if(filtered.package_state_change() == PackageStateChange::Changed) {
+        return PackageStateChange::Changed;
+    }
+    if(filtered.package_state_change() == PackageStateChange::Unknown) {
+        return PackageStateChange::Unknown;
+    }
     if((aur.status == UpgradeAllAurPhaseStatus::NoUpdates ||
         aur.status == UpgradeAllAurPhaseStatus::Completed) &&
        filtered.is_success()) {

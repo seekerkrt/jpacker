@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <exception>
+#include <iterator>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -622,21 +623,35 @@ void retain_transaction_failure_evidence(
 } // namespace
 
 bool AurUpdateSourceBuildExecutionResult::is_success() const noexcept {
-    return status == AurUpdateInvocationExecutionStatus::Completed;
+    return status == AurUpdateInvocationExecutionStatus::Completed &&
+            selected_repository_provider_transaction.is_success();
 }
 
-bool AurUpdateSourceBuildExecutionResult::changed_package_state()
+PackageStateChange
+AurUpdateSourceBuildExecutionResult::package_state_change()
         const noexcept {
+    if(selected_repository_provider_transaction.package_state_change ==
+       PackageStateChange::Changed) {
+        return PackageStateChange::Changed;
+    }
     for(const auto& work_item_result : work_item_results) {
         for(const auto& child : work_item_result.child_results) {
             if(child.status == AurUpdateChildExecutionStatus::Installed ||
                child.status == AurUpdateChildExecutionStatus::
                                        InstalledCleanupFailed) {
-                return true;
+                return PackageStateChange::Changed;
             }
         }
     }
-    return false;
+    return selected_repository_provider_transaction.package_state_change ==
+                   PackageStateChange::Unknown
+            ? PackageStateChange::Unknown
+            : PackageStateChange::NoChange;
+}
+
+bool AurUpdateSourceBuildExecutionResult::changed_package_state()
+        const noexcept {
+    return package_state_change() == PackageStateChange::Changed;
 }
 
 bool AurUpdateSourceBuildExecutionResult::has_not_attempted_items()
@@ -687,9 +702,6 @@ execute_prepared_aur_update_source_build_invocation(
     PreparedProductionSourceBuildInvocation& production_invocation =
             invocation.production_invocation_;
     require_valid_prepared_invocation(invocation, production_invocation);
-    // Selected update build units exist: activate one shared cache capability
-    // before the first checkout/workspace/build mutation.
-    activate_production_source_build_cache(production_invocation);
     const std::vector<AurUpdatePreparedWorkItemAttribution>& attributions =
             invocation.work_item_attributions();
 
@@ -699,6 +711,20 @@ execute_prepared_aur_update_source_build_invocation(
         index < production_invocation.work_items.size(); ++index) {
         result.work_item_results.push_back(make_not_attempted_result(
                 production_invocation.work_items[index], attributions[index]));
+    }
+    // choice/static preflight完了後、高コストなpackage transactionより先に
+    // shared cache capabilityを確定する。
+    activate_production_source_build_cache(production_invocation);
+
+    // POLICY(#272): source executionより前にexact provider transactionを
+    // invocation全体で1回だけ行う。
+    result.selected_repository_provider_transaction =
+            execute_selected_repository_provider_transaction(
+                    production_invocation, config);
+    if(!result.selected_repository_provider_transaction.is_success()) {
+        result.status = AurUpdateInvocationExecutionStatus::
+                StoppedOnProviderTransactionFailure;
+        return result;
     }
 
     // POLICY(#267/#268): mutation前に全work item/required child snapshotを

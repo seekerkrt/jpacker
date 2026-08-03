@@ -918,6 +918,54 @@ bool work_item_child_outcomes_are_consistent(
 
 bool invocation_result_is_consistent(
         const AurUpdateSourceBuildExecutionResult& execution) noexcept {
+    const SelectedRepositoryProviderTransactionResult& provider_transaction =
+            execution.selected_repository_provider_transaction;
+    switch(provider_transaction.status) {
+    case SelectedRepositoryProviderTransactionStatus::NotRequired:
+        if(!provider_transaction.selected_providers.empty() ||
+           provider_transaction.package_state_change !=
+                   PackageStateChange::NoChange ||
+           provider_transaction.command_exit_status.has_value() ||
+           provider_transaction.diagnostic.has_value()) {
+            return false;
+        }
+        break;
+    case SelectedRepositoryProviderTransactionStatus::
+            BlockedBeforeExecution:
+        if(provider_transaction.selected_providers.empty() ||
+           provider_transaction.package_state_change !=
+                   PackageStateChange::NoChange ||
+           provider_transaction.command_exit_status.has_value() ||
+           !provider_transaction.diagnostic.has_value() ||
+           provider_transaction.diagnostic->empty()) {
+            return false;
+        }
+        break;
+    case SelectedRepositoryProviderTransactionStatus::Succeeded:
+        if(provider_transaction.selected_providers.empty() ||
+           provider_transaction.package_state_change !=
+                   PackageStateChange::Unknown ||
+           provider_transaction.command_exit_status !=
+                   std::optional<int>{0} ||
+           provider_transaction.diagnostic.has_value()) {
+            return false;
+        }
+        break;
+    case SelectedRepositoryProviderTransactionStatus::Failed:
+        if(provider_transaction.selected_providers.empty() ||
+           provider_transaction.package_state_change !=
+                   PackageStateChange::Unknown ||
+           (provider_transaction.command_exit_status.has_value() &&
+            *provider_transaction.command_exit_status == 0) ||
+           !provider_transaction.diagnostic.has_value() ||
+           provider_transaction.diagnostic->empty()) {
+            return false;
+        }
+        break;
+    default:
+        return false;
+    }
+
     std::size_t terminal_count = 0;
     std::size_t terminal_position = 0;
     bool has_unknown_status = false;
@@ -957,7 +1005,9 @@ bool invocation_result_is_consistent(
 
     switch(execution.status) {
     case AurUpdateInvocationExecutionStatus::Completed:
-        return terminal_count == 0 && std::all_of(
+        return execution.selected_repository_provider_transaction.
+                       is_success() &&
+               terminal_count == 0 && std::all_of(
                 execution.work_item_results.begin(),
                 execution.work_item_results.end(),
                 [](const AurUpdateWorkItemExecutionResult& work_item) {
@@ -966,13 +1016,29 @@ bool invocation_result_is_consistent(
                            work_item.status ==
                                    AurUpdateWorkItemExecutionStatus::NoChange;
                 });
+    case AurUpdateInvocationExecutionStatus::
+            StoppedOnProviderTransactionFailure:
+        return execution.selected_repository_provider_transaction.status ==
+                       SelectedRepositoryProviderTransactionStatus::Failed &&
+               terminal_count == 0 && std::all_of(
+                       execution.work_item_results.begin(),
+                       execution.work_item_results.end(),
+                       [](const AurUpdateWorkItemExecutionResult& work_item) {
+                           return work_item.status ==
+                                   AurUpdateWorkItemExecutionStatus::
+                                           NotAttempted;
+                       });
     case AurUpdateInvocationExecutionStatus::StoppedOnWorkItemFailure:
-        return terminal_count == 1 &&
+        return execution.selected_repository_provider_transaction.
+                       is_success() &&
+               terminal_count == 1 &&
                execution.work_item_results[terminal_position].status ==
                        AurUpdateWorkItemExecutionStatus::Failed;
     case AurUpdateInvocationExecutionStatus::
             StoppedAfterPackageCleanupFailure:
-        return terminal_count == 1 &&
+        return execution.selected_repository_provider_transaction.
+                       is_success() &&
+               terminal_count == 1 &&
                is_cleanup_failure_status(
                        execution.work_item_results[terminal_position]
                                .status);
@@ -984,6 +1050,8 @@ bool is_known_invocation_status(
         AurUpdateInvocationExecutionStatus status) noexcept {
     switch(status) {
     case AurUpdateInvocationExecutionStatus::Completed:
+    case AurUpdateInvocationExecutionStatus::
+            StoppedOnProviderTransactionFailure:
     case AurUpdateInvocationExecutionStatus::StoppedOnWorkItemFailure:
     case AurUpdateInvocationExecutionStatus::
             StoppedAfterPackageCleanupFailure:
@@ -997,6 +1065,10 @@ AurUpdateOperationStatus map_invocation_status(
     switch(status) {
     case AurUpdateInvocationExecutionStatus::Completed:
         return AurUpdateOperationStatus::Completed;
+    case AurUpdateInvocationExecutionStatus::
+            StoppedOnProviderTransactionFailure:
+        return AurUpdateOperationStatus::
+                StoppedOnProviderTransactionFailure;
     case AurUpdateInvocationExecutionStatus::StoppedOnWorkItemFailure:
         return AurUpdateOperationStatus::StoppedOnWorkItemFailure;
     case AurUpdateInvocationExecutionStatus::
@@ -1009,11 +1081,17 @@ AurUpdateOperationStatus map_invocation_status(
 } // namespace
 
 bool AurUpdateOperationResult::is_success() const noexcept {
-    return status == AurUpdateOperationStatus::NoUpdates ||
-           status == AurUpdateOperationStatus::Completed;
+    return (status == AurUpdateOperationStatus::NoUpdates ||
+            status == AurUpdateOperationStatus::Completed) &&
+            selected_repository_provider_transaction.is_success();
 }
 
-bool AurUpdateOperationResult::changed_package_state() const noexcept {
+PackageStateChange AurUpdateOperationResult::package_state_change()
+        const noexcept {
+    if(selected_repository_provider_transaction.package_state_change ==
+       PackageStateChange::Changed) {
+        return PackageStateChange::Changed;
+    }
     if(std::any_of(
                execution_work_items.begin(), execution_work_items.end(),
                [](const AurUpdateWorkItemExecutionResult& work_item) {
@@ -1029,28 +1107,38 @@ bool AurUpdateOperationResult::changed_package_state() const noexcept {
                                                       InstalledCleanupFailed;
                            });
                })) {
-        return true;
+        return PackageStateChange::Changed;
     }
     for(const auto& target : targets) {
         if(target.status == AurUpdateOperationTargetStatus::Updated ||
            target.status ==
                    AurUpdateOperationTargetStatus::UpdatedCleanupFailed) {
-            return true;
+            return PackageStateChange::Changed;
         }
         for(const auto& contribution : target.execution_contributions) {
             if(contribution.status ==
                        AurUpdateWorkItemExecutionStatus::Updated ||
                contribution.status == AurUpdateWorkItemExecutionStatus::
                                               UpdatedCleanupFailed) {
-                return true;
+                return PackageStateChange::Changed;
             }
         }
     }
-    return false;
+    return selected_repository_provider_transaction.package_state_change ==
+                   PackageStateChange::Unknown
+            ? PackageStateChange::Unknown
+            : PackageStateChange::NoChange;
+}
+
+bool AurUpdateOperationResult::changed_package_state() const noexcept {
+    return package_state_change() == PackageStateChange::Changed;
 }
 
 bool AurUpdateOperationResult::has_partial_completion() const noexcept {
-    return changed_package_state() && !is_success();
+    return !is_success() &&
+            (changed_package_state() ||
+             selected_repository_provider_transaction.status ==
+                     SelectedRepositoryProviderTransactionStatus::Succeeded);
 }
 
 bool AurUpdateOperationResult::has_not_attempted_targets() const noexcept {
@@ -1112,6 +1200,8 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
     if(execution.has_value()) {
         result.execution_status = execution->status;
         result.execution_work_items = execution->work_item_results;
+        result.selected_repository_provider_transaction =
+                execution->selected_repository_provider_transaction;
     }
     result.targets.reserve(preflight.targets.size());
 

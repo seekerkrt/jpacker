@@ -23,6 +23,7 @@ enum class AurUpdateOperationStatus {
     NoUpdates,
     Completed,
     BlockedBeforeExecution,
+    StoppedOnProviderTransactionFailure,
     StoppedOnWorkItemFailure,
     StoppedAfterPackageCleanupFailure,
     InconsistentResult,
@@ -127,6 +128,8 @@ struct AurUpdateOperationResult {
     // partial outcome自体はoperation-level snapshotとして失わない。
     std::optional<AurUpdateInvocationExecutionStatus> execution_status;
     std::vector<AurUpdateWorkItemExecutionResult> execution_work_items;
+    SelectedRepositoryProviderTransactionResult
+            selected_repository_provider_transaction;
 
     // operation-level snapshotはglobal/target-attributedを分けず、入力順と
     // nested typed failureを保って保持する。
@@ -135,6 +138,7 @@ struct AurUpdateOperationResult {
     std::vector<AurUpdateOperationReductionIssue> reduction_issues;
 
     bool is_success() const noexcept;
+    PackageStateChange package_state_change() const noexcept;
     bool changed_package_state() const noexcept;
     bool has_partial_completion() const noexcept;
     bool has_not_attempted_targets() const noexcept;

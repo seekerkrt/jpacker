@@ -67,16 +67,36 @@ endpoint exists.
   build, or install. `fetch` clones missing repositories or runs only
   `git fetch origin` for an existing clone; it does not pull, merge, reset,
   advance the working tree, build, or install.
-- Moguet rejects unresolved dependencies, ambiguous providers, cycles,
-  conflicts/replacements that it cannot safely resolve, and unprovable
-  artifact identities before the corresponding mutation.
+- When multiple provider candidates remain, an interactive TTY lists
+  source-aware candidates by number and requires exactly one explicit choice;
+  there is no default. Empty input, `q`, `quit`, `cancel`, or EOF cancels the
+  choice, while invalid or out-of-range input retries.
+- Non-TTY use and `--noconfirm` do not read provider input from stdin or
+  auto-select a candidate. Unselected ambiguity fails closed.
+- Provider choices belong only to the current invocation. `deps` and `plan`
+  distinguish selected and ambiguous providers; a selected AUR provider's
+  PackageBase flows into fetch/build planning, while a selected repository
+  provider is introduced as an official `repository/package` dependency. In
+  `deps --recursive`, among provided dependencies, only a user-selected AUR
+  provider is traversed; unique providers and selected repository providers
+  remain terminal.
+- The registered-source phase keeps its singular source lifecycle. It offers
+  provider selection only when every candidate is from an official repository;
+  a candidate set containing an AUR provider remains ambiguous and stops before
+  system or source execution because that phase cannot schedule the provider's
+  PackageBase.
+- Moguet rejects unresolved dependencies, unselected ambiguous providers,
+  cycles, conflicts/replacements that it cannot safely resolve, and
+  unprovable artifact identities before the corresponding mutation.
 - `--noconfirm` avoids interactive blocking. It is not “yes to everything” and
   does not bypass source selection, planning, identity, conflict, or ownership
   guards.
 - Multi-phase upgrades are not one atomic transaction. A failure stops later
   work but does not roll back an already completed package transaction. If
   cleanup fails after installation succeeds, inspect the result before
-  retrying; the package may already be installed.
+  retrying; the package may already be installed. In `upgrade-all`, provider
+  selection for the filtered AUR phase occurs before clone, build, pacman, or
+  sudo work in that phase, but earlier phases may already have completed.
 
 The detailed compatibility and routing contract is in
 [docs/COMPATIBILITY.md](https://github.com/seekerkrt/moguet/blob/develop/docs/COMPATIBILITY.md),

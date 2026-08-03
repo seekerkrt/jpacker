@@ -1,6 +1,8 @@
 #pragma once
 
 #include "artifact_install_plan.hpp"
+#include "dependency_provider.hpp"
+#include "dependency_plan.hpp"
 #include "package_metadata.hpp"
 #include "separated_package_base_source_build.hpp"
 #include "source_build.hpp"
@@ -11,7 +13,6 @@
 #include <vector>
 
 struct AppConfig;
-struct BuildPlan;
 
 enum class SourceBuildSourceKind {
     Repository,
@@ -36,6 +37,9 @@ struct ProductionSourceBuildWorkItem {
     // POLICY(#268): PackageBase execution unitのinstall対象とreasonはこのvectorが正本。
     // singular executor用request.package_nameはsize 1の場合だけ設定する。
     std::vector<RequiredPackageArtifactTarget> required_targets;
+    // 利用者が選択したofficial providerを、対応するAUR build unitの
+    // execution前dependency transactionまでtyped identityのまま保持する。
+    std::vector<ProvidedDependency> selected_repository_providers;
     // AUR BuildPlanが確定したchild setをPackageBase ownerへ渡す。
     // falseはofficial/generic/registered-source singular compatibility境界。
     bool                          is_build_plan_entry = false;
@@ -48,8 +52,40 @@ struct ProductionSourceBuildWorkItem {
 // PacmanDatabasePathsはinvocationで1回だけ解決し、全build unitへvalueとして共有する。
 struct PreparedProductionSourceBuildInvocation {
     std::vector<ProductionSourceBuildWorkItem> work_items;
+    std::vector<ProvidedDependency>             selected_repository_providers;
     PacmanDatabasePaths                        database_paths;
     std::optional<ValidatedCacheRoot>          cache_root;
+};
+
+enum class SelectedRepositoryProviderTransactionStatus {
+    NotRequired,
+    BlockedBeforeExecution,
+    Succeeded,
+    Failed,
+};
+
+// provider transactionをsource work-itemへ誤帰属させず、selected identityと
+// package-stateの断言可能範囲をinvocation消費後もowned snapshotとして残す。
+struct SelectedRepositoryProviderTransactionResult {
+    SelectedRepositoryProviderTransactionStatus status =
+            SelectedRepositoryProviderTransactionStatus::NotRequired;
+    std::vector<ProvidedDependency> selected_providers;
+    PackageStateChange package_state_change = PackageStateChange::NoChange;
+    std::optional<int> command_exit_status;
+    std::optional<std::string> diagnostic;
+
+    bool is_success() const noexcept {
+        switch(status) {
+        case SelectedRepositoryProviderTransactionStatus::NotRequired:
+        case SelectedRepositoryProviderTransactionStatus::Succeeded:
+            return true;
+        case SelectedRepositoryProviderTransactionStatus::
+                BlockedBeforeExecution:
+        case SelectedRepositoryProviderTransactionStatus::Failed:
+            return false;
+        }
+        return false;
+    }
 };
 
 // checkoutやmetadata queryより前に確認できるwork item単体のstatic契約。
@@ -78,11 +114,22 @@ ProductionSourceBuildWorkItem prepare_resolved_source_build_work_item(
         SourceBuildEnvironment environment,
         bool only_if_updated,
         bool needed);
+ProductionSourceBuildWorkItem prepare_resolved_source_build_work_item(
+        const ResolvedSourceBuildIdentity& identity,
+        SourceBuildEnvironment environment,
+        bool only_if_updated,
+        bool needed,
+        const ProviderSelectionCallback& select_provider);
 
 ProductionSourceBuildWorkItem prepare_smart_source_build_work_item(
         const std::string& package_name,
         bool only_if_updated,
         bool needed);
+ProductionSourceBuildWorkItem prepare_smart_source_build_work_item(
+        const std::string& package_name,
+        bool only_if_updated,
+        bool needed,
+        const ProviderSelectionCallback& select_provider);
 
 std::vector<ProductionSourceBuildWorkItem> prepare_aur_source_build_work_items(
         const BuildPlan& plan,
@@ -103,6 +150,13 @@ void seed_production_source_build_cache(
 // 全work itemへ同じretained cache-root capabilityを配る。
 void activate_production_source_build_cache(
         PreparedProductionSourceBuildInvocation& invocation);
+
+// invocation全体で選択済みのofficial providerを1回のexact pacman
+// dependency transactionへ渡す。各source executorより前にphase ownerが呼ぶ。
+SelectedRepositoryProviderTransactionResult
+execute_selected_repository_provider_transaction(
+        const PreparedProductionSourceBuildInvocation& invocation,
+        const AppConfig& config);
 
 // AUR PackageBase execution専用のset owner。required_targetsをauthorityにし、
 // child別outcomeとunselected artifact identityをflattenせず返す。

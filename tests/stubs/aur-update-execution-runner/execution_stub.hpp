@@ -20,6 +20,12 @@ enum class EventKind {
     Cleanup,
 };
 
+enum class InvocationEventKind {
+    RepositoryProviderTransaction,
+    CacheActivation,
+    SourceExecution,
+};
+
 struct Event {
     std::size_t call_index = 0;
     EventKind   kind = EventKind::Checkout;
@@ -101,8 +107,12 @@ void enqueue_transaction_failure(
 
 void enqueue_unknown_failure(ExpectedExecution expected);
 
+void fail_repository_provider_transaction(std::string diagnostic);
+void fail_cache_activation(TrustedCacheFailure failure);
+
 const std::vector<ExecutionCall>& call_history();
 const std::vector<Event>& event_history();
+const std::vector<InvocationEventKind>& invocation_event_history();
 void require_script_consumed();
 
 } // namespace aur_update_execution_runner_test_stub

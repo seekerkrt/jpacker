@@ -3,6 +3,7 @@
 #include "dependency_provider.hpp"
 
 #include <cstddef>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -18,25 +19,38 @@ std::vector<ProvidedDependency> repository_providers(
     if(dependency_name == "case8-virtual") {
         return {
                 ProvidedDependency::from_repository(
-                        "extra", "case8-provider-a"),
+                        "extra", "case8-provider-a", "case8-virtual",
+                        "case8-virtual=2", std::optional<std::string>{"2.0-1"}),
                 ProvidedDependency::from_repository(
-                        "community", "case8-provider-b"),
+                        "community", "case8-provider-b", "case8-virtual",
+                        "case8-virtual=3", std::optional<std::string>{"3.0-1"}),
         };
     }
     if(dependency_name == "case11-ambiguous") {
         return {
                 ProvidedDependency::from_repository(
-                        "extra", "case11-provider-a"),
+                        "extra", "case11-provider-a", "case11-ambiguous",
+                        "case11-ambiguous=1", std::optional<std::string>{"1.0-1"}),
                 ProvidedDependency::from_repository(
-                        "community", "case11-provider-b"),
+                        "community", "case11-provider-b", "case11-ambiguous",
+                        "case11-ambiguous=2", std::optional<std::string>{"2.0-1"}),
         };
     }
     if(dependency_name == "case14-virtual") {
         return {ProvidedDependency::from_repository(
-                "aur", "case14-provider")};
+                "aur", "case14-provider", "case14-virtual",
+                "case14-virtual=1", std::optional<std::string>{"1.0-1"})};
     }
     if(dependency_name == "case7-virtual-api" || dependency_name == "case9-missing" ||
        dependency_name == "case11-virtual" || dependency_name == "case11-missing" ||
+       dependency_name == "case21-virtual" ||
+       dependency_name == "case22-virtual" ||
+       dependency_name == "recursive-selected-provider-failure-virtual" ||
+       dependency_name == "selected-provider-identity-virtual" ||
+       dependency_name == "selected-provider-provides-virtual" ||
+       dependency_name == "selected-provider-metadata-virtual" ||
+       dependency_name ==
+               "preflight-exact-failure-no-provider-fallback" ||
        dependency_name == "preflight-dependency-failure-child" ||
        dependency_name == "preflight-provider-search-virtual" ||
        dependency_name == "preflight-provider-candidate-virtual" ||

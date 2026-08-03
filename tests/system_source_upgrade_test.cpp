@@ -201,6 +201,39 @@ SourceBuildExecutionResult source_execution(
     return result;
 }
 
+ProvidedDependency selected_repository_provider() {
+    return ProvidedDependency::from_repository(
+            "extra", "registered-source-provider",
+            "virtual-registered-api", "virtual-registered-api=2",
+            "2.0-1");
+}
+
+ProvidedDependency alternate_repository_provider() {
+    return ProvidedDependency::from_repository(
+            "core", "alternate-registered-source-provider",
+            "virtual-registered-api", "virtual-registered-api=2",
+            "2.1-1");
+}
+
+ProvidedDependency selected_aur_provider() {
+    return ProvidedDependency::from_aur(
+            "aur-registered-source-provider",
+            "aur-registered-source-provider-base",
+            "virtual-registered-api", "virtual-registered-api=2",
+            "2.2-1");
+}
+
+ResolvedSourceBuildIdentity registered_aur_identity(
+        const std::string& package_name) {
+    return ResolvedSourceBuildIdentity{
+            package_name,
+            package_name,
+            "aur:" + package_name,
+            "https://aur.example/" + package_name + ".git",
+            SourceBuildSourceKind::Aur,
+            false};
+}
+
 std::string progress_subject(const SystemSourceUpgradeEvent& event) {
     switch(event.kind) {
         case SystemSourceUpgradeEventKind::LoadingSourcePreference:
@@ -628,6 +661,270 @@ void test_system_failure_keeps_all_sources_not_attempted() {
                                event.subject == "source-check";
                     }),
             "System failure reached post-system source check");
+    stub::require_script_consumed();
+}
+
+void test_repository_provider_transaction_runs_after_system_and_blocks_all_sources_on_failure() {
+    const std::vector<std::string> packages = {"first", "second"};
+    const AppConfig config = full_option_config();
+
+    stub::reset();
+    stub::set_selected_repository_provider(
+            "first", selected_repository_provider());
+    PreparedSystemSourceUpgrade successful = prepare_sources(packages, config);
+    enqueue_post_metadata(packages);
+    stub::enqueue_source_success(source_execution(
+            SourceBuildExecutionStatus::UpToDate));
+    stub::enqueue_source_success(source_execution(
+            SourceBuildExecutionStatus::UpToDate));
+    const SystemSourceUpgradeResult success =
+            execute_prepared_system_source_upgrade(
+                    std::move(successful), config, OBSERVER);
+    expect(success.is_success() &&
+                   success.selected_repository_provider_transaction.status ==
+                           SelectedRepositoryProviderTransactionStatus::
+                                   Succeeded &&
+                   success.selected_repository_provider_transaction.
+                                   package_state_change ==
+                           PackageStateChange::Unknown &&
+                   success.selected_repository_provider_transaction.
+                                   selected_providers ==
+                           std::vector<ProvidedDependency>{
+                                   selected_repository_provider()} &&
+                   success.package_state_change() ==
+                           PackageStateChange::Unknown,
+           "Repository provider transaction success blocked registered sources");
+    expect(
+            event_position(stub::EventKind::SystemCommand, SYSTEM_COMMAND) <
+                            event_position(
+                                    stub::EventKind::
+                                            RepositoryProviderTransaction,
+                                    "selected-repository-providers") &&
+                    event_position(
+                            stub::EventKind::RepositoryProviderTransaction,
+                            "selected-repository-providers") <
+                            event_position(
+                                    stub::EventKind::SourceExecution,
+                                    "first"),
+            "Repository provider transaction did not stay between system and source execution");
+    stub::require_script_consumed();
+
+    stub::reset();
+    stub::set_selected_repository_provider(
+            "first", selected_repository_provider());
+    PreparedSystemSourceUpgrade failing = prepare_sources(packages, config);
+    enqueue_post_metadata(packages);
+    stub::fail_repository_provider_transaction(
+            "scripted repository provider transaction failure");
+    const SystemSourceUpgradeResult failure =
+            execute_prepared_system_source_upgrade(
+                    std::move(failing), config, OBSERVER);
+    expect(
+            failure.status ==
+                            SystemSourceUpgradeStatus::StoppedOnSourceFailure &&
+                    failure.system.status ==
+                            SystemUpgradePhaseStatus::Completed &&
+                    failure.stopped_phase ==
+                            SystemSourceUpgradePhase::RegisteredSource &&
+                    failure.selected_repository_provider_transaction.status ==
+                            SelectedRepositoryProviderTransactionStatus::Failed &&
+                    failure.selected_repository_provider_transaction.
+                                    selected_providers ==
+                            std::vector<ProvidedDependency>{
+                                    selected_repository_provider()} &&
+                    failure.package_state_change() ==
+                            PackageStateChange::Unknown &&
+                    failure.failure_diagnostic() ==
+                            std::optional<std::string>{
+                                    "scripted repository provider transaction failure"},
+            "Repository provider transaction failure lost phase result");
+    expect(
+            std::all_of(
+                    failure.registered_source_results.begin(),
+                    failure.registered_source_results.end(),
+                    [](const RegisteredSourceUpgradeResult& source) {
+                        return source.status ==
+                                RegisteredSourceUpgradeStatus::NotAttempted;
+                    }) &&
+                    stub::source_execution_calls().empty(),
+            "Repository provider transaction failure started registered-source work");
+    expect(
+            event_position(stub::EventKind::SystemCommand, SYSTEM_COMMAND) <
+                    event_position(
+                            stub::EventKind::RepositoryProviderTransaction,
+                            "selected-repository-providers"),
+            "Repository provider transaction failure ran before the system phase");
+    stub::require_script_consumed();
+
+    stub::reset();
+    stub::set_selected_repository_provider(
+            "first", selected_repository_provider());
+    PreparedSystemSourceUpgrade cache_replaced =
+            prepare_sources(packages, config);
+    enqueue_post_metadata(packages);
+    stub::fail_repository_provider_cache_revalidation();
+    const SystemSourceUpgradeResult cache_failure =
+            execute_prepared_system_source_upgrade(
+                    std::move(cache_replaced), config, OBSERVER);
+    const auto cache_issue = std::find_if(
+            cache_failure.issues.begin(), cache_failure.issues.end(),
+            [](const SystemSourceUpgradeIssue& issue) {
+                return issue.kind ==
+                               SystemSourceUpgradeIssueKind::
+                                       CacheAuthorityInvalid &&
+                       issue.phase ==
+                               SystemSourceUpgradePhase::RegisteredSource &&
+                       issue.trusted_cache_failure.has_value();
+            });
+    expect(
+            cache_failure.status ==
+                            SystemSourceUpgradeStatus::StoppedOnSourceFailure &&
+                    cache_failure.system.status ==
+                            SystemUpgradePhaseStatus::Completed &&
+                    cache_failure.stopped_phase ==
+                            SystemSourceUpgradePhase::RegisteredSource &&
+                    cache_failure.
+                                    selected_repository_provider_transaction.
+                                    status ==
+                            SelectedRepositoryProviderTransactionStatus::
+                                    BlockedBeforeExecution &&
+                    cache_failure.
+                                    selected_repository_provider_transaction.
+                                    selected_providers ==
+                            std::vector<ProvidedDependency>{
+                                    selected_repository_provider()} &&
+                    cache_failure.
+                                    selected_repository_provider_transaction.
+                                    package_state_change ==
+                            PackageStateChange::NoChange &&
+                    cache_issue != cache_failure.issues.end() &&
+                    cache_issue->trusted_cache_failure->code ==
+                            TrustedCacheErrorCode::ConcurrentReplacement &&
+                    std::all_of(
+                            cache_failure.registered_source_results.begin(),
+                            cache_failure.registered_source_results.end(),
+                            [](const RegisteredSourceUpgradeResult& source) {
+                                return source.status ==
+                                        RegisteredSourceUpgradeStatus::
+                                                NotAttempted;
+                            }) &&
+                    stub::source_execution_calls().empty() &&
+                    std::none_of(
+                            stub::events().begin(), stub::events().end(),
+                            [](const stub::Event& event) {
+                                return event.kind == stub::EventKind::
+                                        RepositoryProviderTransaction;
+                            }),
+            "Post-system cache replacement was not blocked before the provider transaction");
+    stub::require_script_consumed();
+}
+
+void test_registered_source_provider_selection_precedes_cache_and_suppresses_aur_candidates() {
+    const char* xdg_cache_home = std::getenv("XDG_CACHE_HOME");
+    expect(xdg_cache_home != nullptr,
+           "System/source cache test environment is unavailable");
+    const fs::path selection_cache_home =
+            fs::path(xdg_cache_home) / "registered-provider-selection";
+    fs::create_directory(selection_cache_home);
+    fs::permissions(
+            selection_cache_home, fs::perms::owner_all,
+            fs::perm_options::replace);
+    ScopedEnvironmentVariable cache_environment(
+            "XDG_CACHE_HOME", selection_cache_home.string());
+
+    stub::reset();
+    configure_preferences({"callbackless-source"});
+    stub::set_source_identity(
+            "callbackless-source",
+            registered_aur_identity("callbackless-source"));
+    stub::set_provider_candidates(
+            "callbackless-source",
+            {selected_repository_provider(),
+             alternate_repository_provider()});
+    SystemSourceUpgradeResult callbackless = take_blocked(
+            prepare_system_source_upgrade(full_option_config(), OBSERVER));
+    expect(
+            callbackless.status ==
+                            SystemSourceUpgradeStatus::BlockedBeforeMutation &&
+                    !fs::exists(selection_cache_home / "moguet") &&
+                    stub::system_commands().empty(),
+            "Callbackless registered-source selection changed its legacy boundary");
+    stub::require_script_consumed();
+
+    stub::reset();
+    configure_preferences({"aur-candidate-source"});
+    stub::set_source_identity(
+            "aur-candidate-source",
+            registered_aur_identity("aur-candidate-source"));
+    stub::set_provider_candidates(
+            "aur-candidate-source",
+            {selected_repository_provider(), selected_aur_provider()});
+    std::size_t aur_candidate_selector_calls = 0;
+    stub::set_provider_selector(
+            [&aur_candidate_selector_calls](
+                    const std::string&,
+                    const std::vector<ProvidedDependency>& candidates)
+                    -> std::optional<ProvidedDependency> {
+                ++aur_candidate_selector_calls;
+                return candidates.front();
+            });
+
+    SystemSourceUpgradeResult blocked = take_blocked(
+            prepare_system_source_upgrade(full_option_config(), OBSERVER));
+    expect(
+            blocked.status ==
+                            SystemSourceUpgradeStatus::BlockedBeforeMutation &&
+                    aur_candidate_selector_calls == 0 &&
+                    !fs::exists(selection_cache_home / "moguet") &&
+                    stub::system_commands().empty(),
+            "Registered source offered an AUR provider or mutated cache/system state");
+    stub::require_script_consumed();
+
+    stub::reset();
+    const std::string repository_source = "repository-candidate-source";
+    configure_preferences({repository_source});
+    stub::set_source_identity(
+            repository_source,
+            registered_aur_identity(repository_source));
+    stub::set_provider_candidates(
+            repository_source,
+            {selected_repository_provider(),
+             alternate_repository_provider()});
+    std::size_t repository_selector_calls = 0;
+    bool selection_preceded_cache = false;
+    stub::set_provider_selector(
+            [&repository_selector_calls, &selection_preceded_cache,
+             &selection_cache_home](
+                    const std::string&,
+                    const std::vector<ProvidedDependency>& candidates)
+                    -> std::optional<ProvidedDependency> {
+                ++repository_selector_calls;
+                selection_preceded_cache =
+                        !fs::exists(selection_cache_home / "moguet");
+                return candidates.back();
+            });
+    stub::enqueue_metadata_session(metadata_session(
+            {repository_source},
+            LocalPackageVersionSnapshot{{"core", "1.0-1"}}));
+    SystemSourceUpgradePreparation preparation =
+            prepare_system_source_upgrade(full_option_config(), OBSERVER);
+    expect(
+            std::holds_alternative<PreparedSystemSourceUpgrade>(preparation) &&
+                    repository_selector_calls == 1 &&
+                    selection_preceded_cache &&
+                    fs::is_directory(selection_cache_home / "moguet"),
+            "Registered source repository selection did not precede cache preparation");
+
+    enqueue_post_metadata({repository_source});
+    stub::enqueue_source_success(source_execution(
+            SourceBuildExecutionStatus::UpToDate));
+    SystemSourceUpgradeResult completed =
+            execute_prepared_system_source_upgrade(
+                    std::move(
+                            std::get<PreparedSystemSourceUpgrade>(preparation)),
+                    full_option_config(), OBSERVER);
+    expect(completed.is_success(),
+           "Repository-only registered-source provider selection failed");
     stub::require_script_consumed();
 }
 
@@ -1406,6 +1703,14 @@ int main() {
         run_case(
                 "system failure leaves every source NotAttempted",
                 test_system_failure_keeps_all_sources_not_attempted,
+                completed_cases);
+        run_case(
+                "repository provider phase transaction",
+                test_repository_provider_transaction_runs_after_system_and_blocks_all_sources_on_failure,
+                completed_cases);
+        run_case(
+                "registered-source provider selection boundary",
+                test_registered_source_provider_selection_precedes_cache_and_suppresses_aur_candidates,
                 completed_cases);
         run_case(
                 "first source failure stops suffix",

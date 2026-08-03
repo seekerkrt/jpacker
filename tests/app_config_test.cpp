@@ -44,9 +44,17 @@ void print_config(const AppConfig& config) {
               << "EDITOR=" << config.editor << '\n';
 }
 
+void expect(bool condition, const std::string& message) {
+    if(!condition) throw std::runtime_error(message);
+}
+
 int run_test_driver(int argc, char* argv[]) {
     if(argc == 2 && std::string(argv[1]) == "defaults") {
-        print_config(AppConfig{});
+        AppConfig config;
+        expect(
+                !provider_selection_callback(config),
+                "default AppConfig unexpectedly exposed a provider callback");
+        print_config(config);
         return 0;
     }
 
@@ -55,8 +63,22 @@ int run_test_driver(int argc, char* argv[]) {
         final_user_config.review.pkgbuild = ReviewPolicy::Skip;
         final_user_config.review.diff = ReviewPolicy::Skip;
         final_user_config.build.mode = BuildMode::Clean;
-        print_config(make_app_config(
-                std::move(final_user_config), true, true));
+        AppConfig config = make_app_config(
+                std::move(final_user_config), true, true);
+        expect(
+                config.provider_selection != nullptr,
+                "composed AppConfig has no provider selection session");
+        expect(
+                !config.provider_selection->is_interactive(),
+                "--noconfirm AppConfig has an interactive provider session");
+        AppConfig copied_config = config;
+        expect(
+                copied_config.provider_selection == config.provider_selection,
+                "AppConfig copy did not share the invocation provider session");
+        expect(
+                static_cast<bool>(provider_selection_callback(copied_config)),
+                "composed AppConfig did not expose a provider callback");
+        print_config(config);
         return 0;
     }
 

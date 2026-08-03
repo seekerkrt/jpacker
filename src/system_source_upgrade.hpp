@@ -1,6 +1,7 @@
 #pragma once
 
 #include "package_metadata.hpp"
+#include "source_install.hpp"
 #include "source_environment.hpp"
 #include "source_preference.hpp"
 #include "trusted_cache.hpp"
@@ -17,14 +18,6 @@
 #include <vector>
 
 struct AppConfig;
-
-// Installed package stateについて断言できる範囲を保持する。
-// UnknownをNoChangeへ丸めず、strict boolean helperとは別に扱う。
-enum class PackageStateChange {
-    NoChange,
-    Changed,
-    Unknown,
-};
 
 enum class SystemSourceUpgradePhase {
     None,
@@ -222,6 +215,8 @@ struct SystemSourceUpgradeResult {
     SystemSourceUpgradePhase stopped_phase = SystemSourceUpgradePhase::None;
     SystemSourceUpgradePreparedSnapshot prepared_snapshot;
     SystemUpgradePhaseResult system;
+    SelectedRepositoryProviderTransactionResult
+            selected_repository_provider_transaction;
     std::vector<RegisteredSourceUpgradeResult> registered_source_results;
     std::vector<SystemSourceUpgradeWarning> warnings;
     std::vector<SystemSourceUpgradeIssue> issues;

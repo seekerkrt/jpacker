@@ -318,6 +318,22 @@ strict-results-object|field results expected array, got object
 strict-info-multiple|expected zero or one result, got 2
 CASES
 
+# Provider candidate presentation metadata must be terminal-safe before it
+# reaches any interactive selection UI. Diagnostics do not echo the raw value.
+escape_character=$(printf '\033')
+while IFS='|' read -r package detail; do
+    setup_case "strict-presentation-$package"
+    run_envelope_fail info-strict "$package"
+    assert_validation_error "info[package=\"$package\"]"
+    assert_contains "$detail" "$output_file"
+    assert_not_contains "$escape_character" "$output_file"
+    assert_command_log_empty
+done <<'CASES'
+version-control|field Version contains a control character
+semantic-provides-control|field Provides[0] contains a control character
+semantic-provides-malformed|field Provides[0] contains an invalid version constraint
+CASES
+
 setup_case strict-envelope-search-type
 run_envelope_fail provides-strict strict-search-wrong-type
 assert_validation_error "search[provides=\"strict-search-wrong-type\"]"

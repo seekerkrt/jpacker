@@ -36,8 +36,10 @@ struct BuildPlanResolutionFailureContext {
 };
 
 std::optional<AurPackageInfo> query_aur_package_info(
-        const std::string& package_name, BuildPlanResolutionMode mode) {
-    if(mode == BuildPlanResolutionMode::CaptureOrdinaryFailures) {
+        const std::string& package_name, BuildPlanResolutionMode mode,
+        bool require_authoritative_metadata = false) {
+    if(mode == BuildPlanResolutionMode::CaptureOrdinaryFailures ||
+       require_authoritative_metadata) {
         return AurClient::info_strict(package_name);
     }
     return AurClient::info(package_name);
@@ -66,19 +68,55 @@ bool has_distinct_package_base(const AurPackageInfo& info) {
     return info.PackageBase != info.Name;
 }
 
+bool matches_selected_aur_provider_contract(
+        const AurPackageInfo& info,
+        const ProvidedDependency& selected_provider) {
+    if(!std::holds_alternative<AurProviderOrigin>(
+               selected_provider.origin) ||
+       info.Name != selected_provider.package_name ||
+       info.PackageBase != selected_provider.package_base) {
+        return false;
+    }
+    return std::any_of(
+            info.Provides.begin(), info.Provides.end(),
+            [&selected_provider](const std::string& provided) {
+                return provided_dependency_name(provided) ==
+                        selected_provider.provided_dependency_name;
+            });
+}
+
+std::string selected_aur_provider_revalidation_failure_diagnostic(
+        const ProvidedDependency& selected_provider) {
+    return localization::format_translated_message(
+            "{} provider candidate changed during dependency resolution: {}",
+            "AUR", selected_provider.package_name);
+}
+
+std::string selected_provider_package_identity_conflict_diagnostic(
+        const ProvidedDependency& existing,
+        const ProvidedDependency& selected) {
+    return localization::format_translated_message(
+            "Selected providers use incompatible identities for package {}: {} and {}.",
+            selected.package_name,
+            provider_package_identity_display(existing),
+            provider_package_identity_display(selected));
+}
+
 void add_provider_candidate(std::vector<ProvidedDependency>& candidates, const ProvidedDependency& provider) {
     auto same = [&provider](const ProvidedDependency& existing) {
-        return existing == provider;
+        return same_provider_identity(existing, provider);
     };
     if(std::find_if(candidates.begin(), candidates.end(), same) != candidates.end()) return;
     candidates.push_back(provider);
 }
 
-bool aur_package_provides(const AurPackageInfo& info, const std::string& dependency_name) {
+std::optional<std::string> aur_provided_dependency_specification(
+        const AurPackageInfo& info, const std::string& dependency_name) {
     for(const auto& provided : info.Provides) {
-        if(provided_dependency_name(provided) == dependency_name) return true;
+        if(provided_dependency_name(provided) == dependency_name)
+            return provided;
     }
-    return false;
+    return std::nullopt;
 }
 
 bool same_resolution_failure(
@@ -128,8 +166,10 @@ enum class RepositoryPackageQueryStatus {
 
 RepositoryPackageQueryStatus query_repository_package(
         const std::string& package_name, BuildPlanResolutionMode mode,
-        BuildPlanResolutionFailureContext* failure_context) {
-    if(mode == BuildPlanResolutionMode::Legacy) {
+        BuildPlanResolutionFailureContext* failure_context,
+        bool require_authoritative_repository_metadata = false) {
+    if(mode == BuildPlanResolutionMode::Legacy &&
+       !require_authoritative_repository_metadata) {
         return is_repo_package(package_name)
                 ? RepositoryPackageQueryStatus::Present
                 : RepositoryPackageQueryStatus::NotFound;
@@ -144,6 +184,9 @@ RepositoryPackageQueryStatus query_repository_package(
 
     const RepositoryMetadataFailure& failure =
             std::get<RepositoryMetadataFailure>(result);
+    if(failure_context == nullptr) {
+        throw std::runtime_error(failure.diagnostic);
+    }
     add_resolution_failure(
             failure_context,
             BuildPlanResolutionFailureKind::RepositoryMetadataUnavailable,
@@ -153,20 +196,25 @@ RepositoryPackageQueryStatus query_repository_package(
 
 std::vector<ProvidedDependency> find_aur_providers(
         const std::string& dependency_name,
-        BuildPlanResolutionFailureContext* failure_context = nullptr) {
+        BuildPlanResolutionFailureContext* failure_context = nullptr,
+        bool require_complete_candidates = false) {
     std::vector<ProvidedDependency> providers;
     if(!is_valid_package_name(dependency_name)) return providers;
 
+    const bool use_strict_query =
+            failure_context != nullptr || require_complete_candidates;
+    bool has_incomplete_candidate_metadata = false;
     std::vector<std::string> candidates;
     try {
-        if(failure_context == nullptr) {
-            candidates = AurClient::search_names_by_provides(dependency_name);
-        } else {
+        if(use_strict_query) {
             candidates = AurClient::search_names_by_provides_strict(dependency_name);
+        } else {
+            candidates = AurClient::search_names_by_provides(dependency_name);
         }
     } catch(const AurRpcResponseError&) {
         throw;
     } catch(const std::exception& e) {
+        if(failure_context == nullptr && require_complete_candidates) throw;
         add_resolution_failure(
                 failure_context,
                 BuildPlanResolutionFailureKind::ProviderSearchUnavailable,
@@ -178,24 +226,42 @@ std::vector<ProvidedDependency> find_aur_providers(
     }
     for(const auto& candidate : candidates) {
         try {
-            std::optional<AurPackageInfo> info = failure_context == nullptr
-                    ? AurClient::info(candidate)
-                    : AurClient::info_strict(candidate);
-            if(info.has_value() && aur_package_provides(info.value(), dependency_name)) {
+            std::optional<AurPackageInfo> info = use_strict_query
+                    ? AurClient::info_strict(candidate)
+                    : AurClient::info(candidate);
+            std::optional<std::string> provided_specification;
+            if(info.has_value()) {
+                provided_specification =
+                        aur_provided_dependency_specification(
+                                info.value(), dependency_name);
+            }
+            if(info.has_value() && provided_specification.has_value()) {
                 add_provider_candidate(
-                        providers, ProvidedDependency::from_aur(info->Name));
-            } else if(failure_context != nullptr && !info.has_value()) {
+                        providers, ProvidedDependency::from_aur(
+                                info->Name, info->PackageBase,
+                                dependency_name,
+                                provided_specification.value(),
+                                info->Version));
+            } else if(failure_context != nullptr ||
+                      require_complete_candidates) {
+                has_incomplete_candidate_metadata = true;
+                std::string diagnostic =
+                        localization::format_translated_message(
+                                "{} provider candidate metadata was not returned.",
+                                "AUR");
+                if(failure_context == nullptr && require_complete_candidates) {
+                    throw std::runtime_error(diagnostic);
+                }
                 add_resolution_failure(
                         failure_context,
                         BuildPlanResolutionFailureKind::ProviderCandidateMetadataUnavailable,
-                        candidate,
-                        localization::format_translated_message(
-                                "{} provider candidate metadata was not returned.",
-                                "AUR"));
+                        candidate, diagnostic);
             }
         } catch(const AurRpcResponseError&) {
             throw;
         } catch(const std::exception& e) {
+            if(failure_context == nullptr && require_complete_candidates) throw;
+            has_incomplete_candidate_metadata = true;
             add_resolution_failure(
                     failure_context,
                     BuildPlanResolutionFailureKind::ProviderCandidateMetadataUnavailable,
@@ -206,20 +272,30 @@ std::vector<ProvidedDependency> find_aur_providers(
         }
     }
 
+    if(failure_context != nullptr &&
+       has_incomplete_candidate_metadata) {
+        providers.clear();
+    }
+
     return providers;
 }
 
 std::vector<ProvidedDependency> find_dependency_providers(
         const std::string& dependency_name,
-        BuildPlanResolutionFailureContext* failure_context = nullptr) {
+        BuildPlanResolutionFailureContext* failure_context = nullptr,
+        bool require_authoritative_candidates = false) {
     std::vector<ProvidedDependency> repo_provider;
-    if(failure_context == nullptr) {
+    if(failure_context == nullptr &&
+       !require_authoritative_candidates) {
         repo_provider = find_repo_providers(dependency_name);
     } else {
         StrictRepositoryProvidersQueryResult result =
                 query_repository_providers_strict(dependency_name);
         if(const auto* failure = std::get_if<RepositoryMetadataFailure>(&result);
            failure != nullptr) {
+            if(failure_context == nullptr) {
+                throw std::runtime_error(failure->diagnostic);
+            }
             add_resolution_failure(
                     failure_context,
                     BuildPlanResolutionFailureKind::RepositoryMetadataUnavailable,
@@ -232,7 +308,9 @@ std::vector<ProvidedDependency> find_dependency_providers(
     }
     // POLICY: pacman-first。official repo provider が見つかる場合は AUR provider を混ぜない。
     if(!repo_provider.empty()) return repo_provider;
-    return find_aur_providers(dependency_name, failure_context);
+    return find_aur_providers(
+            dependency_name, failure_context,
+            require_authoritative_candidates);
 }
 
 void add_dependency(
@@ -312,6 +390,31 @@ void add_ambiguous_provider_dependency(
     }
 }
 
+std::optional<ProvidedDependency> select_provider_candidate(
+        const std::string& dependency,
+        const std::vector<ProvidedDependency>& candidates,
+        const ProviderSelectionCallback& select_provider) {
+    if(candidates.empty() || !select_provider) return std::nullopt;
+
+    std::optional<ProvidedDependency> selected =
+            select_provider(dependency, candidates);
+    if(!selected.has_value()) return std::nullopt;
+
+    auto matching_candidate = std::find_if(
+            candidates.begin(), candidates.end(),
+            [&selected](const ProvidedDependency& candidate) {
+                return same_provider_identity(candidate, selected.value());
+            });
+    if(matching_candidate == candidates.end()) {
+        throw std::logic_error(localization::format_translated_message(
+                "Provider selection returned a candidate that was not offered for {}.",
+                dependency));
+    }
+    // Resolver-owned metadata is authoritative even when an injected selector
+    // returns an identity-only value.
+    return *matching_candidate;
+}
+
 void warn_unverified_version_constraint(const std::string& dependency) {
     ParsedDependency parsed = parse_dependency_string(dependency);
     if(!parsed.has_parseable_constraint()) return;
@@ -349,7 +452,9 @@ std::vector<TypedPackageDependency> collect_typed_build_dependencies(const AurPa
     return dependencies;
 }
 
-DependencyClassification classify_dependencies(const std::vector<std::string>& dependencies) {
+DependencyClassification classify_dependencies(
+        const std::vector<std::string>& dependencies,
+        const ProviderSelectionCallback& select_provider) {
     DependencyClassification result;
 
     for(const auto& dependency : dependencies) {
@@ -365,39 +470,69 @@ DependencyClassification classify_dependencies(const std::vector<std::string>& d
         }
         warn_unverified_version_constraint(dependency);
 
-        if(is_repo_package(package_name)) {
+        if(query_repository_package(
+                   package_name, BuildPlanResolutionMode::Legacy, nullptr,
+                   static_cast<bool>(select_provider)) ==
+           RepositoryPackageQueryStatus::Present) {
             add_classified_dependency(result.repo, dependency, package_name);
             continue;
         }
 
         try {
-            std::optional<AurPackageInfo> info = AurClient::info(package_name);
+            std::optional<AurPackageInfo> info = select_provider
+                    ? AurClient::info_strict(package_name)
+                    : AurClient::info(package_name);
             if(info.has_value()) {
                 add_classified_aur_dependency(result.aur, dependency, info.value());
             } else {
-                std::vector<ProvidedDependency> providers = find_dependency_providers(package_name);
-                if(providers.size() == 1)
+                std::vector<ProvidedDependency> providers =
+                        find_dependency_providers(
+                                package_name, nullptr,
+                                static_cast<bool>(select_provider));
+                std::optional<ProvidedDependency> selected =
+                        select_provider_candidate(
+                                dependency, providers, select_provider);
+                if(selected.has_value()) {
+                    result.selected_providers.push_back(
+                            SelectedProvidedDependency{
+                                    dependency, selected.value()});
+                } else if(providers.size() == 1) {
                     result.provided.push_back(
                             provided_dependency_resolution_display(
                                     dependency, providers.front()));
-                else if(providers.size() > 1)
-                    add_ambiguous_provider_dependency(result.ambiguous_providers, dependency, providers);
+                } else if(providers.size() > 1) {
+                    add_ambiguous_provider_dependency(
+                            result.ambiguous_providers, dependency,
+                            providers);
+                }
                 else
                     result.unknown.push_back(dependency_display_with_constraint_note(dependency, dependency));
             }
         } catch(const AurRpcResponseError&) {
             throw;
         } catch(const std::exception& e) {
+            if(select_provider) throw;
             Logger::warn(localization::format_translated_message(
                     "Failed to check {} dependency {}: {}",
                     "AUR", package_name, e.what()));
-            std::vector<ProvidedDependency> providers = find_repo_providers(package_name);
-            if(providers.size() == 1)
+            std::vector<ProvidedDependency> providers =
+                    find_repo_providers(package_name);
+            std::optional<ProvidedDependency> selected =
+                    select_provider_candidate(
+                            dependency, providers, select_provider);
+            if(selected.has_value()) {
+                result.selected_providers.push_back(
+                        SelectedProvidedDependency{
+                                dependency, selected.value()});
+            } else if(providers.size() == 1) {
                 result.provided.push_back(
                         provided_dependency_resolution_display(
                                 dependency, providers.front()));
-            else if(providers.size() > 1)
-                add_ambiguous_provider_dependency(result.ambiguous_providers, dependency, providers);
+            } else if(providers.size() > 1) {
+                add_ambiguous_provider_dependency(
+                        result.ambiguous_providers, dependency,
+                        providers);
+            }
             else
                 result.unknown.push_back(dependency_display_with_constraint_note(dependency, dependency));
         }
@@ -406,22 +541,51 @@ DependencyClassification classify_dependencies(const std::vector<std::string>& d
     return result;
 }
 
+DependencyClassification classify_dependencies(
+        const std::vector<std::string>& dependencies) {
+    return classify_dependencies(dependencies, ProviderSelectionCallback{});
+}
+
 namespace {
 
 RecursiveDependencyNode resolve_recursive_dependency(
-        const std::string& dependency, std::set<std::string>& visited, int depth, int max_depth);
+        const std::string& dependency, std::set<std::string>& visited,
+        int depth, int max_depth,
+        const ProviderSelectionCallback& select_provider);
 
 std::vector<RecursiveDependencyNode> resolve_recursive_dependencies(
-        const AurPackageInfo& pkg, std::set<std::string>& visited, int depth, int max_depth) {
+        const AurPackageInfo& pkg, std::set<std::string>& visited,
+        int depth, int max_depth,
+        const ProviderSelectionCallback& select_provider) {
     std::vector<RecursiveDependencyNode> nodes;
     for(const auto& dependency : collect_build_dependencies(pkg)) {
-        nodes.push_back(resolve_recursive_dependency(dependency, visited, depth, max_depth));
+        nodes.push_back(resolve_recursive_dependency(
+                dependency, visited, depth, max_depth, select_provider));
     }
     return nodes;
 }
 
+void populate_recursive_aur_provider_children(
+        RecursiveDependencyNode& node, const AurPackageInfo& info,
+        std::set<std::string>& visited, int depth, int max_depth,
+        const ProviderSelectionCallback& select_provider) {
+    node.package_base = package_base_name(info);
+    if(!visited.insert(node.package_base).second) {
+        node.already_visited = true;
+        return;
+    }
+    if(depth >= max_depth) {
+        node.max_depth_reached = true;
+        return;
+    }
+    node.children = resolve_recursive_dependencies(
+            info, visited, depth + 1, max_depth, select_provider);
+}
+
 RecursiveDependencyNode resolve_recursive_dependency(
-        const std::string& dependency, std::set<std::string>& visited, int depth, int max_depth) {
+        const std::string& dependency, std::set<std::string>& visited,
+        int depth, int max_depth,
+        const ProviderSelectionCallback& select_provider) {
     RecursiveDependencyNode node;
     node.dependency = dependency;
     ParsedDependency parsed = parse_dependency_string(dependency);
@@ -432,17 +596,23 @@ RecursiveDependencyNode resolve_recursive_dependency(
         return node;
     }
 
-    if(is_repo_package(node.package_name)) {
+    if(query_repository_package(
+               node.package_name, BuildPlanResolutionMode::Legacy, nullptr,
+               static_cast<bool>(select_provider)) ==
+       RepositoryPackageQueryStatus::Present) {
         node.kind = DependencyKind::Repo;
         return node;
     }
 
     std::optional<AurPackageInfo> info;
     try {
-        info = AurClient::info(node.package_name);
+        info = select_provider
+                ? AurClient::info_strict(node.package_name)
+                : AurClient::info(node.package_name);
     } catch(const AurRpcResponseError&) {
         throw;
     } catch(const std::exception& e) {
+        if(select_provider) throw;
         Logger::warn(localization::format_translated_message(
                 "Failed to check {} dependency {}: {}",
                 "AUR", node.package_name, e.what()));
@@ -451,40 +621,77 @@ RecursiveDependencyNode resolve_recursive_dependency(
     }
 
     if(!info.has_value()) {
-        std::vector<ProvidedDependency> providers = find_dependency_providers(node.package_name);
-        if(providers.size() == 1) {
-            node.kind = DependencyKind::Provided;
-            node.provided_by = providers.front();
+        std::vector<ProvidedDependency> providers =
+                find_dependency_providers(
+                        node.package_name, nullptr,
+                        static_cast<bool>(select_provider));
+        std::optional<ProvidedDependency> resolved_provider =
+                select_provider_candidate(
+                        dependency, providers, select_provider);
+        if(resolved_provider.has_value()) {
+            node.provider_resolution =
+                    ProviderResolutionKind::UserSelected;
+        } else if(providers.size() == 1) {
+            resolved_provider = providers.front();
         } else if(providers.size() > 1) {
             node.kind = DependencyKind::AmbiguousProvider;
             node.provider_candidates = providers;
         } else {
             node.kind = DependencyKind::Unknown;
         }
+
+        if(!resolved_provider.has_value()) return node;
+        node.kind = DependencyKind::Provided;
+        node.provided_by = resolved_provider;
+        if(std::holds_alternative<RepositoryProviderOrigin>(
+                   resolved_provider->origin)) {
+            return node;
+        }
+        if(node.provider_resolution !=
+           ProviderResolutionKind::UserSelected) {
+            return node;
+        }
+
+        std::optional<AurPackageInfo> provider_info =
+                AurClient::info_strict(resolved_provider->package_name);
+        if(!provider_info.has_value()) {
+            node.kind = DependencyKind::Unknown;
+            node.provided_by.reset();
+            return node;
+        }
+        if(!matches_selected_aur_provider_contract(
+                   provider_info.value(), resolved_provider.value())) {
+            throw std::runtime_error(
+                    selected_aur_provider_revalidation_failure_diagnostic(
+                            resolved_provider.value()));
+        }
+        populate_recursive_aur_provider_children(
+                node, provider_info.value(), visited, depth, max_depth,
+                select_provider);
         return node;
     }
 
     node.kind = DependencyKind::Aur;
-    node.package_base = package_base_name(info.value());
-    if(!visited.insert(node.package_base).second) {
-        node.already_visited = true;
-        return node;
-    }
-    if(depth >= max_depth) {
-        node.max_depth_reached = true;
-        return node;
-    }
-
-    node.children = resolve_recursive_dependencies(info.value(), visited, depth + 1, max_depth);
+    populate_recursive_aur_provider_children(
+            node, info.value(), visited, depth, max_depth,
+            select_provider);
     return node;
 }
 
 } // namespace
 
-std::vector<RecursiveDependencyNode> resolve_recursive_dependencies(const AurPackageInfo& pkg) {
+std::vector<RecursiveDependencyNode> resolve_recursive_dependencies(
+        const AurPackageInfo& pkg,
+        const ProviderSelectionCallback& select_provider) {
     std::set<std::string> visited;
     visited.insert(package_base_name(pkg));
-    return resolve_recursive_dependencies(pkg, visited, 1, MAX_RECURSIVE_DEP_DEPTH);
+    return resolve_recursive_dependencies(
+            pkg, visited, 1, MAX_RECURSIVE_DEP_DEPTH, select_provider);
+}
+
+std::vector<RecursiveDependencyNode> resolve_recursive_dependencies(
+        const AurPackageInfo& pkg) {
+    return resolve_recursive_dependencies(pkg, ProviderSelectionCallback{});
 }
 
 namespace {
@@ -769,15 +976,26 @@ void order_build_plan_entries(BuildPlan& plan) {
 }
 
 void add_build_plan_provided_dependency(
-        BuildPlan& plan, const std::string& dependency, const ProvidedDependency& provider) {
+        BuildPlan& plan, const std::string& dependency,
+        const ProvidedDependency& provider,
+        ProviderResolutionKind resolution) {
     std::string trimmed = trim(dependency);
     if(trimmed.empty()) return;
 
     auto same_dependency = [&](const BuildPlanProvidedDependency& existing) {
-        return existing.dependency == trimmed && existing.provider == provider;
+        return existing.dependency == trimmed &&
+               same_provider_identity(existing.provider, provider);
     };
-    if(std::find_if(plan.provided.begin(), plan.provided.end(), same_dependency) != plan.provided.end()) return;
-    plan.provided.push_back(BuildPlanProvidedDependency{trimmed, provider});
+    auto existing = std::find_if(
+            plan.provided.begin(), plan.provided.end(), same_dependency);
+    if(existing != plan.provided.end()) {
+        if(existing->resolution != resolution) {
+            existing->resolution = ProviderResolutionKind::UserSelected;
+        }
+        return;
+    }
+    plan.provided.push_back(
+            BuildPlanProvidedDependency{trimmed, provider, resolution});
 }
 
 void add_build_plan_ambiguous_provider(
@@ -793,9 +1011,11 @@ void collect_aur_build_plan(
         const std::vector<PackageRole>& roles,
         const RootTargetIdentity& root, int depth, int max_depth,
         bool traverse_aur_providers, BuildPlanResolutionMode resolution_mode,
+        const ProviderSelectionCallback& select_provider,
         const std::optional<std::string>& parent_package_name,
         const std::optional<std::string>& parent_package_base,
-        const std::optional<std::string>& dependency_specification) {
+        const std::optional<std::string>& dependency_specification,
+        const std::optional<ProvidedDependency>& expected_selected_provider) {
     if(depth > max_depth) {
         add_unique_value(
                 plan.unresolved,
@@ -813,10 +1033,16 @@ void collect_aur_build_plan(
             ? &package_failure_context
             : nullptr;
     try {
-        info = query_aur_package_info(package_name, resolution_mode);
+        info = query_aur_package_info(
+                package_name, resolution_mode,
+                static_cast<bool>(select_provider));
     } catch(const AurRpcResponseError&) {
         throw;
     } catch(const std::exception& e) {
+        if(resolution_mode == BuildPlanResolutionMode::Legacy &&
+           select_provider) {
+            throw;
+        }
         add_resolution_failure(
                 failure_context,
                 BuildPlanResolutionFailureKind::AurPackageMetadataUnavailable,
@@ -829,6 +1055,24 @@ void collect_aur_build_plan(
     }
 
     if(!info.has_value()) {
+        add_unique_value(plan.unresolved, package_name);
+        return;
+    }
+
+    if(expected_selected_provider.has_value() &&
+       !matches_selected_aur_provider_contract(
+               info.value(), expected_selected_provider.value())) {
+        std::string diagnostic =
+                selected_aur_provider_revalidation_failure_diagnostic(
+                        expected_selected_provider.value());
+        if(failure_context == nullptr) {
+            throw std::runtime_error(diagnostic);
+        }
+        add_resolution_failure(
+                failure_context,
+                BuildPlanResolutionFailureKind::ProviderCandidateMetadataUnavailable,
+                package_name, diagnostic);
+        Logger::warn(diagnostic);
         add_unique_value(plan.unresolved, package_name);
         return;
     }
@@ -890,7 +1134,8 @@ void collect_aur_build_plan(
                 : nullptr;
         RepositoryPackageQueryStatus repository_status =
                 query_repository_package(
-                        dep_name, resolution_mode, dependency_failure_sink);
+                        dep_name, resolution_mode, dependency_failure_sink,
+                        static_cast<bool>(select_provider));
         if(repository_status == RepositoryPackageQueryStatus::Present) {
             edge.kind = DependencyKind::Repo;
             edge.resolved_package_name = dep_name;
@@ -904,18 +1149,34 @@ void collect_aur_build_plan(
         }
 
         std::optional<AurPackageInfo> dependency_info;
+        bool dependency_metadata_unavailable = false;
         try {
-            dependency_info = query_aur_package_info(dep_name, resolution_mode);
+            dependency_info = query_aur_package_info(
+                    dep_name, resolution_mode,
+                    static_cast<bool>(select_provider));
         } catch(const AurRpcResponseError&) {
             throw;
         } catch(const std::exception& e) {
+            if(resolution_mode == BuildPlanResolutionMode::Legacy &&
+               select_provider) {
+                throw;
+            }
             add_resolution_failure(
                     dependency_failure_sink,
                     BuildPlanResolutionFailureKind::AurPackageMetadataUnavailable,
                     dep_name, e.what());
+            dependency_metadata_unavailable =
+                    dependency_failure_sink != nullptr;
             Logger::warn(localization::format_translated_message(
                     "Failed to check {} dependency {}: {}",
                     "AUR", dep_name, e.what()));
+        }
+
+        if(dependency_metadata_unavailable) {
+            add_unique_value(plan.unresolved, dependency);
+            add_build_plan_dependency_edges(
+                    plan, edge, matching_dependencies);
+            continue;
         }
 
         if(dependency_info.has_value()) {
@@ -928,25 +1189,49 @@ void collect_aur_build_plan(
                     dep_name, plan, visited_package_names,
                     visiting_package_names, dependency_roles, root,
                     depth + 1, max_depth, traverse_aur_providers,
-                    resolution_mode, info->Name, build_unit, dependency);
+                    resolution_mode, select_provider, info->Name,
+                    build_unit, dependency, std::nullopt);
             continue;
         }
 
         std::vector<ProvidedDependency> providers =
-                find_dependency_providers(dep_name, dependency_failure_sink);
-        if(providers.size() == 1) {
-            const ProvidedDependency& provider = providers.front();
+                find_dependency_providers(
+                        dep_name, dependency_failure_sink,
+                        static_cast<bool>(select_provider));
+        std::optional<ProvidedDependency> resolved_provider =
+                select_provider_candidate(
+                        dependency, providers, select_provider);
+        ProviderResolutionKind provider_resolution =
+                resolved_provider.has_value()
+                ? ProviderResolutionKind::UserSelected
+                : ProviderResolutionKind::Unique;
+        if(!resolved_provider.has_value() && providers.size() == 1) {
+            resolved_provider = providers.front();
+        }
+
+        if(resolved_provider.has_value()) {
+            const ProvidedDependency& provider = resolved_provider.value();
             edge.kind = DependencyKind::Provided;
             edge.resolved_provider = provider;
-            add_build_plan_provided_dependency(plan, dependency, provider);
+            edge.provider_resolution = provider_resolution;
+            add_build_plan_provided_dependency(
+                    plan, dependency, provider, provider_resolution);
             add_build_plan_dependency_edges(plan, edge, matching_dependencies);
-            if(traverse_aur_providers &&
+            if((traverse_aur_providers ||
+                provider_resolution == ProviderResolutionKind::UserSelected) &&
                std::holds_alternative<AurProviderOrigin>(provider.origin)) {
+                std::optional<ProvidedDependency> provider_revalidation_contract;
+                if(provider_resolution ==
+                   ProviderResolutionKind::UserSelected) {
+                    provider_revalidation_contract = provider;
+                }
                 collect_aur_build_plan(
                         provider.package_name, plan, visited_package_names,
                         visiting_package_names, dependency_roles, root,
                         depth + 1, max_depth, traverse_aur_providers,
-                        resolution_mode, info->Name, build_unit, dependency);
+                        resolution_mode, select_provider, info->Name,
+                        build_unit, dependency,
+                        provider_revalidation_contract);
             }
         } else if(providers.size() > 1) {
             edge.kind = DependencyKind::AmbiguousProvider;
@@ -965,7 +1250,8 @@ void collect_aur_build_plan(
 
 BuildPlan resolve_build_plan_internal(
         const std::vector<std::string>& targets,
-        BuildPlanResolutionMode resolution_mode) {
+        BuildPlanResolutionMode resolution_mode,
+        const ProviderSelectionCallback& select_provider) {
     if(targets.empty()) {
         throw std::invalid_argument(localization::translate_message(
                 "Build plan targets must not be empty."));
@@ -975,7 +1261,10 @@ BuildPlan resolve_build_plan_internal(
     if(resolution_mode == BuildPlanResolutionMode::Legacy) {
         // POLICY: legacy resolverの事前存在確認と例外境界は通常-S consumerの契約。
         for(const auto& target : targets) {
-            if(!AurClient::info(target).has_value()) {
+            if(!query_aur_package_info(
+                        target, resolution_mode,
+                        static_cast<bool>(select_provider))
+                        .has_value()) {
                 throw std::runtime_error(
                         localization::format_translated_message(
                                 "{} package not found: {}",
@@ -995,11 +1284,13 @@ BuildPlan resolve_build_plan_internal(
                 targets[i], plan, visited_package_names,
                 visiting_package_names, root_roles, root, 0,
                 MAX_RECURSIVE_DEP_DEPTH, true, resolution_mode,
-                std::nullopt, std::nullopt, std::nullopt);
+                select_provider,
+                std::nullopt, std::nullopt, std::nullopt, std::nullopt);
     }
     order_build_plan_entries(plan);
     propagate_root_identities(plan);
     propagate_resolution_failure_root_identities(plan);
+    require_compatible_selected_provider_package_identities(plan);
     return plan;
 }
 
@@ -1012,22 +1303,53 @@ std::vector<BuildPlanMetadataRisk> collect_build_plan_metadata_risks(const AurPa
 }
 
 BuildPlan resolve_build_plan(const std::string& target) {
-    return resolve_build_plan(std::vector<std::string>{target});
+    return resolve_build_plan(target, ProviderSelectionCallback{});
+}
+
+BuildPlan resolve_build_plan(
+        const std::string& target,
+        const ProviderSelectionCallback& select_provider) {
+    return resolve_build_plan(
+            std::vector<std::string>{target}, select_provider);
 }
 
 BuildPlan resolve_build_plan(const std::vector<std::string>& targets) {
-    return resolve_build_plan_internal(targets, BuildPlanResolutionMode::Legacy);
+    return resolve_build_plan(targets, ProviderSelectionCallback{});
+}
+
+BuildPlan resolve_build_plan(
+        const std::vector<std::string>& targets,
+        const ProviderSelectionCallback& select_provider) {
+    return resolve_build_plan_internal(
+            targets, BuildPlanResolutionMode::Legacy, select_provider);
 }
 
 BuildPlan resolve_build_plan_for_preflight(
         const std::vector<std::string>& targets) {
+    return resolve_build_plan_for_preflight(
+            targets, ProviderSelectionCallback{});
+}
+
+BuildPlan resolve_build_plan_for_preflight(
+        const std::vector<std::string>& targets,
+        const ProviderSelectionCallback& select_provider) {
     return resolve_build_plan_internal(
-            targets, BuildPlanResolutionMode::CaptureOrdinaryFailures);
+            targets, BuildPlanResolutionMode::CaptureOrdinaryFailures,
+            select_provider);
 }
 
 BuildPlan resolve_fetch_plan(const std::string& target) {
+    return resolve_fetch_plan(target, ProviderSelectionCallback{});
+}
+
+BuildPlan resolve_fetch_plan(
+        const std::string& target,
+        const ProviderSelectionCallback& select_provider) {
     require_valid_package_name(target);
-    if(!AurClient::info(target).has_value()) {
+    if(!query_aur_package_info(
+                target, BuildPlanResolutionMode::Legacy,
+                static_cast<bool>(select_provider))
+                .has_value()) {
         throw std::runtime_error(localization::format_translated_message(
                 "{} package not found: {}", "AUR", target));
     }
@@ -1043,9 +1365,11 @@ BuildPlan resolve_fetch_plan(const std::string& target) {
             target, plan, visited_package_names, visiting_package_names,
             root_roles, root, 0,
             MAX_RECURSIVE_DEP_DEPTH, false, BuildPlanResolutionMode::Legacy,
-            std::nullopt, std::nullopt, std::nullopt);
+            select_provider,
+            std::nullopt, std::nullopt, std::nullopt, std::nullopt);
     order_build_plan_entries(plan);
     propagate_root_identities(plan);
+    require_compatible_selected_provider_package_identities(plan);
     return plan;
 }
 
@@ -1131,7 +1455,31 @@ std::string join_metadata_risk_summaries(const std::vector<BuildPlanMetadataRisk
 
 } // namespace
 
+void require_compatible_selected_provider_package_identities(
+        const BuildPlan& plan) {
+    for(std::size_t index = 0; index < plan.provided.size(); ++index) {
+        const BuildPlanProvidedDependency& selected = plan.provided[index];
+        if(selected.resolution != ProviderResolutionKind::UserSelected) {
+            continue;
+        }
+        auto conflict = std::find_if(
+                plan.provided.begin(), plan.provided.begin() + index,
+                [&selected](const BuildPlanProvidedDependency& existing) {
+                    return existing.resolution ==
+                                   ProviderResolutionKind::UserSelected &&
+                           has_incompatible_provider_package_identity(
+                                   existing.provider, selected.provider);
+                });
+        if(conflict != plan.provided.begin() + index) {
+            throw std::runtime_error(
+                    selected_provider_package_identity_conflict_diagnostic(
+                            conflict->provider, selected.provider));
+        }
+    }
+}
+
 void require_fetchable_build_plan(const std::string& target, const BuildPlan& plan) {
+    require_compatible_selected_provider_package_identities(plan);
     if(!plan.unresolved.empty()) {
         throw std::runtime_error(localization::format_translated_message(
                 "Cannot execute build plan for {}; unresolved dependencies: {}",

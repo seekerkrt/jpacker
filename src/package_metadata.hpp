@@ -22,6 +22,14 @@ struct PacmanRepositoryConfiguration {
     std::vector<std::string> repository_names;
 };
 
+// Installed package stateについて断言できる範囲を保持する。
+// UnknownをNoChangeへ丸めず、strict boolean helperとは別に扱う。
+enum class PackageStateChange {
+    NoChange,
+    Changed,
+    Unknown,
+};
+
 struct RepositoryPackageLookup {
     std::string                package_name;
     std::optional<std::string> exact_repository_name;
