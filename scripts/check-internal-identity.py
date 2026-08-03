@@ -4,11 +4,13 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass
-from pathlib import Path
+import os
+from pathlib import Path, PurePosixPath
 import re
 import stat
 import subprocess
 import sys
+import tarfile
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
@@ -25,6 +27,7 @@ FORBIDDEN_RUNTIME_SYSTEM_PATHS = (
     "/etc/moguet",
 )
 RUNTIME_AUTHORITY_PATHS = {"Makefile", "PKGBUILD"}
+CURRENT_SOURCE_ARCHIVE_OVERRIDE = "MOGUET_TEST_CURRENT_SOURCE_ARCHIVE"
 
 
 @dataclass(frozen=True)
@@ -46,7 +49,46 @@ def fail(message: str) -> None:
     raise SystemExit(1)
 
 
+def source_archive_paths(archive_value: str) -> list[str]:
+    archive_path = Path(archive_value)
+    try:
+        archive_mode = archive_path.lstat().st_mode
+    except OSError as error:
+        fail(f"unable to inspect current source archive {archive_path}: {error}")
+    if archive_path.is_symlink() or not stat.S_ISREG(archive_mode):
+        fail(f"current source archive is not a regular non-symlink: {archive_path}")
+
+    try:
+        with tarfile.open(archive_path, mode="r:*") as source_archive:
+            members = source_archive.getmembers()
+    except (OSError, tarfile.TarError) as error:
+        fail(f"unable to read current source archive {archive_path}: {error}")
+
+    paths: list[str] = []
+    for member in members:
+        if not member.isfile():
+            continue
+        member_path = PurePosixPath(member.name)
+        normalized_parts = tuple(
+            part for part in member_path.parts if part not in ("", ".")
+        )
+        if (
+            member_path.is_absolute()
+            or not normalized_parts
+            or ".." in normalized_parts
+        ):
+            fail(f"unsafe current source archive path: {member.name}")
+        path = PurePosixPath(*normalized_parts).as_posix()
+        if (REPOSITORY_ROOT / path).is_file():
+            paths.append(path)
+    return sorted(set(paths))
+
+
 def repository_paths() -> list[str]:
+    source_archive_override = os.environ.get(CURRENT_SOURCE_ARCHIVE_OVERRIDE, "")
+    if source_archive_override:
+        return source_archive_paths(source_archive_override)
+
     result = subprocess.run(
         [
             "git",
@@ -145,6 +187,10 @@ case_cache_component = rf"\$case_dir/xdg-cache/{legacy}{identity_end}"
 legacy_cache_phrase = (
     rf"legacy {legacy}(?: cache(?: root| symlink)?| path component|\.log file|"
     rf" package directories){identity_end}"
+)
+legacy_source_archive_filename = (
+    rf"{identity_start}{legacy}-v1\.16\.0-source\.tar"
+    rf"(?![A-Za-z0-9_.-])"
 )
 
 
@@ -317,13 +363,23 @@ ACTIVE_LEGACY_ALLOWANCES: dict[str, tuple[LegacyAllowance, ...]] = {
         "production-artifact-cleanup",
         rf"^\s*/{legacy}\s*$",
     ),
-    "Makefile": allowances(
+    ".dockerignore": allowances(
         "production-artifact-cleanup",
-        rf"^\s*LEGACY_PRODUCTION_TARGET\s*:=\s*{legacy}\s*$",
-    )
-    + allowances(
-        "historical-license-file",
-        historical_license_filename,
+        rf"^\s*/{legacy}\s*$",
+    ),
+    "Makefile": (
+        allowances(
+            "production-artifact-cleanup",
+            rf"^\s*LEGACY_PRODUCTION_TARGET\s*:=\s*{legacy}\s*$",
+        )
+        + allowances(
+            "historical-license-file",
+            historical_license_filename,
+        )
+        + allowances(
+            "historical-package-fixture",
+            legacy_source_archive_filename,
+        )
     ),
     "PKGBUILD": allowances(
         "historical-package-transition",
@@ -370,6 +426,14 @@ ACTIVE_LEGACY_ALLOWANCES: dict[str, tuple[LegacyAllowance, ...]] = {
     + allowances(
         "negative-identity-pattern",
         rf"current\( \({legacy}\|Moguet\)\)\?",
+    ),
+    "containers/arch-validation/Dockerfile": allowances(
+        "historical-package-fixture",
+        legacy_source_archive_filename,
+    ),
+    "containers/arch-validation/run-tests.sh": allowances(
+        "historical-package-fixture",
+        legacy_source_archive_filename,
     ),
     "src/app_config.cpp": allowances(
         "storage-path",
