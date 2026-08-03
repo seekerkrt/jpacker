@@ -84,6 +84,39 @@ PR merge 後:
 
 GitLab側の同一refはmirror workflowの完了後に確認する。通常flowで手動pushしない。
 
+### Arch Linux container validation
+
+実機Arch Linuxでの最終smoke testより前に、official `archlinux:latest`を使う隔離laneを
+明示的に実行できる。Docker CLI、起動中のDocker daemon、およびcommitとして解決できる
+local `v1.16.0` tagを用意し、repository rootで次を実行する。
+
+    make test-container
+
+image buildではnetwork利用を許可し、`--pull`でbase imageを確認し、cache miss時はArch
+repositoryからdependency packageを取得する。Dockerのlayer cacheは再利用し得るため、このlaneは
+base imageとpackage repositoryの現在状態に対するvalidationであり、長期固定された再現imageでは
+ない。test containerの実行時は`--network=none`とし、public AUR、real Git clone、actual package
+transactionを行わない。
+
+default build contextからsource snapshotだけをcontainer内へcopyし、host worktreeをbind mount
+しない。`.git`、host build artifact、XDG data、credential、Docker socket、host pacman database /
+config / cacheは共有せず、`--privileged`も使用しない。package transition testのlegacy sourceは
+local `v1.16.0` tagからtemporary archiveとして生成し、Git metadataとは分離したnamed build
+contextで渡す。build、test、release validationはcontainer固有のHOME / XDG directoryを使う
+一般userとして、次の順で実行する。
+
+    env -u MAKEFLAGS -u MFLAGS make clean
+    env -u MAKEFLAGS -u MFLAGS make -j8 --output-sync=target
+    env -u MAKEFLAGS -u MFLAGS make -j8 --output-sync=target test
+    env -u MAKEFLAGS -u MFLAGS make -j8 --output-sync=target release-check
+
+Docker command、daemon、image build、またはvalidation stepが失敗した場合、diagnosticとnon-zero
+statusをhostへ返す。実行containerは成功時・失敗時とも`--rm`で破棄し、temporary legacy archiveも
+削除する。build cacheとlocal image `moguet-arch-validation:local`は後続実行で再利用できるよう残す。
+
+このlaneはhostの通常build、`make test`、`make release-check`を置き換えず、それらから再帰的に
+呼び出さない。release前にはhost validationとcontainer validationを別々に確認する。
+
 ### Release flow
 
     git switch develop

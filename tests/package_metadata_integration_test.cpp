@@ -104,7 +104,10 @@ struct PacmanForeignPackage {
 std::vector<PacmanForeignPackage> query_pacman_foreign_packages() {
     CapturedCommandResult result =
             capture_command_output_raw("pacman -Qm 2>/dev/null");
-    if(result.exit_code != 0) {
+    // pacman reports a valid query with no foreign package matches as exit 1
+    // and empty output. The corresponding libalpm inventory is an empty vector.
+    const bool is_empty_inventory = result.exit_code == 1 && result.output.empty();
+    if(result.exit_code != 0 && !is_empty_inventory) {
         throw std::runtime_error(
                 "pacman -Qm failed with exit code " +
                 std::to_string(result.exit_code));

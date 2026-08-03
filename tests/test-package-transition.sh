@@ -15,6 +15,18 @@ fail() {
     exit 1
 }
 
+assert_source_archive_input() {
+    archive_label=$1
+    archive_path=$2
+
+    [ -f "$archive_path" ] && [ ! -L "$archive_path" ] ||
+        fail "$archive_label source archive is missing, not regular, or a symlink: $archive_path"
+    [ -r "$archive_path" ] ||
+        fail "$archive_label source archive is not readable: $archive_path"
+    bsdtar -tf "$archive_path" >/dev/null 2>&1 ||
+        fail "$archive_label source archive is not a readable tar archive: $archive_path"
+}
+
 run_logged() {
     run_description=$1
     run_log=$2
@@ -255,9 +267,15 @@ run_makepkg_fixture() {
     fixture_home=$build_root/home
     fixture_xdg_config=$build_root/xdg-config
     fixture_gnupg_home=$build_root/gnupg
+    fixture_makepkg_config=$build_root/makepkg.conf
 
     mkdir -p "$fixture_home" "$fixture_xdg_config" "$xdg_cache"
     install -d -m700 "$fixture_gnupg_home"
+    cp /etc/makepkg.conf "$fixture_makepkg_config"
+    # Rolling Arch enables split debug packages by default. This fixture
+    # validates the two production package archives, so disable only that
+    # additional artifact while retaining the system compiler/tool settings.
+    printf '\nOPTIONS+=(!debug)\n' >>"$fixture_makepkg_config"
 
     (
         cd "$package_work"
@@ -273,7 +291,8 @@ run_makepkg_fixture() {
             LOGDEST="$log_destination" \
             CCACHE_DIR="$build_root/ccache" \
             CCACHE_TEMPDIR="$build_root/ccache-tmp" \
-            makepkg --cleanbuild --force --noconfirm
+            makepkg --config "$fixture_makepkg_config" \
+                --cleanbuild --force --noconfirm
     )
 }
 
@@ -327,7 +346,15 @@ do
         fail "$required_command is required"
 done
 
-v1_source_archive=$tmp_dir/jpacker-v1.16.0-source.tar
+legacy_source_archive_input=${MOGUET_TEST_LEGACY_SOURCE_ARCHIVE-}
+current_source_archive_input=${MOGUET_TEST_CURRENT_SOURCE_ARCHIVE-}
+if [ -n "$legacy_source_archive_input" ]; then
+    assert_source_archive_input legacy "$legacy_source_archive_input"
+fi
+if [ -n "$current_source_archive_input" ]; then
+    assert_source_archive_input current "$current_source_archive_input"
+fi
+
 v1_source=$tmp_dir/jpacker-v1.16.0-source
 v1_makepkg_work=$tmp_dir/jpacker-v1.16.0-makepkg
 v1_package_destination=$tmp_dir/jpacker-v1.16.0-packages
@@ -351,10 +378,15 @@ current_version=$(tr -d '[:space:]' <"$repo_root/VERSION")
 [ "$current_version" = 2.0.1 ] ||
     fail "current VERSION is $current_version; expected 2.0.1"
 
-git -C "$repo_root" rev-parse --verify 'refs/tags/v1.16.0^{commit}' \
-    >/dev/null || fail 'local tag v1.16.0 is unavailable'
-git -C "$repo_root" archive --format=tar \
-    --output="$v1_source_archive" v1.16.0
+if [ -n "$legacy_source_archive_input" ]; then
+    v1_source_archive=$legacy_source_archive_input
+else
+    v1_source_archive=$tmp_dir/jpacker-v1.16.0-source.tar
+    git -C "$repo_root" rev-parse --verify 'refs/tags/v1.16.0^{commit}' \
+        >/dev/null || fail 'local tag v1.16.0 is unavailable'
+    git -C "$repo_root" archive --format=tar \
+        --output="$v1_source_archive" v1.16.0
+fi
 mkdir -p "$v1_source"
 bsdtar -xf "$v1_source_archive" -C "$v1_source"
 
@@ -366,26 +398,30 @@ prepare_test_pkgbuild "$v1_source/PKGBUILD" "$v1_source" \
     "$v1_makepkg_work" \
     'git+https://github.com/seekerkrt/jpacker.git'
 
-# Copy every present tracked or non-ignored untracked working-tree file. This
-# preserves the issue branch's dirty edits and tracked deletions while keeping
-# .git, ignored build output, the moguet binary, and package artifacts out.
-git -C "$repo_root" ls-files --cached --others --exclude-standard |
-    while IFS= read -r source_path; do
-        case "$source_path" in
-            .git|.git/*|build|build/*|moguet|*.pkg.tar.*|*.src.tar.*)
-                continue
-                ;;
-        esac
-        if [ -f "$repo_root/$source_path" ] || [ -L "$repo_root/$source_path" ]; then
-            printf '%s\n' "$source_path"
-        fi
-    done >"$v2_source_manifest"
-[ -s "$v2_source_manifest" ] || fail 'current source manifest is empty'
 mkdir -p "$v2_source"
-while IFS= read -r source_path; do
-    mkdir -p "$v2_source/$(dirname "$source_path")"
-    cp -a "$repo_root/$source_path" "$v2_source/$source_path"
-done <"$v2_source_manifest"
+if [ -n "$current_source_archive_input" ]; then
+    bsdtar -xf "$current_source_archive_input" -C "$v2_source"
+else
+    # Preserve the issue branch's dirty edits and tracked deletions while
+    # keeping .git, ignored build output, binaries, and package artifacts out.
+    git -C "$repo_root" ls-files --cached --others --exclude-standard |
+        while IFS= read -r source_path; do
+            case "$source_path" in
+                .git|.git/*|build|build/*|moguet|*.pkg.tar.*|*.src.tar.*)
+                    continue
+                    ;;
+            esac
+            if [ -f "$repo_root/$source_path" ] ||
+                [ -L "$repo_root/$source_path" ]; then
+                printf '%s\n' "$source_path"
+            fi
+        done >"$v2_source_manifest"
+    [ -s "$v2_source_manifest" ] || fail 'current source manifest is empty'
+    while IFS= read -r source_path; do
+        mkdir -p "$v2_source/$(dirname "$source_path")"
+        cp -a "$repo_root/$source_path" "$v2_source/$source_path"
+    done <"$v2_source_manifest"
+fi
 
 assert_absent "$v2_source/.git"
 assert_absent "$v2_source/build"

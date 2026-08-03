@@ -2,6 +2,8 @@
 TARGET    := moguet
 LEGACY_PRODUCTION_TARGET := jpacker
 PACKAGE_NAME := moguet
+DOCKER ?= docker
+ARCH_VALIDATION_IMAGE ?= moguet-arch-validation:local
 VERSION_FILE := VERSION
 VERSION   := $(strip $(shell cat $(VERSION_FILE) 2>/dev/null))
 ifeq ($(VERSION),)
@@ -754,6 +756,7 @@ LIBALPM_BUILD_TARGETS := \
 
 .PHONY: all check-libalpm clean check-upgrade-all-plan-link-firewall check-system-source-upgrade-link-firewall check-aur-update-execution-runner-link-firewall check-aur-update-operation-result-link-firewall check-filtered-aur-update-operation-link-firewall check-upgrade-all-operation-link-firewall check-upgrade-all-command-link-firewall check-dependency-plan-model-link-firewall check-build-plan-artifact-target-projection-link-firewall check-artifact-selection-model-link-firewall check-artifact-identity-selection-link-firewall check-multiple-artifact-workspace-link-firewall check-multiple-artifact-identity-link-firewall check-package-base-artifact-install-plan-link-firewall check-package-base-artifact-install-executor-link-firewall check-separated-package-base-source-build-link-firewall test test-internal-identity test-application-identity test-xdg-paths test-xdg-directory-safety test-xdg-state-log test-trusted-cache test-runtime-identity test-app-config test-provider-selection test-user-config test-package-identifier test-package-metadata test-package-metadata-integration test-repository-query test-shell-words test-source-environment test-artifact-workspace test-multiple-artifact-workspace test-artifact-identity test-multiple-artifact-identity test-artifact-install-executor test-package-base-artifact-install-plan test-package-base-artifact-install-executor test-separated-source-build test-separated-package-base-source-build test-production-source-build test-process-capture test-aur-update-plan test-upgrade-all-plan test-system-source-upgrade test-aur-update-query test-aur-update-command test-upgrade-all-command test-aur-update-execution-preflight test-aur-update-execution-preflight-integration test-aur-update-execution-preparation test-aur-update-execution-runner test-aur-update-operation-result test-filtered-aur-update-operation test-upgrade-all-operation test-dependency-plan-model test-build-plan-artifact-target-projection test-artifact-install-plan test-artifact-selection-model test-artifact-identity-selection test-command-stub-contract test-markdown-links test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-commands-inspect test-commands-source-maintenance test-commands-sync test-conflicts-replaces test-install-layout test-package-transition test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check install uninstall
 .PHONY: FORCE catalogs check-catalogs check-localization-config check-pot update-po update-pot test-localization test-catalog-metadata-gate test-cli-localization-surface test-public-documentation
+.PHONY: test-container
 
 all: $(TARGET) $(MANPAGES) catalogs
 
@@ -1904,6 +1907,35 @@ test-needed-contract: $(TEST_TARGET)
 
 test-pkgbuild-export: $(TEST_TARGET)
 	sh tests/test-pkgbuild-export.sh $(abspath $(TEST_TARGET))
+
+test-container:
+	@set -eu; \
+		if ! git -C "$(CURDIR)" rev-parse --verify \
+			'refs/tags/v1.16.0^{commit}' >/dev/null 2>&1; then \
+			printf '%s\n' \
+				'error: local tag v1.16.0 is required for container validation' >&2; \
+			exit 1; \
+		fi; \
+		fixture_dir=$$(mktemp -d); \
+		legacy_archive=$$fixture_dir/jpacker-v1.16.0-source.tar; \
+		cleanup() { \
+			rm -f -- "$$legacy_archive"; \
+			rmdir -- "$$fixture_dir"; \
+		}; \
+		trap cleanup EXIT; \
+		trap 'exit 129' HUP; \
+		trap 'exit 130' INT; \
+		trap 'exit 143' TERM; \
+		git -C "$(CURDIR)" archive --format=tar \
+			--output="$$legacy_archive" v1.16.0; \
+		printf '%s\n' ':: Building Arch validation image'; \
+		$(DOCKER) build --pull \
+			--build-context "moguet-transition-fixture=$$fixture_dir" \
+			--tag "$(ARCH_VALIDATION_IMAGE)" \
+			--file containers/arch-validation/Dockerfile \
+			.; \
+		printf '%s\n' ':: Running Arch validation container'; \
+		$(DOCKER) run --rm --network=none "$(ARCH_VALIDATION_IMAGE)"
 
 test: \
 	test-internal-identity \

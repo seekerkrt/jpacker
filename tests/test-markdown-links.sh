@@ -48,7 +48,8 @@ track_fixture() {
 run_checker_ok() {
     checker=$1
     output=$2
-    if ! sh "$checker" > "$output" 2>&1; then
+    if ! env -u MOGUET_TEST_CURRENT_SOURCE_ARCHIVE \
+        sh "$checker" > "$output" 2>&1; then
         printf 'expected checker to pass: %s\n' "$checker" >&2
         sed -n '1,160p' "$output" >&2
         exit 1
@@ -60,7 +61,8 @@ run_checker_fail() {
     checker=$1
     output=$2
     missing_destination=$3
-    if sh "$checker" > "$output" 2>&1; then
+    if env -u MOGUET_TEST_CURRENT_SOURCE_ARCHIVE \
+        sh "$checker" > "$output" 2>&1; then
         printf 'expected checker to reject: %s\n' "$checker" >&2
         sed -n '1,160p' "$output" >&2
         exit 1
