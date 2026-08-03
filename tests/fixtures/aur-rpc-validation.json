@@ -282,6 +282,11 @@
       "PackageBase": "version-empty",
       "Version": ""
     },
+    "version-control": {
+      "Name": "version-control",
+      "PackageBase": "version-control",
+      "Version": "1.0-1\u001b[31m"
+    },
     "description-number": {
       "Name": "description-number",
       "PackageBase": "description-number",
@@ -330,6 +335,18 @@
       "PackageBase": "semantic-provides",
       "Version": "1.0-1",
       "Provides": ["../virtual=1"]
+    },
+    "semantic-provides-control": {
+      "Name": "semantic-provides-control",
+      "PackageBase": "semantic-provides-control",
+      "Version": "1.0-1",
+      "Provides": ["virtual-control=1\u001b[31m"]
+    },
+    "semantic-provides-malformed": {
+      "Name": "semantic-provides-malformed",
+      "PackageBase": "semantic-provides-malformed",
+      "Version": "1.0-1",
+      "Provides": ["virtual-malformed>"]
     },
     "semantic-conflicts": {
       "Name": "semantic-conflicts",

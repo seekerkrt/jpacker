@@ -26,6 +26,7 @@ enum class EventKind {
     LocalPackageSnapshot,
     Progress,
     SystemCommand,
+    RepositoryProviderTransaction,
     SourceExecution,
 };
 
@@ -80,10 +81,19 @@ void fail_source_identity(
 void fail_source_work_item(
         const std::string& package_name,
         std::string diagnostic);
+void set_selected_repository_provider(
+        const std::string& package_name,
+        ProvidedDependency provider);
+void set_provider_candidates(
+        const std::string& package_name,
+        std::vector<ProvidedDependency> candidates);
+void set_provider_selector(ProviderSelectionCallback select_provider);
+void fail_repository_provider_transaction(std::string diagnostic);
 void fail_source_invocation(std::string diagnostic);
 void fail_supported_options(std::string diagnostic);
 void fail_cache_seed();
 void fail_cache_activation();
+void fail_repository_provider_cache_revalidation();
 
 void enqueue_metadata_session(MetadataSessionScript script);
 

@@ -29,6 +29,7 @@ enum class AurUpdateWorkItemFailureKind {
 
 enum class AurUpdateInvocationExecutionStatus {
     Completed,
+    StoppedOnProviderTransactionFailure,
     StoppedOnWorkItemFailure,
     StoppedAfterPackageCleanupFailure,
 };
@@ -154,8 +155,11 @@ struct AurUpdateSourceBuildExecutionResult {
     AurUpdateInvocationExecutionStatus status =
             AurUpdateInvocationExecutionStatus::Completed;
     std::vector<AurUpdateWorkItemExecutionResult> work_item_results;
+    SelectedRepositoryProviderTransactionResult
+            selected_repository_provider_transaction;
 
     bool is_success() const noexcept;
+    PackageStateChange package_state_change() const noexcept;
     bool changed_package_state() const noexcept;
     bool has_not_attempted_items() const noexcept;
     bool has_cleanup_failure() const noexcept;

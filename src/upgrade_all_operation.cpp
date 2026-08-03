@@ -870,6 +870,15 @@ void map_filtered_result_status(UpgradeAllOperationResult& aggregate) {
             aggregate.aur.status =
                     UpgradeAllAurPhaseStatus::BlockedBeforeExecution;
             return;
+        case AurUpdateOperationStatus::
+                StoppedOnProviderTransactionFailure:
+            aggregate.status =
+                    UpgradeAllOperationStatus::StoppedOnAurFailure;
+            aggregate.stopped_phase =
+                    UpgradeAllOperationPhase::AurExecution;
+            aggregate.aur.status = UpgradeAllAurPhaseStatus::
+                    StoppedOnProviderTransactionFailure;
+            return;
         case AurUpdateOperationStatus::StoppedOnWorkItemFailure:
             aggregate.status = UpgradeAllOperationStatus::StoppedOnAurFailure;
             aggregate.stopped_phase = UpgradeAllOperationPhase::AurExecution;

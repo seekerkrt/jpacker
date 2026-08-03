@@ -570,11 +570,11 @@ assert_command_log_empty
 
 setup_case aur-install-all-root-plan-barrier
 run_status 1 --noedit --nodiff --noconfirm -S --aur plan-a plan-missing
-assert_event_at 1 "aur info plan-a"
-assert_event_at 2 "aur info plan-a"
-assert_event_at 3 "aur info plan-missing"
-assert_event_count 2 "aur info plan-a"
-assert_event_count 1 "aur info plan-missing"
+assert_event_at 1 "aur info-strict plan-a"
+assert_event_at 2 "aur info-strict plan-a"
+assert_event_at 3 "aur info-strict plan-missing"
+assert_event_count 2 "aur info-strict plan-a"
+assert_event_count 1 "aur info-strict plan-missing"
 assert_no_mutation_events
 assert_event_prefix_absent '^sudo '
 assert_cache_entry_absent plan-a
@@ -584,10 +584,10 @@ setup_case aur-install-plan-order-needed-and-preferences-disabled
 write_source_preference plan-a 'CFLAGS=-Oaur-only-must-ignore'
 write_source_preference plan-b 'CFLAGS=-Oaur-only-must-ignore'
 run_status 0 --noedit --nodiff --noconfirm -S --aur --needed plan-a plan-b
-assert_event_at 1 "aur info plan-a"
-assert_event_at 2 "aur info plan-a"
-assert_event_at 3 "aur info plan-b"
-assert_event_at 4 "aur info plan-b"
+assert_event_at 1 "aur info-strict plan-a"
+assert_event_at 2 "aur info-strict plan-a"
+assert_event_at 3 "aur info-strict plan-b"
+assert_event_at 4 "aur info-strict plan-b"
 assert_event_at 5 "pacman-conf --verbose RootDir DBPath"
 assert_event_at 6 "git clone https://aur.archlinux.org/plan-a.git plan-a"
 assert_event_at 7 "git config --get remote.origin.url"
@@ -616,10 +616,10 @@ setup_case aur-install-first-execution-failure-stops-later-plan
 export MOGUET_TEST_MAKEPKG_EXIT_CODE=42
 export MOGUET_TEST_MAKEPKG_PACKAGELIST_EXIT_CODE=0
 run_status 1 --noedit --nodiff --noconfirm -S --aur --needed plan-a plan-b
-assert_event_at 1 "aur info plan-a"
-assert_event_at 2 "aur info plan-a"
-assert_event_at 3 "aur info plan-b"
-assert_event_at 4 "aur info plan-b"
+assert_event_at 1 "aur info-strict plan-a"
+assert_event_at 2 "aur info-strict plan-a"
+assert_event_at 3 "aur info-strict plan-b"
+assert_event_at 4 "aur info-strict plan-b"
 assert_event_at 5 "pacman-conf --verbose RootDir DBPath"
 assert_event_at 6 "git clone https://aur.archlinux.org/plan-a.git plan-a"
 assert_event_at 8 "makepkg --packagelist"
@@ -690,10 +690,10 @@ assert_event_at 1 "pacman -Si official-a"
 assert_event_at 2 "pacman -Si source-a"
 assert_event_at 3 "pacman -Si plan-missing"
 assert_event_at 4 "pacman -Si source-a"
-assert_event_at 5 "aur info source-a"
-assert_event_at 6 "aur info source-a"
+assert_event_at 5 "aur info-strict source-a"
+assert_event_at 6 "aur info-strict source-a"
 assert_event_at 7 "pacman -Si plan-missing"
-assert_event_at 8 "aur info plan-missing"
+assert_event_at 8 "aur info-strict plan-missing"
 assert_event_prefix_absent '^sudo pacman -S( |$)'
 assert_event_prefix_absent '^(git|makepkg) '
 assert_cache_entry_absent source-a
@@ -733,8 +733,8 @@ run_status 0 --noedit --nodiff --noconfirm -S official-a --needed source-a force
 official_transaction='sudo pacman -S --noconfirm official-a --needed'
 assert_event "$official_transaction"
 assert_event_count 1 "$official_transaction"
-assert_event_count_before 2 "aur info source-a" "$official_transaction"
-assert_event_count_before 2 "aur info source-b" "$official_transaction"
+assert_event_count_before 2 "aur info-strict source-a" "$official_transaction"
+assert_event_count_before 2 "aur info-strict source-b" "$official_transaction"
 assert_event_count_before 2 "pacman -Si forced-official" "$official_transaction"
 assert_event_before "pacman-conf --verbose RootDir DBPath" "$official_transaction"
 assert_event_before "$official_transaction" "git clone https://aur.archlinux.org/source-a.git source-a"
@@ -760,8 +760,8 @@ export MOGUET_TEST_SUDO_MAIN_STATUS=42
 run_status 1 --noedit --nodiff --noconfirm -S official-a source-a source-b
 failed_transaction='sudo pacman -S --noconfirm official-a'
 assert_event "$failed_transaction"
-assert_event_count_before 2 "aur info source-a" "$failed_transaction"
-assert_event_count_before 2 "aur info source-b" "$failed_transaction"
+assert_event_count_before 2 "aur info-strict source-a" "$failed_transaction"
+assert_event_count_before 2 "aur info-strict source-b" "$failed_transaction"
 assert_event_prefix_absent '^(git|makepkg) '
 assert_contains "Pacman failed." "$output_file"
 assert_cache_entry_absent source-a
@@ -787,7 +787,7 @@ setup_case auto-install-sysupgrade-without-official-target
 export MOGUET_TEST_SUDO_MAIN_STATUS=0
 run_status 0 --noedit --nodiff --noconfirm -Syu source-a
 assert_event "sudo pacman -Syu --noconfirm"
-assert_event_count_before 2 "aur info source-a" "sudo pacman -Syu --noconfirm"
+assert_event_count_before 2 "aur info-strict source-a" "sudo pacman -Syu --noconfirm"
 assert_event_before "pacman-conf --verbose RootDir DBPath" "sudo pacman -Syu --noconfirm"
 assert_event_before "sudo pacman -Syu --noconfirm" "git clone https://aur.archlinux.org/source-a.git source-a"
 assert_event "makepkg --packagelist"

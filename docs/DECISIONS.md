@@ -165,6 +165,14 @@ storeへaccessできる非協調same-euid processまたはrootが、最終identi
 
 通常、config directoryの変更はPATCHに含めない。しかしこれはv2.0.0で承認済みのuser XDG storage contractから漏れた一領域を、その同じauthorityへ揃える限定的なv2.0.1のbug fixとして扱う。新しいstorage移行をPATCHへ許可する一般的precedentにはしない。v2.0.0のtag、GitHub Release、公開済みrelease bodyはhistorical artifactとして変更しない。
 
+### 13. ambiguous providerはinvocation-localな明示選択とする
+
+#272では、pacman-firstのexact package / unique provider優先順位を維持したまま、複数providerが残る場合だけ利用者の明示選択を受け付ける。選択はinteractive TTYの番号入力に限定し、defaultを設けない。non-TTY、`--noconfirm`、取消、EOFでは候補を自動選択せず、mutation可能な経路をfail closedとする。choiceはcanonical dependencyごとにinvocation内だけで共有し、configやcacheへ永続化しない。
+
+selected AUR providerはPackageBase identityをBuildPlanのdependency edgeとbuild / fetch orderへ渡す。selected repository providerはAUR sourceとして扱わず、source checkout / buildより前にexactな`repository/package`を`pacman -S --asdeps --needed` transactionへ渡す。Moguetが所有するのは候補提示、choice保持、順序、preflight、diagnosticであり、dependency transaction自体はpacmanが所有する。
+
+対応phaseの全provider choiceとstatic preflightが完了するまで、このdependency transaction、Git checkout、makepkg、source artifact installを開始しない。transaction failure後はsource mutationへ進まず、すでに完了した別phaseやpackage transactionをrollbackしたとは扱わない。provider choiceの永続化、non-interactive自動選択、root discovery、完全なversion / conflict / replaces solverはこのdecisionへ含めない。
+
 ---
 
 ## English
@@ -327,3 +335,11 @@ Moguet does not promise complete race freedom against a non-cooperating same-eui
 Moguet neither creates nor reads `/etc/jpacker` or `/etc/moguet` at runtime, and it does not fall back to, merge, automatically copy, rewrite, or delete the legacy store. Migration is a per-user manual operation governed by the Migration Guide. Package installation, reinstallation, and removal neither create nor delete user XDG directories and preserve both canonical and legacy entries.
 
 Config-directory changes are normally excluded from PATCH releases. This is a narrow v2.0.1 bug-fix exception that completes one omitted part of the user-XDG storage contract already approved for v2.0.0; it is not a general precedent for storage migrations in PATCH releases. The v2.0.0 tag, GitHub Release, and published release body remain unchanged historical artifacts.
+
+### 13. Ambiguous providers require invocation-local explicit selection
+
+#272 preserves the pacman-first priority of exact packages and unique providers and asks for user intent only when multiple providers remain. Selection is limited to numbered input on an interactive TTY and has no default. Non-TTY use, `--noconfirm`, cancellation, and EOF never auto-select a candidate; mutation-capable routes fail closed. A choice is shared by canonical dependency only within the invocation and is not persisted in configuration or cache.
+
+A selected AUR provider contributes its PackageBase identity to the BuildPlan dependency edge and build/fetch order. A selected repository provider is not treated as AUR source: before source checkout or build, its exact `repository/package` target enters a `pacman -S --asdeps --needed` transaction. Moguet owns candidate presentation, retained user choice, ordering, preflight, and diagnostics; pacman continues to own the dependency transaction itself.
+
+The corresponding phase does not begin that dependency transaction, Git checkout, makepkg, or source-artifact installation until all provider choices and static preflight for the phase are complete. A transaction failure stops source mutation and is not reported as rolling back package transactions or earlier phases that already completed. Persisted provider choices, non-interactive auto-selection, root discovery, and complete version/conflict/replaces solvers remain outside this decision.

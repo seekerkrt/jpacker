@@ -38,6 +38,7 @@ COMMANDS_SYNC_TEST_TARGET := build/tests/moguet-commands-sync-test
 SOURCE_INSTALL_CHARACTERIZATION_TEST_TARGET := build/tests/moguet-source-install-characterization-test
 APP_CONFIG_MODULE_TEST_TARGET := build/tests/app-config-test
 APP_CONFIG_INTEGRATION_TEST_TARGET := build/tests/moguet-app-config-test
+PROVIDER_SELECTION_TEST_TARGET := $(BUILD_DIR)/tests/provider-selection-test
 USER_CONFIG_MODULE_TEST_TARGET := $(BUILD_DIR)/tests/user-config-test
 PACKAGE_IDENTIFIER_TEST_TARGET := build/tests/package-identifier-test
 SHELL_WORDS_TEST_TARGET := build/tests/shell-words-test
@@ -347,6 +348,8 @@ AUR_UPDATE_OPERATION_RESULT_FORBIDDEN_TEST_SRCS := \
 # transport、BuildPlan resolver、preparation IO、source lifecycleだけをstub化する。
 FILTERED_AUR_UPDATE_OPERATION_TEST_SRCS := \
 	tests/filtered_aur_update_operation_test.cpp \
+	$(SRC_DIR)/app_config.cpp \
+	$(SRC_DIR)/provider_selection.cpp \
 	$(SRC_DIR)/filtered_aur_update_operation.cpp \
 	$(SRC_DIR)/upgrade_all_plan.cpp \
 	$(SRC_DIR)/aur_update_query.cpp \
@@ -368,6 +371,8 @@ FILTERED_AUR_UPDATE_OPERATION_TEST_SRCS := \
 	tests/stubs/aur-update-execution-preparation/preparation_stub.cpp \
 	tests/stubs/aur-update-execution-runner/execution_stub.cpp
 FILTERED_AUR_UPDATE_OPERATION_REQUIRED_TEST_SRCS := \
+	$(SRC_DIR)/app_config.cpp \
+	$(SRC_DIR)/provider_selection.cpp \
 	$(SRC_DIR)/filtered_aur_update_operation.cpp \
 	$(SRC_DIR)/aur_update_query.cpp \
 	$(SRC_DIR)/aur_update_execution_preflight.cpp \
@@ -392,6 +397,8 @@ FILTERED_AUR_UPDATE_OPERATION_FORBIDDEN_TEST_SRCS := \
 # POLICY(#281): aggregate testはPR2/PR3を含むproduction orchestrationをlinkし、
 # command/transport/libalpm/source mutationの外部境界だけを統合stubへ切る。
 UPGRADE_ALL_OPERATION_ALLOWED_PRODUCTION_TEST_SRCS := \
+	$(SRC_DIR)/app_config.cpp \
+	$(SRC_DIR)/provider_selection.cpp \
 	$(SRC_DIR)/upgrade_all_operation.cpp \
 	$(SRC_DIR)/upgrade_all_operation_result.cpp \
 	$(SRC_DIR)/system_source_upgrade.cpp \
@@ -420,6 +427,8 @@ UPGRADE_ALL_OPERATION_TEST_SRCS := \
 	$(UPGRADE_ALL_OPERATION_ALLOWED_PRODUCTION_TEST_SRCS) \
 	tests/stubs/upgrade-all-operation/operation_stub.cpp
 UPGRADE_ALL_OPERATION_REQUIRED_TEST_SRCS := \
+	$(SRC_DIR)/app_config.cpp \
+	$(SRC_DIR)/provider_selection.cpp \
 	$(SRC_DIR)/upgrade_all_operation.cpp \
 	$(SRC_DIR)/upgrade_all_operation_result.cpp \
 	$(SRC_DIR)/system_source_upgrade.cpp \
@@ -666,6 +675,8 @@ SEPARATED_PACKAGE_BASE_SOURCE_BUILD_FORBIDDEN_TEST_SRCS := \
 		$(SRCS))
 PRODUCTION_SOURCE_BUILD_TEST_SRCS := \
 	tests/production_source_build_test.cpp \
+	$(SRC_DIR)/app_config.cpp \
+	$(SRC_DIR)/provider_selection.cpp \
 	$(SRC_DIR)/source_install.cpp \
 	$(SRC_DIR)/cache_authority.cpp \
 	$(SRC_DIR)/source_install_preparation.cpp \
@@ -741,7 +752,7 @@ LIBALPM_BUILD_TARGETS := \
 	$(AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION_TEST_TARGET) \
 	$(UPGRADE_BASELINE_METADATA_TEST_TARGET)
 
-.PHONY: all check-libalpm clean check-upgrade-all-plan-link-firewall check-system-source-upgrade-link-firewall check-aur-update-execution-runner-link-firewall check-aur-update-operation-result-link-firewall check-filtered-aur-update-operation-link-firewall check-upgrade-all-operation-link-firewall check-upgrade-all-command-link-firewall check-dependency-plan-model-link-firewall check-build-plan-artifact-target-projection-link-firewall check-artifact-selection-model-link-firewall check-artifact-identity-selection-link-firewall check-multiple-artifact-workspace-link-firewall check-multiple-artifact-identity-link-firewall check-package-base-artifact-install-plan-link-firewall check-package-base-artifact-install-executor-link-firewall check-separated-package-base-source-build-link-firewall test test-internal-identity test-application-identity test-xdg-paths test-xdg-directory-safety test-xdg-state-log test-trusted-cache test-runtime-identity test-app-config test-user-config test-package-identifier test-package-metadata test-package-metadata-integration test-repository-query test-shell-words test-source-environment test-artifact-workspace test-multiple-artifact-workspace test-artifact-identity test-multiple-artifact-identity test-artifact-install-executor test-package-base-artifact-install-plan test-package-base-artifact-install-executor test-separated-source-build test-separated-package-base-source-build test-production-source-build test-process-capture test-aur-update-plan test-upgrade-all-plan test-system-source-upgrade test-aur-update-query test-aur-update-command test-upgrade-all-command test-aur-update-execution-preflight test-aur-update-execution-preflight-integration test-aur-update-execution-preparation test-aur-update-execution-runner test-aur-update-operation-result test-filtered-aur-update-operation test-upgrade-all-operation test-dependency-plan-model test-build-plan-artifact-target-projection test-artifact-install-plan test-artifact-selection-model test-artifact-identity-selection test-command-stub-contract test-markdown-links test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-commands-inspect test-commands-source-maintenance test-commands-sync test-conflicts-replaces test-install-layout test-package-transition test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check install uninstall
+.PHONY: all check-libalpm clean check-upgrade-all-plan-link-firewall check-system-source-upgrade-link-firewall check-aur-update-execution-runner-link-firewall check-aur-update-operation-result-link-firewall check-filtered-aur-update-operation-link-firewall check-upgrade-all-operation-link-firewall check-upgrade-all-command-link-firewall check-dependency-plan-model-link-firewall check-build-plan-artifact-target-projection-link-firewall check-artifact-selection-model-link-firewall check-artifact-identity-selection-link-firewall check-multiple-artifact-workspace-link-firewall check-multiple-artifact-identity-link-firewall check-package-base-artifact-install-plan-link-firewall check-package-base-artifact-install-executor-link-firewall check-separated-package-base-source-build-link-firewall test test-internal-identity test-application-identity test-xdg-paths test-xdg-directory-safety test-xdg-state-log test-trusted-cache test-runtime-identity test-app-config test-provider-selection test-user-config test-package-identifier test-package-metadata test-package-metadata-integration test-repository-query test-shell-words test-source-environment test-artifact-workspace test-multiple-artifact-workspace test-artifact-identity test-multiple-artifact-identity test-artifact-install-executor test-package-base-artifact-install-plan test-package-base-artifact-install-executor test-separated-source-build test-separated-package-base-source-build test-production-source-build test-process-capture test-aur-update-plan test-upgrade-all-plan test-system-source-upgrade test-aur-update-query test-aur-update-command test-upgrade-all-command test-aur-update-execution-preflight test-aur-update-execution-preflight-integration test-aur-update-execution-preparation test-aur-update-execution-runner test-aur-update-operation-result test-filtered-aur-update-operation test-upgrade-all-operation test-dependency-plan-model test-build-plan-artifact-target-projection test-artifact-install-plan test-artifact-selection-model test-artifact-identity-selection test-command-stub-contract test-markdown-links test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-commands-inspect test-commands-source-maintenance test-commands-sync test-conflicts-replaces test-install-layout test-package-transition test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check install uninstall
 .PHONY: FORCE catalogs check-catalogs check-localization-config check-pot update-po update-pot test-localization test-catalog-metadata-gate test-cli-localization-surface test-public-documentation
 
 all: $(TARGET) $(MANPAGES) catalogs
@@ -801,6 +812,7 @@ check-libalpm:
 
 $(OBJS) $(LIBALPM_BUILD_TARGETS): | check-libalpm check-localization-config
 $(BUILD_DIR)/localization.o $(LIBALPM_BUILD_TARGETS): $(LOCALIZATION_CONFIG_HEADER)
+$(APP_CONFIG_MODULE_TEST_TARGET) $(PROVIDER_SELECTION_TEST_TARGET): $(LOCALIZATION_CONFIG_HEADER)
 
 $(TARGET): $(OBJS)
 	@echo ":: Linking $@"
@@ -1065,10 +1077,15 @@ $(SOURCE_INSTALL_CHARACTERIZATION_TEST_TARGET): tests/source_install_characteriz
 	@echo ":: Compiling shared source-install characterization test binary"
 	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -DMOGUET_ENABLE_TEST_OVERRIDES -I$(SRC_DIR) tests/source_install_characterization.cpp $(SOURCE_INSTALL_CHARACTERIZATION_TEST_SRCS) -o $@ $(MY_LDLIBS) $(LIBALPM_LDLIBS)
 
-$(APP_CONFIG_MODULE_TEST_TARGET): tests/app_config_test.cpp $(SRC_DIR)/app_config.cpp $(SRC_DIR)/app_config.hpp $(SRC_DIR)/user_config.hpp $(VERSION_FILE)
+$(APP_CONFIG_MODULE_TEST_TARGET): tests/app_config_test.cpp $(SRC_DIR)/app_config.cpp $(SRC_DIR)/app_config.hpp $(SRC_DIR)/provider_selection.cpp $(SRC_DIR)/provider_selection.hpp $(SRC_DIR)/dependency_plan.hpp $(SRC_DIR)/dependency_provider.hpp $(SRC_DIR)/dependency_spec.cpp $(SRC_DIR)/dependency_spec.hpp $(SRC_DIR)/localization.cpp $(SRC_DIR)/localization.hpp $(SRC_DIR)/user_config.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling app config module test binary"
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -I$(SRC_DIR) tests/app_config_test.cpp $(SRC_DIR)/app_config.cpp -o $@
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -I$(SRC_DIR) tests/app_config_test.cpp $(SRC_DIR)/app_config.cpp $(SRC_DIR)/provider_selection.cpp $(SRC_DIR)/dependency_spec.cpp $(SRC_DIR)/localization.cpp -o $@
+
+$(PROVIDER_SELECTION_TEST_TARGET): tests/provider_selection_test.cpp $(SRC_DIR)/provider_selection.cpp $(SRC_DIR)/provider_selection.hpp $(SRC_DIR)/dependency_plan.hpp $(SRC_DIR)/dependency_provider.hpp $(SRC_DIR)/dependency_spec.cpp $(SRC_DIR)/dependency_spec.hpp $(SRC_DIR)/localization.cpp $(SRC_DIR)/localization.hpp $(VERSION_FILE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling provider selection test binary"
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -I$(SRC_DIR) tests/provider_selection_test.cpp $(SRC_DIR)/provider_selection.cpp $(SRC_DIR)/dependency_spec.cpp $(SRC_DIR)/localization.cpp -o $@
 
 $(USER_CONFIG_MODULE_TEST_TARGET): tests/user_config_test.cpp $(SRC_DIR)/user_config.cpp $(SRC_DIR)/user_config.hpp $(SRC_DIR)/cli_parser.cpp $(SRC_DIR)/cli_parser.hpp $(SRC_DIR)/localization.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
@@ -1429,6 +1446,9 @@ test-runtime-identity: $(TARGET) $(ROOT_EXECUTION_IDENTITY_TEST_TARGET) $(APP_CO
 test-app-config: $(APP_CONFIG_MODULE_TEST_TARGET) $(APP_CONFIG_INTEGRATION_TEST_TARGET)
 	sh tests/test-app-config.sh $(abspath $(APP_CONFIG_MODULE_TEST_TARGET)) $(abspath $(APP_CONFIG_INTEGRATION_TEST_TARGET))
 
+test-provider-selection: $(PROVIDER_SELECTION_TEST_TARGET)
+	$(abspath $(PROVIDER_SELECTION_TEST_TARGET))
+
 test-user-config: $(USER_CONFIG_MODULE_TEST_TARGET)
 	sh tests/test-user-config.sh $(abspath $(USER_CONFIG_MODULE_TEST_TARGET))
 
@@ -1762,6 +1782,7 @@ test-build-plan-artifact-target-projection: check-build-plan-artifact-target-pro
 
 test-repository-query: $(REPOSITORY_QUERY_TEST_TARGET)
 	@set -e; for test_case in \
+		candidate-value-contract \
 		success \
 		repository-named-aur \
 		legacy-malformed-candidates \
@@ -1776,6 +1797,9 @@ test-repository-query: $(REPOSITORY_QUERY_TEST_TARGET)
 		empty-database \
 		malformed-database \
 		invalid-provided-dependency \
+		missing-package-version \
+		multiple-package-versions \
+		invalid-package-version \
 		partial-snapshot; do \
 		$(abspath $(REPOSITORY_QUERY_TEST_TARGET)) $$test_case; \
 	done
@@ -1893,6 +1917,7 @@ test: \
 	test-trusted-cache \
 	test-runtime-identity \
 	test-app-config \
+	test-provider-selection \
 	test-user-config \
 	test-package-identifier \
 	test-package-metadata \

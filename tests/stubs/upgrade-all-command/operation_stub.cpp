@@ -75,6 +75,7 @@ constexpr std::array UPGRADE_ALL_AUR_PHASE_STATUSES{
         UpgradeAllAurPhaseStatus::NoUpdates,
         UpgradeAllAurPhaseStatus::Completed,
         UpgradeAllAurPhaseStatus::BlockedBeforeExecution,
+        UpgradeAllAurPhaseStatus::StoppedOnProviderTransactionFailure,
         UpgradeAllAurPhaseStatus::StoppedOnWorkItemFailure,
         UpgradeAllAurPhaseStatus::StoppedAfterCleanupFailure,
         UpgradeAllAurPhaseStatus::InconsistentResult};
@@ -104,6 +105,7 @@ constexpr std::array AUR_OPERATION_STATUSES{
         AurUpdateOperationStatus::NoUpdates,
         AurUpdateOperationStatus::Completed,
         AurUpdateOperationStatus::BlockedBeforeExecution,
+        AurUpdateOperationStatus::StoppedOnProviderTransactionFailure,
         AurUpdateOperationStatus::StoppedOnWorkItemFailure,
         AurUpdateOperationStatus::StoppedAfterPackageCleanupFailure,
         AurUpdateOperationStatus::InconsistentResult};

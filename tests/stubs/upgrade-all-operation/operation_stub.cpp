@@ -677,6 +677,17 @@ ProductionSourceBuildWorkItem prepare_resolved_source_build_work_item(
     return work_item;
 }
 
+
+ProductionSourceBuildWorkItem prepare_resolved_source_build_work_item(
+        const ResolvedSourceBuildIdentity& identity,
+        SourceBuildEnvironment environment,
+        bool only_if_updated,
+        bool needed,
+        const ProviderSelectionCallback&) {
+    return prepare_resolved_source_build_work_item(
+            identity, std::move(environment), only_if_updated, needed);
+}
+
 PackageMetadataError::PackageMetadataError(PackageMetadataFailure failure)
     : std::runtime_error(failure.diagnostic),
       failure_(std::move(failure)) {
@@ -966,6 +977,13 @@ std::string exec_command(const char* command) {
 
 BuildPlan resolve_build_plan_for_preflight(
         const std::vector<std::string>& targets) {
+    return resolve_build_plan_for_preflight(
+            targets, ProviderSelectionCallback{});
+}
+
+BuildPlan resolve_build_plan_for_preflight(
+        const std::vector<std::string>& targets,
+        const ProviderSelectionCallback&) {
     g_state.resolver_calls.push_back(targets);
     record_event(
             stub::EventKind::BuildPlanResolution,
@@ -1207,6 +1225,23 @@ execute_prepared_package_base_source_build_work_item_typed(
             throw UnknownAurExecutionFailure{};
     }
     throw std::logic_error("Unknown AUR execution script.");
+}
+
+SelectedRepositoryProviderTransactionResult
+execute_selected_repository_provider_transaction(
+        const PreparedProductionSourceBuildInvocation& invocation,
+        const AppConfig&) {
+    // Aggregate tests cover orchestration composition; the focused runner and
+    // system/source phase tests own provider-transaction ordering and failure.
+    SelectedRepositoryProviderTransactionResult result;
+    result.selected_providers = invocation.selected_repository_providers;
+    if(!result.selected_providers.empty()) {
+        result.status =
+                SelectedRepositoryProviderTransactionStatus::Succeeded;
+        result.package_state_change = PackageStateChange::Unknown;
+        result.command_exit_status = 0;
+    }
+    return result;
 }
 
 void seed_production_source_build_cache(

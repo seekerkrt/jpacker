@@ -42,11 +42,15 @@ INTERNAL_ONLY_ANCHORS: dict[str, tuple[str, ...]] = {
     ),
     "src/source_install_preparation.cpp": (
         "Production source-build work items have a partial cache authority.",
+        "Production source-build selected provider is not repository-owned.",
+        "Production source-build selected provider has an invalid repository name.",
+        "Production source-build repository provider has an AUR PackageBase.",
         "Production source-build work item has an empty Git URL for ",
         "Production source-build work item has no required package target for PackageBase ",
         "Production source-build required target has a mismatched PackageBase: ",
         "Production source-build work item contains duplicate required package target: ",
         "Production source-build work item has an unknown install reason.",
+        "Production source-build work item contains a duplicate selected repository provider.",
         "Production source-build singular request does not match its required package target: ",
         "Production source-build multiple-target work item must not expose a singular requested package.",
         "Production separated source-build requires exactly one required package target for PackageBase ",
@@ -146,8 +150,8 @@ def check_internal_only_anchors() -> None:
                     f"in {relative_path}: {anchor}"
                 )
             total += 1
-    if total != 23:
-        fail(f"internal-only classification contains {total} entries instead of 23")
+    if total != 27:
+        fail(f"internal-only classification contains {total} entries instead of 27")
 
 
 def parse_po_string(line: str, prefix: str) -> str:
@@ -217,7 +221,7 @@ def main() -> None:
     check_technical_msgid_boundaries()
     print(
         "cli-localization-surface: "
-        f"{len(extracted)} extraction sources and 23 internal-only entries verified"
+        f"{len(extracted)} extraction sources and 27 internal-only entries verified"
     )
 
 

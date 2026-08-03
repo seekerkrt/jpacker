@@ -93,8 +93,12 @@ installed packageのうち、現在もexact AUR packageへ解決できるもの�
 system、registered source、fresh foreign inventory、filtered AURの各phaseをこの順で
 実行します。
 explicit source preferenceは重複するAUR targetより優先します。
-単一atomic transactionではなく、最初のfailureで停止し、完了済みpackage
-transactionをrollbackせず、後続作業をnot attemptedとして報告します。
+filtered AUR phaseではprovider selectionを完了してから
+clone、build、pacman、sudoを開始します。
+先行phaseは完了済みの場合があります。
+単一atomic transactionではありません。
+最初のfailureで停止し、完了済みpackage transactionをrollbackせず、
+後続作業をnot attemptedとして報告します。
 .
 .TP
 .B "clean"
@@ -124,21 +128,27 @@ global / pacman optionはunsupportedです。
 .B "deps [--recursive] <pkg>"
 AURのruntime、make、check dependencyを分類します。
 .B --recursive
-を付けるとAUR dependencyを再帰的に辿り、official、unique provider、ambiguous、
-unresolved dependencyは表示しますが、そのcategoryをさらに辿りません。
+を付けるとexact AUR dependencyとuser-selected AUR providerを再帰的に辿ります。
+official dependency、unique provider、selected official repository provider、未選択の
+ambiguous provider、unresolved dependencyは表示しますが、さらに辿りません。
+interactive TTYではsource-aware provider candidateを選択でき、user-selected providerと
+未解決のambiguityを区別して表示します。
 clone、build、install、build order計算は行いません。
 .
 .TP
 .B "plan <pkg>"
 AUR build-order planとdirect official repository package sizeを表示します。
-unknown dependency、ambiguous provider、cycle、安全に解決できないconflicts /
+unknown dependency、未選択のambiguous provider、cycle、安全に解決できないconflicts /
 replacesがあるplanはincompleteです。
+unique resolve、user-selected provider、未選択のambiguous providerを区別します。
 size metadataが利用できなくてもplan bodyを省略しません。
 clone、build、installは行いません。
 .
 .TP
 .B "fetch <pkg>"
 complete inspection planが必要とするAUR PackageBase repositoryを取得します。
+selected AUR providerのPackageBaseも含め、selected official repository providerはclone
+しません。
 未取得repositoryはcloneします。
 既存cloneでは
 .B "git fetch origin"
@@ -263,6 +273,8 @@ user modificationの破棄やdestructive Git operationを許可しません。
 .B "--noconfirm"
 対応するpacman / makepkg executionへnon-confirmation behaviorを渡し、定義済みdefaultを
 使ってMoguetのpromptによる停止を避けます。
+provider selectionにはdefaultがありません。このoptionではstdinを読まず、promptや
+provider選択を行わず、未解決のambiguityをfail-closedで停止します。
 「すべてyes」ではなく、unresolved / ambiguous dependency、cycle、source selection、
 conflicts / replaces、artifact identity、ownership等のsafety guardを突破しません。
 .
@@ -496,6 +508,23 @@ dependency、provider、PackageBase、source、artifact、ownership、transactio
 authoritativeに確定できなければ、対応するexternal mutation前に停止します。
 .B --noconfirm
 でguardを突破しません。
+.
+.PP
+複数dependency providerが残る場合、interactive TTYではsource-aware candidateを番号付きで
+表示し、defaultなしでexactly oneの選択を要求します。empty input、q、quit、cancel、EOFは
+取消とし、invalid / out-of-range inputは再入力します。non-TTYと
+.B --noconfirm
+ではprovider inputをstdinから読まずfail-closedで停止します。choiceは現在のinvocation内
+だけで共有します。selected AUR PackageBaseはfetch / build planへ渡し、selected official
+providerはexactな
+.I repository/package
+dependencyとして導入します。
+.
+.PP
+registered source phaseは、candidateがすべてofficial repository由来の場合だけprovider
+selectionを行います。AUR providerを含むcandidate setは、そのproviderのPackageBaseを
+singular source lifecycleでscheduleできないため、ambiguousのままsystem / source
+execution前にfail-closedで停止します。
 .
 .PP
 .B deps

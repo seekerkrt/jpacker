@@ -26,5 +26,17 @@ AppConfig make_app_config(
             std::move(final_user_config),
             no_confirm,
             rm_deps,
-            resolve_editor_from_environment()};
+            resolve_editor_from_environment(),
+            make_provider_selection_session(no_confirm)};
+}
+
+ProviderSelectionCallback provider_selection_callback(const AppConfig& config) {
+    if(!config.provider_selection) return {};
+
+    std::shared_ptr<ProviderSelectionSession> session = config.provider_selection;
+    return [session = std::move(session)](
+                   const std::string& dependency,
+                   const std::vector<ProvidedDependency>& candidates) {
+        return session->select_provider(dependency, candidates);
+    };
 }

@@ -681,6 +681,20 @@ std::string aur_update_cli_target_failure_summary(
 AurUpdateCliPresentation format_aur_update_cli_presentation(
         const AurUpdateOperationResult& result) {
     AurUpdateCliPresentation presentation;
+    const SelectedRepositoryProviderTransactionResult& provider_transaction =
+            result.selected_repository_provider_transaction;
+    if(provider_transaction.status ==
+       SelectedRepositoryProviderTransactionStatus::Failed) {
+        if(!provider_transaction.diagnostic.has_value() ||
+           provider_transaction.diagnostic->empty()) {
+            throw std::logic_error(localization::translate_message(
+                    "Failed selected repository provider transaction has no diagnostic."));
+        }
+        presentation.error_lines.push_back(
+                localization::format_translated_message(
+                        "  selected repository provider transaction failed: {}",
+                        *provider_transaction.diagnostic));
+    }
     std::set<std::size_t> presented_failure_work_items;
     for(const AurUpdateWorkItemExecutionResult& work_item :
         result.execution_work_items) {

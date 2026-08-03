@@ -6,6 +6,7 @@
 #include "logging.hpp"
 #include "package_identifier.hpp"
 
+#include <cctype>
 #include <cstddef>
 #include <cstdlib>
 #include <curl/curl.h>
@@ -62,6 +63,13 @@ std::string trim(const std::string& str) {
     if(first == std::string::npos) return "";
     size_t last = str.find_last_not_of(" \t\n\r");
     return str.substr(first, (last - first + 1));
+}
+
+bool contains_control_character(const std::string& value) noexcept {
+    for(unsigned char character : value) {
+        if(std::iscntrl(character) != 0) return true;
+    }
+    return false;
 }
 
 // AUR RPC / JSON解析
@@ -348,6 +356,12 @@ void validate_metadata_identifiers(
         const std::vector<std::string>& values, const std::string& field,
         const std::string& context) {
     for(size_t i = 0; i < values.size(); ++i) {
+        if(contains_control_character(values[i])) {
+            throw_aur_rpc_validation_error(
+                    localization::format_translated_message(
+                            "{} {} response validation failed for {}: field {}[{}] contains a control character",
+                            "AUR", "RPC", context, field, i));
+        }
         ParsedDependency parsed = parse_dependency_string(values[i]);
         if(!is_valid_package_name(parsed.name)) {
             throw_aur_rpc_validation_error(
@@ -355,6 +369,19 @@ void validate_metadata_identifiers(
                             "{} {} response validation failed for {}: field {}[{}] contains invalid package identifier {}",
                             "AUR", "RPC", context, field, i,
                             json_value_for_error(parsed.name)));
+        }
+    }
+}
+
+void validate_provided_dependency_constraints(
+        const std::vector<std::string>& values,
+        const std::string& context) {
+    for(size_t i = 0; i < values.size(); ++i) {
+        if(parse_dependency_string(values[i]).has_malformed_constraint()) {
+            throw_aur_rpc_validation_error(
+                    localization::format_translated_message(
+                            "{} {} response validation failed for {}: field {}[{}] contains an invalid version constraint",
+                            "AUR", "RPC", context, "Provides", i));
         }
     }
 }
@@ -379,6 +406,12 @@ AurPackageInfo parse_aur_rpc_package_info(
     info.PackageBase = required_json_string(pkg, "PackageBase", entry_context);
     validate_package_identifier(info.PackageBase, "PackageBase", entry_context);
     info.Version = required_json_string(pkg, "Version", entry_context);
+    if(contains_control_character(info.Version)) {
+        throw_aur_rpc_validation_error(
+                localization::format_translated_message(
+                        "{} {} response validation failed for {}: field {} contains a control character",
+                        "AUR", "RPC", entry_context, "Version"));
+    }
     info.Description = optional_json_string(pkg, "Description", entry_context);
     info.Maintainer = optional_json_string(pkg, "Maintainer", entry_context);
     info.OutOfDate = optional_json_integer(pkg, "OutOfDate", entry_context);
@@ -396,6 +429,7 @@ AurPackageInfo parse_aur_rpc_package_info(
     validate_metadata_identifiers(info.MakeDepends, "MakeDepends", entry_context);
     validate_metadata_identifiers(info.CheckDepends, "CheckDepends", entry_context);
     validate_metadata_identifiers(info.Provides, "Provides", entry_context);
+    validate_provided_dependency_constraints(info.Provides, entry_context);
     validate_metadata_identifiers(info.Conflicts, "Conflicts", entry_context);
     validate_metadata_identifiers(info.Replaces, "Replaces", entry_context);
     return info;

@@ -50,6 +50,7 @@ enum class UpgradeAllAurPhaseStatus {
     NoUpdates,
     Completed,
     BlockedBeforeExecution,
+    StoppedOnProviderTransactionFailure,
     StoppedOnWorkItemFailure,
     StoppedAfterCleanupFailure,
     InconsistentResult,

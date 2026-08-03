@@ -90,6 +90,9 @@ struct AurUpdateExecutionPreflight {
 
 AurUpdateExecutionPreflight resolve_aur_update_execution_preflight(
         const AurUpdatePlan& update_plan);
+AurUpdateExecutionPreflight resolve_aur_update_execution_preflight(
+        const AurUpdatePlan& update_plan,
+        const ProviderSelectionCallback& select_provider);
 bool has_executable_targets(const AurUpdateExecutionPreflight& preflight) noexcept;
 bool has_blocking_targets(const AurUpdateExecutionPreflight& preflight) noexcept;
 bool can_execute(const AurUpdateExecutionPreflight& preflight) noexcept;

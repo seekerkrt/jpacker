@@ -286,6 +286,8 @@ int cmd_sync_install(
         const ParsedCliArguments& parsed, bool is_sys_upgrade,
         PackageSourceSelection source_selection, const AppConfig& config) {
     const SourceSyncOptions source_sync_options = parse_source_sync_options(parsed);
+    ProviderSelectionCallback select_provider =
+            provider_selection_callback(config);
 
     if(source_selection == PackageSourceSelection::RepoOnly) {
         // POLICY(#168): RepoOnly is one ordered binary repository transaction; no classification probe.
@@ -313,13 +315,11 @@ int cmd_sync_install(
             return 1;
         }
         require_supported_production_source_build_options(config);
-        ValidatedCacheRoot cache_root =
-                prepare_sync_source_build_cache_root();
 
         std::vector<BuildPlan> plans;
         plans.reserve(parsed.targets.size());
         for(const auto& target : parsed.targets) {
-            BuildPlan plan = resolve_build_plan(target);
+            BuildPlan plan = resolve_build_plan(target, select_provider);
             require_executable_build_plan(target, plan);
             plans.push_back(std::move(plan));
         }
@@ -331,6 +331,8 @@ int cmd_sync_install(
                     prepare_aur_source_build_work_items(
                             plan, false, source_sync_options.needed));
         }
+        ValidatedCacheRoot cache_root =
+                prepare_sync_source_build_cache_root();
         assign_source_build_cache_root(work_items, cache_root);
         // POLICY(#168,#242): every per-root plan keeps its existing order, while
         // all roots complete static preflight and one database-path resolution
@@ -377,20 +379,17 @@ int cmd_sync_install(
         }
         require_supported_production_source_build_options(config);
     }
-    std::optional<ValidatedCacheRoot> cache_root;
-    if(!aur_targets.empty()) {
-        cache_root = prepare_sync_source_build_cache_root();
-    }
     std::vector<ProductionSourceBuildWorkItem> source_work_items;
     for(const auto& package : aur_targets) {
         if(is_repo_package(package)) {
             source_work_items.push_back(
                     prepare_smart_source_build_work_item(
-                            package, false, source_sync_options.needed));
+                            package, false, source_sync_options.needed,
+                            select_provider));
             continue;
         }
 
-        BuildPlan plan = resolve_build_plan(package);
+        BuildPlan plan = resolve_build_plan(package, select_provider);
         require_executable_build_plan(package, plan);
         append_source_build_work_items(
                 source_work_items,
@@ -399,8 +398,10 @@ int cmd_sync_install(
     }
     std::optional<PreparedProductionSourceBuildInvocation> source_invocation;
     if(!source_work_items.empty()) {
+        ValidatedCacheRoot cache_root =
+                prepare_sync_source_build_cache_root();
         assign_source_build_cache_root(
-                source_work_items, cache_root.value());
+                source_work_items, cache_root);
         source_invocation = prepare_production_source_build_invocation(
                 std::move(source_work_items), config);
     }

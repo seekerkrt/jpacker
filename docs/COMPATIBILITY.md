@@ -53,7 +53,7 @@ MoguetはArch Linux向けの **pacman-first wrapper** として扱う。
 
 `upgrade-aur` は target を取らない Moguet 固有 operation とする。local package database の installed foreign inventory を起点にし、現在も AUR RPC の exact package として解決でき、installed version より新しい AUR version がある package だけを update plan の実行対象とする。official repository packages と、AUR に存在しない non-AUR foreign packages は update 対象にしない。対象選定に source build preference の登録は要求しない。該当 package name または PackageBase の preference が既に存在する場合は、既存の strict source preference preparation に従って custom build environment を読み、`PKGDEST` conflict や unreadable preference は mutation 前の blocking reason とする。
 
-query で得た update plan は、preflight で全 target と recursive AUR build plan を検証し、complete BuildPlan をPackageBase work itemとordered required child attributionへ射影する。preparation は source preference、static work item、Pacman database path を invocation-owned snapshot に固定してから execution へ進める。size 1のrequested split childはchild nameのpreferenceを先に読み、forward可能な定義がなければPackageBase preferenceへfallbackする。same PackageBaseの複数required childはPackageBase preferenceを1回読む。blocking target、unresolved / cyclic dependency、ambiguous provider、conflicts / replaces metadata、preparation failure が 1 件でもあれば、git checkout 更新、makepkg、`pacman -U`、sudo を開始しない。deterministicなrequested split childやsame-Base multiple child自体はblockerにしない。
+query で得た update plan は、preflight で全 target と recursive AUR build plan を検証し、complete BuildPlan をPackageBase work itemとordered required child attributionへ射影する。preparation は source preference、static work item、Pacman database path を invocation-owned snapshot に固定してから execution へ進める。size 1のrequested split childはchild nameのpreferenceを先に読み、forward可能な定義がなければPackageBase preferenceへfallbackする。same PackageBaseの複数required childはPackageBase preferenceを1回読む。blocking target、unresolved / cyclic dependency、選択されていないambiguous provider、conflicts / replaces metadata、preparation failure が 1 件でもあれば、git checkout 更新、makepkg、`pacman -U`、sudo を開始しない。deterministicなrequested split childやsame-Base multiple child自体はblockerにしない。
 
 execution は prepared PackageBase work item の順で逐次実行する。1 PackageBaseは1 fresh workspaceで1回buildし、metadata identityで選択したrequired childrenだけをrequired-target orderで1回の`pacman -U` transactionへ渡す。expectedだがrequiredでないsibling / debug artifactはunselected identityとして保持し、install inputやupdate attributionを付与しない。childごとにselected identity / full version、desired install reason、`Installed` / `SkippedAsNeeded`を保持し、operation reducerはwork-item aggregateではなくchild attributionをtarget contributionの正本とする。
 
@@ -71,7 +71,7 @@ update 対象がない場合は成功とし、git、makepkg、pacman、sudo を�
 
 許可する option は `--noedit`、`--nodiff`、`--noconfirm`、`--rebuild`、`--cleanbuild` に限る。package target、opaque operand、`--needed`、`--rmdeps`、`--aur`、`--repo` は unsupported とし、default log / cache 初期化、source preference preparation、system `pacman -Syu`、foreign inventory、AUR query、その他の external mutation より前に拒否する。option value位置や`--`後のopaque operandをMoguet global optionとして再解釈しないparser role契約は維持する。
 
-phase順序は `system → registered source → fresh foreign inventory → filtered AUR` とする。system failure、registered source failure、source cleanup failure、foreign inventory failure、AUR query / planning / preflight / preparation failure、AUR execution failure、AUR cleanup failure、aggregate inconsistencyではfail-fastし、後続mutationを開始しない。
+phase順序は `system → registered source → fresh foreign inventory → filtered AUR` とする。system failure、registered source failure、source cleanup failure、foreign inventory failure、AUR query / planning / preflight / preparation failure、AUR execution failure、AUR cleanup failure、aggregate inconsistencyではfail-fastし、後続mutationを開始しない。filtered AUR phaseで必要なprovider selectionは、そのphaseのclone、build、pacman、sudoより前に完了させる。この境界はinvocation全体の事前選択を意味せず、provider候補が判明する時点では先行するsystem / registered source phaseが完了済みの場合がある。
 
 explicit source preferenceはautomatically detected AUR targetより優先する。explicit sourceが扱うpackage nameまたはPackageBaseと一致するAUR targetはtyped reason付きduplicate exclusionとし、通常のup-to-date skipと区別する。explicit source PackageBaseがtransitive AUR build unitを満たす場合はexternally satisfiedとして扱い、同じsourceをAUR phaseで再build / installしない。duplicate exclusionとexternal satisfactionはfailureではなく、それだけを理由にnon-zeroとしない。
 
@@ -108,7 +108,7 @@ command ごとの扱いは次の通りとする。
 - `-Si <aur-pkg>` は従来どおり `Conflicts With` / `Replaces` を package metadata として表示する。
 - `deps <pkg>` は対象 AUR package の metadata warning を dependency 分類とは別に表示する。warning 自体は inspection failure とせず、return code 0 を維持する。
 - `plan <pkg>` は recursive plan に含まれる root / dependency AUR package の metadata を package 名と PackageBase に結びつけて表示する。同一 package の重複は除き、risk が 1 件でもあれば incomplete plan とする。plan を表示できた場合の return code は 0 のままとする。
-- `fetch <pkg>` は metadata risk を表示するが、unresolved dependency、ambiguous provider、cycle がなければ PackageBase の clone / `git fetch origin` を許可する。fetch は working tree update、build、install、transaction を行わない。
+- `fetch <pkg>` は metadata risk を表示するが、unresolved dependency、未選択のambiguous provider、cycle がなければ PackageBase の clone / `git fetch origin` を許可する。fetch は working tree update、build、install、transaction を行わない。
 - AUR build/install plan は metadata risk が 1 件でもあれば clone / fetch / build / makepkg / pacman transaction より前に停止する。`--noconfirm` はこの停止を突破しない。
 
 Moguet は installed/local DB や repo sync DB と metadata を照合して実際の衝突有無を判定しない。`Replaces` を dependency resolution や install target 選択に利用せず、package 削除・置換・provider 選択も自動実行しない。source-build preference が付いた official repository package は AUR metadata plan の対象外であり、従来どおり pacman / Arch packaging 側の情報を正とする。
@@ -127,19 +127,29 @@ dependency `bar` を解決する場合、基本順序は次の通りとする。
 4. exact package が repo / AUR のどちらにもなければ provider を探す。
 5. provider が 0 件なら unresolved として扱う。
 6. provider が 1 件なら auto-resolve してよい。`deps` / `plan` では provided dependency として表示する。
-7. provider が複数なら ambiguous provider として扱い、暗黙に最初の 1 件を選ばない。
+7. provider が複数なら ambiguous provider として扱い、暗黙に最初の 1 件を選ばない。interactive TTYでだけ、source-awareな候補からexactly oneを明示選択できる。
 
-複数providerの選択prompt、direct targetに対するprovider selection、provider choiceの保存は、#97で確定した現在の必須範囲には含めない。必要に応じて後続Issueで扱う。
+provider candidateはsource kind、package name、repository packageならrepository name、AUR packageならPackageBase、provided dependency name、取得できる範囲のversion / constraint metadataを保持する。candidate順はconfigured repository orderと既存AUR aggregation orderを維持し、Moguet独自のscoreやdefault candidateを導入しない。
+
+interactive selectionはcandidateを番号付きで表示する。validな番号1件だけをselectionとして受理し、empty input、`q`、`quit`、`cancel`、EOFは取消とする。invalidまたはout-of-rangeな入力は再入力を求める。stdinがTTYでない場合はpipeをprovider inputとして読まず、`--noconfirm`の場合もpromptやdefault selectionを開始せず、ambiguous errorとしてfail-closedで停止する。
+
+provider choiceはinvocation-localなdependency identityとして保持する。同じdependencyが複数edgeから要求された場合は同じchoiceを共有し、incompatible choiceまたはconstraint conflictを検出した場合はmutation前に停止する。choiceをconfigやcacheへ永続化せず、完全なversion solver、conflicts / replaces solver、root package discoveryへ責務を広げない。
+
+selected providerはdependency edgeへsource-aware identityとselection provenanceを保持する。selected AUR providerのPackageBaseはbuild orderと`fetch`対象へ含める。selected repository providerはAUR repositoryとして取得・buildせず、exactな`repository/package`をofficial dependencyとしてpacman / makepkg側の経路へ導入する。selectionを必要とするoperationでは、対象phaseのclone、build、pacman、sudoをselection完了前に開始しない。
+
+selected repository providerの`pacman -S --asdeps --needed`成功だけでは実際のpackage変更を断言せず、transaction outcomeはsource work itemと分離して保持し、authoritativeな変更証拠がないpackage stateは`Unknown`としてaggregateへ伝播する。
 
 ### command ごとの扱い
 
 `-Ss` は search / discovery として扱う。provider selection や unresolved stop とは分け、候補を表示するだけで provider を選択しない。
 
-`deps` は dependency inspection / classification として扱う。repo exact、AUR exact、provided dependency、ambiguous provider、unknown dependency、version constraint 未検証を分類して表示する。provider が複数ある場合は ambiguous として候補一覧を表示し、ここでは選択しない。
+`deps` は dependency inspection / classification として扱う。repo exact、AUR exact、provided dependency、selected provider、ambiguous provider、unknown dependency、version constraint 未検証を分類して表示する。interactive TTYでは複数providerから明示選択でき、選択済みと未選択のambiguous状態を区別する。取消、non-TTY、`--noconfirm`ではcandidateを自動選択せず、ambiguous状態を表示する。`--recursive`ではprovided dependencyのうちuser-selected AUR providerだけをさらに辿り、unique providerとselected repository providerは終端のまま表示する。inspection command自体はmutationへ進まないため、表示できた場合のreturn code 0を維持する。
 
-`plan` は build / install そのものではなく、build plan の可視化・診断として扱う。可能な範囲で build order を表示し、unresolved dependency、ambiguous provider、cyclic dependency、未検証 version constraint、conflicts / replaces metadata が残る場合は complete plan ではなく incomplete plan として表示する。requested packageとPackageBaseの相違はmappingとして表示するが、それだけでincompleteにしない。`moguet plan <pkg>` 自体は、情報を表示できたなら基本的に成功扱いでよい。ただし target package が見つからない、引数が不正、AUR RPC が失敗するなど、plan 作成自体ができない場合は失敗扱いにしてよい。
+`plan` は build / install そのものではなく、build plan の可視化・診断として扱う。可能な範囲で build orderを表示し、unique auto-resolve、user-selected provider、未選択のambiguous providerを区別する。unresolved dependency、未選択のambiguous provider、cyclic dependency、未検証 version constraint、conflicts / replaces metadata が残る場合は complete plan ではなく incomplete plan として表示する。requested packageとPackageBaseの相違はmappingとして表示するが、それだけでincompleteにしない。provider selectionの取消、non-TTY / `--noconfirm`でambiguityが残る場合もincomplete planを表示し、`moguet plan <pkg>`自体は情報を表示できたならreturn code 0を維持する。target packageが見つからない、引数が不正、AUR RPCが失敗するなど、plan作成自体ができない場合は失敗扱いにしてよい。
 
-build / install / fetch 実行系では、ambiguous provider、unresolved dependency、cyclic dependency が残る plan は実行不可として停止する。#96 の方針により、未検証 version constraint を理由に unresolved とした dependency も実行不可のまま扱う。
+build / install / fetch 実行系では、選択されていないambiguous provider、unresolved dependency、cyclic dependency が残る plan は実行不可として停止する。`fetch`はselected AUR providerのPackageBase repositoryも取得し、selected repository providerは取得対象にしない。build / installではselected repository providerをexactな`repository/package` dependencyとして導入する。#96 の方針により、未検証 version constraint を理由に unresolved とした dependency も実行不可のまま扱う。
+
+`upgrade`と`upgrade-all`のregistered source phaseは既存のsingular source lifecycleを維持し、transitiveなselected AUR providerのPackageBaseをscheduleしない。このphaseで複数providerが残る場合は、candidateがすべてofficial repository由来のときだけinteractive selectionへ渡す。AUR providerを1件でも含むcandidate setはpromptせずambiguousのままfail-closedとし、system / registered-source executionを開始しない。standalone `upgrade`はこのprovider choiceとsource invocationのstatic preflightが完了するまでMoguet cache rootを作成しない。`upgrade-all`はaggregate全体で共有するcache authorityを先に確定する既存契約を維持するが、registered-source provider ambiguityが残る場合はsystem phaseを開始しない。
 
 ---
 
@@ -177,7 +187,7 @@ AUR metadata の `PackageBase` は clone / fetch / build repository の単位で
 
 - `deps <pkg>` は入力 target を package name として AUR RPC info を確認し、`Package` と `Package Base` を表示する。build / installは行わない。
 - `plan <pkg>` は、AUR RPC info 上で `Name` と `PackageBase` が異なる target を `Split package install targets` として表示するが、splitであることだけでplanをincompleteにしない。
-- `fetch <pkg>` は PackageBase 単位の取得操作であるため、package name から PackageBase へ解決でき、ambiguous provider / unresolved dependency / cyclic dependency が残らない場合は clone または `git fetch origin` まで実行してよい。build / installは行わない。
+- `fetch <pkg>` は PackageBase 単位の取得操作であるため、package name から PackageBase へ解決でき、未選択のambiguous provider / unresolved dependency / cyclic dependency が残らない場合は clone または `git fetch origin` まで実行してよい。selected AUR providerのPackageBaseも取得対象とし、build / installは行わない。
 - `-G <pkg>` は root PackageBase repository を current directory の `./<PackageBase>` へ export し、`-Gp <pkg>` はその root `PKGBUILD` だけを stdout へ表示する。read-only inspection なので `Name` と `PackageBase` の相違自体では停止せず、dependency repositoryやinstall selectionは扱わない。
 - plain Auto `-S <pkg>`、`-S --aur <pkg>`、`build <pkg>`、`upgrade-aur`、`upgrade-all`のfiltered AUR phaseはrequested split childを扱う。`build`はrequested child 1件だけをrequired targetにする。
 - `-S`とAUR update系routeでは、BuildPlanが同じPackageBaseの複数childを必要とする場合は1 work itemのordered required target setにし、1 fresh workspace / 1 build / selected-only 1 `pacman -U` transactionで実行する。
@@ -424,7 +434,7 @@ build 後の artifact validation、metadata query、または install が失敗�
 
 - 未解決依存を含む AUR build plan の実行
 - 循環依存を含む AUR build plan の実行
-- 未実装の provider selection
+- ambiguous provider の自動選択
 - unknown / missing / duplicate artifact identityの自動選択
 - one transactionで表現できないmixed install reason
 - conflicts / replaces の自動判断
@@ -435,7 +445,7 @@ build 後の artifact validation、metadata query、または install が失敗�
 
 この方針は #83 の prompt helper 実装前提でもある。prompt helper では、単純に `--noconfirm` を「yes」として扱うのではなく、非対話時に安全に停止するもの、default を選べるもの、明示 option が必要なものを分ける。
 
-現時点の Moguet 独自 prompt は、prompt ごとに default selection を持つ。`Updates detected in existing cache repository. View git diff?`、`Edit PKGBUILD?`、`Edit install script <file>?`、`Rebuild package?`、`Clean build existing build directory?`、`Clean Moguet build cache?` は default no とし、`Proceed with build?` は default yes とする。`--noconfirm` 指定時は prompt を表示せず、この default selection を採用する。ただし EOF や入力読み取り失敗は Enter と同一扱いにしない。stdin が TTY でない場合も、危険側へ進まないように扱う。
+Moguet 独自 prompt はpromptごとにdefaultの有無を定める。`Updates detected in existing cache repository. View git diff?`、`Edit PKGBUILD?`、`Edit install script <file>?`、`Rebuild package?`、`Clean build existing build directory?`、`Clean Moguet build cache?` は default no とし、`Proceed with build?` は default yes とする。provider selectionだけはdefaultを持たず、`--noconfirm`やnon-TTYでdefaultへ置き換えない。defaultを持つpromptでもEOFや入力読み取り失敗はEnterと同一扱いにせず、stdinがTTYでない場合は危険側へ進まないように扱う。
 
 ### `--needed`
 
@@ -528,7 +538,7 @@ operation 確定後、値を取る option の次の token は、`--rmdeps` や `
 
 次は未整理または慎重扱いとする。
 
-- provider selection
+- provider choice の永続化と machine-readable non-interactive selection
 - ambiguous / unrequested multiple-artifact selection
 - registered source upgradeのPackageBase set lifecycle
 - conflicts / replaces
@@ -568,7 +578,8 @@ Moguet が利用者に影響する主要な外部コマンドを実行する場�
 次はこの方針文書では扱わない。
 
 - pacman / 既存 AUR helper 完全互換の宣言
-- provider selection の本格実装
+- provider choice の永続化と non-interactive 自動選択
+- search結果からのroot package discovery
 - arbitrary multiple-output packageの全artifact自動install
 - debug packageのdefault install
 - conflicts / replaces の自動解決

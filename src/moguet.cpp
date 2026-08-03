@@ -473,19 +473,19 @@ int run_moguet(int argc, char* argv[]) {
                cli_authority::operation_spec(
                        cli_authority::OperationId::Deps)
                        .token) {
-                return cmd_deps(targets, flags);
+                return cmd_deps(targets, flags, g_config);
             }
             if(operation ==
                cli_authority::operation_spec(
                        cli_authority::OperationId::Plan)
                        .token) {
-                return cmd_plan(targets, flags);
+                return cmd_plan(targets, flags, g_config);
             }
             if(operation ==
                cli_authority::operation_spec(
                        cli_authority::OperationId::Fetch)
                        .token) {
-                return cmd_fetch(targets, flags);
+                return cmd_fetch(targets, flags, g_config);
             }
             if(operation ==
                        cli_authority::operation_spec(

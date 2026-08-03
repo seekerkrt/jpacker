@@ -367,6 +367,7 @@ bool invocation_status_matches_operation(
         return status.has_value() &&
                 *status == AurUpdateInvocationExecutionStatus::Completed;
     case AurUpdateOperationStatus::BlockedBeforeExecution:
+    case AurUpdateOperationStatus::StoppedOnProviderTransactionFailure:
     case AurUpdateOperationStatus::StoppedOnWorkItemFailure:
     case AurUpdateOperationStatus::StoppedAfterPackageCleanupFailure:
     case AurUpdateOperationStatus::InconsistentResult:
@@ -513,6 +514,11 @@ AurUpdateQueryResult query_installed_aur_updates() {
     if(test_scenario == "ordinary-execution-failure") {
         query.plan.entries.push_back(make_plan_entry(
                 "failed-pkg", AurUpdateClassification::UpdateAvailable));
+        return query;
+    }
+    if(test_scenario == "provider-transaction-failure") {
+        query.plan.entries.push_back(make_plan_entry(
+                "provider-pkg", AurUpdateClassification::UpdateAvailable));
         return query;
     }
     if(test_scenario == "updated-cleanup-failure") {
@@ -722,7 +728,20 @@ AurUpdateSourceBuildPreparation prepare_aur_update_source_build_invocation(
 }
 
 bool AurUpdateSourceBuildExecutionResult::is_success() const noexcept {
-    return status == AurUpdateInvocationExecutionStatus::Completed;
+    return status == AurUpdateInvocationExecutionStatus::Completed &&
+            selected_repository_provider_transaction.is_success();
+}
+
+PackageStateChange
+AurUpdateSourceBuildExecutionResult::package_state_change() const noexcept {
+    if(selected_repository_provider_transaction.package_state_change ==
+       PackageStateChange::Changed || changed_package_state()) {
+        return PackageStateChange::Changed;
+    }
+    return selected_repository_provider_transaction.package_state_change ==
+                   PackageStateChange::Unknown
+            ? PackageStateChange::Unknown
+            : PackageStateChange::NoChange;
 }
 
 bool AurUpdateSourceBuildExecutionResult::changed_package_state() const noexcept {
@@ -783,6 +802,27 @@ execute_prepared_aur_update_source_build_invocation(
                 "AUR update command passed an invalid prepared invocation.");
     }
     append_event("execute " + config_snapshot(config));
+    if(scenario() == "provider-transaction-failure") {
+        append_event("external sudo pacman -S provider fixture");
+        AurUpdateSourceBuildExecutionResult execution;
+        execution.status = AurUpdateInvocationExecutionStatus::
+                StoppedOnProviderTransactionFailure;
+        execution.selected_repository_provider_transaction.status =
+                SelectedRepositoryProviderTransactionStatus::Failed;
+        execution.selected_repository_provider_transaction.
+                        selected_providers = {
+                ProvidedDependency::from_repository(
+                        "extra", "selected-provider")};
+        execution.selected_repository_provider_transaction.
+                        package_state_change =
+                PackageStateChange::Unknown;
+        execution.selected_repository_provider_transaction.
+                        command_exit_status =
+                42;
+        execution.selected_repository_provider_transaction.diagnostic =
+                "fixture repository provider transaction failure";
+        return execution;
+    }
     append_event("external git clone fixture");
     append_event("external makepkg -sc fixture");
     append_event("external sudo pacman -U fixture");
@@ -814,7 +854,11 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
     AurUpdateOperationResult result;
     result.preparation_issues = preparation.issues;
     result.preparation_warnings = preparation.warnings;
-    if(execution.has_value()) result.execution_status = execution->status;
+    if(execution.has_value()) {
+        result.execution_status = execution->status;
+        result.selected_repository_provider_transaction =
+                execution->selected_repository_provider_transaction;
+    }
 
     const std::string& test_scenario = scenario();
     if(test_scenario == "no-installed-foreign") {
@@ -1237,6 +1281,13 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
                 "fixture build or install failed");
         return result;
     }
+    if(test_scenario == "provider-transaction-failure") {
+        result.status = AurUpdateOperationStatus::
+                StoppedOnProviderTransactionFailure;
+        result.targets.front().status =
+                AurUpdateOperationTargetStatus::NotAttempted;
+        return result;
+    }
     if(test_scenario == "updated-cleanup-failure") {
         result.status =
                 AurUpdateOperationStatus::StoppedAfterPackageCleanupFailure;
@@ -1313,8 +1364,22 @@ AurUpdateOperationResult reduce_aur_update_operation_result(
 }
 
 bool AurUpdateOperationResult::is_success() const noexcept {
-    return status == AurUpdateOperationStatus::NoUpdates ||
-            status == AurUpdateOperationStatus::Completed;
+    return (status == AurUpdateOperationStatus::NoUpdates ||
+            status == AurUpdateOperationStatus::Completed) &&
+            selected_repository_provider_transaction.is_success();
+}
+
+PackageStateChange AurUpdateOperationResult::package_state_change()
+        const noexcept {
+    if(selected_repository_provider_transaction.package_state_change ==
+               PackageStateChange::Changed ||
+       changed_package_state()) {
+        return PackageStateChange::Changed;
+    }
+    return selected_repository_provider_transaction.package_state_change ==
+                   PackageStateChange::Unknown
+            ? PackageStateChange::Unknown
+            : PackageStateChange::NoChange;
 }
 
 bool AurUpdateOperationResult::changed_package_state() const noexcept {
@@ -1328,7 +1393,10 @@ bool AurUpdateOperationResult::changed_package_state() const noexcept {
 }
 
 bool AurUpdateOperationResult::has_partial_completion() const noexcept {
-    return !is_success() && changed_package_state();
+    return !is_success() &&
+            (changed_package_state() ||
+             selected_repository_provider_transaction.status ==
+                     SelectedRepositoryProviderTransactionStatus::Succeeded);
 }
 
 bool AurUpdateOperationResult::has_not_attempted_targets() const noexcept {
@@ -1413,11 +1481,10 @@ PreparedFilteredAurUpdateOperation prepare_filtered_aur_update_operation(
         throw std::logic_error(
                 "AUR update command stub only supports an empty explicit source set.");
     }
-    if(!cache_root.has_value()) {
+    if(cache_root.has_value()) {
         throw std::logic_error(
-                "AUR update command did not supply cache authority before query execution.");
+                "AUR update command supplied cache authority before provider preflight.");
     }
-    cache_root->require_unchanged_identity();
 
     PreparedFilteredAurUpdateOperation prepared;
     prepared.query_result = std::move(query_result);
@@ -1477,6 +1544,11 @@ bool FilteredAurUpdateExecutionResult::is_success() const noexcept {
     return !has_query_failure() && !has_planning_issue() &&
             reduced_result_is_defensively_successful(
                     reduced_operation_result);
+}
+
+PackageStateChange
+FilteredAurUpdateExecutionResult::package_state_change() const noexcept {
+    return reduced_operation_result.package_state_change();
 }
 
 bool FilteredAurUpdateExecutionResult::changed_package_state() const noexcept {

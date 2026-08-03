@@ -6,6 +6,7 @@
 #include "package_identifier.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -18,6 +19,19 @@
 // internal capability/work-item correlation contract violations.
 
 namespace {
+
+bool is_safe_repository_target_name(const std::string& repository_name) {
+    if(repository_name.empty() || repository_name == "." ||
+       repository_name == ".." ||
+       repository_name.find('/') != std::string::npos) {
+        return false;
+    }
+    return std::none_of(
+            repository_name.begin(), repository_name.end(),
+            [](unsigned char character) {
+                return std::iscntrl(character) != 0;
+            });
+}
 
 std::optional<ValidatedCacheRoot> shared_prepared_cache_root(
         const std::vector<ProductionSourceBuildWorkItem>& work_items) {
@@ -38,6 +52,44 @@ std::optional<ValidatedCacheRoot> shared_prepared_cache_root(
                 "Production source-build work items have a partial cache authority.");
     }
     return shared_root;
+}
+
+void require_selected_repository_provider(
+        const ProvidedDependency& provider) {
+    const auto* repository =
+            std::get_if<RepositoryProviderOrigin>(&provider.origin);
+    if(repository == nullptr) {
+        throw std::logic_error(
+                "Production source-build selected provider is not repository-owned.");
+    }
+    if(!is_safe_repository_target_name(repository->repository_name)) {
+        throw std::logic_error(
+                "Production source-build selected provider has an invalid repository name.");
+    }
+    require_valid_package_name(provider.package_name);
+    require_valid_package_name(provider.provided_dependency_name);
+    if(!provider.package_base.empty()) {
+        throw std::logic_error(
+                "Production source-build repository provider has an AUR PackageBase.");
+    }
+}
+
+std::vector<ProvidedDependency> collect_selected_repository_providers(
+        const std::vector<ProductionSourceBuildWorkItem>& work_items) {
+    std::vector<ProvidedDependency> providers;
+    for(const auto& work_item : work_items) {
+        for(const auto& provider : work_item.selected_repository_providers) {
+            require_selected_repository_provider(provider);
+            auto same = [&provider](const ProvidedDependency& existing) {
+                return same_provider_identity(existing, provider);
+            };
+            if(std::find_if(providers.begin(), providers.end(), same) ==
+               providers.end()) {
+                providers.push_back(provider);
+            }
+        }
+    }
+    return providers;
 }
 
 } // namespace
@@ -84,6 +136,22 @@ void require_static_production_source_build_work_item(
         default:
             throw std::logic_error(
                     "Production source-build work item has an unknown install reason.");
+        }
+    }
+
+    for(std::size_t index = 0;
+        index < work_item.selected_repository_providers.size(); ++index) {
+        const ProvidedDependency& provider =
+                work_item.selected_repository_providers[index];
+        require_selected_repository_provider(provider);
+        if(std::any_of(
+                   work_item.selected_repository_providers.begin(),
+                   work_item.selected_repository_providers.begin() + index,
+                   [&provider](const ProvidedDependency& existing) {
+                       return same_provider_identity(existing, provider);
+                   })) {
+            throw std::logic_error(
+                    "Production source-build work item contains a duplicate selected repository provider.");
         }
     }
 
@@ -149,8 +217,12 @@ PreparedProductionSourceBuildInvocation prepare_production_source_build_invocati
     // Update preparationはfilesystem mutationを行わず、execution ownerがactivateする。
     std::optional<ValidatedCacheRoot> supplied_cache_root =
             shared_prepared_cache_root(work_items);
+    std::vector<ProvidedDependency> selected_repository_providers =
+            collect_selected_repository_providers(work_items);
     PacmanDatabasePaths database_paths = resolve_pacman_database_paths();
     return PreparedProductionSourceBuildInvocation{
-            std::move(work_items), std::move(database_paths),
+            std::move(work_items),
+            std::move(selected_repository_providers),
+            std::move(database_paths),
             std::move(supplied_cache_root)};
 }

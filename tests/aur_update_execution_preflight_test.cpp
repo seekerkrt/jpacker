@@ -16,6 +16,7 @@ namespace {
 using aur_update_execution_preflight_test_stub::reset_preflight_stub;
 using aur_update_execution_preflight_test_stub::resolver_call_count;
 using aur_update_execution_preflight_test_stub::resolver_calls;
+using aur_update_execution_preflight_test_stub::resolver_selection_callback_presence;
 using aur_update_execution_preflight_test_stub::set_resolver_handler;
 
 void expect(bool condition, const std::string& message) {
@@ -1933,8 +1934,15 @@ void test_preflight_uses_combined_resolver_seam() {
             {"read-only-root", "read-only-root", "read-only-root"},
     }));
 
+    const ProviderSelectionCallback select_provider =
+            [](const std::string&,
+               const std::vector<ProvidedDependency>&)
+                    -> std::optional<ProvidedDependency> {
+                return std::nullopt;
+            };
     AurUpdateExecutionPreflight preflight =
-            resolve_aur_update_execution_preflight(update_plan);
+            resolve_aur_update_execution_preflight(
+                    update_plan, select_provider);
 
     expect_status(
             preflight.targets.front(),
@@ -1945,6 +1953,20 @@ void test_preflight_uses_combined_resolver_seam() {
                     resolver_calls() ==
                             std::vector<std::vector<std::string>>{{"read-only-root"}},
             "Preflight did not use the combined resolver seam exactly once");
+    expect(
+            resolver_selection_callback_presence() ==
+                    std::vector<bool>{true},
+            "Preflight did not forward the invocation provider selector");
+
+    reset_preflight_stub();
+    return_build_plan(build_plan_for({
+            {"read-only-root", "read-only-root", "read-only-root"},
+    }));
+    static_cast<void>(resolve_aur_update_execution_preflight(update_plan));
+    expect(
+            resolver_selection_callback_presence() ==
+                    std::vector<bool>{false},
+            "Legacy preflight API did not delegate with an empty provider selector");
 }
 
 template <typename Callable>

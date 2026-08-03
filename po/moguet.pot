@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Moguet 2.0.1\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-03 08:36+0900\n"
+"POT-Creation-Date: 2026-08-03 16:04+0900\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -651,157 +651,172 @@ msgstr ""
 msgid "Validated package signature path changed identity or owner: {}"
 msgstr ""
 
-#: src/aur_rpc.cpp:48
+#: src/aur_rpc.cpp:49
 #, c++-format
 msgid "Failed to initialize the {} handle."
 msgstr ""
 
-#: src/aur_rpc.cpp:150
+#: src/aur_rpc.cpp:158
 #, c++-format
 msgid "{} {} response parse failed for {}: {}"
 msgstr ""
 
-#: src/aur_rpc.cpp:156
+#: src/aur_rpc.cpp:164
 #, c++-format
 msgid "{} {} response validation failed for {}: expected top-level object, got {}"
 msgstr ""
 
-#: src/aur_rpc.cpp:166
+#: src/aur_rpc.cpp:174
 #, c++-format
 msgid "{} {} response validation failed for {}: field {} expected array, got missing"
 msgstr ""
 
-#: src/aur_rpc.cpp:171
+#: src/aur_rpc.cpp:179
 #, c++-format
 msgid "{} {} response validation failed for {}: field {} expected array, got {}"
 msgstr ""
 
-#: src/aur_rpc.cpp:217
+#: src/aur_rpc.cpp:225
 #, c++-format
 msgid "{} {} response validation failed for {}: field {} expected string, got missing"
 msgstr ""
 
-#: src/aur_rpc.cpp:223 src/aur_rpc.cpp:426
+#: src/aur_rpc.cpp:231 src/aur_rpc.cpp:460
 #, c++-format
 msgid "{} {} response validation failed for {}: field {} expected string, got {}"
 msgstr ""
 
-#: src/aur_rpc.cpp:232
+#: src/aur_rpc.cpp:240
 #, c++-format
 msgid "{} {} response validation failed for {}: field {} expected non-empty string, got empty or whitespace-only string"
 msgstr ""
 
-#: src/aur_rpc.cpp:245
+#: src/aur_rpc.cpp:253
 #, c++-format
 msgid "{} {} response validation failed for {}: field {} expected string or null, got {}"
 msgstr ""
 
-#: src/aur_rpc.cpp:259
+#: src/aur_rpc.cpp:267
 #, c++-format
 msgid "{} {} response validation failed for {}: field {} expected integer or null, got {}"
 msgstr ""
 
-#: src/aur_rpc.cpp:269 src/aur_rpc.cpp:300
+#: src/aur_rpc.cpp:277 src/aur_rpc.cpp:308
 #, c++-format
 msgid "{} {} response validation failed for {}: field {} integer is outside supported range"
 msgstr ""
 
-#: src/aur_rpc.cpp:283
+#: src/aur_rpc.cpp:291
 #, c++-format
 msgid "{} {} response validation failed for {}: field {} expected integer, got missing"
 msgstr ""
 
-#: src/aur_rpc.cpp:289
+#: src/aur_rpc.cpp:297
 #, c++-format
 msgid "{} {} response validation failed for {}: field {} expected integer, got {}"
 msgstr ""
 
-#: src/aur_rpc.cpp:315
+#: src/aur_rpc.cpp:323
 #, c++-format
 msgid "{} {} response validation failed for {}: field {} expected array or null, got {}"
 msgstr ""
 
-#: src/aur_rpc.cpp:327
+#: src/aur_rpc.cpp:335
 #, c++-format
 msgid "{} {} response validation failed for {}: field {}[{}] expected string, got {}"
 msgstr ""
 
-#: src/aur_rpc.cpp:341
+#: src/aur_rpc.cpp:349
 #, c++-format
 msgid "{} {} response validation failed for {}: invalid {} {}"
 msgstr ""
 
-#: src/aur_rpc.cpp:355
+#: src/aur_rpc.cpp:362
+#, c++-format
+msgid "{} {} response validation failed for {}: field {}[{}] contains a control character"
+msgstr ""
+
+#: src/aur_rpc.cpp:369
 #, c++-format
 msgid "{} {} response validation failed for {}: field {}[{}] contains invalid package identifier {}"
 msgstr ""
 
-#: src/aur_rpc.cpp:368
+#: src/aur_rpc.cpp:383
+#, c++-format
+msgid "{} {} response validation failed for {}: field {}[{}] contains an invalid version constraint"
+msgstr ""
+
+#: src/aur_rpc.cpp:395
 #, c++-format
 msgid "{} {} response validation failed for {}: package entry expected object, got {}"
 msgstr ""
 
-#: src/aur_rpc.cpp:432
+#: src/aur_rpc.cpp:412
+#, c++-format
+msgid "{} {} response validation failed for {}: field {} contains a control character"
+msgstr ""
+
+#: src/aur_rpc.cpp:466
 #, c++-format
 msgid "{} {} response validation failed for {}: field {} reported {}"
 msgstr ""
 
-#: src/aur_rpc.cpp:440 src/aur_rpc.cpp:450
+#: src/aur_rpc.cpp:474 src/aur_rpc.cpp:484
 #, c++-format
 msgid "{} {} response validation failed for {}: field {} expected {}, got {}"
 msgstr ""
 
-#: src/aur_rpc.cpp:460
+#: src/aur_rpc.cpp:494
 #, c++-format
 msgid "{} {} response validation failed for {}: field {} expected non-negative integer, got {}"
 msgstr ""
 
-#: src/aur_rpc.cpp:470
+#: src/aur_rpc.cpp:504
 #, c++-format
 msgid "{} {} response validation failed for {}: field {} was {} but {} contained {} entries"
 msgstr ""
 
-#: src/aur_rpc.cpp:478 src/aur_rpc.cpp:508
+#: src/aur_rpc.cpp:512 src/aur_rpc.cpp:542
 #, c++-format
 msgid "{} {} response validation failed for {}: expected zero or one result, got {}"
 msgstr ""
 
-#: src/aur_rpc.cpp:514 src/aur_rpc.cpp:531
+#: src/aur_rpc.cpp:548 src/aur_rpc.cpp:565
 #, c++-format
 msgid "{} {} response validation failed for {}: requested {} but response {} was {}"
 msgstr ""
 
-#: src/aur_rpc.cpp:581 src/aur_rpc.cpp:612
+#: src/aur_rpc.cpp:615 src/aur_rpc.cpp:646
 #, c++-format
 msgid "{} request failed: {}"
 msgstr ""
 
-#: src/aur_rpc.cpp:588
+#: src/aur_rpc.cpp:622
 #, c++-format
 msgid "{} request failed with {} status {}."
 msgstr ""
 
-#: src/aur_rpc.cpp:593
+#: src/aur_rpc.cpp:627
 #, c++-format
 msgid "{} request returned an empty response."
 msgstr ""
 
-#: src/aur_rpc.cpp:663
+#: src/aur_rpc.cpp:697
 #, c++-format
 msgid "Failed to encode {} provided name: {}"
 msgstr ""
 
-#: src/aur_rpc.cpp:697 src/aur_rpc.cpp:723
+#: src/aur_rpc.cpp:731 src/aur_rpc.cpp:757
 #, c++-format
 msgid "Failed to encode {} package name: {}"
 msgstr ""
 
-#: src/aur_rpc.cpp:741
+#: src/aur_rpc.cpp:775
 #, c++-format
 msgid "{} {} response validation failed for {}: response {} {} was not requested"
 msgstr ""
 
-#: src/aur_rpc.cpp:748
+#: src/aur_rpc.cpp:782
 #, c++-format
 msgid "{} {} response validation failed for {}: duplicate response {} {}"
 msgstr ""
@@ -820,39 +835,39 @@ msgstr ""
 msgid "Unknown {} child desired install reason."
 msgstr ""
 
-#: src/aur_update_cli_presentation.cpp:36 src/commands_upgrade_all.cpp:354
+#: src/aur_update_cli_presentation.cpp:36 src/commands_upgrade_all.cpp:357
 msgid "configuration unavailable"
 msgstr ""
 
-#: src/aur_update_cli_presentation.cpp:38 src/commands_upgrade_all.cpp:356
+#: src/aur_update_cli_presentation.cpp:38 src/commands_upgrade_all.cpp:359
 msgid "configuration malformed"
 msgstr ""
 
-#: src/aur_update_cli_presentation.cpp:41 src/commands_upgrade_all.cpp:358
+#: src/aur_update_cli_presentation.cpp:41 src/commands_upgrade_all.cpp:361
 msgid "database initialization failed"
 msgstr ""
 
-#: src/aur_update_cli_presentation.cpp:44 src/commands_upgrade_all.cpp:360
+#: src/aur_update_cli_presentation.cpp:44 src/commands_upgrade_all.cpp:363
 msgid "local database unavailable"
 msgstr ""
 
-#: src/aur_update_cli_presentation.cpp:46 src/commands_upgrade_all.cpp:362
+#: src/aur_update_cli_presentation.cpp:46 src/commands_upgrade_all.cpp:365
 msgid "invalid package name"
 msgstr ""
 
-#: src/aur_update_cli_presentation.cpp:48 src/commands_upgrade_all.cpp:364
+#: src/aur_update_cli_presentation.cpp:48 src/commands_upgrade_all.cpp:367
 msgid "package query failed"
 msgstr ""
 
-#: src/aur_update_cli_presentation.cpp:51 src/commands_upgrade_all.cpp:366
+#: src/aur_update_cli_presentation.cpp:51 src/commands_upgrade_all.cpp:369
 msgid "malformed package metadata"
 msgstr ""
 
-#: src/aur_update_cli_presentation.cpp:54 src/commands_upgrade_all.cpp:368
+#: src/aur_update_cli_presentation.cpp:54 src/commands_upgrade_all.cpp:371
 msgid "sync database unavailable"
 msgstr ""
 
-#: src/aur_update_cli_presentation.cpp:57 src/commands_upgrade_all.cpp:370
+#: src/aur_update_cli_presentation.cpp:57 src/commands_upgrade_all.cpp:373
 msgid "repository not configured"
 msgstr ""
 
@@ -978,10 +993,10 @@ msgstr ""
 msgid "Successful {} work item unexpectedly has failure detail."
 msgstr ""
 
-#: src/aur_update_cli_presentation.cpp:173 src/commands_aur_update.cpp:44
-#: src/commands_aur_update.cpp:105 src/commands_upgrade_all.cpp:119
-#: src/commands_upgrade_all.cpp:278 src/commands_upgrade_all.cpp:467
-#: src/commands_upgrade_all.cpp:521
+#: src/aur_update_cli_presentation.cpp:173 src/commands_aur_update.cpp:46
+#: src/commands_aur_update.cpp:107 src/commands_upgrade_all.cpp:119
+#: src/commands_upgrade_all.cpp:281 src/commands_upgrade_all.cpp:470
+#: src/commands_upgrade_all.cpp:524
 msgid "none"
 msgstr ""
 
@@ -1001,7 +1016,7 @@ msgstr ""
 msgid "Unknown {} failure has unexpected typed failure detail."
 msgstr ""
 
-#: src/aur_update_cli_presentation.cpp:190 src/commands_upgrade_all.cpp:233
+#: src/aur_update_cli_presentation.cpp:190 src/commands_upgrade_all.cpp:236
 msgid "unknown exception"
 msgstr ""
 
@@ -1169,9 +1184,9 @@ msgstr ""
 msgid "skipped as needed / no change, but cleanup failed"
 msgstr ""
 
-#: src/aur_update_cli_presentation.cpp:563 src/commands_aur_update.cpp:268
-#: src/commands_aur_update.cpp:277 src/commands_upgrade_all.cpp:905
-#: src/commands_upgrade_all.cpp:917
+#: src/aur_update_cli_presentation.cpp:563 src/commands_aur_update.cpp:275
+#: src/commands_aur_update.cpp:284 src/commands_upgrade_all.cpp:913
+#: src/commands_upgrade_all.cpp:929
 msgid "not attempted: prior work item stopped"
 msgstr ""
 
@@ -1193,13 +1208,13 @@ msgstr ""
 
 #. TRANSLATORS: The placeholders are the PackageBase metadata-key
 #. identity and a package-base identity.
-#: src/aur_update_cli_presentation.cpp:615 src/source_install.cpp:204
+#: src/aur_update_cli_presentation.cpp:615 src/source_install.cpp:286
 #, c++-format
 msgid "{} result: {}"
 msgstr ""
 
 #. TRANSLATORS: The placeholders are package identity and version.
-#: src/aur_update_cli_presentation.cpp:626 src/source_install.cpp:272
+#: src/aur_update_cli_presentation.cpp:626 src/source_install.cpp:354
 #, c++-format
 msgid "  produced artifact: {} {} (not selected; not installed)"
 msgstr ""
@@ -1225,7 +1240,16 @@ msgstr ""
 msgid "failure category unavailable"
 msgstr ""
 
-#: src/aur_update_cli_presentation.cpp:710
+#: src/aur_update_cli_presentation.cpp:691
+msgid "Failed selected repository provider transaction has no diagnostic."
+msgstr ""
+
+#: src/aur_update_cli_presentation.cpp:695
+#, c++-format
+msgid "  selected repository provider transaction failed: {}"
+msgstr ""
+
+#: src/aur_update_cli_presentation.cpp:724
 msgid "  execution failure:"
 msgstr ""
 
@@ -1403,72 +1427,72 @@ msgstr ""
 msgid "A {} root package target references an unknown candidate root."
 msgstr ""
 
-#: src/aur_update_execution_preflight.cpp:1354
+#: src/aur_update_execution_preflight.cpp:1361
 msgid "Installed package reason is unknown."
 msgstr ""
 
-#: src/aur_update_execution_preflight.cpp:1370
+#: src/aur_update_execution_preflight.cpp:1377
 msgid "Update candidate has an invalid installed package name."
 msgstr ""
 
-#: src/aur_update_execution_preflight.cpp:1388
+#: src/aur_update_execution_preflight.cpp:1395
 msgid "Update candidate occurs more than once in the invocation."
 msgstr ""
 
 #. TRANSLATORS: {} is the literal internal type name "BuildPlan".
-#: src/aur_update_execution_preflight.cpp:1405
+#: src/aur_update_execution_preflight.cpp:1412
 #, c++-format
 msgid "Combined {} resolution was skipped because the candidate set is inconsistent."
 msgstr ""
 
 #. TRANSLATORS: {} is the literal service name "AUR".
-#: src/aur_update_execution_preparation.cpp:253
+#: src/aur_update_execution_preparation.cpp:284
 #, c++-format
 msgid "Blocking {} update preflight target has no typed issue."
 msgstr ""
 
 #. TRANSLATORS: {} is the literal service name "AUR".
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_execution_preparation.cpp:257
-#: src/aur_update_operation_result.cpp:1149
+#: src/aur_update_execution_preparation.cpp:288
+#: src/aur_update_operation_result.cpp:1239
 #, c++-format
 msgid "{} update preflight target has an unknown status."
 msgstr ""
 
 #. TRANSLATORS: The first placeholder is the literal
 #. service name "AUR"; the second is a diagnostic.
-#: src/aur_update_execution_preparation.cpp:284
+#: src/aur_update_execution_preparation.cpp:315
 #, c++-format
 msgid "Executable {} update target retains a blocking preflight issue: {}"
 msgstr ""
 
 #. TRANSLATORS: The first placeholder is the literal
 #. service name "AUR"; the second is a diagnostic.
-#: src/aur_update_execution_preparation.cpp:320
+#: src/aur_update_execution_preparation.cpp:351
 #, c++-format
 msgid "Skipped {} update target retains a non-skip preflight issue: {}"
 msgstr ""
 
 #. TRANSLATORS: {} is the literal service name "AUR".
-#: src/aur_update_execution_preparation.cpp:338
+#: src/aur_update_execution_preparation.cpp:369
 #, c++-format
 msgid "Skipped {} update target has no normal skip preflight issue."
 msgstr ""
 
 #. TRANSLATORS: {} is the literal service name "AUR".
-#: src/aur_update_execution_preparation.cpp:364
+#: src/aur_update_execution_preparation.cpp:395
 #, c++-format
 msgid "Executable {} update target index differs from its position in the preflight snapshot."
 msgstr ""
 
 #. TRANSLATORS: {} is the literal internal type name "BuildPlan".
-#: src/aur_update_execution_preparation.cpp:377
+#: src/aur_update_execution_preparation.cpp:408
 #, c++-format
 msgid "{} root count does not match the executable update target count."
 msgstr ""
 
 #. TRANSLATORS: {} is the literal service name "AUR".
-#: src/aur_update_execution_preparation.cpp:391
+#: src/aur_update_execution_preparation.cpp:422
 #, c++-format
 msgid "Executable {} update targets contain a duplicate update plan index."
 msgstr ""
@@ -1476,7 +1500,7 @@ msgstr ""
 #. TRANSLATORS: The placeholders are the literal
 #. service name "AUR" and internal type name
 #. "BuildPlan", respectively.
-#: src/aur_update_execution_preparation.cpp:405
+#: src/aur_update_execution_preparation.cpp:436
 #, c++-format
 msgid "Executable {} update target has no {} root index."
 msgstr ""
@@ -1484,7 +1508,7 @@ msgstr ""
 #. TRANSLATORS: The placeholders are the literal
 #. service name "AUR" and internal type name
 #. "BuildPlan", respectively.
-#: src/aur_update_execution_preparation.cpp:422
+#: src/aur_update_execution_preparation.cpp:453
 #, c++-format
 msgid "Executable {} update target refers to an out-of-range {} root index."
 msgstr ""
@@ -1492,7 +1516,7 @@ msgstr ""
 #. TRANSLATORS: The placeholders are the literal
 #. service name "AUR" and internal type name
 #. "BuildPlan", respectively.
-#: src/aur_update_execution_preparation.cpp:437
+#: src/aur_update_execution_preparation.cpp:468
 #, c++-format
 msgid "Multiple executable {} update targets refer to the same {} root index."
 msgstr ""
@@ -1500,13 +1524,13 @@ msgstr ""
 #. TRANSLATORS: The placeholders are the literal
 #. internal type name "BuildPlan" and service name
 #. "AUR", respectively.
-#: src/aur_update_execution_preparation.cpp:455
+#: src/aur_update_execution_preparation.cpp:486
 #, c++-format
 msgid "{} root identity does not match its executable {} update target."
 msgstr ""
 
 #. TRANSLATORS: {} is the literal service name "AUR".
-#: src/aur_update_execution_preparation.cpp:470
+#: src/aur_update_execution_preparation.cpp:501
 #, c++-format
 msgid "Executable {} update target has no desired install reason."
 msgstr ""
@@ -1514,112 +1538,112 @@ msgstr ""
 #. TRANSLATORS: The placeholders are the literal internal
 #. type name "BuildPlan" and service name "AUR",
 #. respectively.
-#: src/aur_update_execution_preparation.cpp:488
+#: src/aur_update_execution_preparation.cpp:519
 #, c++-format
 msgid "{} contains a root that is not attributed to an executable {} update target."
 msgstr ""
 
 #. TRANSLATORS: {} is the literal service name "AUR".
-#: src/aur_update_execution_preparation.cpp:536
+#: src/aur_update_execution_preparation.cpp:567
 #, c++-format
 msgid "Executable {} update root does not have exactly one matching planned package target."
 msgstr ""
 
-#: src/aur_update_execution_preparation.cpp:558
+#: src/aur_update_execution_preparation.cpp:589
 msgid "Planned package target matches multiple executable update roots."
 msgstr ""
 
 #. TRANSLATORS: {} is the literal enum value "Root".
-#: src/aur_update_execution_preparation.cpp:570
+#: src/aur_update_execution_preparation.cpp:601
 #, c++-format
 msgid "Planned update root lost its {} role or desired install reason."
 msgstr ""
 
-#: src/aur_update_execution_preparation.cpp:584
+#: src/aur_update_execution_preparation.cpp:615
 msgid "Non-root planned package target has no attributable dependency role."
 msgstr ""
 
 #. TRANSLATORS: {} is the literal internal type name "BuildPlan".
-#: src/aur_update_execution_preparation.cpp:658
+#: src/aur_update_execution_preparation.cpp:689
 #, c++-format
 msgid "Build-unit selection count does not match {} execution order."
 msgstr ""
 
 #. TRANSLATORS: {} is the literal internal type name "BuildPlan".
-#: src/aur_update_execution_preparation.cpp:679
+#: src/aur_update_execution_preparation.cpp:710
 #, c++-format
 msgid "Build-unit selection identity or order differs from {} execution order."
 msgstr ""
 
-#: src/aur_update_execution_preparation.cpp:688
+#: src/aur_update_execution_preparation.cpp:719
 msgid "Build-unit selection has an unknown status."
 msgstr ""
 
-#: src/aur_update_execution_preparation.cpp:702
+#: src/aur_update_execution_preparation.cpp:733
 msgid "Selected build unit does not have the expected dense execution index or retains external satisfaction."
 msgstr ""
 
-#: src/aur_update_execution_preparation.cpp:715
+#: src/aur_update_execution_preparation.cpp:746
 msgid "Externally satisfied build unit has an inconsistent execution index or explicit source attribution."
 msgstr ""
 
-#: src/aur_update_execution_preparation.cpp:760
-#: src/aur_update_execution_preparation.cpp:871
+#: src/aur_update_execution_preparation.cpp:791
+#: src/aur_update_execution_preparation.cpp:903
 msgid "Planned package target roots cannot be attributed exactly to executable update targets."
 msgstr ""
 
 #. TRANSLATORS: {} is the literal internal type name "BuildPlan".
-#: src/aur_update_execution_preparation.cpp:766
+#: src/aur_update_execution_preparation.cpp:797
 #, c++-format
 msgid "Planned package target must occur exactly once in {} execution order."
 msgstr ""
 
-#: src/aur_update_execution_preparation.cpp:792
+#: src/aur_update_execution_preparation.cpp:823
 #, c++-format
 msgid "{} Its roots cannot be attributed exactly to executable update targets."
 msgstr ""
 
-#: src/aur_update_execution_preparation.cpp:847
+#: src/aur_update_execution_preparation.cpp:879
 msgid "Planned package target attribution is inconsistent."
 msgstr ""
 
-#: src/aur_update_execution_preparation.cpp:873
+#: src/aur_update_execution_preparation.cpp:905
 msgid "Planned package target contains no known package role."
 msgstr ""
 
 #. TRANSLATORS: {} is the literal service name "AUR".
-#: src/aur_update_execution_preparation.cpp:993
+#: src/aur_update_execution_preparation.cpp:1025
 #, c++-format
 msgid "Executable {} update root has no selected build unit."
 msgstr ""
 
-#: src/aur_update_execution_preparation.cpp:1029
+#: src/aur_update_execution_preparation.cpp:1061
 #, c++-format
 msgid "Strict source preference reader threw an unexpected exception: {}"
 msgstr ""
 
-#: src/aur_update_execution_preparation.cpp:1039
+#: src/aur_update_execution_preparation.cpp:1071
 msgid "Strict source preference reader threw an unknown exception."
 msgstr ""
 
 #. TRANSLATORS: {} is the literal environment key "PKGDEST".
-#: src/aur_update_execution_preparation.cpp:1100
+#: src/aur_update_execution_preparation.cpp:1132
 #, c++-format
 msgid "Source preference defines invocation-owned {}."
 msgstr ""
 
-#: src/aur_update_execution_preparation.cpp:1131
+#: src/aur_update_execution_preparation.cpp:1163
 msgid "Static production source-build work item validation threw an unknown exception."
 msgstr ""
 
 #. TRANSLATORS: {} is the literal service name "AUR".
-#: src/aur_update_execution_preparation.cpp:1633
+#: src/aur_update_execution_preparation.cpp:1665
 #, c++-format
 msgid "{} update preflight has build-unit selection without an executable target."
 msgstr ""
 
 #. TRANSLATORS: {} is the literal service name "AUR".
-#: src/aur_update_execution_preparation.cpp:1651
+#: src/aur_update_execution_preparation.cpp:1683
 #, c++-format
 msgid "{} update preflight contains an unexpected target status."
 msgstr ""
@@ -1627,7 +1651,7 @@ msgstr ""
 #. TRANSLATORS: The placeholders are the literal service
 #. name "AUR" and internal type name "BuildPlan",
 #. respectively.
-#: src/aur_update_execution_preparation.cpp:1670
+#: src/aur_update_execution_preparation.cpp:1702
 #, c++-format
 msgid "Executable {} update preflight has no combined {}."
 msgstr ""
@@ -1635,150 +1659,150 @@ msgstr ""
 #. TRANSLATORS: The placeholders are the literal service
 #. name "AUR" and internal type name "BuildPlan",
 #. respectively.
-#: src/aur_update_execution_preparation.cpp:1691
+#: src/aur_update_execution_preparation.cpp:1723
 #, c++-format
 msgid "Executable {} update {} has an empty execution order."
 msgstr ""
 
 #. TRANSLATORS: {} is the literal service name "AUR".
-#: src/aur_update_execution_preparation.cpp:1739
+#: src/aur_update_execution_preparation.cpp:1771
 #, c++-format
 msgid "Prepared {} update source-build invocation correlation is inconsistent."
 msgstr ""
 
-#: src/aur_update_execution_preparation.cpp:1768
+#: src/aur_update_execution_preparation.cpp:1800
 #, c++-format
 msgid "Generic production source-build preparation failed unexpectedly: {}"
 msgstr ""
 
-#: src/aur_update_execution_preparation.cpp:1775
+#: src/aur_update_execution_preparation.cpp:1807
 msgid "Generic production source-build preparation failed with an unknown exception."
 msgstr ""
 
 #. TRANSLATORS: {} is the literal service name "AUR".
-#: src/aur_update_execution_runner.cpp:22
+#: src/aur_update_execution_runner.cpp:23
 #, c++-format
 msgid "Prepared {} update source-build work item failed with an unknown exception."
 msgstr ""
 
 #. TRANSLATORS: {} is the literal service name "AUR".
-#: src/aur_update_execution_runner.cpp:85
+#: src/aur_update_execution_runner.cpp:86
 #, c++-format
 msgid "Prepared {} update source-build child correlation count is inconsistent."
 msgstr ""
 
 #. TRANSLATORS: {} is the literal service name "AUR".
-#: src/aur_update_execution_runner.cpp:113
+#: src/aur_update_execution_runner.cpp:114
 #, c++-format
 msgid "Prepared {} update source-build required child attribution is inconsistent."
 msgstr ""
 
 #. TRANSLATORS: {} is the literal service name "AUR".
-#: src/aur_update_execution_runner.cpp:130
+#: src/aur_update_execution_runner.cpp:131
 #, c++-format
 msgid "Prepared {} update source-build aggregate child attribution is inconsistent."
 msgstr ""
 
 #. TRANSLATORS: {} is the literal service name "AUR".
-#: src/aur_update_execution_runner.cpp:141
+#: src/aur_update_execution_runner.cpp:142
 #, c++-format
 msgid "Prepared {} update source-build invocation is invalid or has already been consumed."
 msgstr ""
 
 #. TRANSLATORS: {} is the literal service name "AUR".
-#: src/aur_update_execution_runner.cpp:151
+#: src/aur_update_execution_runner.cpp:152
 #, c++-format
 msgid "Prepared {} update source-build invocation correlation count is inconsistent."
 msgstr ""
 
 #. TRANSLATORS: {} is the literal service name "AUR".
-#: src/aur_update_execution_runner.cpp:181
+#: src/aur_update_execution_runner.cpp:182
 #, c++-format
 msgid "Prepared {} update source-build invocation work-item correlation is inconsistent."
 msgstr ""
 
 #. TRANSLATORS: Both placeholders are the literal field
 #. name "PackageBase".
-#: src/aur_update_execution_runner.cpp:264
+#: src/aur_update_execution_runner.cpp:265
 #, c++-format
 msgid "{} source-build result does not match the prepared {}."
 msgstr ""
 
 #. TRANSLATORS: {} is the literal field name "PackageBase".
-#: src/aur_update_execution_runner.cpp:280
+#: src/aur_update_execution_runner.cpp:281
 #, c++-format
 msgid "{} source-build selected child count does not match the prepared required children."
 msgstr ""
 
 #. TRANSLATORS: {} is the literal field name "PackageBase".
-#: src/aur_update_execution_runner.cpp:297
+#: src/aur_update_execution_runner.cpp:298
 #, c++-format
 msgid "{} source-build result contains a duplicate selected child."
 msgstr ""
 
-#: src/aur_update_execution_runner.cpp:306
+#: src/aur_update_execution_runner.cpp:307
 msgid "Selected artifact identity does not match the prepared required child order."
 msgstr ""
 
-#: src/aur_update_execution_runner.cpp:314
+#: src/aur_update_execution_runner.cpp:315
 msgid "Selected artifact result has an empty full version."
 msgstr ""
 
-#: src/aur_update_execution_runner.cpp:322
+#: src/aur_update_execution_runner.cpp:323
 msgid "Selected artifact desired install reason does not match preparation."
 msgstr ""
 
-#: src/aur_update_execution_runner.cpp:334
+#: src/aur_update_execution_runner.cpp:335
 msgid "Selected artifact result has an unknown execution outcome."
 msgstr ""
 
-#: src/aur_update_execution_runner.cpp:347
+#: src/aur_update_execution_runner.cpp:348
 msgid "Unselected artifact identity has an empty package name or full version."
 msgstr ""
 
-#: src/aur_update_execution_runner.cpp:355
+#: src/aur_update_execution_runner.cpp:356
 msgid "Unselected artifact identity overlaps a selected child."
 msgstr ""
 
 #. TRANSLATORS: {} is the literal field name "PackageBase".
-#: src/aur_update_execution_runner.cpp:364
+#: src/aur_update_execution_runner.cpp:365
 #, c++-format
 msgid "{} source-build result contains a duplicate unselected artifact identity."
 msgstr ""
 
 #. TRANSLATORS: {} is the literal field name "PackageBase".
-#: src/aur_update_execution_runner.cpp:382
+#: src/aur_update_execution_runner.cpp:383
 #, c++-format
 msgid "Package transaction failure does not match the prepared {}."
 msgstr ""
 
-#: src/aur_update_execution_runner.cpp:393
+#: src/aur_update_execution_runner.cpp:394
 msgid "Package transaction attempt count does not match the prepared required children."
 msgstr ""
 
-#: src/aur_update_execution_runner.cpp:408
+#: src/aur_update_execution_runner.cpp:409
 msgid "Package transaction failure contains a duplicate attempted child."
 msgstr ""
 
-#: src/aur_update_execution_runner.cpp:416
+#: src/aur_update_execution_runner.cpp:417
 msgid "Package transaction attempted identity does not match the prepared required child order."
 msgstr ""
 
-#: src/aur_update_execution_runner.cpp:424
+#: src/aur_update_execution_runner.cpp:425
 msgid "Package transaction attempt has an empty full version."
 msgstr ""
 
-#: src/aur_update_execution_runner.cpp:432
+#: src/aur_update_execution_runner.cpp:433
 msgid "Package transaction attempt desired reason does not match preparation."
 msgstr ""
 
-#: src/aur_update_execution_runner.cpp:480 src/source_build.cpp:116
+#: src/aur_update_execution_runner.cpp:481 src/source_build.cpp:116
 msgid "Unknown artifact install execution outcome."
 msgstr ""
 
 #. TRANSLATORS: Both placeholders are the literal field
 #. name "PackageBase".
-#: src/aur_update_execution_runner.cpp:551
+#: src/aur_update_execution_runner.cpp:552
 #, c++-format
 msgid "{} install preparation failure does not match the prepared {}."
 msgstr ""
@@ -1794,358 +1818,358 @@ msgid "Terminal execution outcomes from multiple work items were attributed to o
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1175
+#: src/aur_update_operation_result.cpp:1265
 #, c++-format
 msgid "{} update preflight issue has an unknown reason."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1188
+#: src/aur_update_operation_result.cpp:1278
 #, c++-format
 msgid "Executable {} update target retains a blocking preflight issue."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1202
+#: src/aur_update_operation_result.cpp:1292
 #, c++-format
 msgid "{} update target has an unknown installed package reason."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1214
+#: src/aur_update_operation_result.cpp:1304
 #, c++-format
 msgid "{} update target has an unknown update classification."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1228
+#: src/aur_update_operation_result.cpp:1318
 #, c++-format
 msgid "{} update target has an unknown version relation."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1242
+#: src/aur_update_operation_result.cpp:1332
 #, c++-format
 msgid "{} update target has an unknown desired install reason."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1256
+#: src/aur_update_operation_result.cpp:1346
 #, c++-format
 msgid "Skipped {} update target cannot be confirmed as a normal skip."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1272
+#: src/aur_update_operation_result.cpp:1362
 #, c++-format
 msgid "{} update preflight target has an out-of-range update plan index."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1288
+#: src/aur_update_operation_result.cpp:1378
 #, c++-format
 msgid "{} update preflight target index differs from its original-order position."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1305
+#: src/aur_update_operation_result.cpp:1395
 #, c++-format
 msgid "{} update preflight contains a duplicate update plan index."
 msgstr ""
 
-#: src/aur_update_operation_result.cpp:1343
+#: src/aur_update_operation_result.cpp:1433
 msgid "Preparation retains root attribution without a target-bearing phase."
 msgstr ""
 
-#: src/aur_update_operation_result.cpp:1356
+#: src/aur_update_operation_result.cpp:1446
 msgid "Global preparation issue exists outside the executable preparation phase."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1365
+#: src/aur_update_operation_result.cpp:1455
 #, c++-format
 msgid "{} update preparation issue has an unknown reason."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1376
+#: src/aur_update_operation_result.cpp:1466
 #, c++-format
 msgid "{} update preparation issue has no typed reason."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1388
+#: src/aur_update_operation_result.cpp:1478
 #, c++-format
 msgid "Nested {} update preflight issue has an unknown reason."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1401
+#: src/aur_update_operation_result.cpp:1491
 #, c++-format
 msgid "{} update preparation issue has an unknown source preference failure kind."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1414
+#: src/aur_update_operation_result.cpp:1504
 #, c++-format
 msgid "{} update preparation issue has an unknown package metadata error code."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1429
+#: src/aur_update_operation_result.cpp:1519
 #, c++-format
 msgid "{} update preparation issue contains duplicate target attribution."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1446
+#: src/aur_update_operation_result.cpp:1536
 #, c++-format
 msgid "{} update preparation issue refers to an unknown update plan index."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1464
+#: src/aur_update_operation_result.cpp:1554
 #, c++-format
 msgid "{} update preparation issue is attributed to a target outside the current preparation phase."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1486
+#: src/aur_update_operation_result.cpp:1576
 #, c++-format
 msgid "{} update preparation warning has root attribution without update target attribution."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1500
+#: src/aur_update_operation_result.cpp:1590
 #, c++-format
 msgid "{} update preparation warning contains duplicate target attribution."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1514
+#: src/aur_update_operation_result.cpp:1604
 #, c++-format
 msgid "{} update preparation warning refers to an unknown update plan index."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1533
+#: src/aur_update_operation_result.cpp:1623
 #, c++-format
 msgid "{} update preparation warning is attributed to a target outside the warning-producing phase."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1558
+#: src/aur_update_operation_result.cpp:1648
 #, c++-format
 msgid "{} update preparation contains both an invocation and blocking issues."
 msgstr ""
 
-#: src/aur_update_operation_result.cpp:1569
+#: src/aur_update_operation_result.cpp:1659
 msgid "Preflight-blocked preparation unexpectedly contains an execution invocation."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1587
+#: src/aur_update_operation_result.cpp:1677
 #, c++-format
 msgid "Prepared {} update targets have no execution result."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1600
+#: src/aur_update_operation_result.cpp:1690
 #, c++-format
 msgid "{} update execution result exists together with preparation issues."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1612
+#: src/aur_update_operation_result.cpp:1702
 #, c++-format
 msgid "{} update execution result exists for a preflight-blocked operation."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1622
+#: src/aur_update_operation_result.cpp:1712
 #, c++-format
 msgid "{} update execution result exists without an executable preflight target."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1642
+#: src/aur_update_operation_result.cpp:1732
 #, c++-format
 msgid "{} update execution child contains duplicate target attribution."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1661
-#: src/aur_update_operation_result.cpp:1964
+#: src/aur_update_operation_result.cpp:1751
+#: src/aur_update_operation_result.cpp:2054
 #, c++-format
 msgid "{} update execution child refers to an unknown update plan index."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1680
+#: src/aur_update_operation_result.cpp:1770
 #, c++-format
 msgid "{} update execution child is attributed to a non-executable preflight target."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1706
+#: src/aur_update_operation_result.cpp:1796
 #, c++-format
 msgid "{} update execution result contains a duplicate work item index."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1718
+#: src/aur_update_operation_result.cpp:1808
 #, c++-format
 msgid "{} update execution work item index differs from result order."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1734
+#: src/aur_update_operation_result.cpp:1824
 #, c++-format
 msgid "{} update work item result has an unknown status."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1746
+#: src/aur_update_operation_result.cpp:1836
 #, c++-format
 msgid "{} update work item result has an unknown failure kind."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1761
+#: src/aur_update_operation_result.cpp:1851
 #, c++-format
 msgid "{} update work item status and failure kind disagree."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1775
+#: src/aur_update_operation_result.cpp:1865
 #, c++-format
 msgid "{} update work item failure detail or transaction attempt snapshot is inconsistent."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1788
+#: src/aur_update_operation_result.cpp:1878
 #, c++-format
 msgid "{} update work item result has no target attribution."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1808
+#: src/aur_update_operation_result.cpp:1898
 #, c++-format
 msgid "{} update execution work item cannot be correlated to one selected projected build unit."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1827
-#: src/aur_update_operation_result.cpp:2008
+#: src/aur_update_operation_result.cpp:1917
+#: src/aur_update_operation_result.cpp:2098
 #, c++-format
 msgid "{} update execution result contains a duplicate required child index."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1841
-#: src/aur_update_operation_result.cpp:1865
+#: src/aur_update_operation_result.cpp:1931
+#: src/aur_update_operation_result.cpp:1955
 #, c++-format
 msgid "Uncorrelated {} update execution child has an inconsistent outcome."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1887
+#: src/aur_update_operation_result.cpp:1977
 #, c++-format
 msgid "Uncorrelated {} update execution child has an inconsistent selected artifact."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1927
+#: src/aur_update_operation_result.cpp:2017
 #, c++-format
 msgid "{} update execution work-item aggregate snapshot differs from preparation."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1940
+#: src/aur_update_operation_result.cpp:2030
 #, c++-format
 msgid "{} update execution child outcomes do not agree with the work-item aggregate state."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1979
+#: src/aur_update_operation_result.cpp:2069
 #, c++-format
 msgid "{} update execution child has an unknown status."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1993
+#: src/aur_update_operation_result.cpp:2083
 #, c++-format
 msgid "{} update execution result contains an extra required child."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:2027
+#: src/aur_update_operation_result.cpp:2117
 #, c++-format
 msgid "{} update execution required child snapshot differs from preparation."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:2051
+#: src/aur_update_operation_result.cpp:2141
 #, c++-format
 msgid "{} update execution child selected artifact is missing or inconsistent."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:2067
+#: src/aur_update_operation_result.cpp:2157
 #, c++-format
 msgid "{} update execution result contains a duplicate selected artifact identity."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:2082
+#: src/aur_update_operation_result.cpp:2172
 #, c++-format
 msgid "{} update execution child outcome disagrees with the work-item state."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:2114
+#: src/aur_update_operation_result.cpp:2204
 #, c++-format
 msgid "{} update execution result is missing a prepared required child."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:2133
+#: src/aur_update_operation_result.cpp:2223
 #, c++-format
 msgid "Failed or not-attempted {} update work item unexpectedly contains unselected artifact identities."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:2151
+#: src/aur_update_operation_result.cpp:2241
 #, c++-format
 msgid "{} update work-item unselected artifact identity is invalid or overlaps a selected child."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:2177
+#: src/aur_update_operation_result.cpp:2267
 #, c++-format
 msgid "{} update work-item contains a duplicate unselected artifact identity."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:2215
+#: src/aur_update_operation_result.cpp:2305
 #, c++-format
 msgid "Executable {} update target has no execution attribution."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:2231
+#: src/aur_update_operation_result.cpp:2321
 #, c++-format
 msgid "{} update invocation result has an unknown status."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:2241
+#: src/aur_update_operation_result.cpp:2331
 #, c++-format
 msgid "{} update invocation status and work item outcomes disagree."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:2264
+#: src/aur_update_operation_result.cpp:2354
 #, c++-format
 msgid "{} update operation could not be reduced to a known status."
 msgstr ""
@@ -2366,8 +2390,8 @@ msgid "Operation {} requires exactly one {} package target."
 msgstr ""
 
 #. TRANSLATORS: The placeholders are the command, operation, and operand tokens.
-#: src/cli_routing.cpp:54 src/commands_inspect.cpp:52
-#: src/commands_inspect.cpp:59 src/moguet.cpp:206 src/moguet.cpp:215
+#: src/cli_routing.cpp:54 src/commands_inspect.cpp:53
+#: src/commands_inspect.cpp:60 src/moguet.cpp:206 src/moguet.cpp:215
 #, c++-format
 msgid "Usage: {} {} {}"
 msgstr ""
@@ -2382,727 +2406,744 @@ msgstr ""
 msgid "{} is not supported for operation {}."
 msgstr ""
 
-#: src/commands_aur_update.cpp:22 src/commands_upgrade_all.cpp:179
+#: src/commands_aur_update.cpp:21 src/commands_upgrade_all.cpp:179
 msgid "no updates"
 msgstr ""
 
-#: src/commands_aur_update.cpp:24 src/commands_upgrade_all.cpp:181
-#: src/commands_upgrade_all.cpp:202
+#: src/commands_aur_update.cpp:23 src/commands_upgrade_all.cpp:181
+#: src/commands_upgrade_all.cpp:205
 msgid "completed"
 msgstr ""
 
-#: src/commands_aur_update.cpp:26 src/commands_upgrade_all.cpp:183
+#: src/commands_aur_update.cpp:25 src/commands_upgrade_all.cpp:183
 msgid "blocked before execution"
 msgstr ""
 
-#: src/commands_aur_update.cpp:29
+#: src/commands_aur_update.cpp:28 src/commands_upgrade_all.cpp:186
+msgid "stopped after repository provider transaction failure"
+msgstr ""
+
+#: src/commands_aur_update.cpp:31
 msgid "stopped after work-item failure"
 msgstr ""
 
-#: src/commands_aur_update.cpp:32 src/commands_upgrade_all.cpp:187
+#: src/commands_aur_update.cpp:34 src/commands_upgrade_all.cpp:190
 msgid "stopped after cleanup failure"
 msgstr ""
 
-#: src/commands_aur_update.cpp:34 src/commands_upgrade_all.cpp:189
+#: src/commands_aur_update.cpp:36 src/commands_upgrade_all.cpp:192
 msgid "inconsistent result"
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
 #. TRANSLATORS: The placeholder is the literal service name
 #. "AUR".
-#: src/commands_aur_update.cpp:38 src/commands_upgrade_all.cpp:926
+#: src/commands_aur_update.cpp:40 src/commands_upgrade_all.cpp:938
 #, c++-format
 msgid "Unknown {} update operation status."
 msgstr ""
 
-#: src/commands_aur_update.cpp:46 src/commands_upgrade_all.cpp:469
+#: src/commands_aur_update.cpp:48 src/commands_upgrade_all.cpp:472
 msgid "up to date"
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
 #. TRANSLATORS: The placeholder is the literal service name "AUR".
-#: src/commands_aur_update.cpp:50 src/commands_upgrade_all.cpp:472
+#: src/commands_aur_update.cpp:52 src/commands_upgrade_all.cpp:475
 #, c++-format
 msgid "non-{} foreign"
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
 #. TRANSLATORS: {} is the literal service name "AUR".
-#: src/commands_aur_update.cpp:54 src/commands_upgrade_all.cpp:477
-#: src/filtered_aur_update_operation.cpp:1414
+#: src/commands_aur_update.cpp:56 src/commands_upgrade_all.cpp:480
+#: src/filtered_aur_update_operation.cpp:1415
 #, c++-format
 msgid "{} metadata unavailable"
 msgstr ""
 
-#: src/commands_aur_update.cpp:57 src/commands_upgrade_all.cpp:479
+#: src/commands_aur_update.cpp:59 src/commands_upgrade_all.cpp:482
 msgid "version comparison unavailable"
 msgstr ""
 
-#: src/commands_aur_update.cpp:59 src/commands_upgrade_all.cpp:481
+#: src/commands_aur_update.cpp:61 src/commands_upgrade_all.cpp:484
 msgid "installed reason unknown"
 msgstr ""
 
-#: src/commands_aur_update.cpp:61 src/commands_upgrade_all.cpp:483
+#: src/commands_aur_update.cpp:63 src/commands_upgrade_all.cpp:486
 msgid "update plan inconsistent"
 msgstr ""
 
-#: src/commands_aur_update.cpp:63 src/commands_upgrade_all.cpp:485
+#: src/commands_aur_update.cpp:65 src/commands_upgrade_all.cpp:488
 msgid "duplicate update target"
 msgstr ""
 
-#: src/commands_aur_update.cpp:66 src/commands_upgrade_all.cpp:487
+#: src/commands_aur_update.cpp:68 src/commands_upgrade_all.cpp:490
 msgid "repository metadata unavailable"
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/commands_aur_update.cpp:70 src/commands_upgrade_all.cpp:491
+#: src/commands_aur_update.cpp:72 src/commands_upgrade_all.cpp:494
 #, c++-format
 msgid "{} dependency metadata unavailable"
 msgstr ""
 
-#: src/commands_aur_update.cpp:73 src/commands_upgrade_all.cpp:493
+#: src/commands_aur_update.cpp:75 src/commands_upgrade_all.cpp:496
 msgid "provider metadata unavailable"
 msgstr ""
 
-#: src/commands_aur_update.cpp:75 src/commands_upgrade_all.cpp:495
+#: src/commands_aur_update.cpp:77 src/commands_upgrade_all.cpp:498
 msgid "unresolved dependency"
 msgstr ""
 
-#: src/commands_aur_update.cpp:78 src/commands_upgrade_all.cpp:497
+#: src/commands_aur_update.cpp:80 src/commands_upgrade_all.cpp:500
 msgid "version constraint unverified"
 msgstr ""
 
-#: src/commands_aur_update.cpp:80 src/commands_upgrade_all.cpp:499
+#: src/commands_aur_update.cpp:82 src/commands_upgrade_all.cpp:502
 msgid "dependency cycle"
 msgstr ""
 
-#: src/commands_aur_update.cpp:82 src/commands_upgrade_all.cpp:501
+#: src/commands_aur_update.cpp:84 src/commands_upgrade_all.cpp:504
 msgid "build plan inconsistent"
 msgstr ""
 
-#: src/commands_aur_update.cpp:84 src/commands_upgrade_all.cpp:503
+#: src/commands_aur_update.cpp:86 src/commands_upgrade_all.cpp:506
 msgid "package base mismatch"
 msgstr ""
 
-#: src/commands_aur_update.cpp:87 src/commands_upgrade_all.cpp:505
+#: src/commands_aur_update.cpp:89 src/commands_upgrade_all.cpp:508
 msgid "split package selection required"
 msgstr ""
 
-#: src/commands_aur_update.cpp:90 src/commands_upgrade_all.cpp:507
+#: src/commands_aur_update.cpp:92 src/commands_upgrade_all.cpp:510
 msgid "multiple package targets for package base"
 msgstr ""
 
-#: src/commands_aur_update.cpp:92 src/commands_upgrade_all.cpp:509
+#: src/commands_aur_update.cpp:94 src/commands_upgrade_all.cpp:512
 msgid "ambiguous provider"
 msgstr ""
 
-#: src/commands_aur_update.cpp:95 src/commands_upgrade_all.cpp:511
+#: src/commands_aur_update.cpp:97 src/commands_upgrade_all.cpp:514
 msgid "conflicts/replaces unresolved"
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
 #. TRANSLATORS: The placeholder is the literal service name "AUR".
-#: src/commands_aur_update.cpp:99 src/commands_aur_update.cpp:311
-#: src/commands_upgrade_all.cpp:515 src/commands_upgrade_all.cpp:862
+#: src/commands_aur_update.cpp:101 src/commands_aur_update.cpp:318
+#: src/commands_upgrade_all.cpp:518 src/commands_upgrade_all.cpp:865
 #, c++-format
 msgid "Unknown {} update preflight reason."
 msgstr ""
 
-#: src/commands_aur_update.cpp:107 src/commands_upgrade_all.cpp:523
+#: src/commands_aur_update.cpp:109 src/commands_upgrade_all.cpp:526
 msgid "blocking preflight"
 msgstr ""
 
-#: src/commands_aur_update.cpp:109 src/commands_upgrade_all.cpp:525
+#: src/commands_aur_update.cpp:111 src/commands_upgrade_all.cpp:528
 msgid "preflight inconsistent"
 msgstr ""
 
-#: src/commands_aur_update.cpp:111 src/commands_upgrade_all.cpp:527
+#: src/commands_aur_update.cpp:113 src/commands_upgrade_all.cpp:530
 msgid "build plan missing"
 msgstr ""
 
-#: src/commands_aur_update.cpp:113 src/commands_upgrade_all.cpp:529
+#: src/commands_aur_update.cpp:115 src/commands_upgrade_all.cpp:532
 msgid "build plan order empty"
 msgstr ""
 
-#: src/commands_aur_update.cpp:116 src/commands_upgrade_all.cpp:531
+#: src/commands_aur_update.cpp:118 src/commands_upgrade_all.cpp:534
 msgid "root attribution inconsistent"
 msgstr ""
 
-#: src/commands_aur_update.cpp:119 src/commands_upgrade_all.cpp:533
+#: src/commands_aur_update.cpp:121 src/commands_upgrade_all.cpp:536
 msgid "package target attribution inconsistent"
 msgstr ""
 
-#: src/commands_aur_update.cpp:122 src/commands_upgrade_all.cpp:535
+#: src/commands_aur_update.cpp:124 src/commands_upgrade_all.cpp:538
 msgid "desired install reason missing"
 msgstr ""
 
-#: src/commands_aur_update.cpp:125 src/commands_upgrade_all.cpp:218
-#: src/commands_upgrade_all.cpp:295 src/commands_upgrade_all.cpp:537
+#: src/commands_aur_update.cpp:127 src/commands_upgrade_all.cpp:221
+#: src/commands_upgrade_all.cpp:298 src/commands_upgrade_all.cpp:540
 msgid "source preference unavailable"
 msgstr ""
 
 #. TRANSLATORS: PKGDEST is a runtime environment-key identity.
-#: src/commands_aur_update.cpp:129 src/commands_upgrade_all.cpp:542
+#: src/commands_aur_update.cpp:131 src/commands_upgrade_all.cpp:545
 #, c++-format
 msgid "source preference {} conflict"
 msgstr ""
 
-#: src/commands_aur_update.cpp:131 src/commands_upgrade_all.cpp:544
+#: src/commands_aur_update.cpp:133 src/commands_upgrade_all.cpp:547
 msgid "static work item invalid"
 msgstr ""
 
 #. TRANSLATORS: pacman is a runtime command identity.
-#: src/commands_aur_update.cpp:135 src/commands_upgrade_all.cpp:548
+#: src/commands_aur_update.cpp:137 src/commands_upgrade_all.cpp:551
 #, c++-format
 msgid "{} database unavailable"
 msgstr ""
 
-#: src/commands_aur_update.cpp:138 src/commands_upgrade_all.cpp:550
+#: src/commands_aur_update.cpp:140 src/commands_upgrade_all.cpp:553
 msgid "generic preparation inconsistent"
 msgstr ""
 
-#: src/commands_aur_update.cpp:141 src/commands_upgrade_all.cpp:552
+#: src/commands_aur_update.cpp:143 src/commands_upgrade_all.cpp:555
 msgid "build unit selection inconsistent"
 msgstr ""
 
-#: src/commands_aur_update.cpp:144 src/commands_upgrade_all.cpp:554
+#: src/commands_aur_update.cpp:146 src/commands_upgrade_all.cpp:557
 msgid "external satisfaction inconsistent"
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
 #. TRANSLATORS: The placeholder is the literal service name "AUR".
-#: src/commands_aur_update.cpp:148 src/commands_upgrade_all.cpp:558
+#: src/commands_aur_update.cpp:150 src/commands_upgrade_all.cpp:561
 #, c++-format
 msgid "Unknown {} update preparation reason."
 msgstr ""
 
-#: src/commands_aur_update.cpp:154 src/commands_upgrade_all.cpp:564
+#: src/commands_aur_update.cpp:156 src/commands_upgrade_all.cpp:567
 msgid "preflight"
 msgstr ""
 
-#: src/commands_aur_update.cpp:156 src/commands_upgrade_all.cpp:121
-#: src/commands_upgrade_all.cpp:280 src/commands_upgrade_all.cpp:566
+#: src/commands_aur_update.cpp:158 src/commands_upgrade_all.cpp:121
+#: src/commands_upgrade_all.cpp:283 src/commands_upgrade_all.cpp:569
 msgid "preparation"
 msgstr ""
 
-#: src/commands_aur_update.cpp:158 src/commands_upgrade_all.cpp:568
+#: src/commands_aur_update.cpp:160 src/commands_upgrade_all.cpp:571
 msgid "execution"
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/commands_aur_update.cpp:162
+#: src/commands_aur_update.cpp:164
 #, c++-format
 msgid "Unknown {} update reduction stage."
 msgstr ""
 
-#: src/commands_aur_update.cpp:168 src/commands_upgrade_all.cpp:580
+#: src/commands_aur_update.cpp:170 src/commands_upgrade_all.cpp:583
 msgid "duplicate preflight update plan index"
 msgstr ""
 
-#: src/commands_aur_update.cpp:170 src/commands_upgrade_all.cpp:583
+#: src/commands_aur_update.cpp:172 src/commands_upgrade_all.cpp:586
 msgid "out-of-range preflight update plan index"
 msgstr ""
 
-#: src/commands_aur_update.cpp:172 src/commands_upgrade_all.cpp:586
+#: src/commands_aur_update.cpp:174 src/commands_upgrade_all.cpp:589
 msgid "preflight target order inconsistent"
 msgstr ""
 
-#: src/commands_aur_update.cpp:174 src/commands_upgrade_all.cpp:588
+#: src/commands_aur_update.cpp:176 src/commands_upgrade_all.cpp:591
 msgid "duplicate preparation attribution"
 msgstr ""
 
-#: src/commands_aur_update.cpp:176 src/commands_upgrade_all.cpp:590
+#: src/commands_aur_update.cpp:178 src/commands_upgrade_all.cpp:593
 msgid "unknown preparation update plan index"
 msgstr ""
 
-#: src/commands_aur_update.cpp:178 src/commands_upgrade_all.cpp:593
+#: src/commands_aur_update.cpp:180 src/commands_upgrade_all.cpp:596
 msgid "preparation attribution inconsistent"
 msgstr ""
 
-#: src/commands_aur_update.cpp:180 src/commands_upgrade_all.cpp:596
+#: src/commands_aur_update.cpp:182 src/commands_upgrade_all.cpp:599
 msgid "preparation target snapshot inconsistent"
 msgstr ""
 
-#: src/commands_aur_update.cpp:182 src/commands_upgrade_all.cpp:598
+#: src/commands_aur_update.cpp:184 src/commands_upgrade_all.cpp:601
 msgid "duplicate execution work item index"
 msgstr ""
 
-#: src/commands_aur_update.cpp:184 src/commands_upgrade_all.cpp:601
+#: src/commands_aur_update.cpp:186 src/commands_upgrade_all.cpp:604
 msgid "execution work item order inconsistent"
 msgstr ""
 
-#: src/commands_aur_update.cpp:186 src/commands_upgrade_all.cpp:603
+#: src/commands_aur_update.cpp:188 src/commands_upgrade_all.cpp:606
 msgid "duplicate execution attribution"
 msgstr ""
 
-#: src/commands_aur_update.cpp:188 src/commands_upgrade_all.cpp:605
+#: src/commands_aur_update.cpp:190 src/commands_upgrade_all.cpp:608
 msgid "unknown execution update plan index"
 msgstr ""
 
-#: src/commands_aur_update.cpp:190 src/commands_upgrade_all.cpp:607
+#: src/commands_aur_update.cpp:192 src/commands_upgrade_all.cpp:610
 msgid "missing execution attribution"
 msgstr ""
 
-#: src/commands_aur_update.cpp:193 src/commands_upgrade_all.cpp:610
+#: src/commands_aur_update.cpp:195 src/commands_upgrade_all.cpp:613
 msgid "duplicate execution child attribution"
 msgstr ""
 
-#: src/commands_aur_update.cpp:196 src/commands_upgrade_all.cpp:613
+#: src/commands_aur_update.cpp:198 src/commands_upgrade_all.cpp:616
 msgid "missing execution child attribution"
 msgstr ""
 
-#: src/commands_aur_update.cpp:199 src/commands_upgrade_all.cpp:616
+#: src/commands_aur_update.cpp:201 src/commands_upgrade_all.cpp:619
 msgid "unexpected execution child attribution"
 msgstr ""
 
-#: src/commands_aur_update.cpp:202 src/commands_upgrade_all.cpp:619
+#: src/commands_aur_update.cpp:204 src/commands_upgrade_all.cpp:622
 msgid "unknown execution child update plan index"
 msgstr ""
 
-#: src/commands_aur_update.cpp:205 src/commands_upgrade_all.cpp:622
+#: src/commands_aur_update.cpp:207 src/commands_upgrade_all.cpp:625
 msgid "execution child snapshot inconsistent"
 msgstr ""
 
-#: src/commands_aur_update.cpp:207 src/commands_upgrade_all.cpp:624
+#: src/commands_aur_update.cpp:209 src/commands_upgrade_all.cpp:627
 msgid "unexpected selected artifact"
 msgstr ""
 
-#: src/commands_aur_update.cpp:210 src/commands_upgrade_all.cpp:627
+#: src/commands_aur_update.cpp:212 src/commands_upgrade_all.cpp:630
 msgid "unexpected unselected artifact identity"
 msgstr ""
 
-#: src/commands_aur_update.cpp:212 src/commands_upgrade_all.cpp:630
+#: src/commands_aur_update.cpp:214 src/commands_upgrade_all.cpp:633
 msgid "execution result with preparation issues"
 msgstr ""
 
-#: src/commands_aur_update.cpp:214 src/commands_upgrade_all.cpp:632
+#: src/commands_aur_update.cpp:216 src/commands_upgrade_all.cpp:635
 msgid "missing execution result"
 msgstr ""
 
-#: src/commands_aur_update.cpp:216 src/commands_upgrade_all.cpp:634
+#: src/commands_aur_update.cpp:218 src/commands_upgrade_all.cpp:637
 msgid "unknown enum value"
 msgstr ""
 
-#: src/commands_aur_update.cpp:218 src/commands_upgrade_all.cpp:636
+#: src/commands_aur_update.cpp:220 src/commands_upgrade_all.cpp:639
 msgid "work item result inconsistent"
 msgstr ""
 
-#: src/commands_aur_update.cpp:220 src/commands_upgrade_all.cpp:638
+#: src/commands_aur_update.cpp:222 src/commands_upgrade_all.cpp:641
 msgid "invocation result inconsistent"
 msgstr ""
 
-#: src/commands_aur_update.cpp:222 src/commands_upgrade_all.cpp:640
+#: src/commands_aur_update.cpp:224 src/commands_upgrade_all.cpp:643
 msgid "other correlation inconsistency"
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/commands_aur_update.cpp:226
+#: src/commands_aur_update.cpp:228
 #, c++-format
 msgid "Unknown {} update reduction reason."
 msgstr ""
 
-#: src/commands_aur_update.cpp:238 src/commands_upgrade_all.cpp:214
-#: src/commands_upgrade_all.cpp:874
+#: src/commands_aur_update.cpp:240 src/commands_upgrade_all.cpp:217
+#: src/commands_upgrade_all.cpp:877
 msgid "reason unavailable"
 msgstr ""
 
-#: src/commands_aur_update.cpp:246 src/commands_upgrade_all.cpp:251
-#: src/commands_upgrade_all.cpp:882
+#: src/commands_aur_update.cpp:248 src/commands_upgrade_all.cpp:254
+#: src/commands_upgrade_all.cpp:885
 msgid "updated"
 msgstr ""
 
-#: src/commands_aur_update.cpp:248 src/commands_upgrade_all.cpp:33
-#: src/commands_upgrade_all.cpp:253 src/commands_upgrade_all.cpp:884
+#: src/commands_aur_update.cpp:250 src/commands_upgrade_all.cpp:33
+#: src/commands_upgrade_all.cpp:256 src/commands_upgrade_all.cpp:887
 msgid "no change"
 msgstr ""
 
-#: src/commands_aur_update.cpp:250
+#: src/commands_aur_update.cpp:252
 msgid "skipped"
 msgstr ""
 
-#: src/commands_aur_update.cpp:253
+#: src/commands_aur_update.cpp:255
 msgid "unsupported"
 msgstr ""
 
-#: src/commands_aur_update.cpp:256
+#: src/commands_aur_update.cpp:258
 msgid "incomplete"
 msgstr ""
 
-#: src/commands_aur_update.cpp:259 src/commands_upgrade_all.cpp:204
+#: src/commands_aur_update.cpp:261 src/commands_upgrade_all.cpp:207
 msgid "failed"
 msgstr ""
 
-#: src/commands_aur_update.cpp:262 src/commands_upgrade_all.cpp:258
-#: src/commands_upgrade_all.cpp:898
+#: src/commands_aur_update.cpp:264 src/commands_upgrade_all.cpp:261
+#: src/commands_upgrade_all.cpp:901
 msgid "updated, but cleanup failed"
 msgstr ""
 
-#: src/commands_aur_update.cpp:264 src/commands_upgrade_all.cpp:260
-#: src/commands_upgrade_all.cpp:900
+#: src/commands_aur_update.cpp:266 src/commands_upgrade_all.cpp:263
+#: src/commands_upgrade_all.cpp:903
 msgid "no package change, but cleanup failed"
 msgstr ""
 
-#: src/commands_aur_update.cpp:272 src/commands_upgrade_all.cpp:910
+#: src/commands_aur_update.cpp:271 src/commands_upgrade_all.cpp:908
+#: src/commands_upgrade_all.cpp:925
+msgid "not attempted: repository provider transaction failed"
+msgstr ""
+
+#: src/commands_aur_update.cpp:279 src/commands_upgrade_all.cpp:918
 msgid "not attempted: operation blocked before execution"
 msgstr ""
 
-#: src/commands_aur_update.cpp:275 src/commands_upgrade_all.cpp:913
-#: src/commands_upgrade_all.cpp:921
+#: src/commands_aur_update.cpp:282 src/commands_upgrade_all.cpp:921
+#: src/commands_upgrade_all.cpp:933
 msgid "not attempted: result inconsistent"
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
 #. TRANSLATORS: The placeholder is the literal service name "AUR".
-#: src/commands_aur_update.cpp:281 src/commands_upgrade_all.cpp:930
+#: src/commands_aur_update.cpp:288 src/commands_upgrade_all.cpp:942
 #, c++-format
 msgid "Unknown {} update target status."
 msgstr ""
 
-#: src/commands_aur_update.cpp:328
+#: src/commands_aur_update.cpp:335
 msgid "preflight issue"
 msgstr ""
 
-#: src/commands_aur_update.cpp:338 src/commands_upgrade_all.cpp:1191
-#: src/commands_upgrade_all.cpp:1431
+#: src/commands_aur_update.cpp:345 src/commands_upgrade_all.cpp:1203
+#: src/commands_upgrade_all.cpp:1443
 msgid "unknown preference"
 msgstr ""
 
-#: src/commands_aur_update.cpp:341
+#: src/commands_aur_update.cpp:348
 msgid "preparation warning"
 msgstr ""
 
-#: src/commands_aur_update.cpp:346
+#: src/commands_aur_update.cpp:353
 msgid "preparation issue"
 msgstr ""
 
-#: src/commands_aur_update.cpp:355
+#: src/commands_aur_update.cpp:362
 msgid "reduction issue"
 msgstr ""
 
 #. TRANSLATORS: The placeholders are the AUR project identity
 #. and an upstream diagnostic.
-#: src/commands_aur_update.cpp:368
+#: src/commands_aur_update.cpp:375
 #, c++-format
 msgid "{} update query failure for unknown packages: {}"
 msgstr ""
 
 #. TRANSLATORS: The placeholders are the AUR project identity,
 #. package identities, and an upstream diagnostic.
-#: src/commands_aur_update.cpp:375
+#: src/commands_aur_update.cpp:382
 #, c++-format
 msgid "{} update query failure for {}: {}"
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/commands_aur_update.cpp:391
+#: src/commands_aur_update.cpp:398
 #, c++-format
 msgid "{} update:"
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/commands_aur_update.cpp:413
+#: src/commands_aur_update.cpp:420
 #, c++-format
 msgid "{} update partially completed before failure."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/commands_aur_update.cpp:420
+#: src/commands_aur_update.cpp:427
 #, c++-format
 msgid "{} update cleanup failed after a package transaction."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/commands_aur_update.cpp:427
+#: src/commands_aur_update.cpp:434
 #, c++-format
 msgid "{} update has targets that were not attempted."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/commands_aur_update.cpp:436
+#: src/commands_aur_update.cpp:443
 #, c++-format
 msgid "{} update completed, but query failures were reported."
 msgstr ""
 
 #. TRANSLATORS: The placeholders are the command, operation, option, and operand tokens.
-#: src/commands_inspect.cpp:45
+#: src/commands_inspect.cpp:46
 #, c++-format
 msgid "Usage: {} {} [{}] {}"
 msgstr ""
 
-#: src/commands_inspect.cpp:211
+#: src/commands_inspect.cpp:212
 msgid "Metadata       : unavailable (configuration unavailable)"
 msgstr ""
 
-#: src/commands_inspect.cpp:214
+#: src/commands_inspect.cpp:215
 msgid "Metadata       : unavailable (configuration malformed)"
 msgstr ""
 
-#: src/commands_inspect.cpp:217
+#: src/commands_inspect.cpp:218
 msgid "Metadata       : unavailable (initialization failed)"
 msgstr ""
 
-#: src/commands_inspect.cpp:220
+#: src/commands_inspect.cpp:221
 msgid "Metadata       : unavailable (local database unavailable)"
 msgstr ""
 
-#: src/commands_inspect.cpp:223
+#: src/commands_inspect.cpp:224
 msgid "Metadata       : unavailable (invalid package name)"
 msgstr ""
 
-#: src/commands_inspect.cpp:226
+#: src/commands_inspect.cpp:227
 msgid "Metadata       : unavailable (query failed)"
 msgstr ""
 
-#: src/commands_inspect.cpp:229
+#: src/commands_inspect.cpp:230
 msgid "Metadata       : unavailable (invalid metadata)"
 msgstr ""
 
-#: src/commands_inspect.cpp:232
+#: src/commands_inspect.cpp:233
 msgid "Metadata       : unavailable (sync database unavailable)"
 msgstr ""
 
-#: src/commands_inspect.cpp:235
+#: src/commands_inspect.cpp:236
 msgid "Metadata       : unavailable (repository not configured)"
 msgstr ""
 
-#: src/commands_inspect.cpp:238
+#: src/commands_inspect.cpp:239
 msgid "Metadata       : unavailable (metadata failure)"
 msgstr ""
 
-#: src/commands_inspect.cpp:298 src/commands_inspect.cpp:329
+#: src/commands_inspect.cpp:299 src/commands_inspect.cpp:330
 msgid "Repository package sizes:"
 msgstr ""
 
-#: src/commands_inspect.cpp:344
+#: src/commands_inspect.cpp:345
 #, c++-format
 msgid "    Package size   : {}"
 msgstr ""
 
-#: src/commands_inspect.cpp:349
+#: src/commands_inspect.cpp:350
 #, c++-format
 msgid "    Installed size : {}"
 msgstr ""
 
-#: src/commands_inspect.cpp:359
+#: src/commands_inspect.cpp:360
 msgid "    Metadata       : not found"
 msgstr ""
 
-#: src/commands_inspect.cpp:427
+#: src/commands_inspect.cpp:428
 #, c++-format
 msgid "base: {}"
 msgstr ""
 
-#: src/commands_inspect.cpp:431
+#: src/commands_inspect.cpp:432
 #, c++-format
 msgid "by {}"
 msgstr ""
 
-#: src/commands_inspect.cpp:441
+#: src/commands_inspect.cpp:442
 #, c++-format
 msgid "candidates: {}"
 msgstr ""
 
-#: src/commands_inspect.cpp:446
+#: src/commands_inspect.cpp:447
 msgid "(already visited)"
 msgstr ""
 
-#: src/commands_inspect.cpp:450
+#: src/commands_inspect.cpp:451
 msgid "(max depth reached)"
 msgstr ""
 
-#: src/commands_inspect.cpp:461
+#: src/commands_inspect.cpp:462
 msgid "Recursive dependency tree:"
 msgstr ""
 
-#: src/commands_inspect.cpp:464 src/commands_inspect.cpp:481
-#: src/commands_inspect.cpp:493 src/commands_inspect.cpp:539
-#: src/commands_inspect.cpp:652
+#: src/commands_inspect.cpp:465 src/commands_inspect.cpp:482
+#: src/commands_inspect.cpp:494 src/commands_inspect.cpp:516
+#: src/commands_inspect.cpp:558 src/commands_inspect.cpp:676
 msgid "  None"
 msgstr ""
 
-#: src/commands_inspect.cpp:500
+#: src/commands_inspect.cpp:501
 msgid "    candidates:"
 msgstr ""
 
-#: src/commands_inspect.cpp:512
+#: src/commands_inspect.cpp:531
 msgid "Metadata conflicts/replaces:"
 msgstr ""
 
-#: src/commands_inspect.cpp:517
+#: src/commands_inspect.cpp:536
 #, c++-format
 msgid "  {} (base: {})"
 msgstr ""
 
-#: src/commands_inspect.cpp:525
+#: src/commands_inspect.cpp:544
 #, c++-format
 msgid "    conflicts: {}"
 msgstr ""
 
-#: src/commands_inspect.cpp:530
+#: src/commands_inspect.cpp:549
 #, c++-format
 msgid "    replaces: {}"
 msgstr ""
 
-#: src/commands_inspect.cpp:537
+#: src/commands_inspect.cpp:556
 msgid "Build plan:"
 msgstr ""
 
-#: src/commands_inspect.cpp:551
+#: src/commands_inspect.cpp:570
 #, c++-format
 msgid "     target package: {}"
 msgid_plural "     target packages: {}"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/commands_inspect.cpp:564 src/commands_inspect.cpp:763
+#: src/commands_inspect.cpp:583 src/commands_inspect.cpp:810
 msgid "Provided dependencies:"
 msgstr ""
 
-#: src/commands_inspect.cpp:581 src/commands_inspect.cpp:675
-#: src/commands_inspect.cpp:768
+#: src/commands_inspect.cpp:595
+msgid " (selected)"
+msgstr ""
+
+#: src/commands_inspect.cpp:605 src/commands_inspect.cpp:716
+#: src/commands_inspect.cpp:822
 msgid "Ambiguous provided dependencies:"
 msgstr ""
 
-#: src/commands_inspect.cpp:588
+#: src/commands_inspect.cpp:612
 msgid "Split package install targets:"
 msgstr ""
 
-#: src/commands_inspect.cpp:592
+#: src/commands_inspect.cpp:616
 #, c++-format
 msgid "  - {} (base: {})"
 msgstr ""
 
-#: src/commands_inspect.cpp:606 src/commands_inspect.cpp:664
+#: src/commands_inspect.cpp:630 src/commands_inspect.cpp:705
 msgid "Unresolved dependencies:"
 msgstr ""
 
-#: src/commands_inspect.cpp:616 src/commands_inspect.cpp:682
+#: src/commands_inspect.cpp:640 src/commands_inspect.cpp:723
 msgid "Cyclic dependencies:"
 msgstr ""
 
-#: src/commands_inspect.cpp:627
+#: src/commands_inspect.cpp:651
 msgid "Plan status: incomplete"
 msgstr ""
 
-#: src/commands_inspect.cpp:631
+#: src/commands_inspect.cpp:655
 msgid "  unresolved dependencies remain"
 msgstr ""
 
-#: src/commands_inspect.cpp:635
+#: src/commands_inspect.cpp:659
 msgid "  ambiguous providers are not selected"
 msgstr ""
 
-#: src/commands_inspect.cpp:639
+#: src/commands_inspect.cpp:663
 msgid "  cyclic dependencies detected"
 msgstr ""
 
-#: src/commands_inspect.cpp:643
+#: src/commands_inspect.cpp:667
 msgid "  conflicts/replaces metadata is not resolved automatically"
 msgstr ""
 
-#: src/commands_inspect.cpp:649
+#: src/commands_inspect.cpp:673
 msgid "Fetch targets:"
 msgstr ""
 
-#: src/commands_inspect.cpp:693
+#: src/commands_inspect.cpp:698 src/commands_inspect.cpp:816
+msgid "Selected provided dependencies:"
+msgstr ""
+
+#: src/commands_inspect.cpp:734
 msgid "Conflicts/replaces metadata requires manual review before build/install; fetch is allowed."
 msgstr ""
 
 #. TRANSLATORS: The first placeholder is the
 #. literal command name "upgrade-all"; the
 #. second is a runtime option token.
-#: src/commands_inspect.cpp:713 src/commands_inspect.cpp:809
-#: src/commands_inspect.cpp:851 src/commands_upgrade_all.cpp:1806
+#: src/commands_inspect.cpp:757 src/commands_inspect.cpp:867
+#: src/commands_inspect.cpp:914 src/commands_upgrade_all.cpp:1818
 #: src/moguet.cpp:950
 #, c++-format
 msgid "Unsupported {} option: {}"
 msgstr ""
 
-#: src/commands_inspect.cpp:732 src/commands_sync.cpp:476
-#: src/dependency_plan.cpp:981 src/dependency_plan.cpp:1032
+#: src/commands_inspect.cpp:778 src/commands_sync.cpp:477
+#: src/dependency_plan.cpp:1270 src/dependency_plan.cpp:1354
 #: src/pkgbuild_export.cpp:654
 #, c++-format
 msgid "{} package not found: {}"
 msgstr ""
 
-#: src/commands_inspect.cpp:742
+#: src/commands_inspect.cpp:789
 #, c++-format
 msgid "Package         : {}"
 msgstr ""
 
-#: src/commands_inspect.cpp:745 src/commands_sync.cpp:145
+#: src/commands_inspect.cpp:792 src/commands_sync.cpp:145
 #, c++-format
 msgid "Package Base    : {}"
 msgstr ""
 
-#: src/commands_inspect.cpp:748
+#: src/commands_inspect.cpp:795
 #, c++-format
 msgid "Dependencies    : {}"
 msgstr ""
 
-#: src/commands_inspect.cpp:753
+#: src/commands_inspect.cpp:800
 #, c++-format
 msgid "Official {} dependencies:"
 msgstr ""
 
-#: src/commands_inspect.cpp:758
+#: src/commands_inspect.cpp:805
 #, c++-format
 msgid "{} dependencies:"
 msgstr ""
 
-#: src/commands_inspect.cpp:773
+#: src/commands_inspect.cpp:827
 msgid "Unknown dependencies:"
 msgstr ""
 
-#: src/commands_inspect.cpp:781
+#: src/commands_inspect.cpp:835
 msgid "Conflicts/replaces metadata is separate from dependency resolution and requires manual review."
 msgstr ""
 
-#: src/commands_inspect.cpp:791
+#: src/commands_inspect.cpp:846
 #, c++-format
 msgid "Failed to inspect dependencies for {}: {}"
 msgstr ""
 
-#: src/commands_inspect.cpp:833
+#: src/commands_inspect.cpp:893
 #, c++-format
 msgid "Failed to plan build order for {}: {}"
 msgstr ""
 
-#: src/commands_inspect.cpp:882 src/commands_inspect.cpp:900
+#: src/commands_inspect.cpp:945 src/commands_inspect.cpp:965
 #, c++-format
 msgid "Failed to fetch repositories for {}: {}"
 msgstr ""
 
-#: src/commands_inspect.cpp:920
+#: src/commands_inspect.cpp:985
 #, c++-format
 msgid "{} is too large to write to {}."
 msgstr ""
 
-#: src/commands_inspect.cpp:929
+#: src/commands_inspect.cpp:994
 #, c++-format
 msgid "Failed to write {} to {}."
 msgstr ""
 
-#: src/commands_inspect.cpp:938
+#: src/commands_inspect.cpp:1003
 msgid "No foreign packages found."
 msgstr ""
 
-#: src/commands_inspect.cpp:945
+#: src/commands_inspect.cpp:1010
 #, c++-format
 msgid "Checking package {}/{}: {}"
 msgstr ""
 
-#: src/commands_inspect.cpp:954
+#: src/commands_inspect.cpp:1019
 #, c++-format
 msgid "Foreign package not found in {}: {}"
 msgstr ""
 
-#: src/commands_inspect.cpp:965
+#: src/commands_inspect.cpp:1030
 #, c++-format
 msgid "Failed to compare versions: {} -> {}"
 msgstr ""
 
-#: src/commands_inspect.cpp:971
+#: src/commands_inspect.cpp:1036
 #, c++-format
 msgid "Unknown {} update classification."
 msgstr ""
@@ -3156,7 +3197,7 @@ msgstr ""
 msgid "Source preference load event has no entry path."
 msgstr ""
 
-#: src/commands_source_maintenance.cpp:255 src/source_install.cpp:41
+#: src/commands_source_maintenance.cpp:255 src/source_install.cpp:43
 #, c++-format
 msgid "Loading custom build flags from {}."
 msgstr ""
@@ -3497,53 +3538,53 @@ msgstr ""
 msgid "Unsupported {} option for {} search: {}"
 msgstr ""
 
-#: src/commands_sync.cpp:299 src/commands_sync.cpp:460
+#: src/commands_sync.cpp:301 src/commands_sync.cpp:461
 #, c++-format
 msgid "Missing {} package target."
 msgstr ""
 
-#: src/commands_sync.cpp:309 src/commands_sync.cpp:371
+#: src/commands_sync.cpp:311 src/commands_sync.cpp:373
 #, c++-format
 msgid "Unsupported {} option for {}/source-build target: {}"
 msgstr ""
 
-#: src/commands_sync.cpp:312
+#: src/commands_sync.cpp:314
 #, c++-format
 msgid "Rerun {} without this option."
 msgstr ""
 
-#: src/commands_sync.cpp:374
+#: src/commands_sync.cpp:376
 #, c++-format
 msgid "Split official repository and {}/source-build targets, or rerun without this option."
 msgstr ""
 
-#: src/commands_sync.cpp:413
+#: src/commands_sync.cpp:414
 #, c++-format
 msgid "{} failed."
 msgstr ""
 
-#: src/commands_sync.cpp:435
+#: src/commands_sync.cpp:436
 #, c++-format
 msgid "Cannot combine {} refresh with {} info fallback for unqualified target: {}"
 msgstr ""
 
-#: src/commands_sync.cpp:438
+#: src/commands_sync.cpp:439
 #, c++-format
 msgid "Use a repository-qualified target such as {}, or run refresh and {} separately."
 msgstr ""
 
-#: src/commands_sync.cpp:454
+#: src/commands_sync.cpp:455
 #, c++-format
 msgid "Unsupported {} option for {} info: {}"
 msgstr ""
 
-#: src/commands_sync.cpp:481 src/commands_sync.cpp:530
-#: src/dependency_plan.cpp:825 src/source_install.cpp:378
+#: src/commands_sync.cpp:482 src/commands_sync.cpp:531
+#: src/dependency_plan.cpp:1051 src/source_install.cpp:505
 #, c++-format
 msgid "Failed to fetch {} info for {}: {}"
 msgstr ""
 
-#: src/commands_sync.cpp:523 src/source_install.cpp:387
+#: src/commands_sync.cpp:524 src/source_install.cpp:514
 #, c++-format
 msgid "Package not found in repos or {}: {}"
 msgstr ""
@@ -3635,11 +3676,11 @@ msgstr ""
 msgid "Unknown {} operation status."
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:123 src/commands_upgrade_all.cpp:282
+#: src/commands_upgrade_all.cpp:123 src/commands_upgrade_all.cpp:285
 msgid "system"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:125 src/commands_upgrade_all.cpp:284
+#: src/commands_upgrade_all.cpp:125 src/commands_upgrade_all.cpp:287
 msgid "registered source"
 msgstr ""
 
@@ -3654,7 +3695,7 @@ msgid "{} query"
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the literal service name "AUR".
-#: src/commands_upgrade_all.cpp:133 src/commands_upgrade_all.cpp:383
+#: src/commands_upgrade_all.cpp:133 src/commands_upgrade_all.cpp:386
 #, c++-format
 msgid "{} preparation"
 msgstr ""
@@ -3692,7 +3733,7 @@ msgstr ""
 msgid "source cleanup failure"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:160 src/commands_upgrade_all.cpp:408
+#: src/commands_upgrade_all.cpp:160 src/commands_upgrade_all.cpp:411
 msgid "system/source phase incomplete"
 msgstr ""
 
@@ -3700,7 +3741,7 @@ msgstr ""
 msgid "foreign inventory failure"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:164 src/commands_upgrade_all.cpp:222
+#: src/commands_upgrade_all.cpp:164 src/commands_upgrade_all.cpp:225
 msgid "cache authority failure"
 msgstr ""
 
@@ -3715,894 +3756,894 @@ msgstr ""
 msgid "Unknown {} {} reason."
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:177 src/commands_upgrade_all.cpp:200
+#: src/commands_upgrade_all.cpp:177 src/commands_upgrade_all.cpp:203
 msgid "not attempted"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:185
+#: src/commands_upgrade_all.cpp:188
 msgid "stopped on work-item failure"
 msgstr ""
 
 #. TRANSLATORS: The placeholders are the literal command name
 #. "upgrade-all" and service name "AUR".
-#: src/commands_upgrade_all.cpp:194
+#: src/commands_upgrade_all.cpp:197
 #, c++-format
 msgid "Unknown {} {} phase status."
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:207
+#: src/commands_upgrade_all.cpp:210
 msgid "Unknown system upgrade phase status."
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:216 src/commands_upgrade_all.cpp:311
-#: src/commands_upgrade_all.cpp:345
+#: src/commands_upgrade_all.cpp:219 src/commands_upgrade_all.cpp:314
+#: src/commands_upgrade_all.cpp:348
 msgid "invalid source preference name"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:220
+#: src/commands_upgrade_all.cpp:223
 msgid "package metadata unavailable"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:224
+#: src/commands_upgrade_all.cpp:227
 msgid "build or install failed"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:227
+#: src/commands_upgrade_all.cpp:230
 msgid "cleanup failed after package transaction"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:229
+#: src/commands_upgrade_all.cpp:232
 msgid "package update status unknown"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:231
+#: src/commands_upgrade_all.cpp:234
 msgid "prior phase stopped"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:236
+#: src/commands_upgrade_all.cpp:239
 msgid "Unknown registered source failure kind."
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:256 src/commands_upgrade_all.cpp:896
+#: src/commands_upgrade_all.cpp:259 src/commands_upgrade_all.cpp:899
 #, c++-format
 msgid "failed: {}"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:263
+#: src/commands_upgrade_all.cpp:266
 #, c++-format
 msgid "not attempted: {}"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:266 src/commands_upgrade_all.cpp:890
+#: src/commands_upgrade_all.cpp:269 src/commands_upgrade_all.cpp:893
 #, c++-format
 msgid "unsupported: {}"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:269 src/commands_upgrade_all.cpp:893
+#: src/commands_upgrade_all.cpp:272 src/commands_upgrade_all.cpp:896
 #, c++-format
 msgid "incomplete: {}"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:272
+#: src/commands_upgrade_all.cpp:275
 msgid "Unknown registered source status."
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:287
+#: src/commands_upgrade_all.cpp:290
 msgid "Unknown system/source phase."
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:293
+#: src/commands_upgrade_all.cpp:296
 msgid "source preference enumeration unavailable"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:297
+#: src/commands_upgrade_all.cpp:300
 msgid "source identity resolution failed"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:299
+#: src/commands_upgrade_all.cpp:302
 msgid "source work-item preparation failed"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:301
+#: src/commands_upgrade_all.cpp:304
 msgid "source invocation preparation failed"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:303
+#: src/commands_upgrade_all.cpp:306
 msgid "source baseline snapshot unavailable"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:305
+#: src/commands_upgrade_all.cpp:308
 msgid "system package snapshot unavailable"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:307
+#: src/commands_upgrade_all.cpp:310
 msgid "post-system/source snapshot unavailable"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:309 src/commands_upgrade_all.cpp:414
+#: src/commands_upgrade_all.cpp:312 src/commands_upgrade_all.cpp:417
 msgid "cache authority invalid"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:313 src/commands_upgrade_all.cpp:398
+#: src/commands_upgrade_all.cpp:316 src/commands_upgrade_all.cpp:401
 msgid "option snapshot mismatch"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:315
+#: src/commands_upgrade_all.cpp:318
 msgid "prepared source correlation inconsistent"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:317
+#: src/commands_upgrade_all.cpp:320
 msgid "prepared source capability consumed"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:319
+#: src/commands_upgrade_all.cpp:322
 msgid "unknown source preparation failure"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:322
+#: src/commands_upgrade_all.cpp:325
 msgid "Unknown system/source issue kind."
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:329
+#: src/commands_upgrade_all.cpp:332
 msgid "observability only"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:331
+#: src/commands_upgrade_all.cpp:334
 msgid "affects success"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:333
+#: src/commands_upgrade_all.cpp:336
 msgid "blocks execution"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:336
+#: src/commands_upgrade_all.cpp:339
 msgid "Unknown system/source issue impact."
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:343
+#: src/commands_upgrade_all.cpp:346
 msgid "source preference"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:348
+#: src/commands_upgrade_all.cpp:351
 msgid "Unknown system/source warning kind."
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:373
+#: src/commands_upgrade_all.cpp:376
 msgid "Unknown package metadata error code."
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:380
+#: src/commands_upgrade_all.cpp:383
 msgid "registered source preference"
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the literal command name
 #. "upgrade-all".
-#: src/commands_upgrade_all.cpp:389
+#: src/commands_upgrade_all.cpp:392
 #, c++-format
 msgid "Unknown {} warning kind."
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:396
+#: src/commands_upgrade_all.cpp:399
 msgid "explicit source adapter invalid"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:400
+#: src/commands_upgrade_all.cpp:403
 msgid "source snapshot mismatch"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:402
+#: src/commands_upgrade_all.cpp:405
 msgid "explicit source correlation inconsistent"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:404
+#: src/commands_upgrade_all.cpp:407
 msgid "prepared capability consumed"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:406
+#: src/commands_upgrade_all.cpp:409
 msgid "system/source execution failed unexpectedly"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:410
+#: src/commands_upgrade_all.cpp:413
 msgid "foreign inventory configuration failed"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:412
+#: src/commands_upgrade_all.cpp:415
 msgid "foreign inventory read failed"
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the literal service name "AUR".
-#: src/commands_upgrade_all.cpp:417
+#: src/commands_upgrade_all.cpp:420
 #, c++-format
 msgid "{} query failed"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:422
+#: src/commands_upgrade_all.cpp:425
 #, c++-format
 msgid "filtered {} preparation failed"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:426
+#: src/commands_upgrade_all.cpp:429
 #, c++-format
 msgid "filtered {} execution failed"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:429
+#: src/commands_upgrade_all.cpp:432
 msgid "duplicate exclusion correlation inconsistent"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:432
+#: src/commands_upgrade_all.cpp:435
 msgid "external satisfaction correlation inconsistent"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:434
+#: src/commands_upgrade_all.cpp:437
 msgid "unknown aggregate failure"
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the literal command name
 #. "upgrade-all".
-#: src/commands_upgrade_all.cpp:439
+#: src/commands_upgrade_all.cpp:442
 #, c++-format
 msgid "Unknown {} issue kind."
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:446
+#: src/commands_upgrade_all.cpp:449
 msgid "preference package name missing"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:449
+#: src/commands_upgrade_all.cpp:452
 #, c++-format
 msgid "{} unavailable"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:452
+#: src/commands_upgrade_all.cpp:455
 msgid "canonical source identity unavailable"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:455
+#: src/commands_upgrade_all.cpp:458
 msgid "duplicate original preference index"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:458
+#: src/commands_upgrade_all.cpp:461
 msgid "adapter correlation inconsistent"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:461
+#: src/commands_upgrade_all.cpp:464
 msgid "Unknown explicit source adapter issue kind."
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the literal service name "AUR".
-#: src/commands_upgrade_all.cpp:572
+#: src/commands_upgrade_all.cpp:575
 #, c++-format
 msgid "Unknown {} reduction stage."
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the literal service name "AUR".
-#: src/commands_upgrade_all.cpp:644
+#: src/commands_upgrade_all.cpp:647
 #, c++-format
 msgid "Unknown {} reduction reason."
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:651
+#: src/commands_upgrade_all.cpp:654
 msgid "unknown update classification"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:653
+#: src/commands_upgrade_all.cpp:656
 msgid "target/planner mapping inconsistent"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:655
+#: src/commands_upgrade_all.cpp:658
 msgid "filtered target mapping inconsistent"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:658
+#: src/commands_upgrade_all.cpp:661
 msgid "preflight target mapping inconsistent"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:661
+#: src/commands_upgrade_all.cpp:664
 msgid "preflight invocation index out of range"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:664
+#: src/commands_upgrade_all.cpp:667
 msgid "preflight invocation identity mismatch"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:666
+#: src/commands_upgrade_all.cpp:669
 msgid "build-plan root index missing"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:668
+#: src/commands_upgrade_all.cpp:671
 msgid "build-plan root index out of range"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:670
+#: src/commands_upgrade_all.cpp:673
 msgid "build-plan root identity mismatch"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:673
+#: src/commands_upgrade_all.cpp:676
 msgid "build-plan root package identity mismatch"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:675
+#: src/commands_upgrade_all.cpp:678
 msgid "build-unit order identity mismatch"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:678
+#: src/commands_upgrade_all.cpp:681
 msgid "build-unit root attribution inconsistent"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:681
+#: src/commands_upgrade_all.cpp:684
 msgid "build-unit selection mapping inconsistent"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:684
+#: src/commands_upgrade_all.cpp:687
 msgid "execution build-unit mapping inconsistent"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:686
+#: src/commands_upgrade_all.cpp:689
 msgid "reduced target mapping inconsistent"
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the literal service name "AUR".
-#: src/commands_upgrade_all.cpp:690
+#: src/commands_upgrade_all.cpp:693
 #, c++-format
 msgid "Unknown filtered {} operation issue kind."
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:696
+#: src/commands_upgrade_all.cpp:699
 msgid "explicit preference package name missing"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:698
+#: src/commands_upgrade_all.cpp:701
 msgid "explicit produced package name missing"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:703
+#: src/commands_upgrade_all.cpp:706
 #, c++-format
 msgid "explicit {} absent"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:708
+#: src/commands_upgrade_all.cpp:711
 #, c++-format
 msgid "explicit {} resolution failed"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:713
+#: src/commands_upgrade_all.cpp:716
 #, c++-format
 msgid "explicit {} empty"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:715
+#: src/commands_upgrade_all.cpp:718
 msgid "explicit source identity absent"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:717
+#: src/commands_upgrade_all.cpp:720
 msgid "explicit source identity resolution failed"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:719
+#: src/commands_upgrade_all.cpp:722
 msgid "explicit source identity empty"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:722
+#: src/commands_upgrade_all.cpp:725
 msgid "conflicting explicit source identity definition"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:724
+#: src/commands_upgrade_all.cpp:727
 msgid "conflicting explicit package name"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:729
+#: src/commands_upgrade_all.cpp:732
 #, c++-format
 msgid "conflicting explicit {}"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:733
+#: src/commands_upgrade_all.cpp:736
 #, c++-format
 msgid "{} target package name missing"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:738
+#: src/commands_upgrade_all.cpp:741
 #, c++-format
 msgid "{} target {} absent"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:743
+#: src/commands_upgrade_all.cpp:746
 #, c++-format
 msgid "{} target {} resolution failed"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:749
+#: src/commands_upgrade_all.cpp:752
 #, c++-format
 msgid "{} target {} empty"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:753
+#: src/commands_upgrade_all.cpp:756
 #, c++-format
 msgid "unsupported {} target"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:757
+#: src/commands_upgrade_all.cpp:760
 #, c++-format
 msgid "incomplete {} target"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:762
+#: src/commands_upgrade_all.cpp:765
 #, c++-format
 msgid "build-unit {} absent"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:767
+#: src/commands_upgrade_all.cpp:770
 #, c++-format
 msgid "build-unit {} resolution failed"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:772
+#: src/commands_upgrade_all.cpp:775
 #, c++-format
 msgid "build-unit {} empty"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:774
+#: src/commands_upgrade_all.cpp:777
 msgid "build unit has no root attribution"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:776
+#: src/commands_upgrade_all.cpp:779
 msgid "build-unit target index out of range"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:781
+#: src/commands_upgrade_all.cpp:784
 #, c++-format
 msgid "duplicate selected target {}"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:786
+#: src/commands_upgrade_all.cpp:789
 #, c++-format
 msgid "duplicate selected build-unit {}"
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the literal command name
 #. "upgrade-all".
-#: src/commands_upgrade_all.cpp:791
+#: src/commands_upgrade_all.cpp:794
 #, c++-format
 msgid "Unknown {} planning issue kind."
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:797
+#: src/commands_upgrade_all.cpp:800
 msgid "package name handled by explicit source preference"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:802
+#: src/commands_upgrade_all.cpp:805
 #, c++-format
 msgid "{} handled by explicit source preference"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:810
+#: src/commands_upgrade_all.cpp:813
 msgid "Non-exclusion target disposition reached duplicate presentation."
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the literal command name
 #. "upgrade-all".
-#: src/commands_upgrade_all.cpp:815
+#: src/commands_upgrade_all.cpp:818
 #, c++-format
 msgid "Unknown {} target disposition."
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:821
+#: src/commands_upgrade_all.cpp:824
 msgid "root"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:823
+#: src/commands_upgrade_all.cpp:826
 msgid "runtime dependency"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:825
+#: src/commands_upgrade_all.cpp:828
 msgid "build dependency"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:827
+#: src/commands_upgrade_all.cpp:830
 msgid "check dependency"
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the literal command name
 #. "upgrade-all".
-#: src/commands_upgrade_all.cpp:832 src/upgrade_all_plan.cpp:448
+#: src/commands_upgrade_all.cpp:835 src/upgrade_all_plan.cpp:448
 #, c++-format
 msgid "Unknown {} build-unit role."
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:887
+#: src/commands_upgrade_all.cpp:890
 #, c++-format
 msgid "skipped: {}"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:944
+#: src/commands_upgrade_all.cpp:956
 msgid "unknown packages"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:950
+#: src/commands_upgrade_all.cpp:962
 #, c++-format
 msgid "system: {}"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:954
+#: src/commands_upgrade_all.cpp:966
 #, c++-format
 msgid "package state: {}"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:962
+#: src/commands_upgrade_all.cpp:974
 msgid "registered source packages: none"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:972
+#: src/commands_upgrade_all.cpp:984
 msgid "<unknown preference>"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:975
+#: src/commands_upgrade_all.cpp:987
 #, c++-format
 msgid "registered source: {}: {}"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:986
+#: src/commands_upgrade_all.cpp:998
 #, c++-format
 msgid "  canonical source identity: {}"
 msgstr ""
 
 #. TRANSLATORS: The placeholders are the literal service
 #. name "AUR" and enum state "NotAttempted".
-#: src/commands_upgrade_all.cpp:1001
+#: src/commands_upgrade_all.cpp:1013
 #, c++-format
 msgid "The {} phase is {} without a typed reason."
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:1009
+#: src/commands_upgrade_all.cpp:1021
 #, c++-format
 msgid "{} phase not attempted: {}"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:1018
+#: src/commands_upgrade_all.cpp:1030
 #, c++-format
 msgid "{} phase: {}"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:1023
+#: src/commands_upgrade_all.cpp:1035
 #, c++-format
 msgid "{} targets: unavailable"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:1033
+#: src/commands_upgrade_all.cpp:1045
 #, c++-format
 msgid "{} targets: none"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:1042
+#: src/commands_upgrade_all.cpp:1054
 #, c++-format
 msgid "{} target: {}: {}"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:1073
+#: src/commands_upgrade_all.cpp:1085
 #, c++-format
 msgid "{} phase not attempted: foreign inventory failure"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:1089
+#: src/commands_upgrade_all.cpp:1101
 #, c++-format
 msgid "excluded from {} update: {}"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:1093
+#: src/commands_upgrade_all.cpp:1105
 #, c++-format
 msgid "reason: {}"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:1098
+#: src/commands_upgrade_all.cpp:1110
 msgid "The duplicate exclusion has no explicit source attribution."
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:1104 src/commands_upgrade_all.cpp:1153
+#: src/commands_upgrade_all.cpp:1116 src/commands_upgrade_all.cpp:1165
 #, c++-format
 msgid "matched explicit source package: {}"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:1112 src/commands_upgrade_all.cpp:1161
+#: src/commands_upgrade_all.cpp:1124 src/commands_upgrade_all.cpp:1173
 #, c++-format
 msgid "matched {}: {}"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:1118
+#: src/commands_upgrade_all.cpp:1130
 #, c++-format
 msgid "canonical source identity: {}"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:1131
+#: src/commands_upgrade_all.cpp:1143
 msgid "External satisfaction has no explicit source identity."
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:1143
+#: src/commands_upgrade_all.cpp:1155
 #, c++-format
 msgid "{} build unit externally satisfied: {}"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:1147
+#: src/commands_upgrade_all.cpp:1159
 #, c++-format
 msgid "provided by explicit source preference: {}"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:1172
+#: src/commands_upgrade_all.cpp:1184
 #, c++-format
 msgid "affected {} root: {} ({})"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:1193
+#: src/commands_upgrade_all.cpp:1205
 #, c++-format
 msgid "system/source warning: {}: {}: {}"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:1204
+#: src/commands_upgrade_all.cpp:1216
 #, c++-format
 msgid "system failure: {}"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:1213
+#: src/commands_upgrade_all.cpp:1225
 #, c++-format
 msgid "registered source failure: {}: {}"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:1223
+#: src/commands_upgrade_all.cpp:1235
 #, c++-format
 msgid "registered source cleanup failure: {}: {}"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:1243
+#: src/commands_upgrade_all.cpp:1255
 #, c++-format
 msgid "system/source issue: {} ({}, {}): {} [{}]: {}"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:1250
+#: src/commands_upgrade_all.cpp:1262
 #, c++-format
 msgid "system/source issue: {} ({}, {}): {} [{}]"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:1256
+#: src/commands_upgrade_all.cpp:1268
 #, c++-format
 msgid "system/source issue: {} ({}, {}): {}: {}"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:1261
+#: src/commands_upgrade_all.cpp:1273
 #, c++-format
 msgid "system/source issue: {} ({}, {}) [{}]: {}"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:1268 src/commands_upgrade_all.cpp:1278
+#: src/commands_upgrade_all.cpp:1280 src/commands_upgrade_all.cpp:1290
 #, c++-format
 msgid "system/source issue: {} ({}, {}): {}"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:1272
+#: src/commands_upgrade_all.cpp:1284
 #, c++-format
 msgid "system/source issue: {} ({}, {}) [{}]"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:1282
+#: src/commands_upgrade_all.cpp:1294
 #, c++-format
 msgid "system/source issue: {} ({}, {})"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:1298
+#: src/commands_upgrade_all.cpp:1310
 #, c++-format
 msgid "system/source diagnostic: {}: {}"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:1310
+#: src/commands_upgrade_all.cpp:1322
 #, c++-format
 msgid "{} query failure for {}: {}"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:1324
+#: src/commands_upgrade_all.cpp:1336
 #, c++-format
 msgid "{} planner issue: {}: package {}: {} {}"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:1331
+#: src/commands_upgrade_all.cpp:1343
 #, c++-format
 msgid "{} planner issue: {}: package {}"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:1337
+#: src/commands_upgrade_all.cpp:1349
 #, c++-format
 msgid "{} planner issue: {}: {} {}"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:1343
+#: src/commands_upgrade_all.cpp:1355
 #, c++-format
 msgid "{} planner issue: {}"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:1361
+#: src/commands_upgrade_all.cpp:1373
 #, c++-format
 msgid "{} mapping issue: {}: package {}: {} {}: {}"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:1368
+#: src/commands_upgrade_all.cpp:1380
 #, c++-format
 msgid "{} mapping issue: {}: package {}: {} {}"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:1375
+#: src/commands_upgrade_all.cpp:1387
 #, c++-format
 msgid "{} mapping issue: {}: package {}: {}"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:1381
+#: src/commands_upgrade_all.cpp:1393
 #, c++-format
 msgid "{} mapping issue: {}: {} {}: {}"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:1388
+#: src/commands_upgrade_all.cpp:1400
 #, c++-format
 msgid "{} mapping issue: {}: package {}"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:1394
+#: src/commands_upgrade_all.cpp:1406
 #, c++-format
 msgid "{} mapping issue: {}: {} {}"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:1400
+#: src/commands_upgrade_all.cpp:1412
 #, c++-format
 msgid "{} mapping issue: {}: {}"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:1406
+#: src/commands_upgrade_all.cpp:1418
 #, c++-format
 msgid "{} mapping issue: {}"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:1419
+#: src/commands_upgrade_all.cpp:1431
 #, c++-format
 msgid "{} preflight issue: {}: {}"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:1436
+#: src/commands_upgrade_all.cpp:1448
 #, c++-format
 msgid "{} preparation warning: {}: {}"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:1444
+#: src/commands_upgrade_all.cpp:1456
 #, c++-format
 msgid "{} preparation issue: {}: {}"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:1455
+#: src/commands_upgrade_all.cpp:1467
 #, c++-format
 msgid "{} reduction issue: {}: {}: {}"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:1469
+#: src/commands_upgrade_all.cpp:1481
 #, c++-format
 msgid "explicit source adapter issue: {}: {}: {}"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:1473 src/commands_upgrade_all.cpp:1477
+#: src/commands_upgrade_all.cpp:1485 src/commands_upgrade_all.cpp:1489
 #, c++-format
 msgid "explicit source adapter issue: {}: {}"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:1481
+#: src/commands_upgrade_all.cpp:1493
 #, c++-format
 msgid "explicit source adapter issue: {}"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:1498
+#: src/commands_upgrade_all.cpp:1510
 #, c++-format
 msgid "foreign inventory failure [{}]: {}"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:1504
+#: src/commands_upgrade_all.cpp:1516
 #, c++-format
 msgid "foreign inventory failure [{}]"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:1514
+#: src/commands_upgrade_all.cpp:1526
 #, c++-format
 msgid "foreign inventory diagnostic: {}"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:1520
+#: src/commands_upgrade_all.cpp:1532
 msgid "foreign inventory failure: diagnostic unavailable"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:1531
+#: src/commands_upgrade_all.cpp:1543
 msgid "aggregate"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:1537
+#: src/commands_upgrade_all.cpp:1549
 #, c++-format
 msgid "{} warning: {} ({}): {}: {}"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:1570
+#: src/commands_upgrade_all.cpp:1582
 #, c++-format
 msgid "{} issue: {} ({}): {} [{}]: {}"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:1579
+#: src/commands_upgrade_all.cpp:1591
 #, c++-format
 msgid "{} issue: {} ({}): {} [{}]"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:1587
+#: src/commands_upgrade_all.cpp:1599
 #, c++-format
 msgid "{} issue: {} ({}): {}: {}"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:1593
+#: src/commands_upgrade_all.cpp:1605
 #, c++-format
 msgid "{} issue: {} ({}) [{}]: {}"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:1601 src/commands_upgrade_all.cpp:1614
+#: src/commands_upgrade_all.cpp:1613 src/commands_upgrade_all.cpp:1626
 #, c++-format
 msgid "{} issue: {} ({}): {}"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:1607
+#: src/commands_upgrade_all.cpp:1619
 #, c++-format
 msgid "{} issue: {} ({}) [{}]"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:1620
+#: src/commands_upgrade_all.cpp:1632
 #, c++-format
 msgid "{} issue: {} ({})"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:1638
+#: src/commands_upgrade_all.cpp:1650
 #, c++-format
 msgid "{} phase diagnostic: {}"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:1658
+#: src/commands_upgrade_all.cpp:1670
 #, c++-format
 msgid "{} diagnostic: {}: {}"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:1702
+#: src/commands_upgrade_all.cpp:1714
 msgid "partial completion"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:1707
+#: src/commands_upgrade_all.cpp:1719
 msgid "some phases were not attempted"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:1711
+#: src/commands_upgrade_all.cpp:1723
 msgid "cleanup failure occurred"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:1717
+#: src/commands_upgrade_all.cpp:1729
 #, c++-format
 msgid "duplicate {} targets excluded"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:1723
+#: src/commands_upgrade_all.cpp:1735
 #, c++-format
 msgid "{} build units externally satisfied"
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the literal command name
 #. "upgrade-all".
-#: src/commands_upgrade_all.cpp:1733
+#: src/commands_upgrade_all.cpp:1745
 #, c++-format
 msgid "The {} result contains failure details despite a successful aggregate status."
 msgstr ""
 
 #. TRANSLATORS: The first placeholder is the literal
 #. command name "upgrade-all"; the second is an operand.
-#: src/commands_upgrade_all.cpp:1814
+#: src/commands_upgrade_all.cpp:1826
 #, c++-format
 msgid "{} does not accept target operands: {}"
 msgstr ""
 
 #. TRANSLATORS: The first placeholder is the literal
 #. command name "upgrade-all"; the second is an operand.
-#: src/commands_upgrade_all.cpp:1821
+#: src/commands_upgrade_all.cpp:1833
 #, c++-format
 msgid "{} does not accept opaque operands: {}"
 msgstr ""
@@ -4610,109 +4651,124 @@ msgstr ""
 #. TRANSLATORS: The first placeholder is the literal
 #. command name "upgrade-all"; the second is a runtime
 #. option or operand.
-#: src/commands_upgrade_all.cpp:1830
+#: src/commands_upgrade_all.cpp:1842
 #, c++-format
 msgid "Unsupported {} option or operand: {}"
 msgstr ""
 
 #. TRANSLATORS: The placeholders are the literal
 #. command name "upgrade-all" and CLI marker "--".
-#: src/commands_upgrade_all.cpp:1840
+#: src/commands_upgrade_all.cpp:1852
 #, c++-format
 msgid "{} does not accept the {} operand marker."
 msgstr ""
 
 #. TRANSLATORS: The first placeholder is the literal command
 #. name "upgrade-all"; the second is a runtime diagnostic.
-#: src/commands_upgrade_all.cpp:1868
+#: src/commands_upgrade_all.cpp:1880
 #, c++-format
 msgid "Unexpected {} command failure: {}"
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the literal command name
 #. "upgrade-all".
-#: src/commands_upgrade_all.cpp:1875
+#: src/commands_upgrade_all.cpp:1887
 #, c++-format
 msgid "Unexpected {} command failure: unknown exception."
 msgstr ""
 
-#: src/dependency_plan.cpp:175
+#: src/dependency_plan.cpp:91
+#, c++-format
+msgid "{} provider candidate changed during dependency resolution: {}"
+msgstr ""
+
+#: src/dependency_plan.cpp:99 src/provider_selection.cpp:51
+#, c++-format
+msgid "Selected providers use incompatible identities for package {}: {} and {}."
+msgstr ""
+
+#: src/dependency_plan.cpp:223
 #, c++-format
 msgid "Failed to search {} providers for {}: {}"
 msgstr ""
 
-#: src/dependency_plan.cpp:193
+#: src/dependency_plan.cpp:250
 #, c++-format
 msgid "{} provider candidate metadata was not returned."
 msgstr ""
 
-#: src/dependency_plan.cpp:204
+#: src/dependency_plan.cpp:270
 #, c++-format
 msgid "Failed to check {} provider {}: {}"
 msgstr ""
 
 #. TRANSLATORS: The placeholders are dependency and provider identities.
-#: src/dependency_plan.cpp:290
+#: src/dependency_plan.cpp:368
 #, c++-format
 msgid "{} [provided by {}]"
 msgstr ""
 
+#: src/dependency_plan.cpp:410
+#, c++-format
+msgid "Provider selection returned a candidate that was not offered for {}."
+msgstr ""
+
 #. TRANSLATORS: The placeholder is a dependency specification.
-#: src/dependency_plan.cpp:320
+#: src/dependency_plan.cpp:423
 #, c++-format
 msgid "version constraint for {} is not verified"
 msgstr ""
 
-#: src/dependency_plan.cpp:392 src/dependency_plan.cpp:447
-#: src/dependency_plan.cpp:917
+#: src/dependency_plan.cpp:516 src/dependency_plan.cpp:617
+#: src/dependency_plan.cpp:1171
 #, c++-format
 msgid "Failed to check {} dependency {}: {}"
 msgstr ""
 
-#: src/dependency_plan.cpp:504
+#: src/dependency_plan.cpp:711
 msgid "Unknown package role."
 msgstr ""
 
-#: src/dependency_plan.cpp:747
+#: src/dependency_plan.cpp:954
 #, c++-format
 msgid "{} aggregation is missing during build plan ordering: {}"
 msgstr ""
 
-#: src/dependency_plan.cpp:803
+#: src/dependency_plan.cpp:1023
 #, c++-format
 msgid "{} (max depth reached)"
 msgstr ""
 
-#: src/dependency_plan.cpp:859
+#: src/dependency_plan.cpp:1103
 #, c++-format
 msgid "Build dependency is missing its package role: {}"
 msgstr ""
 
-#: src/dependency_plan.cpp:971
+#: src/dependency_plan.cpp:1257
 msgid "Build plan targets must not be empty."
 msgstr ""
 
-#: src/dependency_plan.cpp:1137
+#: src/dependency_plan.cpp:1485
 #, c++-format
 msgid "Cannot execute build plan for {}; unresolved dependencies: {}"
 msgstr ""
 
-#: src/dependency_plan.cpp:1142
+#: src/dependency_plan.cpp:1490
 #, c++-format
 msgid "Cannot execute build plan for {}; ambiguous providers: {}"
 msgstr ""
 
-#: src/dependency_plan.cpp:1149
+#: src/dependency_plan.cpp:1497
 #, c++-format
 msgid "Cannot execute build plan for {}; cyclic dependencies: {}"
 msgstr ""
 
-#: src/dependency_plan.cpp:1158
+#: src/dependency_plan.cpp:1506
 #, c++-format
 msgid "Cannot execute build plan for {}; conflicts/replaces metadata requires manual review: {}"
 msgstr ""
 
-#: src/dependency_plan.cpp:1169
+#: src/dependency_plan.cpp:1517
 #, c++-format
 msgid "Cannot execute singular install plan for {}; split package targets require the {} set lifecycle: {}"
 msgstr ""
@@ -4920,49 +4976,49 @@ msgid "Reduced selected target cannot be mapped back to its original query ident
 msgstr ""
 
 #. TRANSLATORS: {} is the literal service name "AUR".
-#: src/filtered_aur_update_operation.cpp:1403
+#: src/filtered_aur_update_operation.cpp:1404
 #, c++-format
 msgid "{} update candidate"
 msgstr ""
 
 #. TRANSLATORS: {} is the literal service name "AUR".
-#: src/filtered_aur_update_operation.cpp:1407
+#: src/filtered_aur_update_operation.cpp:1408
 #, c++-format
 msgid "{} update candidate has no remote package identity"
 msgstr ""
 
 #. TRANSLATORS: {} is the literal service name "AUR".
-#: src/filtered_aur_update_operation.cpp:1420
+#: src/filtered_aur_update_operation.cpp:1421
 #, c++-format
 msgid "{} version comparison unavailable"
 msgstr ""
 
 #. TRANSLATORS: {} is the literal command name "upgrade-all".
-#: src/filtered_aur_update_operation.cpp:1426
+#: src/filtered_aur_update_operation.cpp:1427
 #, c++-format
 msgid "Normal skip unexpectedly reached the {} target adapter."
 msgstr ""
 
 #. TRANSLATORS: {} is the literal service name "AUR".
-#: src/filtered_aur_update_operation.cpp:1432
+#: src/filtered_aur_update_operation.cpp:1433
 #, c++-format
 msgid "Unknown {} update classification"
 msgstr ""
 
 #. TRANSLATORS: {} is the literal internal type name "AurUpdatePlan".
-#: src/filtered_aur_update_operation.cpp:1439
+#: src/filtered_aur_update_operation.cpp:1440
 #, c++-format
 msgid "{} entry has an unknown classification."
 msgstr ""
 
 #. TRANSLATORS: {} is the literal service name "AUR".
-#: src/filtered_aur_update_operation.cpp:1634
+#: src/filtered_aur_update_operation.cpp:1636
 #, c++-format
 msgid "Prepared filtered {} update operation is invalid or has already been consumed."
 msgstr ""
 
 #. TRANSLATORS: {} is the literal service name "AUR".
-#: src/filtered_aur_update_operation.cpp:1640
+#: src/filtered_aur_update_operation.cpp:1642
 #, c++-format
 msgid "Prepared filtered {} update operation lost its source-build preparation snapshot."
 msgstr ""
@@ -6032,63 +6088,94 @@ msgstr ""
 msgid "Failed to initialize the {} mask: {}"
 msgstr ""
 
-#: src/repository_query.cpp:176
+#: src/provider_selection.cpp:99
+#, c++-format
+msgid "Previously selected provider is no longer a candidate for dependency: {}"
+msgstr ""
+
+#: src/provider_selection.cpp:118
+msgid "Provider selection requires a non-empty dependency name."
+msgstr ""
+
+#: src/provider_selection.cpp:155
+#, c++-format
+msgid "Select a provider from [{}], or press {} / enter {} to cancel:"
+msgstr ""
+
+#: src/provider_selection.cpp:181
+#, c++-format
+msgid "Invalid choice. Enter a number from [{}], or press {} / enter {} to cancel."
+msgstr ""
+
+#: src/repository_query.cpp:193
 msgid "Repository sync metadata is missing a package filename."
 msgstr ""
 
-#: src/repository_query.cpp:182
+#: src/repository_query.cpp:199
 msgid "Repository sync metadata contains an invalid package name."
 msgstr ""
 
-#: src/repository_query.cpp:187
+#: src/repository_query.cpp:204
 msgid "Repository sync metadata contains a duplicate package name."
 msgstr ""
 
-#: src/repository_query.cpp:196
+#: src/repository_query.cpp:209
+msgid "Repository sync metadata is missing a package version."
+msgstr ""
+
+#: src/repository_query.cpp:215
+msgid "Repository sync metadata contains an invalid package version."
+msgstr ""
+
+#: src/repository_query.cpp:225
 msgid "Repository sync metadata contains an invalid provided dependency."
 msgstr ""
 
-#: src/repository_query.cpp:221
+#: src/repository_query.cpp:252
 msgid "Repository sync metadata contains a control character."
 msgstr ""
 
-#: src/repository_query.cpp:236
+#: src/repository_query.cpp:267
 msgid "Repository sync metadata does not start with a package filename."
 msgstr ""
 
-#: src/repository_query.cpp:245
+#: src/repository_query.cpp:276
 msgid "Repository sync metadata contains a value outside a section."
 msgstr ""
 
-#: src/repository_query.cpp:251
+#: src/repository_query.cpp:282
 msgid "Repository sync metadata contains multiple package filenames."
 msgstr ""
 
-#: src/repository_query.cpp:258
+#: src/repository_query.cpp:289
 msgid "Repository sync metadata contains multiple package names."
 msgstr ""
 
-#: src/repository_query.cpp:270
+#: src/repository_query.cpp:296
+msgid "Repository sync metadata contains multiple package versions."
+msgstr ""
+
+#: src/repository_query.cpp:308
 msgid "Repository sync metadata does not contain a package entry."
 msgstr ""
 
 #. TRANSLATORS: The placeholder is a filesystem path.
-#: src/repository_query.cpp:357
+#: src/repository_query.cpp:395
 #, c++-format
 msgid "Repository sync database directory is unavailable: {}"
 msgstr ""
 
-#: src/repository_query.cpp:367
+#: src/repository_query.cpp:405
 msgid "Repository configuration contains a name that is not a safe path component."
 msgstr ""
 
 #. TRANSLATORS: The placeholder is a filesystem path.
-#: src/repository_query.cpp:380
+#: src/repository_query.cpp:418
 #, c++-format
 msgid "Configured repository sync database is unavailable: {}"
 msgstr ""
 
-#: src/repository_query.cpp:394
+#: src/repository_query.cpp:432
 #, c++-format
 msgid "Failed to read configured repository sync database with exit code {}."
 msgstr ""
@@ -6442,121 +6529,144 @@ msgstr ""
 msgid "{} set source-build unexpectedly produced a singular update-status result."
 msgstr ""
 
-#: src/source_build.cpp:1061 src/source_install.cpp:177
-#: src/system_source_upgrade.cpp:581
+#: src/source_build.cpp:1061 src/source_install.cpp:259
+#: src/system_source_upgrade.cpp:609
 msgid "Unknown source-build execution status."
 msgstr ""
 
-#: src/source_install.cpp:65
+#: src/source_install.cpp:67
 msgid "Unknown source-build source kind."
 msgstr ""
 
-#: src/source_install.cpp:76
+#: src/source_install.cpp:78
 #, c++-format
 msgid "Registered source upgrade does not support split {} preference {} from {} {}; this route requires a singular package identity."
 msgstr ""
 
-#: src/source_install.cpp:106
+#: src/source_install.cpp:120
+#, c++-format
+msgid "Registered source upgrade cannot enforce a selected {} dependency provider."
+msgstr ""
+
+#: src/source_install.cpp:135
 #, c++-format
 msgid "{} required artifact target projection failed for {}."
 msgstr ""
 
-#: src/source_install.cpp:119
+#: src/source_install.cpp:148 src/source_install.cpp:561
 #, c++-format
 msgid "{} required artifact target projection omitted {}."
 msgstr ""
 
-#: src/source_install.cpp:198
+#: src/source_install.cpp:214
+#, c++-format
+msgid "Installing selected repository providers: {}"
+msgstr ""
+
+#: src/source_install.cpp:280
 #, c++-format
 msgid "{} source-build result is incoherent for presentation."
 msgstr ""
 
-#: src/source_install.cpp:216
+#: src/source_install.cpp:298
 #, c++-format
 msgid "{} source-build child result is incoherent for presentation."
 msgstr ""
 
-#: src/source_install.cpp:223
+#: src/source_install.cpp:305
 #, c++-format
 msgid "  required child: {} -> {} {} (explicit): installed"
 msgstr ""
 
-#: src/source_install.cpp:232
+#: src/source_install.cpp:314
 #, c++-format
 msgid "  required child: {} -> {} {} (explicit): skipped as needed ({})"
 msgstr ""
 
-#: src/source_install.cpp:241
+#: src/source_install.cpp:323
 #, c++-format
 msgid "  required child: {} -> {} {} (dependency): installed"
 msgstr ""
 
-#: src/source_install.cpp:250
+#: src/source_install.cpp:332
 #, c++-format
 msgid "  required child: {} -> {} {} (dependency): skipped as needed ({})"
 msgstr ""
 
-#: src/source_install.cpp:257
+#: src/source_install.cpp:339
 #, c++-format
 msgid "{} source-build child result has an unknown install reason or outcome."
 msgstr ""
 
-#: src/source_install.cpp:267
+#: src/source_install.cpp:349
 #, c++-format
 msgid "{} unselected artifact identity is incoherent for presentation."
 msgstr ""
 
-#: src/source_install.cpp:286
+#: src/source_install.cpp:368
 msgid "Cannot seed cache for an empty source-build invocation."
 msgstr ""
 
-#: src/source_install.cpp:304
+#: src/source_install.cpp:386
 msgid "Production source-build work items use different cache authorities."
 msgstr ""
 
-#: src/source_install.cpp:314
+#: src/source_install.cpp:396
 msgid "Production source-build invocation cache authority changed."
 msgstr ""
 
-#: src/source_install.cpp:328
+#: src/source_install.cpp:410
 msgid "Cannot activate cache for an empty source-build invocation."
 msgstr ""
 
-#: src/source_install.cpp:346
+#: src/source_install.cpp:432
+msgid "Production source-build invocation has no prepared cache authority."
+msgstr ""
+
+#: src/source_install.cpp:452 src/source_install.cpp:780
+#: src/system_source_upgrade.cpp:1514
+msgid "Failed to install selected repository providers."
+msgstr ""
+
+#: src/source_install.cpp:461 src/system_source_upgrade.cpp:1561
+msgid "Failed to install selected repository providers with an unknown exception."
+msgstr ""
+
+#: src/source_install.cpp:473
 msgid "Production source-build work item has no prepared cache authority."
 msgstr ""
 
-#: src/source_install.cpp:394
+#: src/source_install.cpp:521
 #, c++-format
 msgid "{} info for {} does not include {}."
 msgstr ""
 
-#: src/source_install.cpp:452
+#: src/source_install.cpp:615
 #, c++-format
 msgid "{} required artifact target projection failed before source-build work-item preparation."
 msgstr ""
 
-#: src/source_install.cpp:519
+#: src/source_install.cpp:694
 #, c++-format
 msgid "{} set source-build execution requires an {} {} work item."
 msgstr ""
 
-#: src/source_install.cpp:525
+#: src/source_install.cpp:700
 #, c++-format
 msgid "{} set source-build execution does not support only-if-updated requests."
 msgstr ""
 
-#: src/source_install.cpp:531 src/source_install.cpp:552
+#: src/source_install.cpp:706 src/source_install.cpp:727
 #, c++-format
 msgid "Building {} {}: {}"
 msgstr ""
 
-#: src/source_install.cpp:535 src/source_install.cpp:556
+#: src/source_install.cpp:710 src/source_install.cpp:731
 #, c++-format
 msgid "Target package(s): {}"
 msgstr ""
 
-#: src/source_install.cpp:576
+#: src/source_install.cpp:751
 #, c++-format
 msgid "Failed while building/installing {} {} ({}): {}"
 msgstr ""
@@ -6698,119 +6808,119 @@ msgstr ""
 msgid "The system upgrade completed, but the post-upgrade package metadata snapshot failed: {}"
 msgstr ""
 
-#: src/system_source_upgrade.cpp:145
+#: src/system_source_upgrade.cpp:163
 #, c++-format
 msgid "Failed to query installed package metadata for {}: {}"
 msgstr ""
 
-#: src/system_source_upgrade.cpp:268
+#: src/system_source_upgrade.cpp:286
 msgid "The system/source result is inconsistent after an unexpected exception."
 msgstr ""
 
-#: src/system_source_upgrade.cpp:270
+#: src/system_source_upgrade.cpp:288
 #, c++-format
 msgid "The system/source result is inconsistent after an unexpected exception: {}"
 msgstr ""
 
-#: src/system_source_upgrade.cpp:277
+#: src/system_source_upgrade.cpp:295
 msgid "The system result is unavailable because an unexpected exception occurred after the phase started."
 msgstr ""
 
-#: src/system_source_upgrade.cpp:279 src/upgrade_all_operation.cpp:250
+#: src/system_source_upgrade.cpp:297 src/upgrade_all_operation.cpp:250
 #, c++-format
 msgid "The system result is unavailable because an unexpected exception occurred after the phase started: {}"
 msgstr ""
 
-#: src/system_source_upgrade.cpp:300
+#: src/system_source_upgrade.cpp:318
 msgid "The registered source result is unavailable because an unexpected exception occurred after the phase started."
 msgstr ""
 
-#: src/system_source_upgrade.cpp:302 src/upgrade_all_operation.cpp:263
+#: src/system_source_upgrade.cpp:320 src/upgrade_all_operation.cpp:263
 #, c++-format
 msgid "The registered source result is unavailable because an unexpected exception occurred after the phase started: {}"
 msgstr ""
 
-#: src/system_source_upgrade.cpp:377
+#: src/system_source_upgrade.cpp:395
 #, c++-format
 msgid "Failed to snapshot local package versions before the system upgrade: {}"
 msgstr ""
 
-#: src/system_source_upgrade.cpp:399
+#: src/system_source_upgrade.cpp:417
 #, c++-format
 msgid "Failed to snapshot local package versions after the system upgrade: {}"
 msgstr ""
 
-#: src/system_source_upgrade.cpp:801
+#: src/system_source_upgrade.cpp:838
 msgid "Source preference enumeration failed with an unknown exception."
 msgstr ""
 
-#: src/system_source_upgrade.cpp:811
+#: src/system_source_upgrade.cpp:848
 #, c++-format
 msgid "Source preference enumeration found a non-regular entry: {}"
 msgstr ""
 
-#: src/system_source_upgrade.cpp:815
+#: src/system_source_upgrade.cpp:852
 #, c++-format
 msgid "Source preference enumeration found an invalid entry name: {}"
 msgstr ""
 
-#: src/system_source_upgrade.cpp:924
+#: src/system_source_upgrade.cpp:961
 #, c++-format
 msgid "The registered source preference disappeared before preparation: {}"
 msgstr ""
 
-#: src/system_source_upgrade.cpp:996
+#: src/system_source_upgrade.cpp:1008
 msgid "Source identity resolution failed with an unknown exception."
 msgstr ""
 
-#: src/system_source_upgrade.cpp:1030
+#: src/system_source_upgrade.cpp:1043
 msgid "Source work-item preparation failed with an unknown exception."
 msgstr ""
 
-#: src/system_source_upgrade.cpp:1068
+#: src/system_source_upgrade.cpp:1073
 msgid "Source invocation preparation failed with an unknown exception."
 msgstr ""
 
-#: src/system_source_upgrade.cpp:1167
+#: src/system_source_upgrade.cpp:1202
 msgid "The prepared system/source upgrade is invalid or has already been consumed."
 msgstr ""
 
-#: src/system_source_upgrade.cpp:1182
+#: src/system_source_upgrade.cpp:1217
 msgid "The prepared system/source upgrade options differ from the execution options."
 msgstr ""
 
-#: src/system_source_upgrade.cpp:1198
+#: src/system_source_upgrade.cpp:1233
 msgid "The prepared system/source upgrade source correlation is inconsistent."
 msgstr ""
 
-#: src/system_source_upgrade.cpp:1276 src/system_source_upgrade.cpp:1281
+#: src/system_source_upgrade.cpp:1311 src/system_source_upgrade.cpp:1316
 msgid "The update failed."
 msgstr ""
 
-#: src/system_source_upgrade.cpp:1384
+#: src/system_source_upgrade.cpp:1419
 msgid "The post-upgrade package metadata snapshot failed with an unknown exception."
 msgstr ""
 
-#: src/system_source_upgrade.cpp:1428
+#: src/system_source_upgrade.cpp:1463
 msgid "The prepared source work item is missing after the system upgrade."
 msgstr ""
 
-#: src/system_source_upgrade.cpp:1444
+#: src/system_source_upgrade.cpp:1479
 #, c++-format
 msgid "The system upgrade completed, but the authoritative post-upgrade installed package snapshot is missing for {}; source processing did not start."
 msgstr ""
 
-#: src/system_source_upgrade.cpp:1453
+#: src/system_source_upgrade.cpp:1488
 #, c++-format
 msgid "The system upgrade completed, but the post-upgrade package metadata query failed for {}: {} Source processing did not start."
 msgstr ""
 
-#: src/system_source_upgrade.cpp:1475
+#: src/system_source_upgrade.cpp:1587
 #, c++-format
 msgid "Ignoring invalid source-build preference filename: {}"
 msgstr ""
 
-#: src/system_source_upgrade.cpp:1682
+#: src/system_source_upgrade.cpp:1794
 msgid "An unknown exception occurred."
 msgstr ""
 
@@ -7030,62 +7140,62 @@ msgstr ""
 msgid "The {} update query completed with recoverable failures; filtered execution did not start."
 msgstr ""
 
-#: src/upgrade_all_operation.cpp:999
+#: src/upgrade_all_operation.cpp:1008
 msgid "The registered source preference has no package name."
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the literal
 #. field name "PackageBase".
-#: src/upgrade_all_operation.cpp:1017
+#: src/upgrade_all_operation.cpp:1026
 #, c++-format
 msgid "The registered source preference has no prepared {} identity."
 msgstr ""
 
-#: src/upgrade_all_operation.cpp:1034
+#: src/upgrade_all_operation.cpp:1043
 msgid "The registered source preference has no prepared canonical source identity."
 msgstr ""
 
-#: src/upgrade_all_operation.cpp:1045
+#: src/upgrade_all_operation.cpp:1054
 msgid "The registered source preferences contain a duplicate original index."
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the literal
 #. command name "upgrade-all".
-#: src/upgrade_all_operation.cpp:1164
+#: src/upgrade_all_operation.cpp:1173
 #, c++-format
 msgid "The prepared registered source identity cannot be adapted safely for {} planning."
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the display spelling
 #. of the literal command name "upgrade-all".
-#: src/upgrade_all_operation.cpp:1220
+#: src/upgrade_all_operation.cpp:1229
 #, c++-format
 msgid "{} preparation failed with an unknown exception."
 msgstr ""
 
-#: src/upgrade_all_operation.cpp:1348
+#: src/upgrade_all_operation.cpp:1357
 msgid "System/source execution failed with an unknown exception."
 msgstr ""
 
-#: src/upgrade_all_operation.cpp:1378
+#: src/upgrade_all_operation.cpp:1387
 #, c++-format
 msgid "The system/source result no longer matches the prepared {} source intent snapshot."
 msgstr ""
 
-#: src/upgrade_all_operation.cpp:1441
+#: src/upgrade_all_operation.cpp:1450
 msgid "Foreign inventory configuration resolution failed with an unknown exception."
 msgstr ""
 
-#: src/upgrade_all_operation.cpp:1470
+#: src/upgrade_all_operation.cpp:1479
 msgid "Foreign inventory read failed with an unknown exception."
 msgstr ""
 
-#: src/upgrade_all_operation.cpp:1525
+#: src/upgrade_all_operation.cpp:1534
 #, c++-format
 msgid "The {} update query failed with an unknown exception."
 msgstr ""
 
-#: src/upgrade_all_operation.cpp:1609
+#: src/upgrade_all_operation.cpp:1618
 #, c++-format
 msgid "The filtered {} operation failed with an unknown exception."
 msgstr ""

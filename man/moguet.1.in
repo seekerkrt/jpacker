@@ -91,6 +91,8 @@ and does not update packages selected only by source-build preferences.
 Run the system, registered-source, fresh foreign-inventory, and filtered AUR
 phases in that order.
 Explicit source preferences take priority over duplicate AUR targets.
+Provider selection for the filtered AUR phase completes before clone, build,
+pacman, or sudo work in that phase; earlier phases may already have completed.
 This is not one atomic transaction: execution stops on the first failure,
 does not roll back completed package transactions, and reports later work as
 not attempted.
@@ -125,15 +127,21 @@ Global and pacman options are unsupported.
 Classify AUR runtime, make, and check dependencies.
 With
 .BR --recursive ,
-traverse AUR dependencies while displaying official, uniquely provided,
-ambiguous, and unresolved dependencies without traversing those categories.
+traverse exact AUR dependencies and user-selected AUR providers.
+Official dependencies, uniquely resolved providers, selected official
+repository providers, still-ambiguous providers, and unresolved dependencies
+are displayed without further traversal.
+On an interactive TTY, source-aware provider candidates can be selected and
+the output distinguishes user-selected providers from unresolved ambiguity.
 This command does not clone, build, install, or calculate a build order.
 .
 .TP
 .B "plan <pkg>"
 Display an AUR build-order plan and direct official repository package sizes.
-Unknown dependencies, ambiguous providers, cycles, and conflicts/replacements
+Unknown dependencies, unselected ambiguous providers, cycles, and conflicts/replacements
 that Moguet cannot resolve make the plan incomplete.
+The plan distinguishes uniquely resolved, user-selected, and still-ambiguous
+providers.
 Metadata-size unavailability does not suppress the plan body.
 This command does not clone, build, or install.
 .
@@ -141,6 +149,8 @@ This command does not clone, build, or install.
 .B "fetch <pkg>"
 Retrieve the AUR PackageBase repositories needed by a complete inspection
 plan.
+A selected AUR provider's PackageBase is included; a selected official
+repository provider is not cloned.
 Missing repositories are cloned.
 An existing clone runs only
 .BR "git fetch origin" ;
@@ -268,6 +278,8 @@ operations.
 .B "--noconfirm"
 Pass non-confirmation behavior to supported pacman and makepkg execution and
 avoid Moguet prompts by using their defined defaults.
+Provider selection has no default: this option does not read stdin, prompt, or
+select a provider, and unresolved ambiguity fails closed.
 This is not \(dqyes to everything\(dq and does not bypass unresolved or
 ambiguous dependencies, cycles, source selection, conflicts/replacements,
 artifact identity, ownership, or other safety guards.
@@ -507,6 +519,25 @@ state authoritatively.
 It does not use
 .B --noconfirm
 to cross such a guard.
+.
+.PP
+When multiple dependency providers remain, an interactive TTY displays
+source-aware numbered candidates and requires exactly one selection, with no
+default. Empty input, q, quit, cancel, or EOF cancels; invalid or out-of-range
+input retries. Non-TTY use and
+.B --noconfirm
+do not read provider input from stdin and fail closed. A choice is shared only
+within the current invocation. Selected AUR PackageBases flow into fetch and
+build planning; a selected official provider is introduced as an exact
+.I repository/package
+dependency.
+.
+.PP
+The registered-source phase offers provider selection only when every
+candidate is from an official repository. A candidate set containing an AUR
+provider remains ambiguous and fails closed before system or source execution,
+because the singular source lifecycle cannot schedule that provider's
+PackageBase.
 .
 .PP
 .B deps

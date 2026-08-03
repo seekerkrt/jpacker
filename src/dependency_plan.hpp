@@ -4,14 +4,26 @@
 #include "aur_rpc.hpp"
 
 #include <cstddef>
+#include <functional>
 #include <optional>
 #include <string>
 #include <vector>
 
-// 複数 provider がある依存。#97 ではここで止め、暗黙選択しない。
+// 複数 provider がある依存。明示選択されない場合はここで止め、暗黙選択しない。
 struct AmbiguousProvidedDependency {
     std::string dependency;
     std::vector<ProvidedDependency> candidates;
+};
+
+// provider候補のpresentation/inputはCLI ownerへ委ね、plan coreは
+// source-aware candidateと選択結果だけを受け取る。
+using ProviderSelectionCallback = std::function<std::optional<ProvidedDependency>(
+        const std::string& dependency,
+        const std::vector<ProvidedDependency>& candidates)>;
+
+struct SelectedProvidedDependency {
+    std::string        dependency;
+    ProvidedDependency provider;
 };
 
 // 依存を official repo / AUR / provider / unknown に分けた結果。
@@ -19,8 +31,14 @@ struct DependencyClassification {
     std::vector<std::string>             repo;
     std::vector<std::string>             aur;
     std::vector<std::string>             provided;
+    std::vector<SelectedProvidedDependency> selected_providers;
     std::vector<AmbiguousProvidedDependency> ambiguous_providers;
     std::vector<std::string>             unknown;
+};
+
+enum class ProviderResolutionKind {
+    Unique,
+    UserSelected
 };
 
 enum class PackageRole {
@@ -95,6 +113,8 @@ struct BuildPlanDependencyEdge {
     std::optional<std::string>        resolved_package_name;
     std::optional<std::string>        resolved_package_base;
     std::optional<ProvidedDependency> resolved_provider;
+    ProviderResolutionKind            provider_resolution =
+            ProviderResolutionKind::Unique;
 };
 
 // recursive dependency tree の 1 node。表示と循環検出結果を同じ単位で持つ。
@@ -105,6 +125,8 @@ struct RecursiveDependencyNode {
     std::optional<ProvidedDependency>    provided_by;
     std::vector<ProvidedDependency>      provider_candidates;
     DependencyKind                       kind = DependencyKind::Unknown;
+    ProviderResolutionKind               provider_resolution =
+            ProviderResolutionKind::Unique;
     bool                                 already_visited = false;
     bool                                 max_depth_reached = false;
     std::vector<RecursiveDependencyNode> children;
@@ -124,8 +146,9 @@ struct BuildPlanSplitPackageTarget {
 
 // build plan 上で provider により解決された依存を記録する。
 struct BuildPlanProvidedDependency {
-    std::string        dependency;
-    ProvidedDependency provider;
+    std::string            dependency;
+    ProvidedDependency     provider;
+    ProviderResolutionKind resolution = ProviderResolutionKind::Unique;
 };
 
 // AUR package が宣言する conflicts / replaces を、解決済みと誤認せず plan に残す。
@@ -156,12 +179,32 @@ std::vector<std::string> collect_build_dependencies(const AurPackageInfo& pkg);
 std::vector<TypedPackageDependency> collect_typed_build_dependencies(const AurPackageInfo& pkg);
 DesiredInstallReason desired_install_reason(const PlannedPackageTarget& target);
 DependencyClassification classify_dependencies(const std::vector<std::string>& dependencies);
+DependencyClassification classify_dependencies(
+        const std::vector<std::string>& dependencies,
+        const ProviderSelectionCallback& select_provider);
 std::vector<RecursiveDependencyNode> resolve_recursive_dependencies(const AurPackageInfo& pkg);
+std::vector<RecursiveDependencyNode> resolve_recursive_dependencies(
+        const AurPackageInfo& pkg,
+        const ProviderSelectionCallback& select_provider);
 std::vector<BuildPlanMetadataRisk> collect_build_plan_metadata_risks(const AurPackageInfo& pkg);
 BuildPlan resolve_build_plan(const std::string& target);
+BuildPlan resolve_build_plan(
+        const std::string& target,
+        const ProviderSelectionCallback& select_provider);
 BuildPlan resolve_build_plan(const std::vector<std::string>& targets);
+BuildPlan resolve_build_plan(
+        const std::vector<std::string>& targets,
+        const ProviderSelectionCallback& select_provider);
 BuildPlan resolve_build_plan_for_preflight(const std::vector<std::string>& targets);
+BuildPlan resolve_build_plan_for_preflight(
+        const std::vector<std::string>& targets,
+        const ProviderSelectionCallback& select_provider);
 BuildPlan resolve_fetch_plan(const std::string& target);
+BuildPlan resolve_fetch_plan(
+        const std::string& target,
+        const ProviderSelectionCallback& select_provider);
+void require_compatible_selected_provider_package_identities(
+        const BuildPlan& plan);
 void require_fetchable_build_plan(const std::string& target, const BuildPlan& plan);
 void require_executable_build_plan(const std::string& target, const BuildPlan& plan);
 void require_executable_install_plan(const std::string& target, const BuildPlan& plan);

@@ -739,11 +739,12 @@ assert_not_contains "upgrade-all completed" "$stdout_file"
 # presenter. The row order mirrors the explicit enum arrays in the operation
 # stub; the last row of each enum table injects an unknown value and proves
 # that the command boundary fails closed.
-run_matrix_table aur-phase-status 8 <<'EOF'
+run_matrix_table aur-phase-status 9 <<'EOF'
 1|AUR phase not attempted: preparation blocked|The upgrade-all result contains failure details despite a successful aggregate status.
 0|AUR phase: no updates|-
 0|AUR phase: completed|-
 1|AUR phase: blocked before execution|The upgrade-all result contains failure details despite a successful aggregate status.
+1|AUR phase: stopped after repository provider transaction failure|The upgrade-all result contains failure details despite a successful aggregate status.
 1|AUR phase: stopped on work-item failure|The upgrade-all result contains failure details despite a successful aggregate status.
 1|AUR phase: stopped after cleanup failure|The upgrade-all result contains failure details despite a successful aggregate status.
 1|AUR phase: inconsistent result|The upgrade-all result contains failure details despite a successful aggregate status.
@@ -775,10 +776,11 @@ run_matrix_table target-status 10 <<'EOF'
 1|system: completed|Unexpected upgrade-all command failure: Unknown AUR update target status.
 EOF
 
-run_matrix_table operation-status 7 <<'EOF'
+run_matrix_table operation-status 8 <<'EOF'
 1|AUR target: matrix-target: not attempted: result inconsistent|The upgrade-all result contains failure details despite a successful aggregate status.
 1|AUR target: matrix-target: not attempted: result inconsistent|The upgrade-all result contains failure details despite a successful aggregate status.
 1|AUR target: matrix-target: not attempted: operation blocked before execution|The upgrade-all result contains failure details despite a successful aggregate status.
+1|AUR target: matrix-target: not attempted: repository provider transaction failed|The upgrade-all result contains failure details despite a successful aggregate status.
 1|AUR target: matrix-target: not attempted: prior work item stopped|The upgrade-all result contains failure details despite a successful aggregate status.
 1|AUR target: matrix-target: not attempted: prior work item stopped|The upgrade-all result contains failure details despite a successful aggregate status.
 1|AUR target: matrix-target: not attempted: result inconsistent|The upgrade-all result contains failure details despite a successful aggregate status.
@@ -947,7 +949,7 @@ run_matrix_table external-attribution-missing 1 <<'EOF'
 1|AUR phase: completed|Unexpected upgrade-all command failure: External satisfaction has no explicit source identity.
 EOF
 
-if [ "$case_count" -ne 213 ]; then
+if [ "$case_count" -ne 215 ]; then
     echo "upgrade-all command test scenario count drifted: $case_count" >&2
     exit 1
 fi
