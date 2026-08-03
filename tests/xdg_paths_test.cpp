@@ -686,6 +686,118 @@ void test_config_process_adapter_reads_only_config_authority() {
             "Config process adapter mutated the filesystem.");
 }
 
+void test_source_preference_resolver_uses_explicit_value() {
+    const xdg_paths::EnvironmentSnapshot environment{
+            .xdg_config_home = "/source-preference/base",
+            .xdg_state_home = "relative/state-secret",
+            .xdg_cache_home = "relative/cache-secret",
+            .home = "relative/unused-home",
+    };
+    const xdg_paths::SourcePreferencePaths paths =
+            xdg_paths::resolve_source_preference(environment);
+
+    expect_path(
+            paths.directory,
+            "/source-preference/base/moguet/source-build.d",
+            "Source preference explicit directory");
+    expect_creation_boundary(
+            paths.creation_boundary,
+            xdg_paths::DirectorySource::ExplicitXdg,
+            "/source-preference/base", "/source-preference/base",
+            {"moguet", "source-build.d"},
+            "Source preference explicit creation boundary");
+}
+
+void test_source_preference_resolver_uses_home_fallback() {
+    for(const std::optional<std::string>& xdg_config_home :
+        std::vector<std::optional<std::string>>{std::nullopt, ""}) {
+        const xdg_paths::EnvironmentSnapshot environment{
+                .xdg_config_home = xdg_config_home,
+                .xdg_state_home = "relative/state-secret",
+                .xdg_cache_home = "relative/cache-secret",
+                .home = "/source-preference/home",
+        };
+        const xdg_paths::SourcePreferencePaths paths =
+                xdg_paths::resolve_source_preference(environment);
+
+        expect_path(
+                paths.directory,
+                "/source-preference/home/.config/moguet/source-build.d",
+                "Source preference HOME fallback directory");
+        expect_creation_boundary(
+                paths.creation_boundary,
+                xdg_paths::DirectorySource::HomeFallback,
+                "/source-preference/home/.config",
+                "/source-preference/home",
+                {".config", "moguet", "source-build.d"},
+                "Source preference HOME fallback creation boundary");
+    }
+}
+
+void test_source_preference_resolver_rejects_relative_xdg_value() {
+    const xdg_paths::EnvironmentSnapshot environment{
+            .xdg_config_home = "relative/source-preference-secret",
+            .xdg_state_home = std::nullopt,
+            .xdg_cache_home = std::nullopt,
+            .home = "/valid/fallback",
+    };
+    expect_resolution_error(
+            [&environment]() {
+                static_cast<void>(
+                        xdg_paths::resolve_source_preference(environment));
+            },
+            xdg_paths::DirectoryKind::Config,
+            xdg_paths::EnvironmentVariable::XdgConfigHome,
+            xdg_paths::ResolutionErrorCode::RelativePath,
+            "XDG_CONFIG_HOME must be an absolute path",
+            "relative/source-preference-secret");
+}
+
+void test_source_preference_process_adapter_uses_root_context() {
+    TemporaryDirectory temporary_directory;
+    const fs::path root_home = temporary_directory.path() / "root-home";
+
+    ScopedEnvironmentVariable config_home("XDG_CONFIG_HOME", std::nullopt);
+    ScopedEnvironmentVariable state_home(
+            "XDG_STATE_HOME",
+            std::optional<std::string>{"relative/state-secret"});
+    ScopedEnvironmentVariable cache_home(
+            "XDG_CACHE_HOME",
+            std::optional<std::string>{"relative/cache-secret"});
+    ScopedEnvironmentVariable home(
+            "HOME", std::optional<std::string>{root_home.string()});
+    ScopedEnvironmentVariable user(
+            "USER", std::optional<std::string>{"root"});
+    ScopedEnvironmentVariable logname(
+            "LOGNAME", std::optional<std::string>{"root"});
+
+    xdg_paths::SourcePreferencePaths first_paths;
+    {
+        ScopedEnvironmentVariable sudo_user(
+                "SUDO_USER", std::optional<std::string>{"ordinary-user"});
+        first_paths =
+                xdg_paths::resolve_source_preference_process_environment();
+    }
+    xdg_paths::SourcePreferencePaths second_paths;
+    {
+        ScopedEnvironmentVariable sudo_user(
+                "SUDO_USER", std::optional<std::string>{"different-user"});
+        second_paths =
+                xdg_paths::resolve_source_preference_process_environment();
+    }
+
+    expect_path(
+            first_paths.directory,
+            root_home / ".config" / "moguet" / "source-build.d",
+            "Root-like source preference fallback");
+    expect_path(
+            second_paths.directory, first_paths.directory,
+            "SUDO_USER-independent source preference directory");
+    expect(
+            !fs::exists(root_home),
+            "Source preference process adapter mutated the filesystem.");
+}
+
 void test_state_only_resolver_ignores_unrelated_xdg_values() {
     const xdg_paths::EnvironmentSnapshot environment{
             .xdg_config_home = "relative/config-secret",
@@ -1017,6 +1129,50 @@ void test_config_only_resolution_does_not_mutate_filesystem() {
             "Config-only XDG path resolution created the cache directory.");
 }
 
+void test_source_preference_resolution_does_not_mutate_filesystem() {
+    TemporaryDirectory temporary_directory;
+    const fs::path sentinel_directory =
+            temporary_directory.path() / "sentinel";
+    const fs::path sentinel_file = sentinel_directory / "keep";
+    fs::create_directory(sentinel_directory);
+    {
+        std::ofstream file(sentinel_file, std::ios::binary);
+        if(!file) {
+            throw std::runtime_error(
+                    "Failed to create source preference XDG test sentinel.");
+        }
+        file << "unchanged-source-preference-sentinel";
+    }
+
+    const fs::path config_base = temporary_directory.path() / "config-base";
+    const std::vector<std::string> before =
+            snapshot_tree(temporary_directory.path());
+    const xdg_paths::EnvironmentSnapshot environment{
+            .xdg_config_home = config_base.string(),
+            .xdg_state_home = "relative/state-secret",
+            .xdg_cache_home = "relative/cache-secret",
+            .home = std::nullopt,
+    };
+    const xdg_paths::SourcePreferencePaths paths =
+            xdg_paths::resolve_source_preference(environment);
+    const std::vector<std::string> after =
+            snapshot_tree(temporary_directory.path());
+
+    expect(
+            before == after,
+            "Source preference XDG resolution changed the filesystem tree.");
+    expect(
+            read_file(sentinel_file) ==
+                    "unchanged-source-preference-sentinel",
+            "Source preference XDG resolution changed the sentinel.");
+    expect(
+            !fs::exists(paths.directory),
+            "Source preference XDG resolution created its directory.");
+    expect(
+            !fs::exists(config_base),
+            "Source preference XDG resolution created the config base.");
+}
+
 void test_cache_only_resolution_does_not_mutate_filesystem() {
     TemporaryDirectory temporary_directory;
     const fs::path sentinel_directory =
@@ -1128,6 +1284,18 @@ int main() {
                 "config process adapter reads only config authority",
                 test_config_process_adapter_reads_only_config_authority);
         run_case(
+                "source preference resolver uses explicit value",
+                test_source_preference_resolver_uses_explicit_value);
+        run_case(
+                "source preference resolver uses HOME fallback",
+                test_source_preference_resolver_uses_home_fallback);
+        run_case(
+                "source preference resolver rejects relative XDG value",
+                test_source_preference_resolver_rejects_relative_xdg_value);
+        run_case(
+                "source preference process adapter uses root context",
+                test_source_preference_process_adapter_uses_root_context);
+        run_case(
                 "state-only resolver ignores unrelated XDG values",
                 test_state_only_resolver_ignores_unrelated_xdg_values);
         run_case(
@@ -1157,6 +1325,9 @@ int main() {
         run_case(
                 "config-only resolution does not mutate filesystem",
                 test_config_only_resolution_does_not_mutate_filesystem);
+        run_case(
+                "source preference resolution does not mutate filesystem",
+                test_source_preference_resolution_does_not_mutate_filesystem);
         run_case(
                 "cache-only resolution does not mutate filesystem",
                 test_cache_only_resolution_does_not_mutate_filesystem);

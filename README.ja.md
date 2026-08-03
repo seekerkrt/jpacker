@@ -39,6 +39,11 @@ XDG path、typed TOML config、gettextによる英日CLI surfaceは実装済み�
 package identity、payload、dependency metadata、documentation、jpacker v1.16.0からの
 非破壊transitionをv2 release contractとして確定しました。
 
+Moguet v2.0.1は、採用済みXDG storage契約のうちsource-preference部分を完成させます。
+新しいstorage方針の追加ではなく、v2.0.0で欠けた実装の修正です。source-build
+preferenceは実行user自身のXDG config contextだけを使い、公開済みv2.0.0のtag、Release、
+release noteは歴史的記録のまま変更しません。
+
 canonical repository identityはGitHub上のMoguetで、GitLab mirrorを持ちます。Moguet
 packageは`jpacker` command aliasを提供しません。AUR publicationは将来の別判断であり、
 この文書はAUR endpointが存在すると断定しません。
@@ -102,9 +107,10 @@ find "$stage_dir" -type f -print
 v2.0.0のpackage名と唯一のexecutableは`moguet`で、`/usr/bin/jpacker`をinstall
 しません。payloadはjpacker v1.16.0 packageと重複しないため、metadataには
 `jpacker`への`provides`、`conflicts`、`replaces`を意図的に設定しません。manual
-migrationとrollbackを検証する間、両packageはcoexistできます。productionの
-source-preference compatibility store `/etc/jpacker/package.build/`は共有しますが、
-Moguet packageはそのdirectoryを作成・所有しません。
+migrationとrollbackを検証する間、両packageはcoexistできます。source-preference
+storeは共有せず、Moguetはuser所有のXDG config authorityだけを使い、legacy
+`/etc/jpacker/package.build/` storeを参照・変更しません。Moguet packageはuser XDG dataも
+legacy directoryも作成・所有しません。
 
 package runtime dependencyは`curl`、`git`、`libalpm.so`、`libarchive`、`nano`、
 `pacman`、`sudo`です。package metadataへ記録するexactな`makedepends` setは
@@ -199,19 +205,27 @@ invalid TOML、unknown key、type error、invalid enum、未対応future schema 
 invocationを停止します。Moguetはfileを自動作成・rewrite・migrationせず、
 `/etc/moguet`をsystem-wide config layerとして使用しません。
 
-source-build preferenceは、この実装では`/etc/jpacker/package.build/`に残る独立した
-compatibility境界です。これらのfileはTOML configではなく、XDG config directoryへ
-copyされません。source preference commandは既存storeを操作するため、v2 config
-migrationで保存済みentryが移動したものとして再登録しないでください。このruntime
-compatibilityはMoguet packageによるdirectory ownershipを意味せず、package install /
-uninstallはこれをcreate、migrate、removeしません。
+source-build preferenceは、次のpackage別fileです。
+
+```text
+${XDG_CONFIG_HOME:-$HOME/.config}/moguet/source-build.d/<package-name>
+```
+
+TOML configではありません。`add-src`、`edit-src`、`list-src`、`del-src`、`revert`と、
+build / upgrade側の全readerがこの1つのauthorityを使います。storeまたはentryがない場合
+だけを保存済みpreferenceなしとして扱い、invalid name、unsafe entry、permission error、
+I/O failureはhard errorです。read / list operationはdirectoryを作成しません。storageを
+最初に必要とする`add-src`または`edit-src`だけがmanaged directoryをmode `0700`、entryを
+mode `0600`で作成します。package install / reinstall / uninstallはXDG preferenceも
+legacy dataもcreate、migrate、removeしません。
 
 <!-- parity:xdg -->
-## XDG config・state・cache
+## XDG config・source preference・state・cache
 
 | 責務 | XDG path | fallback |
 | --- | --- | --- |
 | user config | `$XDG_CONFIG_HOME/moguet/` | `~/.config/moguet/` |
+| source-build preference | `$XDG_CONFIG_HOME/moguet/source-build.d/` | `~/.config/moguet/source-build.d/` |
 | 永続runtime stateとlog | `$XDG_STATE_HOME/moguet/` | `~/.local/state/moguet/` |
 | 再生成可能cache | `$XDG_CACHE_HOME/moguet/` | `~/.cache/moguet/` |
 
@@ -219,9 +233,14 @@ default logはstate directory内の`moguet.log`です。cacheはauthorityでは�
 cache削除によってconfigやpersistent stateを失ってはいけません。directoryはcommandが
 必要としたときだけ作成し、help / version表示では作成しません。
 
-relative path等の安全でないXDG pathはfail closedとします。rootでMoguetを実行した
-場合はroot自身のXDG contextを使い、`SUDO_USER`等から別userを推測してそのhomeへ
-書き込みません。このpath規則はAUR source buildのroot実行を許可するものではありません。
+source-preference accessでは、`XDG_CONFIG_HOME`がunsetまたはemptyならHOME fallbackを
+使います。明示的な`XDG_CONFIG_HOME`はabsoluteで、既存かつownership、type、permissionの
+検証に成功する必要があり、Moguetはwrite commandが最初に必要としたときだけ配下のmanaged
+`moguet/source-build.d`を作成します。HOME fallbackでは同じsource-preference safety
+boundaryが必要なconfig階層を作成できます。relative path等の安全でないXDG pathはfail
+closedとします。rootでMoguetを実行した場合はroot自身のXDG contextを使い、`SUDO_USER`等
+から別userを推測してそのhomeへ書き込みません。このpath規則はAUR source buildのroot実行を
+許可するものではありません。
 
 <!-- parity:localization -->
 ## Localization
@@ -247,17 +266,18 @@ pacmanだけで完結するoperationはMoguetが消費しないoptionをpass-thr
 source-build routeをMoguetが所有する場合は、対応関係を明示したoptionだけを保持し、
 意味を維持できないものはmutation前に拒否します。
 
-Moguet v2.0.0は`/etc/jpacker/jpacker.conf`を通常config layerとして読まず、
-`/etc/jpacker`を自動copy・rewrite・deleteしません。root-owned legacy dataの移行先userを
+Moguetは`/etc/jpacker/jpacker.conf`を通常config layerとして読まず、
+`/etc/jpacker/package.build/`をsource-preference fallbackとして使用しません。
+`/etc/jpacker`を自動copy・merge・rewrite・deleteせず、root-owned legacy dataの移行先userを
 推測しません。[English Migration Guide](docs/migration/v1-to-v2.md)または
-[日本語Migration Guide](docs/migration/v1-to-v2.ja.md)に従い、v1 stateをbackupして
-manual mappingとrollbackを行ってください。
+[日本語Migration Guide](docs/migration/v1-to-v2.ja.md)に従い、v1 stateをbackupし、対象user
+ごとに理解したentryだけを手動で再作成してrollback dataを保持してください。
 
 正式かつpackageが提供する唯一のv2 commandは`moguet`で、`jpacker` binary aliasは
 ありません。Moguetとjpacker v1.16.0のpackage fileは重複せず、transition / rollback用に
-同時installできます。ただし既存`/etc/jpacker/package.build/` storeはproduction
-compatibility境界として共有するため、両helperのmutating operationを同時実行しないで
-ください。Moguet packageはこのstoreを所有・移行・削除しません。
+同時installできます。preference storeは共有しませんが、両helperのpackage-mutating
+operationを同時実行しないでください。Moguetはlegacy storeを無視して保持し、明示的な
+per-user migrationだけがXDG authorityを変更します。
 
 <!-- parity:development -->
 ## 開発

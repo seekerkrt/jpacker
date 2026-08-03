@@ -54,13 +54,17 @@ setup_case() {
     command_log=$case_dir/commands.log
     output_file=$case_dir/output
 
-    mkdir -p "$case_dir/home" "$case_dir/xdg-state" "$case_dir/xdg-cache"
+    mkdir -p \
+        "$case_dir/home" "$case_dir/xdg-config" \
+        "$case_dir/xdg-state" "$case_dir/xdg-cache"
+    chmod 0700 "$case_dir/xdg-config"
     : > "$command_log"
     : > "$request_log"
     : > "$user_agent_log"
     inventory_state=$case_dir/foreign-inventory.state
     : > "$inventory_state"
     export HOME=$case_dir/home
+    export XDG_CONFIG_HOME=$case_dir/xdg-config
     export XDG_STATE_HOME=$case_dir/xdg-state
     export XDG_CACHE_HOME=$case_dir/xdg-cache
     export MOGUET_TEST_COMMAND_LOG=$command_log
@@ -70,7 +74,6 @@ setup_case() {
     export MOGUET_TEST_SUDO_EXIT_CODE=99
     unset MOGUET_TEST_PACMAN_QM_OUTPUT
     unset MOGUET_TEST_PACMAN_REPO_PACKAGES
-    unset MOGUET_TEST_PACKAGE_BUILD_DIR
     unset MOGUET_TEST_GIT_REMOTE_URL
     unset MOGUET_TEST_GIT_CLONE_EXIT_CODE
     unset MOGUET_TEST_GIT_CLONE_SYMLINK_TARGET
@@ -225,12 +228,13 @@ assert_cache_entry_absent() {
 }
 
 prepare_source_preferences() {
-    preference_dir=$case_dir/package.build
+    preference_dir=$XDG_CONFIG_HOME/moguet/source-build.d
     mkdir -p "$preference_dir"
+    chmod 0700 "$preference_dir"
     for package in "$@"; do
         : > "$preference_dir/$package"
+        chmod 0600 "$preference_dir/$package"
     done
-    export MOGUET_TEST_PACKAGE_BUILD_DIR=$preference_dir
 }
 
 # strict APIだけがAUR RPC v5 envelopeを検証する。legacy APIのpermissive境界は維持する。

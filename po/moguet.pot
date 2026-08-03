@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Moguet 2.0.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-02 04:39+0900\n"
+"POT-Creation-Date: 2026-08-03 08:03+0900\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -1430,7 +1430,7 @@ msgstr ""
 #. TRANSLATORS: {} is the literal service name "AUR".
 #. TRANSLATORS: AUR is a runtime project identity.
 #: src/aur_update_execution_preparation.cpp:257
-#: src/aur_update_operation_result.cpp:1137
+#: src/aur_update_operation_result.cpp:1149
 #, c++-format
 msgid "{} update preflight target has an unknown status."
 msgstr ""
@@ -1788,364 +1788,364 @@ msgid "Preparation target snapshot does not match the targets eligible in this p
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:717
+#: src/aur_update_operation_result.cpp:729
 #, c++-format
 msgid "Terminal execution outcomes from multiple work items were attributed to one {} update target."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1163
+#: src/aur_update_operation_result.cpp:1175
 #, c++-format
 msgid "{} update preflight issue has an unknown reason."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1176
+#: src/aur_update_operation_result.cpp:1188
 #, c++-format
 msgid "Executable {} update target retains a blocking preflight issue."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1190
+#: src/aur_update_operation_result.cpp:1202
 #, c++-format
 msgid "{} update target has an unknown installed package reason."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1202
+#: src/aur_update_operation_result.cpp:1214
 #, c++-format
 msgid "{} update target has an unknown update classification."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1216
+#: src/aur_update_operation_result.cpp:1228
 #, c++-format
 msgid "{} update target has an unknown version relation."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1230
+#: src/aur_update_operation_result.cpp:1242
 #, c++-format
 msgid "{} update target has an unknown desired install reason."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1244
+#: src/aur_update_operation_result.cpp:1256
 #, c++-format
 msgid "Skipped {} update target cannot be confirmed as a normal skip."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1260
+#: src/aur_update_operation_result.cpp:1272
 #, c++-format
 msgid "{} update preflight target has an out-of-range update plan index."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1276
+#: src/aur_update_operation_result.cpp:1288
 #, c++-format
 msgid "{} update preflight target index differs from its original-order position."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1293
+#: src/aur_update_operation_result.cpp:1305
 #, c++-format
 msgid "{} update preflight contains a duplicate update plan index."
 msgstr ""
 
-#: src/aur_update_operation_result.cpp:1331
+#: src/aur_update_operation_result.cpp:1343
 msgid "Preparation retains root attribution without a target-bearing phase."
 msgstr ""
 
-#: src/aur_update_operation_result.cpp:1344
+#: src/aur_update_operation_result.cpp:1356
 msgid "Global preparation issue exists outside the executable preparation phase."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1353
+#: src/aur_update_operation_result.cpp:1365
 #, c++-format
 msgid "{} update preparation issue has an unknown reason."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1364
+#: src/aur_update_operation_result.cpp:1376
 #, c++-format
 msgid "{} update preparation issue has no typed reason."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1376
+#: src/aur_update_operation_result.cpp:1388
 #, c++-format
 msgid "Nested {} update preflight issue has an unknown reason."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1389
+#: src/aur_update_operation_result.cpp:1401
 #, c++-format
 msgid "{} update preparation issue has an unknown source preference failure kind."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1402
+#: src/aur_update_operation_result.cpp:1414
 #, c++-format
 msgid "{} update preparation issue has an unknown package metadata error code."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1417
+#: src/aur_update_operation_result.cpp:1429
 #, c++-format
 msgid "{} update preparation issue contains duplicate target attribution."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1434
+#: src/aur_update_operation_result.cpp:1446
 #, c++-format
 msgid "{} update preparation issue refers to an unknown update plan index."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1452
+#: src/aur_update_operation_result.cpp:1464
 #, c++-format
 msgid "{} update preparation issue is attributed to a target outside the current preparation phase."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1474
+#: src/aur_update_operation_result.cpp:1486
 #, c++-format
 msgid "{} update preparation warning has root attribution without update target attribution."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1488
+#: src/aur_update_operation_result.cpp:1500
 #, c++-format
 msgid "{} update preparation warning contains duplicate target attribution."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1502
+#: src/aur_update_operation_result.cpp:1514
 #, c++-format
 msgid "{} update preparation warning refers to an unknown update plan index."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1521
+#: src/aur_update_operation_result.cpp:1533
 #, c++-format
 msgid "{} update preparation warning is attributed to a target outside the warning-producing phase."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1546
+#: src/aur_update_operation_result.cpp:1558
 #, c++-format
 msgid "{} update preparation contains both an invocation and blocking issues."
 msgstr ""
 
-#: src/aur_update_operation_result.cpp:1557
+#: src/aur_update_operation_result.cpp:1569
 msgid "Preflight-blocked preparation unexpectedly contains an execution invocation."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1575
+#: src/aur_update_operation_result.cpp:1587
 #, c++-format
 msgid "Prepared {} update targets have no execution result."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1588
+#: src/aur_update_operation_result.cpp:1600
 #, c++-format
 msgid "{} update execution result exists together with preparation issues."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1600
+#: src/aur_update_operation_result.cpp:1612
 #, c++-format
 msgid "{} update execution result exists for a preflight-blocked operation."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1610
+#: src/aur_update_operation_result.cpp:1622
 #, c++-format
 msgid "{} update execution result exists without an executable preflight target."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1630
+#: src/aur_update_operation_result.cpp:1642
 #, c++-format
 msgid "{} update execution child contains duplicate target attribution."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1649
-#: src/aur_update_operation_result.cpp:1952
+#: src/aur_update_operation_result.cpp:1661
+#: src/aur_update_operation_result.cpp:1964
 #, c++-format
 msgid "{} update execution child refers to an unknown update plan index."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1668
+#: src/aur_update_operation_result.cpp:1680
 #, c++-format
 msgid "{} update execution child is attributed to a non-executable preflight target."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1694
+#: src/aur_update_operation_result.cpp:1706
 #, c++-format
 msgid "{} update execution result contains a duplicate work item index."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1706
+#: src/aur_update_operation_result.cpp:1718
 #, c++-format
 msgid "{} update execution work item index differs from result order."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1722
+#: src/aur_update_operation_result.cpp:1734
 #, c++-format
 msgid "{} update work item result has an unknown status."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1734
+#: src/aur_update_operation_result.cpp:1746
 #, c++-format
 msgid "{} update work item result has an unknown failure kind."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1749
+#: src/aur_update_operation_result.cpp:1761
 #, c++-format
 msgid "{} update work item status and failure kind disagree."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1763
+#: src/aur_update_operation_result.cpp:1775
 #, c++-format
 msgid "{} update work item failure detail or transaction attempt snapshot is inconsistent."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1776
+#: src/aur_update_operation_result.cpp:1788
 #, c++-format
 msgid "{} update work item result has no target attribution."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1796
+#: src/aur_update_operation_result.cpp:1808
 #, c++-format
 msgid "{} update execution work item cannot be correlated to one selected projected build unit."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1815
-#: src/aur_update_operation_result.cpp:1996
+#: src/aur_update_operation_result.cpp:1827
+#: src/aur_update_operation_result.cpp:2008
 #, c++-format
 msgid "{} update execution result contains a duplicate required child index."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1829
-#: src/aur_update_operation_result.cpp:1853
+#: src/aur_update_operation_result.cpp:1841
+#: src/aur_update_operation_result.cpp:1865
 #, c++-format
 msgid "Uncorrelated {} update execution child has an inconsistent outcome."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1875
+#: src/aur_update_operation_result.cpp:1887
 #, c++-format
 msgid "Uncorrelated {} update execution child has an inconsistent selected artifact."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1915
+#: src/aur_update_operation_result.cpp:1927
 #, c++-format
 msgid "{} update execution work-item aggregate snapshot differs from preparation."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1928
+#: src/aur_update_operation_result.cpp:1940
 #, c++-format
 msgid "{} update execution child outcomes do not agree with the work-item aggregate state."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1967
+#: src/aur_update_operation_result.cpp:1979
 #, c++-format
 msgid "{} update execution child has an unknown status."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:1981
+#: src/aur_update_operation_result.cpp:1993
 #, c++-format
 msgid "{} update execution result contains an extra required child."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:2015
+#: src/aur_update_operation_result.cpp:2027
 #, c++-format
 msgid "{} update execution required child snapshot differs from preparation."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:2039
+#: src/aur_update_operation_result.cpp:2051
 #, c++-format
 msgid "{} update execution child selected artifact is missing or inconsistent."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:2055
+#: src/aur_update_operation_result.cpp:2067
 #, c++-format
 msgid "{} update execution result contains a duplicate selected artifact identity."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:2070
+#: src/aur_update_operation_result.cpp:2082
 #, c++-format
 msgid "{} update execution child outcome disagrees with the work-item state."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:2102
+#: src/aur_update_operation_result.cpp:2114
 #, c++-format
 msgid "{} update execution result is missing a prepared required child."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:2121
+#: src/aur_update_operation_result.cpp:2133
 #, c++-format
 msgid "Failed or not-attempted {} update work item unexpectedly contains unselected artifact identities."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:2139
+#: src/aur_update_operation_result.cpp:2151
 #, c++-format
 msgid "{} update work-item unselected artifact identity is invalid or overlaps a selected child."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:2165
+#: src/aur_update_operation_result.cpp:2177
 #, c++-format
 msgid "{} update work-item contains a duplicate unselected artifact identity."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:2203
+#: src/aur_update_operation_result.cpp:2215
 #, c++-format
 msgid "Executable {} update target has no execution attribution."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:2219
+#: src/aur_update_operation_result.cpp:2231
 #, c++-format
 msgid "{} update invocation result has an unknown status."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:2229
+#: src/aur_update_operation_result.cpp:2241
 #, c++-format
 msgid "{} update invocation status and work item outcomes disagree."
 msgstr ""
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#: src/aur_update_operation_result.cpp:2252
+#: src/aur_update_operation_result.cpp:2264
 #, c++-format
 msgid "{} update operation could not be reduced to a known status."
 msgstr ""
@@ -2295,7 +2295,7 @@ msgstr ""
 msgid "Failed to clone {}."
 msgstr ""
 
-#: src/cli_parser.cpp:28 src/logging.cpp:175 src/moguet.cpp:83
+#: src/cli_parser.cpp:28 src/logging.cpp:175 src/moguet.cpp:84
 #, c++-format
 msgid "Error: {}"
 msgstr ""
@@ -2367,7 +2367,7 @@ msgstr ""
 
 #. TRANSLATORS: The placeholders are the command, operation, and operand tokens.
 #: src/cli_routing.cpp:54 src/commands_inspect.cpp:52
-#: src/commands_inspect.cpp:59 src/moguet.cpp:162 src/moguet.cpp:171
+#: src/commands_inspect.cpp:59 src/moguet.cpp:206 src/moguet.cpp:215
 #, c++-format
 msgid "Usage: {} {} {}"
 msgstr ""
@@ -3013,7 +3013,7 @@ msgstr ""
 #. second is a runtime option token.
 #: src/commands_inspect.cpp:713 src/commands_inspect.cpp:809
 #: src/commands_inspect.cpp:851 src/commands_upgrade_all.cpp:1806
-#: src/moguet.cpp:894
+#: src/moguet.cpp:950
 #, c++-format
 msgid "Unsupported {} option: {}"
 msgstr ""
@@ -3107,282 +3107,270 @@ msgstr ""
 msgid "Unknown {} update classification."
 msgstr ""
 
-#: src/commands_source_maintenance.cpp:81 src/source_build.cpp:149
+#: src/commands_source_maintenance.cpp:94 src/source_build.cpp:149
 #, c++-format
 msgid "Unsafe command token: {}"
 msgstr ""
 
-#: src/commands_source_maintenance.cpp:87 src/source_build.cpp:155
+#: src/commands_source_maintenance.cpp:100 src/source_build.cpp:155
 msgid "Editor command is empty."
 msgstr ""
 
-#: src/commands_source_maintenance.cpp:155 src/source_build.cpp:205
+#: src/commands_source_maintenance.cpp:184 src/source_build.cpp:205
 #, c++-format
 msgid "Skipping prompt ({}): {} -> yes"
 msgstr ""
 
-#: src/commands_source_maintenance.cpp:161 src/source_build.cpp:211
+#: src/commands_source_maintenance.cpp:190 src/source_build.cpp:211
 #, c++-format
 msgid "Skipping prompt ({}): {} -> no"
 msgstr ""
 
-#: src/commands_source_maintenance.cpp:169 src/source_build.cpp:219
+#: src/commands_source_maintenance.cpp:198 src/source_build.cpp:219
 #, c++-format
 msgid "Cannot answer prompt without interaction ({}): {}"
 msgstr ""
 
-#: src/commands_source_maintenance.cpp:179 src/source_build.cpp:229
+#: src/commands_source_maintenance.cpp:208 src/source_build.cpp:229
 #, c++-format
 msgid "Skipping prompt (non-interactive {}): {} -> no"
 msgstr ""
 
-#: src/commands_source_maintenance.cpp:185 src/source_build.cpp:235
+#: src/commands_source_maintenance.cpp:214 src/source_build.cpp:235
 #, c++-format
 msgid "Cannot safely answer prompt with non-interactive standard input: {}"
 msgstr ""
 
-#: src/commands_source_maintenance.cpp:197 src/source_build.cpp:247
+#: src/commands_source_maintenance.cpp:226 src/source_build.cpp:247
 #, c++-format
 msgid "Failed to read the answer to this prompt: {}"
 msgstr ""
 
-#: src/commands_source_maintenance.cpp:204
-#: src/commands_source_maintenance.cpp:211 src/source_build.cpp:254
+#: src/commands_source_maintenance.cpp:233
+#: src/commands_source_maintenance.cpp:240 src/source_build.cpp:254
 #: src/source_build.cpp:261
 msgid "Please answer yes or no."
 msgstr ""
 
-#: src/commands_source_maintenance.cpp:222
+#: src/commands_source_maintenance.cpp:251
 msgid "Source preference load event has no entry path."
 msgstr ""
 
-#: src/commands_source_maintenance.cpp:226 src/source_install.cpp:41
+#: src/commands_source_maintenance.cpp:255 src/source_install.cpp:41
 #, c++-format
 msgid "Loading custom build flags from {}."
 msgstr ""
 
-#: src/commands_source_maintenance.cpp:235
+#: src/commands_source_maintenance.cpp:264
 msgid "System upgrade..."
 msgstr ""
 
-#: src/commands_source_maintenance.cpp:239
+#: src/commands_source_maintenance.cpp:268
 msgid "Checking source packages..."
 msgstr ""
 
-#: src/commands_source_maintenance.cpp:243
+#: src/commands_source_maintenance.cpp:272
 msgid "Unknown system/source upgrade event kind."
 msgstr ""
 
-#: src/commands_source_maintenance.cpp:252
+#: src/commands_source_maintenance.cpp:281
 msgid "System/source upgrade stopped without a failure diagnostic."
 msgstr ""
 
-#: src/commands_source_maintenance.cpp:263 src/moguet.cpp:144
-#: src/moguet.cpp:153
+#: src/commands_source_maintenance.cpp:292 src/moguet.cpp:188
+#: src/moguet.cpp:197
 #, c++-format
 msgid "Usage: {} {} {} {}"
 msgstr ""
 
-#: src/commands_source_maintenance.cpp:277
-#: src/commands_source_maintenance.cpp:357
+#: src/commands_source_maintenance.cpp:306
+#: src/commands_source_maintenance.cpp:387
 #, c++-format
 msgid "Invalid environment assignment: {}"
 msgstr ""
 
-#: src/commands_source_maintenance.cpp:284
+#: src/commands_source_maintenance.cpp:313
 #, c++-format
 msgid "Ignoring extra arg '{}'"
 msgstr ""
 
-#: src/commands_source_maintenance.cpp:288
+#: src/commands_source_maintenance.cpp:317
 msgid "No package specified."
-msgstr ""
-
-#: src/commands_source_maintenance.cpp:307
-#, c++-format
-msgid "Build Error: {}"
-msgstr ""
-
-#: src/commands_source_maintenance.cpp:324
-#, c++-format
-msgid "Failed to add {}"
-msgstr ""
-
-#: src/commands_source_maintenance.cpp:329
-#, c++-format
-msgid "Added {} to source-build list."
 msgstr ""
 
 #: src/commands_source_maintenance.cpp:336
 #, c++-format
+msgid "Build Error: {}"
+msgstr ""
+
+#: src/commands_source_maintenance.cpp:354
+#, c++-format
+msgid "Added {} to source-build list."
+msgstr ""
+
+#: src/commands_source_maintenance.cpp:364
+#, c++-format
 msgid "Environment assignment requires a preceding package: {}"
 msgstr ""
 
-#: src/commands_source_maintenance.cpp:344
+#: src/commands_source_maintenance.cpp:374
 #, c++-format
 msgid "Appending {} to {}"
 msgstr ""
 
-#: src/commands_source_maintenance.cpp:348
+#: src/commands_source_maintenance.cpp:415
 #, c++-format
-msgid "Failed to append environment key {} to {}."
+msgid "Source preference reader did not return an entry identity for {}."
 msgstr ""
 
-#: src/commands_source_maintenance.cpp:378
+#: src/commands_source_maintenance.cpp:430
 #, c++-format
 msgid "Failed to create a temporary source preference file: {}"
 msgstr ""
 
-#: src/commands_source_maintenance.cpp:388
-#, c++-format
-msgid "Failed to close temporary file {}: {}"
-msgstr ""
-
-#: src/commands_source_maintenance.cpp:403
+#: src/commands_source_maintenance.cpp:443
+#: src/commands_source_maintenance.cpp:619
 #, c++-format
 msgid "Failed to remove temporary file {}: {}"
 msgstr ""
 
-#: src/commands_source_maintenance.cpp:414
-#, c++-format
-msgid "Failed to read source preference file {}."
-msgstr ""
-
-#: src/commands_source_maintenance.cpp:425
-#, c++-format
-msgid "Failed to write temporary file {}."
-msgstr ""
-
-#: src/commands_source_maintenance.cpp:437
+#: src/commands_source_maintenance.cpp:466
 #, c++-format
 msgid "Failed to copy source preference file {} to temporary file {}."
 msgstr ""
 
-#: src/commands_source_maintenance.cpp:449
+#: src/commands_source_maintenance.cpp:476
 #, c++-format
-msgid "Editor failed for {}"
+msgid "Failed to close temporary file {}: {}"
 msgstr ""
 
-#: src/commands_source_maintenance.cpp:464
+#: src/commands_source_maintenance.cpp:487
+#, c++-format
+msgid "Editor failed for {}; the edited file was kept at {}."
+msgstr ""
+
+#: src/commands_source_maintenance.cpp:501
 #, c++-format
 msgid "Failed to open edited temporary file {}: {}"
 msgstr ""
 
-#: src/commands_source_maintenance.cpp:477
+#: src/commands_source_maintenance.cpp:513
 #, c++-format
 msgid "Failed to close edited temporary file {}: {}"
 msgstr ""
 
-#: src/commands_source_maintenance.cpp:488
+#: src/commands_source_maintenance.cpp:524
+#: src/commands_source_maintenance.cpp:563
 #, c++-format
 msgid "Failed to inspect edited temporary file {}: {}"
 msgstr ""
 
-#: src/commands_source_maintenance.cpp:499
+#: src/commands_source_maintenance.cpp:534
 #, c++-format
 msgid "Edited temporary file is not a regular file: {}"
 msgstr ""
 
-#: src/commands_source_maintenance.cpp:515
+#: src/commands_source_maintenance.cpp:550
 #, c++-format
 msgid "Failed to install the edited source-build preference at {}; the edited file was kept at {}."
 msgstr ""
 
-#: src/commands_source_maintenance.cpp:531
+#: src/commands_source_maintenance.cpp:573
+#: src/commands_source_maintenance.cpp:590
+#: src/commands_source_maintenance.cpp:610
+#, c++-format
+msgid "Edited temporary file changed during publication and was not removed: {}"
+msgstr ""
+
+#: src/commands_source_maintenance.cpp:634
 msgid "No source-build packages registered."
 msgstr ""
 
-#: src/commands_source_maintenance.cpp:537
+#: src/commands_source_maintenance.cpp:640
 msgid "Registered Source Packages:"
 msgstr ""
 
-#: src/commands_source_maintenance.cpp:555
+#: src/commands_source_maintenance.cpp:652
 msgid "(none)"
 msgstr ""
 
-#: src/commands_source_maintenance.cpp:566
+#: src/commands_source_maintenance.cpp:663
 #, c++-format
 msgid "Removing {} from list..."
 msgstr ""
 
-#: src/commands_source_maintenance.cpp:570
-#: src/commands_source_maintenance.cpp:591
-#, c++-format
-msgid "Failed to remove {}"
-msgstr ""
-
-#: src/commands_source_maintenance.cpp:587
+#: src/commands_source_maintenance.cpp:692
 #, c++-format
 msgid "Unmarking source-build for {}"
 msgstr ""
 
-#: src/commands_source_maintenance.cpp:599
+#: src/commands_source_maintenance.cpp:696
 #, c++-format
 msgid "{} was not marked."
 msgstr ""
 
-#: src/commands_source_maintenance.cpp:604
+#: src/commands_source_maintenance.cpp:701
 #, c++-format
 msgid "{} exists in official repos. Will reinstall binary."
 msgstr ""
 
-#: src/commands_source_maintenance.cpp:610
+#: src/commands_source_maintenance.cpp:707
 #, c++-format
 msgid "{} is likely an {} package. Config removed only."
 msgstr ""
 
-#: src/commands_source_maintenance.cpp:620
+#: src/commands_source_maintenance.cpp:717
 #, c++-format
 msgid "Reinstalling binaries: {}"
 msgstr ""
 
-#: src/commands_source_maintenance.cpp:623
+#: src/commands_source_maintenance.cpp:720
 msgid "Failed to reinstall binaries."
 msgstr ""
 
-#: src/commands_source_maintenance.cpp:628
+#: src/commands_source_maintenance.cpp:725
 msgid "Failed to revert one or more packages."
 msgstr ""
 
-#: src/commands_source_maintenance.cpp:642
+#: src/commands_source_maintenance.cpp:739
 msgid "Cleaning package caches..."
 msgstr ""
 
-#: src/commands_source_maintenance.cpp:646
+#: src/commands_source_maintenance.cpp:743
 #, c++-format
 msgid "{} clean failed or cancelled."
 msgstr ""
 
-#: src/commands_source_maintenance.cpp:653
+#: src/commands_source_maintenance.cpp:750
 #, c++-format
 msgid "Clean {} build cache ({})?"
 msgstr ""
 
-#: src/commands_source_maintenance.cpp:658
+#: src/commands_source_maintenance.cpp:755
 msgid "Removing cached build files..."
 msgstr ""
 
-#: src/commands_source_maintenance.cpp:667
+#: src/commands_source_maintenance.cpp:764
 #, c++-format
 msgid "Failed to clean the {} cache: {}"
 msgstr ""
 
-#: src/commands_source_maintenance.cpp:673
+#: src/commands_source_maintenance.cpp:770
 #, c++-format
 msgid "{} cache cleanup was incomplete."
 msgstr ""
 
-#: src/commands_source_maintenance.cpp:678
+#: src/commands_source_maintenance.cpp:775
 #, c++-format
 msgid "{} cache cleaned."
 msgstr ""
 
-#: src/commands_source_maintenance.cpp:683
+#: src/commands_source_maintenance.cpp:780
 #, c++-format
 msgid "Skipped {} cache cleaning."
 msgstr ""
 
-#: src/commands_source_maintenance.cpp:688
+#: src/commands_source_maintenance.cpp:785
 #, c++-format
 msgid "{} cache is empty."
 msgstr ""
@@ -4989,303 +4977,309 @@ msgstr ""
 msgid "Running: {}"
 msgstr ""
 
-#: src/moguet.cpp:134
+#: src/moguet.cpp:178
 #, c++-format
 msgid "Unknown operation: {}"
 msgstr ""
 
-#: src/moguet.cpp:177
+#: src/moguet.cpp:221
 #, c++-format
 msgid "Operation {} requires a target."
 msgstr ""
 
-#: src/moguet.cpp:198
+#: src/moguet.cpp:242
 #, c++-format
 msgid "Do not run {} as {} or with {}."
 msgstr ""
 
-#: src/moguet.cpp:203
+#: src/moguet.cpp:247
 #, c++-format
 msgid "Run {} as a normal user; {} will invoke {}/{} when needed."
 msgstr ""
 
-#: src/moguet.cpp:225
+#: src/moguet.cpp:269
 msgid "Failed to load the user configuration because of an unknown error."
 msgstr ""
 
-#: src/moguet.cpp:309
+#: src/moguet.cpp:353
 #, c++-format
 msgid "Operation {} does not accept target operands."
 msgstr ""
 
-#: src/moguet.cpp:350
+#: src/moguet.cpp:394
 #, c++-format
 msgid "Started {} v{}."
 msgstr ""
 
-#: src/moguet.cpp:361
+#: src/moguet.cpp:405
 #, c++-format
 msgid "Cannot initialize the {} default state log because of an unknown error."
 msgstr ""
 
-#: src/moguet.cpp:536
+#: src/moguet.cpp:580
 #, c++-format
 msgid "Cannot finalize the {} default state log because of an unknown error."
 msgstr ""
 
-#: src/moguet.cpp:608
+#: src/moguet.cpp:652
 msgid "USAGE"
 msgstr ""
 
-#: src/moguet.cpp:612
+#: src/moguet.cpp:656
 msgid "OPERATIONS"
 msgstr ""
 
-#: src/moguet.cpp:616
+#: src/moguet.cpp:660
 msgid "Build one package from source without saving a preference"
 msgstr ""
 
-#: src/moguet.cpp:620
+#: src/moguet.cpp:664
 msgid "Update the system and rebuild configured source packages"
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the literal pacman-compatible -Syu token.
-#: src/moguet.cpp:624
+#: src/moguet.cpp:668
 #, c++-format
 msgid "Check registered source-build preferences after {}"
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the AUR project identity.
-#: src/moguet.cpp:630
+#: src/moguet.cpp:674
 #, c++-format
 msgid "Update installed {} packages only"
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the literal pacman-compatible -Syu token.
-#: src/moguet.cpp:634
+#: src/moguet.cpp:678
 #, c++-format
 msgid "Do not run {}; source-build preferences are optional"
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the AUR project identity.
-#: src/moguet.cpp:640
+#: src/moguet.cpp:684
 #, c++-format
 msgid "Update the system, registered source packages, and remaining installed {} packages"
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the literal PackageBase identity.
-#: src/moguet.cpp:645
+#: src/moguet.cpp:689
 #, c++-format
 msgid "Give explicit source preferences priority and avoid duplicate package/{} builds"
 msgstr ""
 
-#: src/moguet.cpp:648
+#: src/moguet.cpp:692
 msgid "Do not accept target operands"
 msgstr ""
 
-#: src/moguet.cpp:651
+#: src/moguet.cpp:695
 msgid "Clean package and build caches"
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the AUR project identity.
-#: src/moguet.cpp:656
+#: src/moguet.cpp:700
 #, c++-format
 msgid "{} INSPECTION"
 msgstr ""
 
 #. TRANSLATORS: AUR, PackageBase, and the destination path are literal identities.
-#: src/moguet.cpp:661
+#: src/moguet.cpp:705
 #, c++-format
 msgid "Export one {} {} repository to {} without building or installing"
 msgstr ""
 
 #. TRANSLATORS: AUR, PackageBase, PKGBUILD, and stdout are literal identities.
-#: src/moguet.cpp:667
+#: src/moguet.cpp:711
 #, c++-format
 msgid "Print one {} {} {} to {} without keeping a checkout"
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the AUR project identity.
-#: src/moguet.cpp:673
+#: src/moguet.cpp:717
 #, c++-format
 msgid "Classify {} dependencies"
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the AUR project identity.
-#: src/moguet.cpp:678
+#: src/moguet.cpp:722
 #, c++-format
 msgid "Show the {} build-order plan"
 msgstr ""
 
 #. TRANSLATORS: The placeholders are literal git commands and the AUR identity.
-#: src/moguet.cpp:683
+#: src/moguet.cpp:727
 #, c++-format
 msgid "Safely run {} or {} for {} build repositories"
 msgstr ""
 
 #. TRANSLATORS: The placeholders are literal git commands.
-#: src/moguet.cpp:688
+#: src/moguet.cpp:732
 #, c++-format
 msgid "For existing clones, run {} only; do not update the working tree or run {}, {}, build, or install"
 msgstr ""
 
-#: src/moguet.cpp:692
+#: src/moguet.cpp:736
 msgid "SOURCE BUILD PREFERENCES"
 msgstr ""
 
-#: src/moguet.cpp:696
+#. TRANSLATORS: The placeholder is the literal XDG identity.
+#: src/moguet.cpp:741
+#, c++-format
+msgid "Store each preference in the active user's {} config authority"
+msgstr ""
+
+#: src/moguet.cpp:746
 msgid "Enable a source-build preference for a package"
 msgstr ""
 
-#: src/moguet.cpp:700
+#: src/moguet.cpp:750
 msgid "Edit a source-build preference"
 msgstr ""
 
-#: src/moguet.cpp:704
+#: src/moguet.cpp:754
 msgid "List source-build preferences"
 msgstr ""
 
-#: src/moguet.cpp:708
+#: src/moguet.cpp:758
 msgid "Remove a source-build preference"
 msgstr ""
 
-#: src/moguet.cpp:712
+#: src/moguet.cpp:762
 msgid "Remove a preference and reinstall the binary package"
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the literal pacman program identity.
-#: src/moguet.cpp:717
+#: src/moguet.cpp:767
 #, c++-format
 msgid "{} COMPATIBILITY"
 msgstr ""
 
-#: src/moguet.cpp:720
+#: src/moguet.cpp:770
 msgid "Install packages"
 msgstr ""
 
-#: src/moguet.cpp:723
+#: src/moguet.cpp:773
 msgid "Upgrade the system"
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the literal pacman program identity.
-#: src/moguet.cpp:727
+#: src/moguet.cpp:777
 #, c++-format
 msgid "Remain compatible with {}; do not scan all source-build preferences"
 msgstr ""
 
-#: src/moguet.cpp:731
+#: src/moguet.cpp:781
 msgid "Search for packages"
 msgstr ""
 
-#: src/moguet.cpp:734
+#: src/moguet.cpp:784
 msgid "Show package information"
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the AUR project identity.
-#: src/moguet.cpp:739
+#: src/moguet.cpp:789
 #, c++-format
 msgid "Check {} and foreign-package updates"
 msgstr ""
 
-#: src/moguet.cpp:741
+#: src/moguet.cpp:791
 msgid "OPTIONS"
 msgstr ""
 
-#: src/moguet.cpp:745
+#: src/moguet.cpp:795
 msgid "Show this help message and exit"
 msgstr ""
 
-#: src/moguet.cpp:749
+#: src/moguet.cpp:799
 msgid "Show version information and exit"
 msgstr ""
 
 #. TRANSLATORS: PKGBUILD and .install are literal artifact names.
-#: src/moguet.cpp:754
+#: src/moguet.cpp:804
 #, c++-format
 msgid "Prompt to review {} and {} files"
 msgstr ""
 
 #. TRANSLATORS: PKGBUILD and .install are literal artifact names.
-#: src/moguet.cpp:759
+#: src/moguet.cpp:809
 #, c++-format
 msgid "Skip {} and {} review"
 msgstr ""
 
-#: src/moguet.cpp:763
+#: src/moguet.cpp:813
 msgid "Prompt to view repository update diffs"
 msgstr ""
 
-#: src/moguet.cpp:767
+#: src/moguet.cpp:817
 msgid "Skip the repository update diff prompt"
 msgstr ""
 
 #. TRANSLATORS: pacman and makepkg are literal external-program identities.
-#: src/moguet.cpp:772
+#: src/moguet.cpp:822
 #, c++-format
 msgid "Pass this option to {} and {}"
 msgstr ""
 
 #. TRANSLATORS: pacman, AUR, and -S are literal identities or CLI tokens.
-#: src/moguet.cpp:777
+#: src/moguet.cpp:827
 #, c++-format
 msgid "Pass this option to {}; on {} or source-build {} routes, apply it only to final installation"
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the literal Moguet project identity.
-#: src/moguet.cpp:782
+#: src/moguet.cpp:832
 #, c++-format
 msgid "Do not skip {} build, review, or plan steps"
 msgstr ""
 
-#: src/moguet.cpp:786
+#: src/moguet.cpp:836
 msgid "Select the source-build mode"
 msgstr ""
 
 #. TRANSLATORS: The placeholder is a literal compatibility option form.
-#: src/moguet.cpp:791 src/moguet.cpp:797
+#: src/moguet.cpp:841 src/moguet.cpp:847
 #, c++-format
 msgid "Compatibility alias for {}"
 msgstr ""
 
-#: src/moguet.cpp:802
+#: src/moguet.cpp:852
 msgid "Unsupported for separated source builds; no dependency cleanup is performed"
 msgstr ""
 
 #. TRANSLATORS: -S, -Ss, -Si, and AUR are literal CLI/project identities.
-#: src/moguet.cpp:807
+#: src/moguet.cpp:857
 #, c++-format
 msgid "Limit {}, {}, and {} to {}; do not fall back to repositories"
 msgstr ""
 
 #. TRANSLATORS: -S, -Ss, -Si, and AUR are literal CLI/project identities.
-#: src/moguet.cpp:813
+#: src/moguet.cpp:863
 #, c++-format
 msgid "Limit {}, {}, and {} to official binary repositories; do not use {} or source builds"
 msgstr ""
 
-#: src/moguet.cpp:816
+#: src/moguet.cpp:866
 msgid "CONFIGURATION"
 msgstr ""
 
-#: src/moguet.cpp:820
+#: src/moguet.cpp:870
 msgid "Read-only typed configuration; a missing file uses built-in defaults"
 msgstr ""
 
-#: src/moguet.cpp:823
+#: src/moguet.cpp:873
 msgid "Required schema version"
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the literal PKGBUILD artifact identity.
-#: src/moguet.cpp:828
+#: src/moguet.cpp:878
 #, c++-format
 msgid "{} review policy"
 msgstr ""
 
-#: src/moguet.cpp:831
+#: src/moguet.cpp:881
 msgid "Repository update diff policy"
 msgstr ""
 
-#: src/moguet.cpp:834
+#: src/moguet.cpp:884
 msgid "Source-build mode"
 msgstr ""
 
@@ -6567,39 +6561,128 @@ msgstr ""
 msgid "Failed while building/installing {} {} ({}): {}"
 msgstr ""
 
-#: src/source_preference.cpp:206
+#: src/source_preference.cpp:283
 #, c++-format
 msgid "Failed to expand variables for {}: {}"
 msgstr ""
 
-#: src/source_preference.cpp:217
+#: src/source_preference.cpp:294
 #, c++-format
 msgid "Ignoring invalid environment assignment: {}"
 msgstr ""
 
-#: src/source_preference.cpp:235
+#: src/source_preference.cpp:312
+#, c++-format
+msgid "Failed to enumerate source preference directory {}: {}"
+msgstr ""
+
+#: src/source_preference.cpp:316
 #, c++-format
 msgid "Failed to inspect source preference entry {}: {}"
 msgstr ""
 
-#: src/source_preference.cpp:239
+#: src/source_preference.cpp:320
 #, c++-format
 msgid "Failed to open source preference entry {}: {}"
 msgstr ""
 
-#: src/source_preference.cpp:243
+#: src/source_preference.cpp:324
+#, c++-format
+msgid "Failed to lock source preference storage {}: {}"
+msgstr ""
+
+#: src/source_preference.cpp:328
 #, c++-format
 msgid "Failed to read source preference entry {}: {}"
 msgstr ""
 
-#: src/source_preference.cpp:249
+#: src/source_preference.cpp:332
+#, c++-format
+msgid "Failed to write source preference entry {}: {}"
+msgstr ""
+
+#: src/source_preference.cpp:336
+#, c++-format
+msgid "Failed to synchronize source preference storage {}: {}"
+msgstr ""
+
+#: src/source_preference.cpp:340
+#, c++-format
+msgid "Failed to publish source preference entry {} atomically: {}"
+msgstr ""
+
+#: src/source_preference.cpp:344
+#, c++-format
+msgid "Failed to remove source preference entry {}: {}"
+msgstr ""
+
+#: src/source_preference.cpp:348
+#, c++-format
+msgid "Failed to close source preference storage {}: {}"
+msgstr ""
+
+#: src/source_preference.cpp:359
 #, c++-format
 msgid "Source preference entry {} failed with an unknown error: {}"
 msgstr ""
 
-#: src/source_preference.cpp:287
+#: src/source_preference.cpp:414
 #, c++-format
 msgid "Source preference entry is not a regular file: {}"
+msgstr ""
+
+#. TRANSLATORS: The first placeholder is the literal XDG identity; the second is a source preference path.
+#: src/source_preference.cpp:498
+#, c++-format
+msgid "Source preference entry ownership does not match the {} config authority: {}"
+msgstr ""
+
+#: src/source_preference.cpp:506
+#, c++-format
+msgid "Source preference entry permissions are not private mode {}: {}"
+msgstr ""
+
+#: src/source_preference.cpp:588 src/source_preference.cpp:615
+#: src/source_preference.cpp:629 src/source_preference.cpp:1030
+#: src/source_preference.cpp:1195 src/source_preference.cpp:1308
+#, c++-format
+msgid "Source preference entry changed during validation: {}"
+msgstr ""
+
+#: src/source_preference.cpp:694 src/source_preference.cpp:832
+#, c++-format
+msgid "Source preference entry changed while it was being read: {}"
+msgstr ""
+
+#: src/source_preference.cpp:759
+#, c++-format
+msgid "Invalid source preference entry name in {}: {}"
+msgstr ""
+
+#: src/source_preference.cpp:950 src/source_preference.cpp:1137
+#: src/source_preference.cpp:1154 src/source_preference.cpp:1168
+#: src/source_preference.cpp:1279 src/source_preference.cpp:1292
+#: src/source_preference.cpp:1355 src/source_preference.cpp:1377
+#: src/source_preference.cpp:1403
+#, c++-format
+msgid "Source preference entry changed during publication: {}"
+msgstr ""
+
+#: src/source_preference.cpp:1059
+#, c++-format
+msgid "Source preference entry changed before publication: {}"
+msgstr ""
+
+#: src/source_preference.cpp:1450 src/source_preference.cpp:1499
+#, c++-format
+msgid "Source preference entry disappeared during enumeration: {}"
+msgstr ""
+
+#: src/source_preference.cpp:1745 src/source_preference.cpp:1773
+#: src/source_preference.cpp:1823 src/source_preference.cpp:1835
+#: src/source_preference.cpp:1852
+#, c++-format
+msgid "Source preference entry changed before removal: {}"
 msgstr ""
 
 #: src/system_source_upgrade.cpp:28
@@ -6657,67 +6740,77 @@ msgstr ""
 msgid "Failed to snapshot local package versions after the system upgrade: {}"
 msgstr ""
 
-#: src/system_source_upgrade.cpp:790
+#: src/system_source_upgrade.cpp:801
 msgid "Source preference enumeration failed with an unknown exception."
 msgstr ""
 
-#: src/system_source_upgrade.cpp:890
+#: src/system_source_upgrade.cpp:811
+#, c++-format
+msgid "Source preference enumeration found a non-regular entry: {}"
+msgstr ""
+
+#: src/system_source_upgrade.cpp:815
+#, c++-format
+msgid "Source preference enumeration found an invalid entry name: {}"
+msgstr ""
+
+#: src/system_source_upgrade.cpp:924
 #, c++-format
 msgid "The registered source preference disappeared before preparation: {}"
 msgstr ""
 
-#: src/system_source_upgrade.cpp:962
+#: src/system_source_upgrade.cpp:996
 msgid "Source identity resolution failed with an unknown exception."
 msgstr ""
 
-#: src/system_source_upgrade.cpp:996
+#: src/system_source_upgrade.cpp:1030
 msgid "Source work-item preparation failed with an unknown exception."
 msgstr ""
 
-#: src/system_source_upgrade.cpp:1034
+#: src/system_source_upgrade.cpp:1068
 msgid "Source invocation preparation failed with an unknown exception."
 msgstr ""
 
-#: src/system_source_upgrade.cpp:1133
+#: src/system_source_upgrade.cpp:1167
 msgid "The prepared system/source upgrade is invalid or has already been consumed."
 msgstr ""
 
-#: src/system_source_upgrade.cpp:1148
+#: src/system_source_upgrade.cpp:1182
 msgid "The prepared system/source upgrade options differ from the execution options."
 msgstr ""
 
-#: src/system_source_upgrade.cpp:1164
+#: src/system_source_upgrade.cpp:1198
 msgid "The prepared system/source upgrade source correlation is inconsistent."
 msgstr ""
 
-#: src/system_source_upgrade.cpp:1242 src/system_source_upgrade.cpp:1247
+#: src/system_source_upgrade.cpp:1276 src/system_source_upgrade.cpp:1281
 msgid "The update failed."
 msgstr ""
 
-#: src/system_source_upgrade.cpp:1350
+#: src/system_source_upgrade.cpp:1384
 msgid "The post-upgrade package metadata snapshot failed with an unknown exception."
 msgstr ""
 
-#: src/system_source_upgrade.cpp:1394
+#: src/system_source_upgrade.cpp:1428
 msgid "The prepared source work item is missing after the system upgrade."
 msgstr ""
 
-#: src/system_source_upgrade.cpp:1410
+#: src/system_source_upgrade.cpp:1444
 #, c++-format
 msgid "The system upgrade completed, but the authoritative post-upgrade installed package snapshot is missing for {}; source processing did not start."
 msgstr ""
 
-#: src/system_source_upgrade.cpp:1419
+#: src/system_source_upgrade.cpp:1453
 #, c++-format
 msgid "The system upgrade completed, but the post-upgrade package metadata query failed for {}: {} Source processing did not start."
 msgstr ""
 
-#: src/system_source_upgrade.cpp:1441
+#: src/system_source_upgrade.cpp:1475
 #, c++-format
 msgid "Ignoring invalid source-build preference filename: {}"
 msgstr ""
 
-#: src/system_source_upgrade.cpp:1648
+#: src/system_source_upgrade.cpp:1682
 msgid "An unknown exception occurred."
 msgstr ""
 
@@ -6804,7 +6897,7 @@ msgstr ""
 msgid "Unknown trusted cache error code."
 msgstr ""
 
-#: src/trusted_cache.cpp:368 src/xdg_directory_safety.cpp:233
+#: src/trusted_cache.cpp:368 src/xdg_directory_safety.cpp:243
 #: src/xdg_state_log.cpp:239
 #, c++-format
 msgid "System error: {}."
@@ -7242,95 +7335,95 @@ msgid "User config error: '{}': key '{}' (line {}, column {}): unsupported value
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the literal XDG standard identity.
-#: src/xdg_directory_safety.cpp:112 src/xdg_directory_safety.cpp:298
-#: src/xdg_paths.cpp:40 src/xdg_paths.cpp:71
+#: src/xdg_directory_safety.cpp:122 src/xdg_directory_safety.cpp:314
+#: src/xdg_paths.cpp:42 src/xdg_paths.cpp:73
 #, c++-format
 msgid "Unknown {} directory kind."
 msgstr ""
 
-#: src/xdg_directory_safety.cpp:139
+#: src/xdg_directory_safety.cpp:149
 #, c++-format
 msgid "Unknown {} directory preparation stage."
 msgstr ""
 
-#: src/xdg_directory_safety.cpp:148
+#: src/xdg_directory_safety.cpp:158
 #, c++-format
 msgid "Cannot prepare the {} {} directory during stage {}: the required existing anchor is missing."
 msgstr ""
 
-#: src/xdg_directory_safety.cpp:156
+#: src/xdg_directory_safety.cpp:166
 #, c++-format
 msgid "Cannot prepare the {} {} directory during stage {}: a symlink component is not allowed."
 msgstr ""
 
-#: src/xdg_directory_safety.cpp:164
+#: src/xdg_directory_safety.cpp:174
 #, c++-format
 msgid "Cannot prepare the {} {} directory during stage {}: a path component is not a directory."
 msgstr ""
 
-#: src/xdg_directory_safety.cpp:172
+#: src/xdg_directory_safety.cpp:182
 #, c++-format
 msgid "Cannot prepare the {} {} directory during stage {}: directory ownership does not match the effective user."
 msgstr ""
 
-#: src/xdg_directory_safety.cpp:180
+#: src/xdg_directory_safety.cpp:190
 #, c++-format
 msgid "Cannot prepare the {} {} directory during stage {}: directory permissions are unsafe."
 msgstr ""
 
-#: src/xdg_directory_safety.cpp:188
+#: src/xdg_directory_safety.cpp:198
 #, c++-format
 msgid "Cannot prepare the {} {} directory during stage {}: filesystem permission was denied."
 msgstr ""
 
-#: src/xdg_directory_safety.cpp:196
+#: src/xdg_directory_safety.cpp:206
 #, c++-format
 msgid "Cannot prepare the {} {} directory during stage {}: directory creation failed."
 msgstr ""
 
-#: src/xdg_directory_safety.cpp:204
+#: src/xdg_directory_safety.cpp:214
 #, c++-format
 msgid "Cannot prepare the {} {} directory during stage {}: filesystem metadata could not be obtained safely."
 msgstr ""
 
-#: src/xdg_directory_safety.cpp:212
+#: src/xdg_directory_safety.cpp:222
 #, c++-format
 msgid "Cannot prepare the {} {} directory during stage {}: a path component changed during validation."
 msgstr ""
 
-#: src/xdg_directory_safety.cpp:220
+#: src/xdg_directory_safety.cpp:230
 #, c++-format
 msgid "Cannot prepare the {} {} directory during stage {}: the resolved creation boundary is invalid."
 msgstr ""
 
-#: src/xdg_directory_safety.cpp:228
+#: src/xdg_directory_safety.cpp:238
 #, c++-format
 msgid "Unknown {} directory preparation error code."
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the literal XDG standard identity.
-#: src/xdg_paths.cpp:57
+#: src/xdg_paths.cpp:59
 #, c++-format
 msgid "Unknown {} environment variable."
 msgstr ""
 
 #. TRANSLATORS: The placeholders are the Moguet project identity,
 #. literal config/state/cache kind, and environment-variable identities.
-#: src/xdg_paths.cpp:85
+#: src/xdg_paths.cpp:87
 #, c++-format
 msgid "Cannot resolve {} {} directory: {} is unset or empty, and {} is not set."
 msgstr ""
 
 #. TRANSLATORS: The placeholders are the Moguet project identity,
 #. literal config/state/cache kind, and environment-variable identities.
-#: src/xdg_paths.cpp:94
+#: src/xdg_paths.cpp:96
 #, c++-format
 msgid "Cannot resolve {} {} directory: {} is unset or empty, and {} is empty."
 msgstr ""
 
 #. TRANSLATORS: The placeholders are the Moguet project identity,
 #. literal config/state/cache kind, and environment-variable identity.
-#: src/xdg_paths.cpp:103
+#: src/xdg_paths.cpp:105
 #, c++-format
 msgid "Cannot resolve {} {} directory: {} must be an absolute path."
 msgstr ""
@@ -7338,7 +7431,7 @@ msgstr ""
 #. TRANSLATORS: The placeholders are the Moguet project identity,
 #. literal config/state/cache kind, environment-variable identity, and
 #. literal path components.
-#: src/xdg_paths.cpp:110
+#: src/xdg_paths.cpp:112
 #, c++-format
 msgid "Cannot resolve {} {} directory: {} contains a '{}' or '{}' path component."
 msgstr ""
@@ -7346,7 +7439,7 @@ msgstr ""
 #. TRANSLATORS: The placeholders are the Moguet project identity,
 #. literal config/state/cache kind, environment-variable identity, and
 #. literal double-slash token.
-#: src/xdg_paths.cpp:118
+#: src/xdg_paths.cpp:120
 #, c++-format
 msgid "Cannot resolve {} {} directory: {} begins with the implementation-defined '{}' form."
 msgstr ""
@@ -7354,20 +7447,20 @@ msgstr ""
 #. TRANSLATORS: The placeholders are the Moguet project identity,
 #. literal config/state/cache kind, environment-variable identity, and
 #. literal NUL token.
-#: src/xdg_paths.cpp:126
+#: src/xdg_paths.cpp:128
 #, c++-format
 msgid "Cannot resolve {} {} directory: {} contains an embedded {} byte."
 msgstr ""
 
 #. TRANSLATORS: The placeholders are the Moguet project identity,
 #. literal config/state/cache kind, and environment-variable identity.
-#: src/xdg_paths.cpp:133
+#: src/xdg_paths.cpp:135
 #, c++-format
 msgid "Cannot resolve {} {} directory: {} is not a valid native path."
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the literal XDG standard identity.
-#: src/xdg_paths.cpp:138
+#: src/xdg_paths.cpp:140
 #, c++-format
 msgid "Unknown {} path resolution error code."
 msgstr ""

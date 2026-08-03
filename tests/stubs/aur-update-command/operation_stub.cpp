@@ -712,7 +712,8 @@ AurUpdateSourceBuildPreparation prepare_aur_update_source_build_invocation(
     if(scenario() == "preparation-warning") {
         AurUpdatePreparationWarning warning;
         warning.preference_name = "warning-pkg";
-        warning.entry_path = "/fixture/package.build/warning-pkg";
+        warning.entry_path =
+                "/fixture/config/moguet/source-build.d/warning-pkg";
         warning.affected_update_plan_indices = {0};
         warning.diagnostic = "fixture source preference warning";
         preparation.warnings.push_back(std::move(warning));

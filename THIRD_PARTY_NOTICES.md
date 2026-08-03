@@ -74,8 +74,7 @@ Every entry below is a separately installed program invoked through command-line
 | `vercmp` | Compare Arch package versions; Arch `pacman` package | Separate process; not linked | No |
 | `git` | Clone, inspect, fetch, diff, and update source repositories | Separate process; not linked | No |
 | `bsdtar` | Read repository metadata from pacman sync databases; Arch `libarchive` package | Separate process; not linked | No |
-| `sudo` | Enter the privilege boundary for pacman and protected file operations | Separate process; not linked | No |
-| `touch`, `tee`, `install`, `rm` | Maintain source-build preference files; Arch `coreutils` package | Separate processes; not linked | No |
+| `sudo` | Enter the privilege boundary for privileged pacman operations | Separate process; not linked | No |
 | `/bin/sh` | Execute constructed command lines. `printf` is used as a shell builtin on the audited system | Separate shell process; not linked | No |
 | User-selected editor (default `nano`) | Review PKGBUILD, install scripts, and preference files; selected by the user or configuration | Separate process; no specific editor implementation is linked | No |
 

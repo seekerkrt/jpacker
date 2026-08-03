@@ -1,5 +1,6 @@
 #!/bin/sh
 set -eu
+umask 077
 
 test_binary=$1
 repo_root=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
@@ -52,15 +53,16 @@ setup_case() {
     output_file=$case_dir/output
 
     mkdir -p \
-        "$case_dir/home" "$case_dir/xdg-state" "$case_dir/xdg-cache" \
-        "$case_dir/package.build"
+        "$case_dir/home" "$case_dir/xdg-config" \
+        "$case_dir/xdg-state" "$case_dir/xdg-cache"
     : > "$command_log"
     : > "$request_log"
     export HOME=$case_dir/home
+    export XDG_CONFIG_HOME=$case_dir/xdg-config
     export XDG_STATE_HOME=$case_dir/xdg-state
     export XDG_CACHE_HOME=$case_dir/xdg-cache
+    preference_dir=$XDG_CONFIG_HOME/moguet/source-build.d
     export MOGUET_TEST_COMMAND_LOG=$command_log
-    export MOGUET_TEST_PACKAGE_BUILD_DIR=$case_dir/package.build
     export MOGUET_TEST_PACMAN_EXIT_CODE=1
     export MOGUET_TEST_SUDO_EXIT_CODE=0
     unset MOGUET_TEST_PACMAN_QM_OUTPUT
@@ -85,6 +87,11 @@ setup_case() {
     unset UNDEFINED
     unset EDITOR
     unset VISUAL
+}
+
+prepare_preference_store() {
+    mkdir -p "$preference_dir"
+    chmod 700 "$XDG_CONFIG_HOME/moguet" "$preference_dir"
 }
 
 run_ok() {
@@ -335,7 +342,9 @@ assert_cache_entry_absent() {
 
 prepare_source_preference() {
     package=$1
-    printf 'CFLAGS=-Osource-selection-test\n' > "$MOGUET_TEST_PACKAGE_BUILD_DIR/$package"
+    prepare_preference_store
+    printf 'CFLAGS=-Osource-selection-test\n' > "$preference_dir/$package"
+    chmod 600 "$preference_dir/$package"
 }
 
 run_exact() {
@@ -351,26 +360,25 @@ run_exact() {
 
 # Source preferenceのpath/read契約。列挙順はfilesystem依存なので固定しない。
 setup_case list-src-missing-root
-export MOGUET_TEST_PACKAGE_BUILD_DIR=$case_dir/missing-package.build
 LC_ALL=C LANGUAGE= run_ok list-src
 assert_contains "No source-build packages registered." "$output_file"
 assert_command_log_empty
 assert_request_log_empty
-if [ -e "$MOGUET_TEST_PACKAGE_BUILD_DIR" ] || [ -L "$MOGUET_TEST_PACKAGE_BUILD_DIR" ]; then
+if [ -e "$preference_dir" ] || [ -L "$preference_dir" ]; then
     echo "list-src created the missing source preference root" >&2
     exit 1
 fi
 
 setup_case list-src-regular-entries
-cat > "$MOGUET_TEST_PACKAGE_BUILD_DIR/alpha" <<'SOURCE_PREFERENCE'
+prepare_preference_store
+cat > "$preference_dir/alpha" <<'SOURCE_PREFERENCE'
   # comment-only line
     CFLAGS = "-O2 # kept quoted"   # removed trailing comment
     raw value without equals        # removed raw comment
 
 SOURCE_PREFERENCE
-printf '%s\n' "LDFLAGS='-Wl,--as-needed'" > "$MOGUET_TEST_PACKAGE_BUILD_DIR/zeta"
-mkdir "$MOGUET_TEST_PACKAGE_BUILD_DIR/ignored-directory"
-printf 'nested entry\n' > "$MOGUET_TEST_PACKAGE_BUILD_DIR/ignored-directory/not-an-entry"
+printf '%s\n' "LDFLAGS='-Wl,--as-needed'" > "$preference_dir/zeta"
+chmod 600 "$preference_dir/alpha" "$preference_dir/zeta"
 LC_ALL=C LANGUAGE= run_ok list-src
 assert_contains "Registered Source Packages:" "$output_file"
 assert_contains "alpha" "$output_file"
@@ -380,35 +388,52 @@ assert_contains "zeta" "$output_file"
 assert_line "    LDFLAGS='-Wl,--as-needed'" "$output_file"
 assert_not_contains "removed trailing comment" "$output_file"
 assert_not_contains "removed raw comment" "$output_file"
-assert_not_contains "ignored-directory" "$output_file"
-assert_not_contains "not-an-entry" "$output_file"
+assert_command_log_empty
+assert_request_log_empty
+
+setup_case list-src-nonregular-is-atomic-hard-error
+prepare_preference_store
+printf 'VISIBLE=must-not-print\n' > "$preference_dir/alpha"
+chmod 600 "$preference_dir/alpha"
+mkdir "$preference_dir/invalid-directory"
+LC_ALL=C LANGUAGE= run_fail list-src
+assert_contains "not a regular file" "$output_file"
+assert_not_contains "VISIBLE=must-not-print" "$output_file"
+assert_not_contains "Registered Source Packages:" "$output_file"
 assert_command_log_empty
 assert_request_log_empty
 
 setup_case list-src-empty-root
+prepare_preference_store
 LC_ALL=C LANGUAGE= run_ok list-src
 assert_contains "Registered Source Packages:" "$output_file"
 assert_contains "  (none)" "$output_file"
 assert_command_log_empty
 assert_request_log_empty
 
-# Mutationとpresentationはhandler側のまま維持する。sudo stubはfilesystemを変更しない。
+# Source preference mutationはnative filesystem APIだけを使う。
 setup_case add-src-handler
-add_src_path=$MOGUET_TEST_PACKAGE_BUILD_DIR/clean-root
+add_src_path=$preference_dir/clean-root
 run_ok add-src clean-root CFLAGS=-O2
 assert_contains "Added clean-root to source-build list." "$output_file"
 assert_contains "Appending CFLAGS=-O2 to $add_src_path" "$output_file"
-assert_command_at 1 "sudo touch $add_src_path"
-assert_command_at 2 "sudo tee -a $add_src_path"
-assert_command_count 2
-if [ -e "$add_src_path" ] || [ -L "$add_src_path" ]; then
-    echo "sudo test stub unexpectedly created the add-src entry" >&2
+assert_command_log_empty
+if [ ! -f "$add_src_path" ] || [ -L "$add_src_path" ]; then
+    echo "add-src did not create a regular canonical entry" >&2
+    exit 1
+fi
+assert_file_content "$add_src_path" 'CFLAGS=-O2'
+if [ "$(stat -c '%a' "$preference_dir")" != "700" ] ||
+   [ "$(stat -c '%a' "$add_src_path")" != "600" ]; then
+    echo "add-src created unsafe source preference modes" >&2
     exit 1
 fi
 
 setup_case edit-src-handler
-edit_src_path=$MOGUET_TEST_PACKAGE_BUILD_DIR/clean-root
+prepare_preference_store
+edit_src_path=$preference_dir/clean-root
 printf 'CFLAGS=-Oexisting\n' > "$edit_src_path"
+chmod 600 "$edit_src_path"
 export EDITOR="moguet-test-editor --wait"
 run_ok edit-src clean-root
 editor_command=$(sed -n '1p' "$command_log")
@@ -423,46 +448,45 @@ case $editor_command in
         ;;
 esac
 edit_temp_path=${editor_command#moguet-test-editor --wait }
-assert_command_at 2 "sudo install -Dm644 -- /dev/stdin $edit_src_path"
-privileged_command=$(sed -n '2p' "$command_log")
-case $privileged_command in
-    *"$edit_temp_path"*)
-        echo "edit-src exposed its temporary pathname to sudo" >&2
-        cat "$command_log" >&2
-        exit 1
-        ;;
-esac
-assert_command_count 2
+assert_command_count 1
 if [ -e "$edit_temp_path" ] || [ -L "$edit_temp_path" ]; then
     echo "edit-src did not remove its temporary file after successful install" >&2
     exit 1
 fi
+assert_file_content "$edit_src_path" 'CFLAGS=-Oexisting'
+if [ "$(stat -c '%a' "$edit_src_path")" != "600" ]; then
+    echo "edit-src did not preserve private entry mode" >&2
+    exit 1
+fi
 
 setup_case del-src-handler
-del_src_path=$MOGUET_TEST_PACKAGE_BUILD_DIR/clean-root
+prepare_preference_store
+del_src_path=$preference_dir/clean-root
 printf 'CFLAGS=-Oexisting\n' > "$del_src_path"
+chmod 600 "$del_src_path"
 run_ok del-src clean-root
 assert_contains "Removing clean-root from list..." "$output_file"
-assert_only_command "sudo rm -f $del_src_path"
-if [ ! -f "$del_src_path" ]; then
-    echo "sudo test stub unexpectedly removed the del-src entry" >&2
+assert_command_log_empty
+if [ -e "$del_src_path" ] || [ -L "$del_src_path" ]; then
+    echo "del-src did not remove the canonical entry" >&2
     exit 1
 fi
 
 setup_case revert-handler
-revert_src_path=$MOGUET_TEST_PACKAGE_BUILD_DIR/official-a
+prepare_preference_store
+revert_src_path=$preference_dir/official-a
 printf 'CFLAGS=-Oexisting\n' > "$revert_src_path"
+chmod 600 "$revert_src_path"
 export MOGUET_TEST_PACMAN_REPO_PACKAGES=official-a
 run_ok revert official-a
 assert_contains "Unmarking source-build for official-a" "$output_file"
 assert_contains "official-a exists in official repos. Will reinstall binary." "$output_file"
 assert_contains "Reinstalling binaries: 'official-a'" "$output_file"
-assert_command_at 1 "sudo rm -f $revert_src_path"
-assert_command_at 2 "pacman -Si official-a"
-assert_command_at 3 "sudo pacman -S official-a"
-assert_command_count 3
-if [ ! -f "$revert_src_path" ]; then
-    echo "sudo test stub unexpectedly removed the revert entry" >&2
+assert_command_at 1 "pacman -Si official-a"
+assert_command_at 2 "sudo pacman -S official-a"
+assert_command_count 2
+if [ -e "$revert_src_path" ] || [ -L "$revert_src_path" ]; then
+    echo "revert did not remove the canonical entry" >&2
     exit 1
 fi
 
@@ -473,15 +497,17 @@ for dot_target in . ..; do
         ..) dot_target_label=dot-dot ;;
     esac
     setup_case "auto-install-reject-$dot_target_label"
-    printf 'SOURCE_PREFERENCE_GUARD=yes\n' > "$MOGUET_TEST_PACKAGE_BUILD_DIR/root-guard"
-    preference_checksum=$(cksum "$MOGUET_TEST_PACKAGE_BUILD_DIR/root-guard")
+    prepare_preference_store
+    printf 'SOURCE_PREFERENCE_GUARD=yes\n' > "$preference_dir/root-guard"
+    chmod 600 "$preference_dir/root-guard"
+    preference_checksum=$(cksum "$preference_dir/root-guard")
 
     run_fail -S "$dot_target"
 
     assert_contains "Invalid package name: $dot_target" "$output_file"
     assert_command_log_empty
     assert_request_log_empty
-    if [ "$(cksum "$MOGUET_TEST_PACKAGE_BUILD_DIR/root-guard")" != "$preference_checksum" ]; then
+    if [ "$(cksum "$preference_dir/root-guard")" != "$preference_checksum" ]; then
         echo "source selection changed the source preference fixture for $dot_target" >&2
         exit 1
     fi
@@ -687,7 +713,7 @@ assert_command "git clone https://aur.archlinux.org/clean-root.git clean-root"
 assert_command_absent "git clone https://gitlab.archlinux.org/archlinux/packaging/packages/clean-root.git clean-root"
 assert_command_absent "pacman -Si clean-root"
 assert_request_log_nonempty
-if [ ! -f "$MOGUET_TEST_PACKAGE_BUILD_DIR/clean-root" ]; then
+if [ ! -f "$preference_dir/clean-root" ]; then
     echo "--aur changed the source-build preference file" >&2
     exit 1
 fi
@@ -756,7 +782,7 @@ export MOGUET_TEST_MAKEPKG_EXIT_CODE=0
 run_ok --noedit --nodiff --noconfirm -S split-child
 assert_command "pacman -Si split-child"
 assert_command "git clone https://aur.archlinux.org/split-base.git split-base"
-assert_contains "Loading custom build flags from $MOGUET_TEST_PACKAGE_BUILD_DIR/split-base." "$output_file"
+assert_contains "Loading custom build flags from $preference_dir/split-base." "$output_file"
 assert_command_pattern_count 1 '^sudo pacman -U --noconfirm -- .*/split-child-2\.5-2-x86_64\.pkg\.tar\.zst$'
 assert_command_pattern_absent '^sudo pacman -U .*split-sibling'
 
@@ -799,17 +825,17 @@ assert_request_log_empty
 
 setup_case repo-install-overrides-preference
 prepare_source_preference official-a
-preference_checksum=$(cksum "$MOGUET_TEST_PACKAGE_BUILD_DIR/official-a")
+preference_checksum=$(cksum "$preference_dir/official-a")
 export MOGUET_TEST_PACMAN_REPO_PACKAGES=official-a
 run_ok -S --repo official-a
 assert_only_command "sudo pacman -S official-a"
 assert_no_source_build_commands
 assert_request_log_empty
-if [ ! -f "$MOGUET_TEST_PACKAGE_BUILD_DIR/official-a" ]; then
+if [ ! -f "$preference_dir/official-a" ]; then
     echo "--repo removed or changed the source-build preference" >&2
     exit 1
 fi
-if [ "$(cksum "$MOGUET_TEST_PACKAGE_BUILD_DIR/official-a")" != "$preference_checksum" ]; then
+if [ "$(cksum "$preference_dir/official-a")" != "$preference_checksum" ]; then
     echo "--repo changed the source-build preference content" >&2
     exit 1
 fi
@@ -851,7 +877,8 @@ assert_no_source_build_commands
 assert_request_log_empty
 
 setup_case auto-install-preferred-official
-cat > "$MOGUET_TEST_PACKAGE_BUILD_DIR/clean-root" <<'SOURCE_PREFERENCE'
+prepare_preference_store
+cat > "$preference_dir/clean-root" <<'SOURCE_PREFERENCE'
   # whole-line comment
   FIRST = "alpha value" # stripped comment
   QUOTED = 'quoted # value' # stripped after the quoted hash
@@ -864,6 +891,7 @@ cat > "$MOGUET_TEST_PACKAGE_BUILD_DIR/clean-root" <<'SOURCE_PREFERENCE'
   9INVALID=value
   ignored without equals
 SOURCE_PREFERENCE
+chmod 600 "$preference_dir/clean-root"
 export MOGUET_TEST_SOURCE_PREFERENCE_EXTERNAL=from-process-environment
 export MOGUET_TEST_PACMAN_REPO_PACKAGES=clean-root
 export MOGUET_TEST_MAKEPKG_EXIT_CODE=0
@@ -878,7 +906,7 @@ assert_command "makepkg --packagelist"
 assert_command "makepkg -sc --noconfirm"
 assert_command_pattern '^pacman -U --print --print-format .* -- .*/clean-root-1\.0-1-x86_64\.pkg\.tar\.zst$'
 assert_command_pattern '^sudo pacman -U --noconfirm -- .*/clean-root-1\.0-1-x86_64\.pkg\.tar\.zst$'
-assert_contains "Loading custom build flags from $MOGUET_TEST_PACKAGE_BUILD_DIR/clean-root." "$output_file"
+assert_contains "Loading custom build flags from $preference_dir/clean-root." "$output_file"
 assert_contains "Applying custom build flags: FIRST='alpha value' QUOTED='quoted # value' DUP='first' DUP='second' BRACED='alpha value/brace' SIMPLE='second/simple'" "$output_file"
 assert_contains "Ignoring invalid environment assignment: 9INVALID=value" "$output_file"
 assert_not_contains "UNDEFINED=" "$output_file"

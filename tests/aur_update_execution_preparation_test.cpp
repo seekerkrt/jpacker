@@ -80,9 +80,12 @@ SourcePreferenceLoaded loaded_preference(
         SourceBuildEnvironment source_environment = {},
         std::vector<std::string> warnings = {}) {
     return SourcePreferenceLoaded{
-            fs::path("/stub/preferences") / preference_name,
-            std::move(source_environment),
-            std::move(warnings)};
+            .entry_path = fs::path("/stub/preferences") / preference_name,
+            .environment = std::move(source_environment),
+            .warnings = std::move(warnings),
+            .raw_contents = {},
+            .identity = std::nullopt,
+    };
 }
 
 SourcePreferenceFailure preference_failure(

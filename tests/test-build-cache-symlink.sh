@@ -62,16 +62,21 @@ setup_case() {
     case_name=$1
     case_dir=$tmp_dir/cases/$case_name
     home_dir=$case_dir/home
+    xdg_config_dir=$case_dir/xdg-config
     xdg_state_dir=$case_dir/xdg-state
     xdg_cache_dir=$case_dir/xdg-cache
     outside_dir=$case_dir/outside
     command_log=$case_dir/commands.log
     editor_argv_log=$case_dir/editor-argv.log
 
-    mkdir -p "$home_dir" "$xdg_state_dir" "$xdg_cache_dir" "$outside_dir"
+    mkdir -p \
+        "$home_dir" "$xdg_config_dir" "$xdg_state_dir" \
+        "$xdg_cache_dir" "$outside_dir"
+    chmod 0700 "$xdg_config_dir"
     : > "$command_log"
     : > "$editor_argv_log"
     export HOME=$home_dir
+    export XDG_CONFIG_HOME=$xdg_config_dir
     export XDG_STATE_HOME=$xdg_state_dir
     export XDG_CACHE_HOME=$xdg_cache_dir
     export MOGUET_TEST_COMMAND_LOG=$command_log
@@ -93,7 +98,6 @@ setup_case() {
     unset MOGUET_TEST_EDITOR_EXIT_CODE
     unset MOGUET_TEST_PACMAN_QM_OUTPUT
     unset MOGUET_TEST_PACMAN_REPO_PACKAGES
-    unset MOGUET_TEST_PACKAGE_BUILD_DIR
     unset MOGUET_TEST_MAKEPKG_EXIT_CODE
     unset EDITOR
     unset VISUAL
@@ -104,7 +108,7 @@ setup_case() {
     unset GIT_CONFIG_SYSTEM GIT_CONFIG_GLOBAL GIT_CONFIG_NOSYSTEM
     unset GIT_CONFIG GIT_EXEC_PATH GIT_TEMPLATE_DIR GIT_SSH GIT_SSH_COMMAND
     unset GIT_PROXY_COMMAND GIT_SSL_NO_VERIFY CURL_CA_BUNDLE
-    unset XDG_CONFIG_HOME LD_PRELOAD LD_LIBRARY_PATH SHELL BASH_ENV ENV CDPATH
+    unset LD_PRELOAD LD_LIBRARY_PATH SHELL BASH_ENV ENV CDPATH
     unset http_proxy https_proxy all_proxy no_proxy
     unset HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY
     unset SSL_CERT_FILE SSL_CERT_DIR GIT_SSL_CAINFO GIT_SSL_CAPATH
@@ -821,6 +825,8 @@ GIT_SSH=$outside_dir/git-ssh
 GIT_SSH_COMMAND="sh -c 'touch $outside_dir/git-ssh-command-marker'"
 GIT_PROXY_COMMAND="sh -c 'touch $outside_dir/git-proxy-command-marker'"
 XDG_CONFIG_HOME=$outside_dir/xdg-config
+mkdir -p "$XDG_CONFIG_HOME"
+chmod 0700 "$XDG_CONFIG_HOME"
 LD_PRELOAD=
 LD_LIBRARY_PATH=
 SHELL="sh -c 'touch $outside_dir/shell-marker'"

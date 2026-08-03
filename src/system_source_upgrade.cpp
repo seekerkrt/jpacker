@@ -770,6 +770,17 @@ SystemSourceUpgradePreparation prepare_system_source_upgrade(
     SourcePreferenceDirectorySnapshot directory_snapshot;
     try {
         directory_snapshot = snapshot_source_preference_directory();
+    } catch(const SourcePreferenceError& error) {
+        SystemSourceUpgradeIssue issue = make_issue(
+                SystemSourceUpgradeIssueKind::
+                        PreferenceEnumerationUnavailable,
+                SystemSourceUpgradeIssueImpact::BlocksExecution,
+                SystemSourceUpgradePhase::Preparation,
+                error.what());
+        issue.source_preference_failure = error.failure();
+        return block_preparation(
+                std::move(state), std::move(issue), std::nullopt,
+                RegisteredSourceUpgradeFailureKind::PreferenceUnavailable);
     } catch(const std::exception& error) {
         SystemSourceUpgradeIssue issue = make_issue(
                 SystemSourceUpgradeIssueKind::
@@ -793,9 +804,32 @@ SystemSourceUpgradePreparation prepare_system_source_upgrade(
                 RegisteredSourceUpgradeFailureKind::UnknownException);
     }
 
+    for(const auto& entry : directory_snapshot.entries) {
+        std::string diagnostic;
+        if(!entry.is_regular_file) {
+            diagnostic = localization::format_translated_message(
+                    "Source preference enumeration found a non-regular entry: {}",
+                    entry.entry_path.string());
+        } else if(!is_valid_package_name(entry.package_name)) {
+            diagnostic = localization::format_translated_message(
+                    "Source preference enumeration found an invalid entry name: {}",
+                    entry.entry_path.string());
+        }
+        if(diagnostic.empty()) continue;
+
+        SystemSourceUpgradeIssue issue = make_issue(
+                SystemSourceUpgradeIssueKind::
+                        PreferenceEnumerationUnavailable,
+                SystemSourceUpgradeIssueImpact::BlocksExecution,
+                SystemSourceUpgradePhase::Preparation,
+                std::move(diagnostic));
+        return block_preparation(
+                std::move(state), std::move(issue), std::nullopt,
+                RegisteredSourceUpgradeFailureKind::PreferenceUnavailable);
+    }
+
     state.snapshot.preference_root_exists = directory_snapshot.root_exists;
     for(const auto& entry : directory_snapshot.entries) {
-        if(!entry.is_regular_file) continue;
         state.snapshot.registered_sources.push_back(
                 RegisteredSourcePreferenceSnapshot{
                         entry.original_index,

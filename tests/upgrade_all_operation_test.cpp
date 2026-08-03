@@ -132,9 +132,12 @@ SourcePreferenceLoaded loaded_preference(
     environment.ordered_assignments.push_back(
             SourceEnvironmentAssignment{"PACKAGE_NAME", package_name});
     return SourcePreferenceLoaded{
-            fs::path("/preferences") / package_name,
-            std::move(environment),
-            std::move(warnings)};
+            .entry_path = fs::path("/preferences") / package_name,
+            .environment = std::move(environment),
+            .warnings = std::move(warnings),
+            .raw_contents = {},
+            .identity = std::nullopt,
+    };
 }
 
 SourcePreferenceFailure preference_failure(
@@ -645,6 +648,54 @@ void test_strict_preference_read_failure_blocks_without_mutation() {
                                     source_preference_failure.has_value(),
             "Strict read failure lost typed preparation detail");
     expect_no_inventory_or_aur("strict preference read failure");
+    stub::require_script_consumed();
+}
+
+void test_nonregular_preference_snapshot_blocks_aggregate() {
+    stub::reset();
+    SourcePreferenceDirectorySnapshot directory;
+    directory.root_exists = true;
+    directory.entries.push_back(SourcePreferenceEntrySnapshot{
+            0, "/preferences/not-regular", "not-regular", false});
+    stub::set_preference_directory(std::move(directory));
+
+    UpgradeAllOperationResult result = take_blocked(
+            prepare_upgrade_all_operation(AppConfig{}),
+            "non-regular source preference snapshot");
+    expect(
+            result.status == UpgradeAllOperationStatus::BlockedBeforeMutation &&
+                    result.system_source.status ==
+                            SystemSourceUpgradeStatus::BlockedBeforeMutation &&
+                    result.system_source.failure_diagnostic().has_value() &&
+                    result.system_source.failure_diagnostic()->find(
+                            "non-regular") != std::string::npos,
+            "Non-regular preference snapshot was not an aggregate hard error");
+    expect(stub::system_commands().empty(),
+           "Non-regular preference snapshot reached system mutation");
+    expect_no_inventory_or_aur("non-regular source preference snapshot");
+    stub::require_script_consumed();
+}
+
+void test_invalid_preference_snapshot_blocks_aggregate() {
+    stub::reset();
+    stub::set_preference_directory(preference_directory({"bad name", "valid"}));
+
+    UpgradeAllOperationResult result = take_blocked(
+            prepare_upgrade_all_operation(AppConfig{}),
+            "invalid source preference snapshot");
+    expect(
+            result.status == UpgradeAllOperationStatus::BlockedBeforeMutation &&
+                    result.system_source.status ==
+                            SystemSourceUpgradeStatus::BlockedBeforeMutation &&
+                    result.system_source.failure_diagnostic().has_value() &&
+                    result.system_source.failure_diagnostic()->find(
+                            "invalid entry name") != std::string::npos,
+            "Invalid preference snapshot was not an aggregate hard error");
+    expect(stub::strict_preference_read_history().empty(),
+           "Invalid preference snapshot reached a strict entry read");
+    expect(stub::system_commands().empty(),
+           "Invalid preference snapshot reached system mutation");
+    expect_no_inventory_or_aur("invalid source preference snapshot");
     stub::require_script_consumed();
 }
 
@@ -2205,6 +2256,12 @@ int main() {
         run_case(
                 "strict preference read failure",
                 test_strict_preference_read_failure_blocks_without_mutation);
+        run_case(
+                "non-regular preference snapshot hard error",
+                test_nonregular_preference_snapshot_blocks_aggregate);
+        run_case(
+                "invalid preference snapshot hard error",
+                test_invalid_preference_snapshot_blocks_aggregate);
         run_case(
                 "system/source preparation blocker",
                 test_system_source_preparation_blocker_is_aggregate_blocker);

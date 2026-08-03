@@ -20,10 +20,11 @@ inspect and back up jpacker v1 data
 ```
 
 Moguet does not use `/etc/jpacker/jpacker.conf` as a normal configuration
-layer. It does not automatically copy, rewrite, or delete `/etc/jpacker`, and
-it does not guess which user should receive root-owned data. The existing
-`/etc/jpacker/package.build/` source-preference store is a separate
-compatibility boundary described below; it is not TOML configuration.
+layer. It does not automatically copy, rewrite, merge, or delete
+`/etc/jpacker`, and it does not guess which user should receive root-owned
+data. Starting with v2.0.1, `/etc/jpacker/package.build/` is also legacy input
+for manual migration only: Moguet neither reads nor writes it at runtime. The
+v2.0.0 tag, Release, and release notes remain unchanged historical artifacts.
 
 <!-- parity:preparation -->
 ## Before you begin
@@ -120,9 +121,9 @@ Do not merge those directories with `/etc/jpacker` during backup.
 The validated Moguet and jpacker v1.16.0 payloads have no common file, so keep
 jpacker installed while checking Moguet when practical. This provides the
 shortest rollback: remove Moguet and continue with the unchanged `jpacker`
-command. Do not run mutating operations from the two helpers concurrently,
-because both use the existing `/etc/jpacker/package.build/` production
-preference store.
+command. Their source-preference stores are separate, but do not run package-
+mutating operations from the two helpers concurrently because both may invoke
+the same system package tools.
 
 After Moguet verification, you may explicitly remove jpacker with the same
 package manager that installed it. For a normal pacman-managed installation,
@@ -158,8 +159,9 @@ development `make install` over the old package as a substitute for the
 validated transition.
 
 Installing the package must not create `/etc/moguet`, a user XDG config file,
-or user XDG state/cache directories. Moguet creates only the user directories
-needed by an actual command, under that executing user's XDG context.
+the source-preference directory, or user XDG state/cache directories. A
+command creates only the user directories that its operation actually needs,
+under that executing user's own XDG context.
 
 <!-- parity:configuration -->
 ## Migrate configuration manually
@@ -212,31 +214,86 @@ file or silently fall back from a broken file.
 <!-- parity:legacy-data -->
 ## Handle legacy preferences and data
 
-Do not copy `/etc/jpacker` wholesale into a Moguet XDG directory. In this
-implementation, `/etc/jpacker/package.build/` remains the source-build
-preference store and source operations read it directly. Its files are not
-TOML config tables. The `moguet add-src <pkg> [V=K]` interface writes to that
-same store, so do not replay existing entries through it as a migration step.
-Back up the store and preserve it unchanged. It is a production compatibility
-boundary, but it is not part of the Moguet package payload or ownership. The
-Moguet installer and uninstaller do not create, copy, rewrite, or remove it.
+Moguet's canonical source-build preference entry is:
+
+```text
+${XDG_CONFIG_HOME:-$HOME/.config}/moguet/source-build.d/<package-name>
+```
+
+An unset or empty `XDG_CONFIG_HOME` uses the `$HOME/.config` fallback. An
+explicit `XDG_CONFIG_HOME` must be an absolute, safe, existing directory;
+relative or otherwise unsafe values fail closed. The fallback path may be
+created safely when the first write needs it. Moguet uses the executing user's
+own XDG context, including when the CLI runs as root, and never infers another
+user from `SUDO_USER`.
+
+All source-preference commands and the build/upgrade readers use only this
+authority. Reads, `moguet list-src`, and a missing `moguet del-src` or
+`moguet revert` do not create a missing source-preference store. The first
+`moguet add-src <pkg> [V=K]` or `moguet edit-src <pkg>` that needs storage
+is the only source-preference operation that creates the managed
+`moguet/source-build.d` hierarchy, with mode `0700`; entries use mode `0600`.
+Filesystem preference operations do not use `sudo`. `moguet revert` may still
+use `sudo` for its separate pacman transaction.
+
+Treat `/etc/jpacker/package.build/` as legacy input for manual migration only.
+Moguet does not read, fall back to, merge with, rewrite, or delete it at
+runtime. It also does not automatically copy a legacy entry into XDG storage.
+The package installer, reinstaller, and uninstaller preserve both legacy and
+canonical entries and do not create or remove user XDG directories.
+
+Migrate one understood package for one explicitly selected user at a time:
+
+1. Keep the verified legacy backup and inspect the legacy entry without
+   modifying it.
+2. As the target user, confirm that the canonical destination entry is absent.
+   A symlink or another unexpected object is not an absent entry and must be
+   investigated rather than overwritten.
+3. If you set `XDG_CONFIG_HOME` explicitly, create and validate that base
+   directory separately before running Moguet. Do not point it at a relative
+   or shared directory.
+4. Re-enter only understood assignments with one of these interfaces, without
+   `sudo`:
+
+   ```bash
+   moguet add-src <package-name> [V=K ...]
+   moguet edit-src <package-name>
+   ```
+
+5. Verify the complete resulting snapshot before considering that package
+   migrated:
+
+   ```bash
+   moguet list-src
+   ```
+
+Do not automate a bulk loop, overwrite a canonical entry, or merge values that
+you have not reviewed. A package name is validated before directory creation
+or editor execution. Only a missing store or entry means “absent”; an invalid
+entry name, symlink, non-regular file, ownership/mode violation, permission or
+I/O error, or detected race is a hard error. `moguet list-src` validates the
+whole snapshot before printing anything, so a bad entry cannot produce a
+trusted partial listing.
 
 Moguet does not automatically:
 
 - read `/etc/jpacker/jpacker.conf` as a config layer;
 - copy `/etc/jpacker` into one or more users' homes;
-- delete or rewrite legacy files;
+- read, merge, delete, or rewrite legacy source-preference files;
 - create or read `/etc/moguet`;
 - migrate `LOGFILE`, `RMDEPS`, arbitrary editor commands, credentials, shell
   fragments, or unknown uppercase keys;
 - infer a destination user from root ownership, `sudo`, or `SUDO_USER`.
 
-Config, state, and cache have separate v2 responsibilities:
+Config, source preferences, state, and cache have separate v2 responsibilities:
 
 ```text
-config: $XDG_CONFIG_HOME/moguet/  (fallback ~/.config/moguet/)
-state:  $XDG_STATE_HOME/moguet/   (fallback ~/.local/state/moguet/)
-cache:  $XDG_CACHE_HOME/moguet/   (fallback ~/.cache/moguet/)
+config:             $XDG_CONFIG_HOME/moguet/config.toml
+source preferences: $XDG_CONFIG_HOME/moguet/source-build.d/
+state:              $XDG_STATE_HOME/moguet/  (fallback ~/.local/state/moguet/)
+cache:              $XDG_CACHE_HOME/moguet/  (fallback ~/.cache/moguet/)
+
+config/source-preference fallback: ~/.config/moguet/
 ```
 
 Cache is reproducible and is not a backup location. Uninstalling Moguet must
@@ -291,8 +348,15 @@ administrator procedure to refresh it. Confirm that completion proposes
 `--build-mode=normal|rebuild|clean`, not a legacy `jpacker` command.
 
 Finally, inspect the resolved XDG paths as the intended user. A help/version
-check alone should not create config, state, or cache directories. Test an
-operation only after reviewing its external commands and package effects.
+check does not create XDG consumer directories. `moguet list-src` and source-
+preference reads performed by read, build, or upgrade paths do not create a
+missing source-preference store. They are otherwise normal commands, however:
+under the existing state-logging contract, `moguet list-src` and other normal
+commands may create the state directory and log. If you migrated preferences,
+confirm that the managed directories are mode `0700`, entries are mode `0600`,
+the legacy entries remain unchanged, and the complete `moguet list-src` output
+matches the intended packages. Test a package operation only after reviewing
+its external commands and effects.
 
 <!-- parity:rollback -->
 ## Roll back to jpacker v1.16.0
@@ -301,8 +365,8 @@ Rollback is an explicit package transition, not an automatic transaction
 rollback.
 
 1. Stop Moguet and finish any active package operation.
-2. Back up the user's Moguet config and state. Keep cache only if it is useful
-   for diagnostics.
+2. Back up the user's Moguet config, source preferences, and state. Keep cache
+   only if it is useful for diagnostics.
 3. Remove the Moguet package using the package manager that installed it.
    Do not delete user XDG directories as part of package removal.
 4. If jpacker was kept installed, verify that its package files and command are
@@ -314,9 +378,10 @@ rollback.
    operation before performing a package transaction.
 
 Moguet's XDG data is not interpreted by jpacker v1 and may be kept for a later
-retry. A completed pacman transaction is not undone by switching helpers;
-compare actual package database state rather than assuming the helper rollback
-changed installed packages.
+retry. It is not synchronized back into `/etc/jpacker/package.build/`.
+A completed pacman transaction is not undone by switching helpers; compare
+actual package database state rather than assuming the helper rollback changed
+installed packages.
 
 <!-- parity:maintenance -->
 ## v1 maintenance and repository remotes

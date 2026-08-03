@@ -149,26 +149,32 @@ complete inspection planが必要とするAUR PackageBase repositoryを取得し
 package 1件のsource-build preferenceとoptional build environment assignmentを
 登録します。
 v2 config fileはsource-preference tableではありません。
+最初のwriteは、必要な場合にmanaged XDG directoryを作成します。
 .
 .TP
 .B "edit-src <pkg>"
 .B VISUAL
 または
 .B EDITOR
-を使って既存source-build preferenceを編集します。
+を使って既存source-build preferenceを編集するか、新規作成します。
+editor実行後にfailureとなった場合は、安全に保持できるedited temporary fileを残し、そのpathを
+表示します。
 .
 .TP
 .B "list-src"
 registered source-build preferenceと表示可能なenvironment assignmentを一覧します。
+entryを1件でも表示する前にdirectory snapshot全体をvalidateします。
 .
 .TP
 .B "del-src <pkg>"
 binary packageをreinstallせず、source-build preference 1件を削除します。
+entryがmissingならpreference directoryを作成せずに成功します。
 .
 .TP
 .B "revert <pkg>"
 source-build preference 1件を削除し、configured official repositoryにtargetがあれば
 official binary packageをreinstallします。
+preferenceがmissingでもdirectoryを作成せず、repository reinstallは省略しません。
 confirm前に表示されたpacman transactionをreviewしてください。
 .
 .TP
@@ -382,9 +388,12 @@ fallbackは
 です。
 .
 .TP
-.I /etc/jpacker/package.build/
-user TOML configとは別のcompatibility境界である、現行source-build preference storeです。
-既存entryはその場で読み、XDG storageへcopyしません。
+.I $XDG_CONFIG_HOME/moguet/source-build.d/<package-name>
+user所有のpackage別source-build preferenceです。
+fallbackは
+.I $HOME/.config/moguet/source-build.d/<package-name>
+です。managed directoryはmode 0700、preference entryはmode 0600です。
+全source-preference commandとbuild / upgrade readerがこのauthorityを使います。
 .
 .TP
 .I $XDG_STATE_HOME/moguet/moguet.log
@@ -434,6 +443,9 @@ user configのabsolute base directoryです。
 unsetまたはemptyなら
 .I $HOME/.config
 へfallbackします。
+source-preference accessでは、明示値はabsoluteで、既存かつownership、type、permissionの
+検証に成功する必要があります。Moguetはwrite operationが最初に必要としたときだけ、その
+base配下のsource-preference managed childを作成します。
 .
 .TP
 .B XDG_STATE_HOME
@@ -453,6 +465,8 @@ unsetまたはemptyなら
 .B HOME
 対応するXDG variableがunsetまたはemptyの場合だけstandard fallbackに使います。
 homeを安全に使用できない場合はfail closedとします。
+source-preference write boundaryは必要なfallback config階層を作成できますが、read-only
+operationは作成しません。
 .
 .TP
 .B VISUAL
@@ -546,16 +560,15 @@ user configよりreviewとnormal build defaultを今回だけ優先する:
 .\" parity:migration
 .SH MIGRATION
 .na
-Moguet v2は
+Moguet v2.0.1以降は
 .I /etc/jpacker/jpacker.conf
 を通常config layerとして読まず、
-.I /etc/jpacker
-を自動copy・rewrite・deleteしません。
-root-owned legacy dataの移行先userを推測しません。
-既存の
 .I /etc/jpacker/package.build/
-source-preference storeは別のcompatibility境界としてその場で読みます。config migration
-としてsource-preference commandからentryを再登録しないでください。
+をsource-preference fallbackとして使用しません。
+.I /etc/jpacker
+を自動copy・merge・rewrite・deleteしません。
+root-owned legacy dataの移行先userを推測しません。
+legacy entryはMoguetから無視され、manual migrationとrollback用に保持されます。
 .
 .PP
 jpacker v1.16.0 dataをbackupし、validated Moguet packageをcoexistさせてinstallしてから、
@@ -563,8 +576,12 @@ jpacker v1.16.0 dataをbackupし、validated Moguet packageをcoexistさせてin
 conflicts、replacesの関係もありません。Moguetは
 .B jpacker
 command aliasを提供しません。直接rollbackできるよう検証中はv1 packageを保持し、Moguetの
-確認後に必要な場合だけ明示的にremoveします。source-preference storeを共有するため、両helper
-のmutating operationを同時実行しないでください。
+確認後に必要な場合だけ明示的にremoveします。source-preference storeは共有しませんが、
+両helperのpackage-mutating operationを同時実行しないでください。理解したlegacy entryだけを、
+明示的に選んだ対象userとpackageごとに1件ずつ再作成し、既存XDG entryを上書きしたりlegacy
+entryを削除したりしません。Moguetはsudo経由ではなく、その通常userとして実行します。
+source-preference filesystem operationはsudoを使いませんが、revertはpacman package
+transactionにsudoを使う場合があります。
 .B NOEDIT
 は
 .BR review.pkgbuild 、

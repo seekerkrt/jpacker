@@ -167,9 +167,10 @@ setup_integration_case() {
 
     mkdir -p \
         "$case_dir/home" \
+        "$config_root" \
         "$case_dir/xdg-state" \
-        "$case_dir/xdg-cache" \
-        "$case_dir/package.build"
+        "$case_dir/xdg-cache"
+    chmod 0700 "$config_root"
     : > "$command_log"
     : > "$output_file"
 
@@ -178,7 +179,6 @@ setup_integration_case() {
     export XDG_STATE_HOME="$case_dir/xdg-state"
     export XDG_CACHE_HOME="$case_dir/xdg-cache"
     export MOGUET_TEST_COMMAND_LOG="$command_log"
-    export MOGUET_TEST_PACKAGE_BUILD_DIR="$case_dir/package.build"
     export MOGUET_TEST_PACMAN_EXIT_CODE=1
     export MOGUET_TEST_SUDO_EXIT_CODE=0
     export MOGUET_TEST_MAKEPKG_EXIT_CODE=0
@@ -273,13 +273,13 @@ assert_no_runtime_storage() {
     fi
 }
 
-# Missing configはXDG config treeを作らず、built-in defaultで通常経路へ進む。
+# Missing configは既存XDG base配下を作らず、built-in defaultで通常経路へ進む。
 setup_integration_case missing-config
 export MOGUET_TEST_PACMAN_EXIT_CODE=0
 run_integration_ok -Q filesystem
 assert_only_command "pacman -Q filesystem"
-if [ -e "$config_root" ] || [ -L "$config_root" ]; then
-    fail "missing config resolution created the XDG config tree"
+if [ -e "$config_root/moguet" ] || [ -L "$config_root/moguet" ]; then
+    fail "missing config resolution created the Moguet config tree"
 fi
 state_log=$XDG_STATE_HOME/moguet/moguet.log
 if [ ! -f "$state_log" ]; then

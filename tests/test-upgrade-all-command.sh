@@ -34,9 +34,10 @@ setup_case() {
     foreign_inventory_file=$case_dir/foreign-packages
 
     mkdir -p \
-        "$case_dir/home" "$case_dir/xdg-state" "$case_dir/xdg-cache" \
-        "$case_dir/work" \
-        "$case_dir/package.build"
+        "$case_dir/home" "$case_dir/xdg-config" \
+        "$case_dir/xdg-state" "$case_dir/xdg-cache" \
+        "$case_dir/work"
+    chmod 0700 "$case_dir/xdg-config"
     : > "$stdout_file"
     : > "$stderr_file"
     : > "$command_log"
@@ -44,10 +45,10 @@ setup_case() {
     : > "$foreign_inventory_file"
 
     export HOME=$case_dir/home
+    export XDG_CONFIG_HOME=$case_dir/xdg-config
     export XDG_STATE_HOME=$case_dir/xdg-state
     export XDG_CACHE_HOME=$case_dir/xdg-cache
     export MOGUET_TEST_CONFIG_FILE=$config_file
-    export MOGUET_TEST_PACKAGE_BUILD_DIR=$case_dir/package.build
     export MOGUET_TEST_COMMAND_LOG=$command_log
     export MOGUET_TEST_PACKAGE_METADATA_EVENT_LOG=$command_log
     export MOGUET_TEST_FOREIGN_PACKAGE_INVENTORY_STATE_FILE=$foreign_inventory_file

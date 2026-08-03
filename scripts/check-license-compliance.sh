@@ -261,8 +261,6 @@ do
         "$external_program_section" "| \`$program\` |"
 done
 require_value_text "THIRD_PARTY_NOTICES.md external-program section" \
-    "$external_program_section" '| `touch`, `tee`, `install`, `rm` |'
-require_value_text "THIRD_PARTY_NOTICES.md external-program section" \
     "$external_program_section" '| `/bin/sh` |'
 require_value_text "THIRD_PARTY_NOTICES.md external-program section" \
     "$external_program_section" '| User-selected editor (default `nano`) |'

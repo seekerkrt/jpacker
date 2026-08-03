@@ -1,5 +1,6 @@
 #!/bin/sh
 set -eu
+umask 077
 
 LC_ALL=C
 export LC_ALL
@@ -71,13 +72,17 @@ setup_case() {
     output_file=$case_dir/output
     stdout_file=$case_dir/stdout
     stderr_file=$case_dir/stderr
-    preference_dir=$case_dir/package.build
+    preference_dir=$case_dir/xdg-config/moguet/source-build.d
     cache_root=$case_dir/xdg-cache/moguet
     sudo_failures=$case_dir/sudo-failures
     config_file=$case_dir/config.toml
     package_metadata_state=$case_dir/package-metadata-state
 
-    mkdir -p "$case_dir/home" "$case_dir/xdg-cache" "$preference_dir"
+    mkdir -p \
+        "$case_dir/home" "$case_dir/xdg-config" "$case_dir/xdg-cache" \
+        "$preference_dir"
+    chmod 700 "$case_dir/xdg-config" \
+        "$case_dir/xdg-config/moguet" "$preference_dir"
     : > "$command_log"
     : > "$request_log"
     : > "$sudo_failures"
@@ -85,11 +90,10 @@ setup_case() {
     printf '%s\n' 'schema_version = 1' > "$config_file"
 
     export HOME=$case_dir/home
+    export XDG_CONFIG_HOME=$case_dir/xdg-config
     export XDG_CACHE_HOME=$case_dir/xdg-cache
     export MOGUET_TEST_COMMAND_LOG=$command_log
-    export MOGUET_TEST_PACKAGE_BUILD_DIR=$preference_dir
     export MOGUET_TEST_CONFIG_FILE=$config_file
-    export MOGUET_TEST_SOURCE_MAINTENANCE_SUDO_MUTATE=1
     export MOGUET_TEST_SOURCE_MAINTENANCE_FAIL_EXACT_FILE=$sudo_failures
     export MOGUET_TEST_PACMAN_EXIT_CODE=1
     export MOGUET_TEST_SUDO_EXIT_CODE=0
@@ -135,6 +139,8 @@ setup_case() {
     unset MOGUET_TEST_SOURCE_MAINTENANCE_EDITOR_REPLACEMENT_SUBSTRING
     unset MOGUET_TEST_SOURCE_MAINTENANCE_EDITOR_REPLACEMENT_TARGET
     unset MOGUET_TEST_SOURCE_MAINTENANCE_EDITOR_REPLACEMENT_SOURCE
+    unset MOGUET_TEST_SOURCE_MAINTENANCE_EDITOR_CONCURRENT_DESTINATION
+    unset MOGUET_TEST_SOURCE_MAINTENANCE_EDITOR_CONCURRENT_CONTENTS
     unset MOGUET_TEST_PACKAGE_METADATA_INITIALIZE_FAILURE
     unset MOGUET_TEST_PACKAGE_METADATA_INITIALIZE_FAILURE_AT
     unset MOGUET_TEST_PACKAGE_METADATA_QUERY_FAILURE_PACKAGE
@@ -145,6 +151,7 @@ setup_case() {
     unset MOGUET_TEST_MAKEPKG_PACKAGE_METADATA_STATE_AFTER_SUCCESS_FILE
     unset MOGUET_TEST_PACMAN_U_SUCCESS_LOG
     unset MOGUET_TEST_REPLACE_WORKSPACE_AFTER_PACMAN_U
+    unset XDG_STATE_HOME
     unset EMPTY
     unset PKGDEST
     unset EDITOR
@@ -553,6 +560,22 @@ assert_path_absent() {
     fi
 }
 
+prepare_fresh_pre_log_storage_case() {
+    XDG_STATE_HOME=$case_dir/xdg-state
+    export XDG_STATE_HOME
+    mkdir -m 700 "$XDG_STATE_HOME"
+    rmdir "$preference_dir"
+    rmdir "$XDG_CONFIG_HOME/moguet"
+}
+
+assert_pre_log_storage_absent() {
+    assert_path_absent "$XDG_CONFIG_HOME/moguet"
+    assert_path_absent "$XDG_STATE_HOME/moguet"
+    assert_path_absent "$HOME/.config/moguet"
+    assert_path_absent "$HOME/.local/state/moguet"
+    assert_not_contains "Started Moguet v" "$output_file"
+}
+
 assert_file_equals() {
     expected_file=$1
     actual_file=$2
@@ -787,7 +810,7 @@ assert_cleanup_partial_success_fixture "$install_success_log"
 
 echo "  ok: P0-1 cmd_build"
 
-# dot path componentは、source preferenceの副作用を始める前にpackage validationで拒否する。
+# dot path componentは、state logやsource preferenceの作成前にpackage validationで拒否する。
 for dot_target in . ..; do
     case $dot_target in
         .) dot_target_label=dot ;;
@@ -795,44 +818,48 @@ for dot_target in . ..; do
     esac
     for operation in add-src edit-src del-src revert; do
         setup_case "$operation-reject-$dot_target_label"
-        printf 'ROOT_GUARD=yes\n' > "$preference_dir/root-guard"
-        printf 'PARENT_GUARD=yes\n' > "$case_dir/parent-guard"
-        root_guard_checksum=$(cksum "$preference_dir/root-guard")
-        parent_guard_checksum=$(cksum "$case_dir/parent-guard")
+        prepare_fresh_pre_log_storage_case
 
         run_fail "$operation" "$dot_target"
 
         assert_contains "Invalid package name: $dot_target" "$output_file"
         assert_total_command_count 0
         assert_request_log_empty
-        if [ "$(cksum "$preference_dir/root-guard")" != "$root_guard_checksum" ] ||
-           [ "$(cksum "$case_dir/parent-guard")" != "$parent_guard_checksum" ]; then
-            echo "$operation $dot_target changed the source preference fixture" >&2
-            exit 1
-        fi
-        entry_count=$(find "$preference_dir" -mindepth 1 -maxdepth 1 -print | wc -l)
-        if [ "$entry_count" -ne 1 ]; then
-            echo "$operation $dot_target changed source preference entries" >&2
-            find "$preference_dir" -maxdepth 1 -print >&2
-            exit 1
-        fi
+        assert_pre_log_storage_absent
     done
 done
 
-echo "  ok: dot package names stop before source preference side effects"
+echo "  ok: dot package names stop before state and source preference creation"
 
-# P0-2: add-src is a streaming mutation with cumulative assignment scope.
+while IFS='|' read -r invalid_label invalid_target use_marker; do
+    for operation in add-src edit-src del-src revert; do
+        setup_case "$operation-reject-$invalid_label"
+        prepare_fresh_pre_log_storage_case
+
+        if [ "$use_marker" = yes ]; then
+            run_fail "$operation" -- "$invalid_target"
+        else
+            run_fail "$operation" "$invalid_target"
+        fi
+
+        assert_contains "Invalid package name: $invalid_target" "$output_file"
+        assert_total_command_count 0
+        assert_request_log_empty
+        assert_pre_log_storage_absent
+    done
+done <<'INVALID_PACKAGE_TARGETS'
+slash|invalid/name|no
+absolute|/absolute-name|no
+leading-hyphen|-leading-name|yes
+INVALID_PACKAGE_TARGETS
+
+echo "  ok: unsafe package paths stop before state, source preference, editor, and sudo boundaries"
+
+# P0-2: add-src is a native streaming mutation with cumulative assignment scope.
 setup_case add-src-streaming
+rmdir "$preference_dir"
 run_ok add-src alpha beta FIRST=one gamma SECOND=two
-assert_command_at 1 "sudo touch $preference_dir/alpha"
-assert_command_at 2 "sudo touch $preference_dir/beta"
-assert_command_at 3 "sudo tee -a $preference_dir/alpha"
-assert_command_at 4 "sudo tee -a $preference_dir/beta"
-assert_command_at 5 "sudo touch $preference_dir/gamma"
-assert_command_at 6 "sudo tee -a $preference_dir/alpha"
-assert_command_at 7 "sudo tee -a $preference_dir/beta"
-assert_command_at 8 "sudo tee -a $preference_dir/gamma"
-assert_contains "Running: printf '%s\\n' 'FIRST=one' | sudo tee -a '$preference_dir/alpha' > /dev/null" "$output_file"
+assert_total_command_count 0
 printf 'FIRST=one\nSECOND=two\n' > "$case_dir/alpha.expected"
 printf 'FIRST=one\nSECOND=two\n' > "$case_dir/beta.expected"
 printf 'SECOND=two\n' > "$case_dir/gamma.expected"
@@ -844,31 +871,37 @@ if [ "$entry_count" -ne 3 ]; then
     echo "add-src did not preserve one preference file per package" >&2
     exit 1
 fi
+if [ "$(stat -c '%a' "$preference_dir")" != "700" ]; then
+    echo "add-src did not create the canonical directory with mode 0700" >&2
+    exit 1
+fi
+for package in alpha beta gamma; do
+    if [ "$(stat -c '%a' "$preference_dir/$package")" != "600" ]; then
+        echo "add-src did not create $package with mode 0600" >&2
+        exit 1
+    fi
+done
 
 setup_case add-src-leading-assignment
 run_fail add-src FIRST=one alpha SECOND=two
 assert_contains "Environment assignment requires a preceding package: FIRST=one" "$output_file"
-assert_command_at 1 "sudo touch $preference_dir/alpha"
-assert_command_at 2 "sudo tee -a $preference_dir/alpha"
+assert_total_command_count 0
 printf 'SECOND=two\n' > "$case_dir/alpha.expected"
 assert_file_equals "$case_dir/alpha.expected" "$preference_dir/alpha"
 
 setup_case add-src-package-failure
-printf 'touch %s\n' "$preference_dir/failed" > "$sudo_failures"
+printf 'UNSAFE=yes\n' > "$preference_dir/failed"
+chmod 644 "$preference_dir/failed"
 run_fail add-src alpha failed beta FLAGS=value
-assert_contains "Failed to add failed" "$output_file"
-assert_command "sudo touch $preference_dir/failed"
-assert_command "sudo tee -a $preference_dir/alpha"
-assert_command "sudo tee -a $preference_dir/beta"
-assert_command_content_absent "tee -a $preference_dir/failed"
-assert_path_absent "$preference_dir/failed"
+assert_contains "Source preference entry permissions are not private mode 0600: $preference_dir/failed" "$output_file"
+assert_total_command_count 0
 printf 'FLAGS=value\n' > "$case_dir/alpha.expected"
 assert_file_equals "$case_dir/alpha.expected" "$preference_dir/alpha"
 assert_file_equals "$case_dir/alpha.expected" "$preference_dir/beta"
 
 echo "  ok: P0-2 cmd_add_src"
 
-# P0-3: edit-src pins the user-opened source fd and gives root only /dev/stdin + destination.
+# P0-3: edit-src pins the user-opened source fd and publishes through native IO.
 setup_case edit-src-editor-arguments
 printf 'CFLAGS=-Oexisting\n' > "$preference_dir/alpha"
 printf 'CFLAGS=-Oexisting\n' > "$case_dir/existing.expected"
@@ -887,31 +920,18 @@ case $editor_command in
         ;;
 esac
 edit_temp_path=${editor_command##* }
-assert_command_at 2 "sudo install -Dm644 -- /dev/stdin $preference_dir/alpha"
-privileged_command=$(sed -n '2p' "$command_log")
-case $privileged_command in
-    *"$edit_temp_path"*)
-        echo "privileged command exposed temporary pathname: $privileged_command" >&2
-        exit 1
-        ;;
-esac
-assert_contains "Running: sudo install -Dm644 -- /dev/stdin '$preference_dir/alpha'" "$output_file"
-logged_install_count=$(grep -Fc -- "Running: sudo install -Dm644 -- /dev/stdin '$preference_dir/alpha'" "$output_file" || true)
-if [ "$logged_install_count" -ne 1 ]; then
-    echo "privileged install command was not logged exactly once" >&2
-    sed -n '1,260p' "$output_file" >&2
-    exit 1
-fi
+assert_total_command_count 1
 assert_file_equals "$case_dir/existing.expected" "$case_dir/editor.snapshot"
 printf 'CFLAGS=-Oexisting\nLDFLAGS=-Wl,--as-needed\n' > "$case_dir/edited.expected"
 assert_file_equals "$case_dir/edited.expected" "$preference_dir/alpha"
-if [ "$(stat -c '%a' "$preference_dir/alpha")" != "644" ]; then
-    echo "edit-src destination mode is not 0644" >&2
+if [ "$(stat -c '%a' "$preference_dir/alpha")" != "600" ]; then
+    echo "edit-src destination mode is not 0600" >&2
     exit 1
 fi
 assert_path_absent "$edit_temp_path"
 
 setup_case edit-src-create-missing-preference
+rmdir "$preference_dir"
 export EDITOR=moguet-test-editor
 export MOGUET_TEST_SOURCE_MAINTENANCE_EDITOR_APPEND_LINE='CREATED=yes'
 run_ok edit-src alpha
@@ -919,7 +939,12 @@ editor_command=$(sed -n '1p' "$command_log")
 edit_temp_path=${editor_command##* }
 printf 'CREATED=yes\n' > "$case_dir/created.expected"
 assert_file_equals "$case_dir/created.expected" "$preference_dir/alpha"
-assert_command_at 2 "sudo install -Dm644 -- /dev/stdin $preference_dir/alpha"
+assert_total_command_count 1
+if [ "$(stat -c '%a' "$preference_dir")" != "700" ] ||
+   [ "$(stat -c '%a' "$preference_dir/alpha")" != "600" ]; then
+    echo "edit-src did not use the private creation boundary" >&2
+    exit 1
+fi
 assert_path_absent "$edit_temp_path"
 
 setup_case edit-src-empty-content
@@ -957,8 +982,13 @@ run_fail edit-src alpha
 editor_command=$(sed -n '1p' "$command_log")
 edit_temp_path=${editor_command##* }
 assert_contains "Editor failed for $preference_dir/alpha" "$output_file"
-assert_path_absent "$edit_temp_path"
-assert_command_content_absent "sudo install"
+if [ ! -f "$edit_temp_path" ]; then
+    echo "edit-src discarded the retained temporary file after editor failure" >&2
+    exit 1
+fi
+assert_file_equals "$preference_dir/alpha" "$edit_temp_path"
+assert_total_command_count 1
+rm -f "$edit_temp_path"
 
 setup_case edit-src-reject-symlink
 printf 'ORIGINAL=yes\n' > "$preference_dir/alpha"
@@ -972,8 +1002,13 @@ editor_command=$(sed -n '1p' "$command_log")
 edit_temp_path=${editor_command##* }
 assert_contains "Failed to open edited temporary file $edit_temp_path" "$output_file"
 assert_total_command_count 1
-assert_path_absent "$edit_temp_path"
 assert_file_equals "$case_dir/original.expected" "$preference_dir/alpha"
+if [ ! -f "$case_dir/symlink-target" ] ||
+   [ "$(cat "$case_dir/symlink-target")" != "UNREVIEWED=yes" ]; then
+    echo "edit-src changed the external symlink target" >&2
+    exit 1
+fi
+rm -f "$edit_temp_path"
 
 setup_case edit-src-reject-directory
 printf 'ORIGINAL=yes\n' > "$preference_dir/alpha"
@@ -984,7 +1019,8 @@ editor_command=$(sed -n '1p' "$command_log")
 edit_temp_path=${editor_command##* }
 assert_contains "Edited temporary file is not a regular file: $edit_temp_path" "$output_file"
 assert_total_command_count 1
-assert_path_absent "$edit_temp_path"
+assert_contains "ORIGINAL=yes" "$preference_dir/alpha"
+rm -rf "$edit_temp_path"
 
 setup_case edit-src-reject-fifo-without-blocking
 printf 'ORIGINAL=yes\n' > "$preference_dir/alpha"
@@ -995,7 +1031,8 @@ editor_command=$(sed -n '1p' "$command_log")
 edit_temp_path=${editor_command##* }
 assert_contains "Edited temporary file is not a regular file: $edit_temp_path" "$output_file"
 assert_total_command_count 1
-assert_path_absent "$edit_temp_path"
+assert_contains "ORIGINAL=yes" "$preference_dir/alpha"
+rm -f "$edit_temp_path"
 
 setup_case edit-src-reject-missing-source
 printf 'ORIGINAL=yes\n' > "$preference_dir/alpha"
@@ -1008,23 +1045,25 @@ assert_contains "Failed to open edited temporary file $edit_temp_path" "$output_
 assert_total_command_count 1
 assert_path_absent "$edit_temp_path"
 
-setup_case edit-src-install-failure
+setup_case edit-src-concurrent-destination-replacement
 printf 'CFLAGS=-Oexisting\n' > "$preference_dir/alpha"
-printf 'CFLAGS=-Oexisting\n' > "$case_dir/existing.expected"
 export EDITOR=moguet-test-editor
 export MOGUET_TEST_SOURCE_MAINTENANCE_EDITOR_APPEND_LINE='EDITED=yes'
-export MOGUET_TEST_SOURCE_MAINTENANCE_FAIL_SUBSTRING='install -Dm644'
+export MOGUET_TEST_SOURCE_MAINTENANCE_EDITOR_CONCURRENT_DESTINATION=$preference_dir/alpha
+export MOGUET_TEST_SOURCE_MAINTENANCE_EDITOR_CONCURRENT_CONTENTS='CONCURRENT=yes'
 run_fail edit-src alpha
 editor_command=$(sed -n '1p' "$command_log")
 edit_temp_path=${editor_command##* }
-assert_command_at 2 "sudo install -Dm644 -- /dev/stdin $preference_dir/alpha"
+assert_total_command_count 1
+assert_contains "Source preference entry changed before publication: $preference_dir/alpha" "$output_file"
 assert_contains "edited file was kept at $edit_temp_path" "$output_file"
 if [ ! -f "$edit_temp_path" ]; then
     echo "edit-src removed the retained file after install failure" >&2
     exit 1
 fi
 assert_contains "EDITED=yes" "$edit_temp_path"
-assert_file_equals "$case_dir/existing.expected" "$preference_dir/alpha"
+printf 'CONCURRENT=yes\n' > "$case_dir/concurrent.expected"
+assert_file_equals "$case_dir/concurrent.expected" "$preference_dir/alpha"
 rm -f "$edit_temp_path"
 
 setup_case edit-src-editor-failure-continues
@@ -1047,10 +1086,14 @@ case $second_editor_command in
         exit 1
         ;;
 esac
-assert_command_at 3 "sudo install -Dm644 -- /dev/stdin $preference_dir/second"
-assert_path_absent "$first_temp_path"
+assert_total_command_count 2
+if [ ! -f "$first_temp_path" ]; then
+    echo "edit-src discarded the first retained temporary file" >&2
+    exit 1
+fi
 assert_path_absent "$second_temp_path"
 assert_contains "EDITED=yes" "$preference_dir/second"
+rm -f "$first_temp_path"
 
 setup_case edit-src-source-validation-continues
 printf 'FIRST=original\n' > "$preference_dir/first"
@@ -1067,10 +1110,10 @@ second_editor_command=$(sed -n '2p' "$command_log")
 first_temp_path=${first_editor_command##* }
 second_temp_path=${second_editor_command##* }
 assert_contains "Failed to open edited temporary file $first_temp_path" "$output_file"
-assert_command_at 3 "sudo install -Dm644 -- /dev/stdin $preference_dir/second"
-assert_path_absent "$first_temp_path"
+assert_total_command_count 2
 assert_path_absent "$second_temp_path"
 assert_contains "EDITED=yes" "$preference_dir/second"
+rm -f "$first_temp_path"
 
 setup_case edit-src-source-fd-zero
 export EDITOR=moguet-test-editor
@@ -1079,7 +1122,7 @@ printf 'FD_ZERO\000PAYLOAD' > "$case_dir/replacement-content"
 export MOGUET_TEST_SOURCE_MAINTENANCE_EDITOR_REPLACEMENT_KIND=regular
 export MOGUET_TEST_SOURCE_MAINTENANCE_EDITOR_REPLACEMENT_SOURCE=$case_dir/replacement-content
 run_ok_stdin_closed edit-src alpha
-assert_command_at 2 "sudo install -Dm644 -- /dev/stdin $preference_dir/alpha"
+assert_total_command_count 1
 assert_file_equals "$case_dir/replacement-content" "$preference_dir/alpha"
 
 echo "  ok: P0-3 cmd_edit_src"
@@ -1087,40 +1130,47 @@ echo "  ok: P0-3 cmd_edit_src"
 # Existing list-src characterization remains owned by test-source-selection.
 
 # P0-4: del-src and revert continue per target and preserve error priority.
+setup_case del-src-missing-store-does-not-create
+rmdir "$preference_dir"
+run_ok del-src absent-source
+assert_path_absent "$preference_dir"
+assert_total_command_count 0
+
+setup_case revert-missing-store-does-not-create
+rmdir "$preference_dir"
+run_ok revert absent-source
+assert_path_absent "$preference_dir"
+assert_command_at 1 "pacman -Si absent-source"
+assert_total_command_count 1
+
 setup_case del-src-partial-failure
 for package in alpha beta gamma; do
     printf 'SOURCE=yes\n' > "$preference_dir/$package"
 done
-printf 'rm -f %s\n' "$preference_dir/beta" > "$sudo_failures"
+chmod 644 "$preference_dir/beta"
 run_fail del-src alpha beta gamma
-assert_command_at 1 "sudo rm -f $preference_dir/alpha"
-assert_command_at 2 "sudo rm -f $preference_dir/beta"
-assert_command_at 3 "sudo rm -f $preference_dir/gamma"
+assert_total_command_count 0
 assert_path_absent "$preference_dir/alpha"
 if [ ! -f "$preference_dir/beta" ]; then
     echo "failed del-src target was unexpectedly removed" >&2
     exit 1
 fi
 assert_path_absent "$preference_dir/gamma"
-assert_contains "Failed to remove beta" "$output_file"
+assert_contains "Source preference entry permissions are not private mode 0600: $preference_dir/beta" "$output_file"
 
 setup_case revert-grouped-reinstall
 for package in official-a remove-fail aur-a; do
     printf 'SOURCE=yes\n' > "$preference_dir/$package"
 done
-printf 'rm -f %s\n' "$preference_dir/remove-fail" > "$sudo_failures"
+chmod 644 "$preference_dir/remove-fail"
 export MOGUET_TEST_PACMAN_REPO_PACKAGES='official-a official-b remove-fail'
 run_fail --noconfirm revert official-a remove-fail aur-a official-b
-assert_command_at 1 "sudo rm -f $preference_dir/official-a"
-assert_command_at 2 "pacman -Si official-a"
-assert_command_at 3 "sudo rm -f $preference_dir/remove-fail"
+assert_command_at 1 "pacman -Si official-a"
 assert_command_absent "pacman -Si remove-fail"
-assert_command_at 4 "sudo rm -f $preference_dir/aur-a"
-assert_command_at 5 "pacman -Si aur-a"
-assert_command_absent "sudo rm -f $preference_dir/official-b"
-assert_command_at 6 "pacman -Si official-b"
-assert_command_at 7 "sudo pacman -S --noconfirm official-a official-b"
-assert_total_command_count 7
+assert_command_at 2 "pacman -Si aur-a"
+assert_command_at 3 "pacman -Si official-b"
+assert_command_at 4 "sudo pacman -S --noconfirm official-a official-b"
+assert_total_command_count 4
 assert_command_count "sudo pacman -S --noconfirm official-a official-b" 1
 assert_contains "official-b was not marked." "$output_file"
 assert_contains "aur-a is likely an AUR package. Config removed only." "$output_file"
@@ -1135,10 +1185,8 @@ fi
 setup_case revert-reinstall-error-priority
 printf 'SOURCE=yes\n' > "$preference_dir/delete-fail"
 printf 'SOURCE=yes\n' > "$preference_dir/official-a"
-{
-    printf 'rm -f %s\n' "$preference_dir/delete-fail"
-    printf 'pacman -S official-a\n'
-} > "$sudo_failures"
+chmod 644 "$preference_dir/delete-fail"
+printf 'pacman -S official-a\n' > "$sudo_failures"
 export MOGUET_TEST_PACMAN_REPO_PACKAGES=official-a
 run_fail revert delete-fail official-a
 assert_contains "Failed to reinstall binaries." "$output_file"
@@ -1146,7 +1194,7 @@ assert_not_contains "Failed to revert one or more packages." "$output_file"
 
 setup_case revert-delete-aggregate
 printf 'SOURCE=yes\n' > "$preference_dir/delete-fail"
-printf 'rm -f %s\n' "$preference_dir/delete-fail" > "$sudo_failures"
+chmod 644 "$preference_dir/delete-fail"
 run_fail revert delete-fail
 assert_contains "Failed to revert one or more packages." "$output_file"
 assert_command_content_absent "sudo pacman -S"
@@ -1292,13 +1340,13 @@ assert_command_absent "sudo pacman -Syu --noconfirm"
 assert_command_content_absent "pacman -Si"
 assert_total_command_count 0
 
-setup_case upgrade-warning-remains-on-stdout
+setup_case upgrade-invalid-name-is-hard-error
 : > "$preference_dir/bad name"
 run_upgrade_split_fail --noconfirm upgrade
-assert_contains "System upgrade..." "$stdout_file"
-assert_contains "Ignoring invalid source-build preference filename: bad name" "$stdout_file"
-assert_file_empty "$stderr_file"
-assert_command "sudo pacman -Syu --noconfirm"
+assert_contains "Invalid source preference entry name in $preference_dir: bad name" "$stderr_file"
+assert_not_contains "Ignoring invalid source-build preference filename" "$stdout_file"
+assert_command_absent "sudo pacman -Syu --noconfirm"
+assert_total_command_count 0
 
 setup_case upgrade-failure-diagnostic-remains-on-stderr
 printf 'pacman -Syu --noconfirm\n' > "$sudo_failures"
@@ -1319,25 +1367,25 @@ assert_total_command_count 1
 
 setup_case upgrade-metadata-nonregular-only
 mkdir "$preference_dir/alpha"
-run_upgrade_ok --noconfirm upgrade
-assert_command "sudo pacman -Syu --noconfirm"
+run_upgrade_fail --noconfirm upgrade
+assert_contains "Source preference entry is not a regular file: $preference_dir/alpha" "$output_file"
+assert_command_absent "sudo pacman -Syu --noconfirm"
 assert_command_content_absent "pacman-conf "
 assert_command_content_absent "alpm "
-assert_total_command_count 1
+assert_total_command_count 0
 
 setup_case upgrade-metadata-invalid-preference-only
 : > "$preference_dir/bad name"
 run_upgrade_fail --noconfirm upgrade
-assert_contains "Ignoring invalid source-build preference filename: bad name" "$output_file"
-assert_output_line_count "Ignoring invalid source-build preference filename: bad name" 1 "$output_file"
-assert_command "sudo pacman -Syu --noconfirm"
+assert_contains "Invalid source preference entry name in $preference_dir: bad name" "$output_file"
+assert_output_line_count "Invalid source preference entry name in $preference_dir: bad name" 1 "$output_file"
+assert_command_absent "sudo pacman -Syu --noconfirm"
 assert_command_content_absent "pacman-conf "
 assert_command_content_absent "alpm "
 assert_command_absent "pacman -Si bad name"
 assert_command_content_absent "git "
 assert_command_content_absent "makepkg "
 assert_request_log_empty
-assert_output_before "System upgrade..." "Ignoring invalid source-build preference filename: bad name" "$output_file"
 
 setup_case upgrade-multi-source-pkgdest-before-syu
 : > "$preference_dir/alpha"
@@ -1566,8 +1614,8 @@ setup_case upgrade-static-source-failure-stops-all-packages
 : > "$preference_dir/missing-upgrade"
 : > "$preference_dir/bad name"
 run_upgrade_fail --noedit --nodiff --noconfirm upgrade
-assert_contains "Package not found in repos or AUR: missing-upgrade" "$output_file"
-assert_command "pacman -Si missing-upgrade"
+assert_contains "Invalid source preference entry name in $preference_dir: bad name" "$output_file"
+assert_command_absent "pacman -Si missing-upgrade"
 assert_command_count "pacman-conf --verbose RootDir DBPath" 0
 assert_command_content_absent "alpm "
 assert_command_absent "sudo pacman -Syu --noconfirm"
@@ -1652,7 +1700,7 @@ export MOGUET_TEST_PACMAN_REPO_PACKAGES=$upgrade_package
 chmod 000 "$preference_dir/$upgrade_package"
 run_upgrade_fail --noedit --nodiff --noconfirm upgrade
 chmod 600 "$preference_dir/$upgrade_package"
-assert_contains "Failed to open source preference entry $preference_dir/$upgrade_package: Permission denied" "$output_file"
+assert_contains "Source preference entry permissions are not private mode 0600: $preference_dir/$upgrade_package" "$output_file"
 assert_not_contains "Loading custom build flags from $preference_dir/$upgrade_package." "$output_file"
 assert_command_absent "sudo pacman -Syu --noconfirm"
 assert_command_content_absent "pacman-conf "
@@ -1936,14 +1984,15 @@ setup_upgrade_transition_case \
 : > "$preference_dir/bad name"
 export MOGUET_TEST_PACMAN_REPO_PACKAGES=$upgrade_package
 run_upgrade_fail --noedit --nodiff --noconfirm upgrade
-assert_contains "Ignoring invalid source-build preference filename: bad name" "$output_file"
-assert_output_line_count "Ignoring invalid source-build preference filename: bad name" 1 "$output_file"
-assert_contains "$upgrade_package is up to date (2.0-1). Skipping." "$output_file"
-assert_single_package_metadata_snapshots_around_syu "$upgrade_package" 2
+assert_contains "Invalid source preference entry name in $preference_dir: bad name" "$output_file"
+assert_output_line_count "Invalid source preference entry name in $preference_dir: bad name" 1 "$output_file"
+assert_not_contains "$upgrade_package is up to date (2.0-1). Skipping." "$output_file"
+assert_command_absent "sudo pacman -Syu --noconfirm"
+assert_command_content_absent "alpm "
 assert_command_absent "alpm query bad name"
 assert_command_absent "pacman -Si bad name"
-assert_command_count "pacman -Si $upgrade_package" 1
-assert_command "vercmp 2.0-1 2.0-1"
+assert_command_absent "pacman -Si $upgrade_package"
+assert_command_absent "vercmp 2.0-1 2.0-1"
 assert_command_absent "pacman -Q $upgrade_package"
 assert_command_content_absent "makepkg"
 assert_request_log_empty
