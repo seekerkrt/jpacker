@@ -1,9 +1,32 @@
 #pragma once
 
+#include "cli_routing.hpp"
+#include "local_source_root.hpp"
+#include "local_source_workspace.hpp"
+
 #include <string>
+#include <utility>
 #include <vector>
 
 struct AppConfig;
+
+// Pre-log route preparationでlexical CLI requestとdescriptor-first local
+// root inspectionを束ねる。missing/unsafe pathはstate/cache作成前に停止する。
+struct PreparedLocalSourceBuildRoute {
+    LocalSourceBuildInvocation invocation;
+    LocalSourceRoot            source_root;
+};
+
+PreparedLocalSourceBuildRoute prepare_local_source_build_route(
+        LocalSourceBuildInvocation invocation,
+        const AppConfig& config);
+
+std::string local_source_workspace_failure_diagnostic(
+        const LocalSourceWorkspaceFailure& failure);
+
+int cmd_build_local(
+        PreparedLocalSourceBuildRoute route,
+        const AppConfig& config);
 
 int cmd_build(
         const std::vector<std::string>& args,

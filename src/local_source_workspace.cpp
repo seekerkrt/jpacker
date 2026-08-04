@@ -1734,11 +1734,11 @@ bool is_same_or_descendant(
     return true;
 }
 
-void require_cache_identity_outside_source_tree(
+void require_directory_identity_outside_source_subtree(
         int source_directory_descriptor,
         const ObservedNodeIdentity& expected_directory,
         std::uintmax_t source_device, std::uintmax_t source_owner,
-        std::uintmax_t cache_device, std::uintmax_t cache_inode,
+        std::uintmax_t directory_device, std::uintmax_t directory_inode,
         const fs::path& relative_path) {
     const struct stat opened_before = descriptor_status(
             source_directory_descriptor,
@@ -1759,7 +1759,8 @@ void require_cache_identity_outside_source_tree(
                 observe_node_identity(named_before);
         if(identity.type != ObservedNodeType::Directory) continue;
 
-        if(identity.device == cache_device && identity.inode == cache_inode) {
+        if(identity.device == directory_device &&
+           identity.inode == directory_inode) {
             throw_workspace_failure(
                     LocalSourceWorkspaceStage::BoundaryValidation,
                     LocalSourceWorkspaceErrorCode::CacheInsideSource,
@@ -1775,9 +1776,9 @@ void require_cache_identity_outside_source_tree(
                 child.get(), LocalSourceWorkspaceStage::BoundaryValidation,
                 entry_path);
         require_unchanged_node(identity, opened_child, entry_path);
-        require_cache_identity_outside_source_tree(
+        require_directory_identity_outside_source_subtree(
                 child.get(), identity, source_device, source_owner,
-                cache_device, cache_inode, entry_path);
+                directory_device, directory_inode, entry_path);
         const struct stat named_after = inspect_named_source_node(
                 source_directory_descriptor, name, entry_path);
         require_unchanged_node(identity, named_after, entry_path);
@@ -1970,22 +1971,60 @@ void LocalSourceWorkspace::cleanup() {
     state_ = State::Cleaned;
 }
 
-LocalSourceWorkspace materialize_local_source_workspace(
+void require_local_source_cache_separation(
         const LocalSourceRoot& source_root,
         const ValidatedCacheRoot& cache_root) {
     require_source_and_cache_boundary(source_root, cache_root);
+
+    require_directory_identity_outside_local_source_tree(
+            source_root, cache_root.device(), cache_root.inode());
+    cache_root.require_unchanged_identity();
+}
+
+void require_directory_identity_outside_local_source_tree(
+        const LocalSourceRoot& source_root,
+        std::uintmax_t directory_device,
+        std::uintmax_t directory_inode) {
+    try {
+        source_root.require_unchanged_identity();
+    } catch(...) {
+        throw_workspace_failure(
+                LocalSourceWorkspaceStage::SourceRevalidation,
+                LocalSourceWorkspaceErrorCode::ConcurrentMutation);
+    }
 
     const struct stat boundary_source_status = descriptor_status(
             source_root.directory_descriptor_,
             LocalSourceWorkspaceStage::BoundaryValidation, {});
     const ObservedNodeIdentity boundary_source_identity =
             observe_node_identity(boundary_source_status);
-    require_cache_identity_outside_source_tree(
+    require_admissible_source_node(
+            boundary_source_identity, ObservedNodeType::Directory,
+            source_root.directory_identity_.device,
+            source_root.expected_owner_, {});
+    if(boundary_source_identity.device == directory_device &&
+       boundary_source_identity.inode == directory_inode) {
+        throw_workspace_failure(
+                LocalSourceWorkspaceStage::BoundaryValidation,
+                LocalSourceWorkspaceErrorCode::CacheInsideSource);
+    }
+    require_directory_identity_outside_source_subtree(
             source_root.directory_descriptor_, boundary_source_identity,
             boundary_source_identity.device, source_root.expected_owner_,
-            cache_root.device(), cache_root.inode(), {});
-    source_root.require_unchanged_identity();
-    cache_root.require_unchanged_identity();
+            directory_device, directory_inode, {});
+    try {
+        source_root.require_unchanged_identity();
+    } catch(...) {
+        throw_workspace_failure(
+                LocalSourceWorkspaceStage::SourceRevalidation,
+                LocalSourceWorkspaceErrorCode::ConcurrentMutation);
+    }
+}
+
+LocalSourceWorkspace materialize_local_source_workspace(
+        const LocalSourceRoot& source_root,
+        const ValidatedCacheRoot& cache_root) {
+    require_local_source_cache_separation(source_root, cache_root);
 
     ValidatedCachePath workspace_path =
             create_source_workspace_path(cache_root);
@@ -2092,14 +2131,7 @@ void set_local_source_workspace_test_hook(
 void require_cache_identity_outside_source_tree_for_test(
         const LocalSourceRoot& source_root,
         std::uintmax_t cache_device, std::uintmax_t cache_inode) {
-    const struct stat source_status = descriptor_status(
-            source_root.directory_descriptor_,
-            LocalSourceWorkspaceStage::BoundaryValidation, {});
-    const ObservedNodeIdentity source_identity =
-            observe_node_identity(source_status);
-    require_cache_identity_outside_source_tree(
-            source_root.directory_descriptor_, source_identity,
-            source_identity.device, source_root.expected_owner_,
-            cache_device, cache_inode, {});
+    require_directory_identity_outside_local_source_tree(
+            source_root, cache_device, cache_inode);
 }
 #endif

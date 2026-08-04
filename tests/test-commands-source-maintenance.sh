@@ -128,6 +128,10 @@ setup_case() {
     unset MOGUET_TEST_MAKEPKG_ENV_KEYS
     unset MOGUET_TEST_MAKEPKG_PACKAGELIST_EXIT_CODE
     unset MOGUET_TEST_MAKEPKG_ARTIFACT_IDENTITIES
+    unset MOGUET_TEST_MAKEPKG_PACKAGE_BASE
+    unset MOGUET_TEST_MAKEPKG_LOCAL_PACKAGE_BASE
+    unset MOGUET_TEST_MAKEPKG_SRCINFO_OUTPUT_FILE
+    unset MOGUET_TEST_MAKEPKG_PRINTSRCINFO_EXIT_CODE
     unset MOGUET_TEST_SOURCE_MAINTENANCE_FAIL_SUBSTRING
     unset MOGUET_TEST_SOURCE_MAINTENANCE_PACMAN_SYU_Q_OUTPUT_FILE
     unset MOGUET_TEST_SOURCE_MAINTENANCE_PACMAN_SC_RACE_PATH
@@ -151,6 +155,7 @@ setup_case() {
     unset MOGUET_TEST_MAKEPKG_PACKAGE_METADATA_STATE_AFTER_SUCCESS_FILE
     unset MOGUET_TEST_PACMAN_U_SUCCESS_LOG
     unset MOGUET_TEST_REPLACE_WORKSPACE_AFTER_PACMAN_U
+    unset MOGUET_TEST_APPEND_LOCAL_PKGBUILD_AFTER_ASDEPS
     unset XDG_STATE_HOME
     unset EMPTY
     unset PKGDEST
@@ -480,6 +485,21 @@ assert_command_pattern_absent() {
     fi
 }
 
+assert_command_pattern_before() {
+    first_pattern=$1
+    second_pattern=$2
+    first_line=$(grep -nE -- "$first_pattern" "$command_log" |
+        sed -n '1s/:.*//p')
+    second_line=$(grep -nE -- "$second_pattern" "$command_log" |
+        sed -n '1s/:.*//p')
+    if [ -z "$first_line" ] || [ -z "$second_line" ] ||
+       [ "$first_line" -ge "$second_line" ]; then
+        echo "unexpected command pattern order: $first_pattern -> $second_pattern" >&2
+        cat "$command_log" >&2
+        exit 1
+    fi
+}
+
 assert_total_command_count() {
     expected=$1
     actual=$(wc -l < "$command_log")
@@ -595,6 +615,29 @@ assert_file_empty() {
     fi
 }
 
+snapshot_source_tree() {
+    checked_source_root=$1
+    source_tree_snapshot=$2
+    (
+        CDPATH= cd "$checked_source_root"
+        find . -exec stat --printf \
+            'entry type=%F mode=%f uid=%u gid=%g dev=%d ino=%i size=%s mtime=%y ctime=%z path=%n target=%N\n' -- {} \;
+        find . -type f -exec cksum {} \;
+    ) | LC_ALL=C sort > "$source_tree_snapshot"
+}
+
+assert_source_tree_unchanged() {
+    checked_source_root=$1
+    before_snapshot=$2
+    after_snapshot=$case_dir/source-tree-after.snapshot
+    snapshot_source_tree "$checked_source_root" "$after_snapshot"
+    if ! cmp -s "$before_snapshot" "$after_snapshot"; then
+        echo "local source tree changed: $checked_source_root" >&2
+        diff -u "$before_snapshot" "$after_snapshot" >&2 || true
+        exit 1
+    fi
+}
+
 assert_argv_log() {
     actual_file=$1
     expected=$2
@@ -613,6 +656,35 @@ write_upgrade_srcinfo() {
         printf 'pkgrel = %s\n' "$srcinfo_release"
         printf 'pkgname = clean-root\n'
     } > "$srcinfo_file"
+}
+
+prepare_local_source_root() {
+    local_root=$1
+    local_package_base=$2
+    local_children=$3
+    local_dependency=${4:-}
+
+    mkdir -m 700 "$local_root"
+    {
+        printf 'pkgbase=%s\n' "$local_package_base"
+        printf 'pkgver=1.0\n'
+        printf 'pkgrel=1\n'
+    } > "$local_root/PKGBUILD"
+    {
+        printf 'pkgbase = %s\n' "$local_package_base"
+        printf 'pkgver = 1.0\n'
+        printf 'pkgrel = 1\n'
+        printf 'arch = any\n'
+        if [ -n "$local_dependency" ]; then
+            printf 'depends = %s\n' "$local_dependency"
+        fi
+        for local_child in $local_children; do
+            printf 'pkgname = %s\n' "$local_child"
+        done
+    } > "$local_root/.SRCINFO"
+    chmod 600 "$local_root/PKGBUILD" "$local_root/.SRCINFO"
+    touch -t 202001010000 "$local_root/PKGBUILD"
+    touch -t 202001010001 "$local_root/.SRCINFO"
 }
 
 prepare_upgrade_source_checkout() {
@@ -699,7 +771,9 @@ setup_upgrade_transition_case() {
 # P0-1: build handler parsing, validation, catch boundary, and source request mapping.
 setup_case build-missing-argument
 run_fail build
-assert_contains "Usage: moguet build <pkg> [VAR=VAL...]" "$output_file"
+assert_contains \
+    "Usage: moguet build <pkg> [V=K...] | build --local <directory> [V=K...]" \
+    "$output_file"
 assert_total_command_count 0
 
 setup_case build-environment-without-package
@@ -809,6 +883,343 @@ assert_file_equals "$installed_after_success" "$package_metadata_state"
 assert_cleanup_partial_success_fixture "$install_success_log"
 
 echo "  ok: P0-1 cmd_build"
+
+# #271 Slice 5: formal local route builds an invocation-owned snapshot and
+# installs every declared local child explicitly without touching the source.
+setup_case build-local-split-success
+local_root=$case_dir/local-source
+prepare_local_source_root \
+    "$local_root" local-suite 'local-cli local-libs'
+cp "$local_root/PKGBUILD" "$case_dir/expected-PKGBUILD"
+cp "$local_root/.SRCINFO" "$case_dir/expected-SRCINFO"
+export MOGUET_TEST_MAKEPKG_LOCAL_PACKAGE_BASE=local-suite
+export MOGUET_TEST_MAKEPKG_ARTIFACT_IDENTITIES='local-suite|local-cli|1.0-1
+local-suite|local-libs|1.0-1
+local-suite|local-debug|1.0-1'
+run_ok --noedit --noconfirm build --local "$local_root"
+assert_command_content_absent "git clone"
+assert_command_content_absent "makepkg --printsrcinfo"
+assert_command_count "makepkg --packagelist" 1
+assert_command_count "makepkg -sc --noconfirm" 1
+assert_command_pattern_count \
+    '^sudo pacman -U --noconfirm -- .*/local-cli-1\.0-1-x86_64\.pkg\.tar\.zst .*/local-libs-1\.0-1-x86_64\.pkg\.tar\.zst$' 1
+assert_command_pattern_absent '^sudo pacman -U .*local-debug'
+assert_contains "Local PackageBase result: local-suite" "$output_file"
+assert_contains "  required child: local-cli 1.0-1 (explicit): installed" "$output_file"
+assert_contains "  required child: local-libs 1.0-1 (explicit): installed" "$output_file"
+assert_contains \
+    "  produced artifact: local-debug 1.0-1 (not selected; not installed)" \
+    "$output_file"
+assert_file_equals "$case_dir/expected-PKGBUILD" "$local_root/PKGBUILD"
+assert_file_equals "$case_dir/expected-SRCINFO" "$local_root/.SRCINFO"
+assert_path_absent "$local_root/src"
+assert_path_absent "$local_root/pkg"
+assert_request_log_empty
+
+# A failed local makepkg invocation retains only its invocation-owned artifact
+# workspace for diagnosis and keeps internal phase tokens out of the CLI.
+setup_case build-local-execution-failure-retains-artifact-workspace
+local_root=$case_dir/local-source
+prepare_local_source_root "$local_root" local-failure local-failure
+source_tree_before=$case_dir/source-tree-before.snapshot
+snapshot_source_tree "$local_root" "$source_tree_before"
+export MOGUET_TEST_MAKEPKG_LOCAL_PACKAGE_BASE=local-failure
+export MOGUET_TEST_MAKEPKG_ARTIFACT_IDENTITIES='local-failure|local-failure|1.0-1'
+export MOGUET_TEST_MAKEPKG_EXIT_CODE=42
+export MOGUET_TEST_MAKEPKG_PACKAGELIST_EXIT_CODE=0
+run_fail --noedit --noconfirm build --local "$local_root"
+assert_contains \
+    "The build-only makepkg command failed with exit code 42." \
+    "$output_file"
+assert_contains "Retained artifact workspace:" "$output_file"
+assert_not_contains \
+    "local-source-build-command-returned-nonzero" "$output_file"
+assert_command_count "makepkg --packagelist" 1
+assert_command_count "makepkg -sc --noconfirm" 1
+assert_command_content_absent "sudo pacman"
+retained_workspace=$(sed -n \
+    's|^.*Retained artifact workspace: \(.*\)$|\1|p' "$output_file")
+if [ -z "$retained_workspace" ] || [ ! -d "$retained_workspace" ] ||
+   [ -L "$retained_workspace" ]; then
+    echo "displayed local artifact workspace was not retained" >&2
+    sed -n '1,260p' "$output_file" >&2
+    exit 1
+fi
+assert_source_tree_unchanged "$local_root" "$source_tree_before"
+
+# State/cache authority must be rejected by retained identity before a
+# managed directory or the fixed state log can mutate the selected source.
+setup_case build-local-state-under-source-missing-rejected
+local_root=$case_dir/local-source
+prepare_local_source_root "$local_root" local-state local-state
+export XDG_STATE_HOME=$local_root
+run_fail --noedit --noconfirm build --local "$local_root"
+assert_contains \
+    "Moguet state and cache directories must be outside the local source tree." \
+    "$output_file"
+assert_path_absent "$local_root/moguet"
+assert_total_command_count 0
+assert_request_log_empty
+
+setup_case build-local-state-under-source-existing-rejected-before-log
+local_root=$case_dir/local-source
+prepare_local_source_root "$local_root" local-state local-state
+mkdir -m 700 "$local_root/moguet"
+export XDG_STATE_HOME=$local_root
+run_fail --noedit --noconfirm build --local "$local_root"
+assert_contains \
+    "Moguet state and cache directories must be outside the local source tree." \
+    "$output_file"
+assert_path_absent "$local_root/moguet/moguet.log"
+assert_total_command_count 0
+assert_request_log_empty
+
+setup_case build-local-cache-under-source-missing-rejected
+local_root=$case_dir/local-source
+prepare_local_source_root "$local_root" local-cache local-cache
+export XDG_CACHE_HOME=$local_root
+run_fail --noedit --noconfirm build --local "$local_root"
+assert_contains \
+    "Moguet state and cache directories must be outside the local source tree." \
+    "$output_file"
+assert_path_absent "$local_root/moguet"
+assert_command_content_absent "makepkg"
+assert_command_content_absent "sudo pacman"
+assert_request_log_empty
+
+setup_case build-local-cache-under-source-existing-rejected
+local_root=$case_dir/local-source
+prepare_local_source_root "$local_root" local-cache local-cache
+mkdir -m 700 "$local_root/moguet"
+export XDG_CACHE_HOME=$local_root
+run_fail --noedit --noconfirm build --local "$local_root"
+assert_contains \
+    "Moguet state and cache directories must be outside the local source tree." \
+    "$output_file"
+if find "$local_root/moguet" -mindepth 1 -print -quit | grep -q .; then
+    echo "existing source-local cache directory was mutated" >&2
+    find "$local_root/moguet" -mindepth 1 -maxdepth 1 -print >&2
+    exit 1
+fi
+assert_command_content_absent "makepkg"
+assert_command_content_absent "sudo pacman"
+assert_request_log_empty
+
+# The local install adapter owns transaction failure retention and successful
+# transaction/failed cleanup presentation at the production CLI boundary.
+setup_case build-local-install-failure-retains-artifacts
+local_root=$case_dir/local-source
+prepare_local_source_root "$local_root" local-failure local-failure
+source_tree_before=$case_dir/source-tree-before.snapshot
+snapshot_source_tree "$local_root" "$source_tree_before"
+export MOGUET_TEST_MAKEPKG_LOCAL_PACKAGE_BASE=local-failure
+export MOGUET_TEST_MAKEPKG_ARTIFACT_IDENTITIES='local-failure|local-failure|1.0-1'
+export MOGUET_TEST_SOURCE_MAINTENANCE_FAIL_SUBSTRING='pacman -U'
+run_fail --noedit --noconfirm build --local "$local_root"
+assert_contains "Build Error: pacman -U failed with exit code 1." "$output_file"
+assert_not_contains "Local PackageBase result:" "$output_file"
+assert_command_prefix_count "sudo pacman -U --noconfirm -- " 1
+failed_artifact=$(sed -n \
+    's|^sudo pacman -U --noconfirm -- \([^ ]*\)$|\1|p' "$command_log")
+failed_workspace=${failed_artifact%/*}
+if [ -z "$failed_artifact" ] || [ ! -f "$failed_artifact" ] ||
+   [ "${failed_workspace%/*}" != "$cache_root" ]; then
+    echo "failed local install did not retain its artifact workspace" >&2
+    cat "$command_log" >&2
+    exit 1
+fi
+case ${failed_workspace##*/} in
+    .artifact-workspace~-??????) ;;
+    *)
+        echo "failed local install retained an unexpected workspace: $failed_workspace" >&2
+        exit 1
+        ;;
+esac
+assert_source_tree_unchanged "$local_root" "$source_tree_before"
+
+setup_case build-local-cleanup-partial-success
+local_root=$case_dir/local-source
+prepare_local_source_root "$local_root" local-cleanup local-cleanup
+source_tree_before=$case_dir/source-tree-before.snapshot
+snapshot_source_tree "$local_root" "$source_tree_before"
+install_success_log=$XDG_CACHE_HOME/pacman-u-success.log
+: > "$install_success_log"
+export MOGUET_TEST_MAKEPKG_LOCAL_PACKAGE_BASE=local-cleanup
+export MOGUET_TEST_MAKEPKG_ARTIFACT_IDENTITIES='local-cleanup|local-cleanup|1.0-1'
+export MOGUET_TEST_PACMAN_U_SUCCESS_LOG=$install_success_log
+export MOGUET_TEST_REPLACE_WORKSPACE_AFTER_PACMAN_U=1
+run_fail --noedit --noconfirm build --local "$local_root"
+assert_contains \
+    "Package installation succeeded, but artifact workspace cleanup failed:" \
+    "$output_file"
+assert_not_contains "Build Error:" "$output_file"
+assert_not_contains "pacman -U failed" "$output_file"
+assert_output_line_count "Local PackageBase result: local-cleanup" 1 "$output_file"
+assert_output_line_count \
+    "  required child: local-cleanup 1.0-1 (explicit): installed" 1 \
+    "$output_file"
+assert_command_prefix_count "sudo pacman -U --noconfirm -- " 1
+assert_cleanup_partial_success_fixture "$install_success_log"
+assert_source_tree_unchanged "$local_root" "$source_tree_before"
+
+# Remote AUR dependency units execute and install as Dependency before the
+# local root.
+setup_case build-local-aur-dependency-before-root
+local_root=$case_dir/local-source
+prepare_local_source_root "$local_root" local-app local-app clean-root
+export MOGUET_TEST_MAKEPKG_LOCAL_PACKAGE_BASE=local-app
+export MOGUET_TEST_MAKEPKG_ARTIFACT_IDENTITIES='clean-root|clean-root|1.0-1
+local-app|local-app|1.0-1'
+run_ok --noedit --noconfirm build --local "$local_root"
+assert_command "git clone https://aur.archlinux.org/clean-root.git clean-root"
+assert_command_pattern_count \
+    '^sudo pacman -U --noconfirm --asdeps -- .*/clean-root-1\.0-1-x86_64\.pkg\.tar\.zst$' 1
+assert_command_pattern_count \
+    '^sudo pacman -U --noconfirm -- .*/local-app-1\.0-1-x86_64\.pkg\.tar\.zst$' 1
+assert_command_pattern_before \
+    '^sudo pacman -U .*clean-root-1\.0-1-' \
+    '^sudo pacman -U .*local-app-1\.0-1-'
+assert_not_contains "local-app" "$request_log"
+assert_contains "clean-root" "$request_log"
+
+# A successful remote dependency transaction is not rolled back, but any
+# subsequent local source mutation must stop before local build/install.
+setup_case build-local-source-change-after-aur-dependency
+local_root=$case_dir/local-source
+prepare_local_source_root "$local_root" local-app local-app clean-root
+export MOGUET_TEST_MAKEPKG_LOCAL_PACKAGE_BASE=local-app
+export MOGUET_TEST_MAKEPKG_ARTIFACT_IDENTITIES='clean-root|clean-root|1.0-1
+local-app|local-app|1.0-1'
+export MOGUET_TEST_APPEND_LOCAL_PKGBUILD_AFTER_ASDEPS=$local_root/PKGBUILD
+run_fail --noedit --noconfirm build --local "$local_root"
+assert_contains \
+    "Local source entry content changed during the operation: $local_root/PKGBUILD" \
+    "$output_file"
+assert_not_contains "local-source-workspace-failed" "$output_file"
+assert_not_contains "local source root failure" "$output_file"
+assert_command_pattern_count \
+    '^sudo pacman -U --noconfirm --asdeps -- .*/clean-root-1\.0-1-x86_64\.pkg\.tar\.zst$' 1
+assert_command_pattern_absent \
+    '^sudo pacman -U --noconfirm -- .*/local-app-1\.0-1-x86_64\.pkg\.tar\.zst$'
+assert_command_count "makepkg --packagelist" 1
+assert_command_count "makepkg -sc --noconfirm" 1
+
+# Missing metadata requires a no-default consent. --noconfirm must stop before
+# makepkg evaluation, while an explicit TTY yes binds the exact environment to
+# evaluation, packagelist, and build.
+setup_case build-local-metadata-noconfirm-rejected
+local_root=$case_dir/local-source
+prepare_local_source_root "$local_root" local-eval local-eval
+rm "$local_root/.SRCINFO"
+run_fail --noedit --noconfirm build --local "$local_root"
+assert_contains "Cannot answer prompt without interaction (--noconfirm):" "$output_file"
+assert_command_content_absent "makepkg"
+assert_command_content_absent "sudo pacman"
+assert_path_absent "$local_root/.SRCINFO"
+
+setup_case build-local-metadata-noninteractive-rejected
+local_root=$case_dir/local-source
+prepare_local_source_root "$local_root" local-eval local-eval
+rm "$local_root/.SRCINFO"
+source_tree_before=$case_dir/source-tree-before.snapshot
+snapshot_source_tree "$local_root" "$source_tree_before"
+run_fail_nonblocking --noedit build --local "$local_root" < /dev/null
+assert_contains \
+    "Cannot safely answer prompt with non-interactive standard input:" \
+    "$output_file"
+assert_command_content_absent "makepkg"
+assert_command_content_absent "sudo pacman"
+assert_path_absent "$local_root/.SRCINFO"
+assert_source_tree_unchanged "$local_root" "$source_tree_before"
+
+for metadata_rejection in empty quit; do
+    setup_case "build-local-metadata-tty-$metadata_rejection-rejected"
+    local_root=$case_dir/local-source
+    prepare_local_source_root "$local_root" local-eval local-eval
+    rm "$local_root/.SRCINFO"
+    source_tree_before=$case_dir/source-tree-before.snapshot
+    snapshot_source_tree "$local_root" "$source_tree_before"
+    case $metadata_rejection in
+        empty)
+            metadata_input='\n'
+            expected_diagnostic="A non-default confirmation requires an explicit yes answer."
+            ;;
+        quit)
+            metadata_input='q\n'
+            expected_diagnostic="Local metadata evaluation was not approved."
+            ;;
+    esac
+    : > "$command_log"
+    tty_exit_code=0
+    if printf '%b' "$metadata_input" |
+        timeout 5 script -qec \
+            "$test_binary --noedit build --local $local_root" \
+            /dev/null > "$output_file" 2>&1; then
+        echo "expected TTY metadata rejection: $metadata_rejection" >&2
+        sed -n '1,260p' "$output_file" >&2
+        exit 1
+    else
+        tty_exit_code=$?
+    fi
+    if [ "$tty_exit_code" -eq 124 ]; then
+        echo "TTY metadata rejection blocked: $metadata_rejection" >&2
+        sed -n '1,260p' "$output_file" >&2
+        exit 1
+    fi
+    assert_contains "$expected_diagnostic" "$output_file"
+    assert_command_content_absent "makepkg"
+    assert_command_content_absent "sudo pacman"
+    assert_path_absent "$local_root/.SRCINFO"
+    assert_source_tree_unchanged "$local_root" "$source_tree_before"
+done
+
+setup_case build-local-metadata-explicit-consent
+local_root=$case_dir/local-source
+prepare_local_source_root "$local_root" local-eval local-eval
+metadata_output=$case_dir/evaluated.SRCINFO
+cp "$local_root/.SRCINFO" "$metadata_output"
+rm "$local_root/.SRCINFO"
+makepkg_env_log=$case_dir/makepkg-env.log
+makepkg_cwd_log=$case_dir/makepkg-cwd.log
+: > "$makepkg_env_log"
+: > "$makepkg_cwd_log"
+export MOGUET_TEST_MAKEPKG_LOCAL_PACKAGE_BASE=local-eval
+export MOGUET_TEST_MAKEPKG_ARTIFACT_IDENTITIES='local-eval|local-eval|1.0-1'
+export MOGUET_TEST_MAKEPKG_SRCINFO_OUTPUT_FILE=$metadata_output
+export MOGUET_TEST_MAKEPKG_ENV_LOG=$makepkg_env_log
+export MOGUET_TEST_MAKEPKG_ENV_KEYS='FIRST EMPTY'
+export MOGUET_TEST_MAKEPKG_CWD_LOG=$makepkg_cwd_log
+if ! printf 'y\n' |
+    script -qec \
+        "$test_binary --noedit build --local $local_root FIRST=one EMPTY= FIRST=last" \
+        /dev/null > "$output_file" 2>&1; then
+    echo "expected explicit local metadata evaluation consent to succeed" >&2
+    sed -n '1,260p' "$output_file" >&2
+    cat "$command_log" >&2
+    exit 1
+fi
+assert_command_count "makepkg --printsrcinfo" 1
+assert_command_count "makepkg --packagelist" 1
+assert_command_count "makepkg -sc" 1
+assert_contains "FIRST='one'" "$output_file"
+assert_contains "FIRST='last'" "$output_file"
+assert_contains "EMPTY=''" "$output_file"
+assert_output_line_count "env[FIRST]=<last>" 3 "$makepkg_env_log"
+assert_output_line_count "env[EMPTY]=<>" 3 "$makepkg_env_log"
+assert_path_absent "$local_root/.SRCINFO"
+first_makepkg_cwd=$(sed -n '1p' "$makepkg_cwd_log")
+if [ "$first_makepkg_cwd" != "$local_root" ]; then
+    echo "metadata evaluation did not run in the retained local root" >&2
+    cat "$makepkg_cwd_log" >&2
+    exit 1
+fi
+if sed -n '2,$p' "$makepkg_cwd_log" | grep -Fx -- "$local_root" >/dev/null; then
+    echo "local packagelist/build unexpectedly ran in the user source root" >&2
+    cat "$makepkg_cwd_log" >&2
+    exit 1
+fi
+
+echo "  ok: #271 Slice 5 local build/install route"
 
 # dot path componentは、state logやsource preferenceの作成前にpackage validationで拒否する。
 for dot_target in . ..; do

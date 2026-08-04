@@ -1304,6 +1304,55 @@ void test_safe_partial_creation_is_retained() {
             "Failed final component unexpectedly exists.");
 }
 
+void test_creation_precondition_rejects_before_mutation() {
+    TemporaryDirectory temporary_directory;
+    create_explicit_anchors(temporary_directory.path());
+    const xdg_paths::ResolvedPaths paths =
+            resolve_explicit(temporary_directory.path());
+
+    const auto require_rejected_without_creation =
+            [](const auto& directory_paths,
+               const std::string& context) {
+                const PathMetadata expected_parent = path_metadata(
+                        directory_paths.creation_boundary.existing_anchor);
+                bool callback_ran = false;
+                bool sentinel_observed = false;
+                try {
+                    static_cast<void>(safety::prepare_directory(
+                            directory_paths,
+                            [&](const safety::DirectoryIdentity& identity) {
+                                callback_ran = true;
+                                expect(
+                                        identity.device ==
+                                                        expected_parent.device &&
+                                                identity.inode ==
+                                                        expected_parent.inode,
+                                        context +
+                                                ": callback did not receive the retained parent identity.");
+                                throw std::runtime_error(
+                                        "creation-precondition-rejected");
+                            }));
+                } catch(const std::runtime_error& error) {
+                    sentinel_observed =
+                            std::string(error.what()) ==
+                            "creation-precondition-rejected";
+                }
+                expect(callback_ran, context + ": callback did not run.");
+                expect(
+                        sentinel_observed,
+                        context + ": callback exception was not preserved.");
+                expect(
+                        !fs::exists(directory_paths.directory),
+                        context +
+                                ": managed directory was created before rejection.");
+            };
+
+    require_rejected_without_creation(
+            paths.state, "State creation precondition");
+    require_rejected_without_creation(
+            paths.cache, "Cache creation precondition");
+}
+
 void test_trailing_separators_preserve_creation_authority() {
     TemporaryDirectory temporary_directory;
     const fs::path explicit_root = temporary_directory.path() / "explicit";
@@ -1625,6 +1674,9 @@ int main() {
         run_case(
                 "safe partial creation retained",
                 test_safe_partial_creation_is_retained);
+        run_case(
+                "creation precondition rejects before mutation",
+                test_creation_precondition_rejects_before_mutation);
         run_case(
                 "trailing separators preserve creation authority",
                 test_trailing_separators_preserve_creation_authority);

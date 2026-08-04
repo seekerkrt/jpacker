@@ -5,6 +5,9 @@ require_makepkg_argv() {
     if [ "$#" -eq 1 ] && [ "${1:-}" = "--packagelist" ]; then
         return 0
     fi
+    if [ "$#" -eq 1 ] && [ "${1:-}" = "--printsrcinfo" ]; then
+        return 0
+    fi
     if [ "$#" -lt 1 ] || [ "${1:-}" != "-sc" ]; then
         exit 2
     fi
@@ -65,8 +68,21 @@ if [ -n "${MOGUET_TEST_MAKEPKG_CWD_LOG:-}" ]; then
     /usr/bin/pwd >> "$MOGUET_TEST_MAKEPKG_CWD_LOG" || exit 1
 fi
 exit_code=${MOGUET_TEST_MAKEPKG_EXIT_CODE:-99}
-package_base=$(/usr/bin/basename -- "$(/usr/bin/pwd)") || exit 1
+observed_package_base=$(/usr/bin/basename -- "$(/usr/bin/pwd)") || exit 1
+package_base=${MOGUET_TEST_MAKEPKG_PACKAGE_BASE:-$observed_package_base}
+case $observed_package_base in
+    .local-source-workspace~*)
+        package_base=${MOGUET_TEST_MAKEPKG_LOCAL_PACKAGE_BASE:-$package_base}
+        ;;
+esac
 default_artifact_path=${PKGDEST:+$PKGDEST/$package_base-1.0-1-x86_64.pkg.tar.zst}
+
+if [ "$1" = "--printsrcinfo" ]; then
+    if [ -n "${MOGUET_TEST_MAKEPKG_SRCINFO_OUTPUT_FILE:-}" ]; then
+        /usr/bin/cat -- "$MOGUET_TEST_MAKEPKG_SRCINFO_OUTPUT_FILE" || exit 1
+    fi
+    exit "${MOGUET_TEST_MAKEPKG_PRINTSRCINFO_EXIT_CODE:-$exit_code}"
+fi
 
 configured_artifacts_for_package_base() {
     [ -n "${MOGUET_TEST_MAKEPKG_ARTIFACT_IDENTITIES:-}" ] || return 0

@@ -227,6 +227,10 @@ moguet upgrade
 moguet upgrade-aur
 moguet upgrade-all
 
+# Build and install one remote package or one local PKGBUILD root
+moguet build <pkg> [V=K...]
+moguet build --local <directory> [V=K...]
+
 # Inspect AUR dependencies and build order without building
 moguet deps --recursive <pkg>
 moguet plan <pkg>
@@ -260,9 +264,22 @@ both selected routes. Non-TTY use and `--noconfirm` fail without querying or
 choosing a package.
 
 Source-build preferences are managed with `add-src`, `edit-src`, `list-src`,
-`del-src`, and `revert`. A one-off `build <pkg> [V=K]` does not save a
-preference. Runtime-aware package-name completion and more advanced completion
-are future work; the shipped completion is limited to the public CLI schema.
+`del-src`, and `revert`. A one-off `build <pkg> [V=K...]` resolves a remote
+package and does not save a preference. `build --local <directory> [V=K...]`
+instead treats exactly one user-owned directory as a local PackageBase source;
+it does not infer a local root from a path-like package operand or query AUR for
+that root.
+
+The local route reads a safe `.SRCINFO` without modifying it. Missing, invalid,
+or known-stale metadata requires PKGBUILD review and explicit no-default consent
+before `makepkg --printsrcinfo`; non-TTY input and `--noconfirm` stop instead of
+authorizing evaluation. Moguet builds from an invocation-owned source snapshot,
+leaves the user-owned tree unchanged, and installs every valid unique `pkgname`
+child declared by the accepted metadata as an explicit root. Dependency
+artifacts retain dependency install reasons, and an already explicit installed
+package is never demoted. Runtime-aware package-name completion and more
+advanced completion are future work; the shipped completion is limited to the
+public CLI schema.
 
 <!-- parity:configuration -->
 ## Configuration

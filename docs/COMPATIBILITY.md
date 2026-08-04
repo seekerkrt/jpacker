@@ -16,7 +16,7 @@ MoguetはArch Linux向けの **pacman-first wrapper** として扱う。
 - AUR / source build 経路では、pacman transaction option を無条件に makepkg へ置き換えない。
 - Moguet 固有 operation の未対応 option と、AUR / source build 経路へ安全に反映できない pacman option は、黙って無視せず実行前に停止する。
 - `--noconfirm` は「全部 yes」ではなく、「対話で止まらない」指定として扱う。
-- `--noconfirm` だけで rebuild / cleanbuild / provider selection / root package selection / conflicts / replaces / ambiguous artifact selection / 未解決依存の突破を勝手に有効化しない。requested childとmetadata identityから一意に決るsplit selectionは対話承認ではない。
+- `--noconfirm` だけで rebuild / cleanbuild / provider selection / root package selection / local PKGBUILD metadata evaluation / conflicts / replaces / ambiguous artifact selection / 未解決依存の突破を勝手に有効化しない。requested childとmetadata identityから一意に決るsplit selectionは対話承認ではない。
 - 値を取る option は、値を target と誤認しないように扱う。値が欠けている場合は停止する。
 
 ---
@@ -26,6 +26,7 @@ MoguetはArch Linux向けの **pacman-first wrapper** として扱う。
 次の operation は Moguet 固有であり、pacman へそのまま委譲しない。
 
 - `build <pkg> [VAR=VALUE...]`
+- `build --local <directory> [VAR=VALUE...]`
 - `upgrade`
 - `upgrade-aur`
 - `upgrade-all`
@@ -205,17 +206,17 @@ route projectionはcandidate表示順を保ったままrepository rootsとAUR ro
 
 ---
 
-## Local PKGBUILD root policy（#271、production未接続）
+## Local PKGBUILD root policy（#271、production接続済み）
 
-この節は#271 Slice 1で採用したv2.1.0向けcontractを記録する。Slice 4までのLocalSourceRoot、read-only metadata、dependency plan projection、source workspace、build-only artifact resultはinternal boundaryとして存在するが、現在のproduction parser / helpにはまだ`--local`を接続しない。metadata evaluation、dependency / install execution、public surfaceが揃うSlice 5まではuser-visible routeを未実装として扱う。
+この節は#271 Slice 1で採用し、Slice 2からSlice 5でLocalSourceRoot、read-only metadata、dependency plan projection、source workspace、metadata evaluation、artifact / install execution、public surfaceを揃えてproduction parser / routingへ接続したv2.1.0向けcontractを記録する。
 
 ### CLI入口とoption境界
 
 正式入口は`moguet build --local <directory> [V=K...]`とする。既存の`build <pkg> [V=K...]`はremote repository / AUR package nameを解決する現行routeのまま維持し、pathらしい文字列を暗黙にlocal rootと推測しない。`--local`はpacman optionや全operation共通のsource selectorではなく、`build`だけが所有するoperation-local selectorとする。canonicalなhelp表記はoperation直後に置き、`-Bi`、`build-local`、`-S --local`等のaliasを追加しない。
 
-`<directory>`はexactly oneとし、absolute pathまたはinvocation開始時のcurrent directoryに対するrelative pathを受け付ける。`.`はcurrent directoryを表す。missing / multiple operand、`--`後のopaque operand、optionに見えるbare path、invalidな`V=K`、package targetとの併記はfilesystem accessより前に拒否する。dashで始まるdirectoryは`./-name`等のpathとして明示する。operandがmissing path、direct `PKGBUILD` file、その他のnon-directoryであることはdescriptor-firstのread-only root inspectionで分類し、AUR RPC、cache / state作成、external commandより前に拒否する。metadata snapshotが宣言するvalidかつuniqueな全`pkgname` childをfirst-seen orderで保持した集合がrequired root targetであり、duplicate child sectionはmetadata errorとして拒否する。初期routeは先頭child、PackageBase名、または全produced artifactをinstall targetとして推測しない。将来child subsetを扱う場合は別の明示契約とする。
+`<directory>`はexactly oneとし、absolute pathまたはinvocation開始時のcurrent directoryに対するrelative pathを受け付ける。`.`はcurrent directoryを表す。missing / multiple operand、`--`後のopaque operand、optionに見えるbare path、invalidな`V=K`、package targetとの併記はlocal-root filesystem accessやcache / state作成より前に拒否する。dashで始まるdirectoryは`./-name`等のpathとして明示する。operandがmissing path、direct `PKGBUILD` file、その他のnon-directoryであることはdescriptor-firstのread-only root inspectionで分類し、AUR RPC、cache / state作成、external commandより前に拒否する。metadata snapshotが宣言するvalidかつuniqueな全`pkgname` childをfirst-seen orderで保持した集合がrequired root targetであり、duplicate child sectionはmetadata errorとして拒否する。初期routeは先頭child、PackageBase名、または全produced artifactをinstall targetとして推測しない。将来child subsetを扱う場合は別の明示契約とする。
 
-local routeで許可するのは既存`build`のPKGBUILD review、one-off `V=K`、build mode、`--noconfirm`のうち、この節の安全境界と同じ意味を保てるものだけとする。`V=K`はparserでvalidationしたfirst-seen orderのeffective environment snapshotとしてmetadata / plan確定前に固定する。assignmentが1件でもあれば既存`.SRCINFO`はそのenvironmentとの一致を証明できないため`KnownStale`として明示評価gateへ送り、同じsnapshotを`makepkg --printsrcinfo`、`makepkg --packagelist`、build-only makepkgへ同じ順序で渡す。Slice 4のbuild-only boundaryは評価済みmetadataとenvironmentを束ねるproofをまだ受け取らないため、assignmentを後付けしたrequestをworkspace / process作成前に拒否する。callerがenvironmentなしとしてLocalSourceRootを開いた後でassignmentを追加してこのgateを迂回することはできない。inherited environmentまたは`V=K`が`PKGDEST`を定義する場合はempty valueでも既存source-build contractどおりall-target preflightで拒否し、fresh `PKGDEST`のownershipを利用者入力へ渡さない。`--noedit`はeditorを省略するだけでmetadata評価の許可にはしない。local rootにremote diffは存在しないためdiff optionはunsupportedとし、`--aur`、`--repo`、`--select`、pacman transaction option、`--rmdeps`、その他のunsupported optionはroot accessやexternal mutationより前に拒否する。`--rebuild` / `--cleanbuild`はinvocation-owned source workspaceだけへ作用し、local treeのartifact、`src/`、`pkg/`を削除する意味へ変えない。
+local routeで許可するのは既存`build`のPKGBUILD review、one-off `V=K`、build mode、`--noconfirm`のうち、この節の安全境界と同じ意味を保てるものだけとする。`V=K`はparserでvalidationしたfirst-seen orderのeffective environment snapshotとしてmetadata / plan確定前に固定する。assignmentが1件でもあれば既存`.SRCINFO`はそのenvironmentとの一致を証明できないため`KnownStale`として明示評価gateへ送り、同じsnapshotを`makepkg --printsrcinfo`、`makepkg --packagelist`、build-only makepkgへ同じ順序で渡す。production routeは、評価済みmetadataとordered environment snapshotの対応を束ねたproofを持つrequestだけをworkspace / process境界へ渡し、LocalSourceRootをenvironmentなしで開いた後にassignmentを追加してこのgateを迂回できない。inherited environmentまたは`V=K`が`PKGDEST`を定義する場合はempty valueでも既存source-build contractどおりall-target preflightで拒否し、fresh `PKGDEST`のownershipを利用者入力へ渡さない。`--noedit`はeditorを省略するだけでmetadata評価の許可にはしない。local rootにremote diffは存在しないためdiff optionはunsupportedとし、`--aur`、`--repo`、`--select`、pacman transaction option、`--rmdeps`、その他のunsupported optionはroot accessやexternal mutationより前に拒否する。`--rebuild` / `--cleanbuild`はinvocation-owned source workspaceだけへ作用し、local treeのartifact、`src/`、`pkg/`を削除する意味へ変えない。
 
 ### LocalSourceRoot identityとfilesystem境界
 
@@ -229,7 +230,7 @@ fresh `PKGDEST`はartifact outputだけをisolateし、makepkgがcurrent source 
 
 source snapshotへ取り込めるentryはrootと同じfilesystem上にあり、effective userが所有するものに限る。そのうちregular directoryとregular fileはgroup / other writableでないことを要求し、symlinkはroot内へlexically収まるrelative targetだけを許可する。symlink mode bitはadmissibilityに使わず、targetをfollowせずlink自体を保持する。absolute target、`..`でroot外へ出るtarget、special file、mount境界、unsafeなowner / regular entry modeを拒否する。entry nameはempty、`.`、`..`、`/`またはASCII controlを含む場合にunsafeとして拒否し、通常のspaceやUnicodeを名前だけで拒否しない。hardlink identityはsnapshotへ持ち越さず、各regular fileを独立したcontent snapshotとしてcopyする。regular fileのmodeは保持し、snapshot directoryはsource modeのgroup / other bitを保ったままbuild中のtraversal、mutation、cleanupに必要なowner `rwx`を追加する。user-owned source directoryのmodeは変更しない。`.git`、既存`src` / `pkg`は名前だけで除外せず、ほかのentryと同じ検証を通して取り込む。
 
-materializeはdescriptor-relativeにtree全体のentry set、type、owner / mode、sourceとdestinationのidentity、regular-file contentを検証し、copy中の追加、削除、置換、内容変更を一つでも観測した場合はpartial workspaceを公開しない。destination regular fileは作成時と最終検証時のinodeを固定してlink count 1を要求し、source hardlinkを独立copyした後の置換やworkspace外hardlink追加を受理しない。元の`LocalSourceRoot` identityもsnapshot前後に再検証する。trusted cache rootがlocal source rootと同一またはそのdescendantなら、canonical pathだけでなくtree内directoryのdevice / inodeとも照合し、bind-mount aliasを含めworkspace作成前に拒否する。
+materializeはdescriptor-relativeにtree全体のentry set、type、owner / mode、sourceとdestinationのidentity、regular-file contentを検証し、copy中の追加、削除、置換、内容変更を一つでも観測した場合はpartial workspaceを公開しない。destination regular fileは作成時と最終検証時のinodeを固定してlink count 1を要求し、source hardlinkを独立copyした後の置換やworkspace外hardlink追加を受理しない。元の`LocalSourceRoot` identityもsnapshot前後に再検証する。trusted cache rootまたはdefault state directoryがlocal source rootと同一またはそのdescendantなら、canonical pathだけでなくtree内directoryのdevice / inodeとも照合する。missingなmanaged componentはretained parent identityを作成直前に検査し、bind-mount aliasを含めdirectoryやstate logをlocal source tree内へ作成する前に拒否する。
 
 source workspaceはmakepkg終了後に成功 / failureを問わずcleanupし、diagnostic retentionの対象は既存contractどおりfresh `PKGDEST`を所有するartifact workspaceとする。makepkgがinvocation-owned snapshotへgroup / other writable mode、owner permissionのないdirectory、FIFO / socket等を生成してもgeneric trusted-cache cleanup policyは緩めない。retained source-workspace rootをnamed inode、device、owner、mount境界で再証明する専用cleanupだけがdirectoryのowner accessを復元し、symlinkをfollowせず任意leaf typeを扱う。全treeをpinして再検証するまでは一件も削除せず、削除時も各mutation前にtrusted cache上のworkspace rootとplan済みancestor lineageをnamed identityから組み直す。cache外へmoveされたretained descriptorを削除authorityとして使わず、空になったrootだけを既存のstrict cleanupへ戻す。build context / packagelist / build / expected-actual validation / package identity / split correlationのfailureではartifact workspaceを保持し、成功時はvalidated build resultが明示cleanupまで所有する。source workspaceとartifact workspaceを同一directoryや同一lifecycleへ融合しない。source root / workspaceのtyped validation failureはbuild phase error内にも保持し、後続compositionがlocal validationとcache / internal failureを固定tokenへflattenせず分類できるようにする。primary build / validation failure中にsource cleanupも失敗した場合はprimary phase / exit statusを保持したままsecondary typed cleanup failureを併記し、destructorのsilent best-effortだけへ委ねない。
 
@@ -263,7 +264,9 @@ local metadataから得た未解決dependencyだけを既存policyへprojectす�
 
 artifact phaseでは#268のPackageBase build unit、ordered required-child selection、expected / actual artifact identity、freshness、containment、selected / unselected区分を再利用する。local metadataに宣言されたroot childrenだけをExplicit、dependency planが要求するchildrenをDependencyとしてtyped install planへ渡し、existing ExplicitをDependencyへ降格しない。unexpected sibling / debug artifactはunselectedとし、missing / duplicate / unknown identity、mixed reasonを推測で解決しない。
 
-この初期scopeにparser / LocalSourceRoot / `.SRCINFO` parserの実装、local metadataのBuildPlan projection、source materialization / build workspace、artifact / install execution、help / man / completion / gettextの公開接続を含めない。これらを#271 Slice 2からSlice 5で順に揃え、user-owned treeを変更し得るpartial routeをproductionへ追加しない。#350のpublic CLI横断監査、#352のunified dry-run、#355のcommon source identity、#360のv3 workspace一般化もこのsliceへ取り込まない。
+明示承認されたmetadata評価と全plan / static preflightが完了した後のpackage-side実行順は、selected repository provider transaction、remote AUR dependency unit、local source snapshot / build、local typed install、artifact cleanupとする。各phaseのfailureでは後続へ進まず、完了済みのprovider / dependency transactionをrollbackしない。local install transaction failureではartifact workspaceをdiagnostic用に保持し、install成功後のcleanup failureは全selected childのinstalled / skipped outcomeを持つnon-zeroのpartial successとして表示する。
+
+#271 Slice 2からSlice 5でparser、LocalSourceRoot、`.SRCINFO` parser、local metadataのBuildPlan projection、source materialization / build workspace、artifact / install execution、help / man / completion / gettextを順に揃え、user-owned treeを変更しないproduction routeとして接続した。#350のpublic CLI横断監査、#352のunified dry-run、#355のcommon source identity、#360のv3 workspace一般化はこのrouteへ取り込まない。
 
 ---
 

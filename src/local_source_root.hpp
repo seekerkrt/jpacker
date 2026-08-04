@@ -124,12 +124,20 @@ enum class LocalSourceMetadataStaleReason {
 class LocalSourceRoot;
 class LocalSourceWorkspace;
 class ValidatedCacheRoot;
+struct LocalSourceMetadataEvaluationAccess;
 LocalSourceRoot open_local_source_root(
         const std::filesystem::path& input_path,
         bool has_one_off_environment_assignment);
 LocalSourceWorkspace materialize_local_source_workspace(
         const LocalSourceRoot& source_root,
         const ValidatedCacheRoot& cache_root);
+void require_local_source_cache_separation(
+        const LocalSourceRoot& source_root,
+        const ValidatedCacheRoot& cache_root);
+void require_directory_identity_outside_local_source_tree(
+        const LocalSourceRoot& source_root,
+        std::uintmax_t directory_device,
+        std::uintmax_t directory_inode);
 #ifdef MOGUET_ENABLE_LOCAL_SOURCE_WORKSPACE_TEST_HOOKS
 void require_cache_identity_outside_source_tree_for_test(
         const LocalSourceRoot& source_root,
@@ -226,6 +234,14 @@ class LocalSourceRoot final {
     friend LocalSourceWorkspace materialize_local_source_workspace(
             const LocalSourceRoot& source_root,
             const ValidatedCacheRoot& cache_root);
+    friend void require_local_source_cache_separation(
+            const LocalSourceRoot& source_root,
+            const ValidatedCacheRoot& cache_root);
+    friend void require_directory_identity_outside_local_source_tree(
+            const LocalSourceRoot& source_root,
+            std::uintmax_t directory_device,
+            std::uintmax_t directory_inode);
+    friend struct LocalSourceMetadataEvaluationAccess;
 #ifdef MOGUET_ENABLE_LOCAL_SOURCE_WORKSPACE_TEST_HOOKS
     friend void require_cache_identity_outside_source_tree_for_test(
             const LocalSourceRoot& source_root,

@@ -5,15 +5,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <stdexcept>
 #include <string>
 #include <system_error>
 #include <vector>
-
-#ifdef MOGUET_TEST_XDG_DIRECTORY_SAFETY_HOOKS
-#include <functional>
-#endif
 
 namespace xdg_state_log {
 struct StateLogDirectoryAccess;
@@ -69,6 +66,17 @@ public:
         return failure_;
     }
 };
+
+struct DirectoryIdentity {
+    std::uintmax_t device = 0;
+    std::uintmax_t inode = 0;
+};
+
+// A throwing callback can reject a missing managed component before mkdirat.
+// The supplied identity belongs to the descriptor-retained current parent;
+// its named lineage is revalidated before and after the callback.
+using DirectoryCreationPrecondition =
+        std::function<void(const DirectoryIdentity&)>;
 
 // Validation後のapplication directoryと、filesystem rootから各named linkを
 // 再証明するprivate descriptor lineageを一体で保持する。作成済みcomponentは
@@ -144,6 +152,14 @@ public:
         return permissions_;
     }
 
+    std::uintmax_t device() const noexcept {
+        return device_;
+    }
+
+    std::uintmax_t inode() const noexcept {
+        return inode_;
+    }
+
     std::size_t created_component_count() const noexcept {
         return created_component_count_;
     }
@@ -156,7 +172,13 @@ public:
 // resolverが固定したXDG suffixとapplication componentだけを作成できる。
 PreparedDirectory prepare_directory(const xdg_paths::ConfigPaths& paths);
 PreparedDirectory prepare_directory(const xdg_paths::StatePaths& paths);
+PreparedDirectory prepare_directory(
+        const xdg_paths::StatePaths& paths,
+        const DirectoryCreationPrecondition& creation_precondition);
 PreparedDirectory prepare_directory(const xdg_paths::CachePaths& paths);
+PreparedDirectory prepare_directory(
+        const xdg_paths::CachePaths& paths,
+        const DirectoryCreationPrecondition& creation_precondition);
 
 // Source preference directoryだけを対象とするcreation / read-only境界。
 // open_existing_directory()のnulloptはmanaged componentのmissingだけを表す。

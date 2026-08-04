@@ -51,6 +51,21 @@ std::size_t artifact_pkgdest_check_call_count() {
 
 } // namespace aur_update_execution_preparation_integration_stub
 
+void ValidatedCacheRoot::require_unchanged_identity() const {
+}
+
+std::uintmax_t ValidatedCacheRoot::device() const noexcept {
+    return 0;
+}
+
+std::uintmax_t ValidatedCacheRoot::inode() const noexcept {
+    return 0;
+}
+
+std::uintmax_t ValidatedCacheRoot::owner() const noexcept {
+    return 0;
+}
+
 PackageMetadataError::PackageMetadataError(PackageMetadataFailure failure)
     : std::runtime_error(failure.diagnostic), failure_(std::move(failure)) {}
 

@@ -8,6 +8,7 @@
 #include <cctype>
 #include <stdexcept>
 #include <string_view>
+#include <utility>
 
 namespace {
 
@@ -52,6 +53,45 @@ std::string_view trim_ascii_whitespace(std::string_view value) noexcept {
 [[noreturn]] void reject_root_package_selection_invocation(
         const std::string& diagnostic) {
     throw std::invalid_argument(diagnostic);
+}
+
+[[noreturn]] void reject_local_source_build_invocation(
+        const std::string& diagnostic) {
+    throw std::invalid_argument(diagnostic);
+}
+
+bool local_source_build_accepts_global_option(
+        const std::string& option) {
+    const cli_authority::GlobalOptionSpec* spec =
+            cli_authority::find_moguet_global_option(option);
+    if(spec == nullptr) return false;
+
+    switch(spec->id) {
+    case cli_authority::GlobalOptionId::Edit:
+    case cli_authority::GlobalOptionId::NoEdit:
+    case cli_authority::GlobalOptionId::NoConfirm:
+    case cli_authority::GlobalOptionId::BuildMode:
+    case cli_authority::GlobalOptionId::Rebuild:
+    case cli_authority::GlobalOptionId::CleanBuild:
+        return true;
+    case cli_authority::GlobalOptionId::Diff:
+    case cli_authority::GlobalOptionId::NoDiff:
+    case cli_authority::GlobalOptionId::RmDeps:
+    case cli_authority::GlobalOptionId::Select:
+    case cli_authority::GlobalOptionId::Aur:
+    case cli_authority::GlobalOptionId::Repo:
+    case cli_authority::GlobalOptionId::Count:
+        return false;
+    }
+    return false;
+}
+
+[[noreturn]] void reject_local_source_build_operand_count() {
+    // TRANSLATORS: Both placeholders are literal CLI syntax tokens.
+    reject_local_source_build_invocation(
+            localization::format_translated_message(
+                    "Operation {} requires exactly one {} operand.",
+                    "build --local", "<directory>"));
 }
 
 } // namespace
@@ -308,4 +348,134 @@ RootPackageSelectionInvocation require_root_package_selection_invocation(
     return RootPackageSelectionInvocation{
             std::string(query),
             parsed_has_semantic_pacman_option(parsed, "--needed")};
+}
+
+bool local_source_build_requested(const ParsedCliArguments& parsed) {
+    // POLICY(#271): operation-local selectorはglobal optionへ昇格させず、
+    // parserが確定したsemantic pacman-option位置のexact tokenだけを解釈する。
+    return parsed_has_semantic_pacman_option(
+            parsed, std::string(cli_authority::LOCAL_SOURCE_OPTION));
+}
+
+LocalSourceBuildInvocation require_local_source_build_invocation(
+        const ParsedCliArguments& parsed) {
+    if(!local_source_build_requested(parsed)) {
+        throw std::logic_error(localization::translate_message(
+                "Local source build was not requested."));
+    }
+
+    const std::string build_operation(
+            cli_authority::operation_spec(
+                    cli_authority::OperationId::Build)
+                    .token);
+    const std::string local_source_option(
+            cli_authority::LOCAL_SOURCE_OPTION);
+    if(parsed.operation != build_operation) {
+        // TRANSLATORS: Both placeholders are literal CLI tokens.
+        reject_local_source_build_invocation(
+                localization::format_translated_message(
+                        "Option {} is supported only with operation {}.",
+                        local_source_option, build_operation));
+    }
+
+    const std::size_t selector_count = static_cast<std::size_t>(
+            std::count_if(
+                    parsed.tokens.begin(), parsed.tokens.end(),
+                    [&](const ParsedCliToken& token) {
+                        return token.role == CliTokenRole::PacmanOption &&
+                               token.value == local_source_option;
+                    }));
+    if(selector_count != 1) {
+        // TRANSLATORS: Both placeholders are literal CLI syntax tokens.
+        reject_local_source_build_invocation(
+                localization::format_translated_message(
+                        "Option {} may be specified only once for operation {}.",
+                        local_source_option, build_operation));
+    }
+
+    LocalSourceBuildInvocation invocation;
+    bool                       has_directory = false;
+
+    for(const ParsedCliToken& token : parsed.tokens) {
+        switch(token.role) {
+        case CliTokenRole::MoguetGlobalOption:
+            if(!local_source_build_accepts_global_option(token.value)) {
+                // TRANSLATORS: The placeholders are literal CLI syntax tokens.
+                reject_local_source_build_invocation(
+                        localization::format_translated_message(
+                                "Unsupported option {} for {}.",
+                                token.value, "build --local"));
+            }
+            break;
+        case CliTokenRole::PacmanOption:
+            if(token.value != local_source_option) {
+                // TRANSLATORS: The placeholders are literal CLI syntax tokens.
+                reject_local_source_build_invocation(
+                        localization::format_translated_message(
+                                "Unsupported option {} for {}.",
+                                token.value, "build --local"));
+            }
+            break;
+        case CliTokenRole::PacmanOptionValue:
+            // The owning pacman option is rejected before this token is reached.
+            break;
+        case CliTokenRole::EndOfOptions:
+            // TRANSLATORS: Both placeholders are literal CLI syntax tokens.
+            reject_local_source_build_invocation(
+                    localization::format_translated_message(
+                            "Cannot use {} with {}.", "--",
+                            "build --local"));
+        case CliTokenRole::OpaqueOperand:
+            // TRANSLATORS: The placeholders are literal CLI syntax and operand tokens.
+            reject_local_source_build_invocation(
+                    localization::format_translated_message(
+                            "Opaque operand is not supported with {}: {}",
+                            "build --local", token.value));
+        case CliTokenRole::Target: {
+            std::string key;
+            std::string value;
+            const bool  is_assignment =
+                    split_env_assignment(token.value, key, value);
+            if(!has_directory) {
+                if(is_assignment) {
+                    // TRANSLATORS: The placeholder is a literal environment assignment.
+                    reject_local_source_build_invocation(
+                            localization::format_translated_message(
+                                    "Environment assignment requires a preceding directory: {}",
+                                    token.value));
+                }
+                if(token.value.find('=') != std::string::npos) {
+                    // TRANSLATORS: The placeholder is a literal environment assignment.
+                    reject_local_source_build_invocation(
+                            localization::format_translated_message(
+                                    "Invalid environment assignment: {}",
+                                    token.value));
+                }
+                invocation.directory = token.value;
+                has_directory = true;
+                break;
+            }
+
+            if(is_assignment) {
+                invocation.source_environment.ordered_assignments.push_back(
+                        SourceEnvironmentAssignment{
+                                std::move(key), std::move(value)});
+                break;
+            }
+            if(token.value.find('=') != std::string::npos) {
+                // TRANSLATORS: The placeholder is a literal environment assignment.
+                reject_local_source_build_invocation(
+                        localization::format_translated_message(
+                                "Invalid environment assignment: {}",
+                                token.value));
+            }
+            reject_local_source_build_operand_count();
+        }
+        case CliTokenRole::Operation:
+            break;
+        }
+    }
+
+    if(!has_directory) reject_local_source_build_operand_count();
+    return invocation;
 }

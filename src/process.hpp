@@ -19,6 +19,9 @@ struct ExplicitProcessInvocation {
     std::vector<std::string> arguments;
     std::vector<std::string> environment;
     std::optional<std::size_t> stdout_capture_limit = std::nullopt;
+    // Borrowed directory descriptor. The child changes directory after fork
+    // and before exec; the caller retains ownership for the whole call.
+    std::optional<int> working_directory_fd = std::nullopt;
 };
 
 CapturedCommandResult capture_command_output(const char* cmd);
