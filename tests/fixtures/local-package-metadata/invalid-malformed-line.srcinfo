@@ -1,0 +1,6 @@
+pkgbase = malformed-line
+	pkgver = 1
+	this line has no assignment separator
+	pkgrel = 1
+	arch = any
+pkgname = malformed-line
