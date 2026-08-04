@@ -218,6 +218,9 @@ run_exact() {
 run_exact value-root-rmdeps \
     "pacman -Q --root --rmdeps filesystem" \
     -Q --root --rmdeps filesystem
+run_exact value-root-select \
+    "pacman -Q --root --select filesystem" \
+    -Q --root --select filesystem
 run_exact value-config-noconfirm \
     "pacman -Q --config --noconfirm filesystem" \
     -Q --config --noconfirm filesystem
@@ -259,7 +262,7 @@ done
 
 # Matrix B: semantic `--`後は全tokenをopaque operandとして保持する。
 for global_option in \
-    --rmdeps --noconfirm --edit --noedit --diff --nodiff \
+    --rmdeps --select --noconfirm --edit --noedit --diff --nodiff \
     --build-mode=normal --build-mode=rebuild --build-mode=clean \
     --rebuild --cleanbuild; do
     case_name=opaque-${global_option#--}
@@ -573,5 +576,93 @@ run_fail upgrade-aur -- --needed
 assert_contains "Operation upgrade-aur does not accept target operands." "$output_file"
 assert_not_contains "Unsupported upgrade-aur option: --needed" "$output_file"
 assert_command_log_empty
+
+# Matrix M: root package selection intentは通常位置だけで消費し、plain -Sの
+# strict entry validationとinput gateをsearch・state log・external commandより先に行う。
+assert_select_stops_before_search() {
+    case_name=$1
+    shift
+
+    setup_case "$case_name"
+    run_fail "$@"
+    assert_contains \
+        "Interactive package selection requires a TTY on standard input." \
+        "$output_file"
+    assert_pre_log_exit
+}
+
+assert_select_rejected_pre_log() {
+    case_name=$1
+    expected=$2
+    shift 2
+
+    setup_case "$case_name"
+    run_fail "$@"
+    assert_contains "$expected" "$output_file"
+    assert_pre_log_exit
+}
+
+# operation前後と重複指定はいずれも同じselection intentとして消費する。
+assert_select_stops_before_search select-before-operation \
+    --select -S query
+assert_select_stops_before_search select-after-operation \
+    -S --select query
+assert_select_stops_before_search select-duplicates \
+    --select -S query --select --select
+
+# --neededだけはselection installへ投影できるpacman optionとして受理する。
+assert_select_stops_before_search select-needed \
+    -S --needed --select query
+
+# plain -S以外のoperation / modifierはselection routeへ入れない。
+assert_select_rejected_pre_log select-search-operation \
+    "Option --select is supported only with plain -S." \
+    -Ss --select query
+assert_select_rejected_pre_log select-info-operation \
+    "Option --select is supported only with plain -S." \
+    -Si --select query
+assert_select_rejected_pre_log select-system-upgrade-operation \
+    "Option --select is supported only with plain -S." \
+    --select -Syu
+assert_select_rejected_pre_log select-query-operation \
+    "Option --select is supported only with plain -S." \
+    --select -Q query
+assert_select_rejected_pre_log select-custom-operation \
+    "Option --select is supported only with plain -S." \
+    --select plan query
+
+setup_case select-unknown-bare-operation
+run_fail --select unknown-select-operation
+assert_contains "Unknown operation: unknown-select-operation" "$output_file"
+assert_pre_log_exit
+
+# queryはASCII whitespaceをtrimした非空・control-freeの1 operandに限る。
+assert_select_rejected_pre_log select-missing-query \
+    "Operation -S --select requires exactly one <query> operand." \
+    -S --select
+assert_select_rejected_pre_log select-multiple-queries \
+    "Operation -S --select requires exactly one <query> operand." \
+    -S --select query-a query-b
+
+ascii_whitespace_query=$(printf ' \011\015\014\013 ')
+assert_select_rejected_pre_log select-ascii-whitespace-query \
+    "Root package search query must not be empty." \
+    -S --select "$ascii_whitespace_query"
+
+control_query=$(printf 'query\001value')
+assert_select_rejected_pre_log select-control-query \
+    "Root package search query contains a control character." \
+    -S --select "$control_query"
+
+# --needed以外のpacman option、operand marker、rmdepsはpre-logで拒否する。
+assert_select_rejected_pre_log select-unsupported-pacman-option \
+    "Unsupported option --config for -S --select." \
+    -S --select --config custom.conf query
+assert_select_rejected_pre_log select-end-of-options \
+    "Cannot use -- with --select." \
+    -S --select -- query
+assert_select_rejected_pre_log select-rmdeps \
+    "Cannot combine --select and --rmdeps." \
+    -S query --select --rmdeps
 
 echo "CLI parser integration tests: all checks passed"

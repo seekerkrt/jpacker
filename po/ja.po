@@ -2,7 +2,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Moguet 2.0.1\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-04 10:24+0900\n"
+"POT-Creation-Date: 2026-08-04 13:10+0900\n"
 "PO-Revision-Date: 2026-08-03 06:53+0900\n"
 "Last-Translator: Moguet contributors\n"
 "Language-Team: Japanese\n"
@@ -2351,59 +2351,96 @@ msgstr "{} の値 '{}' は無効です。{}、{}、{} のいずれかを指定�
 msgid "Unknown {} global option: {}"
 msgstr "不明な {} グローバルオプションです: {}"
 
-#: src/cli_parser.cpp:164 src/cli_parser.cpp:173
+#: src/cli_parser.cpp:167 src/cli_parser.cpp:176 src/cli_routing.cpp:245
 #, c++-format
 msgid "Cannot combine {} and {}."
 msgstr "{} と {} は同時に指定できません。"
 
-#: src/cli_parser.cpp:180
+#: src/cli_parser.cpp:183
 #, c++-format
 msgid "Invalid {} global option authority entry."
 msgstr "{} グローバルオプションの権限定義が無効です。"
 
-#: src/cli_parser.cpp:228
+#: src/cli_parser.cpp:231
 msgid "Empty arguments are not supported."
 msgstr "空の引数はサポートされていません。"
 
-#: src/cli_parser.cpp:303
+#: src/cli_parser.cpp:306
 #, c++-format
 msgid "Missing value for option {}."
 msgstr "オプション {} の値がありません。"
 
-#: src/cli_routing.cpp:16
+#: src/cli_routing.cpp:18
 msgid "Automatic source selection has no explicit option."
 msgstr "自動ソース選択に対応する明示オプションはありません。"
 
-#: src/cli_routing.cpp:23 src/commands_sync.cpp:282
+#: src/cli_routing.cpp:25 src/commands_sync.cpp:413 src/commands_sync.cpp:749
 msgid "Unknown package source selection."
 msgstr "パッケージのソース選択が不明です。"
 
-#: src/cli_routing.cpp:42
+#: src/cli_routing.cpp:73
 #, c++-format
 msgid "Unsupported option {} for operation {}."
 msgstr "操作 {} ではオプション {} をサポートしていません。"
 
-#: src/cli_routing.cpp:50
+#: src/cli_routing.cpp:81
 #, c++-format
 msgid "Operation {} requires exactly one {} package target."
 msgstr "操作 {} には {} パッケージ対象をちょうど1つ指定する必要があります。"
 
 #. TRANSLATORS: The placeholders are the command, operation, and operand tokens.
-#: src/cli_routing.cpp:54 src/commands_inspect.cpp:53
+#: src/cli_routing.cpp:85 src/commands_inspect.cpp:53
 #: src/commands_inspect.cpp:60 src/moguet.cpp:206 src/moguet.cpp:215
 #, c++-format
 msgid "Usage: {} {} {}"
 msgstr "使用方法: {} {} {}"
 
-#: src/cli_routing.cpp:162
+#: src/cli_routing.cpp:193
 #, c++-format
 msgid "Cannot combine {} with {} refresh for operation {}."
 msgstr "操作 {} では {} と {} 更新を同時に指定できません。"
 
-#: src/cli_routing.cpp:170
+#: src/cli_routing.cpp:201
 #, c++-format
 msgid "{} is not supported for operation {}."
 msgstr "操作 {} では {} をサポートしていません。"
+
+#: src/cli_routing.cpp:231
+msgid "Root package selection was not requested."
+msgstr "ルートパッケージの選択は要求されていません。"
+
+#: src/cli_routing.cpp:238
+#, c++-format
+msgid "Option {} is supported only with plain {}."
+msgstr "オプション {} は修飾なしの {} でのみサポートされています。"
+
+#: src/cli_routing.cpp:255
+#, c++-format
+msgid "Cannot use {} with {}."
+msgstr "{} は {} と同時に使用できません。"
+
+#: src/cli_routing.cpp:260
+#, c++-format
+msgid "Opaque operand is not supported with {}: {}"
+msgstr "{} では不透明なオペランドをサポートしていません: {}"
+
+#: src/cli_routing.cpp:267
+#, c++-format
+msgid "Unsupported option {} for {}."
+msgstr "オプション {} は {} でサポートされていません。"
+
+#: src/cli_routing.cpp:288
+#, c++-format
+msgid "Operation {} requires exactly one {} operand."
+msgstr "操作 {} には {} オペランドをちょうど1つ指定する必要があります。"
+
+#: src/cli_routing.cpp:297
+msgid "Root package search query must not be empty."
+msgstr "ルートパッケージの検索クエリを空にはできません。"
+
+#: src/cli_routing.cpp:305
+msgid "Root package search query contains a control character."
+msgstr "ルートパッケージの検索クエリに制御文字が含まれています。"
 
 #: src/commands_aur_update.cpp:21 src/commands_upgrade_all.cpp:179
 msgid "no updates"
@@ -3051,13 +3088,13 @@ msgstr "競合/置換メタデータはビルド/インストール前に手動�
 #. literal command name "upgrade-all"; the
 #. second is a runtime option token.
 #: src/commands_inspect.cpp:757 src/commands_inspect.cpp:867
-#: src/commands_inspect.cpp:914 src/commands_upgrade_all.cpp:1818
-#: src/moguet.cpp:950
+#: src/commands_inspect.cpp:914 src/commands_upgrade_all.cpp:1819
+#: src/moguet.cpp:984
 #, c++-format
 msgid "Unsupported {} option: {}"
 msgstr "{}で未対応のオプションです: {}"
 
-#: src/commands_inspect.cpp:778 src/commands_sync.cpp:477
+#: src/commands_inspect.cpp:778 src/commands_sync.cpp:944
 #: src/dependency_plan.cpp:1270 src/dependency_plan.cpp:1354
 #: src/pkgbuild_export.cpp:654
 #, c++-format
@@ -3069,7 +3106,7 @@ msgstr "{}にパッケージが見つかりません: {}"
 msgid "Package         : {}"
 msgstr "パッケージ      : {}"
 
-#: src/commands_inspect.cpp:792 src/commands_sync.cpp:145
+#: src/commands_inspect.cpp:792 src/commands_sync.cpp:150
 #, c++-format
 msgid "Package Base    : {}"
 msgstr "パッケージベース: {}"
@@ -3414,175 +3451,333 @@ msgstr "{}キャッシュの削除をスキップしました。"
 msgid "{} cache is empty."
 msgstr "{}キャッシュは空です。"
 
-#: src/commands_sync.cpp:87
+#: src/commands_sync.cpp:92
 msgid "[installed]"
 msgstr "[インストール済み]"
 
-#: src/commands_sync.cpp:92
+#: src/commands_sync.cpp:97
 msgid "[out-of-date]"
 msgstr "[期限切れ]"
 
-#: src/commands_sync.cpp:97
+#: src/commands_sync.cpp:102
 msgid "[orphaned]"
 msgstr "[保守担当者なし]"
 
-#: src/commands_sync.cpp:108 src/commands_sync.cpp:153
-#: src/commands_sync.cpp:187
+#: src/commands_sync.cpp:113 src/commands_sync.cpp:158
+#: src/commands_sync.cpp:192
 msgid "None"
 msgstr "なし"
 
-#: src/commands_sync.cpp:119 src/commands_sync.cpp:126
-#: src/commands_sync.cpp:132
+#: src/commands_sync.cpp:124 src/commands_sync.cpp:131
+#: src/commands_sync.cpp:137
 msgid "no"
 msgstr "いいえ"
 
-#: src/commands_sync.cpp:121 src/commands_sync.cpp:127
-#: src/commands_sync.cpp:133
+#: src/commands_sync.cpp:126 src/commands_sync.cpp:132
+#: src/commands_sync.cpp:138
 msgid "yes"
 msgstr "はい"
 
-#: src/commands_sync.cpp:139
+#: src/commands_sync.cpp:144
 #, c++-format
 msgid "Repository      : {}"
 msgstr "リポジトリ        : {}"
 
-#: src/commands_sync.cpp:142
+#: src/commands_sync.cpp:147
 #, c++-format
 msgid "Name            : {}"
 msgstr "名前              : {}"
 
-#: src/commands_sync.cpp:148
+#: src/commands_sync.cpp:153
 #, c++-format
 msgid "Version         : {}"
 msgstr "バージョン        : {}"
 
-#: src/commands_sync.cpp:151
+#: src/commands_sync.cpp:156
 #, c++-format
 msgid "Description     : {}"
 msgstr "説明              : {}"
 
-#: src/commands_sync.cpp:157
+#: src/commands_sync.cpp:162
 #, c++-format
 msgid "Depends On      : {}"
 msgstr "依存先            : {}"
 
-#: src/commands_sync.cpp:161
+#: src/commands_sync.cpp:166
 #, c++-format
 msgid "Make Deps       : {}"
 msgstr "ビルド依存        : {}"
 
-#: src/commands_sync.cpp:165
+#: src/commands_sync.cpp:170
 #, c++-format
 msgid "Check Deps      : {}"
 msgstr "テスト依存        : {}"
 
-#: src/commands_sync.cpp:169
+#: src/commands_sync.cpp:174
 #, c++-format
 msgid "Optional Deps   : {}"
 msgstr "任意依存          : {}"
 
-#: src/commands_sync.cpp:173
+#: src/commands_sync.cpp:178
 #, c++-format
 msgid "Provides        : {}"
 msgstr "提供              : {}"
 
-#: src/commands_sync.cpp:177
+#: src/commands_sync.cpp:182
 #, c++-format
 msgid "Conflicts With  : {}"
 msgstr "競合              : {}"
 
-#: src/commands_sync.cpp:181
+#: src/commands_sync.cpp:186
 #, c++-format
 msgid "Replaces        : {}"
 msgstr "置換              : {}"
 
-#: src/commands_sync.cpp:185
+#: src/commands_sync.cpp:190
 #, c++-format
 msgid "Maintainer      : {}"
 msgstr "保守担当者        : {}"
 
-#: src/commands_sync.cpp:191
+#: src/commands_sync.cpp:196
 #, c++-format
 msgid "Installed       : {}"
 msgstr "インストール済み  : {}"
 
-#: src/commands_sync.cpp:194
+#: src/commands_sync.cpp:199
 #, c++-format
 msgid "Orphaned        : {}"
 msgstr "保守担当者なし    : {}"
 
-#: src/commands_sync.cpp:197
+#: src/commands_sync.cpp:202
 #, c++-format
 msgid "Out of Date     : {}"
 msgstr "期限切れ          : {}"
 
 #. TRANSLATORS: The placeholders are the literal AUR identity and a package target.
-#: src/commands_sync.cpp:207
+#: src/commands_sync.cpp:212
 #, c++-format
 msgid "Invalid {} package target: {}"
 msgstr "無効な{}パッケージ対象です: {}"
 
-#: src/commands_sync.cpp:252
+#: src/commands_sync.cpp:308
+msgid "Invalid package selection token."
+msgstr "パッケージ選択トークンが無効です。"
+
+#: src/commands_sync.cpp:314
+#, c++-format
+msgid "Package selection index is outside the displayed range 1-{}."
+msgstr "パッケージ選択のインデックスが表示範囲 1-{} の外です。"
+
+#: src/commands_sync.cpp:320
+msgid "Package selection ranges must use ascending endpoints."
+msgstr "パッケージ選択の範囲は端点を昇順で指定する必要があります。"
+
+#: src/commands_sync.cpp:325
+msgid "Package selection names an unknown displayed group."
+msgstr "パッケージ選択で指定されたグループは表示候補にありません。"
+
+#: src/commands_sync.cpp:330
+msgid "A package selection cancellation token cannot be combined with selectors."
+msgstr "パッケージ選択の取り消しトークンは選択指定と同時に使用できません。"
+
+#: src/commands_sync.cpp:337
+#, c++-format
+msgid "Package {} was selected from more than one source; select exactly one source."
+msgstr "パッケージ {} が複数のソースから選択されています。ソースをちょうど1つ選択してください。"
+
+#: src/commands_sync.cpp:353
+msgid "Package candidates:"
+msgstr "パッケージ候補:"
+
+#: src/commands_sync.cpp:366
+#, c++-format
+msgid "Select package numbers, ascending ranges, or displayed {}; press {} or enter {} to cancel:"
+msgstr "パッケージ番号、昇順の範囲、または表示されている {} を選択してください。取り消すには {} を押すか {} を入力してください:"
+
+#: src/commands_sync.cpp:386
+msgid "Interactive package selection requires a TTY on standard input."
+msgstr "対話形式のパッケージ選択には、標準入力が TTY である必要があります。"
+
+#: src/commands_sync.cpp:391
+#, c++-format
+msgid "Interactive package selection is not available with {}."
+msgstr "対話形式のパッケージ選択は {} と併用できません。"
+
+#: src/commands_sync.cpp:396
+msgid "Interactive package selection has an inconsistent input gate."
+msgstr "対話形式のパッケージ選択で入力ゲートの状態が矛盾しています。"
+
+#: src/commands_sync.cpp:399
+msgid "Interactive package selection has an unknown input gate."
+msgstr "対話形式のパッケージ選択の入力ゲートが不明です。"
+
+#: src/commands_sync.cpp:423
+#, c++-format
+msgid "Repository package search failed: {}"
+msgstr "リポジトリパッケージの検索に失敗しました: {}"
+
+#: src/commands_sync.cpp:431
+#, c++-format
+msgid "{} package search failed: {}"
+msgstr "{} パッケージの検索に失敗しました: {}"
+
+#: src/commands_sync.cpp:437
+msgid "Package search returned an invalid candidate snapshot."
+msgstr "パッケージ検索から無効な候補スナップショットが返されました。"
+
+#: src/commands_sync.cpp:441
+msgid "Package search failure reporting received a successful snapshot."
+msgstr "パッケージ検索の失敗報告に成功したスナップショットが渡されました。"
+
+#. TRANSLATORS: The placeholder is the AUR project identity.
+#: src/commands_sync.cpp:466
+#, c++-format
+msgid "The {} build plan does not cover every selected root package."
+msgstr "{} ビルド計画が選択されたすべてのルートパッケージを網羅していません。"
+
+#. TRANSLATORS: The placeholder is the AUR project identity.
+#: src/commands_sync.cpp:478
+#, c++-format
+msgid "The {} build plan changed the selected root package order or identity."
+msgstr "{} ビルド計画で選択されたルートパッケージの順序または識別情報が変わりました。"
+
+#. TRANSLATORS: The placeholders are the AUR project identity and a validated package name.
+#: src/commands_sync.cpp:488
+#, c++-format
+msgid "The {} build plan contains duplicate identities for selected package {}."
+msgstr "{} ビルド計画で選択されたパッケージ {} の識別情報が重複しています。"
+
+#. TRANSLATORS: The placeholders are the AUR project identity and a validated package name.
+#: src/commands_sync.cpp:496
+#, c++-format
+msgid "The {} build plan omitted selected package {}."
+msgstr "{} ビルド計画から選択されたパッケージ {} が欠落しています。"
+
+#: src/commands_sync.cpp:504
+#, c++-format
+msgid "The {} for selected {} package {} changed from {} to {}; rerun package selection."
+msgstr "{} は選択された {} パッケージ {} について {} から {} に変わりました。パッケージ選択を再実行してください。"
+
+#. TRANSLATORS: The placeholders are the AUR project identity and a validated package name.
+#: src/commands_sync.cpp:518
+#, c++-format
+msgid "The {} build plan lost root attribution for selected package {}."
+msgstr "{} ビルド計画で選択されたパッケージ {} のルートとしての帰属情報が失われました。"
+
+#: src/commands_sync.cpp:536
+msgid "Package selection query must not be empty."
+msgstr "パッケージ選択のクエリを空にはできません。"
+
+#: src/commands_sync.cpp:542
+#, c++-format
+msgid "Interactive package selection does not support {}."
+msgstr "対話形式のパッケージ選択は {} をサポートしていません。"
+
+#: src/commands_sync.cpp:573
+msgid "No package candidates were found."
+msgstr "パッケージ候補が見つかりませんでした。"
+
+#: src/commands_sync.cpp:585
+msgid "Package selection returned an unknown unavailable reason."
+msgstr "パッケージ選択が利用できない理由が不明です。"
+
+#: src/commands_sync.cpp:590
+msgid "Package selection was cancelled."
+msgstr "パッケージ選択が取り消されました。"
+
+#. TRANSLATORS: The placeholder is the literal pacman program identity.
+#: src/commands_sync.cpp:602
+#, c++-format
+msgid "A selected repository package cannot be represented as an exact {} target."
+msgstr "選択されたリポジトリパッケージを厳密な {} 対象として表現できません。"
+
+#. TRANSLATORS: The placeholder is the AUR project identity.
+#: src/commands_sync.cpp:612
+#, c++-format
+msgid "Source-build review and build-mode options require at least one selected {} package."
+msgstr "ソースビルドの確認オプションとビルドモードオプションには、選択された {} パッケージが1つ以上必要です。"
+
+#: src/commands_sync.cpp:664
+msgid "Prepared package selection contains no install targets."
+msgstr "準備済みのパッケージ選択にインストール対象がありません。"
+
+#. TRANSLATORS: The placeholder is the AUR project identity.
+#: src/commands_sync.cpp:682
+#, c++-format
+msgid "The selected repository package transaction failed; selected {} packages were not executed."
+msgstr "選択されたリポジトリパッケージのトランザクションに失敗したため、選択された {} パッケージは処理されませんでした。"
+
+#: src/commands_sync.cpp:686
+msgid "The selected repository package transaction failed."
+msgstr "選択されたリポジトリパッケージのトランザクションに失敗しました。"
+
+#. TRANSLATORS: The placeholder is the AUR project identity.
+#: src/commands_sync.cpp:700 src/commands_sync.cpp:708
+#, c++-format
+msgid "The repository package transaction completed before the {} route failed; it was not rolled back."
+msgstr "{} 経路が失敗する前にリポジトリパッケージのトランザクションは完了しており、ロールバックされていません。"
+
+#: src/commands_sync.cpp:719
 msgid "Missing search query."
 msgstr "検索条件が指定されていません。"
 
-#: src/commands_sync.cpp:263 src/commands_sync.cpp:275
+#: src/commands_sync.cpp:730 src/commands_sync.cpp:742
 #, c++-format
 msgid "Searching {}..."
 msgstr "{}を検索しています..."
 
-#: src/commands_sync.cpp:270
+#: src/commands_sync.cpp:737
 #, c++-format
 msgid "Unsupported {} option for {} search: {}"
 msgstr "{}による{}検索では次のオプションは未対応です: {}"
 
-#: src/commands_sync.cpp:301 src/commands_sync.cpp:461
+#: src/commands_sync.cpp:768 src/commands_sync.cpp:928
 #, c++-format
 msgid "Missing {} package target."
 msgstr "{}パッケージの対象が指定されていません。"
 
-#: src/commands_sync.cpp:311 src/commands_sync.cpp:373
+#: src/commands_sync.cpp:778 src/commands_sync.cpp:840
 #, c++-format
 msgid "Unsupported {} option for {}/source-build target: {}"
 msgstr "{}では{}/ソースビルド対象に対する次のオプションは未対応です: {}"
 
-#: src/commands_sync.cpp:314
+#: src/commands_sync.cpp:781
 #, c++-format
 msgid "Rerun {} without this option."
 msgstr "このオプションを外して{}を再実行してください。"
 
-#: src/commands_sync.cpp:376
+#: src/commands_sync.cpp:843
 #, c++-format
 msgid "Split official repository and {}/source-build targets, or rerun without this option."
 msgstr "公式リポジトリの対象と{}/ソースビルドの対象を分けるか、このオプションを外して再実行してください。"
 
-#: src/commands_sync.cpp:414
+#: src/commands_sync.cpp:881
 #, c++-format
 msgid "{} failed."
 msgstr "{}に失敗しました。"
 
-#: src/commands_sync.cpp:436
+#: src/commands_sync.cpp:903
 #, c++-format
 msgid "Cannot combine {} refresh with {} info fallback for unqualified target: {}"
 msgstr "リポジトリ未修飾の対象では、{}のデータベース更新と{}情報への代替検索を併用できません: {}"
 
-#: src/commands_sync.cpp:439
+#: src/commands_sync.cpp:906
 #, c++-format
 msgid "Use a repository-qualified target such as {}, or run refresh and {} separately."
 msgstr "{}のようにリポジトリで修飾した対象を使用するか、データベース更新と{}を別々に実行してください。"
 
-#: src/commands_sync.cpp:455
+#: src/commands_sync.cpp:922
 #, c++-format
 msgid "Unsupported {} option for {} info: {}"
 msgstr "{}による{}情報の取得では次のオプションは未対応です: {}"
 
-#: src/commands_sync.cpp:482 src/commands_sync.cpp:531
+#: src/commands_sync.cpp:949 src/commands_sync.cpp:998
 #: src/dependency_plan.cpp:1051 src/source_install.cpp:505
 #, c++-format
 msgid "Failed to fetch {} info for {}: {}"
 msgstr "{}情報を{}について取得できませんでした: {}"
 
-#: src/commands_sync.cpp:524 src/source_install.cpp:514
+#: src/commands_sync.cpp:991 src/source_install.cpp:514
 #, c++-format
 msgid "Package not found in repos or {}: {}"
 msgstr "リポジトリにも{}にもパッケージが見つかりません: {}"
@@ -4634,14 +4829,14 @@ msgstr "{}の集約状態は成功ですが、結果に失敗の詳細が含ま�
 
 #. TRANSLATORS: The first placeholder is the literal
 #. command name "upgrade-all"; the second is an operand.
-#: src/commands_upgrade_all.cpp:1826
+#: src/commands_upgrade_all.cpp:1827
 #, c++-format
 msgid "{} does not accept target operands: {}"
 msgstr "{}は対象オペランドを受け付けません: {}"
 
 #. TRANSLATORS: The first placeholder is the literal
 #. command name "upgrade-all"; the second is an operand.
-#: src/commands_upgrade_all.cpp:1833
+#: src/commands_upgrade_all.cpp:1834
 #, c++-format
 msgid "{} does not accept opaque operands: {}"
 msgstr "{}は不透明なオペランドを受け付けません: {}"
@@ -4649,28 +4844,28 @@ msgstr "{}は不透明なオペランドを受け付けません: {}"
 #. TRANSLATORS: The first placeholder is the literal
 #. command name "upgrade-all"; the second is a runtime
 #. option or operand.
-#: src/commands_upgrade_all.cpp:1842
+#: src/commands_upgrade_all.cpp:1843
 #, c++-format
 msgid "Unsupported {} option or operand: {}"
 msgstr "{}で未対応のオプションまたはオペランドです: {}"
 
 #. TRANSLATORS: The placeholders are the literal
 #. command name "upgrade-all" and CLI marker "--".
-#: src/commands_upgrade_all.cpp:1852
+#: src/commands_upgrade_all.cpp:1853
 #, c++-format
 msgid "{} does not accept the {} operand marker."
 msgstr "{}はオペランドマーカー{}を受け付けません。"
 
 #. TRANSLATORS: The first placeholder is the literal command
 #. name "upgrade-all"; the second is a runtime diagnostic.
-#: src/commands_upgrade_all.cpp:1880
+#: src/commands_upgrade_all.cpp:1881
 #, c++-format
 msgid "Unexpected {} command failure: {}"
 msgstr "予期しない{}コマンドの失敗です: {}"
 
 #. TRANSLATORS: The placeholder is the literal command name
 #. "upgrade-all".
-#: src/commands_upgrade_all.cpp:1887
+#: src/commands_upgrade_all.cpp:1888
 #, c++-format
 msgid "Unexpected {} command failure: unknown exception."
 msgstr "予期しない{}コマンドの失敗です: 不明な例外です。"
@@ -5055,285 +5250,295 @@ msgstr "{}は通常ユーザーとして実行してください。{}は必要�
 msgid "Failed to load the user configuration because of an unknown error."
 msgstr "不明なエラーによりユーザー設定を読み込めませんでした。"
 
-#: src/moguet.cpp:353
+#: src/moguet.cpp:372
 #, c++-format
 msgid "Operation {} does not accept target operands."
 msgstr "操作{}は対象オペランドを受け付けません。"
 
-#: src/moguet.cpp:394
+#: src/moguet.cpp:413
 #, c++-format
 msgid "Started {} v{}."
 msgstr "{} v{}を起動しました。"
 
-#: src/moguet.cpp:405
+#: src/moguet.cpp:424
 #, c++-format
 msgid "Cannot initialize the {} default state log because of an unknown error."
 msgstr "不明なエラーにより{}のデフォルト状態ログを初期化できません。"
 
-#: src/moguet.cpp:580
+#: src/moguet.cpp:605
 #, c++-format
 msgid "Cannot finalize the {} default state log because of an unknown error."
 msgstr "不明なエラーにより{}のデフォルト状態ログを終了処理できません。"
 
-#: src/moguet.cpp:652
+#: src/moguet.cpp:677
 msgid "USAGE"
 msgstr "使用方法"
 
-#: src/moguet.cpp:656
+#: src/moguet.cpp:681
 msgid "OPERATIONS"
 msgstr "操作"
 
-#: src/moguet.cpp:660
+#: src/moguet.cpp:685
 msgid "Build one package from source without saving a preference"
 msgstr "設定を保存せず、パッケージを1つソースからビルド"
 
-#: src/moguet.cpp:664
+#: src/moguet.cpp:689
 msgid "Update the system and rebuild configured source packages"
 msgstr "システムを更新し、設定済みソースパッケージを再ビルド"
 
 #. TRANSLATORS: The placeholder is the literal pacman-compatible -Syu token.
-#: src/moguet.cpp:668
+#: src/moguet.cpp:693
 #, c++-format
 msgid "Check registered source-build preferences after {}"
 msgstr "{}の後に登録済みソースビルド設定を確認"
 
 #. TRANSLATORS: The placeholder is the AUR project identity.
-#: src/moguet.cpp:674
+#: src/moguet.cpp:699
 #, c++-format
 msgid "Update installed {} packages only"
 msgstr "インストール済みの{}パッケージだけを更新"
 
 #. TRANSLATORS: The placeholder is the literal pacman-compatible -Syu token.
-#: src/moguet.cpp:678
+#: src/moguet.cpp:703
 #, c++-format
 msgid "Do not run {}; source-build preferences are optional"
 msgstr "{}は実行しません。ソースビルド設定は任意です"
 
 #. TRANSLATORS: The placeholder is the AUR project identity.
-#: src/moguet.cpp:684
+#: src/moguet.cpp:709
 #, c++-format
 msgid "Update the system, registered source packages, and remaining installed {} packages"
 msgstr "システム、登録済みのソースパッケージ、その他のインストール済み{}パッケージを更新"
 
 #. TRANSLATORS: The placeholder is the literal PackageBase identity.
-#: src/moguet.cpp:689
+#: src/moguet.cpp:714
 #, c++-format
 msgid "Give explicit source preferences priority and avoid duplicate package/{} builds"
 msgstr "明示的なソースビルド設定を優先し、パッケージ/{}単位での重複ビルドを回避"
 
-#: src/moguet.cpp:692
+#: src/moguet.cpp:717
 msgid "Do not accept target operands"
 msgstr "対象引数は受け付けません"
 
-#: src/moguet.cpp:695
+#: src/moguet.cpp:720
 msgid "Clean package and build caches"
 msgstr "パッケージとビルドのキャッシュを削除"
 
 #. TRANSLATORS: The placeholder is the AUR project identity.
-#: src/moguet.cpp:700
+#: src/moguet.cpp:725
 #, c++-format
 msgid "{} INSPECTION"
 msgstr "{}の調査"
 
 #. TRANSLATORS: AUR, PackageBase, and the destination path are literal identities.
-#: src/moguet.cpp:705
+#: src/moguet.cpp:730
 #, c++-format
 msgid "Export one {} {} repository to {} without building or installing"
 msgstr "1つの{} {}リポジトリを{}へエクスポート（ビルドやインストールは行いません）"
 
 #. TRANSLATORS: AUR, PackageBase, PKGBUILD, and stdout are literal identities.
-#: src/moguet.cpp:711
+#: src/moguet.cpp:736
 #, c++-format
 msgid "Print one {} {} {} to {} without keeping a checkout"
 msgstr "1つの{} {}の{}を{}へ出力（チェックアウトは保存しません）"
 
 #. TRANSLATORS: The placeholder is the AUR project identity.
-#: src/moguet.cpp:717
+#: src/moguet.cpp:742
 #, c++-format
 msgid "Classify {} dependencies"
 msgstr "{}の依存関係を分類"
 
 #. TRANSLATORS: The placeholder is the AUR project identity.
-#: src/moguet.cpp:722
+#: src/moguet.cpp:747
 #, c++-format
 msgid "Show the {} build-order plan"
 msgstr "{}のビルド順序を表示"
 
 #. TRANSLATORS: The placeholders are literal git commands and the AUR identity.
-#: src/moguet.cpp:727
+#: src/moguet.cpp:752
 #, c++-format
 msgid "Safely run {} or {} for {} build repositories"
 msgstr "{}または{}を使用して{}ビルドリポジトリを安全に取得"
 
 #. TRANSLATORS: The placeholders are literal git commands.
-#: src/moguet.cpp:732
+#: src/moguet.cpp:757
 #, c++-format
 msgid "For existing clones, run {} only; do not update the working tree or run {}, {}, build, or install"
 msgstr "既存のチェックアウトでは{}だけを実行し、作業ツリーの更新、{}、{}、ビルド、インストールは行いません"
 
-#: src/moguet.cpp:736
+#: src/moguet.cpp:761
 msgid "SOURCE BUILD PREFERENCES"
 msgstr "ソースビルド設定"
 
 #. TRANSLATORS: The placeholder is the literal XDG identity.
-#: src/moguet.cpp:741
+#: src/moguet.cpp:766
 #, c++-format
 msgid "Store each preference in the active user's {} config authority"
 msgstr "各設定を実行ユーザーの{}設定領域へ保存"
 
-#: src/moguet.cpp:746
+#: src/moguet.cpp:771
 msgid "Enable a source-build preference for a package"
 msgstr "パッケージのソースビルド設定を有効化"
 
-#: src/moguet.cpp:750
+#: src/moguet.cpp:775
 msgid "Edit a source-build preference"
 msgstr "ソースビルド設定を編集"
 
-#: src/moguet.cpp:754
+#: src/moguet.cpp:779
 msgid "List source-build preferences"
 msgstr "ソースビルド設定を一覧表示"
 
-#: src/moguet.cpp:758
+#: src/moguet.cpp:783
 msgid "Remove a source-build preference"
 msgstr "ソースビルド設定を削除"
 
-#: src/moguet.cpp:762
+#: src/moguet.cpp:787
 msgid "Remove a preference and reinstall the binary package"
 msgstr "設定を削除してバイナリパッケージを再インストール"
 
 #. TRANSLATORS: The placeholder is the literal pacman program identity.
-#: src/moguet.cpp:767
+#: src/moguet.cpp:792
 #, c++-format
 msgid "{} COMPATIBILITY"
 msgstr "{}互換"
 
-#: src/moguet.cpp:770
+#: src/moguet.cpp:795
 msgid "Install packages"
 msgstr "パッケージをインストール"
 
-#: src/moguet.cpp:773
+#: src/moguet.cpp:799
+msgid "Interactively search for and select root packages to install"
+msgstr "インストールするルートパッケージを対話形式で検索・選択"
+
+#. TRANSLATORS: The placeholder is the AUR project identity.
+#: src/moguet.cpp:803
+#, c++-format
+msgid "Require an interactive terminal; install selected repository roots first, then build selected {} roots only if that transaction succeeds"
+msgstr "対話端末が必要。選択したリポジトリのルートを先にインストールし、そのトランザクションが成功した場合だけ選択した {} のルートをビルド"
+
+#: src/moguet.cpp:807
 msgid "Upgrade the system"
 msgstr "システムをアップグレード"
 
 #. TRANSLATORS: The placeholder is the literal pacman program identity.
-#: src/moguet.cpp:777
+#: src/moguet.cpp:811
 #, c++-format
 msgid "Remain compatible with {}; do not scan all source-build preferences"
 msgstr "{}互換を維持し、登録済みソースビルド設定をすべて走査しません"
 
-#: src/moguet.cpp:781
+#: src/moguet.cpp:815
 msgid "Search for packages"
 msgstr "パッケージを検索"
 
-#: src/moguet.cpp:784
+#: src/moguet.cpp:818
 msgid "Show package information"
 msgstr "パッケージ情報を表示"
 
 #. TRANSLATORS: The placeholder is the AUR project identity.
-#: src/moguet.cpp:789
+#: src/moguet.cpp:823
 #, c++-format
 msgid "Check {} and foreign-package updates"
 msgstr "{}および外部パッケージの更新を確認"
 
-#: src/moguet.cpp:791
+#: src/moguet.cpp:825
 msgid "OPTIONS"
 msgstr "オプション"
 
-#: src/moguet.cpp:795
+#: src/moguet.cpp:829
 msgid "Show this help message and exit"
 msgstr "このヘルプを表示して終了"
 
-#: src/moguet.cpp:799
+#: src/moguet.cpp:833
 msgid "Show version information and exit"
 msgstr "バージョン情報を表示して終了"
 
 #. TRANSLATORS: PKGBUILD and .install are literal artifact names.
-#: src/moguet.cpp:804
+#: src/moguet.cpp:838
 #, c++-format
 msgid "Prompt to review {} and {} files"
 msgstr "{}および{}の確認を促します"
 
 #. TRANSLATORS: PKGBUILD and .install are literal artifact names.
-#: src/moguet.cpp:809
+#: src/moguet.cpp:843
 #, c++-format
 msgid "Skip {} and {} review"
 msgstr "{}および{}の確認を省略"
 
-#: src/moguet.cpp:813
+#: src/moguet.cpp:847
 msgid "Prompt to view repository update diffs"
 msgstr "リポジトリ更新差分の表示を促します"
 
-#: src/moguet.cpp:817
+#: src/moguet.cpp:851
 msgid "Skip the repository update diff prompt"
 msgstr "リポジトリ更新差分の確認を省略"
 
 #. TRANSLATORS: pacman and makepkg are literal external-program identities.
-#: src/moguet.cpp:822
+#: src/moguet.cpp:856
 #, c++-format
 msgid "Pass this option to {} and {}"
 msgstr "このオプションを{}と{}へ渡します"
 
 #. TRANSLATORS: pacman, AUR, and -S are literal identities or CLI tokens.
-#: src/moguet.cpp:827
+#: src/moguet.cpp:861
 #, c++-format
 msgid "Pass this option to {}; on {} or source-build {} routes, apply it only to final installation"
 msgstr "このオプションを{}へ渡し、{}またはソースビルドの{}経路では最後のインストールだけに適用"
 
 #. TRANSLATORS: The placeholder is the literal Moguet project identity.
-#: src/moguet.cpp:832
+#: src/moguet.cpp:866
 #, c++-format
 msgid "Do not skip {} build, review, or plan steps"
 msgstr "{}のビルド、確認、計画段階は省略しません"
 
-#: src/moguet.cpp:836
+#: src/moguet.cpp:870
 msgid "Select the source-build mode"
 msgstr "ソースビルドモードを選択"
 
 #. TRANSLATORS: The placeholder is a literal compatibility option form.
-#: src/moguet.cpp:841 src/moguet.cpp:847
+#: src/moguet.cpp:875 src/moguet.cpp:881
 #, c++-format
 msgid "Compatibility alias for {}"
 msgstr "{}との互換性を保つための別名"
 
-#: src/moguet.cpp:852
+#: src/moguet.cpp:886
 msgid "Unsupported for separated source builds; no dependency cleanup is performed"
 msgstr "分離されたソースビルドでは未対応です。依存パッケージは削除しません"
 
 #. TRANSLATORS: -S, -Ss, -Si, and AUR are literal CLI/project identities.
-#: src/moguet.cpp:857
+#: src/moguet.cpp:891
 #, c++-format
 msgid "Limit {}, {}, and {} to {}; do not fall back to repositories"
 msgstr "{}、{}、{}を{}に限定し、リポジトリへフォールバックしません"
 
 #. TRANSLATORS: -S, -Ss, -Si, and AUR are literal CLI/project identities.
-#: src/moguet.cpp:863
+#: src/moguet.cpp:897
 #, c++-format
 msgid "Limit {}, {}, and {} to official binary repositories; do not use {} or source builds"
 msgstr "{}、{}、{}を公式バイナリリポジトリに限定し、{}やソースビルドを使用しません"
 
-#: src/moguet.cpp:866
+#: src/moguet.cpp:900
 msgid "CONFIGURATION"
 msgstr "設定"
 
-#: src/moguet.cpp:870
+#: src/moguet.cpp:904
 msgid "Read-only typed configuration; a missing file uses built-in defaults"
 msgstr "型付きの読み取り専用設定。ファイルがない場合は組み込みの既定値を使用"
 
-#: src/moguet.cpp:873
+#: src/moguet.cpp:907
 msgid "Required schema version"
 msgstr "必須のスキーマバージョン"
 
 #. TRANSLATORS: The placeholder is the literal PKGBUILD artifact identity.
-#: src/moguet.cpp:878
+#: src/moguet.cpp:912
 #, c++-format
 msgid "{} review policy"
 msgstr "{}の確認方針"
 
-#: src/moguet.cpp:881
+#: src/moguet.cpp:915
 msgid "Repository update diff policy"
 msgstr "リポジトリ更新差分の確認方針"
 
-#: src/moguet.cpp:884
+#: src/moguet.cpp:918
 msgid "Source-build mode"
 msgstr "ソースビルドモード"
 
@@ -7700,6 +7905,9 @@ msgstr "{}のデフォルト状態ログを段階{}で安全に使用できま�
 #: src/xdg_state_log.cpp:234
 msgid "Unknown state log error code."
 msgstr "不明な状態ログエラーコードです。"
+
+#~ msgid "Package selection requires a search callback."
+#~ msgstr "パッケージ選択には検索コールバックが必要です。"
 
 #, c++-format
 #~ msgid "Failed to add {}"

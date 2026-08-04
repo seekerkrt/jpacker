@@ -35,6 +35,7 @@
     "--rebuild": "Compatibility alias for --build-mode=rebuild",
     "--cleanbuild": "Compatibility alias for --build-mode=clean",
     "--rmdeps": "Unsupported for separated source builds; no dependency cleanup is performed",
+    "--select": "Interactively select source-aware package candidates for plain -S",
     "--aur": "Limit supported sync operations to AUR",
     "--repo": "Limit supported sync operations to official binary repositories",
     "--needed": "Skip reinstall at final package installation",

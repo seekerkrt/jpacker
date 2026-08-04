@@ -157,6 +157,9 @@ bool apply_moguet_global_option(const std::string& arg, ParsedCliArguments& pars
     case cli_authority::GlobalOptionId::RmDeps:
         parsed.cli_overrides.rm_deps = true;
         break;
+    case cli_authority::GlobalOptionId::Select:
+        parsed.root_package_selection_requested = true;
+        break;
     case cli_authority::GlobalOptionId::Aur:
         if(parsed.source_selection == PackageSourceSelection::RepoOnly) {
             // TRANSLATORS: Both placeholders are literal CLI options.

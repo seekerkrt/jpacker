@@ -45,7 +45,7 @@ all_candidates=(
     -G -Gp -S -Syu -Ss -Si -Qua
     -h --help -V --version
     --edit --noedit --diff --nodiff --noconfirm --build-mode=
-    --rebuild --cleanbuild --rmdeps --aur --repo --needed --recursive
+    --rebuild --cleanbuild --rmdeps --select --aur --repo --needed --recursive
 )
 
 registration=$(complete -p moguet)
@@ -70,6 +70,9 @@ assert_reply "operation prefix" upgrade upgrade-aur upgrade-all
 
 run_completion moguet deps --r
 assert_reply "option prefix" --rebuild --rmdeps --repo --recursive
+
+run_completion moguet --s
+assert_reply "root discovery option prefix" --select
 
 run_completion moguet --b
 assert_reply "attached-value option token" --build-mode=

@@ -10,6 +10,9 @@
 #include "package_identifier.hpp"
 #include "process.hpp"
 #include "repository_query.hpp"
+#include "root_package_route_projection.hpp"
+#include "root_package_search.hpp"
+#include "root_package_selection.hpp"
 #include "shell_words.hpp"
 #include "source_install.hpp"
 #include "source_preference.hpp"
@@ -23,7 +26,9 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <utility>
+#include <variant>
 #include <vector>
 
 // sync search / info / installのselector別policyと、専用presentation / command constructionを所有する。
@@ -243,7 +248,469 @@ int execute_sync_source_build_invocation(
     }
 }
 
+std::string root_package_presentation_value(
+        const std::optional<std::string>& value) {
+    return value.has_value() ? value.value() : "-";
+}
+
+void present_root_package_candidate(
+        std::ostream& output,
+        std::size_t index,
+        const RootPackageSearchCandidate& candidate) {
+    // NO_TRANSLATE: source/repository/package/PackageBase/version/groups are
+    // stable machine-readable candidate field labels.
+    output << index << ") ";
+    if(const auto* repository =
+               std::get_if<RepositoryRootPackageIdentity>(
+                       &candidate.candidate.identity());
+       repository != nullptr) {
+        output << "source=repository"
+               << " repository=" << repository->repository_name
+               << " package=" << repository->package_name;
+    } else {
+        const auto& aur = std::get<AurRootPackageIdentity>(
+                candidate.candidate.identity());
+        output << "source=AUR"
+               << " package=" << aur.package_name
+               << " PackageBase=" << aur.package_base;
+    }
+    output << " version="
+           << root_package_presentation_value(
+                      candidate.candidate.presentation().version);
+    if(!candidate.selectable_group_names.empty()) {
+        output << " groups=";
+        for(std::size_t group_index = 0;
+            group_index < candidate.selectable_group_names.size();
+            ++group_index) {
+            if(group_index > 0) output << ',';
+            output << '@' << candidate.selectable_group_names[group_index];
+        }
+    }
+    output << '\n';
+    if(candidate.candidate.presentation().description.has_value()) {
+        output << "    "
+               << candidate.candidate.presentation().description.value()
+               << '\n';
+    }
+}
+
+void present_invalid_root_package_selection_issue(
+        std::ostream& output,
+        const RootPackageSelectionIssue& issue) {
+    std::visit(
+            [&output](const auto& typed_issue) {
+                using Issue = std::decay_t<decltype(typed_issue)>;
+                output << ":: ";
+                if constexpr(std::is_same_v<
+                                     Issue,
+                                     MalformedRootPackageSelectionToken>) {
+                    output << localization::translate_message(
+                            "Invalid package selection token.");
+                } else if constexpr(std::is_same_v<
+                                            Issue,
+                                            RootPackageSelectionIndexOutOfRange>) {
+                    // TRANSLATORS: The placeholder is the number of displayed package candidates.
+                    output << localization::format_translated_message(
+                            "Package selection index is outside the displayed range 1-{}.",
+                            typed_issue.candidate_count);
+                } else if constexpr(std::is_same_v<
+                                            Issue,
+                                            DescendingRootPackageSelectionRange>) {
+                    output << localization::translate_message(
+                            "Package selection ranges must use ascending endpoints.");
+                } else if constexpr(std::is_same_v<
+                                            Issue,
+                                            UnknownRootPackageSelectionGroup>) {
+                    output << localization::translate_message(
+                            "Package selection names an unknown displayed group.");
+                } else if constexpr(std::is_same_v<
+                                            Issue,
+                                            MixedRootPackageSelectionCancellationToken>) {
+                    output << localization::translate_message(
+                            "A package selection cancellation token cannot be combined with selectors.");
+                } else if constexpr(std::is_same_v<
+                                            Issue,
+                                            ConflictingRootPackageSelectionAlternatives>) {
+                    // package_name comes from the validated candidate snapshot; raw input tokens are not echoed.
+                    // TRANSLATORS: The placeholder is a validated package name.
+                    output << localization::format_translated_message(
+                            "Package {} was selected from more than one source; select exactly one source.",
+                            typed_issue.package_name);
+                }
+                output << '\n';
+            },
+            issue);
+}
+
+RootPackageSelectionInteractionCallback
+root_package_selection_interaction() {
+    return [](const RootPackageSelectionInteractionEvent& event,
+              const RootPackageSearchSnapshot& snapshot) {
+        if(std::holds_alternative<
+                   PresentRootPackageSelectionCandidates>(event)) {
+            std::cout << ":: "
+                      << localization::translate_message(
+                                 "Package candidates:")
+                      << '\n';
+            for(std::size_t index = 0; index < snapshot.candidates.size();
+                ++index) {
+                present_root_package_candidate(
+                        std::cout, index + 1, snapshot.candidates[index]);
+            }
+            return;
+        }
+        if(std::holds_alternative<PromptForRootPackageSelection>(event)) {
+            // TRANSLATORS: Enter and q/quit/cancel are literal input tokens; @group is fixed selector syntax.
+            std::cout << ":: "
+                      << localization::format_translated_message(
+                                 "Select package numbers, ascending ranges, or displayed {}; press {} or enter {} to cancel:",
+                                 "@group", "Enter", "q/quit/cancel")
+                      << ' ' << std::flush;
+            return;
+        }
+
+        const auto& invalid =
+                std::get<InvalidRootPackageSelectionAttempt>(event);
+        for(const auto& issue : invalid.selection.issues) {
+            present_invalid_root_package_selection_issue(
+                    std::cout, issue);
+        }
+    };
+}
+
+void report_root_package_selection_input_gate(
+        RootPackageSelectionInputGate input_gate) {
+    switch(input_gate) {
+    case RootPackageSelectionInputGate::NonTty:
+        Logger::error(localization::translate_message(
+                "Interactive package selection requires a TTY on standard input."));
+        return;
+    case RootPackageSelectionInputGate::NoConfirm:
+        // TRANSLATORS: The placeholder is the literal CLI option --noconfirm.
+        Logger::error(localization::format_translated_message(
+                "Interactive package selection is not available with {}.",
+                "--noconfirm"));
+        return;
+    case RootPackageSelectionInputGate::Interactive:
+        throw std::logic_error(localization::translate_message(
+                "Interactive package selection has an inconsistent input gate."));
+    }
+    throw std::logic_error(localization::translate_message(
+            "Interactive package selection has an unknown input gate."));
+}
+
+RootPackageSearchScope root_package_search_scope(
+        PackageSourceSelection source_selection) {
+    switch(source_selection) {
+    case PackageSourceSelection::Auto:
+        return RootPackageSearchScope::All;
+    case PackageSourceSelection::AurOnly:
+        return RootPackageSearchScope::Aur;
+    case PackageSourceSelection::RepoOnly:
+        return RootPackageSearchScope::Repository;
+    }
+    throw std::logic_error(localization::translate_message(
+            "Unknown package source selection."));
+}
+
+void report_root_package_search_failure(
+        const RootPackageSearchResult& result) {
+    if(const auto* repository =
+               std::get_if<RepositoryRootPackageSearchFailure>(&result);
+       repository != nullptr) {
+        // TRANSLATORS: The placeholder is a repository metadata diagnostic.
+        Logger::error(localization::format_translated_message(
+                "Repository package search failed: {}",
+                repository->failure.diagnostic));
+        return;
+    }
+    if(const auto* aur = std::get_if<AurRootPackageSearchFailure>(&result);
+       aur != nullptr) {
+        // TRANSLATORS: The placeholders are the AUR project identity and a query diagnostic.
+        Logger::error(localization::format_translated_message(
+                "{} package search failed: {}", "AUR", aur->diagnostic));
+        return;
+    }
+    if(std::holds_alternative<InvalidRootPackageSearchSnapshot>(result)) {
+        // Raw invalid candidate metadata is intentionally not reflected to the terminal.
+        Logger::error(localization::translate_message(
+                "Package search returned an invalid candidate snapshot."));
+        return;
+    }
+    throw std::logic_error(localization::translate_message(
+            "Package search failure reporting received a successful snapshot."));
+}
+
+bool has_source_build_cli_override(const ParsedCliArguments& parsed) noexcept {
+    return parsed.cli_overrides.review_pkgbuild.has_value() ||
+           parsed.cli_overrides.review_diff.has_value() ||
+           parsed.cli_overrides.build_mode.has_value();
+}
+
+std::string join_root_package_names(
+        const std::vector<AurRootPackageRouteTarget>& targets) {
+    std::stringstream joined;
+    for(std::size_t index = 0; index < targets.size(); ++index) {
+        if(index > 0) joined << ", ";
+        joined << targets[index].identity().package_name;
+    }
+    return joined.str();
+}
+
+void require_selected_aur_root_plan_correlation(
+        const std::vector<AurRootPackageRouteTarget>& selected_targets,
+        const BuildPlan& plan) {
+    if(plan.root_targets.size() != selected_targets.size()) {
+        throw std::runtime_error(localization::format_translated_message(
+                // TRANSLATORS: The placeholder is the AUR project identity.
+                "The {} build plan does not cover every selected root package.",
+                "AUR"));
+    }
+
+    for(std::size_t index = 0; index < selected_targets.size(); ++index) {
+        const AurRootPackageIdentity& selected =
+                selected_targets[index].identity();
+        const RootTargetIdentity& planned_root = plan.root_targets[index];
+        if(planned_root.invocation_index != index ||
+           planned_root.requested_name != selected.package_name) {
+            throw std::runtime_error(localization::format_translated_message(
+                    // TRANSLATORS: The placeholder is the AUR project identity.
+                    "The {} build plan changed the selected root package order or identity.",
+                    "AUR"));
+        }
+
+        const PlannedPackageTarget* planned_target = nullptr;
+        for(const auto& candidate : plan.package_targets) {
+            if(candidate.package_name != selected.package_name) continue;
+            if(planned_target != nullptr) {
+                throw std::runtime_error(localization::format_translated_message(
+                        // TRANSLATORS: The placeholders are the AUR project identity and a validated package name.
+                        "The {} build plan contains duplicate identities for selected package {}.",
+                        "AUR", selected.package_name));
+            }
+            planned_target = &candidate;
+        }
+        if(planned_target == nullptr) {
+            throw std::runtime_error(localization::format_translated_message(
+                    // TRANSLATORS: The placeholders are the AUR project identity and a validated package name.
+                    "The {} build plan omitted selected package {}.",
+                    "AUR", selected.package_name));
+        }
+        if(planned_target->package_base != selected.package_base) {
+            // Both PackageBase values are validated identities. Refuse to route a stale
+            // selection to metadata returned by the later build-plan query.
+            // TRANSLATORS: The placeholders are the PackageBase and AUR identities, a validated package name, and two PackageBase names.
+            throw std::runtime_error(localization::format_translated_message(
+                    "The {} for selected {} package {} changed from {} to {}; rerun package selection.",
+                    "PackageBase", "AUR", selected.package_name,
+                    selected.package_base, planned_target->package_base));
+        }
+        if(std::find(
+                   planned_target->roles.begin(),
+                   planned_target->roles.end(),
+                   PackageRole::Root) == planned_target->roles.end() ||
+           std::find(
+                   planned_target->roots.begin(),
+                   planned_target->roots.end(),
+                   planned_root) == planned_target->roots.end()) {
+            throw std::runtime_error(localization::format_translated_message(
+                    // TRANSLATORS: The placeholders are the AUR project identity and a validated package name.
+                    "The {} build plan lost root attribution for selected package {}.",
+                    "AUR", selected.package_name));
+        }
+    }
+}
+
 } // namespace
+
+std::optional<PreparedRootPackageInstall> prepare_root_package_install(
+        const ParsedCliArguments& parsed,
+        RootPackageSelectionInvocation invocation,
+        const AppConfig& config) {
+    RootPackageSelectionSession selection_session =
+            make_root_package_selection_session(
+                    root_package_selection_interaction(),
+                    config.no_confirm);
+    if(invocation.query.empty()) {
+        Logger::error(localization::translate_message(
+                "Package selection query must not be empty."));
+        return std::nullopt;
+    }
+    if(config.rm_deps || parsed.cli_overrides.rm_deps) {
+        // TRANSLATORS: The placeholder is the literal CLI option --rmdeps.
+        Logger::error(localization::format_translated_message(
+                "Interactive package selection does not support {}.",
+                "--rmdeps"));
+        return std::nullopt;
+    }
+
+    // POLICY(#217): gate must be observable before official/AUR candidate query.
+    if(!selection_session.is_interactive()) {
+        report_root_package_selection_input_gate(
+                selection_session.input_gate());
+        return std::nullopt;
+    }
+
+    RootPackageSearchResult search_result = search_root_package_candidates(
+            invocation.query,
+            root_package_search_scope(parsed.source_selection));
+    const auto* snapshot =
+            std::get_if<RootPackageSearchSnapshot>(&search_result);
+    if(snapshot == nullptr) {
+        report_root_package_search_failure(search_result);
+        return std::nullopt;
+    }
+
+    RootPackageSelectionSessionResult selection_result =
+            selection_session.select(*snapshot);
+    if(const auto* unavailable =
+               std::get_if<UnavailableRootPackageSelection>(
+                       &selection_result);
+       unavailable != nullptr) {
+        switch(unavailable->reason) {
+        case RootPackageSelectionUnavailableReason::NoCandidates:
+            Logger::error(localization::translate_message(
+                    "No package candidates were found."));
+            return std::nullopt;
+        case RootPackageSelectionUnavailableReason::NonInteractiveInput:
+            report_root_package_selection_input_gate(
+                    RootPackageSelectionInputGate::NonTty);
+            return std::nullopt;
+        case RootPackageSelectionUnavailableReason::NoConfirm:
+            report_root_package_selection_input_gate(
+                    RootPackageSelectionInputGate::NoConfirm);
+            return std::nullopt;
+        }
+        throw std::logic_error(localization::translate_message(
+                "Package selection returned an unknown unavailable reason."));
+    }
+    if(std::holds_alternative<CancelledRootPackageSelection>(
+               selection_result)) {
+        Logger::error(localization::translate_message(
+                "Package selection was cancelled."));
+        return std::nullopt;
+    }
+
+    const RootPackageSelection& selection =
+            std::get<RootPackageSelection>(selection_result);
+    RootPackageRoutingProjectionResult routing =
+            project_root_package_routing(selection);
+    if(!routing.is_valid()) {
+        // Unsafe repository identity is deliberately not echoed.
+        Logger::error(localization::format_translated_message(
+                // TRANSLATORS: The placeholder is the literal pacman program identity.
+                "A selected repository package cannot be represented as an exact {} target.",
+                "pacman"));
+        return std::nullopt;
+    }
+    const RootPackageRoutingProjection& projection = *routing.projection();
+
+    if(projection.aur_targets().empty() &&
+       has_source_build_cli_override(parsed)) {
+        Logger::error(localization::format_translated_message(
+                // TRANSLATORS: The placeholder is the AUR project identity.
+                "Source-build review and build-mode options require at least one selected {} package.",
+                "AUR"));
+        return std::nullopt;
+    }
+
+    PreparedRootPackageInstall prepared;
+    prepared.needed = invocation.needed;
+    prepared.exact_repository_targets.reserve(
+            projection.repository_targets().size());
+    for(const auto& target : projection.repository_targets()) {
+        prepared.exact_repository_targets.push_back(
+                target.exact_package_target());
+    }
+
+    if(projection.aur_targets().empty()) return prepared;
+
+    // All AUR roots share one plan so same-PackageBase selected children become
+    // one ordered work item. This preserves source-local selection order while
+    // keeping dependency units before their consumers.
+    require_supported_production_source_build_options(config);
+    std::vector<std::string> aur_package_names;
+    aur_package_names.reserve(projection.aur_targets().size());
+    for(const auto& target : projection.aur_targets()) {
+        aur_package_names.push_back(target.identity().package_name);
+    }
+
+    BuildPlan plan = resolve_build_plan(
+            aur_package_names,
+            provider_selection_callback(config));
+    require_selected_aur_root_plan_correlation(
+            projection.aur_targets(), plan);
+    require_executable_build_plan(
+            join_root_package_names(projection.aur_targets()), plan);
+
+    std::vector<ProductionSourceBuildWorkItem> work_items =
+            prepare_aur_source_build_work_items(
+                    plan, false, prepared.needed);
+    // Do not prepare/seed a cache here. execute_prepared_source_build_invocation
+    // activates it only after the selected repository transaction succeeds.
+    prepared.source_invocation =
+            prepare_production_source_build_invocation(
+                    std::move(work_items), config);
+    return prepared;
+}
+
+int execute_prepared_root_package_install(
+        PreparedRootPackageInstall prepared,
+        const AppConfig& config) {
+    const bool has_repository_transaction =
+            !prepared.exact_repository_targets.empty();
+    if(!has_repository_transaction && !prepared.source_invocation.has_value()) {
+        throw std::invalid_argument(localization::translate_message(
+                "Prepared package selection contains no install targets."));
+    }
+
+    if(has_repository_transaction) {
+        std::vector<std::string> pacman_args{"-S"};
+        if(prepared.needed) pacman_args.push_back("--needed");
+        pacman_args.push_back("--");
+        pacman_args.insert(
+                pacman_args.end(),
+                prepared.exact_repository_targets.begin(),
+                prepared.exact_repository_targets.end());
+
+        const int repository_status = run_command(
+                "sudo pacman " + shell_words::join(pacman_args));
+        if(repository_status != 0) {
+            if(prepared.source_invocation.has_value()) {
+                Logger::error(localization::format_translated_message(
+                        // TRANSLATORS: The placeholder is the AUR project identity.
+                        "The selected repository package transaction failed; selected {} packages were not executed.",
+                        "AUR"));
+            } else {
+                Logger::error(localization::translate_message(
+                        "The selected repository package transaction failed."));
+            }
+            return repository_status;
+        }
+    }
+
+    if(!prepared.source_invocation.has_value()) return 0;
+
+    try {
+        const int source_status = execute_sync_source_build_invocation(
+                prepared.source_invocation.value(), config);
+        if(source_status != 0 && has_repository_transaction) {
+            Logger::warn(localization::format_translated_message(
+                    // TRANSLATORS: The placeholder is the AUR project identity.
+                    "The repository package transaction completed before the {} route failed; it was not rolled back.",
+                    "AUR"));
+        }
+        return source_status;
+    } catch(...) {
+        if(has_repository_transaction) {
+            Logger::warn(localization::format_translated_message(
+                    // TRANSLATORS: The placeholder is the AUR project identity.
+                    "The repository package transaction completed before the {} route failed; it was not rolled back.",
+                    "AUR"));
+        }
+        throw;
+    }
+}
 
 int cmd_sync_search(
         const ParsedCliArguments& parsed, bool use_sudo,
