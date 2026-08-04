@@ -1,0 +1,4 @@
+pkgbase = missing-pkgrel
+	pkgver = 1
+	arch = any
+pkgname = missing-pkgrel

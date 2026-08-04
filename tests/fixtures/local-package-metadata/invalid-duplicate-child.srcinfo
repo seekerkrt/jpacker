@@ -1,0 +1,7 @@
+pkgbase = duplicate-child
+	pkgver = 1
+	pkgrel = 1
+	arch = any
+pkgname = duplicate-child-cli
+	depends = runtime
+pkgname = duplicate-child-cli
