@@ -92,6 +92,19 @@ std::vector<ProvidedDependency> collect_selected_repository_providers(
     return providers;
 }
 
+void add_selected_repository_provider(
+        std::vector<ProvidedDependency>& providers,
+        const ProvidedDependency& provider) {
+    require_selected_repository_provider(provider);
+    const auto same = [&provider](const ProvidedDependency& existing) {
+        return same_provider_identity(existing, provider);
+    };
+    if(std::find_if(providers.begin(), providers.end(), same) ==
+       providers.end()) {
+        providers.push_back(provider);
+    }
+}
+
 } // namespace
 
 void require_static_production_source_build_work_item(
@@ -225,4 +238,73 @@ PreparedProductionSourceBuildInvocation prepare_production_source_build_invocati
             std::move(selected_repository_providers),
             std::move(database_paths),
             std::move(supplied_cache_root)};
+}
+
+PreparedProductionSourceBuildInvocation
+prepare_local_source_build_dependency_invocation(
+        LocalSourceBuildDependencyPreparation preparation,
+        const ValidatedCacheRoot& cache_root,
+        const AppConfig& config) {
+    // POLICY(#271): local root ownerが別に存在するためremote work item 0件を
+    // 許可する。generic production invocationのnonempty契約は変更しない。
+    require_supported_separated_install_options(config.rm_deps);
+    require_unclaimed_artifact_pkgdest(SourceBuildEnvironment{});
+    for(const auto& work_item : preparation.remote_work_items_) {
+        require_unclaimed_artifact_pkgdest(
+                work_item.request.custom_environment);
+    }
+    for(const auto& work_item : preparation.remote_work_items_) {
+        require_static_production_source_build_work_item(work_item);
+    }
+
+    std::vector<ProvidedDependency> selected_repository_providers;
+    selected_repository_providers.reserve(
+            preparation.selected_repository_providers_.size());
+    for(const auto& provider :
+        preparation.selected_repository_providers_) {
+        add_selected_repository_provider(
+                selected_repository_providers, provider);
+    }
+    for(const auto& work_item : preparation.remote_work_items_) {
+        for(const auto& provider :
+            work_item.selected_repository_providers) {
+            add_selected_repository_provider(
+                    selected_repository_providers, provider);
+        }
+    }
+
+    cache_root.require_unchanged_identity();
+    std::optional<ValidatedCacheRoot> existing_cache_root =
+            shared_prepared_cache_root(preparation.remote_work_items_);
+    if(existing_cache_root.has_value()) {
+        existing_cache_root->require_unchanged_identity();
+        if(existing_cache_root->device() != cache_root.device() ||
+           existing_cache_root->inode() != cache_root.inode() ||
+           existing_cache_root->owner() != cache_root.owner()) {
+            throw std::logic_error(
+                    "Local source-build dependencies use a different cache authority.");
+        }
+    }
+    for(const auto& work_item : preparation.remote_work_items_) {
+        if(!work_item.cache_root.has_value()) {
+            continue;
+        }
+        work_item.cache_root->require_unchanged_identity();
+        if(work_item.cache_root->device() != cache_root.device() ||
+           work_item.cache_root->inode() != cache_root.inode() ||
+           work_item.cache_root->owner() != cache_root.owner()) {
+            throw std::logic_error(
+                    "Local source-build dependencies use a different cache authority.");
+        }
+    }
+    for(auto& work_item : preparation.remote_work_items_) {
+        work_item.cache_root = cache_root;
+    }
+
+    PacmanDatabasePaths database_paths = resolve_pacman_database_paths();
+    return PreparedProductionSourceBuildInvocation{
+            std::move(preparation.remote_work_items_),
+            std::move(selected_repository_providers),
+            std::move(database_paths), cache_root,
+            LocalSourceBuildInvocationAuthority{}};
 }

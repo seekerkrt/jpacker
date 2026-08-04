@@ -43,6 +43,7 @@ _moguet() {
         --aur
         --repo
         --needed
+        --local
         --recursive
     )
 

@@ -171,6 +171,16 @@ bool validate_pre_log_source_preference_targets(
 }
 
 bool validate_pre_log_operation_route(const ParsedCliArguments& parsed) {
+    if(parsed.operation == cli_authority::LOCAL_SOURCE_OPTION) {
+        // `--local` is reserved as a build-owned selector even when it was
+        // misplaced in argv's operation slot. Never delegate that spelling
+        // to the generic pacman route.
+        // TRANSLATORS: Both placeholders are literal CLI tokens.
+        Logger::error(localization::format_translated_message(
+                "Option {} is supported only with operation {}.",
+                cli_authority::LOCAL_SOURCE_OPTION, "build"));
+        return false;
+    }
     if(!parsed.operation.empty() && parsed.operation.front() != '-' &&
        !is_known_moguet_operation(parsed.operation)) {
         // TRANSLATORS: The placeholder is a literal CLI operation token.
@@ -183,11 +193,13 @@ bool validate_pre_log_operation_route(const ParsedCliArguments& parsed) {
            cli_authority::operation_spec(
                    cli_authority::OperationId::Build)
                    .token) {
-            // TRANSLATORS: The placeholders are literal CLI command, operation, and operand syntax tokens.
+            // TRANSLATORS: The placeholders are the literal CLI command and the complete build syntax.
             Logger::error(localization::format_translated_message(
-                    "Usage: {} {} {} {}",
+                    "Usage: {} {}",
                     application_identity::COMMAND_NAME,
-                    "build", "<pkg>", "[VAR=VAL...]"));
+                    cli_authority::operation_spec(
+                            cli_authority::OperationId::Build)
+                            .help_syntax));
         } else if(parsed.operation ==
                   cli_authority::operation_spec(
                           cli_authority::OperationId::Deps)
@@ -285,6 +297,24 @@ int run_moguet(int argc, char* argv[]) {
             std::move(final_user_config),
             parsed.cli_overrides.no_confirm,
             parsed.cli_overrides.rm_deps);
+
+    // POLICY(#271): exact operation-local selectorをgeneric build option
+    // rejectionより先にstrict projectionし、directory/root inspectionまでを
+    // default state logやcacheの作成前に完了する。
+    std::optional<PreparedLocalSourceBuildRoute>
+            prepared_local_source_build;
+    if(local_source_build_requested(parsed)) {
+        try {
+            LocalSourceBuildInvocation invocation =
+                    require_local_source_build_invocation(parsed);
+            prepared_local_source_build.emplace(
+                    prepare_local_source_build_route(
+                            std::move(invocation), g_config));
+        } catch(const std::exception& error) {
+            Logger::error(error.what());
+            return 1;
+        }
+    }
 
     if(parsed.operation ==
        cli_authority::operation_spec(
@@ -388,6 +418,7 @@ int run_moguet(int argc, char* argv[]) {
     const cli_authority::OperationSpec* custom_operation =
             cli_authority::find_moguet_operation(parsed.operation);
     if(custom_operation != nullptr &&
+       !prepared_local_source_build.has_value() &&
        custom_operation->rejects_options_before_dispatch &&
        !validate_optionless_moguet_operation(parsed.operation, parsed.flags)) {
         // POLICY(#169): unsupported custom-operation options must stop before cache or source mutation.
@@ -401,8 +432,29 @@ int run_moguet(int argc, char* argv[]) {
         // descriptorからfixed default logをopenしてLoggerへownershipを移す。
         xdg_paths::StatePaths state_paths =
                 xdg_paths::resolve_state_process_environment();
+        xdg_directory_safety::DirectoryCreationPrecondition
+                state_creation_precondition;
+        if(prepared_local_source_build.has_value()) {
+            state_creation_precondition =
+                    [&prepared_local_source_build](
+                            const xdg_directory_safety::DirectoryIdentity&
+                                    parent_identity) {
+                        require_directory_identity_outside_local_source_tree(
+                                prepared_local_source_build->source_root,
+                                parent_identity.device,
+                                parent_identity.inode);
+                    };
+        }
         xdg_directory_safety::PreparedDirectory state_directory =
-                xdg_directory_safety::prepare_directory(state_paths);
+                xdg_directory_safety::prepare_directory(
+                        state_paths, state_creation_precondition);
+        if(prepared_local_source_build.has_value()) {
+            // Existing state directories do not enter the mkdir callback, so
+            // pin their final identity before the fixed log name is opened.
+            require_directory_identity_outside_local_source_tree(
+                    prepared_local_source_build->source_root,
+                    state_directory.device(), state_directory.inode());
+        }
         xdg_state_log::PreparedLogFile state_log =
                 xdg_state_log::open_default_state_log(
                         state_paths, state_directory);
@@ -413,6 +465,10 @@ int run_moguet(int argc, char* argv[]) {
                         "Started {} v{}.",
                         application_identity::PROJECT_NAME,
                         application_identity::VERSION));
+    } catch(const LocalSourceWorkspaceError& error) {
+        report_direct_error(
+                local_source_workspace_failure_diagnostic(error.failure()));
+        return 1;
     } catch(const std::exception& error) {
         // Default state authorityのfailureはoperation dispatch前にfatal。
         // Logger adoption後のwrite failureでも同じbackendへ再書込しない。
@@ -458,6 +514,12 @@ int run_moguet(int argc, char* argv[]) {
 
     const int operation_status = [&]() -> int {
         try {
+            if(prepared_local_source_build.has_value()) {
+                return cmd_build_local(
+                        std::move(
+                                prepared_local_source_build.value()),
+                        g_config);
+            }
             if(prepared_root_package_install.has_value()) {
                 return execute_prepared_root_package_install(
                         std::move(
@@ -681,8 +743,10 @@ void print_help() {
     print_help_section(localization::translate_message("OPERATIONS"));
     print_help_entry(
             cli_authority::operation_spec(OperationId::Build).help_syntax,
-            localization::translate_message(
-                    "Build one package from source without saving a preference"));
+            localization::format_translated_message(
+                    // TRANSLATORS: The placeholder is the literal PKGBUILD artifact identity.
+                    "Build one remote package or local {} root without saving a preference",
+                    "PKGBUILD"));
     print_help_entry(
             cli_authority::operation_spec(OperationId::Upgrade).help_syntax,
             localization::translate_message(

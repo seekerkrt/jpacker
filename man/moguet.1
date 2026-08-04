@@ -68,11 +68,30 @@ Command and option tokens are locale-independent.
 .SH COMMANDS
 .\" PUBLIC COMMANDS BEGIN
 .TP
-.B "build <pkg> [V=K]"
-Build one official-repository or AUR package from source without saving a
+.B "build <pkg> [V=K...] | build --local <directory> [V=K...]"
+Without
+.BR --local ,
+build one official-repository or AUR package from source without saving a
 source-build preference.
-The package is reviewed and its produced artifacts are validated before any
-selected artifact is handed to pacman.
+With
+.BR --local ,
+treat exactly one user-owned directory as a local PackageBase source and never
+infer that source from a path-like package operand.
+A safe existing
+.I .SRCINFO
+is read without modification. Missing, invalid, or known-stale metadata is
+evaluated through
+.B makepkg --printsrcinfo
+only after PKGBUILD review and explicit no-default consent; non-TTY input and
+.B --noconfirm
+do not authorize evaluation.
+The local tree is copied to an invocation-owned source snapshot and remains
+unchanged. Every valid unique
+.I pkgname
+child declared by the accepted metadata is installed as an explicit root after
+dependency planning and artifact validation.
+Dependency artifacts retain dependency install reasons, and an already
+explicit installed package is never demoted.
 .
 .TP
 .B "upgrade"
@@ -291,6 +310,9 @@ Provider selection has no default: this option does not read stdin, prompt, or
 select a provider, and unresolved ambiguity fails closed.
 Root package discovery also stops before its candidate query and never chooses
 a package automatically.
+Local PKGBUILD metadata evaluation likewise has no default; this option never
+authorizes
+.BR "makepkg --printsrcinfo" .
 This is not \(dqyes to everything\(dq and does not bypass unresolved or
 ambiguous dependencies, cycles, source selection, conflicts/replacements,
 artifact identity, ownership, or other safety guards.
@@ -593,6 +615,13 @@ The export commands do not build or install.
 External commands and privilege escalation remain visible to the user.
 .
 .PP
+A local PKGBUILD build uses an invocation-owned source snapshot and never
+resets, cleans, overwrites, or deletes the user-owned source tree. It does not
+require Git and does not query AUR for the local root. Unsafe source or metadata
+state, an unapproved metadata evaluation, an incomplete dependency plan, or an
+unproven artifact stops before the corresponding mutation.
+.
+.PP
 Source-build PackageBase work uses a fresh artifact destination, validates all
 expected outputs, selects only required child package identities, and hands
 validated artifacts to one pacman transaction per PackageBase.
@@ -612,6 +641,12 @@ be retried blindly.
 Discover and explicitly select source-aware install targets:
 .RS
 .B moguet -S --select fastfetch
+.RE
+.
+.TP
+Build and install all declared package children from a local PKGBUILD root:
+.RS
+.B moguet build --local .
 .RE
 .
 .TP

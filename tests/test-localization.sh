@@ -309,10 +309,12 @@ strip_ansi "$c_help_short" "$c_help_plain"
 strip_ansi "$ja_help_short" "$ja_help_plain"
 
 assert_line 'USAGE' "$c_help_plain"
-assert_contains 'Build one package from source without saving a preference' \
+assert_contains \
+    'Build one remote package or local PKGBUILD root without saving a preference' \
     "$c_help_plain"
 assert_line '使用方法' "$ja_help_plain"
-assert_contains '設定を保存せず、パッケージを1つソースからビルド' \
+assert_contains \
+    '設定を保存せず、リモートパッケージ1件またはローカルPKGBUILDルート1件をビルド' \
     "$ja_help_plain"
 assert_contains '$XDG_CONFIG_HOME/moguet/config.toml' "$ja_help_plain"
 assert_contains 'review.pkgbuild = prompt|skip' "$ja_help_plain"

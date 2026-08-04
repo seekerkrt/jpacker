@@ -33,7 +33,11 @@ struct OperationSpec {
 
 inline constexpr std::array<OperationSpec, static_cast<std::size_t>(OperationId::Count)>
         MOGUET_OPERATIONS = {{
-                {OperationId::Build, "build", "build <pkg> [V=K]", true, true},
+                {OperationId::Build,
+                 "build",
+                 "build <pkg> [V=K...] | build --local <directory> [V=K...]",
+                 true,
+                 true},
                 {OperationId::Upgrade, "upgrade", "upgrade", false, true},
                 {OperationId::UpgradeAur, "upgrade-aur", "upgrade-aur", false, true},
                 {OperationId::UpgradeAll, "upgrade-all", "upgrade-all", false, true},
@@ -125,6 +129,10 @@ inline constexpr std::string_view BUILD_MODE_REBUILD_OPTION =
         "--build-mode=rebuild";
 inline constexpr std::string_view BUILD_MODE_CLEAN_OPTION =
         "--build-mode=clean";
+
+// Operation-local source selector。GlobalOptionSpecへ昇格させず、build routing
+// だけが解釈する。
+inline constexpr std::string_view LOCAL_SOURCE_OPTION = "--local";
 
 inline constexpr std::string_view HELP_SHORT_OPTION = "-h";
 inline constexpr std::string_view HELP_LONG_OPTION = "--help";

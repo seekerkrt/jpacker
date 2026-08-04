@@ -372,6 +372,11 @@ CapturedCommandResult execute_explicit_process(
             _exit(127);
         }
 
+        if(invocation.working_directory_fd.has_value() &&
+           fchdir(*invocation.working_directory_fd) == -1) {
+            _exit(127);
+        }
+
         if(capture_standard_output) {
             static_cast<void>(close(output_pipe[0]));
             if(dup2(output_pipe[1], STDOUT_FILENO) == -1) _exit(127);

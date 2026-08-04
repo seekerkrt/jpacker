@@ -202,6 +202,10 @@ moguet upgrade
 moguet upgrade-aur
 moguet upgrade-all
 
+# remote package 1件、またはlocal PKGBUILD root 1件をbuild・install
+moguet build <pkg> [V=K...]
+moguet build --local <directory> [V=K...]
+
 # buildせずAUR dependencyとbuild orderを調査
 moguet deps --recursive <pkg>
 moguet plan <pkg>
@@ -232,9 +236,19 @@ sourceを限定します。両selected routeで同じ意味を持つoptionは`--
 non-TTYと`--noconfirm`ではqueryやpackage選択を行わず失敗します。
 
 source-build preferenceは`add-src`、`edit-src`、`list-src`、`del-src`、`revert`で
-管理します。一時的な`build <pkg> [V=K]`はpreferenceを保存しません。runtime stateを
-使うpackage-name completion等の高度な補完はfuture workであり、同梱completionは
-public CLI schemaに限定します。
+管理します。一時的な`build <pkg> [V=K...]`はremote packageを解決し、preferenceを
+保存しません。`build --local <directory> [V=K...]`は、代わりにuser所有directoryを
+exactly oneのlocal PackageBase sourceとして扱います。pathらしいpackage operandからlocal
+rootを推測せず、そのrootをAURへqueryしません。
+
+local routeは安全な`.SRCINFO`を変更せずに読みます。metadataがmissing、invalid、または
+known-staleの場合、PKGBUILD reviewとdefaultなしの明示同意を終えてから
+`makepkg --printsrcinfo`を実行します。non-TTY inputや`--noconfirm`は評価を許可せず停止
+します。Moguetはinvocation-owned source snapshotからbuildし、user-owned treeを変更せず、
+採用metadataが宣言するvalidかつuniqueな全`pkgname` childをexplicit rootとしてinstall
+します。dependency artifactはdependency install reasonを保持し、既にexplicitなinstalled
+packageをdependencyへ降格しません。runtime stateを使うpackage-name completion等の高度な
+補完はfuture workであり、同梱completionはpublic CLI schemaに限定します。
 
 <!-- parity:configuration -->
 ## 設定

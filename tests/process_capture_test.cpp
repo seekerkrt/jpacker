@@ -6,6 +6,7 @@
 #include <cerrno>
 #include <exception>
 #include <filesystem>
+#include <fcntl.h>
 #include <iostream>
 #include <optional>
 #include <stdexcept>
@@ -75,6 +76,10 @@ int run_child(int argc, char* argv[]) {
     if(mode == "no-final-lf") return write_stdout("line") ? 0 : 125;
     if(mode == "carriage-return") return write_stdout("left\rright") ? 0 : 125;
     if(mode == "trim-boundaries") return write_stdout(" \t\nbody\r\n ") ? 0 : 125;
+    if(mode == "cwd") {
+        const std::string directory = fs::current_path().string();
+        return write_stdout(directory) ? 0 : 125;
+    }
     if(mode == "exit-23") return 23;
     if(mode == "signal-term") {
         raise(SIGTERM);
@@ -273,6 +278,26 @@ void test_unbounded_explicit_capture_compatibility(
             "Unbounded capture reported a storage limit overflow");
 }
 
+void test_explicit_working_directory_descriptor(
+        const fs::path& executable_path) {
+    const int directory_descriptor =
+            open("/tmp", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    require(
+            directory_descriptor >= 0,
+            "Failed to open explicit-process working directory");
+
+    CapturedCommandResult result = capture_explicit_process_output_raw(
+            ExplicitProcessInvocation{
+                    executable_path.string(),
+                    {std::string(CHILD_MARKER), "cwd"}, {}, std::nullopt,
+                    directory_descriptor});
+    const int close_status = close(directory_descriptor);
+    require(close_status == 0, "Failed to close working directory descriptor");
+    require_result(
+            "explicit working directory descriptor", result,
+            fs::canonical("/tmp").string(), 0);
+}
+
 void run_tests(const fs::path& executable_path) {
     test_raw_chunk_boundaries(executable_path);
     test_raw_byte_preservation(executable_path);
@@ -280,6 +305,7 @@ void run_tests(const fs::path& executable_path) {
     test_decoded_exit_status(executable_path);
     test_bounded_explicit_capture(executable_path);
     test_unbounded_explicit_capture_compatibility(executable_path);
+    test_explicit_working_directory_descriptor(executable_path);
 }
 
 } // namespace

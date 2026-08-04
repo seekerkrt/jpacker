@@ -71,6 +71,7 @@ setup_case() {
     unset MOGUET_TEST_MAKEPKG_EXIT_CODE
     unset MOGUET_TEST_MAKEPKG_PACKAGELIST_EXIT_CODE
     unset MOGUET_TEST_MAKEPKG_PACKAGELIST_OUTPUT_FILE
+    unset PKGDEST
 }
 
 run_ok() {
@@ -664,5 +665,83 @@ assert_select_rejected_pre_log select-end-of-options \
 assert_select_rejected_pre_log select-rmdeps \
     "Cannot combine --select and --rmdeps." \
     -S query --select --rmdeps
+
+# Matrix N: `--local`はbuild所有のexact semantic optionとしてだけrouteし、
+# local rootへ触れる前にoperation / option / operand grammarを確定する。
+assert_local_build_rejected_pre_log() {
+    case_name=$1
+    expected=$2
+    shift 2
+
+    setup_case "$case_name"
+    run_fail "$@"
+    assert_contains "$expected" "$output_file"
+    assert_pre_log_exit
+}
+
+# 正式形と許可済みglobal / ordered assignmentはstrict parserを通過し、
+# downstreamのdescriptor-first root inspectionへ到達する。
+setup_case local-build-formal-route
+missing_local_root=$case_dir/missing-local-root
+run_fail --noedit --noconfirm --build-mode=clean \
+    build --local "$missing_local_root" FIRST=one EMPTY=
+assert_contains \
+    "Local source root entry is missing: $missing_local_root" \
+    "$output_file"
+assert_pre_log_exit
+
+assert_local_build_rejected_pre_log local-build-wrong-operation \
+    "Option --local is supported only with operation build." \
+    -S --local .
+assert_local_build_rejected_pre_log local-build-selector-in-operation-slot \
+    "Option --local is supported only with operation build." \
+    --local build .
+assert_local_build_rejected_pre_log local-build-missing-directory \
+    "Operation build --local requires exactly one <directory> operand." \
+    build --local
+assert_local_build_rejected_pre_log local-build-duplicate-selector \
+    "Option --local may be specified only once for operation build." \
+    build --local . --local
+assert_local_build_rejected_pre_log local-build-package-co-use \
+    "Operation build --local requires exactly one <directory> operand." \
+    build --local . remote-package
+assert_local_build_rejected_pre_log local-build-other-pacman-option \
+    "Unsupported option --needed for build --local." \
+    build --local . --needed
+assert_local_build_rejected_pre_log local-build-value-taking-pacman-option \
+    "Unsupported option --root for build --local." \
+    build --local . --root custom-root
+assert_local_build_rejected_pre_log local-build-end-of-options \
+    "Cannot use -- with build --local." \
+    build --local -- .
+assert_local_build_rejected_pre_log local-build-assignment-before-directory \
+    "Environment assignment requires a preceding directory: KEY=value" \
+    build --local KEY=value .
+assert_local_build_rejected_pre_log local-build-invalid-assignment \
+    "Invalid environment assignment: 9BAD=value" \
+    build --local . 9BAD=value
+
+# local routeで意味を維持できないglobal optionもoperation-local parserが拒否する。
+for unsupported_local_option in \
+    --diff --nodiff --rmdeps --select --aur --repo
+do
+    case_name=local-build-rejects-${unsupported_local_option#--}
+    assert_local_build_rejected_pre_log "$case_name" \
+        "Unsupported option $unsupported_local_option for build --local." \
+        build --local . "$unsupported_local_option"
+done
+
+# Pacman option value / opaque operandに現れた同じ綴りはlocal selectorへ昇格しない。
+setup_case local-name-as-pacman-option-value
+run_fail build --root --local .
+assert_contains "Unsupported build option: --root" "$output_file"
+assert_not_contains "supported only with operation build" "$output_file"
+assert_pre_log_exit
+
+setup_case local-name-as-opaque-operand
+run_fail build -- --local .
+assert_contains "Unsupported build option: --" "$output_file"
+assert_not_contains "supported only with operation build" "$output_file"
+assert_pre_log_exit
 
 echo "CLI parser integration tests: all checks passed"

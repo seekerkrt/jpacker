@@ -113,6 +113,20 @@ LocalSourceWorkspace materialize_local_source_workspace(
         const LocalSourceRoot& source_root,
         const ValidatedCacheRoot& cache_root);
 
+// workspace作成前にretained identityとsource tree全体をmutation-freeで検査する。
+// materializationもrace対策として実行直前に同じ境界を再確認する。
+void require_local_source_cache_separation(
+        const LocalSourceRoot& source_root,
+        const ValidatedCacheRoot& cache_root);
+
+// XDG managed-directory creation callbacks use this retained-identity check
+// before mkdir. It rejects the source root itself and any directory reachable
+// inside the source tree, including a path alias with the same device/inode.
+void require_directory_identity_outside_local_source_tree(
+        const LocalSourceRoot& source_root,
+        std::uintmax_t directory_device,
+        std::uintmax_t directory_inode);
+
 #ifdef MOGUET_ENABLE_LOCAL_SOURCE_WORKSPACE_TEST_HOOKS
 enum class LocalSourceWorkspaceTestEvent {
     AfterFileDataCopied,
