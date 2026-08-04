@@ -54,6 +54,22 @@ The Moguet package does not provide a `jpacker` command alias. AUR publication
 is a separate future decision; this document does not claim that an AUR
 endpoint exists.
 
+Moguet v2.x is published and usable, but it remains a development-phase
+product rather than a finished, general-purpose AUR helper. Basic pacman
+wrapping, AUR source builds, updates, and per-package source-build
+preferences already work today, while the wider AUR-support surface — a full
+dependency solver, provider/conflict/replaces/version-constraint handling,
+and edge-case coverage — is still being implemented incrementally and its UX
+is still maturing. Moguet does not promise the same automatic-resolution
+completeness as established AUR helpers: unsupported or ambiguous cases stop
+fail-closed instead of guessing. v2.x is the public development period that
+builds Moguet's source-aware entry points, safety boundaries, and validation
+infrastructure; v3.0.0 is the point where Moguet-specific build-profile and
+PKGBUILD-diff workflows come together, which the project treats internally
+as Moguet's full commissioning. See the release roadmap
+([issue #344](https://github.com/seekerkrt/moguet/issues/344)) for the
+detailed plan.
+
 <!-- parity:safety -->
 ## Design and safety boundaries
 
@@ -156,6 +172,27 @@ Moguet v2.0.0 does not include AUR publication. Do not invent an AUR URL or
 install a development payload on the live system. See the
 [v1 to v2 Migration Guide](docs/migration/v1-to-v2.md) before changing an
 installed system.
+
+### Package installation with `PKGBUILD`
+
+The repository root ships a `PKGBUILD` that packages a published release
+rather than the checked-out working tree. Its `pkgver()` reads the version
+from the repository's own `VERSION` file and fetches the matching published
+Git tag (`v<version>`) as the build source, so it never packages unreleased
+working-tree commits.
+
+```bash
+git clone https://github.com/seekerkrt/moguet.git
+cd moguet
+makepkg -si
+```
+
+`makepkg -si` builds that tagged release and installs it onto the live
+system with `pacman -U` in the same step. This differs from `make` and
+`./moguet --help` above, which only build and inspect the development tree
+in place and install nothing. This `PKGBUILD` is a repository-provided
+packaging path, not an AUR submission; Moguet still has no published AUR
+page.
 
 <!-- parity:usage -->
 ## Basic usage
