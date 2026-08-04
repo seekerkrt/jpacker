@@ -48,6 +48,18 @@ canonical repository identityはGitHub上のMoguetで、GitLab mirrorを持ち�
 packageは`jpacker` command aliasを提供しません。AUR publicationは将来の別判断であり、
 この文書はAUR endpointが存在すると断定しません。
 
+Moguet v2.xは公開済みで利用できますが、完成済みの一般向けAUR helperではなく、
+development-phaseのproductのままです。basicなpacman wrapper、AUR source build、
+update、package別のsource-build preferenceは現在すでに動作しますが、AUR support全体を
+構成するdependency solver、provider / conflict / replaces / version constraint対応、
+edge case対応といったより広い範囲は段階的に実装中で、UXも成熟途上です。Moguetは既存AUR
+helperと同等の自動解決能力・完成度を約束しません。unsupportedまたはambiguousなcaseは、
+推測せずfail-closedで停止します。v2.xは、Moguetのsource-aware入口、安全境界、検証基盤を
+築く公開開発期です。v3.0.0は、Moguet固有のbuild-profileとPKGBUILD差分workflowが揃う
+地点であり、projectは内部的にこれをMoguetの本格的な正式就役と位置付けています。詳細な
+計画はrelease roadmap（[issue #344](https://github.com/seekerkrt/moguet/issues/344)）
+を参照してください。
+
 <!-- parity:safety -->
 ## 設計と安全境界
 
@@ -139,6 +151,25 @@ package runtime dependencyは`curl`、`git`、`libalpm.so`、`libarchive`、`nan
 Moguet v2.0.0にはAUR publicationを含めません。AUR URLを作り上げたり、development
 payloadをlive systemへinstallしたりしないでください。installed systemを変更する前に
 [v1からv2へのMigration Guide](docs/migration/v1-to-v2.ja.md)を確認してください。
+
+### `PKGBUILD`によるpackage installation
+
+repository rootの`PKGBUILD`は、checkout済みのworking treeではなく公開済みreleaseを
+package化します。`pkgver()`はrepository自身の`VERSION` fileからversionを読み取り、
+対応する公開済みGit tag（`v<version>`）をbuild sourceとして取得するため、未release
+のworking tree commitをpackage化することはありません。
+
+```bash
+git clone https://github.com/seekerkrt/moguet.git
+cd moguet
+makepkg -si
+```
+
+`makepkg -si`は、そのtag付きreleaseをbuildし、同じ操作で`pacman -U`によってlive
+systemへinstallします。これは、development treeをその場でbuild・確認するだけで
+何もinstallしない、上記の`make`や`./moguet --help`とは異なります。この`PKGBUILD`は
+repository同梱のpackaging経路であり、AUR submissionではありません。Moguetはまだ
+AUR pageを公開していません。
 
 <!-- parity:usage -->
 ## 基本的な使い方
