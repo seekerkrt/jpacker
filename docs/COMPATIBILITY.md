@@ -205,6 +205,62 @@ route projectionはcandidate表示順を保ったままrepository rootsとAUR ro
 
 ---
 
+## Local PKGBUILD root policy（#271、production未接続）
+
+この節は#271 Slice 1で採用したv2.1.0向けcontractを記録する。現在のproduction parser / helpにはまだ`--local`を接続せず、LocalSourceRoot、read-only metadata、dependency plan、source workspace、artifact / install execution、public surfaceが揃う後続sliceまで未実装として扱う。
+
+### CLI入口とoption境界
+
+正式入口は`moguet build --local <directory> [V=K...]`とする。既存の`build <pkg> [V=K...]`はremote repository / AUR package nameを解決する現行routeのまま維持し、pathらしい文字列を暗黙にlocal rootと推測しない。`--local`はpacman optionや全operation共通のsource selectorではなく、`build`だけが所有するoperation-local selectorとする。canonicalなhelp表記はoperation直後に置き、`-Bi`、`build-local`、`-S --local`等のaliasを追加しない。
+
+`<directory>`はexactly oneとし、absolute pathまたはinvocation開始時のcurrent directoryに対するrelative pathを受け付ける。`.`はcurrent directoryを表す。missing / multiple operand、`--`後のopaque operand、optionに見えるbare path、invalidな`V=K`、package targetとの併記はfilesystem accessより前に拒否する。dashで始まるdirectoryは`./-name`等のpathとして明示する。operandがmissing path、direct `PKGBUILD` file、その他のnon-directoryであることはdescriptor-firstのread-only root inspectionで分類し、AUR RPC、cache / state作成、external commandより前に拒否する。metadata snapshotが宣言するvalidかつuniqueな全`pkgname` childをfirst-seen orderで保持した集合がrequired root targetであり、duplicate child sectionはmetadata errorとして拒否する。初期routeは先頭child、PackageBase名、または全produced artifactをinstall targetとして推測しない。将来child subsetを扱う場合は別の明示契約とする。
+
+local routeで許可するのは既存`build`のPKGBUILD review、one-off `V=K`、build mode、`--noconfirm`のうち、この節の安全境界と同じ意味を保てるものだけとする。`V=K`はparserでvalidationしたfirst-seen orderのeffective environment snapshotとしてmetadata / plan確定前に固定する。assignmentが1件でもあれば既存`.SRCINFO`はそのenvironmentとの一致を証明できないため`KnownStale`として明示評価gateへ送り、同じsnapshotを`makepkg --printsrcinfo`、`makepkg --packagelist`、build-only makepkgへ同じ順序で渡す。inherited environmentまたは`V=K`が`PKGDEST`を定義する場合はempty valueでも既存source-build contractどおりall-target preflightで拒否し、fresh `PKGDEST`のownershipを利用者入力へ渡さない。`--noedit`はeditorを省略するだけでmetadata評価の許可にはしない。local rootにremote diffは存在しないためdiff optionはunsupportedとし、`--aur`、`--repo`、`--select`、pacman transaction option、`--rmdeps`、その他のunsupported optionはroot accessやexternal mutationより前に拒否する。`--rebuild` / `--cleanbuild`はinvocation-owned source workspaceだけへ作用し、local treeのartifact、`src/`、`pkg/`を削除する意味へ変えない。
+
+### LocalSourceRoot identityとfilesystem境界
+
+input pathはpathnameを先にcanonicalizeせず、invocation開始時のcurrent directoryをanchorにnofollow / directory-onlyでopenし、`fstat`でtype、owner / permission、device / inodeを検証してからretained descriptorに対応するcanonical display pathを導出する。これによりfinal symlink、non-directory、unsafe owner / permission、identity replacementを分類前にfollowしない。root directory、root直下の`PKGBUILD`、既存`.SRCINFO`はいずれもeffective user所有とし、`fstat`のPOSIX modeでgroup / other write bitが1つでもあればunsafeとして拒否する。root directoryのsticky bitを例外にせず、ACL固有の別authorityは追加しない。`PKGBUILD`と`.SRCINFO`はdescriptor相対で開いたregular non-symlink fileでなければならない。別pathのPKGBUILD、parent traversal、root外へのsymlink followを許可しない。
+
+LocalSourceRootは#217のRepository / AUR root candidateへvariantを足したものではなく、canonical directory、retained descriptor identity、PKGBUILD identity、metadata provenanceを持つ独立したtyped identityとする。Git repository、`.git`、remote URL、branchはidentity要件ではない。existing cache checkout用の`ValidatedCachePath`へcastせず、local rootで`git clone` / `fetch` / `pull` / `merge` / `reset` / `clean`、reclone、cache cleanupを実行しない。
+
+root directoryはtype / owner / permission / device / inode、PKGBUILDと採用metadataはそれらに加えてsize、high-resolution mtime、同じdescriptorから読んだcontent snapshotをprovenanceとして保持し、metadata read / evaluation前後、plan確定時、source workspaceへのsnapshot前、最初のexternal mutation前に再検証する。review editorによる利用者の明示変更は許容するが、変更前のmetadata / planを持ち越さず再分類する。identity mismatch、in-place content change、unsafe replacement、containment failureではnamed replacementをcleanupせずfail closedとする。
+
+fresh `PKGDEST`はartifact outputだけをisolateし、makepkgがcurrent source treeへ作る`src/` / `pkg/`等を隔離しない。したがって既存artifact workspaceだけをlocal rootへ接続しない。buildはlocal source entriesを検証しながら一つのinvocation-owned source snapshotへmaterializeし、観測したentry changeや混在generationではpartial snapshotを公開せず停止する。そのsnapshotだけでbuildを行い、成功、build failure、artifact validation failure、install failureのいずれでもuser-owned local source treeをMoguetがreset、clean、overwrite、deleteしないことをproduction接続の前提とする。
+
+### `.SRCINFO` stateとmetadata authority
+
+root直下に既存`.SRCINFO`があればdescriptor相対でread-onlyに開き、次のtyped stateへ分類する。
+
+- `Missing`: root directoryで`.SRCINFO`が`ENOENT`である場合だけ。permission / I/O failureをmissingへ丸めない。
+- `Unsafe`: symlink、non-regular file、root外参照、effective-user以外のowner、group / other writable mode、read中のidentity replacement、permission / I/O failure。PKGBUILD評価へfallbackせずhard failureとする。
+- `Invalid`: safeなregular fileとして読めたが、grammar、required field、identifier、section scope、duplicate / conflicting identity、constraint等をtyped metadataへ変換できない。
+- `UsableUnverified`: typed metadataとしてvalidで採用可能だが、PKGBUILDとのsemantic freshnessを証明していないsnapshot。
+- `KnownStale`: retained `PKGBUILD`のmtimeが`.SRCINFO`より新しい、review後にPKGBUILD identityが変わった、one-off effective environmentが指定された、または明示評価したmetadataとsemantic identity / fieldが一致しないsnapshot。
+
+mtimeはknown-staleを示す一方向のsignalにだけ使う。`.SRCINFO`のmtimeが同じまたは新しいことをfreshの証明にせず、Git historyも必須authorityにしない。`UsableUnverified`を利用者向け表示でfresh / verifiedと称さない一方、local treeのownerが提供したplanning metadata snapshotとしてprovenance付きで採用できる。
+
+accepted metadataは少なくともPackageBase、ordered `pkgname` children、epoch / pkgver / pkgrel、architecture、depends / makedepends / checkdepends / optdepends、provides、conflicts、replacesと各version constraint / child scope / architecture qualifierを失わず保持する。`depends_x86_64`等のqualified fieldをunqualified fieldへflattenせず、Slice 3で同じeffective architecture snapshotへprojectするまでtyped qualifierを保持する。同一childの重複sectionや矛盾するidentityはinvalidとし、required root targetはvalid child identityをfirst-seen orderで一度だけ保持する。AUR RPC用`AurPackageInfo`へ詰め替えず、local metadata provenanceを保持する。
+
+### PKGBUILD評価とread-only境界
+
+`Missing` / `Invalid` / `KnownStale`をempty dependencyや正常metadataとして続行しない。mutation可能な`build --local`だけが、source rootとreasonを表示し、PKGBUILD reviewを終えた後、defaultを持たない明示確認を得てから、表示した`makepkg --printsrcinfo`をnormal userで実行できる。stdoutをinvocation-owned metadataとしてparseし、user-owned `.SRCINFO`を作成、truncate、rewriteしない。evaluation failure、invalid output、root / PKGBUILD identity changeはtyped local metadata failureとし、部分metadataからplanを公開しない。
+
+`--noedit`はeditor skip、`--noconfirm`は対応済みprompt suppressionであり、どちらもPKGBUILD評価のapproval tokenではない。non-TTY stdin、`--noconfirm`、empty input、cancel、EOFではevaluationを開始せずnon-zeroで停止する。`Unsafe`は対話確認でもoverrideできない。validな`UsableUnverified`は暗黙評価せず採用できるが、reviewでPKGBUILDが変化して`KnownStale`になれば同じevaluation gateへ戻る。
+
+Slice 3で作る`deps` / `plan`相当のread-only local observationは、PKGBUILDがshell codeであることを踏まえ、`makepkg --printsrcinfo`を含むPKGBUILD評価、editor、Git、cache / workspace作成、pacman / sudoを開始しない。`UsableUnverified` metadataだけをprovenance付きで観測し、missing / unsafe / invalid / known-staleではmetadata unavailable / incompleteを区別してnon-zeroとする。read-onlyという名前でPKGBUILD code executionを暗黙に許可しない。
+
+### dependency plan、AUR RPC、artifact lifecycle境界
+
+local root directory、`PKGBUILD` path、PackageBase、root child nameをAUR root packageとしてqueryしない。同名AUR packageが存在してもlocal rootを置換せず、local metadata missing / invalid / stale / evaluation failureをAUR not-found、RPC failure、empty dependencyへfallbackしない。local PackageBase、children、providesと各version constraintをdependency resolution前にlocal identityとして保持し、remote candidate queryより前にSlice 3のtyped projectionへ渡す。same-PackageBaseのchild / provides candidateもconstraint適合の判定前にsatisfiedへflattenせず、self-returnを含むback-edge情報を失わない。internal satisfied edgeと真のcycleの分類は、effective architecture、version / provides constraint、required child集合を確定するSlice 3が所有する。
+
+local metadataから得た未解決dependencyだけを既存policyへprojectする。official exact、AUR exact、official / AUR provider、version constraint、unresolved、cycleの分類を維持し、ambiguous providerは#272の`ProviderSelectionSession` / callbackへ渡す。selected AUR providerのPackageBaseはdependency build unit、selected repository providerはexact `repository/package` dependency transactionとする。provider選択のcancel、non-TTY、`--noconfirm`、constraint conflictはlocal root metadata failureと混ぜず、既存typed reasonのままmutation前に停止する。
+
+artifact phaseでは#268のPackageBase build unit、ordered required-child selection、expected / actual artifact identity、freshness、containment、selected / unselected区分を再利用する。local metadataに宣言されたroot childrenだけをExplicit、dependency planが要求するchildrenをDependencyとしてtyped install planへ渡し、existing ExplicitをDependencyへ降格しない。unexpected sibling / debug artifactはunselectedとし、missing / duplicate / unknown identity、mixed reasonを推測で解決しない。
+
+この初期scopeにparser / LocalSourceRoot / `.SRCINFO` parserの実装、local metadataのBuildPlan projection、source materialization / build workspace、artifact / install execution、help / man / completion / gettextの公開接続を含めない。これらを#271 Slice 2からSlice 5で順に揃え、user-owned treeを変更し得るpartial routeをproductionへ追加しない。#350のpublic CLI横断監査、#352のunified dry-run、#355のcommon source identity、#360のv3 workspace一般化もこのsliceへ取り込まない。
+
+---
+
 ## plan official repository package size metadata policy
 
 `moguet plan <pkg>` は、AUR build graph の既存表示に続く Moguet-owned presentation として、official repository dependency の package size metadata を表示する。この metadata は `BuildPlan` の graph safety や実行可否を構成せず、`BuildPlan::order` に並ぶ AUR build unit の size も推定しない。
