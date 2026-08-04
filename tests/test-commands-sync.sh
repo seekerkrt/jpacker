@@ -3,6 +3,7 @@ set -eu
 
 test_binary=$1
 repo_root=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
+pty_runner=$repo_root/tests/run-with-pty.py
 MOGUET_TEST_REPOSITORY_ROOT=$repo_root
 export MOGUET_TEST_REPOSITORY_ROOT
 . "$repo_root/tests/test-command-safety.sh"
@@ -48,6 +49,7 @@ setup_case() {
     export MOGUET_TEST_MAKEPKG_EXIT_CODE=0
 
     unset MOGUET_TEST_MAKEPKG_PACKAGELIST_EXIT_CODE
+    unset MOGUET_TEST_MAKEPKG_ARTIFACT_IDENTITIES
     unset MOGUET_TEST_PACKAGE_METADATA_PACMAN_CONF_EXIT_CODE
     unset MOGUET_TEST_PACKAGE_METADATA_PACMAN_CONF_FAILURE_AT
     unset MOGUET_TEST_PACKAGE_METADATA_STATE_FILE
@@ -96,6 +98,27 @@ run_status() {
     fi
 }
 
+run_status_pty() {
+    expected_status=$1
+    input=$2
+    shift 2
+    : > "$command_log"
+    : > "$output_file"
+
+    actual_status=0
+    (cd "$case_dir/work" &&
+        printf '%b' "$input" |
+            python3 "$pty_runner" -- "$test_binary" "$@") \
+        > "$output_file" 2>&1 || actual_status=$?
+    if [ "$actual_status" -ne "$expected_status" ]; then
+        echo "unexpected PTY status for case $case_name: $actual_status (expected $expected_status)" >&2
+        echo "command: $*" >&2
+        sed -n '1,260p' "$output_file" >&2
+        cat "$command_log" >&2
+        exit 1
+    fi
+}
+
 assert_contains() {
     expected=$1
     file=$2
@@ -112,6 +135,18 @@ assert_not_contains() {
     if grep -F -- "$unexpected" "$file" >/dev/null; then
         echo "unexpected text in case $case_name: $unexpected" >&2
         sed -n '1,260p' "$file" >&2
+        exit 1
+    fi
+}
+
+assert_output_count() {
+    expected_count=$1
+    expected=$2
+    actual_count=$(grep -Fc -- "$expected" "$output_file" || true)
+    if [ "$actual_count" -ne "$expected_count" ]; then
+        echo "unexpected output count in case $case_name: $expected" >&2
+        echo "actual: $actual_count, expected: $expected_count" >&2
+        sed -n '1,260p' "$output_file" >&2
         exit 1
     fi
 }
@@ -309,6 +344,14 @@ assert_no_mutation_events() {
     if grep -E '^(sudo pacman -S|git clone |makepkg )' "$command_log" >/dev/null; then
         echo "mutation event occurred before validation/plan barrier in case $case_name" >&2
         cat "$command_log" >&2
+        exit 1
+    fi
+}
+
+assert_state_log_absent() {
+    state_path=$XDG_STATE_HOME/moguet
+    if [ -e "$state_path" ] || [ -L "$state_path" ]; then
+        echo "state log path was created before the selection preflight completed in case $case_name: $state_path" >&2
         exit 1
     fi
 }
@@ -795,5 +838,171 @@ assert_event "makepkg -sc --noconfirm"
 assert_event_pattern '^pacman -U --print --print-format .* -- .*/source-a-1\.0-1-x86_64\.pkg\.tar\.zst$'
 assert_event_pattern '^sudo pacman -U --noconfirm -- .*/source-a-1\.0-1-x86_64\.pkg\.tar\.zst$'
 assert_event_absent "sudo pacman -Syu --noconfirm source-a"
+
+# P0-8/P0-9: Issue #217 production root search/selection route and phase barrier.
+setup_case select-nontty-gate-before-query
+run_status 1 -S --select select-scope
+assert_contains "Interactive package selection requires a TTY on standard input." "$output_file"
+assert_event_prefix_absent '^root search '
+assert_command_log_empty
+assert_state_log_absent
+
+setup_case select-noconfirm-gate-before-query
+run_status 1 --noconfirm -S --select select-scope
+assert_contains "Interactive package selection is not available with --noconfirm." "$output_file"
+assert_event_prefix_absent '^root search '
+assert_command_log_empty
+assert_state_log_absent
+
+setup_case select-no-candidates-without-prompt
+run_status_pty 1 '' -S --select select-empty
+assert_event_at 1 "root search all select-empty"
+assert_contains "No package candidates were found." "$output_file"
+assert_not_contains "Package candidates:" "$output_file"
+assert_not_contains "Select package numbers" "$output_file"
+assert_event_prefix_absent '^(sudo|pacman|pacman-conf|git|makepkg|aur) '
+assert_state_log_absent
+
+setup_case select-typed-search-failure-without-prompt
+run_status_pty 1 '' -S --select select-search-failure
+assert_event_at 1 "root search all select-search-failure"
+assert_contains "AUR package search failed: fixture selected root search failure" "$output_file"
+assert_not_contains "Package candidates:" "$output_file"
+assert_not_contains "Select package numbers" "$output_file"
+assert_event_prefix_absent '^(sudo|pacman|pacman-conf|git|makepkg|aur) '
+assert_state_log_absent
+
+setup_case select-typed-repository-search-failure-without-prompt
+run_status_pty 1 '' -S --select --repo select-repository-search-failure
+assert_event_at 1 "root search repository select-repository-search-failure"
+assert_contains "Repository package search failed: fixture selected repository search failure" "$output_file"
+assert_not_contains "Package candidates:" "$output_file"
+assert_not_contains "Select package numbers" "$output_file"
+assert_event_prefix_absent '^(sudo|pacman|pacman-conf|git|makepkg|aur) '
+assert_state_log_absent
+
+setup_case select-presentation-invalid-retry-cancel
+run_status_pty 1 '0\nq\n' -S --select select-presentation
+assert_event_at 1 "root search all select-presentation"
+assert_event_count 1 "root search all select-presentation"
+assert_contains "Package candidates:" "$output_file"
+assert_contains "1) source=repository repository=aur package=repo-presented version=3.0-1 groups=@desktop" "$output_file"
+assert_contains "    repository presentation fixture" "$output_file"
+assert_contains "2) source=AUR package=aur-presented PackageBase=aur-presented version=4.0-1" "$output_file"
+assert_contains "    AUR presentation fixture" "$output_file"
+assert_contains "Package selection index is outside the displayed range 1-2." "$output_file"
+assert_output_count 2 "Select package numbers, ascending ranges, or displayed @group; press Enter or enter q/quit/cancel to cancel:"
+assert_contains "Package selection was cancelled." "$output_file"
+assert_event_prefix_absent '^(sudo|pacman|pacman-conf|git|makepkg|aur) '
+assert_state_log_absent
+
+setup_case select-repository-scope
+run_status_pty 1 'q\n' -S --select --repo select-scope
+assert_event_at 1 "root search repository select-scope"
+assert_contains "source=repository repository=core package=scope-repo" "$output_file"
+assert_not_contains "source=AUR package=scope-aur" "$output_file"
+assert_contains "Package selection was cancelled." "$output_file"
+assert_event_prefix_absent '^(sudo|pacman|pacman-conf|git|makepkg|aur) '
+assert_state_log_absent
+
+setup_case select-aur-scope
+run_status_pty 1 'q\n' -S --select --aur select-scope
+assert_event_at 1 "root search aur select-scope"
+assert_not_contains "source=repository repository=core package=scope-repo" "$output_file"
+assert_contains "source=AUR package=scope-aur PackageBase=scope-aur" "$output_file"
+assert_contains "Package selection was cancelled." "$output_file"
+assert_event_prefix_absent '^(sudo|pacman|pacman-conf|git|makepkg|aur) '
+assert_state_log_absent
+
+setup_case select-repository-range-needed-one-transaction
+run_status_pty 0 '1-2\n' -S --select --repo --needed select-repository
+repository_range_transaction='sudo pacman -S --needed -- core/repo-one extra/repo-two'
+assert_event_at 1 "root search repository select-repository"
+assert_event_at 2 "$repository_range_transaction"
+assert_event_count 1 "$repository_range_transaction"
+assert_event_pattern_count 1 '^sudo pacman -S '
+assert_event_prefix_absent '^(pacman|pacman-conf|git|makepkg|aur) '
+
+setup_case select-repository-group-one-transaction
+run_status_pty 0 '@repo-group\n' -S --select --repo select-repository
+repository_group_transaction='sudo pacman -S -- core/repo-one extra/repo-two'
+assert_event_at 1 "root search repository select-repository"
+assert_event_at 2 "$repository_group_transaction"
+assert_event_count 1 "$repository_group_transaction"
+assert_event_pattern_count 1 '^sudo pacman -S '
+assert_event_prefix_absent '^(pacman|pacman-conf|git|makepkg|aur) '
+
+setup_case select-mixed-repository-before-aur
+run_status_pty 0 '1 2\n' --noedit --nodiff -S --select --needed select-mixed
+mixed_repository_transaction='sudo pacman -S --needed -- extra/mixed-repo'
+assert_event "root search all select-mixed"
+assert_event "$mixed_repository_transaction"
+assert_event_count 1 "$mixed_repository_transaction"
+assert_event_before "$mixed_repository_transaction" "git clone https://aur.archlinux.org/mixed-aur.git mixed-aur"
+assert_event_count 1 "git clone https://aur.archlinux.org/mixed-aur.git mixed-aur"
+assert_event_count 1 "makepkg --packagelist"
+assert_event_count 1 "makepkg -sc"
+assert_event_pattern_count 1 '^sudo pacman -U --needed -- .*/mixed-aur-1\.0-1-x86_64\.pkg\.tar\.zst$'
+assert_event_absent "sudo pacman -S --needed -- extra/mixed-repo mixed-aur"
+assert_cache_entry_present mixed-aur
+
+setup_case select-repository-failure-stops-aur-and-cache
+export MOGUET_TEST_SUDO_MAIN_STATUS=42
+run_status_pty 42 '1 2\n' --noedit --nodiff -S --select select-mixed
+failed_selected_repository_transaction='sudo pacman -S -- extra/mixed-repo'
+assert_event "$failed_selected_repository_transaction"
+assert_event_count 1 "$failed_selected_repository_transaction"
+assert_event_count 1 "pacman-conf --verbose RootDir DBPath"
+assert_event_before "pacman-conf --verbose RootDir DBPath" "$failed_selected_repository_transaction"
+assert_event_prefix_absent '^(git|makepkg) '
+assert_event_pattern_count 0 '^sudo pacman -U '
+assert_contains "The selected repository package transaction failed; selected AUR packages were not executed." "$output_file"
+assert_cache_entry_absent mixed-aur
+
+setup_case select-aur-failure-keeps-completed-repository-transaction
+export MOGUET_TEST_MAKEPKG_EXIT_CODE=47
+export MOGUET_TEST_MAKEPKG_PACKAGELIST_EXIT_CODE=0
+run_status_pty 1 '1 2\n' --noedit --nodiff -S --select select-mixed
+completed_selected_repository_transaction='sudo pacman -S -- extra/mixed-repo'
+assert_event_count 1 "$completed_selected_repository_transaction"
+assert_event_before "pacman-conf --verbose RootDir DBPath" "$completed_selected_repository_transaction"
+assert_event_before "$completed_selected_repository_transaction" "makepkg -sc"
+assert_event_count 1 "makepkg -sc"
+assert_event_pattern_count 1 '^sudo pacman -S '
+assert_event_pattern_count 0 '^sudo pacman -U '
+assert_event_prefix_absent '^sudo pacman -R'
+assert_contains "The repository package transaction completed before the AUR route failed; it was not rolled back." "$output_file"
+assert_cache_entry_present mixed-aur
+
+setup_case select-package-base-mismatch-before-mutation
+run_status_pty 1 '1\n' --noedit --nodiff -S --select --aur select-package-base-mismatch
+assert_event_at 1 "root search aur select-package-base-mismatch"
+assert_contains "The PackageBase for selected AUR package mismatch-child changed from selected-base to resolved-base; rerun package selection." "$output_file"
+assert_event_prefix_absent '^(sudo|pacman|pacman-conf|git|makepkg) '
+assert_cache_entry_absent selected-base
+assert_cache_entry_absent resolved-base
+assert_state_log_absent
+
+setup_case select-same-package-base-aggregates-one-build
+MOGUET_TEST_MAKEPKG_ARTIFACT_IDENTITIES='split-suite|split-one|1.0-1
+split-suite|split-two|1.0-1'
+export MOGUET_TEST_MAKEPKG_ARTIFACT_IDENTITIES
+run_status_pty 0 '1 2\n' --noedit --nodiff -S --select --aur select-same-base
+assert_event "root search aur select-same-base"
+assert_event_count 1 "git clone https://aur.archlinux.org/split-suite.git split-suite"
+assert_event_count 1 "makepkg --packagelist"
+assert_event_count 1 "makepkg -sc"
+assert_event_pattern_count 1 '^sudo pacman -U -- .*/split-one-1\.0-1-x86_64\.pkg\.tar\.zst .*/split-two-1\.0-1-x86_64\.pkg\.tar\.zst$'
+assert_cache_entry_present split-suite
+assert_cache_entry_absent split-one
+assert_cache_entry_absent split-two
+
+setup_case select-repository-only-rejects-source-override
+run_status_pty 1 '1\n' --noedit -S --select --repo select-repository
+assert_event_at 1 "root search repository select-repository"
+assert_contains "Source-build review and build-mode options require at least one selected AUR package." "$output_file"
+assert_event_prefix_absent '^(sudo|pacman|pacman-conf|git|makepkg|aur) '
+assert_cache_entry_absent repo-one
+assert_state_log_absent
 
 echo "sync command characterization tests: all checks passed"

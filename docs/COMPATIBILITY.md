@@ -153,9 +153,9 @@ build / install / fetch 実行系では、選択されていないambiguous prov
 
 ---
 
-## 対話的root package discovery policy（#217、production未接続）
+## 対話的root package discovery policy（#217）
 
-この節は#217 Slice 1で採用したv2.1.0向けcontractを記録する。現在のproduction parser / helpにはまだ`--select`を接続せず、pure model、typed search adapter、interaction / routing、public surfaceが揃う後続sliceまで未実装として扱う。
+この節は#217で採用し、production parser、typed search adapter、interaction / routing、public surfaceへ接続したv2.1.0向けcontractを記録する。
 
 ### CLI入口とoption境界
 

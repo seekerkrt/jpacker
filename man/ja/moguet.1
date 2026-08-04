@@ -13,6 +13,10 @@ moguet \- 検証済みsource buildを備えたpacman-first AUR helper
 .RI [ targets... ]
 .
 .B moguet
+.B -S --select
+.I query
+.
+.B moguet
 .BR -h | --help
 .
 .B moguet
@@ -196,6 +200,10 @@ Auto routingはofficial repositoryを優先し、適用可能なsource preferenc
 は対応target routeをrepository fallbackなしのAURへ固定し、
 .B --repo
 はAUR / source-build fallbackなしのofficial binary repositoryへ固定します。
+.B --select
+を指定すると、1つのoperandをexact package targetではなく検索queryとして扱い、
+source-awareなofficial repository / AUR candidateを表示して、interactiveな明示選択を
+要求します。
 .
 .TP
 .B "-Syu"
@@ -275,8 +283,23 @@ user modificationの破棄やdestructive Git operationを許可しません。
 使ってMoguetのpromptによる停止を避けます。
 provider selectionにはdefaultがありません。このoptionではstdinを読まず、promptや
 provider選択を行わず、未解決のambiguityをfail-closedで停止します。
+root package discoveryもcandidate queryより前に停止し、packageを自動選択しません。
 「すべてyes」ではなく、unresolved / ambiguous dependency、cycle、source selection、
 conflicts / replaces、artifact identity、ownership等のsafety guardを突破しません。
+.
+.TP
+.B "--select"
+plain
+.B -S
+で、exactly oneのoperandをsource-awareなpackage検索queryとして扱い、install前に明示選択を
+要求します。Auto modeはofficial repositoryとAURを検索し、
+.B --aur
+または
+.B --repo
+でcandidate sourceを限定します。interactive TTYでは番号、複数番号、inclusive range、
+表示済みofficial groupのselectorを受理します。両selected routeで共有するpacman optionは
+.B --needed
+だけです。
 .
 .TP
 .B "--needed"
@@ -521,6 +544,21 @@ providerはexactな
 dependencyとして導入します。
 .
 .PP
+.B -S --select
+によるroot package discoveryも、candidateが1件でもdefaultを持ちません。interactive TTYでは
+1件または複数のpackage番号、inclusive range、表示済みofficial groupの
+.B @group
+selectorを受理します。empty input、q、quit、cancel、EOFは取消とし、invalid inputは同じ
+candidate snapshotに対して再入力します。non-TTY stdinと
+.B --noconfirm
+ではcandidate queryやpromptより前に停止します。全selected rootのstatic preflight完了後、
+exactな
+.I repository/package
+targetを1つのrepository transactionとして先に実行し、成功した場合だけselected AUR rootを
+既存source-build lifecycleへ渡します。後続AUR failureは完了済みrepository transactionを
+rollbackしません。
+.
+.PP
 registered source phaseは、candidateがすべてofficial repository由来の場合だけprovider
 selectionを行います。AUR providerを含むcandidate setは、そのproviderのPackageBaseを
 singular source lifecycleでscheduleできないため、ambiguousのままsystem / source
@@ -550,6 +588,12 @@ install成功後のcleanup failureはpartial successであり、盲目的に再�
 .\" parity:examples
 .SH 例
 .na
+.TP
+source-awareなinstall targetを検索して明示選択する:
+.RS
+.B moguet -S --select fastfetch
+.RE
+.
 .TP
 repository fallbackなしでAUR packageをinstallする:
 .RS

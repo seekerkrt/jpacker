@@ -76,6 +76,16 @@ helperと同等の自動解決能力・完成度を約束しません。unsuppor
   `quit`、`cancel`、EOFは選択を取り消し、invalid / out-of-range inputは再入力します。
 - non-TTYと`--noconfirm`ではprovider inputをstdinから読まず、candidateを自動選択しません。
   未選択のambiguous providerはfail-closedで停止します。
+- `moguet -S --select <query>`はofficial repositoryとAURからsource-awareなroot
+  package candidateを検索します。interactive TTYではpackage番号、複数番号、inclusive range、
+  表示済みofficial groupの`@group` selectorを受理します。candidateが1件でもdefaultは
+  ありません。empty input、`q`、`quit`、`cancel`、EOFは取消とし、invalid inputは同じ
+  candidate一覧に対して再入力します。
+- root package discoveryはnon-TTY stdinまたは`--noconfirm`ではcandidate queryもpromptも
+  開始しません。selectionとstatic preflightの完了後、selected repository rootをexactな
+  `repository/package`の1 transactionとして先に実行し、成功した場合だけselected AUR
+  rootを既存source-build lifecycleへ渡します。後続AUR failureは完了済みrepository
+  transactionをrollbackしません。
 - provider choiceは現在のinvocation内だけで所有します。`deps` / `plan`はselectedと
   ambiguous providerを区別し、selected AUR providerのPackageBaseはfetch / build planへ
   渡し、selected repository providerはofficial `repository/package` dependencyとして
@@ -180,6 +190,7 @@ tokenとoption tokenはlocaleによって変わりません。
 ```bash
 # packageのinstall、search、info表示
 moguet -S <pkg>
+moguet -S --select <query>
 moguet -Ss <query>
 moguet -Si <pkg>
 
@@ -214,6 +225,11 @@ packageのsource build、またはそれらを組み合わせたMoguet固有のm
 repositoryへ限定します。両selectorの併用はexternal commandやAUR queryより前に
 失敗します。pacman-only routeではcompatibleなpacman optionを保持し、source-build
 routeで意味を維持できないoptionは黙って無視せず拒否します。
+
+`-S --select <query>`はinteractiveなsource-aware discovery形式です。source selectorを
+指定しなければofficial repositoryとAURの両方を検索し、`--aur`または`--repo`でcandidate
+sourceを限定します。両selected routeで同じ意味を持つoptionは`--needed`だけです。
+non-TTYと`--noconfirm`ではqueryやpackage選択を行わず失敗します。
 
 source-build preferenceは`add-src`、`edit-src`、`list-src`、`del-src`、`revert`で
 管理します。一時的な`build <pkg> [V=K]`はpreferenceを保存しません。runtime stateを

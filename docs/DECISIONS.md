@@ -183,7 +183,7 @@ interactive stdinでだけ、番号、複数番号、inclusive range、および
 
 selectionと全selected rootのstatic preflightが完了するまで、pacman、sudo、clone、build、install等のexternal mutationを開始しない。selected repository rootはexactな`repository/package`のbinary route、selected AUR rootはPackageBase identityを保持したAUR routeへ明示的にprojectし、Auto routingへpackage名だけを戻してsourceを再推定しない。transactionは引き続きpacman、source buildはmakepkgが所有し、cross-source atomic transactionやrollbackを新設しない。
 
-このdecisionは#217のproduction contractを固定するが、現在のCLIへ`--select`を実装済みとするものではない。pure model、typed adapter、interaction / routing、help / man / completion / localizationを後続sliceで揃え、不完全なproduction入口を有効化しない。
+このdecisionは#217のproduction contractを固定する。#217 Slice 5でpure model、typed adapter、interaction / routing、help / man / completion / localizationを揃え、production CLIの`--select`入口へ接続した。
 
 ---
 
@@ -366,4 +366,4 @@ Only interactive stdin accepts package numbers, multiple numbers, inclusive rang
 
 Pacman, sudo, clone, build, install, and other external mutation do not begin until selection and static preflight for every selected root complete. A selected repository root is projected explicitly to the exact `repository/package` binary route, while a selected AUR root is projected to the AUR route with its PackageBase identity intact. Moguet does not return package names to Auto routing and infer the source again. Pacman continues to own transactions and makepkg continues to own source builds; this decision adds no cross-source atomic transaction or rollback.
 
-This decision fixes the production contract for #217 but does not claim that `--select` is implemented in the current CLI. Later slices must complete the pure model, typed adapters, interaction/routing, help, man pages, completion, and localization before enabling the production entry point.
+This decision fixes the production contract for #217. Slice 5 of #217 completed the pure model, typed adapters, interaction/routing, help, man pages, completion, and localization, and connected the `--select` entry point to the production CLI.

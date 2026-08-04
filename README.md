@@ -89,6 +89,18 @@ detailed plan.
   choice, while invalid or out-of-range input retries.
 - Non-TTY use and `--noconfirm` do not read provider input from stdin or
   auto-select a candidate. Unselected ambiguity fails closed.
+- `moguet -S --select <query>` discovers source-aware root package candidates
+  from official repositories and AUR. An interactive TTY accepts package
+  numbers, multiple numbers, inclusive ranges, and an `@group` selector for a
+  displayed official group; there is no default, even for one candidate.
+  Empty input, `q`, `quit`, `cancel`, or EOF cancels, and invalid input retries
+  against the same candidate list.
+- Root package discovery does not query candidates or prompt on non-TTY stdin
+  or with `--noconfirm`. After selection and static preflight finish, selected
+  repository roots run first in one exact `repository/package` transaction;
+  only its success allows selected AUR roots to enter the existing source-build
+  lifecycle. A later AUR failure does not roll back the completed repository
+  transaction.
 - Provider choices belong only to the current invocation. `deps` and `plan`
   distinguish selected and ambiguous providers; a selected AUR provider's
   PackageBase flows into fetch/build planning, while a selected repository
@@ -203,6 +215,7 @@ surface. Command and option tokens never change with the selected locale.
 ```bash
 # Install, search, or inspect packages
 moguet -S <pkg>
+moguet -S --select <query>
 moguet -Ss <query>
 moguet -Si <pkg>
 
@@ -239,6 +252,12 @@ limits them to official binary repositories. Combining the selectors is an
 error before an external command or AUR query. Pacman-only routes preserve
 compatible pacman options; a source-build route rejects options whose meaning
 cannot be preserved instead of silently ignoring them.
+
+`-S --select <query>` is the interactive source-aware discovery form. Without
+a source selector it searches both official repositories and AUR; `--aur` or
+`--repo` limits the candidate source. Only `--needed` has a shared meaning on
+both selected routes. Non-TTY use and `--noconfirm` fail without querying or
+choosing a package.
 
 Source-build preferences are managed with `add-src`, `edit-src`, `list-src`,
 `del-src`, and `revert`. A one-off `build <pkg> [V=K]` does not save a

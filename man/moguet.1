@@ -11,6 +11,10 @@ moguet \- pacman-first AUR helper with verified source builds
 .RI [ targets... ]
 .
 .B moguet
+.B -S --select
+.I query
+.
+.B moguet
 .BR -h | --help
 .
 .B moguet
@@ -201,6 +205,11 @@ preference, and otherwise considers AUR.
 forces the supported target route to AUR without repository fallback;
 .B --repo
 forces official binary repositories without AUR or source-build fallback.
+With
+.BR --select ,
+the single operand is a search query rather than an exact package target;
+Moguet displays source-aware official-repository and AUR candidates and
+requires an explicit interactive selection.
 .
 .TP
 .B "-Syu"
@@ -280,9 +289,26 @@ Pass non-confirmation behavior to supported pacman and makepkg execution and
 avoid Moguet prompts by using their defined defaults.
 Provider selection has no default: this option does not read stdin, prompt, or
 select a provider, and unresolved ambiguity fails closed.
+Root package discovery also stops before its candidate query and never chooses
+a package automatically.
 This is not \(dqyes to everything\(dq and does not bypass unresolved or
 ambiguous dependencies, cycles, source selection, conflicts/replacements,
 artifact identity, ownership, or other safety guards.
+.
+.TP
+.B "--select"
+With plain
+.BR -S ,
+treat exactly one operand as a source-aware package search query and require an
+explicit selection before installation. Auto mode searches official
+repositories and AUR;
+.B --aur
+or
+.B --repo
+limits the candidate source. Number, multiple-number, inclusive-range, and
+displayed-official-group selectors are supported on an interactive TTY. Only
+.B --needed
+is a shared pacman option for both selected routes.
 .
 .TP
 .B "--needed"
@@ -533,6 +559,23 @@ build planning; a selected official provider is introduced as an exact
 dependency.
 .
 .PP
+Root package discovery through
+.B -S --select
+also has no default, even for one candidate. An interactive TTY accepts one or
+more package numbers, inclusive ranges, and an
+.B @group
+selector for a displayed official group. Empty input, q, quit, cancel, or EOF
+cancels; invalid input retries against the same candidate snapshot. Non-TTY
+stdin and
+.B --noconfirm
+stop before candidate queries or prompts. After every selected root completes
+static preflight, exact
+.I repository/package
+targets run first in one repository transaction; only its success allows the
+selected AUR roots to enter the existing source-build lifecycle. A later AUR
+failure does not roll back the completed repository transaction.
+.
+.PP
 The registered-source phase offers provider selection only when every
 candidate is from an official repository. A candidate set containing an AUR
 provider remains ambiguous and fails closed before system or source execution,
@@ -565,6 +608,12 @@ be retried blindly.
 .
 .\" parity:examples
 .SH EXAMPLES
+.TP
+Discover and explicitly select source-aware install targets:
+.RS
+.B moguet -S --select fastfetch
+.RE
+.
 .TP
 Install an AUR package without repository fallback:
 .RS

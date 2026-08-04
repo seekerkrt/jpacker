@@ -343,6 +343,25 @@ int run_moguet(int argc, char* argv[]) {
         return 1;
     }
 
+    std::optional<PreparedRootPackageInstall>
+            prepared_root_package_install;
+    if(parsed.root_package_selection_requested) {
+        // POLICY(#217): `--select <bare-token>` is not an operation-omission
+        // form. Preserve the existing unknown/custom operation validation
+        // before applying the select-specific plain `-S` contract.
+        if(!validate_pre_log_operation_route(parsed)) return 1;
+        try {
+            RootPackageSelectionInvocation invocation =
+                    require_root_package_selection_invocation(parsed);
+            prepared_root_package_install = prepare_root_package_install(
+                    parsed, std::move(invocation), g_config);
+            if(!prepared_root_package_install.has_value()) return 1;
+        } catch(const std::exception& error) {
+            Logger::error(error.what());
+            return 1;
+        }
+    }
+
     if(parsed.operation ==
        cli_authority::operation_spec(
                cli_authority::OperationId::UpgradeAur)
@@ -439,6 +458,12 @@ int run_moguet(int argc, char* argv[]) {
 
     const int operation_status = [&]() -> int {
         try {
+            if(prepared_root_package_install.has_value()) {
+                return execute_prepared_root_package_install(
+                        std::move(
+                                prepared_root_package_install.value()),
+                        g_config);
+            }
             if(operation ==
                cli_authority::operation_spec(
                        cli_authority::OperationId::Build)
@@ -768,6 +793,15 @@ void print_help() {
     print_help_entry(
             cli_authority::PACMAN_SYNC_INSTALL_SYNTAX,
             localization::translate_message("Install packages"));
+    print_help_entry(
+            cli_authority::PACMAN_SYNC_SELECT_SYNTAX,
+            localization::translate_message(
+                    "Interactively search for and select root packages to install"));
+    print_help_continuation(
+            localization::format_translated_message(
+                    // TRANSLATORS: The placeholder is the AUR project identity.
+                    "Require an interactive terminal; install selected repository roots first, then build selected {} roots only if that transaction succeeds",
+                    "AUR"));
     print_help_entry(
             cli_authority::PACMAN_SYSTEM_UPGRADE_SYNTAX,
             localization::translate_message("Upgrade the system"));

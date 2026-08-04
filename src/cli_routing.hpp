@@ -23,6 +23,13 @@ struct SourceSyncOptions {
     bool needed = false;
 };
 
+// `--select`のpre-query validationで確定したowned request。
+// queryはASCII whitespace trim済みで、pacman argvへは戻さない。
+struct RootPackageSelectionInvocation {
+    std::string query;
+    bool        needed = false;
+};
+
 std::optional<PkgbuildExportMode> pkgbuild_export_mode(const ParsedCliArguments& parsed);
 // Emptyならvalid。複数messageの順序はCLI presentation側でも維持する。
 std::vector<std::string> validate_pkgbuild_export_invocation(
@@ -39,4 +46,9 @@ std::optional<std::string> validate_source_selection_operation(
 bool pacman_operation_requests_refresh(
         const std::string& operation, const std::vector<std::string>& flags);
 std::optional<std::string> unsupported_source_sync_option(
+        const ParsedCliArguments& parsed);
+
+// `root_package_selection_requested`がtrueのinvocationだけを受ける。
+// invalid invocationはcandidate query前に表示できるdiagnosticで拒否する。
+RootPackageSelectionInvocation require_root_package_selection_invocation(
         const ParsedCliArguments& parsed);
