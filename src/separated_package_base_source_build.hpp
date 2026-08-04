@@ -66,6 +66,7 @@ class PackageBaseSourceBuildExecutionResult final {
     execute_separated_package_base_source_build(
             SeparatedPackageBaseSourceBuildRequest request,
             const SeparatedSourceBuildUnitOptions& options);
+    friend class LocalSourceInstallAccess;
 
 public:
     PackageBaseSourceBuildExecutionResult(

@@ -13,6 +13,38 @@
 #include <vector>
 
 struct AppConfig;
+class LocalBuildPlan;
+class LocalSourceBuildDependencyPreparation;
+struct PreparedProductionSourceBuildInvocation;
+
+PreparedProductionSourceBuildInvocation
+prepare_local_source_build_dependency_invocation(
+        LocalSourceBuildDependencyPreparation preparation,
+        const ValidatedCacheRoot& cache_root,
+        const AppConfig& config);
+
+// Empty remote invocationをgeneric callerが捏造して通さないためのauthority。
+// local rootを別ownerが保持するpreparationだけが生成できる。
+class LocalSourceBuildInvocationAuthority final {
+    LocalSourceBuildInvocationAuthority() noexcept = default;
+
+    friend PreparedProductionSourceBuildInvocation
+    prepare_local_source_build_dependency_invocation(
+            LocalSourceBuildDependencyPreparation preparation,
+            const ValidatedCacheRoot& cache_root,
+            const AppConfig& config);
+
+public:
+    LocalSourceBuildInvocationAuthority(
+            const LocalSourceBuildInvocationAuthority&) = default;
+    LocalSourceBuildInvocationAuthority(
+            LocalSourceBuildInvocationAuthority&&) noexcept = default;
+    LocalSourceBuildInvocationAuthority& operator=(
+            const LocalSourceBuildInvocationAuthority&) = default;
+    LocalSourceBuildInvocationAuthority& operator=(
+            LocalSourceBuildInvocationAuthority&&) noexcept = default;
+    ~LocalSourceBuildInvocationAuthority() = default;
+};
 
 enum class SourceBuildSourceKind {
     Repository,
@@ -55,6 +87,55 @@ struct PreparedProductionSourceBuildInvocation {
     std::vector<ProvidedDependency>             selected_repository_providers;
     PacmanDatabasePaths                        database_paths;
     std::optional<ValidatedCacheRoot>          cache_root;
+    std::optional<LocalSourceBuildInvocationAuthority>
+            local_source_authority = std::nullopt;
+};
+
+// LocalBuildPlanのlocal root unitをexecution consumerへ渡さず、remote AUR
+// dependency unitと全edge由来のselected repository providerだけを保持する。
+// Production callerはLocalBuildPlan projectionを経ずに生成できない。
+class LocalSourceBuildDependencyPreparation final {
+    std::vector<ProductionSourceBuildWorkItem> remote_work_items_;
+    std::vector<ProvidedDependency> selected_repository_providers_;
+
+    LocalSourceBuildDependencyPreparation(
+            std::vector<ProductionSourceBuildWorkItem> remote_work_items,
+            std::vector<ProvidedDependency> selected_repository_providers)
+            noexcept;
+
+    friend LocalSourceBuildDependencyPreparation
+    prepare_local_source_build_dependencies(
+            const LocalBuildPlan& plan,
+            bool use_source_build_preferences,
+            bool needed);
+    friend PreparedProductionSourceBuildInvocation
+    prepare_local_source_build_dependency_invocation(
+            LocalSourceBuildDependencyPreparation preparation,
+            const ValidatedCacheRoot& cache_root,
+            const AppConfig& config);
+
+public:
+    LocalSourceBuildDependencyPreparation(
+            const LocalSourceBuildDependencyPreparation&) = delete;
+    LocalSourceBuildDependencyPreparation(
+            LocalSourceBuildDependencyPreparation&&) noexcept = default;
+    LocalSourceBuildDependencyPreparation& operator=(
+            const LocalSourceBuildDependencyPreparation&) = delete;
+    LocalSourceBuildDependencyPreparation& operator=(
+            LocalSourceBuildDependencyPreparation&&) noexcept = default;
+    ~LocalSourceBuildDependencyPreparation() = default;
+
+    const std::vector<ProductionSourceBuildWorkItem>& remote_work_items()
+            const noexcept;
+    const std::vector<ProvidedDependency>& selected_repository_providers()
+            const noexcept;
+
+#ifdef MOGUET_ENABLE_TEST_OVERRIDES
+    static LocalSourceBuildDependencyPreparation
+    make_for_production_source_build_test(
+            std::vector<ProductionSourceBuildWorkItem> remote_work_items,
+            std::vector<ProvidedDependency> selected_repository_providers);
+#endif
 };
 
 enum class SelectedRepositoryProviderTransactionStatus {
@@ -136,8 +217,29 @@ std::vector<ProductionSourceBuildWorkItem> prepare_aur_source_build_work_items(
         bool use_source_build_preferences,
         bool needed);
 
+LocalSourceBuildDependencyPreparation
+prepare_local_source_build_dependencies(
+        const LocalBuildPlan& plan,
+        bool use_source_build_preferences,
+        bool needed);
+
 PreparedProductionSourceBuildInvocation prepare_production_source_build_invocation(
         std::vector<ProductionSourceBuildWorkItem> work_items,
+        const AppConfig& config);
+
+// Generic production preparationのnonempty契約は維持し、local root ownerが
+// 存在するこの境界だけremote AUR dependency 0件を許可する。
+PreparedProductionSourceBuildInvocation
+prepare_local_source_build_dependency_invocation(
+        LocalSourceBuildDependencyPreparation preparation,
+        const ValidatedCacheRoot& cache_root,
+        const AppConfig& config);
+PreparedProductionSourceBuildInvocation
+prepare_local_source_build_dependency_invocation(
+        const LocalBuildPlan& plan,
+        bool use_source_build_preferences,
+        bool needed,
+        const ValidatedCacheRoot& cache_root,
         const AppConfig& config);
 
 // Higher-level operationが先に確定したcache capabilityを、generic invocation

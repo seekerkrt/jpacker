@@ -862,11 +862,17 @@ SEPARATED_PACKAGE_BASE_SOURCE_BUILD_FORBIDDEN_TEST_SRCS := \
 	$(filter-out \
 		$(SEPARATED_PACKAGE_BASE_SOURCE_BUILD_ALLOWED_PRODUCTION_TEST_SRCS), \
 		$(SRCS))
+# POLICY(#271): actual LocalBuildPlanからproduction dependency preparationへ
+# 接続するtestも同じbinaryで扱う。queryは既存local-dependency stubへ差し替え、
+# repository_query / AUR RPC本体は各専用targetで検証する。
 PRODUCTION_SOURCE_BUILD_TEST_SRCS := \
 	tests/production_source_build_test.cpp \
 	$(SRC_DIR)/app_config.cpp \
 	$(SRC_DIR)/provider_selection.cpp \
 	$(SRC_DIR)/source_install.cpp \
+	$(SRC_DIR)/local_source_build_dependency_preparation.cpp \
+	$(SRC_DIR)/local_dependency_plan_projection.cpp \
+	$(SRC_DIR)/local_package_metadata.cpp \
 	$(SRC_DIR)/cache_authority.cpp \
 	$(SRC_DIR)/source_install_preparation.cpp \
 	$(SRC_DIR)/source_build.cpp \
@@ -891,8 +897,7 @@ PRODUCTION_SOURCE_BUILD_TEST_SRCS := \
 	$(SRC_DIR)/dependency_plan_model.cpp \
 	$(SRC_DIR)/dependency_spec.cpp \
 	$(SRC_DIR)/package_identifier.cpp \
-	$(SRC_DIR)/repository_query.cpp \
-	$(SRC_DIR)/aur_rpc.cpp \
+	$(LOCAL_DEPENDENCY_PLAN_PROJECTION_REQUIRED_TEST_SUPPORT_SRCS) \
 	$(SRC_DIR)/shell_words.cpp \
 	$(SRC_DIR)/logging.cpp \
 	tests/stubs/package-metadata/alpm_stub.cpp \
@@ -1516,14 +1521,14 @@ $(SEPARATED_PACKAGE_BASE_SOURCE_BUILD_TEST_TARGET): $(SEPARATED_PACKAGE_BASE_SOU
 		$(SEPARATED_PACKAGE_BASE_SOURCE_BUILD_TEST_SRCS) \
 		-o $@
 
-$(PRODUCTION_SOURCE_BUILD_TEST_TARGET): $(PRODUCTION_SOURCE_BUILD_TEST_SRCS) $(HEADERS) tests/stubs/package-metadata/alpm_stub.hpp tests/stubs/artifact-install-executor/process_stub.hpp $(VERSION_FILE)
+$(PRODUCTION_SOURCE_BUILD_TEST_TARGET): $(PRODUCTION_SOURCE_BUILD_TEST_SRCS) $(HEADERS) tests/stubs/package-metadata/alpm_stub.hpp tests/stubs/artifact-install-executor/process_stub.hpp tests/stubs/local-dependency-plan/query_stub.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling production source-build fake-symbol test binary"
 	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
 		-DMOGUET_ENABLE_SEPARATED_SOURCE_BUILD_TEST_HOOKS \
 		-DMOGUET_ENABLE_SEPARATED_PACKAGE_BASE_SOURCE_BUILD_TEST_HOOKS \
 		-DMOGUET_ENABLE_TEST_OVERRIDES \
-		-I$(SRC_DIR) -Itests/stubs/package-metadata \
+		-I$(SRC_DIR) -Itests -Itests/stubs/package-metadata \
 		$(PRODUCTION_SOURCE_BUILD_TEST_SRCS) \
 		-o $@ $(MY_LDLIBS)
 

@@ -106,6 +106,18 @@ const std::vector<Event>& event_history() {
 void ValidatedCacheRoot::require_unchanged_identity() const {
 }
 
+std::uintmax_t ValidatedCacheRoot::device() const noexcept {
+    return 0;
+}
+
+std::uintmax_t ValidatedCacheRoot::inode() const noexcept {
+    return 0;
+}
+
+std::uintmax_t ValidatedCacheRoot::owner() const noexcept {
+    return 0;
+}
+
 StrictSourcePreferenceResult read_source_preference_strict(
         const std::string& package_name) {
     g_state.preference_reads.push_back(package_name);

@@ -2,7 +2,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Moguet 2.0.1\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-04 18:59+0900\n"
+"POT-Creation-Date: 2026-08-05 08:01+0900\n"
 "PO-Revision-Date: 2026-08-03 06:53+0900\n"
 "Last-Translator: Moguet contributors\n"
 "Language-Team: Japanese\n"
@@ -71,9 +71,12 @@ msgstr "インストール理由の指定が不明です。"
 
 #. TRANSLATORS: The first placeholder is the literal command
 #. "pacman -U"; the second is its numeric exit code.
+#. TRANSLATORS: The first placeholder is the literal makepkg
+#. option; the second is its exit code.
 #. TRANSLATORS: The first placeholder is the literal
 #. command "pacman -U"; the second is its exit code.
 #: src/artifact_install_executor.cpp:181
+#: src/local_source_metadata_evaluation.cpp:118
 #: src/package_base_artifact_install_executor.cpp:750
 #: src/package_metadata.cpp:816
 #, c++-format
@@ -821,10 +824,12 @@ msgid "{} {} response validation failed for {}: duplicate response {} {}"
 msgstr "{} {} の {} に対する応答を検証できませんでした: 応答の {} {} が重複しています"
 
 #: src/aur_update_cli_presentation.cpp:24
+#: src/commands_source_maintenance.cpp:545
 msgid "explicit"
 msgstr "明示指定"
 
 #: src/aur_update_cli_presentation.cpp:26
+#: src/commands_source_maintenance.cpp:546
 msgid "dependency"
 msgstr "依存パッケージ"
 
@@ -1207,13 +1212,14 @@ msgstr "  必要な子パッケージ: {}"
 
 #. TRANSLATORS: The placeholders are the PackageBase metadata-key
 #. identity and a package-base identity.
-#: src/aur_update_cli_presentation.cpp:615 src/source_install.cpp:286
+#: src/aur_update_cli_presentation.cpp:615 src/source_install.cpp:329
 #, c++-format
 msgid "{} result: {}"
 msgstr "{} の結果: {}"
 
 #. TRANSLATORS: The placeholders are package identity and version.
-#: src/aur_update_cli_presentation.cpp:626 src/source_install.cpp:354
+#: src/aur_update_cli_presentation.cpp:626
+#: src/commands_source_maintenance.cpp:561 src/source_install.cpp:397
 #, c++-format
 msgid "  produced artifact: {} {} (not selected; not installed)"
 msgstr "  生成されたアーティファクト: {} {}（未選択、未インストール）"
@@ -2351,7 +2357,7 @@ msgstr "{} の値 '{}' は無効です。{}、{}、{} のいずれかを指定�
 msgid "Unknown {} global option: {}"
 msgstr "不明な {} グローバルオプションです: {}"
 
-#: src/cli_parser.cpp:167 src/cli_parser.cpp:176 src/cli_routing.cpp:245
+#: src/cli_parser.cpp:167 src/cli_parser.cpp:176 src/cli_routing.cpp:285
 #, c++-format
 msgid "Cannot combine {} and {}."
 msgstr "{} と {} は同時に指定できません。"
@@ -2370,77 +2376,103 @@ msgstr "空の引数はサポートされていません。"
 msgid "Missing value for option {}."
 msgstr "オプション {} の値がありません。"
 
-#: src/cli_routing.cpp:18
+#: src/cli_routing.cpp:19
 msgid "Automatic source selection has no explicit option."
 msgstr "自動ソース選択に対応する明示オプションはありません。"
 
-#: src/cli_routing.cpp:25 src/commands_sync.cpp:413 src/commands_sync.cpp:749
+#: src/cli_routing.cpp:26 src/commands_sync.cpp:413 src/commands_sync.cpp:749
 msgid "Unknown package source selection."
 msgstr "パッケージのソース選択が不明です。"
 
-#: src/cli_routing.cpp:73
+#: src/cli_routing.cpp:93 src/cli_routing.cpp:328
+#, c++-format
+msgid "Operation {} requires exactly one {} operand."
+msgstr "操作 {} には {} オペランドをちょうど1つ指定する必要があります。"
+
+#: src/cli_routing.cpp:113
 #, c++-format
 msgid "Unsupported option {} for operation {}."
 msgstr "操作 {} ではオプション {} をサポートしていません。"
 
-#: src/cli_routing.cpp:81
+#: src/cli_routing.cpp:121
 #, c++-format
 msgid "Operation {} requires exactly one {} package target."
 msgstr "操作 {} には {} パッケージ対象をちょうど1つ指定する必要があります。"
 
 #. TRANSLATORS: The placeholders are the command, operation, and operand tokens.
-#: src/cli_routing.cpp:85 src/commands_inspect.cpp:53
-#: src/commands_inspect.cpp:60 src/moguet.cpp:206 src/moguet.cpp:215
+#: src/cli_routing.cpp:125 src/commands_inspect.cpp:53
+#: src/commands_inspect.cpp:60 src/moguet.cpp:218 src/moguet.cpp:227
 #, c++-format
 msgid "Usage: {} {} {}"
 msgstr "使用方法: {} {} {}"
 
-#: src/cli_routing.cpp:193
+#: src/cli_routing.cpp:233
 #, c++-format
 msgid "Cannot combine {} with {} refresh for operation {}."
 msgstr "操作 {} では {} と {} 更新を同時に指定できません。"
 
-#: src/cli_routing.cpp:201
+#: src/cli_routing.cpp:241
 #, c++-format
 msgid "{} is not supported for operation {}."
 msgstr "操作 {} では {} をサポートしていません。"
 
-#: src/cli_routing.cpp:231
+#: src/cli_routing.cpp:271
 msgid "Root package selection was not requested."
 msgstr "ルートパッケージの選択は要求されていません。"
 
-#: src/cli_routing.cpp:238
+#: src/cli_routing.cpp:278
 #, c++-format
 msgid "Option {} is supported only with plain {}."
 msgstr "オプション {} は修飾なしの {} でのみサポートされています。"
 
-#: src/cli_routing.cpp:255
+#: src/cli_routing.cpp:295 src/cli_routing.cpp:426
 #, c++-format
 msgid "Cannot use {} with {}."
 msgstr "{} は {} と同時に使用できません。"
 
-#: src/cli_routing.cpp:260
+#: src/cli_routing.cpp:300 src/cli_routing.cpp:432
 #, c++-format
 msgid "Opaque operand is not supported with {}: {}"
 msgstr "{} では不透明なオペランドをサポートしていません: {}"
 
-#: src/cli_routing.cpp:267
+#: src/cli_routing.cpp:307 src/cli_routing.cpp:406 src/cli_routing.cpp:415
 #, c++-format
 msgid "Unsupported option {} for {}."
 msgstr "オプション {} は {} でサポートされていません。"
 
-#: src/cli_routing.cpp:288
-#, c++-format
-msgid "Operation {} requires exactly one {} operand."
-msgstr "操作 {} には {} オペランドをちょうど1つ指定する必要があります。"
-
-#: src/cli_routing.cpp:297
+#: src/cli_routing.cpp:337
 msgid "Root package search query must not be empty."
 msgstr "ルートパッケージの検索クエリを空にはできません。"
 
-#: src/cli_routing.cpp:305
+#: src/cli_routing.cpp:345
 msgid "Root package search query contains a control character."
 msgstr "ルートパッケージの検索クエリに制御文字が含まれています。"
+
+#: src/cli_routing.cpp:364
+msgid "Local source build was not requested."
+msgstr "ローカルソースビルドは要求されていません。"
+
+#: src/cli_routing.cpp:377 src/moguet.cpp:180
+#, c++-format
+msgid "Option {} is supported only with operation {}."
+msgstr "オプション {} は操作 {} でのみサポートされています。"
+
+#: src/cli_routing.cpp:392
+#, c++-format
+msgid "Option {} may be specified only once for operation {}."
+msgstr "オプション {} は操作 {} に対して1回だけ指定できます。"
+
+#: src/cli_routing.cpp:444
+#, c++-format
+msgid "Environment assignment requires a preceding directory: {}"
+msgstr "環境変数代入の前にディレクトリが必要です: {}"
+
+#: src/cli_routing.cpp:451 src/cli_routing.cpp:469
+#: src/commands_source_maintenance.cpp:860
+#: src/commands_source_maintenance.cpp:941
+#, c++-format
+msgid "Invalid environment assignment: {}"
+msgstr "不正な環境変数代入です: {}"
 
 #: src/commands_aur_update.cpp:21 src/commands_upgrade_all.cpp:179
 msgid "no updates"
@@ -3089,7 +3121,7 @@ msgstr "競合/置換メタデータはビルド/インストール前に手動�
 #. second is a runtime option token.
 #: src/commands_inspect.cpp:757 src/commands_inspect.cpp:867
 #: src/commands_inspect.cpp:914 src/commands_upgrade_all.cpp:1819
-#: src/moguet.cpp:984
+#: src/moguet.cpp:1048
 #, c++-format
 msgid "Unsupported {} option: {}"
 msgstr "{}で未対応のオプションです: {}"
@@ -3183,270 +3215,566 @@ msgstr "バージョンを比較できませんでした: {} -> {}"
 msgid "Unknown {} update classification."
 msgstr "不明な{}更新分類です。"
 
-#: src/commands_source_maintenance.cpp:94 src/source_build.cpp:149
+#: src/commands_source_maintenance.cpp:98 src/source_build.cpp:149
 #, c++-format
 msgid "Unsafe command token: {}"
 msgstr "安全でないコマンドトークンです: {}"
 
-#: src/commands_source_maintenance.cpp:100 src/source_build.cpp:155
+#: src/commands_source_maintenance.cpp:104 src/source_build.cpp:155
 msgid "Editor command is empty."
 msgstr "エディターコマンドが空です。"
 
-#: src/commands_source_maintenance.cpp:184 src/source_build.cpp:205
+#: src/commands_source_maintenance.cpp:188 src/source_build.cpp:205
 #, c++-format
 msgid "Skipping prompt ({}): {} -> yes"
 msgstr "確認をスキップします（{}）: {} -> yes"
 
-#: src/commands_source_maintenance.cpp:190 src/source_build.cpp:211
+#: src/commands_source_maintenance.cpp:194 src/source_build.cpp:211
 #, c++-format
 msgid "Skipping prompt ({}): {} -> no"
 msgstr "確認をスキップします（{}）: {} -> no"
 
-#: src/commands_source_maintenance.cpp:198 src/source_build.cpp:219
+#: src/commands_source_maintenance.cpp:202 src/source_build.cpp:219
 #, c++-format
 msgid "Cannot answer prompt without interaction ({}): {}"
 msgstr "対話なしでは確認に回答できません（{}）: {}"
 
-#: src/commands_source_maintenance.cpp:208 src/source_build.cpp:229
+#: src/commands_source_maintenance.cpp:212 src/source_build.cpp:229
 #, c++-format
 msgid "Skipping prompt (non-interactive {}): {} -> no"
 msgstr "確認をスキップします（非対話{}）: {} -> no"
 
-#: src/commands_source_maintenance.cpp:214 src/source_build.cpp:235
+#: src/commands_source_maintenance.cpp:218 src/source_build.cpp:235
 #, c++-format
 msgid "Cannot safely answer prompt with non-interactive standard input: {}"
 msgstr "標準入力が非対話のため、この確認へ安全に回答できません: {}"
 
-#: src/commands_source_maintenance.cpp:226 src/source_build.cpp:247
+#: src/commands_source_maintenance.cpp:230 src/source_build.cpp:247
 #, c++-format
 msgid "Failed to read the answer to this prompt: {}"
 msgstr "この確認への回答を読み取れませんでした: {}"
 
-#: src/commands_source_maintenance.cpp:233
-#: src/commands_source_maintenance.cpp:240 src/source_build.cpp:254
+#: src/commands_source_maintenance.cpp:237
+msgid "A non-default confirmation requires an explicit yes answer."
+msgstr "デフォルトを持たない確認には明示的なyes回答が必要です。"
+
+#: src/commands_source_maintenance.cpp:246 src/source_build.cpp:254
 #: src/source_build.cpp:261
 msgid "Please answer yes or no."
 msgstr "yesまたはnoで回答してください。"
 
-#: src/commands_source_maintenance.cpp:251
+#: src/commands_source_maintenance.cpp:257
 msgid "Source preference load event has no entry path."
 msgstr "ソース設定の読み込みイベントにエントリーパスがありません。"
 
-#: src/commands_source_maintenance.cpp:255 src/source_install.cpp:43
+#: src/commands_source_maintenance.cpp:261 src/source_install.cpp:44
 #, c++-format
 msgid "Loading custom build flags from {}."
 msgstr "{}からカスタムビルドフラグを読み込みます。"
 
-#: src/commands_source_maintenance.cpp:264
+#: src/commands_source_maintenance.cpp:270
 msgid "System upgrade..."
 msgstr "システムを更新しています..."
 
-#: src/commands_source_maintenance.cpp:268
+#: src/commands_source_maintenance.cpp:274
 msgid "Checking source packages..."
 msgstr "ソースパッケージを確認しています..."
 
-#: src/commands_source_maintenance.cpp:272
+#: src/commands_source_maintenance.cpp:278
 msgid "Unknown system/source upgrade event kind."
 msgstr "不明なシステム/ソース更新イベント種別です。"
 
-#: src/commands_source_maintenance.cpp:281
+#: src/commands_source_maintenance.cpp:287
 msgid "System/source upgrade stopped without a failure diagnostic."
 msgstr "失敗診断がないままシステム/ソース更新が停止しました。"
 
-#: src/commands_source_maintenance.cpp:292 src/moguet.cpp:188
-#: src/moguet.cpp:197
+#: src/commands_source_maintenance.cpp:296
 #, c++-format
-msgid "Usage: {} {} {} {}"
-msgstr "使用法: {} {} {} {}"
+msgid "Invalid local source root path: {}"
+msgstr "ローカルソースルートのパスが不正です: {}"
 
-#: src/commands_source_maintenance.cpp:306
-#: src/commands_source_maintenance.cpp:387
+#: src/commands_source_maintenance.cpp:299
 #, c++-format
-msgid "Invalid environment assignment: {}"
-msgstr "不正な環境変数代入です: {}"
+msgid "Local source root entry is missing: {}"
+msgstr "ローカルソースルートのエントリがありません: {}"
 
-#: src/commands_source_maintenance.cpp:313
+#: src/commands_source_maintenance.cpp:302
 #, c++-format
-msgid "Ignoring extra arg '{}'"
-msgstr "余分な引数'{}'を無視します"
+msgid "Local source root entry must not be a symlink: {}"
+msgstr "ローカルソースルートのエントリをシンボリックリンクにはできません: {}"
 
-#: src/commands_source_maintenance.cpp:317
-msgid "No package specified."
-msgstr "パッケージが指定されていません。"
+#: src/commands_source_maintenance.cpp:305
+#, c++-format
+msgid "Local source root is not a directory: {}"
+msgstr "ローカルソースルートはディレクトリではありません: {}"
 
-#: src/commands_source_maintenance.cpp:336
+#: src/commands_source_maintenance.cpp:308
+#, c++-format
+msgid "Local source entry is not a regular file: {}"
+msgstr "ローカルソースのエントリが通常ファイルではありません: {}"
+
+#: src/commands_source_maintenance.cpp:311
+#: src/commands_source_maintenance.cpp:581
+#, c++-format
+msgid "Local source entry is not owned by the current user: {}"
+msgstr "ローカルソースのエントリは現在のユーザーが所有していません: {}"
+
+#: src/commands_source_maintenance.cpp:315
+#: src/commands_source_maintenance.cpp:585
+#, c++-format
+msgid "Local source entry is writable by its group or others: {}"
+msgstr "ローカルソースのエントリはグループまたはその他のユーザーから書き込み可能です: {}"
+
+#: src/commands_source_maintenance.cpp:319
+#: src/commands_source_maintenance.cpp:589
+#, c++-format
+msgid "Permission was denied while inspecting local source entry: {}"
+msgstr "ローカルソースのエントリの検査中にアクセスが拒否されました: {}"
+
+#: src/commands_source_maintenance.cpp:323
+#, c++-format
+msgid "Failed to read local source entry: {}"
+msgstr "ローカルソースのエントリを読み取れませんでした: {}"
+
+#: src/commands_source_maintenance.cpp:326
+#: src/commands_source_maintenance.cpp:593
+#, c++-format
+msgid "Local source entry changed identity during the operation: {}"
+msgstr "操作中にローカルソースのエントリの識別情報が変更されました: {}"
+
+#: src/commands_source_maintenance.cpp:330
+#: src/commands_source_maintenance.cpp:597
+#, c++-format
+msgid "Local source entry content changed during the operation: {}"
+msgstr "操作中にローカルソースのエントリ内容が変更されました: {}"
+
+#: src/commands_source_maintenance.cpp:334
+#, c++-format
+msgid "Local source metadata is unsafe and cannot be evaluated: {}"
+msgstr "ローカルソースメタデータは安全でないため評価できません: {}"
+
+#: src/commands_source_maintenance.cpp:338
+#: src/commands_source_maintenance.cpp:611
+#, c++-format
+msgid "Failed to validate local source metadata: {}"
+msgstr "ローカルソースメタデータを検証できませんでした: {}"
+
+#: src/commands_source_maintenance.cpp:341
+#: src/commands_source_maintenance.cpp:614
+#, c++-format
+msgid "Failed to validate local source root: {}"
+msgstr "ローカルソースルートを検証できませんでした: {}"
+
+#: src/commands_source_maintenance.cpp:355
+#, c++-format
+msgid "Local source root: {}"
+msgstr "ローカルソースルート: {}"
+
+#: src/commands_source_maintenance.cpp:360
+#, c++-format
+msgid "Skipping {} review ({})."
+msgstr "{}のレビューを省略します（{}）。"
+
+#: src/commands_source_maintenance.cpp:369 src/source_build.cpp:329
+#, c++-format
+msgid "Review target: {}"
+msgstr "レビュー対象: {}"
+
+#. TRANSLATORS: The placeholder is the literal PKGBUILD artifact name.
+#: src/commands_source_maintenance.cpp:373 src/source_build.cpp:368
+#, c++-format
+msgid "Edit {}?"
+msgstr "{} を編集しますか？"
+
+#: src/commands_source_maintenance.cpp:385 src/source_build.cpp:376
+#: src/source_build.cpp:390
+msgid "Editor failed."
+msgstr "エディターの実行に失敗しました。"
+
+#: src/commands_source_maintenance.cpp:394
+#, c++-format
+msgid "Local source root changed identity while reviewing {}."
+msgstr "{}のレビュー中にローカルソースルートの識別情報が変更されました。"
+
+#: src/commands_source_maintenance.cpp:399 src/source_build.cpp:401
+msgid "Proceed with build?"
+msgstr "ビルドを続行しますか？"
+
+#: src/commands_source_maintenance.cpp:402 src/source_build.cpp:405
+msgid "Aborted."
+msgstr "中止しました。"
+
+#: src/commands_source_maintenance.cpp:414
+#, c++-format
+msgid "{} changed during review"
+msgstr "レビュー中に{}が変更されました"
+
+#: src/commands_source_maintenance.cpp:420
+#, c++-format
+msgid "{} is missing"
+msgstr "{}がありません"
+
+#: src/commands_source_maintenance.cpp:424
+#, c++-format
+msgid "{} is invalid"
+msgstr "{}が不正です"
+
+#: src/commands_source_maintenance.cpp:434
+#, c++-format
+msgid "{} does not represent the one-off environment"
+msgstr "{}はone-off環境を表していません"
+
+#: src/commands_source_maintenance.cpp:439
+#, c++-format
+msgid "{} is older than {}"
+msgstr "{}は{}より古いです"
+
+#: src/commands_source_maintenance.cpp:443
+#, c++-format
+msgid "{} is unsafe"
+msgstr "{}は安全ではありません"
+
+#: src/commands_source_maintenance.cpp:447
+#, c++-format
+msgid "{} is usable but unverified"
+msgstr "{}は使用できますが未検証です"
+
+#: src/commands_source_maintenance.cpp:450
+msgid "local metadata requires evaluation"
+msgstr "ローカルメタデータの評価が必要です"
+
+#: src/commands_source_maintenance.cpp:466
+#: src/commands_source_maintenance.cpp:728
+msgid "Local source metadata is unsafe and cannot be evaluated."
+msgstr "ローカルソースメタデータは安全でないため評価できません。"
+
+#: src/commands_source_maintenance.cpp:478
+#, c++-format
+msgid "Local metadata evaluation is required for {}: {}."
+msgstr "{}にはローカルメタデータの評価が必要です: {}。"
+
+#. TRANSLATORS: The placeholders are the literal PKGBUILD artifact name and makepkg option.
+#: src/commands_source_maintenance.cpp:483
+#, c++-format
+msgid "Evaluate {} metadata with {}?"
+msgstr "{}メタデータを{}で評価しますか？"
+
+#: src/commands_source_maintenance.cpp:487
+msgid "Local metadata evaluation was not approved."
+msgstr "ローカルメタデータの評価が承認されませんでした。"
+
+#: src/commands_source_maintenance.cpp:505
+#, c++-format
+msgid "Local package {} does not support architecture {}."
+msgstr "ローカルパッケージ {} はアーキテクチャ {} をサポートしていません。"
+
+#: src/commands_source_maintenance.cpp:510
+#, c++-format
+msgid "Local dependency constraint cannot be satisfied for {}: {}"
+msgstr "{}のローカル依存関係制約を満たせません: {}"
+
+#: src/commands_source_maintenance.cpp:515
+#, c++-format
+msgid "Local dependency has multiple matching local providers for {}: {}"
+msgstr "{}のローカル依存関係に一致するローカルプロバイダーが複数あります: {}"
+
+#: src/commands_source_maintenance.cpp:520
+#, c++-format
+msgid "Selected dependency provider identity conflicts for {}: {}"
+msgstr "{}に対する選択済み依存関係プロバイダーの識別情報が競合しています: {}"
+
+#: src/commands_source_maintenance.cpp:525
+msgid "Local dependency plan is incomplete."
+msgstr "ローカル依存関係プランは不完全です。"
+
+#: src/commands_source_maintenance.cpp:540
+#, c++-format
+msgid "Local {} result: {}"
+msgstr "ローカル{}結果: {}"
+
+#: src/commands_source_maintenance.cpp:549
+msgid "installed"
+msgstr "インストール済み"
+
+#: src/commands_source_maintenance.cpp:550
+msgid "skipped as needed"
+msgstr "不要のためスキップ"
+
+#: src/commands_source_maintenance.cpp:553
+#, c++-format
+msgid "  required child: {} {} ({}): {}"
+msgstr "  必要な子パッケージ: {} {}（{}）: {}"
+
+#: src/commands_source_maintenance.cpp:577
+#, c++-format
+msgid "{} state and cache directories must be outside the local source tree."
+msgstr "{} の state および cache directory は local source tree の外に置く必要があります。"
+
+#: src/commands_source_maintenance.cpp:632
+#, c++-format
+msgid "Local source workspace cleanup failed: {}"
+msgstr "ローカルソース作業領域の後処理に失敗しました: {}"
+
+#. TRANSLATORS: The first placeholder is the literal
+#. command name "makepkg"; the second is its exit code.
+#. TRANSLATORS: The first placeholder is the literal command
+#. name "makepkg"; the second is its numeric exit code.
+#: src/commands_source_maintenance.cpp:640
+#: src/separated_package_base_source_build.cpp:350
+#: src/separated_source_build.cpp:75
+#, c++-format
+msgid "The build-only {} command failed with exit code {}."
+msgstr "ビルド専用 {} コマンドが終了コード {} で失敗しました。"
+
+#: src/commands_source_maintenance.cpp:646
+#, c++-format
+msgid "Local source artifact selection failed for {} {}."
+msgstr "ローカルソースの {} {} に対するアーティファクト選択に失敗しました。"
+
+#: src/commands_source_maintenance.cpp:654
+msgid "Local source build preflight failed due to an internal consistency error."
+msgstr "内部整合性エラーによりローカルソースビルドの事前検証に失敗しました。"
+
+#: src/commands_source_maintenance.cpp:657
+msgid "Local source workspace preparation failed."
+msgstr "ローカルソース作業領域の準備に失敗しました。"
+
+#: src/commands_source_maintenance.cpp:660
+msgid "Local source artifact workspace preparation failed."
+msgstr "ローカルソースのアーティファクト作業領域の準備に失敗しました。"
+
+#: src/commands_source_maintenance.cpp:663
+msgid "Local source build context preparation failed."
+msgstr "ローカルソースのビルドコンテキストの準備に失敗しました。"
+
+#: src/commands_source_maintenance.cpp:667
+#, c++-format
+msgid "Local source {} artifact-list query failed."
+msgstr "ローカルソースの {} アーティファクト一覧照会に失敗しました。"
+
+#: src/commands_source_maintenance.cpp:671
+msgid "Local source build command failed."
+msgstr "ローカルソースのビルドコマンドに失敗しました。"
+
+#: src/commands_source_maintenance.cpp:674
+msgid "Local source artifact validation failed."
+msgstr "ローカルソースのアーティファクト検証に失敗しました。"
+
+#: src/commands_source_maintenance.cpp:677
+msgid "Local source artifact identity query failed."
+msgstr "ローカルソースのアーティファクト識別情報の照会に失敗しました。"
+
+#: src/commands_source_maintenance.cpp:680
+msgid "Local source artifact selection failed."
+msgstr "ローカルソースのアーティファクト選択に失敗しました。"
+
+#: src/commands_source_maintenance.cpp:683
+msgid "Local source workspace cleanup failed."
+msgstr "ローカルソース作業領域の後処理に失敗しました。"
+
+#: src/commands_source_maintenance.cpp:686
+msgid "Local source build failed due to an internal error."
+msgstr "内部エラーによりローカルソースビルドに失敗しました。"
+
+#: src/commands_source_maintenance.cpp:696
+#, c++-format
+msgid "Retained artifact workspace: {}"
+msgstr "診断用に保持したアーティファクト作業領域: {}"
+
+#: src/commands_source_maintenance.cpp:702
+#, c++-format
+msgid "Local source workspace cleanup also failed: {}"
+msgstr "ローカルソース作業領域の後処理にも失敗しました: {}"
+
+#: src/commands_source_maintenance.cpp:820
+#: src/commands_source_maintenance.cpp:833
+#: src/commands_source_maintenance.cpp:890
 #, c++-format
 msgid "Build Error: {}"
 msgstr "ビルドエラー: {}"
 
-#: src/commands_source_maintenance.cpp:354
+#: src/commands_source_maintenance.cpp:844 src/moguet.cpp:198
+#, c++-format
+msgid "Usage: {} {}"
+msgstr "使用法: {} {}"
+
+#: src/commands_source_maintenance.cpp:867
+#, c++-format
+msgid "Ignoring extra arg '{}'"
+msgstr "余分な引数'{}'を無視します"
+
+#: src/commands_source_maintenance.cpp:871
+msgid "No package specified."
+msgstr "パッケージが指定されていません。"
+
+#: src/commands_source_maintenance.cpp:908
 #, c++-format
 msgid "Added {} to source-build list."
 msgstr "{}をソースビルド一覧へ追加しました。"
 
-#: src/commands_source_maintenance.cpp:364
+#: src/commands_source_maintenance.cpp:918
 #, c++-format
 msgid "Environment assignment requires a preceding package: {}"
 msgstr "環境変数代入の前にパッケージが必要です: {}"
 
-#: src/commands_source_maintenance.cpp:374
+#: src/commands_source_maintenance.cpp:928
 #, c++-format
 msgid "Appending {} to {}"
 msgstr "{}を{}へ追記します"
 
-#: src/commands_source_maintenance.cpp:415
+#: src/commands_source_maintenance.cpp:969
 #, c++-format
 msgid "Source preference reader did not return an entry identity for {}."
 msgstr "ソース設定readerが{}のエントリidentityを返しませんでした。"
 
-#: src/commands_source_maintenance.cpp:430
+#: src/commands_source_maintenance.cpp:984
 #, c++-format
 msgid "Failed to create a temporary source preference file: {}"
 msgstr "一時ソース設定ファイルを作成できませんでした: {}"
 
-#: src/commands_source_maintenance.cpp:443
-#: src/commands_source_maintenance.cpp:619
+#: src/commands_source_maintenance.cpp:997
+#: src/commands_source_maintenance.cpp:1173
 #, c++-format
 msgid "Failed to remove temporary file {}: {}"
 msgstr "一時ファイル{}を削除できませんでした: {}"
 
-#: src/commands_source_maintenance.cpp:466
+#: src/commands_source_maintenance.cpp:1020
 #, c++-format
 msgid "Failed to copy source preference file {} to temporary file {}."
 msgstr "ソース設定ファイル{}を一時ファイル{}へコピーできませんでした。"
 
-#: src/commands_source_maintenance.cpp:476
+#: src/commands_source_maintenance.cpp:1030
 #, c++-format
 msgid "Failed to close temporary file {}: {}"
 msgstr "一時ファイル{}を閉じられませんでした: {}"
 
-#: src/commands_source_maintenance.cpp:487
+#: src/commands_source_maintenance.cpp:1041
 #, c++-format
 msgid "Editor failed for {}; the edited file was kept at {}."
 msgstr "{}のエディター処理に失敗しました。編集済みファイルは{}に保持されています。"
 
-#: src/commands_source_maintenance.cpp:501
+#: src/commands_source_maintenance.cpp:1055
 #, c++-format
 msgid "Failed to open edited temporary file {}: {}"
 msgstr "編集済み一時ファイル{}を開けませんでした: {}"
 
-#: src/commands_source_maintenance.cpp:513
+#: src/commands_source_maintenance.cpp:1067
 #, c++-format
 msgid "Failed to close edited temporary file {}: {}"
 msgstr "編集済み一時ファイル{}を閉じられませんでした: {}"
 
-#: src/commands_source_maintenance.cpp:524
-#: src/commands_source_maintenance.cpp:563
+#: src/commands_source_maintenance.cpp:1078
+#: src/commands_source_maintenance.cpp:1117
 #, c++-format
 msgid "Failed to inspect edited temporary file {}: {}"
 msgstr "編集済み一時ファイル{}を確認できませんでした: {}"
 
-#: src/commands_source_maintenance.cpp:534
+#: src/commands_source_maintenance.cpp:1088
 #, c++-format
 msgid "Edited temporary file is not a regular file: {}"
 msgstr "編集済み一時ファイルが通常ファイルではありません: {}"
 
-#: src/commands_source_maintenance.cpp:550
+#: src/commands_source_maintenance.cpp:1104
 #, c++-format
 msgid "Failed to install the edited source-build preference at {}; the edited file was kept at {}."
 msgstr "編集済みソースビルド設定を{}へ配置できませんでした。編集済みファイルは{}に保持されています。"
 
-#: src/commands_source_maintenance.cpp:573
-#: src/commands_source_maintenance.cpp:590
-#: src/commands_source_maintenance.cpp:610
+#: src/commands_source_maintenance.cpp:1127
+#: src/commands_source_maintenance.cpp:1144
+#: src/commands_source_maintenance.cpp:1164
 #, c++-format
 msgid "Edited temporary file changed during publication and was not removed: {}"
 msgstr "公開処理中に編集済み一時ファイルが変更されたため削除しませんでした: {}"
 
-#: src/commands_source_maintenance.cpp:634
+#: src/commands_source_maintenance.cpp:1188
 msgid "No source-build packages registered."
 msgstr "ソースビルド対象のパッケージは登録されていません。"
 
-#: src/commands_source_maintenance.cpp:640
+#: src/commands_source_maintenance.cpp:1194
 msgid "Registered Source Packages:"
 msgstr "登録済みソースパッケージ:"
 
-#: src/commands_source_maintenance.cpp:652
+#: src/commands_source_maintenance.cpp:1206
 msgid "(none)"
 msgstr "（なし）"
 
-#: src/commands_source_maintenance.cpp:663
+#: src/commands_source_maintenance.cpp:1217
 #, c++-format
 msgid "Removing {} from list..."
 msgstr "{}を一覧から削除しています..."
 
-#: src/commands_source_maintenance.cpp:692
+#: src/commands_source_maintenance.cpp:1246
 #, c++-format
 msgid "Unmarking source-build for {}"
 msgstr "{}のソースビルド指定を解除しています"
 
-#: src/commands_source_maintenance.cpp:696
+#: src/commands_source_maintenance.cpp:1250
 #, c++-format
 msgid "{} was not marked."
 msgstr "{}は指定されていませんでした。"
 
-#: src/commands_source_maintenance.cpp:701
+#: src/commands_source_maintenance.cpp:1255
 #, c++-format
 msgid "{} exists in official repos. Will reinstall binary."
 msgstr "{}は公式リポジトリに存在します。バイナリを再インストールします。"
 
-#: src/commands_source_maintenance.cpp:707
+#: src/commands_source_maintenance.cpp:1261
 #, c++-format
 msgid "{} is likely an {} package. Config removed only."
 msgstr "{}は{}パッケージと考えられます。設定だけを削除しました。"
 
-#: src/commands_source_maintenance.cpp:717
+#: src/commands_source_maintenance.cpp:1271
 #, c++-format
 msgid "Reinstalling binaries: {}"
 msgstr "バイナリを再インストールしています: {}"
 
-#: src/commands_source_maintenance.cpp:720
+#: src/commands_source_maintenance.cpp:1274
 msgid "Failed to reinstall binaries."
 msgstr "バイナリを再インストールできませんでした。"
 
-#: src/commands_source_maintenance.cpp:725
+#: src/commands_source_maintenance.cpp:1279
 msgid "Failed to revert one or more packages."
 msgstr "1つ以上のパッケージを元へ戻せませんでした。"
 
-#: src/commands_source_maintenance.cpp:739
+#: src/commands_source_maintenance.cpp:1293
 msgid "Cleaning package caches..."
 msgstr "パッケージキャッシュをクリーンアップしています..."
 
-#: src/commands_source_maintenance.cpp:743
+#: src/commands_source_maintenance.cpp:1297
 #, c++-format
 msgid "{} clean failed or cancelled."
 msgstr "{}のクリーン処理に失敗したか、取り消されました。"
 
-#: src/commands_source_maintenance.cpp:750
+#: src/commands_source_maintenance.cpp:1304
 #, c++-format
 msgid "Clean {} build cache ({})?"
 msgstr "{}ビルドキャッシュ（{}）をクリーンアップしますか？"
 
-#: src/commands_source_maintenance.cpp:755
+#: src/commands_source_maintenance.cpp:1309
 msgid "Removing cached build files..."
 msgstr "キャッシュ済みビルドファイルを削除しています..."
 
-#: src/commands_source_maintenance.cpp:764
+#: src/commands_source_maintenance.cpp:1318
 #, c++-format
 msgid "Failed to clean the {} cache: {}"
 msgstr "{}キャッシュを削除できませんでした: {}"
 
-#: src/commands_source_maintenance.cpp:770
+#: src/commands_source_maintenance.cpp:1324
 #, c++-format
 msgid "{} cache cleanup was incomplete."
 msgstr "{}キャッシュの削除が完了しませんでした。"
 
-#: src/commands_source_maintenance.cpp:775
+#: src/commands_source_maintenance.cpp:1329
 #, c++-format
 msgid "{} cache cleaned."
 msgstr "{}キャッシュを削除しました。"
 
-#: src/commands_source_maintenance.cpp:780
+#: src/commands_source_maintenance.cpp:1334
 #, c++-format
 msgid "Skipped {} cache cleaning."
 msgstr "{}キャッシュの削除をスキップしました。"
 
-#: src/commands_source_maintenance.cpp:785
+#: src/commands_source_maintenance.cpp:1339
 #, c++-format
 msgid "{} cache is empty."
 msgstr "{}キャッシュは空です。"
@@ -3772,12 +4100,12 @@ msgid "Unsupported {} option for {} info: {}"
 msgstr "{}による{}情報の取得では次のオプションは未対応です: {}"
 
 #: src/commands_sync.cpp:949 src/commands_sync.cpp:998
-#: src/dependency_plan.cpp:1341 src/source_install.cpp:505
+#: src/dependency_plan.cpp:1341 src/source_install.cpp:600
 #, c++-format
 msgid "Failed to fetch {} info for {}: {}"
 msgstr "{}情報を{}について取得できませんでした: {}"
 
-#: src/commands_sync.cpp:991 src/source_install.cpp:514
+#: src/commands_sync.cpp:991 src/source_install.cpp:609
 #, c++-format
 msgid "Package not found in repos or {}: {}"
 msgstr "リポジトリにも{}にもパッケージが見つかりません: {}"
@@ -5216,6 +5544,116 @@ msgstr "準備済みの絞り込み{}更新操作は不正か、すでに使用�
 msgid "Prepared filtered {} update operation lost its source-build preparation snapshot."
 msgstr "準備済みの絞り込み{}更新操作からソースビルド準備スナップショットが失われました。"
 
+#: src/local_source_build_dependency_preparation.cpp:59
+#, c++-format
+msgid "{} required artifact target projection failed before local source-build dependency preparation."
+msgstr "ローカルソースビルドの依存関係準備前に、{} に必要なアーティファクト対象の投影に失敗しました。"
+
+#: src/local_source_build_dependency_preparation.cpp:75
+#, c++-format
+msgid "Local source-build dependency preparation found duplicate local {} units."
+msgstr "ローカルソースビルドの依存関係準備で重複するローカル{}単位が見つかりました。"
+
+#: src/local_source_build_dependency_preparation.cpp:88
+#, c++-format
+msgid "Local source-build dependency preparation did not find its local {} unit."
+msgstr "ローカルソースビルドの依存関係準備で対応するローカル{}単位が見つかりませんでした。"
+
+#. TRANSLATORS: The placeholder is the literal Arch field name
+#. "PackageBase".
+#: src/local_source_install.cpp:76
+#: src/separated_package_base_source_build.cpp:140
+#, c++-format
+msgid "{} artifact selection failed before package transaction."
+msgstr "パッケージトランザクションの前に {} アーティファクトの選択に失敗しました。"
+
+#. TRANSLATORS: The placeholder is the literal Arch field name
+#. "PackageBase".
+#: src/local_source_install.cpp:83
+#: src/separated_package_base_source_build.cpp:147
+#, c++-format
+msgid "{} artifact install reasons cannot be represented by one package transaction."
+msgstr "{} アーティファクトのインストール理由を1つのパッケージトランザクションで表現できません。"
+
+#. TRANSLATORS: The placeholder is the literal Arch field name
+#. "PackageBase".
+#: src/local_source_install.cpp:89
+#: src/separated_package_base_source_build.cpp:153
+#, c++-format
+msgid "Unknown {} artifact install preparation failure."
+msgstr "{} アーティファクトのインストール準備で不明な失敗が発生しました。"
+
+#. TRANSLATORS: The placeholder is the literal Arch
+#. field name "PackageBase".
+#: src/local_source_install.cpp:152
+#: src/separated_package_base_source_build.cpp:388
+#, c++-format
+msgid "{} artifact identity or validation failed before install preparation."
+msgstr "インストール準備の前に {} アーティファクトの識別または検証に失敗しました。"
+
+#. TRANSLATORS: The placeholder is the literal Arch field
+#. name "PackageBase".
+#. TRANSLATORS: The placeholder is the literal Arch field name
+#. "PackageBase".
+#. TRANSLATORS: The placeholder is the literal Arch field
+#. name "PackageBase".
+#. TRANSLATORS: The placeholder is the literal Arch field name
+#. "PackageBase".
+#: src/local_source_install.cpp:162 src/local_source_install.cpp:176
+#: src/separated_package_base_source_build.cpp:398
+#: src/separated_package_base_source_build.cpp:414
+#, c++-format
+msgid "{} artifact install preparation result is incoherent."
+msgstr "{} アーティファクトのインストール準備結果に整合性がありません。"
+
+#. TRANSLATORS: The placeholder is the literal Arch
+#. field name "PackageBase".
+#. TRANSLATORS: The placeholder is the literal Arch field name
+#. "PackageBase".
+#. TRANSLATORS: The placeholder is the literal Arch
+#. field name "PackageBase".
+#: src/local_source_install.cpp:197
+#: src/package_base_artifact_install_executor.cpp:649
+#: src/package_base_artifact_install_executor.cpp:711
+#: src/separated_package_base_source_build.cpp:438
+#, c++-format
+msgid "Prepared {} artifact install failed validation before transaction."
+msgstr "準備済み{}成果物のインストールはパッケージ処理前の検証に失敗しました。"
+
+#: src/local_source_install.cpp:221
+#: src/separated_package_base_source_build.cpp:463
+#: src/separated_source_build.cpp:100
+#, c++-format
+msgid "Package installation succeeded, but artifact workspace cleanup failed: {}"
+msgstr "パッケージのインストールには成功しましたが、アーティファクト作業領域のクリーンアップに失敗しました: {}"
+
+#: src/local_source_install.cpp:227
+#: src/separated_package_base_source_build.cpp:469
+#: src/separated_source_build.cpp:106
+msgid "Package installation succeeded, but artifact workspace cleanup failed with an unknown error."
+msgstr "パッケージのインストールには成功しましたが、アーティファクト作業領域のクリーンアップが不明なエラーで失敗しました。"
+
+#: src/local_source_metadata_evaluation.cpp:44
+msgid "The effective local build architecture is invalid."
+msgstr "有効なローカルビルドアーキテクチャが不正です。"
+
+#: src/local_source_metadata_evaluation.cpp:81
+msgid "Failed to determine the effective local build architecture."
+msgstr "有効なローカルビルドアーキテクチャを特定できませんでした。"
+
+#. TRANSLATORS: The placeholder is the literal makepkg option.
+#: src/local_source_metadata_evaluation.cpp:111
+#, c++-format
+msgid "{} output exceeded the local metadata size limit."
+msgstr "{}の出力がローカルメタデータのサイズ上限を超えました。"
+
+#. TRANSLATORS: The first placeholder is the literal makepkg
+#. option; the second is a line number in generated metadata.
+#: src/local_source_metadata_evaluation.cpp:132
+#, c++-format
+msgid "{} returned invalid local package metadata at line {}."
+msgstr "{}が{}行目で不正なローカルパッケージメタデータを返しました。"
+
 #: src/logging.cpp:143
 #, c++-format
 msgid "Warning: {}"
@@ -5226,319 +5664,326 @@ msgstr "警告: {}"
 msgid "Running: {}"
 msgstr "実行中: {}"
 
-#: src/moguet.cpp:178
+#: src/moguet.cpp:188
 #, c++-format
 msgid "Unknown operation: {}"
 msgstr "不明な操作です: {}"
 
-#: src/moguet.cpp:221
+#: src/moguet.cpp:209
+#, c++-format
+msgid "Usage: {} {} {} {}"
+msgstr "使用法: {} {} {} {}"
+
+#: src/moguet.cpp:233
 #, c++-format
 msgid "Operation {} requires a target."
 msgstr "操作{}には対象が必要です。"
 
-#: src/moguet.cpp:242
+#: src/moguet.cpp:254
 #, c++-format
 msgid "Do not run {} as {} or with {}."
 msgstr "{}を{}として、または{}経由で実行しないでください。"
 
-#: src/moguet.cpp:247
+#: src/moguet.cpp:259
 #, c++-format
 msgid "Run {} as a normal user; {} will invoke {}/{} when needed."
 msgstr "{}は通常ユーザーとして実行してください。{}は必要に応じて{}/{}を呼び出します。"
 
-#: src/moguet.cpp:269
+#: src/moguet.cpp:281
 msgid "Failed to load the user configuration because of an unknown error."
 msgstr "不明なエラーによりユーザー設定を読み込めませんでした。"
 
-#: src/moguet.cpp:372
+#: src/moguet.cpp:402
 #, c++-format
 msgid "Operation {} does not accept target operands."
 msgstr "操作{}は対象オペランドを受け付けません。"
 
-#: src/moguet.cpp:413
+#: src/moguet.cpp:465
 #, c++-format
 msgid "Started {} v{}."
 msgstr "{} v{}を起動しました。"
 
-#: src/moguet.cpp:424
+#: src/moguet.cpp:480
 #, c++-format
 msgid "Cannot initialize the {} default state log because of an unknown error."
 msgstr "不明なエラーにより{}のデフォルト状態ログを初期化できません。"
 
-#: src/moguet.cpp:605
+#: src/moguet.cpp:667
 #, c++-format
 msgid "Cannot finalize the {} default state log because of an unknown error."
 msgstr "不明なエラーにより{}のデフォルト状態ログを終了処理できません。"
 
-#: src/moguet.cpp:677
+#: src/moguet.cpp:739
 msgid "USAGE"
 msgstr "使用方法"
 
-#: src/moguet.cpp:681
+#: src/moguet.cpp:743
 msgid "OPERATIONS"
 msgstr "操作"
 
-#: src/moguet.cpp:685
-msgid "Build one package from source without saving a preference"
-msgstr "設定を保存せず、パッケージを1つソースからビルド"
+#. TRANSLATORS: The placeholder is the literal PKGBUILD artifact identity.
+#: src/moguet.cpp:748
+#, c++-format
+msgid "Build one remote package or local {} root without saving a preference"
+msgstr "設定を保存せず、リモートパッケージ1件またはローカル{}ルート1件をビルド"
 
-#: src/moguet.cpp:689
+#: src/moguet.cpp:753
 msgid "Update the system and rebuild configured source packages"
 msgstr "システムを更新し、設定済みソースパッケージを再ビルド"
 
 #. TRANSLATORS: The placeholder is the literal pacman-compatible -Syu token.
-#: src/moguet.cpp:693
+#: src/moguet.cpp:757
 #, c++-format
 msgid "Check registered source-build preferences after {}"
 msgstr "{}の後に登録済みソースビルド設定を確認"
 
 #. TRANSLATORS: The placeholder is the AUR project identity.
-#: src/moguet.cpp:699
+#: src/moguet.cpp:763
 #, c++-format
 msgid "Update installed {} packages only"
 msgstr "インストール済みの{}パッケージだけを更新"
 
 #. TRANSLATORS: The placeholder is the literal pacman-compatible -Syu token.
-#: src/moguet.cpp:703
+#: src/moguet.cpp:767
 #, c++-format
 msgid "Do not run {}; source-build preferences are optional"
 msgstr "{}は実行しません。ソースビルド設定は任意です"
 
 #. TRANSLATORS: The placeholder is the AUR project identity.
-#: src/moguet.cpp:709
+#: src/moguet.cpp:773
 #, c++-format
 msgid "Update the system, registered source packages, and remaining installed {} packages"
 msgstr "システム、登録済みのソースパッケージ、その他のインストール済み{}パッケージを更新"
 
 #. TRANSLATORS: The placeholder is the literal PackageBase identity.
-#: src/moguet.cpp:714
+#: src/moguet.cpp:778
 #, c++-format
 msgid "Give explicit source preferences priority and avoid duplicate package/{} builds"
 msgstr "明示的なソースビルド設定を優先し、パッケージ/{}単位での重複ビルドを回避"
 
-#: src/moguet.cpp:717
+#: src/moguet.cpp:781
 msgid "Do not accept target operands"
 msgstr "対象引数は受け付けません"
 
-#: src/moguet.cpp:720
+#: src/moguet.cpp:784
 msgid "Clean package and build caches"
 msgstr "パッケージとビルドのキャッシュを削除"
 
 #. TRANSLATORS: The placeholder is the AUR project identity.
-#: src/moguet.cpp:725
+#: src/moguet.cpp:789
 #, c++-format
 msgid "{} INSPECTION"
 msgstr "{}の調査"
 
 #. TRANSLATORS: AUR, PackageBase, and the destination path are literal identities.
-#: src/moguet.cpp:730
+#: src/moguet.cpp:794
 #, c++-format
 msgid "Export one {} {} repository to {} without building or installing"
 msgstr "1つの{} {}リポジトリを{}へエクスポート（ビルドやインストールは行いません）"
 
 #. TRANSLATORS: AUR, PackageBase, PKGBUILD, and stdout are literal identities.
-#: src/moguet.cpp:736
+#: src/moguet.cpp:800
 #, c++-format
 msgid "Print one {} {} {} to {} without keeping a checkout"
 msgstr "1つの{} {}の{}を{}へ出力（チェックアウトは保存しません）"
 
 #. TRANSLATORS: The placeholder is the AUR project identity.
-#: src/moguet.cpp:742
+#: src/moguet.cpp:806
 #, c++-format
 msgid "Classify {} dependencies"
 msgstr "{}の依存関係を分類"
 
 #. TRANSLATORS: The placeholder is the AUR project identity.
-#: src/moguet.cpp:747
+#: src/moguet.cpp:811
 #, c++-format
 msgid "Show the {} build-order plan"
 msgstr "{}のビルド順序を表示"
 
 #. TRANSLATORS: The placeholders are literal git commands and the AUR identity.
-#: src/moguet.cpp:752
+#: src/moguet.cpp:816
 #, c++-format
 msgid "Safely run {} or {} for {} build repositories"
 msgstr "{}または{}を使用して{}ビルドリポジトリを安全に取得"
 
 #. TRANSLATORS: The placeholders are literal git commands.
-#: src/moguet.cpp:757
+#: src/moguet.cpp:821
 #, c++-format
 msgid "For existing clones, run {} only; do not update the working tree or run {}, {}, build, or install"
 msgstr "既存のチェックアウトでは{}だけを実行し、作業ツリーの更新、{}、{}、ビルド、インストールは行いません"
 
-#: src/moguet.cpp:761
+#: src/moguet.cpp:825
 msgid "SOURCE BUILD PREFERENCES"
 msgstr "ソースビルド設定"
 
 #. TRANSLATORS: The placeholder is the literal XDG identity.
-#: src/moguet.cpp:766
+#: src/moguet.cpp:830
 #, c++-format
 msgid "Store each preference in the active user's {} config authority"
 msgstr "各設定を実行ユーザーの{}設定領域へ保存"
 
-#: src/moguet.cpp:771
+#: src/moguet.cpp:835
 msgid "Enable a source-build preference for a package"
 msgstr "パッケージのソースビルド設定を有効化"
 
-#: src/moguet.cpp:775
+#: src/moguet.cpp:839
 msgid "Edit a source-build preference"
 msgstr "ソースビルド設定を編集"
 
-#: src/moguet.cpp:779
+#: src/moguet.cpp:843
 msgid "List source-build preferences"
 msgstr "ソースビルド設定を一覧表示"
 
-#: src/moguet.cpp:783
+#: src/moguet.cpp:847
 msgid "Remove a source-build preference"
 msgstr "ソースビルド設定を削除"
 
-#: src/moguet.cpp:787
+#: src/moguet.cpp:851
 msgid "Remove a preference and reinstall the binary package"
 msgstr "設定を削除してバイナリパッケージを再インストール"
 
 #. TRANSLATORS: The placeholder is the literal pacman program identity.
-#: src/moguet.cpp:792
+#: src/moguet.cpp:856
 #, c++-format
 msgid "{} COMPATIBILITY"
 msgstr "{}互換"
 
-#: src/moguet.cpp:795
+#: src/moguet.cpp:859
 msgid "Install packages"
 msgstr "パッケージをインストール"
 
-#: src/moguet.cpp:799
+#: src/moguet.cpp:863
 msgid "Interactively search for and select root packages to install"
 msgstr "インストールするルートパッケージを対話形式で検索・選択"
 
 #. TRANSLATORS: The placeholder is the AUR project identity.
-#: src/moguet.cpp:803
+#: src/moguet.cpp:867
 #, c++-format
 msgid "Require an interactive terminal; install selected repository roots first, then build selected {} roots only if that transaction succeeds"
 msgstr "対話端末が必要。選択したリポジトリのルートを先にインストールし、そのトランザクションが成功した場合だけ選択した {} のルートをビルド"
 
-#: src/moguet.cpp:807
+#: src/moguet.cpp:871
 msgid "Upgrade the system"
 msgstr "システムをアップグレード"
 
 #. TRANSLATORS: The placeholder is the literal pacman program identity.
-#: src/moguet.cpp:811
+#: src/moguet.cpp:875
 #, c++-format
 msgid "Remain compatible with {}; do not scan all source-build preferences"
 msgstr "{}互換を維持し、登録済みソースビルド設定をすべて走査しません"
 
-#: src/moguet.cpp:815
+#: src/moguet.cpp:879
 msgid "Search for packages"
 msgstr "パッケージを検索"
 
-#: src/moguet.cpp:818
+#: src/moguet.cpp:882
 msgid "Show package information"
 msgstr "パッケージ情報を表示"
 
 #. TRANSLATORS: The placeholder is the AUR project identity.
-#: src/moguet.cpp:823
+#: src/moguet.cpp:887
 #, c++-format
 msgid "Check {} and foreign-package updates"
 msgstr "{}および外部パッケージの更新を確認"
 
-#: src/moguet.cpp:825
+#: src/moguet.cpp:889
 msgid "OPTIONS"
 msgstr "オプション"
 
-#: src/moguet.cpp:829
+#: src/moguet.cpp:893
 msgid "Show this help message and exit"
 msgstr "このヘルプを表示して終了"
 
-#: src/moguet.cpp:833
+#: src/moguet.cpp:897
 msgid "Show version information and exit"
 msgstr "バージョン情報を表示して終了"
 
 #. TRANSLATORS: PKGBUILD and .install are literal artifact names.
-#: src/moguet.cpp:838
+#: src/moguet.cpp:902
 #, c++-format
 msgid "Prompt to review {} and {} files"
 msgstr "{}および{}の確認を促します"
 
 #. TRANSLATORS: PKGBUILD and .install are literal artifact names.
-#: src/moguet.cpp:843
+#: src/moguet.cpp:907
 #, c++-format
 msgid "Skip {} and {} review"
 msgstr "{}および{}の確認を省略"
 
-#: src/moguet.cpp:847
+#: src/moguet.cpp:911
 msgid "Prompt to view repository update diffs"
 msgstr "リポジトリ更新差分の表示を促します"
 
-#: src/moguet.cpp:851
+#: src/moguet.cpp:915
 msgid "Skip the repository update diff prompt"
 msgstr "リポジトリ更新差分の確認を省略"
 
 #. TRANSLATORS: pacman and makepkg are literal external-program identities.
-#: src/moguet.cpp:856
+#: src/moguet.cpp:920
 #, c++-format
 msgid "Pass this option to {} and {}"
 msgstr "このオプションを{}と{}へ渡します"
 
 #. TRANSLATORS: pacman, AUR, and -S are literal identities or CLI tokens.
-#: src/moguet.cpp:861
+#: src/moguet.cpp:925
 #, c++-format
 msgid "Pass this option to {}; on {} or source-build {} routes, apply it only to final installation"
 msgstr "このオプションを{}へ渡し、{}またはソースビルドの{}経路では最後のインストールだけに適用"
 
 #. TRANSLATORS: The placeholder is the literal Moguet project identity.
-#: src/moguet.cpp:866
+#: src/moguet.cpp:930
 #, c++-format
 msgid "Do not skip {} build, review, or plan steps"
 msgstr "{}のビルド、確認、計画段階は省略しません"
 
-#: src/moguet.cpp:870
+#: src/moguet.cpp:934
 msgid "Select the source-build mode"
 msgstr "ソースビルドモードを選択"
 
 #. TRANSLATORS: The placeholder is a literal compatibility option form.
-#: src/moguet.cpp:875 src/moguet.cpp:881
+#: src/moguet.cpp:939 src/moguet.cpp:945
 #, c++-format
 msgid "Compatibility alias for {}"
 msgstr "{}との互換性を保つための別名"
 
-#: src/moguet.cpp:886
+#: src/moguet.cpp:950
 msgid "Unsupported for separated source builds; no dependency cleanup is performed"
 msgstr "分離されたソースビルドでは未対応です。依存パッケージは削除しません"
 
 #. TRANSLATORS: -S, -Ss, -Si, and AUR are literal CLI/project identities.
-#: src/moguet.cpp:891
+#: src/moguet.cpp:955
 #, c++-format
 msgid "Limit {}, {}, and {} to {}; do not fall back to repositories"
 msgstr "{}、{}、{}を{}に限定し、リポジトリへフォールバックしません"
 
 #. TRANSLATORS: -S, -Ss, -Si, and AUR are literal CLI/project identities.
-#: src/moguet.cpp:897
+#: src/moguet.cpp:961
 #, c++-format
 msgid "Limit {}, {}, and {} to official binary repositories; do not use {} or source builds"
 msgstr "{}、{}、{}を公式バイナリリポジトリに限定し、{}やソースビルドを使用しません"
 
-#: src/moguet.cpp:900
+#: src/moguet.cpp:964
 msgid "CONFIGURATION"
 msgstr "設定"
 
-#: src/moguet.cpp:904
+#: src/moguet.cpp:968
 msgid "Read-only typed configuration; a missing file uses built-in defaults"
 msgstr "型付きの読み取り専用設定。ファイルがない場合は組み込みの既定値を使用"
 
-#: src/moguet.cpp:907
+#: src/moguet.cpp:971
 msgid "Required schema version"
 msgstr "必須のスキーマバージョン"
 
 #. TRANSLATORS: The placeholder is the literal PKGBUILD artifact identity.
-#: src/moguet.cpp:912
+#: src/moguet.cpp:976
 #, c++-format
 msgid "{} review policy"
 msgstr "{}の確認方針"
 
-#: src/moguet.cpp:915
+#: src/moguet.cpp:979
 msgid "Repository update diff policy"
 msgstr "リポジトリ更新差分の確認方針"
 
-#: src/moguet.cpp:918
+#: src/moguet.cpp:982
 msgid "Source-build mode"
 msgstr "ソースビルドモード"
 
@@ -5584,17 +6029,6 @@ msgstr "準備済み{}成果物インストール用ワークスペースは後�
 #, c++-format
 msgid "Prepared {} artifact install workspace was already cleaned."
 msgstr "準備済み{}成果物インストール用ワークスペースはすでに後処理済みです。"
-
-#. TRANSLATORS: The placeholder is the literal Arch field name
-#. "PackageBase".
-#. TRANSLATORS: The placeholder is the literal Arch
-#. field name "PackageBase".
-#: src/package_base_artifact_install_executor.cpp:649
-#: src/package_base_artifact_install_executor.cpp:711
-#: src/separated_package_base_source_build.cpp:438
-#, c++-format
-msgid "Prepared {} artifact install failed validation before transaction."
-msgstr "準備済み{}成果物のインストールはパッケージ処理前の検証に失敗しました。"
 
 #. TRANSLATORS: The placeholder is the literal Arch field name
 #. "PackageBase".
@@ -6456,27 +6890,6 @@ msgstr "分離された {} ソースビルドに重複した必要パッケー�
 msgid "Separated {} source-build has an unknown install reason."
 msgstr "分離された {} ソースビルドに不明なインストール理由があります。"
 
-#. TRANSLATORS: The placeholder is the literal Arch field name
-#. "PackageBase".
-#: src/separated_package_base_source_build.cpp:140
-#, c++-format
-msgid "{} artifact selection failed before package transaction."
-msgstr "パッケージトランザクションの前に {} アーティファクトの選択に失敗しました。"
-
-#. TRANSLATORS: The placeholder is the literal Arch field name
-#. "PackageBase".
-#: src/separated_package_base_source_build.cpp:147
-#, c++-format
-msgid "{} artifact install reasons cannot be represented by one package transaction."
-msgstr "{} アーティファクトのインストール理由を1つのパッケージトランザクションで表現できません。"
-
-#. TRANSLATORS: The placeholder is the literal Arch field name
-#. "PackageBase".
-#: src/separated_package_base_source_build.cpp:153
-#, c++-format
-msgid "Unknown {} artifact install preparation failure."
-msgstr "{} アーティファクトのインストール準備で不明な失敗が発生しました。"
-
 #. TRANSLATORS: The placeholder is the literal Arch
 #. field name "PackageBase".
 #: src/separated_package_base_source_build.cpp:301
@@ -6499,50 +6912,12 @@ msgstr "{} の {} アーティファクト一覧照会に失敗しました。"
 msgid "The {} build-only {} execution failed."
 msgstr "{} のビルド専用 {} 実行に失敗しました。"
 
-#. TRANSLATORS: The first placeholder is the literal
-#. command name "makepkg"; the second is its exit code.
-#. TRANSLATORS: The first placeholder is the literal command
-#. name "makepkg"; the second is its numeric exit code.
-#: src/separated_package_base_source_build.cpp:350
-#: src/separated_source_build.cpp:75
-#, c++-format
-msgid "The build-only {} command failed with exit code {}."
-msgstr "ビルド専用 {} コマンドが終了コード {} で失敗しました。"
-
 #. TRANSLATORS: The placeholder is the literal Arch
 #. field name "PackageBase".
 #: src/separated_package_base_source_build.cpp:365
 #, c++-format
 msgid "{} artifact aggregate validation failed."
 msgstr "{} アーティファクトの集約検証に失敗しました。"
-
-#. TRANSLATORS: The placeholder is the literal Arch
-#. field name "PackageBase".
-#: src/separated_package_base_source_build.cpp:388
-#, c++-format
-msgid "{} artifact identity or validation failed before install preparation."
-msgstr "インストール準備の前に {} アーティファクトの識別または検証に失敗しました。"
-
-#. TRANSLATORS: The placeholder is the literal Arch field
-#. name "PackageBase".
-#. TRANSLATORS: The placeholder is the literal Arch field name
-#. "PackageBase".
-#: src/separated_package_base_source_build.cpp:398
-#: src/separated_package_base_source_build.cpp:414
-#, c++-format
-msgid "{} artifact install preparation result is incoherent."
-msgstr "{} アーティファクトのインストール準備結果に整合性がありません。"
-
-#: src/separated_package_base_source_build.cpp:463
-#: src/separated_source_build.cpp:100
-#, c++-format
-msgid "Package installation succeeded, but artifact workspace cleanup failed: {}"
-msgstr "パッケージのインストールには成功しましたが、アーティファクト作業領域のクリーンアップに失敗しました: {}"
-
-#: src/separated_package_base_source_build.cpp:469
-#: src/separated_source_build.cpp:106
-msgid "Package installation succeeded, but artifact workspace cleanup failed with an unknown error."
-msgstr "パッケージのインストールには成功しましたが、アーティファクト作業領域のクリーンアップが不明なエラーで失敗しました。"
 
 #: src/source_build.cpp:75
 #, c++-format
@@ -6578,11 +6953,6 @@ msgstr "更新差分の範囲: {}（既存のキャッシュリポジトリ）�
 msgid "Review-sensitive file changes: {}"
 msgstr "レビューが必要なファイルの変更: {}"
 
-#: src/source_build.cpp:329
-#, c++-format
-msgid "Review target: {}"
-msgstr "レビュー対象: {}"
-
 #: src/source_build.cpp:339
 #, c++-format
 msgid "Install script(s) present; review before build: {}"
@@ -6598,27 +6968,10 @@ msgstr "レビューディレクトリ: {}"
 msgid "Skipping {}/{} review ({})."
 msgstr "{}/{}のレビューを省略します（{}）。"
 
-#: src/source_build.cpp:368
-#, c++-format
-msgid "Edit {}?"
-msgstr "{} を編集しますか？"
-
-#: src/source_build.cpp:376 src/source_build.cpp:390
-msgid "Editor failed."
-msgstr "エディターの実行に失敗しました。"
-
 #: src/source_build.cpp:385
 #, c++-format
 msgid "Edit install script {}?"
 msgstr "インストールスクリプト {} を編集しますか？"
-
-#: src/source_build.cpp:401
-msgid "Proceed with build?"
-msgstr "ビルドを続行しますか？"
-
-#: src/source_build.cpp:405
-msgid "Aborted."
-msgstr "中止しました。"
 
 #: src/source_build.cpp:497
 #, c++-format
@@ -6777,144 +7130,148 @@ msgstr "{} のソース取得またはビルド準備に失敗しました。"
 msgid "{} set source-build unexpectedly produced a singular update-status result."
 msgstr "{} セットのソースビルドが予期せず単一対象の更新状態結果を生成しました。"
 
-#: src/source_build.cpp:1061 src/source_install.cpp:259
+#: src/source_build.cpp:1061 src/source_install.cpp:302
 #: src/system_source_upgrade.cpp:609
 msgid "Unknown source-build execution status."
 msgstr "ソースビルドの実行状態が不明です。"
 
-#: src/source_install.cpp:67
+#: src/source_install.cpp:68
 msgid "Unknown source-build source kind."
 msgstr "不明なソースビルド元種別です。"
 
-#: src/source_install.cpp:78
+#: src/source_install.cpp:79
 #, c++-format
 msgid "Registered source upgrade does not support split {} preference {} from {} {}; this route requires a singular package identity."
 msgstr "登録済みソースの更新は、分割された {} 設定 {}（{} {} 由来）に対応していません。この経路では単一のパッケージ識別情報が必要です。"
 
-#: src/source_install.cpp:120
+#: src/source_install.cpp:121
 #, c++-format
 msgid "Registered source upgrade cannot enforce a selected {} dependency provider."
 msgstr "登録済みソースの更新では、選択した{}依存プロバイダーを強制できません。"
 
-#: src/source_install.cpp:135
+#: src/source_install.cpp:136
 #, c++-format
 msgid "{} required artifact target projection failed for {}."
 msgstr "{} による {} の必要アーティファクト対象の投影に失敗しました。"
 
-#: src/source_install.cpp:148 src/source_install.cpp:561
+#: src/source_install.cpp:149 src/source_install.cpp:656
 #, c++-format
 msgid "{} required artifact target projection omitted {}."
 msgstr "{} に必要なアーティファクト対象の投影から {} が欠落しています。"
 
-#: src/source_install.cpp:214
+#: src/source_install.cpp:257
 #, c++-format
 msgid "Installing selected repository providers: {}"
 msgstr "選択したリポジトリプロバイダーをインストールしています: {}"
 
-#: src/source_install.cpp:280
+#: src/source_install.cpp:323
 #, c++-format
 msgid "{} source-build result is incoherent for presentation."
 msgstr "{} のソースビルド結果は表示に必要な整合性を満たしていません。"
 
-#: src/source_install.cpp:298
+#: src/source_install.cpp:341
 #, c++-format
 msgid "{} source-build child result is incoherent for presentation."
 msgstr "{} のソースビルドにおける子パッケージの結果は、表示に必要な整合性を満たしていません。"
 
-#: src/source_install.cpp:305
+#: src/source_install.cpp:348
 #, c++-format
 msgid "  required child: {} -> {} {} (explicit): installed"
 msgstr "  必要な子パッケージ: {} -> {} {}（明示）: インストール済み"
 
-#: src/source_install.cpp:314
+#: src/source_install.cpp:357
 #, c++-format
 msgid "  required child: {} -> {} {} (explicit): skipped as needed ({})"
 msgstr "  必要な子パッケージ: {} -> {} {}（明示）: 不要のためスキップ（{}）"
 
-#: src/source_install.cpp:323
+#: src/source_install.cpp:366
 #, c++-format
 msgid "  required child: {} -> {} {} (dependency): installed"
 msgstr "  必要な子パッケージ: {} -> {} {}（依存関係）: インストール済み"
 
-#: src/source_install.cpp:332
+#: src/source_install.cpp:375
 #, c++-format
 msgid "  required child: {} -> {} {} (dependency): skipped as needed ({})"
 msgstr "  必要な子パッケージ: {} -> {} {}（依存関係）: 不要のためスキップ（{}）"
 
-#: src/source_install.cpp:339
+#: src/source_install.cpp:382
 #, c++-format
 msgid "{} source-build child result has an unknown install reason or outcome."
 msgstr "{} のソースビルドにおける子パッケージの結果に、不明なインストール理由または結果があります。"
 
-#: src/source_install.cpp:349
+#: src/source_install.cpp:392
 #, c++-format
 msgid "{} unselected artifact identity is incoherent for presentation."
 msgstr "{} の未選択アーティファクト識別情報は、表示に必要な整合性を満たしていません。"
 
-#: src/source_install.cpp:368
+#: src/source_install.cpp:455
 msgid "Cannot seed cache for an empty source-build invocation."
 msgstr "空のソースビルド呼び出しに対してキャッシュを準備できません。"
 
-#: src/source_install.cpp:386
+#: src/source_install.cpp:473
 msgid "Production source-build work items use different cache authorities."
 msgstr "本番用ソースビルドの作業項目が異なるキャッシュ管理主体を使用しています。"
 
-#: src/source_install.cpp:396
+#: src/source_install.cpp:483
 msgid "Production source-build invocation cache authority changed."
 msgstr "本番用ソースビルド呼び出しのキャッシュ管理主体が変更されました。"
 
-#: src/source_install.cpp:410
+#: src/source_install.cpp:498
 msgid "Cannot activate cache for an empty source-build invocation."
 msgstr "空のソースビルド呼び出しに対してキャッシュを有効化できません。"
 
-#: src/source_install.cpp:432
+#: src/source_install.cpp:502
+msgid "Local source-build dependency invocation has no prepared cache authority."
+msgstr "ローカルソースビルドの依存関係呼び出しに準備済みのキャッシュ管理主体がありません。"
+
+#: src/source_install.cpp:527
 msgid "Production source-build invocation has no prepared cache authority."
 msgstr "本番用ソースビルドの呼び出しには準備済みのキャッシュ管理主体がありません。"
 
-#: src/source_install.cpp:452 src/source_install.cpp:780
+#: src/source_install.cpp:547 src/source_install.cpp:843
 #: src/system_source_upgrade.cpp:1514
 msgid "Failed to install selected repository providers."
 msgstr "選択したリポジトリプロバイダーをインストールできませんでした。"
 
-#: src/source_install.cpp:461 src/system_source_upgrade.cpp:1561
+#: src/source_install.cpp:556 src/system_source_upgrade.cpp:1561
 msgid "Failed to install selected repository providers with an unknown exception."
 msgstr "不明な例外により選択済みリポジトリプロバイダーをインストールできませんでした。"
 
-#: src/source_install.cpp:473
+#: src/source_install.cpp:568
 msgid "Production source-build work item has no prepared cache authority."
 msgstr "本番用ソースビルドの作業項目に準備済みのキャッシュ管理主体がありません。"
 
-#: src/source_install.cpp:521
+#: src/source_install.cpp:616
 #, c++-format
 msgid "{} info for {} does not include {}."
 msgstr "{} の {} に関する情報に {} が含まれていません。"
 
-#: src/source_install.cpp:615
+#: src/source_install.cpp:710
 #, c++-format
 msgid "{} required artifact target projection failed before source-build work-item preparation."
 msgstr "ソースビルド作業項目の準備前に、{} に必要なアーティファクト対象の投影に失敗しました。"
 
-#: src/source_install.cpp:694
+#: src/source_install.cpp:757
 #, c++-format
 msgid "{} set source-build execution requires an {} {} work item."
 msgstr "{} セットのソースビルド実行には {} {} の作業項目が必要です。"
 
-#: src/source_install.cpp:700
+#: src/source_install.cpp:763
 #, c++-format
 msgid "{} set source-build execution does not support only-if-updated requests."
 msgstr "{} セットのソースビルド実行は、更新時のみの要求に対応していません。"
 
-#: src/source_install.cpp:706 src/source_install.cpp:727
+#: src/source_install.cpp:769 src/source_install.cpp:790
 #, c++-format
 msgid "Building {} {}: {}"
 msgstr "{} {} をビルドしています: {}"
 
-#: src/source_install.cpp:710 src/source_install.cpp:731
+#: src/source_install.cpp:773 src/source_install.cpp:794
 #, c++-format
 msgid "Target package(s): {}"
 msgstr "対象パッケージ: {}"
 
-#: src/source_install.cpp:751
+#: src/source_install.cpp:814
 #, c++-format
 msgid "Failed while building/installing {} {} ({}): {}"
 msgstr "{} {}（{}）のビルドまたはインストール中に失敗しました: {}"
@@ -7282,24 +7639,24 @@ msgstr "ロールバック中に仮配置した信頼済みキャッシュディ
 msgid "Failed to restore the working directory after a trusted cache operation: {}"
 msgstr "信頼済みキャッシュ操作後に作業ディレクトリを復元できませんでした: {}"
 
-#: src/trusted_cache.cpp:1822
+#: src/trusted_cache.cpp:1898
 msgid "Unable to prove ownership of a newly staged trusted cache directory; leaving it untouched."
 msgstr "新たに仮配置した信頼済みキャッシュディレクトリの所有権を証明できないため、変更せずに残します。"
 
-#: src/trusted_cache.cpp:2111
+#: src/trusted_cache.cpp:2187
 msgid "Clone rollback requires an existing validated directory."
 msgstr "クローンのロールバックには既存の検証済みディレクトリが必要です。"
 
-#: src/trusted_cache.cpp:2186
+#: src/trusted_cache.cpp:2262
 msgid "Rolled back a failed clone cache entry."
 msgstr "失敗したクローンのキャッシュエントリをロールバックしました。"
 
-#: src/trusted_cache.cpp:2192
+#: src/trusted_cache.cpp:2268
 #, c++-format
 msgid "Refusing unsafe clone rollback: {}"
 msgstr "安全でないクローンのロールバックを拒否します: {}"
 
-#: src/trusted_cache.cpp:2197
+#: src/trusted_cache.cpp:2273
 msgid "Refusing unsafe clone rollback: unknown error."
 msgstr "安全でないクローンのロールバックを拒否します: 不明なエラーです。"
 
@@ -7905,6 +8262,14 @@ msgstr "{}のデフォルト状態ログを段階{}で安全に使用できま�
 #: src/xdg_state_log.cpp:234
 msgid "Unknown state log error code."
 msgstr "不明な状態ログエラーコードです。"
+
+#, c++-format
+#~ msgid "Local source artifact selection failed for PackageBase {}."
+#~ msgstr "ローカルソースの PackageBase {} に対するアーティファクト選択に失敗しました。"
+
+#, c++-format
+#~ msgid "Local PackageBase result: {}"
+#~ msgstr "ローカルPackageBase結果: {}"
 
 #~ msgid "Package selection requires a search callback."
 #~ msgstr "パッケージ選択には検索コールバックが必要です。"

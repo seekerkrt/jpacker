@@ -1,6 +1,6 @@
 {
   "operations": {
-    "build": "Build one package from source without saving a preference",
+    "build": "Build one remote package or local PKGBUILD root without saving a preference",
     "upgrade": "Update the system and rebuild configured source packages",
     "upgrade-aur": "Update installed AUR packages only",
     "upgrade-all": "Update the system, registered source packages, and remaining installed AUR packages",
@@ -35,6 +35,7 @@
     "--rebuild": "Compatibility alias for --build-mode=rebuild",
     "--cleanbuild": "Compatibility alias for --build-mode=clean",
     "--rmdeps": "Unsupported for separated source builds; no dependency cleanup is performed",
+    "--local": "Use one local PKGBUILD directory as the build root",
     "--select": "Interactively select source-aware package candidates for plain -S",
     "--aur": "Limit supported sync operations to AUR",
     "--repo": "Limit supported sync operations to official binary repositories",

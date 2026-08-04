@@ -2,19 +2,19 @@
 
 ## 文書の位置づけ
 
-この文書は、local PKGBUILDをroot sourceとして扱う`build --local` routeのidentity、metadata authority、dependency projection、artifact lifecycle、安全境界を定めるnormative production contractである。文書の規範上の正本は日本語本文であり、現在のCLIで未接続のsliceを実装済みとみなすものではない。
+この文書は、local PKGBUILDをroot sourceとして扱う`build --local` routeのidentity、metadata authority、dependency projection、artifact lifecycle、安全境界を定めるnormative production contractである。文書の規範上の正本は日本語本文であり、Issue #271 Slice 2〜5でproduction CLIへ接続済みの現行routeを記録する。
 
 - Origin Issue: [#271](https://github.com/seekerkrt/moguet/issues/271)
 - Related Issues: [#217](https://github.com/seekerkrt/moguet/issues/217)、[#268](https://github.com/seekerkrt/moguet/issues/268)、[#272](https://github.com/seekerkrt/moguet/issues/272)、[#86](https://github.com/seekerkrt/moguet/issues/86)、[#96](https://github.com/seekerkrt/moguet/issues/96)、[#97](https://github.com/seekerkrt/moguet/issues/97)、[#151](https://github.com/seekerkrt/moguet/issues/151)、[#152](https://github.com/seekerkrt/moguet/issues/152)
-- Related PRs: #368（slice 1）、#369（slice 2）、#370（slice 3）、#371（slice 4）
-- Update history: Issue #373で旧decision 15の本文から安定contractへ分離。
+- Related PRs: #368（slice 1）、#369（slice 2）、#370（slice 3）、#371（slice 4）、#374（slice 5）
+- Update history: Issue #373で旧decision 15の本文から安定contractへ分離。Issue #271 Slice 5 / PR #374でproduction CLIへの接続が完了。
 - Related upper decisions: [decision 1](../DECISIONS.md#decision-1)、[decision 2](../DECISIONS.md#decision-2)、[decision 4](../DECISIONS.md#decision-4)、[decision 5](../DECISIONS.md#decision-5)、[decision 6](../DECISIONS.md#decision-6)、[decision 7](../DECISIONS.md#decision-7)
 
 ## Contract本文（日本語normative source of truth）
 
 ### CLI入口とroot identity
 
-正式入口は`moguet build --local <directory> [V=K...]`とする。既存の`build <pkg> [V=K...]`はremote package name routeとして維持し、pathらしい文字列をlocal rootへ暗黙変換しない。`--local`は`build`だけが所有するoperation-local source selectorであり、`-Bi`、`build-local`、`-S --local`などのaliasは追加しない。directory operandはexactly oneとし、missing / multiple operand、invalid `V=K`、package targetとの併記、opaque operandはfilesystem accessより前に拒否する。
+正式入口は`moguet build --local <directory> [V=K...]`とする。既存の`build <pkg> [V=K...]`はremote package name routeとして維持し、pathらしい文字列をlocal rootへ暗黙変換しない。`--local`は`build`だけが所有するoperation-local source selectorであり、`-Bi`、`build-local`、`-S --local`などのaliasは追加しない。directory operandはexactly oneとし、missing / multiple operand、invalid `V=K`、package targetとの併記、opaque operandはlocal-root filesystem access、cache / state作成、external commandより前に拒否する。
 
 directoryは1つのlocal PackageBase sourceを選ぶ。採用metadata snapshotに宣言されたvalidかつuniqueな全`pkgname` childをfirst-seen orderのrequired root targetとする。初期routeは先頭child、PackageBase名、またはproduced artifact全体をinstall targetとして推測しない。
 
@@ -38,7 +38,7 @@ mtimeが逆順または同時刻であることはfreshnessの証明にならな
 
 mutation可能な`build --local`だけが、source rootとreasonを表示し、PKGBUILD review後にdefaultを持たない明示確認を受けて、normal userで表示した`makepkg --printsrcinfo`を実行できる。evaluation outputはinvocation-owned metadataとしてparseし、user-owned `.SRCINFO`をcreate、truncate、rewriteしない。`--noedit`はeditor skipでありevaluation consentではない。`--noconfirm`、non-TTY、cancel、EOFはevaluationを自動承認しない。read-onlyの`deps` / `plan`境界はPKGBUILD evaluationを開始しない。
 
-one-off `V=K`がある場合、existing `.SRCINFO`はeffective environmentを証明できないため`KnownStale`とする。同じordered environment snapshotを`makepkg --printsrcinfo`、`makepkg --packagelist`、build-only makepkgへ渡す。inherited environmentまたは`V=K`が`PKGDEST`を定義する場合はemptyでもall-target preflightで拒否し、fresh `PKGDEST`のownershipを利用者入力へ渡さない。
+one-off `V=K`がある場合、existing `.SRCINFO`はeffective environmentを証明できないため`KnownStale`とする。同じfirst-seen orderのeffective environment snapshotを`makepkg --printsrcinfo`、`makepkg --packagelist`、build-only makepkgへ渡す。production routeは、evaluated metadata、このenvironment snapshot、`makepkg --printsrcinfo`、`makepkg --packagelist`、build-only makepkgが同じrequest proofとして揃った場合だけworkspace / process境界へ渡す。inherited environmentまたは`V=K`が`PKGDEST`を定義する場合はemptyでもall-target preflightで拒否し、fresh `PKGDEST`のownershipを利用者入力へ渡さない。
 
 ### Dependency planとsource selection
 
@@ -52,7 +52,7 @@ ambiguous providerは[ambiguous provider contract](ambiguous-provider-selection.
 
 user-owned local source treeを直接build lifecycleへ渡さない。source entriesを検証しながら一つのinvocation-owned source snapshotへmaterializeし、snapshot前後と最初のexternal mutation前にroot identity、content provenance、containmentを再検証する。観測した追加、削除、replacement、content change、partial generationではpartial snapshotを公開せず停止する。
 
-source snapshotへ取り込むentryはrootと同じfilesystem上にあり、effective user所有であることを要求する。regular directory / fileはgroup / other writableでないこと、symlinkはroot内へlexically収まるrelative targetだけを許可すること、absolute target、`..`によるroot escape、special file、mount境界、unsafe owner / modeを拒否することを要求する。source treeのmodeは変更せず、hardlink identityをsnapshotへ持ち越さない。
+source snapshotへ取り込むentryはrootと同じfilesystem上にあり、effective user所有であることを要求する。regular directory / fileはgroup / other writableでないこと、symlinkはroot内へlexically収まるrelative targetだけを許可すること、absolute target、`..`によるroot escape、special file、mount境界、unsafe owner / modeを拒否することを要求する。source treeのmodeは変更せず、hardlink identityをsnapshotへ持ち越さない。trusted cache rootだけでなくdefault state directoryがlocal source rootと同一またはそのdescendantとなる場合も拒否する。missingなmanaged componentはretained parent identityを作成直前に検証し、local source tree内へstate logやdirectoryを作成する前に停止する。
 
 artifact phaseでは[PackageBase / required-child selection contract](packagebase-child-selection.md)を再利用する。fresh `PKGDEST`はartifact outputだけをisolateし、makepkgが作るsource treeの`src/` / `pkg/`をlocal rootへ戻すものではない。expected / actual artifact identity、freshness、containment、ownership、required child selectionをmutation前に証明する。
 
@@ -60,17 +60,31 @@ local root childrenはExplicit、dependency planが要求するchildrenはDepend
 
 source workspaceのcleanupとartifact workspaceのdiagnostic retentionは別lifecycleである。cleanup failureやpartial completionをprimary build / install failureへflattenせず、completed child、failed target、unattempted targetを区別する。unsafe identity replacementを観測した場合はnamed replacementをcleanupせず、manual inspection用artifactを保持し得る。
 
+### Production execution orderとfailure
+
+全plan、metadata evaluation、source identity、artifact identity、static preflightが完了した後のpackage-side実行順は次のとおりである。
+
+```text
+selected repository provider transaction
+→ remote AUR dependency unit
+→ local source snapshot / build
+→ local typed install
+→ artifact cleanup
+```
+
+各phaseのfailure後は後続phaseへ進まない。完了済みprovider / dependency transactionを自動rollbackせず、local install failureではartifact workspaceをdiagnostic用に保持する。install成功後のcleanup failureは、selected childの正確なinstalled / skipped outcomeを保持したnon-zero partial successとして報告する。
+
 ### Current production connection
 
-このcontractは#271のproduction contractを固定するが、`--local` routeが現在のCLIで実装済みであることを意味しない。LocalSourceRoot、read-only metadata、dependency-plan projection、user-owned treeを変更しないsource workspace、artifact / install execution、help / man / completion / localizationを揃えるまで、不完全なlocal-build routeを有効化しない。
+Issue #271 Slice 2〜5でLocalSourceRoot、read-only and evaluated metadata、dependency-plan projection、user-owned treeを変更しないsource workspace、artifact / install execution、help、man、completion、localizationを揃え、production CLIの`build --local`入口へ接続済みである。このcontractは、接続済みrouteの安全境界とfailure semanticsを固定する。
 
 ## Non-scope / implementationを固定しない範囲
 
 - local rootをAUR RPC packageとして扱うこと、AUR fallback、arbitrary source tree import。
 - provider choiceの永続化、complete solver、conflicts / replaces自動解決、cross-source transaction。
 - local repository database、clean chroot、package signing、automatic VCS update。
+- advanced runtime-aware completion。
 - descriptor、snapshot、workspace、PKGBUILD parser、metadata evaluationの具体的なmodule / type / syscallを恒久固定すること。
-- incomplete routeのhelp、man、completion、gettext接続。これらはproduction接続時に別途同期する。
 
 ## Compatibility
 

@@ -198,19 +198,35 @@ public:
         return cache_home_path_ / "moguet";
     }
 
-    LocalSourceBuildRequest make_request(bool mismatch_plan = false) const {
+    LocalSourceBuildRequest make_request(
+            bool mismatch_plan = false,
+            SourceBuildEnvironment source_environment = {}) const {
+        const bool has_one_off_environment_assignment =
+                !source_environment.ordered_assignments.empty();
         LocalSourceRoot source_root =
-                open_local_source_root(source_path_, false);
+                open_local_source_root(
+                        source_path_,
+                        has_one_off_environment_assignment);
         const LocalPackageMetadataParseResult* parsed =
                 source_root.metadata().parse_result();
         expect(
                 source_root.metadata().state() ==
-                                LocalSourceMetadataState::UsableUnverified &&
+                                (has_one_off_environment_assignment
+                                         ? LocalSourceMetadataState::KnownStale
+                                         : LocalSourceMetadataState::
+                                                   UsableUnverified) &&
                         parsed != nullptr && parsed->is_success() &&
                         parsed->metadata() != nullptr,
-                "Fixture .SRCINFO was not accepted as usable metadata");
+                "Fixture .SRCINFO was not accepted as typed metadata");
 
-        LocalPackageMetadata metadata = *parsed->metadata();
+        LocalSourceBuildMetadata bound_metadata =
+                has_one_off_environment_assignment
+                ? bind_evaluated_local_source_metadata(
+                          source_root, std::move(source_environment),
+                          "x86_64", SRCINFO_CONTENT)
+                : bind_existing_local_source_metadata(
+                          source_root, "x86_64");
+        LocalPackageMetadata metadata = bound_metadata.metadata();
         if(mismatch_plan) metadata.pkgrel = "2";
         query_stub::reset_repository_stub();
         query_stub::reset_aur_stub();
@@ -225,8 +241,7 @@ public:
                 std::move(source_root),
                 std::move(plan),
                 prepare_test_trusted_cache_root(),
-                SourceBuildEnvironment{},
-                SourceEnvironmentEmptyValuePolicy::Forward,
+                std::move(bound_metadata),
                 ArtifactMakepkgBuildOptions{
                         .no_confirm = true,
                         .rebuild = true,
@@ -277,15 +292,26 @@ std::string expected_shell_quote(std::string_view value) {
     return quoted;
 }
 
-std::string expected_environment_prefix(const fs::path& artifact_workspace) {
-    return "PKGDEST=" +
+std::string expected_environment_prefix(
+        const fs::path& artifact_workspace,
+        const SourceBuildEnvironment& source_environment) {
+    std::string prefix;
+    for(const SourceEnvironmentAssignment& assignment :
+        source_environment.ordered_assignments) {
+        prefix += assignment.key + "=" +
+                  expected_shell_quote(assignment.value) + " ";
+    }
+    return prefix + "PKGDEST=" +
            expected_shell_quote(artifact_workspace.string()) + " ";
 }
 
 std::string expected_makepkg_command(
         const fs::path& artifact_workspace,
-        const std::vector<std::string>& arguments) {
-    std::string command = expected_environment_prefix(artifact_workspace) +
+        const std::vector<std::string>& arguments,
+        const SourceBuildEnvironment& source_environment = {}) {
+    std::string command = expected_environment_prefix(
+                                  artifact_workspace,
+                                  source_environment) +
                           expected_shell_quote("makepkg");
     for(const std::string& argument : arguments) {
         command += " " + expected_shell_quote(argument);
@@ -314,6 +340,7 @@ enum class ScenarioKind {
     IdentityQueryFailure,
     UnsafeWorkspaceSuccess,
     UnsafeWorkspaceBuildFailure,
+    CleanupFailureAfterSuccess,
     CleanupFailureDuringBuildFailure,
 };
 
@@ -325,11 +352,14 @@ struct ScenarioObservation {
     std::size_t  source_workspace_events = 0;
     bool         cleanup_failure_injected = false;
     std::string  hook_failure;
+    SourceBuildEnvironment source_environment;
 
     ScenarioObservation(
-            ScenarioKind scenario_kind, fs::path original_source)
+            ScenarioKind scenario_kind, fs::path original_source,
+            SourceBuildEnvironment environment = {})
         : kind(scenario_kind),
-          original_source_path(std::move(original_source)) {}
+          original_source_path(std::move(original_source)),
+          source_environment(std::move(environment)) {}
 };
 
 ScenarioObservation* g_observation = nullptr;
@@ -369,8 +399,9 @@ void observe_source_workspace_event(
     if(g_observation == nullptr) return;
     ++g_observation->source_workspace_events;
     if(event == LocalSourceWorkspaceTestEvent::BeforeCleanupRemoval &&
-       g_observation->kind ==
-               ScenarioKind::CleanupFailureDuringBuildFailure &&
+       (g_observation->kind == ScenarioKind::CleanupFailureAfterSuccess ||
+        g_observation->kind ==
+                ScenarioKind::CleanupFailureDuringBuildFailure) &&
        !g_observation->cleanup_failure_injected) {
         g_observation->cleanup_failure_injected = true;
         throw LocalSourceWorkspaceError(LocalSourceWorkspaceFailure{
@@ -489,7 +520,9 @@ void observe_artifact_workspace_creation(const fs::path& workspace_path) {
         packagelist_output += (workspace_path / leaf).string() + "\n";
     }
     process_stub::expect_capture_command(
-            expected_makepkg_command(workspace_path, {"--packagelist"}),
+            expected_makepkg_command(
+                    workspace_path, {"--packagelist"},
+                    g_observation->source_environment),
             CapturedCommandResult{std::move(packagelist_output), 0},
             observe_packagelist_command);
 
@@ -498,7 +531,8 @@ void observe_artifact_workspace_creation(const fs::path& workspace_path) {
     process_stub::expect_run_command(
             expected_makepkg_command(
                     workspace_path,
-                    {"-sc", "--noconfirm", "-f", "-C"}),
+                    {"-sc", "--noconfirm", "-f", "-C"},
+                    g_observation->source_environment),
             build_exit_code, observe_build_command);
     if(build_exit_code != 0 ||
        g_observation->kind == ScenarioKind::MissingArtifact ||
@@ -563,6 +597,7 @@ struct ObservedFailure {
     std::optional<LocalSourceWorkspaceFailure> source_cleanup_failure;
     std::optional<PackageBaseArtifactIdentitySelectionFailure>
             selection_failure;
+    std::optional<fs::path> retained_artifact_workspace;
     std::string diagnostic;
 };
 
@@ -588,6 +623,10 @@ ObservedFailure execute_expect_failure(LocalSourceBuildRequest request) {
                         : std::optional<
                                   PackageBaseArtifactIdentitySelectionFailure>(
                                   *error.selection_failure()),
+                error.retained_artifact_workspace() == nullptr
+                        ? std::nullopt
+                        : std::optional<fs::path>(
+                                  *error.retained_artifact_workspace()),
                 error.what()};
     }
     throw std::runtime_error("Local source build unexpectedly succeeded");
@@ -621,6 +660,11 @@ void expect_artifact_diagnostic_retained(
             !observation.artifact_workspace_path.empty() &&
                     fs::exists(observation.artifact_workspace_path),
             "Failure did not retain its artifact workspace");
+    expect(
+            failure.retained_artifact_workspace.has_value() &&
+                    *failure.retained_artifact_workspace ==
+                            observation.artifact_workspace_path,
+            "Failure lost its structured retained workspace display path");
     expect(
             failure.diagnostic.find("retained artifact workspace") !=
                     std::string::npos,
@@ -687,6 +731,68 @@ void test_success_uses_snapshot_and_returns_correlated_artifacts() {
             "Explicit artifact cleanup did not remove the workspace");
 }
 
+void test_cache_below_source_is_rejected_during_static_preflight() {
+    LocalBuildFixture fixture;
+    LocalSourceBuildRequest request = [&]() {
+        ScopedEnvironmentVariable cache_home(
+                "XDG_CACHE_HOME", fixture.source_path().string());
+        return fixture.make_request();
+    }();
+    process_stub::reset_process_stub();
+
+    try {
+        static_cast<void>(prepare_local_source_build(std::move(request)));
+    } catch(const LocalSourceBuildPhaseError& error) {
+        expect(
+                error.phase() == LocalSourceBuildFailurePhase::Preflight,
+                "Source/cache containment was rejected after preflight");
+        expect(
+                error.source_workspace_failure() != nullptr &&
+                        error.source_workspace_failure()->stage ==
+                                LocalSourceWorkspaceStage::BoundaryValidation &&
+                        error.source_workspace_failure()->code ==
+                                LocalSourceWorkspaceErrorCode::CacheInsideSource,
+                "Source/cache containment lost its typed boundary failure");
+        expect(
+                process_stub::run_command_call_count() == 0 &&
+                        process_stub::capture_command_call_count() == 0,
+                "Source/cache containment crossed a process boundary");
+        return;
+    }
+    throw std::runtime_error(
+            "Source/cache containment passed static preflight");
+}
+
+void test_evaluated_metadata_forwards_bound_environment_in_order() {
+    LocalBuildFixture fixture;
+    SourceBuildEnvironment source_environment{{
+            {"FIRST", "one"},
+            {"EMPTY", ""},
+            {"FIRST", "last"},
+    }};
+    LocalSourceBuildRequest request =
+            fixture.make_request(false, source_environment);
+    ScenarioObservation observation(
+            ScenarioKind::Success, fixture.source_path(),
+            std::move(source_environment));
+    process_stub::reset_process_stub();
+    ScenarioObservationGuard guard(observation);
+
+    LocalSourceBuildResult result =
+            execute_local_source_build(std::move(request));
+
+    expect_observed_hooks_succeeded(observation);
+    expect_source_workspace_cleaned(observation);
+    fixture.expect_original_tree_unchanged();
+    expect(
+            result.selected_artifacts().size() == 2,
+            "Evaluated metadata build lost selected artifacts");
+    result.cleanup_artifacts();
+    expect(
+            !fs::exists(observation.artifact_workspace_path),
+            "Evaluated metadata build did not clean its artifact workspace");
+}
+
 void test_preflight_rejects_environment_pkgdest_and_plan_mismatch() {
     {
         LocalBuildFixture fixture;
@@ -714,40 +820,6 @@ void test_preflight_rejects_environment_pkgdest_and_plan_mismatch() {
                 direct_child_names(fixture.cache_root_path()) ==
                         initial_cache_entries,
                 "Ambient PKGDEST mutated the trusted cache");
-        process_stub::require_process_expectations_consumed();
-        fixture.expect_original_tree_unchanged();
-    }
-
-    {
-        LocalBuildFixture fixture;
-        LocalSourceBuildRequest request = fixture.make_request();
-        request.source_environment = SourceBuildEnvironment{{
-                {"FIRST", "one"},
-                {"EMPTY", ""},
-                {"SECOND", "two words"},
-        }};
-        const auto initial_cache_entries =
-                direct_child_names(fixture.cache_root_path());
-        ScenarioObservation observation(
-                ScenarioKind::Success, fixture.source_path());
-        process_stub::reset_process_stub();
-        ScenarioObservationGuard guard(observation);
-
-        const ObservedFailure failure =
-                execute_expect_failure(std::move(request));
-        expect(
-                failure.phase == LocalSourceBuildFailurePhase::Preflight,
-                "Environment/root provenance mismatch failure phase differs");
-        expect(
-                process_stub::capture_command_call_count() == 0 &&
-                        process_stub::run_command_call_count() == 0 &&
-                        observation.source_workspace_events == 0 &&
-                        observation.artifact_workspace_path.empty(),
-                "Environment/root provenance mismatch crossed a workspace or process boundary");
-        expect(
-                direct_child_names(fixture.cache_root_path()) ==
-                        initial_cache_entries,
-                "Environment/root provenance mismatch mutated the trusted cache");
         process_stub::require_process_expectations_consumed();
         fixture.expect_original_tree_unchanged();
     }
@@ -817,6 +889,44 @@ void test_workspace_failure_preserves_typed_cause() {
             "Unsafe source symlink left a partial workspace");
     process_stub::require_process_expectations_consumed();
     fixture.expect_original_tree_unchanged();
+}
+
+void test_execute_revalidates_source_before_workspace_creation() {
+    LocalBuildFixture fixture;
+    PreparedLocalSourceBuild prepared =
+            prepare_local_source_build(fixture.make_request());
+    const auto initial_cache_entries =
+            direct_child_names(fixture.cache_root_path());
+    const fs::path original_pkgbuild =
+            fixture.source_path() / "PKGBUILD.original";
+    fs::rename(fixture.source_path() / "PKGBUILD", original_pkgbuild);
+    write_file(fixture.source_path() / "PKGBUILD", "pkgname=replaced\n");
+    process_stub::reset_process_stub();
+
+    try {
+        static_cast<void>(
+                execute_prepared_local_source_build(std::move(prepared)));
+    } catch(const LocalSourceBuildPhaseError& error) {
+        expect(
+                error.phase() ==
+                                LocalSourceBuildFailurePhase::SourceWorkspace &&
+                        error.source_root_failure() != nullptr &&
+                        error.source_root_failure()->code ==
+                                LocalSourceRootErrorCode::ConcurrentReplacement,
+                "Execution-time source replacement lost its typed phase/cause");
+        expect(
+                process_stub::capture_command_call_count() == 0 &&
+                        process_stub::run_command_call_count() == 0,
+                "Execution-time source replacement crossed a process boundary");
+        expect(
+                direct_child_names(fixture.cache_root_path()) ==
+                        initial_cache_entries,
+                "Execution-time source replacement created a workspace");
+        process_stub::require_process_expectations_consumed();
+        return;
+    }
+    throw std::runtime_error(
+            "Execution-time source replacement was not rejected");
 }
 
 void test_build_context_failure_retains_artifact_diagnostics() {
@@ -941,6 +1051,38 @@ void test_primary_failure_preserves_secondary_source_cleanup_failure() {
     fixture.expect_original_tree_unchanged();
 }
 
+void test_successful_build_preserves_typed_source_cleanup_failure() {
+    LocalBuildFixture fixture;
+    LocalSourceBuildRequest request = fixture.make_request();
+    ScenarioObservation observation(
+            ScenarioKind::CleanupFailureAfterSuccess,
+            fixture.source_path());
+    process_stub::reset_process_stub();
+    ScenarioObservationGuard guard(observation);
+
+    const ObservedFailure failure =
+            execute_expect_failure(std::move(request));
+    expect(
+            failure.phase == LocalSourceBuildFailurePhase::SourceCleanup &&
+                    !failure.build_exit_code.has_value() &&
+                    !failure.source_workspace_failure.has_value() &&
+                    failure.source_cleanup_failure.has_value() &&
+                    failure.source_cleanup_failure->stage ==
+                            LocalSourceWorkspaceStage::Cleanup &&
+                    failure.source_cleanup_failure->code ==
+                            LocalSourceWorkspaceErrorCode::CleanupFailure &&
+                    failure.source_cleanup_failure->relative_path ==
+                            "injected-cleanup",
+            "Successful build lost its typed source cleanup failure");
+    expect(
+            observation.cleanup_failure_injected,
+            "Standalone source cleanup failure hook did not run");
+    expect_observed_hooks_succeeded(observation);
+    expect_source_workspace_cleaned(observation);
+    expect_artifact_diagnostic_retained(observation, failure);
+    fixture.expect_original_tree_unchanged();
+}
+
 void test_missing_and_unexpected_artifacts_fail_closed() {
     for(const ScenarioKind kind : {
                 ScenarioKind::MissingArtifact,
@@ -1026,11 +1168,20 @@ int main() {
                 "snapshot build and correlated artifacts",
                 test_success_uses_snapshot_and_returns_correlated_artifacts);
         run_case(
+                "source and cache separation preflight",
+                test_cache_below_source_is_rejected_during_static_preflight);
+        run_case(
+                "evaluated metadata environment binding",
+                test_evaluated_metadata_forwards_bound_environment_in_order);
+        run_case(
                 "environment, PKGDEST, and plan mismatch preflight",
                 test_preflight_rejects_environment_pkgdest_and_plan_mismatch);
         run_case(
                 "typed source workspace failure",
                 test_workspace_failure_preserves_typed_cause);
+        run_case(
+                "execution-time source identity revalidation",
+                test_execute_revalidates_source_before_workspace_creation);
         run_case(
                 "BuildContext diagnostic retention",
                 test_build_context_failure_retains_artifact_diagnostics);
@@ -1043,6 +1194,9 @@ int main() {
         run_case(
                 "primary and secondary cleanup failure",
                 test_primary_failure_preserves_secondary_source_cleanup_failure);
+        run_case(
+                "standalone source cleanup failure",
+                test_successful_build_preserves_typed_source_cleanup_failure);
         run_case(
                 "missing and unexpected artifacts",
                 test_missing_and_unexpected_artifacts_fail_closed);

@@ -12,6 +12,7 @@
 #include "repository_query.hpp"
 #include "separated_source_build.hpp"
 #include "source_build.hpp"
+#include "source_install_internal.hpp"
 #include "source_preference.hpp"
 #include "shell_words.hpp"
 
@@ -195,6 +196,48 @@ void attach_selected_repository_providers(
     }
 }
 
+ProductionSourceBuildWorkItem make_aur_source_build_work_item(
+        const ProjectedBuildPlanArtifactTargets& unit,
+        const BuildPlan& plan,
+        bool use_source_build_preferences,
+        bool needed) {
+    const bool is_singular = unit.required_targets.size() == 1;
+    const std::string preference_name = is_singular
+            ? unit.required_targets.front().package_name
+            : unit.package_base;
+    SourceBuildEnvironment environment;
+    if(use_source_build_preferences) {
+        SourceBuildEnvironment requested_environment =
+                load_source_preference_environment(preference_name);
+        // POLICY(#242): empty definitionを保持したまま、fallback判定だけは従来の
+        // forward可能なnonempty assignment基準にする。PKGDEST definitionは
+        // fallbackで捨てず、all-target preflightまで保持する。
+        if(!requested_environment.has_forwarded_nonempty_assignment() &&
+           !requested_environment.defines("PKGDEST") && is_singular &&
+           preference_name != unit.package_base) {
+            environment =
+                    load_source_preference_environment(unit.package_base);
+        } else {
+            environment = requested_environment;
+        }
+    }
+
+    ProductionSourceBuildWorkItem work_item;
+    if(is_singular) {
+        work_item.request.package_name =
+                unit.required_targets.front().package_name;
+    }
+    work_item.request.checkout_name = unit.package_base;
+    work_item.request.git_url = aur_git_url_for_package_base(unit.package_base);
+    work_item.request.custom_environment = std::move(environment);
+    work_item.request.needed = needed;
+    work_item.required_targets = unit.required_targets;
+    work_item.is_build_plan_entry = true;
+    attach_selected_repository_providers(work_item, plan);
+    require_static_production_source_build_work_item(work_item);
+    return work_item;
+}
+
 int install_selected_repository_providers(
         const std::vector<ProvidedDependency>& providers,
         const AppConfig& config) {
@@ -359,6 +402,50 @@ void present_package_base_result(
 
 } // namespace
 
+LocalSourceBuildDependencyPreparation::
+        LocalSourceBuildDependencyPreparation(
+                std::vector<ProductionSourceBuildWorkItem>
+                        remote_work_items,
+                std::vector<ProvidedDependency>
+                        selected_repository_providers) noexcept
+    : remote_work_items_(std::move(remote_work_items)),
+      selected_repository_providers_(
+              std::move(selected_repository_providers)) {}
+
+const std::vector<ProductionSourceBuildWorkItem>&
+LocalSourceBuildDependencyPreparation::remote_work_items() const noexcept {
+    return remote_work_items_;
+}
+
+const std::vector<ProvidedDependency>&
+LocalSourceBuildDependencyPreparation::selected_repository_providers()
+        const noexcept {
+    return selected_repository_providers_;
+}
+
+#ifdef MOGUET_ENABLE_TEST_OVERRIDES
+LocalSourceBuildDependencyPreparation
+LocalSourceBuildDependencyPreparation::
+        make_for_production_source_build_test(
+                std::vector<ProductionSourceBuildWorkItem>
+                        remote_work_items,
+                std::vector<ProvidedDependency>
+                        selected_repository_providers) {
+    return LocalSourceBuildDependencyPreparation(
+            std::move(remote_work_items),
+            std::move(selected_repository_providers));
+}
+#endif
+
+ProductionSourceBuildWorkItem prepare_aur_source_build_work_item_internal(
+        const ProjectedBuildPlanArtifactTargets& unit,
+        const BuildPlan& plan,
+        bool use_source_build_preferences,
+        bool needed) {
+    return make_aur_source_build_work_item(
+            unit, plan, use_source_build_preferences, needed);
+}
+
 void seed_production_source_build_cache(
         PreparedProductionSourceBuildInvocation& invocation,
         const ValidatedCacheRoot& cache_root) {
@@ -405,9 +492,17 @@ void seed_production_source_build_cache(
 void activate_production_source_build_cache(
         PreparedProductionSourceBuildInvocation& invocation) {
     if(invocation.work_items.empty()) {
-        throw std::logic_error(
-                localization::translate_message(
-                        "Cannot activate cache for an empty source-build invocation."));
+        if(!invocation.local_source_authority.has_value()) {
+            throw std::logic_error(
+                    localization::translate_message(
+                            "Cannot activate cache for an empty source-build invocation."));
+        }
+        if(!invocation.cache_root.has_value()) {
+            throw std::logic_error(localization::translate_message(
+                    "Local source-build dependency invocation has no prepared cache authority."));
+        }
+        invocation.cache_root->require_unchanged_identity();
+        return;
     }
     std::optional<ValidatedCacheRoot> shared_root = invocation.cache_root;
     for(const auto& work_item : invocation.work_items) {
@@ -619,40 +714,8 @@ std::vector<ProductionSourceBuildWorkItem> prepare_aur_source_build_work_items(
     std::vector<ProductionSourceBuildWorkItem> work_items;
     work_items.reserve(projection.success()->build_units.size());
     for(const auto& unit : projection.success()->build_units) {
-        const bool is_singular = unit.required_targets.size() == 1;
-        const std::string preference_name = is_singular
-                ? unit.required_targets.front().package_name
-                : unit.package_base;
-        SourceBuildEnvironment environment;
-        if(use_source_build_preferences) {
-            SourceBuildEnvironment requested_environment =
-                    load_source_preference_environment(preference_name);
-            // POLICY(#242): empty definitionを保持したまま、fallback判定だけは従来の
-            // forward可能なnonempty assignment基準にする。PKGDEST definitionは
-            // fallbackで捨てず、all-target preflightまで保持する。
-            if(!requested_environment.has_forwarded_nonempty_assignment() &&
-               !requested_environment.defines("PKGDEST") &&
-               is_singular && preference_name != unit.package_base) {
-                environment = load_source_preference_environment(unit.package_base);
-            } else {
-                environment = requested_environment;
-            }
-        }
-
-        ProductionSourceBuildWorkItem work_item;
-        if(is_singular) {
-            work_item.request.package_name =
-                    unit.required_targets.front().package_name;
-        }
-        work_item.request.checkout_name = unit.package_base;
-        work_item.request.git_url = aur_git_url_for_package_base(unit.package_base);
-        work_item.request.custom_environment = std::move(environment);
-        work_item.request.needed = needed;
-        work_item.required_targets = unit.required_targets;
-        work_item.is_build_plan_entry = true;
-        attach_selected_repository_providers(work_item, plan);
-        require_static_production_source_build_work_item(work_item);
-        work_items.push_back(std::move(work_item));
+        work_items.push_back(make_aur_source_build_work_item(
+                unit, plan, use_source_build_preferences, needed));
     }
     return work_items;
 }

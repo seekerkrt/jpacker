@@ -848,20 +848,43 @@ void test_cache_root_identity_alias_is_rejected_pre_creation() {
     TemporaryTree tree;
     const fs::path source_path = make_source_root(tree);
     const fs::path alias_target = source_path / "cache-alias-target";
+    const fs::path outside_target = tree.path() / "outside-target";
     create_fixture_directory(alias_target);
+    create_fixture_directory(outside_target);
     LocalSourceRoot source_root =
             open_local_source_root(source_path, false);
+    const struct stat source_status = node_status(source_path);
     const struct stat alias_status = node_status(alias_target);
+    const struct stat outside_status = node_status(outside_target);
     const std::vector<NodeSnapshot> original = snapshot_tree(source_path);
 
-    bool rejected = false;
+    bool root_rejected = false;
     try {
-        require_cache_identity_outside_source_tree_for_test(
+        require_directory_identity_outside_local_source_tree(
+                source_root,
+                static_cast<std::uintmax_t>(source_status.st_dev),
+                static_cast<std::uintmax_t>(source_status.st_ino));
+    } catch(const LocalSourceWorkspaceError& error) {
+        root_rejected = true;
+        expect(
+                error.failure().stage ==
+                                LocalSourceWorkspaceStage::BoundaryValidation &&
+                        error.failure().code ==
+                                LocalSourceWorkspaceErrorCode::
+                                        CacheInsideSource &&
+                        error.failure().relative_path.empty(),
+                "Source-root identity rejection lost its typed boundary failure");
+    }
+    expect(root_rejected, "Source-root managed-directory identity was accepted");
+
+    bool descendant_rejected = false;
+    try {
+        require_directory_identity_outside_local_source_tree(
                 source_root,
                 static_cast<std::uintmax_t>(alias_status.st_dev),
                 static_cast<std::uintmax_t>(alias_status.st_ino));
     } catch(const LocalSourceWorkspaceError& error) {
-        rejected = true;
+        descendant_rejected = true;
         expect(
                 error.failure().stage ==
                         LocalSourceWorkspaceStage::BoundaryValidation,
@@ -874,7 +897,14 @@ void test_cache_root_identity_alias_is_rejected_pre_creation() {
                 error.failure().relative_path == "cache-alias-target",
                 "Identity-alias rejection lost the source-relative path");
     }
-    expect(rejected, "Source descendant cache identity alias was accepted");
+    expect(
+            descendant_rejected,
+            "Source descendant managed-directory identity alias was accepted");
+
+    require_directory_identity_outside_local_source_tree(
+            source_root,
+            static_cast<std::uintmax_t>(outside_status.st_dev),
+            static_cast<std::uintmax_t>(outside_status.st_ino));
     expect(
             snapshot_tree(source_path) == original,
             "Identity-alias rejection changed the original tree");

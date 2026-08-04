@@ -12,7 +12,7 @@ MoguetはArch Linux向けの **pacman-first wrapper** として扱う。日常�
 - pacmanが自然に扱えるoperation / optionは、Moguetがrouteの意味を安全に保てる範囲でpacmanへpass-throughする。
 - AUR / source-build経路では、pacman transaction optionを無条件にmakepkg optionへ置き換えない。
 - 未対応option、曖昧なselection、authoritative metadataのfailure、安全に意味を保てないpacman optionは黙って無視せず、external mutationより前に停止する。
-- `--noconfirm`は「全部yes」ではなく、対応済みpromptの確認を省略する指定である。未解決dependency、provider、conflict / replacement、削除、source selection、artifact identityの曖昧さを承認しない。
+- `--noconfirm`は「全部yes」ではなく、対応済みpromptの確認を省略する指定である。未解決dependency、provider、conflict / replacement、削除、source selection、local PKGBUILD metadata evaluation、artifact identityの曖昧さを承認しない。
 - 値を取るoptionは、値をtargetと誤認しない。値が欠けている場合は停止する。
 
 <a id="compat-general-route-matrix"></a>
@@ -25,7 +25,7 @@ MoguetはArch Linux向けの **pacman-first wrapper** として扱う。日常�
 | `-S --repo` | official binary repositoryへ限定し、AUR / source-buildへfallbackしない | selectorを除いたargvをpacmanへ渡す |
 | `-Ss` | official searchとAUR searchを組み合わせる。非対話でprovider / root selectionを開始しない | pacman searchを表示し、MoguetがAUR searchを補完する |
 | `-Si` | officialを優先し、見つからない場合だけAUR metadataを表示する。`--aur` / `--repo`はsourceを限定する | AUR infoはpacman infoではなくtyped AUR metadataを表示する |
-| `build` / `upgrade` | source preference、BuildPlan、makepkg、artifact validation、`pacman -U`を分離したsource lifecycleで扱う | `makepkg -sic`一括委譲へ戻さない |
+| remote `build` / local `build --local` / `upgrade` | remote package routeとlocal PKGBUILD production routeを、source preference、BuildPlan、makepkg、artifact validation、`pacman -U`を分離したsource lifecycleで扱う | `makepkg -sic`一括委譲へ戻さない |
 | `deps` / `plan` | dependency inspection / plan表示だけを行い、build / install / cloneを開始しない | read-only observationとmutationを分ける |
 | `fetch` | 未取得repositoryのclone、既存cloneの`git fetch origin`までに留める | working tree update、pull、merge、reset、build、installを行わない |
 | `-G` / `-Gp` | root PackageBaseだけを一時cloneし、exportまたはPKGBUILD表示を行う | dependency plan、makepkg、pacman、sudo、persistent checkoutを行わない |
@@ -38,6 +38,7 @@ source routeのselection、preflight、partial completion、failureの詳細は�
 次のoperationはMoguet固有であり、pacmanへそのまま委譲しない。
 
 - `build <pkg> [VAR=VALUE...]`
+- `build --local <directory> [VAR=VALUE...]`
 - `upgrade`
 - `upgrade-aur`
 - `upgrade-all`
@@ -101,7 +102,7 @@ PackageBaseはclone / fetch / build repositoryの単位であり、package name�
 | source-build preference | `${XDG_CONFIG_HOME:-$HOME/.config}/moguet/source-build.d/`をreader / writer共通のauthorityとする。legacy storeへfallbackしない | [source-build preference XDG authority](contracts/source-build-preference-xdg.md) |
 | ambiguous provider | exact / unique provider以外は候補順で選ばず、interactive TTYの明示selectionだけを受け付ける。non-TTY / `--noconfirm`は停止 | [ambiguous provider selection](contracts/ambiguous-provider-selection.md) |
 | root package selection | `-S --select`だけが対話root selection。`-Ss`は非対話search。候補が1件でもdefault選択せず、source identityを保持する | [root package selection](contracts/root-package-selection.md) |
-| local PKGBUILD | `build --local <directory>`を明示入口とし、local treeをAUR rootへfallbackせず、metadata / source identity / artifactをfail closedで検証する | [local PKGBUILD](contracts/local-pkgbuild.md) |
+| local PKGBUILD | `build --local <directory>`を明示入口とし、local treeをAUR rootへfallbackせず、metadata / source identity / artifactをfail closedで検証するproduction接続済みroute | [local PKGBUILD](contracts/local-pkgbuild.md) |
 
 <a id="compat-packagebase-child-selection"></a>
 ## PackageBase / required-child compatibility
@@ -166,11 +167,11 @@ non-TTY、`--noconfirm`、cancel、EOFではpromptや自動選択を開始しな
 interactive stdinで番号、複数番号、inclusive range、表示済みofficial groupの`@group` selectorを扱う。empty、cancel、EOF、non-TTY、`--noconfirm`はnon-zeroで停止し、invalid lineはatomically retryする。selection、identity validation、全static preflightが終わるまでpacman、sudo、clone、build、install、cache / workspace mutationを開始しない。selected repository rootとAUR rootは明示routeへprojectし、package nameからsourceを再推定しない。詳細は[root package selection contract](contracts/root-package-selection.md)を参照する。
 
 <a id="compat-local-pkgbuild"></a>
-## Local PKGBUILD compatibility（production connection boundary）
+## Local PKGBUILD compatibility（production接続済み）
 
-正式入口は`moguet build --local <directory> [V=K...]`であり、`build <pkg>`はremote package routeとして維持する。local directory、root `PKGBUILD`、`.SRCINFO`のfilesystem identity、owner、mode、containmentをdescriptor-firstで検証し、unsafe stateはfail closedとする。local rootをAUR RPCへqueryせず、metadata failureをAUR absenceやempty dependencyへfallbackしない。
+正式入口は`moguet build --local <directory> [V=K...]`であり、`build <pkg>`はremote package routeとして維持する。local PKGBUILD routeはproduction CLIへ接続済みである。local directory、root `PKGBUILD`、`.SRCINFO`のfilesystem identity、owner、mode、containmentをdescriptor-firstで検証し、unsafe stateはfail closedとする。local rootをAUR RPCへqueryせず、metadata failureをAUR absenceやempty dependencyへfallbackしない。
 
-safe `.SRCINFO`をread-only authorityの第一候補とし、missing / invalid / known-staleとPKGBUILD evaluationを区別する。`--noedit`はevaluation consentではなく、`--noconfirm`、non-TTY、cancel、EOFはevaluationを自動承認しない。local source treeをreset、clean、overwrite、deleteせず、artifactはPackageBase / required-child contractへ接続する。なお、metadata、dependency plan、source workspace、artifact / install、public surfaceの全sliceが揃うまで不完全な`--local` routeをproductionへ接続しない。詳細は[local PKGBUILD contract](contracts/local-pkgbuild.md)を参照する。
+safe `.SRCINFO`をread-only authorityの第一候補とし、missing / invalid / known-staleとPKGBUILD evaluationを区別する。`--noedit`はevaluation consentではなく、`--noconfirm`、non-TTY、cancel、EOFはevaluationを自動承認しない。local source treeをreset、clean、overwrite、deleteせず、local rootはExplicit、dependency artifactsはDependencyとして扱い、existing Explicitを降格しない。artifactはPackageBase / required-child contractへ接続する。Issue #271 Slice 2〜5でmetadata、dependency plan、source workspace、artifact / install、public surfaceを揃え、production CLIへ接続済みである。詳細なfilesystem、execution、cleanup contractは[local PKGBUILD contract](contracts/local-pkgbuild.md)を参照する。
 
 <a id="compat-source-selection"></a>
 ## Package source selection policy
