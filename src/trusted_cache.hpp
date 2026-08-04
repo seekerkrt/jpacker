@@ -20,10 +20,18 @@
 
 class ArtifactWorkspace;
 class ArtifactMakepkgContext;
+class LocalSourceRoot;
+class LocalSourceWorkspace;
 class PreparedCacheCleanup;
+class ValidatedCacheRoot;
 class ValidatedPrivateCacheRoot;
 struct PersistentCheckoutDirectoryAccess;
+struct LocalSourceWorkspaceCleanupAccess;
 struct TrustedCacheAccess;
+
+LocalSourceWorkspace materialize_local_source_workspace(
+        const LocalSourceRoot& source_root,
+        const ValidatedCacheRoot& cache_root);
 
 enum class TrustedCacheStage {
     RootAdoption,
@@ -257,6 +265,16 @@ class RetainedTrustedCacheDirectory final {
             const ValidatedCachePath& path);
     friend class ArtifactMakepkgContext;
     friend struct PersistentCheckoutDirectoryAccess;
+    friend class LocalSourceWorkspace;
+    friend struct LocalSourceWorkspaceCleanupAccess;
+    friend LocalSourceWorkspace materialize_local_source_workspace(
+            const LocalSourceRoot& source_root,
+            const ValidatedCacheRoot& cache_root);
+
+    // Invocation-owned build output may change the workspace root mode.
+    // Re-establish the original named inode and private owner mode before the
+    // source-workspace-specific recursive cleanup runs.
+    void prepare_for_owned_cleanup();
 
 public:
     RetainedTrustedCacheDirectory(

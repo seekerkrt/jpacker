@@ -1766,6 +1766,82 @@ void RetainedTrustedCacheDirectory::require_unchanged_identity() const {
             TrustedCacheStage::ChildOpen);
 }
 
+void RetainedTrustedCacheDirectory::prepare_for_owned_cleanup() {
+    if(descriptor_ < 0) {
+        throw_cache_error(
+                TrustedCacheStage::RecursiveRemoval,
+                TrustedCacheErrorCode::InvalidBoundary);
+    }
+    const ValidatedCacheRoot& root = TrustedCacheAccess::root(path_);
+    require_root_unchanged(root, TrustedCacheStage::RecursiveRemoval);
+    const auto& root_state = require_root_state(
+            root, TrustedCacheStage::RecursiveRemoval);
+
+    struct stat retained_before {};
+    struct stat named_before {};
+    if(fstat(descriptor_, &retained_before) != 0 ||
+       fstatat(
+               root_state->directory_descriptor,
+               TrustedCacheAccess::leaf(path_).c_str(), &named_before,
+               AT_SYMLINK_NOFOLLOW) != 0) {
+        const int metadata_error = errno;
+        throw_cache_error(
+                TrustedCacheStage::RecursiveRemoval,
+                is_permission_error(metadata_error)
+                        ? TrustedCacheErrorCode::PermissionDenied
+                        : TrustedCacheErrorCode::MetadataFailure,
+                metadata_error);
+    }
+    if(!S_ISDIR(retained_before.st_mode) ||
+       !same_identity_and_type(retained_before, named_before) ||
+       !same_identity(retained_before, device_, inode_) ||
+       status_device(retained_before) != root_state->device ||
+       status_owner(retained_before) != root_state->owner ||
+       status_owner(named_before) != root_state->owner ||
+       status_owner(retained_before) !=
+               static_cast<std::uintmax_t>(geteuid())) {
+        throw_cache_error(
+                TrustedCacheStage::RecursiveRemoval,
+                TrustedCacheErrorCode::ConcurrentReplacement);
+    }
+
+    if(fchmod(descriptor_, 0700) != 0) {
+        const int mode_error = errno;
+        throw_cache_error(
+                TrustedCacheStage::RecursiveRemoval,
+                is_permission_error(mode_error)
+                        ? TrustedCacheErrorCode::PermissionDenied
+                        : TrustedCacheErrorCode::MetadataFailure,
+                mode_error);
+    }
+
+    struct stat retained_after {};
+    struct stat named_after {};
+    if(fstat(descriptor_, &retained_after) != 0 ||
+       fstatat(
+               root_state->directory_descriptor,
+               TrustedCacheAccess::leaf(path_).c_str(), &named_after,
+               AT_SYMLINK_NOFOLLOW) != 0) {
+        const int metadata_error = errno;
+        throw_cache_error(
+                TrustedCacheStage::RecursiveRemoval,
+                is_permission_error(metadata_error)
+                        ? TrustedCacheErrorCode::PermissionDenied
+                        : TrustedCacheErrorCode::MetadataFailure,
+                metadata_error);
+    }
+    if(!same_identity_and_type(retained_before, retained_after) ||
+       !same_identity_and_type(retained_after, named_after) ||
+       status_owner(retained_after) != root_state->owner ||
+       status_owner(named_after) != root_state->owner ||
+       status_permissions(retained_after) != 0700 ||
+       status_permissions(named_after) != 0700) {
+        throw_cache_error(
+                TrustedCacheStage::RecursiveRemoval,
+                TrustedCacheErrorCode::ConcurrentReplacement);
+    }
+}
+
 RetainedTrustedCacheDirectory retain_trusted_cache_directory(
         const ValidatedCachePath& path) {
     ValidatedCachePath current = revalidate_trusted_cache_path(

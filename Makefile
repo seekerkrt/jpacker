@@ -48,6 +48,8 @@ ROOT_PACKAGE_ROUTE_PROJECTION_TEST_TARGET := $(BUILD_DIR)/tests/root-package-rou
 LOCAL_PACKAGE_METADATA_TEST_TARGET := $(BUILD_DIR)/tests/local-package-metadata-test
 LOCAL_SOURCE_ROOT_TEST_TARGET := $(BUILD_DIR)/tests/local-source-root-test
 LOCAL_DEPENDENCY_PLAN_PROJECTION_TEST_TARGET := $(BUILD_DIR)/tests/local-dependency-plan-projection-test
+LOCAL_SOURCE_WORKSPACE_TEST_TARGET := $(BUILD_DIR)/tests/local-source-workspace-test
+LOCAL_SOURCE_BUILD_TEST_TARGET := $(BUILD_DIR)/tests/local-source-build-test
 USER_CONFIG_MODULE_TEST_TARGET := $(BUILD_DIR)/tests/user-config-test
 PACKAGE_IDENTIFIER_TEST_TARGET := build/tests/package-identifier-test
 SHELL_WORDS_TEST_TARGET := build/tests/shell-words-test
@@ -577,6 +579,61 @@ LOCAL_DEPENDENCY_PLAN_PROJECTION_FORBIDDEN_TEST_SRCS := \
 	$(filter-out \
 		$(LOCAL_DEPENDENCY_PLAN_PROJECTION_ALLOWED_PRODUCTION_TEST_SRCS), \
 		$(SRCS))
+# POLICY(#271): local source workspace testはsource snapshot ownerとread-only
+# local root/cache capability supportだけをlinkし、process / CLI / install ownerを
+# 持ち込まない。
+LOCAL_SOURCE_WORKSPACE_ALLOWED_PRODUCTION_TEST_SRCS := \
+	$(SRC_DIR)/local_source_workspace.cpp \
+	$(SRC_DIR)/local_source_root.cpp \
+	$(SRC_DIR)/local_package_metadata.cpp \
+	$(SRC_DIR)/trusted_cache.cpp \
+	$(SRC_DIR)/xdg_directory_safety.cpp \
+	$(SRC_DIR)/xdg_paths.cpp \
+	$(SRC_DIR)/logging.cpp
+LOCAL_SOURCE_WORKSPACE_TEST_SRCS := \
+	tests/local_source_workspace_test.cpp \
+	$(LOCAL_SOURCE_WORKSPACE_ALLOWED_PRODUCTION_TEST_SRCS)
+LOCAL_SOURCE_WORKSPACE_FORBIDDEN_TEST_SRCS := \
+	$(filter-out \
+		$(LOCAL_SOURCE_WORKSPACE_ALLOWED_PRODUCTION_TEST_SRCS), \
+		$(SRCS))
+# POLICY(#271): local source build composition testはsource/artifact workspace、
+# local plan、artifact target/identity selectionの既存ownerだけをproductionから
+# linkする。query/process境界は専用stubへ切り、install/CLI/AUR transportを除外する。
+LOCAL_SOURCE_BUILD_ALLOWED_PRODUCTION_TEST_SRCS := \
+	$(SRC_DIR)/local_source_build.cpp \
+	$(SRC_DIR)/local_source_workspace.cpp \
+	$(SRC_DIR)/local_source_root.cpp \
+	$(SRC_DIR)/local_package_metadata.cpp \
+	$(SRC_DIR)/local_dependency_plan_projection.cpp \
+	$(SRC_DIR)/dependency_plan.cpp \
+	$(SRC_DIR)/dependency_plan_model.cpp \
+	$(SRC_DIR)/dependency_spec.cpp \
+	$(SRC_DIR)/build_plan_artifact_target_projection.cpp \
+	$(SRC_DIR)/artifact_workspace.cpp \
+	$(SRC_DIR)/artifact_identity.cpp \
+	$(SRC_DIR)/artifact_identity_set.cpp \
+	$(SRC_DIR)/artifact_identity_selection.cpp \
+	$(SRC_DIR)/artifact_install_plan.cpp \
+	$(SRC_DIR)/trusted_cache.cpp \
+	$(SRC_DIR)/xdg_directory_safety.cpp \
+	$(SRC_DIR)/xdg_paths.cpp \
+	$(SRC_DIR)/source_environment.cpp \
+	$(SRC_DIR)/package_identifier.cpp \
+	$(SRC_DIR)/shell_words.cpp \
+	$(SRC_DIR)/logging.cpp
+LOCAL_SOURCE_BUILD_REQUIRED_TEST_SUPPORT_SRCS := \
+	tests/stubs/local-dependency-plan/aur_rpc_stub.cpp \
+	tests/stubs/local-dependency-plan/repository_query_stub.cpp \
+	tests/stubs/local-source-build/process_stub.cpp
+LOCAL_SOURCE_BUILD_TEST_SRCS := \
+	tests/local_source_build_test.cpp \
+	$(LOCAL_SOURCE_BUILD_ALLOWED_PRODUCTION_TEST_SRCS) \
+	$(LOCAL_SOURCE_BUILD_REQUIRED_TEST_SUPPORT_SRCS)
+LOCAL_SOURCE_BUILD_FORBIDDEN_TEST_SRCS := \
+	$(filter-out \
+		$(LOCAL_SOURCE_BUILD_ALLOWED_PRODUCTION_TEST_SRCS), \
+		$(SRCS))
 # POLICY(#268): dependency resolver model testはresolverとpure model supportだけを
 # productionからlinkし、metadata/process/source-build execution ownerを持ち込まない。
 DEPENDENCY_PLAN_MODEL_ALLOWED_PRODUCTION_TEST_SRCS := \
@@ -884,11 +941,13 @@ LIBALPM_BUILD_TARGETS := \
 	$(PRODUCTION_SOURCE_BUILD_TEST_TARGET) \
 	$(REPOSITORY_QUERY_TEST_TARGET) \
 	$(LOCAL_DEPENDENCY_PLAN_PROJECTION_TEST_TARGET) \
+	$(LOCAL_SOURCE_BUILD_TEST_TARGET) \
 	$(AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION_TEST_TARGET) \
 	$(UPGRADE_BASELINE_METADATA_TEST_TARGET)
 
 .PHONY: all check-libalpm clean check-upgrade-all-plan-link-firewall check-system-source-upgrade-link-firewall check-aur-update-execution-runner-link-firewall check-aur-update-operation-result-link-firewall check-filtered-aur-update-operation-link-firewall check-upgrade-all-operation-link-firewall check-upgrade-all-command-link-firewall check-commands-sync-link-firewall check-root-package-candidate-link-firewall check-root-package-search-link-firewall check-root-package-selection-link-firewall check-root-package-route-projection-link-firewall check-dependency-plan-model-link-firewall check-build-plan-artifact-target-projection-link-firewall check-artifact-selection-model-link-firewall check-artifact-identity-selection-link-firewall check-multiple-artifact-workspace-link-firewall check-multiple-artifact-identity-link-firewall check-package-base-artifact-install-plan-link-firewall check-package-base-artifact-install-executor-link-firewall check-separated-package-base-source-build-link-firewall test test-internal-identity test-application-identity test-xdg-paths test-xdg-directory-safety test-xdg-state-log test-trusted-cache test-runtime-identity test-app-config test-provider-selection test-root-package-candidate test-root-package-search test-root-package-selection test-root-package-route-projection test-user-config test-package-identifier test-package-metadata test-package-metadata-integration test-repository-query test-shell-words test-source-environment test-artifact-workspace test-multiple-artifact-workspace test-artifact-identity test-multiple-artifact-identity test-artifact-install-executor test-package-base-artifact-install-plan test-package-base-artifact-install-executor test-separated-source-build test-separated-package-base-source-build test-production-source-build test-process-capture test-aur-update-plan test-upgrade-all-plan test-system-source-upgrade test-aur-update-query test-aur-update-command test-upgrade-all-command test-aur-update-execution-preflight test-aur-update-execution-preflight-integration test-aur-update-execution-preparation test-aur-update-execution-runner test-aur-update-operation-result test-filtered-aur-update-operation test-upgrade-all-operation test-dependency-plan-model test-build-plan-artifact-target-projection test-artifact-install-plan test-artifact-selection-model test-artifact-identity-selection test-command-stub-contract test-markdown-links test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-commands-inspect test-commands-source-maintenance test-commands-sync test-conflicts-replaces test-install-layout test-package-transition test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check install uninstall
 .PHONY: check-local-package-metadata-link-firewall check-local-source-root-link-firewall check-local-dependency-plan-projection-link-firewall test-local-package-metadata test-local-source-root test-local-dependency-plan-projection
+.PHONY: check-local-source-workspace-link-firewall check-local-source-build-link-firewall test-local-source-workspace test-local-source-build
 .PHONY: FORCE catalogs check-catalogs check-localization-config check-pot update-po update-pot test-localization test-catalog-metadata-gate test-cli-localization-surface test-public-documentation
 .PHONY: test-container
 
@@ -1271,6 +1330,67 @@ $(LOCAL_DEPENDENCY_PLAN_PROJECTION_TEST_TARGET): $(LOCAL_DEPENDENCY_PLAN_PROJECT
 	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
 		-I$(SRC_DIR) -Itests \
 		$(LOCAL_DEPENDENCY_PLAN_PROJECTION_TEST_SRCS) \
+		-o $@ $(LIBALPM_LDLIBS)
+
+$(LOCAL_SOURCE_WORKSPACE_TEST_TARGET): \
+	$(LOCAL_SOURCE_WORKSPACE_TEST_SRCS) \
+	$(SRC_DIR)/local_source_workspace.hpp \
+	$(SRC_DIR)/local_source_root.hpp \
+	$(SRC_DIR)/local_package_metadata.hpp \
+	$(SRC_DIR)/application_identity.hpp \
+	$(SRC_DIR)/trusted_cache.hpp \
+	$(SRC_DIR)/xdg_directory_safety.hpp \
+	$(SRC_DIR)/xdg_paths.hpp \
+	$(SRC_DIR)/logging.hpp \
+	$(SRC_DIR)/localization.hpp \
+	$(TRUSTED_CACHE_SUPPORT_HEADER) \
+	$(VERSION_FILE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling local source workspace test binary"
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
+		-DMOGUET_ENABLE_LOCAL_SOURCE_WORKSPACE_TEST_HOOKS \
+		-I$(SRC_DIR) -Itests \
+		$(LOCAL_SOURCE_WORKSPACE_TEST_SRCS) -o $@
+
+$(LOCAL_SOURCE_BUILD_TEST_TARGET): \
+	$(LOCAL_SOURCE_BUILD_TEST_SRCS) \
+	$(SRC_DIR)/local_source_build.hpp \
+	$(SRC_DIR)/local_source_workspace.hpp \
+	$(SRC_DIR)/local_source_root.hpp \
+	$(SRC_DIR)/local_package_metadata.hpp \
+	$(SRC_DIR)/local_dependency_plan_projection.hpp \
+	$(SRC_DIR)/dependency_plan.hpp \
+	$(SRC_DIR)/dependency_plan_projection_support.hpp \
+	$(SRC_DIR)/dependency_provider.hpp \
+	$(SRC_DIR)/dependency_spec.hpp \
+	$(SRC_DIR)/aur_rpc.hpp \
+	$(SRC_DIR)/repository_query.hpp \
+	$(SRC_DIR)/build_plan_artifact_target_projection.hpp \
+	$(SRC_DIR)/artifact_workspace.hpp \
+	$(SRC_DIR)/artifact_identity.hpp \
+	$(SRC_DIR)/artifact_identity_selection.hpp \
+	$(SRC_DIR)/artifact_install_plan.hpp \
+	$(SRC_DIR)/application_identity.hpp \
+	$(SRC_DIR)/trusted_cache.hpp \
+	$(SRC_DIR)/xdg_directory_safety.hpp \
+	$(SRC_DIR)/xdg_paths.hpp \
+	$(SRC_DIR)/source_environment.hpp \
+	$(SRC_DIR)/package_identifier.hpp \
+	$(SRC_DIR)/shell_words.hpp \
+	$(SRC_DIR)/process.hpp \
+	$(SRC_DIR)/logging.hpp \
+	$(SRC_DIR)/localization.hpp \
+	$(TRUSTED_CACHE_SUPPORT_HEADER) \
+	tests/stubs/local-dependency-plan/query_stub.hpp \
+	tests/stubs/local-source-build/process_stub.hpp \
+	$(VERSION_FILE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling local source build test binary"
+	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
+		-DMOGUET_ENABLE_ARTIFACT_WORKSPACE_TEST_HOOKS \
+		-DMOGUET_ENABLE_LOCAL_SOURCE_WORKSPACE_TEST_HOOKS \
+		-I$(SRC_DIR) -Itests \
+		$(LOCAL_SOURCE_BUILD_TEST_SRCS) \
 		-o $@ $(LIBALPM_LDLIBS)
 
 $(USER_CONFIG_MODULE_TEST_TARGET): tests/user_config_test.cpp $(SRC_DIR)/user_config.cpp $(SRC_DIR)/user_config.hpp $(SRC_DIR)/cli_parser.cpp $(SRC_DIR)/cli_parser.hpp $(SRC_DIR)/localization.hpp $(VERSION_FILE)
@@ -1806,6 +1926,58 @@ check-local-dependency-plan-projection-link-firewall:
 test-local-dependency-plan-projection: check-local-dependency-plan-projection-link-firewall $(LOCAL_DEPENDENCY_PLAN_PROJECTION_TEST_TARGET)
 	$(abspath $(LOCAL_DEPENDENCY_PLAN_PROJECTION_TEST_TARGET))
 
+check-local-source-workspace-link-firewall:
+	@echo ":: Checking local source workspace link firewall"
+	@set -e; for source in $(LOCAL_SOURCE_WORKSPACE_ALLOWED_PRODUCTION_TEST_SRCS); do \
+		count=$$(printf '%s\n' $(LOCAL_SOURCE_WORKSPACE_TEST_SRCS) | \
+			awk -v expected="$$source" '$$0 == expected { count++ } END { print count + 0 }'); \
+		test "$$count" -eq 1 || { \
+			echo "error: local source workspace test must link $$source exactly once" >&2; \
+			exit 1; \
+		}; \
+	done
+	@test -z "$(filter $(LOCAL_SOURCE_WORKSPACE_FORBIDDEN_TEST_SRCS),$(LOCAL_SOURCE_WORKSPACE_TEST_SRCS))" || { \
+		echo "error: local source workspace test links a forbidden production source" >&2; \
+		exit 1; \
+	}
+	@test -z "$(filter tests/stubs/%,$(LOCAL_SOURCE_WORKSPACE_TEST_SRCS))" || { \
+		echo "error: local source workspace test links a test stub" >&2; \
+		exit 1; \
+	}
+
+test-local-source-workspace: check-local-source-workspace-link-firewall $(LOCAL_SOURCE_WORKSPACE_TEST_TARGET)
+	$(abspath $(LOCAL_SOURCE_WORKSPACE_TEST_TARGET))
+
+check-local-source-build-link-firewall:
+	@echo ":: Checking local source build link firewall"
+	@set -e; for source in $(LOCAL_SOURCE_BUILD_ALLOWED_PRODUCTION_TEST_SRCS); do \
+		count=$$(printf '%s\n' $(LOCAL_SOURCE_BUILD_TEST_SRCS) | \
+			awk -v expected="$$source" '$$0 == expected { count++ } END { print count + 0 }'); \
+		test "$$count" -eq 1 || { \
+			echo "error: local source build test must link $$source exactly once" >&2; \
+			exit 1; \
+		}; \
+	done
+	@set -e; for source in $(LOCAL_SOURCE_BUILD_REQUIRED_TEST_SUPPORT_SRCS); do \
+		count=$$(printf '%s\n' $(LOCAL_SOURCE_BUILD_TEST_SRCS) | \
+			awk -v expected="$$source" '$$0 == expected { count++ } END { print count + 0 }'); \
+		test "$$count" -eq 1 || { \
+			echo "error: local source build test must link support $$source exactly once" >&2; \
+			exit 1; \
+		}; \
+	done
+	@test -z "$(filter $(LOCAL_SOURCE_BUILD_FORBIDDEN_TEST_SRCS),$(LOCAL_SOURCE_BUILD_TEST_SRCS))" || { \
+		echo "error: local source build test links a forbidden production source" >&2; \
+		exit 1; \
+	}
+	@test "$(words $(filter tests/stubs/%,$(LOCAL_SOURCE_BUILD_TEST_SRCS)))" -eq "$(words $(LOCAL_SOURCE_BUILD_REQUIRED_TEST_SUPPORT_SRCS))" || { \
+		echo "error: local source build test links an unexpected test stub" >&2; \
+		exit 1; \
+	}
+
+test-local-source-build: check-local-source-build-link-firewall $(LOCAL_SOURCE_BUILD_TEST_TARGET)
+	$(abspath $(LOCAL_SOURCE_BUILD_TEST_TARGET))
+
 test-user-config: $(USER_CONFIG_MODULE_TEST_TARGET)
 	sh tests/test-user-config.sh $(abspath $(USER_CONFIG_MODULE_TEST_TARGET))
 
@@ -2334,6 +2506,8 @@ test: \
 	test-local-package-metadata \
 	test-local-source-root \
 	test-local-dependency-plan-projection \
+	test-local-source-workspace \
+	test-local-source-build \
 	test-user-config \
 	test-package-identifier \
 	test-package-metadata \
