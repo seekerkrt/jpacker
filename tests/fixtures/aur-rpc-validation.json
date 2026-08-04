@@ -541,6 +541,9 @@
   "search_response_overrides": {
     "strict-search-wrong-type": {"set": {"type": "multiinfo"}}
   },
+  "search_status_overrides": {
+    "strict-search-http-failure": 503
+  },
   "info_sequence_groups": {
     "upgrade-execution-schema-error": {
       "requests": ["upgrade-sequence-a", "upgrade-sequence-b"],

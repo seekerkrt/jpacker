@@ -97,6 +97,13 @@ std::vector<AurPackageInfo> AurClient::search(const std::string& query) {
     return {};
 }
 
+std::vector<AurPackageInfo> AurClient::search_strict(
+        const std::string& query) {
+    append_command_log("aur search-strict " + query);
+    throw std::runtime_error(
+            "Unexpected commands-sync strict search call: " + query);
+}
+
 std::vector<std::string> AurClient::search_names_by_provides(
         const std::string& provided_name) {
     append_command_log("aur provides " + provided_name);

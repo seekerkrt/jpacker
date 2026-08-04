@@ -18,6 +18,22 @@ struct RepositoryPackageQuery {
     std::string package_name;
 };
 
+struct RepositorySearchPackageMetadata {
+    std::string name;
+    std::string version;
+    std::string description;
+};
+
+struct RepositorySearchQuery {
+    std::string repository_name;
+    std::string query;
+};
+
+struct RepositoryGroupQuery {
+    std::string repository_name;
+    std::string group_name;
+};
+
 struct LocalPackageMetadata {
     std::string       name;
     std::string       version;
@@ -105,6 +121,30 @@ void preserve_error_on_next_repository_package_query(
         const std::string& package_name,
         alpm_errno_t stale_error = ALPM_ERR_DB_OPEN);
 
+void set_repository_search_results(
+        const std::string& repository_name,
+        const std::string& query,
+        const std::vector<RepositorySearchPackageMetadata>& packages);
+void set_repository_search_failure(
+        const std::string& repository_name,
+        const std::string& query,
+        alpm_errno_t error = ALPM_ERR_INVALID_REGEX);
+void preserve_error_on_next_repository_search(
+        const std::string& repository_name,
+        const std::string& query,
+        alpm_errno_t stale_error = ALPM_ERR_DB_OPEN);
+void set_repository_exact_group(
+        const std::string& repository_name,
+        const std::string& group_name,
+        const std::vector<RepositorySearchPackageMetadata>& packages);
+void set_repository_group_returned_name(
+        const std::string& repository_name,
+        const std::string& group_name,
+        const std::string& returned_name);
+void append_null_repository_group_member(
+        const std::string& repository_name,
+        const std::string& group_name);
+
 std::size_t initialize_call_count();
 std::size_t local_database_call_count();
 std::size_t database_valid_call_count();
@@ -115,6 +155,8 @@ std::size_t sync_package_cache_call_count(
 std::size_t created_handle_count();
 std::size_t release_call_count();
 std::size_t release_count_for_handle(std::size_t creation_index);
+std::size_t owned_list_free_call_count();
+std::size_t group_expansion_call_count();
 
 std::string last_initialize_root();
 std::string last_initialize_database_path();
@@ -124,5 +166,7 @@ std::vector<std::string> local_package_query_history();
 std::vector<SyncDatabaseRegistration> sync_database_registration_history();
 std::vector<std::string> sync_database_operation_history();
 std::vector<RepositoryPackageQuery> repository_package_query_history();
+std::vector<RepositorySearchQuery> repository_search_query_history();
+std::vector<RepositoryGroupQuery> repository_group_query_history();
 
 } // namespace package_metadata_test_stub
