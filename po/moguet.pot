@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Moguet 2.0.1\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-04 18:59+0900\n"
+"POT-Creation-Date: 2026-08-05 01:45+0900\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -7289,24 +7289,24 @@ msgstr ""
 msgid "Failed to restore the working directory after a trusted cache operation: {}"
 msgstr ""
 
-#: src/trusted_cache.cpp:1822
+#: src/trusted_cache.cpp:1898
 msgid "Unable to prove ownership of a newly staged trusted cache directory; leaving it untouched."
 msgstr ""
 
-#: src/trusted_cache.cpp:2111
+#: src/trusted_cache.cpp:2187
 msgid "Clone rollback requires an existing validated directory."
 msgstr ""
 
-#: src/trusted_cache.cpp:2186
+#: src/trusted_cache.cpp:2262
 msgid "Rolled back a failed clone cache entry."
 msgstr ""
 
-#: src/trusted_cache.cpp:2192
+#: src/trusted_cache.cpp:2268
 #, c++-format
 msgid "Refusing unsafe clone rollback: {}"
 msgstr ""
 
-#: src/trusted_cache.cpp:2197
+#: src/trusted_cache.cpp:2273
 msgid "Refusing unsafe clone rollback: unknown error."
 msgstr ""
 
