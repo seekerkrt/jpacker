@@ -1,5 +1,6 @@
 #include "dependency_plan.hpp"
 
+#include "dependency_plan_projection_support.hpp"
 #include "dependency_provider.hpp"
 #include "dependency_spec.hpp"
 #include "localization.hpp"
@@ -752,17 +753,25 @@ const PlannedPackageTarget* find_package_target(
 }
 
 void add_planned_package_target(
-        BuildPlan& plan, const AurPackageInfo& info,
+        BuildPlan& plan, const std::string& package_name,
+        const std::string& package_base,
         const std::vector<PackageRole>& roles, const RootTargetIdentity& root) {
-    PlannedPackageTarget* target = find_package_target(plan, info.Name);
+    PlannedPackageTarget* target = find_package_target(plan, package_name);
     if(target == nullptr) {
         plan.package_targets.push_back(
-                PlannedPackageTarget{info.Name, package_base_name(info), {}, {}});
+                PlannedPackageTarget{package_name, package_base, {}, {}});
         target = &plan.package_targets.back();
     }
 
     for(const auto role : roles) add_package_role(target->roles, role);
     add_root_identity(target->roots, root);
+}
+
+void add_planned_package_target(
+        BuildPlan& plan, const AurPackageInfo& info,
+        const std::vector<PackageRole>& roles, const RootTargetIdentity& root) {
+    add_planned_package_target(
+            plan, info.Name, package_base_name(info), roles, root);
 }
 
 std::vector<TypedPackageDependency> typed_dependencies_for_specification(
@@ -850,43 +859,70 @@ void propagate_resolution_failure_root_identities(BuildPlan& plan) {
     }
 }
 
-void add_build_plan_split_package_target(BuildPlan& plan, const AurPackageInfo& info) {
-    if(!has_distinct_package_base(info)) return;
+void add_build_plan_split_package_target(
+        BuildPlan& plan, const std::string& package_name,
+        const std::string& package_base) {
+    if(package_name == package_base) return;
 
-    auto same_target = [&info](const BuildPlanSplitPackageTarget& existing) {
-        return existing.package_base == info.PackageBase && existing.package_name == info.Name;
+    auto same_target = [&](const BuildPlanSplitPackageTarget& existing) {
+        return existing.package_base == package_base &&
+               existing.package_name == package_name;
     };
     if(std::find_if(plan.split_package_targets.begin(), plan.split_package_targets.end(), same_target) !=
        plan.split_package_targets.end())
         return;
 
-    plan.split_package_targets.push_back(BuildPlanSplitPackageTarget{info.PackageBase, info.Name});
+    plan.split_package_targets.push_back(
+            BuildPlanSplitPackageTarget{package_base, package_name});
 }
 
-void add_build_plan_metadata_risk(BuildPlan& plan, const AurPackageInfo& info) {
-    if(info.Conflicts.empty() && info.Replaces.empty()) return;
+void add_build_plan_split_package_target(
+        BuildPlan& plan, const AurPackageInfo& info) {
+    add_build_plan_split_package_target(
+            plan, info.Name, package_base_name(info));
+}
 
-    std::string package_base = package_base_name(info);
-    auto same_package = [&info, &package_base](const BuildPlanMetadataRisk& existing) {
-        return existing.package_name == info.Name && existing.package_base == package_base;
+void add_build_plan_metadata_risk(
+        BuildPlan& plan, const std::string& package_name,
+        const std::string& package_base,
+        const std::vector<std::string>& conflicts,
+        const std::vector<std::string>& replaces) {
+    if(conflicts.empty() && replaces.empty()) return;
+
+    auto same_package = [&](const BuildPlanMetadataRisk& existing) {
+        return existing.package_name == package_name &&
+               existing.package_base == package_base;
     };
     if(std::find_if(plan.metadata_risks.begin(), plan.metadata_risks.end(), same_package) !=
        plan.metadata_risks.end())
         return;
 
     plan.metadata_risks.push_back(
-            BuildPlanMetadataRisk{info.Name, package_base, info.Conflicts, info.Replaces});
+            BuildPlanMetadataRisk{
+                    package_name, package_base, conflicts, replaces});
 }
 
-void add_build_plan_entry(BuildPlan& plan, const AurPackageInfo& info) {
-    std::string package_base = package_base_name(info);
+void add_build_plan_metadata_risk(BuildPlan& plan, const AurPackageInfo& info) {
+    add_build_plan_metadata_risk(
+            plan, info.Name, package_base_name(info), info.Conflicts,
+            info.Replaces);
+}
+
+void add_build_plan_entry(
+        BuildPlan& plan, const std::string& package_name,
+        const std::string& package_base) {
     auto        same_base = [&package_base](const BuildPlanEntry& existing) { return existing.package_base == package_base; };
     auto        it = std::find_if(plan.order.begin(), plan.order.end(), same_base);
     if(it == plan.order.end()) {
-        plan.order.push_back(BuildPlanEntry{package_base, {info.Name}});
+        plan.order.push_back(BuildPlanEntry{package_base, {package_name}});
         return;
     }
-    add_unique_value(it->package_names, info.Name);
+    add_unique_value(it->package_names, package_name);
+}
+
+void add_build_plan_entry(BuildPlan& plan, const AurPackageInfo& info) {
+    add_build_plan_entry(
+            plan, info.Name, package_base_name(info));
 }
 
 const BuildPlanEntry* find_build_plan_entry(
@@ -1012,6 +1048,260 @@ void collect_aur_build_plan(
         const RootTargetIdentity& root, int depth, int max_depth,
         bool traverse_aur_providers, BuildPlanResolutionMode resolution_mode,
         const ProviderSelectionCallback& select_provider,
+        const std::set<std::string>& local_package_bases,
+        const std::set<std::string>& local_package_names,
+        std::vector<dependency_plan_projection_support::
+                            RemoteProviderIdentityConflict>*
+                identity_conflicts,
+        const dependency_plan_projection_support::LocalDependencyResolver&
+                resolve_local_dependency,
+        const std::optional<std::string>& parent_package_name,
+        const std::optional<std::string>& parent_package_base,
+        const std::optional<std::string>& dependency_specification,
+        const std::optional<ProvidedDependency>& expected_selected_provider);
+
+void resolve_build_plan_dependency(
+        const std::string& parent_package_name,
+        const std::string& parent_package_base,
+        const std::string& dependency,
+        const std::vector<TypedPackageDependency>& matching_dependencies,
+        BuildPlan& plan,
+        std::set<std::string>& visited_package_names,
+        std::set<std::string>& visiting_package_names,
+        const RootTargetIdentity& root, int depth, int max_depth,
+        bool traverse_aur_providers, BuildPlanResolutionMode resolution_mode,
+        const ProviderSelectionCallback& select_provider,
+        const std::set<std::string>& local_package_bases,
+        const std::set<std::string>& local_package_names,
+        std::vector<dependency_plan_projection_support::
+                            RemoteProviderIdentityConflict>*
+                identity_conflicts,
+        const dependency_plan_projection_support::LocalDependencyResolver&
+                resolve_local_dependency) {
+    if(matching_dependencies.empty()) {
+        throw std::logic_error(localization::format_translated_message(
+                "Build dependency is missing its package role: {}",
+                dependency));
+    }
+
+    if(resolve_local_dependency) {
+        const dependency_plan_projection_support::DependencyDecision decision =
+                resolve_local_dependency(
+                        dependency_plan_projection_support::DependencyContext{
+                                parent_package_name,
+                                parent_package_base,
+                                matching_dependencies,
+                                root});
+        if(decision.handled_locally) {
+            if(decision.cycle_package_base.has_value()) {
+                add_unique_value(
+                        plan.cycles, decision.cycle_package_base.value());
+            }
+            if(decision.unresolved_reason.has_value()) {
+                add_unique_value(
+                        plan.unresolved, decision.unresolved_reason.value());
+            }
+            return;
+        }
+    }
+
+    const std::vector<PackageRole> dependency_roles =
+            package_roles_for_dependencies(matching_dependencies);
+    BuildPlanDependencyEdge edge{
+            parent_package_name,
+            parent_package_base,
+            matching_dependencies.front().specification,
+            matching_dependencies.front().role,
+            DependencyKind::Unknown,
+            std::nullopt,
+            std::nullopt,
+            std::nullopt};
+
+    ParsedDependency parsed = parse_dependency_string(dependency);
+    const std::string dep_name = parsed.name;
+    if(!is_valid_package_name(dep_name)) {
+        add_unique_value(plan.unresolved, dependency);
+        add_build_plan_dependency_edges(plan, edge, matching_dependencies);
+        return;
+    }
+    if(parsed.has_malformed_constraint()) {
+        add_unique_value(
+                plan.unresolved,
+                dependency_constraint_unresolved_reason(dependency));
+        add_build_plan_dependency_edges(plan, edge, matching_dependencies);
+        return;
+    }
+    if(parsed.has_constraint()) {
+        // POLICY(#96): remote planはconstraintを解決済みと断定しない。
+        add_unique_value(
+                plan.unresolved,
+                dependency_constraint_unresolved_reason(dependency));
+    }
+
+    BuildPlanResolutionFailureContext dependency_failure_context{
+            plan, root, parent_package_name, parent_package_base, dependency};
+    BuildPlanResolutionFailureContext* dependency_failure_sink =
+            resolution_mode == BuildPlanResolutionMode::CaptureOrdinaryFailures
+            ? &dependency_failure_context
+            : nullptr;
+    const RepositoryPackageQueryStatus repository_status =
+            query_repository_package(
+                    dep_name, resolution_mode, dependency_failure_sink,
+                    static_cast<bool>(select_provider));
+    if(repository_status == RepositoryPackageQueryStatus::Present) {
+        edge.kind = DependencyKind::Repo;
+        edge.resolved_package_name = dep_name;
+        add_build_plan_dependency_edges(plan, edge, matching_dependencies);
+        return;
+    }
+    if(repository_status == RepositoryPackageQueryStatus::Unavailable) {
+        add_unique_value(plan.unresolved, dependency);
+        add_build_plan_dependency_edges(plan, edge, matching_dependencies);
+        return;
+    }
+
+    std::optional<AurPackageInfo> dependency_info;
+    bool dependency_metadata_unavailable = false;
+    try {
+        dependency_info = query_aur_package_info(
+                dep_name, resolution_mode,
+                static_cast<bool>(select_provider));
+    } catch(const AurRpcResponseError&) {
+        throw;
+    } catch(const std::exception& error) {
+        if(resolution_mode == BuildPlanResolutionMode::Legacy &&
+           select_provider) {
+            throw;
+        }
+        add_resolution_failure(
+                dependency_failure_sink,
+                BuildPlanResolutionFailureKind::AurPackageMetadataUnavailable,
+                dep_name, error.what());
+        dependency_metadata_unavailable = dependency_failure_sink != nullptr;
+        Logger::warn(localization::format_translated_message(
+                "Failed to check {} dependency {}: {}",
+                "AUR", dep_name, error.what()));
+    }
+
+    if(dependency_metadata_unavailable) {
+        add_unique_value(plan.unresolved, dependency);
+        add_build_plan_dependency_edges(plan, edge, matching_dependencies);
+        return;
+    }
+
+    if(dependency_info.has_value()) {
+        edge.kind = DependencyKind::Aur;
+        edge.resolved_package_name = dependency_info->Name;
+        edge.resolved_package_base =
+                package_base_name(dependency_info.value());
+        add_build_plan_dependency_edges(plan, edge, matching_dependencies);
+        if(local_package_bases.count(edge.resolved_package_base.value()) > 0) {
+            add_unique_value(plan.cycles, edge.resolved_package_base.value());
+            return;
+        }
+        collect_aur_build_plan(
+                dep_name, plan, visited_package_names,
+                visiting_package_names, dependency_roles, root,
+                depth + 1, max_depth, traverse_aur_providers,
+                resolution_mode, select_provider, local_package_bases,
+                local_package_names, identity_conflicts,
+                resolve_local_dependency, parent_package_name,
+                parent_package_base, dependency, std::nullopt);
+        return;
+    }
+
+    std::vector<ProvidedDependency> providers =
+            find_dependency_providers(
+                    dep_name, dependency_failure_sink,
+                    static_cast<bool>(select_provider));
+    std::optional<ProvidedDependency> resolved_provider =
+            select_provider_candidate(
+                    dependency, providers, select_provider);
+    const ProviderResolutionKind provider_resolution =
+            resolved_provider.has_value()
+            ? ProviderResolutionKind::UserSelected
+            : ProviderResolutionKind::Unique;
+    if(!resolved_provider.has_value() && providers.size() == 1) {
+        resolved_provider = providers.front();
+    }
+
+    if(resolved_provider.has_value()) {
+        const ProvidedDependency& provider = resolved_provider.value();
+        const bool returns_local_package_base =
+                std::holds_alternative<AurProviderOrigin>(provider.origin) &&
+                local_package_bases.count(provider.package_base) > 0;
+        if(local_package_names.count(provider.package_name) > 0 &&
+           !returns_local_package_base) {
+            if(identity_conflicts != nullptr) {
+                identity_conflicts->push_back(
+                        dependency_plan_projection_support::
+                                RemoteProviderIdentityConflict{
+                                        parent_package_name,
+                                        dependency,
+                                        provider});
+            }
+            add_unique_value(
+                    plan.unresolved,
+                    dependency +
+                            " (remote provider conflicts with local package identity)");
+            add_build_plan_dependency_edges(
+                    plan, edge, matching_dependencies);
+            return;
+        }
+        edge.kind = DependencyKind::Provided;
+        edge.resolved_provider = provider;
+        edge.provider_resolution = provider_resolution;
+        add_build_plan_provided_dependency(
+                plan, dependency, provider, provider_resolution);
+        add_build_plan_dependency_edges(plan, edge, matching_dependencies);
+        if((traverse_aur_providers ||
+           provider_resolution == ProviderResolutionKind::UserSelected) &&
+           std::holds_alternative<AurProviderOrigin>(provider.origin)) {
+            if(returns_local_package_base) {
+                add_unique_value(plan.cycles, provider.package_base);
+                return;
+            }
+            std::optional<ProvidedDependency> provider_revalidation_contract;
+            if(provider_resolution == ProviderResolutionKind::UserSelected) {
+                provider_revalidation_contract = provider;
+            }
+            collect_aur_build_plan(
+                    provider.package_name, plan, visited_package_names,
+                    visiting_package_names, dependency_roles, root,
+                    depth + 1, max_depth, traverse_aur_providers,
+                    resolution_mode, select_provider, local_package_bases,
+                    local_package_names, identity_conflicts,
+                    resolve_local_dependency, parent_package_name,
+                    parent_package_base, dependency,
+                    provider_revalidation_contract);
+        }
+        return;
+    }
+
+    if(providers.size() > 1) {
+        edge.kind = DependencyKind::AmbiguousProvider;
+        add_build_plan_ambiguous_provider(plan, dependency, providers);
+    } else {
+        add_unique_value(plan.unresolved, dependency);
+    }
+    add_build_plan_dependency_edges(plan, edge, matching_dependencies);
+}
+
+void collect_aur_build_plan(
+        const std::string& package_name, BuildPlan& plan,
+        std::set<std::string>& visited_package_names,
+        std::set<std::string>& visiting_package_names,
+        const std::vector<PackageRole>& roles,
+        const RootTargetIdentity& root, int depth, int max_depth,
+        bool traverse_aur_providers, BuildPlanResolutionMode resolution_mode,
+        const ProviderSelectionCallback& select_provider,
+        const std::set<std::string>& local_package_bases,
+        const std::set<std::string>& local_package_names,
+        std::vector<dependency_plan_projection_support::
+                            RemoteProviderIdentityConflict>*
+                identity_conflicts,
+        const dependency_plan_projection_support::LocalDependencyResolver&
+                resolve_local_dependency,
         const std::optional<std::string>& parent_package_name,
         const std::optional<std::string>& parent_package_base,
         const std::optional<std::string>& dependency_specification,
@@ -1096,151 +1386,15 @@ void collect_aur_build_plan(
     const std::vector<TypedPackageDependency> typed_dependencies =
             collect_typed_build_dependencies(info.value());
     for(const auto& dependency : collect_build_dependencies(info.value())) {
-        std::vector<TypedPackageDependency> matching_dependencies =
-                typed_dependencies_for_specification(typed_dependencies, dependency);
-        if(matching_dependencies.empty()) {
-            throw std::logic_error(localization::format_translated_message(
-                    "Build dependency is missing its package role: {}",
-                    dependency));
-        }
-        std::vector<PackageRole> dependency_roles =
-                package_roles_for_dependencies(matching_dependencies);
-        BuildPlanDependencyEdge edge{
-                info->Name, build_unit, matching_dependencies.front().specification,
-                matching_dependencies.front().role, DependencyKind::Unknown,
-                std::nullopt, std::nullopt, std::nullopt};
-
-        ParsedDependency parsed = parse_dependency_string(dependency);
-        std::string      dep_name = parsed.name;
-        if(!is_valid_package_name(dep_name)) {
-            add_unique_value(plan.unresolved, dependency);
-            add_build_plan_dependency_edges(plan, edge, matching_dependencies);
-            continue;
-        }
-        if(parsed.has_malformed_constraint()) {
-            add_unique_value(plan.unresolved, dependency_constraint_unresolved_reason(dependency));
-            add_build_plan_dependency_edges(plan, edge, matching_dependencies);
-            continue;
-        }
-        if(parsed.has_constraint()) {
-            // POLICY(#96): plan は未検証 constraint を解決済み扱いにしない。
-            add_unique_value(plan.unresolved, dependency_constraint_unresolved_reason(dependency));
-        }
-        BuildPlanResolutionFailureContext dependency_failure_context{
-                plan, root, info->Name, build_unit, dependency};
-        BuildPlanResolutionFailureContext* dependency_failure_sink =
-                resolution_mode == BuildPlanResolutionMode::CaptureOrdinaryFailures
-                ? &dependency_failure_context
-                : nullptr;
-        RepositoryPackageQueryStatus repository_status =
-                query_repository_package(
-                        dep_name, resolution_mode, dependency_failure_sink,
-                        static_cast<bool>(select_provider));
-        if(repository_status == RepositoryPackageQueryStatus::Present) {
-            edge.kind = DependencyKind::Repo;
-            edge.resolved_package_name = dep_name;
-            add_build_plan_dependency_edges(plan, edge, matching_dependencies);
-            continue;
-        }
-        if(repository_status == RepositoryPackageQueryStatus::Unavailable) {
-            add_unique_value(plan.unresolved, dependency);
-            add_build_plan_dependency_edges(plan, edge, matching_dependencies);
-            continue;
-        }
-
-        std::optional<AurPackageInfo> dependency_info;
-        bool dependency_metadata_unavailable = false;
-        try {
-            dependency_info = query_aur_package_info(
-                    dep_name, resolution_mode,
-                    static_cast<bool>(select_provider));
-        } catch(const AurRpcResponseError&) {
-            throw;
-        } catch(const std::exception& e) {
-            if(resolution_mode == BuildPlanResolutionMode::Legacy &&
-               select_provider) {
-                throw;
-            }
-            add_resolution_failure(
-                    dependency_failure_sink,
-                    BuildPlanResolutionFailureKind::AurPackageMetadataUnavailable,
-                    dep_name, e.what());
-            dependency_metadata_unavailable =
-                    dependency_failure_sink != nullptr;
-            Logger::warn(localization::format_translated_message(
-                    "Failed to check {} dependency {}: {}",
-                    "AUR", dep_name, e.what()));
-        }
-
-        if(dependency_metadata_unavailable) {
-            add_unique_value(plan.unresolved, dependency);
-            add_build_plan_dependency_edges(
-                    plan, edge, matching_dependencies);
-            continue;
-        }
-
-        if(dependency_info.has_value()) {
-            edge.kind = DependencyKind::Aur;
-            edge.resolved_package_name = dependency_info->Name;
-            edge.resolved_package_base =
-                    package_base_name(dependency_info.value());
-            add_build_plan_dependency_edges(plan, edge, matching_dependencies);
-            collect_aur_build_plan(
-                    dep_name, plan, visited_package_names,
-                    visiting_package_names, dependency_roles, root,
-                    depth + 1, max_depth, traverse_aur_providers,
-                    resolution_mode, select_provider, info->Name,
-                    build_unit, dependency, std::nullopt);
-            continue;
-        }
-
-        std::vector<ProvidedDependency> providers =
-                find_dependency_providers(
-                        dep_name, dependency_failure_sink,
-                        static_cast<bool>(select_provider));
-        std::optional<ProvidedDependency> resolved_provider =
-                select_provider_candidate(
-                        dependency, providers, select_provider);
-        ProviderResolutionKind provider_resolution =
-                resolved_provider.has_value()
-                ? ProviderResolutionKind::UserSelected
-                : ProviderResolutionKind::Unique;
-        if(!resolved_provider.has_value() && providers.size() == 1) {
-            resolved_provider = providers.front();
-        }
-
-        if(resolved_provider.has_value()) {
-            const ProvidedDependency& provider = resolved_provider.value();
-            edge.kind = DependencyKind::Provided;
-            edge.resolved_provider = provider;
-            edge.provider_resolution = provider_resolution;
-            add_build_plan_provided_dependency(
-                    plan, dependency, provider, provider_resolution);
-            add_build_plan_dependency_edges(plan, edge, matching_dependencies);
-            if((traverse_aur_providers ||
-                provider_resolution == ProviderResolutionKind::UserSelected) &&
-               std::holds_alternative<AurProviderOrigin>(provider.origin)) {
-                std::optional<ProvidedDependency> provider_revalidation_contract;
-                if(provider_resolution ==
-                   ProviderResolutionKind::UserSelected) {
-                    provider_revalidation_contract = provider;
-                }
-                collect_aur_build_plan(
-                        provider.package_name, plan, visited_package_names,
-                        visiting_package_names, dependency_roles, root,
-                        depth + 1, max_depth, traverse_aur_providers,
-                        resolution_mode, select_provider, info->Name,
-                        build_unit, dependency,
-                        provider_revalidation_contract);
-            }
-        } else if(providers.size() > 1) {
-            edge.kind = DependencyKind::AmbiguousProvider;
-            add_build_plan_ambiguous_provider(plan, dependency, providers);
-            add_build_plan_dependency_edges(plan, edge, matching_dependencies);
-        } else {
-            add_unique_value(plan.unresolved, dependency);
-            add_build_plan_dependency_edges(plan, edge, matching_dependencies);
-        }
+        resolve_build_plan_dependency(
+                info->Name, build_unit, dependency,
+                typed_dependencies_for_specification(
+                        typed_dependencies, dependency),
+                plan, visited_package_names, visiting_package_names, root,
+                depth, max_depth, traverse_aur_providers, resolution_mode,
+                select_provider, local_package_bases, local_package_names,
+                identity_conflicts,
+                resolve_local_dependency);
     }
 
     visiting_package_names.erase(package_identity);
@@ -1284,7 +1438,7 @@ BuildPlan resolve_build_plan_internal(
                 targets[i], plan, visited_package_names,
                 visiting_package_names, root_roles, root, 0,
                 MAX_RECURSIVE_DEP_DEPTH, true, resolution_mode,
-                select_provider,
+                select_provider, {}, {}, nullptr, {},
                 std::nullopt, std::nullopt, std::nullopt, std::nullopt);
     }
     order_build_plan_entries(plan);
@@ -1295,6 +1449,74 @@ BuildPlan resolve_build_plan_internal(
 }
 
 } // namespace
+
+dependency_plan_projection_support::ResolutionResult
+dependency_plan_projection_support::resolve(
+        const std::vector<RootPackage>& roots,
+        const std::set<std::string>& local_package_bases,
+        const LocalDependencyResolver& resolve_local_dependency,
+        const ProviderSelectionCallback& select_provider) {
+    if(roots.empty()) {
+        throw std::invalid_argument(localization::translate_message(
+                "Build plan targets must not be empty."));
+    }
+
+    for(const auto& root : roots) {
+        require_valid_package_name(root.package_name);
+        require_valid_package_name(root.package_base);
+    }
+
+    BuildPlan plan;
+    std::set<std::string> visited_package_names;
+    std::set<std::string> visiting_package_names;
+    std::set<std::string> local_package_names;
+    std::vector<RemoteProviderIdentityConflict> identity_conflicts;
+    const std::vector<PackageRole> root_roles = {PackageRole::Root};
+    for(const auto& root : roots) {
+        local_package_names.insert(root.package_name);
+    }
+
+    for(std::size_t index = 0; index < roots.size(); ++index) {
+        const RootPackage& root_package = roots[index];
+        const RootTargetIdentity root{index, root_package.package_name};
+        plan.root_targets.push_back(root);
+        add_planned_package_target(
+                plan, root_package.package_name, root_package.package_base,
+                root_roles, root);
+        add_build_plan_entry(
+                plan, root_package.package_name, root_package.package_base);
+        add_build_plan_split_package_target(
+                plan, root_package.package_name, root_package.package_base);
+        add_build_plan_metadata_risk(
+                plan, root_package.package_name, root_package.package_base,
+                root_package.conflicts, root_package.replaces);
+
+        std::vector<std::string> specifications;
+        for(const auto& dependency : root_package.dependencies) {
+            add_unique_value(specifications, dependency.specification);
+        }
+        for(const auto& specification : specifications) {
+            resolve_build_plan_dependency(
+                    root_package.package_name, root_package.package_base,
+                    specification,
+                    typed_dependencies_for_specification(
+                            root_package.dependencies, specification),
+                    plan, visited_package_names, visiting_package_names, root,
+                    0, MAX_RECURSIVE_DEP_DEPTH, true,
+                    BuildPlanResolutionMode::CaptureOrdinaryFailures,
+                    select_provider,
+                    local_package_bases, local_package_names,
+                    &identity_conflicts, resolve_local_dependency);
+        }
+    }
+
+    order_build_plan_entries(plan);
+    propagate_root_identities(plan);
+    propagate_resolution_failure_root_identities(plan);
+    require_compatible_selected_provider_package_identities(plan);
+    return ResolutionResult{
+            std::move(plan), std::move(identity_conflicts)};
+}
 
 std::vector<BuildPlanMetadataRisk> collect_build_plan_metadata_risks(const AurPackageInfo& pkg) {
     BuildPlan plan;
@@ -1365,7 +1587,7 @@ BuildPlan resolve_fetch_plan(
             target, plan, visited_package_names, visiting_package_names,
             root_roles, root, 0,
             MAX_RECURSIVE_DEP_DEPTH, false, BuildPlanResolutionMode::Legacy,
-            select_provider,
+            select_provider, {}, {}, nullptr, {},
             std::nullopt, std::nullopt, std::nullopt, std::nullopt);
     order_build_plan_entries(plan);
     propagate_root_identities(plan);

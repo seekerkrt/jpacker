@@ -2,7 +2,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Moguet 2.0.1\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-04 13:10+0900\n"
+"POT-Creation-Date: 2026-08-04 18:59+0900\n"
 "PO-Revision-Date: 2026-08-03 06:53+0900\n"
 "Last-Translator: Moguet contributors\n"
 "Language-Team: Japanese\n"
@@ -3095,7 +3095,7 @@ msgid "Unsupported {} option: {}"
 msgstr "{}で未対応のオプションです: {}"
 
 #: src/commands_inspect.cpp:778 src/commands_sync.cpp:944
-#: src/dependency_plan.cpp:1270 src/dependency_plan.cpp:1354
+#: src/dependency_plan.cpp:1424 src/dependency_plan.cpp:1576
 #: src/pkgbuild_export.cpp:654
 #, c++-format
 msgid "{} package not found: {}"
@@ -3772,7 +3772,7 @@ msgid "Unsupported {} option for {} info: {}"
 msgstr "{}による{}情報の取得では次のオプションは未対応です: {}"
 
 #: src/commands_sync.cpp:949 src/commands_sync.cpp:998
-#: src/dependency_plan.cpp:1051 src/source_install.cpp:505
+#: src/dependency_plan.cpp:1341 src/source_install.cpp:505
 #, c++-format
 msgid "Failed to fetch {} info for {}: {}"
 msgstr "{}情報を{}について取得できませんでした: {}"
@@ -4870,98 +4870,98 @@ msgstr "予期しない{}コマンドの失敗です: {}"
 msgid "Unexpected {} command failure: unknown exception."
 msgstr "予期しない{}コマンドの失敗です: 不明な例外です。"
 
-#: src/dependency_plan.cpp:91
+#: src/dependency_plan.cpp:92
 #, c++-format
 msgid "{} provider candidate changed during dependency resolution: {}"
 msgstr "依存関係の解決中に{}プロバイダー候補が変更されました: {}"
 
-#: src/dependency_plan.cpp:99 src/provider_selection.cpp:51
+#: src/dependency_plan.cpp:100 src/provider_selection.cpp:51
 #, c++-format
 msgid "Selected providers use incompatible identities for package {}: {} and {}."
 msgstr "選択したプロバイダーがパッケージ {} に互換性のない識別情報を使用しています: {} と {}。"
 
-#: src/dependency_plan.cpp:223
+#: src/dependency_plan.cpp:224
 #, c++-format
 msgid "Failed to search {} providers for {}: {}"
 msgstr "{}プロバイダーから{}を検索できませんでした: {}"
 
-#: src/dependency_plan.cpp:250
+#: src/dependency_plan.cpp:251
 #, c++-format
 msgid "{} provider candidate metadata was not returned."
 msgstr "{}プロバイダー候補のメタデータが返されませんでした。"
 
-#: src/dependency_plan.cpp:270
+#: src/dependency_plan.cpp:271
 #, c++-format
 msgid "Failed to check {} provider {}: {}"
 msgstr "{}プロバイダー{}を確認できませんでした: {}"
 
 #. TRANSLATORS: The placeholders are dependency and provider identities.
-#: src/dependency_plan.cpp:368
+#: src/dependency_plan.cpp:369
 #, c++-format
 msgid "{} [provided by {}]"
 msgstr "{} [{}が提供]"
 
-#: src/dependency_plan.cpp:410
+#: src/dependency_plan.cpp:411
 #, c++-format
 msgid "Provider selection returned a candidate that was not offered for {}."
 msgstr "プロバイダー選択が {} に提示されていない候補を返しました。"
 
 #. TRANSLATORS: The placeholder is a dependency specification.
-#: src/dependency_plan.cpp:423
+#: src/dependency_plan.cpp:424
 #, c++-format
 msgid "version constraint for {} is not verified"
 msgstr "{}のバージョン制約は未検証です"
 
-#: src/dependency_plan.cpp:516 src/dependency_plan.cpp:617
-#: src/dependency_plan.cpp:1171
+#: src/dependency_plan.cpp:517 src/dependency_plan.cpp:618
+#: src/dependency_plan.cpp:1182
 #, c++-format
 msgid "Failed to check {} dependency {}: {}"
 msgstr "{}依存関係{}を確認できませんでした: {}"
 
-#: src/dependency_plan.cpp:711
+#: src/dependency_plan.cpp:712
 msgid "Unknown package role."
 msgstr "不明なパッケージ役割です。"
 
-#: src/dependency_plan.cpp:954
+#: src/dependency_plan.cpp:990
 #, c++-format
 msgid "{} aggregation is missing during build plan ordering: {}"
 msgstr "ビルド計画の順序付け中に{}の集約結果がありません: {}"
 
-#: src/dependency_plan.cpp:1023
-#, c++-format
-msgid "{} (max depth reached)"
-msgstr "{}（最大の深さに達しました）"
-
-#: src/dependency_plan.cpp:1103
+#: src/dependency_plan.cpp:1083
 #, c++-format
 msgid "Build dependency is missing its package role: {}"
 msgstr "ビルド依存にパッケージ役割がありません: {}"
 
-#: src/dependency_plan.cpp:1257
+#: src/dependency_plan.cpp:1313
+#, c++-format
+msgid "{} (max depth reached)"
+msgstr "{}（最大の深さに達しました）"
+
+#: src/dependency_plan.cpp:1411 src/dependency_plan.cpp:1461
 msgid "Build plan targets must not be empty."
 msgstr "ビルド計画の対象は空にできません。"
 
-#: src/dependency_plan.cpp:1485
+#: src/dependency_plan.cpp:1707
 #, c++-format
 msgid "Cannot execute build plan for {}; unresolved dependencies: {}"
 msgstr "{}のビルド計画を実行できません。未解決の依存関係: {}"
 
-#: src/dependency_plan.cpp:1490
+#: src/dependency_plan.cpp:1712
 #, c++-format
 msgid "Cannot execute build plan for {}; ambiguous providers: {}"
 msgstr "{}のビルド計画を実行できません。一意に決定できないプロバイダー: {}"
 
-#: src/dependency_plan.cpp:1497
+#: src/dependency_plan.cpp:1719
 #, c++-format
 msgid "Cannot execute build plan for {}; cyclic dependencies: {}"
 msgstr "{}のビルド計画を実行できません。循環依存: {}"
 
-#: src/dependency_plan.cpp:1506
+#: src/dependency_plan.cpp:1728
 #, c++-format
 msgid "Cannot execute build plan for {}; conflicts/replaces metadata requires manual review: {}"
 msgstr "{}のビルド計画を実行できません。競合/置換メタデータは手動確認が必要です: {}"
 
-#: src/dependency_plan.cpp:1517
+#: src/dependency_plan.cpp:1739
 #, c++-format
 msgid "Cannot execute singular install plan for {}; split package targets require the {} set lifecycle: {}"
 msgstr "{}の単一インストール計画を実行できません。分割パッケージの対象には{}集合のライフサイクルが必要です: {}"

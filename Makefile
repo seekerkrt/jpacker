@@ -47,6 +47,7 @@ ROOT_PACKAGE_SELECTION_TEST_TARGET := $(BUILD_DIR)/tests/root-package-selection-
 ROOT_PACKAGE_ROUTE_PROJECTION_TEST_TARGET := $(BUILD_DIR)/tests/root-package-route-projection-test
 LOCAL_PACKAGE_METADATA_TEST_TARGET := $(BUILD_DIR)/tests/local-package-metadata-test
 LOCAL_SOURCE_ROOT_TEST_TARGET := $(BUILD_DIR)/tests/local-source-root-test
+LOCAL_DEPENDENCY_PLAN_PROJECTION_TEST_TARGET := $(BUILD_DIR)/tests/local-dependency-plan-projection-test
 USER_CONFIG_MODULE_TEST_TARGET := $(BUILD_DIR)/tests/user-config-test
 PACKAGE_IDENTIFIER_TEST_TARGET := build/tests/package-identifier-test
 SHELL_WORDS_TEST_TARGET := build/tests/shell-words-test
@@ -555,6 +556,27 @@ LOCAL_SOURCE_ROOT_FORBIDDEN_TEST_SRCS := \
 	$(filter-out \
 		$(LOCAL_SOURCE_ROOT_ALLOWED_PRODUCTION_TEST_SRCS), \
 		$(SRCS))
+# POLICY(#271): local dependency projection testはtyped metadata adapterと既存
+# BuildPlan resolverだけをproductionからlinkし、filesystem / CLI / execution ownerを
+# 持ち込まない。AUR / repository query boundaryは専用stubへ差し替える。
+LOCAL_DEPENDENCY_PLAN_PROJECTION_ALLOWED_PRODUCTION_TEST_SRCS := \
+	$(SRC_DIR)/local_dependency_plan_projection.cpp \
+	$(SRC_DIR)/dependency_plan.cpp \
+	$(SRC_DIR)/dependency_plan_model.cpp \
+	$(SRC_DIR)/dependency_spec.cpp \
+	$(SRC_DIR)/package_identifier.cpp \
+	$(SRC_DIR)/logging.cpp
+LOCAL_DEPENDENCY_PLAN_PROJECTION_REQUIRED_TEST_SUPPORT_SRCS := \
+	tests/stubs/local-dependency-plan/aur_rpc_stub.cpp \
+	tests/stubs/local-dependency-plan/repository_query_stub.cpp
+LOCAL_DEPENDENCY_PLAN_PROJECTION_TEST_SRCS := \
+	tests/local_dependency_plan_projection_test.cpp \
+	$(LOCAL_DEPENDENCY_PLAN_PROJECTION_ALLOWED_PRODUCTION_TEST_SRCS) \
+	$(LOCAL_DEPENDENCY_PLAN_PROJECTION_REQUIRED_TEST_SUPPORT_SRCS)
+LOCAL_DEPENDENCY_PLAN_PROJECTION_FORBIDDEN_TEST_SRCS := \
+	$(filter-out \
+		$(LOCAL_DEPENDENCY_PLAN_PROJECTION_ALLOWED_PRODUCTION_TEST_SRCS), \
+		$(SRCS))
 # POLICY(#268): dependency resolver model testはresolverとpure model supportだけを
 # productionからlinkし、metadata/process/source-build execution ownerを持ち込まない。
 DEPENDENCY_PLAN_MODEL_ALLOWED_PRODUCTION_TEST_SRCS := \
@@ -861,11 +883,12 @@ LIBALPM_BUILD_TARGETS := \
 	$(SEPARATED_PACKAGE_BASE_SOURCE_BUILD_TEST_TARGET) \
 	$(PRODUCTION_SOURCE_BUILD_TEST_TARGET) \
 	$(REPOSITORY_QUERY_TEST_TARGET) \
+	$(LOCAL_DEPENDENCY_PLAN_PROJECTION_TEST_TARGET) \
 	$(AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION_TEST_TARGET) \
 	$(UPGRADE_BASELINE_METADATA_TEST_TARGET)
 
 .PHONY: all check-libalpm clean check-upgrade-all-plan-link-firewall check-system-source-upgrade-link-firewall check-aur-update-execution-runner-link-firewall check-aur-update-operation-result-link-firewall check-filtered-aur-update-operation-link-firewall check-upgrade-all-operation-link-firewall check-upgrade-all-command-link-firewall check-commands-sync-link-firewall check-root-package-candidate-link-firewall check-root-package-search-link-firewall check-root-package-selection-link-firewall check-root-package-route-projection-link-firewall check-dependency-plan-model-link-firewall check-build-plan-artifact-target-projection-link-firewall check-artifact-selection-model-link-firewall check-artifact-identity-selection-link-firewall check-multiple-artifact-workspace-link-firewall check-multiple-artifact-identity-link-firewall check-package-base-artifact-install-plan-link-firewall check-package-base-artifact-install-executor-link-firewall check-separated-package-base-source-build-link-firewall test test-internal-identity test-application-identity test-xdg-paths test-xdg-directory-safety test-xdg-state-log test-trusted-cache test-runtime-identity test-app-config test-provider-selection test-root-package-candidate test-root-package-search test-root-package-selection test-root-package-route-projection test-user-config test-package-identifier test-package-metadata test-package-metadata-integration test-repository-query test-shell-words test-source-environment test-artifact-workspace test-multiple-artifact-workspace test-artifact-identity test-multiple-artifact-identity test-artifact-install-executor test-package-base-artifact-install-plan test-package-base-artifact-install-executor test-separated-source-build test-separated-package-base-source-build test-production-source-build test-process-capture test-aur-update-plan test-upgrade-all-plan test-system-source-upgrade test-aur-update-query test-aur-update-command test-upgrade-all-command test-aur-update-execution-preflight test-aur-update-execution-preflight-integration test-aur-update-execution-preparation test-aur-update-execution-runner test-aur-update-operation-result test-filtered-aur-update-operation test-upgrade-all-operation test-dependency-plan-model test-build-plan-artifact-target-projection test-artifact-install-plan test-artifact-selection-model test-artifact-identity-selection test-command-stub-contract test-markdown-links test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-commands-inspect test-commands-source-maintenance test-commands-sync test-conflicts-replaces test-install-layout test-package-transition test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check install uninstall
-.PHONY: check-local-package-metadata-link-firewall check-local-source-root-link-firewall test-local-package-metadata test-local-source-root
+.PHONY: check-local-package-metadata-link-firewall check-local-source-root-link-firewall check-local-dependency-plan-projection-link-firewall test-local-package-metadata test-local-source-root test-local-dependency-plan-projection
 .PHONY: FORCE catalogs check-catalogs check-localization-config check-pot update-po update-pot test-localization test-catalog-metadata-gate test-cli-localization-surface test-public-documentation
 .PHONY: test-container
 
@@ -1242,6 +1265,14 @@ $(LOCAL_SOURCE_ROOT_TEST_TARGET): $(LOCAL_SOURCE_ROOT_TEST_SRCS) $(SRC_DIR)/loca
 		-I$(SRC_DIR) \
 		$(LOCAL_SOURCE_ROOT_TEST_SRCS) -o $@
 
+$(LOCAL_DEPENDENCY_PLAN_PROJECTION_TEST_TARGET): $(LOCAL_DEPENDENCY_PLAN_PROJECTION_TEST_SRCS) $(SRC_DIR)/local_dependency_plan_projection.hpp $(SRC_DIR)/local_package_metadata.hpp $(SRC_DIR)/dependency_plan.hpp $(SRC_DIR)/dependency_plan_projection_support.hpp $(SRC_DIR)/dependency_provider.hpp $(SRC_DIR)/aur_rpc.hpp $(SRC_DIR)/repository_query.hpp $(SRC_DIR)/dependency_spec.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/logging.hpp tests/stubs/local-dependency-plan/query_stub.hpp $(VERSION_FILE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling local dependency plan projection test binary"
+	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
+		-I$(SRC_DIR) -Itests \
+		$(LOCAL_DEPENDENCY_PLAN_PROJECTION_TEST_SRCS) \
+		-o $@ $(LIBALPM_LDLIBS)
+
 $(USER_CONFIG_MODULE_TEST_TARGET): tests/user_config_test.cpp $(SRC_DIR)/user_config.cpp $(SRC_DIR)/user_config.hpp $(SRC_DIR)/cli_parser.cpp $(SRC_DIR)/cli_parser.hpp $(SRC_DIR)/localization.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling user config module test binary"
@@ -1418,7 +1449,7 @@ $(AUR_UPDATE_EXECUTION_PREFLIGHT_TEST_TARGET): $(AUR_UPDATE_EXECUTION_PREFLIGHT_
 	@echo ":: Compiling AUR update execution preflight fake-symbol test binary"
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -I$(SRC_DIR) $(AUR_UPDATE_EXECUTION_PREFLIGHT_TEST_SRCS) -o $@
 
-$(AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION_TEST_TARGET): $(AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION_TEST_SRCS) $(SRC_DIR)/aur_update_execution_preflight.hpp $(SRC_DIR)/aur_update_plan.hpp $(SRC_DIR)/dependency_plan.hpp $(SRC_DIR)/dependency_provider.hpp $(SRC_DIR)/aur_rpc.hpp $(SRC_DIR)/repository_query.hpp $(SRC_DIR)/package_metadata.hpp $(SRC_DIR)/installed_package.hpp $(SRC_DIR)/dependency_spec.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/process.hpp $(SRC_DIR)/shell_words.hpp $(SRC_DIR)/logging.hpp $(SRC_DIR)/localization.hpp tests/stubs/package-metadata/alpm_stub.hpp tests/stubs/aur-update-execution-preflight-integration/integration_stub.hpp $(VERSION_FILE)
+$(AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION_TEST_TARGET): $(AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION_TEST_SRCS) $(SRC_DIR)/aur_update_execution_preflight.hpp $(SRC_DIR)/aur_update_plan.hpp $(SRC_DIR)/dependency_plan.hpp $(SRC_DIR)/dependency_plan_projection_support.hpp $(SRC_DIR)/dependency_provider.hpp $(SRC_DIR)/aur_rpc.hpp $(SRC_DIR)/repository_query.hpp $(SRC_DIR)/package_metadata.hpp $(SRC_DIR)/installed_package.hpp $(SRC_DIR)/dependency_spec.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/process.hpp $(SRC_DIR)/shell_words.hpp $(SRC_DIR)/logging.hpp $(SRC_DIR)/localization.hpp tests/stubs/package-metadata/alpm_stub.hpp tests/stubs/aur-update-execution-preflight-integration/integration_stub.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling AUR update execution preflight production composition test binary"
 	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
@@ -1486,7 +1517,7 @@ $(UPGRADE_ALL_OPERATION_TEST_TARGET): $(UPGRADE_ALL_OPERATION_TEST_SRCS) $(HEADE
 		$(UPGRADE_ALL_OPERATION_TEST_SRCS) \
 		-o $@
 
-$(DEPENDENCY_PLAN_MODEL_TEST_TARGET): $(DEPENDENCY_PLAN_MODEL_TEST_SRCS) $(SRC_DIR)/dependency_plan.hpp $(SRC_DIR)/dependency_provider.hpp $(SRC_DIR)/aur_rpc.hpp $(SRC_DIR)/repository_query.hpp $(SRC_DIR)/dependency_spec.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/logging.hpp $(SRC_DIR)/localization.hpp $(VERSION_FILE)
+$(DEPENDENCY_PLAN_MODEL_TEST_TARGET): $(DEPENDENCY_PLAN_MODEL_TEST_SRCS) $(SRC_DIR)/dependency_plan.hpp $(SRC_DIR)/dependency_plan_projection_support.hpp $(SRC_DIR)/dependency_provider.hpp $(SRC_DIR)/aur_rpc.hpp $(SRC_DIR)/repository_query.hpp $(SRC_DIR)/dependency_spec.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/logging.hpp $(SRC_DIR)/localization.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling dependency plan model test binary"
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -I$(SRC_DIR) $(DEPENDENCY_PLAN_MODEL_TEST_SRCS) -o $@
@@ -1744,6 +1775,36 @@ check-local-source-root-link-firewall:
 
 test-local-source-root: check-local-source-root-link-firewall $(LOCAL_SOURCE_ROOT_TEST_TARGET)
 	$(abspath $(LOCAL_SOURCE_ROOT_TEST_TARGET))
+
+check-local-dependency-plan-projection-link-firewall:
+	@echo ":: Checking local dependency plan projection link firewall"
+	@set -e; for source in $(LOCAL_DEPENDENCY_PLAN_PROJECTION_ALLOWED_PRODUCTION_TEST_SRCS); do \
+		count=$$(printf '%s\n' $(LOCAL_DEPENDENCY_PLAN_PROJECTION_TEST_SRCS) | \
+			awk -v expected="$$source" '$$0 == expected { count++ } END { print count + 0 }'); \
+		test "$$count" -eq 1 || { \
+			echo "error: local dependency plan projection test must link $$source exactly once" >&2; \
+			exit 1; \
+		}; \
+	done
+	@set -e; for source in $(LOCAL_DEPENDENCY_PLAN_PROJECTION_REQUIRED_TEST_SUPPORT_SRCS); do \
+		count=$$(printf '%s\n' $(LOCAL_DEPENDENCY_PLAN_PROJECTION_TEST_SRCS) | \
+			awk -v expected="$$source" '$$0 == expected { count++ } END { print count + 0 }'); \
+		test "$$count" -eq 1 || { \
+			echo "error: local dependency plan projection test must link support $$source exactly once" >&2; \
+			exit 1; \
+		}; \
+	done
+	@test -z "$(filter $(LOCAL_DEPENDENCY_PLAN_PROJECTION_FORBIDDEN_TEST_SRCS),$(LOCAL_DEPENDENCY_PLAN_PROJECTION_TEST_SRCS))" || { \
+		echo "error: local dependency plan projection test links a forbidden production source" >&2; \
+		exit 1; \
+	}
+	@test "$(words $(filter tests/stubs/%,$(LOCAL_DEPENDENCY_PLAN_PROJECTION_TEST_SRCS)))" -eq "$(words $(LOCAL_DEPENDENCY_PLAN_PROJECTION_REQUIRED_TEST_SUPPORT_SRCS))" || { \
+		echo "error: local dependency plan projection test links an unexpected test stub" >&2; \
+		exit 1; \
+	}
+
+test-local-dependency-plan-projection: check-local-dependency-plan-projection-link-firewall $(LOCAL_DEPENDENCY_PLAN_PROJECTION_TEST_TARGET)
+	$(abspath $(LOCAL_DEPENDENCY_PLAN_PROJECTION_TEST_TARGET))
 
 test-user-config: $(USER_CONFIG_MODULE_TEST_TARGET)
 	sh tests/test-user-config.sh $(abspath $(USER_CONFIG_MODULE_TEST_TARGET))
@@ -2272,6 +2333,7 @@ test: \
 	test-root-package-route-projection \
 	test-local-package-metadata \
 	test-local-source-root \
+	test-local-dependency-plan-projection \
 	test-user-config \
 	test-package-identifier \
 	test-package-metadata \

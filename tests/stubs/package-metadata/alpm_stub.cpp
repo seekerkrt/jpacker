@@ -1584,4 +1584,13 @@ alpm_pkgreason_t alpm_pkg_get_reason(alpm_pkg_t* package) {
             : package_state->reason;
 }
 
+int alpm_pkg_vercmp(const char*, const char*) {
+    // Local dependency projectionのversion比較testはreal libalpmをlinkする。
+    // Aggregate fake-alpm binaryからこの境界へ到達した場合はfixture不足として止める。
+    std::fputs(
+            "Package metadata stub received an unexpected version comparison\n",
+            stderr);
+    std::abort();
+}
+
 } // extern "C"
