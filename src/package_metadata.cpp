@@ -3,6 +3,7 @@
 #include "localization.hpp"
 #include "package_identifier.hpp"
 #include "process.hpp"
+#include "shell_words.hpp"
 
 #include <alpm.h>
 
@@ -199,6 +200,76 @@ PacmanRepositoryConfiguration normalize_pacman_repository_configuration(
     return PacmanRepositoryConfiguration{
             normalize_pacman_database_paths(configuration.database_paths),
             configuration.repository_names};
+}
+
+struct PacmanRepositoryUsage {
+    bool search = false;
+    bool install = false;
+};
+
+PacmanRepositoryUsage parse_pacman_repository_usage(
+        const std::string& output) {
+    bool has_all = false;
+    bool has_sync = false;
+    bool has_search = false;
+    bool has_install = false;
+    bool has_upgrade = false;
+    bool has_value = false;
+
+    std::stringstream output_stream(output);
+    std::string       line;
+    while(std::getline(output_stream, line)) {
+        if(line.empty() || contains_control_character(line)) {
+            throw_package_metadata_error(
+                    PackageMetadataErrorCode::ConfigurationMalformed,
+                    localization::translate_message(
+                            "Repository Usage configuration is malformed."));
+        }
+
+        bool* usage = nullptr;
+        if(line == "All") {
+            usage = &has_all;
+        } else if(line == "Sync") {
+            usage = &has_sync;
+        } else if(line == "Search") {
+            usage = &has_search;
+        } else if(line == "Install") {
+            usage = &has_install;
+        } else if(line == "Upgrade") {
+            usage = &has_upgrade;
+        } else {
+            throw_package_metadata_error(
+                    PackageMetadataErrorCode::ConfigurationMalformed,
+                    localization::translate_message(
+                            "Repository Usage configuration is malformed."));
+        }
+
+        if(*usage) {
+            throw_package_metadata_error(
+                    PackageMetadataErrorCode::ConfigurationMalformed,
+                    localization::translate_message(
+                            "Repository Usage configuration is malformed."));
+        }
+        *usage = true;
+        has_value = true;
+    }
+
+    if(!has_value || (has_all && (has_sync || has_search || has_install || has_upgrade))) {
+        throw_package_metadata_error(
+                PackageMetadataErrorCode::ConfigurationMalformed,
+                localization::translate_message(
+                        "Repository Usage configuration is malformed."));
+    }
+
+    return PacmanRepositoryUsage{
+            has_all || has_search,
+            has_all || has_install};
+}
+
+std::string pacman_repository_usage_command(
+        const std::string& repository_name) {
+    return "pacman-conf --repo " + shell_words::quote(repository_name) +
+           " Usage 2>/dev/null";
 }
 
 std::string bounded_alpm_error_text(alpm_errno_t error_code) {
@@ -441,6 +512,14 @@ struct AlpmHandleReleaser {
 
 using UniqueAlpmHandle = std::unique_ptr<alpm_handle_t, AlpmHandleReleaser>;
 
+struct AlpmListReleaser {
+    void operator()(alpm_list_t* list) const noexcept {
+        if(list != nullptr) alpm_list_free(list);
+    }
+};
+
+using UniqueAlpmList = std::unique_ptr<alpm_list_t, AlpmListReleaser>;
+
 InstalledPackageReason map_install_reason(alpm_pkgreason_t reason) {
     switch(reason) {
         case ALPM_PKG_REASON_EXPLICIT:
@@ -458,6 +537,60 @@ PackageMetadataFailure query_failure(
         PackageMetadataErrorCode code,
         const std::string& diagnostic) {
     return PackageMetadataFailure{code, diagnostic};
+}
+
+std::string repository_package_search_failure(alpm_errno_t error_code) {
+    return alpm_failure_diagnostic(
+            error_code,
+            AlpmFailureDiagnostics{
+                    localization::format_translated_message(
+                            "Repository package search failed: {} reported no error detail.",
+                            "libalpm"),
+                    localization::format_translated_message(
+                            "Repository package search failed: unknown {} error.",
+                            "libalpm"),
+                    localization::format_translated_message(
+                            "Repository package search failed: {}.",
+                            bounded_alpm_error_text(error_code))});
+}
+
+std::optional<std::string> optional_package_metadata_text(
+        const char* raw_value) {
+    if(raw_value == nullptr) return std::nullopt;
+    return std::string(raw_value);
+}
+
+using RepositoryPackageSearchMatchResult = std::variant<
+        RepositoryPackageSearchMatch,
+        PackageMetadataFailure>;
+
+RepositoryPackageSearchMatchResult make_repository_package_search_match(
+        alpm_pkg_t* package,
+        const std::string& repository_name,
+        RepositoryPackageSearchMatchKind kind,
+        std::optional<std::string> group_name) {
+    if(package == nullptr) {
+        return query_failure(
+                PackageMetadataErrorCode::QueryFailed,
+                localization::translate_message(
+                        "Repository package search returned an invalid package entry."));
+    }
+
+    const char* raw_package_name = alpm_pkg_get_name(package);
+    if(raw_package_name == nullptr) {
+        return query_failure(
+                PackageMetadataErrorCode::MalformedMetadata,
+                localization::translate_message(
+                        "Repository package search metadata contains an invalid package name."));
+    }
+
+    return RepositoryPackageSearchMatch{
+            repository_name,
+            raw_package_name,
+            optional_package_metadata_text(alpm_pkg_get_version(package)),
+            optional_package_metadata_text(alpm_pkg_get_desc(package)),
+            kind,
+            std::move(group_name)};
 }
 
 RepositoryPackageQueryResult query_repository_database(
@@ -702,6 +835,48 @@ PacmanRepositoryConfiguration resolve_pacman_repository_configuration() {
     return PacmanRepositoryConfiguration{
             std::move(database_paths),
             parse_pacman_repository_names(command_result.output)};
+}
+
+PacmanRepositoryConfiguration
+resolve_pacman_root_search_repository_configuration() {
+    PacmanRepositoryConfiguration configuration =
+            resolve_pacman_repository_configuration();
+
+    std::vector<std::string> eligible_repository_names;
+    eligible_repository_names.reserve(configuration.repository_names.size());
+    for(const auto& repository_name : configuration.repository_names) {
+        CapturedCommandResult command_result = capture_command_output_raw(
+                pacman_repository_usage_command(repository_name).c_str());
+        if(command_result.exit_code != 0) {
+            throw_package_metadata_error(
+                    PackageMetadataErrorCode::ConfigurationUnavailable,
+                    localization::format_translated_message(
+                            "{} repository Usage query failed with exit code {}.",
+                            "pacman-conf", command_result.exit_code));
+        }
+
+        PacmanRepositoryUsage usage =
+                parse_pacman_repository_usage(command_result.output);
+        if(usage.search && usage.install) {
+            eligible_repository_names.push_back(repository_name);
+        }
+    }
+
+    configuration.repository_names = std::move(eligible_repository_names);
+    return configuration;
+}
+
+RepositoryPackageSearchResult query_repository_root_package_search(
+        const std::string& query) {
+    try {
+        PacmanRepositoryConfiguration configuration =
+                resolve_pacman_root_search_repository_configuration();
+        RepositoryPackageMetadataSession session =
+                RepositoryPackageMetadataSession::open(configuration);
+        return session.query_root_package_search(query);
+    } catch(const PackageMetadataError& error) {
+        return error.failure();
+    }
 }
 
 ForeignPackageInventoryResult query_foreign_package_inventory(
@@ -1032,4 +1207,137 @@ RepositoryPackageQueryResult RepositoryPackageMetadataSession::query_repository_
         return result;
     }
     return PackageNotFound{};
+}
+
+RepositoryPackageSearchResult
+RepositoryPackageMetadataSession::query_root_package_search(
+        const std::string& query) const {
+    if(impl_ == nullptr) {
+        return query_failure(
+                PackageMetadataErrorCode::QueryFailed,
+                localization::translate_message(
+                        "Repository package metadata session is not open."));
+    }
+    if(query.find('\0') != std::string::npos) {
+        return query_failure(
+                PackageMetadataErrorCode::QueryFailed,
+                localization::translate_message(
+                        "Repository package search query is invalid."));
+    }
+
+    RepositoryPackageSearchSnapshot snapshot;
+    snapshot.repository_order.reserve(impl_->repositories.size());
+    for(const auto& repository : impl_->repositories) {
+        snapshot.repository_order.push_back(repository.repository_name);
+    }
+
+    std::string query_needle = query;
+    alpm_list_t query_node{query_needle.data(), nullptr, nullptr};
+    for(const auto& repository : impl_->repositories) {
+        alpm_list_t* raw_search_results = nullptr;
+        int search_status = alpm_db_search(
+                repository.database, &query_node, &raw_search_results);
+        UniqueAlpmList search_results(raw_search_results);
+        if(search_status != 0) {
+            return query_failure(
+                    PackageMetadataErrorCode::QueryFailed,
+                    repository_package_search_failure(
+                            alpm_errno(impl_->handle.get())));
+        }
+
+        for(alpm_list_t* node = search_results.get();
+            node != nullptr;
+            node = node->next) {
+            auto match_result = make_repository_package_search_match(
+                    static_cast<alpm_pkg_t*>(node->data),
+                    repository.repository_name,
+                    RepositoryPackageSearchMatchKind::Search,
+                    std::nullopt);
+            if(const auto* failure =
+                       std::get_if<PackageMetadataFailure>(&match_result);
+               failure != nullptr) {
+                return *failure;
+            }
+            snapshot.matches.push_back(
+                    std::get<RepositoryPackageSearchMatch>(
+                            std::move(match_result)));
+        }
+    }
+
+    bool is_exact_group = false;
+    for(const auto& repository : impl_->repositories) {
+        alpm_group_t* group =
+                alpm_db_get_group(repository.database, query.c_str());
+        // POLICY: package cache preload後のnullptrはexact group missである。
+        // libalpmのhandle errnoは以前の失敗を保持し得るため参照しない。
+        if(group == nullptr) continue;
+
+        if(group->name == nullptr || query != group->name) {
+            return query_failure(
+                    PackageMetadataErrorCode::MalformedMetadata,
+                    localization::translate_message(
+                            "Repository package group metadata contains an invalid group name."));
+        }
+        is_exact_group = true;
+    }
+
+    if(!is_exact_group) return snapshot;
+
+    std::vector<alpm_list_t> database_nodes(impl_->repositories.size());
+    for(std::size_t index = 0; index < impl_->repositories.size(); ++index) {
+        database_nodes[index].data = impl_->repositories[index].database;
+        database_nodes[index].prev =
+                index == 0 ? nullptr : &database_nodes[index - 1];
+        database_nodes[index].next =
+                index + 1 == database_nodes.size()
+                        ? nullptr
+                        : &database_nodes[index + 1];
+    }
+    alpm_list_t* database_list =
+            database_nodes.empty() ? nullptr : &database_nodes.front();
+
+    alpm_list_t* raw_group_packages =
+            alpm_find_group_pkgs(database_list, query.c_str());
+    UniqueAlpmList group_packages(raw_group_packages);
+    // POLICY: public APIはnullptrでemptyとfailureを区別するstatusを返さない。
+    // caller-owned listがない状態をempty group resultとして扱い、stale errnoを
+    // metadata failureへ誤変換しない。
+
+    for(alpm_list_t* node = group_packages.get();
+        node != nullptr;
+        node = node->next) {
+        auto* package = static_cast<alpm_pkg_t*>(node->data);
+        alpm_db_t* package_database =
+                package == nullptr ? nullptr : alpm_pkg_get_db(package);
+
+        const Impl::RegisteredRepository* source_repository = nullptr;
+        for(const auto& repository : impl_->repositories) {
+            if(repository.database == package_database) {
+                source_repository = &repository;
+                break;
+            }
+        }
+        if(source_repository == nullptr) {
+            return query_failure(
+                    PackageMetadataErrorCode::MalformedMetadata,
+                    localization::translate_message(
+                            "Repository package group contains an invalid package source."));
+        }
+
+        auto match_result = make_repository_package_search_match(
+                package,
+                source_repository->repository_name,
+                RepositoryPackageSearchMatchKind::ExactGroup,
+                query);
+        if(const auto* failure =
+                   std::get_if<PackageMetadataFailure>(&match_result);
+           failure != nullptr) {
+            return *failure;
+        }
+        snapshot.matches.push_back(
+                std::get<RepositoryPackageSearchMatch>(
+                        std::move(match_result)));
+    }
+
+    return snapshot;
 }

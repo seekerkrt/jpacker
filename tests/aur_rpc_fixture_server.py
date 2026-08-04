@@ -75,9 +75,13 @@ class Handler(BaseHTTPRequestHandler):
             response_override = fixture.get("search_response_overrides", {}).get(
                 dependency
             )
+            response_status = fixture.get("search_status_overrides", {}).get(
+                dependency, 200
+            )
         else:
             names = query.get("arg[]", [])
             response_type = "multiinfo"
+            response_status = 200
             requested_name = names[0] if len(names) == 1 else None
             response_override = fixture.get("info_response_overrides", {}).get(
                 requested_name
@@ -102,7 +106,7 @@ class Handler(BaseHTTPRequestHandler):
         }
         response = apply_response_override(response, response_override)
         body = json.dumps(response).encode("utf-8")
-        self.send_response(200)
+        self.send_response(response_status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()

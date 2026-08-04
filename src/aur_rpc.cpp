@@ -11,6 +11,7 @@
 #include <cstdlib>
 #include <curl/curl.h>
 #include <limits>
+#include <memory>
 #include <nlohmann/json.hpp>
 #include <set>
 #include <string>
@@ -30,6 +31,7 @@ const std::string AUR_RPC_SEARCH_RESPONSE_TYPE = "search";
 #ifdef MOGUET_ENABLE_AUR_RPC_TEST_HOOKS
 bool        g_should_fail_write_append_for_test = false;
 std::string g_encode_failure_package_for_test;
+std::string g_encode_failure_search_query_for_test;
 #endif
 
 void ensure_curl_global_initialized() {
@@ -56,6 +58,15 @@ public:
         return curl_;
     }
 };
+
+struct CurlEscapedStringReleaser {
+    void operator()(char* value) const noexcept {
+        if(value != nullptr) curl_free(value);
+    }
+};
+
+using UniqueCurlEscapedString =
+        std::unique_ptr<char, CurlEscapedStringReleaser>;
 
 // AUR parserをmonolithへ逆依存させず、汎用utilityを公開しないためのlocal helper。
 std::string trim(const std::string& str) {
@@ -108,6 +119,15 @@ char* escape_info_many_package_name(
     return curl_easy_escape(
             handle, package_name.c_str(),
             static_cast<int>(package_name.length()));
+}
+
+char* escape_strict_search_query(
+        CURL* handle, const std::string& query) {
+#ifdef MOGUET_ENABLE_AUR_RPC_TEST_HOOKS
+    if(query == g_encode_failure_search_query_for_test) return nullptr;
+#endif
+    return curl_easy_escape(
+            handle, query.c_str(), static_cast<int>(query.length()));
 }
 
 std::size_t write_callback_failure_result(std::size_t total_size) noexcept {
@@ -581,6 +601,11 @@ void set_aur_rpc_encode_failure_package_for_test(
     g_encode_failure_package_for_test = package_name;
 }
 
+void set_aur_rpc_encode_failure_search_query_for_test(
+        const std::string& query) {
+    g_encode_failure_search_query_for_test = query;
+}
+
 std::size_t invoke_aur_rpc_write_callback_for_test(
         char* contents, std::size_t size, std::size_t nmemb,
         std::string& buffer) noexcept {
@@ -663,6 +688,23 @@ std::vector<AurPackageInfo> AurClient::search(const std::string& query) {
     if(response.empty()) return packages;
     return parse_aur_rpc_package_results(
             response, aur_rpc_search_context(query));
+}
+
+std::vector<AurPackageInfo> AurClient::search_strict(
+        const std::string& query) {
+    CurlHandle handle;
+    UniqueCurlEscapedString escaped(
+            escape_strict_search_query(handle.get(), query));
+    if(!escaped) {
+        throw std::runtime_error(localization::format_translated_message(
+                "Failed to encode {} search query: {}", "AUR", query));
+    }
+    std::string url = aur_rpc_search_url() + escaped.get();
+
+    std::string response = get_url_strict(url);
+    return parse_strict_aur_rpc_package_results(
+            response, aur_rpc_search_context(query),
+            AUR_RPC_SEARCH_RESPONSE_TYPE);
 }
 
 std::vector<std::string> AurClient::search_names_by_provides(const std::string& provided_name) {

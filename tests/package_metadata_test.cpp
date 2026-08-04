@@ -107,6 +107,17 @@ PackageMetadataFailure require_repository_query_failure(
     return failure;
 }
 
+PackageMetadataFailure require_repository_search_failure(
+        const RepositoryPackageSearchResult& result,
+        PackageMetadataErrorCode expected_code,
+        const std::string& context) {
+    PackageMetadataFailure failure =
+            require_result_alternative<PackageMetadataFailure>(result, context);
+    expect(failure.code == expected_code, context + ": unexpected failure code");
+    expect(!failure.diagnostic.empty(), context + ": empty failure diagnostic");
+    return failure;
+}
+
 PackageMetadataFailure require_inventory_failure(
         const ForeignPackageInventoryResult& result,
         PackageMetadataErrorCode expected_code,
@@ -149,6 +160,20 @@ void set_repository_configuration_outputs(
     stub::enqueue_captured_command_result(
             REPOSITORY_LIST_COMMAND,
             CapturedCommandResult{repository_output, repository_exit_code});
+}
+
+std::string repository_usage_command(const std::string& quoted_repository_name) {
+    return "pacman-conf --repo " + quoted_repository_name +
+           " Usage 2>/dev/null";
+}
+
+void enqueue_repository_usage_output(
+        const std::string& quoted_repository_name,
+        const std::string& output,
+        int exit_code = 0) {
+    stub::enqueue_captured_command_result(
+            repository_usage_command(quoted_repository_name),
+            CapturedCommandResult{output, exit_code});
 }
 
 PacmanRepositoryConfiguration valid_repository_configuration(
@@ -403,6 +428,92 @@ void test_malformed_repository_output_does_not_leak_raw_text() {
             PackageMetadataErrorCode::ConfigurationMalformed,
             "malformed repository output diagnostic",
             sensitive_marker);
+}
+
+void test_root_search_repository_configuration_filters_usage_in_order() {
+    set_repository_configuration_outputs("testing\ncore\nextra\narchive\n");
+    enqueue_repository_usage_output("'testing'", "All\n");
+    enqueue_repository_usage_output("'core'", "Search\nInstall\n");
+    enqueue_repository_usage_output("'extra'", "Search\n");
+    enqueue_repository_usage_output(
+            "'archive'", "Sync\nInstall\nUpgrade\n");
+
+    PacmanRepositoryConfiguration configuration =
+            resolve_pacman_root_search_repository_configuration();
+
+    expect(
+            configuration.repository_names ==
+                    std::vector<std::string>({"testing", "core"}),
+            "root search repository eligibility or order differs");
+    expect(
+            stub::captured_commands() == std::vector<std::string>({
+                    DATABASE_PATH_COMMAND,
+                    REPOSITORY_LIST_COMMAND,
+                    repository_usage_command("'testing'"),
+                    repository_usage_command("'core'"),
+                    repository_usage_command("'extra'"),
+                    repository_usage_command("'archive'")}),
+            "root search Usage query order differs");
+}
+
+void test_root_search_repository_usage_is_strict() {
+    const std::vector<std::string> malformed_outputs = {
+            "",
+            "Search\nSearch\nInstall\n",
+            "All\nSearch\n",
+            "Search Install\n",
+            "Search\nUnknown\nInstall\n",
+            "Search\n\nInstall\n"};
+
+    for(const auto& output : malformed_outputs) {
+        set_repository_configuration_outputs("core\n");
+        enqueue_repository_usage_output("'core'", output);
+        expect_metadata_error(
+                []() {
+                    static_cast<void>(
+                            resolve_pacman_root_search_repository_configuration());
+                },
+                PackageMetadataErrorCode::ConfigurationMalformed,
+                "strict repository Usage parse");
+    }
+}
+
+void test_root_search_repository_usage_command_is_quoted() {
+    set_repository_configuration_outputs("odd'repository\n");
+    enqueue_repository_usage_output("'odd'\\''repository'", "All\n");
+
+    PacmanRepositoryConfiguration configuration =
+            resolve_pacman_root_search_repository_configuration();
+
+    expect(
+            configuration.repository_names ==
+                    std::vector<std::string>({"odd'repository"}),
+            "quoted Usage repository was not retained");
+    expect(
+            stub::last_captured_command() ==
+                    repository_usage_command("'odd'\\''repository'"),
+            "repository Usage command was not shell-quoted");
+}
+
+void test_root_search_usage_failure_precedes_alpm_open() {
+    set_repository_configuration_outputs("core\nextra\n");
+    enqueue_repository_usage_output("'core'", "All\n");
+    enqueue_repository_usage_output("'extra'", "raw-sensitive-output", 23);
+    stub::reset_alpm_stub();
+
+    RepositoryPackageSearchResult result =
+            query_repository_root_package_search("query");
+
+    static_cast<void>(require_repository_search_failure(
+            result,
+            PackageMetadataErrorCode::ConfigurationUnavailable,
+            "Usage failure before alpm open"));
+    expect(
+            stub::initialize_call_count() == 0,
+            "alpm opened before every repository Usage was acquired");
+    expect(
+            stub::capture_command_call_count() == 4,
+            "Usage resolver continued after command failure");
 }
 
 void test_session_open_success() {
@@ -1775,6 +1886,258 @@ void test_repository_metadata_accepts_maximum_off_t() {
             "maximum off_t size conversion differs");
 }
 
+void test_repository_root_search_returns_owned_matches_in_repository_order() {
+    stub::reset_alpm_stub();
+    stub::set_repository_search_results(
+            "core", "editor",
+            {{"alpha-editor", "1.0-1", "Alpha editor"}});
+    stub::set_repository_search_results(
+            "extra", "editor",
+            {{"beta-editor", "2.0-3", "Beta editor"}});
+
+    RepositoryPackageSearchResult result;
+    {
+        RepositoryPackageMetadataSession session =
+                RepositoryPackageMetadataSession::open(
+                        valid_repository_configuration({"core", "extra"}));
+        result = session.query_root_package_search("editor");
+    }
+
+    RepositoryPackageSearchSnapshot snapshot =
+            require_result_alternative<RepositoryPackageSearchSnapshot>(
+                    result, "owned repository root search");
+    expect(
+            snapshot.repository_order ==
+                    std::vector<std::string>({"core", "extra"}),
+            "repository root search order differs");
+    expect(snapshot.matches.size() == 2, "repository root search match count differs");
+    expect(
+            snapshot.matches[0].repository_name == "core" &&
+                    snapshot.matches[0].package_name == "alpha-editor" &&
+                    snapshot.matches[0].version ==
+                            std::optional<std::string>("1.0-1") &&
+                    snapshot.matches[0].description ==
+                            std::optional<std::string>("Alpha editor") &&
+                    snapshot.matches[0].kind ==
+                            RepositoryPackageSearchMatchKind::Search &&
+                    !snapshot.matches[0].group_name.has_value(),
+            "first repository root search match differs");
+    expect(
+            snapshot.matches[1].repository_name == "extra" &&
+                    snapshot.matches[1].package_name == "beta-editor" &&
+                    snapshot.matches[1].version ==
+                            std::optional<std::string>("2.0-3") &&
+                    snapshot.matches[1].description ==
+                            std::optional<std::string>("Beta editor") &&
+                    snapshot.matches[1].kind ==
+                            RepositoryPackageSearchMatchKind::Search &&
+                    !snapshot.matches[1].group_name.has_value(),
+            "second repository root search match differs");
+    expect(
+            stub::release_count_for_handle(0) == 1,
+            "repository root search retained borrowed handle state");
+    expect(
+            stub::owned_list_free_call_count() == 2,
+            "repository search result lists were not caller-freed");
+
+    const auto search_history = stub::repository_search_query_history();
+    expect(
+            search_history.size() == 2 &&
+                    search_history[0].repository_name == "core" &&
+                    search_history[0].query == "editor" &&
+                    search_history[1].repository_name == "extra" &&
+                    search_history[1].query == "editor",
+            "repository root search query history differs");
+}
+
+void test_repository_root_search_adds_exact_group_members_with_provenance() {
+    stub::reset_alpm_stub();
+    stub::set_repository_search_results(
+            "core", "base-devel",
+            {{"shared-tool", "1.0-1", "Shared search match"}});
+    stub::set_repository_exact_group(
+            "core", "base-devel",
+            {{"shared-tool", "1.0-1", "Shared search match"},
+             {"core-tool", "2.0-1", "Core group member"}});
+    stub::set_repository_exact_group(
+            "extra", "base-devel",
+            {{"shared-tool", "3.0-1", "Lower precedence duplicate"},
+             {"extra-tool", "4.0-1", "Extra group member"}});
+    RepositoryPackageMetadataSession session =
+            RepositoryPackageMetadataSession::open(
+                    valid_repository_configuration({"core", "extra"}));
+
+    RepositoryPackageSearchSnapshot snapshot =
+            require_result_alternative<RepositoryPackageSearchSnapshot>(
+                    session.query_root_package_search("base-devel"),
+                    "exact repository group search");
+
+    expect(snapshot.matches.size() == 4, "exact group raw match count differs");
+    expect(
+            snapshot.matches[0].kind ==
+                            RepositoryPackageSearchMatchKind::Search &&
+                    snapshot.matches[0].package_name == "shared-tool",
+            "search provenance was not retained before group matches");
+    expect(
+            snapshot.matches[1].repository_name == "core" &&
+                    snapshot.matches[1].package_name == "shared-tool" &&
+                    snapshot.matches[1].kind ==
+                            RepositoryPackageSearchMatchKind::ExactGroup &&
+                    snapshot.matches[1].group_name ==
+                            std::optional<std::string>("base-devel"),
+            "first exact group match differs");
+    expect(
+            snapshot.matches[2].repository_name == "core" &&
+                    snapshot.matches[2].package_name == "core-tool" &&
+                    snapshot.matches[3].repository_name == "extra" &&
+                    snapshot.matches[3].package_name == "extra-tool",
+            "group expansion did not preserve configured precedence");
+    expect(
+            stub::group_expansion_call_count() == 1,
+            "exact group was not expanded exactly once");
+    expect(
+            stub::owned_list_free_call_count() == 2,
+            "search/group caller-owned lists were not both freed");
+}
+
+void test_repository_root_search_failure_discards_partial_snapshot() {
+    stub::reset_alpm_stub();
+    stub::set_repository_search_results(
+            "core", "broken-regex",
+            {{"partial-match", "1.0-1", "Must not be published"}});
+    stub::set_repository_search_failure(
+            "extra", "broken-regex", ALPM_ERR_INVALID_REGEX);
+    RepositoryPackageMetadataSession session =
+            RepositoryPackageMetadataSession::open(
+                    valid_repository_configuration({"core", "extra"}));
+
+    RepositoryPackageSearchResult result =
+            session.query_root_package_search("broken-regex");
+
+    static_cast<void>(require_repository_search_failure(
+            result,
+            PackageMetadataErrorCode::QueryFailed,
+            "eligible repository search failure"));
+    expect(
+            stub::repository_search_query_history().size() == 2,
+            "eligible repository search stopped before the failing database");
+    expect(
+            stub::owned_list_free_call_count() == 1,
+            "partial repository search list was not freed on later failure");
+    expect(
+            stub::repository_group_query_history().empty() &&
+                    stub::group_expansion_call_count() == 0,
+            "group query continued after repository search failure");
+}
+
+void test_repository_root_search_ignores_stale_errno_for_empty_group_result() {
+    stub::reset_alpm_stub();
+    stub::preserve_error_on_next_repository_search(
+            "core", "not-a-group", ALPM_ERR_DB_OPEN);
+    {
+        RepositoryPackageMetadataSession missing_group_session =
+                RepositoryPackageMetadataSession::open(
+                        valid_repository_configuration({"core"}));
+
+        RepositoryPackageSearchSnapshot missing_group_snapshot =
+                require_result_alternative<RepositoryPackageSearchSnapshot>(
+                        missing_group_session.query_root_package_search(
+                                "not-a-group"),
+                        "exact group miss with stale errno");
+
+        expect(
+                missing_group_snapshot.matches.empty(),
+                "exact group miss with stale errno produced a match");
+        expect(
+                stub::group_expansion_call_count() == 0,
+                "exact group miss started group expansion");
+    }
+
+    stub::reset_alpm_stub();
+    stub::set_repository_exact_group("core", "empty-group", {});
+    stub::preserve_error_on_next_repository_search(
+            "core", "empty-group", ALPM_ERR_DB_OPEN);
+    RepositoryPackageMetadataSession session =
+            RepositoryPackageMetadataSession::open(
+                    valid_repository_configuration({"core"}));
+
+    RepositoryPackageSearchSnapshot snapshot =
+            require_result_alternative<RepositoryPackageSearchSnapshot>(
+                    session.query_root_package_search("empty-group"),
+                    "empty exact group with stale errno");
+
+    expect(snapshot.matches.empty(), "empty exact group produced a match");
+    expect(
+            stub::group_expansion_call_count() == 1,
+            "empty exact group was not passed to libalpm expansion");
+}
+
+void test_repository_root_search_rejects_malformed_group_metadata() {
+    stub::reset_alpm_stub();
+    stub::set_repository_exact_group("core", "group-name", {});
+    stub::set_repository_group_returned_name(
+            "core", "group-name", "different-group");
+    RepositoryPackageMetadataSession malformed_group_session =
+            RepositoryPackageMetadataSession::open(
+                    valid_repository_configuration({"core"}));
+
+    static_cast<void>(require_repository_search_failure(
+            malformed_group_session.query_root_package_search("group-name"),
+            PackageMetadataErrorCode::MalformedMetadata,
+            "mismatched exact group name"));
+
+    stub::reset_alpm_stub();
+    stub::set_repository_exact_group("core", "group-name", {});
+    stub::append_null_repository_group_member("core", "group-name");
+    RepositoryPackageMetadataSession malformed_member_session =
+            RepositoryPackageMetadataSession::open(
+                    valid_repository_configuration({"core"}));
+
+    static_cast<void>(require_repository_search_failure(
+            malformed_member_session.query_root_package_search("group-name"),
+            PackageMetadataErrorCode::MalformedMetadata,
+            "invalid exact group member source"));
+    expect(
+            stub::owned_list_free_call_count() == 1,
+            "malformed group member result list was not freed");
+}
+
+void test_repository_root_search_free_function_uses_one_session() {
+    set_repository_configuration_outputs("core\nextra\ndisabled\n");
+    enqueue_repository_usage_output("'core'", "All\n");
+    enqueue_repository_usage_output("'extra'", "Search\nInstall\n");
+    enqueue_repository_usage_output("'disabled'", "Search\n");
+    stub::reset_alpm_stub();
+    stub::set_sync_database_register_failure("disabled");
+    stub::set_repository_search_results(
+            "extra", "terminal",
+            {{"terminal-tool", "5.0-1", "Terminal utility"}});
+
+    RepositoryPackageSearchResult result =
+            query_repository_root_package_search("terminal");
+
+    RepositoryPackageSearchSnapshot snapshot =
+            require_result_alternative<RepositoryPackageSearchSnapshot>(
+                    result, "repository root search free function");
+    expect(
+            snapshot.repository_order ==
+                    std::vector<std::string>({"core", "extra"}) &&
+                    snapshot.matches.size() == 1 &&
+                    snapshot.matches[0].repository_name == "extra",
+            "repository root search free function snapshot differs");
+    expect(
+            stub::initialize_call_count() == 1 &&
+                    stub::created_handle_count() == 1 &&
+                    stub::release_count_for_handle(0) == 1,
+            "repository root search did not use one released session");
+    const auto registrations = stub::sync_database_registration_history();
+    expect(
+            registrations.size() == 2 &&
+                    registrations[0].repository_name == "core" &&
+                    registrations[1].repository_name == "extra",
+            "non-eligible repository reached the libalpm session");
+}
+
 void test_repository_session_move_construction_does_not_double_release() {
     stub::reset_alpm_stub();
     {
@@ -1831,6 +2194,10 @@ int main() {
         test_repository_configuration_rejects_control_characters();
         test_repository_configuration_command_failures_are_distinct();
         test_malformed_repository_output_does_not_leak_raw_text();
+        test_root_search_repository_configuration_filters_usage_in_order();
+        test_root_search_repository_usage_is_strict();
+        test_root_search_repository_usage_command_is_quoted();
+        test_root_search_usage_failure_precedes_alpm_open();
 
         test_session_open_success();
         test_session_rejects_relative_paths_before_initialize();
@@ -1913,6 +2280,12 @@ int main() {
         test_repository_metadata_accepts_positive_and_zero_sizes();
         test_repository_metadata_rejects_negative_sizes();
         test_repository_metadata_accepts_maximum_off_t();
+        test_repository_root_search_returns_owned_matches_in_repository_order();
+        test_repository_root_search_adds_exact_group_members_with_provenance();
+        test_repository_root_search_failure_discards_partial_snapshot();
+        test_repository_root_search_ignores_stale_errno_for_empty_group_result();
+        test_repository_root_search_rejects_malformed_group_metadata();
+        test_repository_root_search_free_function_uses_one_session();
         test_repository_session_move_construction_does_not_double_release();
         test_repository_session_move_assignment_does_not_double_release();
     } catch(const std::exception& error) {

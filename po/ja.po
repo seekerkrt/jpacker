@@ -2,7 +2,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Moguet 2.0.1\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-03 16:04+0900\n"
+"POT-Creation-Date: 2026-08-04 10:24+0900\n"
 "PO-Revision-Date: 2026-08-03 06:53+0900\n"
 "Last-Translator: Moguet contributors\n"
 "Language-Team: Japanese\n"
@@ -75,7 +75,7 @@ msgstr "インストール理由の指定が不明です。"
 #. command "pacman -U"; the second is its exit code.
 #: src/artifact_install_executor.cpp:181
 #: src/package_base_artifact_install_executor.cpp:750
-#: src/package_metadata.cpp:683
+#: src/package_metadata.cpp:816
 #, c++-format
 msgid "{} failed with exit code {}."
 msgstr "{} は終了コード {} で失敗しました。"
@@ -645,172 +645,177 @@ msgstr "検証済みパッケージ署名の有無が変更されました: {}"
 msgid "Validated package signature path changed identity or owner: {}"
 msgstr "検証済みパッケージ署名のパスが示す識別情報または所有者が変更されました: {}"
 
-#: src/aur_rpc.cpp:49
+#: src/aur_rpc.cpp:51
 #, c++-format
 msgid "Failed to initialize the {} handle."
 msgstr "{} ハンドルを初期化できませんでした。"
 
-#: src/aur_rpc.cpp:158
+#: src/aur_rpc.cpp:178
 #, c++-format
 msgid "{} {} response parse failed for {}: {}"
 msgstr "{} {} の {} に対する応答を解析できませんでした: {}"
 
-#: src/aur_rpc.cpp:164
+#: src/aur_rpc.cpp:184
 #, c++-format
 msgid "{} {} response validation failed for {}: expected top-level object, got {}"
 msgstr "{} {} の {} に対する応答を検証できませんでした: 最上位のオブジェクトを期待しましたが、{} でした"
 
-#: src/aur_rpc.cpp:174
+#: src/aur_rpc.cpp:194
 #, c++-format
 msgid "{} {} response validation failed for {}: field {} expected array, got missing"
 msgstr "{} {} の {} に対する応答を検証できませんでした: フィールド {} は配列である必要がありますが、存在しません"
 
-#: src/aur_rpc.cpp:179
+#: src/aur_rpc.cpp:199
 #, c++-format
 msgid "{} {} response validation failed for {}: field {} expected array, got {}"
 msgstr "{} {} の {} に対する応答を検証できませんでした: フィールド {} は配列である必要がありますが、{} でした"
 
-#: src/aur_rpc.cpp:225
+#: src/aur_rpc.cpp:245
 #, c++-format
 msgid "{} {} response validation failed for {}: field {} expected string, got missing"
 msgstr "{} {} の {} に対する応答を検証できませんでした: フィールド {} は文字列である必要がありますが、存在しません"
 
-#: src/aur_rpc.cpp:231 src/aur_rpc.cpp:460
+#: src/aur_rpc.cpp:251 src/aur_rpc.cpp:480
 #, c++-format
 msgid "{} {} response validation failed for {}: field {} expected string, got {}"
 msgstr "{} {} の {} に対する応答を検証できませんでした: フィールド {} は文字列である必要がありますが、{} でした"
 
-#: src/aur_rpc.cpp:240
+#: src/aur_rpc.cpp:260
 #, c++-format
 msgid "{} {} response validation failed for {}: field {} expected non-empty string, got empty or whitespace-only string"
 msgstr "{} {} の {} に対する応答を検証できませんでした: フィールド {} は空でない文字列である必要がありますが、空または空白のみの文字列でした"
 
-#: src/aur_rpc.cpp:253
+#: src/aur_rpc.cpp:273
 #, c++-format
 msgid "{} {} response validation failed for {}: field {} expected string or null, got {}"
 msgstr "{} {} の {} に対する応答を検証できませんでした: フィールド {} は文字列またはnullである必要がありますが、{} でした"
 
-#: src/aur_rpc.cpp:267
+#: src/aur_rpc.cpp:287
 #, c++-format
 msgid "{} {} response validation failed for {}: field {} expected integer or null, got {}"
 msgstr "{} {} の {} に対する応答を検証できませんでした: フィールド {} は整数またはnullである必要がありますが、{} でした"
 
-#: src/aur_rpc.cpp:277 src/aur_rpc.cpp:308
+#: src/aur_rpc.cpp:297 src/aur_rpc.cpp:328
 #, c++-format
 msgid "{} {} response validation failed for {}: field {} integer is outside supported range"
 msgstr "{} {} の {} に対する応答を検証できませんでした: フィールド {} の整数値がサポート範囲外です"
 
-#: src/aur_rpc.cpp:291
+#: src/aur_rpc.cpp:311
 #, c++-format
 msgid "{} {} response validation failed for {}: field {} expected integer, got missing"
 msgstr "{} {} の {} に対する応答を検証できませんでした: フィールド {} は整数である必要がありますが、存在しません"
 
-#: src/aur_rpc.cpp:297
+#: src/aur_rpc.cpp:317
 #, c++-format
 msgid "{} {} response validation failed for {}: field {} expected integer, got {}"
 msgstr "{} {} の {} に対する応答を検証できませんでした: フィールド {} は整数である必要がありますが、{} でした"
 
-#: src/aur_rpc.cpp:323
+#: src/aur_rpc.cpp:343
 #, c++-format
 msgid "{} {} response validation failed for {}: field {} expected array or null, got {}"
 msgstr "{} {} の {} に対する応答を検証できませんでした: フィールド {} は配列またはnullである必要がありますが、{} でした"
 
-#: src/aur_rpc.cpp:335
+#: src/aur_rpc.cpp:355
 #, c++-format
 msgid "{} {} response validation failed for {}: field {}[{}] expected string, got {}"
 msgstr "{} {} の {} に対する応答を検証できませんでした: フィールド {}[{}] は文字列である必要がありますが、{} でした"
 
-#: src/aur_rpc.cpp:349
+#: src/aur_rpc.cpp:369
 #, c++-format
 msgid "{} {} response validation failed for {}: invalid {} {}"
 msgstr "{} {} の {} に対する応答を検証できませんでした: 無効な {} {}"
 
-#: src/aur_rpc.cpp:362
+#: src/aur_rpc.cpp:382
 #, c++-format
 msgid "{} {} response validation failed for {}: field {}[{}] contains a control character"
 msgstr "{} {} の {} に対する応答を検証できませんでした: フィールド {}[{}] に制御文字が含まれています"
 
-#: src/aur_rpc.cpp:369
+#: src/aur_rpc.cpp:389
 #, c++-format
 msgid "{} {} response validation failed for {}: field {}[{}] contains invalid package identifier {}"
 msgstr "{} {} の {} に対する応答を検証できませんでした: フィールド {}[{}] に無効なパッケージ識別子 {} が含まれています"
 
-#: src/aur_rpc.cpp:383
+#: src/aur_rpc.cpp:403
 #, c++-format
 msgid "{} {} response validation failed for {}: field {}[{}] contains an invalid version constraint"
 msgstr "{} {} の {} に対する応答を検証できませんでした: フィールド {}[{}] に無効なバージョン制約が含まれています"
 
-#: src/aur_rpc.cpp:395
+#: src/aur_rpc.cpp:415
 #, c++-format
 msgid "{} {} response validation failed for {}: package entry expected object, got {}"
 msgstr "{} {} の {} に対する応答を検証できませんでした: パッケージ項目はオブジェクトである必要がありますが、{} でした"
 
-#: src/aur_rpc.cpp:412
+#: src/aur_rpc.cpp:432
 #, c++-format
 msgid "{} {} response validation failed for {}: field {} contains a control character"
 msgstr "{} {} の {} に対する応答を検証できませんでした: フィールド {} に制御文字が含まれています"
 
-#: src/aur_rpc.cpp:466
+#: src/aur_rpc.cpp:486
 #, c++-format
 msgid "{} {} response validation failed for {}: field {} reported {}"
 msgstr "{} {} の {} に対する応答を検証できませんでした: フィールド {} が {} を報告しました"
 
-#: src/aur_rpc.cpp:474 src/aur_rpc.cpp:484
+#: src/aur_rpc.cpp:494 src/aur_rpc.cpp:504
 #, c++-format
 msgid "{} {} response validation failed for {}: field {} expected {}, got {}"
 msgstr "{} {} の {} に対する応答を検証できませんでした: フィールド {} は {} である必要がありますが、{} でした"
 
-#: src/aur_rpc.cpp:494
+#: src/aur_rpc.cpp:514
 #, c++-format
 msgid "{} {} response validation failed for {}: field {} expected non-negative integer, got {}"
 msgstr "{} {} の {} に対する応答を検証できませんでした: フィールド {} は0以上の整数である必要がありますが、{} でした"
 
-#: src/aur_rpc.cpp:504
+#: src/aur_rpc.cpp:524
 #, c++-format
 msgid "{} {} response validation failed for {}: field {} was {} but {} contained {} entries"
 msgstr "{} {} の {} に対する応答を検証できませんでした: フィールド {} は {} でしたが、{} には {} 件の項目が含まれていました"
 
-#: src/aur_rpc.cpp:512 src/aur_rpc.cpp:542
+#: src/aur_rpc.cpp:532 src/aur_rpc.cpp:562
 #, c++-format
 msgid "{} {} response validation failed for {}: expected zero or one result, got {}"
 msgstr "{} {} の {} に対する応答を検証できませんでした: 結果は0件または1件である必要がありますが、{} 件でした"
 
-#: src/aur_rpc.cpp:548 src/aur_rpc.cpp:565
+#: src/aur_rpc.cpp:568 src/aur_rpc.cpp:585
 #, c++-format
 msgid "{} {} response validation failed for {}: requested {} but response {} was {}"
 msgstr "{} {} の {} に対する応答を検証できませんでした: {} を要求しましたが、応答の {} は {} でした"
 
-#: src/aur_rpc.cpp:615 src/aur_rpc.cpp:646
+#: src/aur_rpc.cpp:640 src/aur_rpc.cpp:671
 #, c++-format
 msgid "{} request failed: {}"
 msgstr "{} リクエストに失敗しました: {}"
 
-#: src/aur_rpc.cpp:622
+#: src/aur_rpc.cpp:647
 #, c++-format
 msgid "{} request failed with {} status {}."
 msgstr "{} リクエストは {} ステータス {} で失敗しました。"
 
-#: src/aur_rpc.cpp:627
+#: src/aur_rpc.cpp:652
 #, c++-format
 msgid "{} request returned an empty response."
 msgstr "{} リクエストが空の応答を返しました。"
 
-#: src/aur_rpc.cpp:697
+#: src/aur_rpc.cpp:700
+#, c++-format
+msgid "Failed to encode {} search query: {}"
+msgstr "{} の検索クエリをエンコードできませんでした: {}"
+
+#: src/aur_rpc.cpp:739
 #, c++-format
 msgid "Failed to encode {} provided name: {}"
 msgstr "{} に指定された名前をエンコードできませんでした: {}"
 
-#: src/aur_rpc.cpp:731 src/aur_rpc.cpp:757
+#: src/aur_rpc.cpp:773 src/aur_rpc.cpp:799
 #, c++-format
 msgid "Failed to encode {} package name: {}"
 msgstr "{}パッケージ名をエンコードできませんでした: {}"
 
-#: src/aur_rpc.cpp:775
+#: src/aur_rpc.cpp:817
 #, c++-format
 msgid "{} {} response validation failed for {}: response {} {} was not requested"
 msgstr "{} {} の {} に対する応答を検証できませんでした: 応答の {} {} は要求されていません"
 
-#: src/aur_rpc.cpp:782
+#: src/aur_rpc.cpp:824
 #, c++-format
 msgid "{} {} response validation failed for {}: duplicate response {} {}"
 msgstr "{} {} の {} に対する応答を検証できませんでした: 応答の {} {} が重複しています"
@@ -5412,312 +5417,357 @@ msgid "Invalid package name: {}"
 msgstr "無効なパッケージ名です: {}"
 
 #. TRANSLATORS: The placeholder is a pacman configuration key.
-#: src/package_metadata.cpp:49
+#: src/package_metadata.cpp:50
 #, c++-format
 msgid "{} must be an absolute path."
 msgstr "{}は絶対パスでなければなりません。"
 
 #. TRANSLATORS: The placeholder is a pacman configuration key.
-#: src/package_metadata.cpp:56
+#: src/package_metadata.cpp:57
 #, c++-format
 msgid "{} must not contain a null byte."
 msgstr "{} にヌルバイトを含めることはできません。"
 
-#: src/package_metadata.cpp:87 src/package_metadata.cpp:97
+#: src/package_metadata.cpp:88 src/package_metadata.cpp:98
 #, c++-format
 msgid "{} returned a malformed database path line."
 msgstr "{} が不正なデータベースパス行を返しました。"
 
-#: src/package_metadata.cpp:107
+#: src/package_metadata.cpp:108
 #, c++-format
 msgid "{} returned an empty database path."
 msgstr "{} が空のデータベースパスを返しました。"
 
-#: src/package_metadata.cpp:116 src/package_metadata.cpp:126
+#: src/package_metadata.cpp:117 src/package_metadata.cpp:127
 #, c++-format
 msgid "{} returned {} more than once."
 msgstr "{} が {} を複数回返しました。"
 
-#: src/package_metadata.cpp:135
+#: src/package_metadata.cpp:136
 #, c++-format
 msgid "{} returned an unexpected database path key."
 msgstr "{} が予期しないデータベースパスキーを返しました。"
 
-#: src/package_metadata.cpp:144
+#: src/package_metadata.cpp:145
 #, c++-format
 msgid "{} did not return both {} and {}."
 msgstr "{} は {} と {} の両方を返しませんでした。"
 
-#: src/package_metadata.cpp:166
+#: src/package_metadata.cpp:167
 msgid "Repository configuration contains an invalid repository name."
 msgstr "リポジトリ設定に無効なリポジトリ名が含まれています。"
 
-#: src/package_metadata.cpp:172
+#: src/package_metadata.cpp:173
 msgid "Repository configuration contains a duplicate repository name."
 msgstr "リポジトリ設定に重複したリポジトリ名が含まれています。"
 
-#: src/package_metadata.cpp:187
+#: src/package_metadata.cpp:188
 #, c++-format
 msgid "{} returned a malformed repository list."
 msgstr "{} が不正なリポジトリ一覧を返しました。"
 
-#: src/package_metadata.cpp:239
+#: src/package_metadata.cpp:226 src/package_metadata.cpp:244
+#: src/package_metadata.cpp:251 src/package_metadata.cpp:261
+msgid "Repository Usage configuration is malformed."
+msgstr "リポジトリの Usage 設定が不正です。"
+
+#: src/package_metadata.cpp:310
 #, c++-format
 msgid "Repository package query failed: {} reported no error detail."
 msgstr "リポジトリパッケージの照会に失敗しました: {} からエラーの詳細が報告されませんでした。"
 
-#: src/package_metadata.cpp:242
+#: src/package_metadata.cpp:313
 #, c++-format
 msgid "Repository package query failed: unknown {} error."
 msgstr "リポジトリパッケージの照会に失敗しました: 不明な {} エラー。"
 
-#: src/package_metadata.cpp:245
+#: src/package_metadata.cpp:316
 #, c++-format
 msgid "Repository package query failed: {}."
 msgstr "リポジトリパッケージの照会に失敗しました: {}。"
 
-#: src/package_metadata.cpp:255
+#: src/package_metadata.cpp:326
 #, c++-format
 msgid "Failed to initialize foreign package inventory: {} reported no error detail."
 msgstr "外部パッケージ一覧を初期化できませんでした: {} からエラーの詳細が報告されませんでした。"
 
-#: src/package_metadata.cpp:258
+#: src/package_metadata.cpp:329
 #, c++-format
 msgid "Failed to initialize foreign package inventory: unknown {} error."
 msgstr "外部パッケージ一覧を初期化できませんでした: 不明な {} エラー。"
 
-#: src/package_metadata.cpp:261
+#: src/package_metadata.cpp:332
 #, c++-format
 msgid "Failed to initialize foreign package inventory: {}."
 msgstr "外部パッケージ一覧を初期化できませんでした: {}。"
 
-#: src/package_metadata.cpp:270
+#: src/package_metadata.cpp:341
 #, c++-format
 msgid "Failed to access the local package database: {} reported no error detail."
 msgstr "ローカルパッケージデータベースへアクセスできませんでした: {} からエラーの詳細が報告されませんでした。"
 
-#: src/package_metadata.cpp:273
+#: src/package_metadata.cpp:344
 #, c++-format
 msgid "Failed to access the local package database: unknown {} error."
 msgstr "ローカルパッケージデータベースへアクセスできませんでした: 不明な {} エラー。"
 
-#: src/package_metadata.cpp:276
+#: src/package_metadata.cpp:347
 #, c++-format
 msgid "Failed to access the local package database: {}."
 msgstr "ローカルパッケージデータベースへアクセスできませんでした: {}。"
 
-#: src/package_metadata.cpp:285
+#: src/package_metadata.cpp:356
 #, c++-format
 msgid "Local package database validation failed: {} reported no error detail."
 msgstr "ローカルパッケージデータベースの検証に失敗しました: {} からエラーの詳細が報告されませんでした。"
 
-#: src/package_metadata.cpp:288
+#: src/package_metadata.cpp:359
 #, c++-format
 msgid "Local package database validation failed: unknown {} error."
 msgstr "ローカルパッケージデータベースの検証に失敗しました: 不明な {} エラー。"
 
-#: src/package_metadata.cpp:291
+#: src/package_metadata.cpp:362
 #, c++-format
 msgid "Local package database validation failed: {}."
 msgstr "ローカルパッケージデータベースの検証に失敗しました: {}。"
 
-#: src/package_metadata.cpp:301
+#: src/package_metadata.cpp:372
 #, c++-format
 msgid "Failed to register repository package database '{}': {} reported no error detail."
 msgstr "リポジトリパッケージデータベース '{}' を登録できませんでした: {} からエラーの詳細が報告されませんでした。"
 
-#: src/package_metadata.cpp:304
+#: src/package_metadata.cpp:375
 #, c++-format
 msgid "Failed to register repository package database '{}': unknown {} error."
 msgstr "リポジトリパッケージデータベース '{}' を登録できませんでした: 不明な {} エラー。"
 
-#: src/package_metadata.cpp:307
+#: src/package_metadata.cpp:378
 #, c++-format
 msgid "Failed to register repository package database '{}': {}."
 msgstr "リポジトリパッケージデータベース '{}' を登録できませんでした: {}。"
 
-#: src/package_metadata.cpp:318
+#: src/package_metadata.cpp:389
 #, c++-format
 msgid "Repository package database validation failed: {} reported no error detail."
 msgstr "リポジトリパッケージデータベースの検証に失敗しました: {} からエラーの詳細が報告されませんでした。"
 
-#: src/package_metadata.cpp:321
+#: src/package_metadata.cpp:392
 #, c++-format
 msgid "Repository package database validation failed: unknown {} error."
 msgstr "リポジトリパッケージデータベースの検証に失敗しました: 不明な {} エラー。"
 
-#: src/package_metadata.cpp:324
+#: src/package_metadata.cpp:395
 #, c++-format
 msgid "Repository package database validation failed: {}."
 msgstr "リポジトリパッケージデータベースの検証に失敗しました: {}。"
 
-#: src/package_metadata.cpp:333
+#: src/package_metadata.cpp:404
 #, c++-format
 msgid "Failed to load the local package database: {} reported no error detail."
 msgstr "ローカルパッケージデータベースを読み込めませんでした: {} からエラーの詳細が報告されませんでした。"
 
-#: src/package_metadata.cpp:336
+#: src/package_metadata.cpp:407
 #, c++-format
 msgid "Failed to load the local package database: unknown {} error."
 msgstr "ローカルパッケージデータベースを読み込めませんでした: 不明な {} エラー。"
 
-#: src/package_metadata.cpp:339
+#: src/package_metadata.cpp:410
 #, c++-format
 msgid "Failed to load the local package database: {}."
 msgstr "ローカルパッケージデータベースを読み込めませんでした: {}。"
 
-#: src/package_metadata.cpp:348
+#: src/package_metadata.cpp:419
 #, c++-format
 msgid "Failed to load a repository package database: {} reported no error detail."
 msgstr "リポジトリパッケージデータベースを読み込めませんでした: {} からエラーの詳細が報告されませんでした。"
 
-#: src/package_metadata.cpp:351
+#: src/package_metadata.cpp:422
 #, c++-format
 msgid "Failed to load a repository package database: unknown {} error."
 msgstr "リポジトリパッケージデータベースを読み込めませんでした: 不明な {} エラー。"
 
-#: src/package_metadata.cpp:354
+#: src/package_metadata.cpp:425
 #, c++-format
 msgid "Failed to load a repository package database: {}."
 msgstr "リポジトリパッケージデータベースを読み込めませんでした: {}。"
 
-#: src/package_metadata.cpp:363
+#: src/package_metadata.cpp:434
 #, c++-format
 msgid "Repository package membership query failed: {} reported no error detail."
 msgstr "リポジトリへのパッケージ所属照会に失敗しました: {} からエラーの詳細が報告されませんでした。"
 
-#: src/package_metadata.cpp:366
+#: src/package_metadata.cpp:437
 #, c++-format
 msgid "Repository package membership query failed: unknown {} error."
 msgstr "リポジトリへのパッケージ所属照会に失敗しました: 不明な {} エラー。"
 
-#: src/package_metadata.cpp:369
+#: src/package_metadata.cpp:440
 #, c++-format
 msgid "Repository package membership query failed: {}."
 msgstr "リポジトリへのパッケージ所属照会に失敗しました: {}。"
 
-#: src/package_metadata.cpp:379
+#: src/package_metadata.cpp:450
 #, c++-format
 msgid "Failed to initialize package metadata session: {} reported no error detail."
 msgstr "パッケージメタデータセッションを初期化できませんでした: {} からエラーの詳細が報告されませんでした。"
 
-#: src/package_metadata.cpp:382
+#: src/package_metadata.cpp:453
 #, c++-format
 msgid "Failed to initialize package metadata session: unknown {} error."
 msgstr "パッケージメタデータセッションを初期化できませんでした: 不明な {} エラー。"
 
-#: src/package_metadata.cpp:385
+#: src/package_metadata.cpp:456
 #, c++-format
 msgid "Failed to initialize package metadata session: {}."
 msgstr "パッケージメタデータセッションを初期化できませんでした: {}。"
 
-#: src/package_metadata.cpp:394
+#: src/package_metadata.cpp:465
 #, c++-format
 msgid "Installed package query failed: {} reported no error detail."
 msgstr "インストール済みパッケージの照会に失敗しました: {} からエラーの詳細が報告されませんでした。"
 
-#: src/package_metadata.cpp:397
+#: src/package_metadata.cpp:468
 #, c++-format
 msgid "Installed package query failed: unknown {} error."
 msgstr "インストール済みパッケージの照会に失敗しました: 不明な {} エラー。"
 
-#: src/package_metadata.cpp:400
+#: src/package_metadata.cpp:471
 #, c++-format
 msgid "Installed package query failed: {}."
 msgstr "インストール済みパッケージの照会に失敗しました: {}。"
 
-#: src/package_metadata.cpp:410
+#: src/package_metadata.cpp:481
 #, c++-format
 msgid "Failed to initialize repository package metadata session: {} reported no error detail."
 msgstr "リポジトリパッケージメタデータセッションを初期化できませんでした: {} からエラーの詳細が報告されませんでした。"
 
-#: src/package_metadata.cpp:413
+#: src/package_metadata.cpp:484
 #, c++-format
 msgid "Failed to initialize repository package metadata session: unknown {} error."
 msgstr "リポジトリパッケージメタデータセッションを初期化できませんでした: 不明な {} エラー。"
 
-#: src/package_metadata.cpp:416
+#: src/package_metadata.cpp:487
 #, c++-format
 msgid "Failed to initialize repository package metadata session: {}."
 msgstr "リポジトリパッケージメタデータセッションを初期化できませんでした: {}。"
 
-#: src/package_metadata.cpp:426
+#: src/package_metadata.cpp:497
 #, c++-format
 msgid "Failed to register a repository package database: {} reported no error detail."
 msgstr "リポジトリパッケージデータベースを登録できませんでした: {} からエラーの詳細が報告されませんでした。"
 
-#: src/package_metadata.cpp:429
+#: src/package_metadata.cpp:500
 #, c++-format
 msgid "Failed to register a repository package database: unknown {} error."
 msgstr "リポジトリパッケージデータベースを登録できませんでした: 不明な {} エラー。"
 
-#: src/package_metadata.cpp:432
+#: src/package_metadata.cpp:503
 #, c++-format
 msgid "Failed to register a repository package database: {}."
 msgstr "リポジトリパッケージデータベースを登録できませんでした: {}。"
 
-#: src/package_metadata.cpp:483 src/package_metadata.cpp:636
-#: src/package_metadata.cpp:644
+#: src/package_metadata.cpp:547
+#, c++-format
+msgid "Repository package search failed: {} reported no error detail."
+msgstr "リポジトリパッケージの検索に失敗しました: {} からエラーの詳細が報告されませんでした。"
+
+#: src/package_metadata.cpp:550
+#, c++-format
+msgid "Repository package search failed: unknown {} error."
+msgstr "リポジトリパッケージの検索に失敗しました: 不明な {} エラー。"
+
+#: src/package_metadata.cpp:553
+#, c++-format
+msgid "Repository package search failed: {}."
+msgstr "リポジトリパッケージの検索に失敗しました: {}。"
+
+#: src/package_metadata.cpp:576
+msgid "Repository package search returned an invalid package entry."
+msgstr "リポジトリパッケージ検索が無効なパッケージ項目を返しました。"
+
+#: src/package_metadata.cpp:584
+msgid "Repository package search metadata contains an invalid package name."
+msgstr "リポジトリパッケージ検索メタデータに無効なパッケージ名が含まれています。"
+
+#: src/package_metadata.cpp:616 src/package_metadata.cpp:769
+#: src/package_metadata.cpp:777
 msgid "Repository package metadata contains an invalid package name."
 msgstr "リポジトリパッケージメタデータに無効なパッケージ名が含まれています。"
 
-#: src/package_metadata.cpp:493
+#: src/package_metadata.cpp:626
 msgid "Repository package metadata contains an invalid package size."
 msgstr "リポジトリパッケージメタデータに無効なパッケージサイズが含まれています。"
 
-#: src/package_metadata.cpp:511
+#: src/package_metadata.cpp:644
 msgid "No package repositories are configured for foreign package inventory."
 msgstr "外部パッケージ一覧に使用できるパッケージリポジトリが設定されていません。"
 
-#: src/package_metadata.cpp:599 src/package_metadata.cpp:866
+#: src/package_metadata.cpp:732 src/package_metadata.cpp:1041
 msgid "Local package cache contains an invalid package entry."
 msgstr "ローカルパッケージキャッシュに無効なパッケージ項目が含まれています。"
 
-#: src/package_metadata.cpp:608 src/package_metadata.cpp:616
-#: src/package_metadata.cpp:875 src/package_metadata.cpp:883
+#: src/package_metadata.cpp:741 src/package_metadata.cpp:749
+#: src/package_metadata.cpp:1050 src/package_metadata.cpp:1058
 msgid "Local package metadata contains an invalid package name."
 msgstr "ローカルパッケージメタデータに無効なパッケージ名が含まれています。"
 
-#: src/package_metadata.cpp:656
+#: src/package_metadata.cpp:789
 msgid "Foreign package metadata contains an invalid version."
 msgstr "外部パッケージメタデータに無効なバージョンが含まれています。"
 
-#: src/package_metadata.cpp:698
+#: src/package_metadata.cpp:831
 #, c++-format
 msgid "{} repository list failed with exit code {}."
 msgstr "{} によるリポジトリ一覧の取得が終了コード {} で失敗しました。"
 
-#: src/package_metadata.cpp:805 src/package_metadata.cpp:853
+#: src/package_metadata.cpp:854
+#, c++-format
+msgid "{} repository Usage query failed with exit code {}."
+msgstr "{} によるリポジトリの Usage 照会が終了コード {} で失敗しました。"
+
+#: src/package_metadata.cpp:980 src/package_metadata.cpp:1028
 msgid "Package metadata session is not open."
 msgstr "パッケージメタデータセッションが開かれていません。"
 
-#: src/package_metadata.cpp:810 src/package_metadata.cpp:1011
+#: src/package_metadata.cpp:985 src/package_metadata.cpp:1186
 msgid "Package name is invalid."
 msgstr "パッケージ名が無効です。"
 
-#: src/package_metadata.cpp:830
+#: src/package_metadata.cpp:1005
 msgid "Installed package metadata contains an invalid package name."
 msgstr "インストール済みパッケージのメタデータに無効なパッケージ名が含まれています。"
 
-#: src/package_metadata.cpp:838
+#: src/package_metadata.cpp:1013
 msgid "Installed package metadata contains an invalid version."
 msgstr "インストール済みパッケージのメタデータに無効なバージョンが含まれています。"
 
-#: src/package_metadata.cpp:891
+#: src/package_metadata.cpp:1066
 msgid "Local package metadata contains an invalid version."
 msgstr "ローカルパッケージメタデータに無効なバージョンが含まれています。"
 
-#: src/package_metadata.cpp:900
+#: src/package_metadata.cpp:1075
 msgid "Local package metadata contains a duplicate package name."
 msgstr "ローカルパッケージメタデータに重複したパッケージ名が含まれています。"
 
-#: src/package_metadata.cpp:1006
+#: src/package_metadata.cpp:1181 src/package_metadata.cpp:1219
 msgid "Repository package metadata session is not open."
 msgstr "リポジトリパッケージメタデータセッションが開かれていません。"
 
-#: src/package_metadata.cpp:1024
+#: src/package_metadata.cpp:1199
 msgid "Requested repository is not configured."
 msgstr "要求されたリポジトリは設定されていません。"
+
+#: src/package_metadata.cpp:1225
+msgid "Repository package search query is invalid."
+msgstr "リポジトリパッケージの検索クエリが無効です。"
+
+#: src/package_metadata.cpp:1279
+msgid "Repository package group metadata contains an invalid group name."
+msgstr "リポジトリパッケージグループのメタデータに無効なグループ名が含まれています。"
+
+#: src/package_metadata.cpp:1324
+msgid "Repository package group contains an invalid package source."
+msgstr "リポジトリパッケージグループに無効なパッケージ取得元が含まれています。"
 
 #: src/pkgbuild_export.cpp:69
 #, c++-format

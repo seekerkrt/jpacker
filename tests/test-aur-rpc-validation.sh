@@ -40,13 +40,14 @@ while [ ! -s "$port_file" ]; do
 done
 
 port=$(cat "$port_file")
+fixture_rpc_base_url=http://127.0.0.1:$port/rpc/
 export PATH=$repo_root/tests/stubs:/usr/bin:/bin
 require_exact_test_command pacman-conf "$repo_root/tests/stubs/pacman-conf"
 require_exact_test_command makepkg "$repo_root/tests/stubs/makepkg"
 require_exact_test_command pacman "$repo_root/tests/stubs/pacman"
 require_exact_test_command sudo "$repo_root/tests/stubs/sudo"
 require_exact_test_command git "$repo_root/tests/stubs/git"
-export MOGUET_TEST_AUR_RPC_BASE_URL=http://127.0.0.1:$port/rpc/
+export MOGUET_TEST_AUR_RPC_BASE_URL=$fixture_rpc_base_url
 
 setup_case() {
     case_name=$1
@@ -285,6 +286,39 @@ run_envelope_ok provides-strict virtual-one
 assert_contains "provider-one" "$output_file"
 assert_command_log_empty
 
+setup_case strict-envelope-valid-typed-search
+run_envelope_ok search-strict search-valid-query
+assert_contains "search-valid-result|search-valid-result|1.0-1" "$output_file"
+assert_command_log_empty
+
+setup_case strict-envelope-valid-empty-typed-search
+run_envelope_ok search-strict strict-search-empty
+if [ -s "$output_file" ]; then
+    echo "valid empty strict typed search returned output" >&2
+    cat "$output_file" >&2
+    exit 1
+fi
+assert_command_log_empty
+
+setup_case strict-typed-search-encode-failure
+run_envelope_fail search-encode-failure-strict encode-failure-query
+assert_contains "Failed to encode AUR search query: encode-failure-query" "$output_file"
+assert_request_count 0
+
+setup_case strict-typed-search-transport-failure
+export MOGUET_TEST_AUR_RPC_BASE_URL=http://127.0.0.1:9/rpc/
+run_envelope_fail search-strict transport-failure-query
+export MOGUET_TEST_AUR_RPC_BASE_URL=$fixture_rpc_base_url
+assert_contains "AUR request failed:" "$output_file"
+assert_not_contains "AUR request returned an empty response." "$output_file"
+assert_request_count 0
+
+setup_case strict-typed-search-http-failure
+run_envelope_fail search-strict strict-search-http-failure
+assert_contains "AUR request failed:" "$output_file"
+assert_contains "503" "$output_file"
+assert_request_count 1
+
 setup_case strict-envelope-valid-empty-search
 run_envelope_ok provides-strict strict-search-empty
 if [ -s "$output_file" ]; then
@@ -337,6 +371,12 @@ CASES
 setup_case strict-envelope-search-type
 run_envelope_fail provides-strict strict-search-wrong-type
 assert_validation_error "search[provides=\"strict-search-wrong-type\"]"
+assert_contains 'field type expected "search", got "multiinfo"' "$output_file"
+assert_command_log_empty
+
+setup_case strict-envelope-typed-search-type
+run_envelope_fail search-strict strict-search-wrong-type
+assert_validation_error "search[query=\"strict-search-wrong-type\"]"
 assert_contains 'field type expected "search", got "multiinfo"' "$output_file"
 assert_command_log_empty
 
