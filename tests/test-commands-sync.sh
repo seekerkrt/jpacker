@@ -1,6 +1,13 @@
 #!/bin/sh
 set -eu
 
+# Assertions target the canonical untranslated CLI output.
+# Do not inherit locale settings from the invoking environment.
+LANG=C
+LC_ALL=C
+export LANG LC_ALL
+unset LANGUAGE
+
 test_binary=$1
 repo_root=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
 pty_runner=$repo_root/tests/run-with-pty.py
@@ -88,7 +95,7 @@ run_status() {
     : > "$output_file"
 
     actual_status=0
-    (cd "$case_dir/work" && "$test_binary" "$@") > "$output_file" 2>&1 || actual_status=$?
+    (cd "$case_dir/work" && "$test_binary" "$@" </dev/null) > "$output_file" 2>&1 || actual_status=$?
     if [ "$actual_status" -ne "$expected_status" ]; then
         echo "unexpected status for case $case_name: $actual_status (expected $expected_status)" >&2
         echo "command: $*" >&2

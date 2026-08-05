@@ -1,6 +1,13 @@
 #!/bin/sh
 set -eu
 
+# Assertions target the canonical untranslated CLI output.
+# Do not inherit locale settings from the invoking environment.
+LANG=C
+LC_ALL=C
+export LANG LC_ALL
+unset LANGUAGE
+
 test_binary=$1
 config_test_binary=$2
 upgrade_metadata_test_binary=$3
@@ -139,7 +146,7 @@ write_srcinfo() {
 
 run_ok() {
     : > "$command_log"
-    if ! "$test_runner" "$@" > "$output_file" 2>&1; then
+    if ! "$test_runner" "$@" </dev/null > "$output_file" 2>&1; then
         echo "expected command to succeed: $*" >&2
         sed -n '1,240p' "$output_file" >&2
         cat "$command_log" >&2
@@ -149,7 +156,7 @@ run_ok() {
 
 run_fail() {
     : > "$command_log"
-    if "$test_runner" "$@" > "$output_file" 2>&1; then
+    if "$test_runner" "$@" </dev/null > "$output_file" 2>&1; then
         echo "expected command to fail: $*" >&2
         sed -n '1,240p' "$output_file" >&2
         cat "$command_log" >&2
@@ -159,7 +166,7 @@ run_fail() {
 
 run_upgrade_ok() {
     : > "$command_log"
-    if ! PATH=$upgrade_metadata_path "$upgrade_metadata_test_runner" "$@" > "$output_file" 2>&1; then
+    if ! PATH=$upgrade_metadata_path "$upgrade_metadata_test_runner" "$@" </dev/null > "$output_file" 2>&1; then
         echo "expected upgrade metadata command to succeed: $*" >&2
         sed -n '1,240p' "$output_file" >&2
         cat "$command_log" >&2

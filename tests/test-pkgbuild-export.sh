@@ -1,6 +1,13 @@
 #!/bin/sh
 set -eu
 
+# Assertions target the canonical untranslated CLI output.
+# Do not inherit locale settings from the invoking environment.
+LANG=C
+LC_ALL=C
+export LANG LC_ALL
+unset LANGUAGE
+
 test_binary=$1
 repo_root=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
 MOGUET_TEST_REPOSITORY_ROOT=$repo_root
@@ -115,7 +122,7 @@ run_ok() {
     : > "$stderr_file"
     : > "$normal_request_log"
     : > "$schema_request_log"
-    if ! (cd "$work_dir" && "$test_binary" "$@") > "$stdout_file" 2> "$stderr_file"; then
+    if ! (cd "$work_dir" && "$test_binary" "$@") </dev/null > "$stdout_file" 2> "$stderr_file"; then
         echo "expected command to succeed: $*" >&2
         sed -n '1,240p' "$stdout_file" >&2
         sed -n '1,240p' "$stderr_file" >&2
@@ -130,7 +137,7 @@ run_fail() {
     : > "$stderr_file"
     : > "$normal_request_log"
     : > "$schema_request_log"
-    if (cd "$work_dir" && "$test_binary" "$@") > "$stdout_file" 2> "$stderr_file"; then
+    if (cd "$work_dir" && "$test_binary" "$@") </dev/null > "$stdout_file" 2> "$stderr_file"; then
         echo "expected command to fail: $*" >&2
         sed -n '1,240p' "$stdout_file" >&2
         sed -n '1,240p' "$stderr_file" >&2

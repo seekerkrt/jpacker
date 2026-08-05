@@ -166,7 +166,7 @@ setup_case() {
 run_ok() {
     : > "$command_log"
     : > "$request_log"
-    if ! "$test_binary" "$@" > "$output_file" 2>&1; then
+    if ! "$test_binary" "$@" </dev/null > "$output_file" 2>&1; then
         echo "expected command to succeed: $*" >&2
         sed -n '1,260p' "$output_file" >&2
         cat "$command_log" >&2
@@ -177,7 +177,7 @@ run_ok() {
 run_fail() {
     : > "$command_log"
     : > "$request_log"
-    if "$test_binary" "$@" > "$output_file" 2>&1; then
+    if "$test_binary" "$@" </dev/null > "$output_file" 2>&1; then
         echo "expected command to fail: $*" >&2
         sed -n '1,260p' "$output_file" >&2
         cat "$command_log" >&2
@@ -191,7 +191,7 @@ run_clean_low_nofile_fail() {
     : > "$request_log"
     if (
         ulimit -n "$soft_limit"
-        "$test_binary" --noconfirm clean > "$output_file" 2>&1
+        "$test_binary" --noconfirm clean </dev/null > "$output_file" 2>&1
     ); then
         echo "expected clean preflight to fail with low RLIMIT_NOFILE" >&2
         sed -n '1,260p' "$output_file" >&2
@@ -203,7 +203,7 @@ run_clean_low_nofile_fail() {
 run_upgrade_ok() {
     : > "$command_log"
     : > "$request_log"
-    if ! PATH=$upgrade_metadata_path "$upgrade_metadata_test_binary" "$@" > "$output_file" 2>&1; then
+    if ! PATH=$upgrade_metadata_path "$upgrade_metadata_test_binary" "$@" </dev/null > "$output_file" 2>&1; then
         echo "expected upgrade metadata command to succeed: $*" >&2
         sed -n '1,260p' "$output_file" >&2
         cat "$command_log" >&2
@@ -217,7 +217,7 @@ run_upgrade_fail() {
     : > "$command_log"
     : > "$request_log"
     exit_code=0
-    if PATH=$upgrade_metadata_path "$upgrade_metadata_test_binary" "$@" > "$output_file" 2>&1; then
+    if PATH=$upgrade_metadata_path "$upgrade_metadata_test_binary" "$@" </dev/null > "$output_file" 2>&1; then
         echo "expected upgrade metadata command to fail: $*" >&2
         sed -n '1,260p' "$output_file" >&2
         cat "$command_log" >&2
@@ -239,7 +239,7 @@ run_upgrade_split_fail() {
     : > "$command_log"
     : > "$request_log"
     exit_code=0
-    if PATH=$upgrade_metadata_path "$upgrade_metadata_test_binary" "$@" \
+    if PATH=$upgrade_metadata_path "$upgrade_metadata_test_binary" "$@" </dev/null \
         > "$stdout_file" 2> "$stderr_file"; then
         echo "expected upgrade metadata command to fail: $*" >&2
         sed -n '1,260p' "$stdout_file" >&2
@@ -316,7 +316,7 @@ run_clean_tty_fail() {
 
 run_source_ok() {
     : > "$command_log"
-    if ! "$source_install_test_binary" "$@" > "$output_file" 2>&1; then
+    if ! "$source_install_test_binary" "$@" </dev/null > "$output_file" 2>&1; then
         echo "expected source-install scenario to succeed: $*" >&2
         sed -n '1,260p' "$output_file" >&2
         cat "$command_log" >&2
@@ -326,7 +326,7 @@ run_source_ok() {
 
 run_source_fail() {
     : > "$command_log"
-    if "$source_install_test_binary" "$@" > "$output_file" 2>&1; then
+    if "$source_install_test_binary" "$@" </dev/null > "$output_file" 2>&1; then
         echo "expected source-install scenario to fail: $*" >&2
         sed -n '1,260p' "$output_file" >&2
         cat "$command_log" >&2
