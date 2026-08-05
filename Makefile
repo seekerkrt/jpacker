@@ -1,6 +1,5 @@
 # --- プロジェクト情報 ---
 TARGET    := moguet
-LEGACY_PRODUCTION_TARGET := jpacker
 PACKAGE_NAME := moguet
 DOCKER ?= docker
 ARCH_VALIDATION_IMAGE ?= moguet-arch-validation:local
@@ -1241,7 +1240,7 @@ check-pot: $(POT_FILE) $(POTFILES_FILE) $(VERSION_FILE)
 clean:
 	@echo ":: Cleaning up"
 	rm -rf $(BUILD_DIR)
-	rm -f $(TARGET) $(LEGACY_PRODUCTION_TARGET)
+	rm -f $(TARGET)
 
 $(APPLICATION_IDENTITY_TEST_TARGET): tests/application_identity_test.cpp $(SRC_DIR)/application_identity.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)

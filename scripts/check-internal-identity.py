@@ -369,10 +369,6 @@ ACTIVE_LEGACY_ALLOWANCES: dict[str, tuple[LegacyAllowance, ...]] = {
     ),
     "Makefile": (
         allowances(
-            "production-artifact-cleanup",
-            rf"^\s*LEGACY_PRODUCTION_TARGET\s*:=\s*{legacy}\s*$",
-        )
-        + allowances(
             "historical-license-file",
             historical_license_filename,
         )
@@ -1082,25 +1078,6 @@ def main() -> int:
         )
 
     makefile = texts.get("Makefile", "")
-    legacy_target_lines = [
-        line.strip()
-        for line in makefile.splitlines()
-        if "LEGACY_PRODUCTION_TARGET" in line
-    ]
-    expected_legacy_target_lines = [
-        f"LEGACY_PRODUCTION_TARGET := {LEGACY_NAME}",
-        "rm -f $(TARGET) $(LEGACY_PRODUCTION_TARGET)",
-    ]
-    if legacy_target_lines != expected_legacy_target_lines:
-        findings.append(
-            Finding(
-                "unsafe-legacy-production-target-consumer",
-                "Makefile",
-                0,
-                "LEGACY_PRODUCTION_TARGET must only remove a stale artifact in clean",
-            )
-        )
-
     required_test_targets = {
         "TEST_TARGET": "moguet-test",
         "ROOT_EXECUTION_IDENTITY_TEST_TARGET": "moguet-root-execution-identity-test",
