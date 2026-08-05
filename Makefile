@@ -4,6 +4,7 @@ LEGACY_PRODUCTION_TARGET := jpacker
 PACKAGE_NAME := moguet
 DOCKER ?= docker
 ARCH_VALIDATION_IMAGE ?= moguet-arch-validation:local
+ARCH_LIVE_VALIDATION_IMAGE ?= moguet-arch-live-validation:local
 VERSION_FILE := VERSION
 VERSION   := $(strip $(shell cat $(VERSION_FILE) 2>/dev/null))
 ifeq ($(VERSION),)
@@ -954,7 +955,7 @@ LIBALPM_BUILD_TARGETS := \
 .PHONY: check-local-package-metadata-link-firewall check-local-source-root-link-firewall check-local-dependency-plan-projection-link-firewall test-local-package-metadata test-local-source-root test-local-dependency-plan-projection
 .PHONY: check-local-source-workspace-link-firewall check-local-source-build-link-firewall test-local-source-workspace test-local-source-build
 .PHONY: FORCE catalogs check-catalogs check-localization-config check-pot update-po update-pot test-localization test-catalog-metadata-gate test-cli-localization-surface test-public-documentation
-.PHONY: test-container
+.PHONY: test-container test-container-live-provider
 
 all: $(TARGET) $(MANPAGES) catalogs
 
@@ -2496,6 +2497,16 @@ test-container:
 			.; \
 		printf '%s\n' ':: Running Arch validation container'; \
 		$(DOCKER) run --rm --network=none "$(ARCH_VALIDATION_IMAGE)"
+
+test-container-live-provider:
+	@set -eu; \
+		printf '%s\n' ':: Building Arch live provider-validation image'; \
+		$(DOCKER) build --pull \
+			--tag "$(ARCH_LIVE_VALIDATION_IMAGE)" \
+			--file containers/arch-live-validation/Dockerfile \
+			.; \
+		printf '%s\n' ':: Running Arch live provider-validation container'; \
+		$(DOCKER) run --rm "$(ARCH_LIVE_VALIDATION_IMAGE)"
 
 test: \
 	test-internal-identity \
