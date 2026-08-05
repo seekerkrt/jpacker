@@ -137,6 +137,7 @@ PUBLIC_DOC_FILES := \
 
 # --- コンパイラ設定 ---
 CXX       ?= g++
+CCACHE    ?=
 CXXFLAGS  ?= -O2 -pipe
 LDFLAGS   ?=
 CPPFLAGS  ?=
@@ -192,6 +193,24 @@ AUR_UPDATE_COMMAND_TEST_SRCS := \
 	tests/stubs/aur-update-command/operation_stub.cpp \
 	tests/stubs/upgrade-all-command/operation_stub.cpp \
 	tests/stubs/package-metadata/alpm_stub.cpp
+AUR_UPDATE_COMMAND_REQUIRED_PRODUCTION_TEST_SRCS := \
+	$(SRC_DIR)/moguet.cpp \
+	$(SRC_DIR)/commands_aur_update.cpp \
+	$(SRC_DIR)/aur_update_cli_presentation.cpp \
+	$(SRC_DIR)/cli_parser.cpp \
+	$(SRC_DIR)/cli_routing.cpp
+AUR_UPDATE_COMMAND_REQUIRED_TEST_SUPPORT_SRCS := \
+	tests/stubs/aur-update-command/operation_stub.cpp \
+	tests/stubs/upgrade-all-command/operation_stub.cpp \
+	tests/stubs/package-metadata/alpm_stub.cpp
+AUR_UPDATE_COMMAND_FORBIDDEN_TEST_SRCS := \
+	$(SRC_DIR)/aur_update_query.cpp \
+	$(SRC_DIR)/aur_update_execution_preflight.cpp \
+	$(SRC_DIR)/aur_update_execution_preparation.cpp \
+	$(SRC_DIR)/aur_update_execution_runner.cpp \
+	$(SRC_DIR)/aur_update_operation_result.cpp \
+	$(SRC_DIR)/filtered_aur_update_operation.cpp \
+	$(SRC_DIR)/upgrade_all_operation.cpp
 # POLICY(#281): final CLI testはparser/routing/presentationをproductionのままlinkし、
 # aggregate operation capabilityだけをscenario stubへ差し替える。
 UPGRADE_ALL_COMMAND_TEST_SRCS := \
@@ -205,8 +224,42 @@ UPGRADE_ALL_COMMAND_REQUIRED_TEST_SRCS := \
 	$(SRC_DIR)/cli_parser.cpp \
 	$(SRC_DIR)/cli_routing.cpp \
 	$(SRC_DIR)/upgrade_all_operation_result.cpp
+UPGRADE_ALL_COMMAND_REQUIRED_TEST_SUPPORT_SRCS := \
+	tests/stubs/upgrade-all-command/operation_stub.cpp \
+	tests/stubs/package-metadata/alpm_stub.cpp
 UPGRADE_ALL_COMMAND_FORBIDDEN_TEST_SRCS := \
 	$(SRC_DIR)/upgrade_all_operation.cpp
+AUR_UPDATE_COMMAND_TEST_OBJECT_DIR := \
+	$(BUILD_DIR)/tests/obj/$(notdir $(AUR_UPDATE_COMMAND_TEST_TARGET))
+AUR_UPDATE_COMMAND_TEST_OBJECTS := \
+	$(patsubst %.cpp,$(AUR_UPDATE_COMMAND_TEST_OBJECT_DIR)/%.o,$(AUR_UPDATE_COMMAND_TEST_SRCS))
+AUR_UPDATE_COMMAND_TEST_LINK_OBJECTS := $(AUR_UPDATE_COMMAND_TEST_OBJECTS)
+AUR_UPDATE_COMMAND_TEST_DEPS := $(AUR_UPDATE_COMMAND_TEST_OBJECTS:.o=.d)
+AUR_UPDATE_COMMAND_TEST_COMPILE_SIGNATURE := \
+	$(AUR_UPDATE_COMMAND_TEST_OBJECT_DIR)/compile.signature
+AUR_UPDATE_COMMAND_TEST_LINK_SIGNATURE := \
+	$(AUR_UPDATE_COMMAND_TEST_OBJECT_DIR)/link.signature
+AUR_UPDATE_COMMAND_TEST_CPPFLAGS := \
+	-DMOGUET_ENABLE_TEST_OVERRIDES \
+	-DMOGUET_ENABLE_TEST_CONFIG_PATH \
+	-I$(SRC_DIR) \
+	-Itests/stubs/package-metadata
+UPGRADE_ALL_COMMAND_TEST_OBJECT_DIR := \
+	$(BUILD_DIR)/tests/obj/$(notdir $(UPGRADE_ALL_COMMAND_TEST_TARGET))
+UPGRADE_ALL_COMMAND_TEST_OBJECTS := \
+	$(patsubst %.cpp,$(UPGRADE_ALL_COMMAND_TEST_OBJECT_DIR)/%.o,$(UPGRADE_ALL_COMMAND_TEST_SRCS))
+UPGRADE_ALL_COMMAND_TEST_LINK_OBJECTS := $(UPGRADE_ALL_COMMAND_TEST_OBJECTS)
+UPGRADE_ALL_COMMAND_TEST_DEPS := $(UPGRADE_ALL_COMMAND_TEST_OBJECTS:.o=.d)
+UPGRADE_ALL_COMMAND_TEST_COMPILE_SIGNATURE := \
+	$(UPGRADE_ALL_COMMAND_TEST_OBJECT_DIR)/compile.signature
+UPGRADE_ALL_COMMAND_TEST_LINK_SIGNATURE := \
+	$(UPGRADE_ALL_COMMAND_TEST_OBJECT_DIR)/link.signature
+UPGRADE_ALL_COMMAND_TEST_CPPFLAGS := \
+	-DMOGUET_ENABLE_TEST_OVERRIDES \
+	-DMOGUET_ENABLE_TEST_CONFIG_PATH \
+	-I$(SRC_DIR) \
+	-Itests/stubs/package-metadata
+
 AUR_RPC_VALIDATION_TEST_SRCS := \
 	$(SRCS) \
 	tests/stubs/package-metadata/alpm_stub.cpp
@@ -958,6 +1011,7 @@ LIBALPM_BUILD_TARGETS := \
 .PHONY: check-local-source-workspace-link-firewall check-local-source-build-link-firewall test-local-source-workspace test-local-source-build
 .PHONY: FORCE catalogs check-catalogs check-localization-config check-pot update-po update-pot test-localization test-catalog-metadata-gate test-cli-localization-surface test-public-documentation
 .PHONY: test-container test-container-live test-container-live-provider test-container-live-aur test-container-live-local
+.PHONY: check-aur-update-command-link-firewall
 
 all: $(TARGET) $(MANPAGES) catalogs
 
@@ -1026,6 +1080,69 @@ $(BUILD_DIR)/%.o: $(SRC_DIR)/%.cpp $(VERSION_FILE)
 	@mkdir -p $(BUILD_DIR)
 	@echo ":: Compiling $< (v$(VERSION))"
 	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -MMD -MP -c $< -o $@
+
+$(AUR_UPDATE_COMMAND_TEST_OBJECT_DIR) $(UPGRADE_ALL_COMMAND_TEST_OBJECT_DIR):
+	@mkdir -p $@
+
+$(AUR_UPDATE_COMMAND_TEST_COMPILE_SIGNATURE): FORCE | $(AUR_UPDATE_COMMAND_TEST_OBJECT_DIR)
+	@printf '%s\n' \
+		'CXX=$(CXX)' \
+		'CPPFLAGS=$(CPPFLAGS)' \
+		'LIBALPM_CPPFLAGS=$(LIBALPM_CPPFLAGS)' \
+		'CXXFLAGS=$(CXXFLAGS)' \
+		'MY_CXXFLAGS=$(MY_CXXFLAGS)' \
+		'TARGET_CPPFLAGS=$(AUR_UPDATE_COMMAND_TEST_CPPFLAGS)' \
+		> $@.tmp
+	@cmp -s $@.tmp $@ && rm -f $@.tmp || mv $@.tmp $@
+
+$(AUR_UPDATE_COMMAND_TEST_LINK_SIGNATURE): FORCE | $(AUR_UPDATE_COMMAND_TEST_OBJECT_DIR)
+	@printf '%s\n' \
+		'CXX=$(CXX)' \
+		'LDFLAGS=$(LDFLAGS)' \
+		'MY_LDLIBS=$(MY_LDLIBS)' \
+		'LIBALPM_LDLIBS=$(LIBALPM_LDLIBS)' \
+		'OBJECTS=$(AUR_UPDATE_COMMAND_TEST_LINK_OBJECTS)' \
+		> $@.tmp
+	@cmp -s $@.tmp $@ && rm -f $@.tmp || mv $@.tmp $@
+
+$(UPGRADE_ALL_COMMAND_TEST_COMPILE_SIGNATURE): FORCE | $(UPGRADE_ALL_COMMAND_TEST_OBJECT_DIR)
+	@printf '%s\n' \
+		'CXX=$(CXX)' \
+		'CPPFLAGS=$(CPPFLAGS)' \
+		'LIBALPM_CPPFLAGS=$(LIBALPM_CPPFLAGS)' \
+		'CXXFLAGS=$(CXXFLAGS)' \
+		'MY_CXXFLAGS=$(MY_CXXFLAGS)' \
+		'TARGET_CPPFLAGS=$(UPGRADE_ALL_COMMAND_TEST_CPPFLAGS)' \
+		> $@.tmp
+	@cmp -s $@.tmp $@ && rm -f $@.tmp || mv $@.tmp $@
+
+$(UPGRADE_ALL_COMMAND_TEST_LINK_SIGNATURE): FORCE | $(UPGRADE_ALL_COMMAND_TEST_OBJECT_DIR)
+	@printf '%s\n' \
+		'CXX=$(CXX)' \
+		'LDFLAGS=$(LDFLAGS)' \
+		'MY_LDLIBS=$(MY_LDLIBS)' \
+		'LIBALPM_LDLIBS=$(LIBALPM_LDLIBS)' \
+		'OBJECTS=$(UPGRADE_ALL_COMMAND_TEST_LINK_OBJECTS)' \
+		> $@.tmp
+	@cmp -s $@.tmp $@ && rm -f $@.tmp || mv $@.tmp $@
+
+$(AUR_UPDATE_COMMAND_TEST_OBJECTS): $(AUR_UPDATE_COMMAND_TEST_OBJECT_DIR)/%.o: %.cpp $(AUR_UPDATE_COMMAND_TEST_COMPILE_SIGNATURE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling $< for AUR update command integration test"
+	$(CCACHE) $(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
+		$(AUR_UPDATE_COMMAND_TEST_CPPFLAGS) -MMD -MP -c $< -o $@
+
+$(UPGRADE_ALL_COMMAND_TEST_OBJECTS): $(UPGRADE_ALL_COMMAND_TEST_OBJECT_DIR)/%.o: %.cpp $(UPGRADE_ALL_COMMAND_TEST_COMPILE_SIGNATURE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling $< for upgrade-all command integration test"
+	$(CCACHE) $(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
+		$(UPGRADE_ALL_COMMAND_TEST_CPPFLAGS) -MMD -MP -c $< -o $@
+
+$(AUR_UPDATE_COMMAND_TEST_OBJECTS) $(UPGRADE_ALL_COMMAND_TEST_OBJECTS): | check-libalpm check-localization-config
+$(AUR_UPDATE_COMMAND_TEST_OBJECT_DIR)/src/localization.o \
+	$(UPGRADE_ALL_COMMAND_TEST_OBJECT_DIR)/src/localization.o: $(LOCALIZATION_CONFIG_HEADER)
+
+-include $(AUR_UPDATE_COMMAND_TEST_DEPS) $(UPGRADE_ALL_COMMAND_TEST_DEPS)
 
 $(MANPAGE_EN): $(MANPAGE_EN_IN) $(VERSION_FILE)
 	@echo ":: Generating $@ (v$(VERSION))"
@@ -1245,21 +1362,15 @@ $(COMMANDS_INSPECT_TEST_TARGET): $(COMMANDS_INSPECT_TEST_SRCS) $(HEADERS) tests/
 	@echo ":: Compiling command inspection characterization test binary"
 	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -DMOGUET_ENABLE_TEST_OVERRIDES -I$(SRC_DIR) -Itests/stubs/package-metadata $(COMMANDS_INSPECT_TEST_SRCS) -o $@ $(MY_LDLIBS)
 
-$(AUR_UPDATE_COMMAND_TEST_TARGET): $(AUR_UPDATE_COMMAND_TEST_SRCS) $(HEADERS) tests/stubs/package-metadata/alpm_stub.hpp $(VERSION_FILE)
+$(AUR_UPDATE_COMMAND_TEST_TARGET): $(AUR_UPDATE_COMMAND_TEST_LINK_OBJECTS) $(AUR_UPDATE_COMMAND_TEST_LINK_SIGNATURE) | check-aur-update-command-link-firewall
 	@mkdir -p $(dir $@)
-	@echo ":: Compiling AUR update command integration test binary"
-	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -DMOGUET_ENABLE_TEST_OVERRIDES -DMOGUET_ENABLE_TEST_CONFIG_PATH -I$(SRC_DIR) -Itests/stubs/package-metadata $(AUR_UPDATE_COMMAND_TEST_SRCS) -o $@ $(MY_LDLIBS)
+	@echo ":: Linking AUR update command integration test binary"
+	$(CXX) $(LDFLAGS) $(AUR_UPDATE_COMMAND_TEST_LINK_OBJECTS) -o $@ $(MY_LDLIBS)
 
-$(UPGRADE_ALL_COMMAND_TEST_TARGET): $(UPGRADE_ALL_COMMAND_TEST_SRCS) $(HEADERS) tests/stubs/package-metadata/alpm_stub.hpp $(VERSION_FILE)
+$(UPGRADE_ALL_COMMAND_TEST_TARGET): $(UPGRADE_ALL_COMMAND_TEST_LINK_OBJECTS) $(UPGRADE_ALL_COMMAND_TEST_LINK_SIGNATURE) | check-upgrade-all-command-link-firewall
 	@mkdir -p $(dir $@)
-	@echo ":: Compiling upgrade-all command integration test binary"
-	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-DMOGUET_ENABLE_TEST_OVERRIDES \
-		-DMOGUET_ENABLE_TEST_CONFIG_PATH \
-		-I$(SRC_DIR) \
-		-Itests/stubs/package-metadata \
-		$(UPGRADE_ALL_COMMAND_TEST_SRCS) \
-		-o $@ $(MY_LDLIBS)
+	@echo ":: Linking upgrade-all command integration test binary"
+	$(CXX) $(LDFLAGS) $(UPGRADE_ALL_COMMAND_TEST_LINK_OBJECTS) -o $@ $(MY_LDLIBS)
 
 $(AUR_RPC_VALIDATION_TEST_TARGET): $(AUR_RPC_VALIDATION_TEST_SRCS) $(HEADERS) tests/stubs/package-metadata/alpm_stub.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
@@ -2169,12 +2280,38 @@ test-system-source-upgrade: check-system-source-upgrade-link-firewall $(SYSTEM_S
 test-aur-update-query: $(AUR_UPDATE_QUERY_TEST_TARGET)
 	$(abspath $(AUR_UPDATE_QUERY_TEST_TARGET))
 
-test-aur-update-command: $(AUR_UPDATE_COMMAND_TEST_TARGET)
+check-aur-update-command-link-firewall:
+	@echo ":: Checking AUR update command link firewall"
+	@set -e; for source in $(AUR_UPDATE_COMMAND_REQUIRED_PRODUCTION_TEST_SRCS) $(AUR_UPDATE_COMMAND_REQUIRED_TEST_SUPPORT_SRCS); do \
+		count=$$(printf '%s\n' $(AUR_UPDATE_COMMAND_TEST_SRCS) | \
+			awk -v expected="$$source" '$$0 == expected { count++ } END { print count + 0 }'); \
+		test "$$count" -eq 1 || { \
+			echo "error: AUR update command test must link $$source exactly once" >&2; \
+			exit 1; \
+		}; \
+	done
+	@test -z "$(filter $(AUR_UPDATE_COMMAND_FORBIDDEN_TEST_SRCS),$(AUR_UPDATE_COMMAND_TEST_SRCS))" || { \
+		echo "error: AUR update command test links a production operation owned by a scenario stub" >&2; \
+		exit 1; \
+	}
+	@test "$(words $(AUR_UPDATE_COMMAND_TEST_SRCS))" -eq "$(words $(sort $(AUR_UPDATE_COMMAND_TEST_SRCS)))" || { \
+		echo "error: AUR update command test source list contains duplicates" >&2; \
+		exit 1; \
+	}
+	@test "$(words $(AUR_UPDATE_COMMAND_TEST_SRCS))" -eq "$(words $(AUR_UPDATE_COMMAND_TEST_LINK_OBJECTS))" && \
+		test "$(words $(AUR_UPDATE_COMMAND_TEST_LINK_OBJECTS))" -eq "$(words $(sort $(AUR_UPDATE_COMMAND_TEST_LINK_OBJECTS)))" && \
+		test -z "$(filter-out $(AUR_UPDATE_COMMAND_TEST_OBJECTS),$(AUR_UPDATE_COMMAND_TEST_LINK_OBJECTS))" && \
+		test -z "$(filter-out $(AUR_UPDATE_COMMAND_TEST_LINK_OBJECTS),$(AUR_UPDATE_COMMAND_TEST_OBJECTS))" || { \
+		echo "error: AUR update command test source-to-object mapping is not one-to-one" >&2; \
+		exit 1; \
+	}
+
+test-aur-update-command: check-aur-update-command-link-firewall $(AUR_UPDATE_COMMAND_TEST_TARGET)
 	sh tests/test-aur-update-command.sh $(abspath $(AUR_UPDATE_COMMAND_TEST_TARGET))
 
 check-upgrade-all-command-link-firewall:
 	@echo ":: Checking upgrade-all command link firewall"
-	@set -e; for source in $(UPGRADE_ALL_COMMAND_REQUIRED_TEST_SRCS); do \
+	@set -e; for source in $(UPGRADE_ALL_COMMAND_REQUIRED_TEST_SRCS) $(UPGRADE_ALL_COMMAND_REQUIRED_TEST_SUPPORT_SRCS); do \
 		count=$$(printf '%s\n' $(UPGRADE_ALL_COMMAND_TEST_SRCS) | \
 			awk -v expected="$$source" '$$0 == expected { count++ } END { print count + 0 }'); \
 		test "$$count" -eq 1 || { \
@@ -2184,6 +2321,17 @@ check-upgrade-all-command-link-firewall:
 	done
 	@test -z "$(filter $(UPGRADE_ALL_COMMAND_FORBIDDEN_TEST_SRCS),$(UPGRADE_ALL_COMMAND_TEST_SRCS))" || { \
 		echo "error: upgrade-all command test links the production aggregate operation boundary" >&2; \
+		exit 1; \
+	}
+	@test "$(words $(UPGRADE_ALL_COMMAND_TEST_SRCS))" -eq "$(words $(sort $(UPGRADE_ALL_COMMAND_TEST_SRCS)))" || { \
+		echo "error: upgrade-all command test source list contains duplicates" >&2; \
+		exit 1; \
+	}
+	@test "$(words $(UPGRADE_ALL_COMMAND_TEST_SRCS))" -eq "$(words $(UPGRADE_ALL_COMMAND_TEST_LINK_OBJECTS))" && \
+		test "$(words $(UPGRADE_ALL_COMMAND_TEST_LINK_OBJECTS))" -eq "$(words $(sort $(UPGRADE_ALL_COMMAND_TEST_LINK_OBJECTS)))" && \
+		test -z "$(filter-out $(UPGRADE_ALL_COMMAND_TEST_OBJECTS),$(UPGRADE_ALL_COMMAND_TEST_LINK_OBJECTS))" && \
+		test -z "$(filter-out $(UPGRADE_ALL_COMMAND_TEST_LINK_OBJECTS),$(UPGRADE_ALL_COMMAND_TEST_OBJECTS))" || { \
+		echo "error: upgrade-all command test source-to-object mapping is not one-to-one" >&2; \
 		exit 1; \
 	}
 
