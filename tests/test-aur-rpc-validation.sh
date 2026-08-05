@@ -1,6 +1,13 @@
 #!/bin/sh
 set -eu
 
+# Assertions target the canonical untranslated CLI output.
+# Do not inherit locale settings from the invoking environment.
+LANG=C
+LC_ALL=C
+export LANG LC_ALL
+unset LANGUAGE
+
 test_binary=$1
 envelope_test_binary=$2
 repo_root=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
@@ -86,7 +93,7 @@ setup_case() {
 
 run_ok() {
     : > "$command_log"
-    if ! "$test_binary" "$@" > "$output_file" 2>&1; then
+    if ! "$test_binary" "$@" </dev/null > "$output_file" 2>&1; then
         echo "expected command to succeed: $*" >&2
         sed -n '1,240p' "$output_file" >&2
         cat "$command_log" >&2
@@ -96,7 +103,7 @@ run_ok() {
 
 run_fail() {
     : > "$command_log"
-    if "$test_binary" "$@" > "$output_file" 2>&1; then
+    if "$test_binary" "$@" </dev/null > "$output_file" 2>&1; then
         echo "expected command to fail: $*" >&2
         sed -n '1,240p' "$output_file" >&2
         cat "$command_log" >&2
@@ -106,7 +113,7 @@ run_fail() {
 
 run_envelope_ok() {
     : > "$command_log"
-    if ! "$envelope_test_binary" "$@" > "$output_file" 2>&1; then
+    if ! "$envelope_test_binary" "$@" </dev/null > "$output_file" 2>&1; then
         echo "expected strict envelope command to succeed: $*" >&2
         sed -n '1,240p' "$output_file" >&2
         cat "$command_log" >&2
@@ -116,7 +123,7 @@ run_envelope_ok() {
 
 run_envelope_fail() {
     : > "$command_log"
-    if "$envelope_test_binary" "$@" > "$output_file" 2>&1; then
+    if "$envelope_test_binary" "$@" </dev/null > "$output_file" 2>&1; then
         echo "expected strict envelope command to fail: $*" >&2
         sed -n '1,240p' "$output_file" >&2
         cat "$command_log" >&2
