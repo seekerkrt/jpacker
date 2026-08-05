@@ -15,7 +15,7 @@ TIMEOUT_SECONDS = 20
 
 def usage() -> None:
     print(
-        f"usage: {sys.argv[0]} -- command [argument ...]",
+        f"usage: {sys.argv[0]} [--timeout SECONDS] -- command [argument ...]",
         file=sys.stderr,
     )
 
@@ -40,18 +40,43 @@ def terminate_child(pid: int) -> None:
 
 
 def main() -> int:
-    if len(sys.argv) < 3 or sys.argv[1] != "--":
+    timeout_seconds = TIMEOUT_SECONDS
+
+    argument_index = 1
+    while argument_index < len(sys.argv) and sys.argv[argument_index] != "--":
+        if sys.argv[argument_index] != "--timeout":
+            usage()
+            return 2
+
+        if argument_index + 1 >= len(sys.argv):
+            usage()
+            return 2
+
+        timeout_text = sys.argv[argument_index + 1]
+        if not timeout_text.isdigit():
+            usage()
+            return 2
+
+        timeout_value = int(timeout_text)
+        if timeout_value <= 0:
+            usage()
+            return 2
+
+        timeout_seconds = timeout_value
+        argument_index += 2
+
+    if argument_index + 1 >= len(sys.argv) or sys.argv[argument_index] != "--":
         usage()
         return 2
 
     input_bytes = sys.stdin.buffer.read()
-    command = sys.argv[2:]
+    command = sys.argv[argument_index + 1:]
     pid, master_descriptor = pty.fork()
     if pid == 0:
         os.execvpe(command[0], command, os.environ)
 
     output = bytearray()
-    deadline = time.monotonic() + TIMEOUT_SECONDS
+    deadline = time.monotonic() + timeout_seconds
     child_status = None
     try:
         disable_input_echo(master_descriptor)
