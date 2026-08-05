@@ -6,6 +6,7 @@ DOCKER ?= docker
 ARCH_VALIDATION_IMAGE ?= moguet-arch-validation:local
 ARCH_LIVE_VALIDATION_IMAGE ?= moguet-arch-live-validation:local
 ARCH_LIVE_AUR_VALIDATION_IMAGE ?= moguet-arch-live-aur-validation:local
+ARCH_LIVE_LOCAL_VALIDATION_IMAGE ?= moguet-arch-live-local-validation:local
 VERSION_FILE := VERSION
 VERSION   := $(strip $(shell cat $(VERSION_FILE) 2>/dev/null))
 ifeq ($(VERSION),)
@@ -956,7 +957,7 @@ LIBALPM_BUILD_TARGETS := \
 .PHONY: check-local-package-metadata-link-firewall check-local-source-root-link-firewall check-local-dependency-plan-projection-link-firewall test-local-package-metadata test-local-source-root test-local-dependency-plan-projection
 .PHONY: check-local-source-workspace-link-firewall check-local-source-build-link-firewall test-local-source-workspace test-local-source-build
 .PHONY: FORCE catalogs check-catalogs check-localization-config check-pot update-po update-pot test-localization test-catalog-metadata-gate test-cli-localization-surface test-public-documentation
-.PHONY: test-container test-container-live-provider test-container-live-aur
+.PHONY: test-container test-container-live test-container-live-provider test-container-live-aur test-container-live-local
 
 all: $(TARGET) $(MANPAGES) catalogs
 
@@ -2519,6 +2520,22 @@ test-container-live-aur:
 		printf '%s\n' ':: Running Arch live AUR-validation container'; \
 		$(DOCKER) run --rm "$(ARCH_LIVE_AUR_VALIDATION_IMAGE)"
 
+test-container-live-local:
+	@set -eu; \
+		printf '%s\n' ':: Building Arch live local-PKGBUILD validation image'; \
+		$(DOCKER) build --pull \
+			--tag "$(ARCH_LIVE_LOCAL_VALIDATION_IMAGE)" \
+			--file containers/arch-live-validation/Dockerfile.local \
+			.; \
+		printf '%s\n' ':: Running Arch live local-PKGBUILD validation container'; \
+		$(DOCKER) run --rm "$(ARCH_LIVE_LOCAL_VALIDATION_IMAGE)"
+
+test-container-live:
+	+@set -eu; \
+		$(MAKE) test-container-live-provider; \
+		$(MAKE) test-container-live-aur; \
+		$(MAKE) test-container-live-local
+
 test: \
 	test-internal-identity \
 	test-application-identity \
@@ -2597,7 +2614,7 @@ test: \
 	test-source-build \
 	test-source-selection
 
-release-check: check-pot check-catalogs test-localization test-catalog-metadata-gate test-cli-localization-surface test-internal-identity test-application-identity test-xdg-paths test-xdg-directory-safety test-source-environment test-xdg-state-log test-trusted-cache test-runtime-identity test-public-documentation test-install-layout test-package-transition
+release-check: check-pot check-catalogs test-localization test-catalog-metadata-gate test-cli-localization-surface test-internal-identity test-application-identity test-xdg-paths test-xdg-directory-safety test-source-environment test-xdg-state-log test-trusted-cache test-runtime-identity test-public-documentation test-install-layout test-package-transition test-live-contract
 	@echo ":: Checking release version consistency"
 	sh scripts/check-release-version.sh
 	@echo ":: Checking license compliance"

@@ -895,9 +895,11 @@ std::string expected_install_command(
 
 std::string expected_repository_provider_install_command(
         const std::vector<ProvidedDependency>& providers,
-        const AppConfig& config) {
-    std::vector<std::string> arguments{
-            "sudo", "pacman", "-S", "--asdeps", "--needed"};
+        const AppConfig& config,
+        bool as_dependencies = true) {
+    std::vector<std::string> arguments{"sudo", "pacman", "-S"};
+    if(as_dependencies) arguments.emplace_back("--asdeps");
+    arguments.emplace_back("--needed");
     if(config.no_confirm) arguments.emplace_back("--noconfirm");
     arguments.emplace_back("--");
     for(const ProvidedDependency& provider : providers) {
@@ -1145,6 +1147,10 @@ void observe_run_command() {
     }
     if(command.starts_with("'sudo' 'pacman' '-S'")) {
         ++scenario.repository_provider_install_calls;
+        require_metadata_released_before_install();
+        expect(
+                !metadata_stub::local_package_query_history().empty(),
+                "Repository provider install started without installed metadata authority");
         expect(
                 scenario.git_remote_calls == 0 &&
                         scenario.git_fetch_calls == 0 &&
@@ -1185,8 +1191,9 @@ void observe_run_command() {
                 "Build-only makepkg ran before makepkg --packagelist");
         expect(
                 metadata_stub::initialize_call_count() + 1 ==
-                        scenario.build_calls,
-                "Metadata session opened before build-only makepkg");
+                        scenario.build_calls +
+                                scenario.repository_provider_install_calls,
+                "Artifact metadata session opened before build-only makepkg");
         expect(
                 fs::current_path() == unit.checkout_path,
                 "Build-only makepkg did not run from the scheduled checkout");
@@ -1233,6 +1240,7 @@ void observe_run_command() {
 void activate_scenario(ProductionScenario& scenario) {
     process_stub::reset_process_stub();
     metadata_stub::reset_alpm_stub();
+    metadata_stub::set_package_absent();
     scenario.workspace_paths.clear();
     scenario.artifact_paths.clear();
     scenario.produced_artifact_paths.clear();
@@ -1730,6 +1738,8 @@ void test_local_dependency_invocation_accepts_zero_remote_units(
 void test_local_dependency_invocation_executes_provider_without_aur_units(
         const TemporaryProductionEnvironment&) {
     process_stub::reset_process_stub();
+    metadata_stub::reset_alpm_stub();
+    metadata_stub::set_package_absent();
     const AppConfig config = noninteractive_config();
     const ValidatedCacheRoot cache_root = prepare_process_cache_root();
     const ProvidedDependency first_provider = make_repository_provider(
@@ -1765,6 +1775,11 @@ void test_local_dependency_invocation_executes_provider_without_aur_units(
     expect(
             process_stub::run_command_call_count() == 1,
             "Provider-only local dependency invocation did not execute exactly one transaction");
+    expect(
+            metadata_stub::local_package_query_history() ==
+                    std::vector<std::string>{"local-root-provider"} &&
+                    metadata_stub::release_call_count() == 1,
+            "Provider-only local dependency invocation did not close its installed metadata authority");
     process_stub::require_process_expectations_consumed();
 }
 
@@ -1922,7 +1937,7 @@ void test_selected_repository_provider_executes_before_source(
             "selected repository provider execution ordering");
 }
 
-void test_selected_repository_provider_always_uses_needed_transaction(
+void test_new_repository_provider_uses_asdeps_needed_transaction(
         const TemporaryProductionEnvironment& environment) {
     const ProvidedDependency provider = make_repository_provider(
             "core", "installed-provider", "virtual-installed",
@@ -1951,10 +1966,167 @@ void test_selected_repository_provider_always_uses_needed_transaction(
     expect(
             scenario.repository_provider_query_calls == 0 &&
                     scenario.repository_provider_install_calls == 1,
-            "Selected repository provider bypassed the exact --needed transaction");
+            "New selected repository provider bypassed the exact --asdeps --needed transaction");
+    expect(
+            !metadata_stub::local_package_query_history().empty() &&
+                    metadata_stub::local_package_query_history().front() ==
+                            provider.package_name,
+            "New selected repository provider did not use installed metadata authority");
     require_scenario_complete(
             scenario, 1,
-            "selected repository provider exact --needed transaction");
+            "new selected repository provider exact --asdeps --needed transaction");
+}
+
+void expect_existing_explicit_repository_provider_preserved(
+        const TemporaryProductionEnvironment& environment,
+        const std::string& provider_name,
+        const std::string& installed_version,
+        const std::string& available_version,
+        const std::string& context) {
+    const ProvidedDependency provider = make_repository_provider(
+            "extra", provider_name, "virtual-explicit-provider",
+            "virtual-explicit-provider=1", available_version);
+    std::vector<ProductionSourceBuildWorkItem> work_items =
+            prepare_aur_source_build_work_items(
+                    single_repository_provider_plan(
+                            provider,
+                            ProviderResolutionKind::UserSelected),
+                    false, false);
+    AppConfig config = noninteractive_config();
+    ProductionScenario scenario =
+            make_execution_scenario(environment, work_items, config);
+
+    activate_scenario(scenario);
+    metadata_stub::set_package_metadata(
+            provider.package_name, installed_version,
+            ALPM_PKG_REASON_EXPLICIT);
+    expect_database_paths();
+    PreparedProductionSourceBuildInvocation invocation =
+            prepare_production_source_build_invocation(
+                    std::move(work_items), config);
+    process_stub::expect_run_command(
+            expected_repository_provider_install_command(
+                    {provider}, config, false),
+            0);
+    schedule_source_unit(0);
+
+    execute_invocation(invocation, scenario);
+    expect(
+            scenario.repository_provider_install_calls == 1,
+            context + " did not execute one reason-preserving provider transaction");
+    expect(
+            !metadata_stub::local_package_query_history().empty() &&
+                    metadata_stub::local_package_query_history().front() ==
+                            provider.package_name,
+            context + " did not query the existing provider before pacman");
+    expect(
+            metadata_stub::created_handle_count() == 2 &&
+                    metadata_stub::release_call_count() == 2,
+            context + " did not close provider and artifact metadata sessions");
+    require_scenario_complete(scenario, 1, context);
+}
+
+void test_existing_explicit_repository_provider_same_version_stays_explicit(
+        const TemporaryProductionEnvironment& environment) {
+    expect_existing_explicit_repository_provider_preserved(
+            environment, "same-version-explicit-provider", "2.4-1", "2.4-1",
+            "same-version existing explicit repository provider");
+}
+
+void test_existing_explicit_repository_provider_update_stays_explicit(
+        const TemporaryProductionEnvironment& environment) {
+    expect_existing_explicit_repository_provider_preserved(
+            environment, "update-explicit-provider", "1.0-1", "2.4-1",
+            "update-required existing explicit repository provider");
+}
+
+void test_repository_provider_metadata_failure_stops_before_mutation(
+        const TemporaryProductionEnvironment& environment) {
+    const ProvidedDependency provider = make_repository_provider(
+            "extra", "metadata-failure-provider", "virtual-metadata-failure",
+            "virtual-metadata-failure=1", std::string("2.4-1"));
+    std::vector<ProductionSourceBuildWorkItem> work_items =
+            prepare_aur_source_build_work_items(
+                    single_repository_provider_plan(
+                            provider,
+                            ProviderResolutionKind::UserSelected),
+                    false, false);
+    AppConfig config = noninteractive_config();
+    ProductionScenario scenario =
+            make_execution_scenario(environment, work_items, config);
+
+    activate_scenario(scenario);
+    metadata_stub::set_package_query_failure(ALPM_ERR_DB_OPEN);
+    expect_database_paths();
+    PreparedProductionSourceBuildInvocation invocation =
+            prepare_production_source_build_invocation(
+                    std::move(work_items), config);
+
+    expect_runtime_error(
+            [&]() { execute_invocation(invocation, scenario); },
+            "selected repository provider metadata failure",
+            "Installed package query failed");
+    expect(
+            scenario.repository_provider_install_calls == 0 &&
+                    scenario.git_remote_calls == 0 &&
+                    scenario.workspace_paths.empty() &&
+                    process_stub::run_command_call_count() == 0,
+            "Repository provider metadata failure reached mutation");
+    expect(
+            metadata_stub::package_query_call_count() == 1 &&
+                    metadata_stub::release_call_count() == 1,
+            "Repository provider metadata failure did not close its authority session");
+    require_scenario_complete(
+            scenario, 0, "selected repository provider metadata failure");
+}
+
+void test_mixed_repository_provider_reasons_stop_before_mutation(
+        const TemporaryProductionEnvironment& environment) {
+    const ProvidedDependency new_provider = make_repository_provider(
+            "extra", "mixed-new-provider", "virtual-mixed-new",
+            "virtual-mixed-new=1", std::string("2.4-1"));
+    const ProvidedDependency explicit_provider = make_repository_provider(
+            "extra", "mixed-explicit-provider", "virtual-mixed-explicit",
+            "virtual-mixed-explicit=1", std::string("2.4-1"));
+    std::vector<ProductionSourceBuildWorkItem> work_items =
+            prepare_aur_source_build_work_items(
+                    single_repository_provider_plan(
+                            new_provider,
+                            ProviderResolutionKind::UserSelected),
+                    false, false);
+    work_items.front().selected_repository_providers.push_back(
+            explicit_provider);
+    AppConfig config = noninteractive_config();
+    ProductionScenario scenario =
+            make_execution_scenario(environment, work_items, config);
+
+    activate_scenario(scenario);
+    metadata_stub::enqueue_local_package_query_absent(
+            new_provider.package_name);
+    metadata_stub::enqueue_local_package_query_present(
+            explicit_provider.package_name, explicit_provider.package_name,
+            "1.0-1", ALPM_PKG_REASON_EXPLICIT);
+    expect_database_paths();
+    PreparedProductionSourceBuildInvocation invocation =
+            prepare_production_source_build_invocation(
+                    std::move(work_items), config);
+
+    expect_runtime_error(
+            [&]() { execute_invocation(invocation, scenario); },
+            "mixed selected repository provider reasons",
+            "Selected repository provider install reasons cannot be represented by one package transaction");
+    expect(
+            scenario.repository_provider_install_calls == 0 &&
+                    scenario.git_remote_calls == 0 &&
+                    scenario.workspace_paths.empty() &&
+                    process_stub::run_command_call_count() == 0,
+            "Mixed repository provider reasons reached mutation");
+    metadata_stub::require_local_package_query_expectations_consumed();
+    expect(
+            metadata_stub::release_call_count() == 1,
+            "Mixed repository provider reason preflight did not close its authority session");
+    require_scenario_complete(
+            scenario, 0, "mixed selected repository provider reasons");
 }
 
 void test_repository_provider_failure_stops_before_source_mutation(
@@ -2001,8 +2173,9 @@ void test_repository_provider_failure_stops_before_source_mutation(
                     environment.artifact_workspaces().empty(),
             "Repository provider failure mutated source/cache state");
     expect(
-            metadata_stub::initialize_call_count() == 0,
-            "Repository provider failure opened artifact metadata state");
+            metadata_stub::initialize_call_count() == 1 &&
+                    metadata_stub::release_call_count() == 1,
+            "Repository provider failure did not close provider metadata before pacman");
     require_scenario_complete(
             scenario, 0,
             "selected repository provider failure pre-mutation stop");
@@ -3532,7 +3705,15 @@ int main() {
                     environment);
             test_selected_repository_provider_executes_before_source(
                     environment);
-            test_selected_repository_provider_always_uses_needed_transaction(
+            test_new_repository_provider_uses_asdeps_needed_transaction(
+                    environment);
+            test_existing_explicit_repository_provider_same_version_stays_explicit(
+                    environment);
+            test_existing_explicit_repository_provider_update_stays_explicit(
+                    environment);
+            test_repository_provider_metadata_failure_stops_before_mutation(
+                    environment);
+            test_mixed_repository_provider_reasons_stop_before_mutation(
                     environment);
             test_repository_provider_failure_stops_before_source_mutation(
                     environment);

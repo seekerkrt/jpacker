@@ -24,6 +24,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -238,8 +239,81 @@ ProductionSourceBuildWorkItem make_aur_source_build_work_item(
     return work_item;
 }
 
+enum class RepositoryProviderInstallDirective {
+    Default,
+    AsDependency,
+};
+
+[[noreturn]] void throw_malformed_repository_provider_metadata(
+        const std::string& diagnostic) {
+    throw PackageMetadataError(PackageMetadataFailure{
+            PackageMetadataErrorCode::MalformedMetadata, diagnostic});
+}
+
+RepositoryProviderInstallDirective
+resolve_repository_provider_install_directive(
+        const std::vector<ProvidedDependency>& providers,
+        const PacmanDatabasePaths& database_paths) {
+    std::optional<RepositoryProviderInstallDirective> transaction_directive;
+    PackageMetadataSession session =
+            PackageMetadataSession::open(database_paths);
+    for(const ProvidedDependency& provider : providers) {
+        InstalledPackageQueryResult query_result =
+                session.query_installed_package(provider.package_name);
+        RepositoryProviderInstallDirective provider_directive =
+                RepositoryProviderInstallDirective::AsDependency;
+        if(const auto* failure =
+                   std::get_if<PackageMetadataFailure>(&query_result)) {
+            // POLICY: metadata failureと未導入を区別し、reasonを推測してmutationしない。
+            throw PackageMetadataError(*failure);
+        }
+        if(const auto* metadata =
+                   std::get_if<InstalledPackageMetadata>(&query_result)) {
+            if(metadata->name != provider.package_name) {
+                throw_malformed_repository_provider_metadata(
+                        localization::translate_message(
+                                "Installed package metadata name does not match the selected repository provider identity."));
+            }
+            if(metadata->version.empty()) {
+                throw_malformed_repository_provider_metadata(
+                        localization::translate_message(
+                                "Installed package metadata contains an empty version."));
+            }
+            switch(metadata->reason) {
+            case InstalledPackageReason::Explicit:
+                provider_directive =
+                        RepositoryProviderInstallDirective::Default;
+                break;
+            case InstalledPackageReason::Dependency:
+                break;
+            case InstalledPackageReason::Unknown:
+                throw_malformed_repository_provider_metadata(
+                        localization::translate_message(
+                                "Installed package metadata contains an unknown install reason."));
+            default:
+                throw_malformed_repository_provider_metadata(
+                        localization::translate_message(
+                                "Installed package metadata contains an invalid install reason."));
+            }
+        } else if(!std::holds_alternative<PackageNotFound>(query_result)) {
+            throw std::logic_error(localization::translate_message(
+                    "Unknown installed package query result."));
+        }
+
+        if(transaction_directive.has_value() &&
+           transaction_directive.value() != provider_directive) {
+            throw std::runtime_error(localization::translate_message(
+                    "Selected repository provider install reasons cannot be represented by one package transaction."));
+        }
+        transaction_directive = provider_directive;
+    }
+    return transaction_directive.value_or(
+            RepositoryProviderInstallDirective::AsDependency);
+}
+
 int install_selected_repository_providers(
         const std::vector<ProvidedDependency>& providers,
+        RepositoryProviderInstallDirective directive,
         const AppConfig& config) {
     std::vector<std::string> targets;
     for(const ProvidedDependency& provider : providers) {
@@ -248,8 +322,15 @@ int install_selected_repository_providers(
         targets.push_back(
                 repository.repository_name + "/" + provider.package_name);
     }
-    std::vector<std::string> command{
-            "sudo", "pacman", "-S", "--asdeps", "--needed"};
+    std::vector<std::string> command{"sudo", "pacman", "-S"};
+    switch(directive) {
+    case RepositoryProviderInstallDirective::Default:
+        break;
+    case RepositoryProviderInstallDirective::AsDependency:
+        command.push_back("--asdeps");
+        break;
+    }
+    command.push_back("--needed");
     if(config.no_confirm) command.push_back("--noconfirm");
     command.push_back("--");
     command.insert(command.end(), targets.begin(), targets.end());
@@ -530,12 +611,32 @@ execute_selected_repository_provider_transaction(
     // 再検証する。system phase中のroot replacementを古いsnapshotで通さない。
     invocation.cache_root->require_unchanged_identity();
 
+    RepositoryProviderInstallDirective directive;
+    try {
+        directive = resolve_repository_provider_install_directive(
+                result.selected_providers, invocation.database_paths);
+    } catch(const std::exception& error) {
+        result.status = SelectedRepositoryProviderTransactionStatus::
+                BlockedBeforeExecution;
+        result.diagnostic = error.what();
+        return result;
+    } catch(...) {
+        result.status = SelectedRepositoryProviderTransactionStatus::
+                BlockedBeforeExecution;
+        result.diagnostic = localization::translate_message(
+                "Failed to inspect selected repository provider install reasons with an unknown exception.");
+        return result;
+    }
+
+    // Metadata sessionを閉じた後、actual pacman直前にもcache authorityを再証明する。
+    invocation.cache_root->require_unchanged_identity();
+
     // --needed成功だけではactual changeを断言できず、nonzero/exec failureも
     // partial transactionの可能性を持つため、snapshotなしではUnknownを保つ。
     result.package_state_change = PackageStateChange::Unknown;
     try {
         const int exit_status = install_selected_repository_providers(
-                result.selected_providers, config);
+                result.selected_providers, directive, config);
         result.command_exit_status = exit_status;
         if(exit_status == 0) {
             result.status =

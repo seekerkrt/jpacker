@@ -94,11 +94,36 @@ host localに残り得る。official minimal imageの`NoExtract = usr/share/doc/
 root-owned container configへ`!usr/share/doc/fetchfetch/README.md`だけを追加し、tracked
 payloadのREADMEをexactに展開する。host pacman configは参照・共有しない。
 
-残る責務は次のとおり。
+## Slice 4: real local PKGBUILD install and release gate
 
-- Slice 4: local PKGBUILD rootのbuild / artifact installとlive aggregate release gate
+`make test-container-live-local`はprovider / AUR laneと別のstandalone imageをbuildし、
+tracked local fixtureはvalidation-user buildより前にroot-owned read-only authorityへ固定し、
+runtimeではそのauthorityだけをfresh user-owned directoryへcopyしてproduction
+`moguet --noedit build --local <directory>`で検証する。fixtureのmissing
+`.SRCINFO`はexplicit evaluation gateを通り、real Arch repository metadataから選択した
+`extra/rust` providerをdependencyとしてinstallした後、invocation-owned source snapshot、
+unprivileged `makepkg` build、artifact identity validation、root gateway経由のreal
+`pacman -U`によるexplicit installまでを通す。authorityとcase-local copyのmanifest、owner、
+modeをbuild前に照合し、case-local root、root-owned fixture authority、host worktreeを変更しない。
+root artifact transactionはroot-owned staging copy、four-way SHA-256照合、
+exact `.PKGINFO`、payload path、marker contentの検証を終えてからだけ許可する。
 
-Slice 3のnon-goalはproduction C++、CLI、help、man、completion、gettextの変更、provider
-real install、local fixture/rootのbuild/install、複数AUR package fallback、clean chroot、
-package signing、host install、CI常時実行、release checklist更新、既存offline laneの変更
-である。
+install reasonはlive package databaseで検証する。local root
+`moguet-live-fixture 1.0.0-1`はExplicit、選択した`rust`と同時に導入されるprovider
+closureはDependencyでなければ失敗する。container start時のpackage version / reasonは
+不変でなければならず、root gatewayは`-Syu`、remove、unqualified provider、cache外
+artifact、wrong install reasonをfail closedで拒否する。runtime networkはofficial
+repository transactionのため有効だが、containerは`--rm`で破棄され、host package
+database / config / cacheは共有しない。
+
+`make test-container-live`は単一のfail-fast recipeからprovider、AUR、local PKGBUILDの三つの
+live targetを順に再帰実行するrelease gateである。callerがparallel makeでもlaneを並行開始せず、
+先行laneのfailure後は後続laneを開始しない。network、current Arch repository、public AUR、real package
+transactionを含むため、`make test`と`make release-check`からactual live executionへ
+再帰的に含めない。`release-check`は`test-live-contract`を通じてtargetのisolationとgate
+compositionだけをstaticに検証する。release candidateでは通常のhost / offline
+validationとは別に、明示的にaggregate targetを実行して結果を確認する。
+
+Slice 4のnon-goalはselected repository providerのinstall reason preservationに必要な修正以外の
+production C++、CLI、help、man、completionの変更、provider selection / AUR laneの緩和、
+複数local root、clean chroot、package signing、host install、CI常時実行、既存offline laneの変更である。
