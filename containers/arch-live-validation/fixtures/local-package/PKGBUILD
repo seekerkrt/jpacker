@@ -1,0 +1,16 @@
+pkgname='moguet-live-fixture'
+pkgver=1.0.0
+pkgrel=1
+pkgdesc='Moguet issue-372 slice 1 local marker fixture'
+arch=('any')
+url='https://example.invalid/moguet-live-fixture'
+license=('custom')
+makedepends=('cargo')
+source=()
+sha256sums=()
+
+package() {
+  install -d "${pkgdir}/usr/share/moguet-live-validation"
+  printf '%s\n' 'live-validation-local-package-fixture marker' \
+    >"${pkgdir}/usr/share/moguet-live-validation/live-fixture-marker"
+}

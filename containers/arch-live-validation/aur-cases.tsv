@@ -1,0 +1,2 @@
+# package	package_base	expected_version	runtime_dependencies	make_dependencies	source_kind	install_reason	fallback_policy	review_required
+fetchfetch	fetchfetch	2.0.0-1	glibc	gcc,make	single-release-archive	Explicit	reject	required
