@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Moguet 2.0.1\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-05 08:01+0900\n"
+"POT-Creation-Date: 2026-08-05 17:45+0900\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -51,15 +51,15 @@ msgstr ""
 msgid "Artifact package identity set is no longer active."
 msgstr ""
 
-#: src/artifact_install_executor.cpp:29
+#: src/artifact_install_executor.cpp:29 src/source_install.cpp:292
 msgid "Installed package metadata contains an unknown install reason."
 msgstr ""
 
-#: src/artifact_install_executor.cpp:33
+#: src/artifact_install_executor.cpp:33 src/source_install.cpp:296
 msgid "Installed package metadata contains an invalid install reason."
 msgstr ""
 
-#: src/artifact_install_executor.cpp:56
+#: src/artifact_install_executor.cpp:56 src/source_install.cpp:300
 msgid "Unknown installed package query result."
 msgstr ""
 
@@ -67,7 +67,7 @@ msgstr ""
 msgid "Installed package metadata name does not match the package artifact identity."
 msgstr ""
 
-#: src/artifact_install_executor.cpp:64
+#: src/artifact_install_executor.cpp:64 src/source_install.cpp:280
 msgid "Installed package metadata contains an empty version."
 msgstr ""
 
@@ -1218,14 +1218,14 @@ msgstr ""
 
 #. TRANSLATORS: The placeholders are the PackageBase metadata-key
 #. identity and a package-base identity.
-#: src/aur_update_cli_presentation.cpp:615 src/source_install.cpp:329
+#: src/aur_update_cli_presentation.cpp:615 src/source_install.cpp:410
 #, c++-format
 msgid "{} result: {}"
 msgstr ""
 
 #. TRANSLATORS: The placeholders are package identity and version.
 #: src/aur_update_cli_presentation.cpp:626
-#: src/commands_source_maintenance.cpp:561 src/source_install.cpp:397
+#: src/commands_source_maintenance.cpp:561 src/source_install.cpp:478
 #, c++-format
 msgid "  produced artifact: {} {} (not selected; not installed)"
 msgstr ""
@@ -3274,7 +3274,7 @@ msgstr ""
 msgid "Source preference load event has no entry path."
 msgstr ""
 
-#: src/commands_source_maintenance.cpp:261 src/source_install.cpp:44
+#: src/commands_source_maintenance.cpp:261 src/source_install.cpp:45
 #, c++-format
 msgid "Loading custom build flags from {}."
 msgstr ""
@@ -4107,12 +4107,12 @@ msgid "Unsupported {} option for {} info: {}"
 msgstr ""
 
 #: src/commands_sync.cpp:949 src/commands_sync.cpp:998
-#: src/dependency_plan.cpp:1341 src/source_install.cpp:600
+#: src/dependency_plan.cpp:1341 src/source_install.cpp:701
 #, c++-format
 msgid "Failed to fetch {} info for {}: {}"
 msgstr ""
 
-#: src/commands_sync.cpp:991 src/source_install.cpp:609
+#: src/commands_sync.cpp:991 src/source_install.cpp:710
 #, c++-format
 msgid "Package not found in repos or {}: {}"
 msgstr ""
@@ -7137,148 +7137,160 @@ msgstr ""
 msgid "{} set source-build unexpectedly produced a singular update-status result."
 msgstr ""
 
-#: src/source_build.cpp:1061 src/source_install.cpp:302
+#: src/source_build.cpp:1061 src/source_install.cpp:383
 #: src/system_source_upgrade.cpp:609
 msgid "Unknown source-build execution status."
 msgstr ""
 
-#: src/source_install.cpp:68
+#: src/source_install.cpp:69
 msgid "Unknown source-build source kind."
 msgstr ""
 
-#: src/source_install.cpp:79
+#: src/source_install.cpp:80
 #, c++-format
 msgid "Registered source upgrade does not support split {} preference {} from {} {}; this route requires a singular package identity."
 msgstr ""
 
-#: src/source_install.cpp:121
+#: src/source_install.cpp:122
 #, c++-format
 msgid "Registered source upgrade cannot enforce a selected {} dependency provider."
 msgstr ""
 
-#: src/source_install.cpp:136
+#: src/source_install.cpp:137
 #, c++-format
 msgid "{} required artifact target projection failed for {}."
 msgstr ""
 
-#: src/source_install.cpp:149 src/source_install.cpp:656
+#: src/source_install.cpp:150 src/source_install.cpp:757
 #, c++-format
 msgid "{} required artifact target projection omitted {}."
 msgstr ""
 
-#: src/source_install.cpp:257
+#: src/source_install.cpp:275
+msgid "Installed package metadata name does not match the selected repository provider identity."
+msgstr ""
+
+#: src/source_install.cpp:306
+msgid "Selected repository provider install reasons cannot be represented by one package transaction."
+msgstr ""
+
+#: src/source_install.cpp:338
 #, c++-format
 msgid "Installing selected repository providers: {}"
 msgstr ""
 
-#: src/source_install.cpp:323
+#: src/source_install.cpp:404
 #, c++-format
 msgid "{} source-build result is incoherent for presentation."
 msgstr ""
 
-#: src/source_install.cpp:341
+#: src/source_install.cpp:422
 #, c++-format
 msgid "{} source-build child result is incoherent for presentation."
 msgstr ""
 
-#: src/source_install.cpp:348
+#: src/source_install.cpp:429
 #, c++-format
 msgid "  required child: {} -> {} {} (explicit): installed"
 msgstr ""
 
-#: src/source_install.cpp:357
+#: src/source_install.cpp:438
 #, c++-format
 msgid "  required child: {} -> {} {} (explicit): skipped as needed ({})"
 msgstr ""
 
-#: src/source_install.cpp:366
+#: src/source_install.cpp:447
 #, c++-format
 msgid "  required child: {} -> {} {} (dependency): installed"
 msgstr ""
 
-#: src/source_install.cpp:375
+#: src/source_install.cpp:456
 #, c++-format
 msgid "  required child: {} -> {} {} (dependency): skipped as needed ({})"
 msgstr ""
 
-#: src/source_install.cpp:382
+#: src/source_install.cpp:463
 #, c++-format
 msgid "{} source-build child result has an unknown install reason or outcome."
 msgstr ""
 
-#: src/source_install.cpp:392
+#: src/source_install.cpp:473
 #, c++-format
 msgid "{} unselected artifact identity is incoherent for presentation."
 msgstr ""
 
-#: src/source_install.cpp:455
+#: src/source_install.cpp:536
 msgid "Cannot seed cache for an empty source-build invocation."
 msgstr ""
 
-#: src/source_install.cpp:473
+#: src/source_install.cpp:554
 msgid "Production source-build work items use different cache authorities."
 msgstr ""
 
-#: src/source_install.cpp:483
+#: src/source_install.cpp:564
 msgid "Production source-build invocation cache authority changed."
 msgstr ""
 
-#: src/source_install.cpp:498
+#: src/source_install.cpp:579
 msgid "Cannot activate cache for an empty source-build invocation."
 msgstr ""
 
-#: src/source_install.cpp:502
+#: src/source_install.cpp:583
 msgid "Local source-build dependency invocation has no prepared cache authority."
 msgstr ""
 
-#: src/source_install.cpp:527
+#: src/source_install.cpp:608
 msgid "Production source-build invocation has no prepared cache authority."
 msgstr ""
 
-#: src/source_install.cpp:547 src/source_install.cpp:843
+#: src/source_install.cpp:627
+msgid "Failed to inspect selected repository provider install reasons with an unknown exception."
+msgstr ""
+
+#: src/source_install.cpp:648 src/source_install.cpp:944
 #: src/system_source_upgrade.cpp:1514
 msgid "Failed to install selected repository providers."
 msgstr ""
 
-#: src/source_install.cpp:556 src/system_source_upgrade.cpp:1561
+#: src/source_install.cpp:657 src/system_source_upgrade.cpp:1561
 msgid "Failed to install selected repository providers with an unknown exception."
 msgstr ""
 
-#: src/source_install.cpp:568
+#: src/source_install.cpp:669
 msgid "Production source-build work item has no prepared cache authority."
 msgstr ""
 
-#: src/source_install.cpp:616
+#: src/source_install.cpp:717
 #, c++-format
 msgid "{} info for {} does not include {}."
 msgstr ""
 
-#: src/source_install.cpp:710
+#: src/source_install.cpp:811
 #, c++-format
 msgid "{} required artifact target projection failed before source-build work-item preparation."
 msgstr ""
 
-#: src/source_install.cpp:757
+#: src/source_install.cpp:858
 #, c++-format
 msgid "{} set source-build execution requires an {} {} work item."
 msgstr ""
 
-#: src/source_install.cpp:763
+#: src/source_install.cpp:864
 #, c++-format
 msgid "{} set source-build execution does not support only-if-updated requests."
 msgstr ""
 
-#: src/source_install.cpp:769 src/source_install.cpp:790
+#: src/source_install.cpp:870 src/source_install.cpp:891
 #, c++-format
 msgid "Building {} {}: {}"
 msgstr ""
 
-#: src/source_install.cpp:773 src/source_install.cpp:794
+#: src/source_install.cpp:874 src/source_install.cpp:895
 #, c++-format
 msgid "Target package(s): {}"
 msgstr ""
 
-#: src/source_install.cpp:814
+#: src/source_install.cpp:915
 #, c++-format
 msgid "Failed while building/installing {} {} ({}): {}"
 msgstr ""

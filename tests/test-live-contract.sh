@@ -16,6 +16,10 @@ aur_runner=$live_root/run-aur-install.sh
 aur_gateway=$live_root/aur-pacman-gateway.sh
 aur_stage_helper=$live_root/aur-stage-artifact.py
 aur_metadata_helper=$live_root/aur-archive-metadata-check.c
+local_dockerfile=$live_root/Dockerfile.local
+local_runner=$live_root/run-local-install.sh
+local_gateway=$live_root/local-pacman-gateway.sh
+local_stage_helper=$live_root/local-stage-artifact.py
 dockerignore_file=$repo_root/.dockerignore
 makefile=$repo_root/Makefile
 offline_dockerfile=$repo_root/containers/arch-validation/Dockerfile
@@ -53,10 +57,10 @@ assert_not_contains() {
 make_target_body() {
     target_name=$1
     awk -v target="$target_name" '
-        $0 == target ":" {
+        $0 ~ ("^" target ":[[:space:]]*") {
             in_target = 1
         }
-        in_target && $0 != target ":" &&
+        in_target && $0 !~ ("^" target ":[[:space:]]*") &&
             $0 ~ /^[A-Za-z0-9_.-]+([[:space:]]+[A-Za-z0-9_.-]+)*:/ {
             exit
         }
@@ -79,6 +83,10 @@ assert_regular_file "$aur_runner" 'live AUR runner'
 assert_regular_file "$aur_gateway" 'live AUR pacman gateway'
 assert_regular_file "$aur_stage_helper" 'live AUR staging helper'
 assert_regular_file "$aur_metadata_helper" 'live AUR libarchive metadata helper'
+assert_regular_file "$local_dockerfile" 'live local PKGBUILD Dockerfile'
+assert_regular_file "$local_runner" 'live local PKGBUILD runner'
+assert_regular_file "$local_gateway" 'live local PKGBUILD gateway'
+assert_regular_file "$local_stage_helper" 'live local artifact staging helper'
 assert_regular_file "$dockerignore_file" 'Docker context exclusion contract'
 assert_regular_file "$offline_dockerfile" 'offline validation Dockerfile'
 assert_regular_file "$offline_runner" 'offline validation runner'
@@ -108,6 +116,12 @@ if ! grep -F 'source=()' "$local_package_file" >/dev/null; then
 fi
 if ! grep -F 'live-fixture-marker' "$local_package_file" >/dev/null; then
     fail 'local fixture package() must install marker artifact'
+fi
+if ! grep -F '"${CC:-cc}" -g -O0' "$local_package_file" >/dev/null; then
+    fail 'local fixture must generate debug symbols for the live debug artifact'
+fi
+if ! grep -F 'usr/bin/moguet-live-fixture' "$local_package_file" >/dev/null; then
+    fail 'local fixture package() must install its debug-symbol source binary'
 fi
 if [ -e "$live_root/fixtures/local-package/.SRCINFO" ]; then
     fail 'local fixture must not track .SRCINFO for live contract'
@@ -568,8 +582,8 @@ done
 
 live_target_reference_count=$(grep -F -c \
     'test-container-live-provider' "$makefile")
-if [ "$live_target_reference_count" -ne 2 ]; then
-    fail 'live provider target must appear only in .PHONY and its explicit definition'
+if [ "$live_target_reference_count" -ne 3 ]; then
+    fail 'live provider target must appear only in .PHONY, its definition, and the aggregate gate'
 fi
 
 aur_live_target=$(make_target_body test-container-live-aur)
@@ -599,15 +613,211 @@ do
 done
 aur_live_target_reference_count=$(grep -F -c \
     'test-container-live-aur' "$makefile")
-if [ "$aur_live_target_reference_count" -ne 2 ]; then
-    fail 'live AUR target must appear only in .PHONY and its explicit definition'
+if [ "$aur_live_target_reference_count" -ne 3 ]; then
+    fail 'live AUR target must appear only in .PHONY, its definition, and the aggregate gate'
 fi
+
+local_live_target=$(make_target_body test-container-live-local)
+printf '%s\n' "$local_live_target" | grep -F -- \
+    '$(DOCKER) build --pull' >/dev/null ||
+    fail 'live local target must use docker build --pull'
+printf '%s\n' "$local_live_target" | grep -F -- \
+    '--file containers/arch-live-validation/Dockerfile.local' >/dev/null ||
+    fail 'live local target must select the standalone local Dockerfile'
+printf '%s\n' "$local_live_target" | grep -F -- \
+    '$(DOCKER) run --rm' >/dev/null ||
+    fail 'live local target must destroy its container with --rm'
+for forbidden_runtime_option in \
+    '--privileged' \
+    '--network=none' \
+    '--mount' \
+    '--volume' \
+    'docker.sock' \
+    '/var/lib/pacman' \
+    '/etc/pacman.conf' \
+    '/var/cache/pacman'
+do
+    if printf '%s\n' "$local_live_target" |
+        grep -F -- "$forbidden_runtime_option" >/dev/null; then
+        fail "live local Make target contains forbidden runtime option: $forbidden_runtime_option"
+    fi
+done
+local_live_target_reference_count=$(grep -F -c \
+    'test-container-live-local' "$makefile")
+if [ "$local_live_target_reference_count" -ne 3 ]; then
+    fail 'live local target must appear only in .PHONY, its definition, and the aggregate gate'
+fi
+aggregate_live_target=$(make_target_body test-container-live)
+printf '%s\n' "$aggregate_live_target" | grep -Fx \
+    'test-container-live:' >/dev/null ||
+    fail 'live aggregate gate must be an explicit target'
+printf '%s\n' "$aggregate_live_target" | grep -F \
+    '+@set -eu;' >/dev/null ||
+    fail 'live aggregate gate must use one fail-fast recursive recipe'
+printf '%s\n' "$aggregate_live_target" | awk '
+    index($0, "$(MAKE) test-container-live-provider") {
+        if (stage != 0) exit 1
+        stage = 1
+        next
+    }
+    index($0, "$(MAKE) test-container-live-aur") {
+        if (stage != 1) exit 1
+        stage = 2
+        next
+    }
+    index($0, "$(MAKE) test-container-live-local") {
+        if (stage != 2) exit 1
+        stage = 3
+        next
+    }
+    END { exit stage == 3 ? 0 : 1 }
+' || fail 'live aggregate gate must run provider, AUR, and local in exact order'
+
+# Exercise the real aggregate under parallel make with a harmless Docker
+# double. A provider failure must prevent both later recursive lane calls.
+aggregate_probe_root=$(mktemp -d)
+trap 'rm -rf -- "$aggregate_probe_root"' EXIT HUP INT TERM
+aggregate_docker_probe=$aggregate_probe_root/docker-probe.sh
+aggregate_log=$aggregate_probe_root/aggregate.log
+printf '%s\n' \
+    '#!/bin/sh' \
+    'set -eu' \
+    'printf "%s\n" "$*" >> "$MOGUET_LIVE_AGGREGATE_LOG"' \
+    'if [ -n "${MOGUET_LIVE_AGGREGATE_FAIL_IMAGE-}" ]; then' \
+    '    for argument in "$@"; do' \
+    '        if [ "$argument" = "$MOGUET_LIVE_AGGREGATE_FAIL_IMAGE" ]; then' \
+    '            exit 41' \
+    '        fi' \
+    '    done' \
+    'fi' \
+    > "$aggregate_docker_probe"
+chmod 0755 "$aggregate_docker_probe"
+MOGUET_LIVE_AGGREGATE_LOG=$aggregate_log \
+    env -u MAKEFLAGS -u MFLAGS \
+    make -j8 --no-print-directory -f "$makefile" \
+        DOCKER="$aggregate_docker_probe" test-container-live >/dev/null
+awk '
+    BEGIN {
+        expected[1] = "moguet-arch-live-validation:local"
+        expected[2] = "moguet-arch-live-validation:local"
+        expected[3] = "moguet-arch-live-aur-validation:local"
+        expected[4] = "moguet-arch-live-aur-validation:local"
+        expected[5] = "moguet-arch-live-local-validation:local"
+        expected[6] = "moguet-arch-live-local-validation:local"
+    }
+    {
+        found = ""
+        for (field = 1; field <= NF; ++field) {
+            if ($field == expected[1] || $field == expected[3] ||
+                $field == expected[5]) {
+                found = $field
+            }
+        }
+        if (found != expected[NR]) exit 1
+    }
+    END { exit NR == 6 ? 0 : 1 }
+' "$aggregate_log" ||
+    fail 'parallel live aggregate did not preserve provider, AUR, local order'
+
+: > "$aggregate_log"
+if MOGUET_LIVE_AGGREGATE_LOG=$aggregate_log \
+    MOGUET_LIVE_AGGREGATE_FAIL_IMAGE=moguet-arch-live-validation:local \
+    env -u MAKEFLAGS -u MFLAGS \
+    make -j8 --no-print-directory -f "$makefile" \
+        DOCKER="$aggregate_docker_probe" test-container-live >/dev/null 2>&1; then
+    fail 'parallel live aggregate ignored a provider-lane failure'
+fi
+[ "$(wc -l < "$aggregate_log")" -eq 1 ] &&
+    grep -F 'moguet-arch-live-validation:local' "$aggregate_log" >/dev/null &&
+    ! grep -E 'moguet-arch-live-(aur|local)-validation:local' \
+        "$aggregate_log" >/dev/null ||
+    fail 'parallel live aggregate started a later lane after provider failure'
+
+# The local lane owns its root gateway and staging helper. Its broad system
+# transaction shapes remain rejected, while AUR/provider/offline lanes do not
+# inherit this authority.
+assert_contains "$local_dockerfile" 'FROM archlinux:latest'
+assert_contains "$local_dockerfile" '! pacman -Qq rust'
+assert_contains "$local_dockerfile" '! pacman -Qq rustup'
+assert_contains "$local_dockerfile" '! pacman -Qq moguet-live-fixture'
+assert_contains "$local_dockerfile" 'COPY --chown=moguet-validation:moguet-validation . .'
+assert_contains "$local_dockerfile" '/usr/libexec/moguet-live-local/fixtures/local-package'
+assert_contains "$local_dockerfile" 'install -o root -g root -m 0444'
+awk '
+    index($0, "containers/arch-live-validation/fixtures/local-package/PKGBUILD") {
+        authority_line = NR
+    }
+    index($0, "RUN env -u MAKEFLAGS -u MFLAGS make clean") {
+        build_line = NR
+    }
+    END {
+        exit authority_line > 0 && build_line > authority_line ? 0 : 1
+    }
+' "$local_dockerfile" ||
+    fail 'root-owned fixture authority must be fixed before validation-user build'
+assert_contains "$local_dockerfile" '/usr/libexec/moguet-live-local/pacman.real'
+assert_contains "$local_dockerfile" 'local-pacman-gateway.sh'
+assert_contains "$local_dockerfile" 'local-stage-artifact.py'
+assert_contains "$local_dockerfile" 'moguet-validation ALL=(root) NOPASSWD: /usr/bin/pacman *'
+assert_contains "$local_dockerfile" 'CMD ["sh", "containers/arch-live-validation/run-local-install.sh"]'
+assert_not_contains "$local_dockerfile" 'aur-pacman-gateway.sh'
+assert_not_contains "$local_dockerfile" 'pacman-sentinel.sh'
+assert_contains "$local_gateway" '"/proc/$$/status"'
+assert_contains "$local_gateway" 'PATH=/usr/bin'
+assert_contains "$local_gateway" 'unset PYTHONPATH'
+assert_contains "$local_gateway" 'extra/rust|extra/rustup'
+assert_contains "$local_gateway" 'exec_real_pacman --noconfirm "$@"'
+assert_contains "$local_gateway" 'exec_real_pacman --noconfirm -U --asexplicit -- "$staged_artifact"'
+assert_contains "$local_gateway" 'root argv must be one selected provider transaction or local artifact install'
+assert_contains "$local_gateway" 'artifact path is outside the invocation-owned cache prefix'
+assert_contains "$local_gateway" 'live-local-case/actual/cache/moguet/.artifact-workspace~-*/*'
+assert_contains "$local_gateway" 'local-stage-artifact.py'
+assert_contains "$local_gateway" 'artifact payload path set drift'
+assert_not_contains "$local_gateway" 'pacman -Syu'
+assert_not_contains "$local_gateway" 'pacman -R '
+assert_contains "$local_stage_helper" 'os.O_NOFOLLOW'
+assert_contains "$local_stage_helper" 'os.O_EXCL'
+assert_contains "$local_stage_helper" 'live-local-case/actual/cache/moguet'
+assert_contains "$local_stage_helper" 'source artifact is not owned by the validation user'
+assert_contains "$local_stage_helper" 'source and staged artifact content hashes differ'
+assert_contains "$local_stage_helper" 'source_before='
+assert_contains "$local_stage_helper" 'source_after='
+assert_contains "$local_runner" '--noedit build --local'
+assert_contains "$local_runner" 'fixture_root=/usr/libexec/moguet-live-local/fixtures/local-package'
+assert_contains "$local_runner" 'fixture_before_copy=$(fixture_manifest)'
+assert_contains "$local_runner" 'fixture_after_copy=$(fixture_manifest)'
+assert_contains "$local_runner" 'case_copy_manifest=$(source_content_manifest "$prepared_root/source")'
+assert_contains "$local_runner" 'chmod u+w "$prepared_root/source"'
+assert_contains "$local_runner" 'case-local source copy differs from the root-owned fixture authority'
+assert_contains "$local_runner" 'validation user can modify the root-owned local fixture authority'
+assert_contains "$local_runner" 'ambiguous providers: cargo'
+assert_contains "$local_runner" 'reviewed provider choice'
+assert_contains "$local_runner" 'root did not install as the exact explicit fixture package'
+assert_contains "$local_runner" 'selected rust provider did not retain dependency install reason'
+assert_contains "$local_runner" 'unselected local debug artifact was installed'
+assert_contains "$local_runner" 'baseline package version or reason changed'
+assert_contains "$local_runner" 'gateway rejection self-test changed package inventory'
+assert_contains "$local_runner" "Running: 'sudo' 'pacman' '-U' '--'"
+assert_contains "$local_runner" \
+    'required child: moguet-live-fixture 1.0.0-1 (explicit): installed'
+
+for protected_lane_file in \
+    "$live_dockerfile" "$provider_runner" "$pacman_sentinel" \
+    "$aur_dockerfile" "$aur_runner" "$aur_gateway" "$aur_stage_helper" \
+    "$offline_dockerfile" "$offline_runner"
+do
+    assert_not_contains "$protected_lane_file" 'moguet-live-local'
+    assert_not_contains "$protected_lane_file" 'local-pacman-gateway'
+done
+
 test_target=$(make_target_body test)
 release_target=$(make_target_body release-check)
 if printf '%s\n%s\n' "$test_target" "$release_target" |
-    grep -E 'test-container-live-(provider|aur)' >/dev/null; then
+    grep -E 'test-container-live-(provider|aur|local)' >/dev/null; then
     fail 'make test or release-check must not recursively start the live lane'
 fi
+printf '%s\n' "$release_target" | grep -F 'test-live-contract' >/dev/null ||
+    fail 'release-check must run the static live-contract gate'
 
 # Existing offline files and target remain isolated from the new live paths.
 assert_not_contains "$offline_dockerfile" 'arch-live-validation'
@@ -621,8 +831,8 @@ fi
 printf '%s\n' "$offline_target" | grep -F -- '--network=none' >/dev/null ||
     fail 'existing offline target lost its offline runtime network boundary'
 
-# The tracked fixture remains the only source authority; generated metadata is
-# case-local and real package/source execution remains beyond Slice 2.
+# The tracked fixture remains the Docker build input. Runtime cases consume its
+# pre-build root-owned authority and keep generated metadata case-local.
 if find "$live_root/fixtures/local-package" -mindepth 1 -name .SRCINFO -print |
     grep . >/dev/null; then
     fail 'tracked live fixture must not contain .SRCINFO'
@@ -651,7 +861,12 @@ assert_contains "$readme_file" 'ACL/xattr不在のauthorityには使わない'
 assert_contains "$readme_file" 'exact multiset照合'
 assert_contains "$readme_file" 'xattr、ACL、`pkgdesc` authority drift'
 assert_contains "$readme_file" '!usr/share/doc/fetchfetch/README.md'
-assert_contains "$readme_file" 'Slice 4: local PKGBUILD root'
+assert_contains "$readme_file" 'Slice 4: real local PKGBUILD install and release gate'
+assert_contains "$readme_file" 'moguet --noedit build --local <directory>'
+assert_contains "$readme_file" 'moguet-live-fixture 1.0.0-1`はExplicit'
+assert_contains "$readme_file" 'root-owned read-only authorityへ固定'
+assert_contains "$readme_file" 'make test-container-live`は単一のfail-fast recipe'
+assert_contains "$readme_file" 'release-check`は`test-live-contract`'
 assert_contains "$readme_file" 'image / layer cacheはhost localに残り得る'
 assert_contains "$readme_file" 'host systemへpackage mutationは行わない'
 

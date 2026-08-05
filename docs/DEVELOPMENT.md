@@ -117,6 +117,20 @@ statusをhostへ返す。実行containerは成功時・失敗時とも`--rm`で�
 このlaneはhostの通常build、`make test`、`make release-check`を置き換えず、それらから再帰的に
 呼び出さない。release前にはhost validationとcontainer validationを別々に確認する。
 
+Issue #372のlive aggregate gateは、provider selection、real AUR install、real local
+PKGBUILD build / installを単一のfail-fast recipeから別containerで順に実行する。parallel makeの
+contextでも後続laneを並行開始せず、providerまたはAUR failure後は残りのlaneを開始しない。
+current Arch repository、public AUR、
+container内のactual package transactionを使うため、`make test` / `make release-check`へ
+actual executionを混ぜない。release candidateでは通常のhost / offline validation後に、
+明示的に次を実行し、three live laneの結果を個別に確認する。
+
+    make test-container-live
+
+`release-check`はlive targetのisolation、standalone Dockerfile、aggregate compositionを
+static `test-live-contract`として確認するが、networkやcontainer runtimeが必要なこのgateの
+成功を代替しない。
+
 ### Release flow
 
     git switch develop

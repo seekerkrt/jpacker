@@ -253,8 +253,9 @@ void seed_production_source_build_cache(
 void activate_production_source_build_cache(
         PreparedProductionSourceBuildInvocation& invocation);
 
-// invocation全体で選択済みのofficial providerを1回のexact pacman
-// dependency transactionへ渡す。各source executorより前にphase ownerが呼ぶ。
+// invocation全体で選択済みのofficial providerをinstalled reason authorityで
+// preflightし、1回のexact pacman transactionへ渡す。新規/Dependencyは
+// Dependency、既存ExplicitはExplicitを維持し、混在時はmutation前に停止する。
 SelectedRepositoryProviderTransactionResult
 execute_selected_repository_provider_transaction(
         const PreparedProductionSourceBuildInvocation& invocation,
