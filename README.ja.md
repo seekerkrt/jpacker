@@ -44,6 +44,11 @@ Moguet v2.0.1は、採用済みXDG storage契約のうちsource-preference部分
 preferenceは実行user自身のXDG config contextだけを使い、公開済みv2.0.0のtag、Release、
 release noteは歴史的記録のまま変更しません。
 
+Moguet v2.1.0は最新releaseです。source-awareなpackage discoveryとambiguous AUR
+dependency providerの対話処理、local `PKGBUILD` buildを拡張し、Arch Linux container
+validationも追加しました。利用者から見える変更の全体は
+[v2.1.0 release](https://github.com/seekerkrt/moguet/releases/tag/v2.1.0)を参照してください。
+
 canonical repository identityはGitHub上のMoguetで、GitLab mirrorを持ちます。Moguet
 packageは`jpacker` command aliasを提供しません。AUR publicationは将来の別判断であり、
 この文書はAUR endpointが存在すると断定しません。

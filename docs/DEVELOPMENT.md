@@ -312,33 +312,18 @@ static `test-live-contract`として確認するが、networkやcontainer runtim
     git status --short
 
     git add -- \
-        .github/workflows/mirror-gitlab-release.yml \
-        .github/workflows/mirror-gitlab.yml \
-        .gitlab/mirror-github-release.sh \
-        AGENTS.md \
-        CLAUDE.md \
-        CONTRIBUTING.md \
-        PKGBUILD \
+        VERSION \
         README.ja.md \
         README.md \
         RELEASE_NOTES.md \
-        THIRD_PARTY_NOTICES.md \
-        docs/CODING_CONVENTIONS.md \
-        docs/COMPATIBILITY.md \
-        docs/DECISIONS.md \
         docs/DEVELOPMENT.md \
-        docs/LICENSING.md \
-        docs/PROJECT_STANCE.md \
-        docs/VERSIONING.md \
-        docs/migration/v1-to-v2.ja.md \
-        docs/migration/v1-to-v2.md \
         man/ja/moguet.1 \
-        man/ja/moguet.1.in \
         man/moguet.1 \
-        man/moguet.1.in \
-        scripts/check-internal-identity.py \
+        po/ja.po \
+        po/moguet.pot \
         scripts/check-license-compliance.sh \
         scripts/check-packaging-metadata.sh \
+        tests/test-install-layout.sh \
         tests/test-package-transition.sh
 
     git diff --cached --name-only | LC_ALL=C sort
@@ -348,11 +333,11 @@ static `test-live-contract`として確認するが、networkやcontainer runtim
 
     gh pr create --base main --head release/vX.Y.Z
 
-上記の`git add`は、#311で監査済みのv2.0.0 release diffを1 pathずつ明示したものです。
-`git add .`や代表pathだけのpartial listへ置き換えません。commit前にcached path一覧を#311の
-Known cutover patch ownership（承認済みのStage A finding修正を含む）と再照合し、release
-scopeのunstaged / untracked pathやunrelatedなstaged pathがないことを確認します。将来の
-releaseでは、このlistを流用せず、そのreleaseで監査済みのexact path setへ置き換えます。
+上記の`git add`は、v2.1.0 release preparationで実際に変更したpathを1件ずつ明示した
+exact path setです。`git add .`や代表pathだけのpartial listへ置き換えません。commit前に
+cached path一覧をこのreleaseのdiffと再照合し、release scopeのunstaged / untracked pathや
+unrelatedなstaged pathがないことを確認します。将来のreleaseでは、このlistを流用せず、その
+releaseで監査済みのexact path setへ置き換えます。
 
 merge 後:
 
@@ -374,6 +359,35 @@ tag mirrorとGitLab Release mirrorの完了を確認する。uploaded assetが�
 
     git switch develop
     git pull --ff-only origin develop
+
+### v2.1.0 post-release closure
+
+mainからdevelopへの回収PRとGitLab mirror完了後、次の順にreleaseを閉じる。GitHubを
+authorityとして扱い、GitLabへ同じrefを手動pushしない。
+
+1. GitHub authority上の`release/v2.1.0`を削除する。
+2. GitLab mirror側で同branchの削除/pruneが完了したことを確認する。
+3. local、GitHub、GitLabの`main` SHAが一致することを確認する。
+4. local、GitHub、GitLabの`develop` SHAが一致することを確認する。
+5. local、GitHub、GitLabのannotated `v2.1.0` tag objectが一致することを確認する。
+6. annotated `v2.1.0` tagのpeeled commitが一致することを確認する。
+7. local、GitHub、GitLabに`release/v2.1.0`が存在しないことを確認する。
+8. local worktreeがcleanであることを確認する。
+
+削除操作そのものはGitHub authorityで完了させる。以下は削除後のread-only確認例であり、
+placeholderの`<tag-object-sha>`には手順5で確認したGitHub tag object SHAを使う。
+
+    git rev-parse main develop v2.1.0 v2.1.0^{}
+    git ls-remote origin refs/heads/main refs/heads/develop refs/tags/v2.1.0 'refs/tags/v2.1.0^{}'
+    git ls-remote gitlab refs/heads/main refs/heads/develop refs/tags/v2.1.0 'refs/tags/v2.1.0^{}'
+    gh api --method GET repos/seekerkrt/moguet/git/ref/heads/main
+    gh api --method GET repos/seekerkrt/moguet/git/ref/heads/develop
+    gh api --method GET repos/seekerkrt/moguet/git/ref/tags/v2.1.0
+    gh api --method GET repos/seekerkrt/moguet/git/tags/<tag-object-sha>
+    git branch --list release/v2.1.0
+    git ls-remote --heads origin release/v2.1.0
+    git ls-remote --heads gitlab release/v2.1.0
+    git status --short --branch
 
 ## Notes
 
