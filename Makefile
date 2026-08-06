@@ -43,6 +43,7 @@ SOURCE_INSTALL_CHARACTERIZATION_TEST_TARGET := build/tests/moguet-source-install
 APP_CONFIG_MODULE_TEST_TARGET := build/tests/app-config-test
 APP_CONFIG_INTEGRATION_TEST_TARGET := build/tests/moguet-app-config-test
 PROVIDER_SELECTION_TEST_TARGET := $(BUILD_DIR)/tests/provider-selection-test
+PROVIDER_INSTALLED_STATE_TEST_TARGET := $(BUILD_DIR)/tests/provider-installed-state-test
 ROOT_PACKAGE_CANDIDATE_TEST_TARGET := $(BUILD_DIR)/tests/root-package-candidate-test
 ROOT_PACKAGE_SEARCH_TEST_TARGET := $(BUILD_DIR)/tests/root-package-search-test
 ROOT_PACKAGE_SELECTION_TEST_TARGET := $(BUILD_DIR)/tests/root-package-selection-test
@@ -939,6 +940,24 @@ PACKAGE_METADATA_TEST_SRCS := \
 	$(SRC_DIR)/shell_words.cpp \
 	tests/stubs/package-metadata/alpm_stub.cpp \
 	tests/stubs/package-metadata/process_stub.cpp
+# POLICY(#388): installed-state lookup testはlocal metadata read phaseだけをlinkし、
+# provider identity、selection policy、plan、CLI、execution ownerを持ち込まない。
+PROVIDER_INSTALLED_STATE_ALLOWED_PRODUCTION_TEST_SRCS := \
+	$(SRC_DIR)/provider_installed_state.cpp \
+	$(SRC_DIR)/package_metadata.cpp \
+	$(SRC_DIR)/package_identifier.cpp \
+	$(SRC_DIR)/shell_words.cpp
+PROVIDER_INSTALLED_STATE_REQUIRED_TEST_SUPPORT_SRCS := \
+	tests/stubs/package-metadata/alpm_stub.cpp \
+	tests/stubs/package-metadata/process_stub.cpp
+PROVIDER_INSTALLED_STATE_TEST_SRCS := \
+	tests/provider_installed_state_test.cpp \
+	$(PROVIDER_INSTALLED_STATE_ALLOWED_PRODUCTION_TEST_SRCS) \
+	$(PROVIDER_INSTALLED_STATE_REQUIRED_TEST_SUPPORT_SRCS)
+PROVIDER_INSTALLED_STATE_FORBIDDEN_TEST_SRCS := \
+	$(filter-out \
+		$(PROVIDER_INSTALLED_STATE_ALLOWED_PRODUCTION_TEST_SRCS), \
+		$(SRCS))
 PACKAGE_METADATA_INTEGRATION_TEST_SRCS := \
 	tests/package_metadata_integration_test.cpp \
 	$(SRC_DIR)/package_metadata.cpp \
@@ -1103,6 +1122,7 @@ LIBALPM_BUILD_TARGETS := \
 	$(SOURCE_INSTALL_CHARACTERIZATION_TEST_TARGET) \
 	$(APP_CONFIG_INTEGRATION_TEST_TARGET) \
 	$(PACKAGE_METADATA_TEST_TARGET) \
+	$(PROVIDER_INSTALLED_STATE_TEST_TARGET) \
 	$(PACKAGE_METADATA_INTEGRATION_TEST_TARGET) \
 	$(ARTIFACT_INSTALL_EXECUTOR_TEST_TARGET) \
 	$(PACKAGE_BASE_ARTIFACT_INSTALL_EXECUTOR_TEST_TARGET) \
@@ -1115,7 +1135,7 @@ LIBALPM_BUILD_TARGETS := \
 	$(AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION_TEST_TARGET) \
 	$(UPGRADE_BASELINE_METADATA_TEST_TARGET)
 
-.PHONY: all check-libalpm clean check-upgrade-all-plan-link-firewall check-system-source-upgrade-link-firewall check-aur-update-execution-runner-link-firewall check-aur-update-operation-result-link-firewall check-filtered-aur-update-operation-link-firewall check-upgrade-all-operation-link-firewall check-upgrade-all-command-link-firewall check-commands-sync-link-firewall check-root-package-candidate-link-firewall check-root-package-search-link-firewall check-root-package-selection-link-firewall check-root-package-route-projection-link-firewall check-dependency-plan-model-link-firewall check-build-plan-artifact-target-projection-link-firewall check-artifact-selection-model-link-firewall check-artifact-identity-selection-link-firewall check-multiple-artifact-workspace-link-firewall check-multiple-artifact-identity-link-firewall check-package-base-artifact-install-plan-link-firewall check-package-base-artifact-install-executor-link-firewall check-separated-package-base-source-build-link-firewall test test-internal-identity test-application-identity test-xdg-paths test-xdg-directory-safety test-xdg-state-log test-trusted-cache test-runtime-identity test-app-config test-provider-selection test-root-package-candidate test-root-package-search test-root-package-selection test-root-package-route-projection test-user-config test-package-identifier test-package-metadata test-package-metadata-integration test-repository-query test-shell-words test-source-environment test-artifact-workspace test-multiple-artifact-workspace test-artifact-identity test-multiple-artifact-identity test-artifact-install-executor test-package-base-artifact-install-plan test-package-base-artifact-install-executor test-separated-source-build test-separated-package-base-source-build test-production-source-build test-process-capture test-aur-update-plan test-upgrade-all-plan test-system-source-upgrade test-aur-update-query test-aur-update-command test-upgrade-all-command test-aur-update-execution-preflight test-aur-update-execution-preflight-integration test-aur-update-execution-preparation test-aur-update-execution-runner test-aur-update-operation-result test-filtered-aur-update-operation test-upgrade-all-operation test-dependency-plan-model test-build-plan-artifact-target-projection test-artifact-install-plan test-artifact-selection-model test-artifact-identity-selection test-command-stub-contract test-markdown-links test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-commands-inspect test-commands-source-maintenance test-commands-sync test-live-contract test-run-with-pty test-conflicts-replaces test-install-layout test-package-transition test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check install uninstall
+.PHONY: all check-libalpm clean check-upgrade-all-plan-link-firewall check-system-source-upgrade-link-firewall check-aur-update-execution-runner-link-firewall check-aur-update-operation-result-link-firewall check-filtered-aur-update-operation-link-firewall check-upgrade-all-operation-link-firewall check-upgrade-all-command-link-firewall check-commands-sync-link-firewall check-provider-installed-state-link-firewall check-root-package-candidate-link-firewall check-root-package-search-link-firewall check-root-package-selection-link-firewall check-root-package-route-projection-link-firewall check-dependency-plan-model-link-firewall check-build-plan-artifact-target-projection-link-firewall check-artifact-selection-model-link-firewall check-artifact-identity-selection-link-firewall check-multiple-artifact-workspace-link-firewall check-multiple-artifact-identity-link-firewall check-package-base-artifact-install-plan-link-firewall check-package-base-artifact-install-executor-link-firewall check-separated-package-base-source-build-link-firewall test test-internal-identity test-application-identity test-xdg-paths test-xdg-directory-safety test-xdg-state-log test-trusted-cache test-runtime-identity test-app-config test-provider-selection test-provider-installed-state test-root-package-candidate test-root-package-search test-root-package-selection test-root-package-route-projection test-user-config test-package-identifier test-package-metadata test-package-metadata-integration test-repository-query test-shell-words test-source-environment test-artifact-workspace test-multiple-artifact-workspace test-artifact-identity test-multiple-artifact-identity test-artifact-install-executor test-package-base-artifact-install-plan test-package-base-artifact-install-executor test-separated-source-build test-separated-package-base-source-build test-production-source-build test-process-capture test-aur-update-plan test-upgrade-all-plan test-system-source-upgrade test-aur-update-query test-aur-update-command test-upgrade-all-command test-aur-update-execution-preflight test-aur-update-execution-preflight-integration test-aur-update-execution-preparation test-aur-update-execution-runner test-aur-update-operation-result test-filtered-aur-update-operation test-upgrade-all-operation test-dependency-plan-model test-build-plan-artifact-target-projection test-artifact-install-plan test-artifact-selection-model test-artifact-identity-selection test-command-stub-contract test-markdown-links test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-commands-inspect test-commands-source-maintenance test-commands-sync test-live-contract test-run-with-pty test-conflicts-replaces test-install-layout test-package-transition test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check install uninstall
 .PHONY: check-local-package-metadata-link-firewall check-local-source-root-link-firewall check-local-dependency-plan-projection-link-firewall test-local-package-metadata test-local-source-root test-local-dependency-plan-projection
 .PHONY: check-local-source-workspace-link-firewall check-local-source-build-link-firewall test-local-source-workspace test-local-source-build
 .PHONY: FORCE catalogs check-catalogs check-localization-config check-pot update-po update-pot test-localization test-catalog-metadata-gate test-cli-localization-surface test-public-documentation
@@ -1864,6 +1884,14 @@ $(PACKAGE_METADATA_TEST_TARGET): $(PACKAGE_METADATA_TEST_SRCS) $(SRC_DIR)/packag
 		$(PACKAGE_METADATA_TEST_SRCS) \
 		-o $@
 
+$(PROVIDER_INSTALLED_STATE_TEST_TARGET): $(PROVIDER_INSTALLED_STATE_TEST_SRCS) $(SRC_DIR)/provider_installed_state.hpp $(SRC_DIR)/package_metadata.hpp $(SRC_DIR)/installed_package.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/process.hpp $(SRC_DIR)/shell_words.hpp $(SRC_DIR)/localization.hpp tests/stubs/package-metadata/alpm_stub.hpp tests/stubs/package-metadata/process_stub.hpp $(VERSION_FILE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling provider installed-state test binary"
+	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
+		-I$(SRC_DIR) -Itests/stubs/package-metadata \
+		$(PROVIDER_INSTALLED_STATE_TEST_SRCS) \
+		-o $@
+
 $(PACKAGE_METADATA_INTEGRATION_TEST_TARGET): $(PACKAGE_METADATA_INTEGRATION_TEST_SRCS) $(SRC_DIR)/package_metadata.hpp $(SRC_DIR)/installed_package.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/process.hpp $(SRC_DIR)/shell_words.hpp $(SRC_DIR)/logging.hpp $(SRC_DIR)/localization.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling package metadata integration test binary"
@@ -1924,6 +1952,40 @@ test-app-config: $(APP_CONFIG_MODULE_TEST_TARGET) $(APP_CONFIG_INTEGRATION_TEST_
 
 test-provider-selection: $(PROVIDER_SELECTION_TEST_TARGET)
 	$(abspath $(PROVIDER_SELECTION_TEST_TARGET))
+
+check-provider-installed-state-link-firewall:
+	@echo ":: Checking provider installed-state link firewall"
+	@test "$(words $(PROVIDER_INSTALLED_STATE_TEST_SRCS))" -eq "$(words $(sort $(PROVIDER_INSTALLED_STATE_TEST_SRCS)))" || { \
+		echo "error: provider installed-state test source list contains duplicates" >&2; \
+		exit 1; \
+	}
+	@set -e; for source in $(PROVIDER_INSTALLED_STATE_ALLOWED_PRODUCTION_TEST_SRCS); do \
+		count=$$(printf '%s\n' $(PROVIDER_INSTALLED_STATE_TEST_SRCS) | \
+			awk -v expected="$$source" '$$0 == expected { count++ } END { print count + 0 }'); \
+		test "$$count" -eq 1 || { \
+			echo "error: provider installed-state test must link $$source exactly once" >&2; \
+			exit 1; \
+		}; \
+	done
+	@set -e; for source in $(PROVIDER_INSTALLED_STATE_REQUIRED_TEST_SUPPORT_SRCS); do \
+		count=$$(printf '%s\n' $(PROVIDER_INSTALLED_STATE_TEST_SRCS) | \
+			awk -v expected="$$source" '$$0 == expected { count++ } END { print count + 0 }'); \
+		test "$$count" -eq 1 || { \
+			echo "error: provider installed-state test must link support $$source exactly once" >&2; \
+			exit 1; \
+		}; \
+	done
+	@test -z "$(filter $(PROVIDER_INSTALLED_STATE_FORBIDDEN_TEST_SRCS),$(PROVIDER_INSTALLED_STATE_TEST_SRCS))" || { \
+		echo "error: provider installed-state test links a forbidden production source" >&2; \
+		exit 1; \
+	}
+	@test "$(words $(filter tests/stubs/%,$(PROVIDER_INSTALLED_STATE_TEST_SRCS)))" -eq "$(words $(PROVIDER_INSTALLED_STATE_REQUIRED_TEST_SUPPORT_SRCS))" || { \
+		echo "error: provider installed-state test links an unexpected test stub" >&2; \
+		exit 1; \
+	}
+
+test-provider-installed-state: check-provider-installed-state-link-firewall $(PROVIDER_INSTALLED_STATE_TEST_TARGET)
+	$(abspath $(PROVIDER_INSTALLED_STATE_TEST_TARGET))
 
 check-root-package-candidate-link-firewall:
 	@echo ":: Checking root package candidate model link firewall"
@@ -2730,6 +2792,7 @@ test: \
 	test-runtime-identity \
 	test-app-config \
 	test-provider-selection \
+	test-provider-installed-state \
 	test-root-package-candidate \
 	test-root-package-search \
 	test-root-package-selection \
