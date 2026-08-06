@@ -1,4 +1,4 @@
-.TH MOGUET 1 "August 2026" "Moguet 2.0.1" "User Commands"
+.TH MOGUET 1 "August 2026" "Moguet 2.1.0" "User Commands"
 .\" parity:name
 .SH NAME
 moguet \- pacman-first AUR helper with verified source builds
@@ -9,6 +9,10 @@ moguet \- pacman-first AUR helper with verified source builds
 .I operation
 .RI [ options ]
 .RI [ targets... ]
+.
+.B moguet
+.B -S --select
+.I query
 .
 .B moguet
 .BR -h | --help
@@ -64,11 +68,30 @@ Command and option tokens are locale-independent.
 .SH COMMANDS
 .\" PUBLIC COMMANDS BEGIN
 .TP
-.B "build <pkg> [V=K]"
-Build one official-repository or AUR package from source without saving a
+.B "build <pkg> [V=K...] | build --local <directory> [V=K...]"
+Without
+.BR --local ,
+build one official-repository or AUR package from source without saving a
 source-build preference.
-The package is reviewed and its produced artifacts are validated before any
-selected artifact is handed to pacman.
+With
+.BR --local ,
+treat exactly one user-owned directory as a local PackageBase source and never
+infer that source from a path-like package operand.
+A safe existing
+.I .SRCINFO
+is read without modification. Missing, invalid, or known-stale metadata is
+evaluated through
+.B makepkg --printsrcinfo
+only after PKGBUILD review and explicit no-default consent; non-TTY input and
+.B --noconfirm
+do not authorize evaluation.
+The local tree is copied to an invocation-owned source snapshot and remains
+unchanged. Every valid unique
+.I pkgname
+child declared by the accepted metadata is installed as an explicit root after
+dependency planning and artifact validation.
+Dependency artifacts retain dependency install reasons, and an already
+explicit installed package is never demoted.
 .
 .TP
 .B "upgrade"
@@ -91,6 +114,8 @@ and does not update packages selected only by source-build preferences.
 Run the system, registered-source, fresh foreign-inventory, and filtered AUR
 phases in that order.
 Explicit source preferences take priority over duplicate AUR targets.
+Provider selection for the filtered AUR phase completes before clone, build,
+pacman, or sudo work in that phase; earlier phases may already have completed.
 This is not one atomic transaction: execution stops on the first failure,
 does not roll back completed package transactions, and reports later work as
 not attempted.
@@ -125,15 +150,21 @@ Global and pacman options are unsupported.
 Classify AUR runtime, make, and check dependencies.
 With
 .BR --recursive ,
-traverse AUR dependencies while displaying official, uniquely provided,
-ambiguous, and unresolved dependencies without traversing those categories.
+traverse exact AUR dependencies and user-selected AUR providers.
+Official dependencies, uniquely resolved providers, selected official
+repository providers, still-ambiguous providers, and unresolved dependencies
+are displayed without further traversal.
+On an interactive TTY, source-aware provider candidates can be selected and
+the output distinguishes user-selected providers from unresolved ambiguity.
 This command does not clone, build, install, or calculate a build order.
 .
 .TP
 .B "plan <pkg>"
 Display an AUR build-order plan and direct official repository package sizes.
-Unknown dependencies, ambiguous providers, cycles, and conflicts/replacements
+Unknown dependencies, unselected ambiguous providers, cycles, and conflicts/replacements
 that Moguet cannot resolve make the plan incomplete.
+The plan distinguishes uniquely resolved, user-selected, and still-ambiguous
+providers.
 Metadata-size unavailability does not suppress the plan body.
 This command does not clone, build, or install.
 .
@@ -141,6 +172,8 @@ This command does not clone, build, or install.
 .B "fetch <pkg>"
 Retrieve the AUR PackageBase repositories needed by a complete inspection
 plan.
+A selected AUR provider's PackageBase is included; a selected official
+repository provider is not cloned.
 Missing repositories are cloned.
 An existing clone runs only
 .BR "git fetch origin" ;
@@ -191,6 +224,11 @@ preference, and otherwise considers AUR.
 forces the supported target route to AUR without repository fallback;
 .B --repo
 forces official binary repositories without AUR or source-build fallback.
+With
+.BR --select ,
+the single operand is a search query rather than an exact package target;
+Moguet displays source-aware official-repository and AUR candidates and
+requires an explicit interactive selection.
 .
 .TP
 .B "-Syu"
@@ -268,9 +306,31 @@ operations.
 .B "--noconfirm"
 Pass non-confirmation behavior to supported pacman and makepkg execution and
 avoid Moguet prompts by using their defined defaults.
+Provider selection has no default: this option does not read stdin, prompt, or
+select a provider, and unresolved ambiguity fails closed.
+Root package discovery also stops before its candidate query and never chooses
+a package automatically.
+Local PKGBUILD metadata evaluation likewise has no default; this option never
+authorizes
+.BR "makepkg --printsrcinfo" .
 This is not \(dqyes to everything\(dq and does not bypass unresolved or
 ambiguous dependencies, cycles, source selection, conflicts/replacements,
 artifact identity, ownership, or other safety guards.
+.
+.TP
+.B "--select"
+With plain
+.BR -S ,
+treat exactly one operand as a source-aware package search query and require an
+explicit selection before installation. Auto mode searches official
+repositories and AUR;
+.B --aur
+or
+.B --repo
+limits the candidate source. Number, multiple-number, inclusive-range, and
+displayed-official-group selectors are supported on an interactive TTY. Only
+.B --needed
+is a shared pacman option for both selected routes.
 .
 .TP
 .B "--needed"
@@ -509,6 +569,42 @@ It does not use
 to cross such a guard.
 .
 .PP
+When multiple dependency providers remain, an interactive TTY displays
+source-aware numbered candidates and requires exactly one selection, with no
+default. Empty input, q, quit, cancel, or EOF cancels; invalid or out-of-range
+input retries. Non-TTY use and
+.B --noconfirm
+do not read provider input from stdin and fail closed. A choice is shared only
+within the current invocation. Selected AUR PackageBases flow into fetch and
+build planning; a selected official provider is introduced as an exact
+.I repository/package
+dependency.
+.
+.PP
+Root package discovery through
+.B -S --select
+also has no default, even for one candidate. An interactive TTY accepts one or
+more package numbers, inclusive ranges, and an
+.B @group
+selector for a displayed official group. Empty input, q, quit, cancel, or EOF
+cancels; invalid input retries against the same candidate snapshot. Non-TTY
+stdin and
+.B --noconfirm
+stop before candidate queries or prompts. After every selected root completes
+static preflight, exact
+.I repository/package
+targets run first in one repository transaction; only its success allows the
+selected AUR roots to enter the existing source-build lifecycle. A later AUR
+failure does not roll back the completed repository transaction.
+.
+.PP
+The registered-source phase offers provider selection only when every
+candidate is from an official repository. A candidate set containing an AUR
+provider remains ambiguous and fails closed before system or source execution,
+because the singular source lifecycle cannot schedule that provider's
+PackageBase.
+.
+.PP
 .B deps
 and
 .B plan
@@ -517,6 +613,13 @@ do not clone, build, or install.
 does not update an existing working tree.
 The export commands do not build or install.
 External commands and privilege escalation remain visible to the user.
+.
+.PP
+A local PKGBUILD build uses an invocation-owned source snapshot and never
+resets, cleans, overwrites, or deletes the user-owned source tree. It does not
+require Git and does not query AUR for the local root. Unsafe source or metadata
+state, an unapproved metadata evaluation, an incomplete dependency plan, or an
+unproven artifact stops before the corresponding mutation.
 .
 .PP
 Source-build PackageBase work uses a fresh artifact destination, validates all
@@ -534,6 +637,18 @@ be retried blindly.
 .
 .\" parity:examples
 .SH EXAMPLES
+.TP
+Discover and explicitly select source-aware install targets:
+.RS
+.B moguet -S --select fastfetch
+.RE
+.
+.TP
+Build and install all declared package children from a local PKGBUILD root:
+.RS
+.B moguet build --local .
+.RE
+.
 .TP
 Install an AUR package without repository fallback:
 .RS

@@ -1101,6 +1101,89 @@ void test_build_plan_order_skip_exclusion_and_install_reasons() {
             "multi-root read/validation/DB order");
 }
 
+void test_selected_repository_provider_is_attached_to_parent_build_unit() {
+    stub::reset();
+    stub::set_database_paths(
+            PacmanDatabasePaths{"/provider/root", "/provider/database"});
+
+    AurUpdateExecutionPreflight preflight = single_root_preflight();
+    BuildPlan& plan = preflight.build_plan.value();
+    const ProvidedDependency selected_repository_provider =
+            ProvidedDependency::from_repository(
+                    "extra", "selected-provider", "virtual-dependency",
+                    "virtual-dependency=2", "2.0-1");
+    plan.dependency_edges.push_back(BuildPlanDependencyEdge{
+            "single-root",
+            "single-root",
+            "virtual-dependency>=2",
+            PackageRole::RuntimeDependency,
+            DependencyKind::Provided,
+            std::nullopt,
+            std::nullopt,
+            selected_repository_provider,
+            ProviderResolutionKind::UserSelected});
+    // 同じproviderを別dependency categoryでも参照してもtransactionは重複させない。
+    plan.dependency_edges.push_back(BuildPlanDependencyEdge{
+            "single-root",
+            "single-root",
+            "virtual-dependency>=2",
+            PackageRole::BuildDependency,
+            DependencyKind::Provided,
+            std::nullopt,
+            std::nullopt,
+            selected_repository_provider,
+            ProviderResolutionKind::UserSelected});
+    plan.dependency_edges.push_back(BuildPlanDependencyEdge{
+            "single-root",
+            "single-root",
+            "aur-virtual",
+            PackageRole::RuntimeDependency,
+            DependencyKind::Provided,
+            std::nullopt,
+            std::nullopt,
+            ProvidedDependency::from_aur(
+                    "aur-provider", "aur-provider-base", "aur-virtual",
+                    "aur-virtual=1", "1.0-1"),
+            ProviderResolutionKind::UserSelected});
+    plan.dependency_edges.push_back(BuildPlanDependencyEdge{
+            "single-root",
+            "single-root",
+            "unique-virtual",
+            PackageRole::RuntimeDependency,
+            DependencyKind::Provided,
+            std::nullopt,
+            std::nullopt,
+            ProvidedDependency::from_repository(
+                    "core", "unique-provider", "unique-virtual",
+                    "unique-virtual=1", "1.0-1"),
+            ProviderResolutionKind::Unique});
+
+    const AppConfig config;
+    AurUpdateSourceBuildPreparation preparation =
+            prepare_aur_update_source_build_invocation(
+                    preflight, false, config);
+
+    expect_result_invariant(
+            preparation, "selected repository provider preparation");
+    expect(
+            preparation.is_prepared(),
+            "Selected repository provider blocked update preparation");
+    const PreparedProductionSourceBuildInvocation& invocation =
+            preparation.invocation->production_invocation_for_test();
+    expect(
+            invocation.work_items.size() == 1 &&
+                    invocation.work_items.front()
+                                    .selected_repository_providers ==
+                            std::vector<ProvidedDependency>{
+                                    selected_repository_provider},
+            "Selected repository provider was not attached exactly once to its parent PackageBase");
+    expect(
+            invocation.selected_repository_providers ==
+                    std::vector<ProvidedDependency>{
+                            selected_repository_provider},
+            "Selected repository provider was not retained by the generic invocation");
+}
+
 void test_same_package_base_projection_retains_exact_child_attribution() {
     stub::reset();
     const AppConfig config;
@@ -1961,6 +2044,9 @@ int main() {
         run_case(
                 "BuildPlan order, skipped exclusion, and install reasons",
                 test_build_plan_order_skip_exclusion_and_install_reasons);
+        run_case(
+                "selected repository provider parent build unit",
+                test_selected_repository_provider_is_attached_to_parent_build_unit);
         run_case(
                 "same-PackageBase child projection and preparation",
                 test_same_package_base_projection_retains_exact_child_attribution);

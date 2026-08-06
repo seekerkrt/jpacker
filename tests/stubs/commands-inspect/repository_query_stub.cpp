@@ -38,7 +38,9 @@ bool is_repo_package(const std::string& package_name) {
 
 StrictRepositoryPackageQueryResult query_repository_package_strict(
         const std::string& package_name) {
-    require_valid_package_name(package_name);
+    if(is_repo_package(package_name)) {
+        return RepositoryPackagePresent{"test"};
+    }
     return RepositoryPackageNotFound{};
 }
 

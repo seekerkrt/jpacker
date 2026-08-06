@@ -1,0 +1,11 @@
+# path	type	mode	sha256
+usr/	directory	0755	-
+usr/bin/	directory	0755	-
+usr/bin/fetchfetch	regular	0755	-
+usr/share/	directory	0755	-
+usr/share/doc/	directory	0755	-
+usr/share/doc/fetchfetch/	directory	0755	-
+usr/share/doc/fetchfetch/README.md	regular	0644	26ac44a45dfae74d33d54e474bc14a2d677f0e720dade11882bd3bea3e5b0d9a
+usr/share/licenses/	directory	0755	-
+usr/share/licenses/fetchfetch/	directory	0755	-
+usr/share/licenses/fetchfetch/LICENSE	regular	0644	3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986

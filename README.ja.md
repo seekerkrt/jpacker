@@ -44,9 +44,26 @@ Moguet v2.0.1は、採用済みXDG storage契約のうちsource-preference部分
 preferenceは実行user自身のXDG config contextだけを使い、公開済みv2.0.0のtag、Release、
 release noteは歴史的記録のまま変更しません。
 
+Moguet v2.1.0は最新releaseです。source-awareなpackage discoveryとambiguous AUR
+dependency providerの対話処理、local `PKGBUILD` buildを拡張し、Arch Linux container
+validationも追加しました。利用者から見える変更の全体は
+[v2.1.0 release](https://github.com/seekerkrt/moguet/releases/tag/v2.1.0)を参照してください。
+
 canonical repository identityはGitHub上のMoguetで、GitLab mirrorを持ちます。Moguet
 packageは`jpacker` command aliasを提供しません。AUR publicationは将来の別判断であり、
 この文書はAUR endpointが存在すると断定しません。
+
+Moguet v2.xは公開済みで利用できますが、完成済みの一般向けAUR helperではなく、
+development-phaseのproductのままです。basicなpacman wrapper、AUR source build、
+update、package別のsource-build preferenceは現在すでに動作しますが、AUR support全体を
+構成するdependency solver、provider / conflict / replaces / version constraint対応、
+edge case対応といったより広い範囲は段階的に実装中で、UXも成熟途上です。Moguetは既存AUR
+helperと同等の自動解決能力・完成度を約束しません。unsupportedまたはambiguousなcaseは、
+推測せずfail-closedで停止します。v2.xは、Moguetのsource-aware入口、安全境界、検証基盤を
+築く公開開発期です。v3.0.0は、Moguet固有のbuild-profileとPKGBUILD差分workflowが揃う
+地点であり、projectは内部的にこれをMoguetの本格的な正式就役と位置付けています。詳細な
+計画はrelease roadmap（[issue #344](https://github.com/seekerkrt/moguet/issues/344)）
+を参照してください。
 
 <!-- parity:safety -->
 ## 設計と安全境界
@@ -59,14 +76,40 @@ packageは`jpacker` command aliasを提供しません。AUR publicationは将�
 - `deps`と`plan`は調査・表示だけを行い、clone、build、installしません。`fetch`は
   未取得repositoryをcloneし、既存cloneでは`git fetch origin`だけを実行します。
   pull、merge、reset、working tree更新、build、installは行いません。
-- 未解決dependency、ambiguous provider、cycle、安全に解決できないconflicts /
+- 複数provider candidateが残る場合、interactive TTYではsource-aware candidateを番号付きで
+  表示し、exactly oneの明示選択を要求します。defaultはありません。empty input、`q`、
+  `quit`、`cancel`、EOFは選択を取り消し、invalid / out-of-range inputは再入力します。
+- non-TTYと`--noconfirm`ではprovider inputをstdinから読まず、candidateを自動選択しません。
+  未選択のambiguous providerはfail-closedで停止します。
+- `moguet -S --select <query>`はofficial repositoryとAURからsource-awareなroot
+  package candidateを検索します。interactive TTYではpackage番号、複数番号、inclusive range、
+  表示済みofficial groupの`@group` selectorを受理します。candidateが1件でもdefaultは
+  ありません。empty input、`q`、`quit`、`cancel`、EOFは取消とし、invalid inputは同じ
+  candidate一覧に対して再入力します。
+- root package discoveryはnon-TTY stdinまたは`--noconfirm`ではcandidate queryもpromptも
+  開始しません。selectionとstatic preflightの完了後、selected repository rootをexactな
+  `repository/package`の1 transactionとして先に実行し、成功した場合だけselected AUR
+  rootを既存source-build lifecycleへ渡します。後続AUR failureは完了済みrepository
+  transactionをrollbackしません。
+- provider choiceは現在のinvocation内だけで所有します。`deps` / `plan`はselectedと
+  ambiguous providerを区別し、selected AUR providerのPackageBaseはfetch / build planへ
+  渡し、selected repository providerはofficial `repository/package` dependencyとして
+  導入します。`deps --recursive`ではprovided dependencyのうちuser-selected AUR
+  providerだけをさらに辿り、unique providerとselected repository providerは終端の
+  まま表示します。
+- registered source phaseはsingular source lifecycleを維持します。candidateがすべて
+  official repository由来の場合だけprovider selectionを行い、AUR providerを含む
+  candidate setは、そのPackageBaseをこのphaseでscheduleできないためambiguousのまま
+  system / source execution前に停止します。
+- 未解決dependency、未選択のambiguous provider、cycle、安全に解決できないconflicts /
   replaces、証明できないartifact identityは、対応するmutation前に拒否します。
 - `--noconfirm`は対話停止を避ける指定であり、「すべてyes」ではありません。source
   selection、plan、identity、conflict、ownershipのguardを突破しません。
 - 複数phaseのupgradeは単一atomic transactionではありません。failure時は後続処理を
   止めますが、完了済みpackage transactionをrollbackしません。install成功後にcleanup
   だけ失敗した場合、packageはinstall済みの可能性があるため、結果を確認せず再試行
-  しないでください。
+  しないでください。`upgrade-all`のprovider selectionはfiltered AUR phaseのclone、build、
+  pacman、sudoより前に行いますが、それ以前のphaseは完了済みの場合があります。
 
 詳細なcompatibility / routing契約は
 [docs/COMPATIBILITY.md](https://github.com/seekerkrt/moguet/blob/develop/docs/COMPATIBILITY.md)、
@@ -124,6 +167,25 @@ Moguet v2.0.0にはAUR publicationを含めません。AUR URLを作り上げた
 payloadをlive systemへinstallしたりしないでください。installed systemを変更する前に
 [v1からv2へのMigration Guide](docs/migration/v1-to-v2.ja.md)を確認してください。
 
+### `PKGBUILD`によるpackage installation
+
+repository rootの`PKGBUILD`は、checkout済みのworking treeではなく公開済みreleaseを
+package化します。`pkgver()`はrepository自身の`VERSION` fileからversionを読み取り、
+対応する公開済みGit tag（`v<version>`）をbuild sourceとして取得するため、未release
+のworking tree commitをpackage化することはありません。
+
+```bash
+git clone https://github.com/seekerkrt/moguet.git
+cd moguet
+makepkg -si
+```
+
+`makepkg -si`は、そのtag付きreleaseをbuildし、同じ操作で`pacman -U`によってlive
+systemへinstallします。これは、development treeをその場でbuild・確認するだけで
+何もinstallしない、上記の`make`や`./moguet --help`とは異なります。この`PKGBUILD`は
+repository同梱のpackaging経路であり、AUR submissionではありません。Moguetはまだ
+AUR pageを公開していません。
+
 <!-- parity:usage -->
 ## 基本的な使い方
 
@@ -133,6 +195,7 @@ tokenとoption tokenはlocaleによって変わりません。
 ```bash
 # packageのinstall、search、info表示
 moguet -S <pkg>
+moguet -S --select <query>
 moguet -Ss <query>
 moguet -Si <pkg>
 
@@ -143,6 +206,10 @@ moguet -Syu
 moguet upgrade
 moguet upgrade-aur
 moguet upgrade-all
+
+# remote package 1件、またはlocal PKGBUILD root 1件をbuild・install
+moguet build <pkg> [V=K...]
+moguet build --local <directory> [V=K...]
 
 # buildせずAUR dependencyとbuild orderを調査
 moguet deps --recursive <pkg>
@@ -156,15 +223,37 @@ moguet -G <pkg>
 moguet -Gp <pkg>
 ```
 
+**upgrade commandの選択:** 通常のpackage install、search、system upgradeでは、
+pacmanや他のAUR helperと同様に`-S`、`-Ss`、`-Syu`等のpacman-compatible
+operationを使用してください。保存済みsource-build preferenceの適用、installed AUR
+packageのsource build、またはそれらを組み合わせたMoguet固有のmulti-phase upgradeを
+明示的に実行する場合は、対応する`upgrade`、`upgrade-aur`、`upgrade-all`を使用します。
+これらは通常の`-Syu`の別名ではありません。
+
 `--aur`は対応する`-S`、`-Ss`、`-Si`をAURへ限定し、`--repo`はofficial binary
 repositoryへ限定します。両selectorの併用はexternal commandやAUR queryより前に
 失敗します。pacman-only routeではcompatibleなpacman optionを保持し、source-build
 routeで意味を維持できないoptionは黙って無視せず拒否します。
 
+`-S --select <query>`はinteractiveなsource-aware discovery形式です。source selectorを
+指定しなければofficial repositoryとAURの両方を検索し、`--aur`または`--repo`でcandidate
+sourceを限定します。両selected routeで同じ意味を持つoptionは`--needed`だけです。
+non-TTYと`--noconfirm`ではqueryやpackage選択を行わず失敗します。
+
 source-build preferenceは`add-src`、`edit-src`、`list-src`、`del-src`、`revert`で
-管理します。一時的な`build <pkg> [V=K]`はpreferenceを保存しません。runtime stateを
-使うpackage-name completion等の高度な補完はfuture workであり、同梱completionは
-public CLI schemaに限定します。
+管理します。一時的な`build <pkg> [V=K...]`はremote packageを解決し、preferenceを
+保存しません。`build --local <directory> [V=K...]`は、代わりにuser所有directoryを
+exactly oneのlocal PackageBase sourceとして扱います。pathらしいpackage operandからlocal
+rootを推測せず、そのrootをAURへqueryしません。
+
+local routeは安全な`.SRCINFO`を変更せずに読みます。metadataがmissing、invalid、または
+known-staleの場合、PKGBUILD reviewとdefaultなしの明示同意を終えてから
+`makepkg --printsrcinfo`を実行します。non-TTY inputや`--noconfirm`は評価を許可せず停止
+します。Moguetはinvocation-owned source snapshotからbuildし、user-owned treeを変更せず、
+採用metadataが宣言するvalidかつuniqueな全`pkgname` childをexplicit rootとしてinstall
+します。dependency artifactはdependency install reasonを保持し、既にexplicitなinstalled
+packageをdependencyへ降格しません。runtime stateを使うpackage-name completion等の高度な
+補完はfuture workであり、同梱completionはpublic CLI schemaに限定します。
 
 <!-- parity:configuration -->
 ## 設定

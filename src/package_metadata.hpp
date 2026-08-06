@@ -22,6 +22,33 @@ struct PacmanRepositoryConfiguration {
     std::vector<std::string> repository_names;
 };
 
+enum class RepositoryPackageSearchMatchKind {
+    Search,
+    ExactGroup,
+};
+
+struct RepositoryPackageSearchMatch {
+    std::string                repository_name;
+    std::string                package_name;
+    std::optional<std::string> version;
+    std::optional<std::string> description;
+    RepositoryPackageSearchMatchKind kind;
+    std::optional<std::string> group_name;
+};
+
+struct RepositoryPackageSearchSnapshot {
+    std::vector<std::string>                  repository_order;
+    std::vector<RepositoryPackageSearchMatch> matches;
+};
+
+// Installed package stateについて断言できる範囲を保持する。
+// UnknownをNoChangeへ丸めず、strict boolean helperとは別に扱う。
+enum class PackageStateChange {
+    NoChange,
+    Changed,
+    Unknown,
+};
+
 struct RepositoryPackageLookup {
     std::string                package_name;
     std::optional<std::string> exact_repository_name;
@@ -63,6 +90,10 @@ using RepositoryPackageQueryResult = std::variant<
         PackageNotFound,
         PackageMetadataFailure>;
 
+using RepositoryPackageSearchResult = std::variant<
+        RepositoryPackageSearchSnapshot,
+        PackageMetadataFailure>;
+
 using ForeignPackageInventory = std::vector<InstalledPackageMetadata>;
 
 using ForeignPackageInventoryResult = std::variant<
@@ -89,6 +120,11 @@ private:
 
 PacmanDatabasePaths resolve_pacman_database_paths();
 PacmanRepositoryConfiguration resolve_pacman_repository_configuration();
+PacmanRepositoryConfiguration
+resolve_pacman_root_search_repository_configuration();
+
+RepositoryPackageSearchResult query_repository_root_package_search(
+        const std::string& query);
 
 // local DBと全sync DBを1 handleで照合し、borrowを残さないowned inventoryを返す。
 ForeignPackageInventoryResult query_foreign_package_inventory(
@@ -138,6 +174,9 @@ public:
 
     RepositoryPackageQueryResult query_repository_package(
             const RepositoryPackageLookup& lookup) const;
+
+    RepositoryPackageSearchResult query_root_package_search(
+            const std::string& query) const;
 
 private:
     struct Impl;

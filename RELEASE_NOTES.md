@@ -1,86 +1,99 @@
-# Moguet v2.0.1
+# Moguet v2.1.0
 
 This tracked file is the source of truth for the GitHub Release body. The
 English and Japanese sections describe the same release scope.
 
 ## English
 
-Moguet v2.0.1 is a narrow patch release that completes the XDG config storage
-contract adopted for v2.0.0. It fixes the source-build preference storage issue
-tracked in [#335](https://github.com/seekerkrt/moguet/issues/335).
+Moguet v2.1.0 expands Moguet's source-aware AUR workflows while preserving its
+pacman-first and fail-closed boundaries. It makes ambiguous choices explicit,
+adds a local `PKGBUILD` entry point, and strengthens the validation lanes that
+protect these workflows.
 
-### Fixed
+### Package workflows
 
-- `add-src`, `edit-src`, `list-src`, `del-src`, and `revert`, together with the
-  build and upgrade readers, now use
-  `${XDG_CONFIG_HOME:-$HOME/.config}/moguet/source-build.d/` as their single
-  authority.
-- Source-build preference operations no longer require `sudo` or use a
-  system-wide configuration store.
-- An unset or empty `XDG_CONFIG_HOME` falls back to `$HOME/.config`. An explicit
-  value must be an absolute, safe, existing base directory.
-- Root execution uses root's own XDG context and never infers another user from
-  `SUDO_USER`.
-- The required Moguet directories are created safely when first needed, rather
-  than during package installation.
+- When an AUR dependency has several providers, an interactive TTY now lists
+  the source-aware candidates by number and requires one explicit choice. No
+  provider is selected by default; non-TTY, EOF, `--noconfirm`, and cancellation
+  remain fail-closed.
+- `moguet -S --select <query>` provides interactive package discovery across
+  official repositories and AUR. It supports explicit package numbers,
+  multiple selections, inclusive ranges, and displayed official groups without
+  guessing a default choice.
+- Selected repository roots are installed first through one exact pacman
+  transaction. Only then do selected AUR roots enter the source-build workflow,
+  so source-aware install routing stays visible and a later AUR failure does
+  not hide an already completed repository transaction.
+- `moguet build --local <directory> [V=K...]` builds an explicitly selected
+  local PackageBase without treating a path-like remote package operand as a
+  local source. It preserves the user-owned source tree and validates the local
+  metadata before build and installation.
+- Local `PKGBUILD` builds can resolve their AUR dependencies, build the
+  required PackageBases, and install the validated dependency and local package
+  artifacts through the established build/install boundaries.
 
-### Migration
+### Validation and maintenance
 
-- `/etc/jpacker/package.build/` is now manual migration input only. Moguet does
-  not create, read, write, fall back to, merge, copy, rewrite, or delete it at
-  runtime.
-- Existing preferences are not migrated automatically. Follow the
-  [English Migration Guide](https://github.com/seekerkrt/moguet/blob/v2.0.1/docs/migration/v1-to-v2.md)
-  or [Japanese Migration Guide](https://github.com/seekerkrt/moguet/blob/v2.0.1/docs/migration/v1-to-v2.ja.md).
-- The published v2.0.0 tag, Release, and release body remain unchanged
-  historical artifacts.
+- The Arch Docker offline lane validates a clean source snapshot without
+  runtime network access. The live lane separately exercises real provider
+  selection, AUR build/install, and local `PKGBUILD` end-to-end flows.
+- The heavyweight integration-test binaries now use target-isolated object
+  builds with dependency tracking and link firewalls, improving incremental
+  validation without changing runtime behavior.
+- Developers can opt into `ccache` for compilation and an optional linker such
+  as mold through existing Make overrides; neither is a runtime or package
+  requirement.
+- TTY and locale authority handling is aligned across interactive selection,
+  diagnostics, and gettext fallback, so non-interactive calls do not consume
+  input intended for prompts.
+- Obsolete production artifacts from the jpacker v1.16.0 transition have been
+  removed. Historical migration guidance, fixtures, and license evidence remain
+  available where they document the supported transition.
 
 ### Repositories
 
 - Canonical GitHub repository: <https://github.com/seekerkrt/moguet>
 - GitLab mirror: <https://gitlab.com/seekerkrt/moguet>
 
-### Not included
-
-Interactive package discovery, ambiguous AUR provider selection, shell
-completion changes, and AUR package publication are outside this patch release.
-
 ## 日本語
 
-Moguet v2.0.1は、v2.0.0で採用したXDG config storage契約を完成させる限定的な
-patch releaseです。[#335](https://github.com/seekerkrt/moguet/issues/335)で追跡した
-source-build preferenceの保存先問題を修正します。
+Moguet v2.1.0は、pacman-firstかつfail-closedの境界を保ったまま、source-awareな
+AUR workflowを拡張するreleaseです。曖昧な選択を明示化し、local `PKGBUILD`の入口を追加し、
+これらのworkflowを守るvalidation laneを強化しました。
 
-### 修正内容
+### Package workflow
 
-- `add-src`、`edit-src`、`list-src`、`del-src`、`revert`と、build / upgrade側の
-  readerは、`${XDG_CONFIG_HOME:-$HOME/.config}/moguet/source-build.d/`だけを
-  authorityとして使用します。
-- source-build preference操作から`sudo`とsystem-wide config storeへの依存を
-  撤去しました。
-- `XDG_CONFIG_HOME`がunsetまたはemptyの場合は`$HOME/.config`へfallbackします。
-  明示値にはabsoluteかつ安全で、既存のbase directoryであることを要求します。
-- root実行時はroot自身のXDG contextを使い、`SUDO_USER`から別userを推測しません。
-- 必要なMoguet directoryはpackage installation時ではなく、最初に必要とする実行時に
-  安全に作成します。
+- AUR dependencyに複数providerがある場合、interactive TTYはsource-awareなcandidateを
+  番号付きで表示し、1つの明示選択を求めます。default選択はなく、non-TTY、EOF、
+  `--noconfirm`、cancelは引き続きfail-closedです。
+- `moguet -S --select <query>`はofficial repositoryとAURをまたぐinteractive package
+  discoveryを提供します。package番号、複数選択、inclusive range、表示済みofficial groupを
+  明示的に選択でき、defaultを推測しません。
+- 選択したrepository rootは、まず正確に1つのpacman transactionでinstallします。その後に
+  選択したAUR rootだけがsource-build workflowへ入るため、source-awareなinstall routingは
+  見通しを保ち、後続AUR failureが完了済みrepository transactionを隠すことはありません。
+- `moguet build --local <directory> [V=K...]`は、pathのように見えるremote package operandを
+  local sourceとして扱わず、明示したlocal PackageBaseをbuildします。user所有のsource treeを
+  保持し、local metadataを検証してからbuild / installします。
+- local `PKGBUILD` buildではAUR dependencyを解決し、必要なPackageBaseをbuildし、確立済みの
+  build / install boundaryに従って検証済みのdependencyとlocal package artifactをinstallできます。
 
-### Migration
+### Validationとmaintenance
 
-- `/etc/jpacker/package.build/`は手動migration専用のlegacy inputです。Moguetは
-  runtimeでこれをcreate、read、write、fallback、merge、copy、rewrite、deleteしません。
-- 既存preferenceは自動移行しません。
-  [English Migration Guide](https://github.com/seekerkrt/moguet/blob/v2.0.1/docs/migration/v1-to-v2.md)または
-  [日本語Migration Guide](https://github.com/seekerkrt/moguet/blob/v2.0.1/docs/migration/v1-to-v2.ja.md)を
-  参照してください。
-- 公開済みv2.0.0のtag、Release、release bodyは変更しないhistorical artifactとして
-  維持します。
+- Arch Docker offline laneはruntime network accessなしでcleanなsource snapshotを検証します。
+  live laneはreal provider selection、AUR build / install、local `PKGBUILD`のend-to-end flowを
+  個別に実行します。
+- 重量級integration test binaryは、targetごとに分離したobject build、dependency tracking、
+  link firewallを使用するようになり、runtime behaviorを変えずにincremental validationを改善しました。
+- developerは既存のMake overrideにより、compileへ`ccache`、linkerへmoldなどを任意で使用できます。
+  どちらもruntime / package requirementではありません。
+- TTYとlocaleのauthorityをinteractive selection、diagnostic、gettext fallbackで整合させ、
+  non-interactive callがprompt用inputを消費しないようにしました。
+- jpacker v1.16.0移行に由来するobsoleteなproduction artifactを削除しました。supported
+  transitionを説明するhistorical migration guidance、fixture、license evidenceは必要な範囲で
+  保持しています。
 
 ### Repository
 
 - canonical GitHub repository: <https://github.com/seekerkrt/moguet>
 - GitLab mirror: <https://gitlab.com/seekerkrt/moguet>
-
-### 含めないもの
-
-対話的package discovery、ambiguous AUR provider選択、shell completion変更、AUR package
-publicationは、このpatch releaseのscope外です。

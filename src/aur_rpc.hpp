@@ -42,6 +42,7 @@ public:
 class AurClient {
 public:
     static std::vector<AurPackageInfo> search(const std::string& query);
+    static std::vector<AurPackageInfo> search_strict(const std::string& query);
     static std::vector<std::string> search_names_by_provides(const std::string& provided_name);
     static std::vector<std::string> search_names_by_provides_strict(const std::string& provided_name);
     static std::optional<AurPackageInfo> info(const std::string& pkg_name);
@@ -53,6 +54,8 @@ public:
 void set_aur_rpc_write_append_failure_for_test(bool should_fail) noexcept;
 void set_aur_rpc_encode_failure_package_for_test(
         const std::string& package_name);
+void set_aur_rpc_encode_failure_search_query_for_test(
+        const std::string& query);
 std::size_t invoke_aur_rpc_write_callback_for_test(
         char* contents, std::size_t size, std::size_t nmemb,
         std::string& buffer) noexcept;

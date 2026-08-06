@@ -23,6 +23,9 @@ src/commands_upgrade_all.cpp
 src/dependency_plan.cpp
 src/dependency_spec.cpp
 src/filtered_aur_update_operation.cpp
+src/local_source_build_dependency_preparation.cpp
+src/local_source_install.cpp
+src/local_source_metadata_evaluation.cpp
 src/logging.cpp
 src/moguet.cpp
 src/package_base_artifact_install_executor.cpp
@@ -30,6 +33,7 @@ src/package_identifier.cpp
 src/package_metadata.cpp
 src/pkgbuild_export.cpp
 src/process.cpp
+src/provider_selection.cpp
 src/repository_query.cpp
 src/separated_package_base_source_build.cpp
 src/separated_source_build.cpp

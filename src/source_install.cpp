@@ -8,10 +8,13 @@
 #include "localization.hpp"
 #include "logging.hpp"
 #include "package_identifier.hpp"
+#include "process.hpp"
 #include "repository_query.hpp"
 #include "separated_source_build.hpp"
 #include "source_build.hpp"
+#include "source_install_internal.hpp"
 #include "source_preference.hpp"
+#include "shell_words.hpp"
 
 #include <algorithm>
 #include <filesystem>
@@ -21,6 +24,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -81,9 +85,15 @@ void require_supported_registered_source_install_target(
     }
 }
 
+void add_selected_repository_provider(
+        std::vector<ProvidedDependency>& providers,
+        const ProvidedDependency& provider);
+
 DesiredInstallReason resolve_source_target_reason(
         const ResolvedSourceBuildIdentity& source,
-        bool use_package_base_lifecycle) {
+        bool use_package_base_lifecycle,
+        const ProviderSelectionCallback& select_provider,
+        std::vector<ProvidedDependency>& selected_repository_providers) {
     if(source.source_kind != SourceBuildSourceKind::Aur) {
         return DesiredInstallReason::Explicit;
     }
@@ -91,12 +101,33 @@ DesiredInstallReason resolve_source_target_reason(
     // POLICY(#174,#268): dependency graph全体のRPC schemaを解決してから
     // route固有のexecutable guardへ進む。registered source upgradeのlegacy
     // singular ownerだけはsplit selection guardを維持する。
-    BuildPlan plan = resolve_build_plan(source.requested_name);
+    BuildPlan plan = resolve_build_plan(
+            source.requested_name, select_provider);
     if(use_package_base_lifecycle) {
         require_executable_build_plan(source.requested_name, plan);
     } else {
         require_supported_registered_source_install_target(source);
         require_executable_install_plan(source.requested_name, plan);
+    }
+    for(const BuildPlanProvidedDependency& dependency : plan.provided) {
+        if(dependency.resolution !=
+           ProviderResolutionKind::UserSelected) {
+            continue;
+        }
+        if(std::holds_alternative<AurProviderOrigin>(
+                   dependency.provider.origin) &&
+           !use_package_base_lifecycle) {
+            throw std::runtime_error(
+                    localization::format_translated_message(
+                            "Registered source upgrade cannot enforce a selected {} dependency provider.",
+                            "AUR"));
+        }
+        if(std::holds_alternative<RepositoryProviderOrigin>(
+                   dependency.provider.origin)) {
+            add_selected_repository_provider(
+                    selected_repository_providers,
+                    dependency.provider);
+        }
     }
     BuildPlanArtifactTargetProjectionResult projection =
             project_build_plan_required_artifact_targets(plan);
@@ -135,13 +166,188 @@ std::string aur_git_url_for_package_base(const std::string& package_base) {
     return AUR_BASE_URL + package_base + ".git";
 }
 
+void add_selected_repository_provider(
+        std::vector<ProvidedDependency>& providers,
+        const ProvidedDependency& provider) {
+    auto same = [&provider](const ProvidedDependency& existing) {
+        return same_provider_identity(existing, provider);
+    };
+    if(std::find_if(providers.begin(), providers.end(), same) !=
+       providers.end()) {
+        return;
+    }
+    providers.push_back(provider);
+}
+
+void attach_selected_repository_providers(
+        ProductionSourceBuildWorkItem& work_item,
+        const BuildPlan& plan) {
+    for(const BuildPlanDependencyEdge& edge : plan.dependency_edges) {
+        if(edge.parent_package_base != work_item.request.checkout_name ||
+           edge.kind != DependencyKind::Provided ||
+           edge.provider_resolution != ProviderResolutionKind::UserSelected ||
+           !edge.resolved_provider.has_value() ||
+           !std::holds_alternative<RepositoryProviderOrigin>(
+                   edge.resolved_provider->origin)) {
+            continue;
+        }
+        add_selected_repository_provider(
+                work_item.selected_repository_providers,
+                edge.resolved_provider.value());
+    }
+}
+
+ProductionSourceBuildWorkItem make_aur_source_build_work_item(
+        const ProjectedBuildPlanArtifactTargets& unit,
+        const BuildPlan& plan,
+        bool use_source_build_preferences,
+        bool needed) {
+    const bool is_singular = unit.required_targets.size() == 1;
+    const std::string preference_name = is_singular
+            ? unit.required_targets.front().package_name
+            : unit.package_base;
+    SourceBuildEnvironment environment;
+    if(use_source_build_preferences) {
+        SourceBuildEnvironment requested_environment =
+                load_source_preference_environment(preference_name);
+        // POLICY(#242): empty definitionを保持したまま、fallback判定だけは従来の
+        // forward可能なnonempty assignment基準にする。PKGDEST definitionは
+        // fallbackで捨てず、all-target preflightまで保持する。
+        if(!requested_environment.has_forwarded_nonempty_assignment() &&
+           !requested_environment.defines("PKGDEST") && is_singular &&
+           preference_name != unit.package_base) {
+            environment =
+                    load_source_preference_environment(unit.package_base);
+        } else {
+            environment = requested_environment;
+        }
+    }
+
+    ProductionSourceBuildWorkItem work_item;
+    if(is_singular) {
+        work_item.request.package_name =
+                unit.required_targets.front().package_name;
+    }
+    work_item.request.checkout_name = unit.package_base;
+    work_item.request.git_url = aur_git_url_for_package_base(unit.package_base);
+    work_item.request.custom_environment = std::move(environment);
+    work_item.request.needed = needed;
+    work_item.required_targets = unit.required_targets;
+    work_item.is_build_plan_entry = true;
+    attach_selected_repository_providers(work_item, plan);
+    require_static_production_source_build_work_item(work_item);
+    return work_item;
+}
+
+enum class RepositoryProviderInstallDirective {
+    Default,
+    AsDependency,
+};
+
+[[noreturn]] void throw_malformed_repository_provider_metadata(
+        const std::string& diagnostic) {
+    throw PackageMetadataError(PackageMetadataFailure{
+            PackageMetadataErrorCode::MalformedMetadata, diagnostic});
+}
+
+RepositoryProviderInstallDirective
+resolve_repository_provider_install_directive(
+        const std::vector<ProvidedDependency>& providers,
+        const PacmanDatabasePaths& database_paths) {
+    std::optional<RepositoryProviderInstallDirective> transaction_directive;
+    PackageMetadataSession session =
+            PackageMetadataSession::open(database_paths);
+    for(const ProvidedDependency& provider : providers) {
+        InstalledPackageQueryResult query_result =
+                session.query_installed_package(provider.package_name);
+        RepositoryProviderInstallDirective provider_directive =
+                RepositoryProviderInstallDirective::AsDependency;
+        if(const auto* failure =
+                   std::get_if<PackageMetadataFailure>(&query_result)) {
+            // POLICY: metadata failureと未導入を区別し、reasonを推測してmutationしない。
+            throw PackageMetadataError(*failure);
+        }
+        if(const auto* metadata =
+                   std::get_if<InstalledPackageMetadata>(&query_result)) {
+            if(metadata->name != provider.package_name) {
+                throw_malformed_repository_provider_metadata(
+                        localization::translate_message(
+                                "Installed package metadata name does not match the selected repository provider identity."));
+            }
+            if(metadata->version.empty()) {
+                throw_malformed_repository_provider_metadata(
+                        localization::translate_message(
+                                "Installed package metadata contains an empty version."));
+            }
+            switch(metadata->reason) {
+            case InstalledPackageReason::Explicit:
+                provider_directive =
+                        RepositoryProviderInstallDirective::Default;
+                break;
+            case InstalledPackageReason::Dependency:
+                break;
+            case InstalledPackageReason::Unknown:
+                throw_malformed_repository_provider_metadata(
+                        localization::translate_message(
+                                "Installed package metadata contains an unknown install reason."));
+            default:
+                throw_malformed_repository_provider_metadata(
+                        localization::translate_message(
+                                "Installed package metadata contains an invalid install reason."));
+            }
+        } else if(!std::holds_alternative<PackageNotFound>(query_result)) {
+            throw std::logic_error(localization::translate_message(
+                    "Unknown installed package query result."));
+        }
+
+        if(transaction_directive.has_value() &&
+           transaction_directive.value() != provider_directive) {
+            throw std::runtime_error(localization::translate_message(
+                    "Selected repository provider install reasons cannot be represented by one package transaction."));
+        }
+        transaction_directive = provider_directive;
+    }
+    return transaction_directive.value_or(
+            RepositoryProviderInstallDirective::AsDependency);
+}
+
+int install_selected_repository_providers(
+        const std::vector<ProvidedDependency>& providers,
+        RepositoryProviderInstallDirective directive,
+        const AppConfig& config) {
+    std::vector<std::string> targets;
+    for(const ProvidedDependency& provider : providers) {
+        const auto& repository =
+                std::get<RepositoryProviderOrigin>(provider.origin);
+        targets.push_back(
+                repository.repository_name + "/" + provider.package_name);
+    }
+    std::vector<std::string> command{"sudo", "pacman", "-S"};
+    switch(directive) {
+    case RepositoryProviderInstallDirective::Default:
+        break;
+    case RepositoryProviderInstallDirective::AsDependency:
+        command.push_back("--asdeps");
+        break;
+    }
+    command.push_back("--needed");
+    if(config.no_confirm) command.push_back("--noconfirm");
+    command.push_back("--");
+    command.insert(command.end(), targets.begin(), targets.end());
+    Logger::info(localization::format_translated_message(
+            "Installing selected repository providers: {}",
+            shell_words::join(targets)));
+    return run_command(shell_words::join(command));
+}
+
 ProductionSourceBuildWorkItem make_direct_source_build_work_item(
         const ResolvedSourceBuildIdentity& source,
         SourceBuildEnvironment environment,
         SourceEnvironmentEmptyValuePolicy empty_value_policy,
         bool only_if_updated,
         bool needed,
-        bool use_package_base_lifecycle) {
+        bool use_package_base_lifecycle,
+        const ProviderSelectionCallback& select_provider) {
     ProductionSourceBuildWorkItem work_item;
     work_item.request.package_name = source.requested_name;
     work_item.request.checkout_name = source.package_base;
@@ -150,11 +356,11 @@ ProductionSourceBuildWorkItem make_direct_source_build_work_item(
     work_item.request.empty_value_policy = empty_value_policy;
     work_item.request.only_if_updated = only_if_updated;
     work_item.request.needed = needed;
+    DesiredInstallReason reason = resolve_source_target_reason(
+            source, use_package_base_lifecycle, select_provider,
+            work_item.selected_repository_providers);
     work_item.required_targets.push_back(RequiredPackageArtifactTarget{
-            source.package_base,
-            source.requested_name,
-            resolve_source_target_reason(
-                    source, use_package_base_lifecycle)});
+            source.package_base, source.requested_name, reason});
     work_item.is_build_plan_entry = use_package_base_lifecycle;
     work_item.uses_system_update_baseline =
             source.source_kind == SourceBuildSourceKind::Repository;
@@ -277,6 +483,50 @@ void present_package_base_result(
 
 } // namespace
 
+LocalSourceBuildDependencyPreparation::
+        LocalSourceBuildDependencyPreparation(
+                std::vector<ProductionSourceBuildWorkItem>
+                        remote_work_items,
+                std::vector<ProvidedDependency>
+                        selected_repository_providers) noexcept
+    : remote_work_items_(std::move(remote_work_items)),
+      selected_repository_providers_(
+              std::move(selected_repository_providers)) {}
+
+const std::vector<ProductionSourceBuildWorkItem>&
+LocalSourceBuildDependencyPreparation::remote_work_items() const noexcept {
+    return remote_work_items_;
+}
+
+const std::vector<ProvidedDependency>&
+LocalSourceBuildDependencyPreparation::selected_repository_providers()
+        const noexcept {
+    return selected_repository_providers_;
+}
+
+#ifdef MOGUET_ENABLE_TEST_OVERRIDES
+LocalSourceBuildDependencyPreparation
+LocalSourceBuildDependencyPreparation::
+        make_for_production_source_build_test(
+                std::vector<ProductionSourceBuildWorkItem>
+                        remote_work_items,
+                std::vector<ProvidedDependency>
+                        selected_repository_providers) {
+    return LocalSourceBuildDependencyPreparation(
+            std::move(remote_work_items),
+            std::move(selected_repository_providers));
+}
+#endif
+
+ProductionSourceBuildWorkItem prepare_aur_source_build_work_item_internal(
+        const ProjectedBuildPlanArtifactTargets& unit,
+        const BuildPlan& plan,
+        bool use_source_build_preferences,
+        bool needed) {
+    return make_aur_source_build_work_item(
+            unit, plan, use_source_build_preferences, needed);
+}
+
 void seed_production_source_build_cache(
         PreparedProductionSourceBuildInvocation& invocation,
         const ValidatedCacheRoot& cache_root) {
@@ -323,9 +573,17 @@ void seed_production_source_build_cache(
 void activate_production_source_build_cache(
         PreparedProductionSourceBuildInvocation& invocation) {
     if(invocation.work_items.empty()) {
-        throw std::logic_error(
-                localization::translate_message(
-                        "Cannot activate cache for an empty source-build invocation."));
+        if(!invocation.local_source_authority.has_value()) {
+            throw std::logic_error(
+                    localization::translate_message(
+                            "Cannot activate cache for an empty source-build invocation."));
+        }
+        if(!invocation.cache_root.has_value()) {
+            throw std::logic_error(localization::translate_message(
+                    "Local source-build dependency invocation has no prepared cache authority."));
+        }
+        invocation.cache_root->require_unchanged_identity();
+        return;
     }
     std::optional<ValidatedCacheRoot> shared_root = invocation.cache_root;
     for(const auto& work_item : invocation.work_items) {
@@ -334,6 +592,71 @@ void activate_production_source_build_cache(
     }
     if(!shared_root.has_value()) shared_root = prepare_process_cache_root();
     seed_production_source_build_cache(invocation, shared_root.value());
+}
+
+SelectedRepositoryProviderTransactionResult
+execute_selected_repository_provider_transaction(
+        const PreparedProductionSourceBuildInvocation& invocation,
+        const AppConfig& config) {
+    SelectedRepositoryProviderTransactionResult result;
+    result.selected_providers = invocation.selected_repository_providers;
+    if(result.selected_providers.empty()) return result;
+
+    if(!invocation.cache_root.has_value()) {
+        throw std::logic_error(
+                localization::translate_message(
+                        "Production source-build invocation has no prepared cache authority."));
+    }
+    // POLICY(#272): retained cache authorityをexact pacman transaction直前に
+    // 再検証する。system phase中のroot replacementを古いsnapshotで通さない。
+    invocation.cache_root->require_unchanged_identity();
+
+    RepositoryProviderInstallDirective directive;
+    try {
+        directive = resolve_repository_provider_install_directive(
+                result.selected_providers, invocation.database_paths);
+    } catch(const std::exception& error) {
+        result.status = SelectedRepositoryProviderTransactionStatus::
+                BlockedBeforeExecution;
+        result.diagnostic = error.what();
+        return result;
+    } catch(...) {
+        result.status = SelectedRepositoryProviderTransactionStatus::
+                BlockedBeforeExecution;
+        result.diagnostic = localization::translate_message(
+                "Failed to inspect selected repository provider install reasons with an unknown exception.");
+        return result;
+    }
+
+    // Metadata sessionを閉じた後、actual pacman直前にもcache authorityを再証明する。
+    invocation.cache_root->require_unchanged_identity();
+
+    // --needed成功だけではactual changeを断言できず、nonzero/exec failureも
+    // partial transactionの可能性を持つため、snapshotなしではUnknownを保つ。
+    result.package_state_change = PackageStateChange::Unknown;
+    try {
+        const int exit_status = install_selected_repository_providers(
+                result.selected_providers, directive, config);
+        result.command_exit_status = exit_status;
+        if(exit_status == 0) {
+            result.status =
+                    SelectedRepositoryProviderTransactionStatus::Succeeded;
+            return result;
+        }
+        result.status = SelectedRepositoryProviderTransactionStatus::Failed;
+        result.diagnostic = localization::translate_message(
+                "Failed to install selected repository providers.");
+        return result;
+    } catch(const std::exception& error) {
+        result.status = SelectedRepositoryProviderTransactionStatus::Failed;
+        result.diagnostic = error.what();
+        return result;
+    } catch(...) {
+        result.status = SelectedRepositoryProviderTransactionStatus::Failed;
+        result.diagnostic = localization::translate_message(
+                "Failed to install selected repository providers with an unknown exception.");
+        return result;
+    }
 }
 
 namespace {
@@ -413,16 +736,40 @@ void build_source_target(
     // --rmdepsはAUR/repository probeより前に、invocation optionとして拒否する。
     require_supported_production_source_build_options(config);
     require_valid_package_name(package_name);
-    ValidatedCacheRoot cache_root = prepare_process_cache_root();
     ResolvedSourceBuildIdentity source =
             resolve_source_build_identity(package_name);
-    ProductionSourceBuildWorkItem work_item = make_direct_source_build_work_item(
-            source, custom_environment,
-            SourceEnvironmentEmptyValuePolicy::Forward, false, false,
-            source.source_kind == SourceBuildSourceKind::Aur);
-    work_item.cache_root = cache_root;
     std::vector<ProductionSourceBuildWorkItem> work_items;
-    work_items.push_back(std::move(work_item));
+    ProviderSelectionCallback select_provider =
+            provider_selection_callback(config);
+    if(source.source_kind == SourceBuildSourceKind::Aur) {
+        BuildPlan plan = resolve_build_plan(package_name, select_provider);
+        require_executable_build_plan(package_name, plan);
+        work_items = prepare_aur_source_build_work_items(
+                plan, false, false);
+        auto root_work_item = std::find_if(
+                work_items.begin(), work_items.end(),
+                [&source](const ProductionSourceBuildWorkItem& candidate) {
+                    return candidate.request.checkout_name ==
+                           source.package_base;
+                });
+        if(root_work_item == work_items.end()) {
+            throw std::logic_error(localization::format_translated_message(
+                    "{} required artifact target projection omitted {}.",
+                    "BuildPlan", source.requested_name));
+        }
+        root_work_item->request.custom_environment = custom_environment;
+        root_work_item->request.empty_value_policy =
+                SourceEnvironmentEmptyValuePolicy::Forward;
+    } else {
+        work_items.push_back(make_direct_source_build_work_item(
+                source, custom_environment,
+                SourceEnvironmentEmptyValuePolicy::Forward, false, false,
+                false, select_provider));
+    }
+    ValidatedCacheRoot cache_root = prepare_process_cache_root();
+    for(auto& work_item : work_items) {
+        work_item.cache_root = cache_root;
+    }
     PreparedProductionSourceBuildInvocation invocation =
             prepare_production_source_build_invocation(
                     std::move(work_items), config);
@@ -434,16 +781,28 @@ ProductionSourceBuildWorkItem prepare_resolved_source_build_work_item(
         SourceBuildEnvironment environment,
         bool only_if_updated,
         bool needed) {
+    return prepare_resolved_source_build_work_item(
+            identity, std::move(environment), only_if_updated, needed,
+            ProviderSelectionCallback{});
+}
+
+ProductionSourceBuildWorkItem prepare_resolved_source_build_work_item(
+        const ResolvedSourceBuildIdentity& identity,
+        SourceBuildEnvironment environment,
+        bool only_if_updated,
+        bool needed,
+        const ProviderSelectionCallback& select_provider) {
     return make_direct_source_build_work_item(
             identity, std::move(environment),
             SourceEnvironmentEmptyValuePolicy::Omit, only_if_updated, needed,
-            false);
+            false, select_provider);
 }
 
 std::vector<ProductionSourceBuildWorkItem> prepare_aur_source_build_work_items(
         const BuildPlan& plan,
         bool use_source_build_preferences,
         bool needed) {
+    require_compatible_selected_provider_package_identities(plan);
     BuildPlanArtifactTargetProjectionResult projection =
             project_build_plan_required_artifact_targets(plan);
     if(!projection.is_success()) {
@@ -456,39 +815,8 @@ std::vector<ProductionSourceBuildWorkItem> prepare_aur_source_build_work_items(
     std::vector<ProductionSourceBuildWorkItem> work_items;
     work_items.reserve(projection.success()->build_units.size());
     for(const auto& unit : projection.success()->build_units) {
-        const bool is_singular = unit.required_targets.size() == 1;
-        const std::string preference_name = is_singular
-                ? unit.required_targets.front().package_name
-                : unit.package_base;
-        SourceBuildEnvironment environment;
-        if(use_source_build_preferences) {
-            SourceBuildEnvironment requested_environment =
-                    load_source_preference_environment(preference_name);
-            // POLICY(#242): empty definitionを保持したまま、fallback判定だけは従来の
-            // forward可能なnonempty assignment基準にする。PKGDEST definitionは
-            // fallbackで捨てず、all-target preflightまで保持する。
-            if(!requested_environment.has_forwarded_nonempty_assignment() &&
-               !requested_environment.defines("PKGDEST") &&
-               is_singular && preference_name != unit.package_base) {
-                environment = load_source_preference_environment(unit.package_base);
-            } else {
-                environment = requested_environment;
-            }
-        }
-
-        ProductionSourceBuildWorkItem work_item;
-        if(is_singular) {
-            work_item.request.package_name =
-                    unit.required_targets.front().package_name;
-        }
-        work_item.request.checkout_name = unit.package_base;
-        work_item.request.git_url = aur_git_url_for_package_base(unit.package_base);
-        work_item.request.custom_environment = std::move(environment);
-        work_item.request.needed = needed;
-        work_item.required_targets = unit.required_targets;
-        work_item.is_build_plan_entry = true;
-        require_static_production_source_build_work_item(work_item);
-        work_items.push_back(std::move(work_item));
+        work_items.push_back(make_aur_source_build_work_item(
+                unit, plan, use_source_build_preferences, needed));
     }
     return work_items;
 }
@@ -497,12 +825,23 @@ ProductionSourceBuildWorkItem prepare_smart_source_build_work_item(
         const std::string& package_name,
         bool only_if_updated,
         bool needed) {
+    return prepare_smart_source_build_work_item(
+            package_name, only_if_updated, needed,
+            ProviderSelectionCallback{});
+}
+
+ProductionSourceBuildWorkItem prepare_smart_source_build_work_item(
+        const std::string& package_name,
+        bool only_if_updated,
+        bool needed,
+        const ProviderSelectionCallback& select_provider) {
     SourceBuildEnvironment environment =
             load_source_preference_environment(package_name);
     ResolvedSourceBuildIdentity identity =
             resolve_source_build_identity(package_name);
     return prepare_resolved_source_build_work_item(
-            identity, std::move(environment), only_if_updated, needed);
+            identity, std::move(environment), only_if_updated, needed,
+            select_provider);
 }
 
 PackageBaseSourceBuildExecutionResult
@@ -595,6 +934,15 @@ void execute_prepared_source_build_invocation(
         PreparedProductionSourceBuildInvocation invocation,
         const AppConfig& config) {
     activate_production_source_build_cache(invocation);
+    SelectedRepositoryProviderTransactionResult provider_transaction =
+            execute_selected_repository_provider_transaction(
+                    invocation, config);
+    if(!provider_transaction.is_success()) {
+        throw std::runtime_error(
+                provider_transaction.diagnostic.value_or(
+                        localization::translate_message(
+                                "Failed to install selected repository providers.")));
+    }
     for(const auto& work_item : invocation.work_items) {
         if(work_item.is_build_plan_entry) {
             try {

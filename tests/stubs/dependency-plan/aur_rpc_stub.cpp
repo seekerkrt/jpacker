@@ -1,5 +1,6 @@
 #include "aur_rpc.hpp"
 
+#include <cstddef>
 #include <map>
 #include <optional>
 #include <stdexcept>
@@ -7,6 +8,12 @@
 #include <vector>
 
 namespace {
+
+std::size_t g_case22_provider_info_queries = 0;
+std::size_t g_recursive_selected_provider_info_queries = 0;
+std::size_t g_selected_provider_identity_info_queries = 0;
+std::size_t g_selected_provider_provides_info_queries = 0;
+std::size_t g_selected_provider_metadata_info_queries = 0;
 
 AurPackageInfo package_info(
         const std::string& name, const std::vector<std::string>& depends = {},
@@ -45,6 +52,7 @@ bool is_leaf_package(const std::string& package_name) {
             "case17-leaf",
             "case19-early-dep",
             "case19-late-dep",
+            "case21-provider-child",
     };
     for(const auto& leaf : leaves) {
         if(package_name == leaf) return true;
@@ -53,6 +61,16 @@ bool is_leaf_package(const std::string& package_name) {
 }
 
 } // namespace
+
+namespace dependency_plan_aur_rpc_stub {
+
+void reset_selected_provider_identity_queries() {
+    g_selected_provider_identity_info_queries = 0;
+    g_selected_provider_provides_info_queries = 0;
+    g_selected_provider_metadata_info_queries = 0;
+}
+
+} // namespace dependency_plan_aur_rpc_stub
 
 std::vector<AurPackageInfo> AurClient::search(const std::string& query) {
     throw AurRpcResponseError("Unexpected dependency-plan AUR search: " + query);
@@ -64,6 +82,38 @@ std::vector<std::string> AurClient::search_names_by_provides(
         return {"case7-provider-pkg", "case7-provider-pkg"};
     }
     if(provided_name == "case11-virtual") return {"case11-provider"};
+    if(provided_name == "case21-virtual") {
+        return {"case21-provider-a", "case21-provider-b"};
+    }
+    if(provided_name == "case22-virtual") {
+        return {"case22-provider", "case22-provider"};
+    }
+    if(provided_name == "recursive-selected-provider-failure-virtual") {
+        return {
+                "recursive-selected-provider-failure-a",
+                "recursive-selected-provider-failure-b"};
+    }
+    if(provided_name == "selected-provider-identity-virtual") {
+        return {
+                "selected-provider-identity-a",
+                "selected-provider-identity-b"};
+    }
+    if(provided_name == "selected-provider-provides-virtual") {
+        return {
+                "selected-provider-provides-a",
+                "selected-provider-provides-b"};
+    }
+    if(provided_name == "selected-provider-metadata-virtual") {
+        return {
+                "selected-provider-metadata-a",
+                "selected-provider-metadata-b"};
+    }
+    if(provided_name ==
+       "preflight-exact-failure-no-provider-fallback") {
+        return {
+                "preflight-exact-fallback-provider-a",
+                "preflight-exact-fallback-provider-b"};
+    }
     if(provided_name == "preflight-provider-candidate-virtual") {
         return {
                 "preflight-provider-broken",
@@ -234,6 +284,81 @@ std::optional<AurPackageInfo> AurClient::info(const std::string& package_name) {
                 "case19-suite");
     }
 
+    if(package_name == "case21-app") {
+        return package_info(package_name, {"case21-virtual"});
+    }
+    if(package_name == "case21-provider-a") {
+        return package_info(
+                package_name, {}, {}, {}, {"case21-virtual=1"});
+    }
+    if(package_name == "case21-provider-b") {
+        return package_info(
+                package_name, {"case21-provider-child"}, {}, {},
+                {"case21-virtual=2"}, "case21-provider-suite");
+    }
+    if(package_name == "case22-app") {
+        return package_info(package_name, {"case22-virtual"});
+    }
+    if(package_name == "case22-provider") {
+        AurPackageInfo info = package_info(
+                package_name, {}, {}, {}, {"case22-virtual"});
+        if(g_case22_provider_info_queries++ > 0) info.Version = "2.0-1";
+        return info;
+    }
+    if(package_name == "recursive-selected-provider-failure-a" ||
+       package_name == "recursive-selected-provider-failure-b") {
+        return package_info(
+                package_name, {}, {}, {},
+                {"recursive-selected-provider-failure-virtual"});
+    }
+    if(package_name == "selected-provider-identity-root") {
+        return package_info(
+                package_name, {"selected-provider-identity-virtual"});
+    }
+    if(package_name == "selected-provider-identity-a") {
+        return package_info(
+                package_name, {}, {}, {},
+                {"selected-provider-identity-virtual"});
+    }
+    if(package_name == "selected-provider-identity-b") {
+        return package_info(
+                package_name, {}, {}, {},
+                {"selected-provider-identity-virtual"},
+                "selected-provider-original-base");
+    }
+    if(package_name == "selected-provider-provides-root") {
+        return package_info(
+                package_name, {"selected-provider-provides-virtual"});
+    }
+    if(package_name == "selected-provider-provides-a" ||
+       package_name == "selected-provider-provides-b") {
+        return package_info(
+                package_name, {}, {}, {},
+                {"selected-provider-provides-virtual=1"});
+    }
+    if(package_name == "selected-provider-metadata-root") {
+        return package_info(
+                package_name, {"selected-provider-metadata-virtual"});
+    }
+    if(package_name == "selected-provider-metadata-a" ||
+       package_name == "selected-provider-metadata-b") {
+        return package_info(
+                package_name, {}, {}, {},
+                {"selected-provider-metadata-virtual=1"});
+    }
+    if(package_name ==
+       "preflight-exact-failure-no-provider-fallback-root") {
+        return package_info(
+                package_name,
+                {"preflight-exact-failure-no-provider-fallback"});
+    }
+    if(package_name == "preflight-exact-fallback-provider-a" ||
+       package_name == "preflight-exact-fallback-provider-b") {
+        return package_info(
+                package_name, {}, {}, {},
+                {"preflight-exact-failure-no-provider-fallback"});
+    }
+
     if(package_name == "preflight-root-metadata-failure") {
         throw std::runtime_error("legacy root metadata failure");
     }
@@ -300,7 +425,12 @@ std::optional<AurPackageInfo> AurClient::info(const std::string& package_name) {
     if(package_name == "case7-virtual-api" || package_name == "case8-virtual" ||
        package_name == "case9-missing" || package_name == "case11-virtual" ||
        package_name == "case11-ambiguous" || package_name == "case11-missing" ||
-       package_name == "case14-virtual" ||
+       package_name == "case14-virtual" || package_name == "case21-virtual" ||
+       package_name == "case22-virtual" ||
+       package_name == "recursive-selected-provider-failure-virtual" ||
+       package_name == "selected-provider-identity-virtual" ||
+       package_name == "selected-provider-provides-virtual" ||
+       package_name == "selected-provider-metadata-virtual" ||
        package_name == "preflight-provider-search-virtual" ||
        package_name == "preflight-provider-candidate-virtual" ||
        package_name == "preflight-provider-response-virtual" ||
@@ -319,6 +449,11 @@ std::optional<AurPackageInfo> AurClient::info_strict(const std::string& package_
     if(package_name == "preflight-dependency-failure-child") {
         throw std::runtime_error("strict dependency metadata failure");
     }
+    if(package_name ==
+       "preflight-exact-failure-no-provider-fallback") {
+        throw std::runtime_error(
+                "strict exact metadata failure before provider fallback");
+    }
     if(package_name == "preflight-provider-broken") {
         throw std::runtime_error("strict provider candidate failure");
     }
@@ -330,6 +465,33 @@ std::optional<AurPackageInfo> AurClient::info_strict(const std::string& package_
     }
     if(package_name == "preflight-provider-candidate-response-broken") {
         throw AurRpcResponseError("provider candidate info response failure");
+    }
+    if(package_name == "recursive-selected-provider-failure-b" &&
+       g_recursive_selected_provider_info_queries++ > 0) {
+        throw std::runtime_error(
+                "strict selected provider traversal metadata failure");
+    }
+    if(package_name == "selected-provider-identity-b") {
+        std::optional<AurPackageInfo> result = info(package_name);
+        if(g_selected_provider_identity_info_queries++ > 0) {
+            result->PackageBase = "selected-provider-changed-base";
+        }
+        return result;
+    }
+    if(package_name == "selected-provider-provides-b") {
+        std::optional<AurPackageInfo> result = info(package_name);
+        if(g_selected_provider_provides_info_queries++ > 0) {
+            result->Provides = {"different-virtual=1"};
+        }
+        return result;
+    }
+    if(package_name == "selected-provider-metadata-b") {
+        std::optional<AurPackageInfo> result = info(package_name);
+        if(g_selected_provider_metadata_info_queries++ > 0) {
+            result->Version = "2.0-1";
+            result->Provides = {"selected-provider-metadata-virtual=2"};
+        }
+        return result;
     }
     return info(package_name);
 }

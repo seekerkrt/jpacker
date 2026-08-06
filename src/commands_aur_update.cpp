@@ -2,7 +2,6 @@
 
 #include "app_config.hpp"
 #include "aur_update_cli_presentation.hpp"
-#include "cache_authority.hpp"
 #include "filtered_aur_update_operation.hpp"
 #include "localization.hpp"
 #include "logging.hpp"
@@ -24,6 +23,9 @@ std::string operation_status_label(AurUpdateOperationStatus status) {
         return localization::translate_message("completed");
     case AurUpdateOperationStatus::BlockedBeforeExecution:
         return localization::translate_message("blocked before execution");
+    case AurUpdateOperationStatus::StoppedOnProviderTransactionFailure:
+        return localization::translate_message(
+                "stopped after repository provider transaction failure");
     case AurUpdateOperationStatus::StoppedOnWorkItemFailure:
         return localization::translate_message(
                 "stopped after work-item failure");
@@ -263,6 +265,11 @@ std::string target_status_label(
     case AurUpdateOperationTargetStatus::NoChangeCleanupFailed:
         return localization::translate_message("no package change, but cleanup failed");
     case AurUpdateOperationTargetStatus::NotAttempted:
+        if(operation_status == AurUpdateOperationStatus::
+                                       StoppedOnProviderTransactionFailure) {
+            return localization::translate_message(
+                    "not attempted: repository provider transaction failed");
+        }
         if(target.execution_failure_kind ==
            AurUpdateWorkItemFailureKind::PriorWorkItemStopped) {
             return localization::translate_message("not attempted: prior work item stopped");
@@ -444,13 +451,10 @@ int cmd_upgrade_aur(const AppConfig& config) {
     // POLICY(#267): NoUpdatesでもunsupported optionを成功へ落とさない。
     require_supported_production_source_build_options(config);
 
-    // Validなupgrade-aurはcache-capable mutation routeである。query/curlより
-    // 前にauthorityを確定し、NoUpdatesでも同じfail-closed順序を保つ。
-    ValidatedCacheRoot cache_root = prepare_process_cache_root();
     AurUpdateQueryResult query_result = query_installed_aur_updates();
     PreparedFilteredAurUpdateOperation prepared =
             prepare_filtered_aur_update_operation(
-                    std::move(query_result), {}, config, cache_root);
+                    std::move(query_result), {}, config);
     FilteredAurUpdateExecutionResult result =
             execute_prepared_filtered_aur_update_operation(
                     std::move(prepared), config);

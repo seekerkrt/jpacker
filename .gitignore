@@ -15,3 +15,7 @@
 /pkg/
 *.pkg.tar.zst
 *.pkg.tar.xz
+
+# Python cache artifacts
+__pycache__/
+*.py[cod]

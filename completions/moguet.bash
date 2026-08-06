@@ -39,9 +39,11 @@ _moguet() {
         --rebuild
         --cleanbuild
         --rmdeps
+        --select
         --aur
         --repo
         --needed
+        --local
         --recursive
     )
 

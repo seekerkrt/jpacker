@@ -1,4 +1,4 @@
-.TH MOGUET 1 "August 2026" "Moguet 2.0.1" "ユーザーコマンド"
+.TH MOGUET 1 "August 2026" "Moguet 2.1.0" "ユーザーコマンド"
 .\" parity:name
 .SH 名前
 .na
@@ -11,6 +11,10 @@ moguet \- 検証済みsource buildを備えたpacman-first AUR helper
 .I operation
 .RI [ options ]
 .RI [ targets... ]
+.
+.B moguet
+.B -S --select
+.I query
 .
 .B moguet
 .BR -h | --help
@@ -67,11 +71,25 @@ command / option tokenはlocale非依存です。
 .na
 .\" PUBLIC COMMANDS BEGIN
 .TP
-.B "build <pkg> [V=K]"
-source-build preferenceを保存せず、official repositoryまたはAURのpackageを1つsource
-からbuildします。
-packageをreviewし、生成artifactをvalidationしてから、selected artifactだけをpacmanへ
-渡します。
+.B "build <pkg> [V=K...] | build --local <directory> [V=K...]"
+.B --local
+なしでは、source-build preferenceを保存せず、official repositoryまたはAURのpackageを
+1つsourceからbuildします。
+.B --local
+を指定すると、exactly oneのuser所有directoryをlocal PackageBase sourceとして扱い、
+pathらしいpackage operandからそのsourceを推測しません。安全な既存
+.I .SRCINFO
+は変更せずに読みます。missing、invalid、known-stale metadataは、PKGBUILD reviewと
+defaultなしの明示同意後だけ
+.B makepkg --printsrcinfo
+で評価します。non-TTY inputと
+.B --noconfirm
+は評価を許可しません。local treeはinvocation-owned source snapshotへcopyして変更せず、
+dependency planとartifact validationの後、採用metadataが宣言するvalidかつuniqueな全
+.I pkgname
+childをexplicit rootとしてinstallします。
+dependency artifactはdependency install reasonを保持し、既にexplicitなinstalled packageを
+dependencyへ降格しません。
 .
 .TP
 .B "upgrade"
@@ -93,8 +111,12 @@ installed packageのうち、現在もexact AUR packageへ解決できるもの�
 system、registered source、fresh foreign inventory、filtered AURの各phaseをこの順で
 実行します。
 explicit source preferenceは重複するAUR targetより優先します。
-単一atomic transactionではなく、最初のfailureで停止し、完了済みpackage
-transactionをrollbackせず、後続作業をnot attemptedとして報告します。
+filtered AUR phaseではprovider selectionを完了してから
+clone、build、pacman、sudoを開始します。
+先行phaseは完了済みの場合があります。
+単一atomic transactionではありません。
+最初のfailureで停止し、完了済みpackage transactionをrollbackせず、
+後続作業をnot attemptedとして報告します。
 .
 .TP
 .B "clean"
@@ -124,21 +146,27 @@ global / pacman optionはunsupportedです。
 .B "deps [--recursive] <pkg>"
 AURのruntime、make、check dependencyを分類します。
 .B --recursive
-を付けるとAUR dependencyを再帰的に辿り、official、unique provider、ambiguous、
-unresolved dependencyは表示しますが、そのcategoryをさらに辿りません。
+を付けるとexact AUR dependencyとuser-selected AUR providerを再帰的に辿ります。
+official dependency、unique provider、selected official repository provider、未選択の
+ambiguous provider、unresolved dependencyは表示しますが、さらに辿りません。
+interactive TTYではsource-aware provider candidateを選択でき、user-selected providerと
+未解決のambiguityを区別して表示します。
 clone、build、install、build order計算は行いません。
 .
 .TP
 .B "plan <pkg>"
 AUR build-order planとdirect official repository package sizeを表示します。
-unknown dependency、ambiguous provider、cycle、安全に解決できないconflicts /
+unknown dependency、未選択のambiguous provider、cycle、安全に解決できないconflicts /
 replacesがあるplanはincompleteです。
+unique resolve、user-selected provider、未選択のambiguous providerを区別します。
 size metadataが利用できなくてもplan bodyを省略しません。
 clone、build、installは行いません。
 .
 .TP
 .B "fetch <pkg>"
 complete inspection planが必要とするAUR PackageBase repositoryを取得します。
+selected AUR providerのPackageBaseも含め、selected official repository providerはclone
+しません。
 未取得repositoryはcloneします。
 既存cloneでは
 .B "git fetch origin"
@@ -186,6 +214,10 @@ Auto routingはofficial repositoryを優先し、適用可能なsource preferenc
 は対応target routeをrepository fallbackなしのAURへ固定し、
 .B --repo
 はAUR / source-build fallbackなしのofficial binary repositoryへ固定します。
+.B --select
+を指定すると、1つのoperandをexact package targetではなく検索queryとして扱い、
+source-awareなofficial repository / AUR candidateを表示して、interactiveな明示選択を
+要求します。
 .
 .TP
 .B "-Syu"
@@ -263,8 +295,28 @@ user modificationの破棄やdestructive Git operationを許可しません。
 .B "--noconfirm"
 対応するpacman / makepkg executionへnon-confirmation behaviorを渡し、定義済みdefaultを
 使ってMoguetのpromptによる停止を避けます。
+provider selectionにはdefaultがありません。このoptionではstdinを読まず、promptや
+provider選択を行わず、未解決のambiguityをfail-closedで停止します。
+root package discoveryもcandidate queryより前に停止し、packageを自動選択しません。
+local PKGBUILD metadata評価にもdefaultはなく、このoptionは
+.B makepkg --printsrcinfo
+を許可しません。
 「すべてyes」ではなく、unresolved / ambiguous dependency、cycle、source selection、
 conflicts / replaces、artifact identity、ownership等のsafety guardを突破しません。
+.
+.TP
+.B "--select"
+plain
+.B -S
+で、exactly oneのoperandをsource-awareなpackage検索queryとして扱い、install前に明示選択を
+要求します。Auto modeはofficial repositoryとAURを検索し、
+.B --aur
+または
+.B --repo
+でcandidate sourceを限定します。interactive TTYでは番号、複数番号、inclusive range、
+表示済みofficial groupのselectorを受理します。両selected routeで共有するpacman optionは
+.B --needed
+だけです。
 .
 .TP
 .B "--needed"
@@ -498,6 +550,38 @@ authoritativeに確定できなければ、対応するexternal mutation前に�
 でguardを突破しません。
 .
 .PP
+複数dependency providerが残る場合、interactive TTYではsource-aware candidateを番号付きで
+表示し、defaultなしでexactly oneの選択を要求します。empty input、q、quit、cancel、EOFは
+取消とし、invalid / out-of-range inputは再入力します。non-TTYと
+.B --noconfirm
+ではprovider inputをstdinから読まずfail-closedで停止します。choiceは現在のinvocation内
+だけで共有します。selected AUR PackageBaseはfetch / build planへ渡し、selected official
+providerはexactな
+.I repository/package
+dependencyとして導入します。
+.
+.PP
+.B -S --select
+によるroot package discoveryも、candidateが1件でもdefaultを持ちません。interactive TTYでは
+1件または複数のpackage番号、inclusive range、表示済みofficial groupの
+.B @group
+selectorを受理します。empty input、q、quit、cancel、EOFは取消とし、invalid inputは同じ
+candidate snapshotに対して再入力します。non-TTY stdinと
+.B --noconfirm
+ではcandidate queryやpromptより前に停止します。全selected rootのstatic preflight完了後、
+exactな
+.I repository/package
+targetを1つのrepository transactionとして先に実行し、成功した場合だけselected AUR rootを
+既存source-build lifecycleへ渡します。後続AUR failureは完了済みrepository transactionを
+rollbackしません。
+.
+.PP
+registered source phaseは、candidateがすべてofficial repository由来の場合だけprovider
+selectionを行います。AUR providerを含むcandidate setは、そのproviderのPackageBaseを
+singular source lifecycleでscheduleできないため、ambiguousのままsystem / source
+execution前にfail-closedで停止します。
+.
+.PP
 .B deps
 と
 .B plan
@@ -506,6 +590,12 @@ authoritativeに確定できなければ、対応するexternal mutation前に�
 は既存working treeを更新しません。
 export commandはbuild / installしません。
 external commandとprivilege escalationは利用者から見える形を維持します。
+.
+.PP
+local PKGBUILD buildはinvocation-owned source snapshotを使い、user-owned source treeを
+reset、clean、overwrite、deleteしません。Gitを必須にせず、local rootをAURへquery
+しません。unsafeなsource / metadata state、未承認のmetadata評価、incomplete dependency
+plan、証明できないartifactは、対応するmutation前に停止します。
 .
 .PP
 source-build PackageBase workはfresh artifact destinationを使い、expected output全体を
@@ -521,6 +611,18 @@ install成功後のcleanup failureはpartial successであり、盲目的に再�
 .\" parity:examples
 .SH 例
 .na
+.TP
+source-awareなinstall targetを検索して明示選択する:
+.RS
+.B moguet -S --select fastfetch
+.RE
+.
+.TP
+local PKGBUILD rootが宣言する全package childをbuild・installする:
+.RS
+.B moguet build --local .
+.RE
+.
 .TP
 repository fallbackなしでAUR packageをinstallする:
 .RS

@@ -1,0 +1,193 @@
+FROM archlinux:latest
+
+LABEL org.opencontainers.image.title="Moguet Arch live AUR install validation" \
+      org.opencontainers.image.source="https://github.com/seekerkrt/moguet" \
+      org.opencontainers.image.base.name="docker.io/library/archlinux:latest"
+
+# Package provisioning is the image build's only root package transaction.
+# base-devel supplies gcc, make, makepkg, gettext, pkgconf, and the remaining
+# Arch build baseline; fetchfetch itself must remain absent until runtime.
+RUN pacman-key --init \
+    && pacman-key --populate archlinux \
+    && pacman -Syu --needed --noconfirm \
+        acl \
+        base-devel \
+        curl \
+        git \
+        libarchive \
+        nano \
+        nlohmann-json \
+        pacman \
+        python \
+        sudo \
+        tomlplusplus \
+        util-linux \
+        zstd \
+    && test "$(uname -m)" = x86_64 \
+    && ! pacman -Qq fetchfetch \
+    && rm -f /var/cache/pacman/pkg/*
+
+ARG VALIDATION_UID=1000
+ARG VALIDATION_GID=1000
+
+RUN groupadd --gid "${VALIDATION_GID}" moguet-validation \
+    && useradd \
+        --uid "${VALIDATION_UID}" \
+        --gid "${VALIDATION_GID}" \
+        --create-home \
+        --shell /bin/bash \
+        moguet-validation \
+    && install -d -o moguet-validation -g moguet-validation -m 0700 \
+        /home/moguet-validation/.cache \
+        /home/moguet-validation/.config \
+        /home/moguet-validation/.local/state \
+        /home/moguet-validation/live-aur-case \
+        /home/moguet-validation/work/moguet
+
+ENV HOME=/home/moguet-validation \
+    XDG_CACHE_HOME=/home/moguet-validation/.cache \
+    XDG_CONFIG_HOME=/home/moguet-validation/.config \
+    XDG_STATE_HOME=/home/moguet-validation/.local/state \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8 \
+    LANGUAGE=en
+
+WORKDIR /home/moguet-validation/work/moguet
+
+# .dockerignore excludes VCS metadata, credentials, host state, sockets, and
+# host build/package artifacts from this standalone context.
+COPY --chown=moguet-validation:moguet-validation . .
+
+USER moguet-validation:moguet-validation
+
+RUN env -u MAKEFLAGS -u MFLAGS make clean \
+    && env -u MAKEFLAGS -u MFLAGS make -j8 --output-sync=target
+
+USER root:root
+
+# Provision an immutable, AUR-only root gateway after every image package has
+# been installed. The reference package is built from the fixed AUR authority
+# in this same image before the gateway replaces canonical pacman. It leaves
+# only a root-owned payload manifest: the reference source, build workspace,
+# and package artifacts are removed without installing fetchfetch.
+#
+# The validation user can execute pacman.real only without privilege; kernel
+# permissions then protect the system package database. The official minimal
+# image excludes usr/share/doc globally, so reopen only the one README path
+# required by the frozen fetchfetch payload authority.
+RUN printf '%s\n' \
+        '# Moguet live AUR: retain the exact tracked fetchfetch README.' \
+        'NoExtract = !usr/share/doc/fetchfetch/README.md' \
+        >> /etc/pacman.conf \
+    && pacman-conf NoExtract | \
+        grep -Fx -- '!usr/share/doc/fetchfetch/README.md' \
+    && install -d -o root -g root -m 0755 \
+        /usr/libexec/moguet-live-aur \
+    && install -o root -g root -m 0755 \
+        /usr/bin/pacman \
+        /usr/libexec/moguet-live-aur/pacman.real \
+    && install -o root -g root -m 0555 \
+        containers/arch-live-validation/aur-stage-artifact.py \
+        /usr/libexec/moguet-live-aur/aur-stage-artifact.py \
+    && /usr/bin/cc -std=c11 -Wall -Wextra -Wpedantic -Werror \
+        containers/arch-live-validation/aur-archive-metadata-check.c \
+        -larchive \
+        -o /usr/libexec/moguet-live-aur/aur-archive-metadata-check \
+    && /usr/bin/chown root:root \
+        /usr/libexec/moguet-live-aur/aur-archive-metadata-check \
+    && /usr/bin/chmod 0555 \
+        /usr/libexec/moguet-live-aur/aur-archive-metadata-check \
+    && install -d -o root -g root -m 0555 \
+        /usr/share/moguet-live-aur/policy \
+    && install -d -o root -g root -m 0755 \
+        /usr/libexec/moguet-live-aur/fixtures \
+    && install -o root -g root -m 0444 \
+        containers/arch-live-validation/aur-cases.tsv \
+        /usr/share/moguet-live-aur/policy/aur-cases.tsv \
+    && install -o root -g root -m 0444 \
+        containers/arch-live-validation/fixtures/aur/fetchfetch-payload-authority.tsv \
+        /usr/share/moguet-live-aur/policy/fetchfetch-payload-authority.tsv \
+    && reference_root=/usr/libexec/moguet-live-aur/reference-build \
+    && reference_repository=$reference_root/aur \
+    && reference_package_root=$reference_root/packages \
+    && reference_source_cache=$reference_root/sources \
+    && reference_config=$reference_root/makepkg.conf \
+    && reference_source_archive=$reference_source_cache/fetchfetch-2.0.0.tar.gz \
+    && reference_artifact=$reference_package_root/fetchfetch-2.0.0-1-x86_64.pkg.tar.zst \
+    && reference_staged_artifact=$reference_root/fetchfetch-reference.pkg.tar.zst \
+    && install -d -o root -g root -m 0755 \
+        "$reference_root" "$reference_root/build" "$reference_source_cache" \
+    && /usr/bin/chown root:moguet-validation "$reference_root/build" \
+    && /usr/bin/chmod 1770 "$reference_root/build" \
+    && /usr/bin/chown root:moguet-validation "$reference_source_cache" \
+    && /usr/bin/chmod 1770 "$reference_source_cache" \
+    && install -d -o moguet-validation -g moguet-validation -m 0755 \
+        "$reference_root/build/pkg" "$reference_package_root" \
+    && /usr/bin/git clone --no-checkout \
+        https://aur.archlinux.org/fetchfetch.git "$reference_repository" \
+    && /usr/bin/git -C "$reference_repository" checkout --detach \
+        353dc8ea947734b85175158cda87e5d084585c3f \
+    && test "$(/usr/bin/sha256sum "$reference_repository/PKGBUILD" | /usr/bin/awk '{print $1}')" = \
+        6b9e09ae9c297c5be32b1bd6a038172ad1400cd0f4a5867fe2393b468d964232 \
+    && test "$(/usr/bin/sha256sum "$reference_repository/.SRCINFO" | /usr/bin/awk '{print $1}')" = \
+        d685ae938e6cfe1d2001dba3772539564b2cd8e7b2d488e7e78d92762f411df1 \
+    && /usr/bin/curl --fail --location --silent --show-error \
+        --proto '=https' --tlsv1.2 \
+        --output "$reference_source_archive" \
+        https://github.com/spenserblack/fetchfetch/archive/v2.0.0.tar.gz \
+    && test "$(/usr/bin/sha256sum "$reference_source_archive" | /usr/bin/awk '{print $1}')" = \
+        e67be2f63497b6f75017873e06935218a407e46023fe10f422fb259e92a7d7ae \
+    && install -o root -g root -m 0444 /etc/makepkg.conf "$reference_config" \
+    && printf '%s\n' \
+        "BUILDDIR=$reference_root/build" \
+        "PKGDEST=$reference_package_root" \
+        "SRCDEST=$reference_source_cache" \
+        >> "$reference_config" \
+    && (cd "$reference_repository" \
+        && /usr/bin/runuser -u moguet-validation -- /usr/bin/env -i \
+            HOME=/home/moguet-validation \
+            USER=moguet-validation \
+            LOGNAME=moguet-validation \
+            PATH=/usr/bin \
+            LANG=C.UTF-8 \
+            LC_ALL=C.UTF-8 \
+            LANGUAGE=en \
+            /usr/bin/makepkg --config "$reference_config" --nodeps --noconfirm) \
+    && test -f "$reference_artifact" \
+    && test ! -L "$reference_artifact" \
+    && install -o root -g root -m 0444 \
+        "$reference_artifact" "$reference_staged_artifact" \
+    && /usr/libexec/moguet-live-aur/aur-archive-metadata-check \
+        "$reference_staged_artifact" \
+    && /usr/bin/python3 -I /usr/libexec/moguet-live-aur/aur-stage-artifact.py \
+        manifest \
+        /usr/share/moguet-live-aur/policy/fetchfetch-payload-authority.tsv \
+        "$reference_staged_artifact" \
+        /usr/libexec/moguet-live-aur/fixtures/fetchfetch-payload.tsv \
+    && /usr/bin/python3 -I /usr/libexec/moguet-live-aur/aur-stage-artifact.py \
+        pkginfo-manifest \
+        /usr/share/moguet-live-aur/policy/fetchfetch-payload-authority.tsv \
+        "$reference_staged_artifact" \
+        /usr/libexec/moguet-live-aur/fixtures/fetchfetch-pkginfo.tsv \
+    && /usr/bin/rm -rf -- "$reference_root" \
+    && test ! -e "$reference_root" \
+    && install -d -o root -g root -m 0711 \
+        /var/lib/moguet-live-aur \
+    && install -d -o root -g root -m 0755 \
+        /var/lib/moguet-live-aur/staging \
+    && install -d -o root -g moguet-validation -m 0750 \
+        /var/log/moguet-live-aur \
+    && install -o root -g root -m 0555 \
+        containers/arch-live-validation/aur-pacman-gateway.sh \
+        /usr/bin/pacman \
+    && printf '%s\n' \
+        'Defaults:moguet-validation env_keep += "MOGUET_LIVE_AUR_CASE"' \
+        'moguet-validation ALL=(root) NOPASSWD: /usr/bin/pacman *' \
+        > /etc/sudoers.d/moguet-live-aur \
+    && chown root:root /etc/sudoers.d/moguet-live-aur \
+    && chmod 0440 /etc/sudoers.d/moguet-live-aur \
+    && visudo -cf /etc/sudoers.d/moguet-live-aur
+
+USER moguet-validation:moguet-validation
+
+CMD ["containers/arch-live-validation/run-aur-install.sh"]

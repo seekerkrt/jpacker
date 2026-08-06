@@ -237,10 +237,12 @@ AurUpdateWorkItemExecutionResult work_item_result(
 
 AurUpdateSourceBuildExecutionResult execution_result(
         AurUpdateInvocationExecutionStatus status,
-        std::vector<AurUpdateWorkItemExecutionResult> work_items) {
+        std::vector<AurUpdateWorkItemExecutionResult> work_items,
+        SelectedRepositoryProviderTransactionResult provider_transaction = {}) {
     return AurUpdateSourceBuildExecutionResult{
             status,
-            std::move(work_items)};
+            std::move(work_items),
+            std::move(provider_transaction)};
 }
 
 struct ExactChildExecutionSpec {
@@ -2886,6 +2888,109 @@ void test_unknown_invocation_status_preserves_known_update() {
             "Known update was lost after unknown invocation status");
 }
 
+void test_repository_provider_phase_reduces_without_work_item_attribution() {
+    const AurUpdateExecutionPreflight preflight = preflight_with({
+            executable_target(0, "before-provider-owner"),
+            executable_target(1, "provider-owner"),
+            executable_target(2, "after-provider-owner")});
+    const AurUpdateSourceBuildPreparation preparation =
+            preparation_for_execution(preflight);
+
+    SelectedRepositoryProviderTransactionResult provider_failure;
+    provider_failure.status =
+            SelectedRepositoryProviderTransactionStatus::Failed;
+    provider_failure.selected_providers = {
+            ProvidedDependency::from_repository("extra", "provider-pkg")};
+    provider_failure.package_state_change = PackageStateChange::Unknown;
+    provider_failure.command_exit_status = 42;
+    provider_failure.diagnostic = "scripted provider transaction failure";
+    const AurUpdateSourceBuildExecutionResult failed_execution =
+            execution_result(
+                    AurUpdateInvocationExecutionStatus::
+                            StoppedOnProviderTransactionFailure,
+                    {
+                            work_item_result(
+                                    0,
+                                    AurUpdateWorkItemExecutionStatus::
+                                            NotAttempted,
+                                    {0}, "before-provider-owner"),
+                            work_item_result(
+                                    1,
+                                    AurUpdateWorkItemExecutionStatus::
+                                            NotAttempted,
+                                    {1}, "provider-owner"),
+                            work_item_result(
+                                    2,
+                                    AurUpdateWorkItemExecutionStatus::
+                                            NotAttempted,
+                                    {2}, "after-provider-owner"),
+                    },
+                    provider_failure);
+
+    const AurUpdateOperationResult failed =
+            reduce_aur_update_operation_result(
+                    preflight, preparation, failed_execution);
+    expect(
+            failed.status == AurUpdateOperationStatus::
+                                     StoppedOnProviderTransactionFailure &&
+                    failed.reduction_issues.empty() &&
+                    failed.selected_repository_provider_transaction.
+                                    selected_providers ==
+                            provider_failure.selected_providers &&
+                    failed.package_state_change() ==
+                            PackageStateChange::Unknown &&
+                    !failed.changed_package_state() &&
+                    !failed.has_partial_completion() &&
+                    failed.has_not_attempted_targets(),
+            "Provider phase failure was attributed to a work item or lost by reduction");
+    expect_target_statuses(
+            failed,
+            {AurUpdateOperationTargetStatus::NotAttempted,
+             AurUpdateOperationTargetStatus::NotAttempted,
+             AurUpdateOperationTargetStatus::NotAttempted},
+            "provider phase failure");
+
+    SelectedRepositoryProviderTransactionResult provider_success;
+    provider_success.status =
+            SelectedRepositoryProviderTransactionStatus::Succeeded;
+    provider_success.selected_providers =
+            provider_failure.selected_providers;
+    provider_success.package_state_change = PackageStateChange::Unknown;
+    provider_success.command_exit_status = 0;
+    const AurUpdateSourceBuildExecutionResult later_work_item_failure =
+            execution_result(
+                    AurUpdateInvocationExecutionStatus::
+                            StoppedOnWorkItemFailure,
+                    {
+                            work_item_result(
+                                    0,
+                                    AurUpdateWorkItemExecutionStatus::Failed,
+                                    {0}, "before-provider-owner"),
+                            work_item_result(
+                                    1,
+                                    AurUpdateWorkItemExecutionStatus::
+                                            NotAttempted,
+                                    {1}, "provider-owner"),
+                            work_item_result(
+                                    2,
+                                    AurUpdateWorkItemExecutionStatus::
+                                            NotAttempted,
+                                    {2}, "after-provider-owner"),
+                    },
+                    provider_success);
+    const AurUpdateOperationResult partial =
+            reduce_aur_update_operation_result(
+                    preflight, preparation, later_work_item_failure);
+    expect(
+            partial.status ==
+                            AurUpdateOperationStatus::StoppedOnWorkItemFailure &&
+                    partial.reduction_issues.empty() &&
+                    partial.package_state_change() ==
+                            PackageStateChange::Unknown &&
+                    partial.has_partial_completion(),
+            "Successful provider phase was not retained as partial completion after a later failure");
+}
+
 void test_same_target_partial_update_and_failure_keeps_contributions() {
     const AurUpdateExecutionPreflight preflight =
             preflight_with({executable_target(0, "multi-work-root")});
@@ -3158,6 +3263,9 @@ int main() {
         run_case(
                 "unknown invocation status preserves known update",
                 test_unknown_invocation_status_preserves_known_update);
+        run_case(
+                "repository provider phase has no work-item attribution",
+                test_repository_provider_phase_reduces_without_work_item_attribution);
         run_case(
                 "same-target partial update and failure keeps contributions",
                 test_same_target_partial_update_and_failure_keeps_contributions);

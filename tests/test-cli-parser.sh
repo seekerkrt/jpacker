@@ -1,6 +1,13 @@
 #!/bin/sh
 set -eu
 
+# Assertions target the canonical untranslated CLI output.
+# Do not inherit locale settings from the invoking environment.
+LANG=C
+LC_ALL=C
+export LANG LC_ALL
+unset LANGUAGE
+
 test_binary=$1
 repo_root=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
 MOGUET_TEST_REPOSITORY_ROOT=$repo_root
@@ -71,11 +78,12 @@ setup_case() {
     unset MOGUET_TEST_MAKEPKG_EXIT_CODE
     unset MOGUET_TEST_MAKEPKG_PACKAGELIST_EXIT_CODE
     unset MOGUET_TEST_MAKEPKG_PACKAGELIST_OUTPUT_FILE
+    unset PKGDEST
 }
 
 run_ok() {
     : > "$command_log"
-    if ! "$test_binary" "$@" > "$output_file" 2>&1; then
+    if ! "$test_binary" "$@" </dev/null > "$output_file" 2>&1; then
         echo "expected command to succeed: $*" >&2
         sed -n '1,240p' "$output_file" >&2
         cat "$command_log" >&2
@@ -85,7 +93,7 @@ run_ok() {
 
 run_fail() {
     : > "$command_log"
-    if "$test_binary" "$@" > "$output_file" 2>&1; then
+    if "$test_binary" "$@" </dev/null > "$output_file" 2>&1; then
         echo "expected command to fail: $*" >&2
         sed -n '1,240p' "$output_file" >&2
         cat "$command_log" >&2
@@ -218,6 +226,9 @@ run_exact() {
 run_exact value-root-rmdeps \
     "pacman -Q --root --rmdeps filesystem" \
     -Q --root --rmdeps filesystem
+run_exact value-root-select \
+    "pacman -Q --root --select filesystem" \
+    -Q --root --select filesystem
 run_exact value-config-noconfirm \
     "pacman -Q --config --noconfirm filesystem" \
     -Q --config --noconfirm filesystem
@@ -259,7 +270,7 @@ done
 
 # Matrix B: semantic `--`後は全tokenをopaque operandとして保持する。
 for global_option in \
-    --rmdeps --noconfirm --edit --noedit --diff --nodiff \
+    --rmdeps --select --noconfirm --edit --noedit --diff --nodiff \
     --build-mode=normal --build-mode=rebuild --build-mode=clean \
     --rebuild --cleanbuild; do
     case_name=opaque-${global_option#--}
@@ -573,5 +584,171 @@ run_fail upgrade-aur -- --needed
 assert_contains "Operation upgrade-aur does not accept target operands." "$output_file"
 assert_not_contains "Unsupported upgrade-aur option: --needed" "$output_file"
 assert_command_log_empty
+
+# Matrix M: root package selection intentは通常位置だけで消費し、plain -Sの
+# strict entry validationとinput gateをsearch・state log・external commandより先に行う。
+assert_select_stops_before_search() {
+    case_name=$1
+    shift
+
+    setup_case "$case_name"
+    run_fail "$@"
+    assert_contains \
+        "Interactive package selection requires a TTY on standard input." \
+        "$output_file"
+    assert_pre_log_exit
+}
+
+assert_select_rejected_pre_log() {
+    case_name=$1
+    expected=$2
+    shift 2
+
+    setup_case "$case_name"
+    run_fail "$@"
+    assert_contains "$expected" "$output_file"
+    assert_pre_log_exit
+}
+
+# operation前後と重複指定はいずれも同じselection intentとして消費する。
+assert_select_stops_before_search select-before-operation \
+    --select -S query
+assert_select_stops_before_search select-after-operation \
+    -S --select query
+assert_select_stops_before_search select-duplicates \
+    --select -S query --select --select
+
+# --neededだけはselection installへ投影できるpacman optionとして受理する。
+assert_select_stops_before_search select-needed \
+    -S --needed --select query
+
+# plain -S以外のoperation / modifierはselection routeへ入れない。
+assert_select_rejected_pre_log select-search-operation \
+    "Option --select is supported only with plain -S." \
+    -Ss --select query
+assert_select_rejected_pre_log select-info-operation \
+    "Option --select is supported only with plain -S." \
+    -Si --select query
+assert_select_rejected_pre_log select-system-upgrade-operation \
+    "Option --select is supported only with plain -S." \
+    --select -Syu
+assert_select_rejected_pre_log select-query-operation \
+    "Option --select is supported only with plain -S." \
+    --select -Q query
+assert_select_rejected_pre_log select-custom-operation \
+    "Option --select is supported only with plain -S." \
+    --select plan query
+
+setup_case select-unknown-bare-operation
+run_fail --select unknown-select-operation
+assert_contains "Unknown operation: unknown-select-operation" "$output_file"
+assert_pre_log_exit
+
+# queryはASCII whitespaceをtrimした非空・control-freeの1 operandに限る。
+assert_select_rejected_pre_log select-missing-query \
+    "Operation -S --select requires exactly one <query> operand." \
+    -S --select
+assert_select_rejected_pre_log select-multiple-queries \
+    "Operation -S --select requires exactly one <query> operand." \
+    -S --select query-a query-b
+
+ascii_whitespace_query=$(printf ' \011\015\014\013 ')
+assert_select_rejected_pre_log select-ascii-whitespace-query \
+    "Root package search query must not be empty." \
+    -S --select "$ascii_whitespace_query"
+
+control_query=$(printf 'query\001value')
+assert_select_rejected_pre_log select-control-query \
+    "Root package search query contains a control character." \
+    -S --select "$control_query"
+
+# --needed以外のpacman option、operand marker、rmdepsはpre-logで拒否する。
+assert_select_rejected_pre_log select-unsupported-pacman-option \
+    "Unsupported option --config for -S --select." \
+    -S --select --config custom.conf query
+assert_select_rejected_pre_log select-end-of-options \
+    "Cannot use -- with --select." \
+    -S --select -- query
+assert_select_rejected_pre_log select-rmdeps \
+    "Cannot combine --select and --rmdeps." \
+    -S query --select --rmdeps
+
+# Matrix N: `--local`はbuild所有のexact semantic optionとしてだけrouteし、
+# local rootへ触れる前にoperation / option / operand grammarを確定する。
+assert_local_build_rejected_pre_log() {
+    case_name=$1
+    expected=$2
+    shift 2
+
+    setup_case "$case_name"
+    run_fail "$@"
+    assert_contains "$expected" "$output_file"
+    assert_pre_log_exit
+}
+
+# 正式形と許可済みglobal / ordered assignmentはstrict parserを通過し、
+# downstreamのdescriptor-first root inspectionへ到達する。
+setup_case local-build-formal-route
+missing_local_root=$case_dir/missing-local-root
+run_fail --noedit --noconfirm --build-mode=clean \
+    build --local "$missing_local_root" FIRST=one EMPTY=
+assert_contains \
+    "Local source root entry is missing: $missing_local_root" \
+    "$output_file"
+assert_pre_log_exit
+
+assert_local_build_rejected_pre_log local-build-wrong-operation \
+    "Option --local is supported only with operation build." \
+    -S --local .
+assert_local_build_rejected_pre_log local-build-selector-in-operation-slot \
+    "Option --local is supported only with operation build." \
+    --local build .
+assert_local_build_rejected_pre_log local-build-missing-directory \
+    "Operation build --local requires exactly one <directory> operand." \
+    build --local
+assert_local_build_rejected_pre_log local-build-duplicate-selector \
+    "Option --local may be specified only once for operation build." \
+    build --local . --local
+assert_local_build_rejected_pre_log local-build-package-co-use \
+    "Operation build --local requires exactly one <directory> operand." \
+    build --local . remote-package
+assert_local_build_rejected_pre_log local-build-other-pacman-option \
+    "Unsupported option --needed for build --local." \
+    build --local . --needed
+assert_local_build_rejected_pre_log local-build-value-taking-pacman-option \
+    "Unsupported option --root for build --local." \
+    build --local . --root custom-root
+assert_local_build_rejected_pre_log local-build-end-of-options \
+    "Cannot use -- with build --local." \
+    build --local -- .
+assert_local_build_rejected_pre_log local-build-assignment-before-directory \
+    "Environment assignment requires a preceding directory: KEY=value" \
+    build --local KEY=value .
+assert_local_build_rejected_pre_log local-build-invalid-assignment \
+    "Invalid environment assignment: 9BAD=value" \
+    build --local . 9BAD=value
+
+# local routeで意味を維持できないglobal optionもoperation-local parserが拒否する。
+for unsupported_local_option in \
+    --diff --nodiff --rmdeps --select --aur --repo
+do
+    case_name=local-build-rejects-${unsupported_local_option#--}
+    assert_local_build_rejected_pre_log "$case_name" \
+        "Unsupported option $unsupported_local_option for build --local." \
+        build --local . "$unsupported_local_option"
+done
+
+# Pacman option value / opaque operandに現れた同じ綴りはlocal selectorへ昇格しない。
+setup_case local-name-as-pacman-option-value
+run_fail build --root --local .
+assert_contains "Unsupported build option: --root" "$output_file"
+assert_not_contains "supported only with operation build" "$output_file"
+assert_pre_log_exit
+
+setup_case local-name-as-opaque-operand
+run_fail build -- --local .
+assert_contains "Unsupported build option: --" "$output_file"
+assert_not_contains "supported only with operation build" "$output_file"
+assert_pre_log_exit
 
 echo "CLI parser integration tests: all checks passed"

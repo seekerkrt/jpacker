@@ -920,7 +920,8 @@ std::optional<struct stat> inspect_managed_component(
 
 std::optional<PreparedDirectoryState> prepare_directory_state(
         const DirectoryRequest& request, const TestOverrides* overrides,
-        MissingManagedComponentPolicy missing_component_policy) {
+        MissingManagedComponentPolicy missing_component_policy,
+        const DirectoryCreationPrecondition& creation_precondition) {
     validate_creation_boundary(request);
     const std::uintmax_t expected_effective_user =
             effective_user(overrides);
@@ -987,6 +988,53 @@ std::optional<PreparedDirectoryState> prepare_directory_state(
                         retained_lineage, request,
                         expected_effective_user, overrides);
                 return std::nullopt;
+            }
+        }
+
+        if(!observed_status.has_value()) {
+            // The callback receives the descriptor-retained parent identity,
+            // never a path-derived approximation. Revalidate both the named
+            // lineage and stable absence around it so a rejecting callback
+            // runs before this component can be created.
+            require_retained_lineage_unchanged(
+                    retained_lineage, request,
+                    expected_effective_user, overrides);
+            struct stat current_parent_status {};
+            if(fstat(current_directory.get(), &current_parent_status) != 0) {
+                const int metadata_error = errno;
+                throw_preparation_error(
+                        request.directory_kind,
+                        PreparationStage::DirectoryRevalidation,
+                        is_permission_error(metadata_error)
+                                ? PreparationErrorCode::PermissionDenied
+                                : PreparationErrorCode::MetadataFailure,
+                        metadata_error, component_index);
+            }
+            if(retained_lineage.empty() ||
+               !same_filesystem_identity(
+                       retained_lineage.back().status,
+                       current_parent_status)) {
+                throw_preparation_error(
+                        request.directory_kind,
+                        PreparationStage::DirectoryRevalidation,
+                        PreparationErrorCode::ConcurrentReplacement,
+                        std::nullopt, component_index);
+            }
+            if(creation_precondition) {
+                creation_precondition(DirectoryIdentity{
+                        static_cast<std::uintmax_t>(
+                                current_parent_status.st_dev),
+                        static_cast<std::uintmax_t>(
+                                current_parent_status.st_ino)});
+            }
+            require_retained_lineage_unchanged(
+                    retained_lineage, request,
+                    expected_effective_user, overrides);
+            observed_status = inspect_managed_component(
+                    current_directory.get(), leaf_name, request,
+                    component_index, overrides);
+            if(observed_status.has_value()) {
+                appeared_concurrently = true;
             }
         }
 
@@ -1240,11 +1288,13 @@ struct DirectorySafetyAccess {
 
     static PreparedDirectory prepare(
             const DirectoryRequest& request,
-            const TestOverrides* overrides) {
+            const TestOverrides* overrides,
+            const DirectoryCreationPrecondition& creation_precondition = {}) {
         std::optional<PreparedDirectoryState> state =
                 prepare_directory_state(
                         request, overrides,
-                        MissingManagedComponentPolicy::Create);
+                        MissingManagedComponentPolicy::Create,
+                        creation_precondition);
         if(!state.has_value()) {
             throw_preparation_error(
                     request.directory_kind,
@@ -1260,7 +1310,7 @@ struct DirectorySafetyAccess {
         std::optional<PreparedDirectoryState> state =
                 prepare_directory_state(
                         request, overrides,
-                        MissingManagedComponentPolicy::ReturnAbsent);
+                        MissingManagedComponentPolicy::ReturnAbsent, {});
         if(!state.has_value()) return std::nullopt;
         return std::optional<PreparedDirectory>{
                 adopt(request, std::move(state).value())};
@@ -1444,9 +1494,25 @@ PreparedDirectory prepare_directory(const xdg_paths::StatePaths& paths) {
     return DirectorySafetyAccess::prepare(request, nullptr);
 }
 
+PreparedDirectory prepare_directory(
+        const xdg_paths::StatePaths& paths,
+        const DirectoryCreationPrecondition& creation_precondition) {
+    const DirectoryRequest request = make_request(paths);
+    return DirectorySafetyAccess::prepare(
+            request, nullptr, creation_precondition);
+}
+
 PreparedDirectory prepare_directory(const xdg_paths::CachePaths& paths) {
     const DirectoryRequest request = make_request(paths);
     return DirectorySafetyAccess::prepare(request, nullptr);
+}
+
+PreparedDirectory prepare_directory(
+        const xdg_paths::CachePaths& paths,
+        const DirectoryCreationPrecondition& creation_precondition) {
+    const DirectoryRequest request = make_request(paths);
+    return DirectorySafetyAccess::prepare(
+            request, nullptr, creation_precondition);
 }
 
 PreparedDirectory prepare_directory(

@@ -1,7 +1,11 @@
 # --- プロジェクト情報 ---
 TARGET    := moguet
-LEGACY_PRODUCTION_TARGET := jpacker
 PACKAGE_NAME := moguet
+DOCKER ?= docker
+ARCH_VALIDATION_IMAGE ?= moguet-arch-validation:local
+ARCH_LIVE_VALIDATION_IMAGE ?= moguet-arch-live-validation:local
+ARCH_LIVE_AUR_VALIDATION_IMAGE ?= moguet-arch-live-aur-validation:local
+ARCH_LIVE_LOCAL_VALIDATION_IMAGE ?= moguet-arch-live-local-validation:local
 VERSION_FILE := VERSION
 VERSION   := $(strip $(shell cat $(VERSION_FILE) 2>/dev/null))
 ifeq ($(VERSION),)
@@ -38,6 +42,16 @@ COMMANDS_SYNC_TEST_TARGET := build/tests/moguet-commands-sync-test
 SOURCE_INSTALL_CHARACTERIZATION_TEST_TARGET := build/tests/moguet-source-install-characterization-test
 APP_CONFIG_MODULE_TEST_TARGET := build/tests/app-config-test
 APP_CONFIG_INTEGRATION_TEST_TARGET := build/tests/moguet-app-config-test
+PROVIDER_SELECTION_TEST_TARGET := $(BUILD_DIR)/tests/provider-selection-test
+ROOT_PACKAGE_CANDIDATE_TEST_TARGET := $(BUILD_DIR)/tests/root-package-candidate-test
+ROOT_PACKAGE_SEARCH_TEST_TARGET := $(BUILD_DIR)/tests/root-package-search-test
+ROOT_PACKAGE_SELECTION_TEST_TARGET := $(BUILD_DIR)/tests/root-package-selection-test
+ROOT_PACKAGE_ROUTE_PROJECTION_TEST_TARGET := $(BUILD_DIR)/tests/root-package-route-projection-test
+LOCAL_PACKAGE_METADATA_TEST_TARGET := $(BUILD_DIR)/tests/local-package-metadata-test
+LOCAL_SOURCE_ROOT_TEST_TARGET := $(BUILD_DIR)/tests/local-source-root-test
+LOCAL_DEPENDENCY_PLAN_PROJECTION_TEST_TARGET := $(BUILD_DIR)/tests/local-dependency-plan-projection-test
+LOCAL_SOURCE_WORKSPACE_TEST_TARGET := $(BUILD_DIR)/tests/local-source-workspace-test
+LOCAL_SOURCE_BUILD_TEST_TARGET := $(BUILD_DIR)/tests/local-source-build-test
 USER_CONFIG_MODULE_TEST_TARGET := $(BUILD_DIR)/tests/user-config-test
 PACKAGE_IDENTIFIER_TEST_TARGET := build/tests/package-identifier-test
 SHELL_WORDS_TEST_TARGET := build/tests/shell-words-test
@@ -122,6 +136,7 @@ PUBLIC_DOC_FILES := \
 
 # --- コンパイラ設定 ---
 CXX       ?= g++
+CCACHE    ?=
 CXXFLAGS  ?= -O2 -pipe
 LDFLAGS   ?=
 CPPFLAGS  ?=
@@ -157,11 +172,23 @@ XGETTEXT_OPTIONS := \
 	--no-wrap
 SRCS      := $(wildcard $(SRC_DIR)/*.cpp)
 HEADERS   := $(wildcard $(SRC_DIR)/*.hpp)
+TEST_SRCS := $(SRCS)
+CLI_LOCALIZATION_TEST_SRCS := $(SRCS)
+APP_CONFIG_INTEGRATION_TEST_SRCS := $(SRCS)
 COMMANDS_INSPECT_TEST_SRCS := \
 	$(filter-out $(SRC_DIR)/aur_rpc.cpp $(SRC_DIR)/repository_query.cpp,$(SRCS)) \
 	tests/commands_inspect_aur_stub.cpp \
 	tests/stubs/commands-inspect/repository_query_stub.cpp \
 	tests/stubs/package-metadata/alpm_stub.cpp
+COMMANDS_INSPECT_REQUIRED_PRODUCTION_TEST_SRCS := \
+	$(filter-out $(SRC_DIR)/aur_rpc.cpp $(SRC_DIR)/repository_query.cpp,$(SRCS))
+COMMANDS_INSPECT_REQUIRED_TEST_SUPPORT_SRCS := \
+	tests/commands_inspect_aur_stub.cpp \
+	tests/stubs/commands-inspect/repository_query_stub.cpp \
+	tests/stubs/package-metadata/alpm_stub.cpp
+COMMANDS_INSPECT_FORBIDDEN_TEST_SRCS := \
+	$(SRC_DIR)/aur_rpc.cpp \
+	$(SRC_DIR)/repository_query.cpp
 # POLICY(#267): CLI integration binaryはoperation APIだけをscenario stubへ差し替え、
 # parser/routing/command presentationをproductionと同じtranslation unitで通す。
 AUR_UPDATE_COMMAND_TEST_SRCS := \
@@ -177,21 +204,34 @@ AUR_UPDATE_COMMAND_TEST_SRCS := \
 	tests/stubs/aur-update-command/operation_stub.cpp \
 	tests/stubs/upgrade-all-command/operation_stub.cpp \
 	tests/stubs/package-metadata/alpm_stub.cpp
+AUR_UPDATE_COMMAND_REQUIRED_PRODUCTION_TEST_SRCS = \
+	$(filter-out $(AUR_UPDATE_COMMAND_FORBIDDEN_TEST_SRCS),$(SRCS))
+AUR_UPDATE_COMMAND_REQUIRED_TEST_SUPPORT_SRCS := \
+	tests/stubs/aur-update-command/operation_stub.cpp \
+	tests/stubs/upgrade-all-command/operation_stub.cpp \
+	tests/stubs/package-metadata/alpm_stub.cpp
+AUR_UPDATE_COMMAND_FORBIDDEN_TEST_SRCS := \
+	$(SRC_DIR)/aur_update_query.cpp \
+	$(SRC_DIR)/aur_update_execution_preflight.cpp \
+	$(SRC_DIR)/aur_update_execution_preparation.cpp \
+	$(SRC_DIR)/aur_update_execution_runner.cpp \
+	$(SRC_DIR)/aur_update_operation_result.cpp \
+	$(SRC_DIR)/filtered_aur_update_operation.cpp \
+	$(SRC_DIR)/upgrade_all_operation.cpp
 # POLICY(#281): final CLI testはparser/routing/presentationをproductionのままlinkし、
 # aggregate operation capabilityだけをscenario stubへ差し替える。
 UPGRADE_ALL_COMMAND_TEST_SRCS := \
 	$(filter-out $(SRC_DIR)/upgrade_all_operation.cpp,$(SRCS)) \
 	tests/stubs/upgrade-all-command/operation_stub.cpp \
 	tests/stubs/package-metadata/alpm_stub.cpp
-UPGRADE_ALL_COMMAND_REQUIRED_TEST_SRCS := \
-	$(SRC_DIR)/moguet.cpp \
-	$(SRC_DIR)/commands_upgrade_all.cpp \
-	$(SRC_DIR)/aur_update_cli_presentation.cpp \
-	$(SRC_DIR)/cli_parser.cpp \
-	$(SRC_DIR)/cli_routing.cpp \
-	$(SRC_DIR)/upgrade_all_operation_result.cpp
+UPGRADE_ALL_COMMAND_REQUIRED_PRODUCTION_TEST_SRCS = \
+	$(filter-out $(UPGRADE_ALL_COMMAND_FORBIDDEN_TEST_SRCS),$(SRCS))
+UPGRADE_ALL_COMMAND_REQUIRED_TEST_SUPPORT_SRCS := \
+	tests/stubs/upgrade-all-command/operation_stub.cpp \
+	tests/stubs/package-metadata/alpm_stub.cpp
 UPGRADE_ALL_COMMAND_FORBIDDEN_TEST_SRCS := \
 	$(SRC_DIR)/upgrade_all_operation.cpp
+
 AUR_RPC_VALIDATION_TEST_SRCS := \
 	$(SRCS) \
 	tests/stubs/package-metadata/alpm_stub.cpp
@@ -201,8 +241,27 @@ AUR_RPC_ENVELOPE_VALIDATION_TEST_SRCS := \
 	$(SRC_DIR)/dependency_spec.cpp \
 	$(SRC_DIR)/package_identifier.cpp \
 	$(SRC_DIR)/logging.cpp
-COMMANDS_SYNC_TEST_SRCS := $(filter-out $(SRC_DIR)/aur_rpc.cpp,$(SRCS)) tests/stubs/commands-sync/aur_rpc_stub.cpp
-SOURCE_INSTALL_CHARACTERIZATION_TEST_SRCS := $(filter-out $(SRC_DIR)/moguet.cpp,$(SRCS))
+# POLICY(#217): final sync CLI testはparser/routing/selection/executionを
+# productionのままlinkし、candidate search transportとAUR RPCだけを
+# deterministic stubへ差し替える。
+COMMANDS_SYNC_TEST_SRCS := \
+	$(filter-out \
+		$(SRC_DIR)/aur_rpc.cpp \
+		$(SRC_DIR)/root_package_search.cpp, \
+		$(SRCS)) \
+	tests/stubs/commands-sync/aur_rpc_stub.cpp \
+	tests/stubs/commands-sync/root_package_search_stub.cpp
+COMMANDS_SYNC_REQUIRED_PRODUCTION_TEST_SRCS = \
+	$(filter-out $(COMMANDS_SYNC_FORBIDDEN_TEST_SRCS),$(SRCS))
+COMMANDS_SYNC_REQUIRED_TEST_SUPPORT_SRCS := \
+	tests/stubs/commands-sync/aur_rpc_stub.cpp \
+	tests/stubs/commands-sync/root_package_search_stub.cpp
+COMMANDS_SYNC_FORBIDDEN_TEST_SRCS := \
+	$(SRC_DIR)/aur_rpc.cpp \
+	$(SRC_DIR)/root_package_search.cpp
+SOURCE_INSTALL_CHARACTERIZATION_TEST_SRCS := \
+	tests/source_install_characterization.cpp \
+	$(filter-out $(SRC_DIR)/moguet.cpp,$(SRCS))
 AUR_UPDATE_PLAN_TEST_SRCS := \
 	tests/aur_update_plan_test.cpp \
 	$(SRC_DIR)/aur_update_plan.cpp
@@ -347,6 +406,8 @@ AUR_UPDATE_OPERATION_RESULT_FORBIDDEN_TEST_SRCS := \
 # transport、BuildPlan resolver、preparation IO、source lifecycleだけをstub化する。
 FILTERED_AUR_UPDATE_OPERATION_TEST_SRCS := \
 	tests/filtered_aur_update_operation_test.cpp \
+	$(SRC_DIR)/app_config.cpp \
+	$(SRC_DIR)/provider_selection.cpp \
 	$(SRC_DIR)/filtered_aur_update_operation.cpp \
 	$(SRC_DIR)/upgrade_all_plan.cpp \
 	$(SRC_DIR)/aur_update_query.cpp \
@@ -368,6 +429,8 @@ FILTERED_AUR_UPDATE_OPERATION_TEST_SRCS := \
 	tests/stubs/aur-update-execution-preparation/preparation_stub.cpp \
 	tests/stubs/aur-update-execution-runner/execution_stub.cpp
 FILTERED_AUR_UPDATE_OPERATION_REQUIRED_TEST_SRCS := \
+	$(SRC_DIR)/app_config.cpp \
+	$(SRC_DIR)/provider_selection.cpp \
 	$(SRC_DIR)/filtered_aur_update_operation.cpp \
 	$(SRC_DIR)/aur_update_query.cpp \
 	$(SRC_DIR)/aur_update_execution_preflight.cpp \
@@ -392,6 +455,8 @@ FILTERED_AUR_UPDATE_OPERATION_FORBIDDEN_TEST_SRCS := \
 # POLICY(#281): aggregate testはPR2/PR3を含むproduction orchestrationをlinkし、
 # command/transport/libalpm/source mutationの外部境界だけを統合stubへ切る。
 UPGRADE_ALL_OPERATION_ALLOWED_PRODUCTION_TEST_SRCS := \
+	$(SRC_DIR)/app_config.cpp \
+	$(SRC_DIR)/provider_selection.cpp \
 	$(SRC_DIR)/upgrade_all_operation.cpp \
 	$(SRC_DIR)/upgrade_all_operation_result.cpp \
 	$(SRC_DIR)/system_source_upgrade.cpp \
@@ -420,6 +485,8 @@ UPGRADE_ALL_OPERATION_TEST_SRCS := \
 	$(UPGRADE_ALL_OPERATION_ALLOWED_PRODUCTION_TEST_SRCS) \
 	tests/stubs/upgrade-all-operation/operation_stub.cpp
 UPGRADE_ALL_OPERATION_REQUIRED_TEST_SRCS := \
+	$(SRC_DIR)/app_config.cpp \
+	$(SRC_DIR)/provider_selection.cpp \
 	$(SRC_DIR)/upgrade_all_operation.cpp \
 	$(SRC_DIR)/upgrade_all_operation_result.cpp \
 	$(SRC_DIR)/system_source_upgrade.cpp \
@@ -435,6 +502,162 @@ UPGRADE_ALL_OPERATION_REQUIRED_TEST_SRCS := \
 UPGRADE_ALL_OPERATION_FORBIDDEN_TEST_SRCS := \
 	$(filter-out \
 		$(UPGRADE_ALL_OPERATION_ALLOWED_PRODUCTION_TEST_SRCS), \
+		$(SRCS))
+# POLICY(#217): root candidate testはpure value ownerとidentifierだけをlinkし、
+# search、interaction、routing、external mutationのownerを持ち込まない。
+ROOT_PACKAGE_CANDIDATE_ALLOWED_PRODUCTION_TEST_SRCS := \
+	$(SRC_DIR)/root_package_candidate.cpp \
+	$(SRC_DIR)/package_identifier.cpp
+ROOT_PACKAGE_CANDIDATE_TEST_SRCS := \
+	tests/root_package_candidate_test.cpp \
+	$(ROOT_PACKAGE_CANDIDATE_ALLOWED_PRODUCTION_TEST_SRCS)
+ROOT_PACKAGE_CANDIDATE_FORBIDDEN_TEST_SRCS := \
+	$(filter-out \
+		$(ROOT_PACKAGE_CANDIDATE_ALLOWED_PRODUCTION_TEST_SRCS), \
+		$(SRCS))
+# POLICY(#217): root search testはcandidate aggregation ownerとpure modelだけを
+# productionからlinkし、actual network/libalpm/CLI/selection/mutation境界をstubへ切る。
+ROOT_PACKAGE_SEARCH_ALLOWED_PRODUCTION_TEST_SRCS := \
+	$(SRC_DIR)/root_package_search.cpp \
+	$(SRC_DIR)/root_package_candidate.cpp \
+	$(SRC_DIR)/package_identifier.cpp
+ROOT_PACKAGE_SEARCH_REQUIRED_TEST_SUPPORT_SRCS := \
+	tests/stubs/root-package-search/search_stub.cpp
+ROOT_PACKAGE_SEARCH_TEST_SRCS := \
+	tests/root_package_search_test.cpp \
+	$(ROOT_PACKAGE_SEARCH_ALLOWED_PRODUCTION_TEST_SRCS) \
+	$(ROOT_PACKAGE_SEARCH_REQUIRED_TEST_SUPPORT_SRCS)
+ROOT_PACKAGE_SEARCH_FORBIDDEN_TEST_SRCS := \
+	$(filter-out \
+		$(ROOT_PACKAGE_SEARCH_ALLOWED_PRODUCTION_TEST_SRCS), \
+		$(SRCS))
+# POLICY(#217): root selection testはpure expression / interaction ownerと
+# validated candidate modelだけをlinkし、search adapter、provider、CLI、mutationを持ち込まない。
+ROOT_PACKAGE_SELECTION_ALLOWED_PRODUCTION_TEST_SRCS := \
+	$(SRC_DIR)/root_package_selection.cpp \
+	$(SRC_DIR)/root_package_candidate.cpp \
+	$(SRC_DIR)/package_identifier.cpp
+ROOT_PACKAGE_SELECTION_TEST_SRCS := \
+	tests/root_package_selection_test.cpp \
+	$(ROOT_PACKAGE_SELECTION_ALLOWED_PRODUCTION_TEST_SRCS)
+ROOT_PACKAGE_SELECTION_FORBIDDEN_TEST_SRCS := \
+	$(filter-out \
+		$(ROOT_PACKAGE_SELECTION_ALLOWED_PRODUCTION_TEST_SRCS), \
+		$(SRCS))
+# POLICY(#217): root route projection testはselection invariantとsource-aware
+# projectionだけをlinkし、commands_syncやexternal execution ownerへ接続しない。
+ROOT_PACKAGE_ROUTE_PROJECTION_ALLOWED_PRODUCTION_TEST_SRCS := \
+	$(SRC_DIR)/root_package_route_projection.cpp \
+	$(SRC_DIR)/root_package_selection.cpp \
+	$(SRC_DIR)/root_package_candidate.cpp \
+	$(SRC_DIR)/package_identifier.cpp
+ROOT_PACKAGE_ROUTE_PROJECTION_TEST_SRCS := \
+	tests/root_package_route_projection_test.cpp \
+	$(ROOT_PACKAGE_ROUTE_PROJECTION_ALLOWED_PRODUCTION_TEST_SRCS)
+ROOT_PACKAGE_ROUTE_PROJECTION_FORBIDDEN_TEST_SRCS := \
+	$(filter-out \
+		$(ROOT_PACKAGE_ROUTE_PROJECTION_ALLOWED_PRODUCTION_TEST_SRCS), \
+		$(SRCS))
+# POLICY(#271): local metadata testはfilesystem / AUR / CLIから独立した
+# .SRCINFO value modelとparserだけをlinkする。
+LOCAL_PACKAGE_METADATA_ALLOWED_PRODUCTION_TEST_SRCS := \
+	$(SRC_DIR)/local_package_metadata.cpp
+LOCAL_PACKAGE_METADATA_TEST_SRCS := \
+	tests/local_package_metadata_test.cpp \
+	$(LOCAL_PACKAGE_METADATA_ALLOWED_PRODUCTION_TEST_SRCS)
+LOCAL_PACKAGE_METADATA_FIXTURE_FILES := \
+	$(wildcard tests/fixtures/local-package-metadata/*.srcinfo)
+LOCAL_PACKAGE_METADATA_FORBIDDEN_TEST_SRCS := \
+	$(filter-out \
+		$(LOCAL_PACKAGE_METADATA_ALLOWED_PRODUCTION_TEST_SRCS), \
+		$(SRCS))
+# POLICY(#271): local root testはread-only filesystem capabilityとmetadata
+# parserだけをlinkし、cache / process / CLI / source executionへ接続しない。
+LOCAL_SOURCE_ROOT_ALLOWED_PRODUCTION_TEST_SRCS := \
+	$(SRC_DIR)/local_source_root.cpp \
+	$(SRC_DIR)/local_package_metadata.cpp
+LOCAL_SOURCE_ROOT_TEST_SRCS := \
+	tests/local_source_root_test.cpp \
+	$(LOCAL_SOURCE_ROOT_ALLOWED_PRODUCTION_TEST_SRCS)
+LOCAL_SOURCE_ROOT_FORBIDDEN_TEST_SRCS := \
+	$(filter-out \
+		$(LOCAL_SOURCE_ROOT_ALLOWED_PRODUCTION_TEST_SRCS), \
+		$(SRCS))
+# POLICY(#271): local dependency projection testはtyped metadata adapterと既存
+# BuildPlan resolverだけをproductionからlinkし、filesystem / CLI / execution ownerを
+# 持ち込まない。AUR / repository query boundaryは専用stubへ差し替える。
+LOCAL_DEPENDENCY_PLAN_PROJECTION_ALLOWED_PRODUCTION_TEST_SRCS := \
+	$(SRC_DIR)/local_dependency_plan_projection.cpp \
+	$(SRC_DIR)/dependency_plan.cpp \
+	$(SRC_DIR)/dependency_plan_model.cpp \
+	$(SRC_DIR)/dependency_spec.cpp \
+	$(SRC_DIR)/package_identifier.cpp \
+	$(SRC_DIR)/logging.cpp
+LOCAL_DEPENDENCY_PLAN_PROJECTION_REQUIRED_TEST_SUPPORT_SRCS := \
+	tests/stubs/local-dependency-plan/aur_rpc_stub.cpp \
+	tests/stubs/local-dependency-plan/repository_query_stub.cpp
+LOCAL_DEPENDENCY_PLAN_PROJECTION_TEST_SRCS := \
+	tests/local_dependency_plan_projection_test.cpp \
+	$(LOCAL_DEPENDENCY_PLAN_PROJECTION_ALLOWED_PRODUCTION_TEST_SRCS) \
+	$(LOCAL_DEPENDENCY_PLAN_PROJECTION_REQUIRED_TEST_SUPPORT_SRCS)
+LOCAL_DEPENDENCY_PLAN_PROJECTION_FORBIDDEN_TEST_SRCS := \
+	$(filter-out \
+		$(LOCAL_DEPENDENCY_PLAN_PROJECTION_ALLOWED_PRODUCTION_TEST_SRCS), \
+		$(SRCS))
+# POLICY(#271): local source workspace testはsource snapshot ownerとread-only
+# local root/cache capability supportだけをlinkし、process / CLI / install ownerを
+# 持ち込まない。
+LOCAL_SOURCE_WORKSPACE_ALLOWED_PRODUCTION_TEST_SRCS := \
+	$(SRC_DIR)/local_source_workspace.cpp \
+	$(SRC_DIR)/local_source_root.cpp \
+	$(SRC_DIR)/local_package_metadata.cpp \
+	$(SRC_DIR)/trusted_cache.cpp \
+	$(SRC_DIR)/xdg_directory_safety.cpp \
+	$(SRC_DIR)/xdg_paths.cpp \
+	$(SRC_DIR)/logging.cpp
+LOCAL_SOURCE_WORKSPACE_TEST_SRCS := \
+	tests/local_source_workspace_test.cpp \
+	$(LOCAL_SOURCE_WORKSPACE_ALLOWED_PRODUCTION_TEST_SRCS)
+LOCAL_SOURCE_WORKSPACE_FORBIDDEN_TEST_SRCS := \
+	$(filter-out \
+		$(LOCAL_SOURCE_WORKSPACE_ALLOWED_PRODUCTION_TEST_SRCS), \
+		$(SRCS))
+# POLICY(#271): local source build composition testはsource/artifact workspace、
+# local plan、artifact target/identity selectionの既存ownerだけをproductionから
+# linkする。query/process境界は専用stubへ切り、install/CLI/AUR transportを除外する。
+LOCAL_SOURCE_BUILD_ALLOWED_PRODUCTION_TEST_SRCS := \
+	$(SRC_DIR)/local_source_build.cpp \
+	$(SRC_DIR)/local_source_workspace.cpp \
+	$(SRC_DIR)/local_source_root.cpp \
+	$(SRC_DIR)/local_package_metadata.cpp \
+	$(SRC_DIR)/local_dependency_plan_projection.cpp \
+	$(SRC_DIR)/dependency_plan.cpp \
+	$(SRC_DIR)/dependency_plan_model.cpp \
+	$(SRC_DIR)/dependency_spec.cpp \
+	$(SRC_DIR)/build_plan_artifact_target_projection.cpp \
+	$(SRC_DIR)/artifact_workspace.cpp \
+	$(SRC_DIR)/artifact_identity.cpp \
+	$(SRC_DIR)/artifact_identity_set.cpp \
+	$(SRC_DIR)/artifact_identity_selection.cpp \
+	$(SRC_DIR)/artifact_install_plan.cpp \
+	$(SRC_DIR)/trusted_cache.cpp \
+	$(SRC_DIR)/xdg_directory_safety.cpp \
+	$(SRC_DIR)/xdg_paths.cpp \
+	$(SRC_DIR)/source_environment.cpp \
+	$(SRC_DIR)/package_identifier.cpp \
+	$(SRC_DIR)/shell_words.cpp \
+	$(SRC_DIR)/logging.cpp
+LOCAL_SOURCE_BUILD_REQUIRED_TEST_SUPPORT_SRCS := \
+	tests/stubs/local-dependency-plan/aur_rpc_stub.cpp \
+	tests/stubs/local-dependency-plan/repository_query_stub.cpp \
+	tests/stubs/local-source-build/process_stub.cpp
+LOCAL_SOURCE_BUILD_TEST_SRCS := \
+	tests/local_source_build_test.cpp \
+	$(LOCAL_SOURCE_BUILD_ALLOWED_PRODUCTION_TEST_SRCS) \
+	$(LOCAL_SOURCE_BUILD_REQUIRED_TEST_SUPPORT_SRCS)
+LOCAL_SOURCE_BUILD_FORBIDDEN_TEST_SRCS := \
+	$(filter-out \
+		$(LOCAL_SOURCE_BUILD_ALLOWED_PRODUCTION_TEST_SRCS), \
 		$(SRCS))
 # POLICY(#268): dependency resolver model testはresolverとpure model supportだけを
 # productionからlinkし、metadata/process/source-build execution ownerを持ち込まない。
@@ -664,9 +887,17 @@ SEPARATED_PACKAGE_BASE_SOURCE_BUILD_FORBIDDEN_TEST_SRCS := \
 	$(filter-out \
 		$(SEPARATED_PACKAGE_BASE_SOURCE_BUILD_ALLOWED_PRODUCTION_TEST_SRCS), \
 		$(SRCS))
+# POLICY(#271): actual LocalBuildPlanからproduction dependency preparationへ
+# 接続するtestも同じbinaryで扱う。queryは既存local-dependency stubへ差し替え、
+# repository_query / AUR RPC本体は各専用targetで検証する。
 PRODUCTION_SOURCE_BUILD_TEST_SRCS := \
 	tests/production_source_build_test.cpp \
+	$(SRC_DIR)/app_config.cpp \
+	$(SRC_DIR)/provider_selection.cpp \
 	$(SRC_DIR)/source_install.cpp \
+	$(SRC_DIR)/local_source_build_dependency_preparation.cpp \
+	$(SRC_DIR)/local_dependency_plan_projection.cpp \
+	$(SRC_DIR)/local_package_metadata.cpp \
 	$(SRC_DIR)/cache_authority.cpp \
 	$(SRC_DIR)/source_install_preparation.cpp \
 	$(SRC_DIR)/source_build.cpp \
@@ -691,8 +922,7 @@ PRODUCTION_SOURCE_BUILD_TEST_SRCS := \
 	$(SRC_DIR)/dependency_plan_model.cpp \
 	$(SRC_DIR)/dependency_spec.cpp \
 	$(SRC_DIR)/package_identifier.cpp \
-	$(SRC_DIR)/repository_query.cpp \
-	$(SRC_DIR)/aur_rpc.cpp \
+	$(LOCAL_DEPENDENCY_PLAN_PROJECTION_REQUIRED_TEST_SUPPORT_SRCS) \
 	$(SRC_DIR)/shell_words.cpp \
 	$(SRC_DIR)/logging.cpp \
 	tests/stubs/package-metadata/alpm_stub.cpp \
@@ -706,17 +936,159 @@ PACKAGE_METADATA_TEST_SRCS := \
 	tests/package_metadata_test.cpp \
 	$(SRC_DIR)/package_metadata.cpp \
 	$(SRC_DIR)/package_identifier.cpp \
+	$(SRC_DIR)/shell_words.cpp \
 	tests/stubs/package-metadata/alpm_stub.cpp \
 	tests/stubs/package-metadata/process_stub.cpp
 PACKAGE_METADATA_INTEGRATION_TEST_SRCS := \
 	tests/package_metadata_integration_test.cpp \
 	$(SRC_DIR)/package_metadata.cpp \
 	$(SRC_DIR)/package_identifier.cpp \
+	$(SRC_DIR)/shell_words.cpp \
 	$(SRC_DIR)/process.cpp \
 	$(SRC_DIR)/logging.cpp
 UPGRADE_BASELINE_METADATA_TEST_SRCS := \
 	$(SRCS) \
 	tests/stubs/package-metadata/alpm_stub.cpp
+
+# Issue #380: heavyweight integration binaries keep target-specific object
+# trees while sharing only the compile/link recipe infrastructure.
+AUR_UPDATE_COMMAND_TEST_CPPFLAGS = \
+	-DMOGUET_ENABLE_TEST_OVERRIDES \
+	-DMOGUET_ENABLE_TEST_CONFIG_PATH \
+	-I$(SRC_DIR) \
+	-Itests/stubs/package-metadata
+AUR_UPDATE_COMMAND_TEST_LDLIBS = $(MY_LDLIBS)
+AUR_UPDATE_COMMAND_FORBIDDEN_TEST_LDLIBS = $(LIBALPM_LDLIBS)
+
+UPGRADE_ALL_COMMAND_TEST_CPPFLAGS = \
+	-DMOGUET_ENABLE_TEST_OVERRIDES \
+	-DMOGUET_ENABLE_TEST_CONFIG_PATH \
+	-I$(SRC_DIR) \
+	-Itests/stubs/package-metadata
+UPGRADE_ALL_COMMAND_TEST_LDLIBS = $(MY_LDLIBS)
+UPGRADE_ALL_COMMAND_FORBIDDEN_TEST_LDLIBS = $(LIBALPM_LDLIBS)
+
+COMMANDS_SYNC_TEST_CPPFLAGS = \
+	-DMOGUET_ENABLE_TEST_OVERRIDES \
+	-DMOGUET_ENABLE_TEST_CONFIG_PATH \
+	-I$(SRC_DIR)
+COMMANDS_SYNC_TEST_LDLIBS = $(MY_LDLIBS) $(LIBALPM_LDLIBS)
+COMMANDS_SYNC_FORBIDDEN_TEST_LDLIBS =
+
+COMMANDS_INSPECT_TEST_CPPFLAGS = \
+	-DMOGUET_ENABLE_TEST_OVERRIDES \
+	-I$(SRC_DIR) \
+	-Itests/stubs/package-metadata
+COMMANDS_INSPECT_TEST_LDLIBS = $(MY_LDLIBS)
+COMMANDS_INSPECT_FORBIDDEN_TEST_LDLIBS = $(LIBALPM_LDLIBS)
+
+TEST_CPPFLAGS = -DMOGUET_ENABLE_TEST_OVERRIDES
+TEST_LDLIBS = $(MY_LDLIBS) $(LIBALPM_LDLIBS)
+CORE_REQUIRED_PRODUCTION_TEST_SRCS := $(TEST_SRCS)
+CORE_REQUIRED_TEST_SUPPORT_SRCS =
+CORE_FORBIDDEN_TEST_SRCS =
+CORE_FORBIDDEN_TEST_LDLIBS =
+
+CLI_LOCALIZATION_TEST_CPPFLAGS = \
+	-DMOGUET_LOCALE_DIRECTORY=\"$(MOGUET_TEST_CATALOG_DIR)\" \
+	-DMOGUET_ENABLE_TEST_OVERRIDES
+CLI_LOCALIZATION_TEST_LDLIBS = $(MY_LDLIBS) $(LIBALPM_LDLIBS)
+CLI_LOCALIZATION_REQUIRED_PRODUCTION_TEST_SRCS := $(CLI_LOCALIZATION_TEST_SRCS)
+CLI_LOCALIZATION_REQUIRED_TEST_SUPPORT_SRCS =
+CLI_LOCALIZATION_FORBIDDEN_TEST_SRCS =
+CLI_LOCALIZATION_FORBIDDEN_TEST_LDLIBS =
+
+APP_CONFIG_INTEGRATION_TEST_CPPFLAGS = \
+	-DMOGUET_ENABLE_TEST_OVERRIDES \
+	-DMOGUET_ENABLE_TEST_CONFIG_PATH \
+	-DMOGUET_ENABLE_APP_CONFIG_TEST_HOOKS
+APP_CONFIG_INTEGRATION_TEST_LDLIBS = $(MY_LDLIBS) $(LIBALPM_LDLIBS)
+APP_CONFIG_INTEGRATION_REQUIRED_PRODUCTION_TEST_SRCS := \
+	$(APP_CONFIG_INTEGRATION_TEST_SRCS)
+APP_CONFIG_INTEGRATION_REQUIRED_TEST_SUPPORT_SRCS =
+APP_CONFIG_INTEGRATION_FORBIDDEN_TEST_SRCS =
+APP_CONFIG_INTEGRATION_FORBIDDEN_TEST_LDLIBS =
+
+AUR_RPC_VALIDATION_TEST_CPPFLAGS = \
+	-DMOGUET_ENABLE_TEST_OVERRIDES \
+	-DMOGUET_ENABLE_AUR_RPC_TEST_HOOKS \
+	-I$(SRC_DIR) \
+	-Itests/stubs/package-metadata
+AUR_RPC_VALIDATION_TEST_LDLIBS = $(MY_LDLIBS)
+AUR_RPC_VALIDATION_REQUIRED_PRODUCTION_TEST_SRCS := $(SRCS)
+AUR_RPC_VALIDATION_REQUIRED_TEST_SUPPORT_SRCS := \
+	tests/stubs/package-metadata/alpm_stub.cpp
+AUR_RPC_VALIDATION_FORBIDDEN_TEST_SRCS =
+AUR_RPC_VALIDATION_FORBIDDEN_TEST_LDLIBS = $(LIBALPM_LDLIBS)
+
+SOURCE_INSTALL_CHARACTERIZATION_TEST_CPPFLAGS = \
+	-DMOGUET_ENABLE_TEST_OVERRIDES \
+	-I$(SRC_DIR)
+SOURCE_INSTALL_CHARACTERIZATION_TEST_LDLIBS = \
+	$(MY_LDLIBS) $(LIBALPM_LDLIBS)
+SOURCE_INSTALL_CHARACTERIZATION_REQUIRED_PRODUCTION_TEST_SRCS := \
+	$(filter-out $(SRC_DIR)/moguet.cpp,$(SRCS))
+SOURCE_INSTALL_CHARACTERIZATION_REQUIRED_TEST_SUPPORT_SRCS := \
+	tests/source_install_characterization.cpp
+SOURCE_INSTALL_CHARACTERIZATION_FORBIDDEN_TEST_SRCS := $(SRC_DIR)/moguet.cpp
+SOURCE_INSTALL_CHARACTERIZATION_FORBIDDEN_TEST_LDLIBS =
+
+UPGRADE_BASELINE_METADATA_TEST_CPPFLAGS = \
+	-DMOGUET_ENABLE_TEST_OVERRIDES \
+	-DMOGUET_ENABLE_TEST_CONFIG_PATH \
+	-DMOGUET_ENABLE_APP_CONFIG_TEST_HOOKS \
+	-I$(SRC_DIR) \
+	-Itests/stubs/package-metadata
+UPGRADE_BASELINE_METADATA_TEST_LDLIBS = $(MY_LDLIBS)
+UPGRADE_BASELINE_METADATA_REQUIRED_PRODUCTION_TEST_SRCS := $(SRCS)
+UPGRADE_BASELINE_METADATA_REQUIRED_TEST_SUPPORT_SRCS := \
+	tests/stubs/package-metadata/alpm_stub.cpp
+UPGRADE_BASELINE_METADATA_FORBIDDEN_TEST_SRCS =
+UPGRADE_BASELINE_METADATA_FORBIDDEN_TEST_LDLIBS = $(LIBALPM_LDLIBS)
+
+HEAVY_OBJECT_PREFIXES := \
+	AUR_UPDATE_COMMAND_TEST \
+	UPGRADE_ALL_COMMAND_TEST \
+	COMMANDS_SYNC_TEST \
+	COMMANDS_INSPECT_TEST \
+	TEST \
+	CLI_LOCALIZATION_TEST \
+	APP_CONFIG_INTEGRATION_TEST \
+	AUR_RPC_VALIDATION_TEST \
+	SOURCE_INSTALL_CHARACTERIZATION_TEST \
+	UPGRADE_BASELINE_METADATA_TEST
+
+define define_heavy_object_paths
+$(1)_OBJECT_DIR := $(BUILD_DIR)/tests/obj/$(notdir $($(1)_TARGET))
+$(1)_OBJECTS := $$(patsubst %.cpp,$$($(1)_OBJECT_DIR)/%.o,$$($(1)_SRCS))
+$(1)_LINK_OBJECTS := $$($(1)_OBJECTS)
+$(1)_DEPS := $$($(1)_OBJECTS:.o=.d)
+$(1)_COMPILE_SIGNATURE := $$($(1)_OBJECT_DIR)/compile.signature
+$(1)_LINK_SIGNATURE := $$($(1)_OBJECT_DIR)/link.signature
+endef
+
+$(foreach prefix,$(HEAVY_OBJECT_PREFIXES),\
+	$(eval $(call define_heavy_object_paths,$(prefix))))
+
+ALL_HEAVY_OBJECTS := \
+	$(foreach prefix,$(HEAVY_OBJECT_PREFIXES),$($(prefix)_OBJECTS))
+ALL_HEAVY_DEPS := \
+	$(foreach prefix,$(HEAVY_OBJECT_PREFIXES),$($(prefix)_DEPS))
+HEAVY_LOCALIZATION_OBJECTS := \
+	$(foreach prefix,$(HEAVY_OBJECT_PREFIXES),\
+		$($(prefix)_OBJECT_DIR)/src/localization.o)
+HEAVY_LINK_FIREWALLS := \
+	check-aur-update-command-link-firewall \
+	check-upgrade-all-command-link-firewall \
+	check-commands-sync-link-firewall \
+	check-commands-inspect-link-firewall \
+	check-isolated-integration-link-firewall \
+	check-cli-localization-link-firewall \
+	check-app-config-integration-link-firewall \
+	check-aur-rpc-validation-link-firewall \
+	check-source-install-characterization-link-firewall \
+	check-upgrade-baseline-metadata-link-firewall
+
 OBJS      := $(SRCS:$(SRC_DIR)/%.cpp=$(BUILD_DIR)/%.o)
 DEPS      := $(OBJS:.o=.d)
 LIBALPM_BUILD_TARGETS := \
@@ -738,11 +1110,17 @@ LIBALPM_BUILD_TARGETS := \
 	$(SEPARATED_PACKAGE_BASE_SOURCE_BUILD_TEST_TARGET) \
 	$(PRODUCTION_SOURCE_BUILD_TEST_TARGET) \
 	$(REPOSITORY_QUERY_TEST_TARGET) \
+	$(LOCAL_DEPENDENCY_PLAN_PROJECTION_TEST_TARGET) \
+	$(LOCAL_SOURCE_BUILD_TEST_TARGET) \
 	$(AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION_TEST_TARGET) \
 	$(UPGRADE_BASELINE_METADATA_TEST_TARGET)
 
-.PHONY: all check-libalpm clean check-upgrade-all-plan-link-firewall check-system-source-upgrade-link-firewall check-aur-update-execution-runner-link-firewall check-aur-update-operation-result-link-firewall check-filtered-aur-update-operation-link-firewall check-upgrade-all-operation-link-firewall check-upgrade-all-command-link-firewall check-dependency-plan-model-link-firewall check-build-plan-artifact-target-projection-link-firewall check-artifact-selection-model-link-firewall check-artifact-identity-selection-link-firewall check-multiple-artifact-workspace-link-firewall check-multiple-artifact-identity-link-firewall check-package-base-artifact-install-plan-link-firewall check-package-base-artifact-install-executor-link-firewall check-separated-package-base-source-build-link-firewall test test-internal-identity test-application-identity test-xdg-paths test-xdg-directory-safety test-xdg-state-log test-trusted-cache test-runtime-identity test-app-config test-user-config test-package-identifier test-package-metadata test-package-metadata-integration test-repository-query test-shell-words test-source-environment test-artifact-workspace test-multiple-artifact-workspace test-artifact-identity test-multiple-artifact-identity test-artifact-install-executor test-package-base-artifact-install-plan test-package-base-artifact-install-executor test-separated-source-build test-separated-package-base-source-build test-production-source-build test-process-capture test-aur-update-plan test-upgrade-all-plan test-system-source-upgrade test-aur-update-query test-aur-update-command test-upgrade-all-command test-aur-update-execution-preflight test-aur-update-execution-preflight-integration test-aur-update-execution-preparation test-aur-update-execution-runner test-aur-update-operation-result test-filtered-aur-update-operation test-upgrade-all-operation test-dependency-plan-model test-build-plan-artifact-target-projection test-artifact-install-plan test-artifact-selection-model test-artifact-identity-selection test-command-stub-contract test-markdown-links test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-commands-inspect test-commands-source-maintenance test-commands-sync test-conflicts-replaces test-install-layout test-package-transition test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check install uninstall
+.PHONY: all check-libalpm clean check-upgrade-all-plan-link-firewall check-system-source-upgrade-link-firewall check-aur-update-execution-runner-link-firewall check-aur-update-operation-result-link-firewall check-filtered-aur-update-operation-link-firewall check-upgrade-all-operation-link-firewall check-upgrade-all-command-link-firewall check-commands-sync-link-firewall check-root-package-candidate-link-firewall check-root-package-search-link-firewall check-root-package-selection-link-firewall check-root-package-route-projection-link-firewall check-dependency-plan-model-link-firewall check-build-plan-artifact-target-projection-link-firewall check-artifact-selection-model-link-firewall check-artifact-identity-selection-link-firewall check-multiple-artifact-workspace-link-firewall check-multiple-artifact-identity-link-firewall check-package-base-artifact-install-plan-link-firewall check-package-base-artifact-install-executor-link-firewall check-separated-package-base-source-build-link-firewall test test-internal-identity test-application-identity test-xdg-paths test-xdg-directory-safety test-xdg-state-log test-trusted-cache test-runtime-identity test-app-config test-provider-selection test-root-package-candidate test-root-package-search test-root-package-selection test-root-package-route-projection test-user-config test-package-identifier test-package-metadata test-package-metadata-integration test-repository-query test-shell-words test-source-environment test-artifact-workspace test-multiple-artifact-workspace test-artifact-identity test-multiple-artifact-identity test-artifact-install-executor test-package-base-artifact-install-plan test-package-base-artifact-install-executor test-separated-source-build test-separated-package-base-source-build test-production-source-build test-process-capture test-aur-update-plan test-upgrade-all-plan test-system-source-upgrade test-aur-update-query test-aur-update-command test-upgrade-all-command test-aur-update-execution-preflight test-aur-update-execution-preflight-integration test-aur-update-execution-preparation test-aur-update-execution-runner test-aur-update-operation-result test-filtered-aur-update-operation test-upgrade-all-operation test-dependency-plan-model test-build-plan-artifact-target-projection test-artifact-install-plan test-artifact-selection-model test-artifact-identity-selection test-command-stub-contract test-markdown-links test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-commands-inspect test-commands-source-maintenance test-commands-sync test-live-contract test-run-with-pty test-conflicts-replaces test-install-layout test-package-transition test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check install uninstall
+.PHONY: check-local-package-metadata-link-firewall check-local-source-root-link-firewall check-local-dependency-plan-projection-link-firewall test-local-package-metadata test-local-source-root test-local-dependency-plan-projection
+.PHONY: check-local-source-workspace-link-firewall check-local-source-build-link-firewall test-local-source-workspace test-local-source-build
 .PHONY: FORCE catalogs check-catalogs check-localization-config check-pot update-po update-pot test-localization test-catalog-metadata-gate test-cli-localization-surface test-public-documentation
+.PHONY: test-container test-container-live test-container-live-provider test-container-live-aur test-container-live-local
+.PHONY: $(HEAVY_LINK_FIREWALLS)
 
 all: $(TARGET) $(MANPAGES) catalogs
 
@@ -801,6 +1179,7 @@ check-libalpm:
 
 $(OBJS) $(LIBALPM_BUILD_TARGETS): | check-libalpm check-localization-config
 $(BUILD_DIR)/localization.o $(LIBALPM_BUILD_TARGETS): $(LOCALIZATION_CONFIG_HEADER)
+$(APP_CONFIG_MODULE_TEST_TARGET) $(PROVIDER_SELECTION_TEST_TARGET): $(LOCALIZATION_CONFIG_HEADER)
 
 $(TARGET): $(OBJS)
 	@echo ":: Linking $@"
@@ -810,6 +1189,70 @@ $(BUILD_DIR)/%.o: $(SRC_DIR)/%.cpp $(VERSION_FILE)
 	@mkdir -p $(BUILD_DIR)
 	@echo ":: Compiling $< (v$(VERSION))"
 	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -MMD -MP -c $< -o $@
+
+define define_heavy_object_rules
+$$($(1)_COMPILE_SIGNATURE): FORCE
+	@mkdir -p $$(@D)
+	@printf '%s\n' \
+		'CXX=$$(CXX)' \
+		'CPPFLAGS=$$(CPPFLAGS)' \
+		'LIBALPM_CPPFLAGS=$$(LIBALPM_CPPFLAGS)' \
+		'CXXFLAGS=$$(CXXFLAGS)' \
+		'MY_CXXFLAGS=$$(MY_CXXFLAGS)' \
+		'TARGET_CPPFLAGS=$$($(1)_CPPFLAGS)' \
+		> $$@.tmp
+	@cmp -s $$@.tmp $$@ && rm -f $$@.tmp || mv $$@.tmp $$@
+
+$$($(1)_LINK_SIGNATURE): FORCE
+	@mkdir -p $$(@D)
+	@printf '%s\n' \
+		'CXX=$$(CXX)' \
+		'LDFLAGS=$$(LDFLAGS)' \
+		'MY_LDLIBS=$$(MY_LDLIBS)' \
+		'LIBALPM_LDLIBS=$$(LIBALPM_LDLIBS)' \
+		'TARGET_LDLIBS=$$($(1)_LDLIBS)' \
+		'OBJECTS=$$($(1)_LINK_OBJECTS)' \
+		> $$@.tmp
+	@cmp -s $$@.tmp $$@ && rm -f $$@.tmp || mv $$@.tmp $$@
+
+$$($(1)_OBJECTS): $$($(1)_OBJECT_DIR)/%.o: %.cpp $$($(1)_COMPILE_SIGNATURE)
+	@mkdir -p $$(@D)
+	@echo ":: Compiling $$< for $(2)"
+	$$(CCACHE) $$(CXX) $$(CPPFLAGS) $$(LIBALPM_CPPFLAGS) $$(CXXFLAGS) $$(MY_CXXFLAGS) \
+		$$($(1)_CPPFLAGS) -MMD -MP -c $$< -o $$@
+
+$$($(1)_TARGET): $$($(1)_LINK_OBJECTS) $$($(1)_LINK_SIGNATURE)
+	@mkdir -p $$(@D)
+	@echo ":: Linking $(2)"
+	$$(CXX) $$(LDFLAGS) $$($(1)_LINK_OBJECTS) -o $$@ $$($(1)_LDLIBS)
+endef
+
+$(eval $(call define_heavy_object_rules,AUR_UPDATE_COMMAND_TEST,AUR update command integration test binary))
+$(eval $(call define_heavy_object_rules,UPGRADE_ALL_COMMAND_TEST,upgrade-all command integration test binary))
+$(eval $(call define_heavy_object_rules,COMMANDS_SYNC_TEST,sync command characterization test binary))
+$(eval $(call define_heavy_object_rules,COMMANDS_INSPECT_TEST,command inspection characterization test binary))
+$(eval $(call define_heavy_object_rules,TEST,isolated integration test binary))
+$(eval $(call define_heavy_object_rules,CLI_LOCALIZATION_TEST,CLI localization integration test binary))
+$(eval $(call define_heavy_object_rules,APP_CONFIG_INTEGRATION_TEST,app config integration test binary))
+$(eval $(call define_heavy_object_rules,AUR_RPC_VALIDATION_TEST,AUR RPC validation fake-symbol test binary))
+$(eval $(call define_heavy_object_rules,SOURCE_INSTALL_CHARACTERIZATION_TEST,shared source-install characterization test binary))
+$(eval $(call define_heavy_object_rules,UPGRADE_BASELINE_METADATA_TEST,upgrade baseline metadata fake-symbol test binary))
+
+$(ALL_HEAVY_OBJECTS): | check-libalpm check-localization-config
+$(HEAVY_LOCALIZATION_OBJECTS): $(LOCALIZATION_CONFIG_HEADER)
+
+$(AUR_UPDATE_COMMAND_TEST_TARGET): | check-aur-update-command-link-firewall
+$(UPGRADE_ALL_COMMAND_TEST_TARGET): | check-upgrade-all-command-link-firewall
+$(COMMANDS_SYNC_TEST_TARGET): | check-commands-sync-link-firewall
+$(COMMANDS_INSPECT_TEST_TARGET): | check-commands-inspect-link-firewall
+$(TEST_TARGET): | check-isolated-integration-link-firewall
+$(CLI_LOCALIZATION_TEST_TARGET): | check-cli-localization-link-firewall
+$(APP_CONFIG_INTEGRATION_TEST_TARGET): | check-app-config-integration-link-firewall
+$(AUR_RPC_VALIDATION_TEST_TARGET): | check-aur-rpc-validation-link-firewall
+$(SOURCE_INSTALL_CHARACTERIZATION_TEST_TARGET): | check-source-install-characterization-link-firewall
+$(UPGRADE_BASELINE_METADATA_TEST_TARGET): | check-upgrade-baseline-metadata-link-firewall
+
+-include $(ALL_HEAVY_DEPS)
 
 $(MANPAGE_EN): $(MANPAGE_EN_IN) $(VERSION_FILE)
 	@echo ":: Generating $@ (v$(VERSION))"
@@ -908,7 +1351,7 @@ check-pot: $(POT_FILE) $(POTFILES_FILE) $(VERSION_FILE)
 clean:
 	@echo ":: Cleaning up"
 	rm -rf $(BUILD_DIR)
-	rm -f $(TARGET) $(LEGACY_PRODUCTION_TARGET)
+	rm -f $(TARGET)
 
 $(APPLICATION_IDENTITY_TEST_TARGET): tests/application_identity_test.cpp $(SRC_DIR)/application_identity.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
@@ -935,14 +1378,6 @@ $(LOCALIZATION_MISSING_CATALOG_TEST_TARGET): tests/localization_test.cpp $(SRC_D
 		-I$(SRC_DIR) \
 		tests/localization_test.cpp $(SRC_DIR)/localization.cpp \
 		-o $@
-
-$(CLI_LOCALIZATION_TEST_TARGET): $(SRCS) $(HEADERS) $(VERSION_FILE)
-	@mkdir -p $(dir $@)
-	@echo ":: Compiling CLI localization integration test binary"
-	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-DMOGUET_LOCALE_DIRECTORY=\"$(MOGUET_TEST_CATALOG_DIR)\" \
-		-DMOGUET_ENABLE_TEST_OVERRIDES \
-		$(SRCS) -o $@ $(MY_LDLIBS) $(LIBALPM_LDLIBS)
 
 $(MOGUET_TEST_ZZ_MO): $(MOGUET_TEST_ZZ_PO)
 	@mkdir -p $(dir $@)
@@ -1019,56 +1454,130 @@ $(ROOT_EXECUTION_IDENTITY_TEST_TARGET): $(OBJS) tests/stubs/runtime-identity/get
 		$(OBJS) tests/stubs/runtime-identity/geteuid_stub.cpp \
 		-Wl,--wrap=geteuid -o $@ $(MY_LDLIBS) $(LIBALPM_LDLIBS)
 
-$(TEST_TARGET): $(SRCS) $(HEADERS) $(VERSION_FILE)
-	@mkdir -p $(dir $@)
-	@echo ":: Compiling isolated integration test binary"
-	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -DMOGUET_ENABLE_TEST_OVERRIDES $(SRCS) -o $@ $(MY_LDLIBS) $(LIBALPM_LDLIBS)
-
-$(COMMANDS_INSPECT_TEST_TARGET): $(COMMANDS_INSPECT_TEST_SRCS) $(HEADERS) tests/stubs/package-metadata/alpm_stub.hpp $(VERSION_FILE)
-	@mkdir -p $(dir $@)
-	@echo ":: Compiling command inspection characterization test binary"
-	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -DMOGUET_ENABLE_TEST_OVERRIDES -I$(SRC_DIR) -Itests/stubs/package-metadata $(COMMANDS_INSPECT_TEST_SRCS) -o $@ $(MY_LDLIBS)
-
-$(AUR_UPDATE_COMMAND_TEST_TARGET): $(AUR_UPDATE_COMMAND_TEST_SRCS) $(HEADERS) tests/stubs/package-metadata/alpm_stub.hpp $(VERSION_FILE)
-	@mkdir -p $(dir $@)
-	@echo ":: Compiling AUR update command integration test binary"
-	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -DMOGUET_ENABLE_TEST_OVERRIDES -DMOGUET_ENABLE_TEST_CONFIG_PATH -I$(SRC_DIR) -Itests/stubs/package-metadata $(AUR_UPDATE_COMMAND_TEST_SRCS) -o $@ $(MY_LDLIBS)
-
-$(UPGRADE_ALL_COMMAND_TEST_TARGET): $(UPGRADE_ALL_COMMAND_TEST_SRCS) $(HEADERS) tests/stubs/package-metadata/alpm_stub.hpp $(VERSION_FILE)
-	@mkdir -p $(dir $@)
-	@echo ":: Compiling upgrade-all command integration test binary"
-	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-DMOGUET_ENABLE_TEST_OVERRIDES \
-		-DMOGUET_ENABLE_TEST_CONFIG_PATH \
-		-I$(SRC_DIR) \
-		-Itests/stubs/package-metadata \
-		$(UPGRADE_ALL_COMMAND_TEST_SRCS) \
-		-o $@ $(MY_LDLIBS)
-
-$(AUR_RPC_VALIDATION_TEST_TARGET): $(AUR_RPC_VALIDATION_TEST_SRCS) $(HEADERS) tests/stubs/package-metadata/alpm_stub.hpp $(VERSION_FILE)
-	@mkdir -p $(dir $@)
-	@echo ":: Compiling AUR RPC validation fake-symbol test binary"
-	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -DMOGUET_ENABLE_TEST_OVERRIDES -DMOGUET_ENABLE_AUR_RPC_TEST_HOOKS -I$(SRC_DIR) -Itests/stubs/package-metadata $(AUR_RPC_VALIDATION_TEST_SRCS) -o $@ $(MY_LDLIBS)
-
 $(AUR_RPC_ENVELOPE_VALIDATION_TEST_TARGET): $(AUR_RPC_ENVELOPE_VALIDATION_TEST_SRCS) $(SRC_DIR)/aur_rpc.hpp $(SRC_DIR)/dependency_spec.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/logging.hpp $(SRC_DIR)/localization.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling AUR RPC envelope validation test binary"
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -DMOGUET_ENABLE_TEST_OVERRIDES -DMOGUET_ENABLE_AUR_RPC_TEST_HOOKS -I$(SRC_DIR) $(AUR_RPC_ENVELOPE_VALIDATION_TEST_SRCS) -o $@ $(MY_LDLIBS)
 
-$(COMMANDS_SYNC_TEST_TARGET): $(COMMANDS_SYNC_TEST_SRCS) $(HEADERS) $(VERSION_FILE)
-	@mkdir -p $(dir $@)
-	@echo ":: Compiling sync command characterization test binary"
-	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -DMOGUET_ENABLE_TEST_OVERRIDES -DMOGUET_ENABLE_TEST_CONFIG_PATH -I$(SRC_DIR) $(COMMANDS_SYNC_TEST_SRCS) -o $@ $(MY_LDLIBS) $(LIBALPM_LDLIBS)
-
-$(SOURCE_INSTALL_CHARACTERIZATION_TEST_TARGET): tests/source_install_characterization.cpp $(SRCS) $(HEADERS) $(VERSION_FILE)
-	@mkdir -p $(dir $@)
-	@echo ":: Compiling shared source-install characterization test binary"
-	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -DMOGUET_ENABLE_TEST_OVERRIDES -I$(SRC_DIR) tests/source_install_characterization.cpp $(SOURCE_INSTALL_CHARACTERIZATION_TEST_SRCS) -o $@ $(MY_LDLIBS) $(LIBALPM_LDLIBS)
-
-$(APP_CONFIG_MODULE_TEST_TARGET): tests/app_config_test.cpp $(SRC_DIR)/app_config.cpp $(SRC_DIR)/app_config.hpp $(SRC_DIR)/user_config.hpp $(VERSION_FILE)
+$(APP_CONFIG_MODULE_TEST_TARGET): tests/app_config_test.cpp $(SRC_DIR)/app_config.cpp $(SRC_DIR)/app_config.hpp $(SRC_DIR)/provider_selection.cpp $(SRC_DIR)/provider_selection.hpp $(SRC_DIR)/dependency_plan.hpp $(SRC_DIR)/dependency_provider.hpp $(SRC_DIR)/dependency_spec.cpp $(SRC_DIR)/dependency_spec.hpp $(SRC_DIR)/localization.cpp $(SRC_DIR)/localization.hpp $(SRC_DIR)/user_config.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling app config module test binary"
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -I$(SRC_DIR) tests/app_config_test.cpp $(SRC_DIR)/app_config.cpp -o $@
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -I$(SRC_DIR) tests/app_config_test.cpp $(SRC_DIR)/app_config.cpp $(SRC_DIR)/provider_selection.cpp $(SRC_DIR)/dependency_spec.cpp $(SRC_DIR)/localization.cpp -o $@
+
+$(PROVIDER_SELECTION_TEST_TARGET): tests/provider_selection_test.cpp $(SRC_DIR)/provider_selection.cpp $(SRC_DIR)/provider_selection.hpp $(SRC_DIR)/dependency_plan.hpp $(SRC_DIR)/dependency_provider.hpp $(SRC_DIR)/dependency_spec.cpp $(SRC_DIR)/dependency_spec.hpp $(SRC_DIR)/localization.cpp $(SRC_DIR)/localization.hpp $(VERSION_FILE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling provider selection test binary"
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -I$(SRC_DIR) tests/provider_selection_test.cpp $(SRC_DIR)/provider_selection.cpp $(SRC_DIR)/dependency_spec.cpp $(SRC_DIR)/localization.cpp -o $@
+
+$(ROOT_PACKAGE_CANDIDATE_TEST_TARGET): $(ROOT_PACKAGE_CANDIDATE_TEST_SRCS) $(SRC_DIR)/root_package_candidate.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/localization.hpp $(VERSION_FILE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling root package candidate model test binary"
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -I$(SRC_DIR) $(ROOT_PACKAGE_CANDIDATE_TEST_SRCS) -o $@
+
+$(ROOT_PACKAGE_SEARCH_TEST_TARGET): $(ROOT_PACKAGE_SEARCH_TEST_SRCS) $(SRC_DIR)/root_package_search.hpp $(SRC_DIR)/root_package_candidate.hpp $(SRC_DIR)/package_metadata.hpp $(SRC_DIR)/aur_rpc.hpp $(SRC_DIR)/package_identifier.hpp tests/stubs/root-package-search/search_stub.hpp $(VERSION_FILE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling root package search test binary"
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
+		-I$(SRC_DIR) -Itests \
+		$(ROOT_PACKAGE_SEARCH_TEST_SRCS) -o $@
+
+$(ROOT_PACKAGE_SELECTION_TEST_TARGET): $(ROOT_PACKAGE_SELECTION_TEST_SRCS) $(SRC_DIR)/root_package_selection.hpp $(SRC_DIR)/root_package_search.hpp $(SRC_DIR)/root_package_candidate.hpp $(SRC_DIR)/package_metadata.hpp $(SRC_DIR)/aur_rpc.hpp $(SRC_DIR)/package_identifier.hpp $(VERSION_FILE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling root package selection test binary"
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
+		-I$(SRC_DIR) \
+		$(ROOT_PACKAGE_SELECTION_TEST_SRCS) -o $@
+
+$(ROOT_PACKAGE_ROUTE_PROJECTION_TEST_TARGET): $(ROOT_PACKAGE_ROUTE_PROJECTION_TEST_SRCS) $(SRC_DIR)/root_package_route_projection.hpp $(SRC_DIR)/root_package_selection.hpp $(SRC_DIR)/root_package_search.hpp $(SRC_DIR)/root_package_candidate.hpp $(SRC_DIR)/package_metadata.hpp $(SRC_DIR)/aur_rpc.hpp $(SRC_DIR)/package_identifier.hpp $(VERSION_FILE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling root package route projection test binary"
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
+		-I$(SRC_DIR) \
+		$(ROOT_PACKAGE_ROUTE_PROJECTION_TEST_SRCS) -o $@
+
+$(LOCAL_PACKAGE_METADATA_TEST_TARGET): $(LOCAL_PACKAGE_METADATA_TEST_SRCS) $(LOCAL_PACKAGE_METADATA_FIXTURE_FILES) $(SRC_DIR)/local_package_metadata.hpp $(VERSION_FILE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling local package metadata test binary"
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
+		-I$(SRC_DIR) \
+		$(LOCAL_PACKAGE_METADATA_TEST_SRCS) -o $@
+
+$(LOCAL_SOURCE_ROOT_TEST_TARGET): $(LOCAL_SOURCE_ROOT_TEST_SRCS) $(SRC_DIR)/local_source_root.hpp $(SRC_DIR)/local_package_metadata.hpp $(VERSION_FILE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling local source root test binary"
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
+		-DMOGUET_ENABLE_LOCAL_SOURCE_ROOT_TEST_HOOKS \
+		-I$(SRC_DIR) \
+		$(LOCAL_SOURCE_ROOT_TEST_SRCS) -o $@
+
+$(LOCAL_DEPENDENCY_PLAN_PROJECTION_TEST_TARGET): $(LOCAL_DEPENDENCY_PLAN_PROJECTION_TEST_SRCS) $(SRC_DIR)/local_dependency_plan_projection.hpp $(SRC_DIR)/local_package_metadata.hpp $(SRC_DIR)/dependency_plan.hpp $(SRC_DIR)/dependency_plan_projection_support.hpp $(SRC_DIR)/dependency_provider.hpp $(SRC_DIR)/aur_rpc.hpp $(SRC_DIR)/repository_query.hpp $(SRC_DIR)/dependency_spec.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/logging.hpp tests/stubs/local-dependency-plan/query_stub.hpp $(VERSION_FILE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling local dependency plan projection test binary"
+	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
+		-I$(SRC_DIR) -Itests \
+		$(LOCAL_DEPENDENCY_PLAN_PROJECTION_TEST_SRCS) \
+		-o $@ $(LIBALPM_LDLIBS)
+
+$(LOCAL_SOURCE_WORKSPACE_TEST_TARGET): \
+	$(LOCAL_SOURCE_WORKSPACE_TEST_SRCS) \
+	$(SRC_DIR)/local_source_workspace.hpp \
+	$(SRC_DIR)/local_source_root.hpp \
+	$(SRC_DIR)/local_package_metadata.hpp \
+	$(SRC_DIR)/application_identity.hpp \
+	$(SRC_DIR)/trusted_cache.hpp \
+	$(SRC_DIR)/xdg_directory_safety.hpp \
+	$(SRC_DIR)/xdg_paths.hpp \
+	$(SRC_DIR)/logging.hpp \
+	$(SRC_DIR)/localization.hpp \
+	$(TRUSTED_CACHE_SUPPORT_HEADER) \
+	$(VERSION_FILE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling local source workspace test binary"
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
+		-DMOGUET_ENABLE_LOCAL_SOURCE_WORKSPACE_TEST_HOOKS \
+		-I$(SRC_DIR) -Itests \
+		$(LOCAL_SOURCE_WORKSPACE_TEST_SRCS) -o $@
+
+$(LOCAL_SOURCE_BUILD_TEST_TARGET): \
+	$(LOCAL_SOURCE_BUILD_TEST_SRCS) \
+	$(SRC_DIR)/local_source_build.hpp \
+	$(SRC_DIR)/local_source_workspace.hpp \
+	$(SRC_DIR)/local_source_root.hpp \
+	$(SRC_DIR)/local_package_metadata.hpp \
+	$(SRC_DIR)/local_dependency_plan_projection.hpp \
+	$(SRC_DIR)/dependency_plan.hpp \
+	$(SRC_DIR)/dependency_plan_projection_support.hpp \
+	$(SRC_DIR)/dependency_provider.hpp \
+	$(SRC_DIR)/dependency_spec.hpp \
+	$(SRC_DIR)/aur_rpc.hpp \
+	$(SRC_DIR)/repository_query.hpp \
+	$(SRC_DIR)/build_plan_artifact_target_projection.hpp \
+	$(SRC_DIR)/artifact_workspace.hpp \
+	$(SRC_DIR)/artifact_identity.hpp \
+	$(SRC_DIR)/artifact_identity_selection.hpp \
+	$(SRC_DIR)/artifact_install_plan.hpp \
+	$(SRC_DIR)/application_identity.hpp \
+	$(SRC_DIR)/trusted_cache.hpp \
+	$(SRC_DIR)/xdg_directory_safety.hpp \
+	$(SRC_DIR)/xdg_paths.hpp \
+	$(SRC_DIR)/source_environment.hpp \
+	$(SRC_DIR)/package_identifier.hpp \
+	$(SRC_DIR)/shell_words.hpp \
+	$(SRC_DIR)/process.hpp \
+	$(SRC_DIR)/logging.hpp \
+	$(SRC_DIR)/localization.hpp \
+	$(TRUSTED_CACHE_SUPPORT_HEADER) \
+	tests/stubs/local-dependency-plan/query_stub.hpp \
+	tests/stubs/local-source-build/process_stub.hpp \
+	$(VERSION_FILE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling local source build test binary"
+	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
+		-DMOGUET_ENABLE_ARTIFACT_WORKSPACE_TEST_HOOKS \
+		-DMOGUET_ENABLE_LOCAL_SOURCE_WORKSPACE_TEST_HOOKS \
+		-I$(SRC_DIR) -Itests \
+		$(LOCAL_SOURCE_BUILD_TEST_SRCS) \
+		-o $@ $(LIBALPM_LDLIBS)
 
 $(USER_CONFIG_MODULE_TEST_TARGET): tests/user_config_test.cpp $(SRC_DIR)/user_config.cpp $(SRC_DIR)/user_config.hpp $(SRC_DIR)/cli_parser.cpp $(SRC_DIR)/cli_parser.hpp $(SRC_DIR)/localization.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
@@ -1078,11 +1587,6 @@ $(USER_CONFIG_MODULE_TEST_TARGET): tests/user_config_test.cpp $(SRC_DIR)/user_co
 		$(SRC_DIR)/user_config.cpp \
 		$(SRC_DIR)/cli_parser.cpp \
 		-o $@
-
-$(APP_CONFIG_INTEGRATION_TEST_TARGET): $(SRCS) $(HEADERS) $(VERSION_FILE)
-	@mkdir -p $(dir $@)
-	@echo ":: Compiling app config integration test binary"
-	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -DMOGUET_ENABLE_TEST_OVERRIDES -DMOGUET_ENABLE_TEST_CONFIG_PATH -DMOGUET_ENABLE_APP_CONFIG_TEST_HOOKS $(SRCS) -o $@ $(MY_LDLIBS) $(LIBALPM_LDLIBS)
 
 $(PACKAGE_IDENTIFIER_TEST_TARGET): tests/package_identifier_test.cpp $(SRC_DIR)/package_identifier.cpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/localization.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
@@ -1193,14 +1697,14 @@ $(SEPARATED_PACKAGE_BASE_SOURCE_BUILD_TEST_TARGET): $(SEPARATED_PACKAGE_BASE_SOU
 		$(SEPARATED_PACKAGE_BASE_SOURCE_BUILD_TEST_SRCS) \
 		-o $@
 
-$(PRODUCTION_SOURCE_BUILD_TEST_TARGET): $(PRODUCTION_SOURCE_BUILD_TEST_SRCS) $(HEADERS) tests/stubs/package-metadata/alpm_stub.hpp tests/stubs/artifact-install-executor/process_stub.hpp $(VERSION_FILE)
+$(PRODUCTION_SOURCE_BUILD_TEST_TARGET): $(PRODUCTION_SOURCE_BUILD_TEST_SRCS) $(HEADERS) tests/stubs/package-metadata/alpm_stub.hpp tests/stubs/artifact-install-executor/process_stub.hpp tests/stubs/local-dependency-plan/query_stub.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling production source-build fake-symbol test binary"
 	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
 		-DMOGUET_ENABLE_SEPARATED_SOURCE_BUILD_TEST_HOOKS \
 		-DMOGUET_ENABLE_SEPARATED_PACKAGE_BASE_SOURCE_BUILD_TEST_HOOKS \
 		-DMOGUET_ENABLE_TEST_OVERRIDES \
-		-I$(SRC_DIR) -Itests/stubs/package-metadata \
+		-I$(SRC_DIR) -Itests -Itests/stubs/package-metadata \
 		$(PRODUCTION_SOURCE_BUILD_TEST_SRCS) \
 		-o $@ $(MY_LDLIBS)
 
@@ -1246,7 +1750,7 @@ $(AUR_UPDATE_EXECUTION_PREFLIGHT_TEST_TARGET): $(AUR_UPDATE_EXECUTION_PREFLIGHT_
 	@echo ":: Compiling AUR update execution preflight fake-symbol test binary"
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -I$(SRC_DIR) $(AUR_UPDATE_EXECUTION_PREFLIGHT_TEST_SRCS) -o $@
 
-$(AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION_TEST_TARGET): $(AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION_TEST_SRCS) $(SRC_DIR)/aur_update_execution_preflight.hpp $(SRC_DIR)/aur_update_plan.hpp $(SRC_DIR)/dependency_plan.hpp $(SRC_DIR)/dependency_provider.hpp $(SRC_DIR)/aur_rpc.hpp $(SRC_DIR)/repository_query.hpp $(SRC_DIR)/package_metadata.hpp $(SRC_DIR)/installed_package.hpp $(SRC_DIR)/dependency_spec.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/process.hpp $(SRC_DIR)/shell_words.hpp $(SRC_DIR)/logging.hpp $(SRC_DIR)/localization.hpp tests/stubs/package-metadata/alpm_stub.hpp tests/stubs/aur-update-execution-preflight-integration/integration_stub.hpp $(VERSION_FILE)
+$(AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION_TEST_TARGET): $(AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION_TEST_SRCS) $(SRC_DIR)/aur_update_execution_preflight.hpp $(SRC_DIR)/aur_update_plan.hpp $(SRC_DIR)/dependency_plan.hpp $(SRC_DIR)/dependency_plan_projection_support.hpp $(SRC_DIR)/dependency_provider.hpp $(SRC_DIR)/aur_rpc.hpp $(SRC_DIR)/repository_query.hpp $(SRC_DIR)/package_metadata.hpp $(SRC_DIR)/installed_package.hpp $(SRC_DIR)/dependency_spec.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/process.hpp $(SRC_DIR)/shell_words.hpp $(SRC_DIR)/logging.hpp $(SRC_DIR)/localization.hpp tests/stubs/package-metadata/alpm_stub.hpp tests/stubs/aur-update-execution-preflight-integration/integration_stub.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling AUR update execution preflight production composition test binary"
 	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
@@ -1314,7 +1818,7 @@ $(UPGRADE_ALL_OPERATION_TEST_TARGET): $(UPGRADE_ALL_OPERATION_TEST_SRCS) $(HEADE
 		$(UPGRADE_ALL_OPERATION_TEST_SRCS) \
 		-o $@
 
-$(DEPENDENCY_PLAN_MODEL_TEST_TARGET): $(DEPENDENCY_PLAN_MODEL_TEST_SRCS) $(SRC_DIR)/dependency_plan.hpp $(SRC_DIR)/dependency_provider.hpp $(SRC_DIR)/aur_rpc.hpp $(SRC_DIR)/repository_query.hpp $(SRC_DIR)/dependency_spec.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/logging.hpp $(SRC_DIR)/localization.hpp $(VERSION_FILE)
+$(DEPENDENCY_PLAN_MODEL_TEST_TARGET): $(DEPENDENCY_PLAN_MODEL_TEST_SRCS) $(SRC_DIR)/dependency_plan.hpp $(SRC_DIR)/dependency_plan_projection_support.hpp $(SRC_DIR)/dependency_provider.hpp $(SRC_DIR)/aur_rpc.hpp $(SRC_DIR)/repository_query.hpp $(SRC_DIR)/dependency_spec.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/logging.hpp $(SRC_DIR)/localization.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling dependency plan model test binary"
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -I$(SRC_DIR) $(DEPENDENCY_PLAN_MODEL_TEST_SRCS) -o $@
@@ -1352,7 +1856,7 @@ $(ARTIFACT_IDENTITY_SELECTION_TEST_TARGET): $(ARTIFACT_IDENTITY_SELECTION_TEST_S
 		$(ARTIFACT_IDENTITY_SELECTION_TEST_SRCS) \
 		-o $@
 
-$(PACKAGE_METADATA_TEST_TARGET): $(PACKAGE_METADATA_TEST_SRCS) $(SRC_DIR)/package_metadata.hpp $(SRC_DIR)/installed_package.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/process.hpp $(SRC_DIR)/localization.hpp tests/stubs/package-metadata/alpm_stub.hpp tests/stubs/package-metadata/process_stub.hpp $(VERSION_FILE)
+$(PACKAGE_METADATA_TEST_TARGET): $(PACKAGE_METADATA_TEST_SRCS) $(SRC_DIR)/package_metadata.hpp $(SRC_DIR)/installed_package.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/process.hpp $(SRC_DIR)/shell_words.hpp $(SRC_DIR)/localization.hpp tests/stubs/package-metadata/alpm_stub.hpp tests/stubs/package-metadata/process_stub.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling package metadata fake-symbol test binary"
 	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
@@ -1360,7 +1864,7 @@ $(PACKAGE_METADATA_TEST_TARGET): $(PACKAGE_METADATA_TEST_SRCS) $(SRC_DIR)/packag
 		$(PACKAGE_METADATA_TEST_SRCS) \
 		-o $@
 
-$(PACKAGE_METADATA_INTEGRATION_TEST_TARGET): $(PACKAGE_METADATA_INTEGRATION_TEST_SRCS) $(SRC_DIR)/package_metadata.hpp $(SRC_DIR)/installed_package.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/process.hpp $(SRC_DIR)/logging.hpp $(SRC_DIR)/localization.hpp $(VERSION_FILE)
+$(PACKAGE_METADATA_INTEGRATION_TEST_TARGET): $(PACKAGE_METADATA_INTEGRATION_TEST_SRCS) $(SRC_DIR)/package_metadata.hpp $(SRC_DIR)/installed_package.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/process.hpp $(SRC_DIR)/shell_words.hpp $(SRC_DIR)/logging.hpp $(SRC_DIR)/localization.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling package metadata integration test binary"
 	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
@@ -1368,18 +1872,7 @@ $(PACKAGE_METADATA_INTEGRATION_TEST_TARGET): $(PACKAGE_METADATA_INTEGRATION_TEST
 		$(PACKAGE_METADATA_INTEGRATION_TEST_SRCS) \
 		-o $@ $(LIBALPM_LDLIBS)
 
-$(UPGRADE_BASELINE_METADATA_TEST_TARGET): $(UPGRADE_BASELINE_METADATA_TEST_SRCS) $(HEADERS) tests/stubs/package-metadata/alpm_stub.hpp $(VERSION_FILE)
-	@mkdir -p $(dir $@)
-	@echo ":: Compiling upgrade baseline metadata fake-symbol test binary"
-	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-DMOGUET_ENABLE_TEST_OVERRIDES \
-		-DMOGUET_ENABLE_TEST_CONFIG_PATH \
-		-DMOGUET_ENABLE_APP_CONFIG_TEST_HOOKS \
-		-I$(SRC_DIR) -Itests/stubs/package-metadata \
-		$(UPGRADE_BASELINE_METADATA_TEST_SRCS) \
-		-o $@ $(MY_LDLIBS)
-
-test-internal-identity:
+test-internal-identity: $(MANPAGES)
 	python3 scripts/check-internal-identity.py
 
 test-cli-localization-surface: check-pot $(POT_FILE) $(POTFILES_FILE) scripts/check-cli-localization-surface.py
@@ -1428,6 +1921,232 @@ test-runtime-identity: $(TARGET) $(ROOT_EXECUTION_IDENTITY_TEST_TARGET) $(APP_CO
 
 test-app-config: $(APP_CONFIG_MODULE_TEST_TARGET) $(APP_CONFIG_INTEGRATION_TEST_TARGET)
 	sh tests/test-app-config.sh $(abspath $(APP_CONFIG_MODULE_TEST_TARGET)) $(abspath $(APP_CONFIG_INTEGRATION_TEST_TARGET))
+
+test-provider-selection: $(PROVIDER_SELECTION_TEST_TARGET)
+	$(abspath $(PROVIDER_SELECTION_TEST_TARGET))
+
+check-root-package-candidate-link-firewall:
+	@echo ":: Checking root package candidate model link firewall"
+	@set -e; for source in $(ROOT_PACKAGE_CANDIDATE_ALLOWED_PRODUCTION_TEST_SRCS); do \
+		count=$$(printf '%s\n' $(ROOT_PACKAGE_CANDIDATE_TEST_SRCS) | \
+			awk -v expected="$$source" '$$0 == expected { count++ } END { print count + 0 }'); \
+		test "$$count" -eq 1 || { \
+			echo "error: root package candidate test must link $$source exactly once" >&2; \
+			exit 1; \
+		}; \
+	done
+	@test -z "$(filter $(ROOT_PACKAGE_CANDIDATE_FORBIDDEN_TEST_SRCS),$(ROOT_PACKAGE_CANDIDATE_TEST_SRCS))" || { \
+		echo "error: root package candidate test links a forbidden production source" >&2; \
+		exit 1; \
+	}
+	@test -z "$(filter tests/stubs/%,$(ROOT_PACKAGE_CANDIDATE_TEST_SRCS))" || { \
+		echo "error: root package candidate test links a test stub" >&2; \
+		exit 1; \
+	}
+
+test-root-package-candidate: check-root-package-candidate-link-firewall $(ROOT_PACKAGE_CANDIDATE_TEST_TARGET)
+	$(abspath $(ROOT_PACKAGE_CANDIDATE_TEST_TARGET))
+
+check-root-package-search-link-firewall:
+	@echo ":: Checking root package search link firewall"
+	@set -e; for source in $(ROOT_PACKAGE_SEARCH_ALLOWED_PRODUCTION_TEST_SRCS); do \
+		count=$$(printf '%s\n' $(ROOT_PACKAGE_SEARCH_TEST_SRCS) | \
+			awk -v expected="$$source" '$$0 == expected { count++ } END { print count + 0 }'); \
+		test "$$count" -eq 1 || { \
+			echo "error: root package search test must link $$source exactly once" >&2; \
+			exit 1; \
+		}; \
+	done
+	@set -e; for source in $(ROOT_PACKAGE_SEARCH_REQUIRED_TEST_SUPPORT_SRCS); do \
+		count=$$(printf '%s\n' $(ROOT_PACKAGE_SEARCH_TEST_SRCS) | \
+			awk -v expected="$$source" '$$0 == expected { count++ } END { print count + 0 }'); \
+		test "$$count" -eq 1 || { \
+			echo "error: root package search test must link support $$source exactly once" >&2; \
+			exit 1; \
+		}; \
+	done
+	@test -z "$(filter $(ROOT_PACKAGE_SEARCH_FORBIDDEN_TEST_SRCS),$(ROOT_PACKAGE_SEARCH_TEST_SRCS))" || { \
+		echo "error: root package search test links a forbidden production source" >&2; \
+		exit 1; \
+	}
+	@test "$(words $(filter tests/stubs/%,$(ROOT_PACKAGE_SEARCH_TEST_SRCS)))" -eq "$(words $(ROOT_PACKAGE_SEARCH_REQUIRED_TEST_SUPPORT_SRCS))" || { \
+		echo "error: root package search test links an unexpected test stub" >&2; \
+		exit 1; \
+	}
+
+test-root-package-search: check-root-package-search-link-firewall $(ROOT_PACKAGE_SEARCH_TEST_TARGET)
+	$(abspath $(ROOT_PACKAGE_SEARCH_TEST_TARGET))
+
+check-root-package-selection-link-firewall:
+	@echo ":: Checking root package selection link firewall"
+	@set -e; for source in $(ROOT_PACKAGE_SELECTION_ALLOWED_PRODUCTION_TEST_SRCS); do \
+		count=$$(printf '%s\n' $(ROOT_PACKAGE_SELECTION_TEST_SRCS) | \
+			awk -v expected="$$source" '$$0 == expected { count++ } END { print count + 0 }'); \
+		test "$$count" -eq 1 || { \
+			echo "error: root package selection test must link $$source exactly once" >&2; \
+			exit 1; \
+		}; \
+	done
+	@test -z "$(filter $(ROOT_PACKAGE_SELECTION_FORBIDDEN_TEST_SRCS),$(ROOT_PACKAGE_SELECTION_TEST_SRCS))" || { \
+		echo "error: root package selection test links a forbidden production source" >&2; \
+		exit 1; \
+	}
+	@test -z "$(filter tests/stubs/%,$(ROOT_PACKAGE_SELECTION_TEST_SRCS))" || { \
+		echo "error: root package selection test links a test stub" >&2; \
+		exit 1; \
+	}
+
+test-root-package-selection: check-root-package-selection-link-firewall $(ROOT_PACKAGE_SELECTION_TEST_TARGET)
+	$(abspath $(ROOT_PACKAGE_SELECTION_TEST_TARGET))
+
+check-root-package-route-projection-link-firewall:
+	@echo ":: Checking root package route projection link firewall"
+	@set -e; for source in $(ROOT_PACKAGE_ROUTE_PROJECTION_ALLOWED_PRODUCTION_TEST_SRCS); do \
+		count=$$(printf '%s\n' $(ROOT_PACKAGE_ROUTE_PROJECTION_TEST_SRCS) | \
+			awk -v expected="$$source" '$$0 == expected { count++ } END { print count + 0 }'); \
+		test "$$count" -eq 1 || { \
+			echo "error: root package route projection test must link $$source exactly once" >&2; \
+			exit 1; \
+		}; \
+	done
+	@test -z "$(filter $(ROOT_PACKAGE_ROUTE_PROJECTION_FORBIDDEN_TEST_SRCS),$(ROOT_PACKAGE_ROUTE_PROJECTION_TEST_SRCS))" || { \
+		echo "error: root package route projection test links a forbidden production source" >&2; \
+		exit 1; \
+	}
+	@test -z "$(filter tests/stubs/%,$(ROOT_PACKAGE_ROUTE_PROJECTION_TEST_SRCS))" || { \
+		echo "error: root package route projection test links a test stub" >&2; \
+		exit 1; \
+	}
+
+test-root-package-route-projection: check-root-package-route-projection-link-firewall $(ROOT_PACKAGE_ROUTE_PROJECTION_TEST_TARGET)
+	$(abspath $(ROOT_PACKAGE_ROUTE_PROJECTION_TEST_TARGET))
+
+check-local-package-metadata-link-firewall:
+	@echo ":: Checking local package metadata link firewall"
+	@set -e; for source in $(LOCAL_PACKAGE_METADATA_ALLOWED_PRODUCTION_TEST_SRCS); do \
+		count=$$(printf '%s\n' $(LOCAL_PACKAGE_METADATA_TEST_SRCS) | \
+			awk -v expected="$$source" '$$0 == expected { count++ } END { print count + 0 }'); \
+		test "$$count" -eq 1 || { \
+			echo "error: local package metadata test must link $$source exactly once" >&2; \
+			exit 1; \
+		}; \
+	done
+	@test -z "$(filter $(LOCAL_PACKAGE_METADATA_FORBIDDEN_TEST_SRCS),$(LOCAL_PACKAGE_METADATA_TEST_SRCS))" || { \
+		echo "error: local package metadata test links a forbidden production source" >&2; \
+		exit 1; \
+	}
+	@test -z "$(filter tests/stubs/%,$(LOCAL_PACKAGE_METADATA_TEST_SRCS))" || { \
+		echo "error: local package metadata test links a test stub" >&2; \
+		exit 1; \
+	}
+
+test-local-package-metadata: check-local-package-metadata-link-firewall $(LOCAL_PACKAGE_METADATA_TEST_TARGET)
+	$(abspath $(LOCAL_PACKAGE_METADATA_TEST_TARGET)) \
+		$(abspath tests/fixtures/local-package-metadata)
+
+check-local-source-root-link-firewall:
+	@echo ":: Checking local source root link firewall"
+	@set -e; for source in $(LOCAL_SOURCE_ROOT_ALLOWED_PRODUCTION_TEST_SRCS); do \
+		count=$$(printf '%s\n' $(LOCAL_SOURCE_ROOT_TEST_SRCS) | \
+			awk -v expected="$$source" '$$0 == expected { count++ } END { print count + 0 }'); \
+		test "$$count" -eq 1 || { \
+			echo "error: local source root test must link $$source exactly once" >&2; \
+			exit 1; \
+		}; \
+	done
+	@test -z "$(filter $(LOCAL_SOURCE_ROOT_FORBIDDEN_TEST_SRCS),$(LOCAL_SOURCE_ROOT_TEST_SRCS))" || { \
+		echo "error: local source root test links a forbidden production source" >&2; \
+		exit 1; \
+	}
+	@test -z "$(filter tests/stubs/%,$(LOCAL_SOURCE_ROOT_TEST_SRCS))" || { \
+		echo "error: local source root test links a test stub" >&2; \
+		exit 1; \
+	}
+
+test-local-source-root: check-local-source-root-link-firewall $(LOCAL_SOURCE_ROOT_TEST_TARGET)
+	$(abspath $(LOCAL_SOURCE_ROOT_TEST_TARGET))
+
+check-local-dependency-plan-projection-link-firewall:
+	@echo ":: Checking local dependency plan projection link firewall"
+	@set -e; for source in $(LOCAL_DEPENDENCY_PLAN_PROJECTION_ALLOWED_PRODUCTION_TEST_SRCS); do \
+		count=$$(printf '%s\n' $(LOCAL_DEPENDENCY_PLAN_PROJECTION_TEST_SRCS) | \
+			awk -v expected="$$source" '$$0 == expected { count++ } END { print count + 0 }'); \
+		test "$$count" -eq 1 || { \
+			echo "error: local dependency plan projection test must link $$source exactly once" >&2; \
+			exit 1; \
+		}; \
+	done
+	@set -e; for source in $(LOCAL_DEPENDENCY_PLAN_PROJECTION_REQUIRED_TEST_SUPPORT_SRCS); do \
+		count=$$(printf '%s\n' $(LOCAL_DEPENDENCY_PLAN_PROJECTION_TEST_SRCS) | \
+			awk -v expected="$$source" '$$0 == expected { count++ } END { print count + 0 }'); \
+		test "$$count" -eq 1 || { \
+			echo "error: local dependency plan projection test must link support $$source exactly once" >&2; \
+			exit 1; \
+		}; \
+	done
+	@test -z "$(filter $(LOCAL_DEPENDENCY_PLAN_PROJECTION_FORBIDDEN_TEST_SRCS),$(LOCAL_DEPENDENCY_PLAN_PROJECTION_TEST_SRCS))" || { \
+		echo "error: local dependency plan projection test links a forbidden production source" >&2; \
+		exit 1; \
+	}
+	@test "$(words $(filter tests/stubs/%,$(LOCAL_DEPENDENCY_PLAN_PROJECTION_TEST_SRCS)))" -eq "$(words $(LOCAL_DEPENDENCY_PLAN_PROJECTION_REQUIRED_TEST_SUPPORT_SRCS))" || { \
+		echo "error: local dependency plan projection test links an unexpected test stub" >&2; \
+		exit 1; \
+	}
+
+test-local-dependency-plan-projection: check-local-dependency-plan-projection-link-firewall $(LOCAL_DEPENDENCY_PLAN_PROJECTION_TEST_TARGET)
+	$(abspath $(LOCAL_DEPENDENCY_PLAN_PROJECTION_TEST_TARGET))
+
+check-local-source-workspace-link-firewall:
+	@echo ":: Checking local source workspace link firewall"
+	@set -e; for source in $(LOCAL_SOURCE_WORKSPACE_ALLOWED_PRODUCTION_TEST_SRCS); do \
+		count=$$(printf '%s\n' $(LOCAL_SOURCE_WORKSPACE_TEST_SRCS) | \
+			awk -v expected="$$source" '$$0 == expected { count++ } END { print count + 0 }'); \
+		test "$$count" -eq 1 || { \
+			echo "error: local source workspace test must link $$source exactly once" >&2; \
+			exit 1; \
+		}; \
+	done
+	@test -z "$(filter $(LOCAL_SOURCE_WORKSPACE_FORBIDDEN_TEST_SRCS),$(LOCAL_SOURCE_WORKSPACE_TEST_SRCS))" || { \
+		echo "error: local source workspace test links a forbidden production source" >&2; \
+		exit 1; \
+	}
+	@test -z "$(filter tests/stubs/%,$(LOCAL_SOURCE_WORKSPACE_TEST_SRCS))" || { \
+		echo "error: local source workspace test links a test stub" >&2; \
+		exit 1; \
+	}
+
+test-local-source-workspace: check-local-source-workspace-link-firewall $(LOCAL_SOURCE_WORKSPACE_TEST_TARGET)
+	$(abspath $(LOCAL_SOURCE_WORKSPACE_TEST_TARGET))
+
+check-local-source-build-link-firewall:
+	@echo ":: Checking local source build link firewall"
+	@set -e; for source in $(LOCAL_SOURCE_BUILD_ALLOWED_PRODUCTION_TEST_SRCS); do \
+		count=$$(printf '%s\n' $(LOCAL_SOURCE_BUILD_TEST_SRCS) | \
+			awk -v expected="$$source" '$$0 == expected { count++ } END { print count + 0 }'); \
+		test "$$count" -eq 1 || { \
+			echo "error: local source build test must link $$source exactly once" >&2; \
+			exit 1; \
+		}; \
+	done
+	@set -e; for source in $(LOCAL_SOURCE_BUILD_REQUIRED_TEST_SUPPORT_SRCS); do \
+		count=$$(printf '%s\n' $(LOCAL_SOURCE_BUILD_TEST_SRCS) | \
+			awk -v expected="$$source" '$$0 == expected { count++ } END { print count + 0 }'); \
+		test "$$count" -eq 1 || { \
+			echo "error: local source build test must link support $$source exactly once" >&2; \
+			exit 1; \
+		}; \
+	done
+	@test -z "$(filter $(LOCAL_SOURCE_BUILD_FORBIDDEN_TEST_SRCS),$(LOCAL_SOURCE_BUILD_TEST_SRCS))" || { \
+		echo "error: local source build test links a forbidden production source" >&2; \
+		exit 1; \
+	}
+	@test "$(words $(filter tests/stubs/%,$(LOCAL_SOURCE_BUILD_TEST_SRCS)))" -eq "$(words $(LOCAL_SOURCE_BUILD_REQUIRED_TEST_SUPPORT_SRCS))" || { \
+		echo "error: local source build test links an unexpected test stub" >&2; \
+		exit 1; \
+	}
+
+test-local-source-build: check-local-source-build-link-firewall $(LOCAL_SOURCE_BUILD_TEST_TARGET)
+	$(abspath $(LOCAL_SOURCE_BUILD_TEST_TARGET))
 
 test-user-config: $(USER_CONFIG_MODULE_TEST_TARGET)
 	sh tests/test-user-config.sh $(abspath $(USER_CONFIG_MODULE_TEST_TARGET))
@@ -1612,23 +2331,65 @@ test-system-source-upgrade: check-system-source-upgrade-link-firewall $(SYSTEM_S
 test-aur-update-query: $(AUR_UPDATE_QUERY_TEST_TARGET)
 	$(abspath $(AUR_UPDATE_QUERY_TEST_TARGET))
 
-test-aur-update-command: $(AUR_UPDATE_COMMAND_TEST_TARGET)
-	sh tests/test-aur-update-command.sh $(abspath $(AUR_UPDATE_COMMAND_TEST_TARGET))
+define configure_heavy_link_firewall
+$(1): private OBJECT_BUILD_LABEL := $(4)
+$(1): private OBJECT_BUILD_SRCS := $($(2)_SRCS)
+$(1): private OBJECT_BUILD_OBJECTS := $($(2)_OBJECTS)
+$(1): private OBJECT_BUILD_LINK_OBJECTS := $($(2)_LINK_OBJECTS)
+$(1): private OBJECT_BUILD_LDLIBS := $($(2)_LDLIBS)
+$(1): private OBJECT_BUILD_REQUIRED_PRODUCTION_SRCS := $($(3)_REQUIRED_PRODUCTION_TEST_SRCS)
+$(1): private OBJECT_BUILD_REQUIRED_SUPPORT_SRCS := $($(3)_REQUIRED_TEST_SUPPORT_SRCS)
+$(1): private OBJECT_BUILD_FORBIDDEN_SRCS := $($(3)_FORBIDDEN_TEST_SRCS)
+$(1): private OBJECT_BUILD_FORBIDDEN_LDLIBS := $($(3)_FORBIDDEN_TEST_LDLIBS)
+endef
 
-check-upgrade-all-command-link-firewall:
-	@echo ":: Checking upgrade-all command link firewall"
-	@set -e; for source in $(UPGRADE_ALL_COMMAND_REQUIRED_TEST_SRCS); do \
-		count=$$(printf '%s\n' $(UPGRADE_ALL_COMMAND_TEST_SRCS) | \
-			awk -v expected="$$source" '$$0 == expected { count++ } END { print count + 0 }'); \
-		test "$$count" -eq 1 || { \
-			echo "error: upgrade-all command test must link $$source exactly once" >&2; \
-			exit 1; \
-		}; \
-	done
-	@test -z "$(filter $(UPGRADE_ALL_COMMAND_FORBIDDEN_TEST_SRCS),$(UPGRADE_ALL_COMMAND_TEST_SRCS))" || { \
-		echo "error: upgrade-all command test links the production aggregate operation boundary" >&2; \
+$(eval $(call configure_heavy_link_firewall,check-aur-update-command-link-firewall,AUR_UPDATE_COMMAND_TEST,AUR_UPDATE_COMMAND,AUR update command test))
+$(eval $(call configure_heavy_link_firewall,check-upgrade-all-command-link-firewall,UPGRADE_ALL_COMMAND_TEST,UPGRADE_ALL_COMMAND,upgrade-all command test))
+$(eval $(call configure_heavy_link_firewall,check-commands-sync-link-firewall,COMMANDS_SYNC_TEST,COMMANDS_SYNC,sync command test))
+$(eval $(call configure_heavy_link_firewall,check-commands-inspect-link-firewall,COMMANDS_INSPECT_TEST,COMMANDS_INSPECT,command inspection test))
+$(eval $(call configure_heavy_link_firewall,check-isolated-integration-link-firewall,TEST,CORE,isolated integration test))
+$(eval $(call configure_heavy_link_firewall,check-cli-localization-link-firewall,CLI_LOCALIZATION_TEST,CLI_LOCALIZATION,CLI localization test))
+$(eval $(call configure_heavy_link_firewall,check-app-config-integration-link-firewall,APP_CONFIG_INTEGRATION_TEST,APP_CONFIG_INTEGRATION,app config integration test))
+$(eval $(call configure_heavy_link_firewall,check-aur-rpc-validation-link-firewall,AUR_RPC_VALIDATION_TEST,AUR_RPC_VALIDATION,AUR RPC validation test))
+$(eval $(call configure_heavy_link_firewall,check-source-install-characterization-link-firewall,SOURCE_INSTALL_CHARACTERIZATION_TEST,SOURCE_INSTALL_CHARACTERIZATION,source-install characterization test))
+$(eval $(call configure_heavy_link_firewall,check-upgrade-baseline-metadata-link-firewall,UPGRADE_BASELINE_METADATA_TEST,UPGRADE_BASELINE_METADATA,upgrade baseline metadata test))
+
+$(HEAVY_LINK_FIREWALLS):
+	@echo ":: Checking $(OBJECT_BUILD_LABEL) link firewall"
+	@test "$(words $(OBJECT_BUILD_REQUIRED_PRODUCTION_SRCS) $(OBJECT_BUILD_REQUIRED_SUPPORT_SRCS))" -eq \
+		"$(words $(sort $(OBJECT_BUILD_REQUIRED_PRODUCTION_SRCS) $(OBJECT_BUILD_REQUIRED_SUPPORT_SRCS)))" || { \
+		echo "error: $(OBJECT_BUILD_LABEL) required source set contains duplicates" >&2; \
 		exit 1; \
 	}
+	@test "$(words $(OBJECT_BUILD_SRCS))" -eq "$(words $(sort $(OBJECT_BUILD_SRCS)))" || { \
+		echo "error: $(OBJECT_BUILD_LABEL) source list contains duplicates" >&2; \
+		exit 1; \
+	}
+	@test -z "$(filter-out $(OBJECT_BUILD_SRCS),$(OBJECT_BUILD_REQUIRED_PRODUCTION_SRCS) $(OBJECT_BUILD_REQUIRED_SUPPORT_SRCS))" && \
+		test -z "$(filter-out $(OBJECT_BUILD_REQUIRED_PRODUCTION_SRCS) $(OBJECT_BUILD_REQUIRED_SUPPORT_SRCS),$(OBJECT_BUILD_SRCS))" || { \
+		echo "error: $(OBJECT_BUILD_LABEL) must link every required source exactly once" >&2; \
+		exit 1; \
+	}
+	@test -z "$(filter $(OBJECT_BUILD_FORBIDDEN_SRCS),$(OBJECT_BUILD_SRCS))" || { \
+		echo "error: $(OBJECT_BUILD_LABEL) links a production source owned by test support" >&2; \
+		exit 1; \
+	}
+	@test -z "$(filter $(OBJECT_BUILD_FORBIDDEN_LDLIBS),$(OBJECT_BUILD_LDLIBS))" || { \
+		echo "error: $(OBJECT_BUILD_LABEL) links a library owned by test support" >&2; \
+		exit 1; \
+	}
+	@test "$(words $(OBJECT_BUILD_SRCS))" -eq "$(words $(OBJECT_BUILD_OBJECTS))" && \
+		test "$(words $(OBJECT_BUILD_OBJECTS))" -eq "$(words $(sort $(OBJECT_BUILD_OBJECTS)))" && \
+		test "$(words $(OBJECT_BUILD_OBJECTS))" -eq "$(words $(OBJECT_BUILD_LINK_OBJECTS))" && \
+		test "$(words $(OBJECT_BUILD_LINK_OBJECTS))" -eq "$(words $(sort $(OBJECT_BUILD_LINK_OBJECTS)))" && \
+		test -z "$(filter-out $(OBJECT_BUILD_OBJECTS),$(OBJECT_BUILD_LINK_OBJECTS))" && \
+		test -z "$(filter-out $(OBJECT_BUILD_LINK_OBJECTS),$(OBJECT_BUILD_OBJECTS))" || { \
+		echo "error: $(OBJECT_BUILD_LABEL) source-to-object mapping is not one-to-one" >&2; \
+		exit 1; \
+	}
+
+test-aur-update-command: check-aur-update-command-link-firewall $(AUR_UPDATE_COMMAND_TEST_TARGET)
+	sh tests/test-aur-update-command.sh $(abspath $(AUR_UPDATE_COMMAND_TEST_TARGET))
 
 test-upgrade-all-command: check-upgrade-all-command-link-firewall $(UPGRADE_ALL_COMMAND_TEST_TARGET)
 	sh tests/test-upgrade-all-command.sh $(abspath $(UPGRADE_ALL_COMMAND_TEST_TARGET))
@@ -1762,6 +2523,7 @@ test-build-plan-artifact-target-projection: check-build-plan-artifact-target-pro
 
 test-repository-query: $(REPOSITORY_QUERY_TEST_TARGET)
 	@set -e; for test_case in \
+		candidate-value-contract \
 		success \
 		repository-named-aur \
 		legacy-malformed-candidates \
@@ -1776,6 +2538,9 @@ test-repository-query: $(REPOSITORY_QUERY_TEST_TARGET)
 		empty-database \
 		malformed-database \
 		invalid-provided-dependency \
+		missing-package-version \
+		multiple-package-versions \
+		invalid-package-version \
 		partial-snapshot; do \
 		$(abspath $(REPOSITORY_QUERY_TEST_TARGET)) $$test_case; \
 	done
@@ -1851,8 +2616,14 @@ test-commands-source-maintenance: $(APP_CONFIG_INTEGRATION_TEST_TARGET) $(SOURCE
 		$(abspath $(SOURCE_INSTALL_CHARACTERIZATION_TEST_TARGET)) \
 		$(abspath $(UPGRADE_BASELINE_METADATA_TEST_TARGET))
 
-test-commands-sync: $(COMMANDS_SYNC_TEST_TARGET)
+test-commands-sync: check-commands-sync-link-firewall $(COMMANDS_SYNC_TEST_TARGET)
 	sh tests/test-commands-sync.sh $(abspath $(COMMANDS_SYNC_TEST_TARGET))
+
+test-live-contract:
+	sh tests/test-live-contract.sh
+
+test-run-with-pty:
+	sh tests/test-run-with-pty.sh
 
 test-pacman-routing: $(TEST_TARGET)
 	sh tests/test-pacman-routing.sh $(abspath $(TEST_TARGET))
@@ -1869,7 +2640,7 @@ test-source-build: $(TEST_TARGET) $(APP_CONFIG_INTEGRATION_TEST_TARGET) $(UPGRAD
 test-source-selection: $(TEST_TARGET)
 	sh tests/test-source-selection.sh $(abspath $(TEST_TARGET))
 
-test-install-layout: $(TARGET) $(MANPAGES) $(COMPLETION_FILES) $(PROJECT_LICENSE_FILES) $(COMPLIANCE_DOC_FILES) $(PUBLIC_DOC_FILES)
+test-install-layout: $(TARGET) $(MANPAGES) $(COMPLETION_FILES) $(MO_FILES) $(PROJECT_LICENSE_FILES) $(COMPLIANCE_DOC_FILES) $(PUBLIC_DOC_FILES)
 	sh tests/test-install-layout.sh
 
 test-package-transition: $(TARGET) $(MANPAGES) $(COMPLETION_FILES) $(PROJECT_LICENSE_FILES) $(COMPLIANCE_DOC_FILES) $(PUBLIC_DOC_FILES)
@@ -1880,6 +2651,71 @@ test-needed-contract: $(TEST_TARGET)
 
 test-pkgbuild-export: $(TEST_TARGET)
 	sh tests/test-pkgbuild-export.sh $(abspath $(TEST_TARGET))
+
+test-container:
+	@set -eu; \
+		if ! git -C "$(CURDIR)" rev-parse --verify \
+			'refs/tags/v1.16.0^{commit}' >/dev/null 2>&1; then \
+			printf '%s\n' \
+				'error: local tag v1.16.0 is required for container validation' >&2; \
+			exit 1; \
+		fi; \
+		fixture_dir=$$(mktemp -d); \
+		legacy_archive=$$fixture_dir/jpacker-v1.16.0-source.tar; \
+		cleanup() { \
+			rm -f -- "$$legacy_archive"; \
+			rmdir -- "$$fixture_dir"; \
+		}; \
+		trap cleanup EXIT; \
+		trap 'exit 129' HUP; \
+		trap 'exit 130' INT; \
+		trap 'exit 143' TERM; \
+		git -C "$(CURDIR)" archive --format=tar \
+			--output="$$legacy_archive" v1.16.0; \
+		printf '%s\n' ':: Building Arch validation image'; \
+		$(DOCKER) build --pull \
+			--build-context "moguet-transition-fixture=$$fixture_dir" \
+			--tag "$(ARCH_VALIDATION_IMAGE)" \
+			--file containers/arch-validation/Dockerfile \
+			.; \
+		printf '%s\n' ':: Running Arch validation container'; \
+		$(DOCKER) run --rm --network=none "$(ARCH_VALIDATION_IMAGE)"
+
+test-container-live-provider:
+	@set -eu; \
+		printf '%s\n' ':: Building Arch live provider-validation image'; \
+		$(DOCKER) build --pull \
+			--tag "$(ARCH_LIVE_VALIDATION_IMAGE)" \
+			--file containers/arch-live-validation/Dockerfile \
+			.; \
+		printf '%s\n' ':: Running Arch live provider-validation container'; \
+		$(DOCKER) run --rm "$(ARCH_LIVE_VALIDATION_IMAGE)"
+
+test-container-live-aur:
+	@set -eu; \
+		printf '%s\n' ':: Building Arch live AUR-validation image'; \
+		$(DOCKER) build --pull \
+			--tag "$(ARCH_LIVE_AUR_VALIDATION_IMAGE)" \
+			--file containers/arch-live-validation/Dockerfile.aur \
+			.; \
+		printf '%s\n' ':: Running Arch live AUR-validation container'; \
+		$(DOCKER) run --rm "$(ARCH_LIVE_AUR_VALIDATION_IMAGE)"
+
+test-container-live-local:
+	@set -eu; \
+		printf '%s\n' ':: Building Arch live local-PKGBUILD validation image'; \
+		$(DOCKER) build --pull \
+			--tag "$(ARCH_LIVE_LOCAL_VALIDATION_IMAGE)" \
+			--file containers/arch-live-validation/Dockerfile.local \
+			.; \
+		printf '%s\n' ':: Running Arch live local-PKGBUILD validation container'; \
+		$(DOCKER) run --rm "$(ARCH_LIVE_LOCAL_VALIDATION_IMAGE)"
+
+test-container-live:
+	+@set -eu; \
+		$(MAKE) test-container-live-provider; \
+		$(MAKE) test-container-live-aur; \
+		$(MAKE) test-container-live-local
 
 test: \
 	test-internal-identity \
@@ -1893,6 +2729,16 @@ test: \
 	test-trusted-cache \
 	test-runtime-identity \
 	test-app-config \
+	test-provider-selection \
+	test-root-package-candidate \
+	test-root-package-search \
+	test-root-package-selection \
+	test-root-package-route-projection \
+	test-local-package-metadata \
+	test-local-source-root \
+	test-local-dependency-plan-projection \
+	test-local-source-workspace \
+	test-local-source-build \
 	test-user-config \
 	test-package-identifier \
 	test-package-metadata \
@@ -1938,6 +2784,8 @@ test: \
 	test-commands-inspect \
 	test-commands-source-maintenance \
 	test-commands-sync \
+	test-live-contract \
+	test-run-with-pty \
 	test-conflicts-replaces \
 	test-install-layout \
 	test-package-transition \
@@ -1947,7 +2795,7 @@ test: \
 	test-source-build \
 	test-source-selection
 
-release-check: check-pot check-catalogs test-localization test-catalog-metadata-gate test-cli-localization-surface test-internal-identity test-application-identity test-xdg-paths test-xdg-directory-safety test-source-environment test-xdg-state-log test-trusted-cache test-runtime-identity test-public-documentation test-install-layout test-package-transition
+release-check: check-pot check-catalogs test-localization test-catalog-metadata-gate test-cli-localization-surface test-internal-identity test-application-identity test-xdg-paths test-xdg-directory-safety test-source-environment test-xdg-state-log test-trusted-cache test-runtime-identity test-public-documentation test-install-layout test-package-transition test-live-contract
 	@echo ":: Checking release version consistency"
 	sh scripts/check-release-version.sh
 	@echo ":: Checking license compliance"

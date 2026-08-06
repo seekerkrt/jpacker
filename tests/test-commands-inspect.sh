@@ -1,6 +1,13 @@
 #!/bin/sh
 set -eu
 
+# Assertions target the canonical untranslated CLI output.
+# Do not inherit locale settings from the invoking environment.
+LANG=C
+LC_ALL=C
+export LANG LC_ALL
+unset LANGUAGE
+
 test_binary=$1
 repo_root=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
 MOGUET_TEST_REPOSITORY_ROOT=$repo_root
@@ -12,6 +19,11 @@ cleanup() {
     rm -rf "$tmp_dir"
 }
 trap cleanup EXIT INT TERM
+
+if ! command -v script >/dev/null 2>&1; then
+    echo "script(1) is required for command inspection tests" >&2
+    exit 1
+fi
 
 export PATH=$repo_root/tests/stubs:/usr/bin:/bin
 require_exact_test_command pacman-conf "$repo_root/tests/stubs/pacman-conf"
@@ -87,7 +99,7 @@ fail_case() {
 
 run_ok() {
     : > "$command_log"
-    if ! "$test_binary" "$@" > "$stdout_file" 2> "$stderr_file"; then
+    if ! "$test_binary" "$@" </dev/null > "$stdout_file" 2> "$stderr_file"; then
         fail_case "expected command to succeed: $*"
     fi
 }
@@ -95,11 +107,68 @@ run_ok() {
 run_fail() {
     : > "$command_log"
     set +e
-    "$test_binary" "$@" > "$stdout_file" 2> "$stderr_file"
+    "$test_binary" "$@" </dev/null > "$stdout_file" 2> "$stderr_file"
     exit_status=$?
     set -e
     if [ "$exit_status" -ne 1 ]; then
         fail_case "expected command status 1, got $exit_status: $*"
+    fi
+}
+
+run_ok_with_pipe() {
+    input=$1
+    shift
+    : > "$command_log"
+    if ! printf '%s\n' "$input" |
+        "$test_binary" "$@" > "$stdout_file" 2> "$stderr_file"; then
+        fail_case "expected piped command to succeed: $*"
+    fi
+}
+
+run_fail_with_pipe() {
+    input=$1
+    shift
+    : > "$command_log"
+    set +e
+    printf '%s\n' "$input" |
+        "$test_binary" "$@" > "$stdout_file" 2> "$stderr_file"
+    exit_status=$?
+    set -e
+    if [ "$exit_status" -ne 1 ]; then
+        fail_case "expected piped command status 1, got $exit_status: $*"
+    fi
+}
+
+run_tty_ok() {
+    answer=$1
+    shift
+    : > "$command_log"
+    if ! printf '%s\n' "$answer" |
+        script -qec "$test_binary $*" /dev/null > "$stdout_file" 2> "$stderr_file"; then
+        fail_case "expected interactive command to succeed: $*"
+    fi
+}
+
+run_tty_fail() {
+    answer=$1
+    shift
+    : > "$command_log"
+    set +e
+    printf '%s\n' "$answer" |
+        script -qec "$test_binary $*" /dev/null \
+            > "$stdout_file" 2> "$stderr_file"
+    exit_status=$?
+    set -e
+    if [ "$exit_status" -ne 1 ]; then
+        fail_case "expected interactive command status 1, got $exit_status: $*"
+    fi
+}
+
+run_tty_ok_with_eof() {
+    : > "$command_log"
+    if ! script -qec "$test_binary $*" /dev/null </dev/null \
+        > "$stdout_file" 2> "$stderr_file"; then
+        fail_case "expected interactive EOF command to succeed: $*"
     fi
 }
 
@@ -142,6 +211,16 @@ assert_exact_line_count() {
     actual=$(grep -Fxc -- "$line" "$file" || true)
     if [ "$actual" -ne "$expected" ]; then
         fail_case "expected $expected occurrence(s) of '$line', got $actual"
+    fi
+}
+
+assert_contains_count() {
+    expected=$1
+    pattern=$2
+    file=$3
+    actual=$(grep -Fc -- "$pattern" "$file" || true)
+    if [ "$actual" -ne "$expected" ]; then
+        fail_case "expected $expected line(s) containing '$pattern', got $actual"
     fi
 }
 
@@ -235,6 +314,12 @@ assert_no_git_mutation() {
     fi
 }
 
+assert_cache_root_absent() {
+    if [ -e "$XDG_CACHE_HOME/moguet" ] || [ -L "$XDG_CACHE_HOME/moguet" ]; then
+        fail_case "fetch created the cache before validation and provider preflight completed"
+    fi
+}
+
 assert_no_foreign_update_mutation() {
     if grep -E '^(git|makepkg|sudo)( |$)' "$command_log" >/dev/null ||
        grep -E '^pacman( |$)' "$command_log" >/dev/null; then
@@ -310,14 +395,76 @@ assert_exact_line "      2. aur/provider-a" "$stdout_file"
 assert_before "      1. aur/provider-z" "      2. aur/provider-a" "$stdout_file"
 echo "  ok: deps provider numbering preserves candidate order"
 
+# Issue #272: provider choice is numbered, metadata-complete, and shared by the
+# top-level classification and recursive view in one invocation.
+setup_case deps-provider-interactive-selection
+export MOGUET_TEST_INSPECTION_SCENARIO=deps-provider-interactive-selection
+run_tty_ok 2 deps --recursive provider-root
+assert_contains_count 1 \
+    ":: provider dependency=moguet-inspect-203-virtual-provider" \
+    "$stdout_file"
+assert_contains \
+    "2) source=AUR package=provider-a PackageBase=provider-a provided=moguet-inspect-203-virtual-provider provided-specification=moguet-inspect-203-virtual-provider version=2.0-1" \
+    "$stdout_file"
+assert_contains "Selected provided dependencies:" "$stdout_file"
+assert_contains \
+    "moguet-inspect-203-virtual-provider -> aur/provider-a" \
+    "$stdout_file"
+assert_contains \
+    "moguet-inspect-203-virtual-provider [provided] by aur/provider-a" \
+    "$stdout_file"
+echo "  ok: deps shares one interactive provider choice with recursive display"
+
+# A cancellation is an invocation-local decision for the canonical dependency;
+# the recursive pass must retain ambiguity without asking again.
+setup_case deps-provider-interactive-cancel
+export MOGUET_TEST_INSPECTION_SCENARIO=deps-provider-interactive-cancel
+run_tty_ok q deps --recursive provider-root
+assert_contains_count 1 \
+    ":: provider dependency=moguet-inspect-203-virtual-provider" \
+    "$stdout_file"
+assert_not_contains "Selected provided dependencies:" "$stdout_file"
+assert_contains "Ambiguous provided dependencies:" "$stdout_file"
+assert_contains \
+    "moguet-inspect-203-virtual-provider [ambiguous-provider]" \
+    "$stdout_file"
+assert_no_git_mutation
+assert_not_contains "makepkg " "$command_log"
+assert_not_contains "sudo " "$command_log"
+echo "  ok: deps retains an explicit provider cancellation across recursive resolution"
+
+# EOF has the same cancellation contract and must not start a second prompt.
+setup_case deps-provider-interactive-eof
+export MOGUET_TEST_INSPECTION_SCENARIO=deps-provider-interactive-eof
+run_tty_ok_with_eof deps --recursive provider-root
+assert_contains_count 1 \
+    ":: provider dependency=moguet-inspect-203-virtual-provider" \
+    "$stdout_file"
+assert_not_contains "Selected provided dependencies:" "$stdout_file"
+assert_contains "Ambiguous provided dependencies:" "$stdout_file"
+assert_no_git_mutation
+assert_not_contains "makepkg " "$command_log"
+assert_not_contains "sudo " "$command_log"
+echo "  ok: deps retains provider EOF cancellation across recursive resolution"
+
+# stdin pipe is never a provider-selection input source.
+setup_case deps-provider-non-tty-pipe
+export MOGUET_TEST_INSPECTION_SCENARIO=deps-provider-non-tty-pipe
+run_ok_with_pipe 2 deps provider-root
+assert_not_contains ":: provider dependency=" "$stdout_file"
+assert_not_contains "Selected provided dependencies:" "$stdout_file"
+assert_exact_line "      1. aur/provider-z" "$stdout_file"
+assert_exact_line "      2. aur/provider-a" "$stdout_file"
+echo "  ok: deps ignores piped provider input and remains ambiguous"
+
 setup_case plan-partial-failure
 export MOGUET_TEST_INSPECTION_SCENARIO=plan-partial-failure
 run_fail plan plan-first plan-fail plan-third
 assert_contains "Failed to plan build order for plan-fail: fixture plan failure" "$stderr_file"
 assert_before "  1. plan-first" "  1. plan-third" "$stdout_file"
 assert_single_blank_before_occurrence "Build plan:" 2 "$stdout_file"
-assert_exact_command_before "aur info plan-first" "aur info plan-fail"
-assert_exact_command_before "aur info plan-fail" "aur info plan-third"
+assert_exact_command_before "aur info-strict plan-first" "aur info-strict plan-fail"
+assert_exact_command_before "aur info-strict plan-fail" "aur info-strict plan-third"
 echo "  ok: plan partial failure continues in target order"
 
 setup_case plan-validation-position
@@ -325,9 +472,45 @@ export MOGUET_TEST_INSPECTION_SCENARIO=plan-validation-position
 run_fail plan plan-first invalid/name plan-third
 assert_contains "Invalid package name: invalid/name" "$stderr_file"
 assert_not_contains "Failed to plan build order for invalid/name" "$stderr_file"
-assert_exact_line "aur info plan-first" "$command_log"
-assert_not_contains "aur info plan-third" "$command_log"
+assert_exact_line "aur info-strict plan-first" "$command_log"
+assert_not_contains "aur info-strict plan-third" "$command_log"
 echo "  ok: plan target validation remains outside the target catch"
+
+setup_case plan-provider-interactive-selection
+export MOGUET_TEST_INSPECTION_SCENARIO=plan-provider-interactive-selection
+run_tty_ok 2 plan provider-root provider-root
+assert_contains_count 1 \
+    ":: provider dependency=moguet-inspect-203-virtual-provider" \
+    "$stdout_file"
+assert_contains_count 2 \
+    "moguet-inspect-203-virtual-provider -> aur/provider-a (selected)" \
+    "$stdout_file"
+assert_contains_count 2 "  1. provider-a" "$stdout_file"
+assert_not_contains "Plan status: incomplete" "$stdout_file"
+echo "  ok: plan reuses one interactive provider choice across targets"
+
+setup_case plan-provider-interactive-cancel
+export MOGUET_TEST_INSPECTION_SCENARIO=plan-provider-interactive-cancel
+run_tty_ok q plan provider-root provider-root
+assert_contains_count 1 \
+    ":: provider dependency=moguet-inspect-203-virtual-provider" \
+    "$stdout_file"
+assert_not_contains " (selected)" "$stdout_file"
+assert_contains_count 2 "Plan status: incomplete" "$stdout_file"
+assert_no_git_mutation
+assert_not_contains "makepkg " "$command_log"
+assert_not_contains "sudo " "$command_log"
+echo "  ok: plan retains provider cancellation across multiple targets"
+
+# --noconfirm suppresses provider selection even when stdin is a TTY.
+setup_case plan-provider-noconfirm-tty
+export MOGUET_TEST_INSPECTION_SCENARIO=plan-provider-noconfirm-tty
+run_tty_ok 2 --noconfirm plan provider-root
+assert_not_contains ":: provider dependency=" "$stdout_file"
+assert_not_contains " (selected)" "$stdout_file"
+assert_contains "Ambiguous provided dependencies:" "$stdout_file"
+assert_contains "Plan status: incomplete" "$stdout_file"
+echo "  ok: --noconfirm keeps an ambiguous provider fail-closed on a TTY"
 
 # Issue #125: formatterはprivate helperのまま、repository metadataからplan表示へ流して固定する。
 setup_case plan-repository-size-formatter
@@ -424,6 +607,8 @@ echo "  ok: plan lookup/cache/display identities remain distinct and first-seen"
 
 setup_case deps-typed-provider-display
 export MOGUET_TEST_INSPECTION_SCENARIO=plan-repository-size-identities
+MOGUET_TEST_PACMAN_REPO_PACKAGES='same-package different-package same-semantic repository-aur-package'
+export MOGUET_TEST_PACMAN_REPO_PACKAGES
 run_ok deps --recursive plan-identity-root
 assert_exact_line "  - identity-repository-aur-virtual [provided] by aur/repository-aur-package" "$stdout_file"
 assert_exact_line "  - identity-aur-virtual [provided] by aur/identity-aur-provider" "$stdout_file"
@@ -545,19 +730,69 @@ assert_not_contains "Failed to fetch repositories for invalid/name" "$stderr_fil
 if [ -s "$command_log" ]; then
     fail_case "fetch queried external metadata before all targets were valid"
 fi
-if [ -e "$XDG_CACHE_HOME/moguet" ] || [ -L "$XDG_CACHE_HOME/moguet" ]; then
-    fail_case "fetch created the cache before all targets were valid"
-fi
-assert_not_contains "aur info fetch-after-root" "$command_log"
+assert_cache_root_absent
+assert_not_contains "aur info-strict fetch-after-root" "$command_log"
 assert_no_git_mutation
 echo "  ok: fetch validates every target before cache/network preparation"
+
+setup_case fetch-provider-interactive-selection
+export MOGUET_TEST_INSPECTION_SCENARIO=fetch-provider-interactive-selection
+run_tty_ok 2 fetch provider-root
+assert_contains_count 1 \
+    ":: provider dependency=moguet-inspect-203-virtual-provider" \
+    "$stdout_file"
+assert_contains "  1. provider-a -> https://aur.archlinux.org/provider-a.git" \
+    "$stdout_file"
+assert_contains "  2. provider-root -> https://aur.archlinux.org/provider-root.git" \
+    "$stdout_file"
+assert_contains "Selected provided dependencies:" "$stdout_file"
+assert_contains \
+    "moguet-inspect-203-virtual-provider -> aur/provider-a" \
+    "$stdout_file"
+assert_exact_line \
+    "git clone https://aur.archlinux.org/provider-a.git provider-a" \
+    "$command_log"
+assert_exact_line \
+    "git clone https://aur.archlinux.org/provider-root.git provider-root" \
+    "$command_log"
+assert_exact_command_before \
+    "git clone https://aur.archlinux.org/provider-a.git provider-a" \
+    "git clone https://aur.archlinux.org/provider-root.git provider-root"
+assert_not_contains \
+    "git clone https://aur.archlinux.org/provider-z.git provider-z" \
+    "$command_log"
+echo "  ok: fetch retrieves only the interactively selected AUR provider"
+
+setup_case fetch-provider-interactive-cancel
+export MOGUET_TEST_INSPECTION_SCENARIO=fetch-provider-interactive-cancel
+run_tty_fail q fetch provider-root
+assert_contains_count 1 \
+    ":: provider dependency=moguet-inspect-203-virtual-provider" \
+    "$stdout_file"
+assert_not_contains "Selected provided dependencies:" "$stdout_file"
+assert_contains "Ambiguous provided dependencies:" "$stdout_file"
+assert_cache_root_absent
+assert_no_git_mutation
+echo "  ok: fetch cancellation stops before cache or Git mutation"
+
+setup_case fetch-provider-non-tty-pipe
+export MOGUET_TEST_INSPECTION_SCENARIO=fetch-provider-non-tty-pipe
+run_fail_with_pipe 2 fetch provider-root
+assert_not_contains ":: provider dependency=" "$stdout_file"
+assert_not_contains "Selected provided dependencies:" "$stdout_file"
+assert_contains "Ambiguous provided dependencies:" "$stdout_file"
+assert_contains "Cannot execute build plan for provider-root; ambiguous providers:" \
+    "$stderr_file"
+assert_cache_root_absent
+assert_no_git_mutation
+echo "  ok: fetch ignores piped provider input and fails before cache or Git mutation"
 
 # P0-2: planning/guardは全rootを先に走査し、1件でも失敗すればmutationを開始しない。
 setup_case fetch-preflight-barrier
 export MOGUET_TEST_INSPECTION_SCENARIO=fetch-preflight-barrier
 run_fail fetch fetch-preflight-root fetch-guard-root fetch-after-root
 assert_contains "Failed to fetch repositories for fetch-guard-root: Cannot execute build plan for fetch-guard-root; cyclic dependencies: fetch-guard-root" "$stderr_file"
-assert_exact_line "aur info fetch-after-root" "$command_log"
+assert_exact_line "aur info-strict fetch-after-root" "$command_log"
 assert_no_git_mutation
 echo "  ok: fetch waits for every root preflight before mutation"
 
@@ -585,7 +820,7 @@ printf '%s\n' \
 if ! diff -u "$expected_clone_file" "$actual_clone_file"; then
     fail_case "fetch execution did not visit each entry exactly once in plan/root order"
 fi
-last_plan_line=$(grep -nFx -- "aur info fetch-later-root" "$command_log" | tail -n 1 | cut -d: -f1)
+last_plan_line=$(grep -nFx -- "aur info-strict fetch-later-root" "$command_log" | tail -n 1 | cut -d: -f1)
 first_fetch_line=$(grep -nF -- "git clone " "$command_log" | head -n 1 | cut -d: -f1)
 if [ -z "$last_plan_line" ] || [ -z "$first_fetch_line" ] || [ "$last_plan_line" -ge "$first_fetch_line" ]; then
     fail_case "fetch execution started before the later root completed planning"

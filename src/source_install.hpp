@@ -1,6 +1,8 @@
 #pragma once
 
 #include "artifact_install_plan.hpp"
+#include "dependency_provider.hpp"
+#include "dependency_plan.hpp"
 #include "package_metadata.hpp"
 #include "separated_package_base_source_build.hpp"
 #include "source_build.hpp"
@@ -11,7 +13,38 @@
 #include <vector>
 
 struct AppConfig;
-struct BuildPlan;
+class LocalBuildPlan;
+class LocalSourceBuildDependencyPreparation;
+struct PreparedProductionSourceBuildInvocation;
+
+PreparedProductionSourceBuildInvocation
+prepare_local_source_build_dependency_invocation(
+        LocalSourceBuildDependencyPreparation preparation,
+        const ValidatedCacheRoot& cache_root,
+        const AppConfig& config);
+
+// Empty remote invocationをgeneric callerが捏造して通さないためのauthority。
+// local rootを別ownerが保持するpreparationだけが生成できる。
+class LocalSourceBuildInvocationAuthority final {
+    LocalSourceBuildInvocationAuthority() noexcept = default;
+
+    friend PreparedProductionSourceBuildInvocation
+    prepare_local_source_build_dependency_invocation(
+            LocalSourceBuildDependencyPreparation preparation,
+            const ValidatedCacheRoot& cache_root,
+            const AppConfig& config);
+
+public:
+    LocalSourceBuildInvocationAuthority(
+            const LocalSourceBuildInvocationAuthority&) = default;
+    LocalSourceBuildInvocationAuthority(
+            LocalSourceBuildInvocationAuthority&&) noexcept = default;
+    LocalSourceBuildInvocationAuthority& operator=(
+            const LocalSourceBuildInvocationAuthority&) = default;
+    LocalSourceBuildInvocationAuthority& operator=(
+            LocalSourceBuildInvocationAuthority&&) noexcept = default;
+    ~LocalSourceBuildInvocationAuthority() = default;
+};
 
 enum class SourceBuildSourceKind {
     Repository,
@@ -36,6 +69,9 @@ struct ProductionSourceBuildWorkItem {
     // POLICY(#268): PackageBase execution unitのinstall対象とreasonはこのvectorが正本。
     // singular executor用request.package_nameはsize 1の場合だけ設定する。
     std::vector<RequiredPackageArtifactTarget> required_targets;
+    // 利用者が選択したofficial providerを、対応するAUR build unitの
+    // execution前dependency transactionまでtyped identityのまま保持する。
+    std::vector<ProvidedDependency> selected_repository_providers;
     // AUR BuildPlanが確定したchild setをPackageBase ownerへ渡す。
     // falseはofficial/generic/registered-source singular compatibility境界。
     bool                          is_build_plan_entry = false;
@@ -48,8 +84,89 @@ struct ProductionSourceBuildWorkItem {
 // PacmanDatabasePathsはinvocationで1回だけ解決し、全build unitへvalueとして共有する。
 struct PreparedProductionSourceBuildInvocation {
     std::vector<ProductionSourceBuildWorkItem> work_items;
+    std::vector<ProvidedDependency>             selected_repository_providers;
     PacmanDatabasePaths                        database_paths;
     std::optional<ValidatedCacheRoot>          cache_root;
+    std::optional<LocalSourceBuildInvocationAuthority>
+            local_source_authority = std::nullopt;
+};
+
+// LocalBuildPlanのlocal root unitをexecution consumerへ渡さず、remote AUR
+// dependency unitと全edge由来のselected repository providerだけを保持する。
+// Production callerはLocalBuildPlan projectionを経ずに生成できない。
+class LocalSourceBuildDependencyPreparation final {
+    std::vector<ProductionSourceBuildWorkItem> remote_work_items_;
+    std::vector<ProvidedDependency> selected_repository_providers_;
+
+    LocalSourceBuildDependencyPreparation(
+            std::vector<ProductionSourceBuildWorkItem> remote_work_items,
+            std::vector<ProvidedDependency> selected_repository_providers)
+            noexcept;
+
+    friend LocalSourceBuildDependencyPreparation
+    prepare_local_source_build_dependencies(
+            const LocalBuildPlan& plan,
+            bool use_source_build_preferences,
+            bool needed);
+    friend PreparedProductionSourceBuildInvocation
+    prepare_local_source_build_dependency_invocation(
+            LocalSourceBuildDependencyPreparation preparation,
+            const ValidatedCacheRoot& cache_root,
+            const AppConfig& config);
+
+public:
+    LocalSourceBuildDependencyPreparation(
+            const LocalSourceBuildDependencyPreparation&) = delete;
+    LocalSourceBuildDependencyPreparation(
+            LocalSourceBuildDependencyPreparation&&) noexcept = default;
+    LocalSourceBuildDependencyPreparation& operator=(
+            const LocalSourceBuildDependencyPreparation&) = delete;
+    LocalSourceBuildDependencyPreparation& operator=(
+            LocalSourceBuildDependencyPreparation&&) noexcept = default;
+    ~LocalSourceBuildDependencyPreparation() = default;
+
+    const std::vector<ProductionSourceBuildWorkItem>& remote_work_items()
+            const noexcept;
+    const std::vector<ProvidedDependency>& selected_repository_providers()
+            const noexcept;
+
+#ifdef MOGUET_ENABLE_TEST_OVERRIDES
+    static LocalSourceBuildDependencyPreparation
+    make_for_production_source_build_test(
+            std::vector<ProductionSourceBuildWorkItem> remote_work_items,
+            std::vector<ProvidedDependency> selected_repository_providers);
+#endif
+};
+
+enum class SelectedRepositoryProviderTransactionStatus {
+    NotRequired,
+    BlockedBeforeExecution,
+    Succeeded,
+    Failed,
+};
+
+// provider transactionをsource work-itemへ誤帰属させず、selected identityと
+// package-stateの断言可能範囲をinvocation消費後もowned snapshotとして残す。
+struct SelectedRepositoryProviderTransactionResult {
+    SelectedRepositoryProviderTransactionStatus status =
+            SelectedRepositoryProviderTransactionStatus::NotRequired;
+    std::vector<ProvidedDependency> selected_providers;
+    PackageStateChange package_state_change = PackageStateChange::NoChange;
+    std::optional<int> command_exit_status;
+    std::optional<std::string> diagnostic;
+
+    bool is_success() const noexcept {
+        switch(status) {
+        case SelectedRepositoryProviderTransactionStatus::NotRequired:
+        case SelectedRepositoryProviderTransactionStatus::Succeeded:
+            return true;
+        case SelectedRepositoryProviderTransactionStatus::
+                BlockedBeforeExecution:
+        case SelectedRepositoryProviderTransactionStatus::Failed:
+            return false;
+        }
+        return false;
+    }
 };
 
 // checkoutやmetadata queryより前に確認できるwork item単体のstatic契約。
@@ -78,19 +195,51 @@ ProductionSourceBuildWorkItem prepare_resolved_source_build_work_item(
         SourceBuildEnvironment environment,
         bool only_if_updated,
         bool needed);
+ProductionSourceBuildWorkItem prepare_resolved_source_build_work_item(
+        const ResolvedSourceBuildIdentity& identity,
+        SourceBuildEnvironment environment,
+        bool only_if_updated,
+        bool needed,
+        const ProviderSelectionCallback& select_provider);
 
 ProductionSourceBuildWorkItem prepare_smart_source_build_work_item(
         const std::string& package_name,
         bool only_if_updated,
         bool needed);
+ProductionSourceBuildWorkItem prepare_smart_source_build_work_item(
+        const std::string& package_name,
+        bool only_if_updated,
+        bool needed,
+        const ProviderSelectionCallback& select_provider);
 
 std::vector<ProductionSourceBuildWorkItem> prepare_aur_source_build_work_items(
         const BuildPlan& plan,
         bool use_source_build_preferences,
         bool needed);
 
+LocalSourceBuildDependencyPreparation
+prepare_local_source_build_dependencies(
+        const LocalBuildPlan& plan,
+        bool use_source_build_preferences,
+        bool needed);
+
 PreparedProductionSourceBuildInvocation prepare_production_source_build_invocation(
         std::vector<ProductionSourceBuildWorkItem> work_items,
+        const AppConfig& config);
+
+// Generic production preparationのnonempty契約は維持し、local root ownerが
+// 存在するこの境界だけremote AUR dependency 0件を許可する。
+PreparedProductionSourceBuildInvocation
+prepare_local_source_build_dependency_invocation(
+        LocalSourceBuildDependencyPreparation preparation,
+        const ValidatedCacheRoot& cache_root,
+        const AppConfig& config);
+PreparedProductionSourceBuildInvocation
+prepare_local_source_build_dependency_invocation(
+        const LocalBuildPlan& plan,
+        bool use_source_build_preferences,
+        bool needed,
+        const ValidatedCacheRoot& cache_root,
         const AppConfig& config);
 
 // Higher-level operationが先に確定したcache capabilityを、generic invocation
@@ -103,6 +252,14 @@ void seed_production_source_build_cache(
 // 全work itemへ同じretained cache-root capabilityを配る。
 void activate_production_source_build_cache(
         PreparedProductionSourceBuildInvocation& invocation);
+
+// invocation全体で選択済みのofficial providerをinstalled reason authorityで
+// preflightし、1回のexact pacman transactionへ渡す。新規/Dependencyは
+// Dependency、既存ExplicitはExplicitを維持し、混在時はmutation前に停止する。
+SelectedRepositoryProviderTransactionResult
+execute_selected_repository_provider_transaction(
+        const PreparedProductionSourceBuildInvocation& invocation,
+        const AppConfig& config);
 
 // AUR PackageBase execution専用のset owner。required_targetsをauthorityにし、
 // child別outcomeとunselected artifact identityをflattenせず返す。

@@ -8,12 +8,15 @@
 
 ### 文書の位置づけ
 
-この文書は、現在のMoguetへ適用する上位設計ポリシーの詳細な正本である。CLI挙動、provider選択、solverの利用、fallback、自動化、安全境界について新しい判断を行うときは、このポリシーを基準にする。
+この文書は、現在のMoguetへ適用する普遍的な上位設計原則とlicense / third-party complianceの上位原則の詳細な正本である。CLI挙動、provider選択、solverの利用、fallback、自動化、安全境界について新しい判断を行うときは、このポリシーを基準にする。
+
+Issue別に増えるproduction contractの全文はこの文書へ追加せず、[docs/contracts/](contracts/README.md)の各安定contractを参照する。現在のcommand routingと利用者向けcompatibility summaryは[docs/COMPATIBILITY.md](COMPATIBILITY.md)を参照する。`DECISIONS.md`は上位原則の正本であり、個別contractの実装詳細を独立した正本として重複保持しない。
 
 現在のproject名はMoguetである。Moguet v2.0.0はjpacker v1.16.0の実行基盤を継承するが、current identityはMoguetとし、旧名称はversion、migration、storage等の明示されたlegacy contextだけで使用する。
 
-この文書は、現在の全 CLI 挙動を列挙する互換性仕様でも、未実装機能を実装済みとみなす保証でもない。現在の command routing と個別の互換性契約は [docs/COMPATIBILITY.md](COMPATIBILITY.md) を参照する。個別仕様を追加・変更するときは、この上位ポリシーに沿って、対象となる behavior と検証範囲を別途明示する。
+この文書は、現在の全CLI挙動を列挙する互換性仕様でも、未実装機能を実装済みとみなす保証でもない。個別仕様を追加・変更するときは、この上位ポリシーに沿って、対象となるbehaviorと検証範囲をcontract側へ明示する。
 
+<a id="decision-1"></a>
 ### 1. 一貫性
 
 同じ種類の状態、結果、失敗は、経路や内部実装が違っても同じ境界と規則で扱う。
@@ -23,6 +26,7 @@
 * 同じ option や operation は、pacman-only、AUR、source-build など経路が違っても、対応可能な範囲で同じ意味を保つ。
 * 経路ごとに同じ意味を安全に保てない場合は、黙って無視したり別の意味へ変換したりせず、未対応であることを示して実行前に停止する。
 
+<a id="decision-2"></a>
 ### 2. 透明性
 
 何を観測し、何を判断し、どの command を実行し、なぜ停止したかを、利用者が追える形にする。
@@ -32,6 +36,7 @@
 * 利用者に影響する主要な外部 command と副作用は、実行前に見える形にする。特に pacman / makepkg に渡す主要 option を隠さない。
 * 安全境界で停止した場合は、拒否した判断や不足している情報を示し、利用者が次に確認すべき対象を分かるようにする。
 
+<a id="decision-3"></a>
 ### 3. 既存操作と挙動の尊重
 
 pacman、makepkg、git、および既存 Moguet CLI の操作、責務、挙動は、明確な理由と独立した設計判断なしに変更しない。
@@ -41,6 +46,7 @@ pacman、makepkg、git、および既存 Moguet CLI の操作、責務、挙動�
 * wrapper として扱える operation は、元 command の操作感、引数の意味、主要な副作用、終了状態を可能な限りなぞる。
 * この原則は完全互換の宣言ではない。現在未対応の command や edge case を保証するのではなく、差異を意図せず増やさないための判断基準である。
 
+<a id="decision-4"></a>
 ### 4. 任せる部分は任せる
 
 Moguetは、既存componentが所有するpackage-management機能の不完全な再実装を増やさない。各componentのauthoritativeな結果と既存の責務境界を利用し、その上で必要なorchestrationを行う。
@@ -53,6 +59,7 @@ Moguetは、既存componentが所有するpackage-management機能の不完全�
 
 重要: 現在採用している libalpm の scope は read-only package metadata に限る。Moguet は libalpm transaction を開始、準備、commit せず、system package transaction の owner は引き続き pacman である。metadata の authority を libalpm へ寄せることは、transaction ownership の移行を意味しない。
 
+<a id="decision-5"></a>
 ### 5. ユーザーが自然に想像する意図
 
 これは、利便性の好みではなく、自動化と安全境界を決める独立した中核原則である。
@@ -68,6 +75,7 @@ user intent は、command 名、指定された target と option、元 tool の
 * 対象同士が独立し、安全境界を保ったまま処理できる場合は、失敗対象を隔離して残りを継続してよい。その場合は partial failure として、成功、失敗、未実行を区別して示す。
 * 「驚きが少ないこと」と「元 command から自然に予想できること」を、compatibility と UX の一部として扱う。
 
+<a id="decision-6"></a>
 ### 6. 責務境界
 
 | Component | 所有する責務 |
@@ -80,6 +88,7 @@ user intent は、command 名、指定された target と option、元 tool の
 
 Moguet が外部 component を呼び出すための順序、事前条件、停止条件、表示を設計することは orchestration の責務である。ただし、それを理由に各 component の solver、transaction、build、repository operation を独自実装へ置き換えない。
 
+<a id="decision-7"></a>
 ### 7. 判断ルール
 
 新しい自動化、fallback、solver 利用、または behavior change を検討するときは、最低限、次を確認する。
@@ -94,6 +103,7 @@ Moguet が外部 component を呼び出すための順序、事前条件、停�
 
 これらを満たす説明や検証方法がない場合は、自動化を既定動作へ組み込まない。read-only の観測や plan と、build、install、remove、repository update などの mutation を分け、必要な判断材料を利用者へ示すことを優先する。
 
+<a id="decision-8"></a>
 ### 8. Licenseとthird-party compliance
 
 Moguet releaseとjpacker v1.15.0以降は`GPL-3.0-or-later`で提供する。jpacker v1.14.0以前のreleaseはMIT Licenseのまま維持し、過去のtag、release、permissionを書き換えない。
@@ -102,81 +112,21 @@ licenseとnoticeの監査では、同じprogramへ組み込まれるdirect linke
 
 version boundary、配布policy、component別の詳細は[docs/LICENSING.md](LICENSING.md)をsource of truthとする。
 
-### 9. PackageBase buildとrequired child selectionの分離
-
-AUR source buildでは、PackageBaseをrepository / build / workspace / package transactionの単位、BuildPlanが必要とするpackage childをinstall-selectionの単位とする。この2つのidentityを単一のpackage nameへflattenしない。
-
-* 1 PackageBaseは1つのfresh artifact workspaceで1回buildする。expected outputは`makepkg --packagelist`からordered aggregateとして取得する。
-* required childのartifactはfilenameの推測ではなく、build後のpackage metadata identityでexactly one選択する。selected childの順序はBuildPlanのrequired-target orderに従う。
-* expectedだがrequiredでないsibling / debug artifactはunselected result dataとして保持する。install input、update target attribution、install outcomeは付与しない。
-* selected childrenは1 PackageBaseにつき1回のpacman transactionへ渡す。childごとのdesired install reasonからそのtransactionで表現できるpolicyを作れない場合は、部分的にinstallせずfail closedとする。
-* transaction failureはpackageごとのpartial successを証明しないため、child successを推測しない。safeなattempt identityはfailure evidenceとして成功outcomeから分離する。
-* workspace cleanupはtransaction成功後に限る。cleanup failureはtransaction failureへflattenせず、すべてのcompleted childの正確なoutcomeとunselected identityを保つpartial successとする。
-
-### 10. separated source-build上の`--rmdeps`はunsupportedとする
-
-#123の旧combined lifecycleでは、`makepkg -sicr`がdependency同期、source artifactのbuild、package install、dependency cleanupを一続きで所有していた。#242ではこの責務を、build-only makepkg、invocation-ownedのfresh `PKGDEST`、検証済みartifactを扱うtyped `pacman -U` install transactionへ分離した。Moguetはjpacker v1.16.0からこのseparated lifecycleを継承しており、今回のinvocationだけが新規導入したmake / check dependencyの集合をauthoritativeに所有していない。
-
-build前後のinstalled package差分だけでは、並行package transaction、pre-existing dependency、Explicit package、install reasonの変化、`base-devel`、およびinvocation外で導入または変更されたpackageを安全に区別できない。`pacman -Qdt`や`pacman -Rns`によるsystem-wideなorphan cleanupは、このoptionの責務でもない。そのためMoguetでは、separated AUR / source-build lifecycle上の`--rmdeps`を正式にunsupportedとする。
-
-このunsupported decisionはsilent ignoreではない。source-build routeでは、cleanup ownershipを証明できないまま削除へ進む代わりに、各callerの既存preflight contractに従ってexternal mutationより前にfailureとする。`makepkg -r`、pacman removal、独自orphan cleanup、automatic rollbackへ変換しない。`--noconfirm`はpackage削除を暗黙に許可せず、このfailureを突破しない。pacman-only routeではMoguet global optionとして消費するが、作用させずpacmanへも転送しない。
-
-将来dependency cleanupを実装する場合は、少なくとも次を満たす設計が必要である。これは実装方法を確定するものではなく、安全にsupportできると判断するための必要条件である。
-
-* authoritativeなbuild前installed package / install reason snapshotを持つこと。
-* dependency installation transactionが今回のinvocationに所有されていることを証明できること。
-* 今回新規導入されたDependency-reason packageのexact setを特定できること。
-* concurrent package transactionを排除または検出できること。
-* pre-existing package、Explicit package、`base-devel`、およびinvocation外で導入または変更されたpackageをcleanup対象から保護すること。
-* cleanup planを実行前にpreviewし、必要なconfirmationを得ること。
-* build、install、cleanupの成功または失敗を別resultとして保持すること。
-* cleanup failure後も、すでに成功したpackage installを失敗へflattenしたり無条件に再実行したりしないこと。
-* package削除を実systemへ向けずに検証できるstrict stub / isolated testを備えること。
-
-### 11. XDG cache cutoverの安全契約と実装の比例性
-
-#302のMoguet v2 roadmapにおける#305は、XDG準拠のcache rootへの切替とlegacy jpacker cacheの非破壊を当初の中心としていた。一方、対象operationにはpersistent checkout、artifact workspace、rollback、reclone、recursive cleanupが含まれ、利用者所有のfilesystem entryを作成、置換、削除する。
-
-MoguetはOSSであり、maintainer自身が把握する環境だけでなく、未知の利用者と実行環境でも利用され得る。#75のdecision authorityの下で、decision 4 / 6の責務境界とdecision 5 / 7のmutation前停止をこのfilesystem / Git execution境界へ適用し、最小限のpath cutoverより保守的に、現実的に到達可能な脆弱性をfail-closedに扱う設計を採用する。これは安全性を優先した意図的なtrade-offである。
-
-将来implementationを統合、縮小、または置換する場合も、少なくとも次の契約を維持する。
-
-* destructive operationをtrusted root内へ限定する。
-* symlinkまたはroot escapeをfollowしない。
-* 通常のidentity replacementを検出し、fail-closedとする。
-* rollbackはownershipとidentityを証明できるentryだけを対象にする。
-* cache cleanupは全targetのpreflightが完了する前に削除を開始しない。
-* legacy jpacker cacheを自動的に読み込み、移行、変更、削除しない。
-* Git executionは、危険なparent-process routingまたはconfig environmentを暗黙に継承しない。
-
-このdecisionが固定するのは上記の安全契約であり、現在のmodule、type、capability plumbing、trusted Git policy、removal planningを恒久的architectureとして固定するものではない。現在のproject規模に対して、実装、理解、test、将来追従のcostが不釣り合いになる可能性を認識する。実際の保守でその負担が明らかになった場合は、安全契約を維持したまま、より小さく規模に比例したarchitectureへ統合、縮小、または置換してよい。その簡素化はこのdecisionの撤回ではなく、安全性と保守性を両立するための正当な調整である。
-
-### 12. source-build preferenceのXDG authorityとv2.0.1 PATCH例外
-
-#335は、v2.0.0のXDG移行でsource-build preferenceだけがlegacy system storeに残った実装漏れを修正する。canonical authorityは`${XDG_CONFIG_HOME:-$HOME/.config}/moguet/source-build.d/<package-name>`とし、add / edit / list / delete / revertとbuild / upgrade側のreaderを原子的に同じauthorityへ切り替える。unsetまたはemptyな`XDG_CONFIG_HOME`は`$HOME/.config`へfallbackし、明示値はabsoluteかつ安全で既存のbase directoryでなければfail-closedとする。root実行でもroot自身のXDG contextを使い、`SUDO_USER`から別userを推測しない。
-
-readとmissing entryに対するdelete / revertはdirectoryを作らない。最初にstorageを必要とするadd / editだけが安全なcreation boundaryを通り、managed directoryをmode `0700`、entryをmode `0600`で作成する。source preferenceのfilesystem操作はdescriptor基準とし、final symlinkを拒否し、write / renameをatomicに行う。missing store / entryだけをabsenceとして扱い、invalid name、symlink、non-regular file、owner / mode違反、permission、I/O、raceはhard errorとする。listはsnapshot全体を検証してから出力する。filesystem操作から`sudo`を撤去するが、revert後のpacman transactionに必要な`sudo`は維持する。
-
-同じstoreを使うMoguet process同士のconcurrency contractは、directory descriptorへのcooperative flockで固定する。writerはmutation全体で`LOCK_EX`、strict single-entry readとsnapshot / list readerはreadとvalidationの全期間で`LOCK_SH`を保持する。これにより、正常なMoguet readerが別のMoguet writerのinternal temporary / tombstoneを観測しない。crash等でlock ownerが消えた後も残るinternal artifactはskipせず、invalid entryとしてhard errorにする。
-
-storeへaccessできる非協調same-euid processまたはrootが、最終identity checkとpathname syscallの間でentryを敵対的に置換する場合まで完全なrace-free保証は行わない。ただし、Moguetがidentity mismatchやexternal replacementを観測した後は、その正体を証明できないnameをunlink、exchange、restoreしない。cleanup / rollbackを安全に証明できない場合はmanual inspection用artifactを保持し、typed hard errorを返す。Linuxにinode条件付きunlinkがないことを過剰なrecheck chainで模倣しない。
-
-`/etc/jpacker`と`/etc/moguet`はruntimeで作成・参照せず、legacy storeへのfallback、merge、自動copy / rewrite / deleteを行わない。migrationは利用者がMigration Guideに従ってuserごとに手動実行する。package install / reinstall / uninstallはuser XDG directoryを作成・削除せず、canonical entryとlegacy entryの双方を保持する。
-
-通常、config directoryの変更はPATCHに含めない。しかしこれはv2.0.0で承認済みのuser XDG storage contractから漏れた一領域を、その同じauthorityへ揃える限定的なv2.0.1のbug fixとして扱う。新しいstorage移行をPATCHへ許可する一般的precedentにはしない。v2.0.0のtag、GitHub Release、公開済みrelease bodyはhistorical artifactとして変更しない。
-
 ---
 
 ## English
 
 ### Status and authority
 
-This document is the detailed canonical source for the high-level design policy applied to the current Moguet project. New decisions about CLI behavior, provider selection, solver use, fallback, automation, and safety boundaries must be evaluated against this policy.
+This document is the detailed canonical source for the high-level design policy applied to the current Moguet project. Decisions 1 through 7 are universal design principles, and decision 8 is the high-level license and third-party compliance principle. New decisions about CLI behavior, provider selection, solver use, fallback, automation, and safety boundaries must be evaluated against this policy.
+
+Issue-specific production contracts are not duplicated here. Use the [contract index](contracts/README.md) for their Japanese normative source and [docs/COMPATIBILITY.md](COMPATIBILITY.md) for current routing and user-visible compatibility summaries. This document is the source of truth for the high-level principles.
 
 The current project name is Moguet. Moguet v2.0.0 inherits the jpacker v1.16.0 execution base, but Moguet is the current identity; the former name is used only in explicit legacy contexts such as versions, migration, and storage.
 
-This document is not a compatibility specification enumerating all current CLI behavior, and it does not claim that unimplemented features already exist. See [docs/COMPATIBILITY.md](COMPATIBILITY.md) for current command-routing details and specific compatibility contracts. When a specific contract is added or changed, the affected behavior and verification scope must be stated separately in accordance with this policy.
+This document is not a compatibility specification enumerating all current CLI behavior, and it does not claim that unimplemented features already exist. Specific behavior contracts must state their affected behavior and verification scope in the contract documents while following this policy.
 
+<a id="decision-1-en"></a>
 ### 1. Consistency
 
 States, results, and failures of the same kind must follow the same boundaries and rules even when they pass through different routes or internal implementations.
@@ -186,6 +136,7 @@ States, results, and failures of the same kind must follow the same boundaries a
 * The same option or operation should retain the same meaning, where supported, across pacman-only, AUR, and source-build routes.
 * If a route cannot safely preserve that meaning, Moguet must not silently ignore the option or translate it into a different meaning. It must report the unsupported case and stop before execution.
 
+<a id="decision-2-en"></a>
 ### 2. Transparency
 
 Users must be able to follow what was observed, what was decided, which command will run, and why processing stopped.
@@ -195,6 +146,7 @@ Users must be able to follow what was observed, what was decided, which command 
 * Major external commands and side effects that affect users must be visible before execution. In particular, important options passed to pacman or makepkg must not be hidden.
 * When a safety boundary stops processing, diagnostics must identify the rejected decision or missing information so users know what to inspect next.
 
+<a id="decision-3-en"></a>
 ### 3. Preserve existing commands and behavior
 
 The operations, responsibilities, and behavior of pacman, makepkg, git, and the existing Moguet CLI must not change without a clear reason and a separate design decision.
@@ -204,6 +156,7 @@ The operations, responsibilities, and behavior of pacman, makepkg, git, and the 
 * An operation that can remain a wrapper should follow the original command's interaction model, argument meaning, major side effects, and completion status wherever possible.
 * This principle is not a declaration of complete compatibility. It does not guarantee commands or edge cases that are currently unsupported; it is a rule against introducing unintended differences.
 
+<a id="decision-4-en"></a>
 ### 4. Delegate to authoritative components
 
 Moguet must not accumulate incomplete reimplementations of package-management capabilities owned by existing components. It should use their authoritative results and established responsibility boundaries, then provide the necessary orchestration around them.
@@ -216,6 +169,7 @@ Moguet must not accumulate incomplete reimplementations of package-management ca
 
 Important: the currently adopted libalpm scope is limited to read-only package metadata. Moguet does not initiate, prepare, or commit libalpm transactions; pacman remains the owner of system package transactions. Treating libalpm as the metadata authority does not transfer transaction ownership to libalpm.
 
+<a id="decision-5-en"></a>
 ### 5. Natural user intent
 
 This is an independent core principle for automation and safety boundaries, not merely a preference about convenience.
@@ -231,6 +185,7 @@ User intent is inferred from the command name, explicit targets and options, con
 * When targets are independent and can be processed without weakening safety boundaries, a failed target may be isolated while the remaining targets continue. The result must be reported as a partial failure that distinguishes success, failure, and unattempted work.
 * “Low surprise” and behavior naturally predictable from the original command are part of compatibility and user experience.
 
+<a id="decision-6-en"></a>
 ### 6. Responsibility boundary
 
 | Component | Owned responsibility |
@@ -243,6 +198,7 @@ User intent is inferred from the command name, explicit targets and options, con
 
 Designing the order, preconditions, stop conditions, and presentation around calls to external components is part of Moguet orchestration. It is not a reason to replace each component's solver, transaction, build, or repository operations with a custom implementation.
 
+<a id="decision-7-en"></a>
 ### 7. Decision rule
 
 Before introducing new automation, fallback, solver use, or a behavior change, verify at least the following:
@@ -257,6 +213,7 @@ Before introducing new automation, fallback, solver use, or a behavior change, v
 
 If these questions cannot be answered with a clear explanation and verification method, the automation must not become default behavior. Prefer separating read-only observation and planning from mutations such as build, install, removal, and repository update, and expose the decision inputs users need.
 
+<a id="decision-8-en"></a>
 ### 8. Licensing and third-party compliance
 
 Moguet releases and jpacker v1.15.0 or later are distributed under `GPL-3.0-or-later`. jpacker releases through v1.14.0 remain under the MIT License; their historical tags, releases, and granted permissions are not rewritten.
@@ -265,65 +222,54 @@ License and notice audits distinguish direct linked or header-compiled component
 
 [docs/LICENSING.md](LICENSING.md) is the source of truth for the version boundary, distribution policy, and component-level details.
 
-### 9. Separate PackageBase builds from required-child selection
+---
 
-For AUR source builds, a PackageBase is the repository, build, workspace, and package-transaction unit. A package child required by the BuildPlan is the installation-selection unit. These two identities must not be flattened into one package name.
+## Issue別production contract index
 
-* One PackageBase is built once in one fresh artifact workspace. Ordered expected outputs come from `makepkg --packagelist` as an aggregate.
-* A required child's artifact is selected exactly once by post-build package metadata identity, never by guessing from a filename. Selected-child order follows BuildPlan required-target order.
-* Expected but unrequired sibling or debug artifacts remain unselected result data. They receive no install input role, update-target attribution, or install outcome.
-* Selected children enter one pacman transaction per PackageBase. If the child-specific desired install reasons cannot form a policy representable by that transaction, processing fails closed instead of partially installing them.
-* A failed transaction does not prove per-package partial success, so no child success is inferred. Safe attempted identities remain failure evidence separate from successful outcomes.
-* Workspace cleanup occurs only after transaction success. Cleanup failure is not flattened into transaction failure: it is partial success retaining every completed child's exact outcome and all unselected identities.
+decision 9〜15として旧`DECISIONS.md`に記載していた全文contractは、次の安定filenameへ移動した。旧decision番号は追跡用の互換識別子であり、新しいcontractのauthorityは各ファイルの日本語本文である。
 
-### 10. `--rmdeps` is unsupported on separated source builds
+| 旧decision | 現行contract | behavior / safety boundary |
+| --- | --- | --- |
+| 9 | [PackageBase build / required-child selection](contracts/packagebase-child-selection.md) | PackageBase build unitとrequired child install selectionの分離 |
+| 10 | [separated source-build `--rmdeps`](contracts/source-build-rmdeps.md) | cleanup ownershipを証明できないsource-buildではfail closed、pacman-onlyでは消費してno-op |
+| 11 | [XDG cache cutover safety](contracts/xdg-cache-safety.md) | cache filesystem identity、symlink、root escape、legacy cache非変更 |
+| 12 | [source-build preference XDG authority](contracts/source-build-preference-xdg.md) | source preferenceのuser XDG authorityと安全なfilesystem操作 |
+| 13 | [ambiguous provider selection](contracts/ambiguous-provider-selection.md) | invocation-localな明示provider選択とmutation前preflight |
+| 14 | [root package selection](contracts/root-package-selection.md) | `-S --select`によるsource-aware root selectionとroute固定 |
+| 15 | [local PKGBUILD](contracts/local-pkgbuild.md) | `build --local`のlocal root identity、metadata、source tree非破壊境界 |
 
-Under the former combined lifecycle from #123, `makepkg -sicr` owned dependency synchronization, source-artifact building, package installation, and dependency cleanup as one continuous operation. #242 separated those responsibilities into build-only makepkg, an invocation-owned fresh `PKGDEST`, and a typed `pacman -U` installation transaction over validated artifacts. Moguet inherits this separated lifecycle from jpacker v1.16.0 and does not authoritatively own the set of make and check dependencies introduced only by the current invocation.
+### 上位原則とcontractの読み分け
 
-A pre/post installed-package difference alone cannot safely distinguish concurrent package transactions, pre-existing dependencies, Explicit packages, install-reason changes, `base-devel`, or packages introduced or changed outside the invocation. System-wide orphan cleanup through `pacman -Qdt` or `pacman -Rns` is also outside this option's responsibility. Moguet therefore formally treats `--rmdeps` as unsupported on the separated AUR/source-build lifecycle.
+decision 1〜7は全contractへ適用する普遍原則であり、decision 8はlicense / third-party complianceの上位原則である。個別contractはこれらの原則を特定のbehaviorやsafety boundaryへ適用したもので、実装module、type、capability plumbingを恒久固定するものではない。利用者向けのroute差分、pass-through、対応 / 非対応一覧は`COMPATIBILITY.md`を参照する。
 
-This unsupported decision is not silent ignore. On a source-build route, each caller follows its existing preflight contract and fails before external mutation instead of deleting packages whose cleanup ownership is unproven. The option is not translated into `makepkg -r`, pacman removal, custom orphan cleanup, or automatic rollback. `--noconfirm` does not implicitly authorize package removal and cannot bypass this failure. On a pacman-only route, Moguet consumes the global option but gives it no effect and does not forward it to pacman.
+## Legacy decision anchors and move notices
 
-Any future dependency-cleanup implementation would need a design that satisfies at least the following conditions. These are necessary conditions for deciding that support is safe, not a commitment to a particular implementation:
+旧decision 9〜15を参照する外部linkやhistorical auditのため、旧番号と旧見出し相当のcompatibility anchorを残す。旧contract全文は保持せず、移動先だけを案内する。
 
-* An authoritative pre-build snapshot of installed packages and install reasons.
-* Proof that the dependency installation transaction is owned by the current invocation.
-* The exact set of Dependency-reason packages newly introduced by this invocation.
-* A mechanism that excludes or detects concurrent package transactions.
-* Protection for pre-existing packages, Explicit packages, `base-devel`, and packages introduced or changed outside the invocation.
-* Preview and required confirmation of the cleanup plan before execution.
-* Separate results for build, installation, and cleanup success or failure.
-* Preservation of an already successful package installation after cleanup failure, without flattening it into failure or blindly retrying it.
-* Strict stubs and isolated tests that verify removal behavior without targeting the real system.
+<a id="decision-9"></a>
+<a id="9-packagebase-buildとrequired-child-selectionの分離"></a>
+* 旧decision 9: [PackageBase build / required-child selection contract](contracts/packagebase-child-selection.md)へ移動。
 
-### 11. Safety contract and implementation proportionality for the XDG cache cutover
+<a id="decision-10"></a>
+<a id="10-separated-source-build上のrmdepsはunsupportedとする"></a>
+* 旧decision 10: [separated source-build `--rmdeps` contract](contracts/source-build-rmdeps.md)へ移動。
 
-Under the Moguet v2 roadmap in #302, #305 originally centered on moving the cache root to an XDG-compliant location while leaving the legacy jpacker cache untouched. The affected operations also include persistent checkouts, artifact workspaces, rollback, reclone, and recursive cleanup, all of which create, replace, or remove user-owned filesystem entries.
+<a id="decision-11"></a>
+<a id="11-xdg-cache-cutoverの安全契約と実装の比例性"></a>
+* 旧decision 11: [XDG cache cutover safety contract](contracts/xdg-cache-safety.md)へ移動。
 
-Moguet is open source and may be used by unknown users in execution environments beyond those known to the maintainer. Under the decision authority in #75, the responsibility boundaries in decisions 4 and 6 and the pre-mutation stop rules in decisions 5 and 7 are applied to this filesystem and Git execution boundary. The adopted design is more conservative than the minimum path cutover and fails closed for realistically reachable vulnerabilities. This is a deliberate safety-first trade-off.
+<a id="decision-12"></a>
+<a id="12-source-build-preferenceのxdg authorityとv2.0.1-patch例外"></a>
+* 旧decision 12: [source-build preference XDG authority contract](contracts/source-build-preference-xdg.md)へ移動。
 
-Any future consolidation, reduction, or replacement of the implementation must preserve at least these contracts:
+<a id="decision-13"></a>
+<a id="13-ambiguous-providerはinvocation-localな明示選択とする"></a>
+* 旧decision 13: [ambiguous provider selection contract](contracts/ambiguous-provider-selection.md)へ移動。
 
-* Destructive operations remain confined to a trusted root.
-* Symlinks and root escapes are not followed.
-* Ordinary identity replacement is detected and fails closed.
-* Rollback targets only entries whose ownership and identity can be proven.
-* Cache cleanup does not begin deletion until every target has completed preflight.
-* The legacy jpacker cache is never read, migrated, modified, or removed automatically.
-* Git execution does not implicitly inherit dangerous parent-process routing or configuration environment.
+<a id="decision-14"></a>
+<a id="14-root-package-discoveryは-s-selectでsource-awareな明示選択とする"></a>
+* 旧decision 14: [root package selection contract](contracts/root-package-selection.md)へ移動。
 
-This decision fixes those safety contracts, not the current modules, types, capability plumbing, trusted Git policy, or removal-planning structure as permanent architecture. Their implementation, comprehension, testing, and future adaptation costs may prove disproportionate to the current project scale. If maintenance demonstrates that burden, the implementation may be consolidated, reduced, or replaced with a smaller architecture proportional to the project, provided the safety contracts remain intact. Such simplification is a legitimate adjustment that balances safety and maintainability, not a reversal of this decision.
-
-### 12. XDG authority for source-build preferences and the v2.0.1 PATCH exception
-
-#335 fixes an implementation omission that left source-build preferences in a legacy system store during the v2.0.0 XDG transition. The canonical authority is `${XDG_CONFIG_HOME:-$HOME/.config}/moguet/source-build.d/<package-name>`, and add, edit, list, delete, revert, and the build/upgrade readers move atomically to that one authority. An unset or empty `XDG_CONFIG_HOME` falls back to `$HOME/.config`; an explicit value fails closed unless it is an absolute, safe, existing base directory. Root execution uses root's own XDG context and never infers another user from `SUDO_USER`.
-
-Reads and deletion/revert of a missing entry do not create directories. Only the first add/edit that needs storage crosses the safe creation boundary, creating managed directories with mode `0700` and entries with mode `0600`. Source-preference filesystem operations are descriptor-based, reject a final symlink, and use atomic write/rename. Only a missing store or entry means absence; an invalid name, symlink, non-regular file, ownership/mode violation, permission or I/O error, or race is a hard error. Listing validates the complete snapshot before output. Filesystem operations no longer use `sudo`, while `sudo` remains for the pacman transaction after revert.
-
-The concurrency contract between Moguet processes using the same store is cooperative directory-descriptor flocking. A writer holds `LOCK_EX` for the complete mutation, while strict single-entry reads and snapshot/list readers hold `LOCK_SH` for their complete read and validation. A normal Moguet reader therefore does not observe another Moguet writer's internal temporary file or tombstone. An internal artifact left after its lock owner exits, for example after a crash, is not skipped and remains a hard invalid-entry error.
-
-Moguet does not promise complete race freedom against a non-cooperating same-euid process or root that can replace an entry between the final identity check and a pathname syscall. However, after Moguet observes an identity mismatch or external replacement, it does not unlink, exchange, or restore a name whose identity it cannot prove. If cleanup or rollback cannot be proven safe, Moguet retains the artifact for manual inspection and returns a typed hard error. It does not add an excessive recheck chain to imitate an inode-conditional unlink operation that Linux does not provide.
-
-Moguet neither creates nor reads `/etc/jpacker` or `/etc/moguet` at runtime, and it does not fall back to, merge, automatically copy, rewrite, or delete the legacy store. Migration is a per-user manual operation governed by the Migration Guide. Package installation, reinstallation, and removal neither create nor delete user XDG directories and preserve both canonical and legacy entries.
-
-Config-directory changes are normally excluded from PATCH releases. This is a narrow v2.0.1 bug-fix exception that completes one omitted part of the user-XDG storage contract already approved for v2.0.0; it is not a general precedent for storage migrations in PATCH releases. The v2.0.0 tag, GitHub Release, and published release body remain unchanged historical artifacts.
+<a id="decision-15"></a>
+<a id="15-local-pkgbuildはbuild-localで明示しremote-package-identityと分離する"></a>
+* 旧decision 15: [local PKGBUILD contract](contracts/local-pkgbuild.md)へ移動。

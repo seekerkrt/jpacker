@@ -40,6 +40,24 @@ std::string post_upgrade_snapshot_failure_diagnostic(
             detail);
 }
 
+ProviderSelectionCallback registered_source_provider_selection_callback(
+        ProviderSelectionCallback select_provider) {
+    if(!select_provider) return {};
+    return [select_provider = std::move(select_provider)](
+                   const std::string& dependency,
+                   const std::vector<ProvidedDependency>& candidates)
+                   -> std::optional<ProvidedDependency> {
+        const bool has_aur_candidate = std::any_of(
+                candidates.begin(), candidates.end(),
+                [](const ProvidedDependency& candidate) {
+                    return std::holds_alternative<AurProviderOrigin>(
+                            candidate.origin);
+                });
+        if(has_aur_candidate) return std::nullopt;
+        return select_provider(dependency, candidates);
+    };
+}
+
 using SourceUpdateBaselines = std::map<std::string, SourceUpdateBaseline>;
 using SourceInstalledSnapshotResult = std::variant<
         SourceInstalledSnapshot,
@@ -551,6 +569,16 @@ void stop_for_global_source_metadata_failure(
     result.stopped_phase = SystemSourceUpgradePhase::RegisteredSource;
 }
 
+void stop_for_repository_provider_transaction_failure(
+        SystemSourceUpgradeResult& result,
+        std::string diagnostic) {
+    result.diagnostics.push_back(make_diagnostic(
+            SystemSourceUpgradePhase::RegisteredSource,
+            std::move(diagnostic), true));
+    result.status = SystemSourceUpgradeStatus::StoppedOnSourceFailure;
+    result.stopped_phase = SystemSourceUpgradePhase::RegisteredSource;
+}
+
 void map_source_execution_result(
         RegisteredSourceUpgradeResult& result,
         const SourceBuildExecutionResult& execution) {
@@ -623,6 +651,7 @@ struct SystemSourceUpgradePreparationAccess {
 
 bool SystemSourceUpgradeResult::is_success() const noexcept {
     if(status != SystemSourceUpgradeStatus::Completed) return false;
+    if(!selected_repository_provider_transaction.is_success()) return false;
     // snapshot failureはexecutionを止めない場合もあるが、観測不能を完全成功へ
     // 丸めない。legacy CLIのexit互換はcommand adapter側で別に判断する。
     if(!issues.empty()) return false;
@@ -637,8 +666,12 @@ bool SystemSourceUpgradeResult::is_success() const noexcept {
 PackageStateChange SystemSourceUpgradeResult::package_state_change()
         const noexcept {
     bool has_unknown = system.package_state_change ==
-            PackageStateChange::Unknown;
-    if(system.package_state_change == PackageStateChange::Changed) {
+                               PackageStateChange::Unknown ||
+            selected_repository_provider_transaction.package_state_change ==
+                    PackageStateChange::Unknown;
+    if(system.package_state_change == PackageStateChange::Changed ||
+       selected_repository_provider_transaction.package_state_change ==
+               PackageStateChange::Changed) {
         return PackageStateChange::Changed;
     }
     for(const auto& source : registered_source_results) {
@@ -711,6 +744,10 @@ SystemSourceUpgradeResult::failure_diagnostic() const {
     if(system.diagnostic.has_value() &&
        system.status == SystemUpgradePhaseStatus::Failed) {
         return system.diagnostic;
+    }
+    if(!selected_repository_provider_transaction.is_success() &&
+       selected_repository_provider_transaction.diagnostic.has_value()) {
+        return selected_repository_provider_transaction.diagnostic;
     }
     for(const auto& source : registered_source_results) {
         if(source.cleanup_diagnostic.has_value()) {
@@ -929,36 +966,11 @@ SystemSourceUpgradePreparation prepare_system_source_upgrade(
                 RegisteredSourceUpgradeFailureKind::PreferenceUnavailable);
     }
 
-    if(has_valid_source) {
-        try {
-            if(cache_root.has_value()) {
-                cache_root->require_unchanged_identity();
-            } else {
-                cache_root = prepare_process_cache_root();
-            }
-        } catch(const xdg_paths::ResolutionError& error) {
-            SystemSourceUpgradeIssue issue =
-                    make_cache_authority_issue(error.what());
-            issue.cache_resolution_failure = error.failure();
-            return block_cache_authority_preparation(
-                    std::move(state), std::move(issue));
-        } catch(const xdg_directory_safety::PreparationError& error) {
-            SystemSourceUpgradeIssue issue =
-                    make_cache_authority_issue(error.what());
-            issue.cache_preparation_failure = error.failure();
-            return block_cache_authority_preparation(
-                    std::move(state), std::move(issue));
-        } catch(const TrustedCacheError& error) {
-            SystemSourceUpgradeIssue issue =
-                    make_cache_authority_issue(error.what());
-            issue.trusted_cache_failure = error.failure();
-            return block_cache_authority_preparation(
-                    std::move(state), std::move(issue));
-        }
-    }
-
     std::vector<ProductionSourceBuildWorkItem> source_work_items;
     std::vector<std::string> package_names;
+    ProviderSelectionCallback select_provider =
+            registered_source_provider_selection_callback(
+                    provider_selection_callback(config));
     for(std::size_t source_position = 0;
         source_position < state.snapshot.registered_sources.size();
         ++source_position) {
@@ -1007,7 +1019,8 @@ SystemSourceUpgradePreparation prepare_system_source_upgrade(
                             identity,
                             source.environment.value(),
                             true,
-                            false));
+                            false,
+                            select_provider));
             package_names.push_back(source.preference_package_name);
         } catch(const std::exception& error) {
             SystemSourceUpgradeIssue issue = make_issue(
@@ -1040,14 +1053,6 @@ SystemSourceUpgradePreparation prepare_system_source_upgrade(
             state.source_invocation =
                     prepare_production_source_build_invocation(
                             std::move(source_work_items), config);
-            seed_production_source_build_cache(
-                    state.source_invocation.value(), cache_root.value());
-        } catch(const TrustedCacheError& error) {
-            SystemSourceUpgradeIssue issue =
-                    make_cache_authority_issue(error.what());
-            issue.trusted_cache_failure = error.failure();
-            return block_cache_authority_preparation(
-                    std::move(state), std::move(issue));
         } catch(const std::exception& error) {
             SystemSourceUpgradeIssue issue = make_issue(
                     SystemSourceUpgradeIssueKind::
@@ -1069,6 +1074,36 @@ SystemSourceUpgradePreparation prepare_system_source_upgrade(
             return block_preparation(
                     std::move(state), std::move(issue), std::nullopt,
                     RegisteredSourceUpgradeFailureKind::UnknownException);
+        }
+
+        // POLICY(#272): registered-source provider choiceとstatic invocation
+        // preflightを確定してから、最初のcache filesystem mutationへ進む。
+        try {
+            if(cache_root.has_value()) {
+                cache_root->require_unchanged_identity();
+            } else {
+                cache_root = prepare_process_cache_root();
+            }
+            seed_production_source_build_cache(
+                    state.source_invocation.value(), cache_root.value());
+        } catch(const xdg_paths::ResolutionError& error) {
+            SystemSourceUpgradeIssue issue =
+                    make_cache_authority_issue(error.what());
+            issue.cache_resolution_failure = error.failure();
+            return block_cache_authority_preparation(
+                    std::move(state), std::move(issue));
+        } catch(const xdg_directory_safety::PreparationError& error) {
+            SystemSourceUpgradeIssue issue =
+                    make_cache_authority_issue(error.what());
+            issue.cache_preparation_failure = error.failure();
+            return block_cache_authority_preparation(
+                    std::move(state), std::move(issue));
+        } catch(const TrustedCacheError& error) {
+            SystemSourceUpgradeIssue issue =
+                    make_cache_authority_issue(error.what());
+            issue.trusted_cache_failure = error.failure();
+            return block_cache_authority_preparation(
+                    std::move(state), std::move(issue));
         }
 
         const PacmanDatabasePaths database_paths =
@@ -1458,6 +1493,83 @@ SystemSourceUpgradeResult execute_prepared_system_source_upgrade(
                         source_position,
                         *metadata_failure,
                         diagnostic);
+                return result;
+            }
+        }
+
+        if(state.source_invocation.has_value()) {
+            try {
+                // POLICY(#272): system phaseと全post-system metadata guardの後、
+                // registered-source checkout/buildより前にphase全体で1回行う。
+                result.selected_repository_provider_transaction =
+                        execute_selected_repository_provider_transaction(
+                                state.source_invocation.value(), config);
+                if(!result.selected_repository_provider_transaction.
+                           is_success()) {
+                    stop_for_repository_provider_transaction_failure(
+                            result,
+                            result.selected_repository_provider_transaction.
+                                    diagnostic.value_or(
+                                            localization::translate_message(
+                                                    "Failed to install selected repository providers.")));
+                    return result;
+                }
+            } catch(const TrustedCacheError& error) {
+                result.selected_repository_provider_transaction.status =
+                        SelectedRepositoryProviderTransactionStatus::
+                                BlockedBeforeExecution;
+                result.selected_repository_provider_transaction.
+                                selected_providers =
+                        state.source_invocation->
+                                selected_repository_providers;
+                result.selected_repository_provider_transaction.
+                                package_state_change =
+                        PackageStateChange::NoChange;
+                result.selected_repository_provider_transaction.diagnostic =
+                        error.what();
+                SystemSourceUpgradeIssue issue = make_issue(
+                        SystemSourceUpgradeIssueKind::CacheAuthorityInvalid,
+                        SystemSourceUpgradeIssueImpact::BlocksExecution,
+                        SystemSourceUpgradePhase::RegisteredSource,
+                        error.what());
+                issue.trusted_cache_failure = error.failure();
+                result.issues.push_back(std::move(issue));
+                result.diagnostics.push_back(make_diagnostic(
+                        SystemSourceUpgradePhase::RegisteredSource,
+                        error.what(), true));
+                result.status =
+                        SystemSourceUpgradeStatus::StoppedOnSourceFailure;
+                result.stopped_phase =
+                        SystemSourceUpgradePhase::RegisteredSource;
+                return result;
+            } catch(const std::exception& error) {
+                result.selected_repository_provider_transaction.status =
+                        SelectedRepositoryProviderTransactionStatus::
+                                BlockedBeforeExecution;
+                result.selected_repository_provider_transaction.
+                                selected_providers =
+                        state.source_invocation->
+                                selected_repository_providers;
+                result.selected_repository_provider_transaction.diagnostic =
+                        error.what();
+                stop_for_repository_provider_transaction_failure(
+                        result, error.what());
+                return result;
+            } catch(...) {
+                const std::string diagnostic =
+                        localization::translate_message(
+                                "Failed to install selected repository providers with an unknown exception.");
+                result.selected_repository_provider_transaction.status =
+                        SelectedRepositoryProviderTransactionStatus::
+                                BlockedBeforeExecution;
+                result.selected_repository_provider_transaction.
+                                selected_providers =
+                        state.source_invocation->
+                                selected_repository_providers;
+                result.selected_repository_provider_transaction.diagnostic =
+                        diagnostic;
+                stop_for_repository_provider_transaction_failure(
+                        result, diagnostic);
                 return result;
             }
         }

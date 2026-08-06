@@ -196,6 +196,7 @@ struct FilteredAurUpdateExecutionResult {
     std::vector<FilteredAurUpdateOperationIssue> issues;
 
     bool is_success() const noexcept;
+    PackageStateChange package_state_change() const noexcept;
     bool changed_package_state() const noexcept;
     bool has_partial_completion() const noexcept;
     bool has_not_attempted_targets() const noexcept;

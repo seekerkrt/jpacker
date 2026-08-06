@@ -1327,6 +1327,13 @@ void inspect_combined_build_plan_consistency(
 
 AurUpdateExecutionPreflight resolve_aur_update_execution_preflight(
         const AurUpdatePlan& update_plan) {
+    return resolve_aur_update_execution_preflight(
+            update_plan, ProviderSelectionCallback{});
+}
+
+AurUpdateExecutionPreflight resolve_aur_update_execution_preflight(
+        const AurUpdatePlan& update_plan,
+        const ProviderSelectionCallback& select_provider) {
     AurUpdateExecutionPreflight preflight;
     preflight.targets.reserve(update_plan.entries.size());
 
@@ -1415,7 +1422,8 @@ AurUpdateExecutionPreflight resolve_aur_update_execution_preflight(
     }
 
     // POLICY(#267): invocation全体で一度だけ解決し、candidate順とexecution順を混ぜない。
-    preflight.build_plan = resolve_build_plan_for_preflight(candidate_names);
+    preflight.build_plan = resolve_build_plan_for_preflight(
+            candidate_names, select_provider);
     inspect_combined_build_plan_consistency(preflight, candidates);
     apply_attributed_build_plan_issues(
             preflight, candidates,

@@ -35,6 +35,19 @@ install_artifacts() {
     done
 }
 
+is_typed_dependency_install() {
+    is_typed_pacman_install "$@" || return 1
+    for install_argument in "$@"; do
+        if [ "$install_argument" = "--" ]; then
+            return 1
+        fi
+        if [ "$install_argument" = "--asdeps" ]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
 require_source_maintenance_repo_install_argv() {
     [ "$#" -ge 3 ] && [ "${1:-}" = "pacman" ] && [ "${2:-}" = "-S" ] ||
         exit 2
@@ -165,6 +178,27 @@ if is_typed_pacman_install "$@"; then
         # 変え、CLI境界へreal cleanup partial-successを伝播させる。
         /usr/bin/mv -- "$workspace_path" "$displaced_workspace" || exit 1
         /usr/bin/mkdir -m 700 -- "$workspace_path" || exit 1
+    fi
+
+    append_local_pkgbuild=${MOGUET_TEST_APPEND_LOCAL_PKGBUILD_AFTER_ASDEPS:-}
+    if [ -n "$append_local_pkgbuild" ] &&
+       is_typed_dependency_install "$@"; then
+        case_root=${XDG_CACHE_HOME%/*}
+        canonical_case_root=$(/usr/bin/realpath -e -- "$case_root") || exit 1
+        canonical_pkgbuild=$(/usr/bin/realpath -e -- \
+            "$append_local_pkgbuild") || exit 1
+        if [ "$append_local_pkgbuild" != "$canonical_pkgbuild" ] ||
+           [ ! -f "$canonical_pkgbuild" ] || [ -L "$canonical_pkgbuild" ]; then
+            exit 1
+        fi
+        case $canonical_pkgbuild in
+            "$canonical_case_root"/*/PKGBUILD) ;;
+            *) exit 1 ;;
+        esac
+        # POLICY(#271): dependency transaction成功直後のlocal source変更を
+        # production CLIのretained snapshot再検証へ注入するtest-only hook。
+        printf '%s\n' '# test-only dependency transaction mutation' \
+            >> "$canonical_pkgbuild" || exit 1
     fi
 fi
 

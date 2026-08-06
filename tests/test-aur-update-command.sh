@@ -1,6 +1,13 @@
 #!/bin/sh
 set -eu
 
+# Assertions target the canonical untranslated CLI output.
+# Do not inherit locale settings from the invoking environment.
+LANG=C
+LC_ALL=C
+export LANG LC_ALL
+unset LANGUAGE
+
 test_binary=$1
 repo_root=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
 MOGUET_TEST_REPOSITORY_ROOT=$repo_root
@@ -72,7 +79,7 @@ run_status() {
     expected_status=$1
     shift
     actual_status=0
-    (cd "$case_dir/work" && "$test_binary" "$@") \
+    (cd "$case_dir/work" && "$test_binary" "$@" </dev/null) \
         > "$stdout_file" 2> "$stderr_file" || actual_status=$?
     if [ "$actual_status" -ne "$expected_status" ]; then
         fail_case "unexpected status $actual_status (expected $expected_status): $*"
@@ -150,6 +157,7 @@ assert_exact_line "preflight" "$command_log"
 assert_contains "prepare needed=false" "$command_log"
 assert_exact_line "reduce execution=no" "$command_log"
 assert_no_external_mutation
+assert_cache_absent
 
 # UpToDate / NonAurForeign are successful skips and never reach the runner.
 setup_case all-up-to-date all-up-to-date
@@ -179,6 +187,7 @@ assert_contains \
 assert_not_contains "fixture AUR metadata request failed" "$stdout_file"
 assert_exact_line "reduce execution=no" "$command_log"
 assert_no_external_mutation
+assert_cache_absent
 
 setup_case version-comparison-unavailable version-comparison-unavailable
 run_status 1 upgrade-aur
@@ -210,6 +219,7 @@ assert_contains \
     "  preflight issue: unresolved dependency: fixture dependency could not be resolved" \
     "$stderr_file"
 assert_no_external_mutation
+assert_cache_absent
 
 # This fixture deliberately retains an invocation with an issue.  The command
 # must use is_prepared(), not optional presence, before consuming the runner.
@@ -393,6 +403,26 @@ assert_exact_line \
 assert_contains \
     "  execution failure: build or install failure" \
     "$stderr_file"
+
+# Selected repository provider failure is an invocation phase, not a work-item
+# failure, and it stops before source checkout/build/install.
+setup_case provider-transaction-failure provider-transaction-failure
+run_status 1 upgrade-aur
+assert_exact_line \
+    "AUR update: stopped after repository provider transaction failure" \
+    "$stdout_file"
+assert_exact_line \
+    "provider-pkg: not attempted: repository provider transaction failed" \
+    "$stdout_file"
+assert_contains \
+    "selected repository provider transaction failed: fixture repository provider transaction failure" \
+    "$stderr_file"
+assert_exact_line \
+    "external sudo pacman -S provider fixture" "$command_log"
+assert_not_contains "external git clone fixture" "$command_log"
+assert_not_contains "external makepkg -sc fixture" "$command_log"
+assert_not_contains "external sudo pacman -U fixture" "$command_log"
+assert_no_real_package_command
 
 setup_case updated-cleanup-failure updated-cleanup-failure
 run_status 1 upgrade-aur
@@ -627,7 +657,7 @@ run_status 0 upgrade
 assert_exact_line "sudo pacman -Syu" "$command_log"
 assert_pipeline_absent
 
-if [ "$case_count" -ne 44 ]; then
+if [ "$case_count" -ne 45 ]; then
     fail_case "internal test case count changed: $case_count"
 fi
 echo "AUR update command integration tests passed ($case_count cases)."

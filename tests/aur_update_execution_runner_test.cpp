@@ -169,6 +169,30 @@ AurUpdateExecutionPreflight single_root_preflight(
     return preflight;
 }
 
+ProvidedDependency selected_repository_provider() {
+    return ProvidedDependency::from_repository(
+            "extra", "selected-runner-provider", "virtual-runner-api",
+            "virtual-runner-api=2", "2.0-1");
+}
+
+AurUpdateExecutionPreflight selected_repository_provider_preflight() {
+    AurUpdateExecutionPreflight preflight = single_root_preflight(
+            "provider-root", DesiredInstallReason::Explicit,
+            "provider-root");
+    preflight.build_plan->dependency_edges.push_back(
+            BuildPlanDependencyEdge{
+                    "provider-root",
+                    "provider-root",
+                    "virtual-runner-api",
+                    PackageRole::RuntimeDependency,
+                    DependencyKind::Provided,
+                    std::nullopt,
+                    std::nullopt,
+                    selected_repository_provider(),
+                    ProviderResolutionKind::UserSelected});
+    return preflight;
+}
+
 AurUpdateExecutionPreflight three_singular_work_item_preflight() {
     const RootTargetIdentity root{0, "runner-root"};
     BuildPlan plan;
@@ -203,6 +227,23 @@ AurUpdateExecutionPreflight three_singular_work_item_preflight() {
             0, 0, "runner-root", DesiredInstallReason::Explicit,
             "runner-root"));
     preflight.build_plan = std::move(plan);
+    return preflight;
+}
+
+AurUpdateExecutionPreflight later_repository_provider_preflight() {
+    AurUpdateExecutionPreflight preflight =
+            three_singular_work_item_preflight();
+    preflight.build_plan->dependency_edges.push_back(
+            BuildPlanDependencyEdge{
+                    "second-dependency",
+                    "second-dependency",
+                    "virtual-runner-api",
+                    PackageRole::RuntimeDependency,
+                    DependencyKind::Provided,
+                    std::nullopt,
+                    std::nullopt,
+                    selected_repository_provider(),
+                    ProviderResolutionKind::UserSelected});
     return preflight;
 }
 
@@ -568,6 +609,189 @@ void test_multiple_work_items_preserve_fifo_call_order_and_one_db_snapshot() {
     }
     expect(execution_stub::event_history().size() == 12,
            "Ordered work-item lifecycle event count differs");
+}
+
+void test_selected_repository_provider_transaction_precedes_source_and_stops_failure() {
+    const AppConfig config = runner_config();
+    const PacmanDatabasePaths database_paths{
+            "/provider/root", "/provider/database"};
+
+    AurUpdateSourceBuildPreparation successful_preparation = prepare_fixture(
+            selected_repository_provider_preflight(), false, config,
+            database_paths);
+    expect(
+            successful_preparation.invocation->production_invocation_for_test()
+                            .selected_repository_providers ==
+                    std::vector<ProvidedDependency>{
+                            selected_repository_provider()},
+            "Runner fixture lost its selected repository provider");
+
+    execution_stub::reset();
+    execution_stub::enqueue_success(
+            expected_execution(
+                    0,
+                    "provider-root",
+                    {required_target(
+                            "provider-root",
+                            "provider-root",
+                            DesiredInstallReason::Explicit)},
+                    false,
+                    database_paths,
+                    config),
+            "provider-root",
+            {selected_child(
+                    "provider-root",
+                    "2.0-1",
+                    DesiredInstallReason::Explicit,
+                    ArtifactInstallExecutionOutcome::Installed)});
+    const AurUpdateSourceBuildExecutionResult success = execute_without_escape(
+            std::move(*successful_preparation.invocation), config,
+            "selected repository provider success");
+    expect(success.is_success() &&
+                   success.selected_repository_provider_transaction.status ==
+                           SelectedRepositoryProviderTransactionStatus::
+                                   Succeeded &&
+                   success.selected_repository_provider_transaction.
+                                   package_state_change ==
+                           PackageStateChange::Unknown &&
+                   success.selected_repository_provider_transaction.
+                                   selected_providers ==
+                           std::vector<ProvidedDependency>{
+                                   selected_repository_provider()},
+           "Selected repository provider success did not complete");
+    expect(
+            execution_stub::invocation_event_history() ==
+                    std::vector<execution_stub::InvocationEventKind>{
+                            execution_stub::InvocationEventKind::CacheActivation,
+                            execution_stub::InvocationEventKind::
+                                    RepositoryProviderTransaction,
+                            execution_stub::InvocationEventKind::SourceExecution},
+            "Cache/provider transaction did not precede source execution");
+    execution_stub::require_script_consumed();
+
+    AurUpdateSourceBuildPreparation failing_preparation = prepare_fixture(
+            selected_repository_provider_preflight(), false, config,
+            database_paths);
+    execution_stub::reset();
+    execution_stub::fail_repository_provider_transaction(
+            "scripted repository provider transaction failure");
+    const AurUpdateSourceBuildExecutionResult failure = execute_without_escape(
+            std::move(*failing_preparation.invocation), config,
+            "selected repository provider failure");
+    expect(
+            failure.status ==
+                            AurUpdateInvocationExecutionStatus::
+                                    StoppedOnProviderTransactionFailure &&
+                    failure.work_item_results.size() == 1,
+            "Repository provider transaction failure lost invocation state");
+    const AurUpdateWorkItemExecutionResult& failed_work_item =
+            failure.work_item_results.front();
+    expect(
+            failed_work_item.status ==
+                            AurUpdateWorkItemExecutionStatus::NotAttempted &&
+                    failed_work_item.failure_kind ==
+                            AurUpdateWorkItemFailureKind::PriorWorkItemStopped &&
+                    !failed_work_item.diagnostic.has_value() &&
+                    failure.selected_repository_provider_transaction.status ==
+                            SelectedRepositoryProviderTransactionStatus::Failed &&
+                    failure.selected_repository_provider_transaction.
+                                    package_state_change ==
+                            PackageStateChange::Unknown &&
+                    failure.selected_repository_provider_transaction.diagnostic ==
+                            std::optional<std::string>{
+                                    "scripted repository provider transaction failure"},
+            "Repository provider transaction failure lost independent phase state");
+    expect_no_fabricated_child_success(
+            failed_work_item,
+            "selected repository provider transaction failure");
+    expect(
+            execution_stub::call_history().empty() &&
+                    execution_stub::event_history().empty() &&
+                    execution_stub::invocation_event_history() ==
+                            std::vector<execution_stub::InvocationEventKind>{
+                                    execution_stub::InvocationEventKind::
+                                            CacheActivation,
+                                    execution_stub::InvocationEventKind::
+                                            RepositoryProviderTransaction},
+            "Repository provider transaction failure reached source execution");
+    execution_stub::require_script_consumed();
+
+    AurUpdateSourceBuildPreparation later_owner_preparation = prepare_fixture(
+            later_repository_provider_preflight(), false, config,
+            database_paths);
+    execution_stub::reset();
+    execution_stub::fail_repository_provider_transaction(
+            "scripted later-owner provider transaction failure");
+    const AurUpdateSourceBuildExecutionResult later_owner_failure =
+            execute_without_escape(
+                    std::move(*later_owner_preparation.invocation), config,
+                    "later selected repository provider owner failure");
+    expect(
+            later_owner_failure.status ==
+                            AurUpdateInvocationExecutionStatus::
+                                    StoppedOnProviderTransactionFailure &&
+                    later_owner_failure.work_item_results.size() == 3 &&
+                    later_owner_failure.work_item_results[0].status ==
+                            AurUpdateWorkItemExecutionStatus::NotAttempted &&
+                    later_owner_failure.work_item_results[1].status ==
+                            AurUpdateWorkItemExecutionStatus::NotAttempted &&
+                    later_owner_failure.work_item_results[1].failure_kind ==
+                            AurUpdateWorkItemFailureKind::PriorWorkItemStopped &&
+                    later_owner_failure.work_item_results[2].status ==
+                            AurUpdateWorkItemExecutionStatus::NotAttempted &&
+                    later_owner_failure.
+                                    selected_repository_provider_transaction.
+                                    selected_providers ==
+                            std::vector<ProvidedDependency>{
+                                    selected_repository_provider()},
+            "Repository provider transaction failure was not kept independent of work items");
+    for(const auto& work_item : later_owner_failure.work_item_results) {
+        expect_no_fabricated_child_success(
+                work_item,
+                "later selected repository provider owner failure");
+    }
+    expect(
+            execution_stub::call_history().empty() &&
+                    execution_stub::invocation_event_history() ==
+                            std::vector<execution_stub::InvocationEventKind>{
+                                    execution_stub::InvocationEventKind::
+                                            CacheActivation,
+                                    execution_stub::InvocationEventKind::
+                                            RepositoryProviderTransaction},
+            "Later provider owner failure reached source execution");
+    execution_stub::require_script_consumed();
+
+    AurUpdateSourceBuildPreparation cache_failure_preparation =
+            prepare_fixture(
+                    selected_repository_provider_preflight(), false, config,
+                    database_paths);
+    execution_stub::reset();
+    execution_stub::fail_cache_activation(TrustedCacheFailure{
+            TrustedCacheStage::RootRevalidation,
+            TrustedCacheErrorCode::ConcurrentReplacement,
+            std::nullopt});
+    std::optional<TrustedCacheFailure> observed_cache_failure;
+    try {
+        static_cast<void>(
+                execute_prepared_aur_update_source_build_invocation(
+                        std::move(*cache_failure_preparation.invocation),
+                        config));
+    } catch(const TrustedCacheError& error) {
+        observed_cache_failure = error.failure();
+    }
+    expect(
+            observed_cache_failure.has_value() &&
+                    observed_cache_failure->stage ==
+                            TrustedCacheStage::RootRevalidation &&
+                    observed_cache_failure->code ==
+                            TrustedCacheErrorCode::ConcurrentReplacement &&
+                    execution_stub::call_history().empty() &&
+                    execution_stub::invocation_event_history() ==
+                            std::vector<execution_stub::InvocationEventKind>{
+                                    execution_stub::InvocationEventKind::
+                                            CacheActivation},
+            "Cache activation failure reached repository provider transaction");
+    execution_stub::require_script_consumed();
 }
 
 void test_requested_split_child_size_one_is_no_change() {
@@ -1613,6 +1837,9 @@ int main() {
         run_case(
                 "multiple work-item FIFO and DB snapshot",
                 test_multiple_work_items_preserve_fifo_call_order_and_one_db_snapshot);
+        run_case(
+                "selected repository provider phase transaction",
+                test_selected_repository_provider_transaction_precedes_source_and_stops_failure);
         run_case(
                 "requested split child size-one",
                 test_requested_split_child_size_one_is_no_change);

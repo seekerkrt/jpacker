@@ -43,6 +43,13 @@ AurPackageInfo package_info(const std::string& name) {
     return info;
 }
 
+AurPackageInfo package_info_with_base(
+        const std::string& name, const std::string& package_base) {
+    AurPackageInfo info = package_info(name);
+    info.PackageBase = package_base;
+    return info;
+}
+
 AurPackageInfo search_presentation_info() {
     AurPackageInfo info = package_info("search-presented");
     info.Version = "2.0-1";
@@ -64,8 +71,15 @@ std::optional<AurPackageInfo> fixture_info(const std::string& package_name) {
        package_name == "info-installed" || package_name == "info-uninstalled" ||
        package_name == "plan-a" || package_name == "plan-b" ||
        package_name == "source-a" || package_name == "source-b" ||
-       package_name == "forced-official") {
+       package_name == "forced-official" || package_name == "mixed-aur" ||
+       package_name == "aur-presented" || package_name == "scope-aur") {
         return package_info(package_name);
+    }
+    if(package_name == "mismatch-child") {
+        return package_info_with_base(package_name, "resolved-base");
+    }
+    if(package_name == "split-one" || package_name == "split-two") {
+        return package_info_with_base(package_name, "split-suite");
     }
 
     return std::nullopt;
@@ -95,6 +109,13 @@ std::vector<AurPackageInfo> AurClient::search(const std::string& query) {
         return {package_info(query)};
     }
     return {};
+}
+
+std::vector<AurPackageInfo> AurClient::search_strict(
+        const std::string& query) {
+    append_command_log("aur search-strict " + query);
+    throw std::runtime_error(
+            "Unexpected commands-sync strict search call: " + query);
 }
 
 std::vector<std::string> AurClient::search_names_by_provides(

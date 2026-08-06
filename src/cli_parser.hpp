@@ -51,6 +51,7 @@ struct ParsedCliArguments {
     std::vector<std::size_t>         target_token_indices;
     std::optional<std::string>       pending_option;
     bool                             end_of_options = false;
+    bool                             root_package_selection_requested = false;
     PackageSourceSelection           source_selection = PackageSourceSelection::Auto;
     CliOverrides                     cli_overrides;
 };

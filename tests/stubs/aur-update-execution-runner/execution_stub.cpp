@@ -79,6 +79,9 @@ struct ExecutionStubState {
     std::deque<ScriptedExecution>       executions;
     std::vector<stub::ExecutionCall>    calls;
     std::vector<stub::Event>            events;
+    std::vector<stub::InvocationEventKind> invocation_events;
+    std::optional<TrustedCacheFailure> cache_activation_failure;
+    std::optional<std::string> repository_provider_transaction_failure;
     const PacmanDatabasePaths* first_database_paths_address = nullptr;
     std::optional<std::string> expectation_failure;
 };
@@ -217,6 +220,35 @@ void enqueue(stub::ExpectedExecution expected, Outcome outcome) {
 void activate_production_source_build_cache(
         PreparedProductionSourceBuildInvocation&) {
     // Runner tests isolate cache/filesystem mutation behind this seam.
+    g_state.invocation_events.push_back(
+            stub::InvocationEventKind::CacheActivation);
+    if(g_state.cache_activation_failure.has_value()) {
+        throw TrustedCacheError(
+                std::move(g_state.cache_activation_failure.value()));
+    }
+}
+
+SelectedRepositoryProviderTransactionResult
+execute_selected_repository_provider_transaction(
+        const PreparedProductionSourceBuildInvocation& invocation,
+        const AppConfig&) {
+    SelectedRepositoryProviderTransactionResult result;
+    result.selected_providers = invocation.selected_repository_providers;
+    if(result.selected_providers.empty()) return result;
+    g_state.invocation_events.push_back(
+            stub::InvocationEventKind::RepositoryProviderTransaction);
+    if(g_state.repository_provider_transaction_failure.has_value()) {
+        result.status =
+                SelectedRepositoryProviderTransactionStatus::Failed;
+        result.package_state_change = PackageStateChange::Unknown;
+        result.diagnostic =
+                *g_state.repository_provider_transaction_failure;
+        return result;
+    }
+    result.status = SelectedRepositoryProviderTransactionStatus::Succeeded;
+    result.package_state_change = PackageStateChange::Unknown;
+    result.command_exit_status = 0;
+    return result;
 }
 
 namespace aur_update_execution_runner_test_stub {
@@ -322,12 +354,24 @@ void enqueue_unknown_failure(ExpectedExecution expected) {
     enqueue(std::move(expected), ScriptedUnknownFailure{});
 }
 
+void fail_repository_provider_transaction(std::string diagnostic) {
+    g_state.repository_provider_transaction_failure = std::move(diagnostic);
+}
+
+void fail_cache_activation(TrustedCacheFailure failure) {
+    g_state.cache_activation_failure = std::move(failure);
+}
+
 const std::vector<ExecutionCall>& call_history() {
     return g_state.calls;
 }
 
 const std::vector<Event>& event_history() {
     return g_state.events;
+}
+
+const std::vector<InvocationEventKind>& invocation_event_history() {
+    return g_state.invocation_events;
 }
 
 void require_script_consumed() {
@@ -473,6 +517,8 @@ execute_prepared_package_base_source_build_work_item_typed(
         const ProductionSourceBuildWorkItem& work_item,
         const PacmanDatabasePaths& database_paths,
         const AppConfig& config) {
+    g_state.invocation_events.push_back(
+            stub::InvocationEventKind::SourceExecution);
     const std::size_t call_index = g_state.calls.size();
     const bool singular = work_item.required_targets.size() == 1;
     g_state.calls.push_back(stub::ExecutionCall{

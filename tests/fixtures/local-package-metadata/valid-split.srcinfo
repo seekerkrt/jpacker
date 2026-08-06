@@ -1,0 +1,36 @@
+# Generated split-package fixture. This comment is part of valid SRCINFO syntax.
+
+pkgbase = sample-suite
+	pkgdesc = Ignored base description
+	epoch = 2
+	pkgver = 1.0+git.r42
+	pkgrel = 3.1
+	arch = x86_64
+	arch = aarch64
+	depends = runtime>=2
+	depends_x86_64 = lib:libexample.so.1
+	makedepends = cmake>=3.29
+	checkdepends = pytest<9
+	optdepends = helper>=1: keeps: inner  double spaces
+	provides = virtual-suite=1.0
+	conflicts = legacy-suite<1
+	replaces = old-suite
+	source = fixture::https://example.invalid/archive?key=value
+
+pkgname = sample-suite-cli
+	pkgdesc = Ignored child description
+	arch = x86_64
+	depends = cli-runtime=4
+	depends_x86_64 = cli-accelerator>=2
+	checkdepends = child-test
+	optdepends = child-helper: child description
+	provides = suite-command=2
+	conflicts = suite-legacy
+	replaces = suite-old
+
+pkgname = sample-suite-libs
+	arch = aarch64
+	depends =
+	checkdepends_aarch64 = child-check>=7
+	optdepends = libs-docs: documentation in 日本語
+	provides = lib:libsample.so.2

@@ -49,10 +49,32 @@ a new storage direction: source-build preferences now use only the executing
 user's XDG config context, while the published v2.0.0 tag, Release, and release
 notes remain historical records.
 
+Moguet v2.1.0 is the latest release. It adds interactive handling for
+source-aware package discovery and ambiguous AUR dependency providers, expands
+local `PKGBUILD` builds, and adds Arch Linux container validation coverage. See
+the [v2.1.0 release](https://github.com/seekerkrt/moguet/releases/tag/v2.1.0)
+for the complete user-visible changes.
+
 The canonical repository identity is Moguet on GitHub, with a GitLab mirror.
 The Moguet package does not provide a `jpacker` command alias. AUR publication
 is a separate future decision; this document does not claim that an AUR
 endpoint exists.
+
+Moguet v2.x is published and usable, but it remains a development-phase
+product rather than a finished, general-purpose AUR helper. Basic pacman
+wrapping, AUR source builds, updates, and per-package source-build
+preferences already work today, while the wider AUR-support surface — a full
+dependency solver, provider/conflict/replaces/version-constraint handling,
+and edge-case coverage — is still being implemented incrementally and its UX
+is still maturing. Moguet does not promise the same automatic-resolution
+completeness as established AUR helpers: unsupported or ambiguous cases stop
+fail-closed instead of guessing. v2.x is the public development period that
+builds Moguet's source-aware entry points, safety boundaries, and validation
+infrastructure; v3.0.0 is the point where Moguet-specific build-profile and
+PKGBUILD-diff workflows come together, which the project treats internally
+as Moguet's full commissioning. See the release roadmap
+([issue #344](https://github.com/seekerkrt/moguet/issues/344)) for the
+detailed plan.
 
 <!-- parity:safety -->
 ## Design and safety boundaries
@@ -67,16 +89,48 @@ endpoint exists.
   build, or install. `fetch` clones missing repositories or runs only
   `git fetch origin` for an existing clone; it does not pull, merge, reset,
   advance the working tree, build, or install.
-- Moguet rejects unresolved dependencies, ambiguous providers, cycles,
-  conflicts/replacements that it cannot safely resolve, and unprovable
-  artifact identities before the corresponding mutation.
+- When multiple provider candidates remain, an interactive TTY lists
+  source-aware candidates by number and requires exactly one explicit choice;
+  there is no default. Empty input, `q`, `quit`, `cancel`, or EOF cancels the
+  choice, while invalid or out-of-range input retries.
+- Non-TTY use and `--noconfirm` do not read provider input from stdin or
+  auto-select a candidate. Unselected ambiguity fails closed.
+- `moguet -S --select <query>` discovers source-aware root package candidates
+  from official repositories and AUR. An interactive TTY accepts package
+  numbers, multiple numbers, inclusive ranges, and an `@group` selector for a
+  displayed official group; there is no default, even for one candidate.
+  Empty input, `q`, `quit`, `cancel`, or EOF cancels, and invalid input retries
+  against the same candidate list.
+- Root package discovery does not query candidates or prompt on non-TTY stdin
+  or with `--noconfirm`. After selection and static preflight finish, selected
+  repository roots run first in one exact `repository/package` transaction;
+  only its success allows selected AUR roots to enter the existing source-build
+  lifecycle. A later AUR failure does not roll back the completed repository
+  transaction.
+- Provider choices belong only to the current invocation. `deps` and `plan`
+  distinguish selected and ambiguous providers; a selected AUR provider's
+  PackageBase flows into fetch/build planning, while a selected repository
+  provider is introduced as an official `repository/package` dependency. In
+  `deps --recursive`, among provided dependencies, only a user-selected AUR
+  provider is traversed; unique providers and selected repository providers
+  remain terminal.
+- The registered-source phase keeps its singular source lifecycle. It offers
+  provider selection only when every candidate is from an official repository;
+  a candidate set containing an AUR provider remains ambiguous and stops before
+  system or source execution because that phase cannot schedule the provider's
+  PackageBase.
+- Moguet rejects unresolved dependencies, unselected ambiguous providers,
+  cycles, conflicts/replacements that it cannot safely resolve, and
+  unprovable artifact identities before the corresponding mutation.
 - `--noconfirm` avoids interactive blocking. It is not “yes to everything” and
   does not bypass source selection, planning, identity, conflict, or ownership
   guards.
 - Multi-phase upgrades are not one atomic transaction. A failure stops later
   work but does not roll back an already completed package transaction. If
   cleanup fails after installation succeeds, inspect the result before
-  retrying; the package may already be installed.
+  retrying; the package may already be installed. In `upgrade-all`, provider
+  selection for the filtered AUR phase occurs before clone, build, pacman, or
+  sudo work in that phase, but earlier phases may already have completed.
 
 The detailed compatibility and routing contract is in
 [docs/COMPATIBILITY.md](https://github.com/seekerkrt/moguet/blob/develop/docs/COMPATIBILITY.md),
@@ -137,6 +191,27 @@ install a development payload on the live system. See the
 [v1 to v2 Migration Guide](docs/migration/v1-to-v2.md) before changing an
 installed system.
 
+### Package installation with `PKGBUILD`
+
+The repository root ships a `PKGBUILD` that packages a published release
+rather than the checked-out working tree. Its `pkgver()` reads the version
+from the repository's own `VERSION` file and fetches the matching published
+Git tag (`v<version>`) as the build source, so it never packages unreleased
+working-tree commits.
+
+```bash
+git clone https://github.com/seekerkrt/moguet.git
+cd moguet
+makepkg -si
+```
+
+`makepkg -si` builds that tagged release and installs it onto the live
+system with `pacman -U` in the same step. This differs from `make` and
+`./moguet --help` above, which only build and inspect the development tree
+in place and install nothing. This `PKGBUILD` is a repository-provided
+packaging path, not an AUR submission; Moguet still has no published AUR
+page.
+
 <!-- parity:usage -->
 ## Basic usage
 
@@ -146,6 +221,7 @@ surface. Command and option tokens never change with the selected locale.
 ```bash
 # Install, search, or inspect packages
 moguet -S <pkg>
+moguet -S --select <query>
 moguet -Ss <query>
 moguet -Si <pkg>
 
@@ -156,6 +232,10 @@ moguet -Syu
 moguet upgrade
 moguet upgrade-aur
 moguet upgrade-all
+
+# Build and install one remote package or one local PKGBUILD root
+moguet build <pkg> [V=K...]
+moguet build --local <directory> [V=K...]
 
 # Inspect AUR dependencies and build order without building
 moguet deps --recursive <pkg>
@@ -169,16 +249,43 @@ moguet -G <pkg>
 moguet -Gp <pkg>
 ```
 
+**Choosing an upgrade command:** For ordinary package installation, search,
+and system upgrades, use pacman-compatible operations such as `-S`, `-Ss`,
+and `-Syu`, as with pacman and other AUR helpers. Use the corresponding
+`upgrade`, `upgrade-aur`, or `upgrade-all` command when you intentionally want
+a Moguet-specific multi-phase workflow, such as applying saved source-build
+preferences or rebuilding installed AUR packages from source. These commands
+are not aliases for an ordinary `-Syu`.
+
 `--aur` limits supported `-S`, `-Ss`, and `-Si` forms to AUR. `--repo`
 limits them to official binary repositories. Combining the selectors is an
 error before an external command or AUR query. Pacman-only routes preserve
 compatible pacman options; a source-build route rejects options whose meaning
 cannot be preserved instead of silently ignoring them.
 
+`-S --select <query>` is the interactive source-aware discovery form. Without
+a source selector it searches both official repositories and AUR; `--aur` or
+`--repo` limits the candidate source. Only `--needed` has a shared meaning on
+both selected routes. Non-TTY use and `--noconfirm` fail without querying or
+choosing a package.
+
 Source-build preferences are managed with `add-src`, `edit-src`, `list-src`,
-`del-src`, and `revert`. A one-off `build <pkg> [V=K]` does not save a
-preference. Runtime-aware package-name completion and more advanced completion
-are future work; the shipped completion is limited to the public CLI schema.
+`del-src`, and `revert`. A one-off `build <pkg> [V=K...]` resolves a remote
+package and does not save a preference. `build --local <directory> [V=K...]`
+instead treats exactly one user-owned directory as a local PackageBase source;
+it does not infer a local root from a path-like package operand or query AUR for
+that root.
+
+The local route reads a safe `.SRCINFO` without modifying it. Missing, invalid,
+or known-stale metadata requires PKGBUILD review and explicit no-default consent
+before `makepkg --printsrcinfo`; non-TTY input and `--noconfirm` stop instead of
+authorizing evaluation. Moguet builds from an invocation-owned source snapshot,
+leaves the user-owned tree unchanged, and installs every valid unique `pkgname`
+child declared by the accepted metadata as an explicit root. Dependency
+artifacts retain dependency install reasons, and an already explicit installed
+package is never demoted. Runtime-aware package-name completion and more
+advanced completion are future work; the shipped completion is limited to the
+public CLI schema.
 
 <!-- parity:configuration -->
 ## Configuration

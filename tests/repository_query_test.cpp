@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <system_error>
@@ -137,10 +138,12 @@ void enqueue_database_read(
 
 std::string package_description(
         const std::string& package_name,
-        const std::vector<std::string>& provides = {}) {
+        const std::vector<std::string>& provides = {},
+        const std::string& package_version = "1.0-1") {
     std::string description =
             "%FILENAME%\n" + package_name + "-1-1-x86_64.pkg.tar.zst\n\n" +
-            "%NAME%\n" + package_name + "\n\n";
+            "%NAME%\n" + package_name + "\n\n" +
+            "%VERSION%\n" + package_version + "\n\n";
     if(!provides.empty()) {
         description += "%PROVIDES%\n";
         for(const auto& provided : provides) description += provided + "\n";
@@ -182,6 +185,68 @@ const RepositoryProviderOrigin& require_repository_provider_origin(
     return *origin;
 }
 
+void test_candidate_value_contract() {
+    const ProvidedDependency legacy_repository =
+            ProvidedDependency::from_repository("aur", "same-package");
+    const ProvidedDependency legacy_aur =
+            ProvidedDependency::from_aur("same-package");
+    expect(
+            legacy_repository.package_base.empty() &&
+                    legacy_repository.provided_dependency_name.empty() &&
+                    legacy_repository.provided_dependency_specification.empty() &&
+                    !legacy_repository.package_version.has_value(),
+            "legacy repository factory metadata defaults differ");
+    expect(
+            legacy_aur.package_base == "same-package" &&
+                    legacy_aur.provided_dependency_name.empty() &&
+                    legacy_aur.provided_dependency_specification.empty() &&
+                    !legacy_aur.package_version.has_value(),
+            "legacy AUR factory metadata defaults differ");
+
+    const ProvidedDependency repository =
+            ProvidedDependency::from_repository(
+                    "aur", "same-package", "virtual-api",
+                    "virtual-api=2", std::string("2.3-1"));
+    const ProvidedDependency same_repository_identity =
+            ProvidedDependency::from_repository(
+                    "aur", "same-package", "other-api",
+                    "other-api>=1", std::string("2.4-1"));
+    const ProvidedDependency aur = ProvidedDependency::from_aur(
+            "same-package", "split-base", "virtual-api",
+            "virtual-api=2", std::string("2.3-1"));
+    const ProvidedDependency other_aur_base = ProvidedDependency::from_aur(
+            "same-package", "other-base", "virtual-api",
+            "virtual-api=2", std::string("2.3-1"));
+
+    expect(
+            repository.package_base.empty() &&
+                    repository.provided_dependency_name == "virtual-api" &&
+                    repository.provided_dependency_specification ==
+                            "virtual-api=2" &&
+                    repository.package_version ==
+                            std::optional<std::string>("2.3-1"),
+            "full repository factory lost owned metadata");
+    expect(
+            aur.package_base == "split-base" &&
+                    aur.provided_dependency_name == "virtual-api" &&
+                    aur.provided_dependency_specification == "virtual-api=2" &&
+                    aur.package_version ==
+                            std::optional<std::string>("2.3-1"),
+            "full AUR factory lost owned metadata");
+    expect(
+            same_provider_identity(repository, same_repository_identity) &&
+                    repository != same_repository_identity,
+            "repository semantic identity depends on presentation metadata");
+    expect(
+            !same_provider_identity(aur, other_aur_base),
+            "AUR semantic identity lost PackageBase");
+    expect(
+            !same_provider_identity(repository, aur) &&
+                    provided_dependency_display(repository) ==
+                            provided_dependency_display(legacy_aur),
+            "typed provider identity was inferred from presentation text");
+}
+
 void test_success_snapshot_and_queries() {
     TestDatabase database;
     database.add_repository_file("core");
@@ -191,11 +256,13 @@ void test_success_snapshot_and_queries() {
     enqueue_database_read(
             database, "core",
             package_description(
-                    "core-provider", {"virtual-api=2", "virtual-api=2"}) +
+                    "core-provider", {"virtual-api=2", "virtual-api=2"},
+                    "2.4-1") +
                     package_description("shared-package"));
     enqueue_database_read(
             database, "extra",
-            package_description("extra-provider", {"virtual-api"}) +
+            package_description(
+                    "extra-provider", {"virtual-api"}, "3.1-2") +
                     package_description("shared-package"));
 
     StrictRepositoryPackageQueryResult shared_result =
@@ -230,13 +297,19 @@ void test_success_snapshot_and_queries() {
             require_repository_provider_origin(
                     providers[0], "first provider")
                             .repository_name == "core" &&
-                    providers[0].package_name == "core-provider",
+                    providers[0] == ProvidedDependency::from_repository(
+                                            "core", "core-provider",
+                                            "virtual-api", "virtual-api=2",
+                                            std::string("2.4-1")),
             "first provider does not preserve configured order");
     expect(
             require_repository_provider_origin(
                     providers[1], "second provider")
                             .repository_name == "extra" &&
-                    providers[1].package_name == "extra-provider",
+                    providers[1] == ProvidedDependency::from_repository(
+                                            "extra", "extra-provider",
+                                            "virtual-api", "virtual-api",
+                                            std::string("3.1-2")),
             "second provider does not preserve configured order");
 
     StrictRepositoryProvidersQueryResult missing_provider_result =
@@ -284,8 +357,15 @@ void test_repository_named_aur() {
             providers.front().package_name == "repository-provider",
             "repository named aur provider package differs");
     expect(
-            providers.front() !=
-                    ProvidedDependency::from_aur("repository-provider"),
+            providers.front() == ProvidedDependency::from_repository(
+                                         "aur", "repository-provider",
+                                         "virtual-api", "virtual-api",
+                                         std::string("1.0-1")),
+            "repository named aur provider metadata differs");
+    expect(
+            !same_provider_identity(
+                    providers.front(),
+                    ProvidedDependency::from_aur("repository-provider")),
             "repository named aur was conflated with AUR origin");
 
     expect_commands(
@@ -306,7 +386,10 @@ void test_legacy_malformed_candidates_are_skipped() {
             package_description(
                     "malformed-alias-provider", {"virtual-api="}) +
             package_description(
-                    "invalid-alias-provider", {"virtual/api"});
+                    "invalid-alias-provider", {"virtual/api"}) +
+            package_description(
+                    "invalid-version-provider", {"virtual-api"},
+                    "1.0\tinvalid");
 
     std::vector<ProvidedDependency> providers =
             parse_legacy_repository_provider_candidates_for_test(
@@ -314,7 +397,8 @@ void test_legacy_malformed_candidates_are_skipped() {
     expect(
             providers == std::vector<ProvidedDependency>{
                     ProvidedDependency::from_repository(
-                            "core", "valid-provider")},
+                            "core", "valid-provider", "virtual-api",
+                            "virtual-api", std::string("1.0-1"))},
             "legacy parser did not skip malformed candidates locally");
     expect(
             parse_legacy_repository_provider_candidates_for_test(
@@ -326,7 +410,8 @@ void test_legacy_malformed_candidates_are_skipped() {
                     description, "aur", "virtual-api") ==
                     std::vector<ProvidedDependency>{
                             ProvidedDependency::from_repository(
-                                    "aur", "valid-provider")},
+                                    "aur", "valid-provider", "virtual-api",
+                                    "virtual-api", std::string("1.0-1"))},
             "legacy parser conflated repository name aur with AUR origin");
     expect(
             parse_legacy_repository_provider_candidates_for_test(
@@ -547,6 +632,64 @@ void test_invalid_provided_dependency() {
             "invalid provided dependency"));
 }
 
+void test_missing_package_version() {
+    TestDatabase database;
+    database.add_repository_file("core");
+    enqueue_configuration(database, {"core"});
+    enqueue_database_read(
+            database, "core",
+            "%FILENAME%\nprovider-package-1-1-x86_64.pkg.tar.zst\n\n"
+            "%NAME%\nprovider-package\n\n"
+            "%PROVIDES%\nvirtual-api\n\n",
+            0);
+
+    StrictRepositoryProvidersQueryResult result =
+            query_repository_providers_strict("virtual-api");
+    static_cast<void>(require_failure(
+            result,
+            RepositoryMetadataFailureKind::SyncDatabaseMalformed,
+            "missing package version"));
+}
+
+void test_multiple_package_versions() {
+    TestDatabase database;
+    database.add_repository_file("core");
+    enqueue_configuration(database, {"core"});
+    enqueue_database_read(
+            database, "core",
+            "%FILENAME%\nprovider-package-1-1-x86_64.pkg.tar.zst\n\n"
+            "%NAME%\nprovider-package\n\n"
+            "%VERSION%\n1.0-1\n2.0-1\n\n"
+            "%PROVIDES%\nvirtual-api\n\n",
+            0);
+
+    StrictRepositoryProvidersQueryResult result =
+            query_repository_providers_strict("virtual-api");
+    static_cast<void>(require_failure(
+            result,
+            RepositoryMetadataFailureKind::SyncDatabaseMalformed,
+            "multiple package versions"));
+}
+
+void test_invalid_package_version() {
+    TestDatabase database;
+    database.add_repository_file("core");
+    enqueue_configuration(database, {"core"});
+    enqueue_database_read(
+            database, "core",
+            package_description(
+                    "provider-package", {"virtual-api"},
+                    "1.0\tinvalid"),
+            0);
+
+    StrictRepositoryProvidersQueryResult result =
+            query_repository_providers_strict("virtual-api");
+    static_cast<void>(require_failure(
+            result,
+            RepositoryMetadataFailureKind::SyncDatabaseMalformed,
+            "invalid package version"));
+}
+
 void test_partial_snapshot_is_not_published() {
     TestDatabase database;
     database.add_repository_file("core");
@@ -583,7 +726,9 @@ void test_partial_snapshot_is_not_published() {
 }
 
 void run_test_case(const std::string& test_case) {
-    if(test_case == "success")
+    if(test_case == "candidate-value-contract")
+        test_candidate_value_contract();
+    else if(test_case == "success")
         test_success_snapshot_and_queries();
     else if(test_case == "repository-named-aur")
         test_repository_named_aur();
@@ -611,6 +756,12 @@ void run_test_case(const std::string& test_case) {
         test_malformed_database_metadata();
     else if(test_case == "invalid-provided-dependency")
         test_invalid_provided_dependency();
+    else if(test_case == "missing-package-version")
+        test_missing_package_version();
+    else if(test_case == "multiple-package-versions")
+        test_multiple_package_versions();
+    else if(test_case == "invalid-package-version")
+        test_invalid_package_version();
     else if(test_case == "partial-snapshot")
         test_partial_snapshot_is_not_published();
     else

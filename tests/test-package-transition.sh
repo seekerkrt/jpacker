@@ -15,6 +15,18 @@ fail() {
     exit 1
 }
 
+assert_source_archive_input() {
+    archive_label=$1
+    archive_path=$2
+
+    [ -f "$archive_path" ] && [ ! -L "$archive_path" ] ||
+        fail "$archive_label source archive is missing, not regular, or a symlink: $archive_path"
+    [ -r "$archive_path" ] ||
+        fail "$archive_label source archive is not readable: $archive_path"
+    bsdtar -tf "$archive_path" >/dev/null 2>&1 ||
+        fail "$archive_label source archive is not a readable tar archive: $archive_path"
+}
+
 run_logged() {
     run_description=$1
     run_log=$2
@@ -255,9 +267,15 @@ run_makepkg_fixture() {
     fixture_home=$build_root/home
     fixture_xdg_config=$build_root/xdg-config
     fixture_gnupg_home=$build_root/gnupg
+    fixture_makepkg_config=$build_root/makepkg.conf
 
     mkdir -p "$fixture_home" "$fixture_xdg_config" "$xdg_cache"
     install -d -m700 "$fixture_gnupg_home"
+    cp /etc/makepkg.conf "$fixture_makepkg_config"
+    # Rolling Arch enables split debug packages by default. This fixture
+    # validates the two production package archives, so disable only that
+    # additional artifact while retaining the system compiler/tool settings.
+    printf '\nOPTIONS+=(!debug)\n' >>"$fixture_makepkg_config"
 
     (
         cd "$package_work"
@@ -273,7 +291,8 @@ run_makepkg_fixture() {
             LOGDEST="$log_destination" \
             CCACHE_DIR="$build_root/ccache" \
             CCACHE_TEMPDIR="$build_root/ccache-tmp" \
-            makepkg --cleanbuild --force --noconfirm
+            makepkg --config "$fixture_makepkg_config" \
+                --cleanbuild --force --noconfirm
     )
 }
 
@@ -327,7 +346,15 @@ do
         fail "$required_command is required"
 done
 
-v1_source_archive=$tmp_dir/jpacker-v1.16.0-source.tar
+legacy_source_archive_input=${MOGUET_TEST_LEGACY_SOURCE_ARCHIVE-}
+current_source_archive_input=${MOGUET_TEST_CURRENT_SOURCE_ARCHIVE-}
+if [ -n "$legacy_source_archive_input" ]; then
+    assert_source_archive_input legacy "$legacy_source_archive_input"
+fi
+if [ -n "$current_source_archive_input" ]; then
+    assert_source_archive_input current "$current_source_archive_input"
+fi
+
 v1_source=$tmp_dir/jpacker-v1.16.0-source
 v1_makepkg_work=$tmp_dir/jpacker-v1.16.0-makepkg
 v1_package_destination=$tmp_dir/jpacker-v1.16.0-packages
@@ -336,25 +363,30 @@ v1_manifest=$tmp_dir/jpacker-v1.16.0-files.txt
 v1_directory_manifest=$tmp_dir/jpacker-v1.16.0-directories.txt
 v1_removable_manifest=$tmp_dir/jpacker-v1.16.0-removable-files.txt
 
-v2_source=$tmp_dir/moguet-v2.0.1-source
-v2_source_manifest=$tmp_dir/moguet-v2.0.1-source-files.txt
-v2_makepkg_work=$tmp_dir/moguet-v2.0.1-makepkg
-v2_package_destination=$tmp_dir/moguet-v2.0.1-packages
-v2_archive_root=$tmp_dir/moguet-v2.0.1-archive-root
-v2_manifest=$tmp_dir/moguet-v2.0.1-files.txt
-v2_directory_manifest=$tmp_dir/moguet-v2.0.1-directories.txt
+v2_source=$tmp_dir/moguet-v2.1.0-source
+v2_source_manifest=$tmp_dir/moguet-v2.1.0-source-files.txt
+v2_makepkg_work=$tmp_dir/moguet-v2.1.0-makepkg
+v2_package_destination=$tmp_dir/moguet-v2.1.0-packages
+v2_archive_root=$tmp_dir/moguet-v2.1.0-archive-root
+v2_manifest=$tmp_dir/moguet-v2.1.0-files.txt
+v2_directory_manifest=$tmp_dir/moguet-v2.1.0-directories.txt
 
 coinstall_root=$tmp_dir/coinstall-root
 transition_root=$tmp_dir/transition-root
 
 current_version=$(tr -d '[:space:]' <"$repo_root/VERSION")
-[ "$current_version" = 2.0.1 ] ||
-    fail "current VERSION is $current_version; expected 2.0.1"
+[ "$current_version" = 2.1.0 ] ||
+    fail "current VERSION is $current_version; expected 2.1.0"
 
-git -C "$repo_root" rev-parse --verify 'refs/tags/v1.16.0^{commit}' \
-    >/dev/null || fail 'local tag v1.16.0 is unavailable'
-git -C "$repo_root" archive --format=tar \
-    --output="$v1_source_archive" v1.16.0
+if [ -n "$legacy_source_archive_input" ]; then
+    v1_source_archive=$legacy_source_archive_input
+else
+    v1_source_archive=$tmp_dir/jpacker-v1.16.0-source.tar
+    git -C "$repo_root" rev-parse --verify 'refs/tags/v1.16.0^{commit}' \
+        >/dev/null || fail 'local tag v1.16.0 is unavailable'
+    git -C "$repo_root" archive --format=tar \
+        --output="$v1_source_archive" v1.16.0
+fi
 mkdir -p "$v1_source"
 bsdtar -xf "$v1_source_archive" -C "$v1_source"
 
@@ -366,26 +398,30 @@ prepare_test_pkgbuild "$v1_source/PKGBUILD" "$v1_source" \
     "$v1_makepkg_work" \
     'git+https://github.com/seekerkrt/jpacker.git'
 
-# Copy every present tracked or non-ignored untracked working-tree file. This
-# preserves the issue branch's dirty edits and tracked deletions while keeping
-# .git, ignored build output, the moguet binary, and package artifacts out.
-git -C "$repo_root" ls-files --cached --others --exclude-standard |
-    while IFS= read -r source_path; do
-        case "$source_path" in
-            .git|.git/*|build|build/*|moguet|*.pkg.tar.*|*.src.tar.*)
-                continue
-                ;;
-        esac
-        if [ -f "$repo_root/$source_path" ] || [ -L "$repo_root/$source_path" ]; then
-            printf '%s\n' "$source_path"
-        fi
-    done >"$v2_source_manifest"
-[ -s "$v2_source_manifest" ] || fail 'current source manifest is empty'
 mkdir -p "$v2_source"
-while IFS= read -r source_path; do
-    mkdir -p "$v2_source/$(dirname "$source_path")"
-    cp -a "$repo_root/$source_path" "$v2_source/$source_path"
-done <"$v2_source_manifest"
+if [ -n "$current_source_archive_input" ]; then
+    bsdtar -xf "$current_source_archive_input" -C "$v2_source"
+else
+    # Preserve the issue branch's dirty edits and tracked deletions while
+    # keeping .git, ignored build output, binaries, and package artifacts out.
+    git -C "$repo_root" ls-files --cached --others --exclude-standard |
+        while IFS= read -r source_path; do
+            case "$source_path" in
+                .git|.git/*|build|build/*|moguet|*.pkg.tar.*|*.src.tar.*)
+                    continue
+                    ;;
+            esac
+            if [ -f "$repo_root/$source_path" ] ||
+                [ -L "$repo_root/$source_path" ]; then
+                printf '%s\n' "$source_path"
+            fi
+        done >"$v2_source_manifest"
+    [ -s "$v2_source_manifest" ] || fail 'current source manifest is empty'
+    while IFS= read -r source_path; do
+        mkdir -p "$v2_source/$(dirname "$source_path")"
+        cp -a "$repo_root/$source_path" "$v2_source/$source_path"
+    done <"$v2_source_manifest"
+fi
 
 assert_absent "$v2_source/.git"
 assert_absent "$v2_source/build"
@@ -399,7 +435,7 @@ first_package_artifact=$(find "$v2_source" -type f \
 [ -z "$first_package_artifact" ] ||
     fail "source fixture contains package artifact $first_package_artifact"
 
-initialize_fixture_repository "$v2_source" v2.0.1
+initialize_fixture_repository "$v2_source" v2.1.0
 prepare_test_pkgbuild "$repo_root/PKGBUILD" "$v2_source" \
     "$v2_makepkg_work" \
     'git+https://github.com/seekerkrt/moguet.git'
@@ -418,7 +454,7 @@ run_logged 'jpacker v1.16.0 clean package build' "$tmp_dir/v1-makepkg.log" \
         "$tmp_dir/v1-source-packages" \
         "$tmp_dir/v1-logs" \
         "$tmp_dir/v1-xdg-cache"
-run_logged 'Moguet v2.0.1 clean package build' "$tmp_dir/v2-makepkg.log" \
+run_logged 'Moguet v2.1.0 clean package build' "$tmp_dir/v2-makepkg.log" \
     run_makepkg_fixture \
         "$v2_makepkg_work" \
         "$tmp_dir/v2-build" \
@@ -429,7 +465,7 @@ run_logged 'Moguet v2.0.1 clean package build' "$tmp_dir/v2-makepkg.log" \
         "$tmp_dir/v2-xdg-cache"
 
 v1_package_archive=$v1_package_destination/jpacker-1.16.0-1-x86_64.pkg.tar.zst
-v2_package_archive=$v2_package_destination/moguet-2.0.1-1-x86_64.pkg.tar.zst
+v2_package_archive=$v2_package_destination/moguet-2.1.0-1-x86_64.pkg.tar.zst
 [ -f "$v1_package_archive" ] ||
     fail "expected package archive is missing: $v1_package_archive"
 [ -f "$v2_package_archive" ] ||
@@ -457,7 +493,7 @@ assert_metadata_single "$tmp_dir/v1.PKGINFO" backup \
     etc/jpacker/jpacker.conf
 
 assert_metadata_single "$tmp_dir/v2.PKGINFO" pkgname moguet
-assert_metadata_single "$tmp_dir/v2.PKGINFO" pkgver 2.0.1-1
+assert_metadata_single "$tmp_dir/v2.PKGINFO" pkgver 2.1.0-1
 assert_metadata_single "$tmp_dir/v2.PKGINFO" arch x86_64
 assert_metadata_single "$tmp_dir/v2.PKGINFO" license GPL-3.0-or-later
 for transition_key in backup conflict conflicts provides replaces
@@ -540,7 +576,7 @@ archive_version=$(LC_ALL=C \
     XDG_STATE_HOME="$archive_state_home" \
     XDG_CACHE_HOME="$archive_cache_home" \
     "$v2_archive_root/usr/bin/moguet" --version)
-[ "$archive_version" = 'Moguet v2.0.1' ] ||
+[ "$archive_version" = 'Moguet v2.1.0' ] ||
     fail "archived Moguet version mismatch: $archive_version"
 assert_absent "$archive_config_home"
 assert_absent "$archive_state_home"

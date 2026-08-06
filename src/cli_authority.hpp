@@ -33,7 +33,11 @@ struct OperationSpec {
 
 inline constexpr std::array<OperationSpec, static_cast<std::size_t>(OperationId::Count)>
         MOGUET_OPERATIONS = {{
-                {OperationId::Build, "build", "build <pkg> [V=K]", true, true},
+                {OperationId::Build,
+                 "build",
+                 "build <pkg> [V=K...] | build --local <directory> [V=K...]",
+                 true,
+                 true},
                 {OperationId::Upgrade, "upgrade", "upgrade", false, true},
                 {OperationId::UpgradeAur, "upgrade-aur", "upgrade-aur", false, true},
                 {OperationId::UpgradeAll, "upgrade-all", "upgrade-all", false, true},
@@ -70,6 +74,7 @@ enum class GlobalOptionId {
     Rebuild,
     CleanBuild,
     RmDeps,
+    Select,
     Aur,
     Repo,
     Count,
@@ -93,6 +98,7 @@ inline constexpr std::array<GlobalOptionSpec, static_cast<std::size_t>(GlobalOpt
                 {GlobalOptionId::Rebuild, "--rebuild", "--rebuild", false},
                 {GlobalOptionId::CleanBuild, "--cleanbuild", "--cleanbuild", false},
                 {GlobalOptionId::RmDeps, "--rmdeps", "--rmdeps", false},
+                {GlobalOptionId::Select, "--select", "--select", false},
                 {GlobalOptionId::Aur, "--aur", "--aur", false},
                 {GlobalOptionId::Repo, "--repo", "--repo", false},
         }};
@@ -124,6 +130,10 @@ inline constexpr std::string_view BUILD_MODE_REBUILD_OPTION =
 inline constexpr std::string_view BUILD_MODE_CLEAN_OPTION =
         "--build-mode=clean";
 
+// Operation-local source selector。GlobalOptionSpecへ昇格させず、build routing
+// だけが解釈する。
+inline constexpr std::string_view LOCAL_SOURCE_OPTION = "--local";
+
 inline constexpr std::string_view HELP_SHORT_OPTION = "-h";
 inline constexpr std::string_view HELP_LONG_OPTION = "--help";
 inline constexpr std::string_view HELP_OPTION_SYNTAX = "-h, --help";
@@ -138,6 +148,8 @@ inline constexpr std::string_view PKGBUILD_PRINT_SYNTAX = "-Gp <pkg>";
 
 // pacman-compatible entries are documentation examples, not a parser allowlist.
 inline constexpr std::string_view PACMAN_SYNC_INSTALL_SYNTAX = "-S <pkg>";
+inline constexpr std::string_view PACMAN_SYNC_SELECT_SYNTAX =
+        "-S --select <query>";
 inline constexpr std::string_view PACMAN_SYSTEM_UPGRADE_SYNTAX = "-Syu";
 inline constexpr std::string_view PACMAN_SYNC_SEARCH_SYNTAX = "-Ss <query>";
 inline constexpr std::string_view PACMAN_SYNC_INFO_SYNTAX = "-Si <pkg>";

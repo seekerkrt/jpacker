@@ -1,6 +1,13 @@
 #!/bin/sh
 set -eu
 
+# Assertions target the canonical untranslated CLI output.
+# Do not inherit locale settings from the invoking environment.
+LANG=C
+LC_ALL=C
+export LANG LC_ALL
+unset LANGUAGE
+
 test_binary=$1
 repo_root=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
 MOGUET_TEST_REPOSITORY_ROOT=$repo_root
@@ -64,13 +71,13 @@ unset MOGUET_TEST_MAKEPKG_EXIT_CODE
 run_ok() {
     output_file=$1
     shift
-    "$test_binary" "$@" > "$output_file" 2>&1
+    "$test_binary" "$@" </dev/null > "$output_file" 2>&1
 }
 
 run_fail() {
     output_file=$1
     shift
-    if "$test_binary" "$@" > "$output_file" 2>&1; then
+    if "$test_binary" "$@" </dev/null > "$output_file" 2>&1; then
         echo "expected command to fail: $*" >&2
         exit 1
     fi

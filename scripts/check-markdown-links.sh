@@ -5,9 +5,15 @@ set -eu
 repo_root=$(CDPATH= cd "$(dirname "$0")/.." && pwd -P)
 links_file=$(mktemp)
 missing_file=$(mktemp)
+archive_paths_file=$(mktemp)
+source_links_file=$(mktemp)
 
 cleanup() {
-    rm -f "$links_file" "$missing_file"
+    rm -f \
+        "$links_file" \
+        "$missing_file" \
+        "$archive_paths_file" \
+        "$source_links_file"
 }
 trap cleanup EXIT INT TERM
 
@@ -20,10 +26,46 @@ cd "$repo_root"
 command -v realpath >/dev/null 2>&1 ||
     fail "realpath is required for repository containment checks."
 
-git grep -n -o -E '\[[^]]*\]\([^)]*\)' -- '*.md' > "$links_file" || {
-    status=$?
-    [ "$status" -eq 1 ] || fail "unable to enumerate tracked Markdown links."
-}
+current_source_archive=${MOGUET_TEST_CURRENT_SOURCE_ARCHIVE-}
+if [ -n "$current_source_archive" ]; then
+    [ -f "$current_source_archive" ] && [ ! -L "$current_source_archive" ] ||
+        fail "current source archive is missing, not regular, or a symlink: $current_source_archive"
+    command -v bsdtar >/dev/null 2>&1 ||
+        fail "bsdtar is required for current source archive enumeration."
+    bsdtar -tf "$current_source_archive" >"$archive_paths_file" ||
+        fail "unable to enumerate current source archive."
+
+    while IFS= read -r archive_path
+    do
+        source_file=${archive_path#./}
+        [ -n "$source_file" ] || continue
+        case "$source_file" in
+            /*|..|../*|*/..|*/../*)
+                fail "unsafe current source archive path: $archive_path"
+                ;;
+            *.md)
+                [ -f "$source_file" ] && [ ! -L "$source_file" ] ||
+                    fail "archived Markdown is missing or not regular: $source_file"
+                if grep -n -o -E '\[[^]]*\]\([^)]*\)' -- \
+                    "$source_file" >"$source_links_file"; then
+                    awk -v source_file="$source_file" \
+                        '{ print source_file ":" $0 }' \
+                        "$source_links_file" >>"$links_file"
+                else
+                    status=$?
+                    [ "$status" -eq 1 ] ||
+                        fail "unable to inspect archived Markdown: $source_file"
+                fi
+                ;;
+        esac
+    done <"$archive_paths_file"
+else
+    git grep -n -o -E '\[[^]]*\]\([^)]*\)' -- '*.md' >"$links_file" || {
+        status=$?
+        [ "$status" -eq 1 ] ||
+            fail "unable to enumerate tracked Markdown links."
+    }
+fi
 
 while IFS=: read -r source_file line_number markdown_link
 do

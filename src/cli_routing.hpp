@@ -1,6 +1,7 @@
 #pragma once
 
 #include "cli_parser.hpp"
+#include "source_environment.hpp"
 
 #include <optional>
 #include <string>
@@ -23,6 +24,20 @@ struct SourceSyncOptions {
     bool needed = false;
 };
 
+// `--select`のpre-query validationで確定したowned request。
+// queryはASCII whitespace trim済みで、pacman argvへは戻さない。
+struct RootPackageSelectionInvocation {
+    std::string query;
+    bool        needed = false;
+};
+
+// `build --local`のstrict entry validationで確定したowned request。
+// directoryはfilesystem inspection前のlexical operandをそのまま保持する。
+struct LocalSourceBuildInvocation {
+    std::string            directory;
+    SourceBuildEnvironment source_environment;
+};
+
 std::optional<PkgbuildExportMode> pkgbuild_export_mode(const ParsedCliArguments& parsed);
 // Emptyならvalid。複数messageの順序はCLI presentation側でも維持する。
 std::vector<std::string> validate_pkgbuild_export_invocation(
@@ -39,4 +54,17 @@ std::optional<std::string> validate_source_selection_operation(
 bool pacman_operation_requests_refresh(
         const std::string& operation, const std::vector<std::string>& flags);
 std::optional<std::string> unsupported_source_sync_option(
+        const ParsedCliArguments& parsed);
+
+// `root_package_selection_requested`がtrueのinvocationだけを受ける。
+// invalid invocationはcandidate query前に表示できるdiagnosticで拒否する。
+RootPackageSelectionInvocation require_root_package_selection_invocation(
+        const ParsedCliArguments& parsed);
+
+// exactなoperation-local selectorだけをsemantic requestとして扱う。
+// option valueや`--`後の同じ綴りはrequestへ昇格させない。
+bool local_source_build_requested(const ParsedCliArguments& parsed);
+// local source buildがrequestedなinvocationだけを受け、directory accessより前に
+// option / operand grammarとordered environment assignmentを確定する。
+LocalSourceBuildInvocation require_local_source_build_invocation(
         const ParsedCliArguments& parsed);

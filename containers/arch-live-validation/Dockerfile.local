@@ -1,0 +1,106 @@
+FROM archlinux:latest
+
+LABEL org.opencontainers.image.title="Moguet Arch live local PKGBUILD validation" \
+      org.opencontainers.image.source="https://github.com/seekerkrt/moguet" \
+      org.opencontainers.image.base.name="docker.io/library/archlinux:latest"
+
+# This is a standalone image. cargo intentionally remains absent so the
+# tracked local fixture exercises a selected provider before local build/install.
+RUN pacman-key --init \
+    && pacman-key --populate archlinux \
+    && pacman -Syu --needed --noconfirm \
+        base-devel \
+        curl \
+        git \
+        libarchive \
+        nano \
+        nlohmann-json \
+        pacman \
+        python \
+        sudo \
+        tomlplusplus \
+        util-linux \
+        zstd \
+    && ! pacman -Qq rust \
+    && ! pacman -Qq rustup \
+    && ! pacman -Qq moguet-live-fixture \
+    && rm -f /var/cache/pacman/pkg/*
+
+ARG VALIDATION_UID=1000
+ARG VALIDATION_GID=1000
+
+RUN groupadd --gid "${VALIDATION_GID}" moguet-validation \
+    && useradd \
+        --uid "${VALIDATION_UID}" \
+        --gid "${VALIDATION_GID}" \
+        --create-home \
+        --shell /bin/bash \
+        moguet-validation \
+    && install -d -o moguet-validation -g moguet-validation -m 0700 \
+        /home/moguet-validation/.cache \
+        /home/moguet-validation/.config \
+        /home/moguet-validation/.local/state \
+        /home/moguet-validation/live-local-case \
+        /home/moguet-validation/work/moguet
+
+ENV HOME=/home/moguet-validation \
+    XDG_CACHE_HOME=/home/moguet-validation/.cache \
+    XDG_CONFIG_HOME=/home/moguet-validation/.config \
+    XDG_STATE_HOME=/home/moguet-validation/.local/state \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8 \
+    LANGUAGE=en
+
+WORKDIR /home/moguet-validation/work/moguet
+
+# .dockerignore excludes VCS metadata, credentials, host state, sockets, and
+# host build/package artifacts from this standalone context.
+COPY --chown=moguet-validation:moguet-validation . .
+
+# Capture the reviewed tracked fixture before any validation-user build step.
+# Runtime cases copy only from this root-owned, non-writable authority.
+RUN install -d -o root -g root -m 0755 \
+        /usr/libexec/moguet-live-local/fixtures \
+    && install -d -o root -g root -m 0555 \
+        /usr/libexec/moguet-live-local/fixtures/local-package \
+    && install -o root -g root -m 0444 \
+        containers/arch-live-validation/fixtures/local-package/PKGBUILD \
+        containers/arch-live-validation/fixtures/local-package/contract.env \
+        /usr/libexec/moguet-live-local/fixtures/local-package/
+
+USER moguet-validation:moguet-validation
+
+RUN env -u MAKEFLAGS -u MFLAGS make clean \
+    && env -u MAKEFLAGS -u MFLAGS make -j8 --output-sync=target
+
+USER root:root
+
+# Only this local-validation gateway can reach the real pacman. It accepts
+# one selected cargo provider and one staged local fixture artifact.
+RUN install -d -o root -g root -m 0755 \
+        /usr/libexec/moguet-live-local \
+    && install -o root -g root -m 0755 \
+        /usr/bin/pacman \
+        /usr/libexec/moguet-live-local/pacman.real \
+    && install -o root -g root -m 0755 \
+        containers/arch-live-validation/local-stage-artifact.py \
+        /usr/libexec/moguet-live-local/local-stage-artifact.py \
+    && install -d -o root -g root -m 0711 \
+        /var/lib/moguet-live-local \
+    && install -d -o root -g moguet-validation -m 0750 \
+        /var/lib/moguet-live-local/staging \
+        /var/log/moguet-live-local \
+    && install -o root -g root -m 0555 \
+        containers/arch-live-validation/local-pacman-gateway.sh \
+        /usr/bin/pacman \
+    && printf '%s\n' \
+        'Defaults:moguet-validation env_keep += "MOGUET_LIVE_LOCAL_CASE"' \
+        'moguet-validation ALL=(root) NOPASSWD: /usr/bin/pacman *' \
+        > /etc/sudoers.d/moguet-live-local \
+    && chown root:root /etc/sudoers.d/moguet-live-local \
+    && chmod 0440 /etc/sudoers.d/moguet-live-local \
+    && visudo -cf /etc/sudoers.d/moguet-live-local
+
+USER moguet-validation:moguet-validation
+
+CMD ["sh", "containers/arch-live-validation/run-local-install.sh"]

@@ -12,6 +12,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <variant>
 #include <vector>
 
 // AUR update preflightをmutation-freeなproduction invocationへ射影する。
@@ -44,6 +45,36 @@ template<typename Value>
 void add_unique(std::vector<Value>& values, const Value& value) {
     if(std::find(values.begin(), values.end(), value) == values.end()) {
         values.push_back(value);
+    }
+}
+
+void add_selected_repository_provider(
+        std::vector<ProvidedDependency>& providers,
+        const ProvidedDependency& provider) {
+    const auto same = [&provider](const ProvidedDependency& existing) {
+        return same_provider_identity(existing, provider);
+    };
+    if(std::find_if(providers.begin(), providers.end(), same) ==
+       providers.end()) {
+        providers.push_back(provider);
+    }
+}
+
+void attach_selected_repository_providers(
+        ProductionSourceBuildWorkItem& work_item,
+        const BuildPlan& plan) {
+    for(const BuildPlanDependencyEdge& edge : plan.dependency_edges) {
+        if(edge.parent_package_base != work_item.request.checkout_name ||
+           edge.kind != DependencyKind::Provided ||
+           edge.provider_resolution != ProviderResolutionKind::UserSelected ||
+           !edge.resolved_provider.has_value() ||
+           !std::holds_alternative<RepositoryProviderOrigin>(
+                   edge.resolved_provider->origin)) {
+            continue;
+        }
+        add_selected_repository_provider(
+                work_item.selected_repository_providers,
+                edge.resolved_provider.value());
     }
 }
 
@@ -825,6 +856,7 @@ bool collect_work_item_drafts(
         draft.work_item.request.update_baseline = std::nullopt;
         draft.work_item.is_build_plan_entry = true;
         draft.work_item.uses_system_update_baseline = false;
+        attach_selected_repository_providers(draft.work_item, plan);
 
         bool unit_is_consistent = true;
         for(const auto& generic_target : projected_targets.required_targets) {

@@ -2129,6 +2129,27 @@ void test_constructed_completed_unknown_success_fixture() {
             "Completed + Unknown package state must remain successful");
 }
 
+void test_constructed_provider_transaction_unknown_reaches_aggregate() {
+    UpgradeAllOperationResult result =
+            make_constructed_completed_helper_fixture(
+                    PackageStateChange::NoChange);
+    SelectedRepositoryProviderTransactionResult& provider_transaction =
+            result.aur.operation_result->reduced_operation_result.
+                    selected_repository_provider_transaction;
+    provider_transaction.status =
+            SelectedRepositoryProviderTransactionStatus::Succeeded;
+    provider_transaction.selected_providers = {
+            ProvidedDependency::from_repository("extra", "provider-pkg")};
+    provider_transaction.package_state_change = PackageStateChange::Unknown;
+    provider_transaction.command_exit_status = 0;
+
+    expect(
+            result.is_success() &&
+                    result.package_state_change() ==
+                            PackageStateChange::Unknown,
+            "AUR provider transaction Unknown state was lost by the aggregate");
+}
+
 void test_constructed_success_metadata_fixture() {
     UpgradeAllOperationResult result =
             make_constructed_completed_helper_fixture(
@@ -2374,6 +2395,9 @@ int main() {
         run_case(
                 "constructed Completed Unknown success",
                 test_constructed_completed_unknown_success_fixture);
+        run_case(
+                "constructed provider transaction Unknown aggregate",
+                test_constructed_provider_transaction_unknown_reaches_aggregate);
         run_case(
                 "constructed success metadata",
                 test_constructed_success_metadata_fixture);

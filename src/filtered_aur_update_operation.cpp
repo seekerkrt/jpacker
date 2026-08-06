@@ -1357,6 +1357,7 @@ bool invocation_status_matches_operation(
         return result.execution_status ==
                 AurUpdateInvocationExecutionStatus::Completed;
     case AurUpdateOperationStatus::BlockedBeforeExecution:
+    case AurUpdateOperationStatus::StoppedOnProviderTransactionFailure:
     case AurUpdateOperationStatus::StoppedOnWorkItemFailure:
     case AurUpdateOperationStatus::StoppedAfterPackageCleanupFailure:
     case AurUpdateOperationStatus::InconsistentResult:
@@ -1575,7 +1576,8 @@ PreparedFilteredAurUpdateOperation prepare_filtered_aur_update_operation(
 
     build_filtered_update_plan(operation);
     operation.preflight = resolve_aur_update_execution_preflight(
-            operation.filtered_update_plan);
+            operation.filtered_update_plan,
+            provider_selection_callback(config));
     correlate_preflight(operation);
 
     BuildUnitAdapterResult build_adapter;
@@ -1719,6 +1721,11 @@ bool FilteredAurUpdateExecutionResult::is_success() const noexcept {
                        work_item.failure_kind ==
                                AurUpdateWorkItemFailureKind::None;
             });
+}
+
+PackageStateChange
+FilteredAurUpdateExecutionResult::package_state_change() const noexcept {
+    return reduced_operation_result.package_state_change();
 }
 
 bool FilteredAurUpdateExecutionResult::changed_package_state() const noexcept {

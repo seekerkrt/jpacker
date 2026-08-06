@@ -8,6 +8,7 @@
 #include <fstream>
 #include <map>
 #include <memory>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -87,11 +88,38 @@ struct RepositoryPackageState {
     PackageLookupMode lookup_mode = PackageLookupMode::Absent;
     alpm_errno_t      query_error = ALPM_ERR_DB_OPEN;
     std::string       returned_name;
+    std::string       version;
+    std::string       description;
     off_t             package_size = 0;
     off_t             installed_size = 0;
     bool              name_is_null = false;
     bool              should_preserve_query_error = false;
     alpm_errno_t      preserved_query_error = ALPM_ERR_DB_OPEN;
+};
+
+struct RepositorySearchBehavior {
+    bool                     fails = false;
+    alpm_errno_t             error = ALPM_ERR_INVALID_REGEX;
+    bool                     should_preserve_error = false;
+    alpm_errno_t             preserved_error = ALPM_ERR_DB_OPEN;
+    std::vector<std::string> package_names;
+};
+
+struct RepositoryGroupBehavior {
+    PackageLookupMode        lookup_mode = PackageLookupMode::Absent;
+    alpm_errno_t             query_error = ALPM_ERR_DB_OPEN;
+    std::string              returned_name;
+    bool                     has_custom_returned_name = false;
+    bool                     append_null_member = false;
+    std::vector<std::string> package_names;
+};
+
+struct GroupRecord {
+    explicit GroupRecord(std::string group_name)
+        : name(std::move(group_name)), group{name.data(), nullptr} {}
+
+    std::string  name;
+    alpm_group_t group;
 };
 
 struct SyncDatabaseRecord {
@@ -102,6 +130,7 @@ struct SyncDatabaseRecord {
     alpm_db_t database;
     alpm_list_t cache_node;
     std::map<std::string, std::unique_ptr<alpm_pkg_t>> packages;
+    std::map<std::string, std::unique_ptr<GroupRecord>> groups;
 };
 
 struct HandleRecord {
@@ -181,11 +210,21 @@ struct AlpmStubState {
     std::map<std::string, SyncDatabaseBehavior> sync_database_behaviors;
     std::map<std::pair<std::string, std::string>, RepositoryPackageState>
             repository_packages;
+    std::map<std::pair<std::string, std::string>, RepositorySearchBehavior>
+            repository_search_behaviors;
+    std::map<std::pair<std::string, std::string>, RepositoryGroupBehavior>
+            repository_group_behaviors;
+    std::size_t owned_list_free_calls = 0;
+    std::size_t group_expansion_calls = 0;
     std::vector<package_metadata_test_stub::SyncDatabaseRegistration>
             sync_database_registrations;
     std::vector<std::string> sync_database_operations;
     std::vector<package_metadata_test_stub::RepositoryPackageQuery>
             repository_package_queries;
+    std::vector<package_metadata_test_stub::RepositorySearchQuery>
+            repository_search_queries;
+    std::vector<package_metadata_test_stub::RepositoryGroupQuery>
+            repository_group_queries;
 
     std::vector<std::unique_ptr<HandleRecord>> handles;
 };
@@ -527,6 +566,48 @@ RepositoryPackageState* repository_package_state(alpm_pkg_t* package) {
     return &package_state->second;
 }
 
+alpm_pkg_t* sync_package_for(
+        alpm_db_t* database,
+        const std::string& package_name) {
+    SyncDatabaseRecord* database_record = sync_database_record(database);
+    if(database_record == nullptr) return nullptr;
+
+    auto& package = database_record->packages[package_name];
+    if(package == nullptr) {
+        package = std::make_unique<alpm_pkg_t>(alpm_pkg_t{
+                database->handle,
+                AlpmStubDatabaseKind::Sync,
+                database->repository_name,
+                package_name,
+                0});
+    }
+    return package.get();
+}
+
+alpm_list_t* make_owned_list(const std::vector<void*>& values) {
+    alpm_list_t* first = nullptr;
+    alpm_list_t* previous = nullptr;
+    try {
+        for(void* value : values) {
+            auto* node = new alpm_list_t{value, previous, nullptr};
+            if(previous == nullptr) {
+                first = node;
+            } else {
+                previous->next = node;
+            }
+            previous = node;
+        }
+    } catch(...) {
+        while(first != nullptr) {
+            alpm_list_t* next = first->next;
+            delete first;
+            first = next;
+        }
+        throw;
+    }
+    return first;
+}
+
 void set_handle_error(alpm_handle_t* handle, alpm_errno_t error) {
     if(handle != nullptr) handle->error = error;
 }
@@ -817,6 +898,88 @@ void preserve_error_on_next_repository_package_query(
     package_state.preserved_query_error = stale_error;
 }
 
+void set_repository_search_results(
+        const std::string& repository_name,
+        const std::string& query,
+        const std::vector<RepositorySearchPackageMetadata>& packages) {
+    RepositorySearchBehavior& behavior =
+            g_state.repository_search_behaviors[{repository_name, query}];
+    behavior.fails = false;
+    behavior.package_names.clear();
+    for(const auto& package : packages) {
+        behavior.package_names.push_back(package.name);
+        RepositoryPackageState& package_state =
+                repository_package_state(repository_name, package.name);
+        package_state.lookup_mode = PackageLookupMode::Present;
+        package_state.returned_name = package.name;
+        package_state.version = package.version;
+        package_state.description = package.description;
+        package_state.name_is_null = false;
+    }
+}
+
+void set_repository_search_failure(
+        const std::string& repository_name,
+        const std::string& query,
+        alpm_errno_t error) {
+    RepositorySearchBehavior& behavior =
+            g_state.repository_search_behaviors[{repository_name, query}];
+    behavior.fails = true;
+    behavior.error = error;
+}
+
+void preserve_error_on_next_repository_search(
+        const std::string& repository_name,
+        const std::string& query,
+        alpm_errno_t stale_error) {
+    RepositorySearchBehavior& behavior =
+            g_state.repository_search_behaviors[{repository_name, query}];
+    behavior.should_preserve_error = true;
+    behavior.preserved_error = stale_error;
+}
+
+void set_repository_exact_group(
+        const std::string& repository_name,
+        const std::string& group_name,
+        const std::vector<RepositorySearchPackageMetadata>& packages) {
+    RepositoryGroupBehavior& behavior =
+            g_state.repository_group_behaviors[{repository_name, group_name}];
+    behavior.lookup_mode = PackageLookupMode::Present;
+    behavior.has_custom_returned_name = false;
+    behavior.append_null_member = false;
+    behavior.package_names.clear();
+    for(const auto& package : packages) {
+        behavior.package_names.push_back(package.name);
+        RepositoryPackageState& package_state =
+                repository_package_state(repository_name, package.name);
+        package_state.lookup_mode = PackageLookupMode::Present;
+        package_state.returned_name = package.name;
+        package_state.version = package.version;
+        package_state.description = package.description;
+        package_state.name_is_null = false;
+    }
+}
+
+void set_repository_group_returned_name(
+        const std::string& repository_name,
+        const std::string& group_name,
+        const std::string& returned_name) {
+    RepositoryGroupBehavior& behavior =
+            g_state.repository_group_behaviors[{repository_name, group_name}];
+    behavior.lookup_mode = PackageLookupMode::Present;
+    behavior.returned_name = returned_name;
+    behavior.has_custom_returned_name = true;
+}
+
+void append_null_repository_group_member(
+        const std::string& repository_name,
+        const std::string& group_name) {
+    RepositoryGroupBehavior& behavior =
+            g_state.repository_group_behaviors[{repository_name, group_name}];
+    behavior.lookup_mode = PackageLookupMode::Present;
+    behavior.append_null_member = true;
+}
+
 std::size_t initialize_call_count() {
     return g_state.initialize_calls;
 }
@@ -859,6 +1022,14 @@ std::size_t release_count_for_handle(std::size_t creation_index) {
     return g_state.handles[creation_index]->release_count;
 }
 
+std::size_t owned_list_free_call_count() {
+    return g_state.owned_list_free_calls;
+}
+
+std::size_t group_expansion_call_count() {
+    return g_state.group_expansion_calls;
+}
+
 std::string last_initialize_root() {
     return g_state.initialize_root;
 }
@@ -887,9 +1058,26 @@ std::vector<RepositoryPackageQuery> repository_package_query_history() {
     return g_state.repository_package_queries;
 }
 
+std::vector<RepositorySearchQuery> repository_search_query_history() {
+    return g_state.repository_search_queries;
+}
+
+std::vector<RepositoryGroupQuery> repository_group_query_history() {
+    return g_state.repository_group_queries;
+}
+
 } // namespace package_metadata_test_stub
 
 extern "C" {
+
+void alpm_list_free(alpm_list_t* list) {
+    ++g_state.owned_list_free_calls;
+    while(list != nullptr) {
+        alpm_list_t* next = list->next;
+        delete list;
+        list = next;
+    }
+}
 
 alpm_handle_t* alpm_initialize(
         const char* root, const char* database_path, alpm_errno_t* error) {
@@ -1085,6 +1273,135 @@ alpm_list_t* alpm_db_get_pkgcache(alpm_db_t* database) {
     return record->local_cache_nodes.front().get();
 }
 
+int alpm_db_search(
+        alpm_db_t* database,
+        const alpm_list_t* needles,
+        alpm_list_t** results) {
+    if(database == nullptr ||
+       database->kind != AlpmStubDatabaseKind::Sync ||
+       needles == nullptr || needles->data == nullptr ||
+       needles->next != nullptr || results == nullptr || *results != nullptr) {
+        if(database != nullptr) {
+            set_handle_error(database->handle, ALPM_ERR_WRONG_ARGS);
+        }
+        return -1;
+    }
+
+    const std::string query(static_cast<const char*>(needles->data));
+    g_state.repository_search_queries.push_back(
+            package_metadata_test_stub::RepositorySearchQuery{
+                    database->repository_name, query});
+    g_state.sync_database_operations.push_back(
+            "search " + database->repository_name + "/" + query);
+
+    RepositorySearchBehavior& behavior =
+            g_state.repository_search_behaviors[
+                    {database->repository_name, query}];
+    if(behavior.fails) {
+        set_handle_error(database->handle, behavior.error);
+        return -1;
+    }
+
+    std::vector<void*> package_values;
+    package_values.reserve(behavior.package_names.size());
+    for(const auto& package_name : behavior.package_names) {
+        package_values.push_back(sync_package_for(database, package_name));
+    }
+    *results = make_owned_list(package_values);
+    if(behavior.should_preserve_error) {
+        set_handle_error(database->handle, behavior.preserved_error);
+        behavior.should_preserve_error = false;
+    } else {
+        set_handle_error(database->handle, ALPM_ERR_OK);
+    }
+    return 0;
+}
+
+alpm_group_t* alpm_db_get_group(
+        alpm_db_t* database,
+        const char* group_name) {
+    if(database == nullptr ||
+       database->kind != AlpmStubDatabaseKind::Sync ||
+       group_name == nullptr || group_name[0] == '\0') {
+        if(database != nullptr) {
+            set_handle_error(database->handle, ALPM_ERR_WRONG_ARGS);
+        }
+        return nullptr;
+    }
+
+    const std::string group(group_name);
+    g_state.repository_group_queries.push_back(
+            package_metadata_test_stub::RepositoryGroupQuery{
+                    database->repository_name, group});
+    g_state.sync_database_operations.push_back(
+            "group " + database->repository_name + "/" + group);
+
+    RepositoryGroupBehavior& behavior =
+            g_state.repository_group_behaviors[
+                    {database->repository_name, group}];
+    switch(behavior.lookup_mode) {
+        case PackageLookupMode::Present: {
+            SyncDatabaseRecord* database_record =
+                    sync_database_record(database);
+            if(database_record == nullptr) {
+                set_handle_error(database->handle, ALPM_ERR_DB_NULL);
+                return nullptr;
+            }
+            auto& group_record = database_record->groups[group];
+            if(group_record == nullptr) {
+                group_record = std::make_unique<GroupRecord>(
+                        behavior.has_custom_returned_name
+                                ? behavior.returned_name
+                                : group);
+            }
+            return &group_record->group;
+        }
+        case PackageLookupMode::Absent:
+            return nullptr;
+        case PackageLookupMode::Failure:
+            set_handle_error(database->handle, behavior.query_error);
+            return nullptr;
+        case PackageLookupMode::NullWithoutError:
+            return nullptr;
+    }
+    return nullptr;
+}
+
+alpm_list_t* alpm_find_group_pkgs(
+        alpm_list_t* databases,
+        const char* group_name) {
+    ++g_state.group_expansion_calls;
+    if(databases == nullptr || group_name == nullptr || group_name[0] == '\0') {
+        return nullptr;
+    }
+
+    auto* first_database = static_cast<alpm_db_t*>(databases->data);
+    if(first_database == nullptr) return nullptr;
+    std::set<std::string> seen_package_names;
+    std::vector<void*>    package_values;
+    for(alpm_list_t* node = databases; node != nullptr; node = node->next) {
+        auto* database = static_cast<alpm_db_t*>(node->data);
+        if(database == nullptr ||
+           database->kind != AlpmStubDatabaseKind::Sync) {
+            set_handle_error(first_database->handle, ALPM_ERR_DB_NULL);
+            return nullptr;
+        }
+
+        RepositoryGroupBehavior& behavior =
+                g_state.repository_group_behaviors[
+                        {database->repository_name, group_name}];
+        if(behavior.lookup_mode != PackageLookupMode::Present) continue;
+        for(const auto& package_name : behavior.package_names) {
+            if(!seen_package_names.insert(package_name).second) continue;
+            package_values.push_back(
+                    sync_package_for(database, package_name));
+        }
+        if(behavior.append_null_member) package_values.push_back(nullptr);
+    }
+
+    return make_owned_list(package_values);
+}
+
 alpm_pkg_t* alpm_db_get_pkg(alpm_db_t* database, const char* name) {
     if(database != nullptr && database->kind == AlpmStubDatabaseKind::Sync) {
         const std::string package_name = name == nullptr ? "" : name;
@@ -1215,10 +1532,35 @@ const char* alpm_pkg_get_name(alpm_pkg_t* package) {
 
 const char* alpm_pkg_get_version(alpm_pkg_t* package) {
     if(package == nullptr) return nullptr;
+    if(package->kind == AlpmStubDatabaseKind::Sync) {
+        RepositoryPackageState* package_state = repository_package_state(package);
+        if(package_state == nullptr) return nullptr;
+        return package_state->version.c_str();
+    }
     set_handle_error(package->handle, ALPM_ERR_OK);
     LocalPackageState* package_state = local_package_state(package);
     if(package_state == nullptr || package_state->version_is_null) return nullptr;
     return package_state->version.c_str();
+}
+
+const char* alpm_pkg_get_desc(alpm_pkg_t* package) {
+    RepositoryPackageState* package_state = repository_package_state(package);
+    if(package_state == nullptr) return nullptr;
+    return package_state->description.c_str();
+}
+
+alpm_db_t* alpm_pkg_get_db(alpm_pkg_t* package) {
+    if(package == nullptr || package->kind != AlpmStubDatabaseKind::Sync) {
+        return nullptr;
+    }
+    HandleRecord* handle_record = record_for_handle(package->handle);
+    if(handle_record == nullptr) return nullptr;
+    for(const auto& database : handle_record->sync_databases) {
+        if(database->database.repository_name == package->repository_name) {
+            return &database->database;
+        }
+    }
+    return nullptr;
 }
 
 off_t alpm_pkg_get_size(alpm_pkg_t* package) {
@@ -1240,6 +1582,15 @@ alpm_pkgreason_t alpm_pkg_get_reason(alpm_pkg_t* package) {
     return package_state == nullptr
             ? static_cast<alpm_pkgreason_t>(-1)
             : package_state->reason;
+}
+
+int alpm_pkg_vercmp(const char*, const char*) {
+    // Local dependency projectionのversion比較testはreal libalpmをlinkする。
+    // Aggregate fake-alpm binaryからこの境界へ到達した場合はfixture不足として止める。
+    std::fputs(
+            "Package metadata stub received an unexpected version comparison\n",
+            stderr);
+    std::abort();
 }
 
 } // extern "C"

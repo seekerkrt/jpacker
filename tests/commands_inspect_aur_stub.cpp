@@ -252,6 +252,13 @@ std::vector<AurPackageInfo> AurClient::search(const std::string& query) {
     throw std::runtime_error("Unexpected inspection search call: " + query);
 }
 
+std::vector<AurPackageInfo> AurClient::search_strict(
+        const std::string& query) {
+    append_command_log("aur search-strict " + query);
+    throw std::runtime_error(
+            "Unexpected inspection strict search call: " + query);
+}
+
 std::vector<std::string> AurClient::search_names_by_provides(
         const std::string& provided_name) {
     append_command_log("aur search-provides " + provided_name);
@@ -296,6 +303,8 @@ std::optional<AurPackageInfo> AurClient::info(const std::string& package_name) {
 std::optional<AurPackageInfo> AurClient::info_strict(const std::string& package_name) {
     append_command_log("aur info-strict " + package_name);
     const std::string scenario = inspection_scenario();
+
+    if(is_graph_scenario(scenario)) return graph_info(package_name);
 
     if(scenario == "foreign-fallback" &&
        is_numbered_foreign_package(package_name) &&

@@ -1,6 +1,13 @@
 #!/bin/sh
 set -eu
 
+# Assertions target the canonical untranslated CLI output.
+# Do not inherit locale settings from the invoking environment.
+LANG=C
+LC_ALL=C
+export LANG LC_ALL
+unset LANGUAGE
+
 test_binary=$1
 envelope_test_binary=$2
 repo_root=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
@@ -40,13 +47,14 @@ while [ ! -s "$port_file" ]; do
 done
 
 port=$(cat "$port_file")
+fixture_rpc_base_url=http://127.0.0.1:$port/rpc/
 export PATH=$repo_root/tests/stubs:/usr/bin:/bin
 require_exact_test_command pacman-conf "$repo_root/tests/stubs/pacman-conf"
 require_exact_test_command makepkg "$repo_root/tests/stubs/makepkg"
 require_exact_test_command pacman "$repo_root/tests/stubs/pacman"
 require_exact_test_command sudo "$repo_root/tests/stubs/sudo"
 require_exact_test_command git "$repo_root/tests/stubs/git"
-export MOGUET_TEST_AUR_RPC_BASE_URL=http://127.0.0.1:$port/rpc/
+export MOGUET_TEST_AUR_RPC_BASE_URL=$fixture_rpc_base_url
 
 setup_case() {
     case_name=$1
@@ -85,7 +93,7 @@ setup_case() {
 
 run_ok() {
     : > "$command_log"
-    if ! "$test_binary" "$@" > "$output_file" 2>&1; then
+    if ! "$test_binary" "$@" </dev/null > "$output_file" 2>&1; then
         echo "expected command to succeed: $*" >&2
         sed -n '1,240p' "$output_file" >&2
         cat "$command_log" >&2
@@ -95,7 +103,7 @@ run_ok() {
 
 run_fail() {
     : > "$command_log"
-    if "$test_binary" "$@" > "$output_file" 2>&1; then
+    if "$test_binary" "$@" </dev/null > "$output_file" 2>&1; then
         echo "expected command to fail: $*" >&2
         sed -n '1,240p' "$output_file" >&2
         cat "$command_log" >&2
@@ -105,7 +113,7 @@ run_fail() {
 
 run_envelope_ok() {
     : > "$command_log"
-    if ! "$envelope_test_binary" "$@" > "$output_file" 2>&1; then
+    if ! "$envelope_test_binary" "$@" </dev/null > "$output_file" 2>&1; then
         echo "expected strict envelope command to succeed: $*" >&2
         sed -n '1,240p' "$output_file" >&2
         cat "$command_log" >&2
@@ -115,7 +123,7 @@ run_envelope_ok() {
 
 run_envelope_fail() {
     : > "$command_log"
-    if "$envelope_test_binary" "$@" > "$output_file" 2>&1; then
+    if "$envelope_test_binary" "$@" </dev/null > "$output_file" 2>&1; then
         echo "expected strict envelope command to fail: $*" >&2
         sed -n '1,240p' "$output_file" >&2
         cat "$command_log" >&2
@@ -285,6 +293,39 @@ run_envelope_ok provides-strict virtual-one
 assert_contains "provider-one" "$output_file"
 assert_command_log_empty
 
+setup_case strict-envelope-valid-typed-search
+run_envelope_ok search-strict search-valid-query
+assert_contains "search-valid-result|search-valid-result|1.0-1" "$output_file"
+assert_command_log_empty
+
+setup_case strict-envelope-valid-empty-typed-search
+run_envelope_ok search-strict strict-search-empty
+if [ -s "$output_file" ]; then
+    echo "valid empty strict typed search returned output" >&2
+    cat "$output_file" >&2
+    exit 1
+fi
+assert_command_log_empty
+
+setup_case strict-typed-search-encode-failure
+run_envelope_fail search-encode-failure-strict encode-failure-query
+assert_contains "Failed to encode AUR search query: encode-failure-query" "$output_file"
+assert_request_count 0
+
+setup_case strict-typed-search-transport-failure
+export MOGUET_TEST_AUR_RPC_BASE_URL=http://127.0.0.1:9/rpc/
+run_envelope_fail search-strict transport-failure-query
+export MOGUET_TEST_AUR_RPC_BASE_URL=$fixture_rpc_base_url
+assert_contains "AUR request failed:" "$output_file"
+assert_not_contains "AUR request returned an empty response." "$output_file"
+assert_request_count 0
+
+setup_case strict-typed-search-http-failure
+run_envelope_fail search-strict strict-search-http-failure
+assert_contains "AUR request failed:" "$output_file"
+assert_contains "503" "$output_file"
+assert_request_count 1
+
 setup_case strict-envelope-valid-empty-search
 run_envelope_ok provides-strict strict-search-empty
 if [ -s "$output_file" ]; then
@@ -318,9 +359,31 @@ strict-results-object|field results expected array, got object
 strict-info-multiple|expected zero or one result, got 2
 CASES
 
+# Provider candidate presentation metadata must be terminal-safe before it
+# reaches any interactive selection UI. Diagnostics do not echo the raw value.
+escape_character=$(printf '\033')
+while IFS='|' read -r package detail; do
+    setup_case "strict-presentation-$package"
+    run_envelope_fail info-strict "$package"
+    assert_validation_error "info[package=\"$package\"]"
+    assert_contains "$detail" "$output_file"
+    assert_not_contains "$escape_character" "$output_file"
+    assert_command_log_empty
+done <<'CASES'
+version-control|field Version contains a control character
+semantic-provides-control|field Provides[0] contains a control character
+semantic-provides-malformed|field Provides[0] contains an invalid version constraint
+CASES
+
 setup_case strict-envelope-search-type
 run_envelope_fail provides-strict strict-search-wrong-type
 assert_validation_error "search[provides=\"strict-search-wrong-type\"]"
+assert_contains 'field type expected "search", got "multiinfo"' "$output_file"
+assert_command_log_empty
+
+setup_case strict-envelope-typed-search-type
+run_envelope_fail search-strict strict-search-wrong-type
+assert_validation_error "search[query=\"strict-search-wrong-type\"]"
 assert_contains 'field type expected "search", got "multiinfo"' "$output_file"
 assert_command_log_empty
 
