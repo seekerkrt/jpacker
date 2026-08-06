@@ -660,7 +660,10 @@ NON_HOOK_UPPERCASE_TOKENS = {
     "SIGNAL_TEST_TIMEOUT",
 }
 TEST_INFRASTRUCTURE_TOKEN = re.compile(
-    r"_TEST_(?:TARGET|SRCS|SUPPORT_SRCS)$"
+    r"_TEST_(?:"
+    r"TARGET|SRCS|SUPPORT_SRCS|CPPFLAGS|LDLIBS|OBJECT_DIR|OBJECTS|"
+    r"LINK_OBJECTS|DEPS|COMPILE_SIGNATURE|LINK_SIGNATURE"
+    r")$"
 )
 
 
@@ -858,10 +861,28 @@ def check_classifier_contract() -> None:
         "OTHER" + "_TEST_FAKE",
         "MOGUET_INTERNAL" + "_TEST_BAD",
         "OTHER_NAMESPACE" + "_ENABLE_FAKE",
+        "OTHER" + "_TEST_OBJECTS_HOOK",
     )
     for wrong_hook in wrong_hooks:
         if wrong_hook not in extract_test_hook_tokens(wrong_hook):
             fail("internal test-hook classifier self-test failed")
+
+    infrastructure_tokens = (
+        "OTHER" + "_TEST_TARGET",
+        "OTHER" + "_TEST_SRCS",
+        "OTHER" + "_TEST_SUPPORT_SRCS",
+        "OTHER" + "_TEST_CPPFLAGS",
+        "OTHER" + "_TEST_LDLIBS",
+        "OTHER" + "_TEST_OBJECT_DIR",
+        "OTHER" + "_TEST_OBJECTS",
+        "OTHER" + "_TEST_LINK_OBJECTS",
+        "OTHER" + "_TEST_DEPS",
+        "OTHER" + "_TEST_COMPILE_SIGNATURE",
+        "OTHER" + "_TEST_LINK_SIGNATURE",
+    )
+    for infrastructure_token in infrastructure_tokens:
+        if extract_test_hook_tokens(infrastructure_token):
+            fail("internal test-infrastructure classifier self-test failed")
 
 
 def main() -> int:
