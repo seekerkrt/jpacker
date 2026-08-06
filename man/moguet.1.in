@@ -581,6 +581,19 @@ build planning; a selected official provider is introduced as an exact
 dependency.
 .
 .PP
+When the interactive provider list is actually displayed, Moguet looks up each
+candidate package name in the read-only local package database. It appends the
+localized tag
+.B [installed]
+only for a same-name local package, leaves an authoritative absence untagged,
+and displays
+.B [installed state unknown]
+with a separate warning when the lookup is unavailable. This name-only
+observation does not prove source provenance, PackageBase, version or
+constraint compatibility, or install reason; it does not change candidate
+order, numbering, choice reuse, routing, or the required explicit choice.
+.
+.PP
 Root package discovery through
 .B -S --select
 also has no default, even for one candidate. An interactive TTY accepts one or

@@ -1484,10 +1484,26 @@ $(APP_CONFIG_MODULE_TEST_TARGET): tests/app_config_test.cpp $(SRC_DIR)/app_confi
 	@echo ":: Compiling app config module test binary"
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -I$(SRC_DIR) tests/app_config_test.cpp $(SRC_DIR)/app_config.cpp $(SRC_DIR)/provider_selection.cpp $(SRC_DIR)/dependency_spec.cpp $(SRC_DIR)/localization.cpp -o $@
 
-$(PROVIDER_SELECTION_TEST_TARGET): tests/provider_selection_test.cpp $(SRC_DIR)/provider_selection.cpp $(SRC_DIR)/provider_selection.hpp $(SRC_DIR)/dependency_plan.hpp $(SRC_DIR)/dependency_provider.hpp $(SRC_DIR)/dependency_spec.cpp $(SRC_DIR)/dependency_spec.hpp $(SRC_DIR)/localization.cpp $(SRC_DIR)/localization.hpp $(VERSION_FILE)
+PROVIDER_SELECTION_TEST_SRCS := \
+	tests/provider_selection_test.cpp \
+	$(SRC_DIR)/provider_selection.cpp \
+	$(SRC_DIR)/provider_installed_state_presentation.cpp \
+	$(SRC_DIR)/provider_installed_state.cpp \
+	$(SRC_DIR)/package_metadata.cpp \
+	$(SRC_DIR)/package_identifier.cpp \
+	$(SRC_DIR)/shell_words.cpp \
+	$(SRC_DIR)/dependency_spec.cpp \
+	$(SRC_DIR)/localization.cpp \
+	tests/stubs/package-metadata/alpm_stub.cpp \
+	tests/stubs/package-metadata/process_stub.cpp
+
+$(PROVIDER_SELECTION_TEST_TARGET): $(PROVIDER_SELECTION_TEST_SRCS) $(SRC_DIR)/provider_selection.hpp $(SRC_DIR)/provider_installed_state_presentation.hpp $(SRC_DIR)/provider_installed_state.hpp $(SRC_DIR)/package_metadata.hpp $(SRC_DIR)/dependency_plan.hpp $(SRC_DIR)/dependency_provider.hpp $(SRC_DIR)/dependency_spec.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/process.hpp $(SRC_DIR)/shell_words.hpp $(SRC_DIR)/localization.hpp tests/stubs/package-metadata/alpm_stub.hpp tests/stubs/package-metadata/process_stub.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling provider selection test binary"
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -I$(SRC_DIR) tests/provider_selection_test.cpp $(SRC_DIR)/provider_selection.cpp $(SRC_DIR)/dependency_spec.cpp $(SRC_DIR)/localization.cpp -o $@
+	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
+		-I$(SRC_DIR) -Itests/stubs/package-metadata \
+		$(PROVIDER_SELECTION_TEST_SRCS) \
+		-o $@
 
 $(ROOT_PACKAGE_CANDIDATE_TEST_TARGET): $(ROOT_PACKAGE_CANDIDATE_TEST_SRCS) $(SRC_DIR)/root_package_candidate.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/localization.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)

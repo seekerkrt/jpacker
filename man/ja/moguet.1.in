@@ -561,6 +561,16 @@ providerはexactな
 dependencyとして導入します。
 .
 .PP
+interactive provider一覧を実際に表示するときだけ、candidateのpackage名をread-only local package
+databaseへ照会します。同名packageが存在する場合だけlocalizedな
+.B [installed]
+を末尾へ付け、authoritativeな未installにはsuffixを付けません。lookup不能時は
+.B [installed state unknown]
+と別のwarningを表示します。このname-only observationはsource provenance、PackageBase、version / constraint
+compatibility、install reasonを証明せず、candidate順、番号、choice reuse、routing、明示選択の必要性を
+変更しません。
+.
+.PP
 .B -S --select
 によるroot package discoveryも、candidateが1件でもdefaultを持ちません。interactive TTYでは
 1件または複数のpackage番号、inclusive range、表示済みofficial groupの

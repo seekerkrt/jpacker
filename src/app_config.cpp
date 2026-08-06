@@ -27,16 +27,21 @@ AppConfig make_app_config(
             no_confirm,
             rm_deps,
             resolve_editor_from_environment(),
-            make_provider_selection_session(no_confirm)};
+            make_provider_selection_session(no_confirm),
+            {}};
 }
 
 ProviderSelectionCallback provider_selection_callback(const AppConfig& config) {
     if(!config.provider_selection) return {};
 
     std::shared_ptr<ProviderSelectionSession> session = config.provider_selection;
-    return [session = std::move(session)](
+    ProviderCandidatePresenter presenter =
+            config.provider_candidate_presenter_factory
+                    ? config.provider_candidate_presenter_factory()
+                    : make_default_provider_candidate_presenter();
+    return [session = std::move(session), presenter = std::move(presenter)](
                    const std::string& dependency,
                    const std::vector<ProvidedDependency>& candidates) {
-        return session->select_provider(dependency, candidates);
+        return session->select_provider(dependency, candidates, presenter);
     };
 }

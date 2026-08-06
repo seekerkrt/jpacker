@@ -26,6 +26,7 @@
 #include "logging.hpp"
 #include "package_identifier.hpp"
 #include "process.hpp"
+#include "provider_installed_state_presentation.hpp"
 #include "shell_words.hpp"
 #include "source_install.hpp"
 #include "user_config.hpp"
@@ -297,6 +298,8 @@ int run_moguet(int argc, char* argv[]) {
             std::move(final_user_config),
             parsed.cli_overrides.no_confirm,
             parsed.cli_overrides.rm_deps);
+    g_config.provider_candidate_presenter_factory =
+            make_provider_installed_state_candidate_presenter_factory();
 
     // POLICY(#271): exact operation-local selectorをgeneric build option
     // rejectionより先にstrict projectionし、directory/root inspectionまでを

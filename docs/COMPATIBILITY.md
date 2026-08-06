@@ -159,6 +159,8 @@ official exact、AUR exact、unique providerを先に扱い、複数providerはa
 
 non-TTY、`--noconfirm`、cancel、EOFではpromptや自動選択を開始しない。choiceはinvocation-localであり、config / cacheへ保存しない。selected repository providerはexact `repository/package`のofficial dependency、selected AUR providerはPackageBase build unitとして扱う。selectionとstatic preflight前にclone、build、pacman、sudoを開始しない。詳細は[ambiguous provider contract](contracts/ambiguous-provider-selection.md)を参照する。
 
+interactive candidate listには、read-only local package databaseにcandidateの`package_name`と同名packageがある場合だけlocalizedな`[installed]`を末尾へ付ける。authoritativeなabsenceはsuffixなし、configuration / local DB / query / malformed metadata failureはlocalizedな`[installed state unknown]`と別warningで表示する。これはname-only observationであり、source provenance、PackageBase、version / constraint、install reasonを証明しない。state表示はcandidate identity、順序、番号、選択、choice reuse、BuildPlan、routingを変更せず、non-TTY、`--noconfirm`、candidate数1以下、reuse、cancelled dependencyではlookupを開始しない。
+
 <a id="compat-root-package-selection"></a>
 ## Root package selection compatibility
 

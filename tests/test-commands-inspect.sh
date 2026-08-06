@@ -40,6 +40,7 @@ setup_case() {
     stderr_file=$case_dir/stderr
     command_log=$case_dir/commands.log
     repository_metadata_state=$case_dir/repository-metadata.state
+    provider_installed_state=$case_dir/provider-installed-state
 
     mkdir -p \
         "$case_dir/home" "$case_dir/xdg-config" \
@@ -47,12 +48,14 @@ setup_case() {
     chmod 0700 "$case_dir/xdg-config"
     : > "$command_log"
     : > "$repository_metadata_state"
+    : > "$provider_installed_state"
     export HOME=$case_dir/home
     export XDG_CONFIG_HOME=$case_dir/xdg-config
     export XDG_STATE_HOME=$case_dir/xdg-state
     export XDG_CACHE_HOME=$case_dir/xdg-cache
     export MOGUET_TEST_COMMAND_LOG=$command_log
     export MOGUET_TEST_PACKAGE_METADATA_EVENT_LOG=$command_log
+    export MOGUET_TEST_PACKAGE_METADATA_STATE_FILE=$provider_installed_state
     export MOGUET_TEST_REPOSITORY_METADATA_STATE_FILE=$repository_metadata_state
     MOGUET_TEST_PACMAN_CONF_REPOSITORY_LIST='core
 extra'
@@ -414,6 +417,37 @@ assert_contains \
     "moguet-inspect-203-virtual-provider [provided] by aur/provider-a" \
     "$stdout_file"
 echo "  ok: deps shares one interactive provider choice with recursive display"
+
+# Issue #388: installed state is a read-only suffix on the existing numbered
+# candidate lines. It neither changes candidate order nor selects a provider.
+setup_case deps-provider-installed-state-presentation
+export MOGUET_TEST_INSPECTION_SCENARIO=deps-provider-interactive-selection
+printf '%s\n' 'provider-z 1.0-1' > "$provider_installed_state"
+run_tty_ok 2 deps --recursive provider-root
+assert_contains \
+    "1) source=AUR package=provider-z PackageBase=provider-z provided=moguet-inspect-203-virtual-provider provided-specification=moguet-inspect-203-virtual-provider version=2.0-1 [installed]" \
+    "$stdout_file"
+assert_contains \
+    "2) source=AUR package=provider-a PackageBase=provider-a provided=moguet-inspect-203-virtual-provider provided-specification=moguet-inspect-203-virtual-provider version=2.0-1" \
+    "$stdout_file"
+assert_not_contains "2) source=AUR package=provider-a PackageBase=provider-a provided=moguet-inspect-203-virtual-provider provided-specification=moguet-inspect-203-virtual-provider version=2.0-1 [installed]" "$stdout_file"
+assert_not_contains "[installed state unknown]" "$stdout_file"
+assert_contains "alpm query provider-z" "$command_log"
+assert_contains "alpm query provider-a" "$command_log"
+echo "  ok: deps presents installed provider state without changing explicit selection"
+
+setup_case deps-provider-installed-state-unknown
+export MOGUET_TEST_INSPECTION_SCENARIO=deps-provider-interactive-selection
+printf '%s\n' 'provider-a 2.0-1' > "$provider_installed_state"
+export MOGUET_TEST_PACKAGE_METADATA_QUERY_FAILURE_PACKAGE=provider-z
+run_tty_ok 1 deps --recursive provider-root
+assert_contains "1) source=AUR package=provider-z PackageBase=provider-z provided=moguet-inspect-203-virtual-provider provided-specification=moguet-inspect-203-virtual-provider version=2.0-1 [installed state unknown]" "$stdout_file"
+assert_contains "Warning: installed state is unavailable for provider candidate provider-z:" "$stdout_file"
+assert_contains \
+    "moguet-inspect-203-virtual-provider -> aur/provider-z" \
+    "$stdout_file"
+assert_not_contains ":: Invalid choice." "$stdout_file"
+echo "  ok: unknown provider state remains selectable with a separate warning"
 
 # A cancellation is an invocation-local decision for the canonical dependency;
 # the recursive pass must retain ambiguity without asking again.
