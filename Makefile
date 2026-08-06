@@ -172,11 +172,23 @@ XGETTEXT_OPTIONS := \
 	--no-wrap
 SRCS      := $(wildcard $(SRC_DIR)/*.cpp)
 HEADERS   := $(wildcard $(SRC_DIR)/*.hpp)
+TEST_SRCS := $(SRCS)
+CLI_LOCALIZATION_TEST_SRCS := $(SRCS)
+APP_CONFIG_INTEGRATION_TEST_SRCS := $(SRCS)
 COMMANDS_INSPECT_TEST_SRCS := \
 	$(filter-out $(SRC_DIR)/aur_rpc.cpp $(SRC_DIR)/repository_query.cpp,$(SRCS)) \
 	tests/commands_inspect_aur_stub.cpp \
 	tests/stubs/commands-inspect/repository_query_stub.cpp \
 	tests/stubs/package-metadata/alpm_stub.cpp
+COMMANDS_INSPECT_REQUIRED_PRODUCTION_TEST_SRCS := \
+	$(filter-out $(SRC_DIR)/aur_rpc.cpp $(SRC_DIR)/repository_query.cpp,$(SRCS))
+COMMANDS_INSPECT_REQUIRED_TEST_SUPPORT_SRCS := \
+	tests/commands_inspect_aur_stub.cpp \
+	tests/stubs/commands-inspect/repository_query_stub.cpp \
+	tests/stubs/package-metadata/alpm_stub.cpp
+COMMANDS_INSPECT_FORBIDDEN_TEST_SRCS := \
+	$(SRC_DIR)/aur_rpc.cpp \
+	$(SRC_DIR)/repository_query.cpp
 # POLICY(#267): CLI integration binaryはoperation APIだけをscenario stubへ差し替え、
 # parser/routing/command presentationをproductionと同じtranslation unitで通す。
 AUR_UPDATE_COMMAND_TEST_SRCS := \
@@ -192,12 +204,8 @@ AUR_UPDATE_COMMAND_TEST_SRCS := \
 	tests/stubs/aur-update-command/operation_stub.cpp \
 	tests/stubs/upgrade-all-command/operation_stub.cpp \
 	tests/stubs/package-metadata/alpm_stub.cpp
-AUR_UPDATE_COMMAND_REQUIRED_PRODUCTION_TEST_SRCS := \
-	$(SRC_DIR)/moguet.cpp \
-	$(SRC_DIR)/commands_aur_update.cpp \
-	$(SRC_DIR)/aur_update_cli_presentation.cpp \
-	$(SRC_DIR)/cli_parser.cpp \
-	$(SRC_DIR)/cli_routing.cpp
+AUR_UPDATE_COMMAND_REQUIRED_PRODUCTION_TEST_SRCS = \
+	$(filter-out $(AUR_UPDATE_COMMAND_FORBIDDEN_TEST_SRCS),$(SRCS))
 AUR_UPDATE_COMMAND_REQUIRED_TEST_SUPPORT_SRCS := \
 	tests/stubs/aur-update-command/operation_stub.cpp \
 	tests/stubs/upgrade-all-command/operation_stub.cpp \
@@ -216,48 +224,13 @@ UPGRADE_ALL_COMMAND_TEST_SRCS := \
 	$(filter-out $(SRC_DIR)/upgrade_all_operation.cpp,$(SRCS)) \
 	tests/stubs/upgrade-all-command/operation_stub.cpp \
 	tests/stubs/package-metadata/alpm_stub.cpp
-UPGRADE_ALL_COMMAND_REQUIRED_TEST_SRCS := \
-	$(SRC_DIR)/moguet.cpp \
-	$(SRC_DIR)/commands_upgrade_all.cpp \
-	$(SRC_DIR)/aur_update_cli_presentation.cpp \
-	$(SRC_DIR)/cli_parser.cpp \
-	$(SRC_DIR)/cli_routing.cpp \
-	$(SRC_DIR)/upgrade_all_operation_result.cpp
+UPGRADE_ALL_COMMAND_REQUIRED_PRODUCTION_TEST_SRCS = \
+	$(filter-out $(UPGRADE_ALL_COMMAND_FORBIDDEN_TEST_SRCS),$(SRCS))
 UPGRADE_ALL_COMMAND_REQUIRED_TEST_SUPPORT_SRCS := \
 	tests/stubs/upgrade-all-command/operation_stub.cpp \
 	tests/stubs/package-metadata/alpm_stub.cpp
 UPGRADE_ALL_COMMAND_FORBIDDEN_TEST_SRCS := \
 	$(SRC_DIR)/upgrade_all_operation.cpp
-AUR_UPDATE_COMMAND_TEST_OBJECT_DIR := \
-	$(BUILD_DIR)/tests/obj/$(notdir $(AUR_UPDATE_COMMAND_TEST_TARGET))
-AUR_UPDATE_COMMAND_TEST_OBJECTS := \
-	$(patsubst %.cpp,$(AUR_UPDATE_COMMAND_TEST_OBJECT_DIR)/%.o,$(AUR_UPDATE_COMMAND_TEST_SRCS))
-AUR_UPDATE_COMMAND_TEST_LINK_OBJECTS := $(AUR_UPDATE_COMMAND_TEST_OBJECTS)
-AUR_UPDATE_COMMAND_TEST_DEPS := $(AUR_UPDATE_COMMAND_TEST_OBJECTS:.o=.d)
-AUR_UPDATE_COMMAND_TEST_COMPILE_SIGNATURE := \
-	$(AUR_UPDATE_COMMAND_TEST_OBJECT_DIR)/compile.signature
-AUR_UPDATE_COMMAND_TEST_LINK_SIGNATURE := \
-	$(AUR_UPDATE_COMMAND_TEST_OBJECT_DIR)/link.signature
-AUR_UPDATE_COMMAND_TEST_CPPFLAGS := \
-	-DMOGUET_ENABLE_TEST_OVERRIDES \
-	-DMOGUET_ENABLE_TEST_CONFIG_PATH \
-	-I$(SRC_DIR) \
-	-Itests/stubs/package-metadata
-UPGRADE_ALL_COMMAND_TEST_OBJECT_DIR := \
-	$(BUILD_DIR)/tests/obj/$(notdir $(UPGRADE_ALL_COMMAND_TEST_TARGET))
-UPGRADE_ALL_COMMAND_TEST_OBJECTS := \
-	$(patsubst %.cpp,$(UPGRADE_ALL_COMMAND_TEST_OBJECT_DIR)/%.o,$(UPGRADE_ALL_COMMAND_TEST_SRCS))
-UPGRADE_ALL_COMMAND_TEST_LINK_OBJECTS := $(UPGRADE_ALL_COMMAND_TEST_OBJECTS)
-UPGRADE_ALL_COMMAND_TEST_DEPS := $(UPGRADE_ALL_COMMAND_TEST_OBJECTS:.o=.d)
-UPGRADE_ALL_COMMAND_TEST_COMPILE_SIGNATURE := \
-	$(UPGRADE_ALL_COMMAND_TEST_OBJECT_DIR)/compile.signature
-UPGRADE_ALL_COMMAND_TEST_LINK_SIGNATURE := \
-	$(UPGRADE_ALL_COMMAND_TEST_OBJECT_DIR)/link.signature
-UPGRADE_ALL_COMMAND_TEST_CPPFLAGS := \
-	-DMOGUET_ENABLE_TEST_OVERRIDES \
-	-DMOGUET_ENABLE_TEST_CONFIG_PATH \
-	-I$(SRC_DIR) \
-	-Itests/stubs/package-metadata
 
 AUR_RPC_VALIDATION_TEST_SRCS := \
 	$(SRCS) \
@@ -278,20 +251,17 @@ COMMANDS_SYNC_TEST_SRCS := \
 		$(SRCS)) \
 	tests/stubs/commands-sync/aur_rpc_stub.cpp \
 	tests/stubs/commands-sync/root_package_search_stub.cpp
-COMMANDS_SYNC_REQUIRED_PRODUCTION_TEST_SRCS := \
-	$(SRC_DIR)/moguet.cpp \
-	$(SRC_DIR)/commands_sync.cpp \
-	$(SRC_DIR)/cli_parser.cpp \
-	$(SRC_DIR)/cli_routing.cpp \
-	$(SRC_DIR)/root_package_selection.cpp \
-	$(SRC_DIR)/root_package_route_projection.cpp
+COMMANDS_SYNC_REQUIRED_PRODUCTION_TEST_SRCS = \
+	$(filter-out $(COMMANDS_SYNC_FORBIDDEN_TEST_SRCS),$(SRCS))
 COMMANDS_SYNC_REQUIRED_TEST_SUPPORT_SRCS := \
 	tests/stubs/commands-sync/aur_rpc_stub.cpp \
 	tests/stubs/commands-sync/root_package_search_stub.cpp
 COMMANDS_SYNC_FORBIDDEN_TEST_SRCS := \
 	$(SRC_DIR)/aur_rpc.cpp \
 	$(SRC_DIR)/root_package_search.cpp
-SOURCE_INSTALL_CHARACTERIZATION_TEST_SRCS := $(filter-out $(SRC_DIR)/moguet.cpp,$(SRCS))
+SOURCE_INSTALL_CHARACTERIZATION_TEST_SRCS := \
+	tests/source_install_characterization.cpp \
+	$(filter-out $(SRC_DIR)/moguet.cpp,$(SRCS))
 AUR_UPDATE_PLAN_TEST_SRCS := \
 	tests/aur_update_plan_test.cpp \
 	$(SRC_DIR)/aur_update_plan.cpp
@@ -979,6 +949,146 @@ PACKAGE_METADATA_INTEGRATION_TEST_SRCS := \
 UPGRADE_BASELINE_METADATA_TEST_SRCS := \
 	$(SRCS) \
 	tests/stubs/package-metadata/alpm_stub.cpp
+
+# Issue #380: heavyweight integration binaries keep target-specific object
+# trees while sharing only the compile/link recipe infrastructure.
+AUR_UPDATE_COMMAND_TEST_CPPFLAGS = \
+	-DMOGUET_ENABLE_TEST_OVERRIDES \
+	-DMOGUET_ENABLE_TEST_CONFIG_PATH \
+	-I$(SRC_DIR) \
+	-Itests/stubs/package-metadata
+AUR_UPDATE_COMMAND_TEST_LDLIBS = $(MY_LDLIBS)
+AUR_UPDATE_COMMAND_FORBIDDEN_TEST_LDLIBS = $(LIBALPM_LDLIBS)
+
+UPGRADE_ALL_COMMAND_TEST_CPPFLAGS = \
+	-DMOGUET_ENABLE_TEST_OVERRIDES \
+	-DMOGUET_ENABLE_TEST_CONFIG_PATH \
+	-I$(SRC_DIR) \
+	-Itests/stubs/package-metadata
+UPGRADE_ALL_COMMAND_TEST_LDLIBS = $(MY_LDLIBS)
+UPGRADE_ALL_COMMAND_FORBIDDEN_TEST_LDLIBS = $(LIBALPM_LDLIBS)
+
+COMMANDS_SYNC_TEST_CPPFLAGS = \
+	-DMOGUET_ENABLE_TEST_OVERRIDES \
+	-DMOGUET_ENABLE_TEST_CONFIG_PATH \
+	-I$(SRC_DIR)
+COMMANDS_SYNC_TEST_LDLIBS = $(MY_LDLIBS) $(LIBALPM_LDLIBS)
+COMMANDS_SYNC_FORBIDDEN_TEST_LDLIBS =
+
+COMMANDS_INSPECT_TEST_CPPFLAGS = \
+	-DMOGUET_ENABLE_TEST_OVERRIDES \
+	-I$(SRC_DIR) \
+	-Itests/stubs/package-metadata
+COMMANDS_INSPECT_TEST_LDLIBS = $(MY_LDLIBS)
+COMMANDS_INSPECT_FORBIDDEN_TEST_LDLIBS = $(LIBALPM_LDLIBS)
+
+TEST_CPPFLAGS = -DMOGUET_ENABLE_TEST_OVERRIDES
+TEST_LDLIBS = $(MY_LDLIBS) $(LIBALPM_LDLIBS)
+CORE_REQUIRED_PRODUCTION_TEST_SRCS := $(TEST_SRCS)
+CORE_REQUIRED_TEST_SUPPORT_SRCS =
+CORE_FORBIDDEN_TEST_SRCS =
+CORE_FORBIDDEN_TEST_LDLIBS =
+
+CLI_LOCALIZATION_TEST_CPPFLAGS = \
+	-DMOGUET_LOCALE_DIRECTORY=\"$(MOGUET_TEST_CATALOG_DIR)\" \
+	-DMOGUET_ENABLE_TEST_OVERRIDES
+CLI_LOCALIZATION_TEST_LDLIBS = $(MY_LDLIBS) $(LIBALPM_LDLIBS)
+CLI_LOCALIZATION_REQUIRED_PRODUCTION_TEST_SRCS := $(CLI_LOCALIZATION_TEST_SRCS)
+CLI_LOCALIZATION_REQUIRED_TEST_SUPPORT_SRCS =
+CLI_LOCALIZATION_FORBIDDEN_TEST_SRCS =
+CLI_LOCALIZATION_FORBIDDEN_TEST_LDLIBS =
+
+APP_CONFIG_INTEGRATION_TEST_CPPFLAGS = \
+	-DMOGUET_ENABLE_TEST_OVERRIDES \
+	-DMOGUET_ENABLE_TEST_CONFIG_PATH \
+	-DMOGUET_ENABLE_APP_CONFIG_TEST_HOOKS
+APP_CONFIG_INTEGRATION_TEST_LDLIBS = $(MY_LDLIBS) $(LIBALPM_LDLIBS)
+APP_CONFIG_INTEGRATION_REQUIRED_PRODUCTION_TEST_SRCS := \
+	$(APP_CONFIG_INTEGRATION_TEST_SRCS)
+APP_CONFIG_INTEGRATION_REQUIRED_TEST_SUPPORT_SRCS =
+APP_CONFIG_INTEGRATION_FORBIDDEN_TEST_SRCS =
+APP_CONFIG_INTEGRATION_FORBIDDEN_TEST_LDLIBS =
+
+AUR_RPC_VALIDATION_TEST_CPPFLAGS = \
+	-DMOGUET_ENABLE_TEST_OVERRIDES \
+	-DMOGUET_ENABLE_AUR_RPC_TEST_HOOKS \
+	-I$(SRC_DIR) \
+	-Itests/stubs/package-metadata
+AUR_RPC_VALIDATION_TEST_LDLIBS = $(MY_LDLIBS)
+AUR_RPC_VALIDATION_REQUIRED_PRODUCTION_TEST_SRCS := $(SRCS)
+AUR_RPC_VALIDATION_REQUIRED_TEST_SUPPORT_SRCS := \
+	tests/stubs/package-metadata/alpm_stub.cpp
+AUR_RPC_VALIDATION_FORBIDDEN_TEST_SRCS =
+AUR_RPC_VALIDATION_FORBIDDEN_TEST_LDLIBS = $(LIBALPM_LDLIBS)
+
+SOURCE_INSTALL_CHARACTERIZATION_TEST_CPPFLAGS = \
+	-DMOGUET_ENABLE_TEST_OVERRIDES \
+	-I$(SRC_DIR)
+SOURCE_INSTALL_CHARACTERIZATION_TEST_LDLIBS = \
+	$(MY_LDLIBS) $(LIBALPM_LDLIBS)
+SOURCE_INSTALL_CHARACTERIZATION_REQUIRED_PRODUCTION_TEST_SRCS := \
+	$(filter-out $(SRC_DIR)/moguet.cpp,$(SRCS))
+SOURCE_INSTALL_CHARACTERIZATION_REQUIRED_TEST_SUPPORT_SRCS := \
+	tests/source_install_characterization.cpp
+SOURCE_INSTALL_CHARACTERIZATION_FORBIDDEN_TEST_SRCS := $(SRC_DIR)/moguet.cpp
+SOURCE_INSTALL_CHARACTERIZATION_FORBIDDEN_TEST_LDLIBS =
+
+UPGRADE_BASELINE_METADATA_TEST_CPPFLAGS = \
+	-DMOGUET_ENABLE_TEST_OVERRIDES \
+	-DMOGUET_ENABLE_TEST_CONFIG_PATH \
+	-DMOGUET_ENABLE_APP_CONFIG_TEST_HOOKS \
+	-I$(SRC_DIR) \
+	-Itests/stubs/package-metadata
+UPGRADE_BASELINE_METADATA_TEST_LDLIBS = $(MY_LDLIBS)
+UPGRADE_BASELINE_METADATA_REQUIRED_PRODUCTION_TEST_SRCS := $(SRCS)
+UPGRADE_BASELINE_METADATA_REQUIRED_TEST_SUPPORT_SRCS := \
+	tests/stubs/package-metadata/alpm_stub.cpp
+UPGRADE_BASELINE_METADATA_FORBIDDEN_TEST_SRCS =
+UPGRADE_BASELINE_METADATA_FORBIDDEN_TEST_LDLIBS = $(LIBALPM_LDLIBS)
+
+HEAVY_OBJECT_PREFIXES := \
+	AUR_UPDATE_COMMAND_TEST \
+	UPGRADE_ALL_COMMAND_TEST \
+	COMMANDS_SYNC_TEST \
+	COMMANDS_INSPECT_TEST \
+	TEST \
+	CLI_LOCALIZATION_TEST \
+	APP_CONFIG_INTEGRATION_TEST \
+	AUR_RPC_VALIDATION_TEST \
+	SOURCE_INSTALL_CHARACTERIZATION_TEST \
+	UPGRADE_BASELINE_METADATA_TEST
+
+define define_heavy_object_paths
+$(1)_OBJECT_DIR := $(BUILD_DIR)/tests/obj/$(notdir $($(1)_TARGET))
+$(1)_OBJECTS := $$(patsubst %.cpp,$$($(1)_OBJECT_DIR)/%.o,$$($(1)_SRCS))
+$(1)_LINK_OBJECTS := $$($(1)_OBJECTS)
+$(1)_DEPS := $$($(1)_OBJECTS:.o=.d)
+$(1)_COMPILE_SIGNATURE := $$($(1)_OBJECT_DIR)/compile.signature
+$(1)_LINK_SIGNATURE := $$($(1)_OBJECT_DIR)/link.signature
+endef
+
+$(foreach prefix,$(HEAVY_OBJECT_PREFIXES),\
+	$(eval $(call define_heavy_object_paths,$(prefix))))
+
+ALL_HEAVY_OBJECTS := \
+	$(foreach prefix,$(HEAVY_OBJECT_PREFIXES),$($(prefix)_OBJECTS))
+ALL_HEAVY_DEPS := \
+	$(foreach prefix,$(HEAVY_OBJECT_PREFIXES),$($(prefix)_DEPS))
+HEAVY_LOCALIZATION_OBJECTS := \
+	$(foreach prefix,$(HEAVY_OBJECT_PREFIXES),\
+		$($(prefix)_OBJECT_DIR)/src/localization.o)
+HEAVY_LINK_FIREWALLS := \
+	check-aur-update-command-link-firewall \
+	check-upgrade-all-command-link-firewall \
+	check-commands-sync-link-firewall \
+	check-commands-inspect-link-firewall \
+	check-isolated-integration-link-firewall \
+	check-cli-localization-link-firewall \
+	check-app-config-integration-link-firewall \
+	check-aur-rpc-validation-link-firewall \
+	check-source-install-characterization-link-firewall \
+	check-upgrade-baseline-metadata-link-firewall
+
 OBJS      := $(SRCS:$(SRC_DIR)/%.cpp=$(BUILD_DIR)/%.o)
 DEPS      := $(OBJS:.o=.d)
 LIBALPM_BUILD_TARGETS := \
@@ -1010,7 +1120,7 @@ LIBALPM_BUILD_TARGETS := \
 .PHONY: check-local-source-workspace-link-firewall check-local-source-build-link-firewall test-local-source-workspace test-local-source-build
 .PHONY: FORCE catalogs check-catalogs check-localization-config check-pot update-po update-pot test-localization test-catalog-metadata-gate test-cli-localization-surface test-public-documentation
 .PHONY: test-container test-container-live test-container-live-provider test-container-live-aur test-container-live-local
-.PHONY: check-aur-update-command-link-firewall
+.PHONY: $(HEAVY_LINK_FIREWALLS)
 
 all: $(TARGET) $(MANPAGES) catalogs
 
@@ -1080,68 +1190,69 @@ $(BUILD_DIR)/%.o: $(SRC_DIR)/%.cpp $(VERSION_FILE)
 	@echo ":: Compiling $< (v$(VERSION))"
 	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -MMD -MP -c $< -o $@
 
-$(AUR_UPDATE_COMMAND_TEST_OBJECT_DIR) $(UPGRADE_ALL_COMMAND_TEST_OBJECT_DIR):
-	@mkdir -p $@
-
-$(AUR_UPDATE_COMMAND_TEST_COMPILE_SIGNATURE): FORCE | $(AUR_UPDATE_COMMAND_TEST_OBJECT_DIR)
+define define_heavy_object_rules
+$$($(1)_COMPILE_SIGNATURE): FORCE
+	@mkdir -p $$(@D)
 	@printf '%s\n' \
-		'CXX=$(CXX)' \
-		'CPPFLAGS=$(CPPFLAGS)' \
-		'LIBALPM_CPPFLAGS=$(LIBALPM_CPPFLAGS)' \
-		'CXXFLAGS=$(CXXFLAGS)' \
-		'MY_CXXFLAGS=$(MY_CXXFLAGS)' \
-		'TARGET_CPPFLAGS=$(AUR_UPDATE_COMMAND_TEST_CPPFLAGS)' \
-		> $@.tmp
-	@cmp -s $@.tmp $@ && rm -f $@.tmp || mv $@.tmp $@
+		'CXX=$$(CXX)' \
+		'CPPFLAGS=$$(CPPFLAGS)' \
+		'LIBALPM_CPPFLAGS=$$(LIBALPM_CPPFLAGS)' \
+		'CXXFLAGS=$$(CXXFLAGS)' \
+		'MY_CXXFLAGS=$$(MY_CXXFLAGS)' \
+		'TARGET_CPPFLAGS=$$($(1)_CPPFLAGS)' \
+		> $$@.tmp
+	@cmp -s $$@.tmp $$@ && rm -f $$@.tmp || mv $$@.tmp $$@
 
-$(AUR_UPDATE_COMMAND_TEST_LINK_SIGNATURE): FORCE | $(AUR_UPDATE_COMMAND_TEST_OBJECT_DIR)
+$$($(1)_LINK_SIGNATURE): FORCE
+	@mkdir -p $$(@D)
 	@printf '%s\n' \
-		'CXX=$(CXX)' \
-		'LDFLAGS=$(LDFLAGS)' \
-		'MY_LDLIBS=$(MY_LDLIBS)' \
-		'LIBALPM_LDLIBS=$(LIBALPM_LDLIBS)' \
-		'OBJECTS=$(AUR_UPDATE_COMMAND_TEST_LINK_OBJECTS)' \
-		> $@.tmp
-	@cmp -s $@.tmp $@ && rm -f $@.tmp || mv $@.tmp $@
+		'CXX=$$(CXX)' \
+		'LDFLAGS=$$(LDFLAGS)' \
+		'MY_LDLIBS=$$(MY_LDLIBS)' \
+		'LIBALPM_LDLIBS=$$(LIBALPM_LDLIBS)' \
+		'TARGET_LDLIBS=$$($(1)_LDLIBS)' \
+		'OBJECTS=$$($(1)_LINK_OBJECTS)' \
+		> $$@.tmp
+	@cmp -s $$@.tmp $$@ && rm -f $$@.tmp || mv $$@.tmp $$@
 
-$(UPGRADE_ALL_COMMAND_TEST_COMPILE_SIGNATURE): FORCE | $(UPGRADE_ALL_COMMAND_TEST_OBJECT_DIR)
-	@printf '%s\n' \
-		'CXX=$(CXX)' \
-		'CPPFLAGS=$(CPPFLAGS)' \
-		'LIBALPM_CPPFLAGS=$(LIBALPM_CPPFLAGS)' \
-		'CXXFLAGS=$(CXXFLAGS)' \
-		'MY_CXXFLAGS=$(MY_CXXFLAGS)' \
-		'TARGET_CPPFLAGS=$(UPGRADE_ALL_COMMAND_TEST_CPPFLAGS)' \
-		> $@.tmp
-	@cmp -s $@.tmp $@ && rm -f $@.tmp || mv $@.tmp $@
+$$($(1)_OBJECTS): $$($(1)_OBJECT_DIR)/%.o: %.cpp $$($(1)_COMPILE_SIGNATURE)
+	@mkdir -p $$(@D)
+	@echo ":: Compiling $$< for $(2)"
+	$$(CCACHE) $$(CXX) $$(CPPFLAGS) $$(LIBALPM_CPPFLAGS) $$(CXXFLAGS) $$(MY_CXXFLAGS) \
+		$$($(1)_CPPFLAGS) -MMD -MP -c $$< -o $$@
 
-$(UPGRADE_ALL_COMMAND_TEST_LINK_SIGNATURE): FORCE | $(UPGRADE_ALL_COMMAND_TEST_OBJECT_DIR)
-	@printf '%s\n' \
-		'CXX=$(CXX)' \
-		'LDFLAGS=$(LDFLAGS)' \
-		'MY_LDLIBS=$(MY_LDLIBS)' \
-		'LIBALPM_LDLIBS=$(LIBALPM_LDLIBS)' \
-		'OBJECTS=$(UPGRADE_ALL_COMMAND_TEST_LINK_OBJECTS)' \
-		> $@.tmp
-	@cmp -s $@.tmp $@ && rm -f $@.tmp || mv $@.tmp $@
+$$($(1)_TARGET): $$($(1)_LINK_OBJECTS) $$($(1)_LINK_SIGNATURE)
+	@mkdir -p $$(@D)
+	@echo ":: Linking $(2)"
+	$$(CXX) $$(LDFLAGS) $$($(1)_LINK_OBJECTS) -o $$@ $$($(1)_LDLIBS)
+endef
 
-$(AUR_UPDATE_COMMAND_TEST_OBJECTS): $(AUR_UPDATE_COMMAND_TEST_OBJECT_DIR)/%.o: %.cpp $(AUR_UPDATE_COMMAND_TEST_COMPILE_SIGNATURE)
-	@mkdir -p $(dir $@)
-	@echo ":: Compiling $< for AUR update command integration test"
-	$(CCACHE) $(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		$(AUR_UPDATE_COMMAND_TEST_CPPFLAGS) -MMD -MP -c $< -o $@
+$(eval $(call define_heavy_object_rules,AUR_UPDATE_COMMAND_TEST,AUR update command integration test binary))
+$(eval $(call define_heavy_object_rules,UPGRADE_ALL_COMMAND_TEST,upgrade-all command integration test binary))
+$(eval $(call define_heavy_object_rules,COMMANDS_SYNC_TEST,sync command characterization test binary))
+$(eval $(call define_heavy_object_rules,COMMANDS_INSPECT_TEST,command inspection characterization test binary))
+$(eval $(call define_heavy_object_rules,TEST,isolated integration test binary))
+$(eval $(call define_heavy_object_rules,CLI_LOCALIZATION_TEST,CLI localization integration test binary))
+$(eval $(call define_heavy_object_rules,APP_CONFIG_INTEGRATION_TEST,app config integration test binary))
+$(eval $(call define_heavy_object_rules,AUR_RPC_VALIDATION_TEST,AUR RPC validation fake-symbol test binary))
+$(eval $(call define_heavy_object_rules,SOURCE_INSTALL_CHARACTERIZATION_TEST,shared source-install characterization test binary))
+$(eval $(call define_heavy_object_rules,UPGRADE_BASELINE_METADATA_TEST,upgrade baseline metadata fake-symbol test binary))
 
-$(UPGRADE_ALL_COMMAND_TEST_OBJECTS): $(UPGRADE_ALL_COMMAND_TEST_OBJECT_DIR)/%.o: %.cpp $(UPGRADE_ALL_COMMAND_TEST_COMPILE_SIGNATURE)
-	@mkdir -p $(dir $@)
-	@echo ":: Compiling $< for upgrade-all command integration test"
-	$(CCACHE) $(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		$(UPGRADE_ALL_COMMAND_TEST_CPPFLAGS) -MMD -MP -c $< -o $@
+$(ALL_HEAVY_OBJECTS): | check-libalpm check-localization-config
+$(HEAVY_LOCALIZATION_OBJECTS): $(LOCALIZATION_CONFIG_HEADER)
 
-$(AUR_UPDATE_COMMAND_TEST_OBJECTS) $(UPGRADE_ALL_COMMAND_TEST_OBJECTS): | check-libalpm check-localization-config
-$(AUR_UPDATE_COMMAND_TEST_OBJECT_DIR)/src/localization.o \
-	$(UPGRADE_ALL_COMMAND_TEST_OBJECT_DIR)/src/localization.o: $(LOCALIZATION_CONFIG_HEADER)
+$(AUR_UPDATE_COMMAND_TEST_TARGET): | check-aur-update-command-link-firewall
+$(UPGRADE_ALL_COMMAND_TEST_TARGET): | check-upgrade-all-command-link-firewall
+$(COMMANDS_SYNC_TEST_TARGET): | check-commands-sync-link-firewall
+$(COMMANDS_INSPECT_TEST_TARGET): | check-commands-inspect-link-firewall
+$(TEST_TARGET): | check-isolated-integration-link-firewall
+$(CLI_LOCALIZATION_TEST_TARGET): | check-cli-localization-link-firewall
+$(APP_CONFIG_INTEGRATION_TEST_TARGET): | check-app-config-integration-link-firewall
+$(AUR_RPC_VALIDATION_TEST_TARGET): | check-aur-rpc-validation-link-firewall
+$(SOURCE_INSTALL_CHARACTERIZATION_TEST_TARGET): | check-source-install-characterization-link-firewall
+$(UPGRADE_BASELINE_METADATA_TEST_TARGET): | check-upgrade-baseline-metadata-link-firewall
 
--include $(AUR_UPDATE_COMMAND_TEST_DEPS) $(UPGRADE_ALL_COMMAND_TEST_DEPS)
+-include $(ALL_HEAVY_DEPS)
 
 $(MANPAGE_EN): $(MANPAGE_EN_IN) $(VERSION_FILE)
 	@echo ":: Generating $@ (v$(VERSION))"
@@ -1268,14 +1379,6 @@ $(LOCALIZATION_MISSING_CATALOG_TEST_TARGET): tests/localization_test.cpp $(SRC_D
 		tests/localization_test.cpp $(SRC_DIR)/localization.cpp \
 		-o $@
 
-$(CLI_LOCALIZATION_TEST_TARGET): $(SRCS) $(HEADERS) $(VERSION_FILE)
-	@mkdir -p $(dir $@)
-	@echo ":: Compiling CLI localization integration test binary"
-	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-DMOGUET_LOCALE_DIRECTORY=\"$(MOGUET_TEST_CATALOG_DIR)\" \
-		-DMOGUET_ENABLE_TEST_OVERRIDES \
-		$(SRCS) -o $@ $(MY_LDLIBS) $(LIBALPM_LDLIBS)
-
 $(MOGUET_TEST_ZZ_MO): $(MOGUET_TEST_ZZ_PO)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling test-only message catalog $<"
@@ -1351,45 +1454,10 @@ $(ROOT_EXECUTION_IDENTITY_TEST_TARGET): $(OBJS) tests/stubs/runtime-identity/get
 		$(OBJS) tests/stubs/runtime-identity/geteuid_stub.cpp \
 		-Wl,--wrap=geteuid -o $@ $(MY_LDLIBS) $(LIBALPM_LDLIBS)
 
-$(TEST_TARGET): $(SRCS) $(HEADERS) $(VERSION_FILE)
-	@mkdir -p $(dir $@)
-	@echo ":: Compiling isolated integration test binary"
-	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -DMOGUET_ENABLE_TEST_OVERRIDES $(SRCS) -o $@ $(MY_LDLIBS) $(LIBALPM_LDLIBS)
-
-$(COMMANDS_INSPECT_TEST_TARGET): $(COMMANDS_INSPECT_TEST_SRCS) $(HEADERS) tests/stubs/package-metadata/alpm_stub.hpp $(VERSION_FILE)
-	@mkdir -p $(dir $@)
-	@echo ":: Compiling command inspection characterization test binary"
-	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -DMOGUET_ENABLE_TEST_OVERRIDES -I$(SRC_DIR) -Itests/stubs/package-metadata $(COMMANDS_INSPECT_TEST_SRCS) -o $@ $(MY_LDLIBS)
-
-$(AUR_UPDATE_COMMAND_TEST_TARGET): $(AUR_UPDATE_COMMAND_TEST_LINK_OBJECTS) $(AUR_UPDATE_COMMAND_TEST_LINK_SIGNATURE) | check-aur-update-command-link-firewall
-	@mkdir -p $(dir $@)
-	@echo ":: Linking AUR update command integration test binary"
-	$(CXX) $(LDFLAGS) $(AUR_UPDATE_COMMAND_TEST_LINK_OBJECTS) -o $@ $(MY_LDLIBS)
-
-$(UPGRADE_ALL_COMMAND_TEST_TARGET): $(UPGRADE_ALL_COMMAND_TEST_LINK_OBJECTS) $(UPGRADE_ALL_COMMAND_TEST_LINK_SIGNATURE) | check-upgrade-all-command-link-firewall
-	@mkdir -p $(dir $@)
-	@echo ":: Linking upgrade-all command integration test binary"
-	$(CXX) $(LDFLAGS) $(UPGRADE_ALL_COMMAND_TEST_LINK_OBJECTS) -o $@ $(MY_LDLIBS)
-
-$(AUR_RPC_VALIDATION_TEST_TARGET): $(AUR_RPC_VALIDATION_TEST_SRCS) $(HEADERS) tests/stubs/package-metadata/alpm_stub.hpp $(VERSION_FILE)
-	@mkdir -p $(dir $@)
-	@echo ":: Compiling AUR RPC validation fake-symbol test binary"
-	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -DMOGUET_ENABLE_TEST_OVERRIDES -DMOGUET_ENABLE_AUR_RPC_TEST_HOOKS -I$(SRC_DIR) -Itests/stubs/package-metadata $(AUR_RPC_VALIDATION_TEST_SRCS) -o $@ $(MY_LDLIBS)
-
 $(AUR_RPC_ENVELOPE_VALIDATION_TEST_TARGET): $(AUR_RPC_ENVELOPE_VALIDATION_TEST_SRCS) $(SRC_DIR)/aur_rpc.hpp $(SRC_DIR)/dependency_spec.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/logging.hpp $(SRC_DIR)/localization.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling AUR RPC envelope validation test binary"
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -DMOGUET_ENABLE_TEST_OVERRIDES -DMOGUET_ENABLE_AUR_RPC_TEST_HOOKS -I$(SRC_DIR) $(AUR_RPC_ENVELOPE_VALIDATION_TEST_SRCS) -o $@ $(MY_LDLIBS)
-
-$(COMMANDS_SYNC_TEST_TARGET): $(COMMANDS_SYNC_TEST_SRCS) $(HEADERS) $(VERSION_FILE)
-	@mkdir -p $(dir $@)
-	@echo ":: Compiling sync command characterization test binary"
-	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -DMOGUET_ENABLE_TEST_OVERRIDES -DMOGUET_ENABLE_TEST_CONFIG_PATH -I$(SRC_DIR) $(COMMANDS_SYNC_TEST_SRCS) -o $@ $(MY_LDLIBS) $(LIBALPM_LDLIBS)
-
-$(SOURCE_INSTALL_CHARACTERIZATION_TEST_TARGET): tests/source_install_characterization.cpp $(SRCS) $(HEADERS) $(VERSION_FILE)
-	@mkdir -p $(dir $@)
-	@echo ":: Compiling shared source-install characterization test binary"
-	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -DMOGUET_ENABLE_TEST_OVERRIDES -I$(SRC_DIR) tests/source_install_characterization.cpp $(SOURCE_INSTALL_CHARACTERIZATION_TEST_SRCS) -o $@ $(MY_LDLIBS) $(LIBALPM_LDLIBS)
 
 $(APP_CONFIG_MODULE_TEST_TARGET): tests/app_config_test.cpp $(SRC_DIR)/app_config.cpp $(SRC_DIR)/app_config.hpp $(SRC_DIR)/provider_selection.cpp $(SRC_DIR)/provider_selection.hpp $(SRC_DIR)/dependency_plan.hpp $(SRC_DIR)/dependency_provider.hpp $(SRC_DIR)/dependency_spec.cpp $(SRC_DIR)/dependency_spec.hpp $(SRC_DIR)/localization.cpp $(SRC_DIR)/localization.hpp $(SRC_DIR)/user_config.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
@@ -1519,11 +1587,6 @@ $(USER_CONFIG_MODULE_TEST_TARGET): tests/user_config_test.cpp $(SRC_DIR)/user_co
 		$(SRC_DIR)/user_config.cpp \
 		$(SRC_DIR)/cli_parser.cpp \
 		-o $@
-
-$(APP_CONFIG_INTEGRATION_TEST_TARGET): $(SRCS) $(HEADERS) $(VERSION_FILE)
-	@mkdir -p $(dir $@)
-	@echo ":: Compiling app config integration test binary"
-	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -DMOGUET_ENABLE_TEST_OVERRIDES -DMOGUET_ENABLE_TEST_CONFIG_PATH -DMOGUET_ENABLE_APP_CONFIG_TEST_HOOKS $(SRCS) -o $@ $(MY_LDLIBS) $(LIBALPM_LDLIBS)
 
 $(PACKAGE_IDENTIFIER_TEST_TARGET): tests/package_identifier_test.cpp $(SRC_DIR)/package_identifier.cpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/localization.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
@@ -1808,17 +1871,6 @@ $(PACKAGE_METADATA_INTEGRATION_TEST_TARGET): $(PACKAGE_METADATA_INTEGRATION_TEST
 		-I$(SRC_DIR) \
 		$(PACKAGE_METADATA_INTEGRATION_TEST_SRCS) \
 		-o $@ $(LIBALPM_LDLIBS)
-
-$(UPGRADE_BASELINE_METADATA_TEST_TARGET): $(UPGRADE_BASELINE_METADATA_TEST_SRCS) $(HEADERS) tests/stubs/package-metadata/alpm_stub.hpp $(VERSION_FILE)
-	@mkdir -p $(dir $@)
-	@echo ":: Compiling upgrade baseline metadata fake-symbol test binary"
-	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-DMOGUET_ENABLE_TEST_OVERRIDES \
-		-DMOGUET_ENABLE_TEST_CONFIG_PATH \
-		-DMOGUET_ENABLE_APP_CONFIG_TEST_HOOKS \
-		-I$(SRC_DIR) -Itests/stubs/package-metadata \
-		$(UPGRADE_BASELINE_METADATA_TEST_SRCS) \
-		-o $@ $(MY_LDLIBS)
 
 test-internal-identity: $(MANPAGES)
 	python3 scripts/check-internal-identity.py
@@ -2279,60 +2331,65 @@ test-system-source-upgrade: check-system-source-upgrade-link-firewall $(SYSTEM_S
 test-aur-update-query: $(AUR_UPDATE_QUERY_TEST_TARGET)
 	$(abspath $(AUR_UPDATE_QUERY_TEST_TARGET))
 
-check-aur-update-command-link-firewall:
-	@echo ":: Checking AUR update command link firewall"
-	@set -e; for source in $(AUR_UPDATE_COMMAND_REQUIRED_PRODUCTION_TEST_SRCS) $(AUR_UPDATE_COMMAND_REQUIRED_TEST_SUPPORT_SRCS); do \
-		count=$$(printf '%s\n' $(AUR_UPDATE_COMMAND_TEST_SRCS) | \
-			awk -v expected="$$source" '$$0 == expected { count++ } END { print count + 0 }'); \
-		test "$$count" -eq 1 || { \
-			echo "error: AUR update command test must link $$source exactly once" >&2; \
-			exit 1; \
-		}; \
-	done
-	@test -z "$(filter $(AUR_UPDATE_COMMAND_FORBIDDEN_TEST_SRCS),$(AUR_UPDATE_COMMAND_TEST_SRCS))" || { \
-		echo "error: AUR update command test links a production operation owned by a scenario stub" >&2; \
+define configure_heavy_link_firewall
+$(1): private OBJECT_BUILD_LABEL := $(4)
+$(1): private OBJECT_BUILD_SRCS := $($(2)_SRCS)
+$(1): private OBJECT_BUILD_OBJECTS := $($(2)_OBJECTS)
+$(1): private OBJECT_BUILD_LINK_OBJECTS := $($(2)_LINK_OBJECTS)
+$(1): private OBJECT_BUILD_LDLIBS := $($(2)_LDLIBS)
+$(1): private OBJECT_BUILD_REQUIRED_PRODUCTION_SRCS := $($(3)_REQUIRED_PRODUCTION_TEST_SRCS)
+$(1): private OBJECT_BUILD_REQUIRED_SUPPORT_SRCS := $($(3)_REQUIRED_TEST_SUPPORT_SRCS)
+$(1): private OBJECT_BUILD_FORBIDDEN_SRCS := $($(3)_FORBIDDEN_TEST_SRCS)
+$(1): private OBJECT_BUILD_FORBIDDEN_LDLIBS := $($(3)_FORBIDDEN_TEST_LDLIBS)
+endef
+
+$(eval $(call configure_heavy_link_firewall,check-aur-update-command-link-firewall,AUR_UPDATE_COMMAND_TEST,AUR_UPDATE_COMMAND,AUR update command test))
+$(eval $(call configure_heavy_link_firewall,check-upgrade-all-command-link-firewall,UPGRADE_ALL_COMMAND_TEST,UPGRADE_ALL_COMMAND,upgrade-all command test))
+$(eval $(call configure_heavy_link_firewall,check-commands-sync-link-firewall,COMMANDS_SYNC_TEST,COMMANDS_SYNC,sync command test))
+$(eval $(call configure_heavy_link_firewall,check-commands-inspect-link-firewall,COMMANDS_INSPECT_TEST,COMMANDS_INSPECT,command inspection test))
+$(eval $(call configure_heavy_link_firewall,check-isolated-integration-link-firewall,TEST,CORE,isolated integration test))
+$(eval $(call configure_heavy_link_firewall,check-cli-localization-link-firewall,CLI_LOCALIZATION_TEST,CLI_LOCALIZATION,CLI localization test))
+$(eval $(call configure_heavy_link_firewall,check-app-config-integration-link-firewall,APP_CONFIG_INTEGRATION_TEST,APP_CONFIG_INTEGRATION,app config integration test))
+$(eval $(call configure_heavy_link_firewall,check-aur-rpc-validation-link-firewall,AUR_RPC_VALIDATION_TEST,AUR_RPC_VALIDATION,AUR RPC validation test))
+$(eval $(call configure_heavy_link_firewall,check-source-install-characterization-link-firewall,SOURCE_INSTALL_CHARACTERIZATION_TEST,SOURCE_INSTALL_CHARACTERIZATION,source-install characterization test))
+$(eval $(call configure_heavy_link_firewall,check-upgrade-baseline-metadata-link-firewall,UPGRADE_BASELINE_METADATA_TEST,UPGRADE_BASELINE_METADATA,upgrade baseline metadata test))
+
+$(HEAVY_LINK_FIREWALLS):
+	@echo ":: Checking $(OBJECT_BUILD_LABEL) link firewall"
+	@test "$(words $(OBJECT_BUILD_REQUIRED_PRODUCTION_SRCS) $(OBJECT_BUILD_REQUIRED_SUPPORT_SRCS))" -eq \
+		"$(words $(sort $(OBJECT_BUILD_REQUIRED_PRODUCTION_SRCS) $(OBJECT_BUILD_REQUIRED_SUPPORT_SRCS)))" || { \
+		echo "error: $(OBJECT_BUILD_LABEL) required source set contains duplicates" >&2; \
 		exit 1; \
 	}
-	@test "$(words $(AUR_UPDATE_COMMAND_TEST_SRCS))" -eq "$(words $(sort $(AUR_UPDATE_COMMAND_TEST_SRCS)))" || { \
-		echo "error: AUR update command test source list contains duplicates" >&2; \
+	@test "$(words $(OBJECT_BUILD_SRCS))" -eq "$(words $(sort $(OBJECT_BUILD_SRCS)))" || { \
+		echo "error: $(OBJECT_BUILD_LABEL) source list contains duplicates" >&2; \
 		exit 1; \
 	}
-	@test "$(words $(AUR_UPDATE_COMMAND_TEST_SRCS))" -eq "$(words $(AUR_UPDATE_COMMAND_TEST_LINK_OBJECTS))" && \
-		test "$(words $(AUR_UPDATE_COMMAND_TEST_LINK_OBJECTS))" -eq "$(words $(sort $(AUR_UPDATE_COMMAND_TEST_LINK_OBJECTS)))" && \
-		test -z "$(filter-out $(AUR_UPDATE_COMMAND_TEST_OBJECTS),$(AUR_UPDATE_COMMAND_TEST_LINK_OBJECTS))" && \
-		test -z "$(filter-out $(AUR_UPDATE_COMMAND_TEST_LINK_OBJECTS),$(AUR_UPDATE_COMMAND_TEST_OBJECTS))" || { \
-		echo "error: AUR update command test source-to-object mapping is not one-to-one" >&2; \
+	@test -z "$(filter-out $(OBJECT_BUILD_SRCS),$(OBJECT_BUILD_REQUIRED_PRODUCTION_SRCS) $(OBJECT_BUILD_REQUIRED_SUPPORT_SRCS))" && \
+		test -z "$(filter-out $(OBJECT_BUILD_REQUIRED_PRODUCTION_SRCS) $(OBJECT_BUILD_REQUIRED_SUPPORT_SRCS),$(OBJECT_BUILD_SRCS))" || { \
+		echo "error: $(OBJECT_BUILD_LABEL) must link every required source exactly once" >&2; \
+		exit 1; \
+	}
+	@test -z "$(filter $(OBJECT_BUILD_FORBIDDEN_SRCS),$(OBJECT_BUILD_SRCS))" || { \
+		echo "error: $(OBJECT_BUILD_LABEL) links a production source owned by test support" >&2; \
+		exit 1; \
+	}
+	@test -z "$(filter $(OBJECT_BUILD_FORBIDDEN_LDLIBS),$(OBJECT_BUILD_LDLIBS))" || { \
+		echo "error: $(OBJECT_BUILD_LABEL) links a library owned by test support" >&2; \
+		exit 1; \
+	}
+	@test "$(words $(OBJECT_BUILD_SRCS))" -eq "$(words $(OBJECT_BUILD_OBJECTS))" && \
+		test "$(words $(OBJECT_BUILD_OBJECTS))" -eq "$(words $(sort $(OBJECT_BUILD_OBJECTS)))" && \
+		test "$(words $(OBJECT_BUILD_OBJECTS))" -eq "$(words $(OBJECT_BUILD_LINK_OBJECTS))" && \
+		test "$(words $(OBJECT_BUILD_LINK_OBJECTS))" -eq "$(words $(sort $(OBJECT_BUILD_LINK_OBJECTS)))" && \
+		test -z "$(filter-out $(OBJECT_BUILD_OBJECTS),$(OBJECT_BUILD_LINK_OBJECTS))" && \
+		test -z "$(filter-out $(OBJECT_BUILD_LINK_OBJECTS),$(OBJECT_BUILD_OBJECTS))" || { \
+		echo "error: $(OBJECT_BUILD_LABEL) source-to-object mapping is not one-to-one" >&2; \
 		exit 1; \
 	}
 
 test-aur-update-command: check-aur-update-command-link-firewall $(AUR_UPDATE_COMMAND_TEST_TARGET)
 	sh tests/test-aur-update-command.sh $(abspath $(AUR_UPDATE_COMMAND_TEST_TARGET))
-
-check-upgrade-all-command-link-firewall:
-	@echo ":: Checking upgrade-all command link firewall"
-	@set -e; for source in $(UPGRADE_ALL_COMMAND_REQUIRED_TEST_SRCS) $(UPGRADE_ALL_COMMAND_REQUIRED_TEST_SUPPORT_SRCS); do \
-		count=$$(printf '%s\n' $(UPGRADE_ALL_COMMAND_TEST_SRCS) | \
-			awk -v expected="$$source" '$$0 == expected { count++ } END { print count + 0 }'); \
-		test "$$count" -eq 1 || { \
-			echo "error: upgrade-all command test must link $$source exactly once" >&2; \
-			exit 1; \
-		}; \
-	done
-	@test -z "$(filter $(UPGRADE_ALL_COMMAND_FORBIDDEN_TEST_SRCS),$(UPGRADE_ALL_COMMAND_TEST_SRCS))" || { \
-		echo "error: upgrade-all command test links the production aggregate operation boundary" >&2; \
-		exit 1; \
-	}
-	@test "$(words $(UPGRADE_ALL_COMMAND_TEST_SRCS))" -eq "$(words $(sort $(UPGRADE_ALL_COMMAND_TEST_SRCS)))" || { \
-		echo "error: upgrade-all command test source list contains duplicates" >&2; \
-		exit 1; \
-	}
-	@test "$(words $(UPGRADE_ALL_COMMAND_TEST_SRCS))" -eq "$(words $(UPGRADE_ALL_COMMAND_TEST_LINK_OBJECTS))" && \
-		test "$(words $(UPGRADE_ALL_COMMAND_TEST_LINK_OBJECTS))" -eq "$(words $(sort $(UPGRADE_ALL_COMMAND_TEST_LINK_OBJECTS)))" && \
-		test -z "$(filter-out $(UPGRADE_ALL_COMMAND_TEST_OBJECTS),$(UPGRADE_ALL_COMMAND_TEST_LINK_OBJECTS))" && \
-		test -z "$(filter-out $(UPGRADE_ALL_COMMAND_TEST_LINK_OBJECTS),$(UPGRADE_ALL_COMMAND_TEST_OBJECTS))" || { \
-		echo "error: upgrade-all command test source-to-object mapping is not one-to-one" >&2; \
-		exit 1; \
-	}
 
 test-upgrade-all-command: check-upgrade-all-command-link-firewall $(UPGRADE_ALL_COMMAND_TEST_TARGET)
 	sh tests/test-upgrade-all-command.sh $(abspath $(UPGRADE_ALL_COMMAND_TEST_TARGET))
@@ -2558,29 +2615,6 @@ test-commands-source-maintenance: $(APP_CONFIG_INTEGRATION_TEST_TARGET) $(SOURCE
 		$(abspath $(APP_CONFIG_INTEGRATION_TEST_TARGET)) \
 		$(abspath $(SOURCE_INSTALL_CHARACTERIZATION_TEST_TARGET)) \
 		$(abspath $(UPGRADE_BASELINE_METADATA_TEST_TARGET))
-
-check-commands-sync-link-firewall:
-	@echo ":: Checking sync command link firewall"
-	@set -e; for source in $(COMMANDS_SYNC_REQUIRED_PRODUCTION_TEST_SRCS); do \
-		count=$$(printf '%s\n' $(COMMANDS_SYNC_TEST_SRCS) | \
-			awk -v expected="$$source" '$$0 == expected { count++ } END { print count + 0 }'); \
-		test "$$count" -eq 1 || { \
-			echo "error: sync command test must link $$source exactly once" >&2; \
-			exit 1; \
-		}; \
-	done
-	@set -e; for source in $(COMMANDS_SYNC_REQUIRED_TEST_SUPPORT_SRCS); do \
-		count=$$(printf '%s\n' $(COMMANDS_SYNC_TEST_SRCS) | \
-			awk -v expected="$$source" '$$0 == expected { count++ } END { print count + 0 }'); \
-		test "$$count" -eq 1 || { \
-			echo "error: sync command test must link support $$source exactly once" >&2; \
-			exit 1; \
-		}; \
-	done
-	@test -z "$(filter $(COMMANDS_SYNC_FORBIDDEN_TEST_SRCS),$(COMMANDS_SYNC_TEST_SRCS))" || { \
-		echo "error: sync command test links a replaced production transport" >&2; \
-		exit 1; \
-	}
 
 test-commands-sync: check-commands-sync-link-firewall $(COMMANDS_SYNC_TEST_TARGET)
 	sh tests/test-commands-sync.sh $(abspath $(COMMANDS_SYNC_TEST_TARGET))

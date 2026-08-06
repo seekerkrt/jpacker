@@ -153,7 +153,7 @@ stub ownershipは次のsource境界を正とする。
 
 #### Object・dependency・ccache契約
 
-Slice 2以降のobject分離は次を満たす。
+Slice 2とSlice 3で移行した上記10 targetのobject分離は次を満たす。
 
 - objectは`build/tests/obj/<binary-name>/`以下のtarget専用directoryへ置く。`src/`、`tests/`、
   `tests/stubs/`以下の相対pathをobject pathにも残し、同名fileの衝突を避ける。異なるtest target間で
@@ -165,14 +165,40 @@ Slice 2以降のobject分離は次を満たす。
   更新し、そのtargetのobjectを再compileする。command line overrideによるflag変更もtimestampに
   関係なく検出する。
 - linkにもordered object set、effective `CXX`、`LDFLAGS`、`MY_LDLIBS`、
-  `LIBALPM_LDLIBS`を記録したsignatureを持つ。objectまたはlink条件が変わった場合だけ再linkする。
-  現行の重量級recipeが参照していない`LDFLAGS`は、分離後のlink stepで正式に適用する。
+  `LIBALPM_LDLIBS`、targetが実際に使うlibrary listを記録したsignatureを持つ。objectまたはlink条件が
+  変わった場合だけ再linkする。移行前の重量級recipeが参照していなかった`LDFLAGS`は、分離後の
+  link stepで正式に適用する。
 - `CCACHE ?=`を空の既定値として定義し、compile recipeだけを`$(CCACHE) $(CXX) ... -c`とする。
   `make CCACHE=ccache ...`で有効化し、未導入環境、通常の`make`、または`CCACHE=`ではwrapperなしの
   buildを維持する。`CCACHE`は生成物のcompile signatureへ含めず、compiler identityと全compile
   inputのcache identityはccacheへ委ねる。link recipeへccacheを付けない。
 - `CXX`、`CPPFLAGS`、`CXXFLAGS`、`LDFLAGS`のoverrideを維持する。ccacheをruntime / packageの
   必須dependencyにせず、mold等のlinkerも既定または必須にしない。
+
+#### ccache・optional linkerの利用
+
+ccacheを導入済みの開発環境では、compile wrapperを明示して有効化する。
+
+    make CCACHE=ccache -j8 --output-sync=target test
+
+cacheの状態はccache自身の正式な入口で確認する。
+
+    ccache --show-stats
+
+ccacheを一時的に無効化する場合は空値を明示する。
+
+    make CCACHE= -j8 --output-sync=target test
+
+`CCACHE`のdefaultは空なので、ccacheを導入していない環境でも通常の`make`、`make test`、
+`make release-check`はcompilerを直接呼ぶ。ccacheはruntime dependency、package dependency、
+default buildの前提ではない。
+
+linkerは`LDFLAGS`の既存overrideで任意に選べる。たとえばmoldを導入済みの環境では次のように指定する。
+
+    make LDFLAGS=-fuse-ld=mold -j8 --output-sync=target test
+
+この指定は任意であり、moldをMoguetの必須dependencyまたはdefault linkerにはしない。空の
+`LDFLAGS`ではtoolchain既定のlinkerを使う。
 
 #### Link firewall
 
@@ -183,18 +209,20 @@ sourceのcheckはsource listに対して維持し、source-to-object mappingと�
 ないことをstatic checkする。production implementationと同じsymbolを所有するstubを同じbinaryへ
 混在させない。
 
-特に`check-upgrade-all-command-link-firewall`と`check-commands-sync-link-firewall`を各test targetの
-prerequisiteとして維持する。明示的なfirewallをまだ持たないstub使用targetでは、上記stub ownershipを
-required / forbidden source setとして固定し、object化と同時に同等以上のstatic checkを追加する。
+各targetは共通firewall recipeへtarget固有のrequired production source、required test support、
+forbidden production source、link libraryを渡す。10 targetすべてでsource重複、required setの
+exactly-once、forbidden owner、source-to-object mapping、明示link object setをtargetのprerequisite
+として確認する。
 
-#### Slice scopeとbaseline
+#### 実装済みscopeとbaseline
 
-Slice 2は次の2 targetだけをobject化する。
+Slice 2では次の2 targetをobject化した。
 
 - `UPGRADE_ALL_COMMAND_TEST_TARGET`
 - `AUR_UPDATE_COMMAND_TEST_TARGET`
 
-Slice 3は共通Make helperを最小限に整理しながら、次の残り8 targetをobject化する。
+Slice 3ではsignature、1 source / 1 object compile、明示object link、firewallを共通Make helperへ
+整理しながら、次の残り8 targetをobject化した。
 
 - `COMMANDS_SYNC_TEST_TARGET`
 - `COMMANDS_INSPECT_TEST_TARGET`
@@ -216,9 +244,9 @@ Slice 3は共通Make helperを最小限に整理しながら、次の残り8 tar
 | isolated warm ccache + clean rebuild | 233.06 s | 累計cacheable 0 / 20、hit 0、cache file 0 |
 
 cold / warm測定はtemporary `CCACHE_DIR`だけを使用し、global ccacheを参照・消去・変更していない。
-現行recipeではccacheが全callをlink invocationと判定するため、warm cacheの効果はない。Slice 2 / 3では
-同じtarget集合についてdefault clean、incremental、isolated cold / warm ccache、test behavior、
-link firewallを再測定し、このbaselineと比較する。
+Slice 1時点のrecipeではccacheが全callをlink invocationと判定したため、warm cacheの効果はなかった。
+Slice 2 / 3の実装後も同じtarget集合についてdefault clean、incremental、isolated cold / warm ccache、
+test behavior、link firewallを測定し、このbaselineと比較する。
 
 ### Arch Linux container validation
 
