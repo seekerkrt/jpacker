@@ -1,9 +1,8 @@
 #include "local_dependency_plan_projection.hpp"
 
+#include "dependency_constraint.hpp"
 #include "dependency_plan_projection_support.hpp"
 #include "dependency_spec.hpp"
-
-#include <alpm.h>
 
 #include <algorithm>
 #include <functional>
@@ -17,7 +16,6 @@
 
 namespace {
 
-using Comparison = LocalPackageMetadataComparison;
 using Relation = LocalPackageMetadataRelation;
 using RelationKind = LocalPackageMetadataRelationKind;
 using Target = LocalPackageMetadataRelationTarget;
@@ -30,18 +28,18 @@ struct EffectiveChild {
 };
 
 struct RequiredDependency {
-    TargetKind                    kind;
-    std::string                   name;
-    std::optional<Comparison>     comparison;
-    std::optional<std::string>    version;
-    bool                          malformed_constraint;
+    TargetKind                                  kind;
+    std::string                                 name;
+    std::optional<ConsumerDependencyRequirement> requirement;
+    bool                                        malformed_constraint;
 };
 
 struct Candidate {
     std::string                    package_name;
     LocalDependencyResolutionKind resolution_kind;
     std::optional<std::string>     provided_specification;
-    std::optional<std::string>     version;
+    std::optional<ProviderCapability> provider_capability;
+    ObservedVersion                observed_version;
     bool                           architecture_supported;
 };
 
@@ -160,10 +158,64 @@ std::optional<PackageRole> package_role(RelationKind kind) {
     throw std::logic_error("Unknown local metadata relation kind.");
 }
 
+DependencyVersionRelation relation_from_local_comparison(
+        LocalPackageMetadataComparison comparison) {
+    switch(comparison) {
+    case LocalPackageMetadataComparison::LessThan:
+        return DependencyVersionRelation::LessThan;
+    case LocalPackageMetadataComparison::LessThanOrEqual:
+        return DependencyVersionRelation::LessThanOrEqual;
+    case LocalPackageMetadataComparison::Equal:
+        return DependencyVersionRelation::Equal;
+    case LocalPackageMetadataComparison::GreaterThanOrEqual:
+        return DependencyVersionRelation::GreaterThanOrEqual;
+    case LocalPackageMetadataComparison::GreaterThan:
+        return DependencyVersionRelation::GreaterThan;
+    }
+    throw std::logic_error("Unknown local metadata comparison.");
+}
+
+std::optional<DependencyRequirement> typed_requirement_from_relation(
+        const Relation& relation) {
+    if(!relation.target.has_value()) return std::nullopt;
+    const Target& target = relation.target.value();
+    if(target.kind == TargetKind::Soname) {
+        return DependencyRequirement{SonameDependencyRequirement(
+                relation.raw_value, target.name)};
+    }
+    if(target.kind != TargetKind::Package) {
+        throw std::logic_error("Unknown local metadata relation target kind.");
+    }
+
+    std::optional<DependencyVersionConstraint> constraint;
+    if(target.comparison.has_value()) {
+        if(!target.version.has_value()) return std::nullopt;
+        constraint.emplace(
+                relation_from_local_comparison(target.comparison.value()),
+                target.version.value());
+    } else if(target.version.has_value()) {
+        return std::nullopt;
+    }
+    return DependencyRequirement{ConsumerDependencyRequirement(
+            relation.raw_value, target.name, std::move(constraint))};
+}
+
+std::optional<ProviderCapability> provider_capability_from_relation(
+        const Relation& relation) {
+    if(!relation.target.has_value() ||
+       relation.target->kind != TargetKind::Package) {
+        return std::nullopt;
+    }
+    return ProviderCapability(
+            relation.raw_value, relation.target->name,
+            relation.target->version);
+}
+
 void add_typed_dependency(
         std::vector<TypedPackageDependency>& dependencies,
-        const std::string& specification, PackageRole role) {
-    const TypedPackageDependency dependency{specification, role};
+        const Relation& relation, PackageRole role) {
+    const TypedPackageDependency dependency{
+            relation.raw_value, role, typed_requirement_from_relation(relation)};
     const auto same = [&](const TypedPackageDependency& existing) {
         return existing.specification == dependency.specification &&
                existing.role == dependency.role;
@@ -188,8 +240,7 @@ collect_root_packages(const std::vector<EffectiveChild>& children,
                         package_role(relation->kind);
                 if(role.has_value()) {
                     add_typed_dependency(
-                            root.dependencies, relation->raw_value,
-                            role.value());
+                            root.dependencies, *relation, role.value());
                 } else if(relation->kind == RelationKind::Conflicts) {
                     root.conflicts.push_back(relation->raw_value);
                 } else if(relation->kind == RelationKind::Replaces) {
@@ -202,27 +253,57 @@ collect_root_packages(const std::vector<EffectiveChild>& children,
     return roots;
 }
 
-std::optional<Comparison> comparison_from_operator(
+std::optional<DependencyVersionRelation> relation_from_operator(
         const std::optional<std::string>& value) {
     if(!value.has_value()) return std::nullopt;
-    if(value.value() == "<") return Comparison::LessThan;
-    if(value.value() == "<=") return Comparison::LessThanOrEqual;
-    if(value.value() == "=") return Comparison::Equal;
-    if(value.value() == ">=") return Comparison::GreaterThanOrEqual;
-    if(value.value() == ">") return Comparison::GreaterThan;
+    if(value.value() == "<") return DependencyVersionRelation::LessThan;
+    if(value.value() == "<=") return DependencyVersionRelation::LessThanOrEqual;
+    if(value.value() == "=") return DependencyVersionRelation::Equal;
+    if(value.value() == ">=") return DependencyVersionRelation::GreaterThanOrEqual;
+    if(value.value() == ">") return DependencyVersionRelation::GreaterThan;
     return std::nullopt;
 }
 
 RequiredDependency parse_required_dependency(
-        const std::string& specification) {
+        const TypedPackageDependency& declaration) {
+    if(declaration.requirement.has_value()) {
+        const DependencyRequirement& requirement = declaration.requirement.value();
+        if(const auto* consumer =
+                   std::get_if<ConsumerDependencyRequirement>(&requirement)) {
+            return RequiredDependency{
+                    TargetKind::Package, consumer->package_name(), *consumer,
+                    false};
+        }
+        if(const auto* soname =
+                   std::get_if<SonameDependencyRequirement>(&requirement)) {
+            return RequiredDependency{
+                    TargetKind::Soname, soname->soname(), std::nullopt, false};
+        }
+        throw std::logic_error("Unknown typed dependency requirement.");
+    }
+
+    // AUR declaration parsing remains on its existing path until Slice 4
+    // introduces its own metadata trust boundary. Local metadata always takes
+    // the typed branch above and is never reparsed here.
+    const std::string& specification = declaration.specification;
     const ParsedDependency parsed = parse_dependency_string(specification);
     const bool is_soname = !parsed.has_constraint() &&
                            parsed.name.find(':') != std::string::npos;
+    const std::optional<DependencyVersionRelation> relation =
+            relation_from_operator(parsed.op);
+    std::optional<ConsumerDependencyRequirement> requirement;
+    if(!is_soname && relation.has_value() && parsed.version.has_value()) {
+        requirement.emplace(
+                parsed.raw, parsed.name,
+                DependencyVersionConstraint(
+                        relation.value(), parsed.version.value()));
+    } else if(!is_soname && !parsed.has_constraint()) {
+        requirement.emplace(parsed.raw, parsed.name, std::nullopt);
+    }
     return RequiredDependency{
             is_soname ? TargetKind::Soname : TargetKind::Package,
             parsed.name,
-            comparison_from_operator(parsed.op),
-            parsed.version,
+            std::move(requirement),
             parsed.has_malformed_constraint()};
 }
 
@@ -255,7 +336,10 @@ std::optional<Candidate> exact_candidate(
                     child.package_name,
                     LocalDependencyResolutionKind::Package,
                     std::nullopt,
-                    package_version,
+                    std::nullopt,
+                    ObservedVersion::available(
+                            ObservedVersionSource::LocalExactPackage,
+                            package_version),
                     child.architecture_supported};
         }
     }
@@ -274,68 +358,93 @@ void add_provided_candidates(
                relation->target->name != dependency.name) {
                 continue;
             }
+            const std::optional<ProviderCapability> capability =
+                    provider_capability_from_relation(*relation);
             add_candidate(
                     candidates,
                     Candidate{
                             child.package_name,
                             LocalDependencyResolutionKind::Provided,
                             relation->raw_value,
-                            relation->target->version,
+                            capability,
+                            capability.has_value() &&
+                                            capability->version().has_value()
+                                    ? ObservedVersion::available(
+                                              ObservedVersionSource::
+                                                      LocalProviderCapability,
+                                              capability->version().value())
+                                    : ObservedVersion::unknown(
+                                              ObservedVersionSource::
+                                                      LocalProviderCapability,
+                                              dependency.kind == TargetKind::Package
+                                                      ? ObservedVersionUnknownReason::
+                                                                UnversionedProviderCapability
+                                                      : ObservedVersionUnknownReason::
+                                                                RelationKindNotComparable),
                             child.architecture_supported});
         }
     }
 }
 
-bool satisfies_comparison(
-        int comparison, Comparison required_comparison) {
-    switch(required_comparison) {
-    case Comparison::LessThan:
-        return comparison < 0;
-    case Comparison::LessThanOrEqual:
-        return comparison <= 0;
-    case Comparison::Equal:
-        return comparison == 0;
-    case Comparison::GreaterThanOrEqual:
-        return comparison >= 0;
-    case Comparison::GreaterThan:
-        return comparison > 0;
+ConstraintEvaluation candidate_constraint_evaluation(
+        const Candidate& candidate, const RequiredDependency& dependency) {
+    if(dependency.malformed_constraint) {
+        return ConstraintEvaluation::invalid(
+                ConstraintInvalidReason::MalformedRequirement);
     }
-    throw std::logic_error("Unknown local dependency comparison.");
+    if(dependency.kind == TargetKind::Soname) {
+        return ConstraintEvaluation::unknown(
+                ObservedVersionUnknownReason::RelationKindNotComparable);
+    }
+    if(!dependency.requirement.has_value()) {
+        return ConstraintEvaluation::invalid(
+                ConstraintInvalidReason::InternalInvariantViolation);
+    }
+    return evaluate_consumer_dependency_requirement(
+            dependency.requirement.value(), candidate.observed_version);
 }
 
 bool candidate_is_compatible(
         const Candidate& candidate,
         const RequiredDependency& dependency) {
-    if(!candidate.architecture_supported ||
-       dependency.malformed_constraint) {
+    if(!candidate.architecture_supported || dependency.malformed_constraint) {
         return false;
     }
-    if(!dependency.comparison.has_value()) return true;
-    if(!candidate.version.has_value() ||
-       !dependency.version.has_value()) {
+    if(dependency.kind == TargetKind::Soname) return true;
+    switch(candidate_constraint_evaluation(candidate, dependency).satisfaction()) {
+    case ConstraintSatisfaction::Unconstrained:
+    case ConstraintSatisfaction::Satisfied:
+        return true;
+    case ConstraintSatisfaction::Unsatisfied:
+    case ConstraintSatisfaction::Unknown:
+    case ConstraintSatisfaction::Invalid:
+    case ConstraintSatisfaction::Conflicting:
         return false;
     }
-    return satisfies_comparison(
-            alpm_pkg_vercmp(
-                    candidate.version->c_str(),
-                    dependency.version->c_str()),
-            dependency.comparison.value());
+    throw std::logic_error("Unknown constraint satisfiability result.");
 }
 
-LocalDependencyPlanCandidate public_candidate(const Candidate& candidate) {
+LocalDependencyPlanCandidate public_candidate(
+        const Candidate& candidate, const RequiredDependency& dependency) {
+    std::optional<std::string> version;
+    if(const std::string* observed_version = candidate.observed_version.version()) {
+        version = *observed_version;
+    }
     return LocalDependencyPlanCandidate{
             candidate.package_name,
             candidate.provided_specification,
-            candidate.version,
-            std::nullopt};
+            std::move(version),
+            std::nullopt,
+            candidate_constraint_evaluation(candidate, dependency)};
 }
 
 std::vector<LocalDependencyPlanCandidate> public_candidates(
-        const std::vector<Candidate>& candidates) {
+        const std::vector<Candidate>& candidates,
+        const RequiredDependency& dependency) {
     std::vector<LocalDependencyPlanCandidate> result;
     result.reserve(candidates.size());
     for(const auto& candidate : candidates) {
-        result.push_back(public_candidate(candidate));
+        result.push_back(public_candidate(candidate, dependency));
     }
     return result;
 }
@@ -402,7 +511,7 @@ dependency_plan_projection_support::DependencyDecision resolve_local_candidate(
     const std::string& specification =
             context.declarations.front().specification;
     const RequiredDependency dependency =
-            parse_required_dependency(specification);
+            parse_required_dependency(context.declarations.front());
     if(dependency.malformed_constraint) {
         return {false, std::nullopt, std::nullopt};
     }
@@ -448,7 +557,7 @@ dependency_plan_projection_support::DependencyDecision resolve_local_candidate(
                         context.parent_package_name,
                         specification,
                         std::nullopt,
-                        public_candidates(candidates)});
+                        public_candidates(candidates, dependency)});
         return {
                 true,
                 std::nullopt,
@@ -463,7 +572,7 @@ dependency_plan_projection_support::DependencyDecision resolve_local_candidate(
                         context.parent_package_name,
                         specification,
                         std::nullopt,
-                        public_candidates(compatible)});
+                        public_candidates(compatible, dependency)});
         return {
                 true,
                 std::nullopt,

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "dependency_constraint.hpp"
 #include "dependency_plan.hpp"
 #include "local_package_metadata.hpp"
 
@@ -17,6 +18,7 @@ struct LocalDependencyPlanCandidate {
     std::optional<std::string>        provided_specification;
     std::optional<std::string>        version;
     std::optional<ProvidedDependency> remote_provider = std::nullopt;
+    std::optional<ConstraintEvaluation> constraint_evaluation = std::nullopt;
 
     bool operator==(const LocalDependencyPlanCandidate&) const = default;
 };

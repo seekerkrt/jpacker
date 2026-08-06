@@ -733,7 +733,11 @@ void test_local_mismatch_and_ambiguity_fail_closed() {
             mismatch_plan.failures().size() == 1,
             "Constraint mismatch failure count differs");
     const std::vector<LocalDependencyPlanCandidate> mismatch_candidates = {
-            {core, std::nullopt, "2:1.0-10", std::nullopt}};
+            {core,
+             std::nullopt,
+             "2:1.0-10",
+             std::nullopt,
+             ConstraintEvaluation::unsatisfied()}};
     expect(
             mismatch_plan.failures()[0].kind ==
                             LocalDependencyPlanFailureKind::ConstraintMismatch &&
@@ -798,8 +802,16 @@ void test_local_mismatch_and_ambiguity_fail_closed() {
     expect(
             ambiguity_plan.failures()[0].candidates ==
                     std::vector<LocalDependencyPlanCandidate>{
-                            {provider_a, "shared-api=1", "1", std::nullopt},
-                            {provider_b, "shared-api=1", "1", std::nullopt}},
+                            {provider_a,
+                             "shared-api=1",
+                             "1",
+                             std::nullopt,
+                             ConstraintEvaluation::satisfied()},
+                            {provider_b,
+                             "shared-api=1",
+                             "1",
+                             std::nullopt,
+                             ConstraintEvaluation::satisfied()}},
             "Local provider ambiguity candidate order differs");
     expect(
             ambiguity_plan.internal_edges().empty() &&
