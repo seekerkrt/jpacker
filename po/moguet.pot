@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Moguet 2.1.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-05 18:54+0900\n"
+"POT-Creation-Date: 2026-08-06 19:11+0900\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -2330,7 +2330,7 @@ msgstr ""
 msgid "Failed to clone {}."
 msgstr ""
 
-#: src/cli_parser.cpp:28 src/logging.cpp:175 src/moguet.cpp:84
+#: src/cli_parser.cpp:28 src/logging.cpp:175 src/moguet.cpp:85
 #, c++-format
 msgid "Error: {}"
 msgstr ""
@@ -2407,7 +2407,7 @@ msgstr ""
 
 #. TRANSLATORS: The placeholders are the command, operation, and operand tokens.
 #: src/cli_routing.cpp:125 src/commands_inspect.cpp:53
-#: src/commands_inspect.cpp:60 src/moguet.cpp:218 src/moguet.cpp:227
+#: src/commands_inspect.cpp:60 src/moguet.cpp:219 src/moguet.cpp:228
 #, c++-format
 msgid "Usage: {} {} {}"
 msgstr ""
@@ -2458,7 +2458,7 @@ msgstr ""
 msgid "Local source build was not requested."
 msgstr ""
 
-#: src/cli_routing.cpp:377 src/moguet.cpp:180
+#: src/cli_routing.cpp:377 src/moguet.cpp:181
 #, c++-format
 msgid "Option {} is supported only with operation {}."
 msgstr ""
@@ -3128,7 +3128,7 @@ msgstr ""
 #. second is a runtime option token.
 #: src/commands_inspect.cpp:757 src/commands_inspect.cpp:867
 #: src/commands_inspect.cpp:914 src/commands_upgrade_all.cpp:1819
-#: src/moguet.cpp:1048
+#: src/moguet.cpp:1051
 #, c++-format
 msgid "Unsupported {} option: {}"
 msgstr ""
@@ -3600,7 +3600,7 @@ msgstr ""
 msgid "Build Error: {}"
 msgstr ""
 
-#: src/commands_source_maintenance.cpp:844 src/moguet.cpp:198
+#: src/commands_source_maintenance.cpp:844 src/moguet.cpp:199
 #, c++-format
 msgid "Usage: {} {}"
 msgstr ""
@@ -3786,7 +3786,7 @@ msgstr ""
 msgid "{} cache is empty."
 msgstr ""
 
-#: src/commands_sync.cpp:92
+#: src/commands_sync.cpp:92 src/provider_installed_state_presentation.cpp:46
 msgid "[installed]"
 msgstr ""
 
@@ -5671,326 +5671,326 @@ msgstr ""
 msgid "Running: {}"
 msgstr ""
 
-#: src/moguet.cpp:188
+#: src/moguet.cpp:189
 #, c++-format
 msgid "Unknown operation: {}"
 msgstr ""
 
-#: src/moguet.cpp:209
+#: src/moguet.cpp:210
 #, c++-format
 msgid "Usage: {} {} {} {}"
 msgstr ""
 
-#: src/moguet.cpp:233
+#: src/moguet.cpp:234
 #, c++-format
 msgid "Operation {} requires a target."
 msgstr ""
 
-#: src/moguet.cpp:254
+#: src/moguet.cpp:255
 #, c++-format
 msgid "Do not run {} as {} or with {}."
 msgstr ""
 
-#: src/moguet.cpp:259
+#: src/moguet.cpp:260
 #, c++-format
 msgid "Run {} as a normal user; {} will invoke {}/{} when needed."
 msgstr ""
 
-#: src/moguet.cpp:281
+#: src/moguet.cpp:282
 msgid "Failed to load the user configuration because of an unknown error."
 msgstr ""
 
-#: src/moguet.cpp:402
+#: src/moguet.cpp:405
 #, c++-format
 msgid "Operation {} does not accept target operands."
 msgstr ""
 
-#: src/moguet.cpp:465
+#: src/moguet.cpp:468
 #, c++-format
 msgid "Started {} v{}."
 msgstr ""
 
-#: src/moguet.cpp:480
+#: src/moguet.cpp:483
 #, c++-format
 msgid "Cannot initialize the {} default state log because of an unknown error."
 msgstr ""
 
-#: src/moguet.cpp:667
+#: src/moguet.cpp:670
 #, c++-format
 msgid "Cannot finalize the {} default state log because of an unknown error."
 msgstr ""
 
-#: src/moguet.cpp:739
+#: src/moguet.cpp:742
 msgid "USAGE"
 msgstr ""
 
-#: src/moguet.cpp:743
+#: src/moguet.cpp:746
 msgid "OPERATIONS"
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the literal PKGBUILD artifact identity.
-#: src/moguet.cpp:748
+#: src/moguet.cpp:751
 #, c++-format
 msgid "Build one remote package or local {} root without saving a preference"
 msgstr ""
 
-#: src/moguet.cpp:753
+#: src/moguet.cpp:756
 msgid "Update the system and rebuild configured source packages"
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the literal pacman-compatible -Syu token.
-#: src/moguet.cpp:757
+#: src/moguet.cpp:760
 #, c++-format
 msgid "Check registered source-build preferences after {}"
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the AUR project identity.
-#: src/moguet.cpp:763
+#: src/moguet.cpp:766
 #, c++-format
 msgid "Update installed {} packages only"
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the literal pacman-compatible -Syu token.
-#: src/moguet.cpp:767
+#: src/moguet.cpp:770
 #, c++-format
 msgid "Do not run {}; source-build preferences are optional"
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the AUR project identity.
-#: src/moguet.cpp:773
+#: src/moguet.cpp:776
 #, c++-format
 msgid "Update the system, registered source packages, and remaining installed {} packages"
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the literal PackageBase identity.
-#: src/moguet.cpp:778
+#: src/moguet.cpp:781
 #, c++-format
 msgid "Give explicit source preferences priority and avoid duplicate package/{} builds"
 msgstr ""
 
-#: src/moguet.cpp:781
+#: src/moguet.cpp:784
 msgid "Do not accept target operands"
 msgstr ""
 
-#: src/moguet.cpp:784
+#: src/moguet.cpp:787
 msgid "Clean package and build caches"
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the AUR project identity.
-#: src/moguet.cpp:789
+#: src/moguet.cpp:792
 #, c++-format
 msgid "{} INSPECTION"
 msgstr ""
 
 #. TRANSLATORS: AUR, PackageBase, and the destination path are literal identities.
-#: src/moguet.cpp:794
+#: src/moguet.cpp:797
 #, c++-format
 msgid "Export one {} {} repository to {} without building or installing"
 msgstr ""
 
 #. TRANSLATORS: AUR, PackageBase, PKGBUILD, and stdout are literal identities.
-#: src/moguet.cpp:800
+#: src/moguet.cpp:803
 #, c++-format
 msgid "Print one {} {} {} to {} without keeping a checkout"
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the AUR project identity.
-#: src/moguet.cpp:806
+#: src/moguet.cpp:809
 #, c++-format
 msgid "Classify {} dependencies"
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the AUR project identity.
-#: src/moguet.cpp:811
+#: src/moguet.cpp:814
 #, c++-format
 msgid "Show the {} build-order plan"
 msgstr ""
 
 #. TRANSLATORS: The placeholders are literal git commands and the AUR identity.
-#: src/moguet.cpp:816
+#: src/moguet.cpp:819
 #, c++-format
 msgid "Safely run {} or {} for {} build repositories"
 msgstr ""
 
 #. TRANSLATORS: The placeholders are literal git commands.
-#: src/moguet.cpp:821
+#: src/moguet.cpp:824
 #, c++-format
 msgid "For existing clones, run {} only; do not update the working tree or run {}, {}, build, or install"
 msgstr ""
 
-#: src/moguet.cpp:825
+#: src/moguet.cpp:828
 msgid "SOURCE BUILD PREFERENCES"
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the literal XDG identity.
-#: src/moguet.cpp:830
+#: src/moguet.cpp:833
 #, c++-format
 msgid "Store each preference in the active user's {} config authority"
 msgstr ""
 
-#: src/moguet.cpp:835
+#: src/moguet.cpp:838
 msgid "Enable a source-build preference for a package"
 msgstr ""
 
-#: src/moguet.cpp:839
+#: src/moguet.cpp:842
 msgid "Edit a source-build preference"
 msgstr ""
 
-#: src/moguet.cpp:843
+#: src/moguet.cpp:846
 msgid "List source-build preferences"
 msgstr ""
 
-#: src/moguet.cpp:847
+#: src/moguet.cpp:850
 msgid "Remove a source-build preference"
 msgstr ""
 
-#: src/moguet.cpp:851
+#: src/moguet.cpp:854
 msgid "Remove a preference and reinstall the binary package"
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the literal pacman program identity.
-#: src/moguet.cpp:856
+#: src/moguet.cpp:859
 #, c++-format
 msgid "{} COMPATIBILITY"
 msgstr ""
 
-#: src/moguet.cpp:859
+#: src/moguet.cpp:862
 msgid "Install packages"
 msgstr ""
 
-#: src/moguet.cpp:863
+#: src/moguet.cpp:866
 msgid "Interactively search for and select root packages to install"
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the AUR project identity.
-#: src/moguet.cpp:867
+#: src/moguet.cpp:870
 #, c++-format
 msgid "Require an interactive terminal; install selected repository roots first, then build selected {} roots only if that transaction succeeds"
 msgstr ""
 
-#: src/moguet.cpp:871
+#: src/moguet.cpp:874
 msgid "Upgrade the system"
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the literal pacman program identity.
-#: src/moguet.cpp:875
+#: src/moguet.cpp:878
 #, c++-format
 msgid "Remain compatible with {}; do not scan all source-build preferences"
 msgstr ""
 
-#: src/moguet.cpp:879
+#: src/moguet.cpp:882
 msgid "Search for packages"
 msgstr ""
 
-#: src/moguet.cpp:882
+#: src/moguet.cpp:885
 msgid "Show package information"
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the AUR project identity.
-#: src/moguet.cpp:887
+#: src/moguet.cpp:890
 #, c++-format
 msgid "Check {} and foreign-package updates"
 msgstr ""
 
-#: src/moguet.cpp:889
+#: src/moguet.cpp:892
 msgid "OPTIONS"
 msgstr ""
 
-#: src/moguet.cpp:893
+#: src/moguet.cpp:896
 msgid "Show this help message and exit"
 msgstr ""
 
-#: src/moguet.cpp:897
+#: src/moguet.cpp:900
 msgid "Show version information and exit"
 msgstr ""
 
 #. TRANSLATORS: PKGBUILD and .install are literal artifact names.
-#: src/moguet.cpp:902
+#: src/moguet.cpp:905
 #, c++-format
 msgid "Prompt to review {} and {} files"
 msgstr ""
 
 #. TRANSLATORS: PKGBUILD and .install are literal artifact names.
-#: src/moguet.cpp:907
+#: src/moguet.cpp:910
 #, c++-format
 msgid "Skip {} and {} review"
 msgstr ""
 
-#: src/moguet.cpp:911
+#: src/moguet.cpp:914
 msgid "Prompt to view repository update diffs"
 msgstr ""
 
-#: src/moguet.cpp:915
+#: src/moguet.cpp:918
 msgid "Skip the repository update diff prompt"
 msgstr ""
 
 #. TRANSLATORS: pacman and makepkg are literal external-program identities.
-#: src/moguet.cpp:920
+#: src/moguet.cpp:923
 #, c++-format
 msgid "Pass this option to {} and {}"
 msgstr ""
 
 #. TRANSLATORS: pacman, AUR, and -S are literal identities or CLI tokens.
-#: src/moguet.cpp:925
+#: src/moguet.cpp:928
 #, c++-format
 msgid "Pass this option to {}; on {} or source-build {} routes, apply it only to final installation"
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the literal Moguet project identity.
-#: src/moguet.cpp:930
+#: src/moguet.cpp:933
 #, c++-format
 msgid "Do not skip {} build, review, or plan steps"
 msgstr ""
 
-#: src/moguet.cpp:934
+#: src/moguet.cpp:937
 msgid "Select the source-build mode"
 msgstr ""
 
 #. TRANSLATORS: The placeholder is a literal compatibility option form.
-#: src/moguet.cpp:939 src/moguet.cpp:945
+#: src/moguet.cpp:942 src/moguet.cpp:948
 #, c++-format
 msgid "Compatibility alias for {}"
 msgstr ""
 
-#: src/moguet.cpp:950
+#: src/moguet.cpp:953
 msgid "Unsupported for separated source builds; no dependency cleanup is performed"
 msgstr ""
 
 #. TRANSLATORS: -S, -Ss, -Si, and AUR are literal CLI/project identities.
-#: src/moguet.cpp:955
+#: src/moguet.cpp:958
 #, c++-format
 msgid "Limit {}, {}, and {} to {}; do not fall back to repositories"
 msgstr ""
 
 #. TRANSLATORS: -S, -Ss, -Si, and AUR are literal CLI/project identities.
-#: src/moguet.cpp:961
+#: src/moguet.cpp:964
 #, c++-format
 msgid "Limit {}, {}, and {} to official binary repositories; do not use {} or source builds"
 msgstr ""
 
-#: src/moguet.cpp:964
+#: src/moguet.cpp:967
 msgid "CONFIGURATION"
 msgstr ""
 
-#: src/moguet.cpp:968
+#: src/moguet.cpp:971
 msgid "Read-only typed configuration; a missing file uses built-in defaults"
 msgstr ""
 
-#: src/moguet.cpp:971
+#: src/moguet.cpp:974
 msgid "Required schema version"
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the literal PKGBUILD artifact identity.
-#: src/moguet.cpp:976
+#: src/moguet.cpp:979
 #, c++-format
 msgid "{} review policy"
 msgstr ""
 
-#: src/moguet.cpp:979
+#: src/moguet.cpp:982
 msgid "Repository update diff policy"
 msgstr ""
 
-#: src/moguet.cpp:982
+#: src/moguet.cpp:985
 msgid "Source-build mode"
 msgstr ""
 
@@ -6777,23 +6777,50 @@ msgstr ""
 msgid "Failed to initialize the {} mask: {}"
 msgstr ""
 
-#: src/provider_selection.cpp:99
+#: src/provider_selection.cpp:116
 #, c++-format
 msgid "Previously selected provider is no longer a candidate for dependency: {}"
 msgstr ""
 
-#: src/provider_selection.cpp:118
+#: src/provider_selection.cpp:143
 msgid "Provider selection requires a non-empty dependency name."
 msgstr ""
 
-#: src/provider_selection.cpp:155
+#: src/provider_selection.cpp:179
 #, c++-format
 msgid "Select a provider from [{}], or press {} / enter {} to cancel:"
 msgstr ""
 
-#: src/provider_selection.cpp:181
+#: src/provider_selection.cpp:205
 #, c++-format
 msgid "Invalid choice. Enter a number from [{}], or press {} / enter {} to cancel."
+msgstr ""
+
+#. TRANSLATORS: This tag means Moguet could not
+#. determine whether the provider package is
+#. installed. It does not reject a valid
+#. numbered choice and is distinct from a
+#. not-installed package.
+#: src/provider_installed_state_presentation.cpp:58
+msgid "[installed state unknown]"
+msgstr ""
+
+#. TRANSLATORS: The placeholder is a diagnostic from the
+#. read-only local package database query. This warning is
+#. emitted once for one provider-selection phase, not once
+#. for every candidate.
+#: src/provider_installed_state_presentation.cpp:80
+#, c++-format
+msgid "Warning: installed state is unavailable for provider candidates: {}."
+msgstr ""
+
+#. TRANSLATORS: The first placeholder is a provider package
+#. name and the second is a diagnostic from the read-only
+#. local package database query. This warning does not make
+#. the candidate invalid.
+#: src/provider_installed_state_presentation.cpp:92
+#, c++-format
+msgid "Warning: installed state is unavailable for provider candidate {}: {}."
 msgstr ""
 
 #: src/repository_query.cpp:193

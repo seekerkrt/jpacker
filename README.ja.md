@@ -79,6 +79,11 @@ helperと同等の自動解決能力・完成度を約束しません。unsuppor
 - 複数provider candidateが残る場合、interactive TTYではsource-aware candidateを番号付きで
   表示し、exactly oneの明示選択を要求します。defaultはありません。empty input、`q`、
   `quit`、`cancel`、EOFは選択を取り消し、invalid / out-of-range inputは再入力します。
+- interactive provider一覧では、candidateのpackage名と同名のpackageがread-only local
+  package databaseにあればlocalizedな`[installed]`を末尾へ付けます。未install candidateには
+  suffixを付けず、lookup不能時はwarningと`[installed state unknown]`を表示します。この
+  name-only observationはprovenanceやversion compatibilityを証明せず、candidate順、番号、
+  明示選択の必要性を変更しません。
 - non-TTYと`--noconfirm`ではprovider inputをstdinから読まず、candidateを自動選択しません。
   未選択のambiguous providerはfail-closedで停止します。
 - `moguet -S --select <query>`はofficial repositoryとAURからsource-awareなroot

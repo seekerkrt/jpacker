@@ -34,6 +34,7 @@ src/package_metadata.cpp
 src/pkgbuild_export.cpp
 src/process.cpp
 src/provider_selection.cpp
+src/provider_installed_state_presentation.cpp
 src/repository_query.cpp
 src/separated_package_base_source_build.cpp
 src/separated_source_build.cpp

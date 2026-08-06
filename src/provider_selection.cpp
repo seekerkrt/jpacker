@@ -54,7 +54,7 @@ std::string selected_provider_package_identity_conflict_diagnostic(
             provider_package_identity_display(selected));
 }
 
-void present_candidate(
+void present_candidate_metadata(
         std::ostream& output, std::size_t index,
         const ProvidedDependency& candidate) {
     // NO_TRANSLATE: Provider candidate fields are fixed CLI metadata labels.
@@ -74,7 +74,14 @@ void present_candidate(
            << metadata_value(candidate.provided_dependency_name)
            << " provided-specification="
            << metadata_value(candidate.provided_dependency_specification)
-           << " version=" << metadata_value(candidate.package_version) << '\n';
+           << " version=" << metadata_value(candidate.package_version);
+}
+
+void present_default_candidate(
+        std::ostream& output, std::size_t index,
+        const ProvidedDependency& candidate) {
+    present_candidate_metadata(output, index, candidate);
+    output << '\n';
 }
 
 std::optional<std::size_t> parse_candidate_number(
@@ -91,6 +98,16 @@ std::optional<std::size_t> parse_candidate_number(
 }
 
 } // namespace
+
+ProviderCandidatePresenter make_default_provider_candidate_presenter() {
+    return present_default_candidate;
+}
+
+void present_provider_candidate_metadata(
+        std::ostream& output, std::size_t index,
+        const ProvidedDependency& candidate) {
+    present_candidate_metadata(output, index, candidate);
+}
 
 ProviderSelectionConflict::ProviderSelectionConflict(
         std::string dependency_name)
@@ -111,6 +128,14 @@ ProviderSelectionSession::ProviderSelectionSession(
 std::optional<ProvidedDependency> ProviderSelectionSession::select_provider(
         const std::string& dependency,
         const std::vector<ProvidedDependency>& candidates) {
+    return select_provider(
+            dependency, candidates, make_default_provider_candidate_presenter());
+}
+
+std::optional<ProvidedDependency> ProviderSelectionSession::select_provider(
+        const std::string& dependency,
+        const std::vector<ProvidedDependency>& candidates,
+        const ProviderCandidatePresenter& present_candidate) {
     const std::string dependency_name = dependency_package_name(dependency);
     if(dependency_name.empty()) {
         throw std::invalid_argument(
@@ -136,7 +161,6 @@ std::optional<ProvidedDependency> ProviderSelectionSession::select_provider(
         return std::nullopt;
 
     if(!is_interactive_ || candidates.size() < 2) return std::nullopt;
-
     // NO_TRANSLATE: The ":: " framing, numeric range, and response tokens are
     // fixed provider-selection UI syntax. The complete prompt sentences are
     // translated below.

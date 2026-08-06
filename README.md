@@ -93,6 +93,12 @@ detailed plan.
   source-aware candidates by number and requires exactly one explicit choice;
   there is no default. Empty input, `q`, `quit`, `cancel`, or EOF cancels the
   choice, while invalid or out-of-range input retries.
+- An interactive provider list appends localized `[installed]` when the
+  candidate's package name exists in the read-only local package database.
+  It leaves not-installed candidates untagged and marks an unavailable lookup
+  as `[installed state unknown]` with a warning. This name-only observation
+  neither proves provenance or version compatibility nor changes candidate
+  order, numbering, or the required explicit choice.
 - Non-TTY use and `--noconfirm` do not read provider input from stdin or
   auto-select a candidate. Unselected ambiguity fails closed.
 - `moguet -S --select <query>` discovers source-aware root package candidates
