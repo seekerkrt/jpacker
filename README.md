@@ -49,6 +49,12 @@ a new storage direction: source-build preferences now use only the executing
 user's XDG config context, while the published v2.0.0 tag, Release, and release
 notes remain historical records.
 
+Moguet v2.1.0 is the latest release. It adds interactive handling for
+source-aware package discovery and ambiguous AUR dependency providers, expands
+local `PKGBUILD` builds, and adds Arch Linux container validation coverage. See
+the [v2.1.0 release](https://github.com/seekerkrt/moguet/releases/tag/v2.1.0)
+for the complete user-visible changes.
+
 The canonical repository identity is Moguet on GitHub, with a GitLab mirror.
 The Moguet package does not provide a `jpacker` command alias. AUR publication
 is a separate future decision; this document does not claim that an AUR

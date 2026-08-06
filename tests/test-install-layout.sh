@@ -266,7 +266,7 @@ version_output=$(LC_ALL=C HOME=$test_home \
     XDG_STATE_HOME=$xdg_state_home \
     XDG_CACHE_HOME=$xdg_cache_home \
     "$binary_file" --version)
-[ "$version_output" = 'Moguet v2.0.1' ] ||
+[ "$version_output" = 'Moguet v2.1.0' ] ||
     fail "staged binary version mismatch: $version_output"
 assert_absent "$xdg_config_home/moguet"
 assert_absent "$xdg_state_home/moguet"
