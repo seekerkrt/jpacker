@@ -406,12 +406,13 @@ ConstraintEvaluation candidate_constraint_evaluation(
 
 bool candidate_is_compatible(
         const Candidate& candidate,
-        const RequiredDependency& dependency) {
+        const RequiredDependency& dependency,
+        const ConstraintEvaluation& evaluation) {
     if(!candidate.architecture_supported || dependency.malformed_constraint) {
         return false;
     }
     if(dependency.kind == TargetKind::Soname) return true;
-    switch(candidate_constraint_evaluation(candidate, dependency).satisfaction()) {
+    switch(evaluation.satisfaction()) {
     case ConstraintSatisfaction::Unconstrained:
     case ConstraintSatisfaction::Satisfied:
         return true;
@@ -521,18 +522,30 @@ dependency_plan_projection_support::DependencyDecision resolve_local_candidate(
     if(exact.has_value()) candidates.push_back(exact.value());
     const bool has_compatible_exact =
             exact.has_value() &&
-            candidate_is_compatible(exact.value(), dependency);
+            candidate_is_compatible(
+                    exact.value(), dependency,
+                    candidate_constraint_evaluation(exact.value(), dependency));
     if(!has_compatible_exact) {
         add_provided_candidates(children, dependency, candidates);
     }
     if(candidates.empty()) return {false, std::nullopt, std::nullopt};
 
     std::vector<Candidate> compatible;
+    std::vector<Candidate> unknown;
     if(has_compatible_exact) {
         compatible.push_back(exact.value());
     } else {
         for(const auto& candidate : candidates) {
-            if(!candidate_is_compatible(candidate, dependency)) continue;
+            const ConstraintEvaluation evaluation =
+                    candidate_constraint_evaluation(candidate, dependency);
+            if(dependency.kind == TargetKind::Package &&
+               candidate.architecture_supported &&
+               evaluation.satisfaction() == ConstraintSatisfaction::Unknown) {
+                unknown.push_back(candidate);
+            }
+            if(!candidate_is_compatible(candidate, dependency, evaluation)) {
+                continue;
+            }
             const auto same_package = [&](const Candidate& existing) {
                 return existing.package_name == candidate.package_name;
             };
@@ -545,23 +558,42 @@ dependency_plan_projection_support::DependencyDecision resolve_local_candidate(
     }
 
     if(compatible.empty()) {
-        if(!exact.has_value()) {
-            // Version不適合のvirtual provideはlocal identity collisionではない。
-            // 未解決dependencyとして既存repo/AUR/provider policyへ渡す。
-            return {false, std::nullopt, std::nullopt};
+        if(exact.has_value()) {
+            add_failure(
+                    failures,
+                    LocalDependencyPlanFailure{
+                            LocalDependencyPlanFailureKind::ConstraintMismatch,
+                            context.parent_package_name,
+                            specification,
+                            std::nullopt,
+                            public_candidates(candidates, dependency)});
+            return {
+                    true,
+                    std::nullopt,
+                    specification + " (local candidate is incompatible)"};
         }
-        add_failure(
-                failures,
-                LocalDependencyPlanFailure{
-                        LocalDependencyPlanFailureKind::ConstraintMismatch,
-                        context.parent_package_name,
-                        specification,
-                        std::nullopt,
-                        public_candidates(candidates, dependency)});
-        return {
-                true,
-                std::nullopt,
-                specification + " (local candidate is incompatible)"};
+        if(!unknown.empty()) {
+            // POLICY(#351): an unversioned local provider is an observed
+            // unknown, not an incompatible candidate that can authorize a
+            // repository or AUR fallback. The existing failure kind preserves
+            // the current public/CLI boundary; candidates retain the typed
+            // Unknown result and owned reason.
+            add_failure(
+                    failures,
+                    LocalDependencyPlanFailure{
+                            LocalDependencyPlanFailureKind::ConstraintMismatch,
+                            context.parent_package_name,
+                            specification,
+                            std::nullopt,
+                            public_candidates(unknown, dependency)});
+            return {
+                    true,
+                    std::nullopt,
+                    specification + " (local candidate version is unknown)"};
+        }
+        // Version不適合のvirtual provideはlocal identity collisionではない。
+        // 未解決dependencyとして既存repo/AUR/provider policyへ渡す。
+        return {false, std::nullopt, std::nullopt};
     }
 
     if(compatible.size() > 1) {

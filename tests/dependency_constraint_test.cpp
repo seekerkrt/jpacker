@@ -222,16 +222,25 @@ void test_invalid_and_aggregate_conflicting_results() {
             require_consumer_requirement(
                     parse_dependency_requirement("consumer<2"),
                     "second aggregate requirement");
-    const ConstraintEvaluation conflicting =
-            project_conflicting_constraint_invocation(
-                    {first, second},
-                    ConstraintConflictReason::IncompatibleRequirements);
+    const std::optional<ConstraintEvaluation> conflicting =
+            project_conflicting_constraint_invocation({first, second});
     expect(
-            conflicting.satisfaction() == ConstraintSatisfaction::Conflicting &&
-                    conflicting.conflict_reason() != nullptr &&
-                    *conflicting.conflict_reason() ==
+            conflicting.has_value() &&
+                    conflicting->satisfaction() ==
+                            ConstraintSatisfaction::Conflicting &&
+                    conflicting->conflict_reason() != nullptr &&
+                    *conflicting->conflict_reason() ==
                             ConstraintConflictReason::IncompatibleRequirements,
             "Aggregate conflicting result differs");
+
+    const ConsumerDependencyRequirement compatible =
+            require_consumer_requirement(
+                    parse_dependency_requirement("consumer>=2"),
+                    "compatible aggregate requirement");
+    expect(
+            !project_conflicting_constraint_invocation({first, compatible})
+                     .has_value(),
+            "Compatible aggregate requirements generated Conflicting");
 }
 
 } // namespace

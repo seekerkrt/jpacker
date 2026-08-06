@@ -143,6 +143,36 @@ bool relation_is_satisfied(
     throw std::logic_error("Unknown consumer dependency version relation.");
 }
 
+bool is_strict_lower_bound(DependencyVersionRelation relation) noexcept {
+    return relation == DependencyVersionRelation::GreaterThan;
+}
+
+bool is_strict_upper_bound(DependencyVersionRelation relation) noexcept {
+    return relation == DependencyVersionRelation::LessThan;
+}
+
+bool is_stricter_lower_bound(
+        const DependencyVersionConstraint& candidate,
+        const DependencyVersionConstraint& current) noexcept {
+    const ArchVersionOrdering ordering = compare_arch_package_versions(
+            candidate.version(), current.version());
+    return ordering == ArchVersionOrdering::Greater ||
+           (ordering == ArchVersionOrdering::Equal &&
+            is_strict_lower_bound(candidate.relation()) &&
+            !is_strict_lower_bound(current.relation()));
+}
+
+bool is_stricter_upper_bound(
+        const DependencyVersionConstraint& candidate,
+        const DependencyVersionConstraint& current) noexcept {
+    const ArchVersionOrdering ordering = compare_arch_package_versions(
+            candidate.version(), current.version());
+    return ordering == ArchVersionOrdering::Less ||
+           (ordering == ArchVersionOrdering::Equal &&
+            is_strict_upper_bound(candidate.relation()) &&
+            !is_strict_upper_bound(current.relation()));
+}
+
 } // namespace
 
 DependencyVersionConstraint::DependencyVersionConstraint(
@@ -507,13 +537,10 @@ ConstraintEvaluation evaluate_consumer_dependency_requirement(
             : ConstraintEvaluation::unsatisfied();
 }
 
-ConstraintEvaluation project_conflicting_constraint_invocation(
-        const std::vector<ConsumerDependencyRequirement>& requirements,
-        ConstraintConflictReason reason) {
-    if(requirements.size() < 2) {
-        throw std::logic_error(
-                "Conflicting constraint projection requires multiple requirements.");
-    }
+std::optional<ConstraintEvaluation> project_conflicting_constraint_invocation(
+        const std::vector<ConsumerDependencyRequirement>& requirements) {
+    if(requirements.size() < 2) return std::nullopt;
+
     const std::string& package_name = requirements.front().package_name();
     if(std::any_of(
                requirements.begin() + 1, requirements.end(),
@@ -523,7 +550,73 @@ ConstraintEvaluation project_conflicting_constraint_invocation(
         throw std::logic_error(
                 "Conflicting constraint projection requires one package identity.");
     }
-    return ConstraintEvaluation(
-            ConstraintSatisfaction::Conflicting, std::nullopt, std::nullopt,
-            reason);
+
+    const DependencyVersionConstraint* equality = nullptr;
+    const DependencyVersionConstraint* lower_bound = nullptr;
+    const DependencyVersionConstraint* upper_bound = nullptr;
+    for(const auto& requirement : requirements) {
+        if(!requirement.constraint().has_value()) continue;
+        const DependencyVersionConstraint& constraint =
+                requirement.constraint().value();
+        switch(constraint.relation()) {
+        case DependencyVersionRelation::Equal:
+            if(equality != nullptr &&
+               compare_arch_package_versions(
+                       equality->version(), constraint.version()) !=
+                       ArchVersionOrdering::Equal) {
+                return ConstraintEvaluation(
+                        ConstraintSatisfaction::Conflicting, std::nullopt,
+                        std::nullopt,
+                        ConstraintConflictReason::IncompatibleRequirements);
+            }
+            equality = &constraint;
+            break;
+        case DependencyVersionRelation::LessThan:
+        case DependencyVersionRelation::LessThanOrEqual:
+            if(upper_bound == nullptr ||
+               is_stricter_upper_bound(constraint, *upper_bound)) {
+                upper_bound = &constraint;
+            }
+            break;
+        case DependencyVersionRelation::GreaterThanOrEqual:
+        case DependencyVersionRelation::GreaterThan:
+            if(lower_bound == nullptr ||
+               is_stricter_lower_bound(constraint, *lower_bound)) {
+                lower_bound = &constraint;
+            }
+            break;
+        }
+    }
+
+    if(equality != nullptr) {
+        for(const auto& requirement : requirements) {
+            if(!requirement.constraint().has_value()) continue;
+            const DependencyVersionConstraint& constraint =
+                    requirement.constraint().value();
+            const ArchVersionOrdering ordering = compare_arch_package_versions(
+                    equality->version(), constraint.version());
+            if(!relation_is_satisfied(constraint.relation(), ordering)) {
+                return ConstraintEvaluation(
+                        ConstraintSatisfaction::Conflicting, std::nullopt,
+                        std::nullopt,
+                        ConstraintConflictReason::IncompatibleRequirements);
+            }
+        }
+        return std::nullopt;
+    }
+
+    if(lower_bound == nullptr || upper_bound == nullptr) return std::nullopt;
+
+    const ArchVersionOrdering ordering = compare_arch_package_versions(
+            lower_bound->version(), upper_bound->version());
+    if(ordering == ArchVersionOrdering::Greater ||
+       (ordering == ArchVersionOrdering::Equal &&
+        (is_strict_lower_bound(lower_bound->relation()) ||
+         is_strict_upper_bound(upper_bound->relation())))) {
+        return ConstraintEvaluation(
+                ConstraintSatisfaction::Conflicting, std::nullopt,
+                std::nullopt,
+                ConstraintConflictReason::IncompatibleRequirements);
+    }
+    return std::nullopt;
 }

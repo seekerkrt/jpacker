@@ -342,18 +342,19 @@ private:
     std::optional<ConstraintInvalidReason>      invalid_reason_;
     std::optional<ConstraintConflictReason>     conflict_reason_;
 
-    friend ConstraintEvaluation
+    friend std::optional<ConstraintEvaluation>
     project_conflicting_constraint_invocation(
-            const std::vector<ConsumerDependencyRequirement>& requirements,
-            ConstraintConflictReason reason);
+            const std::vector<ConsumerDependencyRequirement>& requirements);
 };
 
 ConstraintEvaluation evaluate_consumer_dependency_requirement(
         const ConsumerDependencyRequirement& requirement,
         const ObservedVersion& observed_version);
 
-// Conflicting is intentionally created only by this invocation-level
-// projection. An atomic observed-versus-required comparison cannot produce it.
-ConstraintEvaluation project_conflicting_constraint_invocation(
-        const std::vector<ConsumerDependencyRequirement>& requirements,
-        ConstraintConflictReason reason);
+// Conflicting is intentionally created only when this invocation-level
+// projection proves that requirements for one package cannot coexist. An
+// atomic observed-versus-required comparison cannot produce it. Provider
+// identity conflicts remain a distinct source-aware reason and cannot be
+// manufactured by this pure requirement projection.
+std::optional<ConstraintEvaluation> project_conflicting_constraint_invocation(
+        const std::vector<ConsumerDependencyRequirement>& requirements);
