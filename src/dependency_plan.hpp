@@ -1,7 +1,8 @@
 #pragma once
 
-#include "dependency_provider.hpp"
 #include "aur_rpc.hpp"
+#include "dependency_constraint.hpp"
+#include "dependency_provider.hpp"
 
 #include <cstddef>
 #include <functional>
@@ -65,6 +66,9 @@ enum class DesiredInstallReason {
 struct TypedPackageDependency {
     std::string specification;
     PackageRole role;
+    // Metadata adapters may retain a parsed requirement here. Legacy AUR
+    // inputs intentionally remain raw until their Slice 4 trust boundary.
+    std::optional<DependencyRequirement> requirement = std::nullopt;
 };
 
 // CLI invocation内のroot target。indexは入力順を失わないためのidentityの一部。

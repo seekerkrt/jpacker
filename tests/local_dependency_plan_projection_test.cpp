@@ -726,14 +726,17 @@ void test_local_mismatch_and_ambiguity_fail_closed() {
             "2", "1.0", "10");
 
     query_stub::set_repository_package_response("virtual-api", "core");
-    query_stub::set_repository_package_response("unversioned-api", "extra");
     const LocalBuildPlan mismatch_plan = resolve_local_build_plan(
             mismatch_metadata, "x86_64", reject_provider_selection());
     expect(
-            mismatch_plan.failures().size() == 1,
+            mismatch_plan.failures().size() == 2,
             "Constraint mismatch failure count differs");
     const std::vector<LocalDependencyPlanCandidate> mismatch_candidates = {
-            {core, std::nullopt, "2:1.0-10", std::nullopt}};
+            {core,
+             std::nullopt,
+             "2:1.0-10",
+             std::nullopt,
+             ConstraintEvaluation::unsatisfied()}};
     expect(
             mismatch_plan.failures()[0].kind ==
                             LocalDependencyPlanFailureKind::ConstraintMismatch &&
@@ -744,6 +747,23 @@ void test_local_mismatch_and_ambiguity_fail_closed() {
                     mismatch_plan.failures()[0].candidates ==
                             mismatch_candidates,
             "Constraint mismatch lost its typed failure");
+    const std::vector<LocalDependencyPlanCandidate> unknown_candidates = {
+            {core,
+             "unversioned-api",
+             std::nullopt,
+             std::nullopt,
+             ConstraintEvaluation::unknown(
+                     ObservedVersionUnknownReason::
+                             UnversionedProviderCapability)}};
+    expect(
+            mismatch_plan.failures()[1].kind ==
+                            LocalDependencyPlanFailureKind::ConstraintMismatch &&
+                    mismatch_plan.failures()[1].parent_package_name ==
+                            consumer &&
+                    mismatch_plan.failures()[1].dependency_specification ==
+                            "unversioned-api>=1" &&
+                    mismatch_plan.failures()[1].candidates == unknown_candidates,
+            "Unversioned local provider lost its typed Unknown result");
     expect(
             mismatch_plan.internal_edges().empty(),
             "Mismatched local candidates became internal edges");
@@ -753,17 +773,17 @@ void test_local_mismatch_and_ambiguity_fail_closed() {
                     "virtual-api>=1.0",
                     PackageRole::RuntimeDependency)
                             .kind == DependencyKind::Repo &&
-                    require_remote_edge(
-                            mismatch_plan.build_plan(), consumer,
-                            "unversioned-api>=1",
-                            PackageRole::RuntimeDependency)
-                                    .kind == DependencyKind::Repo,
-            "Incompatible local provides did not reach remote resolution");
+                    mismatch_plan.build_plan().dependency_edges.size() == 1 &&
+                    contains_value(
+                            mismatch_plan.build_plan().unresolved,
+                            "unversioned-api>=1 (local candidate version is "
+                            "unknown)"),
+            "Local constraint result projection differs");
     expect(
             repository_subject_was_queried("virtual-api") &&
-                    repository_subject_was_queried("unversioned-api") &&
+                    !repository_subject_was_queried("unversioned-api") &&
                     query_stub::aur_query_history().empty(),
-            "Local provide mismatch external query boundary differs");
+            "Unversioned local provider triggered source fallback");
 
     reset_queries();
     const std::string provider_a = "local-provider-a";
@@ -798,8 +818,16 @@ void test_local_mismatch_and_ambiguity_fail_closed() {
     expect(
             ambiguity_plan.failures()[0].candidates ==
                     std::vector<LocalDependencyPlanCandidate>{
-                            {provider_a, "shared-api=1", "1", std::nullopt},
-                            {provider_b, "shared-api=1", "1", std::nullopt}},
+                            {provider_a,
+                             "shared-api=1",
+                             "1",
+                             std::nullopt,
+                             ConstraintEvaluation::satisfied()},
+                            {provider_b,
+                             "shared-api=1",
+                             "1",
+                             std::nullopt,
+                             ConstraintEvaluation::satisfied()}},
             "Local provider ambiguity candidate order differs");
     expect(
             ambiguity_plan.internal_edges().empty() &&
