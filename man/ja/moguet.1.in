@@ -147,8 +147,10 @@ global / pacman optionはunsupportedです。
 AURのruntime、make、check dependencyを分類します。
 .B --recursive
 を付けるとexact AUR dependencyとuser-selected AUR providerを再帰的に辿ります。
-official dependency、unique provider、selected official repository provider、未選択の
-ambiguous provider、unresolved dependencyは表示しますが、さらに辿りません。
+installed dependency、official dependency、unique provider、selected official repository
+provider、未選択のambiguous provider、unresolved dependencyは表示しますが、さらに辿りません。
+installed exact dependencyはInstalled source identityを保持し、official repository package
+として表示しません。
 interactive TTYではsource-aware provider candidateを選択でき、user-selected providerと
 未解決のambiguityを区別して表示します。
 constraintのresult / reasonを表示します。Unsatisfied / Unknownはwarning付きでread-only

@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <exception>
+#include <functional>
 #include <iostream>
 #include <optional>
 #include <stdexcept>
@@ -415,6 +416,10 @@ void expect_equivalent_plans(const BuildPlan& lhs, const BuildPlan& rhs) {
     expect(
             lhs.resolution_failures == rhs.resolution_failures,
             "BuildPlan::resolution_failures differs");
+    expect(
+            lhs.incomplete_provider_candidate_sets ==
+                    rhs.incomplete_provider_candidate_sets,
+            "BuildPlan::incomplete_provider_candidate_sets differs");
 
     expect(
             lhs.split_package_targets.size() == rhs.split_package_targets.size(),
@@ -1122,37 +1127,14 @@ void test_selected_aur_provider_revalidation_boundary() {
 
     callback_count = 0;
     dependency_plan_aur_rpc_stub::reset_selected_provider_identity_queries();
-    BuildPlan preflight = resolve_build_plan_for_preflight(
-            {"selected-provider-identity-root"},
-            select_changed_provider);
+    expect_exception(
+            [&select_changed_provider]() {
+                static_cast<void>(resolve_build_plan_for_preflight(
+                        {"selected-provider-identity-root"},
+                        select_changed_provider));
+            },
+            diagnostic);
     expect(callback_count == 1, "Preflight revalidation callback count differs");
-    const BuildPlanResolutionFailure& failure = require_resolution_failure(
-            preflight,
-            BuildPlanResolutionFailureKind::ProviderCandidateMetadataUnavailable,
-            "selected-provider-identity-b");
-    expect_resolution_failure_context(
-            failure,
-            std::optional<std::string>{"selected-provider-identity-root"},
-            std::optional<std::string>{"selected-provider-identity-root"},
-            std::optional<std::string>{"selected-provider-identity-virtual"},
-            {{0, "selected-provider-identity-root"}}, diagnostic);
-    const BuildPlanDependencyEdge& edge = require_edge(
-            preflight, "selected-provider-identity-root",
-            "selected-provider-identity-virtual",
-            PackageRole::RuntimeDependency);
-    expect(
-            edge.kind == DependencyKind::Provided &&
-                    edge.provider_resolution ==
-                            ProviderResolutionKind::UserSelected &&
-                    edge.resolved_provider.has_value() &&
-                    edge.resolved_provider->package_base ==
-                            "selected-provider-original-base",
-            "Preflight lost the selected provider snapshot");
-    expect(
-            preflight.unresolved ==
-                    std::vector<std::string>{"selected-provider-identity-b"},
-            "Changed selected provider did not remain unresolved");
-    expect_legacy_order(preflight, {"selected-provider-identity-root"});
 
     callback_count = 0;
     dependency_plan_aur_rpc_stub::reset_selected_provider_identity_queries();
@@ -1208,30 +1190,230 @@ void test_selected_aur_provider_revalidation_boundary() {
         return candidates[1];
     };
     dependency_plan_aur_rpc_stub::reset_selected_provider_identity_queries();
-    BuildPlan updated_metadata = resolve_build_plan(
-            "selected-provider-metadata-root", select_updated_metadata);
+    expect_exception(
+            [&select_updated_metadata]() {
+                static_cast<void>(resolve_build_plan(
+                        "selected-provider-metadata-root",
+                        select_updated_metadata));
+            },
+            "AUR provider candidate changed during dependency resolution: "
+            "selected-provider-metadata-b");
     expect(
             metadata_callback_count == 1,
             "Updated provider metadata callback count differs");
-    const BuildPlanDependencyEdge& updated_edge = require_edge(
-            updated_metadata, "selected-provider-metadata-root",
-            "selected-provider-metadata-virtual",
+
+    std::size_t source_callback_count = 0;
+    ProviderSelectionCallback select_changed_source =
+            [&source_callback_count](
+                    const std::string& dependency,
+                    const std::vector<ProvidedDependency>& candidates)
+                    -> std::optional<ProvidedDependency> {
+        ++source_callback_count;
+        expect(
+                dependency == "selected-source-change-virtual" &&
+                        candidates.size() == 1 &&
+                        std::holds_alternative<AurProviderOrigin>(
+                                candidates.front().origin),
+                "Source-change provider callback input differs");
+        return candidates.front();
+    };
+    dependency_plan_repository_query_stub::reset_query_counts();
+    expect_exception(
+            [&select_changed_source]() {
+                static_cast<void>(resolve_build_plan(
+                        "selected-source-change-root",
+                        select_changed_source));
+            },
+            "AUR provider candidate changed during dependency resolution: "
+            "selected-source-change-provider");
+    expect(
+            source_callback_count == 1,
+            "Provider source-change callback count differs");
+}
+
+void test_unique_aur_provider_refresh_firewall() {
+    dependency_plan_aur_rpc_stub::reset_selected_provider_identity_queries();
+    expect_exception(
+            []() {
+                static_cast<void>(resolve_build_plan_for_preflight(
+                        {"unique-refresh-removal-root"}));
+            },
+            "AUR provider candidate changed during dependency resolution: "
+            "unique-refresh-removal-provider");
+
+    dependency_plan_aur_rpc_stub::reset_selected_provider_identity_queries();
+    expect_exception(
+            []() {
+                static_cast<void>(resolve_build_plan_for_preflight(
+                        {"unique-refresh-name-change-root"}));
+            },
+            "AUR provider candidate changed during dependency resolution: "
+            "unique-refresh-name-change-provider");
+
+    dependency_plan_aur_rpc_stub::reset_selected_provider_identity_queries();
+    BuildPlan query_failure = resolve_build_plan_for_preflight(
+            {"unique-refresh-failure-root"});
+    const BuildPlanDependencyEdge& edge = require_edge(
+            query_failure, "unique-refresh-failure-root",
+            "unique-refresh-failure-virtual>=1",
             PackageRole::RuntimeDependency);
     expect(
-            updated_edge.resolved_provider.has_value(),
-            "Updated provider edge lost its selected candidate");
-    const ProvidedDependency& selected_snapshot =
-            updated_edge.resolved_provider.value();
+            edge.kind == DependencyKind::Unknown &&
+                    !edge.resolved_provider.has_value() &&
+                    !edge.resolved_candidate.has_value() &&
+                    edge.constraint_evaluation.has_value() &&
+                    edge.constraint_evaluation->satisfaction() ==
+                            ConstraintSatisfaction::Unknown &&
+                    edge.constraint_evaluation->unknown_reason() != nullptr &&
+                    *edge.constraint_evaluation->unknown_reason() ==
+                            ObservedVersionUnknownReason::
+                                    MetadataQueryFailure,
+            "Provider refresh failure reused a stale Satisfied edge");
+    static_cast<void>(require_resolution_failure(
+            query_failure,
+            BuildPlanResolutionFailureKind::
+                    ProviderCandidateMetadataUnavailable,
+            "unique-refresh-failure-provider"));
+
+    bool mutation_called = false;
+    try {
+        require_executable_build_plan(
+                "unique-refresh-failure-root", query_failure);
+        mutation_called = true;
+    } catch(const std::exception& error) {
+        expect(
+                std::string(error.what()).find("Unknown") !=
+                        std::string::npos,
+                "Refresh failure guard did not report typed Unknown");
+    }
     expect(
-            selected_snapshot.package_version ==
-                            std::optional<std::string>{"2.0-1"} &&
-                    selected_snapshot.provided_dependency_specification ==
-                            "selected-provider-metadata-virtual=2",
-            "Selected edge did not retain refreshed provider metadata");
-    expect_legacy_order(
-            updated_metadata,
-            {"selected-provider-metadata-b",
-             "selected-provider-metadata-root"});
+            !mutation_called,
+            "Mutation sentinel ran after provider refresh failure");
+}
+
+void test_invocation_conflicts_before_provider_prompt() {
+    const auto expect_conflict_before_prompt = [](
+            const std::function<void(const ProviderSelectionCallback&)>&
+                    resolve) {
+        std::size_t callback_count = 0;
+        ProviderSelectionCallback selector =
+                [&callback_count](
+                        const std::string&,
+                        const std::vector<ProvidedDependency>& candidates)
+                        -> std::optional<ProvidedDependency> {
+            ++callback_count;
+            return candidates.front();
+        };
+        try {
+            resolve(selector);
+        } catch(const std::exception& error) {
+            expect(
+                    std::string(error.what()).find("Conflicting") !=
+                            std::string::npos,
+                    "Invocation conflict did not remain typed Conflicting");
+            expect(
+                    callback_count == 0,
+                    "Provider prompt ran before conflict projection");
+            return;
+        }
+        throw std::runtime_error(
+                "Conflicting invocation unexpectedly resolved");
+    };
+
+    expect_conflict_before_prompt(
+            [](const ProviderSelectionCallback& selector) {
+                static_cast<void>(resolve_build_plan(
+                        "conflict-single-root", selector));
+            });
+    expect_conflict_before_prompt(
+            [](const ProviderSelectionCallback& selector) {
+                static_cast<void>(resolve_build_plan(
+                        std::vector<std::string>{
+                                "conflict-root-a", "conflict-root-b"},
+                        selector));
+            });
+    expect_conflict_before_prompt(
+            [](const ProviderSelectionCallback& selector) {
+                static_cast<void>(resolve_fetch_plan(
+                        std::vector<std::string>{
+                                "conflict-root-a", "conflict-root-b"},
+                        selector));
+            });
+
+    dependency_plan_repository_query_stub::reset_query_counts();
+    std::size_t metadata_change_callback_count = 0;
+    ProviderSelectionCallback metadata_change_selector =
+            [&metadata_change_callback_count](
+                    const std::string&,
+                    const std::vector<ProvidedDependency>& candidates)
+                    -> std::optional<ProvidedDependency> {
+        ++metadata_change_callback_count;
+        return candidates.front();
+    };
+    expect_exception(
+            [&metadata_change_selector]() {
+                static_cast<void>(resolve_build_plan(
+                        std::vector<std::string>{
+                                "target-metadata-root-a",
+                                "target-metadata-root-b"},
+                        metadata_change_selector));
+            },
+            "Provider candidates changed during invocation resolution: "
+            "target-metadata-change-virtual");
+    expect(
+            metadata_change_callback_count == 0,
+            "Target-to-target metadata change reached provider prompt");
+}
+
+void test_installed_exact_state_projection() {
+    BuildPlan present = resolve_build_plan_for_preflight(
+            {"installed-present-root"});
+    const BuildPlanDependencyEdge& present_edge = require_edge(
+            present, "installed-present-root", "installed-present>=1",
+            PackageRole::RuntimeDependency);
+    expect(
+            present_edge.kind == DependencyKind::Installed &&
+                    present_edge.resolved_candidate.has_value() &&
+                    std::holds_alternative<InstalledExactPackage>(
+                            present_edge.resolved_candidate.value()) &&
+                    present_edge.constraint_evaluation.has_value() &&
+                    present_edge.constraint_evaluation->satisfaction() ==
+                            ConstraintSatisfaction::Satisfied,
+            "Installed exact candidate lost source-aware projection");
+
+    BuildPlan absent = resolve_build_plan_for_preflight(
+            {"installed-absent-root"});
+    const BuildPlanDependencyEdge& absent_edge = require_edge(
+            absent, "installed-absent-root", "installed-absent",
+            PackageRole::RuntimeDependency);
+    expect(
+            absent_edge.kind == DependencyKind::Unknown &&
+                    !absent_edge.constraint_evaluation.has_value() &&
+                    absent.resolution_failures.empty() &&
+                    absent.unresolved ==
+                            std::vector<std::string>{"installed-absent"},
+            "Installed absence was conflated with query failure");
+
+    BuildPlan query_failure = resolve_build_plan_for_preflight(
+            {"installed-query-failure-root"});
+    const BuildPlanDependencyEdge& failure_edge = require_edge(
+            query_failure, "installed-query-failure-root",
+            "installed-query-failure>=1",
+            PackageRole::RuntimeDependency);
+    expect(
+            failure_edge.kind == DependencyKind::Unknown &&
+                    failure_edge.constraint_evaluation.has_value() &&
+                    failure_edge.constraint_evaluation->unknown_reason() !=
+                            nullptr &&
+                    *failure_edge.constraint_evaluation->unknown_reason() ==
+                            ObservedVersionUnknownReason::
+                                    MetadataQueryFailure,
+            "Installed DB query failure was flattened into absence");
+    static_cast<void>(require_resolution_failure(
+            query_failure,
+            BuildPlanResolutionFailureKind::
+                    InstalledPackageMetadataUnavailable,
+            "installed-query-failure"));
 }
 
 void test_selection_enabled_metadata_failure_boundary() {
@@ -1281,30 +1463,30 @@ void test_selection_enabled_metadata_failure_boundary() {
             },
             "strict dependency metadata failure");
 
-    expect_exception(
-            [&select_provider]() {
-                static_cast<void>(resolve_build_plan(
-                        "preflight-provider-search-root", select_provider));
-            },
-            "strict provider search failure");
-    expect_exception(
-            [&select_provider]() {
-                static_cast<void>(resolve_build_plan(
-                        "preflight-provider-candidate-root", select_provider));
-            },
-            "strict provider candidate failure");
-    expect_exception(
-            [&select_provider]() {
-                static_cast<void>(resolve_fetch_plan(
-                        "preflight-provider-search-root", select_provider));
-            },
-            "strict provider search failure");
-    expect_exception(
-            [&select_provider]() {
-                static_cast<void>(resolve_fetch_plan(
-                        "preflight-provider-candidate-root", select_provider));
-            },
-            "strict provider candidate failure");
+    BuildPlan provider_search = resolve_build_plan(
+            "preflight-provider-search-root", select_provider);
+    expect(
+            require_edge(
+                    provider_search, "preflight-provider-search-root",
+                    "preflight-provider-search-virtual",
+                    PackageRole::RuntimeDependency)
+                            .constraint_evaluation->unknown_reason() != nullptr,
+            "Provider search failure was not retained as typed Unknown");
+    BuildPlan provider_candidate = resolve_build_plan(
+            "preflight-provider-candidate-root", select_provider);
+    expect(
+            !provider_candidate.incomplete_provider_candidate_sets.empty(),
+            "Partial provider candidates were not retained");
+    BuildPlan fetch_search = resolve_fetch_plan(
+            "preflight-provider-search-root", select_provider);
+    expect(
+            has_incomplete_constraint_evaluations(fetch_search),
+            "Fetch provider search failure was not typed");
+    BuildPlan fetch_candidate = resolve_fetch_plan(
+            "preflight-provider-candidate-root", select_provider);
+    expect(
+            !fetch_candidate.incomplete_provider_candidate_sets.empty(),
+            "Fetch partial provider candidates were not retained");
 
     expect_exception(
             [&select_provider]() {
@@ -1941,12 +2123,96 @@ void test_preflight_dependency_and_provider_failures() {
             PackageRole::RuntimeDependency);
     expect(
             provider_edge.kind == DependencyKind::Unknown &&
-                    !provider_edge.resolved_provider.has_value(),
+                    !provider_edge.resolved_provider.has_value() &&
+                    provider_edge.constraint_evaluation.has_value() &&
+                    provider_edge.constraint_evaluation->unknown_reason() !=
+                            nullptr &&
+                    *provider_edge.constraint_evaluation->unknown_reason() ==
+                            ObservedVersionUnknownReason::
+                                    PartialSourceFailure,
             "Partial provider candidates were treated as authoritative");
     expect(
             provider_candidate.unresolved == std::vector<std::string>{
                     "preflight-provider-candidate-virtual"},
             "Incomplete provider candidates did not remain unresolved");
+    expect(
+            provider_candidate.incomplete_provider_candidate_sets.size() ==
+                            1 &&
+                    provider_candidate.incomplete_provider_candidate_sets
+                                    .front()
+                                    .reason ==
+                            ObservedVersionUnknownReason::
+                                    PartialSourceFailure &&
+                    provider_candidate.incomplete_provider_candidate_sets
+                                    .front()
+                                    .observed_candidates.size() == 1 &&
+                    provider_candidate.incomplete_provider_candidate_sets
+                                    .front()
+                                    .observed_candidates.front()
+                                    .package_name ==
+                            "preflight-provider-good",
+            "Partial AUR provider observations were discarded");
+
+    std::size_t repository_partial_callback_count = 0;
+    ProviderSelectionCallback reject_partial_repository_candidates =
+            [&repository_partial_callback_count](
+                    const std::string&,
+                    const std::vector<ProvidedDependency>& candidates)
+                    -> std::optional<ProvidedDependency> {
+        ++repository_partial_callback_count;
+        return candidates.front();
+    };
+    BuildPlan repository_partial = resolve_build_plan_for_preflight(
+            {"preflight-repository-partial-provider-root"},
+            reject_partial_repository_candidates);
+    expect(
+            repository_partial_callback_count == 0,
+            "Partial repository provider set reached the prompt");
+    const BuildPlanDependencyEdge& repository_partial_edge = require_edge(
+            repository_partial,
+            "preflight-repository-partial-provider-root",
+            "preflight-repository-partial-provider-virtual>=1",
+            PackageRole::RuntimeDependency);
+    expect(
+            repository_partial_edge.kind == DependencyKind::Unknown &&
+                    repository_partial_edge.constraint_evaluation.has_value() &&
+                    repository_partial_edge.constraint_evaluation
+                                    ->unknown_reason() != nullptr &&
+                    *repository_partial_edge.constraint_evaluation
+                                     ->unknown_reason() ==
+                            ObservedVersionUnknownReason::
+                                    PartialSourceFailure &&
+                    repository_partial.incomplete_provider_candidate_sets
+                                    .size() == 1 &&
+                    repository_partial.incomplete_provider_candidate_sets
+                                    .front()
+                                    .observed_candidates.front()
+                                    .package_name ==
+                            "partial-repository-provider",
+            "Partial repository provider observation was flattened");
+
+    bool mutation_called = false;
+    try {
+        require_executable_build_plan(
+                "preflight-provider-candidate-root",
+                provider_candidate);
+        mutation_called = true;
+    } catch(const std::exception&) {
+    }
+    expect(
+            !mutation_called,
+            "Mutation sentinel ran with an incomplete AUR provider set");
+
+    try {
+        require_executable_build_plan(
+                "preflight-repository-partial-provider-root",
+                repository_partial);
+        mutation_called = true;
+    } catch(const std::exception&) {
+    }
+    expect(
+            !mutation_called,
+            "Mutation sentinel ran with an incomplete repository provider set");
 }
 
 void test_preflight_shared_failure_root_attribution() {
@@ -2120,19 +2386,21 @@ void test_legacy_resolution_failure_boundary() {
                     std::vector<std::string>{"preflight-dependency-failure-child"},
             "Legacy dependency failure behavior changed");
 
-    expect_exception(
-            []() {
-                static_cast<void>(resolve_build_plan(
-                        "preflight-provider-search-root"));
-            },
-            "strict provider search failure");
+    BuildPlan provider_search = resolve_build_plan(
+            "preflight-provider-search-root");
+    expect(
+            has_incomplete_constraint_evaluations(provider_search),
+            "Legacy provider search failure was not retained as Unknown");
 
-    expect_exception(
-            []() {
-                static_cast<void>(resolve_build_plan(
-                        "preflight-provider-candidate-root"));
-            },
-            "strict provider candidate failure");
+    BuildPlan provider_candidate = resolve_build_plan(
+            "preflight-provider-candidate-root");
+    expect(
+            provider_candidate.incomplete_provider_candidate_sets.size() ==
+                            1 &&
+                    provider_candidate.incomplete_provider_candidate_sets
+                                    .front()
+                                    .observed_candidates.size() == 1,
+            "Legacy partial provider observations were discarded");
 
     expect_exception(
             []() {
@@ -2192,6 +2460,15 @@ int main() {
         run_case(
                 "selected AUR provider revalidation boundary",
                 test_selected_aur_provider_revalidation_boundary);
+        run_case(
+                "unique AUR provider refresh firewall",
+                test_unique_aur_provider_refresh_firewall);
+        run_case(
+                "invocation conflicts precede provider prompt",
+                test_invocation_conflicts_before_provider_prompt);
+        run_case(
+                "installed exact state projection",
+                test_installed_exact_state_projection);
         run_case(
                 "selection-enabled metadata failure boundary",
                 test_selection_enabled_metadata_failure_boundary);

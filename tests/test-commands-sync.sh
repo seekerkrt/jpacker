@@ -34,6 +34,7 @@ setup_case() {
     command_log=$case_dir/commands.log
     output_file=$case_dir/output
     config_file=$case_dir/config.toml
+    package_metadata_state=$case_dir/package-metadata.state
     source_preference_dir=$case_dir/xdg-config/moguet/source-build.d
 
     mkdir -p \
@@ -42,6 +43,7 @@ setup_case() {
     chmod 0700 "$case_dir/xdg-config"
     : > "$command_log"
     : > "$output_file"
+    : > "$package_metadata_state"
     printf '%s\n' 'schema_version = 1' > "$config_file"
 
     export HOME=$case_dir/home
@@ -54,6 +56,8 @@ setup_case() {
     export MOGUET_TEST_SUDO_MAIN_STATUS=0
     export MOGUET_TEST_GIT_CLONE_EXIT_CODE=0
     export MOGUET_TEST_MAKEPKG_EXIT_CODE=0
+    MOGUET_TEST_PACMAN_CONF_REPOSITORY_LIST=core
+    export MOGUET_TEST_PACMAN_CONF_REPOSITORY_LIST
 
     unset MOGUET_TEST_MAKEPKG_PACKAGELIST_EXIT_CODE
     unset MOGUET_TEST_MAKEPKG_ARTIFACT_IDENTITIES
@@ -77,6 +81,11 @@ setup_case() {
     unset MOGUET_TEST_SOURCE_PREFERENCE_EXTERNAL
     unset MOGUET_TEST_PACMAN_U_SUCCESS_LOG
     unset MOGUET_TEST_REPLACE_WORKSPACE_AFTER_PACMAN_U
+    unset MOGUET_TEST_ALPM_VERCMP_EXPECTED_LHS
+    unset MOGUET_TEST_ALPM_VERCMP_EXPECTED_RHS
+    unset MOGUET_TEST_ALPM_VERCMP_RESULT
+
+    export MOGUET_TEST_PACKAGE_METADATA_STATE_FILE=$package_metadata_state
 }
 
 write_source_preference() {
@@ -348,9 +357,17 @@ assert_two_info_blocks_have_one_blank_line() {
 }
 
 assert_no_mutation_events() {
-    if grep -E '^(sudo pacman -S|git clone |makepkg )' "$command_log" >/dev/null; then
+    if grep -E '^(sudo pacman -(S|U)|pacman -U|git (clone|fetch)( |$)|makepkg )' "$command_log" >/dev/null; then
         echo "mutation event occurred before validation/plan barrier in case $case_name" >&2
         cat "$command_log" >&2
+        exit 1
+    fi
+}
+
+assert_cache_root_absent() {
+    if [ -e "$XDG_CACHE_HOME/moguet" ] || [ -L "$XDG_CACHE_HOME/moguet" ]; then
+        echo "cache root was created before invocation constraint preflight in case $case_name" >&2
+        find "$XDG_CACHE_HOME" -maxdepth 3 -print >&2 || true
         exit 1
     fi
 }
@@ -621,9 +638,8 @@ assert_command_log_empty
 setup_case aur-install-all-root-plan-barrier
 run_status 1 --noedit --nodiff --noconfirm -S --aur plan-a plan-missing
 assert_event_at 1 "aur info-strict plan-a"
-assert_event_at 2 "aur info-strict plan-a"
-assert_event_at 3 "aur info-strict plan-missing"
-assert_event_count 2 "aur info-strict plan-a"
+assert_event_at 2 "aur info-strict plan-missing"
+assert_event_count 1 "aur info-strict plan-a"
 assert_event_count 1 "aur info-strict plan-missing"
 assert_no_mutation_events
 assert_event_prefix_absent '^sudo '
@@ -631,6 +647,9 @@ assert_cache_entry_absent plan-a
 assert_cache_entry_absent plan-missing
 
 setup_case aur-install-constraint-preflight-firewall
+export MOGUET_TEST_ALPM_VERCMP_EXPECTED_LHS=1.0-1
+export MOGUET_TEST_ALPM_VERCMP_EXPECTED_RHS=2.0-1
+export MOGUET_TEST_ALPM_VERCMP_RESULT=-1
 run_status 1 --noedit --nodiff --noconfirm -S --aur constraint-block-root
 assert_contains "dependency constraint-block-leaf>=2.0-1 is Unsatisfied" "$output_file"
 assert_no_mutation_events
@@ -638,13 +657,33 @@ assert_event_prefix_absent '^sudo '
 assert_cache_entry_absent constraint-block-root
 assert_cache_entry_absent constraint-block-leaf
 
+setup_case aur-install-partial-provider-firewall
+run_status_pty 1 '1\n' --noedit --nodiff -S --aur install-partial-root
+assert_contains "source metadata is incomplete" "$output_file"
+assert_not_contains ":: provider dependency=" "$output_file"
+assert_no_mutation_events
+assert_event_prefix_absent '^sudo '
+assert_cache_root_absent
+
+setup_case aur-install-cross-target-conflict-before-prompt
+export MOGUET_TEST_ALPM_VERCMP_EXPECTED_LHS=2
+export MOGUET_TEST_ALPM_VERCMP_EXPECTED_RHS=2
+export MOGUET_TEST_ALPM_VERCMP_RESULT=0
+run_status_pty 1 '1\n' --noedit --nodiff -S --aur \
+    install-conflict-root-a install-conflict-root-b
+assert_contains "is Conflicting" "$output_file"
+assert_not_contains ":: provider dependency=" "$output_file"
+assert_no_mutation_events
+assert_event_prefix_absent '^sudo '
+assert_cache_root_absent
+
 setup_case aur-install-plan-order-needed-and-preferences-disabled
 write_source_preference plan-a 'CFLAGS=-Oaur-only-must-ignore'
 write_source_preference plan-b 'CFLAGS=-Oaur-only-must-ignore'
 run_status 0 --noedit --nodiff --noconfirm -S --aur --needed plan-a plan-b
 assert_event_at 1 "aur info-strict plan-a"
-assert_event_at 2 "aur info-strict plan-a"
-assert_event_at 3 "aur info-strict plan-b"
+assert_event_at 2 "aur info-strict plan-b"
+assert_event_at 3 "aur info-strict plan-a"
 assert_event_at 4 "aur info-strict plan-b"
 assert_event_at 5 "pacman-conf --verbose RootDir DBPath"
 assert_event_at 6 "git clone https://aur.archlinux.org/plan-a.git plan-a"
@@ -675,8 +714,8 @@ export MOGUET_TEST_MAKEPKG_EXIT_CODE=42
 export MOGUET_TEST_MAKEPKG_PACKAGELIST_EXIT_CODE=0
 run_status 1 --noedit --nodiff --noconfirm -S --aur --needed plan-a plan-b
 assert_event_at 1 "aur info-strict plan-a"
-assert_event_at 2 "aur info-strict plan-a"
-assert_event_at 3 "aur info-strict plan-b"
+assert_event_at 2 "aur info-strict plan-b"
+assert_event_at 3 "aur info-strict plan-a"
 assert_event_at 4 "aur info-strict plan-b"
 assert_event_at 5 "pacman-conf --verbose RootDir DBPath"
 assert_event_at 6 "git clone https://aur.archlinux.org/plan-a.git plan-a"
@@ -748,10 +787,9 @@ assert_event_at 1 "pacman -Si official-a"
 assert_event_at 2 "pacman -Si source-a"
 assert_event_at 3 "pacman -Si plan-missing"
 assert_event_at 4 "pacman -Si source-a"
-assert_event_at 5 "aur info-strict source-a"
+assert_event_at 5 "pacman -Si plan-missing"
 assert_event_at 6 "aur info-strict source-a"
-assert_event_at 7 "pacman -Si plan-missing"
-assert_event_at 8 "aur info-strict plan-missing"
+assert_event_at 7 "aur info-strict plan-missing"
 assert_event_prefix_absent '^sudo pacman -S( |$)'
 assert_event_prefix_absent '^(git|makepkg) '
 assert_cache_entry_absent source-a

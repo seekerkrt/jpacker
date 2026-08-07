@@ -222,6 +222,28 @@ void append_source_build_work_items(
     }
 }
 
+std::size_t earliest_root_index_for_source_build_work_item(
+        const BuildPlan& plan,
+        const ProductionSourceBuildWorkItem& work_item) {
+    std::optional<std::size_t> earliest_root;
+    for(const auto& target : plan.package_targets) {
+        if(target.package_base != work_item.request.checkout_name) continue;
+        for(const auto& root : target.roots) {
+            if(!earliest_root.has_value() ||
+               root.invocation_index < earliest_root.value()) {
+                earliest_root = root.invocation_index;
+            }
+        }
+    }
+    if(!earliest_root.has_value() ||
+       earliest_root.value() >= plan.root_targets.size()) {
+        throw std::logic_error(localization::format_translated_message(
+                "{} work item has no invocation root ownership: {}",
+                "BuildPlan", work_item.request.checkout_name));
+    }
+    return earliest_root.value();
+}
+
 ValidatedCacheRoot prepare_sync_source_build_cache_root() {
     return prepare_process_cache_root();
 }
@@ -453,6 +475,16 @@ std::string join_root_package_names(
     for(std::size_t index = 0; index < targets.size(); ++index) {
         if(index > 0) joined << ", ";
         joined << targets[index].identity().package_name;
+    }
+    return joined.str();
+}
+
+std::string join_package_names(
+        const std::vector<std::string>& package_names) {
+    std::stringstream joined;
+    for(std::size_t index = 0; index < package_names.size(); ++index) {
+        if(index > 0) joined << ", ";
+        joined << package_names[index];
     }
     return joined.str();
 }
@@ -783,27 +815,20 @@ int cmd_sync_install(
         }
         require_supported_production_source_build_options(config);
 
-        std::vector<BuildPlan> plans;
-        plans.reserve(parsed.targets.size());
-        for(const auto& target : parsed.targets) {
-            BuildPlan plan = resolve_build_plan(target, select_provider);
-            require_executable_build_plan(target, plan);
-            plans.push_back(std::move(plan));
-        }
+        BuildPlan plan = resolve_build_plan(
+                parsed.targets, select_provider);
+        require_executable_build_plan(
+                join_package_names(parsed.targets), plan);
 
-        std::vector<ProductionSourceBuildWorkItem> work_items;
-        for(const auto& plan : plans) {
-            append_source_build_work_items(
-                    work_items,
-                    prepare_aur_source_build_work_items(
-                            plan, false, source_sync_options.needed));
-        }
+        std::vector<ProductionSourceBuildWorkItem> work_items =
+                prepare_aur_source_build_work_items(
+                        plan, false, source_sync_options.needed);
         ValidatedCacheRoot cache_root =
                 prepare_sync_source_build_cache_root();
         assign_source_build_cache_root(work_items, cache_root);
-        // POLICY(#168,#242): every per-root plan keeps its existing order, while
-        // all roots complete static preflight and one database-path resolution
-        // before the first checkout/workspace/build/install mutation.
+        // POLICY(#168,#242/#351): 全rootを一つのplanへaggregateし、
+        // static preflightとdatabase-path resolutionを最初の
+        // checkout/workspace/build/install mutationより前に完了する。
         PreparedProductionSourceBuildInvocation invocation =
                 prepare_production_source_build_invocation(
                         std::move(work_items), config);
@@ -846,22 +871,66 @@ int cmd_sync_install(
         }
         require_supported_production_source_build_options(config);
     }
-    std::vector<ProductionSourceBuildWorkItem> source_work_items;
+    std::vector<std::string> repository_source_targets;
+    std::vector<std::string> aur_plan_targets;
     for(const auto& package : aur_targets) {
         if(is_repo_package(package)) {
+            repository_source_targets.push_back(package);
+        } else {
+            aur_plan_targets.push_back(package);
+        }
+    }
+
+    std::optional<BuildPlan> aur_invocation_plan;
+    if(!aur_plan_targets.empty()) {
+        aur_invocation_plan = resolve_build_plan(
+                aur_plan_targets, select_provider);
+        require_executable_build_plan(
+                join_package_names(aur_plan_targets),
+                aur_invocation_plan.value());
+    }
+
+    std::vector<std::vector<ProductionSourceBuildWorkItem>>
+            aur_work_items_by_root(aur_plan_targets.size());
+    if(aur_invocation_plan.has_value()) {
+        std::vector<ProductionSourceBuildWorkItem> aur_work_items =
+                prepare_aur_source_build_work_items(
+                        aur_invocation_plan.value(), true,
+                        source_sync_options.needed);
+        for(auto& work_item : aur_work_items) {
+            const std::size_t root_index =
+                    earliest_root_index_for_source_build_work_item(
+                            aur_invocation_plan.value(), work_item);
+            aur_work_items_by_root[root_index].push_back(
+                    std::move(work_item));
+        }
+    }
+
+    std::vector<ProductionSourceBuildWorkItem> source_work_items;
+    std::size_t aur_root_index = 0;
+    for(const auto& package : aur_targets) {
+        if(std::find(
+                   repository_source_targets.begin(),
+                   repository_source_targets.end(), package) !=
+           repository_source_targets.end()) {
             source_work_items.push_back(
                     prepare_smart_source_build_work_item(
                             package, false, source_sync_options.needed,
                             select_provider));
             continue;
         }
-
-        BuildPlan plan = resolve_build_plan(package, select_provider);
-        require_executable_build_plan(package, plan);
+        if(aur_root_index >= aur_work_items_by_root.size()) {
+            throw std::logic_error(localization::translate_message(
+                    "Build plan root ownership is inconsistent with source targets."));
+        }
         append_source_build_work_items(
                 source_work_items,
-                prepare_aur_source_build_work_items(
-                        plan, true, source_sync_options.needed));
+                std::move(aur_work_items_by_root[aur_root_index]));
+        ++aur_root_index;
+    }
+    if(aur_root_index != aur_work_items_by_root.size()) {
+        throw std::logic_error(localization::translate_message(
+                "Build plan source targets were not fully projected."));
     }
     std::optional<PreparedProductionSourceBuildInvocation> source_invocation;
     if(!source_work_items.empty()) {

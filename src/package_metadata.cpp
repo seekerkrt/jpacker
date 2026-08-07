@@ -7,6 +7,7 @@
 
 #include <alpm.h>
 
+#include <algorithm>
 #include <cctype>
 #include <cstddef>
 #include <cstdint>
@@ -1170,6 +1171,7 @@ struct RepositoryPackageMetadataSession::Impl {
     struct RegisteredRepository {
         std::string repository_name;
         alpm_db_t*  database;
+        alpm_list_t* package_cache;
     };
 
     Impl(
@@ -1244,7 +1246,7 @@ RepositoryPackageMetadataSession RepositoryPackageMetadataSession::open(
 
         // LANDMINE: missing/corrupt sync DB can surface only while loading the cache.
         // nullptr+OK is retained as a valid empty repository database.
-        static_cast<void>(alpm_db_get_pkgcache(database));
+        alpm_list_t* package_cache = alpm_db_get_pkgcache(database);
         alpm_errno_t package_cache_error = alpm_errno(handle.get());
         if(package_cache_error != ALPM_ERR_OK) {
             throw_package_metadata_error(
@@ -1253,7 +1255,8 @@ RepositoryPackageMetadataSession RepositoryPackageMetadataSession::open(
                             package_cache_error));
         }
 
-        repositories.push_back(Impl::RegisteredRepository{repository_name, database});
+        repositories.push_back(Impl::RegisteredRepository{
+                repository_name, database, package_cache});
     }
 
     auto impl = std::make_unique<Impl>(std::move(handle), std::move(repositories));
@@ -1393,6 +1396,106 @@ RepositoryPackageMetadataSession::query_repository_exact_package_metadata(
     return snapshot;
 }
 
+RepositoryProviderPackageMetadataQueryResult
+RepositoryPackageMetadataSession::query_repository_provider_package_metadata(
+        const std::string& dependency_name) const {
+    if(impl_ == nullptr) {
+        return query_failure(
+                PackageMetadataErrorCode::QueryFailed,
+                localization::translate_message(
+                        "Repository package metadata session is not open."));
+    }
+    if(!is_valid_package_name(dependency_name)) {
+        return query_failure(
+                PackageMetadataErrorCode::InvalidPackageName,
+                localization::translate_message("Package name is invalid."));
+    }
+    if(impl_->repositories.empty()) {
+        return query_failure(
+                PackageMetadataErrorCode::RepositoryNotConfigured,
+                localization::translate_message(
+                        "Requested repository is not configured."));
+    }
+
+    RepositoryProviderPackageMetadataSnapshot snapshot;
+    snapshot.repository_order.reserve(impl_->repositories.size());
+    snapshot.source_results.reserve(impl_->repositories.size());
+    for(std::size_t repository_order = 0;
+        repository_order < impl_->repositories.size();
+        ++repository_order) {
+        const auto& repository = impl_->repositories[repository_order];
+        snapshot.repository_order.push_back(repository.repository_name);
+        RepositoryProviderPackageMetadataSourceSnapshot source{
+                repository_order, repository.repository_name, {}};
+        std::optional<PackageMetadataFailure> source_failure;
+
+        alpm_list_t* package_cache = repository.package_cache;
+
+        for(alpm_list_t* node = package_cache;
+            node != nullptr && !source_failure.has_value();
+            node = node->next) {
+            if(node->data == nullptr) {
+                source_failure = query_failure(
+                        PackageMetadataErrorCode::MalformedMetadata,
+                        localization::translate_message(
+                                "Repository package metadata contains an invalid package record."));
+                break;
+            }
+
+            auto* package = static_cast<alpm_pkg_t*>(node->data);
+            RepositoryProvidedPackageMetadataResult provides_result =
+                    snapshot_repository_provides(package);
+            if(const auto* failure =
+                       std::get_if<PackageMetadataFailure>(&provides_result);
+               failure != nullptr) {
+                source_failure = *failure;
+                break;
+            }
+
+            std::vector<RepositoryProvidedPackageMetadata> provides =
+                    std::get<std::vector<RepositoryProvidedPackageMetadata>>(
+                            std::move(provides_result));
+            const bool matches = std::any_of(
+                    provides.begin(), provides.end(),
+                    [&dependency_name](
+                            const RepositoryProvidedPackageMetadata& provided) {
+                        return provided.package_name == dependency_name;
+                    });
+            if(!matches) continue;
+
+            const char* package_name = alpm_pkg_get_name(package);
+            if(package_name == nullptr ||
+               !is_valid_package_name(package_name)) {
+                source_failure = query_failure(
+                        PackageMetadataErrorCode::MalformedMetadata,
+                        localization::translate_message(
+                                "Repository package metadata contains an invalid package name."));
+                break;
+            }
+            const char* package_version = alpm_pkg_get_version(package);
+            source.packages.push_back(RepositoryExactPackageMetadata{
+                    repository_order,
+                    repository.repository_name,
+                    package_name,
+                    package_version == nullptr
+                            ? std::nullopt
+                            : std::optional<std::string>(package_version),
+                    std::move(provides)});
+        }
+
+        if(source_failure.has_value()) {
+            snapshot.source_results.push_back(
+                    RepositoryProviderPackageMetadataSourceFailure{
+                            repository_order,
+                            repository.repository_name,
+                            std::move(source_failure.value())});
+        } else {
+            snapshot.source_results.push_back(std::move(source));
+        }
+    }
+    return snapshot;
+}
+
 RepositoryExactPackageMetadataQueryResult
 query_configured_repository_exact_package_metadata(
         const PacmanRepositoryConfiguration& configuration,
@@ -1487,6 +1590,110 @@ query_configured_repository_exact_package_metadata(
                 [configured_order, &repository_name](auto& result) {
                     result.configured_repository_order = configured_order;
                     result.repository_name = repository_name;
+                },
+                source_result);
+        snapshot.source_results.push_back(std::move(source_result));
+    }
+    return snapshot;
+}
+
+RepositoryProviderPackageMetadataQueryResult
+query_configured_repository_provider_package_metadata(
+        const PacmanRepositoryConfiguration& configuration,
+        const std::string& dependency_name) {
+    PacmanRepositoryConfiguration normalized_configuration;
+    try {
+        normalized_configuration =
+                normalize_pacman_repository_configuration(configuration);
+    } catch(const PackageMetadataError& error) {
+        return error.failure();
+    }
+
+    if(!is_valid_package_name(dependency_name)) {
+        return query_failure(
+                PackageMetadataErrorCode::InvalidPackageName,
+                localization::translate_message("Package name is invalid."));
+    }
+    if(normalized_configuration.repository_names.empty()) {
+        return query_failure(
+                PackageMetadataErrorCode::RepositoryNotConfigured,
+                localization::translate_message(
+                        "Requested repository is not configured."));
+    }
+
+    RepositoryProviderPackageMetadataSnapshot snapshot;
+    snapshot.repository_order = normalized_configuration.repository_names;
+    snapshot.source_results.reserve(
+            normalized_configuration.repository_names.size());
+    for(std::size_t configured_order = 0;
+        configured_order < normalized_configuration.repository_names.size();
+        ++configured_order) {
+        const std::string& repository_name =
+                normalized_configuration.repository_names[configured_order];
+        PacmanRepositoryConfiguration source_configuration{
+                normalized_configuration.database_paths,
+                {repository_name}};
+
+        std::optional<RepositoryPackageMetadataSession> source_session;
+        try {
+            source_session.emplace(
+                    RepositoryPackageMetadataSession::open(
+                            source_configuration));
+        } catch(const PackageMetadataError& error) {
+            if(error.failure().code !=
+               PackageMetadataErrorCode::SyncDatabaseUnavailable) {
+                return error.failure();
+            }
+            snapshot.source_results.push_back(
+                    RepositoryProviderPackageMetadataSourceFailure{
+                            configured_order,
+                            repository_name,
+                            error.failure()});
+            continue;
+        }
+
+        RepositoryProviderPackageMetadataQueryResult source_query =
+                source_session->query_repository_provider_package_metadata(
+                        dependency_name);
+        if(const auto* failure =
+                   std::get_if<PackageMetadataFailure>(&source_query);
+           failure != nullptr) {
+            snapshot.source_results.push_back(
+                    RepositoryProviderPackageMetadataSourceFailure{
+                            configured_order,
+                            repository_name,
+                            *failure});
+            continue;
+        }
+
+        RepositoryProviderPackageMetadataSnapshot source_snapshot =
+                std::get<RepositoryProviderPackageMetadataSnapshot>(
+                        std::move(source_query));
+        if(source_snapshot.source_results.size() != 1) {
+            snapshot.source_results.push_back(
+                    RepositoryProviderPackageMetadataSourceFailure{
+                            configured_order,
+                            repository_name,
+                            query_failure(
+                                    PackageMetadataErrorCode::QueryFailed,
+                                    localization::translate_message(
+                                            "Repository provider metadata query returned an invalid source result."))});
+            continue;
+        }
+
+        RepositoryProviderPackageMetadataSourceResult source_result =
+                std::move(source_snapshot.source_results.front());
+        std::visit(
+                [configured_order, &repository_name](auto& result) {
+                    result.configured_repository_order = configured_order;
+                    result.repository_name = repository_name;
+                    if constexpr(requires { result.packages; }) {
+                        for(auto& package : result.packages) {
+                            package.configured_repository_order =
+                                    configured_order;
+                            package.repository_name = repository_name;
+                        }
+                    }
                 },
                 source_result);
         snapshot.source_results.push_back(std::move(source_result));

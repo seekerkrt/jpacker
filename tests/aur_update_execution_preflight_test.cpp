@@ -633,6 +633,15 @@ void test_incomplete_build_plan_issues_are_typed_and_deduplicated() {
     plan.resolution_failures.push_back(metadata_failure);
     plan.resolution_failures.push_back(metadata_failure);
     plan.resolution_failures.push_back(BuildPlanResolutionFailure{
+            BuildPlanResolutionFailureKind::
+                    InstalledPackageMetadataUnavailable,
+            std::optional<std::string>{"incomplete-root"},
+            std::optional<std::string>{"incomplete-root"},
+            "installed-dependency",
+            std::optional<std::string>{"installed-dependency"},
+            {root},
+            "installed metadata unavailable"});
+    plan.resolution_failures.push_back(BuildPlanResolutionFailure{
             BuildPlanResolutionFailureKind::RepositoryMetadataUnavailable,
             std::optional<std::string>{"incomplete-root"},
             std::optional<std::string>{"incomplete-root"},
@@ -668,6 +677,12 @@ void test_incomplete_build_plan_issues_are_typed_and_deduplicated() {
     expect(
             has_issue(target, AurUpdateExecutionReason::UnresolvedDependency),
             "Unresolved dependency issue is missing");
+    expect(
+            has_issue(
+                    target,
+                    AurUpdateExecutionReason::
+                            InstalledPackageMetadataUnavailable),
+            "Installed package metadata issue is missing");
     expect(
             has_issue(
                     target,

@@ -41,7 +41,9 @@ enum class AurUpdateExecutionReason {
     SplitPackageSelectionRequired,
     MultiplePackageTargetsForPackageBase,
     AmbiguousProvider,
-    ConflictsOrReplacesUnresolved
+    ConflictsOrReplacesUnresolved,
+
+    InstalledPackageMetadataUnavailable
 };
 
 struct AurUpdateExecutionIssue {

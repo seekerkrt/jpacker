@@ -136,5 +136,6 @@ StrictRepositoryProvidersQueryResult query_repository_providers_strict(
         const std::string& dependency_name) {
     g_query_history.push_back(RepositoryQuery{
             RepositoryQueryKind::StrictProviders, dependency_name});
-    return require_provider_response(dependency_name);
+    return RepositoryProviderQuerySnapshot{
+            require_provider_response(dependency_name), {}};
 }

@@ -794,7 +794,7 @@ run_matrix_table operation-status 8 <<'EOF'
 1|AUR phase: completed|Unexpected upgrade-all command failure: Unknown AUR update operation status.
 EOF
 
-run_matrix_table preflight-reason 21 <<'EOF'
+run_matrix_table preflight-reason 22 <<'EOF'
 1|AUR target: matrix-target: unsupported: none|AUR preflight issue: none: matrix preflight diagnostic
 0|AUR target: matrix-target: skipped: up to date|-
 0|AUR target: matrix-target: skipped: non-AUR foreign|-
@@ -815,6 +815,7 @@ run_matrix_table preflight-reason 21 <<'EOF'
 1|AUR target: matrix-target: unsupported: multiple package targets for package base|AUR preflight issue: multiple package targets for package base: matrix preflight diagnostic
 1|AUR target: matrix-target: unsupported: ambiguous provider|AUR preflight issue: ambiguous provider: matrix preflight diagnostic
 1|AUR target: matrix-target: unsupported: conflicts/replaces unresolved|AUR preflight issue: conflicts/replaces unresolved: matrix preflight diagnostic
+1|AUR target: matrix-target: unsupported: installed package metadata unavailable|AUR preflight issue: installed package metadata unavailable: matrix preflight diagnostic
 1|system: completed|Unexpected upgrade-all command failure: Unknown AUR update preflight reason.
 EOF
 
@@ -956,7 +957,7 @@ run_matrix_table external-attribution-missing 1 <<'EOF'
 1|AUR phase: completed|Unexpected upgrade-all command failure: External satisfaction has no explicit source identity.
 EOF
 
-if [ "$case_count" -ne 215 ]; then
+if [ "$case_count" -ne 216 ]; then
     echo "upgrade-all command test scenario count drifted: $case_count" >&2
     exit 1
 fi

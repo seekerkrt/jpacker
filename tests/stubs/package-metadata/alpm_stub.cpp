@@ -129,12 +129,11 @@ struct GroupRecord {
 
 struct SyncDatabaseRecord {
     SyncDatabaseRecord(alpm_handle_t* handle, const std::string& repository_name)
-        : database{handle, AlpmStubDatabaseKind::Sync, repository_name},
-          cache_node{nullptr, nullptr, nullptr} {}
+        : database{handle, AlpmStubDatabaseKind::Sync, repository_name} {}
 
     alpm_db_t database;
-    alpm_list_t cache_node;
     std::map<std::string, std::unique_ptr<alpm_pkg_t>> packages;
+    std::vector<std::unique_ptr<alpm_list_t>> cache_nodes;
     std::map<std::string, std::unique_ptr<GroupRecord>> groups;
 };
 
@@ -1317,7 +1316,35 @@ alpm_list_t* alpm_db_get_pkgcache(alpm_db_t* database) {
         if(behavior.cache_empty) return nullptr;
 
         SyncDatabaseRecord* database_record = sync_database_record(database);
-        return database_record == nullptr ? nullptr : &database_record->cache_node;
+        if(database_record == nullptr) return nullptr;
+
+        database_record->cache_nodes.clear();
+        for(const auto& [identity, package_state] :
+            g_state.repository_packages) {
+            if(identity.first != database->repository_name ||
+               package_state.lookup_mode != PackageLookupMode::Present) {
+                continue;
+            }
+            database_record->cache_nodes.push_back(
+                    std::make_unique<alpm_list_t>(alpm_list_t{
+                            sync_package_for(database, identity.second),
+                            nullptr,
+                            nullptr}));
+        }
+        for(std::size_t index = 0;
+            index < database_record->cache_nodes.size();
+            ++index) {
+            database_record->cache_nodes[index]->prev = index == 0
+                    ? nullptr
+                    : database_record->cache_nodes[index - 1].get();
+            database_record->cache_nodes[index]->next =
+                    index + 1 == database_record->cache_nodes.size()
+                    ? nullptr
+                    : database_record->cache_nodes[index + 1].get();
+        }
+        return database_record->cache_nodes.empty()
+                ? nullptr
+                : database_record->cache_nodes.front().get();
     }
 
     ++g_state.package_cache_calls;

@@ -528,9 +528,16 @@ void print_selected_provider_group(
     }
 }
 
-void print_constraint_evaluations(const BuildPlan& plan) {
+void print_constraint_evaluations(
+        const BuildPlan& plan,
+        const std::optional<std::string>& parent_package_name =
+                std::nullopt) {
     bool printed_header = false;
     for(const auto& edge : plan.dependency_edges) {
+        if(parent_package_name.has_value() &&
+           edge.parent_package_name != parent_package_name.value()) {
+            continue;
+        }
         if(!edge.constraint_evaluation.has_value()) continue;
         if(!printed_header) {
             std::cout << std::endl
@@ -559,6 +566,39 @@ void print_constraint_evaluations(const BuildPlan& plan) {
     }
 }
 
+void print_resolution_failures(const BuildPlan& plan) {
+    for(const auto& failure : plan.resolution_failures) {
+        switch(failure.kind) {
+        case BuildPlanResolutionFailureKind::
+                InstalledPackageMetadataUnavailable:
+            Logger::warn(localization::format_translated_message(
+                    "Installed package metadata for {} is unavailable: {}",
+                    failure.subject, failure.diagnostic));
+            break;
+        case BuildPlanResolutionFailureKind::RepositoryMetadataUnavailable:
+            Logger::warn(localization::format_translated_message(
+                    "Repository package metadata for {} is unavailable: {}",
+                    failure.subject, failure.diagnostic));
+            break;
+        case BuildPlanResolutionFailureKind::AurPackageMetadataUnavailable:
+            Logger::warn(localization::format_translated_message(
+                    // TRANSLATORS: The first placeholder is the literal
+                    // service name "AUR"; the remaining placeholders are a
+                    // package identity and diagnostic, respectively.
+                    "{} package metadata for {} is unavailable: {}",
+                    "AUR", failure.subject, failure.diagnostic));
+            break;
+        case BuildPlanResolutionFailureKind::ProviderSearchUnavailable:
+        case BuildPlanResolutionFailureKind::
+                ProviderCandidateMetadataUnavailable:
+            Logger::warn(localization::format_translated_message(
+                    "Provider metadata for {} is unavailable: {}",
+                    failure.subject, failure.diagnostic));
+            break;
+        }
+    }
+}
+
 DependencyClassification classify_direct_build_plan_edges(
         const BuildPlan& plan, const std::string& parent_package_name) {
     DependencyClassification classified;
@@ -566,6 +606,8 @@ DependencyClassification classify_direct_build_plan_edges(
         if(edge.parent_package_name != parent_package_name) continue;
         switch(edge.kind) {
         case DependencyKind::Installed:
+            add_unique_value(classified.installed, edge.dependency_spec);
+            break;
         case DependencyKind::Repo:
             add_unique_value(classified.repo, edge.dependency_spec);
             break;
@@ -597,12 +639,57 @@ DependencyClassification classify_direct_build_plan_edges(
         }
     }
     for(const auto& ambiguous : plan.ambiguous_providers) {
-        classified.ambiguous_providers.push_back(ambiguous);
+        const bool is_direct = std::any_of(
+                plan.dependency_edges.begin(), plan.dependency_edges.end(),
+                [&parent_package_name, &ambiguous](
+                        const BuildPlanDependencyEdge& edge) {
+                    return edge.parent_package_name == parent_package_name &&
+                           edge.kind == DependencyKind::AmbiguousProvider &&
+                           edge.dependency_spec == ambiguous.dependency;
+                });
+        if(is_direct) {
+            classified.ambiguous_providers.push_back(ambiguous);
+        }
     }
     for(const auto& unresolved : plan.unresolved) {
         add_unique_value(classified.unknown, unresolved);
     }
     return classified;
+}
+
+void print_incomplete_provider_candidate_sets(const BuildPlan& plan) {
+    if(plan.incomplete_provider_candidate_sets.empty()) return;
+
+    std::cout << std::endl
+              << localization::translate_message(
+                         "Incomplete provider candidate observations:")
+              << std::endl;
+    for(const auto& candidate_set :
+        plan.incomplete_provider_candidate_sets) {
+        const std::string reason = constraint_evaluation_reason_display(
+                ConstraintEvaluation::unknown(candidate_set.reason));
+        std::cout << localization::format_translated_message(
+                             "  - {}: {}", candidate_set.dependency,
+                             reason)
+                  << std::endl;
+        if(!candidate_set.observed_candidates.empty()) {
+            std::vector<std::string> candidates;
+            candidates.reserve(
+                    candidate_set.observed_candidates.size());
+            for(const auto& candidate :
+                candidate_set.observed_candidates) {
+                candidates.push_back(
+                        provided_dependency_display(candidate));
+            }
+            std::cout << localization::format_translated_message(
+                                 "    observed candidates: {}",
+                                 join_comma_display_values(candidates))
+                      << std::endl;
+        }
+        Logger::warn(localization::format_translated_message(
+                "Provider candidates for {} are incomplete: {}",
+                candidate_set.dependency, reason));
+    }
 }
 
 void print_metadata_risk_group(const std::vector<BuildPlanMetadataRisk>& risks) {
@@ -711,6 +798,8 @@ void print_build_plan(const BuildPlan& plan) {
         }
     }
 
+    print_incomplete_provider_candidate_sets(plan);
+
     if(!plan.cycles.empty()) {
         std::cout << std::endl;
         std::cout << localization::translate_message(
@@ -723,6 +812,7 @@ void print_build_plan(const BuildPlan& plan) {
 
     if(!plan.unresolved.empty() || !plan.ambiguous_providers.empty() ||
        !plan.cycles.empty() || !plan.metadata_risks.empty() ||
+       !plan.incomplete_provider_candidate_sets.empty() ||
        has_incomplete_constraint_evaluations(plan)) {
         std::cout << std::endl;
         std::cout << localization::translate_message(
@@ -750,6 +840,7 @@ void print_build_plan(const BuildPlan& plan) {
                       << std::endl;
     }
     print_constraint_evaluations(plan);
+    print_resolution_failures(plan);
 }
 
 void print_fetch_plan(const BuildPlan& plan) {
@@ -791,6 +882,8 @@ void print_fetch_plan(const BuildPlan& plan) {
             Logger::warn(dependency);
         }
     }
+
+    print_incomplete_provider_candidate_sets(plan);
 
     if(!plan.ambiguous_providers.empty()) {
         std::cout << std::endl;
@@ -847,9 +940,21 @@ int cmd_deps(
         return 1;
     }
 
-    bool failed = false;
     ProviderSelectionCallback select_provider =
             provider_selection_callback(config);
+    BuildPlan invocation_plan;
+    try {
+        invocation_plan = resolve_build_plan_for_preflight(
+                targets, select_provider);
+    } catch(const std::exception& error) {
+        Logger::error(localization::format_translated_message(
+                "Failed to inspect dependencies for {}: {}",
+                join_comma_display_values(targets), error.what()));
+        return 1;
+    }
+    print_resolution_failures(invocation_plan);
+
+    bool failed = false;
     for(size_t i = 0; i < targets.size(); ++i) {
         const auto& target = targets[i];
         require_valid_package_name(target);
@@ -865,9 +970,9 @@ int cmd_deps(
 
             std::vector<std::string> dependencies =
                     collect_build_dependencies(info.value());
-            BuildPlan plan = resolve_build_plan(target, select_provider);
             DependencyClassification classified =
-                    classify_direct_build_plan_edges(plan, info->Name);
+                    classify_direct_build_plan_edges(
+                            invocation_plan, info->Name);
 
             if(i > 0) std::cout << std::endl;
             std::cout << localization::format_translated_message(
@@ -879,6 +984,11 @@ int cmd_deps(
             std::cout << localization::format_translated_message(
                                  "Dependencies    : {}", dependencies.size())
                       << std::endl;
+            std::cout << std::endl;
+            print_dependency_group(
+                    localization::translate_message(
+                            "Installed dependencies:"),
+                    classified.installed);
             std::cout << std::endl;
             print_dependency_group(
                     localization::format_translated_message(
@@ -919,7 +1029,8 @@ int cmd_deps(
                 Logger::warn(localization::translate_message(
                         "Conflicts/replaces metadata is separate from dependency resolution and requires manual review."));
             }
-            print_constraint_evaluations(plan);
+            print_incomplete_provider_candidate_sets(invocation_plan);
+            print_constraint_evaluations(invocation_plan, info->Name);
             if(recursive) {
                 std::vector<RecursiveDependencyNode> recursive_nodes =
                         resolve_recursive_dependencies(
@@ -960,29 +1071,25 @@ int cmd_plan(
         return 1;
     }
 
-    bool                                  failed = false;
     RepositoryMetadataPresentationContext metadata_context;
     ProviderSelectionCallback select_provider =
             provider_selection_callback(config);
-    for(size_t i = 0; i < targets.size(); ++i) {
-        const auto& target = targets[i];
+    for(const auto& target : targets) {
         require_valid_package_name(target);
-
-        try {
-            BuildPlan plan = resolve_build_plan(target, select_provider);
-
-            if(i > 0) std::cout << std::endl;
-            print_build_plan(plan);
-            print_repository_package_sizes(plan, metadata_context);
-        } catch(const std::exception& e) {
-            Logger::error(localization::format_translated_message(
-                    "Failed to plan build order for {}: {}", target,
-                    e.what()));
-            failed = true;
-        }
     }
 
-    return failed ? 1 : 0;
+    try {
+        BuildPlan plan = resolve_build_plan_for_preflight(
+                targets, select_provider);
+        print_build_plan(plan);
+        print_repository_package_sizes(plan, metadata_context);
+    } catch(const std::exception& error) {
+        Logger::error(localization::format_translated_message(
+                "Failed to plan build order for {}: {}",
+                join_comma_display_values(targets), error.what()));
+        return 1;
+    }
+    return 0;
 }
 
 int cmd_fetch(
@@ -1012,46 +1119,38 @@ int cmd_fetch(
         require_valid_package_name(target);
     }
 
-    bool                                           failed = false;
-    std::vector<std::pair<std::string, BuildPlan>> plans;
     ProviderSelectionCallback select_provider =
             provider_selection_callback(config);
-    for(size_t i = 0; i < targets.size(); ++i) {
-        const auto& target = targets[i];
-        try {
-            BuildPlan plan = resolve_fetch_plan(target, select_provider);
-
-            if(i > 0) std::cout << std::endl;
-            print_fetch_plan(plan);
-            // POLICY(#150): fetch は read-only retrieval stage。metadata risk は表示するが取得を妨げない。
-            require_fetchable_build_plan(target, plan);
-            plans.emplace_back(target, std::move(plan));
-        } catch(const std::exception& e) {
-            Logger::error(localization::format_translated_message(
-                    "Failed to fetch repositories for {}: {}", target,
-                    e.what()));
-            failed = true;
-        }
+    BuildPlan plan;
+    const std::string invocation_targets =
+            join_comma_display_values(targets);
+    try {
+        plan = resolve_fetch_plan(targets, select_provider);
+        print_fetch_plan(plan);
+        // POLICY(#150): fetch は read-only retrieval stage。metadata risk は表示するが取得を妨げない。
+        require_fetchable_build_plan(invocation_targets, plan);
+    } catch(const std::exception& error) {
+        Logger::error(localization::format_translated_message(
+                "Failed to fetch repositories for {}: {}",
+                invocation_targets, error.what()));
+        return 1;
     }
 
-    // POLICY(#174/#272): 全targetのprovider selectionとschema/semantic
+    // POLICY(#174/#272/#351): invocation全体のprovider選択とconstraint
     // preflightが成功するまでcache preparationやclone/fetchへ進まない。
-    if(failed) return 1;
-
     ValidatedCacheRoot cache_root = prepare_process_cache_root();
-    for(const auto& [target, plan] : plans) {
-        for(const auto& entry : plan.order) {
-            try {
-                fetch_persistent_checkout(
-                        cache_root,
-                        entry.package_base,
-                        aur_git_url_for_package_base(entry.package_base));
-            } catch(const std::exception& e) {
-                Logger::error(localization::format_translated_message(
-                        "Failed to fetch repositories for {}: {}", target,
-                        e.what()));
-                failed = true;
-            }
+    bool failed = false;
+    for(const auto& entry : plan.order) {
+        try {
+            fetch_persistent_checkout(
+                    cache_root,
+                    entry.package_base,
+                    aur_git_url_for_package_base(entry.package_base));
+        } catch(const std::exception& error) {
+            Logger::error(localization::format_translated_message(
+                    "Failed to fetch repositories for {}: {}",
+                    invocation_targets, error.what()));
+            failed = true;
         }
     }
 

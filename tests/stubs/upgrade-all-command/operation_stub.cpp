@@ -130,7 +130,8 @@ constexpr std::array AUR_PREFLIGHT_REASONS{
         AurUpdateExecutionReason::SplitPackageSelectionRequired,
         AurUpdateExecutionReason::MultiplePackageTargetsForPackageBase,
         AurUpdateExecutionReason::AmbiguousProvider,
-        AurUpdateExecutionReason::ConflictsOrReplacesUnresolved};
+        AurUpdateExecutionReason::ConflictsOrReplacesUnresolved,
+        AurUpdateExecutionReason::InstalledPackageMetadataUnavailable};
 
 constexpr std::array AUR_PREPARATION_REASONS{
         AurUpdatePreparationReason::None,

@@ -698,6 +698,11 @@ void inspect_resolution_failures(
     for(const auto& failure : plan.resolution_failures) {
         AurUpdateExecutionReason reason;
         switch(failure.kind) {
+        case BuildPlanResolutionFailureKind::
+                InstalledPackageMetadataUnavailable:
+            reason = AurUpdateExecutionReason::
+                    InstalledPackageMetadataUnavailable;
+            break;
         case BuildPlanResolutionFailureKind::RepositoryMetadataUnavailable:
             reason = AurUpdateExecutionReason::RepositoryMetadataUnavailable;
             break;

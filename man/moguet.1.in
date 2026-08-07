@@ -151,9 +151,11 @@ Classify AUR runtime, make, and check dependencies.
 With
 .BR --recursive ,
 traverse exact AUR dependencies and user-selected AUR providers.
-Official dependencies, uniquely resolved providers, selected official
-repository providers, still-ambiguous providers, and unresolved dependencies
-are displayed without further traversal.
+Installed dependencies, official dependencies, uniquely resolved providers,
+selected official repository providers, still-ambiguous providers, and
+unresolved dependencies are displayed without further traversal. An installed
+exact dependency retains Installed source identity and is not presented as an
+official repository package.
 On an interactive TTY, source-aware provider candidates can be selected and
 the output distinguishes user-selected providers from unresolved ambiguity.
 Constraint results and reasons are displayed. Unsatisfied or unknown results

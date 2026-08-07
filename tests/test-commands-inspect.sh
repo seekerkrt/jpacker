@@ -387,11 +387,11 @@ echo "  ok: deps partial failure continues in target order"
 setup_case deps-validation-position
 export MOGUET_TEST_INSPECTION_SCENARIO=deps-validation-position
 run_fail deps deps-first invalid/name deps-third
-assert_contains "Invalid package name: invalid/name" "$stderr_file"
-assert_not_contains "Failed to inspect dependencies for invalid/name" "$stderr_file"
-assert_exact_line "aur info deps-first" "$command_log"
-assert_not_contains "aur info deps-third" "$command_log"
-echo "  ok: deps target validation remains outside the target catch"
+assert_contains "Failed to inspect dependencies for deps-first, invalid/name, deps-third: Invalid package name: invalid/name" "$stderr_file"
+if [ -s "$command_log" ]; then
+    fail_case "deps queried metadata before validating the whole invocation"
+fi
+echo "  ok: deps validates the whole invocation before metadata resolution"
 
 setup_case deps-provider-order
 export MOGUET_TEST_INSPECTION_SCENARIO=deps-provider-order
@@ -494,24 +494,45 @@ assert_exact_line "      1. aur/provider-z" "$stdout_file"
 assert_exact_line "      2. aur/provider-a" "$stdout_file"
 echo "  ok: deps ignores piped provider input and remains ambiguous"
 
+# Issue #351 F4: incomplete candidate observations are retained for diagnostics,
+# but the incomplete set is never offered to provider interaction.
+setup_case deps-provider-partial-source-failure
+export MOGUET_TEST_INSPECTION_SCENARIO=deps-provider-partial-failure
+run_tty_ok 1 deps partial-provider-root
+assert_not_contains ":: provider dependency=" "$stdout_file"
+assert_contains "Incomplete provider candidate observations:" "$stdout_file"
+assert_contains \
+    "partial-provider-virtual>=1: source metadata is incomplete" \
+    "$stdout_file"
+assert_contains "observed candidates: aur/partial-provider-a" "$stdout_file"
+assert_contains \
+    "partial-provider-virtual>=1: result=Unknown, reason=source metadata is incomplete" \
+    "$stdout_file"
+assert_contains \
+    "Provider candidates for partial-provider-virtual>=1 are incomplete: source metadata is incomplete" \
+    "$stdout_file"
+echo "  ok: deps retains partial provider observations without prompting"
+
 setup_case plan-partial-failure
 export MOGUET_TEST_INSPECTION_SCENARIO=plan-partial-failure
-run_fail plan plan-first plan-fail plan-third
-assert_contains "Failed to plan build order for plan-fail: fixture plan failure" "$stderr_file"
-assert_before "  1. plan-first" "  1. plan-third" "$stdout_file"
-assert_single_blank_before_occurrence "Build plan:" 2 "$stdout_file"
+run_ok plan plan-first plan-fail plan-third
+assert_contains "AUR package metadata for plan-fail is unavailable: fixture plan failure" "$stdout_file"
+assert_before "  1. plan-first" "  2. plan-third" "$stdout_file"
+assert_exact_line_count 1 "Build plan:" "$stdout_file"
+assert_contains "Plan status: incomplete" "$stdout_file"
 assert_exact_command_before "aur info-strict plan-first" "aur info-strict plan-fail"
 assert_exact_command_before "aur info-strict plan-fail" "aur info-strict plan-third"
-echo "  ok: plan partial failure continues in target order"
+echo "  ok: plan retains ordinary failure as one incomplete invocation"
 
 setup_case plan-validation-position
 export MOGUET_TEST_INSPECTION_SCENARIO=plan-validation-position
 run_fail plan plan-first invalid/name plan-third
 assert_contains "Invalid package name: invalid/name" "$stderr_file"
-assert_not_contains "Failed to plan build order for invalid/name" "$stderr_file"
-assert_exact_line "aur info-strict plan-first" "$command_log"
-assert_not_contains "aur info-strict plan-third" "$command_log"
-echo "  ok: plan target validation remains outside the target catch"
+assert_not_contains "Failed to plan build order" "$stderr_file"
+if [ -s "$command_log" ]; then
+    fail_case "plan queried metadata before validating the whole invocation"
+fi
+echo "  ok: plan validates the whole invocation before metadata resolution"
 
 setup_case plan-provider-interactive-selection
 export MOGUET_TEST_INSPECTION_SCENARIO=plan-provider-interactive-selection
@@ -519,10 +540,10 @@ run_tty_ok 2 plan provider-root provider-root
 assert_contains_count 1 \
     ":: provider dependency=moguet-inspect-203-virtual-provider" \
     "$stdout_file"
-assert_contains_count 2 \
+assert_contains_count 1 \
     "moguet-inspect-203-virtual-provider -> aur/provider-a (selected)" \
     "$stdout_file"
-assert_contains_count 2 "  1. provider-a" "$stdout_file"
+assert_contains_count 1 "  1. provider-a" "$stdout_file"
 assert_not_contains "Plan status: incomplete" "$stdout_file"
 echo "  ok: plan reuses one interactive provider choice across targets"
 
@@ -533,7 +554,7 @@ assert_contains_count 1 \
     ":: provider dependency=moguet-inspect-203-virtual-provider" \
     "$stdout_file"
 assert_not_contains " (selected)" "$stdout_file"
-assert_contains_count 2 "Plan status: incomplete" "$stdout_file"
+assert_contains_count 1 "Plan status: incomplete" "$stdout_file"
 assert_no_git_mutation
 assert_not_contains "makepkg " "$command_log"
 assert_not_contains "sudo " "$command_log"
@@ -548,6 +569,31 @@ assert_not_contains " (selected)" "$stdout_file"
 assert_contains "Ambiguous provided dependencies:" "$stdout_file"
 assert_contains "Plan status: incomplete" "$stdout_file"
 echo "  ok: --noconfirm keeps an ambiguous provider fail-closed on a TTY"
+
+setup_case plan-provider-partial-source-failure
+export MOGUET_TEST_INSPECTION_SCENARIO=plan-provider-partial-failure
+run_tty_ok 1 plan partial-provider-root
+assert_not_contains ":: provider dependency=" "$stdout_file"
+assert_contains "Incomplete provider candidate observations:" "$stdout_file"
+assert_contains "observed candidates: aur/partial-provider-a" "$stdout_file"
+assert_contains "Plan status: incomplete" "$stdout_file"
+assert_contains \
+    "partial-provider-virtual>=1: result=Unknown, reason=source metadata is incomplete" \
+    "$stdout_file"
+echo "  ok: plan marks partial provider metadata incomplete without prompting"
+
+# Issue #351 F2: conflicts are invocation facts, so no candidate interaction is
+# allowed before both same-root and cross-root aggregation completes.
+setup_case plan-provider-conflict-before-prompt
+export MOGUET_TEST_INSPECTION_SCENARIO=plan-provider-conflict-before-prompt
+export MOGUET_TEST_ALPM_VERCMP_EXPECTED_LHS=2
+export MOGUET_TEST_ALPM_VERCMP_EXPECTED_RHS=2
+export MOGUET_TEST_ALPM_VERCMP_RESULT=0
+run_tty_fail 1 plan public-conflict-single-root
+assert_contains "is Conflicting" "$stdout_file"
+assert_not_contains ":: provider dependency=" "$stdout_file"
+assert_no_git_mutation
+echo "  ok: same-root conflict fails before provider interaction"
 
 # Issue #125: formatterはprivate helperのまま、repository metadataからplan表示へ流して固定する。
 setup_case plan-repository-size-formatter
@@ -598,7 +644,7 @@ assert_line_immediately_after "  result-malformed" "    Metadata       : unavail
 assert_line_immediately_after "  core/result-after-failure" "    Package size   : 1.00 KiB" "$stdout_file"
 assert_line_immediately_after "  core/result-later-target" "    Package size   : 2.00 KiB" "$stdout_file"
 assert_before "  result-query-failure" "  core/result-after-failure" "$stdout_file"
-assert_before "  result-query-failure" "  1. plan-result-later-root" "$stdout_file"
+assert_before "  1. plan-result-root" "  2. plan-result-later-root" "$stdout_file"
 assert_not_contains "Plan status: incomplete" "$stdout_file"
 echo "  ok: plan repository metadata preserves zero, absence, failure, and malformed states"
 
@@ -665,14 +711,14 @@ assert_not_contains "alpm sync-register" "$command_log"
 assert_not_contains "alpm sync-query" "$command_log"
 echo "  ok: plan skips repository metadata calls when no eligible edge exists"
 
-# sessionとquery cacheはcmd_plan invocation全体で共有するが、各targetのsectionは表示する。
+# sessionとquery cacheはcmd_plan invocation全体で共有し、invocation全体を単一planとして表示する。
 setup_case plan-repository-size-multi-target-cache
 export MOGUET_TEST_INSPECTION_SCENARIO=plan-repository-size-multi-target-cache
 export MOGUET_TEST_PACMAN_REPO_PACKAGES=cache-shared
 set_repository_metadata core cache-shared 991730 5283285
 run_ok plan plan-cache-first plan-cache-second
-assert_exact_line_count 2 "Repository package sizes:" "$stdout_file"
-assert_exact_line_count 2 "  core/cache-shared" "$stdout_file"
+assert_exact_line_count 1 "Repository package sizes:" "$stdout_file"
+assert_exact_line_count 1 "  core/cache-shared" "$stdout_file"
 assert_exact_line_count 1 "pacman-conf --verbose RootDir DBPath" "$command_log"
 assert_exact_line_count 1 "pacman-conf --repo-list" "$command_log"
 assert_exact_line_count 1 "alpm initialize" "$command_log"
@@ -680,7 +726,7 @@ assert_exact_line_count 1 "alpm sync-register core" "$command_log"
 assert_exact_line_count 1 "alpm sync-register extra" "$command_log"
 assert_exact_line_count 1 "alpm sync-query core/cache-shared" "$command_log"
 assert_exact_line_count 1 "alpm release" "$command_log"
-echo "  ok: plan shares one metadata session/query cache and renders each target"
+echo "  ok: plan shares one metadata session/query cache for the aggregate invocation"
 
 # open failureはplan本文とexit 0を維持し、後続targetでsession openを再試行しない。
 setup_case plan-repository-size-open-failure
@@ -690,9 +736,9 @@ export MOGUET_TEST_PACMAN_REPO_PACKAGES
 export MOGUET_TEST_PACKAGE_METADATA_INITIALIZE_FAILURE=1
 run_ok plan plan-open-failure-first plan-open-failure-second
 assert_exact_line "  1. plan-open-failure-first" "$stdout_file"
-assert_exact_line "  1. plan-open-failure-second" "$stdout_file"
-assert_exact_line_count 2 "Repository package sizes:" "$stdout_file"
-assert_exact_line_count 2 "  Metadata       : unavailable (initialization failed)" "$stdout_file"
+assert_exact_line "  2. plan-open-failure-second" "$stdout_file"
+assert_exact_line_count 1 "Repository package sizes:" "$stdout_file"
+assert_exact_line_count 1 "  Metadata       : unavailable (initialization failed)" "$stdout_file"
 assert_exact_line_count 1 "pacman-conf --verbose RootDir DBPath" "$command_log"
 assert_exact_line_count 1 "pacman-conf --repo-list" "$command_log"
 assert_exact_line_count 1 "alpm initialize" "$command_log"
@@ -708,7 +754,7 @@ MOGUET_TEST_PACMAN_REPO_PACKAGES='open-first-package open-second-package'
 export MOGUET_TEST_PACMAN_REPO_PACKAGES
 export MOGUET_TEST_PACMAN_CONF_REPOSITORY_LIST_EXIT_CODE=42
 run_ok plan plan-open-failure-first plan-open-failure-second
-assert_exact_line_count 2 "  Metadata       : unavailable (configuration unavailable)" "$stdout_file"
+assert_exact_line_count 1 "  Metadata       : unavailable (configuration unavailable)" "$stdout_file"
 assert_exact_line_count 1 "pacman-conf --verbose RootDir DBPath" "$command_log"
 assert_exact_line_count 1 "pacman-conf --repo-list" "$command_log"
 assert_not_contains "alpm initialize" "$command_log"
@@ -763,7 +809,6 @@ setup_case fetch-validation-position
 export MOGUET_TEST_INSPECTION_SCENARIO=fetch-validation-position
 run_fail fetch fetch-preflight-root invalid/name fetch-after-root
 assert_contains "Invalid package name: invalid/name" "$stderr_file"
-assert_not_contains "Failed to fetch repositories for invalid/name" "$stderr_file"
 if [ -s "$command_log" ]; then
     fail_case "fetch queried external metadata before all targets were valid"
 fi
@@ -828,7 +873,7 @@ echo "  ok: fetch ignores piped provider input and fails before cache or Git mut
 setup_case fetch-preflight-barrier
 export MOGUET_TEST_INSPECTION_SCENARIO=fetch-preflight-barrier
 run_fail fetch fetch-preflight-root fetch-guard-root fetch-after-root
-assert_contains "Failed to fetch repositories for fetch-guard-root: Cannot execute build plan for fetch-guard-root; cyclic dependencies: fetch-guard-root" "$stderr_file"
+assert_contains "Failed to fetch repositories for fetch-preflight-root, fetch-guard-root, fetch-after-root: Cannot execute build plan for fetch-preflight-root, fetch-guard-root, fetch-after-root; cyclic dependencies: fetch-guard-root" "$stderr_file"
 assert_exact_line "aur info-strict fetch-after-root" "$command_log"
 assert_no_git_mutation
 echo "  ok: fetch waits for every root preflight before mutation"
@@ -868,6 +913,32 @@ export MOGUET_TEST_INSPECTION_SCENARIO=deps-constraint-invalid
 run_fail deps constraint-invalid-root
 assert_contains "AUR package metadata constraint projection failed: constraint-invalid-root" "$stderr_file"
 
+# Issue #351 F5: an installed exact source is distinct from repository origin,
+# and local-database query failure remains a typed Unknown rather than absence.
+setup_case deps-installed-source-classification
+export MOGUET_TEST_INSPECTION_SCENARIO=deps-installed-source-classification
+export MOGUET_TEST_PACMAN_Q_OUTPUT='foreign-installed 1.0-1'
+run_ok deps installed-display-root
+assert_contains "Installed dependencies:" "$stdout_file"
+assert_exact_line_count 1 "  foreign-installed" "$stdout_file"
+assert_before "Installed dependencies:" "  foreign-installed" "$stdout_file"
+assert_before "  foreign-installed" "Official repo dependencies:" "$stdout_file"
+assert_exact_line "  None" "$stdout_file"
+echo "  ok: deps presents foreign installed exact packages as Installed"
+
+setup_case deps-installed-query-failure
+export MOGUET_TEST_INSPECTION_SCENARIO=deps-installed-query-failure
+run_ok deps installed-query-failure-root
+assert_contains \
+    "installed-query-failure>=1: result=Unknown, reason=metadata query failed" \
+    "$stdout_file"
+assert_contains \
+    "Installed package metadata for installed-query-failure is unavailable: installed database query failure" \
+    "$stdout_file"
+assert_exact_line "  installed-query-failure>=1" "$stdout_file"
+assert_before "Unknown dependencies:" "  installed-query-failure>=1" "$stdout_file"
+echo "  ok: deps distinguishes installed absence from database query failure"
+
 setup_case plan-constraint-incomplete
 export MOGUET_TEST_INSPECTION_SCENARIO=plan-constraint-incomplete
 export MOGUET_TEST_ALPM_VERCMP_EXPECTED_LHS=2.0-1
@@ -888,12 +959,37 @@ assert_contains "dependency constraint-leaf>=3 is Unsatisfied" "$stderr_file"
 assert_not_contains "git " "$command_log"
 echo "  ok: constraint preflight stops fetch before Git mutation"
 
-# execution phaseの失敗はentry単位。同じplanの後続entryと後続rootへ進む。
+setup_case fetch-provider-partial-source-firewall
+export MOGUET_TEST_INSPECTION_SCENARIO=fetch-provider-partial-failure
+run_tty_fail 1 fetch partial-provider-root
+assert_not_contains ":: provider dependency=" "$stdout_file"
+assert_contains "source metadata is incomplete" "$stdout_file"
+assert_cache_root_absent
+assert_no_git_mutation
+assert_not_contains "makepkg " "$command_log"
+assert_not_contains "sudo " "$command_log"
+echo "  ok: partial provider metadata blocks fetch before cache or Git mutation"
+
+setup_case fetch-multi-target-conflict-before-prompt
+export MOGUET_TEST_INSPECTION_SCENARIO=fetch-multi-target-conflict-before-prompt
+export MOGUET_TEST_ALPM_VERCMP_EXPECTED_LHS=2
+export MOGUET_TEST_ALPM_VERCMP_EXPECTED_RHS=2
+export MOGUET_TEST_ALPM_VERCMP_RESULT=0
+run_tty_fail 1 fetch public-conflict-root-a public-conflict-root-b
+assert_contains "is Conflicting" "$stdout_file"
+assert_not_contains ":: provider dependency=" "$stdout_file"
+assert_cache_root_absent
+assert_no_git_mutation
+assert_not_contains "makepkg " "$command_log"
+assert_not_contains "sudo " "$command_log"
+echo "  ok: cross-target conflict fails before provider interaction or mutation"
+
+# execution phaseの失敗はentry単位。aggregate planの後続entryへ進む。
 setup_case fetch-entry-continue
 export MOGUET_TEST_INSPECTION_SCENARIO=fetch-entry-continue
 export MOGUET_TEST_GIT_CLONE_FAIL_DESTINATION=fetch-entry-fail
 run_fail fetch fetch-exec-root fetch-later-root
-assert_contains "Failed to fetch repositories for fetch-exec-root: Failed to clone fetch-entry-fail." "$stderr_file"
+assert_contains "Failed to fetch repositories for fetch-exec-root, fetch-later-root: Failed to clone fetch-entry-fail." "$stderr_file"
 assert_exact_line "git clone https://aur.archlinux.org/fetch-entry-fail.git fetch-entry-fail" "$command_log"
 assert_exact_line "git clone https://aur.archlinux.org/fetch-entry-after.git fetch-entry-after" "$command_log"
 assert_exact_line "git clone https://aur.archlinux.org/fetch-exec-root.git fetch-exec-root" "$command_log"

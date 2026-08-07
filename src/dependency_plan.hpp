@@ -31,6 +31,7 @@ struct SelectedProvidedDependency {
 
 // 依存を official repo / AUR / provider / unknown に分けた結果。
 struct DependencyClassification {
+    std::vector<std::string>             installed;
     std::vector<std::string>             repo;
     std::vector<std::string>             aur;
     std::vector<std::string>             provided;
@@ -85,6 +86,7 @@ struct RootTargetIdentity {
 
 // ordinary metadata resolution failureを、confirmed absenceやschema failureと区別して保持する。
 enum class BuildPlanResolutionFailureKind {
+    InstalledPackageMetadataUnavailable,
     RepositoryMetadataUnavailable,
     AurPackageMetadataUnavailable,
     ProviderSearchUnavailable,
@@ -197,6 +199,17 @@ struct BuildPlanProvidedDependency {
     ProviderResolutionKind resolution = ProviderResolutionKind::Unique;
 };
 
+// Candidate observations remain available for diagnostics even when a source
+// failure means the complete provider set cannot be proven. Selection never
+// consumes this partial set.
+struct IncompleteProviderCandidateSet {
+    std::string                       dependency;
+    std::vector<ProvidedDependency>   observed_candidates;
+    ObservedVersionUnknownReason      reason;
+
+    bool operator==(const IncompleteProviderCandidateSet&) const = default;
+};
+
 // AUR package が宣言する conflicts / replaces を、解決済みと誤認せず plan に残す。
 // POLICY(#150): v1.x では installed/repo DB との照合や置換先選択を行わず、raw metadata を保持する。
 struct BuildPlanMetadataRisk {
@@ -219,6 +232,8 @@ struct BuildPlan {
     std::vector<AmbiguousProvidedDependency> ambiguous_providers;
     std::vector<std::string>                 unresolved;
     std::vector<std::string>                 cycles;
+    std::vector<IncompleteProviderCandidateSet>
+            incomplete_provider_candidate_sets;
 };
 
 std::vector<std::string> collect_build_dependencies(const AurPackageInfo& pkg);
@@ -248,6 +263,10 @@ BuildPlan resolve_build_plan_for_preflight(
 BuildPlan resolve_fetch_plan(const std::string& target);
 BuildPlan resolve_fetch_plan(
         const std::string& target,
+        const ProviderSelectionCallback& select_provider);
+BuildPlan resolve_fetch_plan(const std::vector<std::string>& targets);
+BuildPlan resolve_fetch_plan(
+        const std::vector<std::string>& targets,
         const ProviderSelectionCallback& select_provider);
 void require_compatible_selected_provider_package_identities(
         const BuildPlan& plan);

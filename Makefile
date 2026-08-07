@@ -249,20 +249,22 @@ AUR_RPC_ENVELOPE_VALIDATION_TEST_SRCS := \
 	$(SRC_DIR)/logging.cpp \
 	tests/stubs/package-metadata/alpm_stub.cpp
 # POLICY(#217): final sync CLI testはparser/routing/selection/executionを
-# productionのままlinkし、candidate search transportとAUR RPCだけを
-# deterministic stubへ差し替える。
+# productionのままlinkし、candidate search transport、AUR RPC、libalpm APIを
+# deterministic stubへ差し替える。repository adapter自体はproduction ownerを使う。
 COMMANDS_SYNC_TEST_SRCS := \
 	$(filter-out \
 		$(SRC_DIR)/aur_rpc.cpp \
 		$(SRC_DIR)/root_package_search.cpp, \
 		$(SRCS)) \
 	tests/stubs/commands-sync/aur_rpc_stub.cpp \
-	tests/stubs/commands-sync/root_package_search_stub.cpp
+	tests/stubs/commands-sync/root_package_search_stub.cpp \
+	tests/stubs/package-metadata/alpm_stub.cpp
 COMMANDS_SYNC_REQUIRED_PRODUCTION_TEST_SRCS = \
 	$(filter-out $(COMMANDS_SYNC_FORBIDDEN_TEST_SRCS),$(SRCS))
 COMMANDS_SYNC_REQUIRED_TEST_SUPPORT_SRCS := \
 	tests/stubs/commands-sync/aur_rpc_stub.cpp \
-	tests/stubs/commands-sync/root_package_search_stub.cpp
+	tests/stubs/commands-sync/root_package_search_stub.cpp \
+	tests/stubs/package-metadata/alpm_stub.cpp
 COMMANDS_SYNC_FORBIDDEN_TEST_SRCS := \
 	$(SRC_DIR)/aur_rpc.cpp \
 	$(SRC_DIR)/root_package_search.cpp
@@ -1074,9 +1076,10 @@ UPGRADE_ALL_COMMAND_FORBIDDEN_TEST_LDLIBS = $(LIBALPM_LDLIBS)
 COMMANDS_SYNC_TEST_CPPFLAGS = \
 	-DMOGUET_ENABLE_TEST_OVERRIDES \
 	-DMOGUET_ENABLE_TEST_CONFIG_PATH \
-	-I$(SRC_DIR)
-COMMANDS_SYNC_TEST_LDLIBS = $(MY_LDLIBS) $(LIBALPM_LDLIBS)
-COMMANDS_SYNC_FORBIDDEN_TEST_LDLIBS =
+	-I$(SRC_DIR) \
+	-Itests/stubs/package-metadata
+COMMANDS_SYNC_TEST_LDLIBS = $(MY_LDLIBS)
+COMMANDS_SYNC_FORBIDDEN_TEST_LDLIBS = $(LIBALPM_LDLIBS)
 
 COMMANDS_INSPECT_TEST_CPPFLAGS = \
 	-DMOGUET_ENABLE_TEST_OVERRIDES \
@@ -1959,7 +1962,6 @@ $(REPOSITORY_QUERY_TEST_TARGET): $(REPOSITORY_QUERY_TEST_SRCS) $(SRC_DIR)/reposi
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling repository query fake-symbol test binary"
 	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-DMOGUET_ENABLE_REPOSITORY_QUERY_TEST_HOOKS \
 		-I$(SRC_DIR) -Itests/stubs/package-metadata \
 		$(REPOSITORY_QUERY_TEST_SRCS) \
 		-o $@
@@ -2795,24 +2797,15 @@ test-build-plan-artifact-target-projection: check-build-plan-artifact-target-pro
 test-repository-query: $(REPOSITORY_QUERY_TEST_TARGET)
 	@set -e; for test_case in \
 		candidate-value-contract \
-		success \
+		configured-order \
+		present-later-failure \
+		absent-later-failure \
+		unrelated-malformed-exact \
+		provider-capabilities \
+		provider-partial-failure \
 		repository-named-aur \
-		legacy-malformed-candidates \
-		configuration-command-failure \
-		configuration-parse-failure \
-		unsafe-repository-name \
-		missing-sync-directory \
-		empty-repository-configuration \
-		missing-configured-database \
-		non-regular-configured-database \
-		database-read-failure \
-		empty-database \
-		malformed-database \
-		invalid-provided-dependency \
-		missing-package-version \
-		multiple-package-versions \
-		invalid-package-version \
-		partial-snapshot; do \
+		configuration-failure \
+		installed-exact-states; do \
 		$(abspath $(REPOSITORY_QUERY_TEST_TARGET)) $$test_case; \
 	done
 

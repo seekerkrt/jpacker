@@ -1009,16 +1009,20 @@ void test_internal_edges_propagate_roots_to_remote_subtree() {
                     one_way_remote, "remote-one-way-base",
                     {one_way_b, one_way_b + ">="}));
 
-    const LocalBuildPlan one_way_plan = resolve_local_build_plan(
-            one_way_metadata, "x86_64", reject_provider_selection());
+    bool malformed_projection_failed = false;
+    try {
+        static_cast<void>(resolve_local_build_plan(
+                one_way_metadata, "x86_64",
+                reject_provider_selection()));
+    } catch(const std::exception& error) {
+        malformed_projection_failed =
+                std::string(error.what()).find(
+                        "AUR package metadata constraint projection failed: " +
+                        one_way_remote) != std::string::npos;
+    }
     expect(
-            one_way_plan.failures().empty() &&
-                    one_way_plan.internal_edges().empty() &&
-                    contains_value(
-                            one_way_plan.build_plan().unresolved,
-                            one_way_remote) &&
-                    one_way_plan.build_plan().resolution_failures.size() == 1,
-            "Malformed typed AUR projection did not fail closed at its source boundary");
+            malformed_projection_failed,
+            "Malformed typed AUR projection was not rejected at its source boundary");
     expect_no_external_query_for(
             one_way_b, "One-way transitive local dependency");
 }
