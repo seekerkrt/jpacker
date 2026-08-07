@@ -2,7 +2,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Moguet 2.1.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-06 19:11+0900\n"
+"POT-Creation-Date: 2026-08-07 08:35+0900\n"
 "PO-Revision-Date: 2026-08-03 06:53+0900\n"
 "Last-Translator: Moguet contributors\n"
 "Language-Team: Japanese\n"
@@ -78,7 +78,7 @@ msgstr "インストール理由の指定が不明です。"
 #: src/artifact_install_executor.cpp:181
 #: src/local_source_metadata_evaluation.cpp:118
 #: src/package_base_artifact_install_executor.cpp:750
-#: src/package_metadata.cpp:816
+#: src/package_metadata.cpp:864
 #, c++-format
 msgid "{} failed with exit code {}."
 msgstr "{} は終了コード {} で失敗しました。"
@@ -6305,106 +6305,115 @@ msgstr "リポジトリパッケージデータベースを登録できません
 msgid "Failed to register a repository package database: {}."
 msgstr "リポジトリパッケージデータベースを登録できませんでした: {}。"
 
-#: src/package_metadata.cpp:547
+#: src/package_metadata.cpp:595
 #, c++-format
 msgid "Repository package search failed: {} reported no error detail."
 msgstr "リポジトリパッケージの検索に失敗しました: {} からエラーの詳細が報告されませんでした。"
 
-#: src/package_metadata.cpp:550
+#: src/package_metadata.cpp:598
 #, c++-format
 msgid "Repository package search failed: unknown {} error."
 msgstr "リポジトリパッケージの検索に失敗しました: 不明な {} エラー。"
 
-#: src/package_metadata.cpp:553
+#: src/package_metadata.cpp:601
 #, c++-format
 msgid "Repository package search failed: {}."
 msgstr "リポジトリパッケージの検索に失敗しました: {}。"
 
-#: src/package_metadata.cpp:576
+#: src/package_metadata.cpp:624
 msgid "Repository package search returned an invalid package entry."
 msgstr "リポジトリパッケージ検索が無効なパッケージ項目を返しました。"
 
-#: src/package_metadata.cpp:584
+#: src/package_metadata.cpp:632
 msgid "Repository package search metadata contains an invalid package name."
 msgstr "リポジトリパッケージ検索メタデータに無効なパッケージ名が含まれています。"
 
-#: src/package_metadata.cpp:616 src/package_metadata.cpp:769
-#: src/package_metadata.cpp:777
+#: src/package_metadata.cpp:664 src/package_metadata.cpp:817
+#: src/package_metadata.cpp:825 src/package_metadata.cpp:1364
 msgid "Repository package metadata contains an invalid package name."
 msgstr "リポジトリパッケージメタデータに無効なパッケージ名が含まれています。"
 
-#: src/package_metadata.cpp:626
+#: src/package_metadata.cpp:674
 msgid "Repository package metadata contains an invalid package size."
 msgstr "リポジトリパッケージメタデータに無効なパッケージサイズが含まれています。"
 
-#: src/package_metadata.cpp:644
+#: src/package_metadata.cpp:692
 msgid "No package repositories are configured for foreign package inventory."
 msgstr "外部パッケージ一覧に使用できるパッケージリポジトリが設定されていません。"
 
-#: src/package_metadata.cpp:732 src/package_metadata.cpp:1041
+#: src/package_metadata.cpp:780 src/package_metadata.cpp:1129
 msgid "Local package cache contains an invalid package entry."
 msgstr "ローカルパッケージキャッシュに無効なパッケージ項目が含まれています。"
 
-#: src/package_metadata.cpp:741 src/package_metadata.cpp:749
-#: src/package_metadata.cpp:1050 src/package_metadata.cpp:1058
+#: src/package_metadata.cpp:789 src/package_metadata.cpp:797
+#: src/package_metadata.cpp:1138 src/package_metadata.cpp:1146
 msgid "Local package metadata contains an invalid package name."
 msgstr "ローカルパッケージメタデータに無効なパッケージ名が含まれています。"
 
-#: src/package_metadata.cpp:789
+#: src/package_metadata.cpp:837
 msgid "Foreign package metadata contains an invalid version."
 msgstr "外部パッケージメタデータに無効なバージョンが含まれています。"
 
-#: src/package_metadata.cpp:831
+#: src/package_metadata.cpp:879
 #, c++-format
 msgid "{} repository list failed with exit code {}."
 msgstr "{} によるリポジトリ一覧の取得が終了コード {} で失敗しました。"
 
-#: src/package_metadata.cpp:854
+#: src/package_metadata.cpp:902
 #, c++-format
 msgid "{} repository Usage query failed with exit code {}."
 msgstr "{} によるリポジトリの Usage 照会が終了コード {} で失敗しました。"
 
-#: src/package_metadata.cpp:980 src/package_metadata.cpp:1028
+#: src/package_metadata.cpp:1028 src/package_metadata.cpp:1077
+#: src/package_metadata.cpp:1116
 msgid "Package metadata session is not open."
 msgstr "パッケージメタデータセッションが開かれていません。"
 
-#: src/package_metadata.cpp:985 src/package_metadata.cpp:1186
+#: src/package_metadata.cpp:1033 src/package_metadata.cpp:1082
+#: src/package_metadata.cpp:1274 src/package_metadata.cpp:1312
+#: src/package_metadata.cpp:1411
 msgid "Package name is invalid."
 msgstr "パッケージ名が無効です。"
 
-#: src/package_metadata.cpp:1005
+#: src/package_metadata.cpp:1053 src/package_metadata.cpp:1099
 msgid "Installed package metadata contains an invalid package name."
 msgstr "インストール済みパッケージのメタデータに無効なパッケージ名が含まれています。"
 
-#: src/package_metadata.cpp:1013
+#: src/package_metadata.cpp:1061
 msgid "Installed package metadata contains an invalid version."
 msgstr "インストール済みパッケージのメタデータに無効なバージョンが含まれています。"
 
-#: src/package_metadata.cpp:1066
+#: src/package_metadata.cpp:1154
 msgid "Local package metadata contains an invalid version."
 msgstr "ローカルパッケージメタデータに無効なバージョンが含まれています。"
 
-#: src/package_metadata.cpp:1075
+#: src/package_metadata.cpp:1163
 msgid "Local package metadata contains a duplicate package name."
 msgstr "ローカルパッケージメタデータに重複したパッケージ名が含まれています。"
 
-#: src/package_metadata.cpp:1181 src/package_metadata.cpp:1219
+#: src/package_metadata.cpp:1269 src/package_metadata.cpp:1307
+#: src/package_metadata.cpp:1504
 msgid "Repository package metadata session is not open."
 msgstr "リポジトリパッケージメタデータセッションが開かれていません。"
 
-#: src/package_metadata.cpp:1199
+#: src/package_metadata.cpp:1287 src/package_metadata.cpp:1318
+#: src/package_metadata.cpp:1417
 msgid "Requested repository is not configured."
 msgstr "要求されたリポジトリは設定されていません。"
 
-#: src/package_metadata.cpp:1225
+#: src/package_metadata.cpp:1480
+msgid "Repository package metadata query returned an invalid source result."
+msgstr "リポジトリパッケージメタデータの問い合わせが無効なソース結果を返しました。"
+
+#: src/package_metadata.cpp:1510
 msgid "Repository package search query is invalid."
 msgstr "リポジトリパッケージの検索クエリが無効です。"
 
-#: src/package_metadata.cpp:1279
+#: src/package_metadata.cpp:1564
 msgid "Repository package group metadata contains an invalid group name."
 msgstr "リポジトリパッケージグループのメタデータに無効なグループ名が含まれています。"
 
-#: src/package_metadata.cpp:1324
+#: src/package_metadata.cpp:1609
 msgid "Repository package group contains an invalid package source."
 msgstr "リポジトリパッケージグループに無効なパッケージ取得元が含まれています。"
 

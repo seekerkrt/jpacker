@@ -89,12 +89,17 @@ struct RepositoryPackageState {
     alpm_errno_t      query_error = ALPM_ERR_DB_OPEN;
     std::string       returned_name;
     std::string       version;
+    bool              version_is_null = false;
     std::string       description;
     off_t             package_size = 0;
     off_t             installed_size = 0;
     bool              name_is_null = false;
     bool              should_preserve_query_error = false;
     alpm_errno_t      preserved_query_error = ALPM_ERR_DB_OPEN;
+    std::vector<package_metadata_test_stub::RepositoryProvidedPackageMetadata>
+            provides;
+    std::vector<alpm_depend_t> provide_dependencies;
+    std::vector<alpm_list_t>   provide_nodes;
 };
 
 struct RepositorySearchBehavior {
@@ -558,6 +563,38 @@ RepositoryPackageState& repository_package_state(
     return g_state.repository_packages[{repository_name, package_name}];
 }
 
+void rebuild_repository_provides(RepositoryPackageState& package_state) {
+    package_state.provide_dependencies.clear();
+    package_state.provide_dependencies.reserve(package_state.provides.size());
+    for(auto& provided : package_state.provides) {
+        package_state.provide_dependencies.push_back(alpm_depend_t{
+                provided.package_name.has_value()
+                        ? provided.package_name->data()
+                        : nullptr,
+                provided.version.has_value()
+                        ? provided.version->data()
+                        : nullptr,
+                nullptr,
+                0,
+                provided.relation});
+    }
+
+    package_state.provide_nodes.resize(
+            package_state.provide_dependencies.size());
+    for(std::size_t index = 0;
+        index < package_state.provide_nodes.size();
+        ++index) {
+        package_state.provide_nodes[index] = alpm_list_t{
+                &package_state.provide_dependencies[index],
+                index == 0
+                        ? nullptr
+                        : &package_state.provide_nodes[index - 1],
+                index + 1 == package_state.provide_nodes.size()
+                        ? nullptr
+                        : &package_state.provide_nodes[index + 1]};
+    }
+}
+
 RepositoryPackageState* repository_package_state(alpm_pkg_t* package) {
     if(package == nullptr || package->kind != AlpmStubDatabaseKind::Sync) return nullptr;
     auto package_state = g_state.repository_packages.find(
@@ -866,6 +903,35 @@ void set_repository_package_metadata(
     package_state.returned_name = package_name;
     package_state.package_size = package_size;
     package_state.installed_size = installed_size;
+}
+
+void set_repository_package_version(
+        const std::string& repository_name,
+        const std::string& package_name,
+        const std::string& version) {
+    RepositoryPackageState& package_state =
+            repository_package_state(repository_name, package_name);
+    package_state.version = version;
+    package_state.version_is_null = false;
+}
+
+void set_repository_package_version_null(
+        const std::string& repository_name,
+        const std::string& package_name) {
+    RepositoryPackageState& package_state =
+            repository_package_state(repository_name, package_name);
+    package_state.version.clear();
+    package_state.version_is_null = true;
+}
+
+void set_repository_package_provides(
+        const std::string& repository_name,
+        const std::string& package_name,
+        const std::vector<RepositoryProvidedPackageMetadata>& provides) {
+    RepositoryPackageState& package_state =
+            repository_package_state(repository_name, package_name);
+    package_state.provides = provides;
+    rebuild_repository_provides(package_state);
 }
 
 void set_repository_package_returned_name(
@@ -1534,13 +1600,21 @@ const char* alpm_pkg_get_version(alpm_pkg_t* package) {
     if(package == nullptr) return nullptr;
     if(package->kind == AlpmStubDatabaseKind::Sync) {
         RepositoryPackageState* package_state = repository_package_state(package);
-        if(package_state == nullptr) return nullptr;
+        if(package_state == nullptr || package_state->version_is_null) return nullptr;
         return package_state->version.c_str();
     }
     set_handle_error(package->handle, ALPM_ERR_OK);
     LocalPackageState* package_state = local_package_state(package);
     if(package_state == nullptr || package_state->version_is_null) return nullptr;
     return package_state->version.c_str();
+}
+
+alpm_list_t* alpm_pkg_get_provides(alpm_pkg_t* package) {
+    RepositoryPackageState* package_state = repository_package_state(package);
+    if(package_state == nullptr || package_state->provide_nodes.empty()) {
+        return nullptr;
+    }
+    return package_state->provide_nodes.data();
 }
 
 const char* alpm_pkg_get_desc(alpm_pkg_t* package) {
