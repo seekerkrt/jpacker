@@ -1,0 +1,89 @@
+#pragma once
+
+#include "dependency_constraint.hpp"
+#include "package_metadata.hpp"
+
+#include <cstddef>
+#include <string>
+#include <variant>
+#include <vector>
+
+struct InstalledExactPackage {
+    std::string     package_name;
+    ObservedVersion observed_version;
+};
+
+struct InstalledExactPackageAbsent {
+    std::string package_name;
+};
+
+struct InstalledExactPackageQueryFailure {
+    std::string            package_name;
+    PackageMetadataFailure failure;
+};
+
+using InstalledExactPackageObservationResult = std::variant<
+        InstalledExactPackage,
+        InstalledExactPackageAbsent,
+        InstalledExactPackageQueryFailure>;
+
+struct ConfiguredRepositoryIdentity {
+    std::string repository_name;
+    std::size_t configured_order;
+
+    bool operator==(const ConfiguredRepositoryIdentity&) const = default;
+};
+
+struct RepositoryProviderCapability {
+    ProviderCapability capability;
+    ObservedVersion    provided_version;
+};
+
+struct RepositoryExactPackage {
+    ConfiguredRepositoryIdentity             repository;
+    std::string                              package_name;
+    ObservedVersion                          package_version;
+    std::vector<RepositoryProviderCapability> provides;
+};
+
+struct RepositoryExactPackageAbsent {
+    ConfiguredRepositoryIdentity repository;
+    std::string                  package_name;
+};
+
+using RepositoryExactPackageSourceFailureReason = std::variant<
+        PackageMetadataFailure,
+        DependencyConstraintParseFailure>;
+
+struct RepositoryExactPackageSourceFailure {
+    ConfiguredRepositoryIdentity             repository;
+    std::string                              package_name;
+    RepositoryExactPackageSourceFailureReason reason;
+};
+
+using RepositoryExactPackageSourceResult = std::variant<
+        RepositoryExactPackage,
+        RepositoryExactPackageAbsent,
+        RepositoryExactPackageSourceFailure>;
+
+struct RepositoryExactPackageObservation {
+    std::vector<std::string>                       configured_repository_order;
+    std::vector<RepositoryExactPackageSourceResult> source_results;
+};
+
+struct RepositoryExactPackageObservationFailure {
+    std::string            package_name;
+    PackageMetadataFailure failure;
+};
+
+using RepositoryExactPackageObservationResult = std::variant<
+        RepositoryExactPackageObservation,
+        RepositoryExactPackageObservationFailure>;
+
+InstalledExactPackageObservationResult observe_installed_exact_package(
+        const PackageMetadataSession& session,
+        const std::string& package_name);
+
+RepositoryExactPackageObservationResult observe_repository_exact_package(
+        const PacmanRepositoryConfiguration& configuration,
+        const std::string& package_name);
