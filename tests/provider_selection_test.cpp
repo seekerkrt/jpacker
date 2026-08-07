@@ -40,6 +40,35 @@ ProvidedDependency aur_candidate(
             std::move(package_version));
 }
 
+ProvidedDependency typed_aur_candidate(
+        const std::string& capability_specification,
+        const std::string& package_version) {
+    ProviderCapabilityParseResult parsed =
+            parse_provider_capability(capability_specification);
+    const ProviderCapability* capability = parsed.capability();
+    if(capability == nullptr) {
+        throw std::runtime_error(
+                "typed provider test capability did not parse");
+    }
+    ObservedVersion provided_version = capability->version().has_value()
+            ? ObservedVersion::available(
+                      ObservedVersionSource::AurProviderCapability,
+                      capability->version().value())
+            : ObservedVersion::unknown(
+                      ObservedVersionSource::AurProviderCapability,
+                      ObservedVersionUnknownReason::
+                              UnversionedProviderCapability);
+    return ProvidedDependency::from_aur_constraint_metadata(
+            "shared-provider",
+            "shared-provider-base",
+            ProviderConstraintMetadata{
+                    *capability,
+                    ObservedVersion::available(
+                            ObservedVersionSource::AurExactPackage,
+                            package_version),
+                    std::move(provided_version)});
+}
+
 std::vector<ProvidedDependency> candidates() {
     return {repository_candidate(), aur_candidate()};
 }
@@ -470,6 +499,51 @@ void test_canonical_dependency_reuses_source_aware_choice() {
             "reused provider choice consumed another input line");
 }
 
+void test_choice_reuse_returns_current_typed_capability_without_reordering() {
+    std::istringstream input("2\n1\n");
+    std::ostringstream output;
+    ProviderSelectionSession session(input, output, true);
+    const std::vector<ProvidedDependency> initial_candidates{
+            repository_candidate(),
+            typed_aur_candidate("virtual-dependency=3", "8.0-1")};
+
+    const std::optional<ProvidedDependency> selected =
+            session.select_provider(
+                    "virtual-dependency>=2", initial_candidates);
+    expect(
+            selected.has_value() &&
+                    selected->constraint_metadata.has_value() &&
+                    selected->constraint_metadata->provided_capability
+                                    .raw_specification() ==
+                            "virtual-dependency=3",
+            "Initial typed AUR capability was not selected explicitly");
+
+    const std::vector<ProvidedDependency> current_candidates{
+            repository_candidate("1.3.0-1"),
+            typed_aur_candidate("virtual-dependency=1", "9.0-1")};
+    const std::string output_before_reuse = output.str();
+    const std::optional<ProvidedDependency> refreshed =
+            session.select_provider(
+                    "virtual-dependency<9", current_candidates);
+    expect(
+            refreshed.has_value() &&
+                    refreshed.value() == current_candidates[1] &&
+                    refreshed->constraint_metadata.has_value() &&
+                    refreshed->constraint_metadata->provided_capability
+                                    .raw_specification() ==
+                            "virtual-dependency=1",
+            "Choice reuse did not return the current typed capability");
+    expect(
+            output.str() == output_before_reuse,
+            "Typed capability refresh prompted or changed candidate policy");
+
+    std::string unread_input;
+    expect(
+            static_cast<bool>(std::getline(input, unread_input)) &&
+                    unread_input == "1",
+            "Typed capability refresh consumed a new selection");
+}
+
 void test_missing_previous_identity_throws_typed_conflict() {
     std::istringstream input("2\n");
     std::ostringstream output;
@@ -581,6 +655,7 @@ int main() {
         test_cancelled_dependency_does_not_prompt_or_read_again();
         test_eof_dependency_does_not_prompt_again();
         test_canonical_dependency_reuses_source_aware_choice();
+        test_choice_reuse_returns_current_typed_capability_without_reordering();
         test_missing_previous_identity_throws_typed_conflict();
         test_cross_dependency_package_identity_conflicts();
         test_cross_dependency_same_identity_is_allowed();

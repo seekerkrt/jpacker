@@ -373,7 +373,14 @@ done <<'CASES'
 version-control|field Version contains a control character
 semantic-provides-control|field Provides[0] contains a control character
 semantic-provides-malformed|field Provides[0] contains an invalid version constraint
+semantic-provides-non-equality|field Provides[0] contains an invalid version constraint
+semantic-provides-empty-version|field Provides[0] contains an invalid version constraint
 CASES
+
+setup_case strict-constraint-metadata-projection
+run_envelope_ok constraint-metadata-strict arrays-valid
+assert_contains "arrays-valid|arrays-valid|1|1|1|1" "$output_file"
+assert_command_log_empty
 
 setup_case strict-envelope-search-type
 run_envelope_fail provides-strict strict-search-wrong-type

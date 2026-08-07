@@ -1,5 +1,7 @@
 #pragma once
 
+#include "aur_constraint_metadata.hpp"
+
 #include <cstddef>
 #include <map>
 #include <optional>
@@ -23,6 +25,8 @@ struct AurPackageInfo {
     std::vector<std::string> Replaces;
     std::string              Maintainer;
     std::optional<long long> OutOfDate;
+    // Non-JSON Slice 4 projection populated once by the production RPC parser.
+    std::optional<AurPackageConstraintMetadata> constraint_metadata;
 };
 
 // AUR RPC の parse/schema/semantic violation。transport failure や not-found と区別して伝播する。
