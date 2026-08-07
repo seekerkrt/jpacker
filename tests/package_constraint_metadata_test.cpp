@@ -514,6 +514,47 @@ void test_repository_provides_use_equality_only_capabilities() {
             "Provider package version was substituted for capability version");
 }
 
+void test_repository_provides_reject_empty_unversioned_metadata() {
+    stub::reset_alpm_stub();
+    stub::set_repository_package_metadata(
+            "core", "empty-unversioned-provider", 10, 20);
+    stub::set_repository_package_version(
+            "core", "empty-unversioned-provider", "7.0-1");
+    stub::set_repository_package_provides(
+            "core",
+            "empty-unversioned-provider",
+            {stub::RepositoryProvidedPackageMetadata{
+                    std::string("foo"),
+                    std::string(""),
+                    ALPM_DEP_MOD_ANY}});
+    stub::set_repository_package_absent(
+            "extra", "empty-unversioned-provider");
+    PacmanRepositoryConfiguration configuration = repository_configuration();
+
+    const RepositoryExactPackageObservation& observation =
+            require_repository_observation(
+                    observe_repository_exact_package(
+                            configuration,
+                            "empty-unversioned-provider"),
+                    "empty unversioned repository Provide");
+    const RepositoryExactPackageSourceFailure& source_failure =
+            require_alternative<RepositoryExactPackageSourceFailure>(
+                    observation.source_results[0],
+                    "empty unversioned provider source failure");
+    const DependencyConstraintParseFailure& parse_failure =
+            require_alternative<DependencyConstraintParseFailure>(
+                    source_failure.reason,
+                    "empty unversioned provider parse failure");
+    expect(
+            source_failure.repository ==
+                            ConfiguredRepositoryIdentity{"core", 0} &&
+                    parse_failure.kind ==
+                            DependencyConstraintParseFailureKind::
+                                    UnsupportedProviderOperator &&
+                    parse_failure.raw_specification == "foo>",
+            "Empty unversioned repository Provide became a valid capability");
+}
+
 void test_repository_provides_reject_non_equality_operator() {
     stub::reset_alpm_stub();
     stub::set_repository_package_metadata(
@@ -568,6 +609,7 @@ int main() {
         test_global_repository_open_failure_remains_top_level();
         test_repository_missing_and_invalid_versions_are_typed();
         test_repository_provides_use_equality_only_capabilities();
+        test_repository_provides_reject_empty_unversioned_metadata();
         test_repository_provides_reject_non_equality_operator();
     } catch(const std::exception& error) {
         std::cerr << "package constraint metadata test failed: "

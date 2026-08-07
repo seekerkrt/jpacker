@@ -27,7 +27,7 @@ std::string provider_capability_specification(
         case RepositoryProvidedPackageRelation::Unversioned:
             // A version attached to an unversioned relation is malformed rather
             // than an equality capability inferred by the adapter.
-            return version.empty()
+            return !metadata.version.has_value()
                     ? package_name
                     : package_name + ">" + version;
         case RepositoryProvidedPackageRelation::Equal:
