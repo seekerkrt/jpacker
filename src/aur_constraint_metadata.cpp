@@ -106,6 +106,27 @@ AurProviderDependencyProjectionFailure invalid_candidate_failure(
             failure.reason};
 }
 
+AurProviderDependencyProjectionFailure provider_identity_changed_failure(
+        const AurProviderDependencyProjection& selected) {
+    return AurProviderDependencyProjectionFailure{
+            selected.requirement,
+            selected.provider.package_name,
+            selected.provider.package_base,
+            AurProviderProjectionFailureKind::ProviderIdentityChanged,
+            std::nullopt};
+}
+
+AurProviderDependencyProjectionFailure refreshed_invalid_candidate_failure(
+        const AurProviderDependencyProjection& selected,
+        const AurConstraintMetadataProjectionFailure& failure) {
+    return AurProviderDependencyProjectionFailure{
+            selected.requirement,
+            selected.provider.package_name,
+            selected.provider.package_base,
+            AurProviderProjectionFailureKind::InvalidCandidateMetadata,
+            failure.reason};
+}
+
 AurProviderDependencyProjectionResult project_available_aur_provider(
         const ConsumerDependencyRequirement& requirement,
         const AurPackageConstraintMetadata& metadata) {
@@ -234,23 +255,55 @@ project_aur_provider_dependencies(
 AurProviderDependencyProjectionResult refresh_aur_provider_dependency(
         const AurProviderDependencyProjection& selected,
         const AurProviderCandidateMetadata& current_metadata) {
+    if(!std::holds_alternative<AurProviderOrigin>(selected.provider.origin)) {
+        return provider_identity_changed_failure(selected);
+    }
+
     if(const auto* current =
                std::get_if<AurPackageConstraintMetadata>(&current_metadata);
        current != nullptr) {
-        if(!std::holds_alternative<AurProviderOrigin>(
-                   selected.provider.origin) ||
-           selected.provider.package_name != current->package_name ||
+        if(selected.provider.package_name != current->package_name ||
            selected.provider.package_base != current->package_base) {
-            return AurProviderDependencyProjectionFailure{
-                    selected.requirement,
-                    current->package_name,
-                    current->package_base,
-                    AurProviderProjectionFailureKind::ProviderIdentityChanged,
-                    std::nullopt};
+            return provider_identity_changed_failure(selected);
         }
+        // Re-run the projection from the current capability list. The
+        // previously selected capability/version is never accepted as refresh
+        // input.
+        return project_available_aur_provider(selected.requirement, *current);
     }
-    // Re-run the projection from the current capability list. The previously
-    // selected capability/version is never accepted as refresh input.
-    return project_aur_provider_dependency(
-            selected.requirement, current_metadata);
+
+    if(const auto* unavailable =
+               std::get_if<AurProviderMetadataUnavailable>(
+                       &current_metadata);
+       unavailable != nullptr) {
+        const bool package_name_changed =
+                !unavailable->package_name.empty() &&
+                selected.provider.package_name != unavailable->package_name;
+        const bool package_base_changed =
+                unavailable->package_base.has_value() &&
+                selected.provider.package_base !=
+                        unavailable->package_base.value();
+        if(package_name_changed || package_base_changed) {
+            return provider_identity_changed_failure(selected);
+        }
+        return AurProviderDependencyUnknown{
+                selected.requirement,
+                selected.provider.package_name,
+                selected.provider.package_base,
+                unavailable->reason};
+    }
+
+    const AurConstraintMetadataProjectionFailure& failure =
+            std::get<AurConstraintMetadataProjectionFailure>(
+                    current_metadata);
+    const bool package_name_changed =
+            !failure.package_name.empty() &&
+            selected.provider.package_name != failure.package_name;
+    const bool package_base_changed =
+            !failure.package_base.empty() &&
+            selected.provider.package_base != failure.package_base;
+    if(package_name_changed || package_base_changed) {
+        return provider_identity_changed_failure(selected);
+    }
+    return refreshed_invalid_candidate_failure(selected, failure);
 }

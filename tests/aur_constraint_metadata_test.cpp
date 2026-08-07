@@ -76,6 +76,48 @@ AurPackageConstraintMetadata project_package(
             result, context);
 }
 
+AurProviderDependencyProjection selected_aur_provider() {
+    AurPackageInfo package = package_info(
+            "provider", "provider-base", "8.0-1");
+    package.Provides = {"virtual-api=3"};
+    return require_alternative<AurProviderDependencyProjection>(
+            project_aur_provider_dependency(
+                    consumer_requirement("virtual-api>=2"),
+                    project_package(package, "selected AUR provider")),
+            "selected AUR provider projection");
+}
+
+AurConstraintMetadataProjectionFailure malformed_provider_metadata(
+        std::string package_name, std::string package_base) {
+    return AurConstraintMetadataProjectionFailure{
+            std::move(package_name),
+            std::move(package_base),
+            AurConstraintMetadataField::Provides,
+            0,
+            DependencyConstraintParseFailure{
+                    DependencyConstraintParseFailureKind::
+                            UnsupportedProviderOperator,
+                    "virtual-api>=3"}};
+}
+
+void expect_refresh_identity_changed(
+        const AurProviderDependencyProjectionResult& result,
+        const AurProviderDependencyProjection& selected,
+        const std::string& context) {
+    const AurProviderDependencyProjectionFailure& failure =
+            require_alternative<AurProviderDependencyProjectionFailure>(
+                    result, context);
+    expect(
+            failure.kind == AurProviderProjectionFailureKind::
+                                    ProviderIdentityChanged &&
+                    failure.package_name == selected.provider.package_name &&
+                    failure.package_base == std::optional<std::string>(
+                                                    selected.provider
+                                                            .package_base) &&
+                    !failure.metadata_failure.has_value(),
+            context + ": selected provider identity was not retained");
+}
+
 ConsumerDependencyRequirement require_consumer(
         const DependencyRequirement& requirement,
         const std::string& context) {
@@ -294,6 +336,130 @@ void test_partial_candidate_failure_preserves_order_and_identity() {
             "Partial AUR candidate failure changed order or source identity");
 }
 
+void test_refresh_unavailable_metadata_preserves_selected_identity() {
+    const AurProviderDependencyProjection selected = selected_aur_provider();
+
+    const AurProviderDependencyUnknown& same_identity =
+            require_alternative<AurProviderDependencyUnknown>(
+                    refresh_aur_provider_dependency(
+                            selected,
+                            AurProviderMetadataUnavailable{
+                                    "provider",
+                                    std::optional<std::string>(
+                                            "provider-base"),
+                                    ObservedVersionUnknownReason::
+                                            PartialSourceFailure}),
+                    "same-identity unavailable metadata");
+    expect(
+            same_identity.requirement == selected.requirement &&
+                    same_identity.package_name ==
+                            selected.provider.package_name &&
+                    same_identity.package_base ==
+                            std::optional<std::string>(
+                                    selected.provider.package_base) &&
+                    same_identity.reason == ObservedVersionUnknownReason::
+                                                    PartialSourceFailure,
+            "Unavailable metadata lost selected identity or failure reason");
+
+    const AurProviderDependencyUnknown& missing_package_base =
+            require_alternative<AurProviderDependencyUnknown>(
+                    refresh_aur_provider_dependency(
+                            selected,
+                            AurProviderMetadataUnavailable{
+                                    "provider",
+                                    std::nullopt,
+                                    ObservedVersionUnknownReason::
+                                            MetadataQueryFailure}),
+                    "unavailable PackageBase metadata");
+    expect(
+            missing_package_base.requirement == selected.requirement &&
+                    missing_package_base.package_name ==
+                            selected.provider.package_name &&
+                    missing_package_base.package_base ==
+                            std::optional<std::string>(
+                                    selected.provider.package_base) &&
+                    missing_package_base.reason ==
+                            ObservedVersionUnknownReason::MetadataQueryFailure,
+            "Unknown PackageBase discarded selected identity or query failure");
+}
+
+void test_refresh_rejects_known_unavailable_identity_changes() {
+    const AurProviderDependencyProjection selected = selected_aur_provider();
+
+    expect_refresh_identity_changed(
+            refresh_aur_provider_dependency(
+                    selected,
+                    AurProviderMetadataUnavailable{
+                            "changed-provider",
+                            std::optional<std::string>("provider-base"),
+                            ObservedVersionUnknownReason::PartialSourceFailure}),
+            selected,
+            "unavailable provider Name change");
+    expect_refresh_identity_changed(
+            refresh_aur_provider_dependency(
+                    selected,
+                    AurProviderMetadataUnavailable{
+                            "provider",
+                            std::optional<std::string>("changed-base"),
+                            ObservedVersionUnknownReason::PartialSourceFailure}),
+            selected,
+            "unavailable provider PackageBase change");
+}
+
+void test_refresh_malformed_metadata_checks_and_preserves_identity() {
+    const AurProviderDependencyProjection selected = selected_aur_provider();
+    const AurConstraintMetadataProjectionFailure same_identity_metadata =
+            malformed_provider_metadata("provider", "provider-base");
+    const AurProviderDependencyProjectionFailure& same_identity =
+            require_alternative<AurProviderDependencyProjectionFailure>(
+                    refresh_aur_provider_dependency(
+                            selected, same_identity_metadata),
+                    "same-identity malformed metadata");
+    expect(
+            same_identity.requirement == selected.requirement &&
+                    same_identity.package_name ==
+                            selected.provider.package_name &&
+                    same_identity.package_base ==
+                            std::optional<std::string>(
+                                    selected.provider.package_base) &&
+                    same_identity.kind == AurProviderProjectionFailureKind::
+                                                  InvalidCandidateMetadata &&
+                    same_identity.metadata_failure ==
+                            std::optional<DependencyConstraintParseFailure>(
+                                    same_identity_metadata.reason),
+            "Malformed metadata lost selected identity or parse failure");
+
+    expect_refresh_identity_changed(
+            refresh_aur_provider_dependency(
+                    selected,
+                    malformed_provider_metadata(
+                            "changed-provider", "provider-base")),
+            selected,
+            "malformed provider Name change");
+    expect_refresh_identity_changed(
+            refresh_aur_provider_dependency(
+                    selected,
+                    malformed_provider_metadata("provider", "changed-base")),
+            selected,
+            "malformed provider PackageBase change");
+}
+
+void test_refresh_rejects_non_aur_selected_origin() {
+    AurProviderDependencyProjection selected = selected_aur_provider();
+    selected.provider =
+            ProvidedDependency::from_repository("core", "provider");
+
+    expect_refresh_identity_changed(
+            refresh_aur_provider_dependency(
+                    selected,
+                    AurProviderMetadataUnavailable{
+                            "provider",
+                            std::optional<std::string>("provider-base"),
+                            ObservedVersionUnknownReason::PartialSourceFailure}),
+            selected,
+            "non-AUR selected provider origin");
+}
+
 void test_refresh_reprojects_current_capability() {
     const ConsumerDependencyRequirement requirement =
             consumer_requirement("virtual-api>=2");
@@ -329,6 +495,10 @@ void test_refresh_reprojects_current_capability() {
                     same_provider_identity(
                             refreshed.provider, selected.provider) &&
                     refreshed.provider.constraint_metadata.has_value() &&
+                    refreshed.provider.constraint_metadata->package_version
+                                    .version() != nullptr &&
+                    *refreshed.provider.constraint_metadata->package_version
+                                     .version() == "9.0-1" &&
                     refreshed.provider.constraint_metadata
                                     ->provided_capability.raw_specification() ==
                             "virtual-api=1" &&
@@ -370,6 +540,10 @@ int main() {
         test_provides_equality_only_and_version_separation();
         test_provides_reject_non_equality_and_present_empty();
         test_partial_candidate_failure_preserves_order_and_identity();
+        test_refresh_unavailable_metadata_preserves_selected_identity();
+        test_refresh_rejects_known_unavailable_identity_changes();
+        test_refresh_malformed_metadata_checks_and_preserves_identity();
+        test_refresh_rejects_non_aur_selected_origin();
         test_refresh_reprojects_current_capability();
         std::cout << "AUR constraint metadata tests passed\n";
     } catch(const std::exception& error) {
