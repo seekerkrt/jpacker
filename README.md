@@ -89,6 +89,12 @@ detailed plan.
   build, or install. `fetch` clones missing repositories or runs only
   `git fetch origin` for an existing clone; it does not pull, merge, reset,
   advance the working tree, build, or install.
+- Dependency edges retain the typed requirement, source-aware candidate, and
+  constraint result. `deps` continues with a warning for `Unsatisfied` or
+  `Unknown`; `plan` marks the result incomplete. `Invalid` and `Conflicting`
+  fail closed. `fetch`, build, install, upgrade, and local build stop before
+  clone, fetch, source mutation, build, sudo, pacman, or transaction work when
+  the result is `Unsatisfied` or `Unknown`.
 - When multiple provider candidates remain, an interactive TTY lists
   source-aware candidates by number and requires exactly one explicit choice;
   there is no default. Empty input, `q`, `quit`, `cancel`, or EOF cancels the
@@ -120,6 +126,10 @@ detailed plan.
   `deps --recursive`, among provided dependencies, only a user-selected AUR
   provider is traversed; unique providers and selected repository providers
   remain terminal.
+- Constraint results do not filter, sort, number, recommend, default, or
+  auto-select provider candidates, and do not authorize source fallback.
+  When selected AUR provider metadata is refreshed, the current matching
+  capability is evaluated again and the stale result is discarded.
 - The registered-source phase keeps its singular source lifecycle. It offers
   provider selection only when every candidate is from an official repository;
   a candidate set containing an AUR provider remains ambiguous and stops before

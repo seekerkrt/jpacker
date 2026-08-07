@@ -25,8 +25,15 @@ namespace {
 namespace fs = std::filesystem;
 
 // strict queryはconfigured repository順のprovenanceも含め、1 read phaseをowned snapshot化する。
+struct StrictRepositoryPackageRecord {
+    std::string     repository_name;
+    std::size_t     configured_order;
+    std::string     package_name;
+    ObservedVersion package_version;
+};
+
 struct StrictRepositoryMetadataSnapshot {
-    std::map<std::string, std::string>                     package_repositories;
+    std::map<std::string, StrictRepositoryPackageRecord>   packages;
     std::map<std::string, std::vector<ProvidedDependency>> providers;
 };
 
@@ -171,6 +178,7 @@ struct StrictRepositoryDescriptionRecord {
 
 std::optional<RepositoryMetadataFailure> parse_repo_sync_desc_strict(
         const std::string& desc, const std::string& repository,
+        std::size_t configured_order,
         StrictRepositoryMetadataSnapshot& snapshot) {
     std::stringstream                  stream(desc);
     std::string                        line;
@@ -215,28 +223,47 @@ std::optional<RepositoryMetadataFailure> parse_repo_sync_desc_strict(
                             "Repository sync metadata contains an invalid package version."));
         }
 
+        std::vector<ProviderCapability> capabilities;
+        capabilities.reserve(record.package_provides.size());
         for(const auto& provided : record.package_provides) {
-            ParsedDependency parsed = parse_dependency_string(provided);
-            if(!is_valid_package_name(parsed.name) ||
-               parsed.has_malformed_constraint() ||
-               contains_control_character(parsed.raw)) {
+            ProviderCapabilityParseResult parsed =
+                    parse_provider_capability(provided);
+            if(parsed.failure() != nullptr || parsed.capability() == nullptr ||
+               contains_control_character(provided)) {
                 return malformed(
                         localization::translate_message(
                                 "Repository sync metadata contains an invalid provided dependency."));
             }
+            capabilities.push_back(*parsed.capability());
         }
 
         // POLICY: configured repository順の最初のpackageをexact lookupのprovenanceとする。
-        snapshot.package_repositories.try_emplace(
-                record.package_name.value(), repository);
-        for(const auto& provided : record.package_provides) {
-            std::string provided_name = provided_dependency_name(provided);
+        const ObservedVersion package_version = ObservedVersion::available(
+                ObservedVersionSource::RepositoryExactPackage,
+                record.package_version.value());
+        snapshot.packages.try_emplace(
+                record.package_name.value(),
+                StrictRepositoryPackageRecord{
+                        repository, configured_order,
+                        record.package_name.value(), package_version});
+        for(const auto& capability : capabilities) {
+            ObservedVersion provided_version = capability.version().has_value()
+                    ? ObservedVersion::available(
+                              ObservedVersionSource::
+                                      RepositoryProviderCapability,
+                              capability.version().value())
+                    : ObservedVersion::unknown(
+                              ObservedVersionSource::
+                                      RepositoryProviderCapability,
+                              ObservedVersionUnknownReason::
+                                      UnversionedProviderCapability);
             add_repo_provider_candidate(
-                    snapshot.providers[provided_name],
-                    ProvidedDependency::from_repository(
+                    snapshot.providers[capability.package_name()],
+                    ProvidedDependency::from_repository_constraint_metadata(
                             repository, record.package_name.value(),
-                            provided_name, provided,
-                            record.package_version));
+                            ProviderConstraintMetadata{
+                                    capability, package_version,
+                                    std::move(provided_version)}));
         }
 
         parsed_package = true;
@@ -396,7 +423,11 @@ StrictRepositoryMetadataSnapshotResult load_strict_repository_metadata_snapshot(
                         sync_directory.string()));
     }
 
-    for(const auto& repository_name : configuration.repository_names) {
+    for(std::size_t configured_order = 0;
+        configured_order < configuration.repository_names.size();
+        ++configured_order) {
+        const std::string& repository_name =
+                configuration.repository_names[configured_order];
         if(!is_safe_repository_path_component(repository_name)) {
             return repository_metadata_failure(
                     RepositoryMetadataFailureKind::ConfigurationMalformed,
@@ -434,7 +465,8 @@ StrictRepositoryMetadataSnapshotResult load_strict_repository_metadata_snapshot(
         }
 
         if(auto failure = parse_repo_sync_desc_strict(
-                   command_result.output, repository_name, snapshot);
+                   command_result.output, repository_name,
+                   configured_order, snapshot);
            failure.has_value()) {
             return failure.value();
         }
@@ -499,10 +531,14 @@ StrictRepositoryPackageQueryResult query_repository_package_strict(
 
     const auto& snapshot =
             std::get<StrictRepositoryMetadataSnapshot>(snapshot_result);
-    auto package = snapshot.package_repositories.find(package_name);
-    if(package == snapshot.package_repositories.end())
+    auto package = snapshot.packages.find(package_name);
+    if(package == snapshot.packages.end())
         return RepositoryPackageNotFound{};
-    return RepositoryPackagePresent{package->second};
+    return RepositoryPackagePresent{
+            package->second.repository_name,
+            package->second.configured_order,
+            package->second.package_name,
+            package->second.package_version};
 }
 
 StrictRepositoryProvidersQueryResult query_repository_providers_strict(
@@ -523,6 +559,19 @@ StrictRepositoryProvidersQueryResult query_repository_providers_strict(
     if(providers == snapshot.providers.end())
         return std::vector<ProvidedDependency>{};
     return providers->second;
+}
+
+InstalledExactPackageObservationResult query_installed_exact_package_strict(
+        const std::string& package_name) {
+    require_valid_package_name(package_name);
+    try {
+        const PacmanDatabasePaths paths = resolve_pacman_database_paths();
+        PackageMetadataSession session = PackageMetadataSession::open(paths);
+        return observe_installed_exact_package(session, package_name);
+    } catch(const PackageMetadataError& error) {
+        return InstalledExactPackageQueryFailure{
+                package_name, error.failure()};
+    }
 }
 
 std::vector<InstalledPackage> get_foreign_packages() {

@@ -185,6 +185,58 @@ const RepositoryProviderOrigin& require_repository_provider_origin(
     return *origin;
 }
 
+void expect_repository_provider(
+        const ProvidedDependency& provider,
+        const std::string& repository_name,
+        const std::string& package_name,
+        const std::string& provided_specification,
+        const std::string& package_version,
+        const std::optional<std::string>& provided_version,
+        const std::string& context) {
+    expect(
+            require_repository_provider_origin(provider, context)
+                            .repository_name == repository_name &&
+                    provider.package_name == package_name &&
+                    provider.package_base.empty() &&
+                    provider.provided_dependency_name == "virtual-api" &&
+                    provider.provided_dependency_specification ==
+                            provided_specification &&
+                    provider.package_version == package_version &&
+                    provider.constraint_metadata.has_value(),
+            context + ": provider identity or metadata differs");
+    const ProviderConstraintMetadata& metadata =
+            provider.constraint_metadata.value();
+    expect(
+            metadata.provided_capability.package_name() == "virtual-api" &&
+                    metadata.provided_capability.raw_specification() ==
+                            provided_specification &&
+                    metadata.provided_capability.version() ==
+                            provided_version &&
+                    metadata.package_version.source() ==
+                            ObservedVersionSource::RepositoryExactPackage &&
+                    metadata.package_version.version() != nullptr &&
+                    *metadata.package_version.version() == package_version &&
+                    metadata.provided_version.source() ==
+                            ObservedVersionSource::
+                                    RepositoryProviderCapability,
+            context + ": typed constraint metadata differs");
+    if(provided_version.has_value()) {
+        expect(
+                metadata.provided_version.version() != nullptr &&
+                        *metadata.provided_version.version() ==
+                                provided_version.value(),
+                context + ": provided version differs");
+    } else {
+        expect(
+                metadata.provided_version.version() == nullptr &&
+                        metadata.provided_version.unknown_reason() != nullptr &&
+                        *metadata.provided_version.unknown_reason() ==
+                                ObservedVersionUnknownReason::
+                                        UnversionedProviderCapability,
+                context + ": unversioned capability reason differs");
+    }
+}
+
 void test_candidate_value_contract() {
     const ProvidedDependency legacy_repository =
             ProvidedDependency::from_repository("aur", "same-package");
@@ -273,6 +325,14 @@ void test_success_snapshot_and_queries() {
     expect(
             shared.repository_name == "core",
             "exact query did not preserve configured repository precedence");
+    expect(
+            shared.package_name == "shared-package" &&
+                    shared.package_version.has_value() &&
+                    shared.package_version->source() ==
+                            ObservedVersionSource::RepositoryExactPackage &&
+                    shared.package_version->version() != nullptr &&
+                    *shared.package_version->version() == "1.0-1",
+            "exact query lost typed package identity or version");
 
     StrictRepositoryPackageQueryResult extra_result =
             query_repository_package_strict("extra-provider");
@@ -293,24 +353,13 @@ void test_success_snapshot_and_queries() {
             require_alternative<std::vector<ProvidedDependency>>(
                     provider_result, "provider query");
     expect(providers.size() == 2, "provider query did not deduplicate candidates");
-    expect(
-            require_repository_provider_origin(
-                    providers[0], "first provider")
-                            .repository_name == "core" &&
-                    providers[0] == ProvidedDependency::from_repository(
-                                            "core", "core-provider",
-                                            "virtual-api", "virtual-api=2",
-                                            std::string("2.4-1")),
-            "first provider does not preserve configured order");
-    expect(
-            require_repository_provider_origin(
-                    providers[1], "second provider")
-                            .repository_name == "extra" &&
-                    providers[1] == ProvidedDependency::from_repository(
-                                            "extra", "extra-provider",
-                                            "virtual-api", "virtual-api",
-                                            std::string("3.1-2")),
-            "second provider does not preserve configured order");
+    expect_repository_provider(
+            providers[0], "core", "core-provider", "virtual-api=2",
+            "2.4-1", std::optional<std::string>{"2"},
+            "first provider");
+    expect_repository_provider(
+            providers[1], "extra", "extra-provider", "virtual-api",
+            "3.1-2", std::nullopt, "second provider");
 
     StrictRepositoryProvidersQueryResult missing_provider_result =
             query_repository_providers_strict("missing-virtual");
@@ -356,12 +405,10 @@ void test_repository_named_aur() {
     expect(
             providers.front().package_name == "repository-provider",
             "repository named aur provider package differs");
-    expect(
-            providers.front() == ProvidedDependency::from_repository(
-                                         "aur", "repository-provider",
-                                         "virtual-api", "virtual-api",
-                                         std::string("1.0-1")),
-            "repository named aur provider metadata differs");
+    expect_repository_provider(
+            providers.front(), "aur", "repository-provider",
+            "virtual-api", "1.0-1", std::nullopt,
+            "repository named aur provider");
     expect(
             !same_provider_identity(
                     providers.front(),

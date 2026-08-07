@@ -405,10 +405,14 @@ std::string dependency_kind_display(DependencyKind kind) {
     // NO_TRANSLATE(Issue #308): These values are stable dependency-kind tokens
     // in the recursive inspection format, not human-readable prose labels.
     switch(kind) {
+    case DependencyKind::Installed:
+        return "installed";
     case DependencyKind::Repo:
         return "repo";
     case DependencyKind::Aur:
         return "aur";
+    case DependencyKind::Local:
+        return "local";
     case DependencyKind::Provided:
         return "provided";
     case DependencyKind::AmbiguousProvider:
@@ -496,8 +500,7 @@ void print_ambiguous_provider_group(
     }
 
     for(const auto& dependency : dependencies) {
-        std::cout << "  " << dependency_display_with_constraint_note(dependency.dependency, dependency.dependency)
-                  << std::endl;
+        std::cout << "  " << dependency.dependency << std::endl;
         std::cout << localization::translate_message("    candidates:")
                   << std::endl;
         for(size_t i = 0; i < dependency.candidates.size(); ++i) {
@@ -518,12 +521,88 @@ void print_selected_provider_group(
     }
     for(const auto& dependency : dependencies) {
         std::cout << "  "
-                  << dependency_display_with_constraint_note(
-                             dependency.dependency, dependency.dependency)
+                  << dependency.dependency
                   << " -> "
                   << provided_dependency_display(dependency.provider)
                   << std::endl;
     }
+}
+
+void print_constraint_evaluations(const BuildPlan& plan) {
+    bool printed_header = false;
+    for(const auto& edge : plan.dependency_edges) {
+        if(!edge.constraint_evaluation.has_value()) continue;
+        if(!printed_header) {
+            std::cout << std::endl
+                      << localization::translate_message(
+                                 "Dependency constraint evaluations:")
+                      << std::endl;
+            printed_header = true;
+        }
+        const ConstraintEvaluation& evaluation =
+                edge.constraint_evaluation.value();
+        const std::string result = constraint_satisfaction_display(
+                evaluation.satisfaction());
+        const std::string reason =
+                constraint_evaluation_reason_display(evaluation);
+        std::cout << localization::format_translated_message(
+                             "  - {}: result={}, reason={}",
+                             edge.dependency_spec, result, reason)
+                  << std::endl;
+        if(evaluation.satisfaction() ==
+                   ConstraintSatisfaction::Unsatisfied ||
+           evaluation.satisfaction() == ConstraintSatisfaction::Unknown) {
+            Logger::warn(localization::format_translated_message(
+                    "Dependency {} is {}: {}",
+                    edge.dependency_spec, result, reason));
+        }
+    }
+}
+
+DependencyClassification classify_direct_build_plan_edges(
+        const BuildPlan& plan, const std::string& parent_package_name) {
+    DependencyClassification classified;
+    for(const auto& edge : plan.dependency_edges) {
+        if(edge.parent_package_name != parent_package_name) continue;
+        switch(edge.kind) {
+        case DependencyKind::Installed:
+        case DependencyKind::Repo:
+            add_unique_value(classified.repo, edge.dependency_spec);
+            break;
+        case DependencyKind::Aur:
+        case DependencyKind::Local:
+            add_unique_value(classified.aur, edge.dependency_spec);
+            break;
+        case DependencyKind::Provided:
+            if(!edge.resolved_provider.has_value()) {
+                add_unique_value(classified.unknown, edge.dependency_spec);
+                break;
+            }
+            if(edge.provider_resolution ==
+               ProviderResolutionKind::UserSelected) {
+                classified.selected_providers.push_back(
+                        SelectedProvidedDependency{
+                                edge.dependency_spec,
+                                edge.resolved_provider.value()});
+            } else {
+                classified.provided.push_back(
+                        edge.dependency_spec + " -> " +
+                        provided_dependency_display(
+                                edge.resolved_provider.value()));
+            }
+            break;
+        case DependencyKind::AmbiguousProvider:
+        case DependencyKind::Unknown:
+            break;
+        }
+    }
+    for(const auto& ambiguous : plan.ambiguous_providers) {
+        classified.ambiguous_providers.push_back(ambiguous);
+    }
+    for(const auto& unresolved : plan.unresolved) {
+        add_unique_value(classified.unknown, unresolved);
+    }
+    return classified;
 }
 
 void print_metadata_risk_group(const std::vector<BuildPlanMetadataRisk>& risks) {
@@ -584,9 +663,7 @@ void print_build_plan(const BuildPlan& plan) {
                   << std::endl;
         for(const auto& dependency : plan.provided) {
             std::cout << "  - "
-                      << dependency_display_with_constraint_note(
-                                 dependency.dependency,
-                                 dependency.dependency)
+                      << dependency.dependency
                       << " -> "
                       << provided_dependency_display(dependency.provider)
                       << (dependency.resolution ==
@@ -645,7 +722,8 @@ void print_build_plan(const BuildPlan& plan) {
     }
 
     if(!plan.unresolved.empty() || !plan.ambiguous_providers.empty() ||
-       !plan.cycles.empty() || !plan.metadata_risks.empty()) {
+       !plan.cycles.empty() || !plan.metadata_risks.empty() ||
+       has_incomplete_constraint_evaluations(plan)) {
         std::cout << std::endl;
         std::cout << localization::translate_message(
                              "Plan status: incomplete")
@@ -666,7 +744,12 @@ void print_build_plan(const BuildPlan& plan) {
             std::cout << localization::translate_message(
                                  "  conflicts/replaces metadata is not resolved automatically")
                       << std::endl;
+        if(has_incomplete_constraint_evaluations(plan))
+            std::cout << localization::translate_message(
+                                 "  dependency constraints are incomplete")
+                      << std::endl;
     }
+    print_constraint_evaluations(plan);
 }
 
 void print_fetch_plan(const BuildPlan& plan) {
@@ -780,9 +863,11 @@ int cmd_deps(
                 continue;
             }
 
-            std::vector<std::string> dependencies = collect_build_dependencies(info.value());
-            DependencyClassification classified = classify_dependencies(
-                    dependencies, select_provider);
+            std::vector<std::string> dependencies =
+                    collect_build_dependencies(info.value());
+            BuildPlan plan = resolve_build_plan(target, select_provider);
+            DependencyClassification classified =
+                    classify_direct_build_plan_edges(plan, info->Name);
 
             if(i > 0) std::cout << std::endl;
             std::cout << localization::format_translated_message(
@@ -834,6 +919,7 @@ int cmd_deps(
                 Logger::warn(localization::translate_message(
                         "Conflicts/replaces metadata is separate from dependency resolution and requires manual review."));
             }
+            print_constraint_evaluations(plan);
             if(recursive) {
                 std::vector<RecursiveDependencyNode> recursive_nodes =
                         resolve_recursive_dependencies(

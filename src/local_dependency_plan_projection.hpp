@@ -48,6 +48,11 @@ struct LocalDependencyPlanInternalEdge {
     LocalDependencyResolutionKind resolution_kind;
     std::optional<std::string>     provided_specification;
     bool                           is_cycle;
+    std::optional<DependencyRequirement> requirement = std::nullopt;
+    std::optional<LocalResolvedDependencyCandidate> resolved_candidate =
+            std::nullopt;
+    std::optional<ConstraintEvaluation> constraint_evaluation =
+            std::nullopt;
 
     bool operator==(const LocalDependencyPlanInternalEdge&) const = default;
 };

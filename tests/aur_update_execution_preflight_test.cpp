@@ -391,6 +391,58 @@ void test_installed_reason_mapping_and_root_dependency_overlap() {
             "Unknown installed reason issue is missing");
 }
 
+void test_typed_unsatisfied_constraint_blocks_update_preflight() {
+    reset_preflight_stub();
+    AurUpdatePlan update_plan{{
+            remote_entry("constraint-root", InstalledPackageReason::Explicit),
+    }};
+    BuildPlan plan = build_plan_for({
+            {"constraint-root", "constraint-root", "constraint-root"},
+    });
+    const RootTargetIdentity root{0, "constraint-root"};
+    add_dependency_target(
+            plan, "constraint-child", "constraint-child", {root});
+    plan.order.insert(
+            plan.order.begin(),
+            BuildPlanEntry{"constraint-child", {"constraint-child"}});
+    ConsumerDependencyRequirement requirement(
+            "constraint-child>=3", "constraint-child",
+            DependencyVersionConstraint(
+                    DependencyVersionRelation::GreaterThanOrEqual, "3"));
+    plan.dependency_edges.push_back(BuildPlanDependencyEdge{
+            "constraint-root",
+            "constraint-root",
+            "constraint-child>=3",
+            PackageRole::RuntimeDependency,
+            DependencyKind::Aur,
+            std::optional<std::string>{"constraint-child"},
+            std::optional<std::string>{"constraint-child"},
+            std::nullopt,
+            ProviderResolutionKind::Unique,
+            DependencyRequirement{requirement},
+            ResolvedDependencyCandidate{AurResolvedDependencyCandidate{
+                    "constraint-child",
+                    "constraint-child",
+                    ObservedVersion::available(
+                            ObservedVersionSource::AurExactPackage,
+                            "2.0-1")}},
+            ConstraintEvaluation::unsatisfied()});
+    return_build_plan(std::move(plan));
+
+    AurUpdateExecutionPreflight preflight =
+            resolve_aur_update_execution_preflight(update_plan);
+    expect_status(
+            preflight.targets.front(),
+            AurUpdateExecutionTargetStatus::Incomplete,
+            "Typed Unsatisfied update preflight");
+    expect(
+            has_issue(
+                    preflight.targets.front(),
+                    AurUpdateExecutionReason::VersionConstraintUnverified),
+            "Typed Unsatisfied update constraint did not produce a blocker");
+    expect(!can_execute(preflight), "Unsatisfied update preflight was executable");
+}
+
 void test_duplicate_update_targets_suppress_resolution() {
     reset_preflight_stub();
     AurUpdatePlan update_plan{{
@@ -1988,6 +2040,9 @@ int main() {
         run_case(
                 "installed reason mapping and root/dependency overlap",
                 test_installed_reason_mapping_and_root_dependency_overlap);
+        run_case(
+                "typed Unsatisfied constraint blocks update preflight",
+                test_typed_unsatisfied_constraint_blocks_update_preflight);
         run_case(
                 "duplicate update targets suppress resolution",
                 test_duplicate_update_targets_suppress_resolution);

@@ -630,6 +630,14 @@ assert_event_prefix_absent '^sudo '
 assert_cache_entry_absent plan-a
 assert_cache_entry_absent plan-missing
 
+setup_case aur-install-constraint-preflight-firewall
+run_status 1 --noedit --nodiff --noconfirm -S --aur constraint-block-root
+assert_contains "dependency constraint-block-leaf>=2.0-1 is Unsatisfied" "$output_file"
+assert_no_mutation_events
+assert_event_prefix_absent '^sudo '
+assert_cache_entry_absent constraint-block-root
+assert_cache_entry_absent constraint-block-leaf
+
 setup_case aur-install-plan-order-needed-and-preferences-disabled
 write_source_preference plan-a 'CFLAGS=-Oaur-only-must-ignore'
 write_source_preference plan-b 'CFLAGS=-Oaur-only-must-ignore'

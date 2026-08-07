@@ -316,11 +316,29 @@ std::vector<ExactDependencyEdge> collect_exact_dependency_edges(
                         std::optional<std::string>{edge.parent_package_base});
 
         std::optional<std::size_t> target_index;
+        std::optional<std::string> exact_requirement_name;
+        if(edge.requirement.has_value() &&
+           std::holds_alternative<ConsumerDependencyRequirement>(
+                   edge.requirement.value())) {
+            exact_requirement_name =
+                    std::get<ConsumerDependencyRequirement>(
+                            edge.requirement.value())
+                            .package_name();
+        } else if(!edge.requirement.has_value()) {
+            // Compatibility for graph-only fixtures. Production edges own the
+            // typed requirement and never enter this branch.
+            ParsedDependency legacy =
+                    parse_dependency_string(edge.dependency_spec);
+            if(!legacy.has_malformed_constraint()) {
+                exact_requirement_name = legacy.name;
+            }
+        }
         if(is_aur_edge && edge.resolved_package_name.has_value() &&
            edge.resolved_package_base.has_value() &&
            !edge.resolved_provider.has_value() &&
+           exact_requirement_name.has_value() &&
            *edge.resolved_package_name ==
-                   parse_dependency_string(edge.dependency_spec).name) {
+                   exact_requirement_name.value()) {
             target_index = find_unique_package_target_index(
                     plan, *edge.resolved_package_name,
                     edge.resolved_package_base);

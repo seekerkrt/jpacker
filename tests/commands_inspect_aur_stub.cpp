@@ -110,6 +110,29 @@ std::optional<AurPackageInfo> graph_info(const std::string& package_name) {
         return package_info(package_name, {"fetch-entry-fail", "fetch-entry-after"});
     }
 
+    if(package_name == "constraint-unsatisfied-root") {
+        return package_info(package_name, {"constraint-leaf>=3"});
+    }
+    if(package_name == "constraint-satisfied-root") {
+        return package_info(package_name, {"constraint-leaf>=2.0-1"});
+    }
+    if(package_name == "constraint-unconstrained-root") {
+        return package_info(package_name, {"constraint-leaf"});
+    }
+    if(package_name == "constraint-invalid-root") {
+        return package_info(package_name, {"constraint-leaf>="});
+    }
+    if(package_name == "constraint-leaf") {
+        return package_info(package_name);
+    }
+    if(package_name == "constraint-unknown-root") {
+        return package_info(package_name, {"constraint-virtual>=3"});
+    }
+    if(package_name == "constraint-virtual") return std::nullopt;
+    if(package_name == "constraint-provider") {
+        return package_info(package_name, {}, {"constraint-virtual"});
+    }
+
     if(package_name == "plan-formatter-root") {
         return package_info(
                 package_name,
@@ -275,6 +298,9 @@ std::vector<std::string> AurClient::search_names_by_provides(
     }
     if(provided_name == "no-metadata-aur-virtual") {
         return {"no-metadata-aur-provider"};
+    }
+    if(provided_name == "constraint-virtual") {
+        return {"constraint-provider"};
     }
     if(provided_name == "identity-unknown-virtual" ||
        provided_name == "no-metadata-unknown-virtual") {

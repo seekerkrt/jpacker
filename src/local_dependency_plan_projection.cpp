@@ -404,27 +404,6 @@ ConstraintEvaluation candidate_constraint_evaluation(
             dependency.requirement.value(), candidate.observed_version);
 }
 
-bool candidate_is_compatible(
-        const Candidate& candidate,
-        const RequiredDependency& dependency,
-        const ConstraintEvaluation& evaluation) {
-    if(!candidate.architecture_supported || dependency.malformed_constraint) {
-        return false;
-    }
-    if(dependency.kind == TargetKind::Soname) return true;
-    switch(evaluation.satisfaction()) {
-    case ConstraintSatisfaction::Unconstrained:
-    case ConstraintSatisfaction::Satisfied:
-        return true;
-    case ConstraintSatisfaction::Unsatisfied:
-    case ConstraintSatisfaction::Unknown:
-    case ConstraintSatisfaction::Invalid:
-    case ConstraintSatisfaction::Conflicting:
-        return false;
-    }
-    throw std::logic_error("Unknown constraint satisfiability result.");
-}
-
 LocalDependencyPlanCandidate public_candidate(
         const Candidate& candidate, const RequiredDependency& dependency) {
     std::optional<std::string> version;
@@ -520,83 +499,28 @@ dependency_plan_projection_support::DependencyDecision resolve_local_candidate(
             exact_candidate(children, dependency, package_version);
     std::vector<Candidate> candidates;
     if(exact.has_value()) candidates.push_back(exact.value());
-    const bool has_compatible_exact =
-            exact.has_value() &&
-            candidate_is_compatible(
-                    exact.value(), dependency,
-                    candidate_constraint_evaluation(exact.value(), dependency));
-    if(!has_compatible_exact) {
+    if(!exact.has_value()) {
         add_provided_candidates(children, dependency, candidates);
     }
     if(candidates.empty()) return {false, std::nullopt, std::nullopt};
 
-    std::vector<Candidate> compatible;
-    std::vector<Candidate> unknown;
-    if(has_compatible_exact) {
-        compatible.push_back(exact.value());
-    } else {
-        for(const auto& candidate : candidates) {
-            const ConstraintEvaluation evaluation =
-                    candidate_constraint_evaluation(candidate, dependency);
-            if(dependency.kind == TargetKind::Package &&
-               candidate.architecture_supported &&
-               evaluation.satisfaction() == ConstraintSatisfaction::Unknown) {
-                unknown.push_back(candidate);
-            }
-            if(!candidate_is_compatible(candidate, dependency, evaluation)) {
-                continue;
-            }
-            const auto same_package = [&](const Candidate& existing) {
-                return existing.package_name == candidate.package_name;
-            };
-            if(std::find_if(
-                       compatible.begin(), compatible.end(), same_package) ==
-               compatible.end()) {
-                compatible.push_back(candidate);
-            }
+    std::vector<Candidate> selectable;
+    for(const auto& candidate : candidates) {
+        if(!candidate.architecture_supported) continue;
+        const auto same_package = [&](const Candidate& existing) {
+            return existing.package_name == candidate.package_name;
+        };
+        if(std::find_if(selectable.begin(), selectable.end(), same_package) ==
+           selectable.end()) {
+            selectable.push_back(candidate);
         }
     }
+    if(selectable.empty()) return {false, std::nullopt, std::nullopt};
 
-    if(compatible.empty()) {
-        if(exact.has_value()) {
-            add_failure(
-                    failures,
-                    LocalDependencyPlanFailure{
-                            LocalDependencyPlanFailureKind::ConstraintMismatch,
-                            context.parent_package_name,
-                            specification,
-                            std::nullopt,
-                            public_candidates(candidates, dependency)});
-            return {
-                    true,
-                    std::nullopt,
-                    specification + " (local candidate is incompatible)"};
-        }
-        if(!unknown.empty()) {
-            // POLICY(#351): an unversioned local provider is an observed
-            // unknown, not an incompatible candidate that can authorize a
-            // repository or AUR fallback. The existing failure kind preserves
-            // the current public/CLI boundary; candidates retain the typed
-            // Unknown result and owned reason.
-            add_failure(
-                    failures,
-                    LocalDependencyPlanFailure{
-                            LocalDependencyPlanFailureKind::ConstraintMismatch,
-                            context.parent_package_name,
-                            specification,
-                            std::nullopt,
-                            public_candidates(unknown, dependency)});
-            return {
-                    true,
-                    std::nullopt,
-                    specification + " (local candidate version is unknown)"};
-        }
-        // Version不適合のvirtual provideはlocal identity collisionではない。
-        // 未解決dependencyとして既存repo/AUR/provider policyへ渡す。
-        return {false, std::nullopt, std::nullopt};
-    }
-
-    if(compatible.size() > 1) {
+    // Constraint evaluation is presentation/preflight state. It never filters
+    // or reorders matching local provider identities and never authorizes a
+    // repository/AUR fallback.
+    if(selectable.size() > 1) {
         add_failure(
                 failures,
                 LocalDependencyPlanFailure{
@@ -604,14 +528,28 @@ dependency_plan_projection_support::DependencyDecision resolve_local_candidate(
                         context.parent_package_name,
                         specification,
                         std::nullopt,
-                        public_candidates(compatible, dependency)});
+                        public_candidates(selectable, dependency)});
         return {
                 true,
                 std::nullopt,
                 specification + " (ambiguous local providers)"};
     }
 
-    const Candidate& candidate = compatible.front();
+    const Candidate& candidate = selectable.front();
+    const ConstraintEvaluation evaluation =
+            candidate_constraint_evaluation(candidate, dependency);
+    if(dependency.kind == TargetKind::Package &&
+       (evaluation.satisfaction() == ConstraintSatisfaction::Unsatisfied ||
+        evaluation.satisfaction() == ConstraintSatisfaction::Unknown)) {
+        add_failure(
+                failures,
+                LocalDependencyPlanFailure{
+                        LocalDependencyPlanFailureKind::ConstraintMismatch,
+                        context.parent_package_name,
+                        specification,
+                        std::nullopt,
+                        public_candidates(selectable, dependency)});
+    }
     const bool remote_back_edge =
             context.parent_package_base != package_base;
     const bool direct_self_edge =
@@ -626,7 +564,14 @@ dependency_plan_projection_support::DependencyDecision resolve_local_candidate(
                         candidate.package_name,
                         candidate.resolution_kind,
                         candidate.provided_specification,
-                        remote_back_edge || direct_self_edge});
+                        remote_back_edge || direct_self_edge,
+                        declaration.requirement,
+                        LocalResolvedDependencyCandidate{
+                                candidate.package_name,
+                                package_base,
+                                candidate.provider_capability,
+                                candidate.observed_version},
+                        evaluation});
     }
     return {
             true,
@@ -680,6 +625,26 @@ void aggregate_local_roles(
         PlannedPackageTarget* target =
                 find_package_target(plan, edge.resolved_package_name);
         if(target != nullptr) add_package_role(target->roles, edge.role);
+    }
+}
+
+void append_local_build_plan_edges(
+        BuildPlan& plan,
+        const std::vector<LocalDependencyPlanInternalEdge>& internal_edges,
+        const std::string& package_base) {
+    for(const auto& local_edge : internal_edges) {
+        BuildPlanDependencyEdge edge;
+        edge.parent_package_name = local_edge.parent_package_name;
+        edge.parent_package_base = package_base;
+        edge.dependency_spec = local_edge.dependency_specification;
+        edge.role = local_edge.role;
+        edge.kind = DependencyKind::Local;
+        edge.resolved_package_name = local_edge.resolved_package_name;
+        edge.resolved_package_base = package_base;
+        edge.requirement = local_edge.requirement;
+        edge.resolved_candidate = local_edge.resolved_candidate;
+        edge.constraint_evaluation = local_edge.constraint_evaluation;
+        plan.dependency_edges.push_back(std::move(edge));
     }
 }
 
@@ -1039,6 +1004,9 @@ LocalBuildPlan resolve_local_build_plan(
     append_unique_values(plan.cycles, local_preflight_plan.cycles);
     add_remote_identity_conflict_failures(
             resolution.identity_conflicts, failures);
+    append_local_build_plan_edges(
+            plan, internal_edges, metadata.package_base);
+    finalize_build_plan_constraints(plan);
     aggregate_local_roles(plan, internal_edges, children);
     classify_local_cycles(
             plan, internal_edges, metadata.package_base);

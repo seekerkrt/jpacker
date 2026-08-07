@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Moguet 2.1.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-07 10:24+0900\n"
+"POT-Creation-Date: 2026-08-07 13:23+0900\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -1309,23 +1309,27 @@ msgid "Installed and {} package names disagree."
 msgstr ""
 
 #. TRANSLATORS: The placeholder is a literal dependency specification.
-#: src/aur_update_execution_preflight.cpp:816
+#: src/aur_update_execution_preflight.cpp:857
 #, c++-format
 msgid "Dependency has multiple provider candidates: {}"
 msgstr ""
 
-#: src/aur_update_execution_preflight.cpp:838
+#: src/aur_update_execution_preflight.cpp:879
 msgid "Dependency edge fields or root attribution are inconsistent."
 msgstr ""
 
+#: src/aur_update_execution_preflight.cpp:896 src/commands_inspect.cpp:556
+#, c++-format
+msgid "Dependency {} is {}: {}"
+msgstr ""
+
 #. TRANSLATORS: The placeholder is a literal dependency specification.
-#: src/aur_update_execution_preflight.cpp:854
+#: src/aur_update_execution_preflight.cpp:927
 #, c++-format
 msgid "Dependency could not be resolved: {}"
 msgstr ""
 
-#. TRANSLATORS: The placeholder is a literal dependency specification.
-#: src/aur_update_execution_preflight.cpp:876
+#: src/aur_update_execution_preflight.cpp:943
 #, c++-format
 msgid "Dependency version constraint is not verified: {}"
 msgstr ""
@@ -1333,7 +1337,7 @@ msgstr ""
 #. TRANSLATORS: The first placeholder is the literal
 #. internal type name "BuildPlan"; the second is a
 #. package or dependency identity.
-#: src/aur_update_execution_preflight.cpp:910
+#: src/aur_update_execution_preflight.cpp:977
 #, c++-format
 msgid "{} contains an unresolved dependency: {}"
 msgstr ""
@@ -1341,13 +1345,13 @@ msgstr ""
 #. TRANSLATORS: The first placeholder is the literal
 #. field name "PackageBase"; the second is that
 #. field's package identity.
-#: src/aur_update_execution_preflight.cpp:932
+#: src/aur_update_execution_preflight.cpp:999
 #, c++-format
 msgid "Dependency cycle contains {}: {}"
 msgstr ""
 
 #. TRANSLATORS: {} is the literal internal type name "BuildPlan".
-#: src/aur_update_execution_preflight.cpp:942
+#: src/aur_update_execution_preflight.cpp:1009
 #, c++-format
 msgid "{} cycle summary has no matching reachable dependency cycle."
 msgstr ""
@@ -1355,29 +1359,29 @@ msgstr ""
 #. TRANSLATORS: The first placeholder is the literal
 #. field name "PackageBase"; the second is that
 #. field's package identity.
-#: src/aur_update_execution_preflight.cpp:967
+#: src/aur_update_execution_preflight.cpp:1034
 #, c++-format
 msgid "Typed dependency graph contains a cycle at {}: {}"
 msgstr ""
 
 #. TRANSLATORS: {} is the literal internal type name "BuildPlan".
-#: src/aur_update_execution_preflight.cpp:978
+#: src/aur_update_execution_preflight.cpp:1045
 #, c++-format
 msgid "Reachable dependency cycle is missing from {} summary."
 msgstr ""
 
 #. TRANSLATORS: The placeholder is a literal dependency specification.
-#: src/aur_update_execution_preflight.cpp:1009
+#: src/aur_update_execution_preflight.cpp:1079
 #, c++-format
 msgid "Ambiguous provider summary has no matching dependency edge: {}"
 msgstr ""
 
-#: src/aur_update_execution_preflight.cpp:1022
+#: src/aur_update_execution_preflight.cpp:1092
 msgid "Package declares conflicts or replaces metadata that requires policy."
 msgstr ""
 
 #. TRANSLATORS: {} is the literal internal type name "BuildPlan".
-#: src/aur_update_execution_preflight.cpp:1088
+#: src/aur_update_execution_preflight.cpp:1158
 #, c++-format
 msgid "{} package target identity or root ownership is inconsistent."
 msgstr ""
@@ -1385,73 +1389,73 @@ msgstr ""
 #. TRANSLATORS: The placeholders are the literal
 #. internal type name "BuildPlan" and service
 #. name "AUR", respectively.
-#: src/aur_update_execution_preflight.cpp:1104
+#: src/aur_update_execution_preflight.cpp:1174
 #, c++-format
 msgid "{} {} dependency target is not grounded in the rooted dependency graph."
 msgstr ""
 
 #. TRANSLATORS: {} is the literal internal type name "BuildPlan".
-#: src/aur_update_execution_preflight.cpp:1191
+#: src/aur_update_execution_preflight.cpp:1261
 #, c++-format
 msgid "A blocking {} issue could not be attributed to every affected root."
 msgstr ""
 
 #. TRANSLATORS: {} is the literal internal type name "BuildPlan".
-#: src/aur_update_execution_preflight.cpp:1213
+#: src/aur_update_execution_preflight.cpp:1283
 #, c++-format
 msgid "Combined {} root count does not match the update candidate count."
 msgstr ""
 
 #. TRANSLATORS: {} is the literal internal type name "BuildPlan".
-#: src/aur_update_execution_preflight.cpp:1227
+#: src/aur_update_execution_preflight.cpp:1297
 #, c++-format
 msgid "Combined {} is missing the candidate root."
 msgstr ""
 
 #. TRANSLATORS: {} is the literal internal type name "BuildPlan".
-#: src/aur_update_execution_preflight.cpp:1243
+#: src/aur_update_execution_preflight.cpp:1313
 #, c++-format
 msgid "Combined {} root identity or order differs from the candidate mapping."
 msgstr ""
 
-#: src/aur_update_execution_preflight.cpp:1267
+#: src/aur_update_execution_preflight.cpp:1337
 msgid "Candidate root does not have exactly one matching planned package target."
 msgstr ""
 
 #. TRANSLATORS: The placeholders are the literal
 #. service name "AUR" and internal type name
 #. "BuildPlan", respectively.
-#: src/aur_update_execution_preflight.cpp:1287
+#: src/aur_update_execution_preflight.cpp:1357
 #, c++-format
 msgid "{} update metadata and {} root identity differ."
 msgstr ""
 
 #. TRANSLATORS: {} is the literal internal type name "BuildPlan".
-#: src/aur_update_execution_preflight.cpp:1304
+#: src/aur_update_execution_preflight.cpp:1374
 #, c++-format
 msgid "A {} root package target has no root identity."
 msgstr ""
 
 #. TRANSLATORS: {} is the literal internal type name "BuildPlan".
-#: src/aur_update_execution_preflight.cpp:1318
+#: src/aur_update_execution_preflight.cpp:1388
 #, c++-format
 msgid "A {} root package target references an unknown candidate root."
 msgstr ""
 
-#: src/aur_update_execution_preflight.cpp:1361
+#: src/aur_update_execution_preflight.cpp:1431
 msgid "Installed package reason is unknown."
 msgstr ""
 
-#: src/aur_update_execution_preflight.cpp:1377
+#: src/aur_update_execution_preflight.cpp:1447
 msgid "Update candidate has an invalid installed package name."
 msgstr ""
 
-#: src/aur_update_execution_preflight.cpp:1395
+#: src/aur_update_execution_preflight.cpp:1465
 msgid "Update candidate occurs more than once in the invocation."
 msgstr ""
 
 #. TRANSLATORS: {} is the literal internal type name "BuildPlan".
-#: src/aur_update_execution_preflight.cpp:1412
+#: src/aur_update_execution_preflight.cpp:1482
 #, c++-format
 msgid "Combined {} resolution was skipped because the candidate set is inconsistent."
 msgstr ""
@@ -2531,7 +2535,7 @@ msgstr ""
 #. TRANSLATORS: AUR is a runtime project identity.
 #. TRANSLATORS: {} is the literal service name "AUR".
 #: src/commands_aur_update.cpp:56 src/commands_upgrade_all.cpp:480
-#: src/filtered_aur_update_operation.cpp:1415
+#: src/filtered_aur_update_operation.cpp:1433
 #, c++-format
 msgid "{} metadata unavailable"
 msgstr ""
@@ -2994,230 +2998,243 @@ msgstr ""
 msgid "    Metadata       : not found"
 msgstr ""
 
-#: src/commands_inspect.cpp:428
+#: src/commands_inspect.cpp:432
 #, c++-format
 msgid "base: {}"
 msgstr ""
 
-#: src/commands_inspect.cpp:432
+#: src/commands_inspect.cpp:436
 #, c++-format
 msgid "by {}"
 msgstr ""
 
-#: src/commands_inspect.cpp:442
+#: src/commands_inspect.cpp:446
 #, c++-format
 msgid "candidates: {}"
 msgstr ""
 
-#: src/commands_inspect.cpp:447
+#: src/commands_inspect.cpp:451
 msgid "(already visited)"
 msgstr ""
 
-#: src/commands_inspect.cpp:451
+#: src/commands_inspect.cpp:455
 msgid "(max depth reached)"
 msgstr ""
 
-#: src/commands_inspect.cpp:462
+#: src/commands_inspect.cpp:466
 msgid "Recursive dependency tree:"
 msgstr ""
 
-#: src/commands_inspect.cpp:465 src/commands_inspect.cpp:482
-#: src/commands_inspect.cpp:494 src/commands_inspect.cpp:516
-#: src/commands_inspect.cpp:558 src/commands_inspect.cpp:676
+#: src/commands_inspect.cpp:469 src/commands_inspect.cpp:486
+#: src/commands_inspect.cpp:498 src/commands_inspect.cpp:519
+#: src/commands_inspect.cpp:637 src/commands_inspect.cpp:759
 msgid "  None"
 msgstr ""
 
-#: src/commands_inspect.cpp:501
+#: src/commands_inspect.cpp:504
 msgid "    candidates:"
 msgstr ""
 
-#: src/commands_inspect.cpp:531
-msgid "Metadata conflicts/replaces:"
-msgstr ""
-
-#: src/commands_inspect.cpp:536
-#, c++-format
-msgid "  {} (base: {})"
-msgstr ""
-
-#: src/commands_inspect.cpp:544
-#, c++-format
-msgid "    conflicts: {}"
+#: src/commands_inspect.cpp:538
+msgid "Dependency constraint evaluations:"
 msgstr ""
 
 #: src/commands_inspect.cpp:549
 #, c++-format
+msgid "  - {}: result={}, reason={}"
+msgstr ""
+
+#: src/commands_inspect.cpp:610
+msgid "Metadata conflicts/replaces:"
+msgstr ""
+
+#: src/commands_inspect.cpp:615
+#, c++-format
+msgid "  {} (base: {})"
+msgstr ""
+
+#: src/commands_inspect.cpp:623
+#, c++-format
+msgid "    conflicts: {}"
+msgstr ""
+
+#: src/commands_inspect.cpp:628
+#, c++-format
 msgid "    replaces: {}"
 msgstr ""
 
-#: src/commands_inspect.cpp:556
+#: src/commands_inspect.cpp:635
 msgid "Build plan:"
 msgstr ""
 
-#: src/commands_inspect.cpp:570
+#: src/commands_inspect.cpp:649
 #, c++-format
 msgid "     target package: {}"
 msgid_plural "     target packages: {}"
 msgstr[0] ""
 msgstr[1] ""
 
-#: src/commands_inspect.cpp:583 src/commands_inspect.cpp:810
+#: src/commands_inspect.cpp:662 src/commands_inspect.cpp:895
 msgid "Provided dependencies:"
 msgstr ""
 
-#: src/commands_inspect.cpp:595
+#: src/commands_inspect.cpp:672
 msgid " (selected)"
 msgstr ""
 
-#: src/commands_inspect.cpp:605 src/commands_inspect.cpp:716
-#: src/commands_inspect.cpp:822
+#: src/commands_inspect.cpp:682 src/commands_inspect.cpp:799
+#: src/commands_inspect.cpp:907
 msgid "Ambiguous provided dependencies:"
 msgstr ""
 
-#: src/commands_inspect.cpp:612
+#: src/commands_inspect.cpp:689
 msgid "Split package install targets:"
 msgstr ""
 
-#: src/commands_inspect.cpp:616
+#: src/commands_inspect.cpp:693
 #, c++-format
 msgid "  - {} (base: {})"
 msgstr ""
 
-#: src/commands_inspect.cpp:630 src/commands_inspect.cpp:705
+#: src/commands_inspect.cpp:707 src/commands_inspect.cpp:788
 msgid "Unresolved dependencies:"
 msgstr ""
 
-#: src/commands_inspect.cpp:640 src/commands_inspect.cpp:723
+#: src/commands_inspect.cpp:717 src/commands_inspect.cpp:806
 msgid "Cyclic dependencies:"
 msgstr ""
 
-#: src/commands_inspect.cpp:651
+#: src/commands_inspect.cpp:729
 msgid "Plan status: incomplete"
 msgstr ""
 
-#: src/commands_inspect.cpp:655
+#: src/commands_inspect.cpp:733
 msgid "  unresolved dependencies remain"
 msgstr ""
 
-#: src/commands_inspect.cpp:659
+#: src/commands_inspect.cpp:737
 msgid "  ambiguous providers are not selected"
 msgstr ""
 
-#: src/commands_inspect.cpp:663
+#: src/commands_inspect.cpp:741
 msgid "  cyclic dependencies detected"
 msgstr ""
 
-#: src/commands_inspect.cpp:667
+#: src/commands_inspect.cpp:745
 msgid "  conflicts/replaces metadata is not resolved automatically"
 msgstr ""
 
-#: src/commands_inspect.cpp:673
+#: src/commands_inspect.cpp:749
+msgid "  dependency constraints are incomplete"
+msgstr ""
+
+#: src/commands_inspect.cpp:756
 msgid "Fetch targets:"
 msgstr ""
 
-#: src/commands_inspect.cpp:698 src/commands_inspect.cpp:816
+#: src/commands_inspect.cpp:781 src/commands_inspect.cpp:901
 msgid "Selected provided dependencies:"
 msgstr ""
 
-#: src/commands_inspect.cpp:734
+#: src/commands_inspect.cpp:817
 msgid "Conflicts/replaces metadata requires manual review before build/install; fetch is allowed."
 msgstr ""
 
 #. TRANSLATORS: The first placeholder is the
 #. literal command name "upgrade-all"; the
 #. second is a runtime option token.
-#: src/commands_inspect.cpp:757 src/commands_inspect.cpp:867
-#: src/commands_inspect.cpp:914 src/commands_upgrade_all.cpp:1819
+#: src/commands_inspect.cpp:840 src/commands_inspect.cpp:953
+#: src/commands_inspect.cpp:1000 src/commands_upgrade_all.cpp:1819
 #: src/moguet.cpp:1051
 #, c++-format
 msgid "Unsupported {} option: {}"
 msgstr ""
 
-#: src/commands_inspect.cpp:778 src/commands_sync.cpp:944
-#: src/dependency_plan.cpp:1424 src/dependency_plan.cpp:1576
+#: src/commands_inspect.cpp:861 src/commands_sync.cpp:944
+#: src/dependency_plan.cpp:1783 src/dependency_plan.cpp:1940
 #: src/pkgbuild_export.cpp:654
 #, c++-format
 msgid "{} package not found: {}"
 msgstr ""
 
-#: src/commands_inspect.cpp:789
+#: src/commands_inspect.cpp:874
 #, c++-format
 msgid "Package         : {}"
 msgstr ""
 
-#: src/commands_inspect.cpp:792 src/commands_sync.cpp:150
+#: src/commands_inspect.cpp:877 src/commands_sync.cpp:150
 #, c++-format
 msgid "Package Base    : {}"
 msgstr ""
 
-#: src/commands_inspect.cpp:795
+#: src/commands_inspect.cpp:880
 #, c++-format
 msgid "Dependencies    : {}"
 msgstr ""
 
-#: src/commands_inspect.cpp:800
+#: src/commands_inspect.cpp:885
 #, c++-format
 msgid "Official {} dependencies:"
 msgstr ""
 
-#: src/commands_inspect.cpp:805
+#: src/commands_inspect.cpp:890
 #, c++-format
 msgid "{} dependencies:"
 msgstr ""
 
-#: src/commands_inspect.cpp:827
+#: src/commands_inspect.cpp:912
 msgid "Unknown dependencies:"
 msgstr ""
 
-#: src/commands_inspect.cpp:835
+#: src/commands_inspect.cpp:920
 msgid "Conflicts/replaces metadata is separate from dependency resolution and requires manual review."
 msgstr ""
 
-#: src/commands_inspect.cpp:846
+#: src/commands_inspect.cpp:932
 #, c++-format
 msgid "Failed to inspect dependencies for {}: {}"
 msgstr ""
 
-#: src/commands_inspect.cpp:893
+#: src/commands_inspect.cpp:979
 #, c++-format
 msgid "Failed to plan build order for {}: {}"
 msgstr ""
 
-#: src/commands_inspect.cpp:945 src/commands_inspect.cpp:965
+#: src/commands_inspect.cpp:1031 src/commands_inspect.cpp:1051
 #, c++-format
 msgid "Failed to fetch repositories for {}: {}"
 msgstr ""
 
-#: src/commands_inspect.cpp:985
+#: src/commands_inspect.cpp:1071
 #, c++-format
 msgid "{} is too large to write to {}."
 msgstr ""
 
-#: src/commands_inspect.cpp:994
+#: src/commands_inspect.cpp:1080
 #, c++-format
 msgid "Failed to write {} to {}."
 msgstr ""
 
-#: src/commands_inspect.cpp:1003
+#: src/commands_inspect.cpp:1089
 msgid "No foreign packages found."
 msgstr ""
 
-#: src/commands_inspect.cpp:1010
+#: src/commands_inspect.cpp:1096
 #, c++-format
 msgid "Checking package {}/{}: {}"
 msgstr ""
 
-#: src/commands_inspect.cpp:1019
+#: src/commands_inspect.cpp:1105
 #, c++-format
 msgid "Foreign package not found in {}: {}"
 msgstr ""
 
-#: src/commands_inspect.cpp:1030
+#: src/commands_inspect.cpp:1116
 #, c++-format
 msgid "Failed to compare versions: {} -> {}"
 msgstr ""
 
-#: src/commands_inspect.cpp:1036
+#: src/commands_inspect.cpp:1122
 #, c++-format
 msgid "Unknown {} update classification."
 msgstr ""
@@ -4107,7 +4124,7 @@ msgid "Unsupported {} option for {} info: {}"
 msgstr ""
 
 #: src/commands_sync.cpp:949 src/commands_sync.cpp:998
-#: src/dependency_plan.cpp:1341 src/source_install.cpp:701
+#: src/dependency_plan.cpp:1700 src/source_install.cpp:701
 #, c++-format
 msgid "Failed to fetch {} info for {}: {}"
 msgstr ""
@@ -5205,100 +5222,264 @@ msgstr ""
 msgid "Unexpected {} command failure: unknown exception."
 msgstr ""
 
-#: src/dependency_plan.cpp:92
+#: src/dependency_plan.cpp:52 src/dependency_plan.cpp:589
+#, c++-format
+msgid "{} package metadata constraint projection failed: {}"
+msgstr ""
+
+#: src/dependency_plan.cpp:116
 #, c++-format
 msgid "{} provider candidate changed during dependency resolution: {}"
 msgstr ""
 
-#: src/dependency_plan.cpp:100 src/provider_selection.cpp:51
+#: src/dependency_plan.cpp:124 src/provider_selection.cpp:51
 #, c++-format
 msgid "Selected providers use incompatible identities for package {}: {} and {}."
 msgstr ""
 
-#: src/dependency_plan.cpp:224
+#: src/dependency_plan.cpp:279
+#, c++-format
+msgid "{} package metadata is missing its typed constraint projection: {}"
+msgstr ""
+
+#: src/dependency_plan.cpp:287
+#, c++-format
+msgid "{} package metadata constraint identity is inconsistent: {}"
+msgstr ""
+
+#: src/dependency_plan.cpp:359
 #, c++-format
 msgid "Failed to search {} providers for {}: {}"
 msgstr ""
 
-#: src/dependency_plan.cpp:251
+#: src/dependency_plan.cpp:384
 #, c++-format
 msgid "{} provider candidate metadata was not returned."
 msgstr ""
 
-#: src/dependency_plan.cpp:271
+#: src/dependency_plan.cpp:404
 #, c++-format
 msgid "Failed to check {} provider {}: {}"
 msgstr ""
 
 #. TRANSLATORS: The placeholders are dependency and provider identities.
-#: src/dependency_plan.cpp:369
+#: src/dependency_plan.cpp:504
 #, c++-format
 msgid "{} [provided by {}]"
 msgstr ""
 
-#: src/dependency_plan.cpp:411
+#: src/dependency_plan.cpp:546
 #, c++-format
 msgid "Provider selection returned a candidate that was not offered for {}."
 msgstr ""
 
 #. TRANSLATORS: The placeholder is a dependency specification.
-#: src/dependency_plan.cpp:424
+#: src/dependency_plan.cpp:559
 #, c++-format
 msgid "version constraint for {} is not verified"
 msgstr ""
 
-#: src/dependency_plan.cpp:517 src/dependency_plan.cpp:618
-#: src/dependency_plan.cpp:1182
+#: src/dependency_plan.cpp:603
+#, c++-format
+msgid "{} package metadata constraint projection is inconsistent: {}"
+msgstr ""
+
+#: src/dependency_plan.cpp:689 src/dependency_plan.cpp:793
+#: src/dependency_plan.cpp:1446
 #, c++-format
 msgid "Failed to check {} dependency {}: {}"
 msgstr ""
 
-#: src/dependency_plan.cpp:712
+#: src/dependency_plan.cpp:891
 msgid "Unknown package role."
 msgstr ""
 
-#: src/dependency_plan.cpp:990
+#: src/dependency_plan.cpp:1170
 #, c++-format
 msgid "{} aggregation is missing during build plan ordering: {}"
 msgstr ""
 
-#: src/dependency_plan.cpp:1083
+#: src/dependency_plan.cpp:1335
 #, c++-format
 msgid "Build dependency is missing its package role: {}"
 msgstr ""
 
-#: src/dependency_plan.cpp:1313
+#: src/dependency_plan.cpp:1495
+#, c++-format
+msgid "Cannot select a provider for {}; candidate {} is {}: {}."
+msgstr ""
+
+#: src/dependency_plan.cpp:1504
+#, c++-format
+msgid "Provider candidate {} for {} is {}: {}. Candidate order and explicit selection are unchanged."
+msgstr ""
+
+#: src/dependency_plan.cpp:1668
 #, c++-format
 msgid "{} (max depth reached)"
 msgstr ""
 
-#: src/dependency_plan.cpp:1411 src/dependency_plan.cpp:1461
+#: src/dependency_plan.cpp:1770 src/dependency_plan.cpp:1823
 msgid "Build plan targets must not be empty."
 msgstr ""
 
-#: src/dependency_plan.cpp:1707
+#: src/dependency_plan.cpp:2082
+#, c++-format
+msgid "Build plan constraint requirement is invalid for {}."
+msgstr ""
+
+#: src/dependency_plan.cpp:2094
+#, c++-format
+msgid "Build plan constraint requirement identity changed for {}."
+msgstr ""
+
+#: src/dependency_plan.cpp:2148
+#, c++-format
+msgid "Build plan constraint source identity is inconsistent for {}."
+msgstr ""
+
+#: src/dependency_plan.cpp:2154
+#, c++-format
+msgid "Build plan constraint evaluation is missing for {}."
+msgstr ""
+
+#: src/dependency_plan.cpp:2166
+#, c++-format
+msgid "Cannot construct build plan; dependency {} is {}: {}."
+msgstr ""
+
+#: src/dependency_plan.cpp:2192
+#, c++-format
+msgid "Cannot execute build plan for {}; dependency {} is {}: {}."
+msgstr ""
+
+#: src/dependency_plan.cpp:2205
 #, c++-format
 msgid "Cannot execute build plan for {}; unresolved dependencies: {}"
 msgstr ""
 
-#: src/dependency_plan.cpp:1712
+#: src/dependency_plan.cpp:2210
 #, c++-format
 msgid "Cannot execute build plan for {}; ambiguous providers: {}"
 msgstr ""
 
-#: src/dependency_plan.cpp:1719
+#: src/dependency_plan.cpp:2217
 #, c++-format
 msgid "Cannot execute build plan for {}; cyclic dependencies: {}"
 msgstr ""
 
-#: src/dependency_plan.cpp:1728
+#: src/dependency_plan.cpp:2226
 #, c++-format
 msgid "Cannot execute build plan for {}; conflicts/replaces metadata requires manual review: {}"
 msgstr ""
 
-#: src/dependency_plan.cpp:1739
+#: src/dependency_plan.cpp:2237
 #, c++-format
 msgid "Cannot execute singular install plan for {}; split package targets require the {} set lifecycle: {}"
+msgstr ""
+
+#: src/dependency_constraint_presentation.cpp:11
+msgid "Unconstrained"
+msgstr ""
+
+#: src/dependency_constraint_presentation.cpp:13
+msgid "Satisfied"
+msgstr ""
+
+#: src/dependency_constraint_presentation.cpp:15
+msgid "Unsatisfied"
+msgstr ""
+
+#: src/dependency_constraint_presentation.cpp:17
+msgid "Unknown"
+msgstr ""
+
+#: src/dependency_constraint_presentation.cpp:19
+msgid "Invalid"
+msgstr ""
+
+#: src/dependency_constraint_presentation.cpp:21
+msgid "Conflicting"
+msgstr ""
+
+#: src/dependency_constraint_presentation.cpp:24
+msgid "Unknown constraint satisfaction result."
+msgstr ""
+
+#: src/dependency_constraint_presentation.cpp:32
+msgid "version metadata is missing"
+msgstr ""
+
+#: src/dependency_constraint_presentation.cpp:35
+msgid "the matching provider capability has no version"
+msgstr ""
+
+#: src/dependency_constraint_presentation.cpp:37
+msgid "metadata query failed"
+msgstr ""
+
+#: src/dependency_constraint_presentation.cpp:39
+msgid "source metadata is incomplete"
+msgstr ""
+
+#: src/dependency_constraint_presentation.cpp:42
+msgid "version comparison authority is unavailable"
+msgstr ""
+
+#: src/dependency_constraint_presentation.cpp:44
+msgid "candidate version cannot be proven"
+msgstr ""
+
+#: src/dependency_constraint_presentation.cpp:47
+msgid "the relation is not a package-version constraint"
+msgstr ""
+
+#: src/dependency_constraint_presentation.cpp:54
+msgid "the dependency requirement is malformed"
+msgstr ""
+
+#: src/dependency_constraint_presentation.cpp:57
+msgid "the dependency operator is unsupported"
+msgstr ""
+
+#: src/dependency_constraint_presentation.cpp:60
+msgid "the provider operator is unsupported"
+msgstr ""
+
+#: src/dependency_constraint_presentation.cpp:62
+msgid "the package identity is invalid"
+msgstr ""
+
+#: src/dependency_constraint_presentation.cpp:64
+msgid "the package version is invalid"
+msgstr ""
+
+#: src/dependency_constraint_presentation.cpp:67
+msgid "an internal constraint invariant failed"
+msgstr ""
+
+#: src/dependency_constraint_presentation.cpp:74
+msgid "requirements for the same candidate conflict"
+msgstr ""
+
+#: src/dependency_constraint_presentation.cpp:77
+msgid "provider source identities conflict"
+msgstr ""
+
+#: src/dependency_constraint_presentation.cpp:82
+msgid "no version comparison is required"
+msgstr ""
+
+#: src/dependency_constraint_presentation.cpp:85
+msgid "the observed version satisfies the requirement"
+msgstr ""
+
+#: src/dependency_constraint_presentation.cpp:88
+msgid "the observed version does not satisfy the requirement"
+msgstr ""
+
+#: src/dependency_constraint_presentation.cpp:95
+msgid "Constraint evaluation reason is missing."
 msgstr ""
 
 #. TRANSLATORS: The placeholders are a literal dependency operator and version.
@@ -5328,7 +5509,7 @@ msgstr ""
 #. TRANSLATORS: The placeholders are the literal
 #. internal type name "BuildPlan" and service name
 #. "AUR", respectively.
-#: src/filtered_aur_update_operation.cpp:356
+#: src/filtered_aur_update_operation.cpp:374
 #, c++-format
 msgid "{} {} dependency edge cannot be correlated by exact package identity."
 msgstr ""
@@ -5336,99 +5517,99 @@ msgstr ""
 #. TRANSLATORS: The placeholders are the literal
 #. internal type name "BuildPlan" and enum value
 #. "Root", respectively.
-#: src/filtered_aur_update_operation.cpp:394
+#: src/filtered_aur_update_operation.cpp:412
 #, c++-format
 msgid "{} root does not have one exact {} package target."
 msgstr ""
 
 #. TRANSLATORS: {} is the literal internal type name "BuildPlan".
-#: src/filtered_aur_update_operation.cpp:445
+#: src/filtered_aur_update_operation.cpp:463
 #, c++-format
 msgid "{} package target roles/roots differ from rooted dependency graph attribution."
 msgstr ""
 
 #. TRANSLATORS: {} is the literal internal type name "BuildPlan".
-#: src/filtered_aur_update_operation.cpp:524
+#: src/filtered_aur_update_operation.cpp:542
 #, c++-format
 msgid "{} order entry does not map exactly to planned package targets."
 msgstr ""
 
 #. TRANSLATORS: {} is the literal internal type name "BuildPlan".
-#: src/filtered_aur_update_operation.cpp:543
+#: src/filtered_aur_update_operation.cpp:561
 #, c++-format
 msgid "{} unit root cannot be mapped to a selected filtered target identity."
 msgstr ""
 
-#: src/filtered_aur_update_operation.cpp:632
+#: src/filtered_aur_update_operation.cpp:650
 msgid "Target adapter refers to an out-of-range planner target."
 msgstr ""
 
-#: src/filtered_aur_update_operation.cpp:676
+#: src/filtered_aur_update_operation.cpp:694
 msgid "Selected planner target dense/original mapping is inconsistent."
 msgstr ""
 
-#: src/filtered_aur_update_operation.cpp:695
+#: src/filtered_aur_update_operation.cpp:713
 msgid "Selected planner target has no retained original query entry."
 msgstr ""
 
-#: src/filtered_aur_update_operation.cpp:713
+#: src/filtered_aur_update_operation.cpp:731
 msgid "Selected planner target identity differs from its original query payload."
-msgstr ""
-
-#. TRANSLATORS: {} is the literal internal type name "BuildPlan".
-#: src/filtered_aur_update_operation.cpp:749
-#, c++-format
-msgid "{} root invocation index maps outside the selected target snapshot."
 msgstr ""
 
 #. TRANSLATORS: {} is the literal internal type name "BuildPlan".
 #: src/filtered_aur_update_operation.cpp:767
 #, c++-format
+msgid "{} root invocation index maps outside the selected target snapshot."
+msgstr ""
+
+#. TRANSLATORS: {} is the literal internal type name "BuildPlan".
+#: src/filtered_aur_update_operation.cpp:785
+#, c++-format
 msgid "{} root invocation identity differs from the selected target identity."
 msgstr ""
 
-#: src/filtered_aur_update_operation.cpp:789
+#: src/filtered_aur_update_operation.cpp:807
 msgid "Preflight target count differs from the filtered update plan."
 msgstr ""
 
-#: src/filtered_aur_update_operation.cpp:808
+#: src/filtered_aur_update_operation.cpp:826
 msgid "Preflight target position/index/payload differs from the filtered update plan."
 msgstr ""
 
-#: src/filtered_aur_update_operation.cpp:831
+#: src/filtered_aur_update_operation.cpp:849
 msgid "Selected target maps outside the preflight target snapshot."
 msgstr ""
 
-#: src/filtered_aur_update_operation.cpp:851
+#: src/filtered_aur_update_operation.cpp:869
 msgid "Selected target identity differs from its preflight target."
 msgstr ""
 
 #. TRANSLATORS: {} is the literal internal type name "BuildPlan".
-#: src/filtered_aur_update_operation.cpp:869
+#: src/filtered_aur_update_operation.cpp:887
 #, c++-format
 msgid "Selected preflight target has no {} snapshot."
 msgstr ""
 
 #. TRANSLATORS: {} is the literal internal type name "BuildPlan".
-#: src/filtered_aur_update_operation.cpp:888
+#: src/filtered_aur_update_operation.cpp:906
 #, c++-format
 msgid "Selected preflight target has no {} root index."
 msgstr ""
 
 #. TRANSLATORS: {} is the literal internal type name "BuildPlan".
-#: src/filtered_aur_update_operation.cpp:908
+#: src/filtered_aur_update_operation.cpp:926
 #, c++-format
 msgid "Selected target position maps outside the {} root snapshot."
 msgstr ""
 
 #. TRANSLATORS: {} is the literal internal type name "BuildPlan".
-#: src/filtered_aur_update_operation.cpp:932
+#: src/filtered_aur_update_operation.cpp:950
 #, c++-format
 msgid "Selected preflight target has an out-of-range {} root index."
 msgstr ""
 
 #. TRANSLATORS: {} is the literal internal type name "BuildPlan".
-#: src/filtered_aur_update_operation.cpp:949
+#: src/filtered_aur_update_operation.cpp:967
 #, c++-format
 msgid "{} root position differs from the selected target mapping."
 msgstr ""
@@ -5436,117 +5617,117 @@ msgstr ""
 #. TRANSLATORS: The placeholders are the literal
 #. internal type name "BuildPlan" and service name
 #. "AUR", respectively.
-#: src/filtered_aur_update_operation.cpp:982
+#: src/filtered_aur_update_operation.cpp:1000
 #, c++-format
 msgid "{} root package target differs from the selected {} target identity."
 msgstr ""
 
 #. TRANSLATORS: {} is the literal service name "AUR".
-#: src/filtered_aur_update_operation.cpp:1047
+#: src/filtered_aur_update_operation.cpp:1065
 #, c++-format
 msgid "Prepared filtered {} operation preflight snapshot changed after preparation."
 msgstr ""
 
 #. TRANSLATORS: {} is the literal service name "AUR".
-#: src/filtered_aur_update_operation.cpp:1079
+#: src/filtered_aur_update_operation.cpp:1097
 #, c++-format
 msgid "Filtered {} operation planning or correlation failed before mutation preparation."
 msgstr ""
 
 #. TRANSLATORS: {} is the literal internal type name "BuildPlan".
-#: src/filtered_aur_update_operation.cpp:1110
+#: src/filtered_aur_update_operation.cpp:1128
 #, c++-format
 msgid "Build-unit planner result order differs from {} order."
 msgstr ""
 
-#: src/filtered_aur_update_operation.cpp:1131
+#: src/filtered_aur_update_operation.cpp:1149
 msgid "Selected build unit has no dense execution index."
 msgstr ""
 
-#: src/filtered_aur_update_operation.cpp:1144
+#: src/filtered_aur_update_operation.cpp:1162
 msgid "Externally satisfied build unit has no explicit source attribution."
 msgstr ""
 
 #. TRANSLATORS: {} is the literal internal type name "BuildPlan".
-#: src/filtered_aur_update_operation.cpp:1167
+#: src/filtered_aur_update_operation.cpp:1185
 #, c++-format
 msgid "Filtered preflight {} contains a non-executable build-unit disposition."
 msgstr ""
 
 #. TRANSLATORS: {} is the literal internal type name "BuildPlan".
-#: src/filtered_aur_update_operation.cpp:1192
+#: src/filtered_aur_update_operation.cpp:1210
 #, c++-format
 msgid "Build-unit planner result maps outside the {} correlation snapshot."
 msgstr ""
 
 #. TRANSLATORS: {} is the literal internal type name "BuildPlan".
-#: src/filtered_aur_update_operation.cpp:1217
+#: src/filtered_aur_update_operation.cpp:1235
 #, c++-format
 msgid "Prepared work item maps outside the {} correlation snapshot."
 msgstr ""
 
-#: src/filtered_aur_update_operation.cpp:1245
+#: src/filtered_aur_update_operation.cpp:1263
 msgid "Prepared work-item identity differs from its selected build unit."
 msgstr ""
 
 #. TRANSLATORS: {} is the literal internal type name "BuildPlan".
-#: src/filtered_aur_update_operation.cpp:1269
+#: src/filtered_aur_update_operation.cpp:1287
 #, c++-format
 msgid "Execution work item maps outside the {} correlation snapshot."
 msgstr ""
 
-#: src/filtered_aur_update_operation.cpp:1288
+#: src/filtered_aur_update_operation.cpp:1306
 msgid "Execution work-item identity differs from its prepared build unit."
 msgstr ""
 
-#: src/filtered_aur_update_operation.cpp:1318
+#: src/filtered_aur_update_operation.cpp:1336
 msgid "Reduced selected target cannot be mapped back to its original query identity."
 msgstr ""
 
 #. TRANSLATORS: {} is the literal service name "AUR".
-#: src/filtered_aur_update_operation.cpp:1404
+#: src/filtered_aur_update_operation.cpp:1422
 #, c++-format
 msgid "{} update candidate"
 msgstr ""
 
 #. TRANSLATORS: {} is the literal service name "AUR".
-#: src/filtered_aur_update_operation.cpp:1408
+#: src/filtered_aur_update_operation.cpp:1426
 #, c++-format
 msgid "{} update candidate has no remote package identity"
 msgstr ""
 
 #. TRANSLATORS: {} is the literal service name "AUR".
-#: src/filtered_aur_update_operation.cpp:1421
+#: src/filtered_aur_update_operation.cpp:1439
 #, c++-format
 msgid "{} version comparison unavailable"
 msgstr ""
 
 #. TRANSLATORS: {} is the literal command name "upgrade-all".
-#: src/filtered_aur_update_operation.cpp:1427
+#: src/filtered_aur_update_operation.cpp:1445
 #, c++-format
 msgid "Normal skip unexpectedly reached the {} target adapter."
 msgstr ""
 
 #. TRANSLATORS: {} is the literal service name "AUR".
-#: src/filtered_aur_update_operation.cpp:1433
+#: src/filtered_aur_update_operation.cpp:1451
 #, c++-format
 msgid "Unknown {} update classification"
 msgstr ""
 
 #. TRANSLATORS: {} is the literal internal type name "AurUpdatePlan".
-#: src/filtered_aur_update_operation.cpp:1440
+#: src/filtered_aur_update_operation.cpp:1458
 #, c++-format
 msgid "{} entry has an unknown classification."
 msgstr ""
 
 #. TRANSLATORS: {} is the literal service name "AUR".
-#: src/filtered_aur_update_operation.cpp:1636
+#: src/filtered_aur_update_operation.cpp:1654
 #, c++-format
 msgid "Prepared filtered {} update operation is invalid or has already been consumed."
 msgstr ""
 
 #. TRANSLATORS: {} is the literal service name "AUR".
-#: src/filtered_aur_update_operation.cpp:1642
+#: src/filtered_aur_update_operation.cpp:1660
 #, c++-format
 msgid "Prepared filtered {} update operation lost its source-build preparation snapshot."
 msgstr ""
@@ -5797,13 +5978,13 @@ msgstr ""
 #. TRANSLATORS: The placeholder is the AUR project identity.
 #: src/moguet.cpp:809
 #, c++-format
-msgid "Classify {} dependencies"
+msgid "Classify {} dependencies and show constraint results"
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the AUR project identity.
 #: src/moguet.cpp:814
 #, c++-format
-msgid "Show the {} build-order plan"
+msgid "Show the {} build-order plan and constraint completeness"
 msgstr ""
 
 #. TRANSLATORS: The placeholders are literal git commands and the AUR identity.
@@ -6832,75 +7013,75 @@ msgstr ""
 msgid "Warning: installed state is unavailable for provider candidate {}: {}."
 msgstr ""
 
-#: src/repository_query.cpp:193
+#: src/repository_query.cpp:201
 msgid "Repository sync metadata is missing a package filename."
 msgstr ""
 
-#: src/repository_query.cpp:199
+#: src/repository_query.cpp:207
 msgid "Repository sync metadata contains an invalid package name."
 msgstr ""
 
-#: src/repository_query.cpp:204
+#: src/repository_query.cpp:212
 msgid "Repository sync metadata contains a duplicate package name."
 msgstr ""
 
-#: src/repository_query.cpp:209
+#: src/repository_query.cpp:217
 msgid "Repository sync metadata is missing a package version."
 msgstr ""
 
-#: src/repository_query.cpp:215
+#: src/repository_query.cpp:223
 msgid "Repository sync metadata contains an invalid package version."
 msgstr ""
 
-#: src/repository_query.cpp:225
+#: src/repository_query.cpp:235
 msgid "Repository sync metadata contains an invalid provided dependency."
 msgstr ""
 
-#: src/repository_query.cpp:252
+#: src/repository_query.cpp:279
 msgid "Repository sync metadata contains a control character."
 msgstr ""
 
-#: src/repository_query.cpp:267
+#: src/repository_query.cpp:294
 msgid "Repository sync metadata does not start with a package filename."
 msgstr ""
 
-#: src/repository_query.cpp:276
+#: src/repository_query.cpp:303
 msgid "Repository sync metadata contains a value outside a section."
 msgstr ""
 
-#: src/repository_query.cpp:282
+#: src/repository_query.cpp:309
 msgid "Repository sync metadata contains multiple package filenames."
 msgstr ""
 
-#: src/repository_query.cpp:289
+#: src/repository_query.cpp:316
 msgid "Repository sync metadata contains multiple package names."
 msgstr ""
 
-#: src/repository_query.cpp:296
+#: src/repository_query.cpp:323
 msgid "Repository sync metadata contains multiple package versions."
 msgstr ""
 
-#: src/repository_query.cpp:308
+#: src/repository_query.cpp:335
 msgid "Repository sync metadata does not contain a package entry."
 msgstr ""
 
 #. TRANSLATORS: The placeholder is a filesystem path.
-#: src/repository_query.cpp:395
+#: src/repository_query.cpp:422
 #, c++-format
 msgid "Repository sync database directory is unavailable: {}"
 msgstr ""
 
-#: src/repository_query.cpp:405
+#: src/repository_query.cpp:436
 msgid "Repository configuration contains a name that is not a safe path component."
 msgstr ""
 
 #. TRANSLATORS: The placeholder is a filesystem path.
-#: src/repository_query.cpp:418
+#: src/repository_query.cpp:449
 #, c++-format
 msgid "Configured repository sync database is unavailable: {}"
 msgstr ""
 
-#: src/repository_query.cpp:432
+#: src/repository_query.cpp:463
 #, c++-format
 msgid "Failed to read configured repository sync database with exit code {}."
 msgstr ""

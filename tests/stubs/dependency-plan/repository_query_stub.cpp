@@ -16,30 +16,49 @@ std::size_t g_strict_repo_provider_queries = 0;
 
 std::vector<ProvidedDependency> repository_providers(
         const std::string& dependency_name) {
+    const auto provider = [](
+                                  std::string repository,
+                                  std::string package,
+                                  std::string capability,
+                                  std::string package_version) {
+        const std::size_t equals = capability.find('=');
+        ProviderCapability parsed(
+                capability, capability.substr(0, equals),
+                equals == std::string::npos
+                        ? std::nullopt
+                        : std::optional<std::string>(
+                                  capability.substr(equals + 1)));
+        const ObservedVersion provided_version = parsed.version().has_value()
+                ? ObservedVersion::available(
+                          ObservedVersionSource::RepositoryProviderCapability,
+                          parsed.version().value())
+                : ObservedVersion::unknown(
+                          ObservedVersionSource::RepositoryProviderCapability,
+                          ObservedVersionUnknownReason::UnversionedProviderCapability);
+        return ProvidedDependency::from_repository_constraint_metadata(
+                std::move(repository), std::move(package),
+                ProviderConstraintMetadata{
+                        std::move(parsed),
+                        ObservedVersion::available(
+                                ObservedVersionSource::RepositoryExactPackage,
+                                std::move(package_version)),
+                        provided_version});
+    };
     if(dependency_name == "case8-virtual") {
         return {
-                ProvidedDependency::from_repository(
-                        "extra", "case8-provider-a", "case8-virtual",
-                        "case8-virtual=2", std::optional<std::string>{"2.0-1"}),
-                ProvidedDependency::from_repository(
-                        "community", "case8-provider-b", "case8-virtual",
-                        "case8-virtual=3", std::optional<std::string>{"3.0-1"}),
+                provider("extra", "case8-provider-a", "case8-virtual=2", "2.0-1"),
+                provider("community", "case8-provider-b", "case8-virtual=3", "3.0-1"),
         };
     }
     if(dependency_name == "case11-ambiguous") {
         return {
-                ProvidedDependency::from_repository(
-                        "extra", "case11-provider-a", "case11-ambiguous",
-                        "case11-ambiguous=1", std::optional<std::string>{"1.0-1"}),
-                ProvidedDependency::from_repository(
-                        "community", "case11-provider-b", "case11-ambiguous",
-                        "case11-ambiguous=2", std::optional<std::string>{"2.0-1"}),
+                provider("extra", "case11-provider-a", "case11-ambiguous=1", "1.0-1"),
+                provider("community", "case11-provider-b", "case11-ambiguous=2", "2.0-1"),
         };
     }
     if(dependency_name == "case14-virtual") {
-        return {ProvidedDependency::from_repository(
-                "aur", "case14-provider", "case14-virtual",
-                "case14-virtual=1", std::optional<std::string>{"1.0-1"})};
+        return {provider(
+                "aur", "case14-provider", "case14-virtual=1", "1.0-1")};
     }
     if(dependency_name == "case7-virtual-api" || dependency_name == "case9-missing" ||
        dependency_name == "case11-virtual" || dependency_name == "case11-missing" ||
@@ -104,9 +123,18 @@ StrictRepositoryPackageQueryResult query_repository_package_strict(
                 "strict repository exact metadata failure"};
     }
     if(package_name == "case6-repo-lib") {
-        return RepositoryPackagePresent{"core"};
+        return RepositoryPackagePresent{
+                "core", 0, package_name,
+                ObservedVersion::available(
+                        ObservedVersionSource::RepositoryExactPackage,
+                        "1.0-1")};
     }
     return RepositoryPackageNotFound{};
+}
+
+InstalledExactPackageObservationResult query_installed_exact_package_strict(
+        const std::string& package_name) {
+    return InstalledExactPackageAbsent{package_name};
 }
 
 std::vector<ProvidedDependency> find_repo_providers(

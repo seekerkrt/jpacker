@@ -27,6 +27,8 @@ dependency `bar`の解決では、pacman-firstの既存順序を維持する。
 
 candidateはsource kind、package name、repository packageならrepository name、AUR packageならPackageBase、provided dependency name、取得可能なversion / constraint metadataを保持する。candidate順はconfigured repository orderと既存AUR aggregation orderを維持し、Moguet独自のscoreやdefault candidateを導入しない。
 
+constraint evaluationはcandidateのfilter、sort、番号、default、recommend、auto-selectionを変更しない。`Unsatisfied` / `Unknown`はpresentation-only warningとしてchoice契約を維持し、`Invalid` / `Conflicting`はprompt開始前にfail-closedとする。constraintを理由に別sourceへfallbackしない。selection後にAUR provider metadataをrefreshした場合はcurrent matching capabilityを再取得・再評価し、selection前のprovided version / resultを再利用しない。
+
 ### Interactive selection
 
 複数providerの選択はinteractive TTYの番号入力だけで受け付ける。候補を番号付きで表示し、defaultを設けず、validな番号1件を明示入力として受理する。empty input、`q`、`quit`、`cancel`、EOFは取消とする。invalidまたはout-of-range inputは再入力を求める。

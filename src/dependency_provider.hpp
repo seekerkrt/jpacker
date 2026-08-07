@@ -64,6 +64,48 @@ struct ProvidedDependency {
                 std::move(package_version), std::nullopt};
     }
 
+    static ProvidedDependency from_repository_constraint_metadata(
+            std::string repository_name, std::string package_name,
+            ProviderConstraintMetadata constraint_metadata) {
+        const ProviderCapability& capability =
+                constraint_metadata.provided_capability;
+        if(constraint_metadata.package_version.source() !=
+                   ObservedVersionSource::RepositoryExactPackage ||
+           constraint_metadata.provided_version.source() !=
+                   ObservedVersionSource::RepositoryProviderCapability) {
+            throw std::invalid_argument(
+                    "Repository provider constraint metadata has incompatible version sources.");
+        }
+        if(capability.version().has_value()) {
+            const std::string* provided_version =
+                    constraint_metadata.provided_version.version();
+            if(provided_version == nullptr ||
+               *provided_version != capability.version().value()) {
+                throw std::invalid_argument(
+                        "Repository provided capability version metadata is inconsistent.");
+            }
+        } else {
+            const ObservedVersionUnknownReason* unknown_reason =
+                    constraint_metadata.provided_version.unknown_reason();
+            if(unknown_reason == nullptr ||
+               *unknown_reason != ObservedVersionUnknownReason::
+                                          UnversionedProviderCapability) {
+                throw std::invalid_argument(
+                        "Unversioned repository capability has version metadata.");
+            }
+        }
+        const std::string* package_version =
+                constraint_metadata.package_version.version();
+        return ProvidedDependency{
+                RepositoryProviderOrigin{std::move(repository_name)},
+                std::move(package_name), {}, capability.package_name(),
+                capability.raw_specification(),
+                package_version == nullptr
+                        ? std::nullopt
+                        : std::optional<std::string>(*package_version),
+                std::move(constraint_metadata)};
+    }
+
     static ProvidedDependency from_aur(std::string package_name) {
         std::string package_base = package_name;
         return from_aur(

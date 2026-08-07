@@ -3,11 +3,13 @@
 #include "aur_rpc.hpp"
 #include "dependency_constraint.hpp"
 #include "dependency_provider.hpp"
+#include "package_constraint_metadata.hpp"
 
 #include <cstddef>
 #include <functional>
 #include <optional>
 #include <string>
+#include <variant>
 #include <vector>
 
 // 複数 provider がある依存。明示選択されない場合はここで止め、暗黙選択しない。
@@ -50,8 +52,10 @@ enum class PackageRole {
 };
 
 enum class DependencyKind {
+    Installed,
     Repo,
     Aur,
+    Local,
     Provided,
     AmbiguousProvider,
     Unknown
@@ -107,6 +111,39 @@ struct PlannedPackageTarget {
     std::vector<RootTargetIdentity> roots;
 };
 
+// BuildPlan edgeが解決時に採用したsource authority。package nameだけへ
+// flattenせず、preflightとactual routeのidentity照合に使う。
+struct AurResolvedDependencyCandidate {
+    std::string     package_name;
+    std::string     package_base;
+    ObservedVersion package_version;
+
+    bool operator==(const AurResolvedDependencyCandidate&) const = default;
+};
+
+struct LocalResolvedDependencyCandidate {
+    std::string                       package_name;
+    std::string                       package_base;
+    std::optional<ProviderCapability> provided_capability;
+    ObservedVersion                   observed_version;
+
+    bool operator==(const LocalResolvedDependencyCandidate&) const = default;
+};
+
+struct ProviderResolvedDependencyCandidate {
+    ProvidedDependency provider;
+    ObservedVersion    provided_version;
+
+    bool operator==(const ProviderResolvedDependencyCandidate&) const = default;
+};
+
+using ResolvedDependencyCandidate = std::variant<
+        InstalledExactPackage,
+        RepositoryExactPackage,
+        AurResolvedDependencyCandidate,
+        LocalResolvedDependencyCandidate,
+        ProviderResolvedDependencyCandidate>;
+
 // dependency宣言と、その最終的な解決結果を結び付ける。
 struct BuildPlanDependencyEdge {
     std::string                       parent_package_name;
@@ -119,6 +156,11 @@ struct BuildPlanDependencyEdge {
     std::optional<ProvidedDependency> resolved_provider;
     ProviderResolutionKind            provider_resolution =
             ProviderResolutionKind::Unique;
+    // AUR RPC / local metadata trust boundaryで一度だけ構成された値。
+    std::optional<DependencyRequirement>       requirement = std::nullopt;
+    std::optional<ResolvedDependencyCandidate> resolved_candidate =
+            std::nullopt;
+    std::optional<ConstraintEvaluation> constraint_evaluation = std::nullopt;
 };
 
 // recursive dependency tree の 1 node。表示と循環検出結果を同じ単位で持つ。
@@ -209,6 +251,13 @@ BuildPlan resolve_fetch_plan(
         const ProviderSelectionCallback& select_provider);
 void require_compatible_selected_provider_package_identities(
         const BuildPlan& plan);
+bool has_incomplete_constraint_evaluations(const BuildPlan& plan) noexcept;
+std::string constraint_satisfaction_display(
+        ConstraintSatisfaction satisfaction);
+std::string constraint_evaluation_reason_display(
+        const ConstraintEvaluation& evaluation);
+void require_constructible_build_plan_constraints(const BuildPlan& plan);
+void finalize_build_plan_constraints(BuildPlan& plan);
 void require_fetchable_build_plan(const std::string& target, const BuildPlan& plan);
 void require_executable_build_plan(const std::string& target, const BuildPlan& plan);
 void require_executable_install_plan(const std::string& target, const BuildPlan& plan);

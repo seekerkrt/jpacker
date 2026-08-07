@@ -76,6 +76,11 @@ helperと同等の自動解決能力・完成度を約束しません。unsuppor
 - `deps`と`plan`は調査・表示だけを行い、clone、build、installしません。`fetch`は
   未取得repositoryをcloneし、既存cloneでは`git fetch origin`だけを実行します。
   pull、merge、reset、working tree更新、build、installは行いません。
+- dependency edgeはtyped requirement、source-aware candidate、constraint resultを保持します。
+  `deps`は`Unsatisfied` / `Unknown`をwarning付きで継続し、`plan`はincompleteとして表示します。
+  `Invalid` / `Conflicting`はfail-closedです。`fetch`、build、install、upgrade、local buildは
+  `Unsatisfied` / `Unknown`の場合、clone、fetch、source mutation、build、sudo、pacman、transaction
+  より前に停止します。
 - 複数provider candidateが残る場合、interactive TTYではsource-aware candidateを番号付きで
   表示し、exactly oneの明示選択を要求します。defaultはありません。empty input、`q`、
   `quit`、`cancel`、EOFは選択を取り消し、invalid / out-of-range inputは再入力します。
@@ -102,6 +107,9 @@ helperと同等の自動解決能力・完成度を約束しません。unsuppor
   導入します。`deps --recursive`ではprovided dependencyのうちuser-selected AUR
   providerだけをさらに辿り、unique providerとselected repository providerは終端の
   まま表示します。
+- constraint resultはprovider candidateのfilter、sort、番号変更、recommend、default、
+  auto-selectを行わず、source fallbackの根拠にもなりません。selected AUR provider metadataを
+  refreshした場合はcurrent matching capabilityを再評価し、古いresultを再利用しません。
 - registered source phaseはsingular source lifecycleを維持します。candidateがすべて
   official repository由来の場合だけprovider selectionを行い、AUR providerを含む
   candidate setは、そのPackageBaseをこのphaseでscheduleできないためambiguousのまま

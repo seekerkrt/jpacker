@@ -111,9 +111,18 @@ StrictRepositoryPackageQueryResult query_repository_package_strict(
     const std::optional<std::string>& repository =
             require_package_response(package_name);
     if(repository.has_value()) {
-        return RepositoryPackagePresent{repository.value()};
+        return RepositoryPackagePresent{
+                repository.value(), 0, package_name,
+                ObservedVersion::available(
+                        ObservedVersionSource::RepositoryExactPackage,
+                        "1.0-1")};
     }
     return RepositoryPackageNotFound{};
+}
+
+InstalledExactPackageObservationResult query_installed_exact_package_strict(
+        const std::string& package_name) {
+    return InstalledExactPackageAbsent{package_name};
 }
 
 std::vector<ProvidedDependency> find_repo_providers(

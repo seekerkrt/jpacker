@@ -25,3 +25,15 @@ DesiredInstallReason desired_install_reason(
             "Planned package target has no package role: " +
             target.package_name);
 }
+
+bool has_incomplete_constraint_evaluations(const BuildPlan& plan) noexcept {
+    return std::any_of(
+            plan.dependency_edges.begin(), plan.dependency_edges.end(),
+            [](const BuildPlanDependencyEdge& edge) {
+                if(!edge.constraint_evaluation.has_value()) return false;
+                const ConstraintSatisfaction satisfaction =
+                        edge.constraint_evaluation->satisfaction();
+                return satisfaction == ConstraintSatisfaction::Unsatisfied ||
+                       satisfaction == ConstraintSatisfaction::Unknown;
+            });
+}

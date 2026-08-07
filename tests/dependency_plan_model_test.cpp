@@ -33,47 +33,109 @@ void expect(bool condition, const std::string& message) {
     if(!condition) throw std::runtime_error(message);
 }
 
+ProvidedDependency typed_aur_provider(
+        std::string package_name, std::string package_base,
+        std::string capability, std::optional<std::string> package_version) {
+    ProviderCapability parsed(
+            capability,
+            capability.substr(0, capability.find('=')),
+            capability.find('=') == std::string::npos
+                    ? std::nullopt
+                    : std::optional<std::string>(
+                              capability.substr(capability.find('=') + 1)));
+    const ObservedVersion provided_version = parsed.version().has_value()
+            ? ObservedVersion::available(
+                      ObservedVersionSource::AurProviderCapability,
+                      parsed.version().value())
+            : ObservedVersion::unknown(
+                      ObservedVersionSource::AurProviderCapability,
+                      ObservedVersionUnknownReason::UnversionedProviderCapability);
+    return ProvidedDependency::from_aur_constraint_metadata(
+            std::move(package_name), std::move(package_base),
+            ProviderConstraintMetadata{
+                    std::move(parsed),
+                    package_version.has_value()
+                            ? ObservedVersion::available(
+                                      ObservedVersionSource::AurExactPackage,
+                                      package_version.value())
+                            : ObservedVersion::unknown(
+                                      ObservedVersionSource::AurExactPackage,
+                                      ObservedVersionUnknownReason::MissingVersionMetadata),
+                    provided_version});
+}
+
+ProvidedDependency typed_repository_provider(
+        std::string repository_name, std::string package_name,
+        std::string capability, std::optional<std::string> package_version) {
+    ProviderCapability parsed(
+            capability,
+            capability.substr(0, capability.find('=')),
+            capability.find('=') == std::string::npos
+                    ? std::nullopt
+                    : std::optional<std::string>(
+                              capability.substr(capability.find('=') + 1)));
+    const ObservedVersion provided_version = parsed.version().has_value()
+            ? ObservedVersion::available(
+                      ObservedVersionSource::RepositoryProviderCapability,
+                      parsed.version().value())
+            : ObservedVersion::unknown(
+                      ObservedVersionSource::RepositoryProviderCapability,
+                      ObservedVersionUnknownReason::UnversionedProviderCapability);
+    return ProvidedDependency::from_repository_constraint_metadata(
+            std::move(repository_name), std::move(package_name),
+            ProviderConstraintMetadata{
+                    std::move(parsed),
+                    package_version.has_value()
+                            ? ObservedVersion::available(
+                                      ObservedVersionSource::RepositoryExactPackage,
+                                      package_version.value())
+                            : ObservedVersion::unknown(
+                                      ObservedVersionSource::RepositoryExactPackage,
+                                      ObservedVersionUnknownReason::MissingVersionMetadata),
+                    provided_version});
+}
+
 ProvidedDependency case7_aur_provider() {
-    return ProvidedDependency::from_aur(
+    return typed_aur_provider(
             "case7-provider-pkg", "case7-provider-pkg",
-            "case7-virtual-api", "case7-virtual-api",
+            "case7-virtual-api",
             std::optional<std::string>{"1.0-1"});
 }
 
 ProvidedDependency case8_repository_provider_a() {
-    return ProvidedDependency::from_repository(
-            "extra", "case8-provider-a", "case8-virtual",
-            "case8-virtual=2", std::optional<std::string>{"2.0-1"});
+    return typed_repository_provider(
+            "extra", "case8-provider-a", "case8-virtual=2",
+            std::optional<std::string>{"2.0-1"});
 }
 
 ProvidedDependency case8_repository_provider_b() {
-    return ProvidedDependency::from_repository(
-            "community", "case8-provider-b", "case8-virtual",
-            "case8-virtual=3", std::optional<std::string>{"3.0-1"});
+    return typed_repository_provider(
+            "community", "case8-provider-b", "case8-virtual=3",
+            std::optional<std::string>{"3.0-1"});
 }
 
 ProvidedDependency case14_repository_provider() {
-    return ProvidedDependency::from_repository(
-            "aur", "case14-provider", "case14-virtual",
-            "case14-virtual=1", std::optional<std::string>{"1.0-1"});
+    return typed_repository_provider(
+            "aur", "case14-provider", "case14-virtual=1",
+            std::optional<std::string>{"1.0-1"});
 }
 
 ProvidedDependency case21_aur_provider_a() {
-    return ProvidedDependency::from_aur(
-            "case21-provider-a", "case21-provider-a", "case21-virtual",
-            "case21-virtual=1", std::optional<std::string>{"1.0-1"});
+    return typed_aur_provider(
+            "case21-provider-a", "case21-provider-a", "case21-virtual=1",
+            std::optional<std::string>{"1.0-1"});
 }
 
 ProvidedDependency case21_aur_provider_b() {
-    return ProvidedDependency::from_aur(
-            "case21-provider-b", "case21-provider-suite", "case21-virtual",
-            "case21-virtual=2", std::optional<std::string>{"1.0-1"});
+    return typed_aur_provider(
+            "case21-provider-b", "case21-provider-suite", "case21-virtual=2",
+            std::optional<std::string>{"1.0-1"});
 }
 
 ProvidedDependency case22_aur_provider() {
-    return ProvidedDependency::from_aur(
+    return typed_aur_provider(
             "case22-provider", "case22-provider", "case22-virtual",
-            "case22-virtual", std::optional<std::string>{"1.0-1"});
+            std::optional<std::string>{"1.0-1"});
 }
 
 ProviderSelectionCallback select_case21_provider(
@@ -429,6 +491,129 @@ void test_provider_origin_value_contract() {
             provided_dependency_display(repository) == "aur/same-package" &&
                     provided_dependency_display(aur) == "aur/same-package",
             "Typed provider display compatibility differs");
+}
+
+BuildPlan typed_constraint_plan(
+        ConstraintEvaluation evaluation,
+        std::string resolved_name = "typed-candidate") {
+    BuildPlan plan;
+    ConsumerDependencyRequirement requirement(
+            "typed-candidate>=2", "typed-candidate",
+            DependencyVersionConstraint(
+                    DependencyVersionRelation::GreaterThanOrEqual, "2"));
+    RepositoryExactPackage candidate{
+            ConfiguredRepositoryIdentity{"core", 0},
+            resolved_name,
+            ObservedVersion::available(
+                    ObservedVersionSource::RepositoryExactPackage, "1"),
+            {}};
+    plan.dependency_edges.push_back(BuildPlanDependencyEdge{
+            "typed-root",
+            "typed-root",
+            "typed-candidate>=2",
+            PackageRole::RuntimeDependency,
+            DependencyKind::Repo,
+            resolved_name,
+            std::nullopt,
+            std::nullopt,
+            ProviderResolutionKind::Unique,
+            DependencyRequirement{requirement},
+            ResolvedDependencyCandidate{candidate},
+            std::move(evaluation)});
+    return plan;
+}
+
+void test_typed_constraint_edge_and_mutation_firewall() {
+    BuildPlan unsatisfied =
+            typed_constraint_plan(ConstraintEvaluation::unsatisfied());
+    const BuildPlanDependencyEdge& edge = unsatisfied.dependency_edges.front();
+    expect(
+            edge.requirement.has_value() &&
+                    edge.resolved_candidate.has_value() &&
+                    edge.constraint_evaluation ==
+                            std::optional<ConstraintEvaluation>{
+                                    ConstraintEvaluation::unsatisfied()},
+            "Typed dependency edge did not retain requirement/candidate/evaluation");
+    expect(
+            has_incomplete_constraint_evaluations(unsatisfied),
+            "Unsatisfied constraint did not make the read-only plan incomplete");
+    require_constructible_build_plan_constraints(unsatisfied);
+    bool mutation_called = false;
+    expect_exception(
+            [&]() {
+                require_fetchable_build_plan("typed-root", unsatisfied);
+                mutation_called = true;
+            },
+            "Cannot execute build plan for typed-root; dependency "
+            "typed-candidate>=2 is Unsatisfied: the observed version does not "
+            "satisfy the requirement.");
+    expect(!mutation_called, "Mutation sentinel ran after Unsatisfied preflight");
+
+    BuildPlan unknown = typed_constraint_plan(ConstraintEvaluation::unknown(
+            ObservedVersionUnknownReason::CandidateVersionUnavailable));
+    expect(
+            has_incomplete_constraint_evaluations(unknown),
+            "Unknown constraint did not make the read-only plan incomplete");
+    expect_exception(
+            [&]() {
+                require_fetchable_build_plan("typed-root", unknown);
+                mutation_called = true;
+            },
+            "Cannot execute build plan for typed-root; dependency "
+            "typed-candidate>=2 is Unknown: candidate version cannot be proven.");
+    expect(!mutation_called, "Mutation sentinel ran after Unknown preflight");
+
+    for(const ConstraintEvaluation evaluation : {
+                ConstraintEvaluation::satisfied(),
+                ConstraintEvaluation::unconstrained()}) {
+        BuildPlan executable = typed_constraint_plan(evaluation);
+        expect(
+                !has_incomplete_constraint_evaluations(executable),
+                "Satisfied/Unconstrained constraint made the plan incomplete");
+        require_fetchable_build_plan("typed-root", executable);
+    }
+}
+
+void test_invalid_conflicting_and_source_identity_fail_closed() {
+    const std::optional<ConstraintEvaluation> conflicting =
+            project_conflicting_constraint_invocation({
+                    ConsumerDependencyRequirement(
+                            "typed-candidate<1", "typed-candidate",
+                            DependencyVersionConstraint(
+                                    DependencyVersionRelation::LessThan,
+                                    "1")),
+                    ConsumerDependencyRequirement(
+                            "typed-candidate>=2", "typed-candidate",
+                            DependencyVersionConstraint(
+                                    DependencyVersionRelation::
+                                            GreaterThanOrEqual,
+                                    "2"))});
+    expect(conflicting.has_value(), "Conflict fixture was not conflicting");
+    for(const ConstraintEvaluation evaluation : {
+                ConstraintEvaluation::invalid(
+                        ConstraintInvalidReason::MalformedRequirement),
+                conflicting.value()}) {
+        BuildPlan plan = typed_constraint_plan(evaluation);
+        bool failed = false;
+        try {
+            require_constructible_build_plan_constraints(plan);
+        } catch(const std::exception&) {
+            failed = true;
+        }
+        expect(failed, "Invalid/Conflicting plan construction did not fail closed");
+    }
+
+    BuildPlan mismatched = typed_constraint_plan(
+            ConstraintEvaluation::satisfied(), "different-candidate");
+    std::get<RepositoryExactPackage>(
+            mismatched.dependency_edges.front().resolved_candidate.value())
+            .package_name = "typed-candidate";
+    expect_exception(
+            [&]() {
+                require_fetchable_build_plan("typed-root", mismatched);
+            },
+            "Build plan constraint source identity is inconsistent for "
+            "typed-candidate>=2.");
 }
 
 void test_case_1_root_only() {
@@ -805,9 +990,14 @@ void test_provider_candidates_dedupe_by_source_identity() {
     expect(
             edge.resolved_provider ==
                             std::optional<ProvidedDependency>{
-                                    case22_aur_provider()} &&
+                                    typed_aur_provider(
+                                            "case22-provider",
+                                            "case22-provider",
+                                            "case22-virtual",
+                                            std::optional<std::string>{
+                                                    "2.0-1"})} &&
                     edge.provider_resolution == ProviderResolutionKind::Unique,
-            "Identity dedupe did not preserve first authoritative candidate");
+            "Identity dedupe did not retain the refreshed authoritative candidate");
 }
 
 BuildPlan selected_provider_identity_plan(
@@ -1034,10 +1224,10 @@ void test_selected_aur_provider_revalidation_boundary() {
             updated_edge.resolved_provider.value();
     expect(
             selected_snapshot.package_version ==
-                            std::optional<std::string>{"1.0-1"} &&
+                            std::optional<std::string>{"2.0-1"} &&
                     selected_snapshot.provided_dependency_specification ==
-                            "selected-provider-metadata-virtual=1",
-            "Selected edge did not retain its candidate snapshot");
+                            "selected-provider-metadata-virtual=2",
+            "Selected edge did not retain refreshed provider metadata");
     expect_legacy_order(
             updated_metadata,
             {"selected-provider-metadata-b",
@@ -1930,24 +2120,19 @@ void test_legacy_resolution_failure_boundary() {
                     std::vector<std::string>{"preflight-dependency-failure-child"},
             "Legacy dependency failure behavior changed");
 
-    BuildPlan provider_search = resolve_build_plan(
-            "preflight-provider-search-root");
-    expect(
-            provider_search.resolution_failures.empty(),
-            "Legacy resolver captured provider search failure");
-    expect(
-            provider_search.unresolved ==
-                    std::vector<std::string>{"preflight-provider-search-virtual"},
-            "Legacy provider search failure behavior changed");
+    expect_exception(
+            []() {
+                static_cast<void>(resolve_build_plan(
+                        "preflight-provider-search-root"));
+            },
+            "strict provider search failure");
 
-    BuildPlan provider_candidate = resolve_build_plan(
-            "preflight-provider-candidate-root");
-    expect(
-            provider_candidate.resolution_failures.empty(),
-            "Legacy resolver captured provider candidate failure");
-    expect(
-            provider_candidate.unresolved.empty(),
-            "Legacy resolver lost the surviving provider candidate");
+    expect_exception(
+            []() {
+                static_cast<void>(resolve_build_plan(
+                        "preflight-provider-candidate-root"));
+            },
+            "strict provider candidate failure");
 
     expect_exception(
             []() {
@@ -1975,6 +2160,12 @@ int main() {
         run_case(
                 "provider origin value contract",
                 test_provider_origin_value_contract);
+        run_case(
+                "typed constraint edge and mutation firewall",
+                test_typed_constraint_edge_and_mutation_firewall);
+        run_case(
+                "invalid/conflicting/source identity fail closed",
+                test_invalid_conflicting_and_source_identity_fail_closed);
         run_case("Case 1 root only", test_case_1_root_only);
         run_case("Case 2 dependency roles", test_case_2_dependency_roles);
         run_case("Case 3 multiple roles", test_case_3_multiple_roles);

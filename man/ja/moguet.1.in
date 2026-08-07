@@ -151,6 +151,8 @@ official dependency、unique provider、selected official repository provider、
 ambiguous provider、unresolved dependencyは表示しますが、さらに辿りません。
 interactive TTYではsource-aware provider candidateを選択でき、user-selected providerと
 未解決のambiguityを区別して表示します。
+constraintのresult / reasonを表示します。Unsatisfied / Unknownはwarning付きでread-only
+commandを継続し、Invalid / Conflictingはfail-closedです。
 clone、build、install、build order計算は行いません。
 .
 .TP
@@ -160,6 +162,8 @@ unknown dependency、未選択のambiguous provider、cycle、安全に解決で
 replacesがあるplanはincompleteです。
 unique resolve、user-selected provider、未選択のambiguous providerを区別します。
 size metadataが利用できなくてもplan bodyを省略しません。
+Unsatisfied / Unknownのdependency constraintはplanをincompleteとし、result / reasonを
+表示します。Invalid / Conflictingはplan constructionをfail-closedにします。
 clone、build、installは行いません。
 .
 .TP
@@ -167,6 +171,7 @@ clone、build、installは行いません。
 complete inspection planが必要とするAUR PackageBase repositoryを取得します。
 selected AUR providerのPackageBaseも含め、selected official repository providerはclone
 しません。
+Unsatisfied / Unknownのdependency constraintはclone / fetch開始前に停止します。
 未取得repositoryはcloneします。
 既存cloneでは
 .B "git fetch origin"

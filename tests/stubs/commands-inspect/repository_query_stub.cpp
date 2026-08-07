@@ -39,9 +39,25 @@ bool is_repo_package(const std::string& package_name) {
 StrictRepositoryPackageQueryResult query_repository_package_strict(
         const std::string& package_name) {
     if(is_repo_package(package_name)) {
-        return RepositoryPackagePresent{"test"};
+        return RepositoryPackagePresent{
+                "test", 0, package_name,
+                ObservedVersion::available(
+                        ObservedVersionSource::RepositoryExactPackage,
+                        "1.0-1")};
     }
     return RepositoryPackageNotFound{};
+}
+
+InstalledExactPackageObservationResult query_installed_exact_package_strict(
+        const std::string& package_name) {
+    if(is_installed_package(package_name)) {
+        return InstalledExactPackage{
+                package_name,
+                ObservedVersion::unknown(
+                        ObservedVersionSource::InstalledExactPackage,
+                        ObservedVersionUnknownReason::MissingVersionMetadata)};
+    }
+    return InstalledExactPackageAbsent{package_name};
 }
 
 std::vector<ProvidedDependency> find_repo_providers(

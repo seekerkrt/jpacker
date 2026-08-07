@@ -75,6 +75,14 @@ std::optional<AurPackageInfo> fixture_info(const std::string& package_name) {
        package_name == "aur-presented" || package_name == "scope-aur") {
         return package_info(package_name);
     }
+    if(package_name == "constraint-block-root") {
+        AurPackageInfo info = package_info(package_name);
+        info.Depends = {"constraint-block-leaf>=2.0-1"};
+        return info;
+    }
+    if(package_name == "constraint-block-leaf") {
+        return package_info(package_name);
+    }
     if(package_name == "mismatch-child") {
         return package_info_with_base(package_name, "resolved-base");
     }

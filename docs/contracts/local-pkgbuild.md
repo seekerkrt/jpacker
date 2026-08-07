@@ -46,6 +46,8 @@ local root directory、PKGBUILD path、PackageBase、root child nameをAUR root 
 
 local PackageBase、children、provides、version constraints、self-returnを含むback-edgeをtyped identityのままremote candidate queryより前に保持する。同じPackageBaseのedgeをconstraint matching前にsatisfiedへ丸めず、cycle情報を捨てない。effective architecture、version / provides constraint、required child集合に基づくinternal edge、unresolved dependency、real cycleの分類を行ってから、unresolved dependencyだけを既存のrepo exact / AUR exact / provider policyへprojectする。
 
+matching local package / provider capabilityが存在するedgeは、typed requirement、local package / PackageBase / capability identity、`ConstraintEvaluation`をBuildPlanへ保持する。`Unsatisfied` / `Unknown`を理由にlocal candidateを捨ててrepository / AURへfallbackせず、local buildのworkspace preparation / makepkg開始前に停止する。`Invalid` / `Conflicting`はplan constructionでfail-closedとする。
+
 ambiguous providerは[ambiguous provider contract](ambiguous-provider-selection.md)へ渡す。selected AUR providerのPackageBaseはdependency build unit、selected repository providerはexact `repository/package` dependency transactionとする。provider選択のcancel、non-TTY、`--noconfirm`、constraint conflictはlocal metadata failureへ混ぜず、既存typed reasonのままmutation前に停止する。
 
 ### Source snapshot、artifact、install

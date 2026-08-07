@@ -83,6 +83,9 @@ extra'
     unset MOGUET_TEST_PACKAGE_METADATA_PACMAN_CONF_EXIT_CODE
     unset MOGUET_TEST_PACKAGE_METADATA_PACMAN_CONF_FAILURE_AT
     unset MOGUET_TEST_PACMAN_CONF_REPOSITORY_LIST_EXIT_CODE
+    unset MOGUET_TEST_ALPM_VERCMP_EXPECTED_LHS
+    unset MOGUET_TEST_ALPM_VERCMP_EXPECTED_RHS
+    unset MOGUET_TEST_ALPM_VERCMP_RESULT
 }
 
 show_case_diagnostics() {
@@ -829,6 +832,61 @@ assert_contains "Failed to fetch repositories for fetch-guard-root: Cannot execu
 assert_exact_line "aur info-strict fetch-after-root" "$command_log"
 assert_no_git_mutation
 echo "  ok: fetch waits for every root preflight before mutation"
+
+setup_case deps-constraint-unsatisfied
+export MOGUET_TEST_INSPECTION_SCENARIO=deps-constraint-unsatisfied
+export MOGUET_TEST_ALPM_VERCMP_EXPECTED_LHS=2.0-1
+export MOGUET_TEST_ALPM_VERCMP_EXPECTED_RHS=3
+export MOGUET_TEST_ALPM_VERCMP_RESULT=-1
+run_ok deps constraint-unsatisfied-root
+assert_contains "constraint-leaf>=3: result=Unsatisfied" "$stdout_file"
+assert_contains "Dependency constraint-leaf>=3 is Unsatisfied" "$stdout_file"
+
+setup_case deps-constraint-satisfied
+export MOGUET_TEST_INSPECTION_SCENARIO=deps-constraint-satisfied
+export MOGUET_TEST_ALPM_VERCMP_EXPECTED_LHS=2.0-1
+export MOGUET_TEST_ALPM_VERCMP_EXPECTED_RHS=2.0-1
+export MOGUET_TEST_ALPM_VERCMP_RESULT=0
+run_ok deps constraint-satisfied-root
+assert_contains "constraint-leaf>=2.0-1: result=Satisfied" "$stdout_file"
+assert_not_contains "Warning: Dependency constraint-leaf>=2.0-1" "$stdout_file"
+
+setup_case deps-constraint-unconstrained
+export MOGUET_TEST_INSPECTION_SCENARIO=deps-constraint-unconstrained
+run_ok deps constraint-unconstrained-root
+assert_contains "constraint-leaf: result=Unconstrained" "$stdout_file"
+assert_not_contains "Warning: Dependency constraint-leaf" "$stdout_file"
+
+setup_case deps-constraint-unknown
+export MOGUET_TEST_INSPECTION_SCENARIO=deps-constraint-unknown
+run_ok deps constraint-unknown-root
+assert_contains "constraint-virtual>=3: result=Unknown" "$stdout_file"
+assert_contains "Dependency constraint-virtual>=3 is Unknown" "$stdout_file"
+
+setup_case deps-constraint-invalid
+export MOGUET_TEST_INSPECTION_SCENARIO=deps-constraint-invalid
+run_fail deps constraint-invalid-root
+assert_contains "AUR package metadata constraint projection failed: constraint-invalid-root" "$stderr_file"
+
+setup_case plan-constraint-incomplete
+export MOGUET_TEST_INSPECTION_SCENARIO=plan-constraint-incomplete
+export MOGUET_TEST_ALPM_VERCMP_EXPECTED_LHS=2.0-1
+export MOGUET_TEST_ALPM_VERCMP_EXPECTED_RHS=3
+export MOGUET_TEST_ALPM_VERCMP_RESULT=-1
+run_ok plan constraint-unsatisfied-root
+assert_contains "Plan status: incomplete" "$stdout_file"
+assert_contains "dependency constraints are incomplete" "$stdout_file"
+assert_contains "constraint-leaf>=3: result=Unsatisfied" "$stdout_file"
+
+setup_case fetch-constraint-firewall
+export MOGUET_TEST_INSPECTION_SCENARIO=fetch-constraint-firewall
+export MOGUET_TEST_ALPM_VERCMP_EXPECTED_LHS=2.0-1
+export MOGUET_TEST_ALPM_VERCMP_EXPECTED_RHS=3
+export MOGUET_TEST_ALPM_VERCMP_RESULT=-1
+run_fail fetch constraint-unsatisfied-root
+assert_contains "dependency constraint-leaf>=3 is Unsatisfied" "$stderr_file"
+assert_not_contains "git " "$command_log"
+echo "  ok: constraint preflight stops fetch before Git mutation"
 
 # execution phaseの失敗はentry単位。同じplanの後続entryと後続rootへ進む。
 setup_case fetch-entry-continue

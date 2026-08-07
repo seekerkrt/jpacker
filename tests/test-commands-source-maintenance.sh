@@ -823,6 +823,14 @@ assert_contains "Build Error: Package not found in repos or AUR: missing-source-
 assert_command_content_absent "git clone"
 assert_command_content_absent "makepkg"
 
+setup_case build-constraint-preflight-firewall
+run_fail --noedit --nodiff --noconfirm build constraint-block-root
+assert_contains "dependency constraint-block-leaf>=2.0-1 is Unsatisfied" "$output_file"
+assert_command_content_absent "git clone"
+assert_command_content_absent "makepkg"
+assert_command_content_absent "pacman -U"
+assert_command_content_absent "sudo "
+
 setup_case build-split-child-selected-only
 export MOGUET_TEST_MAKEPKG_ARTIFACT_IDENTITIES='split-base|split-sibling|3.1-4
 split-base|split-child|3.1-4
@@ -1750,6 +1758,16 @@ assert_contains "Separated build/install does not support --rmdeps." "$output_fi
 assert_command_absent "sudo pacman -Syu --noconfirm"
 assert_command_content_absent "pacman -Si"
 assert_total_command_count 0
+
+setup_case upgrade-constraint-preflight-firewall
+: > "$preference_dir/constraint-block-root"
+run_fail --noedit --nodiff --noconfirm upgrade
+assert_contains "dependency constraint-block-leaf>=2.0-1 is Unsatisfied" "$output_file"
+assert_command_content_absent "sudo "
+assert_command_content_absent "git clone"
+assert_command_content_absent "git fetch"
+assert_command_content_absent "makepkg"
+assert_command_content_absent "pacman -U"
 
 setup_case upgrade-invalid-name-is-hard-error
 : > "$preference_dir/bad name"
