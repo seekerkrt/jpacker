@@ -129,12 +129,11 @@ struct GroupRecord {
 
 struct SyncDatabaseRecord {
     SyncDatabaseRecord(alpm_handle_t* handle, const std::string& repository_name)
-        : database{handle, AlpmStubDatabaseKind::Sync, repository_name},
-          cache_node{nullptr, nullptr, nullptr} {}
+        : database{handle, AlpmStubDatabaseKind::Sync, repository_name} {}
 
     alpm_db_t database;
-    alpm_list_t cache_node;
     std::map<std::string, std::unique_ptr<alpm_pkg_t>> packages;
+    std::vector<std::unique_ptr<alpm_list_t>> cache_nodes;
     std::map<std::string, std::unique_ptr<GroupRecord>> groups;
 };
 
@@ -1317,7 +1316,35 @@ alpm_list_t* alpm_db_get_pkgcache(alpm_db_t* database) {
         if(behavior.cache_empty) return nullptr;
 
         SyncDatabaseRecord* database_record = sync_database_record(database);
-        return database_record == nullptr ? nullptr : &database_record->cache_node;
+        if(database_record == nullptr) return nullptr;
+
+        database_record->cache_nodes.clear();
+        for(const auto& [identity, package_state] :
+            g_state.repository_packages) {
+            if(identity.first != database->repository_name ||
+               package_state.lookup_mode != PackageLookupMode::Present) {
+                continue;
+            }
+            database_record->cache_nodes.push_back(
+                    std::make_unique<alpm_list_t>(alpm_list_t{
+                            sync_package_for(database, identity.second),
+                            nullptr,
+                            nullptr}));
+        }
+        for(std::size_t index = 0;
+            index < database_record->cache_nodes.size();
+            ++index) {
+            database_record->cache_nodes[index]->prev = index == 0
+                    ? nullptr
+                    : database_record->cache_nodes[index - 1].get();
+            database_record->cache_nodes[index]->next =
+                    index + 1 == database_record->cache_nodes.size()
+                    ? nullptr
+                    : database_record->cache_nodes[index + 1].get();
+        }
+        return database_record->cache_nodes.empty()
+                ? nullptr
+                : database_record->cache_nodes.front().get();
     }
 
     ++g_state.package_cache_calls;
@@ -1658,9 +1685,24 @@ alpm_pkgreason_t alpm_pkg_get_reason(alpm_pkg_t* package) {
             : package_state->reason;
 }
 
-int alpm_pkg_vercmp(const char*, const char*) {
-    // Local dependency projectionのversion比較testはreal libalpmをlinkする。
-    // Aggregate fake-alpm binaryからこの境界へ到達した場合はfixture不足として止める。
+int alpm_pkg_vercmp(const char* lhs, const char* rhs) {
+    // This test binary intentionally does not link libalpm. Constraint cases
+    // must declare the one expected comparison and its libalpm-style result;
+    // the stub never implements an Arch version ordering algorithm.
+    const char* expected_lhs =
+            std::getenv("MOGUET_TEST_ALPM_VERCMP_EXPECTED_LHS");
+    const char* expected_rhs =
+            std::getenv("MOGUET_TEST_ALPM_VERCMP_EXPECTED_RHS");
+    const char* expected_result =
+            std::getenv("MOGUET_TEST_ALPM_VERCMP_RESULT");
+    if(lhs != nullptr && rhs != nullptr && expected_lhs != nullptr &&
+       expected_rhs != nullptr && expected_result != nullptr &&
+       std::strcmp(lhs, expected_lhs) == 0 &&
+       std::strcmp(rhs, expected_rhs) == 0) {
+        if(std::strcmp(expected_result, "-1") == 0) return -1;
+        if(std::strcmp(expected_result, "0") == 0) return 0;
+        if(std::strcmp(expected_result, "1") == 0) return 1;
+    }
     std::fputs(
             "Package metadata stub received an unexpected version comparison\n",
             stderr);

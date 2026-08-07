@@ -75,6 +75,41 @@ std::optional<AurPackageInfo> fixture_info(const std::string& package_name) {
        package_name == "aur-presented" || package_name == "scope-aur") {
         return package_info(package_name);
     }
+    if(package_name == "constraint-block-root") {
+        AurPackageInfo info = package_info(package_name);
+        info.Depends = {"constraint-block-leaf>=2.0-1"};
+        return info;
+    }
+    if(package_name == "constraint-block-leaf") {
+        return package_info(package_name);
+    }
+    if(package_name == "install-partial-root") {
+        AurPackageInfo info = package_info(package_name);
+        info.Depends = {"install-partial-virtual>=1"};
+        return info;
+    }
+    if(package_name == "install-partial-provider-a" ||
+       package_name == "install-partial-provider-b") {
+        AurPackageInfo info = package_info(package_name);
+        info.Provides = {"install-partial-virtual=2"};
+        return info;
+    }
+    if(package_name == "install-conflict-root-a") {
+        AurPackageInfo info = package_info(package_name);
+        info.Depends = {"install-conflict-virtual>=2"};
+        return info;
+    }
+    if(package_name == "install-conflict-root-b") {
+        AurPackageInfo info = package_info(package_name);
+        info.Depends = {"install-conflict-virtual<2"};
+        return info;
+    }
+    if(package_name == "install-conflict-provider-a" ||
+       package_name == "install-conflict-provider-b") {
+        AurPackageInfo info = package_info(package_name);
+        info.Provides = {"install-conflict-virtual=2"};
+        return info;
+    }
     if(package_name == "mismatch-child") {
         return package_info_with_base(package_name, "resolved-base");
     }
@@ -121,6 +156,12 @@ std::vector<AurPackageInfo> AurClient::search_strict(
 std::vector<std::string> AurClient::search_names_by_provides(
         const std::string& provided_name) {
     append_command_log("aur provides " + provided_name);
+    if(provided_name == "install-partial-virtual") {
+        return {"install-partial-provider-a", "install-partial-provider-b"};
+    }
+    if(provided_name == "install-conflict-virtual") {
+        return {"install-conflict-provider-a", "install-conflict-provider-b"};
+    }
     return {};
 }
 
@@ -136,6 +177,10 @@ std::optional<AurPackageInfo> AurClient::info(const std::string& package_name) {
 
 std::optional<AurPackageInfo> AurClient::info_strict(const std::string& package_name) {
     append_command_log("aur info-strict " + package_name);
+    if(package_name == "install-partial-provider-b") {
+        throw std::runtime_error(
+                "partial provider candidate metadata failure");
+    }
     return fixture_info(package_name);
 }
 

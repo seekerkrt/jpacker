@@ -3,6 +3,13 @@ set -eu
 
 printf 'pacman-conf %s\n' "$*" >> "$MOGUET_TEST_COMMAND_LOG"
 
+if [ "$#" -eq 1 ] && [ "${1:-}" = "--repo-list" ]; then
+    if [ -n "${MOGUET_TEST_PACMAN_CONF_REPOSITORY_LIST:-}" ]; then
+        printf '%s\n' "$MOGUET_TEST_PACMAN_CONF_REPOSITORY_LIST"
+    fi
+    exit 0
+fi
+
 if [ "$#" -ne 3 ] ||
    [ "${1:-}" != "--verbose" ] ||
    [ "${2:-}" != "RootDir" ] ||

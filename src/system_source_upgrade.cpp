@@ -2,6 +2,7 @@
 
 #include "app_config.hpp"
 #include "cache_authority.hpp"
+#include "dependency_plan.hpp"
 #include "localization.hpp"
 #include "package_identifier.hpp"
 #include "process.hpp"
@@ -31,6 +32,16 @@ std::string unknown_system_failure_diagnostic() {
 std::string unknown_source_failure_diagnostic() {
     return localization::translate_message(
             "Registered source package processing failed with an unknown exception.");
+}
+
+std::string join_package_names(
+        const std::vector<std::string>& package_names) {
+    std::string joined;
+    for(std::size_t index = 0; index < package_names.size(); ++index) {
+        if(index > 0) joined += ", ";
+        joined += package_names[index];
+    }
+    return joined;
 }
 
 std::string post_upgrade_snapshot_failure_diagnostic(
@@ -966,8 +977,9 @@ SystemSourceUpgradePreparation prepare_system_source_upgrade(
                 RegisteredSourceUpgradeFailureKind::PreferenceUnavailable);
     }
 
-    std::vector<ProductionSourceBuildWorkItem> source_work_items;
-    std::vector<std::string> package_names;
+    std::vector<std::optional<ResolvedSourceBuildIdentity>>
+            resolved_identities(
+                    state.snapshot.registered_sources.size());
     ProviderSelectionCallback select_provider =
             registered_source_provider_selection_callback(
                     provider_selection_callback(config));
@@ -980,13 +992,14 @@ SystemSourceUpgradePreparation prepare_system_source_upgrade(
                 state.snapshot.registered_sources[source_position];
         if(!correlation.has_valid_package_name) continue;
 
-        ResolvedSourceBuildIdentity identity;
         try {
-            identity = resolve_source_build_identity(
-                    source.preference_package_name);
+            ResolvedSourceBuildIdentity identity =
+                    resolve_source_build_identity(
+                            source.preference_package_name);
             source.canonical_source_identity_key =
                     identity.canonical_source_key;
             source.resolved_package_base = identity.package_base;
+            resolved_identities[source_position] = std::move(identity);
         } catch(const std::exception& error) {
             SystemSourceUpgradeIssue issue = make_issue(
                     SystemSourceUpgradeIssueKind::
@@ -1012,11 +1025,81 @@ SystemSourceUpgradePreparation prepare_system_source_upgrade(
                     RegisteredSourceUpgradeFailureKind::UnknownException);
         }
 
+    }
+
+    std::vector<std::string> aur_package_names;
+    std::optional<std::size_t> first_aur_source_position;
+    for(std::size_t source_position = 0;
+        source_position < resolved_identities.size();
+        ++source_position) {
+        if(!resolved_identities[source_position].has_value() ||
+           resolved_identities[source_position]->source_kind !=
+                   SourceBuildSourceKind::Aur) {
+            continue;
+        }
+        if(!first_aur_source_position.has_value()) {
+            first_aur_source_position = source_position;
+        }
+        aur_package_names.push_back(
+                resolved_identities[source_position]->requested_name);
+    }
+    if(!aur_package_names.empty()) {
+        try {
+            BuildPlan invocation_plan = resolve_build_plan(
+                    aur_package_names, select_provider);
+            require_executable_install_plan(
+                    join_package_names(aur_package_names),
+                    invocation_plan);
+        } catch(const std::exception& error) {
+            const std::size_t source_position =
+                    first_aur_source_position.value();
+            RegisteredSourcePreferenceSnapshot& source =
+                    state.snapshot.registered_sources[source_position];
+            SystemSourceUpgradeIssue issue = make_issue(
+                    SystemSourceUpgradeIssueKind::
+                            SourceWorkItemPreparationFailed,
+                    SystemSourceUpgradeIssueImpact::BlocksExecution,
+                    SystemSourceUpgradePhase::Preparation,
+                    error.what());
+            attribute_issue_to_source(issue, source);
+            return block_preparation(
+                    std::move(state), std::move(issue), source_position,
+                    RegisteredSourceUpgradeFailureKind::BuildOrInstallFailed);
+        } catch(...) {
+            const std::size_t source_position =
+                    first_aur_source_position.value();
+            RegisteredSourcePreferenceSnapshot& source =
+                    state.snapshot.registered_sources[source_position];
+            SystemSourceUpgradeIssue issue = make_issue(
+                    SystemSourceUpgradeIssueKind::
+                            SourceWorkItemPreparationFailed,
+                    SystemSourceUpgradeIssueImpact::BlocksExecution,
+                    SystemSourceUpgradePhase::Preparation,
+                    localization::translate_message(
+                            "Source invocation constraint preflight failed with an unknown exception."));
+            attribute_issue_to_source(issue, source);
+            return block_preparation(
+                    std::move(state), std::move(issue), source_position,
+                    RegisteredSourceUpgradeFailureKind::UnknownException);
+        }
+    }
+
+    std::vector<ProductionSourceBuildWorkItem> source_work_items;
+    std::vector<std::string> package_names;
+    for(std::size_t source_position = 0;
+        source_position < state.snapshot.registered_sources.size();
+        ++source_position) {
+        RegisteredSourceCorrelation& correlation =
+                state.correlations[source_position];
+        RegisteredSourcePreferenceSnapshot& source =
+                state.snapshot.registered_sources[source_position];
+        if(!resolved_identities[source_position].has_value()) continue;
+
         try {
             correlation.work_item_index = source_work_items.size();
             source_work_items.push_back(
                     prepare_resolved_source_build_work_item(
-                            identity,
+                            resolved_identities[source_position].value(),
                             source.environment.value(),
                             true,
                             false,

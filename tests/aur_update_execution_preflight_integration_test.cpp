@@ -1,6 +1,5 @@
 #include "aur_update_execution_preflight.hpp"
 #include "integration_stub.hpp"
-#include "shell_words.hpp"
 
 #include <algorithm>
 #include <cstdlib>
@@ -230,13 +229,6 @@ void test_ordinary_aur_dependency_failure_is_owned_and_read_only() {
     stub::enqueue_captured_command_result(
             REPOSITORY_LIST_COMMAND,
             CapturedCommandResult{"core\n", 0});
-    const std::string archive_command =
-            "bsdtar -xOf " + shell_words::quote(repository_database.string()) +
-            " '*/desc' 2>/dev/null";
-    stub::enqueue_captured_command_result(
-            archive_command,
-            CapturedCommandResult{"", 0});
-
     const std::vector<fs::path> paths_before = fixture.relative_paths();
     fixture.enter();
     AurUpdateExecutionPreflight preflight =
@@ -260,7 +252,6 @@ void test_ordinary_aur_dependency_failure_is_owned_and_read_only() {
             stub::captured_commands() == std::vector<std::string>{
                     DATABASE_PATH_COMMAND,
                     REPOSITORY_LIST_COMMAND,
-                    archive_command,
             },
             "Strict repository read used an unexpected command sequence");
     expect_no_forbidden_operations();

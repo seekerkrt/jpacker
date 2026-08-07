@@ -6,9 +6,9 @@
 
 - Origin Issue: [#272](https://github.com/seekerkrt/moguet/issues/272)
 - Related Issues: [#97](https://github.com/seekerkrt/moguet/issues/97)、[#217](https://github.com/seekerkrt/moguet/issues/217)、[#268](https://github.com/seekerkrt/moguet/issues/268)、[#271](https://github.com/seekerkrt/moguet/issues/271)、[#266](https://github.com/seekerkrt/moguet/issues/266)、[#267](https://github.com/seekerkrt/moguet/issues/267)
-- Related Issue: #388
+- Related Issues: #388、#351
 - Related PRs: #341（#272 provider selection）、#277（typed provider origin）
-- Update history: Issue #373で旧decision 13の本文から安定contractへ分離。Issue #388 Slice 1でinstalled stateのauthority/presentation契約を追加。
+- Update history: Issue #373で旧decision 13の本文から安定contractへ分離。Issue #388 Slice 1でinstalled stateのauthority/presentation契約を追加。Issue #351 Slice 5でconstraint preflight、partial-source、installed exact fallbackのproduction semanticsへ同期。
 - Related upper decisions: [decision 1](../DECISIONS.md#decision-1)、[decision 2](../DECISIONS.md#decision-2)、[decision 4](../DECISIONS.md#decision-4)、[decision 5](../DECISIONS.md#decision-5)、[decision 6](../DECISIONS.md#decision-6)、[decision 7](../DECISIONS.md#decision-7)
 
 ## Contract本文（日本語normative source of truth）
@@ -17,15 +17,30 @@
 
 dependency `bar`の解決では、pacman-firstの既存順序を維持する。
 
-1. official repositoryのexact packageを確認する。
-2. repo exact packageがあればrepo dependencyとし、repository orderはpacman / pacman.confの順序に従う。
-3. repo exact packageがなければAUR exact packageを確認する。
-4. exact packageがなければproviderを探す。
-5. providerが0件ならunresolvedとする。
-6. providerが1件ならauto-resolveできる。
-7. providerが複数ならambiguousとし、候補順で先頭を選ばない。
+1. official repositoryのexact packageをsource-aware libalpm adapterで確認する。
+2. repo exact packageがあればrepo dependencyとし、repository identityとpacman / pacman.confのconfigured orderを保持する。先行sourceの`Present`は後続sourceの`SourceFailure`で消さない。
+3. repo exact packageがなく、source failureが残る場合はtyped `Unknown`とし、AURへfallbackしない。全configured sourceが`Absent`の場合だけAUR exact packageを確認する。
+4. AUR exact packageがあればAUR dependencyとする。AUR exact query failureはtyped `Unknown`とし、providerへfallbackしない。
+5. exact packageがなければproviderを探す。repository provider setを先に確認し、そのsetがcompleteかつ空の場合だけAUR provider setを確認する。
+6. provider candidate setがpartialならvalid observationをdiagnostic用に保持したtyped `Unknown(PartialSourceFailure)`とし、selection promptや別source fallbackへ進まない。
+7. completeなprovider setが1件ならauto-resolveできる。
+8. completeなprovider setが複数ならambiguousとし、候補順で先頭を選ばない。
+9. completeなrepository / AUR provider setがともに0件の場合だけinstalled exact packageを確認する。
+10. installed exactが`Present`なら`Installed` sourceとして解決し、`Absent`ならunresolved、local DBの`QueryFailure`ならtyped `Unknown`とする。
 
 candidateはsource kind、package name、repository packageならrepository name、AUR packageならPackageBase、provided dependency name、取得可能なversion / constraint metadataを保持する。candidate順はconfigured repository orderと既存AUR aggregation orderを維持し、Moguet独自のscoreやdefault candidateを導入しない。
+
+constraint evaluationはcandidateのfilter、sort、番号、default、recommend、auto-selectionを変更しない。`Unsatisfied` / `Unknown`はpresentation-only warningとしてchoice契約を維持し、`Invalid` / `Conflicting`はprompt開始前にfail-closedとする。constraintを理由に別sourceへfallbackしない。selection後にAUR provider metadataをrefreshした場合はcurrent matching capabilityを再取得・再評価し、selection前のprovided version / resultを再利用しない。source kind、package name、PackageBase、matching provided capability、provided capability versionの変化はidentity mismatchとしてfail-closedとする。
+
+### Installed exact fallbackとsource identity
+
+completeなexact / provider lookupの後に行うinstalled exact fallbackは、provider candidateへの`[installed]`注記とは別のresolution phaseである。
+
+- installed exact candidateのsourceは`Installed`であり、official repositoryやAURへ分類しない。
+- foreign installed packageも`deps`では`Installed dependencies`へ表示し、`Official repo dependencies`へ表示しない。
+- local DBのconfirmed absenceだけを`Absent`とし、initialization / database / query failureをabsenceへ丸めない。
+- query failureはfailure reasonを保持したtyped `Unknown`とし、read-only routeではwarning、mutation routeではmutation前blockへ接続する。
+- installed stateはrepository source provenanceを証明しない。
 
 ### Interactive selection
 
@@ -181,11 +196,9 @@ installed stateはidentity modelやBuildPlanへ流入しない境界を維持す
 
 ### Current implementation status
 
-本Sliceはproduction実装との接続は行わない。契約固定のみを行う。
-
-- Slice 2: pure installed-state model、typed failure projection、phase-local libalpm adapter、single lazy session、package-name cache、focused unit tests
-- Slice 3: provider candidate presentationへの接続、localization、CLI integration、public docs / man / compatibility同期
-- Slice 4: full regression、release-check、必要に応じたDocker validation
+- Issue #388でprovider candidateのinstalled-state annotationをproduction presentationへ接続済み。
+- Issue #351 Slice 2〜4のtyped constraint model、source-aware repository/local adapter、AUR metadata projectionをproduction resolver edgeのauthorityとする。
+- Issue #351 Slice 5ではinvocation-wide aggregation、prompt前の`Invalid` / `Conflicting` guard、partial-source `Unknown`、selected provider refresh、installed exact fallbackを同じBuildPlan / preflight ownerへ接続する。
 
 ### Ownership、plan、route
 

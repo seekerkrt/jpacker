@@ -604,8 +604,9 @@ void test_internal_constraints_and_provides_use_libalpm() {
             plan.internal_edges().size() == direct_constraints.size() + 2,
             "Satisfied internal edge count differs");
     expect(
-            plan.build_plan().dependency_edges.empty(),
-            "Satisfied local dependencies reached remote resolution");
+            plan.build_plan().dependency_edges.size() ==
+                    direct_constraints.size() + 2,
+            "Satisfied local dependencies were not retained as typed BuildPlan edges");
     expect(plan.build_plan().unresolved.empty(), "Satisfied local edge unresolved");
     expect(plan.build_plan().cycles.empty(), "One-way local edges are cyclic");
 
@@ -619,6 +620,11 @@ void test_internal_constraints_and_provides_use_libalpm() {
                         !edge.provided_specification.has_value() &&
                         !edge.is_cycle,
                 "Direct local version edge differs");
+        expect(
+                edge.requirement.has_value() &&
+                        edge.resolved_candidate.has_value() &&
+                        edge.constraint_evaluation.has_value(),
+                "Direct local edge lost typed constraint state");
     }
     const auto& provided =
             require_internal_edge(plan, consumer, "virtual-api<1.0");
@@ -675,12 +681,15 @@ void test_internal_constraints_and_provides_use_libalpm() {
     const auto& fallback_edge = require_internal_edge(
             fallback_plan, fallback_consumer, exact + ">=2");
     expect(
-            fallback_plan.failures().empty() &&
+            fallback_plan.failures().size() == 1 &&
                     fallback_edge.resolution_kind ==
-                            LocalDependencyResolutionKind::Provided &&
-                    fallback_edge.resolved_package_name == provider &&
-                    fallback_edge.provided_specification == exact + "=2",
-            "Compatible local provide did not satisfy an exact version mismatch");
+                            LocalDependencyResolutionKind::Package &&
+                    fallback_edge.resolved_package_name == exact &&
+                    !fallback_edge.provided_specification.has_value() &&
+                    fallback_edge.constraint_evaluation ==
+                            std::optional<ConstraintEvaluation>{
+                                    ConstraintEvaluation::unsatisfied()},
+            "Constraint result changed exact-local precedence or selected a fallback");
     expect(
             query_stub::repository_query_history().empty() &&
                     query_stub::aur_query_history().empty(),
@@ -729,7 +738,7 @@ void test_local_mismatch_and_ambiguity_fail_closed() {
     const LocalBuildPlan mismatch_plan = resolve_local_build_plan(
             mismatch_metadata, "x86_64", reject_provider_selection());
     expect(
-            mismatch_plan.failures().size() == 2,
+            mismatch_plan.failures().size() == 3,
             "Constraint mismatch failure count differs");
     const std::vector<LocalDependencyPlanCandidate> mismatch_candidates = {
             {core,
@@ -756,34 +765,23 @@ void test_local_mismatch_and_ambiguity_fail_closed() {
                      ObservedVersionUnknownReason::
                              UnversionedProviderCapability)}};
     expect(
-            mismatch_plan.failures()[1].kind ==
+            mismatch_plan.failures()[2].kind ==
                             LocalDependencyPlanFailureKind::ConstraintMismatch &&
-                    mismatch_plan.failures()[1].parent_package_name ==
+                    mismatch_plan.failures()[2].parent_package_name ==
                             consumer &&
-                    mismatch_plan.failures()[1].dependency_specification ==
+                    mismatch_plan.failures()[2].dependency_specification ==
                             "unversioned-api>=1" &&
-                    mismatch_plan.failures()[1].candidates == unknown_candidates,
+                    mismatch_plan.failures()[2].candidates == unknown_candidates,
             "Unversioned local provider lost its typed Unknown result");
     expect(
-            mismatch_plan.internal_edges().empty(),
-            "Mismatched local candidates became internal edges");
+            mismatch_plan.internal_edges().size() == 3 &&
+                    mismatch_plan.build_plan().dependency_edges.size() == 3 &&
+                    mismatch_plan.build_plan().unresolved.empty(),
+            "Local constraint results were not retained without source fallback");
     expect(
-            require_remote_edge(
-                    mismatch_plan.build_plan(), consumer,
-                    "virtual-api>=1.0",
-                    PackageRole::RuntimeDependency)
-                            .kind == DependencyKind::Repo &&
-                    mismatch_plan.build_plan().dependency_edges.size() == 1 &&
-                    contains_value(
-                            mismatch_plan.build_plan().unresolved,
-                            "unversioned-api>=1 (local candidate version is "
-                            "unknown)"),
-            "Local constraint result projection differs");
-    expect(
-            repository_subject_was_queried("virtual-api") &&
-                    !repository_subject_was_queried("unversioned-api") &&
+            query_stub::repository_query_history().empty() &&
                     query_stub::aur_query_history().empty(),
-            "Unversioned local provider triggered source fallback");
+            "Unsatisfied/Unknown local candidates triggered source fallback");
 
     reset_queries();
     const std::string provider_a = "local-provider-a";
@@ -1011,23 +1009,20 @@ void test_internal_edges_propagate_roots_to_remote_subtree() {
                     one_way_remote, "remote-one-way-base",
                     {one_way_b, one_way_b + ">="}));
 
-    const LocalBuildPlan one_way_plan = resolve_local_build_plan(
-            one_way_metadata, "x86_64", reject_provider_selection());
-    const auto& one_way_return = require_internal_edge(
-            one_way_plan, one_way_remote, one_way_b);
+    bool malformed_projection_failed = false;
+    try {
+        static_cast<void>(resolve_local_build_plan(
+                one_way_metadata, "x86_64",
+                reject_provider_selection()));
+    } catch(const std::exception& error) {
+        malformed_projection_failed =
+                std::string(error.what()).find(
+                        "AUR package metadata constraint projection failed: " +
+                        one_way_remote) != std::string::npos;
+    }
     expect(
-            one_way_return.is_cycle &&
-                    contains_value(
-                            one_way_plan.build_plan().cycles,
-                            "local-one-way-suite"),
-            "Remote return to the local PackageBase was not a cycle");
-    expect(
-            one_way_plan.failures().empty() &&
-                    contains_value(
-                            one_way_plan.build_plan().unresolved,
-                            dependency_constraint_unresolved_reason(
-                                    one_way_b + ">=")),
-            "Malformed remote constraint was reclassified as a local failure");
+            malformed_projection_failed,
+            "Malformed typed AUR projection was not rejected at its source boundary");
     expect_no_external_query_for(
             one_way_b, "One-way transitive local dependency");
 }
@@ -1240,12 +1235,18 @@ void test_remaining_dependencies_reuse_build_plan_policy() {
                             ProviderResolutionKind::UserSelected,
             "BuildPlan selected provider record differs");
     expect(
-            contains_value(
-                    build_plan.unresolved,
-                    dependency_constraint_unresolved_reason(
-                            "remote-constrained>=2")) &&
-                    contains_value(build_plan.unresolved, "remote-missing"),
-            "Existing unresolved dependency policy was not reused");
+            contains_value(build_plan.unresolved, "remote-missing") &&
+                    !contains_value(
+                            build_plan.unresolved,
+                            dependency_constraint_unresolved_reason(
+                                    "remote-constrained>=2")) &&
+                    require_remote_edge(
+                            build_plan, child, "remote-constrained>=2",
+                            PackageRole::RuntimeDependency)
+                                    .constraint_evaluation ==
+                            std::optional<ConstraintEvaluation>{
+                                    ConstraintEvaluation::unsatisfied()},
+            "Typed remote constraint result was not retained on its edge");
     expect(
             build_plan.ambiguous_providers.empty(),
             "Selected provider remained ambiguous");
@@ -1408,20 +1409,37 @@ void test_remote_provider_local_name_collision_fails_closed() {
             aur_package(
                     local_child, "remote-collision-base", {},
                     {dependency + "=1"}));
-    const ProvidedDependency aur_provider = ProvidedDependency::from_aur(
-            local_child, "remote-collision-base", dependency,
-            dependency + "=1", std::optional<std::string>{"1.0-1"});
-
     const LocalBuildPlan aur_plan =
             resolve_local_build_plan(metadata, "x86_64");
+    expect(
+            aur_plan.failures().size() == 1 &&
+                    aur_plan.failures()[0].candidates.size() == 1 &&
+                    aur_plan.failures()[0].candidates[0]
+                            .remote_provider.has_value(),
+            "AUR provider/local identity collision lost its provider");
+    const ProvidedDependency& current_aur_provider =
+            aur_plan.failures()[0].candidates[0].remote_provider.value();
     expect(
             aur_plan.failures().size() == 1 &&
                     aur_plan.failures()[0].kind ==
                             LocalDependencyPlanFailureKind::
                                     RemoteProviderIdentityConflict &&
                     aur_plan.failures()[0].candidates.size() == 1 &&
-                    aur_plan.failures()[0].candidates[0].remote_provider ==
-                            aur_provider,
+                    std::holds_alternative<AurProviderOrigin>(
+                            current_aur_provider.origin) &&
+                    current_aur_provider.package_name == local_child &&
+                    current_aur_provider.package_base ==
+                            "remote-collision-base" &&
+                    current_aur_provider.provided_dependency_name ==
+                            dependency &&
+                    current_aur_provider
+                                    .provided_dependency_specification ==
+                            dependency + "=1" &&
+                    current_aur_provider.package_version == "1.0-1" &&
+                    current_aur_provider.constraint_metadata.has_value() &&
+                    current_aur_provider.constraint_metadata
+                                    ->provided_capability.version() ==
+                            std::optional<std::string>{"1"},
             "AUR provider/local identity collision lost typed context");
     expect(
             aur_plan.build_plan().provided.empty() &&
@@ -1432,7 +1450,7 @@ void test_remote_provider_local_name_collision_fails_closed() {
     expect(
             query_stub::aur_query_count(
                     query_stub::AurQueryKind::StrictInfo,
-                    local_child) == 1,
+                    local_child) == 2,
             "AUR provider collision candidate metadata query count differs");
 }
 

@@ -481,7 +481,7 @@ void test_refresh_reprojects_current_capability() {
 
     AurPackageInfo current_package = package_info(
             "provider", "provider-base", "9.0-1");
-    current_package.Provides = {"virtual-api=1"};
+    current_package.Provides = {"virtual-api=3"};
     const AurProviderDependencyProjection& refreshed =
             require_alternative<AurProviderDependencyProjection>(
                     refresh_aur_provider_dependency(
@@ -501,17 +501,29 @@ void test_refresh_reprojects_current_capability() {
                                      .version() == "9.0-1" &&
                     refreshed.provider.constraint_metadata
                                     ->provided_capability.raw_specification() ==
-                            "virtual-api=1" &&
+                            "virtual-api=3" &&
                     refreshed.provider.constraint_metadata->provided_version
                                     .version() != nullptr &&
                     *refreshed.provider.constraint_metadata->provided_version
-                                     .version() == "1" &&
+                                     .version() == "3" &&
                     refreshed.evaluation.satisfaction() ==
-                            ConstraintSatisfaction::Unsatisfied,
-            "Refresh reused the stale matching capability");
+                            ConstraintSatisfaction::Satisfied,
+            "Refresh did not retain the current package metadata");
+
+    AurPackageInfo changed_capability_package = package_info(
+            "provider", "provider-base", "10.0-1");
+    changed_capability_package.Provides = {"virtual-api=1"};
+    expect_refresh_identity_changed(
+            refresh_aur_provider_dependency(
+                    selected,
+                    project_package(
+                            changed_capability_package,
+                            "changed current capability version")),
+            selected,
+            "provided capability version change");
 
     AurPackageInfo missing_capability_package = package_info(
-            "provider", "provider-base", "10.0-1");
+            "provider", "provider-base", "11.0-1");
     missing_capability_package.Provides = {"other-api=7"};
     const AurProviderDependencyProjectionFailure& missing_capability =
             require_alternative<AurProviderDependencyProjectionFailure>(

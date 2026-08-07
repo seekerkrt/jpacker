@@ -80,6 +80,34 @@ using RepositoryExactPackageObservationResult = std::variant<
         RepositoryExactPackageObservation,
         RepositoryExactPackageObservationFailure>;
 
+struct RepositoryProviderSourceObservation {
+    ConfiguredRepositoryIdentity          repository;
+    std::vector<RepositoryExactPackage> packages;
+};
+
+struct RepositoryProviderSourceFailure {
+    ConfiguredRepositoryIdentity             repository;
+    RepositoryExactPackageSourceFailureReason reason;
+};
+
+using RepositoryProviderSourceResult = std::variant<
+        RepositoryProviderSourceObservation,
+        RepositoryProviderSourceFailure>;
+
+struct RepositoryProviderObservation {
+    std::vector<std::string>                 configured_repository_order;
+    std::vector<RepositoryProviderSourceResult> source_results;
+};
+
+struct RepositoryProviderObservationFailure {
+    std::string            dependency_name;
+    PackageMetadataFailure failure;
+};
+
+using RepositoryProviderObservationResult = std::variant<
+        RepositoryProviderObservation,
+        RepositoryProviderObservationFailure>;
+
 InstalledExactPackageObservationResult observe_installed_exact_package(
         const PackageMetadataSession& session,
         const std::string& package_name);
@@ -87,3 +115,7 @@ InstalledExactPackageObservationResult observe_installed_exact_package(
 RepositoryExactPackageObservationResult observe_repository_exact_package(
         const PacmanRepositoryConfiguration& configuration,
         const std::string& package_name);
+
+RepositoryProviderObservationResult observe_repository_providers(
+        const PacmanRepositoryConfiguration& configuration,
+        const std::string& dependency_name);

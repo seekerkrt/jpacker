@@ -269,7 +269,27 @@ AurProviderDependencyProjectionResult refresh_aur_provider_dependency(
         // Re-run the projection from the current capability list. The
         // previously selected capability/version is never accepted as refresh
         // input.
-        return project_available_aur_provider(selected.requirement, *current);
+        AurProviderDependencyProjectionResult refreshed =
+                project_available_aur_provider(selected.requirement, *current);
+        if(const auto* projection =
+                   std::get_if<AurProviderDependencyProjection>(&refreshed);
+           projection != nullptr) {
+            if(!selected.provider.constraint_metadata.has_value() ||
+               selected.provider.provided_dependency_name !=
+                       projection->provider.provided_dependency_name ||
+               selected.provider.provided_dependency_specification !=
+                       projection->provider
+                               .provided_dependency_specification ||
+               selected.provider.constraint_metadata->provided_capability !=
+                       projection->provider.constraint_metadata
+                               ->provided_capability ||
+               selected.provider.constraint_metadata->provided_version !=
+                       projection->provider.constraint_metadata
+                               ->provided_version) {
+                return provider_identity_changed_failure(selected);
+            }
+        }
+        return refreshed;
     }
 
     if(const auto* unavailable =

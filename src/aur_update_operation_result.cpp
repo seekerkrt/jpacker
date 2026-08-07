@@ -159,6 +159,7 @@ bool is_known_preflight_reason(AurUpdateExecutionReason reason) noexcept {
     case AurUpdateExecutionReason::InstalledReasonUnknown:
     case AurUpdateExecutionReason::UpdatePlanInconsistent:
     case AurUpdateExecutionReason::DuplicateUpdateTarget:
+    case AurUpdateExecutionReason::InstalledPackageMetadataUnavailable:
     case AurUpdateExecutionReason::RepositoryMetadataUnavailable:
     case AurUpdateExecutionReason::AurDependencyMetadataUnavailable:
     case AurUpdateExecutionReason::ProviderMetadataUnavailable:

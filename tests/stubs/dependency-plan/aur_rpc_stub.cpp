@@ -14,6 +14,9 @@ std::size_t g_recursive_selected_provider_info_queries = 0;
 std::size_t g_selected_provider_identity_info_queries = 0;
 std::size_t g_selected_provider_provides_info_queries = 0;
 std::size_t g_selected_provider_metadata_info_queries = 0;
+std::size_t g_unique_refresh_removal_info_queries = 0;
+std::size_t g_unique_refresh_failure_info_queries = 0;
+std::size_t g_unique_refresh_name_change_info_queries = 0;
 
 AurPackageInfo package_info(
         const std::string& name, const std::vector<std::string>& depends = {},
@@ -68,6 +71,9 @@ void reset_selected_provider_identity_queries() {
     g_selected_provider_identity_info_queries = 0;
     g_selected_provider_provides_info_queries = 0;
     g_selected_provider_metadata_info_queries = 0;
+    g_unique_refresh_removal_info_queries = 0;
+    g_unique_refresh_failure_info_queries = 0;
+    g_unique_refresh_name_change_info_queries = 0;
 }
 
 } // namespace dependency_plan_aur_rpc_stub
@@ -108,6 +114,18 @@ std::vector<std::string> AurClient::search_names_by_provides(
                 "selected-provider-metadata-a",
                 "selected-provider-metadata-b"};
     }
+    if(provided_name == "selected-source-change-virtual") {
+        return {"selected-source-change-provider"};
+    }
+    if(provided_name == "unique-refresh-removal-virtual") {
+        return {"unique-refresh-removal-provider"};
+    }
+    if(provided_name == "unique-refresh-failure-virtual") {
+        return {"unique-refresh-failure-provider"};
+    }
+    if(provided_name == "unique-refresh-name-change-virtual") {
+        return {"unique-refresh-name-change-provider"};
+    }
     if(provided_name ==
        "preflight-exact-failure-no-provider-fallback") {
         return {
@@ -129,7 +147,13 @@ std::vector<std::string> AurClient::search_names_by_provides(
     if(provided_name == "preflight-provider-candidate-response-virtual") {
         return {"preflight-provider-candidate-response-broken"};
     }
-    if(provided_name == "case9-missing" || provided_name == "case11-missing") return {};
+    if(provided_name == "case9-missing" ||
+       provided_name == "case11-missing" ||
+       provided_name == "installed-present" ||
+       provided_name == "installed-absent" ||
+       provided_name == "installed-query-failure") {
+        return {};
+    }
     if(provided_name == "preflight-dependency-failure-child" ||
        provided_name == "preflight-shared-failure") {
         return {};
@@ -346,6 +370,73 @@ std::optional<AurPackageInfo> AurClient::info(const std::string& package_name) {
                 package_name, {}, {}, {},
                 {"selected-provider-metadata-virtual=1"});
     }
+    if(package_name == "selected-source-change-root") {
+        return package_info(
+                package_name, {"selected-source-change-virtual"});
+    }
+    if(package_name == "selected-source-change-provider") {
+        return package_info(
+                package_name, {}, {}, {},
+                {"selected-source-change-virtual=1"});
+    }
+    if(package_name == "unique-refresh-removal-root") {
+        return package_info(
+                package_name, {"unique-refresh-removal-virtual>=1"});
+    }
+    if(package_name == "unique-refresh-removal-provider") {
+        return package_info(
+                package_name, {}, {}, {},
+                {"unique-refresh-removal-virtual=2"});
+    }
+    if(package_name == "unique-refresh-failure-root") {
+        return package_info(
+                package_name, {"unique-refresh-failure-virtual>=1"});
+    }
+    if(package_name == "unique-refresh-failure-provider") {
+        return package_info(
+                package_name, {}, {}, {},
+                {"unique-refresh-failure-virtual=2"});
+    }
+    if(package_name == "unique-refresh-name-change-root") {
+        return package_info(
+                package_name, {"unique-refresh-name-change-virtual>=1"});
+    }
+    if(package_name == "unique-refresh-name-change-provider") {
+        return package_info(
+                package_name, {}, {}, {},
+                {"unique-refresh-name-change-virtual=2"});
+    }
+    if(package_name == "conflict-single-root") {
+        return package_info(
+                package_name, {"conflict-virtual>=2"},
+                {"conflict-virtual<2"});
+    }
+    if(package_name == "conflict-root-a") {
+        return package_info(package_name, {"conflict-virtual>=2"});
+    }
+    if(package_name == "conflict-root-b") {
+        return package_info(package_name, {"conflict-virtual<2"});
+    }
+    if(package_name == "target-metadata-root-a" ||
+       package_name == "target-metadata-root-b") {
+        return package_info(
+                package_name, {"target-metadata-change-virtual"});
+    }
+    if(package_name == "installed-present-root") {
+        return package_info(package_name, {"installed-present>=1"});
+    }
+    if(package_name == "installed-absent-root") {
+        return package_info(package_name, {"installed-absent"});
+    }
+    if(package_name == "installed-query-failure-root") {
+        return package_info(
+                package_name, {"installed-query-failure>=1"});
+    }
+    if(package_name == "preflight-repository-partial-provider-root") {
+        return package_info(
+                package_name,
+                {"preflight-repository-partial-provider-virtual>=1"});
+    }
     if(package_name ==
        "preflight-exact-failure-no-provider-fallback-root") {
         return package_info(
@@ -431,6 +522,16 @@ std::optional<AurPackageInfo> AurClient::info(const std::string& package_name) {
        package_name == "selected-provider-identity-virtual" ||
        package_name == "selected-provider-provides-virtual" ||
        package_name == "selected-provider-metadata-virtual" ||
+       package_name == "selected-source-change-virtual" ||
+       package_name == "unique-refresh-removal-virtual" ||
+       package_name == "unique-refresh-failure-virtual" ||
+       package_name == "unique-refresh-name-change-virtual" ||
+       package_name == "conflict-virtual" ||
+       package_name == "target-metadata-change-virtual" ||
+       package_name == "installed-present" ||
+       package_name == "installed-absent" ||
+       package_name == "installed-query-failure" ||
+       package_name == "preflight-repository-partial-provider-virtual" ||
        package_name == "preflight-provider-search-virtual" ||
        package_name == "preflight-provider-candidate-virtual" ||
        package_name == "preflight-provider-response-virtual" ||
@@ -490,6 +591,27 @@ std::optional<AurPackageInfo> AurClient::info_strict(const std::string& package_
         if(g_selected_provider_metadata_info_queries++ > 0) {
             result->Version = "2.0-1";
             result->Provides = {"selected-provider-metadata-virtual=2"};
+        }
+        return result;
+    }
+    if(package_name == "unique-refresh-removal-provider") {
+        std::optional<AurPackageInfo> result = info(package_name);
+        if(g_unique_refresh_removal_info_queries++ > 0) {
+            result->Provides = {"different-virtual=2"};
+        }
+        return result;
+    }
+    if(package_name == "unique-refresh-failure-provider") {
+        if(g_unique_refresh_failure_info_queries++ > 0) {
+            throw std::runtime_error(
+                    "transient selected provider metadata failure");
+        }
+        return info(package_name);
+    }
+    if(package_name == "unique-refresh-name-change-provider") {
+        std::optional<AurPackageInfo> result = info(package_name);
+        if(g_unique_refresh_name_change_info_queries++ > 0) {
+            result->Name = "unique-refresh-changed-provider";
         }
         return result;
     }

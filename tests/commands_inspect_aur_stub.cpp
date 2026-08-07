@@ -110,6 +110,67 @@ std::optional<AurPackageInfo> graph_info(const std::string& package_name) {
         return package_info(package_name, {"fetch-entry-fail", "fetch-entry-after"});
     }
 
+    if(package_name == "constraint-unsatisfied-root") {
+        return package_info(package_name, {"constraint-leaf>=3"});
+    }
+    if(package_name == "constraint-satisfied-root") {
+        return package_info(package_name, {"constraint-leaf>=2.0-1"});
+    }
+    if(package_name == "constraint-unconstrained-root") {
+        return package_info(package_name, {"constraint-leaf"});
+    }
+    if(package_name == "constraint-invalid-root") {
+        return package_info(package_name, {"constraint-leaf>="});
+    }
+    if(package_name == "constraint-leaf") {
+        return package_info(package_name);
+    }
+    if(package_name == "constraint-unknown-root") {
+        return package_info(package_name, {"constraint-virtual>=3"});
+    }
+    if(package_name == "constraint-virtual") return std::nullopt;
+    if(package_name == "constraint-provider") {
+        return package_info(package_name, {}, {"constraint-virtual"});
+    }
+
+    if(package_name == "partial-provider-root") {
+        return package_info(package_name, {"partial-provider-virtual>=1"});
+    }
+    if(package_name == "partial-provider-virtual") return std::nullopt;
+    if(package_name == "partial-provider-a" ||
+       package_name == "partial-provider-b") {
+        return package_info(
+                package_name, {}, {"partial-provider-virtual=2"});
+    }
+
+    if(package_name == "public-conflict-single-root") {
+        AurPackageInfo info = package_info(
+                package_name, {"public-conflict-virtual>=2"});
+        info.MakeDepends = {"public-conflict-virtual<2"};
+        return info;
+    }
+    if(package_name == "public-conflict-root-a") {
+        return package_info(
+                package_name, {"public-conflict-virtual>=2"});
+    }
+    if(package_name == "public-conflict-root-b") {
+        return package_info(
+                package_name, {"public-conflict-virtual<2"});
+    }
+    if(package_name == "public-conflict-virtual") return std::nullopt;
+
+    if(package_name == "installed-display-root") {
+        return package_info(package_name, {"foreign-installed"});
+    }
+    if(package_name == "installed-query-failure-root") {
+        return package_info(
+                package_name, {"installed-query-failure>=1"});
+    }
+    if(package_name == "foreign-installed" ||
+       package_name == "installed-query-failure") {
+        return std::nullopt;
+    }
+
     if(package_name == "plan-formatter-root") {
         return package_info(
                 package_name,
@@ -276,6 +337,16 @@ std::vector<std::string> AurClient::search_names_by_provides(
     if(provided_name == "no-metadata-aur-virtual") {
         return {"no-metadata-aur-provider"};
     }
+    if(provided_name == "constraint-virtual") {
+        return {"constraint-provider"};
+    }
+    if(provided_name == "partial-provider-virtual") {
+        return {"partial-provider-a", "partial-provider-b"};
+    }
+    if(provided_name == "foreign-installed" ||
+       provided_name == "installed-query-failure") {
+        return {};
+    }
     if(provided_name == "identity-unknown-virtual" ||
        provided_name == "no-metadata-unknown-virtual") {
         return {};
@@ -304,7 +375,15 @@ std::optional<AurPackageInfo> AurClient::info_strict(const std::string& package_
     append_command_log("aur info-strict " + package_name);
     const std::string scenario = inspection_scenario();
 
-    if(is_graph_scenario(scenario)) return graph_info(package_name);
+    if(is_graph_scenario(scenario)) {
+        if(scenario.find("provider-partial-failure") !=
+                   std::string::npos &&
+           package_name == "partial-provider-b") {
+            throw std::runtime_error(
+                    "partial provider candidate metadata failure");
+        }
+        return graph_info(package_name);
+    }
 
     if(scenario == "foreign-fallback" &&
        is_numbered_foreign_package(package_name) &&

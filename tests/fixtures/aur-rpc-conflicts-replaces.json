@@ -6,6 +6,18 @@
       "Version": "1.0-1",
       "Depends": []
     },
+    "constraint-block-root": {
+      "Name": "constraint-block-root",
+      "PackageBase": "constraint-block-root",
+      "Version": "1.0-1",
+      "Depends": ["constraint-block-leaf>=2.0-1"]
+    },
+    "constraint-block-leaf": {
+      "Name": "constraint-block-leaf",
+      "PackageBase": "constraint-block-leaf",
+      "Version": "1.0-1",
+      "Depends": []
+    },
     "conflict-only": {
       "Name": "conflict-only",
       "PackageBase": "conflict-only",

@@ -63,6 +63,9 @@ std::string preflight_reason_label(AurUpdateExecutionReason reason) {
         return localization::translate_message("update plan inconsistent");
     case AurUpdateExecutionReason::DuplicateUpdateTarget:
         return localization::translate_message("duplicate update target");
+    case AurUpdateExecutionReason::InstalledPackageMetadataUnavailable:
+        return localization::translate_message(
+                "installed package metadata unavailable");
     case AurUpdateExecutionReason::RepositoryMetadataUnavailable:
         return localization::translate_message(
                 "repository metadata unavailable");
@@ -299,6 +302,7 @@ bool is_normal_skip_reason(AurUpdateExecutionReason reason) {
     case AurUpdateExecutionReason::InstalledReasonUnknown:
     case AurUpdateExecutionReason::UpdatePlanInconsistent:
     case AurUpdateExecutionReason::DuplicateUpdateTarget:
+    case AurUpdateExecutionReason::InstalledPackageMetadataUnavailable:
     case AurUpdateExecutionReason::RepositoryMetadataUnavailable:
     case AurUpdateExecutionReason::AurDependencyMetadataUnavailable:
     case AurUpdateExecutionReason::ProviderMetadataUnavailable:

@@ -194,3 +194,83 @@ RepositoryExactPackageObservationResult observe_repository_exact_package(
     }
     return observation;
 }
+
+RepositoryProviderObservationResult observe_repository_providers(
+        const PacmanRepositoryConfiguration& configuration,
+        const std::string& dependency_name) {
+    RepositoryProviderPackageMetadataQueryResult metadata_result =
+            query_configured_repository_provider_package_metadata(
+                    configuration,
+                    dependency_name);
+    if(const auto* failure =
+               std::get_if<PackageMetadataFailure>(&metadata_result);
+       failure != nullptr) {
+        return RepositoryProviderObservationFailure{
+                dependency_name,
+                *failure};
+    }
+
+    RepositoryProviderPackageMetadataSnapshot metadata_snapshot =
+            std::get<RepositoryProviderPackageMetadataSnapshot>(
+                    std::move(metadata_result));
+    RepositoryProviderObservation observation;
+    observation.configured_repository_order =
+            std::move(metadata_snapshot.repository_order);
+    observation.source_results.reserve(metadata_snapshot.source_results.size());
+
+    for(auto& source_result : metadata_snapshot.source_results) {
+        if(auto* source =
+                   std::get_if<RepositoryProviderPackageMetadataSourceSnapshot>(
+                           &source_result);
+           source != nullptr) {
+            RepositoryProviderSourceObservation projected{
+                    repository_identity(
+                            source->configured_repository_order,
+                            source->repository_name),
+                    {}};
+            projected.packages.reserve(source->packages.size());
+            std::optional<DependencyConstraintParseFailure> parse_failure;
+            for(auto& metadata : source->packages) {
+                RepositoryProviderCapabilityProjectionResult provides_result =
+                        project_repository_provides(metadata.provides);
+                if(const auto* failure =
+                           std::get_if<DependencyConstraintParseFailure>(
+                                   &provides_result);
+                   failure != nullptr) {
+                    parse_failure = *failure;
+                    break;
+                }
+                projected.packages.push_back(RepositoryExactPackage{
+                        repository_identity(
+                                metadata.configured_repository_order,
+                                metadata.repository_name),
+                        std::move(metadata.package_name),
+                        exact_package_version(
+                                ObservedVersionSource::RepositoryExactPackage,
+                                metadata.version),
+                        std::get<std::vector<RepositoryProviderCapability>>(
+                                std::move(provides_result))});
+            }
+            if(parse_failure.has_value()) {
+                observation.source_results.push_back(
+                        RepositoryProviderSourceFailure{
+                                projected.repository,
+                                std::move(parse_failure.value())});
+            } else {
+                observation.source_results.push_back(std::move(projected));
+            }
+            continue;
+        }
+
+        auto& failure =
+                std::get<RepositoryProviderPackageMetadataSourceFailure>(
+                        source_result);
+        observation.source_results.push_back(
+                RepositoryProviderSourceFailure{
+                        repository_identity(
+                                failure.configured_repository_order,
+                                failure.repository_name),
+                        std::move(failure.failure)});
+    }
+    return observation;
+}

@@ -249,20 +249,22 @@ AUR_RPC_ENVELOPE_VALIDATION_TEST_SRCS := \
 	$(SRC_DIR)/logging.cpp \
 	tests/stubs/package-metadata/alpm_stub.cpp
 # POLICY(#217): final sync CLI testはparser/routing/selection/executionを
-# productionのままlinkし、candidate search transportとAUR RPCだけを
-# deterministic stubへ差し替える。
+# productionのままlinkし、candidate search transport、AUR RPC、libalpm APIを
+# deterministic stubへ差し替える。repository adapter自体はproduction ownerを使う。
 COMMANDS_SYNC_TEST_SRCS := \
 	$(filter-out \
 		$(SRC_DIR)/aur_rpc.cpp \
 		$(SRC_DIR)/root_package_search.cpp, \
 		$(SRCS)) \
 	tests/stubs/commands-sync/aur_rpc_stub.cpp \
-	tests/stubs/commands-sync/root_package_search_stub.cpp
+	tests/stubs/commands-sync/root_package_search_stub.cpp \
+	tests/stubs/package-metadata/alpm_stub.cpp
 COMMANDS_SYNC_REQUIRED_PRODUCTION_TEST_SRCS = \
 	$(filter-out $(COMMANDS_SYNC_FORBIDDEN_TEST_SRCS),$(SRCS))
 COMMANDS_SYNC_REQUIRED_TEST_SUPPORT_SRCS := \
 	tests/stubs/commands-sync/aur_rpc_stub.cpp \
-	tests/stubs/commands-sync/root_package_search_stub.cpp
+	tests/stubs/commands-sync/root_package_search_stub.cpp \
+	tests/stubs/package-metadata/alpm_stub.cpp
 COMMANDS_SYNC_FORBIDDEN_TEST_SRCS := \
 	$(SRC_DIR)/aur_rpc.cpp \
 	$(SRC_DIR)/root_package_search.cpp
@@ -315,6 +317,8 @@ AUR_UPDATE_EXECUTION_PREFLIGHT_TEST_SRCS := \
 	tests/aur_update_execution_preflight_test.cpp \
 	$(SRC_DIR)/aur_update_execution_preflight.cpp \
 	$(SRC_DIR)/build_plan_artifact_target_projection.cpp \
+	$(SRC_DIR)/dependency_constraint.cpp \
+	$(SRC_DIR)/dependency_constraint_presentation.cpp \
 	$(SRC_DIR)/dependency_plan_model.cpp \
 	$(SRC_DIR)/dependency_spec.cpp \
 	$(SRC_DIR)/package_identifier.cpp \
@@ -322,10 +326,14 @@ AUR_UPDATE_EXECUTION_PREFLIGHT_TEST_SRCS := \
 AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION_TEST_SRCS := \
 	tests/aur_update_execution_preflight_integration_test.cpp \
 	$(SRC_DIR)/aur_update_execution_preflight.cpp \
+	$(SRC_DIR)/aur_constraint_metadata.cpp \
 	$(SRC_DIR)/build_plan_artifact_target_projection.cpp \
+	$(SRC_DIR)/dependency_constraint.cpp \
+	$(SRC_DIR)/dependency_constraint_presentation.cpp \
 	$(SRC_DIR)/dependency_plan.cpp \
 	$(SRC_DIR)/dependency_plan_model.cpp \
 	$(SRC_DIR)/dependency_spec.cpp \
+	$(SRC_DIR)/package_constraint_metadata.cpp \
 	$(SRC_DIR)/repository_query.cpp \
 	$(SRC_DIR)/package_metadata.cpp \
 	$(SRC_DIR)/package_identifier.cpp \
@@ -338,6 +346,7 @@ AUR_UPDATE_EXECUTION_PREPARATION_TEST_SRCS := \
 	tests/aur_update_execution_preparation_test.cpp \
 	$(SRC_DIR)/aur_update_execution_preparation.cpp \
 	$(SRC_DIR)/build_plan_artifact_target_projection.cpp \
+	$(SRC_DIR)/dependency_constraint.cpp \
 	$(SRC_DIR)/dependency_plan_model.cpp \
 	$(SRC_DIR)/source_install_preparation.cpp \
 	$(SRC_DIR)/source_environment.cpp \
@@ -348,6 +357,7 @@ AUR_UPDATE_EXECUTION_PREPARATION_INTEGRATION_TEST_SRCS := \
 	tests/aur_update_execution_preparation_integration_test.cpp \
 	$(SRC_DIR)/aur_update_execution_preparation.cpp \
 	$(SRC_DIR)/build_plan_artifact_target_projection.cpp \
+	$(SRC_DIR)/dependency_constraint.cpp \
 	$(SRC_DIR)/dependency_plan_model.cpp \
 	$(SRC_DIR)/source_install_preparation.cpp \
 	$(SRC_DIR)/source_preference.cpp \
@@ -364,6 +374,7 @@ AUR_UPDATE_EXECUTION_RUNNER_TEST_SRCS := \
 	$(SRC_DIR)/aur_update_execution_runner.cpp \
 	$(SRC_DIR)/aur_update_execution_preparation.cpp \
 	$(SRC_DIR)/build_plan_artifact_target_projection.cpp \
+	$(SRC_DIR)/dependency_constraint.cpp \
 	$(SRC_DIR)/dependency_plan_model.cpp \
 	$(SRC_DIR)/source_install_preparation.cpp \
 	$(SRC_DIR)/source_environment.cpp \
@@ -392,6 +403,7 @@ AUR_UPDATE_OPERATION_RESULT_TEST_SRCS := \
 	$(SRC_DIR)/aur_update_operation_result.cpp \
 	$(SRC_DIR)/aur_update_execution_preparation.cpp \
 	$(SRC_DIR)/build_plan_artifact_target_projection.cpp \
+	$(SRC_DIR)/dependency_constraint.cpp \
 	$(SRC_DIR)/dependency_plan_model.cpp \
 	$(SRC_DIR)/source_install_preparation.cpp \
 	$(SRC_DIR)/source_environment.cpp \
@@ -422,6 +434,8 @@ FILTERED_AUR_UPDATE_OPERATION_TEST_SRCS := \
 	$(SRC_DIR)/aur_update_execution_preflight.cpp \
 	$(SRC_DIR)/aur_update_execution_preparation.cpp \
 	$(SRC_DIR)/build_plan_artifact_target_projection.cpp \
+	$(SRC_DIR)/dependency_constraint.cpp \
+	$(SRC_DIR)/dependency_constraint_presentation.cpp \
 	$(SRC_DIR)/dependency_plan_model.cpp \
 	$(SRC_DIR)/aur_update_execution_runner.cpp \
 	$(SRC_DIR)/aur_update_operation_result.cpp \
@@ -443,6 +457,8 @@ FILTERED_AUR_UPDATE_OPERATION_REQUIRED_TEST_SRCS := \
 	$(SRC_DIR)/aur_update_execution_preflight.cpp \
 	$(SRC_DIR)/aur_update_execution_preparation.cpp \
 	$(SRC_DIR)/build_plan_artifact_target_projection.cpp \
+	$(SRC_DIR)/dependency_constraint.cpp \
+	$(SRC_DIR)/dependency_constraint_presentation.cpp \
 	$(SRC_DIR)/dependency_plan_model.cpp \
 	$(SRC_DIR)/aur_update_execution_runner.cpp \
 	$(SRC_DIR)/aur_update_operation_result.cpp
@@ -478,6 +494,8 @@ UPGRADE_ALL_OPERATION_ALLOWED_PRODUCTION_TEST_SRCS := \
 	$(SRC_DIR)/aur_update_execution_preflight.cpp \
 	$(SRC_DIR)/aur_update_execution_preparation.cpp \
 	$(SRC_DIR)/build_plan_artifact_target_projection.cpp \
+	$(SRC_DIR)/dependency_constraint.cpp \
+	$(SRC_DIR)/dependency_constraint_presentation.cpp \
 	$(SRC_DIR)/dependency_plan_model.cpp \
 	$(SRC_DIR)/aur_update_execution_runner.cpp \
 	$(SRC_DIR)/aur_update_operation_result.cpp \
@@ -503,6 +521,8 @@ UPGRADE_ALL_OPERATION_REQUIRED_TEST_SRCS := \
 	$(SRC_DIR)/aur_update_execution_preflight.cpp \
 	$(SRC_DIR)/aur_update_execution_preparation.cpp \
 	$(SRC_DIR)/build_plan_artifact_target_projection.cpp \
+	$(SRC_DIR)/dependency_constraint.cpp \
+	$(SRC_DIR)/dependency_constraint_presentation.cpp \
 	$(SRC_DIR)/dependency_plan_model.cpp \
 	$(SRC_DIR)/aur_update_execution_runner.cpp \
 	$(SRC_DIR)/aur_update_operation_result.cpp
@@ -595,7 +615,9 @@ LOCAL_SOURCE_ROOT_FORBIDDEN_TEST_SRCS := \
 # 持ち込まない。AUR / repository query boundaryは専用stubへ差し替える。
 LOCAL_DEPENDENCY_PLAN_PROJECTION_ALLOWED_PRODUCTION_TEST_SRCS := \
 	$(SRC_DIR)/local_dependency_plan_projection.cpp \
+	$(SRC_DIR)/aur_constraint_metadata.cpp \
 	$(SRC_DIR)/dependency_constraint.cpp \
+	$(SRC_DIR)/dependency_constraint_presentation.cpp \
 	$(SRC_DIR)/dependency_plan.cpp \
 	$(SRC_DIR)/dependency_plan_model.cpp \
 	$(SRC_DIR)/dependency_spec.cpp \
@@ -639,7 +661,9 @@ LOCAL_SOURCE_BUILD_ALLOWED_PRODUCTION_TEST_SRCS := \
 	$(SRC_DIR)/local_source_root.cpp \
 	$(SRC_DIR)/local_package_metadata.cpp \
 	$(SRC_DIR)/local_dependency_plan_projection.cpp \
+	$(SRC_DIR)/aur_constraint_metadata.cpp \
 	$(SRC_DIR)/dependency_constraint.cpp \
+	$(SRC_DIR)/dependency_constraint_presentation.cpp \
 	$(SRC_DIR)/dependency_plan.cpp \
 	$(SRC_DIR)/dependency_plan_model.cpp \
 	$(SRC_DIR)/dependency_spec.cpp \
@@ -673,6 +697,9 @@ LOCAL_SOURCE_BUILD_FORBIDDEN_TEST_SRCS := \
 DEPENDENCY_PLAN_MODEL_ALLOWED_PRODUCTION_TEST_SRCS := \
 	$(SRC_DIR)/dependency_plan.cpp \
 	$(SRC_DIR)/dependency_plan_model.cpp \
+	$(SRC_DIR)/aur_constraint_metadata.cpp \
+	$(SRC_DIR)/dependency_constraint.cpp \
+	$(SRC_DIR)/dependency_constraint_presentation.cpp \
 	$(SRC_DIR)/dependency_spec.cpp \
 	$(SRC_DIR)/package_identifier.cpp \
 	$(SRC_DIR)/logging.cpp
@@ -691,6 +718,7 @@ DEPENDENCY_PLAN_MODEL_FORBIDDEN_TEST_SRCS := \
 # reducer/identifierだけをlinkし、filesystem/process/metadata/executor/stubを持ち込まない。
 BUILD_PLAN_ARTIFACT_TARGET_PROJECTION_ALLOWED_PRODUCTION_TEST_SRCS := \
 	$(SRC_DIR)/build_plan_artifact_target_projection.cpp \
+	$(SRC_DIR)/dependency_constraint.cpp \
 	$(SRC_DIR)/dependency_plan_model.cpp \
 	$(SRC_DIR)/package_identifier.cpp
 BUILD_PLAN_ARTIFACT_TARGET_PROJECTION_TEST_SRCS := \
@@ -703,6 +731,8 @@ BUILD_PLAN_ARTIFACT_TARGET_PROJECTION_FORBIDDEN_TEST_SRCS := \
 REPOSITORY_QUERY_TEST_SRCS := \
 	tests/repository_query_test.cpp \
 	$(SRC_DIR)/repository_query.cpp \
+	$(SRC_DIR)/package_constraint_metadata.cpp \
+	$(SRC_DIR)/dependency_constraint.cpp \
 	$(SRC_DIR)/package_metadata.cpp \
 	$(SRC_DIR)/dependency_spec.cpp \
 	$(SRC_DIR)/package_identifier.cpp \
@@ -902,11 +932,13 @@ SEPARATED_PACKAGE_BASE_SOURCE_BUILD_FORBIDDEN_TEST_SRCS := \
 PRODUCTION_SOURCE_BUILD_TEST_SRCS := \
 	tests/production_source_build_test.cpp \
 	$(SRC_DIR)/app_config.cpp \
+	$(SRC_DIR)/aur_constraint_metadata.cpp \
 	$(SRC_DIR)/provider_selection.cpp \
 	$(SRC_DIR)/source_install.cpp \
 	$(SRC_DIR)/local_source_build_dependency_preparation.cpp \
 	$(SRC_DIR)/local_dependency_plan_projection.cpp \
 	$(SRC_DIR)/dependency_constraint.cpp \
+	$(SRC_DIR)/dependency_constraint_presentation.cpp \
 	$(SRC_DIR)/local_package_metadata.cpp \
 	$(SRC_DIR)/cache_authority.cpp \
 	$(SRC_DIR)/source_install_preparation.cpp \
@@ -1044,9 +1076,10 @@ UPGRADE_ALL_COMMAND_FORBIDDEN_TEST_LDLIBS = $(LIBALPM_LDLIBS)
 COMMANDS_SYNC_TEST_CPPFLAGS = \
 	-DMOGUET_ENABLE_TEST_OVERRIDES \
 	-DMOGUET_ENABLE_TEST_CONFIG_PATH \
-	-I$(SRC_DIR)
-COMMANDS_SYNC_TEST_LDLIBS = $(MY_LDLIBS) $(LIBALPM_LDLIBS)
-COMMANDS_SYNC_FORBIDDEN_TEST_LDLIBS =
+	-I$(SRC_DIR) \
+	-Itests/stubs/package-metadata
+COMMANDS_SYNC_TEST_LDLIBS = $(MY_LDLIBS)
+COMMANDS_SYNC_FORBIDDEN_TEST_LDLIBS = $(LIBALPM_LDLIBS)
 
 COMMANDS_INSPECT_TEST_CPPFLAGS = \
 	-DMOGUET_ENABLE_TEST_OVERRIDES \
@@ -1839,7 +1872,9 @@ $(AUR_UPDATE_QUERY_TEST_TARGET): $(AUR_UPDATE_QUERY_TEST_SRCS) $(SRC_DIR)/aur_up
 $(AUR_UPDATE_EXECUTION_PREFLIGHT_TEST_TARGET): $(AUR_UPDATE_EXECUTION_PREFLIGHT_TEST_SRCS) $(SRC_DIR)/aur_update_execution_preflight.hpp $(SRC_DIR)/aur_update_plan.hpp $(SRC_DIR)/dependency_plan.hpp $(SRC_DIR)/dependency_provider.hpp $(SRC_DIR)/dependency_spec.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/installed_package.hpp $(SRC_DIR)/localization.hpp tests/stubs/aur-update-execution-preflight/preflight_stub.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling AUR update execution preflight fake-symbol test binary"
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -I$(SRC_DIR) $(AUR_UPDATE_EXECUTION_PREFLIGHT_TEST_SRCS) -o $@
+	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
+		-I$(SRC_DIR) $(AUR_UPDATE_EXECUTION_PREFLIGHT_TEST_SRCS) \
+		-o $@ $(LIBALPM_LDLIBS)
 
 $(AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION_TEST_TARGET): $(AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION_TEST_SRCS) $(SRC_DIR)/aur_update_execution_preflight.hpp $(SRC_DIR)/aur_update_plan.hpp $(SRC_DIR)/dependency_plan.hpp $(SRC_DIR)/dependency_plan_projection_support.hpp $(SRC_DIR)/dependency_provider.hpp $(SRC_DIR)/aur_rpc.hpp $(SRC_DIR)/repository_query.hpp $(SRC_DIR)/package_metadata.hpp $(SRC_DIR)/installed_package.hpp $(SRC_DIR)/dependency_spec.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/process.hpp $(SRC_DIR)/shell_words.hpp $(SRC_DIR)/logging.hpp $(SRC_DIR)/localization.hpp tests/stubs/package-metadata/alpm_stub.hpp tests/stubs/aur-update-execution-preflight-integration/integration_stub.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
@@ -1854,76 +1889,79 @@ $(AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION_TEST_TARGET): $(AUR_UPDATE_EXECUTIO
 $(AUR_UPDATE_EXECUTION_PREPARATION_TEST_TARGET): $(AUR_UPDATE_EXECUTION_PREPARATION_TEST_SRCS) $(HEADERS) tests/stubs/aur-update-execution-preparation/preparation_stub.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling AUR update execution preparation fake-symbol test binary"
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
+	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
 		-DMOGUET_ENABLE_AUR_UPDATE_EXECUTION_PREPARATION_TEST_HOOKS \
 		-I$(SRC_DIR) \
 		$(AUR_UPDATE_EXECUTION_PREPARATION_TEST_SRCS) \
-		-o $@
+		-o $@ $(LIBALPM_LDLIBS)
 
 $(AUR_UPDATE_EXECUTION_PREPARATION_INTEGRATION_TEST_TARGET): $(AUR_UPDATE_EXECUTION_PREPARATION_INTEGRATION_TEST_SRCS) $(HEADERS) tests/stubs/aur-update-execution-preparation-integration/preparation_stub.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling AUR update execution preparation production-reader composition test binary"
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
+	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
 		-DMOGUET_ENABLE_TEST_OVERRIDES \
 		-DMOGUET_ENABLE_AUR_UPDATE_EXECUTION_PREPARATION_TEST_HOOKS \
 		-DMOGUET_ENABLE_SOURCE_PREFERENCE_TEST_HOOKS \
 		-I$(SRC_DIR) \
 		$(AUR_UPDATE_EXECUTION_PREPARATION_INTEGRATION_TEST_SRCS) \
-		-o $@
+		-o $@ $(LIBALPM_LDLIBS)
 
 $(AUR_UPDATE_EXECUTION_RUNNER_TEST_TARGET): $(AUR_UPDATE_EXECUTION_RUNNER_TEST_SRCS) $(HEADERS) tests/stubs/aur-update-execution-preparation/preparation_stub.hpp tests/stubs/aur-update-execution-runner/execution_stub.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling AUR update execution runner fake-symbol test binary"
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
+	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
 		-DMOGUET_ENABLE_AUR_UPDATE_EXECUTION_PREPARATION_TEST_HOOKS \
 		-DMOGUET_ENABLE_AUR_UPDATE_EXECUTION_RUNNER_TEST_HOOKS \
 		-I$(SRC_DIR) \
 		$(AUR_UPDATE_EXECUTION_RUNNER_TEST_SRCS) \
-		-o $@
+		-o $@ $(LIBALPM_LDLIBS)
 
 $(AUR_UPDATE_OPERATION_RESULT_TEST_TARGET): $(AUR_UPDATE_OPERATION_RESULT_TEST_SRCS) $(HEADERS) tests/stubs/aur-update-execution-preparation/preparation_stub.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling pure AUR update operation result test binary"
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
+	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
 		-I$(SRC_DIR) \
 		$(AUR_UPDATE_OPERATION_RESULT_TEST_SRCS) \
-		-o $@
+		-o $@ $(LIBALPM_LDLIBS)
 
 $(FILTERED_AUR_UPDATE_OPERATION_TEST_TARGET): $(FILTERED_AUR_UPDATE_OPERATION_TEST_SRCS) $(HEADERS) tests/stubs/filtered-aur-update-operation/query_stub.hpp tests/stubs/aur-update-execution-preflight/preflight_stub.hpp tests/stubs/aur-update-execution-preparation/preparation_stub.hpp tests/stubs/aur-update-execution-runner/execution_stub.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling filtered AUR update operation production-composition test binary"
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
+	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
 		-DMOGUET_ENABLE_AUR_UPDATE_EXECUTION_PREPARATION_TEST_HOOKS \
 		-DMOGUET_ENABLE_AUR_UPDATE_EXECUTION_RUNNER_TEST_HOOKS \
 		-I$(SRC_DIR) \
 		$(FILTERED_AUR_UPDATE_OPERATION_TEST_SRCS) \
-		-o $@
+		-o $@ $(LIBALPM_LDLIBS)
 
 $(UPGRADE_ALL_OPERATION_TEST_TARGET): $(UPGRADE_ALL_OPERATION_TEST_SRCS) $(HEADERS) tests/stubs/upgrade-all-operation/operation_stub.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling upgrade-all operation production-composition test binary"
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
+	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
 		-DMOGUET_ENABLE_UPGRADE_ALL_OPERATION_TEST_HOOKS \
 		-DMOGUET_ENABLE_SYSTEM_SOURCE_UPGRADE_TEST_HOOKS \
 		-I$(SRC_DIR) \
 		$(UPGRADE_ALL_OPERATION_TEST_SRCS) \
-		-o $@
+		-o $@ $(LIBALPM_LDLIBS)
 
 $(DEPENDENCY_PLAN_MODEL_TEST_TARGET): $(DEPENDENCY_PLAN_MODEL_TEST_SRCS) $(SRC_DIR)/dependency_plan.hpp $(SRC_DIR)/dependency_plan_projection_support.hpp $(SRC_DIR)/dependency_provider.hpp $(SRC_DIR)/aur_rpc.hpp $(SRC_DIR)/repository_query.hpp $(SRC_DIR)/dependency_spec.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/logging.hpp $(SRC_DIR)/localization.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling dependency plan model test binary"
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -I$(SRC_DIR) $(DEPENDENCY_PLAN_MODEL_TEST_SRCS) -o $@
+	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
+		-I$(SRC_DIR) $(DEPENDENCY_PLAN_MODEL_TEST_SRCS) \
+		-o $@ $(LIBALPM_LDLIBS)
 
 $(BUILD_PLAN_ARTIFACT_TARGET_PROJECTION_TEST_TARGET): $(BUILD_PLAN_ARTIFACT_TARGET_PROJECTION_TEST_SRCS) $(SRC_DIR)/build_plan_artifact_target_projection.hpp $(SRC_DIR)/artifact_install_plan.hpp $(SRC_DIR)/dependency_plan.hpp $(SRC_DIR)/dependency_provider.hpp $(SRC_DIR)/aur_rpc.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/localization.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling BuildPlan artifact target projection test binary"
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -I$(SRC_DIR) $(BUILD_PLAN_ARTIFACT_TARGET_PROJECTION_TEST_SRCS) -o $@
+	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
+		-I$(SRC_DIR) $(BUILD_PLAN_ARTIFACT_TARGET_PROJECTION_TEST_SRCS) \
+		-o $@ $(LIBALPM_LDLIBS)
 
-$(REPOSITORY_QUERY_TEST_TARGET): $(REPOSITORY_QUERY_TEST_SRCS) $(SRC_DIR)/repository_query.hpp $(SRC_DIR)/dependency_provider.hpp $(SRC_DIR)/package_metadata.hpp $(SRC_DIR)/installed_package.hpp $(SRC_DIR)/dependency_spec.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/process.hpp $(SRC_DIR)/shell_words.hpp $(SRC_DIR)/localization.hpp tests/stubs/package-metadata/alpm_stub.hpp tests/stubs/repository-query/process_stub.hpp $(VERSION_FILE)
+$(REPOSITORY_QUERY_TEST_TARGET): $(REPOSITORY_QUERY_TEST_SRCS) $(SRC_DIR)/repository_query.hpp $(SRC_DIR)/dependency_provider.hpp $(SRC_DIR)/package_constraint_metadata.hpp $(SRC_DIR)/dependency_constraint.hpp $(SRC_DIR)/package_metadata.hpp $(SRC_DIR)/installed_package.hpp $(SRC_DIR)/dependency_spec.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/process.hpp $(SRC_DIR)/shell_words.hpp $(SRC_DIR)/localization.hpp tests/stubs/package-metadata/alpm_stub.hpp tests/stubs/repository-query/process_stub.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling repository query fake-symbol test binary"
 	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-DMOGUET_ENABLE_REPOSITORY_QUERY_TEST_HOOKS \
 		-I$(SRC_DIR) -Itests/stubs/package-metadata \
 		$(REPOSITORY_QUERY_TEST_SRCS) \
 		-o $@
@@ -2759,24 +2797,15 @@ test-build-plan-artifact-target-projection: check-build-plan-artifact-target-pro
 test-repository-query: $(REPOSITORY_QUERY_TEST_TARGET)
 	@set -e; for test_case in \
 		candidate-value-contract \
-		success \
+		configured-order \
+		present-later-failure \
+		absent-later-failure \
+		unrelated-malformed-exact \
+		provider-capabilities \
+		provider-partial-failure \
 		repository-named-aur \
-		legacy-malformed-candidates \
-		configuration-command-failure \
-		configuration-parse-failure \
-		unsafe-repository-name \
-		missing-sync-directory \
-		empty-repository-configuration \
-		missing-configured-database \
-		non-regular-configured-database \
-		database-read-failure \
-		empty-database \
-		malformed-database \
-		invalid-provided-dependency \
-		missing-package-version \
-		multiple-package-versions \
-		invalid-package-version \
-		partial-snapshot; do \
+		configuration-failure \
+		installed-exact-states; do \
 		$(abspath $(REPOSITORY_QUERY_TEST_TARGET)) $$test_case; \
 	done
 

@@ -144,6 +144,34 @@ using RepositoryExactPackageMetadataQueryResult = std::variant<
         RepositoryExactPackageMetadataSnapshot,
         PackageMetadataFailure>;
 
+// Provider enumeration uses the same owned libalpm projection as exact
+// lookup. Each configured source keeps its own success/failure state so a
+// later unavailable repository cannot erase observations from an earlier one.
+struct RepositoryProviderPackageMetadataSourceSnapshot {
+    std::size_t configured_repository_order;
+    std::string repository_name;
+    std::vector<RepositoryExactPackageMetadata> packages;
+};
+
+struct RepositoryProviderPackageMetadataSourceFailure {
+    std::size_t            configured_repository_order;
+    std::string            repository_name;
+    PackageMetadataFailure failure;
+};
+
+using RepositoryProviderPackageMetadataSourceResult = std::variant<
+        RepositoryProviderPackageMetadataSourceSnapshot,
+        RepositoryProviderPackageMetadataSourceFailure>;
+
+struct RepositoryProviderPackageMetadataSnapshot {
+    std::vector<std::string> repository_order;
+    std::vector<RepositoryProviderPackageMetadataSourceResult> source_results;
+};
+
+using RepositoryProviderPackageMetadataQueryResult = std::variant<
+        RepositoryProviderPackageMetadataSnapshot,
+        PackageMetadataFailure>;
+
 using InstalledPackageQueryResult = std::variant<
         InstalledPackageMetadata,
         PackageNotFound,
@@ -196,6 +224,11 @@ RepositoryExactPackageMetadataQueryResult
 query_configured_repository_exact_package_metadata(
         const PacmanRepositoryConfiguration& configuration,
         const std::string& package_name);
+
+RepositoryProviderPackageMetadataQueryResult
+query_configured_repository_provider_package_metadata(
+        const PacmanRepositoryConfiguration& configuration,
+        const std::string& dependency_name);
 
 // local DBと全sync DBを1 handleで照合し、borrowを残さないowned inventoryを返す。
 ForeignPackageInventoryResult query_foreign_package_inventory(
@@ -253,6 +286,10 @@ public:
     RepositoryExactPackageMetadataQueryResult
     query_repository_exact_package_metadata(
             const std::string& package_name) const;
+
+    RepositoryProviderPackageMetadataQueryResult
+    query_repository_provider_package_metadata(
+            const std::string& dependency_name) const;
 
     RepositoryPackageSearchResult query_root_package_search(
             const std::string& query) const;

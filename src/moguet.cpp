@@ -806,12 +806,12 @@ void print_help() {
             cli_authority::operation_spec(OperationId::Deps).help_syntax,
             localization::format_translated_message(
                     // TRANSLATORS: The placeholder is the AUR project identity.
-                    "Classify {} dependencies", "AUR"));
+                    "Classify {} dependencies and show constraint results", "AUR"));
     print_help_entry(
             cli_authority::operation_spec(OperationId::Plan).help_syntax,
             localization::format_translated_message(
                     // TRANSLATORS: The placeholder is the AUR project identity.
-                    "Show the {} build-order plan", "AUR"));
+                    "Show the {} build-order plan and constraint completeness", "AUR"));
     print_help_entry(
             cli_authority::operation_spec(OperationId::Fetch).help_syntax,
             localization::format_translated_message(

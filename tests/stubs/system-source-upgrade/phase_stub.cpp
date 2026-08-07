@@ -1,6 +1,7 @@
 #include "phase_stub.hpp"
 
 #include "artifact_install_executor.hpp"
+#include "dependency_plan.hpp"
 #include "separated_source_build.hpp"
 
 #include <algorithm>
@@ -563,6 +564,21 @@ PackageMetadataSession::snapshot_local_package_versions() const {
                 "Stub package metadata session is closed."};
     }
     return impl_->script.local_package_snapshot;
+}
+
+BuildPlan resolve_build_plan(
+        const std::vector<std::string>& targets,
+        const ProviderSelectionCallback&) {
+    BuildPlan plan;
+    for(std::size_t index = 0; index < targets.size(); ++index) {
+        plan.root_targets.push_back(
+                RootTargetIdentity{index, targets[index]});
+    }
+    return plan;
+}
+
+void require_executable_install_plan(
+        const std::string&, const BuildPlan&) {
 }
 
 int run_command(const std::string& command) {

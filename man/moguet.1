@@ -151,11 +151,16 @@ Classify AUR runtime, make, and check dependencies.
 With
 .BR --recursive ,
 traverse exact AUR dependencies and user-selected AUR providers.
-Official dependencies, uniquely resolved providers, selected official
-repository providers, still-ambiguous providers, and unresolved dependencies
-are displayed without further traversal.
+Installed dependencies, official dependencies, uniquely resolved providers,
+selected official repository providers, still-ambiguous providers, and
+unresolved dependencies are displayed without further traversal. An installed
+exact dependency retains Installed source identity and is not presented as an
+official repository package.
 On an interactive TTY, source-aware provider candidates can be selected and
 the output distinguishes user-selected providers from unresolved ambiguity.
+Constraint results and reasons are displayed. Unsatisfied or unknown results
+warn but do not stop this read-only command; invalid or conflicting input
+fails closed.
 This command does not clone, build, install, or calculate a build order.
 .
 .TP
@@ -166,6 +171,9 @@ that Moguet cannot resolve make the plan incomplete.
 The plan distinguishes uniquely resolved, user-selected, and still-ambiguous
 providers.
 Metadata-size unavailability does not suppress the plan body.
+Unsatisfied or unknown dependency constraints make the plan incomplete and
+are shown with their result and reason. Invalid or conflicting constraints
+fail plan construction.
 This command does not clone, build, or install.
 .
 .TP
@@ -174,6 +182,7 @@ Retrieve the AUR PackageBase repositories needed by a complete inspection
 plan.
 A selected AUR provider's PackageBase is included; a selected official
 repository provider is not cloned.
+Unsatisfied or unknown dependency constraints stop before clone or fetch.
 Missing repositories are cloned.
 An existing clone runs only
 .BR "git fetch origin" ;
