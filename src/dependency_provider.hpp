@@ -1,6 +1,9 @@
 #pragma once
 
+#include "dependency_constraint.hpp"
+
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <variant>
@@ -19,6 +22,17 @@ struct AurProviderOrigin {
 
 using ProviderOrigin = std::variant<RepositoryProviderOrigin, AurProviderOrigin>;
 
+// Constraint metadata is resolution metadata, not provider identity. Keeping
+// package and provided versions in separate typed fields prevents an
+// unversioned capability from inheriting its provider package's version.
+struct ProviderConstraintMetadata {
+    ProviderCapability provided_capability;
+    ObservedVersion    package_version;
+    ObservedVersion    provided_version;
+
+    bool operator==(const ProviderConstraintMetadata&) const = default;
+};
+
 // 依存名を満たすprovider packageと、そのtyped provenance。
 // POLICY(#267): origin shapeはfactoryで固定し、trust boundaryの文字列検証とは分離する。
 struct ProvidedDependency {
@@ -28,6 +42,7 @@ struct ProvidedDependency {
     std::string               provided_dependency_name;
     std::string               provided_dependency_specification;
     std::optional<std::string> package_version;
+    std::optional<ProviderConstraintMetadata> constraint_metadata;
 
     static ProvidedDependency from_repository(
             std::string repository_name, std::string package_name) {
@@ -46,7 +61,7 @@ struct ProvidedDependency {
                 std::move(package_name), {},
                 std::move(provided_dependency_name),
                 std::move(provided_dependency_specification),
-                std::move(package_version)};
+                std::move(package_version), std::nullopt};
     }
 
     static ProvidedDependency from_aur(std::string package_name) {
@@ -66,7 +81,51 @@ struct ProvidedDependency {
                 std::move(package_base),
                 std::move(provided_dependency_name),
                 std::move(provided_dependency_specification),
-                std::move(package_version)};
+                std::move(package_version), std::nullopt};
+    }
+
+    static ProvidedDependency from_aur_constraint_metadata(
+            std::string package_name, std::string package_base,
+            ProviderConstraintMetadata constraint_metadata) {
+        const ProviderCapability& capability =
+                constraint_metadata.provided_capability;
+        if(constraint_metadata.package_version.source() !=
+                   ObservedVersionSource::AurExactPackage ||
+           constraint_metadata.provided_version.source() !=
+                   ObservedVersionSource::AurProviderCapability) {
+            throw std::invalid_argument(
+                    "AUR provider constraint metadata has incompatible version sources.");
+        }
+        if(capability.version().has_value()) {
+            const std::string* provided_version =
+                    constraint_metadata.provided_version.version();
+            if(provided_version == nullptr ||
+               *provided_version != capability.version().value()) {
+                throw std::invalid_argument(
+                        "AUR provided capability version metadata is inconsistent.");
+            }
+        } else {
+            const ObservedVersionUnknownReason* unknown_reason =
+                    constraint_metadata.provided_version.unknown_reason();
+            if(unknown_reason == nullptr ||
+               *unknown_reason != ObservedVersionUnknownReason::
+                                          UnversionedProviderCapability) {
+                throw std::invalid_argument(
+                        "Unversioned AUR capability has version metadata.");
+            }
+        }
+        const std::string* package_version =
+                constraint_metadata.package_version.version();
+        return ProvidedDependency{
+                AurProviderOrigin{},
+                std::move(package_name),
+                std::move(package_base),
+                capability.package_name(),
+                capability.raw_specification(),
+                package_version == nullptr
+                        ? std::nullopt
+                        : std::optional<std::string>(*package_version),
+                std::move(constraint_metadata)};
     }
 
     bool operator==(const ProvidedDependency&) const = default;
@@ -77,13 +136,15 @@ private:
             std::string package_base,
             std::string provided_dependency_name,
             std::string provided_dependency_specification,
-            std::optional<std::string> package_version)
+            std::optional<std::string> package_version,
+            std::optional<ProviderConstraintMetadata> constraint_metadata)
         : origin(std::move(origin)), package_name(std::move(package_name)),
           package_base(std::move(package_base)),
           provided_dependency_name(std::move(provided_dependency_name)),
           provided_dependency_specification(
                   std::move(provided_dependency_specification)),
-          package_version(std::move(package_version)) {}
+          package_version(std::move(package_version)),
+          constraint_metadata(std::move(constraint_metadata)) {}
 };
 
 // provider choiceのidentityはpresentationや取得時点の補助metadataに依存させない。

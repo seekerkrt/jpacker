@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Moguet 2.1.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-07 08:35+0900\n"
+"POT-Creation-Date: 2026-08-07 10:24+0900\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -684,7 +684,7 @@ msgstr ""
 msgid "{} {} response validation failed for {}: field {} expected string, got missing"
 msgstr ""
 
-#: src/aur_rpc.cpp:251 src/aur_rpc.cpp:480
+#: src/aur_rpc.cpp:251 src/aur_rpc.cpp:547
 #, c++-format
 msgid "{} {} response validation failed for {}: field {} expected string, got {}"
 msgstr ""
@@ -734,97 +734,97 @@ msgstr ""
 msgid "{} {} response validation failed for {}: invalid {} {}"
 msgstr ""
 
-#: src/aur_rpc.cpp:382
+#: src/aur_rpc.cpp:382 src/aur_rpc.cpp:403
 #, c++-format
 msgid "{} {} response validation failed for {}: field {}[{}] contains a control character"
 msgstr ""
 
-#: src/aur_rpc.cpp:389
+#: src/aur_rpc.cpp:389 src/aur_rpc.cpp:441
 #, c++-format
 msgid "{} {} response validation failed for {}: field {}[{}] contains invalid package identifier {}"
 msgstr ""
 
-#: src/aur_rpc.cpp:403
+#: src/aur_rpc.cpp:453
 #, c++-format
 msgid "{} {} response validation failed for {}: field {}[{}] contains an invalid version constraint"
 msgstr ""
 
-#: src/aur_rpc.cpp:415
+#: src/aur_rpc.cpp:467
 #, c++-format
 msgid "{} {} response validation failed for {}: package entry expected object, got {}"
 msgstr ""
 
-#: src/aur_rpc.cpp:432
+#: src/aur_rpc.cpp:484
 #, c++-format
 msgid "{} {} response validation failed for {}: field {} contains a control character"
 msgstr ""
 
-#: src/aur_rpc.cpp:486
+#: src/aur_rpc.cpp:553
 #, c++-format
 msgid "{} {} response validation failed for {}: field {} reported {}"
 msgstr ""
 
-#: src/aur_rpc.cpp:494 src/aur_rpc.cpp:504
+#: src/aur_rpc.cpp:561 src/aur_rpc.cpp:571
 #, c++-format
 msgid "{} {} response validation failed for {}: field {} expected {}, got {}"
 msgstr ""
 
-#: src/aur_rpc.cpp:514
+#: src/aur_rpc.cpp:581
 #, c++-format
 msgid "{} {} response validation failed for {}: field {} expected non-negative integer, got {}"
 msgstr ""
 
-#: src/aur_rpc.cpp:524
+#: src/aur_rpc.cpp:591
 #, c++-format
 msgid "{} {} response validation failed for {}: field {} was {} but {} contained {} entries"
 msgstr ""
 
-#: src/aur_rpc.cpp:532 src/aur_rpc.cpp:562
+#: src/aur_rpc.cpp:599 src/aur_rpc.cpp:629
 #, c++-format
 msgid "{} {} response validation failed for {}: expected zero or one result, got {}"
 msgstr ""
 
-#: src/aur_rpc.cpp:568 src/aur_rpc.cpp:585
+#: src/aur_rpc.cpp:635 src/aur_rpc.cpp:652
 #, c++-format
 msgid "{} {} response validation failed for {}: requested {} but response {} was {}"
 msgstr ""
 
-#: src/aur_rpc.cpp:640 src/aur_rpc.cpp:671
+#: src/aur_rpc.cpp:707 src/aur_rpc.cpp:738
 #, c++-format
 msgid "{} request failed: {}"
 msgstr ""
 
-#: src/aur_rpc.cpp:647
+#: src/aur_rpc.cpp:714
 #, c++-format
 msgid "{} request failed with {} status {}."
 msgstr ""
 
-#: src/aur_rpc.cpp:652
+#: src/aur_rpc.cpp:719
 #, c++-format
 msgid "{} request returned an empty response."
 msgstr ""
 
-#: src/aur_rpc.cpp:700
+#: src/aur_rpc.cpp:767
 #, c++-format
 msgid "Failed to encode {} search query: {}"
 msgstr ""
 
-#: src/aur_rpc.cpp:739
+#: src/aur_rpc.cpp:806
 #, c++-format
 msgid "Failed to encode {} provided name: {}"
 msgstr ""
 
-#: src/aur_rpc.cpp:773 src/aur_rpc.cpp:799
+#: src/aur_rpc.cpp:840 src/aur_rpc.cpp:866
 #, c++-format
 msgid "Failed to encode {} package name: {}"
 msgstr ""
 
-#: src/aur_rpc.cpp:817
+#: src/aur_rpc.cpp:884
 #, c++-format
 msgid "{} {} response validation failed for {}: response {} {} was not requested"
 msgstr ""
 
-#: src/aur_rpc.cpp:824
+#: src/aur_rpc.cpp:891
 #, c++-format
 msgid "{} {} response validation failed for {}: duplicate response {} {}"
 msgstr ""

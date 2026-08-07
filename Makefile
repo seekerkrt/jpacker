@@ -46,6 +46,7 @@ PROVIDER_SELECTION_TEST_TARGET := $(BUILD_DIR)/tests/provider-selection-test
 PROVIDER_INSTALLED_STATE_TEST_TARGET := $(BUILD_DIR)/tests/provider-installed-state-test
 DEPENDENCY_CONSTRAINT_TEST_TARGET := $(BUILD_DIR)/tests/dependency-constraint-test
 PACKAGE_CONSTRAINT_METADATA_TEST_TARGET := $(BUILD_DIR)/tests/package-constraint-metadata-test
+AUR_CONSTRAINT_METADATA_TEST_TARGET := $(BUILD_DIR)/tests/aur-constraint-metadata-test
 ROOT_PACKAGE_CANDIDATE_TEST_TARGET := $(BUILD_DIR)/tests/root-package-candidate-test
 ROOT_PACKAGE_SEARCH_TEST_TARGET := $(BUILD_DIR)/tests/root-package-search-test
 ROOT_PACKAGE_SELECTION_TEST_TARGET := $(BUILD_DIR)/tests/root-package-selection-test
@@ -241,9 +242,12 @@ AUR_RPC_VALIDATION_TEST_SRCS := \
 AUR_RPC_ENVELOPE_VALIDATION_TEST_SRCS := \
 	tests/aur_rpc_validation_test.cpp \
 	$(SRC_DIR)/aur_rpc.cpp \
+	$(SRC_DIR)/aur_constraint_metadata.cpp \
+	$(SRC_DIR)/dependency_constraint.cpp \
 	$(SRC_DIR)/dependency_spec.cpp \
 	$(SRC_DIR)/package_identifier.cpp \
-	$(SRC_DIR)/logging.cpp
+	$(SRC_DIR)/logging.cpp \
+	tests/stubs/package-metadata/alpm_stub.cpp
 # POLICY(#217): final sync CLI testはparser/routing/selection/executionを
 # productionのままlinkし、candidate search transportとAUR RPCだけを
 # deterministic stubへ差し替える。
@@ -995,6 +999,19 @@ PACKAGE_CONSTRAINT_METADATA_FORBIDDEN_TEST_SRCS := \
 	$(filter-out \
 		$(PACKAGE_CONSTRAINT_METADATA_ALLOWED_PRODUCTION_TEST_SRCS), \
 		$(SRCS))
+# POLICY(#351): Slice 4 AUR projection testはraw AUR valueからowned
+# constraint/provider metadataへのpure adapterだけをlinkする。repository query、
+# selection policy、CLI、BuildPlan、source fallback、mutation ownerは持ち込まない。
+AUR_CONSTRAINT_METADATA_ALLOWED_PRODUCTION_TEST_SRCS := \
+	$(SRC_DIR)/aur_constraint_metadata.cpp \
+	$(SRC_DIR)/dependency_constraint.cpp
+AUR_CONSTRAINT_METADATA_TEST_SRCS := \
+	tests/aur_constraint_metadata_test.cpp \
+	$(AUR_CONSTRAINT_METADATA_ALLOWED_PRODUCTION_TEST_SRCS)
+AUR_CONSTRAINT_METADATA_FORBIDDEN_TEST_SRCS := \
+	$(filter-out \
+		$(AUR_CONSTRAINT_METADATA_ALLOWED_PRODUCTION_TEST_SRCS), \
+		$(SRCS))
 PACKAGE_METADATA_INTEGRATION_TEST_SRCS := \
 	tests/package_metadata_integration_test.cpp \
 	$(SRC_DIR)/package_metadata.cpp \
@@ -1172,7 +1189,7 @@ LIBALPM_BUILD_TARGETS := \
 	$(AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION_TEST_TARGET) \
 	$(UPGRADE_BASELINE_METADATA_TEST_TARGET)
 
-.PHONY: all check-libalpm clean check-upgrade-all-plan-link-firewall check-system-source-upgrade-link-firewall check-aur-update-execution-runner-link-firewall check-aur-update-operation-result-link-firewall check-filtered-aur-update-operation-link-firewall check-upgrade-all-operation-link-firewall check-upgrade-all-command-link-firewall check-commands-sync-link-firewall check-provider-installed-state-link-firewall check-dependency-constraint-link-firewall check-package-constraint-metadata-link-firewall check-root-package-candidate-link-firewall check-root-package-search-link-firewall check-root-package-selection-link-firewall check-root-package-route-projection-link-firewall check-dependency-plan-model-link-firewall check-build-plan-artifact-target-projection-link-firewall check-artifact-selection-model-link-firewall check-artifact-identity-selection-link-firewall check-multiple-artifact-workspace-link-firewall check-multiple-artifact-identity-link-firewall check-package-base-artifact-install-plan-link-firewall check-package-base-artifact-install-executor-link-firewall check-separated-package-base-source-build-link-firewall test test-internal-identity test-application-identity test-xdg-paths test-xdg-directory-safety test-xdg-state-log test-trusted-cache test-runtime-identity test-app-config test-provider-selection test-provider-installed-state test-dependency-constraint test-package-constraint-metadata test-root-package-candidate test-root-package-search test-root-package-selection test-root-package-route-projection test-user-config test-package-identifier test-package-metadata test-package-metadata-integration test-repository-query test-shell-words test-source-environment test-artifact-workspace test-multiple-artifact-workspace test-artifact-identity test-multiple-artifact-identity test-artifact-install-executor test-package-base-artifact-install-plan test-package-base-artifact-install-executor test-separated-source-build test-separated-package-base-source-build test-production-source-build test-process-capture test-aur-update-plan test-upgrade-all-plan test-system-source-upgrade test-aur-update-query test-aur-update-command test-upgrade-all-command test-aur-update-execution-preflight test-aur-update-execution-preflight-integration test-aur-update-execution-preparation test-aur-update-execution-runner test-aur-update-operation-result test-filtered-aur-update-operation test-upgrade-all-operation test-dependency-plan-model test-build-plan-artifact-target-projection test-artifact-install-plan test-artifact-selection-model test-artifact-identity-selection test-command-stub-contract test-markdown-links test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-commands-inspect test-commands-source-maintenance test-commands-sync test-live-contract test-run-with-pty test-conflicts-replaces test-install-layout test-package-transition test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check install uninstall
+.PHONY: all check-libalpm clean check-upgrade-all-plan-link-firewall check-system-source-upgrade-link-firewall check-aur-update-execution-runner-link-firewall check-aur-update-operation-result-link-firewall check-filtered-aur-update-operation-link-firewall check-upgrade-all-operation-link-firewall check-upgrade-all-command-link-firewall check-commands-sync-link-firewall check-provider-installed-state-link-firewall check-dependency-constraint-link-firewall check-package-constraint-metadata-link-firewall check-aur-constraint-metadata-link-firewall check-root-package-candidate-link-firewall check-root-package-search-link-firewall check-root-package-selection-link-firewall check-root-package-route-projection-link-firewall check-dependency-plan-model-link-firewall check-build-plan-artifact-target-projection-link-firewall check-artifact-selection-model-link-firewall check-artifact-identity-selection-link-firewall check-multiple-artifact-workspace-link-firewall check-multiple-artifact-identity-link-firewall check-package-base-artifact-install-plan-link-firewall check-package-base-artifact-install-executor-link-firewall check-separated-package-base-source-build-link-firewall test test-internal-identity test-application-identity test-xdg-paths test-xdg-directory-safety test-xdg-state-log test-trusted-cache test-runtime-identity test-app-config test-provider-selection test-provider-installed-state test-dependency-constraint test-package-constraint-metadata test-aur-constraint-metadata test-root-package-candidate test-root-package-search test-root-package-selection test-root-package-route-projection test-user-config test-package-identifier test-package-metadata test-package-metadata-integration test-repository-query test-shell-words test-source-environment test-artifact-workspace test-multiple-artifact-workspace test-artifact-identity test-multiple-artifact-identity test-artifact-install-executor test-package-base-artifact-install-plan test-package-base-artifact-install-executor test-separated-source-build test-separated-package-base-source-build test-production-source-build test-process-capture test-aur-update-plan test-upgrade-all-plan test-system-source-upgrade test-aur-update-query test-aur-update-command test-upgrade-all-command test-aur-update-execution-preflight test-aur-update-execution-preflight-integration test-aur-update-execution-preparation test-aur-update-execution-runner test-aur-update-operation-result test-filtered-aur-update-operation test-upgrade-all-operation test-dependency-plan-model test-build-plan-artifact-target-projection test-artifact-install-plan test-artifact-selection-model test-artifact-identity-selection test-command-stub-contract test-markdown-links test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-commands-inspect test-commands-source-maintenance test-commands-sync test-live-contract test-run-with-pty test-conflicts-replaces test-install-layout test-package-transition test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check install uninstall
 .PHONY: check-local-package-metadata-link-firewall check-local-source-root-link-firewall check-local-dependency-plan-projection-link-firewall test-local-package-metadata test-local-source-root test-local-dependency-plan-projection
 .PHONY: check-local-source-workspace-link-firewall check-local-source-build-link-firewall test-local-source-workspace test-local-source-build
 .PHONY: FORCE catalogs check-catalogs check-localization-config check-pot update-po update-pot test-localization test-catalog-metadata-gate test-cli-localization-surface test-public-documentation
@@ -1511,10 +1528,10 @@ $(ROOT_EXECUTION_IDENTITY_TEST_TARGET): $(OBJS) tests/stubs/runtime-identity/get
 		$(OBJS) tests/stubs/runtime-identity/geteuid_stub.cpp \
 		-Wl,--wrap=geteuid -o $@ $(MY_LDLIBS) $(LIBALPM_LDLIBS)
 
-$(AUR_RPC_ENVELOPE_VALIDATION_TEST_TARGET): $(AUR_RPC_ENVELOPE_VALIDATION_TEST_SRCS) $(SRC_DIR)/aur_rpc.hpp $(SRC_DIR)/dependency_spec.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/logging.hpp $(SRC_DIR)/localization.hpp $(VERSION_FILE)
+$(AUR_RPC_ENVELOPE_VALIDATION_TEST_TARGET): $(AUR_RPC_ENVELOPE_VALIDATION_TEST_SRCS) $(SRC_DIR)/aur_rpc.hpp $(SRC_DIR)/aur_constraint_metadata.hpp $(SRC_DIR)/dependency_constraint.hpp $(SRC_DIR)/dependency_provider.hpp $(SRC_DIR)/dependency_spec.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/logging.hpp $(SRC_DIR)/localization.hpp tests/stubs/package-metadata/alpm_stub.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling AUR RPC envelope validation test binary"
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -DMOGUET_ENABLE_TEST_OVERRIDES -DMOGUET_ENABLE_AUR_RPC_TEST_HOOKS -I$(SRC_DIR) $(AUR_RPC_ENVELOPE_VALIDATION_TEST_SRCS) -o $@ $(MY_LDLIBS)
+	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -DMOGUET_ENABLE_TEST_OVERRIDES -DMOGUET_ENABLE_AUR_RPC_TEST_HOOKS -I$(SRC_DIR) -Itests/stubs/package-metadata $(AUR_RPC_ENVELOPE_VALIDATION_TEST_SRCS) -o $@ $(MY_LDLIBS)
 
 $(APP_CONFIG_MODULE_TEST_TARGET): tests/app_config_test.cpp $(SRC_DIR)/app_config.cpp $(SRC_DIR)/app_config.hpp $(SRC_DIR)/provider_selection.cpp $(SRC_DIR)/provider_selection.hpp $(SRC_DIR)/dependency_plan.hpp $(SRC_DIR)/dependency_provider.hpp $(SRC_DIR)/dependency_spec.cpp $(SRC_DIR)/dependency_spec.hpp $(SRC_DIR)/localization.cpp $(SRC_DIR)/localization.hpp $(SRC_DIR)/user_config.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
@@ -1524,6 +1541,7 @@ $(APP_CONFIG_MODULE_TEST_TARGET): tests/app_config_test.cpp $(SRC_DIR)/app_confi
 PROVIDER_SELECTION_TEST_SRCS := \
 	tests/provider_selection_test.cpp \
 	$(SRC_DIR)/provider_selection.cpp \
+	$(SRC_DIR)/dependency_constraint.cpp \
 	$(SRC_DIR)/provider_installed_state_presentation.cpp \
 	$(SRC_DIR)/provider_installed_state.cpp \
 	$(SRC_DIR)/package_metadata.cpp \
@@ -1961,6 +1979,14 @@ $(PACKAGE_CONSTRAINT_METADATA_TEST_TARGET): $(PACKAGE_CONSTRAINT_METADATA_TEST_S
 		$(PACKAGE_CONSTRAINT_METADATA_TEST_SRCS) \
 		-o $@
 
+$(AUR_CONSTRAINT_METADATA_TEST_TARGET): $(AUR_CONSTRAINT_METADATA_TEST_SRCS) $(SRC_DIR)/aur_constraint_metadata.hpp $(SRC_DIR)/aur_rpc.hpp $(SRC_DIR)/dependency_constraint.hpp $(SRC_DIR)/dependency_provider.hpp $(VERSION_FILE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling AUR constraint metadata projection test binary"
+	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
+		-I$(SRC_DIR) \
+		$(AUR_CONSTRAINT_METADATA_TEST_SRCS) \
+		-o $@ $(LIBALPM_LDLIBS)
+
 $(PACKAGE_METADATA_INTEGRATION_TEST_TARGET): $(PACKAGE_METADATA_INTEGRATION_TEST_SRCS) $(SRC_DIR)/package_metadata.hpp $(SRC_DIR)/installed_package.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/process.hpp $(SRC_DIR)/shell_words.hpp $(SRC_DIR)/logging.hpp $(SRC_DIR)/localization.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling package metadata integration test binary"
@@ -2107,6 +2133,32 @@ check-package-constraint-metadata-link-firewall:
 
 test-package-constraint-metadata: check-package-constraint-metadata-link-firewall $(PACKAGE_CONSTRAINT_METADATA_TEST_TARGET)
 	$(abspath $(PACKAGE_CONSTRAINT_METADATA_TEST_TARGET))
+
+check-aur-constraint-metadata-link-firewall:
+	@echo ":: Checking AUR constraint metadata projection link firewall"
+	@test "$(words $(AUR_CONSTRAINT_METADATA_TEST_SRCS))" -eq "$(words $(sort $(AUR_CONSTRAINT_METADATA_TEST_SRCS)))" || { \
+		echo "error: AUR constraint metadata test source list contains duplicates" >&2; \
+		exit 1; \
+	}
+	@set -e; for source in $(AUR_CONSTRAINT_METADATA_ALLOWED_PRODUCTION_TEST_SRCS); do \
+		count=$$(printf '%s\n' $(AUR_CONSTRAINT_METADATA_TEST_SRCS) | \
+			awk -v expected="$$source" '$$0 == expected { count++ } END { print count + 0 }'); \
+		test "$$count" -eq 1 || { \
+			echo "error: AUR constraint metadata test must link $$source exactly once" >&2; \
+			exit 1; \
+		}; \
+	done
+	@test -z "$(filter $(AUR_CONSTRAINT_METADATA_FORBIDDEN_TEST_SRCS),$(AUR_CONSTRAINT_METADATA_TEST_SRCS))" || { \
+		echo "error: AUR constraint metadata test links a forbidden production source" >&2; \
+		exit 1; \
+	}
+	@test -z "$(filter tests/stubs/%,$(AUR_CONSTRAINT_METADATA_TEST_SRCS))" || { \
+		echo "error: AUR constraint metadata test links a test stub" >&2; \
+		exit 1; \
+	}
+
+test-aur-constraint-metadata: check-aur-constraint-metadata-link-firewall $(AUR_CONSTRAINT_METADATA_TEST_TARGET)
+	$(abspath $(AUR_CONSTRAINT_METADATA_TEST_TARGET))
 
 check-root-package-candidate-link-firewall:
 	@echo ":: Checking root package candidate model link firewall"
@@ -2916,6 +2968,7 @@ test: \
 	test-provider-installed-state \
 	test-dependency-constraint \
 	test-package-constraint-metadata \
+	test-aur-constraint-metadata \
 	test-root-package-candidate \
 	test-root-package-search \
 	test-root-package-selection \
