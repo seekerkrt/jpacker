@@ -96,7 +96,9 @@ struct AurExecutionCall {
 };
 
 using ResolverHandler =
-        std::function<BuildPlan(const std::vector<std::string>& targets)>;
+        std::function<BuildPlan(
+                const std::vector<std::string>& targets,
+                const ProviderSelectionCallback& select_provider)>;
 
 void reset();
 

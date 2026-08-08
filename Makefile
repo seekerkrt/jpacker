@@ -347,6 +347,7 @@ AUR_UPDATE_EXECUTION_PREPARATION_TEST_SRCS := \
 	$(SRC_DIR)/aur_update_execution_preparation.cpp \
 	$(SRC_DIR)/build_plan_artifact_target_projection.cpp \
 	$(SRC_DIR)/dependency_constraint.cpp \
+	$(SRC_DIR)/dependency_constraint_presentation.cpp \
 	$(SRC_DIR)/dependency_plan_model.cpp \
 	$(SRC_DIR)/source_install_preparation.cpp \
 	$(SRC_DIR)/source_environment.cpp \
@@ -358,6 +359,7 @@ AUR_UPDATE_EXECUTION_PREPARATION_INTEGRATION_TEST_SRCS := \
 	$(SRC_DIR)/aur_update_execution_preparation.cpp \
 	$(SRC_DIR)/build_plan_artifact_target_projection.cpp \
 	$(SRC_DIR)/dependency_constraint.cpp \
+	$(SRC_DIR)/dependency_constraint_presentation.cpp \
 	$(SRC_DIR)/dependency_plan_model.cpp \
 	$(SRC_DIR)/source_install_preparation.cpp \
 	$(SRC_DIR)/source_preference.cpp \
@@ -375,6 +377,7 @@ AUR_UPDATE_EXECUTION_RUNNER_TEST_SRCS := \
 	$(SRC_DIR)/aur_update_execution_preparation.cpp \
 	$(SRC_DIR)/build_plan_artifact_target_projection.cpp \
 	$(SRC_DIR)/dependency_constraint.cpp \
+	$(SRC_DIR)/dependency_constraint_presentation.cpp \
 	$(SRC_DIR)/dependency_plan_model.cpp \
 	$(SRC_DIR)/source_install_preparation.cpp \
 	$(SRC_DIR)/source_environment.cpp \
@@ -404,6 +407,7 @@ AUR_UPDATE_OPERATION_RESULT_TEST_SRCS := \
 	$(SRC_DIR)/aur_update_execution_preparation.cpp \
 	$(SRC_DIR)/build_plan_artifact_target_projection.cpp \
 	$(SRC_DIR)/dependency_constraint.cpp \
+	$(SRC_DIR)/dependency_constraint_presentation.cpp \
 	$(SRC_DIR)/dependency_plan_model.cpp \
 	$(SRC_DIR)/source_install_preparation.cpp \
 	$(SRC_DIR)/source_environment.cpp \
@@ -719,6 +723,7 @@ DEPENDENCY_PLAN_MODEL_FORBIDDEN_TEST_SRCS := \
 BUILD_PLAN_ARTIFACT_TARGET_PROJECTION_ALLOWED_PRODUCTION_TEST_SRCS := \
 	$(SRC_DIR)/build_plan_artifact_target_projection.cpp \
 	$(SRC_DIR)/dependency_constraint.cpp \
+	$(SRC_DIR)/dependency_constraint_presentation.cpp \
 	$(SRC_DIR)/dependency_plan_model.cpp \
 	$(SRC_DIR)/package_identifier.cpp
 BUILD_PLAN_ARTIFACT_TARGET_PROJECTION_TEST_SRCS := \
