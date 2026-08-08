@@ -685,8 +685,8 @@ setup_case upgrade-registered-split-guard
 prepare_source_preferences valid-split
 export MOGUET_TEST_SUDO_EXIT_CODE=0
 run_fail upgrade
-assert_contains "Registered source upgrade does not support split AUR preference valid-split from PackageBase valid-split-base" "$output_file"
-assert_contains "this route requires a singular package identity" "$output_file"
+assert_contains "Cannot execute singular install plan for valid-split" "$output_file"
+assert_contains "split package targets require the PackageBase set lifecycle: valid-split (base: valid-split-base)" "$output_file"
 assert_no_mutation_commands
 assert_cache_entry_absent valid-split
 assert_cache_entry_absent valid-split-base

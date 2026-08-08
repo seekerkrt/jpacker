@@ -21,6 +21,7 @@ src/commands_source_maintenance.cpp
 src/commands_sync.cpp
 src/commands_upgrade_all.cpp
 src/dependency_plan.cpp
+src/dependency_plan_model.cpp
 src/dependency_constraint_presentation.cpp
 src/dependency_spec.cpp
 src/filtered_aur_update_operation.cpp

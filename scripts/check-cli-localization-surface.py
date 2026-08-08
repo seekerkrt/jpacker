@@ -62,6 +62,14 @@ INTERNAL_ONLY_ANCHORS: dict[str, tuple[str, ...]] = {
     ),
 }
 
+# A mixed source keeps its exact internal-only anchors while also owning an
+# explicitly audited number of user-facing catalog calls. BuildPlan execution
+# guards moved to the pure model owner without translating its programmer-only
+# reducer invariant.
+MIXED_INTERNAL_ONLY_EXTRACTION_COUNTS: dict[str, int] = {
+    "src/dependency_plan_model.cpp": 12,
+}
+
 TECHNICAL_MSGID_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     (
         "project, tool, protocol, or schema identity",
@@ -137,10 +145,14 @@ def check_internal_only_anchors() -> None:
         text = (REPOSITORY_ROOT / relative_path).read_text(encoding="utf-8")
         if "NO_TRANSLATE(Issue #308)" not in text:
             fail(f"missing Issue #308 no-translate rationale: {relative_path}")
-        if EXTRACTION_CALL.search(text):
+        extraction_count = len(EXTRACTION_CALL.findall(text))
+        expected_extraction_count = MIXED_INTERNAL_ONLY_EXTRACTION_COUNTS.get(
+            relative_path, 0)
+        if extraction_count != expected_extraction_count:
             fail(
-                "internal-only translation unit unexpectedly contains a "
-                f"catalog extraction call: {relative_path}"
+                f"internal-only translation unit contains {extraction_count} "
+                "catalog extraction calls instead of "
+                f"{expected_extraction_count}: {relative_path}"
             )
         for anchor in anchors:
             count = text.count(anchor)

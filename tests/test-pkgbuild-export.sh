@@ -106,6 +106,7 @@ setup_case() {
     export MOGUET_TEST_AUR_RPC_BASE_URL=$normal_rpc_url
     export MOGUET_TEST_COMMAND_LOG=$command_log
     export MOGUET_TEST_GIT_CLONE_FIXTURE_DIR=$git_fixture_dir
+    export MOGUET_TEST_PACMAN_CONF_REPOSITORY_LIST=core
     export MOGUET_TEST_PACMAN_EXIT_CODE=1
     export MOGUET_TEST_SUDO_EXIT_CODE=99
     export MOGUET_TEST_MAKEPKG_EXIT_CODE=99

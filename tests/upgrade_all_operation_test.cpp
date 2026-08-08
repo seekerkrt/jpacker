@@ -422,7 +422,8 @@ void return_build_plan(
     stub::set_resolver_handler(
             [plan = std::move(plan),
              expected_targets = std::move(expected_targets)](
-                    const std::vector<std::string>& targets) {
+                    const std::vector<std::string>& targets,
+                    const ProviderSelectionCallback&) {
                 if(targets != expected_targets) {
                     throw std::logic_error(
                             "Aggregate resolver target order differs");

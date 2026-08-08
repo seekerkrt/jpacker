@@ -621,6 +621,56 @@ void test_invalid_conflicting_and_source_identity_fail_closed() {
             "typed-candidate>=2.");
 }
 
+void test_execution_guard_category_order() {
+    BuildPlan plan;
+    plan.unresolved.push_back("missing-dependency");
+    plan.ambiguous_providers.push_back(AmbiguousProvidedDependency{
+            "virtual-api",
+            {case8_repository_provider_a(),
+             case8_repository_provider_b()}});
+    plan.cycles.push_back("cycle-base");
+    plan.metadata_risks.push_back(BuildPlanMetadataRisk{
+            "risk-child", "risk-base",
+            {"conflict-target"}, {"replacement-target"}});
+    plan.split_package_targets.push_back(
+            BuildPlanSplitPackageTarget{"split-base", "split-child"});
+
+    const auto require_install_plan = [&plan]() {
+        require_executable_install_plan("guard-root", plan);
+    };
+    expect_exception(
+            require_install_plan,
+            "Cannot execute build plan for guard-root; unresolved dependencies: "
+            "missing-dependency");
+
+    plan.unresolved.clear();
+    expect_exception(
+            require_install_plan,
+            "Cannot execute build plan for guard-root; ambiguous providers: "
+            "virtual-api (extra/case8-provider-a, "
+            "community/case8-provider-b)");
+
+    plan.ambiguous_providers.clear();
+    expect_exception(
+            require_install_plan,
+            "Cannot execute build plan for guard-root; cyclic dependencies: "
+            "cycle-base");
+
+    plan.cycles.clear();
+    expect_exception(
+            require_install_plan,
+            "Cannot execute build plan for guard-root; conflicts/replaces "
+            "metadata requires manual review: risk-child (base: risk-base) "
+            "[conflicts: conflict-target; replaces: replacement-target]");
+
+    plan.metadata_risks.clear();
+    expect_exception(
+            require_install_plan,
+            "Cannot execute singular install plan for guard-root; split "
+            "package targets require the PackageBase set lifecycle: "
+            "split-child (base: split-base)");
+}
+
 void test_case_1_root_only() {
     BuildPlan plan = resolve_build_plan("case1-app");
     expect(
@@ -2434,6 +2484,9 @@ int main() {
         run_case(
                 "invalid/conflicting/source identity fail closed",
                 test_invalid_conflicting_and_source_identity_fail_closed);
+        run_case(
+                "execution guard category order",
+                test_execution_guard_category_order);
         run_case("Case 1 root only", test_case_1_root_only);
         run_case("Case 2 dependency roles", test_case_2_dependency_roles);
         run_case("Case 3 multiple roles", test_case_3_multiple_roles);

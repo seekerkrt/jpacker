@@ -91,6 +91,7 @@ setup_case() {
     export XDG_CACHE_HOME=$case_dir/xdg-cache
     export MOGUET_TEST_AUR_RPC_BASE_URL=$normal_rpc_url
     export MOGUET_TEST_COMMAND_LOG=$command_log
+    export MOGUET_TEST_PACMAN_CONF_REPOSITORY_LIST=core
     export MOGUET_TEST_PACMAN_EXIT_CODE=1
     export MOGUET_TEST_SUDO_EXIT_CODE=0
     export MOGUET_TEST_MAKEPKG_EXIT_CODE=0

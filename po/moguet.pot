@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Moguet 2.1.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-07 16:56+0900\n"
+"POT-Creation-Date: 2026-08-08 08:09+0900\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -3202,7 +3202,7 @@ msgid "Failed to inspect dependencies for {}: {}"
 msgstr ""
 
 #: src/commands_inspect.cpp:966 src/commands_sync.cpp:1013
-#: src/dependency_plan.cpp:1957 src/dependency_plan.cpp:2211
+#: src/dependency_plan.cpp:1946 src/dependency_plan.cpp:2200
 #: src/pkgbuild_export.cpp:654
 #, c++-format
 msgid "{} package not found: {}"
@@ -4187,7 +4187,7 @@ msgid "Unsupported {} option for {} info: {}"
 msgstr ""
 
 #: src/commands_sync.cpp:1018 src/commands_sync.cpp:1067
-#: src/dependency_plan.cpp:1874 src/source_install.cpp:701
+#: src/dependency_plan.cpp:1863 src/source_install.cpp:701
 #, c++-format
 msgid "Failed to fetch {} info for {}: {}"
 msgstr ""
@@ -5285,188 +5285,188 @@ msgstr ""
 msgid "Unexpected {} command failure: unknown exception."
 msgstr ""
 
-#: src/dependency_plan.cpp:65 src/dependency_plan.cpp:631
+#: src/dependency_plan.cpp:64 src/dependency_plan.cpp:620
 #, c++-format
 msgid "{} package metadata constraint projection failed: {}"
 msgstr ""
 
-#: src/dependency_plan.cpp:139
+#: src/dependency_plan.cpp:138
 #, c++-format
 msgid "{} provider candidate changed during dependency resolution: {}"
 msgstr ""
 
-#: src/dependency_plan.cpp:147 src/provider_selection.cpp:51
-#, c++-format
-msgid "Selected providers use incompatible identities for package {}: {} and {}."
-msgstr ""
-
-#: src/dependency_plan.cpp:302
+#: src/dependency_plan.cpp:291
 #, c++-format
 msgid "{} package metadata is missing its typed constraint projection: {}"
 msgstr ""
 
-#: src/dependency_plan.cpp:310
+#: src/dependency_plan.cpp:299
 #, c++-format
 msgid "{} package metadata constraint identity is inconsistent: {}"
 msgstr ""
 
-#: src/dependency_plan.cpp:382
+#: src/dependency_plan.cpp:371
 #, c++-format
 msgid "Failed to search {} providers for {}: {}"
 msgstr ""
 
-#: src/dependency_plan.cpp:406
+#: src/dependency_plan.cpp:395
 #, c++-format
 msgid "Failed to check {} provider {}: {}"
 msgstr ""
 
-#: src/dependency_plan.cpp:440 src/dependency_plan.cpp:1690
+#: src/dependency_plan.cpp:429 src/dependency_plan.cpp:1679
 #, c++-format
 msgid "{} provider candidate metadata was not returned."
 msgstr ""
 
 #. TRANSLATORS: The placeholders are dependency and provider identities.
-#: src/dependency_plan.cpp:546
+#: src/dependency_plan.cpp:535
 #, c++-format
 msgid "{} [provided by {}]"
 msgstr ""
 
-#: src/dependency_plan.cpp:588
+#: src/dependency_plan.cpp:577
 #, c++-format
 msgid "Provider selection returned a candidate that was not offered for {}."
 msgstr ""
 
 #. TRANSLATORS: The placeholder is a dependency specification.
-#: src/dependency_plan.cpp:601
+#: src/dependency_plan.cpp:590
 #, c++-format
 msgid "version constraint for {} is not verified"
 msgstr ""
 
-#: src/dependency_plan.cpp:645
+#: src/dependency_plan.cpp:634
 #, c++-format
 msgid "{} package metadata constraint projection is inconsistent: {}"
 msgstr ""
 
-#: src/dependency_plan.cpp:739 src/dependency_plan.cpp:845
-#: src/dependency_plan.cpp:1563
+#: src/dependency_plan.cpp:728 src/dependency_plan.cpp:834
+#: src/dependency_plan.cpp:1552
 #, c++-format
 msgid "Failed to check {} dependency {}: {}"
 msgstr ""
 
-#: src/dependency_plan.cpp:950
+#: src/dependency_plan.cpp:939
 msgid "Unknown package role."
 msgstr ""
 
-#: src/dependency_plan.cpp:1229
+#: src/dependency_plan.cpp:1218
 #, c++-format
 msgid "{} aggregation is missing during build plan ordering: {}"
 msgstr ""
 
-#: src/dependency_plan.cpp:1450
+#: src/dependency_plan.cpp:1439
 #, c++-format
 msgid "Build dependency is missing its package role: {}"
 msgstr ""
 
-#: src/dependency_plan.cpp:1625
+#: src/dependency_plan.cpp:1614
 #, c++-format
 msgid "Cannot select a provider for {}; candidate {} is {}: {}."
 msgstr ""
 
-#: src/dependency_plan.cpp:1634
+#: src/dependency_plan.cpp:1623
 #, c++-format
 msgid "Provider candidate {} for {} is {}: {}. Candidate order and explicit selection are unchanged."
 msgstr ""
 
-#: src/dependency_plan.cpp:1672
+#: src/dependency_plan.cpp:1661
 #, c++-format
 msgid "Failed to refresh {} provider {}: {}"
 msgstr ""
 
-#: src/dependency_plan.cpp:1840
+#: src/dependency_plan.cpp:1829
 #, c++-format
 msgid "{} (max depth reached)"
 msgstr ""
 
-#: src/dependency_plan.cpp:1944 src/dependency_plan.cpp:2201
-#: src/dependency_plan.cpp:2265
+#: src/dependency_plan.cpp:1933 src/dependency_plan.cpp:2190
+#: src/dependency_plan.cpp:2254
 msgid "Build plan targets must not be empty."
 msgstr ""
 
-#: src/dependency_plan.cpp:1996
+#: src/dependency_plan.cpp:1985
 msgid "Provider selection request has no candidates."
 msgstr ""
 
-#: src/dependency_plan.cpp:2008
+#: src/dependency_plan.cpp:1997
 msgid "Provider selection candidates have inconsistent dependency identities."
 msgstr ""
 
-#: src/dependency_plan.cpp:2100
+#: src/dependency_plan.cpp:2089
 #, c++-format
 msgid "Provider candidates changed during invocation resolution: {}"
 msgstr ""
 
-#: src/dependency_plan.cpp:2120 src/dependency_plan.cpp:2169
+#: src/dependency_plan.cpp:2109 src/dependency_plan.cpp:2158
 #: src/provider_selection.cpp:116
 #, c++-format
 msgid "Previously selected provider is no longer a candidate for dependency: {}"
 msgstr ""
 
-#: src/dependency_plan.cpp:2176
+#: src/dependency_plan.cpp:2165
 #, c++-format
 msgid "Provider candidate changed during dependency resolution: {}"
 msgstr ""
 
-#: src/dependency_plan.cpp:2527
+#: src/dependency_plan_model.cpp:17 src/provider_selection.cpp:51
 #, c++-format
-msgid "Build plan constraint requirement is invalid for {}."
+msgid "Selected providers use incompatible identities for package {}: {} and {}."
 msgstr ""
 
-#: src/dependency_plan.cpp:2539
-#, c++-format
-msgid "Build plan constraint requirement identity changed for {}."
-msgstr ""
-
-#: src/dependency_plan.cpp:2593
-#, c++-format
-msgid "Build plan constraint source identity is inconsistent for {}."
-msgstr ""
-
-#: src/dependency_plan.cpp:2599
-#, c++-format
-msgid "Build plan constraint evaluation is missing for {}."
-msgstr ""
-
-#: src/dependency_plan.cpp:2611
-#, c++-format
-msgid "Cannot construct build plan; dependency {} is {}: {}."
-msgstr ""
-
-#: src/dependency_plan.cpp:2637
+#: src/dependency_plan_model.cpp:118
 #, c++-format
 msgid "Cannot execute build plan for {}; dependency {} is {}: {}."
 msgstr ""
 
-#: src/dependency_plan.cpp:2650
+#: src/dependency_plan_model.cpp:198
+#, c++-format
+msgid "Build plan constraint requirement is invalid for {}."
+msgstr ""
+
+#: src/dependency_plan_model.cpp:210
+#, c++-format
+msgid "Build plan constraint requirement identity changed for {}."
+msgstr ""
+
+#: src/dependency_plan_model.cpp:264
+#, c++-format
+msgid "Build plan constraint source identity is inconsistent for {}."
+msgstr ""
+
+#: src/dependency_plan_model.cpp:270
+#, c++-format
+msgid "Build plan constraint evaluation is missing for {}."
+msgstr ""
+
+#: src/dependency_plan_model.cpp:282
+#, c++-format
+msgid "Cannot construct build plan; dependency {} is {}: {}."
+msgstr ""
+
+#: src/dependency_plan_model.cpp:297
 #, c++-format
 msgid "Cannot execute build plan for {}; unresolved dependencies: {}"
 msgstr ""
 
-#: src/dependency_plan.cpp:2655
+#: src/dependency_plan_model.cpp:302
 #, c++-format
 msgid "Cannot execute build plan for {}; ambiguous providers: {}"
 msgstr ""
 
-#: src/dependency_plan.cpp:2662
+#: src/dependency_plan_model.cpp:309
 #, c++-format
 msgid "Cannot execute build plan for {}; cyclic dependencies: {}"
 msgstr ""
 
-#: src/dependency_plan.cpp:2671
+#: src/dependency_plan_model.cpp:319
 #, c++-format
 msgid "Cannot execute build plan for {}; conflicts/replaces metadata requires manual review: {}"
 msgstr ""
 
-#: src/dependency_plan.cpp:2682
+#: src/dependency_plan_model.cpp:331
 #, c++-format
 msgid "Cannot execute singular install plan for {}; split package targets require the {} set lifecycle: {}"
 msgstr ""

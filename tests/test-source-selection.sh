@@ -70,6 +70,7 @@ setup_case() {
     export XDG_CACHE_HOME=$case_dir/xdg-cache
     preference_dir=$XDG_CONFIG_HOME/moguet/source-build.d
     export MOGUET_TEST_COMMAND_LOG=$command_log
+    export MOGUET_TEST_PACMAN_CONF_REPOSITORY_LIST=core
     export MOGUET_TEST_PACMAN_EXIT_CODE=1
     export MOGUET_TEST_SUDO_EXIT_CODE=0
     unset MOGUET_TEST_PACMAN_QM_OUTPUT

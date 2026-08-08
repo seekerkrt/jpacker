@@ -983,7 +983,7 @@ BuildPlan resolve_build_plan_for_preflight(
 
 BuildPlan resolve_build_plan_for_preflight(
         const std::vector<std::string>& targets,
-        const ProviderSelectionCallback&) {
+        const ProviderSelectionCallback& select_provider) {
     g_state.resolver_calls.push_back(targets);
     record_event(
             stub::EventKind::BuildPlanResolution,
@@ -993,7 +993,14 @@ BuildPlan resolve_build_plan_for_preflight(
         fail_unexpected(
                 "Unexpected AUR preflight resolver call with no handler.");
     }
-    return g_state.resolver_handler(targets);
+    return g_state.resolver_handler(targets, select_provider);
+}
+
+BuildPlan resolve_build_plan(
+        const std::vector<std::string>& targets,
+        const ProviderSelectionCallback& select_provider) {
+    return resolve_build_plan_for_preflight(
+            targets, select_provider);
 }
 
 const std::string&
