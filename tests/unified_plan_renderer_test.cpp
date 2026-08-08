@@ -9,6 +9,7 @@
 
 #include <array>
 #include <exception>
+#include <filesystem>
 #include <functional>
 #include <iostream>
 #include <optional>
@@ -33,6 +34,14 @@ void expect_contains(
     expect(
             output.find(expected) != std::string::npos,
             context + " is missing: " + std::string(expected));
+}
+
+void expect_not_contains(
+        const std::string& output, std::string_view unexpected,
+        const std::string& context) {
+    expect(
+            output.find(unexpected) == std::string::npos,
+            context + " unexpectedly contains: " + std::string(unexpected));
 }
 
 void expect_before(
@@ -334,7 +343,7 @@ void test_ready_rendering_and_identity_boundaries() {
     expect_before(
             rendered.text,
             "Identity: AUR/same-name (PackageBase: aur-base)",
-            "Identity: /work/local-suite (device: 41; inode: 73)",
+            "Identity: /work/local-suite (node type: directory; device: 41; inode: 73)",
             "AUR/local root order");
     expect_contains(
             rendered.text, "Route: repository transaction",
@@ -381,7 +390,7 @@ void test_ready_rendering_and_identity_boundaries() {
             "PackageBase child identities");
     expect_contains(
             rendered.text,
-            "local source /work/local-suite (device: 41; inode: 73; PackageBase: local-base)",
+            "local source /work/local-suite (node type: directory; device: 41; inode: 73; PackageBase: local-base)",
             "local build unit");
     expect_contains(
             rendered.text,
@@ -408,7 +417,7 @@ void test_ready_rendering_and_identity_boundaries() {
             "dependency artifact install intent");
     expect_contains(
             rendered.text,
-            "root required artifact #2: local source /work/local-suite (device: 41; inode: 73; PackageBase: local-base); target: local-base/local-child",
+            "root required artifact #2: local source /work/local-suite (node type: directory; device: 41; inode: 73; PackageBase: local-base); target: local-base/local-child",
             "root artifact install intent");
 }
 
@@ -653,7 +662,7 @@ void test_cross_source_required_artifact_identity() {
             "AUR artifact source identity");
     expect_contains(
             rendered.text,
-            "Source/build unit: local source /work/cross-source-local (device: 701; inode: 902; PackageBase: shared-base)",
+            "Source/build unit: local source /work/cross-source-local (node type: directory; device: 701; inode: 902; PackageBase: shared-base)",
             "local artifact source identity");
     expect_contains(
             rendered.text,
@@ -718,8 +727,55 @@ void test_blocker_variant_details() {
             LocalSourceRootErrorCode::PermissionDenied,
             "/work/blocked-local/PKGBUILD",
             std::make_error_code(std::errc::permission_denied)};
-    const ConstraintEvaluation constraint =
-            ConstraintEvaluation::unsatisfied();
+    const ProvidedDependency decoy_provider =
+            ProvidedDependency::from_repository(
+                    "alpha", "constraint-decoy-provider",
+                    "constraint-virtual", "constraint-virtual=1", "1");
+    const ProvidedDependency constraint_provider =
+            ProvidedDependency::from_repository(
+                    "zeta", "constraint-provider",
+                    "constraint-virtual", "constraint-virtual=3", "3");
+    BuildPlan constraint_plan;
+    constraint_plan.dependency_edges.push_back(BuildPlanDependencyEdge{
+            "constraint-decoy-parent",
+            "constraint-decoy-base",
+            "constraint-virtual>=4",
+            PackageRole::BuildDependency,
+            DependencyKind::Provided,
+            "constraint-decoy-provider",
+            std::nullopt,
+            decoy_provider,
+            ProviderResolutionKind::Unique,
+            std::nullopt,
+            ResolvedDependencyCandidate{ProviderResolvedDependencyCandidate{
+                    decoy_provider,
+                    ObservedVersion::available(
+                            ObservedVersionSource::
+                                    RepositoryProviderCapability,
+                            "1")}},
+            ConstraintEvaluation::unsatisfied()});
+    constraint_plan.dependency_edges.push_back(BuildPlanDependencyEdge{
+            "constraint-parent",
+            "constraint-parent-base",
+            "constraint-virtual>=4",
+            PackageRole::RuntimeDependency,
+            DependencyKind::Provided,
+            "constraint-provider",
+            "constraint-provider-base",
+            constraint_provider,
+            ProviderResolutionKind::UserSelected,
+            std::nullopt,
+            ResolvedDependencyCandidate{ProviderResolvedDependencyCandidate{
+                    constraint_provider,
+                    ObservedVersion::available(
+                            ObservedVersionSource::
+                                    RepositoryProviderCapability,
+                            "3")}},
+            ConstraintEvaluation::unknown(
+                    ObservedVersionUnknownReason::
+                            CandidateVersionUnavailable)});
+    const BuildPlanDependencyEdge& constraint_edge =
+            constraint_plan.dependency_edges[1];
     const BuildPlanMetadataRisk metadata_risk{
             "risk-child", "risk-base", {"conflict-a"}, {"replace-b"}};
     const LocalDependencyPlanFailure local_dependency_failure{
@@ -735,9 +791,7 @@ void test_blocker_variant_details() {
             RootPackageInstallPreparationIssue{
                     RootPackageInstallPreparationIssueKind::
                             SourceWorkPreparationFailed,
-                    RootPackageSelectionInputGate::Interactive,
-                    std::nullopt,
-                    std::nullopt,
+                    std::nullopt, std::nullopt, std::nullopt,
                     "root work preparation diagnostic"});
     const BuildPlanArtifactTargetProjectionIssue artifact_projection_issue{
             BuildPlanArtifactTargetProjectionIssueKind::PackageBaseMismatch,
@@ -759,68 +813,107 @@ void test_blocker_variant_details() {
 
     const auto expect_blocker = [](
                                         UnifiedPlanBlocker blocker,
-                                        std::string_view expected,
+                                        const std::vector<std::string_view>&
+                                                expected,
                                         std::string_view context) {
         const UnifiedPlanRenderingResult rendered =
                 render_blocked(std::move(blocker));
         expect(
                 rendered.is_complete(),
                 std::string(context) + " rendering is incomplete");
-        expect_contains(
-                rendered.text, expected, std::string(context));
+        for(const std::string_view fragment : expected) {
+            expect_contains(
+                    rendered.text, fragment, std::string(context));
+        }
+        return rendered.text;
     };
 
     expect_blocker(
             UnknownUnifiedPlanBlocker{
                     UnifiedPlanBorrowedAuthorityReference<
                             BuildPlanDependencyEdge>(unknown)},
-            "UnknownUnifiedPlanBlocker", "unknown blocker");
+            {"UnknownUnifiedPlanBlocker", "missing-runtime>=3",
+             "blocked-child (PackageBase: blocked-base)",
+             "dependency kind: unknown", "role: runtime dependency",
+             "Unknown (metadata query failed)"},
+            "unknown blocker");
     expect_blocker(
             AmbiguousUnifiedPlanBlocker{
                     UnifiedPlanBorrowedAuthorityReference<
                             AmbiguousProvidedDependency>(ambiguous)},
-            "AmbiguousUnifiedPlanBlocker", "ambiguous blocker");
+            {"AmbiguousUnifiedPlanBlocker", "virtual-blocker",
+             "AUR/aur-provider (PackageBase: aur-provider-base)",
+             "provided dependency: virtual-blocker",
+             "capability: virtual-blocker=1", "package version: 1"},
+            "ambiguous blocker");
     expect_blocker(
             UnsupportedUnifiedPlanBlocker{
                     UnifiedPlanBorrowedAuthorityReference<
                             MixedPackageBaseInstallReasonUnsupported>(
                             unsupported)},
-            "MixedPackageBaseInstallReasonUnsupported",
+            {"MixedPackageBaseInstallReasonUnsupported", "mixed-base",
+             "mixed-child 1-1", "desired reason: dependency",
+             "InstalledVersionState::SameVersion",
+             "InstallReasonDirective::AsDependency"},
             "unsupported blocker");
     expect_blocker(
             SourceFailureUnifiedPlanBlocker{
                     UnifiedPlanBorrowedAuthorityReference<
                             LocalSourceRootFailure>(local_source_failure)},
-            "LocalSourceRootFailure", "source failure blocker");
-    expect_blocker(
+            {"LocalSourceRootFailure", "/work/blocked-local/PKGBUILD",
+             "LocalSourceRootStage::PkgbuildRead",
+             "LocalSourceRootErrorCode::PermissionDenied"},
+            "source failure blocker");
+    const std::string constraint_text = expect_blocker(
             ConstraintFailureUnifiedPlanBlocker{
                     UnifiedPlanBorrowedAuthorityReference<
-                            ConstraintEvaluation>(constraint)},
-            "ConstraintFailureUnifiedPlanBlocker",
+                            BuildPlanDependencyEdge>(constraint_edge)},
+            {"ConstraintFailureUnifiedPlanBlocker", "constraint-parent",
+             "constraint-parent-base", "constraint-virtual>=4",
+             "dependency kind: provider", "role: runtime dependency",
+             "resolved package: constraint-provider (PackageBase: constraint-provider-base)",
+             "selected candidate: zeta/constraint-provider",
+             "selected provider: zeta/constraint-provider",
+             "Unknown (candidate version cannot be proven)"},
             "constraint blocker");
+    expect_not_contains(
+            constraint_text, "constraint-decoy-provider",
+            "constraint blocker edge correlation");
     expect_blocker(
             MetadataRiskUnifiedPlanBlocker{
                     UnifiedPlanBorrowedAuthorityReference<
                             BuildPlanMetadataRisk>(metadata_risk)},
-            "MetadataRiskUnifiedPlanBlocker", "metadata blocker");
+            {"MetadataRiskUnifiedPlanBlocker", "risk-child",
+             "PackageBase: risk-base", "conflicts: conflict-a",
+             "replaces: replace-b"},
+            "metadata blocker");
     expect_blocker(
             LocalDependencyPlanUnifiedPlanBlocker{
                     UnifiedPlanBorrowedAuthorityReference<
                             LocalDependencyPlanFailure>(
                             local_dependency_failure)},
-            "LocalDependencyPlanFailureKind::ConstraintMismatch",
+            {"LocalDependencyPlanFailureKind::ConstraintMismatch",
+             "parent: local-parent", "dependency: virtual-local>=2",
+             "local-provider", "provided capability: virtual-local=1",
+             "version: 1", "stored constraint result: Unsatisfied"},
             "local dependency blocker");
     expect_blocker(
             RootPackagePreparationUnifiedPlanBlocker{
                     UnifiedPlanBorrowedAuthorityReference<
                             RootPackageInstallPreparationFailure>(
                             root_preparation_failure)},
-            "RootPackageInstallPreparationIssueKind::SourceWorkPreparationFailed",
+            {"RootPackageInstallPreparationIssueKind::SourceWorkPreparationFailed",
+             "input gate: not observed",
+             "root work preparation diagnostic"},
             "root preparation blocker");
     expect_blocker(
             BuildPlanArtifactProjectionUnifiedPlanBlocker{
                     artifact_projection_issue},
-            "BuildPlanArtifactTargetProjectionIssueKind::PackageBaseMismatch",
+            {"BuildPlanArtifactTargetProjectionIssueKind::PackageBaseMismatch",
+             "BuildPlan unit index: 3", "entry package index: 1",
+             "package target indices: 2", "PackageBase: expected-base",
+             "package: artifact-child", "artifact-root (invocation index: 4)",
+             "artifact projection diagnostic"},
             "artifact projection blocker");
     expect_blocker(
             BuildPlanStateUnifiedPlanBlocker{
@@ -829,14 +922,210 @@ void test_blocker_variant_details() {
                     BuildPlanStateUnifiedPlanBlockerKind::
                             UnresolvedDependency,
                     0},
-            "BuildPlanStateUnifiedPlanBlockerKind::UnresolvedDependency",
+            {"BuildPlanStateUnifiedPlanBlockerKind::UnresolvedDependency",
+             "state-missing"},
             "BuildPlan state blocker");
     expect_blocker(
             RoutePreflightUnifiedPlanBlocker{
                     UnifiedPlanBorrowedAuthorityReference<
                             AurUpdateExecutionIssue>(route_issue)},
-            "AurUpdateExecutionReason::ProviderMetadataUnavailable",
+            {"AurUpdateExecutionReason::ProviderMetadataUnavailable",
+             "package: route-child", "PackageBase: route-base",
+             "dependency: route-dependency>=1",
+             "route preflight diagnostic"},
             "route preflight blocker");
+}
+
+void test_invalid_root_search_snapshot_typed_details() {
+    const std::string c1_group_repository =
+            std::string("zeta-") + "\xC2\x85" + "-group-repo";
+    const std::string line_separator_duplicate =
+            std::string("zeta-") + "\xE2\x80\xA8" +
+            "-duplicate-repo";
+    const std::string malformed_unranked_package =
+            std::string("zeta-") + static_cast<char>(0xff) +
+            "-unranked-child";
+    InvalidRootPackageSearchSnapshot validation_snapshot;
+    validation_snapshot.validation_failures.push_back(
+            RootPackageCandidateValidationFailure{
+                    RootPackageSourceKind::Aur,
+                    {
+                            RootPackageCandidateValidationIssue{
+                                    RootPackageCandidateValidationIssueKind::
+                                            InvalidPackageBase,
+                                    "DO-NOT-ECHO-AUR-BASE"},
+                            RootPackageCandidateValidationIssue{
+                                    RootPackageCandidateValidationIssueKind::
+                                            InvalidVersion,
+                                    "DO-NOT-ECHO-AUR-VERSION"},
+                    }});
+    validation_snapshot.validation_failures.push_back(
+            RootPackageCandidateValidationFailure{
+                    RootPackageSourceKind::Repository,
+                    {RootPackageCandidateValidationIssue{
+                            RootPackageCandidateValidationIssueKind::
+                                    InvalidRepositoryName,
+                            "DO-NOT-ECHO-REPOSITORY"}}});
+    validation_snapshot.candidate_pair_issues.push_back(
+            InconsistentAurRootPackageBase{
+                    "pair-child", "zeta-pair-base", "alpha-pair-base"});
+    validation_snapshot.candidate_pair_issues.push_back(
+            ConflictingRootPackageCandidateMetadata{
+                    RootPackageIdentity{RepositoryRootPackageIdentity{
+                            "metadata-repo", "metadata-child"}},
+                    RootPackageCandidateMetadataField::Description,
+                    "first-description", "second-description"});
+    validation_snapshot.invalid_group_matches = {
+            InvalidRepositoryRootPackageGroupMatch{
+                    RepositoryRootPackageIdentity{
+                            c1_group_repository, "zeta-group-child"},
+                    "zeta\\group"},
+            InvalidRepositoryRootPackageGroupMatch{
+                    RepositoryRootPackageIdentity{
+                            "alpha/group-repo", "alpha-group-child"},
+                    std::nullopt},
+    };
+    validation_snapshot.duplicate_repository_order_entries = {
+            line_separator_duplicate, "alpha-duplicate-repo"};
+    validation_snapshot.unranked_repository_candidates = {
+            RepositoryRootPackageIdentity{
+                    "zeta-unranked-repo", malformed_unranked_package},
+            RepositoryRootPackageIdentity{
+                    "alpha-unranked-repo", "alpha-unranked-child"},
+    };
+
+    RootPackageInstallPreparationFailure failure;
+    failure.details.push_back(std::move(validation_snapshot));
+    const UnifiedPlanRenderingResult rendered = render_blocked(
+            RootPackagePreparationUnifiedPlanBlocker{
+                    UnifiedPlanBorrowedAuthorityReference<
+                            RootPackageInstallPreparationFailure>(failure)});
+
+    expect(rendered.is_complete(), "invalid snapshot details are incomplete");
+    const std::vector<std::string_view> expected{
+            "InvalidRootPackageSearchSnapshot",
+            "RootPackageSourceKind::Aur",
+            "RootPackageCandidateValidationIssueKind::InvalidPackageBase",
+            "RootPackageCandidateValidationIssueKind::InvalidVersion",
+            "RootPackageSourceKind::Repository",
+            "RootPackageCandidateValidationIssueKind::InvalidRepositoryName",
+            "InconsistentAurRootPackageBase",
+            "package: pair-child",
+            "first PackageBase: zeta-pair-base",
+            "second PackageBase: alpha-pair-base",
+            "ConflictingRootPackageCandidateMetadata",
+            "identity: metadata-repo/metadata-child",
+            "RootPackageCandidateMetadataField::Description",
+            "first value: first-description",
+            "second value: second-description",
+            "zeta-\\xC2\\x85-group-repo/zeta-group-child",
+            "group: zeta\\x5Cgroup",
+            "alpha\\x2Fgroup-repo/alpha-group-child",
+            "group: not observed",
+            "zeta-\\xE2\\x80\\xA8-duplicate-repo",
+            "alpha-duplicate-repo",
+            "zeta-unranked-repo/zeta-\\xFF-unranked-child",
+            "alpha-unranked-repo/alpha-unranked-child",
+    };
+    for(const std::string_view fragment : expected) {
+        expect_contains(rendered.text, fragment, "invalid snapshot detail");
+    }
+    expect_not_contains(
+            rendered.text, "DO-NOT-ECHO",
+            "invalid snapshot raw candidate safety");
+    expect_not_contains(
+            rendered.text, c1_group_repository,
+            "invalid snapshot raw C1 safety");
+    expect_not_contains(
+            rendered.text, line_separator_duplicate,
+            "invalid snapshot raw line-separator safety");
+    expect_not_contains(
+            rendered.text, malformed_unranked_package,
+            "invalid snapshot malformed UTF-8 safety");
+    expect_not_contains(
+            rendered.text, "zeta\\group",
+            "invalid snapshot raw delimiter safety");
+    expect_not_contains(
+            rendered.text, "alpha/group-repo/alpha-group-child",
+            "invalid snapshot raw identity-boundary safety");
+    expect_before(
+            rendered.text,
+            "RootPackageCandidateValidationIssueKind::InvalidPackageBase",
+            "RootPackageCandidateValidationIssueKind::InvalidVersion",
+            "validation issue authority order");
+    expect_before(
+            rendered.text, "zeta-\\xE2\\x80\\xA8-duplicate-repo",
+            "alpha-duplicate-repo",
+            "duplicate repository authority order");
+    expect_before(
+            rendered.text,
+            "zeta-\\xC2\\x85-group-repo/zeta-group-child",
+            "alpha\\x2Fgroup-repo/alpha-group-child",
+            "invalid group authority order");
+    expect_before(
+            rendered.text,
+            "zeta-unranked-repo/zeta-\\xFF-unranked-child",
+            "alpha-unranked-repo/alpha-unranked-child",
+            "unranked repository authority order");
+
+    InvalidRootPackageSearchSnapshot incomplete_snapshot;
+    incomplete_snapshot.invalid_group_matches.push_back(
+            InvalidRepositoryRootPackageGroupMatch{
+                    RepositoryRootPackageIdentity{
+                            "present-repository", ""},
+                    std::nullopt});
+    incomplete_snapshot.duplicate_repository_order_entries.push_back("");
+    incomplete_snapshot.unranked_repository_candidates.push_back(
+            RepositoryRootPackageIdentity{"", "present-package"});
+    RootPackageInstallPreparationFailure incomplete_failure;
+    incomplete_failure.details.push_back(std::move(incomplete_snapshot));
+    const UnifiedPlanRenderingResult incomplete_rendered = render_blocked(
+            RootPackagePreparationUnifiedPlanBlocker{
+                    UnifiedPlanBorrowedAuthorityReference<
+                            RootPackageInstallPreparationFailure>(
+                            incomplete_failure)});
+    expect(
+            !incomplete_rendered.is_complete() &&
+                    incomplete_rendered.issues.size() == 3,
+            "empty snapshot identity was rendered complete or duplicated");
+    std::string issue_diagnostics;
+    for(const UnifiedPlanRenderingIssue& issue :
+        incomplete_rendered.issues) {
+        expect(
+                issue.kind ==
+                                UnifiedPlanRenderingIssueKind::
+                                        MissingReferencedValue &&
+                        issue.section ==
+                                UnifiedPlanRenderingSection::Blockers &&
+                        issue.item_index == 0 && issue.detail_index == 0,
+                "empty snapshot identity issue lost its typed location");
+        issue_diagnostics += issue.diagnostic;
+        issue_diagnostics += '\n';
+    }
+    expect_contains(
+            issue_diagnostics,
+            "invalid group match is missing its package identity",
+            "empty group-match identity diagnostic");
+    expect_contains(
+            issue_diagnostics,
+            "duplicate repository-order entry is missing its repository identity",
+            "empty duplicate repository identity diagnostic");
+    expect_contains(
+            issue_diagnostics,
+            "unranked repository candidate is missing its repository identity",
+            "empty unranked identity diagnostic");
+    expect_contains(
+            incomplete_rendered.text,
+            "InvalidRepositoryRootPackageGroupMatch; identity: present-repository/unavailable; group: not observed",
+            "empty group-match identity fallback");
+    expect_contains(
+            incomplete_rendered.text,
+            "duplicate repository-order entry: unavailable",
+            "empty duplicate repository fallback");
+    expect_contains(
+            incomplete_rendered.text,
+            "unranked repository candidate: unavailable/present-package",
+            "empty snapshot identity fallback");
 }
 
 void test_source_failure_and_route_preflight_subtypes() {
@@ -972,7 +1261,464 @@ void test_source_failure_and_route_preflight_subtypes() {
             "upgrade-all BuildPlan identity");
 }
 
-void test_blocked_partial_identity_is_incomplete_rendering() {
+void test_route_preflight_nested_typed_details() {
+    const auto expect_route = [](
+                                      UnifiedPlanBlocker blocker,
+                                      const std::vector<std::string_view>&
+                                              expected,
+                                      std::string_view context) {
+        const UnifiedPlanRenderingResult rendered =
+                render_blocked(std::move(blocker));
+        expect(
+                rendered.is_complete(),
+                std::string(context) + " rendering is incomplete");
+        for(const std::string_view fragment : expected) {
+            expect_contains(rendered.text, fragment, std::string(context));
+        }
+    };
+
+    SystemSourceUpgradeIssue preference_issue;
+    preference_issue.kind =
+            SystemSourceUpgradeIssueKind::PreferenceUnavailable;
+    preference_issue.impact =
+            SystemSourceUpgradeIssueImpact::BlocksExecution;
+    preference_issue.phase = SystemSourceUpgradePhase::Preparation;
+    preference_issue.original_preference_index = 9;
+    preference_issue.preference_package_name = "nested-source-package";
+    preference_issue.source_preference_failure = SourcePreferenceFailure{
+            SourcePreferenceFailureKind::ReadFailed,
+            "/preferences/nested-source-package",
+            std::make_error_code(std::errc::io_error), std::nullopt,
+            "nested source preference diagnostic"};
+    preference_issue.diagnostic = "outer source preference diagnostic";
+    expect_route(
+            RoutePreflightUnifiedPlanBlocker{
+                    UnifiedPlanBorrowedAuthorityReference<
+                            SystemSourceUpgradeIssue>(preference_issue)},
+            {"SystemSourceUpgradeIssueKind::PreferenceUnavailable",
+             "preference index: 9", "package: nested-source-package",
+             "SourcePreferenceFailure",
+             "SourcePreferenceFailureKind::ReadFailed",
+             "/preferences/nested-source-package", "system error: generic:",
+             "nested source preference diagnostic",
+             "outer source preference diagnostic"},
+            "system/source preference failure");
+
+    SystemSourceUpgradeIssue metadata_issue;
+    metadata_issue.kind =
+            SystemSourceUpgradeIssueKind::SystemPackageSnapshotUnavailable;
+    metadata_issue.impact =
+            SystemSourceUpgradeIssueImpact::ObservabilityOnly;
+    metadata_issue.phase = SystemSourceUpgradePhase::System;
+    metadata_issue.package_metadata_failure = PackageMetadataFailure{
+            PackageMetadataErrorCode::MalformedMetadata,
+            "nested system metadata diagnostic"};
+    metadata_issue.diagnostic = "outer system metadata diagnostic";
+    expect_route(
+            RoutePreflightUnifiedPlanBlocker{
+                    UnifiedPlanBorrowedAuthorityReference<
+                            SystemSourceUpgradeIssue>(metadata_issue)},
+            {"SystemSourceUpgradeIssueKind::SystemPackageSnapshotUnavailable",
+             "SystemSourceUpgradeIssueImpact::ObservabilityOnly",
+             "PackageMetadataFailure",
+             "PackageMetadataErrorCode::MalformedMetadata",
+             "nested system metadata diagnostic",
+             "outer system metadata diagnostic"},
+            "system/source metadata failure");
+
+    SystemSourceUpgradeIssue resolution_issue;
+    resolution_issue.kind =
+            SystemSourceUpgradeIssueKind::CacheAuthorityInvalid;
+    resolution_issue.impact =
+            SystemSourceUpgradeIssueImpact::BlocksExecution;
+    resolution_issue.phase = SystemSourceUpgradePhase::Preparation;
+    resolution_issue.cache_resolution_failure = xdg_paths::ResolutionFailure{
+            xdg_paths::DirectoryKind::Cache,
+            xdg_paths::EnvironmentVariable::XdgCacheHome,
+            xdg_paths::ResolutionErrorCode::RelativePath};
+    resolution_issue.diagnostic = "outer system resolution diagnostic";
+    expect_route(
+            RoutePreflightUnifiedPlanBlocker{
+                    UnifiedPlanBorrowedAuthorityReference<
+                            SystemSourceUpgradeIssue>(resolution_issue)},
+            {"SystemSourceUpgradeIssueKind::CacheAuthorityInvalid",
+             "xdg_paths::ResolutionFailure",
+             "xdg_paths::DirectoryKind::Cache", "XDG_CACHE_HOME",
+             "xdg_paths::ResolutionErrorCode::RelativePath",
+             "outer system resolution diagnostic"},
+            "system/source XDG resolution failure");
+
+    SystemSourceUpgradeIssue preparation_issue;
+    preparation_issue.kind =
+            SystemSourceUpgradeIssueKind::CacheAuthorityInvalid;
+    preparation_issue.impact =
+            SystemSourceUpgradeIssueImpact::BlocksExecution;
+    preparation_issue.phase = SystemSourceUpgradePhase::Preparation;
+    preparation_issue.cache_preparation_failure =
+            xdg_directory_safety::PreparationFailure{
+                    xdg_paths::DirectoryKind::Cache,
+                    xdg_directory_safety::PreparationStage::
+                            ComponentValidation,
+                    xdg_directory_safety::PreparationErrorCode::
+                            OwnershipMismatch,
+                    std::make_error_code(std::errc::permission_denied), 7};
+    preparation_issue.diagnostic = "outer system preparation diagnostic";
+    expect_route(
+            RoutePreflightUnifiedPlanBlocker{
+                    UnifiedPlanBorrowedAuthorityReference<
+                            SystemSourceUpgradeIssue>(preparation_issue)},
+            {"xdg_directory_safety::PreparationFailure",
+             "xdg_paths::DirectoryKind::Cache",
+             "xdg_directory_safety::PreparationStage::ComponentValidation",
+             "xdg_directory_safety::PreparationErrorCode::OwnershipMismatch",
+             "system error: generic:", "component index: 7",
+             "outer system preparation diagnostic"},
+            "system/source directory preparation failure");
+
+    SystemSourceUpgradeIssue trusted_issue;
+    trusted_issue.kind =
+            SystemSourceUpgradeIssueKind::CacheAuthorityInvalid;
+    trusted_issue.impact =
+            SystemSourceUpgradeIssueImpact::BlocksExecution;
+    trusted_issue.phase = SystemSourceUpgradePhase::RegisteredSource;
+    trusted_issue.trusted_cache_failure = TrustedCacheFailure{
+            TrustedCacheStage::ChildOpen,
+            TrustedCacheErrorCode::PermissionDenied,
+            std::make_error_code(std::errc::permission_denied)};
+    trusted_issue.diagnostic = "outer system trusted-cache diagnostic";
+    expect_route(
+            RoutePreflightUnifiedPlanBlocker{
+                    UnifiedPlanBorrowedAuthorityReference<
+                            SystemSourceUpgradeIssue>(trusted_issue)},
+            {"TrustedCacheFailure", "TrustedCacheStage::ChildOpen",
+             "TrustedCacheErrorCode::PermissionDenied",
+             "system error: generic:",
+             "outer system trusted-cache diagnostic"},
+            "system/source trusted cache failure");
+
+    UpgradeAllOperationIssue upgrade_metadata;
+    upgrade_metadata.kind =
+            UpgradeAllOperationIssueKind::ForeignInventoryReadFailed;
+    upgrade_metadata.phase = UpgradeAllOperationPhase::ForeignInventory;
+    upgrade_metadata.package_metadata_failure = PackageMetadataFailure{
+            PackageMetadataErrorCode::LocalDatabaseUnavailable,
+            "nested upgrade metadata diagnostic"};
+    upgrade_metadata.diagnostic = "outer upgrade metadata diagnostic";
+    expect_route(
+            RoutePreflightUnifiedPlanBlocker{
+                    UnifiedPlanBorrowedAuthorityReference<
+                            UpgradeAllOperationIssue>(upgrade_metadata)},
+            {"UpgradeAllOperationIssueKind::ForeignInventoryReadFailed",
+             "phase: foreign package inventory",
+             "PackageMetadataFailure",
+             "PackageMetadataErrorCode::LocalDatabaseUnavailable",
+             "nested upgrade metadata diagnostic",
+             "outer upgrade metadata diagnostic"},
+            "upgrade-all metadata failure");
+
+    UpgradeAllOperationIssue upgrade_resolution;
+    upgrade_resolution.kind =
+            UpgradeAllOperationIssueKind::CacheAuthorityInvalid;
+    upgrade_resolution.phase = UpgradeAllOperationPhase::Preparation;
+    upgrade_resolution.cache_resolution_failure =
+            xdg_paths::ResolutionFailure{
+                    xdg_paths::DirectoryKind::State,
+                    xdg_paths::EnvironmentVariable::XdgStateHome,
+                    xdg_paths::ResolutionErrorCode::DotComponent};
+    upgrade_resolution.diagnostic = "outer upgrade resolution diagnostic";
+    expect_route(
+            RoutePreflightUnifiedPlanBlocker{
+                    UnifiedPlanBorrowedAuthorityReference<
+                            UpgradeAllOperationIssue>(upgrade_resolution)},
+            {"UpgradeAllOperationIssueKind::CacheAuthorityInvalid",
+             "xdg_paths::ResolutionFailure",
+             "xdg_paths::DirectoryKind::State", "XDG_STATE_HOME",
+             "xdg_paths::ResolutionErrorCode::DotComponent",
+             "outer upgrade resolution diagnostic"},
+            "upgrade-all XDG resolution failure");
+
+    UpgradeAllOperationIssue upgrade_preparation;
+    upgrade_preparation.kind =
+            UpgradeAllOperationIssueKind::CacheAuthorityInvalid;
+    upgrade_preparation.phase = UpgradeAllOperationPhase::Preparation;
+    upgrade_preparation.cache_preparation_failure =
+            xdg_directory_safety::PreparationFailure{
+                    xdg_paths::DirectoryKind::Cache,
+                    xdg_directory_safety::PreparationStage::ComponentCreation,
+                    xdg_directory_safety::PreparationErrorCode::CreationFailed,
+                    std::make_error_code(std::errc::permission_denied), 3};
+    upgrade_preparation.diagnostic =
+            "outer upgrade preparation diagnostic";
+    expect_route(
+            RoutePreflightUnifiedPlanBlocker{
+                    UnifiedPlanBorrowedAuthorityReference<
+                            UpgradeAllOperationIssue>(upgrade_preparation)},
+            {"xdg_directory_safety::PreparationFailure",
+             "xdg_directory_safety::PreparationStage::ComponentCreation",
+             "xdg_directory_safety::PreparationErrorCode::CreationFailed",
+             "component index: 3", "outer upgrade preparation diagnostic"},
+            "upgrade-all directory preparation failure");
+
+    UpgradeAllOperationIssue upgrade_trusted;
+    upgrade_trusted.kind =
+            UpgradeAllOperationIssueKind::CacheAuthorityInvalid;
+    upgrade_trusted.phase = UpgradeAllOperationPhase::AurPreparation;
+    upgrade_trusted.trusted_cache_failure = TrustedCacheFailure{
+            TrustedCacheStage::Rollback,
+            TrustedCacheErrorCode::RollbackRefusal, std::nullopt};
+    upgrade_trusted.diagnostic = "outer upgrade trusted-cache diagnostic";
+    expect_route(
+            RoutePreflightUnifiedPlanBlocker{
+                    UnifiedPlanBorrowedAuthorityReference<
+                            UpgradeAllOperationIssue>(upgrade_trusted)},
+            {"TrustedCacheFailure", "TrustedCacheStage::Rollback",
+             "TrustedCacheErrorCode::RollbackRefusal",
+             "system error: not observed",
+             "outer upgrade trusted-cache diagnostic"},
+            "upgrade-all trusted cache failure");
+}
+
+void test_route_preflight_nested_required_field_canaries() {
+    const auto expect_single_missing = [](
+                                               const UnifiedPlanRenderingResult& rendered,
+                                               std::string_view diagnostic,
+                                               std::string_view context) {
+        expect(
+                !rendered.is_complete(),
+                std::string(context) + " was rendered complete");
+        expect(
+                rendered.issues.size() == 1,
+                std::string(context) + " duplicated its missing issue");
+        const UnifiedPlanRenderingIssue& issue = rendered.issues.front();
+        expect(
+                issue.kind ==
+                                UnifiedPlanRenderingIssueKind::
+                                        MissingReferencedValue &&
+                        issue.section ==
+                                UnifiedPlanRenderingSection::Blockers &&
+                        issue.item_index == 0 &&
+                        !issue.detail_index.has_value(),
+                std::string(context) + " lost its typed issue location");
+        expect_contains(
+                issue.diagnostic, diagnostic,
+                std::string(context) + " diagnostic");
+    };
+
+    SystemSourceUpgradeIssue unsupported_file_type;
+    unsupported_file_type.kind =
+            SystemSourceUpgradeIssueKind::PreferenceUnavailable;
+    unsupported_file_type.impact =
+            SystemSourceUpgradeIssueImpact::BlocksExecution;
+    unsupported_file_type.phase = SystemSourceUpgradePhase::Preparation;
+    unsupported_file_type.original_preference_index = 4;
+    unsupported_file_type.preference_package_name =
+            "unsupported-file-type-package";
+    unsupported_file_type.source_preference_failure =
+            SourcePreferenceFailure{
+                    SourcePreferenceFailureKind::UnsupportedFileType,
+                    "/preferences/unsupported-file-type-package",
+                    std::nullopt, std::filesystem::file_type::symlink,
+                    "unsupported file type diagnostic"};
+    unsupported_file_type.diagnostic =
+            "outer unsupported file type diagnostic";
+    const UnifiedPlanRenderingResult unsupported_rendered = render_blocked(
+            RoutePreflightUnifiedPlanBlocker{
+                    UnifiedPlanBorrowedAuthorityReference<
+                            SystemSourceUpgradeIssue>(unsupported_file_type)});
+    expect(
+            unsupported_rendered.is_complete(),
+            "typed unsupported source preference file type was incomplete");
+    expect_contains(
+            unsupported_rendered.text,
+            "SourcePreferenceFailureKind::UnsupportedFileType",
+            "unsupported source preference kind");
+    expect_contains(
+            unsupported_rendered.text,
+            "observed file type: std::filesystem::file_type::symlink",
+            "unsupported source preference observed file type");
+
+    SystemSourceUpgradeIssue missing_file_type = unsupported_file_type;
+    missing_file_type.source_preference_failure->observed_file_type =
+            std::nullopt;
+    missing_file_type.source_preference_failure->diagnostic =
+            "missing observed file type diagnostic";
+    missing_file_type.diagnostic =
+            "outer missing observed file type diagnostic";
+    const UnifiedPlanRenderingResult missing_file_type_rendered =
+            render_blocked(RoutePreflightUnifiedPlanBlocker{
+                    UnifiedPlanBorrowedAuthorityReference<
+                            SystemSourceUpgradeIssue>(missing_file_type)});
+    expect_single_missing(
+            missing_file_type_rendered,
+            "unsupported source preference entry is missing its observed "
+            "file type",
+            "missing source preference observed file type");
+    expect_contains(
+            missing_file_type_rendered.text,
+            "observed file type: unavailable",
+            "missing source preference file type fallback");
+
+    SystemSourceUpgradeIssue missing_package_metadata;
+    missing_package_metadata.kind =
+            SystemSourceUpgradeIssueKind::SystemPackageSnapshotUnavailable;
+    missing_package_metadata.impact =
+            SystemSourceUpgradeIssueImpact::ObservabilityOnly;
+    missing_package_metadata.phase = SystemSourceUpgradePhase::System;
+    missing_package_metadata.diagnostic =
+            "missing system package metadata diagnostic";
+    const UnifiedPlanRenderingResult missing_package_metadata_rendered =
+            render_blocked(RoutePreflightUnifiedPlanBlocker{
+                    UnifiedPlanBorrowedAuthorityReference<
+                            SystemSourceUpgradeIssue>(
+                            missing_package_metadata)});
+    expect_single_missing(
+            missing_package_metadata_rendered,
+            "system package snapshot issue is missing its package metadata "
+            "failure",
+            "missing system package metadata failure");
+    expect_contains(
+            missing_package_metadata_rendered.text,
+            "SystemSourceUpgradeIssueKind::SystemPackageSnapshotUnavailable",
+            "missing system package metadata kind");
+    expect_contains(
+            missing_package_metadata_rendered.text,
+            "typed nested details: unavailable",
+            "missing system package metadata fallback");
+
+    SystemSourceUpgradeIssue missing_cache_failure;
+    missing_cache_failure.kind =
+            SystemSourceUpgradeIssueKind::CacheAuthorityInvalid;
+    missing_cache_failure.impact =
+            SystemSourceUpgradeIssueImpact::BlocksExecution;
+    missing_cache_failure.phase = SystemSourceUpgradePhase::Preparation;
+    missing_cache_failure.diagnostic =
+            "missing typed cache failure diagnostic";
+    const UnifiedPlanRenderingResult missing_cache_failure_rendered =
+            render_blocked(RoutePreflightUnifiedPlanBlocker{
+                    UnifiedPlanBorrowedAuthorityReference<
+                            SystemSourceUpgradeIssue>(missing_cache_failure)});
+    expect_single_missing(
+            missing_cache_failure_rendered,
+            "system/source cache authority issue is missing its typed cache "
+            "failure",
+            "missing system/source cache failure");
+    expect_contains(
+            missing_cache_failure_rendered.text,
+            "SystemSourceUpgradeIssueKind::CacheAuthorityInvalid",
+            "missing system/source cache failure kind");
+    expect_contains(
+            missing_cache_failure_rendered.text,
+            "typed nested details: unavailable",
+            "missing system/source cache failure fallback");
+}
+
+void test_optional_constraint_evaluation_absence_is_not_missing() {
+    BuildPlan plan;
+    plan.dependency_edges.push_back(BuildPlanDependencyEdge{
+            "unknown-optional-parent",
+            "unknown-optional-base",
+            "unknown-optional-dependency>=1",
+            PackageRole::RuntimeDependency,
+            DependencyKind::Unknown,
+            std::nullopt,
+            std::nullopt,
+            std::nullopt,
+            ProviderResolutionKind::Unique,
+            DependencyRequirement{ConsumerDependencyRequirement(
+                    "unknown-optional-dependency>=1",
+                    "unknown-optional-dependency",
+                    DependencyVersionConstraint(
+                            DependencyVersionRelation::GreaterThanOrEqual,
+                            "1"))},
+            std::nullopt,
+            std::nullopt});
+    plan.dependency_edges.push_back(BuildPlanDependencyEdge{
+            "ambiguous-optional-parent",
+            "ambiguous-optional-base",
+            "ambiguous-optional-dependency>=2",
+            PackageRole::BuildDependency,
+            DependencyKind::AmbiguousProvider,
+            std::nullopt,
+            std::nullopt,
+            std::nullopt,
+            ProviderResolutionKind::Unique,
+            DependencyRequirement{ConsumerDependencyRequirement(
+                    "ambiguous-optional-dependency>=2",
+                    "ambiguous-optional-dependency",
+                    DependencyVersionConstraint(
+                            DependencyVersionRelation::GreaterThanOrEqual,
+                            "2"))},
+            std::nullopt,
+            std::nullopt});
+    plan.ambiguous_providers.push_back(AmbiguousProvidedDependency{
+            "ambiguous-optional-dependency>=2",
+            {ProvidedDependency::from_aur(
+                    "ambiguous-optional-provider",
+                    "ambiguous-optional-provider-base",
+                    "ambiguous-optional-dependency",
+                    "ambiguous-optional-dependency=2", "2")}});
+
+    UnifiedPlanObservationInput input;
+    input.status = UnifiedPlanObservationStatus::Blocked;
+    input.dependency_authorities.push_back(
+            UnifiedPlanDependencyAuthorityReference::from_build_plan(plan));
+    input.blockers.push_back(UnknownUnifiedPlanBlocker{
+            UnifiedPlanBorrowedAuthorityReference<BuildPlanDependencyEdge>(
+                    plan.dependency_edges[0])});
+    input.blockers.push_back(AmbiguousUnifiedPlanBlocker{
+            UnifiedPlanBorrowedAuthorityReference<
+                    AmbiguousProvidedDependency>(
+                    plan.ambiguous_providers.front())});
+
+    const UnifiedPlanObservationResult observation_result =
+            make_unified_plan_observation(std::move(input));
+    const UnifiedPlanObservation& observation = expect_valid(
+            observation_result,
+            "optional constraint evaluation absence fixture");
+    const UnifiedPlanRenderingResult rendered =
+            render_unified_plan_observation(observation);
+
+    expect(
+            observation.status() == UnifiedPlanObservationStatus::Blocked,
+            "renderer changed optional constraint fixture status");
+    expect(
+            rendered.is_complete() && rendered.issues.empty(),
+            "optional constraint evaluation absence was reported missing");
+    expect_contains(
+            rendered.text,
+            "unknown-optional-parent (PackageBase: unknown-optional-base) -> "
+            "unknown-optional-dependency>=1 [unknown; role: runtime dependency]",
+            "optional Unknown dependency edge");
+    expect_contains(
+            rendered.text,
+            "ambiguous-optional-parent (PackageBase: ambiguous-optional-base) "
+            "-> ambiguous-optional-dependency>=2 [ambiguous provider; role: "
+            "build dependency]",
+            "optional Ambiguous dependency edge");
+    expect_contains(
+            rendered.text, "Stored constraint result: not observed",
+            "optional constraint fallback display");
+
+    UpgradeAllOperationIssue cache_exception_issue;
+    cache_exception_issue.kind =
+            UpgradeAllOperationIssueKind::CacheAuthorityInvalid;
+    cache_exception_issue.phase = UpgradeAllOperationPhase::Preparation;
+    cache_exception_issue.diagnostic =
+            "generic cache authority exception diagnostic";
+    const UnifiedPlanRenderingResult cache_rendered = render_blocked(
+            RoutePreflightUnifiedPlanBlocker{
+                    UnifiedPlanBorrowedAuthorityReference<
+                            UpgradeAllOperationIssue>(cache_exception_issue)});
+    expect(
+            cache_rendered.is_complete() && cache_rendered.issues.empty(),
+            "generic upgrade-all cache failure was over-reported missing");
+    expect_contains(
+            cache_rendered.text,
+            "typed nested details: None; diagnostic: generic cache authority exception diagnostic",
+            "generic upgrade-all cache failure fallback");
+}
+
+void test_blocked_partial_root_identity_is_incomplete_rendering() {
     BuildPlan plan;
     plan.unresolved.push_back("partial-missing-dependency");
 
@@ -980,8 +1726,111 @@ void test_blocked_partial_identity_is_incomplete_rendering() {
     input.status = UnifiedPlanObservationStatus::Blocked;
     input.roots.emplace_back(
             RootTargetIdentity{0, "partial-request"},
-            AurRootPackageIdentity{"", ""},
-            UnifiedPlanRootRouteKind::AurSourceBuild);
+            AurRootPackageIdentity{"partial-child", "partial-base"},
+            UnifiedPlanRootRouteKind::RepositoryTransaction);
+    input.blockers.push_back(BuildPlanStateUnifiedPlanBlocker{
+            UnifiedPlanBorrowedAuthorityReference<BuildPlan>(plan),
+            BuildPlanStateUnifiedPlanBlockerKind::UnresolvedDependency,
+            0});
+
+    const UnifiedPlanObservationResult observation_result =
+            make_unified_plan_observation(std::move(input));
+    const UnifiedPlanObservation& observation = expect_valid(
+            observation_result, "Blocked partial root identity fixture");
+    const UnifiedPlanRenderingResult rendered =
+            render_unified_plan_observation(observation);
+
+    expect(
+            observation.status() == UnifiedPlanObservationStatus::Blocked,
+            "renderer changed partial root Blocked status");
+    expect(
+            !rendered.is_complete(),
+            "partial root rendering was reported complete");
+    expect(
+            rendered.issues.size() == 1,
+            "partial root rendering did not isolate its missing value");
+    const UnifiedPlanRenderingIssue& issue = rendered.issues.front();
+    expect(
+            issue.kind ==
+                            UnifiedPlanRenderingIssueKind::
+                                    MissingReferencedValue &&
+                    issue.section == UnifiedPlanRenderingSection::Roots &&
+                    issue.item_index == 0 && !issue.detail_index.has_value(),
+            "partial root rendering issue lost its typed location");
+    expect_contains(
+            issue.diagnostic,
+            "root route does not match its typed source identity",
+            "partial root rendering diagnostic");
+    expect_contains(
+            rendered.text,
+            "Identity: AUR/partial-child (PackageBase: partial-base)",
+            "partial root identity display");
+    expect_contains(
+            rendered.text, "Typed identity completeness: unavailable",
+            "partial root fallback display");
+    expect_contains(
+            rendered.text, "  Status: Blocked",
+            "partial root Blocked status display");
+}
+
+void test_blocked_partial_root_request_has_one_specific_issue() {
+    BuildPlan plan;
+    plan.unresolved.push_back("partial-request-missing-dependency");
+
+    UnifiedPlanObservationInput input;
+    input.status = UnifiedPlanObservationStatus::Blocked;
+    input.roots.emplace_back(
+            RootTargetIdentity{0, ""},
+            RepositoryRootPackageIdentity{
+                    "partial-request-repository", "partial-request-package"},
+            UnifiedPlanRootRouteKind::RepositoryTransaction);
+    input.blockers.push_back(BuildPlanStateUnifiedPlanBlocker{
+            UnifiedPlanBorrowedAuthorityReference<BuildPlan>(plan),
+            BuildPlanStateUnifiedPlanBlockerKind::UnresolvedDependency, 0});
+
+    const UnifiedPlanObservationResult observation_result =
+            make_unified_plan_observation(std::move(input));
+    const UnifiedPlanObservation& observation = expect_valid(
+            observation_result, "Blocked partial root request fixture");
+    const UnifiedPlanRenderingResult rendered =
+            render_unified_plan_observation(observation);
+
+    expect(
+            observation.status() == UnifiedPlanObservationStatus::Blocked,
+            "renderer changed partial root request Blocked status");
+    expect(
+            !rendered.is_complete() && rendered.issues.size() == 1,
+            "partial root request was complete or duplicated its issue");
+    const UnifiedPlanRenderingIssue& issue = rendered.issues.front();
+    expect(
+            issue.kind ==
+                            UnifiedPlanRenderingIssueKind::
+                                    MissingReferencedValue &&
+                    issue.section == UnifiedPlanRenderingSection::Roots &&
+                    issue.item_index == 0 && !issue.detail_index.has_value(),
+            "partial root request issue lost its typed location");
+    expect_contains(
+            issue.diagnostic,
+            "root is missing its invocation request identity",
+            "partial root request diagnostic");
+    expect_contains(
+            rendered.text,
+            "Identity: partial-request-repository/partial-request-package",
+            "partial root request identity display");
+    expect_contains(
+            rendered.text, "Request: unavailable (invocation index: 0)",
+            "partial root request fallback");
+    expect_not_contains(
+            rendered.text, "Typed identity completeness: unavailable",
+            "partial root request duplicate generic fallback");
+}
+
+void test_blocked_partial_build_unit_is_incomplete_rendering() {
+    BuildPlan plan;
+    plan.unresolved.push_back("partial-build-unit-dependency");
+
+    UnifiedPlanObservationInput input;
+    input.status = UnifiedPlanObservationStatus::Blocked;
     input.build_units.push_back(AurPackageBaseBuildUnitReference(
             std::cref(plan), 7));
     input.blockers.push_back(BuildPlanStateUnifiedPlanBlocker{
@@ -992,35 +1841,96 @@ void test_blocked_partial_identity_is_incomplete_rendering() {
     const UnifiedPlanObservationResult observation_result =
             make_unified_plan_observation(std::move(input));
     const UnifiedPlanObservation& observation = expect_valid(
-            observation_result, "Blocked partial identity fixture");
+            observation_result, "Blocked partial build unit fixture");
     const UnifiedPlanRenderingResult rendered =
             render_unified_plan_observation(observation);
 
     expect(
             observation.status() == UnifiedPlanObservationStatus::Blocked,
-            "renderer changed partial Blocked status");
+            "renderer changed partial build unit Blocked status");
     expect(
             !rendered.is_complete(),
-            "partial Blocked rendering was reported complete");
+            "partial build unit rendering was reported complete");
     expect(
-            !rendered.issues.empty(),
-            "partial Blocked rendering has no renderer-local issue");
-    bool has_missing_reference = false;
-    for(const UnifiedPlanRenderingIssue& issue : rendered.issues) {
-        if(issue.kind ==
-           UnifiedPlanRenderingIssueKind::MissingReferencedValue) {
-            has_missing_reference = true;
-        }
-    }
+            rendered.issues.size() == 1,
+            "partial build unit rendering duplicated its missing value");
+    const UnifiedPlanRenderingIssue& issue = rendered.issues.front();
     expect(
-            has_missing_reference,
-            "partial Blocked rendering lost MissingReferencedValue");
+            issue.kind ==
+                            UnifiedPlanRenderingIssueKind::
+                                    MissingReferencedValue &&
+                    issue.section ==
+                            UnifiedPlanRenderingSection::BuildUnits &&
+                    issue.item_index == 0 && !issue.detail_index.has_value(),
+            "partial build unit rendering issue lost its typed location");
     expect_contains(
-            rendered.text, "unavailable",
-            "partial Blocked fallback display");
+            issue.diagnostic,
+            "build unit no longer references a BuildPlan entry",
+            "partial build unit rendering diagnostic");
+    expect_contains(
+            rendered.text,
+            "AUR BuildPlan unit #8 (PackageBase: unavailable)",
+            "partial build unit fallback display");
     expect_contains(
             rendered.text, "  Status: Blocked",
-            "partial Blocked status display");
+            "partial build unit Blocked status display");
+}
+
+void test_blocked_prepared_build_unit_missing_preference_is_not_duplicated() {
+    RegisteredSourcePreferenceSnapshot source;
+    source.preference_package_name = "";
+    source.canonical_source_identity_key = "partial-prepared-source-key";
+    source.resolved_package_base = "partial-prepared-base";
+    source.source_kind = SourceBuildSourceKind::Repository;
+    const std::string requested_package = "partial-prepared-package";
+    const std::string checkout_package_base = "partial-prepared-base";
+    const std::vector<RequiredPackageArtifactTarget> targets{
+            RequiredPackageArtifactTarget{
+                    checkout_package_base, requested_package,
+                    DesiredInstallReason::Explicit}};
+    BuildPlan plan;
+    plan.unresolved.push_back("partial-prepared-missing-dependency");
+
+    UnifiedPlanObservationInput input;
+    input.status = UnifiedPlanObservationStatus::Blocked;
+    input.build_units.push_back(PreparedSystemSourceBuildUnitReference(
+            std::cref(source), std::cref(requested_package),
+            std::cref(checkout_package_base), false, true,
+            std::cref(targets)));
+    input.blockers.push_back(BuildPlanStateUnifiedPlanBlocker{
+            UnifiedPlanBorrowedAuthorityReference<BuildPlan>(plan),
+            BuildPlanStateUnifiedPlanBlockerKind::UnresolvedDependency, 0});
+
+    const UnifiedPlanObservationResult observation_result =
+            make_unified_plan_observation(std::move(input));
+    const UnifiedPlanObservation& observation = expect_valid(
+            observation_result,
+            "Blocked prepared build unit preference fixture");
+    const UnifiedPlanRenderingResult rendered =
+            render_unified_plan_observation(observation);
+
+    expect(
+            observation.status() == UnifiedPlanObservationStatus::Blocked,
+            "renderer changed prepared build unit Blocked status");
+    expect(
+            !rendered.is_complete() && rendered.issues.size() == 1,
+            "prepared build unit preference was complete or duplicated its issue");
+    const UnifiedPlanRenderingIssue& issue = rendered.issues.front();
+    expect(
+            issue.kind ==
+                            UnifiedPlanRenderingIssueKind::
+                                    MissingReferencedValue &&
+                    issue.section ==
+                            UnifiedPlanRenderingSection::BuildUnits &&
+                    issue.item_index == 0 && !issue.detail_index.has_value(),
+            "prepared build unit preference issue lost its typed location");
+    expect_contains(
+            issue.diagnostic,
+            "prepared source build unit is missing its source preference identity",
+            "prepared build unit preference diagnostic");
+    expect_contains(
+            rendered.text, "Source preference: unavailable",
+            "prepared build unit preference fallback");
 }
 
 void test_rendering_issue_is_isolated_from_execution_status() {
@@ -1066,8 +1976,15 @@ int main() {
         test_cross_source_required_artifact_identity();
         test_build_plan_order_is_preserved();
         test_blocker_variant_details();
+        test_invalid_root_search_snapshot_typed_details();
         test_source_failure_and_route_preflight_subtypes();
-        test_blocked_partial_identity_is_incomplete_rendering();
+        test_route_preflight_nested_typed_details();
+        test_route_preflight_nested_required_field_canaries();
+        test_optional_constraint_evaluation_absence_is_not_missing();
+        test_blocked_partial_root_identity_is_incomplete_rendering();
+        test_blocked_partial_root_request_has_one_specific_issue();
+        test_blocked_partial_build_unit_is_incomplete_rendering();
+        test_blocked_prepared_build_unit_missing_preference_is_not_duplicated();
         test_rendering_issue_is_isolated_from_execution_status();
         std::cout << "unified plan renderer tests passed" << std::endl;
         return 0;

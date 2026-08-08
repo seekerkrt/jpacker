@@ -513,7 +513,7 @@ struct SourceFailureUnifiedPlanBlocker {
 };
 
 struct ConstraintFailureUnifiedPlanBlocker {
-    UnifiedPlanBorrowedAuthorityReference<ConstraintEvaluation> detail;
+    UnifiedPlanBorrowedAuthorityReference<BuildPlanDependencyEdge> detail;
 };
 
 struct MetadataRiskUnifiedPlanBlocker {

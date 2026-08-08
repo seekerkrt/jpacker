@@ -814,6 +814,45 @@ void test_build_plan_partial_failure_remains_typed() {
                     ObservedVersionUnknownReason::PartialSourceFailure});
     plan.dependency_edges.front().constraint_evaluation =
             ConstraintEvaluation::unsatisfied();
+    const std::string shared_dependency =
+            plan.dependency_edges.front().dependency_spec;
+    const std::optional<DependencyRequirement> shared_requirement =
+            plan.dependency_edges.front().requirement;
+    const ProvidedDependency similar_provider =
+            ProvidedDependency::from_repository_constraint_metadata(
+                    "core", 0, "similar-runtime-provider",
+                    ProviderConstraintMetadata{
+                            ProviderCapability(
+                                    "virtual-runtime=1", "virtual-runtime",
+                                    "1"),
+                            ObservedVersion::available(
+                                    ObservedVersionSource::
+                                            RepositoryExactPackage,
+                                    "1.1"),
+                            ObservedVersion::available(
+                                    ObservedVersionSource::
+                                            RepositoryProviderCapability,
+                                    "1")});
+    plan.dependency_edges.push_back(BuildPlanDependencyEdge{
+            plan.root_targets.front().requested_name,
+            plan.order.front().package_base,
+            shared_dependency,
+            PackageRole::BuildDependency,
+            DependencyKind::Provided,
+            "similar-runtime-provider",
+            std::nullopt,
+            similar_provider,
+            ProviderResolutionKind::Unique,
+            shared_requirement,
+            ResolvedDependencyCandidate{ProviderResolvedDependencyCandidate{
+                    similar_provider,
+                    ObservedVersion::available(
+                            ObservedVersionSource::
+                                    RepositoryProviderCapability,
+                            "1")}},
+            ConstraintEvaluation::unknown(
+                    ObservedVersionUnknownReason::
+                            CandidateVersionUnavailable)});
 
     const std::unique_ptr<UnifiedPlanProjection> projection =
             project_root_package_unified_plan(
@@ -826,16 +865,13 @@ void test_build_plan_partial_failure_remains_typed() {
                     observation.transaction_intents().empty(),
             "partial BuildPlan failure exposed mutation intent");
     bool partial_failure_borrowed = false;
-    bool constraint_failure_borrowed = false;
+    std::vector<const BuildPlanDependencyEdge*> constraint_failure_edges;
     for(const UnifiedPlanBlocker& blocker : observation.blockers()) {
         if(const auto* constraint =
                    std::get_if<ConstraintFailureUnifiedPlanBlocker>(
                            &blocker);
-           constraint != nullptr &&
-           &constraint->detail.get() ==
-                   &plan.dependency_edges.front()
-                            .constraint_evaluation.value()) {
-            constraint_failure_borrowed = true;
+           constraint != nullptr) {
+            constraint_failure_edges.push_back(&constraint->detail.get());
         }
         const auto* source =
                 std::get_if<SourceFailureUnifiedPlanBlocker>(&blocker);
@@ -852,7 +888,46 @@ void test_build_plan_partial_failure_remains_typed() {
         }
     }
     expect(
-            partial_failure_borrowed && constraint_failure_borrowed,
+            partial_failure_borrowed &&
+                    constraint_failure_edges.size() == 2 &&
+                    constraint_failure_edges[0] ==
+                            &plan.dependency_edges[0] &&
+                    constraint_failure_edges[1] ==
+                            &plan.dependency_edges[1] &&
+                    constraint_failure_edges[0]->dependency_spec ==
+                            constraint_failure_edges[1]->dependency_spec &&
+                    constraint_failure_edges[0]
+                            ->resolved_provider.has_value() &&
+                    constraint_failure_edges[0]
+                                    ->resolved_provider->package_name ==
+                            "runtime-provider" &&
+                    constraint_failure_edges[0]
+                            ->constraint_evaluation.has_value() &&
+                    &constraint_failure_edges[0]
+                             ->constraint_evaluation.value() ==
+                            &plan.dependency_edges[0]
+                                     .constraint_evaluation.value() &&
+                    constraint_failure_edges[0]
+                                    ->constraint_evaluation->satisfaction() ==
+                            ConstraintSatisfaction::Unsatisfied &&
+                    constraint_failure_edges[1]
+                            ->resolved_provider.has_value() &&
+                    constraint_failure_edges[1]
+                                    ->resolved_provider->package_name ==
+                            "similar-runtime-provider" &&
+                    constraint_failure_edges[1]
+                            ->constraint_evaluation.has_value() &&
+                    &constraint_failure_edges[1]
+                             ->constraint_evaluation.value() ==
+                            &plan.dependency_edges[1]
+                                     .constraint_evaluation.value() &&
+                    constraint_failure_edges[1]
+                                    ->constraint_evaluation->unknown_reason() !=
+                            nullptr &&
+                    *constraint_failure_edges[1]
+                             ->constraint_evaluation->unknown_reason() ==
+                            ObservedVersionUnknownReason::
+                                    CandidateVersionUnavailable,
             "typed partial-source/constraint authority was flattened");
 }
 

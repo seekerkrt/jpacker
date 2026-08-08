@@ -2937,7 +2937,7 @@ check-unified-plan-observation-link-firewall:
 test-unified-plan-observation: check-unified-plan-observation-link-firewall $(UNIFIED_PLAN_OBSERVATION_TEST_TARGET)
 	$(abspath $(UNIFIED_PLAN_OBSERVATION_TEST_TARGET))
 
-test-observation-contract-gate: check-unified-plan-observation-link-firewall
+test-observation-contract-gate: test-unified-plan-observation
 
 UNIFIED_PLAN_PROJECTION_FORBIDDEN_SYMBOL_PATTERN := (^|[^[:alnum:]_])(resolve_|execute_|run_command|capture_command|cmd_|shell_words::|Process::|prepare_production_source_build_invocation|prepare_aur_source_build_work_items|run_explicit_process|capture_explicit_process_output_raw|exec_command|command_status|prepare_artifact_install|prepare_package_base_artifact_install|prepare_smart_source_build_work_item|prepare_resolved_source_build_work_item|argv)
 UNIFIED_PLAN_PROJECTION_FIREWALL_PROBE_SYMBOLS := \
@@ -2998,7 +2998,7 @@ check-unified-plan-projection-link-firewall: $(BUILD_DIR)/unified_plan_projectio
 test-unified-plan-projection: check-unified-plan-projection-link-firewall $(UNIFIED_PLAN_PROJECTION_TEST_TARGET)
 	$(abspath $(UNIFIED_PLAN_PROJECTION_TEST_TARGET))
 
-test-projection-fixture-gate: check-unified-plan-projection-link-firewall
+test-projection-fixture-gate: test-unified-plan-projection
 
 UNIFIED_PLAN_RENDERER_FORBIDDEN_SYMBOL_PATTERN := (^|[^[:alnum:]_])(resolve_|evaluate_consumer_dependency_requirement|select_provider|make_provider_selection_session|provider_selection_callback|execute_|run_command|capture_command|cmd_|shell_words::|Process::|prepare_production_source_build_invocation|prepare_aur_source_build_work_items|run_explicit_process|capture_explicit_process_output_raw|exec_command|command_status|prepare_artifact_install|prepare_package_base_artifact_install|prepare_smart_source_build_work_item|prepare_resolved_source_build_work_item|argv)
 UNIFIED_PLAN_RENDERER_FIREWALL_PROBE_SYMBOLS := \

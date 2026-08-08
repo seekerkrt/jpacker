@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Moguet 2.1.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-09 06:13+0900\n"
+"POT-Creation-Date: 2026-08-09 07:48+0900\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -830,13 +830,13 @@ msgid "{} {} response validation failed for {}: duplicate response {} {}"
 msgstr ""
 
 #: src/aur_update_cli_presentation.cpp:24
-#: src/commands_source_maintenance.cpp:545 src/unified_plan_renderer.cpp:548
+#: src/commands_source_maintenance.cpp:545 src/unified_plan_renderer.cpp:593
 msgid "explicit"
 msgstr ""
 
 #: src/aur_update_cli_presentation.cpp:26
-#: src/commands_source_maintenance.cpp:546 src/unified_plan_renderer.cpp:550
-#: src/unified_plan_renderer.cpp:1274
+#: src/commands_source_maintenance.cpp:546 src/unified_plan_renderer.cpp:595
+#: src/unified_plan_renderer.cpp:1373
 msgid "dependency"
 msgstr ""
 
@@ -1007,8 +1007,8 @@ msgstr ""
 #: src/aur_update_cli_presentation.cpp:173 src/commands_aur_update.cpp:46
 #: src/commands_aur_update.cpp:110 src/commands_upgrade_all.cpp:119
 #: src/commands_upgrade_all.cpp:281 src/commands_upgrade_all.cpp:470
-#: src/commands_upgrade_all.cpp:527 src/unified_plan_renderer.cpp:293
-#: src/unified_plan_renderer.cpp:313
+#: src/commands_upgrade_all.cpp:527 src/unified_plan_renderer.cpp:345
+#: src/unified_plan_renderer.cpp:365
 msgid "none"
 msgstr ""
 
@@ -2605,7 +2605,7 @@ msgid "multiple package targets for package base"
 msgstr ""
 
 #: src/commands_aur_update.cpp:97 src/commands_upgrade_all.cpp:515
-#: src/unified_plan_renderer.cpp:377
+#: src/unified_plan_renderer.cpp:430
 msgid "ambiguous provider"
 msgstr ""
 
@@ -2695,7 +2695,7 @@ msgstr ""
 
 #: src/commands_aur_update.cpp:161 src/commands_upgrade_all.cpp:121
 #: src/commands_upgrade_all.cpp:283 src/commands_upgrade_all.cpp:572
-#: src/unified_plan_renderer.cpp:295 src/unified_plan_renderer.cpp:315
+#: src/unified_plan_renderer.cpp:347 src/unified_plan_renderer.cpp:367
 msgid "preparation"
 msgstr ""
 
@@ -2834,7 +2834,7 @@ msgstr ""
 msgid "skipped"
 msgstr ""
 
-#: src/commands_aur_update.cpp:258 src/unified_plan_renderer.cpp:43
+#: src/commands_aur_update.cpp:258 src/unified_plan_renderer.cpp:45
 msgid "unsupported"
 msgstr ""
 
@@ -3036,10 +3036,10 @@ msgstr ""
 #: src/commands_inspect.cpp:469 src/commands_inspect.cpp:486
 #: src/commands_inspect.cpp:498 src/commands_inspect.cpp:519
 #: src/commands_inspect.cpp:724 src/commands_inspect.cpp:850
-#: src/unified_plan_renderer.cpp:578 src/unified_plan_renderer.cpp:615
-#: src/unified_plan_renderer.cpp:655 src/unified_plan_renderer.cpp:912
-#: src/unified_plan_renderer.cpp:1058 src/unified_plan_renderer.cpp:1156
-#: src/unified_plan_renderer.cpp:1294 src/unified_plan_renderer.cpp:2736
+#: src/unified_plan_renderer.cpp:623 src/unified_plan_renderer.cpp:685
+#: src/unified_plan_renderer.cpp:725 src/unified_plan_renderer.cpp:993
+#: src/unified_plan_renderer.cpp:1143 src/unified_plan_renderer.cpp:1255
+#: src/unified_plan_renderer.cpp:1393 src/unified_plan_renderer.cpp:4069
 msgid "  None"
 msgstr ""
 
@@ -3574,7 +3574,7 @@ msgstr ""
 msgid "Local {} result: {}"
 msgstr ""
 
-#: src/commands_source_maintenance.cpp:549 src/unified_plan_renderer.cpp:367
+#: src/commands_source_maintenance.cpp:549 src/unified_plan_renderer.cpp:420
 msgid "installed"
 msgstr ""
 
@@ -3874,21 +3874,22 @@ msgid "[orphaned]"
 msgstr ""
 
 #: src/commands_sync.cpp:113 src/commands_sync.cpp:158
-#: src/commands_sync.cpp:192 src/unified_plan_renderer.cpp:1596
-#: src/unified_plan_renderer.cpp:1638 src/unified_plan_renderer.cpp:1810
-#: src/unified_plan_renderer.cpp:2165 src/unified_plan_renderer.cpp:2169
-#: src/unified_plan_renderer.cpp:2426 src/unified_plan_renderer.cpp:2465
-#: src/unified_plan_renderer.cpp:2693 src/unified_plan_renderer.cpp:2696
+#: src/commands_sync.cpp:192 src/unified_plan_renderer.cpp:1695
+#: src/unified_plan_renderer.cpp:1737 src/unified_plan_renderer.cpp:1909
+#: src/unified_plan_renderer.cpp:2410 src/unified_plan_renderer.cpp:2815
+#: src/unified_plan_renderer.cpp:2818 src/unified_plan_renderer.cpp:3567
+#: src/unified_plan_renderer.cpp:3674 src/unified_plan_renderer.cpp:4026
+#: src/unified_plan_renderer.cpp:4029
 msgid "None"
 msgstr ""
 
 #: src/commands_sync.cpp:124 src/commands_sync.cpp:131
-#: src/commands_sync.cpp:137 src/unified_plan_renderer.cpp:82
+#: src/commands_sync.cpp:137 src/unified_plan_renderer.cpp:84
 msgid "no"
 msgstr ""
 
 #: src/commands_sync.cpp:126 src/commands_sync.cpp:132
-#: src/commands_sync.cpp:138 src/unified_plan_renderer.cpp:81
+#: src/commands_sync.cpp:138 src/unified_plan_renderer.cpp:83
 msgid "yes"
 msgstr ""
 
@@ -4213,7 +4214,7 @@ msgstr ""
 msgid "changed"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:37 src/unified_plan_renderer.cpp:379
+#: src/commands_upgrade_all.cpp:37 src/unified_plan_renderer.cpp:432
 msgid "unknown"
 msgstr ""
 
@@ -4297,12 +4298,12 @@ msgid "Unknown {} operation status."
 msgstr ""
 
 #: src/commands_upgrade_all.cpp:123 src/commands_upgrade_all.cpp:285
-#: src/unified_plan_renderer.cpp:297 src/unified_plan_renderer.cpp:317
+#: src/unified_plan_renderer.cpp:349 src/unified_plan_renderer.cpp:369
 msgid "system"
 msgstr ""
 
 #: src/commands_upgrade_all.cpp:125 src/commands_upgrade_all.cpp:287
-#: src/unified_plan_renderer.cpp:299 src/unified_plan_renderer.cpp:319
+#: src/unified_plan_renderer.cpp:351 src/unified_plan_renderer.cpp:371
 msgid "registered source"
 msgstr ""
 
@@ -4311,25 +4312,25 @@ msgid "foreign inventory"
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the literal service name "AUR".
-#: src/commands_upgrade_all.cpp:130 src/unified_plan_renderer.cpp:323
+#: src/commands_upgrade_all.cpp:130 src/unified_plan_renderer.cpp:375
 #, c++-format
 msgid "{} query"
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the literal service name "AUR".
 #: src/commands_upgrade_all.cpp:133 src/commands_upgrade_all.cpp:386
-#: src/unified_plan_renderer.cpp:326
+#: src/unified_plan_renderer.cpp:378
 #, c++-format
 msgid "{} preparation"
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the literal service name "AUR".
-#: src/commands_upgrade_all.cpp:137 src/unified_plan_renderer.cpp:329
+#: src/commands_upgrade_all.cpp:137 src/unified_plan_renderer.cpp:381
 #, c++-format
 msgid "{} execution"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:140 src/unified_plan_renderer.cpp:331
+#: src/commands_upgrade_all.cpp:140 src/unified_plan_renderer.cpp:383
 msgid "reduction"
 msgstr ""
 
@@ -4850,20 +4851,20 @@ msgstr ""
 msgid "Unknown {} target disposition."
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:827 src/unified_plan_renderer.cpp:394
-#: src/unified_plan_renderer.cpp:1273
+#: src/commands_upgrade_all.cpp:827 src/unified_plan_renderer.cpp:446
+#: src/unified_plan_renderer.cpp:1372
 msgid "root"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:829 src/unified_plan_renderer.cpp:396
+#: src/commands_upgrade_all.cpp:829 src/unified_plan_renderer.cpp:448
 msgid "runtime dependency"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:831 src/unified_plan_renderer.cpp:398
+#: src/commands_upgrade_all.cpp:831 src/unified_plan_renderer.cpp:450
 msgid "build dependency"
 msgstr ""
 
-#: src/commands_upgrade_all.cpp:833 src/unified_plan_renderer.cpp:400
+#: src/commands_upgrade_all.cpp:833 src/unified_plan_renderer.cpp:452
 msgid "check dependency"
 msgstr ""
 
@@ -8335,986 +8336,1365 @@ msgstr ""
 msgid "User config error: '{}': key '{}' (line {}, column {}): unsupported value '{}'; accepted values: {}, {}, {}"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:53 src/unified_plan_renderer.cpp:971
-#: src/unified_plan_renderer.cpp:1086 src/unified_plan_renderer.cpp:1107
+#: src/unified_plan_renderer.cpp:55 src/unified_plan_renderer.cpp:1172
+#: src/unified_plan_renderer.cpp:1193
 msgid "unavailable"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:70 src/unified_plan_renderer.cpp:77
-#: src/unified_plan_renderer.cpp:1701 src/unified_plan_renderer.cpp:1761
-#: src/unified_plan_renderer.cpp:1767 src/unified_plan_renderer.cpp:1987
-#: src/unified_plan_renderer.cpp:1997 src/unified_plan_renderer.cpp:2007
-#: src/unified_plan_renderer.cpp:2010 src/unified_plan_renderer.cpp:2172
-#: src/unified_plan_renderer.cpp:2383 src/unified_plan_renderer.cpp:2386
-#: src/unified_plan_renderer.cpp:2430 src/unified_plan_renderer.cpp:2469
-#: src/unified_plan_renderer.cpp:2628
+#: src/unified_plan_renderer.cpp:72 src/unified_plan_renderer.cpp:79
+#: src/unified_plan_renderer.cpp:841 src/unified_plan_renderer.cpp:1800
+#: src/unified_plan_renderer.cpp:1860 src/unified_plan_renderer.cpp:1866
+#: src/unified_plan_renderer.cpp:2347 src/unified_plan_renderer.cpp:2477
+#: src/unified_plan_renderer.cpp:2495 src/unified_plan_renderer.cpp:2513
+#: src/unified_plan_renderer.cpp:2525 src/unified_plan_renderer.cpp:2784
+#: src/unified_plan_renderer.cpp:2946 src/unified_plan_renderer.cpp:3057
+#: src/unified_plan_renderer.cpp:3068 src/unified_plan_renderer.cpp:3080
+#: src/unified_plan_renderer.cpp:3439 src/unified_plan_renderer.cpp:3442
+#: src/unified_plan_renderer.cpp:3525 src/unified_plan_renderer.cpp:3544
+#: src/unified_plan_renderer.cpp:3555 src/unified_plan_renderer.cpp:3633
+#: src/unified_plan_renderer.cpp:3649 src/unified_plan_renderer.cpp:3659
+#: src/unified_plan_renderer.cpp:3755 src/unified_plan_renderer.cpp:3762
+#: src/unified_plan_renderer.cpp:3769 src/unified_plan_renderer.cpp:3827
+#: src/unified_plan_renderer.cpp:3834 src/unified_plan_renderer.cpp:3904
+#: src/unified_plan_renderer.cpp:3945 src/unified_plan_renderer.cpp:3952
 msgid "not observed"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:98
+#: src/unified_plan_renderer.cpp:100
 msgid "Ready"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:100
+#: src/unified_plan_renderer.cpp:102
 msgid "NoOp"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:102
+#: src/unified_plan_renderer.cpp:104
 msgid "Blocked"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:107
+#: src/unified_plan_renderer.cpp:109
 msgid "Unified plan status is not supported by the renderer."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:115 src/unified_plan_renderer.cpp:369
-#: src/unified_plan_renderer.cpp:564
+#: src/unified_plan_renderer.cpp:117 src/unified_plan_renderer.cpp:422
+#: src/unified_plan_renderer.cpp:609
 msgid "repository"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:119 src/unified_plan_renderer.cpp:373
+#: src/unified_plan_renderer.cpp:121 src/unified_plan_renderer.cpp:426
 msgid "local"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:125
+#: src/unified_plan_renderer.cpp:127
 msgid "A root source is not supported by the renderer."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:133 src/unified_plan_renderer.cpp:243
+#: src/unified_plan_renderer.cpp:135 src/unified_plan_renderer.cpp:295
 msgid "repository transaction"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:135
+#: src/unified_plan_renderer.cpp:137
 msgid "repository source build"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:138
+#: src/unified_plan_renderer.cpp:140
 #, c++-format
 msgid "{} source build"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:140
+#: src/unified_plan_renderer.cpp:142
 msgid "local source build"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:146
+#: src/unified_plan_renderer.cpp:148
 msgid "A root route is not supported by the renderer."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:165
+#: src/unified_plan_renderer.cpp:185
+msgid "directory"
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:190
+msgid "A local source filesystem identity references a regular file instead of a directory."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:195
+msgid "A local source filesystem identity has an unsupported node type."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:214
 msgid "A repository root is missing its repository identity."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:171
+#: src/unified_plan_renderer.cpp:220
 msgid "A repository root is missing its package identity."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:181
+#: src/unified_plan_renderer.cpp:230
 msgid "A repository source root is missing its package identity."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:187
+#: src/unified_plan_renderer.cpp:236
 #, c++-format
 msgid "A repository source root is missing its {} identity."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:193
+#: src/unified_plan_renderer.cpp:242
 msgid "A repository source root is missing its source identity key."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:176
+#: src/unified_plan_renderer.cpp:225
 #, c++-format
 msgid "{} ({}: {}; source key: {})"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:203
+#: src/unified_plan_renderer.cpp:252
 #, c++-format
 msgid "An {} root is missing its package identity."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:210
+#: src/unified_plan_renderer.cpp:259
 #, c++-format
 msgid "An {} root is missing its {} identity."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:198 src/unified_plan_renderer.cpp:428
-#: src/unified_plan_renderer.cpp:479
+#: src/unified_plan_renderer.cpp:247 src/unified_plan_renderer.cpp:480
+#: src/unified_plan_renderer.cpp:529 src/unified_plan_renderer.cpp:2202
 #, c++-format
 msgid "{}/{} ({}: {})"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:219
+#: src/unified_plan_renderer.cpp:268
 msgid "A local root is missing its canonical path identity."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:214
+#: src/unified_plan_renderer.cpp:263
 #, c++-format
-msgid "{} (device: {}; inode: {})"
+msgid "{} (node type: {}; device: {}; inode: {})"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:232
+#: src/unified_plan_renderer.cpp:284
 msgid "request / root discovery"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:235
+#: src/unified_plan_renderer.cpp:287
 msgid "metadata / dependency candidate discovery"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:238
+#: src/unified_plan_renderer.cpp:290
 msgid "provider decision / refreshed resolution"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:241
+#: src/unified_plan_renderer.cpp:293
 msgid "execution preflight / projection"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:245
+#: src/unified_plan_renderer.cpp:297
 msgid "source retrieval"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:247
+#: src/unified_plan_renderer.cpp:299
 msgid "source build"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:250
+#: src/unified_plan_renderer.cpp:302
 msgid "artifact validation / selection"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:253
+#: src/unified_plan_renderer.cpp:305
 msgid "source-built artifact install"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:255
+#: src/unified_plan_renderer.cpp:307
 msgid "cleanup / reduction"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:261
+#: src/unified_plan_renderer.cpp:313
 msgid "An observation phase is not supported by the renderer."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:285
+#: src/unified_plan_renderer.cpp:337
 msgid "A phase owner is not supported by the renderer."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:305
+#: src/unified_plan_renderer.cpp:357
 msgid "A system/source route phase is not supported by the renderer."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:321
+#: src/unified_plan_renderer.cpp:373
 msgid "foreign package inventory"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:337
+#: src/unified_plan_renderer.cpp:389
 #, c++-format
 msgid "An {} route phase is not supported by the renderer."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:349
+#: src/unified_plan_renderer.cpp:401
 #, c++-format
 msgid "system/source: {}"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:354
+#: src/unified_plan_renderer.cpp:406
 #, c++-format
 msgid "{}: {}"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:375
+#: src/unified_plan_renderer.cpp:428
 msgid "provider"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:385
+#: src/unified_plan_renderer.cpp:437
 msgid "A dependency kind is not supported by the renderer."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:405
+#: src/unified_plan_renderer.cpp:457
 msgid "A package role is not supported by the renderer."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:419
+#: src/unified_plan_renderer.cpp:471
 msgid "A repository provider is missing its repository identity."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:425
+#: src/unified_plan_renderer.cpp:477
 msgid "A repository provider is missing its package identity."
-msgstr ""
-
-#: src/unified_plan_renderer.cpp:433
-#, c++-format
-msgid "An {} provider is missing its package identity."
-msgstr ""
-
-#: src/unified_plan_renderer.cpp:440
-#, c++-format
-msgid "An {} provider is missing its {} identity."
-msgstr ""
-
-#: src/unified_plan_renderer.cpp:458
-msgid "An installed dependency candidate is missing its package identity."
-msgstr ""
-
-#: src/unified_plan_renderer.cpp:452
-#, c++-format
-msgid "installed/{}"
-msgstr ""
-
-#: src/unified_plan_renderer.cpp:467
-msgid "A repository dependency candidate is missing its repository identity."
-msgstr ""
-
-#: src/unified_plan_renderer.cpp:474
-msgid "A repository dependency candidate is missing its package identity."
 msgstr ""
 
 #: src/unified_plan_renderer.cpp:485
 #, c++-format
+msgid "An {} provider is missing its package identity."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:492
+#, c++-format
+msgid "An {} provider is missing its {} identity."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:510
+msgid "An installed dependency candidate is missing its package identity."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:505
+#, c++-format
+msgid "installed/{}"
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:518
+msgid "A repository dependency candidate is missing its repository identity."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:524
+msgid "A repository dependency candidate is missing its package identity."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:534
+#, c++-format
 msgid "An {} dependency candidate is missing its package identity."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:493
+#: src/unified_plan_renderer.cpp:541
 #, c++-format
 msgid "An {} dependency candidate is missing its {} identity."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:505
+#: src/unified_plan_renderer.cpp:552
 msgid "A local dependency candidate is missing its package identity."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:512
+#: src/unified_plan_renderer.cpp:558
 #, c++-format
 msgid "A local dependency candidate is missing its {} identity."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:499
+#: src/unified_plan_renderer.cpp:547
 #, c++-format
 msgid "local/{} ({}: {})"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:530 src/unified_plan_renderer.cpp:1697
+#: src/unified_plan_renderer.cpp:575 src/unified_plan_renderer.cpp:1796
 #, c++-format
 msgid "{} ({})"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:537
+#: src/unified_plan_renderer.cpp:582
 #, c++-format
 msgid "A dependency constraint could not be rendered: {}"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:555
+#: src/unified_plan_renderer.cpp:600
 msgid "An install reason is not supported by the renderer."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:571
+#: src/unified_plan_renderer.cpp:616
 msgid "A source-build kind is not supported by the renderer."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:576
+#: src/unified_plan_renderer.cpp:621
 msgid "Roots:"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:585
+#: src/unified_plan_renderer.cpp:635
+msgid "A root is missing its invocation request identity."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:640
 #, c++-format
 msgid "  {}. Identity: {}"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:589
+#: src/unified_plan_renderer.cpp:644
 #, c++-format
 msgid "     Source: {}"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:594
+#: src/unified_plan_renderer.cpp:649
 #, c++-format
 msgid "     Route: {}"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:605
-msgid "A root is missing its invocation request identity."
+#: src/unified_plan_renderer.cpp:661
+msgid "A root route does not match its typed source identity."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:599
+#: src/unified_plan_renderer.cpp:655 src/unified_plan_renderer.cpp:665
+#, c++-format
+msgid "     Typed identity completeness: {}"
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:671
+msgid "A root has an incomplete typed source identity that cannot be attributed to one display field."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:675
 #, c++-format
 msgid "     Request: {} (invocation index: {})"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:613
+#: src/unified_plan_renderer.cpp:683
 msgid "Phases:"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:621 src/unified_plan_renderer.cpp:921
-#: src/unified_plan_renderer.cpp:929 src/unified_plan_renderer.cpp:938
-#: src/unified_plan_renderer.cpp:1066 src/unified_plan_renderer.cpp:2742
+#: src/unified_plan_renderer.cpp:691 src/unified_plan_renderer.cpp:1002
+#: src/unified_plan_renderer.cpp:1010 src/unified_plan_renderer.cpp:1019
+#: src/unified_plan_renderer.cpp:1152 src/unified_plan_renderer.cpp:4075
 #, c++-format
 msgid "  {}. {}"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:627
+#: src/unified_plan_renderer.cpp:697
 #, c++-format
 msgid "     External owner: {}"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:633
+#: src/unified_plan_renderer.cpp:703
 #, c++-format
 msgid "     Route phase: {}"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:645
+#: src/unified_plan_renderer.cpp:715
 msgid "Configured repository order:"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:650
+#: src/unified_plan_renderer.cpp:720
 msgid "  Not observed"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:670
+#: src/unified_plan_renderer.cpp:740
 msgid "     Dependencies: None"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:687
+#: src/unified_plan_renderer.cpp:757
 msgid "A dependency edge is missing its parent package identity."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:695
+#: src/unified_plan_renderer.cpp:765
 #, c++-format
 msgid "A dependency edge is missing its parent {} identity."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:703
+#: src/unified_plan_renderer.cpp:773
 msgid "A dependency edge is missing its dependency specification."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:679
+#: src/unified_plan_renderer.cpp:749
 #, c++-format
 msgid "     {}. {} ({}: {}) -> {} [{}; role: {}]"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:715 src/unified_plan_renderer.cpp:734
+#: src/unified_plan_renderer.cpp:787 src/unified_plan_renderer.cpp:808
 #, c++-format
 msgid "        Selected identity: {}"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:723
+#: src/unified_plan_renderer.cpp:797
 #, c++-format
 msgid "        Selected provider: {}"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:741
+#: src/unified_plan_renderer.cpp:815
 msgid "A resolved dependency edge is missing its selected candidate or provider identity."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:746 src/unified_plan_renderer.cpp:756
+#: src/unified_plan_renderer.cpp:820 src/unified_plan_renderer.cpp:830
 #, c++-format
 msgid "        Stored constraint result: {}"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:763
-msgid "A dependency edge is missing its stored constraint result."
+#: src/unified_plan_renderer.cpp:839
+msgid "A resolved dependency edge is missing its stored constraint result."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:784
-msgid "A LocalBuildPlan is missing its effective architecture."
+#: src/unified_plan_renderer.cpp:862
+#, c++-format
+msgid "A {} is missing its effective architecture."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:778
+#: src/unified_plan_renderer.cpp:856
 #, c++-format
 msgid "     Effective architecture: {}"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:788
+#: src/unified_plan_renderer.cpp:867
 msgid "     Local internal dependencies: None"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:792
+#: src/unified_plan_renderer.cpp:871
 msgid "     Local internal dependencies:"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:807
+#: src/unified_plan_renderer.cpp:886
 msgid "A local dependency edge is missing its parent package identity."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:815
+#: src/unified_plan_renderer.cpp:894
 msgid "A local dependency edge is missing its dependency specification."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:822
+#: src/unified_plan_renderer.cpp:901
 msgid "A local dependency edge is missing its resolved package identity."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:799
+#: src/unified_plan_renderer.cpp:878
 #, c++-format
 msgid "       {}. {} -> {} (resolved package: {}; role: {}; cycle: {})"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:832
+#: src/unified_plan_renderer.cpp:911
 #, c++-format
 msgid "          Provided capability: {}"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:838 src/unified_plan_renderer.cpp:848
+#: src/unified_plan_renderer.cpp:917 src/unified_plan_renderer.cpp:929
 #, c++-format
 msgid "          Selected identity: {}"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:855
+#: src/unified_plan_renderer.cpp:936
 msgid "A local dependency edge is missing its selected candidate identity."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:860 src/unified_plan_renderer.cpp:871
+#: src/unified_plan_renderer.cpp:941 src/unified_plan_renderer.cpp:952
 #, c++-format
 msgid "          Stored constraint result: {}"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:878
+#: src/unified_plan_renderer.cpp:959
 msgid "A local dependency edge is missing its stored constraint result."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:885
+#: src/unified_plan_renderer.cpp:966
 msgid "     Local dependency failures: None"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:889
+#: src/unified_plan_renderer.cpp:970
 msgid "     Local dependency failures:"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:894
+#: src/unified_plan_renderer.cpp:975
 #, c++-format
 msgid "       {}. {}"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:909
+#: src/unified_plan_renderer.cpp:990
 msgid "Dependency authorities:"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:945
+#: src/unified_plan_renderer.cpp:1026
 msgid "A dependency authority reference is unavailable."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:963
-msgid "A build unit has an incomplete typed source identity."
-msgstr ""
-
-#: src/unified_plan_renderer.cpp:976
-#, c++-format
-msgid "An {} build unit is missing its {} identity."
-msgstr ""
-
-#: src/unified_plan_renderer.cpp:984
+#: src/unified_plan_renderer.cpp:1050
 #, c++-format
 msgid "An {} build unit no longer references a {} entry."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:988
+#: src/unified_plan_renderer.cpp:1056
+#, c++-format
+msgid "An {} build unit is missing its {} identity."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:1059
 #, c++-format
 msgid "{} {} unit #{} ({}: {})"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:1002
+#: src/unified_plan_renderer.cpp:1073
 msgid "A local build unit is missing its canonical path identity."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:1009
+#: src/unified_plan_renderer.cpp:1083
 #, c++-format
 msgid "A local build unit is missing its {} identity."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:997
+#: src/unified_plan_renderer.cpp:1068
 #, c++-format
-msgid "local source {} (device: {}; inode: {}; {}: {})"
+msgid "local source {} (node type: {}; device: {}; inode: {}; {}: {})"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:1023
+#: src/unified_plan_renderer.cpp:1097
 msgid "A prepared source build unit is missing its source kind."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:1033
+#: src/unified_plan_renderer.cpp:1107
 msgid "A prepared source build unit is missing its source identity key."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:1041
+#: src/unified_plan_renderer.cpp:1115
 msgid "A prepared source build unit is missing its requested package identity."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:1047
+#: src/unified_plan_renderer.cpp:1121
 #, c++-format
 msgid "A prepared source build unit is missing its checkout {} identity."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:1035
+#: src/unified_plan_renderer.cpp:1109
 #, c++-format
 msgid "{} source key {} (requested package: {}; checkout {}: {})"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:1056
+#: src/unified_plan_renderer.cpp:1132 src/unified_plan_renderer.cpp:1244
+msgid "A build unit has an incomplete typed source identity that cannot be attributed to one display field."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:1141
 msgid "Build units:"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:1089 src/unified_plan_renderer.cpp:1103
+#: src/unified_plan_renderer.cpp:1175 src/unified_plan_renderer.cpp:1189
 #, c++-format
 msgid "     Child packages: {}"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:1123
+#: src/unified_plan_renderer.cpp:1209
 msgid "A prepared source build unit is missing its source preference identity."
-msgstr ""
-
-#: src/unified_plan_renderer.cpp:1113
-#, c++-format
-msgid "     Source preference: {}"
-msgstr ""
-
-#: src/unified_plan_renderer.cpp:1131
-#, c++-format
-msgid "     Required target {}: {}/{} ({})"
-msgstr ""
-
-#: src/unified_plan_renderer.cpp:1153
-msgid "Required artifact targets:"
-msgstr ""
-
-#: src/unified_plan_renderer.cpp:1166
-#, c++-format
-msgid "  {}. Source/build unit: {}"
-msgstr ""
-
-#: src/unified_plan_renderer.cpp:1175
-#, c++-format
-msgid "     Required target: {}: {}; child package: {}; install reason: {}"
 msgstr ""
 
 #: src/unified_plan_renderer.cpp:1199
 #, c++-format
+msgid "     Source preference: {}"
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:1217
+#, c++-format
+msgid "     Required target {}: {}/{} ({})"
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:1252
+msgid "Required artifact targets:"
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:1265
+#, c++-format
+msgid "  {}. Source/build unit: {}"
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:1274
+#, c++-format
+msgid "     Required target: {}: {}; child package: {}; install reason: {}"
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:1298
+#, c++-format
 msgid "root: {}"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:1218
+#: src/unified_plan_renderer.cpp:1317
 msgid "A repository transaction dependency is missing its repository identity."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:1225
+#: src/unified_plan_renderer.cpp:1324
 msgid "A repository transaction dependency is missing its package identity."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:1211
+#: src/unified_plan_renderer.cpp:1310
 #, c++-format
 msgid "dependency: {}/{}"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:1230
+#: src/unified_plan_renderer.cpp:1329
 #, c++-format
 msgid "selected provider: {}"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:1238
+#: src/unified_plan_renderer.cpp:1337
 msgid "system upgrade"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:1263
+#: src/unified_plan_renderer.cpp:1362
 msgid "A source install intent references an unavailable required artifact."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:1272
+#: src/unified_plan_renderer.cpp:1371
 #, c++-format
 msgid "{} required artifact #{}: {}; target: {}/{}; install reason: {}"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:1291
+#: src/unified_plan_renderer.cpp:1390
 msgid "Transaction intents:"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:1310
+#: src/unified_plan_renderer.cpp:1409
 msgid "Repository package transaction"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:1307 src/unified_plan_renderer.cpp:1324
+#: src/unified_plan_renderer.cpp:1406 src/unified_plan_renderer.cpp:1423
 #, c++-format
 msgid "  {}. {} ({} policy: {})"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:1327
+#: src/unified_plan_renderer.cpp:1426
 msgid "Source-built artifact install boundary"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:1363
+#: src/unified_plan_renderer.cpp:1462
 #, c++-format
 msgid "A {} resolution failure kind is not supported by the renderer."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:1390
+#: src/unified_plan_renderer.cpp:1489
 msgid "An observed-version unknown reason is not supported by the renderer."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:1420
+#: src/unified_plan_renderer.cpp:1519
 msgid "A package metadata error code is not supported by the renderer."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:1446
+#: src/unified_plan_renderer.cpp:1545
 msgid "A dependency constraint parse failure kind is not supported by the renderer."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:1465
+#: src/unified_plan_renderer.cpp:1564
 msgid "A repository source failure is missing its metadata diagnostic."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:1457 src/unified_plan_renderer.cpp:2031
+#: src/unified_plan_renderer.cpp:1556 src/unified_plan_renderer.cpp:2553
 #, c++-format
 msgid "{}; diagnostic: {}"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:1476
+#: src/unified_plan_renderer.cpp:1575
 msgid "A repository source failure is missing its constraint specification."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:1468
+#: src/unified_plan_renderer.cpp:1567
 #, c++-format
 msgid "{}; specification: {}"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:1519
+#: src/unified_plan_renderer.cpp:1618
 msgid "A local source failure stage is not supported by the renderer."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:1557
+#: src/unified_plan_renderer.cpp:1656
 msgid "A local source failure code is not supported by the renderer."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:1562
+#: src/unified_plan_renderer.cpp:1661 src/unified_plan_renderer.cpp:2673
 #, c++-format
 msgid "{} (invocation index: {})"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:1586
+#: src/unified_plan_renderer.cpp:1685
 #, c++-format
 msgid "A {} resolution failure is missing its subject."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:1613
+#: src/unified_plan_renderer.cpp:1712
 #, c++-format
 msgid "A {} resolution failure is missing its diagnostic."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:1578
+#: src/unified_plan_renderer.cpp:1677
 #, c++-format
 msgid "source authority failure ({}); subject: {}; parent: {}; {}: {}; dependency: {}; roots: {}; diagnostic: {}"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:1636
+#: src/unified_plan_renderer.cpp:1735
 msgid "An incomplete provider set is missing its dependency identity."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:1629
+#: src/unified_plan_renderer.cpp:1728
 #, c++-format
 msgid "source authority failure ({}); dependency: {}; observed candidates: {}; reason: {}"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:1654
+#: src/unified_plan_renderer.cpp:1753
 msgid "A repository package source failure is missing its repository identity."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:1660
+#: src/unified_plan_renderer.cpp:1759
 msgid "A repository package source failure is missing its package identity."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:1647
+#: src/unified_plan_renderer.cpp:1746
 #, c++-format
 msgid "source authority failure ({}); package: {}/{}; reason: {}"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:1675
+#: src/unified_plan_renderer.cpp:1774
 msgid "A repository provider source failure is missing its repository identity."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:1668
+#: src/unified_plan_renderer.cpp:1767
 #, c++-format
 msgid "source authority failure ({}); repository: {}; reason: {}"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:1690
+#: src/unified_plan_renderer.cpp:1789
 msgid "A local source failure is missing its path identity."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:1683
+#: src/unified_plan_renderer.cpp:1782
 #, c++-format
 msgid "source authority failure ({}); path: {}; stage: {}; code: {}; system error: {}"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:1713
+#: src/unified_plan_renderer.cpp:1812
 #, c++-format
 msgid "An {} query failure is missing its package identities."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:1722
+#: src/unified_plan_renderer.cpp:1821
 #, c++-format
 msgid "An {} query failure is missing its diagnostic."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:1704
+#: src/unified_plan_renderer.cpp:1803
 #, c++-format
 msgid "source authority failure ({}); packages: {}; diagnostic: {}"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:1746
+#: src/unified_plan_renderer.cpp:1845
 msgid "A local dependency plan failure kind is not supported by the renderer."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:1774
+#: src/unified_plan_renderer.cpp:1873
 msgid "A local dependency plan failure candidate is missing its package identity."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:1769
+#: src/unified_plan_renderer.cpp:1868
 #, c++-format
 msgid "{} (provided capability: {}; version: {}; remote provider: {}; stored constraint result: {})"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:1797
+#: src/unified_plan_renderer.cpp:1896
 msgid "A local dependency plan failure is missing its dependency specification."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:1807
+#: src/unified_plan_renderer.cpp:1906
 msgid "An unsupported-architecture local dependency failure is missing its architecture."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:1816
+#: src/unified_plan_renderer.cpp:1915
 msgid "A local dependency plan failure is missing its candidate identities."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:1826
+#: src/unified_plan_renderer.cpp:1925
 msgid "A local dependency plan failure is missing its parent package identity."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:1819
+#: src/unified_plan_renderer.cpp:1918
 #, c++-format
 msgid "local dependency plan failure ({}); parent: {}; dependency: {}; architecture: {}; candidates: {}"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:1838
+#: src/unified_plan_renderer.cpp:1945
+#, c++-format
+msgid "A {} unresolved-dependency blocker is missing its dependency identity."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:1937
 #, c++-format
 msgid "{} state blocker ({}): unresolved dependency: {}"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:1847
+#: src/unified_plan_renderer.cpp:1960
+#, c++-format
+msgid "A {} cycle blocker is missing its cycle diagnostic."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:1952
 #, c++-format
 msgid "{} state blocker ({}): dependency cycle: {}"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:1858
+#: src/unified_plan_renderer.cpp:1977
+msgid "A split-package selection blocker is missing its package identity."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:1984
+#, c++-format
+msgid "A split-package selection blocker is missing its {} identity."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:1969
 #, c++-format
 msgid "{} state blocker ({}): split package selection required: {} ({}: {})"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:1870
+#: src/unified_plan_renderer.cpp:1993
 #, c++-format
 msgid "A {} blocker kind is not supported by the renderer."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:1877
+#: src/unified_plan_renderer.cpp:2000
 #, c++-format
 msgid "A {} blocker references an unavailable authority item."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:1907
+#: src/unified_plan_renderer.cpp:2030
 msgid "A root package preparation issue kind is not supported by the renderer."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:1925
+#: src/unified_plan_renderer.cpp:2048
 msgid "A root package selection input gate is not supported by the renderer."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:1944
+#: src/unified_plan_renderer.cpp:2067
 msgid "A root package selection unavailable reason is not supported by the renderer."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:1963
+#: src/unified_plan_renderer.cpp:2086
 msgid "A root package selection cancellation reason is not supported by the renderer."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:1977
+#: src/unified_plan_renderer.cpp:2135
+msgid "A root package candidate source kind is not supported by the renderer."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:2158
+msgid "A root package candidate validation issue kind is not supported by the renderer."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:2175
+msgid "A root package candidate metadata field is not supported by the renderer."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:2192
+msgid "A candidate-pair issue is missing its repository identity."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:2199
+msgid "A candidate-pair issue is missing its package identity."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:2208
 #, c++-format
-msgid "{}; input gate: {}; unavailable reason: {}; cancellation reason: {}; diagnostic: {}"
+msgid "An {} candidate-pair issue is missing its package identity."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:2026
-msgid "A repository root search failure is missing its diagnostic."
-msgstr ""
-
-#: src/unified_plan_renderer.cpp:2016
+#: src/unified_plan_renderer.cpp:2216
 #, c++-format
-msgid "{}; code: {}; diagnostic: {}"
+msgid "An {} candidate-pair issue is missing its {} identity."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:2038
+#: src/unified_plan_renderer.cpp:2254
+msgid "A candidate validation failure has no typed issue kinds."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:2243
 #, c++-format
-msgid "An {} root search failure is missing its diagnostic."
+msgid "#{} source: {}; validation kinds: {}"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:2044
+#: src/unified_plan_renderer.cpp:2277
+#, c++-format
+msgid "An inconsistent {} candidate pair is missing its package identity."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:2285
+#, c++-format
+msgid "An inconsistent {} candidate pair is missing its first identity."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:2293
+#, c++-format
+msgid "An inconsistent {} candidate pair is missing its second identity."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:2269
+#, c++-format
+msgid "#{} {}; package: {}; first {}: {}; second {}: {}"
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:2311
+msgid "A candidate metadata conflict is missing its first value."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:2317
+msgid "A candidate metadata conflict is missing its second value."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:2297
+#, c++-format
+msgid "#{} {}; identity: {}; field: {}; first value: {}; second value: {}"
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:2334
+msgid "An invalid group match is missing its repository identity."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:2340
+msgid "An invalid group match is missing its package identity."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:2346
+msgid "An invalid group match has an empty group identity."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:2349
+#, c++-format
+msgid "#{} {}; identity: {}; group: {}"
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:2369
+msgid "A duplicate repository-order entry is missing its repository identity."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:2362
+#, c++-format
+msgid "#{} duplicate repository-order entry: {}"
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:2385
+msgid "An unranked repository candidate is missing its repository identity."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:2391
+msgid "An unranked repository candidate is missing its package identity."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:2394
+#, c++-format
+msgid "#{} unranked repository candidate: {}"
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:2406
+msgid "An invalid root package search snapshot has no typed details."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:2414
 #, c++-format
 msgid "{}; candidate validation failures: {}; candidate pair issues: {}; invalid group matches: {}; duplicate repository-order entries: {}; unranked repository candidates: {}"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:2063
+#: src/unified_plan_renderer.cpp:2475
+msgid "A root package preparation issue is missing its required input gate."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:2493
+msgid "A root package selection-unavailable issue is missing its typed reason."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:2511
+msgid "A root package selection-cancelled issue is missing its typed reason."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:2523
+msgid "A root package preparation issue is missing its required diagnostic."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:2528
+#, c++-format
+msgid "{}; input gate: {}; unavailable reason: {}; cancellation reason: {}; diagnostic: {}"
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:2548
+msgid "A repository root search failure is missing its diagnostic."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:2538 src/unified_plan_renderer.cpp:3099
+#, c++-format
+msgid "{}; code: {}; diagnostic: {}"
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:2560
+#, c++-format
+msgid "An {} root search failure is missing its diagnostic."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:2577
 #, c++-format
 msgid "selection index {}: {}/{}"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:2078
+#: src/unified_plan_renderer.cpp:2592
 msgid "An invalid root routing projection is missing its affected target identities."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:2069
+#: src/unified_plan_renderer.cpp:2583
 #, c++-format
 msgid "{}; targets: {}"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:2095
+#: src/unified_plan_renderer.cpp:2609
 msgid "A root package preparation failure has no typed details."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:2090 src/unified_plan_renderer.cpp:2106
+#: src/unified_plan_renderer.cpp:2604 src/unified_plan_renderer.cpp:2620
 #, c++-format
 msgid "root package preparation failure: {}"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:2141
+#: src/unified_plan_renderer.cpp:2655
 msgid "A required artifact projection issue kind is not supported by the renderer."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:2158
+#: src/unified_plan_renderer.cpp:2670
+msgid "A required artifact projection issue is missing an affected root identity."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:2730
+msgid "A required artifact projection issue is missing its kind-specific authority location."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:2770
+msgid "observed invalid value"
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:2792
+#, c++-format
+msgid "A required artifact projection issue is missing its {} subject."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:2800
+msgid "A required artifact projection issue is missing its package subject."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:2806
+msgid "A required artifact projection issue is missing its diagnostic."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:2808
 #, c++-format
 msgid "required artifact projection failure ({}); {} unit index: {}; entry package index: {}; package target indices: {}; {}: {}; package: {}; roots: {}; diagnostic: {}"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:2186
+#: src/unified_plan_renderer.cpp:2833
 #, c++-format
 msgid "An {} route preflight blocker has no failure reason."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:2234
+#: src/unified_plan_renderer.cpp:2881
 #, c++-format
 msgid "An {} execution preflight reason is not supported by the renderer."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:2275
+#: src/unified_plan_renderer.cpp:2922
 msgid "A system/source upgrade issue kind is not supported by the renderer."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:2293
+#: src/unified_plan_renderer.cpp:2940
 msgid "A system/source upgrade issue impact is not supported by the renderer."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:2337
+#: src/unified_plan_renderer.cpp:2949
+#, c++-format
+msgid "{}:{} ({})"
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:2994
+msgid "A source preference failure kind is not supported by the renderer."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:3026
+msgid "A source preference file type is not supported by the renderer."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:3056
+msgid "A source preference failure is missing its affected path."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:3067
+msgid "A source preference syscall failure is missing its system error."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:3079
+msgid "An unsupported source preference entry is missing its observed file type."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:3092
+msgid "A source preference failure is missing its diagnostic."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:3082
+#, c++-format
+msgid "{}; kind: {}; path: {}; system error: {}; observed file type: {}; diagnostic: {}"
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:3107
+msgid "A package metadata failure is missing its diagnostic."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:3125
+#, c++-format
+msgid "An {} directory kind is not supported by the renderer."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:3146
+#, c++-format
+msgid "An {} environment variable is not supported by the renderer."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:3173
+#, c++-format
+msgid "An {} path resolution error code is not supported by the renderer."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:3181
+#, c++-format
+msgid "{}; directory: {}; environment variable: {}; code: {}"
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:3218
+#, c++-format
+msgid "An {} directory preparation stage is not supported by the renderer."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:3251
+#, c++-format
+msgid "An {} directory preparation error code is not supported by the renderer."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:3259
+#, c++-format
+msgid "{}; directory: {}; stage: {}; code: {}; system error: {}; component index: {}"
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:3296
+msgid "A trusted cache stage is not supported by the renderer."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:3336
+msgid "A trusted cache error code is not supported by the renderer."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:3343
+#, c++-format
+msgid "{}; stage: {}; code: {}; system error: {}"
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:3393
 #, c++-format
 msgid "An {} issue kind is not supported by the renderer."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:2363
+#: src/unified_plan_renderer.cpp:3419
 #, c++-format
 msgid "An {} route preflight blocker has no affected identity or diagnostic detail."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:2367
+#: src/unified_plan_renderer.cpp:3423
 #, c++-format
 msgid "{} route preflight failure ({}); package: {}; {}: {}; dependency: {}; artifact projection: {}; diagnostic: {}"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:2411
+#: src/unified_plan_renderer.cpp:3497
+msgid "A system package snapshot issue is missing its package metadata failure."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:3510
+msgid "A system/source cache authority issue is missing its typed cache failure."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:3523
+msgid "A system/source issue is missing its source-preference index."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:3534
+msgid "A system/source issue has an empty affected package identity."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:3542
+msgid "A system/source issue is missing its affected package identity."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:3553
+#, c++-format
+msgid "A system/source issue has an empty affected {} identity."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:3574
+msgid "A system/source issue is missing its diagnostic."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:3557
 #, c++-format
 msgid "system/source route preflight failure ({}); impact: {}; phase: {}; preference index: {}; package: {}; {}: {}; typed nested details: {}; diagnostic: {}"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:2449
+#: src/unified_plan_renderer.cpp:3609
+#, c++-format
+msgid "An {} foreign inventory issue is missing its package metadata failure."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:3630
+#, c++-format
+msgid "An {} exclusion-correlation issue is missing its adapter index."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:3645
+#, c++-format
+msgid "An {} external-satisfaction issue is missing its {} unit index."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:3657
+#, c++-format
+msgid "An {} issue has an empty affected package identity."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:3681
+#, c++-format
+msgid "An {} issue is missing its diagnostic."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:3661
 #, c++-format
 msgid "{} route preflight failure ({}); phase: {}; adapter index: {}; preference index: {}; query plan index: {}; {} unit index: {}; package: {}; typed nested details: {}; diagnostic: {}"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:2491
+#: src/unified_plan_renderer.cpp:3703
 msgid "An installed version state is not supported by the renderer."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:2507
+#: src/unified_plan_renderer.cpp:3719
 msgid "An existing install reason is not supported by the renderer."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:2525
+#: src/unified_plan_renderer.cpp:3737
 msgid "An install reason directive is not supported by the renderer."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:2545
+#: src/unified_plan_renderer.cpp:3778
 msgid "An unknown dependency blocker is missing its dependency specification."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:2551
+#: src/unified_plan_renderer.cpp:3784
 msgid "An unknown dependency blocker is missing its parent package identity."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:2558
+#: src/unified_plan_renderer.cpp:3791
 #, c++-format
 msgid "An unknown dependency blocker is missing its parent {} identity."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:2538
+#: src/unified_plan_renderer.cpp:3771
 #, c++-format
-msgid "unknown dependency blocker ({}); dependency: {}; parent: {} ({}: {}); role: {}"
+msgid "unknown dependency blocker ({}); dependency: {}; parent: {} ({}: {}); dependency kind: {}; role: {}; resolved package: {} ({}: {}); selected candidate: {}; selected provider: {}; stored result: {}"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:2586
+#: src/unified_plan_renderer.cpp:3819
+#, c++-format
+msgid "{} (provided dependency: {}; capability: {}; package version: {})"
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:3848
 msgid "An ambiguous provider blocker is missing its dependency identity."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:2594
+#: src/unified_plan_renderer.cpp:3856
 msgid "An ambiguous provider blocker is missing its candidate identities."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:2579
+#: src/unified_plan_renderer.cpp:3841
 #, c++-format
 msgid "ambiguous provider blocker ({}); dependency: {}; candidates: {}"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:2607
+#: src/unified_plan_renderer.cpp:3877
+msgid "A mixed install-reason artifact is missing its package identity."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:3885
+msgid "A mixed install-reason artifact is missing its version identity."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:3869
 #, c++-format
 msgid "{} {} (desired reason: {}; installed version state: {}; existing reason: {}; directive: {})"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:2642
+#: src/unified_plan_renderer.cpp:3918
 #, c++-format
 msgid "A mixed install-reason blocker is missing its {} identity."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:2651
+#: src/unified_plan_renderer.cpp:3927
 msgid "A mixed install-reason blocker is missing its artifact details."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:2634
+#: src/unified_plan_renderer.cpp:3910
 #, c++-format
 msgid "unsupported blocker ({}); mixed install reason for {} {}; artifacts: {}"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:2664
-#, c++-format
-msgid "constraint failure blocker ({}); stored result: {}"
+#: src/unified_plan_renderer.cpp:3964
+msgid "A constraint failure blocker is missing its stored constraint result."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:2683
+#: src/unified_plan_renderer.cpp:3973
+msgid "A constraint failure blocker is missing its parent package identity."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:3980
+#, c++-format
+msgid "A constraint failure blocker is missing its parent {} identity."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:3987
+msgid "A constraint failure blocker is missing its dependency specification."
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:3966
+#, c++-format
+msgid "constraint failure blocker ({}); parent: {} ({}: {}); dependency: {}; dependency kind: {}; role: {}; resolved package: {} ({}: {}); selected candidate: {}; selected provider: {}; stored result: {}"
+msgstr ""
+
+#: src/unified_plan_renderer.cpp:4016
 msgid "A metadata risk blocker is missing its package identity."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:2690
+#: src/unified_plan_renderer.cpp:4023
 #, c++-format
 msgid "A metadata risk blocker is missing its {} identity."
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:2676
+#: src/unified_plan_renderer.cpp:4009
 #, c++-format
 msgid "metadata risk blocker ({}); package: {} ({}: {}); conflicts: {}; replaces: {}"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:2734
+#: src/unified_plan_renderer.cpp:4067
 msgid "Blockers:"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:2755
+#: src/unified_plan_renderer.cpp:4088
 msgid "Unified plan:"
 msgstr ""
 
-#: src/unified_plan_renderer.cpp:2757
+#: src/unified_plan_renderer.cpp:4090
 #, c++-format
 msgid "  Status: {}"
 msgstr ""
