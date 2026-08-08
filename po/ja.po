@@ -2,7 +2,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Moguet 2.1.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-08 08:09+0900\n"
+"POT-Creation-Date: 2026-08-09 04:32+0900\n"
 "PO-Revision-Date: 2026-08-03 06:53+0900\n"
 "Last-Translator: Moguet contributors\n"
 "Language-Team: Japanese\n"
@@ -45,15 +45,15 @@ msgstr "アーティファクトのパッケージ識別情報セットを空に
 msgid "Artifact package identity set is no longer active."
 msgstr "アーティファクトのパッケージ識別情報セットはすでに無効です。"
 
-#: src/artifact_install_executor.cpp:29 src/source_install.cpp:292
+#: src/artifact_install_executor.cpp:29 src/source_install.cpp:297
 msgid "Installed package metadata contains an unknown install reason."
 msgstr "インストール済みパッケージのメタデータに不明なインストール理由が含まれています。"
 
-#: src/artifact_install_executor.cpp:33 src/source_install.cpp:296
+#: src/artifact_install_executor.cpp:33 src/source_install.cpp:301
 msgid "Installed package metadata contains an invalid install reason."
 msgstr "インストール済みパッケージのメタデータに無効なインストール理由が含まれています。"
 
-#: src/artifact_install_executor.cpp:56 src/source_install.cpp:300
+#: src/artifact_install_executor.cpp:56 src/source_install.cpp:305
 msgid "Unknown installed package query result."
 msgstr "インストール済みパッケージの照会結果が不明です。"
 
@@ -61,7 +61,7 @@ msgstr "インストール済みパッケージの照会結果が不明です。
 msgid "Installed package metadata name does not match the package artifact identity."
 msgstr "インストール済みパッケージのメタデータ名がパッケージアーティファクト識別情報と一致しません。"
 
-#: src/artifact_install_executor.cpp:64 src/source_install.cpp:280
+#: src/artifact_install_executor.cpp:64 src/source_install.cpp:285
 msgid "Installed package metadata contains an empty version."
 msgstr "インストール済みパッケージのメタデータに空のバージョンが含まれています。"
 
@@ -824,12 +824,13 @@ msgid "{} {} response validation failed for {}: duplicate response {} {}"
 msgstr "{} {} の {} に対する応答を検証できませんでした: 応答の {} {} が重複しています"
 
 #: src/aur_update_cli_presentation.cpp:24
-#: src/commands_source_maintenance.cpp:545
+#: src/commands_source_maintenance.cpp:545 src/unified_plan_renderer.cpp:354
 msgid "explicit"
 msgstr "明示指定"
 
 #: src/aur_update_cli_presentation.cpp:26
-#: src/commands_source_maintenance.cpp:546
+#: src/commands_source_maintenance.cpp:546 src/unified_plan_renderer.cpp:356
+#: src/unified_plan_renderer.cpp:752
 msgid "dependency"
 msgstr "依存パッケージ"
 
@@ -1000,7 +1001,8 @@ msgstr "成功した {} 作業項目に予期しない失敗詳細がありま�
 #: src/aur_update_cli_presentation.cpp:173 src/commands_aur_update.cpp:46
 #: src/commands_aur_update.cpp:110 src/commands_upgrade_all.cpp:119
 #: src/commands_upgrade_all.cpp:281 src/commands_upgrade_all.cpp:470
-#: src/commands_upgrade_all.cpp:527
+#: src/commands_upgrade_all.cpp:527 src/unified_plan_renderer.cpp:219
+#: src/unified_plan_renderer.cpp:239
 msgid "none"
 msgstr "なし"
 
@@ -1212,14 +1214,14 @@ msgstr "  必要な子パッケージ: {}"
 
 #. TRANSLATORS: The placeholders are the PackageBase metadata-key
 #. identity and a package-base identity.
-#: src/aur_update_cli_presentation.cpp:615 src/source_install.cpp:410
+#: src/aur_update_cli_presentation.cpp:615 src/source_install.cpp:416
 #, c++-format
 msgid "{} result: {}"
 msgstr "{} の結果: {}"
 
 #. TRANSLATORS: The placeholders are package identity and version.
 #: src/aur_update_cli_presentation.cpp:626
-#: src/commands_source_maintenance.cpp:561 src/source_install.cpp:478
+#: src/commands_source_maintenance.cpp:561 src/source_install.cpp:484
 #, c++-format
 msgid "  produced artifact: {} {} (not selected; not installed)"
 msgstr "  生成されたアーティファクト: {} {}（未選択、未インストール）"
@@ -2384,7 +2386,7 @@ msgstr "オプション {} の値がありません。"
 msgid "Automatic source selection has no explicit option."
 msgstr "自動ソース選択に対応する明示オプションはありません。"
 
-#: src/cli_routing.cpp:26 src/commands_sync.cpp:435 src/commands_sync.cpp:781
+#: src/cli_routing.cpp:26 src/commands_sync.cpp:435 src/commands_sync.cpp:898
 msgid "Unknown package source selection."
 msgstr "パッケージのソース選択が不明です。"
 
@@ -2597,6 +2599,7 @@ msgid "multiple package targets for package base"
 msgstr "パッケージベースに複数のパッケージ対象があります"
 
 #: src/commands_aur_update.cpp:97 src/commands_upgrade_all.cpp:515
+#: src/unified_plan_renderer.cpp:303
 msgid "ambiguous provider"
 msgstr "提供元が曖昧です"
 
@@ -2686,6 +2689,7 @@ msgstr "事前検証"
 
 #: src/commands_aur_update.cpp:161 src/commands_upgrade_all.cpp:121
 #: src/commands_upgrade_all.cpp:283 src/commands_upgrade_all.cpp:572
+#: src/unified_plan_renderer.cpp:221 src/unified_plan_renderer.cpp:241
 msgid "preparation"
 msgstr "準備"
 
@@ -2824,7 +2828,8 @@ msgstr "変更なし"
 msgid "skipped"
 msgstr "スキップ"
 
-#: src/commands_aur_update.cpp:258
+#: src/commands_aur_update.cpp:258 src/unified_plan_renderer.cpp:42
+#: src/unified_plan_renderer.cpp:94
 msgid "unsupported"
 msgstr "未対応"
 
@@ -3026,6 +3031,10 @@ msgstr "再帰的な依存関係ツリー:"
 #: src/commands_inspect.cpp:469 src/commands_inspect.cpp:486
 #: src/commands_inspect.cpp:498 src/commands_inspect.cpp:519
 #: src/commands_inspect.cpp:724 src/commands_inspect.cpp:850
+#: src/unified_plan_renderer.cpp:384 src/unified_plan_renderer.cpp:415
+#: src/unified_plan_renderer.cpp:455 src/unified_plan_renderer.cpp:532
+#: src/unified_plan_renderer.cpp:572 src/unified_plan_renderer.cpp:663
+#: src/unified_plan_renderer.cpp:764 src/unified_plan_renderer.cpp:1046
 msgid "  None"
 msgstr "  なし"
 
@@ -3184,7 +3193,7 @@ msgstr "競合/置換メタデータはビルド/インストール前に手動�
 #. second is a runtime option token.
 #: src/commands_inspect.cpp:933 src/commands_inspect.cpp:1064
 #: src/commands_inspect.cpp:1107 src/commands_upgrade_all.cpp:1823
-#: src/moguet.cpp:1051
+#: src/moguet.cpp:1055
 #, c++-format
 msgid "Unsupported {} option: {}"
 msgstr "{}で未対応のオプションです: {}"
@@ -3194,8 +3203,8 @@ msgstr "{}で未対応のオプションです: {}"
 msgid "Failed to inspect dependencies for {}: {}"
 msgstr "{}の依存関係を調査できませんでした: {}"
 
-#: src/commands_inspect.cpp:966 src/commands_sync.cpp:1013
-#: src/dependency_plan.cpp:1946 src/dependency_plan.cpp:2200
+#: src/commands_inspect.cpp:966 src/commands_sync.cpp:1130
+#: src/dependency_plan.cpp:1981 src/dependency_plan.cpp:2235
 #: src/pkgbuild_export.cpp:654
 #, c++-format
 msgid "{} package not found: {}"
@@ -3559,7 +3568,7 @@ msgstr "ローカル依存関係プランは不完全です。"
 msgid "Local {} result: {}"
 msgstr "ローカル{}結果: {}"
 
-#: src/commands_source_maintenance.cpp:549
+#: src/commands_source_maintenance.cpp:549 src/unified_plan_renderer.cpp:293
 msgid "installed"
 msgstr "インストール済み"
 
@@ -3864,12 +3873,12 @@ msgid "None"
 msgstr "なし"
 
 #: src/commands_sync.cpp:124 src/commands_sync.cpp:131
-#: src/commands_sync.cpp:137
+#: src/commands_sync.cpp:137 src/unified_plan_renderer.cpp:57
 msgid "no"
 msgstr "いいえ"
 
 #: src/commands_sync.cpp:126 src/commands_sync.cpp:132
-#: src/commands_sync.cpp:138
+#: src/commands_sync.cpp:138 src/unified_plan_renderer.cpp:56
 msgid "yes"
 msgstr "はい"
 
@@ -4064,128 +4073,128 @@ msgstr "{} は選択された {} パッケージ {} について {} から {} �
 msgid "The {} build plan lost root attribution for selected package {}."
 msgstr "{} ビルド計画で選択されたパッケージ {} のルートとしての帰属情報が失われました。"
 
-#: src/commands_sync.cpp:568
+#: src/commands_sync.cpp:573
 msgid "Package selection query must not be empty."
 msgstr "パッケージ選択のクエリを空にはできません。"
 
-#: src/commands_sync.cpp:574
+#: src/commands_sync.cpp:582
 #, c++-format
 msgid "Interactive package selection does not support {}."
 msgstr "対話形式のパッケージ選択は {} をサポートしていません。"
 
-#: src/commands_sync.cpp:605
+#: src/commands_sync.cpp:634
 msgid "No package candidates were found."
 msgstr "パッケージ候補が見つかりませんでした。"
 
-#: src/commands_sync.cpp:617
+#: src/commands_sync.cpp:655
 msgid "Package selection returned an unknown unavailable reason."
 msgstr "パッケージ選択が利用できない理由が不明です。"
 
-#: src/commands_sync.cpp:622
+#: src/commands_sync.cpp:679
 msgid "Package selection was cancelled."
 msgstr "パッケージ選択が取り消されました。"
 
 #. TRANSLATORS: The placeholder is the literal pacman program identity.
-#: src/commands_sync.cpp:634
+#: src/commands_sync.cpp:699
 #, c++-format
 msgid "A selected repository package cannot be represented as an exact {} target."
 msgstr "選択されたリポジトリパッケージを厳密な {} 対象として表現できません。"
 
 #. TRANSLATORS: The placeholder is the AUR project identity.
-#: src/commands_sync.cpp:644
+#: src/commands_sync.cpp:713
 #, c++-format
 msgid "Source-build review and build-mode options require at least one selected {} package."
 msgstr "ソースビルドの確認オプションとビルドモードオプションには、選択された {} パッケージが1つ以上必要です。"
 
-#: src/commands_sync.cpp:696
+#: src/commands_sync.cpp:813
 msgid "Prepared package selection contains no install targets."
 msgstr "準備済みのパッケージ選択にインストール対象がありません。"
 
 #. TRANSLATORS: The placeholder is the AUR project identity.
-#: src/commands_sync.cpp:714
+#: src/commands_sync.cpp:831
 #, c++-format
 msgid "The selected repository package transaction failed; selected {} packages were not executed."
 msgstr "選択されたリポジトリパッケージのトランザクションに失敗したため、選択された {} パッケージは処理されませんでした。"
 
-#: src/commands_sync.cpp:718
+#: src/commands_sync.cpp:835
 msgid "The selected repository package transaction failed."
 msgstr "選択されたリポジトリパッケージのトランザクションに失敗しました。"
 
 #. TRANSLATORS: The placeholder is the AUR project identity.
-#: src/commands_sync.cpp:732 src/commands_sync.cpp:740
+#: src/commands_sync.cpp:849 src/commands_sync.cpp:857
 #, c++-format
 msgid "The repository package transaction completed before the {} route failed; it was not rolled back."
 msgstr "{} 経路が失敗する前にリポジトリパッケージのトランザクションは完了しており、ロールバックされていません。"
 
-#: src/commands_sync.cpp:751
+#: src/commands_sync.cpp:868
 msgid "Missing search query."
 msgstr "検索条件が指定されていません。"
 
-#: src/commands_sync.cpp:762 src/commands_sync.cpp:774
+#: src/commands_sync.cpp:879 src/commands_sync.cpp:891
 #, c++-format
 msgid "Searching {}..."
 msgstr "{}を検索しています..."
 
-#: src/commands_sync.cpp:769
+#: src/commands_sync.cpp:886
 #, c++-format
 msgid "Unsupported {} option for {} search: {}"
 msgstr "{}による{}検索では次のオプションは未対応です: {}"
 
-#: src/commands_sync.cpp:800 src/commands_sync.cpp:997
+#: src/commands_sync.cpp:917 src/commands_sync.cpp:1114
 #, c++-format
 msgid "Missing {} package target."
 msgstr "{}パッケージの対象が指定されていません。"
 
-#: src/commands_sync.cpp:810 src/commands_sync.cpp:865
+#: src/commands_sync.cpp:927 src/commands_sync.cpp:982
 #, c++-format
 msgid "Unsupported {} option for {}/source-build target: {}"
 msgstr "{}では{}/ソースビルド対象に対する次のオプションは未対応です: {}"
 
-#: src/commands_sync.cpp:813
+#: src/commands_sync.cpp:930
 #, c++-format
 msgid "Rerun {} without this option."
 msgstr "このオプションを外して{}を再実行してください。"
 
-#: src/commands_sync.cpp:868
+#: src/commands_sync.cpp:985
 #, c++-format
 msgid "Split official repository and {}/source-build targets, or rerun without this option."
 msgstr "公式リポジトリの対象と{}/ソースビルドの対象を分けるか、このオプションを外して再実行してください。"
 
-#: src/commands_sync.cpp:924
+#: src/commands_sync.cpp:1041
 msgid "Build plan root ownership is inconsistent with source targets."
 msgstr "ビルド計画のルート所有関係がソース対象と整合していません。"
 
-#: src/commands_sync.cpp:933
+#: src/commands_sync.cpp:1050
 msgid "Build plan source targets were not fully projected."
 msgstr "ビルド計画のソース対象がすべて射影されていません。"
 
-#: src/commands_sync.cpp:950
+#: src/commands_sync.cpp:1067
 #, c++-format
 msgid "{} failed."
 msgstr "{}に失敗しました。"
 
-#: src/commands_sync.cpp:972
+#: src/commands_sync.cpp:1089
 #, c++-format
 msgid "Cannot combine {} refresh with {} info fallback for unqualified target: {}"
 msgstr "リポジトリ未修飾の対象では、{}のデータベース更新と{}情報への代替検索を併用できません: {}"
 
-#: src/commands_sync.cpp:975
+#: src/commands_sync.cpp:1092
 #, c++-format
 msgid "Use a repository-qualified target such as {}, or run refresh and {} separately."
 msgstr "{}のようにリポジトリで修飾した対象を使用するか、データベース更新と{}を別々に実行してください。"
 
-#: src/commands_sync.cpp:991
+#: src/commands_sync.cpp:1108
 #, c++-format
 msgid "Unsupported {} option for {} info: {}"
 msgstr "{}による{}情報の取得では次のオプションは未対応です: {}"
 
-#: src/commands_sync.cpp:1018 src/commands_sync.cpp:1067
-#: src/dependency_plan.cpp:1863 src/source_install.cpp:701
+#: src/commands_sync.cpp:1135 src/commands_sync.cpp:1184
+#: src/dependency_plan.cpp:1898 src/source_install.cpp:707
 #, c++-format
 msgid "Failed to fetch {} info for {}: {}"
 msgstr "{}情報を{}について取得できませんでした: {}"
 
-#: src/commands_sync.cpp:1060 src/source_install.cpp:710
+#: src/commands_sync.cpp:1177 src/source_install.cpp:716
 #, c++-format
 msgid "Package not found in repos or {}: {}"
 msgstr "リポジトリにも{}にもパッケージが見つかりません: {}"
@@ -4194,7 +4203,7 @@ msgstr "リポジトリにも{}にもパッケージが見つかりません: {}
 msgid "changed"
 msgstr "変更あり"
 
-#: src/commands_upgrade_all.cpp:37
+#: src/commands_upgrade_all.cpp:37 src/unified_plan_renderer.cpp:305
 msgid "unknown"
 msgstr "不明"
 
@@ -4278,10 +4287,12 @@ msgid "Unknown {} operation status."
 msgstr "不明な{}操作状態です。"
 
 #: src/commands_upgrade_all.cpp:123 src/commands_upgrade_all.cpp:285
+#: src/unified_plan_renderer.cpp:223 src/unified_plan_renderer.cpp:243
 msgid "system"
 msgstr "システム"
 
 #: src/commands_upgrade_all.cpp:125 src/commands_upgrade_all.cpp:287
+#: src/unified_plan_renderer.cpp:225 src/unified_plan_renderer.cpp:245
 msgid "registered source"
 msgstr "登録済みソース"
 
@@ -4290,24 +4301,25 @@ msgid "foreign inventory"
 msgstr "外部パッケージ一覧"
 
 #. TRANSLATORS: The placeholder is the literal service name "AUR".
-#: src/commands_upgrade_all.cpp:130
+#: src/commands_upgrade_all.cpp:130 src/unified_plan_renderer.cpp:249
 #, c++-format
 msgid "{} query"
 msgstr "{}問い合わせ"
 
 #. TRANSLATORS: The placeholder is the literal service name "AUR".
 #: src/commands_upgrade_all.cpp:133 src/commands_upgrade_all.cpp:386
+#: src/unified_plan_renderer.cpp:252
 #, c++-format
 msgid "{} preparation"
 msgstr "{}準備"
 
 #. TRANSLATORS: The placeholder is the literal service name "AUR".
-#: src/commands_upgrade_all.cpp:137
+#: src/commands_upgrade_all.cpp:137 src/unified_plan_renderer.cpp:255
 #, c++-format
 msgid "{} execution"
 msgstr "{}実行"
 
-#: src/commands_upgrade_all.cpp:140
+#: src/commands_upgrade_all.cpp:140 src/unified_plan_renderer.cpp:257
 msgid "reduction"
 msgstr "集約"
 
@@ -4828,7 +4840,7 @@ msgstr "除外対象ではない処理結果が重複して表示されようと
 msgid "Unknown {} target disposition."
 msgstr "不明な{}対象処理結果です。"
 
-#: src/commands_upgrade_all.cpp:827
+#: src/commands_upgrade_all.cpp:827 src/unified_plan_renderer.cpp:751
 msgid "root"
 msgstr "ルート"
 
@@ -5033,7 +5045,7 @@ msgstr "システム/ソース問題: {}（{}, {}）"
 msgid "system/source diagnostic: {}: {}"
 msgstr "システム/ソース診断: {}: {}"
 
-#: src/commands_upgrade_all.cpp:1326
+#: src/commands_upgrade_all.cpp:1326 src/unified_plan_renderer.cpp:852
 #, c++-format
 msgid "{} query failure for {}: {}"
 msgstr "{}の{}に対する問い合わせ失敗: {}"
@@ -5278,7 +5290,7 @@ msgstr "予期しない{}コマンドの失敗です: {}"
 msgid "Unexpected {} command failure: unknown exception."
 msgstr "予期しない{}コマンドの失敗です: 不明な例外です。"
 
-#: src/dependency_plan.cpp:64 src/dependency_plan.cpp:620
+#: src/dependency_plan.cpp:64 src/dependency_plan.cpp:654
 #, c++-format
 msgid "{} package metadata constraint projection failed: {}"
 msgstr "{}パッケージメタデータの制約projectionに失敗しました: {}"
@@ -5288,118 +5300,118 @@ msgstr "{}パッケージメタデータの制約projectionに失敗しました
 msgid "{} provider candidate changed during dependency resolution: {}"
 msgstr "依存関係の解決中に{}プロバイダー候補が変更されました: {}"
 
-#: src/dependency_plan.cpp:291
+#: src/dependency_plan.cpp:318
 #, c++-format
 msgid "{} package metadata is missing its typed constraint projection: {}"
 msgstr "{}パッケージメタデータにtyped constraint projectionがありません: {}"
 
-#: src/dependency_plan.cpp:299
+#: src/dependency_plan.cpp:326
 #, c++-format
 msgid "{} package metadata constraint identity is inconsistent: {}"
 msgstr "{}パッケージメタデータの制約identityに整合性がありません: {}"
 
-#: src/dependency_plan.cpp:371
+#: src/dependency_plan.cpp:398
 #, c++-format
 msgid "Failed to search {} providers for {}: {}"
 msgstr "{}プロバイダーから{}を検索できませんでした: {}"
 
-#: src/dependency_plan.cpp:395
+#: src/dependency_plan.cpp:422
 #, c++-format
 msgid "Failed to check {} provider {}: {}"
 msgstr "{}プロバイダー{}を確認できませんでした: {}"
 
-#: src/dependency_plan.cpp:429 src/dependency_plan.cpp:1679
+#: src/dependency_plan.cpp:456 src/dependency_plan.cpp:1714
 #, c++-format
 msgid "{} provider candidate metadata was not returned."
 msgstr "{}プロバイダー候補のメタデータが返されませんでした。"
 
 #. TRANSLATORS: The placeholders are dependency and provider identities.
-#: src/dependency_plan.cpp:535
+#: src/dependency_plan.cpp:569
 #, c++-format
 msgid "{} [provided by {}]"
 msgstr "{} [{}が提供]"
 
-#: src/dependency_plan.cpp:577
+#: src/dependency_plan.cpp:611
 #, c++-format
 msgid "Provider selection returned a candidate that was not offered for {}."
 msgstr "プロバイダー選択が {} に提示されていない候補を返しました。"
 
 #. TRANSLATORS: The placeholder is a dependency specification.
-#: src/dependency_plan.cpp:590
+#: src/dependency_plan.cpp:624
 #, c++-format
 msgid "version constraint for {} is not verified"
 msgstr "{}のバージョン制約は未検証です"
 
-#: src/dependency_plan.cpp:634
+#: src/dependency_plan.cpp:668
 #, c++-format
 msgid "{} package metadata constraint projection is inconsistent: {}"
 msgstr "{}パッケージメタデータの制約projectionに整合性がありません: {}"
 
-#: src/dependency_plan.cpp:728 src/dependency_plan.cpp:834
-#: src/dependency_plan.cpp:1552
+#: src/dependency_plan.cpp:762 src/dependency_plan.cpp:868
+#: src/dependency_plan.cpp:1587
 #, c++-format
 msgid "Failed to check {} dependency {}: {}"
 msgstr "{}依存関係{}を確認できませんでした: {}"
 
-#: src/dependency_plan.cpp:939
+#: src/dependency_plan.cpp:973
 msgid "Unknown package role."
 msgstr "不明なパッケージ役割です。"
 
-#: src/dependency_plan.cpp:1218
+#: src/dependency_plan.cpp:1252
 #, c++-format
 msgid "{} aggregation is missing during build plan ordering: {}"
 msgstr "ビルド計画の順序付け中に{}の集約結果がありません: {}"
 
-#: src/dependency_plan.cpp:1439
+#: src/dependency_plan.cpp:1473
 #, c++-format
 msgid "Build dependency is missing its package role: {}"
 msgstr "ビルド依存にパッケージ役割がありません: {}"
 
-#: src/dependency_plan.cpp:1614
+#: src/dependency_plan.cpp:1649
 #, c++-format
 msgid "Cannot select a provider for {}; candidate {} is {}: {}."
 msgstr "{}のproviderを選択できません。candidate {}は{}です: {}"
 
-#: src/dependency_plan.cpp:1623
+#: src/dependency_plan.cpp:1658
 #, c++-format
 msgid "Provider candidate {} for {} is {}: {}. Candidate order and explicit selection are unchanged."
 msgstr "{}のprovider candidate {}は{}です: {}。candidate順と明示選択は変更しません。"
 
-#: src/dependency_plan.cpp:1661
+#: src/dependency_plan.cpp:1696
 #, c++-format
 msgid "Failed to refresh {} provider {}: {}"
 msgstr "{}プロバイダー{}のメタデータ更新に失敗しました: {}"
 
-#: src/dependency_plan.cpp:1829
+#: src/dependency_plan.cpp:1864
 #, c++-format
 msgid "{} (max depth reached)"
 msgstr "{}（最大の深さに達しました）"
 
-#: src/dependency_plan.cpp:1933 src/dependency_plan.cpp:2190
-#: src/dependency_plan.cpp:2254
+#: src/dependency_plan.cpp:1968 src/dependency_plan.cpp:2225
+#: src/dependency_plan.cpp:2289
 msgid "Build plan targets must not be empty."
 msgstr "ビルド計画の対象は空にできません。"
 
-#: src/dependency_plan.cpp:1985
+#: src/dependency_plan.cpp:2020
 msgid "Provider selection request has no candidates."
 msgstr "プロバイダー選択要求に候補がありません。"
 
-#: src/dependency_plan.cpp:1997
+#: src/dependency_plan.cpp:2032
 msgid "Provider selection candidates have inconsistent dependency identities."
 msgstr "プロバイダー選択候補の依存関係識別情報に整合性がありません。"
 
-#: src/dependency_plan.cpp:2089
+#: src/dependency_plan.cpp:2124
 #, c++-format
 msgid "Provider candidates changed during invocation resolution: {}"
 msgstr "呼び出しの解決中にプロバイダー候補が変更されました: {}"
 
-#: src/dependency_plan.cpp:2109 src/dependency_plan.cpp:2158
+#: src/dependency_plan.cpp:2144 src/dependency_plan.cpp:2193
 #: src/provider_selection.cpp:116
 #, c++-format
 msgid "Previously selected provider is no longer a candidate for dependency: {}"
 msgstr "以前に選択したプロバイダーは、依存関係 {} の候補ではなくなりました。"
 
-#: src/dependency_plan.cpp:2165
+#: src/dependency_plan.cpp:2200
 #, c++-format
 msgid "Provider candidate changed during dependency resolution: {}"
 msgstr "依存関係の解決中にプロバイダー候補が変更されました: {}"
@@ -5967,297 +5979,297 @@ msgstr "{}は通常ユーザーとして実行してください。{}は必要�
 msgid "Failed to load the user configuration because of an unknown error."
 msgstr "不明なエラーによりユーザー設定を読み込めませんでした。"
 
-#: src/moguet.cpp:405
+#: src/moguet.cpp:409
 #, c++-format
 msgid "Operation {} does not accept target operands."
 msgstr "操作{}は対象オペランドを受け付けません。"
 
-#: src/moguet.cpp:468
+#: src/moguet.cpp:472
 #, c++-format
 msgid "Started {} v{}."
 msgstr "{} v{}を起動しました。"
 
-#: src/moguet.cpp:483
+#: src/moguet.cpp:487
 #, c++-format
 msgid "Cannot initialize the {} default state log because of an unknown error."
 msgstr "不明なエラーにより{}のデフォルト状態ログを初期化できません。"
 
-#: src/moguet.cpp:670
+#: src/moguet.cpp:674
 #, c++-format
 msgid "Cannot finalize the {} default state log because of an unknown error."
 msgstr "不明なエラーにより{}のデフォルト状態ログを終了処理できません。"
 
-#: src/moguet.cpp:742
+#: src/moguet.cpp:746
 msgid "USAGE"
 msgstr "使用方法"
 
-#: src/moguet.cpp:746
+#: src/moguet.cpp:750
 msgid "OPERATIONS"
 msgstr "操作"
 
 #. TRANSLATORS: The placeholder is the literal PKGBUILD artifact identity.
-#: src/moguet.cpp:751
+#: src/moguet.cpp:755
 #, c++-format
 msgid "Build one remote package or local {} root without saving a preference"
 msgstr "設定を保存せず、リモートパッケージ1件またはローカル{}ルート1件をビルド"
 
-#: src/moguet.cpp:756
+#: src/moguet.cpp:760
 msgid "Update the system and rebuild configured source packages"
 msgstr "システムを更新し、設定済みソースパッケージを再ビルド"
 
 #. TRANSLATORS: The placeholder is the literal pacman-compatible -Syu token.
-#: src/moguet.cpp:760
+#: src/moguet.cpp:764
 #, c++-format
 msgid "Check registered source-build preferences after {}"
 msgstr "{}の後に登録済みソースビルド設定を確認"
 
 #. TRANSLATORS: The placeholder is the AUR project identity.
-#: src/moguet.cpp:766
+#: src/moguet.cpp:770
 #, c++-format
 msgid "Update installed {} packages only"
 msgstr "インストール済みの{}パッケージだけを更新"
 
 #. TRANSLATORS: The placeholder is the literal pacman-compatible -Syu token.
-#: src/moguet.cpp:770
+#: src/moguet.cpp:774
 #, c++-format
 msgid "Do not run {}; source-build preferences are optional"
 msgstr "{}は実行しません。ソースビルド設定は任意です"
 
 #. TRANSLATORS: The placeholder is the AUR project identity.
-#: src/moguet.cpp:776
+#: src/moguet.cpp:780
 #, c++-format
 msgid "Update the system, registered source packages, and remaining installed {} packages"
 msgstr "システム、登録済みのソースパッケージ、その他のインストール済み{}パッケージを更新"
 
 #. TRANSLATORS: The placeholder is the literal PackageBase identity.
-#: src/moguet.cpp:781
+#: src/moguet.cpp:785
 #, c++-format
 msgid "Give explicit source preferences priority and avoid duplicate package/{} builds"
 msgstr "明示的なソースビルド設定を優先し、パッケージ/{}単位での重複ビルドを回避"
 
-#: src/moguet.cpp:784
+#: src/moguet.cpp:788
 msgid "Do not accept target operands"
 msgstr "対象引数は受け付けません"
 
-#: src/moguet.cpp:787
+#: src/moguet.cpp:791
 msgid "Clean package and build caches"
 msgstr "パッケージとビルドのキャッシュを削除"
 
 #. TRANSLATORS: The placeholder is the AUR project identity.
-#: src/moguet.cpp:792
+#: src/moguet.cpp:796
 #, c++-format
 msgid "{} INSPECTION"
 msgstr "{}の調査"
 
 #. TRANSLATORS: AUR, PackageBase, and the destination path are literal identities.
-#: src/moguet.cpp:797
+#: src/moguet.cpp:801
 #, c++-format
 msgid "Export one {} {} repository to {} without building or installing"
 msgstr "1つの{} {}リポジトリを{}へエクスポート（ビルドやインストールは行いません）"
 
 #. TRANSLATORS: AUR, PackageBase, PKGBUILD, and stdout are literal identities.
-#: src/moguet.cpp:803
+#: src/moguet.cpp:807
 #, c++-format
 msgid "Print one {} {} {} to {} without keeping a checkout"
 msgstr "1つの{} {}の{}を{}へ出力（チェックアウトは保存しません）"
 
 #. TRANSLATORS: The placeholder is the AUR project identity.
-#: src/moguet.cpp:809
+#: src/moguet.cpp:813
 #, c++-format
 msgid "Classify {} dependencies and show constraint results"
 msgstr "{}の依存関係を分類しconstraint resultを表示"
 
 #. TRANSLATORS: The placeholder is the AUR project identity.
-#: src/moguet.cpp:814
+#: src/moguet.cpp:818
 #, c++-format
 msgid "Show the {} build-order plan and constraint completeness"
 msgstr "{}のビルド順序とconstraint completenessを表示"
 
 #. TRANSLATORS: The placeholders are literal git commands and the AUR identity.
-#: src/moguet.cpp:819
+#: src/moguet.cpp:823
 #, c++-format
 msgid "Safely run {} or {} for {} build repositories"
 msgstr "{}または{}を使用して{}ビルドリポジトリを安全に取得"
 
 #. TRANSLATORS: The placeholders are literal git commands.
-#: src/moguet.cpp:824
+#: src/moguet.cpp:828
 #, c++-format
 msgid "For existing clones, run {} only; do not update the working tree or run {}, {}, build, or install"
 msgstr "既存のチェックアウトでは{}だけを実行し、作業ツリーの更新、{}、{}、ビルド、インストールは行いません"
 
-#: src/moguet.cpp:828
+#: src/moguet.cpp:832
 msgid "SOURCE BUILD PREFERENCES"
 msgstr "ソースビルド設定"
 
 #. TRANSLATORS: The placeholder is the literal XDG identity.
-#: src/moguet.cpp:833
+#: src/moguet.cpp:837
 #, c++-format
 msgid "Store each preference in the active user's {} config authority"
 msgstr "各設定を実行ユーザーの{}設定領域へ保存"
 
-#: src/moguet.cpp:838
+#: src/moguet.cpp:842
 msgid "Enable a source-build preference for a package"
 msgstr "パッケージのソースビルド設定を有効化"
 
-#: src/moguet.cpp:842
+#: src/moguet.cpp:846
 msgid "Edit a source-build preference"
 msgstr "ソースビルド設定を編集"
 
-#: src/moguet.cpp:846
+#: src/moguet.cpp:850
 msgid "List source-build preferences"
 msgstr "ソースビルド設定を一覧表示"
 
-#: src/moguet.cpp:850
+#: src/moguet.cpp:854
 msgid "Remove a source-build preference"
 msgstr "ソースビルド設定を削除"
 
-#: src/moguet.cpp:854
+#: src/moguet.cpp:858
 msgid "Remove a preference and reinstall the binary package"
 msgstr "設定を削除してバイナリパッケージを再インストール"
 
 #. TRANSLATORS: The placeholder is the literal pacman program identity.
-#: src/moguet.cpp:859
+#: src/moguet.cpp:863
 #, c++-format
 msgid "{} COMPATIBILITY"
 msgstr "{}互換"
 
-#: src/moguet.cpp:862
+#: src/moguet.cpp:866
 msgid "Install packages"
 msgstr "パッケージをインストール"
 
-#: src/moguet.cpp:866
+#: src/moguet.cpp:870
 msgid "Interactively search for and select root packages to install"
 msgstr "インストールするルートパッケージを対話形式で検索・選択"
 
 #. TRANSLATORS: The placeholder is the AUR project identity.
-#: src/moguet.cpp:870
+#: src/moguet.cpp:874
 #, c++-format
 msgid "Require an interactive terminal; install selected repository roots first, then build selected {} roots only if that transaction succeeds"
 msgstr "対話端末が必要。選択したリポジトリのルートを先にインストールし、そのトランザクションが成功した場合だけ選択した {} のルートをビルド"
 
-#: src/moguet.cpp:874
+#: src/moguet.cpp:878
 msgid "Upgrade the system"
 msgstr "システムをアップグレード"
 
 #. TRANSLATORS: The placeholder is the literal pacman program identity.
-#: src/moguet.cpp:878
+#: src/moguet.cpp:882
 #, c++-format
 msgid "Remain compatible with {}; do not scan all source-build preferences"
 msgstr "{}互換を維持し、登録済みソースビルド設定をすべて走査しません"
 
-#: src/moguet.cpp:882
+#: src/moguet.cpp:886
 msgid "Search for packages"
 msgstr "パッケージを検索"
 
-#: src/moguet.cpp:885
+#: src/moguet.cpp:889
 msgid "Show package information"
 msgstr "パッケージ情報を表示"
 
 #. TRANSLATORS: The placeholder is the AUR project identity.
-#: src/moguet.cpp:890
+#: src/moguet.cpp:894
 #, c++-format
 msgid "Check {} and foreign-package updates"
 msgstr "{}および外部パッケージの更新を確認"
 
-#: src/moguet.cpp:892
+#: src/moguet.cpp:896
 msgid "OPTIONS"
 msgstr "オプション"
 
-#: src/moguet.cpp:896
+#: src/moguet.cpp:900
 msgid "Show this help message and exit"
 msgstr "このヘルプを表示して終了"
 
-#: src/moguet.cpp:900
+#: src/moguet.cpp:904
 msgid "Show version information and exit"
 msgstr "バージョン情報を表示して終了"
 
 #. TRANSLATORS: PKGBUILD and .install are literal artifact names.
-#: src/moguet.cpp:905
+#: src/moguet.cpp:909
 #, c++-format
 msgid "Prompt to review {} and {} files"
 msgstr "{}および{}の確認を促します"
 
 #. TRANSLATORS: PKGBUILD and .install are literal artifact names.
-#: src/moguet.cpp:910
+#: src/moguet.cpp:914
 #, c++-format
 msgid "Skip {} and {} review"
 msgstr "{}および{}の確認を省略"
 
-#: src/moguet.cpp:914
+#: src/moguet.cpp:918
 msgid "Prompt to view repository update diffs"
 msgstr "リポジトリ更新差分の表示を促します"
 
-#: src/moguet.cpp:918
+#: src/moguet.cpp:922
 msgid "Skip the repository update diff prompt"
 msgstr "リポジトリ更新差分の確認を省略"
 
 #. TRANSLATORS: pacman and makepkg are literal external-program identities.
-#: src/moguet.cpp:923
+#: src/moguet.cpp:927
 #, c++-format
 msgid "Pass this option to {} and {}"
 msgstr "このオプションを{}と{}へ渡します"
 
 #. TRANSLATORS: pacman, AUR, and -S are literal identities or CLI tokens.
-#: src/moguet.cpp:928
+#: src/moguet.cpp:932
 #, c++-format
 msgid "Pass this option to {}; on {} or source-build {} routes, apply it only to final installation"
 msgstr "このオプションを{}へ渡し、{}またはソースビルドの{}経路では最後のインストールだけに適用"
 
 #. TRANSLATORS: The placeholder is the literal Moguet project identity.
-#: src/moguet.cpp:933
+#: src/moguet.cpp:937
 #, c++-format
 msgid "Do not skip {} build, review, or plan steps"
 msgstr "{}のビルド、確認、計画段階は省略しません"
 
-#: src/moguet.cpp:937
+#: src/moguet.cpp:941
 msgid "Select the source-build mode"
 msgstr "ソースビルドモードを選択"
 
 #. TRANSLATORS: The placeholder is a literal compatibility option form.
-#: src/moguet.cpp:942 src/moguet.cpp:948
+#: src/moguet.cpp:946 src/moguet.cpp:952
 #, c++-format
 msgid "Compatibility alias for {}"
 msgstr "{}との互換性を保つための別名"
 
-#: src/moguet.cpp:953
+#: src/moguet.cpp:957
 msgid "Unsupported for separated source builds; no dependency cleanup is performed"
 msgstr "分離されたソースビルドでは未対応です。依存パッケージは削除しません"
 
 #. TRANSLATORS: -S, -Ss, -Si, and AUR are literal CLI/project identities.
-#: src/moguet.cpp:958
+#: src/moguet.cpp:962
 #, c++-format
 msgid "Limit {}, {}, and {} to {}; do not fall back to repositories"
 msgstr "{}、{}、{}を{}に限定し、リポジトリへフォールバックしません"
 
 #. TRANSLATORS: -S, -Ss, -Si, and AUR are literal CLI/project identities.
-#: src/moguet.cpp:964
+#: src/moguet.cpp:968
 #, c++-format
 msgid "Limit {}, {}, and {} to official binary repositories; do not use {} or source builds"
 msgstr "{}、{}、{}を公式バイナリリポジトリに限定し、{}やソースビルドを使用しません"
 
-#: src/moguet.cpp:967
+#: src/moguet.cpp:971
 msgid "CONFIGURATION"
 msgstr "設定"
 
-#: src/moguet.cpp:971
+#: src/moguet.cpp:975
 msgid "Read-only typed configuration; a missing file uses built-in defaults"
 msgstr "型付きの読み取り専用設定。ファイルがない場合は組み込みの既定値を使用"
 
-#: src/moguet.cpp:974
+#: src/moguet.cpp:978
 msgid "Required schema version"
 msgstr "必須のスキーマバージョン"
 
 #. TRANSLATORS: The placeholder is the literal PKGBUILD artifact identity.
-#: src/moguet.cpp:979
+#: src/moguet.cpp:983
 #, c++-format
 msgid "{} review policy"
 msgstr "{}の確認方針"
 
-#: src/moguet.cpp:982
+#: src/moguet.cpp:986
 msgid "Repository update diff policy"
 msgstr "リポジトリ更新差分の確認方針"
 
-#: src/moguet.cpp:985
+#: src/moguet.cpp:989
 msgid "Source-build mode"
 msgstr "ソースビルドモード"
 
@@ -7377,8 +7389,8 @@ msgstr "{} のソース取得またはビルド準備に失敗しました。"
 msgid "{} set source-build unexpectedly produced a singular update-status result."
 msgstr "{} セットのソースビルドが予期せず単一対象の更新状態結果を生成しました。"
 
-#: src/source_build.cpp:1061 src/source_install.cpp:383
-#: src/system_source_upgrade.cpp:620
+#: src/source_build.cpp:1061 src/source_install.cpp:389
+#: src/system_source_upgrade.cpp:622
 msgid "Unknown source-build execution status."
 msgstr "ソースビルドの実行状態が不明です。"
 
@@ -7391,146 +7403,146 @@ msgstr "不明なソースビルド元種別です。"
 msgid "Registered source upgrade does not support split {} preference {} from {} {}; this route requires a singular package identity."
 msgstr "登録済みソースの更新は、分割された {} 設定 {}（{} {} 由来）に対応していません。この経路では単一のパッケージ識別情報が必要です。"
 
-#: src/source_install.cpp:122
+#: src/source_install.cpp:125
 #, c++-format
 msgid "Registered source upgrade cannot enforce a selected {} dependency provider."
 msgstr "登録済みソースの更新では、選択した{}依存プロバイダーを強制できません。"
 
-#: src/source_install.cpp:137
+#: src/source_install.cpp:140
 #, c++-format
 msgid "{} required artifact target projection failed for {}."
 msgstr "{} による {} の必要アーティファクト対象の投影に失敗しました。"
 
-#: src/source_install.cpp:150 src/source_install.cpp:757
+#: src/source_install.cpp:153 src/source_install.cpp:763
 #, c++-format
 msgid "{} required artifact target projection omitted {}."
 msgstr "{} に必要なアーティファクト対象の投影から {} が欠落しています。"
 
-#: src/source_install.cpp:275
+#: src/source_install.cpp:280
 msgid "Installed package metadata name does not match the selected repository provider identity."
 msgstr "インストール済みパッケージのメタデータ名が、選択したリポジトリプロバイダーの識別情報と一致しません。"
 
-#: src/source_install.cpp:306
+#: src/source_install.cpp:311
 msgid "Selected repository provider install reasons cannot be represented by one package transaction."
 msgstr "選択したリポジトリプロバイダーのインストール理由を1つのパッケージトランザクションで表現できません。"
 
-#: src/source_install.cpp:338
+#: src/source_install.cpp:343
 #, c++-format
 msgid "Installing selected repository providers: {}"
 msgstr "選択したリポジトリプロバイダーをインストールしています: {}"
 
-#: src/source_install.cpp:404
+#: src/source_install.cpp:410
 #, c++-format
 msgid "{} source-build result is incoherent for presentation."
 msgstr "{} のソースビルド結果は表示に必要な整合性を満たしていません。"
 
-#: src/source_install.cpp:422
+#: src/source_install.cpp:428
 #, c++-format
 msgid "{} source-build child result is incoherent for presentation."
 msgstr "{} のソースビルドにおける子パッケージの結果は、表示に必要な整合性を満たしていません。"
 
-#: src/source_install.cpp:429
+#: src/source_install.cpp:435
 #, c++-format
 msgid "  required child: {} -> {} {} (explicit): installed"
 msgstr "  必要な子パッケージ: {} -> {} {}（明示）: インストール済み"
 
-#: src/source_install.cpp:438
+#: src/source_install.cpp:444
 #, c++-format
 msgid "  required child: {} -> {} {} (explicit): skipped as needed ({})"
 msgstr "  必要な子パッケージ: {} -> {} {}（明示）: 不要のためスキップ（{}）"
 
-#: src/source_install.cpp:447
+#: src/source_install.cpp:453
 #, c++-format
 msgid "  required child: {} -> {} {} (dependency): installed"
 msgstr "  必要な子パッケージ: {} -> {} {}（依存関係）: インストール済み"
 
-#: src/source_install.cpp:456
+#: src/source_install.cpp:462
 #, c++-format
 msgid "  required child: {} -> {} {} (dependency): skipped as needed ({})"
 msgstr "  必要な子パッケージ: {} -> {} {}（依存関係）: 不要のためスキップ（{}）"
 
-#: src/source_install.cpp:463
+#: src/source_install.cpp:469
 #, c++-format
 msgid "{} source-build child result has an unknown install reason or outcome."
 msgstr "{} のソースビルドにおける子パッケージの結果に、不明なインストール理由または結果があります。"
 
-#: src/source_install.cpp:473
+#: src/source_install.cpp:479
 #, c++-format
 msgid "{} unselected artifact identity is incoherent for presentation."
 msgstr "{} の未選択アーティファクト識別情報は、表示に必要な整合性を満たしていません。"
 
-#: src/source_install.cpp:536
+#: src/source_install.cpp:542
 msgid "Cannot seed cache for an empty source-build invocation."
 msgstr "空のソースビルド呼び出しに対してキャッシュを準備できません。"
 
-#: src/source_install.cpp:554
+#: src/source_install.cpp:560
 msgid "Production source-build work items use different cache authorities."
 msgstr "本番用ソースビルドの作業項目が異なるキャッシュ管理主体を使用しています。"
 
-#: src/source_install.cpp:564
+#: src/source_install.cpp:570
 msgid "Production source-build invocation cache authority changed."
 msgstr "本番用ソースビルド呼び出しのキャッシュ管理主体が変更されました。"
 
-#: src/source_install.cpp:579
+#: src/source_install.cpp:585
 msgid "Cannot activate cache for an empty source-build invocation."
 msgstr "空のソースビルド呼び出しに対してキャッシュを有効化できません。"
 
-#: src/source_install.cpp:583
+#: src/source_install.cpp:589
 msgid "Local source-build dependency invocation has no prepared cache authority."
 msgstr "ローカルソースビルドの依存関係呼び出しに準備済みのキャッシュ管理主体がありません。"
 
-#: src/source_install.cpp:608
+#: src/source_install.cpp:614
 msgid "Production source-build invocation has no prepared cache authority."
 msgstr "本番用ソースビルドの呼び出しには準備済みのキャッシュ管理主体がありません。"
 
-#: src/source_install.cpp:627
+#: src/source_install.cpp:633
 msgid "Failed to inspect selected repository provider install reasons with an unknown exception."
 msgstr "不明な例外により、選択したリポジトリプロバイダーのインストール理由を確認できませんでした。"
 
-#: src/source_install.cpp:648 src/source_install.cpp:944
-#: src/system_source_upgrade.cpp:1597
+#: src/source_install.cpp:654 src/source_install.cpp:950
+#: src/system_source_upgrade.cpp:1672
 msgid "Failed to install selected repository providers."
 msgstr "選択したリポジトリプロバイダーをインストールできませんでした。"
 
-#: src/source_install.cpp:657 src/system_source_upgrade.cpp:1644
+#: src/source_install.cpp:663 src/system_source_upgrade.cpp:1719
 msgid "Failed to install selected repository providers with an unknown exception."
 msgstr "不明な例外により選択済みリポジトリプロバイダーをインストールできませんでした。"
 
-#: src/source_install.cpp:669
+#: src/source_install.cpp:675
 msgid "Production source-build work item has no prepared cache authority."
 msgstr "本番用ソースビルドの作業項目に準備済みのキャッシュ管理主体がありません。"
 
-#: src/source_install.cpp:717
+#: src/source_install.cpp:723
 #, c++-format
 msgid "{} info for {} does not include {}."
 msgstr "{} の {} に関する情報に {} が含まれていません。"
 
-#: src/source_install.cpp:811
+#: src/source_install.cpp:817
 #, c++-format
 msgid "{} required artifact target projection failed before source-build work-item preparation."
 msgstr "ソースビルド作業項目の準備前に、{} に必要なアーティファクト対象の投影に失敗しました。"
 
-#: src/source_install.cpp:858
+#: src/source_install.cpp:864
 #, c++-format
 msgid "{} set source-build execution requires an {} {} work item."
 msgstr "{} セットのソースビルド実行には {} {} の作業項目が必要です。"
 
-#: src/source_install.cpp:864
+#: src/source_install.cpp:870
 #, c++-format
 msgid "{} set source-build execution does not support only-if-updated requests."
 msgstr "{} セットのソースビルド実行は、更新時のみの要求に対応していません。"
 
-#: src/source_install.cpp:870 src/source_install.cpp:891
+#: src/source_install.cpp:876 src/source_install.cpp:897
 #, c++-format
 msgid "Building {} {}: {}"
 msgstr "{} {} をビルドしています: {}"
 
-#: src/source_install.cpp:874 src/source_install.cpp:895
+#: src/source_install.cpp:880 src/source_install.cpp:901
 #, c++-format
 msgid "Target package(s): {}"
 msgstr "対象パッケージ: {}"
 
-#: src/source_install.cpp:915
+#: src/source_install.cpp:921
 #, c++-format
 msgid "Failed while building/installing {} {} ({}): {}"
 msgstr "{} {}（{}）のビルドまたはインストール中に失敗しました: {}"
@@ -7672,123 +7684,123 @@ msgstr "登録済みソースパッケージの処理が不明な例外で失敗
 msgid "The system upgrade completed, but the post-upgrade package metadata snapshot failed: {}"
 msgstr "システム更新は完了しましたが、更新後のパッケージメタデータのスナップショット取得に失敗しました: {}"
 
-#: src/system_source_upgrade.cpp:174
+#: src/system_source_upgrade.cpp:175
 #, c++-format
 msgid "Failed to query installed package metadata for {}: {}"
 msgstr "{}のインストール済みパッケージメタデータを問い合わせできませんでした: {}"
 
-#: src/system_source_upgrade.cpp:297
+#: src/system_source_upgrade.cpp:299
 msgid "The system/source result is inconsistent after an unexpected exception."
 msgstr "予期しない例外の発生後、システム/ソース処理の結果に整合性がありません。"
 
-#: src/system_source_upgrade.cpp:299
+#: src/system_source_upgrade.cpp:301
 #, c++-format
 msgid "The system/source result is inconsistent after an unexpected exception: {}"
 msgstr "予期しない例外の発生後、システム/ソース処理の結果に整合性がありません: {}"
 
-#: src/system_source_upgrade.cpp:306
+#: src/system_source_upgrade.cpp:308
 msgid "The system result is unavailable because an unexpected exception occurred after the phase started."
 msgstr "段階の開始後に予期しない例外が発生したため、システム処理の結果を利用できません。"
 
-#: src/system_source_upgrade.cpp:308 src/upgrade_all_operation.cpp:250
+#: src/system_source_upgrade.cpp:310 src/upgrade_all_operation.cpp:251
 #, c++-format
 msgid "The system result is unavailable because an unexpected exception occurred after the phase started: {}"
 msgstr "段階の開始後に予期しない例外が発生したため、システム処理の結果を利用できません: {}"
 
-#: src/system_source_upgrade.cpp:329
+#: src/system_source_upgrade.cpp:331
 msgid "The registered source result is unavailable because an unexpected exception occurred after the phase started."
 msgstr "段階の開始後に予期しない例外が発生したため、登録済みソース処理の結果を利用できません。"
 
-#: src/system_source_upgrade.cpp:331 src/upgrade_all_operation.cpp:263
+#: src/system_source_upgrade.cpp:333 src/upgrade_all_operation.cpp:264
 #, c++-format
 msgid "The registered source result is unavailable because an unexpected exception occurred after the phase started: {}"
 msgstr "段階の開始後に予期しない例外が発生したため、登録済みソース処理の結果を利用できません: {}"
 
-#: src/system_source_upgrade.cpp:406
+#: src/system_source_upgrade.cpp:408
 #, c++-format
 msgid "Failed to snapshot local package versions before the system upgrade: {}"
 msgstr "システム更新前のローカルパッケージバージョンをスナップショットへ保存できませんでした: {}"
 
-#: src/system_source_upgrade.cpp:428
+#: src/system_source_upgrade.cpp:430
 #, c++-format
 msgid "Failed to snapshot local package versions after the system upgrade: {}"
 msgstr "システム更新後のローカルパッケージバージョンをスナップショットへ保存できませんでした: {}"
 
-#: src/system_source_upgrade.cpp:849
+#: src/system_source_upgrade.cpp:922
 msgid "Source preference enumeration failed with an unknown exception."
 msgstr "ソース設定の列挙が不明な例外で失敗しました。"
 
-#: src/system_source_upgrade.cpp:859
+#: src/system_source_upgrade.cpp:932
 #, c++-format
 msgid "Source preference enumeration found a non-regular entry: {}"
 msgstr "ソース設定の列挙で通常ファイルではないエントリが見つかりました: {}"
 
-#: src/system_source_upgrade.cpp:863
+#: src/system_source_upgrade.cpp:936
 #, c++-format
 msgid "Source preference enumeration found an invalid entry name: {}"
 msgstr "ソース設定の列挙で無効なエントリ名が見つかりました: {}"
 
-#: src/system_source_upgrade.cpp:972
+#: src/system_source_upgrade.cpp:1046
 #, c++-format
 msgid "The registered source preference disappeared before preparation: {}"
 msgstr "登録済みソース設定が準備前になくなりました: {}"
 
-#: src/system_source_upgrade.cpp:1021
+#: src/system_source_upgrade.cpp:1096
 msgid "Source identity resolution failed with an unknown exception."
 msgstr "ソース識別情報の解決が不明な例外で失敗しました。"
 
-#: src/system_source_upgrade.cpp:1079
+#: src/system_source_upgrade.cpp:1154
 msgid "Source invocation constraint preflight failed with an unknown exception."
 msgstr "ソース呼び出しのconstraint preflightが不明な例外で失敗しました。"
 
-#: src/system_source_upgrade.cpp:1126
+#: src/system_source_upgrade.cpp:1201
 msgid "Source work-item preparation failed with an unknown exception."
 msgstr "ソース作業項目の準備が不明な例外で失敗しました。"
 
-#: src/system_source_upgrade.cpp:1156
+#: src/system_source_upgrade.cpp:1231
 msgid "Source invocation preparation failed with an unknown exception."
 msgstr "ソース呼び出しの準備が不明な例外で失敗しました。"
 
-#: src/system_source_upgrade.cpp:1285
+#: src/system_source_upgrade.cpp:1360
 msgid "The prepared system/source upgrade is invalid or has already been consumed."
 msgstr "準備済みシステム/ソース更新は無効か、すでに使用されています。"
 
-#: src/system_source_upgrade.cpp:1300
+#: src/system_source_upgrade.cpp:1375
 msgid "The prepared system/source upgrade options differ from the execution options."
 msgstr "準備済みシステム/ソース更新のオプションが実行時のオプションと異なります。"
 
-#: src/system_source_upgrade.cpp:1316
+#: src/system_source_upgrade.cpp:1391
 msgid "The prepared system/source upgrade source correlation is inconsistent."
 msgstr "準備済みシステム/ソース更新のソース相関に整合性がありません。"
 
-#: src/system_source_upgrade.cpp:1394 src/system_source_upgrade.cpp:1399
+#: src/system_source_upgrade.cpp:1469 src/system_source_upgrade.cpp:1474
 msgid "The update failed."
 msgstr "更新に失敗しました。"
 
-#: src/system_source_upgrade.cpp:1502
+#: src/system_source_upgrade.cpp:1577
 msgid "The post-upgrade package metadata snapshot failed with an unknown exception."
 msgstr "更新後のパッケージメタデータのスナップショット取得が不明な例外で失敗しました。"
 
-#: src/system_source_upgrade.cpp:1546
+#: src/system_source_upgrade.cpp:1621
 msgid "The prepared source work item is missing after the system upgrade."
 msgstr "システム更新後に準備済みソース作業項目がありません。"
 
-#: src/system_source_upgrade.cpp:1562
+#: src/system_source_upgrade.cpp:1637
 #, c++-format
 msgid "The system upgrade completed, but the authoritative post-upgrade installed package snapshot is missing for {}; source processing did not start."
 msgstr "システム更新は完了しましたが、{}の更新後インストール済みパッケージの正式なスナップショットがありません。ソース処理は開始されませんでした。"
 
-#: src/system_source_upgrade.cpp:1571
+#: src/system_source_upgrade.cpp:1646
 #, c++-format
 msgid "The system upgrade completed, but the post-upgrade package metadata query failed for {}: {} Source processing did not start."
 msgstr "システム更新は完了しましたが、{}の更新後パッケージメタデータを問い合わせできませんでした: {} ソース処理は開始されませんでした。"
 
-#: src/system_source_upgrade.cpp:1670
+#: src/system_source_upgrade.cpp:1745
 #, c++-format
 msgid "Ignoring invalid source-build preference filename: {}"
 msgstr "無効なソースビルド設定ファイル名を無視します: {}"
 
-#: src/system_source_upgrade.cpp:1877
+#: src/system_source_upgrade.cpp:1952
 msgid "An unknown exception occurred."
 msgstr "不明な例外が発生しました。"
 
@@ -7963,107 +7975,107 @@ msgstr "準備済み{}ソーススナップショットが内部のシステム/
 msgid "Prepared {} explicit source correlation is inconsistent."
 msgstr "準備済み{}の明示的ソース相関に整合性がありません。"
 
-#: src/upgrade_all_operation.cpp:528
+#: src/upgrade_all_operation.cpp:529
 #, c++-format
 msgid "The system/source phase completed without a fully successful typed result; {} processing did not start."
 msgstr "システム/ソース段階は完了しましたが、型付き結果が完全な成功ではないため、{}処理は開始されませんでした。"
 
 #. TRANSLATORS: The placeholder is the literal
 #. service name "AUR".
-#: src/upgrade_all_operation.cpp:620
+#: src/upgrade_all_operation.cpp:621
 #, c++-format
 msgid "The duplicate-excluded {} target has no planner/query correlation."
 msgstr "重複により除外された{}対象に計画処理/問い合わせとの相関がありません。"
 
 #. TRANSLATORS: The placeholder is the literal
 #. service name "AUR".
-#: src/upgrade_all_operation.cpp:640
+#: src/upgrade_all_operation.cpp:641
 #, c++-format
 msgid "The duplicate-excluded {} target maps outside the original query plan."
 msgstr "重複により除外された{}対象が元の問い合わせ計画の範囲外を指しています。"
 
 #. TRANSLATORS: The placeholder is the literal
 #. service name "AUR".
-#: src/upgrade_all_operation.cpp:662
+#: src/upgrade_all_operation.cpp:663
 #, c++-format
 msgid "The duplicate-excluded {} target identity differs from its original query entry."
 msgstr "重複により除外された{}対象の識別情報が元の問い合わせエントリと異なります。"
 
 #. TRANSLATORS: The placeholders are the literal
 #. service name "AUR" and correlation label "PR3".
-#: src/upgrade_all_operation.cpp:744
+#: src/upgrade_all_operation.cpp:745
 #, c++-format
 msgid "The externally satisfied {} build unit has no {} root-role correlation."
 msgstr "外部で充足された{}ビルド単位に{}のルート役割との相関がありません。"
 
 #. TRANSLATORS: The placeholders are the literal
 #. service name "AUR" and correlation label "PR3".
-#: src/upgrade_all_operation.cpp:766
+#: src/upgrade_all_operation.cpp:767
 #, c++-format
 msgid "The externally satisfied {} build-unit child identity differs from its {} correlation."
 msgstr "外部で充足された{}ビルド単位の子識別情報が{}相関と異なります。"
 
-#: src/upgrade_all_operation.cpp:831
+#: src/upgrade_all_operation.cpp:832
 #, c++-format
 msgid "The {} update query completed with recoverable failures; filtered execution did not start."
 msgstr "{}更新の問い合わせは回復可能な失敗を伴って完了したため、絞り込み後の実行は開始されませんでした。"
 
-#: src/upgrade_all_operation.cpp:1008
+#: src/upgrade_all_operation.cpp:1009
 msgid "The registered source preference has no package name."
 msgstr "登録済みソース設定にパッケージ名がありません。"
 
 #. TRANSLATORS: The placeholder is the literal
 #. field name "PackageBase".
-#: src/upgrade_all_operation.cpp:1026
+#: src/upgrade_all_operation.cpp:1027
 #, c++-format
 msgid "The registered source preference has no prepared {} identity."
 msgstr "登録済みソース設定に準備済み{}識別情報がありません。"
 
-#: src/upgrade_all_operation.cpp:1043
+#: src/upgrade_all_operation.cpp:1044
 msgid "The registered source preference has no prepared canonical source identity."
 msgstr "登録済みソース設定に準備済みの正規ソース識別情報がありません。"
 
-#: src/upgrade_all_operation.cpp:1054
+#: src/upgrade_all_operation.cpp:1055
 msgid "The registered source preferences contain a duplicate original index."
 msgstr "登録済みソース設定に重複した元のインデックスが含まれています。"
 
 #. TRANSLATORS: The placeholder is the literal
 #. command name "upgrade-all".
-#: src/upgrade_all_operation.cpp:1173
+#: src/upgrade_all_operation.cpp:1192
 #, c++-format
 msgid "The prepared registered source identity cannot be adapted safely for {} planning."
 msgstr "準備済みの登録済みソース識別情報を{}計画用に安全に変換できません。"
 
 #. TRANSLATORS: The placeholder is the display spelling
 #. of the literal command name "upgrade-all".
-#: src/upgrade_all_operation.cpp:1229
+#: src/upgrade_all_operation.cpp:1248
 #, c++-format
 msgid "{} preparation failed with an unknown exception."
 msgstr "{}の準備が不明な例外で失敗しました。"
 
-#: src/upgrade_all_operation.cpp:1357
+#: src/upgrade_all_operation.cpp:1376
 msgid "System/source execution failed with an unknown exception."
 msgstr "システム/ソース実行が不明な例外で失敗しました。"
 
-#: src/upgrade_all_operation.cpp:1387
+#: src/upgrade_all_operation.cpp:1406
 #, c++-format
 msgid "The system/source result no longer matches the prepared {} source intent snapshot."
 msgstr "システム/ソース結果が準備済み{}ソース意図のスナップショットと一致しなくなりました。"
 
-#: src/upgrade_all_operation.cpp:1450
+#: src/upgrade_all_operation.cpp:1469
 msgid "Foreign inventory configuration resolution failed with an unknown exception."
 msgstr "外部パッケージ一覧の設定解決が不明な例外で失敗しました。"
 
-#: src/upgrade_all_operation.cpp:1479
+#: src/upgrade_all_operation.cpp:1498
 msgid "Foreign inventory read failed with an unknown exception."
 msgstr "外部パッケージ一覧の読み取りが不明な例外で失敗しました。"
 
-#: src/upgrade_all_operation.cpp:1534
+#: src/upgrade_all_operation.cpp:1553
 #, c++-format
 msgid "The {} update query failed with an unknown exception."
 msgstr "{}更新の問い合わせが不明な例外で失敗しました。"
 
-#: src/upgrade_all_operation.cpp:1618
+#: src/upgrade_all_operation.cpp:1637
 #, c++-format
 msgid "The filtered {} operation failed with an unknown exception."
 msgstr "絞り込み済み{}操作が不明な例外で失敗しました。"
@@ -8312,6 +8324,484 @@ msgstr "ユーザー設定エラー: '{}': キー'{}'（行{}、列{}）: 文字
 msgid "User config error: '{}': key '{}' (line {}, column {}): unsupported value '{}'; accepted values: {}, {}, {}"
 msgstr "ユーザー設定エラー: '{}': キー'{}'（行{}、列{}）: 値'{}'は未対応です。使用可能な値: {}、{}、{}"
 
+#: src/unified_plan_renderer.cpp:52
+msgid "unavailable"
+msgstr "利用不可"
+
+#: src/unified_plan_renderer.cpp:73
+msgid "Ready"
+msgstr "準備完了"
+
+#: src/unified_plan_renderer.cpp:75
+msgid "NoOp"
+msgstr "操作なし"
+
+#: src/unified_plan_renderer.cpp:77
+msgid "Blocked"
+msgstr "実行不可"
+
+#: src/unified_plan_renderer.cpp:82
+msgid "Unified plan status is not supported by the renderer."
+msgstr "統合プランの状態はレンダラーでサポートされていません。"
+
+#: src/unified_plan_renderer.cpp:88 src/unified_plan_renderer.cpp:295
+#: src/unified_plan_renderer.cpp:369
+msgid "repository"
+msgstr "リポジトリ"
+
+#: src/unified_plan_renderer.cpp:92 src/unified_plan_renderer.cpp:299
+msgid "local"
+msgstr "ローカル"
+
+#: src/unified_plan_renderer.cpp:102 src/unified_plan_renderer.cpp:169
+msgid "repository transaction"
+msgstr "リポジトリトランザクション"
+
+#: src/unified_plan_renderer.cpp:104
+msgid "repository source build"
+msgstr "リポジトリソースビルド"
+
+#: src/unified_plan_renderer.cpp:107
+#, c++-format
+msgid "{} source build"
+msgstr "{}ソースビルド"
+
+#: src/unified_plan_renderer.cpp:109
+msgid "local source build"
+msgstr "ローカルソースビルド"
+
+#: src/unified_plan_renderer.cpp:115
+msgid "A root route is not supported by the renderer."
+msgstr "ルート経路はレンダラーでサポートされていません。"
+
+#: src/unified_plan_renderer.cpp:131
+#, c++-format
+msgid "{} ({}: {}; source key: {})"
+msgstr "{}（{}: {}、ソースキー: {}）"
+
+#: src/unified_plan_renderer.cpp:139 src/unified_plan_renderer.cpp:331
+#, c++-format
+msgid "{}/{} ({}: {})"
+msgstr "{}/{}（{}: {}）"
+
+#: src/unified_plan_renderer.cpp:144
+#, c++-format
+msgid "{} (device: {}; inode: {})"
+msgstr "{}（デバイス: {}、inode: {}）"
+
+#: src/unified_plan_renderer.cpp:158
+msgid "request / root discovery"
+msgstr "要求 / ルート検出"
+
+#: src/unified_plan_renderer.cpp:161
+msgid "metadata / dependency candidate discovery"
+msgstr "メタデータ / 依存候補検出"
+
+#: src/unified_plan_renderer.cpp:164
+msgid "provider decision / refreshed resolution"
+msgstr "プロバイダー判断 / 更新後の解決"
+
+#: src/unified_plan_renderer.cpp:167
+msgid "execution preflight / projection"
+msgstr "実行事前検査 / 投影"
+
+#: src/unified_plan_renderer.cpp:171
+msgid "source retrieval"
+msgstr "ソース取得"
+
+#: src/unified_plan_renderer.cpp:173
+msgid "source build"
+msgstr "ソースビルド"
+
+#: src/unified_plan_renderer.cpp:176
+msgid "artifact validation / selection"
+msgstr "アーティファクト検証 / 選択"
+
+#: src/unified_plan_renderer.cpp:179
+msgid "source-built artifact install"
+msgstr "ソースビルド済みアーティファクトのインストール"
+
+#: src/unified_plan_renderer.cpp:181
+msgid "cleanup / reduction"
+msgstr "クリーンアップ / 集約"
+
+#: src/unified_plan_renderer.cpp:187
+msgid "An observation phase is not supported by the renderer."
+msgstr "観測フェーズはレンダラーでサポートされていません。"
+
+#: src/unified_plan_renderer.cpp:211
+msgid "A phase owner is not supported by the renderer."
+msgstr "フェーズの所有者はレンダラーでサポートされていません。"
+
+#: src/unified_plan_renderer.cpp:231
+msgid "A system/source route phase is not supported by the renderer."
+msgstr "システム/ソース経路のフェーズはレンダラーでサポートされていません。"
+
+#: src/unified_plan_renderer.cpp:247
+msgid "foreign package inventory"
+msgstr "外部パッケージ一覧"
+
+#: src/unified_plan_renderer.cpp:263
+#, c++-format
+msgid "An {} route phase is not supported by the renderer."
+msgstr "{}経路のフェーズはレンダラーでサポートされていません。"
+
+#: src/unified_plan_renderer.cpp:275
+#, c++-format
+msgid "system/source: {}"
+msgstr "システム/ソース: {}"
+
+#: src/unified_plan_renderer.cpp:280
+#, c++-format
+msgid "{}: {}"
+msgstr "{}: {}"
+
+#: src/unified_plan_renderer.cpp:301
+msgid "provider"
+msgstr "プロバイダー"
+
+#: src/unified_plan_renderer.cpp:311
+msgid "A dependency kind is not supported by the renderer."
+msgstr "依存関係の種別はレンダラーでサポートされていません。"
+
+#: src/unified_plan_renderer.cpp:321
+#, c++-format
+msgid "installed/{}"
+msgstr "インストール済み/{}"
+
+#: src/unified_plan_renderer.cpp:338
+#, c++-format
+msgid "local/{} ({}: {})"
+msgstr "ローカル/{}（{}: {}）"
+
+#: src/unified_plan_renderer.cpp:361
+msgid "An install reason is not supported by the renderer."
+msgstr "インストール理由はレンダラーでサポートされていません。"
+
+#: src/unified_plan_renderer.cpp:377
+msgid "A source-build kind is not supported by the renderer."
+msgstr "ソースビルド種別はレンダラーでサポートされていません。"
+
+#: src/unified_plan_renderer.cpp:382
+msgid "Roots:"
+msgstr "ルート:"
+
+#: src/unified_plan_renderer.cpp:391
+#, c++-format
+msgid "  {}. Identity: {}"
+msgstr "  {}. 識別情報: {}"
+
+#: src/unified_plan_renderer.cpp:395
+#, c++-format
+msgid "     Source: {}"
+msgstr "     ソース: {}"
+
+#: src/unified_plan_renderer.cpp:399
+#, c++-format
+msgid "     Route: {}"
+msgstr "     経路: {}"
+
+#: src/unified_plan_renderer.cpp:404
+#, c++-format
+msgid "     Request: {} (invocation index: {})"
+msgstr "     要求: {}（呼び出しindex: {}）"
+
+#: src/unified_plan_renderer.cpp:413
+msgid "Phases:"
+msgstr "フェーズ:"
+
+#: src/unified_plan_renderer.cpp:421 src/unified_plan_renderer.cpp:541
+#: src/unified_plan_renderer.cpp:556 src/unified_plan_renderer.cpp:1052
+#, c++-format
+msgid "  {}. {}"
+msgstr "  {}. {}"
+
+#: src/unified_plan_renderer.cpp:427
+#, c++-format
+msgid "     External owner: {}"
+msgstr "     外部所有者: {}"
+
+#: src/unified_plan_renderer.cpp:433
+#, c++-format
+msgid "     Route phase: {}"
+msgstr "     経路フェーズ: {}"
+
+#: src/unified_plan_renderer.cpp:445
+msgid "Configured repository order:"
+msgstr "設定済みリポジトリ順:"
+
+#: src/unified_plan_renderer.cpp:450
+msgid "  Not observed"
+msgstr "  未観測"
+
+#: src/unified_plan_renderer.cpp:470
+msgid "     Dependencies: None"
+msgstr "     依存関係: なし"
+
+#: src/unified_plan_renderer.cpp:479
+#, c++-format
+msgid "     {}. {} ({}: {}) -> {} [{}]"
+msgstr "     {}. {}（{}: {}）-> {} [{}]"
+
+#: src/unified_plan_renderer.cpp:489
+#, c++-format
+msgid "        Selected identity: {}"
+msgstr "        選択済み識別情報: {}"
+
+#: src/unified_plan_renderer.cpp:495
+#, c++-format
+msgid "        Selected provider: {}"
+msgstr "        選択済みプロバイダー: {}"
+
+#: src/unified_plan_renderer.cpp:505
+#, c++-format
+msgid "        Constraint: {} ({})"
+msgstr "        制約: {}（{}）"
+
+#: src/unified_plan_renderer.cpp:517
+#, c++-format
+msgid "A dependency constraint could not be rendered: {}"
+msgstr "依存関係制約を表示できませんでした: {}"
+
+#: src/unified_plan_renderer.cpp:520
+msgid "        Constraint: unsupported"
+msgstr "        制約: 未対応"
+
+#: src/unified_plan_renderer.cpp:529
+msgid "Dependency authorities:"
+msgstr "依存関係authority:"
+
+#: src/unified_plan_renderer.cpp:548
+#, c++-format
+msgid "  {}. LocalBuildPlan"
+msgstr "  {}. LocalBuildPlan"
+
+#: src/unified_plan_renderer.cpp:551
+msgid "     Local dependency authority is borrowed without detaching it."
+msgstr "     ローカル依存関係authorityを切り離さず借用しています。"
+
+#: src/unified_plan_renderer.cpp:563
+msgid "A dependency authority reference is unavailable."
+msgstr "依存関係authorityの参照を利用できません。"
+
+#: src/unified_plan_renderer.cpp:570
+msgid "Build units:"
+msgstr "ビルド単位:"
+
+#: src/unified_plan_renderer.cpp:591
+#, c++-format
+msgid "An {} build unit no longer references a {} entry."
+msgstr "{}ビルド単位が{}エントリーを参照していません。"
+
+#: src/unified_plan_renderer.cpp:596
+#, c++-format
+msgid "{} {}: {}"
+msgstr "{} {}: {}"
+
+#: src/unified_plan_renderer.cpp:600 src/unified_plan_renderer.cpp:620
+#, c++-format
+msgid "     Package children: {}"
+msgstr "     パッケージchild: {}"
+
+#: src/unified_plan_renderer.cpp:614
+#, c++-format
+msgid "Local {}: {} ({})"
+msgstr "ローカル{}: {}（{}）"
+
+#: src/unified_plan_renderer.cpp:631 src/unified_plan_renderer.cpp:637
+msgid "not observed"
+msgstr "未観測"
+
+#: src/unified_plan_renderer.cpp:639
+#, c++-format
+msgid "Prepared {} source {}: {}"
+msgstr "準備済み{}ソースの{}: {}"
+
+#: src/unified_plan_renderer.cpp:644
+#, c++-format
+msgid "     Requested package: {}"
+msgstr "     要求パッケージ: {}"
+
+#: src/unified_plan_renderer.cpp:648
+#, c++-format
+msgid "     Source key: {}"
+msgstr "     ソースキー: {}"
+
+#: src/unified_plan_renderer.cpp:660
+msgid "Required artifact targets:"
+msgstr "必要アーティファクト対象:"
+
+#: src/unified_plan_renderer.cpp:671
+#, c++-format
+msgid "  {}. {}: {}; package child: {}; install reason: {}"
+msgstr "  {}. {}: {}、パッケージchild: {}、インストール理由: {}"
+
+#: src/unified_plan_renderer.cpp:696
+#, c++-format
+msgid "root: {}"
+msgstr "ルート: {}"
+
+#: src/unified_plan_renderer.cpp:704
+#, c++-format
+msgid "dependency: {}/{}"
+msgstr "依存関係: {}/{}"
+
+#: src/unified_plan_renderer.cpp:711
+#, c++-format
+msgid "selected provider: {}"
+msgstr "選択済みプロバイダー: {}"
+
+#: src/unified_plan_renderer.cpp:716
+msgid "system upgrade"
+msgstr "システム更新"
+
+#: src/unified_plan_renderer.cpp:743
+msgid "A source install intent references an unavailable required artifact."
+msgstr "ソースインストールintentが利用できない必要アーティファクトを参照しています。"
+
+#: src/unified_plan_renderer.cpp:750
+#, c++-format
+msgid "{} artifact #{}: {}/{}"
+msgstr "{}アーティファクト #{}: {}/{}"
+
+#: src/unified_plan_renderer.cpp:761
+msgid "Transaction intents:"
+msgstr "トランザクションintent:"
+
+#: src/unified_plan_renderer.cpp:777
+#, c++-format
+msgid "  {}. Repository package transaction (needed: {})"
+msgstr "  {}. リポジトリパッケージトランザクション（needed: {}）"
+
+#: src/unified_plan_renderer.cpp:791
+#, c++-format
+msgid "  {}. Source-built artifact install boundary (needed: {})"
+msgstr "  {}. ソースビルド済みアーティファクトのインストール境界（needed: {}）"
+
+#: src/unified_plan_renderer.cpp:819
+#, c++-format
+msgid "{} resolution failure for {}: {}"
+msgstr "{}の{}に対する解決失敗: {}"
+
+#: src/unified_plan_renderer.cpp:826
+#, c++-format
+msgid "incomplete provider candidates for {}"
+msgstr "{}のプロバイダー候補が不完全です"
+
+#: src/unified_plan_renderer.cpp:833
+#, c++-format
+msgid "repository package source failure: {}/{}"
+msgstr "リポジトリパッケージのソース失敗: {}/{}"
+
+#: src/unified_plan_renderer.cpp:841
+#, c++-format
+msgid "repository provider source failure: {}"
+msgstr "リポジトリプロバイダーのソース失敗: {}"
+
+#: src/unified_plan_renderer.cpp:848
+#, c++-format
+msgid "local source failure: {}"
+msgstr "ローカルソースの失敗: {}"
+
+#: src/unified_plan_renderer.cpp:868
+#, c++-format
+msgid "unresolved dependency: {}"
+msgstr "未解決の依存関係: {}"
+
+#: src/unified_plan_renderer.cpp:875
+#, c++-format
+msgid "dependency cycle: {}"
+msgstr "依存関係の循環: {}"
+
+#: src/unified_plan_renderer.cpp:884
+#, c++-format
+msgid "split package selection required: {} ({}: {})"
+msgstr "分割パッケージの選択が必要です: {}（{}: {}）"
+
+#: src/unified_plan_renderer.cpp:894
+#, c++-format
+msgid "A {} blocker kind is not supported by the renderer."
+msgstr "{}ブロッカーの種別はレンダラーでサポートされていません。"
+
+#: src/unified_plan_renderer.cpp:901
+#, c++-format
+msgid "A {} blocker references an unavailable authority item."
+msgstr "{}ブロッカーが利用できないauthority項目を参照しています。"
+
+#: src/unified_plan_renderer.cpp:916
+#, c++-format
+msgid "{} execution preflight failure: {}"
+msgstr "{}実行事前検査の失敗: {}"
+
+#: src/unified_plan_renderer.cpp:923
+#, c++-format
+msgid "system/source preflight failure: {}"
+msgstr "システム/ソース事前検査の失敗: {}"
+
+#: src/unified_plan_renderer.cpp:927
+#, c++-format
+msgid "{} preflight failure: {}"
+msgstr "{}事前検査の失敗: {}"
+
+#: src/unified_plan_renderer.cpp:944
+#, c++-format
+msgid "unknown dependency: {} required by {} ({}: {})"
+msgstr "不明な依存関係: {}（{}が要求、{}: {}）"
+
+#: src/unified_plan_renderer.cpp:960
+#, c++-format
+msgid "ambiguous provider for {}: {}"
+msgstr "{}のプロバイダーが曖昧です: {}"
+
+#: src/unified_plan_renderer.cpp:969
+#, c++-format
+msgid "unsupported mixed install reason for {} {}"
+msgstr "{} {}ではインストール理由の混在をサポートしていません"
+
+#: src/unified_plan_renderer.cpp:982
+#, c++-format
+msgid "constraint failure: {} ({})"
+msgstr "制約の失敗: {}（{}）"
+
+#: src/unified_plan_renderer.cpp:993
+#, c++-format
+msgid "A constraint blocker could not be rendered: {}"
+msgstr "制約ブロッカーを表示できませんでした: {}"
+
+#: src/unified_plan_renderer.cpp:1002
+#, c++-format
+msgid "metadata risk for {} ({}: {}); conflicts: {}; replaces: {}"
+msgstr "{}のメタデータrisk（{}: {}）、競合: {}、置換: {}"
+
+#: src/unified_plan_renderer.cpp:1013
+#, c++-format
+msgid "local dependency plan failure for {}"
+msgstr "{}のローカル依存関係プラン失敗"
+
+#: src/unified_plan_renderer.cpp:1021
+#, c++-format
+msgid "root package preparation failure ({} typed detail)"
+msgid_plural "root package preparation failure ({} typed details)"
+msgstr[0] "ルートパッケージ準備の失敗（typed detail: {}件）"
+
+#: src/unified_plan_renderer.cpp:1028
+#, c++-format
+msgid "required artifact projection failure: {}"
+msgstr "必要アーティファクトの投影失敗: {}"
+
+#: src/unified_plan_renderer.cpp:1044
+msgid "Blockers:"
+msgstr "ブロッカー:"
+
+#: src/unified_plan_renderer.cpp:1065
+msgid "Unified plan:"
+msgstr "統合プラン:"
+
+#: src/unified_plan_renderer.cpp:1067
+#, c++-format
+msgid "  Status: {}"
+msgstr "  状態: {}"
+
 #. TRANSLATORS: The placeholder is the literal XDG standard identity.
 #: src/xdg_directory_safety.cpp:122 src/xdg_directory_safety.cpp:314
 #: src/xdg_paths.cpp:42 src/xdg_paths.cpp:73
@@ -8526,6 +9016,26 @@ msgstr "{}のデフォルト状態ログを段階{}で安全に使用できま�
 msgid "Unknown state log error code."
 msgstr "不明な状態ログエラーコードです。"
 
+#, c++-format
+#~ msgid "{}/{} (PackageBase: {})"
+#~ msgstr "{}/{}（PackageBase: {}）"
+
+#, c++-format
+#~ msgid "upgrade-all: {}"
+#~ msgstr "upgrade-all: {}"
+
+#, c++-format
+#~ msgid "  {}. BuildPlan"
+#~ msgstr "  {}. BuildPlan"
+
+#, c++-format
+#~ msgid "{} PackageBase: {}"
+#~ msgstr "{} PackageBase: {}"
+
+#, c++-format
+#~ msgid "upgrade-all preflight failure: {}"
+#~ msgstr "upgrade-all事前検査の失敗: {}"
+
 #~ msgid "Repository sync metadata is missing a package filename."
 #~ msgstr "リポジトリ同期メタデータにパッケージファイル名がありません。"
 
@@ -8579,10 +9089,6 @@ msgstr "不明な状態ログエラーコードです。"
 #, c++-format
 #~ msgid "Local source artifact selection failed for PackageBase {}."
 #~ msgstr "ローカルソースの PackageBase {} に対するアーティファクト選択に失敗しました。"
-
-#, c++-format
-#~ msgid "Local PackageBase result: {}"
-#~ msgstr "ローカルPackageBase結果: {}"
 
 #~ msgid "Package selection requires a search callback."
 #~ msgstr "パッケージ選択には検索コールバックが必要です。"
