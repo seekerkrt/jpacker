@@ -386,9 +386,13 @@ int run_moguet(int argc, char* argv[]) {
         try {
             RootPackageSelectionInvocation invocation =
                     require_root_package_selection_invocation(parsed);
-            prepared_root_package_install = prepare_root_package_install(
+            RootPackageInstallPreparation preparation =
+                    prepare_root_package_install(
                     parsed, std::move(invocation), g_config);
-            if(!prepared_root_package_install.has_value()) return 1;
+            auto* prepared = std::get_if<PreparedRootPackageInstall>(
+                    &preparation);
+            if(prepared == nullptr) return 1;
+            prepared_root_package_install.emplace(std::move(*prepared));
         } catch(const std::exception& error) {
             Logger::error(error.what());
             return 1;

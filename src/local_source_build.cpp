@@ -516,7 +516,26 @@ PreparedLocalSourceBuild::PreparedLocalSourceBuild(
         LocalSourceBuildRequest request, std::string package_base,
         std::vector<RequiredPackageArtifactTarget> required_targets) noexcept
     : request_(std::move(request)), package_base_(std::move(package_base)),
-      required_targets_(std::move(required_targets)) {}
+      required_targets_(std::move(required_targets)),
+      projection_authority_(request_) {}
+
+LocalSourceBuildProjectionAuthority::LocalSourceBuildProjectionAuthority(
+        const LocalSourceBuildRequest& request) noexcept
+    : LocalSourceBuildProjectionAuthority(
+              request.source_root, request.build_plan,
+              request.metadata.metadata_,
+              request.metadata.source_environment_,
+              request.metadata.effective_architecture_,
+              request.metadata.provenance_,
+              request.metadata.source_directory_identity_,
+              request.metadata.pkgbuild_snapshot_) {}
+
+PreparedLocalSourceBuild::PreparedLocalSourceBuild(
+        PreparedLocalSourceBuild&& other) noexcept
+    : request_(std::move(other.request_)),
+      package_base_(std::move(other.package_base_)),
+      required_targets_(std::move(other.required_targets_)),
+      projection_authority_(request_) {}
 
 LocalSourceBuildPhaseError::LocalSourceBuildPhaseError(
         LocalSourceBuildFailurePhase phase, const std::string& diagnostic,

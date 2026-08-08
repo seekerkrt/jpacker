@@ -79,65 +79,78 @@ std::map<std::string, std::size_t> repository_rank_by_name(
 
 RootPackageSearchResult aggregate_root_package_search(
         const std::string& query,
-        RepositoryPackageSearchSnapshot repository_snapshot,
+        std::optional<RepositoryPackageSearchSnapshot> repository_snapshot,
         std::vector<AurPackageInfo> aur_packages) {
     InvalidRootPackageSearchSnapshot invalid;
+    const std::vector<std::string> empty_repository_order;
+    const std::vector<std::string>& repository_order =
+            repository_snapshot.has_value()
+            ? repository_snapshot->repository_order
+            : empty_repository_order;
     const std::map<std::string, std::size_t> repository_ranks =
             repository_rank_by_name(
-                    repository_snapshot.repository_order,
+                    repository_order,
                     invalid.duplicate_repository_order_entries);
 
     std::vector<PendingRootPackageSearchCandidate> pending;
-    pending.reserve(repository_snapshot.matches.size() + aur_packages.size());
+    pending.reserve(
+            (repository_snapshot.has_value()
+                     ? repository_snapshot->matches.size()
+                     : 0) +
+            aur_packages.size());
 
-    for(auto& match : repository_snapshot.matches) {
-        const RepositoryRootPackageIdentity raw_identity{
-                match.repository_name, match.package_name};
-        auto rank = repository_ranks.find(match.repository_name);
-        if(rank == repository_ranks.end()) {
-            invalid.unranked_repository_candidates.push_back(
-                    raw_identity);
-        }
+    if(repository_snapshot.has_value()) {
+        for(auto& match : repository_snapshot->matches) {
+            const RepositoryRootPackageIdentity raw_identity{
+                    match.repository_name, match.package_name};
+            auto rank = repository_ranks.find(match.repository_name);
+            if(rank == repository_ranks.end()) {
+                invalid.unranked_repository_candidates.push_back(
+                        raw_identity);
+            }
 
-        std::vector<std::string> group_names;
-        switch(match.kind) {
-        case RepositoryPackageSearchMatchKind::Search:
-            if(match.group_name.has_value()) {
+            std::vector<std::string> group_names;
+            switch(match.kind) {
+            case RepositoryPackageSearchMatchKind::Search:
+                if(match.group_name.has_value()) {
+                    invalid.invalid_group_matches.push_back(
+                            InvalidRepositoryRootPackageGroupMatch{
+                                    raw_identity, match.group_name});
+                }
+                break;
+            case RepositoryPackageSearchMatchKind::ExactGroup:
+                if(!match.group_name.has_value() ||
+                   match.group_name.value() != query) {
+                    invalid.invalid_group_matches.push_back(
+                            InvalidRepositoryRootPackageGroupMatch{
+                                    raw_identity, match.group_name});
+                } else {
+                    add_group_name(group_names, match.group_name);
+                }
+                break;
+            default:
                 invalid.invalid_group_matches.push_back(
                         InvalidRepositoryRootPackageGroupMatch{
                                 raw_identity, match.group_name});
+                break;
             }
-            break;
-        case RepositoryPackageSearchMatchKind::ExactGroup:
-            if(!match.group_name.has_value() ||
-               match.group_name.value() != query) {
-                invalid.invalid_group_matches.push_back(
-                        InvalidRepositoryRootPackageGroupMatch{
-                                raw_identity, match.group_name});
-            } else {
-                add_group_name(group_names, match.group_name);
+
+            RootPackageCandidateValidationResult candidate_result =
+                    make_repository_root_package_candidate(
+                            std::move(match.repository_name),
+                            std::move(match.package_name),
+                            std::move(match.version),
+                            std::move(match.description));
+            if(const auto* failure = candidate_result.failure();
+               failure != nullptr) {
+                invalid.validation_failures.push_back(*failure);
+                continue;
             }
-            break;
-        default:
-            invalid.invalid_group_matches.push_back(
-                    InvalidRepositoryRootPackageGroupMatch{
-                            raw_identity, match.group_name});
-            break;
-        }
 
-        RootPackageCandidateValidationResult candidate_result =
-                make_repository_root_package_candidate(
-                        std::move(match.repository_name),
-                        std::move(match.package_name),
-                        std::move(match.version),
-                        std::move(match.description));
-        if(const auto* failure = candidate_result.failure(); failure != nullptr) {
-            invalid.validation_failures.push_back(*failure);
-            continue;
+            pending.push_back(PendingRootPackageSearchCandidate{
+                    *candidate_result.candidate(),
+                    std::move(group_names)});
         }
-
-        pending.push_back(PendingRootPackageSearchCandidate{
-                *candidate_result.candidate(), std::move(group_names)});
     }
 
     for(auto& package : aur_packages) {
@@ -246,7 +259,14 @@ RootPackageSearchResult aggregate_root_package_search(
                         rhs_identity.package_base);
             });
 
-    return RootPackageSearchSnapshot{std::move(aggregated)};
+    std::optional<std::vector<std::string>> configured_repository_order;
+    if(repository_snapshot.has_value()) {
+        configured_repository_order.emplace(
+                std::move(repository_snapshot->repository_order));
+    }
+    return RootPackageSearchSnapshot{
+            std::move(aggregated),
+            std::move(configured_repository_order)};
 }
 
 } // namespace
@@ -271,7 +291,7 @@ RootPackageSearchResult search_root_package_candidates(
         throw std::invalid_argument("Unknown root package search scope.");
     }
 
-    RepositoryPackageSearchSnapshot repository_snapshot;
+    std::optional<RepositoryPackageSearchSnapshot> repository_snapshot;
     if(query_repository) {
         RepositoryPackageSearchResult repository_result =
                 query_repository_root_package_search(query);
@@ -280,8 +300,9 @@ RootPackageSearchResult search_root_package_candidates(
            failure != nullptr) {
             return RepositoryRootPackageSearchFailure{*failure};
         }
-        repository_snapshot = std::get<RepositoryPackageSearchSnapshot>(
-                std::move(repository_result));
+        repository_snapshot.emplace(
+                std::get<RepositoryPackageSearchSnapshot>(
+                        std::move(repository_result)));
     }
 
     std::vector<AurPackageInfo> aur_packages;

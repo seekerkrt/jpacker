@@ -76,6 +76,10 @@ struct ProductionSourceBuildWorkItem {
     // falseはofficial/generic/registered-source singular compatibility境界。
     bool                          is_build_plan_entry = false;
     bool                          uses_system_update_baseline = false;
+    // dependency/provider resolutionが問い合わせたconfiguration snapshot。
+    // nulloptはrepository authority未問い合わせを表す。
+    std::optional<std::vector<std::string>> configured_repository_order =
+            std::nullopt;
     // 1 invocationでadoptした同一cache-root capabilityを全build unitが共有する。
     // static model生成中はemptyで、production invocation preparationだけが設定する。
     std::optional<ValidatedCacheRoot> cache_root;

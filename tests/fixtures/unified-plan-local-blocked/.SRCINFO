@@ -1,0 +1,7 @@
+pkgbase = unified-plan-local-blocked
+	pkgdesc = Unified plan blocked local fixture
+	pkgver = 1.0
+	pkgrel = 1
+	arch = x86_64
+
+pkgname = unified-plan-local-blocked

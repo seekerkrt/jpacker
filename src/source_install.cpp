@@ -93,7 +93,9 @@ DesiredInstallReason resolve_source_target_reason(
         const ResolvedSourceBuildIdentity& source,
         bool use_package_base_lifecycle,
         const ProviderSelectionCallback& select_provider,
-        std::vector<ProvidedDependency>& selected_repository_providers) {
+        std::vector<ProvidedDependency>& selected_repository_providers,
+        std::optional<std::vector<std::string>>&
+                configured_repository_order) {
     if(source.source_kind != SourceBuildSourceKind::Aur) {
         return DesiredInstallReason::Explicit;
     }
@@ -103,6 +105,7 @@ DesiredInstallReason resolve_source_target_reason(
     // singular ownerだけはsplit selection guardを維持する。
     BuildPlan plan = resolve_build_plan(
             source.requested_name, select_provider);
+    configured_repository_order = plan.configured_repository_order;
     if(use_package_base_lifecycle) {
         require_executable_build_plan(source.requested_name, plan);
     } else {
@@ -234,6 +237,8 @@ ProductionSourceBuildWorkItem make_aur_source_build_work_item(
     work_item.request.needed = needed;
     work_item.required_targets = unit.required_targets;
     work_item.is_build_plan_entry = true;
+    work_item.configured_repository_order =
+            plan.configured_repository_order;
     attach_selected_repository_providers(work_item, plan);
     require_static_production_source_build_work_item(work_item);
     return work_item;
@@ -358,7 +363,8 @@ ProductionSourceBuildWorkItem make_direct_source_build_work_item(
     work_item.request.needed = needed;
     DesiredInstallReason reason = resolve_source_target_reason(
             source, use_package_base_lifecycle, select_provider,
-            work_item.selected_repository_providers);
+            work_item.selected_repository_providers,
+            work_item.configured_repository_order);
     work_item.required_targets.push_back(RequiredPackageArtifactTarget{
             source.package_base, source.requested_name, reason});
     work_item.is_build_plan_entry = use_package_base_lifecycle;

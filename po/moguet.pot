@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Moguet 2.1.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-08 08:09+0900\n"
+"POT-Creation-Date: 2026-08-08 17:22+0900\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -51,15 +51,15 @@ msgstr ""
 msgid "Artifact package identity set is no longer active."
 msgstr ""
 
-#: src/artifact_install_executor.cpp:29 src/source_install.cpp:292
+#: src/artifact_install_executor.cpp:29 src/source_install.cpp:297
 msgid "Installed package metadata contains an unknown install reason."
 msgstr ""
 
-#: src/artifact_install_executor.cpp:33 src/source_install.cpp:296
+#: src/artifact_install_executor.cpp:33 src/source_install.cpp:301
 msgid "Installed package metadata contains an invalid install reason."
 msgstr ""
 
-#: src/artifact_install_executor.cpp:56 src/source_install.cpp:300
+#: src/artifact_install_executor.cpp:56 src/source_install.cpp:305
 msgid "Unknown installed package query result."
 msgstr ""
 
@@ -67,7 +67,7 @@ msgstr ""
 msgid "Installed package metadata name does not match the package artifact identity."
 msgstr ""
 
-#: src/artifact_install_executor.cpp:64 src/source_install.cpp:280
+#: src/artifact_install_executor.cpp:64 src/source_install.cpp:285
 msgid "Installed package metadata contains an empty version."
 msgstr ""
 
@@ -1218,14 +1218,14 @@ msgstr ""
 
 #. TRANSLATORS: The placeholders are the PackageBase metadata-key
 #. identity and a package-base identity.
-#: src/aur_update_cli_presentation.cpp:615 src/source_install.cpp:410
+#: src/aur_update_cli_presentation.cpp:615 src/source_install.cpp:416
 #, c++-format
 msgid "{} result: {}"
 msgstr ""
 
 #. TRANSLATORS: The placeholders are package identity and version.
 #: src/aur_update_cli_presentation.cpp:626
-#: src/commands_source_maintenance.cpp:561 src/source_install.cpp:478
+#: src/commands_source_maintenance.cpp:561 src/source_install.cpp:484
 #, c++-format
 msgid "  produced artifact: {} {} (not selected; not installed)"
 msgstr ""
@@ -2390,7 +2390,7 @@ msgstr ""
 msgid "Automatic source selection has no explicit option."
 msgstr ""
 
-#: src/cli_routing.cpp:26 src/commands_sync.cpp:435 src/commands_sync.cpp:781
+#: src/cli_routing.cpp:26 src/commands_sync.cpp:435 src/commands_sync.cpp:898
 msgid "Unknown package source selection."
 msgstr ""
 
@@ -3191,7 +3191,7 @@ msgstr ""
 #. second is a runtime option token.
 #: src/commands_inspect.cpp:933 src/commands_inspect.cpp:1064
 #: src/commands_inspect.cpp:1107 src/commands_upgrade_all.cpp:1823
-#: src/moguet.cpp:1051
+#: src/moguet.cpp:1055
 #, c++-format
 msgid "Unsupported {} option: {}"
 msgstr ""
@@ -3201,8 +3201,8 @@ msgstr ""
 msgid "Failed to inspect dependencies for {}: {}"
 msgstr ""
 
-#: src/commands_inspect.cpp:966 src/commands_sync.cpp:1013
-#: src/dependency_plan.cpp:1946 src/dependency_plan.cpp:2200
+#: src/commands_inspect.cpp:966 src/commands_sync.cpp:1130
+#: src/dependency_plan.cpp:1981 src/dependency_plan.cpp:2235
 #: src/pkgbuild_export.cpp:654
 #, c++-format
 msgid "{} package not found: {}"
@@ -4071,128 +4071,128 @@ msgstr ""
 msgid "The {} build plan lost root attribution for selected package {}."
 msgstr ""
 
-#: src/commands_sync.cpp:568
+#: src/commands_sync.cpp:573
 msgid "Package selection query must not be empty."
 msgstr ""
 
-#: src/commands_sync.cpp:574
+#: src/commands_sync.cpp:582
 #, c++-format
 msgid "Interactive package selection does not support {}."
 msgstr ""
 
-#: src/commands_sync.cpp:605
+#: src/commands_sync.cpp:634
 msgid "No package candidates were found."
 msgstr ""
 
-#: src/commands_sync.cpp:617
+#: src/commands_sync.cpp:655
 msgid "Package selection returned an unknown unavailable reason."
 msgstr ""
 
-#: src/commands_sync.cpp:622
+#: src/commands_sync.cpp:679
 msgid "Package selection was cancelled."
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the literal pacman program identity.
-#: src/commands_sync.cpp:634
+#: src/commands_sync.cpp:699
 #, c++-format
 msgid "A selected repository package cannot be represented as an exact {} target."
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the AUR project identity.
-#: src/commands_sync.cpp:644
+#: src/commands_sync.cpp:713
 #, c++-format
 msgid "Source-build review and build-mode options require at least one selected {} package."
 msgstr ""
 
-#: src/commands_sync.cpp:696
+#: src/commands_sync.cpp:813
 msgid "Prepared package selection contains no install targets."
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the AUR project identity.
-#: src/commands_sync.cpp:714
+#: src/commands_sync.cpp:831
 #, c++-format
 msgid "The selected repository package transaction failed; selected {} packages were not executed."
 msgstr ""
 
-#: src/commands_sync.cpp:718
+#: src/commands_sync.cpp:835
 msgid "The selected repository package transaction failed."
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the AUR project identity.
-#: src/commands_sync.cpp:732 src/commands_sync.cpp:740
+#: src/commands_sync.cpp:849 src/commands_sync.cpp:857
 #, c++-format
 msgid "The repository package transaction completed before the {} route failed; it was not rolled back."
 msgstr ""
 
-#: src/commands_sync.cpp:751
+#: src/commands_sync.cpp:868
 msgid "Missing search query."
 msgstr ""
 
-#: src/commands_sync.cpp:762 src/commands_sync.cpp:774
+#: src/commands_sync.cpp:879 src/commands_sync.cpp:891
 #, c++-format
 msgid "Searching {}..."
 msgstr ""
 
-#: src/commands_sync.cpp:769
+#: src/commands_sync.cpp:886
 #, c++-format
 msgid "Unsupported {} option for {} search: {}"
 msgstr ""
 
-#: src/commands_sync.cpp:800 src/commands_sync.cpp:997
+#: src/commands_sync.cpp:917 src/commands_sync.cpp:1114
 #, c++-format
 msgid "Missing {} package target."
 msgstr ""
 
-#: src/commands_sync.cpp:810 src/commands_sync.cpp:865
+#: src/commands_sync.cpp:927 src/commands_sync.cpp:982
 #, c++-format
 msgid "Unsupported {} option for {}/source-build target: {}"
 msgstr ""
 
-#: src/commands_sync.cpp:813
+#: src/commands_sync.cpp:930
 #, c++-format
 msgid "Rerun {} without this option."
 msgstr ""
 
-#: src/commands_sync.cpp:868
+#: src/commands_sync.cpp:985
 #, c++-format
 msgid "Split official repository and {}/source-build targets, or rerun without this option."
 msgstr ""
 
-#: src/commands_sync.cpp:924
+#: src/commands_sync.cpp:1041
 msgid "Build plan root ownership is inconsistent with source targets."
 msgstr ""
 
-#: src/commands_sync.cpp:933
+#: src/commands_sync.cpp:1050
 msgid "Build plan source targets were not fully projected."
 msgstr ""
 
-#: src/commands_sync.cpp:950
+#: src/commands_sync.cpp:1067
 #, c++-format
 msgid "{} failed."
 msgstr ""
 
-#: src/commands_sync.cpp:972
+#: src/commands_sync.cpp:1089
 #, c++-format
 msgid "Cannot combine {} refresh with {} info fallback for unqualified target: {}"
 msgstr ""
 
-#: src/commands_sync.cpp:975
+#: src/commands_sync.cpp:1092
 #, c++-format
 msgid "Use a repository-qualified target such as {}, or run refresh and {} separately."
 msgstr ""
 
-#: src/commands_sync.cpp:991
+#: src/commands_sync.cpp:1108
 #, c++-format
 msgid "Unsupported {} option for {} info: {}"
 msgstr ""
 
-#: src/commands_sync.cpp:1018 src/commands_sync.cpp:1067
-#: src/dependency_plan.cpp:1863 src/source_install.cpp:701
+#: src/commands_sync.cpp:1135 src/commands_sync.cpp:1184
+#: src/dependency_plan.cpp:1898 src/source_install.cpp:707
 #, c++-format
 msgid "Failed to fetch {} info for {}: {}"
 msgstr ""
 
-#: src/commands_sync.cpp:1060 src/source_install.cpp:710
+#: src/commands_sync.cpp:1177 src/source_install.cpp:716
 #, c++-format
 msgid "Package not found in repos or {}: {}"
 msgstr ""
@@ -5285,7 +5285,7 @@ msgstr ""
 msgid "Unexpected {} command failure: unknown exception."
 msgstr ""
 
-#: src/dependency_plan.cpp:64 src/dependency_plan.cpp:620
+#: src/dependency_plan.cpp:64 src/dependency_plan.cpp:654
 #, c++-format
 msgid "{} package metadata constraint projection failed: {}"
 msgstr ""
@@ -5295,118 +5295,118 @@ msgstr ""
 msgid "{} provider candidate changed during dependency resolution: {}"
 msgstr ""
 
-#: src/dependency_plan.cpp:291
+#: src/dependency_plan.cpp:318
 #, c++-format
 msgid "{} package metadata is missing its typed constraint projection: {}"
 msgstr ""
 
-#: src/dependency_plan.cpp:299
+#: src/dependency_plan.cpp:326
 #, c++-format
 msgid "{} package metadata constraint identity is inconsistent: {}"
 msgstr ""
 
-#: src/dependency_plan.cpp:371
+#: src/dependency_plan.cpp:398
 #, c++-format
 msgid "Failed to search {} providers for {}: {}"
 msgstr ""
 
-#: src/dependency_plan.cpp:395
+#: src/dependency_plan.cpp:422
 #, c++-format
 msgid "Failed to check {} provider {}: {}"
 msgstr ""
 
-#: src/dependency_plan.cpp:429 src/dependency_plan.cpp:1679
+#: src/dependency_plan.cpp:456 src/dependency_plan.cpp:1714
 #, c++-format
 msgid "{} provider candidate metadata was not returned."
 msgstr ""
 
 #. TRANSLATORS: The placeholders are dependency and provider identities.
-#: src/dependency_plan.cpp:535
+#: src/dependency_plan.cpp:569
 #, c++-format
 msgid "{} [provided by {}]"
 msgstr ""
 
-#: src/dependency_plan.cpp:577
+#: src/dependency_plan.cpp:611
 #, c++-format
 msgid "Provider selection returned a candidate that was not offered for {}."
 msgstr ""
 
 #. TRANSLATORS: The placeholder is a dependency specification.
-#: src/dependency_plan.cpp:590
+#: src/dependency_plan.cpp:624
 #, c++-format
 msgid "version constraint for {} is not verified"
 msgstr ""
 
-#: src/dependency_plan.cpp:634
+#: src/dependency_plan.cpp:668
 #, c++-format
 msgid "{} package metadata constraint projection is inconsistent: {}"
 msgstr ""
 
-#: src/dependency_plan.cpp:728 src/dependency_plan.cpp:834
-#: src/dependency_plan.cpp:1552
+#: src/dependency_plan.cpp:762 src/dependency_plan.cpp:868
+#: src/dependency_plan.cpp:1587
 #, c++-format
 msgid "Failed to check {} dependency {}: {}"
 msgstr ""
 
-#: src/dependency_plan.cpp:939
+#: src/dependency_plan.cpp:973
 msgid "Unknown package role."
 msgstr ""
 
-#: src/dependency_plan.cpp:1218
+#: src/dependency_plan.cpp:1252
 #, c++-format
 msgid "{} aggregation is missing during build plan ordering: {}"
 msgstr ""
 
-#: src/dependency_plan.cpp:1439
+#: src/dependency_plan.cpp:1473
 #, c++-format
 msgid "Build dependency is missing its package role: {}"
 msgstr ""
 
-#: src/dependency_plan.cpp:1614
+#: src/dependency_plan.cpp:1649
 #, c++-format
 msgid "Cannot select a provider for {}; candidate {} is {}: {}."
 msgstr ""
 
-#: src/dependency_plan.cpp:1623
+#: src/dependency_plan.cpp:1658
 #, c++-format
 msgid "Provider candidate {} for {} is {}: {}. Candidate order and explicit selection are unchanged."
 msgstr ""
 
-#: src/dependency_plan.cpp:1661
+#: src/dependency_plan.cpp:1696
 #, c++-format
 msgid "Failed to refresh {} provider {}: {}"
 msgstr ""
 
-#: src/dependency_plan.cpp:1829
+#: src/dependency_plan.cpp:1864
 #, c++-format
 msgid "{} (max depth reached)"
 msgstr ""
 
-#: src/dependency_plan.cpp:1933 src/dependency_plan.cpp:2190
-#: src/dependency_plan.cpp:2254
+#: src/dependency_plan.cpp:1968 src/dependency_plan.cpp:2225
+#: src/dependency_plan.cpp:2289
 msgid "Build plan targets must not be empty."
 msgstr ""
 
-#: src/dependency_plan.cpp:1985
+#: src/dependency_plan.cpp:2020
 msgid "Provider selection request has no candidates."
 msgstr ""
 
-#: src/dependency_plan.cpp:1997
+#: src/dependency_plan.cpp:2032
 msgid "Provider selection candidates have inconsistent dependency identities."
 msgstr ""
 
-#: src/dependency_plan.cpp:2089
+#: src/dependency_plan.cpp:2124
 #, c++-format
 msgid "Provider candidates changed during invocation resolution: {}"
 msgstr ""
 
-#: src/dependency_plan.cpp:2109 src/dependency_plan.cpp:2158
+#: src/dependency_plan.cpp:2144 src/dependency_plan.cpp:2193
 #: src/provider_selection.cpp:116
 #, c++-format
 msgid "Previously selected provider is no longer a candidate for dependency: {}"
 msgstr ""
 
-#: src/dependency_plan.cpp:2165
+#: src/dependency_plan.cpp:2200
 #, c++-format
 msgid "Provider candidate changed during dependency resolution: {}"
 msgstr ""
@@ -5974,297 +5974,297 @@ msgstr ""
 msgid "Failed to load the user configuration because of an unknown error."
 msgstr ""
 
-#: src/moguet.cpp:405
+#: src/moguet.cpp:409
 #, c++-format
 msgid "Operation {} does not accept target operands."
 msgstr ""
 
-#: src/moguet.cpp:468
+#: src/moguet.cpp:472
 #, c++-format
 msgid "Started {} v{}."
 msgstr ""
 
-#: src/moguet.cpp:483
+#: src/moguet.cpp:487
 #, c++-format
 msgid "Cannot initialize the {} default state log because of an unknown error."
 msgstr ""
 
-#: src/moguet.cpp:670
+#: src/moguet.cpp:674
 #, c++-format
 msgid "Cannot finalize the {} default state log because of an unknown error."
 msgstr ""
 
-#: src/moguet.cpp:742
+#: src/moguet.cpp:746
 msgid "USAGE"
 msgstr ""
 
-#: src/moguet.cpp:746
+#: src/moguet.cpp:750
 msgid "OPERATIONS"
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the literal PKGBUILD artifact identity.
-#: src/moguet.cpp:751
+#: src/moguet.cpp:755
 #, c++-format
 msgid "Build one remote package or local {} root without saving a preference"
 msgstr ""
 
-#: src/moguet.cpp:756
+#: src/moguet.cpp:760
 msgid "Update the system and rebuild configured source packages"
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the literal pacman-compatible -Syu token.
-#: src/moguet.cpp:760
+#: src/moguet.cpp:764
 #, c++-format
 msgid "Check registered source-build preferences after {}"
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the AUR project identity.
-#: src/moguet.cpp:766
+#: src/moguet.cpp:770
 #, c++-format
 msgid "Update installed {} packages only"
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the literal pacman-compatible -Syu token.
-#: src/moguet.cpp:770
+#: src/moguet.cpp:774
 #, c++-format
 msgid "Do not run {}; source-build preferences are optional"
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the AUR project identity.
-#: src/moguet.cpp:776
+#: src/moguet.cpp:780
 #, c++-format
 msgid "Update the system, registered source packages, and remaining installed {} packages"
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the literal PackageBase identity.
-#: src/moguet.cpp:781
+#: src/moguet.cpp:785
 #, c++-format
 msgid "Give explicit source preferences priority and avoid duplicate package/{} builds"
 msgstr ""
 
-#: src/moguet.cpp:784
+#: src/moguet.cpp:788
 msgid "Do not accept target operands"
 msgstr ""
 
-#: src/moguet.cpp:787
+#: src/moguet.cpp:791
 msgid "Clean package and build caches"
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the AUR project identity.
-#: src/moguet.cpp:792
+#: src/moguet.cpp:796
 #, c++-format
 msgid "{} INSPECTION"
 msgstr ""
 
 #. TRANSLATORS: AUR, PackageBase, and the destination path are literal identities.
-#: src/moguet.cpp:797
+#: src/moguet.cpp:801
 #, c++-format
 msgid "Export one {} {} repository to {} without building or installing"
 msgstr ""
 
 #. TRANSLATORS: AUR, PackageBase, PKGBUILD, and stdout are literal identities.
-#: src/moguet.cpp:803
+#: src/moguet.cpp:807
 #, c++-format
 msgid "Print one {} {} {} to {} without keeping a checkout"
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the AUR project identity.
-#: src/moguet.cpp:809
+#: src/moguet.cpp:813
 #, c++-format
 msgid "Classify {} dependencies and show constraint results"
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the AUR project identity.
-#: src/moguet.cpp:814
+#: src/moguet.cpp:818
 #, c++-format
 msgid "Show the {} build-order plan and constraint completeness"
 msgstr ""
 
 #. TRANSLATORS: The placeholders are literal git commands and the AUR identity.
-#: src/moguet.cpp:819
+#: src/moguet.cpp:823
 #, c++-format
 msgid "Safely run {} or {} for {} build repositories"
 msgstr ""
 
 #. TRANSLATORS: The placeholders are literal git commands.
-#: src/moguet.cpp:824
+#: src/moguet.cpp:828
 #, c++-format
 msgid "For existing clones, run {} only; do not update the working tree or run {}, {}, build, or install"
 msgstr ""
 
-#: src/moguet.cpp:828
+#: src/moguet.cpp:832
 msgid "SOURCE BUILD PREFERENCES"
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the literal XDG identity.
-#: src/moguet.cpp:833
+#: src/moguet.cpp:837
 #, c++-format
 msgid "Store each preference in the active user's {} config authority"
 msgstr ""
 
-#: src/moguet.cpp:838
+#: src/moguet.cpp:842
 msgid "Enable a source-build preference for a package"
 msgstr ""
 
-#: src/moguet.cpp:842
+#: src/moguet.cpp:846
 msgid "Edit a source-build preference"
 msgstr ""
 
-#: src/moguet.cpp:846
+#: src/moguet.cpp:850
 msgid "List source-build preferences"
 msgstr ""
 
-#: src/moguet.cpp:850
+#: src/moguet.cpp:854
 msgid "Remove a source-build preference"
 msgstr ""
 
-#: src/moguet.cpp:854
+#: src/moguet.cpp:858
 msgid "Remove a preference and reinstall the binary package"
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the literal pacman program identity.
-#: src/moguet.cpp:859
+#: src/moguet.cpp:863
 #, c++-format
 msgid "{} COMPATIBILITY"
 msgstr ""
 
-#: src/moguet.cpp:862
+#: src/moguet.cpp:866
 msgid "Install packages"
 msgstr ""
 
-#: src/moguet.cpp:866
+#: src/moguet.cpp:870
 msgid "Interactively search for and select root packages to install"
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the AUR project identity.
-#: src/moguet.cpp:870
+#: src/moguet.cpp:874
 #, c++-format
 msgid "Require an interactive terminal; install selected repository roots first, then build selected {} roots only if that transaction succeeds"
 msgstr ""
 
-#: src/moguet.cpp:874
+#: src/moguet.cpp:878
 msgid "Upgrade the system"
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the literal pacman program identity.
-#: src/moguet.cpp:878
+#: src/moguet.cpp:882
 #, c++-format
 msgid "Remain compatible with {}; do not scan all source-build preferences"
 msgstr ""
 
-#: src/moguet.cpp:882
+#: src/moguet.cpp:886
 msgid "Search for packages"
 msgstr ""
 
-#: src/moguet.cpp:885
+#: src/moguet.cpp:889
 msgid "Show package information"
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the AUR project identity.
-#: src/moguet.cpp:890
+#: src/moguet.cpp:894
 #, c++-format
 msgid "Check {} and foreign-package updates"
 msgstr ""
 
-#: src/moguet.cpp:892
+#: src/moguet.cpp:896
 msgid "OPTIONS"
 msgstr ""
 
-#: src/moguet.cpp:896
+#: src/moguet.cpp:900
 msgid "Show this help message and exit"
 msgstr ""
 
-#: src/moguet.cpp:900
+#: src/moguet.cpp:904
 msgid "Show version information and exit"
 msgstr ""
 
 #. TRANSLATORS: PKGBUILD and .install are literal artifact names.
-#: src/moguet.cpp:905
+#: src/moguet.cpp:909
 #, c++-format
 msgid "Prompt to review {} and {} files"
 msgstr ""
 
 #. TRANSLATORS: PKGBUILD and .install are literal artifact names.
-#: src/moguet.cpp:910
+#: src/moguet.cpp:914
 #, c++-format
 msgid "Skip {} and {} review"
 msgstr ""
 
-#: src/moguet.cpp:914
+#: src/moguet.cpp:918
 msgid "Prompt to view repository update diffs"
 msgstr ""
 
-#: src/moguet.cpp:918
+#: src/moguet.cpp:922
 msgid "Skip the repository update diff prompt"
 msgstr ""
 
 #. TRANSLATORS: pacman and makepkg are literal external-program identities.
-#: src/moguet.cpp:923
+#: src/moguet.cpp:927
 #, c++-format
 msgid "Pass this option to {} and {}"
 msgstr ""
 
 #. TRANSLATORS: pacman, AUR, and -S are literal identities or CLI tokens.
-#: src/moguet.cpp:928
+#: src/moguet.cpp:932
 #, c++-format
 msgid "Pass this option to {}; on {} or source-build {} routes, apply it only to final installation"
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the literal Moguet project identity.
-#: src/moguet.cpp:933
+#: src/moguet.cpp:937
 #, c++-format
 msgid "Do not skip {} build, review, or plan steps"
 msgstr ""
 
-#: src/moguet.cpp:937
+#: src/moguet.cpp:941
 msgid "Select the source-build mode"
 msgstr ""
 
 #. TRANSLATORS: The placeholder is a literal compatibility option form.
-#: src/moguet.cpp:942 src/moguet.cpp:948
+#: src/moguet.cpp:946 src/moguet.cpp:952
 #, c++-format
 msgid "Compatibility alias for {}"
 msgstr ""
 
-#: src/moguet.cpp:953
+#: src/moguet.cpp:957
 msgid "Unsupported for separated source builds; no dependency cleanup is performed"
 msgstr ""
 
 #. TRANSLATORS: -S, -Ss, -Si, and AUR are literal CLI/project identities.
-#: src/moguet.cpp:958
+#: src/moguet.cpp:962
 #, c++-format
 msgid "Limit {}, {}, and {} to {}; do not fall back to repositories"
 msgstr ""
 
 #. TRANSLATORS: -S, -Ss, -Si, and AUR are literal CLI/project identities.
-#: src/moguet.cpp:964
+#: src/moguet.cpp:968
 #, c++-format
 msgid "Limit {}, {}, and {} to official binary repositories; do not use {} or source builds"
 msgstr ""
 
-#: src/moguet.cpp:967
+#: src/moguet.cpp:971
 msgid "CONFIGURATION"
 msgstr ""
 
-#: src/moguet.cpp:971
+#: src/moguet.cpp:975
 msgid "Read-only typed configuration; a missing file uses built-in defaults"
 msgstr ""
 
-#: src/moguet.cpp:974
+#: src/moguet.cpp:978
 msgid "Required schema version"
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the literal PKGBUILD artifact identity.
-#: src/moguet.cpp:979
+#: src/moguet.cpp:983
 #, c++-format
 msgid "{} review policy"
 msgstr ""
 
-#: src/moguet.cpp:982
+#: src/moguet.cpp:986
 msgid "Repository update diff policy"
 msgstr ""
 
-#: src/moguet.cpp:985
+#: src/moguet.cpp:989
 msgid "Source-build mode"
 msgstr ""
 
@@ -7384,8 +7384,8 @@ msgstr ""
 msgid "{} set source-build unexpectedly produced a singular update-status result."
 msgstr ""
 
-#: src/source_build.cpp:1061 src/source_install.cpp:383
-#: src/system_source_upgrade.cpp:620
+#: src/source_build.cpp:1061 src/source_install.cpp:389
+#: src/system_source_upgrade.cpp:622
 msgid "Unknown source-build execution status."
 msgstr ""
 
@@ -7398,146 +7398,146 @@ msgstr ""
 msgid "Registered source upgrade does not support split {} preference {} from {} {}; this route requires a singular package identity."
 msgstr ""
 
-#: src/source_install.cpp:122
+#: src/source_install.cpp:125
 #, c++-format
 msgid "Registered source upgrade cannot enforce a selected {} dependency provider."
 msgstr ""
 
-#: src/source_install.cpp:137
+#: src/source_install.cpp:140
 #, c++-format
 msgid "{} required artifact target projection failed for {}."
 msgstr ""
 
-#: src/source_install.cpp:150 src/source_install.cpp:757
+#: src/source_install.cpp:153 src/source_install.cpp:763
 #, c++-format
 msgid "{} required artifact target projection omitted {}."
 msgstr ""
 
-#: src/source_install.cpp:275
+#: src/source_install.cpp:280
 msgid "Installed package metadata name does not match the selected repository provider identity."
 msgstr ""
 
-#: src/source_install.cpp:306
+#: src/source_install.cpp:311
 msgid "Selected repository provider install reasons cannot be represented by one package transaction."
 msgstr ""
 
-#: src/source_install.cpp:338
+#: src/source_install.cpp:343
 #, c++-format
 msgid "Installing selected repository providers: {}"
 msgstr ""
 
-#: src/source_install.cpp:404
+#: src/source_install.cpp:410
 #, c++-format
 msgid "{} source-build result is incoherent for presentation."
 msgstr ""
 
-#: src/source_install.cpp:422
+#: src/source_install.cpp:428
 #, c++-format
 msgid "{} source-build child result is incoherent for presentation."
 msgstr ""
 
-#: src/source_install.cpp:429
+#: src/source_install.cpp:435
 #, c++-format
 msgid "  required child: {} -> {} {} (explicit): installed"
 msgstr ""
 
-#: src/source_install.cpp:438
+#: src/source_install.cpp:444
 #, c++-format
 msgid "  required child: {} -> {} {} (explicit): skipped as needed ({})"
 msgstr ""
 
-#: src/source_install.cpp:447
+#: src/source_install.cpp:453
 #, c++-format
 msgid "  required child: {} -> {} {} (dependency): installed"
 msgstr ""
 
-#: src/source_install.cpp:456
+#: src/source_install.cpp:462
 #, c++-format
 msgid "  required child: {} -> {} {} (dependency): skipped as needed ({})"
 msgstr ""
 
-#: src/source_install.cpp:463
+#: src/source_install.cpp:469
 #, c++-format
 msgid "{} source-build child result has an unknown install reason or outcome."
 msgstr ""
 
-#: src/source_install.cpp:473
+#: src/source_install.cpp:479
 #, c++-format
 msgid "{} unselected artifact identity is incoherent for presentation."
 msgstr ""
 
-#: src/source_install.cpp:536
+#: src/source_install.cpp:542
 msgid "Cannot seed cache for an empty source-build invocation."
 msgstr ""
 
-#: src/source_install.cpp:554
+#: src/source_install.cpp:560
 msgid "Production source-build work items use different cache authorities."
 msgstr ""
 
-#: src/source_install.cpp:564
+#: src/source_install.cpp:570
 msgid "Production source-build invocation cache authority changed."
 msgstr ""
 
-#: src/source_install.cpp:579
+#: src/source_install.cpp:585
 msgid "Cannot activate cache for an empty source-build invocation."
 msgstr ""
 
-#: src/source_install.cpp:583
+#: src/source_install.cpp:589
 msgid "Local source-build dependency invocation has no prepared cache authority."
 msgstr ""
 
-#: src/source_install.cpp:608
+#: src/source_install.cpp:614
 msgid "Production source-build invocation has no prepared cache authority."
 msgstr ""
 
-#: src/source_install.cpp:627
+#: src/source_install.cpp:633
 msgid "Failed to inspect selected repository provider install reasons with an unknown exception."
 msgstr ""
 
-#: src/source_install.cpp:648 src/source_install.cpp:944
-#: src/system_source_upgrade.cpp:1597
+#: src/source_install.cpp:654 src/source_install.cpp:950
+#: src/system_source_upgrade.cpp:1672
 msgid "Failed to install selected repository providers."
 msgstr ""
 
-#: src/source_install.cpp:657 src/system_source_upgrade.cpp:1644
+#: src/source_install.cpp:663 src/system_source_upgrade.cpp:1719
 msgid "Failed to install selected repository providers with an unknown exception."
 msgstr ""
 
-#: src/source_install.cpp:669
+#: src/source_install.cpp:675
 msgid "Production source-build work item has no prepared cache authority."
 msgstr ""
 
-#: src/source_install.cpp:717
+#: src/source_install.cpp:723
 #, c++-format
 msgid "{} info for {} does not include {}."
 msgstr ""
 
-#: src/source_install.cpp:811
+#: src/source_install.cpp:817
 #, c++-format
 msgid "{} required artifact target projection failed before source-build work-item preparation."
 msgstr ""
 
-#: src/source_install.cpp:858
+#: src/source_install.cpp:864
 #, c++-format
 msgid "{} set source-build execution requires an {} {} work item."
 msgstr ""
 
-#: src/source_install.cpp:864
+#: src/source_install.cpp:870
 #, c++-format
 msgid "{} set source-build execution does not support only-if-updated requests."
 msgstr ""
 
-#: src/source_install.cpp:870 src/source_install.cpp:891
+#: src/source_install.cpp:876 src/source_install.cpp:897
 #, c++-format
 msgid "Building {} {}: {}"
 msgstr ""
 
-#: src/source_install.cpp:874 src/source_install.cpp:895
+#: src/source_install.cpp:880 src/source_install.cpp:901
 #, c++-format
 msgid "Target package(s): {}"
 msgstr ""
 
-#: src/source_install.cpp:915
+#: src/source_install.cpp:921
 #, c++-format
 msgid "Failed while building/installing {} {} ({}): {}"
 msgstr ""
@@ -7679,123 +7679,123 @@ msgstr ""
 msgid "The system upgrade completed, but the post-upgrade package metadata snapshot failed: {}"
 msgstr ""
 
-#: src/system_source_upgrade.cpp:174
+#: src/system_source_upgrade.cpp:175
 #, c++-format
 msgid "Failed to query installed package metadata for {}: {}"
 msgstr ""
 
-#: src/system_source_upgrade.cpp:297
+#: src/system_source_upgrade.cpp:299
 msgid "The system/source result is inconsistent after an unexpected exception."
 msgstr ""
 
-#: src/system_source_upgrade.cpp:299
+#: src/system_source_upgrade.cpp:301
 #, c++-format
 msgid "The system/source result is inconsistent after an unexpected exception: {}"
 msgstr ""
 
-#: src/system_source_upgrade.cpp:306
+#: src/system_source_upgrade.cpp:308
 msgid "The system result is unavailable because an unexpected exception occurred after the phase started."
 msgstr ""
 
-#: src/system_source_upgrade.cpp:308 src/upgrade_all_operation.cpp:250
+#: src/system_source_upgrade.cpp:310 src/upgrade_all_operation.cpp:251
 #, c++-format
 msgid "The system result is unavailable because an unexpected exception occurred after the phase started: {}"
 msgstr ""
 
-#: src/system_source_upgrade.cpp:329
+#: src/system_source_upgrade.cpp:331
 msgid "The registered source result is unavailable because an unexpected exception occurred after the phase started."
 msgstr ""
 
-#: src/system_source_upgrade.cpp:331 src/upgrade_all_operation.cpp:263
+#: src/system_source_upgrade.cpp:333 src/upgrade_all_operation.cpp:264
 #, c++-format
 msgid "The registered source result is unavailable because an unexpected exception occurred after the phase started: {}"
 msgstr ""
 
-#: src/system_source_upgrade.cpp:406
+#: src/system_source_upgrade.cpp:408
 #, c++-format
 msgid "Failed to snapshot local package versions before the system upgrade: {}"
 msgstr ""
 
-#: src/system_source_upgrade.cpp:428
+#: src/system_source_upgrade.cpp:430
 #, c++-format
 msgid "Failed to snapshot local package versions after the system upgrade: {}"
 msgstr ""
 
-#: src/system_source_upgrade.cpp:849
+#: src/system_source_upgrade.cpp:922
 msgid "Source preference enumeration failed with an unknown exception."
 msgstr ""
 
-#: src/system_source_upgrade.cpp:859
+#: src/system_source_upgrade.cpp:932
 #, c++-format
 msgid "Source preference enumeration found a non-regular entry: {}"
 msgstr ""
 
-#: src/system_source_upgrade.cpp:863
+#: src/system_source_upgrade.cpp:936
 #, c++-format
 msgid "Source preference enumeration found an invalid entry name: {}"
 msgstr ""
 
-#: src/system_source_upgrade.cpp:972
+#: src/system_source_upgrade.cpp:1046
 #, c++-format
 msgid "The registered source preference disappeared before preparation: {}"
 msgstr ""
 
-#: src/system_source_upgrade.cpp:1021
+#: src/system_source_upgrade.cpp:1096
 msgid "Source identity resolution failed with an unknown exception."
 msgstr ""
 
-#: src/system_source_upgrade.cpp:1079
+#: src/system_source_upgrade.cpp:1154
 msgid "Source invocation constraint preflight failed with an unknown exception."
 msgstr ""
 
-#: src/system_source_upgrade.cpp:1126
+#: src/system_source_upgrade.cpp:1201
 msgid "Source work-item preparation failed with an unknown exception."
 msgstr ""
 
-#: src/system_source_upgrade.cpp:1156
+#: src/system_source_upgrade.cpp:1231
 msgid "Source invocation preparation failed with an unknown exception."
 msgstr ""
 
-#: src/system_source_upgrade.cpp:1285
+#: src/system_source_upgrade.cpp:1360
 msgid "The prepared system/source upgrade is invalid or has already been consumed."
 msgstr ""
 
-#: src/system_source_upgrade.cpp:1300
+#: src/system_source_upgrade.cpp:1375
 msgid "The prepared system/source upgrade options differ from the execution options."
 msgstr ""
 
-#: src/system_source_upgrade.cpp:1316
+#: src/system_source_upgrade.cpp:1391
 msgid "The prepared system/source upgrade source correlation is inconsistent."
 msgstr ""
 
-#: src/system_source_upgrade.cpp:1394 src/system_source_upgrade.cpp:1399
+#: src/system_source_upgrade.cpp:1469 src/system_source_upgrade.cpp:1474
 msgid "The update failed."
 msgstr ""
 
-#: src/system_source_upgrade.cpp:1502
+#: src/system_source_upgrade.cpp:1577
 msgid "The post-upgrade package metadata snapshot failed with an unknown exception."
 msgstr ""
 
-#: src/system_source_upgrade.cpp:1546
+#: src/system_source_upgrade.cpp:1621
 msgid "The prepared source work item is missing after the system upgrade."
 msgstr ""
 
-#: src/system_source_upgrade.cpp:1562
+#: src/system_source_upgrade.cpp:1637
 #, c++-format
 msgid "The system upgrade completed, but the authoritative post-upgrade installed package snapshot is missing for {}; source processing did not start."
 msgstr ""
 
-#: src/system_source_upgrade.cpp:1571
+#: src/system_source_upgrade.cpp:1646
 #, c++-format
 msgid "The system upgrade completed, but the post-upgrade package metadata query failed for {}: {} Source processing did not start."
 msgstr ""
 
-#: src/system_source_upgrade.cpp:1670
+#: src/system_source_upgrade.cpp:1745
 #, c++-format
 msgid "Ignoring invalid source-build preference filename: {}"
 msgstr ""
 
-#: src/system_source_upgrade.cpp:1877
+#: src/system_source_upgrade.cpp:1952
 msgid "An unknown exception occurred."
 msgstr ""
 
@@ -7970,107 +7970,107 @@ msgstr ""
 msgid "Prepared {} explicit source correlation is inconsistent."
 msgstr ""
 
-#: src/upgrade_all_operation.cpp:528
+#: src/upgrade_all_operation.cpp:529
 #, c++-format
 msgid "The system/source phase completed without a fully successful typed result; {} processing did not start."
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the literal
 #. service name "AUR".
-#: src/upgrade_all_operation.cpp:620
+#: src/upgrade_all_operation.cpp:621
 #, c++-format
 msgid "The duplicate-excluded {} target has no planner/query correlation."
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the literal
 #. service name "AUR".
-#: src/upgrade_all_operation.cpp:640
+#: src/upgrade_all_operation.cpp:641
 #, c++-format
 msgid "The duplicate-excluded {} target maps outside the original query plan."
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the literal
 #. service name "AUR".
-#: src/upgrade_all_operation.cpp:662
+#: src/upgrade_all_operation.cpp:663
 #, c++-format
 msgid "The duplicate-excluded {} target identity differs from its original query entry."
 msgstr ""
 
 #. TRANSLATORS: The placeholders are the literal
 #. service name "AUR" and correlation label "PR3".
-#: src/upgrade_all_operation.cpp:744
+#: src/upgrade_all_operation.cpp:745
 #, c++-format
 msgid "The externally satisfied {} build unit has no {} root-role correlation."
 msgstr ""
 
 #. TRANSLATORS: The placeholders are the literal
 #. service name "AUR" and correlation label "PR3".
-#: src/upgrade_all_operation.cpp:766
+#: src/upgrade_all_operation.cpp:767
 #, c++-format
 msgid "The externally satisfied {} build-unit child identity differs from its {} correlation."
 msgstr ""
 
-#: src/upgrade_all_operation.cpp:831
+#: src/upgrade_all_operation.cpp:832
 #, c++-format
 msgid "The {} update query completed with recoverable failures; filtered execution did not start."
 msgstr ""
 
-#: src/upgrade_all_operation.cpp:1008
+#: src/upgrade_all_operation.cpp:1009
 msgid "The registered source preference has no package name."
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the literal
 #. field name "PackageBase".
-#: src/upgrade_all_operation.cpp:1026
+#: src/upgrade_all_operation.cpp:1027
 #, c++-format
 msgid "The registered source preference has no prepared {} identity."
 msgstr ""
 
-#: src/upgrade_all_operation.cpp:1043
+#: src/upgrade_all_operation.cpp:1044
 msgid "The registered source preference has no prepared canonical source identity."
 msgstr ""
 
-#: src/upgrade_all_operation.cpp:1054
+#: src/upgrade_all_operation.cpp:1055
 msgid "The registered source preferences contain a duplicate original index."
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the literal
 #. command name "upgrade-all".
-#: src/upgrade_all_operation.cpp:1173
+#: src/upgrade_all_operation.cpp:1192
 #, c++-format
 msgid "The prepared registered source identity cannot be adapted safely for {} planning."
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the display spelling
 #. of the literal command name "upgrade-all".
-#: src/upgrade_all_operation.cpp:1229
+#: src/upgrade_all_operation.cpp:1248
 #, c++-format
 msgid "{} preparation failed with an unknown exception."
 msgstr ""
 
-#: src/upgrade_all_operation.cpp:1357
+#: src/upgrade_all_operation.cpp:1376
 msgid "System/source execution failed with an unknown exception."
 msgstr ""
 
-#: src/upgrade_all_operation.cpp:1387
+#: src/upgrade_all_operation.cpp:1406
 #, c++-format
 msgid "The system/source result no longer matches the prepared {} source intent snapshot."
 msgstr ""
 
-#: src/upgrade_all_operation.cpp:1450
+#: src/upgrade_all_operation.cpp:1469
 msgid "Foreign inventory configuration resolution failed with an unknown exception."
 msgstr ""
 
-#: src/upgrade_all_operation.cpp:1479
+#: src/upgrade_all_operation.cpp:1498
 msgid "Foreign inventory read failed with an unknown exception."
 msgstr ""
 
-#: src/upgrade_all_operation.cpp:1534
+#: src/upgrade_all_operation.cpp:1553
 #, c++-format
 msgid "The {} update query failed with an unknown exception."
 msgstr ""
 
-#: src/upgrade_all_operation.cpp:1618
+#: src/upgrade_all_operation.cpp:1637
 #, c++-format
 msgid "The filtered {} operation failed with an unknown exception."
 msgstr ""

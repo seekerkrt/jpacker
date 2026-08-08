@@ -185,6 +185,9 @@ void test_configured_repository_order() {
     expect(
             package.repository_name == "core" &&
                     package.configured_order == 0 &&
+                    package.configured_repository_order ==
+                            std::optional<std::vector<std::string>>{
+                                    {"core", "extra"}} &&
                     package.package_name == "shared-package" &&
                     package.package_version.has_value() &&
                     package.package_version->version() != nullptr &&
@@ -223,7 +226,10 @@ void test_absent_before_later_source_failure() {
             "absence before later source failure");
     expect(
             failure.repository_name ==
-                    std::optional<std::string>{"extra"},
+                            std::optional<std::string>{"extra"} &&
+                    failure.configured_repository_order ==
+                            std::optional<std::vector<std::string>>{
+                                    {"core", "extra"}},
             "Partial exact failure lost source identity");
 }
 
@@ -275,6 +281,10 @@ void test_repository_provider_capabilities() {
                     "repository provider capabilities");
     expect(snapshot.source_failures.empty(),
            "Complete provider snapshot has source failures");
+    expect(
+            snapshot.configured_repository_order ==
+                    std::optional<std::vector<std::string>>{{"core"}},
+            "Provider snapshot lost configured repository authority");
     expect(snapshot.candidates.size() == 2,
            "Provider enumeration candidate count differs");
 
@@ -282,6 +292,9 @@ void test_repository_provider_capabilities() {
     expect(
             require_repository_origin(equality, "equality provider")
                             .repository_name == "core" &&
+                    require_repository_origin(equality, "equality provider")
+                                    .configured_order ==
+                            std::optional<std::size_t>{0} &&
                     equality.package_name == "provider-a" &&
                     equality.provided_dependency_specification ==
                             "virtual-api=2.1-3" &&

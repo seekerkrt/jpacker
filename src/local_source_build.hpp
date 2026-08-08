@@ -7,6 +7,7 @@
 #include "local_source_workspace.hpp"
 
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -47,6 +48,7 @@ class LocalSourceBuildMetadata final {
             const LocalSourceRoot&, SourceBuildEnvironment, std::string,
             std::string_view);
     friend class PreparedLocalSourceBuild;
+    friend class LocalSourceBuildProjectionAuthority;
     friend PreparedLocalSourceBuild prepare_local_source_build(
             struct LocalSourceBuildRequest request);
 
@@ -89,10 +91,104 @@ struct LocalSourceBuildRequest {
     ArtifactMakepkgBuildOptions         makepkg_options;
 };
 
+// PreparedLocalSourceBuild内でcoherence確認済みのrequestだけから生成する
+// read-only seam。local source identity、採用metadata、environment/provenance、
+// architecture、LocalBuildPlanを別invocationから組み合わせられない。
+class LocalSourceBuildProjectionAuthority final {
+public:
+    LocalSourceBuildProjectionAuthority(
+            const LocalSourceBuildProjectionAuthority&) = delete;
+    LocalSourceBuildProjectionAuthority& operator=(
+            const LocalSourceBuildProjectionAuthority&) = delete;
+    LocalSourceBuildProjectionAuthority(
+            LocalSourceBuildProjectionAuthority&&) noexcept = default;
+    LocalSourceBuildProjectionAuthority& operator=(
+            LocalSourceBuildProjectionAuthority&&) noexcept = default;
+    ~LocalSourceBuildProjectionAuthority() = default;
+
+    [[nodiscard]] const LocalSourceRoot& source_root() const noexcept {
+        return source_root_.get();
+    }
+    [[nodiscard]] const LocalBuildPlan& local_build_plan() const noexcept {
+        return local_build_plan_.get();
+    }
+    [[nodiscard]] const LocalPackageMetadata& accepted_metadata()
+            const noexcept {
+        return accepted_metadata_.get();
+    }
+    [[nodiscard]] const SourceBuildEnvironment& source_environment()
+            const noexcept {
+        return source_environment_.get();
+    }
+    [[nodiscard]] const std::string& effective_architecture()
+            const noexcept {
+        return effective_architecture_.get();
+    }
+    [[nodiscard]] LocalSourceBuildMetadataProvenance provenance()
+            const noexcept {
+        return provenance_;
+    }
+    [[nodiscard]] const LocalSourceDirectoryIdentity&
+    source_directory_identity() const noexcept {
+        return source_directory_identity_.get();
+    }
+    [[nodiscard]] const LocalSourceFileSnapshot& pkgbuild_snapshot()
+            const noexcept {
+        return pkgbuild_snapshot_.get();
+    }
+    [[nodiscard]] bool has_complete_identity() const noexcept {
+        return !source_root().canonical_path().empty() &&
+               !accepted_metadata().package_base.empty() &&
+               !effective_architecture().empty() &&
+               source_root().directory_identity() ==
+                       source_directory_identity() &&
+               source_root().pkgbuild() == pkgbuild_snapshot() &&
+               accepted_metadata() ==
+                       local_build_plan().local_metadata() &&
+               effective_architecture() ==
+                       local_build_plan().effective_architecture();
+    }
+
+private:
+    explicit LocalSourceBuildProjectionAuthority(
+            const LocalSourceBuildRequest& request) noexcept;
+    LocalSourceBuildProjectionAuthority(
+            const LocalSourceRoot& source_root,
+            const LocalBuildPlan& local_build_plan,
+            const LocalPackageMetadata& accepted_metadata,
+            const SourceBuildEnvironment& source_environment,
+            const std::string& effective_architecture,
+            LocalSourceBuildMetadataProvenance provenance,
+            const LocalSourceDirectoryIdentity& source_directory_identity,
+            const LocalSourceFileSnapshot& pkgbuild_snapshot) noexcept
+        : source_root_(source_root), local_build_plan_(local_build_plan),
+          accepted_metadata_(accepted_metadata),
+          source_environment_(source_environment),
+          effective_architecture_(effective_architecture),
+          provenance_(provenance),
+          source_directory_identity_(source_directory_identity),
+          pkgbuild_snapshot_(pkgbuild_snapshot) {}
+
+    std::reference_wrapper<const LocalSourceRoot> source_root_;
+    std::reference_wrapper<const LocalBuildPlan> local_build_plan_;
+    std::reference_wrapper<const LocalPackageMetadata> accepted_metadata_;
+    std::reference_wrapper<const SourceBuildEnvironment>
+            source_environment_;
+    std::reference_wrapper<const std::string> effective_architecture_;
+    LocalSourceBuildMetadataProvenance provenance_;
+    std::reference_wrapper<const LocalSourceDirectoryIdentity>
+            source_directory_identity_;
+    std::reference_wrapper<const LocalSourceFileSnapshot> pkgbuild_snapshot_;
+
+    friend class PreparedLocalSourceBuild;
+    friend struct UnifiedPlanProjectionTestAccess;
+};
+
 class PreparedLocalSourceBuild final {
     LocalSourceBuildRequest                    request_;
     std::string                                package_base_;
     std::vector<RequiredPackageArtifactTarget> required_targets_;
+    LocalSourceBuildProjectionAuthority        projection_authority_;
 
     PreparedLocalSourceBuild(
             LocalSourceBuildRequest request,
@@ -110,10 +206,15 @@ public:
     PreparedLocalSourceBuild(const PreparedLocalSourceBuild&) = delete;
     PreparedLocalSourceBuild& operator=(
             const PreparedLocalSourceBuild&) = delete;
-    PreparedLocalSourceBuild(PreparedLocalSourceBuild&&) noexcept = default;
+    PreparedLocalSourceBuild(PreparedLocalSourceBuild&& other) noexcept;
     PreparedLocalSourceBuild& operator=(
             PreparedLocalSourceBuild&&) = delete;
     ~PreparedLocalSourceBuild() noexcept = default;
+
+    [[nodiscard]] const LocalSourceBuildProjectionAuthority&
+    projection_authority() const noexcept {
+        return projection_authority_;
+    }
 };
 
 enum class LocalSourceBuildFailurePhase {

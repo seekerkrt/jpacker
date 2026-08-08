@@ -555,32 +555,48 @@ void require_selected_aur_root_plan_correlation(
 
 } // namespace
 
-std::optional<PreparedRootPackageInstall> prepare_root_package_install(
+RootPackageInstallPreparation prepare_root_package_install(
         const ParsedCliArguments& parsed,
         RootPackageSelectionInvocation invocation,
         const AppConfig& config) {
+    auto issue_failure = [](RootPackageInstallPreparationIssue issue) {
+        RootPackageInstallPreparationFailure failure;
+        failure.details.push_back(std::move(issue));
+        return failure;
+    };
     RootPackageSelectionSession selection_session =
             make_root_package_selection_session(
                     root_package_selection_interaction(),
                     config.no_confirm);
     if(invocation.query.empty()) {
-        Logger::error(localization::translate_message(
-                "Package selection query must not be empty."));
-        return std::nullopt;
+        const std::string diagnostic = localization::translate_message(
+                "Package selection query must not be empty.");
+        Logger::error(diagnostic);
+        return issue_failure(RootPackageInstallPreparationIssue{
+                RootPackageInstallPreparationIssueKind::EmptyQuery,
+                std::nullopt, std::nullopt, std::nullopt, diagnostic});
     }
     if(config.rm_deps || parsed.cli_overrides.rm_deps) {
         // TRANSLATORS: The placeholder is the literal CLI option --rmdeps.
-        Logger::error(localization::format_translated_message(
+        const std::string diagnostic = localization::format_translated_message(
                 "Interactive package selection does not support {}.",
-                "--rmdeps"));
-        return std::nullopt;
+                "--rmdeps");
+        Logger::error(diagnostic);
+        return issue_failure(RootPackageInstallPreparationIssue{
+                RootPackageInstallPreparationIssueKind::
+                        RemoveDependenciesUnsupported,
+                std::nullopt, std::nullopt, std::nullopt, diagnostic});
     }
 
     // POLICY(#217): gate must be observable before official/AUR candidate query.
     if(!selection_session.is_interactive()) {
+        const RootPackageSelectionInputGate input_gate =
+                selection_session.input_gate();
         report_root_package_selection_input_gate(
-                selection_session.input_gate());
-        return std::nullopt;
+                input_gate);
+        return issue_failure(RootPackageInstallPreparationIssue{
+                RootPackageInstallPreparationIssueKind::InputGateUnavailable,
+                input_gate, std::nullopt, std::nullopt, {}});
     }
 
     RootPackageSearchResult search_result = search_root_package_candidates(
@@ -590,7 +606,19 @@ std::optional<PreparedRootPackageInstall> prepare_root_package_install(
             std::get_if<RootPackageSearchSnapshot>(&search_result);
     if(snapshot == nullptr) {
         report_root_package_search_failure(search_result);
-        return std::nullopt;
+        RootPackageInstallPreparationFailure failure;
+        std::visit(
+                [&failure](auto&& detail) {
+                    using Detail = std::decay_t<decltype(detail)>;
+                    if constexpr(!std::is_same_v<
+                                         Detail,
+                                         RootPackageSearchSnapshot>) {
+                        failure.details.push_back(
+                                std::forward<decltype(detail)>(detail));
+                    }
+                },
+                std::move(search_result));
+        return failure;
     }
 
     RootPackageSelectionSessionResult selection_result =
@@ -601,26 +629,63 @@ std::optional<PreparedRootPackageInstall> prepare_root_package_install(
        unavailable != nullptr) {
         switch(unavailable->reason) {
         case RootPackageSelectionUnavailableReason::NoCandidates:
-            Logger::error(localization::translate_message(
-                    "No package candidates were found."));
-            return std::nullopt;
+        {
+            const std::string diagnostic = localization::translate_message(
+                    "No package candidates were found.");
+            Logger::error(diagnostic);
+            RootPackageInstallPreparationFailure failure = issue_failure(
+                    RootPackageInstallPreparationIssue{
+                            RootPackageInstallPreparationIssueKind::
+                                    SelectionUnavailable,
+                            std::nullopt, unavailable->reason, std::nullopt,
+                            diagnostic});
+            failure.discovery_snapshot.emplace(std::move(*snapshot));
+            return failure;
+        }
         case RootPackageSelectionUnavailableReason::NonInteractiveInput:
             report_root_package_selection_input_gate(
                     RootPackageSelectionInputGate::NonTty);
-            return std::nullopt;
+            break;
         case RootPackageSelectionUnavailableReason::NoConfirm:
             report_root_package_selection_input_gate(
                     RootPackageSelectionInputGate::NoConfirm);
-            return std::nullopt;
+            break;
+        default:
+            throw std::logic_error(localization::translate_message(
+                    "Package selection returned an unknown unavailable reason."));
         }
-        throw std::logic_error(localization::translate_message(
-                "Package selection returned an unknown unavailable reason."));
+        RootPackageInstallPreparationFailure failure = issue_failure(
+                RootPackageInstallPreparationIssue{
+                        RootPackageInstallPreparationIssueKind::
+                                SelectionUnavailable,
+                        unavailable->reason ==
+                                        RootPackageSelectionUnavailableReason::
+                                                NonInteractiveInput
+                                ? std::optional<RootPackageSelectionInputGate>{
+                                          RootPackageSelectionInputGate::
+                                                  NonTty}
+                                : std::optional<RootPackageSelectionInputGate>{
+                                          RootPackageSelectionInputGate::
+                                                  NoConfirm},
+                        unavailable->reason, std::nullopt, {}});
+        failure.discovery_snapshot.emplace(std::move(*snapshot));
+        return failure;
     }
-    if(std::holds_alternative<CancelledRootPackageSelection>(
-               selection_result)) {
-        Logger::error(localization::translate_message(
-                "Package selection was cancelled."));
-        return std::nullopt;
+    if(const auto* cancelled =
+               std::get_if<CancelledRootPackageSelection>(
+                       &selection_result);
+       cancelled != nullptr) {
+        const std::string diagnostic = localization::translate_message(
+                "Package selection was cancelled.");
+        Logger::error(diagnostic);
+        RootPackageInstallPreparationFailure failure = issue_failure(
+                RootPackageInstallPreparationIssue{
+                        RootPackageInstallPreparationIssueKind::
+                                SelectionCancelled,
+                        std::nullopt, std::nullopt, cancelled->reason,
+                        diagnostic});
+        failure.discovery_snapshot.emplace(std::move(*snapshot));
+        return failure;
     }
 
     const RootPackageSelection& selection =
@@ -629,21 +694,34 @@ std::optional<PreparedRootPackageInstall> prepare_root_package_install(
             project_root_package_routing(selection);
     if(!routing.is_valid()) {
         // Unsafe repository identity is deliberately not echoed.
-        Logger::error(localization::format_translated_message(
+        const std::string diagnostic = localization::format_translated_message(
                 // TRANSLATORS: The placeholder is the literal pacman program identity.
                 "A selected repository package cannot be represented as an exact {} target.",
-                "pacman"));
-        return std::nullopt;
+                "pacman");
+        Logger::error(diagnostic);
+        RootPackageInstallPreparationFailure failure;
+        failure.details.push_back(*routing.failure());
+        failure.discovery_snapshot.emplace(std::move(*snapshot));
+        return failure;
     }
     const RootPackageRoutingProjection& projection = *routing.projection();
 
     if(projection.aur_targets().empty() &&
        has_source_build_cli_override(parsed)) {
-        Logger::error(localization::format_translated_message(
+        const std::string diagnostic = localization::format_translated_message(
                 // TRANSLATORS: The placeholder is the AUR project identity.
                 "Source-build review and build-mode options require at least one selected {} package.",
-                "AUR"));
-        return std::nullopt;
+                "AUR");
+        Logger::error(diagnostic);
+        RootPackageInstallPreparationFailure failure = issue_failure(
+                RootPackageInstallPreparationIssue{
+                        RootPackageInstallPreparationIssueKind::
+                                SourceOptionsWithoutAurTarget,
+                        std::nullopt, std::nullopt, std::nullopt,
+                        diagnostic});
+        failure.discovery_snapshot.emplace(std::move(*snapshot));
+        failure.routing_projection.emplace(projection);
+        return failure;
     }
 
     PreparedRootPackageInstall prepared;
@@ -654,35 +732,74 @@ std::optional<PreparedRootPackageInstall> prepare_root_package_install(
         prepared.exact_repository_targets.push_back(
                 target.exact_package_target());
     }
+    prepared.discovery_snapshot.emplace(
+            std::get<RootPackageSearchSnapshot>(std::move(search_result)));
+    prepared.routing_projection.emplace(projection);
 
     if(projection.aur_targets().empty()) return prepared;
 
     // All AUR roots share one plan so same-PackageBase selected children become
     // one ordered work item. This preserves source-local selection order while
     // keeping dependency units before their consumers.
-    require_supported_production_source_build_options(config);
     std::vector<std::string> aur_package_names;
     aur_package_names.reserve(projection.aur_targets().size());
     for(const auto& target : projection.aur_targets()) {
         aur_package_names.push_back(target.identity().package_name);
     }
 
-    BuildPlan plan = resolve_build_plan(
-            aur_package_names,
-            provider_selection_callback(config));
-    require_selected_aur_root_plan_correlation(
-            projection.aur_targets(), plan);
-    require_executable_build_plan(
-            join_root_package_names(projection.aur_targets()), plan);
+    BuildPlan plan;
+    bool plan_resolved = false;
+    try {
+        require_supported_production_source_build_options(config);
+        plan = resolve_build_plan(
+                aur_package_names,
+                provider_selection_callback(config));
+        plan_resolved = true;
+        require_selected_aur_root_plan_correlation(
+                projection.aur_targets(), plan);
+        require_executable_build_plan(
+                join_root_package_names(projection.aur_targets()), plan);
+    } catch(const std::exception& error) {
+        Logger::error(error.what());
+        RootPackageInstallPreparationFailure failure = issue_failure(
+                RootPackageInstallPreparationIssue{
+                        RootPackageInstallPreparationIssueKind::
+                                BuildPlanPreparationFailed,
+                        std::nullopt, std::nullopt, std::nullopt,
+                        error.what()});
+        failure.discovery_snapshot =
+                std::move(prepared.discovery_snapshot);
+        failure.routing_projection =
+                std::move(prepared.routing_projection);
+        if(plan_resolved) failure.aur_build_plan.emplace(std::move(plan));
+        return failure;
+    }
 
-    std::vector<ProductionSourceBuildWorkItem> work_items =
-            prepare_aur_source_build_work_items(
-                    plan, false, prepared.needed);
-    // Do not prepare/seed a cache here. execute_prepared_source_build_invocation
-    // activates it only after the selected repository transaction succeeds.
-    prepared.source_invocation =
-            prepare_production_source_build_invocation(
-                    std::move(work_items), config);
+    try {
+        std::vector<ProductionSourceBuildWorkItem> work_items =
+                prepare_aur_source_build_work_items(
+                        plan, false, prepared.needed);
+        // Do not prepare/seed a cache here. execute activates it only after
+        // the selected repository transaction succeeds.
+        prepared.source_invocation =
+                prepare_production_source_build_invocation(
+                        std::move(work_items), config);
+    } catch(const std::exception& error) {
+        Logger::error(error.what());
+        RootPackageInstallPreparationFailure failure = issue_failure(
+                RootPackageInstallPreparationIssue{
+                        RootPackageInstallPreparationIssueKind::
+                                SourceWorkPreparationFailed,
+                        std::nullopt, std::nullopt, std::nullopt,
+                        error.what()});
+        failure.discovery_snapshot =
+                std::move(prepared.discovery_snapshot);
+        failure.routing_projection =
+                std::move(prepared.routing_projection);
+        failure.aur_build_plan.emplace(std::move(plan));
+        return failure;
+    }
+    prepared.aur_build_plan.emplace(std::move(plan));
     return prepared;
 }
 

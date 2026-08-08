@@ -28,6 +28,8 @@ struct RepositoryMetadataFailure {
     RepositoryMetadataFailureKind kind;
     std::optional<std::string>     repository_name;
     std::string                    diagnostic;
+    std::optional<std::vector<std::string>> configured_repository_order =
+            std::nullopt;
 
     bool operator==(const RepositoryMetadataFailure&) const = default;
 };
@@ -37,11 +39,16 @@ struct RepositoryPackagePresent {
     std::size_t configured_order = 0;
     std::string package_name;
     std::optional<ObservedVersion> package_version = std::nullopt;
+    std::optional<std::vector<std::string>> configured_repository_order =
+            std::nullopt;
 
     bool operator==(const RepositoryPackagePresent&) const = default;
 };
 
 struct RepositoryPackageNotFound {
+    std::optional<std::vector<std::string>> configured_repository_order =
+            std::nullopt;
+
     bool operator==(const RepositoryPackageNotFound&) const = default;
 };
 
@@ -53,6 +60,8 @@ using StrictRepositoryPackageQueryResult = std::variant<
 struct RepositoryProviderQuerySnapshot {
     std::vector<ProvidedDependency>      candidates;
     std::vector<RepositoryMetadataFailure> source_failures;
+    std::optional<std::vector<std::string>> configured_repository_order =
+            std::nullopt;
 
     [[nodiscard]] bool is_complete() const noexcept {
         return source_failures.empty();

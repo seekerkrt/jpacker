@@ -92,6 +92,7 @@ void add_repository_provider_candidates(
                 candidates,
                 ProvidedDependency::from_repository_constraint_metadata(
                         package.repository.repository_name,
+                        package.repository.configured_order,
                         package.package_name,
                         ProviderConstraintMetadata{
                                 provided.capability,
@@ -133,7 +134,11 @@ StrictRepositoryPackageQueryResult query_repository_package_strict(
     if(const auto* failure =
                std::get_if<RepositoryExactPackageObservationFailure>(&result);
        failure != nullptr) {
-        return repository_failure(failure->failure);
+        RepositoryMetadataFailure projected =
+                repository_failure(failure->failure);
+        projected.configured_repository_order =
+                configuration.repository_names;
+        return projected;
     }
 
     const RepositoryExactPackageObservation& observation =
@@ -146,7 +151,8 @@ StrictRepositoryPackageQueryResult query_repository_package_strict(
                     package->repository.repository_name,
                     package->repository.configured_order,
                     package->package_name,
-                    package->package_version};
+                    package->package_version,
+                    observation.configured_repository_order};
         }
         if(std::holds_alternative<RepositoryExactPackageAbsent>(
                    source_result)) {
@@ -156,14 +162,18 @@ StrictRepositoryPackageQueryResult query_repository_package_strict(
         const RepositoryExactPackageSourceFailure& failure =
                 std::get<RepositoryExactPackageSourceFailure>(source_result);
         return std::visit(
-                [&failure](const auto& reason) {
-                    return repository_failure(
+                [&failure, &observation](const auto& reason) {
+                    RepositoryMetadataFailure projected = repository_failure(
                             reason,
                             failure.repository.repository_name);
+                    projected.configured_repository_order =
+                            observation.configured_repository_order;
+                    return projected;
                 },
                 failure.reason);
     }
-    return RepositoryPackageNotFound{};
+    return RepositoryPackageNotFound{
+            observation.configured_repository_order};
 }
 
 StrictRepositoryProvidersQueryResult query_repository_providers_strict(
@@ -182,12 +192,18 @@ StrictRepositoryProvidersQueryResult query_repository_providers_strict(
     if(const auto* failure =
                std::get_if<RepositoryProviderObservationFailure>(&result);
        failure != nullptr) {
-        return repository_failure(failure->failure);
+        RepositoryMetadataFailure projected =
+                repository_failure(failure->failure);
+        projected.configured_repository_order =
+                configuration.repository_names;
+        return projected;
     }
 
     RepositoryProviderQuerySnapshot snapshot;
     const RepositoryProviderObservation& observation =
             std::get<RepositoryProviderObservation>(result);
+    snapshot.configured_repository_order =
+            observation.configured_repository_order;
     for(const auto& source_result : observation.source_results) {
         if(const auto* source =
                    std::get_if<RepositoryProviderSourceObservation>(

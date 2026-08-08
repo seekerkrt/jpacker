@@ -25,6 +25,11 @@ struct RootPackageSearchCandidate {
 
 struct RootPackageSearchSnapshot {
     std::vector<RootPackageSearchCandidate> candidates;
+    // libalpm / pacman configuration order is retained independently from
+    // presentation sorting so downstream observations never reconstruct it.
+    // nullopt means that the enabled search scope did not query repository
+    // authority; it is distinct from a queried configuration with no entries.
+    std::optional<std::vector<std::string>> repository_order = std::nullopt;
 
     bool operator==(const RootPackageSearchSnapshot&) const = default;
 };

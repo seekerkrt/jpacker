@@ -6,9 +6,11 @@
 #include "trusted_cache.hpp"
 
 #include <cstddef>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -173,6 +175,44 @@ struct UpgradeAllOperationPreparedSnapshot {
     std::vector<UpgradeAllOperationWarning> warnings;
 };
 
+// Aggregate prepared capabilityが所有するread-only projection seam。
+// nested system/source authorityをborrowし、outer execution/cache capabilityは
+// unified observationへ公開しない。
+class UpgradeAllOperationProjectionAuthority final {
+public:
+    UpgradeAllOperationProjectionAuthority(
+            const UpgradeAllOperationProjectionAuthority&) = delete;
+    UpgradeAllOperationProjectionAuthority& operator=(
+            const UpgradeAllOperationProjectionAuthority&) = delete;
+    UpgradeAllOperationProjectionAuthority(
+            UpgradeAllOperationProjectionAuthority&&) noexcept = default;
+    UpgradeAllOperationProjectionAuthority& operator=(
+            UpgradeAllOperationProjectionAuthority&&) noexcept = default;
+    ~UpgradeAllOperationProjectionAuthority() = default;
+
+    [[nodiscard]] const UpgradeAllOperationPreparedSnapshot& snapshot()
+            const noexcept {
+        return snapshot_.get();
+    }
+    [[nodiscard]] const SystemSourceUpgradeProjectionAuthority&
+    system_source() const noexcept {
+        return system_source_.get();
+    }
+
+private:
+    UpgradeAllOperationProjectionAuthority(
+            const UpgradeAllOperationPreparedSnapshot& snapshot,
+            const SystemSourceUpgradeProjectionAuthority& system_source)
+        : snapshot_(snapshot), system_source_(system_source) {}
+
+    std::reference_wrapper<const UpgradeAllOperationPreparedSnapshot> snapshot_;
+    std::reference_wrapper<const SystemSourceUpgradeProjectionAuthority>
+            system_source_;
+
+    friend class PreparedUpgradeAllOperation;
+    friend struct UnifiedPlanProjectionTestAccess;
+};
+
 struct UpgradeAllForeignInventoryPhaseResult {
     UpgradeAllForeignInventoryPhaseStatus status =
             UpgradeAllForeignInventoryPhaseStatus::NotAttempted;
@@ -245,6 +285,8 @@ class PreparedUpgradeAllOperation final {
             const AppConfig& config);
 
     std::unique_ptr<Impl> impl_;
+    std::optional<UpgradeAllOperationProjectionAuthority>
+            projection_authority_;
 
 public:
     PreparedUpgradeAllOperation(const PreparedUpgradeAllOperation&) = delete;
@@ -257,6 +299,8 @@ public:
 
     bool is_valid() const noexcept;
     const UpgradeAllOperationPreparedSnapshot* snapshot() const noexcept;
+    const UpgradeAllOperationProjectionAuthority* projection_authority()
+            const noexcept;
 
 #ifdef MOGUET_ENABLE_UPGRADE_ALL_OPERATION_TEST_HOOKS
     void make_source_snapshot_inconsistent_for_test();
