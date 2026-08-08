@@ -744,6 +744,40 @@ void test_success_uses_snapshot_and_returns_correlated_artifacts() {
             "Explicit artifact cleanup did not remove the workspace");
 }
 
+void test_prepared_projection_authority_tracks_one_invocation() {
+    LocalBuildFixture fixture;
+    PreparedLocalSourceBuild prepared = prepare_local_source_build(
+            fixture.make_request());
+    const LocalSourceBuildProjectionAuthority& authority =
+            prepared.projection_authority();
+    expect(
+            authority.has_complete_identity() &&
+                    authority.source_root().canonical_path() ==
+                            fs::canonical(fixture.source_path()) &&
+                    authority.accepted_metadata().package_base ==
+                            PACKAGE_BASE &&
+                    authority.effective_architecture() == "x86_64" &&
+                    authority.source_environment()
+                            .ordered_assignments.empty() &&
+                    authority.provenance() ==
+                            LocalSourceBuildMetadataProvenance::
+                                    ExistingSrcinfo &&
+                    authority.source_directory_identity() ==
+                            authority.source_root().directory_identity() &&
+                    authority.pkgbuild_snapshot() ==
+                            authority.source_root().pkgbuild(),
+            "Prepared local projection authority mixed invocation state");
+
+    PreparedLocalSourceBuild moved(std::move(prepared));
+    const LocalSourceBuildProjectionAuthority& moved_authority =
+            moved.projection_authority();
+    expect(
+            moved_authority.has_complete_identity() &&
+                    moved_authority.source_root().canonical_path() ==
+                            fs::canonical(fixture.source_path()),
+            "Moved local projection authority retained moved-from borrows");
+}
+
 void test_cache_below_source_is_rejected_during_static_preflight() {
     LocalBuildFixture fixture;
     LocalSourceBuildRequest request = [&]() {
@@ -1230,6 +1264,9 @@ int main() {
         run_case(
                 "snapshot build and correlated artifacts",
                 test_success_uses_snapshot_and_returns_correlated_artifacts);
+        run_case(
+                "prepared projection invocation authority",
+                test_prepared_projection_authority_tracks_one_invocation);
         run_case(
                 "source and cache separation preflight",
                 test_cache_below_source_is_rejected_during_static_preflight);

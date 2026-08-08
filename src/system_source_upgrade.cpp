@@ -84,6 +84,7 @@ struct RegisteredSourceCorrelation {
 
 struct SystemSourceUpgradePreparationState {
     SystemSourceUpgradePreparedSnapshot snapshot;
+    std::optional<BuildPlan> aur_invocation_plan;
     std::optional<PreparedProductionSourceBuildInvocation> source_invocation;
     std::vector<RegisteredSourceCorrelation> correlations;
     SourceUpdateBaselines update_baselines;
@@ -119,7 +120,7 @@ SystemSourceUpgradeOptionSnapshot snapshot_options(const AppConfig& config) {
             config.user_config.build.mode == BuildMode::Rebuild,
             config.user_config.build.mode == BuildMode::Clean,
             config.rm_deps,
-            config.editor};
+            config.editor, false};
 }
 
 bool options_match(
@@ -135,7 +136,7 @@ bool options_match(
            snapshot.clean_build ==
                    (config.user_config.build.mode == BuildMode::Clean) &&
            snapshot.rm_deps == config.rm_deps &&
-           snapshot.editor == config.editor;
+           snapshot.editor == config.editor && !snapshot.needed;
 }
 
 std::string system_upgrade_command(const AppConfig& config) {
@@ -223,6 +224,7 @@ SystemSourceUpgradeResult make_result_from_state(
     result.warnings = std::move(state.warnings);
     result.issues = std::move(state.issues);
     result.diagnostics = std::move(state.diagnostics);
+    result.aur_invocation_plan = std::move(state.aur_invocation_plan);
     result.registered_source_results.reserve(
             result.prepared_snapshot.registered_sources.size());
     for(const auto& source : result.prepared_snapshot.registered_sources) {
@@ -774,12 +776,62 @@ SystemSourceUpgradeResult::failure_diagnostic() const {
 }
 
 PreparedSystemSourceUpgrade::PreparedSystemSourceUpgrade(
-        std::unique_ptr<Impl> impl) noexcept
+        std::unique_ptr<Impl> impl)
     : impl_(std::move(impl)) {
+    if(impl_ == nullptr) return;
+
+    SystemSourceUpgradePreparationState& state = impl_->state;
+    if(state.correlations.size() !=
+       state.snapshot.registered_sources.size()) {
+        throw std::logic_error(
+                "Prepared system/source projection correlation count is inconsistent.");
+    }
+
+    const std::size_t work_item_count = state.source_invocation.has_value()
+            ? state.source_invocation->work_items.size()
+            : 0;
+    std::vector<bool> observed_work_items(work_item_count, false);
+    std::vector<PreparedSystemSourceWorkReference> source_work_items;
+    source_work_items.reserve(work_item_count);
+    for(const RegisteredSourceCorrelation& correlation : state.correlations) {
+        if(!correlation.work_item_index.has_value()) continue;
+        if(correlation.snapshot_index >=
+                   state.snapshot.registered_sources.size() ||
+           !state.source_invocation.has_value() ||
+           correlation.work_item_index.value() >= work_item_count ||
+           observed_work_items[correlation.work_item_index.value()]) {
+            throw std::logic_error(
+                    "Prepared system/source work-item correlation is inconsistent.");
+        }
+
+        observed_work_items[correlation.work_item_index.value()] = true;
+        source_work_items.push_back(PreparedSystemSourceWorkReference(
+                state.snapshot.registered_sources[correlation.snapshot_index],
+                state.source_invocation
+                        ->work_items[correlation.work_item_index.value()]));
+    }
+    if(std::any_of(
+               observed_work_items.begin(), observed_work_items.end(),
+               [](bool observed) { return !observed; })) {
+        throw std::logic_error(
+                "Prepared system/source work item has no source correlation.");
+    }
+
+    SystemSourceUpgradeProjectionAuthority authority(
+            state.snapshot,
+            state.aur_invocation_plan.has_value()
+                    ? &state.aur_invocation_plan.value()
+                    : nullptr,
+            state.issues, std::move(source_work_items));
+    projection_authority_.emplace(std::move(authority));
 }
 
 PreparedSystemSourceUpgrade::PreparedSystemSourceUpgrade(
-        PreparedSystemSourceUpgrade&&) noexcept = default;
+        PreparedSystemSourceUpgrade&& other) noexcept
+    : impl_(std::move(other.impl_)),
+      projection_authority_(std::move(other.projection_authority_)) {
+    other.projection_authority_.reset();
+}
 
 PreparedSystemSourceUpgrade::~PreparedSystemSourceUpgrade() noexcept = default;
 
@@ -790,6 +842,27 @@ bool PreparedSystemSourceUpgrade::is_valid() const noexcept {
 const SystemSourceUpgradePreparedSnapshot*
 PreparedSystemSourceUpgrade::snapshot() const noexcept {
     return impl_ == nullptr ? nullptr : &impl_->state.snapshot;
+}
+
+const BuildPlan* PreparedSystemSourceUpgrade::aur_invocation_plan()
+        const noexcept {
+    if(impl_ == nullptr || !impl_->state.aur_invocation_plan.has_value()) {
+        return nullptr;
+    }
+    return &impl_->state.aur_invocation_plan.value();
+}
+
+const std::vector<SystemSourceUpgradeIssue>&
+PreparedSystemSourceUpgrade::issues() const noexcept {
+    static const std::vector<SystemSourceUpgradeIssue> s_empty;
+    return impl_ == nullptr ? s_empty : impl_->state.issues;
+}
+
+const SystemSourceUpgradeProjectionAuthority*
+PreparedSystemSourceUpgrade::projection_authority() const noexcept {
+    return impl_ != nullptr && projection_authority_.has_value()
+            ? &projection_authority_.value()
+            : nullptr;
 }
 
 #ifdef MOGUET_ENABLE_SYSTEM_SOURCE_UPGRADE_TEST_HOOKS
@@ -886,7 +959,8 @@ SystemSourceUpgradePreparation prepare_system_source_upgrade(
                         std::nullopt,
                         std::nullopt,
                         std::nullopt,
-                        {}});
+                        {},
+                        std::nullopt});
         state.correlations.push_back(RegisteredSourceCorrelation{
                 state.snapshot.registered_sources.size() - 1,
                 is_valid_package_name(entry.package_name),
@@ -999,6 +1073,7 @@ SystemSourceUpgradePreparation prepare_system_source_upgrade(
             source.canonical_source_identity_key =
                     identity.canonical_source_key;
             source.resolved_package_base = identity.package_base;
+            source.source_kind = identity.source_kind;
             resolved_identities[source_position] = std::move(identity);
         } catch(const std::exception& error) {
             SystemSourceUpgradeIssue issue = make_issue(
@@ -1045,11 +1120,11 @@ SystemSourceUpgradePreparation prepare_system_source_upgrade(
     }
     if(!aur_package_names.empty()) {
         try {
-            BuildPlan invocation_plan = resolve_build_plan(
-                    aur_package_names, select_provider);
+            state.aur_invocation_plan.emplace(resolve_build_plan(
+                    aur_package_names, select_provider));
             require_executable_install_plan(
                     join_package_names(aur_package_names),
-                    invocation_plan);
+                    state.aur_invocation_plan.value());
         } catch(const std::exception& error) {
             const std::size_t source_position =
                     first_aur_source_position.value();
@@ -1102,7 +1177,7 @@ SystemSourceUpgradePreparation prepare_system_source_upgrade(
                             resolved_identities[source_position].value(),
                             source.environment.value(),
                             true,
-                            false,
+                            state.snapshot.options.needed,
                             select_provider));
             package_names.push_back(source.preference_package_name);
         } catch(const std::exception& error) {

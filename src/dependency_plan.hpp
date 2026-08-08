@@ -234,6 +234,10 @@ struct BuildPlan {
     std::vector<std::string>                 cycles;
     std::vector<IncompleteProviderCandidateSet>
             incomplete_provider_candidate_sets;
+    // strict dependency/provider resolutionが実際に問い合わせたpacman
+    // repository configuration。nulloptはauthority未問い合わせを表す。
+    std::optional<std::vector<std::string>> configured_repository_order =
+            std::nullopt;
 };
 
 std::vector<std::string> collect_build_dependencies(const AurPackageInfo& pkg);

@@ -9,6 +9,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -40,6 +41,16 @@ concept HasOrderingOperator = requires(const T& lhs, const T& rhs) {
 
 static_assert(!std::is_default_constructible_v<UnifiedPlanObservation>);
 static_assert(!std::is_aggregate_v<UnifiedPlanObservation>);
+static_assert(!std::is_copy_constructible_v<UnifiedPlanObservation>);
+static_assert(!std::is_copy_assignable_v<UnifiedPlanObservation>);
+static_assert(!std::is_constructible_v<
+              UnifiedPlanObservation,
+              const UnifiedPlanObservation&&>);
+static_assert(!std::is_copy_constructible_v<UnifiedPlanObservationResult>);
+static_assert(!std::is_copy_assignable_v<UnifiedPlanObservationResult>);
+static_assert(!std::is_constructible_v<
+              UnifiedPlanObservationResult,
+              const UnifiedPlanObservationResult&&>);
 static_assert(!std::is_constructible_v<
               UnifiedPlanObservation,
               ProviderSelectionCallback>);
@@ -82,17 +93,74 @@ static_assert(!std::same_as<
 static_assert(!std::same_as<
               RequiredArtifactTargetReference,
               ProducedPackageArtifact>);
+static_assert(!std::is_copy_constructible_v<RequiredArtifactTargetReference>);
+static_assert(!std::is_constructible_v<
+              RequiredArtifactTargetReference,
+              const RequiredArtifactTargetReference&&>);
+static_assert(!std::is_constructible_v<
+              RequiredArtifactTargetReference,
+              UnifiedPlanBuildUnitReference,
+              RequiredPackageArtifactTarget&&>);
+static_assert(!std::is_constructible_v<
+              AurPackageBaseBuildUnitReference,
+              BuildPlan&&,
+              std::size_t>);
+static_assert(!std::is_constructible_v<
+              LocalSourceBuildUnitReference,
+              LocalSourceRootObservationIdentity,
+              LocalPackageMetadata&&>);
+static_assert(!std::is_constructible_v<
+              UnifiedPlanConfiguredRepositoryOrderReference,
+              std::vector<std::string>&&>);
+static_assert(!std::is_copy_constructible_v<UnifiedPlanBuildUnitReference>);
+static_assert(!std::is_copy_constructible_v<UnifiedPlanBlocker>);
+static_assert(!std::is_constructible_v<
+              UnifiedPlanBlocker, const UnifiedPlanBlocker&&>);
+static_assert(!std::is_copy_constructible_v<UnifiedPlanTransactionIntent>);
+static_assert(!std::is_constructible_v<
+              UnifiedPlanTransactionIntent,
+              const UnifiedPlanTransactionIntent&&>);
+static_assert(!std::is_copy_constructible_v<
+              UnifiedPlanBorrowedAuthorityReference<
+                      BuildPlanResolutionFailure>>);
+static_assert(!std::is_constructible_v<
+              UnifiedPlanBorrowedAuthorityReference<
+                      BuildPlanResolutionFailure>,
+              BuildPlanResolutionFailure&&>);
+static_assert(!std::is_copy_constructible_v<UnknownUnifiedPlanBlocker>);
+static_assert(!std::is_copy_constructible_v<
+              SourceFailureUnifiedPlanBlocker>);
+static_assert(!std::is_copy_constructible_v<
+              BuildPlanStateUnifiedPlanBlocker>);
+static_assert(!std::is_copy_constructible_v<
+              RepositoryDependencyInstallIntent>);
+static_assert(!std::is_copy_constructible_v<
+              RepositoryProviderInstallIntent>);
+static_assert(!std::is_copy_constructible_v<
+              RepositoryInstallIntentTarget>);
+using NestedSourceFailureBorrow = std::variant_alternative_t<
+        0, SourceFailureUnifiedPlanBlockerDetail>;
+static_assert(!std::is_copy_constructible_v<NestedSourceFailureBorrow>);
+static_assert(!std::is_constructible_v<
+              NestedSourceFailureBorrow,
+              const NestedSourceFailureBorrow&&>);
 
 void expect(bool condition, const std::string& message) {
     if(!condition) throw std::runtime_error(message);
 }
 
-UnifiedPlanObservation expect_valid(
+const UnifiedPlanObservation& expect_valid(
         const UnifiedPlanObservationResult& result,
-        const std::string& context) {
-    expect(result.is_valid(), context + " unexpectedly failed validation");
-    expect(result.observation() != nullptr, context + " has no observation");
-    expect(result.failure() == nullptr, context + " also has a failure");
+        std::string_view context) {
+    expect(
+            result.is_valid(),
+            std::string(context) + " unexpectedly failed validation");
+    expect(
+            result.observation() != nullptr,
+            std::string(context) + " has no observation");
+    expect(
+            result.failure() == nullptr,
+            std::string(context) + " also has a failure");
     return *result.observation();
 }
 
@@ -236,9 +304,10 @@ void test_status_invariants() {
     UnifiedPlanObservationInput ready_input;
     ready_input.status = UnifiedPlanObservationStatus::Ready;
     ready_input.roots = {repository_root(0, "ready-root")};
-    const UnifiedPlanObservation& ready = expect_valid(
-            make_unified_plan_observation(std::move(ready_input)),
-            "Ready observation");
+    const UnifiedPlanObservationResult ready_result =
+            make_unified_plan_observation(std::move(ready_input));
+    const UnifiedPlanObservation& ready =
+            expect_valid(ready_result, "Ready observation");
     expect(
             ready.status() == UnifiedPlanObservationStatus::Ready,
             "Ready status was not retained");
@@ -246,9 +315,10 @@ void test_status_invariants() {
     UnifiedPlanObservationInput no_op_input;
     no_op_input.status = UnifiedPlanObservationStatus::NoOp;
     no_op_input.roots = {repository_root(0, "no-op-root")};
-    const UnifiedPlanObservation& no_op = expect_valid(
-            make_unified_plan_observation(std::move(no_op_input)),
-            "NoOp observation");
+    const UnifiedPlanObservationResult no_op_result =
+            make_unified_plan_observation(std::move(no_op_input));
+    const UnifiedPlanObservation& no_op =
+            expect_valid(no_op_result, "NoOp observation");
     expect(
             no_op.status() == UnifiedPlanObservationStatus::NoOp,
             "NoOp status was not retained");
@@ -258,32 +328,30 @@ void test_status_invariants() {
 
     const BuildPlanDependencyEdge unknown =
             unknown_dependency_edge_fixture();
-    const UnifiedPlanObservation& blocked = expect_valid(
-            make_unified_plan_observation(UnifiedPlanObservationInput{
-                    UnifiedPlanObservationStatus::Blocked,
-                    {},
-                    {},
-                    {},
-                    {},
-                    {},
-                    {},
-                    {UnknownUnifiedPlanBlocker{std::cref(unknown)}}}),
-            "Blocked observation");
+    UnifiedPlanObservationInput blocked_input;
+    blocked_input.status = UnifiedPlanObservationStatus::Blocked;
+    blocked_input.blockers.push_back(UnknownUnifiedPlanBlocker{
+            UnifiedPlanBorrowedAuthorityReference<BuildPlanDependencyEdge>(
+                    unknown)});
+    const UnifiedPlanObservationResult blocked_result =
+            make_unified_plan_observation(std::move(blocked_input));
+    const UnifiedPlanObservation& blocked =
+            expect_valid(blocked_result, "Blocked observation");
     expect(
             blocked.status() == UnifiedPlanObservationStatus::Blocked,
             "Blocked status was not retained");
     expect(blocked.blockers().size() == 1, "Blocked detail was lost");
 
+    UnifiedPlanObservationInput ready_with_blocker_input;
+    ready_with_blocker_input.status = UnifiedPlanObservationStatus::Ready;
+    ready_with_blocker_input.roots = {
+            repository_root(0, "ready-root")};
+    ready_with_blocker_input.blockers.push_back(
+            UnknownUnifiedPlanBlocker{
+                    UnifiedPlanBorrowedAuthorityReference<
+                            BuildPlanDependencyEdge>(unknown)});
     const auto ready_with_blocker = make_unified_plan_observation(
-            UnifiedPlanObservationInput{
-                    UnifiedPlanObservationStatus::Ready,
-                    {repository_root(0, "ready-root")},
-                    {},
-                    {},
-                    {},
-                    {},
-                    {},
-                    {UnknownUnifiedPlanBlocker{std::cref(unknown)}}});
+            std::move(ready_with_blocker_input));
     expect(
             has_invariant_issue(
                     expect_invalid(ready_with_blocker, "Ready with blocker"),
@@ -304,14 +372,15 @@ void test_status_invariants() {
                             BlockedWithoutBlocker),
             "Blocked nonempty-detail invariant was not reported");
 
-    RepositoryPackageTransactionIntent transaction{
-            {RepositoryRootInstallIntent{repository_root(
-                    0, "no-op-root")}},
-            RepositoryTransactionPolicyView{false}};
+    RepositoryPackageTransactionIntent transaction;
+    transaction.targets.push_back(RepositoryRootInstallIntent{
+            repository_root(0, "no-op-root")});
+    transaction.policy = RepositoryTransactionPolicyView{false};
     UnifiedPlanObservationInput no_op_intent_input;
     no_op_intent_input.status = UnifiedPlanObservationStatus::NoOp;
     no_op_intent_input.roots = {repository_root(0, "no-op-root")};
-    no_op_intent_input.transaction_intents = {std::move(transaction)};
+    no_op_intent_input.transaction_intents.push_back(
+            std::move(transaction));
     const auto no_op_with_intent = make_unified_plan_observation(
             std::move(no_op_intent_input));
     expect(
@@ -320,6 +389,28 @@ void test_status_invariants() {
                     UnifiedPlanObservationInvariantIssueKind::
                             NoOpHasMutationIntent),
             "NoOp mutation-intent invariant was not reported");
+
+    UnifiedPlanObservationInput blocked_intent_input;
+    blocked_intent_input.status = UnifiedPlanObservationStatus::Blocked;
+    blocked_intent_input.roots = {repository_root(0, "blocked-root")};
+    blocked_intent_input.blockers.push_back(UnknownUnifiedPlanBlocker{
+            UnifiedPlanBorrowedAuthorityReference<BuildPlanDependencyEdge>(
+                    unknown)});
+    RepositoryPackageTransactionIntent blocked_transaction;
+    blocked_transaction.targets.push_back(RepositoryRootInstallIntent{
+            repository_root(0, "blocked-root")});
+    blocked_intent_input.transaction_intents.push_back(
+            std::move(blocked_transaction));
+    const UnifiedPlanObservationResult blocked_with_intent =
+            make_unified_plan_observation(
+                    std::move(blocked_intent_input));
+    expect(
+            has_invariant_issue(
+                    expect_invalid(
+                            blocked_with_intent, "Blocked with intent"),
+                    UnifiedPlanObservationInvariantIssueKind::
+                            BlockedHasMutationIntent),
+            "Blocked mutation-intent invariant was not reported");
 }
 
 void test_source_aware_root_identity() {
@@ -418,18 +509,23 @@ void test_dependency_authority_reference() {
 void test_build_unit_and_required_artifact_identity() {
     const BuildPlan plan = build_plan_fixture();
     const LocalPackageMetadata metadata = local_metadata();
-    const AurPackageBaseBuildUnitReference aur_unit(plan, 0);
-    const LocalSourceBuildUnitReference local_unit(
-            local_source_identity("/work/local-suite"), metadata);
-    expect(aur_unit.has_complete_identity(), "AUR build unit is incomplete");
+    const AurPackageBaseBuildUnitReference inspected_aur_unit(
+            std::cref(plan), 0);
+    const LocalSourceBuildUnitReference inspected_local_unit(
+            local_source_identity("/work/local-suite"),
+            std::cref(metadata));
     expect(
-            local_unit.has_complete_identity(),
+            inspected_aur_unit.has_complete_identity(),
+            "AUR build unit is incomplete");
+    expect(
+            inspected_local_unit.has_complete_identity(),
             "Local source build unit is incomplete");
     expect(
-            aur_unit.entry()->package_base == "shared-suite",
+            inspected_aur_unit.entry()->package_base == "shared-suite",
             "AUR PackageBase identity differs");
     expect(
-            local_unit.source_root().canonical_path == "/work/local-suite",
+            inspected_local_unit.source_root().canonical_path ==
+                    "/work/local-suite",
             "Local build unit lost source-root identity");
 
     const RequiredPackageArtifactTarget root_target{
@@ -437,9 +533,12 @@ void test_build_unit_and_required_artifact_identity() {
     const RequiredPackageArtifactTarget dependency_target{
             "shared-suite", "shared-runtime",
             DesiredInstallReason::Dependency};
-    const RequiredArtifactTargetReference root_artifact(aur_unit, root_target);
-    const RequiredArtifactTargetReference dependency_artifact(
-            aur_unit, dependency_target);
+    RequiredArtifactTargetReference root_artifact(
+            AurPackageBaseBuildUnitReference(std::cref(plan), 0),
+            std::cref(root_target));
+    RequiredArtifactTargetReference dependency_artifact(
+            AurPackageBaseBuildUnitReference(std::cref(plan), 0),
+            std::cref(dependency_target));
     expect(
             root_artifact.matches_build_unit(),
             "Root artifact target does not match PackageBase unit");
@@ -448,20 +547,31 @@ void test_build_unit_and_required_artifact_identity() {
             "Dependency artifact target does not match PackageBase unit");
     expect(
             root_artifact.target().package_name !=
-                    aur_unit.entry()->package_base,
+                    inspected_aur_unit.entry()->package_base,
             "PackageBase and child package identity were conflated");
+    const RequiredPackageArtifactTarget retained_target =
+            root_artifact.target();
     expect(
-            &root_artifact.target() == &root_target,
-            "Required artifact target was copied");
+            retained_target.package_base == root_target.package_base &&
+                    retained_target.package_name == root_target.package_name &&
+                    retained_target.desired_reason ==
+                            root_target.desired_reason,
+            "Required artifact target identity changed");
 
     UnifiedPlanObservationInput input;
     input.status = UnifiedPlanObservationStatus::Ready;
     input.roots = {aur_root(0, "same-name", "shared-suite")};
-    input.build_units = {aur_unit, local_unit};
-    input.required_artifacts = {root_artifact, dependency_artifact};
+    input.build_units.push_back(
+            AurPackageBaseBuildUnitReference(std::cref(plan), 0));
+    input.build_units.push_back(LocalSourceBuildUnitReference(
+            local_source_identity("/work/local-suite"),
+            std::cref(metadata)));
+    input.required_artifacts.push_back(std::move(root_artifact));
+    input.required_artifacts.push_back(std::move(dependency_artifact));
+    const UnifiedPlanObservationResult observation_result =
+            make_unified_plan_observation(std::move(input));
     const UnifiedPlanObservation& observation = expect_valid(
-            make_unified_plan_observation(std::move(input)),
-            "Build/artifact identity observation");
+            observation_result, "Build/artifact identity observation");
     expect(
             observation.build_units().size() == 2 &&
                     observation.required_artifacts().size() == 2,
@@ -469,12 +579,16 @@ void test_build_unit_and_required_artifact_identity() {
 
     const RequiredPackageArtifactTarget mismatch{
             "different-base", "same-name", DesiredInstallReason::Explicit};
-    const RequiredArtifactTargetReference mismatched_artifact(aur_unit, mismatch);
+    RequiredArtifactTargetReference mismatched_artifact(
+            AurPackageBaseBuildUnitReference(std::cref(plan), 0),
+            std::cref(mismatch));
     UnifiedPlanObservationInput invalid_input;
     invalid_input.status = UnifiedPlanObservationStatus::Ready;
     invalid_input.roots = {aur_root(0, "same-name", "shared-suite")};
-    invalid_input.build_units = {aur_unit};
-    invalid_input.required_artifacts = {mismatched_artifact};
+    invalid_input.build_units.push_back(
+            AurPackageBaseBuildUnitReference(std::cref(plan), 0));
+    invalid_input.required_artifacts.push_back(
+            std::move(mismatched_artifact));
     expect(
             has_invariant_issue(
                     expect_invalid(
@@ -523,34 +637,45 @@ void test_typed_blockers() {
             std::nullopt,
             "route preflight blocked"};
 
-    std::vector<UnifiedPlanBlocker> blockers{
-            UnknownUnifiedPlanBlocker{std::cref(unknown)},
-            AmbiguousUnifiedPlanBlocker{std::cref(ambiguous)},
-            UnsupportedUnifiedPlanBlocker{std::cref(unsupported)},
-            SourceFailureUnifiedPlanBlocker{
-                    SourceFailureUnifiedPlanBlockerDetail{
-                            std::cref(source_failure)}},
-            SourceFailureUnifiedPlanBlocker{
-                    SourceFailureUnifiedPlanBlockerDetail{
-                            std::cref(partial_source)}},
-            ConstraintFailureUnifiedPlanBlocker{std::cref(constraint)},
-            MetadataRiskUnifiedPlanBlocker{std::cref(metadata_risk)},
-            RoutePreflightUnifiedPlanBlocker{
-                    RoutePreflightUnifiedPlanBlockerDetail{
-                            std::cref(route_preflight)}}};
+    std::vector<UnifiedPlanBlocker> blockers;
+    blockers.push_back(UnknownUnifiedPlanBlocker{
+            UnifiedPlanBorrowedAuthorityReference<BuildPlanDependencyEdge>(
+                    unknown)});
+    blockers.push_back(AmbiguousUnifiedPlanBlocker{
+            UnifiedPlanBorrowedAuthorityReference<
+                    AmbiguousProvidedDependency>(ambiguous)});
+    blockers.push_back(UnsupportedUnifiedPlanBlocker{
+            UnifiedPlanBorrowedAuthorityReference<
+                    MixedPackageBaseInstallReasonUnsupported>(unsupported)});
+    blockers.push_back(SourceFailureUnifiedPlanBlocker{
+            SourceFailureUnifiedPlanBlockerDetail{
+                    UnifiedPlanBorrowedAuthorityReference<
+                            BuildPlanResolutionFailure>(source_failure)}});
+    blockers.push_back(SourceFailureUnifiedPlanBlocker{
+            SourceFailureUnifiedPlanBlockerDetail{
+                    UnifiedPlanBorrowedAuthorityReference<
+                            IncompleteProviderCandidateSet>(partial_source)}});
+    blockers.push_back(ConstraintFailureUnifiedPlanBlocker{
+            UnifiedPlanBorrowedAuthorityReference<ConstraintEvaluation>(
+                    constraint)});
+    blockers.push_back(MetadataRiskUnifiedPlanBlocker{
+            UnifiedPlanBorrowedAuthorityReference<BuildPlanMetadataRisk>(
+                    metadata_risk)});
+    blockers.push_back(RoutePreflightUnifiedPlanBlocker{
+            RoutePreflightUnifiedPlanBlockerDetail{
+                    UnifiedPlanBorrowedAuthorityReference<
+                            AurUpdateExecutionIssue>(route_preflight)}});
 
+    UnifiedPlanObservationInput partial_ready_input;
+    partial_ready_input.status = UnifiedPlanObservationStatus::Ready;
+    partial_ready_input.blockers.push_back(
+            SourceFailureUnifiedPlanBlocker{
+                    SourceFailureUnifiedPlanBlockerDetail{
+                            UnifiedPlanBorrowedAuthorityReference<
+                                    IncompleteProviderCandidateSet>(
+                                    partial_source)}});
     const auto partial_ready = make_unified_plan_observation(
-            UnifiedPlanObservationInput{
-                    UnifiedPlanObservationStatus::Ready,
-                    {},
-                    {},
-                    {},
-                    {},
-                    {},
-                    {},
-                    {SourceFailureUnifiedPlanBlocker{
-                            SourceFailureUnifiedPlanBlockerDetail{
-                                    std::cref(partial_source)}}}});
+            std::move(partial_ready_input));
     expect(
             has_invariant_issue(
                     expect_invalid(
@@ -581,7 +706,8 @@ void test_typed_blockers() {
     const auto& resolution_source_blocker =
             std::get<SourceFailureUnifiedPlanBlocker>(blockers[3]);
     const auto* resolution_failure_reference = std::get_if<
-            std::reference_wrapper<const BuildPlanResolutionFailure>>(
+            UnifiedPlanBorrowedAuthorityReference<
+                    BuildPlanResolutionFailure>>(
             &resolution_source_blocker.detail);
     expect(
             resolution_failure_reference != nullptr &&
@@ -594,7 +720,8 @@ void test_typed_blockers() {
     const auto& source_blocker =
             std::get<SourceFailureUnifiedPlanBlocker>(blockers[4]);
     const auto* partial_reference = std::get_if<
-            std::reference_wrapper<const IncompleteProviderCandidateSet>>(
+            UnifiedPlanBorrowedAuthorityReference<
+                    IncompleteProviderCandidateSet>>(
             &source_blocker.detail);
     expect(
             partial_reference != nullptr &&
@@ -608,9 +735,10 @@ void test_typed_blockers() {
     UnifiedPlanObservationInput input;
     input.status = UnifiedPlanObservationStatus::Blocked;
     input.blockers = std::move(blockers);
-    const UnifiedPlanObservation& observation = expect_valid(
-            make_unified_plan_observation(std::move(input)),
-            "Typed blocker observation");
+    const UnifiedPlanObservationResult observation_result =
+            make_unified_plan_observation(std::move(input));
+    const UnifiedPlanObservation& observation =
+            expect_valid(observation_result, "Typed blocker observation");
     expect(
             observation.blockers().size() == 8,
             "Blocked taxonomy lost typed details");
@@ -626,19 +754,27 @@ void test_transaction_intent_boundaries() {
             {}};
     const ProvidedDependency provider =
             ProvidedDependency::from_repository("core", "provider-package");
-    const RepositoryPackageTransactionIntent repository_intent{
-            {RepositoryRootInstallIntent{root},
-             RepositoryDependencyInstallIntent{std::cref(dependency)},
-             RepositoryProviderInstallIntent{std::cref(provider)}},
-            RepositoryTransactionPolicyView{true}};
+    RepositoryPackageTransactionIntent repository_intent;
+    repository_intent.targets.push_back(RepositoryRootInstallIntent{root});
+    repository_intent.targets.push_back(
+            RepositoryDependencyInstallIntent{
+                    UnifiedPlanBorrowedAuthorityReference<
+                            RepositoryExactPackage>(dependency)});
+    repository_intent.targets.push_back(
+            RepositoryProviderInstallIntent{
+                    UnifiedPlanBorrowedAuthorityReference<ProvidedDependency>(
+                            provider)});
+    repository_intent.policy = RepositoryTransactionPolicyView{true};
 
     UnifiedPlanObservationInput repository_input;
     repository_input.status = UnifiedPlanObservationStatus::Ready;
     repository_input.roots = {root};
-    repository_input.transaction_intents = {repository_intent};
+    repository_input.transaction_intents.push_back(
+            std::move(repository_intent));
+    const UnifiedPlanObservationResult repository_result =
+            make_unified_plan_observation(std::move(repository_input));
     const UnifiedPlanObservation& repository_observation = expect_valid(
-            make_unified_plan_observation(std::move(repository_input)),
-            "Repository transaction intent");
+            repository_result, "Repository transaction intent");
     const auto& retained_repository_intent =
             std::get<RepositoryPackageTransactionIntent>(
                     repository_observation.transaction_intents().front());
@@ -656,29 +792,36 @@ void test_transaction_intent_boundaries() {
             "Exact-known repository targets were copied or reconstructed");
 
     const BuildPlan plan = build_plan_fixture();
-    const AurPackageBaseBuildUnitReference unit(plan, 0);
     const RequiredPackageArtifactTarget root_target{
             "shared-suite", "same-name", DesiredInstallReason::Explicit};
     const RequiredPackageArtifactTarget dependency_target{
             "shared-suite", "shared-runtime",
             DesiredInstallReason::Dependency};
-    const RequiredArtifactTargetReference root_artifact(unit, root_target);
-    const RequiredArtifactTargetReference dependency_artifact(
-            unit, dependency_target);
-    const SourceBuiltArtifactInstallBoundaryIntent source_intent{
-            {SourceRootArtifactInstallIntent{root_artifact},
-             SourceDependencyArtifactInstallIntent{dependency_artifact}},
-            true};
+    RequiredArtifactTargetReference root_artifact(
+            AurPackageBaseBuildUnitReference(std::cref(plan), 0),
+            std::cref(root_target));
+    RequiredArtifactTargetReference dependency_artifact(
+            AurPackageBaseBuildUnitReference(std::cref(plan), 0),
+            std::cref(dependency_target));
+    SourceBuiltArtifactInstallBoundaryIntent source_intent;
+    source_intent.targets.push_back(SourceRootArtifactInstallIntent{0});
+    source_intent.targets.push_back(
+            SourceDependencyArtifactInstallIntent{1});
+    source_intent.needed = true;
 
     UnifiedPlanObservationInput source_input;
     source_input.status = UnifiedPlanObservationStatus::Ready;
     source_input.roots = {aur_root(0, "same-name", "shared-suite")};
-    source_input.build_units = {unit};
-    source_input.required_artifacts = {root_artifact, dependency_artifact};
-    source_input.transaction_intents = {source_intent};
+    source_input.build_units.push_back(
+            AurPackageBaseBuildUnitReference(std::cref(plan), 0));
+    source_input.required_artifacts.push_back(std::move(root_artifact));
+    source_input.required_artifacts.push_back(
+            std::move(dependency_artifact));
+    source_input.transaction_intents.push_back(std::move(source_intent));
+    const UnifiedPlanObservationResult source_result =
+            make_unified_plan_observation(std::move(source_input));
     const UnifiedPlanObservation& source_observation = expect_valid(
-            make_unified_plan_observation(std::move(source_input)),
-            "Source artifact install boundary");
+            source_result, "Source artifact install boundary");
     const auto& retained_source_intent =
             std::get<SourceBuiltArtifactInstallBoundaryIntent>(
                     source_observation.transaction_intents().front());
@@ -733,9 +876,10 @@ void test_phase_and_owner_vocabulary() {
     UnifiedPlanObservationInput ordered_input;
     ordered_input.status = UnifiedPlanObservationStatus::Ready;
     ordered_input.phases = phases;
-    const UnifiedPlanObservation& observation = expect_valid(
-            make_unified_plan_observation(std::move(ordered_input)),
-            "Ordered phase observation");
+    const UnifiedPlanObservationResult observation_result =
+            make_unified_plan_observation(std::move(ordered_input));
+    const UnifiedPlanObservation& observation =
+            expect_valid(observation_result, "Ordered phase observation");
     expect(
             observation.phases()[0].existing_route_phase.has_value() &&
                     std::holds_alternative<SystemSourceUpgradePhase>(

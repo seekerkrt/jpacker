@@ -88,6 +88,8 @@ void set_provider_candidates(
         const std::string& package_name,
         std::vector<ProvidedDependency> candidates);
 void set_provider_selector(ProviderSelectionCallback select_provider);
+void set_aur_invocation_plan(BuildPlan plan);
+void fail_build_plan_guard(std::string diagnostic);
 void fail_repository_provider_transaction(std::string diagnostic);
 void fail_source_invocation(std::string diagnostic);
 void fail_supported_options(std::string diagnostic);

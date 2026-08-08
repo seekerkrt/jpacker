@@ -104,7 +104,8 @@ bool source_entries_match(
            lhs.canonical_source_identity_key ==
                    rhs.canonical_source_identity_key &&
            lhs.resolved_package_base == rhs.resolved_package_base &&
-           lhs.preference_load_warnings == rhs.preference_load_warnings;
+           lhs.preference_load_warnings == rhs.preference_load_warnings &&
+           lhs.source_kind == rhs.source_kind;
 }
 
 bool source_snapshots_match(
@@ -1074,10 +1075,21 @@ adapt_prepared_source_identities_for_upgrade_all(
 PreparedUpgradeAllOperation::PreparedUpgradeAllOperation(
         std::unique_ptr<Impl> impl) noexcept
     : impl_(std::move(impl)) {
+    if(impl_ == nullptr) return;
+    const SystemSourceUpgradeProjectionAuthority* system_source =
+            impl_->system_source.projection_authority();
+    if(system_source == nullptr) return;
+    UpgradeAllOperationProjectionAuthority authority(
+            impl_->snapshot, *system_source);
+    projection_authority_.emplace(std::move(authority));
 }
 
 PreparedUpgradeAllOperation::PreparedUpgradeAllOperation(
-        PreparedUpgradeAllOperation&&) noexcept = default;
+        PreparedUpgradeAllOperation&& other) noexcept
+    : impl_(std::move(other.impl_)),
+      projection_authority_(std::move(other.projection_authority_)) {
+    other.projection_authority_.reset();
+}
 
 PreparedUpgradeAllOperation::~PreparedUpgradeAllOperation() noexcept = default;
 
@@ -1088,6 +1100,13 @@ bool PreparedUpgradeAllOperation::is_valid() const noexcept {
 const UpgradeAllOperationPreparedSnapshot*
 PreparedUpgradeAllOperation::snapshot() const noexcept {
     return impl_ == nullptr ? nullptr : &impl_->snapshot;
+}
+
+const UpgradeAllOperationProjectionAuthority*
+PreparedUpgradeAllOperation::projection_authority() const noexcept {
+    return impl_ != nullptr && projection_authority_.has_value()
+            ? &projection_authority_.value()
+            : nullptr;
 }
 
 #ifdef MOGUET_ENABLE_UPGRADE_ALL_OPERATION_TEST_HOOKS

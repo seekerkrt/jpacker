@@ -91,12 +91,17 @@ const AurRootPackageIdentity& require_aur_identity(
 
 void test_source_scope_queries_only_enabled_adapters() {
     stub::reset();
-    stub::enqueue_repository_result(RepositoryPackageSearchSnapshot{});
+    stub::enqueue_repository_result(RepositoryPackageSearchSnapshot{
+            {"core", "extra"}, {}});
     const RootPackageSearchSnapshot repository = require_snapshot(
             search_root_package_candidates(
                     "repo-query", RootPackageSearchScope::Repository),
             "repository-only search");
     expect(repository.candidates.empty(), "repository-only empty differs");
+    expect(
+            repository.repository_order ==
+                    std::vector<std::string>{"core", "extra"},
+            "repository-only search lost configured repository order");
     expect(
             stub::repository_queries() ==
                     std::vector<std::string>{"repo-query"} &&
@@ -110,6 +115,9 @@ void test_source_scope_queries_only_enabled_adapters() {
                     "aur-query", RootPackageSearchScope::Aur),
             "AUR-only search");
     expect(aur.candidates.empty(), "AUR-only empty differs");
+    expect(
+            !aur.repository_order.has_value(),
+            "AUR-only search flattened unqueried repository order to empty");
     expect(
             stub::repository_query_count() == 0 &&
                     stub::aur_queries() ==

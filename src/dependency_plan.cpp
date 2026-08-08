@@ -211,11 +211,26 @@ enum class RepositoryPackageQueryStatus {
     Unavailable
 };
 
+void retain_configured_repository_order(
+        BuildPlan* plan,
+        const std::optional<std::vector<std::string>>& configured_order) {
+    if(plan == nullptr || !configured_order.has_value()) return;
+    if(!plan->configured_repository_order.has_value()) {
+        plan->configured_repository_order = configured_order;
+        return;
+    }
+    if(plan->configured_repository_order.value() != configured_order.value()) {
+        throw std::runtime_error(
+                "Repository configuration changed during BuildPlan resolution.");
+    }
+}
+
 RepositoryPackageQueryStatus query_repository_package(
         const std::string& package_name, BuildPlanResolutionMode mode,
         BuildPlanResolutionFailureContext* failure_context,
         bool require_authoritative_repository_metadata = false,
-        std::optional<RepositoryPackagePresent>* present_package = nullptr) {
+        std::optional<RepositoryPackagePresent>* present_package = nullptr,
+        BuildPlan* repository_configuration_authority = nullptr) {
     if(mode == BuildPlanResolutionMode::Legacy &&
        !require_authoritative_repository_metadata) {
         if(is_repo_package(package_name)) {
@@ -233,14 +248,26 @@ RepositoryPackageQueryStatus query_repository_package(
     if(const auto* present =
                std::get_if<RepositoryPackagePresent>(&result);
        present != nullptr) {
+        retain_configured_repository_order(
+                repository_configuration_authority,
+                present->configured_repository_order);
         if(present_package != nullptr) *present_package = *present;
         return RepositoryPackageQueryStatus::Present;
     }
-    if(std::holds_alternative<RepositoryPackageNotFound>(result))
+    if(const auto* not_found =
+               std::get_if<RepositoryPackageNotFound>(&result);
+       not_found != nullptr) {
+        retain_configured_repository_order(
+                repository_configuration_authority,
+                not_found->configured_repository_order);
         return RepositoryPackageQueryStatus::NotFound;
+    }
 
     const RepositoryMetadataFailure& failure =
             std::get<RepositoryMetadataFailure>(result);
+    retain_configured_repository_order(
+            repository_configuration_authority,
+            failure.configured_repository_order);
     if(failure_context == nullptr) {
         throw std::runtime_error(failure.diagnostic);
     }
@@ -440,12 +467,16 @@ ProviderCandidateDiscovery find_aur_providers(
 ProviderCandidateDiscovery find_dependency_providers(
         const std::string& dependency_name,
         BuildPlanResolutionFailureContext* failure_context = nullptr,
-        bool require_authoritative_candidates = false) {
+        bool require_authoritative_candidates = false,
+        BuildPlan* repository_configuration_authority = nullptr) {
     static_cast<void>(require_authoritative_candidates);
     StrictRepositoryProvidersQueryResult result =
             query_repository_providers_strict(dependency_name);
     if(const auto* failure = std::get_if<RepositoryMetadataFailure>(&result);
        failure != nullptr) {
+        retain_configured_repository_order(
+                repository_configuration_authority,
+                failure->configured_repository_order);
         add_resolution_failure(
                 failure_context,
                 BuildPlanResolutionFailureKind::RepositoryMetadataUnavailable,
@@ -456,6 +487,9 @@ ProviderCandidateDiscovery find_dependency_providers(
     }
     RepositoryProviderQuerySnapshot repository =
             std::get<RepositoryProviderQuerySnapshot>(std::move(result));
+    retain_configured_repository_order(
+            repository_configuration_authority,
+            repository.configured_repository_order);
     if(!repository.source_failures.empty()) {
         for(const auto& failure : repository.source_failures) {
             add_resolution_failure(
@@ -1503,7 +1537,8 @@ void resolve_build_plan_dependency(
             query_repository_package(
                     dep_name, resolution_mode, dependency_failure_sink,
                     true,
-                    &present_repository_package);
+                    &present_repository_package,
+                    &plan);
     if(repository_status == RepositoryPackageQueryStatus::Present) {
         if(!present_repository_package.has_value()) {
             edge.constraint_evaluation = ConstraintEvaluation::invalid(
@@ -1588,7 +1623,7 @@ void resolve_build_plan_dependency(
     ProviderCandidateDiscovery provider_discovery =
             find_dependency_providers(
                     dep_name, &dependency_failure_context,
-                    true);
+                    true, &plan);
     if(!provider_discovery.is_complete) {
         add_incomplete_provider_candidate_set(
                 plan, dependency, provider_discovery);

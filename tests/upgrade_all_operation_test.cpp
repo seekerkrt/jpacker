@@ -2,6 +2,7 @@
 #include "artifact_install_executor.hpp"
 #include "source_build.hpp"
 #include "stubs/upgrade-all-operation/operation_stub.hpp"
+#include "unified_plan_projection.hpp"
 #include "upgrade_all_operation.hpp"
 
 #include <algorithm>
@@ -10,6 +11,7 @@
 #include <filesystem>
 #include <iostream>
 #include <map>
+#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -28,6 +30,8 @@ static_assert(!std::is_copy_constructible_v<PreparedUpgradeAllOperation>);
 static_assert(std::is_nothrow_move_constructible_v<
               PreparedUpgradeAllOperation>);
 static_assert(!std::is_move_assignable_v<PreparedUpgradeAllOperation>);
+static_assert(!std::is_copy_constructible_v<
+              UpgradeAllOperationProjectionAuthority>);
 static_assert(std::is_same_v<
               decltype(&execute_prepared_upgrade_all_operation),
               UpgradeAllOperationExecutor>);
@@ -511,6 +515,39 @@ void test_empty_source_preparation_snapshot() {
     stub::require_script_consumed();
 }
 
+void test_prepared_projection_authority_tracks_nested_source_work() {
+    stub::reset();
+    const std::string package_name = "projection-source";
+    PreparedUpgradeAllOperation prepared = prepare_sources(
+            {package_name}, full_option_config());
+    const UpgradeAllOperationPreparedSnapshot* snapshot = prepared.snapshot();
+    const UpgradeAllOperationProjectionAuthority* projection_authority =
+            prepared.projection_authority();
+    expect(
+            snapshot != nullptr && projection_authority != nullptr &&
+                    &projection_authority->snapshot() == snapshot,
+            "Prepared upgrade-all projection authority lost outer owner");
+    const SystemSourceUpgradeProjectionAuthority& system_source =
+            projection_authority->system_source();
+    expect(
+            system_source.source_work_items().size() == 1 &&
+                    &system_source.source_work_items().front().source() ==
+                            &system_source.snapshot()
+                                     .registered_sources.front(),
+            "Prepared upgrade-all authority lost nested source correlation");
+    const auto& targets = system_source.source_work_items()
+                                  .front()
+                                  .required_targets();
+    expect(
+            targets.size() == 1 &&
+                    targets.front().package_base == package_name &&
+                    targets.front().package_name == package_name &&
+                    targets.front().desired_reason ==
+                            DesiredInstallReason::Explicit,
+            "Prepared upgrade-all authority did not borrow nested actual work targets");
+    stub::require_script_consumed();
+}
+
 void test_cache_replacement_before_execution_blocks_system() {
     stub::reset();
     stub::set_preference_directory(preference_directory({}));
@@ -711,12 +748,25 @@ void test_system_source_preparation_blocker_is_aggregate_blocker() {
     UpgradeAllOperationResult result = take_blocked(
             prepare_upgrade_all_operation(AppConfig{}),
             "system/source preparation blocker");
+    const std::unique_ptr<UnifiedPlanProjection> projection =
+            project_upgrade_all_unified_plan(
+                    UpgradeAllUnifiedPlanProjectionInput{
+                            std::cref(result)});
+    const UnifiedPlanObservationResult& observation_result =
+            projection->observation_result();
+    const UnifiedPlanObservation* observation =
+            observation_result.observation();
     expect(
             result.status ==
                             UpgradeAllOperationStatus::BlockedBeforeMutation &&
                     result.stopped_phase ==
                             UpgradeAllOperationPhase::Preparation &&
-                    result.system_source.has_blocking_issue(),
+                    result.system_source.has_blocking_issue() &&
+                    observation_result.is_valid() &&
+                    observation != nullptr &&
+                    observation->status() ==
+                            UnifiedPlanObservationStatus::Blocked &&
+                    observation->transaction_intents().empty(),
             "Nested preparation blocker was not preserved");
     expect_no_inventory_or_aur("system/source preparation blocker");
     stub::require_script_consumed();
@@ -1381,6 +1431,44 @@ void test_recoverable_aur_query_failure_blocks_mutation() {
             "Recoverable AUR query failure was not retained");
     expect(stub::aur_execution_calls().empty(),
            "Recoverable AUR failure reached mutation");
+
+    const FilteredAurUpdateExecutionResult& aur_result =
+            result.aur.operation_result.value();
+    const std::unique_ptr<UnifiedPlanProjection> projection =
+            project_aur_update_unified_plan(
+                    AurUpdateUnifiedPlanProjectionInput{
+                            std::cref(aur_result.query_result),
+                            std::cref(aur_result.preflight), false});
+    const UnifiedPlanObservationResult& observation_result =
+            projection->observation_result();
+    const UnifiedPlanObservation* observation =
+            observation_result.observation();
+    expect(
+            observation_result.is_valid() && observation != nullptr &&
+                    observation->status() ==
+                            UnifiedPlanObservationStatus::Blocked &&
+                    observation->transaction_intents().empty(),
+            "Actual recoverable AUR query result did not reach a typed Blocked observation");
+    const bool query_failure_borrowed = std::any_of(
+            observation->blockers().begin(),
+            observation->blockers().end(),
+            [&aur_result](const UnifiedPlanBlocker& blocker) {
+                const auto* source =
+                        std::get_if<SourceFailureUnifiedPlanBlocker>(
+                                &blocker);
+                if(source == nullptr) return false;
+                const auto* failure = std::get_if<
+                        UnifiedPlanBorrowedAuthorityReference<
+                                AurUpdateQueryFailure>>(
+                        &source->detail);
+                return failure != nullptr &&
+                       &failure->get() ==
+                               &aur_result.query_result
+                                        .recoverable_failures.front();
+            });
+    expect(
+            query_failure_borrowed,
+            "Actual recoverable AUR query failure was copied or flattened");
     stub::require_script_consumed();
 }
 
@@ -2266,6 +2354,9 @@ int main() {
         run_case(
                 "empty registered-source preparation snapshot",
                 test_empty_source_preparation_snapshot);
+        run_case(
+                "prepared projection authority tracks nested source work",
+                test_prepared_projection_authority_tracks_nested_source_work);
         run_case(
                 "cache replacement before execution",
                 test_cache_replacement_before_execution_blocks_system);

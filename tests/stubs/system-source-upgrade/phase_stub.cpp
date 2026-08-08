@@ -46,6 +46,8 @@ struct PhaseStubState {
     std::map<std::string, std::vector<ProvidedDependency>>
             provider_candidates;
     ProviderSelectionCallback provider_selector;
+    std::optional<BuildPlan> aur_invocation_plan;
+    std::optional<std::string> build_plan_guard_failure;
     std::optional<std::string> repository_provider_transaction_failure;
     std::optional<std::string> invocation_failure;
     std::optional<std::string> supported_options_failure;
@@ -214,6 +216,14 @@ void set_provider_candidates(
 
 void set_provider_selector(ProviderSelectionCallback select_provider) {
     g_state.provider_selector = std::move(select_provider);
+}
+
+void set_aur_invocation_plan(BuildPlan plan) {
+    g_state.aur_invocation_plan.emplace(std::move(plan));
+}
+
+void fail_build_plan_guard(std::string diagnostic) {
+    g_state.build_plan_guard_failure = std::move(diagnostic);
 }
 
 void fail_repository_provider_transaction(std::string diagnostic) {
@@ -569,6 +579,9 @@ PackageMetadataSession::snapshot_local_package_versions() const {
 BuildPlan resolve_build_plan(
         const std::vector<std::string>& targets,
         const ProviderSelectionCallback&) {
+    if(g_state.aur_invocation_plan.has_value()) {
+        return g_state.aur_invocation_plan.value();
+    }
     BuildPlan plan;
     for(std::size_t index = 0; index < targets.size(); ++index) {
         plan.root_targets.push_back(
@@ -579,6 +592,9 @@ BuildPlan resolve_build_plan(
 
 void require_executable_install_plan(
         const std::string&, const BuildPlan&) {
+    if(g_state.build_plan_guard_failure.has_value()) {
+        throw std::runtime_error(g_state.build_plan_guard_failure.value());
+    }
 }
 
 int run_command(const std::string& command) {

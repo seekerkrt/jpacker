@@ -2,6 +2,7 @@
 
 #include "dependency_constraint.hpp"
 
+#include <cstddef>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -11,6 +12,9 @@
 // repository由来providerはprovenanceとしてexact repository名を所有する。
 struct RepositoryProviderOrigin {
     std::string repository_name;
+    // strict repository observationが保持したconfigured index。legacy
+    // adapterではunknownのままにし、projectionでname-only照合へ退化させない。
+    std::optional<std::size_t> configured_order = std::nullopt;
 
     bool operator==(const RepositoryProviderOrigin&) const = default;
 };
@@ -52,6 +56,17 @@ struct ProvidedDependency {
     }
 
     static ProvidedDependency from_repository(
+            std::string repository_name,
+            std::size_t configured_order,
+            std::string package_name) {
+        return ProvidedDependency{
+                RepositoryProviderOrigin{
+                        std::move(repository_name), configured_order},
+                std::move(package_name), {}, {}, {}, std::nullopt,
+                std::nullopt};
+    }
+
+    static ProvidedDependency from_repository(
             std::string repository_name, std::string package_name,
             std::string provided_dependency_name,
             std::string provided_dependency_specification,
@@ -66,6 +81,28 @@ struct ProvidedDependency {
 
     static ProvidedDependency from_repository_constraint_metadata(
             std::string repository_name, std::string package_name,
+            ProviderConstraintMetadata constraint_metadata) {
+        return from_repository_constraint_metadata(
+                std::move(repository_name), std::nullopt,
+                std::move(package_name), std::move(constraint_metadata));
+    }
+
+    static ProvidedDependency from_repository_constraint_metadata(
+            std::string repository_name,
+            std::size_t configured_order,
+            std::string package_name,
+            ProviderConstraintMetadata constraint_metadata) {
+        return from_repository_constraint_metadata(
+                std::move(repository_name),
+                std::optional<std::size_t>{configured_order},
+                std::move(package_name), std::move(constraint_metadata));
+    }
+
+private:
+    static ProvidedDependency from_repository_constraint_metadata(
+            std::string repository_name,
+            std::optional<std::size_t> configured_order,
+            std::string package_name,
             ProviderConstraintMetadata constraint_metadata) {
         const ProviderCapability& capability =
                 constraint_metadata.provided_capability;
@@ -97,7 +134,8 @@ struct ProvidedDependency {
         const std::string* package_version =
                 constraint_metadata.package_version.version();
         return ProvidedDependency{
-                RepositoryProviderOrigin{std::move(repository_name)},
+                RepositoryProviderOrigin{
+                        std::move(repository_name), configured_order},
                 std::move(package_name), {}, capability.package_name(),
                 capability.raw_specification(),
                 package_version == nullptr
@@ -106,6 +144,7 @@ struct ProvidedDependency {
                 std::move(constraint_metadata)};
     }
 
+public:
     static ProvidedDependency from_aur(std::string package_name) {
         std::string package_base = package_name;
         return from_aur(

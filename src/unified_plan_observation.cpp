@@ -1,5 +1,7 @@
 #include "unified_plan_observation.hpp"
 
+#include "system_source_upgrade.hpp"
+
 #include <algorithm>
 #include <type_traits>
 #include <utility>
@@ -10,6 +12,12 @@ bool has_complete_local_source_identity(
         const LocalSourceRootObservationIdentity& identity) noexcept {
     return !identity.canonical_path.empty() &&
            identity.directory_identity.type == LocalSourceNodeType::Directory;
+}
+
+bool has_complete_repository_source_build_identity(
+        const RepositorySourceBuildRootIdentity& identity) noexcept {
+    return !identity.package_name.empty() && !identity.package_base.empty() &&
+           !identity.canonical_source_identity_key.empty();
 }
 
 bool route_matches_source(
@@ -54,11 +62,22 @@ bool same_build_unit_reference(
                                    &rhs_reference.authority() &&
                            lhs_reference.build_plan_order_index() ==
                                    rhs_reference.build_plan_order_index();
-                } else {
+                } else if constexpr(
+                        std::is_same_v<Lhs,
+                                       LocalSourceBuildUnitReference>) {
                     return lhs_reference.source_root() ==
                                    rhs_reference.source_root() &&
                            &lhs_reference.metadata() ==
                                    &rhs_reference.metadata();
+                } else {
+                    return &lhs_reference.source() ==
+                                   &rhs_reference.source() &&
+                           &lhs_reference.required_targets() ==
+                                   &rhs_reference.required_targets() &&
+                           &lhs_reference.requested_package_name() ==
+                                   &rhs_reference.requested_package_name() &&
+                           &lhs_reference.checkout_package_base() ==
+                                   &rhs_reference.checkout_package_base();
                 }
             },
             lhs, rhs);
@@ -71,23 +90,6 @@ bool is_observed_build_unit(
             observed.begin(), observed.end(),
             [&candidate](const UnifiedPlanBuildUnitReference& build_unit) {
                 return same_build_unit_reference(build_unit, candidate);
-            });
-}
-
-bool same_required_artifact_reference(
-        const RequiredArtifactTargetReference& lhs,
-        const RequiredArtifactTargetReference& rhs) noexcept {
-    return &lhs.target() == &rhs.target() &&
-           same_build_unit_reference(lhs.build_unit(), rhs.build_unit());
-}
-
-bool is_observed_required_artifact(
-        const std::vector<RequiredArtifactTargetReference>& observed,
-        const RequiredArtifactTargetReference& candidate) noexcept {
-    return std::any_of(
-            observed.begin(), observed.end(),
-            [&candidate](const RequiredArtifactTargetReference& artifact) {
-                return same_required_artifact_reference(artifact, candidate);
             });
 }
 
@@ -116,7 +118,9 @@ bool is_valid_repository_transaction_target(
                             intent.package.get();
                     return !package.repository.repository_name.empty() &&
                            !package.package_name.empty();
-                } else {
+                } else if constexpr(std::is_same_v<
+                                            Intent,
+                                            RepositoryProviderInstallIntent>) {
                     const ProvidedDependency& provider = intent.provider.get();
                     const auto* origin =
                             std::get_if<RepositoryProviderOrigin>(
@@ -124,36 +128,44 @@ bool is_valid_repository_transaction_target(
                     return origin != nullptr &&
                            !origin->repository_name.empty() &&
                            !provider.package_name.empty();
+                } else {
+                    return true;
                 }
             },
             target);
 }
 
-const RequiredArtifactTargetReference& source_intent_artifact(
+std::size_t source_intent_artifact_index(
         const SourceArtifactInstallIntentTarget& target) noexcept {
     return std::visit(
-            [](const auto& intent) ->
-                    const RequiredArtifactTargetReference& {
-                return intent.target;
+            [](const auto& intent) {
+                return intent.required_artifact_index;
             },
             target);
 }
 
 bool is_valid_source_artifact_install_target(
-        const SourceArtifactInstallIntentTarget& target) noexcept {
+        const SourceArtifactInstallIntentTarget& target,
+        const std::vector<RequiredArtifactTargetReference>& artifacts)
+        noexcept {
+    const std::size_t artifact_index =
+            source_intent_artifact_index(target);
+    if(artifact_index >= artifacts.size()) return false;
+    const RequiredArtifactTargetReference& artifact =
+            artifacts[artifact_index];
     return std::visit(
-            [](const auto& intent) {
+            [&artifact](const auto& intent) {
                 using Intent = std::decay_t<decltype(intent)>;
-                const RequiredPackageArtifactTarget& artifact =
-                        intent.target.target();
-                if(!intent.target.matches_build_unit()) return false;
+                const RequiredPackageArtifactTarget target_value =
+                        artifact.target();
+                if(!artifact.matches_build_unit()) return false;
                 if constexpr(std::is_same_v<
                                      Intent,
                                      SourceRootArtifactInstallIntent>) {
-                    return artifact.desired_reason ==
+                    return target_value.desired_reason ==
                            DesiredInstallReason::Explicit;
                 } else {
-                    return artifact.desired_reason ==
+                    return target_value.desired_reason ==
                            DesiredInstallReason::Dependency;
                 }
             },
@@ -200,6 +212,8 @@ UnifiedPlanRootReference::source_identity() const noexcept {
 UnifiedPlanRootSourceKind UnifiedPlanRootReference::source_kind()
         const noexcept {
     if(std::holds_alternative<RepositoryRootPackageIdentity>(
+               source_identity_) ||
+       std::holds_alternative<RepositorySourceBuildRootIdentity>(
                source_identity_)) {
         return UnifiedPlanRootSourceKind::Repository;
     }
@@ -227,6 +241,11 @@ bool UnifiedPlanRootReference::has_complete_identity() const noexcept {
                            !identity.package_name.empty();
                 } else if constexpr(std::is_same_v<
                                             Identity,
+                                            RepositorySourceBuildRootIdentity>) {
+                    return has_complete_repository_source_build_identity(
+                            identity);
+                } else if constexpr(std::is_same_v<
+                                            Identity,
                                             AurRootPackageIdentity>) {
                     return !identity.package_name.empty() &&
                            !identity.package_base.empty();
@@ -236,6 +255,18 @@ bool UnifiedPlanRootReference::has_complete_identity() const noexcept {
             },
             source_identity_);
     return identity_is_complete && route_matches_source(source_kind(), route_kind_);
+}
+
+UnifiedPlanConfiguredRepositoryOrderReference::
+        UnifiedPlanConfiguredRepositoryOrderReference(
+                std::reference_wrapper<const std::vector<std::string>>
+                        configured_order) noexcept
+    : configured_order_(configured_order) {}
+
+const std::vector<std::string>&
+UnifiedPlanConfiguredRepositoryOrderReference::configured_order()
+        const noexcept {
+    return configured_order_.get();
 }
 
 UnifiedPlanDependencyAuthorityReference::
@@ -270,7 +301,7 @@ UnifiedPlanDependencyAuthorityReference::local_build_plan() const noexcept {
 }
 
 AurPackageBaseBuildUnitReference::AurPackageBaseBuildUnitReference(
-        const BuildPlan& authority,
+        std::reference_wrapper<const BuildPlan> authority,
         std::size_t build_plan_order_index) noexcept
     : authority_(authority), build_plan_order_index_(build_plan_order_index) {}
 
@@ -305,7 +336,7 @@ bool AurPackageBaseBuildUnitReference::has_complete_identity() const noexcept {
 
 LocalSourceBuildUnitReference::LocalSourceBuildUnitReference(
         LocalSourceRootObservationIdentity source_root,
-        const LocalPackageMetadata& metadata)
+        std::reference_wrapper<const LocalPackageMetadata> metadata)
     : source_root_(std::move(source_root)), metadata_(metadata) {}
 
 const LocalSourceRootObservationIdentity&
@@ -331,9 +362,87 @@ bool LocalSourceBuildUnitReference::has_complete_identity() const noexcept {
             });
 }
 
+PreparedSystemSourceBuildUnitReference::
+        PreparedSystemSourceBuildUnitReference(
+                std::reference_wrapper<
+                        const RegisteredSourcePreferenceSnapshot> source,
+                std::reference_wrapper<const std::string>
+                        requested_package_name,
+                std::reference_wrapper<const std::string>
+                        checkout_package_base,
+                bool is_build_plan_entry,
+                bool uses_system_update_baseline,
+                std::reference_wrapper<const std::vector<
+                        RequiredPackageArtifactTarget>> required_targets)
+                noexcept
+    : source_(source), required_targets_(required_targets),
+      requested_package_name_(requested_package_name),
+      checkout_package_base_(checkout_package_base),
+      is_build_plan_entry_(is_build_plan_entry),
+      uses_system_update_baseline_(uses_system_update_baseline) {}
+
+const RegisteredSourcePreferenceSnapshot&
+PreparedSystemSourceBuildUnitReference::source() const noexcept {
+    return source_.get();
+}
+
+const std::vector<RequiredPackageArtifactTarget>&
+PreparedSystemSourceBuildUnitReference::required_targets() const noexcept {
+    return required_targets_.get();
+}
+
+const std::string&
+PreparedSystemSourceBuildUnitReference::requested_package_name()
+        const noexcept {
+    return requested_package_name_.get();
+}
+
+const std::string&
+PreparedSystemSourceBuildUnitReference::checkout_package_base()
+        const noexcept {
+    return checkout_package_base_.get();
+}
+
+bool PreparedSystemSourceBuildUnitReference::is_build_plan_entry()
+        const noexcept {
+    return is_build_plan_entry_;
+}
+
+bool PreparedSystemSourceBuildUnitReference::uses_system_update_baseline()
+        const noexcept {
+    return uses_system_update_baseline_;
+}
+
+bool PreparedSystemSourceBuildUnitReference::has_complete_identity()
+        const noexcept {
+    const RegisteredSourcePreferenceSnapshot& prepared_source = source_.get();
+    const auto& targets = required_targets_.get();
+    if(prepared_source.preference_package_name.empty() ||
+       !prepared_source.resolved_package_base.has_value() ||
+       prepared_source.resolved_package_base->empty() ||
+       !prepared_source.canonical_source_identity_key.has_value() ||
+       prepared_source.canonical_source_identity_key->empty() ||
+       !prepared_source.source_kind.has_value() || targets.empty() ||
+       requested_package_name_.get().empty() ||
+       checkout_package_base_.get().empty() || is_build_plan_entry_ ||
+       requested_package_name_.get() !=
+               prepared_source.preference_package_name ||
+       checkout_package_base_.get() !=
+               prepared_source.resolved_package_base.value() ||
+       targets.size() != 1 || uses_system_update_baseline_ !=
+               (prepared_source.source_kind.value() ==
+                SourceBuildSourceKind::Repository)) {
+        return false;
+    }
+    const RequiredPackageArtifactTarget& target = targets.front();
+    return target.package_base == checkout_package_base_.get() &&
+           target.package_name == requested_package_name_.get() &&
+           is_known_install_reason(target.desired_reason);
+}
+
 RequiredArtifactTargetReference::RequiredArtifactTargetReference(
         UnifiedPlanBuildUnitReference build_unit,
-        const RequiredPackageArtifactTarget& target)
+        std::reference_wrapper<const RequiredPackageArtifactTarget> target)
     : build_unit_(std::move(build_unit)), target_(target) {}
 
 const UnifiedPlanBuildUnitReference&
@@ -341,8 +450,8 @@ RequiredArtifactTargetReference::build_unit() const noexcept {
     return build_unit_;
 }
 
-const RequiredPackageArtifactTarget& RequiredArtifactTargetReference::target()
-        const noexcept {
+RequiredPackageArtifactTarget RequiredArtifactTargetReference::target()
+        const {
     return target_.get();
 }
 
@@ -368,7 +477,9 @@ bool RequiredArtifactTargetReference::matches_build_unit() const noexcept {
                                    entry->package_names.end(),
                                    required.package_name) !=
                                    entry->package_names.end();
-                } else {
+                } else if constexpr(std::is_same_v<
+                                            BuildUnit,
+                                            LocalSourceBuildUnitReference>) {
                     const LocalPackageMetadata& metadata =
                             build_unit.metadata();
                     return metadata.package_base == required.package_base &&
@@ -380,6 +491,20 @@ bool RequiredArtifactTargetReference::matches_build_unit() const noexcept {
                                                    child) {
                                        return child.name ==
                                               required.package_name;
+                                   });
+                } else {
+                    const RegisteredSourcePreferenceSnapshot& source =
+                            build_unit.source();
+                    const auto& targets = build_unit.required_targets();
+                    return source.resolved_package_base.has_value() &&
+                           source.resolved_package_base.value() ==
+                                   required.package_base &&
+                           std::any_of(
+                                   targets.begin(), targets.end(),
+                                   [&required](
+                                           const RequiredPackageArtifactTarget&
+                                                   target) {
+                                       return &target == &required;
                                    });
                 }
             },
@@ -399,9 +524,26 @@ const std::vector<UnifiedPlanRootReference>& UnifiedPlanObservation::roots()
     return input_.roots;
 }
 
+const std::vector<UnifiedPlanRootMetadataAuthorityReference>&
+UnifiedPlanObservation::root_metadata() const noexcept {
+    return input_.root_metadata;
+}
+
+const UnifiedPlanConfiguredRepositoryOrderReference*
+UnifiedPlanObservation::configured_repository_order() const noexcept {
+    return input_.configured_repository_order.has_value()
+            ? &input_.configured_repository_order.value()
+            : nullptr;
+}
+
 const std::vector<UnifiedPlanDependencyAuthorityReference>&
 UnifiedPlanObservation::dependency_authorities() const noexcept {
     return input_.dependency_authorities;
+}
+
+const std::vector<UnifiedPlanRoutePreflightAuthorityReference>&
+UnifiedPlanObservation::route_preflight_authorities() const noexcept {
+    return input_.route_preflight_authorities;
 }
 
 const std::vector<UnifiedPlanBuildUnitReference>&
@@ -485,6 +627,12 @@ UnifiedPlanObservationResult make_unified_plan_observation(
                     UnifiedPlanObservationInvariantIssueKind::
                             BlockedWithoutBlocker);
         }
+        if(!input.transaction_intents.empty()) {
+            add_invariant_issue(
+                    issues,
+                    UnifiedPlanObservationInvariantIssueKind::
+                            BlockedHasMutationIntent);
+        }
         break;
     default:
         add_invariant_issue(
@@ -518,7 +666,7 @@ UnifiedPlanObservationResult make_unified_plan_observation(
         ++index) {
         const RequiredArtifactTargetReference& artifact =
                 input.required_artifacts[index];
-        const RequiredPackageArtifactTarget& target = artifact.target();
+        const RequiredPackageArtifactTarget target = artifact.target();
         if(target.package_base.empty() || target.package_name.empty() ||
            !is_known_install_reason(target.desired_reason)) {
             add_invariant_issue(
@@ -586,16 +734,16 @@ UnifiedPlanObservationResult make_unified_plan_observation(
                             const SourceArtifactInstallIntentTarget& target =
                                     typed_intent.targets[target_index];
                             if(!is_valid_source_artifact_install_target(
-                                       target)) {
+                                       target,
+                                       input.required_artifacts)) {
                                 add_invariant_issue(
                                         issues,
                                         UnifiedPlanObservationInvariantIssueKind::
                                                 SourceArtifactInstallTargetInvalid,
                                         intent_index, target_index);
                             }
-                            if(!is_observed_required_artifact(
-                                       input.required_artifacts,
-                                       source_intent_artifact(target))) {
+                            if(source_intent_artifact_index(target) >=
+                               input.required_artifacts.size()) {
                                 add_invariant_issue(
                                         issues,
                                         UnifiedPlanObservationInvariantIssueKind::
