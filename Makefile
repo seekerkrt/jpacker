@@ -792,17 +792,30 @@ UNIFIED_PLAN_PROJECTION_FORBIDDEN_TEST_SRCS := \
 	$(filter-out \
 		$(UNIFIED_PLAN_PROJECTION_ALLOWED_PRODUCTION_TEST_SRCS), \
 		$(SRCS))
-# POLICY(#352): renderer test links the observation model and presentation-only
-# helpers. Resolver, executor, process, command/argv, source preparation, and
-# CLI routing owners remain outside this focused binary.
+# POLICY(#352): renderer test links the observation model, presentation-only
+# helpers, and the existing LocalBuildPlan resolver solely to construct a
+# production typed-authority fixture. Query transport is replaced by the same
+# dedicated stubs as the local projection test. The renderer object itself is
+# kept behind the resolver/provider/constraint-evaluation symbol firewall.
 UNIFIED_PLAN_RENDERER_ALLOWED_PRODUCTION_TEST_SRCS := \
 	$(SRC_DIR)/unified_plan_renderer.cpp \
 	$(SRC_DIR)/unified_plan_observation.cpp \
+	$(SRC_DIR)/local_dependency_plan_projection.cpp \
+	$(SRC_DIR)/aur_constraint_metadata.cpp \
 	$(SRC_DIR)/dependency_constraint.cpp \
-	$(SRC_DIR)/dependency_constraint_presentation.cpp
+	$(SRC_DIR)/dependency_constraint_presentation.cpp \
+	$(SRC_DIR)/dependency_plan.cpp \
+	$(SRC_DIR)/dependency_plan_model.cpp \
+	$(SRC_DIR)/dependency_spec.cpp \
+	$(SRC_DIR)/package_identifier.cpp \
+	$(SRC_DIR)/logging.cpp
+UNIFIED_PLAN_RENDERER_REQUIRED_TEST_SUPPORT_SRCS := \
+	tests/stubs/local-dependency-plan/aur_rpc_stub.cpp \
+	tests/stubs/local-dependency-plan/repository_query_stub.cpp
 UNIFIED_PLAN_RENDERER_TEST_SRCS := \
 	tests/unified_plan_renderer_test.cpp \
-	$(UNIFIED_PLAN_RENDERER_ALLOWED_PRODUCTION_TEST_SRCS)
+	$(UNIFIED_PLAN_RENDERER_ALLOWED_PRODUCTION_TEST_SRCS) \
+	$(UNIFIED_PLAN_RENDERER_REQUIRED_TEST_SUPPORT_SRCS)
 UNIFIED_PLAN_RENDERER_FORBIDDEN_TEST_SRCS := \
 	$(filter-out \
 		$(UNIFIED_PLAN_RENDERER_ALLOWED_PRODUCTION_TEST_SRCS), \
@@ -1307,8 +1320,8 @@ LIBALPM_BUILD_TARGETS := \
 .PHONY: all check-libalpm clean check-upgrade-all-plan-link-firewall check-system-source-upgrade-link-firewall check-aur-update-execution-runner-link-firewall check-aur-update-operation-result-link-firewall check-filtered-aur-update-operation-link-firewall check-upgrade-all-operation-link-firewall check-upgrade-all-command-link-firewall check-commands-sync-link-firewall check-provider-installed-state-link-firewall check-dependency-constraint-link-firewall check-package-constraint-metadata-link-firewall check-aur-constraint-metadata-link-firewall check-root-package-candidate-link-firewall check-root-package-search-link-firewall check-root-package-selection-link-firewall check-root-package-route-projection-link-firewall check-dependency-plan-model-link-firewall check-build-plan-artifact-target-projection-link-firewall check-artifact-selection-model-link-firewall check-artifact-identity-selection-link-firewall check-multiple-artifact-workspace-link-firewall check-multiple-artifact-identity-link-firewall check-package-base-artifact-install-plan-link-firewall check-package-base-artifact-install-executor-link-firewall check-separated-package-base-source-build-link-firewall test test-internal-identity test-application-identity test-xdg-paths test-xdg-directory-safety test-xdg-state-log test-trusted-cache test-runtime-identity test-app-config test-provider-selection test-provider-installed-state test-dependency-constraint test-package-constraint-metadata test-aur-constraint-metadata test-root-package-candidate test-root-package-search test-root-package-selection test-root-package-route-projection test-user-config test-package-identifier test-package-metadata test-package-metadata-integration test-repository-query test-shell-words test-source-environment test-artifact-workspace test-multiple-artifact-workspace test-artifact-identity test-multiple-artifact-identity test-artifact-install-executor test-package-base-artifact-install-plan test-package-base-artifact-install-executor test-separated-source-build test-separated-package-base-source-build test-production-source-build test-process-capture test-aur-update-plan test-upgrade-all-plan test-system-source-upgrade test-aur-update-query test-aur-update-command test-upgrade-all-command test-aur-update-execution-preflight test-aur-update-execution-preflight-integration test-aur-update-execution-preparation test-aur-update-execution-runner test-aur-update-operation-result test-filtered-aur-update-operation test-upgrade-all-operation test-dependency-plan-model test-build-plan-artifact-target-projection test-artifact-install-plan test-artifact-selection-model test-artifact-identity-selection test-command-stub-contract test-markdown-links test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-commands-inspect test-commands-source-maintenance test-commands-sync test-live-contract test-run-with-pty test-conflicts-replaces test-install-layout test-package-transition test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check install uninstall
 .PHONY: check-local-package-metadata-link-firewall check-local-source-root-link-firewall check-local-dependency-plan-projection-link-firewall test-local-package-metadata test-local-source-root test-local-dependency-plan-projection
 .PHONY: check-local-source-workspace-link-firewall check-local-source-build-link-firewall test-local-source-workspace test-local-source-build
-.PHONY: check-unified-plan-observation-link-firewall test-unified-plan-observation
-.PHONY: check-unified-plan-projection-link-firewall test-unified-plan-projection
+.PHONY: check-unified-plan-observation-link-firewall test-unified-plan-observation test-observation-contract-gate
+.PHONY: check-unified-plan-projection-link-firewall test-unified-plan-projection test-projection-fixture-gate
 .PHONY: check-unified-plan-renderer-link-firewall test-unified-plan-renderer
 .PHONY: FORCE catalogs check-catalogs check-localization-config check-pot update-po update-pot test-localization test-catalog-metadata-gate test-cli-localization-surface test-public-documentation
 .PHONY: test-container test-container-live test-container-live-provider test-container-live-aur test-container-live-local
@@ -2059,11 +2072,11 @@ $(UNIFIED_PLAN_PROJECTION_TEST_TARGET): $(UNIFIED_PLAN_PROJECTION_TEST_SRCS) $(S
 		-I$(SRC_DIR) -Itests $(UNIFIED_PLAN_PROJECTION_TEST_SRCS) \
 		-o $@ $(LIBALPM_LDLIBS)
 
-$(UNIFIED_PLAN_RENDERER_TEST_TARGET): $(UNIFIED_PLAN_RENDERER_TEST_SRCS) $(SRC_DIR)/unified_plan_renderer.hpp $(SRC_DIR)/unified_plan_observation.hpp $(SRC_DIR)/dependency_plan.hpp $(SRC_DIR)/artifact_install_plan.hpp $(SRC_DIR)/local_dependency_plan_projection.hpp $(SRC_DIR)/localization.hpp $(SRC_DIR)/system_source_upgrade.hpp $(SRC_DIR)/upgrade_all_operation.hpp $(VERSION_FILE)
+$(UNIFIED_PLAN_RENDERER_TEST_TARGET): $(UNIFIED_PLAN_RENDERER_TEST_SRCS) $(SRC_DIR)/unified_plan_renderer.hpp $(SRC_DIR)/unified_plan_observation.hpp $(SRC_DIR)/dependency_plan.hpp $(SRC_DIR)/artifact_install_plan.hpp $(SRC_DIR)/local_dependency_plan_projection.hpp $(SRC_DIR)/localization.hpp $(SRC_DIR)/system_source_upgrade.hpp $(SRC_DIR)/upgrade_all_operation.hpp tests/stubs/local-dependency-plan/query_stub.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling unified plan renderer focused test binary"
 	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-I$(SRC_DIR) $(UNIFIED_PLAN_RENDERER_TEST_SRCS) \
+		-I$(SRC_DIR) -Itests $(UNIFIED_PLAN_RENDERER_TEST_SRCS) \
 		-o $@ $(LIBALPM_LDLIBS)
 
 $(REPOSITORY_QUERY_TEST_TARGET): $(REPOSITORY_QUERY_TEST_SRCS) $(SRC_DIR)/repository_query.hpp $(SRC_DIR)/dependency_provider.hpp $(SRC_DIR)/package_constraint_metadata.hpp $(SRC_DIR)/dependency_constraint.hpp $(SRC_DIR)/package_metadata.hpp $(SRC_DIR)/installed_package.hpp $(SRC_DIR)/dependency_spec.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/process.hpp $(SRC_DIR)/shell_words.hpp $(SRC_DIR)/localization.hpp tests/stubs/package-metadata/alpm_stub.hpp tests/stubs/repository-query/process_stub.hpp $(VERSION_FILE)
@@ -2924,6 +2937,8 @@ check-unified-plan-observation-link-firewall:
 test-unified-plan-observation: check-unified-plan-observation-link-firewall $(UNIFIED_PLAN_OBSERVATION_TEST_TARGET)
 	$(abspath $(UNIFIED_PLAN_OBSERVATION_TEST_TARGET))
 
+test-observation-contract-gate: check-unified-plan-observation-link-firewall
+
 UNIFIED_PLAN_PROJECTION_FORBIDDEN_SYMBOL_PATTERN := (^|[^[:alnum:]_])(resolve_|execute_|run_command|capture_command|cmd_|shell_words::|Process::|prepare_production_source_build_invocation|prepare_aur_source_build_work_items|run_explicit_process|capture_explicit_process_output_raw|exec_command|command_status|prepare_artifact_install|prepare_package_base_artifact_install|prepare_smart_source_build_work_item|prepare_resolved_source_build_work_item|argv)
 UNIFIED_PLAN_PROJECTION_FIREWALL_PROBE_SYMBOLS := \
 	resolve_build_plan \
@@ -2983,9 +2998,15 @@ check-unified-plan-projection-link-firewall: $(BUILD_DIR)/unified_plan_projectio
 test-unified-plan-projection: check-unified-plan-projection-link-firewall $(UNIFIED_PLAN_PROJECTION_TEST_TARGET)
 	$(abspath $(UNIFIED_PLAN_PROJECTION_TEST_TARGET))
 
-UNIFIED_PLAN_RENDERER_FORBIDDEN_SYMBOL_PATTERN := (^|[^[:alnum:]_])(resolve_|execute_|run_command|capture_command|cmd_|shell_words::|Process::|prepare_production_source_build_invocation|prepare_aur_source_build_work_items|run_explicit_process|capture_explicit_process_output_raw|exec_command|command_status|prepare_artifact_install|prepare_package_base_artifact_install|prepare_smart_source_build_work_item|prepare_resolved_source_build_work_item|argv)
+test-projection-fixture-gate: check-unified-plan-projection-link-firewall
+
+UNIFIED_PLAN_RENDERER_FORBIDDEN_SYMBOL_PATTERN := (^|[^[:alnum:]_])(resolve_|evaluate_consumer_dependency_requirement|select_provider|make_provider_selection_session|provider_selection_callback|execute_|run_command|capture_command|cmd_|shell_words::|Process::|prepare_production_source_build_invocation|prepare_aur_source_build_work_items|run_explicit_process|capture_explicit_process_output_raw|exec_command|command_status|prepare_artifact_install|prepare_package_base_artifact_install|prepare_smart_source_build_work_item|prepare_resolved_source_build_work_item|argv)
 UNIFIED_PLAN_RENDERER_FIREWALL_PROBE_SYMBOLS := \
 	resolve_build_plan \
+	evaluate_consumer_dependency_requirement \
+	select_provider \
+	make_provider_selection_session \
+	provider_selection_callback \
 	execute_source_build_typed \
 	shell_words::quote \
 	argv \
@@ -3022,12 +3043,20 @@ check-unified-plan-renderer-link-firewall: $(BUILD_DIR)/unified_plan_renderer.o
 			exit 1; \
 		}; \
 	done
+	@set -e; for source in $(UNIFIED_PLAN_RENDERER_REQUIRED_TEST_SUPPORT_SRCS); do \
+		count=$$(printf '%s\n' $(UNIFIED_PLAN_RENDERER_TEST_SRCS) | \
+			awk -v expected="$$source" '$$0 == expected { count++ } END { print count + 0 }'); \
+		test "$$count" -eq 1 || { \
+			echo "error: unified plan renderer test must link support $$source exactly once" >&2; \
+			exit 1; \
+		}; \
+	done
 	@test -z "$(filter $(UNIFIED_PLAN_RENDERER_FORBIDDEN_TEST_SRCS),$(UNIFIED_PLAN_RENDERER_TEST_SRCS))" || { \
 		echo "error: unified plan renderer test links a forbidden production source" >&2; \
 		exit 1; \
 	}
-	@test -z "$(filter tests/stubs/%,$(UNIFIED_PLAN_RENDERER_TEST_SRCS))" || { \
-		echo "error: unified plan renderer test links a test stub" >&2; \
+	@test "$(words $(filter tests/stubs/%,$(UNIFIED_PLAN_RENDERER_TEST_SRCS)))" -eq "$(words $(UNIFIED_PLAN_RENDERER_REQUIRED_TEST_SUPPORT_SRCS))" || { \
+		echo "error: unified plan renderer test links an unexpected test stub" >&2; \
 		exit 1; \
 	}
 
