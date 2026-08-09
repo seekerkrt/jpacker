@@ -20,6 +20,10 @@ moguet \- pacman-first AUR helper with verified source builds
 .B moguet
 .BR -V | --version
 .
+.B moguet
+.B --dry-run
+.I supported-operation
+.
 .\" parity:description
 .SH DESCRIPTION
 .B Moguet
@@ -283,6 +287,55 @@ Show localized help and exit without creating XDG directories.
 Show
 .B Moguet
 and the program version, then exit without creating XDG directories.
+.
+.TP
+.B "--dry-run"
+Observe a supported Moguet-owned mutating route by using its production
+pre-mutation authorities and the unified human-readable plan renderer.
+The supported routes are Moguet-owned
+.B -S
+install and system-update forms such as
+.BR -Syu ,
+.BR fetch ,
+remote and local
+.BR build ,
+.BR upgrade ,
+.BR upgrade-aur ,
+and
+.BR upgrade-all .
+Scope-excluded
+.BR deps ,
+.BR plan ,
+.BR -Ss ,
+.BR -Si ,
+.BR clean ,
+and generic pacman pass-through forms are rejected explicitly.
+.
+.PP
+Read-only filesystem, network, and exact allowlisted pacman discovery queries
+may run, but dry-run does not write the state log or persistent state, create a
+cache, workspace, or worktree, run Git clone/fetch/checkout mutation, evaluate
+local metadata with
+.BR "makepkg --printsrcinfo" ,
+produce build output, invoke sudo, start or mutate through a pacman
+transaction, acquire a pacman transaction lock, install packages, or perform
+cleanup mutation.
+The local route uses only an already safe descriptor; if metadata evaluation
+would be required, the observation is
+.B Blocked
+instead of guessed ready.
+.
+.PP
+.B Ready
+and
+.B NoOp
+observations exit zero;
+.B Blocked
+exits non-zero.
+The observation is not an approval token, prepared execution capability, or
+cached provider choice. A later actual invocation revalidates current state.
+Moguet v2.2.0 provides this human-readable surface only; no JSON or other
+machine-readable plan schema is introduced.
 .
 .TP
 .B "--edit"

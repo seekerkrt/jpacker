@@ -263,7 +263,36 @@ moguet fetch <pkg>
 # Export one PackageBase checkout or print only its PKGBUILD
 moguet -G <pkg>
 moguet -Gp <pkg>
+
+# Observe every supported mutating route without changing persistent state
+moguet --dry-run -S <pkg>
+moguet --dry-run -Syu
+moguet --dry-run fetch <pkg>
+moguet --dry-run build <pkg>
+moguet --dry-run build --local <directory>
+moguet --dry-run upgrade
+moguet --dry-run upgrade-aur
+moguet --dry-run upgrade-all
 ```
+
+`--dry-run` is a global observation modifier for the Moguet-owned `-S` install
+and system-update routes, `fetch`, remote and local `build`, `upgrade`,
+`upgrade-aur`, and `upgrade-all`. It explicitly rejects `deps`, `plan`, `-Ss`,
+`-Si`, `clean`, and generic pacman pass-through routes instead of forwarding
+the option to pacman. The renderer reports `Ready` or `NoOp` with exit status
+0 and `Blocked` with a non-zero status.
+
+Dry-run can perform the same read-only filesystem, network, and exact
+allowlisted pacman discovery queries as the production preflight, but does not
+write the state log or persistent state, create a cache, workspace, or
+worktree, run Git clone/fetch/checkout mutation, run `makepkg --printsrcinfo`
+or other local metadata evaluation, produce build output, invoke sudo, start
+or mutate through a pacman transaction, acquire a pacman transaction lock,
+install packages, or perform cleanup mutation. A local build that needs
+metadata evaluation is therefore `Blocked`; it is never guessed ready. The observation
+is not reused as an approval token, execution capability, or cached provider
+choice: a later actual invocation revalidates current state. The v2.2.0 surface
+is human-readable only and adds no JSON or other machine-readable plan schema.
 
 **Choosing an upgrade command:** For ordinary package installation, search,
 and system upgrades, use pacman-compatible operations such as `-S`, `-Ss`,

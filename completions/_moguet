@@ -34,6 +34,7 @@ local -a _moguet_options=(
     '--diff:Prompt to view repository update diffs'
     '--nodiff:Skip the repository update diff prompt'
     '--noconfirm:Pass this option to pacman and makepkg'
+    '--dry-run:Observe a supported mutating operation without changing persistent state'
     '--build-mode=:Select the source-build mode'
     '--rebuild:Compatibility alias for --build-mode=rebuild'
     '--cleanbuild:Compatibility alias for --build-mode=clean'

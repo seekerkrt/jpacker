@@ -530,6 +530,24 @@ LocalSourceBuildProjectionAuthority::LocalSourceBuildProjectionAuthority(
               request.metadata.source_directory_identity_,
               request.metadata.pkgbuild_snapshot_) {}
 
+LocalSourceBuildProjectionAuthority
+make_local_source_build_projection_authority(
+        const LocalSourceRoot& source_root,
+        const LocalBuildPlan& local_build_plan,
+        const LocalSourceBuildMetadata& metadata) {
+    metadata.require_matches(source_root);
+    LocalSourceBuildProjectionAuthority authority(
+            source_root, local_build_plan, metadata.metadata_,
+            metadata.source_environment_, metadata.effective_architecture_,
+            metadata.provenance_, metadata.source_directory_identity_,
+            metadata.pkgbuild_snapshot_);
+    if(!authority.has_complete_identity()) {
+        throw std::invalid_argument(
+                "Local source read-only projection authorities are inconsistent.");
+    }
+    return authority;
+}
+
 PreparedLocalSourceBuild::PreparedLocalSourceBuild(
         PreparedLocalSourceBuild&& other) noexcept
     : request_(std::move(other.request_)),

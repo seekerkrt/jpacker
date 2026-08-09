@@ -1,8 +1,10 @@
 #pragma once
 
 #include "build_plan_artifact_target_projection.hpp"
+#include "commands_inspect.hpp"
 #include "commands_sync.hpp"
 #include "local_source_build.hpp"
+#include "source_install.hpp"
 #include "system_source_upgrade.hpp"
 #include "unified_plan_observation.hpp"
 #include "upgrade_all_operation.hpp"
@@ -14,6 +16,29 @@
 
 struct AurUpdateExecutionPreflight;
 struct AurUpdateQueryResult;
+struct AurUpdateSourceBuildPreparation;
+class PreparedFilteredAurUpdateOperation;
+class PreparedUpgradeAllAurPreflight;
+
+struct FetchUnifiedPlanProjectionInput {
+    std::reference_wrapper<const FetchPreparation> source;
+};
+
+using SyncInstallUnifiedPlanProjectionSource = std::variant<
+        std::reference_wrapper<const PreparedSyncInstall>,
+        std::reference_wrapper<const SyncInstallPreparationFailure>>;
+
+struct SyncInstallUnifiedPlanProjectionInput {
+    SyncInstallUnifiedPlanProjectionSource source;
+};
+
+using RemoteSourceBuildUnifiedPlanProjectionSource = std::variant<
+        std::reference_wrapper<const PreparedRemoteSourceBuild>,
+        std::reference_wrapper<const RemoteSourceBuildPlanFailure>>;
+
+struct RemoteSourceBuildUnifiedPlanProjectionInput {
+    RemoteSourceBuildUnifiedPlanProjectionSource source;
+};
 // Ready prepared ownerとBlocked production resultだけを受けるread-only sum。
 // reference_wrapperによりtemporary authorityは拒否し、fake work itemを
 // Blocked armへ要求しない。すべてのownerはprojectionを破棄するまでmove、
@@ -31,9 +56,14 @@ struct LocalSourceBuildPlanFailureProjectionInput {
     std::reference_wrapper<const LocalBuildPlan> local_build_plan;
 };
 
+struct LocalSourceMetadataEvaluationProjectionInput {
+    std::reference_wrapper<const LocalSourceRoot> source_root;
+};
+
 using LocalSourceUnifiedPlanProjectionSource = std::variant<
         std::reference_wrapper<const LocalSourceBuildProjectionAuthority>,
-        LocalSourceBuildPlanFailureProjectionInput>;
+        LocalSourceBuildPlanFailureProjectionInput,
+        LocalSourceMetadataEvaluationProjectionInput>;
 
 struct LocalSourceUnifiedPlanProjectionInput {
     LocalSourceUnifiedPlanProjectionSource source;
@@ -44,6 +74,12 @@ struct AurUpdateUnifiedPlanProjectionInput {
     std::reference_wrapper<const AurUpdateQueryResult> query_result;
     std::reference_wrapper<const AurUpdateExecutionPreflight> preflight;
     bool needed = false;
+    std::optional<std::reference_wrapper<
+            const AurUpdateSourceBuildPreparation>>
+            source_build_preparation = std::nullopt;
+    std::optional<std::reference_wrapper<
+            const PreparedFilteredAurUpdateOperation>>
+            filtered_operation = std::nullopt;
 };
 
 using SystemSourceUpgradeUnifiedPlanProjectionSource = std::variant<
@@ -67,6 +103,12 @@ struct UpgradeAllUnifiedPlanProjectionInput {
     std::optional<std::reference_wrapper<
             const std::vector<UpgradeAllOperationIssue>>>
             issues = std::nullopt;
+    std::optional<std::reference_wrapper<
+            const AurUpdateSourceBuildPreparation>>
+            aur_source_build_preparation = std::nullopt;
+    std::optional<std::reference_wrapper<
+            const PreparedUpgradeAllAurPreflight>>
+            aur_operation_preflight = std::nullopt;
 };
 
 // BuildPlan routeのRequiredPackageArtifactTargetはowned projection resultまたは
@@ -112,26 +154,53 @@ private:
     project_root_package_unified_plan(
             RootPackageUnifiedPlanProjectionInput input);
     friend std::unique_ptr<UnifiedPlanProjection>
+    project_fetch_unified_plan(FetchUnifiedPlanProjectionInput input);
+    friend std::unique_ptr<UnifiedPlanProjection>
+    project_sync_install_unified_plan(
+            SyncInstallUnifiedPlanProjectionInput input);
+    friend std::unique_ptr<UnifiedPlanProjection>
+    project_remote_source_build_unified_plan(
+            RemoteSourceBuildUnifiedPlanProjectionInput input);
+    friend std::unique_ptr<UnifiedPlanProjection>
     project_local_source_unified_plan(
             LocalSourceUnifiedPlanProjectionInput input);
     friend std::unique_ptr<UnifiedPlanProjection>
     project_aur_update_unified_plan(
             AurUpdateUnifiedPlanProjectionInput input);
     friend std::unique_ptr<UnifiedPlanProjection>
+    project_filtered_aur_update_unified_plan(
+            const PreparedFilteredAurUpdateOperation& prepared);
+    friend std::unique_ptr<UnifiedPlanProjection>
     project_system_source_upgrade_unified_plan(
             SystemSourceUpgradeUnifiedPlanProjectionInput input);
     friend std::unique_ptr<UnifiedPlanProjection>
     project_upgrade_all_unified_plan(
             UpgradeAllUnifiedPlanProjectionInput input);
+    friend std::unique_ptr<UnifiedPlanProjection>
+    project_upgrade_all_unified_plan(
+            const UpgradeAllOperationProjectionAuthority& prepared,
+            const PreparedUpgradeAllAurPreflight& aur_preflight);
 };
 
 std::unique_ptr<UnifiedPlanProjection> project_root_package_unified_plan(
         RootPackageUnifiedPlanProjectionInput input);
+std::unique_ptr<UnifiedPlanProjection> project_fetch_unified_plan(
+        FetchUnifiedPlanProjectionInput input);
+std::unique_ptr<UnifiedPlanProjection> project_sync_install_unified_plan(
+        SyncInstallUnifiedPlanProjectionInput input);
+std::unique_ptr<UnifiedPlanProjection>
+project_remote_source_build_unified_plan(
+        RemoteSourceBuildUnifiedPlanProjectionInput input);
 std::unique_ptr<UnifiedPlanProjection> project_local_source_unified_plan(
         LocalSourceUnifiedPlanProjectionInput input);
 std::unique_ptr<UnifiedPlanProjection> project_aur_update_unified_plan(
         AurUpdateUnifiedPlanProjectionInput input);
+std::unique_ptr<UnifiedPlanProjection> project_filtered_aur_update_unified_plan(
+        const PreparedFilteredAurUpdateOperation& prepared);
 std::unique_ptr<UnifiedPlanProjection> project_system_source_upgrade_unified_plan(
         SystemSourceUpgradeUnifiedPlanProjectionInput input);
 std::unique_ptr<UnifiedPlanProjection> project_upgrade_all_unified_plan(
         UpgradeAllUnifiedPlanProjectionInput input);
+std::unique_ptr<UnifiedPlanProjection> project_upgrade_all_unified_plan(
+        const UpgradeAllOperationProjectionAuthority& prepared,
+        const PreparedUpgradeAllAurPreflight& aur_preflight);

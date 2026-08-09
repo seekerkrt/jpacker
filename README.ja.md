@@ -234,7 +234,33 @@ moguet fetch <pkg>
 # PackageBase checkoutをexport、またはPKGBUILDだけを表示
 moguet -G <pkg>
 moguet -Gp <pkg>
+
+# persistent stateを変更せず、対応する全mutating routeを観測
+moguet --dry-run -S <pkg>
+moguet --dry-run -Syu
+moguet --dry-run fetch <pkg>
+moguet --dry-run build <pkg>
+moguet --dry-run build --local <directory>
+moguet --dry-run upgrade
+moguet --dry-run upgrade-aur
+moguet --dry-run upgrade-all
 ```
+
+`--dry-run`は、Moguet-owned `-S` install / system-update route、`fetch`、remote / local
+`build`、`upgrade`、`upgrade-aur`、`upgrade-all`のglobal observation modifierです。
+`deps`、`plan`、`-Ss`、`-Si`、`clean`、generic pacman pass-through routeではpacmanへ
+転送せず明示的に拒否します。rendererは`Ready` / `NoOp`を終了code 0、`Blocked`を
+non-zeroで報告します。
+
+dry-runはproduction preflightと同じread-only filesystem / network discoveryと、exact
+allowlist済みのpacman discovery queryを実行し得ますが、state logやpersistent stateを書かず、
+cache、workspace、worktreeを作成せず、Git clone / fetch / checkout mutation、
+`makepkg --printsrcinfo`その他のlocal metadata評価、build output、sudo、pacman transactionの
+開始・mutation、pacman transaction lock、package install、cleanup mutationへ進みません。そのためlocal
+buildでmetadata評価が必要な場合はreadyを推測せず`Blocked`になります。観測結果をapproval
+token、execution capability、cached provider choiceとして再利用せず、後のactual invocationは
+current stateを再validationします。v2.2.0のsurfaceはhuman-readableだけで、JSONその他の
+machine-readable plan schemaは追加しません。
 
 **upgrade commandの選択:** 通常のpackage install、search、system upgradeでは、
 pacmanや他のAUR helperと同様に`-S`、`-Ss`、`-Syu`等のpacman-compatible

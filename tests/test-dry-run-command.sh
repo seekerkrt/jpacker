@@ -1,0 +1,487 @@
+#!/bin/sh
+set -eu
+
+LANG=C
+LC_ALL=C
+export LANG LC_ALL
+unset LANGUAGE
+
+test_binary=$1
+repo_root=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
+MOGUET_TEST_REPOSITORY_ROOT=$repo_root
+export MOGUET_TEST_REPOSITORY_ROOT
+. "$repo_root/tests/test-command-safety.sh"
+
+tmp_dir=$(mktemp -d)
+server_pid=
+mutation_sentinel_pid=
+
+cleanup() {
+    if [ -n "$mutation_sentinel_pid" ]; then
+        kill "$mutation_sentinel_pid" 2>/dev/null || true
+        wait "$mutation_sentinel_pid" 2>/dev/null || true
+    fi
+    if [ -n "$server_pid" ]; then
+        kill "$server_pid" 2>/dev/null || true
+        wait "$server_pid" 2>/dev/null || true
+    fi
+    rm -rf "$tmp_dir"
+}
+trap cleanup EXIT INT TERM
+
+port_file=$tmp_dir/port
+python3 "$repo_root/tests/aur_rpc_fixture_server.py" \
+    "$repo_root/tests/fixtures/aur-rpc-conflicts-replaces.json" \
+    "$port_file" &
+server_pid=$!
+
+attempt=0
+while [ ! -s "$port_file" ]; do
+    attempt=$((attempt + 1))
+    if [ "$attempt" -gt 100 ]; then
+        echo "fixture server did not start" >&2
+        exit 1
+    fi
+    sleep 0.05
+done
+
+port=$(cat "$port_file")
+PATH=$repo_root/tests/stubs:/usr/bin:/bin
+export PATH
+require_exact_test_command pacman-conf "$repo_root/tests/stubs/pacman-conf"
+require_exact_test_command makepkg "$repo_root/tests/stubs/makepkg"
+require_exact_test_command pacman "$repo_root/tests/stubs/pacman"
+require_exact_test_command sudo "$repo_root/tests/stubs/sudo"
+require_exact_test_command git "$repo_root/tests/stubs/git"
+MOGUET_TEST_AUR_RPC_BASE_URL=http://127.0.0.1:$port/rpc/
+export MOGUET_TEST_AUR_RPC_BASE_URL
+
+snapshot_protected_storage() {
+    snapshot_destination=$1
+    {
+        for snapshot_tree in \
+            "$XDG_CONFIG_HOME" \
+            "$XDG_STATE_HOME" \
+            "$XDG_CACHE_HOME" \
+            "$TMPDIR" \
+            "$case_work_dir"
+        do
+            printf 'tree=%s\n' "$snapshot_tree"
+            find "$snapshot_tree" -printf '%p|%y\n' | LC_ALL=C sort
+            find "$snapshot_tree" -exec \
+                stat --format='%n|%F|%d|%i|%u|%g|%a|%s|%Y|%Z' -- {} + |
+                LC_ALL=C sort
+            find "$snapshot_tree" -type f -exec sha256sum -- {} + |
+                LC_ALL=C sort
+        done
+    } > "$snapshot_destination"
+}
+
+prepare_canary_tree() {
+    protected_tree=$1
+    protected_label=$2
+    mkdir -p "$protected_tree/moguet/canary-directory"
+    printf '%s\n' "$protected_label root canary" > \
+        "$protected_tree/root-canary"
+    printf '%s\n' "$protected_label Moguet canary" > \
+        "$protected_tree/moguet/canary-directory/content"
+    chmod 0600 \
+        "$protected_tree/root-canary" \
+        "$protected_tree/moguet/canary-directory/content"
+    chmod 0700 \
+        "$protected_tree/moguet/canary-directory" \
+        "$protected_tree/moguet" \
+        "$protected_tree"
+}
+
+setup_case() {
+    case_name=$1
+    case_dir=$tmp_dir/cases/$case_name
+    command_log=$case_dir/commands.log
+    output_file=$case_dir/output
+    mkdir -p \
+        "$case_dir/home" \
+        "$case_dir/xdg-config" \
+        "$case_dir/xdg-state" \
+        "$case_dir/xdg-cache" \
+        "$case_dir/tmp" \
+        "$case_dir/work"
+    : > "$command_log"
+
+    HOME=$case_dir/home
+    XDG_CONFIG_HOME=$case_dir/xdg-config
+    XDG_STATE_HOME=$case_dir/xdg-state
+    XDG_CACHE_HOME=$case_dir/xdg-cache
+    TMPDIR=$case_dir/tmp
+    case_work_dir=$case_dir/work
+    MOGUET_TEST_COMMAND_LOG=$command_log
+    export HOME XDG_CONFIG_HOME XDG_STATE_HOME XDG_CACHE_HOME TMPDIR
+    export MOGUET_TEST_COMMAND_LOG
+
+    # Every persistent or temporary boundary is pre-existing and
+    # content-addressed. A per-case filesystem event sentinel additionally
+    # retains create-then-cleanup attempts that leave the final tree unchanged.
+    prepare_canary_tree "$XDG_CONFIG_HOME" config
+    prepare_canary_tree "$XDG_STATE_HOME" state
+    prepare_canary_tree "$XDG_CACHE_HOME" cache
+    prepare_canary_tree "$TMPDIR" temporary
+    prepare_canary_tree "$case_work_dir" working
+    protected_before_snapshot=$case_dir/protected-before
+    protected_after_snapshot=$case_dir/protected-after
+    snapshot_protected_storage "$protected_before_snapshot"
+
+    # Mutation-capable stubs leave a marker and return a status outside the
+    # dry-run 0/1 contract. The pacman stub accepts only read-only queries and
+    # logs before rejecting transaction argv.
+    MOGUET_TEST_PACMAN_EXIT_CODE=0
+    MOGUET_TEST_SUDO_EXIT_CODE=97
+    MOGUET_TEST_MAKEPKG_EXIT_CODE=97
+    MOGUET_TEST_GIT_CLONE_EXIT_CODE=97
+    MOGUET_TEST_PACMAN_REPO_PACKAGES=official-only
+    MOGUET_TEST_PACMAN_CONF_REPOSITORY_LIST=core
+    VISUAL=sudo
+    EDITOR=sudo
+    export MOGUET_TEST_PACMAN_EXIT_CODE MOGUET_TEST_SUDO_EXIT_CODE
+    export MOGUET_TEST_MAKEPKG_EXIT_CODE MOGUET_TEST_GIT_CLONE_EXIT_CODE
+    export MOGUET_TEST_PACMAN_REPO_PACKAGES
+    export MOGUET_TEST_PACMAN_CONF_REPOSITORY_LIST VISUAL EDITOR
+
+    unset MOGUET_TEST_PACMAN_QM_OUTPUT
+    unset MOGUET_TEST_PACMAN_Q_OUTPUT
+    unset MOGUET_TEST_PACMAN_Q_OUTPUT_FILE
+    unset MOGUET_TEST_PACKAGE_METADATA_STATE_FILE
+    unset MOGUET_TEST_REPOSITORY_METADATA_STATE_FILE
+    unset MOGUET_TEST_MAKEPKG_PRINTSRCINFO_EXIT_CODE
+    unset MOGUET_TEST_MAKEPKG_SRCINFO_OUTPUT_FILE
+    unset PKGDEST
+}
+
+start_mutation_sentinel() {
+    mutation_sentinel_ready=$case_dir/mutation-sentinel.ready
+    mutation_sentinel_stop=$case_dir/mutation-sentinel.stop
+    mutation_sentinel_events=$case_dir/mutation-sentinel.events
+    mutation_sentinel_error=$case_dir/mutation-sentinel.stderr
+    python3 "$repo_root/tests/fs_mutation_sentinel.py" \
+        "$mutation_sentinel_ready" \
+        "$mutation_sentinel_stop" \
+        "$mutation_sentinel_events" \
+        "$XDG_CONFIG_HOME" \
+        "$XDG_STATE_HOME" \
+        "$XDG_CACHE_HOME" \
+        "$TMPDIR" \
+        "$case_work_dir" \
+        "$@" \
+        2> "$mutation_sentinel_error" &
+    mutation_sentinel_pid=$!
+
+    mutation_sentinel_attempt=0
+    while [ ! -s "$mutation_sentinel_ready" ]; do
+        if ! kill -0 "$mutation_sentinel_pid" 2>/dev/null; then
+            wait "$mutation_sentinel_pid" 2>/dev/null || true
+            mutation_sentinel_pid=
+            echo "filesystem mutation sentinel did not start" >&2
+            cat "$mutation_sentinel_error" >&2
+            exit 1
+        fi
+        mutation_sentinel_attempt=$((mutation_sentinel_attempt + 1))
+        if [ "$mutation_sentinel_attempt" -gt 100 ]; then
+            echo "filesystem mutation sentinel did not become ready" >&2
+            cat "$mutation_sentinel_error" >&2
+            exit 1
+        fi
+        sleep 0.01
+    done
+}
+
+finish_mutation_sentinel() {
+    mutation_sentinel_expectation=${1:-clean}
+    : > "$mutation_sentinel_stop"
+    if ! wait "$mutation_sentinel_pid"; then
+        mutation_sentinel_pid=
+        echo "filesystem mutation sentinel failed" >&2
+        cat "$mutation_sentinel_error" >&2
+        exit 1
+    fi
+    mutation_sentinel_pid=
+    case $mutation_sentinel_expectation in
+        clean)
+            if [ -s "$mutation_sentinel_events" ]; then
+                echo "dry-run crossed a filesystem mutation boundary" >&2
+                cat "$mutation_sentinel_events" >&2
+                exit 1
+            fi
+            ;;
+        mutated)
+            if [ ! -s "$mutation_sentinel_events" ]; then
+                echo "filesystem mutation sentinel missed its transient canary" >&2
+                exit 1
+            fi
+            ;;
+        *)
+            echo "invalid filesystem mutation sentinel expectation" >&2
+            exit 1
+            ;;
+    esac
+}
+
+assert_protected_storage_unchanged() {
+    snapshot_protected_storage "$protected_after_snapshot"
+    finish_mutation_sentinel
+    if ! cmp -s \
+        "$protected_before_snapshot" "$protected_after_snapshot"
+    then
+        echo "dry-run changed protected config, state, cache, temporary, or working storage" >&2
+        diff -u \
+            "$protected_before_snapshot" "$protected_after_snapshot" \
+            >&2 || true
+        exit 1
+    fi
+}
+
+assert_read_only_commands() {
+    while IFS= read -r command; do
+        case $command in
+            '') ;;
+            'pacman-conf --verbose RootDir DBPath'|\
+            'pacman-conf --repo-list'|\
+            'pacman -Si clean-root'|\
+            'pacman -Qm') ;;
+            *)
+                echo "dry-run crossed a forbidden or unapproved process boundary" >&2
+                echo "$command" >&2
+                cat "$command_log" >&2
+                exit 1
+                ;;
+        esac
+    done < "$command_log"
+}
+
+assert_expected_observation() {
+    observation_expected_status=$1
+    observation_expected_root_count=$2
+    observation_expected_identity=$3
+    observation_exit_status=$4
+    observation_context=$5
+
+    case $observation_expected_status in
+        Ready|NoOp)
+            observation_expected_exit_status=0
+            ;;
+        Blocked)
+            observation_expected_exit_status=1
+            ;;
+        *)
+            echo "invalid expected dry-run status: $observation_expected_status" >&2
+            exit 1
+            ;;
+    esac
+    if [ "$observation_exit_status" -ne "$observation_expected_exit_status" ]; then
+        echo "dry-run returned $observation_exit_status instead of $observation_expected_exit_status: $observation_context" >&2
+        sed -n '1,240p' "$output_file" >&2
+        exit 1
+    fi
+    if ! grep -Fx -- \
+        "  Status: $observation_expected_status" "$output_file" >/dev/null
+    then
+        echo "dry-run did not render expected $observation_expected_status status: $observation_context" >&2
+        sed -n '1,240p' "$output_file" >&2
+        exit 1
+    fi
+    observation_root_count=$(
+        awk '/^  [0-9]+\. Identity: / { count++ }
+             END { print count + 0 }' "$output_file"
+    )
+    if [ "$observation_root_count" -ne "$observation_expected_root_count" ]; then
+        echo "dry-run rendered $observation_root_count roots instead of $observation_expected_root_count: $observation_context" >&2
+        sed -n '1,240p' "$output_file" >&2
+        exit 1
+    fi
+    if ! grep -F -- "$observation_expected_identity" \
+        "$output_file" >/dev/null
+    then
+        echo "dry-run lost its expected typed identity: $observation_context" >&2
+        echo "expected: $observation_expected_identity" >&2
+        sed -n '1,240p' "$output_file" >&2
+        exit 1
+    fi
+}
+
+run_supported() {
+    case_name=$1
+    expected_status=$2
+    expected_root_count=$3
+    expected_identity=$4
+    shift 4
+    setup_case "$case_name"
+    : > "$command_log"
+    start_mutation_sentinel
+    if (cd "$case_work_dir" && "$test_binary" "$@") \
+        </dev/null > "$output_file" 2>&1
+    then
+        status=0
+    else
+        status=$?
+    fi
+    if ! grep -F -- "Unified plan:" "$output_file" >/dev/null; then
+        echo "supported dry-run did not render a unified observation: $*" >&2
+        sed -n '1,240p' "$output_file" >&2
+        exit 1
+    fi
+    assert_expected_observation \
+        "$expected_status" "$expected_root_count" "$expected_identity" \
+        "$status" "$*"
+    assert_protected_storage_unchanged
+    assert_read_only_commands
+}
+
+snapshot_local_tree() {
+    source_tree=$1
+    destination=$2
+    {
+        find "$source_tree" -mindepth 1 -printf '%P\n' | LC_ALL=C sort
+        find "$source_tree" -mindepth 1 -exec \
+            stat --format='%n|%F|%d|%i|%u|%g|%a|%s|%Y|%Z' -- {} + |
+            LC_ALL=C sort
+        find "$source_tree" -type f -exec sha256sum -- {} + |
+            LC_ALL=C sort
+    } > "$destination"
+}
+
+assert_no_raw_local_terminal_payload() {
+    local_output_hex=$(od -An -v -tx1 "$output_file" | tr '\n' ' ')
+    for local_raw_sequence in \
+        '1b' \
+        '07' \
+        'c2 85' \
+        'e2 80 a8'
+    do
+        case " $local_output_hex " in
+            *" $local_raw_sequence "*)
+                echo "local metadata blocker reflected raw terminal bytes: $local_raw_sequence" >&2
+                sed -n '1,240p' "$output_file" >&2
+                exit 1
+                ;;
+        esac
+    done
+    if grep -E '^M4-RAW-NEXT-LINE' "$output_file" >/dev/null; then
+        echo "local metadata blocker reflected a raw newline" >&2
+        sed -n '1,240p' "$output_file" >&2
+        exit 1
+    fi
+}
+
+# Prove that the event seam retains a create-then-cleanup mutation even though
+# a final filesystem snapshot would be identical.
+setup_case mutation-sentinel-self-check
+start_mutation_sentinel
+printf '%s\n' transient > "$TMPDIR/transient-canary"
+rm "$TMPDIR/transient-canary"
+finish_mutation_sentinel mutated
+
+# Both supported sync forms share the same production classifier, while the
+# remaining route cases exercise each route-specific authority adapter.
+run_supported \
+    sync-install Ready 1 \
+    "Identity: AUR/clean-root (PackageBase: clean-root)" \
+    --dry-run -S clean-root
+run_supported \
+    sync-system-update Ready 0 "     - system upgrade" \
+    -Syu --dry-run
+run_supported \
+    fetch Ready 1 \
+    "Identity: AUR/clean-root (PackageBase: clean-root)" \
+    fetch clean-root --dry-run
+run_supported \
+    remote-build Ready 1 \
+    "Identity: AUR/clean-root (PackageBase: clean-root)" \
+    --dry-run build clean-root --dry-run
+
+setup_case local-build
+local_source=$case_dir/local-source
+cp -a "$repo_root/tests/fixtures/unified-plan-local-blocked" "$local_source"
+touch "$local_source/.SRCINFO"
+before_snapshot=$case_dir/local-before
+after_snapshot=$case_dir/local-after
+snapshot_local_tree "$local_source" "$before_snapshot"
+start_mutation_sentinel "$local_source"
+if (cd "$case_work_dir" &&
+        "$test_binary" build --local "$local_source" --dry-run) \
+    </dev/null > "$output_file" 2>&1
+then
+    status=0
+else
+    status=$?
+fi
+if ! grep -F -- "Unified plan:" "$output_file" >/dev/null; then
+    echo "local dry-run did not render a unified observation" >&2
+    sed -n '1,240p' "$output_file" >&2
+    exit 1
+fi
+assert_expected_observation \
+    Ready 1 \
+    "Request: unified-plan-local-blocked (invocation index: 0)" \
+    "$status" "local build with reusable metadata"
+if ! grep -F -- "     Source: local" "$output_file" >/dev/null; then
+    echo "local dry-run lost its typed source kind" >&2
+    sed -n '1,240p' "$output_file" >&2
+    exit 1
+fi
+snapshot_local_tree "$local_source" "$after_snapshot"
+if ! cmp -s "$before_snapshot" "$after_snapshot"; then
+    echo "local dry-run changed source file list, content, or identity" >&2
+    diff -u "$before_snapshot" "$after_snapshot" >&2 || true
+    exit 1
+fi
+assert_protected_storage_unchanged
+assert_read_only_commands
+
+setup_case local-build-metadata-required
+unsafe_local_component=$(printf \
+    'local-source-before\nM4-RAW-NEXT-LINE\\literal\033]0;LOCAL-OSC\007\302\205\342\200\250')
+local_source=$case_dir/$unsafe_local_component
+cp -a "$repo_root/tests/fixtures/unified-plan-local-blocked" "$local_source"
+rm "$local_source/.SRCINFO"
+before_snapshot=$case_dir/local-before
+after_snapshot=$case_dir/local-after
+snapshot_local_tree "$local_source" "$before_snapshot"
+start_mutation_sentinel "$local_source"
+if (cd "$case_work_dir" &&
+        "$test_binary" build --local "$local_source" --dry-run) \
+    </dev/null > "$output_file" 2>&1
+then
+    status=0
+else
+    status=$?
+fi
+assert_expected_observation \
+    Blocked 0 "local metadata evaluation required" \
+    "$status" "local build requiring metadata evaluation"
+expected_escaped_local_path='local-source-before\x0AM4-RAW-NEXT-LINE\x5Cliteral\x1B]0;LOCAL-OSC\x07\xC2\x85\xE2\x80\xA8'
+if ! grep -F -- "$expected_escaped_local_path" \
+    "$output_file" >/dev/null
+then
+    echo "local metadata blocker did not terminal-escape its source path" >&2
+    sed -n '1,240p' "$output_file" >&2
+    exit 1
+fi
+assert_no_raw_local_terminal_payload
+snapshot_local_tree "$local_source" "$after_snapshot"
+if ! cmp -s "$before_snapshot" "$after_snapshot"; then
+    echo "blocked local dry-run changed source file list, content, or identity" >&2
+    diff -u "$before_snapshot" "$after_snapshot" >&2 || true
+    exit 1
+fi
+assert_protected_storage_unchanged
+assert_read_only_commands
+
+run_supported \
+    upgrade Ready 0 "     - system upgrade" \
+    upgrade --dry-run
+run_supported \
+    upgrade-aur NoOp 0 "External owner: AUR RPC" \
+    upgrade-aur --dry-run
+run_supported \
+    upgrade-all Ready 0 "     - system upgrade" \
+    upgrade-all --dry-run
+
+echo "dry-run command sentinel regression passed"

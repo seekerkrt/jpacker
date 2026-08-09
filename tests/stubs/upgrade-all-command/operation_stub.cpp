@@ -1980,6 +1980,18 @@ PreparedUpgradeAllOperation::snapshot() const noexcept {
     return impl_ == nullptr ? nullptr : &impl_->snapshot;
 }
 
+const UpgradeAllOperationProjectionAuthority*
+PreparedUpgradeAllOperation::projection_authority() const noexcept {
+    return nullptr;
+}
+
+PreparedUpgradeAllAurPreflight prepare_upgrade_all_aur_preflight(
+        const UpgradeAllOperationPreparedSnapshot&,
+        const AppConfig&) {
+    throw std::logic_error(
+            "Upgrade-all command fixture does not provide dry-run preflight authority.");
+}
+
 UpgradeAllOperationPreparation prepare_upgrade_all_operation(
         const AppConfig& config) {
     const std::string scenario = current_scenario();

@@ -1783,6 +1783,7 @@ bool is_supported_upgrade_all_global_option(const std::string& option) {
     case cli_authority::GlobalOptionId::Diff:
     case cli_authority::GlobalOptionId::NoDiff:
     case cli_authority::GlobalOptionId::NoConfirm:
+    case cli_authority::GlobalOptionId::DryRun:
     case cli_authority::GlobalOptionId::BuildMode:
     case cli_authority::GlobalOptionId::Rebuild:
     case cli_authority::GlobalOptionId::CleanBuild:

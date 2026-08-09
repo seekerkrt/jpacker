@@ -1,4 +1,5 @@
 #include "aur_update_execution_preflight.hpp"
+#include "source_install.hpp"
 #include "system_source_upgrade.hpp"
 #include "unified_plan_observation.hpp"
 #include "upgrade_all_operation.hpp"
@@ -109,6 +110,10 @@ static_assert(!std::is_constructible_v<
               LocalSourceBuildUnitReference,
               LocalSourceRootObservationIdentity,
               LocalPackageMetadata&&>);
+static_assert(!std::is_constructible_v<
+              PreparedRemoteSourceBuildUnitReference,
+              ResolvedSourceBuildIdentity&&,
+              ProductionSourceBuildWorkItem&&>);
 static_assert(!std::is_constructible_v<
               UnifiedPlanConfiguredRepositoryOrderReference,
               std::vector<std::string>&&>);
@@ -533,6 +538,24 @@ void test_build_unit_and_required_artifact_identity() {
                     "/work/local-suite",
             "Local build unit lost source-root identity");
 
+    const ResolvedSourceBuildIdentity remote_source{
+            "repository-child", "repository-base",
+            "repo:repository-base",
+            "https://example.invalid/repository-base.git",
+            SourceBuildSourceKind::Repository, true};
+    ProductionSourceBuildWorkItem remote_work;
+    remote_work.request.package_name = remote_source.requested_name;
+    remote_work.request.checkout_name = remote_source.package_base;
+    remote_work.request.git_url = remote_source.git_url;
+    remote_work.required_targets.push_back(RequiredPackageArtifactTarget{
+            remote_source.package_base, remote_source.requested_name,
+            DesiredInstallReason::Explicit});
+    const PreparedRemoteSourceBuildUnitReference inspected_remote_unit(
+            std::cref(remote_source), std::cref(remote_work));
+    expect(
+            inspected_remote_unit.has_complete_identity(),
+            "Prepared remote source build unit is incomplete");
+
     const RequiredPackageArtifactTarget root_target{
             "shared-suite", "same-name", DesiredInstallReason::Explicit};
     const RequiredPackageArtifactTarget dependency_target{
@@ -544,12 +567,19 @@ void test_build_unit_and_required_artifact_identity() {
     RequiredArtifactTargetReference dependency_artifact(
             AurPackageBaseBuildUnitReference(std::cref(plan), 0),
             std::cref(dependency_target));
+    RequiredArtifactTargetReference remote_artifact(
+            PreparedRemoteSourceBuildUnitReference(
+                    std::cref(remote_source), std::cref(remote_work)),
+            std::cref(remote_work.required_targets.front()));
     expect(
             root_artifact.matches_build_unit(),
             "Root artifact target does not match PackageBase unit");
     expect(
             dependency_artifact.matches_build_unit(),
             "Dependency artifact target does not match PackageBase unit");
+    expect(
+            remote_artifact.matches_build_unit(),
+            "Remote artifact target does not match prepared source unit");
     expect(
             root_artifact.target().package_name !=
                     inspected_aur_unit.entry()->package_base,
@@ -571,15 +601,18 @@ void test_build_unit_and_required_artifact_identity() {
     input.build_units.push_back(LocalSourceBuildUnitReference(
             local_source_identity("/work/local-suite"),
             std::cref(metadata)));
+    input.build_units.push_back(PreparedRemoteSourceBuildUnitReference(
+            std::cref(remote_source), std::cref(remote_work)));
     input.required_artifacts.push_back(std::move(root_artifact));
     input.required_artifacts.push_back(std::move(dependency_artifact));
+    input.required_artifacts.push_back(std::move(remote_artifact));
     const UnifiedPlanObservationResult observation_result =
             make_unified_plan_observation(std::move(input));
     const UnifiedPlanObservation& observation = expect_valid(
             observation_result, "Build/artifact identity observation");
     expect(
-            observation.build_units().size() == 2 &&
-                    observation.required_artifacts().size() == 2,
+            observation.build_units().size() == 3 &&
+                    observation.required_artifacts().size() == 3,
             "Build unit and artifact target cardinality was flattened");
 
     const RequiredPackageArtifactTarget mismatch{

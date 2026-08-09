@@ -35,6 +35,7 @@ _moguet() {
         --diff
         --nodiff
         --noconfirm
+        --dry-run
         --build-mode=
         --rebuild
         --cleanbuild

@@ -1,7 +1,48 @@
+# Upcoming: Moguet v2.2.0 (unreleased)
+
+This tracked file is the source of truth for release bodies. The English and
+Japanese sections for each release describe the same scope.
+
+## English
+
+### Unified production dry-run
+
+- The global `--dry-run` modifier observes Moguet-owned `-S` install and
+  system-update routes, `fetch`, remote and local `build`, `upgrade`,
+  `upgrade-aur`, and `upgrade-all` through their existing production
+  pre-mutation authorities and unified human-readable renderer. Scope-excluded
+  operations and generic pacman pass-through fail closed.
+- Dry-run permits read-only filesystem, network, and exact allowlisted pacman
+  discovery queries but never writes persistent state, creates cache/workspace
+  state, mutates Git, evaluates local metadata with `makepkg --printsrcinfo`,
+  builds, invokes sudo, starts or mutates through a pacman transaction,
+  installs, or cleans up. Local metadata that would require evaluation is
+  reported as `Blocked` rather than guessed ready.
+- `Ready` and `NoOp` return zero; `Blocked` returns non-zero. Observations are
+  never reused as execution capabilities or provider approvals, and a later
+  actual invocation revalidates current state. v2.2.0 adds no JSON or other
+  machine-readable plan schema.
+
+## 日本語
+
+### Unified production dry-run
+
+- global `--dry-run`は、Moguet-owned `-S` install / system-update、`fetch`、
+  remote / local `build`、`upgrade`、`upgrade-aur`、`upgrade-all`を、既存production
+  pre-mutation authorityと統一human-readable rendererで観測します。scope外operationと
+  generic pacman pass-throughはfail-closedです。
+- dry-runはread-only filesystem / network discoveryと、exact allowlist済みのpacman
+  discovery queryを許しますが、persistent stateやcache / workspace stateを書かず、Gitをmutationせず、
+  `makepkg --printsrcinfo`でlocal metadataを評価せず、build、sudo、pacman transactionの
+  開始・mutation、install、cleanupへ進みません。local metadata評価が必要な状態はreadyと
+  推測せず`Blocked`で報告します。
+- `Ready` / `NoOp`は終了code 0、`Blocked`はnon-zeroです。観測結果をexecution capabilityや
+  provider approvalとして再利用せず、後のactual invocationはcurrent stateを再validationします。
+  v2.2.0ではJSONその他のmachine-readable plan schemaを追加しません。
+
 # Moguet v2.1.0
 
-This tracked file is the source of truth for the GitHub Release body. The
-English and Japanese sections describe the same release scope.
+The following historical notes describe the published v2.1.0 release.
 
 ## English
 

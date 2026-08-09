@@ -1499,11 +1499,6 @@ PreparedFilteredAurUpdateOperation::PreparedFilteredAurUpdateOperation(
       issues(std::move(other.issues)) {
 }
 
-const AurUpdateQueryResult&
-PreparedFilteredAurUpdateOperation::original_query_result() const noexcept {
-    return query_result;
-}
-
 const FilteredAurUpdateTargetAdapter&
 PreparedFilteredAurUpdateOperation::target_adapter_result() const noexcept {
     return target_adapter;
@@ -1538,20 +1533,9 @@ PreparedFilteredAurUpdateOperation::selected_target_correlations()
     return target_correlations;
 }
 
-const AurUpdateExecutionPreflight&
-PreparedFilteredAurUpdateOperation::execution_preflight() const noexcept {
-    return preflight;
-}
-
 const std::vector<FilteredAurUpdateBuildUnitCorrelation>&
 PreparedFilteredAurUpdateOperation::build_unit_mapping() const noexcept {
     return build_unit_correlations;
-}
-
-const std::optional<AurUpdateSourceBuildPreparation>&
-PreparedFilteredAurUpdateOperation::source_build_preparation()
-        const noexcept {
-    return preparation;
 }
 
 const std::vector<FilteredAurUpdateOperationIssue>&
@@ -1643,6 +1627,14 @@ PreparedFilteredAurUpdateOperation prepare_filtered_aur_update_operation(
                 operation.preparation.value(), cache_root.value());
     }
     return operation;
+}
+
+void seed_filtered_aur_update_operation_cache(
+        PreparedFilteredAurUpdateOperation& prepared,
+        const ValidatedCacheRoot& cache_root) {
+    cache_root.require_unchanged_identity();
+    seed_aur_update_source_build_cache(
+            prepared.preparation.value(), cache_root);
 }
 
 FilteredAurUpdateExecutionResult execute_prepared_filtered_aur_update_operation(

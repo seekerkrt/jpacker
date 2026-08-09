@@ -2,7 +2,6 @@
 
 #include "app_config.hpp"
 #include "aur_rpc.hpp"
-#include "cache_authority.hpp"
 #include "cli_routing.hpp"
 #include "dependency_plan.hpp"
 #include "localization.hpp"
@@ -16,7 +15,6 @@
 #include "shell_words.hpp"
 #include "source_install.hpp"
 #include "source_preference.hpp"
-#include "trusted_cache.hpp"
 
 #include <algorithm>
 #include <cstddef>
@@ -244,29 +242,128 @@ std::size_t earliest_root_index_for_source_build_work_item(
     return earliest_root.value();
 }
 
-ValidatedCacheRoot prepare_sync_source_build_cache_root() {
-    return prepare_process_cache_root();
-}
-
-void assign_source_build_cache_root(
-        std::vector<ProductionSourceBuildWorkItem>& work_items,
-        const ValidatedCacheRoot& cache_root) {
-    for(auto& work_item : work_items) {
-        work_item.cache_root = cache_root;
-    }
-}
-
 int execute_sync_source_build_invocation(
-        const PreparedProductionSourceBuildInvocation& invocation,
+        PreparedProductionSourceBuildInvocation invocation,
         const AppConfig& config) {
     try {
-        execute_prepared_source_build_invocation(invocation, config);
+        execute_prepared_source_build_invocation(
+                std::move(invocation), config);
         return 0;
     } catch(const SeparatedPackageBaseSourceBuildCleanupError& error) {
         // Direct source routeは利用者がretained workspaceを手動確認できる
         // 既存contractを維持する。AUR update resultのpath firewallとは別境界。
         Logger::error(error.what());
         return 1;
+    }
+}
+
+struct PendingAurSyncRoot {
+    std::size_t target_index = 0;
+    RootTargetIdentity invocation_correlation;
+    std::optional<RepositoryPackageNotFound> repository_absence;
+    std::size_t aur_input_index = 0;
+};
+
+struct PendingRepositorySourceWork {
+    std::size_t target_index = 0;
+    RepositoryPackagePresent package;
+    ResolvedSourceBuildIdentity source;
+    SourcePreferenceLoaded preference;
+};
+
+struct PendingAurSourceWork {
+    std::size_t aur_input_index = 0;
+};
+
+using PendingSyncSourceWork = std::variant<
+        PendingRepositorySourceWork,
+        PendingAurSourceWork>;
+
+std::vector<SyncInstallRoot> take_observed_sync_roots(
+        std::vector<std::optional<SyncInstallRoot>>& root_slots) {
+    std::vector<SyncInstallRoot> roots;
+    roots.reserve(root_slots.size());
+    for(auto& root : root_slots) {
+        if(root.has_value()) roots.push_back(std::move(root.value()));
+    }
+    return roots;
+}
+
+SyncInstallPreparationIssue make_sync_install_issue(
+        SyncInstallPreparationIssueKind kind,
+        std::string diagnostic,
+        std::optional<RootTargetIdentity> root = std::nullopt,
+        std::optional<std::string> option = std::nullopt) {
+    return SyncInstallPreparationIssue{
+            kind, std::move(root), std::move(option),
+            std::move(diagnostic)};
+}
+
+void present_loaded_source_preference(
+        const SourcePreferenceLoaded& preference) {
+    Logger::info(localization::format_translated_message(
+            // TRANSLATORS: The placeholder is a source preference file path.
+            "Loading custom build flags from {}.",
+            preference.entry_path.string()));
+    for(const std::string& warning : preference.warnings) {
+        Logger::warn(warning);
+    }
+}
+
+std::optional<std::size_t> build_plan_root_index(
+        const BuildPlan& plan,
+        std::size_t aur_input_index,
+        const std::string& requested_name) {
+    std::optional<std::size_t> matched_index;
+    for(std::size_t index = 0; index < plan.root_targets.size(); ++index) {
+        const RootTargetIdentity& candidate = plan.root_targets[index];
+        if(candidate.invocation_index != aur_input_index ||
+           candidate.requested_name != requested_name) {
+            continue;
+        }
+        if(matched_index.has_value()) return std::nullopt;
+        matched_index = index;
+    }
+    return matched_index;
+}
+
+void report_sync_install_preparation_failure(
+        const SyncInstallPreparationFailure& failure) {
+    for(const SyncInstallPreparationFailureDetail& detail : failure.details) {
+        std::visit(
+                [](const auto& typed_detail) {
+                    using Detail = std::decay_t<decltype(typed_detail)>;
+                    if constexpr(std::is_same_v<
+                                         Detail,
+                                         SyncInstallPreparationIssue>) {
+                        if(typed_detail.kind ==
+                           SyncInstallPreparationIssueKind::
+                                   UnsupportedSourceOption) {
+                            // The compound diagnostic remains one typed
+                            // projection payload. Actual CLI compatibility
+                            // requires separate error output and log records.
+                            const std::size_t separator =
+                                    typed_detail.diagnostic.find('\n');
+                            if(separator != std::string::npos) {
+                                Logger::error(
+                                        typed_detail.diagnostic.substr(
+                                                0, separator));
+                                Logger::error(
+                                        typed_detail.diagnostic.substr(
+                                                separator + 1));
+                                return;
+                            }
+                        }
+                        Logger::error(typed_detail.diagnostic);
+                    } else if constexpr(std::is_same_v<
+                                                Detail,
+                                                SyncRepositoryMetadataReadFailure>) {
+                        Logger::error(typed_detail.failure.diagnostic);
+                    } else {
+                        Logger::error(typed_detail.diagnostic);
+                    }
+                },
+                detail);
     }
 }
 
@@ -898,180 +995,550 @@ int cmd_sync_search(
             "Unknown package source selection."));
 }
 
-int cmd_sync_install(
-        const ParsedCliArguments& parsed, bool is_sys_upgrade,
-        PackageSourceSelection source_selection, const AppConfig& config) {
+SyncInstallPreparation prepare_sync_install(
+        const ParsedCliArguments& parsed,
+        bool system_update,
+        PackageSourceSelection source_selection,
+        const AppConfig& config) {
     const SourceSyncOptions source_sync_options = parse_source_sync_options(parsed);
-    ProviderSelectionCallback select_provider =
-            provider_selection_callback(config);
+    std::vector<std::optional<SyncInstallRoot>> root_slots(
+            parsed.targets.size());
+    std::optional<BuildPlan> aur_build_plan;
+
+    auto fail = [&](SyncInstallPreparationFailureDetail detail) {
+        SyncInstallPreparationFailure failure;
+        failure.details.push_back(std::move(detail));
+        failure.ordered_roots = take_observed_sync_roots(root_slots);
+        failure.source_selection = source_selection;
+        failure.system_update = system_update;
+        failure.needed = source_sync_options.needed;
+        if(aur_build_plan.has_value()) {
+            failure.aur_build_plan.emplace(
+                    std::move(aur_build_plan.value()));
+        }
+        return SyncInstallPreparation{std::move(failure)};
+    };
 
     if(source_selection == PackageSourceSelection::RepoOnly) {
-        // POLICY(#168): RepoOnly is one ordered binary repository transaction; no classification probe.
-        return run_command(
-                "sudo pacman " + join_pacman_args(parsed.ordered_pacman_args, config));
+        return fail(make_sync_install_issue(
+                SyncInstallPreparationIssueKind::
+                        UnsupportedSourceSelection,
+                localization::format_translated_message(
+                        "{} is not supported for operation {}.",
+                        "--repo", parsed.operation)));
+    }
+    if(source_selection == PackageSourceSelection::Auto &&
+       parsed.targets.empty() && !system_update) {
+        return fail(make_sync_install_issue(
+                SyncInstallPreparationIssueKind::EmptyPreparedRoute,
+                localization::translate_message(
+                        "Sync preflight requires a package target or a system update.")));
+    }
+    if(source_selection == PackageSourceSelection::AurOnly && system_update) {
+        return fail(make_sync_install_issue(
+                SyncInstallPreparationIssueKind::
+                        UnsupportedSourceSelection,
+                localization::format_translated_message(
+                        "Cannot combine {} with {} refresh for operation {}.",
+                        "--aur", "pacman", parsed.operation)));
+    }
+    if(parsed.target_token_indices.size() != parsed.targets.size()) {
+        return fail(make_sync_install_issue(
+                SyncInstallPreparationIssueKind::TargetCorrelationFailed,
+                localization::translate_message(
+                        "Sync target token correlation is incomplete.")));
     }
 
     if(source_selection == PackageSourceSelection::AurOnly) {
         if(parsed.targets.empty()) {
-            Logger::error(localization::format_translated_message(
-                    "Missing {} package target.", "AUR"));
-            return 1;
+            return fail(make_sync_install_issue(
+                    SyncInstallPreparationIssueKind::MissingAurTarget,
+                    localization::format_translated_message(
+                            "Missing {} package target.", "AUR")));
         }
-        for(const auto& target : parsed.targets) {
-            require_valid_aur_package_target(target);
-        }
-
-        std::optional<std::string> unsupported_option = unsupported_source_sync_option(parsed);
-        if(unsupported_option.has_value()) {
-            Logger::error(localization::format_translated_message(
-                    "Unsupported {} option for {}/source-build target: {}",
-                    "pacman", "AUR", unsupported_option.value()));
-            Logger::error(localization::format_translated_message(
-                    "Rerun {} without this option.", "--aur"));
-            return 1;
-        }
-        require_supported_production_source_build_options(config);
-
-        BuildPlan plan = resolve_build_plan(
-                parsed.targets, select_provider);
-        require_executable_build_plan(
-                join_package_names(parsed.targets), plan);
-
-        std::vector<ProductionSourceBuildWorkItem> work_items =
-                prepare_aur_source_build_work_items(
-                        plan, false, source_sync_options.needed);
-        ValidatedCacheRoot cache_root =
-                prepare_sync_source_build_cache_root();
-        assign_source_build_cache_root(work_items, cache_root);
-        // POLICY(#168,#242/#351): 全rootを一つのplanへaggregateし、
-        // static preflightとdatabase-path resolutionを最初の
-        // checkout/workspace/build/install mutationより前に完了する。
-        PreparedProductionSourceBuildInvocation invocation =
-                prepare_production_source_build_invocation(
-                        std::move(work_items), config);
-        return execute_sync_source_build_invocation(invocation, config);
-    }
-
-    if(parsed.targets.empty()) {
-        return run_command(
-                "sudo pacman " + join_pacman_args(parsed.ordered_pacman_args, config));
-    }
-
-    std::vector<std::string> repo_targets;
-    std::vector<std::string> aur_targets;
-    std::set<size_t>         aur_target_token_indices;
-    for(const std::string& target : parsed.targets) {
-        require_valid_package_name(target);
-    }
-    for(size_t i = 0; i < parsed.targets.size(); ++i) {
-        const std::string& target = parsed.targets[i];
-        if(is_force_source(target)) {
-            aur_targets.push_back(target);
-            aur_target_token_indices.insert(parsed.target_token_indices[i]);
-        } else if(is_repo_package(target)) {
-            repo_targets.push_back(target);
-        } else {
-            aur_targets.push_back(target);
-            aur_target_token_indices.insert(parsed.target_token_indices[i]);
+        for(std::size_t index = 0; index < parsed.targets.size(); ++index) {
+            const RootTargetIdentity root{index, parsed.targets[index]};
+            try {
+                require_valid_aur_package_target(parsed.targets[index]);
+            } catch(const std::exception& error) {
+                return fail(make_sync_install_issue(
+                        SyncInstallPreparationIssueKind::InvalidTarget,
+                        error.what(), root));
+            }
         }
     }
-    if(!aur_targets.empty()) {
-        std::optional<std::string> unsupported_option = unsupported_source_sync_option(parsed);
-        if(unsupported_option.has_value()) {
-            Logger::error(localization::format_translated_message(
-                    "Unsupported {} option for {}/source-build target: {}",
-                    "pacman", "AUR", unsupported_option.value()));
-            Logger::error(localization::format_translated_message(
-                    "Split official repository and {}/source-build targets, or rerun without this option.",
-                    "AUR"));
-            return 1;
+
+    if(source_selection == PackageSourceSelection::Auto) {
+        for(std::size_t index = 0; index < parsed.targets.size(); ++index) {
+            const RootTargetIdentity root{index, parsed.targets[index]};
+            try {
+                require_valid_package_name(parsed.targets[index]);
+            } catch(const std::exception& error) {
+                return fail(make_sync_install_issue(
+                        SyncInstallPreparationIssueKind::InvalidTarget,
+                        error.what(), root));
+            }
         }
-        require_supported_production_source_build_options(config);
     }
-    std::vector<std::string> repository_source_targets;
+
+    std::vector<PendingAurSyncRoot> pending_aur_roots;
     std::vector<std::string> aur_plan_targets;
-    for(const auto& package : aur_targets) {
-        if(is_repo_package(package)) {
-            repository_source_targets.push_back(package);
-        } else {
-            aur_plan_targets.push_back(package);
+    std::vector<PendingSyncSourceWork> pending_source_work;
+    std::set<std::size_t> source_target_token_indices;
+    bool has_repository_transaction_root = false;
+    bool has_repository_order = false;
+    std::optional<std::vector<std::string>> repository_order;
+
+    auto retain_repository_order = [&](const std::optional<std::vector<std::string>>& observed) {
+        if(!has_repository_order) {
+            repository_order = observed;
+            has_repository_order = true;
+            return true;
+        }
+        return repository_order == observed;
+    };
+
+    if(source_selection == PackageSourceSelection::AurOnly) {
+        pending_aur_roots.reserve(parsed.targets.size());
+        aur_plan_targets = parsed.targets;
+        pending_source_work.reserve(parsed.targets.size());
+        for(std::size_t index = 0; index < parsed.targets.size(); ++index) {
+            pending_aur_roots.push_back(PendingAurSyncRoot{
+                    index,
+                    RootTargetIdentity{index, parsed.targets[index]},
+                    std::nullopt,
+                    index});
+            pending_source_work.push_back(PendingAurSourceWork{index});
+            source_target_token_indices.insert(
+                    parsed.target_token_indices[index]);
+        }
+    } else {
+        for(std::size_t index = 0; index < parsed.targets.size(); ++index) {
+            const std::string& target = parsed.targets[index];
+            const RootTargetIdentity root{index, target};
+
+            StrictSourcePreferenceResult preference =
+                    read_source_preference_strict(target);
+            if(const auto* preference_failure =
+                       std::get_if<SourcePreferenceFailure>(&preference);
+               preference_failure != nullptr) {
+                return fail(*preference_failure);
+            }
+            std::optional<SourcePreferenceLoaded> loaded_preference;
+            if(std::holds_alternative<SourcePreferenceLoaded>(preference)) {
+                loaded_preference.emplace(std::get<SourcePreferenceLoaded>(
+                        std::move(preference)));
+            }
+
+            StrictRepositoryPackageQueryResult repository_result =
+                    query_repository_package_strict(target);
+            if(const auto* metadata_failure =
+                       std::get_if<RepositoryMetadataFailure>(
+                               &repository_result);
+               metadata_failure != nullptr) {
+                return fail(SyncRepositoryMetadataReadFailure{
+                        root, *metadata_failure});
+            }
+
+            if(auto* package = std::get_if<RepositoryPackagePresent>(
+                       &repository_result);
+               package != nullptr) {
+                if(package->package_name != target ||
+                   !retain_repository_order(
+                           package->configured_repository_order)) {
+                    return fail(make_sync_install_issue(
+                            SyncInstallPreparationIssueKind::
+                                    RepositoryAuthorityChanged,
+                            localization::format_translated_message(
+                                    "Repository authority changed while preparing sync target {}.",
+                                    target),
+                            root));
+                }
+
+                if(!loaded_preference.has_value()) {
+                    root_slots[index] = SyncRepositoryTransactionRoot{
+                            root, *package};
+                    has_repository_transaction_root = true;
+                    continue;
+                }
+
+                try {
+                    ResolvedSourceBuildIdentity source =
+                            make_repository_source_build_identity(*package);
+                    root_slots[index] = SyncRepositorySourceRoot{
+                            root, *package, source};
+                    pending_source_work.push_back(
+                            PendingRepositorySourceWork{
+                                    index, *package, std::move(source),
+                                    std::move(loaded_preference.value())});
+                    source_target_token_indices.insert(
+                            parsed.target_token_indices[index]);
+                } catch(const std::exception& error) {
+                    return fail(make_sync_install_issue(
+                            SyncInstallPreparationIssueKind::
+                                    SourceWorkPreparationFailed,
+                            error.what(), root));
+                }
+                continue;
+            }
+
+            RepositoryPackageNotFound absence =
+                    std::get<RepositoryPackageNotFound>(
+                            std::move(repository_result));
+            if(!retain_repository_order(
+                       absence.configured_repository_order)) {
+                return fail(make_sync_install_issue(
+                        SyncInstallPreparationIssueKind::
+                                RepositoryAuthorityChanged,
+                        localization::format_translated_message(
+                                "Repository authority changed while preparing sync target {}.",
+                                target),
+                        root));
+            }
+            const std::size_t aur_input_index = aur_plan_targets.size();
+            aur_plan_targets.push_back(target);
+            pending_aur_roots.push_back(PendingAurSyncRoot{
+                    index, root, std::move(absence), aur_input_index});
+            pending_source_work.push_back(
+                    PendingAurSourceWork{aur_input_index});
+            source_target_token_indices.insert(
+                    parsed.target_token_indices[index]);
         }
     }
 
-    std::optional<BuildPlan> aur_invocation_plan;
+    if(!pending_source_work.empty()) {
+        std::optional<std::string> unsupported_option = unsupported_source_sync_option(parsed);
+        if(unsupported_option.has_value()) {
+            return fail(make_sync_install_issue(
+                    SyncInstallPreparationIssueKind::UnsupportedSourceOption,
+                    source_selection == PackageSourceSelection::AurOnly
+                            ? localization::format_translated_message(
+                                      "Unsupported {} option for {}/source-build target: {}",
+                                      "pacman", "AUR",
+                                      unsupported_option.value()) +
+                                      "\n" +
+                                      localization::format_translated_message(
+                                              "Rerun {} without this option.",
+                                              "--aur")
+                            : localization::format_translated_message(
+                                      "Unsupported {} option for {}/source-build target: {}",
+                                      "pacman", "AUR",
+                                      unsupported_option.value()) +
+                                      "\n" +
+                                      localization::format_translated_message(
+                                              "Split official repository and {}/source-build targets, or rerun without this option.",
+                                              "AUR"),
+                    std::nullopt, unsupported_option));
+        }
+        try {
+            require_supported_production_source_build_options(config);
+        } catch(const std::exception& error) {
+            return fail(make_sync_install_issue(
+                    SyncInstallPreparationIssueKind::
+                            SourceBuildOptionsUnsupported,
+                    error.what()));
+        }
+    }
+
     if(!aur_plan_targets.empty()) {
-        aur_invocation_plan = resolve_build_plan(
-                aur_plan_targets, select_provider);
-        require_executable_build_plan(
-                join_package_names(aur_plan_targets),
-                aur_invocation_plan.value());
+        try {
+            aur_build_plan.emplace(resolve_build_plan(
+                    aur_plan_targets,
+                    provider_selection_callback(config)));
+        } catch(const std::exception& error) {
+            return fail(make_sync_install_issue(
+                    SyncInstallPreparationIssueKind::
+                            BuildPlanResolutionFailed,
+                    error.what()));
+        }
+
+        for(const PendingAurSyncRoot& pending : pending_aur_roots) {
+            std::optional<std::size_t> plan_root_index =
+                    build_plan_root_index(
+                            aur_build_plan.value(),
+                            pending.aur_input_index,
+                            pending.invocation_correlation.requested_name);
+            if(!plan_root_index.has_value()) {
+                return fail(make_sync_install_issue(
+                        SyncInstallPreparationIssueKind::
+                                BuildPlanCorrelationFailed,
+                        localization::format_translated_message(
+                                "{} root correlation failed for package {}.",
+                                "BuildPlan",
+                                pending.invocation_correlation.requested_name),
+                        pending.invocation_correlation));
+            }
+            root_slots[pending.target_index] = SyncAurRoot{
+                    pending.invocation_correlation,
+                    pending.repository_absence,
+                    plan_root_index.value()};
+        }
+
+        if(has_repository_order && repository_order.has_value() &&
+           aur_build_plan->configured_repository_order.has_value() &&
+           repository_order !=
+                   aur_build_plan->configured_repository_order) {
+            return fail(make_sync_install_issue(
+                    SyncInstallPreparationIssueKind::
+                            RepositoryAuthorityChanged,
+                    localization::translate_message(
+                            "Repository authority changed during sync build-plan resolution.")));
+        }
+
+        try {
+            require_executable_build_plan(
+                    join_package_names(aur_plan_targets),
+                    aur_build_plan.value());
+        } catch(const std::exception& error) {
+            return fail(make_sync_install_issue(
+                    SyncInstallPreparationIssueKind::BuildPlanBlocked,
+                    error.what()));
+        }
     }
 
     std::vector<std::vector<ProductionSourceBuildWorkItem>>
             aur_work_items_by_root(aur_plan_targets.size());
-    if(aur_invocation_plan.has_value()) {
-        std::vector<ProductionSourceBuildWorkItem> aur_work_items =
-                prepare_aur_source_build_work_items(
-                        aur_invocation_plan.value(), true,
-                        source_sync_options.needed);
-        for(auto& work_item : aur_work_items) {
-            const std::size_t root_index =
-                    earliest_root_index_for_source_build_work_item(
-                            aur_invocation_plan.value(), work_item);
-            aur_work_items_by_root[root_index].push_back(
-                    std::move(work_item));
+    if(aur_build_plan.has_value()) {
+        try {
+            std::vector<ProductionSourceBuildWorkItem> aur_work_items =
+                    prepare_aur_source_build_work_items(
+                            aur_build_plan.value(),
+                            source_selection == PackageSourceSelection::Auto,
+                            source_sync_options.needed);
+            for(auto& work_item : aur_work_items) {
+                const std::size_t root_index =
+                        earliest_root_index_for_source_build_work_item(
+                                aur_build_plan.value(), work_item);
+                aur_work_items_by_root[root_index].push_back(
+                        std::move(work_item));
+            }
+        } catch(const SourcePreferenceError& error) {
+            return fail(error.failure());
+        } catch(const std::exception& error) {
+            return fail(make_sync_install_issue(
+                    SyncInstallPreparationIssueKind::
+                            SourceWorkPreparationFailed,
+                    error.what()));
         }
     }
 
     std::vector<ProductionSourceBuildWorkItem> source_work_items;
-    std::size_t aur_root_index = 0;
-    for(const auto& package : aur_targets) {
-        if(std::find(
-                   repository_source_targets.begin(),
-                   repository_source_targets.end(), package) !=
-           repository_source_targets.end()) {
-            source_work_items.push_back(
-                    prepare_smart_source_build_work_item(
-                            package, false, source_sync_options.needed,
-                            select_provider));
-            continue;
+    try {
+        ProviderSelectionCallback select_provider =
+                provider_selection_callback(config);
+        for(PendingSyncSourceWork& pending : pending_source_work) {
+            if(auto* repository_source =
+                       std::get_if<PendingRepositorySourceWork>(&pending);
+               repository_source != nullptr) {
+                present_loaded_source_preference(
+                        repository_source->preference);
+                const std::size_t source_work_item_index =
+                        source_work_items.size();
+                ProductionSourceBuildWorkItem work_item =
+                        prepare_resolved_source_build_work_item(
+                                repository_source->source,
+                                std::move(
+                                        repository_source->preference.environment),
+                                false, source_sync_options.needed,
+                                select_provider);
+                work_item.configured_repository_order =
+                        repository_source->package.
+                                configured_repository_order;
+                source_work_items.push_back(std::move(work_item));
+                if(repository_source->target_index >= root_slots.size() ||
+                   !root_slots[repository_source->target_index]
+                            .has_value()) {
+                    throw std::logic_error(
+                            "Prepared repository source work lost its invocation root.");
+                }
+                auto* root = std::get_if<SyncRepositorySourceRoot>(
+                        &root_slots[repository_source->target_index]
+                                 .value());
+                if(root == nullptr ||
+                   root->invocation_correlation.invocation_index !=
+                           repository_source->target_index ||
+                   root->package != repository_source->package ||
+                   root->source.requested_name !=
+                           repository_source->source.requested_name ||
+                   root->source.package_base !=
+                           repository_source->source.package_base ||
+                   root->source.canonical_source_key !=
+                           repository_source->source.canonical_source_key ||
+                   root->source.git_url !=
+                           repository_source->source.git_url ||
+                   root->source.source_kind !=
+                           repository_source->source.source_kind ||
+                   root->source.has_distinct_package_base !=
+                           repository_source->source.
+                                   has_distinct_package_base) {
+                    throw std::logic_error(
+                            "Prepared repository source work differs from its invocation root.");
+                }
+                root->source_work_item_index = source_work_item_index;
+                continue;
+            }
+
+            const std::size_t aur_input_index =
+                    std::get<PendingAurSourceWork>(pending).
+                            aur_input_index;
+            if(aur_input_index >= aur_work_items_by_root.size()) {
+                throw std::logic_error(localization::translate_message(
+                        "Build plan root ownership is inconsistent with source targets."));
+            }
+            append_source_build_work_items(
+                    source_work_items,
+                    std::move(
+                            aur_work_items_by_root[aur_input_index]));
         }
-        if(aur_root_index >= aur_work_items_by_root.size()) {
-            throw std::logic_error(localization::translate_message(
-                    "Build plan root ownership is inconsistent with source targets."));
+    } catch(const SourcePreferenceError& error) {
+        return fail(error.failure());
+    } catch(const std::exception& error) {
+        return fail(make_sync_install_issue(
+                SyncInstallPreparationIssueKind::
+                        SourceWorkPreparationFailed,
+                error.what()));
+    }
+
+    for(const auto& work_items : aur_work_items_by_root) {
+        if(!work_items.empty()) {
+            return fail(make_sync_install_issue(
+                    SyncInstallPreparationIssueKind::
+                            BuildPlanCorrelationFailed,
+                    localization::translate_message(
+                            "Build plan source targets were not fully projected.")));
         }
-        append_source_build_work_items(
-                source_work_items,
-                std::move(aur_work_items_by_root[aur_root_index]));
-        ++aur_root_index;
     }
-    if(aur_root_index != aur_work_items_by_root.size()) {
-        throw std::logic_error(localization::translate_message(
-                "Build plan source targets were not fully projected."));
-    }
-    std::optional<PreparedProductionSourceBuildInvocation> source_invocation;
+
+    std::optional<PreparedProductionSourceBuildInvocation>
+            source_invocation;
     if(!source_work_items.empty()) {
-        ValidatedCacheRoot cache_root =
-                prepare_sync_source_build_cache_root();
-        assign_source_build_cache_root(
-                source_work_items, cache_root);
-        source_invocation = prepare_production_source_build_invocation(
-                std::move(source_work_items), config);
-    }
-    if(!repo_targets.empty() || is_sys_upgrade) {
-        // POLICY(#173): AUR targetのtokenだけを除き、option/value/official targetの元順序を維持する。
-        std::vector<std::string> pacman_args =
-                ordered_pacman_args_excluding_targets(parsed, aur_target_token_indices);
-        if(run_command("sudo pacman " + join_pacman_args(pacman_args, config)) != 0) {
-            throw std::runtime_error(localization::format_translated_message(
-                    "{} failed.", "Pacman"));
+        try {
+            // No cache capability is created here. Actual execution activates
+            // one before its first repository/source mutation.
+            source_invocation.emplace(
+                    prepare_production_source_build_invocation(
+                            std::move(source_work_items), config));
+        } catch(const std::exception& error) {
+            return fail(make_sync_install_issue(
+                    SyncInstallPreparationIssueKind::
+                            SourceWorkPreparationFailed,
+                    error.what()));
         }
     }
-    if(source_invocation.has_value()) {
+
+    for(const auto& root : root_slots) {
+        if(!root.has_value()) {
+            return fail(make_sync_install_issue(
+                    SyncInstallPreparationIssueKind::
+                            TargetCorrelationFailed,
+                    localization::translate_message(
+                            "Sync root projection did not retain every target.")));
+        }
+    }
+
+    PreparedSyncInstall prepared;
+    prepared.ordered_roots = take_observed_sync_roots(root_slots);
+    prepared.source_selection = source_selection;
+    prepared.repository_transaction_required =
+            source_selection == PackageSourceSelection::Auto &&
+            (has_repository_transaction_root || system_update);
+    if(prepared.repository_transaction_required) {
+        prepared.repository_pacman_args =
+                ordered_pacman_args_excluding_targets(
+                        parsed, source_target_token_indices);
+    }
+    prepared.system_update = system_update;
+    prepared.needed = source_sync_options.needed;
+    prepared.aur_build_plan = std::move(aur_build_plan);
+    prepared.source_invocation = std::move(source_invocation);
+
+    if(!prepared.repository_transaction_required &&
+       !prepared.source_invocation.has_value()) {
+        SyncInstallPreparationFailure failure;
+        failure.details.push_back(make_sync_install_issue(
+                SyncInstallPreparationIssueKind::EmptyPreparedRoute,
+                localization::translate_message(
+                        "Prepared sync install contains no executable route.")));
+        failure.ordered_roots = std::move(prepared.ordered_roots);
+        failure.source_selection = prepared.source_selection;
+        failure.system_update = prepared.system_update;
+        failure.needed = prepared.needed;
+        failure.aur_build_plan =
+                std::move(prepared.aur_build_plan);
+        return failure;
+    }
+    return prepared;
+}
+
+int execute_prepared_sync_install(
+        PreparedSyncInstall prepared,
+        const AppConfig& config) {
+    if(prepared.repository_transaction_required &&
+       prepared.repository_pacman_args.empty()) {
+        throw std::logic_error(localization::format_translated_message(
+                "Prepared repository transaction has no {} arguments.",
+                "pacman"));
+    }
+
+    if(prepared.source_invocation.has_value()) {
+        // POLICY(#352): cache activation is part of actual execution, but it
+        // must complete before a mixed route can mutate repository state.
+        // The source executor revalidates the same retained capability after
+        // the repository transaction before starting source mutation.
+        activate_production_source_build_cache(
+                prepared.source_invocation.value());
+    }
+
+    if(prepared.repository_transaction_required) {
+        if(run_command(
+                   "sudo pacman " +
+                   join_pacman_args(
+                           prepared.repository_pacman_args, config)) != 0) {
+            throw std::runtime_error(
+                    localization::format_translated_message(
+                            "{} failed.", "Pacman"));
+        }
+    }
+
+    if(prepared.source_invocation.has_value()) {
         return execute_sync_source_build_invocation(
-                source_invocation.value(), config);
+                std::move(prepared.source_invocation.value()), config);
+    }
+    if(!prepared.repository_transaction_required) {
+        throw std::logic_error(localization::translate_message(
+                "Prepared sync install contains no executable route."));
     }
     return 0;
+}
+
+int cmd_sync_install(
+        const ParsedCliArguments& parsed, bool is_sys_upgrade,
+        PackageSourceSelection source_selection, const AppConfig& config) {
+    if(source_selection == PackageSourceSelection::RepoOnly) {
+        // POLICY(#168): RepoOnly is one ordered binary repository transaction; no classification probe.
+        return run_command(
+                "sudo pacman " +
+                join_pacman_args(parsed.ordered_pacman_args, config));
+    }
+
+    const bool system_update = is_sys_upgrade;
+    if(source_selection == PackageSourceSelection::Auto &&
+       parsed.targets.empty() && !system_update) {
+        return run_command(
+                "sudo pacman " +
+                join_pacman_args(parsed.ordered_pacman_args, config));
+    }
+
+    SyncInstallPreparation preparation = prepare_sync_install(
+            parsed, system_update, source_selection, config);
+    if(const auto* failure =
+               std::get_if<SyncInstallPreparationFailure>(&preparation);
+       failure != nullptr) {
+        report_sync_install_preparation_failure(*failure);
+        return 1;
+    }
+    return execute_prepared_sync_install(
+            std::move(std::get<PreparedSyncInstall>(preparation)), config);
 }
 
 int cmd_sync_info(

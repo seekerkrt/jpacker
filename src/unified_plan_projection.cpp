@@ -1,8 +1,10 @@
 #include "unified_plan_projection.hpp"
 
+#include "aur_update_execution_preparation.hpp"
 #include "aur_update_execution_preflight.hpp"
 #include "aur_update_query.hpp"
 #include "commands_sync.hpp"
+#include "filtered_aur_update_operation.hpp"
 #include "local_dependency_plan_projection.hpp"
 #include "package_metadata.hpp"
 #include "root_package_route_projection.hpp"
@@ -93,6 +95,26 @@ void append_build_plan_blockers(
                         SplitPackageSelectionRequired,
                 index});
     }
+}
+
+void append_fetch_build_plan_blockers(
+        const BuildPlan& plan, UnifiedPlanObservationInput& observation) {
+    append_build_plan_blockers(plan, observation);
+    std::erase_if(
+            observation.blockers,
+            [](const UnifiedPlanBlocker& blocker) {
+                if(std::holds_alternative<
+                           MetadataRiskUnifiedPlanBlocker>(blocker)) {
+                    return true;
+                }
+                const auto* state =
+                        std::get_if<BuildPlanStateUnifiedPlanBlocker>(
+                                &blocker);
+                return state != nullptr &&
+                       state->kind ==
+                               BuildPlanStateUnifiedPlanBlockerKind::
+                                       SplitPackageSelectionRequired;
+            });
 }
 
 void append_repository_dependency_intents(
@@ -205,6 +227,33 @@ void append_prepared_source_work(
     }
 }
 
+void append_prepared_remote_source_work(
+        const PreparedRemoteSourceBuild& prepared,
+        UnifiedPlanObservationInput& observation) {
+    if(prepared.invocation.work_items.size() != 1) {
+        reject_inconsistent_input(
+                "Prepared repository source build has an invalid work-item count.");
+    }
+    const ProductionSourceBuildWorkItem& work_item =
+            prepared.invocation.work_items.front();
+    PreparedRemoteSourceBuildUnitReference build_unit(
+            std::cref(prepared.source), std::cref(work_item));
+    if(!build_unit.has_complete_identity()) {
+        reject_inconsistent_input(
+                "Prepared repository source build identity is inconsistent.");
+    }
+    observation.build_units.push_back(
+            PreparedRemoteSourceBuildUnitReference(
+                    std::cref(prepared.source), std::cref(work_item)));
+    for(const RequiredPackageArtifactTarget& target :
+        work_item.required_targets) {
+        observation.required_artifacts.emplace_back(
+                PreparedRemoteSourceBuildUnitReference(
+                        std::cref(prepared.source), std::cref(work_item)),
+                std::cref(target));
+    }
+}
+
 void append_source_artifact_transaction(
         UnifiedPlanObservationInput& observation, bool needed) {
     if(observation.required_artifacts.empty()) return;
@@ -293,6 +342,38 @@ const PlannedPackageTarget& validate_plan_root_identity(
     }
     if(matched_target == nullptr) reject_inconsistent_input(diagnostic);
     return *matched_target;
+}
+
+const PlannedPackageTarget* find_plan_root_target(
+        const BuildPlan& plan, std::size_t root_index,
+        const char* diagnostic) {
+    if(root_index >= plan.root_targets.size()) {
+        reject_inconsistent_input(diagnostic);
+    }
+    const RootTargetIdentity& root = plan.root_targets[root_index];
+    const PlannedPackageTarget* matched = nullptr;
+    for(const PlannedPackageTarget& target : plan.package_targets) {
+        if(target.package_name != root.requested_name ||
+           !has_package_role(target, PackageRole::Root) ||
+           std::count(target.roots.begin(), target.roots.end(), root) != 1) {
+            continue;
+        }
+        if(matched != nullptr) reject_inconsistent_input(diagnostic);
+        matched = &target;
+    }
+    if(matched != nullptr && matched->package_base.empty()) {
+        reject_inconsistent_input(diagnostic);
+    }
+    return matched;
+}
+
+const PlannedPackageTarget& require_plan_root_target(
+        const BuildPlan& plan, std::size_t root_index,
+        const char* diagnostic) {
+    const PlannedPackageTarget* matched =
+            find_plan_root_target(plan, root_index, diagnostic);
+    if(matched == nullptr) reject_inconsistent_input(diagnostic);
+    return *matched;
 }
 
 void validate_plan_roots(
@@ -542,11 +623,12 @@ const std::vector<std::string>* validate_prepared_work_repository_authority(
     return configured_order;
 }
 
-const std::vector<std::string>* validate_root_source_work(
-        const PreparedRootPackageInstall& prepared,
+const std::vector<std::string>* validate_aur_source_work(
+        const BuildPlan& plan,
+        const PreparedProductionSourceBuildInvocation& invocation,
+        bool needed,
         const BuildPlanArtifactTargetProjectionResult& projection) {
-    const auto& work_items = prepared.source_invocation->work_items;
-    const BuildPlan& plan = prepared.aur_build_plan.value();
+    const auto& work_items = invocation.work_items;
     if(work_items.size() != plan.order.size()) {
         reject_inconsistent_input(
                 "Prepared AUR source work does not match BuildPlan execution units.");
@@ -555,7 +637,7 @@ const std::vector<std::string>* validate_root_source_work(
         const ProductionSourceBuildWorkItem& work_item = work_items[index];
         const BuildPlanEntry& plan_entry = plan.order[index];
         if(!work_item.is_build_plan_entry ||
-           work_item.request.needed != prepared.needed ||
+           work_item.request.needed != needed ||
            work_item.request.checkout_name != plan_entry.package_base ||
            work_item.required_targets.empty() ||
            std::any_of(
@@ -578,11 +660,10 @@ const std::vector<std::string>* validate_root_source_work(
             projection.success();
     if(success == nullptr) {
         return validate_build_plan_repository_authority(
-                prepared.aur_build_plan.value());
+                plan);
     }
     const std::vector<std::string>* plan_repository_order =
-            validate_build_plan_repository_authority(
-                    prepared.aur_build_plan.value());
+            validate_build_plan_repository_authority(plan);
     if(work_items.size() != success->build_units.size()) {
         reject_inconsistent_input(
                 "Prepared AUR source work does not match its BuildPlan.");
@@ -620,8 +701,8 @@ const std::vector<std::string>* validate_root_source_work(
                     provider, work_repository_order,
                     "Prepared AUR source work provider does not match its resolution configuration.");
             const bool belongs_to_plan = std::any_of(
-                    prepared.aur_build_plan->provided.begin(),
-                    prepared.aur_build_plan->provided.end(),
+                    plan.provided.begin(),
+                    plan.provided.end(),
                     [&provider](
                             const BuildPlanProvidedDependency& selected) {
                         return selected.resolution ==
@@ -636,7 +717,7 @@ const std::vector<std::string>* validate_root_source_work(
         }
         std::vector<const ProvidedDependency*> expected_providers;
         for(const BuildPlanDependencyEdge& edge :
-            prepared.aur_build_plan->dependency_edges) {
+            plan.dependency_edges) {
             if(edge.parent_package_base != work_item.request.checkout_name ||
                edge.provider_resolution !=
                        ProviderResolutionKind::UserSelected ||
@@ -674,6 +755,15 @@ const std::vector<std::string>* validate_root_source_work(
         }
     }
     return plan_repository_order;
+}
+
+const std::vector<std::string>* validate_root_source_work(
+        const PreparedRootPackageInstall& prepared,
+        const BuildPlanArtifactTargetProjectionResult& projection) {
+    return validate_aur_source_work(
+            prepared.aur_build_plan.value(),
+            prepared.source_invocation.value(), prepared.needed,
+            projection);
 }
 
 void validate_local_source_input(
@@ -1151,6 +1241,230 @@ void append_aur_update_roots_and_blockers(
     }
 }
 
+bool same_build_plan_projection_issue_identity(
+        const BuildPlanArtifactTargetProjectionIssue& lhs,
+        const BuildPlanArtifactTargetProjectionIssue& rhs) noexcept {
+    return lhs.kind == rhs.kind &&
+           lhs.build_plan_order_index == rhs.build_plan_order_index &&
+           lhs.entry_package_name_index == rhs.entry_package_name_index &&
+           lhs.package_target_indices == rhs.package_target_indices &&
+           lhs.package_base == rhs.package_base &&
+           lhs.package_name == rhs.package_name && lhs.roots == rhs.roots;
+}
+
+bool is_known_wrapped_preflight_issue_reason(
+        AurUpdateExecutionReason reason) noexcept {
+    switch(reason) {
+    case AurUpdateExecutionReason::None:
+        return false;
+    case AurUpdateExecutionReason::UpToDate:
+    case AurUpdateExecutionReason::NonAurForeign:
+    case AurUpdateExecutionReason::AurMetadataUnavailable:
+    case AurUpdateExecutionReason::VersionComparisonUnavailable:
+    case AurUpdateExecutionReason::InstalledReasonUnknown:
+    case AurUpdateExecutionReason::UpdatePlanInconsistent:
+    case AurUpdateExecutionReason::DuplicateUpdateTarget:
+    case AurUpdateExecutionReason::RepositoryMetadataUnavailable:
+    case AurUpdateExecutionReason::AurDependencyMetadataUnavailable:
+    case AurUpdateExecutionReason::ProviderMetadataUnavailable:
+    case AurUpdateExecutionReason::UnresolvedDependency:
+    case AurUpdateExecutionReason::VersionConstraintUnverified:
+    case AurUpdateExecutionReason::DependencyCycle:
+    case AurUpdateExecutionReason::BuildPlanInconsistent:
+    case AurUpdateExecutionReason::PackageBaseMismatch:
+    case AurUpdateExecutionReason::SplitPackageSelectionRequired:
+    case AurUpdateExecutionReason::MultiplePackageTargetsForPackageBase:
+    case AurUpdateExecutionReason::AmbiguousProvider:
+    case AurUpdateExecutionReason::ConflictsOrReplacesUnresolved:
+    case AurUpdateExecutionReason::InstalledPackageMetadataUnavailable:
+        return true;
+    }
+    return false;
+}
+
+bool is_known_build_plan_projection_issue_kind(
+        BuildPlanArtifactTargetProjectionIssueKind kind) noexcept {
+    switch(kind) {
+    case BuildPlanArtifactTargetProjectionIssueKind::InvalidPackageBase:
+    case BuildPlanArtifactTargetProjectionIssueKind::EmptyEntryPackageNames:
+    case BuildPlanArtifactTargetProjectionIssueKind::InvalidPackageName:
+    case BuildPlanArtifactTargetProjectionIssueKind::DuplicateEntryPackageName:
+    case BuildPlanArtifactTargetProjectionIssueKind::
+            MissingPlannedPackageTarget:
+    case BuildPlanArtifactTargetProjectionIssueKind::
+            DuplicatePlannedPackageTarget:
+    case BuildPlanArtifactTargetProjectionIssueKind::PackageBaseMismatch:
+    case BuildPlanArtifactTargetProjectionIssueKind::
+            UncoveredPlannedPackageTarget:
+    case BuildPlanArtifactTargetProjectionIssueKind::
+            DesiredInstallReasonUnavailable:
+    case BuildPlanArtifactTargetProjectionIssueKind::
+            RootAttributionInconsistent:
+    case BuildPlanArtifactTargetProjectionIssueKind::
+            DuplicatePackageBaseEntry:
+        return true;
+    }
+    return false;
+}
+
+bool has_known_build_plan_projection_issue_relation(
+        const AurUpdateExecutionIssue& issue) noexcept {
+    if(!issue.build_plan_projection_issue.has_value()) return true;
+
+    const BuildPlanArtifactTargetProjectionIssueKind kind =
+            issue.build_plan_projection_issue->kind;
+    if(!is_known_build_plan_projection_issue_kind(kind)) return false;
+    return issue.reason ==
+            (kind == BuildPlanArtifactTargetProjectionIssueKind::
+                             PackageBaseMismatch
+                     ? AurUpdateExecutionReason::PackageBaseMismatch
+                     : AurUpdateExecutionReason::BuildPlanInconsistent);
+}
+
+bool same_preflight_issue_identity(
+        const AurUpdateExecutionIssue& lhs,
+        const AurUpdateExecutionIssue& rhs) noexcept {
+    if(!is_known_wrapped_preflight_issue_reason(lhs.reason) ||
+       !is_known_wrapped_preflight_issue_reason(rhs.reason) ||
+       !has_known_build_plan_projection_issue_relation(lhs) ||
+       !has_known_build_plan_projection_issue_relation(rhs) ||
+       lhs.reason != rhs.reason || lhs.package_name != rhs.package_name ||
+       lhs.package_base != rhs.package_base ||
+       lhs.dependency_specification != rhs.dependency_specification ||
+       lhs.build_plan_projection_issue.has_value() !=
+               rhs.build_plan_projection_issue.has_value()) {
+        return false;
+    }
+    return !lhs.build_plan_projection_issue.has_value() ||
+           same_build_plan_projection_issue_identity(
+                   lhs.build_plan_projection_issue.value(),
+                   rhs.build_plan_projection_issue.value());
+}
+
+bool has_exact_preflight_issue_target_correlation(
+        const AurUpdateExecutionIssue& issue,
+        const AurUpdateExecutionTarget& target,
+        const AurUpdateExecutionPreflight& preflight) noexcept {
+    if(!issue.build_plan_projection_issue.has_value()) return true;
+    if(!preflight.build_plan.has_value() ||
+       !target.build_plan_root_index.has_value() ||
+       target.build_plan_root_index.value() >=
+               preflight.build_plan->root_targets.size()) {
+        return false;
+    }
+
+    const BuildPlan& plan = preflight.build_plan.value();
+    const std::vector<RootTargetIdentity>& roots =
+            issue.build_plan_projection_issue->roots;
+    const RootTargetIdentity& target_root = plan.root_targets[
+            target.build_plan_root_index.value()];
+    auto target_retains_same_issue =
+            [&issue](const AurUpdateExecutionTarget& candidate) {
+        return (candidate.status ==
+                        AurUpdateExecutionTargetStatus::Unsupported ||
+                candidate.status ==
+                        AurUpdateExecutionTargetStatus::Incomplete) &&
+               std::any_of(
+                       candidate.issues.begin(), candidate.issues.end(),
+                       [&issue](const AurUpdateExecutionIssue& original) {
+                           return same_preflight_issue_identity(
+                                   original, issue);
+                       });
+    };
+
+    if(roots.empty()) {
+        return std::all_of(
+                preflight.targets.begin(), preflight.targets.end(),
+                [&target_retains_same_issue](
+                        const AurUpdateExecutionTarget& candidate) {
+                    return !candidate.build_plan_root_index.has_value() ||
+                           target_retains_same_issue(candidate);
+                });
+    }
+    if(std::count(roots.begin(), roots.end(), target_root) != 1) return false;
+
+    for(const RootTargetIdentity& root : roots) {
+        if(std::count(roots.begin(), roots.end(), root) != 1) return false;
+
+        std::optional<std::size_t> root_index;
+        for(std::size_t index = 0; index < plan.root_targets.size(); ++index) {
+            if(plan.root_targets[index] != root) continue;
+            if(root_index.has_value()) return false;
+            root_index = index;
+        }
+        if(!root_index.has_value()) return false;
+
+        const std::size_t correlated_target_count =
+                static_cast<std::size_t>(std::count_if(
+                        preflight.targets.begin(), preflight.targets.end(),
+                        [root_index, &target_retains_same_issue](
+                                const AurUpdateExecutionTarget& candidate) {
+                            return candidate.build_plan_root_index ==
+                                           root_index &&
+                                   target_retains_same_issue(candidate);
+                        }));
+        if(correlated_target_count != 1) return false;
+    }
+    return true;
+}
+
+bool is_already_projected_blocking_preflight_wrapper(
+        const AurUpdatePreparationIssue& issue,
+        const AurUpdateExecutionPreflight& preflight) noexcept {
+    if(issue.reason != AurUpdatePreparationReason::BlockingPreflight ||
+       !issue.preflight_issue.has_value() ||
+       issue.affected_update_plan_indices.size() != 1 ||
+       !issue.affected_roots.empty() ||
+       issue.source_preference_failure.has_value() ||
+       issue.package_metadata_failure.has_value() ||
+       issue.build_plan_projection_issue.has_value() ||
+       issue.package_name != issue.preflight_issue->package_name ||
+       issue.package_base != issue.preflight_issue->package_base) {
+        return false;
+    }
+
+    const std::size_t update_plan_index =
+            issue.affected_update_plan_indices.front();
+    for(const AurUpdateExecutionTarget& target : preflight.targets) {
+        if(target.update_plan_index != update_plan_index ||
+           (target.status != AurUpdateExecutionTargetStatus::Unsupported &&
+            target.status != AurUpdateExecutionTargetStatus::Incomplete)) {
+            continue;
+        }
+        if(!has_exact_preflight_issue_target_correlation(
+                   issue.preflight_issue.value(), target, preflight)) {
+            return false;
+        }
+        if(std::any_of(
+                   target.issues.begin(), target.issues.end(),
+                   [&issue](const AurUpdateExecutionIssue& original) {
+                       return same_preflight_issue_identity(
+                               original, issue.preflight_issue.value());
+                   })) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void append_aur_update_preparation_blockers(
+        const AurUpdateSourceBuildPreparation& preparation,
+        const AurUpdateExecutionPreflight& preflight,
+        UnifiedPlanObservationInput& observation) {
+    observation.route_preflight_authorities.push_back(
+            UnifiedPlanBorrowedAuthorityReference<
+                    AurUpdateSourceBuildPreparation>(preparation));
+    for(const AurUpdatePreparationIssue& issue : preparation.issues) {
+        if(is_already_projected_blocking_preflight_wrapper(
+                   issue, preflight)) {
+            continue;
+        }
+        observation.blockers.push_back(RoutePreflightUnifiedPlanBlocker{
+                UnifiedPlanBorrowedAuthorityReference<
+                        AurUpdatePreparationIssue>(issue)});
+    }
+}
+
 void append_phase(
         UnifiedPlanObservationInput& observation,
         UnifiedPlanObservationPhase phase,
@@ -1158,6 +1472,43 @@ void append_phase(
         std::optional<ExistingRoutePhaseReference> existing = std::nullopt) {
     observation.phases.push_back(UnifiedPlanPhaseReference{
             phase, owner, std::move(existing)});
+}
+
+void append_local_metadata_evaluation_blocker(
+        const LocalSourceRoot& source_root,
+        UnifiedPlanObservationInput& observation) {
+    const LocalSourceMetadataSnapshot& metadata = source_root.metadata();
+    if(metadata.state() == LocalSourceMetadataState::UsableUnverified) {
+        reject_inconsistent_input(
+                "Usable local metadata was projected as evaluation-required.");
+    }
+    observation.status = UnifiedPlanObservationStatus::Blocked;
+    observation.route_preflight_authorities.push_back(
+            UnifiedPlanBorrowedAuthorityReference<LocalSourceRoot>(
+                    source_root));
+    if(metadata.state() == LocalSourceMetadataState::Unsafe) {
+        if(metadata.unsafe_failure() == nullptr) {
+            reject_inconsistent_input(
+                    "Unsafe local metadata has no typed source failure.");
+        }
+        observation.blockers.push_back(SourceFailureUnifiedPlanBlocker{
+                UnifiedPlanBorrowedAuthorityReference<
+                        LocalSourceRootFailure>(*metadata.unsafe_failure())});
+    } else {
+        observation.blockers.push_back(
+                LocalSourceMetadataEvaluationUnifiedPlanBlocker{
+                        LocalSourceRootObservationIdentity{
+                                source_root.canonical_path(),
+                                source_root.directory_identity()},
+                        UnifiedPlanBorrowedAuthorityReference<
+                                LocalSourceMetadataSnapshot>(metadata)});
+    }
+    append_phase(
+            observation, UnifiedPlanObservationPhase::RequestDiscovery,
+            UnifiedPlanAuthorityOwner::Moguet);
+    append_phase(
+            observation, UnifiedPlanObservationPhase::MetadataDiscovery,
+            UnifiedPlanAuthorityOwner::Moguet);
 }
 
 bool has_repository_transaction(
@@ -1949,13 +2300,691 @@ std::unique_ptr<UnifiedPlanProjection> project_root_package_unified_plan(
             std::move(projections), std::move(observation));
 }
 
+std::unique_ptr<UnifiedPlanProjection> project_fetch_unified_plan(
+        FetchUnifiedPlanProjectionInput input) {
+    const FetchPreparation& preparation = input.source.get();
+    const BuildPlan& plan = preparation.plan;
+    if(plan.root_targets.empty() || preparation.invocation_targets.empty()) {
+        reject_inconsistent_input(
+                "Fetch projection lacks invocation root authority.");
+    }
+    const std::vector<std::string>* repository_order =
+            validate_build_plan_repository_authority(plan);
+
+    UnifiedPlanObservationInput observation;
+    if(repository_order != nullptr) {
+        observation.configured_repository_order.emplace(
+                std::cref(*repository_order));
+    }
+    observation.route_preflight_authorities.push_back(
+            UnifiedPlanBorrowedAuthorityReference<FetchPreparation>(
+                    preparation));
+    observation.dependency_authorities.push_back(
+            UnifiedPlanDependencyAuthorityReference::from_build_plan(plan));
+    append_fetch_build_plan_blockers(plan, observation);
+    for(std::size_t index = 0; index < plan.root_targets.size(); ++index) {
+        const PlannedPackageTarget* target = find_plan_root_target(
+                plan, index,
+                "Fetch BuildPlan root identity is inconsistent.");
+        if(target == nullptr) continue;
+        observation.roots.emplace_back(
+                plan.root_targets[index],
+                AurRootPackageIdentity{
+                        target->package_name, target->package_base},
+                UnifiedPlanRootRouteKind::AurSourceBuild);
+    }
+    for(std::size_t index = 0; index < plan.order.size(); ++index) {
+        observation.build_units.emplace_back(
+                AurPackageBaseBuildUnitReference(std::cref(plan), index));
+    }
+    observation.status = observation.blockers.empty()
+            ? UnifiedPlanObservationStatus::Ready
+            : UnifiedPlanObservationStatus::Blocked;
+    if(observation.status == UnifiedPlanObservationStatus::Ready &&
+       observation.roots.size() != plan.root_targets.size()) {
+        reject_inconsistent_input(
+                "Fetch Ready projection lacks a complete root identity.");
+    }
+    append_phase(
+            observation, UnifiedPlanObservationPhase::RequestDiscovery,
+            UnifiedPlanAuthorityOwner::Moguet);
+    append_phase(
+            observation, UnifiedPlanObservationPhase::MetadataDiscovery,
+            UnifiedPlanAuthorityOwner::AurRpc);
+    append_phase(
+            observation, UnifiedPlanObservationPhase::ProviderDecision,
+            UnifiedPlanAuthorityOwner::Moguet);
+    append_phase(
+            observation, UnifiedPlanObservationPhase::ExecutionProjection,
+            UnifiedPlanAuthorityOwner::Moguet);
+    if(observation.status == UnifiedPlanObservationStatus::Ready) {
+        append_phase(
+                observation, UnifiedPlanObservationPhase::SourceRetrieval,
+                UnifiedPlanAuthorityOwner::Git);
+    }
+    return UnifiedPlanProjection::make({}, std::move(observation));
+}
+
+std::unique_ptr<UnifiedPlanProjection> project_sync_install_unified_plan(
+        SyncInstallUnifiedPlanProjectionInput input) {
+    if(const auto* blocked = std::get_if<std::reference_wrapper<
+               const SyncInstallPreparationFailure>>(&input.source);
+       blocked != nullptr) {
+        const SyncInstallPreparationFailure& failure = blocked->get();
+        if(failure.details.empty()) {
+            reject_inconsistent_input(
+                    "Blocked sync preparation has no typed detail.");
+        }
+        UnifiedPlanObservationInput observation;
+        observation.status = UnifiedPlanObservationStatus::Blocked;
+        observation.route_preflight_authorities.push_back(
+                UnifiedPlanBorrowedAuthorityReference<
+                        SyncInstallPreparationFailure>(failure));
+        observation.blockers.push_back(
+                SyncInstallPreparationUnifiedPlanBlocker{
+                        UnifiedPlanBorrowedAuthorityReference<
+                                SyncInstallPreparationFailure>(failure)});
+        if(failure.aur_build_plan.has_value()) {
+            const BuildPlan& plan = failure.aur_build_plan.value();
+            observation.dependency_authorities.push_back(
+                    UnifiedPlanDependencyAuthorityReference::from_build_plan(
+                            plan));
+            append_build_plan_blockers(plan, observation);
+            if(plan.configured_repository_order.has_value()) {
+                observation.configured_repository_order.emplace(std::cref(
+                        plan.configured_repository_order.value()));
+            }
+        }
+        append_phase(
+                observation,
+                UnifiedPlanObservationPhase::RequestDiscovery,
+                UnifiedPlanAuthorityOwner::Moguet);
+        append_phase(
+                observation,
+                UnifiedPlanObservationPhase::ExecutionProjection,
+                UnifiedPlanAuthorityOwner::Moguet);
+        return UnifiedPlanProjection::make({}, std::move(observation));
+    }
+
+    const PreparedSyncInstall& prepared =
+            std::get<std::reference_wrapper<const PreparedSyncInstall>>(
+                    input.source)
+                    .get();
+    if(prepared.ordered_roots.empty() && !prepared.system_update) {
+        reject_inconsistent_input("Prepared sync route has no operation.");
+    }
+    const BuildPlan* plan = prepared.aur_build_plan.has_value()
+            ? &prepared.aur_build_plan.value()
+            : nullptr;
+    std::vector<BuildPlanArtifactTargetProjectionResult> projections;
+    const std::vector<std::string>* repository_order = plan == nullptr
+            ? nullptr
+            : validate_build_plan_repository_authority(*plan);
+    if(plan != nullptr) {
+        projections.push_back(
+                project_build_plan_required_artifact_targets(*plan));
+    }
+
+    UnifiedPlanObservationInput observation;
+    observation.route_preflight_authorities.push_back(
+            UnifiedPlanBorrowedAuthorityReference<PreparedSyncInstall>(
+                    prepared));
+    if(plan != nullptr) {
+        observation.dependency_authorities.push_back(
+                UnifiedPlanDependencyAuthorityReference::from_build_plan(
+                        *plan));
+        append_build_plan_blockers(*plan, observation);
+        append_artifact_projection(
+                *plan, projections.front(), observation);
+    }
+
+    RepositoryPackageTransactionIntent repository_transaction;
+    repository_transaction.policy.needed = prepared.needed;
+    std::vector<const SyncRepositorySourceRoot*> repository_source_roots;
+    std::vector<bool> observed_aur_roots(
+            plan == nullptr ? 0 : plan->root_targets.size(), false);
+    bool has_repository_root = false;
+    bool has_repository_transaction_root = false;
+    bool has_aur_root = false;
+    for(std::size_t ordered_root_index = 0;
+        ordered_root_index < prepared.ordered_roots.size();
+        ++ordered_root_index) {
+        const SyncInstallRoot& sync_root =
+                prepared.ordered_roots[ordered_root_index];
+        std::visit(
+                [&, ordered_root_index](const auto& root) {
+                    using Root = std::decay_t<decltype(root)>;
+                    if constexpr(std::is_same_v<
+                                         Root,
+                                         SyncRepositoryTransactionRoot> ||
+                                 std::is_same_v<
+                                         Root,
+                                         SyncRepositorySourceRoot>) {
+                        const RepositoryPackagePresent& package =
+                                root.package;
+                        if(package.repository_name.empty() ||
+                           package.package_name.empty() ||
+                           package.package_name !=
+                                   root.invocation_correlation.requested_name ||
+                           !package.configured_repository_order.has_value()) {
+                            reject_inconsistent_input(
+                                    "Prepared sync repository root identity is incomplete.");
+                        }
+                        validate_configured_repository_identity(
+                                ConfiguredRepositoryIdentity{
+                                        package.repository_name,
+                                        package.configured_order},
+                                package.configured_repository_order.value(),
+                                "Prepared sync repository root used an inconsistent repository configuration.");
+                        merge_repository_order_authority(
+                                &package.configured_repository_order.value(),
+                                repository_order,
+                                "Prepared sync roots used different repository configurations.");
+                        has_repository_root = true;
+                        if constexpr(std::is_same_v<
+                                             Root,
+                                             SyncRepositoryTransactionRoot>) {
+                            has_repository_transaction_root = true;
+                            UnifiedPlanRootReference observed_root(
+                                    root.invocation_correlation,
+                                    RepositoryRootPackageIdentity{
+                                            package.repository_name,
+                                            package.package_name},
+                                    UnifiedPlanRootRouteKind::
+                                            RepositoryTransaction);
+                            observation.roots.push_back(observed_root);
+                            repository_transaction.targets.push_back(
+                                    RepositoryRootInstallIntent{
+                                            observed_root});
+                        } else {
+                            if(root.invocation_correlation.invocation_index !=
+                                       ordered_root_index ||
+                               !root.source_work_item_index.has_value()) {
+                                reject_inconsistent_input(
+                                        "Prepared sync repository source root lost its typed work correlation.");
+                            }
+                            if(root.source.source_kind !=
+                                       SourceBuildSourceKind::Repository ||
+                               root.source.requested_name !=
+                                       package.package_name ||
+                               root.source.package_base.empty() ||
+                               root.source.canonical_source_key.empty()) {
+                                reject_inconsistent_input(
+                                        "Prepared sync repository source identity is inconsistent.");
+                            }
+                            observation.roots.emplace_back(
+                                    root.invocation_correlation,
+                                    RepositorySourceBuildRootIdentity{
+                                            root.source.requested_name,
+                                            root.source.package_base,
+                                            root.source.canonical_source_key},
+                                    UnifiedPlanRootRouteKind::
+                                            RepositorySourceBuild);
+                            repository_source_roots.push_back(&root);
+                        }
+                        observation.root_metadata.push_back(
+                                UnifiedPlanBorrowedAuthorityReference<
+                                        RepositoryPackagePresent>(package));
+                        if(repository_order == nullptr) {
+                            repository_order =
+                                    &package.configured_repository_order.value();
+                        }
+                    } else {
+                        if(plan == nullptr ||
+                           root.build_plan_root_index >=
+                                   plan->root_targets.size() ||
+                           observed_aur_roots[root.build_plan_root_index]) {
+                            reject_inconsistent_input(
+                                    "Prepared sync AUR root correlation is inconsistent.");
+                        }
+                        const PlannedPackageTarget& target =
+                                require_plan_root_target(
+                                        *plan,
+                                        root.build_plan_root_index,
+                                        "Prepared sync AUR root lacks BuildPlan identity.");
+                        if(target.package_name !=
+                                   root.invocation_correlation.requested_name ||
+                           plan->root_targets[root.build_plan_root_index]
+                                           .requested_name !=
+                                   root.invocation_correlation.requested_name) {
+                            reject_inconsistent_input(
+                                    "Prepared sync AUR root differs from its BuildPlan.");
+                        }
+                        observed_aur_roots[root.build_plan_root_index] = true;
+                        has_aur_root = true;
+                        observation.roots.emplace_back(
+                                root.invocation_correlation,
+                                AurRootPackageIdentity{
+                                        target.package_name,
+                                        target.package_base},
+                                UnifiedPlanRootRouteKind::AurSourceBuild);
+                        if(root.repository_absence.has_value()) {
+                            const RepositoryPackageNotFound& absence =
+                                    root.repository_absence.value();
+                            merge_repository_order_authority(
+                                    absence.configured_repository_order
+                                                    .has_value()
+                                            ? &absence
+                                                       .configured_repository_order
+                                                       .value()
+                                            : nullptr,
+                                    repository_order,
+                                    "Prepared sync AUR roots used different repository configurations.");
+                            observation.root_metadata.push_back(
+                                    UnifiedPlanBorrowedAuthorityReference<
+                                            RepositoryPackageNotFound>(
+                                            absence));
+                        }
+                    }
+                },
+                sync_root);
+    }
+    if(plan != nullptr &&
+       std::any_of(
+               observed_aur_roots.begin(), observed_aur_roots.end(),
+               [](bool observed) { return !observed; })) {
+        reject_inconsistent_input(
+                "Prepared sync BuildPlan has an unobserved invocation root.");
+    }
+
+    const bool has_source_roots =
+            !repository_source_roots.empty() || has_aur_root;
+    if(has_source_roots != prepared.source_invocation.has_value()) {
+        reject_inconsistent_input(
+                "Prepared sync source roots and invocation do not match.");
+    }
+    if(prepared.source_invocation.has_value()) {
+        const auto& work_items = prepared.source_invocation->work_items;
+        std::vector<bool> observed_work(work_items.size(), false);
+        for(const SyncRepositorySourceRoot* root :
+            repository_source_roots) {
+            if(!root->source_work_item_index.has_value() ||
+               root->source_work_item_index.value() >= work_items.size()) {
+                reject_inconsistent_input(
+                        "Prepared sync repository source work is missing.");
+            }
+            const std::size_t matched_index =
+                    root->source_work_item_index.value();
+            const ProductionSourceBuildWorkItem* matched =
+                    &work_items[matched_index];
+            if(observed_work[matched_index] || matched->is_build_plan_entry) {
+                reject_inconsistent_input(
+                        "Prepared sync repository source work correlation is inconsistent.");
+            }
+            if(matched->request.needed != prepared.needed) {
+                reject_inconsistent_input(
+                        "Prepared sync repository source work used a different needed policy.");
+            }
+            merge_repository_order_authority(
+                    matched->configured_repository_order.has_value()
+                            ? &matched->configured_repository_order.value()
+                            : nullptr,
+                    repository_order,
+                    "Prepared sync repository source work used a different repository configuration.");
+            observed_work[matched_index] = true;
+            PreparedRemoteSourceBuildUnitReference unit(
+                    std::cref(root->source), std::cref(*matched));
+            if(!unit.has_complete_identity()) {
+                reject_inconsistent_input(
+                        "Prepared sync repository source work is inconsistent.");
+            }
+            observation.build_units.push_back(
+                    PreparedRemoteSourceBuildUnitReference(
+                            std::cref(root->source), std::cref(*matched)));
+            for(const RequiredPackageArtifactTarget& target :
+                matched->required_targets) {
+                observation.required_artifacts.emplace_back(
+                        PreparedRemoteSourceBuildUnitReference(
+                                std::cref(root->source),
+                                std::cref(*matched)),
+                        std::cref(target));
+            }
+        }
+        if(plan != nullptr) {
+            const auto* projected = projections.front().success();
+            if(projected == nullptr) {
+                reject_inconsistent_input(
+                        "Prepared sync source invocation has an invalid artifact projection.");
+            }
+            for(const ProjectedBuildPlanArtifactTargets& unit :
+                projected->build_units) {
+                const ProductionSourceBuildWorkItem* matched = nullptr;
+                std::size_t matched_index = 0;
+                for(std::size_t index = 0; index < work_items.size(); ++index) {
+                    const ProductionSourceBuildWorkItem& work =
+                            work_items[index];
+                    if(!work.is_build_plan_entry ||
+                       work.request.checkout_name != unit.package_base) {
+                        continue;
+                    }
+                    if(matched != nullptr) {
+                        reject_inconsistent_input(
+                                "Prepared sync AUR work is ambiguous.");
+                    }
+                    matched = &work;
+                    matched_index = index;
+                }
+                if(matched == nullptr || observed_work[matched_index] ||
+                   matched->request.needed != prepared.needed ||
+                   matched->required_targets.size() !=
+                           unit.required_targets.size() ||
+                   !std::equal(
+                           matched->required_targets.begin(),
+                           matched->required_targets.end(),
+                           unit.required_targets.begin(),
+                           same_required_artifact_target)) {
+                    reject_inconsistent_input(
+                            "Prepared sync AUR work differs from its BuildPlan.");
+                }
+                observed_work[matched_index] = true;
+            }
+        }
+        if(std::any_of(
+                   observed_work.begin(), observed_work.end(),
+                   [](bool observed) { return !observed; })) {
+            reject_inconsistent_input(
+                    "Prepared sync invocation has unowned source work.");
+        }
+        for(const ProvidedDependency& provider :
+            prepared.source_invocation->selected_repository_providers) {
+            const bool projected_by_plan =
+                    plan != nullptr &&
+                    std::any_of(
+                            plan->provided.begin(), plan->provided.end(),
+                            [&provider](
+                                    const BuildPlanProvidedDependency&
+                                            selected) {
+                                return selected.resolution ==
+                                               ProviderResolutionKind::
+                                                       UserSelected &&
+                                       std::holds_alternative<
+                                               RepositoryProviderOrigin>(
+                                               selected.provider.origin) &&
+                                       same_provider_identity(
+                                               selected.provider, provider);
+                            });
+            if(projected_by_plan) continue;
+            repository_transaction.targets.push_back(
+                    RepositoryProviderInstallIntent{
+                            UnifiedPlanBorrowedAuthorityReference<
+                                    ProvidedDependency>(provider)});
+        }
+    }
+    if(plan != nullptr) {
+        append_repository_dependency_intents(*plan, repository_transaction);
+    }
+    if(prepared.system_update) {
+        repository_transaction.targets.push_back(
+                RepositorySystemUpgradeIntent{});
+    }
+    const bool initial_repository_transaction_required =
+            prepared.source_selection == PackageSourceSelection::Auto &&
+            (has_repository_transaction_root || prepared.system_update);
+    if(initial_repository_transaction_required !=
+       prepared.repository_transaction_required) {
+        reject_inconsistent_input(
+                "Prepared sync repository transaction policy is inconsistent.");
+    }
+    const bool has_repository_transaction =
+            !repository_transaction.targets.empty();
+    if(repository_order != nullptr) {
+        observation.configured_repository_order.emplace(
+                std::cref(*repository_order));
+    }
+    observation.status = observation.blockers.empty()
+            ? UnifiedPlanObservationStatus::Ready
+            : UnifiedPlanObservationStatus::Blocked;
+    if(observation.status == UnifiedPlanObservationStatus::Ready) {
+        if(has_repository_transaction) {
+            observation.transaction_intents.push_back(
+                    std::move(repository_transaction));
+        }
+        append_source_artifact_transaction(observation, prepared.needed);
+    }
+    append_phase(
+            observation, UnifiedPlanObservationPhase::RequestDiscovery,
+            UnifiedPlanAuthorityOwner::Moguet);
+    if(has_repository_root || prepared.system_update) {
+        append_phase(
+                observation,
+                UnifiedPlanObservationPhase::MetadataDiscovery,
+                UnifiedPlanAuthorityOwner::Libalpm);
+    }
+    if(has_aur_root) {
+        append_phase(
+                observation,
+                UnifiedPlanObservationPhase::MetadataDiscovery,
+                UnifiedPlanAuthorityOwner::AurRpc);
+        append_phase(
+                observation,
+                UnifiedPlanObservationPhase::ProviderDecision,
+                UnifiedPlanAuthorityOwner::Moguet);
+    }
+    append_phase(
+            observation,
+            UnifiedPlanObservationPhase::ExecutionProjection,
+            UnifiedPlanAuthorityOwner::Moguet);
+    if(observation.status == UnifiedPlanObservationStatus::Ready) {
+        if(has_repository_transaction) {
+            append_phase(
+                    observation,
+                    UnifiedPlanObservationPhase::RepositoryTransaction,
+                    UnifiedPlanAuthorityOwner::Pacman);
+        }
+        if(has_source_roots) append_source_mutation_phases(observation);
+    }
+    return UnifiedPlanProjection::make(
+            std::move(projections), std::move(observation));
+}
+
+std::unique_ptr<UnifiedPlanProjection>
+project_remote_source_build_unified_plan(
+        RemoteSourceBuildUnifiedPlanProjectionInput input) {
+    if(const auto* blocked = std::get_if<std::reference_wrapper<
+               const RemoteSourceBuildPlanFailure>>(&input.source);
+       blocked != nullptr) {
+        const RemoteSourceBuildPlanFailure& failure = blocked->get();
+        if(failure.source.source_kind != SourceBuildSourceKind::Aur ||
+           failure.source.requested_name.empty() ||
+           failure.source.package_base.empty()) {
+            reject_inconsistent_input(
+                    "Remote source-build failure lacks AUR identity.");
+        }
+        UnifiedPlanObservationInput observation;
+        observation.route_preflight_authorities.push_back(
+                UnifiedPlanBorrowedAuthorityReference<
+                        RemoteSourceBuildPlanFailure>(failure));
+        observation.dependency_authorities.push_back(
+                UnifiedPlanDependencyAuthorityReference::from_build_plan(
+                        failure.plan));
+        if(failure.plan.configured_repository_order.has_value()) {
+            observation.configured_repository_order.emplace(std::cref(
+                    failure.plan.configured_repository_order.value()));
+        }
+        append_build_plan_blockers(failure.plan, observation);
+        if(observation.blockers.empty()) {
+            reject_inconsistent_input(
+                    "Remote source-build failure has no typed BuildPlan blocker.");
+        }
+        RootTargetIdentity correlation{0, failure.source.requested_name};
+        if(!failure.plan.root_targets.empty()) {
+            correlation = failure.plan.root_targets.front();
+        }
+        observation.roots.emplace_back(
+                std::move(correlation),
+                AurRootPackageIdentity{
+                        failure.source.requested_name,
+                        failure.source.package_base},
+                UnifiedPlanRootRouteKind::AurSourceBuild);
+        observation.root_metadata.push_back(
+                UnifiedPlanBorrowedAuthorityReference<
+                        ResolvedSourceBuildIdentity>(failure.source));
+        observation.status = UnifiedPlanObservationStatus::Blocked;
+        append_phase(
+                observation,
+                UnifiedPlanObservationPhase::RequestDiscovery,
+                UnifiedPlanAuthorityOwner::Moguet);
+        append_phase(
+                observation,
+                UnifiedPlanObservationPhase::MetadataDiscovery,
+                UnifiedPlanAuthorityOwner::AurRpc);
+        append_phase(
+                observation,
+                UnifiedPlanObservationPhase::ProviderDecision,
+                UnifiedPlanAuthorityOwner::Moguet);
+        append_phase(
+                observation,
+                UnifiedPlanObservationPhase::ExecutionProjection,
+                UnifiedPlanAuthorityOwner::Moguet);
+        return UnifiedPlanProjection::make({}, std::move(observation));
+    }
+
+    const PreparedRemoteSourceBuild& prepared =
+            std::get<std::reference_wrapper<
+                    const PreparedRemoteSourceBuild>>(input.source)
+                    .get();
+    UnifiedPlanObservationInput observation;
+    observation.route_preflight_authorities.push_back(
+            UnifiedPlanBorrowedAuthorityReference<
+                    PreparedRemoteSourceBuild>(prepared));
+    observation.root_metadata.push_back(
+            UnifiedPlanBorrowedAuthorityReference<
+                    ResolvedSourceBuildIdentity>(prepared.source));
+
+    std::vector<BuildPlanArtifactTargetProjectionResult> projections;
+    const BuildPlan* plan = prepared.aur_build_plan.has_value()
+            ? &prepared.aur_build_plan.value()
+            : nullptr;
+    RepositoryPackageTransactionIntent repository_transaction;
+    bool has_repository_metadata = false;
+    if(prepared.source.source_kind == SourceBuildSourceKind::Aur) {
+        if(plan == nullptr || plan->root_targets.size() != 1) {
+            reject_inconsistent_input(
+                    "Prepared AUR source build lacks its invocation BuildPlan.");
+        }
+        const PlannedPackageTarget& root = require_plan_root_target(
+                *plan, 0,
+                "Prepared AUR source-build root identity is inconsistent.");
+        if(root.package_name != prepared.source.requested_name ||
+           root.package_base != prepared.source.package_base) {
+            reject_inconsistent_input(
+                    "Prepared AUR source-build identity differs from its BuildPlan.");
+        }
+        projections.push_back(
+                project_build_plan_required_artifact_targets(*plan));
+        const std::vector<std::string>* repository_order =
+                validate_aur_source_work(
+                        *plan, prepared.invocation, false,
+                        projections.front());
+        if(repository_order != nullptr) {
+            observation.configured_repository_order.emplace(
+                    std::cref(*repository_order));
+        }
+        observation.dependency_authorities.push_back(
+                UnifiedPlanDependencyAuthorityReference::from_build_plan(
+                        *plan));
+        append_build_plan_blockers(*plan, observation);
+        append_artifact_projection(
+                *plan, projections.front(), observation);
+        append_repository_dependency_intents(
+                *plan, repository_transaction);
+        observation.roots.emplace_back(
+                plan->root_targets.front(),
+                AurRootPackageIdentity{
+                        prepared.source.requested_name,
+                        prepared.source.package_base},
+                UnifiedPlanRootRouteKind::AurSourceBuild);
+    } else {
+        if(plan != nullptr) {
+            reject_inconsistent_input(
+                    "Prepared repository source build retained an AUR BuildPlan.");
+        }
+        append_prepared_remote_source_work(prepared, observation);
+        const ProductionSourceBuildWorkItem& work =
+                prepared.invocation.work_items.front();
+        if(work.configured_repository_order.has_value()) {
+            observation.configured_repository_order.emplace(
+                    std::cref(work.configured_repository_order.value()));
+        }
+        for(const ProvidedDependency& provider :
+            prepared.invocation.selected_repository_providers) {
+            repository_transaction.targets.push_back(
+                    RepositoryProviderInstallIntent{
+                            UnifiedPlanBorrowedAuthorityReference<
+                                    ProvidedDependency>(provider)});
+        }
+        observation.roots.emplace_back(
+                RootTargetIdentity{0, prepared.source.requested_name},
+                RepositorySourceBuildRootIdentity{
+                        prepared.source.requested_name,
+                        prepared.source.package_base,
+                        prepared.source.canonical_source_key},
+                UnifiedPlanRootRouteKind::RepositorySourceBuild);
+        has_repository_metadata = true;
+    }
+
+    observation.status = observation.blockers.empty()
+            ? UnifiedPlanObservationStatus::Ready
+            : UnifiedPlanObservationStatus::Blocked;
+    if(observation.status == UnifiedPlanObservationStatus::Ready) {
+        if(!repository_transaction.targets.empty()) {
+            observation.transaction_intents.push_back(
+                    std::move(repository_transaction));
+        }
+        append_source_artifact_transaction(observation, false);
+    }
+    append_phase(
+            observation, UnifiedPlanObservationPhase::RequestDiscovery,
+            UnifiedPlanAuthorityOwner::Moguet);
+    append_phase(
+            observation, UnifiedPlanObservationPhase::MetadataDiscovery,
+            has_repository_metadata ? UnifiedPlanAuthorityOwner::Libalpm
+                                    : UnifiedPlanAuthorityOwner::AurRpc);
+    if(plan != nullptr) {
+        append_phase(
+                observation,
+                UnifiedPlanObservationPhase::ProviderDecision,
+                UnifiedPlanAuthorityOwner::Moguet);
+    }
+    append_phase(
+            observation,
+            UnifiedPlanObservationPhase::ExecutionProjection,
+            UnifiedPlanAuthorityOwner::Moguet);
+    if(observation.status == UnifiedPlanObservationStatus::Ready) {
+        if(!observation.transaction_intents.empty() &&
+           std::holds_alternative<RepositoryPackageTransactionIntent>(
+                   observation.transaction_intents.front())) {
+            append_phase(
+                    observation,
+                    UnifiedPlanObservationPhase::RepositoryTransaction,
+                    UnifiedPlanAuthorityOwner::Pacman);
+        }
+        append_source_mutation_phases(observation);
+    }
+    return UnifiedPlanProjection::make(
+            std::move(projections), std::move(observation));
+}
+
 std::unique_ptr<UnifiedPlanProjection> project_local_source_unified_plan(
         LocalSourceUnifiedPlanProjectionInput input) {
+    if(const auto* metadata_blocked =
+               std::get_if<LocalSourceMetadataEvaluationProjectionInput>(
+                       &input.source);
+       metadata_blocked != nullptr) {
+        UnifiedPlanObservationInput observation;
+        append_local_metadata_evaluation_blocker(
+                metadata_blocked->source_root.get(), observation);
+        return UnifiedPlanProjection::make({}, std::move(observation));
+    }
     const auto* ready = std::get_if<std::reference_wrapper<
             const LocalSourceBuildProjectionAuthority>>(&input.source);
     const LocalSourceBuildPlanFailureProjectionInput* blocked =
             std::get_if<LocalSourceBuildPlanFailureProjectionInput>(
                     &input.source);
+    if(ready == nullptr && blocked == nullptr) {
+        reject_inconsistent_input(
+                "Local source projection has no supported authority.");
+    }
     const LocalSourceRoot& source_root = ready != nullptr
             ? ready->get().source_root()
             : blocked->source_root.get();
@@ -2070,7 +3099,28 @@ std::unique_ptr<UnifiedPlanProjection> project_aur_update_unified_plan(
     observation.route_preflight_authorities.push_back(
             UnifiedPlanBorrowedAuthorityReference<
                     AurUpdateExecutionPreflight>(preflight));
+    if(input.filtered_operation.has_value()) {
+        const PreparedFilteredAurUpdateOperation& operation =
+                input.filtered_operation->get();
+        if(&operation.original_query_result() != &query ||
+           &operation.execution_preflight() != &preflight ||
+           !input.source_build_preparation.has_value() ||
+           !operation.source_build_preparation().has_value() ||
+           &operation.source_build_preparation().value() !=
+                   &input.source_build_preparation->get()) {
+            reject_inconsistent_input(
+                    "Filtered AUR operation projection authorities are inconsistent.");
+        }
+        observation.route_preflight_authorities.push_back(
+                UnifiedPlanBorrowedAuthorityReference<
+                        PreparedFilteredAurUpdateOperation>(operation));
+    }
     append_aur_update_roots_and_blockers(query, preflight, observation);
+    if(input.source_build_preparation.has_value()) {
+        append_aur_update_preparation_blockers(
+                input.source_build_preparation->get(), preflight,
+                observation);
+    }
     if(plan != nullptr) {
         observation.dependency_authorities.push_back(
                 UnifiedPlanDependencyAuthorityReference::from_build_plan(
@@ -2106,6 +3156,22 @@ std::unique_ptr<UnifiedPlanProjection> project_aur_update_unified_plan(
     return UnifiedPlanProjection::make(
             std::move(projections), std::move(route_artifact_targets),
             std::move(observation));
+}
+
+std::unique_ptr<UnifiedPlanProjection>
+project_filtered_aur_update_unified_plan(
+        const PreparedFilteredAurUpdateOperation& prepared) {
+    if(!prepared.source_build_preparation().has_value()) {
+        reject_inconsistent_input(
+                "Filtered AUR operation lacks a valid production preparation snapshot.");
+    }
+    return project_aur_update_unified_plan(
+            AurUpdateUnifiedPlanProjectionInput{
+                    std::cref(prepared.original_query_result()),
+                    std::cref(prepared.execution_preflight()), false,
+                    std::cref(
+                            prepared.source_build_preparation().value()),
+                    std::cref(prepared)});
 }
 
 std::unique_ptr<UnifiedPlanProjection>
@@ -2173,12 +3239,100 @@ std::unique_ptr<UnifiedPlanProjection> project_upgrade_all_unified_plan(
                const UpgradeAllOperationResult>>(&input.source);
        blocked != nullptr) {
         if(input.aur_query_result.has_value() ||
-           input.aur_preflight.has_value() || input.issues.has_value()) {
+           input.aur_preflight.has_value() || input.issues.has_value() ||
+           input.aur_source_build_preparation.has_value() ||
+           input.aur_operation_preflight.has_value()) {
             reject_inconsistent_input(
                     "Blocked upgrade-all projection received Ready-only authorities.");
         }
         UnifiedPlanObservationInput observation;
         append_blocked_upgrade_all(blocked->get(), observation);
+        return UnifiedPlanProjection::make({}, std::move(observation));
+    }
+    const PreparedUpgradeAllAurPreflight* aggregate_aur_preflight =
+            input.aur_operation_preflight.has_value()
+            ? &input.aur_operation_preflight->get()
+            : nullptr;
+    if(aggregate_aur_preflight != nullptr &&
+       !aggregate_aur_preflight->has_filtered_operation()) {
+        if(input.aur_query_result.has_value() ||
+           input.aur_preflight.has_value() ||
+           input.aur_source_build_preparation.has_value() ||
+           !input.issues.has_value() ||
+           &input.issues->get() != &aggregate_aur_preflight->issues() ||
+           aggregate_aur_preflight->issues().empty()) {
+            reject_inconsistent_input(
+                    "Blocked upgrade-all AUR preflight authorities are inconsistent.");
+        }
+        const UpgradeAllOperationProjectionAuthority& prepared =
+                std::get<std::reference_wrapper<
+                        const UpgradeAllOperationProjectionAuthority>>(
+                        input.source)
+                        .get();
+        validate_upgrade_all_authority(prepared);
+        const SystemSourceUpgradeProjectionAuthority& system_source =
+                prepared.system_source();
+        const std::vector<std::string>* repository_order =
+                validate_system_source_authority(system_source);
+        UnifiedPlanObservationInput observation;
+        observation.status = UnifiedPlanObservationStatus::Blocked;
+        if(repository_order != nullptr) {
+            observation.configured_repository_order.emplace(
+                    std::cref(*repository_order));
+        }
+        observation.route_preflight_authorities.push_back(
+                UnifiedPlanBorrowedAuthorityReference<
+                        UpgradeAllOperationProjectionAuthority>(prepared));
+        observation.route_preflight_authorities.push_back(
+                UnifiedPlanBorrowedAuthorityReference<
+                        PreparedUpgradeAllAurPreflight>(
+                        *aggregate_aur_preflight));
+        append_system_source_roots(system_source, observation);
+        append_system_source_issues(system_source.issues(), observation);
+        append_prepared_source_work(system_source, observation);
+        for(const UpgradeAllOperationIssue& issue :
+            aggregate_aur_preflight->issues()) {
+            observation.blockers.push_back(RoutePreflightUnifiedPlanBlocker{
+                    UnifiedPlanBorrowedAuthorityReference<
+                            UpgradeAllOperationIssue>(issue)});
+        }
+        if(const BuildPlan* registered_plan =
+                   system_source.aur_invocation_plan();
+           registered_plan != nullptr) {
+            observation.dependency_authorities.push_back(
+                    UnifiedPlanDependencyAuthorityReference::from_build_plan(
+                            *registered_plan));
+            append_build_plan_blockers(*registered_plan, observation);
+        }
+        append_phase(
+                observation,
+                UnifiedPlanObservationPhase::RequestDiscovery,
+                UnifiedPlanAuthorityOwner::Moguet,
+                ExistingRoutePhaseReference{
+                        UpgradeAllOperationPhase::Preparation});
+        append_phase(
+                observation,
+                UnifiedPlanObservationPhase::MetadataDiscovery,
+                UnifiedPlanAuthorityOwner::Libalpm,
+                ExistingRoutePhaseReference{
+                        UpgradeAllOperationPhase::ForeignInventory});
+        if(aggregate_aur_preflight->stopped_phase() ==
+                   UpgradeAllOperationPhase::AurQuery ||
+           aggregate_aur_preflight->stopped_phase() ==
+                   UpgradeAllOperationPhase::AurPreparation) {
+            append_phase(
+                    observation,
+                    UnifiedPlanObservationPhase::MetadataDiscovery,
+                    UnifiedPlanAuthorityOwner::AurRpc,
+                    ExistingRoutePhaseReference{
+                            UpgradeAllOperationPhase::AurQuery});
+        }
+        append_phase(
+                observation,
+                UnifiedPlanObservationPhase::ExecutionProjection,
+                UnifiedPlanAuthorityOwner::Moguet,
+                ExistingRoutePhaseReference{
+                        UpgradeAllOperationPhase::Preparation});
         return UnifiedPlanProjection::make({}, std::move(observation));
     }
     if(!input.aur_query_result.has_value() ||
@@ -2200,6 +3354,21 @@ std::unique_ptr<UnifiedPlanProjection> project_upgrade_all_unified_plan(
             input.aur_query_result->get();
     const AurUpdateExecutionPreflight& aur_preflight =
             input.aur_preflight->get();
+    if(aggregate_aur_preflight != nullptr) {
+        const PreparedFilteredAurUpdateOperation* filtered =
+                aggregate_aur_preflight->filtered_operation();
+        if(filtered == nullptr ||
+           &aggregate_aur_preflight->issues() != &input.issues->get() ||
+           &filtered->original_query_result() != &aur_query ||
+           &filtered->execution_preflight() != &aur_preflight ||
+           !input.aur_source_build_preparation.has_value() ||
+           !filtered->source_build_preparation().has_value() ||
+           &filtered->source_build_preparation().value() !=
+                   &input.aur_source_build_preparation->get()) {
+            reject_inconsistent_input(
+                    "Prepared upgrade-all AUR authorities are inconsistent.");
+        }
+    }
     merge_repository_order_authority(
             validate_aur_update_input(aur_query, aur_preflight),
             repository_order,
@@ -2231,6 +3400,12 @@ std::unique_ptr<UnifiedPlanProjection> project_upgrade_all_unified_plan(
     observation.route_preflight_authorities.push_back(
             UnifiedPlanBorrowedAuthorityReference<
                     AurUpdateExecutionPreflight>(aur_preflight));
+    if(aggregate_aur_preflight != nullptr) {
+        observation.route_preflight_authorities.push_back(
+                UnifiedPlanBorrowedAuthorityReference<
+                        PreparedUpgradeAllAurPreflight>(
+                        *aggregate_aur_preflight));
+    }
     append_system_source_roots(system_source, observation);
     append_system_source_issues(system_source.issues(), observation);
     append_prepared_source_work(system_source, observation);
@@ -2238,6 +3413,11 @@ std::unique_ptr<UnifiedPlanProjection> project_upgrade_all_unified_plan(
             observation.required_artifacts.size();
     append_aur_update_roots_and_blockers(
             aur_query, aur_preflight, observation);
+    if(input.aur_source_build_preparation.has_value()) {
+        append_aur_update_preparation_blockers(
+                input.aur_source_build_preparation->get(), aur_preflight,
+                observation);
+    }
     for(const UpgradeAllOperationIssue& issue : input.issues->get()) {
         observation.blockers.push_back(RoutePreflightUnifiedPlanBlocker{
                 UnifiedPlanBorrowedAuthorityReference<
@@ -2299,4 +3479,31 @@ std::unique_ptr<UnifiedPlanProjection> project_upgrade_all_unified_plan(
     return UnifiedPlanProjection::make(
             std::move(projections), std::move(route_artifact_targets),
             std::move(observation));
+}
+
+std::unique_ptr<UnifiedPlanProjection> project_upgrade_all_unified_plan(
+        const UpgradeAllOperationProjectionAuthority& prepared,
+        const PreparedUpgradeAllAurPreflight& aur_preflight) {
+    if(const PreparedFilteredAurUpdateOperation* filtered =
+               aur_preflight.filtered_operation();
+       filtered != nullptr) {
+        if(!filtered->source_build_preparation().has_value()) {
+            reject_inconsistent_input(
+                    "Prepared upgrade-all filtered AUR operation lacks source preparation.");
+        }
+        return project_upgrade_all_unified_plan(
+                UpgradeAllUnifiedPlanProjectionInput{
+                        std::cref(prepared),
+                        std::cref(filtered->original_query_result()),
+                        std::cref(filtered->execution_preflight()),
+                        std::cref(aur_preflight.issues()),
+                        std::cref(
+                                filtered->source_build_preparation().value()),
+                        std::cref(aur_preflight)});
+    }
+    return project_upgrade_all_unified_plan(
+            UpgradeAllUnifiedPlanProjectionInput{
+                    std::cref(prepared), std::nullopt, std::nullopt,
+                    std::cref(aur_preflight.issues()), std::nullopt,
+                    std::cref(aur_preflight)});
 }

@@ -391,7 +391,8 @@ class PreparedSystemSourceUpgrade final {
     friend SystemSourceUpgradeResult execute_prepared_system_source_upgrade(
             PreparedSystemSourceUpgrade prepared,
             const AppConfig& config,
-            const SystemSourceUpgradeEventObserver& observer);
+            const SystemSourceUpgradeEventObserver& observer,
+            std::optional<ValidatedCacheRoot> shared_cache_root);
 
     std::unique_ptr<Impl> impl_;
     std::optional<SystemSourceUpgradeProjectionAuthority>
@@ -420,17 +421,20 @@ public:
 };
 
 // blocked resultとexecutable capabilityを同時に返さないsum type。
+// Preparation is read-only. Cache authority is acquired only by execution.
 using SystemSourceUpgradePreparation = std::variant<
         PreparedSystemSourceUpgrade,
         SystemSourceUpgradeResult>;
 
 SystemSourceUpgradePreparation prepare_system_source_upgrade(
         const AppConfig& config,
-        const SystemSourceUpgradeEventObserver& observer = {},
-        std::optional<ValidatedCacheRoot> cache_root = std::nullopt);
+        const SystemSourceUpgradeEventObserver& observer = {});
 
 // by-value consumeにより、呼び出し元capabilityをmutation前にinvalid化する。
+// shared_cache_root keeps one actual-execution authority across the nested
+// system/source and later upgrade-all AUR phases.
 SystemSourceUpgradeResult execute_prepared_system_source_upgrade(
         PreparedSystemSourceUpgrade prepared,
         const AppConfig& config,
-        const SystemSourceUpgradeEventObserver& observer = {});
+        const SystemSourceUpgradeEventObserver& observer = {},
+        std::optional<ValidatedCacheRoot> shared_cache_root = std::nullopt);

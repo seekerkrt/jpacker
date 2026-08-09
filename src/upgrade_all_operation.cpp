@@ -549,32 +549,6 @@ PackageMetadataFailure generic_metadata_failure(
     return PackageMetadataFailure{code, diagnostic};
 }
 
-void stop_for_inventory_failure(
-        UpgradeAllOperationResult& result,
-        UpgradeAllOperationIssueKind issue_kind,
-        PackageMetadataFailure failure) {
-    result.status = UpgradeAllOperationStatus::StoppedBeforeAurExecution;
-    result.stopped_phase = UpgradeAllOperationPhase::ForeignInventory;
-    result.foreign_inventory.status =
-            UpgradeAllForeignInventoryPhaseStatus::Failed;
-    result.foreign_inventory.not_attempted_reason.reset();
-    result.foreign_inventory.failure = failure;
-    result.foreign_inventory.diagnostic = failure.diagnostic;
-    UpgradeAllOperationIssue issue = make_issue(
-            issue_kind,
-            UpgradeAllOperationPhase::ForeignInventory,
-            failure.diagnostic);
-    issue.package_metadata_failure = failure;
-    result.issues.push_back(std::move(issue));
-    add_stopping_diagnostic(
-            result,
-            UpgradeAllOperationPhase::ForeignInventory,
-            failure.diagnostic);
-    result.aur.status = UpgradeAllAurPhaseStatus::NotAttempted;
-    result.aur.not_attempted_reason =
-            UpgradeAllNotAttemptedReason::ForeignInventoryFailure;
-}
-
 void stop_for_cache_authority_failure(
         UpgradeAllOperationResult& result,
         UpgradeAllOperationPhase stopped_phase,
@@ -939,33 +913,68 @@ bool qualifies_as_no_updates(
     return true;
 }
 
+bool stop_for_aur_preflight_failure(
+        UpgradeAllOperationResult& result,
+        const PreparedUpgradeAllAurPreflight& preflight) {
+    if(preflight.stopped_phase() == UpgradeAllOperationPhase::None) {
+        return false;
+    }
+
+    const bool is_inconsistent = std::any_of(
+            preflight.issues().begin(), preflight.issues().end(),
+            [](const UpgradeAllOperationIssue& issue) {
+                return issue.kind == UpgradeAllOperationIssueKind::
+                        FilteredAurExecutionFailed;
+            });
+    result.status = is_inconsistent
+            ? UpgradeAllOperationStatus::InconsistentResult
+            : UpgradeAllOperationStatus::StoppedBeforeAurExecution;
+    result.stopped_phase = preflight.stopped_phase();
+    if(result.stopped_phase == UpgradeAllOperationPhase::ForeignInventory) {
+        result.aur.status = UpgradeAllAurPhaseStatus::NotAttempted;
+        result.aur.not_attempted_reason =
+                UpgradeAllNotAttemptedReason::ForeignInventoryFailure;
+    } else if(is_inconsistent) {
+        result.aur.status = UpgradeAllAurPhaseStatus::InconsistentResult;
+    } else {
+        result.aur.status = UpgradeAllAurPhaseStatus::BlockedBeforeExecution;
+    }
+    result.aur.diagnostic = preflight.diagnostic();
+    result.issues.insert(
+            result.issues.end(),
+            preflight.issues().begin(),
+            preflight.issues().end());
+    if(preflight.diagnostic().has_value()) {
+        add_stopping_diagnostic(
+                result,
+                preflight.stopped_phase(),
+                preflight.diagnostic().value());
+    }
+    return true;
+}
+
 } // namespace
 
 struct PreparedUpgradeAllOperation::Impl {
     Impl(
             UpgradeAllOperationPreparedSnapshot prepared_snapshot,
-            PreparedSystemSourceUpgrade prepared_system_source,
-            ValidatedCacheRoot prepared_cache_root)
+            PreparedSystemSourceUpgrade prepared_system_source)
         : snapshot(std::move(prepared_snapshot)),
-          system_source(std::move(prepared_system_source)),
-          cache_root(std::move(prepared_cache_root)) {
+          system_source(std::move(prepared_system_source)) {
     }
 
     UpgradeAllOperationPreparedSnapshot snapshot;
     PreparedSystemSourceUpgrade system_source;
-    ValidatedCacheRoot cache_root;
 };
 
 struct UpgradeAllOperationPreparationAccess {
     static PreparedUpgradeAllOperation make(
             UpgradeAllOperationPreparedSnapshot snapshot,
-            PreparedSystemSourceUpgrade system_source,
-            ValidatedCacheRoot cache_root) {
+            PreparedSystemSourceUpgrade system_source) {
         return PreparedUpgradeAllOperation(
                 std::make_unique<PreparedUpgradeAllOperation::Impl>(
                         std::move(snapshot),
-                        std::move(system_source),
-                        std::move(cache_root)));
+                        std::move(system_source)));
     }
 };
 
@@ -1151,16 +1160,208 @@ set_nested_system_source_unexpected_exception_for_test(
 #endif
 #endif
 
+void PreparedUpgradeAllAurPreflight::prepare_foreign_inventory_stage() {
+    if(stopped_phase_ != UpgradeAllOperationPhase::None) return;
+    try {
+        foreign_inventory_.repository_configuration =
+                resolve_pacman_repository_configuration();
+    } catch(const PackageMetadataError& error) {
+        foreign_inventory_.status =
+                UpgradeAllForeignInventoryPhaseStatus::Failed;
+        foreign_inventory_.failure = error.failure();
+        foreign_inventory_.diagnostic = error.what();
+        UpgradeAllOperationIssue issue = make_issue(
+                UpgradeAllOperationIssueKind::
+                        ForeignInventoryConfigurationFailed,
+                UpgradeAllOperationPhase::ForeignInventory,
+                error.what());
+        issue.package_metadata_failure = error.failure();
+        issues_.push_back(std::move(issue));
+        stopped_phase_ = UpgradeAllOperationPhase::ForeignInventory;
+        diagnostic_ = error.what();
+        return;
+    } catch(const std::exception& error) {
+        PackageMetadataFailure failure = generic_metadata_failure(
+                PackageMetadataErrorCode::ConfigurationUnavailable,
+                error.what());
+        foreign_inventory_.status =
+                UpgradeAllForeignInventoryPhaseStatus::Failed;
+        foreign_inventory_.failure = failure;
+        foreign_inventory_.diagnostic = error.what();
+        UpgradeAllOperationIssue issue = make_issue(
+                UpgradeAllOperationIssueKind::
+                        ForeignInventoryConfigurationFailed,
+                UpgradeAllOperationPhase::ForeignInventory,
+                error.what());
+        issue.package_metadata_failure = std::move(failure);
+        issues_.push_back(std::move(issue));
+        stopped_phase_ = UpgradeAllOperationPhase::ForeignInventory;
+        diagnostic_ = error.what();
+        return;
+    } catch(...) {
+        const std::string diagnostic = localization::translate_message(
+                "Foreign inventory configuration resolution failed with an unknown exception.");
+        PackageMetadataFailure failure = generic_metadata_failure(
+                PackageMetadataErrorCode::ConfigurationUnavailable,
+                diagnostic);
+        foreign_inventory_.status =
+                UpgradeAllForeignInventoryPhaseStatus::Failed;
+        foreign_inventory_.failure = failure;
+        foreign_inventory_.diagnostic = diagnostic;
+        UpgradeAllOperationIssue issue = make_issue(
+                UpgradeAllOperationIssueKind::
+                        ForeignInventoryConfigurationFailed,
+                UpgradeAllOperationPhase::ForeignInventory,
+                diagnostic);
+        issue.package_metadata_failure = std::move(failure);
+        issues_.push_back(std::move(issue));
+        stopped_phase_ = UpgradeAllOperationPhase::ForeignInventory;
+        diagnostic_ = diagnostic;
+        return;
+    }
+
+    ForeignPackageInventoryResult inventory_result;
+    try {
+        inventory_result = query_foreign_package_inventory(
+                foreign_inventory_.repository_configuration.value());
+    } catch(const PackageMetadataError& error) {
+        inventory_result = error.failure();
+    } catch(const std::exception& error) {
+        inventory_result = generic_metadata_failure(
+                PackageMetadataErrorCode::QueryFailed, error.what());
+    } catch(...) {
+        inventory_result = generic_metadata_failure(
+                PackageMetadataErrorCode::QueryFailed,
+                localization::translate_message(
+                        "Foreign inventory read failed with an unknown exception."));
+    }
+    if(const auto* failure =
+               std::get_if<PackageMetadataFailure>(&inventory_result)) {
+        foreign_inventory_.status =
+                UpgradeAllForeignInventoryPhaseStatus::Failed;
+        foreign_inventory_.failure = *failure;
+        foreign_inventory_.diagnostic = failure->diagnostic;
+        UpgradeAllOperationIssue issue = make_issue(
+                UpgradeAllOperationIssueKind::ForeignInventoryReadFailed,
+                UpgradeAllOperationPhase::ForeignInventory,
+                failure->diagnostic);
+        issue.package_metadata_failure = *failure;
+        issues_.push_back(std::move(issue));
+        stopped_phase_ = UpgradeAllOperationPhase::ForeignInventory;
+        diagnostic_ = failure->diagnostic;
+        return;
+    }
+    foreign_inventory_.status =
+            UpgradeAllForeignInventoryPhaseStatus::Completed;
+    foreign_inventory_.not_attempted_reason.reset();
+    foreign_inventory_.inventory =
+            std::get<ForeignPackageInventory>(std::move(inventory_result));
+}
+
+void PreparedUpgradeAllAurPreflight::prepare_aur_query_stage() {
+    if(stopped_phase_ != UpgradeAllOperationPhase::None ||
+       foreign_inventory_.status !=
+               UpgradeAllForeignInventoryPhaseStatus::Completed) {
+        return;
+    }
+    try {
+        // Keep the fresh inventory as observable authority while the query
+        // consumes its own owned copy.
+        aur_query_result_.emplace(
+                query_aur_updates_for_foreign_inventory(
+                        foreign_inventory_.inventory));
+    } catch(const std::exception& error) {
+        issues_.push_back(make_issue(
+                UpgradeAllOperationIssueKind::AurQueryFailed,
+                UpgradeAllOperationPhase::AurQuery,
+                error.what()));
+        stopped_phase_ = UpgradeAllOperationPhase::AurQuery;
+        diagnostic_ = error.what();
+        return;
+    } catch(...) {
+        const std::string diagnostic =
+                localization::format_translated_message(
+                        "The {} update query failed with an unknown exception.",
+                        AUR_SERVICE);
+        issues_.push_back(make_issue(
+                UpgradeAllOperationIssueKind::AurQueryFailed,
+                UpgradeAllOperationPhase::AurQuery,
+                diagnostic));
+        stopped_phase_ = UpgradeAllOperationPhase::AurQuery;
+        diagnostic_ = diagnostic;
+        return;
+    }
+}
+
+void PreparedUpgradeAllAurPreflight::prepare_filtered_operation_stage(
+        const UpgradeAllOperationPreparedSnapshot& prepared,
+        const AppConfig& config,
+        std::optional<ValidatedCacheRoot> cache_root) {
+    if(stopped_phase_ != UpgradeAllOperationPhase::None ||
+       !aur_query_result_.has_value()) {
+        return;
+    }
+    std::vector<UpgradeAllExplicitSourceIdentity> explicit_sources =
+            prepared.explicit_source_adapter.planner_identities();
+    AurUpdateQueryResult query_result =
+            std::move(aur_query_result_.value());
+    aur_query_result_.reset();
+    try {
+        filtered_operation_.emplace(
+                prepare_filtered_aur_update_operation(
+                        std::move(query_result),
+                        std::move(explicit_sources),
+                        config,
+                        std::move(cache_root)));
+    } catch(const TrustedCacheError&) {
+        throw;
+    } catch(const std::logic_error& error) {
+        issues_.push_back(make_issue(
+                UpgradeAllOperationIssueKind::FilteredAurExecutionFailed,
+                UpgradeAllOperationPhase::AurPreparation,
+                error.what()));
+        stopped_phase_ = UpgradeAllOperationPhase::AurPreparation;
+        diagnostic_ = error.what();
+    } catch(const std::exception& error) {
+        issues_.push_back(make_issue(
+                UpgradeAllOperationIssueKind::FilteredAurPreparationFailed,
+                UpgradeAllOperationPhase::AurPreparation,
+                error.what()));
+        stopped_phase_ = UpgradeAllOperationPhase::AurPreparation;
+        diagnostic_ = error.what();
+    } catch(...) {
+        const std::string diagnostic =
+                localization::format_translated_message(
+                        "The filtered {} operation failed with an unknown exception.",
+                        AUR_SERVICE);
+        issues_.push_back(make_issue(
+                UpgradeAllOperationIssueKind::FilteredAurExecutionFailed,
+                UpgradeAllOperationPhase::AurPreparation,
+                diagnostic));
+        stopped_phase_ = UpgradeAllOperationPhase::AurPreparation;
+        diagnostic_ = diagnostic;
+    }
+}
+
+PreparedUpgradeAllAurPreflight prepare_upgrade_all_aur_preflight(
+        const UpgradeAllOperationPreparedSnapshot& prepared,
+        const AppConfig& config) {
+    PreparedUpgradeAllAurPreflight preflight;
+    preflight.prepare_foreign_inventory_stage();
+    preflight.prepare_aur_query_stage();
+    preflight.prepare_filtered_operation_stage(
+            prepared, config, std::nullopt);
+    return preflight;
+}
+
 UpgradeAllOperationPreparation prepare_upgrade_all_operation(
         const AppConfig& config) {
     try {
-        // Static option guards remain before filesystem mutation. A valid
-        // upgrade-all route is cache-capable, so one authority is retained
-        // across registered-source and filtered-AUR phases before system sudo.
+        // Preparation is a read-only production preflight. Actual execution
+        // acquires one cache authority for registered-source and AUR phases.
         require_supported_production_source_build_options(config);
-        ValidatedCacheRoot cache_root = prepare_process_cache_root();
         SystemSourceUpgradePreparation source_preparation =
-                prepare_system_source_upgrade(config, {}, cache_root);
+                prepare_system_source_upgrade(config);
         if(auto* blocked =
                    std::get_if<SystemSourceUpgradeResult>(
                            &source_preparation)) {
@@ -1199,38 +1400,7 @@ UpgradeAllOperationPreparation prepare_upgrade_all_operation(
         }
 
         return UpgradeAllOperationPreparationAccess::make(
-                std::move(snapshot), std::move(prepared_source),
-                std::move(cache_root));
-    } catch(const xdg_paths::ResolutionError& error) {
-        UpgradeAllOperationResult result = make_preexecution_rejection(
-                {}, UpgradeAllOperationIssueKind::CacheAuthorityInvalid,
-                error.what(),
-                UpgradeAllOperationStatus::BlockedBeforeMutation);
-        result.issues.back().cache_resolution_failure = error.failure();
-        set_not_attempted_after(
-                result,
-                UpgradeAllNotAttemptedReason::CacheAuthorityFailure);
-        return result;
-    } catch(const xdg_directory_safety::PreparationError& error) {
-        UpgradeAllOperationResult result = make_preexecution_rejection(
-                {}, UpgradeAllOperationIssueKind::CacheAuthorityInvalid,
-                error.what(),
-                UpgradeAllOperationStatus::BlockedBeforeMutation);
-        result.issues.back().cache_preparation_failure = error.failure();
-        set_not_attempted_after(
-                result,
-                UpgradeAllNotAttemptedReason::CacheAuthorityFailure);
-        return result;
-    } catch(const TrustedCacheError& error) {
-        UpgradeAllOperationResult result = make_preexecution_rejection(
-                {}, UpgradeAllOperationIssueKind::CacheAuthorityInvalid,
-                error.what(),
-                UpgradeAllOperationStatus::BlockedBeforeMutation);
-        result.issues.back().trusted_cache_failure = error.failure();
-        set_not_attempted_after(
-                result,
-                UpgradeAllNotAttemptedReason::CacheAuthorityFailure);
-        return result;
+                std::move(snapshot), std::move(prepared_source));
     } catch(const std::exception& error) {
         UpgradeAllOperationResult result = make_preexecution_rejection(
                 {},
@@ -1289,10 +1459,33 @@ UpgradeAllOperationResult execute_prepared_upgrade_all_operation(
                 source_correlation_mismatch_diagnostic());
     }
 
+    std::optional<ValidatedCacheRoot> execution_cache_root;
     try {
-        // A prepared capability can outlive a pathname replacement. Revoke it
-        // before the nested system phase starts any pacman/sudo mutation.
-        prepared.impl_->cache_root.require_unchanged_identity();
+        // Preparation intentionally retained no filesystem capability. Adopt
+        // current state only after every static correlation/option guard.
+        execution_cache_root = prepare_process_cache_root();
+    } catch(const xdg_paths::ResolutionError& error) {
+        UpgradeAllOperationResult result = make_preexecution_rejection(
+                std::move(snapshot),
+                UpgradeAllOperationIssueKind::CacheAuthorityInvalid,
+                error.what(),
+                UpgradeAllOperationStatus::BlockedBeforeMutation);
+        result.issues.back().cache_resolution_failure = error.failure();
+        set_not_attempted_after(
+                result,
+                UpgradeAllNotAttemptedReason::CacheAuthorityFailure);
+        return result;
+    } catch(const xdg_directory_safety::PreparationError& error) {
+        UpgradeAllOperationResult result = make_preexecution_rejection(
+                std::move(snapshot),
+                UpgradeAllOperationIssueKind::CacheAuthorityInvalid,
+                error.what(),
+                UpgradeAllOperationStatus::BlockedBeforeMutation);
+        result.issues.back().cache_preparation_failure = error.failure();
+        set_not_attempted_after(
+                result,
+                UpgradeAllNotAttemptedReason::CacheAuthorityFailure);
+        return result;
     } catch(const TrustedCacheError& error) {
         UpgradeAllOperationResult result = make_preexecution_rejection(
                 std::move(snapshot),
@@ -1316,8 +1509,6 @@ UpgradeAllOperationResult execute_prepared_upgrade_all_operation(
         return result;
     }
 
-    std::vector<UpgradeAllExplicitSourceIdentity> explicit_sources =
-            snapshot.explicit_source_adapter.planner_identities();
     UpgradeAllOperationResult result;
     result.prepared_snapshot = snapshot;
     result.warnings = snapshot.warnings;
@@ -1349,7 +1540,8 @@ UpgradeAllOperationResult execute_prepared_upgrade_all_operation(
         result.system_source = execute_prepared_system_source_upgrade(
                 std::move(prepared.impl_->system_source),
                 config,
-                progress_observer);
+                progress_observer,
+                execution_cache_root.value());
     } catch(const std::exception& error) {
         const UpgradeAllOperationPhase stopped_phase =
                 aggregate_phase_for_system_source(
@@ -1424,9 +1616,9 @@ UpgradeAllOperationResult execute_prepared_upgrade_all_operation(
     if(stop_after_system_source_failure(result)) return result;
 
     try {
-        // The system/source phase may be long-running. Revalidate the same
-        // retained authority before pacman-conf/inventory work for AUR.
-        prepared.impl_->cache_root.require_unchanged_identity();
+        // The system/source phase may be long-running. Revalidate before the
+        // fresh read-only repository/AUR authority is collected.
+        execution_cache_root->require_unchanged_identity();
     } catch(const TrustedCacheError& error) {
         stop_for_cache_authority_failure(
                 result, UpgradeAllOperationPhase::ForeignInventory,
@@ -1439,84 +1631,16 @@ UpgradeAllOperationResult execute_prepared_upgrade_all_operation(
         return result;
     }
 
-    try {
-        result.foreign_inventory.repository_configuration =
-                resolve_pacman_repository_configuration();
-    } catch(const PackageMetadataError& error) {
-        stop_for_inventory_failure(
-                result,
-                UpgradeAllOperationIssueKind::
-                        ForeignInventoryConfigurationFailed,
-                error.failure());
-        return result;
-    } catch(const std::exception& error) {
-        stop_for_inventory_failure(
-                result,
-                UpgradeAllOperationIssueKind::
-                        ForeignInventoryConfigurationFailed,
-                generic_metadata_failure(
-                        PackageMetadataErrorCode::ConfigurationUnavailable,
-                        error.what()));
-        return result;
-    } catch(...) {
-        stop_for_inventory_failure(
-                result,
-                UpgradeAllOperationIssueKind::
-                        ForeignInventoryConfigurationFailed,
-                generic_metadata_failure(
-                        PackageMetadataErrorCode::ConfigurationUnavailable,
-                        localization::translate_message(
-                                "Foreign inventory configuration resolution failed with an unknown exception.")));
+    PreparedUpgradeAllAurPreflight aur_preflight;
+    aur_preflight.prepare_foreign_inventory_stage();
+    result.foreign_inventory = aur_preflight.foreign_inventory_;
+    if(stop_for_aur_preflight_failure(result, aur_preflight)) {
         return result;
     }
-
-    ForeignPackageInventoryResult inventory_result;
     try {
-        inventory_result = query_foreign_package_inventory(
-                *result.foreign_inventory.repository_configuration);
-    } catch(const PackageMetadataError& error) {
-        stop_for_inventory_failure(
-                result,
-                UpgradeAllOperationIssueKind::ForeignInventoryReadFailed,
-                error.failure());
-        return result;
-    } catch(const std::exception& error) {
-        stop_for_inventory_failure(
-                result,
-                UpgradeAllOperationIssueKind::ForeignInventoryReadFailed,
-                generic_metadata_failure(
-                        PackageMetadataErrorCode::QueryFailed,
-                        error.what()));
-        return result;
-    } catch(...) {
-        stop_for_inventory_failure(
-                result,
-                UpgradeAllOperationIssueKind::ForeignInventoryReadFailed,
-                generic_metadata_failure(
-                        PackageMetadataErrorCode::QueryFailed,
-                        localization::translate_message(
-                                "Foreign inventory read failed with an unknown exception.")));
-        return result;
-    }
-    if(const auto* failure =
-               std::get_if<PackageMetadataFailure>(&inventory_result)) {
-        stop_for_inventory_failure(
-                result,
-                UpgradeAllOperationIssueKind::ForeignInventoryReadFailed,
-                *failure);
-        return result;
-    }
-    result.foreign_inventory.status =
-            UpgradeAllForeignInventoryPhaseStatus::Completed;
-    result.foreign_inventory.not_attempted_reason.reset();
-    result.foreign_inventory.inventory =
-            std::get<ForeignPackageInventory>(std::move(inventory_result));
-
-    AurUpdateQueryResult query_result;
-    try {
-        // Inventory resolution can run external pacman metadata queries. A
-        // replacement during that phase must still stop before AUR curl.
-        prepared.impl_->cache_root.require_unchanged_identity();
+        // Inventory resolution can invoke pacman metadata queries. A cache
+        // replacement observed there must stop before AUR network access.
+        execution_cache_root->require_unchanged_identity();
     } catch(const TrustedCacheError& error) {
         stop_for_cache_authority_failure(
                 result, UpgradeAllOperationPhase::AurQuery, error.what(),
@@ -1527,50 +1651,14 @@ UpgradeAllOperationResult execute_prepared_upgrade_all_operation(
                 result, UpgradeAllOperationPhase::AurQuery, error.what());
         return result;
     }
-    try {
-        // LANDMINE(#281): result snapshotを残すためinventoryをcopyで渡す。
-        // query_installed_aur_updates()による再取得は禁止する。
-        query_result = query_aur_updates_for_foreign_inventory(
-                result.foreign_inventory.inventory);
-    } catch(const std::exception& error) {
-        result.status =
-                UpgradeAllOperationStatus::StoppedBeforeAurExecution;
-        result.stopped_phase = UpgradeAllOperationPhase::AurQuery;
-        result.aur.status =
-                UpgradeAllAurPhaseStatus::BlockedBeforeExecution;
-        result.aur.diagnostic = error.what();
-        result.issues.push_back(make_issue(
-                UpgradeAllOperationIssueKind::AurQueryFailed,
-                UpgradeAllOperationPhase::AurQuery,
-                error.what()));
-        add_stopping_diagnostic(
-                result, UpgradeAllOperationPhase::AurQuery, error.what());
-        return result;
-    } catch(...) {
-        // TRANSLATORS: The placeholder is the literal service name "AUR".
-        const std::string diagnostic =
-                localization::format_translated_message(
-                        "The {} update query failed with an unknown exception.",
-                        AUR_SERVICE);
-        result.status =
-                UpgradeAllOperationStatus::StoppedBeforeAurExecution;
-        result.stopped_phase = UpgradeAllOperationPhase::AurQuery;
-        result.aur.status =
-                UpgradeAllAurPhaseStatus::BlockedBeforeExecution;
-        result.aur.diagnostic = diagnostic;
-        result.issues.push_back(make_issue(
-                UpgradeAllOperationIssueKind::AurQueryFailed,
-                UpgradeAllOperationPhase::AurQuery,
-                diagnostic));
-        add_stopping_diagnostic(
-                result, UpgradeAllOperationPhase::AurQuery, diagnostic);
+    aur_preflight.prepare_aur_query_stage();
+    if(stop_for_aur_preflight_failure(result, aur_preflight)) {
         return result;
     }
-
     try {
-        // AUR curl can be long-running. Do not let a replacement observed
-        // during the query reach filtered pacman/source preparation.
-        prepared.impl_->cache_root.require_unchanged_identity();
+        // AUR network access can be long-running. Revoke cache authority
+        // before provider and package-database preparation starts.
+        execution_cache_root->require_unchanged_identity();
     } catch(const TrustedCacheError& error) {
         stop_for_cache_authority_failure(
                 result, UpgradeAllOperationPhase::AurPreparation,
@@ -1582,19 +1670,45 @@ UpgradeAllOperationResult execute_prepared_upgrade_all_operation(
                 error.what());
         return result;
     }
-
     try {
-        PreparedFilteredAurUpdateOperation filtered_preparation =
-                prepare_filtered_aur_update_operation(
-                        std::move(query_result),
-                        std::move(explicit_sources),
-                        config,
-                        prepared.impl_->cache_root);
+        aur_preflight.prepare_filtered_operation_stage(
+                snapshot, config, execution_cache_root);
+    } catch(const TrustedCacheError& error) {
+        stop_for_cache_authority_failure(
+                result, UpgradeAllOperationPhase::AurPreparation,
+                error.what(), error.failure());
+        return result;
+    }
+    if(stop_for_aur_preflight_failure(result, aur_preflight)) {
+        return result;
+    }
+    const PreparedFilteredAurUpdateOperation* filtered_operation =
+            aur_preflight.filtered_operation();
+    if(filtered_operation != nullptr && filtered_operation->is_prepared()) {
+        try {
+            // Blocked/no-op preparations are typed production results. Only
+            // an executable capability needs this final mutation gate.
+            execution_cache_root->require_unchanged_identity();
+        } catch(const TrustedCacheError& error) {
+            stop_for_cache_authority_failure(
+                    result, UpgradeAllOperationPhase::AurPreparation,
+                    error.what(), error.failure());
+            return result;
+        } catch(const std::exception& error) {
+            stop_for_cache_authority_failure(
+                    result, UpgradeAllOperationPhase::AurPreparation,
+                    error.what());
+            return result;
+        }
+    }
+    try {
         // PR3 consume boundaryはblocked/no-op時にrunnerを呼ばず、正確な
         // correlation/reducer resultだけをmaterializeする。
         result.aur.operation_result.emplace(
                 execute_prepared_filtered_aur_update_operation(
-                        std::move(filtered_preparation), config));
+                        std::move(
+                                aur_preflight.filtered_operation_.value()),
+                        config));
     } catch(const TrustedCacheError& error) {
         stop_for_cache_authority_failure(
                 result, UpgradeAllOperationPhase::AurPreparation,

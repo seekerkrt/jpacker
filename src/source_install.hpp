@@ -10,9 +10,11 @@
 
 #include <optional>
 #include <string>
+#include <variant>
 #include <vector>
 
 struct AppConfig;
+struct RepositoryPackagePresent;
 class LocalBuildPlan;
 class LocalSourceBuildDependencyPreparation;
 struct PreparedProductionSourceBuildInvocation;
@@ -94,6 +96,24 @@ struct PreparedProductionSourceBuildInvocation {
     std::optional<LocalSourceBuildInvocationAuthority>
             local_source_authority = std::nullopt;
 };
+
+// Remote buildのroute identity、AUR plan（該当時）、cache未activateの
+// production invocationを同じowned snapshotへ束ねる。dry-run projectionは
+// このauthorityをborrowし、actual executionだけがcacheをactivateする。
+struct PreparedRemoteSourceBuild {
+    ResolvedSourceBuildIdentity source;
+    std::optional<BuildPlan> aur_build_plan;
+    PreparedProductionSourceBuildInvocation invocation;
+};
+
+struct RemoteSourceBuildPlanFailure {
+    ResolvedSourceBuildIdentity source;
+    BuildPlan plan;
+};
+
+using RemoteSourceBuildPreparation = std::variant<
+        PreparedRemoteSourceBuild,
+        RemoteSourceBuildPlanFailure>;
 
 // LocalBuildPlanのlocal root unitをexecution consumerへ渡さず、remote AUR
 // dependency unitと全edge由来のselected repository providerだけを保持する。
@@ -190,8 +210,16 @@ void build_source_target(
         const SourceBuildEnvironment& custom_environment,
         const AppConfig& config);
 
+RemoteSourceBuildPreparation prepare_remote_source_build(
+        const std::string& package_name,
+        const SourceBuildEnvironment& custom_environment,
+        const AppConfig& config);
+
 ResolvedSourceBuildIdentity resolve_source_build_identity(
         const std::string& package_name);
+
+ResolvedSourceBuildIdentity make_repository_source_build_identity(
+        const RepositoryPackagePresent& package);
 
 // strict reader等で既にowned化したenvironmentを再readせずwork itemに射影する。
 ProductionSourceBuildWorkItem prepare_resolved_source_build_work_item(

@@ -32,6 +32,10 @@ static_assert(std::is_nothrow_move_constructible_v<
 static_assert(!std::is_move_assignable_v<PreparedUpgradeAllOperation>);
 static_assert(!std::is_copy_constructible_v<
               UpgradeAllOperationProjectionAuthority>);
+static_assert(!std::is_copy_constructible_v<
+              PreparedUpgradeAllAurPreflight>);
+static_assert(std::is_move_constructible_v<
+              PreparedUpgradeAllAurPreflight>);
 static_assert(std::is_same_v<
               decltype(&execute_prepared_upgrade_all_operation),
               UpgradeAllOperationExecutor>);
@@ -446,6 +450,19 @@ bool has_issue(
             });
 }
 
+const AurUpdatePreparationIssue* find_aur_preparation_issue(
+        const UpgradeAllOperationResult& result,
+        AurUpdatePreparationReason reason) {
+    if(!result.aur.operation_result.has_value()) return nullptr;
+    const auto& issues = result.aur.operation_result->preparation.issues;
+    auto found = std::find_if(
+            issues.begin(), issues.end(),
+            [reason](const AurUpdatePreparationIssue& issue) {
+                return issue.reason == reason;
+            });
+    return found == issues.end() ? nullptr : &*found;
+}
+
 std::size_t event_position(
         stub::EventKind kind,
         const std::string& subject,
@@ -548,47 +565,38 @@ void test_prepared_projection_authority_tracks_nested_source_work() {
     stub::require_script_consumed();
 }
 
-void test_cache_replacement_before_execution_blocks_system() {
+void test_preparation_and_aur_preflight_do_not_activate_cache() {
     stub::reset();
     stub::set_preference_directory(preference_directory({}));
+    stub::set_foreign_inventory({});
     const AppConfig config = full_option_config();
     PreparedUpgradeAllOperation prepared = take_prepared(
             prepare_upgrade_all_operation(config),
-            "cache replacement before execution");
+            "read-only upgrade-all preparation");
+    const char* raw_cache_home = std::getenv("XDG_CACHE_HOME");
+    expect(raw_cache_home != nullptr, "XDG cache test environment is unset");
+    const fs::path cache_root = fs::path(raw_cache_home) / "moguet";
+    expect(
+            !fs::exists(cache_root),
+            "Static upgrade-all preparation activated the cache");
 
-    const fs::path moved = move_active_cache_root("before-execution");
-    UpgradeAllOperationResult result =
-            execute_prepared_upgrade_all_operation(
-                    std::move(prepared), config);
+    const UpgradeAllOperationPreparedSnapshot* snapshot = prepared.snapshot();
+    expect(snapshot != nullptr, "Prepared aggregate snapshot is unavailable");
+    PreparedUpgradeAllAurPreflight aur_preflight =
+            prepare_upgrade_all_aur_preflight(*snapshot, config);
     expect(
-            result.status ==
-                            UpgradeAllOperationStatus::BlockedBeforeMutation &&
-                    result.stopped_phase ==
-                            UpgradeAllOperationPhase::Preparation &&
-                    has_issue(
-                            result,
-                            UpgradeAllOperationIssueKind::CacheAuthorityInvalid),
-            "Revoked prepared cache authority did not block execution");
+            aur_preflight.has_filtered_operation() &&
+                    aur_preflight.foreign_inventory().status ==
+                            UpgradeAllForeignInventoryPhaseStatus::Completed &&
+                    aur_preflight.aur_query_result() != nullptr &&
+                    aur_preflight.aur_preflight() != nullptr &&
+                    aur_preflight.filtered_operation() != nullptr &&
+                    aur_preflight.issues().empty(),
+            "Fresh upgrade-all AUR preflight lost production authority");
     expect(
-            !result.issues.empty() &&
-                    result.issues.front().trusted_cache_failure.has_value() &&
-                    result.issues.front().trusted_cache_failure->code ==
-                            TrustedCacheErrorCode::ConcurrentReplacement,
-            "Prepared cache replacement lost typed failure detail");
-    expect(
-            stub::system_commands().empty(),
-            "Revoked prepared cache authority reached system mutation");
-    expect(
-            result.foreign_inventory.status ==
-                            UpgradeAllForeignInventoryPhaseStatus::NotAttempted &&
-                    result.foreign_inventory.not_attempted_reason ==
-                            UpgradeAllNotAttemptedReason::CacheAuthorityFailure,
-            "Pre-system cache replacement lost foreign-inventory reason");
-    expect_aur_not_attempted(
-            result, UpgradeAllNotAttemptedReason::CacheAuthorityFailure,
-            "cache replacement before execution");
-    expect_no_inventory_or_aur("cache replacement before execution");
-    remove_cache_fixture(moved);
+            !fs::exists(cache_root) && stub::system_commands().empty() &&
+                    stub::aur_execution_calls().empty(),
+            "Read-only upgrade-all AUR preflight crossed a mutation boundary");
     stub::require_script_consumed();
 }
 
@@ -1071,15 +1079,14 @@ void test_system_failure_is_fail_fast() {
 
 void test_nested_cache_seed_failure_is_typed() {
     stub::reset();
-    stub::set_preference_directory(
-            preference_directory({"cache-seed"}));
-    stub::enqueue_preference_result(
-            "cache-seed", loaded_preference("cache-seed"));
+    const AppConfig config;
+    PreparedUpgradeAllOperation prepared =
+            prepare_sources({"cache-seed"}, config);
     stub::fail_cache_seed();
 
-    UpgradeAllOperationResult result = take_blocked(
-            prepare_upgrade_all_operation(AppConfig{}),
-            "nested cache seed failure");
+    UpgradeAllOperationResult result =
+            execute_prepared_upgrade_all_operation(
+                    std::move(prepared), config);
     expect(
             result.status ==
                             UpgradeAllOperationStatus::BlockedBeforeMutation &&
@@ -1358,11 +1365,69 @@ void test_foreign_inventory_read_failure() {
     stub::require_script_consumed();
 }
 
+void test_cache_replacement_during_inventory_blocks_aur_query() {
+    stub::reset();
+    stub::set_preference_directory(preference_directory({}));
+    stub::set_foreign_inventory(foreign_inventory({"inventory-root"}));
+    const AppConfig config;
+    PreparedUpgradeAllOperation prepared = take_prepared(
+            prepare_upgrade_all_operation(config),
+            "foreign inventory cache replacement fixture");
+
+    fs::path moved;
+    stub::set_after_foreign_inventory_hook([&moved]() {
+        moved = move_active_cache_root("during-foreign-inventory");
+    });
+    UpgradeAllOperationResult result =
+            execute_prepared_upgrade_all_operation(
+                    std::move(prepared), config);
+    expect(
+            result.status ==
+                            UpgradeAllOperationStatus::
+                                    StoppedBeforeAurExecution &&
+                    result.stopped_phase ==
+                            UpgradeAllOperationPhase::AurQuery &&
+                    result.foreign_inventory.status ==
+                            UpgradeAllForeignInventoryPhaseStatus::Completed &&
+                    has_issue(
+                            result,
+                            UpgradeAllOperationIssueKind::
+                                    CacheAuthorityInvalid),
+            "Foreign-inventory cache replacement was not stopped before AUR query");
+    expect(
+            !result.issues.empty() &&
+                    result.issues.back().trusted_cache_failure.has_value() &&
+                    result.issues.back().trusted_cache_failure->code ==
+                            TrustedCacheErrorCode::ConcurrentReplacement,
+            "Foreign-inventory cache replacement lost typed detail");
+    expect_aur_not_attempted(
+            result, UpgradeAllNotAttemptedReason::CacheAuthorityFailure,
+            "foreign-inventory cache replacement");
+    expect(
+            stub::repository_configuration_calls() == 1 &&
+                    stub::inventory_calls() == 1 &&
+                    stub::info_many_call_history().empty() &&
+                    stub::database_call_count() == 0 &&
+                    stub::resolver_call_count() == 0,
+            "Foreign-inventory cache replacement crossed the next production stage");
+    remove_cache_fixture(moved);
+    stub::require_script_consumed();
+}
+
 void test_cache_replacement_during_aur_query_blocks_preparation() {
     stub::reset();
     stub::set_preference_directory(preference_directory({}));
     stub::set_foreign_inventory(foreign_inventory({"query-root"}));
     enqueue_aur_query({{"query-root", "query-base"}});
+    stub::set_database_failure(PackageMetadataFailure{
+            PackageMetadataErrorCode::LocalDatabaseUnavailable,
+            "fixture later database failure"});
+    stub::set_resolver_handler(
+            [](const std::vector<std::string>&,
+               const ProviderSelectionCallback&) -> BuildPlan {
+                throw std::runtime_error(
+                        "fixture later provider failure");
+            });
     const AppConfig config;
     PreparedUpgradeAllOperation prepared = take_prepared(
             prepare_upgrade_all_operation(config),
@@ -1400,7 +1465,264 @@ void test_cache_replacement_during_aur_query_blocks_preparation() {
     expect(stub::database_call_count() == 0 &&
                    stub::resolver_call_count() == 0 &&
                    stub::aur_execution_calls().empty(),
-           "AUR-query cache replacement reached filtered preparation");
+           "AUR-query cache replacement reached provider/database preparation");
+    remove_cache_fixture(moved);
+    stub::require_script_consumed();
+}
+
+void test_cache_replacement_during_filtered_planning_blocks_database() {
+    stub::reset();
+    stub::set_preference_directory(preference_directory({}));
+    stub::set_foreign_inventory(foreign_inventory({"planning-root"}));
+    enqueue_aur_query({{"planning-root", "planning-base"}});
+    const AppConfig config;
+    PreparedUpgradeAllOperation prepared = take_prepared(
+            prepare_upgrade_all_operation(config),
+            "filtered planning cache replacement fixture");
+
+    fs::path moved;
+    BuildPlan plan = root_plan({{"planning-root", "planning-base"}});
+    stub::set_resolver_handler(
+            [&moved, plan = std::move(plan)](
+                    const std::vector<std::string>&,
+                    const ProviderSelectionCallback&) mutable -> BuildPlan {
+                moved = move_active_cache_root("during-filtered-planning");
+                return std::move(plan);
+            });
+    UpgradeAllOperationResult result =
+            execute_prepared_upgrade_all_operation(
+                    std::move(prepared), config);
+    expect(
+            result.status ==
+                            UpgradeAllOperationStatus::
+                                    StoppedBeforeAurExecution &&
+                    result.stopped_phase ==
+                            UpgradeAllOperationPhase::AurPreparation &&
+                    has_issue(
+                            result,
+                            UpgradeAllOperationIssueKind::
+                                    CacheAuthorityInvalid),
+            "Filtered-planning cache replacement was not stopped before database preparation");
+    expect_aur_not_attempted(
+            result, UpgradeAllNotAttemptedReason::CacheAuthorityFailure,
+            "filtered-planning cache replacement");
+    expect(
+            stub::resolver_call_count() == 1 &&
+                    stub::database_call_count() == 0 &&
+                    stub::aur_execution_calls().empty(),
+            "Filtered-planning cache replacement reached package-database preparation");
+    remove_cache_fixture(moved);
+    stub::require_script_consumed();
+}
+
+void test_filtered_preparation_failure_keeps_stage_precedence() {
+    stub::reset();
+    stub::set_preference_directory(preference_directory({}));
+    stub::set_foreign_inventory(foreign_inventory({"provider-root"}));
+    enqueue_aur_query({{"provider-root", "provider-base"}});
+    const AppConfig config;
+    PreparedUpgradeAllOperation prepared = take_prepared(
+            prepare_upgrade_all_operation(config),
+            "filtered preparation failure precedence fixture");
+
+    fs::path moved;
+    stub::set_resolver_handler(
+            [&moved](const std::vector<std::string>&,
+                     const ProviderSelectionCallback&) -> BuildPlan {
+                moved = move_active_cache_root(
+                        "during-filtered-preparation");
+                throw std::runtime_error(
+                        "fixture filtered provider preparation failure");
+            });
+    UpgradeAllOperationResult result =
+            execute_prepared_upgrade_all_operation(
+                    std::move(prepared), config);
+    expect(
+            result.status ==
+                            UpgradeAllOperationStatus::
+                                    StoppedBeforeAurExecution &&
+                    result.stopped_phase ==
+                            UpgradeAllOperationPhase::AurPreparation &&
+                    has_issue(
+                            result,
+                            UpgradeAllOperationIssueKind::
+                                    FilteredAurPreparationFailed) &&
+                    !has_issue(
+                            result,
+                            UpgradeAllOperationIssueKind::
+                                    CacheAuthorityInvalid),
+            "Filtered preparation failure lost same-stage precedence");
+    expect(
+            stub::resolver_call_count() == 1 &&
+                    stub::database_call_count() == 0 &&
+                    stub::aur_execution_calls().empty(),
+            "Filtered preparation failure crossed the expected stage boundary");
+    remove_cache_fixture(moved);
+    stub::require_script_consumed();
+}
+
+void test_strict_preference_failure_precedes_post_stage_cache_drift() {
+    stub::reset();
+    stub::set_preference_directory(preference_directory({}));
+    stub::set_foreign_inventory(foreign_inventory({"strict-root"}));
+    enqueue_aur_query({{"strict-root", "strict-root"}});
+    return_build_plan(
+            root_plan({{"strict-root", "strict-root"}}),
+            {"strict-root"});
+    stub::enqueue_source_preference_result(
+            "strict-root",
+            preference_failure(
+                    "strict-root", "fixture strict preference failure"));
+    const AppConfig config;
+    PreparedUpgradeAllOperation prepared = take_prepared(
+            prepare_upgrade_all_operation(config),
+            "strict preference and cache drift fixture");
+
+    fs::path moved;
+    stub::set_after_next_strict_preference_read_hook([&moved]() {
+        moved = move_active_cache_root("after-strict-preference-failure");
+    });
+    UpgradeAllOperationResult result =
+            execute_prepared_upgrade_all_operation(
+                    std::move(prepared), config);
+    const AurUpdatePreparationIssue* issue = find_aur_preparation_issue(
+            result,
+            AurUpdatePreparationReason::SourcePreferenceUnavailable);
+    expect(
+            result.status ==
+                            UpgradeAllOperationStatus::
+                                    StoppedBeforeAurExecution &&
+                    result.stopped_phase ==
+                            UpgradeAllOperationPhase::AurPreparation &&
+                    result.aur.status ==
+                            UpgradeAllAurPhaseStatus::BlockedBeforeExecution &&
+                    issue != nullptr &&
+                    issue->source_preference_failure.has_value() &&
+                    issue->source_preference_failure->diagnostic ==
+                            "fixture strict preference failure" &&
+                    !has_issue(
+                            result,
+                            UpgradeAllOperationIssueKind::
+                                    CacheAuthorityInvalid),
+            "Strict preference failure was masked by post-stage cache drift");
+    expect(
+            !moved.empty() &&
+                    stub::strict_preference_read_history() ==
+                            std::vector<std::string>{"strict-root"} &&
+                    stub::database_call_count() == 0 &&
+                    stub::aur_execution_calls().empty(),
+            "Strict preference failure crossed the typed preparation boundary");
+    remove_cache_fixture(moved);
+    stub::require_script_consumed();
+}
+
+void test_pacman_database_failure_precedes_post_stage_cache_drift() {
+    stub::reset();
+    stub::set_preference_directory(preference_directory({}));
+    stub::set_foreign_inventory(foreign_inventory({"database-root"}));
+    enqueue_aur_query({{"database-root", "database-root"}});
+    return_build_plan(
+            root_plan({{"database-root", "database-root"}}),
+            {"database-root"});
+    stub::enqueue_source_preference_result(
+            "database-root", loaded_preference("database-root"));
+    const PackageMetadataFailure database_failure{
+            PackageMetadataErrorCode::LocalDatabaseUnavailable,
+            "fixture pacman database failure"};
+    stub::set_database_failure(database_failure);
+    const AppConfig config;
+    PreparedUpgradeAllOperation prepared = take_prepared(
+            prepare_upgrade_all_operation(config),
+            "pacman database failure and cache drift fixture");
+
+    fs::path moved;
+    stub::set_after_next_strict_preference_read_hook([&moved]() {
+        moved = move_active_cache_root("before-pacman-database-failure");
+    });
+    UpgradeAllOperationResult result =
+            execute_prepared_upgrade_all_operation(
+                    std::move(prepared), config);
+    const AurUpdatePreparationIssue* issue = find_aur_preparation_issue(
+            result,
+            AurUpdatePreparationReason::PacmanDatabaseUnavailable);
+    expect(
+            result.status ==
+                            UpgradeAllOperationStatus::
+                                    StoppedBeforeAurExecution &&
+                    result.stopped_phase ==
+                            UpgradeAllOperationPhase::AurPreparation &&
+                    result.aur.status ==
+                            UpgradeAllAurPhaseStatus::BlockedBeforeExecution &&
+                    issue != nullptr &&
+                    issue->package_metadata_failure.has_value() &&
+                    issue->package_metadata_failure->code ==
+                            database_failure.code &&
+                    issue->package_metadata_failure->diagnostic ==
+                            database_failure.diagnostic &&
+                    !has_issue(
+                            result,
+                            UpgradeAllOperationIssueKind::
+                                    CacheAuthorityInvalid),
+            "Pacman database failure was masked by post-stage cache drift");
+    expect(
+            !moved.empty() &&
+                    stub::strict_preference_read_history() ==
+                            std::vector<std::string>{"database-root"} &&
+                    stub::database_call_count() == 1 &&
+                    stub::aur_execution_calls().empty(),
+            "Pacman database failure crossed the typed preparation boundary");
+    remove_cache_fixture(moved);
+    stub::require_script_consumed();
+}
+
+void test_executable_preparation_cache_drift_blocks_aur_execution() {
+    stub::reset();
+    stub::set_preference_directory(preference_directory({}));
+    stub::set_foreign_inventory(foreign_inventory({"executable-root"}));
+    enqueue_aur_query({{"executable-root", "executable-root"}});
+    BuildPlan plan = root_plan({{"executable-root", "executable-root"}});
+    fs::path moved;
+    stub::set_resolver_handler(
+            [&moved, plan = std::move(plan)](
+                    const std::vector<std::string>& targets,
+                    const ProviderSelectionCallback&) mutable -> BuildPlan {
+                if(targets != std::vector<std::string>{"executable-root"}) {
+                    throw std::logic_error(
+                            "Executable drift resolver target differs");
+                }
+                stub::set_after_next_cache_seed_hook([&moved]() {
+                    moved = move_active_cache_root(
+                            "after-executable-cache-seed");
+                });
+                return std::move(plan);
+            });
+    const AppConfig config;
+    PreparedUpgradeAllOperation prepared = take_prepared(
+            prepare_upgrade_all_operation(config),
+            "executable preparation cache drift fixture");
+
+    UpgradeAllOperationResult result =
+            execute_prepared_upgrade_all_operation(
+                    std::move(prepared), config);
+    expect(
+            result.status ==
+                            UpgradeAllOperationStatus::
+                                    StoppedBeforeAurExecution &&
+                    result.stopped_phase ==
+                            UpgradeAllOperationPhase::AurPreparation &&
+                    has_issue(
+                            result,
+                            UpgradeAllOperationIssueKind::
+                                    CacheAuthorityInvalid),
+            "Executable preparation cache drift passed the mutation gate");
+    expect_aur_not_attempted(
+            result, UpgradeAllNotAttemptedReason::CacheAuthorityFailure,
+            "executable preparation cache drift");
+    expect(
+            !moved.empty() && stub::resolver_call_count() == 1 &&
+                    stub::database_call_count() == 1 &&
+                    stub::aur_execution_calls().empty(),
+            "Executable preparation cache drift reached AUR execution");
     remove_cache_fixture(moved);
     stub::require_script_consumed();
 }
@@ -2358,8 +2680,8 @@ int main() {
                 "prepared projection authority tracks nested source work",
                 test_prepared_projection_authority_tracks_nested_source_work);
         run_case(
-                "cache replacement before execution",
-                test_cache_replacement_before_execution_blocks_system);
+                "preparation and AUR preflight are cache-free",
+                test_preparation_and_aur_preflight_do_not_activate_cache);
         run_case(
                 "cache replacement after system",
                 test_cache_replacement_after_system_blocks_inventory_and_aur);
@@ -2431,8 +2753,26 @@ int main() {
                 "foreign inventory read failure",
                 test_foreign_inventory_read_failure);
         run_case(
+                "cache replacement during foreign inventory",
+                test_cache_replacement_during_inventory_blocks_aur_query);
+        run_case(
                 "cache replacement during AUR query",
                 test_cache_replacement_during_aur_query_blocks_preparation);
+        run_case(
+                "cache replacement during filtered planning",
+                test_cache_replacement_during_filtered_planning_blocks_database);
+        run_case(
+                "filtered preparation failure precedence",
+                test_filtered_preparation_failure_keeps_stage_precedence);
+        run_case(
+                "strict preference failure precedes post-stage cache drift",
+                test_strict_preference_failure_precedes_post_stage_cache_drift);
+        run_case(
+                "Pacman database failure precedes post-stage cache drift",
+                test_pacman_database_failure_precedes_post_stage_cache_drift);
+        run_case(
+                "executable preparation cache drift",
+                test_executable_preparation_cache_drift_blocks_aur_execution);
         run_case(
                 "recoverable AUR query failure",
                 test_recoverable_aur_query_failure_blocks_mutation);

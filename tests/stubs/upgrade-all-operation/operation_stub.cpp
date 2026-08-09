@@ -80,6 +80,7 @@ struct OperationStubState {
     std::optional<std::string> preference_directory_failure;
     std::map<std::string, std::deque<StrictSourcePreferenceResult>>
             preference_results;
+    std::function<void()> after_next_strict_preference_read_hook;
     std::map<std::string, ResolvedSourceBuildIdentity> identities;
     std::map<std::string, std::string> identity_failures;
     std::map<std::string, std::string> work_item_failures;
@@ -89,6 +90,7 @@ struct OperationStubState {
     std::optional<std::string> system_failure;
     std::function<void()> after_system_command_hook;
     bool cache_seed_failure = false;
+    std::function<void()> after_next_cache_seed_hook;
     bool cache_activation_failure = false;
     std::deque<ScriptedSourceExecution> source_executions;
 
@@ -99,6 +101,7 @@ struct OperationStubState {
                             "/upgrade-all-stub/database"},
                     {"upgrade-all-stub-repository"}};
     ForeignInventoryScript foreign_inventory = ForeignPackageInventory{};
+    std::function<void()> after_foreign_inventory_hook;
     std::deque<InfoManyScript> info_many_scripts;
     std::function<void()> after_info_many_hook;
     std::deque<InfoStrictScript> info_strict_scripts;
@@ -265,6 +268,11 @@ void enqueue_source_preference_result(
     enqueue_preference_result(package_name, std::move(result));
 }
 
+void set_after_next_strict_preference_read_hook(
+        std::function<void()> hook) {
+    g_state.after_next_strict_preference_read_hook = std::move(hook);
+}
+
 void set_source_identity(
         const std::string& package_name,
         ResolvedSourceBuildIdentity identity) {
@@ -303,6 +311,10 @@ void set_after_system_command_hook(std::function<void()> hook) {
 
 void fail_cache_seed() {
     g_state.cache_seed_failure = true;
+}
+
+void set_after_next_cache_seed_hook(std::function<void()> hook) {
+    g_state.after_next_cache_seed_hook = std::move(hook);
 }
 
 void fail_cache_activation() {
@@ -360,6 +372,10 @@ void set_foreign_inventory(ForeignPackageInventory inventory) {
 
 void set_foreign_inventory_failure(PackageMetadataFailure failure) {
     g_state.foreign_inventory = std::move(failure);
+}
+
+void set_after_foreign_inventory_hook(std::function<void()> hook) {
+    g_state.after_foreign_inventory_hook = std::move(hook);
 }
 
 void enqueue_info_many_result(
@@ -628,6 +644,11 @@ StrictSourcePreferenceResult read_source_preference_strict(
     StrictSourcePreferenceResult result =
             std::move(scripted->second.front());
     scripted->second.pop_front();
+    if(g_state.after_next_strict_preference_read_hook) {
+        std::function<void()> hook =
+                std::move(g_state.after_next_strict_preference_read_hook);
+        hook();
+    }
     return result;
 }
 
@@ -906,7 +927,14 @@ ForeignPackageInventoryResult query_foreign_package_inventory(
                &g_state.foreign_inventory)) {
         return *failure;
     }
-    return std::get<ForeignPackageInventory>(g_state.foreign_inventory);
+    ForeignPackageInventory inventory =
+            std::get<ForeignPackageInventory>(g_state.foreign_inventory);
+    if(g_state.after_foreign_inventory_hook) {
+        std::function<void()> hook =
+                std::move(g_state.after_foreign_inventory_hook);
+        hook();
+    }
+    return inventory;
 }
 
 std::map<std::string, AurPackageInfo> AurClient::info_many(
@@ -1264,6 +1292,11 @@ void seed_production_source_build_cache(
     invocation.cache_root = cache_root;
     for(auto& work_item : invocation.work_items) {
         work_item.cache_root = cache_root;
+    }
+    if(g_state.after_next_cache_seed_hook) {
+        std::function<void()> hook =
+                std::move(g_state.after_next_cache_seed_hook);
+        hook();
     }
 }
 

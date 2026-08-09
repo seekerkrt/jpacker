@@ -1,7 +1,9 @@
+#include "aur_update_execution_preparation.hpp"
 #include "aur_update_execution_preflight.hpp"
 #include "aur_update_query.hpp"
 #include "commands_sync.hpp"
 #include "local_dependency_plan_projection.hpp"
+#include "source_install.hpp"
 #include "stubs/local-dependency-plan/query_stub.hpp"
 #include "system_source_upgrade.hpp"
 #include "unified_plan_renderer.hpp"
@@ -1440,6 +1442,206 @@ void test_untrusted_failure_text_is_terminal_safe() {
             constraint_rendered.text, "constraint output");
 }
 
+void test_slice_five_failure_text_is_terminal_safe() {
+    std::string unsafe_diagnostic =
+            std::string("slice-five-before\nslice-five-after\\literal") +
+            "\x1b]0;SLICE-FIVE-OSC\x07" +
+            std::string("\xC2\x85", 2) +
+            std::string("\xE2\x80\xA8", 3);
+    unsafe_diagnostic.push_back(static_cast<char>(0xff));
+    const std::string escaped_diagnostic =
+            "slice-five-before\\x0Aslice-five-after\\x5Cliteral"
+            "\\x1B]0;SLICE-FIVE-OSC\\x07"
+            "\\xC2\\x85\\xE2\\x80\\xA8\\xFF";
+
+    const auto expect_escaped = [&unsafe_diagnostic, &escaped_diagnostic](
+                                        const UnifiedPlanRenderingResult& rendered,
+                                        std::string_view context) {
+        const std::string context_text(context);
+        expect(
+                rendered.is_complete(),
+                context_text + " rendering is incomplete");
+        expect_contains(
+                rendered.text, escaped_diagnostic,
+                context_text + " escaped diagnostic");
+        expect_not_contains(
+                rendered.text,
+                "slice-five-before\nslice-five-after",
+                context_text + " raw newline diagnostic");
+        expect_not_contains(
+                rendered.text, std::string("\xC2\x85", 2),
+                context_text + " raw C1 diagnostic");
+        expect_not_contains(
+                rendered.text, std::string("\xE2\x80\xA8", 3),
+                context_text + " raw line-separator diagnostic");
+        expect(
+                rendered.text.find(static_cast<char>(0xff)) ==
+                        std::string::npos,
+                context_text + " retained invalid UTF-8");
+        expect_not_contains(
+                rendered.text, unsafe_diagnostic,
+                context_text + " raw diagnostic");
+        expect_no_reflected_terminal_controls(rendered.text, context);
+    };
+
+    SystemSourceUpgradeIssue package_metadata_issue;
+    package_metadata_issue.kind =
+            SystemSourceUpgradeIssueKind::SystemPackageSnapshotUnavailable;
+    package_metadata_issue.impact =
+            SystemSourceUpgradeIssueImpact::ObservabilityOnly;
+    package_metadata_issue.phase = SystemSourceUpgradePhase::System;
+    package_metadata_issue.package_metadata_failure = PackageMetadataFailure{
+            PackageMetadataErrorCode::MalformedMetadata,
+            unsafe_diagnostic};
+    package_metadata_issue.diagnostic =
+            "outer package metadata diagnostic";
+    const UnifiedPlanRenderingResult package_metadata_rendered =
+            render_blocked(RoutePreflightUnifiedPlanBlocker{
+                    UnifiedPlanBorrowedAuthorityReference<
+                            SystemSourceUpgradeIssue>(
+                            package_metadata_issue)});
+    expect_escaped(package_metadata_rendered, "package metadata failure");
+
+    AurUpdatePreparationIssue aur_preparation_issue;
+    aur_preparation_issue.reason =
+            AurUpdatePreparationReason::BuildPlanMissing;
+    aur_preparation_issue.affected_update_plan_indices = {3};
+    aur_preparation_issue.affected_roots = {
+            RootTargetIdentity{2, "terminal-safe-root"}};
+    aur_preparation_issue.package_name = "terminal-safe-child";
+    aur_preparation_issue.package_base = "terminal-safe-base";
+    aur_preparation_issue.diagnostic = unsafe_diagnostic;
+    const UnifiedPlanRenderingResult aur_preparation_rendered =
+            render_blocked(RoutePreflightUnifiedPlanBlocker{
+                    UnifiedPlanBorrowedAuthorityReference<
+                            AurUpdatePreparationIssue>(
+                            aur_preparation_issue)});
+    expect_escaped(aur_preparation_rendered, "AUR preparation failure");
+
+    package_metadata_issue.package_metadata_failure->diagnostic.clear();
+    const UnifiedPlanRenderingResult missing_package_diagnostic =
+            render_blocked(RoutePreflightUnifiedPlanBlocker{
+                    UnifiedPlanBorrowedAuthorityReference<
+                            SystemSourceUpgradeIssue>(
+                            package_metadata_issue)});
+    expect(
+            !missing_package_diagnostic.is_complete() &&
+                    missing_package_diagnostic.issues.size() == 1 &&
+                    missing_package_diagnostic.issues.front().kind ==
+                            UnifiedPlanRenderingIssueKind::
+                                    MissingReferencedValue,
+            "package metadata missing diagnostic accounting changed");
+
+    aur_preparation_issue.diagnostic.clear();
+    const UnifiedPlanRenderingResult missing_aur_diagnostic =
+            render_blocked(RoutePreflightUnifiedPlanBlocker{
+                    UnifiedPlanBorrowedAuthorityReference<
+                            AurUpdatePreparationIssue>(
+                            aur_preparation_issue)});
+    expect(
+            !missing_aur_diagnostic.is_complete() &&
+                    missing_aur_diagnostic.issues.size() == 1 &&
+                    missing_aur_diagnostic.issues.front().kind ==
+                            UnifiedPlanRenderingIssueKind::
+                                    MissingReferencedValue,
+            "AUR preparation missing diagnostic accounting changed");
+}
+
+void test_direct_aur_update_execution_diagnostic_is_terminal_safe() {
+    std::string unsafe_diagnostic =
+            std::string(
+                    "direct-before\ndirect-after\rcr-after\ttab-after\\literal") +
+            std::string("\x1b", 1) + "esc-after" +
+            std::string("\x07", 1) + "bel-after" +
+            std::string("\xC2\x85", 2) + "c1-after" +
+            std::string("\x7f", 1) + "del-after" +
+            std::string("\xE2\x80\xA8", 3) + "line-after" +
+            std::string("\xE2\x80\xA9", 3) + "paragraph-after";
+    unsafe_diagnostic.push_back(static_cast<char>(0xff));
+    const std::string escaped_diagnostic =
+            "direct-before\\x0Adirect-after\\x0Dcr-after\\x09tab-after"
+            "\\x5Cliteral\\x1Besc-after\\x07bel-after"
+            "\\xC2\\x85c1-after\\x7Fdel-after"
+            "\\xE2\\x80\\xA8line-after"
+            "\\xE2\\x80\\xA9paragraph-after\\xFF";
+
+    const AurUpdateExecutionIssue direct_issue{
+            AurUpdateExecutionReason::ProviderMetadataUnavailable,
+            "direct-terminal-child", "direct-terminal-base",
+            "direct-terminal-dependency>=1", unsafe_diagnostic};
+    UnifiedPlanObservationInput input;
+    input.status = UnifiedPlanObservationStatus::Blocked;
+    input.blockers.push_back(RoutePreflightUnifiedPlanBlocker{
+            UnifiedPlanBorrowedAuthorityReference<AurUpdateExecutionIssue>(
+                    direct_issue)});
+    const UnifiedPlanObservationResult observation_result =
+            make_unified_plan_observation(std::move(input));
+    const UnifiedPlanObservation& observation =
+            expect_valid(observation_result, "direct AUR execution issue");
+    const UnifiedPlanObservationStatus status_before = observation.status();
+
+    const UnifiedPlanRenderingResult rendered =
+            render_unified_plan_observation(observation);
+
+    expect(
+            rendered.is_complete(),
+            "direct AUR execution diagnostic rendering is incomplete");
+    expect(
+            status_before == UnifiedPlanObservationStatus::Blocked &&
+                    observation.status() == status_before,
+            "renderer changed direct AUR execution issue status");
+    expect_contains(
+            rendered.text, escaped_diagnostic,
+            "direct AUR execution escaped diagnostic");
+    expect_not_contains(
+            rendered.text, "direct-before\ndirect-after",
+            "direct AUR execution raw newline diagnostic");
+    expect_not_contains(
+            rendered.text, std::string("\xC2\x85", 2),
+            "direct AUR execution raw C1 diagnostic");
+    expect_not_contains(
+            rendered.text, std::string("\xE2\x80\xA8", 3),
+            "direct AUR execution raw line-separator diagnostic");
+    expect_not_contains(
+            rendered.text, std::string("\xE2\x80\xA9", 3),
+            "direct AUR execution raw paragraph-separator diagnostic");
+    expect(
+            rendered.text.find(static_cast<char>(0xff)) == std::string::npos,
+            "direct AUR execution diagnostic retained invalid UTF-8");
+    expect_not_contains(
+            rendered.text, "tab-after\\literal",
+            "direct AUR execution diagnostic retained literal backslash");
+    expect_no_reflected_terminal_controls(
+            rendered.text, "direct AUR execution diagnostic");
+
+    AurUpdateExecutionIssue missing_diagnostic_issue;
+    missing_diagnostic_issue.reason =
+            AurUpdateExecutionReason::ProviderMetadataUnavailable;
+    const UnifiedPlanRenderingResult missing_diagnostic = render_blocked(
+            RoutePreflightUnifiedPlanBlocker{
+                    UnifiedPlanBorrowedAuthorityReference<
+                            AurUpdateExecutionIssue>(
+                            missing_diagnostic_issue)});
+    expect(
+            !missing_diagnostic.is_complete() &&
+                    missing_diagnostic.issues.size() == 1,
+            "direct AUR execution missing diagnostic accounting changed");
+    const UnifiedPlanRenderingIssue& missing_issue =
+            missing_diagnostic.issues.front();
+    expect(
+            missing_issue.kind ==
+                            UnifiedPlanRenderingIssueKind::
+                                    MissingReferencedValue &&
+                    missing_issue.section ==
+                            UnifiedPlanRenderingSection::Blockers &&
+                    missing_issue.item_index == 0 &&
+                    !missing_issue.detail_index.has_value(),
+            "direct AUR execution missing diagnostic location changed");
+    expect_contains(
+            missing_diagnostic.text, "diagnostic: not observed",
+            "direct AUR execution missing diagnostic display");
+}
+
 void test_source_failure_and_route_preflight_subtypes() {
     const BuildPlanResolutionFailure build_plan_failure{
             BuildPlanResolutionFailureKind::RepositoryMetadataUnavailable,
@@ -2245,6 +2447,94 @@ void test_blocked_prepared_build_unit_missing_preference_is_not_duplicated() {
             "prepared build unit preference fallback");
 }
 
+void test_slice_five_route_authority_rendering() {
+    SyncInstallPreparationFailure sync_failure;
+    sync_failure.details.push_back(SyncInstallPreparationIssue{
+            SyncInstallPreparationIssueKind::InvalidTarget,
+            RootTargetIdentity{2, "invalid-sync-root"}, "--invalid-option",
+            "invalid sync fixture"});
+    sync_failure.details.push_back(SyncRepositoryMetadataReadFailure{
+            RootTargetIdentity{3, "metadata-root"},
+            RepositoryMetadataFailure{
+                    RepositoryMetadataFailureKind::SyncDatabaseUnavailable,
+                    "extra", "repository metadata fixture",
+                    std::vector<std::string>{"core", "extra"}}});
+    const UnifiedPlanRenderingResult sync_rendered = render_blocked(
+            SyncInstallPreparationUnifiedPlanBlocker{
+                    UnifiedPlanBorrowedAuthorityReference<
+                            SyncInstallPreparationFailure>(sync_failure)});
+    expect(sync_rendered.is_complete(), "sync blocker rendering incomplete");
+    expect_contains(
+            sync_rendered.text,
+            "SyncInstallPreparationIssueKind::InvalidTarget",
+            "sync route issue kind");
+    expect_contains(
+            sync_rendered.text,
+            "RepositoryMetadataFailureKind::SyncDatabaseUnavailable",
+            "sync repository metadata issue kind");
+
+    AurUpdatePreparationIssue aur_issue;
+    aur_issue.reason = AurUpdatePreparationReason::BuildPlanMissing;
+    aur_issue.affected_update_plan_indices = {4};
+    aur_issue.affected_roots = {
+            RootTargetIdentity{1, "aur-update-root"}};
+    aur_issue.package_name = "aur-update-child";
+    aur_issue.package_base = "aur-update-base";
+    aur_issue.diagnostic = "AUR source preparation fixture";
+    const UnifiedPlanRenderingResult aur_rendered = render_blocked(
+            RoutePreflightUnifiedPlanBlocker{
+                    UnifiedPlanBorrowedAuthorityReference<
+                            AurUpdatePreparationIssue>(aur_issue)});
+    expect(
+            aur_rendered.is_complete(),
+            "AUR source preparation blocker rendering incomplete");
+    expect_contains(
+            aur_rendered.text,
+            "AurUpdatePreparationReason::BuildPlanMissing",
+            "AUR source preparation reason");
+    expect_contains(
+            aur_rendered.text, "aur-update-root",
+            "AUR source preparation root identity");
+
+    ResolvedSourceBuildIdentity source{
+            "repository-child", "repository-base", "repo:repository-base",
+            "https://example.invalid/repository-base.git",
+            SourceBuildSourceKind::Repository, true};
+    ProductionSourceBuildWorkItem work;
+    work.request.package_name = source.requested_name;
+    work.request.checkout_name = source.package_base;
+    work.request.git_url = source.git_url;
+    work.required_targets.push_back(RequiredPackageArtifactTarget{
+            source.package_base, source.requested_name,
+            DesiredInstallReason::Explicit});
+    UnifiedPlanObservationInput remote_input;
+    remote_input.status = UnifiedPlanObservationStatus::Ready;
+    remote_input.build_units.push_back(
+            PreparedRemoteSourceBuildUnitReference(
+                    std::cref(source), std::cref(work)));
+    remote_input.required_artifacts.emplace_back(
+            PreparedRemoteSourceBuildUnitReference(
+                    std::cref(source), std::cref(work)),
+            std::cref(work.required_targets.front()));
+    const UnifiedPlanObservationResult remote_observation =
+            make_unified_plan_observation(std::move(remote_input));
+    const UnifiedPlanRenderingResult remote_rendered =
+            render_unified_plan_observation(expect_valid(
+                    remote_observation,
+                    "standalone remote source build rendering fixture"));
+    expect(
+            remote_rendered.is_complete(),
+            "standalone remote source build rendering incomplete");
+    expect_contains(
+            remote_rendered.text,
+            "repository source key repo:repository-base",
+            "standalone remote source identity");
+    expect_contains(
+            remote_rendered.text,
+            "requested package: repository-child",
+            "standalone remote source requested package");
+}
+
 void test_rendering_issue_is_isolated_from_execution_status() {
     UnifiedPlanObservationInput input;
     input.status = UnifiedPlanObservationStatus::Ready;
@@ -2292,6 +2582,8 @@ int main() {
         test_invalid_root_routing_identity_fields();
         test_aur_root_preparation_diagnostics_are_terminal_safe();
         test_untrusted_failure_text_is_terminal_safe();
+        test_slice_five_failure_text_is_terminal_safe();
+        test_direct_aur_update_execution_diagnostic_is_terminal_safe();
         test_source_failure_and_route_preflight_subtypes();
         test_route_preflight_nested_typed_details();
         test_route_preflight_nested_required_field_canaries();
@@ -2300,6 +2592,7 @@ int main() {
         test_blocked_partial_root_request_has_one_specific_issue();
         test_blocked_partial_build_unit_is_incomplete_rendering();
         test_blocked_prepared_build_unit_missing_preference_is_not_duplicated();
+        test_slice_five_route_authority_rendering();
         test_rendering_issue_is_isolated_from_execution_status();
         std::cout << "unified plan renderer tests passed" << std::endl;
         return 0;

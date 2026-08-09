@@ -1114,25 +1114,17 @@ int cmd_fetch(
         return 1;
     }
 
-    // Invalid targetはprovider resolutionやcache mutationより前に全件拒否する。
-    for(const auto& target : targets) {
-        require_valid_package_name(target);
-    }
-
-    ProviderSelectionCallback select_provider =
-            provider_selection_callback(config);
-    BuildPlan plan;
-    const std::string invocation_targets =
-            join_comma_display_values(targets);
+    FetchPreparation preparation;
     try {
-        plan = resolve_fetch_plan(targets, select_provider);
-        print_fetch_plan(plan);
+        preparation = prepare_fetch_operation(targets, config);
+        print_fetch_plan(preparation.plan);
         // POLICY(#150): fetch は read-only retrieval stage。metadata risk は表示するが取得を妨げない。
-        require_fetchable_build_plan(invocation_targets, plan);
+        require_fetchable_build_plan(
+                preparation.invocation_targets, preparation.plan);
     } catch(const std::exception& error) {
         Logger::error(localization::format_translated_message(
                 "Failed to fetch repositories for {}: {}",
-                invocation_targets, error.what()));
+                join_comma_display_values(targets), error.what()));
         return 1;
     }
 
@@ -1140,7 +1132,7 @@ int cmd_fetch(
     // preflightが成功するまでcache preparationやclone/fetchへ進まない。
     ValidatedCacheRoot cache_root = prepare_process_cache_root();
     bool failed = false;
-    for(const auto& entry : plan.order) {
+    for(const auto& entry : preparation.plan.order) {
         try {
             fetch_persistent_checkout(
                     cache_root,
@@ -1149,12 +1141,30 @@ int cmd_fetch(
         } catch(const std::exception& error) {
             Logger::error(localization::format_translated_message(
                     "Failed to fetch repositories for {}: {}",
-                    invocation_targets, error.what()));
+                    preparation.invocation_targets, error.what()));
             failed = true;
         }
     }
 
     return failed ? 1 : 0;
+}
+
+FetchPreparation prepare_fetch_operation(
+        const std::vector<std::string>& targets,
+        const AppConfig& config) {
+    if(targets.empty()) {
+        throw std::invalid_argument(fetch_usage());
+    }
+    // Invalid targetはprovider resolutionやcache mutationより前に全件拒否する。
+    for(const auto& target : targets) {
+        require_valid_package_name(target);
+    }
+
+    ProviderSelectionCallback select_provider =
+            provider_selection_callback(config);
+    return FetchPreparation{
+            resolve_fetch_plan(targets, select_provider),
+            join_comma_display_values(targets)};
 }
 
 int cmd_export_pkgbuild_tree(const std::string& target) {

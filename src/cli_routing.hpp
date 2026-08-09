@@ -19,6 +19,20 @@ enum class SourceSelectableSyncOperation {
     Unsupported,
 };
 
+// `--dry-run`がproduction preflightへ接続できるowned routeだけを列挙する。
+// Unsupportedはgeneric pacman pass-throughを含むfail-closed結果。
+enum class DryRunOperation {
+    SyncInstall,
+    SyncSystemUpdate,
+    Fetch,
+    RemoteBuild,
+    LocalBuild,
+    Upgrade,
+    UpgradeAur,
+    UpgradeAll,
+    Unsupported,
+};
+
 // pacman-compatible sync optionのうち、source buildへ意味を保って変換できるinvocation-level policy。
 struct SourceSyncOptions {
     bool needed = false;
@@ -64,6 +78,10 @@ RootPackageSelectionInvocation require_root_package_selection_invocation(
 // exactなoperation-local selectorだけをsemantic requestとして扱う。
 // option valueや`--`後の同じ綴りはrequestへ昇格させない。
 bool local_source_build_requested(const ParsedCliArguments& parsed);
+// parse済みargvだけを参照し、process / filesystem / networkへ到達しない。
+// sync routeはdry-runで意味を維持できる明示的な-S grammarだけを受理する。
+DryRunOperation classify_dry_run_operation(
+        const ParsedCliArguments& parsed);
 // local source buildがrequestedなinvocationだけを受け、directory accessより前に
 // option / operand grammarとordered environment assignmentを確定する。
 LocalSourceBuildInvocation require_local_source_build_invocation(

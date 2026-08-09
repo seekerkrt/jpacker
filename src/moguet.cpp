@@ -22,6 +22,7 @@
 #include "commands_source_maintenance.hpp"
 #include "commands_sync.hpp"
 #include "commands_upgrade_all.hpp"
+#include "dry_run.hpp"
 #include "localization.hpp"
 #include "logging.hpp"
 #include "package_identifier.hpp"
@@ -301,6 +302,12 @@ int run_moguet(int argc, char* argv[]) {
     g_config.provider_candidate_presenter_factory =
             make_provider_installed_state_candidate_presenter_factory();
 
+    // POLICY(#352): dry-run owns a fail-closed route before every persistent
+    // state, export/Git, local evaluator, cache, or executor boundary.
+    if(parsed.cli_overrides.dry_run) {
+        return run_dry_run(parsed, g_config);
+    }
+
     // POLICY(#271): exact operation-local selectorをgeneric build option
     // rejectionより先にstrict projectionし、directory/root inspectionまでを
     // default state logやcacheの作成前に完了する。
@@ -313,6 +320,8 @@ int run_moguet(int argc, char* argv[]) {
             prepared_local_source_build.emplace(
                     prepare_local_source_build_route(
                             std::move(invocation), g_config));
+            require_executable_local_source_build_route(
+                    prepared_local_source_build.value());
         } catch(const std::exception& error) {
             Logger::error(error.what());
             return 1;
@@ -902,6 +911,13 @@ void print_help() {
             cli_authority::VERSION_OPTION_SYNTAX,
             localization::translate_message(
                     "Show version information and exit"));
+    print_help_entry(
+            cli_authority::global_option_spec(GlobalOptionId::DryRun)
+                    .help_syntax,
+            localization::translate_message(
+                    "Observe supported mutating operations without changing persistent state"));
+    print_help_continuation(localization::translate_message(
+            "Reject unsupported routes and do not create state, cache, or workspaces"));
     print_help_entry(
             cli_authority::global_option_spec(GlobalOptionId::Edit).help_syntax,
             localization::format_translated_message(

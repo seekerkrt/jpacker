@@ -1,5 +1,6 @@
 #include "unified_plan_renderer.hpp"
 
+#include "aur_update_execution_preparation.hpp"
 #include "aur_update_execution_preflight.hpp"
 #include "aur_update_query.hpp"
 #include "commands_sync.hpp"
@@ -1085,6 +1086,32 @@ std::string build_unit_identity_display(
                                     localization::format_translated_message(
                                             "A local build unit is missing its {} identity.",
                                             "PackageBase")));
+                } else if constexpr(std::is_same_v<
+                                            Unit,
+                                            PreparedRemoteSourceBuildUnitReference>) {
+                    display = localization::format_translated_message(
+                            "{} source key {} (requested package: {}; checkout {}: {})",
+                            source_build_kind_display(
+                                    unit.source().source_kind, state,
+                                    section, item_index, detail_index),
+                            required_string_display(
+                                    unit.source().canonical_source_key,
+                                    state, section, item_index,
+                                    detail_index,
+                                    localization::translate_message(
+                                            "A remote source build unit is missing its source identity key.")),
+                            required_string_display(
+                                    unit.source().requested_name, state,
+                                    section, item_index, detail_index,
+                                    localization::translate_message(
+                                            "A remote source build unit is missing its requested package identity.")),
+                            "PackageBase",
+                            required_string_display(
+                                    unit.source().package_base, state,
+                                    section, item_index, detail_index,
+                                    localization::format_translated_message(
+                                            "A remote source build unit is missing its checkout {} identity.",
+                                            "PackageBase")));
                 } else {
                     const RegisteredSourcePreferenceSnapshot& source =
                             unit.source();
@@ -1197,6 +1224,28 @@ void render_build_units(
                                                         : join_display_values(
                                                                   children))
                                      << '\n';
+                    } else if constexpr(std::is_same_v<
+                                                Unit,
+                                                PreparedRemoteSourceBuildUnitReference>) {
+                        for(std::size_t target_index = 0;
+                            target_index < unit.required_targets().size();
+                            ++target_index) {
+                            const RequiredPackageArtifactTarget& target =
+                                    unit.required_targets()[target_index];
+                            state.output << localization::format_translated_message(
+                                                    "     Required target {}: {}/{} ({})",
+                                                    target_index + 1,
+                                                    target.package_base,
+                                                    target.package_name,
+                                                    install_reason_display(
+                                                            target.desired_reason,
+                                                            state,
+                                                            UnifiedPlanRenderingSection::
+                                                                    BuildUnits,
+                                                            index,
+                                                            target_index))
+                                         << '\n';
+                        }
                     } else {
                         state.output << localization::format_translated_message(
                                                 "     Source preference: {}",
@@ -1657,6 +1706,68 @@ std::string local_source_root_error_code_display(
             std::nullopt,
             localization::translate_message(
                     "A local source failure code is not supported by the renderer."));
+}
+
+std::string local_source_metadata_state_display(
+        LocalSourceMetadataState metadata_state, std::size_t blocker_index,
+        RenderState& state) {
+    switch(metadata_state) {
+    case LocalSourceMetadataState::Missing:
+        return "LocalSourceMetadataState::Missing";
+    case LocalSourceMetadataState::Unsafe:
+        return "LocalSourceMetadataState::Unsafe";
+    case LocalSourceMetadataState::Invalid:
+        return "LocalSourceMetadataState::Invalid";
+    case LocalSourceMetadataState::UsableUnverified:
+        return "LocalSourceMetadataState::UsableUnverified";
+    case LocalSourceMetadataState::KnownStale:
+        return "LocalSourceMetadataState::KnownStale";
+    }
+    return unsupported_display(
+            state, UnifiedPlanRenderingSection::Blockers, blocker_index,
+            std::nullopt,
+            localization::translate_message(
+                    "A local source metadata state is not supported by the renderer."));
+}
+
+std::string local_source_metadata_stale_reason_display(
+        LocalSourceMetadataStaleReason reason, std::size_t blocker_index,
+        RenderState& state) {
+    switch(reason) {
+    case LocalSourceMetadataStaleReason::PkgbuildNewer:
+        return "LocalSourceMetadataStaleReason::PkgbuildNewer";
+    case LocalSourceMetadataStaleReason::OneOffEnvironmentAssignment:
+        return "LocalSourceMetadataStaleReason::OneOffEnvironmentAssignment";
+    }
+    return unsupported_display(
+            state, UnifiedPlanRenderingSection::Blockers, blocker_index,
+            std::nullopt,
+            localization::translate_message(
+                    "A local source metadata stale reason is not supported by the renderer."));
+}
+
+std::string local_source_metadata_evaluation_blocker_display(
+        const LocalSourceMetadataEvaluationUnifiedPlanBlocker& blocker,
+        std::size_t blocker_index, RenderState& state) {
+    std::vector<std::string> stale_reasons;
+    for(const LocalSourceMetadataStaleReason reason :
+        blocker.detail.get().stale_reasons()) {
+        stale_reasons.push_back(local_source_metadata_stale_reason_display(
+                reason, blocker_index, state));
+    }
+    return localization::format_translated_message(
+            "local metadata evaluation required ({}); source: {}; stale reasons: {}",
+            local_source_metadata_state_display(
+                    blocker.detail.get().state(), blocker_index, state),
+            terminal_safe_text_display(required_string_display(
+                    blocker.source_root.canonical_path.generic_string(),
+                    state, UnifiedPlanRenderingSection::Blockers,
+                    blocker_index, std::nullopt,
+                    localization::translate_message(
+                            "A local metadata blocker is missing its source identity."))),
+            stale_reasons.empty()
+                    ? localization::translate_message("None")
+                    : join_display_values(stale_reasons));
 }
 
 std::string root_target_identity_display(const RootTargetIdentity& root) {
@@ -3077,6 +3188,157 @@ std::string source_preference_failure_display(
                             "A source preference failure is missing its diagnostic."))));
 }
 
+std::string sync_install_preparation_issue_kind_display(
+        SyncInstallPreparationIssueKind kind, std::size_t blocker_index,
+        RenderState& state) {
+    switch(kind) {
+    case SyncInstallPreparationIssueKind::UnsupportedSourceSelection:
+        return "SyncInstallPreparationIssueKind::UnsupportedSourceSelection";
+    case SyncInstallPreparationIssueKind::MissingAurTarget:
+        return "SyncInstallPreparationIssueKind::MissingAurTarget";
+    case SyncInstallPreparationIssueKind::InvalidTarget:
+        return "SyncInstallPreparationIssueKind::InvalidTarget";
+    case SyncInstallPreparationIssueKind::TargetCorrelationFailed:
+        return "SyncInstallPreparationIssueKind::TargetCorrelationFailed";
+    case SyncInstallPreparationIssueKind::UnsupportedSourceOption:
+        return "SyncInstallPreparationIssueKind::UnsupportedSourceOption";
+    case SyncInstallPreparationIssueKind::SourceBuildOptionsUnsupported:
+        return "SyncInstallPreparationIssueKind::SourceBuildOptionsUnsupported";
+    case SyncInstallPreparationIssueKind::RepositoryAuthorityChanged:
+        return "SyncInstallPreparationIssueKind::RepositoryAuthorityChanged";
+    case SyncInstallPreparationIssueKind::BuildPlanResolutionFailed:
+        return "SyncInstallPreparationIssueKind::BuildPlanResolutionFailed";
+    case SyncInstallPreparationIssueKind::BuildPlanBlocked:
+        return "SyncInstallPreparationIssueKind::BuildPlanBlocked";
+    case SyncInstallPreparationIssueKind::BuildPlanCorrelationFailed:
+        return "SyncInstallPreparationIssueKind::BuildPlanCorrelationFailed";
+    case SyncInstallPreparationIssueKind::SourceWorkPreparationFailed:
+        return "SyncInstallPreparationIssueKind::SourceWorkPreparationFailed";
+    case SyncInstallPreparationIssueKind::EmptyPreparedRoute:
+        return "SyncInstallPreparationIssueKind::EmptyPreparedRoute";
+    }
+    return unsupported_display(
+            state, UnifiedPlanRenderingSection::Blockers, blocker_index,
+            std::nullopt,
+            localization::translate_message(
+                    "A sync preparation issue kind is not supported by the renderer."));
+}
+
+std::string repository_metadata_failure_kind_display(
+        RepositoryMetadataFailureKind kind, std::size_t blocker_index,
+        RenderState& state) {
+    switch(kind) {
+    case RepositoryMetadataFailureKind::ConfigurationUnavailable:
+        return "RepositoryMetadataFailureKind::ConfigurationUnavailable";
+    case RepositoryMetadataFailureKind::ConfigurationMalformed:
+        return "RepositoryMetadataFailureKind::ConfigurationMalformed";
+    case RepositoryMetadataFailureKind::SyncDatabaseUnavailable:
+        return "RepositoryMetadataFailureKind::SyncDatabaseUnavailable";
+    case RepositoryMetadataFailureKind::SyncDatabaseMalformed:
+        return "RepositoryMetadataFailureKind::SyncDatabaseMalformed";
+    }
+    return unsupported_display(
+            state, UnifiedPlanRenderingSection::Blockers, blocker_index,
+            std::nullopt,
+            localization::translate_message(
+                    "A repository metadata failure kind is not supported by the renderer."));
+}
+
+std::string sync_repository_metadata_failure_display(
+        const SyncRepositoryMetadataReadFailure& failure,
+        std::size_t blocker_index, RenderState& state) {
+    const RepositoryMetadataFailure& metadata = failure.failure;
+    std::vector<std::string> repository_order;
+    if(metadata.configured_repository_order.has_value()) {
+        repository_order.reserve(
+                metadata.configured_repository_order->size());
+        for(const std::string& repository :
+            metadata.configured_repository_order.value()) {
+            repository_order.push_back(
+                    terminal_safe_text_display(repository));
+        }
+    }
+    return localization::format_translated_message(
+            "{}; root: {}; kind: {}; repository: {}; configured repository order: {}; diagnostic: {}",
+            "SyncRepositoryMetadataReadFailure",
+            terminal_safe_text_display(
+                    root_target_identity_display(failure.root)),
+            repository_metadata_failure_kind_display(
+                    metadata.kind, blocker_index, state),
+            metadata.repository_name.has_value() &&
+                            !metadata.repository_name->empty()
+                    ? terminal_safe_text_display(
+                              metadata.repository_name.value())
+                    : localization::translate_message("not observed"),
+            repository_order.empty()
+                    ? localization::translate_message("not observed")
+                    : join_display_values(repository_order),
+            metadata.diagnostic.empty()
+                    ? localization::translate_message("not observed")
+                    : terminal_safe_text_display(metadata.diagnostic));
+}
+
+std::string sync_install_preparation_failure_display(
+        const SyncInstallPreparationFailure& failure,
+        std::size_t blocker_index, RenderState& state) {
+    if(failure.details.empty()) {
+        return localization::format_translated_message(
+                "sync preparation failure: {}",
+                unavailable_display(
+                        state, UnifiedPlanRenderingSection::Blockers,
+                        blocker_index, std::nullopt,
+                        localization::translate_message(
+                                "A sync preparation failure has no typed details.")));
+    }
+    std::vector<std::string> details;
+    details.reserve(failure.details.size());
+    for(const SyncInstallPreparationFailureDetail& detail : failure.details) {
+        details.push_back(std::visit(
+                [&](const auto& typed_detail) -> std::string {
+                    using Detail = std::decay_t<decltype(typed_detail)>;
+                    if constexpr(std::is_same_v<
+                                         Detail,
+                                         SyncInstallPreparationIssue>) {
+                        return localization::format_translated_message(
+                                "{}; kind: {}; root: {}; option: {}; diagnostic: {}",
+                                "SyncInstallPreparationIssue",
+                                sync_install_preparation_issue_kind_display(
+                                        typed_detail.kind, blocker_index,
+                                        state),
+                                typed_detail.root.has_value()
+                                        ? terminal_safe_text_display(
+                                                  root_target_identity_display(
+                                                          typed_detail.root
+                                                                  .value()))
+                                        : localization::translate_message(
+                                                  "not observed"),
+                                typed_detail.option.has_value() &&
+                                                !typed_detail.option->empty()
+                                        ? terminal_safe_text_display(
+                                                  typed_detail.option.value())
+                                        : localization::translate_message(
+                                                  "not observed"),
+                                typed_detail.diagnostic.empty()
+                                        ? localization::translate_message(
+                                                  "not observed")
+                                        : terminal_safe_text_display(
+                                                  typed_detail.diagnostic));
+                    } else if constexpr(std::is_same_v<
+                                                Detail,
+                                                SyncRepositoryMetadataReadFailure>) {
+                        return sync_repository_metadata_failure_display(
+                                typed_detail, blocker_index, state);
+                    } else {
+                        return source_preference_failure_display(
+                                typed_detail, blocker_index, state);
+                    }
+                },
+                detail));
+    }
+    return localization::format_translated_message(
+            "sync preparation failure: {}", join_display_values(details));
+}
+
 std::string package_metadata_failure_display(
         const PackageMetadataFailure& failure, std::size_t blocker_index,
         RenderState& state) {
@@ -3084,12 +3346,12 @@ std::string package_metadata_failure_display(
             "{}; code: {}; diagnostic: {}", "PackageMetadataFailure",
             package_metadata_error_code_display(
                     failure.code, blocker_index, state),
-            required_string_display(
+            terminal_safe_text_display(required_string_display(
                     failure.diagnostic, state,
                     UnifiedPlanRenderingSection::Blockers, blocker_index,
                     std::nullopt,
                     localization::translate_message(
-                            "A package metadata failure is missing its diagnostic.")));
+                            "A package metadata failure is missing its diagnostic."))));
 }
 
 std::string xdg_directory_kind_display(
@@ -3379,6 +3641,115 @@ std::string upgrade_all_issue_kind_display(
                     "upgrade-all"));
 }
 
+std::string aur_update_preparation_reason_display(
+        AurUpdatePreparationReason reason, std::size_t blocker_index,
+        RenderState& state) {
+    switch(reason) {
+    case AurUpdatePreparationReason::None:
+        return "AurUpdatePreparationReason::None";
+    case AurUpdatePreparationReason::BlockingPreflight:
+        return "AurUpdatePreparationReason::BlockingPreflight";
+    case AurUpdatePreparationReason::PreflightInconsistent:
+        return "AurUpdatePreparationReason::PreflightInconsistent";
+    case AurUpdatePreparationReason::BuildPlanMissing:
+        return "AurUpdatePreparationReason::BuildPlanMissing";
+    case AurUpdatePreparationReason::BuildPlanOrderEmpty:
+        return "AurUpdatePreparationReason::BuildPlanOrderEmpty";
+    case AurUpdatePreparationReason::RootAttributionInconsistent:
+        return "AurUpdatePreparationReason::RootAttributionInconsistent";
+    case AurUpdatePreparationReason::PackageTargetAttributionInconsistent:
+        return "AurUpdatePreparationReason::PackageTargetAttributionInconsistent";
+    case AurUpdatePreparationReason::DesiredInstallReasonMissing:
+        return "AurUpdatePreparationReason::DesiredInstallReasonMissing";
+    case AurUpdatePreparationReason::SourcePreferenceUnavailable:
+        return "AurUpdatePreparationReason::SourcePreferenceUnavailable";
+    case AurUpdatePreparationReason::SourcePreferencePkgdestConflict:
+        return "AurUpdatePreparationReason::SourcePreferencePkgdestConflict";
+    case AurUpdatePreparationReason::StaticWorkItemInvalid:
+        return "AurUpdatePreparationReason::StaticWorkItemInvalid";
+    case AurUpdatePreparationReason::PacmanDatabaseUnavailable:
+        return "AurUpdatePreparationReason::PacmanDatabaseUnavailable";
+    case AurUpdatePreparationReason::GenericPreparationInconsistent:
+        return "AurUpdatePreparationReason::GenericPreparationInconsistent";
+    case AurUpdatePreparationReason::BuildUnitSelectionInconsistent:
+        return "AurUpdatePreparationReason::BuildUnitSelectionInconsistent";
+    case AurUpdatePreparationReason::ExternalSatisfactionInconsistent:
+        return "AurUpdatePreparationReason::ExternalSatisfactionInconsistent";
+    }
+    return unsupported_display(
+            state, UnifiedPlanRenderingSection::Blockers, blocker_index,
+            std::nullopt,
+            localization::format_translated_message(
+                    "An {} source preparation reason is not supported by the renderer.",
+                    "AUR"));
+}
+
+std::string aur_update_preparation_issue_display(
+        const AurUpdatePreparationIssue& issue,
+        std::size_t blocker_index, RenderState& state) {
+    std::vector<std::string> update_indices;
+    update_indices.reserve(issue.affected_update_plan_indices.size());
+    for(const std::size_t index : issue.affected_update_plan_indices) {
+        update_indices.push_back(std::to_string(index));
+    }
+    std::vector<std::string> roots;
+    roots.reserve(issue.affected_roots.size());
+    for(const RootTargetIdentity& root : issue.affected_roots) {
+        roots.push_back(root_target_identity_display(root));
+    }
+    std::vector<std::string> nested_details;
+    if(issue.preflight_issue.has_value()) {
+        const AurUpdateExecutionIssue& preflight =
+                issue.preflight_issue.value();
+        nested_details.push_back(localization::format_translated_message(
+                "{}; reason: {}; diagnostic: {}",
+                "AurUpdateExecutionIssue",
+                aur_update_execution_reason_display(
+                        preflight.reason, blocker_index, state),
+                preflight.diagnostic.empty()
+                        ? localization::translate_message("not observed")
+                        : terminal_safe_text_display(preflight.diagnostic)));
+    }
+    if(issue.source_preference_failure.has_value()) {
+        nested_details.push_back(source_preference_failure_display(
+                issue.source_preference_failure.value(), blocker_index,
+                state));
+    }
+    if(issue.package_metadata_failure.has_value()) {
+        nested_details.push_back(package_metadata_failure_display(
+                issue.package_metadata_failure.value(), blocker_index,
+                state));
+    }
+    if(issue.build_plan_projection_issue.has_value()) {
+        nested_details.push_back(
+                build_plan_artifact_projection_issue_display(
+                        issue.build_plan_projection_issue.value(),
+                        blocker_index, state));
+    }
+    return localization::format_translated_message(
+            "{} source preparation failure ({}); update plan indices: {}; roots: {}; package: {}; {}: {}; typed nested details: {}; diagnostic: {}",
+            "AUR",
+            aur_update_preparation_reason_display(
+                    issue.reason, blocker_index, state),
+            update_indices.empty()
+                    ? localization::translate_message("None")
+                    : join_display_values(update_indices),
+            roots.empty() ? localization::translate_message("None")
+                          : join_display_values(roots),
+            optional_string_display(issue.package_name), "PackageBase",
+            optional_string_display(issue.package_base),
+            nested_details.empty()
+                    ? localization::translate_message("None")
+                    : join_display_values(nested_details),
+            terminal_safe_text_display(required_string_display(
+                    issue.diagnostic, state,
+                    UnifiedPlanRenderingSection::Blockers, blocker_index,
+                    std::nullopt,
+                    localization::format_translated_message(
+                            "An {} source preparation issue is missing its diagnostic.",
+                            "AUR"))));
+}
+
 std::string route_preflight_blocker_display(
         const RoutePreflightUnifiedPlanBlocker& blocker,
         std::size_t blocker_index, RenderState& state) {
@@ -3425,7 +3796,13 @@ std::string route_preflight_blocker_display(
                             detail.diagnostic.empty()
                                     ? localization::translate_message(
                                               "not observed")
-                                    : detail.diagnostic);
+                                    : terminal_safe_text_display(detail.diagnostic));
+                } else if constexpr(std::is_same_v<
+                                            Reference,
+                                            UnifiedPlanBorrowedAuthorityReference<
+                                                    AurUpdatePreparationIssue>>) {
+                    return aur_update_preparation_issue_display(
+                            detail, blocker_index, state);
                 } else if constexpr(std::is_same_v<
                                             Reference,
                                             UnifiedPlanBorrowedAuthorityReference<
@@ -4024,10 +4401,22 @@ std::string blocker_display(
                             blocker_index, std::nullopt);
                 } else if constexpr(std::is_same_v<
                                             Blocker,
+                                            LocalSourceMetadataEvaluationUnifiedPlanBlocker>) {
+                    return local_source_metadata_evaluation_blocker_display(
+                            typed_blocker, blocker_index, state);
+                } else if constexpr(std::is_same_v<
+                                            Blocker,
                                             RootPackagePreparationUnifiedPlanBlocker>) {
                     const RootPackageInstallPreparationFailure& failure =
                             typed_blocker.detail.get();
                     return root_package_preparation_failure_display(
+                            failure, blocker_index, state);
+                } else if constexpr(std::is_same_v<
+                                            Blocker,
+                                            SyncInstallPreparationUnifiedPlanBlocker>) {
+                    const SyncInstallPreparationFailure& failure =
+                            typed_blocker.detail.get();
+                    return sync_install_preparation_failure_display(
                             failure, blocker_index, state);
                 } else if constexpr(std::is_same_v<
                                             Blocker,

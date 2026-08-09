@@ -37,6 +37,7 @@ struct CliOverrides {
     std::optional<ReviewPolicy> review_diff;
     std::optional<BuildMode>    build_mode;
     bool                        no_confirm = false;
+    bool                        dry_run = false;
     bool                        rm_deps = false;
 };
 

@@ -883,8 +883,7 @@ void PreparedSystemSourceUpgrade::set_unexpected_exception_for_test(
 
 SystemSourceUpgradePreparation prepare_system_source_upgrade(
         const AppConfig& config,
-        const SystemSourceUpgradeEventObserver& observer,
-        std::optional<ValidatedCacheRoot> cache_root) {
+        const SystemSourceUpgradeEventObserver& observer) {
     SystemSourceUpgradePreparationState state;
     state.snapshot.options = snapshot_options(config);
 
@@ -1234,36 +1233,6 @@ SystemSourceUpgradePreparation prepare_system_source_upgrade(
                     RegisteredSourceUpgradeFailureKind::UnknownException);
         }
 
-        // POLICY(#272): registered-source provider choiceとstatic invocation
-        // preflightを確定してから、最初のcache filesystem mutationへ進む。
-        try {
-            if(cache_root.has_value()) {
-                cache_root->require_unchanged_identity();
-            } else {
-                cache_root = prepare_process_cache_root();
-            }
-            seed_production_source_build_cache(
-                    state.source_invocation.value(), cache_root.value());
-        } catch(const xdg_paths::ResolutionError& error) {
-            SystemSourceUpgradeIssue issue =
-                    make_cache_authority_issue(error.what());
-            issue.cache_resolution_failure = error.failure();
-            return block_cache_authority_preparation(
-                    std::move(state), std::move(issue));
-        } catch(const xdg_directory_safety::PreparationError& error) {
-            SystemSourceUpgradeIssue issue =
-                    make_cache_authority_issue(error.what());
-            issue.cache_preparation_failure = error.failure();
-            return block_cache_authority_preparation(
-                    std::move(state), std::move(issue));
-        } catch(const TrustedCacheError& error) {
-            SystemSourceUpgradeIssue issue =
-                    make_cache_authority_issue(error.what());
-            issue.trusted_cache_failure = error.failure();
-            return block_cache_authority_preparation(
-                    std::move(state), std::move(issue));
-        }
-
         const PacmanDatabasePaths database_paths =
                 state.source_invocation->database_paths;
         state.system_database_paths = database_paths;
@@ -1347,7 +1316,8 @@ SystemSourceUpgradePreparation prepare_system_source_upgrade(
 SystemSourceUpgradeResult execute_prepared_system_source_upgrade(
         PreparedSystemSourceUpgrade prepared,
         const AppConfig& config,
-        const SystemSourceUpgradeEventObserver& observer) {
+        const SystemSourceUpgradeEventObserver& observer,
+        std::optional<ValidatedCacheRoot> shared_cache_root) {
     if(prepared.impl_ == nullptr) {
         SystemSourceUpgradeResult result;
         result.status = SystemSourceUpgradeStatus::InconsistentResult;
@@ -1392,23 +1362,36 @@ SystemSourceUpgradeResult execute_prepared_system_source_upgrade(
         return result;
     }
 
-    // Registered source workがある場合はsystem pacmanより前にcache authorityを
-    // 1回だけ確定し、typed failureをresultへ保持する。
+    // Read-only preflightはcache capabilityを保持しない。actual executionだけが
+    // current XDG stateからrootを取得し、system pacman前にseed/activateする。
     if(state.source_invocation.has_value()) {
         try {
+            if(!shared_cache_root.has_value()) {
+                shared_cache_root = prepare_process_cache_root();
+            }
+            seed_production_source_build_cache(
+                    state.source_invocation.value(),
+                    shared_cache_root.value());
             activate_production_source_build_cache(
                     state.source_invocation.value());
+        } catch(const xdg_paths::ResolutionError& error) {
+            SystemSourceUpgradeIssue issue =
+                    make_cache_authority_issue(error.what());
+            issue.cache_resolution_failure = error.failure();
+            return block_cache_authority_preparation(
+                    std::move(state), std::move(issue));
+        } catch(const xdg_directory_safety::PreparationError& error) {
+            SystemSourceUpgradeIssue issue =
+                    make_cache_authority_issue(error.what());
+            issue.cache_preparation_failure = error.failure();
+            return block_cache_authority_preparation(
+                    std::move(state), std::move(issue));
         } catch(const TrustedCacheError& error) {
-            SystemSourceUpgradeIssue issue = make_issue(
-                    SystemSourceUpgradeIssueKind::CacheAuthorityInvalid,
-                    SystemSourceUpgradeIssueImpact::BlocksExecution,
-                    SystemSourceUpgradePhase::Preparation,
-                    error.what());
+            SystemSourceUpgradeIssue issue =
+                    make_cache_authority_issue(error.what());
             issue.trusted_cache_failure = error.failure();
-            return block_preparation(
-                    std::move(state), std::move(issue), std::nullopt,
-                    RegisteredSourceUpgradeFailureKind::
-                            CacheAuthorityFailure);
+            return block_cache_authority_preparation(
+                    std::move(state), std::move(issue));
         }
     }
 
