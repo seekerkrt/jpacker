@@ -1,5 +1,6 @@
 #include "unified_plan_observation.hpp"
 
+#include "source_install.hpp"
 #include "system_source_upgrade.hpp"
 
 #include <algorithm>
@@ -69,6 +70,14 @@ bool same_build_unit_reference(
                                    rhs_reference.source_root() &&
                            &lhs_reference.metadata() ==
                                    &rhs_reference.metadata();
+                } else if constexpr(
+                        std::is_same_v<
+                                Lhs,
+                                PreparedRemoteSourceBuildUnitReference>) {
+                    return &lhs_reference.source() ==
+                                   &rhs_reference.source() &&
+                           &lhs_reference.work_item() ==
+                                   &rhs_reference.work_item();
                 } else {
                     return &lhs_reference.source() ==
                                    &rhs_reference.source() &&
@@ -362,6 +371,50 @@ bool LocalSourceBuildUnitReference::has_complete_identity() const noexcept {
             });
 }
 
+PreparedRemoteSourceBuildUnitReference::
+        PreparedRemoteSourceBuildUnitReference(
+                std::reference_wrapper<
+                        const ResolvedSourceBuildIdentity> source,
+                std::reference_wrapper<
+                        const ProductionSourceBuildWorkItem> work_item)
+                noexcept
+    : source_(source), work_item_(work_item) {}
+
+const ResolvedSourceBuildIdentity&
+PreparedRemoteSourceBuildUnitReference::source() const noexcept {
+    return source_.get();
+}
+
+const ProductionSourceBuildWorkItem&
+PreparedRemoteSourceBuildUnitReference::work_item() const noexcept {
+    return work_item_.get();
+}
+
+const std::vector<RequiredPackageArtifactTarget>&
+PreparedRemoteSourceBuildUnitReference::required_targets() const noexcept {
+    return work_item_.get().required_targets;
+}
+
+bool PreparedRemoteSourceBuildUnitReference::has_complete_identity()
+        const noexcept {
+    const ResolvedSourceBuildIdentity& source = source_.get();
+    const ProductionSourceBuildWorkItem& work = work_item_.get();
+    if(source.source_kind != SourceBuildSourceKind::Repository ||
+       source.requested_name.empty() || source.package_base.empty() ||
+       source.canonical_source_key.empty() || source.git_url.empty() ||
+       work.request.package_name != source.requested_name ||
+       work.request.checkout_name != source.package_base ||
+       work.request.git_url != source.git_url ||
+       work.is_build_plan_entry || work.required_targets.size() != 1) {
+        return false;
+    }
+    const RequiredPackageArtifactTarget& target =
+            work.required_targets.front();
+    return target.package_base == source.package_base &&
+           target.package_name == source.requested_name &&
+           is_known_install_reason(target.desired_reason);
+}
+
 PreparedSystemSourceBuildUnitReference::
         PreparedSystemSourceBuildUnitReference(
                 std::reference_wrapper<
@@ -492,6 +545,17 @@ bool RequiredArtifactTargetReference::matches_build_unit() const noexcept {
                                        return child.name ==
                                               required.package_name;
                                    });
+                } else if constexpr(std::is_same_v<
+                                            BuildUnit,
+                                            PreparedRemoteSourceBuildUnitReference>) {
+                    return std::any_of(
+                            build_unit.required_targets().begin(),
+                            build_unit.required_targets().end(),
+                            [&required](
+                                    const RequiredPackageArtifactTarget&
+                                            target) {
+                                return &target == &required;
+                            });
                 } else {
                     const RegisteredSourcePreferenceSnapshot& source =
                             build_unit.source();

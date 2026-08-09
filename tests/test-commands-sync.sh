@@ -35,6 +35,7 @@ setup_case() {
     output_file=$case_dir/output
     config_file=$case_dir/config.toml
     package_metadata_state=$case_dir/package-metadata.state
+    repository_metadata_state=$case_dir/repository-metadata.state
     source_preference_dir=$case_dir/xdg-config/moguet/source-build.d
 
     mkdir -p \
@@ -44,6 +45,7 @@ setup_case() {
     : > "$command_log"
     : > "$output_file"
     : > "$package_metadata_state"
+    : > "$repository_metadata_state"
     printf '%s\n' 'schema_version = 1' > "$config_file"
 
     export HOME=$case_dir/home
@@ -86,6 +88,7 @@ setup_case() {
     unset MOGUET_TEST_ALPM_VERCMP_RESULT
 
     export MOGUET_TEST_PACKAGE_METADATA_STATE_FILE=$package_metadata_state
+    export MOGUET_TEST_REPOSITORY_METADATA_STATE_FILE=$repository_metadata_state
 }
 
 write_source_preference() {
@@ -95,6 +98,11 @@ write_source_preference() {
     chmod 0700 "$source_preference_dir"
     printf '%s\n' "$contents" > "$source_preference_dir/$package"
     chmod 0600 "$source_preference_dir/$package"
+}
+
+write_repository_package() {
+    package=$1
+    printf 'core %s 1 1\n' "$package" >> "$repository_metadata_state"
 }
 
 run_status() {
@@ -631,8 +639,9 @@ assert_command_log_empty
 
 setup_case aur-install-rejects-option-before-plan
 run_status 1 -S --aur plan-a --config config-value plan-b
-assert_contains "Unsupported pacman option for AUR/source-build target: --config" "$output_file"
-assert_contains "Rerun --aur without this option." "$output_file"
+assert_contains "Error: Unsupported pacman option for AUR/source-build target: --config" "$output_file"
+assert_contains "Error: Rerun --aur without this option." "$output_file"
+assert_output_count 2 "Error:"
 assert_command_log_empty
 
 setup_case aur-install-all-root-plan-barrier
@@ -774,28 +783,29 @@ assert_contains "Invalid package name: core/filesystem" "$output_file"
 
 setup_case auto-install-unsupported-option-before-source-guard
 run_status 1 -S source-a --config config-value
-assert_event_at 1 "pacman -Si source-a"
+assert_event_at 1 "pacman-conf --verbose RootDir DBPath"
+assert_event_at 2 "pacman-conf --repo-list"
 assert_event_prefix_absent '^aur '
 assert_no_mutation_events
-assert_contains "Unsupported pacman option for AUR/source-build target: --config" "$output_file"
-assert_contains "Split official repository and AUR/source-build targets, or rerun without this option." "$output_file"
+assert_contains "Error: Unsupported pacman option for AUR/source-build target: --config" "$output_file"
+assert_contains "Error: Split official repository and AUR/source-build targets, or rerun without this option." "$output_file"
+assert_output_count 2 "Error:"
 
 setup_case auto-install-all-source-guard-before-pacman
+write_repository_package official-a
 export MOGUET_TEST_PACMAN_REPO_PACKAGES='official-a'
 run_status 1 --noedit --nodiff --noconfirm -S official-a source-a plan-missing
-assert_event_at 1 "pacman -Si official-a"
-assert_event_at 2 "pacman -Si source-a"
-assert_event_at 3 "pacman -Si plan-missing"
-assert_event_at 4 "pacman -Si source-a"
-assert_event_at 5 "pacman -Si plan-missing"
-assert_event_at 6 "aur info-strict source-a"
-assert_event_at 7 "aur info-strict plan-missing"
+assert_event_count 3 "pacman-conf --verbose RootDir DBPath"
+assert_event_count 3 "pacman-conf --repo-list"
+assert_event_at 7 "aur info-strict source-a"
+assert_event_at 8 "aur info-strict plan-missing"
 assert_event_prefix_absent '^sudo pacman -S( |$)'
 assert_event_prefix_absent '^(git|makepkg) '
 assert_cache_entry_absent source-a
 assert_cache_entry_absent plan-missing
 
 setup_case auto-install-later-source-pkgdest-before-official-transaction
+write_repository_package official-a
 write_source_preference source-b 'PKGDEST='
 export MOGUET_TEST_PACMAN_REPO_PACKAGES='official-a'
 mkdir -p "$XDG_CACHE_HOME/moguet/preflight-sentinel"
@@ -805,7 +815,9 @@ auto_preflight_checksum=$(cksum \
     "$XDG_CACHE_HOME/moguet/preflight-sentinel/state")
 run_status 1 --noedit --nodiff --noconfirm -S official-a source-a source-b
 assert_contains "Source environment PKGDEST conflicts with the invocation-owned artifact workspace." "$output_file"
-assert_event_count 0 "pacman-conf --verbose RootDir DBPath"
+# Three strict root repository reads complete; source invocation DB-path
+# preparation must not add a fourth read after the PKGDEST guard fails.
+assert_event_count 3 "pacman-conf --verbose RootDir DBPath"
 assert_event_prefix_absent '^sudo '
 assert_event_prefix_absent '^(git|makepkg) '
 assert_event_pattern_count 0 '^pacman -U '
@@ -822,6 +834,8 @@ if [ "$auto_preflight_after" != "$auto_preflight_checksum" ] ||
 fi
 
 setup_case auto-install-mixed-order-filtering-and-source-asymmetry
+write_repository_package official-a
+write_repository_package forced-official
 write_source_preference forced-official 'CFLAGS=-Oforced-official'
 export MOGUET_TEST_PACMAN_REPO_PACKAGES='official-a forced-official'
 export MOGUET_TEST_SUDO_MAIN_STATUS=0
@@ -831,12 +845,12 @@ assert_event "$official_transaction"
 assert_event_count 1 "$official_transaction"
 assert_event_count_before 2 "aur info-strict source-a" "$official_transaction"
 assert_event_count_before 2 "aur info-strict source-b" "$official_transaction"
-assert_event_count_before 2 "pacman -Si forced-official" "$official_transaction"
+assert_event_count_before 4 "pacman-conf --repo-list" "$official_transaction"
 assert_event_before "pacman-conf --verbose RootDir DBPath" "$official_transaction"
 assert_event_before "$official_transaction" "git clone https://aur.archlinux.org/source-a.git source-a"
 assert_event_before "git clone https://aur.archlinux.org/source-a.git source-a" "git clone https://gitlab.archlinux.org/archlinux/packaging/packages/forced-official.git forced-official"
 assert_event_before "git clone https://gitlab.archlinux.org/archlinux/packaging/packages/forced-official.git forced-official" "git clone https://aur.archlinux.org/source-b.git source-b"
-assert_event_count 1 "pacman-conf --verbose RootDir DBPath"
+assert_event_count 5 "pacman-conf --verbose RootDir DBPath"
 assert_event_count 3 "makepkg --packagelist"
 assert_event_count 3 "makepkg -sc --noconfirm"
 assert_event_pattern_count 3 '^pacman -U --print --print-format '
@@ -850,7 +864,34 @@ assert_cache_entry_present source-a
 assert_cache_entry_present forced-official
 assert_cache_entry_present source-b
 
+setup_case auto-install-cache-activation-failure-stops-official-transaction
+write_repository_package official-a
+export MOGUET_TEST_PACMAN_REPO_PACKAGES='official-a'
+printf '%s\n' 'cache root obstruction' > "$XDG_CACHE_HOME/moguet"
+cache_obstruction_checksum=$(cksum "$XDG_CACHE_HOME/moguet")
+run_status 1 --noedit --nodiff --noconfirm -S official-a source-a
+assert_event_prefix_absent '^sudo '
+assert_event_prefix_absent '^(git|makepkg) '
+assert_event_pattern_count 0 '^pacman -U '
+if [ ! -f "$XDG_CACHE_HOME/moguet" ] ||
+   [ "$(cksum "$XDG_CACHE_HOME/moguet")" != "$cache_obstruction_checksum" ]; then
+    echo "Sync cache activation failure changed its obstruction fixture" >&2
+    exit 1
+fi
+
+setup_case auto-install-dry-run-duplicate-repository-source-correlation
+write_repository_package duplicate-root
+write_source_preference duplicate-root 'CFLAGS=-Oduplicate-root'
+export MOGUET_TEST_PACMAN_REPO_PACKAGES='duplicate-root'
+run_status 0 --dry-run --noedit --nodiff --noconfirm -S duplicate-root duplicate-root
+assert_output_count 1 "Request: duplicate-root (invocation index: 0)"
+assert_output_count 1 "Request: duplicate-root (invocation index: 1)"
+assert_output_count 2 "Identity: duplicate-root (PackageBase: duplicate-root; source key: repository:duplicate-root)"
+assert_event_prefix_absent '^(sudo|git|makepkg) '
+assert_event_pattern_count 0 '^pacman -U '
+
 setup_case auto-install-pacman-failure-stops-source-execution
+write_repository_package official-a
 export MOGUET_TEST_PACMAN_REPO_PACKAGES='official-a'
 export MOGUET_TEST_SUDO_MAIN_STATUS=42
 run_status 1 --noedit --nodiff --noconfirm -S official-a source-a source-b
@@ -864,6 +905,7 @@ assert_cache_entry_absent source-a
 assert_cache_entry_absent source-b
 
 setup_case auto-install-first-source-failure-stops-later-target
+write_repository_package official-a
 export MOGUET_TEST_PACMAN_REPO_PACKAGES='official-a'
 export MOGUET_TEST_SUDO_MAIN_STATUS=0
 export MOGUET_TEST_MAKEPKG_EXIT_CODE=42

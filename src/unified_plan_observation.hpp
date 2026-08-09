@@ -23,19 +23,32 @@ class LocalSourceBuildProjectionAuthority;
 
 struct AurUpdateExecutionPreflight;
 struct AurUpdateExecutionIssue;
+struct AurUpdatePreparationIssue;
+struct AurUpdateSourceBuildPreparation;
 struct AurUpdatePlanEntry;
 struct AurUpdateQueryFailure;
+struct FetchPreparation;
 struct LocalDependencyPlanFailure;
+struct PreparedRemoteSourceBuild;
+struct ProductionSourceBuildWorkItem;
+struct PreparedSyncInstall;
 struct RegisteredSourcePreferenceSnapshot;
+struct RepositoryPackageNotFound;
+struct RepositoryPackagePresent;
+struct RemoteSourceBuildPlanFailure;
+struct ResolvedSourceBuildIdentity;
 class RootPackageRoutingProjection;
 struct RootPackageSearchCandidate;
 struct RootPackageInstallPreparationFailure;
 struct SystemSourceUpgradeResult;
 struct SystemSourceUpgradeIssue;
+struct SyncInstallPreparationFailure;
 class SystemSourceUpgradeProjectionAuthority;
 struct UpgradeAllOperationResult;
 struct UpgradeAllOperationIssue;
 class UpgradeAllOperationProjectionAuthority;
+class PreparedFilteredAurUpdateOperation;
+class PreparedUpgradeAllAurPreflight;
 
 // Public observation leaves may borrow production-owned authority, but the
 // borrow itself must not be detached from the observation by value. Keeping
@@ -231,6 +244,39 @@ private:
     std::reference_wrapper<const LocalPackageMetadata> metadata_;
 };
 
+// Standalone repository source-buildのcache-free production workをborrowする。
+// AUR BuildPlan unitは既存AurPackageBaseBuildUnitReferenceを正本とする。
+class PreparedRemoteSourceBuildUnitReference final {
+public:
+    PreparedRemoteSourceBuildUnitReference(
+            std::reference_wrapper<const ResolvedSourceBuildIdentity>
+                    source,
+            std::reference_wrapper<const ProductionSourceBuildWorkItem>
+                    work_item) noexcept;
+
+    PreparedRemoteSourceBuildUnitReference(
+            const PreparedRemoteSourceBuildUnitReference&) = delete;
+    PreparedRemoteSourceBuildUnitReference& operator=(
+            const PreparedRemoteSourceBuildUnitReference&) = delete;
+    PreparedRemoteSourceBuildUnitReference(
+            PreparedRemoteSourceBuildUnitReference&&) noexcept = default;
+    PreparedRemoteSourceBuildUnitReference& operator=(
+            PreparedRemoteSourceBuildUnitReference&&) noexcept = default;
+    ~PreparedRemoteSourceBuildUnitReference() = default;
+
+    [[nodiscard]] const ResolvedSourceBuildIdentity& source()
+            const noexcept;
+    [[nodiscard]] const ProductionSourceBuildWorkItem& work_item()
+            const noexcept;
+    [[nodiscard]] const std::vector<RequiredPackageArtifactTarget>&
+    required_targets() const noexcept;
+    [[nodiscard]] bool has_complete_identity() const noexcept;
+
+private:
+    std::reference_wrapper<const ResolvedSourceBuildIdentity> source_;
+    std::reference_wrapper<const ProductionSourceBuildWorkItem> work_item_;
+};
+
 // system/source preparationが確定したactual work itemのidentityとtarget setを
 // borrowする。BuildPlanからwork itemを再構築しない。
 class PreparedSystemSourceBuildUnitReference final {
@@ -281,12 +327,16 @@ private:
 using UnifiedPlanBuildUnitReference = std::variant<
         AurPackageBaseBuildUnitReference,
         LocalSourceBuildUnitReference,
+        PreparedRemoteSourceBuildUnitReference,
         PreparedSystemSourceBuildUnitReference>;
 
 using UnifiedPlanRootMetadataAuthorityReference = std::variant<
         UnifiedPlanBorrowedAuthorityReference<RootPackageSearchCandidate>,
         UnifiedPlanBorrowedAuthorityReference<AurUpdatePlanEntry>,
         UnifiedPlanBorrowedAuthorityReference<LocalPackageMetadata>,
+        UnifiedPlanBorrowedAuthorityReference<ResolvedSourceBuildIdentity>,
+        UnifiedPlanBorrowedAuthorityReference<RepositoryPackagePresent>,
+        UnifiedPlanBorrowedAuthorityReference<RepositoryPackageNotFound>,
         UnifiedPlanBorrowedAuthorityReference<
                 RegisteredSourcePreferenceSnapshot>>;
 
@@ -317,10 +367,23 @@ private:
 
 using UnifiedPlanRoutePreflightAuthorityReference = std::variant<
         UnifiedPlanBorrowedAuthorityReference<RootPackageRoutingProjection>,
+        UnifiedPlanBorrowedAuthorityReference<LocalSourceRoot>,
         UnifiedPlanBorrowedAuthorityReference<
                 LocalSourceBuildProjectionAuthority>,
         UnifiedPlanBorrowedAuthorityReference<LocalBuildPlan>,
+        UnifiedPlanBorrowedAuthorityReference<FetchPreparation>,
+        UnifiedPlanBorrowedAuthorityReference<PreparedSyncInstall>,
+        UnifiedPlanBorrowedAuthorityReference<
+                SyncInstallPreparationFailure>,
+        UnifiedPlanBorrowedAuthorityReference<PreparedRemoteSourceBuild>,
+        UnifiedPlanBorrowedAuthorityReference<RemoteSourceBuildPlanFailure>,
         UnifiedPlanBorrowedAuthorityReference<AurUpdateExecutionPreflight>,
+        UnifiedPlanBorrowedAuthorityReference<
+                AurUpdateSourceBuildPreparation>,
+        UnifiedPlanBorrowedAuthorityReference<
+                PreparedFilteredAurUpdateOperation>,
+        UnifiedPlanBorrowedAuthorityReference<
+                PreparedUpgradeAllAurPreflight>,
         UnifiedPlanBorrowedAuthorityReference<
                 SystemSourceUpgradeProjectionAuthority>,
         UnifiedPlanBorrowedAuthorityReference<SystemSourceUpgradeResult>,
@@ -524,9 +587,21 @@ struct LocalDependencyPlanUnifiedPlanBlocker {
     UnifiedPlanBorrowedAuthorityReference<LocalDependencyPlanFailure> detail;
 };
 
+// makepkg evaluationへ進めないread-only local routeが、既存descriptorの
+// metadata stateを推測でReadyへ変換しないためのtyped blocker。
+struct LocalSourceMetadataEvaluationUnifiedPlanBlocker {
+    LocalSourceRootObservationIdentity source_root;
+    UnifiedPlanBorrowedAuthorityReference<LocalSourceMetadataSnapshot> detail;
+};
+
 struct RootPackagePreparationUnifiedPlanBlocker {
     UnifiedPlanBorrowedAuthorityReference<
             RootPackageInstallPreparationFailure>
+            detail;
+};
+
+struct SyncInstallPreparationUnifiedPlanBlocker {
+    UnifiedPlanBorrowedAuthorityReference<SyncInstallPreparationFailure>
             detail;
 };
 
@@ -548,6 +623,7 @@ struct BuildPlanStateUnifiedPlanBlocker {
 
 using RoutePreflightUnifiedPlanBlockerDetail = std::variant<
         UnifiedPlanBorrowedAuthorityReference<AurUpdateExecutionIssue>,
+        UnifiedPlanBorrowedAuthorityReference<AurUpdatePreparationIssue>,
         UnifiedPlanBorrowedAuthorityReference<SystemSourceUpgradeIssue>,
         UnifiedPlanBorrowedAuthorityReference<UpgradeAllOperationIssue>>;
 
@@ -563,7 +639,9 @@ using UnifiedPlanBlocker = std::variant<
         ConstraintFailureUnifiedPlanBlocker,
         MetadataRiskUnifiedPlanBlocker,
         LocalDependencyPlanUnifiedPlanBlocker,
+        LocalSourceMetadataEvaluationUnifiedPlanBlocker,
         RootPackagePreparationUnifiedPlanBlocker,
+        SyncInstallPreparationUnifiedPlanBlocker,
         BuildPlanArtifactProjectionUnifiedPlanBlocker,
         BuildPlanStateUnifiedPlanBlocker,
         RoutePreflightUnifiedPlanBlocker>;

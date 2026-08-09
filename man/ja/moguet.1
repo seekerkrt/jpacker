@@ -22,6 +22,10 @@ moguet \- 検証済みsource buildを備えたpacman-first AUR helper
 .B moguet
 .BR -V | --version
 .
+.B moguet
+.B --dry-run
+.I supported-operation
+.
 .\" parity:description
 .SH 説明
 .na
@@ -271,6 +275,53 @@ localized helpを表示し、XDG directoryを作成せず終了します。
 .B "-V, --version"
 .B Moguet
 とprogram versionを表示し、XDG directoryを作成せず終了します。
+.
+.TP
+.B "--dry-run"
+対応するMoguet-owned mutating routeについて、productionのpre-mutation authorityと
+統一human-readable plan rendererを使って観測します。
+対象はMoguet-owned
+.B -S
+installと
+.B -Syu
+等のsystem-update形式、
+.BR fetch 、
+remote / local
+.BR build 、
+.BR upgrade 、
+.BR upgrade-aur 、
+.B upgrade-all
+です。
+scope外の
+.BR deps 、
+.BR plan 、
+.BR -Ss 、
+.BR -Si 、
+.BR clean 、
+generic pacman pass-through形式は明示的に拒否します。
+.
+.PP
+read-only filesystem / network discoveryと、exact allowlist済みのpacman discovery queryは
+実行し得ますが、dry-runはstate logやpersistent stateを書かず、cache、workspace、worktreeを
+作成せず、Git clone / fetch / checkout mutation、
+.B "makepkg --printsrcinfo"
+によるlocal metadata評価、build output、sudo、pacman transactionの開始・mutation、pacman
+transaction lock、install、cleanup mutationへ進みません。
+local routeは既存の安全なdescriptorだけを使い、metadata評価が必要ならreadyを推測せず
+.B Blocked
+として観測します。
+.
+.PP
+.B Ready
+と
+.B NoOp
+は終了code 0、
+.B Blocked
+はnon-zeroです。
+観測結果はapproval token、prepared execution capability、cached provider choiceではなく、
+後のactual invocationはcurrent stateを再validationします。
+Moguet v2.2.0ではhuman-readable surfaceだけを提供し、JSONその他のmachine-readable plan
+schemaは追加しません。
 .
 .TP
 .B "--edit"

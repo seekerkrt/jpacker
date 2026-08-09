@@ -70,6 +70,7 @@ bool local_source_build_accepts_global_option(
     case cli_authority::GlobalOptionId::Edit:
     case cli_authority::GlobalOptionId::NoEdit:
     case cli_authority::GlobalOptionId::NoConfirm:
+    case cli_authority::GlobalOptionId::DryRun:
     case cli_authority::GlobalOptionId::BuildMode:
     case cli_authority::GlobalOptionId::Rebuild:
     case cli_authority::GlobalOptionId::CleanBuild:
@@ -355,6 +356,125 @@ bool local_source_build_requested(const ParsedCliArguments& parsed) {
     // parserが確定したsemantic pacman-option位置のexact tokenだけを解釈する。
     return parsed_has_semantic_pacman_option(
             parsed, std::string(cli_authority::LOCAL_SOURCE_OPTION));
+}
+
+DryRunOperation classify_dry_run_operation(
+        const ParsedCliArguments& parsed) {
+    if(parsed.operation.size() >= 2 &&
+       parsed.operation[0] == '-' && parsed.operation[1] == 'S') {
+        bool requests_system_update = false;
+        for(std::size_t i = 2; i < parsed.operation.size(); ++i) {
+            if(parsed.operation[i] != 'y' && parsed.operation[i] != 'u') {
+                return DryRunOperation::Unsupported;
+            }
+            requests_system_update = true;
+        }
+
+        // `--needed` alone has an existing Moguet-owned install projection.
+        // Separate pacman operation modifiers remain generic pass-through;
+        // an owned system update is spelled in the operation token itself.
+        for(const ParsedCliToken& token : parsed.tokens) {
+            switch(token.role) {
+            case CliTokenRole::PacmanOption:
+                if(token.value == "--needed") continue;
+                return DryRunOperation::Unsupported;
+            case CliTokenRole::PacmanOptionValue:
+            case CliTokenRole::EndOfOptions:
+            case CliTokenRole::OpaqueOperand:
+                return DryRunOperation::Unsupported;
+            case CliTokenRole::MoguetGlobalOption:
+            case CliTokenRole::Operation:
+            case CliTokenRole::Target:
+                break;
+            }
+        }
+
+        if(parsed.source_selection == PackageSourceSelection::RepoOnly) {
+            return DryRunOperation::Unsupported;
+        }
+        if(!requests_system_update && parsed.targets.empty() &&
+           parsed.source_selection == PackageSourceSelection::Auto &&
+           !parsed.root_package_selection_requested) {
+            return DryRunOperation::Unsupported;
+        }
+
+        return requests_system_update
+                       ? DryRunOperation::SyncSystemUpdate
+                       : DryRunOperation::SyncInstall;
+    }
+
+    const cli_authority::OperationSpec* operation =
+            cli_authority::find_moguet_operation(parsed.operation);
+    if(operation == nullptr) return DryRunOperation::Unsupported;
+    if(parsed.root_package_selection_requested ||
+       parsed.source_selection != PackageSourceSelection::Auto) {
+        return DryRunOperation::Unsupported;
+    }
+    const bool has_unexpected_custom_token = std::any_of(
+            parsed.tokens.begin(), parsed.tokens.end(),
+            [](const ParsedCliToken& token) {
+                return token.role != CliTokenRole::MoguetGlobalOption &&
+                       token.role != CliTokenRole::Operation &&
+                       token.role != CliTokenRole::Target;
+            });
+
+    switch(operation->id) {
+    case cli_authority::OperationId::Build: {
+        const bool local_build = local_source_build_requested(parsed);
+        std::size_t local_selector_count = 0;
+        for(const ParsedCliToken& token : parsed.tokens) {
+            switch(token.role) {
+            case CliTokenRole::PacmanOption:
+                if(local_build &&
+                   token.value == cli_authority::LOCAL_SOURCE_OPTION) {
+                    ++local_selector_count;
+                    break;
+                }
+                return DryRunOperation::Unsupported;
+            case CliTokenRole::PacmanOptionValue:
+            case CliTokenRole::EndOfOptions:
+            case CliTokenRole::OpaqueOperand:
+                return DryRunOperation::Unsupported;
+            case CliTokenRole::MoguetGlobalOption:
+            case CliTokenRole::Operation:
+            case CliTokenRole::Target:
+                break;
+            }
+        }
+        if(local_build && local_selector_count != 1) {
+            return DryRunOperation::Unsupported;
+        }
+        return local_build ? DryRunOperation::LocalBuild
+                           : DryRunOperation::RemoteBuild;
+    }
+    case cli_authority::OperationId::Fetch:
+        return has_unexpected_custom_token || parsed.targets.empty()
+                       ? DryRunOperation::Unsupported
+                       : DryRunOperation::Fetch;
+    case cli_authority::OperationId::Upgrade:
+        return has_unexpected_custom_token || !parsed.targets.empty()
+                       ? DryRunOperation::Unsupported
+                       : DryRunOperation::Upgrade;
+    case cli_authority::OperationId::UpgradeAur:
+        return has_unexpected_custom_token || !parsed.targets.empty()
+                       ? DryRunOperation::Unsupported
+                       : DryRunOperation::UpgradeAur;
+    case cli_authority::OperationId::UpgradeAll:
+        return has_unexpected_custom_token || !parsed.targets.empty()
+                       ? DryRunOperation::Unsupported
+                       : DryRunOperation::UpgradeAll;
+    case cli_authority::OperationId::Clean:
+    case cli_authority::OperationId::Deps:
+    case cli_authority::OperationId::Plan:
+    case cli_authority::OperationId::AddSource:
+    case cli_authority::OperationId::DeleteSource:
+    case cli_authority::OperationId::Revert:
+    case cli_authority::OperationId::EditSource:
+    case cli_authority::OperationId::ListSources:
+    case cli_authority::OperationId::Count:
+        return DryRunOperation::Unsupported;
+    }
+    return DryRunOperation::Unsupported;
 }
 
 LocalSourceBuildInvocation require_local_source_build_invocation(

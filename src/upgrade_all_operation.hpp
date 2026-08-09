@@ -314,12 +314,96 @@ public:
 #endif
 };
 
+// Fresh repository inventory, AUR query, and filtered production preflight.
+// The exact authority is shared by dry-run projection and actual execution;
+// cache activation remains owned by actual execution.
+class PreparedUpgradeAllAurPreflight final {
+    PreparedUpgradeAllAurPreflight() = default;
+
+    void prepare_foreign_inventory_stage();
+    void prepare_aur_query_stage();
+    void prepare_filtered_operation_stage(
+            const UpgradeAllOperationPreparedSnapshot& prepared,
+            const AppConfig& config,
+            std::optional<ValidatedCacheRoot> cache_root);
+
+    UpgradeAllForeignInventoryPhaseResult foreign_inventory_;
+    std::optional<AurUpdateQueryResult> aur_query_result_;
+    std::optional<PreparedFilteredAurUpdateOperation> filtered_operation_;
+    std::vector<UpgradeAllOperationIssue> issues_;
+    UpgradeAllOperationPhase stopped_phase_ = UpgradeAllOperationPhase::None;
+    std::optional<std::string> diagnostic_;
+
+    friend PreparedUpgradeAllAurPreflight
+    prepare_upgrade_all_aur_preflight(
+            const UpgradeAllOperationPreparedSnapshot& prepared,
+            const AppConfig& config);
+    friend UpgradeAllOperationResult execute_prepared_upgrade_all_operation(
+            PreparedUpgradeAllOperation prepared,
+            const AppConfig& config);
+
+public:
+    PreparedUpgradeAllAurPreflight(
+            const PreparedUpgradeAllAurPreflight&) = delete;
+    PreparedUpgradeAllAurPreflight& operator=(
+            const PreparedUpgradeAllAurPreflight&) = delete;
+    PreparedUpgradeAllAurPreflight(
+            PreparedUpgradeAllAurPreflight&&) noexcept = default;
+    PreparedUpgradeAllAurPreflight& operator=(
+            PreparedUpgradeAllAurPreflight&&) = delete;
+    ~PreparedUpgradeAllAurPreflight() noexcept = default;
+
+    [[nodiscard]] bool has_filtered_operation() const noexcept {
+        return filtered_operation_.has_value();
+    }
+    [[nodiscard]] UpgradeAllOperationPhase stopped_phase() const noexcept {
+        return stopped_phase_;
+    }
+    [[nodiscard]] const UpgradeAllForeignInventoryPhaseResult&
+    foreign_inventory() const noexcept {
+        return foreign_inventory_;
+    }
+    [[nodiscard]] const AurUpdateQueryResult* aur_query_result()
+            const noexcept {
+        if(filtered_operation_.has_value()) {
+            return &filtered_operation_->original_query_result();
+        }
+        return aur_query_result_.has_value()
+                ? &aur_query_result_.value()
+                : nullptr;
+    }
+    [[nodiscard]] const AurUpdateExecutionPreflight* aur_preflight()
+            const noexcept {
+        return filtered_operation_.has_value()
+                ? &filtered_operation_->execution_preflight()
+                : nullptr;
+    }
+    [[nodiscard]] const PreparedFilteredAurUpdateOperation*
+    filtered_operation() const noexcept {
+        return filtered_operation_.has_value()
+                ? &filtered_operation_.value()
+                : nullptr;
+    }
+    [[nodiscard]] const std::vector<UpgradeAllOperationIssue>& issues()
+            const noexcept {
+        return issues_;
+    }
+    [[nodiscard]] const std::optional<std::string>& diagnostic()
+            const noexcept {
+        return diagnostic_;
+    }
+};
+
 // blocked resultとexecutable capabilityを同時に返さないsum type。
 using UpgradeAllOperationPreparation = std::variant<
         PreparedUpgradeAllOperation,
         UpgradeAllOperationResult>;
 
 UpgradeAllOperationPreparation prepare_upgrade_all_operation(
+        const AppConfig& config);
+
+PreparedUpgradeAllAurPreflight prepare_upgrade_all_aur_preflight(
+        const UpgradeAllOperationPreparedSnapshot& prepared,
         const AppConfig& config);
 
 // by-value consumeによりouterとnested capabilityを最初のsystem mutation前に

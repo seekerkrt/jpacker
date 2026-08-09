@@ -53,6 +53,17 @@ source routeのselection、preflight、partial completion、failureの詳細は�
 
 `deps`、`plan`、`fetch`、`-G`、`-Gp`は調査・表示・取得段階であり、build / installを混ぜない。`deps`の`--recursive`を除き、Moguet固有operationに未対応optionを指定した場合は停止する。
 
+<a id="compat-dry-run"></a>
+## Unified dry-run compatibility
+
+global `--dry-run`は、Moguet-owned supported `-S` install / system-update、`fetch`、remote `build`、local `build --local`、`upgrade`、`upgrade-aur`、`upgrade-all`だけを統一planとして観測する。nested `dry-run` commandやpacman自身の`--print`への委譲ではない。`deps`、`plan`、`-Ss`、`-Si`、`clean`、`-G` / `-Gp`、source-preference command、未裁定generic pacman pass-throughを含むその他のrouteでは明示的にnon-zeroで拒否する。
+
+観測は各routeの既存production pre-mutation authorityを使い、root discovery、route projection、`BuildPlan`、provider selection、constraint evaluation、read-only local descriptor validation、AUR update preflight、required artifact、repository transaction intentをhuman-readableに表示する。read-only filesystem / network accessと、`pacman -Si` / `pacman -Qm`等のexact allowlist済みread-only discovery queryは実行し得る。statusは既存authorityから得た`Ready` / `NoOp`を終了code 0、`Blocked`をnon-zeroとし、renderer-local completenessから再計算しない。partial source failureやtyped blockerをreadyへflattenしない。
+
+absolute no-mutation boundaryとして、dry-runはstate log / persistent stateのwriteやdirectory作成、cache、workspace、worktree、Git clone / fetch / checkout mutation、`makepkg --printsrcinfo`その他のlocal metadata生成・評価、build output、sudo、pacman transactionの開始・mutation、pacman transaction lock、install、cleanup mutationへ到達しない。local routeは安全な既存descriptorだけを使い、metadata評価が必要ならreadyを推測せず`Blocked`とする。
+
+dry-run observationはapproval token、prepared execution capability、cached provider choiceではない。後続のactual invocationへ渡さず、actual routeはcurrent stateからproduction validationとprovider selectionを再実行する。v2.2.0ではhuman-readable outputだけを提供し、JSON / machine-readable schemaは追加しない。
+
 <a id="compat-aur-update"></a>
 ## AUR update operation summary
 

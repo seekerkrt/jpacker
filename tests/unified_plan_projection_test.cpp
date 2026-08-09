@@ -1,3 +1,4 @@
+#include "aur_update_execution_preparation.hpp"
 #include "aur_update_execution_preflight.hpp"
 #include "aur_update_query.hpp"
 #include "commands_sync.hpp"
@@ -177,6 +178,12 @@ static_assert(!std::constructible_from<
                       const RootPackageInstallPreparationFailure>,
               RootPackageInstallPreparationFailure&&>);
 static_assert(!std::constructible_from<
+              std::reference_wrapper<const PreparedSyncInstall>,
+              PreparedSyncInstall&&>);
+static_assert(!std::constructible_from<
+              std::reference_wrapper<const SyncInstallPreparationFailure>,
+              SyncInstallPreparationFailure&&>);
+static_assert(!std::constructible_from<
               std::reference_wrapper<const BuildPlan>, BuildPlan&&>);
 static_assert(!std::constructible_from<
               std::reference_wrapper<const LocalBuildPlan>,
@@ -227,6 +234,22 @@ const UnifiedPlanObservation& require_observation(
             result.observation() != nullptr,
             std::string(context) + " observation is missing");
     return *result.observation();
+}
+
+template<typename Detail>
+std::size_t count_route_preflight_blockers(
+        const UnifiedPlanObservation& observation) {
+    return static_cast<std::size_t>(std::count_if(
+            observation.blockers().begin(), observation.blockers().end(),
+            [](const UnifiedPlanBlocker& blocker) {
+                const auto* route =
+                        std::get_if<RoutePreflightUnifiedPlanBlocker>(
+                                &blocker);
+                return route != nullptr &&
+                       std::holds_alternative<
+                               UnifiedPlanBorrowedAuthorityReference<Detail>>(
+                               route->detail);
+            }));
 }
 
 bool has_phase(
@@ -983,6 +1006,36 @@ void test_local_and_no_op_phases() {
                             UnifiedPlanAuthorityOwner::AurRpc),
             "local route fabricated AUR metadata discovery");
 
+    const LocalSourceRoot stale_source_root = open_local_source_root(
+            "tests/fixtures/pkgbuild-export", true);
+    expect(
+            stale_source_root.metadata().state() ==
+                    LocalSourceMetadataState::KnownStale,
+            "local one-off environment fixture did not require evaluation");
+    const std::unique_ptr<UnifiedPlanProjection> metadata_blocked_projection =
+            project_local_source_unified_plan(
+                    LocalSourceUnifiedPlanProjectionInput{
+                            LocalSourceMetadataEvaluationProjectionInput{
+                                    std::cref(stale_source_root)},
+                            false});
+    const UnifiedPlanObservation& metadata_blocked = require_observation(
+            *metadata_blocked_projection,
+            "local metadata evaluation-required");
+    expect(
+            metadata_blocked.status() ==
+                            UnifiedPlanObservationStatus::Blocked &&
+                    metadata_blocked.transaction_intents().empty() &&
+                    metadata_blocked.blockers().size() == 1 &&
+                    std::holds_alternative<
+                            LocalSourceMetadataEvaluationUnifiedPlanBlocker>(
+                            metadata_blocked.blockers().front()) &&
+                    &std::get<
+                             LocalSourceMetadataEvaluationUnifiedPlanBlocker>(
+                             metadata_blocked.blockers().front())
+                             .detail.get() ==
+                            &stale_source_root.metadata(),
+            "local metadata evaluation requirement was inferred as Ready or copied");
+
     const AurUpdateQueryResult query = update_query(
             AurUpdateClassification::UpToDate);
     const AurUpdateExecutionPreflight preflight = no_op_update_preflight();
@@ -1009,6 +1062,697 @@ void test_local_and_no_op_phases() {
                             UnifiedPlanObservationPhase::
                                     SourceArtifactInstall),
             "NoOp route fabricated mutation phases");
+}
+
+void test_aur_update_source_preparation_blocker() {
+    const AurUpdateQueryResult query = update_query();
+    const AurUpdateExecutionPreflight preflight =
+            executable_update_preflight(build_plan_fixture());
+    AurUpdateSourceBuildPreparation source_preparation;
+    AurUpdatePreparationIssue issue;
+    issue.reason = AurUpdatePreparationReason::SourcePreferenceUnavailable;
+    issue.package_name = "suite-child";
+    issue.package_base = "suite-base";
+    issue.diagnostic = "fixture strict source preference failure";
+    source_preparation.issues.push_back(std::move(issue));
+
+    const std::unique_ptr<UnifiedPlanProjection> projection =
+            project_aur_update_unified_plan(
+                    AurUpdateUnifiedPlanProjectionInput{
+                            std::cref(query), std::cref(preflight), false,
+                            std::cref(source_preparation)});
+    const UnifiedPlanObservation& observation = require_observation(
+            *projection, "AUR source preparation blocker");
+    expect(
+            observation.status() == UnifiedPlanObservationStatus::Blocked &&
+                    observation.transaction_intents().empty(),
+            "AUR source preparation failure was flattened to Ready");
+    const auto* blocker = std::get_if<RoutePreflightUnifiedPlanBlocker>(
+            &observation.blockers().back());
+    expect(
+            blocker != nullptr &&
+                    std::holds_alternative<
+                            UnifiedPlanBorrowedAuthorityReference<
+                                    AurUpdatePreparationIssue>>(
+                            blocker->detail) &&
+                    &std::get<UnifiedPlanBorrowedAuthorityReference<
+                            AurUpdatePreparationIssue>>(blocker->detail)
+                             .get() == &source_preparation.issues.front(),
+            "AUR source preparation blocker lost its production authority");
+}
+
+AurUpdateSourceBuildPreparation blocking_preflight_preparation_fixture(
+        const AurUpdateExecutionPreflight& preflight) {
+    AurUpdateSourceBuildPreparation preparation;
+    for(const AurUpdateExecutionTarget& target : preflight.targets) {
+        for(const AurUpdateExecutionIssue& preflight_issue : target.issues) {
+            // Mirror retain_preflight_blockers(): the wrapper keeps an owned
+            // copy of the original typed issue and only target-index
+            // attribution.
+            AurUpdatePreparationIssue wrapper;
+            wrapper.reason = AurUpdatePreparationReason::BlockingPreflight;
+            wrapper.affected_update_plan_indices = {
+                    target.update_plan_index};
+            wrapper.package_name = preflight_issue.package_name;
+            wrapper.package_base = preflight_issue.package_base;
+            wrapper.preflight_issue = preflight_issue;
+            wrapper.diagnostic = preflight_issue.diagnostic;
+            preparation.issues.push_back(std::move(wrapper));
+        }
+    }
+    return preparation;
+}
+
+std::size_t count_preparation_blockers_with_reason(
+        const UnifiedPlanObservation& observation,
+        AurUpdatePreparationReason reason) {
+    return static_cast<std::size_t>(std::count_if(
+            observation.blockers().begin(), observation.blockers().end(),
+            [reason](const UnifiedPlanBlocker& blocker) {
+                const auto* route =
+                        std::get_if<RoutePreflightUnifiedPlanBlocker>(
+                                &blocker);
+                if(route == nullptr) return false;
+                const auto* preparation = std::get_if<
+                        UnifiedPlanBorrowedAuthorityReference<
+                                AurUpdatePreparationIssue>>(
+                        &route->detail);
+                return preparation != nullptr &&
+                       preparation->get().reason == reason;
+            }));
+}
+
+void expect_blocking_preflight_projection(
+        const AurUpdateQueryResult& query,
+        const AurUpdateExecutionPreflight& preflight,
+        const AurUpdateSourceBuildPreparation& preparation,
+        std::size_t original_issue_count,
+        const std::vector<AurUpdatePreparationReason>& preparation_reasons,
+        std::string_view context) {
+    auto verify = [&](const UnifiedPlanObservation& observation,
+                      std::string_view route) {
+        const std::string route_context =
+                std::string(context) + " " + std::string(route);
+        expect(
+                observation.status() == UnifiedPlanObservationStatus::Blocked &&
+                        observation.transaction_intents().empty() &&
+                        count_route_preflight_blockers<
+                                AurUpdateExecutionIssue>(observation) ==
+                                original_issue_count &&
+                        count_route_preflight_blockers<
+                                AurUpdatePreparationIssue>(observation) ==
+                                preparation_reasons.size(),
+                route_context + " projected unexpected blocker authorities");
+        for(const AurUpdatePreparationReason reason : preparation_reasons) {
+            const std::size_t expected_count =
+                    static_cast<std::size_t>(std::count(
+                            preparation_reasons.begin(),
+                            preparation_reasons.end(), reason));
+            expect(
+                    count_preparation_blockers_with_reason(
+                            observation, reason) == expected_count,
+                    route_context + " lost a typed preparation blocker");
+        }
+    };
+
+    const std::unique_ptr<UnifiedPlanProjection> aur_projection =
+            project_aur_update_unified_plan(
+                    AurUpdateUnifiedPlanProjectionInput{
+                            std::cref(query), std::cref(preflight), false,
+                            std::cref(preparation)});
+    verify(
+            require_observation(*aur_projection, context), "upgrade-aur");
+
+    SystemSourceUpgradePreparedSnapshot system_snapshot;
+    const std::vector<SystemSourceUpgradeIssue> system_issues;
+    const std::vector<ProductionSourceBuildWorkItem> system_work;
+    const SystemSourceUpgradeProjectionAuthority system_authority =
+            UnifiedPlanProjectionTestAccess::make_system_source(
+                    system_snapshot, nullptr, system_issues, system_work);
+    const UpgradeAllOperationPreparedSnapshot aggregate_snapshot{
+            system_snapshot, {}, {}};
+    const UpgradeAllOperationProjectionAuthority aggregate_authority =
+            UnifiedPlanProjectionTestAccess::make_upgrade_all(
+                    aggregate_snapshot, system_authority);
+    const std::vector<UpgradeAllOperationIssue> aggregate_issues;
+    const std::unique_ptr<UnifiedPlanProjection> upgrade_projection =
+            project_upgrade_all_unified_plan(
+                    UpgradeAllUnifiedPlanProjectionInput{
+                            std::cref(aggregate_authority),
+                            std::cref(query), std::cref(preflight),
+                            std::cref(aggregate_issues),
+                            std::cref(preparation)});
+    verify(
+            require_observation(*upgrade_projection, context), "upgrade-all");
+}
+
+AurUpdateExecutionPreflight blocking_preflight_fixture(
+        AurUpdateExecutionIssue issue) {
+    AurUpdateExecutionTarget target;
+    target.update_plan_index = 0;
+    target.update = update_entry();
+    target.status = AurUpdateExecutionTargetStatus::Incomplete;
+    target.issues.push_back(std::move(issue));
+    return AurUpdateExecutionPreflight{{std::move(target)}, std::nullopt};
+}
+
+BuildPlanArtifactTargetProjectionIssue projection_issue_fixture(
+        BuildPlanArtifactTargetProjectionIssueKind kind,
+        std::vector<RootTargetIdentity> roots) {
+    BuildPlanArtifactTargetProjectionIssue issue;
+    issue.kind = kind;
+    issue.build_plan_order_index = 0;
+    issue.entry_package_name_index = 0;
+    issue.package_target_indices = {0};
+    issue.package_base = "suite-base";
+    issue.package_name = "suite-child";
+    issue.roots = std::move(roots);
+    issue.diagnostic = "fixture build-plan projection issue";
+    return issue;
+}
+
+AurUpdateExecutionPreflight projection_blocking_preflight_fixture(
+        AurUpdateExecutionReason reason,
+        BuildPlanArtifactTargetProjectionIssueKind kind,
+        std::vector<RootTargetIdentity> roots) {
+    BuildPlan plan = build_plan_fixture();
+    // Keep root identity valid while making artifact projection take its
+    // typed DesiredInstallReasonUnavailable failure path.
+    plan.package_targets.front().roles.push_back(
+            static_cast<PackageRole>(999));
+
+    AurUpdateExecutionIssue issue{
+            reason, "suite-child", "suite-base", std::nullopt,
+            "fixture blocking projection issue",
+            projection_issue_fixture(kind, std::move(roots))};
+    AurUpdateExecutionTarget target;
+    target.update_plan_index = 0;
+    target.build_plan_root_index = 0;
+    target.update = update_entry();
+    target.status = AurUpdateExecutionTargetStatus::Incomplete;
+    target.issues.push_back(std::move(issue));
+    return AurUpdateExecutionPreflight{
+            {std::move(target)}, std::move(plan)};
+}
+
+void test_aur_update_blocking_preflight_wrapper_is_not_duplicated() {
+    const AurUpdateQueryResult query = update_query();
+    const AurUpdateExecutionPreflight preflight = blocking_preflight_fixture(
+            AurUpdateExecutionIssue{
+                    AurUpdateExecutionReason::BuildPlanInconsistent,
+                    "suite-child", "suite-base", std::nullopt,
+                    "fixture blocking preflight issue"});
+    const AurUpdateSourceBuildPreparation preparation =
+            blocking_preflight_preparation_fixture(preflight);
+    expect_blocking_preflight_projection(
+            query, preflight, preparation, 1, {},
+            "producer-shaped blocking preflight");
+
+    const RootTargetIdentity root{0, "suite-child"};
+    const AurUpdateExecutionPreflight projection_preflight =
+            projection_blocking_preflight_fixture(
+                    AurUpdateExecutionReason::BuildPlanInconsistent,
+                    BuildPlanArtifactTargetProjectionIssueKind::
+                            DesiredInstallReasonUnavailable,
+                    {root});
+    const AurUpdateSourceBuildPreparation projection_preparation =
+            blocking_preflight_preparation_fixture(projection_preflight);
+    expect_blocking_preflight_projection(
+            query, projection_preflight, projection_preparation, 1, {},
+            "producer-shaped projection preflight");
+
+    AurUpdateExecutionTarget multiple_target;
+    multiple_target.update_plan_index = 0;
+    multiple_target.update = update_entry();
+    multiple_target.status = AurUpdateExecutionTargetStatus::Incomplete;
+    multiple_target.issues.push_back(AurUpdateExecutionIssue{
+            AurUpdateExecutionReason::BuildPlanInconsistent,
+            "suite-child", "suite-base", std::nullopt,
+            "fixture first blocking issue"});
+    multiple_target.issues.push_back(AurUpdateExecutionIssue{
+            AurUpdateExecutionReason::UnresolvedDependency,
+            "suite-child", "suite-base", "fixture-runtime",
+            "fixture second blocking issue"});
+    const AurUpdateExecutionPreflight multiple_preflight{
+            {std::move(multiple_target)}, std::nullopt};
+    const AurUpdateSourceBuildPreparation multiple_preparation =
+            blocking_preflight_preparation_fixture(multiple_preflight);
+    expect_blocking_preflight_projection(
+            query, multiple_preflight, multiple_preparation, 2, {},
+            "multiple unrelated blocking preflight issues");
+}
+
+void test_malformed_blocking_preflight_wrappers_are_retained() {
+    const AurUpdateQueryResult query = update_query();
+    const AurUpdateExecutionPreflight preflight = blocking_preflight_fixture(
+            AurUpdateExecutionIssue{
+                    AurUpdateExecutionReason::BuildPlanInconsistent,
+                    "suite-child", "suite-base", std::nullopt,
+                    "fixture blocking preflight issue"});
+
+    AurUpdateSourceBuildPreparation affected_root =
+            blocking_preflight_preparation_fixture(preflight);
+    affected_root.issues.front().affected_roots.push_back(
+            RootTargetIdentity{0, "suite-child"});
+    expect_blocking_preflight_projection(
+            query, preflight, affected_root, 1,
+            {AurUpdatePreparationReason::BlockingPreflight},
+            "blocking wrapper with affected root");
+
+    AurUpdateSourceBuildPreparation source_preference =
+            blocking_preflight_preparation_fixture(preflight);
+    source_preference.issues.front().source_preference_failure =
+            SourcePreferenceFailure{
+                    SourcePreferenceFailureKind::AuthorityUnavailable,
+                    "fixture-source-preference", std::nullopt, std::nullopt,
+                    "fixture source-preference failure"};
+    expect_blocking_preflight_projection(
+            query, preflight, source_preference, 1,
+            {AurUpdatePreparationReason::BlockingPreflight},
+            "blocking wrapper with source-preference attribution");
+
+    AurUpdateSourceBuildPreparation package_metadata =
+            blocking_preflight_preparation_fixture(preflight);
+    package_metadata.issues.front().package_metadata_failure =
+            PackageMetadataFailure{
+                    PackageMetadataErrorCode::LocalDatabaseUnavailable,
+                    "fixture package metadata failure"};
+    expect_blocking_preflight_projection(
+            query, preflight, package_metadata, 1,
+            {AurUpdatePreparationReason::BlockingPreflight},
+            "blocking wrapper with package-metadata attribution");
+
+    AurUpdateSourceBuildPreparation outer_projection =
+            blocking_preflight_preparation_fixture(preflight);
+    outer_projection.issues.front().build_plan_projection_issue =
+            projection_issue_fixture(
+                    BuildPlanArtifactTargetProjectionIssueKind::
+                            DesiredInstallReasonUnavailable,
+                    {RootTargetIdentity{0, "suite-child"}});
+    expect_blocking_preflight_projection(
+            query, preflight, outer_projection, 1,
+            {AurUpdatePreparationReason::BlockingPreflight},
+            "blocking wrapper with outer projection attribution");
+
+    const AurUpdateExecutionPreflight unknown_reason_preflight =
+            blocking_preflight_fixture(AurUpdateExecutionIssue{
+                    static_cast<AurUpdateExecutionReason>(999),
+                    "suite-child", "suite-base", std::nullopt,
+                    "fixture unknown preflight reason"});
+    const AurUpdateSourceBuildPreparation unknown_reason =
+            blocking_preflight_preparation_fixture(
+                    unknown_reason_preflight);
+    expect_blocking_preflight_projection(
+            query, unknown_reason_preflight, unknown_reason, 1,
+            {AurUpdatePreparationReason::BlockingPreflight},
+            "blocking wrapper with unknown nested reason");
+
+    const AurUpdateExecutionPreflight none_reason_preflight =
+            blocking_preflight_fixture(AurUpdateExecutionIssue{
+                    AurUpdateExecutionReason::None,
+                    "suite-child", "suite-base", std::nullopt,
+                    "fixture absent preflight reason"});
+    const AurUpdateSourceBuildPreparation none_reason =
+            blocking_preflight_preparation_fixture(none_reason_preflight);
+    expect_blocking_preflight_projection(
+            query, none_reason_preflight, none_reason, 1,
+            {AurUpdatePreparationReason::BlockingPreflight},
+            "blocking wrapper with None nested reason");
+
+    const RootTargetIdentity root{0, "suite-child"};
+    const AurUpdateExecutionPreflight unknown_kind_preflight =
+            projection_blocking_preflight_fixture(
+                    AurUpdateExecutionReason::BuildPlanInconsistent,
+                    static_cast<
+                            BuildPlanArtifactTargetProjectionIssueKind>(999),
+                    {root});
+    const AurUpdateSourceBuildPreparation unknown_kind =
+            blocking_preflight_preparation_fixture(unknown_kind_preflight);
+    expect_blocking_preflight_projection(
+            query, unknown_kind_preflight, unknown_kind, 1,
+            {AurUpdatePreparationReason::BlockingPreflight},
+            "blocking wrapper with unknown projection kind");
+
+    const AurUpdateExecutionPreflight mismatched_reason_preflight =
+            projection_blocking_preflight_fixture(
+                    AurUpdateExecutionReason::PackageBaseMismatch,
+                    BuildPlanArtifactTargetProjectionIssueKind::
+                            DesiredInstallReasonUnavailable,
+                    {root});
+    const AurUpdateSourceBuildPreparation mismatched_reason =
+            blocking_preflight_preparation_fixture(
+                    mismatched_reason_preflight);
+    expect_blocking_preflight_projection(
+            query, mismatched_reason_preflight, mismatched_reason, 1,
+            {AurUpdatePreparationReason::BlockingPreflight},
+            "blocking wrapper with mismatched reason and projection kind");
+
+    const AurUpdateExecutionPreflight mismatched_root_preflight =
+            projection_blocking_preflight_fixture(
+                    AurUpdateExecutionReason::BuildPlanInconsistent,
+                    BuildPlanArtifactTargetProjectionIssueKind::
+                            DesiredInstallReasonUnavailable,
+                    {RootTargetIdentity{1, "other-root"}});
+    const AurUpdateSourceBuildPreparation mismatched_root =
+            blocking_preflight_preparation_fixture(
+                    mismatched_root_preflight);
+    expect_blocking_preflight_projection(
+            query, mismatched_root_preflight, mismatched_root, 1,
+            {AurUpdatePreparationReason::BlockingPreflight},
+            "blocking wrapper with cross-target projection root");
+
+    const AurUpdateExecutionPreflight extra_root_preflight =
+            projection_blocking_preflight_fixture(
+                    AurUpdateExecutionReason::BuildPlanInconsistent,
+                    BuildPlanArtifactTargetProjectionIssueKind::
+                            DesiredInstallReasonUnavailable,
+                    {root, RootTargetIdentity{1, "unknown-root"}});
+    const AurUpdateSourceBuildPreparation extra_root =
+            blocking_preflight_preparation_fixture(extra_root_preflight);
+    expect_blocking_preflight_projection(
+            query, extra_root_preflight, extra_root, 1,
+            {AurUpdatePreparationReason::BlockingPreflight},
+            "blocking wrapper with additional unknown projection root");
+
+    const AurUpdateExecutionPreflight duplicate_root_preflight =
+            projection_blocking_preflight_fixture(
+                    AurUpdateExecutionReason::BuildPlanInconsistent,
+                    BuildPlanArtifactTargetProjectionIssueKind::
+                            DesiredInstallReasonUnavailable,
+                    {root, root});
+    const AurUpdateSourceBuildPreparation duplicate_root =
+            blocking_preflight_preparation_fixture(
+                    duplicate_root_preflight);
+    expect_blocking_preflight_projection(
+            query, duplicate_root_preflight, duplicate_root, 1,
+            {AurUpdatePreparationReason::BlockingPreflight},
+            "blocking wrapper with duplicate projection root");
+}
+
+void test_strict_preparation_blockers_are_not_suppressed() {
+    const AurUpdateQueryResult query = update_query();
+    const AurUpdateExecutionPreflight preflight = blocking_preflight_fixture(
+            AurUpdateExecutionIssue{
+                    AurUpdateExecutionReason::BuildPlanInconsistent,
+                    "suite-child", "suite-base", std::nullopt,
+                    "fixture blocking preflight issue"});
+    AurUpdateSourceBuildPreparation preparation =
+            blocking_preflight_preparation_fixture(preflight);
+
+    AurUpdatePreparationIssue source_preference;
+    source_preference.reason =
+            AurUpdatePreparationReason::SourcePreferenceUnavailable;
+    source_preference.affected_update_plan_indices = {0};
+    source_preference.package_name = "suite-child";
+    source_preference.package_base = "suite-base";
+    source_preference.source_preference_failure = SourcePreferenceFailure{
+            SourcePreferenceFailureKind::AuthorityUnavailable,
+            "fixture-source-preference", std::nullopt, std::nullopt,
+            "fixture source-preference failure"};
+    source_preference.diagnostic = "fixture source-preference blocker";
+    preparation.issues.push_back(std::move(source_preference));
+
+    AurUpdatePreparationIssue pkgdest;
+    pkgdest.reason =
+            AurUpdatePreparationReason::SourcePreferencePkgdestConflict;
+    pkgdest.affected_update_plan_indices = {0};
+    pkgdest.package_name = "suite-child";
+    pkgdest.package_base = "suite-base";
+    pkgdest.diagnostic = "fixture PKGDEST blocker";
+    preparation.issues.push_back(std::move(pkgdest));
+
+    AurUpdatePreparationIssue static_work;
+    static_work.reason = AurUpdatePreparationReason::StaticWorkItemInvalid;
+    static_work.affected_update_plan_indices = {0};
+    static_work.package_name = "suite-child";
+    static_work.package_base = "suite-base";
+    static_work.diagnostic = "fixture static work blocker";
+    preparation.issues.push_back(std::move(static_work));
+
+    AurUpdatePreparationIssue pacman_database;
+    pacman_database.reason =
+            AurUpdatePreparationReason::PacmanDatabaseUnavailable;
+    pacman_database.affected_update_plan_indices = {0};
+    pacman_database.package_metadata_failure = PackageMetadataFailure{
+            PackageMetadataErrorCode::LocalDatabaseUnavailable,
+            "fixture Pacman database failure"};
+    pacman_database.diagnostic = "fixture Pacman database blocker";
+    preparation.issues.push_back(std::move(pacman_database));
+
+    expect_blocking_preflight_projection(
+            query, preflight, preparation, 1,
+            {AurUpdatePreparationReason::SourcePreferenceUnavailable,
+             AurUpdatePreparationReason::SourcePreferencePkgdestConflict,
+             AurUpdatePreparationReason::StaticWorkItemInvalid,
+             AurUpdatePreparationReason::PacmanDatabaseUnavailable},
+            "strict preparation blockers");
+}
+
+void test_fetch_and_remote_source_build_adapters() {
+    FetchPreparation fetch{build_plan_fixture(), "suite-child"};
+    fetch.plan.metadata_risks.push_back(BuildPlanMetadataRisk{
+            "suite-child", "suite-base", {"legacy-suite"}, {}});
+    const std::unique_ptr<UnifiedPlanProjection> fetch_projection =
+            project_fetch_unified_plan(
+                    FetchUnifiedPlanProjectionInput{std::cref(fetch)});
+    const UnifiedPlanObservation& fetch_observation = require_observation(
+            *fetch_projection, "fetch production plan");
+    expect(
+            fetch_observation.status() ==
+                            UnifiedPlanObservationStatus::Ready &&
+                    fetch_observation.transaction_intents().empty() &&
+                    fetch_observation.build_units().size() ==
+                            fetch.plan.order.size() &&
+                    has_phase(
+                            fetch_observation,
+                            UnifiedPlanObservationPhase::SourceRetrieval,
+                            UnifiedPlanAuthorityOwner::Git),
+            "fetch adapter treated review-only metadata risk as an execution blocker");
+
+    FetchPreparation blocked_fetch{build_plan_fixture(), "suite-child"};
+    blocked_fetch.plan.unresolved.push_back("missing-runtime");
+    const std::unique_ptr<UnifiedPlanProjection> blocked_fetch_projection =
+            project_fetch_unified_plan(
+                    FetchUnifiedPlanProjectionInput{
+                            std::cref(blocked_fetch)});
+    const UnifiedPlanObservation& blocked_fetch_observation =
+            require_observation(
+                    *blocked_fetch_projection, "blocked fetch plan");
+    expect(
+            blocked_fetch_observation.status() ==
+                            UnifiedPlanObservationStatus::Blocked &&
+                    !has_phase(
+                            blocked_fetch_observation,
+                            UnifiedPlanObservationPhase::SourceRetrieval),
+            "fetch BuildPlan blocker exposed retrieval mutation");
+
+    PreparedRemoteSourceBuild repository_build;
+    repository_build.source = ResolvedSourceBuildIdentity{
+            "repo-child", "repo-child", "repo:repo-child",
+            "https://gitlab.archlinux.org/archlinux/packaging/packages/repo-child.git",
+            SourceBuildSourceKind::Repository, false};
+    ProductionSourceBuildWorkItem repository_work =
+            source_work_item("repo-child", "repo-child");
+    repository_work.request.git_url = repository_build.source.git_url;
+    repository_build.invocation.work_items.push_back(
+            std::move(repository_work));
+    const std::unique_ptr<UnifiedPlanProjection> repository_projection =
+            project_remote_source_build_unified_plan(
+                    RemoteSourceBuildUnifiedPlanProjectionInput{
+                            std::cref(repository_build)});
+    const UnifiedPlanObservation& repository_observation =
+            require_observation(
+                    *repository_projection,
+                    "repository remote source build");
+    expect(
+            repository_observation.status() ==
+                            UnifiedPlanObservationStatus::Ready &&
+                    repository_observation.required_artifacts().size() == 1 &&
+                    std::holds_alternative<
+                            PreparedRemoteSourceBuildUnitReference>(
+                            repository_observation.build_units().front()) &&
+                    repository_observation.transaction_intents().size() == 1,
+            "repository remote build lost actual work or install boundary");
+
+    RemoteSourceBuildPlanFailure remote_failure{
+            ResolvedSourceBuildIdentity{
+                    "suite-child", "suite-base", "aur:suite-base",
+                    "https://aur.archlinux.org/suite-base.git",
+                    SourceBuildSourceKind::Aur, false},
+            build_plan_fixture()};
+    remote_failure.plan.unresolved.push_back("missing-runtime");
+    const std::unique_ptr<UnifiedPlanProjection> remote_failure_projection =
+            project_remote_source_build_unified_plan(
+                    RemoteSourceBuildUnifiedPlanProjectionInput{
+                            std::cref(remote_failure)});
+    const UnifiedPlanObservation& remote_failure_observation =
+            require_observation(
+                    *remote_failure_projection,
+                    "remote AUR BuildPlan failure");
+    expect(
+            remote_failure_observation.status() ==
+                            UnifiedPlanObservationStatus::Blocked &&
+                    remote_failure_observation.transaction_intents().empty() &&
+                    !has_phase(
+                            remote_failure_observation,
+                            UnifiedPlanObservationPhase::SourceBuild),
+            "remote AUR BuildPlan failure fabricated executable work");
+}
+
+void test_sync_install_preparation_adapters() {
+    const std::vector<std::string> repository_order{
+            "core", "extra", "multilib"};
+    PreparedSyncInstall prepared;
+    prepared.ordered_roots.push_back(SyncRepositoryTransactionRoot{
+            RootTargetIdentity{0, "repo-root"},
+            RepositoryPackagePresent{
+                    "core", 0, "repo-root", std::nullopt,
+                    repository_order}});
+    prepared.repository_pacman_args = {"repo-root"};
+    prepared.repository_transaction_required = true;
+    prepared.system_update = true;
+    prepared.needed = true;
+
+    const std::unique_ptr<UnifiedPlanProjection> ready_projection =
+            project_sync_install_unified_plan(
+                    SyncInstallUnifiedPlanProjectionInput{
+                            std::cref(prepared)});
+    const UnifiedPlanObservation& ready = require_observation(
+            *ready_projection, "prepared sync install");
+    expect(
+            ready.status() == UnifiedPlanObservationStatus::Ready &&
+                    ready.roots().size() == 1 &&
+                    ready.root_metadata().size() == 1 &&
+                    ready.transaction_intents().size() == 1 &&
+                    std::get<RepositoryPackageTransactionIntent>(
+                            ready.transaction_intents().front())
+                                    .targets.size() == 2 &&
+                    has_phase(
+                            ready,
+                            UnifiedPlanObservationPhase::RepositoryTransaction,
+                            UnifiedPlanAuthorityOwner::Pacman),
+            "prepared sync install lost repository/system-update authority");
+
+    PreparedSyncInstall aur_prepared;
+    aur_prepared.source_selection = PackageSourceSelection::AurOnly;
+    aur_prepared.needed = true;
+    aur_prepared.aur_build_plan.emplace(build_plan_fixture());
+    aur_prepared.ordered_roots.push_back(SyncAurRoot{
+            RootTargetIdentity{0, "suite-child"}, std::nullopt, 0});
+    aur_prepared.source_invocation.emplace();
+    aur_prepared.source_invocation->work_items.push_back(source_work_item(
+            "suite-base", "suite-child",
+            DesiredInstallReason::Explicit, true,
+            SourceBuildSourceKind::Aur, true));
+    aur_prepared.source_invocation->work_items.front()
+            .configured_repository_order =
+            aur_prepared.aur_build_plan->configured_repository_order;
+    aur_prepared.source_invocation->work_items.front()
+            .selected_repository_providers.push_back(
+                    aur_prepared.aur_build_plan->provided.front().provider);
+    aur_prepared.source_invocation->selected_repository_providers.push_back(
+            aur_prepared.aur_build_plan->provided.front().provider);
+    const std::unique_ptr<UnifiedPlanProjection> aur_projection =
+            project_sync_install_unified_plan(
+                    SyncInstallUnifiedPlanProjectionInput{
+                            std::cref(aur_prepared)});
+    const UnifiedPlanObservation& aur_observation = require_observation(
+            *aur_projection, "prepared AUR-only sync install");
+    const auto* aur_repository_transaction = std::get_if<
+            RepositoryPackageTransactionIntent>(
+            &aur_observation.transaction_intents().front());
+    expect(
+            aur_observation.status() ==
+                            UnifiedPlanObservationStatus::Ready &&
+                    aur_observation.transaction_intents().size() == 2 &&
+                    aur_repository_transaction != nullptr &&
+                    aur_repository_transaction->targets.size() == 1 &&
+                    std::holds_alternative<RepositoryProviderInstallIntent>(
+                            aur_repository_transaction->targets.front()),
+            "AUR-only sync duplicated provider transaction authority or required an initial pacman route");
+
+    SyncInstallPreparationFailure failure;
+    failure.details.push_back(SyncInstallPreparationIssue{
+            SyncInstallPreparationIssueKind::InvalidTarget,
+            RootTargetIdentity{0, "invalid-root"}, std::nullopt,
+            "fixture invalid sync target"});
+    const std::unique_ptr<UnifiedPlanProjection> blocked_projection =
+            project_sync_install_unified_plan(
+                    SyncInstallUnifiedPlanProjectionInput{
+                            std::cref(failure)});
+    const UnifiedPlanObservation& blocked = require_observation(
+            *blocked_projection, "blocked sync install");
+    const auto* blocker = std::get_if<
+            SyncInstallPreparationUnifiedPlanBlocker>(
+            &blocked.blockers().front());
+    expect(
+            blocked.status() == UnifiedPlanObservationStatus::Blocked &&
+                    blocked.transaction_intents().empty() &&
+                    blocker != nullptr &&
+                    &blocker->detail.get() == &failure &&
+                    !has_phase(
+                            blocked,
+                            UnifiedPlanObservationPhase::RepositoryTransaction),
+            "blocked sync preparation fabricated transaction authority");
+}
+
+void test_sync_duplicate_repository_source_correlation() {
+    const std::vector<std::string> repository_order{
+            "core", "extra", "multilib"};
+    const RepositoryPackagePresent package{
+            "core", 0, "duplicate-root", std::nullopt,
+            repository_order};
+    const ResolvedSourceBuildIdentity source{
+            "duplicate-root", "duplicate-root", "repo:duplicate-root",
+            "https://gitlab.archlinux.org/archlinux/packaging/packages/duplicate-root.git",
+            SourceBuildSourceKind::Repository, false};
+
+    PreparedSyncInstall prepared;
+    prepared.source_invocation.emplace();
+    for(std::size_t index = 0; index < 2; ++index) {
+        prepared.ordered_roots.push_back(SyncRepositorySourceRoot{
+                RootTargetIdentity{index, "duplicate-root"}, package,
+                source, index});
+        ProductionSourceBuildWorkItem work =
+                source_work_item("duplicate-root", "duplicate-root");
+        work.request.git_url = source.git_url;
+        work.configured_repository_order = repository_order;
+        prepared.source_invocation->work_items.push_back(std::move(work));
+    }
+
+    const std::unique_ptr<UnifiedPlanProjection> projection =
+            project_sync_install_unified_plan(
+                    SyncInstallUnifiedPlanProjectionInput{
+                            std::cref(prepared)});
+    const UnifiedPlanObservation& observation = require_observation(
+            *projection, "duplicate repository source sync roots");
+    expect(
+            observation.status() == UnifiedPlanObservationStatus::Ready &&
+                    observation.roots().size() == 2 &&
+                    observation.build_units().size() == 2 &&
+                    observation.required_artifacts().size() == 2,
+            "duplicate repository source roots became ambiguous or were deduplicated");
+
+    for(std::size_t index = 0; index < 2; ++index) {
+        const auto* root = std::get_if<SyncRepositorySourceRoot>(
+                &prepared.ordered_roots[index]);
+        const auto* unit = std::get_if<PreparedRemoteSourceBuildUnitReference>(
+                &observation.build_units()[index]);
+        expect(
+                root != nullptr &&
+                        root->invocation_correlation.invocation_index ==
+                                index &&
+                        root->source_work_item_index == index &&
+                        observation.roots()[index]
+                                        .invocation_correlation()
+                                        .invocation_index == index &&
+                        unit != nullptr &&
+                        &unit->source() == &root->source &&
+                        &unit->work_item() ==
+                                &prepared.source_invocation
+                                         ->work_items[index],
+                "duplicate repository source root used a name-matched work item instead of its typed correlation");
+    }
 }
 
 void test_actual_prepared_source_work_is_artifact_authority() {
@@ -1727,6 +2471,13 @@ int main() {
         test_aur_update_install_reason_parity();
         test_build_plan_partial_failure_remains_typed();
         test_local_and_no_op_phases();
+        test_aur_update_source_preparation_blocker();
+        test_aur_update_blocking_preflight_wrapper_is_not_duplicated();
+        test_malformed_blocking_preflight_wrappers_are_retained();
+        test_strict_preparation_blockers_are_not_suppressed();
+        test_fetch_and_remote_source_build_adapters();
+        test_sync_install_preparation_adapters();
+        test_sync_duplicate_repository_source_correlation();
         test_actual_prepared_source_work_is_artifact_authority();
         test_system_issue_impact_and_blocked_phases();
         test_partial_failures_and_upgrade_all_authorities();

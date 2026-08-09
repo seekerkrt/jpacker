@@ -17,6 +17,7 @@
 struct LocalSourceBuildRequest;
 class PreparedLocalSourceBuild;
 class LocalSourceBuildResult;
+class LocalSourceBuildProjectionAuthority;
 
 enum class LocalSourceBuildMetadataProvenance {
     ExistingSrcinfo,
@@ -47,6 +48,11 @@ class LocalSourceBuildMetadata final {
     friend LocalSourceBuildMetadata bind_evaluated_local_source_metadata(
             const LocalSourceRoot&, SourceBuildEnvironment, std::string,
             std::string_view);
+    friend LocalSourceBuildProjectionAuthority
+    make_local_source_build_projection_authority(
+            const LocalSourceRoot& source_root,
+            const LocalBuildPlan& local_build_plan,
+            const LocalSourceBuildMetadata& metadata);
     friend class PreparedLocalSourceBuild;
     friend class LocalSourceBuildProjectionAuthority;
     friend PreparedLocalSourceBuild prepare_local_source_build(
@@ -181,8 +187,22 @@ private:
     std::reference_wrapper<const LocalSourceFileSnapshot> pkgbuild_snapshot_;
 
     friend class PreparedLocalSourceBuild;
+    friend LocalSourceBuildProjectionAuthority
+    make_local_source_build_projection_authority(
+            const LocalSourceRoot& source_root,
+            const LocalBuildPlan& local_build_plan,
+            const LocalSourceBuildMetadata& metadata);
     friend struct UnifiedPlanProjectionTestAccess;
 };
+
+// Existing .SRCINFOを採用したread-only dry-run route向け。cache/workspaceを
+// 準備せず、production LocalSourceRoot/LocalBuildPlan/metadataの相関だけを
+// projection authorityへ固定する。
+LocalSourceBuildProjectionAuthority
+make_local_source_build_projection_authority(
+        const LocalSourceRoot& source_root,
+        const LocalBuildPlan& local_build_plan,
+        const LocalSourceBuildMetadata& metadata);
 
 class PreparedLocalSourceBuild final {
     LocalSourceBuildRequest                    request_;

@@ -717,22 +717,66 @@ PreparedLocalSourceBuildRoute prepare_local_source_build_route(
         LocalSourceRoot source_root = open_local_source_root(
                 invocation.directory,
                 !invocation.source_environment.ordered_assignments.empty());
-        if(source_root.metadata().state() ==
-           LocalSourceMetadataState::Unsafe) {
-            if(source_root.metadata().unsafe_failure() != nullptr) {
-                throw std::runtime_error(
-                        local_source_root_failure_diagnostic(
-                                *source_root.metadata().unsafe_failure()));
-            }
-            throw std::runtime_error(localization::translate_message(
-                    "Local source metadata is unsafe and cannot be evaluated."));
-        }
         return PreparedLocalSourceBuildRoute{
                 std::move(invocation), std::move(source_root)};
     } catch(const LocalSourceRootError& error) {
         throw std::runtime_error(
                 local_source_root_failure_diagnostic(error.failure()));
     }
+}
+
+void require_executable_local_source_build_route(
+        const PreparedLocalSourceBuildRoute& route) {
+    if(route.source_root.metadata().state() !=
+       LocalSourceMetadataState::Unsafe) {
+        return;
+    }
+    if(route.source_root.metadata().unsafe_failure() != nullptr) {
+        throw std::runtime_error(local_source_root_failure_diagnostic(
+                *route.source_root.metadata().unsafe_failure()));
+    }
+    throw std::runtime_error(localization::translate_message(
+            "Local source metadata is unsafe and cannot be evaluated."));
+}
+
+RemoteSourceBuildInvocation require_remote_source_build_invocation(
+        const std::vector<std::string>& args) {
+    if(args.empty()) {
+        // TRANSLATORS: The placeholders are the literal CLI command and the complete build syntax.
+        throw std::invalid_argument(localization::format_translated_message(
+                "Usage: {} {}",
+                application_identity::COMMAND_NAME,
+                cli_authority::operation_spec(
+                        cli_authority::OperationId::Build)
+                        .help_syntax));
+    }
+
+    RemoteSourceBuildInvocation invocation;
+    for(const auto& arg : args) {
+        std::string key;
+        std::string value;
+        if(split_env_assignment(arg, key, value)) {
+            invocation.source_environment.ordered_assignments.push_back(
+                    {std::move(key), std::move(value)});
+        } else if(arg.find('=') != std::string::npos) {
+            // TRANSLATORS: The placeholder is a literal environment assignment.
+            throw std::invalid_argument(
+                    localization::format_translated_message(
+                            "Invalid environment assignment: {}", arg));
+        } else if(invocation.package_name.empty()) {
+            invocation.package_name = arg;
+        } else {
+            // TRANSLATORS: The placeholder is a literal CLI argument.
+            Logger::warn(localization::format_translated_message(
+                    "Ignoring extra arg '{}'", arg));
+        }
+    }
+    if(invocation.package_name.empty()) {
+        throw std::invalid_argument(localization::translate_message(
+                "No package specified."));
+    }
+    require_valid_package_name(invocation.package_name);
+    return invocation;
 }
 
 int cmd_build_local(
@@ -838,43 +882,18 @@ int cmd_build_local(
 int cmd_build(
         const std::vector<std::string>& args,
         const AppConfig& config) {
-    if(args.empty()) {
-        // TRANSLATORS: The placeholders are the literal CLI command and the complete build syntax.
-        Logger::error(localization::format_translated_message(
-                "Usage: {} {}",
-                application_identity::COMMAND_NAME,
-                cli_authority::operation_spec(
-                        cli_authority::OperationId::Build)
-                        .help_syntax));
+    RemoteSourceBuildInvocation invocation;
+    try {
+        invocation = require_remote_source_build_invocation(args);
+    } catch(const std::exception& error) {
+        Logger::error(error.what());
         return 1;
     }
-    std::string            pkg_name;
-    SourceBuildEnvironment custom_env;
-    for(const auto& arg : args) {
-        std::string key, val;
-        if(split_env_assignment(arg, key, val))
-            custom_env.ordered_assignments.push_back({key, val});
-        else if(arg.find('=') != std::string::npos) {
-            // TRANSLATORS: The placeholder is a literal environment assignment.
-            Logger::error(localization::format_translated_message(
-                    "Invalid environment assignment: {}", arg));
-            return 1;
-        } else if(pkg_name.empty())
-            pkg_name = arg;
-        else
-            // TRANSLATORS: The placeholder is a literal CLI argument.
-            Logger::warn(localization::format_translated_message(
-                    "Ignoring extra arg '{}'", arg));
-    }
-    if(pkg_name.empty()) {
-        Logger::error(localization::translate_message(
-                "No package specified."));
-        return 1;
-    }
-    require_valid_package_name(pkg_name);
 
     try {
-        build_source_target(pkg_name, custom_env, config);
+        build_source_target(
+                invocation.package_name,
+                invocation.source_environment, config);
     } catch(const SeparatedPackageBaseSourceBuildCleanupError& error) {
         // Direct buildはretained workspaceを手動確認できる既存contractを
         // 維持し、transaction成功済みcleanup failureとしてそのまま表示する。

@@ -1317,7 +1317,7 @@ LIBALPM_BUILD_TARGETS := \
 	$(UNIFIED_PLAN_RENDERER_TEST_TARGET) \
 	$(UPGRADE_BASELINE_METADATA_TEST_TARGET)
 
-.PHONY: all check-libalpm clean check-upgrade-all-plan-link-firewall check-system-source-upgrade-link-firewall check-aur-update-execution-runner-link-firewall check-aur-update-operation-result-link-firewall check-filtered-aur-update-operation-link-firewall check-upgrade-all-operation-link-firewall check-upgrade-all-command-link-firewall check-commands-sync-link-firewall check-provider-installed-state-link-firewall check-dependency-constraint-link-firewall check-package-constraint-metadata-link-firewall check-aur-constraint-metadata-link-firewall check-root-package-candidate-link-firewall check-root-package-search-link-firewall check-root-package-selection-link-firewall check-root-package-route-projection-link-firewall check-dependency-plan-model-link-firewall check-build-plan-artifact-target-projection-link-firewall check-artifact-selection-model-link-firewall check-artifact-identity-selection-link-firewall check-multiple-artifact-workspace-link-firewall check-multiple-artifact-identity-link-firewall check-package-base-artifact-install-plan-link-firewall check-package-base-artifact-install-executor-link-firewall check-separated-package-base-source-build-link-firewall test test-internal-identity test-application-identity test-xdg-paths test-xdg-directory-safety test-xdg-state-log test-trusted-cache test-runtime-identity test-app-config test-provider-selection test-provider-installed-state test-dependency-constraint test-package-constraint-metadata test-aur-constraint-metadata test-root-package-candidate test-root-package-search test-root-package-selection test-root-package-route-projection test-user-config test-package-identifier test-package-metadata test-package-metadata-integration test-repository-query test-shell-words test-source-environment test-artifact-workspace test-multiple-artifact-workspace test-artifact-identity test-multiple-artifact-identity test-artifact-install-executor test-package-base-artifact-install-plan test-package-base-artifact-install-executor test-separated-source-build test-separated-package-base-source-build test-production-source-build test-process-capture test-aur-update-plan test-upgrade-all-plan test-system-source-upgrade test-aur-update-query test-aur-update-command test-upgrade-all-command test-aur-update-execution-preflight test-aur-update-execution-preflight-integration test-aur-update-execution-preparation test-aur-update-execution-runner test-aur-update-operation-result test-filtered-aur-update-operation test-upgrade-all-operation test-dependency-plan-model test-build-plan-artifact-target-projection test-artifact-install-plan test-artifact-selection-model test-artifact-identity-selection test-command-stub-contract test-markdown-links test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-commands-inspect test-commands-source-maintenance test-commands-sync test-live-contract test-run-with-pty test-conflicts-replaces test-install-layout test-package-transition test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check install uninstall
+.PHONY: all check-libalpm clean check-upgrade-all-plan-link-firewall check-system-source-upgrade-link-firewall check-aur-update-execution-runner-link-firewall check-aur-update-operation-result-link-firewall check-filtered-aur-update-operation-link-firewall check-upgrade-all-operation-link-firewall check-upgrade-all-command-link-firewall check-commands-sync-link-firewall check-provider-installed-state-link-firewall check-dependency-constraint-link-firewall check-package-constraint-metadata-link-firewall check-aur-constraint-metadata-link-firewall check-root-package-candidate-link-firewall check-root-package-search-link-firewall check-root-package-selection-link-firewall check-root-package-route-projection-link-firewall check-dependency-plan-model-link-firewall check-build-plan-artifact-target-projection-link-firewall check-artifact-selection-model-link-firewall check-artifact-identity-selection-link-firewall check-multiple-artifact-workspace-link-firewall check-multiple-artifact-identity-link-firewall check-package-base-artifact-install-plan-link-firewall check-package-base-artifact-install-executor-link-firewall check-separated-package-base-source-build-link-firewall test test-internal-identity test-application-identity test-xdg-paths test-xdg-directory-safety test-xdg-state-log test-trusted-cache test-runtime-identity test-app-config test-provider-selection test-provider-installed-state test-dependency-constraint test-package-constraint-metadata test-aur-constraint-metadata test-root-package-candidate test-root-package-search test-root-package-selection test-root-package-route-projection test-user-config test-package-identifier test-package-metadata test-package-metadata-integration test-repository-query test-shell-words test-source-environment test-artifact-workspace test-multiple-artifact-workspace test-artifact-identity test-multiple-artifact-identity test-artifact-install-executor test-package-base-artifact-install-plan test-package-base-artifact-install-executor test-separated-source-build test-separated-package-base-source-build test-production-source-build test-process-capture test-aur-update-plan test-upgrade-all-plan test-system-source-upgrade test-aur-update-query test-aur-update-command test-upgrade-all-command test-aur-update-execution-preflight test-aur-update-execution-preflight-integration test-aur-update-execution-preparation test-aur-update-execution-runner test-aur-update-operation-result test-filtered-aur-update-operation test-upgrade-all-operation test-dependency-plan-model test-build-plan-artifact-target-projection test-artifact-install-plan test-artifact-selection-model test-artifact-identity-selection test-command-stub-contract test-markdown-links test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-dry-run-command test-commands-inspect test-commands-source-maintenance test-commands-sync test-live-contract test-run-with-pty test-conflicts-replaces test-install-layout test-package-transition test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check install uninstall
 .PHONY: check-local-package-metadata-link-firewall check-local-source-root-link-firewall check-local-dependency-plan-projection-link-firewall test-local-package-metadata test-local-source-root test-local-dependency-plan-projection
 .PHONY: check-local-source-workspace-link-firewall check-local-source-build-link-firewall test-local-source-workspace test-local-source-build
 .PHONY: check-unified-plan-observation-link-firewall test-unified-plan-observation test-observation-contract-gate
@@ -3132,8 +3132,13 @@ test-aur-rpc-validation: $(AUR_RPC_VALIDATION_TEST_TARGET) $(AUR_RPC_ENVELOPE_VA
 		$(abspath $(AUR_RPC_VALIDATION_TEST_TARGET)) \
 		$(abspath $(AUR_RPC_ENVELOPE_VALIDATION_TEST_TARGET))
 
-test-cli-parser: $(TEST_TARGET)
-	sh tests/test-cli-parser.sh $(abspath $(TEST_TARGET))
+# POLICY(#352): CLI parser/routing/presentationはproduction TUを保ち、strict
+# repository authorityだけを既存libalpm stubのcase-local snapshotへ接続する。
+test-cli-parser: $(AUR_RPC_VALIDATION_TEST_TARGET)
+	sh tests/test-cli-parser.sh $(abspath $(AUR_RPC_VALIDATION_TEST_TARGET))
+
+test-dry-run-command: $(TEST_TARGET)
+	sh tests/test-dry-run-command.sh $(abspath $(TEST_TARGET))
 
 test-public-documentation: $(CLI_LOCALIZATION_TEST_TARGET) $(MANPAGES) $(COMPLETION_FILES) $(MO_FILES) tests/test-help-man-completion.sh tests/test-static-completion.sh
 	sh tests/test-help-man-completion.sh $(abspath $(CLI_LOCALIZATION_TEST_TARGET))
@@ -3170,8 +3175,10 @@ test-source-build: $(TEST_TARGET) $(APP_CONFIG_INTEGRATION_TEST_TARGET) $(UPGRAD
 		$(abspath $(APP_CONFIG_INTEGRATION_TEST_TARGET)) \
 		$(abspath $(UPGRADE_BASELINE_METADATA_TEST_TARGET))
 
-test-source-selection: $(TEST_TARGET)
-	sh tests/test-source-selection.sh $(abspath $(TEST_TARGET))
+# POLICY(#352): source-selection CLI characterization keeps every production TU
+# while strict repository discovery reads a case-local libalpm snapshot.
+test-source-selection: $(AUR_RPC_VALIDATION_TEST_TARGET)
+	sh tests/test-source-selection.sh $(abspath $(AUR_RPC_VALIDATION_TEST_TARGET))
 
 test-install-layout: $(TARGET) $(MANPAGES) $(COMPLETION_FILES) $(MO_FILES) $(PROJECT_LICENSE_FILES) $(COMPLIANCE_DOC_FILES) $(PUBLIC_DOC_FILES)
 	sh tests/test-install-layout.sh
@@ -3179,8 +3186,10 @@ test-install-layout: $(TARGET) $(MANPAGES) $(COMPLETION_FILES) $(MO_FILES) $(PRO
 test-package-transition: $(TARGET) $(MANPAGES) $(COMPLETION_FILES) $(PROJECT_LICENSE_FILES) $(COMPLIANCE_DOC_FILES) $(PUBLIC_DOC_FILES)
 	sh tests/test-package-transition.sh
 
-test-needed-contract: $(TEST_TARGET)
-	sh tests/test-needed-contract.sh $(abspath $(TEST_TARGET))
+# POLICY(#352): --needed CLI characterization keeps every production TU while
+# strict repository discovery reads a case-local libalpm snapshot.
+test-needed-contract: $(AUR_RPC_VALIDATION_TEST_TARGET)
+	sh tests/test-needed-contract.sh $(abspath $(AUR_RPC_VALIDATION_TEST_TARGET))
 
 test-pkgbuild-export: $(TEST_TARGET)
 	sh tests/test-pkgbuild-export.sh $(abspath $(TEST_TARGET))
@@ -3320,6 +3329,7 @@ test: \
 	test-aur-rpc-validation \
 	test-build-cache-symlink \
 	test-cli-parser \
+	test-dry-run-command \
 	test-public-documentation \
 	test-commands-inspect \
 	test-commands-source-maintenance \
@@ -3335,7 +3345,7 @@ test: \
 	test-source-build \
 	test-source-selection
 
-release-check: check-pot check-catalogs test-localization test-catalog-metadata-gate test-cli-localization-surface test-internal-identity test-application-identity test-xdg-paths test-xdg-directory-safety test-source-environment test-xdg-state-log test-trusted-cache test-runtime-identity test-public-documentation test-install-layout test-package-transition test-live-contract
+release-check: check-pot check-catalogs test-localization test-catalog-metadata-gate test-cli-localization-surface test-internal-identity test-application-identity test-xdg-paths test-xdg-directory-safety test-source-environment test-xdg-state-log test-trusted-cache test-runtime-identity test-dry-run-command test-public-documentation test-install-layout test-package-transition test-live-contract
 	@echo ":: Checking release version consistency"
 	sh scripts/check-release-version.sh
 	@echo ":: Checking license compliance"

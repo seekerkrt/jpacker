@@ -21,7 +21,8 @@
 using SystemSourceUpgradeExecutor = SystemSourceUpgradeResult (*)(
         PreparedSystemSourceUpgrade,
         const AppConfig&,
-        const SystemSourceUpgradeEventObserver&);
+        const SystemSourceUpgradeEventObserver&,
+        std::optional<ValidatedCacheRoot>);
 
 static_assert(!std::is_copy_constructible_v<PreparedSystemSourceUpgrade>);
 static_assert(std::is_move_constructible_v<PreparedSystemSourceUpgrade>);
@@ -38,13 +39,15 @@ static_assert(
                 SystemSourceUpgradeExecutor,
                 PreparedSystemSourceUpgrade&&,
                 const AppConfig&,
-                const SystemSourceUpgradeEventObserver&>);
+                const SystemSourceUpgradeEventObserver&,
+                std::optional<ValidatedCacheRoot>>);
 static_assert(
         !std::is_invocable_v<
                 SystemSourceUpgradeExecutor,
                 PreparedSystemSourceUpgrade&,
                 const AppConfig&,
-                const SystemSourceUpgradeEventObserver&>);
+                const SystemSourceUpgradeEventObserver&,
+                std::optional<ValidatedCacheRoot>>);
 
 namespace {
 
@@ -1000,8 +1003,8 @@ void test_registered_source_provider_selection_precedes_cache_and_suppresses_aur
             std::holds_alternative<PreparedSystemSourceUpgrade>(preparation) &&
                     repository_selector_calls == 1 &&
                     selection_preceded_cache &&
-                    fs::is_directory(selection_cache_home / "moguet"),
-            "Registered source repository selection did not precede cache preparation");
+                    !fs::exists(selection_cache_home / "moguet"),
+            "Read-only registered-source preparation activated the cache");
 
     enqueue_post_metadata({repository_source});
     stub::enqueue_source_success(source_execution(
@@ -1013,6 +1016,9 @@ void test_registered_source_provider_selection_precedes_cache_and_suppresses_aur
                     full_option_config(), OBSERVER);
     expect(completed.is_success(),
            "Repository-only registered-source provider selection failed");
+    expect(
+            fs::is_directory(selection_cache_home / "moguet"),
+            "Actual registered-source execution did not activate the cache");
     stub::require_script_consumed();
 }
 
@@ -1262,12 +1268,24 @@ void test_preference_read_failure_blocks_before_mutation() {
 
 void test_initial_cache_resolution_failure_is_typed() {
     stub::reset();
-    configure_preferences({"cache-resolution"});
+    const std::vector<std::string> packages = {"cache-resolution"};
+    configure_preferences(packages);
+    stub::enqueue_metadata_session(metadata_session(
+            packages,
+            LocalPackageVersionSnapshot{{"core", "1.0-1"}}));
     ScopedEnvironmentVariable cache_environment(
             "XDG_CACHE_HOME", "relative-cache-home");
 
-    SystemSourceUpgradeResult result = take_blocked(
-            prepare_system_source_upgrade(full_option_config(), OBSERVER));
+    SystemSourceUpgradePreparation preparation =
+            prepare_system_source_upgrade(full_option_config(), OBSERVER);
+    expect(
+            std::holds_alternative<PreparedSystemSourceUpgrade>(preparation),
+            "Read-only preparation consulted the relative cache path");
+    SystemSourceUpgradeResult result =
+            execute_prepared_system_source_upgrade(
+                    std::move(std::get<PreparedSystemSourceUpgrade>(
+                            preparation)),
+                    full_option_config(), OBSERVER);
     expect(
             result.status ==
                             SystemSourceUpgradeStatus::BlockedBeforeMutation &&
@@ -1301,12 +1319,24 @@ void test_initial_cache_preparation_failure_is_typed() {
            "Missing cache anchor fixture already exists");
 
     stub::reset();
-    configure_preferences({"cache-preparation"});
+    const std::vector<std::string> packages = {"cache-preparation"};
+    configure_preferences(packages);
+    stub::enqueue_metadata_session(metadata_session(
+            packages,
+            LocalPackageVersionSnapshot{{"core", "1.0-1"}}));
     ScopedEnvironmentVariable cache_environment(
             "XDG_CACHE_HOME", missing_anchor.string());
 
-    SystemSourceUpgradeResult result = take_blocked(
-            prepare_system_source_upgrade(full_option_config(), OBSERVER));
+    SystemSourceUpgradePreparation preparation =
+            prepare_system_source_upgrade(full_option_config(), OBSERVER);
+    expect(
+            std::holds_alternative<PreparedSystemSourceUpgrade>(preparation),
+            "Read-only preparation consulted the missing cache anchor");
+    SystemSourceUpgradeResult result =
+            execute_prepared_system_source_upgrade(
+                    std::move(std::get<PreparedSystemSourceUpgrade>(
+                            preparation)),
+                    full_option_config(), OBSERVER);
     expect(
             result.status ==
                             SystemSourceUpgradeStatus::BlockedBeforeMutation &&
@@ -1335,20 +1365,32 @@ void test_initial_cache_preparation_failure_is_typed() {
 
 void test_initial_trusted_cache_failure_is_typed() {
     stub::reset();
-    configure_preferences({"trusted-cache-preparation"});
+    const std::vector<std::string> packages = {
+            "trusted-cache-preparation"};
+    configure_preferences(packages);
+    stub::enqueue_metadata_session(metadata_session(
+            packages,
+            LocalPackageVersionSnapshot{{"core", "1.0-1"}}));
     ValidatedCacheRoot cache_root = prepare_process_cache_root();
     const fs::path active_path = cache_root.path();
     const fs::path moved_path =
             active_path.parent_path() / "moguet-revoked-preparation";
+
+    SystemSourceUpgradePreparation preparation =
+            prepare_system_source_upgrade(full_option_config(), OBSERVER);
+    expect(
+            std::holds_alternative<PreparedSystemSourceUpgrade>(preparation),
+            "Read-only preparation unexpectedly depended on an external cache authority");
 
     std::error_code rename_error;
     fs::rename(active_path, moved_path, rename_error);
     expect(!rename_error,
            "Failed to revoke trusted cache preparation fixture");
 
-    std::optional<SystemSourceUpgradePreparation> preparation;
+    std::optional<SystemSourceUpgradeResult> execution_result;
     try {
-        preparation.emplace(prepare_system_source_upgrade(
+        execution_result.emplace(execute_prepared_system_source_upgrade(
+                std::move(std::get<PreparedSystemSourceUpgrade>(preparation)),
                 full_option_config(), OBSERVER, cache_root));
     } catch(...) {
         std::error_code restore_error;
@@ -1359,8 +1401,7 @@ void test_initial_trusted_cache_failure_is_typed() {
     expect(!rename_error,
            "Failed to restore trusted cache preparation fixture");
 
-    SystemSourceUpgradeResult result =
-            take_blocked(std::move(preparation.value()));
+    SystemSourceUpgradeResult result = std::move(execution_result.value());
     expect(
             result.status ==
                             SystemSourceUpgradeStatus::BlockedBeforeMutation &&
@@ -1386,11 +1427,23 @@ void test_initial_trusted_cache_failure_is_typed() {
 
 void test_cache_seed_failure_is_typed() {
     stub::reset();
-    configure_preferences({"cache-seed"});
+    const std::vector<std::string> packages = {"cache-seed"};
+    configure_preferences(packages);
+    stub::enqueue_metadata_session(metadata_session(
+            packages,
+            LocalPackageVersionSnapshot{{"core", "1.0-1"}}));
+    SystemSourceUpgradePreparation preparation =
+            prepare_system_source_upgrade(full_option_config(), OBSERVER);
+    expect(
+            std::holds_alternative<PreparedSystemSourceUpgrade>(preparation),
+            "Read-only preparation did not produce an execution capability");
     stub::fail_cache_seed();
 
-    SystemSourceUpgradeResult result = take_blocked(
-            prepare_system_source_upgrade(full_option_config(), OBSERVER));
+    SystemSourceUpgradeResult result =
+            execute_prepared_system_source_upgrade(
+                    std::move(std::get<PreparedSystemSourceUpgrade>(
+                            preparation)),
+                    full_option_config(), OBSERVER);
     expect(
             result.status ==
                             SystemSourceUpgradeStatus::BlockedBeforeMutation &&

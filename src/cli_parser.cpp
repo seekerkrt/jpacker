@@ -144,6 +144,9 @@ bool apply_moguet_global_option(const std::string& arg, ParsedCliArguments& pars
     case cli_authority::GlobalOptionId::NoConfirm:
         parsed.cli_overrides.no_confirm = true;
         break;
+    case cli_authority::GlobalOptionId::DryRun:
+        parsed.cli_overrides.dry_run = true;
+        break;
     case cli_authority::GlobalOptionId::BuildMode:
         return apply_build_mode_option(arg, parsed);
     case cli_authority::GlobalOptionId::Rebuild:

@@ -121,6 +121,9 @@ class PreparedFilteredAurUpdateOperation final {
     execute_prepared_filtered_aur_update_operation(
             PreparedFilteredAurUpdateOperation prepared,
             const AppConfig& config);
+    friend void seed_filtered_aur_update_operation_cache(
+            PreparedFilteredAurUpdateOperation& prepared,
+            const ValidatedCacheRoot& cache_root);
     friend struct FilteredAurUpdateOperationMutableAccess;
 
     bool valid_ = true;
@@ -152,7 +155,9 @@ public:
 
     // prepared capabilityのowned snapshotは観測だけを許し、runnerへ渡す前に
     // mapping/preparationとprivate invocationが乖離しないようにする。
-    const AurUpdateQueryResult& original_query_result() const noexcept;
+    const AurUpdateQueryResult& original_query_result() const noexcept {
+        return query_result;
+    }
     const FilteredAurUpdateTargetAdapter& target_adapter_result()
             const noexcept;
     const UpgradeAllPlan& target_and_build_unit_plan() const noexcept;
@@ -163,11 +168,15 @@ public:
     original_to_filtered_indexes() const noexcept;
     const std::vector<FilteredAurUpdateTargetCorrelation>&
     selected_target_correlations() const noexcept;
-    const AurUpdateExecutionPreflight& execution_preflight() const noexcept;
+    const AurUpdateExecutionPreflight& execution_preflight() const noexcept {
+        return preflight;
+    }
     const std::vector<FilteredAurUpdateBuildUnitCorrelation>&
     build_unit_mapping() const noexcept;
     const std::optional<AurUpdateSourceBuildPreparation>&
-    source_build_preparation() const noexcept;
+    source_build_preparation() const noexcept {
+        return preparation;
+    }
     const std::vector<FilteredAurUpdateOperationIssue>& operation_issues()
             const noexcept;
 
@@ -215,6 +224,12 @@ PreparedFilteredAurUpdateOperation prepare_filtered_aur_update_operation(
         std::vector<UpgradeAllExplicitSourceIdentity> explicit_sources,
         const AppConfig& config,
         std::optional<ValidatedCacheRoot> cache_root = std::nullopt);
+
+// A route aggregate that retained a cache authority can seed the already
+// resolved filtered invocation immediately before actual execution.
+void seed_filtered_aur_update_operation_cache(
+        PreparedFilteredAurUpdateOperation& prepared,
+        const ValidatedCacheRoot& cache_root);
 
 // aggregateをby-valueでconsumeし、nested invocation capabilityだけをrunnerへmoveする。
 FilteredAurUpdateExecutionResult execute_prepared_filtered_aur_update_operation(
