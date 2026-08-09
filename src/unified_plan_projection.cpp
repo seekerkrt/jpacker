@@ -66,8 +66,7 @@ void append_build_plan_blockers(
             observation.blockers.push_back(
                     ConstraintFailureUnifiedPlanBlocker{
                             UnifiedPlanBorrowedAuthorityReference<
-                                    ConstraintEvaluation>(
-                                    edge.constraint_evaluation.value())});
+                                    BuildPlanDependencyEdge>(edge)});
         } else if(edge.kind == DependencyKind::Unknown) {
             observation.blockers.push_back(UnknownUnifiedPlanBlocker{
                     UnifiedPlanBorrowedAuthorityReference<

@@ -129,6 +129,11 @@ static_assert(!std::is_constructible_v<
               BuildPlanResolutionFailure&&>);
 static_assert(!std::is_copy_constructible_v<UnknownUnifiedPlanBlocker>);
 static_assert(!std::is_copy_constructible_v<
+              ConstraintFailureUnifiedPlanBlocker>);
+static_assert(!std::is_constructible_v<
+              UnifiedPlanBorrowedAuthorityReference<BuildPlanDependencyEdge>,
+              BuildPlanDependencyEdge&&>);
+static_assert(!std::is_copy_constructible_v<
               SourceFailureUnifiedPlanBlocker>);
 static_assert(!std::is_copy_constructible_v<
               BuildPlanStateUnifiedPlanBlocker>);
@@ -625,8 +630,25 @@ void test_typed_blockers() {
             {ProvidedDependency::from_repository(
                     "core", "observed-provider")},
             ObservedVersionUnknownReason::PartialSourceFailure};
-    const ConstraintEvaluation constraint =
-            ConstraintEvaluation::unsatisfied();
+    const BuildPlanDependencyEdge constraint_edge{
+            "constraint-consumer",
+            "constraint-base",
+            "constraint-runtime>=2",
+            PackageRole::RuntimeDependency,
+            DependencyKind::Repo,
+            "constraint-runtime",
+            std::nullopt,
+            std::nullopt,
+            ProviderResolutionKind::Unique,
+            std::nullopt,
+            ResolvedDependencyCandidate{RepositoryExactPackage{
+                    ConfiguredRepositoryIdentity{"extra", 1},
+                    "constraint-runtime",
+                    ObservedVersion::available(
+                            ObservedVersionSource::RepositoryExactPackage,
+                            "1"),
+                    {}}},
+            ConstraintEvaluation::unsatisfied()};
     const BuildPlanMetadataRisk metadata_risk{
             "risky-child", "risky-base", {"old-package"},
             {"replacement"}};
@@ -656,8 +678,8 @@ void test_typed_blockers() {
                     UnifiedPlanBorrowedAuthorityReference<
                             IncompleteProviderCandidateSet>(partial_source)}});
     blockers.push_back(ConstraintFailureUnifiedPlanBlocker{
-            UnifiedPlanBorrowedAuthorityReference<ConstraintEvaluation>(
-                    constraint)});
+            UnifiedPlanBorrowedAuthorityReference<BuildPlanDependencyEdge>(
+                    constraint_edge)});
     blockers.push_back(MetadataRiskUnifiedPlanBlocker{
             UnifiedPlanBorrowedAuthorityReference<BuildPlanMetadataRisk>(
                     metadata_risk)});
@@ -702,6 +724,24 @@ void test_typed_blockers() {
                     std::holds_alternative<RoutePreflightUnifiedPlanBlocker>(
                             blockers[7]),
             "Typed blockers were flattened into one failure kind");
+
+    const BuildPlanDependencyEdge& retained_constraint_edge =
+            std::get<ConstraintFailureUnifiedPlanBlocker>(blockers[5])
+                    .detail.get();
+    expect(
+            &retained_constraint_edge == &constraint_edge &&
+                    retained_constraint_edge.parent_package_name ==
+                            "constraint-consumer" &&
+                    retained_constraint_edge.dependency_spec ==
+                            "constraint-runtime>=2" &&
+                    retained_constraint_edge.resolved_candidate.has_value() &&
+                    retained_constraint_edge.constraint_evaluation.has_value() &&
+                    &retained_constraint_edge.constraint_evaluation.value() ==
+                            &constraint_edge.constraint_evaluation.value() &&
+                    retained_constraint_edge.constraint_evaluation
+                                    ->satisfaction() ==
+                            ConstraintSatisfaction::Unsatisfied,
+            "Constraint blocker detached its edge correlation or stored evaluation");
 
     const auto& resolution_source_blocker =
             std::get<SourceFailureUnifiedPlanBlocker>(blockers[3]);

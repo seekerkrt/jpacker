@@ -49,6 +49,7 @@ src/trusted_git.cpp
 src/upgrade_all_operation.cpp
 src/upgrade_all_plan.cpp
 src/user_config.cpp
+src/unified_plan_renderer.cpp
 src/xdg_directory_safety.cpp
 src/xdg_paths.cpp
 src/xdg_state_log.cpp
