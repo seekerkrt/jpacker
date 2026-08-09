@@ -44,6 +44,26 @@ void expect_not_contains(
             context + " unexpectedly contains: " + std::string(unexpected));
 }
 
+void expect_no_reflected_terminal_controls(
+        const std::string& output, std::string_view context) {
+    const std::string context_text(context);
+    expect(
+            output.find('\x1b') == std::string::npos,
+            context_text + " contains an actual ESC byte");
+    expect(
+            output.find('\r') == std::string::npos,
+            context_text + " contains an actual carriage return");
+    expect(
+            output.find('\t') == std::string::npos,
+            context_text + " contains an actual tab");
+    expect(
+            output.find('\x07') == std::string::npos,
+            context_text + " contains an actual BEL byte");
+    expect(
+            output.find('\x7f') == std::string::npos,
+            context_text + " contains an actual DEL byte");
+}
+
 void expect_before(
         const std::string& output, std::string_view first,
         std::string_view second, const std::string& context) {
@@ -1128,6 +1148,216 @@ void test_invalid_root_search_snapshot_typed_details() {
             "empty snapshot identity fallback");
 }
 
+void test_invalid_root_routing_identity_fields() {
+    InvalidRootPackageRoutingProjection projection;
+    projection.unrepresentable_repository_targets = {
+            UnrepresentableRepositoryRootPackageRouteTarget{
+                    0, RepositoryRootPackageIdentity{".", "dot-package"}},
+            UnrepresentableRepositoryRootPackageRouteTarget{
+                    2,
+                    RepositoryRootPackageIdentity{
+                            "..", "parent-package"}},
+            UnrepresentableRepositoryRootPackageRouteTarget{
+                    4,
+                    RepositoryRootPackageIdentity{
+                            "nested/repository", "nested-package"}},
+    };
+    RootPackageInstallPreparationFailure failure;
+    failure.details.push_back(std::move(projection));
+
+    const UnifiedPlanRenderingResult rendered = render_blocked(
+            RootPackagePreparationUnifiedPlanBlocker{
+                    UnifiedPlanBorrowedAuthorityReference<
+                            RootPackageInstallPreparationFailure>(failure)});
+
+    expect(rendered.is_complete(), "invalid routing rendering is incomplete");
+    expect_contains(
+            rendered.text, "InvalidRootPackageRoutingProjection",
+            "invalid routing failure kind");
+    expect_contains(
+            rendered.text,
+            "selection index 0; repository: .; package: dot-package",
+            "dot repository identity fields");
+    expect_contains(
+            rendered.text,
+            "selection index 2; repository: ..; package: parent-package",
+            "parent repository identity fields");
+    expect_contains(
+            rendered.text,
+            "selection index 4; repository: nested/repository; package: nested-package",
+            "nested repository identity fields");
+    expect_not_contains(
+            rendered.text, "nested/repository/nested-package",
+            "invalid routing flattened identity");
+}
+
+void test_untrusted_failure_text_is_terminal_safe() {
+    const std::string unsafe_entry_name =
+            std::string("entry-path-before\nentry-path-after\t") +
+            "\x1b]0;ENTRY-OSC\x07" + "\x7f";
+    const std::filesystem::path unsafe_entry_path =
+            std::filesystem::path("/preferences") / unsafe_entry_name;
+    const std::string unsafe_preference_diagnostic =
+            std::string("preference-日本語-before\rpreference-after") +
+            "\xC2\x85" + "-C1" + "\x1b[31m-COLOR" +
+            "\x1b]0;DIAGNOSTIC-OSC\x07" + "\xE2\x80\xA8" +
+            "-LINE-SEPARATOR";
+
+    SystemSourceUpgradeIssue preference_issue;
+    preference_issue.kind =
+            SystemSourceUpgradeIssueKind::PreferenceEnumerationUnavailable;
+    preference_issue.impact =
+            SystemSourceUpgradeIssueImpact::BlocksExecution;
+    preference_issue.phase = SystemSourceUpgradePhase::Preparation;
+    preference_issue.source_preference_failure = SourcePreferenceFailure{
+            SourcePreferenceFailureKind::InvalidEntryName,
+            unsafe_entry_path, std::nullopt, std::nullopt,
+            unsafe_preference_diagnostic};
+    preference_issue.diagnostic = unsafe_preference_diagnostic;
+
+    const UnifiedPlanRenderingResult preference_rendered = render_blocked(
+            RoutePreflightUnifiedPlanBlocker{
+                    UnifiedPlanBorrowedAuthorityReference<
+                            SystemSourceUpgradeIssue>(preference_issue)});
+
+    expect(
+            preference_rendered.is_complete(),
+            "source preference terminal-safe rendering is incomplete");
+    expect_contains(
+            preference_rendered.text,
+            "SystemSourceUpgradeIssueKind::PreferenceEnumerationUnavailable",
+            "source preference issue kind");
+    expect_contains(
+            preference_rendered.text, "phase: preparation",
+            "source preference issue phase");
+    expect_contains(
+            preference_rendered.text,
+            "/preferences/entry-path-before\\x0Aentry-path-after\\x09\\x1B]0;ENTRY-OSC\\x07\\x7F",
+            "source preference escaped path");
+    const std::string escaped_preference_diagnostic =
+            "preference-日本語-before\\x0Dpreference-after"
+            "\\xC2\\x85-C1\\x1B[31m-COLOR"
+            "\\x1B]0;DIAGNOSTIC-OSC\\x07"
+            "\\xE2\\x80\\xA8-LINE-SEPARATOR";
+    const std::size_t nested_diagnostic_position =
+            preference_rendered.text.find(escaped_preference_diagnostic);
+    expect(
+            nested_diagnostic_position != std::string::npos,
+            "source preference nested diagnostic is not escaped");
+    expect(
+            preference_rendered.text.find(
+                    escaped_preference_diagnostic,
+                    nested_diagnostic_position +
+                            escaped_preference_diagnostic.size()) !=
+                    std::string::npos,
+            "source preference outer diagnostic is not escaped");
+    expect(
+            preference_rendered.text.find(
+                    "entry-path-before\nentry-path-after") ==
+                    std::string::npos,
+            "source preference path injected a rendered line");
+    expect(
+            preference_rendered.text.find(
+                    "preference-日本語-before\rpreference-after") ==
+                    std::string::npos,
+            "source preference diagnostic retained a carriage return");
+    expect(
+            preference_rendered.text.find(
+                    std::string("\xC2\x85", 2)) == std::string::npos,
+            "source preference diagnostic retained a C1 control");
+    expect(
+            preference_rendered.text.find(
+                    std::string("\xE2\x80\xA8", 3)) ==
+                    std::string::npos,
+            "source preference diagnostic retained a line separator");
+    expect_no_reflected_terminal_controls(
+            preference_rendered.text, "source preference output");
+
+    const std::string unsafe_preference_name =
+            std::string("invalid-name-before\ninvalid-name-after") +
+            "\x1b]0;NAME-OSC\x07";
+    SystemSourceUpgradeIssue invalid_name_issue;
+    invalid_name_issue.kind =
+            SystemSourceUpgradeIssueKind::InvalidPreferenceName;
+    invalid_name_issue.impact =
+            SystemSourceUpgradeIssueImpact::AffectsSuccess;
+    invalid_name_issue.phase = SystemSourceUpgradePhase::RegisteredSource;
+    invalid_name_issue.original_preference_index = 3;
+    invalid_name_issue.preference_package_name = unsafe_preference_name;
+    invalid_name_issue.diagnostic =
+            "Ignoring invalid source preference: " +
+            unsafe_preference_name;
+    const UnifiedPlanRenderingResult invalid_name_rendered = render_blocked(
+            RoutePreflightUnifiedPlanBlocker{
+                    UnifiedPlanBorrowedAuthorityReference<
+                            SystemSourceUpgradeIssue>(invalid_name_issue)});
+    expect(
+            invalid_name_rendered.is_complete(),
+            "invalid source preference name rendering is incomplete");
+    expect_contains(
+            invalid_name_rendered.text,
+            "package: invalid-name-before\\x0Ainvalid-name-after\\x1B]0;NAME-OSC\\x07",
+            "invalid source preference package field");
+    expect(
+            invalid_name_rendered.text.find(
+                    "invalid-name-before\ninvalid-name-after") ==
+                    std::string::npos,
+            "invalid source preference name injected a rendered line");
+    expect_no_reflected_terminal_controls(
+            invalid_name_rendered.text,
+            "invalid source preference name output");
+
+    const std::string unsafe_raw_specification =
+            std::string("virtual-provider=1\nCONSTRAINT-LINE\t") +
+            "\x1b[31m-CONSTRAINT-COLOR" +
+            "\x1b]0;CONSTRAINT-OSC\x07" +
+            static_cast<char>(0xff);
+    const ProviderCapabilityParseResult parse_result =
+            parse_provider_capability(unsafe_raw_specification);
+    const DependencyConstraintParseFailure* parse_failure =
+            parse_result.failure();
+    expect(
+            parse_failure != nullptr &&
+                    parse_failure->kind ==
+                            DependencyConstraintParseFailureKind::
+                                    InvalidVersion &&
+                    parse_failure->raw_specification ==
+                            unsafe_raw_specification,
+            "constraint parser fixture did not retain invalid raw input");
+    const RepositoryProviderSourceFailure source_failure{
+            ConfiguredRepositoryIdentity{"extra", 1}, *parse_failure};
+    const UnifiedPlanRenderingResult constraint_rendered = render_blocked(
+            SourceFailureUnifiedPlanBlocker{
+                    UnifiedPlanBorrowedAuthorityReference<
+                            RepositoryProviderSourceFailure>(
+                            source_failure)});
+
+    expect(
+            constraint_rendered.is_complete(),
+            "constraint terminal-safe rendering is incomplete");
+    expect_contains(
+            constraint_rendered.text,
+            "DependencyConstraintParseFailureKind::InvalidVersion",
+            "constraint parse failure kind");
+    expect_contains(
+            constraint_rendered.text,
+            "virtual-provider=1\\x0ACONSTRAINT-LINE\\x09"
+            "\\x1B[31m-CONSTRAINT-COLOR"
+            "\\x1B]0;CONSTRAINT-OSC\\x07\\xFF",
+            "escaped constraint specification");
+    expect(
+            constraint_rendered.text.find(
+                    "virtual-provider=1\nCONSTRAINT-LINE") ==
+                    std::string::npos,
+            "constraint specification injected a rendered line");
+    expect(
+            constraint_rendered.text.find(static_cast<char>(0xff)) ==
+                    std::string::npos,
+            "constraint specification retained invalid UTF-8");
+    expect_no_reflected_terminal_controls(
+            constraint_rendered.text, "constraint output");
+}
+
 void test_source_failure_and_route_preflight_subtypes() {
     const BuildPlanResolutionFailure build_plan_failure{
             BuildPlanResolutionFailureKind::RepositoryMetadataUnavailable,
@@ -1977,6 +2207,8 @@ int main() {
         test_build_plan_order_is_preserved();
         test_blocker_variant_details();
         test_invalid_root_search_snapshot_typed_details();
+        test_invalid_root_routing_identity_fields();
+        test_untrusted_failure_text_is_terminal_safe();
         test_source_failure_and_route_preflight_subtypes();
         test_route_preflight_nested_typed_details();
         test_route_preflight_nested_required_field_canaries();

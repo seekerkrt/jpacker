@@ -20,6 +20,9 @@
 
 namespace {
 
+std::string terminal_safe_text_display(std::string_view value);
+std::string invalid_snapshot_raw_value_display(std::string_view value);
+
 struct RenderState {
     std::ostringstream                    output;
     std::vector<UnifiedPlanRenderingIssue> issues;
@@ -1567,12 +1570,12 @@ std::string repository_source_failure_reason_display(
                             "{}; specification: {}",
                             dependency_constraint_parse_failure_kind_display(
                                     detail.kind, blocker_index, state),
-                            required_string_display(
+                            terminal_safe_text_display(required_string_display(
                                     detail.raw_specification, state,
                                     UnifiedPlanRenderingSection::Blockers,
                                     blocker_index, std::nullopt,
                                     localization::translate_message(
-                                            "A repository source failure is missing its constraint specification.")));
+                                            "A repository source failure is missing its constraint specification."))));
                 }
             },
             reason);
@@ -2086,27 +2089,6 @@ std::string root_selection_cancellation_reason_display(
                     "A root package selection cancellation reason is not supported by the renderer."));
 }
 
-std::string invalid_snapshot_raw_value_display(std::string_view value) {
-    static constexpr char HEX_DIGITS[] = "0123456789ABCDEF";
-    std::string           display;
-    display.reserve(value.size());
-    for(const unsigned char byte : value) {
-        const bool is_safe_identity_byte =
-                (byte >= '0' && byte <= '9') ||
-                (byte >= 'A' && byte <= 'Z') ||
-                (byte >= 'a' && byte <= 'z') || byte == '-' ||
-                byte == '_' || byte == '.' || byte == '+' || byte == '@';
-        if(is_safe_identity_byte) {
-            display.push_back(static_cast<char>(byte));
-            continue;
-        }
-        display += "\\x";
-        display.push_back(HEX_DIGITS[(byte >> 4) & 0x0f]);
-        display.push_back(HEX_DIGITS[byte & 0x0f]);
-    }
-    return display;
-}
-
 std::string required_snapshot_opaque_value_display(
         std::string_view value, RenderState& state,
         std::size_t blocker_index, std::size_t detail_index,
@@ -2574,10 +2556,12 @@ std::string root_package_preparation_detail_display(
                         typed_detail.unrepresentable_repository_targets) {
                         targets.push_back(
                                 localization::format_translated_message(
-                                        "selection index {}: {}/{}",
+                                        "selection index {}; repository: {}; package: {}",
                                         target.selection_index,
-                                        target.identity.repository_name,
-                                        target.identity.package_name));
+                                        terminal_safe_text_display(
+                                                target.identity.repository_name),
+                                        terminal_safe_text_display(
+                                                target.identity.package_name)));
                     }
                     return localization::format_translated_message(
                             "{}; targets: {}",
@@ -3055,7 +3039,7 @@ std::string source_preference_failure_display(
                               localization::translate_message(
                                       "A source preference failure is missing its affected path."))
                     : localization::translate_message("not observed")
-            : failure.entry_path.generic_string();
+            : terminal_safe_text_display(failure.entry_path.generic_string());
     const std::string system_error = failure.system_error.has_value()
             ? route_system_error_display(failure.system_error)
             : requires_system_error
@@ -3084,12 +3068,12 @@ std::string source_preference_failure_display(
             source_preference_failure_kind_display(
                     failure.kind, blocker_index, state),
             path, system_error, file_type,
-            required_string_display(
+            terminal_safe_text_display(required_string_display(
                     failure.diagnostic, state,
                     UnifiedPlanRenderingSection::Blockers, blocker_index,
                     std::nullopt,
                     localization::translate_message(
-                            "A source preference failure is missing its diagnostic.")));
+                            "A source preference failure is missing its diagnostic."))));
 }
 
 std::string package_metadata_failure_display(
@@ -3525,13 +3509,13 @@ std::string route_preflight_blocker_display(
                                               "not observed");
                     const std::string package =
                             detail.preference_package_name.has_value()
-                            ? required_string_display(
+                            ? terminal_safe_text_display(required_string_display(
                                       detail.preference_package_name.value(),
                                       state,
                                       UnifiedPlanRenderingSection::Blockers,
                                       blocker_index, std::nullopt,
                                       localization::translate_message(
-                                              "A system/source issue has an empty affected package identity."))
+                                              "A system/source issue has an empty affected package identity.")))
                             : requires_source_identity
                                     ? unavailable_display(
                                               state,
@@ -3566,12 +3550,12 @@ std::string route_preflight_blocker_display(
                             nested_details.empty()
                                     ? localization::translate_message("None")
                                     : join_display_values(nested_details),
-                            required_string_display(
+                            terminal_safe_text_display(required_string_display(
                                     detail.diagnostic, state,
                                     UnifiedPlanRenderingSection::Blockers,
                                     blocker_index, std::nullopt,
                                     localization::translate_message(
-                                            "A system/source issue is missing its diagnostic.")));
+                                            "A system/source issue is missing its diagnostic."))));
                 } else {
                     std::vector<std::string> nested_details;
                     if(detail.package_metadata_failure.has_value()) {
@@ -4078,6 +4062,141 @@ void render_blockers(
                                         state))
                      << '\n';
     }
+}
+
+void append_escaped_byte(std::string& display, unsigned char byte) {
+    static constexpr char HEX_DIGITS[] = "0123456789ABCDEF";
+    display += "\\x";
+    display.push_back(HEX_DIGITS[(byte >> 4) & 0x0f]);
+    display.push_back(HEX_DIGITS[byte & 0x0f]);
+}
+
+bool is_utf8_continuation_byte(unsigned char byte) noexcept {
+    return byte >= 0x80 && byte <= 0xbf;
+}
+
+bool decode_terminal_utf8_code_point(
+        std::string_view value, std::size_t offset,
+        char32_t& code_point, std::size_t& length) noexcept {
+    const auto byte_at = [&value](std::size_t index) {
+        return static_cast<unsigned char>(value[index]);
+    };
+
+    const unsigned char first = byte_at(offset);
+    if(first <= 0x7f) {
+        code_point = first;
+        length = 1;
+        return true;
+    }
+    if(first >= 0xc2 && first <= 0xdf) {
+        if(offset + 1 >= value.size()) return false;
+        const unsigned char second = byte_at(offset + 1);
+        if(!is_utf8_continuation_byte(second)) return false;
+        code_point =
+                (static_cast<char32_t>(first & 0x1f) << 6) |
+                static_cast<char32_t>(second & 0x3f);
+        length = 2;
+        return true;
+    }
+    if(first >= 0xe0 && first <= 0xef) {
+        if(offset + 2 >= value.size()) return false;
+        const unsigned char second = byte_at(offset + 1);
+        const unsigned char third = byte_at(offset + 2);
+        const bool valid_second =
+                first == 0xe0 ? second >= 0xa0 && second <= 0xbf
+                              : first == 0xed
+                                      ? second >= 0x80 && second <= 0x9f
+                                      : is_utf8_continuation_byte(second);
+        if(!valid_second || !is_utf8_continuation_byte(third)) return false;
+        code_point =
+                (static_cast<char32_t>(first & 0x0f) << 12) |
+                (static_cast<char32_t>(second & 0x3f) << 6) |
+                static_cast<char32_t>(third & 0x3f);
+        length = 3;
+        return true;
+    }
+    if(first >= 0xf0 && first <= 0xf4) {
+        if(offset + 3 >= value.size()) return false;
+        const unsigned char second = byte_at(offset + 1);
+        const unsigned char third = byte_at(offset + 2);
+        const unsigned char fourth = byte_at(offset + 3);
+        const bool valid_second =
+                first == 0xf0 ? second >= 0x90 && second <= 0xbf
+                              : first == 0xf4
+                                      ? second >= 0x80 && second <= 0x8f
+                                      : is_utf8_continuation_byte(second);
+        if(!valid_second || !is_utf8_continuation_byte(third) ||
+           !is_utf8_continuation_byte(fourth)) {
+            return false;
+        }
+        code_point =
+                (static_cast<char32_t>(first & 0x07) << 18) |
+                (static_cast<char32_t>(second & 0x3f) << 12) |
+                (static_cast<char32_t>(third & 0x3f) << 6) |
+                static_cast<char32_t>(fourth & 0x3f);
+        length = 4;
+        return true;
+    }
+    return false;
+}
+
+bool is_terminal_safe_code_point(char32_t code_point) noexcept {
+    return code_point >= 0x20 &&
+           !(code_point >= 0x7f && code_point <= 0x9f) &&
+           code_point != 0x2028 && code_point != 0x2029;
+}
+
+// Human-readable payloads retain valid printable UTF-8, while every terminal
+// control, line separator, invalid byte, and escape introducer stays visible.
+std::string terminal_safe_text_display(std::string_view value) {
+    std::string display;
+    display.reserve(value.size());
+    std::size_t offset = 0;
+    while(offset < value.size()) {
+        char32_t    code_point = 0;
+        std::size_t length = 0;
+        if(!decode_terminal_utf8_code_point(
+                   value, offset, code_point, length)) {
+            append_escaped_byte(
+                    display,
+                    static_cast<unsigned char>(value[offset++]));
+            continue;
+        }
+        const bool is_unambiguous_safe_text =
+                is_terminal_safe_code_point(code_point) &&
+                code_point != static_cast<char32_t>('\\');
+        if(is_unambiguous_safe_text) {
+            display.append(value.substr(offset, length));
+        } else {
+            for(std::size_t index = 0; index < length; ++index) {
+                append_escaped_byte(
+                        display,
+                        static_cast<unsigned char>(value[offset + index]));
+            }
+        }
+        offset += length;
+    }
+    return display;
+}
+
+// Legacy snapshot fields remain opaque because their surrounding display
+// still uses delimiters to distinguish typed identities.
+std::string invalid_snapshot_raw_value_display(std::string_view value) {
+    std::string display;
+    display.reserve(value.size());
+    for(const unsigned char byte : value) {
+        const bool is_safe_identity_byte =
+                (byte >= '0' && byte <= '9') ||
+                (byte >= 'A' && byte <= 'Z') ||
+                (byte >= 'a' && byte <= 'z') || byte == '-' ||
+                byte == '_' || byte == '.' || byte == '+' || byte == '@';
+        if(is_safe_identity_byte) {
+            display.push_back(static_cast<char>(byte));
+            continue;
+        }
+        append_escaped_byte(display, byte);
+    }
+    return display;
 }
 
 } // namespace
