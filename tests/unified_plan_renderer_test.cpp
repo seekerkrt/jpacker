@@ -1191,6 +1191,88 @@ void test_invalid_root_routing_identity_fields() {
             "invalid routing flattened identity");
 }
 
+void test_aur_root_preparation_diagnostics_are_terminal_safe() {
+    const std::string c1_csi = "\xC2\x9B";
+    const std::string line_separator = "\xE2\x80\xA8";
+    const std::string root_search_diagnostic =
+            std::string(
+                    "AUR RPC response validation failed for "
+                    "search[query=\"fixture-root\"]: field error reported "
+                    "\"root-search-before") +
+            c1_csi + "31mroot-search-after" + line_separator + "next\"";
+    const std::string escaped_root_search_diagnostic =
+            "AUR RPC response validation failed for "
+            "search[query=\"fixture-root\"]: field error reported "
+            "\"root-search-before"
+            "\\xC2\\x9B31mroot-search-after\\xE2\\x80\\xA8next\"";
+
+    RootPackageInstallPreparationFailure root_search_failure;
+    root_search_failure.details.push_back(
+            AurRootPackageSearchFailure{root_search_diagnostic});
+    const UnifiedPlanRenderingResult root_search_rendered = render_blocked(
+            RootPackagePreparationUnifiedPlanBlocker{
+                    UnifiedPlanBorrowedAuthorityReference<
+                            RootPackageInstallPreparationFailure>(
+                            root_search_failure)});
+
+    expect(
+            root_search_rendered.is_complete(),
+            "AUR root search diagnostic rendering is incomplete");
+    expect_contains(
+            root_search_rendered.text, "AurRootPackageSearchFailure",
+            "AUR root search failure kind");
+    expect_contains(
+            root_search_rendered.text, escaped_root_search_diagnostic,
+            "AUR root search escaped diagnostic");
+    expect_not_contains(
+            root_search_rendered.text, c1_csi,
+            "AUR root search raw C1 diagnostic");
+    expect_not_contains(
+            root_search_rendered.text, line_separator,
+            "AUR root search raw line separator diagnostic");
+
+    const std::string preparation_diagnostic =
+            std::string(
+                    "AUR RPC response validation failed for "
+                    "info[package=\"aur-root\"]: field error reported "
+                    "\"build-plan-before") +
+            c1_csi + "31mbuild-plan-after" + line_separator + "next\"";
+    const std::string escaped_preparation_diagnostic =
+            "AUR RPC response validation failed for "
+            "info[package=\"aur-root\"]: field error reported "
+            "\"build-plan-before"
+            "\\xC2\\x9B31mbuild-plan-after\\xE2\\x80\\xA8next\"";
+    RootPackageInstallPreparationFailure preparation_failure;
+    preparation_failure.details.push_back(
+            RootPackageInstallPreparationIssue{
+                    RootPackageInstallPreparationIssueKind::
+                            BuildPlanPreparationFailed,
+                    std::nullopt, std::nullopt, std::nullopt,
+                    preparation_diagnostic});
+    const UnifiedPlanRenderingResult preparation_rendered = render_blocked(
+            RootPackagePreparationUnifiedPlanBlocker{
+                    UnifiedPlanBorrowedAuthorityReference<
+                            RootPackageInstallPreparationFailure>(
+                            preparation_failure)});
+
+    expect(
+            preparation_rendered.is_complete(),
+            "AUR build-plan preparation diagnostic rendering is incomplete");
+    expect_contains(
+            preparation_rendered.text,
+            "RootPackageInstallPreparationIssueKind::BuildPlanPreparationFailed",
+            "AUR build-plan preparation failure kind");
+    expect_contains(
+            preparation_rendered.text, escaped_preparation_diagnostic,
+            "AUR build-plan preparation escaped diagnostic");
+    expect_not_contains(
+            preparation_rendered.text, c1_csi,
+            "AUR build-plan preparation raw C1 diagnostic");
+    expect_not_contains(
+            preparation_rendered.text, line_separator,
+            "AUR build-plan preparation raw line separator diagnostic");
+}
+
 void test_untrusted_failure_text_is_terminal_safe() {
     const std::string unsafe_entry_name =
             std::string("entry-path-before\nentry-path-after\t") +
@@ -2208,6 +2290,7 @@ int main() {
         test_blocker_variant_details();
         test_invalid_root_search_snapshot_typed_details();
         test_invalid_root_routing_identity_fields();
+        test_aur_root_preparation_diagnostics_are_terminal_safe();
         test_untrusted_failure_text_is_terminal_safe();
         test_source_failure_and_route_preflight_subtypes();
         test_route_preflight_nested_typed_details();

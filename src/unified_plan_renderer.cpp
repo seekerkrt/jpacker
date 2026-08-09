@@ -2505,7 +2505,8 @@ std::string root_package_preparation_detail_display(
                                                       "A root package preparation issue is missing its required diagnostic."))
                                     : localization::translate_message(
                                               "not observed")
-                            : typed_detail.diagnostic;
+                            : terminal_safe_text_display(
+                                      typed_detail.diagnostic);
                     return localization::format_translated_message(
                             "{}; input gate: {}; unavailable reason: {}; cancellation reason: {}; diagnostic: {}",
                             root_package_preparation_issue_kind_display(
@@ -2534,13 +2535,13 @@ std::string root_package_preparation_detail_display(
                     return localization::format_translated_message(
                             "{}; diagnostic: {}",
                             "AurRootPackageSearchFailure",
-                            required_string_display(
+                            terminal_safe_text_display(required_string_display(
                                     typed_detail.diagnostic, state,
                                     UnifiedPlanRenderingSection::Blockers,
                                     blocker_index, detail_index,
                                     localization::format_translated_message(
                                             "An {} root search failure is missing its diagnostic.",
-                                            "AUR")));
+                                            "AUR"))));
                 } else if constexpr(std::is_same_v<
                                             Detail,
                                             InvalidRootPackageSearchSnapshot>) {
