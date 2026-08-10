@@ -26,6 +26,7 @@
     "--help": "Show the help message and exit",
     "-V": "Show version information and exit",
     "--version": "Show version information and exit",
+    "--dry-run": "Observe a supported mutating operation without changing persistent state",
     "--edit": "Prompt to review PKGBUILD and .install files",
     "--noedit": "Skip PKGBUILD and .install review",
     "--diff": "Prompt to view repository update diffs",

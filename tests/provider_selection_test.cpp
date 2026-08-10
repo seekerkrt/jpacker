@@ -1,5 +1,10 @@
 #include "provider_selection.hpp"
+#include "provider_installed_state_presentation.hpp"
 
+#include "stubs/package-metadata/alpm_stub.hpp"
+#include "stubs/package-metadata/process_stub.hpp"
+
+#include <alpm.h>
 #include <exception>
 #include <iostream>
 #include <optional>
@@ -10,6 +15,11 @@
 #include <vector>
 
 namespace {
+
+namespace stub = package_metadata_test_stub;
+
+constexpr const char* DATABASE_PATH_COMMAND =
+        "pacman-conf --verbose RootDir DBPath 2>/dev/null";
 
 void expect(bool condition, const std::string& message) {
     if(!condition) throw std::runtime_error(message);
@@ -30,8 +40,47 @@ ProvidedDependency aur_candidate(
             std::move(package_version));
 }
 
+ProvidedDependency typed_aur_candidate(
+        const std::string& capability_specification,
+        const std::string& package_version) {
+    ProviderCapabilityParseResult parsed =
+            parse_provider_capability(capability_specification);
+    const ProviderCapability* capability = parsed.capability();
+    if(capability == nullptr) {
+        throw std::runtime_error(
+                "typed provider test capability did not parse");
+    }
+    ObservedVersion provided_version = capability->version().has_value()
+            ? ObservedVersion::available(
+                      ObservedVersionSource::AurProviderCapability,
+                      capability->version().value())
+            : ObservedVersion::unknown(
+                      ObservedVersionSource::AurProviderCapability,
+                      ObservedVersionUnknownReason::
+                              UnversionedProviderCapability);
+    return ProvidedDependency::from_aur_constraint_metadata(
+            "shared-provider",
+            "shared-provider-base",
+            ProviderConstraintMetadata{
+                    *capability,
+                    ObservedVersion::available(
+                            ObservedVersionSource::AurExactPackage,
+                            package_version),
+                    std::move(provided_version)});
+}
+
 std::vector<ProvidedDependency> candidates() {
     return {repository_candidate(), aur_candidate()};
+}
+
+std::vector<ProvidedDependency> installed_state_candidates() {
+    return {
+            ProvidedDependency::from_repository(
+                    "extra", "repository-provider", "virtual-dependency",
+                    "virtual-dependency=1.2", "1.2.3-1"),
+            ProvidedDependency::from_aur(
+                    "aur-provider", "aur-provider-base", "virtual-dependency",
+                    "virtual-dependency>=2.4", "2.4.0-1")};
 }
 
 ProvidedDependency repository_identity_candidate(
@@ -67,6 +116,23 @@ std::size_t occurrence_count(
         offset += needle.size();
     }
     return count;
+}
+
+void reset_metadata_stubs() {
+    stub::reset_alpm_stub();
+    stub::reset_process_stub();
+}
+
+void enqueue_valid_database_paths() {
+    stub::enqueue_captured_command_result(
+            DATABASE_PATH_COMMAND,
+            CapturedCommandResult{
+                    "RootDir = /\nDBPath = /var/lib/pacman/\n", 0});
+}
+
+ProviderCandidatePresenter make_installed_state_presenter(
+        ProviderInstalledStateLookup& lookup) {
+    return make_provider_installed_state_candidate_presenter(lookup);
 }
 
 void test_noninteractive_session_does_not_read_or_write() {
@@ -116,6 +182,206 @@ void test_candidate_metadata_and_exact_number_selection() {
                     ":: Select a provider from [1-2], or press Enter / enter "
                     "q/quit/cancel to cancel: ") != std::string::npos,
             "translated provider prompt sentence was not presented");
+}
+
+void test_installed_state_presentation_preserves_order_and_explicit_selection() {
+    reset_metadata_stubs();
+    enqueue_valid_database_paths();
+    stub::enqueue_local_package_query_present(
+            "repository-provider", "repository-provider", "1.2.3-1",
+            ALPM_PKG_REASON_EXPLICIT);
+    stub::enqueue_local_package_query_absent("aur-provider");
+
+    std::istringstream input("2\n");
+    std::ostringstream output;
+    ProviderSelectionSession session(input, output, true);
+    ProviderInstalledStateLookup lookup;
+
+    const std::vector<ProvidedDependency> candidates = installed_state_candidates();
+    std::optional<ProvidedDependency> selected = session.select_provider(
+            "virtual-dependency", candidates,
+            make_installed_state_presenter(lookup));
+
+    expect(selected.has_value(), "installed-state presentation did not accept explicit input");
+    expect(
+            same_provider_identity(selected.value(), candidates[1]),
+            "installed state changed the selected provider identity");
+    const std::string presentation = output.str();
+    expect(
+            presentation.find(
+                    "1) source=repository package=repository-provider repository=extra "
+                    "provided=virtual-dependency "
+                    "provided-specification=virtual-dependency=1.2 "
+                    "version=1.2.3-1 [installed]") != std::string::npos,
+            "installed repository provider was not annotated");
+    expect(
+            presentation.find(
+                    "2) source=AUR package=aur-provider PackageBase=aur-provider-base "
+                    "provided=virtual-dependency "
+                    "provided-specification=virtual-dependency>=2.4 "
+                    "version=2.4.0-1\n") != std::string::npos,
+            "not-installed provider did not preserve its metadata line");
+    expect(
+            presentation.find("1) source=repository") <
+                    presentation.find("2) source=AUR"),
+            "installed state changed candidate order or numbering");
+    expect(stub::package_query_call_count() == 2, "candidate states were not queried once each");
+    stub::require_local_package_query_expectations_consumed();
+}
+
+void test_multiple_installed_candidates_remain_explicit_choices() {
+    reset_metadata_stubs();
+    enqueue_valid_database_paths();
+    stub::enqueue_local_package_query_present(
+            "repository-provider", "repository-provider", "1.2.3-1",
+            ALPM_PKG_REASON_EXPLICIT);
+    stub::enqueue_local_package_query_present(
+            "aur-provider", "aur-provider", "2.4.0-1",
+            ALPM_PKG_REASON_EXPLICIT);
+
+    std::istringstream input("2\n");
+    std::ostringstream output;
+    ProviderSelectionSession session(input, output, true);
+    ProviderInstalledStateLookup lookup;
+    const std::vector<ProvidedDependency> candidates = installed_state_candidates();
+
+    std::optional<ProvidedDependency> selected = session.select_provider(
+            "virtual-dependency", candidates,
+            make_installed_state_presenter(lookup));
+
+    expect(selected.has_value(), "multiple installed candidates were not selectable");
+    expect(
+            same_provider_identity(selected.value(), candidates[1]),
+            "multiple installed candidates were auto-selected or reordered");
+    expect(
+            occurrence_count(output.str(), "[installed]") == 2,
+            "multiple installed candidates did not receive independent annotations");
+    stub::require_local_package_query_expectations_consumed();
+}
+
+void test_unknown_installed_state_stays_selectable_and_reports_once_per_package() {
+    reset_metadata_stubs();
+    enqueue_valid_database_paths();
+    stub::enqueue_local_package_query_failure("repository-provider");
+    stub::enqueue_local_package_query_absent("aur-provider");
+
+    std::istringstream input("1\n");
+    std::ostringstream output;
+    ProviderSelectionSession session(input, output, true);
+    ProviderInstalledStateLookup lookup;
+    const std::vector<ProvidedDependency> candidates = installed_state_candidates();
+
+    std::optional<ProvidedDependency> selected = session.select_provider(
+            "virtual-dependency", candidates,
+            make_installed_state_presenter(lookup));
+
+    expect(selected.has_value(), "unknown installed state rejected a valid choice");
+    expect(
+            same_provider_identity(selected.value(), candidates[0]),
+            "unknown installed state changed explicit selection");
+    expect(
+            output.str().find("[installed state unknown]") != std::string::npos,
+            "unknown installed state was indistinguishable from not installed");
+    expect(
+            occurrence_count(
+                    output.str(),
+                    "Warning: installed state is unavailable for provider candidate "
+                    "repository-provider:") == 1,
+            "package-specific installed-state warning was not emitted exactly once");
+    stub::require_local_package_query_expectations_consumed();
+}
+
+void test_session_installed_state_failure_reports_once_for_all_candidates() {
+    reset_metadata_stubs();
+    stub::enqueue_captured_command_result(
+            DATABASE_PATH_COMMAND, CapturedCommandResult{"", 127});
+
+    std::istringstream input("1\n");
+    std::ostringstream output;
+    ProviderSelectionSession session(input, output, true);
+    ProviderInstalledStateLookup lookup;
+
+    std::optional<ProvidedDependency> selected = session.select_provider(
+            "virtual-dependency", installed_state_candidates(),
+            make_installed_state_presenter(lookup));
+
+    expect(selected.has_value(), "session-level installed-state failure rejected a choice");
+    expect(
+            occurrence_count(output.str(), "[installed state unknown]") == 2,
+            "session-level failure did not annotate every unknown candidate");
+    expect(
+            occurrence_count(
+                    output.str(),
+                    "Warning: installed state is unavailable for provider candidates:") == 1,
+            "session-level installed-state warning repeated for candidates");
+    expect(stub::capture_command_call_count() == 1, "session failure retried metadata initialization");
+}
+
+void test_lookup_is_not_started_for_noninteractive_small_reuse_or_cancelled_paths() {
+    reset_metadata_stubs();
+    ProviderInstalledStateLookup lookup;
+    ProviderCandidatePresenter presenter = make_installed_state_presenter(lookup);
+
+    {
+        std::istringstream input("2\n");
+        std::ostringstream output;
+        ProviderSelectionSession session(input, output, false);
+        static_cast<void>(session.select_provider(
+                "virtual-dependency", installed_state_candidates(), presenter));
+    }
+    {
+        std::istringstream input;
+        std::ostringstream output;
+        ProviderSelectionSession session(input, output, true);
+        const std::vector<ProvidedDependency> single_candidate{
+                installed_state_candidates().front()};
+        static_cast<void>(session.select_provider(
+                "virtual-dependency", single_candidate, presenter));
+    }
+    expect(stub::capture_command_call_count() == 0, "noninteractive or single candidate started lookup");
+    expect(stub::initialize_call_count() == 0, "noninteractive or single candidate initialized libalpm");
+    expect(stub::package_query_call_count() == 0, "noninteractive or single candidate queried local DB");
+
+    reset_metadata_stubs();
+    enqueue_valid_database_paths();
+    stub::enqueue_local_package_query_absent("repository-provider");
+    stub::enqueue_local_package_query_absent("aur-provider");
+    ProviderInstalledStateLookup interactive_lookup;
+    ProviderCandidatePresenter interactive_presenter =
+            make_installed_state_presenter(interactive_lookup);
+    std::istringstream input("q\n2\n");
+    std::ostringstream output;
+    ProviderSelectionSession session(input, output, true);
+    const std::vector<ProvidedDependency> candidates = installed_state_candidates();
+    static_cast<void>(session.select_provider(
+            "virtual-dependency", candidates, interactive_presenter));
+    const std::size_t queries_after_cancel = stub::package_query_call_count();
+    static_cast<void>(session.select_provider(
+            "virtual-dependency>=1", candidates, interactive_presenter));
+    expect(
+            stub::package_query_call_count() == queries_after_cancel,
+            "cancelled dependency reuse started an installed-state lookup");
+    stub::require_local_package_query_expectations_consumed();
+
+    reset_metadata_stubs();
+    enqueue_valid_database_paths();
+    stub::enqueue_local_package_query_absent("repository-provider");
+    stub::enqueue_local_package_query_absent("aur-provider");
+    ProviderInstalledStateLookup reuse_lookup;
+    ProviderCandidatePresenter reuse_presenter =
+            make_installed_state_presenter(reuse_lookup);
+    std::istringstream reuse_input("1\n2\n");
+    std::ostringstream reuse_output;
+    ProviderSelectionSession reuse_session(reuse_input, reuse_output, true);
+    static_cast<void>(reuse_session.select_provider(
+            "virtual-dependency", candidates, reuse_presenter));
+    const std::size_t queries_after_choice = stub::package_query_call_count();
+    static_cast<void>(reuse_session.select_provider(
+            "virtual-dependency<9", candidates, reuse_presenter));
+    expect(
+            stub::package_query_call_count() == queries_after_choice,
+            "existing provider choice reuse started an installed-state lookup");
+    stub::require_local_package_query_expectations_consumed();
 }
 
 void test_invalid_and_out_of_range_input_retries() {
@@ -233,6 +499,51 @@ void test_canonical_dependency_reuses_source_aware_choice() {
             "reused provider choice consumed another input line");
 }
 
+void test_choice_reuse_returns_current_typed_capability_without_reordering() {
+    std::istringstream input("2\n1\n");
+    std::ostringstream output;
+    ProviderSelectionSession session(input, output, true);
+    const std::vector<ProvidedDependency> initial_candidates{
+            repository_candidate(),
+            typed_aur_candidate("virtual-dependency=3", "8.0-1")};
+
+    const std::optional<ProvidedDependency> selected =
+            session.select_provider(
+                    "virtual-dependency>=2", initial_candidates);
+    expect(
+            selected.has_value() &&
+                    selected->constraint_metadata.has_value() &&
+                    selected->constraint_metadata->provided_capability
+                                    .raw_specification() ==
+                            "virtual-dependency=3",
+            "Initial typed AUR capability was not selected explicitly");
+
+    const std::vector<ProvidedDependency> current_candidates{
+            repository_candidate("1.3.0-1"),
+            typed_aur_candidate("virtual-dependency=1", "9.0-1")};
+    const std::string output_before_reuse = output.str();
+    const std::optional<ProvidedDependency> refreshed =
+            session.select_provider(
+                    "virtual-dependency<9", current_candidates);
+    expect(
+            refreshed.has_value() &&
+                    refreshed.value() == current_candidates[1] &&
+                    refreshed->constraint_metadata.has_value() &&
+                    refreshed->constraint_metadata->provided_capability
+                                    .raw_specification() ==
+                            "virtual-dependency=1",
+            "Choice reuse did not return the current typed capability");
+    expect(
+            output.str() == output_before_reuse,
+            "Typed capability refresh prompted or changed candidate policy");
+
+    std::string unread_input;
+    expect(
+            static_cast<bool>(std::getline(input, unread_input)) &&
+                    unread_input == "1",
+            "Typed capability refresh consumed a new selection");
+}
+
 void test_missing_previous_identity_throws_typed_conflict() {
     std::istringstream input("2\n");
     std::ostringstream output;
@@ -334,11 +645,17 @@ int main() {
     try {
         test_noninteractive_session_does_not_read_or_write();
         test_candidate_metadata_and_exact_number_selection();
+        test_installed_state_presentation_preserves_order_and_explicit_selection();
+        test_multiple_installed_candidates_remain_explicit_choices();
+        test_unknown_installed_state_stays_selectable_and_reports_once_per_package();
+        test_session_installed_state_failure_reports_once_for_all_candidates();
+        test_lookup_is_not_started_for_noninteractive_small_reuse_or_cancelled_paths();
         test_invalid_and_out_of_range_input_retries();
         test_cancel_inputs_return_no_selection();
         test_cancelled_dependency_does_not_prompt_or_read_again();
         test_eof_dependency_does_not_prompt_again();
         test_canonical_dependency_reuses_source_aware_choice();
+        test_choice_reuse_returns_current_typed_capability_without_reordering();
         test_missing_previous_identity_throws_typed_conflict();
         test_cross_dependency_package_identity_conflicts();
         test_cross_dependency_same_identity_is_allowed();

@@ -486,6 +486,9 @@ std::string preflight_reason_label(AurUpdateExecutionReason reason) {
         return localization::translate_message("update plan inconsistent");
     case AurUpdateExecutionReason::DuplicateUpdateTarget:
         return localization::translate_message("duplicate update target");
+    case AurUpdateExecutionReason::InstalledPackageMetadataUnavailable:
+        return localization::translate_message(
+                "installed package metadata unavailable");
     case AurUpdateExecutionReason::RepositoryMetadataUnavailable:
         return localization::translate_message("repository metadata unavailable");
     case AurUpdateExecutionReason::AurDependencyMetadataUnavailable:
@@ -846,6 +849,7 @@ bool is_normal_skip_reason(AurUpdateExecutionReason reason) {
     case AurUpdateExecutionReason::InstalledReasonUnknown:
     case AurUpdateExecutionReason::UpdatePlanInconsistent:
     case AurUpdateExecutionReason::DuplicateUpdateTarget:
+    case AurUpdateExecutionReason::InstalledPackageMetadataUnavailable:
     case AurUpdateExecutionReason::RepositoryMetadataUnavailable:
     case AurUpdateExecutionReason::AurDependencyMetadataUnavailable:
     case AurUpdateExecutionReason::ProviderMetadataUnavailable:
@@ -1779,6 +1783,7 @@ bool is_supported_upgrade_all_global_option(const std::string& option) {
     case cli_authority::GlobalOptionId::Diff:
     case cli_authority::GlobalOptionId::NoDiff:
     case cli_authority::GlobalOptionId::NoConfirm:
+    case cli_authority::GlobalOptionId::DryRun:
     case cli_authority::GlobalOptionId::BuildMode:
     case cli_authority::GlobalOptionId::Rebuild:
     case cli_authority::GlobalOptionId::CleanBuild:

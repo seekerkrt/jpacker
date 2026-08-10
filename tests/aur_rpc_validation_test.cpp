@@ -33,6 +33,22 @@ void print_info_map(const std::map<std::string, AurPackageInfo>& packages) {
     }
 }
 
+void print_constraint_metadata(
+        const std::optional<AurPackageInfo>& info) {
+    if(!info.has_value() || !info->constraint_metadata.has_value()) {
+        throw std::runtime_error(
+                "AUR response did not retain typed constraint metadata.");
+    }
+    const AurPackageConstraintMetadata& metadata =
+            info->constraint_metadata.value();
+    std::cout << metadata.package_name << '|'
+              << metadata.package_base << '|'
+              << metadata.depends.size() << '|'
+              << metadata.make_depends.size() << '|'
+              << metadata.check_depends.size() << '|'
+              << metadata.provides.size() << '\n';
+}
+
 #ifdef MOGUET_ENABLE_AUR_RPC_TEST_HOOKS
 void test_write_callback_contract() {
     char        payload[] = "abc";
@@ -82,6 +98,8 @@ int main(int argc, char* argv[]) {
     try {
         if(operation == "info-strict") {
             print_info(AurClient::info_strict(subject));
+        } else if(operation == "constraint-metadata-strict") {
+            print_constraint_metadata(AurClient::info_strict(subject));
         } else if(operation == "info-legacy") {
             print_info(AurClient::info(subject));
         } else if(operation == "search-strict") {

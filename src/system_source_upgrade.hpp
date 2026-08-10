@@ -1,5 +1,6 @@
 #pragma once
 
+#include "dependency_plan.hpp"
 #include "package_metadata.hpp"
 #include "source_install.hpp"
 #include "source_environment.hpp"
@@ -14,6 +15,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -118,6 +120,9 @@ struct SystemSourceUpgradeOptionSnapshot {
     bool        clean_build = false;
     bool        rm_deps = false;
     std::string editor;
+    // Registered-source/AUR update artifact installはproductionで常に
+    // --neededなし。projectionもこのprepared policyを正本にする。
+    bool needed = false;
 };
 
 // system mutation前に確定した利用者intentとsource identity。
@@ -130,6 +135,7 @@ struct RegisteredSourcePreferenceSnapshot {
     std::optional<std::string> canonical_source_identity_key;
     std::optional<std::string> resolved_package_base;
     std::vector<std::string> preference_load_warnings;
+    std::optional<SourceBuildSourceKind> source_kind = std::nullopt;
 };
 
 struct SystemSourceUpgradePreparedSnapshot {
@@ -154,6 +160,147 @@ struct SystemSourceUpgradeIssue {
             cache_preparation_failure;
     std::optional<TrustedCacheFailure> trusted_cache_failure;
     std::string diagnostic;
+};
+
+// Prepared source invocation内のactual work itemから、source identityと
+// pre-build required targetだけをborrowする。command/cache/executor capabilityは
+// このviewへ公開しない。
+class PreparedSystemSourceWorkReference final {
+public:
+    PreparedSystemSourceWorkReference(
+            const PreparedSystemSourceWorkReference&) = delete;
+    PreparedSystemSourceWorkReference& operator=(
+            const PreparedSystemSourceWorkReference&) = delete;
+    PreparedSystemSourceWorkReference(
+            PreparedSystemSourceWorkReference&&) noexcept = default;
+    PreparedSystemSourceWorkReference& operator=(
+            PreparedSystemSourceWorkReference&&) noexcept = default;
+    ~PreparedSystemSourceWorkReference() = default;
+
+    [[nodiscard]] const RegisteredSourcePreferenceSnapshot& source()
+            const noexcept {
+        return source_.get();
+    }
+    [[nodiscard]] const std::vector<RequiredPackageArtifactTarget>&
+    required_targets() const noexcept {
+        return required_targets_.get();
+    }
+    [[nodiscard]] const std::string& requested_package_name() const noexcept {
+        return requested_package_name_.get();
+    }
+    [[nodiscard]] const std::string& checkout_package_base() const noexcept {
+        return checkout_package_base_.get();
+    }
+    [[nodiscard]] bool is_build_plan_entry() const noexcept {
+        return is_build_plan_entry_;
+    }
+    [[nodiscard]] bool uses_system_update_baseline() const noexcept {
+        return uses_system_update_baseline_;
+    }
+    [[nodiscard]] bool needed() const noexcept {
+        return needed_;
+    }
+    [[nodiscard]] const std::optional<std::vector<std::string>>&
+    configured_repository_order() const noexcept {
+        return configured_repository_order_.get();
+    }
+    [[nodiscard]] const std::vector<ProvidedDependency>&
+    selected_repository_providers() const noexcept {
+        return selected_repository_providers_.get();
+    }
+
+private:
+    PreparedSystemSourceWorkReference(
+            const RegisteredSourcePreferenceSnapshot& source,
+            const ProductionSourceBuildWorkItem& work_item)
+        : source_(source),
+          required_targets_(work_item.required_targets),
+          requested_package_name_(work_item.request.package_name),
+          checkout_package_base_(work_item.request.checkout_name),
+          is_build_plan_entry_(work_item.is_build_plan_entry),
+          uses_system_update_baseline_(
+                  work_item.uses_system_update_baseline),
+          needed_(work_item.request.needed),
+          configured_repository_order_(
+                  work_item.configured_repository_order),
+          selected_repository_providers_(
+                  work_item.selected_repository_providers) {}
+
+    std::reference_wrapper<const RegisteredSourcePreferenceSnapshot> source_;
+    std::reference_wrapper<
+            const std::vector<RequiredPackageArtifactTarget>>
+            required_targets_;
+    std::reference_wrapper<const std::string> requested_package_name_;
+    std::reference_wrapper<const std::string> checkout_package_base_;
+    bool is_build_plan_entry_ = false;
+    bool uses_system_update_baseline_ = false;
+    bool needed_ = false;
+    std::reference_wrapper<
+            const std::optional<std::vector<std::string>>>
+            configured_repository_order_;
+    std::reference_wrapper<const std::vector<ProvidedDependency>>
+            selected_repository_providers_;
+
+    friend class PreparedSystemSourceUpgrade;
+    friend struct UnifiedPlanProjectionTestAccess;
+};
+
+// PreparedSystemSourceUpgradeが所有するread-only projection seam。
+// すべての参照先は同じprepared capability内にあり、そのcapabilityをmoveまたは
+// destroyする前に、このauthorityをborrowするprojectionを破棄する。
+class SystemSourceUpgradeProjectionAuthority final {
+public:
+    SystemSourceUpgradeProjectionAuthority(
+            const SystemSourceUpgradeProjectionAuthority&) = delete;
+    SystemSourceUpgradeProjectionAuthority& operator=(
+            const SystemSourceUpgradeProjectionAuthority&) = delete;
+    SystemSourceUpgradeProjectionAuthority(
+            SystemSourceUpgradeProjectionAuthority&&) noexcept = default;
+    SystemSourceUpgradeProjectionAuthority& operator=(
+            SystemSourceUpgradeProjectionAuthority&&) noexcept = default;
+    ~SystemSourceUpgradeProjectionAuthority() = default;
+
+    [[nodiscard]] const SystemSourceUpgradePreparedSnapshot& snapshot()
+            const noexcept {
+        return snapshot_.get();
+    }
+    [[nodiscard]] const BuildPlan* aur_invocation_plan() const noexcept {
+        return aur_invocation_plan_.has_value()
+                ? &aur_invocation_plan_->get()
+                : nullptr;
+    }
+    [[nodiscard]] const std::vector<SystemSourceUpgradeIssue>& issues()
+            const noexcept {
+        return issues_.get();
+    }
+    [[nodiscard]] const std::vector<PreparedSystemSourceWorkReference>&
+    source_work_items() const noexcept {
+        return source_work_items_;
+    }
+
+private:
+    SystemSourceUpgradeProjectionAuthority(
+            const SystemSourceUpgradePreparedSnapshot& snapshot,
+            const BuildPlan* aur_invocation_plan,
+            const std::vector<SystemSourceUpgradeIssue>& issues,
+            std::vector<PreparedSystemSourceWorkReference> source_work_items)
+        : snapshot_(snapshot),
+          aur_invocation_plan_(
+                  aur_invocation_plan == nullptr
+                  ? std::nullopt
+                  : std::optional<std::reference_wrapper<const BuildPlan>>{
+                            std::cref(*aur_invocation_plan)}),
+          issues_(issues),
+          source_work_items_(std::move(source_work_items)) {}
+
+    std::reference_wrapper<const SystemSourceUpgradePreparedSnapshot> snapshot_;
+    std::optional<std::reference_wrapper<const BuildPlan>>
+            aur_invocation_plan_;
+    std::reference_wrapper<const std::vector<SystemSourceUpgradeIssue>> issues_;
+    std::vector<PreparedSystemSourceWorkReference> source_work_items_;
+
+    friend class PreparedSystemSourceUpgrade;
+    friend struct UnifiedPlanProjectionTestAccess;
 };
 
 struct SystemSourceUpgradeWarning {
@@ -221,6 +368,9 @@ struct SystemSourceUpgradeResult {
     std::vector<SystemSourceUpgradeWarning> warnings;
     std::vector<SystemSourceUpgradeIssue> issues;
     std::vector<SystemSourceUpgradeDiagnostic> diagnostics;
+    // Invocation-wide provider/dependency preflight authority. It is moved
+    // from preparation and is never reconstructed per root for observation.
+    std::optional<BuildPlan> aur_invocation_plan = std::nullopt;
 
     bool is_success() const noexcept;
     PackageStateChange package_state_change() const noexcept;
@@ -235,15 +385,18 @@ struct SystemSourceUpgradeResult {
 class PreparedSystemSourceUpgrade final {
     struct Impl;
 
-    explicit PreparedSystemSourceUpgrade(std::unique_ptr<Impl> impl) noexcept;
+    explicit PreparedSystemSourceUpgrade(std::unique_ptr<Impl> impl);
 
     friend struct SystemSourceUpgradePreparationAccess;
     friend SystemSourceUpgradeResult execute_prepared_system_source_upgrade(
             PreparedSystemSourceUpgrade prepared,
             const AppConfig& config,
-            const SystemSourceUpgradeEventObserver& observer);
+            const SystemSourceUpgradeEventObserver& observer,
+            std::optional<ValidatedCacheRoot> shared_cache_root);
 
     std::unique_ptr<Impl> impl_;
+    std::optional<SystemSourceUpgradeProjectionAuthority>
+            projection_authority_;
 
 public:
     PreparedSystemSourceUpgrade(const PreparedSystemSourceUpgrade&) = delete;
@@ -254,6 +407,10 @@ public:
 
     bool is_valid() const noexcept;
     const SystemSourceUpgradePreparedSnapshot* snapshot() const noexcept;
+    const BuildPlan* aur_invocation_plan() const noexcept;
+    const std::vector<SystemSourceUpgradeIssue>& issues() const noexcept;
+    const SystemSourceUpgradeProjectionAuthority* projection_authority()
+            const noexcept;
 
 #ifdef MOGUET_ENABLE_SYSTEM_SOURCE_UPGRADE_TEST_HOOKS
     void make_first_source_correlation_inconsistent_for_test();
@@ -264,17 +421,20 @@ public:
 };
 
 // blocked resultとexecutable capabilityを同時に返さないsum type。
+// Preparation is read-only. Cache authority is acquired only by execution.
 using SystemSourceUpgradePreparation = std::variant<
         PreparedSystemSourceUpgrade,
         SystemSourceUpgradeResult>;
 
 SystemSourceUpgradePreparation prepare_system_source_upgrade(
         const AppConfig& config,
-        const SystemSourceUpgradeEventObserver& observer = {},
-        std::optional<ValidatedCacheRoot> cache_root = std::nullopt);
+        const SystemSourceUpgradeEventObserver& observer = {});
 
 // by-value consumeにより、呼び出し元capabilityをmutation前にinvalid化する。
+// shared_cache_root keeps one actual-execution authority across the nested
+// system/source and later upgrade-all AUR phases.
 SystemSourceUpgradeResult execute_prepared_system_source_upgrade(
         PreparedSystemSourceUpgrade prepared,
         const AppConfig& config,
-        const SystemSourceUpgradeEventObserver& observer = {});
+        const SystemSourceUpgradeEventObserver& observer = {},
+        std::optional<ValidatedCacheRoot> shared_cache_root = std::nullopt);

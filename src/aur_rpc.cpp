@@ -393,17 +393,69 @@ void validate_metadata_identifiers(
     }
 }
 
-void validate_provided_dependency_constraints(
-        const std::vector<std::string>& values,
+void validate_metadata_control_characters(
+        const std::vector<std::string>& values, const std::string& field,
         const std::string& context) {
     for(size_t i = 0; i < values.size(); ++i) {
-        if(parse_dependency_string(values[i]).has_malformed_constraint()) {
+        if(contains_control_character(values[i])) {
             throw_aur_rpc_validation_error(
                     localization::format_translated_message(
-                            "{} {} response validation failed for {}: field {}[{}] contains an invalid version constraint",
-                            "AUR", "RPC", context, "Provides", i));
+                            "{} {} response validation failed for {}: field {}[{}] contains a control character",
+                            "AUR", "RPC", context, field, i));
         }
     }
+}
+
+std::string constraint_metadata_field_name(
+        AurConstraintMetadataField field) {
+    switch(field) {
+    case AurConstraintMetadataField::Depends:
+        return "Depends";
+    case AurConstraintMetadataField::MakeDepends:
+        return "MakeDepends";
+    case AurConstraintMetadataField::CheckDepends:
+        return "CheckDepends";
+    case AurConstraintMetadataField::Provides:
+        return "Provides";
+    }
+    throw std::logic_error("Unknown AUR constraint metadata field.");
+}
+
+std::string constraint_metadata_identity_for_error(
+        const std::string& specification) {
+    const std::size_t operator_position = specification.find_first_of("<>=");
+    return trim(operator_position == std::string::npos
+                        ? specification
+                        : specification.substr(0, operator_position));
+}
+
+[[noreturn]] void throw_constraint_metadata_projection_failure(
+        const AurConstraintMetadataProjectionFailure& failure,
+        const std::string& context) {
+    const std::string field = constraint_metadata_field_name(failure.field);
+    switch(failure.reason.kind) {
+    case DependencyConstraintParseFailureKind::EmptySpecification:
+    case DependencyConstraintParseFailureKind::InvalidPackageIdentity:
+        throw_aur_rpc_validation_error(
+                localization::format_translated_message(
+                        "{} {} response validation failed for {}: field {}[{}] contains invalid package identifier {}",
+                        "AUR", "RPC", context, field, failure.item_index,
+                        json_value_for_error(
+                                constraint_metadata_identity_for_error(
+                                        failure.reason.raw_specification))));
+    case DependencyConstraintParseFailureKind::InvalidSonameIdentity:
+    case DependencyConstraintParseFailureKind::UnsupportedConsumerOperator:
+    case DependencyConstraintParseFailureKind::UnsupportedProviderOperator:
+    case DependencyConstraintParseFailureKind::MissingVersion:
+    case DependencyConstraintParseFailureKind::InvalidVersion:
+        throw_aur_rpc_validation_error(
+                localization::format_translated_message(
+                        "{} {} response validation failed for {}: field {}[{}] contains an invalid version constraint",
+                        "AUR", "RPC", context, field,
+                        failure.item_index));
+    }
+    throw std::logic_error(
+            "Unknown AUR constraint metadata projection failure.");
 }
 
 AurPackageInfo parse_aur_rpc_package_info(
@@ -445,13 +497,28 @@ AurPackageInfo parse_aur_rpc_package_info(
     info.Replaces = optional_json_string_array(pkg, "Replaces", entry_context);
 
     // POLICY(#174): OptDepends は `pkg: description` を許すため型だけを検証する。
-    validate_metadata_identifiers(info.Depends, "Depends", entry_context);
-    validate_metadata_identifiers(info.MakeDepends, "MakeDepends", entry_context);
-    validate_metadata_identifiers(info.CheckDepends, "CheckDepends", entry_context);
-    validate_metadata_identifiers(info.Provides, "Provides", entry_context);
-    validate_provided_dependency_constraints(info.Provides, entry_context);
+    validate_metadata_control_characters(
+            info.Depends, "Depends", entry_context);
+    validate_metadata_control_characters(
+            info.MakeDepends, "MakeDepends", entry_context);
+    validate_metadata_control_characters(
+            info.CheckDepends, "CheckDepends", entry_context);
+    validate_metadata_control_characters(
+            info.Provides, "Provides", entry_context);
     validate_metadata_identifiers(info.Conflicts, "Conflicts", entry_context);
     validate_metadata_identifiers(info.Replaces, "Replaces", entry_context);
+
+    AurConstraintMetadataProjectionResult constraint_metadata =
+            project_aur_constraint_metadata(info);
+    if(const auto* failure =
+               std::get_if<AurConstraintMetadataProjectionFailure>(
+                       &constraint_metadata);
+       failure != nullptr) {
+        throw_constraint_metadata_projection_failure(*failure, entry_context);
+    }
+    info.constraint_metadata =
+            std::get<AurPackageConstraintMetadata>(
+                    std::move(constraint_metadata));
     return info;
 }
 

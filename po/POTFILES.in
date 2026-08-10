@@ -21,7 +21,10 @@ src/commands_source_maintenance.cpp
 src/commands_sync.cpp
 src/commands_upgrade_all.cpp
 src/dependency_plan.cpp
+src/dependency_plan_model.cpp
+src/dependency_constraint_presentation.cpp
 src/dependency_spec.cpp
+src/dry_run.cpp
 src/filtered_aur_update_operation.cpp
 src/local_source_build_dependency_preparation.cpp
 src/local_source_install.cpp
@@ -34,6 +37,7 @@ src/package_metadata.cpp
 src/pkgbuild_export.cpp
 src/process.cpp
 src/provider_selection.cpp
+src/provider_installed_state_presentation.cpp
 src/repository_query.cpp
 src/separated_package_base_source_build.cpp
 src/separated_source_build.cpp
@@ -46,6 +50,7 @@ src/trusted_git.cpp
 src/upgrade_all_operation.cpp
 src/upgrade_all_plan.cpp
 src/user_config.cpp
+src/unified_plan_renderer.cpp
 src/xdg_directory_safety.cpp
 src/xdg_paths.cpp
 src/xdg_state_log.cpp

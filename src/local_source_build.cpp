@@ -516,7 +516,44 @@ PreparedLocalSourceBuild::PreparedLocalSourceBuild(
         LocalSourceBuildRequest request, std::string package_base,
         std::vector<RequiredPackageArtifactTarget> required_targets) noexcept
     : request_(std::move(request)), package_base_(std::move(package_base)),
-      required_targets_(std::move(required_targets)) {}
+      required_targets_(std::move(required_targets)),
+      projection_authority_(request_) {}
+
+LocalSourceBuildProjectionAuthority::LocalSourceBuildProjectionAuthority(
+        const LocalSourceBuildRequest& request) noexcept
+    : LocalSourceBuildProjectionAuthority(
+              request.source_root, request.build_plan,
+              request.metadata.metadata_,
+              request.metadata.source_environment_,
+              request.metadata.effective_architecture_,
+              request.metadata.provenance_,
+              request.metadata.source_directory_identity_,
+              request.metadata.pkgbuild_snapshot_) {}
+
+LocalSourceBuildProjectionAuthority
+make_local_source_build_projection_authority(
+        const LocalSourceRoot& source_root,
+        const LocalBuildPlan& local_build_plan,
+        const LocalSourceBuildMetadata& metadata) {
+    metadata.require_matches(source_root);
+    LocalSourceBuildProjectionAuthority authority(
+            source_root, local_build_plan, metadata.metadata_,
+            metadata.source_environment_, metadata.effective_architecture_,
+            metadata.provenance_, metadata.source_directory_identity_,
+            metadata.pkgbuild_snapshot_);
+    if(!authority.has_complete_identity()) {
+        throw std::invalid_argument(
+                "Local source read-only projection authorities are inconsistent.");
+    }
+    return authority;
+}
+
+PreparedLocalSourceBuild::PreparedLocalSourceBuild(
+        PreparedLocalSourceBuild&& other) noexcept
+    : request_(std::move(other.request_)),
+      package_base_(std::move(other.package_base_)),
+      required_targets_(std::move(other.required_targets_)),
+      projection_authority_(request_) {}
 
 LocalSourceBuildPhaseError::LocalSourceBuildPhaseError(
         LocalSourceBuildFailurePhase phase, const std::string& diagnostic,

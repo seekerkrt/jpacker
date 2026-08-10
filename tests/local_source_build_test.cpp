@@ -53,6 +53,14 @@ constexpr std::string_view SRCINFO_CONTENT =
         "\tarch = x86_64\n"
         "pkgname = local-build-cli\n"
         "pkgname = local-build-libs\n";
+constexpr std::string_view UNSATISFIED_SRCINFO_CONTENT =
+        "pkgbase = local-build-suite\n"
+        "\tpkgver = 1.0\n"
+        "\tpkgrel = 1\n"
+        "\tarch = x86_64\n"
+        "pkgname = local-build-cli\n"
+        "\tdepends = local-build-libs>=2.0-1\n"
+        "pkgname = local-build-libs\n";
 constexpr std::string_view NESTED_CONTENT = "local source payload\n";
 
 void expect(bool condition, const std::string& message) {
@@ -194,6 +202,10 @@ public:
         return source_path_;
     }
 
+    void write_srcinfo(std::string_view contents) const {
+        write_file(source_path_ / ".SRCINFO", contents);
+    }
+
     fs::path cache_root_path() const {
         return cache_home_path_ / "moguet";
     }
@@ -248,12 +260,13 @@ public:
                         .clean_build = true}};
     }
 
-    void expect_original_tree_unchanged() const {
+    void expect_original_tree_unchanged(
+            std::string_view expected_srcinfo = SRCINFO_CONTENT) const {
         expect(
                 read_file(source_path_ / "PKGBUILD") == PKGBUILD_CONTENT,
                 "Original PKGBUILD changed during local build");
         expect(
-                read_file(source_path_ / ".SRCINFO") == SRCINFO_CONTENT,
+                read_file(source_path_ / ".SRCINFO") == expected_srcinfo,
                 "Original .SRCINFO changed during local build");
         expect(
                 read_file(source_path_ / "nested" / "payload") ==
@@ -731,6 +744,40 @@ void test_success_uses_snapshot_and_returns_correlated_artifacts() {
             "Explicit artifact cleanup did not remove the workspace");
 }
 
+void test_prepared_projection_authority_tracks_one_invocation() {
+    LocalBuildFixture fixture;
+    PreparedLocalSourceBuild prepared = prepare_local_source_build(
+            fixture.make_request());
+    const LocalSourceBuildProjectionAuthority& authority =
+            prepared.projection_authority();
+    expect(
+            authority.has_complete_identity() &&
+                    authority.source_root().canonical_path() ==
+                            fs::canonical(fixture.source_path()) &&
+                    authority.accepted_metadata().package_base ==
+                            PACKAGE_BASE &&
+                    authority.effective_architecture() == "x86_64" &&
+                    authority.source_environment()
+                            .ordered_assignments.empty() &&
+                    authority.provenance() ==
+                            LocalSourceBuildMetadataProvenance::
+                                    ExistingSrcinfo &&
+                    authority.source_directory_identity() ==
+                            authority.source_root().directory_identity() &&
+                    authority.pkgbuild_snapshot() ==
+                            authority.source_root().pkgbuild(),
+            "Prepared local projection authority mixed invocation state");
+
+    PreparedLocalSourceBuild moved(std::move(prepared));
+    const LocalSourceBuildProjectionAuthority& moved_authority =
+            moved.projection_authority();
+    expect(
+            moved_authority.has_complete_identity() &&
+                    moved_authority.source_root().canonical_path() ==
+                            fs::canonical(fixture.source_path()),
+            "Moved local projection authority retained moved-from borrows");
+}
+
 void test_cache_below_source_is_rejected_during_static_preflight() {
     LocalBuildFixture fixture;
     LocalSourceBuildRequest request = [&]() {
@@ -761,6 +808,56 @@ void test_cache_below_source_is_rejected_during_static_preflight() {
     }
     throw std::runtime_error(
             "Source/cache containment passed static preflight");
+}
+
+void test_unsatisfied_constraint_stops_before_local_build_mutation() {
+    LocalBuildFixture fixture;
+    fixture.write_srcinfo(UNSATISFIED_SRCINFO_CONTENT);
+    LocalSourceBuildRequest request = fixture.make_request();
+    const auto initial_cache_entries =
+            direct_child_names(fixture.cache_root_path());
+
+    const auto typed_edge = std::find_if(
+            request.build_plan.build_plan().dependency_edges.begin(),
+            request.build_plan.build_plan().dependency_edges.end(),
+            [](const BuildPlanDependencyEdge& edge) {
+                return edge.dependency_spec ==
+                        "local-build-libs>=2.0-1";
+            });
+    expect(
+            typed_edge !=
+                            request.build_plan.build_plan()
+                                    .dependency_edges.end() &&
+                    typed_edge->kind == DependencyKind::Local &&
+                    typed_edge->requirement.has_value() &&
+                    typed_edge->resolved_candidate.has_value() &&
+                    typed_edge->constraint_evaluation.has_value() &&
+                    typed_edge->constraint_evaluation->satisfaction() ==
+                            ConstraintSatisfaction::Unsatisfied,
+            "Local build fixture did not retain its typed unsatisfied edge");
+
+    ScenarioObservation observation(
+            ScenarioKind::Success, fixture.source_path());
+    process_stub::reset_process_stub();
+    ScenarioObservationGuard guard(observation);
+    const ObservedFailure failure =
+            execute_expect_failure(std::move(request));
+
+    expect(
+            failure.phase == LocalSourceBuildFailurePhase::Preflight,
+            "Unsatisfied local constraint was rejected after preflight");
+    expect(
+            process_stub::capture_command_call_count() == 0 &&
+                    process_stub::run_command_call_count() == 0 &&
+                    observation.source_workspace_events == 0 &&
+                    observation.artifact_workspace_path.empty(),
+            "Unsatisfied local constraint crossed a workspace or process boundary");
+    expect(
+            direct_child_names(fixture.cache_root_path()) ==
+                    initial_cache_entries,
+            "Unsatisfied local constraint mutated the trusted cache");
+    process_stub::require_process_expectations_consumed();
+    fixture.expect_original_tree_unchanged(UNSATISFIED_SRCINFO_CONTENT);
 }
 
 void test_evaluated_metadata_forwards_bound_environment_in_order() {
@@ -1168,8 +1265,14 @@ int main() {
                 "snapshot build and correlated artifacts",
                 test_success_uses_snapshot_and_returns_correlated_artifacts);
         run_case(
+                "prepared projection invocation authority",
+                test_prepared_projection_authority_tracks_one_invocation);
+        run_case(
                 "source and cache separation preflight",
                 test_cache_below_source_is_rejected_during_static_preflight);
+        run_case(
+                "unsatisfied constraint pre-mutation firewall",
+                test_unsatisfied_constraint_stops_before_local_build_mutation);
         run_case(
                 "evaluated metadata environment binding",
                 test_evaluated_metadata_forwards_bound_environment_in_order);

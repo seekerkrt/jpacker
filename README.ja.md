@@ -44,10 +44,11 @@ Moguet v2.0.1は、採用済みXDG storage契約のうちsource-preference部分
 preferenceは実行user自身のXDG config contextだけを使い、公開済みv2.0.0のtag、Release、
 release noteは歴史的記録のまま変更しません。
 
-Moguet v2.1.0は最新releaseです。source-awareなpackage discoveryとambiguous AUR
-dependency providerの対話処理、local `PKGBUILD` buildを拡張し、Arch Linux container
-validationも追加しました。利用者から見える変更の全体は
-[v2.1.0 release](https://github.com/seekerkrt/moguet/releases/tag/v2.1.0)を参照してください。
+Moguet v2.2.0は最新releaseです。ambiguous providerのinstalled state表示を明示化し、
+repository、AUR、provider、localのobservationをまたぐversion constraintを検証し、
+supported workflow向けの統一human-readable planとglobal `--dry-run`を追加しました。
+利用者から見える変更の全体は
+[v2.2.0 release](https://github.com/seekerkrt/moguet/releases/tag/v2.2.0)を参照してください。
 
 canonical repository identityはGitHub上のMoguetで、GitLab mirrorを持ちます。Moguet
 packageは`jpacker` command aliasを提供しません。AUR publicationは将来の別判断であり、
@@ -76,9 +77,19 @@ helperと同等の自動解決能力・完成度を約束しません。unsuppor
 - `deps`と`plan`は調査・表示だけを行い、clone、build、installしません。`fetch`は
   未取得repositoryをcloneし、既存cloneでは`git fetch origin`だけを実行します。
   pull、merge、reset、working tree更新、build、installは行いません。
+- dependency edgeはtyped requirement、source-aware candidate、constraint resultを保持します。
+  `deps`は`Unsatisfied` / `Unknown`をwarning付きで継続し、`plan`はincompleteとして表示します。
+  `Invalid` / `Conflicting`はfail-closedです。`fetch`、build、install、upgrade、local buildは
+  `Unsatisfied` / `Unknown`の場合、clone、fetch、source mutation、build、sudo、pacman、transaction
+  より前に停止します。
 - 複数provider candidateが残る場合、interactive TTYではsource-aware candidateを番号付きで
   表示し、exactly oneの明示選択を要求します。defaultはありません。empty input、`q`、
   `quit`、`cancel`、EOFは選択を取り消し、invalid / out-of-range inputは再入力します。
+- interactive provider一覧では、candidateのpackage名と同名のpackageがread-only local
+  package databaseにあればlocalizedな`[installed]`を末尾へ付けます。未install candidateには
+  suffixを付けず、lookup不能時はwarningと`[installed state unknown]`を表示します。この
+  name-only observationはprovenanceやversion compatibilityを証明せず、candidate順、番号、
+  明示選択の必要性を変更しません。
 - non-TTYと`--noconfirm`ではprovider inputをstdinから読まず、candidateを自動選択しません。
   未選択のambiguous providerはfail-closedで停止します。
 - `moguet -S --select <query>`はofficial repositoryとAURからsource-awareなroot
@@ -97,6 +108,9 @@ helperと同等の自動解決能力・完成度を約束しません。unsuppor
   導入します。`deps --recursive`ではprovided dependencyのうちuser-selected AUR
   providerだけをさらに辿り、unique providerとselected repository providerは終端の
   まま表示します。
+- constraint resultはprovider candidateのfilter、sort、番号変更、recommend、default、
+  auto-selectを行わず、source fallbackの根拠にもなりません。selected AUR provider metadataを
+  refreshした場合はcurrent matching capabilityを再評価し、古いresultを再利用しません。
 - registered source phaseはsingular source lifecycleを維持します。candidateがすべて
   official repository由来の場合だけprovider selectionを行い、AUR providerを含む
   candidate setは、そのPackageBaseをこのphaseでscheduleできないためambiguousのまま
@@ -221,7 +235,33 @@ moguet fetch <pkg>
 # PackageBase checkoutをexport、またはPKGBUILDだけを表示
 moguet -G <pkg>
 moguet -Gp <pkg>
+
+# persistent stateを変更せず、対応する全mutating routeを観測
+moguet --dry-run -S <pkg>
+moguet --dry-run -Syu
+moguet --dry-run fetch <pkg>
+moguet --dry-run build <pkg>
+moguet --dry-run build --local <directory>
+moguet --dry-run upgrade
+moguet --dry-run upgrade-aur
+moguet --dry-run upgrade-all
 ```
+
+`--dry-run`は、Moguet-owned `-S` install / system-update route、`fetch`、remote / local
+`build`、`upgrade`、`upgrade-aur`、`upgrade-all`のglobal observation modifierです。
+`deps`、`plan`、`-Ss`、`-Si`、`clean`、generic pacman pass-through routeではpacmanへ
+転送せず明示的に拒否します。rendererは`Ready` / `NoOp`を終了code 0、`Blocked`を
+non-zeroで報告します。
+
+dry-runはproduction preflightと同じread-only filesystem / network discoveryと、exact
+allowlist済みのpacman discovery queryを実行し得ますが、state logやpersistent stateを書かず、
+cache、workspace、worktreeを作成せず、Git clone / fetch / checkout mutation、
+`makepkg --printsrcinfo`その他のlocal metadata評価、build output、sudo、pacman transactionの
+開始・mutation、pacman transaction lock、package install、cleanup mutationへ進みません。そのためlocal
+buildでmetadata評価が必要な場合はreadyを推測せず`Blocked`になります。観測結果をapproval
+token、execution capability、cached provider choiceとして再利用せず、後のactual invocationは
+current stateを再validationします。v2.2.0のsurfaceはhuman-readableだけで、JSONその他の
+machine-readable plan schemaは追加しません。
 
 **upgrade commandの選択:** 通常のpackage install、search、system upgradeでは、
 pacmanや他のAUR helperと同様に`-S`、`-Ss`、`-Syu`等のpacman-compatible

@@ -5,6 +5,7 @@
 #include "process.hpp"
 #include "shell_words.hpp"
 
+#include <cstdlib>
 #include <set>
 #include <sstream>
 #include <string>
@@ -39,9 +40,35 @@ bool is_repo_package(const std::string& package_name) {
 StrictRepositoryPackageQueryResult query_repository_package_strict(
         const std::string& package_name) {
     if(is_repo_package(package_name)) {
-        return RepositoryPackagePresent{"test"};
+        return RepositoryPackagePresent{
+                "test", 0, package_name,
+                ObservedVersion::available(
+                        ObservedVersionSource::RepositoryExactPackage,
+                        "1.0-1")};
     }
     return RepositoryPackageNotFound{};
+}
+
+InstalledExactPackageObservationResult query_installed_exact_package_strict(
+        const std::string& package_name) {
+    const char* scenario = std::getenv("MOGUET_TEST_INSPECTION_SCENARIO");
+    if(scenario != nullptr &&
+       std::string(scenario) == "deps-installed-query-failure" &&
+       package_name == "installed-query-failure") {
+        return InstalledExactPackageQueryFailure{
+                package_name,
+                PackageMetadataFailure{
+                        PackageMetadataErrorCode::QueryFailed,
+                        "installed database query failure"}};
+    }
+    if(is_installed_package(package_name)) {
+        return InstalledExactPackage{
+                package_name,
+                ObservedVersion::unknown(
+                        ObservedVersionSource::InstalledExactPackage,
+                        ObservedVersionUnknownReason::MissingVersionMetadata)};
+    }
+    return InstalledExactPackageAbsent{package_name};
 }
 
 std::vector<ProvidedDependency> find_repo_providers(
@@ -50,27 +77,47 @@ std::vector<ProvidedDependency> find_repo_providers(
 
     if(dependency_name == "identity-same-virtual") {
         return {ProvidedDependency::from_repository(
-                "extra", "same-package")};
+                "extra", "same-package", dependency_name,
+                dependency_name, std::nullopt)};
     }
     if(dependency_name == "identity-different-virtual") {
         return {ProvidedDependency::from_repository(
-                "extra", "different-package")};
+                "extra", "different-package", dependency_name,
+                dependency_name, std::nullopt)};
     }
     if(dependency_name == "identity-stale-virtual") {
         return {ProvidedDependency::from_repository(
-                "stale", "stale-package")};
+                "stale", "stale-package", dependency_name,
+                dependency_name, std::nullopt)};
     }
     if(dependency_name == "identity-repository-aur-virtual") {
         return {ProvidedDependency::from_repository(
-                "aur", "repository-aur-package")};
+                "aur", "repository-aur-package", dependency_name,
+                dependency_name, std::nullopt)};
     }
     if(dependency_name == "identity-ambiguous-virtual" ||
        dependency_name == "ambiguous-only-virtual") {
         return {
                 ProvidedDependency::from_repository(
-                        "core", "ambiguous-provider-a"),
+                        "core", "ambiguous-provider-a", dependency_name,
+                        dependency_name, std::nullopt),
                 ProvidedDependency::from_repository(
-                        "extra", "ambiguous-provider-b")};
+                        "extra", "ambiguous-provider-b", dependency_name,
+                        dependency_name, std::nullopt)};
+    }
+    if(dependency_name == "public-conflict-virtual") {
+        return {
+                ProvidedDependency::from_repository(
+                        "core", "public-conflict-provider-a",
+                        "public-conflict-virtual",
+                        "public-conflict-virtual=2",
+                        std::optional<std::string>{"2.0-1"}),
+                ProvidedDependency::from_repository(
+                        "extra", "public-conflict-provider-b",
+                        "public-conflict-virtual",
+                        "public-conflict-virtual=3",
+                        std::optional<std::string>{"3.0-1"}),
+        };
     }
 
     // AUR provider/unknown fixturesと既存provider-order fixtureは、AUR seamへ委譲する。
@@ -79,7 +126,8 @@ std::vector<ProvidedDependency> find_repo_providers(
 
 StrictRepositoryProvidersQueryResult query_repository_providers_strict(
         const std::string& dependency_name) {
-    return find_repo_providers(dependency_name);
+    return RepositoryProviderQuerySnapshot{
+            find_repo_providers(dependency_name), {}};
 }
 
 std::vector<InstalledPackage> get_foreign_packages() {

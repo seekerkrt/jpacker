@@ -130,7 +130,8 @@ constexpr std::array AUR_PREFLIGHT_REASONS{
         AurUpdateExecutionReason::SplitPackageSelectionRequired,
         AurUpdateExecutionReason::MultiplePackageTargetsForPackageBase,
         AurUpdateExecutionReason::AmbiguousProvider,
-        AurUpdateExecutionReason::ConflictsOrReplacesUnresolved};
+        AurUpdateExecutionReason::ConflictsOrReplacesUnresolved,
+        AurUpdateExecutionReason::InstalledPackageMetadataUnavailable};
 
 constexpr std::array AUR_PREPARATION_REASONS{
         AurUpdatePreparationReason::None,
@@ -1977,6 +1978,18 @@ bool PreparedUpgradeAllOperation::is_valid() const noexcept {
 const UpgradeAllOperationPreparedSnapshot*
 PreparedUpgradeAllOperation::snapshot() const noexcept {
     return impl_ == nullptr ? nullptr : &impl_->snapshot;
+}
+
+const UpgradeAllOperationProjectionAuthority*
+PreparedUpgradeAllOperation::projection_authority() const noexcept {
+    return nullptr;
+}
+
+PreparedUpgradeAllAurPreflight prepare_upgrade_all_aur_preflight(
+        const UpgradeAllOperationPreparedSnapshot&,
+        const AppConfig&) {
+    throw std::logic_error(
+            "Upgrade-all command fixture does not provide dry-run preflight authority.");
 }
 
 UpgradeAllOperationPreparation prepare_upgrade_all_operation(

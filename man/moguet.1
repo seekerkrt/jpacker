@@ -1,4 +1,4 @@
-.TH MOGUET 1 "August 2026" "Moguet 2.1.0" "User Commands"
+.TH MOGUET 1 "August 2026" "Moguet 2.2.0" "User Commands"
 .\" parity:name
 .SH NAME
 moguet \- pacman-first AUR helper with verified source builds
@@ -19,6 +19,10 @@ moguet \- pacman-first AUR helper with verified source builds
 .
 .B moguet
 .BR -V | --version
+.
+.B moguet
+.B --dry-run
+.I supported-operation
 .
 .\" parity:description
 .SH DESCRIPTION
@@ -151,11 +155,16 @@ Classify AUR runtime, make, and check dependencies.
 With
 .BR --recursive ,
 traverse exact AUR dependencies and user-selected AUR providers.
-Official dependencies, uniquely resolved providers, selected official
-repository providers, still-ambiguous providers, and unresolved dependencies
-are displayed without further traversal.
+Installed dependencies, official dependencies, uniquely resolved providers,
+selected official repository providers, still-ambiguous providers, and
+unresolved dependencies are displayed without further traversal. An installed
+exact dependency retains Installed source identity and is not presented as an
+official repository package.
 On an interactive TTY, source-aware provider candidates can be selected and
 the output distinguishes user-selected providers from unresolved ambiguity.
+Constraint results and reasons are displayed. Unsatisfied or unknown results
+warn but do not stop this read-only command; invalid or conflicting input
+fails closed.
 This command does not clone, build, install, or calculate a build order.
 .
 .TP
@@ -166,6 +175,9 @@ that Moguet cannot resolve make the plan incomplete.
 The plan distinguishes uniquely resolved, user-selected, and still-ambiguous
 providers.
 Metadata-size unavailability does not suppress the plan body.
+Unsatisfied or unknown dependency constraints make the plan incomplete and
+are shown with their result and reason. Invalid or conflicting constraints
+fail plan construction.
 This command does not clone, build, or install.
 .
 .TP
@@ -174,6 +186,7 @@ Retrieve the AUR PackageBase repositories needed by a complete inspection
 plan.
 A selected AUR provider's PackageBase is included; a selected official
 repository provider is not cloned.
+Unsatisfied or unknown dependency constraints stop before clone or fetch.
 Missing repositories are cloned.
 An existing clone runs only
 .BR "git fetch origin" ;
@@ -274,6 +287,55 @@ Show localized help and exit without creating XDG directories.
 Show
 .B Moguet
 and the program version, then exit without creating XDG directories.
+.
+.TP
+.B "--dry-run"
+Observe a supported Moguet-owned mutating route by using its production
+pre-mutation authorities and the unified human-readable plan renderer.
+The supported routes are Moguet-owned
+.B -S
+install and system-update forms such as
+.BR -Syu ,
+.BR fetch ,
+remote and local
+.BR build ,
+.BR upgrade ,
+.BR upgrade-aur ,
+and
+.BR upgrade-all .
+Scope-excluded
+.BR deps ,
+.BR plan ,
+.BR -Ss ,
+.BR -Si ,
+.BR clean ,
+and generic pacman pass-through forms are rejected explicitly.
+.
+.PP
+Read-only filesystem, network, and exact allowlisted pacman discovery queries
+may run, but dry-run does not write the state log or persistent state, create a
+cache, workspace, or worktree, run Git clone/fetch/checkout mutation, evaluate
+local metadata with
+.BR "makepkg --printsrcinfo" ,
+produce build output, invoke sudo, start or mutate through a pacman
+transaction, acquire a pacman transaction lock, install packages, or perform
+cleanup mutation.
+The local route uses only an already safe descriptor; if metadata evaluation
+would be required, the observation is
+.B Blocked
+instead of guessed ready.
+.
+.PP
+.B Ready
+and
+.B NoOp
+observations exit zero;
+.B Blocked
+exits non-zero.
+The observation is not an approval token, prepared execution capability, or
+cached provider choice. A later actual invocation revalidates current state.
+Moguet v2.2.0 provides this human-readable surface only; no JSON or other
+machine-readable plan schema is introduced.
 .
 .TP
 .B "--edit"
@@ -579,6 +641,19 @@ within the current invocation. Selected AUR PackageBases flow into fetch and
 build planning; a selected official provider is introduced as an exact
 .I repository/package
 dependency.
+.
+.PP
+When the interactive provider list is actually displayed, Moguet looks up each
+candidate package name in the read-only local package database. It appends the
+localized tag
+.B [installed]
+only for a same-name local package, leaves an authoritative absence untagged,
+and displays
+.B [installed state unknown]
+with a separate warning when the lookup is unavailable. This name-only
+observation does not prove source provenance, PackageBase, version or
+constraint compatibility, or install reason; it does not change candidate
+order, numbering, choice reuse, routing, or the required explicit choice.
 .
 .PP
 Root package discovery through

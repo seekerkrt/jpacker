@@ -93,7 +93,9 @@ DesiredInstallReason resolve_source_target_reason(
         const ResolvedSourceBuildIdentity& source,
         bool use_package_base_lifecycle,
         const ProviderSelectionCallback& select_provider,
-        std::vector<ProvidedDependency>& selected_repository_providers) {
+        std::vector<ProvidedDependency>& selected_repository_providers,
+        std::optional<std::vector<std::string>>&
+                configured_repository_order) {
     if(source.source_kind != SourceBuildSourceKind::Aur) {
         return DesiredInstallReason::Explicit;
     }
@@ -103,6 +105,7 @@ DesiredInstallReason resolve_source_target_reason(
     // singular ownerだけはsplit selection guardを維持する。
     BuildPlan plan = resolve_build_plan(
             source.requested_name, select_provider);
+    configured_repository_order = plan.configured_repository_order;
     if(use_package_base_lifecycle) {
         require_executable_build_plan(source.requested_name, plan);
     } else {
@@ -234,6 +237,8 @@ ProductionSourceBuildWorkItem make_aur_source_build_work_item(
     work_item.request.needed = needed;
     work_item.required_targets = unit.required_targets;
     work_item.is_build_plan_entry = true;
+    work_item.configured_repository_order =
+            plan.configured_repository_order;
     attach_selected_repository_providers(work_item, plan);
     require_static_production_source_build_work_item(work_item);
     return work_item;
@@ -358,7 +363,8 @@ ProductionSourceBuildWorkItem make_direct_source_build_work_item(
     work_item.request.needed = needed;
     DesiredInstallReason reason = resolve_source_target_reason(
             source, use_package_base_lifecycle, select_provider,
-            work_item.selected_repository_providers);
+            work_item.selected_repository_providers,
+            work_item.configured_repository_order);
     work_item.required_targets.push_back(RequiredPackageArtifactTarget{
             source.package_base, source.requested_name, reason});
     work_item.is_build_plan_entry = use_package_base_lifecycle;
@@ -729,7 +735,44 @@ ResolvedSourceBuildIdentity resolve_source_build_identity(
             has_distinct_package_base(info.value())};
 }
 
+ResolvedSourceBuildIdentity make_repository_source_build_identity(
+        const RepositoryPackagePresent& package) {
+    require_valid_package_name(package.package_name);
+    if(package.repository_name.empty()) {
+        throw std::invalid_argument(localization::translate_message(
+                "Repository source-build identity has no repository name."));
+    }
+    const SourceBuildSourceKind source_kind =
+            SourceBuildSourceKind::Repository;
+    return ResolvedSourceBuildIdentity{
+            package.package_name,
+            package.package_name,
+            canonical_source_key(source_kind, package.package_name),
+            ARCH_GIT_BASE + package.package_name + ".git",
+            source_kind,
+            false};
+}
+
 void build_source_target(
+        const std::string& package_name,
+        const SourceBuildEnvironment& custom_environment,
+        const AppConfig& config) {
+    RemoteSourceBuildPreparation preparation = prepare_remote_source_build(
+            package_name, custom_environment, config);
+    if(const auto* blocked =
+               std::get_if<RemoteSourceBuildPlanFailure>(&preparation);
+       blocked != nullptr) {
+        require_executable_build_plan(package_name, blocked->plan);
+        throw std::logic_error(localization::translate_message(
+                "Remote source-build plan was rejected without a blocking detail."));
+    }
+    PreparedRemoteSourceBuild prepared = std::move(
+            std::get<PreparedRemoteSourceBuild>(preparation));
+    execute_prepared_source_build_invocation(
+            std::move(prepared.invocation), config);
+}
+
+RemoteSourceBuildPreparation prepare_remote_source_build(
         const std::string& package_name,
         const SourceBuildEnvironment& custom_environment,
         const AppConfig& config) {
@@ -739,11 +782,17 @@ void build_source_target(
     ResolvedSourceBuildIdentity source =
             resolve_source_build_identity(package_name);
     std::vector<ProductionSourceBuildWorkItem> work_items;
+    std::optional<BuildPlan> aur_build_plan;
     ProviderSelectionCallback select_provider =
             provider_selection_callback(config);
     if(source.source_kind == SourceBuildSourceKind::Aur) {
         BuildPlan plan = resolve_build_plan(package_name, select_provider);
-        require_executable_build_plan(package_name, plan);
+        try {
+            require_executable_build_plan(package_name, plan);
+        } catch(const std::exception&) {
+            return RemoteSourceBuildPlanFailure{
+                    std::move(source), std::move(plan)};
+        }
         work_items = prepare_aur_source_build_work_items(
                 plan, false, false);
         auto root_work_item = std::find_if(
@@ -760,20 +809,19 @@ void build_source_target(
         root_work_item->request.custom_environment = custom_environment;
         root_work_item->request.empty_value_policy =
                 SourceEnvironmentEmptyValuePolicy::Forward;
+        aur_build_plan.emplace(std::move(plan));
     } else {
         work_items.push_back(make_direct_source_build_work_item(
                 source, custom_environment,
                 SourceEnvironmentEmptyValuePolicy::Forward, false, false,
                 false, select_provider));
     }
-    ValidatedCacheRoot cache_root = prepare_process_cache_root();
-    for(auto& work_item : work_items) {
-        work_item.cache_root = cache_root;
-    }
     PreparedProductionSourceBuildInvocation invocation =
             prepare_production_source_build_invocation(
                     std::move(work_items), config);
-    execute_prepared_source_build_invocation(invocation, config);
+    return PreparedRemoteSourceBuild{
+            std::move(source), std::move(aur_build_plan),
+            std::move(invocation)};
 }
 
 ProductionSourceBuildWorkItem prepare_resolved_source_build_work_item(

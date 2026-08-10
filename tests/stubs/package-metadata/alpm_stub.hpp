@@ -3,6 +3,7 @@
 #include <alpm.h>
 
 #include <cstddef>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -32,6 +33,12 @@ struct RepositorySearchQuery {
 struct RepositoryGroupQuery {
     std::string repository_name;
     std::string group_name;
+};
+
+struct RepositoryProvidedPackageMetadata {
+    std::optional<std::string> package_name;
+    std::optional<std::string> version;
+    alpm_depmod_t              relation = ALPM_DEP_MOD_ANY;
 };
 
 struct LocalPackageMetadata {
@@ -109,6 +116,17 @@ void set_repository_package_metadata(
         const std::string& package_name,
         off_t package_size,
         off_t installed_size);
+void set_repository_package_version(
+        const std::string& repository_name,
+        const std::string& package_name,
+        const std::string& version);
+void set_repository_package_version_null(
+        const std::string& repository_name,
+        const std::string& package_name);
+void set_repository_package_provides(
+        const std::string& repository_name,
+        const std::string& package_name,
+        const std::vector<RepositoryProvidedPackageMetadata>& provides);
 void set_repository_package_returned_name(
         const std::string& repository_name,
         const std::string& package_name,

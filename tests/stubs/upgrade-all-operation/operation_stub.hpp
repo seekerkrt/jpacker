@@ -96,7 +96,9 @@ struct AurExecutionCall {
 };
 
 using ResolverHandler =
-        std::function<BuildPlan(const std::vector<std::string>& targets)>;
+        std::function<BuildPlan(
+                const std::vector<std::string>& targets,
+                const ProviderSelectionCallback& select_provider)>;
 
 void reset();
 
@@ -110,6 +112,7 @@ void enqueue_preference_result(
 void enqueue_source_preference_result(
         const std::string& package_name,
         StrictSourcePreferenceResult result);
+void set_after_next_strict_preference_read_hook(std::function<void()> hook);
 
 void set_source_identity(
         const std::string& package_name,
@@ -129,6 +132,7 @@ void set_system_command_exit_status(int exit_status);
 void fail_system_command(std::string diagnostic);
 void set_after_system_command_hook(std::function<void()> hook);
 void fail_cache_seed();
+void set_after_next_cache_seed_hook(std::function<void()> hook);
 void fail_cache_activation();
 void enqueue_source_success(SourceBuildExecutionResult result);
 void enqueue_source_failure(std::string diagnostic);
@@ -144,6 +148,7 @@ void set_repository_configuration(
 void set_repository_configuration_failure(PackageMetadataFailure failure);
 void set_foreign_inventory(ForeignPackageInventory inventory);
 void set_foreign_inventory_failure(PackageMetadataFailure failure);
+void set_after_foreign_inventory_hook(std::function<void()> hook);
 
 void enqueue_info_many_result(
         std::map<std::string, AurPackageInfo> result);

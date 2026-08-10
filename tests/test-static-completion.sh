@@ -44,7 +44,7 @@ all_candidates=(
     add-src del-src revert edit-src list-src
     -G -Gp -S -Syu -Ss -Si -Qua
     -h --help -V --version
-    --edit --noedit --diff --nodiff --noconfirm --build-mode=
+    --edit --noedit --diff --nodiff --noconfirm --dry-run --build-mode=
     --rebuild --cleanbuild --rmdeps --select --aur --repo --needed --local
     --recursive
 )
@@ -80,6 +80,9 @@ assert_reply "local build option prefix" --local
 
 run_completion moguet --b
 assert_reply "attached-value option token" --build-mode=
+
+run_completion moguet --d
+assert_reply "dry-run option prefix" --diff --dry-run
 
 # enum / typed value候補は#253へ残し、#309ではoption tokenだけを提示する。
 run_completion moguet --build-mode=n

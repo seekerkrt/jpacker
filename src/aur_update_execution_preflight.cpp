@@ -357,6 +357,25 @@ struct AurDependencyGraphEdge {
     PackageRole                 role;
 };
 
+std::optional<std::string> edge_requirement_name(
+        const BuildPlanDependencyEdge& edge) {
+    if(!edge.requirement.has_value()) {
+        // Compatibility for graph-only BuildPlan producers and focused test
+        // fixtures. Production resolver edges always take the typed branch.
+        const ParsedDependency legacy =
+                parse_dependency_string(edge.dependency_spec);
+        if(legacy.has_malformed_constraint()) return std::nullopt;
+        return legacy.name;
+    }
+    if(const auto* consumer =
+               std::get_if<ConsumerDependencyRequirement>(
+                       &edge.requirement.value());
+       consumer != nullptr) {
+        return consumer->package_name();
+    }
+    return std::nullopt;
+}
+
 std::vector<AurDependencyGraphEdge> collect_aur_dependency_graph(
         const BuildPlan& plan) {
     std::vector<AurDependencyGraphEdge> graph;
@@ -373,8 +392,9 @@ std::vector<AurDependencyGraphEdge> collect_aur_dependency_graph(
            edge.resolved_package_name.has_value() &&
            edge.resolved_package_base.has_value() &&
            !edge.resolved_provider.has_value() &&
+           edge_requirement_name(edge).has_value() &&
            edge.resolved_package_name.value() ==
-                   parse_dependency_string(edge.dependency_spec).name) {
+                   edge_requirement_name(edge).value()) {
             target = find_unique_package_target(
                     plan, edge.resolved_package_name.value(),
                     edge.resolved_package_base);
@@ -678,6 +698,11 @@ void inspect_resolution_failures(
     for(const auto& failure : plan.resolution_failures) {
         AurUpdateExecutionReason reason;
         switch(failure.kind) {
+        case BuildPlanResolutionFailureKind::
+                InstalledPackageMetadataUnavailable:
+            reason = AurUpdateExecutionReason::
+                    InstalledPackageMetadataUnavailable;
+            break;
         case BuildPlanResolutionFailureKind::RepositoryMetadataUnavailable:
             reason = AurUpdateExecutionReason::RepositoryMetadataUnavailable;
             break;
@@ -719,7 +744,13 @@ void inspect_dependency_edges(
         std::vector<AttributedBuildPlanIssue>& issues,
         std::set<std::string>& represented_unresolved_values) {
     for(const auto& edge : plan.dependency_edges) {
-        ParsedDependency parsed = parse_dependency_string(edge.dependency_spec);
+        const std::optional<std::string> requirement_name =
+                edge_requirement_name(edge);
+        const std::optional<ParsedDependency> legacy_requirement =
+                edge.requirement.has_value()
+                ? std::nullopt
+                : std::optional<ParsedDependency>{
+                          parse_dependency_string(edge.dependency_spec)};
         std::vector<RootTargetIdentity> roots = roots_for_package(
                 plan, edge.parent_package_name, edge.parent_package_base);
 
@@ -744,12 +775,15 @@ void inspect_dependency_edges(
         bool edge_is_consistent =
                 !roots.empty() && is_dependency_role(edge.role);
         switch(edge.kind) {
+        case DependencyKind::Installed:
         case DependencyKind::Repo:
             edge_is_consistent = edge_is_consistent &&
                     edge.resolved_package_name.has_value() &&
+                    requirement_name.has_value() &&
                     is_valid_package_name(
                             edge.resolved_package_name.value()) &&
-                    edge.resolved_package_name.value() == parsed.name &&
+                    edge.resolved_package_name.value() ==
+                            requirement_name.value() &&
                     !edge.resolved_package_base.has_value() &&
                     !edge.resolved_provider.has_value();
             break;
@@ -757,11 +791,13 @@ void inspect_dependency_edges(
             edge_is_consistent = edge_is_consistent &&
                     edge.resolved_package_name.has_value() &&
                     edge.resolved_package_base.has_value() &&
+                    requirement_name.has_value() &&
                     is_valid_package_name(
                             edge.resolved_package_name.value()) &&
                     is_valid_package_name(
                             edge.resolved_package_base.value()) &&
-                    edge.resolved_package_name.value() == parsed.name &&
+                    edge.resolved_package_name.value() ==
+                            requirement_name.value() &&
                     !edge.resolved_provider.has_value();
             if(edge.resolved_package_name.has_value() &&
                edge.resolved_package_base.has_value() &&
@@ -803,9 +839,19 @@ void inspect_dependency_edges(
             edge_is_consistent = edge_is_consistent && std::any_of(
                     plan.ambiguous_providers.begin(),
                     plan.ambiguous_providers.end(),
-                    [&parsed](const AmbiguousProvidedDependency& ambiguous) {
-                        return parse_dependency_string(ambiguous.dependency).raw ==
-                                parsed.raw;
+                    [&edge, &legacy_requirement](
+                            const AmbiguousProvidedDependency& ambiguous) {
+                        const std::string canonical_edge =
+                                legacy_requirement.has_value()
+                                ? legacy_requirement->raw
+                                : edge.dependency_spec;
+                        const std::string canonical_ambiguous =
+                                legacy_requirement.has_value()
+                                ? parse_dependency_string(
+                                          ambiguous.dependency)
+                                          .raw
+                                : ambiguous.dependency;
+                        return canonical_ambiguous == canonical_edge;
                     });
             add_attributed_issue(
                     issues,
@@ -814,7 +860,7 @@ void inspect_dependency_edges(
                             localization::format_translated_message(
                                     // TRANSLATORS: The placeholder is a literal dependency specification.
                                     "Dependency has multiple provider candidates: {}",
-                                    parsed.raw),
+                                    edge.dependency_spec),
                             edge.parent_package_name,
                             edge.parent_package_base,
                             edge.dependency_spec),
@@ -841,9 +887,41 @@ void inspect_dependency_edges(
                             edge.dependency_spec),
                     roots);
         }
+        if(edge.constraint_evaluation.has_value()) {
+            const ConstraintSatisfaction satisfaction =
+                    edge.constraint_evaluation->satisfaction();
+            if(satisfaction == ConstraintSatisfaction::Unsatisfied ||
+               satisfaction == ConstraintSatisfaction::Unknown) {
+                add_attributed_issue(
+                        issues,
+                        make_localized_execution_issue(
+                                AurUpdateExecutionReason::
+                                        VersionConstraintUnverified,
+                                localization::format_translated_message(
+                                        "Dependency {} is {}: {}",
+                                        edge.dependency_spec,
+                                        constraint_satisfaction_display(
+                                                satisfaction),
+                                        constraint_evaluation_reason_display(
+                                                edge.constraint_evaluation
+                                                        .value())),
+                                edge.parent_package_name,
+                                edge.parent_package_base,
+                                edge.dependency_spec),
+                        roots);
+            }
+        }
 
-        if(parsed.has_malformed_constraint() ||
-           !is_valid_package_name(parsed.name) ||
+        const bool malformed_legacy_requirement =
+                legacy_requirement.has_value() &&
+                (legacy_requirement->has_malformed_constraint() ||
+                 !is_valid_package_name(legacy_requirement->name));
+        const bool invalid_typed_requirement =
+                edge.requirement.has_value() &&
+                !requirement_name.has_value() &&
+                !std::holds_alternative<SonameDependencyRequirement>(
+                        edge.requirement.value());
+        if(malformed_legacy_requirement || invalid_typed_requirement ||
            edge.kind == DependencyKind::Unknown) {
             add_attributed_issue(
                     issues,
@@ -852,29 +930,23 @@ void inspect_dependency_edges(
                             localization::format_translated_message(
                                     // TRANSLATORS: The placeholder is a literal dependency specification.
                                     "Dependency could not be resolved: {}",
-                                    parsed.raw),
+                                    edge.dependency_spec),
                             edge.parent_package_name,
                             edge.parent_package_base,
                             edge.dependency_spec),
                     roots);
-            if(parsed.has_malformed_constraint()) {
-                represented_unresolved_values.insert(
-                        dependency_constraint_unresolved_reason(
-                                edge.dependency_spec));
-            } else {
-                represented_unresolved_values.insert(parsed.raw);
-            }
+            represented_unresolved_values.insert(edge.dependency_spec);
         }
-
-        if(parsed.has_parseable_constraint()) {
+        if(legacy_requirement.has_value() &&
+           legacy_requirement->has_parseable_constraint()) {
             add_attributed_issue(
                     issues,
                     make_localized_execution_issue(
-                            AurUpdateExecutionReason::VersionConstraintUnverified,
+                            AurUpdateExecutionReason::
+                                    VersionConstraintUnverified,
                             localization::format_translated_message(
-                                    // TRANSLATORS: The placeholder is a literal dependency specification.
                                     "Dependency version constraint is not verified: {}",
-                                    parsed.raw),
+                                    legacy_requirement->raw),
                             edge.parent_package_name,
                             edge.parent_package_base,
                             edge.dependency_spec),
@@ -988,8 +1060,11 @@ void inspect_unresolved_cycles_and_risks(
                 parse_dependency_string(ambiguous.dependency).raw;
         for(const auto& edge : plan.dependency_edges) {
             if(edge.kind != DependencyKind::AmbiguousProvider ||
-               parse_dependency_string(edge.dependency_spec).raw !=
-                       canonical_dependency) {
+               (edge.requirement.has_value()
+                                ? edge.dependency_spec
+                                : parse_dependency_string(
+                                          edge.dependency_spec)
+                                          .raw) != canonical_dependency) {
                 continue;
             }
             has_matching_edge = true;

@@ -2,6 +2,7 @@
 
 #include "installed_package.hpp"
 
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <map>
@@ -80,6 +81,97 @@ struct PackageMetadataFailure {
     std::string              diagnostic;
 };
 
+// Slice 3 adapterへ渡すlibalpm read-phaseのowned snapshot。
+// libalpmのrelation enumやborrowed pointerはこの境界より外へ出さない。
+enum class RepositoryProvidedPackageRelation {
+    Unversioned,
+    Equal,
+    GreaterThanOrEqual,
+    LessThanOrEqual,
+    GreaterThan,
+    LessThan,
+    Unsupported,
+};
+
+struct RepositoryProvidedPackageMetadata {
+    std::optional<std::string>          package_name;
+    std::optional<std::string>          version;
+    RepositoryProvidedPackageRelation relation;
+};
+
+struct InstalledExactPackageMetadata {
+    std::string                package_name;
+    std::optional<std::string> version;
+};
+
+using InstalledExactPackageMetadataQueryResult = std::variant<
+        InstalledExactPackageMetadata,
+        PackageNotFound,
+        PackageMetadataFailure>;
+
+struct RepositoryExactPackageMetadata {
+    std::size_t                                    configured_repository_order;
+    std::string                                    repository_name;
+    std::string                                    package_name;
+    std::optional<std::string>                     version;
+    std::vector<RepositoryProvidedPackageMetadata> provides;
+};
+
+struct RepositoryExactPackageMetadataNotFound {
+    std::size_t configured_repository_order;
+    std::string repository_name;
+    std::string package_name;
+};
+
+struct RepositoryExactPackageMetadataSourceFailure {
+    std::size_t            configured_repository_order;
+    std::string            repository_name;
+    std::string            package_name;
+    PackageMetadataFailure failure;
+};
+
+using RepositoryExactPackageMetadataSourceResult = std::variant<
+        RepositoryExactPackageMetadata,
+        RepositoryExactPackageMetadataNotFound,
+        RepositoryExactPackageMetadataSourceFailure>;
+
+struct RepositoryExactPackageMetadataSnapshot {
+    std::vector<std::string> repository_order;
+    std::vector<RepositoryExactPackageMetadataSourceResult> source_results;
+};
+
+using RepositoryExactPackageMetadataQueryResult = std::variant<
+        RepositoryExactPackageMetadataSnapshot,
+        PackageMetadataFailure>;
+
+// Provider enumeration uses the same owned libalpm projection as exact
+// lookup. Each configured source keeps its own success/failure state so a
+// later unavailable repository cannot erase observations from an earlier one.
+struct RepositoryProviderPackageMetadataSourceSnapshot {
+    std::size_t configured_repository_order;
+    std::string repository_name;
+    std::vector<RepositoryExactPackageMetadata> packages;
+};
+
+struct RepositoryProviderPackageMetadataSourceFailure {
+    std::size_t            configured_repository_order;
+    std::string            repository_name;
+    PackageMetadataFailure failure;
+};
+
+using RepositoryProviderPackageMetadataSourceResult = std::variant<
+        RepositoryProviderPackageMetadataSourceSnapshot,
+        RepositoryProviderPackageMetadataSourceFailure>;
+
+struct RepositoryProviderPackageMetadataSnapshot {
+    std::vector<std::string> repository_order;
+    std::vector<RepositoryProviderPackageMetadataSourceResult> source_results;
+};
+
+using RepositoryProviderPackageMetadataQueryResult = std::variant<
+        RepositoryProviderPackageMetadataSnapshot,
+        PackageMetadataFailure>;
+
 using InstalledPackageQueryResult = std::variant<
         InstalledPackageMetadata,
         PackageNotFound,
@@ -126,6 +218,18 @@ resolve_pacman_root_search_repository_configuration();
 RepositoryPackageSearchResult query_repository_root_package_search(
         const std::string& query);
 
+// Slice 3のconfigured repository exact observation用read phase。
+// repository固有のopen/query failureをconfigured order付きowned resultへ保持する。
+RepositoryExactPackageMetadataQueryResult
+query_configured_repository_exact_package_metadata(
+        const PacmanRepositoryConfiguration& configuration,
+        const std::string& package_name);
+
+RepositoryProviderPackageMetadataQueryResult
+query_configured_repository_provider_package_metadata(
+        const PacmanRepositoryConfiguration& configuration,
+        const std::string& dependency_name);
+
 // local DBと全sync DBを1 handleで照合し、borrowを残さないowned inventoryを返す。
 ForeignPackageInventoryResult query_foreign_package_inventory(
         const PacmanRepositoryConfiguration& configuration);
@@ -144,6 +248,10 @@ public:
     ~PackageMetadataSession() noexcept;
 
     InstalledPackageQueryResult query_installed_package(
+            const std::string& package_name) const;
+
+    InstalledExactPackageMetadataQueryResult
+    query_installed_exact_package_metadata(
             const std::string& package_name) const;
 
     LocalPackageVersionSnapshotResult snapshot_local_package_versions() const;
@@ -174,6 +282,14 @@ public:
 
     RepositoryPackageQueryResult query_repository_package(
             const RepositoryPackageLookup& lookup) const;
+
+    RepositoryExactPackageMetadataQueryResult
+    query_repository_exact_package_metadata(
+            const std::string& package_name) const;
+
+    RepositoryProviderPackageMetadataQueryResult
+    query_repository_provider_package_metadata(
+            const std::string& dependency_name) const;
 
     RepositoryPackageSearchResult query_root_package_search(
             const std::string& query) const;

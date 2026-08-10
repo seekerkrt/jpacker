@@ -58,6 +58,7 @@ require_exact_test_command sudo "$repo_root/tests/stubs/sudo"
 require_exact_test_command git "$repo_root/tests/stubs/git"
 export MOGUET_TEST_AUR_RPC_BASE_URL=http://127.0.0.1:$port/rpc/
 export MOGUET_TEST_COMMAND_LOG=$command_log
+export MOGUET_TEST_PACMAN_CONF_REPOSITORY_LIST=core
 export MOGUET_TEST_PACMAN_EXIT_CODE=1
 export MOGUET_TEST_SUDO_EXIT_CODE=99
 unset MOGUET_TEST_PACMAN_QM_OUTPUT

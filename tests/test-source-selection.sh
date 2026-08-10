@@ -58,11 +58,15 @@ setup_case() {
     case_dir=$tmp_dir/cases/$case_name
     command_log=$case_dir/commands.log
     output_file=$case_dir/output
+    package_metadata_state=$case_dir/package-metadata.state
+    repository_metadata_state=$case_dir/repository-metadata.state
 
     mkdir -p \
         "$case_dir/home" "$case_dir/xdg-config" \
         "$case_dir/xdg-state" "$case_dir/xdg-cache"
     : > "$command_log"
+    : > "$package_metadata_state"
+    : > "$repository_metadata_state"
     : > "$request_log"
     export HOME=$case_dir/home
     export XDG_CONFIG_HOME=$case_dir/xdg-config
@@ -70,6 +74,9 @@ setup_case() {
     export XDG_CACHE_HOME=$case_dir/xdg-cache
     preference_dir=$XDG_CONFIG_HOME/moguet/source-build.d
     export MOGUET_TEST_COMMAND_LOG=$command_log
+    export MOGUET_TEST_PACKAGE_METADATA_STATE_FILE=$package_metadata_state
+    export MOGUET_TEST_REPOSITORY_METADATA_STATE_FILE=$repository_metadata_state
+    export MOGUET_TEST_PACMAN_CONF_REPOSITORY_LIST=core
     export MOGUET_TEST_PACMAN_EXIT_CODE=1
     export MOGUET_TEST_SUDO_EXIT_CODE=0
     unset MOGUET_TEST_PACMAN_QM_OUTPUT
@@ -236,6 +243,18 @@ assert_command_pattern_count() {
     fi
 }
 
+assert_repository_read_counts() {
+    strict_repository_reads=$1
+    additional_database_path_reads=$2
+
+    assert_command_pattern_count \
+        "$((strict_repository_reads + additional_database_path_reads))" \
+        '^pacman-conf --verbose RootDir DBPath$'
+    assert_command_pattern_count \
+        "$strict_repository_reads" \
+        '^pacman-conf --repo-list$'
+}
+
 assert_command_pattern_absent() {
     unexpected_pattern=$1
     if grep -E -- "$unexpected_pattern" "$command_log" >/dev/null; then
@@ -352,6 +371,11 @@ prepare_source_preference() {
     prepare_preference_store
     printf 'CFLAGS=-Osource-selection-test\n' > "$preference_dir/$package"
     chmod 600 "$preference_dir/$package"
+}
+
+write_repository_package() {
+    package=$1
+    printf 'core %s 1 1\n' "$package" >> "$repository_metadata_state"
 }
 
 run_exact() {
@@ -599,17 +623,23 @@ assert_request_log_empty
 # POLICY: Autoはoperation文字列だけでsearch/infoを分類し、separated modifierをinstall routeで扱う。
 # selector routeとの現行非対称を共通化しないため、official targetでcall pathを固定する。
 setup_case separated-auto-search-short
-export MOGUET_TEST_PACMAN_REPO_PACKAGES=official-a
+write_repository_package official-a
 run_ok -S -s official-a
-assert_command "pacman -Si official-a"
+assert_command "pacman-conf --verbose RootDir DBPath"
+assert_command "pacman-conf --repo-list"
 assert_command "sudo pacman -S -s official-a"
+assert_repository_read_counts 1 0
+assert_command_count 3
 assert_request_log_empty
 
 setup_case separated-auto-info-short
-export MOGUET_TEST_PACMAN_REPO_PACKAGES=official-a
+write_repository_package official-a
 run_ok -S -i official-a
-assert_command "pacman -Si official-a"
+assert_command "pacman-conf --verbose RootDir DBPath"
+assert_command "pacman-conf --repo-list"
 assert_command "sudo pacman -S -i official-a"
+assert_repository_read_counts 1 0
+assert_command_count 3
 assert_request_log_empty
 
 conflict_index=0
@@ -696,6 +726,7 @@ assert_command "makepkg -sc --noconfirm"
 assert_command_pattern '^pacman -U --print --print-format .* -- .*/clean-root-1\.0-1-x86_64\.pkg\.tar\.zst$'
 assert_command_pattern '^sudo pacman -U --noconfirm -- .*/clean-root-1\.0-1-x86_64\.pkg\.tar\.zst$'
 assert_command_pattern_count 1 '^pacman-conf --verbose RootDir DBPath$'
+assert_command_pattern_count 0 '^pacman-conf --repo-list$'
 assert_command_pattern_count 1 '^makepkg --packagelist$'
 assert_command_pattern_count 1 '^makepkg -sc --noconfirm$'
 assert_command_pattern_count 1 '^pacman -U --print --print-format '
@@ -787,7 +818,9 @@ export MOGUET_TEST_MAKEPKG_ARTIFACT_IDENTITIES='split-base|split-child|2.5-2
 split-base|split-sibling|2.5-2'
 export MOGUET_TEST_MAKEPKG_EXIT_CODE=0
 run_ok --noedit --nodiff --noconfirm -S split-child
-assert_command "pacman -Si split-child"
+assert_command_absent "pacman -Si split-child"
+assert_command "pacman-conf --repo-list"
+assert_repository_read_counts 1 1
 assert_command "git clone https://aur.archlinux.org/split-base.git split-base"
 assert_contains "Loading custom build flags from $preference_dir/split-base." "$output_file"
 assert_command_pattern_count 1 '^sudo pacman -U --noconfirm -- .*/split-child-2\.5-2-x86_64\.pkg\.tar\.zst$'
@@ -876,10 +909,13 @@ assert_request_log_empty
 
 # Auto install regression: selector未指定時のrepo/source-build/AUR分類と横断preflightを維持する。
 setup_case auto-install-official
-export MOGUET_TEST_PACMAN_REPO_PACKAGES=official-a
+write_repository_package official-a
 run_ok -S official-a
-assert_command "pacman -Si official-a"
+assert_command_absent "pacman -Si official-a"
+assert_command "pacman-conf --repo-list"
 assert_command "sudo pacman -S official-a"
+assert_repository_read_counts 1 0
+assert_command_count 3
 assert_no_source_build_commands
 assert_request_log_empty
 
@@ -900,7 +936,7 @@ cat > "$preference_dir/clean-root" <<'SOURCE_PREFERENCE'
 SOURCE_PREFERENCE
 chmod 600 "$preference_dir/clean-root"
 export MOGUET_TEST_SOURCE_PREFERENCE_EXTERNAL=from-process-environment
-export MOGUET_TEST_PACMAN_REPO_PACKAGES=clean-root
+write_repository_package clean-root
 export MOGUET_TEST_MAKEPKG_EXIT_CODE=0
 makepkg_env_log=$case_dir/makepkg-env.log
 : > "$makepkg_env_log"
@@ -913,6 +949,7 @@ assert_command "makepkg --packagelist"
 assert_command "makepkg -sc --noconfirm"
 assert_command_pattern '^pacman -U --print --print-format .* -- .*/clean-root-1\.0-1-x86_64\.pkg\.tar\.zst$'
 assert_command_pattern '^sudo pacman -U --noconfirm -- .*/clean-root-1\.0-1-x86_64\.pkg\.tar\.zst$'
+assert_repository_read_counts 1 1
 assert_contains "Loading custom build flags from $preference_dir/clean-root." "$output_file"
 assert_contains "Applying custom build flags: FIRST='alpha value' QUOTED='quoted # value' DUP='first' DUP='second' BRACED='alpha value/brace' SIMPLE='second/simple'" "$output_file"
 assert_contains "Ignoring invalid environment assignment: 9INVALID=value" "$output_file"
@@ -935,25 +972,28 @@ assert_request_log_empty
 setup_case auto-install-aur
 export MOGUET_TEST_MAKEPKG_EXIT_CODE=0
 run_ok --noedit --nodiff --noconfirm -S clean-root
-assert_command "pacman -Si clean-root"
+assert_command_absent "pacman -Si clean-root"
+assert_command "pacman-conf --repo-list"
 assert_command "git clone https://aur.archlinux.org/clean-root.git clean-root"
 assert_command "pacman-conf --verbose RootDir DBPath"
 assert_command "makepkg --packagelist"
 assert_command "makepkg -sc --noconfirm"
 assert_command_pattern '^pacman -U --print --print-format .* -- .*/clean-root-1\.0-1-x86_64\.pkg\.tar\.zst$'
 assert_command_pattern '^sudo pacman -U --noconfirm -- .*/clean-root-1\.0-1-x86_64\.pkg\.tar\.zst$'
+assert_repository_read_counts 1 1
 assert_request_log_nonempty
 
 setup_case auto-install-mixed-preflight
-export MOGUET_TEST_PACMAN_REPO_PACKAGES=official-a
+write_repository_package official-a
 run_fail --noedit --noconfirm -S official-a missing-aur-package
 assert_contains "not found" "$output_file"
 assert_no_mutation_commands
 assert_request_log_nonempty
 assert_cache_entry_absent missing-aur-package
+assert_repository_read_counts 2 0
 
 setup_case auto-install-mixed-success
-export MOGUET_TEST_PACMAN_REPO_PACKAGES=official-a
+write_repository_package official-a
 export MOGUET_TEST_MAKEPKG_EXIT_CODE=0
 run_ok --noedit --nodiff --noconfirm -S official-a clean-root
 assert_command "sudo pacman -S --noconfirm official-a"
@@ -963,14 +1003,16 @@ assert_command "makepkg --packagelist"
 assert_command "makepkg -sc --noconfirm"
 assert_command_pattern '^pacman -U --print --print-format .* -- .*/clean-root-1\.0-1-x86_64\.pkg\.tar\.zst$'
 assert_command_pattern '^sudo pacman -U --noconfirm -- .*/clean-root-1\.0-1-x86_64\.pkg\.tar\.zst$'
+assert_repository_read_counts 2 1
 assert_request_log_nonempty
 
 setup_case auto-install-unsupported-option
-export MOGUET_TEST_PACMAN_REPO_PACKAGES=official-a
+write_repository_package official-a
 run_fail -S official-a --config custom.conf clean-root
 assert_contains "Unsupported pacman option for AUR/source-build target: --config" "$output_file"
 assert_no_mutation_commands
 assert_request_log_empty
+assert_repository_read_counts 2 0
 
 # Matrix D: search。AurOnlyはAURのみ、RepoOnlyはpacmanのみ、Autoは従来の統合表示。
 setup_case aur-search

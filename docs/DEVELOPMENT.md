@@ -323,6 +323,7 @@ static `test-live-contract`として確認するが、networkやcontainer runtim
         po/moguet.pot \
         scripts/check-license-compliance.sh \
         scripts/check-packaging-metadata.sh \
+        scripts/extract-release-notes.sh \
         tests/test-install-layout.sh \
         tests/test-package-transition.sh
 
@@ -333,11 +334,13 @@ static `test-live-contract`として確認するが、networkやcontainer runtim
 
     gh pr create --base main --head release/vX.Y.Z
 
-上記の`git add`は、v2.1.0 release preparationで実際に変更したpathを1件ずつ明示した
-exact path setです。`git add .`や代表pathだけのpartial listへ置き換えません。commit前に
+上記の`git add`は、現在のv2.2.0 release preparationでstage対象とするpathを1件ずつ明示した
+current release用のexact path setです。`git add .`や代表pathだけのpartial listへ置き換えません。commit前に
 cached path一覧をこのreleaseのdiffと再照合し、release scopeのunstaged / untracked pathや
-unrelatedなstaged pathがないことを確認します。将来のreleaseでは、このlistを流用せず、その
-releaseで監査済みのexact path setへ置き換えます。
+unrelatedなstaged pathがないことを確認します。現在のv2.2.0 release preparationでは、上記の
+14-path listがstage対象のcurrent release scopeのauthorityです。v2.1.0固有の履歴は、下記の
+`v2.1.0 post-release closure`として別に扱い、current listの根拠にはしません。将来のrelease
+では、このlistを流用せず、そのreleaseで監査済みのexact path setへ置き換えます。
 
 merge 後:
 
@@ -347,9 +350,45 @@ merge 後:
     git tag -a vX.Y.Z -m "vX.Y.Z"
     git push origin vX.Y.Z
 
-    gh release create vX.Y.Z --title "vX.Y.Z" --notes-file RELEASE_NOTES.md
+    if ! release_notes_payload=$(mktemp); then
+        printf '%s\n' 'release notes payload: unable to create temporary file; release was not created' >&2
+        exit 1
+    fi
+    trap 'rm -f "$release_notes_payload"' EXIT HUP INT TERM
+
+    if ! sh scripts/extract-release-notes.sh >"$release_notes_payload"; then
+        printf '%s\n' 'release notes extraction failed; release was not created' >&2
+        exit 1
+    fi
+
+    printf '%s\n' 'Inspect the release notes payload before creating the release:'
+    if ! cat "$release_notes_payload"; then
+        printf '%s\n' 'release notes payload inspection failed; release was not created' >&2
+        exit 1
+    fi
+
+    if [ ! -s "$release_notes_payload" ]; then
+        printf '%s\n' 'release notes payload is empty; release was not created' >&2
+        exit 1
+    fi
+
+    if ! version=$(tr -d '[:space:]' < VERSION); then
+        printf '%s\n' 'VERSION could not be read; release was not created' >&2
+        exit 1
+    fi
+    if ! grep -Fqx "# Moguet v$version" "$release_notes_payload"; then
+        printf '%s\n' 'release notes payload verification failed; release was not created' >&2
+        exit 1
+    fi
+
+    gh release create vX.Y.Z --title "vX.Y.Z" --notes-file "$release_notes_payload"
 
 tag mirrorとGitLab Release mirrorの完了を確認する。uploaded assetがないreleaseではGitLab asset linkが0件でも正常とする。
+
+`RELEASE_NOTES.md`は過去releaseの履歴も保持するため、そのまま`--notes-file`へ渡さない。
+`sh scripts/extract-release-notes.sh`は`VERSION`と一致するcurrent top-level sectionだけを出力し、
+current headingが0件または複数なら失敗する。GitHub Release作成前にこの出力を確認し、実際に
+渡すpayloadがcurrent release sectionだけであることを確認する。
 
 その後、`main`から`develop`への回収PRを作成する。protected branchをlocal mergeやdirect pushで更新しない。
 

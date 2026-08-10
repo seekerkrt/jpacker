@@ -49,11 +49,12 @@ a new storage direction: source-build preferences now use only the executing
 user's XDG config context, while the published v2.0.0 tag, Release, and release
 notes remain historical records.
 
-Moguet v2.1.0 is the latest release. It adds interactive handling for
-source-aware package discovery and ambiguous AUR dependency providers, expands
-local `PKGBUILD` builds, and adds Arch Linux container validation coverage. See
-the [v2.1.0 release](https://github.com/seekerkrt/moguet/releases/tag/v2.1.0)
-for the complete user-visible changes.
+Moguet v2.2.0 is the latest release. It makes installed-state visibility for
+ambiguous providers explicit, validates version constraints across repository,
+AUR, provider, and local observations, and adds a unified human-readable plan
+with global `--dry-run` coverage for supported workflows. See the
+[v2.2.0 release](https://github.com/seekerkrt/moguet/releases/tag/v2.2.0) for
+the complete user-visible changes.
 
 The canonical repository identity is Moguet on GitHub, with a GitLab mirror.
 The Moguet package does not provide a `jpacker` command alias. AUR publication
@@ -89,10 +90,22 @@ detailed plan.
   build, or install. `fetch` clones missing repositories or runs only
   `git fetch origin` for an existing clone; it does not pull, merge, reset,
   advance the working tree, build, or install.
+- Dependency edges retain the typed requirement, source-aware candidate, and
+  constraint result. `deps` continues with a warning for `Unsatisfied` or
+  `Unknown`; `plan` marks the result incomplete. `Invalid` and `Conflicting`
+  fail closed. `fetch`, build, install, upgrade, and local build stop before
+  clone, fetch, source mutation, build, sudo, pacman, or transaction work when
+  the result is `Unsatisfied` or `Unknown`.
 - When multiple provider candidates remain, an interactive TTY lists
   source-aware candidates by number and requires exactly one explicit choice;
   there is no default. Empty input, `q`, `quit`, `cancel`, or EOF cancels the
   choice, while invalid or out-of-range input retries.
+- An interactive provider list appends localized `[installed]` when the
+  candidate's package name exists in the read-only local package database.
+  It leaves not-installed candidates untagged and marks an unavailable lookup
+  as `[installed state unknown]` with a warning. This name-only observation
+  neither proves provenance or version compatibility nor changes candidate
+  order, numbering, or the required explicit choice.
 - Non-TTY use and `--noconfirm` do not read provider input from stdin or
   auto-select a candidate. Unselected ambiguity fails closed.
 - `moguet -S --select <query>` discovers source-aware root package candidates
@@ -114,6 +127,10 @@ detailed plan.
   `deps --recursive`, among provided dependencies, only a user-selected AUR
   provider is traversed; unique providers and selected repository providers
   remain terminal.
+- Constraint results do not filter, sort, number, recommend, default, or
+  auto-select provider candidates, and do not authorize source fallback.
+  When selected AUR provider metadata is refreshed, the current matching
+  capability is evaluated again and the stale result is discarded.
 - The registered-source phase keeps its singular source lifecycle. It offers
   provider selection only when every candidate is from an official repository;
   a candidate set containing an AUR provider remains ambiguous and stops before
@@ -247,7 +264,36 @@ moguet fetch <pkg>
 # Export one PackageBase checkout or print only its PKGBUILD
 moguet -G <pkg>
 moguet -Gp <pkg>
+
+# Observe every supported mutating route without changing persistent state
+moguet --dry-run -S <pkg>
+moguet --dry-run -Syu
+moguet --dry-run fetch <pkg>
+moguet --dry-run build <pkg>
+moguet --dry-run build --local <directory>
+moguet --dry-run upgrade
+moguet --dry-run upgrade-aur
+moguet --dry-run upgrade-all
 ```
+
+`--dry-run` is a global observation modifier for the Moguet-owned `-S` install
+and system-update routes, `fetch`, remote and local `build`, `upgrade`,
+`upgrade-aur`, and `upgrade-all`. It explicitly rejects `deps`, `plan`, `-Ss`,
+`-Si`, `clean`, and generic pacman pass-through routes instead of forwarding
+the option to pacman. The renderer reports `Ready` or `NoOp` with exit status
+0 and `Blocked` with a non-zero status.
+
+Dry-run can perform the same read-only filesystem, network, and exact
+allowlisted pacman discovery queries as the production preflight, but does not
+write the state log or persistent state, create a cache, workspace, or
+worktree, run Git clone/fetch/checkout mutation, run `makepkg --printsrcinfo`
+or other local metadata evaluation, produce build output, invoke sudo, start
+or mutate through a pacman transaction, acquire a pacman transaction lock,
+install packages, or perform cleanup mutation. A local build that needs
+metadata evaluation is therefore `Blocked`; it is never guessed ready. The observation
+is not reused as an approval token, execution capability, or cached provider
+choice: a later actual invocation revalidates current state. The v2.2.0 surface
+is human-readable only and adds no JSON or other machine-readable plan schema.
 
 **Choosing an upgrade command:** For ordinary package installation, search,
 and system upgrades, use pacman-compatible operations such as `-S`, `-Ss`,

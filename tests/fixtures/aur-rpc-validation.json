@@ -348,6 +348,18 @@
       "Version": "1.0-1",
       "Provides": ["virtual-malformed>"]
     },
+    "semantic-provides-non-equality": {
+      "Name": "semantic-provides-non-equality",
+      "PackageBase": "semantic-provides-non-equality",
+      "Version": "1.0-1",
+      "Provides": ["virtual-non-equality>=1"]
+    },
+    "semantic-provides-empty-version": {
+      "Name": "semantic-provides-empty-version",
+      "PackageBase": "semantic-provides-empty-version",
+      "Version": "1.0-1",
+      "Provides": ["virtual-empty-version="]
+    },
     "semantic-conflicts": {
       "Name": "semantic-conflicts",
       "PackageBase": "semantic-conflicts",

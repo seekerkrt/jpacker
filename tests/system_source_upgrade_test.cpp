@@ -2,12 +2,14 @@
 #include "cache_authority.hpp"
 #include "system_source_upgrade.hpp"
 #include "stubs/system-source-upgrade/phase_stub.hpp"
+#include "unified_plan_projection.hpp"
 
 #include <algorithm>
 #include <cstddef>
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
+#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -19,10 +21,15 @@
 using SystemSourceUpgradeExecutor = SystemSourceUpgradeResult (*)(
         PreparedSystemSourceUpgrade,
         const AppConfig&,
-        const SystemSourceUpgradeEventObserver&);
+        const SystemSourceUpgradeEventObserver&,
+        std::optional<ValidatedCacheRoot>);
 
 static_assert(!std::is_copy_constructible_v<PreparedSystemSourceUpgrade>);
 static_assert(std::is_move_constructible_v<PreparedSystemSourceUpgrade>);
+static_assert(!std::is_copy_constructible_v<
+              SystemSourceUpgradeProjectionAuthority>);
+static_assert(!std::is_copy_constructible_v<
+              PreparedSystemSourceWorkReference>);
 static_assert(
         std::is_same_v<
                 decltype(&execute_prepared_system_source_upgrade),
@@ -32,13 +39,15 @@ static_assert(
                 SystemSourceUpgradeExecutor,
                 PreparedSystemSourceUpgrade&&,
                 const AppConfig&,
-                const SystemSourceUpgradeEventObserver&>);
+                const SystemSourceUpgradeEventObserver&,
+                std::optional<ValidatedCacheRoot>>);
 static_assert(
         !std::is_invocable_v<
                 SystemSourceUpgradeExecutor,
                 PreparedSystemSourceUpgrade&,
                 const AppConfig&,
-                const SystemSourceUpgradeEventObserver&>);
+                const SystemSourceUpgradeEventObserver&,
+                std::optional<ValidatedCacheRoot>>);
 
 namespace {
 
@@ -371,6 +380,88 @@ void test_empty_registered_snapshot() {
     expect(stub::system_commands() == std::vector<std::string>{SYSTEM_COMMAND},
            "System command changed");
     expect(stub::source_execution_calls().empty(), "System-only phase executed source");
+    stub::require_script_consumed();
+}
+
+void test_preparation_retains_aur_plan_and_source_kind() {
+    stub::reset();
+    const std::string package_name = "retained-aur-source";
+    stub::set_source_identity(
+            package_name, registered_aur_identity(package_name));
+
+    PreparedSystemSourceUpgrade prepared = prepare_sources(
+            {package_name}, full_option_config());
+    const SystemSourceUpgradePreparedSnapshot* snapshot =
+            prepared.snapshot();
+    const BuildPlan* plan = prepared.aur_invocation_plan();
+    const SystemSourceUpgradeProjectionAuthority* projection_authority =
+            prepared.projection_authority();
+    expect(snapshot != nullptr, "Prepared AUR snapshot is unavailable");
+    expect(
+            snapshot->registered_sources.size() == 1 &&
+                    snapshot->registered_sources.front().source_kind ==
+                            SourceBuildSourceKind::Aur,
+            "Prepared AUR source kind was not retained as typed identity");
+    expect(
+            plan != nullptr && plan->root_targets ==
+                    std::vector<RootTargetIdentity>{
+                            RootTargetIdentity{0, package_name}},
+            "Invocation-wide AUR BuildPlan was discarded or rebuilt");
+    expect(
+            prepared.issues().empty(),
+            "Successful preparation gained a route issue");
+    expect(
+            projection_authority != nullptr &&
+                    &projection_authority->snapshot() == snapshot &&
+                    projection_authority->aur_invocation_plan() == plan &&
+                    projection_authority->source_work_items().size() == 1 &&
+                    &projection_authority->source_work_items()
+                             .front()
+                             .source() ==
+                            &snapshot->registered_sources.front(),
+            "Prepared AUR projection seam lost owner correlation");
+    const auto& targets = projection_authority->source_work_items()
+                                  .front()
+                                  .required_targets();
+    expect(
+            targets.size() == 1 &&
+                    targets.front().package_base == package_name &&
+                    targets.front().package_name == package_name &&
+                    targets.front().desired_reason ==
+                            DesiredInstallReason::Explicit,
+            "Prepared AUR projection seam did not retain actual work targets");
+    stub::require_script_consumed();
+}
+
+void test_preparation_exposes_repository_work_targets() {
+    stub::reset();
+    const std::string package_name = "retained-repository-source";
+    PreparedSystemSourceUpgrade prepared = prepare_sources(
+            {package_name}, full_option_config());
+    const SystemSourceUpgradePreparedSnapshot* snapshot = prepared.snapshot();
+    const SystemSourceUpgradeProjectionAuthority* projection_authority =
+            prepared.projection_authority();
+    expect(
+            snapshot != nullptr && projection_authority != nullptr &&
+                    projection_authority->aur_invocation_plan() == nullptr &&
+                    projection_authority->source_work_items().size() == 1 &&
+                    &projection_authority->source_work_items()
+                             .front()
+                             .source() ==
+                            &snapshot->registered_sources.front() &&
+                    snapshot->registered_sources.front().source_kind ==
+                            SourceBuildSourceKind::Repository,
+            "Prepared repository projection seam lost source authority");
+    const auto& targets = projection_authority->source_work_items()
+                                  .front()
+                                  .required_targets();
+    expect(
+            targets.size() == 1 &&
+                    targets.front().package_base == package_name &&
+                    targets.front().package_name == package_name &&
+                    targets.front().desired_reason ==
+                            DesiredInstallReason::Explicit,
+            "Prepared repository projection seam did not retain actual work targets");
     stub::require_script_consumed();
 }
 
@@ -912,8 +1003,8 @@ void test_registered_source_provider_selection_precedes_cache_and_suppresses_aur
             std::holds_alternative<PreparedSystemSourceUpgrade>(preparation) &&
                     repository_selector_calls == 1 &&
                     selection_preceded_cache &&
-                    fs::is_directory(selection_cache_home / "moguet"),
-            "Registered source repository selection did not precede cache preparation");
+                    !fs::exists(selection_cache_home / "moguet"),
+            "Read-only registered-source preparation activated the cache");
 
     enqueue_post_metadata({repository_source});
     stub::enqueue_source_success(source_execution(
@@ -925,6 +1016,9 @@ void test_registered_source_provider_selection_precedes_cache_and_suppresses_aur
                     full_option_config(), OBSERVER);
     expect(completed.is_success(),
            "Repository-only registered-source provider selection failed");
+    expect(
+            fs::is_directory(selection_cache_home / "moguet"),
+            "Actual registered-source execution did not activate the cache");
     stub::require_script_consumed();
 }
 
@@ -1174,12 +1268,24 @@ void test_preference_read_failure_blocks_before_mutation() {
 
 void test_initial_cache_resolution_failure_is_typed() {
     stub::reset();
-    configure_preferences({"cache-resolution"});
+    const std::vector<std::string> packages = {"cache-resolution"};
+    configure_preferences(packages);
+    stub::enqueue_metadata_session(metadata_session(
+            packages,
+            LocalPackageVersionSnapshot{{"core", "1.0-1"}}));
     ScopedEnvironmentVariable cache_environment(
             "XDG_CACHE_HOME", "relative-cache-home");
 
-    SystemSourceUpgradeResult result = take_blocked(
-            prepare_system_source_upgrade(full_option_config(), OBSERVER));
+    SystemSourceUpgradePreparation preparation =
+            prepare_system_source_upgrade(full_option_config(), OBSERVER);
+    expect(
+            std::holds_alternative<PreparedSystemSourceUpgrade>(preparation),
+            "Read-only preparation consulted the relative cache path");
+    SystemSourceUpgradeResult result =
+            execute_prepared_system_source_upgrade(
+                    std::move(std::get<PreparedSystemSourceUpgrade>(
+                            preparation)),
+                    full_option_config(), OBSERVER);
     expect(
             result.status ==
                             SystemSourceUpgradeStatus::BlockedBeforeMutation &&
@@ -1213,12 +1319,24 @@ void test_initial_cache_preparation_failure_is_typed() {
            "Missing cache anchor fixture already exists");
 
     stub::reset();
-    configure_preferences({"cache-preparation"});
+    const std::vector<std::string> packages = {"cache-preparation"};
+    configure_preferences(packages);
+    stub::enqueue_metadata_session(metadata_session(
+            packages,
+            LocalPackageVersionSnapshot{{"core", "1.0-1"}}));
     ScopedEnvironmentVariable cache_environment(
             "XDG_CACHE_HOME", missing_anchor.string());
 
-    SystemSourceUpgradeResult result = take_blocked(
-            prepare_system_source_upgrade(full_option_config(), OBSERVER));
+    SystemSourceUpgradePreparation preparation =
+            prepare_system_source_upgrade(full_option_config(), OBSERVER);
+    expect(
+            std::holds_alternative<PreparedSystemSourceUpgrade>(preparation),
+            "Read-only preparation consulted the missing cache anchor");
+    SystemSourceUpgradeResult result =
+            execute_prepared_system_source_upgrade(
+                    std::move(std::get<PreparedSystemSourceUpgrade>(
+                            preparation)),
+                    full_option_config(), OBSERVER);
     expect(
             result.status ==
                             SystemSourceUpgradeStatus::BlockedBeforeMutation &&
@@ -1247,20 +1365,32 @@ void test_initial_cache_preparation_failure_is_typed() {
 
 void test_initial_trusted_cache_failure_is_typed() {
     stub::reset();
-    configure_preferences({"trusted-cache-preparation"});
+    const std::vector<std::string> packages = {
+            "trusted-cache-preparation"};
+    configure_preferences(packages);
+    stub::enqueue_metadata_session(metadata_session(
+            packages,
+            LocalPackageVersionSnapshot{{"core", "1.0-1"}}));
     ValidatedCacheRoot cache_root = prepare_process_cache_root();
     const fs::path active_path = cache_root.path();
     const fs::path moved_path =
             active_path.parent_path() / "moguet-revoked-preparation";
+
+    SystemSourceUpgradePreparation preparation =
+            prepare_system_source_upgrade(full_option_config(), OBSERVER);
+    expect(
+            std::holds_alternative<PreparedSystemSourceUpgrade>(preparation),
+            "Read-only preparation unexpectedly depended on an external cache authority");
 
     std::error_code rename_error;
     fs::rename(active_path, moved_path, rename_error);
     expect(!rename_error,
            "Failed to revoke trusted cache preparation fixture");
 
-    std::optional<SystemSourceUpgradePreparation> preparation;
+    std::optional<SystemSourceUpgradeResult> execution_result;
     try {
-        preparation.emplace(prepare_system_source_upgrade(
+        execution_result.emplace(execute_prepared_system_source_upgrade(
+                std::move(std::get<PreparedSystemSourceUpgrade>(preparation)),
                 full_option_config(), OBSERVER, cache_root));
     } catch(...) {
         std::error_code restore_error;
@@ -1271,8 +1401,7 @@ void test_initial_trusted_cache_failure_is_typed() {
     expect(!rename_error,
            "Failed to restore trusted cache preparation fixture");
 
-    SystemSourceUpgradeResult result =
-            take_blocked(std::move(preparation.value()));
+    SystemSourceUpgradeResult result = std::move(execution_result.value());
     expect(
             result.status ==
                             SystemSourceUpgradeStatus::BlockedBeforeMutation &&
@@ -1298,11 +1427,23 @@ void test_initial_trusted_cache_failure_is_typed() {
 
 void test_cache_seed_failure_is_typed() {
     stub::reset();
-    configure_preferences({"cache-seed"});
+    const std::vector<std::string> packages = {"cache-seed"};
+    configure_preferences(packages);
+    stub::enqueue_metadata_session(metadata_session(
+            packages,
+            LocalPackageVersionSnapshot{{"core", "1.0-1"}}));
+    SystemSourceUpgradePreparation preparation =
+            prepare_system_source_upgrade(full_option_config(), OBSERVER);
+    expect(
+            std::holds_alternative<PreparedSystemSourceUpgrade>(preparation),
+            "Read-only preparation did not produce an execution capability");
     stub::fail_cache_seed();
 
-    SystemSourceUpgradeResult result = take_blocked(
-            prepare_system_source_upgrade(full_option_config(), OBSERVER));
+    SystemSourceUpgradeResult result =
+            execute_prepared_system_source_upgrade(
+                    std::move(std::get<PreparedSystemSourceUpgrade>(
+                            preparation)),
+                    full_option_config(), OBSERVER);
     expect(
             result.status ==
                             SystemSourceUpgradeStatus::BlockedBeforeMutation &&
@@ -1359,11 +1500,32 @@ void test_known_package_base_survives_later_preparation_failure() {
                     "https://aur.example/known-base.git",
                     SourceBuildSourceKind::Aur,
                     true});
+    BuildPlan plan;
+    const RootTargetIdentity root{0, "split"};
+    plan.root_targets.push_back(root);
+    plan.order.push_back(BuildPlanEntry{"known-base", {"split"}});
+    plan.package_targets.push_back(PlannedPackageTarget{
+            "split", "known-base", {PackageRole::Root}, {root}});
+    stub::set_aur_invocation_plan(std::move(plan));
     stub::fail_source_work_item(
             "split", "scripted post-identity preparation failure");
 
     SystemSourceUpgradeResult result = take_blocked(
             prepare_system_source_upgrade(full_option_config(), OBSERVER));
+    const std::unique_ptr<UnifiedPlanProjection> projection =
+            project_system_source_upgrade_unified_plan(
+                    SystemSourceUpgradeUnifiedPlanProjectionInput{
+                            std::cref(result)});
+    const UnifiedPlanObservationResult& observation_result =
+            projection->observation_result();
+    const UnifiedPlanObservation* observation =
+            observation_result.observation();
+    expect(
+            observation_result.is_valid() && observation != nullptr &&
+                    observation->status() ==
+                            UnifiedPlanObservationStatus::Blocked &&
+                    observation->transaction_intents().empty(),
+            "Actual blocked preparation result did not reach a typed Blocked observation");
     const RegisteredSourceUpgradeResult& source =
             result.registered_source_results.front();
     expect(source.resolved_package_base ==
@@ -1378,6 +1540,65 @@ void test_known_package_base_survives_later_preparation_failure() {
            "Post-identity failure diagnostic was lost");
     expect(stub::system_commands().empty(),
            "Post-identity preparation failure reached mutation");
+    stub::require_script_consumed();
+}
+
+void test_actual_constraint_blocker_reaches_unified_projection() {
+    stub::reset();
+    configure_preferences({"constraint-root"});
+    stub::set_source_identity(
+            "constraint-root",
+            ResolvedSourceBuildIdentity{
+                    "constraint-root",
+                    "constraint-base",
+                    "aur:constraint-base",
+                    "https://aur.example/constraint-base.git",
+                    SourceBuildSourceKind::Aur,
+                    true});
+
+    BuildPlan plan;
+    const RootTargetIdentity root{0, "constraint-root"};
+    plan.root_targets.push_back(root);
+    plan.order.push_back(
+            BuildPlanEntry{"constraint-base", {"constraint-root"}});
+    plan.package_targets.push_back(PlannedPackageTarget{
+            "constraint-root", "constraint-base", {PackageRole::Root},
+            {root}});
+    BuildPlanDependencyEdge edge;
+    edge.parent_package_name = "constraint-root";
+    edge.parent_package_base = "constraint-base";
+    edge.dependency_spec = "missing-runtime>=2";
+    edge.role = PackageRole::RuntimeDependency;
+    edge.kind = DependencyKind::Unknown;
+    edge.constraint_evaluation = ConstraintEvaluation::unsatisfied();
+    plan.dependency_edges.push_back(std::move(edge));
+    stub::set_aur_invocation_plan(std::move(plan));
+    stub::fail_build_plan_guard("scripted constraint blocker");
+
+    SystemSourceUpgradeResult result = take_blocked(
+            prepare_system_source_upgrade(full_option_config(), OBSERVER));
+    const std::unique_ptr<UnifiedPlanProjection> projection =
+            project_system_source_upgrade_unified_plan(
+                    SystemSourceUpgradeUnifiedPlanProjectionInput{
+                            std::cref(result)});
+    const UnifiedPlanObservation* observation =
+            projection->observation_result().observation();
+    expect(
+            observation != nullptr &&
+                    observation->status() ==
+                            UnifiedPlanObservationStatus::Blocked &&
+                    std::any_of(
+                            observation->blockers().begin(),
+                            observation->blockers().end(),
+                            [](const UnifiedPlanBlocker& blocker) {
+                                return std::holds_alternative<
+                                        ConstraintFailureUnifiedPlanBlocker>(
+                                        blocker);
+                            }) &&
+                    observation->transaction_intents().empty(),
+            "Actual constraint failure was not retained as a typed Blocked observation");
+    expect(stub::system_commands().empty(),
+           "Constraint projection crossed the system mutation boundary");
     stub::require_script_consumed();
 }
 
@@ -1685,6 +1906,14 @@ int main() {
                 test_cache_seed_failure_is_typed,
                 completed_cases);
         run_case(
+                "preparation retains AUR plan and typed source kind",
+                test_preparation_retains_aur_plan_and_source_kind,
+                completed_cases);
+        run_case(
+                "preparation exposes repository work targets",
+                test_preparation_exposes_repository_work_targets,
+                completed_cases);
+        run_case(
                 "all sources success, order, options, and package change",
                 test_all_sources_success_order_options_and_change,
                 completed_cases);
@@ -1743,6 +1972,10 @@ int main() {
         run_case(
                 "known PackageBase survives preparation failure",
                 test_known_package_base_survives_later_preparation_failure,
+                completed_cases);
+        run_case(
+                "actual constraint blocker reaches unified projection",
+                test_actual_constraint_blocker_reaches_unified_projection,
                 completed_cases);
         run_case(
                 "pre-system package snapshot failure is Unknown",

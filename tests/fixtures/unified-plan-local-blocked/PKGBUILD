@@ -1,0 +1,5 @@
+pkgname=unified-plan-local-blocked
+pkgver=1.0
+pkgrel=1
+pkgdesc='Unified plan blocked local fixture'
+arch=('x86_64')

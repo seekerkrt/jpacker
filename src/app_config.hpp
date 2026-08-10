@@ -13,6 +13,7 @@ struct AppConfig {
     bool        rm_deps = false;
     std::string editor = "nano";
     std::shared_ptr<ProviderSelectionSession> provider_selection;
+    ProviderCandidatePresenterFactory provider_candidate_presenter_factory;
 };
 
 // load / composition済みのfinal configをproduction consumer向けに一度だけ束ねる。

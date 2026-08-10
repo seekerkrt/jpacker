@@ -76,6 +76,8 @@ setup_case() {
     case_dir=$tmp_dir/cases/$case_name
     command_log=$case_dir/commands.log
     output_file=$case_dir/output
+    package_metadata_state=$case_dir/package-metadata.state
+    repository_metadata_state=$case_dir/repository-metadata.state
     source_preference_dir=$case_dir/xdg-config/moguet/source-build.d
 
     mkdir -p \
@@ -83,6 +85,8 @@ setup_case() {
         "$case_dir/xdg-state" "$case_dir/xdg-cache"
     chmod 0700 "$case_dir/xdg-config"
     : > "$command_log"
+    : > "$package_metadata_state"
+    : > "$repository_metadata_state"
     : > "$normal_request_log"
     : > "$schema_request_log"
     export HOME=$case_dir/home
@@ -91,6 +95,9 @@ setup_case() {
     export XDG_CACHE_HOME=$case_dir/xdg-cache
     export MOGUET_TEST_AUR_RPC_BASE_URL=$normal_rpc_url
     export MOGUET_TEST_COMMAND_LOG=$command_log
+    export MOGUET_TEST_PACKAGE_METADATA_STATE_FILE=$package_metadata_state
+    export MOGUET_TEST_REPOSITORY_METADATA_STATE_FILE=$repository_metadata_state
+    export MOGUET_TEST_PACMAN_CONF_REPOSITORY_LIST=core
     export MOGUET_TEST_PACMAN_EXIT_CODE=1
     export MOGUET_TEST_SUDO_EXIT_CODE=0
     export MOGUET_TEST_MAKEPKG_EXIT_CODE=0
@@ -291,8 +298,12 @@ assert_command_before() {
 assert_separated_source_install() {
     expected_makepkg=$1
     expected_sudo_prefix=$2
+    expected_repository_queries=${3:-0}
 
-    assert_command_count "pacman-conf --verbose RootDir DBPath" 1
+    assert_command_count \
+        "pacman-conf --verbose RootDir DBPath" \
+        "$((expected_repository_queries + 1))"
+    assert_command_count "pacman-conf --repo-list" "$expected_repository_queries"
     assert_command_count "makepkg --packagelist" 1
     assert_command_count "$expected_makepkg" 1
     makepkg_count=$(grep -c '^makepkg ' "$command_log" || true)
@@ -318,6 +329,11 @@ prepare_source_preference() {
     chmod 0600 "$source_preference_dir/$package"
 }
 
+write_repository_package() {
+    package=$1
+    printf 'core %s 1 1\n' "$package" >> "$repository_metadata_state"
+}
+
 assert_preference_unchanged() {
     package=$1
     expected_checksum=$2
@@ -330,16 +346,17 @@ assert_preference_unchanged() {
 
 # Matrix A: pacman-only routeではordered argvをそのまま保持する。
 setup_case pacman-auto
-export MOGUET_TEST_PACMAN_REPO_PACKAGES=repo-pkg
+write_repository_package repo-pkg
 run_ok -S --needed repo-pkg
-assert_command_count "pacman -Si repo-pkg" 1
+assert_command_count "pacman-conf --verbose RootDir DBPath" 1
+assert_command_count "pacman-conf --repo-list" 1
 assert_command_count "sudo pacman -S --needed repo-pkg" 1
-if [ "$(wc -l < "$command_log")" -ne 2 ]; then
-    echo "automatic repository route ran unexpected commands" >&2
+if [ "$(wc -l < "$command_log")" -ne 3 ]; then
+    echo "unexpected additional command(s)" >&2
     cat "$command_log" >&2
     exit 1
 fi
-assert_command_before "pacman -Si repo-pkg" "sudo pacman -S --needed repo-pkg"
+assert_command_before "pacman-conf --repo-list" "sudo pacman -S --needed repo-pkg"
 assert_no_source_build_commands
 assert_normal_request_log_empty
 
@@ -359,7 +376,7 @@ setup_case system-upgrade-with-source-target
 run_ok --noedit --nodiff -Syu --needed clean-root
 assert_command_count "sudo pacman -Syu --needed" 1
 assert_command "git clone https://aur.archlinux.org/clean-root.git clean-root"
-assert_separated_source_install "makepkg -sc" "sudo pacman -U --needed -- "
+assert_separated_source_install "makepkg -sc" "sudo pacman -U --needed -- " 1
 sudo_count=$(grep -c '^sudo ' "$command_log" || true)
 if [ "$sudo_count" -ne 2 ]; then
     echo "system upgrade with a source target ran an unexpected sudo transaction" >&2
@@ -400,20 +417,20 @@ assert_normal_request_log_nonempty
 
 setup_case aur-auto
 run_ok --noedit --nodiff -S --needed clean-root
-assert_command "pacman -Si clean-root"
+assert_command_absent "pacman -Si clean-root"
 assert_command "git clone https://aur.archlinux.org/clean-root.git clean-root"
-assert_separated_source_install "makepkg -sc" "sudo pacman -U --needed -- "
+assert_separated_source_install "makepkg -sc" "sudo pacman -U --needed -- " 1
 assert_command_absent "sudo pacman -S --needed clean-root"
 assert_normal_request_log_nonempty
 
 setup_case preferred-official
 prepare_source_preference clean-root
 preference_checksum=$(cksum "$source_preference_dir/clean-root")
-export MOGUET_TEST_PACMAN_REPO_PACKAGES=clean-root
+write_repository_package clean-root
 run_ok --noedit --nodiff -S --needed clean-root
 assert_command "git clone https://gitlab.archlinux.org/archlinux/packaging/packages/clean-root.git clean-root"
 assert_command_absent "git clone https://aur.archlinux.org/clean-root.git clean-root"
-assert_separated_source_install "makepkg -sc" "sudo pacman -U --needed -- "
+assert_separated_source_install "makepkg -sc" "sudo pacman -U --needed -- " 1
 assert_command_absent "sudo pacman -S --needed clean-root"
 assert_preference_unchanged clean-root "$preference_checksum"
 assert_normal_request_log_empty
@@ -429,11 +446,11 @@ assert_normal_request_log_empty
 
 # Matrix C: mixed routeは全source preflight後にofficial transactionを行い、両routeへneededを保持する。
 setup_case mixed-success
-export MOGUET_TEST_PACMAN_REPO_PACKAGES=official-a
+write_repository_package official-a
 run_ok --noedit --nodiff -S --needed official-a clean-root
 assert_command_count "sudo pacman -S --needed official-a" 1
 assert_command "git clone https://aur.archlinux.org/clean-root.git clean-root"
-assert_separated_source_install "makepkg -sc" "sudo pacman -U --needed -- "
+assert_separated_source_install "makepkg -sc" "sudo pacman -U --needed -- " 2
 sudo_count=$(grep -c '^sudo ' "$command_log" || true)
 if [ "$sudo_count" -ne 2 ]; then
     echo "mixed route ran an unexpected sudo transaction" >&2
@@ -444,10 +461,10 @@ assert_command_before "sudo pacman -S --needed official-a" "git clone https://au
 assert_normal_request_log_nonempty
 
 setup_case mixed-ordered-index
-export MOGUET_TEST_PACMAN_REPO_PACKAGES=official-a
+write_repository_package official-a
 run_ok --noedit --nodiff -S official-a --needed clean-root
 assert_command_count "sudo pacman -S official-a --needed" 1
-assert_separated_source_install "makepkg -sc" "sudo pacman -U --needed -- "
+assert_separated_source_install "makepkg -sc" "sudo pacman -U --needed -- " 2
 sudo_count=$(grep -c '^sudo ' "$command_log" || true)
 if [ "$sudo_count" -ne 2 ]; then
     echo "mixed ordered route ran an unexpected sudo transaction" >&2
@@ -457,7 +474,7 @@ fi
 assert_normal_request_log_nonempty
 
 setup_case mixed-preflight-failure
-export MOGUET_TEST_PACMAN_REPO_PACKAGES=official-a
+write_repository_package official-a
 run_fail --noedit --nodiff -S --needed official-a missing-aur-package
 assert_contains "not found" "$output_file"
 assert_no_mutation_commands

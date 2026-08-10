@@ -661,9 +661,40 @@ ProvidedDependency make_repository_provider(
         const std::string& provided_dependency_name,
         const std::string& provided_dependency_specification,
         const std::optional<std::string>& package_version) {
-    return ProvidedDependency::from_repository(
-            repository_name, package_name, provided_dependency_name,
-            provided_dependency_specification, package_version);
+    const ProviderCapabilityParseResult capability_parse =
+            parse_provider_capability(provided_dependency_specification);
+    const ProviderCapability* const parsed_capability =
+            capability_parse.capability();
+    expect(
+            parsed_capability != nullptr &&
+                    parsed_capability->package_name() ==
+                            provided_dependency_name,
+            "Failed to parse typed repository provider capability fixture: " +
+                    provided_dependency_specification);
+    const ObservedVersion provided_version =
+            parsed_capability->version().has_value()
+            ? ObservedVersion::available(
+                      ObservedVersionSource::RepositoryProviderCapability,
+                      parsed_capability->version().value())
+            : ObservedVersion::unknown(
+                      ObservedVersionSource::RepositoryProviderCapability,
+                      ObservedVersionUnknownReason::
+                              UnversionedProviderCapability);
+    return ProvidedDependency::from_repository_constraint_metadata(
+            repository_name, package_name,
+            ProviderConstraintMetadata{
+                    *parsed_capability,
+                    package_version.has_value()
+                            ? ObservedVersion::available(
+                                      ObservedVersionSource::
+                                              RepositoryExactPackage,
+                                      package_version.value())
+                            : ObservedVersion::unknown(
+                                      ObservedVersionSource::
+                                              RepositoryExactPackage,
+                                      ObservedVersionUnknownReason::
+                                              MissingVersionMetadata),
+                    provided_version});
 }
 
 BuildPlanDependencyEdge make_repository_provider_edge(
@@ -1747,7 +1778,7 @@ void test_local_dependency_invocation_executes_provider_without_aur_units(
             "virtual-local-api=1", std::string("1.0-1"));
     const ProvidedDependency duplicate_provider = make_repository_provider(
             "extra", "local-root-provider", "virtual-local-api-alias",
-            "virtual-local-api-alias>=1", std::string("1.1-1"));
+            "virtual-local-api-alias=1", std::string("1.1-1"));
     LocalSourceBuildDependencyPreparation preparation =
             LocalSourceBuildDependencyPreparation::
                     make_for_production_source_build_test(
@@ -1789,7 +1820,7 @@ void test_selected_repository_provider_projection_and_invocation_deduplication()
             "virtual-api=2", std::string("2.4-1"));
     const ProvidedDependency root_provider = make_repository_provider(
             "extra", "repository-provider", "virtual-api-alias",
-            "virtual-api-alias>=2", std::string("2.5-1"));
+            "virtual-api-alias=2", std::string("2.5-1"));
     expect(
             same_provider_identity(dependency_provider, root_provider) &&
                     dependency_provider != root_provider,

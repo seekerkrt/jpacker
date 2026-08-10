@@ -2,6 +2,7 @@
 
 #include "app_config.hpp"
 #include "cache_authority.hpp"
+#include "dependency_plan.hpp"
 #include "localization.hpp"
 #include "package_identifier.hpp"
 #include "process.hpp"
@@ -31,6 +32,16 @@ std::string unknown_system_failure_diagnostic() {
 std::string unknown_source_failure_diagnostic() {
     return localization::translate_message(
             "Registered source package processing failed with an unknown exception.");
+}
+
+std::string join_package_names(
+        const std::vector<std::string>& package_names) {
+    std::string joined;
+    for(std::size_t index = 0; index < package_names.size(); ++index) {
+        if(index > 0) joined += ", ";
+        joined += package_names[index];
+    }
+    return joined;
 }
 
 std::string post_upgrade_snapshot_failure_diagnostic(
@@ -73,6 +84,7 @@ struct RegisteredSourceCorrelation {
 
 struct SystemSourceUpgradePreparationState {
     SystemSourceUpgradePreparedSnapshot snapshot;
+    std::optional<BuildPlan> aur_invocation_plan;
     std::optional<PreparedProductionSourceBuildInvocation> source_invocation;
     std::vector<RegisteredSourceCorrelation> correlations;
     SourceUpdateBaselines update_baselines;
@@ -108,7 +120,7 @@ SystemSourceUpgradeOptionSnapshot snapshot_options(const AppConfig& config) {
             config.user_config.build.mode == BuildMode::Rebuild,
             config.user_config.build.mode == BuildMode::Clean,
             config.rm_deps,
-            config.editor};
+            config.editor, false};
 }
 
 bool options_match(
@@ -124,7 +136,7 @@ bool options_match(
            snapshot.clean_build ==
                    (config.user_config.build.mode == BuildMode::Clean) &&
            snapshot.rm_deps == config.rm_deps &&
-           snapshot.editor == config.editor;
+           snapshot.editor == config.editor && !snapshot.needed;
 }
 
 std::string system_upgrade_command(const AppConfig& config) {
@@ -212,6 +224,7 @@ SystemSourceUpgradeResult make_result_from_state(
     result.warnings = std::move(state.warnings);
     result.issues = std::move(state.issues);
     result.diagnostics = std::move(state.diagnostics);
+    result.aur_invocation_plan = std::move(state.aur_invocation_plan);
     result.registered_source_results.reserve(
             result.prepared_snapshot.registered_sources.size());
     for(const auto& source : result.prepared_snapshot.registered_sources) {
@@ -763,12 +776,62 @@ SystemSourceUpgradeResult::failure_diagnostic() const {
 }
 
 PreparedSystemSourceUpgrade::PreparedSystemSourceUpgrade(
-        std::unique_ptr<Impl> impl) noexcept
+        std::unique_ptr<Impl> impl)
     : impl_(std::move(impl)) {
+    if(impl_ == nullptr) return;
+
+    SystemSourceUpgradePreparationState& state = impl_->state;
+    if(state.correlations.size() !=
+       state.snapshot.registered_sources.size()) {
+        throw std::logic_error(
+                "Prepared system/source projection correlation count is inconsistent.");
+    }
+
+    const std::size_t work_item_count = state.source_invocation.has_value()
+            ? state.source_invocation->work_items.size()
+            : 0;
+    std::vector<bool> observed_work_items(work_item_count, false);
+    std::vector<PreparedSystemSourceWorkReference> source_work_items;
+    source_work_items.reserve(work_item_count);
+    for(const RegisteredSourceCorrelation& correlation : state.correlations) {
+        if(!correlation.work_item_index.has_value()) continue;
+        if(correlation.snapshot_index >=
+                   state.snapshot.registered_sources.size() ||
+           !state.source_invocation.has_value() ||
+           correlation.work_item_index.value() >= work_item_count ||
+           observed_work_items[correlation.work_item_index.value()]) {
+            throw std::logic_error(
+                    "Prepared system/source work-item correlation is inconsistent.");
+        }
+
+        observed_work_items[correlation.work_item_index.value()] = true;
+        source_work_items.push_back(PreparedSystemSourceWorkReference(
+                state.snapshot.registered_sources[correlation.snapshot_index],
+                state.source_invocation
+                        ->work_items[correlation.work_item_index.value()]));
+    }
+    if(std::any_of(
+               observed_work_items.begin(), observed_work_items.end(),
+               [](bool observed) { return !observed; })) {
+        throw std::logic_error(
+                "Prepared system/source work item has no source correlation.");
+    }
+
+    SystemSourceUpgradeProjectionAuthority authority(
+            state.snapshot,
+            state.aur_invocation_plan.has_value()
+                    ? &state.aur_invocation_plan.value()
+                    : nullptr,
+            state.issues, std::move(source_work_items));
+    projection_authority_.emplace(std::move(authority));
 }
 
 PreparedSystemSourceUpgrade::PreparedSystemSourceUpgrade(
-        PreparedSystemSourceUpgrade&&) noexcept = default;
+        PreparedSystemSourceUpgrade&& other) noexcept
+    : impl_(std::move(other.impl_)),
+      projection_authority_(std::move(other.projection_authority_)) {
+    other.projection_authority_.reset();
+}
 
 PreparedSystemSourceUpgrade::~PreparedSystemSourceUpgrade() noexcept = default;
 
@@ -779,6 +842,27 @@ bool PreparedSystemSourceUpgrade::is_valid() const noexcept {
 const SystemSourceUpgradePreparedSnapshot*
 PreparedSystemSourceUpgrade::snapshot() const noexcept {
     return impl_ == nullptr ? nullptr : &impl_->state.snapshot;
+}
+
+const BuildPlan* PreparedSystemSourceUpgrade::aur_invocation_plan()
+        const noexcept {
+    if(impl_ == nullptr || !impl_->state.aur_invocation_plan.has_value()) {
+        return nullptr;
+    }
+    return &impl_->state.aur_invocation_plan.value();
+}
+
+const std::vector<SystemSourceUpgradeIssue>&
+PreparedSystemSourceUpgrade::issues() const noexcept {
+    static const std::vector<SystemSourceUpgradeIssue> s_empty;
+    return impl_ == nullptr ? s_empty : impl_->state.issues;
+}
+
+const SystemSourceUpgradeProjectionAuthority*
+PreparedSystemSourceUpgrade::projection_authority() const noexcept {
+    return impl_ != nullptr && projection_authority_.has_value()
+            ? &projection_authority_.value()
+            : nullptr;
 }
 
 #ifdef MOGUET_ENABLE_SYSTEM_SOURCE_UPGRADE_TEST_HOOKS
@@ -799,8 +883,7 @@ void PreparedSystemSourceUpgrade::set_unexpected_exception_for_test(
 
 SystemSourceUpgradePreparation prepare_system_source_upgrade(
         const AppConfig& config,
-        const SystemSourceUpgradeEventObserver& observer,
-        std::optional<ValidatedCacheRoot> cache_root) {
+        const SystemSourceUpgradeEventObserver& observer) {
     SystemSourceUpgradePreparationState state;
     state.snapshot.options = snapshot_options(config);
 
@@ -875,7 +958,8 @@ SystemSourceUpgradePreparation prepare_system_source_upgrade(
                         std::nullopt,
                         std::nullopt,
                         std::nullopt,
-                        {}});
+                        {},
+                        std::nullopt});
         state.correlations.push_back(RegisteredSourceCorrelation{
                 state.snapshot.registered_sources.size() - 1,
                 is_valid_package_name(entry.package_name),
@@ -966,8 +1050,9 @@ SystemSourceUpgradePreparation prepare_system_source_upgrade(
                 RegisteredSourceUpgradeFailureKind::PreferenceUnavailable);
     }
 
-    std::vector<ProductionSourceBuildWorkItem> source_work_items;
-    std::vector<std::string> package_names;
+    std::vector<std::optional<ResolvedSourceBuildIdentity>>
+            resolved_identities(
+                    state.snapshot.registered_sources.size());
     ProviderSelectionCallback select_provider =
             registered_source_provider_selection_callback(
                     provider_selection_callback(config));
@@ -980,13 +1065,15 @@ SystemSourceUpgradePreparation prepare_system_source_upgrade(
                 state.snapshot.registered_sources[source_position];
         if(!correlation.has_valid_package_name) continue;
 
-        ResolvedSourceBuildIdentity identity;
         try {
-            identity = resolve_source_build_identity(
-                    source.preference_package_name);
+            ResolvedSourceBuildIdentity identity =
+                    resolve_source_build_identity(
+                            source.preference_package_name);
             source.canonical_source_identity_key =
                     identity.canonical_source_key;
             source.resolved_package_base = identity.package_base;
+            source.source_kind = identity.source_kind;
+            resolved_identities[source_position] = std::move(identity);
         } catch(const std::exception& error) {
             SystemSourceUpgradeIssue issue = make_issue(
                     SystemSourceUpgradeIssueKind::
@@ -1012,14 +1099,84 @@ SystemSourceUpgradePreparation prepare_system_source_upgrade(
                     RegisteredSourceUpgradeFailureKind::UnknownException);
         }
 
+    }
+
+    std::vector<std::string> aur_package_names;
+    std::optional<std::size_t> first_aur_source_position;
+    for(std::size_t source_position = 0;
+        source_position < resolved_identities.size();
+        ++source_position) {
+        if(!resolved_identities[source_position].has_value() ||
+           resolved_identities[source_position]->source_kind !=
+                   SourceBuildSourceKind::Aur) {
+            continue;
+        }
+        if(!first_aur_source_position.has_value()) {
+            first_aur_source_position = source_position;
+        }
+        aur_package_names.push_back(
+                resolved_identities[source_position]->requested_name);
+    }
+    if(!aur_package_names.empty()) {
+        try {
+            state.aur_invocation_plan.emplace(resolve_build_plan(
+                    aur_package_names, select_provider));
+            require_executable_install_plan(
+                    join_package_names(aur_package_names),
+                    state.aur_invocation_plan.value());
+        } catch(const std::exception& error) {
+            const std::size_t source_position =
+                    first_aur_source_position.value();
+            RegisteredSourcePreferenceSnapshot& source =
+                    state.snapshot.registered_sources[source_position];
+            SystemSourceUpgradeIssue issue = make_issue(
+                    SystemSourceUpgradeIssueKind::
+                            SourceWorkItemPreparationFailed,
+                    SystemSourceUpgradeIssueImpact::BlocksExecution,
+                    SystemSourceUpgradePhase::Preparation,
+                    error.what());
+            attribute_issue_to_source(issue, source);
+            return block_preparation(
+                    std::move(state), std::move(issue), source_position,
+                    RegisteredSourceUpgradeFailureKind::BuildOrInstallFailed);
+        } catch(...) {
+            const std::size_t source_position =
+                    first_aur_source_position.value();
+            RegisteredSourcePreferenceSnapshot& source =
+                    state.snapshot.registered_sources[source_position];
+            SystemSourceUpgradeIssue issue = make_issue(
+                    SystemSourceUpgradeIssueKind::
+                            SourceWorkItemPreparationFailed,
+                    SystemSourceUpgradeIssueImpact::BlocksExecution,
+                    SystemSourceUpgradePhase::Preparation,
+                    localization::translate_message(
+                            "Source invocation constraint preflight failed with an unknown exception."));
+            attribute_issue_to_source(issue, source);
+            return block_preparation(
+                    std::move(state), std::move(issue), source_position,
+                    RegisteredSourceUpgradeFailureKind::UnknownException);
+        }
+    }
+
+    std::vector<ProductionSourceBuildWorkItem> source_work_items;
+    std::vector<std::string> package_names;
+    for(std::size_t source_position = 0;
+        source_position < state.snapshot.registered_sources.size();
+        ++source_position) {
+        RegisteredSourceCorrelation& correlation =
+                state.correlations[source_position];
+        RegisteredSourcePreferenceSnapshot& source =
+                state.snapshot.registered_sources[source_position];
+        if(!resolved_identities[source_position].has_value()) continue;
+
         try {
             correlation.work_item_index = source_work_items.size();
             source_work_items.push_back(
                     prepare_resolved_source_build_work_item(
-                            identity,
+                            resolved_identities[source_position].value(),
                             source.environment.value(),
                             true,
-                            false,
+                            state.snapshot.options.needed,
                             select_provider));
             package_names.push_back(source.preference_package_name);
         } catch(const std::exception& error) {
@@ -1074,36 +1231,6 @@ SystemSourceUpgradePreparation prepare_system_source_upgrade(
             return block_preparation(
                     std::move(state), std::move(issue), std::nullopt,
                     RegisteredSourceUpgradeFailureKind::UnknownException);
-        }
-
-        // POLICY(#272): registered-source provider choiceとstatic invocation
-        // preflightを確定してから、最初のcache filesystem mutationへ進む。
-        try {
-            if(cache_root.has_value()) {
-                cache_root->require_unchanged_identity();
-            } else {
-                cache_root = prepare_process_cache_root();
-            }
-            seed_production_source_build_cache(
-                    state.source_invocation.value(), cache_root.value());
-        } catch(const xdg_paths::ResolutionError& error) {
-            SystemSourceUpgradeIssue issue =
-                    make_cache_authority_issue(error.what());
-            issue.cache_resolution_failure = error.failure();
-            return block_cache_authority_preparation(
-                    std::move(state), std::move(issue));
-        } catch(const xdg_directory_safety::PreparationError& error) {
-            SystemSourceUpgradeIssue issue =
-                    make_cache_authority_issue(error.what());
-            issue.cache_preparation_failure = error.failure();
-            return block_cache_authority_preparation(
-                    std::move(state), std::move(issue));
-        } catch(const TrustedCacheError& error) {
-            SystemSourceUpgradeIssue issue =
-                    make_cache_authority_issue(error.what());
-            issue.trusted_cache_failure = error.failure();
-            return block_cache_authority_preparation(
-                    std::move(state), std::move(issue));
         }
 
         const PacmanDatabasePaths database_paths =
@@ -1189,7 +1316,8 @@ SystemSourceUpgradePreparation prepare_system_source_upgrade(
 SystemSourceUpgradeResult execute_prepared_system_source_upgrade(
         PreparedSystemSourceUpgrade prepared,
         const AppConfig& config,
-        const SystemSourceUpgradeEventObserver& observer) {
+        const SystemSourceUpgradeEventObserver& observer,
+        std::optional<ValidatedCacheRoot> shared_cache_root) {
     if(prepared.impl_ == nullptr) {
         SystemSourceUpgradeResult result;
         result.status = SystemSourceUpgradeStatus::InconsistentResult;
@@ -1234,23 +1362,36 @@ SystemSourceUpgradeResult execute_prepared_system_source_upgrade(
         return result;
     }
 
-    // Registered source workがある場合はsystem pacmanより前にcache authorityを
-    // 1回だけ確定し、typed failureをresultへ保持する。
+    // Read-only preflightはcache capabilityを保持しない。actual executionだけが
+    // current XDG stateからrootを取得し、system pacman前にseed/activateする。
     if(state.source_invocation.has_value()) {
         try {
+            if(!shared_cache_root.has_value()) {
+                shared_cache_root = prepare_process_cache_root();
+            }
+            seed_production_source_build_cache(
+                    state.source_invocation.value(),
+                    shared_cache_root.value());
             activate_production_source_build_cache(
                     state.source_invocation.value());
+        } catch(const xdg_paths::ResolutionError& error) {
+            SystemSourceUpgradeIssue issue =
+                    make_cache_authority_issue(error.what());
+            issue.cache_resolution_failure = error.failure();
+            return block_cache_authority_preparation(
+                    std::move(state), std::move(issue));
+        } catch(const xdg_directory_safety::PreparationError& error) {
+            SystemSourceUpgradeIssue issue =
+                    make_cache_authority_issue(error.what());
+            issue.cache_preparation_failure = error.failure();
+            return block_cache_authority_preparation(
+                    std::move(state), std::move(issue));
         } catch(const TrustedCacheError& error) {
-            SystemSourceUpgradeIssue issue = make_issue(
-                    SystemSourceUpgradeIssueKind::CacheAuthorityInvalid,
-                    SystemSourceUpgradeIssueImpact::BlocksExecution,
-                    SystemSourceUpgradePhase::Preparation,
-                    error.what());
+            SystemSourceUpgradeIssue issue =
+                    make_cache_authority_issue(error.what());
             issue.trusted_cache_failure = error.failure();
-            return block_preparation(
-                    std::move(state), std::move(issue), std::nullopt,
-                    RegisteredSourceUpgradeFailureKind::
-                            CacheAuthorityFailure);
+            return block_cache_authority_preparation(
+                    std::move(state), std::move(issue));
         }
     }
 

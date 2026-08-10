@@ -1,7 +1,92 @@
+# Moguet v2.2.0
+
+This tracked file is the source of truth for release bodies. The English and
+Japanese sections for each release describe the same scope.
+
+## English
+
+Moguet v2.2.0 extends package planning and execution safety while preserving
+its pacman-first and fail-closed boundaries. It makes ambiguity visible,
+validates version constraints across source observations, and provides one
+human-readable plan for supported no-mutation workflows.
+
+### #388 — Ambiguous provider installed-state visibility
+
+- Ambiguous provider candidates now show `[installed]` when a same-name
+  installed package is observed.
+- If installed-state lookup is unavailable or cannot be trusted, the candidate
+  shows `[installed state unknown]` with a warning; an authoritative absence
+  remains unmarked.
+- Installed-state text is presentation-only. Provider selection policy,
+  candidate order, numbering, explicit choice, and routing are unchanged; no
+  provider is selected automatically.
+
+### #351 — Version constraint satisfiability
+
+- Consumer requirements and provider capabilities are kept separate and
+  evaluated as typed results: `Unconstrained`, `Satisfied`, `Unsatisfied`,
+  `Unknown`, `Invalid`, or `Conflicting`.
+- Repository, AUR, provider, and local observations retain their source-aware
+  identity so version compatibility is not inferred from a name alone.
+- Mutation routes perform the same production preflight before clone, fetch,
+  build, install, or transaction work. Constraints that cannot be proven safe
+  fail closed instead of being guessed or silently routed elsewhere.
+
+### #352 — Unified plan and global dry-run
+
+- A unified human-readable plan describes the observations and decisions for
+  supported Moguet-owned routes.
+- Global `--dry-run` is supported for:
+  `-S` install / system-update, `fetch`, remote build, local build, `upgrade`,
+  `upgrade-aur`, and `upgrade-all`.
+- Dry-run is no-mutation and unsupported routes fail closed. An actual
+  execution revalidates the current state instead of reusing an observation as
+  approval or execution capability.
+
+## 日本語
+
+Moguet v2.2.0は、pacman-firstかつfail-closedの境界を保ったまま、package
+planningとexecution safetyを拡張するreleaseです。曖昧さを表示し、source
+observationをまたぐversion constraintを検証し、supportedなno-mutation workflowを
+1つのhuman-readable planで確認できるようにしました。
+
+### #388 — ambiguous providerのinstalled state表示
+
+- ambiguous provider candidateと同名のinstalled packageが観測された場合、候補に
+  `[installed]`を表示します。
+- installed-state lookupが利用できない、または信頼できない場合は、候補に
+  `[installed state unknown]`とwarningを表示します。authoritativeに未installと判定できる
+  場合はsuffixを付けません。
+- installed-state表示はpresentation-onlyです。provider selection policy、候補順、番号、
+  明示選択、routingは変更せず、providerを自動選択しません。
+
+### #351 — version constraint satisfiability
+
+- consumer requirementとprovider capabilityを分離し、`Unconstrained`、`Satisfied`、
+  `Unsatisfied`、`Unknown`、`Invalid`、`Conflicting`のtyped resultとして評価します。
+- repository、AUR、provider、localのobservationはsource-awareなidentityを保ち、nameだけ
+  からversion compatibilityを推測しません。
+- mutation routeではclone、fetch、build、install、transactionへ進む前に同じproduction
+  preflightを実行します。安全を証明できないconstraintは推測や別経路への黙ったfallbackをせず、
+  fail-closedになります。
+
+### #352 — unified planとglobal dry-run
+
+- supportedなMoguet-owned routeのobservationとdecisionを、統一human-readable planで表示します。
+- global `--dry-run`は、次のrouteに対応します。
+  - `-S` install / system-update
+  - `fetch`
+  - remote build
+  - local build
+  - `upgrade`
+  - `upgrade-aur`
+  - `upgrade-all`
+- dry-runはno-mutationで、unsupported routeはfail-closedです。actual executionはobservationを
+  approvalやexecution capabilityとして再利用せず、current stateから再validationします。
+
 # Moguet v2.1.0
 
-This tracked file is the source of truth for the GitHub Release body. The
-English and Japanese sections describe the same release scope.
+The following historical notes describe the published v2.1.0 release.
 
 ## English
 

@@ -54,6 +54,7 @@ setup_case() {
     case_dir=$tmp_dir/cases/$case_name
     command_log=$case_dir/commands.log
     output_file=$case_dir/output
+    repository_metadata_state=$case_dir/repository-metadata.state
 
     mkdir -p \
         "$case_dir/home" \
@@ -62,11 +63,14 @@ setup_case() {
         "$case_dir/xdg-cache"
     chmod 0700 "$case_dir/xdg-config"
     : > "$command_log"
+    : > "$repository_metadata_state"
     export HOME=$case_dir/home
     export XDG_CONFIG_HOME=$case_dir/xdg-config
     export XDG_STATE_HOME=$case_dir/xdg-state
     export XDG_CACHE_HOME=$case_dir/xdg-cache
     export MOGUET_TEST_COMMAND_LOG=$command_log
+    export MOGUET_TEST_REPOSITORY_METADATA_STATE_FILE=$repository_metadata_state
+    export MOGUET_TEST_PACMAN_CONF_REPOSITORY_LIST=core
     export MOGUET_TEST_PACMAN_EXIT_CODE=0
     export MOGUET_TEST_SUDO_EXIT_CODE=0
     unset MOGUET_TEST_PACMAN_QM_OUTPUT
@@ -79,6 +83,11 @@ setup_case() {
     unset MOGUET_TEST_MAKEPKG_PACKAGELIST_EXIT_CODE
     unset MOGUET_TEST_MAKEPKG_PACKAGELIST_OUTPUT_FILE
     unset PKGDEST
+}
+
+write_repository_package() {
+    package=$1
+    printf 'core %s 1 1\n' "$package" >> "$repository_metadata_state"
 }
 
 run_ok() {
@@ -229,6 +238,9 @@ run_exact value-root-rmdeps \
 run_exact value-root-select \
     "pacman -Q --root --select filesystem" \
     -Q --root --select filesystem
+run_exact value-root-dry-run \
+    "pacman -Q --root --dry-run filesystem" \
+    -Q --root --dry-run filesystem
 run_exact value-config-noconfirm \
     "pacman -Q --config --noconfirm filesystem" \
     -Q --config --noconfirm filesystem
@@ -270,7 +282,7 @@ done
 
 # Matrix B: semantic `--`後は全tokenをopaque operandとして保持する。
 for global_option in \
-    --rmdeps --select --noconfirm --edit --noedit --diff --nodiff \
+    --rmdeps --select --noconfirm --dry-run --edit --noedit --diff --nodiff \
     --build-mode=normal --build-mode=rebuild --build-mode=clean \
     --rebuild --cleanbuild; do
     case_name=opaque-${global_option#--}
@@ -282,6 +294,117 @@ run_exact opaque-conflicting-review-values \
 run_exact opaque-invalid-build-mode \
     "sudo pacman -U -- --build-mode=cleanbuild" \
     -U -- --build-mode=cleanbuild
+
+# Matrix B2: --dry-run is a global modifier only in semantic global
+# positions. Supported owned routes reach production projection before all
+# persistent state, while unsupported routes fail closed instead of falling
+# through to pacman or Git.
+assert_dry_run_rendered() {
+    case_name=$1
+    shift
+
+    setup_case "$case_name"
+    export MOGUET_TEST_PACMAN_REPO_PACKAGES=official-only
+    export MOGUET_TEST_PACMAN_CONF_REPOSITORY_LIST=core
+    if "$test_binary" "$@" </dev/null > "$output_file" 2>&1; then
+        status=0
+    else
+        status=$?
+    fi
+    if [ "$status" -ne 0 ] && [ "$status" -ne 1 ]; then
+        echo "unexpected dry-run status $status: $*" >&2
+        sed -n '1,240p' "$output_file" >&2
+        cat "$command_log" >&2
+        exit 1
+    fi
+    assert_contains "Unified plan:" "$output_file"
+    assert_not_contains "Started Moguet v" "$output_file"
+    assert_storage_roots_absent
+    assert_no_mutation_commands
+}
+
+assert_dry_run_rejected() {
+    case_name=$1
+    shift
+
+    setup_case "$case_name"
+    run_fail "$@"
+    assert_contains "Option --dry-run is not supported for operation" \
+        "$output_file"
+    assert_pre_log_exit
+}
+
+assert_dry_run_rendered dry-run-before-operation \
+    --dry-run --aur -S clean-root
+assert_dry_run_rendered dry-run-after-operation \
+    fetch clean-root --dry-run
+assert_dry_run_rendered dry-run-duplicate \
+    --dry-run build clean-root --dry-run
+assert_dry_run_rendered dry-run-sync-system-update \
+    -Syu --dry-run
+
+setup_case dry-run-local-build
+local_dry_run_source=$case_dir/local-source
+cp -a "$repo_root/tests/fixtures/unified-plan-local-blocked" \
+    "$local_dry_run_source"
+touch "$local_dry_run_source/.SRCINFO"
+if ! "$test_binary" build --local "$local_dry_run_source" --dry-run \
+        </dev/null > "$output_file" 2>&1; then
+    echo "supported local dry-run did not succeed" >&2
+    sed -n '1,240p' "$output_file" >&2
+    cat "$command_log" >&2
+    exit 1
+fi
+assert_contains "Unified plan:" "$output_file"
+assert_not_contains "Started Moguet v" "$output_file"
+assert_storage_roots_absent
+assert_no_mutation_commands
+
+assert_dry_run_rendered dry-run-upgrade upgrade --dry-run
+assert_dry_run_rendered dry-run-upgrade-aur upgrade-aur --dry-run
+assert_dry_run_rendered dry-run-upgrade-all upgrade-all --dry-run
+
+assert_dry_run_rejected dry-run-deps deps clean-root --dry-run
+assert_dry_run_rejected dry-run-plan plan clean-root --dry-run
+assert_dry_run_rejected dry-run-search -Ss clean-root --dry-run
+assert_dry_run_rejected dry-run-info -Si clean-root --dry-run
+assert_dry_run_rejected dry-run-clean clean --dry-run
+assert_dry_run_rejected dry-run-pkgbuild-export -G clean-root --dry-run
+assert_dry_run_rejected dry-run-pkgbuild-print -Gp clean-root --dry-run
+assert_dry_run_rejected dry-run-source-maintenance \
+    add-src clean-root --dry-run
+assert_dry_run_rejected dry-run-query-passthrough -Q --dry-run clean-root
+assert_dry_run_rejected dry-run-remove-passthrough -R clean-root --dry-run
+assert_dry_run_rejected dry-run-upgrade-passthrough -U clean-root --dry-run
+assert_dry_run_rejected dry-run-database-passthrough -D clean-root --dry-run
+assert_dry_run_rejected dry-run-files-passthrough -F clean-root --dry-run
+assert_dry_run_rejected dry-run-deptest-passthrough -T clean-root --dry-run
+assert_dry_run_rejected dry-run-unsupported-sync -Sc --dry-run
+assert_dry_run_rejected dry-run-unknown-sync-modifier -Sz clean-root --dry-run
+assert_dry_run_rejected dry-run-targetless-sync --dry-run -S
+assert_dry_run_rejected dry-run-repo-passthrough \
+    --dry-run --repo -S official-only
+assert_dry_run_rejected dry-run-separate-sysupgrade \
+    --dry-run -S --sysupgrade
+assert_dry_run_rejected dry-run-sync-pacman-option \
+    --dry-run -S --config custom.conf clean-root
+assert_dry_run_rejected dry-run-sync-end-of-options \
+    --dry-run -S -- clean-root
+assert_dry_run_rejected dry-run-targetless-fetch --dry-run fetch
+assert_dry_run_rejected dry-run-fetch-pacman-option \
+    --dry-run fetch --needed clean-root
+assert_dry_run_rejected dry-run-fetch-end-of-options \
+    --dry-run fetch -- clean-root
+assert_dry_run_rejected dry-run-build-pacman-option \
+    --dry-run build --needed clean-root
+assert_dry_run_rejected dry-run-build-end-of-options \
+    --dry-run build -- clean-root
+assert_dry_run_rejected dry-run-local-build-extra-option \
+    --dry-run build --local . --needed
+assert_dry_run_rejected dry-run-upgrade-target \
+    --dry-run upgrade clean-root
+assert_dry_run_rejected dry-run-upgrade-end-of-options \
+    --dry-run upgrade --
 
 # Matrix C/D: 通常位置のglobalだけを消費し、generated optionはoperation直後へ1件置く。
 run_exact global-leading-noconfirm \
@@ -501,23 +624,31 @@ run_exact version-as-opaque-operand \
 # Matrix J: official transactionはAUR targetだけを元indexで除外し、残りの順序を保つ。
 setup_case official-sync-order
 export MOGUET_TEST_PACMAN_REPO_PACKAGES='official-a official-b'
+write_repository_package official-a
+write_repository_package official-b
 run_ok -S official-a --config custom.conf official-b
 assert_only_sudo_command "sudo pacman -S official-a --config custom.conf official-b"
 assert_command_absent "sudo pacman -S --config custom.conf official-a official-b"
 
 setup_case official-sync-generated-option
 export MOGUET_TEST_PACMAN_REPO_PACKAGES='official-a official-b'
+write_repository_package official-a
+write_repository_package official-b
 run_ok --noconfirm -S official-a --config custom.conf official-b
 assert_only_sudo_command "sudo pacman -S --noconfirm official-a --config custom.conf official-b"
 
 setup_case mixed-sync-unsupported
 export MOGUET_TEST_PACMAN_REPO_PACKAGES='official-a official-c'
+write_repository_package official-a
+write_repository_package official-c
 run_fail -S official-a --config custom.conf clean-root official-c
 assert_contains "Unsupported pacman option for AUR/source-build target: --config" "$output_file"
 assert_no_mutation_commands
 
 setup_case mixed-sync-supported
 export MOGUET_TEST_PACMAN_REPO_PACKAGES='official-a official-c'
+write_repository_package official-a
+write_repository_package official-c
 run_fail --noconfirm --noedit -S official-a clean-root official-c
 assert_only_sudo_command "sudo pacman -S --noconfirm official-a official-c"
 assert_command_absent "sudo pacman -S --noconfirm official-a clean-root official-c"
@@ -542,16 +673,16 @@ export MOGUET_TEST_PACMAN_REPO_PACKAGES='official-only'
 run_fail --noedit --nodiff --noconfirm \
     --build-mode=rebuild --rebuild --rmdeps -S clean-root
 assert_contains "Separated build/install does not support --rmdeps." "$output_file"
-assert_command "pacman -Si clean-root"
-assert_command_absent "pacman-conf --verbose RootDir DBPath"
+assert_command "pacman-conf --verbose RootDir DBPath"
+assert_command "pacman-conf --repo-list"
 assert_no_mutation_commands
 
 setup_case aur-trailing-rmdeps
 export MOGUET_TEST_PACMAN_REPO_PACKAGES='official-only'
 run_fail -S clean-root --rmdeps --noedit --noconfirm
 assert_contains "Separated build/install does not support --rmdeps." "$output_file"
-assert_command "pacman -Si clean-root"
-assert_command_absent "pacman-conf --verbose RootDir DBPath"
+assert_command "pacman-conf --verbose RootDir DBPath"
+assert_command "pacman-conf --repo-list"
 assert_no_mutation_commands
 
 setup_case aur-global-name-as-option-value
