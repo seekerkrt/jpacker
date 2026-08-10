@@ -179,7 +179,6 @@ XGETTEXT_OPTIONS := \
 	--package-version=$(VERSION) \
 	--no-wrap
 SRCS      := $(wildcard $(SRC_DIR)/*.cpp)
-HEADERS   := $(wildcard $(SRC_DIR)/*.hpp)
 TEST_SRCS := $(SRCS)
 CLI_LOCALIZATION_TEST_SRCS := $(SRCS)
 APP_CONFIG_INTEGRATION_TEST_SRCS := $(SRCS)
@@ -1144,6 +1143,73 @@ PACKAGE_METADATA_INTEGRATION_TEST_SRCS := \
 	$(SRC_DIR)/shell_words.cpp \
 	$(SRC_DIR)/process.cpp \
 	$(SRC_DIR)/logging.cpp
+APPLICATION_IDENTITY_TEST_SRCS := \
+	tests/application_identity_test.cpp
+LOCALIZATION_TEST_SRCS := \
+	tests/localization_test.cpp \
+	$(SRC_DIR)/localization.cpp
+XDG_PATHS_TEST_SRCS := \
+	tests/xdg_paths_test.cpp \
+	$(SRC_DIR)/xdg_paths.cpp
+XDG_DIRECTORY_SAFETY_TEST_SRCS := \
+	tests/xdg_directory_safety_test.cpp \
+	$(SRC_DIR)/xdg_directory_safety.cpp \
+	$(SRC_DIR)/xdg_paths.cpp
+XDG_STATE_LOG_TEST_SRCS := \
+	tests/xdg_state_log_test.cpp \
+	$(SRC_DIR)/xdg_state_log.cpp \
+	$(SRC_DIR)/xdg_directory_safety.cpp \
+	$(SRC_DIR)/xdg_paths.cpp \
+	$(SRC_DIR)/logging.cpp
+TRUSTED_CACHE_TEST_SRCS := \
+	tests/trusted_cache_test.cpp \
+	$(SRC_DIR)/trusted_cache.cpp \
+	$(SRC_DIR)/xdg_directory_safety.cpp \
+	$(SRC_DIR)/xdg_paths.cpp \
+	$(SRC_DIR)/logging.cpp
+ROOT_EXECUTION_IDENTITY_DIRECT_SRCS := \
+	tests/stubs/runtime-identity/geteuid_stub.cpp
+APP_CONFIG_MODULE_TEST_SRCS := \
+	tests/app_config_test.cpp \
+	$(SRC_DIR)/app_config.cpp \
+	$(SRC_DIR)/provider_selection.cpp \
+	$(SRC_DIR)/dependency_spec.cpp \
+	$(SRC_DIR)/localization.cpp
+PROVIDER_SELECTION_TEST_SRCS := \
+	tests/provider_selection_test.cpp \
+	$(SRC_DIR)/provider_selection.cpp \
+	$(SRC_DIR)/dependency_constraint.cpp \
+	$(SRC_DIR)/provider_installed_state_presentation.cpp \
+	$(SRC_DIR)/provider_installed_state.cpp \
+	$(SRC_DIR)/package_metadata.cpp \
+	$(SRC_DIR)/package_identifier.cpp \
+	$(SRC_DIR)/shell_words.cpp \
+	$(SRC_DIR)/dependency_spec.cpp \
+	$(SRC_DIR)/localization.cpp \
+	tests/stubs/package-metadata/alpm_stub.cpp \
+	tests/stubs/package-metadata/process_stub.cpp
+USER_CONFIG_MODULE_TEST_SRCS := \
+	tests/user_config_test.cpp \
+	$(SRC_DIR)/user_config.cpp \
+	$(SRC_DIR)/cli_parser.cpp
+PACKAGE_IDENTIFIER_TEST_SRCS := \
+	tests/package_identifier_test.cpp \
+	$(SRC_DIR)/package_identifier.cpp
+SHELL_WORDS_TEST_SRCS := \
+	tests/shell_words_test.cpp \
+	$(SRC_DIR)/shell_words.cpp
+SOURCE_ENVIRONMENT_TEST_SRCS := \
+	tests/source_environment_test.cpp \
+	$(SRC_DIR)/source_environment.cpp \
+	$(SRC_DIR)/source_preference.cpp \
+	$(SRC_DIR)/xdg_directory_safety.cpp \
+	$(SRC_DIR)/xdg_paths.cpp \
+	$(SRC_DIR)/package_identifier.cpp \
+	$(SRC_DIR)/shell_words.cpp
+PROCESS_STDIN_FD_TEST_SRCS := \
+	tests/process_stdin_fd_test.cpp \
+	$(SRC_DIR)/process.cpp \
+	$(SRC_DIR)/logging.cpp
 UPGRADE_BASELINE_METADATA_TEST_SRCS := \
 	$(SRCS) \
 	tests/stubs/package-metadata/alpm_stub.cpp
@@ -1290,6 +1356,11 @@ HEAVY_LINK_FIREWALLS := \
 
 OBJS      := $(SRCS:$(SRC_DIR)/%.cpp=$(BUILD_DIR)/%.o)
 DEPS      := $(OBJS:.o=.d)
+PRODUCTION_SIGNATURE_DIR := $(BUILD_DIR)/production
+PRODUCTION_COMPILE_SIGNATURE := \
+	$(PRODUCTION_SIGNATURE_DIR)/compile.signature
+PRODUCTION_LINK_SIGNATURE := \
+	$(PRODUCTION_SIGNATURE_DIR)/link.signature
 LIBALPM_BUILD_TARGETS := \
 	$(TARGET) \
 	$(ROOT_EXECUTION_IDENTITY_TEST_TARGET) \
@@ -1318,7 +1389,7 @@ LIBALPM_BUILD_TARGETS := \
 	$(UNIFIED_PLAN_RENDERER_TEST_TARGET) \
 	$(UPGRADE_BASELINE_METADATA_TEST_TARGET)
 
-.PHONY: all check-libalpm clean check-upgrade-all-plan-link-firewall check-system-source-upgrade-link-firewall check-aur-update-execution-runner-link-firewall check-aur-update-operation-result-link-firewall check-filtered-aur-update-operation-link-firewall check-upgrade-all-operation-link-firewall check-upgrade-all-command-link-firewall check-commands-sync-link-firewall check-provider-installed-state-link-firewall check-dependency-constraint-link-firewall check-package-constraint-metadata-link-firewall check-aur-constraint-metadata-link-firewall check-root-package-candidate-link-firewall check-root-package-search-link-firewall check-root-package-selection-link-firewall check-root-package-route-projection-link-firewall check-dependency-plan-model-link-firewall check-build-plan-artifact-target-projection-link-firewall check-artifact-selection-model-link-firewall check-artifact-identity-selection-link-firewall check-multiple-artifact-workspace-link-firewall check-multiple-artifact-identity-link-firewall check-package-base-artifact-install-plan-link-firewall check-package-base-artifact-install-executor-link-firewall check-separated-package-base-source-build-link-firewall test test-internal-identity test-application-identity test-xdg-paths test-xdg-directory-safety test-xdg-state-log test-trusted-cache test-runtime-identity test-app-config test-provider-selection test-provider-installed-state test-dependency-constraint test-package-constraint-metadata test-aur-constraint-metadata test-root-package-candidate test-root-package-search test-root-package-selection test-root-package-route-projection test-user-config test-package-identifier test-package-metadata test-package-metadata-integration test-repository-query test-shell-words test-source-environment test-artifact-workspace test-multiple-artifact-workspace test-artifact-identity test-multiple-artifact-identity test-artifact-install-executor test-package-base-artifact-install-plan test-package-base-artifact-install-executor test-separated-source-build test-separated-package-base-source-build test-production-source-build test-process-capture test-aur-update-plan test-upgrade-all-plan test-system-source-upgrade test-aur-update-query test-aur-update-command test-upgrade-all-command test-aur-update-execution-preflight test-aur-update-execution-preflight-integration test-aur-update-execution-preparation test-aur-update-execution-runner test-aur-update-operation-result test-filtered-aur-update-operation test-upgrade-all-operation test-dependency-plan-model test-build-plan-artifact-target-projection test-artifact-install-plan test-artifact-selection-model test-artifact-identity-selection test-command-stub-contract test-markdown-links test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-dry-run-command test-commands-inspect test-commands-source-maintenance test-commands-sync test-live-contract test-run-with-pty test-conflicts-replaces test-install-layout test-package-transition test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check install uninstall
+.PHONY: all check-libalpm clean check-upgrade-all-plan-link-firewall check-system-source-upgrade-link-firewall check-aur-update-execution-runner-link-firewall check-aur-update-operation-result-link-firewall check-filtered-aur-update-operation-link-firewall check-upgrade-all-operation-link-firewall check-upgrade-all-command-link-firewall check-commands-sync-link-firewall check-provider-installed-state-link-firewall check-dependency-constraint-link-firewall check-package-constraint-metadata-link-firewall check-aur-constraint-metadata-link-firewall check-root-package-candidate-link-firewall check-root-package-search-link-firewall check-root-package-selection-link-firewall check-root-package-route-projection-link-firewall check-dependency-plan-model-link-firewall check-build-plan-artifact-target-projection-link-firewall check-artifact-selection-model-link-firewall check-artifact-identity-selection-link-firewall check-multiple-artifact-workspace-link-firewall check-multiple-artifact-identity-link-firewall check-package-base-artifact-install-plan-link-firewall check-package-base-artifact-install-executor-link-firewall check-separated-package-base-source-build-link-firewall test test-host-release test-internal-identity test-application-identity test-xdg-paths test-xdg-directory-safety test-xdg-state-log test-trusted-cache test-runtime-identity test-app-config test-provider-selection test-provider-installed-state test-dependency-constraint test-package-constraint-metadata test-aur-constraint-metadata test-root-package-candidate test-root-package-search test-root-package-selection test-root-package-route-projection test-user-config test-package-identifier test-package-metadata test-package-metadata-integration test-repository-query test-shell-words test-source-environment test-artifact-workspace test-multiple-artifact-workspace test-artifact-identity test-multiple-artifact-identity test-artifact-install-executor test-package-base-artifact-install-plan test-package-base-artifact-install-executor test-separated-source-build test-separated-package-base-source-build test-production-source-build test-process-capture test-aur-update-plan test-upgrade-all-plan test-system-source-upgrade test-aur-update-query test-aur-update-command test-upgrade-all-command test-aur-update-execution-preflight test-aur-update-execution-preflight-integration test-aur-update-execution-preparation test-aur-update-execution-runner test-aur-update-operation-result test-filtered-aur-update-operation test-upgrade-all-operation test-dependency-plan-model test-build-plan-artifact-target-projection test-artifact-install-plan test-artifact-selection-model test-artifact-identity-selection test-command-stub-contract test-markdown-links test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-dry-run-command test-commands-inspect test-commands-source-maintenance test-commands-sync test-live-contract test-run-with-pty test-conflicts-replaces test-install-layout test-package-transition test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check release-check-exclusive install uninstall
 .PHONY: check-local-package-metadata-link-firewall check-local-source-root-link-firewall check-local-dependency-plan-projection-link-firewall test-local-package-metadata test-local-source-root test-local-dependency-plan-projection
 .PHONY: check-local-source-workspace-link-firewall check-local-source-build-link-firewall test-local-source-workspace test-local-source-build
 .PHONY: check-unified-plan-observation-link-firewall test-unified-plan-observation test-observation-contract-gate
@@ -1387,6 +1458,31 @@ check-libalpm:
 $(OBJS) $(LIBALPM_BUILD_TARGETS): | check-libalpm check-localization-config
 $(BUILD_DIR)/localization.o $(LIBALPM_BUILD_TARGETS): $(LOCALIZATION_CONFIG_HEADER)
 $(APP_CONFIG_MODULE_TEST_TARGET) $(PROVIDER_SELECTION_TEST_TARGET): $(LOCALIZATION_CONFIG_HEADER)
+
+$(PRODUCTION_COMPILE_SIGNATURE): FORCE
+	@mkdir -p $(@D)
+	@printf '%s\n' \
+		'CXX=$(CXX)' \
+		'CPPFLAGS=$(CPPFLAGS)' \
+		'LIBALPM_CPPFLAGS=$(LIBALPM_CPPFLAGS)' \
+		'CXXFLAGS=$(CXXFLAGS)' \
+		'MY_CXXFLAGS=$(MY_CXXFLAGS)' \
+		> $@.tmp
+	@cmp -s $@.tmp $@ && rm -f $@.tmp || mv $@.tmp $@
+
+$(PRODUCTION_LINK_SIGNATURE): FORCE
+	@mkdir -p $(@D)
+	@printf '%s\n' \
+		'CXX=$(CXX)' \
+		'LDFLAGS=$(LDFLAGS)' \
+		'OBJECTS=$(OBJS)' \
+		'MY_LDLIBS=$(MY_LDLIBS)' \
+		'LIBALPM_LDLIBS=$(LIBALPM_LDLIBS)' \
+		> $@.tmp
+	@cmp -s $@.tmp $@ && rm -f $@.tmp || mv $@.tmp $@
+
+$(OBJS): $(PRODUCTION_COMPILE_SIGNATURE)
+$(TARGET): $(PRODUCTION_LINK_SIGNATURE)
 
 $(TARGET): $(OBJS)
 	@echo ":: Linking $@"
@@ -1460,6 +1556,235 @@ $(SOURCE_INSTALL_CHARACTERIZATION_TEST_TARGET): | check-source-install-character
 $(UPGRADE_BASELINE_METADATA_TEST_TARGET): | check-upgrade-baseline-metadata-link-firewall
 
 -include $(ALL_HEAVY_DEPS)
+
+# Issue #403: direct compile/link test binaries keep their existing source,
+# fake/stub, include, and library profiles. Each target owns compiler-generated
+# dependency metadata and signatures without sharing objects across profiles.
+DIRECT_COMPILE_ARGS = $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS)
+DIRECT_LIBALPM_COMPILE_ARGS = \
+	$(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS)
+comma := ,
+GC_SECTIONS_LINK_ARG := -Wl$(comma)--gc-sections
+WRAP_GETEUID_LINK_ARG := -Wl$(comma)--wrap=geteuid
+
+NON_HEAVY_TARGETS := \
+	$(APPLICATION_IDENTITY_TEST_TARGET) \
+	$(LOCALIZATION_TEST_TARGET) \
+	$(LOCALIZATION_MISSING_CATALOG_TEST_TARGET) \
+	$(XDG_PATHS_TEST_TARGET) \
+	$(XDG_DIRECTORY_SAFETY_TEST_TARGET) \
+	$(XDG_STATE_LOG_TEST_TARGET) \
+	$(TRUSTED_CACHE_TEST_TARGET) \
+	$(ROOT_EXECUTION_IDENTITY_TEST_TARGET) \
+	$(AUR_RPC_ENVELOPE_VALIDATION_TEST_TARGET) \
+	$(APP_CONFIG_MODULE_TEST_TARGET) \
+	$(PROVIDER_SELECTION_TEST_TARGET) \
+	$(ROOT_PACKAGE_CANDIDATE_TEST_TARGET) \
+	$(ROOT_PACKAGE_SEARCH_TEST_TARGET) \
+	$(ROOT_PACKAGE_SELECTION_TEST_TARGET) \
+	$(ROOT_PACKAGE_ROUTE_PROJECTION_TEST_TARGET) \
+	$(LOCAL_PACKAGE_METADATA_TEST_TARGET) \
+	$(LOCAL_SOURCE_ROOT_TEST_TARGET) \
+	$(LOCAL_DEPENDENCY_PLAN_PROJECTION_TEST_TARGET) \
+	$(LOCAL_SOURCE_WORKSPACE_TEST_TARGET) \
+	$(LOCAL_SOURCE_BUILD_TEST_TARGET) \
+	$(USER_CONFIG_MODULE_TEST_TARGET) \
+	$(PACKAGE_IDENTIFIER_TEST_TARGET) \
+	$(SHELL_WORDS_TEST_TARGET) \
+	$(SOURCE_ENVIRONMENT_TEST_TARGET) \
+	$(ARTIFACT_WORKSPACE_TEST_TARGET) \
+	$(MULTIPLE_ARTIFACT_WORKSPACE_TEST_TARGET) \
+	$(ARTIFACT_IDENTITY_TEST_TARGET) \
+	$(MULTIPLE_ARTIFACT_IDENTITY_TEST_TARGET) \
+	$(PACKAGE_BASE_ARTIFACT_INSTALL_PLAN_TEST_TARGET) \
+	$(ARTIFACT_INSTALL_EXECUTOR_TEST_TARGET) \
+	$(PACKAGE_BASE_ARTIFACT_INSTALL_EXECUTOR_TEST_TARGET) \
+	$(SEPARATED_SOURCE_BUILD_TEST_TARGET) \
+	$(SEPARATED_PACKAGE_BASE_SOURCE_BUILD_TEST_TARGET) \
+	$(PRODUCTION_SOURCE_BUILD_TEST_TARGET) \
+	$(PROCESS_CAPTURE_TEST_TARGET) \
+	$(PROCESS_STDIN_FD_TEST_TARGET) \
+	$(AUR_UPDATE_PLAN_TEST_TARGET) \
+	$(UPGRADE_ALL_PLAN_TEST_TARGET) \
+	$(SYSTEM_SOURCE_UPGRADE_TEST_TARGET) \
+	$(AUR_UPDATE_QUERY_TEST_TARGET) \
+	$(AUR_UPDATE_EXECUTION_PREFLIGHT_TEST_TARGET) \
+	$(AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION_TEST_TARGET) \
+	$(AUR_UPDATE_EXECUTION_PREPARATION_TEST_TARGET) \
+	$(AUR_UPDATE_EXECUTION_PREPARATION_INTEGRATION_TEST_TARGET) \
+	$(AUR_UPDATE_EXECUTION_RUNNER_TEST_TARGET) \
+	$(AUR_UPDATE_OPERATION_RESULT_TEST_TARGET) \
+	$(FILTERED_AUR_UPDATE_OPERATION_TEST_TARGET) \
+	$(UPGRADE_ALL_OPERATION_TEST_TARGET) \
+	$(DEPENDENCY_PLAN_MODEL_TEST_TARGET) \
+	$(BUILD_PLAN_ARTIFACT_TARGET_PROJECTION_TEST_TARGET) \
+	$(UNIFIED_PLAN_OBSERVATION_TEST_TARGET) \
+	$(UNIFIED_PLAN_PROJECTION_TEST_TARGET) \
+	$(UNIFIED_PLAN_RENDERER_TEST_TARGET) \
+	$(REPOSITORY_QUERY_TEST_TARGET) \
+	$(ARTIFACT_INSTALL_PLAN_TEST_TARGET) \
+	$(ARTIFACT_SELECTION_MODEL_TEST_TARGET) \
+	$(ARTIFACT_IDENTITY_SELECTION_TEST_TARGET) \
+	$(PACKAGE_METADATA_TEST_TARGET) \
+	$(PROVIDER_INSTALLED_STATE_TEST_TARGET) \
+	$(DEPENDENCY_CONSTRAINT_TEST_TARGET) \
+	$(PACKAGE_CONSTRAINT_METADATA_TEST_TARGET) \
+	$(AUR_CONSTRAINT_METADATA_TEST_TARGET) \
+	$(PACKAGE_METADATA_INTEGRATION_TEST_TARGET)
+
+NON_HEAVY_TRACKED_TARGETS :=
+NON_HEAVY_DEPFILES :=
+
+# $(1): profile prefix
+# $(2): preprocessor/compiler arguments
+# $(3): source files read by the dependency scanner
+# $(4): link arguments placed before source/link inputs
+# $(5): link arguments placed after source/link inputs and before the output
+# $(6): link arguments placed after the output
+# $(7): optional build inputs when they differ from $(3)
+define define_non_heavy_test_profile
+$(1)_DIRECT_METADATA_DIR := $(BUILD_DIR)/tests/dep/$(notdir $($(1)_TEST_TARGET))
+$(1)_DIRECT_DEPFILE := $$($(1)_DIRECT_METADATA_DIR)/dependencies.d
+$(1)_DIRECT_COMPILE_SIGNATURE := $$($(1)_DIRECT_METADATA_DIR)/compile.signature
+$(1)_DIRECT_LINK_SIGNATURE := $$($(1)_DIRECT_METADATA_DIR)/link.signature
+$(1)_DIRECT_COMPILE_ARGS := $(strip $(2))
+$(1)_DIRECT_SRCS := $(strip $(3))
+$(1)_DIRECT_PRE_LINK_ARGS := $(strip $(4))
+$(1)_DIRECT_PRE_OUTPUT_ARGS := $(strip $(5))
+$(1)_DIRECT_LINK_ARGS := $(strip $(6))
+$(1)_DIRECT_BUILD_INPUTS := $(if $(strip $(7)),$(strip $(7)),$(strip $(3)))
+NON_HEAVY_TRACKED_TARGETS += $$($(1)_TEST_TARGET)
+NON_HEAVY_DEPFILES += $$($(1)_DIRECT_DEPFILE)
+
+$$($(1)_DIRECT_COMPILE_SIGNATURE): FORCE
+	@mkdir -p $$(@D)
+	@printf '%s\n' \
+		'TARGET=$$($(1)_TEST_TARGET)' \
+		'CXX=$$(CXX)' \
+		'COMPILE_ARGS=$$($(1)_DIRECT_COMPILE_ARGS)' \
+		'SOURCES=$$($(1)_DIRECT_SRCS)' \
+		> $$@.tmp
+	@cmp -s $$@.tmp $$@ && rm -f $$@.tmp || mv $$@.tmp $$@
+
+$$($(1)_DIRECT_LINK_SIGNATURE): FORCE
+	@mkdir -p $$(@D)
+	@printf '%s\n' \
+		'TARGET=$$($(1)_TEST_TARGET)' \
+		'CXX=$$(CXX)' \
+		'PRE_LINK_ARGS=$$($(1)_DIRECT_PRE_LINK_ARGS)' \
+		'PRE_OUTPUT_ARGS=$$($(1)_DIRECT_PRE_OUTPUT_ARGS)' \
+		'LINK_ARGS=$$($(1)_DIRECT_LINK_ARGS)' \
+		'BUILD_INPUTS=$$($(1)_DIRECT_BUILD_INPUTS)' \
+		> $$@.tmp
+	@cmp -s $$@.tmp $$@ && rm -f $$@.tmp || mv $$@.tmp $$@
+
+$$($(1)_DIRECT_DEPFILE):
+	@mkdir -p $$(@D)
+	@: > $$@
+
+$$($(1)_TEST_TARGET): \
+		$$($(1)_DIRECT_DEPFILE) \
+		$$($(1)_DIRECT_COMPILE_SIGNATURE) \
+		$$($(1)_DIRECT_LINK_SIGNATURE)
+endef
+
+define compile_non_heavy_test
+@set -eu; \
+	tmp_file='$($(1)_DIRECT_DEPFILE).tmp'; \
+	rm -f "$$tmp_file"; \
+	trap 'rm -f "$$tmp_file"' EXIT HUP INT TERM; \
+	$(CXX) $($(1)_DIRECT_COMPILE_ARGS) \
+		-MM -MP -MT "$($(1)_TEST_TARGET)" \
+		$($(1)_DIRECT_SRCS) > "$$tmp_file"; \
+	if ! cmp -s "$$tmp_file" "$($(1)_DIRECT_DEPFILE)"; then \
+		mv "$$tmp_file" "$($(1)_DIRECT_DEPFILE)"; \
+	fi
+$(CXX) $($(1)_DIRECT_COMPILE_ARGS) \
+	$($(1)_DIRECT_PRE_LINK_ARGS) $($(1)_DIRECT_BUILD_INPUTS) \
+	$($(1)_DIRECT_PRE_OUTPUT_ARGS) -o $@ $($(1)_DIRECT_LINK_ARGS)
+endef
+
+$(eval $(call define_non_heavy_test_profile,APPLICATION_IDENTITY,$(DIRECT_COMPILE_ARGS) -I$(SRC_DIR),$(APPLICATION_IDENTITY_TEST_SRCS)))
+$(eval $(call define_non_heavy_test_profile,LOCALIZATION,$(CPPFLAGS) $(CXXFLAGS) $(BASE_CXXFLAGS) -DMOGUET_LOCALE_DIRECTORY=\"$(MOGUET_TEST_CATALOG_DIR)\" -I$(SRC_DIR),$(LOCALIZATION_TEST_SRCS)))
+$(eval $(call define_non_heavy_test_profile,LOCALIZATION_MISSING_CATALOG,$(CPPFLAGS) $(CXXFLAGS) $(BASE_CXXFLAGS) -DMOGUET_LOCALE_DIRECTORY=\"$(LOCALIZATION_MISSING_CATALOG_DIR)\" -I$(SRC_DIR),$(LOCALIZATION_TEST_SRCS)))
+$(eval $(call define_non_heavy_test_profile,XDG_PATHS,$(DIRECT_COMPILE_ARGS) -I$(SRC_DIR),$(XDG_PATHS_TEST_SRCS)))
+$(eval $(call define_non_heavy_test_profile,XDG_DIRECTORY_SAFETY,$(DIRECT_COMPILE_ARGS) -DMOGUET_TEST_XDG_DIRECTORY_SAFETY_HOOKS -I$(SRC_DIR),$(XDG_DIRECTORY_SAFETY_TEST_SRCS)))
+$(eval $(call define_non_heavy_test_profile,XDG_STATE_LOG,$(DIRECT_COMPILE_ARGS) -DMOGUET_TEST_XDG_STATE_LOG_HOOKS -I$(SRC_DIR),$(XDG_STATE_LOG_TEST_SRCS),$(LDFLAGS)))
+$(eval $(call define_non_heavy_test_profile,TRUSTED_CACHE,$(DIRECT_COMPILE_ARGS) -DMOGUET_ENABLE_TRUSTED_CACHE_TEST_HOOKS -I$(SRC_DIR),$(TRUSTED_CACHE_TEST_SRCS)))
+$(eval $(call define_non_heavy_test_profile,ROOT_EXECUTION_IDENTITY,$(DIRECT_COMPILE_ARGS),$(ROOT_EXECUTION_IDENTITY_DIRECT_SRCS),$(LDFLAGS),$(WRAP_GETEUID_LINK_ARG),$(MY_LDLIBS) $(LIBALPM_LDLIBS),$(OBJS) $(ROOT_EXECUTION_IDENTITY_DIRECT_SRCS)))
+$(eval $(call define_non_heavy_test_profile,AUR_RPC_ENVELOPE_VALIDATION,$(DIRECT_LIBALPM_COMPILE_ARGS) -DMOGUET_ENABLE_TEST_OVERRIDES -DMOGUET_ENABLE_AUR_RPC_TEST_HOOKS -I$(SRC_DIR) -Itests/stubs/package-metadata,$(AUR_RPC_ENVELOPE_VALIDATION_TEST_SRCS),,,$(MY_LDLIBS)))
+$(eval $(call define_non_heavy_test_profile,APP_CONFIG_MODULE,$(DIRECT_COMPILE_ARGS) -I$(SRC_DIR),$(APP_CONFIG_MODULE_TEST_SRCS)))
+$(eval $(call define_non_heavy_test_profile,PROVIDER_SELECTION,$(DIRECT_LIBALPM_COMPILE_ARGS) -I$(SRC_DIR) -Itests/stubs/package-metadata,$(PROVIDER_SELECTION_TEST_SRCS)))
+$(eval $(call define_non_heavy_test_profile,ROOT_PACKAGE_CANDIDATE,$(DIRECT_COMPILE_ARGS) -I$(SRC_DIR),$(ROOT_PACKAGE_CANDIDATE_TEST_SRCS)))
+$(eval $(call define_non_heavy_test_profile,ROOT_PACKAGE_SEARCH,$(DIRECT_COMPILE_ARGS) -I$(SRC_DIR) -Itests,$(ROOT_PACKAGE_SEARCH_TEST_SRCS)))
+$(eval $(call define_non_heavy_test_profile,ROOT_PACKAGE_SELECTION,$(DIRECT_COMPILE_ARGS) -I$(SRC_DIR),$(ROOT_PACKAGE_SELECTION_TEST_SRCS)))
+$(eval $(call define_non_heavy_test_profile,ROOT_PACKAGE_ROUTE_PROJECTION,$(DIRECT_COMPILE_ARGS) -I$(SRC_DIR),$(ROOT_PACKAGE_ROUTE_PROJECTION_TEST_SRCS)))
+$(eval $(call define_non_heavy_test_profile,LOCAL_PACKAGE_METADATA,$(DIRECT_COMPILE_ARGS) -I$(SRC_DIR),$(LOCAL_PACKAGE_METADATA_TEST_SRCS)))
+$(eval $(call define_non_heavy_test_profile,LOCAL_SOURCE_ROOT,$(DIRECT_COMPILE_ARGS) -DMOGUET_ENABLE_LOCAL_SOURCE_ROOT_TEST_HOOKS -I$(SRC_DIR),$(LOCAL_SOURCE_ROOT_TEST_SRCS)))
+$(eval $(call define_non_heavy_test_profile,LOCAL_DEPENDENCY_PLAN_PROJECTION,$(DIRECT_LIBALPM_COMPILE_ARGS) -I$(SRC_DIR) -Itests,$(LOCAL_DEPENDENCY_PLAN_PROJECTION_TEST_SRCS),,,$(LIBALPM_LDLIBS)))
+$(eval $(call define_non_heavy_test_profile,LOCAL_SOURCE_WORKSPACE,$(DIRECT_COMPILE_ARGS) -DMOGUET_ENABLE_LOCAL_SOURCE_WORKSPACE_TEST_HOOKS -I$(SRC_DIR) -Itests,$(LOCAL_SOURCE_WORKSPACE_TEST_SRCS)))
+$(eval $(call define_non_heavy_test_profile,LOCAL_SOURCE_BUILD,$(DIRECT_LIBALPM_COMPILE_ARGS) -DMOGUET_ENABLE_ARTIFACT_WORKSPACE_TEST_HOOKS -DMOGUET_ENABLE_LOCAL_SOURCE_WORKSPACE_TEST_HOOKS -I$(SRC_DIR) -Itests,$(LOCAL_SOURCE_BUILD_TEST_SRCS),,,$(LIBALPM_LDLIBS)))
+$(eval $(call define_non_heavy_test_profile,USER_CONFIG_MODULE,$(DIRECT_COMPILE_ARGS) -I$(SRC_DIR),$(USER_CONFIG_MODULE_TEST_SRCS)))
+$(eval $(call define_non_heavy_test_profile,PACKAGE_IDENTIFIER,$(DIRECT_COMPILE_ARGS) -I$(SRC_DIR),$(PACKAGE_IDENTIFIER_TEST_SRCS)))
+$(eval $(call define_non_heavy_test_profile,SHELL_WORDS,$(DIRECT_COMPILE_ARGS) -I$(SRC_DIR),$(SHELL_WORDS_TEST_SRCS)))
+$(eval $(call define_non_heavy_test_profile,SOURCE_ENVIRONMENT,$(DIRECT_COMPILE_ARGS) -DMOGUET_ENABLE_TEST_OVERRIDES -DMOGUET_ENABLE_SOURCE_PREFERENCE_TEST_HOOKS -I$(SRC_DIR),$(SOURCE_ENVIRONMENT_TEST_SRCS)))
+$(eval $(call define_non_heavy_test_profile,ARTIFACT_WORKSPACE,$(DIRECT_COMPILE_ARGS) -DMOGUET_ENABLE_ARTIFACT_WORKSPACE_TEST_HOOKS -DMOGUET_ENABLE_TRUSTED_CACHE_TEST_HOOKS -I$(SRC_DIR),$(ARTIFACT_WORKSPACE_TEST_SRCS)))
+$(eval $(call define_non_heavy_test_profile,MULTIPLE_ARTIFACT_WORKSPACE,$(DIRECT_COMPILE_ARGS) -DMOGUET_ENABLE_ARTIFACT_WORKSPACE_TEST_HOOKS -DMOGUET_ENABLE_TRUSTED_CACHE_TEST_HOOKS -I$(SRC_DIR),$(MULTIPLE_ARTIFACT_WORKSPACE_TEST_SRCS)))
+$(eval $(call define_non_heavy_test_profile,ARTIFACT_IDENTITY,$(DIRECT_COMPILE_ARGS) -I$(SRC_DIR),$(ARTIFACT_IDENTITY_TEST_SRCS)))
+$(eval $(call define_non_heavy_test_profile,MULTIPLE_ARTIFACT_IDENTITY,$(DIRECT_COMPILE_ARGS) -I$(SRC_DIR),$(MULTIPLE_ARTIFACT_IDENTITY_TEST_SRCS)))
+$(eval $(call define_non_heavy_test_profile,PACKAGE_BASE_ARTIFACT_INSTALL_PLAN,$(DIRECT_COMPILE_ARGS) -I$(SRC_DIR),$(PACKAGE_BASE_ARTIFACT_INSTALL_PLAN_TEST_SRCS)))
+$(eval $(call define_non_heavy_test_profile,ARTIFACT_INSTALL_EXECUTOR,$(DIRECT_LIBALPM_COMPILE_ARGS) -I$(SRC_DIR) -Itests/stubs/package-metadata,$(ARTIFACT_INSTALL_EXECUTOR_TEST_SRCS)))
+$(eval $(call define_non_heavy_test_profile,PACKAGE_BASE_ARTIFACT_INSTALL_EXECUTOR,$(DIRECT_LIBALPM_COMPILE_ARGS) -DMOGUET_ENABLE_PACKAGE_BASE_ARTIFACT_INSTALL_PLAN_TEST_HOOKS -I$(SRC_DIR) -Itests/stubs/package-metadata,$(PACKAGE_BASE_ARTIFACT_INSTALL_EXECUTOR_TEST_SRCS)))
+$(eval $(call define_non_heavy_test_profile,SEPARATED_SOURCE_BUILD,$(DIRECT_LIBALPM_COMPILE_ARGS) -DMOGUET_ENABLE_SEPARATED_SOURCE_BUILD_TEST_HOOKS -I$(SRC_DIR) -Itests/stubs/package-metadata,$(SEPARATED_SOURCE_BUILD_TEST_SRCS)))
+$(eval $(call define_non_heavy_test_profile,SEPARATED_PACKAGE_BASE_SOURCE_BUILD,$(DIRECT_LIBALPM_COMPILE_ARGS) -DMOGUET_ENABLE_SEPARATED_PACKAGE_BASE_SOURCE_BUILD_TEST_HOOKS -I$(SRC_DIR) -Itests/stubs/package-metadata,$(SEPARATED_PACKAGE_BASE_SOURCE_BUILD_TEST_SRCS)))
+$(eval $(call define_non_heavy_test_profile,PRODUCTION_SOURCE_BUILD,$(DIRECT_LIBALPM_COMPILE_ARGS) -DMOGUET_ENABLE_SEPARATED_SOURCE_BUILD_TEST_HOOKS -DMOGUET_ENABLE_SEPARATED_PACKAGE_BASE_SOURCE_BUILD_TEST_HOOKS -DMOGUET_ENABLE_TEST_OVERRIDES -I$(SRC_DIR) -Itests -Itests/stubs/package-metadata,$(PRODUCTION_SOURCE_BUILD_TEST_SRCS),,,$(MY_LDLIBS)))
+$(eval $(call define_non_heavy_test_profile,PROCESS_CAPTURE,$(DIRECT_COMPILE_ARGS) -I$(SRC_DIR),$(PROCESS_CAPTURE_TEST_SRCS)))
+$(eval $(call define_non_heavy_test_profile,PROCESS_STDIN_FD,$(DIRECT_COMPILE_ARGS) -I$(SRC_DIR),$(PROCESS_STDIN_FD_TEST_SRCS)))
+$(eval $(call define_non_heavy_test_profile,AUR_UPDATE_PLAN,$(DIRECT_COMPILE_ARGS) -I$(SRC_DIR),$(AUR_UPDATE_PLAN_TEST_SRCS)))
+$(eval $(call define_non_heavy_test_profile,UPGRADE_ALL_PLAN,$(DIRECT_COMPILE_ARGS) -I$(SRC_DIR),$(UPGRADE_ALL_PLAN_TEST_SRCS)))
+$(eval $(call define_non_heavy_test_profile,SYSTEM_SOURCE_UPGRADE,$(DIRECT_COMPILE_ARGS) -ffunction-sections -fdata-sections -DMOGUET_ENABLE_SYSTEM_SOURCE_UPGRADE_TEST_HOOKS -I$(SRC_DIR),$(SYSTEM_SOURCE_UPGRADE_TEST_SRCS),,$(GC_SECTIONS_LINK_ARG)))
+$(eval $(call define_non_heavy_test_profile,AUR_UPDATE_QUERY,$(DIRECT_COMPILE_ARGS) -I$(SRC_DIR),$(AUR_UPDATE_QUERY_TEST_SRCS)))
+$(eval $(call define_non_heavy_test_profile,AUR_UPDATE_EXECUTION_PREFLIGHT,$(DIRECT_LIBALPM_COMPILE_ARGS) -I$(SRC_DIR),$(AUR_UPDATE_EXECUTION_PREFLIGHT_TEST_SRCS),,,$(LIBALPM_LDLIBS)))
+$(eval $(call define_non_heavy_test_profile,AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION,$(DIRECT_LIBALPM_COMPILE_ARGS) -I$(SRC_DIR) -Itests/stubs/package-metadata -Itests/stubs/aur-update-execution-preflight-integration,$(AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION_TEST_SRCS)))
+$(eval $(call define_non_heavy_test_profile,AUR_UPDATE_EXECUTION_PREPARATION,$(DIRECT_LIBALPM_COMPILE_ARGS) -DMOGUET_ENABLE_AUR_UPDATE_EXECUTION_PREPARATION_TEST_HOOKS -I$(SRC_DIR),$(AUR_UPDATE_EXECUTION_PREPARATION_TEST_SRCS),,,$(LIBALPM_LDLIBS)))
+$(eval $(call define_non_heavy_test_profile,AUR_UPDATE_EXECUTION_PREPARATION_INTEGRATION,$(DIRECT_LIBALPM_COMPILE_ARGS) -DMOGUET_ENABLE_TEST_OVERRIDES -DMOGUET_ENABLE_AUR_UPDATE_EXECUTION_PREPARATION_TEST_HOOKS -DMOGUET_ENABLE_SOURCE_PREFERENCE_TEST_HOOKS -I$(SRC_DIR),$(AUR_UPDATE_EXECUTION_PREPARATION_INTEGRATION_TEST_SRCS),,,$(LIBALPM_LDLIBS)))
+$(eval $(call define_non_heavy_test_profile,AUR_UPDATE_EXECUTION_RUNNER,$(DIRECT_LIBALPM_COMPILE_ARGS) -DMOGUET_ENABLE_AUR_UPDATE_EXECUTION_PREPARATION_TEST_HOOKS -DMOGUET_ENABLE_AUR_UPDATE_EXECUTION_RUNNER_TEST_HOOKS -I$(SRC_DIR),$(AUR_UPDATE_EXECUTION_RUNNER_TEST_SRCS),,,$(LIBALPM_LDLIBS)))
+$(eval $(call define_non_heavy_test_profile,AUR_UPDATE_OPERATION_RESULT,$(DIRECT_LIBALPM_COMPILE_ARGS) -I$(SRC_DIR),$(AUR_UPDATE_OPERATION_RESULT_TEST_SRCS),,,$(LIBALPM_LDLIBS)))
+$(eval $(call define_non_heavy_test_profile,FILTERED_AUR_UPDATE_OPERATION,$(DIRECT_LIBALPM_COMPILE_ARGS) -DMOGUET_ENABLE_AUR_UPDATE_EXECUTION_PREPARATION_TEST_HOOKS -DMOGUET_ENABLE_AUR_UPDATE_EXECUTION_RUNNER_TEST_HOOKS -I$(SRC_DIR),$(FILTERED_AUR_UPDATE_OPERATION_TEST_SRCS),,,$(LIBALPM_LDLIBS)))
+$(eval $(call define_non_heavy_test_profile,UPGRADE_ALL_OPERATION,$(DIRECT_LIBALPM_COMPILE_ARGS) -ffunction-sections -fdata-sections -DMOGUET_ENABLE_UPGRADE_ALL_OPERATION_TEST_HOOKS -DMOGUET_ENABLE_SYSTEM_SOURCE_UPGRADE_TEST_HOOKS -I$(SRC_DIR),$(UPGRADE_ALL_OPERATION_TEST_SRCS),,$(GC_SECTIONS_LINK_ARG),$(LIBALPM_LDLIBS)))
+$(eval $(call define_non_heavy_test_profile,DEPENDENCY_PLAN_MODEL,$(DIRECT_LIBALPM_COMPILE_ARGS) -I$(SRC_DIR),$(DEPENDENCY_PLAN_MODEL_TEST_SRCS),,,$(LIBALPM_LDLIBS)))
+$(eval $(call define_non_heavy_test_profile,BUILD_PLAN_ARTIFACT_TARGET_PROJECTION,$(DIRECT_LIBALPM_COMPILE_ARGS) -I$(SRC_DIR),$(BUILD_PLAN_ARTIFACT_TARGET_PROJECTION_TEST_SRCS),,,$(LIBALPM_LDLIBS)))
+$(eval $(call define_non_heavy_test_profile,UNIFIED_PLAN_OBSERVATION,$(DIRECT_LIBALPM_COMPILE_ARGS) -I$(SRC_DIR),$(UNIFIED_PLAN_OBSERVATION_TEST_SRCS),,,$(LIBALPM_LDLIBS)))
+$(eval $(call define_non_heavy_test_profile,UNIFIED_PLAN_PROJECTION,$(DIRECT_LIBALPM_COMPILE_ARGS) -I$(SRC_DIR) -Itests,$(UNIFIED_PLAN_PROJECTION_TEST_SRCS),,,$(LIBALPM_LDLIBS)))
+$(eval $(call define_non_heavy_test_profile,UNIFIED_PLAN_RENDERER,$(DIRECT_LIBALPM_COMPILE_ARGS) -I$(SRC_DIR) -Itests,$(UNIFIED_PLAN_RENDERER_TEST_SRCS),,,$(LIBALPM_LDLIBS)))
+$(eval $(call define_non_heavy_test_profile,REPOSITORY_QUERY,$(DIRECT_LIBALPM_COMPILE_ARGS) -I$(SRC_DIR) -Itests/stubs/package-metadata,$(REPOSITORY_QUERY_TEST_SRCS)))
+$(eval $(call define_non_heavy_test_profile,ARTIFACT_INSTALL_PLAN,$(DIRECT_COMPILE_ARGS) -I$(SRC_DIR),$(ARTIFACT_INSTALL_PLAN_TEST_SRCS)))
+$(eval $(call define_non_heavy_test_profile,ARTIFACT_SELECTION_MODEL,$(DIRECT_COMPILE_ARGS) -I$(SRC_DIR),$(ARTIFACT_SELECTION_MODEL_TEST_SRCS)))
+$(eval $(call define_non_heavy_test_profile,ARTIFACT_IDENTITY_SELECTION,$(DIRECT_COMPILE_ARGS) -DMOGUET_ENABLE_ARTIFACT_IDENTITY_TEST_HOOKS -I$(SRC_DIR),$(ARTIFACT_IDENTITY_SELECTION_TEST_SRCS)))
+$(eval $(call define_non_heavy_test_profile,PACKAGE_METADATA,$(DIRECT_LIBALPM_COMPILE_ARGS) -I$(SRC_DIR) -Itests/stubs/package-metadata,$(PACKAGE_METADATA_TEST_SRCS)))
+$(eval $(call define_non_heavy_test_profile,PROVIDER_INSTALLED_STATE,$(DIRECT_LIBALPM_COMPILE_ARGS) -I$(SRC_DIR) -Itests/stubs/package-metadata,$(PROVIDER_INSTALLED_STATE_TEST_SRCS)))
+$(eval $(call define_non_heavy_test_profile,DEPENDENCY_CONSTRAINT,$(DIRECT_LIBALPM_COMPILE_ARGS) -I$(SRC_DIR),$(DEPENDENCY_CONSTRAINT_TEST_SRCS),,,$(LIBALPM_LDLIBS)))
+$(eval $(call define_non_heavy_test_profile,PACKAGE_CONSTRAINT_METADATA,$(DIRECT_LIBALPM_COMPILE_ARGS) -I$(SRC_DIR) -Itests/stubs/package-metadata,$(PACKAGE_CONSTRAINT_METADATA_TEST_SRCS)))
+$(eval $(call define_non_heavy_test_profile,AUR_CONSTRAINT_METADATA,$(DIRECT_LIBALPM_COMPILE_ARGS) -I$(SRC_DIR),$(AUR_CONSTRAINT_METADATA_TEST_SRCS),,,$(LIBALPM_LDLIBS)))
+$(eval $(call define_non_heavy_test_profile,PACKAGE_METADATA_INTEGRATION,$(DIRECT_LIBALPM_COMPILE_ARGS) -I$(SRC_DIR),$(PACKAGE_METADATA_INTEGRATION_TEST_SRCS),,,$(LIBALPM_LDLIBS)))
+
+NON_HEAVY_MISSING_PROFILES := \
+	$(filter-out $(NON_HEAVY_TRACKED_TARGETS),$(NON_HEAVY_TARGETS))
+NON_HEAVY_UNEXPECTED_PROFILES := \
+	$(filter-out $(NON_HEAVY_TARGETS),$(NON_HEAVY_TRACKED_TARGETS))
+ifneq ($(strip $(NON_HEAVY_MISSING_PROFILES)),)
+$(error missing non-heavy test build profiles: $(NON_HEAVY_MISSING_PROFILES))
+endif
+ifneq ($(strip $(NON_HEAVY_UNEXPECTED_PROFILES)),)
+$(error unexpected non-heavy test build profiles: $(NON_HEAVY_UNEXPECTED_PROFILES))
+endif
+ifneq ($(words $(NON_HEAVY_TRACKED_TARGETS)),$(words $(sort $(NON_HEAVY_TRACKED_TARGETS))))
+$(error duplicate non-heavy test build profiles)
+endif
+
+ifeq ($(filter clean,$(MAKECMDGOALS)),)
+-include $(wildcard $(NON_HEAVY_DEPFILES))
+endif
 
 $(MANPAGE_EN): $(MANPAGE_EN_IN) $(VERSION_FILE)
 	@echo ":: Generating $@ (v$(VERSION))"
@@ -1560,31 +1885,20 @@ clean:
 	rm -rf $(BUILD_DIR)
 	rm -f $(TARGET)
 
-$(APPLICATION_IDENTITY_TEST_TARGET): tests/application_identity_test.cpp $(SRC_DIR)/application_identity.hpp $(VERSION_FILE)
+$(APPLICATION_IDENTITY_TEST_TARGET): $(APPLICATION_IDENTITY_TEST_SRCS) $(SRC_DIR)/application_identity.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling application identity test binary"
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-I$(SRC_DIR) \
-		tests/application_identity_test.cpp \
-		-o $@
+	$(call compile_non_heavy_test,APPLICATION_IDENTITY)
 
-$(LOCALIZATION_TEST_TARGET): tests/localization_test.cpp $(SRC_DIR)/localization.cpp $(SRC_DIR)/localization.hpp $(SRC_DIR)/application_identity.hpp $(VERSION_FILE)
+$(LOCALIZATION_TEST_TARGET): $(LOCALIZATION_TEST_SRCS) $(SRC_DIR)/localization.hpp $(SRC_DIR)/application_identity.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling localization test binary"
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(BASE_CXXFLAGS) \
-		-DMOGUET_LOCALE_DIRECTORY=\"$(MOGUET_TEST_CATALOG_DIR)\" \
-		-I$(SRC_DIR) \
-		tests/localization_test.cpp $(SRC_DIR)/localization.cpp \
-		-o $@
+	$(call compile_non_heavy_test,LOCALIZATION)
 
-$(LOCALIZATION_MISSING_CATALOG_TEST_TARGET): tests/localization_test.cpp $(SRC_DIR)/localization.cpp $(SRC_DIR)/localization.hpp $(SRC_DIR)/application_identity.hpp $(VERSION_FILE)
+$(LOCALIZATION_MISSING_CATALOG_TEST_TARGET): $(LOCALIZATION_TEST_SRCS) $(SRC_DIR)/localization.hpp $(SRC_DIR)/application_identity.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling missing-catalog localization test binary"
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(BASE_CXXFLAGS) \
-		-DMOGUET_LOCALE_DIRECTORY=\"$(LOCALIZATION_MISSING_CATALOG_DIR)\" \
-		-I$(SRC_DIR) \
-		tests/localization_test.cpp $(SRC_DIR)/localization.cpp \
-		-o $@
+	$(call compile_non_heavy_test,LOCALIZATION_MISSING_CATALOG)
 
 $(MOGUET_TEST_ZZ_MO): $(MOGUET_TEST_ZZ_PO)
 	@mkdir -p $(dir $@)
@@ -1608,139 +1922,80 @@ $(MOGUET_TEST_BROKEN_MO): $(LOCALIZATION_INVALID_FORMAT_PO)
 			--output-file="$$tmp_file" "$<"; \
 		mv "$$tmp_file" "$@"
 
-$(XDG_PATHS_TEST_TARGET): tests/xdg_paths_test.cpp $(SRC_DIR)/xdg_paths.cpp $(SRC_DIR)/xdg_paths.hpp $(SRC_DIR)/application_identity.hpp $(SRC_DIR)/localization.hpp $(VERSION_FILE)
+$(XDG_PATHS_TEST_TARGET): $(XDG_PATHS_TEST_SRCS) $(SRC_DIR)/xdg_paths.hpp $(SRC_DIR)/application_identity.hpp $(SRC_DIR)/localization.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling XDG paths test binary"
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-I$(SRC_DIR) \
-		tests/xdg_paths_test.cpp \
-		$(SRC_DIR)/xdg_paths.cpp \
-		-o $@
+	$(call compile_non_heavy_test,XDG_PATHS)
 
-$(XDG_DIRECTORY_SAFETY_TEST_TARGET): tests/xdg_directory_safety_test.cpp $(SRC_DIR)/xdg_directory_safety.cpp $(SRC_DIR)/xdg_directory_safety.hpp $(SRC_DIR)/xdg_paths.cpp $(SRC_DIR)/xdg_paths.hpp $(SRC_DIR)/application_identity.hpp $(SRC_DIR)/localization.hpp $(VERSION_FILE)
+$(XDG_DIRECTORY_SAFETY_TEST_TARGET): $(XDG_DIRECTORY_SAFETY_TEST_SRCS) $(SRC_DIR)/xdg_directory_safety.hpp $(SRC_DIR)/xdg_paths.hpp $(SRC_DIR)/application_identity.hpp $(SRC_DIR)/localization.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling XDG directory safety test binary"
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-DMOGUET_TEST_XDG_DIRECTORY_SAFETY_HOOKS \
-		-I$(SRC_DIR) \
-		tests/xdg_directory_safety_test.cpp \
-		$(SRC_DIR)/xdg_directory_safety.cpp \
-		$(SRC_DIR)/xdg_paths.cpp \
-		-o $@
+	$(call compile_non_heavy_test,XDG_DIRECTORY_SAFETY)
 
-$(XDG_STATE_LOG_TEST_TARGET): tests/xdg_state_log_test.cpp $(SRC_DIR)/xdg_state_log.cpp $(SRC_DIR)/xdg_state_log.hpp $(SRC_DIR)/xdg_directory_safety.cpp $(SRC_DIR)/xdg_directory_safety.hpp $(SRC_DIR)/xdg_paths.cpp $(SRC_DIR)/xdg_paths.hpp $(SRC_DIR)/logging.cpp $(SRC_DIR)/logging.hpp $(SRC_DIR)/application_identity.hpp $(SRC_DIR)/localization.hpp $(VERSION_FILE)
+$(XDG_STATE_LOG_TEST_TARGET): $(XDG_STATE_LOG_TEST_SRCS) $(SRC_DIR)/xdg_state_log.hpp $(SRC_DIR)/xdg_directory_safety.hpp $(SRC_DIR)/xdg_paths.hpp $(SRC_DIR)/logging.hpp $(SRC_DIR)/application_identity.hpp $(SRC_DIR)/localization.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling XDG state log test binary"
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) $(LDFLAGS) \
-		-DMOGUET_TEST_XDG_STATE_LOG_HOOKS \
-		-I$(SRC_DIR) \
-		tests/xdg_state_log_test.cpp \
-		$(SRC_DIR)/xdg_state_log.cpp \
-		$(SRC_DIR)/xdg_directory_safety.cpp \
-		$(SRC_DIR)/xdg_paths.cpp \
-		$(SRC_DIR)/logging.cpp \
-		-o $@
+	$(call compile_non_heavy_test,XDG_STATE_LOG)
 
-$(TRUSTED_CACHE_TEST_TARGET): tests/trusted_cache_test.cpp $(SRC_DIR)/trusted_cache.cpp $(SRC_DIR)/trusted_cache.hpp $(SRC_DIR)/xdg_directory_safety.cpp $(SRC_DIR)/xdg_directory_safety.hpp $(SRC_DIR)/xdg_paths.cpp $(SRC_DIR)/xdg_paths.hpp $(SRC_DIR)/logging.cpp $(SRC_DIR)/logging.hpp $(SRC_DIR)/localization.hpp $(VERSION_FILE)
+$(TRUSTED_CACHE_TEST_TARGET): $(TRUSTED_CACHE_TEST_SRCS) $(SRC_DIR)/trusted_cache.hpp $(SRC_DIR)/xdg_directory_safety.hpp $(SRC_DIR)/xdg_paths.hpp $(SRC_DIR)/logging.hpp $(SRC_DIR)/localization.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling trusted cache test binary"
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-DMOGUET_ENABLE_TRUSTED_CACHE_TEST_HOOKS \
-		-I$(SRC_DIR) \
-		tests/trusted_cache_test.cpp \
-		$(SRC_DIR)/trusted_cache.cpp \
-		$(SRC_DIR)/xdg_directory_safety.cpp \
-		$(SRC_DIR)/xdg_paths.cpp \
-		$(SRC_DIR)/logging.cpp \
-		-o $@
+	$(call compile_non_heavy_test,TRUSTED_CACHE)
 
-$(ROOT_EXECUTION_IDENTITY_TEST_TARGET): $(OBJS) tests/stubs/runtime-identity/geteuid_stub.cpp $(VERSION_FILE)
+$(ROOT_EXECUTION_IDENTITY_TEST_TARGET): $(OBJS) $(ROOT_EXECUTION_IDENTITY_DIRECT_SRCS) $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Linking root execution identity test binary"
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) $(LDFLAGS) \
-		$(OBJS) tests/stubs/runtime-identity/geteuid_stub.cpp \
-		-Wl,--wrap=geteuid -o $@ $(MY_LDLIBS) $(LIBALPM_LDLIBS)
+	$(call compile_non_heavy_test,ROOT_EXECUTION_IDENTITY)
 
 $(AUR_RPC_ENVELOPE_VALIDATION_TEST_TARGET): $(AUR_RPC_ENVELOPE_VALIDATION_TEST_SRCS) $(SRC_DIR)/aur_rpc.hpp $(SRC_DIR)/aur_constraint_metadata.hpp $(SRC_DIR)/dependency_constraint.hpp $(SRC_DIR)/dependency_provider.hpp $(SRC_DIR)/dependency_spec.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/logging.hpp $(SRC_DIR)/localization.hpp tests/stubs/package-metadata/alpm_stub.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling AUR RPC envelope validation test binary"
-	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -DMOGUET_ENABLE_TEST_OVERRIDES -DMOGUET_ENABLE_AUR_RPC_TEST_HOOKS -I$(SRC_DIR) -Itests/stubs/package-metadata $(AUR_RPC_ENVELOPE_VALIDATION_TEST_SRCS) -o $@ $(MY_LDLIBS)
+	$(call compile_non_heavy_test,AUR_RPC_ENVELOPE_VALIDATION)
 
-$(APP_CONFIG_MODULE_TEST_TARGET): tests/app_config_test.cpp $(SRC_DIR)/app_config.cpp $(SRC_DIR)/app_config.hpp $(SRC_DIR)/provider_selection.cpp $(SRC_DIR)/provider_selection.hpp $(SRC_DIR)/dependency_plan.hpp $(SRC_DIR)/dependency_provider.hpp $(SRC_DIR)/dependency_spec.cpp $(SRC_DIR)/dependency_spec.hpp $(SRC_DIR)/localization.cpp $(SRC_DIR)/localization.hpp $(SRC_DIR)/user_config.hpp $(VERSION_FILE)
+$(APP_CONFIG_MODULE_TEST_TARGET): $(APP_CONFIG_MODULE_TEST_SRCS) $(SRC_DIR)/app_config.hpp $(SRC_DIR)/provider_selection.hpp $(SRC_DIR)/dependency_plan.hpp $(SRC_DIR)/dependency_provider.hpp $(SRC_DIR)/dependency_spec.hpp $(SRC_DIR)/localization.hpp $(SRC_DIR)/user_config.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling app config module test binary"
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -I$(SRC_DIR) tests/app_config_test.cpp $(SRC_DIR)/app_config.cpp $(SRC_DIR)/provider_selection.cpp $(SRC_DIR)/dependency_spec.cpp $(SRC_DIR)/localization.cpp -o $@
-
-PROVIDER_SELECTION_TEST_SRCS := \
-	tests/provider_selection_test.cpp \
-	$(SRC_DIR)/provider_selection.cpp \
-	$(SRC_DIR)/dependency_constraint.cpp \
-	$(SRC_DIR)/provider_installed_state_presentation.cpp \
-	$(SRC_DIR)/provider_installed_state.cpp \
-	$(SRC_DIR)/package_metadata.cpp \
-	$(SRC_DIR)/package_identifier.cpp \
-	$(SRC_DIR)/shell_words.cpp \
-	$(SRC_DIR)/dependency_spec.cpp \
-	$(SRC_DIR)/localization.cpp \
-	tests/stubs/package-metadata/alpm_stub.cpp \
-	tests/stubs/package-metadata/process_stub.cpp
+	$(call compile_non_heavy_test,APP_CONFIG_MODULE)
 
 $(PROVIDER_SELECTION_TEST_TARGET): $(PROVIDER_SELECTION_TEST_SRCS) $(SRC_DIR)/provider_selection.hpp $(SRC_DIR)/provider_installed_state_presentation.hpp $(SRC_DIR)/provider_installed_state.hpp $(SRC_DIR)/package_metadata.hpp $(SRC_DIR)/dependency_plan.hpp $(SRC_DIR)/dependency_provider.hpp $(SRC_DIR)/dependency_spec.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/process.hpp $(SRC_DIR)/shell_words.hpp $(SRC_DIR)/localization.hpp tests/stubs/package-metadata/alpm_stub.hpp tests/stubs/package-metadata/process_stub.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling provider selection test binary"
-	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-I$(SRC_DIR) -Itests/stubs/package-metadata \
-		$(PROVIDER_SELECTION_TEST_SRCS) \
-		-o $@
+	$(call compile_non_heavy_test,PROVIDER_SELECTION)
 
 $(ROOT_PACKAGE_CANDIDATE_TEST_TARGET): $(ROOT_PACKAGE_CANDIDATE_TEST_SRCS) $(SRC_DIR)/root_package_candidate.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/localization.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling root package candidate model test binary"
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -I$(SRC_DIR) $(ROOT_PACKAGE_CANDIDATE_TEST_SRCS) -o $@
+	$(call compile_non_heavy_test,ROOT_PACKAGE_CANDIDATE)
 
 $(ROOT_PACKAGE_SEARCH_TEST_TARGET): $(ROOT_PACKAGE_SEARCH_TEST_SRCS) $(SRC_DIR)/root_package_search.hpp $(SRC_DIR)/root_package_candidate.hpp $(SRC_DIR)/package_metadata.hpp $(SRC_DIR)/aur_rpc.hpp $(SRC_DIR)/package_identifier.hpp tests/stubs/root-package-search/search_stub.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling root package search test binary"
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-I$(SRC_DIR) -Itests \
-		$(ROOT_PACKAGE_SEARCH_TEST_SRCS) -o $@
+	$(call compile_non_heavy_test,ROOT_PACKAGE_SEARCH)
 
 $(ROOT_PACKAGE_SELECTION_TEST_TARGET): $(ROOT_PACKAGE_SELECTION_TEST_SRCS) $(SRC_DIR)/root_package_selection.hpp $(SRC_DIR)/root_package_search.hpp $(SRC_DIR)/root_package_candidate.hpp $(SRC_DIR)/package_metadata.hpp $(SRC_DIR)/aur_rpc.hpp $(SRC_DIR)/package_identifier.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling root package selection test binary"
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-I$(SRC_DIR) \
-		$(ROOT_PACKAGE_SELECTION_TEST_SRCS) -o $@
+	$(call compile_non_heavy_test,ROOT_PACKAGE_SELECTION)
 
 $(ROOT_PACKAGE_ROUTE_PROJECTION_TEST_TARGET): $(ROOT_PACKAGE_ROUTE_PROJECTION_TEST_SRCS) $(SRC_DIR)/root_package_route_projection.hpp $(SRC_DIR)/root_package_selection.hpp $(SRC_DIR)/root_package_search.hpp $(SRC_DIR)/root_package_candidate.hpp $(SRC_DIR)/package_metadata.hpp $(SRC_DIR)/aur_rpc.hpp $(SRC_DIR)/package_identifier.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling root package route projection test binary"
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-I$(SRC_DIR) \
-		$(ROOT_PACKAGE_ROUTE_PROJECTION_TEST_SRCS) -o $@
+	$(call compile_non_heavy_test,ROOT_PACKAGE_ROUTE_PROJECTION)
 
 $(LOCAL_PACKAGE_METADATA_TEST_TARGET): $(LOCAL_PACKAGE_METADATA_TEST_SRCS) $(LOCAL_PACKAGE_METADATA_FIXTURE_FILES) $(SRC_DIR)/local_package_metadata.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling local package metadata test binary"
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-I$(SRC_DIR) \
-		$(LOCAL_PACKAGE_METADATA_TEST_SRCS) -o $@
+	$(call compile_non_heavy_test,LOCAL_PACKAGE_METADATA)
 
 $(LOCAL_SOURCE_ROOT_TEST_TARGET): $(LOCAL_SOURCE_ROOT_TEST_SRCS) $(SRC_DIR)/local_source_root.hpp $(SRC_DIR)/local_package_metadata.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling local source root test binary"
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-DMOGUET_ENABLE_LOCAL_SOURCE_ROOT_TEST_HOOKS \
-		-I$(SRC_DIR) \
-		$(LOCAL_SOURCE_ROOT_TEST_SRCS) -o $@
+	$(call compile_non_heavy_test,LOCAL_SOURCE_ROOT)
 
 $(LOCAL_DEPENDENCY_PLAN_PROJECTION_TEST_TARGET): $(LOCAL_DEPENDENCY_PLAN_PROJECTION_TEST_SRCS) $(SRC_DIR)/local_dependency_plan_projection.hpp $(SRC_DIR)/local_package_metadata.hpp $(SRC_DIR)/dependency_plan.hpp $(SRC_DIR)/dependency_plan_projection_support.hpp $(SRC_DIR)/dependency_provider.hpp $(SRC_DIR)/aur_rpc.hpp $(SRC_DIR)/repository_query.hpp $(SRC_DIR)/dependency_spec.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/logging.hpp tests/stubs/local-dependency-plan/query_stub.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling local dependency plan projection test binary"
-	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-I$(SRC_DIR) -Itests \
-		$(LOCAL_DEPENDENCY_PLAN_PROJECTION_TEST_SRCS) \
-		-o $@ $(LIBALPM_LDLIBS)
+	$(call compile_non_heavy_test,LOCAL_DEPENDENCY_PLAN_PROJECTION)
 
 $(LOCAL_SOURCE_WORKSPACE_TEST_TARGET): \
 	$(LOCAL_SOURCE_WORKSPACE_TEST_SRCS) \
@@ -1757,10 +2012,7 @@ $(LOCAL_SOURCE_WORKSPACE_TEST_TARGET): \
 	$(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling local source workspace test binary"
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-DMOGUET_ENABLE_LOCAL_SOURCE_WORKSPACE_TEST_HOOKS \
-		-I$(SRC_DIR) -Itests \
-		$(LOCAL_SOURCE_WORKSPACE_TEST_SRCS) -o $@
+	$(call compile_non_heavy_test,LOCAL_SOURCE_WORKSPACE)
 
 $(LOCAL_SOURCE_BUILD_TEST_TARGET): \
 	$(LOCAL_SOURCE_BUILD_TEST_SRCS) \
@@ -1796,365 +2048,222 @@ $(LOCAL_SOURCE_BUILD_TEST_TARGET): \
 	$(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling local source build test binary"
-	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-DMOGUET_ENABLE_ARTIFACT_WORKSPACE_TEST_HOOKS \
-		-DMOGUET_ENABLE_LOCAL_SOURCE_WORKSPACE_TEST_HOOKS \
-		-I$(SRC_DIR) -Itests \
-		$(LOCAL_SOURCE_BUILD_TEST_SRCS) \
-		-o $@ $(LIBALPM_LDLIBS)
+	$(call compile_non_heavy_test,LOCAL_SOURCE_BUILD)
 
-$(USER_CONFIG_MODULE_TEST_TARGET): tests/user_config_test.cpp $(SRC_DIR)/user_config.cpp $(SRC_DIR)/user_config.hpp $(SRC_DIR)/cli_parser.cpp $(SRC_DIR)/cli_parser.hpp $(SRC_DIR)/localization.hpp $(VERSION_FILE)
+$(USER_CONFIG_MODULE_TEST_TARGET): $(USER_CONFIG_MODULE_TEST_SRCS) $(SRC_DIR)/user_config.hpp $(SRC_DIR)/cli_parser.hpp $(SRC_DIR)/localization.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling user config module test binary"
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -I$(SRC_DIR) \
-		tests/user_config_test.cpp \
-		$(SRC_DIR)/user_config.cpp \
-		$(SRC_DIR)/cli_parser.cpp \
-		-o $@
+	$(call compile_non_heavy_test,USER_CONFIG_MODULE)
 
-$(PACKAGE_IDENTIFIER_TEST_TARGET): tests/package_identifier_test.cpp $(SRC_DIR)/package_identifier.cpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/localization.hpp $(VERSION_FILE)
+$(PACKAGE_IDENTIFIER_TEST_TARGET): $(PACKAGE_IDENTIFIER_TEST_SRCS) $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/localization.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling package identifier test binary"
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -I$(SRC_DIR) tests/package_identifier_test.cpp $(SRC_DIR)/package_identifier.cpp -o $@
+	$(call compile_non_heavy_test,PACKAGE_IDENTIFIER)
 
-$(SHELL_WORDS_TEST_TARGET): tests/shell_words_test.cpp $(SRC_DIR)/shell_words.cpp $(SRC_DIR)/shell_words.hpp $(VERSION_FILE)
+$(SHELL_WORDS_TEST_TARGET): $(SHELL_WORDS_TEST_SRCS) $(SRC_DIR)/shell_words.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling shell word serialization test binary"
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-I$(SRC_DIR) \
-		tests/shell_words_test.cpp \
-		$(SRC_DIR)/shell_words.cpp \
-		-o $@
+	$(call compile_non_heavy_test,SHELL_WORDS)
 
-$(SOURCE_ENVIRONMENT_TEST_TARGET): tests/source_environment_test.cpp $(SRC_DIR)/source_environment.cpp $(SRC_DIR)/source_environment.hpp $(SRC_DIR)/source_preference.cpp $(SRC_DIR)/source_preference.hpp $(SRC_DIR)/xdg_directory_safety.cpp $(SRC_DIR)/xdg_directory_safety.hpp $(SRC_DIR)/xdg_paths.cpp $(SRC_DIR)/xdg_paths.hpp $(SRC_DIR)/package_identifier.cpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/shell_words.cpp $(SRC_DIR)/shell_words.hpp $(SRC_DIR)/localization.hpp $(VERSION_FILE)
+$(SOURCE_ENVIRONMENT_TEST_TARGET): $(SOURCE_ENVIRONMENT_TEST_SRCS) $(SRC_DIR)/source_environment.hpp $(SRC_DIR)/source_preference.hpp $(SRC_DIR)/xdg_directory_safety.hpp $(SRC_DIR)/xdg_paths.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/shell_words.hpp $(SRC_DIR)/localization.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling source environment test binary"
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-DMOGUET_ENABLE_TEST_OVERRIDES \
-		-DMOGUET_ENABLE_SOURCE_PREFERENCE_TEST_HOOKS \
-		-I$(SRC_DIR) \
-		tests/source_environment_test.cpp \
-		$(SRC_DIR)/source_environment.cpp \
-		$(SRC_DIR)/source_preference.cpp \
-		$(SRC_DIR)/xdg_directory_safety.cpp \
-		$(SRC_DIR)/xdg_paths.cpp \
-		$(SRC_DIR)/package_identifier.cpp \
-		$(SRC_DIR)/shell_words.cpp \
-		-o $@
+	$(call compile_non_heavy_test,SOURCE_ENVIRONMENT)
 
 $(ARTIFACT_WORKSPACE_TEST_TARGET): $(ARTIFACT_WORKSPACE_TEST_SRCS) $(SRC_DIR)/artifact_workspace.hpp $(SRC_DIR)/trusted_cache.hpp $(SRC_DIR)/source_environment.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/shell_words.hpp $(SRC_DIR)/process.hpp $(SRC_DIR)/logging.hpp $(SRC_DIR)/localization.hpp $(TRUSTED_CACHE_SUPPORT_HEADER) tests/stubs/makepkg $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling artifact workspace test binary"
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-DMOGUET_ENABLE_ARTIFACT_WORKSPACE_TEST_HOOKS \
-		-DMOGUET_ENABLE_TRUSTED_CACHE_TEST_HOOKS \
-		-I$(SRC_DIR) \
-		$(ARTIFACT_WORKSPACE_TEST_SRCS) \
-		-o $@
+	$(call compile_non_heavy_test,ARTIFACT_WORKSPACE)
 
 $(MULTIPLE_ARTIFACT_WORKSPACE_TEST_TARGET): $(MULTIPLE_ARTIFACT_WORKSPACE_TEST_SRCS) $(SRC_DIR)/artifact_workspace.hpp $(SRC_DIR)/trusted_cache.hpp $(SRC_DIR)/source_environment.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/shell_words.hpp $(SRC_DIR)/process.hpp $(SRC_DIR)/logging.hpp $(SRC_DIR)/localization.hpp $(TRUSTED_CACHE_SUPPORT_HEADER) tests/stubs/makepkg $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling multiple artifact workspace test binary"
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-DMOGUET_ENABLE_ARTIFACT_WORKSPACE_TEST_HOOKS \
-		-DMOGUET_ENABLE_TRUSTED_CACHE_TEST_HOOKS \
-		-I$(SRC_DIR) \
-		$(MULTIPLE_ARTIFACT_WORKSPACE_TEST_SRCS) \
-		-o $@
+	$(call compile_non_heavy_test,MULTIPLE_ARTIFACT_WORKSPACE)
 
 $(ARTIFACT_IDENTITY_TEST_TARGET): $(ARTIFACT_IDENTITY_TEST_SRCS) $(SRC_DIR)/artifact_identity.hpp $(SRC_DIR)/artifact_workspace.hpp $(SRC_DIR)/trusted_cache.hpp $(SRC_DIR)/source_environment.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/shell_words.hpp $(SRC_DIR)/process.hpp $(SRC_DIR)/logging.hpp $(SRC_DIR)/localization.hpp $(TRUSTED_CACHE_SUPPORT_HEADER) tests/stubs/artifact-identity/process_stub.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling artifact identity test binary"
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-I$(SRC_DIR) \
-		$(ARTIFACT_IDENTITY_TEST_SRCS) \
-		-o $@
+	$(call compile_non_heavy_test,ARTIFACT_IDENTITY)
 
 $(MULTIPLE_ARTIFACT_IDENTITY_TEST_TARGET): $(MULTIPLE_ARTIFACT_IDENTITY_TEST_SRCS) $(SRC_DIR)/artifact_identity.hpp $(SRC_DIR)/artifact_workspace.hpp $(SRC_DIR)/trusted_cache.hpp $(SRC_DIR)/source_environment.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/shell_words.hpp $(SRC_DIR)/process.hpp $(SRC_DIR)/logging.hpp $(SRC_DIR)/localization.hpp $(TRUSTED_CACHE_SUPPORT_HEADER) tests/stubs/artifact-identity/process_stub.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling multiple artifact identity test binary"
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-I$(SRC_DIR) \
-		$(MULTIPLE_ARTIFACT_IDENTITY_TEST_SRCS) \
-		-o $@
+	$(call compile_non_heavy_test,MULTIPLE_ARTIFACT_IDENTITY)
 
 $(PACKAGE_BASE_ARTIFACT_INSTALL_PLAN_TEST_TARGET): $(PACKAGE_BASE_ARTIFACT_INSTALL_PLAN_TEST_SRCS) $(SRC_DIR)/package_base_artifact_install_plan.hpp $(SRC_DIR)/artifact_install_plan.hpp $(SRC_DIR)/artifact_identity.hpp $(SRC_DIR)/dependency_plan.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/localization.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling PackageBase artifact install reason plan test binary"
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-I$(SRC_DIR) \
-		$(PACKAGE_BASE_ARTIFACT_INSTALL_PLAN_TEST_SRCS) \
-		-o $@
+	$(call compile_non_heavy_test,PACKAGE_BASE_ARTIFACT_INSTALL_PLAN)
 
 $(ARTIFACT_INSTALL_EXECUTOR_TEST_TARGET): $(ARTIFACT_INSTALL_EXECUTOR_TEST_SRCS) $(SRC_DIR)/artifact_install_executor.hpp $(SRC_DIR)/artifact_install_plan.hpp $(SRC_DIR)/artifact_identity.hpp $(SRC_DIR)/artifact_workspace.hpp $(SRC_DIR)/package_metadata.hpp $(SRC_DIR)/installed_package.hpp $(SRC_DIR)/dependency_plan.hpp $(SRC_DIR)/dependency_provider.hpp $(SRC_DIR)/trusted_cache.hpp $(SRC_DIR)/source_environment.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/shell_words.hpp $(SRC_DIR)/process.hpp $(SRC_DIR)/logging.hpp $(SRC_DIR)/localization.hpp $(TRUSTED_CACHE_SUPPORT_HEADER) tests/stubs/package-metadata/alpm_stub.hpp tests/stubs/artifact-install-executor/process_stub.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling artifact install executor fake-symbol test binary"
-	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-I$(SRC_DIR) -Itests/stubs/package-metadata \
-		$(ARTIFACT_INSTALL_EXECUTOR_TEST_SRCS) \
-		-o $@
+	$(call compile_non_heavy_test,ARTIFACT_INSTALL_EXECUTOR)
 
-$(PACKAGE_BASE_ARTIFACT_INSTALL_EXECUTOR_TEST_TARGET): $(PACKAGE_BASE_ARTIFACT_INSTALL_EXECUTOR_TEST_SRCS) $(HEADERS) $(TRUSTED_CACHE_SUPPORT_HEADER) tests/stubs/package-metadata/alpm_stub.hpp tests/stubs/artifact-install-executor/process_stub.hpp $(VERSION_FILE)
+$(PACKAGE_BASE_ARTIFACT_INSTALL_EXECUTOR_TEST_TARGET): $(PACKAGE_BASE_ARTIFACT_INSTALL_EXECUTOR_TEST_SRCS) $(TRUSTED_CACHE_SUPPORT_HEADER) tests/stubs/package-metadata/alpm_stub.hpp tests/stubs/artifact-install-executor/process_stub.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling PackageBase artifact install executor fake-symbol test binary"
-	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-DMOGUET_ENABLE_PACKAGE_BASE_ARTIFACT_INSTALL_PLAN_TEST_HOOKS \
-		-I$(SRC_DIR) -Itests/stubs/package-metadata \
-		$(PACKAGE_BASE_ARTIFACT_INSTALL_EXECUTOR_TEST_SRCS) \
-		-o $@
+	$(call compile_non_heavy_test,PACKAGE_BASE_ARTIFACT_INSTALL_EXECUTOR)
 
 $(SEPARATED_SOURCE_BUILD_TEST_TARGET): $(SEPARATED_SOURCE_BUILD_TEST_SRCS) $(SRC_DIR)/separated_source_build.hpp $(SRC_DIR)/artifact_install_executor.hpp $(SRC_DIR)/artifact_install_plan.hpp $(SRC_DIR)/artifact_identity.hpp $(SRC_DIR)/artifact_workspace.hpp $(SRC_DIR)/package_metadata.hpp $(SRC_DIR)/installed_package.hpp $(SRC_DIR)/dependency_plan.hpp $(SRC_DIR)/dependency_provider.hpp $(SRC_DIR)/trusted_cache.hpp $(SRC_DIR)/source_environment.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/shell_words.hpp $(SRC_DIR)/process.hpp $(SRC_DIR)/logging.hpp $(SRC_DIR)/localization.hpp $(TRUSTED_CACHE_SUPPORT_HEADER) tests/stubs/package-metadata/alpm_stub.hpp tests/stubs/artifact-install-executor/process_stub.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling separated source-build lifecycle fake-symbol test binary"
-	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-DMOGUET_ENABLE_SEPARATED_SOURCE_BUILD_TEST_HOOKS \
-		-I$(SRC_DIR) -Itests/stubs/package-metadata \
-		$(SEPARATED_SOURCE_BUILD_TEST_SRCS) \
-		-o $@
+	$(call compile_non_heavy_test,SEPARATED_SOURCE_BUILD)
 
-$(SEPARATED_PACKAGE_BASE_SOURCE_BUILD_TEST_TARGET): $(SEPARATED_PACKAGE_BASE_SOURCE_BUILD_TEST_SRCS) $(HEADERS) $(TRUSTED_CACHE_SUPPORT_HEADER) tests/stubs/package-metadata/alpm_stub.hpp tests/stubs/artifact-install-executor/process_stub.hpp $(VERSION_FILE)
+$(SEPARATED_PACKAGE_BASE_SOURCE_BUILD_TEST_TARGET): $(SEPARATED_PACKAGE_BASE_SOURCE_BUILD_TEST_SRCS) $(TRUSTED_CACHE_SUPPORT_HEADER) tests/stubs/package-metadata/alpm_stub.hpp tests/stubs/artifact-install-executor/process_stub.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling separated PackageBase source-build lifecycle fake-symbol test binary"
-	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-DMOGUET_ENABLE_SEPARATED_PACKAGE_BASE_SOURCE_BUILD_TEST_HOOKS \
-		-I$(SRC_DIR) -Itests/stubs/package-metadata \
-		$(SEPARATED_PACKAGE_BASE_SOURCE_BUILD_TEST_SRCS) \
-		-o $@
+	$(call compile_non_heavy_test,SEPARATED_PACKAGE_BASE_SOURCE_BUILD)
 
-$(PRODUCTION_SOURCE_BUILD_TEST_TARGET): $(PRODUCTION_SOURCE_BUILD_TEST_SRCS) $(HEADERS) tests/stubs/package-metadata/alpm_stub.hpp tests/stubs/artifact-install-executor/process_stub.hpp tests/stubs/local-dependency-plan/query_stub.hpp $(VERSION_FILE)
+$(PRODUCTION_SOURCE_BUILD_TEST_TARGET): $(PRODUCTION_SOURCE_BUILD_TEST_SRCS) tests/stubs/package-metadata/alpm_stub.hpp tests/stubs/artifact-install-executor/process_stub.hpp tests/stubs/local-dependency-plan/query_stub.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling production source-build fake-symbol test binary"
-	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-DMOGUET_ENABLE_SEPARATED_SOURCE_BUILD_TEST_HOOKS \
-		-DMOGUET_ENABLE_SEPARATED_PACKAGE_BASE_SOURCE_BUILD_TEST_HOOKS \
-		-DMOGUET_ENABLE_TEST_OVERRIDES \
-		-I$(SRC_DIR) -Itests -Itests/stubs/package-metadata \
-		$(PRODUCTION_SOURCE_BUILD_TEST_SRCS) \
-		-o $@ $(MY_LDLIBS)
+	$(call compile_non_heavy_test,PRODUCTION_SOURCE_BUILD)
 
 $(PROCESS_CAPTURE_TEST_TARGET): $(PROCESS_CAPTURE_TEST_SRCS) $(SRC_DIR)/process.hpp $(SRC_DIR)/shell_words.hpp $(SRC_DIR)/logging.hpp $(SRC_DIR)/localization.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling process capture test binary"
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-I$(SRC_DIR) \
-		$(PROCESS_CAPTURE_TEST_SRCS) \
-		-o $@
+	$(call compile_non_heavy_test,PROCESS_CAPTURE)
 
-$(PROCESS_STDIN_FD_TEST_TARGET): tests/process_stdin_fd_test.cpp $(SRC_DIR)/process.cpp $(SRC_DIR)/process.hpp $(SRC_DIR)/logging.cpp $(SRC_DIR)/logging.hpp $(SRC_DIR)/localization.hpp $(VERSION_FILE)
+$(PROCESS_STDIN_FD_TEST_TARGET): $(PROCESS_STDIN_FD_TEST_SRCS) $(SRC_DIR)/process.hpp $(SRC_DIR)/logging.hpp $(SRC_DIR)/localization.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling process stdin fd test binary"
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -I$(SRC_DIR) tests/process_stdin_fd_test.cpp $(SRC_DIR)/process.cpp $(SRC_DIR)/logging.cpp -o $@
+	$(call compile_non_heavy_test,PROCESS_STDIN_FD)
 
 $(AUR_UPDATE_PLAN_TEST_TARGET): $(AUR_UPDATE_PLAN_TEST_SRCS) $(SRC_DIR)/aur_update_plan.hpp $(SRC_DIR)/installed_package.hpp $(SRC_DIR)/localization.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling AUR update plan model test binary"
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -I$(SRC_DIR) $(AUR_UPDATE_PLAN_TEST_SRCS) -o $@
+	$(call compile_non_heavy_test,AUR_UPDATE_PLAN)
 
 $(UPGRADE_ALL_PLAN_TEST_TARGET): $(UPGRADE_ALL_PLAN_TEST_SRCS) $(SRC_DIR)/upgrade_all_plan.hpp $(SRC_DIR)/localization.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling upgrade-all plan model test binary"
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -I$(SRC_DIR) $(UPGRADE_ALL_PLAN_TEST_SRCS) -o $@
+	$(call compile_non_heavy_test,UPGRADE_ALL_PLAN)
 
-$(SYSTEM_SOURCE_UPGRADE_TEST_TARGET): $(SYSTEM_SOURCE_UPGRADE_TEST_SRCS) $(HEADERS) tests/stubs/system-source-upgrade/phase_stub.hpp $(VERSION_FILE)
+$(SYSTEM_SOURCE_UPGRADE_TEST_TARGET): $(SYSTEM_SOURCE_UPGRADE_TEST_SRCS) tests/stubs/system-source-upgrade/phase_stub.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling system/source upgrade phase fake-symbol test binary"
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-ffunction-sections -fdata-sections \
-		-DMOGUET_ENABLE_SYSTEM_SOURCE_UPGRADE_TEST_HOOKS \
-		-I$(SRC_DIR) \
-		$(SYSTEM_SOURCE_UPGRADE_TEST_SRCS) \
-		-Wl,--gc-sections -o $@
+	$(call compile_non_heavy_test,SYSTEM_SOURCE_UPGRADE)
 
 $(AUR_UPDATE_QUERY_TEST_TARGET): $(AUR_UPDATE_QUERY_TEST_SRCS) $(SRC_DIR)/aur_update_query.hpp $(SRC_DIR)/aur_update_plan.hpp $(SRC_DIR)/aur_rpc.hpp $(SRC_DIR)/package_metadata.hpp $(SRC_DIR)/installed_package.hpp $(SRC_DIR)/process.hpp $(SRC_DIR)/shell_words.hpp $(SRC_DIR)/logging.hpp $(SRC_DIR)/localization.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling AUR update query fake-symbol test binary"
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -I$(SRC_DIR) $(AUR_UPDATE_QUERY_TEST_SRCS) -o $@
+	$(call compile_non_heavy_test,AUR_UPDATE_QUERY)
 
 $(AUR_UPDATE_EXECUTION_PREFLIGHT_TEST_TARGET): $(AUR_UPDATE_EXECUTION_PREFLIGHT_TEST_SRCS) $(SRC_DIR)/aur_update_execution_preflight.hpp $(SRC_DIR)/aur_update_plan.hpp $(SRC_DIR)/dependency_plan.hpp $(SRC_DIR)/dependency_provider.hpp $(SRC_DIR)/dependency_spec.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/installed_package.hpp $(SRC_DIR)/localization.hpp tests/stubs/aur-update-execution-preflight/preflight_stub.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling AUR update execution preflight fake-symbol test binary"
-	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-I$(SRC_DIR) $(AUR_UPDATE_EXECUTION_PREFLIGHT_TEST_SRCS) \
-		-o $@ $(LIBALPM_LDLIBS)
+	$(call compile_non_heavy_test,AUR_UPDATE_EXECUTION_PREFLIGHT)
 
 $(AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION_TEST_TARGET): $(AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION_TEST_SRCS) $(SRC_DIR)/aur_update_execution_preflight.hpp $(SRC_DIR)/aur_update_plan.hpp $(SRC_DIR)/dependency_plan.hpp $(SRC_DIR)/dependency_plan_projection_support.hpp $(SRC_DIR)/dependency_provider.hpp $(SRC_DIR)/aur_rpc.hpp $(SRC_DIR)/repository_query.hpp $(SRC_DIR)/package_metadata.hpp $(SRC_DIR)/installed_package.hpp $(SRC_DIR)/dependency_spec.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/process.hpp $(SRC_DIR)/shell_words.hpp $(SRC_DIR)/logging.hpp $(SRC_DIR)/localization.hpp tests/stubs/package-metadata/alpm_stub.hpp tests/stubs/aur-update-execution-preflight-integration/integration_stub.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling AUR update execution preflight production composition test binary"
-	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-I$(SRC_DIR) \
-		-Itests/stubs/package-metadata \
-		-Itests/stubs/aur-update-execution-preflight-integration \
-		$(AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION_TEST_SRCS) \
-		-o $@
+	$(call compile_non_heavy_test,AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION)
 
-$(AUR_UPDATE_EXECUTION_PREPARATION_TEST_TARGET): $(AUR_UPDATE_EXECUTION_PREPARATION_TEST_SRCS) $(HEADERS) tests/stubs/aur-update-execution-preparation/preparation_stub.hpp $(VERSION_FILE)
+$(AUR_UPDATE_EXECUTION_PREPARATION_TEST_TARGET): $(AUR_UPDATE_EXECUTION_PREPARATION_TEST_SRCS) tests/stubs/aur-update-execution-preparation/preparation_stub.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling AUR update execution preparation fake-symbol test binary"
-	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-DMOGUET_ENABLE_AUR_UPDATE_EXECUTION_PREPARATION_TEST_HOOKS \
-		-I$(SRC_DIR) \
-		$(AUR_UPDATE_EXECUTION_PREPARATION_TEST_SRCS) \
-		-o $@ $(LIBALPM_LDLIBS)
+	$(call compile_non_heavy_test,AUR_UPDATE_EXECUTION_PREPARATION)
 
-$(AUR_UPDATE_EXECUTION_PREPARATION_INTEGRATION_TEST_TARGET): $(AUR_UPDATE_EXECUTION_PREPARATION_INTEGRATION_TEST_SRCS) $(HEADERS) tests/stubs/aur-update-execution-preparation-integration/preparation_stub.hpp $(VERSION_FILE)
+$(AUR_UPDATE_EXECUTION_PREPARATION_INTEGRATION_TEST_TARGET): $(AUR_UPDATE_EXECUTION_PREPARATION_INTEGRATION_TEST_SRCS) tests/stubs/aur-update-execution-preparation-integration/preparation_stub.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling AUR update execution preparation production-reader composition test binary"
-	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-DMOGUET_ENABLE_TEST_OVERRIDES \
-		-DMOGUET_ENABLE_AUR_UPDATE_EXECUTION_PREPARATION_TEST_HOOKS \
-		-DMOGUET_ENABLE_SOURCE_PREFERENCE_TEST_HOOKS \
-		-I$(SRC_DIR) \
-		$(AUR_UPDATE_EXECUTION_PREPARATION_INTEGRATION_TEST_SRCS) \
-		-o $@ $(LIBALPM_LDLIBS)
+	$(call compile_non_heavy_test,AUR_UPDATE_EXECUTION_PREPARATION_INTEGRATION)
 
-$(AUR_UPDATE_EXECUTION_RUNNER_TEST_TARGET): $(AUR_UPDATE_EXECUTION_RUNNER_TEST_SRCS) $(HEADERS) tests/stubs/aur-update-execution-preparation/preparation_stub.hpp tests/stubs/aur-update-execution-runner/execution_stub.hpp $(VERSION_FILE)
+$(AUR_UPDATE_EXECUTION_RUNNER_TEST_TARGET): $(AUR_UPDATE_EXECUTION_RUNNER_TEST_SRCS) tests/stubs/aur-update-execution-preparation/preparation_stub.hpp tests/stubs/aur-update-execution-runner/execution_stub.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling AUR update execution runner fake-symbol test binary"
-	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-DMOGUET_ENABLE_AUR_UPDATE_EXECUTION_PREPARATION_TEST_HOOKS \
-		-DMOGUET_ENABLE_AUR_UPDATE_EXECUTION_RUNNER_TEST_HOOKS \
-		-I$(SRC_DIR) \
-		$(AUR_UPDATE_EXECUTION_RUNNER_TEST_SRCS) \
-		-o $@ $(LIBALPM_LDLIBS)
+	$(call compile_non_heavy_test,AUR_UPDATE_EXECUTION_RUNNER)
 
-$(AUR_UPDATE_OPERATION_RESULT_TEST_TARGET): $(AUR_UPDATE_OPERATION_RESULT_TEST_SRCS) $(HEADERS) tests/stubs/aur-update-execution-preparation/preparation_stub.hpp $(VERSION_FILE)
+$(AUR_UPDATE_OPERATION_RESULT_TEST_TARGET): $(AUR_UPDATE_OPERATION_RESULT_TEST_SRCS) tests/stubs/aur-update-execution-preparation/preparation_stub.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling pure AUR update operation result test binary"
-	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-I$(SRC_DIR) \
-		$(AUR_UPDATE_OPERATION_RESULT_TEST_SRCS) \
-		-o $@ $(LIBALPM_LDLIBS)
+	$(call compile_non_heavy_test,AUR_UPDATE_OPERATION_RESULT)
 
-$(FILTERED_AUR_UPDATE_OPERATION_TEST_TARGET): $(FILTERED_AUR_UPDATE_OPERATION_TEST_SRCS) $(HEADERS) tests/stubs/filtered-aur-update-operation/query_stub.hpp tests/stubs/aur-update-execution-preflight/preflight_stub.hpp tests/stubs/aur-update-execution-preparation/preparation_stub.hpp tests/stubs/aur-update-execution-runner/execution_stub.hpp $(VERSION_FILE)
+$(FILTERED_AUR_UPDATE_OPERATION_TEST_TARGET): $(FILTERED_AUR_UPDATE_OPERATION_TEST_SRCS) tests/stubs/filtered-aur-update-operation/query_stub.hpp tests/stubs/aur-update-execution-preflight/preflight_stub.hpp tests/stubs/aur-update-execution-preparation/preparation_stub.hpp tests/stubs/aur-update-execution-runner/execution_stub.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling filtered AUR update operation production-composition test binary"
-	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-DMOGUET_ENABLE_AUR_UPDATE_EXECUTION_PREPARATION_TEST_HOOKS \
-		-DMOGUET_ENABLE_AUR_UPDATE_EXECUTION_RUNNER_TEST_HOOKS \
-		-I$(SRC_DIR) \
-		$(FILTERED_AUR_UPDATE_OPERATION_TEST_SRCS) \
-		-o $@ $(LIBALPM_LDLIBS)
+	$(call compile_non_heavy_test,FILTERED_AUR_UPDATE_OPERATION)
 
-$(UPGRADE_ALL_OPERATION_TEST_TARGET): $(UPGRADE_ALL_OPERATION_TEST_SRCS) $(HEADERS) tests/stubs/upgrade-all-operation/operation_stub.hpp $(VERSION_FILE)
+$(UPGRADE_ALL_OPERATION_TEST_TARGET): $(UPGRADE_ALL_OPERATION_TEST_SRCS) tests/stubs/upgrade-all-operation/operation_stub.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling upgrade-all operation production-composition test binary"
-	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-ffunction-sections -fdata-sections \
-		-DMOGUET_ENABLE_UPGRADE_ALL_OPERATION_TEST_HOOKS \
-		-DMOGUET_ENABLE_SYSTEM_SOURCE_UPGRADE_TEST_HOOKS \
-		-I$(SRC_DIR) \
-		$(UPGRADE_ALL_OPERATION_TEST_SRCS) \
-		-Wl,--gc-sections -o $@ $(LIBALPM_LDLIBS)
+	$(call compile_non_heavy_test,UPGRADE_ALL_OPERATION)
 
 $(DEPENDENCY_PLAN_MODEL_TEST_TARGET): $(DEPENDENCY_PLAN_MODEL_TEST_SRCS) $(SRC_DIR)/dependency_plan.hpp $(SRC_DIR)/dependency_plan_projection_support.hpp $(SRC_DIR)/dependency_provider.hpp $(SRC_DIR)/aur_rpc.hpp $(SRC_DIR)/repository_query.hpp $(SRC_DIR)/dependency_spec.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/logging.hpp $(SRC_DIR)/localization.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling dependency plan model test binary"
-	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-I$(SRC_DIR) $(DEPENDENCY_PLAN_MODEL_TEST_SRCS) \
-		-o $@ $(LIBALPM_LDLIBS)
+	$(call compile_non_heavy_test,DEPENDENCY_PLAN_MODEL)
 
 $(BUILD_PLAN_ARTIFACT_TARGET_PROJECTION_TEST_TARGET): $(BUILD_PLAN_ARTIFACT_TARGET_PROJECTION_TEST_SRCS) $(SRC_DIR)/build_plan_artifact_target_projection.hpp $(SRC_DIR)/artifact_install_plan.hpp $(SRC_DIR)/dependency_plan.hpp $(SRC_DIR)/dependency_provider.hpp $(SRC_DIR)/aur_rpc.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/localization.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling BuildPlan artifact target projection test binary"
-	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-I$(SRC_DIR) $(BUILD_PLAN_ARTIFACT_TARGET_PROJECTION_TEST_SRCS) \
-		-o $@ $(LIBALPM_LDLIBS)
+	$(call compile_non_heavy_test,BUILD_PLAN_ARTIFACT_TARGET_PROJECTION)
 
 $(UNIFIED_PLAN_OBSERVATION_TEST_TARGET): $(UNIFIED_PLAN_OBSERVATION_TEST_SRCS) $(SRC_DIR)/unified_plan_observation.hpp $(SRC_DIR)/dependency_plan.hpp $(SRC_DIR)/artifact_install_plan.hpp $(SRC_DIR)/root_package_candidate.hpp $(SRC_DIR)/local_source_root.hpp $(SRC_DIR)/local_package_metadata.hpp $(SRC_DIR)/package_constraint_metadata.hpp $(SRC_DIR)/package_base_artifact_install_plan.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling unified plan observation pure-model test binary"
-	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-I$(SRC_DIR) $(UNIFIED_PLAN_OBSERVATION_TEST_SRCS) \
-		-o $@ $(LIBALPM_LDLIBS)
+	$(call compile_non_heavy_test,UNIFIED_PLAN_OBSERVATION)
 
 $(UNIFIED_PLAN_PROJECTION_TEST_TARGET): $(UNIFIED_PLAN_PROJECTION_TEST_SRCS) $(SRC_DIR)/unified_plan_projection.hpp $(SRC_DIR)/unified_plan_observation.hpp $(SRC_DIR)/build_plan_artifact_target_projection.hpp $(SRC_DIR)/root_package_route_projection.hpp $(SRC_DIR)/root_package_search.hpp $(SRC_DIR)/local_dependency_plan_projection.hpp $(SRC_DIR)/local_source_root.hpp $(SRC_DIR)/aur_update_query.hpp $(SRC_DIR)/aur_update_execution_preflight.hpp $(SRC_DIR)/system_source_upgrade.hpp $(SRC_DIR)/upgrade_all_operation.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling unified plan projection adapter test binary"
-	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-I$(SRC_DIR) -Itests $(UNIFIED_PLAN_PROJECTION_TEST_SRCS) \
-		-o $@ $(LIBALPM_LDLIBS)
+	$(call compile_non_heavy_test,UNIFIED_PLAN_PROJECTION)
 
 $(UNIFIED_PLAN_RENDERER_TEST_TARGET): $(UNIFIED_PLAN_RENDERER_TEST_SRCS) $(SRC_DIR)/unified_plan_renderer.hpp $(SRC_DIR)/unified_plan_observation.hpp $(SRC_DIR)/dependency_plan.hpp $(SRC_DIR)/artifact_install_plan.hpp $(SRC_DIR)/local_dependency_plan_projection.hpp $(SRC_DIR)/localization.hpp $(SRC_DIR)/system_source_upgrade.hpp $(SRC_DIR)/upgrade_all_operation.hpp tests/stubs/local-dependency-plan/query_stub.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling unified plan renderer focused test binary"
-	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-I$(SRC_DIR) -Itests $(UNIFIED_PLAN_RENDERER_TEST_SRCS) \
-		-o $@ $(LIBALPM_LDLIBS)
+	$(call compile_non_heavy_test,UNIFIED_PLAN_RENDERER)
 
 $(REPOSITORY_QUERY_TEST_TARGET): $(REPOSITORY_QUERY_TEST_SRCS) $(SRC_DIR)/repository_query.hpp $(SRC_DIR)/dependency_provider.hpp $(SRC_DIR)/package_constraint_metadata.hpp $(SRC_DIR)/dependency_constraint.hpp $(SRC_DIR)/package_metadata.hpp $(SRC_DIR)/installed_package.hpp $(SRC_DIR)/dependency_spec.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/process.hpp $(SRC_DIR)/shell_words.hpp $(SRC_DIR)/localization.hpp tests/stubs/package-metadata/alpm_stub.hpp tests/stubs/repository-query/process_stub.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling repository query fake-symbol test binary"
-	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-I$(SRC_DIR) -Itests/stubs/package-metadata \
-		$(REPOSITORY_QUERY_TEST_SRCS) \
-		-o $@
+	$(call compile_non_heavy_test,REPOSITORY_QUERY)
 
 $(ARTIFACT_INSTALL_PLAN_TEST_TARGET): $(ARTIFACT_INSTALL_PLAN_TEST_SRCS) $(SRC_DIR)/artifact_install_plan.hpp $(SRC_DIR)/dependency_plan.hpp $(SRC_DIR)/dependency_provider.hpp $(SRC_DIR)/aur_rpc.hpp $(SRC_DIR)/repository_query.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/localization.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling artifact install plan test binary"
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -I$(SRC_DIR) $(ARTIFACT_INSTALL_PLAN_TEST_SRCS) -o $@
+	$(call compile_non_heavy_test,ARTIFACT_INSTALL_PLAN)
 
 $(ARTIFACT_SELECTION_MODEL_TEST_TARGET): $(ARTIFACT_SELECTION_MODEL_TEST_SRCS) $(SRC_DIR)/artifact_install_plan.hpp $(SRC_DIR)/dependency_plan.hpp $(SRC_DIR)/dependency_provider.hpp $(SRC_DIR)/aur_rpc.hpp $(SRC_DIR)/repository_query.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/localization.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling artifact selection model test binary"
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) -I$(SRC_DIR) $(ARTIFACT_SELECTION_MODEL_TEST_SRCS) -o $@
+	$(call compile_non_heavy_test,ARTIFACT_SELECTION_MODEL)
 
 $(ARTIFACT_IDENTITY_SELECTION_TEST_TARGET): $(ARTIFACT_IDENTITY_SELECTION_TEST_SRCS) $(SRC_DIR)/artifact_identity_selection.hpp $(SRC_DIR)/artifact_identity.hpp $(SRC_DIR)/artifact_install_plan.hpp $(SRC_DIR)/dependency_plan.hpp $(SRC_DIR)/dependency_provider.hpp $(SRC_DIR)/aur_rpc.hpp $(SRC_DIR)/repository_query.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/localization.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling artifact identity selection test binary"
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-DMOGUET_ENABLE_ARTIFACT_IDENTITY_TEST_HOOKS \
-		-I$(SRC_DIR) \
-		$(ARTIFACT_IDENTITY_SELECTION_TEST_SRCS) \
-		-o $@
+	$(call compile_non_heavy_test,ARTIFACT_IDENTITY_SELECTION)
 
 $(PACKAGE_METADATA_TEST_TARGET): $(PACKAGE_METADATA_TEST_SRCS) $(SRC_DIR)/package_metadata.hpp $(SRC_DIR)/installed_package.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/process.hpp $(SRC_DIR)/shell_words.hpp $(SRC_DIR)/localization.hpp tests/stubs/package-metadata/alpm_stub.hpp tests/stubs/package-metadata/process_stub.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling package metadata fake-symbol test binary"
-	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-I$(SRC_DIR) -Itests/stubs/package-metadata \
-		$(PACKAGE_METADATA_TEST_SRCS) \
-		-o $@
+	$(call compile_non_heavy_test,PACKAGE_METADATA)
 
 $(PROVIDER_INSTALLED_STATE_TEST_TARGET): $(PROVIDER_INSTALLED_STATE_TEST_SRCS) $(SRC_DIR)/provider_installed_state.hpp $(SRC_DIR)/package_metadata.hpp $(SRC_DIR)/installed_package.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/process.hpp $(SRC_DIR)/shell_words.hpp $(SRC_DIR)/localization.hpp tests/stubs/package-metadata/alpm_stub.hpp tests/stubs/package-metadata/process_stub.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling provider installed-state test binary"
-	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-I$(SRC_DIR) -Itests/stubs/package-metadata \
-		$(PROVIDER_INSTALLED_STATE_TEST_SRCS) \
-		-o $@
+	$(call compile_non_heavy_test,PROVIDER_INSTALLED_STATE)
 
 $(DEPENDENCY_CONSTRAINT_TEST_TARGET): $(DEPENDENCY_CONSTRAINT_TEST_SRCS) $(SRC_DIR)/dependency_constraint.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling dependency constraint model test binary"
-	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-I$(SRC_DIR) \
-		$(DEPENDENCY_CONSTRAINT_TEST_SRCS) \
-		-o $@ $(LIBALPM_LDLIBS)
+	$(call compile_non_heavy_test,DEPENDENCY_CONSTRAINT)
 
 $(PACKAGE_CONSTRAINT_METADATA_TEST_TARGET): $(PACKAGE_CONSTRAINT_METADATA_TEST_SRCS) $(SRC_DIR)/package_constraint_metadata.hpp $(SRC_DIR)/dependency_constraint.hpp $(SRC_DIR)/package_metadata.hpp $(SRC_DIR)/installed_package.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/shell_words.hpp $(SRC_DIR)/localization.hpp tests/stubs/package-metadata/alpm_stub.hpp tests/stubs/package-metadata/process_stub.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling package constraint metadata adapter test binary"
-	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-I$(SRC_DIR) -Itests/stubs/package-metadata \
-		$(PACKAGE_CONSTRAINT_METADATA_TEST_SRCS) \
-		-o $@
+	$(call compile_non_heavy_test,PACKAGE_CONSTRAINT_METADATA)
 
 $(AUR_CONSTRAINT_METADATA_TEST_TARGET): $(AUR_CONSTRAINT_METADATA_TEST_SRCS) $(SRC_DIR)/aur_constraint_metadata.hpp $(SRC_DIR)/aur_rpc.hpp $(SRC_DIR)/dependency_constraint.hpp $(SRC_DIR)/dependency_provider.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling AUR constraint metadata projection test binary"
-	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-I$(SRC_DIR) \
-		$(AUR_CONSTRAINT_METADATA_TEST_SRCS) \
-		-o $@ $(LIBALPM_LDLIBS)
+	$(call compile_non_heavy_test,AUR_CONSTRAINT_METADATA)
 
 $(PACKAGE_METADATA_INTEGRATION_TEST_TARGET): $(PACKAGE_METADATA_INTEGRATION_TEST_SRCS) $(SRC_DIR)/package_metadata.hpp $(SRC_DIR)/installed_package.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/process.hpp $(SRC_DIR)/shell_words.hpp $(SRC_DIR)/logging.hpp $(SRC_DIR)/localization.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling package metadata integration test binary"
-	$(CXX) $(CPPFLAGS) $(LIBALPM_CPPFLAGS) $(CXXFLAGS) $(MY_CXXFLAGS) \
-		-I$(SRC_DIR) \
-		$(PACKAGE_METADATA_INTEGRATION_TEST_SRCS) \
-		-o $@ $(LIBALPM_LDLIBS)
+	$(call compile_non_heavy_test,PACKAGE_METADATA_INTEGRATION)
 
 test-internal-identity: $(MANPAGES)
 	python3 scripts/check-internal-identity.py
@@ -2207,6 +2316,23 @@ test-app-config: $(APP_CONFIG_MODULE_TEST_TARGET) $(APP_CONFIG_INTEGRATION_TEST_
 	sh tests/test-app-config.sh $(abspath $(APP_CONFIG_MODULE_TEST_TARGET)) $(abspath $(APP_CONFIG_INTEGRATION_TEST_TARGET))
 
 test-provider-selection: $(PROVIDER_SELECTION_TEST_TARGET)
+	@test -s "$(PROVIDER_SELECTION_DIRECT_DEPFILE)" || { \
+		echo "error: provider selection compiler depfile is missing" >&2; \
+		exit 1; \
+	}
+	@grep -F 'src/dependency_constraint.hpp' \
+		"$(PROVIDER_SELECTION_DIRECT_DEPFILE)" >/dev/null || { \
+		echo "error: provider selection depfile lost transitive dependency_constraint.hpp" >&2; \
+		exit 1; \
+	}
+	@test -s "$(PROVIDER_SELECTION_DIRECT_COMPILE_SIGNATURE)" || { \
+		echo "error: provider selection compile signature is missing" >&2; \
+		exit 1; \
+	}
+	@test -s "$(PROVIDER_SELECTION_DIRECT_LINK_SIGNATURE)" || { \
+		echo "error: provider selection link signature is missing" >&2; \
+		exit 1; \
+	}
 	$(abspath $(PROVIDER_SELECTION_TEST_TARGET))
 
 check-provider-installed-state-link-firewall:
@@ -3345,7 +3471,13 @@ test: \
 	test-source-build \
 	test-source-selection
 
+test-host-release: test
+	+@$(MAKE) --no-print-directory release-check-exclusive
+
 release-check: check-pot check-catalogs test-localization test-catalog-metadata-gate test-cli-localization-surface test-internal-identity test-application-identity test-xdg-paths test-xdg-directory-safety test-source-environment test-xdg-state-log test-trusted-cache test-runtime-identity test-dry-run-command test-public-documentation test-install-layout test-package-transition test-live-contract test-validation-status
+	+@$(MAKE) --no-print-directory release-check-exclusive
+
+release-check-exclusive:
 	@echo ":: Checking release version consistency"
 	sh scripts/check-release-version.sh
 	@echo ":: Checking license compliance"

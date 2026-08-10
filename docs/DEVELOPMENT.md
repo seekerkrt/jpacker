@@ -175,6 +175,25 @@ Slice 2とSlice 3で移行した上記10 targetのobject分離は次を満たす
 - `CXX`、`CPPFLAGS`、`CXXFLAGS`、`LDFLAGS`のoverrideを維持する。ccacheをruntime / packageの
   必須dependencyにせず、mold等のlinkerも既定または必須にしない。
 
+#### Direct compile/link testのdependency契約
+
+重量級10件以外のMakefile-direct test binary 63件は、既存の単一compile/link invocationを維持する。
+objectを重量級targetや別profileと共有せず、各binaryが
+`build/tests/dep/<binary-name>/`以下に`dependencies.d`、`compile.signature`、
+`link.signature`を所有する。
+
+- depfileは各targetと同じsource、macro、include path、compiler flagsで`-MM -MP`を実行して生成し、
+  実際に読んだproject / test-support headerだけをbinary prerequisiteへ戻す。全`src/*.hpp`を
+  一律prerequisiteにはしない。
+- compile signatureはeffective `CXX`、compile arguments、source / fake / stub setを記録する。
+  link signatureはeffective `CXX`、対象targetが実際に使う`LDFLAGS`、library、ordered build inputを
+  記録する。内容が変わらないstampのmtimeは更新しない。
+- source、tracked header、compile profileの変更時はそのbinaryだけを再compile/linkし、unchanged
+  rerunでは再利用する。depfileを失ったtargetは、空のplaceholderを先に作ってbinaryをstaleにし、
+  compile成功時にcompiler outputで置き換える。
+- direct targetのccache適用範囲と`LDFLAGS`適用範囲はこの変更で広げない。source composition、
+  fake / stub ownership、link library、既存link firewallをtargetごとに維持する。
+
 #### ccache・optional linkerの利用
 
 ccacheを導入済みの開発環境では、compile wrapperを明示して有効化する。
@@ -248,6 +267,15 @@ Slice 1時点のrecipeではccacheが全callをlink invocationと判定したた
 Slice 2 / 3の実装後も同じtarget集合についてdefault clean、incremental、isolated cold / warm ccache、
 test behavior、link firewallを測定し、このbaselineと比較する。
 
+### Host validation execution graph
+
+`test`はfull host A–Dを所有し、`release-check-exclusive`はversion、license、packaging、tracked
+Markdownのrelease固有4 checkerだけを所有する。`test-host-release`は同じtop-level runで`test`を
+完了してから`release-check-exclusive`を1回実行するため、A–DとGを重複なく構成できる。
+
+既存`release-check`のstandalone互換性は維持し、従来のA–D subset prerequisiteを完了してから同じ
+`release-check-exclusive`へ委譲する。`release-check`単独をfull A–Dへ拡張したものではない。
+
 ### Arch Linux container validation
 
 実機Arch Linuxでの最終smoke testより前に、official `archlinux:latest`を使う隔離laneを
@@ -267,12 +295,17 @@ default build contextからsource snapshotだけをcontainer内へcopyし、host
 config / cacheは共有せず、`--privileged`も使用しない。package transition testのlegacy sourceは
 local `v1.16.0` tagからtemporary archiveとして生成し、Git metadataとは分離したnamed build
 contextで渡す。build、test、release validationはcontainer固有のHOME / XDG directoryを使う
-一般userとして、次の順で実行する。
+一般userとして実行する。image buildがclean production buildを1回所有し、runtimeはそのbinaryが
+存在することを確認してfull host A–Dとrelease固有Gを1回ずつ実行する。
+
+image build:
 
     env -u MAKEFLAGS -u MFLAGS make clean
     env -u MAKEFLAGS -u MFLAGS make -j8 --output-sync=target
-    env -u MAKEFLAGS -u MFLAGS make -j8 --output-sync=target test
-    env -u MAKEFLAGS -u MFLAGS make -j8 --output-sync=target release-check
+
+runtime:
+
+    env -u MAKEFLAGS -u MFLAGS make -j8 --output-sync=target test-host-release
 
 Docker command、daemon、image build、またはvalidation stepが失敗した場合、diagnosticとnon-zero
 statusをhostへ返す。実行containerは成功時・失敗時とも`--rm`で破棄し、temporary legacy archiveも
