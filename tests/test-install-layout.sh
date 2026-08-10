@@ -3,6 +3,7 @@
 set -eu
 
 repo_root=$(CDPATH='' cd "$(dirname "$0")/.." && pwd)
+. "$repo_root/scripts/validation-status.sh"
 stage_root=$(mktemp -d)
 stage_dir=$stage_root/root
 test_home=$stage_dir/home/test-user
@@ -127,8 +128,29 @@ assert_exact_payload() {
 /usr/share/man/ja/man1/moguet.1
 /usr/share/man/man1/moguet.1
 /usr/share/zsh/site-functions/_moguet'
-    actual_payload=$(find "$stage_dir" -type f -print |
-        sed "s|^$stage_dir||" | LC_ALL=C sort)
+    payload_paths_raw=$stage_root/payload-paths.raw
+    payload_paths_normalized=$stage_root/payload-paths.normalized
+    payload_paths_sorted=$stage_root/payload-paths.sorted
+    if validation_capture_output "$payload_paths_raw" \
+        find "$stage_dir" -type f -print; then
+        :
+    else
+        payload_status=$?
+        fail "payload path producer failed with status $payload_status; raw=$payload_paths_raw"
+    fi
+    if sed "s|^$stage_dir||" "$payload_paths_raw" \
+        >"$payload_paths_normalized"; then
+        :
+    else
+        payload_status=$?
+        fail "payload path normalization failed with status $payload_status"
+    fi
+    if LC_ALL=C sort "$payload_paths_normalized" >"$payload_paths_sorted"; then
+        actual_payload=$(cat "$payload_paths_sorted")
+    else
+        payload_status=$?
+        fail "payload path sorting failed with status $payload_status"
+    fi
     [ "$actual_payload" = "$expected_payload" ] || {
         printf 'install-layout-test: unexpected payload:\n%s\n' \
             "$actual_payload" >&2

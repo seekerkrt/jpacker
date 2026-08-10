@@ -13,6 +13,38 @@ repo_root=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
 MOGUET_TEST_REPOSITORY_ROOT=$repo_root
 export MOGUET_TEST_REPOSITORY_ROOT
 . "$repo_root/tests/test-command-safety.sh"
+. "$repo_root/scripts/validation-status.sh"
+
+snapshot_directory_raw() {
+    snapshot_dir=$1
+    (
+        CDPATH='' cd "$snapshot_dir" || exit $?
+        find . -exec "${MOGUET_TEST_SNAPSHOT_STAT_COMMAND:-stat}" --printf \
+            'entry type=%F mode=%f uid=%u gid=%g dev=%d ino=%i size=%s mtime=%y ctime=%z path=%n target=%N\n' -- {} + || exit $?
+        find . -type f \
+            -exec "${MOGUET_TEST_SNAPSHOT_CKSUM_COMMAND:-cksum}" {} + || exit $?
+    )
+}
+
+if [ -n "${MOGUET_TEST_SNAPSHOT_FAULT_ROOT:-}" ]; then
+    if [ -z "${MOGUET_TEST_SNAPSHOT_FAULT_OUTPUT:-}" ]; then
+        printf '%s\n' \
+            'snapshot fault injection requires an output path' >&2
+        exit 1
+    fi
+    if validation_capture_sorted_output \
+        "$MOGUET_TEST_SNAPSHOT_FAULT_OUTPUT.raw" \
+        "$MOGUET_TEST_SNAPSHOT_FAULT_OUTPUT" \
+        snapshot_directory_raw "$MOGUET_TEST_SNAPSHOT_FAULT_ROOT"; then
+        exit 0
+    else
+        snapshot_status=$?
+    fi
+    printf 'directory snapshot failed with status %s; raw=%s\n' \
+        "$snapshot_status" "$MOGUET_TEST_SNAPSHOT_FAULT_OUTPUT.raw" >&2
+    exit 1
+fi
+
 tmp_dir=$(mktemp -d)
 server_pid=
 
@@ -141,8 +173,8 @@ run_fail() {
     output_file=$1
     shift
     : > "$command_log"
-    if "$test_runner" "$@" </dev/null > "$output_file" 2>&1; then
-        echo "expected command to fail: $*" >&2
+    if ! validation_expect_status build-cache-business-failure 1 \
+        "$output_file" "$output_file" "$test_runner" "$@" </dev/null; then
         sed -n '1,240p' "$output_file" >&2
         cat "$command_log" >&2
         exit 1
@@ -163,8 +195,17 @@ run_clean_tty_ok() {
 run_clean_tty_fail() {
     output_file=$1
     : > "$command_log"
-    if printf 'y\n' | script -qec "$test_runner clean" /dev/null > "$output_file" 2>&1; then
-        echo "expected interactive clean to fail" >&2
+    tty_input=$case_dir/clean-tty.input
+    printf 'y\n' >"$tty_input"
+    if script -qec "$test_runner clean" /dev/null \
+        <"$tty_input" >"$output_file" 2>&1; then
+        tty_status=0
+    else
+        tty_status=$?
+    fi
+    if ! validation_assert_status build-cache-clean-tty-failure 1 \
+        "$tty_status" "$output_file" "$output_file" \
+        script -qec "$test_runner clean" /dev/null; then
         sed -n '1,240p' "$output_file" >&2
         cat "$command_log" >&2
         exit 1
@@ -188,9 +229,17 @@ run_build_tty_fail() {
     output_file=$1
     answers=$2
     : > "$command_log"
-    if printf '%b' "$answers" |
-        script -qec "$test_runner --nodiff build clean-root" /dev/null > "$output_file" 2>&1; then
-        echo "expected interactive build to fail" >&2
+    tty_input=$case_dir/build-tty.input
+    printf '%b' "$answers" >"$tty_input"
+    if script -qec "$test_runner --nodiff build clean-root" /dev/null \
+        <"$tty_input" >"$output_file" 2>&1; then
+        tty_status=0
+    else
+        tty_status=$?
+    fi
+    if ! validation_assert_status build-cache-build-tty-failure 1 \
+        "$tty_status" "$output_file" "$output_file" \
+        script -qec "$test_runner --nodiff build clean-root" /dev/null; then
         sed -n '1,240p' "$output_file" >&2
         cat "$command_log" >&2
         exit 1
@@ -301,10 +350,25 @@ assert_no_cache_mutation_commands() {
         cat "$command_log" >&2
         exit 1
     fi
-    if grep '^pacman ' "$command_log" | grep -v '^pacman -Si ' >/dev/null; then
+    pacman_filter_raw=$case_dir/pacman-commands.raw
+    if validation_capture_output "$pacman_filter_raw" \
+        grep '^pacman ' "$command_log"; then
+        :
+    else
+        grep_status=$?
+        case "$grep_status" in
+            1) : >"$pacman_filter_raw" ;;
+            *) fail "pacman command filter failed with status $grep_status" ;;
+        esac
+    fi
+    if grep -v '^pacman -Si ' "$pacman_filter_raw" >/dev/null; then
         echo "unsafe cache path reached a pacman mutation command" >&2
         cat "$command_log" >&2
         exit 1
+    else
+        grep_status=$?
+        [ "$grep_status" -eq 1 ] ||
+            fail "pacman mutation filter failed with status $grep_status"
     fi
 }
 
@@ -314,10 +378,25 @@ assert_no_build_or_install_commands() {
         cat "$command_log" >&2
         exit 1
     fi
-    if grep '^pacman ' "$command_log" | grep -v '^pacman -Si ' >/dev/null; then
+    pacman_filter_raw=$case_dir/pacman-commands.raw
+    if validation_capture_output "$pacman_filter_raw" \
+        grep '^pacman ' "$command_log"; then
+        :
+    else
+        grep_status=$?
+        case "$grep_status" in
+            1) : >"$pacman_filter_raw" ;;
+            *) fail "pacman command filter failed with status $grep_status" ;;
+        esac
+    fi
+    if grep -v '^pacman -Si ' "$pacman_filter_raw" >/dev/null; then
         echo "unsafe reviewed artifact reached a pacman mutation command" >&2
         cat "$command_log" >&2
         exit 1
+    else
+        grep_status=$?
+        [ "$grep_status" -eq 1 ] ||
+            fail "pacman mutation filter failed with status $grep_status"
     fi
 }
 
@@ -425,8 +504,16 @@ append_padding_branch_git_config() {
 
 git_config_output_size() {
     config_file=$1
-    /usr/bin/git config --file "$config_file" \
-        --no-includes --null --list | wc -c
+    config_output_raw=$case_dir/git-config-output.raw
+    if validation_capture_output "$config_output_raw" \
+        /usr/bin/git config --file "$config_file" \
+        --no-includes --null --list; then
+        wc -c <"$config_output_raw"
+        return 0
+    else
+        config_status=$?
+    fi
+    fail "git config producer failed with status $config_status; raw=$config_output_raw"
 }
 
 create_clone_fixture() {
@@ -439,12 +526,13 @@ create_clone_fixture() {
 snapshot_directory() {
     snapshot_dir=$1
     snapshot_file=$2
-    (
-        CDPATH= cd "$snapshot_dir"
-        find . -exec stat --printf \
-            'entry type=%F mode=%f uid=%u gid=%g dev=%d ino=%i size=%s mtime=%y ctime=%z path=%n target=%N\n' -- {} \;
-        find . -type f -exec cksum {} \;
-    ) | LC_ALL=C sort > "$snapshot_file"
+    if validation_capture_sorted_output "$snapshot_file.raw" "$snapshot_file" \
+        snapshot_directory_raw "$snapshot_dir"; then
+        return 0
+    else
+        snapshot_status=$?
+    fi
+    fail "directory snapshot failed with status $snapshot_status; raw=$snapshot_file.raw"
 }
 
 assert_directory_unchanged() {
@@ -911,11 +999,11 @@ for ssl_cert_dir_value in \
     assert_command "git fetch origin"
     assert_environment_assignment \
         SSL_CERT_DIR "$ssl_cert_dir_value" "$trusted_git_environment_log"
-    exact_count=$(grep -Fxc -- \
+    exact_count=$(validation_grep_count -Fxc -- \
         "SSL_CERT_DIR=$ssl_cert_dir_value" \
-        "$trusted_git_environment_log" || true)
-    variable_count=$(grep -Ec '^SSL_CERT_DIR=' \
-        "$trusted_git_environment_log" || true)
+        "$trusted_git_environment_log")
+    variable_count=$(validation_grep_count -Ec '^SSL_CERT_DIR=' \
+        "$trusted_git_environment_log")
     if [ "$exact_count" -ne 3 ] || [ "$variable_count" -ne 3 ]; then
         fail "SSL_CERT_DIR was not forwarded exactly once per trusted Git child"
     fi

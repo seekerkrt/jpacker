@@ -13,6 +13,7 @@ repo_root=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
 MOGUET_TEST_REPOSITORY_ROOT=$repo_root
 export MOGUET_TEST_REPOSITORY_ROOT
 . "$repo_root/tests/test-command-safety.sh"
+. "$repo_root/scripts/validation-status.sh"
 tmp_dir=$(mktemp -d)
 server_pid=
 
@@ -77,8 +78,8 @@ run_fail() {
     output_file=$1
     shift
     : > "$command_log"
-    if "$test_binary" "$@" </dev/null > "$output_file" 2>&1; then
-        echo "expected command to fail: $*" >&2
+    if ! validation_expect_status pacman-routing-business-failure 1 \
+        "$output_file" "$output_file" "$test_binary" "$@" </dev/null; then
         exit 1
     fi
 }

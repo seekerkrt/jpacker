@@ -12,6 +12,38 @@ repo_root=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
 MOGUET_TEST_REPOSITORY_ROOT=$repo_root
 export MOGUET_TEST_REPOSITORY_ROOT
 . "$repo_root/tests/test-command-safety.sh"
+. "$repo_root/scripts/validation-status.sh"
+
+snapshot_source_tree_raw() {
+    checked_source_root=$1
+    (
+        CDPATH='' cd "$checked_source_root" || exit $?
+        find . -exec "${MOGUET_TEST_SNAPSHOT_STAT_COMMAND:-stat}" --printf \
+            'entry type=%F mode=%f uid=%u gid=%g dev=%d ino=%i size=%s mtime=%y ctime=%z path=%n target=%N\n' -- {} + || exit $?
+        find . -type f \
+            -exec "${MOGUET_TEST_SNAPSHOT_CKSUM_COMMAND:-cksum}" {} + || exit $?
+    )
+}
+
+if [ -n "${MOGUET_TEST_SNAPSHOT_FAULT_ROOT:-}" ]; then
+    if [ -z "${MOGUET_TEST_SNAPSHOT_FAULT_OUTPUT:-}" ]; then
+        printf '%s\n' \
+            'snapshot fault injection requires an output path' >&2
+        exit 1
+    fi
+    if validation_capture_sorted_output \
+        "$MOGUET_TEST_SNAPSHOT_FAULT_OUTPUT.raw" \
+        "$MOGUET_TEST_SNAPSHOT_FAULT_OUTPUT" \
+        snapshot_source_tree_raw "$MOGUET_TEST_SNAPSHOT_FAULT_ROOT"; then
+        exit 0
+    else
+        snapshot_status=$?
+    fi
+    printf 'source tree snapshot failed with status %s; raw=%s\n' \
+        "$snapshot_status" "$MOGUET_TEST_SNAPSHOT_FAULT_OUTPUT.raw" >&2
+    exit 1
+fi
+
 tmp_dir=$(mktemp -d)
 server_pid=
 
@@ -23,6 +55,20 @@ cleanup() {
     rm -rf "$tmp_dir"
 }
 trap cleanup EXIT INT TERM
+
+count_command_output_lines() {
+    count_label=$1
+    shift
+    count_raw=$case_dir/$count_label.raw
+    if validation_capture_output "$count_raw" "$@"; then
+        wc -l <"$count_raw"
+        return 0
+    else
+        count_status=$?
+    fi
+    echo "$count_label producer failed with status $count_status; raw=$count_raw" >&2
+    return "$count_status"
+}
 
 if ! command -v script >/dev/null 2>&1; then
     echo "script(1) is required for source/maintenance command tests" >&2
@@ -179,8 +225,8 @@ run_ok() {
 run_fail() {
     : > "$command_log"
     : > "$request_log"
-    if "$test_binary" "$@" </dev/null > "$output_file" 2>&1; then
-        echo "expected command to fail: $*" >&2
+    if ! validation_expect_status source-maintenance-business-failure 1 \
+        "$output_file" "$output_file" "$test_binary" "$@" </dev/null; then
         sed -n '1,260p' "$output_file" >&2
         cat "$command_log" >&2
         exit 1
@@ -195,7 +241,13 @@ run_clean_low_nofile_fail() {
         ulimit -n "$soft_limit"
         "$test_binary" --noconfirm clean </dev/null > "$output_file" 2>&1
     ); then
-        echo "expected clean preflight to fail with low RLIMIT_NOFILE" >&2
+        exit_code=0
+    else
+        exit_code=$?
+    fi
+    if ! validation_assert_status clean-low-nofile-business-failure 1 \
+        "$exit_code" "$output_file" "$output_file" \
+        "$test_binary" --noconfirm clean; then
         sed -n '1,260p' "$output_file" >&2
         cat "$command_log" >&2
         exit 1
@@ -277,15 +329,13 @@ run_fail_nonblocking() {
     : > "$request_log"
     exit_code=0
     if timeout 5 "$test_binary" "$@" > "$output_file" 2>&1; then
-        echo "expected command to fail without blocking: $*" >&2
-        sed -n '1,260p' "$output_file" >&2
-        cat "$command_log" >&2
-        exit 1
+        exit_code=0
     else
         exit_code=$?
     fi
-    if [ "$exit_code" -eq 124 ]; then
-        echo "command blocked until timeout: $*" >&2
+    if ! validation_assert_status source-maintenance-nonblocking-failure 1 \
+        "$exit_code" "$output_file" "$output_file" \
+        timeout 5 "$test_binary" "$@"; then
         sed -n '1,260p' "$output_file" >&2
         cat "$command_log" >&2
         exit 1
@@ -307,9 +357,17 @@ run_clean_tty_ok() {
 run_clean_tty_fail() {
     answer=$1
     : > "$command_log"
-    if printf '%s\n' "$answer" |
-        script -qec "$test_binary clean" /dev/null > "$output_file" 2>&1; then
-        echo "expected interactive clean to fail with answer: $answer" >&2
+    clean_input=$case_dir/clean-tty.input
+    printf '%s\n' "$answer" >"$clean_input"
+    if script -qec "$test_binary clean" /dev/null \
+        <"$clean_input" >"$output_file" 2>&1; then
+        tty_status=0
+    else
+        tty_status=$?
+    fi
+    if ! validation_assert_status clean-tty-business-failure 1 \
+        "$tty_status" "$output_file" "$output_file" \
+        script -qec "$test_binary clean" /dev/null; then
         sed -n '1,260p' "$output_file" >&2
         cat "$command_log" >&2
         exit 1
@@ -328,8 +386,9 @@ run_source_ok() {
 
 run_source_fail() {
     : > "$command_log"
-    if "$source_install_test_binary" "$@" </dev/null > "$output_file" 2>&1; then
-        echo "expected source-install scenario to fail: $*" >&2
+    if ! validation_expect_status source-install-business-failure 1 \
+        "$output_file" "$output_file" \
+        "$source_install_test_binary" "$@" </dev/null; then
         sed -n '1,260p' "$output_file" >&2
         cat "$command_log" >&2
         exit 1
@@ -383,7 +442,7 @@ assert_output_line_count() {
     pattern=$1
     expected_count=$2
     file=$3
-    actual_count=$(grep -Fc -- "$pattern" "$file" || true)
+    actual_count=$(validation_grep_count -Fc -- "$pattern" "$file")
     if [ "$actual_count" -ne "$expected_count" ]; then
         echo "unexpected output count for: $pattern" >&2
         echo "expected $expected_count, got $actual_count" >&2
@@ -442,7 +501,7 @@ assert_command_at() {
 assert_command_count() {
     expected=$1
     expected_count=$2
-    actual_count=$(grep -Fxc -- "$expected" "$command_log" || true)
+    actual_count=$(validation_grep_count -Fxc -- "$expected" "$command_log")
     if [ "$actual_count" -ne "$expected_count" ]; then
         echo "unexpected command count for: $expected" >&2
         echo "expected $expected_count, got $actual_count" >&2
@@ -469,7 +528,8 @@ assert_command_prefix_count() {
 assert_command_pattern_count() {
     expected_pattern=$1
     expected_count=$2
-    actual_count=$(grep -Ec -- "$expected_pattern" "$command_log" || true)
+    actual_count=$(validation_grep_count -Ec -- \
+        "$expected_pattern" "$command_log")
     if [ "$actual_count" -ne "$expected_count" ]; then
         echo "unexpected command pattern count: $actual_count (expected $expected_count)" >&2
         echo "pattern: $expected_pattern" >&2
@@ -620,12 +680,16 @@ assert_file_empty() {
 snapshot_source_tree() {
     checked_source_root=$1
     source_tree_snapshot=$2
-    (
-        CDPATH= cd "$checked_source_root"
-        find . -exec stat --printf \
-            'entry type=%F mode=%f uid=%u gid=%g dev=%d ino=%i size=%s mtime=%y ctime=%z path=%n target=%N\n' -- {} \;
-        find . -type f -exec cksum {} \;
-    ) | LC_ALL=C sort > "$source_tree_snapshot"
+    if validation_capture_sorted_output \
+        "$source_tree_snapshot.raw" "$source_tree_snapshot" \
+        snapshot_source_tree_raw "$checked_source_root"; then
+        return 0
+    else
+        snapshot_status=$?
+    fi
+    printf 'source tree snapshot failed with status %s; raw=%s\n' \
+        "$snapshot_status" "$source_tree_snapshot.raw" >&2
+    exit 1
 }
 
 assert_source_tree_unchanged() {
@@ -1006,7 +1070,16 @@ run_fail --noedit --noconfirm build --local "$local_root"
 assert_contains \
     "Moguet state and cache directories must be outside the local source tree." \
     "$output_file"
-if find "$local_root/moguet" -mindepth 1 -print -quit | grep -q .; then
+local_cache_entries_raw=$case_dir/local-cache-entries.raw
+if validation_capture_output "$local_cache_entries_raw" \
+    find "$local_root/moguet" -mindepth 1 -print -quit; then
+    :
+else
+    local_cache_status=$?
+    echo "local cache producer failed with status $local_cache_status" >&2
+    exit 1
+fi
+if [ -s "$local_cache_entries_raw" ]; then
     echo "existing source-local cache directory was mutated" >&2
     find "$local_root/moguet" -mindepth 1 -maxdepth 1 -print >&2
     exit 1
@@ -1160,19 +1233,19 @@ for metadata_rejection in empty quit; do
             ;;
     esac
     : > "$command_log"
-    tty_exit_code=0
-    if printf '%b' "$metadata_input" |
-        timeout 5 script -qec \
-            "$test_binary --noedit build --local $local_root" \
-            /dev/null > "$output_file" 2>&1; then
-        echo "expected TTY metadata rejection: $metadata_rejection" >&2
-        sed -n '1,260p' "$output_file" >&2
-        exit 1
+    metadata_input_file=$case_dir/metadata-rejection.input
+    printf '%b' "$metadata_input" >"$metadata_input_file"
+    if timeout 5 script -qec \
+        "$test_binary --noedit build --local $local_root" \
+        /dev/null <"$metadata_input_file" >"$output_file" 2>&1; then
+        tty_exit_code=0
     else
         tty_exit_code=$?
     fi
-    if [ "$tty_exit_code" -eq 124 ]; then
-        echo "TTY metadata rejection blocked: $metadata_rejection" >&2
+    if ! validation_assert_status \
+        "metadata-rejection-$metadata_rejection" 1 "$tty_exit_code" \
+        "$output_file" "$output_file" timeout 5 script -qec \
+        "$test_binary --noedit build --local $local_root" /dev/null; then
         sed -n '1,260p' "$output_file" >&2
         exit 1
     fi
@@ -1287,7 +1360,8 @@ printf 'SECOND=two\n' > "$case_dir/gamma.expected"
 assert_file_equals "$case_dir/alpha.expected" "$preference_dir/alpha"
 assert_file_equals "$case_dir/beta.expected" "$preference_dir/beta"
 assert_file_equals "$case_dir/gamma.expected" "$preference_dir/gamma"
-entry_count=$(find "$preference_dir" -maxdepth 1 -type f | wc -l)
+entry_count=$(count_command_output_lines add-src-preference-entries \
+    find "$preference_dir" -maxdepth 1 -type f)
 if [ "$entry_count" -ne 3 ]; then
     echo "add-src did not preserve one preference file per package" >&2
     exit 1
@@ -1649,7 +1723,9 @@ run_clean_low_nofile_fail 24
 assert_contains "Too many open files" "$output_file"
 assert_not_contains "Cleaning package caches..." "$output_file"
 assert_total_command_count 0
-if [ "$(find "$cache_root" -mindepth 1 -maxdepth 1 -type d | wc -l)" -ne 64 ]; then
+fd_cache_entry_count=$(count_command_output_lines fd-cache-entries \
+    find "$cache_root" -mindepth 1 -maxdepth 1 -type d)
+if [ "$fd_cache_entry_count" -ne 64 ]; then
     echo "low-RLIMIT cleanup preflight mutated cache entries" >&2
     exit 1
 fi
@@ -1844,8 +1920,9 @@ if [ -e "$cache_root/alpha" ] || [ -L "$cache_root/alpha" ] ||
 fi
 upgrade_preflight_after=$(cksum \
     "$cache_root/preflight-sentinel/state")
-upgrade_preflight_entry_count=$(find "$cache_root" \
-    -mindepth 1 -maxdepth 1 -print | wc -l)
+upgrade_preflight_entry_count=$(count_command_output_lines \
+    upgrade-preflight-cache-entries find "$cache_root" \
+    -mindepth 1 -maxdepth 1 -print)
 if [ "$upgrade_preflight_after" != "$upgrade_preflight_checksum" ] ||
    [ "$upgrade_preflight_entry_count" -ne 1 ]; then
     echo "upgrade PKGDEST preflight mutated the cache tree" >&2

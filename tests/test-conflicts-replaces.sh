@@ -13,6 +13,7 @@ repo_root=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
 MOGUET_TEST_REPOSITORY_ROOT=$repo_root
 export MOGUET_TEST_REPOSITORY_ROOT
 . "$repo_root/tests/test-command-safety.sh"
+. "$repo_root/scripts/validation-status.sh"
 tmp_dir=$(mktemp -d)
 server_pid=
 
@@ -78,8 +79,8 @@ run_ok() {
 run_fail() {
     output_file=$1
     shift
-    if "$test_binary" "$@" </dev/null > "$output_file" 2>&1; then
-        echo "expected command to fail: $*" >&2
+    if ! validation_expect_status conflicts-replaces-business-failure 1 \
+        "$output_file" "$output_file" "$test_binary" "$@" </dev/null; then
         exit 1
     fi
 }
@@ -114,7 +115,9 @@ run_ok "$tmp_dir/dependency-plan.out" plan dependency-risk-root
 assert_contains "risk-dep" "$tmp_dir/dependency-plan.out"
 assert_contains "conflicts: dep-old>=2" "$tmp_dir/dependency-plan.out"
 assert_contains "Plan status: incomplete" "$tmp_dir/dependency-plan.out"
-if [ "$(grep -c '^  risk-dep$' "$tmp_dir/dependency-plan.out")" -ne 1 ]; then
+risk_dep_count=$(validation_grep_count -c '^  risk-dep$' \
+    "$tmp_dir/dependency-plan.out")
+if [ "$risk_dep_count" -ne 1 ]; then
     echo "risk-dep metadata was not deduplicated" >&2
     exit 1
 fi

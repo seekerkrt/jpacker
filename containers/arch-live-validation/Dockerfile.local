@@ -85,6 +85,12 @@ RUN install -d -o root -g root -m 0755 \
     && install -o root -g root -m 0755 \
         containers/arch-live-validation/local-stage-artifact.py \
         /usr/libexec/moguet-live-local/local-stage-artifact.py \
+    && install -o root -g root -m 0755 \
+        scripts/validation-status.sh \
+        /usr/libexec/moguet-live-local/validation-status.sh \
+    && install -o root -g root -m 0755 \
+        containers/arch-live-validation/local-archive-validator.sh \
+        /usr/libexec/moguet-live-local/local-archive-validator.sh \
     && install -d -o root -g root -m 0711 \
         /var/lib/moguet-live-local \
     && install -d -o root -g moguet-validation -m 0750 \

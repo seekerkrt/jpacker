@@ -2,6 +2,8 @@
 set -eu
 
 module_test_binary=$1
+repo_root=$(CDPATH='' cd "$(dirname "$0")/.." && pwd)
+. "$repo_root/scripts/validation-status.sh"
 tmp_dir=$(mktemp -d)
 
 cleanup() {
@@ -69,8 +71,8 @@ run_ok() {
 run_fail() {
     output_file=$1
     shift
-    if "$module_test_binary" "$@" > "$output_file" 2>&1; then
-        echo "user_config module test command unexpectedly succeeded: $*" >&2
+    if ! validation_expect_status user-config-business-failure 1 \
+        "$output_file" "$output_file" "$module_test_binary" "$@"; then
         cat "$output_file" >&2
         exit 1
     fi

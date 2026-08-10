@@ -10,6 +10,7 @@ unset LANGUAGE
 
 test_binary=$1
 repo_root=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
+. "$repo_root/scripts/validation-status.sh"
 MOGUET_TEST_REPOSITORY_ROOT=$repo_root
 export MOGUET_TEST_REPOSITORY_ROOT
 . "$repo_root/tests/test-command-safety.sh"
@@ -214,7 +215,7 @@ assert_exact_line_count() {
     expected=$1
     line=$2
     file=$3
-    actual=$(grep -Fxc -- "$line" "$file" || true)
+    actual=$(validation_grep_count -Fxc -- "$line" "$file")
     if [ "$actual" -ne "$expected" ]; then
         fail_case "expected $expected occurrence(s) of '$line', got $actual"
     fi
@@ -224,7 +225,7 @@ assert_contains_count() {
     expected=$1
     pattern=$2
     file=$3
-    actual=$(grep -Fc -- "$pattern" "$file" || true)
+    actual=$(validation_grep_count -Fc -- "$pattern" "$file")
     if [ "$actual" -ne "$expected" ]; then
         fail_case "expected $expected line(s) containing '$pattern', got $actual"
     fi
@@ -1057,7 +1058,7 @@ assert_numbered_foreign_batches
 assert_exact_command_before "aur info-many 100 foreign-001 foreign-100" "aur info-strict foreign-001"
 assert_exact_command_before "aur info-strict foreign-100" "aur info-many 1 foreign-101 foreign-101"
 assert_not_contains "aur info-strict foreign-101" "$command_log"
-fallback_count=$(grep -c '^aur info-strict ' "$command_log" || true)
+fallback_count=$(validation_grep_count -c '^aur info-strict ' "$command_log")
 if [ "$fallback_count" -ne 100 ]; then
     fail_case "expected 100 per-package fallback calls, got $fallback_count"
 fi
@@ -1078,7 +1079,8 @@ assert_not_contains "Failed to fetch AUR info:" "$stderr_file"
 assert_exact_line "aur info-many 100 foreign-001 foreign-100" "$command_log"
 assert_exact_line "aur info-strict foreign-001" "$command_log"
 assert_not_contains "aur info-strict foreign-002" "$command_log"
-fallback_schema_info_many_count=$(grep -c '^aur info-many ' "$command_log" || true)
+fallback_schema_info_many_count=$(validation_grep_count \
+    -c '^aur info-many ' "$command_log")
 if [ "$fallback_schema_info_many_count" -ne 1 ]; then
     fail_case "fallback AurRpcResponseError should stop before the second batch"
 fi
@@ -1111,7 +1113,7 @@ set_foreign_packages_101
 run_fail -Qua
 assert_contains "schema batch failure" "$stderr_file"
 assert_not_contains "Failed to fetch AUR info:" "$stderr_file"
-info_many_count=$(grep -c '^aur info-many ' "$command_log" || true)
+info_many_count=$(validation_grep_count -c '^aur info-many ' "$command_log")
 if [ "$info_many_count" -ne 1 ]; then
     fail_case "AurRpcResponseError should stop before the second batch"
 fi

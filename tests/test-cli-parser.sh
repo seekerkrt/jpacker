@@ -13,6 +13,7 @@ repo_root=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
 MOGUET_TEST_REPOSITORY_ROOT=$repo_root
 export MOGUET_TEST_REPOSITORY_ROOT
 . "$repo_root/tests/test-command-safety.sh"
+. "$repo_root/scripts/validation-status.sh"
 tmp_dir=$(mktemp -d)
 server_pid=
 
@@ -102,8 +103,8 @@ run_ok() {
 
 run_fail() {
     : > "$command_log"
-    if "$test_binary" "$@" </dev/null > "$output_file" 2>&1; then
-        echo "expected command to fail: $*" >&2
+    if ! validation_expect_status cli-parser-business-failure 1 \
+        "$output_file" "$output_file" "$test_binary" "$@" </dev/null; then
         sed -n '1,240p' "$output_file" >&2
         cat "$command_log" >&2
         exit 1
@@ -142,7 +143,7 @@ assert_command() {
 assert_command_count() {
     expected=$1
     expected_count=$2
-    actual_count=$(grep -Fxc -- "$expected" "$command_log" || true)
+    actual_count=$(validation_grep_count -Fxc -- "$expected" "$command_log")
     if [ "$actual_count" -ne "$expected_count" ]; then
         echo "unexpected command count for: $expected" >&2
         echo "expected $expected_count, got $actual_count" >&2
@@ -214,7 +215,7 @@ assert_no_mutation_commands() {
 assert_only_sudo_command() {
     expected=$1
     assert_command_count "$expected" 1
-    sudo_count=$(grep -c '^sudo ' "$command_log" || true)
+    sudo_count=$(validation_grep_count -c '^sudo ' "$command_log")
     if [ "$sudo_count" -ne 1 ]; then
         echo "unexpected additional sudo command(s)" >&2
         cat "$command_log" >&2

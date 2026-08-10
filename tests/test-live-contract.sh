@@ -2,6 +2,14 @@
 set -eu
 
 repo_root=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
+. "$repo_root/scripts/validation-status.sh"
+tmp_dir=$(mktemp -d)
+
+cleanup() {
+    rm -rf "$tmp_dir" >/dev/null 2>&1 || :
+}
+trap cleanup EXIT
+
 live_root=$repo_root/containers/arch-live-validation
 readme_file=$live_root/README.md
 local_package_file=$live_root/fixtures/local-package/PKGBUILD
@@ -20,6 +28,8 @@ local_dockerfile=$live_root/Dockerfile.local
 local_runner=$live_root/run-local-install.sh
 local_gateway=$live_root/local-pacman-gateway.sh
 local_stage_helper=$live_root/local-stage-artifact.py
+local_archive_validator=$live_root/local-archive-validator.sh
+validation_status_library=$repo_root/scripts/validation-status.sh
 dockerignore_file=$repo_root/.dockerignore
 makefile=$repo_root/Makefile
 offline_dockerfile=$repo_root/containers/arch-validation/Dockerfile
@@ -87,6 +97,8 @@ assert_regular_file "$local_dockerfile" 'live local PKGBUILD Dockerfile'
 assert_regular_file "$local_runner" 'live local PKGBUILD runner'
 assert_regular_file "$local_gateway" 'live local PKGBUILD gateway'
 assert_regular_file "$local_stage_helper" 'live local artifact staging helper'
+assert_regular_file "$local_archive_validator" 'live local archive validator'
+assert_regular_file "$validation_status_library" 'validation status library'
 assert_regular_file "$dockerignore_file" 'Docker context exclusion contract'
 assert_regular_file "$offline_dockerfile" 'offline validation Dockerfile'
 assert_regular_file "$offline_runner" 'offline validation runner'
@@ -500,7 +512,10 @@ do
     assert_contains "$aur_runner" "$gateway_rejection_shape"
 done
 assert_contains "$aur_runner" '"$production_moguet" -Si --aur "$package_name"'
-assert_contains "$aur_runner" "printf 'n\\n' | env MOGUET_LIVE_AUR_CASE"
+assert_contains "$aur_runner" 'production_input=$case_root/production-install.input'
+assert_contains "$aur_runner" "printf 'n\\n' >\"\$production_input\""
+assert_contains "$aur_runner" '<"$production_input" >"$production_output"'
+assert_not_contains "$aur_runner" "printf 'n\\n' | env MOGUET_LIVE_AUR_CASE"
 assert_contains "$aur_runner" \
     '"$production_moguet" --nodiff --noconfirm -S --aur "$package_name"'
 if grep -E '"\$production_moguet".*--noedit' "$aur_runner" >/dev/null; then
@@ -580,7 +595,7 @@ do
     fi
 done
 
-live_target_reference_count=$(grep -F -c \
+live_target_reference_count=$(validation_grep_count -F -c \
     'test-container-live-provider' "$makefile")
 if [ "$live_target_reference_count" -ne 3 ]; then
     fail 'live provider target must appear only in .PHONY, its definition, and the aggregate gate'
@@ -611,7 +626,7 @@ do
         fail "live AUR Make target contains forbidden runtime option: $forbidden_runtime_option"
     fi
 done
-aur_live_target_reference_count=$(grep -F -c \
+aur_live_target_reference_count=$(validation_grep_count -F -c \
     'test-container-live-aur' "$makefile")
 if [ "$aur_live_target_reference_count" -ne 3 ]; then
     fail 'live AUR target must appear only in .PHONY, its definition, and the aggregate gate'
@@ -642,7 +657,7 @@ do
         fail "live local Make target contains forbidden runtime option: $forbidden_runtime_option"
     fi
 done
-local_live_target_reference_count=$(grep -F -c \
+local_live_target_reference_count=$(validation_grep_count -F -c \
     'test-container-live-local' "$makefile")
 if [ "$local_live_target_reference_count" -ne 3 ]; then
     fail 'live local target must appear only in .PHONY, its definition, and the aggregate gate'
@@ -758,6 +773,8 @@ awk '
 assert_contains "$local_dockerfile" '/usr/libexec/moguet-live-local/pacman.real'
 assert_contains "$local_dockerfile" 'local-pacman-gateway.sh'
 assert_contains "$local_dockerfile" 'local-stage-artifact.py'
+assert_contains "$local_dockerfile" 'local-archive-validator.sh'
+assert_contains "$local_dockerfile" 'scripts/validation-status.sh'
 assert_contains "$local_dockerfile" 'moguet-validation ALL=(root) NOPASSWD: /usr/bin/pacman *'
 assert_contains "$local_dockerfile" 'CMD ["sh", "containers/arch-live-validation/run-local-install.sh"]'
 assert_not_contains "$local_dockerfile" 'aur-pacman-gateway.sh'
@@ -772,9 +789,37 @@ assert_contains "$local_gateway" 'root argv must be one selected provider transa
 assert_contains "$local_gateway" 'artifact path is outside the invocation-owned cache prefix'
 assert_contains "$local_gateway" 'live-local-case/actual/cache/moguet/.artifact-workspace~-*/*'
 assert_contains "$local_gateway" 'local-stage-artifact.py'
-assert_contains "$local_gateway" 'artifact payload path set drift'
+assert_contains "$local_gateway" 'local-archive-validator.sh'
+assert_contains "$local_gateway" 'validation-status.sh'
+assert_contains "$local_gateway" 'archive validator failed with infrastructure status'
 assert_not_contains "$local_gateway" 'pacman -Syu'
 assert_not_contains "$local_gateway" 'pacman -R '
+assert_contains "$local_archive_validator" 'validation_capture_sorted_output'
+assert_contains "$local_archive_validator" 'archive-members.raw'
+assert_contains "$local_archive_validator" 'expected-members.raw'
+assert_contains "$local_archive_validator" 'artifact member listing failed with status'
+assert_contains "$local_archive_validator" 'artifact payload path set drift'
+assert_contains "$local_archive_validator" 'moguet-live-local-gateway: rejected:'
+if grep -E 'bsdtar[^|]*\|[^|]*sort' \
+    "$local_gateway" "$local_archive_validator" >/dev/null; then
+    fail 'local archive inspection must not pipe bsdtar directly into sort'
+fi
+awk '
+    index($0, "\"$archive_validator\" \"$staged_artifact\"") {
+        validator_line = NR
+    }
+    index($0, "accepted.argv") {
+        accepted_line = NR
+    }
+    index($0, "exec_real_pacman --noconfirm -U --asexplicit") {
+        pacman_line = NR
+    }
+    END {
+        exit validator_line > 0 && accepted_line > validator_line &&
+            pacman_line > accepted_line ? 0 : 1
+    }
+' "$local_gateway" ||
+    fail 'archive validation must finish before accepted or real-pacman evidence'
 assert_contains "$local_stage_helper" 'os.O_NOFOLLOW'
 assert_contains "$local_stage_helper" 'os.O_EXCL'
 assert_contains "$local_stage_helper" 'live-local-case/actual/cache/moguet'
@@ -823,18 +868,26 @@ printf '%s\n' "$release_target" | grep -F 'test-live-contract' >/dev/null ||
 assert_not_contains "$offline_dockerfile" 'arch-live-validation'
 assert_not_contains "$offline_runner" 'arch-live-validation'
 offline_target=$(make_target_body test-container)
-assert_not_contains_target=$(printf '%s\n' "$offline_target" |
-    grep -F 'arch-live-validation' || true)
-if [ -n "$assert_not_contains_target" ]; then
-    fail 'existing test-container recipe contains live-lane paths'
-fi
+case "$offline_target" in
+    *arch-live-validation*)
+        fail 'existing test-container recipe contains live-lane paths'
+        ;;
+esac
 printf '%s\n' "$offline_target" | grep -F -- '--network=none' >/dev/null ||
     fail 'existing offline target lost its offline runtime network boundary'
 
 # The tracked fixture remains the Docker build input. Runtime cases consume its
 # pre-build root-owned authority and keep generated metadata case-local.
-if find "$live_root/fixtures/local-package" -mindepth 1 -name .SRCINFO -print |
-    grep . >/dev/null; then
+tracked_srcinfo_raw=$tmp_dir/tracked-srcinfo.raw
+if validation_capture_output "$tracked_srcinfo_raw" \
+    find "$live_root/fixtures/local-package" \
+    -mindepth 1 -name .SRCINFO -print; then
+    :
+else
+    fixture_status=$?
+    fail "tracked fixture path producer failed with status $fixture_status; raw=$tracked_srcinfo_raw"
+fi
+if [ -s "$tracked_srcinfo_raw" ]; then
     fail 'tracked live fixture must not contain .SRCINFO'
 fi
 assert_contains "$provider_runner" "assert_sentinel_absent \"\$current_case\""

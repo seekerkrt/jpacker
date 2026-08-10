@@ -153,6 +153,7 @@ MSGMERGE ?= msgmerge
 MSGCMP ?= msgcmp
 MSGFMT ?= msgfmt
 MSGGREP ?= msggrep
+NM ?= nm
 LIBALPM_CPPFLAGS = $(shell $(PKG_CONFIG) --cflags libalpm)
 LIBALPM_LDLIBS   = $(shell $(PKG_CONFIG) --libs libalpm)
 BASE_CXXFLAGS := -std=c++20 -Wall -Wextra -DMOGUET_VERSION=\"$(VERSION)\"
@@ -1325,6 +1326,7 @@ LIBALPM_BUILD_TARGETS := \
 .PHONY: check-unified-plan-renderer-link-firewall test-unified-plan-renderer
 .PHONY: FORCE catalogs check-catalogs check-localization-config check-pot update-po update-pot test-localization test-catalog-metadata-gate test-cli-localization-surface test-public-documentation
 .PHONY: test-container test-container-live test-container-live-provider test-container-live-aur test-container-live-local
+.PHONY: test-validation-status
 .PHONY: $(HEAVY_LINK_FIREWALLS)
 
 all: $(TARGET) $(MANPAGES) catalogs
@@ -2956,13 +2958,10 @@ UNIFIED_PLAN_PROJECTION_FIREWALL_PROBE_SYMBOLS := \
 
 check-unified-plan-projection-link-firewall: $(BUILD_DIR)/unified_plan_projection.o
 	@echo ":: Checking unified plan projection link firewall"
-	@forbidden_symbols="$$(nm -C -u $(BUILD_DIR)/unified_plan_projection.o | \
-		grep -E '$(UNIFIED_PLAN_PROJECTION_FORBIDDEN_SYMBOL_PATTERN)' || true)"; \
-		test -z "$$forbidden_symbols" || { \
-			echo "error: unified plan projection object imports resolver/executor/process/command symbols" >&2; \
-			printf '%s\n' "$$forbidden_symbols" >&2; \
-			exit 1; \
-		}
+	@NM='$(NM)' sh scripts/check-nm-symbol-firewall.sh \
+		$(BUILD_DIR)/unified_plan_projection.o \
+		'$(UNIFIED_PLAN_PROJECTION_FORBIDDEN_SYMBOL_PATTERN)' \
+		'unified plan projection object'
 	@set -e; for symbol in $(UNIFIED_PLAN_PROJECTION_FIREWALL_PROBE_SYMBOLS); do \
 		printf '                 U %s\n' "$$symbol" | \
 			grep -Eq '$(UNIFIED_PLAN_PROJECTION_FORBIDDEN_SYMBOL_PATTERN)' || { \
@@ -3021,13 +3020,10 @@ UNIFIED_PLAN_RENDERER_FIREWALL_PROBE_SYMBOLS := \
 
 check-unified-plan-renderer-link-firewall: $(BUILD_DIR)/unified_plan_renderer.o
 	@echo ":: Checking unified plan renderer link firewall"
-	@forbidden_symbols="$$(nm -C -u $(BUILD_DIR)/unified_plan_renderer.o | \
-		grep -E '$(UNIFIED_PLAN_RENDERER_FORBIDDEN_SYMBOL_PATTERN)' || true)"; \
-		test -z "$$forbidden_symbols" || { \
-			echo "error: unified plan renderer imports resolver/executor/process/command symbols" >&2; \
-			printf '%s\n' "$$forbidden_symbols" >&2; \
-			exit 1; \
-		}
+	@NM='$(NM)' sh scripts/check-nm-symbol-firewall.sh \
+		$(BUILD_DIR)/unified_plan_renderer.o \
+		'$(UNIFIED_PLAN_RENDERER_FORBIDDEN_SYMBOL_PATTERN)' \
+		'unified plan renderer object'
 	@set -e; for symbol in $(UNIFIED_PLAN_RENDERER_FIREWALL_PROBE_SYMBOLS); do \
 		printf '                 U %s\n' "$$symbol" | \
 			grep -Eq '$(UNIFIED_PLAN_RENDERER_FORBIDDEN_SYMBOL_PATTERN)' || { \
@@ -3119,6 +3115,9 @@ test-artifact-identity-selection: check-artifact-identity-selection-link-firewal
 
 test-command-stub-contract:
 	sh tests/test-command-stub-contract.sh
+
+test-validation-status:
+	sh tests/test-validation-status.sh
 
 test-markdown-links:
 	sh tests/test-markdown-links.sh \
@@ -3325,6 +3324,7 @@ test: \
 	test-artifact-selection-model \
 	test-artifact-identity-selection \
 	test-command-stub-contract \
+	test-validation-status \
 	test-markdown-links \
 	test-aur-rpc-validation \
 	test-build-cache-symlink \
@@ -3345,7 +3345,7 @@ test: \
 	test-source-build \
 	test-source-selection
 
-release-check: check-pot check-catalogs test-localization test-catalog-metadata-gate test-cli-localization-surface test-internal-identity test-application-identity test-xdg-paths test-xdg-directory-safety test-source-environment test-xdg-state-log test-trusted-cache test-runtime-identity test-dry-run-command test-public-documentation test-install-layout test-package-transition test-live-contract
+release-check: check-pot check-catalogs test-localization test-catalog-metadata-gate test-cli-localization-surface test-internal-identity test-application-identity test-xdg-paths test-xdg-directory-safety test-source-environment test-xdg-state-log test-trusted-cache test-runtime-identity test-dry-run-command test-public-documentation test-install-layout test-package-transition test-live-contract test-validation-status
 	@echo ":: Checking release version consistency"
 	sh scripts/check-release-version.sh
 	@echo ":: Checking license compliance"

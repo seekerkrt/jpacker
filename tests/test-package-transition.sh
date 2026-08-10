@@ -3,6 +3,7 @@
 set -eu
 
 repo_root=$(CDPATH='' cd "$(dirname "$0")/.." && pwd)
+. "$repo_root/scripts/validation-status.sh"
 tmp_dir=$(mktemp -d)
 
 cleanup() {
@@ -13,6 +14,40 @@ trap cleanup EXIT INT TERM
 fail() {
     printf 'package-transition-test: %s\n' "$*" >&2
     exit 1
+}
+
+sha256_file() {
+    if checksum_output=$(sha256sum -- "$1"); then
+        printf '%s\n' "${checksum_output%% *}"
+        return 0
+    else
+        return $?
+    fi
+}
+
+count_command_output_lines() {
+    count_label=$1
+    shift
+    count_raw=$tmp_dir/$count_label.raw
+    if validation_capture_output "$count_raw" "$@"; then
+        wc -l <"$count_raw"
+        return 0
+    else
+        count_status=$?
+    fi
+    fail "$count_label producer failed with status $count_status; raw=$count_raw"
+}
+
+grep_fixed_matches() {
+    match_pattern=$1
+    match_file=$2
+    if grep -Fo -- "$match_pattern" "$match_file"; then
+        return 0
+    else
+        match_status=$?
+    fi
+    [ "$match_status" -eq 1 ] && return 0
+    return "$match_status"
 }
 
 assert_source_archive_input() {
@@ -69,34 +104,86 @@ assert_mode() {
 write_regular_manifest() {
     manifest_root=$1
     manifest_output=$2
+    if validation_capture_sorted_output \
+        "$manifest_output.raw" "$manifest_output" \
+        write_regular_manifest_raw "$manifest_root"; then
+        return 0
+    else
+        manifest_status=$?
+    fi
+    fail "regular manifest producer failed with status $manifest_status; raw=$manifest_output.raw"
+}
 
+write_regular_manifest_raw() {
+    manifest_root=$1
     (
-        cd "$manifest_root"
-        find . -type f ! -path './.*' -print | LC_ALL=C sort
-    ) >"$manifest_output"
+        cd "$manifest_root" || exit $?
+        find . -type f ! -path './.*' -print || exit $?
+    )
 }
 
 write_directory_manifest() {
     manifest_root=$1
     manifest_output=$2
+    manifest_raw=$manifest_output.raw
+    manifest_temporary=$manifest_output.tmp.$$
+    if validation_capture_output "$manifest_raw" \
+        write_directory_manifest_raw "$manifest_root"; then
+        :
+    else
+        manifest_status=$?
+        fail "directory manifest producer failed with status $manifest_status; raw=$manifest_raw"
+    fi
+    if LC_ALL=C sort -r "$manifest_raw" >"$manifest_temporary"; then
+        mv "$manifest_temporary" "$manifest_output"
+    else
+        manifest_status=$?
+        rm -f "$manifest_temporary" >/dev/null 2>&1 || :
+        fail "directory manifest normalization failed with status $manifest_status"
+    fi
+}
 
+write_directory_manifest_raw() {
+    manifest_root=$1
     (
-        cd "$manifest_root"
-        find . -type d ! -path . ! -path './.*' -print | LC_ALL=C sort -r
-    ) >"$manifest_output"
+        cd "$manifest_root" || exit $?
+        find . -type d ! -path . ! -path './.*' -print || exit $?
+    )
 }
 
 write_checksum_snapshot() {
     snapshot_root=$1
     snapshot_output=$2
+    snapshot_paths_raw=$snapshot_output.paths.raw
+    snapshot_paths=$snapshot_output.paths
+    snapshot_temporary=$snapshot_output.tmp.$$
+    if validation_capture_sorted_output \
+        "$snapshot_paths_raw" "$snapshot_paths" \
+        write_checksum_paths_raw "$snapshot_root"; then
+        :
+    else
+        snapshot_status=$?
+        fail "checksum path producer failed with status $snapshot_status; raw=$snapshot_paths_raw"
+    fi
+    if (
+        cd "$snapshot_root" || exit $?
+        while IFS= read -r snapshot_path; do
+            sha256sum "$snapshot_path" || exit $?
+        done <"$snapshot_paths"
+    ) >"$snapshot_temporary"; then
+        mv "$snapshot_temporary" "$snapshot_output"
+    else
+        snapshot_status=$?
+        fail "checksum producer failed with status $snapshot_status; partial=$snapshot_temporary"
+    fi
+}
 
+write_checksum_paths_raw() {
+    snapshot_root=$1
     (
-        cd "$snapshot_root"
-        find . -type f -print | LC_ALL=C sort |
-            while IFS= read -r snapshot_path; do
-                sha256sum "$snapshot_path"
-            done
-    ) >"$snapshot_output"
+        cd "$snapshot_root" || exit $?
+        find . -type f -print || exit $?
+    )
 }
 
 assert_snapshot_matches() {
@@ -196,8 +283,15 @@ assert_metadata_set() {
     metadata_file=$1
     metadata_key=$2
     expected_values=$3
-    actual_values=$(metadata_values "$metadata_file" "$metadata_key" |
-        LC_ALL=C sort)
+    metadata_raw=$tmp_dir/metadata-$metadata_key.raw
+    metadata_sorted=$tmp_dir/metadata-$metadata_key.sorted
+    if validation_capture_sorted_output "$metadata_raw" "$metadata_sorted" \
+        metadata_values "$metadata_file" "$metadata_key"; then
+        actual_values=$(cat "$metadata_sorted")
+    else
+        metadata_status=$?
+        fail "$metadata_key producer failed with status $metadata_status; raw=$metadata_raw"
+    fi
     [ "$actual_values" = "$expected_values" ] || {
         printf 'package-transition-test: %s mismatch\nexpected:\n%s\nactual:\n%s\n' \
             "$metadata_key" "$expected_values" "$actual_values" >&2
@@ -241,8 +335,8 @@ prepare_test_pkgbuild() {
     cp "$production_pkgbuild" "$package_work/PKGBUILD"
     cp "$(dirname "$production_pkgbuild")/VERSION" "$package_work/VERSION"
 
-    source_occurrences=$(grep -Fo -- "$production_source" \
-        "$package_work/PKGBUILD" | wc -l | tr -d '[:space:]')
+    source_occurrences=$(count_command_output_lines production-source-occurrences \
+        grep_fixed_matches "$production_source" "$package_work/PKGBUILD")
     [ "$source_occurrences" = 1 ] ||
         fail "$production_pkgbuild must contain exactly one production source URL"
     sed -i "s|$production_source|$fixture_source|" \
@@ -404,8 +498,17 @@ if [ -n "$current_source_archive_input" ]; then
 else
     # Preserve the issue branch's dirty edits and tracked deletions while
     # keeping .git, ignored build output, binaries, and package artifacts out.
-    git -C "$repo_root" ls-files --cached --others --exclude-standard |
-        while IFS= read -r source_path; do
+    v2_source_paths_raw=$v2_source_manifest.raw
+    v2_source_manifest_temporary=$v2_source_manifest.tmp
+    if validation_capture_output "$v2_source_paths_raw" \
+        git -C "$repo_root" ls-files \
+        --cached --others --exclude-standard; then
+        :
+    else
+        source_status=$?
+        fail "current source path producer failed with status $source_status; raw=$v2_source_paths_raw"
+    fi
+    if while IFS= read -r source_path; do
             case "$source_path" in
                 .git|.git/*|build|build/*|moguet|*.pkg.tar.*|*.src.tar.*)
                     continue
@@ -413,9 +516,14 @@ else
             esac
             if [ -f "$repo_root/$source_path" ] ||
                 [ -L "$repo_root/$source_path" ]; then
-                printf '%s\n' "$source_path"
+                printf '%s\n' "$source_path" || exit $?
             fi
-        done >"$v2_source_manifest"
+        done <"$v2_source_paths_raw" >"$v2_source_manifest_temporary"; then
+        mv "$v2_source_manifest_temporary" "$v2_source_manifest"
+    else
+        source_status=$?
+        fail "current source manifest normalization failed with status $source_status; partial=$v2_source_manifest_temporary"
+    fi
     [ -s "$v2_source_manifest" ] || fail 'current source manifest is empty'
     while IFS= read -r source_path; do
         mkdir -p "$v2_source/$(dirname "$source_path")"
@@ -470,17 +578,21 @@ v2_package_archive=$v2_package_destination/moguet-2.2.0-1-x86_64.pkg.tar.zst
     fail "expected package archive is missing: $v1_package_archive"
 [ -f "$v2_package_archive" ] ||
     fail "expected package archive is missing: $v2_package_archive"
-[ "$(find "$v1_package_destination" -maxdepth 1 -type f \
-    -name '*.pkg.tar.*' | wc -l | tr -d '[:space:]')" = 1 ] ||
+[ "$(count_command_output_lines v1-package-archives \
+    find "$v1_package_destination" -maxdepth 1 -type f \
+    -name '*.pkg.tar.*')" = 1 ] ||
     fail 'v1 package build produced an unexpected archive set'
-[ "$(find "$v2_package_destination" -maxdepth 1 -type f \
-    -name '*.pkg.tar.*' | wc -l | tr -d '[:space:]')" = 1 ] ||
+[ "$(count_command_output_lines v2-package-archives \
+    find "$v2_package_destination" -maxdepth 1 -type f \
+    -name '*.pkg.tar.*')" = 1 ] ||
     fail 'v2 package build produced an unexpected archive set'
-printf '%s  %s\n' \
-    "$(sha256sum "$v1_package_archive" | awk '{ print $1 }')" \
+v1_package_hash=$(sha256_file "$v1_package_archive") ||
+    fail 'v1 package checksum producer failed'
+v2_package_hash=$(sha256_file "$v2_package_archive") ||
+    fail 'v2 package checksum producer failed'
+printf '%s  %s\n' "$v1_package_hash" \
     "$(basename "$v1_package_archive")" >"$tmp_dir/v1-package.sha256"
-printf '%s  %s\n' \
-    "$(sha256sum "$v2_package_archive" | awk '{ print $1 }')" \
+printf '%s  %s\n' "$v2_package_hash" \
     "$(basename "$v2_package_archive")" >"$tmp_dir/v2-package.sha256"
 
 bsdtar -xOf "$v1_package_archive" .PKGINFO >"$tmp_dir/v1.PKGINFO"
@@ -501,14 +613,51 @@ do
     assert_metadata_absent "$tmp_dir/v2.PKGINFO" "$transition_key"
 done
 
-actual_libalpm_dependency=$(metadata_values "$tmp_dir/v2.PKGINFO" depend |
-    grep -E '^libalpm\.so(=[0-9]+-[0-9]+)?$' || :)
-[ -n "$actual_libalpm_dependency" ] &&
-    [ "$(printf '%s\n' "$actual_libalpm_dependency" | wc -l | tr -d '[:space:]')" = 1 ] ||
+v2_dependencies_raw=$tmp_dir/v2-dependencies.raw
+if validation_capture_output "$v2_dependencies_raw" \
+    metadata_values "$tmp_dir/v2.PKGINFO" depend; then
+    :
+else
+    dependency_status=$?
+    fail "v2 dependency producer failed with status $dependency_status; raw=$v2_dependencies_raw"
+fi
+
+libalpm_dependencies=$tmp_dir/v2-libalpm-dependencies.raw
+if grep -E '^libalpm\.so(=[0-9]+-[0-9]+)?$' \
+    "$v2_dependencies_raw" >"$libalpm_dependencies"; then
+    :
+else
+    grep_status=$?
+    case "$grep_status" in
+        1) : >"$libalpm_dependencies" ;;
+        *) fail "libalpm dependency filter failed with status $grep_status" ;;
+    esac
+fi
+if libalpm_dependency_count=$(wc -l <"$libalpm_dependencies"); then
+    :
+else
+    count_status=$?
+    fail "libalpm dependency count failed with status $count_status"
+fi
+[ "$libalpm_dependency_count" = 1 ] ||
     fail 'v2 package has an invalid libalpm soname dependency'
-normalized_dependencies=$(metadata_values "$tmp_dir/v2.PKGINFO" depend |
-    sed -E 's/^libalpm\.so(=[0-9]+-[0-9]+)?$/libalpm.so/' |
-    LC_ALL=C sort)
+
+normalized_dependencies_raw=$tmp_dir/v2-dependencies.normalized.raw
+normalized_dependencies_sorted=$tmp_dir/v2-dependencies.normalized.sorted
+if sed -E 's/^libalpm\.so(=[0-9]+-[0-9]+)?$/libalpm.so/' \
+    "$v2_dependencies_raw" >"$normalized_dependencies_raw"; then
+    :
+else
+    normalize_status=$?
+    fail "dependency normalization failed with status $normalize_status"
+fi
+if LC_ALL=C sort "$normalized_dependencies_raw" \
+    >"$normalized_dependencies_sorted"; then
+    normalized_dependencies=$(cat "$normalized_dependencies_sorted")
+else
+    sort_status=$?
+    fail "dependency sorting failed with status $sort_status"
+fi
 expected_dependencies='curl
 git
 libalpm.so

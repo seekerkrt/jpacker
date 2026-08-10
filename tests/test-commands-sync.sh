@@ -14,6 +14,7 @@ pty_runner=$repo_root/tests/run-with-pty.py
 MOGUET_TEST_REPOSITORY_ROOT=$repo_root
 export MOGUET_TEST_REPOSITORY_ROOT
 . "$repo_root/tests/test-command-safety.sh"
+. "$repo_root/scripts/validation-status.sh"
 tmp_dir=$(mktemp -d)
 
 cleanup() {
@@ -166,7 +167,7 @@ assert_not_contains() {
 assert_output_count() {
     expected_count=$1
     expected=$2
-    actual_count=$(grep -Fc -- "$expected" "$output_file" || true)
+    actual_count=$(validation_grep_count -Fc -- "$expected" "$output_file")
     if [ "$actual_count" -ne "$expected_count" ]; then
         echo "unexpected output count in case $case_name: $expected" >&2
         echo "actual: $actual_count, expected: $expected_count" >&2
@@ -228,7 +229,7 @@ assert_event_prefix_absent() {
 assert_event_count() {
     expected_count=$1
     expected=$2
-    actual_count=$(grep -Fxc -- "$expected" "$command_log" || true)
+    actual_count=$(validation_grep_count -Fxc -- "$expected" "$command_log")
     if [ "$actual_count" -ne "$expected_count" ]; then
         echo "unexpected event count in case $case_name: $expected" >&2
         echo "actual: $actual_count, expected: $expected_count" >&2
@@ -249,7 +250,8 @@ assert_event_pattern() {
 assert_event_pattern_count() {
     expected_count=$1
     expected_pattern=$2
-    actual_count=$(grep -Ec -- "$expected_pattern" "$command_log" || true)
+    actual_count=$(validation_grep_count -Ec -- \
+        "$expected_pattern" "$command_log")
     if [ "$actual_count" -ne "$expected_count" ]; then
         echo "unexpected event pattern count in case $case_name: $expected_pattern" >&2
         echo "actual: $actual_count, expected: $expected_count" >&2
@@ -295,7 +297,14 @@ assert_event_count_before() {
         cat "$command_log" >&2
         exit 1
     fi
-    actual_count=$(sed -n "1,$((boundary_line - 1))p" "$command_log" | grep -Fxc -- "$expected" || true)
+    pre_boundary_log=$case_dir/pre-boundary.log
+    sed -n "1,$((boundary_line - 1))p" "$command_log" \
+        >"$pre_boundary_log" || {
+        echo "failed to capture pre-boundary events in case $case_name" >&2
+        exit 1
+    }
+    actual_count=$(validation_grep_count \
+        -Fxc -- "$expected" "$pre_boundary_log")
     if [ "$actual_count" -ne "$expected_count" ]; then
         echo "unexpected pre-boundary event count in case $case_name: $expected" >&2
         echo "actual: $actual_count, expected: $expected_count" >&2
@@ -825,8 +834,16 @@ assert_cache_entry_absent source-a
 assert_cache_entry_absent source-b
 auto_preflight_after=$(cksum \
     "$XDG_CACHE_HOME/moguet/preflight-sentinel/state")
-auto_preflight_entry_count=$(find "$XDG_CACHE_HOME/moguet" \
-    -mindepth 1 -maxdepth 1 -print | wc -l)
+auto_preflight_entries_raw=$case_dir/auto-preflight-entries.raw
+if validation_capture_output "$auto_preflight_entries_raw" \
+    find "$XDG_CACHE_HOME/moguet" \
+    -mindepth 1 -maxdepth 1 -print; then
+    auto_preflight_entry_count=$(wc -l <"$auto_preflight_entries_raw")
+else
+    preflight_status=$?
+    echo "Auto mixed PKGDEST cache producer failed with status $preflight_status" >&2
+    exit 1
+fi
 if [ "$auto_preflight_after" != "$auto_preflight_checksum" ] ||
    [ "$auto_preflight_entry_count" -ne 1 ]; then
     echo "Auto mixed PKGDEST preflight mutated the cache tree" >&2

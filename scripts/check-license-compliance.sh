@@ -4,6 +4,7 @@ set -eu
 
 script_dir=$(CDPATH='' cd "$(dirname "$0")" && pwd)
 repo_root=$(CDPATH='' cd "$script_dir/.." && pwd)
+. "$script_dir/validation-status.sh"
 
 fail() {
     printf 'license-check: %s\n' "$*" >&2
@@ -48,14 +49,21 @@ require_value_text() {
     label=$1
     value=$2
     expected=$3
-    printf '%s\n' "$value" | grep -F -- "$expected" >/dev/null ||
-        fail "$label is missing required text: $expected"
+    case $value in
+        *"$expected"*) ;;
+        *) fail "$label is missing required text: $expected" ;;
+    esac
 }
 
 check_sha256() {
     file=$1
     expected=$2
-    actual=$(sha256sum "$file" | awk '{print $1}')
+    if checksum_output=$(sha256sum "$file"); then
+        actual=${checksum_output%% *}
+    else
+        checksum_status=$?
+        fail "$file checksum producer failed with status $checksum_status"
+    fi
     [ "$actual" = "$expected" ] ||
         fail "$file checksum mismatch: expected $expected, got $actual"
     pass "$file matches audited SHA-256"
@@ -65,46 +73,53 @@ check_pkgbuild_metadata() {
     case_version=$1
 
     printf '%s\n' "$case_version" > "$pkgbuild_test_dir/VERSION"
-    if ! package_metadata=$(
-        cd "$pkgbuild_test_dir"
-        makepkg --printsrcinfo
-    ); then
-        fail "PKGBUILD evaluation failed for Moguet $case_version."
+    package_metadata_file=$pkgbuild_test_dir/.SRCINFO
+    if validation_capture_output "$package_metadata_file" \
+        evaluate_pkgbuild_metadata; then
+        :
+    else
+        metadata_status=$?
+        fail "PKGBUILD evaluation failed for Moguet $case_version (status $metadata_status)."
     fi
 
-    evaluated_pkgbase=$(printf '%s\n' "$package_metadata" |
-        sed -n 's/^pkgbase = //p')
+    evaluated_pkgbase=$(sed -n 's/^pkgbase = //p' "$package_metadata_file")
     [ "$evaluated_pkgbase" = moguet ] ||
         fail "PKGBUILD evaluated pkgbase=$evaluated_pkgbase; expected moguet."
 
-    evaluated_pkgname=$(printf '%s\n' "$package_metadata" |
-        sed -n 's/^pkgname = //p')
+    evaluated_pkgname=$(sed -n 's/^pkgname = //p' "$package_metadata_file")
     [ "$evaluated_pkgname" = moguet ] ||
         fail "PKGBUILD evaluated pkgname=$evaluated_pkgname; expected moguet."
 
-    evaluated_version=$(printf '%s\n' "$package_metadata" |
-        sed -n 's/^[[:space:]]*pkgver = //p')
+    evaluated_version=$(sed -n \
+        's/^[[:space:]]*pkgver = //p' "$package_metadata_file")
     [ "$evaluated_version" = "$case_version" ] ||
         fail "PKGBUILD evaluated pkgver=$evaluated_version; expected $case_version."
 
-    evaluated_license=$(printf '%s\n' "$package_metadata" |
-        sed -n 's/^[[:space:]]*license = //p')
+    evaluated_license=$(sed -n \
+        's/^[[:space:]]*license = //p' "$package_metadata_file")
     [ "$evaluated_license" = GPL-3.0-or-later ] ||
         fail "PKGBUILD evaluated license=$evaluated_license; expected GPL-3.0-or-later."
 
-    evaluated_url=$(printf '%s\n' "$package_metadata" |
-        sed -n 's/^[[:space:]]*url = //p')
+    evaluated_url=$(sed -n \
+        's/^[[:space:]]*url = //p' "$package_metadata_file")
     expected_url="https://github.com/seekerkrt/moguet"
     [ "$evaluated_url" = "$expected_url" ] ||
         fail "PKGBUILD URL mismatch: expected $expected_url, got $evaluated_url."
 
-    evaluated_source=$(printf '%s\n' "$package_metadata" |
-        sed -n 's/^[[:space:]]*source = //p')
+    evaluated_source=$(sed -n \
+        's/^[[:space:]]*source = //p' "$package_metadata_file")
     expected_source="moguet-src::git+https://github.com/seekerkrt/moguet.git#tag=v$case_version"
     [ "$evaluated_source" = "$expected_source" ] ||
         fail "PKGBUILD source mismatch: expected $expected_source, got $evaluated_source."
 
     pass "PKGBUILD describes Moguet $case_version under GPL-3.0-or-later"
+}
+
+evaluate_pkgbuild_metadata() {
+    (
+        cd "$pkgbuild_test_dir" || exit $?
+        makepkg --printsrcinfo || exit $?
+    )
 }
 
 cd "$repo_root"

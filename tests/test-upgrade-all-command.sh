@@ -10,6 +10,7 @@ unset LANGUAGE
 
 test_binary=$1
 repo_root=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
+. "$repo_root/scripts/validation-status.sh"
 MOGUET_TEST_REPOSITORY_ROOT=$repo_root
 export MOGUET_TEST_REPOSITORY_ROOT
 . "$repo_root/tests/test-command-safety.sh"
@@ -129,7 +130,7 @@ assert_occurrence_count() {
     expected_count=$1
     expected=$2
     file=$3
-    actual_count=$(grep -Fc -- "$expected" "$file" || true)
+    actual_count=$(validation_grep_count -Fc -- "$expected" "$file")
     if [ "$actual_count" -ne "$expected_count" ]; then
         fail_case "occurrence count for '$expected': $actual_count (expected $expected_count)"
     fi
@@ -150,7 +151,8 @@ assert_line_before() {
 assert_event_count() {
     expected_count=$1
     expected_event=$2
-    actual_count=$(grep -Fxc -- "$expected_event" "$command_log" || true)
+    actual_count=$(validation_grep_count -Fxc -- \
+        "$expected_event" "$command_log")
     if [ "$actual_count" -ne "$expected_count" ]; then
         fail_case "event count for '$expected_event': $actual_count (expected $expected_count)"
     fi
