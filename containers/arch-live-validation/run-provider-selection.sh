@@ -3,6 +3,7 @@
 set -eu
 
 repo_root=$(CDPATH='' cd "$(dirname "$0")/../.." && pwd)
+. "$repo_root/scripts/validation-status.sh"
 fixture_root=$repo_root/containers/arch-live-validation/fixtures/local-package
 fixture_pkgbuild=$fixture_root/PKGBUILD
 fixture_contract=$fixture_root/contract.env
@@ -52,7 +53,7 @@ assert_count() {
     expected_count=$1
     pattern=$2
     checked_file=$3
-    actual_count=$(grep -F -c -- "$pattern" "$checked_file" || true)
+    actual_count=$(validation_grep_count -F -c -- "$pattern" "$checked_file")
     if [ "$actual_count" -ne "$expected_count" ]; then
         fail "expected $expected_count occurrences of '$pattern', observed $actual_count"
     fi
@@ -84,42 +85,97 @@ PY
     fi
 }
 
-tracked_fixture_manifest() {
+tracked_fixture_manifest_raw() {
     (
-        cd "$fixture_root"
-        sha256sum PKGBUILD contract.env
-        find . -mindepth 1 -maxdepth 1 -printf '%y %m %f\n' | LC_ALL=C sort
+        cd "$fixture_root" || exit $?
+        sha256sum PKGBUILD contract.env || exit $?
+        find . -mindepth 1 -maxdepth 1 -printf '%y %m %f\n' || exit $?
+    )
+}
+
+tracked_fixture_manifest() {
+    manifest_raw=$(mktemp "$case_root/tracked-fixture.raw.XXXXXX")
+    manifest_sorted=$(mktemp "$case_root/tracked-fixture.sorted.XXXXXX")
+    if validation_capture_sorted_output "$manifest_raw" "$manifest_sorted" \
+        tracked_fixture_manifest_raw; then
+        cat "$manifest_sorted" || return $?
+        rm -f "$manifest_raw" "$manifest_sorted" || :
+        return 0
+    else
+        manifest_status=$?
+    fi
+    fail "tracked fixture manifest failed with status $manifest_status; raw=$manifest_raw"
+}
+
+package_database_paths_raw() {
+    (
+        cd /var/lib/pacman/local || exit $?
+        find . -mindepth 1 -printf '%P\n' || exit $?
+    )
+}
+
+sha256_file() {
+    if checksum_output=$(sha256sum -- "$1"); then
+        printf '%s\n' "${checksum_output%% *}"
+        return 0
+    else
+        return $?
+    fi
+}
+
+package_database_rows() {
+    sorted_paths=$1
+    (
+        cd /var/lib/pacman/local || exit $?
+        while IFS= read -r relative_path; do
+            database_path=./$relative_path
+            entry_type=$(find "$database_path" -prune -printf '%y') || exit $?
+            entry_mode=$(stat -c '%a' -- "$database_path") || exit $?
+            entry_owner_group=$(stat -c '%u:%g' -- "$database_path") || exit $?
+            content_hash=-
+            if [ "$entry_type" = f ]; then
+                content_hash=$(sha256_file "$database_path") || exit $?
+            fi
+            printf '%s\ttype=%s\tmode=%s\towner_group=%s\tsha256=%s\n' \
+                "$relative_path" "$entry_type" "$entry_mode" \
+                "$entry_owner_group" "$content_hash" || exit $?
+        done <"$sorted_paths"
     )
 }
 
 package_database_manifest() {
-    (
-        cd /var/lib/pacman/local
-        find . -mindepth 1 -printf '%P\n' |
-            LC_ALL=C sort |
-            while IFS= read -r relative_path; do
-                database_path=./$relative_path
-                entry_type=$(find "$database_path" -prune -printf '%y')
-                entry_mode=$(stat -c '%a' -- "$database_path")
-                entry_owner_group=$(stat -c '%u:%g' -- "$database_path")
-                content_hash=-
-                if [ "$entry_type" = f ]; then
-                    content_hash=$(sha256sum -- "$database_path" | awk '{ print $1 }')
-                fi
-                printf '%s\ttype=%s\tmode=%s\towner_group=%s\tsha256=%s\n' \
-                    "$relative_path" "$entry_type" "$entry_mode" \
-                    "$entry_owner_group" "$content_hash"
-            done
-    ) |
-        sha256sum
+    paths_raw=$(mktemp "$case_root/package-db-paths.raw.XXXXXX")
+    paths_sorted=$(mktemp "$case_root/package-db-paths.sorted.XXXXXX")
+    rows_file=$(mktemp "$case_root/package-db-rows.XXXXXX")
+    if validation_capture_sorted_output "$paths_raw" "$paths_sorted" \
+        package_database_paths_raw; then
+        :
+    else
+        manifest_status=$?
+        fail "package database path producer failed with status $manifest_status; raw=$paths_raw"
+    fi
+    if validation_capture_output "$rows_file" \
+        package_database_rows "$paths_sorted"; then
+        :
+    else
+        manifest_status=$?
+        fail "package database row producer failed with status $manifest_status; partial=$rows_file"
+    fi
+    if manifest_hash=$(sha256_file "$rows_file"); then
+        printf '%s  -\n' "$manifest_hash"
+    else
+        manifest_status=$?
+        fail "package database hash producer failed with status $manifest_status"
+    fi
+    rm -f "$paths_raw" "$paths_sorted" "$rows_file" || :
 }
 
 source_manifest() {
     manifest_root=$1
     (
-        cd "$manifest_root"
-        sha256sum PKGBUILD .SRCINFO
-        stat -c '%u:%g:%a:%F:%n' PKGBUILD .SRCINFO
+        cd "$manifest_root" || exit $?
+        sha256sum PKGBUILD .SRCINFO || exit $?
+        stat -c '%u:%g:%a:%F:%n' PKGBUILD .SRCINFO || exit $?
     )
 }
 
@@ -271,43 +327,54 @@ run_pty_case() {
     else
         case_status=$?
     fi
+    validation_assert_status "live-provider-$current_case" 1 "$case_status" \
+        "$case_output" "$case_output" python3 "$pty_runner" --timeout 90 -- \
+        "$production_moguet" "$@" ||
+        fail 'provider case returned a non-canonical business status'
 }
 
 run_non_tty_case() {
     piped_value=$1
     shift
+    non_tty_input=$case_directory/non-tty.input
+    printf '%s\n' "$piped_value" >"$non_tty_input"
     case_status=0
-    if printf '%s\n' "$piped_value" | env \
+    if env \
         HOME="$HOME" \
         XDG_CONFIG_HOME="$case_config" \
         XDG_CACHE_HOME="$case_cache" \
         XDG_STATE_HOME="$case_state" \
         MOGUET_LIVE_SENTINEL_CASE="$current_case" \
         "$production_moguet" "$@" \
-        >"$case_output" 2>&1; then
+        <"$non_tty_input" >"$case_output" 2>&1; then
         case_status=0
     else
         case_status=$?
     fi
+    validation_assert_status "live-provider-$current_case" 1 "$case_status" \
+        "$case_output" "$case_output" "$production_moguet" "$@" ||
+        fail 'non-TTY provider case returned a non-canonical business status'
 }
 
 assert_blocked_status() {
-    if [ "$case_status" -eq 0 ]; then
-        fail 'case unexpectedly succeeded'
-    fi
-    if [ "$case_status" -eq 124 ]; then
-        fail 'case timed out instead of failing closed'
-    fi
+    [ "$case_status" -eq 1 ] ||
+        fail "case returned $case_status instead of canonical status 1"
 }
 
 assert_no_source_or_install_execution() {
     assert_not_contains "Running: 'git'" "$case_output"
     assert_not_contains "Running: 'makepkg'" "$case_output"
     assert_not_contains "Running: 'sudo' 'pacman' '-U'" "$case_output"
-    if find "$case_cache" -type d \
+    workspace_probe=$case_directory/workspaces.raw
+    if validation_capture_output "$workspace_probe" find "$case_cache" -type d \
         \( -name '.local-source-workspace~-*' \
-        -o -name '.artifact-workspace~-*' \) -print |
-        grep . >/dev/null; then
+        -o -name '.artifact-workspace~-*' \) -print; then
+        :
+    else
+        workspace_status=$?
+        fail "workspace absence producer failed with status $workspace_status"
+    fi
+    if [ -s "$workspace_probe" ]; then
         fail 'source or artifact workspace exists after blocked phase'
     fi
     if [ -e "$case_source/src" ] || [ -e "$case_source/pkg" ]; then
@@ -340,13 +407,14 @@ parse_candidate_contract() {
     normalized_output=$parsed_output.normalized
     tr -d '\r' < "$parsed_output" > "$normalized_output"
 
-    dependency_header_count=$(grep -F -c \
-        ':: provider dependency=cargo' "$normalized_output" || true)
+    dependency_header_count=$(validation_grep_count -F -c \
+        ':: provider dependency=cargo' "$normalized_output")
     if [ "$dependency_header_count" -ne 1 ]; then
         fail "expected one cargo provider header, observed $dependency_header_count"
     fi
 
-    presented_count=$(grep -E -c '^[0-9]+\) ' "$normalized_output" || true)
+    presented_count=$(validation_grep_count -E -c \
+        '^[0-9]+\) ' "$normalized_output")
     awk '
 /^[0-9]+\) / {
     number = $1
@@ -375,15 +443,31 @@ parse_candidate_contract() {
     if grep -F 'source=AUR' "$normalized_output" >/dev/null; then
         fail 'provider drift: AUR candidate entered the cargo candidate set'
     fi
-    if [ "$(cut -f1 "$parsed_table" | LC_ALL=C sort -n | tr '\n' ' ')" != '1 2 ' ]; then
+    awk -F '\t' '
+        { numbers[$1]++ }
+        END {
+            for (number in numbers) number_count++
+            exit NR == 2 && number_count == 2 &&
+                numbers[1] == 1 && numbers[2] == 1 ? 0 : 1
+        }
+    ' "$parsed_table" ||
         fail 'provider presentation has duplicate, non-contiguous, or unsafe numbers'
-    fi
-    if [ "$(cut -f1 "$parsed_table" | LC_ALL=C sort -n | uniq | wc -l)" -ne 2 ]; then
+    awk -F '\t' '
+        { numbers[$1] = 1 }
+        END {
+            for (number in numbers) number_count++
+            exit number_count == 2 ? 0 : 1
+        }
+    ' "$parsed_table" ||
         fail 'provider presentation contains duplicate numbers'
-    fi
-    if [ "$(cut -f3 "$parsed_table" | LC_ALL=C sort | uniq | wc -l)" -ne 2 ]; then
+    awk -F '\t' '
+        { packages[$3] = 1 }
+        END {
+            for (package in packages) package_count++
+            exit package_count == 2 ? 0 : 1
+        }
+    ' "$parsed_table" ||
         fail 'provider candidate set contains duplicate package identities'
-    fi
     while IFS="$(printf '\t')" read -r \
         candidate_number candidate_source candidate_package \
         candidate_repository candidate_dependency; do
@@ -535,14 +619,20 @@ fi
 if [ -e "$repo_root/.git" ]; then
     fail 'Docker build context leaked host .git metadata into the image'
 fi
-if find "$repo_root" -xdev \
+credential_probe=$case_root/credential-paths.raw
+mkdir -p "$case_root"
+if validation_capture_output "$credential_probe" find "$repo_root" -xdev \
     \( -name .ssh -o -name .gnupg -o -name .git-credentials \
-    -o -name .netrc -o -name docker.sock \) -print |
-    grep . >/dev/null; then
+    -o -name .netrc -o -name docker.sock \) -print; then
+    :
+else
+    credential_status=$?
+    fail "credential-path producer failed with status $credential_status"
+fi
+if [ -s "$credential_probe" ]; then
     fail 'Docker build context leaked credential or Docker socket state'
 fi
 
-mkdir -p "$case_root"
 tracked_fixture_before=$(tracked_fixture_manifest)
 tracked_pkgbuild_before=$(sha256sum "$fixture_pkgbuild")
 initial_package_database=$(package_database_manifest)

@@ -10,6 +10,8 @@ export LC_ALL=C
 
 real_pacman=/usr/libexec/moguet-live-local/pacman.real
 stage_helper=/usr/libexec/moguet-live-local/local-stage-artifact.py
+archive_validator=/usr/libexec/moguet-live-local/local-archive-validator.sh
+status_library=/usr/libexec/moguet-live-local/validation-status.sh
 staging_root=/var/lib/moguet-live-local/staging
 evidence_root=/var/log/moguet-live-local
 validation_user=moguet-validation
@@ -54,6 +56,8 @@ case_identity=${MOGUET_LIVE_LOCAL_CASE-}
 
 require_root_readonly_file "$real_pacman" 'real pacman'
 require_root_readonly_file "$stage_helper" 'staging helper'
+require_root_readonly_file "$archive_validator" 'archive validator'
+require_root_readonly_file "$status_library" 'archive status library'
 
 # The provider is chosen by production Moguet from the current real sync DB;
 # this gateway permits only the reviewed cargo providers and no other system
@@ -101,48 +105,38 @@ staged_artifact=$staging_directory/$fixture_artifact
     "$validation_uid:$validation_gid" ||
     reject 'safe artifact staging failed'
 
-pkginfo=$(/usr/bin/bsdtar -xOf "$staged_artifact" .PKGINFO) ||
-    reject 'artifact has no readable PKGINFO'
-printf '%s\n' "$pkginfo" | /usr/bin/grep -Fx -- "pkgname = $fixture_name" >/dev/null ||
-    reject 'artifact package name drift'
-printf '%s\n' "$pkginfo" | /usr/bin/grep -Fx -- "pkgbase = $fixture_name" >/dev/null ||
-    reject 'artifact PackageBase drift'
-printf '%s\n' "$pkginfo" | /usr/bin/grep -Fx -- "pkgver = $fixture_version" >/dev/null ||
-    reject 'artifact version drift'
-printf '%s\n' "$pkginfo" | /usr/bin/grep -Fx -- "arch = $fixture_arch" >/dev/null ||
-    reject 'artifact architecture drift'
-if printf '%s\n' "$pkginfo" | /usr/bin/grep -E '^install = |^conflict = |^replaces = |^provides = ' >/dev/null; then
-    reject 'artifact gained a transaction-affecting PKGINFO field'
+if "$archive_validator" "$staged_artifact" "$evidence_directory"; then
+    archive_status=0
+else
+    archive_status=$?
+fi
+if [ "$archive_status" -ne 0 ]; then
+    if [ "$archive_status" -eq "$gateway_reject_status" ]; then
+        exit "$gateway_reject_status"
+    fi
+    reject "archive validator failed with infrastructure status $archive_status"
 fi
 
+pkginfo_file=$evidence_directory/PKGINFO
+pkginfo_raw=$evidence_directory/PKGINFO.raw
 member_list=$evidence_directory/archive-members.txt
-/usr/bin/bsdtar -tf "$staged_artifact" | LC_ALL=C /usr/bin/sort > "$member_list" ||
-    reject 'artifact member listing failed'
+member_list_raw=$evidence_directory/archive-members.raw
 expected_members=$evidence_directory/expected-members.txt
-printf '%s\n' \
-    .BUILDINFO \
-    .MTREE \
-    .PKGINFO \
-    usr/ \
-    usr/bin/ \
-    usr/bin/moguet-live-fixture \
-    usr/share/ \
-    usr/share/moguet-live-validation/ \
-    usr/share/moguet-live-validation/live-fixture-marker \
-    | LC_ALL=C /usr/bin/sort > "$expected_members"
-/usr/bin/cmp -s "$expected_members" "$member_list" ||
-    reject 'artifact payload path set drift'
-marker=$(/usr/bin/bsdtar -xOf "$staged_artifact" \
-    usr/share/moguet-live-validation/live-fixture-marker) ||
-    reject 'artifact marker payload is unreadable'
-[ "$marker" = 'live-validation-local-package-fixture marker' ] ||
-    reject 'artifact marker payload drift'
-
-printf '%s\n' "$pkginfo" > "$evidence_directory/PKGINFO"
-/usr/bin/chown root:"$validation_user" "$evidence_directory/PKGINFO" \
-    "$member_list" "$expected_members"
-/usr/bin/chmod 0640 "$evidence_directory/PKGINFO" \
-    "$member_list" "$expected_members"
+expected_members_raw=$evidence_directory/expected-members.raw
+marker_raw=$evidence_directory/marker.raw
+marker_file=$evidence_directory/marker.txt
+expected_marker=$evidence_directory/expected-marker.txt
+for validated_evidence in \
+    "$pkginfo_file" "$pkginfo_raw" \
+    "$member_list" "$member_list_raw" \
+    "$expected_members" "$expected_members_raw" \
+    "$marker_raw" "$marker_file" "$expected_marker"
+do
+    [ -f "$validated_evidence" ] && [ ! -L "$validated_evidence" ] ||
+        reject "archive validator omitted evidence: $validated_evidence"
+    /usr/bin/chown root:"$validation_user" "$validated_evidence"
+    /usr/bin/chmod 0640 "$validated_evidence"
+done
 printf '%s\0' sudo pacman "$@" > "$evidence_directory/accepted.argv"
 /usr/bin/chown root:"$validation_user" "$evidence_directory/accepted.argv"
 /usr/bin/chmod 0640 "$evidence_directory/accepted.argv"

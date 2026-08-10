@@ -13,6 +13,7 @@ repo_root=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
 MOGUET_TEST_REPOSITORY_ROOT=$repo_root
 export MOGUET_TEST_REPOSITORY_ROOT
 . "$repo_root/tests/test-command-safety.sh"
+. "$repo_root/scripts/validation-status.sh"
 tmp_dir=$(mktemp -d)
 normal_server_pid=
 schema_server_pid=
@@ -128,8 +129,8 @@ run_fail() {
     : > "$command_log"
     : > "$normal_request_log"
     : > "$schema_request_log"
-    if "$test_binary" "$@" </dev/null > "$output_file" 2>&1; then
-        echo "expected command to fail: $*" >&2
+    if ! validation_expect_status needed-contract-business-failure 1 \
+        "$output_file" "$output_file" "$test_binary" "$@" </dev/null; then
         sed -n '1,240p' "$output_file" >&2
         cat "$command_log" >&2
         exit 1
@@ -177,7 +178,7 @@ assert_command_absent() {
 assert_command_count() {
     expected=$1
     expected_count=$2
-    actual_count=$(grep -Fxc -- "$expected" "$command_log" || true)
+    actual_count=$(validation_grep_count -Fxc -- "$expected" "$command_log")
     if [ "$actual_count" -ne "$expected_count" ]; then
         echo "unexpected command count for: $expected" >&2
         echo "expected $expected_count, got $actual_count" >&2
@@ -306,7 +307,7 @@ assert_separated_source_install() {
     assert_command_count "pacman-conf --repo-list" "$expected_repository_queries"
     assert_command_count "makepkg --packagelist" 1
     assert_command_count "$expected_makepkg" 1
-    makepkg_count=$(grep -c '^makepkg ' "$command_log" || true)
+    makepkg_count=$(validation_grep_count -c '^makepkg ' "$command_log")
     if [ "$makepkg_count" -ne 2 ]; then
         echo "expected packagelist and build-only makepkg commands" >&2
         cat "$command_log" >&2
@@ -377,7 +378,7 @@ run_ok --noedit --nodiff -Syu --needed clean-root
 assert_command_count "sudo pacman -Syu --needed" 1
 assert_command "git clone https://aur.archlinux.org/clean-root.git clean-root"
 assert_separated_source_install "makepkg -sc" "sudo pacman -U --needed -- " 1
-sudo_count=$(grep -c '^sudo ' "$command_log" || true)
+sudo_count=$(validation_grep_count -c '^sudo ' "$command_log")
 if [ "$sudo_count" -ne 2 ]; then
     echo "system upgrade with a source target ran an unexpected sudo transaction" >&2
     cat "$command_log" >&2
@@ -451,7 +452,7 @@ run_ok --noedit --nodiff -S --needed official-a clean-root
 assert_command_count "sudo pacman -S --needed official-a" 1
 assert_command "git clone https://aur.archlinux.org/clean-root.git clean-root"
 assert_separated_source_install "makepkg -sc" "sudo pacman -U --needed -- " 2
-sudo_count=$(grep -c '^sudo ' "$command_log" || true)
+sudo_count=$(validation_grep_count -c '^sudo ' "$command_log")
 if [ "$sudo_count" -ne 2 ]; then
     echo "mixed route ran an unexpected sudo transaction" >&2
     cat "$command_log" >&2
@@ -465,7 +466,7 @@ write_repository_package official-a
 run_ok --noedit --nodiff -S official-a --needed clean-root
 assert_command_count "sudo pacman -S official-a --needed" 1
 assert_separated_source_install "makepkg -sc" "sudo pacman -U --needed -- " 2
-sudo_count=$(grep -c '^sudo ' "$command_log" || true)
+sudo_count=$(validation_grep_count -c '^sudo ' "$command_log")
 if [ "$sudo_count" -ne 2 ]; then
     echo "mixed ordered route ran an unexpected sudo transaction" >&2
     cat "$command_log" >&2

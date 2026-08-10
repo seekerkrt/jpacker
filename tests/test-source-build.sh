@@ -15,6 +15,7 @@ repo_root=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
 MOGUET_TEST_REPOSITORY_ROOT=$repo_root
 export MOGUET_TEST_REPOSITORY_ROOT
 . "$repo_root/tests/test-command-safety.sh"
+. "$repo_root/scripts/validation-status.sh"
 tmp_dir=$(mktemp -d)
 
 cleanup() {
@@ -156,8 +157,8 @@ run_ok() {
 
 run_fail() {
     : > "$command_log"
-    if "$test_runner" "$@" </dev/null > "$output_file" 2>&1; then
-        echo "expected command to fail: $*" >&2
+    if ! validation_expect_status source-build-business-failure 1 \
+        "$output_file" "$output_file" "$test_runner" "$@" </dev/null; then
         sed -n '1,240p' "$output_file" >&2
         cat "$command_log" >&2
         exit 1
@@ -220,9 +221,17 @@ run_config_tty_fail() {
     answers=$1
     shift
     : > "$command_log"
-    if printf '%b' "$answers" |
-        script -qec "$config_test_runner $*" /dev/null > "$output_file" 2>&1; then
-        echo "expected config-aware interactive command to fail: $*" >&2
+    tty_input=$case_dir/config-tty.input
+    printf '%b' "$answers" >"$tty_input"
+    if script -qec "$config_test_runner $*" /dev/null \
+        <"$tty_input" >"$output_file" 2>&1; then
+        tty_status=0
+    else
+        tty_status=$?
+    fi
+    if ! validation_assert_status source-build-config-tty-failure 1 \
+        "$tty_status" "$output_file" "$output_file" \
+        script -qec "$config_test_runner $*" /dev/null; then
         sed -n '1,240p' "$output_file" >&2
         cat "$command_log" >&2
         exit 1
@@ -270,7 +279,7 @@ assert_command_absent() {
 assert_command_count() {
     expected=$1
     expected_count=$2
-    actual_count=$(grep -Fxc -- "$expected" "$command_log" || true)
+    actual_count=$(validation_grep_count -Fxc -- "$expected" "$command_log")
     if [ "$actual_count" -ne "$expected_count" ]; then
         echo "unexpected command count for: $expected" >&2
         echo "expected $expected_count, got $actual_count" >&2

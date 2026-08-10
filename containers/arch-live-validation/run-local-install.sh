@@ -7,6 +7,7 @@ export LANG=C.UTF-8
 export LANGUAGE=en
 
 repo_root=$(CDPATH='' cd "$(dirname "$0")/../.." && pwd)
+. "$repo_root/scripts/validation-status.sh"
 fixture_root=/usr/libexec/moguet-live-local/fixtures/local-package
 fixture_pkgbuild=$fixture_root/PKGBUILD
 fixture_contract=$fixture_root/contract.env
@@ -35,8 +36,10 @@ fail() {
         find "$gateway_evidence_root/$gateway_case" -maxdepth 1 -type f \
             -printf '  %f\n' | LC_ALL=C sort >&2
         for evidence_file in \
-            stage-hashes.txt staged-artifact-path.txt accepted.argv PKGINFO \
-            archive-members.txt expected-members.txt
+            stage-hashes.txt staged-artifact-path.txt accepted.argv \
+            PKGINFO PKGINFO.raw archive-members.txt archive-members.raw \
+            expected-members.txt expected-members.raw marker.raw \
+            marker.txt expected-marker.txt
         do
             if [ -f "$gateway_evidence_root/$gateway_case/$evidence_file" ]; then
                 printf 'arch-live-local: %s:\n' "$evidence_file" >&2
@@ -79,22 +82,46 @@ assert_metadata() {
         fail "$checked_label metadata drift: $actual_metadata"
 }
 
-source_tree_manifest() {
+source_tree_manifest_raw() {
     manifest_root=$1
     (
-        cd "$manifest_root"
-        sha256sum PKGBUILD contract.env
-        find . -mindepth 1 -maxdepth 1 -printf '%y %m %f\n' | LC_ALL=C sort
+        cd "$manifest_root" || exit $?
+        sha256sum PKGBUILD contract.env || exit $?
+        find . -mindepth 1 -maxdepth 1 -printf '%y %m %f\n' || exit $?
     )
 }
 
-source_content_manifest() {
+source_content_manifest_raw() {
     manifest_root=$1
     (
-        cd "$manifest_root"
-        sha256sum PKGBUILD contract.env
-        find . -mindepth 1 -maxdepth 1 -printf '%y %f\n' | LC_ALL=C sort
+        cd "$manifest_root" || exit $?
+        sha256sum PKGBUILD contract.env || exit $?
+        find . -mindepth 1 -maxdepth 1 -printf '%y %f\n' || exit $?
     )
+}
+
+capture_source_manifest() {
+    manifest_kind=$1
+    manifest_root=$2
+    manifest_raw=$(mktemp "$case_root/$manifest_kind.raw.XXXXXX")
+    manifest_sorted=$(mktemp "$case_root/$manifest_kind.sorted.XXXXXX")
+    if validation_capture_sorted_output "$manifest_raw" "$manifest_sorted" \
+        "$manifest_kind" "$manifest_root"; then
+        cat "$manifest_sorted" || return $?
+        rm -f "$manifest_raw" "$manifest_sorted" || :
+        return 0
+    else
+        manifest_status=$?
+    fi
+    fail "$manifest_kind failed with status $manifest_status; raw=$manifest_raw"
+}
+
+source_tree_manifest() {
+    capture_source_manifest source_tree_manifest_raw "$1"
+}
+
+source_content_manifest() {
+    capture_source_manifest source_content_manifest_raw "$1"
 }
 
 fixture_manifest() {
@@ -174,11 +201,7 @@ assert_source_root_unchanged() {
         fail 'production local invocation wrote .SRCINFO into the case source root'
     [ ! -e "$source_root/src" ] && [ ! -e "$source_root/pkg" ] ||
         fail 'production local invocation wrote makepkg work directories into the case source root'
-    case_manifest=$( (
-        cd "$source_root"
-        sha256sum PKGBUILD contract.env
-        find . -mindepth 1 -maxdepth 1 -printf '%y %m %f\n' | LC_ALL=C sort
-    ) )
+    case_manifest=$(source_tree_manifest "$source_root")
     [ "$case_manifest" = "$fixture_before" ] ||
         fail 'case-local source root changed during production execution'
 }
@@ -321,6 +344,10 @@ assert_metadata /usr/libexec/moguet-live-local/pacman.real \
     'root:root:755:regular file' 'isolated real pacman'
 assert_metadata /usr/libexec/moguet-live-local/local-stage-artifact.py \
     'root:root:755:regular file' 'root staging helper'
+assert_metadata /usr/libexec/moguet-live-local/local-archive-validator.sh \
+    'root:root:755:regular file' 'root archive validator'
+assert_metadata /usr/libexec/moguet-live-local/validation-status.sh \
+    'root:root:755:regular file' 'root archive status library'
 assert_metadata "$fixture_root" \
     'root:root:555:directory' 'local fixture authority root'
 assert_metadata "$fixture_pkgbuild" \
@@ -361,8 +388,11 @@ discovery_output=$discovery_root/output.txt
 printf 'y\nq\n' > "$discovery_input"
 run_pty "$discovery_input" "$discovery_output" "$discovery_source" \
     "$discovery_root/cache" "$discovery_root/state"
-[ "$run_status" -ne 0 ] && [ "$run_status" -ne 124 ] ||
-    fail 'provider discovery did not cancel cleanly before a transaction'
+validation_assert_status live-local-provider-discovery 1 "$run_status" \
+    "$discovery_output" "$discovery_output" python3 "$pty_runner" \
+    --timeout 900 -- "$production_moguet" --noedit build --local \
+    "$discovery_source" ||
+    fail 'provider discovery did not return canonical business status 1'
 tr -d '\r' < "$discovery_output" > "$discovery_output.normalized"
 current_phase=provider-discovery
 current_output=$discovery_output
@@ -403,10 +433,18 @@ assert_not_contains "Running: 'git'" "$actual_output.normalized"
 assert_source_root_unchanged "$actual_source" "$actual_source_before"
 [ "$fixture_authority_before" = "$(fixture_manifest)" ] ||
     fail 'root-owned local fixture authority changed during live execution'
-find "$actual_root/cache" -type d \
+workspace_probe=$actual_root/workspaces.raw
+if validation_capture_output "$workspace_probe" find "$actual_root/cache" -type d \
     \( -name '.local-source-workspace~-*' -o -name '.artifact-workspace~-*' \) \
-    -print | grep . >/dev/null &&
+    -print; then
+    :
+else
+    workspace_status=$?
+    fail "workspace cleanup producer failed with status $workspace_status"
+fi
+if [ -s "$workspace_probe" ]; then
     fail 'production did not clean its local source or artifact workspace'
+fi
 capture_inventory "$actual_root/after"
 assert_inventory_transition "$case_root/runtime/after-rejection.tsv" \
     "$actual_root/after.tsv"
@@ -426,8 +464,10 @@ assert_metadata "$gateway_evidence_root/$gateway_case" \
 assert_metadata "$gateway_staging_root/$gateway_case" \
     'root:moguet-validation:750:directory' 'accepted root staging directory'
 for evidence_file in \
-    stage-hashes.txt staged-artifact-path.txt accepted.argv PKGINFO \
-    archive-members.txt expected-members.txt
+    stage-hashes.txt staged-artifact-path.txt accepted.argv \
+    PKGINFO PKGINFO.raw archive-members.txt archive-members.raw \
+    expected-members.txt expected-members.raw marker.raw marker.txt \
+    expected-marker.txt
 do
     assert_regular_non_symlink "$gateway_evidence_root/$gateway_case/$evidence_file" \
         "accepted root evidence $evidence_file"

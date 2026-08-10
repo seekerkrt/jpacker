@@ -3,6 +3,7 @@
 set -eu
 
 repo_root=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
+. "$repo_root/scripts/validation-status.sh"
 checker_source=${1:-$repo_root/scripts/check-markdown-links.sh}
 checker_source=$(realpath -- "$checker_source")
 tmp_dir=$(mktemp -d)
@@ -61,9 +62,9 @@ run_checker_fail() {
     checker=$1
     output=$2
     missing_destination=$3
-    if env -u MOGUET_TEST_CURRENT_SOURCE_ARCHIVE \
-        sh "$checker" > "$output" 2>&1; then
-        printf 'expected checker to reject: %s\n' "$checker" >&2
+    if ! validation_expect_status markdown-link-business-failure 1 \
+        "$output" "$output" \
+        env -u MOGUET_TEST_CURRENT_SOURCE_ARCHIVE sh "$checker"; then
         sed -n '1,160p' "$output" >&2
         exit 1
     fi

@@ -10,6 +10,7 @@ export LC_ALL LANGUAGE
 module_test_binary=$1
 integration_test_binary=$2
 repo_root=$(CDPATH='' cd "$(dirname "$0")/.." && pwd)
+. "$repo_root/scripts/validation-status.sh"
 MOGUET_TEST_REPOSITORY_ROOT=$repo_root
 export MOGUET_TEST_REPOSITORY_ROOT
 . "$repo_root/tests/test-command-safety.sh"
@@ -220,8 +221,8 @@ run_integration_ok() {
 
 run_integration_fail() {
     : > "$command_log"
-    if "$integration_test_binary" "$@" > "$output_file" 2>&1; then
-        echo "integration command unexpectedly succeeded: $*" >&2
+    if ! validation_expect_status app-config-business-failure 1 \
+        "$output_file" "$output_file" "$integration_test_binary" "$@"; then
         sed -n '1,240p' "$output_file" >&2
         sed -n '1,240p' "$command_log" >&2
         exit 1

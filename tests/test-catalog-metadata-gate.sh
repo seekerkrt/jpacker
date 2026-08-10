@@ -10,6 +10,7 @@ set -eu
 
 make_command=$1
 repo_root=$2
+. "$repo_root/scripts/validation-status.sh"
 source_po_dir=$3
 xgettext_command=$4
 msgcmp_command=$5
@@ -35,6 +36,32 @@ show_log_and_fail() {
     fail "$*"
 }
 
+assert_catalog_context_line() {
+    context_label=$1
+    context_option=$2
+    expected_line=$3
+    fixture_reason=$4
+    context_raw=$tmp_dir/$context_label.raw
+
+    if validation_capture_output "$context_raw" \
+        grep "$context_option" -F \
+        'msgid "Show this help message and exit"' \
+        "$fixture_po_dir/ja.po"; then
+        :
+    else
+        context_status=$?
+        fail "$fixture_reason context producer failed with status $context_status; raw=$context_raw"
+    fi
+    if grep -Fqx "$expected_line" "$context_raw"; then
+        return 0
+    else
+        context_status=$?
+    fi
+    [ "$context_status" -eq 1 ] ||
+        fail "$fixture_reason assertion failed with status $context_status"
+    fail "failed to create the $fixture_reason fixture."
+}
+
 assert_target_rejects_catalog() {
     case_name=$1
     target_name=$2
@@ -45,17 +72,20 @@ assert_target_rejects_catalog() {
 
     # release-check owns this negative test, so its child invocation skips
     # only this phony target to avoid recursively running the same assertion.
-    if "$make_command" --no-print-directory -j1 \
-            --old-file=test-catalog-metadata-gate -C "$repo_root" \
-            BUILD_DIR="$target_build_dir" \
-            PO_DIR="$fixture_po_dir" \
-            XGETTEXT="$xgettext_command" \
-            MSGCMP="$msgcmp_command" \
-            MSGFMT="$msgfmt_command" \
-            MSGGREP="$msggrep_command" \
-            "$target_name" > "$target_log" 2>&1; then
+    if ! validation_expect_status \
+        "catalog-$case_name-$target_name" 2 \
+        "$target_log" "$target_log" \
+        "$make_command" --no-print-directory -j1 \
+        --old-file=test-catalog-metadata-gate -C "$repo_root" \
+        BUILD_DIR="$target_build_dir" \
+        PO_DIR="$fixture_po_dir" \
+        XGETTEXT="$xgettext_command" \
+        MSGCMP="$msgcmp_command" \
+        MSGFMT="$msgfmt_command" \
+        MSGGREP="$msggrep_command" \
+        "$target_name"; then
         show_log_and_fail "$target_log" \
-            "$target_name accepted the $case_name catalog."
+            "$target_name returned a non-canonical status for the $case_name catalog."
     fi
 
     grep -Fqx "$expected_error" "$target_log" ||
@@ -139,9 +169,8 @@ awk '
     { print }
 ' "$source_po_dir/ja.po" > "$fixture_po_dir/ja.po"
 
-grep -A1 -F 'msgid "Show this help message and exit"' \
-    "$fixture_po_dir/ja.po" | grep -Fqx 'msgstr ""' ||
-    fail 'failed to create the untranslated catalog fixture.'
+assert_catalog_context_line \
+    untranslated-context -A1 'msgstr ""' untranslated-catalog
 
 coverage_error="error: $fixture_po_dir/ja.po has untranslated or fuzzy messages required by $fixture_po_dir/moguet.pot; run 'make update-po' and complete the translations"
 assert_target_rejects_catalog \
@@ -162,9 +191,7 @@ awk '
     { print }
 ' "$source_po_dir/ja.po" > "$fixture_po_dir/ja.po"
 
-grep -B1 -F 'msgid "Show this help message and exit"' \
-    "$fixture_po_dir/ja.po" | grep -Fqx '#, fuzzy' ||
-    fail 'failed to create the fuzzy catalog fixture.'
+assert_catalog_context_line fuzzy-context -B1 '#, fuzzy' fuzzy-catalog
 
 assert_target_rejects_catalog \
     fuzzy-message check-catalogs \

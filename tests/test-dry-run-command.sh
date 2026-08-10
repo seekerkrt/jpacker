@@ -11,6 +11,7 @@ repo_root=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
 MOGUET_TEST_REPOSITORY_ROOT=$repo_root
 export MOGUET_TEST_REPOSITORY_ROOT
 . "$repo_root/tests/test-command-safety.sh"
+. "$repo_root/scripts/validation-status.sh"
 
 tmp_dir=$(mktemp -d)
 server_pid=
@@ -56,25 +57,34 @@ require_exact_test_command git "$repo_root/tests/stubs/git"
 MOGUET_TEST_AUR_RPC_BASE_URL=http://127.0.0.1:$port/rpc/
 export MOGUET_TEST_AUR_RPC_BASE_URL
 
+snapshot_protected_storage_raw() {
+    for snapshot_tree in \
+        "$XDG_CONFIG_HOME" \
+        "$XDG_STATE_HOME" \
+        "$XDG_CACHE_HOME" \
+        "$TMPDIR" \
+        "$case_work_dir"
+    do
+        printf 'tree=%s\n' "$snapshot_tree" || return $?
+        find "$snapshot_tree" -printf '%p|%y\n' || return $?
+        find "$snapshot_tree" -exec \
+            stat --format='%n|%F|%d|%i|%u|%g|%a|%s|%Y|%Z' -- {} + || return $?
+        find "$snapshot_tree" -type f -exec sha256sum -- {} + || return $?
+    done
+}
+
 snapshot_protected_storage() {
     snapshot_destination=$1
-    {
-        for snapshot_tree in \
-            "$XDG_CONFIG_HOME" \
-            "$XDG_STATE_HOME" \
-            "$XDG_CACHE_HOME" \
-            "$TMPDIR" \
-            "$case_work_dir"
-        do
-            printf 'tree=%s\n' "$snapshot_tree"
-            find "$snapshot_tree" -printf '%p|%y\n' | LC_ALL=C sort
-            find "$snapshot_tree" -exec \
-                stat --format='%n|%F|%d|%i|%u|%g|%a|%s|%Y|%Z' -- {} + |
-                LC_ALL=C sort
-            find "$snapshot_tree" -type f -exec sha256sum -- {} + |
-                LC_ALL=C sort
-        done
-    } > "$snapshot_destination"
+    if validation_capture_sorted_output \
+        "$snapshot_destination.raw" "$snapshot_destination" \
+        snapshot_protected_storage_raw; then
+        return 0
+    else
+        snapshot_status=$?
+    fi
+    printf 'protected storage snapshot producer failed with status %s; raw=%s\n' \
+        "$snapshot_status" "$snapshot_destination.raw" >&2
+    exit 1
 }
 
 prepare_canary_tree() {
@@ -337,18 +347,46 @@ run_supported() {
 snapshot_local_tree() {
     source_tree=$1
     destination=$2
+    if validation_capture_sorted_output "$destination.raw" "$destination" \
+        snapshot_local_tree_raw "$source_tree"; then
+        return 0
+    else
+        snapshot_status=$?
+    fi
+    printf 'local tree snapshot producer failed with status %s; raw=%s\n' \
+        "$snapshot_status" "$destination.raw" >&2
+    exit 1
+}
+
+snapshot_local_tree_raw() {
+    source_tree=$1
     {
-        find "$source_tree" -mindepth 1 -printf '%P\n' | LC_ALL=C sort
+        find "$source_tree" -mindepth 1 -printf '%P\n' || return $?
         find "$source_tree" -mindepth 1 -exec \
-            stat --format='%n|%F|%d|%i|%u|%g|%a|%s|%Y|%Z' -- {} + |
-            LC_ALL=C sort
-        find "$source_tree" -type f -exec sha256sum -- {} + |
-            LC_ALL=C sort
-    } > "$destination"
+            stat --format='%n|%F|%d|%i|%u|%g|%a|%s|%Y|%Z' -- {} + || return $?
+        find "$source_tree" -type f -exec sha256sum -- {} + || return $?
+    }
 }
 
 assert_no_raw_local_terminal_payload() {
-    local_output_hex=$(od -An -v -tx1 "$output_file" | tr '\n' ' ')
+    local_output_hex_raw=$case_dir/local-output.hex.raw
+    if validation_capture_output "$local_output_hex_raw" \
+        od -An -v -tx1 "$output_file"; then
+        :
+    else
+        hex_status=$?
+        printf 'terminal payload producer failed with status %s; raw=%s\n' \
+            "$hex_status" "$local_output_hex_raw" >&2
+        exit 1
+    fi
+    if local_output_hex=$(tr '\n' ' ' <"$local_output_hex_raw"); then
+        :
+    else
+        hex_status=$?
+        printf 'terminal payload normalization failed with status %s\n' \
+            "$hex_status" >&2
+        exit 1
+    fi
     for local_raw_sequence in \
         '1b' \
         '07' \

@@ -7,6 +7,7 @@ export LANG=C.UTF-8
 export LANGUAGE=en
 
 repo_root=$(CDPATH='' cd "$(dirname "$0")/../.." && pwd)
+. "$repo_root/scripts/validation-status.sh"
 case_policy=$repo_root/containers/arch-live-validation/aur-cases.tsv
 payload_policy=$repo_root/containers/arch-live-validation/fixtures/aur/fetchfetch-payload-authority.tsv
 runtime_policy_root=/usr/share/moguet-live-aur/policy
@@ -119,6 +120,23 @@ assert_metadata() {
     if [ "$actual_metadata" != "$expected_metadata" ]; then
         fail "$checked_label metadata drift: $actual_metadata"
     fi
+}
+
+sha256_file() {
+    if checksum_output=$(sha256sum -- "$1"); then
+        printf '%s\n' "${checksum_output%% *}"
+        return 0
+    else
+        return $?
+    fi
+}
+
+tree_member_paths_raw() {
+    member_root=$1
+    (
+        cd "$member_root" || exit $?
+        find . -mindepth 1 -printf '%P\n' || exit $?
+    )
 }
 
 capture_package_inventory() {
@@ -247,7 +265,8 @@ assert_negative_case_rejected() {
 assert_independent_artifact_unchanged() {
     expected_hash=$1
     artifact_path=$2
-    actual_hash=$(sha256sum "$artifact_path" | awk '{print $1}')
+    actual_hash=$(sha256_file "$artifact_path") ||
+        fail 'negative artifact checksum producer failed'
     [ "$actual_hash" = "$expected_hash" ] ||
         fail 'negative repack changed the independent valid artifact'
 }
@@ -258,8 +277,20 @@ assert_repacked_path_set() {
     label=$3
     original_paths=$case_root/$label-original-paths.txt
     repacked_paths=$case_root/$label-repacked-paths.txt
-    /usr/bin/bsdtar -tf "$original_artifact" | LC_ALL=C sort > "$original_paths"
-    /usr/bin/bsdtar -tf "$repacked_artifact" | LC_ALL=C sort > "$repacked_paths"
+    if validation_capture_sorted_output "$original_paths.raw" "$original_paths" \
+        /usr/bin/bsdtar -tf "$original_artifact"; then
+        :
+    else
+        archive_status=$?
+        fail "$label original archive listing failed with status $archive_status"
+    fi
+    if validation_capture_sorted_output "$repacked_paths.raw" "$repacked_paths" \
+        /usr/bin/bsdtar -tf "$repacked_artifact"; then
+        :
+    else
+        archive_status=$?
+        fail "$label repacked archive listing failed with status $archive_status"
+    fi
     cmp -s "$original_paths" "$repacked_paths" ||
         fail "$label repack changed the package path set"
 }
@@ -345,20 +376,43 @@ fi
 for forbidden_name in \
     .git-credentials .netrc .ssh .gnupg .env
 do
-    if find "$repo_root" -name "$forbidden_name" -print | grep . >/dev/null; then
+    credential_probe=$case_root/credential-$forbidden_name.raw
+    if validation_capture_output "$credential_probe" \
+        find "$repo_root" -name "$forbidden_name" -print; then
+        :
+    else
+        credential_status=$?
+        fail "credential producer failed with status $credential_status"
+    fi
+    if [ -s "$credential_probe" ]; then
         fail "container repository copy includes credential path: $forbidden_name"
     fi
 done
-if find "$repo_root" -type s -print | grep . >/dev/null; then
+socket_probe=$case_root/socket-paths.raw
+if validation_capture_output "$socket_probe" find "$repo_root" -type s -print; then
+    :
+else
+    socket_status=$?
+    fail "socket producer failed with status $socket_status"
+fi
+if [ -s "$socket_probe" ]; then
     fail 'container repository copy includes a socket'
 fi
 if [ -e /var/run/docker.sock ] || [ -e /run/docker.sock ]; then
     fail 'Docker socket is visible inside the AUR container'
 fi
-if grep -R -l --exclude='run-aur-install.sh' \
-    '/home/seeke/moguet' "$repo_root" 2>/dev/null | grep . >/dev/null; then
-    fail 'container source contains a host worktree path reference'
+host_path_probe=$case_root/host-paths.raw
+if validation_capture_output "$host_path_probe" grep -R -l \
+    --exclude='run-aur-install.sh' '/home/seeke/moguet' "$repo_root"; then
+    host_path_status=0
+else
+    host_path_status=$?
 fi
+case $host_path_status in
+    0) fail 'container source contains a host worktree path reference' ;;
+    1) ;;
+    *) fail "host-path producer failed with status $host_path_status" ;;
+esac
 
 assert_metadata /usr/bin/pacman 'root:root:555:regular file' \
     'canonical pacman gateway'
@@ -591,8 +645,17 @@ ls_remote_parsed_count=$(awk -F '\t' \
 [ "$ls_remote_line_count" -gt 0 ] || fail 'AUR git ls-remote returned no HEAD'
 [ "$ls_remote_parsed_count" -eq "$ls_remote_line_count" ] ||
     fail 'AUR git ls-remote returned a non-HEAD or malformed record'
-current_aur_head=$(cut -f1 "$ls_remote_output" | LC_ALL=C sort -u)
-[ "$(printf '%s\n' "$current_aur_head" | wc -l)" -eq 1 ] ||
+current_aur_head=$(awk -F '\t' '
+    { heads[$1] = 1 }
+    END {
+        for (head in heads) {
+            count++
+            selected = head
+        }
+        if (count != 1) exit 1
+        print selected
+    }
+' "$ls_remote_output") ||
     fail 'AUR git ls-remote returned multiple distinct HEAD identities'
 [ "$current_aur_head" = "$expected_aur_git_head" ] ||
     fail "review-required AUR HEAD drift: $current_aur_head"
@@ -610,14 +673,30 @@ git -C "$preflight_checkout" show \
     "${preflight_head}:.SRCINFO" > "$preflight_srcinfo"
 assert_regular_non_symlink "$preflight_pkgbuild" 'preflight PKGBUILD'
 assert_regular_non_symlink "$preflight_srcinfo" 'preflight .SRCINFO'
-[ "$(sha256sum "$preflight_pkgbuild" | awk '{print $1}')" = \
+preflight_pkgbuild_hash=$(sha256_file "$preflight_pkgbuild") ||
+    fail 'preflight PKGBUILD checksum producer failed'
+[ "$preflight_pkgbuild_hash" = \
     "$expected_pkgbuild_sha256" ] || fail 'review-required PKGBUILD byte drift'
-[ "$(sha256sum "$preflight_srcinfo" | awk '{print $1}')" = \
+preflight_srcinfo_hash=$(sha256_file "$preflight_srcinfo") ||
+    fail 'preflight .SRCINFO checksum producer failed'
+[ "$preflight_srcinfo_hash" = \
     "$expected_srcinfo_sha256" ] || fail 'review-required .SRCINFO byte drift'
-git -C "$preflight_checkout" ls-tree --name-only HEAD |
-    LC_ALL=C sort > "$preflight_root/tree.txt"
-printf '%s\n' .SRCINFO .gitignore PKGBUILD | LC_ALL=C sort \
-    > "$preflight_root/expected-tree.txt"
+if validation_capture_sorted_output \
+    "$preflight_root/tree.raw" "$preflight_root/tree.txt" \
+    git -C "$preflight_checkout" ls-tree --name-only HEAD; then
+    :
+else
+    tree_status=$?
+    fail "AUR tree producer failed with status $tree_status"
+fi
+if validation_capture_sorted_output \
+    "$preflight_root/expected-tree.raw" "$preflight_root/expected-tree.txt" \
+    printf '%s\n' .SRCINFO .gitignore PKGBUILD; then
+    :
+else
+    tree_status=$?
+    fail "expected AUR tree normalization failed with status $tree_status"
+fi
 cmp -s "$preflight_root/expected-tree.txt" "$preflight_root/tree.txt" ||
     fail 'review-required AUR repository tree drift'
 
@@ -736,19 +815,27 @@ cmp -s "$preflight_srcinfo" "$negative_checkout/.SRCINFO" ||
 ) || fail 'content-drift package build failed'
 negative_artifact=$negative_checkout/$package_name-$expected_version-$expected_architecture.pkg.tar.zst
 assert_regular_non_symlink "$negative_artifact" 'content-drift source artifact'
+/usr/bin/mkdir -m 0700 "$negative_artifact_root"
 reference_binary_hash=$(awk -F "$tab" \
     '$1 == "usr/bin/fetchfetch" { print $6; count++ }
      END { if (count != 1) exit 1 }' "$runtime_reference_manifest") ||
     fail 'reference manifest has no unique binary hash'
-negative_binary_hash=$(/usr/bin/bsdtar -xOf "$negative_artifact" usr/bin/fetchfetch |
-    /usr/bin/sha256sum | /usr/bin/awk '{print $1}')
+negative_binary=$negative_artifact_root/fetchfetch.binary.raw
+if validation_capture_output "$negative_binary" \
+    /usr/bin/bsdtar -xOf "$negative_artifact" usr/bin/fetchfetch; then
+    negative_binary_hash=$(sha256_file "$negative_binary") ||
+        fail 'negative binary checksum producer failed'
+else
+    archive_status=$?
+    fail "negative binary archive producer failed with status $archive_status"
+fi
 [ "$negative_binary_hash" = "$reference_binary_hash" ] ||
     fail 'independent content-drift artifact does not match the per-image reference binary'
-negative_artifact_hash=$(sha256sum "$negative_artifact" | awk '{print $1}')
+negative_artifact_hash=$(sha256_file "$negative_artifact") ||
+    fail 'negative artifact checksum producer failed'
 /usr/bin/mkdir -m 0700 "$XDG_CACHE_HOME/moguet"
 negative_workspace=$(mktemp -d "$XDG_CACHE_HOME/moguet/.artifact-workspace~-XXXXXX")
 negative_gateway_artifact=$negative_workspace/$package_name-$expected_version-$expected_architecture.pkg.tar.zst
-/usr/bin/mkdir -m 0700 "$negative_artifact_root"
 /usr/bin/zstd --decompress --stdout "$negative_artifact" > "$negative_raw_tar"
 python3 - "$negative_raw_tar" <<'PY'
 from pathlib import Path
@@ -894,9 +981,15 @@ import sys
 target = Path(sys.argv[1])
 os.setxattr(target, b"user.moguet-live-test", b"xattr-negative")
 PY
+if validation_capture_sorted_output "$xattr_list.raw" "$xattr_list" \
+    tree_member_paths_raw "$xattr_tree"; then
+    :
+else
+    path_status=$?
+    fail "xattr archive path producer failed with status $path_status"
+fi
 (
     cd "$xattr_tree"
-    find . -mindepth 1 -printf '%P\n' | LC_ALL=C sort > "$xattr_list"
     /usr/bin/tar --format=pax --xattrs --acls --numeric-owner --owner=0 --group=0 \
         --no-recursion -cf "$xattr_raw_tar" -T "$xattr_list"
 )
@@ -919,9 +1012,15 @@ acl_gateway_artifact=$acl_workspace/$package_name-$expected_version-$expected_ar
 /usr/bin/mkdir -m 0700 "$acl_tree"
 /usr/bin/bsdtar -xf "$negative_artifact" -C "$acl_tree"
 /usr/bin/setfacl -m u:65534:rx "$acl_tree/usr/bin/fetchfetch"
+if validation_capture_sorted_output "$acl_list.raw" "$acl_list" \
+    tree_member_paths_raw "$acl_tree"; then
+    :
+else
+    path_status=$?
+    fail "ACL archive path producer failed with status $path_status"
+fi
 (
     cd "$acl_tree"
-    find . -mindepth 1 -printf '%P\n' | LC_ALL=C sort > "$acl_list"
     /usr/bin/tar --format=pax --xattrs --acls --numeric-owner --owner=0 --group=0 \
         --no-recursion -cf "$acl_raw_tar" -T "$acl_list"
 )
@@ -1054,10 +1153,12 @@ build_start_marker=$case_root/build-start.marker
 touch "$build_start_marker"
 build_start_ns=$(date '+%s%N')
 production_status=0
-if printf 'n\n' | env MOGUET_LIVE_AUR_CASE="$gateway_case" \
+production_input=$case_root/production-install.input
+printf 'n\n' >"$production_input"
+if env MOGUET_LIVE_AUR_CASE="$gateway_case" \
     python3 "$pty_runner" --timeout 900 -- \
         "$production_moguet" --nodiff --noconfirm -S --aur "$package_name" \
-        > "$production_output" 2>&1; then
+        <"$production_input" >"$production_output" 2>&1; then
     production_status=0
 else
     production_status=$?
@@ -1131,14 +1232,21 @@ cmp -s "$preflight_srcinfo" "$checkout_path/.SRCINFO" ||
     fail 'production .SRCINFO differs from reviewed pinned bytes'
 source_archive=$checkout_path/$expected_source_filename
 assert_regular_non_symlink "$source_archive" 'downloaded source archive'
-[ "$(sha256sum "$source_archive" | awk '{print $1}')" = \
+source_archive_hash=$(sha256_file "$source_archive") ||
+    fail 'downloaded source checksum producer failed'
+[ "$source_archive_hash" = \
     "$expected_source_sha256" ] || fail 'downloaded source checksum drift'
 if [ ! "$source_archive" -nt "$build_start_marker" ]; then
     fail 'downloaded source archive is not fresh for this invocation'
 fi
 cache_entries=$case_root/cache-entries.txt
-find "$cache_root" -mindepth 1 -maxdepth 1 -printf '%f\n' |
-    LC_ALL=C sort > "$cache_entries"
+if validation_capture_sorted_output "$cache_entries.raw" "$cache_entries" \
+    find "$cache_root" -mindepth 1 -maxdepth 1 -printf '%f\n'; then
+    :
+else
+    cache_status=$?
+    fail "cache entry producer failed with status $cache_status"
+fi
 [ "$(cat "$cache_entries")" = "$package_base" ] ||
     fail 'production cache contains another package or retained workspace'
 printf '  checkout path: %s\n' "$checkout_path"
@@ -1218,7 +1326,9 @@ source_hash_after=$(awk -F= '$1 == "source_sha256_after" {print $2}' \
     [ "$source_hash_before" = "$staged_hash" ] &&
     [ "$source_hash_before" = "$source_hash_after" ] ||
     fail 'gateway source/copy/staged/after hashes differ'
-[ "$(sha256sum "$staged_artifact" | awk '{print $1}')" = "$staged_hash" ] ||
+staged_artifact_hash=$(sha256_file "$staged_artifact") ||
+    fail 'staged artifact checksum producer failed'
+[ "$staged_artifact_hash" = "$staged_hash" ] ||
     fail 'staged artifact changed after gateway validation'
 artifact_mtime_ns=$(awk -F= '$1 == "source_mtime_ns" {print $2}' \
     "$evidence_directory/stage-hashes.txt")
@@ -1249,9 +1359,17 @@ package_query=$(pacman -U --print --print-format "$package_query_format" -- \
     "$staged_artifact") || fail 'real non-root package query of staged artifact failed'
 [ "$package_query" = "$(printf '%s\t%s' "$package_name" "$expected_version")" ] ||
     fail 'staged artifact identity query drift'
-[ "$(find "$gateway_evidence_root" -mindepth 1 -maxdepth 1 -type d | wc -l)" -eq 6 ] ||
+evidence_directories=$case_root/evidence-directories.raw
+validation_capture_output "$evidence_directories" \
+    find "$gateway_evidence_root" -mindepth 1 -maxdepth 1 -type d ||
+    fail "gateway evidence directory producer failed with status $?"
+[ "$(wc -l <"$evidence_directories")" -eq 6 ] ||
     fail 'gateway must retain one positive and five independent negative evidence directories'
-[ "$(find "$gateway_staging_root" -mindepth 1 -maxdepth 1 -type d | wc -l)" -eq 6 ] ||
+staging_directories=$case_root/staging-directories.raw
+validation_capture_output "$staging_directories" \
+    find "$gateway_staging_root" -mindepth 1 -maxdepth 1 -type d ||
+    fail "gateway staging directory producer failed with status $?"
+[ "$(wc -l <"$staging_directories")" -eq 6 ] ||
     fail 'gateway must retain one positive and five independent negative staging directories'
 printf '  artifact original: %s (production-cleaned)\n' "$original_artifact"
 printf '  artifact staged: %s\n' "$staged_artifact"
@@ -1375,12 +1493,27 @@ done < "$case_root/dependencies-after.tsv"
 printf '  package inventory diff: +%s %s Explicit; no other change\n' \
     "$package_name" "$expected_version"
 
-if find "$repo_root" "$case_root" -type d -name __pycache__ -print |
-    grep . >/dev/null; then
+python_cache_probe=$case_root/python-cache-paths.raw
+if validation_capture_output "$python_cache_probe" \
+    find "$repo_root" "$case_root" -type d -name __pycache__ -print; then
+    :
+else
+    cache_status=$?
+    fail "Python cache path producer failed with status $cache_status"
+fi
+if [ -s "$python_cache_probe" ]; then
     fail 'Python cache artifact was created'
 fi
-if find "$repo_root" "$case_root" -type f \
-    \( -name '*.pyc' -o -name '*.pyo' \) -print | grep . >/dev/null; then
+python_bytecode_probe=$case_root/python-bytecode-paths.raw
+if validation_capture_output "$python_bytecode_probe" \
+    find "$repo_root" "$case_root" -type f \
+    \( -name '*.pyc' -o -name '*.pyo' \) -print; then
+    :
+else
+    cache_status=$?
+    fail "Python bytecode path producer failed with status $cache_status"
+fi
+if [ -s "$python_bytecode_probe" ]; then
     fail 'Python bytecode artifact was created'
 fi
 

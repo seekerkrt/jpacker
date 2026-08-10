@@ -14,6 +14,7 @@ repo_root=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
 MOGUET_TEST_REPOSITORY_ROOT=$repo_root
 export MOGUET_TEST_REPOSITORY_ROOT
 . "$repo_root/tests/test-command-safety.sh"
+. "$repo_root/scripts/validation-status.sh"
 tmp_dir=$(mktemp -d)
 server_pid=
 
@@ -103,8 +104,8 @@ run_ok() {
 
 run_fail() {
     : > "$command_log"
-    if "$test_binary" "$@" </dev/null > "$output_file" 2>&1; then
-        echo "expected command to fail: $*" >&2
+    if ! validation_expect_status aur-rpc-business-failure 1 \
+        "$output_file" "$output_file" "$test_binary" "$@" </dev/null; then
         sed -n '1,240p' "$output_file" >&2
         cat "$command_log" >&2
         exit 1
@@ -123,8 +124,9 @@ run_envelope_ok() {
 
 run_envelope_fail() {
     : > "$command_log"
-    if "$envelope_test_binary" "$@" </dev/null > "$output_file" 2>&1; then
-        echo "expected strict envelope command to fail: $*" >&2
+    if ! validation_expect_status aur-envelope-business-failure 1 \
+        "$output_file" "$output_file" \
+        "$envelope_test_binary" "$@" </dev/null; then
         sed -n '1,240p' "$output_file" >&2
         cat "$command_log" >&2
         exit 1
@@ -204,9 +206,8 @@ assert_moguet_user_agents() {
         echo "AUR fixture did not observe a User-Agent header" >&2
         exit 1
     fi
-    unexpected_user_agent_count=$(
-        grep -Fvxc -- "$expected_user_agent" "$user_agent_log" || true
-    )
+    unexpected_user_agent_count=$(validation_grep_count \
+        -Fvxc -- "$expected_user_agent" "$user_agent_log")
     if [ "$unexpected_user_agent_count" -ne 0 ]; then
         echo "unexpected AUR RPC User-Agent; expected $expected_user_agent" >&2
         cat "$user_agent_log" >&2

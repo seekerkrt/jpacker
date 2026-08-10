@@ -3,6 +3,7 @@
 set -eu
 
 repo_root=$(CDPATH='' cd "$(dirname "$0")/.." && pwd)
+. "$repo_root/scripts/validation-status.sh"
 tmp_dir=$(mktemp -d)
 srcinfo_file=$tmp_dir/.SRCINFO
 stage_root=$tmp_dir/stage
@@ -42,7 +43,15 @@ assert_no_values() {
 assert_value_set() {
     key=$1
     expected=$2
-    actual=$(srcinfo_values "$key" | LC_ALL=C sort)
+    values_raw=$tmp_dir/srcinfo-$key.raw
+    values_sorted=$tmp_dir/srcinfo-$key.sorted
+    if validation_capture_sorted_output "$values_raw" "$values_sorted" \
+        srcinfo_values "$key"; then
+        actual=$(cat "$values_sorted")
+    else
+        producer_status=$?
+        fail "$key producer or normalization failed with status $producer_status; raw=$values_raw"
+    fi
     [ "$actual" = "$expected" ] || {
         printf 'packaging-metadata-check: %s mismatch\nexpected:\n%s\nactual:\n%s\n' \
             "$key" "$expected" "$actual" >&2
@@ -88,9 +97,19 @@ assert_no_values optdepends
 
 for build_only_dependency in nlohmann-json tomlplusplus
 do
-    if srcinfo_values depends | grep -Fx -- "$build_only_dependency" >/dev/null; then
-        fail "$build_only_dependency must not be a runtime dependency."
+    depends_values=$tmp_dir/srcinfo-depends.values
+    validation_capture_output "$depends_values" srcinfo_values depends ||
+        fail "depends producer failed with status $?"
+    if grep -Fx -- "$build_only_dependency" "$depends_values" >/dev/null; then
+        dependency_status=0
+    else
+        dependency_status=$?
     fi
+    case $dependency_status in
+        0) fail "$build_only_dependency must not be a runtime dependency." ;;
+        1) ;;
+        *) fail "depends inspection failed with status $dependency_status" ;;
+    esac
 done
 
 for forbidden_tomlplusplus_flag in \
@@ -138,8 +157,25 @@ expected_payload='/usr/bin/moguet
 /usr/share/man/ja/man1/moguet.1
 /usr/share/man/man1/moguet.1
 /usr/share/zsh/site-functions/_moguet'
-actual_payload=$(find "$stage_root" -type f -print |
-    sed "s|^$stage_root||" | LC_ALL=C sort)
+payload_paths_raw=$tmp_dir/payload-paths.raw
+payload_paths_stripped=$tmp_dir/payload-paths.stripped
+payload_paths_sorted=$tmp_dir/payload-paths.sorted
+validation_capture_output "$payload_paths_raw" \
+    find "$stage_root" -type f -print ||
+    fail "payload path producer failed with status $?; raw=$payload_paths_raw"
+if sed "s|^$stage_root||" "$payload_paths_raw" \
+    >"$payload_paths_stripped"; then
+    :
+else
+    producer_status=$?
+    fail "payload path normalization failed with status $producer_status"
+fi
+if LC_ALL=C sort "$payload_paths_stripped" >"$payload_paths_sorted"; then
+    actual_payload=$(cat "$payload_paths_sorted")
+else
+    producer_status=$?
+    fail "payload path sorting failed with status $producer_status"
+fi
 [ "$actual_payload" = "$expected_payload" ] || {
     printf 'packaging-metadata-check: archive payload mismatch:\n%s\n' \
         "$actual_payload" >&2
@@ -155,14 +191,34 @@ actual_payload=$(find "$stage_root" -type f -print |
 
 command -v readelf >/dev/null 2>&1 ||
     fail "readelf is required for runtime dependency verification."
-needed=$(LC_ALL=C readelf -d "$stage_root/usr/bin/moguet" |
-    sed -n 's/.*Shared library: \[\([^]]*\)\].*/\1/p')
-printf '%s\n' "$needed" | grep -Eq '^libcurl\.so(\.|$)' ||
+readelf_raw=$tmp_dir/readelf.dynamic.raw
+needed_file=$tmp_dir/readelf.needed
+if validation_capture_output "$readelf_raw" \
+    readelf -d "$stage_root/usr/bin/moguet"; then
+    :
+else
+    producer_status=$?
+    fail "readelf producer failed with status $producer_status; raw=$readelf_raw"
+fi
+if sed -n 's/.*Shared library: \[\([^]]*\)\].*/\1/p' \
+    "$readelf_raw" >"$needed_file"; then
+    :
+else
+    producer_status=$?
+    fail "readelf dependency normalization failed with status $producer_status"
+fi
+grep -Eq '^libcurl\.so(\.|$)' "$needed_file" ||
     fail "moguet ELF is missing the direct libcurl runtime dependency."
-printf '%s\n' "$needed" | grep -Eq '^libalpm\.so(\.|$)' ||
+grep -Eq '^libalpm\.so(\.|$)' "$needed_file" ||
     fail "moguet ELF is missing the direct libalpm runtime dependency."
-if printf '%s\n' "$needed" | grep -Eq '^libintl\.so(\.|$)'; then
+if grep -Eq '^libintl\.so(\.|$)' "$needed_file"; then
     fail "gettext unexpectedly became a linked runtime dependency."
+else
+    grep_status=$?
+    case $grep_status in
+        1) ;;
+        *) fail "readelf dependency absence check failed with status $grep_status" ;;
+    esac
 fi
 
 printf 'packaging-metadata-check: all checks passed\n'
