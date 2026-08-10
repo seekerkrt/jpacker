@@ -83,8 +83,9 @@ RUN set -eu; \
     makepkg --version | sed -n '1p'; \
     g++ --version | sed -n '1p'
 
-# The issue's parallel contract requires clean to be its own top-level make
-# process and prevents inherited host jobserver flags from changing the lane.
+# The image build owns lane E's clean production build. Runtime validation
+# consumes this artifact and adds the host-test and release-exclusive coverage
+# without rebuilding production a second time.
 RUN env -u MAKEFLAGS -u MFLAGS make clean
 RUN env -u MAKEFLAGS -u MFLAGS make -j8 --output-sync=target
 

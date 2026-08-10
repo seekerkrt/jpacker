@@ -857,16 +857,43 @@ done
 
 test_target=$(make_target_body test)
 release_target=$(make_target_body release-check)
+host_release_target=$(make_target_body test-host-release)
+release_exclusive_target=$(make_target_body release-check-exclusive)
 if printf '%s\n%s\n' "$test_target" "$release_target" |
     grep -E 'test-container-live-(provider|aur|local)' >/dev/null; then
     fail 'make test or release-check must not recursively start the live lane'
 fi
 printf '%s\n' "$release_target" | grep -F 'test-live-contract' >/dev/null ||
     fail 'release-check must run the static live-contract gate'
+printf '%s\n' "$host_release_target" | grep -F 'test-host-release: test' >/dev/null ||
+    fail 'host release composite must own the full host test prerequisite'
+printf '%s\n' "$host_release_target" |
+    grep -F 'release-check-exclusive' >/dev/null ||
+    fail 'host release composite must run the release-exclusive owner'
+printf '%s\n' "$release_target" | grep -F 'release-check-exclusive' >/dev/null ||
+    fail 'release-check must preserve G coverage through the exclusive owner'
+for release_checker in \
+    scripts/check-release-version.sh \
+    scripts/check-license-compliance.sh \
+    scripts/check-packaging-metadata.sh \
+    scripts/check-markdown-links.sh
+do
+    printf '%s\n' "$release_exclusive_target" |
+        grep -F "$release_checker" >/dev/null ||
+        fail "release-exclusive owner lost checker: $release_checker"
+done
 
 # Existing offline files and target remain isolated from the new live paths.
 assert_not_contains "$offline_dockerfile" 'arch-live-validation'
 assert_not_contains "$offline_runner" 'arch-live-validation'
+assert_contains "$offline_dockerfile" 'RUN env -u MAKEFLAGS -u MFLAGS make clean'
+assert_contains "$offline_dockerfile" \
+    'RUN env -u MAKEFLAGS -u MFLAGS make -j8 --output-sync=target'
+assert_contains "$offline_runner" 'image clean production build artifact is missing'
+assert_contains "$offline_runner" 'test-host-release'
+assert_not_contains "$offline_runner" 'make clean'
+assert_not_contains "$offline_runner" 'parallel-build'
+assert_not_contains "$offline_runner" 'parallel-release-check'
 offline_target=$(make_target_body test-container)
 case "$offline_target" in
     *arch-live-validation*)
