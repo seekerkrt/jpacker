@@ -3299,8 +3299,10 @@ test-run-with-pty:
 test-pacman-routing: $(TEST_TARGET)
 	sh tests/test-pacman-routing.sh $(abspath $(TEST_TARGET))
 
-test-build-cache-symlink: $(TEST_TARGET)
-	sh tests/test-build-cache-symlink.sh $(abspath $(TEST_TARGET))
+# POLICY(#406): cache safety characterization keeps every production TU while
+# strict repository discovery reads a case-local libalpm snapshot.
+test-build-cache-symlink: $(AUR_RPC_VALIDATION_TEST_TARGET)
+	sh tests/test-build-cache-symlink.sh $(abspath $(AUR_RPC_VALIDATION_TEST_TARGET))
 
 test-source-build: $(TEST_TARGET) $(APP_CONFIG_INTEGRATION_TEST_TARGET) $(UPGRADE_BASELINE_METADATA_TEST_TARGET)
 	sh tests/test-source-build.sh \
