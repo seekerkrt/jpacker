@@ -219,6 +219,12 @@ if re.search(r"(?m)^[ \t]*make_dependencies=", runner):
     raise SystemExit("runner reintroduces a make-dependency alias assignment")
 if '"$make_dependencies"' in runner:
     raise SystemExit("runner consumes a make-dependency alias")
+if re.search(
+    r"(?<![A-Za-z0-9_])AUR_CASE_MAKE_DEPENDENCIES"
+    r"[ \t]*(?:\+?=|:=)",
+    runner,
+):
+    raise SystemExit("runner reassigns loaded AUR make-dependency authority")
 start_marker = "current_phase=conflict-policy-negative"
 end_marker = "/usr/bin/zstd --quiet --force -o \"$conflict_gateway_artifact\""
 if runner.count(start_marker) != 1 or runner.count(end_marker) != 1:
@@ -271,28 +277,71 @@ else
 fi
 printf '%s\n' '  consumer-side make-dependency literal counterexample: rejected'
 
+# The scenario loader is the only setter for the uppercase authority field.
+# Reject a detached consumer alias that shadows the loaded value before the
+# otherwise-direct runner function reaches the mutator.
+shadow_runner=$tmp_dir/run-aur-install-uppercase-shadow.sh
+python3 - "$aur_runner" "$shadow_runner" <<'PY' || fail 'uppercase-shadow runner counterexample setup failed'
+from pathlib import Path
+import sys
+
+source, destination = map(Path, sys.argv[1:])
+runner = source.read_text(encoding="utf-8")
+anchor = "runtime_dependencies=$AUR_CASE_RUNTIME_DEPENDENCIES\n"
+if runner.count(anchor) != 1:
+    raise SystemExit("runner uppercase-shadow authority anchor is not unique")
+destination.write_text(
+    runner.replace(
+        anchor,
+        anchor
+        + "detached_make_dependencies=fixture-build-literal\n"
+        + "AUR_CASE_MAKE_DEPENDENCIES=$detached_make_dependencies\n",
+        1,
+    ),
+    encoding="utf-8",
+)
+PY
+if validation_expect_status \
+    aur-runner-uppercase-shadow-counterexample 1 \
+    "$tmp_dir/aur-runner-uppercase-shadow.stdout" \
+    "$tmp_dir/aur-runner-uppercase-shadow.stderr" \
+    validate_runner_conflict_mutation_contract \
+    "$shadow_runner" "$tmp_dir/uppercase-shadow-runner-function.sh"; then
+    :
+else
+    fail 'uppercase-shadow make-dependency counterexample was not rejected'
+fi
+printf '%s\n' '  uppercase-shadow make-dependency counterexample: rejected'
+
 aur_mutation_case=$tmp_dir/aur-mutation-case.tsv
-python3 - "$aur_case_file" "$aur_mutation_case" <<'PY' || fail 'temporary AUR dependency authority setup failed'
+expected_aur_mutation_make_dependencies='fixture-build-one>=1.0,fixture-build-two'
+python3 - \
+    "$aur_case_file" "$aur_mutation_case" \
+    "$expected_aur_mutation_make_dependencies" <<'PY' || fail 'temporary AUR dependency authority setup failed'
 import csv
 from pathlib import Path
 import sys
 
 source = Path(sys.argv[1])
 destination = Path(sys.argv[2])
+expected_make_dependencies = sys.argv[3]
 with source.open(encoding="utf-8", newline="") as stream:
     rows = list(csv.reader(stream, delimiter="\t"))
 if len(rows) != 2 or "make_dependencies" not in rows[0]:
     raise SystemExit("tracked AUR scenario shape drift")
 make_dependencies_index = rows[0].index("make_dependencies")
-rows[1][make_dependencies_index] = (
-    "fixture-build-one>=1.0,fixture-build-two"
-)
+rows[1][make_dependencies_index] = expected_make_dependencies
 with destination.open("w", encoding="utf-8", newline="") as stream:
     writer = csv.writer(stream, delimiter="\t", lineterminator="\n")
     writer.writerows(rows)
 PY
 validation_load_aur_case "$aur_mutation_case" ||
     fail 'temporary AUR dependency authority did not load'
+[ "$AUR_CASE_MAKE_DEPENDENCIES" = \
+    "$expected_aur_mutation_make_dependencies" ] ||
+    fail 'temporary AUR make-dependency authority did not load exactly'
+printf '  changed AUR authority exact value: %s\n' \
+    "$AUR_CASE_MAKE_DEPENDENCIES"
 
 aur_mutation_positive=$tmp_dir/aur-mutation-positive.tar
 aur_mutation_zero=$tmp_dir/aur-mutation-zero.tar
