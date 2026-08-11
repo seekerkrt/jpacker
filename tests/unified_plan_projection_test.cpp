@@ -2179,22 +2179,58 @@ void test_full_identity_correlation_fail_closed() {
             nested_snapshot, {}, {}};
     mixed_outer.system_source.registered_sources.front()
             .resolved_package_base = "other-invocation-base";
-    const UpgradeAllOperationProjectionAuthority mixed_authority =
-            UnifiedPlanProjectionTestAccess::make_upgrade_all(
-                    mixed_outer, nested_authority);
     const AurUpdateExecutionPreflight update_preflight =
             executable_update_preflight(build_plan_fixture());
     const std::vector<UpgradeAllOperationIssue> upgrade_issues;
-    expect_invalid_argument(
-            [&mixed_authority, &query, &update_preflight, &upgrade_issues] {
+    const auto expect_mismatched_system_source_snapshot =
+            [&nested_authority, &query, &update_preflight,
+             &upgrade_issues](
+                    const UpgradeAllOperationPreparedSnapshot& outer,
+                    std::string_view context) {
+        const UpgradeAllOperationProjectionAuthority authority =
+                UnifiedPlanProjectionTestAccess::make_upgrade_all(
+                        outer, nested_authority);
+        expect_invalid_argument(
+            [&authority, &query, &update_preflight, &upgrade_issues] {
                 (void)project_upgrade_all_unified_plan(
                         UpgradeAllUnifiedPlanProjectionInput{
-                                std::cref(mixed_authority),
+                                std::cref(authority),
                                 std::cref(query),
                                 std::cref(update_preflight),
                                 std::cref(upgrade_issues)});
             },
-            "upgrade-all nested different invocation");
+            context);
+    };
+    expect_mismatched_system_source_snapshot(
+            mixed_outer, "upgrade-all nested different invocation");
+
+    UpgradeAllOperationPreparedSnapshot mixed_repository_identity{
+            nested_snapshot, {}, {}};
+    mixed_repository_identity.system_source.registered_sources.front()
+            .repository_identity = ResolvedRepositorySourceBuildIdentity{
+                    RepositoryPackagePresent{
+                            "extra", 1, "repo-child", "repo-base"}};
+    expect_mismatched_system_source_snapshot(
+            mixed_repository_identity,
+            "upgrade-all nested different repository identity");
+
+    UpgradeAllOperationPreparedSnapshot mixed_provenance{
+            nested_snapshot, {}, {}};
+    mixed_provenance.system_source.registered_sources.front()
+            .required_target_provenance =
+                    RequiredTargetProvenance::AurBuildPlanProjection;
+    expect_mismatched_system_source_snapshot(
+            mixed_provenance,
+            "upgrade-all nested different required-target provenance");
+
+    UpgradeAllOperationPreparedSnapshot mixed_lifecycle{
+            nested_snapshot, {}, {}};
+    mixed_lifecycle.system_source.registered_sources.front()
+            .artifact_lifecycle_intent =
+                    ArtifactLifecycleIntent::PackageBaseSet;
+    expect_mismatched_system_source_snapshot(
+            mixed_lifecycle,
+            "upgrade-all nested different artifact lifecycle intent");
 
     UpgradeAllOperationPreparedSnapshot mixed_options{
             nested_snapshot, {}, {}};
