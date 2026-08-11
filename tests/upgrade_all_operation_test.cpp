@@ -195,15 +195,11 @@ SourceBuildExecutionResult source_execution(
 
 ResolvedSourceBuildIdentity source_identity(
         const std::string& requested_name,
-        const std::string& package_base,
-        const std::string& canonical_key) {
+        const std::string& package_base) {
     return ResolvedSourceBuildIdentity{
-            requested_name,
-            package_base,
-            canonical_key,
-            "https://packages.example/" + package_base + ".git",
-            SourceBuildSourceKind::Repository,
-            false};
+            ResolvedRepositorySourceBuildIdentity{
+                    RepositoryPackagePresent{
+                            "core", 0, requested_name, package_base}}};
 }
 
 void configure_sources(
@@ -1824,49 +1820,25 @@ void test_total_aur_query_failure_blocks_mutation() {
     stub::require_script_consumed();
 }
 
-void test_planner_conflict_blocks_before_preflight() {
-    stub::reset();
-    const std::vector<std::string> sources = {"source-a", "source-b"};
-    configure_sources(sources);
-    stub::set_source_identity(
-            "source-a",
-            source_identity("source-a", "source-a", "source://shared"));
-    stub::set_source_identity(
-            "source-b",
-            source_identity("source-b", "source-b", "source://shared"));
-    const AppConfig config;
-    PreparedUpgradeAllOperation prepared = take_prepared(
-            prepare_upgrade_all_operation(config),
-            "planner conflict fixture");
-    enqueue_post_source_metadata(sources);
-    stub::enqueue_source_success(
-            source_execution(SourceBuildExecutionStatus::UpToDate));
-    stub::enqueue_source_success(
-            source_execution(SourceBuildExecutionStatus::UpToDate));
-    stub::set_foreign_inventory(foreign_inventory({"aur-root"}));
-    enqueue_aur_query({{"aur-root", "aur-root"}});
-    return_build_plan(root_plan({{"aur-root", "aur-root"}}), {"aur-root"});
+void test_repository_source_key_is_derived_from_package_base() {
+    const ResolvedSourceBuildIdentity first =
+            source_identity("source-a", "source-base-a");
+    const ResolvedSourceBuildIdentity second =
+            source_identity("source-b", "source-base-b");
+    const ResolvedSourceBuildIdentity sibling =
+            source_identity("source-a-sibling", "source-base-a");
 
-    UpgradeAllOperationResult result =
-            execute_prepared_upgrade_all_operation(
-                    std::move(prepared), config);
     expect(
-            result.aur.operation_result.has_value(),
-            "Explicit source identity conflict lost filtered result: status=" +
-                    std::to_string(static_cast<int>(result.status)) +
-                    " issues=" + std::to_string(result.issues.size()));
-    expect(
-            result.has_planning_issue(),
-            "Explicit source identity conflict lost planning issue: planner=" +
-                    std::to_string(
-                            result.aur.operation_result->upgrade_all_plan.
-                                    issues.size()));
-    expect(!result.is_success(),
-           "Explicit source identity conflict was rounded to success");
-    expect(stub::resolver_call_count() == 1 &&
-                   stub::aur_execution_calls().empty(),
-           "Planner issue did not stop before AUR mutation");
-    stub::require_script_consumed();
+            first.canonical_source_key() == "repository:source-base-a" &&
+                    second.canonical_source_key() ==
+                            "repository:source-base-b" &&
+                    first.canonical_source_key() !=
+                            second.canonical_source_key() &&
+                    sibling.canonical_source_key() ==
+                            first.canonical_source_key() &&
+                    sibling.package_base() == first.package_base() &&
+                    sibling.requested_name() != first.requested_name(),
+            "Repository source key did not remain a PackageBase-derived identity");
 }
 
 void test_mapping_issue_blocks_aur_mutation() {
@@ -2285,7 +2257,7 @@ void test_duplicate_exclusion_uses_prepared_source_intent() {
     stub::set_source_identity(
             "duplicate-root",
             source_identity(
-                    "duplicate-root", "changed-base", "source://changed"));
+                    "duplicate-root", "changed-base"));
     enqueue_post_source_metadata(sources);
     stub::enqueue_source_success(
             source_execution(SourceBuildExecutionStatus::UpToDate));
@@ -2780,8 +2752,8 @@ int main() {
                 "total AUR query failure",
                 test_total_aur_query_failure_blocks_mutation);
         run_case(
-                "planner identity conflict",
-                test_planner_conflict_blocks_before_preflight);
+                "repository source key derivation",
+                test_repository_source_key_is_derived_from_package_base);
         run_case(
                 "filtered mapping issue",
                 test_mapping_issue_blocks_aur_mutation);

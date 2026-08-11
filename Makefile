@@ -3190,6 +3190,10 @@ test-repository-query: $(REPOSITORY_QUERY_TEST_TARGET)
 	@set -e; for test_case in \
 		candidate-value-contract \
 		configured-order \
+		split-package-base \
+		confirmed-not-found \
+		malformed-package-base \
+		returned-child-mismatch \
 		present-later-failure \
 		absent-later-failure \
 		unrelated-malformed-exact \

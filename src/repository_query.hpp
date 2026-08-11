@@ -38,6 +38,7 @@ struct RepositoryPackagePresent {
     std::string repository_name;
     std::size_t configured_order = 0;
     std::string package_name;
+    std::string package_base;
     std::optional<ObservedVersion> package_version = std::nullopt;
     std::optional<std::vector<std::string>> configured_repository_order =
             std::nullopt;

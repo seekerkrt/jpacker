@@ -509,6 +509,7 @@ BuildPlan typed_constraint_plan(
     RepositoryExactPackage candidate{
             ConfiguredRepositoryIdentity{"core", 0},
             resolved_name,
+            resolved_name,
             ObservedVersion::available(
                     ObservedVersionSource::RepositoryExactPackage, "1"),
             {}};

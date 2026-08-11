@@ -113,6 +113,7 @@ struct RepositoryExactPackageMetadata {
     std::size_t                                    configured_repository_order;
     std::string                                    repository_name;
     std::string                                    package_name;
+    std::string                                    package_base;
     std::optional<std::string>                     version;
     std::vector<RepositoryProvidedPackageMetadata> provides;
 };

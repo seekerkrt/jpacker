@@ -539,17 +539,23 @@ void test_build_unit_and_required_artifact_identity() {
             "Local build unit lost source-root identity");
 
     const ResolvedSourceBuildIdentity remote_source{
-            "repository-child", "repository-base",
-            "repo:repository-base",
-            "https://example.invalid/repository-base.git",
-            SourceBuildSourceKind::Repository, true};
+            ResolvedRepositorySourceBuildIdentity{
+                    RepositoryPackagePresent{
+                            "extra", 0, "repository-child",
+                            "repository-base"}}};
     ProductionSourceBuildWorkItem remote_work;
-    remote_work.request.package_name = remote_source.requested_name;
-    remote_work.request.checkout_name = remote_source.package_base;
-    remote_work.request.git_url = remote_source.git_url;
+    remote_work.request.package_name = remote_source.requested_name();
+    remote_work.request.checkout_name = remote_source.package_base();
+    remote_work.request.git_url = remote_source.git_url();
     remote_work.required_targets.push_back(RequiredPackageArtifactTarget{
-            remote_source.package_base, remote_source.requested_name,
+            remote_source.package_base(), remote_source.requested_name(),
             DesiredInstallReason::Explicit});
+    remote_work.required_target_provenance =
+            RequiredTargetProvenance::RepositoryExactPackageProjection;
+    remote_work.artifact_lifecycle_intent =
+            ArtifactLifecycleIntent::SingularCompatibility;
+    remote_work.repository_identity = *remote_source.repository_identity();
+    remote_work.uses_system_update_baseline = true;
     const PreparedRemoteSourceBuildUnitReference inspected_remote_unit(
             std::cref(remote_source), std::cref(remote_work));
     expect(
@@ -676,6 +682,7 @@ void test_typed_blockers() {
             std::nullopt,
             ResolvedDependencyCandidate{RepositoryExactPackage{
                     ConfiguredRepositoryIdentity{"extra", 1},
+                    "constraint-runtime",
                     "constraint-runtime",
                     ObservedVersion::available(
                             ObservedVersionSource::RepositoryExactPackage,
@@ -821,6 +828,7 @@ void test_transaction_intent_boundaries() {
     const UnifiedPlanRootReference root = repository_root(0, "root-package");
     const RepositoryExactPackage dependency{
             ConfiguredRepositoryIdentity{"extra", 1},
+            "exact-dependency",
             "exact-dependency",
             ObservedVersion::available(
                     ObservedVersionSource::RepositoryExactPackage, "3.0-1"),

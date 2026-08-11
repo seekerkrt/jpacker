@@ -145,7 +145,7 @@ StrictRepositoryPackageQueryResult query_repository_package_strict(
     }
     if(package_name == "case6-repo-lib") {
         return RepositoryPackagePresent{
-                "core", 0, package_name,
+                "core", 0, package_name, package_name,
                 ObservedVersion::available(
                         ObservedVersionSource::RepositoryExactPackage,
                         "1.0-1")};

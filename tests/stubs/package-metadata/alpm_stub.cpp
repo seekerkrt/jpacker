@@ -88,6 +88,8 @@ struct RepositoryPackageState {
     PackageLookupMode lookup_mode = PackageLookupMode::Absent;
     alpm_errno_t      query_error = ALPM_ERR_DB_OPEN;
     std::string       returned_name;
+    std::string       package_base;
+    bool              package_base_is_null = false;
     std::string       version;
     bool              version_is_null = false;
     std::string       description;
@@ -527,6 +529,8 @@ void configure_repository_package_from_environment(
 
         package_state.lookup_mode = PackageLookupMode::Present;
         package_state.returned_name = fixture_package;
+        package_state.package_base = fixture_package;
+        package_state.package_base_is_null = false;
         package_state.package_size = package_size;
         package_state.installed_size = installed_size;
         package_state.name_is_null = false;
@@ -900,6 +904,7 @@ void set_repository_package_metadata(
     package_state = RepositoryPackageState{};
     package_state.lookup_mode = PackageLookupMode::Present;
     package_state.returned_name = package_name;
+    package_state.package_base = package_name;
     package_state.package_size = package_size;
     package_state.installed_size = installed_size;
 }
@@ -921,6 +926,25 @@ void set_repository_package_version_null(
             repository_package_state(repository_name, package_name);
     package_state.version.clear();
     package_state.version_is_null = true;
+}
+
+void set_repository_package_base(
+        const std::string& repository_name,
+        const std::string& package_name,
+        const std::string& package_base) {
+    RepositoryPackageState& package_state =
+            repository_package_state(repository_name, package_name);
+    package_state.package_base = package_base;
+    package_state.package_base_is_null = false;
+}
+
+void set_repository_package_base_null(
+        const std::string& repository_name,
+        const std::string& package_name) {
+    RepositoryPackageState& package_state =
+            repository_package_state(repository_name, package_name);
+    package_state.package_base.clear();
+    package_state.package_base_is_null = true;
 }
 
 void set_repository_package_provides(
@@ -1634,6 +1658,14 @@ const char* alpm_pkg_get_version(alpm_pkg_t* package) {
     LocalPackageState* package_state = local_package_state(package);
     if(package_state == nullptr || package_state->version_is_null) return nullptr;
     return package_state->version.c_str();
+}
+
+const char* alpm_pkg_get_base(alpm_pkg_t* package) {
+    RepositoryPackageState* package_state = repository_package_state(package);
+    if(package_state == nullptr || package_state->package_base_is_null) {
+        return nullptr;
+    }
+    return package_state->package_base.c_str();
 }
 
 alpm_list_t* alpm_pkg_get_provides(alpm_pkg_t* package) {

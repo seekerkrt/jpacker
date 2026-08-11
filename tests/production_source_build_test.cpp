@@ -595,6 +595,10 @@ ProductionSourceBuildWorkItem make_work_item(
             "https://aur.archlinux.org/" + package_name + ".git";
     work_item.required_targets.push_back(RequiredPackageArtifactTarget{
             package_name, package_name, desired_reason});
+    work_item.required_target_provenance =
+            RequiredTargetProvenance::AurBuildPlanProjection;
+    work_item.artifact_lifecycle_intent =
+            ArtifactLifecycleIntent::SingularCompatibility;
     return work_item;
 }
 
@@ -610,7 +614,10 @@ ProductionSourceBuildWorkItem make_package_base_work_item(
     work_item.request.git_url =
             "https://aur.archlinux.org/" + package_base + ".git";
     work_item.required_targets = std::move(required_targets);
-    work_item.is_build_plan_entry = true;
+    work_item.required_target_provenance =
+            RequiredTargetProvenance::AurBuildPlanProjection;
+    work_item.artifact_lifecycle_intent =
+            ArtifactLifecycleIntent::PackageBaseSet;
     return work_item;
 }
 
@@ -1603,17 +1610,27 @@ void test_build_plan_projection() {
     expect(work_items[1].required_targets.size() == 1,
            "Ordinary root work item did not retain one required target");
     expect_required_target(
-            require_singular_required_package_target(work_items[0]),
+            work_items[0].required_targets.front(),
             "dependency-package", "dependency-package",
             DesiredInstallReason::Dependency,
             "ordinary dependency BuildPlan projection");
     expect_required_target(
-            require_singular_required_package_target(work_items[1]),
+            work_items[1].required_targets.front(),
             "root-package", "root-package",
             DesiredInstallReason::Explicit,
             "ordinary root BuildPlan projection");
     expect(
-            work_items[0].request.needed && work_items[1].request.needed,
+            work_items[0].request.needed && work_items[1].request.needed &&
+                    work_items[0].required_target_provenance ==
+                            RequiredTargetProvenance::
+                                    AurBuildPlanProjection &&
+                    work_items[0].artifact_lifecycle_intent ==
+                            ArtifactLifecycleIntent::PackageBaseSet &&
+                    work_items[1].required_target_provenance ==
+                            RequiredTargetProvenance::
+                                    AurBuildPlanProjection &&
+                    work_items[1].artifact_lifecycle_intent ==
+                            ArtifactLifecycleIntent::PackageBaseSet,
             "--needed was not projected to every BuildPlan unit");
 }
 
@@ -2305,7 +2322,7 @@ void test_same_package_base_projection_preserves_required_children() {
                         require_singular_required_package_target(work_item));
             },
             "multiple required target compatibility accessor",
-            "exactly one required package target");
+            "singular compatibility lifecycle intent");
 }
 
 void test_same_package_base_source_preference_route() {
@@ -2354,20 +2371,20 @@ void test_resolved_repository_identity_and_owned_environment_preparation() {
     const ResolvedSourceBuildIdentity identity =
             resolve_source_build_identity("identity-repository");
     expect(
-            identity.requested_name == "identity-repository" &&
-                    identity.package_base == "identity-repository",
+            identity.requested_name() == "identity-repository" &&
+                    identity.package_base() == "identity-repository",
             "Repository source identity lost requested/PackageBase correlation");
     expect(
-            identity.canonical_source_key ==
+            identity.canonical_source_key() ==
                     "repository:identity-repository",
             "Repository source identity key differs");
     expect(
-            identity.git_url ==
+            identity.git_url() ==
                     "https://gitlab.archlinux.org/archlinux/packaging/packages/identity-repository.git",
             "Repository source identity Git URL differs");
     expect(
-            identity.source_kind == SourceBuildSourceKind::Repository &&
-                    !identity.has_distinct_package_base,
+            identity.source_kind() == SourceBuildSourceKind::Repository &&
+                    !identity.has_distinct_package_base(),
             "Repository source kind flags differ");
 
     SourceBuildEnvironment environment;
@@ -2377,9 +2394,9 @@ void test_resolved_repository_identity_and_owned_environment_preparation() {
             prepare_resolved_source_build_work_item(
                     identity, std::move(environment), true, true);
     expect(
-            work_item.request.package_name == identity.requested_name &&
-                    work_item.request.checkout_name == identity.package_base &&
-                    work_item.request.git_url == identity.git_url,
+            work_item.request.package_name == identity.requested_name() &&
+                    work_item.request.checkout_name == identity.package_base() &&
+                    work_item.request.git_url == identity.git_url(),
             "Resolved source identity was not projected to the work item");
     expect(
             work_item.request.custom_environment.ordered_assignments.size() ==
@@ -2391,7 +2408,13 @@ void test_resolved_repository_identity_and_owned_environment_preparation() {
             "Caller-owned strict source environment was not preserved");
     expect(
             work_item.request.only_if_updated && work_item.request.needed &&
-                    work_item.uses_system_update_baseline,
+                    work_item.uses_system_update_baseline &&
+                    work_item.required_target_provenance ==
+                            RequiredTargetProvenance::
+                                    RepositoryExactPackageProjection &&
+                    work_item.artifact_lifecycle_intent ==
+                            ArtifactLifecycleIntent::SingularCompatibility &&
+                    work_item.repository_identity.has_value(),
             "Resolved repository work-item policy differs");
     expect(
             work_item.required_targets.size() == 1,
@@ -2403,13 +2426,248 @@ void test_resolved_repository_identity_and_owned_environment_preparation() {
             "resolved source required target");
     expect(
             query_stub::repository_query_count(
-                    query_stub::RepositoryQueryKind::LegacyPackage,
+                    query_stub::RepositoryQueryKind::StrictPackage,
                     "identity-repository") == 1,
-            "Repository source identity did not use the legacy package probe once");
+            "Repository source identity did not use the strict package query once");
     process_stub::require_process_expectations_consumed();
     process_stub::reset_process_stub();
     query_stub::reset_repository_stub();
     query_stub::reset_aur_stub();
+}
+
+void test_resolved_repository_split_identity_and_required_target_projection() {
+    process_stub::reset_process_stub();
+    query_stub::reset_repository_stub();
+    query_stub::reset_aur_stub();
+    query_stub::set_repository_package_response(
+            "suite-child", "extra", "suite");
+
+    const ResolvedSourceBuildIdentity identity =
+            resolve_source_build_identity("suite-child");
+    const ResolvedRepositorySourceBuildIdentity* repository =
+            identity.repository_identity();
+    expect(
+            repository != nullptr &&
+                    repository->requested_child() == "suite-child" &&
+                    repository->package_base() == "suite" &&
+                    identity.requested_name() == "suite-child" &&
+                    identity.package_base() == "suite" &&
+                    identity.canonical_source_key() == "repository:suite" &&
+                    identity.git_url() ==
+                            "https://gitlab.archlinux.org/archlinux/packaging/packages/suite.git",
+            "Repository split identity flattened requested child, PackageBase, or checkout");
+
+    const ProductionSourceBuildWorkItem work_item =
+            prepare_resolved_source_build_work_item(
+                    identity, SourceBuildEnvironment{}, true, false);
+    expect(
+            work_item.required_target_provenance ==
+                            RequiredTargetProvenance::
+                                    RepositoryExactPackageProjection &&
+                    work_item.artifact_lifecycle_intent ==
+                            ArtifactLifecycleIntent::SingularCompatibility &&
+                    work_item.repository_identity.has_value() &&
+                    work_item.request.package_name == "suite-child" &&
+                    work_item.request.checkout_name == "suite" &&
+                    work_item.request.only_if_updated &&
+                    !work_item.request.needed &&
+                    work_item.uses_system_update_baseline,
+            "Repository split work-item policy or identity differs");
+    expect_required_target(
+            require_singular_required_package_target(work_item),
+            "suite", "suite-child", DesiredInstallReason::Explicit,
+            "repository split required target");
+    expect(
+            query_stub::repository_query_count(
+                    query_stub::RepositoryQueryKind::StrictPackage,
+                    "suite-child") == 1 &&
+                    query_stub::aur_query_history().empty() &&
+                    process_stub::capture_command_call_count() == 0 &&
+                    process_stub::run_command_call_count() == 0,
+            "Repository split projection used a legacy/AUR query or started mutation");
+
+    process_stub::require_process_expectations_consumed();
+    process_stub::reset_process_stub();
+    query_stub::reset_repository_stub();
+    query_stub::reset_aur_stub();
+}
+
+void test_repository_query_failure_stops_before_aur_or_mutation() {
+    process_stub::reset_process_stub();
+    query_stub::reset_repository_stub();
+    query_stub::reset_aur_stub();
+    query_stub::set_repository_package_failure(
+            "metadata-failure-child", "repository metadata unavailable");
+    AurPackageInfo forbidden_aur_fallback;
+    forbidden_aur_fallback.Name = "metadata-failure-child";
+    forbidden_aur_fallback.PackageBase = "forbidden-aur-base";
+    forbidden_aur_fallback.Version = "1.0-1";
+    query_stub::set_aur_package_response(
+            "metadata-failure-child", forbidden_aur_fallback);
+
+    static_cast<void>(expect_runtime_error(
+            []() {
+                static_cast<void>(resolve_source_build_identity(
+                        "metadata-failure-child"));
+            },
+            "repository metadata failure source resolution",
+            "Failed to inspect repository metadata"));
+    expect(
+            query_stub::repository_query_count(
+                    query_stub::RepositoryQueryKind::StrictPackage,
+                    "metadata-failure-child") == 1 &&
+                    query_stub::aur_query_history().empty() &&
+                    process_stub::capture_command_call_count() == 0 &&
+                    process_stub::run_command_call_count() == 0,
+            "Repository metadata failure fell back to AUR or started source mutation");
+
+    process_stub::require_process_expectations_consumed();
+    process_stub::reset_process_stub();
+    query_stub::reset_repository_stub();
+    query_stub::reset_aur_stub();
+}
+
+void test_confirmed_repository_not_found_allows_exact_aur_fallback() {
+    process_stub::reset_process_stub();
+    query_stub::reset_repository_stub();
+    query_stub::reset_aur_stub();
+    query_stub::set_repository_package_response(
+            "aur-split-child", std::nullopt);
+    AurPackageInfo aur_package;
+    aur_package.Name = "aur-split-child";
+    aur_package.PackageBase = "aur-split-base";
+    aur_package.Version = "2.0-1";
+    query_stub::set_aur_package_response("aur-split-child", aur_package);
+
+    const ResolvedSourceBuildIdentity identity =
+            resolve_source_build_identity("aur-split-child");
+    expect(
+            identity.source_kind() == SourceBuildSourceKind::Aur &&
+                    identity.repository_identity() == nullptr &&
+                    identity.requested_name() == "aur-split-child" &&
+                    identity.package_base() == "aur-split-base" &&
+                    identity.canonical_source_key() ==
+                            "aur:aur-split-base" &&
+                    query_stub::repository_query_count(
+                            query_stub::RepositoryQueryKind::StrictPackage,
+                            "aur-split-child") == 1 &&
+                    query_stub::aur_query_count(
+                            query_stub::AurQueryKind::LegacyInfo,
+                            "aur-split-child") == 1,
+            "Confirmed repository NotFound did not route to exact AUR identity");
+    expect(
+            process_stub::capture_command_call_count() == 0 &&
+                    process_stub::run_command_call_count() == 0,
+            "Identity-only AUR fallback started checkout/build mutation");
+
+    process_stub::require_process_expectations_consumed();
+    process_stub::reset_process_stub();
+    query_stub::reset_repository_stub();
+    query_stub::reset_aur_stub();
+}
+
+void test_repository_work_item_static_identity_invariants() {
+    const RepositoryPackagePresent exact{
+            "extra", 0, "static-child", "static-base",
+            ObservedVersion::available(
+                    ObservedVersionSource::RepositoryExactPackage,
+                    "1.0-1"),
+            std::vector<std::string>{"extra"}};
+    const ResolvedSourceBuildIdentity identity =
+            make_repository_source_build_identity(exact);
+    const ProductionSourceBuildWorkItem valid =
+            prepare_resolved_source_build_work_item(
+                    identity, SourceBuildEnvironment{}, true, false);
+
+    ProductionSourceBuildWorkItem future_set = valid;
+    future_set.artifact_lifecycle_intent =
+            ArtifactLifecycleIntent::PackageBaseSet;
+    require_static_production_source_build_work_item(future_set);
+    const AppConfig config;
+    static_cast<void>(expect_logic_error(
+            [&future_set, &config]() {
+                static_cast<void>(
+                        execute_prepared_package_base_source_build_work_item_typed(
+                                future_set, PacmanDatabasePaths{}, config));
+            },
+            "repository PackageBase set execution remains deferred",
+            "not connected"));
+
+    ProductionSourceBuildWorkItem empty_child = valid;
+    empty_child.request.package_name.clear();
+    static_cast<void>(expect_runtime_error(
+            [&empty_child]() {
+                require_static_production_source_build_work_item(empty_child);
+            },
+            "empty repository requested child", "Invalid package name"));
+
+    ProductionSourceBuildWorkItem empty_base = valid;
+    empty_base.request.checkout_name.clear();
+    static_cast<void>(expect_runtime_error(
+            [&empty_base]() {
+                require_static_production_source_build_work_item(empty_base);
+            },
+            "empty repository PackageBase", "Invalid package name"));
+
+    ProductionSourceBuildWorkItem invalid_checkout = valid;
+    invalid_checkout.request.git_url.clear();
+    static_cast<void>(expect_logic_error(
+            [&invalid_checkout]() {
+                require_static_production_source_build_work_item(
+                        invalid_checkout);
+            },
+            "invalid repository checkout identity", "empty Git URL"));
+
+    ProductionSourceBuildWorkItem mismatched_base = valid;
+    mismatched_base.required_targets.front().package_base = "other-base";
+    static_cast<void>(expect_logic_error(
+            [&mismatched_base]() {
+                require_static_production_source_build_work_item(
+                        mismatched_base);
+            },
+            "repository target PackageBase mismatch",
+            "mismatched PackageBase"));
+
+    ProductionSourceBuildWorkItem mismatched_child = valid;
+    mismatched_child.required_targets.front().package_name = "other-child";
+    static_cast<void>(expect_logic_error(
+            [&mismatched_child]() {
+                require_static_production_source_build_work_item(
+                        mismatched_child);
+            },
+            "repository target child mismatch",
+            "does not match its required package target"));
+
+    ProductionSourceBuildWorkItem aur_with_repository_identity = valid;
+    aur_with_repository_identity.required_target_provenance =
+            RequiredTargetProvenance::AurBuildPlanProjection;
+    static_cast<void>(expect_logic_error(
+            [&aur_with_repository_identity]() {
+                require_static_production_source_build_work_item(
+                        aur_with_repository_identity);
+            },
+            "AUR provenance with repository identity",
+            "contains a repository identity"));
+
+    ProductionSourceBuildWorkItem missing_repository_identity = valid;
+    missing_repository_identity.repository_identity.reset();
+    static_cast<void>(expect_logic_error(
+            [&missing_repository_identity]() {
+                require_static_production_source_build_work_item(
+                        missing_repository_identity);
+            },
+            "repository provenance without identity",
+            "has no exact repository identity"));
+
+    ProductionSourceBuildWorkItem unsupported = valid;
+    unsupported.artifact_lifecycle_intent =
+            ArtifactLifecycleIntent::Unspecified;
+    static_cast<void>(expect_logic_error(
+            [&unsupported]() {
+                require_static_production_source_build_work_item(unsupported);
+            },
+            "unsupported lifecycle intent",
+            "no supported artifact lifecycle intent"));
 }
 
 void test_set_static_preparation_accepts_split_and_multiple(
@@ -3237,7 +3495,11 @@ void test_ordinary_build_plan_unit_uses_set_owner(
                     ordinary_single_entry_plan(), false, false);
     expect(
             work_items.size() == 1 &&
-                    work_items.front().is_build_plan_entry,
+                    work_items.front().required_target_provenance ==
+                            RequiredTargetProvenance::
+                                    AurBuildPlanProjection &&
+                    work_items.front().artifact_lifecycle_intent ==
+                            ArtifactLifecycleIntent::PackageBaseSet,
             "Ordinary AUR BuildPlan did not produce one set-owned work item");
     ProductionScenario scenario =
             make_execution_scenario(environment, work_items, config);
@@ -3718,6 +3980,10 @@ int main() {
         test_same_package_base_projection_preserves_required_children();
         test_same_package_base_source_preference_route();
         test_resolved_repository_identity_and_owned_environment_preparation();
+        test_resolved_repository_split_identity_and_required_target_projection();
+        test_repository_query_failure_stops_before_aur_or_mutation();
+        test_confirmed_repository_not_found_allows_exact_aur_fallback();
+        test_repository_work_item_static_identity_invariants();
         {
             // Production must remain private-first even when the caller's
             // ordinary collaborative umask would make a legacy mkdir 0775.

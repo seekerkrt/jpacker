@@ -1092,22 +1092,22 @@ std::string build_unit_identity_display(
                     display = localization::format_translated_message(
                             "{} source key {} (requested package: {}; checkout {}: {})",
                             source_build_kind_display(
-                                    unit.source().source_kind, state,
+                                    unit.source().source_kind(), state,
                                     section, item_index, detail_index),
                             required_string_display(
-                                    unit.source().canonical_source_key,
+                                    unit.source().canonical_source_key(),
                                     state, section, item_index,
                                     detail_index,
                                     localization::translate_message(
                                             "A remote source build unit is missing its source identity key.")),
                             required_string_display(
-                                    unit.source().requested_name, state,
+                                    unit.source().requested_name(), state,
                                     section, item_index, detail_index,
                                     localization::translate_message(
                                             "A remote source build unit is missing its requested package identity.")),
                             "PackageBase",
                             required_string_display(
-                                    unit.source().package_base, state,
+                                    unit.source().package_base(), state,
                                     section, item_index, detail_index,
                                     localization::format_translated_message(
                                             "A remote source build unit is missing its checkout {} identity.",

@@ -31,6 +31,8 @@ static_assert(!std::is_copy_assignable_v<RepositoryPackageMetadataSession>);
 static_assert(std::is_nothrow_move_constructible_v<RepositoryPackageMetadataSession>);
 static_assert(std::is_nothrow_move_assignable_v<RepositoryPackageMetadataSession>);
 static_assert(std::is_nothrow_destructible_v<RepositoryPackageMetadataSession>);
+static_assert(!std::is_pointer_v<
+              decltype(RepositoryExactPackageMetadata::package_base)>);
 
 namespace {
 
@@ -116,6 +118,41 @@ PackageMetadataFailure require_repository_search_failure(
     expect(failure.code == expected_code, context + ": unexpected failure code");
     expect(!failure.diagnostic.empty(), context + ": empty failure diagnostic");
     return failure;
+}
+
+RepositoryExactPackageMetadataSnapshot require_exact_repository_snapshot(
+        const RepositoryExactPackageMetadataQueryResult& result,
+        const std::string& context) {
+    return require_result_alternative<
+            RepositoryExactPackageMetadataSnapshot>(result, context);
+}
+
+RepositoryExactPackageMetadata require_exact_repository_metadata(
+        const RepositoryExactPackageMetadataQueryResult& result,
+        const std::string& context) {
+    RepositoryExactPackageMetadataSnapshot snapshot =
+            require_exact_repository_snapshot(result, context);
+    expect(snapshot.source_results.size() == 1,
+           context + ": source result count differs");
+    return require_result_alternative<RepositoryExactPackageMetadata>(
+            snapshot.source_results.front(), context);
+}
+
+PackageMetadataFailure require_exact_repository_source_failure(
+        const RepositoryExactPackageMetadataQueryResult& result,
+        PackageMetadataErrorCode expected_code,
+        const std::string& context) {
+    RepositoryExactPackageMetadataSnapshot snapshot =
+            require_exact_repository_snapshot(result, context);
+    expect(snapshot.source_results.size() == 1,
+           context + ": source result count differs");
+    RepositoryExactPackageMetadataSourceFailure source_failure =
+            require_result_alternative<
+                    RepositoryExactPackageMetadataSourceFailure>(
+                    snapshot.source_results.front(), context);
+    expect(source_failure.failure.code == expected_code,
+           context + ": unexpected failure code");
+    return source_failure.failure;
 }
 
 PackageMetadataFailure require_inventory_failure(
@@ -2138,6 +2175,98 @@ void test_repository_root_search_free_function_uses_one_session() {
             "non-eligible repository reached the libalpm session");
 }
 
+void test_repository_exact_metadata_owns_authoritative_package_base() {
+    {
+        stub::reset_alpm_stub();
+        stub::set_repository_package_metadata(
+                "core", "ordinary-package", 10, 20);
+        stub::set_repository_package_version(
+                "core", "ordinary-package", "1.0-1");
+        RepositoryPackageMetadataSession ordinary_session =
+                RepositoryPackageMetadataSession::open(
+                        valid_repository_configuration({"core"}));
+        RepositoryExactPackageMetadata ordinary =
+                require_exact_repository_metadata(
+                        ordinary_session.
+                                query_repository_exact_package_metadata(
+                                        "ordinary-package"),
+                        "ordinary exact PackageBase");
+        expect(
+                ordinary.package_name == "ordinary-package" &&
+                        ordinary.package_base == "ordinary-package",
+                "Ordinary exact metadata lost its authoritative PackageBase");
+    }
+
+    {
+        stub::reset_alpm_stub();
+        stub::set_repository_package_metadata(
+                "extra", "suite-child", 30, 40);
+        stub::set_repository_package_version(
+                "extra", "suite-child", "2.0-1");
+        stub::set_repository_package_base(
+                "extra", "suite-child", "suite");
+        RepositoryPackageMetadataSession split_session =
+                RepositoryPackageMetadataSession::open(
+                        valid_repository_configuration({"extra"}));
+        RepositoryExactPackageMetadata split =
+                require_exact_repository_metadata(
+                        split_session.
+                                query_repository_exact_package_metadata(
+                                        "suite-child"),
+                        "split exact PackageBase");
+        expect(
+                split.package_name == "suite-child" &&
+                        split.package_base == "suite",
+                "Split exact metadata flattened child and PackageBase identity");
+    }
+}
+
+void test_repository_exact_metadata_rejects_invalid_package_base() {
+    const auto require_invalid_base = [](
+            const std::string& package_name,
+            const auto& configure_base,
+            const std::string& context) {
+        stub::reset_alpm_stub();
+        stub::set_repository_package_metadata(
+                "core", package_name, 10, 20);
+        stub::set_repository_package_version(
+                "core", package_name, "1.0-1");
+        configure_base();
+        RepositoryPackageMetadataSession session =
+                RepositoryPackageMetadataSession::open(
+                        valid_repository_configuration({"core"}));
+        PackageMetadataFailure failure =
+                require_exact_repository_source_failure(
+                        session.query_repository_exact_package_metadata(
+                                package_name),
+                        PackageMetadataErrorCode::MalformedMetadata,
+                        context);
+        expect(!failure.diagnostic.empty(), context + ": empty diagnostic");
+    };
+
+    require_invalid_base(
+            "null-base",
+            []() {
+                stub::set_repository_package_base_null(
+                        "core", "null-base");
+            },
+            "null PackageBase");
+    require_invalid_base(
+            "empty-base",
+            []() {
+                stub::set_repository_package_base(
+                        "core", "empty-base", "");
+            },
+            "empty PackageBase");
+    require_invalid_base(
+            "malformed-base",
+            []() {
+                stub::set_repository_package_base(
+                        "core", "malformed-base", "invalid/base");
+            },
+            "malformed PackageBase");
+}
+
 void test_repository_session_move_construction_does_not_double_release() {
     stub::reset_alpm_stub();
     {
@@ -2286,6 +2415,8 @@ int main() {
         test_repository_root_search_ignores_stale_errno_for_empty_group_result();
         test_repository_root_search_rejects_malformed_group_metadata();
         test_repository_root_search_free_function_uses_one_session();
+        test_repository_exact_metadata_owns_authoritative_package_base();
+        test_repository_exact_metadata_rejects_invalid_package_base();
         test_repository_session_move_construction_does_not_double_release();
         test_repository_session_move_assignment_does_not_double_release();
     } catch(const std::exception& error) {

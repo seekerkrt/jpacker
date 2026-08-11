@@ -366,7 +366,8 @@ ProductionSourceBuildWorkItem source_work_item(
         std::string package_base,
         std::string package_name,
         DesiredInstallReason reason = DesiredInstallReason::Explicit,
-        bool is_build_plan_entry = false,
+        ArtifactLifecycleIntent lifecycle_intent =
+                ArtifactLifecycleIntent::SingularCompatibility,
         SourceBuildSourceKind source_kind =
                 SourceBuildSourceKind::Repository,
         bool needed = false) {
@@ -375,8 +376,22 @@ ProductionSourceBuildWorkItem source_work_item(
     work.request.checkout_name = package_base;
     work.request.needed = needed;
     work.required_targets.push_back(RequiredPackageArtifactTarget{
-            std::move(package_base), std::move(package_name), reason});
-    work.is_build_plan_entry = is_build_plan_entry;
+            package_base, package_name, reason});
+    work.required_target_provenance =
+            source_kind == SourceBuildSourceKind::Repository
+            ? RequiredTargetProvenance::RepositoryExactPackageProjection
+            : RequiredTargetProvenance::AurBuildPlanProjection;
+    work.artifact_lifecycle_intent = lifecycle_intent;
+    if(source_kind == SourceBuildSourceKind::Repository) {
+        work.repository_identity =
+                ResolvedRepositorySourceBuildIdentity{
+                        RepositoryPackagePresent{
+                                "core", 0, package_name, package_base}};
+        work.request.git_url = work.repository_identity->checkout().git_url();
+    } else {
+        work.request.git_url =
+                "https://aur.archlinux.org/" + package_base + ".git";
+    }
     work.uses_system_update_baseline =
             source_kind == SourceBuildSourceKind::Repository;
     return work;
@@ -423,7 +438,8 @@ PreparedRootPackageInstall make_root_prepared(
         prepared.source_invocation->work_items.push_back(
                 source_work_item(
                         "suite-base", "suite-child",
-                        DesiredInstallReason::Explicit, true,
+                        DesiredInstallReason::Explicit,
+                        ArtifactLifecycleIntent::PackageBaseSet,
                         SourceBuildSourceKind::Aur, prepared.needed));
         prepared.source_invocation->work_items.front()
                 .configured_repository_order =
@@ -495,17 +511,30 @@ RegisteredSourcePreferenceSnapshot registered_source(
         std::string package_base,
         SourceBuildSourceKind kind) {
     const std::string key =
-            (kind == SourceBuildSourceKind::Aur ? "aur:" : "repo:") +
+            (kind == SourceBuildSourceKind::Aur ? "aur:" : "repository:") +
             package_base;
-    return RegisteredSourcePreferenceSnapshot{
+    RegisteredSourcePreferenceSnapshot snapshot{
             index,
-            std::move(package_name),
+            package_name,
             "/tmp/source-preference",
             SourceBuildEnvironment{},
             key,
-            std::move(package_base),
+            package_base,
             {},
             kind};
+    snapshot.required_target_provenance =
+            kind == SourceBuildSourceKind::Repository
+            ? RequiredTargetProvenance::RepositoryExactPackageProjection
+            : RequiredTargetProvenance::AurBuildPlanProjection;
+    snapshot.artifact_lifecycle_intent =
+            ArtifactLifecycleIntent::SingularCompatibility;
+    if(kind == SourceBuildSourceKind::Repository) {
+        snapshot.repository_identity =
+                ResolvedRepositorySourceBuildIdentity{
+                        RepositoryPackagePresent{
+                                "core", 0, package_name, package_base}};
+    }
+    return snapshot;
 }
 
 RegisteredSourceUpgradeResult not_attempted_source_result(
@@ -1546,14 +1575,17 @@ void test_fetch_and_remote_source_build_adapters() {
                             UnifiedPlanObservationPhase::SourceRetrieval),
             "fetch BuildPlan blocker exposed retrieval mutation");
 
-    PreparedRemoteSourceBuild repository_build;
-    repository_build.source = ResolvedSourceBuildIdentity{
-            "repo-child", "repo-child", "repo:repo-child",
-            "https://gitlab.archlinux.org/archlinux/packaging/packages/repo-child.git",
-            SourceBuildSourceKind::Repository, false};
+    PreparedRemoteSourceBuild repository_build{
+            ResolvedSourceBuildIdentity{
+                    ResolvedRepositorySourceBuildIdentity{
+                            RepositoryPackagePresent{
+                                    "core", 0, "repo-child",
+                                    "repo-child"}}},
+            std::nullopt,
+            PreparedProductionSourceBuildInvocation{}};
     ProductionSourceBuildWorkItem repository_work =
             source_work_item("repo-child", "repo-child");
-    repository_work.request.git_url = repository_build.source.git_url;
+    repository_work.request.git_url = repository_build.source.git_url();
     repository_build.invocation.work_items.push_back(
             std::move(repository_work));
     const std::unique_ptr<UnifiedPlanProjection> repository_projection =
@@ -1576,9 +1608,8 @@ void test_fetch_and_remote_source_build_adapters() {
 
     RemoteSourceBuildPlanFailure remote_failure{
             ResolvedSourceBuildIdentity{
-                    "suite-child", "suite-base", "aur:suite-base",
-                    "https://aur.archlinux.org/suite-base.git",
-                    SourceBuildSourceKind::Aur, false},
+                    ResolvedAurSourceBuildIdentity{
+                            "suite-child", "suite-base"}},
             build_plan_fixture()};
     remote_failure.plan.unresolved.push_back("missing-runtime");
     const std::unique_ptr<UnifiedPlanProjection> remote_failure_projection =
@@ -1606,7 +1637,7 @@ void test_sync_install_preparation_adapters() {
     prepared.ordered_roots.push_back(SyncRepositoryTransactionRoot{
             RootTargetIdentity{0, "repo-root"},
             RepositoryPackagePresent{
-                    "core", 0, "repo-root", std::nullopt,
+                    "core", 0, "repo-root", "repo-root", std::nullopt,
                     repository_order}});
     prepared.repository_pacman_args = {"repo-root"};
     prepared.repository_transaction_required = true;
@@ -1642,7 +1673,8 @@ void test_sync_install_preparation_adapters() {
     aur_prepared.source_invocation.emplace();
     aur_prepared.source_invocation->work_items.push_back(source_work_item(
             "suite-base", "suite-child",
-            DesiredInstallReason::Explicit, true,
+            DesiredInstallReason::Explicit,
+            ArtifactLifecycleIntent::PackageBaseSet,
             SourceBuildSourceKind::Aur, true));
     aur_prepared.source_invocation->work_items.front()
             .configured_repository_order =
@@ -1700,12 +1732,10 @@ void test_sync_duplicate_repository_source_correlation() {
     const std::vector<std::string> repository_order{
             "core", "extra", "multilib"};
     const RepositoryPackagePresent package{
-            "core", 0, "duplicate-root", std::nullopt,
+            "core", 0, "duplicate-root", "duplicate-root", std::nullopt,
             repository_order};
     const ResolvedSourceBuildIdentity source{
-            "duplicate-root", "duplicate-root", "repo:duplicate-root",
-            "https://gitlab.archlinux.org/archlinux/packaging/packages/duplicate-root.git",
-            SourceBuildSourceKind::Repository, false};
+            ResolvedRepositorySourceBuildIdentity{package}};
 
     PreparedSyncInstall prepared;
     prepared.source_invocation.emplace();
@@ -1715,7 +1745,8 @@ void test_sync_duplicate_repository_source_correlation() {
                 source, index});
         ProductionSourceBuildWorkItem work =
                 source_work_item("duplicate-root", "duplicate-root");
-        work.request.git_url = source.git_url;
+        work.request.git_url = source.git_url();
+        work.repository_identity = *source.repository_identity();
         work.configured_repository_order = repository_order;
         prepared.source_invocation->work_items.push_back(std::move(work));
     }
@@ -1768,7 +1799,8 @@ void test_actual_prepared_source_work_is_artifact_authority() {
     work_items.push_back(source_work_item("repo-base", "repo-child"));
     work_items.push_back(source_work_item(
             "suite-base", "suite-child",
-            DesiredInstallReason::Explicit, false,
+            DesiredInstallReason::Explicit,
+            ArtifactLifecycleIntent::SingularCompatibility,
             SourceBuildSourceKind::Aur));
     BuildPlan aur_plan = build_plan_fixture();
     aur_plan.order.insert(
@@ -2115,7 +2147,8 @@ void test_full_identity_correlation_fail_closed() {
     std::vector<ProductionSourceBuildWorkItem> artifact_identity_work{
             source_work_item(
                     "suite-base", "suite-child",
-                    DesiredInstallReason::Dependency, false,
+                    DesiredInstallReason::Dependency,
+                    ArtifactLifecycleIntent::SingularCompatibility,
                     SourceBuildSourceKind::Aur)};
     artifact_identity_work.front().configured_repository_order =
             artifact_identity_plan.configured_repository_order;
@@ -2446,7 +2479,8 @@ void test_missing_system_source_plan_is_rejected() {
     const std::vector<ProductionSourceBuildWorkItem> work_items{
             source_work_item(
                     "suite-base", "suite-child",
-                    DesiredInstallReason::Explicit, false,
+                    DesiredInstallReason::Explicit,
+                    ArtifactLifecycleIntent::SingularCompatibility,
                     SourceBuildSourceKind::Aur)};
     const std::vector<SystemSourceUpgradeIssue> issues;
     const SystemSourceUpgradeProjectionAuthority authority =

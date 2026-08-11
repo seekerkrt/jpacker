@@ -498,7 +498,15 @@ bool validate_prepared_correlation(
         const ProductionSourceBuildWorkItem& work_item =
                 invocation->work_items[work_item_index];
         if(work_item.request.package_name != source.preference_package_name ||
-           work_item.request.checkout_name != source.resolved_package_base.value()) {
+           work_item.request.checkout_name !=
+                   source.resolved_package_base.value() ||
+           source.required_target_provenance !=
+                   std::optional<RequiredTargetProvenance>{
+                           work_item.required_target_provenance} ||
+           source.artifact_lifecycle_intent !=
+                   std::optional<ArtifactLifecycleIntent>{
+                           work_item.artifact_lifecycle_intent} ||
+           source.repository_identity != work_item.repository_identity) {
             return false;
         }
     }
@@ -1070,9 +1078,13 @@ SystemSourceUpgradePreparation prepare_system_source_upgrade(
                     resolve_source_build_identity(
                             source.preference_package_name);
             source.canonical_source_identity_key =
-                    identity.canonical_source_key;
-            source.resolved_package_base = identity.package_base;
-            source.source_kind = identity.source_kind;
+                    identity.canonical_source_key();
+            source.resolved_package_base = identity.package_base();
+            source.source_kind = identity.source_kind();
+            if(const auto* repository = identity.repository_identity();
+               repository != nullptr) {
+                source.repository_identity = *repository;
+            }
             resolved_identities[source_position] = std::move(identity);
         } catch(const std::exception& error) {
             SystemSourceUpgradeIssue issue = make_issue(
@@ -1107,7 +1119,7 @@ SystemSourceUpgradePreparation prepare_system_source_upgrade(
         source_position < resolved_identities.size();
         ++source_position) {
         if(!resolved_identities[source_position].has_value() ||
-           resolved_identities[source_position]->source_kind !=
+           resolved_identities[source_position]->source_kind() !=
                    SourceBuildSourceKind::Aur) {
             continue;
         }
@@ -1115,7 +1127,7 @@ SystemSourceUpgradePreparation prepare_system_source_upgrade(
             first_aur_source_position = source_position;
         }
         aur_package_names.push_back(
-                resolved_identities[source_position]->requested_name);
+                resolved_identities[source_position]->requested_name());
     }
     if(!aur_package_names.empty()) {
         try {
@@ -1171,13 +1183,18 @@ SystemSourceUpgradePreparation prepare_system_source_upgrade(
 
         try {
             correlation.work_item_index = source_work_items.size();
-            source_work_items.push_back(
+            ProductionSourceBuildWorkItem work_item =
                     prepare_resolved_source_build_work_item(
                             resolved_identities[source_position].value(),
                             source.environment.value(),
                             true,
                             state.snapshot.options.needed,
-                            select_provider));
+                            select_provider);
+            source.required_target_provenance =
+                    work_item.required_target_provenance;
+            source.artifact_lifecycle_intent =
+                    work_item.artifact_lifecycle_intent;
+            source_work_items.push_back(std::move(work_item));
             package_names.push_back(source.preference_package_name);
         } catch(const std::exception& error) {
             SystemSourceUpgradeIssue issue = make_issue(

@@ -90,12 +90,9 @@ stub::ConfigSnapshot snapshot_config(const AppConfig& config) {
 ResolvedSourceBuildIdentity default_identity(
         const std::string& package_name) {
     return ResolvedSourceBuildIdentity{
-            package_name,
-            package_name,
-            "repository:" + package_name,
-            "https://packages.example/" + package_name + ".git",
-            SourceBuildSourceKind::Repository,
-            false};
+            ResolvedRepositorySourceBuildIdentity{
+                    RepositoryPackagePresent{
+                            "core", 0, package_name, package_name}}};
 }
 
 } // namespace
@@ -185,7 +182,8 @@ void enqueue_preference_result(
 void set_source_identity(
         const std::string& package_name,
         ResolvedSourceBuildIdentity identity) {
-    g_state.identities[package_name] = std::move(identity);
+    g_state.identities.insert_or_assign(
+            package_name, std::move(identity));
     g_state.identity_failures.erase(package_name);
 }
 
@@ -404,25 +402,37 @@ ProductionSourceBuildWorkItem prepare_resolved_source_build_work_item(
         bool needed) {
     g_state.events.push_back(stub::Event{
             stub::EventKind::SourceWorkItemPreparation,
-            identity.requested_name});
-    auto failure = g_state.work_item_failures.find(identity.requested_name);
+            identity.requested_name()});
+    auto failure = g_state.work_item_failures.find(identity.requested_name());
     if(failure != g_state.work_item_failures.end()) {
         throw std::runtime_error(failure->second);
     }
 
     ProductionSourceBuildWorkItem work_item;
-    work_item.request.package_name = identity.requested_name;
-    work_item.request.checkout_name = identity.package_base;
-    work_item.request.git_url = identity.git_url;
+    work_item.request.package_name = identity.requested_name();
+    work_item.request.checkout_name = identity.package_base();
+    work_item.request.git_url = identity.git_url();
     work_item.request.custom_environment = std::move(environment);
     work_item.request.only_if_updated = only_if_updated;
     work_item.request.needed = needed;
     work_item.required_targets.push_back(RequiredPackageArtifactTarget{
-            identity.package_base,
-            identity.requested_name,
+            identity.package_base(),
+            identity.requested_name(),
             DesiredInstallReason::Explicit});
+    work_item.required_target_provenance =
+            identity.source_kind() == SourceBuildSourceKind::Repository
+            ? RequiredTargetProvenance::RepositoryExactPackageProjection
+            : RequiredTargetProvenance::AurBuildPlanProjection;
+    work_item.artifact_lifecycle_intent =
+            ArtifactLifecycleIntent::SingularCompatibility;
+    if(const auto* repository = identity.repository_identity();
+       repository != nullptr) {
+        work_item.repository_identity = *repository;
+        work_item.configured_repository_order =
+                repository->exact_package().configured_repository_order;
+    }
     work_item.uses_system_update_baseline =
-            identity.source_kind == SourceBuildSourceKind::Repository;
+            identity.source_kind() == SourceBuildSourceKind::Repository;
     return work_item;
 }
 
@@ -436,7 +446,7 @@ ProductionSourceBuildWorkItem prepare_resolved_source_build_work_item(
             prepare_resolved_source_build_work_item(
             identity, std::move(environment), only_if_updated, needed);
     auto candidates = g_state.provider_candidates.find(
-            identity.requested_name);
+            identity.requested_name());
     if(candidates != g_state.provider_candidates.end()) {
         if(!select_provider) {
             throw std::runtime_error(
@@ -460,7 +470,7 @@ ProductionSourceBuildWorkItem prepare_resolved_source_build_work_item(
         }
     }
     auto providers = g_state.selected_repository_providers.find(
-            identity.requested_name);
+            identity.requested_name());
     if(providers != g_state.selected_repository_providers.end()) {
         work_item.selected_repository_providers = providers->second;
     }

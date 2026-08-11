@@ -557,6 +557,22 @@ using RepositoryProvidedPackageMetadataResult = std::variant<
         std::vector<RepositoryProvidedPackageMetadata>,
         PackageMetadataFailure>;
 
+using RepositoryPackageBaseSnapshotResult = std::variant<
+        std::string,
+        PackageMetadataFailure>;
+
+RepositoryPackageBaseSnapshotResult snapshot_repository_package_base(
+        alpm_pkg_t* package) {
+    const char* package_base = alpm_pkg_get_base(package);
+    if(package_base == nullptr || !is_valid_package_name(package_base)) {
+        return PackageMetadataFailure{
+                PackageMetadataErrorCode::MalformedMetadata,
+                localization::translate_message(
+                        "Repository package metadata contains an invalid PackageBase.")};
+    }
+    return std::string(package_base);
+}
+
 RepositoryProvidedPackageMetadataResult snapshot_repository_provides(
         alpm_pkg_t* package) {
     std::vector<RepositoryProvidedPackageMetadata> provides;
@@ -1368,6 +1384,20 @@ RepositoryPackageMetadataSession::query_repository_exact_package_metadata(
             continue;
         }
 
+        RepositoryPackageBaseSnapshotResult package_base_result =
+                snapshot_repository_package_base(package);
+        if(const auto* failure =
+                   std::get_if<PackageMetadataFailure>(&package_base_result);
+           failure != nullptr) {
+            snapshot.source_results.push_back(
+                    RepositoryExactPackageMetadataSourceFailure{
+                            repository_order,
+                            repository.repository_name,
+                            package_name,
+                            *failure});
+            continue;
+        }
+
         RepositoryProvidedPackageMetadataResult provides_result =
                 snapshot_repository_provides(package);
         if(const auto* failure =
@@ -1387,6 +1417,7 @@ RepositoryPackageMetadataSession::query_repository_exact_package_metadata(
                 repository_order,
                 repository.repository_name,
                 returned_name,
+                std::get<std::string>(std::move(package_base_result)),
                 package_version == nullptr
                         ? std::nullopt
                         : std::optional<std::string>(package_version),
@@ -1472,11 +1503,22 @@ RepositoryPackageMetadataSession::query_repository_provider_package_metadata(
                                 "Repository package metadata contains an invalid package name."));
                 break;
             }
+            RepositoryPackageBaseSnapshotResult package_base_result =
+                    snapshot_repository_package_base(package);
+            if(const auto* failure =
+                       std::get_if<PackageMetadataFailure>(
+                               &package_base_result);
+               failure != nullptr) {
+                source_failure = *failure;
+                break;
+            }
             const char* package_version = alpm_pkg_get_version(package);
             source.packages.push_back(RepositoryExactPackageMetadata{
                     repository_order,
                     repository.repository_name,
                     package_name,
+                    std::get<std::string>(
+                            std::move(package_base_result)),
                     package_version == nullptr
                             ? std::nullopt
                             : std::optional<std::string>(package_version),

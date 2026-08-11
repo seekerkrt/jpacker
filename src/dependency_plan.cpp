@@ -236,7 +236,7 @@ RepositoryPackageQueryStatus query_repository_package(
         if(is_repo_package(package_name)) {
             if(present_package != nullptr) {
                 *present_package = RepositoryPackagePresent{
-                        {}, 0, package_name, std::nullopt};
+                        {}, 0, package_name, {}, std::nullopt};
             }
             return RepositoryPackageQueryStatus::Present;
         }
@@ -307,6 +307,7 @@ RepositoryExactPackage repository_candidate(
                     present.repository_name, present.configured_order},
             present.package_name.empty() ? package_name
                                          : present.package_name,
+            present.package_base,
             observed_version,
             {}};
 }

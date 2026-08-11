@@ -399,19 +399,28 @@ bool PreparedRemoteSourceBuildUnitReference::has_complete_identity()
         const noexcept {
     const ResolvedSourceBuildIdentity& source = source_.get();
     const ProductionSourceBuildWorkItem& work = work_item_.get();
-    if(source.source_kind != SourceBuildSourceKind::Repository ||
-       source.requested_name.empty() || source.package_base.empty() ||
-       source.canonical_source_key.empty() || source.git_url.empty() ||
-       work.request.package_name != source.requested_name ||
-       work.request.checkout_name != source.package_base ||
-       work.request.git_url != source.git_url ||
-       work.is_build_plan_entry || work.required_targets.size() != 1) {
+    const ResolvedRepositorySourceBuildIdentity* repository =
+            source.repository_identity();
+    if(repository == nullptr || source.requested_name().empty() ||
+       source.package_base().empty() || source.canonical_source_key().empty() ||
+       source.git_url().empty() ||
+       work.request.package_name != source.requested_name() ||
+       work.request.checkout_name != source.package_base() ||
+       work.request.git_url != source.git_url() ||
+       work.required_target_provenance !=
+               RequiredTargetProvenance::RepositoryExactPackageProjection ||
+       work.artifact_lifecycle_intent !=
+               ArtifactLifecycleIntent::SingularCompatibility ||
+       work.repository_identity !=
+               std::optional<ResolvedRepositorySourceBuildIdentity>{
+                       *repository} ||
+       work.required_targets.size() != 1) {
         return false;
     }
     const RequiredPackageArtifactTarget& target =
             work.required_targets.front();
-    return target.package_base == source.package_base &&
-           target.package_name == source.requested_name &&
+    return target.package_base == source.package_base() &&
+           target.package_name == source.requested_name() &&
            is_known_install_reason(target.desired_reason);
 }
 
@@ -423,7 +432,8 @@ PreparedSystemSourceBuildUnitReference::
                         requested_package_name,
                 std::reference_wrapper<const std::string>
                         checkout_package_base,
-                bool is_build_plan_entry,
+                RequiredTargetProvenance required_target_provenance,
+                ArtifactLifecycleIntent artifact_lifecycle_intent,
                 bool uses_system_update_baseline,
                 std::reference_wrapper<const std::vector<
                         RequiredPackageArtifactTarget>> required_targets)
@@ -431,7 +441,8 @@ PreparedSystemSourceBuildUnitReference::
     : source_(source), required_targets_(required_targets),
       requested_package_name_(requested_package_name),
       checkout_package_base_(checkout_package_base),
-      is_build_plan_entry_(is_build_plan_entry),
+      required_target_provenance_(required_target_provenance),
+      artifact_lifecycle_intent_(artifact_lifecycle_intent),
       uses_system_update_baseline_(uses_system_update_baseline) {}
 
 const RegisteredSourcePreferenceSnapshot&
@@ -456,9 +467,16 @@ PreparedSystemSourceBuildUnitReference::checkout_package_base()
     return checkout_package_base_.get();
 }
 
-bool PreparedSystemSourceBuildUnitReference::is_build_plan_entry()
+RequiredTargetProvenance
+PreparedSystemSourceBuildUnitReference::required_target_provenance()
         const noexcept {
-    return is_build_plan_entry_;
+    return required_target_provenance_;
+}
+
+ArtifactLifecycleIntent
+PreparedSystemSourceBuildUnitReference::artifact_lifecycle_intent()
+        const noexcept {
+    return artifact_lifecycle_intent_;
 }
 
 bool PreparedSystemSourceBuildUnitReference::uses_system_update_baseline()
@@ -477,7 +495,15 @@ bool PreparedSystemSourceBuildUnitReference::has_complete_identity()
        prepared_source.canonical_source_identity_key->empty() ||
        !prepared_source.source_kind.has_value() || targets.empty() ||
        requested_package_name_.get().empty() ||
-       checkout_package_base_.get().empty() || is_build_plan_entry_ ||
+       checkout_package_base_.get().empty() ||
+       artifact_lifecycle_intent_ !=
+               ArtifactLifecycleIntent::SingularCompatibility ||
+       prepared_source.required_target_provenance !=
+               std::optional<RequiredTargetProvenance>{
+                       required_target_provenance_} ||
+       prepared_source.artifact_lifecycle_intent !=
+               std::optional<ArtifactLifecycleIntent>{
+                       artifact_lifecycle_intent_} ||
        requested_package_name_.get() !=
                prepared_source.preference_package_name ||
        checkout_package_base_.get() !=
@@ -485,6 +511,19 @@ bool PreparedSystemSourceBuildUnitReference::has_complete_identity()
        targets.size() != 1 || uses_system_update_baseline_ !=
                (prepared_source.source_kind.value() ==
                 SourceBuildSourceKind::Repository)) {
+        return false;
+    }
+    if(prepared_source.source_kind.value() ==
+       SourceBuildSourceKind::Repository) {
+        if(required_target_provenance_ !=
+                   RequiredTargetProvenance::
+                           RepositoryExactPackageProjection ||
+           !prepared_source.repository_identity.has_value()) {
+            return false;
+        }
+    } else if(required_target_provenance_ !=
+                      RequiredTargetProvenance::AurBuildPlanProjection ||
+              prepared_source.repository_identity.has_value()) {
         return false;
     }
     const RequiredPackageArtifactTarget& target = targets.front();

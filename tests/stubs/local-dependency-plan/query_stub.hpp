@@ -42,6 +42,10 @@ void reset_repository_stub();
 void set_repository_package_response(
         std::string package_name,
         std::optional<std::string> repository_name);
+void set_repository_package_response(
+        std::string package_name,
+        std::optional<std::string> repository_name,
+        std::string package_base);
 void set_repository_package_failure(
         std::string package_name, std::string diagnostic);
 void set_repository_provider_response(

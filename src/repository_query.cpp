@@ -151,6 +151,7 @@ StrictRepositoryPackageQueryResult query_repository_package_strict(
                     package->repository.repository_name,
                     package->repository.configured_order,
                     package->package_name,
+                    package->package_base,
                     package->package_version,
                     observation.configured_repository_order};
         }
