@@ -207,7 +207,7 @@ command -v readelf >/dev/null 2>&1 ||
 readelf_raw=$tmp_dir/readelf.dynamic.raw
 needed_file=$tmp_dir/readelf.needed
 if validation_capture_output "$readelf_raw" \
-    readelf -d "$stage_root/usr/bin/$COMMAND_NAME"; then
+    env LC_ALL=C readelf -d "$stage_root/usr/bin/$COMMAND_NAME"; then
     :
 else
     producer_status=$?
