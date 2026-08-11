@@ -64,7 +64,7 @@ SourceBuildExecutionResult execute_source_build_typed(
         const PacmanDatabasePaths& database_paths,
         const AppConfig& config);
 
-// AUR PackageBase execution向け。ordered required_targetsを一つのfresh
+// source-neutralなPackageBase execution。ordered required_targetsを一つのfresh
 // workspace/transactionへ渡し、multipleではrequest.package_nameを使わない。
 PackageBaseSourceBuildExecutionResult
 execute_source_build_package_base_typed(

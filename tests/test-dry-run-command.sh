@@ -7,6 +7,7 @@ export LANG LC_ALL
 unset LANGUAGE
 
 test_binary=$1
+repository_test_binary=$2
 repo_root=$(CDPATH= cd "$(dirname "$0")/.." && pwd)
 MOGUET_TEST_REPOSITORY_ROOT=$repo_root
 export MOGUET_TEST_REPOSITORY_ROOT
@@ -160,6 +161,7 @@ setup_case() {
     unset MOGUET_TEST_PACMAN_Q_OUTPUT
     unset MOGUET_TEST_PACMAN_Q_OUTPUT_FILE
     unset MOGUET_TEST_PACKAGE_METADATA_STATE_FILE
+    unset MOGUET_TEST_PACKAGE_METADATA_EVENT_LOG
     unset MOGUET_TEST_REPOSITORY_METADATA_STATE_FILE
     unset MOGUET_TEST_MAKEPKG_PRINTSRCINFO_EXIT_CODE
     unset MOGUET_TEST_MAKEPKG_SRCINFO_OUTPUT_FILE
@@ -255,7 +257,13 @@ assert_read_only_commands() {
             'pacman-conf --verbose RootDir DBPath'|\
             'pacman-conf --repo-list'|\
             'pacman -Si clean-root'|\
-            'pacman -Qm') ;;
+            'pacman -Qm'|\
+            'alpm initialize'|\
+            'alpm sync-register core'|\
+            'alpm sync-valid core'|\
+            'alpm sync-cache core'|\
+            'alpm sync-query core/repository-root'|\
+            'alpm release') ;;
             *)
                 echo "dry-run crossed a forbidden or unapproved process boundary" >&2
                 echo "$command" >&2
@@ -433,6 +441,38 @@ run_supported \
     remote-build Ready 1 \
     "Identity: AUR/clean-root (PackageBase: clean-root)" \
     --dry-run build clean-root --dry-run
+
+# Issue #406 Slice 3: strict repository metadata selects the standalone
+# PackageBase-set projection. Ready therefore proves the route-specific Set
+# canary accepted it, while the sentinel proves observation stayed read-only.
+setup_case remote-repository-build
+repository_metadata_state=$case_dir/repository-metadata-state
+printf 'core repository-root 1 1\n' > "$repository_metadata_state"
+export MOGUET_TEST_REPOSITORY_METADATA_STATE_FILE=$repository_metadata_state
+export MOGUET_TEST_PACKAGE_METADATA_EVENT_LOG=$command_log
+MOGUET_TEST_PACMAN_REPO_PACKAGES=repository-root
+export MOGUET_TEST_PACMAN_REPO_PACKAGES
+: > "$command_log"
+start_mutation_sentinel
+if (cd "$case_work_dir" &&
+        "$repository_test_binary" --dry-run build repository-root) \
+    </dev/null > "$output_file" 2>&1
+then
+    status=0
+else
+    status=$?
+fi
+if ! grep -F -- "Unified plan:" "$output_file" >/dev/null; then
+    echo "standalone repository dry-run did not render a unified observation" >&2
+    sed -n '1,240p' "$output_file" >&2
+    exit 1
+fi
+assert_expected_observation \
+    Ready 1 \
+    "repository source key repository:repository-root (requested package: repository-root; checkout PackageBase: repository-root)" \
+    "$status" "standalone repository PackageBase-set build"
+assert_protected_storage_unchanged
+assert_read_only_commands
 
 setup_case local-build
 local_source=$case_dir/local-source

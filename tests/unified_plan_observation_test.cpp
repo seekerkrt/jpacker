@@ -553,7 +553,7 @@ void test_build_unit_and_required_artifact_identity() {
     remote_work.required_target_provenance =
             RequiredTargetProvenance::RepositoryExactPackageProjection;
     remote_work.artifact_lifecycle_intent =
-            ArtifactLifecycleIntent::SingularCompatibility;
+            ArtifactLifecycleIntent::PackageBaseSet;
     remote_work.repository_identity = *remote_source.repository_identity();
     remote_work.uses_system_update_baseline = true;
     const PreparedRemoteSourceBuildUnitReference inspected_remote_unit(
@@ -561,6 +561,18 @@ void test_build_unit_and_required_artifact_identity() {
     expect(
             inspected_remote_unit.has_complete_identity(),
             "Prepared remote source build unit is incomplete");
+    remote_work.artifact_lifecycle_intent =
+            ArtifactLifecycleIntent::SingularCompatibility;
+    expect(
+            inspected_remote_unit.has_complete_identity(),
+            "Prepared remote source reference rejected supported singular sync work");
+    remote_work.artifact_lifecycle_intent =
+            ArtifactLifecycleIntent::Unspecified;
+    expect(
+            !inspected_remote_unit.has_complete_identity(),
+            "Prepared remote source reference accepted an unsupported lifecycle");
+    remote_work.artifact_lifecycle_intent =
+            ArtifactLifecycleIntent::PackageBaseSet;
 
     const RequiredPackageArtifactTarget root_target{
             "shared-suite", "same-name", DesiredInstallReason::Explicit};

@@ -966,7 +966,7 @@ export MOGUET_TEST_PACMAN_REPO_PACKAGES=clean-root
 export MOGUET_TEST_MAKEPKG_EXIT_CODE=42
 export MOGUET_TEST_MAKEPKG_PACKAGELIST_EXIT_CODE=0
 run_fail --noedit --nodiff build clean-root
-assert_contains "Build Error: Failed while building/installing PackageBase clean-root (clean-root): The build-only makepkg command failed with exit code 42." "$output_file"
+assert_contains "Build Error: The build-only makepkg command failed with exit code 42." "$output_file"
 assert_command "makepkg --packagelist"
 assert_command "makepkg -sc"
 assert_command_content_absent "sudo pacman -U"

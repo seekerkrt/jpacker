@@ -3269,8 +3269,10 @@ test-aur-rpc-validation: $(AUR_RPC_VALIDATION_TEST_TARGET) $(AUR_RPC_ENVELOPE_VA
 test-cli-parser: $(AUR_RPC_VALIDATION_TEST_TARGET)
 	sh tests/test-cli-parser.sh $(abspath $(AUR_RPC_VALIDATION_TEST_TARGET))
 
-test-dry-run-command: $(TEST_TARGET)
-	sh tests/test-dry-run-command.sh $(abspath $(TEST_TARGET))
+test-dry-run-command: $(TEST_TARGET) $(AUR_RPC_VALIDATION_TEST_TARGET)
+	sh tests/test-dry-run-command.sh \
+		$(abspath $(TEST_TARGET)) \
+		$(abspath $(AUR_RPC_VALIDATION_TEST_TARGET))
 
 test-public-documentation: $(CLI_LOCALIZATION_TEST_TARGET) $(MANPAGES) $(COMPLETION_FILES) $(MO_FILES) tests/test-help-man-completion.sh tests/test-static-completion.sh
 	sh tests/test-help-man-completion.sh $(abspath $(CLI_LOCALIZATION_TEST_TARGET))

@@ -238,6 +238,12 @@ void append_prepared_remote_source_work(
     }
     const ProductionSourceBuildWorkItem& work_item =
             prepared.invocation.work_items.front();
+    if(work_item.artifact_lifecycle_intent !=
+               ArtifactLifecycleIntent::PackageBaseSet ||
+       work_item.request.only_if_updated || work_item.request.needed) {
+        reject_inconsistent_input(
+                "Prepared repository source build has an invalid standalone lifecycle policy.");
+    }
     PreparedRemoteSourceBuildUnitReference build_unit(
             std::cref(prepared.source), std::cref(work_item));
     if(!build_unit.has_complete_identity()) {

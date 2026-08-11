@@ -1584,7 +1584,11 @@ void test_fetch_and_remote_source_build_adapters() {
             std::nullopt,
             PreparedProductionSourceBuildInvocation{}};
     ProductionSourceBuildWorkItem repository_work =
-            source_work_item("repo-child", "repo-child");
+            source_work_item(
+                    "repo-child", "repo-child",
+                    DesiredInstallReason::Explicit,
+                    ArtifactLifecycleIntent::PackageBaseSet,
+                    SourceBuildSourceKind::Repository, false);
     repository_work.request.git_url = repository_build.source.git_url();
     repository_build.invocation.work_items.push_back(
             std::move(repository_work));
@@ -1605,6 +1609,40 @@ void test_fetch_and_remote_source_build_adapters() {
                             repository_observation.build_units().front()) &&
                     repository_observation.transaction_intents().size() == 1,
             "repository remote build lost actual work or install boundary");
+
+    repository_build.invocation.work_items.front()
+            .artifact_lifecycle_intent =
+            ArtifactLifecycleIntent::SingularCompatibility;
+    expect_invalid_argument(
+            [&repository_build]() {
+                static_cast<void>(project_remote_source_build_unified_plan(
+                        RemoteSourceBuildUnifiedPlanProjectionInput{
+                                std::cref(repository_build)}));
+            },
+            "standalone repository singular lifecycle drift");
+    repository_build.invocation.work_items.front()
+            .artifact_lifecycle_intent =
+            ArtifactLifecycleIntent::PackageBaseSet;
+    repository_build.invocation.work_items.front().request.only_if_updated =
+            true;
+    expect_invalid_argument(
+            [&repository_build]() {
+                static_cast<void>(project_remote_source_build_unified_plan(
+                        RemoteSourceBuildUnifiedPlanProjectionInput{
+                                std::cref(repository_build)}));
+            },
+            "standalone repository only-if-updated drift");
+    repository_build.invocation.work_items.front().request.only_if_updated =
+            false;
+    repository_build.invocation.work_items.front().request.needed = true;
+    expect_invalid_argument(
+            [&repository_build]() {
+                static_cast<void>(project_remote_source_build_unified_plan(
+                        RemoteSourceBuildUnifiedPlanProjectionInput{
+                                std::cref(repository_build)}));
+            },
+            "standalone repository needed drift");
+    repository_build.invocation.work_items.front().request.needed = false;
 
     RemoteSourceBuildPlanFailure remote_failure{
             ResolvedSourceBuildIdentity{
