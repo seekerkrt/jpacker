@@ -235,12 +235,18 @@ ProvidedDependency selected_aur_provider() {
 ResolvedSourceBuildIdentity registered_aur_identity(
         const std::string& package_name) {
     return ResolvedSourceBuildIdentity{
-            package_name,
-            package_name,
-            "aur:" + package_name,
-            "https://aur.example/" + package_name + ".git",
-            SourceBuildSourceKind::Aur,
-            false};
+            ResolvedAurSourceBuildIdentity{package_name, package_name}};
+}
+
+ResolvedSourceBuildIdentity registered_repository_identity(
+        const std::string& requested_child,
+        const std::string& package_base) {
+    return ResolvedSourceBuildIdentity{
+            ResolvedRepositorySourceBuildIdentity{
+                    RepositoryPackagePresent{
+                            "extra", 0, requested_child, package_base,
+                            std::nullopt,
+                            std::vector<std::string>{"extra"}}}};
 }
 
 std::string progress_subject(const SystemSourceUpgradeEvent& event) {
@@ -435,7 +441,11 @@ void test_preparation_retains_aur_plan_and_source_kind() {
 
 void test_preparation_exposes_repository_work_targets() {
     stub::reset();
-    const std::string package_name = "retained-repository-source";
+    const std::string package_name = "retained-repository-child";
+    const std::string package_base = "retained-repository-base";
+    stub::set_source_identity(
+            package_name,
+            registered_repository_identity(package_name, package_base));
     PreparedSystemSourceUpgrade prepared = prepare_sources(
             {package_name}, full_option_config());
     const SystemSourceUpgradePreparedSnapshot* snapshot = prepared.snapshot();
@@ -450,17 +460,46 @@ void test_preparation_exposes_repository_work_targets() {
                              .source() ==
                             &snapshot->registered_sources.front() &&
                     snapshot->registered_sources.front().source_kind ==
-                            SourceBuildSourceKind::Repository,
+                            SourceBuildSourceKind::Repository &&
+                    snapshot->registered_sources.front()
+                                    .resolved_package_base ==
+                            std::optional<std::string>(package_base) &&
+                    snapshot->registered_sources.front()
+                                    .required_target_provenance ==
+                            RequiredTargetProvenance::
+                                    RepositoryExactPackageProjection &&
+                    snapshot->registered_sources.front()
+                                    .artifact_lifecycle_intent ==
+                            ArtifactLifecycleIntent::SingularCompatibility,
             "Prepared repository projection seam lost source authority");
-    const auto& targets = projection_authority->source_work_items()
-                                  .front()
-                                  .required_targets();
+    const PreparedSystemSourceWorkReference& work =
+            projection_authority->source_work_items().front();
+    const auto& targets = work.required_targets();
     expect(
             targets.size() == 1 &&
-                    targets.front().package_base == package_name &&
+                    targets.front().package_base == package_base &&
                     targets.front().package_name == package_name &&
                     targets.front().desired_reason ==
-                            DesiredInstallReason::Explicit,
+                            DesiredInstallReason::Explicit &&
+                    work.requested_package_name() == package_name &&
+                    work.checkout_package_base() == package_base &&
+                    work.required_target_provenance() ==
+                            RequiredTargetProvenance::
+                                    RepositoryExactPackageProjection &&
+                    work.artifact_lifecycle_intent() ==
+                            ArtifactLifecycleIntent::SingularCompatibility &&
+                    work.repository_identity().has_value() &&
+                    work.repository_identity()->requested_child() ==
+                            package_name &&
+                    work.repository_identity()->package_base() ==
+                            package_base &&
+                    work.uses_system_update_baseline() &&
+                    !work.needed() &&
+                    work.only_if_updated() &&
+                    work.source().environment.has_value() &&
+                    work.source().environment->ordered_assignments.size() == 1 &&
+                    work.source().environment->ordered_assignments.front()
+                                    .value == package_name,
             "Prepared repository projection seam did not retain actual work targets");
     stub::require_script_consumed();
 }
@@ -1494,12 +1533,8 @@ void test_known_package_base_survives_later_preparation_failure() {
     stub::set_source_identity(
             "split",
             ResolvedSourceBuildIdentity{
-                    "split",
-                    "known-base",
-                    "aur:known-base",
-                    "https://aur.example/known-base.git",
-                    SourceBuildSourceKind::Aur,
-                    true});
+                    ResolvedAurSourceBuildIdentity{
+                            "split", "known-base"}});
     BuildPlan plan;
     const RootTargetIdentity root{0, "split"};
     plan.root_targets.push_back(root);
@@ -1549,12 +1584,8 @@ void test_actual_constraint_blocker_reaches_unified_projection() {
     stub::set_source_identity(
             "constraint-root",
             ResolvedSourceBuildIdentity{
-                    "constraint-root",
-                    "constraint-base",
-                    "aur:constraint-base",
-                    "https://aur.example/constraint-base.git",
-                    SourceBuildSourceKind::Aur,
-                    true});
+                    ResolvedAurSourceBuildIdentity{
+                            "constraint-root", "constraint-base"}});
 
     BuildPlan plan;
     const RootTargetIdentity root{0, "constraint-root"};

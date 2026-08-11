@@ -41,7 +41,7 @@ StrictRepositoryPackageQueryResult query_repository_package_strict(
         const std::string& package_name) {
     if(is_repo_package(package_name)) {
         return RepositoryPackagePresent{
-                "test", 0, package_name,
+                "test", 0, package_name, package_name,
                 ObservedVersion::available(
                         ObservedVersionSource::RepositoryExactPackage,
                         "1.0-1")};

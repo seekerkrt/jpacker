@@ -174,7 +174,11 @@ void require_expected_call(
         fail_expectation(
                 "AUR update set executor AppConfig snapshot differs from its strict expectation.");
     }
-    if(!work_item.is_build_plan_entry || work_item.request.only_if_updated) {
+    if(work_item.required_target_provenance !=
+                   RequiredTargetProvenance::AurBuildPlanProjection ||
+       work_item.artifact_lifecycle_intent !=
+                   ArtifactLifecycleIntent::PackageBaseSet ||
+       work_item.request.only_if_updated) {
         fail_expectation(
                 "AUR update set executor received a non-AUR or only-if-updated work item.");
     }

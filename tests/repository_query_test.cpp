@@ -189,10 +189,84 @@ void test_configured_repository_order() {
                             std::optional<std::vector<std::string>>{
                                     {"core", "extra"}} &&
                     package.package_name == "shared-package" &&
+                    package.package_base == "shared-package" &&
                     package.package_version.has_value() &&
                     package.package_version->version() != nullptr &&
                     *package.package_version->version() == "3.0-1",
             "Exact lookup lost configured repository precedence");
+}
+
+void test_split_child_preserves_package_base() {
+    alpm_stub::reset_alpm_stub();
+    TestDatabase database;
+    enqueue_configuration(database, {"core"});
+    set_repository_package("core", "suite-child", "4.0-1");
+    alpm_stub::set_repository_package_base(
+            "core", "suite-child", "suite");
+
+    const RepositoryPackagePresent& package =
+            require_alternative<RepositoryPackagePresent>(
+                    query_repository_package_strict("suite-child"),
+                    "split child PackageBase");
+    expect(
+            package.repository_name == "core" &&
+                    package.package_name == "suite-child" &&
+                    package.package_base == "suite",
+            "Strict repository query flattened split child and PackageBase");
+}
+
+void test_confirmed_not_found_is_distinct() {
+    alpm_stub::reset_alpm_stub();
+    TestDatabase database;
+    enqueue_configuration(database);
+    alpm_stub::set_repository_package_absent("core", "missing-package");
+    alpm_stub::set_repository_package_absent("extra", "missing-package");
+
+    const RepositoryPackageNotFound& missing =
+            require_alternative<RepositoryPackageNotFound>(
+                    query_repository_package_strict("missing-package"),
+                    "confirmed repository absence");
+    expect(
+            missing.configured_repository_order ==
+                    std::optional<std::vector<std::string>>{
+                            {"core", "extra"}},
+            "Confirmed repository absence lost configured order");
+}
+
+void test_malformed_package_base_is_failure() {
+    alpm_stub::reset_alpm_stub();
+    TestDatabase database;
+    enqueue_configuration(database, {"core"});
+    set_repository_package("core", "malformed-base", "1.0-1");
+    alpm_stub::set_repository_package_base(
+            "core", "malformed-base", "invalid/base");
+
+    RepositoryMetadataFailure failure = require_failure(
+            query_repository_package_strict("malformed-base"),
+            RepositoryMetadataFailureKind::SyncDatabaseMalformed,
+            "malformed PackageBase");
+    expect(
+            failure.repository_name ==
+                    std::optional<std::string>{"core"},
+            "Malformed PackageBase lost repository provenance");
+}
+
+void test_exact_returned_child_mismatch_is_failure() {
+    alpm_stub::reset_alpm_stub();
+    TestDatabase database;
+    enqueue_configuration(database, {"core"});
+    set_repository_package("core", "requested-child", "1.0-1");
+    alpm_stub::set_repository_package_returned_name(
+            "core", "requested-child", "different-child");
+
+    RepositoryMetadataFailure failure = require_failure(
+            query_repository_package_strict("requested-child"),
+            RepositoryMetadataFailureKind::SyncDatabaseMalformed,
+            "exact returned child mismatch");
+    expect(
+            failure.repository_name ==
+                    std::optional<std::string>{"core"},
+            "Exact child mismatch lost repository provenance");
 }
 
 void test_present_before_later_source_failure() {
@@ -461,6 +535,14 @@ void run_test_case(const std::string& test_case) {
         test_candidate_value_contract();
     } else if(test_case == "configured-order") {
         test_configured_repository_order();
+    } else if(test_case == "split-package-base") {
+        test_split_child_preserves_package_base();
+    } else if(test_case == "confirmed-not-found") {
+        test_confirmed_not_found_is_distinct();
+    } else if(test_case == "malformed-package-base") {
+        test_malformed_package_base_is_failure();
+    } else if(test_case == "returned-child-mismatch") {
+        test_exact_returned_child_mismatch_is_failure();
     } else if(test_case == "present-later-failure") {
         test_present_before_later_source_failure();
     } else if(test_case == "absent-later-failure") {

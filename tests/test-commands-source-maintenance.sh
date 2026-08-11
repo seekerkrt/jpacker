@@ -123,6 +123,7 @@ setup_case() {
     sudo_failures=$case_dir/sudo-failures
     config_file=$case_dir/config.toml
     package_metadata_state=$case_dir/package-metadata-state
+    repository_metadata_state=$case_dir/repository-metadata-state
 
     mkdir -p \
         "$case_dir/home" "$case_dir/xdg-config" "$case_dir/xdg-cache" \
@@ -133,6 +134,7 @@ setup_case() {
     : > "$request_log"
     : > "$sudo_failures"
     : > "$package_metadata_state"
+    : > "$repository_metadata_state"
     printf '%s\n' 'schema_version = 1' > "$config_file"
 
     export HOME=$case_dir/home
@@ -146,6 +148,7 @@ setup_case() {
     export MOGUET_TEST_MAKEPKG_EXIT_CODE=0
     export MOGUET_TEST_PACKAGE_METADATA_STATE_FILE=$package_metadata_state
     export MOGUET_TEST_PACKAGE_METADATA_EVENT_LOG=$command_log
+    export MOGUET_TEST_REPOSITORY_METADATA_STATE_FILE=$repository_metadata_state
     MOGUET_TEST_PACMAN_CONF_REPOSITORY_LIST=core
     export MOGUET_TEST_PACMAN_CONF_REPOSITORY_LIST
 
@@ -200,6 +203,9 @@ setup_case() {
     unset MOGUET_TEST_PACKAGE_METADATA_UNKNOWN_REASON_PACKAGE
     unset MOGUET_TEST_PACKAGE_METADATA_PACMAN_CONF_EXIT_CODE
     unset MOGUET_TEST_PACKAGE_METADATA_PACMAN_CONF_FAILURE_AT
+    unset MOGUET_TEST_ALPM_VERCMP_EXPECTED_LHS
+    unset MOGUET_TEST_ALPM_VERCMP_EXPECTED_RHS
+    unset MOGUET_TEST_ALPM_VERCMP_RESULT
     unset MOGUET_TEST_MAKEPKG_PACKAGE_METADATA_STATE_AFTER_SUCCESS_FILE
     unset MOGUET_TEST_PACMAN_U_SUCCESS_LOG
     unset MOGUET_TEST_REPLACE_WORKSPACE_AFTER_PACMAN_U
@@ -211,7 +217,15 @@ setup_case() {
     unset VISUAL
 }
 
+refresh_repository_metadata_fixture() {
+    : > "$repository_metadata_state"
+    for package in ${MOGUET_TEST_PACMAN_REPO_PACKAGES:-}; do
+        printf 'core %s 1 1\n' "$package" >> "$repository_metadata_state"
+    done
+}
+
 run_ok() {
+    refresh_repository_metadata_fixture
     : > "$command_log"
     : > "$request_log"
     if ! "$test_binary" "$@" </dev/null > "$output_file" 2>&1; then
@@ -223,6 +237,7 @@ run_ok() {
 }
 
 run_fail() {
+    refresh_repository_metadata_fixture
     : > "$command_log"
     : > "$request_log"
     if ! validation_expect_status source-maintenance-business-failure 1 \
@@ -255,6 +270,7 @@ run_clean_low_nofile_fail() {
 }
 
 run_upgrade_ok() {
+    refresh_repository_metadata_fixture
     : > "$command_log"
     : > "$request_log"
     if ! PATH=$upgrade_metadata_path "$upgrade_metadata_test_binary" "$@" </dev/null > "$output_file" 2>&1; then
@@ -268,6 +284,7 @@ run_upgrade_ok() {
 }
 
 run_upgrade_fail() {
+    refresh_repository_metadata_fixture
     : > "$command_log"
     : > "$request_log"
     exit_code=0
@@ -290,6 +307,7 @@ run_upgrade_fail() {
 }
 
 run_upgrade_split_fail() {
+    refresh_repository_metadata_fixture
     : > "$command_log"
     : > "$request_log"
     exit_code=0
@@ -375,6 +393,7 @@ run_clean_tty_fail() {
 }
 
 run_source_ok() {
+    refresh_repository_metadata_fixture
     : > "$command_log"
     if ! "$source_install_test_binary" "$@" </dev/null > "$output_file" 2>&1; then
         echo "expected source-install scenario to succeed: $*" >&2
@@ -385,6 +404,7 @@ run_source_ok() {
 }
 
 run_source_fail() {
+    refresh_repository_metadata_fixture
     : > "$command_log"
     if ! validation_expect_status source-install-business-failure 1 \
         "$output_file" "$output_file" \
@@ -608,17 +628,23 @@ assert_command_occurrence_before() {
 
 assert_single_package_metadata_snapshots_around_syu() {
     package_name=$1
-    expected_session_count=${2:-3}
-    assert_command_count "pacman-conf --verbose RootDir DBPath" 1
-    assert_command_count "alpm initialize" "$expected_session_count"
-    assert_command_count "alpm query $package_name" "$expected_session_count"
-    assert_command_count "alpm release" "$expected_session_count"
-    assert_command_occurrence_before "alpm query $package_name" 1 "alpm release" 1
-    assert_command_occurrence_before "alpm release" 1 "sudo pacman -Syu --noconfirm" 1
+    expected_metadata_session_count=${2:-3}
+    expected_total_session_count=$((expected_metadata_session_count + 1))
+    assert_command_count "pacman-conf --verbose RootDir DBPath" 2
+    assert_command_count "pacman-conf --repo-list" 1
+    assert_command_count "alpm initialize" "$expected_total_session_count"
+    assert_command_count "alpm sync-query core/$package_name" 1
+    assert_command_count "alpm query $package_name" "$expected_metadata_session_count"
+    assert_command_count "alpm release" "$expected_total_session_count"
+    assert_command_absent "pacman -Si $package_name"
+    assert_command_occurrence_before "alpm sync-query core/$package_name" 1 "alpm release" 1
+    assert_command_occurrence_before "alpm query $package_name" 1 "alpm release" 2
+    assert_command_occurrence_before "alpm release" 2 "sudo pacman -Syu --noconfirm" 1
     assert_command_occurrence_before "pacman-conf --verbose RootDir DBPath" 1 "alpm initialize" 1
-    assert_command_occurrence_before "sudo pacman -Syu --noconfirm" 1 "alpm initialize" 2
-    assert_command_occurrence_before "alpm initialize" 2 "alpm query $package_name" 2
-    assert_command_occurrence_before "alpm query $package_name" 2 "alpm release" 2
+    assert_command_occurrence_before "pacman-conf --verbose RootDir DBPath" 2 "alpm initialize" 2
+    assert_command_occurrence_before "sudo pacman -Syu --noconfirm" 1 "alpm initialize" 3
+    assert_command_occurrence_before "alpm initialize" 3 "alpm query $package_name" 2
+    assert_command_occurrence_before "alpm query $package_name" 2 "alpm release" 3
 }
 
 assert_output_before() {
@@ -860,8 +886,10 @@ run_fail --noedit --nodiff --noconfirm build \
     PKGDEST=first-path PKGDEST= ignored
 assert_contains "Ignoring extra arg 'ignored'" "$output_file"
 assert_contains "Source environment PKGDEST conflicts with the invocation-owned artifact workspace." "$output_file"
-assert_command "pacman -Si clean-root"
-assert_command_count "pacman-conf --verbose RootDir DBPath" 0
+assert_command "pacman-conf --verbose RootDir DBPath"
+assert_command "pacman-conf --repo-list"
+assert_command "alpm sync-query core/clean-root"
+assert_command_absent "pacman -Si clean-root"
 assert_command_content_absent "git clone"
 assert_command_content_absent "makepkg"
 assert_command_content_absent "pacman -U"
@@ -871,8 +899,10 @@ export MOGUET_TEST_PACMAN_REPO_PACKAGES=clean-root
 export PKGDEST=
 run_fail --noedit --nodiff --noconfirm build clean-root
 assert_contains "Inherited PKGDEST conflicts with the invocation-owned artifact workspace." "$output_file"
-assert_command "pacman -Si clean-root"
-assert_command_count "pacman-conf --verbose RootDir DBPath" 0
+assert_command "pacman-conf --verbose RootDir DBPath"
+assert_command "pacman-conf --repo-list"
+assert_command "alpm sync-query core/clean-root"
+assert_command_absent "pacman -Si clean-root"
 assert_command_content_absent "git clone"
 assert_command_content_absent "makepkg"
 assert_command_content_absent "pacman -U"
@@ -890,6 +920,9 @@ assert_command_content_absent "git clone"
 assert_command_content_absent "makepkg"
 
 setup_case build-constraint-preflight-firewall
+export MOGUET_TEST_ALPM_VERCMP_EXPECTED_LHS=1.0-1
+export MOGUET_TEST_ALPM_VERCMP_EXPECTED_RHS=2.0-1
+export MOGUET_TEST_ALPM_VERCMP_RESULT=-1
 run_fail --noedit --nodiff --noconfirm build constraint-block-root
 assert_contains "dependency constraint-block-leaf>=2.0-1 is Unsatisfied" "$output_file"
 assert_command_content_absent "git clone"
@@ -1839,6 +1872,9 @@ assert_total_command_count 0
 
 setup_case upgrade-constraint-preflight-firewall
 : > "$preference_dir/constraint-block-root"
+export MOGUET_TEST_ALPM_VERCMP_EXPECTED_LHS=1.0-1
+export MOGUET_TEST_ALPM_VERCMP_EXPECTED_RHS=2.0-1
+export MOGUET_TEST_ALPM_VERCMP_RESULT=-1
 run_fail --noedit --nodiff --noconfirm upgrade
 assert_contains "dependency constraint-block-leaf>=2.0-1 is Unsatisfied" "$output_file"
 assert_command_content_absent "sudo "
@@ -1905,10 +1941,13 @@ upgrade_preflight_checksum=$(cksum \
     "$cache_root/preflight-sentinel/state")
 run_upgrade_fail --noedit --nodiff --noconfirm upgrade
 assert_contains "Source environment PKGDEST conflicts with the invocation-owned artifact workspace." "$output_file"
-assert_command_count "pacman -Si alpha" 1
-assert_command_count "pacman -Si beta" 1
-assert_command_count "pacman-conf --verbose RootDir DBPath" 0
-assert_command_content_absent "alpm "
+assert_command_count "pacman-conf --verbose RootDir DBPath" 2
+assert_command_count "pacman-conf --repo-list" 2
+assert_command_count "alpm initialize" 2
+assert_command_count "alpm sync-query core/alpha" 1
+assert_command_count "alpm sync-query core/beta" 1
+assert_command_count "alpm release" 2
+assert_command_content_absent "pacman -Si "
 assert_command_absent "sudo pacman -Syu --noconfirm"
 assert_command_content_absent "git "
 assert_command_content_absent "makepkg"
@@ -1933,10 +1972,14 @@ setup_case upgrade-metadata-resolver-failure
 : > "$preference_dir/alpha"
 export MOGUET_TEST_PACMAN_REPO_PACKAGES=alpha
 export MOGUET_TEST_PACKAGE_METADATA_PACMAN_CONF_EXIT_CODE=42
+export MOGUET_TEST_PACKAGE_METADATA_PACMAN_CONF_FAILURE_AT=2
 run_upgrade_fail --noconfirm upgrade
 assert_contains "pacman-conf failed with exit code 42." "$output_file"
-assert_command_count "pacman-conf --verbose RootDir DBPath" 1
-assert_command_content_absent "alpm "
+assert_command_count "pacman-conf --verbose RootDir DBPath" 2
+assert_command_count "pacman-conf --repo-list" 1
+assert_command_count "alpm initialize" 1
+assert_command_count "alpm sync-query core/alpha" 1
+assert_command_count "alpm release" 1
 assert_command_absent "sudo pacman -Syu --noconfirm"
 assert_command_content_absent "git "
 assert_command_content_absent "makepkg "
@@ -1945,13 +1988,15 @@ setup_case upgrade-metadata-session-open-failure
 : > "$preference_dir/alpha"
 printf 'alpha 1.0-1\n' > "$package_metadata_state"
 export MOGUET_TEST_PACMAN_REPO_PACKAGES=alpha
-export MOGUET_TEST_PACKAGE_METADATA_INITIALIZE_FAILURE=1
+export MOGUET_TEST_PACKAGE_METADATA_INITIALIZE_FAILURE_AT=2
 run_upgrade_fail --noconfirm upgrade
 assert_contains "Failed to initialize package metadata session: system error." "$output_file"
-assert_command_count "pacman-conf --verbose RootDir DBPath" 1
-assert_command_count "alpm initialize" 1
+assert_command_count "pacman-conf --verbose RootDir DBPath" 2
+assert_command_count "pacman-conf --repo-list" 1
+assert_command_count "alpm initialize" 2
+assert_command_count "alpm sync-query core/alpha" 1
 assert_command_content_absent "alpm query "
-assert_command_absent "alpm release"
+assert_command_count "alpm release" 1
 assert_command_absent "sudo pacman -Syu --noconfirm"
 assert_command_content_absent "git "
 assert_command_content_absent "makepkg "
@@ -1960,13 +2005,15 @@ setup_case upgrade-metadata-query-failure
 : > "$preference_dir/alpha"
 printf 'alpha 1.0-1\n' > "$package_metadata_state"
 export MOGUET_TEST_PACMAN_REPO_PACKAGES=alpha
-export MOGUET_TEST_PACKAGE_METADATA_QUERY_FAILURE_PACKAGE=alpha
+export MOGUET_TEST_PACKAGE_METADATA_QUERY_FAILURE_AT=1
 run_upgrade_fail --noconfirm upgrade
 assert_contains "Failed to query installed package metadata for alpha: Installed package query failed: database open failed." "$output_file"
-assert_command_count "pacman-conf --verbose RootDir DBPath" 1
-assert_command_count "alpm initialize" 1
+assert_command_count "pacman-conf --verbose RootDir DBPath" 2
+assert_command_count "pacman-conf --repo-list" 1
+assert_command_count "alpm initialize" 2
+assert_command_count "alpm sync-query core/alpha" 1
 assert_command_count "alpm query alpha" 1
-assert_command_count "alpm release" 1
+assert_command_count "alpm release" 2
 assert_command_absent "sudo pacman -Syu --noconfirm"
 assert_command_content_absent "git "
 assert_command_content_absent "makepkg "
@@ -1980,10 +2027,14 @@ export MOGUET_TEST_PACMAN_REPO_PACKAGES='alpha beta gamma'
 export MOGUET_TEST_PACKAGE_METADATA_QUERY_FAILURE_AT=2
 run_upgrade_fail --noconfirm upgrade
 assert_contains "Failed to query installed package metadata for " "$output_file"
-assert_command_count "pacman-conf --verbose RootDir DBPath" 1
-assert_command_count "alpm initialize" 1
+assert_command_count "pacman-conf --verbose RootDir DBPath" 4
+assert_command_count "pacman-conf --repo-list" 3
+assert_command_count "alpm initialize" 4
 assert_command_prefix_count "alpm query " 2
-assert_command_count "alpm release" 1
+assert_command_count "alpm release" 4
+for package in alpha beta gamma; do
+    assert_command_count "alpm sync-query core/$package" 1
+done
 assert_command_absent "sudo pacman -Syu --noconfirm"
 assert_command_content_absent "git "
 assert_command_content_absent "makepkg "
@@ -1993,16 +2044,18 @@ setup_case upgrade-database-paths-resolved-once
 printf 'alpha 1.0-1\n' > "$package_metadata_state"
 export MOGUET_TEST_PACMAN_REPO_PACKAGES=alpha
 export MOGUET_TEST_PACKAGE_METADATA_PACMAN_CONF_EXIT_CODE=42
-export MOGUET_TEST_PACKAGE_METADATA_PACMAN_CONF_FAILURE_AT=2
+export MOGUET_TEST_PACKAGE_METADATA_PACMAN_CONF_FAILURE_AT=3
 run_upgrade_ok --noedit --nodiff --noconfirm upgrade
-assert_command_count "pacman-conf --verbose RootDir DBPath" 1
-assert_command_count "alpm initialize" 2
+assert_command_count "pacman-conf --verbose RootDir DBPath" 2
+assert_command_count "pacman-conf --repo-list" 1
+assert_command_count "alpm initialize" 3
+assert_command_count "alpm sync-query core/alpha" 1
 assert_command_count "alpm query alpha" 2
-assert_command_count "alpm release" 2
+assert_command_count "alpm release" 3
 assert_command "sudo pacman -Syu --noconfirm"
-assert_command_count "pacman -Si alpha" 1
-assert_command_occurrence_before "alpm release" 1 "sudo pacman -Syu --noconfirm" 1
-assert_command_occurrence_before "sudo pacman -Syu --noconfirm" 1 "alpm initialize" 2
+assert_command_absent "pacman -Si alpha"
+assert_command_occurrence_before "alpm release" 2 "sudo pacman -Syu --noconfirm" 1
+assert_command_occurrence_before "sudo pacman -Syu --noconfirm" 1 "alpm initialize" 3
 assert_command_content_absent "makepkg"
 assert_command_content_absent "pacman -U"
 
@@ -2010,20 +2063,22 @@ setup_case upgrade-post-metadata-session-open-failure
 : > "$preference_dir/alpha"
 printf 'alpha 1.0-1\n' > "$package_metadata_state"
 export MOGUET_TEST_PACMAN_REPO_PACKAGES=alpha
-export MOGUET_TEST_PACKAGE_METADATA_INITIALIZE_FAILURE_AT=2
+export MOGUET_TEST_PACKAGE_METADATA_INITIALIZE_FAILURE_AT=3
 run_upgrade_fail --noconfirm upgrade
 post_snapshot_failure_prefix="The system upgrade completed, but the post-upgrade package metadata snapshot failed: "
 post_initialize_failure_diagnostic="${post_snapshot_failure_prefix}Failed to initialize package metadata session: system error."
 assert_contains "$post_initialize_failure_diagnostic" "$output_file"
 assert_output_line_count "$post_initialize_failure_diagnostic" 1 "$output_file"
 assert_not_contains "${post_snapshot_failure_prefix}${post_snapshot_failure_prefix}" "$output_file"
-assert_command_count "pacman-conf --verbose RootDir DBPath" 1
-assert_command_count "alpm initialize" 2
+assert_command_count "pacman-conf --verbose RootDir DBPath" 2
+assert_command_count "pacman-conf --repo-list" 1
+assert_command_count "alpm initialize" 3
+assert_command_count "alpm sync-query core/alpha" 1
 assert_command_count "alpm query alpha" 1
-assert_command_count "alpm release" 1
+assert_command_count "alpm release" 2
 assert_command "sudo pacman -Syu --noconfirm"
-assert_command_count "pacman -Si alpha" 1
-assert_command_occurrence_before "sudo pacman -Syu --noconfirm" 1 "alpm initialize" 2
+assert_command_absent "pacman -Si alpha"
+assert_command_occurrence_before "sudo pacman -Syu --noconfirm" 1 "alpm initialize" 3
 assert_command_content_absent "git "
 assert_command_content_absent "makepkg "
 
@@ -2036,13 +2091,15 @@ run_upgrade_fail --noedit --nodiff --noconfirm upgrade
 post_query_failure_diagnostic="The system upgrade completed, but the post-upgrade package metadata query failed for alpha: Installed package query failed: database open failed. Source processing did not start."
 assert_contains "$post_query_failure_diagnostic" "$output_file"
 assert_output_line_count "$post_query_failure_diagnostic" 1 "$output_file"
-assert_command_count "pacman-conf --verbose RootDir DBPath" 1
-assert_command_count "alpm initialize" 2
+assert_command_count "pacman-conf --verbose RootDir DBPath" 2
+assert_command_count "pacman-conf --repo-list" 1
+assert_command_count "alpm initialize" 3
+assert_command_count "alpm sync-query core/alpha" 1
 assert_command_count "alpm query alpha" 2
-assert_command_count "alpm release" 2
+assert_command_count "alpm release" 3
 assert_command "sudo pacman -Syu --noconfirm"
-assert_command_count "pacman -Si alpha" 1
-assert_command_occurrence_before "alpm query alpha" 2 "alpm release" 2
+assert_command_absent "pacman -Si alpha"
+assert_command_occurrence_before "alpm query alpha" 2 "alpm release" 3
 assert_command_content_absent "git "
 assert_command_content_absent "vercmp "
 assert_command_content_absent "makepkg "
@@ -2072,18 +2129,20 @@ if [ -z "$failed_package" ]; then
     cat "$command_log" >&2
     exit 1
 fi
-assert_command_count "pacman-conf --verbose RootDir DBPath" 1
-assert_command_count "alpm initialize" 2
+assert_command_count "pacman-conf --verbose RootDir DBPath" 4
+assert_command_count "pacman-conf --repo-list" 3
+assert_command_count "alpm initialize" 5
 assert_command_prefix_count "alpm query " 6
-assert_command_count "alpm release" 2
+assert_command_count "alpm release" 5
 assert_command_content_absent "makepkg"
 assert_command_content_absent "vercmp"
 assert_command_content_absent "git clone"
 assert_command_content_absent "pacman -U"
 for package in alpha beta gamma; do
     assert_command_count "alpm query $package" 2
-    assert_command_occurrence_before "alpm query $package" 2 "alpm release" 2
-    assert_command_count "pacman -Si $package" 1
+    assert_command_occurrence_before "alpm query $package" 2 "alpm release" 5
+    assert_command_count "alpm sync-query core/$package" 1
+    assert_command_absent "pacman -Si $package"
 done
 multi_query_failure_diagnostic="The system upgrade completed, but the post-upgrade package metadata query failed for $failed_package: Installed package query failed: database open failed. Source processing did not start."
 assert_contains "$multi_query_failure_diagnostic" "$output_file"
@@ -2093,9 +2152,12 @@ setup_case upgrade-ordinary-preflight-errors
 : > "$preference_dir/missing-upgrade-a"
 : > "$preference_dir/missing-upgrade-b"
 run_upgrade_fail --noconfirm upgrade
-assert_command_count "pacman-conf --verbose RootDir DBPath" 0
-assert_command_content_absent "alpm "
-assert_command_prefix_count "pacman -Si missing-upgrade-" 1
+assert_command_count "pacman-conf --verbose RootDir DBPath" 1
+assert_command_count "pacman-conf --repo-list" 1
+assert_command_count "alpm initialize" 1
+assert_command_prefix_count "alpm sync-query core/missing-upgrade-" 1
+assert_command_count "alpm release" 1
+assert_command_content_absent "pacman -Si missing-upgrade-"
 assert_command_absent "sudo pacman -Syu --noconfirm"
 assert_contains "Package not found in repos or AUR: missing-upgrade-" "$output_file"
 assert_command_content_absent "git clone"
@@ -2105,14 +2167,16 @@ setup_case upgrade-pacman-failure
 : > "$preference_dir/clean-root"
 printf 'pacman -Syu --noconfirm\n' > "$sudo_failures"
 run_upgrade_fail --noedit --nodiff --noconfirm upgrade
-assert_command "pacman -Si clean-root"
-assert_command_count "pacman-conf --verbose RootDir DBPath" 1
-assert_command_count "alpm initialize" 1
+assert_command_absent "pacman -Si clean-root"
+assert_command_count "pacman-conf --verbose RootDir DBPath" 2
+assert_command_count "pacman-conf --repo-list" 1
+assert_command_count "alpm initialize" 2
+assert_command_count "alpm sync-query core/clean-root" 1
 assert_command_count "alpm query clean-root" 1
-assert_command_count "alpm release" 1
+assert_command_count "alpm release" 2
 assert_command_absent "pacman -Q clean-root"
 assert_command "sudo pacman -Syu --noconfirm"
-assert_command_before "alpm release" "sudo pacman -Syu --noconfirm"
+assert_command_occurrence_before "alpm release" 2 "sudo pacman -Syu --noconfirm" 1
 assert_contains "The update failed." "$output_file"
 assert_command_content_absent "git clone"
 assert_command_content_absent "makepkg"
@@ -2145,7 +2209,10 @@ export MOGUET_TEST_PACMAN_REPO_PACKAGES='alpha beta'
 run_upgrade_ok --noedit --nodiff --noconfirm upgrade
 assert_output_before "System upgrade..." "Processing $preference_first..." "$output_file"
 assert_output_before "Processing $preference_first..." "Processing $preference_second..." "$output_file"
-assert_command_before "pacman -Si $preference_first" "pacman -Si $preference_second"
+assert_command_before \
+    "alpm sync-query core/$preference_first" \
+    "alpm sync-query core/$preference_second"
+assert_command_content_absent "pacman -Si "
 assert_command_occurrence_before "sudo pacman -Syu --noconfirm" 1 "git fetch origin" 1
 assert_command_count "makepkg --packagelist" 2
 assert_command_count "makepkg -sc --noconfirm" 2
@@ -2247,7 +2314,7 @@ assert_file_equals "$remote_srcinfo" "$checkout_dir/.SRCINFO"
 assert_contains "Loading custom build flags from $preference_dir/$upgrade_package." "$output_file"
 assert_contains "$upgrade_package was updated by the system transaction (1.0-1 -> 2.0-1); rebuilding the preferred source package." "$output_file"
 assert_not_contains "$upgrade_package is up to date (2.0-1). Skipping." "$output_file"
-assert_command_count "pacman -Si $upgrade_package" 1
+assert_command_absent "pacman -Si $upgrade_package"
 assert_command "sudo pacman -Syu --noconfirm"
 assert_single_package_metadata_snapshots_around_syu "$upgrade_package"
 assert_command "git fetch origin"
@@ -2257,7 +2324,7 @@ assert_command "vercmp 2.0-1 2.0-1"
 assert_command_count "makepkg -sc --noconfirm" 1
 assert_separated_source_commands 1
 assert_command_content_absent "git clone"
-assert_command_occurrence_before "alpm release" 2 "git fetch origin" 1
+assert_command_occurrence_before "alpm release" 3 "git fetch origin" 1
 assert_command_occurrence_before "git fetch origin" 1 "git reset --hard origin/main" 1
 assert_command_occurrence_before "git reset --hard origin/main" 1 "vercmp 2.0-1 2.0-1" 1
 assert_command_occurrence_before "vercmp 2.0-1 2.0-1" 1 "makepkg --packagelist" 1
@@ -2285,7 +2352,7 @@ assert_file_equals "$installed_version_after" "$installed_version_state"
 assert_file_equals "$remote_srcinfo" "$checkout_dir/.SRCINFO"
 assert_contains "Loading custom build flags from $preference_dir/$upgrade_package." "$output_file"
 assert_not_contains "rebuilding the preferred source package." "$output_file"
-assert_command_count "pacman -Si $upgrade_package" 1
+assert_command_absent "pacman -Si $upgrade_package"
 assert_command "sudo pacman -Syu --noconfirm"
 assert_single_package_metadata_snapshots_around_syu "$upgrade_package"
 assert_command "git fetch origin"
@@ -2295,7 +2362,7 @@ assert_command "vercmp 2.0-1 1.0-1"
 assert_command_count "makepkg -sc --noconfirm" 1
 assert_separated_source_commands 1
 assert_command_content_absent "git clone"
-assert_command_occurrence_before "alpm release" 2 "git fetch origin" 1
+assert_command_occurrence_before "alpm release" 3 "git fetch origin" 1
 assert_command_occurrence_before "git reset --hard origin/main" 1 "vercmp 2.0-1 1.0-1" 1
 assert_command_occurrence_before "vercmp 2.0-1 1.0-1" 1 "makepkg --packagelist" 1
 assert_argv_log "$vercmp_argv_log" 'argv-begin
@@ -2342,7 +2409,7 @@ assert_file_equals "$installed_version_after" "$installed_version_state"
 assert_file_equals "$remote_srcinfo" "$checkout_dir/.SRCINFO"
 assert_contains "Loading custom build flags from $preference_dir/$upgrade_package." "$output_file"
 assert_not_contains "rebuilding the preferred source package." "$output_file"
-assert_command_count "pacman -Si $upgrade_package" 1
+assert_command_absent "pacman -Si $upgrade_package"
 assert_command "sudo pacman -Syu --noconfirm"
 assert_single_package_metadata_snapshots_around_syu "$upgrade_package"
 assert_command "git fetch origin"
@@ -2352,8 +2419,8 @@ assert_command "vercmp 2.0-1 1.0-1"
 assert_command_count "makepkg -sc --noconfirm" 1
 assert_separated_source_commands 1
 assert_command_content_absent "git clone"
-assert_command_occurrence_before "pacman -Si $upgrade_package" 1 "alpm query $upgrade_package" 1
-assert_command_occurrence_before "alpm release" 2 "git fetch origin" 1
+assert_command_occurrence_before "alpm sync-query core/$upgrade_package" 1 "alpm query $upgrade_package" 1
+assert_command_occurrence_before "alpm release" 3 "git fetch origin" 1
 assert_command_occurrence_before "git reset --hard origin/main" 1 "vercmp 2.0-1 1.0-1" 1
 assert_command_occurrence_before "vercmp 2.0-1 1.0-1" 1 "makepkg --packagelist" 1
 assert_argv_log "$vercmp_argv_log" 'argv-begin
@@ -2382,7 +2449,7 @@ assert_file_equals "$installed_version_after" "$installed_version_state"
 assert_file_equals "$remote_srcinfo" "$checkout_dir/.SRCINFO"
 assert_contains "$upgrade_package is up to date (2.0-1). Skipping." "$output_file"
 assert_not_contains "rebuilding the preferred source package." "$output_file"
-assert_command_count "pacman -Si $upgrade_package" 1
+assert_command_absent "pacman -Si $upgrade_package"
 assert_command_absent "pacman -Q $upgrade_package"
 assert_command "sudo pacman -Syu --noconfirm"
 assert_single_package_metadata_snapshots_around_syu "$upgrade_package" 2
@@ -2407,7 +2474,7 @@ assert_file_equals "$installed_version_after" "$installed_version_state"
 assert_file_equals "$remote_srcinfo" "$checkout_dir/.SRCINFO"
 assert_contains "$upgrade_package is up to date (3.0-1). Skipping." "$output_file"
 assert_not_contains "rebuilding the preferred source package." "$output_file"
-assert_command_count "pacman -Si $upgrade_package" 1
+assert_command_absent "pacman -Si $upgrade_package"
 assert_command_absent "pacman -Q $upgrade_package"
 assert_command "sudo pacman -Syu --noconfirm"
 assert_single_package_metadata_snapshots_around_syu "$upgrade_package" 2
@@ -2432,7 +2499,7 @@ assert_file_equals "$installed_version_after" "$installed_version_state"
 assert_file_equals "$remote_srcinfo" "$checkout_dir/.SRCINFO"
 assert_contains "$upgrade_package was installed by the system transaction at version 2.0-1; rebuilding the preferred source package." "$output_file"
 assert_not_contains "$upgrade_package is up to date (2.0-1). Skipping." "$output_file"
-assert_command_count "pacman -Si $upgrade_package" 1
+assert_command_absent "pacman -Si $upgrade_package"
 assert_command_absent "pacman -Q $upgrade_package"
 assert_command "sudo pacman -Syu --noconfirm"
 assert_single_package_metadata_snapshots_around_syu "$upgrade_package"
@@ -2440,7 +2507,7 @@ assert_command "git reset --hard origin/main"
 assert_command "vercmp 2.0-1 2.0-1"
 assert_command_count "makepkg -sc --noconfirm" 1
 assert_separated_source_commands 1
-assert_command_occurrence_before "alpm release" 2 "git reset --hard origin/main" 1
+assert_command_occurrence_before "alpm release" 3 "git reset --hard origin/main" 1
 assert_command_occurrence_before "git reset --hard origin/main" 1 "vercmp 2.0-1 2.0-1" 1
 assert_command_occurrence_before "vercmp 2.0-1 2.0-1" 1 "makepkg --packagelist" 1
 assert_argv_log "$vercmp_argv_log" 'argv-begin
@@ -2463,15 +2530,15 @@ export MOGUET_TEST_PACMAN_REPO_PACKAGES=$upgrade_package
 run_upgrade_ok --noedit --nodiff --noconfirm upgrade
 assert_file_empty "$installed_version_state"
 assert_single_package_metadata_snapshots_around_syu "$upgrade_package"
-assert_command_count "pacman -Si $upgrade_package" 1
+assert_command_absent "pacman -Si $upgrade_package"
 assert_command "git fetch origin"
 assert_command "git reset --hard origin/main"
 assert_command_absent "pacman -Q $upgrade_package"
 assert_command_content_absent "vercmp "
 assert_command_count "makepkg -sc --noconfirm" 1
 assert_separated_source_commands 1
-assert_command_occurrence_before "alpm release" 2 "git reset --hard origin/main" 1
-assert_command_occurrence_before "alpm release" 2 "git fetch origin" 1
+assert_command_occurrence_before "alpm release" 3 "git reset --hard origin/main" 1
+assert_command_occurrence_before "alpm release" 3 "git fetch origin" 1
 assert_command_occurrence_before "git reset --hard origin/main" 1 "makepkg --packagelist" 1
 
 setup_upgrade_transition_case \
@@ -2525,9 +2592,10 @@ export MOGUET_TEST_SOURCE_MAINTENANCE_PACMAN_SYU_Q_OUTPUT_FILE=$post_syu_metadat
 export MOGUET_TEST_MAKEPKG_PACKAGE_METADATA_STATE_AFTER_SUCCESS_FILE=$live_metadata_after_first_makepkg
 run_upgrade_ok --noedit --nodiff --noconfirm upgrade
 assert_file_equals "$live_metadata_after_first_makepkg" "$package_metadata_state"
-assert_command_count "pacman-conf --verbose RootDir DBPath" 1
-assert_command_count "alpm initialize" 4
-assert_command_count "alpm release" 4
+assert_command_count "pacman-conf --verbose RootDir DBPath" 3
+assert_command_count "pacman-conf --repo-list" 2
+assert_command_count "alpm initialize" 6
+assert_command_count "alpm release" 6
 assert_command_count "git fetch origin" 2
 assert_command_count "git reset --hard origin/main" 2
 assert_command_count "vercmp 2.0-1 1.0-1" 2
@@ -2536,10 +2604,11 @@ assert_command_count "makepkg -sc --noconfirm" 2
 assert_separated_source_commands 2
 for package in alpha beta; do
     assert_command_count "alpm query $package" 3
-    assert_command_count "pacman -Si $package" 1
+    assert_command_count "alpm sync-query core/$package" 1
+    assert_command_absent "pacman -Si $package"
     assert_command_absent "pacman -Q $package"
-    assert_command_occurrence_before "alpm query $package" 2 "alpm release" 2
-    assert_command_occurrence_before "alpm release" 2 "git fetch origin" 1
+    assert_command_occurrence_before "alpm query $package" 2 "alpm release" 4
+    assert_command_occurrence_before "alpm release" 4 "git fetch origin" 1
 done
 
 echo "  ok: P0-6 cmd_upgrade"
@@ -2617,8 +2686,9 @@ assert_output_before \
     "Loading custom build flags from $preference_dir/clean-root." \
     "Processing clean-root..." "$output_file"
 assert_command_before \
-    "pacman -Si clean-root" \
+    "alpm sync-query core/clean-root" \
     "git clone https://gitlab.archlinux.org/archlinux/packaging/packages/clean-root.git clean-root"
+assert_command_absent "pacman -Si clean-root"
 assert_contains "Applying custom build flags: SMART='preference' " "$output_file"
 assert_command_count "makepkg -sc --noconfirm" 1
 assert_separated_source_commands 1
@@ -2627,8 +2697,12 @@ setup_case smart-source-missing-post-snapshot
 export MOGUET_TEST_PACMAN_REPO_PACKAGES=clean-root
 run_source_fail smart-source-missing-post-snapshot
 assert_contains "No authoritative installed package snapshot was supplied for clean-root." "$output_file"
-assert_command "pacman -Si clean-root"
-assert_command_count "pacman-conf --verbose RootDir DBPath" 1
+assert_command_absent "pacman -Si clean-root"
+assert_command_count "pacman-conf --verbose RootDir DBPath" 2
+assert_command_count "pacman-conf --repo-list" 1
+assert_command_count "alpm initialize" 1
+assert_command_count "alpm sync-query core/clean-root" 1
+assert_command_count "alpm release" 1
 assert_command_content_absent "git clone"
 assert_command_content_absent "makepkg"
 assert_command_content_absent "pacman -U"

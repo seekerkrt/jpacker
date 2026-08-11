@@ -109,6 +109,25 @@ void add_selected_repository_provider(
 
 void require_static_production_source_build_work_item(
         const ProductionSourceBuildWorkItem& work_item) {
+    switch(work_item.required_target_provenance) {
+    case RequiredTargetProvenance::RepositoryExactPackageProjection:
+    case RequiredTargetProvenance::AurBuildPlanProjection:
+        break;
+    case RequiredTargetProvenance::Unspecified:
+    default:
+        throw std::logic_error(
+                "Production source-build work item has no supported required-target provenance.");
+    }
+    switch(work_item.artifact_lifecycle_intent) {
+    case ArtifactLifecycleIntent::SingularCompatibility:
+    case ArtifactLifecycleIntent::PackageBaseSet:
+        break;
+    case ArtifactLifecycleIntent::Unspecified:
+    default:
+        throw std::logic_error(
+                "Production source-build work item has no supported artifact lifecycle intent.");
+    }
+
     require_valid_package_name(work_item.request.checkout_name);
     if(work_item.request.git_url.empty()) {
         throw std::logic_error(
@@ -120,6 +139,12 @@ void require_static_production_source_build_work_item(
         throw std::logic_error(
                 "Production source-build work item has no required package target for PackageBase " +
                 work_item.request.checkout_name + ".");
+    }
+    if(work_item.artifact_lifecycle_intent ==
+               ArtifactLifecycleIntent::SingularCompatibility &&
+       work_item.required_targets.size() != 1) {
+        throw std::logic_error(
+                "Production source-build singular compatibility work item has multiple required targets.");
     }
     for(std::size_t index = 0; index < work_item.required_targets.size();
         ++index) {
@@ -180,10 +205,45 @@ void require_static_production_source_build_work_item(
         throw std::logic_error(
                 "Production source-build multiple-target work item must not expose a singular requested package.");
     }
+
+    if(work_item.required_target_provenance ==
+       RequiredTargetProvenance::RepositoryExactPackageProjection) {
+        if(!work_item.repository_identity.has_value()) {
+            throw std::logic_error(
+                    "Repository source-build work item has no exact repository identity.");
+        }
+        const ResolvedRepositorySourceBuildIdentity& identity =
+                work_item.repository_identity.value();
+        const RepositoryPackagePresent& exact = identity.exact_package();
+        if(work_item.required_targets.size() != 1 ||
+           work_item.request.package_name != identity.requested_child() ||
+           work_item.request.checkout_name != identity.package_base() ||
+           work_item.request.git_url != identity.checkout().git_url() ||
+           work_item.required_targets.front().package_base !=
+                   identity.package_base() ||
+           work_item.required_targets.front().package_name !=
+                   identity.requested_child() ||
+           work_item.required_targets.front().desired_reason !=
+                   DesiredInstallReason::Explicit ||
+           work_item.configured_repository_order !=
+                   exact.configured_repository_order ||
+           !work_item.uses_system_update_baseline) {
+            throw std::logic_error(
+                    "Repository source-build work item does not match its exact repository identity.");
+        }
+    } else if(work_item.repository_identity.has_value()) {
+        throw std::logic_error(
+                "AUR BuildPlan source-build work item contains a repository identity.");
+    }
 }
 
 const RequiredPackageArtifactTarget& require_singular_required_package_target(
         const ProductionSourceBuildWorkItem& work_item) {
+    if(work_item.artifact_lifecycle_intent !=
+       ArtifactLifecycleIntent::SingularCompatibility) {
+        throw std::logic_error(
+                "Production separated source-build requires singular compatibility lifecycle intent.");
+    }
     if(work_item.required_targets.size() != 1) {
         throw std::logic_error(
                 "Production separated source-build requires exactly one required package target for PackageBase " +

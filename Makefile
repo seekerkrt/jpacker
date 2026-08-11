@@ -274,7 +274,8 @@ COMMANDS_SYNC_FORBIDDEN_TEST_SRCS := \
 	$(SRC_DIR)/root_package_search.cpp
 SOURCE_INSTALL_CHARACTERIZATION_TEST_SRCS := \
 	tests/source_install_characterization.cpp \
-	$(filter-out $(SRC_DIR)/moguet.cpp,$(SRCS))
+	$(filter-out $(SRC_DIR)/moguet.cpp,$(SRCS)) \
+	tests/stubs/package-metadata/alpm_stub.cpp
 AUR_UPDATE_PLAN_TEST_SRCS := \
 	tests/aur_update_plan_test.cpp \
 	$(SRC_DIR)/aur_update_plan.cpp
@@ -1289,15 +1290,16 @@ AUR_RPC_VALIDATION_FORBIDDEN_TEST_LDLIBS = $(LIBALPM_LDLIBS)
 
 SOURCE_INSTALL_CHARACTERIZATION_TEST_CPPFLAGS = \
 	-DMOGUET_ENABLE_TEST_OVERRIDES \
-	-I$(SRC_DIR)
-SOURCE_INSTALL_CHARACTERIZATION_TEST_LDLIBS = \
-	$(MY_LDLIBS) $(LIBALPM_LDLIBS)
+	-I$(SRC_DIR) \
+	-Itests/stubs/package-metadata
+SOURCE_INSTALL_CHARACTERIZATION_TEST_LDLIBS = $(MY_LDLIBS)
 SOURCE_INSTALL_CHARACTERIZATION_REQUIRED_PRODUCTION_TEST_SRCS := \
 	$(filter-out $(SRC_DIR)/moguet.cpp,$(SRCS))
 SOURCE_INSTALL_CHARACTERIZATION_REQUIRED_TEST_SUPPORT_SRCS := \
-	tests/source_install_characterization.cpp
+	tests/source_install_characterization.cpp \
+	tests/stubs/package-metadata/alpm_stub.cpp
 SOURCE_INSTALL_CHARACTERIZATION_FORBIDDEN_TEST_SRCS := $(SRC_DIR)/moguet.cpp
-SOURCE_INSTALL_CHARACTERIZATION_FORBIDDEN_TEST_LDLIBS =
+SOURCE_INSTALL_CHARACTERIZATION_FORBIDDEN_TEST_LDLIBS = $(LIBALPM_LDLIBS)
 
 UPGRADE_BASELINE_METADATA_TEST_CPPFLAGS = \
 	-DMOGUET_ENABLE_TEST_OVERRIDES \
@@ -3190,6 +3192,10 @@ test-repository-query: $(REPOSITORY_QUERY_TEST_TARGET)
 	@set -e; for test_case in \
 		candidate-value-contract \
 		configured-order \
+		split-package-base \
+		confirmed-not-found \
+		malformed-package-base \
+		returned-child-mismatch \
 		present-later-failure \
 		absent-later-failure \
 		unrelated-malformed-exact \
@@ -3273,10 +3279,12 @@ test-public-documentation: $(CLI_LOCALIZATION_TEST_TARGET) $(MANPAGES) $(COMPLET
 test-commands-inspect: $(COMMANDS_INSPECT_TEST_TARGET)
 	sh tests/test-commands-inspect.sh $(abspath $(COMMANDS_INSPECT_TEST_TARGET))
 
-test-commands-source-maintenance: $(APP_CONFIG_INTEGRATION_TEST_TARGET) $(SOURCE_INSTALL_CHARACTERIZATION_TEST_TARGET) $(PROCESS_STDIN_FD_TEST_TARGET) $(UPGRADE_BASELINE_METADATA_TEST_TARGET)
+# POLICY(#406): strict repository discovery in the full CLI and lower
+# characterization routes reads the same case-local libalpm snapshot.
+test-commands-source-maintenance: $(SOURCE_INSTALL_CHARACTERIZATION_TEST_TARGET) $(PROCESS_STDIN_FD_TEST_TARGET) $(UPGRADE_BASELINE_METADATA_TEST_TARGET)
 	$(abspath $(PROCESS_STDIN_FD_TEST_TARGET))
 	sh tests/test-commands-source-maintenance.sh \
-		$(abspath $(APP_CONFIG_INTEGRATION_TEST_TARGET)) \
+		$(abspath $(UPGRADE_BASELINE_METADATA_TEST_TARGET)) \
 		$(abspath $(SOURCE_INSTALL_CHARACTERIZATION_TEST_TARGET)) \
 		$(abspath $(UPGRADE_BASELINE_METADATA_TEST_TARGET))
 
@@ -3295,13 +3303,17 @@ test-run-with-pty:
 test-pacman-routing: $(TEST_TARGET)
 	sh tests/test-pacman-routing.sh $(abspath $(TEST_TARGET))
 
-test-build-cache-symlink: $(TEST_TARGET)
-	sh tests/test-build-cache-symlink.sh $(abspath $(TEST_TARGET))
+# POLICY(#406): cache safety characterization keeps every production TU while
+# strict repository discovery reads a case-local libalpm snapshot.
+test-build-cache-symlink: $(AUR_RPC_VALIDATION_TEST_TARGET)
+	sh tests/test-build-cache-symlink.sh $(abspath $(AUR_RPC_VALIDATION_TEST_TARGET))
 
-test-source-build: $(TEST_TARGET) $(APP_CONFIG_INTEGRATION_TEST_TARGET) $(UPGRADE_BASELINE_METADATA_TEST_TARGET)
+# POLICY(#406): source-build characterization keeps every production TU while
+# strict repository discovery reads a case-local libalpm snapshot.
+test-source-build: $(AUR_RPC_VALIDATION_TEST_TARGET) $(UPGRADE_BASELINE_METADATA_TEST_TARGET)
 	sh tests/test-source-build.sh \
-		$(abspath $(TEST_TARGET)) \
-		$(abspath $(APP_CONFIG_INTEGRATION_TEST_TARGET)) \
+		$(abspath $(AUR_RPC_VALIDATION_TEST_TARGET)) \
+		$(abspath $(UPGRADE_BASELINE_METADATA_TEST_TARGET)) \
 		$(abspath $(UPGRADE_BASELINE_METADATA_TEST_TARGET))
 
 # POLICY(#352): source-selection CLI characterization keeps every production TU

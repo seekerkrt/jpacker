@@ -107,6 +107,8 @@ setup_case() {
     outside_dir=$case_dir/outside
     command_log=$case_dir/commands.log
     editor_argv_log=$case_dir/editor-argv.log
+    package_metadata_state=$case_dir/package-metadata.state
+    repository_metadata_state=$case_dir/repository-metadata.state
 
     mkdir -p \
         "$home_dir" "$xdg_config_dir" "$xdg_state_dir" \
@@ -114,12 +116,17 @@ setup_case() {
     chmod 0700 "$xdg_config_dir"
     : > "$command_log"
     : > "$editor_argv_log"
+    : > "$package_metadata_state"
+    : > "$repository_metadata_state"
     export HOME=$home_dir
     export XDG_CONFIG_HOME=$xdg_config_dir
     export XDG_STATE_HOME=$xdg_state_dir
     export XDG_CACHE_HOME=$xdg_cache_dir
     export MOGUET_TEST_COMMAND_LOG=$command_log
     export MOGUET_TEST_EDITOR_ARGV_LOG=$editor_argv_log
+    export MOGUET_TEST_PACKAGE_METADATA_STATE_FILE=$package_metadata_state
+    export MOGUET_TEST_REPOSITORY_METADATA_STATE_FILE=$repository_metadata_state
+    export MOGUET_TEST_PACMAN_CONF_REPOSITORY_LIST=core
     unset MOGUET_TEST_GIT_REMOTE_URL
     unset MOGUET_TEST_GIT_CLONE_EXIT_CODE
     unset MOGUET_TEST_GIT_CLONE_SYMLINK_TARGET
@@ -405,9 +412,9 @@ assert_only_clone_after_metadata() {
     assert_command "$expected_clone"
     while IFS= read -r command; do
         case $command in
-            pacman\ -Si\ *)
-                ;;
             pacman-conf\ --verbose\ RootDir\ DBPath)
+                ;;
+            pacman-conf\ --repo-list)
                 ;;
             "$expected_clone")
                 ;;

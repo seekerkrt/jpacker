@@ -854,7 +854,10 @@ bool collect_work_item_drafts(
         draft.work_item.request.only_if_updated = false;
         draft.work_item.request.installed_snapshot = std::nullopt;
         draft.work_item.request.update_baseline = std::nullopt;
-        draft.work_item.is_build_plan_entry = true;
+        draft.work_item.required_target_provenance =
+                RequiredTargetProvenance::AurBuildPlanProjection;
+        draft.work_item.artifact_lifecycle_intent =
+                ArtifactLifecycleIntent::PackageBaseSet;
         draft.work_item.uses_system_update_baseline = false;
         attach_selected_repository_providers(draft.work_item, plan);
 

@@ -1358,19 +1358,7 @@ SyncInstallPreparation prepare_sync_install(
                    root->invocation_correlation.invocation_index !=
                            repository_source->target_index ||
                    root->package != repository_source->package ||
-                   root->source.requested_name !=
-                           repository_source->source.requested_name ||
-                   root->source.package_base !=
-                           repository_source->source.package_base ||
-                   root->source.canonical_source_key !=
-                           repository_source->source.canonical_source_key ||
-                   root->source.git_url !=
-                           repository_source->source.git_url ||
-                   root->source.source_kind !=
-                           repository_source->source.source_kind ||
-                   root->source.has_distinct_package_base !=
-                           repository_source->source.
-                                   has_distinct_package_base) {
+                   root->source != repository_source->source) {
                     throw std::logic_error(
                             "Prepared repository source work differs from its invocation root.");
                 }

@@ -82,6 +82,8 @@ private:
 
 enum class SystemSourceUpgradePhase;
 enum class UpgradeAllOperationPhase;
+enum class RequiredTargetProvenance;
+enum class ArtifactLifecycleIntent;
 
 enum class UnifiedPlanObservationStatus {
     Ready,
@@ -288,7 +290,8 @@ public:
                     requested_package_name,
             std::reference_wrapper<const std::string>
                     checkout_package_base,
-            bool is_build_plan_entry,
+            RequiredTargetProvenance required_target_provenance,
+            ArtifactLifecycleIntent artifact_lifecycle_intent,
             bool uses_system_update_baseline,
             std::reference_wrapper<const std::vector<
                     RequiredPackageArtifactTarget>> required_targets) noexcept;
@@ -309,7 +312,10 @@ public:
     required_targets() const noexcept;
     [[nodiscard]] const std::string& requested_package_name() const noexcept;
     [[nodiscard]] const std::string& checkout_package_base() const noexcept;
-    [[nodiscard]] bool is_build_plan_entry() const noexcept;
+    [[nodiscard]] RequiredTargetProvenance required_target_provenance()
+            const noexcept;
+    [[nodiscard]] ArtifactLifecycleIntent artifact_lifecycle_intent()
+            const noexcept;
     [[nodiscard]] bool uses_system_update_baseline() const noexcept;
     [[nodiscard]] bool has_complete_identity() const noexcept;
 
@@ -320,7 +326,8 @@ private:
             required_targets_;
     std::reference_wrapper<const std::string> requested_package_name_;
     std::reference_wrapper<const std::string> checkout_package_base_;
-    bool is_build_plan_entry_ = false;
+    RequiredTargetProvenance required_target_provenance_;
+    ArtifactLifecycleIntent artifact_lifecycle_intent_;
     bool uses_system_update_baseline_ = false;
 };
 

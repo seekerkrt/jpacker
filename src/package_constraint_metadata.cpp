@@ -161,6 +161,7 @@ RepositoryExactPackageObservationResult observe_repository_exact_package(
                             metadata->configured_repository_order,
                             metadata->repository_name),
                     std::move(metadata->package_name),
+                    std::move(metadata->package_base),
                     exact_package_version(
                             ObservedVersionSource::RepositoryExactPackage,
                             metadata->version),
@@ -245,6 +246,7 @@ RepositoryProviderObservationResult observe_repository_providers(
                                 metadata.configured_repository_order,
                                 metadata.repository_name),
                         std::move(metadata.package_name),
+                        std::move(metadata.package_base),
                         exact_package_version(
                                 ObservedVersionSource::RepositoryExactPackage,
                                 metadata.version),

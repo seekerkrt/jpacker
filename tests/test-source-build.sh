@@ -61,6 +61,7 @@ setup_case() {
     checkout_dir=$case_dir/xdg-cache/moguet/clean-root
     source_preference_dir=$case_dir/xdg-config/moguet/source-build.d
     package_metadata_state=$case_dir/package-metadata-state
+    repository_metadata_state=$case_dir/repository-metadata-state
 
     mkdir -p \
         "$case_dir/home" "$case_dir/xdg-config" \
@@ -69,6 +70,7 @@ setup_case() {
     : > "$command_log"
     : > "$editor_argv_log"
     : > "$package_metadata_state"
+    printf 'core clean-root 1 1\n' > "$repository_metadata_state"
     printf '%s\n' 'schema_version = 1' > "$config_file"
     export HOME=$case_dir/home
     export XDG_CONFIG_HOME=$case_dir/xdg-config
@@ -81,6 +83,8 @@ setup_case() {
     export MOGUET_TEST_MAKEPKG_EXIT_CODE=0
     export MOGUET_TEST_PACKAGE_METADATA_STATE_FILE=$package_metadata_state
     export MOGUET_TEST_PACKAGE_METADATA_EVENT_LOG=$command_log
+    export MOGUET_TEST_REPOSITORY_METADATA_STATE_FILE=$repository_metadata_state
+    export MOGUET_TEST_PACMAN_CONF_REPOSITORY_LIST=core
     unset MOGUET_TEST_PACMAN_Q_OUTPUT
     unset MOGUET_TEST_PACMAN_Q_EXIT_CODE
     unset MOGUET_TEST_PACMAN_QM_OUTPUT
@@ -408,24 +412,33 @@ prepare_upgrade_case
 write_srcinfo 2.0 1
 export MOGUET_TEST_VERCMP_OUTPUT=1
 run_upgrade_ok --noedit --nodiff upgrade
-assert_command_count "pacman-conf --verbose RootDir DBPath" 1
-assert_command_count "alpm initialize" 3
+assert_command_count "pacman-conf --verbose RootDir DBPath" 2
+assert_command_count "pacman-conf --repo-list" 1
+assert_command_count "alpm initialize" 4
+assert_command_count "alpm sync-register core" 1
+assert_command_count "alpm sync-valid core" 1
+assert_command_count "alpm sync-cache core" 1
+assert_command_count "alpm sync-query core/clean-root" 1
 assert_command_count "alpm query clean-root" 3
-assert_command_count "alpm release" 3
+assert_command_count "alpm release" 4
 assert_command "sudo pacman -Syu"
-assert_command_count "pacman -Si clean-root" 1
+assert_command_absent "pacman -Si clean-root"
 assert_command "git fetch origin"
 assert_command "git reset --hard origin/main"
 assert_command_absent "pacman -Q clean-root"
 assert_command "vercmp 2.0-1 1.0-1"
 assert_command "makepkg --packagelist"
 assert_command "makepkg -sc"
-assert_command_occurrence_before "alpm query clean-root" 1 "alpm release" 1
-assert_command_occurrence_before "alpm release" 1 "sudo pacman -Syu" 1
+assert_command_occurrence_before "pacman-conf --verbose RootDir DBPath" 1 "pacman-conf --repo-list" 1
+assert_command_occurrence_before "pacman-conf --repo-list" 1 "alpm sync-query core/clean-root" 1
+assert_command_occurrence_before "alpm sync-query core/clean-root" 1 "alpm release" 1
+assert_command_occurrence_before "alpm release" 1 "pacman-conf --verbose RootDir DBPath" 2
+assert_command_occurrence_before "pacman-conf --verbose RootDir DBPath" 2 "alpm query clean-root" 1
+assert_command_occurrence_before "alpm query clean-root" 1 "alpm release" 2
+assert_command_occurrence_before "alpm release" 2 "sudo pacman -Syu" 1
 assert_command_occurrence_before "sudo pacman -Syu" 1 "alpm query clean-root" 2
-assert_command_occurrence_before "alpm query clean-root" 2 "alpm release" 2
-assert_command_occurrence_before "pacman -Si clean-root" 1 "pacman-conf --verbose RootDir DBPath" 1
-assert_command_occurrence_before "alpm release" 2 "git fetch origin" 1
+assert_command_occurrence_before "alpm query clean-root" 2 "alpm release" 3
+assert_command_occurrence_before "alpm release" 3 "git fetch origin" 1
 assert_command_before "git reset --hard origin/main" "vercmp 2.0-1 1.0-1"
 assert_command_before "vercmp 2.0-1 1.0-1" "makepkg --packagelist"
 

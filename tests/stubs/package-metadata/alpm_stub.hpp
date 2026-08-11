@@ -123,6 +123,13 @@ void set_repository_package_version(
 void set_repository_package_version_null(
         const std::string& repository_name,
         const std::string& package_name);
+void set_repository_package_base(
+        const std::string& repository_name,
+        const std::string& package_name,
+        const std::string& package_base);
+void set_repository_package_base_null(
+        const std::string& repository_name,
+        const std::string& package_name);
 void set_repository_package_provides(
         const std::string& repository_name,
         const std::string& package_name,

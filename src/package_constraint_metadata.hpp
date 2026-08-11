@@ -42,6 +42,7 @@ struct RepositoryProviderCapability {
 struct RepositoryExactPackage {
     ConfiguredRepositoryIdentity             repository;
     std::string                              package_name;
+    std::string                              package_base;
     ObservedVersion                          package_version;
     std::vector<RepositoryProviderCapability> provides;
 };

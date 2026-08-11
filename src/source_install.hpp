@@ -4,17 +4,19 @@
 #include "dependency_provider.hpp"
 #include "dependency_plan.hpp"
 #include "package_metadata.hpp"
+#include "repository_query.hpp"
 #include "separated_package_base_source_build.hpp"
 #include "source_build.hpp"
 #include "trusted_cache.hpp"
 
 #include <optional>
+#include <stdexcept>
 #include <string>
+#include <utility>
 #include <variant>
 #include <vector>
 
 struct AppConfig;
-struct RepositoryPackagePresent;
 class LocalBuildPlan;
 class LocalSourceBuildDependencyPreparation;
 struct PreparedProductionSourceBuildInvocation;
@@ -53,15 +55,195 @@ enum class SourceBuildSourceKind {
     Aur,
 };
 
-// requested packageと実際にcheckoutするPackageBase/sourceを結ぶowned identity。
-// canonical_source_keyはrequested aliasに寄せず、source kind + PackageBaseで安定化する。
-struct ResolvedSourceBuildIdentity {
-    std::string           requested_name;
-    std::string           package_base;
-    std::string           canonical_source_key;
-    std::string           git_url;
-    SourceBuildSourceKind source_kind = SourceBuildSourceKind::Repository;
-    bool                  has_distinct_package_base = false;
+// PackageBaseだけを入力にcanonical key / official checkout URLを構成し、
+// URL leafからPackageBaseを逆算させないclosed source identity。
+class SourceCheckoutIdentity final {
+public:
+    [[nodiscard]] const std::string& package_base() const noexcept {
+        return package_base_;
+    }
+    [[nodiscard]] const std::string& canonical_source_key() const noexcept {
+        return canonical_source_key_;
+    }
+    [[nodiscard]] const std::string& git_url() const noexcept {
+        return git_url_;
+    }
+
+    bool operator==(const SourceCheckoutIdentity&) const = default;
+
+private:
+    SourceCheckoutIdentity(
+            SourceBuildSourceKind source_kind,
+            std::string package_base)
+        : package_base_(std::move(package_base)) {
+        switch(source_kind) {
+        case SourceBuildSourceKind::Repository:
+            canonical_source_key_ = "repository:" + package_base_;
+            git_url_ =
+                    "https://gitlab.archlinux.org/archlinux/packaging/packages/" +
+                    package_base_ + ".git";
+            break;
+        case SourceBuildSourceKind::Aur:
+            canonical_source_key_ = "aur:" + package_base_;
+            git_url_ = "https://aur.archlinux.org/" + package_base_ + ".git";
+            break;
+        }
+    }
+
+    std::string package_base_;
+    std::string canonical_source_key_;
+    std::string git_url_;
+
+    friend class ResolvedRepositorySourceBuildIdentity;
+    friend class ResolvedAurSourceBuildIdentity;
+};
+
+// strict repository exact observationと、それだけから導いたcheckout identityを
+// 同じowned valueへ閉じ込める。requested childとPackageBaseは別fieldで保持する。
+class ResolvedRepositorySourceBuildIdentity final {
+public:
+    explicit ResolvedRepositorySourceBuildIdentity(
+            RepositoryPackagePresent exact_package)
+        : exact_package_(std::move(exact_package)),
+          checkout_(
+                  SourceBuildSourceKind::Repository,
+                  exact_package_.package_base) {
+        if(exact_package_.repository_name.empty()) {
+            throw std::invalid_argument(
+                    "Repository source-build identity has no repository name.");
+        }
+        if(exact_package_.configured_repository_order.has_value()) {
+            const auto& order =
+                    exact_package_.configured_repository_order.value();
+            if(exact_package_.configured_order >= order.size() ||
+               order[exact_package_.configured_order] !=
+                       exact_package_.repository_name) {
+                throw std::invalid_argument(
+                        "Repository source-build identity has inconsistent repository provenance.");
+            }
+        }
+    }
+
+    [[nodiscard]] const RepositoryPackagePresent& exact_package()
+            const noexcept {
+        return exact_package_;
+    }
+    [[nodiscard]] const std::string& requested_child() const noexcept {
+        return exact_package_.package_name;
+    }
+    [[nodiscard]] const std::string& package_base() const noexcept {
+        return exact_package_.package_base;
+    }
+    [[nodiscard]] const SourceCheckoutIdentity& checkout() const noexcept {
+        return checkout_;
+    }
+
+    bool operator==(const ResolvedRepositorySourceBuildIdentity&) const =
+            default;
+
+private:
+    RepositoryPackagePresent exact_package_;
+    SourceCheckoutIdentity   checkout_;
+};
+
+class ResolvedAurSourceBuildIdentity final {
+public:
+    ResolvedAurSourceBuildIdentity(
+            std::string requested_name,
+            std::string package_base)
+        : requested_name_(std::move(requested_name)),
+          checkout_(SourceBuildSourceKind::Aur, std::move(package_base)) {}
+
+    [[nodiscard]] const std::string& requested_name() const noexcept {
+        return requested_name_;
+    }
+    [[nodiscard]] const SourceCheckoutIdentity& checkout() const noexcept {
+        return checkout_;
+    }
+    [[nodiscard]] bool has_distinct_package_base() const noexcept {
+        return requested_name_ != checkout_.package_base();
+    }
+
+    bool operator==(const ResolvedAurSourceBuildIdentity&) const = default;
+
+private:
+    std::string            requested_name_;
+    SourceCheckoutIdentity checkout_;
+};
+
+// Resolver result自体もsource-specific alternativeへ閉じ、source kindと
+// unrelated stringsをcallerが別々に組み立てる余地を持たせない。
+class ResolvedSourceBuildIdentity final {
+public:
+    explicit ResolvedSourceBuildIdentity(
+            ResolvedRepositorySourceBuildIdentity repository)
+        : source_(std::move(repository)) {}
+    explicit ResolvedSourceBuildIdentity(
+            ResolvedAurSourceBuildIdentity aur)
+        : source_(std::move(aur)) {}
+
+    [[nodiscard]] SourceBuildSourceKind source_kind() const noexcept {
+        return std::holds_alternative<ResolvedRepositorySourceBuildIdentity>(
+                       source_)
+                ? SourceBuildSourceKind::Repository
+                : SourceBuildSourceKind::Aur;
+    }
+    [[nodiscard]] const std::string& requested_name() const noexcept {
+        if(const auto* repository = repository_identity();
+           repository != nullptr) {
+            return repository->requested_child();
+        }
+        return std::get<ResolvedAurSourceBuildIdentity>(source_)
+                .requested_name();
+    }
+    [[nodiscard]] const SourceCheckoutIdentity& checkout() const noexcept {
+        if(const auto* repository = repository_identity();
+           repository != nullptr) {
+            return repository->checkout();
+        }
+        return std::get<ResolvedAurSourceBuildIdentity>(source_).checkout();
+    }
+    [[nodiscard]] const std::string& package_base() const noexcept {
+        return checkout().package_base();
+    }
+    [[nodiscard]] const std::string& canonical_source_key() const noexcept {
+        return checkout().canonical_source_key();
+    }
+    [[nodiscard]] const std::string& git_url() const noexcept {
+        return checkout().git_url();
+    }
+    [[nodiscard]] bool has_distinct_package_base() const noexcept {
+        if(const auto* aur =
+                   std::get_if<ResolvedAurSourceBuildIdentity>(&source_);
+           aur != nullptr) {
+            return aur->has_distinct_package_base();
+        }
+        return requested_name() != package_base();
+    }
+    [[nodiscard]] const ResolvedRepositorySourceBuildIdentity*
+    repository_identity() const noexcept {
+        return std::get_if<ResolvedRepositorySourceBuildIdentity>(&source_);
+    }
+
+    bool operator==(const ResolvedSourceBuildIdentity&) const = default;
+
+private:
+    std::variant<
+            ResolvedRepositorySourceBuildIdentity,
+            ResolvedAurSourceBuildIdentity>
+            source_;
+};
+
+enum class RequiredTargetProvenance {
+    Unspecified,
+    RepositoryExactPackageProjection,
+    AurBuildPlanProjection,
+};
+
+enum class ArtifactLifecycleIntent {
+    Unspecified,
+    SingularCompatibility,
+    PackageBaseSet,
 };
 
 // production all-target preflightで確定し、mutation phaseまで保持する1 build unit。
@@ -74,9 +256,14 @@ struct ProductionSourceBuildWorkItem {
     // 利用者が選択したofficial providerを、対応するAUR build unitの
     // execution前dependency transactionまでtyped identityのまま保持する。
     std::vector<ProvidedDependency> selected_repository_providers;
-    // AUR BuildPlanが確定したchild setをPackageBase ownerへ渡す。
-    // falseはofficial/generic/registered-source singular compatibility境界。
-    bool                          is_build_plan_entry = false;
+    // required targetのauthorityとartifact execution selectorを別domainで保持する。
+    RequiredTargetProvenance required_target_provenance =
+            RequiredTargetProvenance::Unspecified;
+    ArtifactLifecycleIntent artifact_lifecycle_intent =
+            ArtifactLifecycleIntent::Unspecified;
+    // repository projectionだけがstrict exact observationを保持する。
+    std::optional<ResolvedRepositorySourceBuildIdentity>
+            repository_identity = std::nullopt;
     bool                          uses_system_update_baseline = false;
     // dependency/provider resolutionが問い合わせたconfiguration snapshot。
     // nulloptはrepository authority未問い合わせを表す。

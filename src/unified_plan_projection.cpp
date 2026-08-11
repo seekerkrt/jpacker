@@ -208,7 +208,8 @@ void append_prepared_source_work(
                         std::cref(work.source()),
                         std::cref(work.requested_package_name()),
                         std::cref(work.checkout_package_base()),
-                        work.is_build_plan_entry(),
+                        work.required_target_provenance(),
+                        work.artifact_lifecycle_intent(),
                         work.uses_system_update_baseline(),
                         std::cref(work.required_targets()));
         observation.build_units.push_back(std::move(build_unit));
@@ -219,7 +220,8 @@ void append_prepared_source_work(
                             std::cref(work.source()),
                             std::cref(work.requested_package_name()),
                             std::cref(work.checkout_package_base()),
-                            work.is_build_plan_entry(),
+                            work.required_target_provenance(),
+                            work.artifact_lifecycle_intent(),
                             work.uses_system_update_baseline(),
                             std::cref(work.required_targets())),
                     std::cref(target));
@@ -636,7 +638,10 @@ const std::vector<std::string>* validate_aur_source_work(
     for(std::size_t index = 0; index < work_items.size(); ++index) {
         const ProductionSourceBuildWorkItem& work_item = work_items[index];
         const BuildPlanEntry& plan_entry = plan.order[index];
-        if(!work_item.is_build_plan_entry ||
+        if(work_item.required_target_provenance !=
+                   RequiredTargetProvenance::AurBuildPlanProjection ||
+           work_item.artifact_lifecycle_intent !=
+                   ArtifactLifecycleIntent::PackageBaseSet ||
            work_item.request.needed != needed ||
            work_item.request.checkout_name != plan_entry.package_base ||
            work_item.required_targets.empty() ||
@@ -675,7 +680,10 @@ const std::vector<std::string>* validate_aur_source_work(
                 success->build_units[index];
         const auto& projected_targets = projected_unit.required_targets;
         if(actual_targets.size() != projected_targets.size() ||
-           !work_item.is_build_plan_entry ||
+           work_item.required_target_provenance !=
+                   RequiredTargetProvenance::AurBuildPlanProjection ||
+           work_item.artifact_lifecycle_intent !=
+                   ArtifactLifecycleIntent::PackageBaseSet ||
            work_item.request.checkout_name != projected_unit.package_base ||
            (actual_targets.size() == 1
                     ? work_item.request.package_name !=
@@ -951,7 +959,8 @@ const std::vector<std::string>* validate_system_source_authority(
                     std::cref(work.source()),
                     std::cref(work.requested_package_name()),
                     std::cref(work.checkout_package_base()),
-                    work.is_build_plan_entry(),
+                    work.required_target_provenance(),
+                    work.artifact_lifecycle_intent(),
                     work.uses_system_update_baseline(),
                     std::cref(work.required_targets()))
                     .has_complete_identity()) {
@@ -1148,7 +1157,11 @@ bool same_registered_source_identity(
                    rhs.canonical_source_identity_key &&
            lhs.resolved_package_base == rhs.resolved_package_base &&
            lhs.preference_load_warnings == rhs.preference_load_warnings &&
-           lhs.source_kind == rhs.source_kind;
+           lhs.source_kind == rhs.source_kind &&
+           lhs.repository_identity == rhs.repository_identity &&
+           lhs.required_target_provenance ==
+                   rhs.required_target_provenance &&
+           lhs.artifact_lifecycle_intent == rhs.artifact_lifecycle_intent;
 }
 
 bool same_system_source_options(
@@ -2503,21 +2516,21 @@ std::unique_ptr<UnifiedPlanProjection> project_sync_install_unified_plan(
                                 reject_inconsistent_input(
                                         "Prepared sync repository source root lost its typed work correlation.");
                             }
-                            if(root.source.source_kind !=
+                            if(root.source.source_kind() !=
                                        SourceBuildSourceKind::Repository ||
-                               root.source.requested_name !=
+                               root.source.requested_name() !=
                                        package.package_name ||
-                               root.source.package_base.empty() ||
-                               root.source.canonical_source_key.empty()) {
+                               root.source.package_base().empty() ||
+                               root.source.canonical_source_key().empty()) {
                                 reject_inconsistent_input(
                                         "Prepared sync repository source identity is inconsistent.");
                             }
                             observation.roots.emplace_back(
                                     root.invocation_correlation,
                                     RepositorySourceBuildRootIdentity{
-                                            root.source.requested_name,
-                                            root.source.package_base,
-                                            root.source.canonical_source_key},
+                                            root.source.requested_name(),
+                                            root.source.package_base(),
+                                            root.source.canonical_source_key()},
                                     UnifiedPlanRootRouteKind::
                                             RepositorySourceBuild);
                             repository_source_roots.push_back(&root);
@@ -2607,7 +2620,12 @@ std::unique_ptr<UnifiedPlanProjection> project_sync_install_unified_plan(
                     root->source_work_item_index.value();
             const ProductionSourceBuildWorkItem* matched =
                     &work_items[matched_index];
-            if(observed_work[matched_index] || matched->is_build_plan_entry) {
+            if(observed_work[matched_index] ||
+               matched->required_target_provenance !=
+                       RequiredTargetProvenance::
+                               RepositoryExactPackageProjection ||
+               matched->artifact_lifecycle_intent !=
+                       ArtifactLifecycleIntent::SingularCompatibility) {
                 reject_inconsistent_input(
                         "Prepared sync repository source work correlation is inconsistent.");
             }
@@ -2653,7 +2671,11 @@ std::unique_ptr<UnifiedPlanProjection> project_sync_install_unified_plan(
                 for(std::size_t index = 0; index < work_items.size(); ++index) {
                     const ProductionSourceBuildWorkItem& work =
                             work_items[index];
-                    if(!work.is_build_plan_entry ||
+                    if(work.required_target_provenance !=
+                               RequiredTargetProvenance::
+                                       AurBuildPlanProjection ||
+                       work.artifact_lifecycle_intent !=
+                               ArtifactLifecycleIntent::PackageBaseSet ||
                        work.request.checkout_name != unit.package_base) {
                         continue;
                     }
@@ -2784,9 +2806,9 @@ project_remote_source_build_unified_plan(
                const RemoteSourceBuildPlanFailure>>(&input.source);
        blocked != nullptr) {
         const RemoteSourceBuildPlanFailure& failure = blocked->get();
-        if(failure.source.source_kind != SourceBuildSourceKind::Aur ||
-           failure.source.requested_name.empty() ||
-           failure.source.package_base.empty()) {
+        if(failure.source.source_kind() != SourceBuildSourceKind::Aur ||
+           failure.source.requested_name().empty() ||
+           failure.source.package_base().empty()) {
             reject_inconsistent_input(
                     "Remote source-build failure lacks AUR identity.");
         }
@@ -2806,15 +2828,15 @@ project_remote_source_build_unified_plan(
             reject_inconsistent_input(
                     "Remote source-build failure has no typed BuildPlan blocker.");
         }
-        RootTargetIdentity correlation{0, failure.source.requested_name};
+        RootTargetIdentity correlation{0, failure.source.requested_name()};
         if(!failure.plan.root_targets.empty()) {
             correlation = failure.plan.root_targets.front();
         }
         observation.roots.emplace_back(
                 std::move(correlation),
                 AurRootPackageIdentity{
-                        failure.source.requested_name,
-                        failure.source.package_base},
+                        failure.source.requested_name(),
+                        failure.source.package_base()},
                 UnifiedPlanRootRouteKind::AurSourceBuild);
         observation.root_metadata.push_back(
                 UnifiedPlanBorrowedAuthorityReference<
@@ -2857,7 +2879,7 @@ project_remote_source_build_unified_plan(
             : nullptr;
     RepositoryPackageTransactionIntent repository_transaction;
     bool has_repository_metadata = false;
-    if(prepared.source.source_kind == SourceBuildSourceKind::Aur) {
+    if(prepared.source.source_kind() == SourceBuildSourceKind::Aur) {
         if(plan == nullptr || plan->root_targets.size() != 1) {
             reject_inconsistent_input(
                     "Prepared AUR source build lacks its invocation BuildPlan.");
@@ -2865,8 +2887,8 @@ project_remote_source_build_unified_plan(
         const PlannedPackageTarget& root = require_plan_root_target(
                 *plan, 0,
                 "Prepared AUR source-build root identity is inconsistent.");
-        if(root.package_name != prepared.source.requested_name ||
-           root.package_base != prepared.source.package_base) {
+        if(root.package_name != prepared.source.requested_name() ||
+           root.package_base != prepared.source.package_base()) {
             reject_inconsistent_input(
                     "Prepared AUR source-build identity differs from its BuildPlan.");
         }
@@ -2891,8 +2913,8 @@ project_remote_source_build_unified_plan(
         observation.roots.emplace_back(
                 plan->root_targets.front(),
                 AurRootPackageIdentity{
-                        prepared.source.requested_name,
-                        prepared.source.package_base},
+                        prepared.source.requested_name(),
+                        prepared.source.package_base()},
                 UnifiedPlanRootRouteKind::AurSourceBuild);
     } else {
         if(plan != nullptr) {
@@ -2914,11 +2936,11 @@ project_remote_source_build_unified_plan(
                                     ProvidedDependency>(provider)});
         }
         observation.roots.emplace_back(
-                RootTargetIdentity{0, prepared.source.requested_name},
+                RootTargetIdentity{0, prepared.source.requested_name()},
                 RepositorySourceBuildRootIdentity{
-                        prepared.source.requested_name,
-                        prepared.source.package_base,
-                        prepared.source.canonical_source_key},
+                        prepared.source.requested_name(),
+                        prepared.source.package_base(),
+                        prepared.source.canonical_source_key()},
                 UnifiedPlanRootRouteKind::RepositorySourceBuild);
         has_repository_metadata = true;
     }

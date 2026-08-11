@@ -19,6 +19,7 @@ static_assert(!std::is_pointer_v<decltype(InstalledExactPackage::package_name)>)
 static_assert(!std::is_pointer_v<decltype(InstalledExactPackage::observed_version)>);
 static_assert(!std::is_pointer_v<decltype(RepositoryExactPackage::repository)>);
 static_assert(!std::is_pointer_v<decltype(RepositoryExactPackage::package_name)>);
+static_assert(!std::is_pointer_v<decltype(RepositoryExactPackage::package_base)>);
 static_assert(!std::is_pointer_v<decltype(RepositoryExactPackage::package_version)>);
 static_assert(!std::is_pointer_v<decltype(RepositoryExactPackage::provides)>);
 
@@ -181,15 +182,45 @@ void test_repository_exact_packages_retain_order_and_provenance() {
     expect(
             core.repository == ConfiguredRepositoryIdentity{"core", 0} &&
                     core.package_name == "shared-package" &&
+                    core.package_base == "shared-package" &&
                     core.package_version.version() != nullptr &&
                     *core.package_version.version() == "3.0-1",
             "First repository exact package identity/version differs");
     expect(
             extra.repository == ConfiguredRepositoryIdentity{"extra", 1} &&
                     extra.package_name == "shared-package" &&
+                    extra.package_base == "shared-package" &&
                     extra.package_version.version() != nullptr &&
                     *extra.package_version.version() == "2.0-2",
             "Second repository exact package identity/version differs");
+}
+
+void test_repository_split_package_base_is_lossless() {
+    stub::reset_alpm_stub();
+    stub::set_repository_package_metadata(
+            "core", "suite-child", 10, 20);
+    stub::set_repository_package_version(
+            "core", "suite-child", "4.0-1");
+    stub::set_repository_package_base(
+            "core", "suite-child", "suite");
+    PacmanRepositoryConfiguration configuration =
+            repository_configuration({"core"});
+
+    const RepositoryExactPackageObservation& observation =
+            require_repository_observation(
+                    observe_repository_exact_package(
+                            configuration, "suite-child"),
+                    "repository split PackageBase projection");
+    const RepositoryExactPackage& package =
+            require_alternative<RepositoryExactPackage>(
+                    observation.source_results.front(),
+                    "repository split exact package");
+    expect(
+            package.package_name == "suite-child" &&
+                    package.package_base == "suite" &&
+                    package.package_version.version() != nullptr &&
+                    *package.package_version.version() == "4.0-1",
+            "Repository constraint projection flattened split PackageBase");
 }
 
 void test_repository_confirmed_absence() {
@@ -603,6 +634,7 @@ int main() {
         test_installed_absence_and_query_failure_are_distinct();
         test_installed_missing_and_invalid_versions_are_typed();
         test_repository_exact_packages_retain_order_and_provenance();
+        test_repository_split_package_base_is_lossless();
         test_repository_confirmed_absence();
         test_partial_repository_failure_is_not_absence();
         test_repository_open_failures_are_source_local();
