@@ -3304,10 +3304,12 @@ test-pacman-routing: $(TEST_TARGET)
 test-build-cache-symlink: $(AUR_RPC_VALIDATION_TEST_TARGET)
 	sh tests/test-build-cache-symlink.sh $(abspath $(AUR_RPC_VALIDATION_TEST_TARGET))
 
-test-source-build: $(TEST_TARGET) $(APP_CONFIG_INTEGRATION_TEST_TARGET) $(UPGRADE_BASELINE_METADATA_TEST_TARGET)
+# POLICY(#406): source-build characterization keeps every production TU while
+# strict repository discovery reads a case-local libalpm snapshot.
+test-source-build: $(AUR_RPC_VALIDATION_TEST_TARGET) $(UPGRADE_BASELINE_METADATA_TEST_TARGET)
 	sh tests/test-source-build.sh \
-		$(abspath $(TEST_TARGET)) \
-		$(abspath $(APP_CONFIG_INTEGRATION_TEST_TARGET)) \
+		$(abspath $(AUR_RPC_VALIDATION_TEST_TARGET)) \
+		$(abspath $(UPGRADE_BASELINE_METADATA_TEST_TARGET)) \
 		$(abspath $(UPGRADE_BASELINE_METADATA_TEST_TARGET))
 
 # POLICY(#352): source-selection CLI characterization keeps every production TU
