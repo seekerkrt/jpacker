@@ -4,6 +4,11 @@ set -eu
 
 repo_root=$(CDPATH='' cd "$(dirname "$0")/.." && pwd)
 . "$repo_root/scripts/validation-status.sh"
+current_package_fixture=$repo_root/tests/fixtures/current-package
+current_package_contract=$current_package_fixture/contract.env
+runtime_dependency_authority=$current_package_fixture/runtime-dependencies.txt
+build_dependency_authority=$current_package_fixture/build-dependencies.txt
+install_payload_authority=$current_package_fixture/install-payload.txt
 tmp_dir=$(mktemp -d)
 
 cleanup() {
@@ -15,6 +20,19 @@ fail() {
     printf 'package-transition-test: %s\n' "$*" >&2
     exit 1
 }
+
+for authority_file in \
+    "$current_package_contract" \
+    "$runtime_dependency_authority" \
+    "$build_dependency_authority" \
+    "$install_payload_authority"
+do
+    [ -f "$authority_file" ] && [ ! -L "$authority_file" ] &&
+        [ -s "$authority_file" ] ||
+        fail "current package authority must be a non-empty regular non-symlink: $authority_file"
+done
+# shellcheck source=fixtures/current-package/contract.env
+. "$current_package_contract"
 
 sha256_file() {
     if checksum_output=$(sha256sum -- "$1"); then
@@ -449,6 +467,11 @@ if [ -n "$current_source_archive_input" ]; then
     assert_source_archive_input current "$current_source_archive_input"
 fi
 
+[ -f "$repo_root/VERSION" ] && [ ! -L "$repo_root/VERSION" ] ||
+    fail 'current VERSION must be a regular non-symlink'
+current_version=$(tr -d '[:space:]' <"$repo_root/VERSION")
+[ -n "$current_version" ] || fail 'current VERSION is empty'
+
 v1_source=$tmp_dir/jpacker-v1.16.0-source
 v1_makepkg_work=$tmp_dir/jpacker-v1.16.0-makepkg
 v1_package_destination=$tmp_dir/jpacker-v1.16.0-packages
@@ -457,20 +480,16 @@ v1_manifest=$tmp_dir/jpacker-v1.16.0-files.txt
 v1_directory_manifest=$tmp_dir/jpacker-v1.16.0-directories.txt
 v1_removable_manifest=$tmp_dir/jpacker-v1.16.0-removable-files.txt
 
-v2_source=$tmp_dir/moguet-v2.2.0-source
-v2_source_manifest=$tmp_dir/moguet-v2.2.0-source-files.txt
-v2_makepkg_work=$tmp_dir/moguet-v2.2.0-makepkg
-v2_package_destination=$tmp_dir/moguet-v2.2.0-packages
-v2_archive_root=$tmp_dir/moguet-v2.2.0-archive-root
-v2_manifest=$tmp_dir/moguet-v2.2.0-files.txt
-v2_directory_manifest=$tmp_dir/moguet-v2.2.0-directories.txt
+v2_source=$tmp_dir/$PACKAGE_NAME-v$current_version-source
+v2_source_manifest=$tmp_dir/$PACKAGE_NAME-v$current_version-source-files.txt
+v2_makepkg_work=$tmp_dir/$PACKAGE_NAME-v$current_version-makepkg
+v2_package_destination=$tmp_dir/$PACKAGE_NAME-v$current_version-packages
+v2_archive_root=$tmp_dir/$PACKAGE_NAME-v$current_version-archive-root
+v2_manifest=$tmp_dir/$PACKAGE_NAME-v$current_version-files.txt
+v2_directory_manifest=$tmp_dir/$PACKAGE_NAME-v$current_version-directories.txt
 
 coinstall_root=$tmp_dir/coinstall-root
 transition_root=$tmp_dir/transition-root
-
-current_version=$(tr -d '[:space:]' <"$repo_root/VERSION")
-[ "$current_version" = 2.2.0 ] ||
-    fail "current VERSION is $current_version; expected 2.2.0"
 
 if [ -n "$legacy_source_archive_input" ]; then
     v1_source_archive=$legacy_source_archive_input
@@ -510,7 +529,7 @@ else
     fi
     if while IFS= read -r source_path; do
             case "$source_path" in
-                .git|.git/*|build|build/*|moguet|*.pkg.tar.*|*.src.tar.*)
+                .git|.git/*|build|build/*|"$COMMAND_NAME"|*.pkg.tar.*|*.src.tar.*)
                     continue
                     ;;
             esac
@@ -533,7 +552,7 @@ fi
 
 assert_absent "$v2_source/.git"
 assert_absent "$v2_source/build"
-assert_absent "$v2_source/moguet"
+assert_absent "$v2_source/$COMMAND_NAME"
 assert_absent "$v2_source/config/jpacker.conf"
 cmp -s "$repo_root/tests/test-package-transition.sh" \
     "$v2_source/tests/test-package-transition.sh" ||
@@ -542,11 +561,14 @@ first_package_artifact=$(find "$v2_source" -type f \
     \( -name '*.pkg.tar.*' -o -name '*.src.tar.*' \) -print -quit)
 [ -z "$first_package_artifact" ] ||
     fail "source fixture contains package artifact $first_package_artifact"
+v2_source_version=$(tr -d '[:space:]' < "$v2_source/VERSION")
+[ "$v2_source_version" = "$current_version" ] ||
+    fail "current source VERSION is $v2_source_version; expected $current_version"
 
-initialize_fixture_repository "$v2_source" v2.2.0
+initialize_fixture_repository "$v2_source" "v$current_version"
 prepare_test_pkgbuild "$repo_root/PKGBUILD" "$v2_source" \
     "$v2_makepkg_work" \
-    'git+https://github.com/seekerkrt/moguet.git'
+    "git+$PROJECT_REPOSITORY_URL.git"
 
 mkdir -p \
     "$v1_package_destination" \
@@ -562,7 +584,7 @@ run_logged 'jpacker v1.16.0 clean package build' "$tmp_dir/v1-makepkg.log" \
         "$tmp_dir/v1-source-packages" \
         "$tmp_dir/v1-logs" \
         "$tmp_dir/v1-xdg-cache"
-run_logged 'Moguet v2.2.0 clean package build' "$tmp_dir/v2-makepkg.log" \
+run_logged "$PROJECT_NAME v$current_version clean package build" "$tmp_dir/v2-makepkg.log" \
     run_makepkg_fixture \
         "$v2_makepkg_work" \
         "$tmp_dir/v2-build" \
@@ -573,7 +595,8 @@ run_logged 'Moguet v2.2.0 clean package build' "$tmp_dir/v2-makepkg.log" \
         "$tmp_dir/v2-xdg-cache"
 
 v1_package_archive=$v1_package_destination/jpacker-1.16.0-1-x86_64.pkg.tar.zst
-v2_package_archive=$v2_package_destination/moguet-2.2.0-1-x86_64.pkg.tar.zst
+v2_package_archive=$v2_package_destination/$PACKAGE_NAME-$current_version-
+v2_package_archive=$v2_package_archive$PACKAGE_RELEASE-$PACKAGE_ARCHITECTURE.pkg.tar.zst
 [ -f "$v1_package_archive" ] ||
     fail "expected package archive is missing: $v1_package_archive"
 [ -f "$v2_package_archive" ] ||
@@ -604,10 +627,10 @@ assert_metadata_single "$tmp_dir/v1.PKGINFO" license GPL-3.0-or-later
 assert_metadata_single "$tmp_dir/v1.PKGINFO" backup \
     etc/jpacker/jpacker.conf
 
-assert_metadata_single "$tmp_dir/v2.PKGINFO" pkgname moguet
-assert_metadata_single "$tmp_dir/v2.PKGINFO" pkgver 2.2.0-1
-assert_metadata_single "$tmp_dir/v2.PKGINFO" arch x86_64
-assert_metadata_single "$tmp_dir/v2.PKGINFO" license GPL-3.0-or-later
+assert_metadata_single "$tmp_dir/v2.PKGINFO" pkgname "$PACKAGE_NAME"
+assert_metadata_single "$tmp_dir/v2.PKGINFO" pkgver "$current_version-$PACKAGE_RELEASE"
+assert_metadata_single "$tmp_dir/v2.PKGINFO" arch "$PACKAGE_ARCHITECTURE"
+assert_metadata_single "$tmp_dir/v2.PKGINFO" license "$PACKAGE_LICENSE"
 for transition_key in backup conflict conflicts provides replaces
 do
     assert_metadata_absent "$tmp_dir/v2.PKGINFO" "$transition_key"
@@ -658,26 +681,29 @@ else
     sort_status=$?
     fail "dependency sorting failed with status $sort_status"
 fi
-expected_dependencies='curl
-git
-libalpm.so
-libarchive
-nano
-pacman
-sudo'
+if expected_dependencies=$(cat "$runtime_dependency_authority"); then
+    :
+else
+    dependency_status=$?
+    fail "runtime dependency authority read failed with status $dependency_status"
+fi
 [ "$normalized_dependencies" = "$expected_dependencies" ] || {
     printf 'package-transition-test: depend mismatch\nexpected:\n%s\nactual:\n%s\n' \
         "$expected_dependencies" "$normalized_dependencies" >&2
     exit 1
 }
-expected_makedepends='nlohmann-json
-tomlplusplus'
+if expected_makedepends=$(cat "$build_dependency_authority"); then
+    :
+else
+    dependency_status=$?
+    fail "build dependency authority read failed with status $dependency_status"
+fi
 assert_metadata_set "$tmp_dir/v2.PKGINFO" makedepend "$expected_makedepends"
 
 assert_archive_layout "$v1_package_archive" \
     "$tmp_dir/v1-archive-listing.txt" usr/bin/jpacker
 assert_archive_layout "$v2_package_archive" \
-    "$tmp_dir/v2-archive-listing.txt" usr/bin/moguet
+    "$tmp_dir/v2-archive-listing.txt" "usr/bin/$COMMAND_NAME"
 bsdtar -xf "$v1_package_archive" -C "$v1_archive_root"
 bsdtar -xf "$v2_package_archive" -C "$v2_archive_root"
 assert_no_symlinks "$v1_archive_root"
@@ -687,34 +713,24 @@ write_directory_manifest "$v1_archive_root" "$v1_directory_manifest"
 write_regular_manifest "$v2_archive_root" "$v2_manifest"
 write_directory_manifest "$v2_archive_root" "$v2_directory_manifest"
 
-expected_v2_payload='./usr/bin/moguet
-./usr/share/bash-completion/completions/moguet
-./usr/share/doc/moguet/README.ja.md
-./usr/share/doc/moguet/README.md
-./usr/share/doc/moguet/THIRD_PARTY_NOTICES.md
-./usr/share/doc/moguet/docs/LICENSING.md
-./usr/share/doc/moguet/docs/migration/v1-to-v2.ja.md
-./usr/share/doc/moguet/docs/migration/v1-to-v2.md
-./usr/share/fish/vendor_completions.d/moguet.fish
-./usr/share/licenses/moguet/LICENSE
-./usr/share/licenses/moguet/bjoern-hoehrmann-utf8-MIT.txt
-./usr/share/licenses/moguet/curl.txt
-./usr/share/licenses/moguet/jpacker-MIT-legacy.txt
-./usr/share/licenses/moguet/nlohmann-json-MIT.txt
-./usr/share/licenses/moguet/tomlplusplus-MIT.txt
-./usr/share/locale/ja/LC_MESSAGES/moguet.mo
-./usr/share/man/ja/man1/moguet.1.gz
-./usr/share/man/man1/moguet.1.gz
-./usr/share/zsh/site-functions/_moguet'
-[ "$(cat "$v2_manifest")" = "$expected_v2_payload" ] || {
+expected_v2_payload=$tmp_dir/expected-v2-package-payload.txt
+if sed -e 's|^/|./|' -e '/\/share\/man\// s/\.1$/.1.gz/' \
+    "$install_payload_authority" >"$expected_v2_payload"; then
+    :
+else
+    payload_status=$?
+    fail "archive payload projection failed with status $payload_status"
+fi
+if ! cmp -s "$expected_v2_payload" "$v2_manifest"; then
     printf 'package-transition-test: package payload mismatch:\n%s\n' \
         "$(cat "$v2_manifest")" >&2
     exit 1
-}
+fi
 
-archive_binary_mode=$(stat -c '%a' "$v2_archive_root/usr/bin/moguet")
+archive_binary=$v2_archive_root/usr/bin/$COMMAND_NAME
+archive_binary_mode=$(stat -c '%a' "$archive_binary")
 [ "$archive_binary_mode" = 755 ] ||
-    fail "archived Moguet binary mode is $archive_binary_mode; expected 755"
+    fail "archived $PROJECT_NAME binary mode is $archive_binary_mode; expected 755"
 archive_home=$tmp_dir/archive-home
 archive_config_home=$tmp_dir/archive-xdg/config
 archive_state_home=$tmp_dir/archive-xdg/state
@@ -724,9 +740,9 @@ archive_version=$(LC_ALL=C \
     XDG_CONFIG_HOME="$archive_config_home" \
     XDG_STATE_HOME="$archive_state_home" \
     XDG_CACHE_HOME="$archive_cache_home" \
-    "$v2_archive_root/usr/bin/moguet" --version)
-[ "$archive_version" = 'Moguet v2.2.0' ] ||
-    fail "archived Moguet version mismatch: $archive_version"
+    "$archive_binary" --version)
+[ "$archive_version" = "$PROJECT_NAME v$current_version" ] ||
+    fail "archived $PROJECT_NAME version mismatch: $archive_version"
 assert_absent "$archive_config_home"
 assert_absent "$archive_state_home"
 assert_absent "$archive_cache_home"
@@ -770,15 +786,15 @@ bsdtar -xf "$v1_package_archive" -C "$coinstall_root" etc usr
 modified_legacy_config='NOEDIT=true
 NODIFF=true'
 legacy_preference='CFLAGS=-O3 -march=native'
-coinstall_config_dir=$coinstall_root/user-home/.config/moguet
+coinstall_config_dir=$coinstall_root/user-home/.config/$XDG_IDENTITY
 coinstall_source_preference_dir=$coinstall_config_dir/source-build.d
 coinstall_source_preference=$coinstall_source_preference_dir/fastfetch
 mkdir -p \
     "$coinstall_root/etc/jpacker/package.build" \
     "$coinstall_config_dir" \
-    "$coinstall_root/user-home/.local/state/moguet" \
-    "$coinstall_root/user-home/.cache/moguet" \
-    "$coinstall_root/usr/share/doc/moguet" \
+    "$coinstall_root/user-home/.local/state/$XDG_IDENTITY" \
+    "$coinstall_root/user-home/.cache/$XDG_IDENTITY" \
+    "$coinstall_root/usr/share/doc/$PACKAGE_NAME" \
     "$coinstall_root/usr/share/locale/ja/LC_MESSAGES"
 printf '%s\n' "$modified_legacy_config" \
     >"$coinstall_root/etc/jpacker/jpacker.conf"
@@ -792,11 +808,11 @@ install -d -m700 "$coinstall_source_preference_dir"
 install -m600 /dev/null "$coinstall_source_preference"
 printf '%s\n' 'CFLAGS=-O2 -pipe' >"$coinstall_source_preference"
 printf '%s\n' 'persistent state' \
-    >"$coinstall_root/user-home/.local/state/moguet/state.keep"
+    >"$coinstall_root/user-home/.local/state/$XDG_IDENTITY/state.keep"
 printf '%s\n' 'reproducible cache fixture' \
-    >"$coinstall_root/user-home/.cache/moguet/cache.keep"
+    >"$coinstall_root/user-home/.cache/$XDG_IDENTITY/cache.keep"
 printf '%s\n' 'foreign documentation' \
-    >"$coinstall_root/usr/share/doc/moguet/foreign-file.keep"
+    >"$coinstall_root/usr/share/doc/$PACKAGE_NAME/foreign-file.keep"
 printf '%s\n' 'foreign locale catalog' \
     >"$coinstall_root/usr/share/locale/ja/LC_MESSAGES/foreign-domain.mo"
 
@@ -833,14 +849,14 @@ assert_mode "$coinstall_source_preference" 600
 # config becomes .pacsave, while runtime-managed and foreign legacy data stays.
 mkdir -p "$transition_root"
 bsdtar -xf "$v1_package_archive" -C "$transition_root" etc usr
-transition_config_dir=$transition_root/user-home/.config/moguet
+transition_config_dir=$transition_root/user-home/.config/$XDG_IDENTITY
 transition_source_preference_dir=$transition_config_dir/source-build.d
 transition_source_preference=$transition_source_preference_dir/fastfetch
 mkdir -p \
     "$transition_root/etc/jpacker/package.build" \
     "$transition_config_dir" \
-    "$transition_root/user-home/.local/state/moguet" \
-    "$transition_root/user-home/.cache/moguet"
+    "$transition_root/user-home/.local/state/$XDG_IDENTITY" \
+    "$transition_root/user-home/.cache/$XDG_IDENTITY"
 printf '%s\n' "$modified_legacy_config" \
     >"$transition_root/etc/jpacker/jpacker.conf"
 printf '%s\n' "$legacy_preference" \
@@ -853,9 +869,9 @@ install -d -m700 "$transition_source_preference_dir"
 install -m600 /dev/null "$transition_source_preference"
 printf '%s\n' 'CFLAGS=-O2 -pipe' >"$transition_source_preference"
 printf '%s\n' 'persistent transition state' \
-    >"$transition_root/user-home/.local/state/moguet/state.keep"
+    >"$transition_root/user-home/.local/state/$XDG_IDENTITY/state.keep"
 printf '%s\n' 'transition cache fixture' \
-    >"$transition_root/user-home/.cache/moguet/cache.keep"
+    >"$transition_root/user-home/.cache/$XDG_IDENTITY/cache.keep"
 
 expected_legacy_after_removal=$tmp_dir/expected-legacy-after-removal
 mkdir -p "$expected_legacy_after_removal"
@@ -930,9 +946,20 @@ rollback_version=$(LC_ALL=C \
     sha256sum -c "$tmp_dir/v2-package.sha256" >/dev/null) ||
     fail 'v2 package archive changed during transition validation'
 
+if v2_payload_count=$(wc -l <"$v2_manifest"); then
+    :
+else
+    payload_count_status=$?
+    fail "verified payload count failed with status $payload_count_status"
+fi
+case "$v2_payload_count" in
+    ''|*[!0-9]*) fail "verified payload count is invalid: $v2_payload_count" ;;
+esac
+
 printf 'package-transition-test: actual v1/v2 package archives have 0 path conflicts\n'
 printf 'package-transition-test: v2 .PKGINFO identity/dependencies and transition metadata passed\n'
 printf 'package-transition-test: archive owners, modes, and entry types passed\n'
-printf 'package-transition-test: Moguet archive payload (19 regular files):\n'
+printf 'package-transition-test: %s archive payload (%s regular files):\n' \
+    "$PROJECT_NAME" "$v2_payload_count"
 sed 's|^\./|/|' "$v2_manifest"
 printf 'package-transition-test: all checks passed\n'

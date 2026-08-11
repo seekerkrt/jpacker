@@ -1,0 +1,7 @@
+# path	type	mode	sha256
+usr/	directory	0755	-
+usr/bin/	directory	0755	-
+usr/bin/validator-fixture	regular	0755	-
+usr/share/	directory	0755	-
+usr/share/validator-fixture/	directory	0755	-
+usr/share/validator-fixture/marker	regular	0644	d6a011b4fe3170d82202e9d52c3df3b1dcc354a2c634256501b13c144119289d

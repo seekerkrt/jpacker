@@ -4,6 +4,11 @@ set -eu
 
 repo_root=$(CDPATH='' cd "$(dirname "$0")/.." && pwd)
 . "$repo_root/scripts/validation-status.sh"
+current_package_fixture=$repo_root/tests/fixtures/current-package
+current_package_contract=$current_package_fixture/contract.env
+runtime_dependency_authority=$current_package_fixture/runtime-dependencies.txt
+build_dependency_authority=$current_package_fixture/build-dependencies.txt
+install_payload_authority=$current_package_fixture/install-payload.txt
 tmp_dir=$(mktemp -d)
 srcinfo_file=$tmp_dir/.SRCINFO
 stage_root=$tmp_dir/stage
@@ -19,6 +24,24 @@ fail() {
     printf 'packaging-metadata-check: %s\n' "$*" >&2
     exit 1
 }
+
+for authority_file in \
+    "$current_package_contract" \
+    "$runtime_dependency_authority" \
+    "$build_dependency_authority" \
+    "$install_payload_authority"
+do
+    [ -f "$authority_file" ] && [ ! -L "$authority_file" ] &&
+        [ -s "$authority_file" ] ||
+        fail "current package authority must be a non-empty regular non-symlink: $authority_file"
+done
+# shellcheck source=../tests/fixtures/current-package/contract.env
+. "$current_package_contract"
+
+[ -f "$repo_root/VERSION" ] && [ ! -L "$repo_root/VERSION" ] ||
+    fail 'VERSION must be a regular non-symlink'
+current_version=$(tr -d '[:space:]' < "$repo_root/VERSION")
+[ -n "$current_version" ] || fail 'VERSION is empty'
 
 srcinfo_values() {
     key=$1
@@ -64,27 +87,30 @@ assert_value_set() {
     makepkg --printsrcinfo
 ) > "$srcinfo_file"
 
-assert_single_value pkgbase moguet
-assert_single_value pkgname moguet
-assert_single_value pkgver 2.2.0
-assert_single_value pkgrel 1
-assert_single_value arch x86_64
-assert_single_value license GPL-3.0-or-later
+assert_single_value pkgbase "$PACKAGE_BASE"
+assert_single_value pkgname "$PACKAGE_NAME"
+assert_single_value pkgver "$current_version"
+assert_single_value pkgrel "$PACKAGE_RELEASE"
+assert_single_value arch "$PACKAGE_ARCHITECTURE"
+assert_single_value license "$PACKAGE_LICENSE"
 assert_single_value source \
-    'moguet-src::git+https://github.com/seekerkrt/moguet.git#tag=v2.2.0'
+    "$PACKAGE_SOURCE_NAME::git+$PROJECT_REPOSITORY_URL.git#tag=v$current_version"
 assert_single_value sha256sums SKIP
 
-expected_depends='curl
-git
-libalpm.so
-libarchive
-nano
-pacman
-sudo'
+if expected_depends=$(cat "$runtime_dependency_authority"); then
+    :
+else
+    producer_status=$?
+    fail "runtime dependency authority read failed with status $producer_status"
+fi
 assert_value_set depends "$expected_depends"
 
-expected_makedepends='nlohmann-json
-tomlplusplus'
+if expected_makedepends=$(cat "$build_dependency_authority"); then
+    :
+else
+    producer_status=$?
+    fail "build dependency authority read failed with status $producer_status"
+fi
 assert_value_set makedepends "$expected_makedepends"
 
 # No system or user configuration belongs to the package. The disjoint v1/v2
@@ -95,8 +121,8 @@ assert_no_values replaces
 assert_no_values provides
 assert_no_values optdepends
 
-for build_only_dependency in nlohmann-json tomlplusplus
-do
+while IFS= read -r build_only_dependency; do
+    [ -n "$build_only_dependency" ] || continue
     depends_values=$tmp_dir/srcinfo-depends.values
     validation_capture_output "$depends_values" srcinfo_values depends ||
         fail "depends producer failed with status $?"
@@ -110,7 +136,7 @@ do
         1) ;;
         *) fail "depends inspection failed with status $dependency_status" ;;
     esac
-done
+done <"$build_dependency_authority"
 
 for forbidden_tomlplusplus_flag in \
     -ltomlplusplus \
@@ -125,7 +151,7 @@ done
 # Evaluate the actual package() function against the current source tree. A
 # clean archive build uses an isolated local-tag fixture in the package
 # transition test because the public v2.0.0 tag belongs to the later cutover.
-ln -s "$repo_root" "$package_work/moguet-src"
+ln -s "$repo_root" "$package_work/$PACKAGE_SOURCE_NAME"
 ln -s "$repo_root/VERSION" "$package_work/VERSION"
 bash -c '
     set -eu
@@ -138,25 +164,12 @@ bash -c '
     package
 ' bash "$package_work" "$stage_root" "$repo_root/PKGBUILD" >/dev/null
 
-expected_payload='/usr/bin/moguet
-/usr/share/bash-completion/completions/moguet
-/usr/share/doc/moguet/README.ja.md
-/usr/share/doc/moguet/README.md
-/usr/share/doc/moguet/THIRD_PARTY_NOTICES.md
-/usr/share/doc/moguet/docs/LICENSING.md
-/usr/share/doc/moguet/docs/migration/v1-to-v2.ja.md
-/usr/share/doc/moguet/docs/migration/v1-to-v2.md
-/usr/share/fish/vendor_completions.d/moguet.fish
-/usr/share/licenses/moguet/LICENSE
-/usr/share/licenses/moguet/bjoern-hoehrmann-utf8-MIT.txt
-/usr/share/licenses/moguet/curl.txt
-/usr/share/licenses/moguet/jpacker-MIT-legacy.txt
-/usr/share/licenses/moguet/nlohmann-json-MIT.txt
-/usr/share/licenses/moguet/tomlplusplus-MIT.txt
-/usr/share/locale/ja/LC_MESSAGES/moguet.mo
-/usr/share/man/ja/man1/moguet.1
-/usr/share/man/man1/moguet.1
-/usr/share/zsh/site-functions/_moguet'
+if expected_payload=$(cat "$install_payload_authority"); then
+    :
+else
+    producer_status=$?
+    fail "install payload authority read failed with status $producer_status"
+fi
 payload_paths_raw=$tmp_dir/payload-paths.raw
 payload_paths_stripped=$tmp_dir/payload-paths.stripped
 payload_paths_sorted=$tmp_dir/payload-paths.sorted
@@ -194,7 +207,7 @@ command -v readelf >/dev/null 2>&1 ||
 readelf_raw=$tmp_dir/readelf.dynamic.raw
 needed_file=$tmp_dir/readelf.needed
 if validation_capture_output "$readelf_raw" \
-    readelf -d "$stage_root/usr/bin/moguet"; then
+    readelf -d "$stage_root/usr/bin/$COMMAND_NAME"; then
     :
 else
     producer_status=$?
@@ -208,9 +221,9 @@ else
     fail "readelf dependency normalization failed with status $producer_status"
 fi
 grep -Eq '^libcurl\.so(\.|$)' "$needed_file" ||
-    fail "moguet ELF is missing the direct libcurl runtime dependency."
+    fail "$COMMAND_NAME ELF is missing the direct libcurl runtime dependency."
 grep -Eq '^libalpm\.so(\.|$)' "$needed_file" ||
-    fail "moguet ELF is missing the direct libalpm runtime dependency."
+    fail "$COMMAND_NAME ELF is missing the direct libalpm runtime dependency."
 if grep -Eq '^libintl\.so(\.|$)' "$needed_file"; then
     fail "gettext unexpectedly became a linked runtime dependency."
 else

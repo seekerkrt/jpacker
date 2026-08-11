@@ -9,18 +9,20 @@ export LANGUAGE=en
 repo_root=$(CDPATH='' cd "$(dirname "$0")/../.." && pwd)
 . "$repo_root/scripts/validation-status.sh"
 case_policy=$repo_root/containers/arch-live-validation/aur-cases.tsv
-payload_policy=$repo_root/containers/arch-live-validation/fixtures/aur/fetchfetch-payload-authority.tsv
+case_loader=$repo_root/containers/arch-live-validation/fixtures/aur/load-case.sh
+payload_policy=$repo_root/containers/arch-live-validation/fixtures/aur/payload-authority.tsv
+conflict_mutator=$repo_root/containers/arch-live-validation/aur-mutate-pkginfo-conflict.py
 runtime_policy_root=/usr/share/moguet-live-aur/policy
 runtime_case_policy=$runtime_policy_root/aur-cases.tsv
-runtime_payload_policy=$runtime_policy_root/fetchfetch-payload-authority.tsv
-runtime_reference_manifest=/usr/libexec/moguet-live-aur/fixtures/fetchfetch-payload.tsv
-runtime_pkginfo_manifest=/usr/libexec/moguet-live-aur/fixtures/fetchfetch-pkginfo.tsv
+runtime_payload_policy=$runtime_policy_root/payload-authority.tsv
+runtime_reference_manifest=/usr/libexec/moguet-live-aur/fixtures/reference-payload.tsv
+runtime_pkginfo_manifest=/usr/libexec/moguet-live-aur/fixtures/reference-pkginfo.tsv
 metadata_helper=/usr/libexec/moguet-live-aur/aur-archive-metadata-check
 pty_runner=$repo_root/tests/run-with-pty.py
 production_moguet=$repo_root/moguet
 case_root=$HOME/live-aur-case
 preflight_root=$case_root/aur-preflight
-preflight_checkout=$preflight_root/fetchfetch.git
+preflight_checkout=$preflight_root/aur.git
 preflight_pkgbuild=$preflight_root/PKGBUILD
 preflight_srcinfo=$preflight_root/.SRCINFO
 rpc_evidence=$preflight_root/aur-rpc.json
@@ -29,12 +31,12 @@ production_output=$case_root/production-install.output
 normalized_output=$case_root/production-install.normalized
 gateway_evidence_root=/var/log/moguet-live-aur
 gateway_staging_root=/var/lib/moguet-live-aur/staging
-gateway_case=fetchfetch-install
-gateway_negative_case=fetchfetch-content-drift-test
-gateway_conflict_case=fetchfetch-conflict-policy-test
-gateway_xattr_case=fetchfetch-xattr-metadata-test
-gateway_acl_case=fetchfetch-acl-metadata-test
-gateway_pkgdesc_case=fetchfetch-pkgdesc-authority-test
+gateway_case=aur-install
+gateway_negative_case=aur-content-drift-test
+gateway_conflict_case=aur-conflict-policy-test
+gateway_xattr_case=aur-xattr-metadata-test
+gateway_acl_case=aur-acl-metadata-test
+gateway_pkgdesc_case=aur-pkgdesc-authority-test
 gateway_status=97
 current_phase=preflight
 current_output=
@@ -295,60 +297,34 @@ assert_repacked_path_set() {
         fail "$label repack changed the package path set"
 }
 
-tab=$(printf '\tX')
-tab=${tab%X}
-expected_header=$(printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s' \
-    '# package' package_base expected_version runtime_dependencies \
-    make_dependencies source_kind install_reason fallback_policy \
-    review_required expected_aur_git_head expected_pkgbuild_sha256 \
-    expected_srcinfo_sha256 expected_source_filename expected_source_url \
-    expected_source_sha256 expected_rpc_url_path \
-    expected_artifact_architecture)
-policy_header=
-package_name=
-package_base=
-expected_version=
-runtime_dependencies=
-make_dependencies=
-source_kind=
-install_reason=
-fallback_policy=
-review_required=
-expected_aur_git_head=
-expected_pkgbuild_sha256=
-expected_srcinfo_sha256=
-expected_source_filename=
-expected_source_url=
-expected_source_sha256=
-expected_rpc_url_path=
-expected_architecture=
-extra_field=
-{
-    IFS= read -r policy_header || fail 'AUR case policy has no header'
-    IFS=$tab read -r \
-        package_name package_base expected_version runtime_dependencies \
-        make_dependencies source_kind install_reason fallback_policy \
-        review_required expected_aur_git_head expected_pkgbuild_sha256 \
-        expected_srcinfo_sha256 expected_source_filename expected_source_url \
-        expected_source_sha256 expected_rpc_url_path expected_architecture \
-        extra_field || fail 'AUR case policy has no case row'
-    if IFS= read -r _; then
-        fail 'AUR case policy must contain exactly one case row'
-    fi
-} < "$case_policy"
+mutate_conflict_policy_archive() {
+    mutation_archive_path=$1
+    python3 "$conflict_mutator" \
+        "$mutation_archive_path" "$AUR_CASE_MAKE_DEPENDENCIES"
+}
 
-[ "$policy_header" = "$expected_header" ] || fail 'AUR case header drift'
-[ -z "$extra_field" ] || fail 'AUR case contains extra columns'
-[ "$package_name" = fetchfetch ] || fail 'tracked package must remain fetchfetch'
-[ "$package_base" = fetchfetch ] || fail 'tracked PackageBase must remain fetchfetch'
-[ "$expected_version" = 2.0.0-1 ] || fail 'tracked version drift'
-[ "$runtime_dependencies" = glibc ] || fail 'runtime dependency drift'
-[ "$make_dependencies" = gcc,make ] || fail 'make dependency drift'
-[ "$source_kind" = single-release-archive ] || fail 'source-kind drift'
-[ "$install_reason" = Explicit ] || fail 'install reason drift'
-[ "$fallback_policy" = reject ] || fail 'candidate fallback must remain rejected'
-[ "$review_required" = required ] || fail 'review-required authority drift'
-[ "$expected_architecture" = x86_64 ] || fail 'artifact architecture drift'
+assert_regular_non_symlink "$case_loader" 'tracked AUR case loader'
+assert_regular_non_symlink "$conflict_mutator" 'tracked AUR conflict mutator'
+# shellcheck source=fixtures/aur/load-case.sh
+. "$case_loader"
+validation_load_aur_case "$case_policy" || fail 'AUR case policy is invalid'
+package_name=$AUR_CASE_PACKAGE_NAME
+package_base=$AUR_CASE_PACKAGE_BASE
+expected_version=$AUR_CASE_EXPECTED_VERSION
+runtime_dependencies=$AUR_CASE_RUNTIME_DEPENDENCIES
+source_kind=$AUR_CASE_SOURCE_KIND
+install_reason=$AUR_CASE_INSTALL_REASON
+fallback_policy=$AUR_CASE_FALLBACK_POLICY
+review_required=$AUR_CASE_REVIEW_REQUIRED
+expected_aur_git_head=$AUR_CASE_EXPECTED_GIT_HEAD
+expected_pkgbuild_sha256=$AUR_CASE_EXPECTED_PKGBUILD_SHA256
+expected_srcinfo_sha256=$AUR_CASE_EXPECTED_SRCINFO_SHA256
+expected_source_filename=$AUR_CASE_EXPECTED_SOURCE_FILENAME
+expected_source_url=$AUR_CASE_EXPECTED_SOURCE_URL
+expected_source_sha256=$AUR_CASE_EXPECTED_SOURCE_SHA256
+expected_rpc_url_path=$AUR_CASE_EXPECTED_RPC_URL_PATH
+expected_architecture=$AUR_CASE_EXPECTED_ARCHITECTURE
+tab=$validation_aur_tab
 
 printf '%s\n' ':: AUR case and isolation preflight'
 printf '  case identity: %s / PackageBase=%s\n' \
@@ -440,38 +416,19 @@ cmp -s "$payload_policy" "$runtime_payload_policy" ||
     fail 'root-owned payload policy differs from the tracked authority'
 pacman_conf_noextract=$case_root/pacman-conf-noextract.txt
 pacman-conf NoExtract > "$pacman_conf_noextract"
-grep -Fx -- '!usr/share/doc/fetchfetch/README.md' \
+grep -Fx -- "!$AUR_CASE_README_PATH" \
     "$pacman_conf_noextract" >/dev/null ||
     fail 'container pacman config does not retain the exact expected README'
 
-python3 - "$payload_policy" "$runtime_reference_manifest" <<'PY'
+python3 - "$payload_policy" "$runtime_reference_manifest" "$package_name" <<'PY'
 from pathlib import Path
 import re
 import sys
 
-static_path, manifest_path = map(Path, sys.argv[1:])
+static_path, manifest_path = map(Path, sys.argv[1:3])
+package_name = sys.argv[3]
 static_header = ("# path", "type", "mode", "sha256")
 manifest_header = ("# path", "type", "mode", "owner", "group", "sha256")
-expected = {
-    "usr/": ("directory", "0755", "-"),
-    "usr/bin/": ("directory", "0755", "-"),
-    "usr/bin/fetchfetch": ("regular", "0755", "-"),
-    "usr/share/": ("directory", "0755", "-"),
-    "usr/share/doc/": ("directory", "0755", "-"),
-    "usr/share/doc/fetchfetch/": ("directory", "0755", "-"),
-    "usr/share/doc/fetchfetch/README.md": (
-        "regular",
-        "0644",
-        "26ac44a45dfae74d33d54e474bc14a2d677f0e720dade11882bd3bea3e5b0d9a",
-    ),
-    "usr/share/licenses/": ("directory", "0755", "-"),
-    "usr/share/licenses/fetchfetch/": ("directory", "0755", "-"),
-    "usr/share/licenses/fetchfetch/LICENSE": (
-        "regular",
-        "0644",
-        "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
-    ),
-}
 
 def parse(path: Path, header: tuple[str, ...]) -> list[tuple[str, ...]]:
     text = path.read_text(encoding="utf-8")
@@ -494,8 +451,16 @@ for path, entry_type, mode, content_hash in static_rows:
     static[path] = (entry_type, mode, content_hash)
 if [row[0] for row in static_rows] != sorted(static):
     raise SystemExit("static payload authority is not sorted")
-if static != expected:
-    raise SystemExit("static payload authority entries drift")
+required = {
+    f"usr/bin/{package_name}": ("regular", "0755", "-"),
+    f"usr/share/doc/{package_name}/README.md": None,
+    f"usr/share/licenses/{package_name}/LICENSE": None,
+}
+for path, identity in required.items():
+    if path not in static:
+        raise SystemExit(f"static payload authority lacks {path}")
+    if identity is not None and static[path] != identity:
+        raise SystemExit(f"static payload authority identity drift: {path}")
 
 manifest_rows = parse(manifest_path, manifest_header)
 manifest = {}
@@ -505,15 +470,15 @@ for path, entry_type, mode, owner, group, content_hash in manifest_rows:
     manifest[path] = (entry_type, mode, owner, group, content_hash)
 if [row[0] for row in manifest_rows] != sorted(manifest):
     raise SystemExit("reference payload manifest is not sorted")
-if set(manifest) != set(expected):
+if set(manifest) != set(static):
     raise SystemExit("reference payload manifest path set drift")
-for path, (entry_type, mode, static_hash) in expected.items():
+for path, (entry_type, mode, static_hash) in static.items():
     actual_type, actual_mode, owner, group, actual_hash = manifest[path]
     if (actual_type, actual_mode, owner, group) != (entry_type, mode, "root", "root"):
         raise SystemExit(f"reference manifest identity drift: {path}")
-    if path == "usr/bin/fetchfetch":
+    if entry_type == "regular" and static_hash == "-":
         if not re.fullmatch(r"[0-9a-f]{64}", actual_hash):
-            raise SystemExit("reference binary hash is absent or malformed")
+            raise SystemExit(f"reference dynamic hash is absent or malformed: {path}")
     elif actual_hash != static_hash:
         raise SystemExit(f"reference static content hash drift: {path}")
 PY
@@ -590,7 +555,8 @@ curl --fail --silent --show-error --location \
     fail 'public AUR RPC query failed'
 python3 - \
     "$rpc_evidence" "$package_name" "$package_base" "$expected_version" \
-    "$runtime_dependencies" "$make_dependencies" "$expected_rpc_url_path" <<'PY'
+    "$runtime_dependencies" "$AUR_CASE_MAKE_DEPENDENCIES" \
+    "$expected_rpc_url_path" <<'PY'
 import json
 from pathlib import Path
 import sys
@@ -703,7 +669,8 @@ cmp -s "$preflight_root/expected-tree.txt" "$preflight_root/tree.txt" ||
 python3 - \
     "$preflight_pkgbuild" "$preflight_srcinfo" "$payload_policy" \
     "$package_name" "$package_base" "$expected_version" \
-    "$runtime_dependencies" "$make_dependencies" "$expected_source_filename" \
+    "$runtime_dependencies" "$AUR_CASE_MAKE_DEPENDENCIES" \
+    "$expected_source_filename" \
     "$expected_source_url" "$expected_source_sha256" "$expected_architecture" <<'PY'
 from collections import defaultdict
 from pathlib import Path
@@ -774,9 +741,9 @@ expected_package_lines = {
 if len(package_lines) != 4 or set(package_lines) != expected_package_lines:
     raise SystemExit("PKGBUILD package() payload command drift")
 expected_payload = {
-    "usr/bin/fetchfetch",
-    "usr/share/doc/fetchfetch/README.md",
-    "usr/share/licenses/fetchfetch/LICENSE",
+    f"usr/bin/{package}",
+    f"usr/share/doc/{package}/README.md",
+    f"usr/share/licenses/{package}/LICENSE",
 }
 payload_rows = [
     line.split("\t")
@@ -797,7 +764,7 @@ printf '%s\n' ':: root gateway binary-content fail-closed test'
 current_phase=content-drift-negative
 negative_checkout=$case_root/content-drift-checkout
 negative_artifact_root=$case_root/content-drift-artifact
-negative_raw_tar=$negative_artifact_root/fetchfetch.pkg.tar
+negative_raw_tar=$negative_artifact_root/$package_name.pkg.tar
 negative_workspace=
 negative_artifact=
 negative_output=$case_root/content-drift-gateway.output
@@ -816,13 +783,14 @@ cmp -s "$preflight_srcinfo" "$negative_checkout/.SRCINFO" ||
 negative_artifact=$negative_checkout/$package_name-$expected_version-$expected_architecture.pkg.tar.zst
 assert_regular_non_symlink "$negative_artifact" 'content-drift source artifact'
 /usr/bin/mkdir -m 0700 "$negative_artifact_root"
-reference_binary_hash=$(awk -F "$tab" \
-    '$1 == "usr/bin/fetchfetch" { print $6; count++ }
+binary_payload_path=usr/bin/$package_name
+reference_binary_hash=$(awk -F "$tab" -v target="$binary_payload_path" \
+    '$1 == target { print $6; count++ }
      END { if (count != 1) exit 1 }' "$runtime_reference_manifest") ||
     fail 'reference manifest has no unique binary hash'
-negative_binary=$negative_artifact_root/fetchfetch.binary.raw
+negative_binary=$negative_artifact_root/$package_name.binary.raw
 if validation_capture_output "$negative_binary" \
-    /usr/bin/bsdtar -xOf "$negative_artifact" usr/bin/fetchfetch; then
+    /usr/bin/bsdtar -xOf "$negative_artifact" "$binary_payload_path"; then
     negative_binary_hash=$(sha256_file "$negative_binary") ||
         fail 'negative binary checksum producer failed'
 else
@@ -837,12 +805,12 @@ negative_artifact_hash=$(sha256_file "$negative_artifact") ||
 negative_workspace=$(mktemp -d "$XDG_CACHE_HOME/moguet/.artifact-workspace~-XXXXXX")
 negative_gateway_artifact=$negative_workspace/$package_name-$expected_version-$expected_architecture.pkg.tar.zst
 /usr/bin/zstd --decompress --stdout "$negative_artifact" > "$negative_raw_tar"
-python3 - "$negative_raw_tar" <<'PY'
+python3 - "$negative_raw_tar" "$binary_payload_path" <<'PY'
 from pathlib import Path
 import sys
 
 archive = Path(sys.argv[1])
-target = b"usr/bin/fetchfetch"
+target = sys.argv[2].encode("utf-8")
 with archive.open("r+b") as stream:
     while True:
         header_offset = stream.tell()
@@ -883,7 +851,7 @@ fi
     current_output=$negative_output
     fail "content-drift gateway rejection returned $negative_status"
 }
-assert_contains 'archive payload content hash drift: usr/bin/fetchfetch' \
+assert_contains "archive payload content hash drift: $binary_payload_path" \
     "$negative_output"
 assert_contains 'moguet-live-aur-gateway: rejected:' "$negative_output"
 capture_package_inventory "$case_root/after-content-drift"
@@ -906,25 +874,17 @@ assert_metadata "$gateway_staging_root/$gateway_negative_case" \
 assert_independent_artifact_unchanged "$negative_artifact_hash" "$negative_artifact"
 printf '%s\n' ':: root gateway transaction-metadata fail-closed test'
 current_phase=conflict-policy-negative
-conflict_raw_tar=$negative_artifact_root/fetchfetch-conflict.pkg.tar
+conflict_raw_tar=$negative_artifact_root/$package_name-conflict.pkg.tar
 conflict_workspace=$(mktemp -d "$XDG_CACHE_HOME/moguet/.artifact-workspace~-XXXXXX")
 conflict_gateway_artifact=$conflict_workspace/$package_name-$expected_version-$expected_architecture.pkg.tar.zst
 conflict_output=$case_root/conflict-policy-gateway.output
 /usr/bin/zstd --decompress --stdout "$negative_artifact" > "$conflict_raw_tar"
-python3 - "$conflict_raw_tar" <<'PY'
-from pathlib import Path
-import sys
-
-archive = Path(sys.argv[1])
-expected = b"makedepend = make\n"
-replacement = b"conflict = foo   \n"
-if len(expected) != len(replacement):
-    raise SystemExit("conflict mutation changes PKGINFO member length")
-contents = archive.read_bytes()
-if contents.count(expected) != 1:
-    raise SystemExit("expected unique make dependency line in PKGINFO")
-archive.write_bytes(contents.replace(expected, replacement, 1))
-PY
+if mutate_conflict_policy_archive "$conflict_raw_tar"; then
+    :
+else
+    mutation_status=$?
+    fail "conflict mutation failed with status $mutation_status"
+fi
 /usr/bin/zstd --quiet --force -o "$conflict_gateway_artifact" "$conflict_raw_tar"
 /usr/bin/touch "$conflict_gateway_artifact"
 assert_repacked_path_set "$negative_artifact" "$conflict_gateway_artifact" conflict-policy
@@ -967,13 +927,13 @@ current_phase=xattr-metadata-negative
 xattr_artifact_root=$case_root/xattr-metadata-artifact
 xattr_tree=$xattr_artifact_root/tree
 xattr_list=$xattr_artifact_root/archive-paths.txt
-xattr_raw_tar=$xattr_artifact_root/fetchfetch.pkg.tar
+xattr_raw_tar=$xattr_artifact_root/$package_name.pkg.tar
 xattr_workspace=$(mktemp -d "$XDG_CACHE_HOME/moguet/.artifact-workspace~-XXXXXX")
 xattr_gateway_artifact=$xattr_workspace/$package_name-$expected_version-$expected_architecture.pkg.tar.zst
 /usr/bin/mkdir -m 0700 "$xattr_artifact_root"
 /usr/bin/mkdir -m 0700 "$xattr_tree"
 /usr/bin/bsdtar -xf "$negative_artifact" -C "$xattr_tree"
-python3 - "$xattr_tree/usr/bin/fetchfetch" <<'PY'
+python3 - "$xattr_tree/$binary_payload_path" <<'PY'
 import os
 from pathlib import Path
 import sys
@@ -997,7 +957,7 @@ fi
 /usr/bin/touch "$xattr_gateway_artifact"
 assert_repacked_path_set "$negative_artifact" "$xattr_gateway_artifact" xattr-metadata
 assert_negative_case_rejected xattr-metadata "$gateway_xattr_case" \
-    "$xattr_gateway_artifact" 'category=xattr entry=usr/bin/fetchfetch'
+    "$xattr_gateway_artifact" "category=xattr entry=$binary_payload_path"
 assert_independent_artifact_unchanged "$negative_artifact_hash" "$negative_artifact"
 
 printf '%s\n' ':: root gateway ACL metadata fail-closed test'
@@ -1005,13 +965,13 @@ current_phase=acl-metadata-negative
 acl_artifact_root=$case_root/acl-metadata-artifact
 acl_tree=$acl_artifact_root/tree
 acl_list=$acl_artifact_root/archive-paths.txt
-acl_raw_tar=$acl_artifact_root/fetchfetch.pkg.tar
+acl_raw_tar=$acl_artifact_root/$package_name.pkg.tar
 acl_workspace=$(mktemp -d "$XDG_CACHE_HOME/moguet/.artifact-workspace~-XXXXXX")
 acl_gateway_artifact=$acl_workspace/$package_name-$expected_version-$expected_architecture.pkg.tar.zst
 /usr/bin/mkdir -m 0700 "$acl_artifact_root"
 /usr/bin/mkdir -m 0700 "$acl_tree"
 /usr/bin/bsdtar -xf "$negative_artifact" -C "$acl_tree"
-/usr/bin/setfacl -m u:65534:rx "$acl_tree/usr/bin/fetchfetch"
+/usr/bin/setfacl -m u:65534:rx "$acl_tree/$binary_payload_path"
 if validation_capture_sorted_output "$acl_list.raw" "$acl_list" \
     tree_member_paths_raw "$acl_tree"; then
     :
@@ -1028,13 +988,13 @@ fi
 /usr/bin/touch "$acl_gateway_artifact"
 assert_repacked_path_set "$negative_artifact" "$acl_gateway_artifact" acl-metadata
 assert_negative_case_rejected acl-metadata "$gateway_acl_case" \
-    "$acl_gateway_artifact" 'category=acl entry=usr/bin/fetchfetch'
+    "$acl_gateway_artifact" "category=acl entry=$binary_payload_path"
 assert_independent_artifact_unchanged "$negative_artifact_hash" "$negative_artifact"
 
 printf '%s\n' ':: root gateway PKGINFO authority fail-closed test'
 current_phase=pkgdesc-authority-negative
 pkgdesc_artifact_root=$case_root/pkgdesc-authority-artifact
-pkgdesc_raw_tar=$pkgdesc_artifact_root/fetchfetch.pkg.tar
+pkgdesc_raw_tar=$pkgdesc_artifact_root/$package_name.pkg.tar
 pkgdesc_workspace=$(mktemp -d "$XDG_CACHE_HOME/moguet/.artifact-workspace~-XXXXXX")
 pkgdesc_gateway_artifact=$pkgdesc_workspace/$package_name-$expected_version-$expected_architecture.pkg.tar.zst
 /usr/bin/mkdir -m 0700 "$pkgdesc_artifact_root"
@@ -1116,7 +1076,9 @@ for metadata_line in \
 do
     assert_contains "$metadata_line" "$metadata_output"
 done
-python3 - "$metadata_output" "$runtime_dependencies" "$make_dependencies" <<'PY'
+python3 - \
+    "$metadata_output" "$runtime_dependencies" \
+    "$AUR_CASE_MAKE_DEPENDENCIES" <<'PY'
 from pathlib import Path
 import re
 import sys
@@ -1140,11 +1102,15 @@ printf '  production metadata: %s / PackageBase=%s / Version=%s / AUR\n' \
     "$package_name" "$package_base" "$expected_version"
 
 capture_package_inventory "$case_root/before-install"
-for dependency_name in glibc gcc make; do
+saved_ifs=$IFS
+IFS=,
+all_dependencies=$runtime_dependencies,$AUR_CASE_MAKE_DEPENDENCIES
+for dependency_name in $all_dependencies; do
     inventory_record "$dependency_name" "$case_root/before-install.tsv" \
         >> "$case_root/dependencies-before.tsv" ||
         fail "required existing dependency is absent: $dependency_name"
 done
+IFS=$saved_ifs
 
 printf '%s\n' ':: production AUR clone / review / source build / install'
 current_phase=production-install
@@ -1195,12 +1161,12 @@ assert_contains "Running: LC_ALL=C 'pacman' '-U' '--print' '--print-format'" \
     "$normalized_output"
 assert_contains "Running: 'sudo' 'pacman' '-U' '--noconfirm' '--'" \
     "$normalized_output"
-assert_contains 'PackageBase result: fetchfetch' "$normalized_output"
+assert_contains "PackageBase result: $package_base" "$normalized_output"
 assert_contains \
-    'required child: fetchfetch -> fetchfetch 2.0.0-1 (explicit): installed' \
+    "required child: $package_name -> $package_name $expected_version (explicit): installed" \
     "$normalized_output"
 assert_contains \
-    'produced artifact: fetchfetch-debug 2.0.0-1 (not selected; not installed)' \
+    "produced artifact: $AUR_CASE_DEBUG_PACKAGE_NAME $expected_version (not selected; not installed)" \
     "$normalized_output"
 assert_not_contains "Running: 'sudo' 'pacman' '-S'" "$normalized_output"
 assert_not_contains 'Installing selected repository providers:' "$normalized_output"
@@ -1210,7 +1176,8 @@ assert_not_contains "'--needed'" "$normalized_output"
 assert_not_contains '/home/seeke/moguet' "$normalized_output"
 printf '%s\n' '  review boundary: PKGBUILD shown; edit declined; no .install prompt'
 printf '%s\n' '  makepkg evidence: --packagelist then -sc --noconfirm'
-printf '%s\n' '  PackageBase result: fetchfetch; required child explicit/installed'
+printf '  PackageBase result: %s; required child explicit/installed\n' \
+    "$package_base"
 
 printf '%s\n' ':: persistent checkout and source evidence'
 current_phase=checkout-evidence
@@ -1423,11 +1390,11 @@ pacman -Q "$package_name" > "$case_root/installed-package.txt" ||
     fail 'installed package query failed'
 [ "$(cat "$case_root/installed-package.txt")" = \
     "$package_name $expected_version" ] || fail 'installed version drift'
-pacman -Qe "$package_name" >/dev/null || fail 'fetchfetch is not Explicit'
+pacman -Qe "$package_name" >/dev/null || fail "$package_name is not Explicit"
 if pacman -Qd "$package_name" >/dev/null 2>&1; then
-    fail 'fetchfetch was incorrectly installed as Dependency'
+    fail "$package_name was incorrectly installed as Dependency"
 fi
-assert_regular_non_symlink /usr/bin/fetchfetch 'installed fetchfetch executable'
+assert_regular_non_symlink "/usr/bin/$package_name" 'installed fixture executable'
 pacman -Qlq "$package_name" > "$case_root/installed-paths.raw"
 python3 - \
     "$case_root/installed-paths.raw" "$runtime_reference_manifest" <<'PY'
@@ -1470,16 +1437,20 @@ for archive_path, (entry_type, mode, owner, group, content_hash) in manifest.ite
     else:
         raise SystemExit(f"unexpected manifest type: {entry_type}")
 PY
-if pacman -Q fetchfetch-debug >/dev/null 2>&1; then
+if pacman -Q "$AUR_CASE_DEBUG_PACKAGE_NAME" >/dev/null 2>&1; then
     fail 'unselected debug artifact was unexpectedly installed'
 fi
 
 : > "$case_root/dependencies-after.tsv"
-for dependency_name in glibc gcc make; do
+saved_ifs=$IFS
+IFS=,
+all_dependencies=$runtime_dependencies,$AUR_CASE_MAKE_DEPENDENCIES
+for dependency_name in $all_dependencies; do
     inventory_record "$dependency_name" "$case_root/after-install.tsv" \
         >> "$case_root/dependencies-after.tsv" ||
         fail "dependency disappeared after install: $dependency_name"
 done
+IFS=$saved_ifs
 cmp -s "$case_root/dependencies-before.tsv" \
     "$case_root/dependencies-after.tsv" ||
     fail 'dependency version or install reason changed'

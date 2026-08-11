@@ -11,6 +11,8 @@ repo_root=$(CDPATH='' cd "$(dirname "$0")/../.." && pwd)
 fixture_root=/usr/libexec/moguet-live-local/fixtures/local-package
 fixture_pkgbuild=$fixture_root/PKGBUILD
 fixture_contract=$fixture_root/contract.env
+fixture_expected_srcinfo=$fixture_root/expected.srcinfo
+fixture_payload_authority=$fixture_root/payload-authority.tsv
 pty_runner=$repo_root/tests/run-with-pty.py
 production_moguet=$repo_root/moguet
 case_root=$HOME/live-local-case
@@ -18,10 +20,6 @@ gateway_evidence_root=/var/log/moguet-live-local
 gateway_staging_root=/var/lib/moguet-live-local/staging
 gateway_case=local-root-install
 gateway_status=97
-fixture_name=moguet-live-fixture
-fixture_version=1.0.0-1
-fixture_arch=any
-fixture_artifact=${fixture_name}-${fixture_version}-${fixture_arch}.pkg.tar.zst
 current_phase=preflight
 current_output=
 
@@ -86,7 +84,7 @@ source_tree_manifest_raw() {
     manifest_root=$1
     (
         cd "$manifest_root" || exit $?
-        sha256sum PKGBUILD contract.env || exit $?
+        sha256sum PKGBUILD || exit $?
         find . -mindepth 1 -maxdepth 1 -printf '%y %m %f\n' || exit $?
     )
 }
@@ -95,8 +93,18 @@ source_content_manifest_raw() {
     manifest_root=$1
     (
         cd "$manifest_root" || exit $?
-        sha256sum PKGBUILD contract.env || exit $?
-        find . -mindepth 1 -maxdepth 1 -printf '%y %f\n' || exit $?
+        sha256sum PKGBUILD || exit $?
+        stat -c '%F:%n' PKGBUILD || exit $?
+    )
+}
+
+fixture_manifest_raw() {
+    (
+        cd "$fixture_root" || exit $?
+        sha256sum \
+            PKGBUILD contract.env expected.srcinfo payload-authority.tsv ||
+            exit $?
+        find . -mindepth 1 -maxdepth 1 -printf '%y %m %f\n' || exit $?
     )
 }
 
@@ -125,7 +133,7 @@ source_content_manifest() {
 }
 
 fixture_manifest() {
-    source_tree_manifest "$fixture_root"
+    capture_source_manifest fixture_manifest_raw "$fixture_root"
 }
 
 capture_inventory() {
@@ -168,10 +176,9 @@ prepare_source_root() {
     fixture_content_before_copy=$(source_content_manifest "$fixture_root")
     rm -rf -- "$prepared_root"
     mkdir -m 0700 "$prepared_root"
-    cp -R "$fixture_root" "$prepared_root/source"
-    chmod u+w "$prepared_root/source" \
-        "$prepared_root/source/PKGBUILD" \
-        "$prepared_root/source/contract.env"
+    mkdir -m 0755 "$prepared_root/source"
+    cp "$fixture_pkgbuild" "$prepared_root/source/PKGBUILD"
+    chmod 0644 "$prepared_root/source/PKGBUILD"
     [ ! -e "$prepared_root/source/.SRCINFO" ] ||
         fail 'root-owned local fixture authority unexpectedly has generated .SRCINFO'
     fixture_after_copy=$(fixture_manifest)
@@ -187,9 +194,6 @@ prepare_source_root() {
     assert_metadata "$prepared_root/source/PKGBUILD" \
         'moguet-validation:moguet-validation:644:regular file' \
         'case-local PKGBUILD after authority copy'
-    assert_metadata "$prepared_root/source/contract.env" \
-        'moguet-validation:moguet-validation:644:regular file' \
-        'case-local fixture contract after authority copy'
 }
 
 assert_source_root_unchanged() {
@@ -249,7 +253,7 @@ run_pty() {
     fi
 }
 
-parse_rust_choice() {
+parse_selected_provider_choice() {
     output_file=$1
     candidate_table=$2
     tr -d '\r' < "$output_file" > "$output_file.normalized"
@@ -271,28 +275,40 @@ parse_rust_choice() {
 }
 ' "$output_file.normalized" > "$candidate_table" ||
         fail 'provider presentation could not be parsed safely'
-    [ "$(wc -l < "$candidate_table")" -eq 2 ] ||
-        fail 'cargo provider candidate count drifted from the reviewed two choices'
-    while IFS="$(printf '\t')" read -r number source package repository provided; do
-        [ "$source" = repository ] && [ "$repository" = extra ] && \
-            [ "$provided" = cargo ] ||
-            fail "unsafe provider identity: $number/$source/$repository/$provided"
-        case "$package" in
-            rust|rustup) ;;
-            *) fail "unexpected cargo provider: $package" ;;
-        esac
-    done < "$candidate_table"
-    rust_choice=$(awk -F '\t' '$3 == "rust" { print $1; count++ } END { if (count != 1) exit 1 }' "$candidate_table") ||
-        fail 'cargo provider set does not contain exactly one extra/rust choice'
-    [ "$(awk -F '\t' '$3 == "rustup" { count++ } END { print count + 0 }' "$candidate_table")" -eq 1 ] ||
-        fail 'cargo provider set does not contain exactly one extra/rustup choice'
-    printf '%s\n' "$rust_choice"
+    python3 - "$candidate_table" "$EXPECTED_PROVIDER_REPOSITORY" \
+        "$REQUIRED_MAKE_DEPENDENCY" "$EXPECTED_PROVIDER_PACKAGES" \
+        "$LOCAL_INSTALL_PROVIDER" <<'PY'
+from pathlib import Path
+import sys
+
+table, expected_repository, expected_provided, provider_text, selected = sys.argv[1:]
+expected_packages = provider_text.split(",")
+rows = [line.split("\t") for line in Path(table).read_text(encoding="utf-8").splitlines()]
+if any(len(row) != 5 for row in rows):
+    raise SystemExit("provider table is not exact-tab data")
+if len(rows) != len(expected_packages):
+    raise SystemExit("provider candidate count drifted from the reviewed set")
+if [row[0] for row in rows] != [str(index) for index in range(1, len(rows) + 1)]:
+    raise SystemExit("provider numbering is unsafe")
+if any(row[1] != "repository" or row[3] != expected_repository or
+       row[4] != expected_provided for row in rows):
+    raise SystemExit("provider source or constraint identity drift")
+if {row[2] for row in rows} != set(expected_packages):
+    raise SystemExit("provider package identity set drift")
+choices = [row[0] for row in rows if row[2] == selected]
+if len(choices) != 1:
+    raise SystemExit("selected provider is not uniquely present")
+print(choices[0])
+PY
 }
 
 assert_inventory_transition() {
     before_file=$1
     after_file=$2
-    python3 - "$before_file" "$after_file" "$fixture_name" <<'PY'
+    python3 - "$before_file" "$after_file" \
+        "$fixture_name" "$fixture_version" "$ROOT_ARTIFACT_INSTALL_REASON" \
+        "$LOCAL_INSTALL_PROVIDER" "$PROVIDER_INSTALL_REASON" \
+        "$EXPECTED_PROVIDER_PACKAGES" <<'PY'
 from pathlib import Path
 import sys
 
@@ -310,23 +326,24 @@ def parse(path: str) -> dict[str, tuple[str, str]]:
 
 before = parse(sys.argv[1])
 after = parse(sys.argv[2])
-fixture = sys.argv[3]
+fixture, fixture_version, root_reason, selected_provider, provider_reason, provider_text = sys.argv[3:]
+reviewed_providers = set(provider_text.split(","))
 for name, record in before.items():
     if after.get(name) != record:
         raise SystemExit(f"baseline package version or reason changed: {name}")
-if fixture not in after or after[fixture] != ("1.0.0-1", "Explicit"):
+if fixture not in after or after[fixture] != (fixture_version, root_reason):
     raise SystemExit("local root did not install as the exact explicit fixture package")
-if "rust" not in after or after["rust"][1] != "Dependency":
-    raise SystemExit("selected rust provider did not retain dependency install reason")
-if fixture in before or "rust" in before or "rustup" in before:
-    raise SystemExit("fixture or cargo provider was installed before the local case")
-if "moguet-live-fixture-debug" in after:
+if selected_provider not in after or after[selected_provider][1] != provider_reason:
+    raise SystemExit("selected provider did not retain dependency install reason")
+if fixture in before or reviewed_providers.intersection(before):
+    raise SystemExit("fixture or reviewed provider was installed before the local case")
+if f"{fixture}-debug" in after:
     raise SystemExit("unselected local debug artifact was installed")
 new_names = set(after) - set(before)
-if fixture not in new_names or "rust" not in new_names:
+if fixture not in new_names or selected_provider not in new_names:
     raise SystemExit("local fixture or selected provider was not newly installed")
 for name in new_names - {fixture}:
-    if after[name][1] != "Dependency":
+    if after[name][1] != provider_reason:
         raise SystemExit(f"new provider transaction package is not a dependency: {name}")
 print(f"inventory transition: {len(new_names)} new package(s), root explicit and providers dependency")
 PY
@@ -334,8 +351,28 @@ PY
 
 assert_regular_non_symlink "$fixture_pkgbuild" 'root-owned local PKGBUILD fixture authority'
 assert_regular_non_symlink "$fixture_contract" 'root-owned local fixture contract authority'
+assert_regular_non_symlink "$fixture_expected_srcinfo" \
+    'root-owned local expected .SRCINFO authority'
+assert_regular_non_symlink "$fixture_payload_authority" \
+    'root-owned local payload authority'
 assert_regular_non_symlink "$pty_runner" 'PTY runner'
 assert_regular_non_symlink "$production_moguet" 'production Moguet binary'
+# shellcheck source=fixtures/local-package/contract.env
+. "$fixture_contract"
+fixture_name=$PACKAGE_NAME
+fixture_version=$PACKAGE_VERSION
+fixture_arch=$PACKAGE_ARCHITECTURE
+fixture_artifact=${fixture_name}-${fixture_version}-${fixture_arch}.pkg.tar.zst
+selected_provider=$LOCAL_INSTALL_PROVIDER
+selected_provider_identity=$EXPECTED_PROVIDER_REPOSITORY/$selected_provider
+provider_count=0
+saved_ifs=$IFS
+IFS=,
+for reviewed_provider in $EXPECTED_PROVIDER_PACKAGES; do
+    provider_count=$((provider_count + 1))
+done
+IFS=$saved_ifs
+provider_prompt="Select a provider from [1-$provider_count]"
 [ "$(id -u)" -eq 1000 ] && [ "$(id -g)" -eq 1000 ] ||
     fail 'live local runner must execute as validation uid/gid 1000'
 [ ! -e "$repo_root/.git" ] || fail 'container source copy unexpectedly includes .git'
@@ -354,8 +391,13 @@ assert_metadata "$fixture_pkgbuild" \
     'root:root:444:regular file' 'local PKGBUILD fixture authority'
 assert_metadata "$fixture_contract" \
     'root:root:444:regular file' 'local fixture contract authority'
+assert_metadata "$fixture_expected_srcinfo" \
+    'root:root:444:regular file' 'local expected .SRCINFO authority'
+assert_metadata "$fixture_payload_authority" \
+    'root:root:444:regular file' 'local payload authority'
 [ ! -w "$fixture_root" ] && [ ! -w "$fixture_pkgbuild" ] &&
-    [ ! -w "$fixture_contract" ] ||
+    [ ! -w "$fixture_contract" ] && [ ! -w "$fixture_expected_srcinfo" ] &&
+    [ ! -w "$fixture_payload_authority" ] ||
     fail 'validation user can modify the root-owned local fixture authority'
 assert_metadata "$gateway_evidence_root" \
     'root:moguet-validation:750:directory' 'local gateway evidence root'
@@ -367,11 +409,12 @@ fixture_authority_before=$(fixture_manifest)
 capture_inventory "$case_root/runtime/before-rejection"
 printf '%s\n' ':: root gateway fail-closed self-test'
 run_gateway_rejection system-upgrade "$gateway_case" -Syu
-run_gateway_rejection removal "$gateway_case" -R rust
+run_gateway_rejection removal "$gateway_case" -R "$selected_provider"
 run_gateway_rejection outside-artifact "$gateway_case" \
     -U -- /tmp/unsafe.pkg.tar.zst
 run_gateway_rejection wrong-provider "$gateway_case" \
-    -S --asdeps --needed -- extra/cargo
+    -S --asdeps --needed -- \
+    "$EXPECTED_PROVIDER_REPOSITORY/$REQUIRED_MAKE_DEPENDENCY"
 run_gateway_rejection missing-case missing -Syu
 capture_inventory "$case_root/runtime/after-rejection"
 cmp -s "$case_root/runtime/before-rejection.tsv" \
@@ -396,14 +439,17 @@ validation_assert_status live-local-provider-discovery 1 "$run_status" \
 tr -d '\r' < "$discovery_output" > "$discovery_output.normalized"
 current_phase=provider-discovery
 current_output=$discovery_output
-assert_contains 'Select a provider from [1-2]' "$discovery_output.normalized"
-assert_contains 'ambiguous providers: cargo' "$discovery_output.normalized"
+assert_contains "$provider_prompt" "$discovery_output.normalized"
+assert_contains "ambiguous providers: $REQUIRED_MAKE_DEPENDENCY" \
+    "$discovery_output.normalized"
 assert_source_root_unchanged "$discovery_source" "$discovery_source_before"
 capture_inventory "$discovery_root/after"
 cmp -s "$case_root/runtime/after-rejection.tsv" "$discovery_root/after.tsv" ||
     fail 'provider discovery changed package inventory'
-rust_choice=$(parse_rust_choice "$discovery_output" "$discovery_root/candidates.tsv")
-printf '  reviewed provider choice: %s=extra/rust\n' "$rust_choice"
+selected_provider_choice=$(parse_selected_provider_choice \
+    "$discovery_output" "$discovery_root/candidates.tsv")
+printf '  reviewed provider choice: %s=%s\n' \
+    "$selected_provider_choice" "$selected_provider_identity"
 
 printf '%s\n' ':: real local PKGBUILD build and install'
 actual_root=$case_root/actual
@@ -412,22 +458,22 @@ actual_source=$actual_root/source
 actual_source_before=$(source_tree_manifest "$actual_source")
 actual_input=$actual_root/input.txt
 actual_output=$actual_root/output.txt
-printf 'y\n%s\ny\ny\n' "$rust_choice" > "$actual_input"
+printf 'y\n%s\ny\ny\n' "$selected_provider_choice" > "$actual_input"
 current_phase=local-build-install
 current_output=$actual_output
 run_pty "$actual_input" "$actual_output" "$actual_source" \
     "$actual_root/cache" "$actual_root/state"
 [ "$run_status" -eq 0 ] || fail "production local build/install returned $run_status"
 tr -d '\r' < "$actual_output" > "$actual_output.normalized"
-assert_contains "Installing selected repository providers: 'extra/rust'" \
+assert_contains "Installing selected repository providers: '$selected_provider_identity'" \
     "$actual_output.normalized"
-assert_contains "Running: 'sudo' 'pacman' '-S' '--asdeps' '--needed' '--' 'extra/rust'" \
+assert_contains "Running: 'sudo' 'pacman' '-S' '--asdeps' '--needed' '--' '$selected_provider_identity'" \
     "$actual_output.normalized"
 assert_contains "Running: 'sudo' 'pacman' '-U' '--'" \
     "$actual_output.normalized"
-assert_contains 'Local PackageBase result: moguet-live-fixture' \
+assert_contains "Local PackageBase result: $PACKAGE_BASE" \
     "$actual_output.normalized"
-assert_contains 'required child: moguet-live-fixture 1.0.0-1 (explicit): installed' \
+assert_contains "required child: $fixture_name $fixture_version (explicit): installed" \
     "$actual_output.normalized"
 assert_not_contains "Running: 'git'" "$actual_output.normalized"
 assert_source_root_unchanged "$actual_source" "$actual_source_before"
@@ -453,10 +499,10 @@ pacman -Qe "$fixture_name" >/dev/null ||
 if pacman -Qd "$fixture_name" >/dev/null 2>&1; then
     fail 'local root is installed as a dependency'
 fi
-pacman -Qd rust >/dev/null ||
-    fail 'selected rust provider is not installed as a dependency'
-if pacman -Qe rust >/dev/null 2>&1; then
-    fail 'selected rust provider is installed as explicit'
+pacman -Qd "$selected_provider" >/dev/null ||
+    fail 'selected provider is not installed as a dependency'
+if pacman -Qe "$selected_provider" >/dev/null 2>&1; then
+    fail 'selected provider is installed as explicit'
 fi
 
 assert_metadata "$gateway_evidence_root/$gateway_case" \
@@ -475,7 +521,8 @@ do
         'root:moguet-validation:640:regular file' \
         "accepted root evidence $evidence_file"
 done
-python3 - "$gateway_evidence_root/$gateway_case/accepted.argv" <<'PY'
+python3 - "$gateway_evidence_root/$gateway_case/accepted.argv" \
+    "$fixture_artifact" <<'PY'
 from pathlib import Path
 import sys
 
@@ -485,7 +532,7 @@ if argv[-1:] != [b""]:
 actual = [item.decode("utf-8", "strict") for item in argv[:-1]]
 if actual[:4] != ["sudo", "pacman", "-U", "--"] or len(actual) != 5:
     raise SystemExit(f"unexpected accepted local gateway argv: {actual!r}")
-if not actual[-1].endswith("/moguet-live-fixture-1.0.0-1-any.pkg.tar.zst"):
+if not actual[-1].endswith("/" + sys.argv[2]):
     raise SystemExit("accepted local gateway artifact identity drift")
 PY
 

@@ -195,22 +195,69 @@ cp "$repo_root/containers/arch-live-validation/local-archive-validator.sh" \
     "$archive_tool_root/local-archive-validator.sh"
 chmod 0555 "$archive_tool_root/local-archive-validator.sh"
 archive_validator=$archive_tool_root/local-archive-validator.sh
+archive_authority=$archive_tool_root/archive-authority
+mkdir -p "$archive_authority"
+cp "$repo_root/tests/fixtures/local-archive-validator/contract.env" \
+    "$repo_root/tests/fixtures/local-archive-validator/payload-authority.tsv" \
+    "$archive_authority/"
+chmod 0444 \
+    "$archive_authority/contract.env" \
+    "$archive_authority/payload-authority.tsv"
+# shellcheck source=fixtures/local-archive-validator/contract.env
+. "$archive_authority/contract.env"
 
 archive_root=$tmp_dir/archive-root
-mkdir -p \
-    "$archive_root/usr/bin" \
-    "$archive_root/usr/share/moguet-live-validation"
+mkdir -p "$archive_root"
+payload_directories=$tmp_dir/archive-payload-directories.txt
+if awk -F '\t' '$2 == "directory" { print $1 }' \
+    "$archive_authority/payload-authority.tsv" >"$payload_directories"; then
+    :
+else
+    authority_status=$?
+    fail "archive payload directory projection failed with status $authority_status"
+fi
+while IFS= read -r payload_directory; do
+    [ -n "$payload_directory" ] || continue
+    mkdir -p "$archive_root/$payload_directory"
+done <"$payload_directories"
+
+dynamic_payload_path=$(awk -F '\t' '
+    $2 == "regular" && $4 == "-" { print $1; count++ }
+    END { if (count != 1) exit 1 }
+' "$archive_authority/payload-authority.tsv") ||
+    fail 'archive authority must identify one dynamic regular payload'
+static_payload_record=$(awk -F '\t' '
+    $2 == "regular" && $4 != "-" { print $1 "\t" $4; count++ }
+    END { if (count != 1) exit 1 }
+' "$archive_authority/payload-authority.tsv") ||
+    fail 'archive authority must identify one static regular payload'
+tab=$(printf '\tX')
+tab=${tab%X}
+if IFS=$tab read -r static_payload_path static_payload_sha256 <<EOF
+$static_payload_record
+EOF
+then
+    :
+else
+    authority_status=$?
+    fail "archive static payload parsing failed with status $authority_status"
+fi
+
 printf '%s\n' \
-    'pkgname = moguet-live-fixture' \
-    'pkgbase = moguet-live-fixture' \
-    'pkgver = 1.0.0-1' \
-    'arch = any' >"$archive_root/.PKGINFO"
+    "pkgname = $PACKAGE_NAME" \
+    "pkgbase = $PACKAGE_BASE" \
+    "pkgver = $PACKAGE_VERSION" \
+    "arch = $PACKAGE_ARCHITECTURE" >"$archive_root/.PKGINFO"
 printf '%s\n' 'build info' >"$archive_root/.BUILDINFO"
 printf '%s\n' 'mtree' >"$archive_root/.MTREE"
-dd if=/dev/zero of="$archive_root/usr/bin/moguet-live-fixture" \
+dd if=/dev/zero of="$archive_root/$dynamic_payload_path" \
     bs=1024 count=256 status=none
-printf '%s\n' 'live-validation-local-package-fixture marker' \
-    >"$archive_root/usr/share/moguet-live-validation/live-fixture-marker"
+printf '%s\n' 'validation-status archive fixture marker' \
+    >"$archive_root/$static_payload_path"
+static_payload_checksum=$(sha256sum -- "$archive_root/$static_payload_path") ||
+    fail 'archive static payload checksum producer failed'
+[ "${static_payload_checksum%% *}" = "$static_payload_sha256" ] ||
+    fail 'archive static payload bytes differ from their independent authority'
 
 valid_archive=$tmp_dir/valid.pkg.tar
 bsdtar -cf "$valid_archive" -C "$archive_root" \
@@ -219,7 +266,8 @@ valid_evidence=$tmp_dir/valid-evidence
 mkdir "$valid_evidence"
 validation_expect_status valid-archive 0 \
     "$tmp_dir/valid.stdout" "$tmp_dir/valid.stderr" \
-    "$archive_validator" "$valid_archive" "$valid_evidence" ||
+    "$archive_validator" "$valid_archive" "$valid_evidence" \
+    "$archive_authority" ||
     fail 'valid archive did not pass the local gateway inspection consumer'
 [ -s "$valid_evidence/archive-members.raw" ] &&
     [ -s "$valid_evidence/archive-members.txt" ] ||
@@ -234,7 +282,8 @@ assert_archive_rejected() {
     mkdir "$evidence_path"
     validation_expect_status "$case_name" 97 \
         "$stdout_path" "$stderr_path" \
-        "$archive_validator" "$archive_path" "$evidence_path" ||
+        "$archive_validator" "$archive_path" "$evidence_path" \
+        "$archive_authority" ||
         fail "$case_name did not return canonical gateway reject status 97"
     grep -F 'moguet-live-local-gateway: rejected:' "$stderr_path" >/dev/null ||
         fail "$case_name lost the canonical gateway rejection diagnostic"

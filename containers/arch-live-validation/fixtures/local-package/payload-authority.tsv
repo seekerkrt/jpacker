@@ -1,0 +1,7 @@
+# path	type	mode	sha256
+usr/	directory	0755	-
+usr/bin/	directory	0755	-
+usr/bin/moguet-live-fixture	regular	0755	-
+usr/share/	directory	0755	-
+usr/share/moguet-live-validation/	directory	0755	-
+usr/share/moguet-live-validation/live-fixture-marker	regular	0644	3661189392dd7bf8bbe5453d321002408c5eafb0b9e4944b567b6855935fe346

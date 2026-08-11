@@ -14,12 +14,12 @@ import time
 CACHE_ROOT = Path("/home/moguet-validation/.cache/moguet")
 STAGING_ROOT = Path("/var/lib/moguet-live-aur/staging")
 STAGING_CASES = {
-    "fetchfetch-install",
-    "fetchfetch-content-drift-test",
-    "fetchfetch-conflict-policy-test",
-    "fetchfetch-xattr-metadata-test",
-    "fetchfetch-acl-metadata-test",
-    "fetchfetch-pkgdesc-authority-test",
+    "aur-install",
+    "aur-content-drift-test",
+    "aur-conflict-policy-test",
+    "aur-xattr-metadata-test",
+    "aur-acl-metadata-test",
+    "aur-pkgdesc-authority-test",
 }
 WORKSPACE_PATTERN = re.compile(r"\.artifact-workspace~-[A-Za-z0-9]{6}")
 MAX_ARTIFACT_AGE_SECONDS = 60 * 60
@@ -28,26 +28,6 @@ FUTURE_SKEW_SECONDS = 5
 STATIC_HEADER = ("# path", "type", "mode", "sha256")
 MANIFEST_HEADER = ("# path", "type", "mode", "owner", "group", "sha256")
 PKGINFO_MANIFEST_HEADER = ("# key", "value")
-EXPECTED_STATIC_AUTHORITY = {
-    "usr/": ("directory", "0755", "-"),
-    "usr/bin/": ("directory", "0755", "-"),
-    "usr/bin/fetchfetch": ("regular", "0755", "-"),
-    "usr/share/": ("directory", "0755", "-"),
-    "usr/share/doc/": ("directory", "0755", "-"),
-    "usr/share/doc/fetchfetch/": ("directory", "0755", "-"),
-    "usr/share/doc/fetchfetch/README.md": (
-        "regular",
-        "0644",
-        "26ac44a45dfae74d33d54e474bc14a2d677f0e720dade11882bd3bea3e5b0d9a",
-    ),
-    "usr/share/licenses/": ("directory", "0755", "-"),
-    "usr/share/licenses/fetchfetch/": ("directory", "0755", "-"),
-    "usr/share/licenses/fetchfetch/LICENSE": (
-        "regular",
-        "0644",
-        "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
-    ),
-}
 EXPECTED_METADATA = {
     ".BUILDINFO": ("regular", "0644"),
     ".MTREE": ("regular", "0644"),
@@ -87,6 +67,43 @@ SAFE_ENV = {"PATH": "/usr/bin", "LC_ALL": "C"}
 
 def fail(message: str) -> None:
     raise RuntimeError(message)
+
+
+def parse_scenario(values: list[str]) -> dict[str, str | tuple[str, ...]]:
+    if len(values) != 6:
+        fail("scenario identity requires six fields")
+    package_name, package_base, version, runtime_text, make_text, architecture = values
+    package_pattern = re.compile(r"[a-z0-9][a-z0-9@._+-]*")
+    dependency_pattern = re.compile(
+        r"[a-z0-9][a-z0-9@._+-]*(?:[<>=]+[0-9A-Za-z@._+:~+-]+)?"
+    )
+    if not package_pattern.fullmatch(package_name) or not package_pattern.fullmatch(
+        package_base
+    ):
+        fail("scenario package identity is unsafe")
+    if package_name != package_base:
+        fail("scenario requires one package matching its PackageBase")
+    if not re.fullmatch(r"[0-9A-Za-z@._+:~=-]+", version):
+        fail("scenario version is unsafe")
+    if not re.fullmatch(r"[0-9A-Za-z_+-]+", architecture):
+        fail("scenario architecture is unsafe")
+
+    def dependencies(text: str, label: str) -> tuple[str, ...]:
+        result = tuple(text.split(","))
+        if not result or any(not dependency_pattern.fullmatch(item) for item in result):
+            fail(f"scenario {label} dependency identity is unsafe")
+        if len(set(result)) != len(result):
+            fail(f"scenario {label} dependencies contain duplicates")
+        return result
+
+    return {
+        "package_name": package_name,
+        "package_base": package_base,
+        "version": version,
+        "runtime_dependencies": dependencies(runtime_text, "runtime"),
+        "make_dependencies": dependencies(make_text, "make"),
+        "architecture": architecture,
+    }
 
 
 def hash_bytes(value: bytes) -> str:
@@ -340,7 +357,9 @@ def read_tsv(path: Path, header: tuple[str, ...], label: str) -> list[tuple[str,
     return rows[1:]
 
 
-def load_static_authority(path: Path) -> dict[str, tuple[str, str, str]]:
+def load_static_authority(
+    path: Path, scenario: dict[str, str | tuple[str, ...]]
+) -> dict[str, tuple[str, str, str]]:
     require_root_readonly_file(path, "static payload authority")
     rows = read_tsv(path, STATIC_HEADER, "static payload authority")
     entries: dict[str, tuple[str, str, str]] = {}
@@ -363,8 +382,21 @@ def load_static_authority(path: Path) -> dict[str, tuple[str, str, str]]:
         ordered_paths.append(archive_path)
     if ordered_paths != sorted(ordered_paths):
         fail("static payload authority is not sorted")
-    if entries != EXPECTED_STATIC_AUTHORITY:
-        fail("static payload authority does not contain exactly the expected entries")
+    package_name = str(scenario["package_name"])
+    required_regular = {
+        f"usr/bin/{package_name}": ("0755", False),
+        f"usr/share/doc/{package_name}/README.md": ("0644", True),
+        f"usr/share/licenses/{package_name}/LICENSE": ("0644", True),
+    }
+    for archive_path, (expected_mode, requires_hash) in required_regular.items():
+        identity = entries.get(archive_path)
+        if identity is None or identity[:2] != ("regular", expected_mode):
+            fail(f"static payload authority lacks required entry: {archive_path}")
+        content_hash = identity[2]
+        if requires_hash and not re.fullmatch(r"[0-9a-f]{64}", content_hash):
+            fail(f"static payload authority lacks pinned content: {archive_path}")
+        if not requires_hash and content_hash != "-":
+            fail(f"generated payload must not have a tracked hash: {archive_path}")
     return entries
 
 
@@ -396,9 +428,9 @@ def load_runtime_manifest(
             "root",
         ):
             fail("reference payload manifest type/mode/owner/group drift")
-        if archive_path == "usr/bin/fetchfetch":
+        if entry_type == "regular" and static_hash == "-":
             if not re.fullmatch(r"[0-9a-f]{64}", content_hash):
-                fail("reference binary hash is invalid")
+                fail("reference generated-payload hash is invalid")
         elif content_hash != static_hash:
             fail("reference payload manifest static content hash drift")
     return entries
@@ -431,7 +463,9 @@ def run_bsdtar(arguments: list[str], text: bool = False) -> bytes | str:
     return completed.stdout
 
 
-def parse_pkginfo(value: bytes) -> dict[str, list[str]]:
+def parse_pkginfo(
+    value: bytes, scenario: dict[str, str | tuple[str, ...]]
+) -> dict[str, list[str]]:
     try:
         lines = value.decode("utf-8").splitlines()
     except UnicodeDecodeError as error:
@@ -470,16 +504,17 @@ def parse_pkginfo(value: bytes) -> dict[str, list[str]]:
             fail(f".PKGINFO singleton cardinality drift: {key}")
     if not fields.get("license"):
         fail(".PKGINFO has no license")
-    if fields.get("depend") != ["glibc"]:
+    if Counter(fields.get("depend", [])) != Counter(scenario["runtime_dependencies"]):
         fail(".PKGINFO dependency policy drift")
-    make_dependencies = fields.get("makedepend", [])
-    if len(make_dependencies) != 2 or set(make_dependencies) != {"gcc", "make"}:
+    if Counter(fields.get("makedepend", [])) != Counter(
+        scenario["make_dependencies"]
+    ):
         fail(".PKGINFO make dependency policy drift")
     expected_identity = {
-        "pkgname": "fetchfetch",
-        "pkgbase": "fetchfetch",
-        "pkgver": "2.0.0-1",
-        "arch": "x86_64",
+        "pkgname": scenario["package_name"],
+        "pkgbase": scenario["package_base"],
+        "pkgver": scenario["version"],
+        "arch": scenario["architecture"],
     }
     for key, expected in expected_identity.items():
         if fields[key] != [expected]:
@@ -545,6 +580,7 @@ def validate_pkginfo_authority(
 def validate_package_archive(
     archive: Path,
     expected_entries: dict[str, tuple[str, str, str, str, str]],
+    scenario: dict[str, str | tuple[str, ...]],
 ) -> tuple[list[str], bytes, dict[str, list[str]]]:
     archive_status = os.lstat(archive)
     if not stat.S_ISREG(archive_status.st_mode) or stat.S_ISLNK(archive_status.st_mode):
@@ -592,7 +628,7 @@ def validate_package_archive(
 
     pkginfo = run_bsdtar(["-xOf", str(archive), ".PKGINFO"])
     assert isinstance(pkginfo, bytes)
-    pkginfo_fields = parse_pkginfo(pkginfo)
+    pkginfo_fields = parse_pkginfo(pkginfo, scenario)
     for archive_path, (_entry_type, _mode, _owner, _group, expected_hash) in expected_entries.items():
         if expected_hash == "-":
             continue
@@ -621,13 +657,15 @@ def write_new_file(path: Path, value: bytes, mode: int, gid: int) -> None:
 
 
 def create_reference_manifest(arguments: list[str]) -> int:
-    if len(arguments) != 3:
+    if len(arguments) != 9:
         print(
-            "usage: aur-stage-artifact.py manifest STATIC_AUTHORITY ARCHIVE OUTPUT",
+            "usage: aur-stage-artifact.py manifest STATIC_AUTHORITY ARCHIVE OUTPUT "
+            "PACKAGE PACKAGE_BASE VERSION RUNTIME_DEPS MAKE_DEPS ARCH",
             file=sys.stderr,
         )
         return 2
-    static_entries = load_static_authority(Path(arguments[0]))
+    scenario = parse_scenario(arguments[3:])
+    static_entries = load_static_authority(Path(arguments[0]), scenario)
     archive = Path(arguments[1])
     output = Path(arguments[2])
     output_parent = output.parent
@@ -645,18 +683,23 @@ def create_reference_manifest(arguments: list[str]) -> int:
         for archive_path, (entry_type, mode, content_hash) in static_entries.items()
     }
     serialized_members, _pkginfo, _pkginfo_fields = validate_package_archive(
-        archive, reference_entries
+        archive, reference_entries, scenario
     )
     del serialized_members
-    binary = run_bsdtar(["-xOf", str(archive), "usr/bin/fetchfetch"])
-    assert isinstance(binary, bytes)
-    reference_entries["usr/bin/fetchfetch"] = (
-        "regular",
-        "0755",
-        "root",
-        "root",
-        hash_bytes(binary),
-    )
+    for archive_path, (entry_type, mode, _owner, _group, content_hash) in list(
+        reference_entries.items()
+    ):
+        if entry_type != "regular" or content_hash != "-":
+            continue
+        generated_payload = run_bsdtar(["-xOf", str(archive), archive_path])
+        assert isinstance(generated_payload, bytes)
+        reference_entries[archive_path] = (
+            entry_type,
+            mode,
+            "root",
+            "root",
+            hash_bytes(generated_payload),
+        )
     lines = ["\t".join(MANIFEST_HEADER)]
     for archive_path in sorted(reference_entries):
         lines.append("\t".join((archive_path, *reference_entries[archive_path])))
@@ -665,14 +708,16 @@ def create_reference_manifest(arguments: list[str]) -> int:
 
 
 def create_reference_pkginfo_manifest(arguments: list[str]) -> int:
-    if len(arguments) != 3:
+    if len(arguments) != 9:
         print(
             "usage: aur-stage-artifact.py pkginfo-manifest "
-            "STATIC_AUTHORITY ARCHIVE OUTPUT",
+            "STATIC_AUTHORITY ARCHIVE OUTPUT PACKAGE PACKAGE_BASE VERSION "
+            "RUNTIME_DEPS MAKE_DEPS ARCH",
             file=sys.stderr,
         )
         return 2
-    static_entries = load_static_authority(Path(arguments[0]))
+    scenario = parse_scenario(arguments[3:])
+    static_entries = load_static_authority(Path(arguments[0]), scenario)
     archive = Path(arguments[1])
     output = Path(arguments[2])
     output_parent = output.parent
@@ -690,7 +735,7 @@ def create_reference_pkginfo_manifest(arguments: list[str]) -> int:
         for archive_path, (entry_type, mode, content_hash) in static_entries.items()
     }
     _serialized_members, _pkginfo, fields = validate_package_archive(
-        archive, reference_entries
+        archive, reference_entries, scenario
     )
     del _serialized_members, _pkginfo
     pairs = pkginfo_stable_pairs(fields)
@@ -703,15 +748,16 @@ def create_reference_pkginfo_manifest(arguments: list[str]) -> int:
 
 
 def validate_staged_archive(arguments: list[str]) -> int:
-    if len(arguments) != 6:
+    if len(arguments) != 12:
         print(
             "usage: aur-stage-artifact.py validate STATIC_AUTHORITY "
             "PAYLOAD_MANIFEST PKGINFO_MANIFEST ARCHIVE EVIDENCE_DIRECTORY "
-            "EVIDENCE_GID",
+            "EVIDENCE_GID PACKAGE PACKAGE_BASE VERSION RUNTIME_DEPS MAKE_DEPS ARCH",
             file=sys.stderr,
         )
         return 2
-    static_entries = load_static_authority(Path(arguments[0]))
+    scenario = parse_scenario(arguments[6:])
+    static_entries = load_static_authority(Path(arguments[0]), scenario)
     manifest_entries = load_runtime_manifest(Path(arguments[1]), static_entries)
     pkginfo_reference = load_pkginfo_manifest(Path(arguments[2]))
     archive = Path(arguments[3])
@@ -727,7 +773,7 @@ def validate_staged_archive(arguments: list[str]) -> int:
     ):
         fail("evidence directory is unsafe")
     serialized_members, pkginfo, pkginfo_fields = validate_package_archive(
-        archive, manifest_entries
+        archive, manifest_entries, scenario
     )
     validate_pkginfo_authority(pkginfo_fields, pkginfo_reference)
     write_new_file(
@@ -745,19 +791,6 @@ def validate_staged_archive(arguments: list[str]) -> int:
     write_new_file(
         evidence_directory / "validated-payload.tsv",
         ("\n".join(manifest_lines) + "\n").encode("utf-8"),
-        0o640,
-        evidence_gid,
-    )
-    identity_lines = [
-        f"package_name={pkginfo_fields['pkgname'][0]}",
-        f"package_base={pkginfo_fields['pkgbase'][0]}",
-        f"package_version={pkginfo_fields['pkgver'][0]}",
-        f"package_architecture={pkginfo_fields['arch'][0]}",
-        f"package_dependency={pkginfo_fields['depend'][0]}",
-    ]
-    write_new_file(
-        evidence_directory / "package-identity.txt",
-        ("\n".join(identity_lines) + "\n").encode("utf-8"),
         0o640,
         evidence_gid,
     )
