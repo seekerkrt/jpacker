@@ -567,8 +567,9 @@ RepositoryPackageBaseSnapshotResult snapshot_repository_package_base(
     if(package_base == nullptr || !is_valid_package_name(package_base)) {
         return PackageMetadataFailure{
                 PackageMetadataErrorCode::MalformedMetadata,
-                localization::translate_message(
-                        "Repository package metadata contains an invalid PackageBase.")};
+                localization::format_translated_message(
+                        "Repository package metadata contains an invalid {}.",
+                        "PackageBase")};
     }
     return std::string(package_base);
 }
