@@ -2,7 +2,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Moguet 2.2.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-10 05:40+0900\n"
+"POT-Creation-Date: 2026-08-11 16:54+0900\n"
 "PO-Revision-Date: 2026-08-03 06:53+0900\n"
 "Last-Translator: Moguet contributors\n"
 "Language-Team: Japanese\n"
@@ -5243,6 +5243,9 @@ msgstr "リポジトリパッケージデータベースを登録できません
 msgid "Failed to register a repository package database: {}."
 msgstr "リポジトリパッケージデータベースを登録できませんでした: {}。"
 
+msgid "Repository package metadata contains an invalid PackageBase."
+msgstr "リポジトリパッケージのメタデータに無効な PackageBase が含まれています。"
+
 #, c++-format
 msgid "Repository package search failed: {} reported no error detail."
 msgstr "リポジトリパッケージの検索に失敗しました: {} からエラーの詳細が報告されませんでした。"
@@ -5874,9 +5877,6 @@ msgstr "{} セットのソースビルドが予期せず単一対象の更新状
 msgid "Unknown source-build execution status."
 msgstr "ソースビルドの実行状態が不明です。"
 
-msgid "Unknown source-build source kind."
-msgstr "不明なソースビルド元種別です。"
-
 #, c++-format
 msgid "Registered source upgrade does not support split {} preference {} from {} {}; this route requires a singular package identity."
 msgstr "登録済みソースの更新は、分割された {} 設定 {}（{} {} 由来）に対応していません。この経路では単一のパッケージ識別情報が必要です。"
@@ -5966,6 +5966,14 @@ msgid "Production source-build work item has no prepared cache authority."
 msgstr "本番用ソースビルドの作業項目に準備済みのキャッシュ管理主体がありません。"
 
 #, c++-format
+msgid "Repository exact package identity does not match the requested package {}."
+msgstr "リポジトリの正確なパッケージ識別情報が、要求されたパッケージ {} と一致しません。"
+
+#, c++-format
+msgid "Failed to inspect repository metadata for {}: {}"
+msgstr "{} のリポジトリメタデータの確認に失敗しました: {}"
+
+#, c++-format
 msgid "{} info for {} does not include {}."
 msgstr "{} の {} に関する情報に {} が含まれていません。"
 
@@ -5978,10 +5986,6 @@ msgstr "blocking detailがないままremote source-build planが拒否されま
 #, c++-format
 msgid "{} required artifact target projection failed before source-build work-item preparation."
 msgstr "ソースビルド作業項目の準備前に、{} に必要なアーティファクト対象の投影に失敗しました。"
-
-#, c++-format
-msgid "{} set source-build execution requires an {} {} work item."
-msgstr "{} セットのソースビルド実行には {} {} の作業項目が必要です。"
 
 #, c++-format
 msgid "{} set source-build execution does not support only-if-updated requests."
@@ -7890,6 +7894,13 @@ msgstr "{}のデフォルト状態ログを段階{}で安全に使用できま�
 
 msgid "Unknown state log error code."
 msgstr "不明な状態ログエラーコードです。"
+
+#~ msgid "Unknown source-build source kind."
+#~ msgstr "不明なソースビルド元種別です。"
+
+#, c++-format
+#~ msgid "{} set source-build execution requires an {} {} work item."
+#~ msgstr "{} セットのソースビルド実行には {} {} の作業項目が必要です。"
 
 #~ msgid "redacted because candidate validation failed"
 #~ msgstr "候補の検証に失敗したため非表示"
