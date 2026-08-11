@@ -36,6 +36,8 @@ local_archive_validator=$live_root/local-archive-validator.sh
 validation_status_library=$repo_root/scripts/validation-status.sh
 dockerignore_file=$repo_root/.dockerignore
 makefile=$repo_root/Makefile
+development_policy=$repo_root/docs/DEVELOPMENT.md
+validation_policy=$repo_root/docs/VALIDATION.md
 offline_dockerfile=$repo_root/containers/arch-validation/Dockerfile
 offline_runner=$repo_root/containers/arch-validation/run-tests.sh
 
@@ -108,6 +110,8 @@ assert_regular_file "$local_stage_helper" 'live local artifact staging helper'
 assert_regular_file "$local_archive_validator" 'live local archive validator'
 assert_regular_file "$validation_status_library" 'validation status library'
 assert_regular_file "$dockerignore_file" 'Docker context exclusion contract'
+assert_regular_file "$development_policy" 'development workflow authority'
+assert_regular_file "$validation_policy" 'validation policy authority'
 assert_regular_file "$offline_dockerfile" 'offline validation Dockerfile'
 assert_regular_file "$offline_runner" 'offline validation runner'
 
@@ -1106,6 +1110,19 @@ do
         grep -F "$release_checker" >/dev/null ||
         fail "release-exclusive owner lost checker: $release_checker"
 done
+
+# The policy owner must remain discoverable from the development workflow and
+# preserve the same named boundaries enforced above. These assertions do not
+# duplicate the matrix; they prevent documentation from silently promoting a
+# focused or compatibility target to approval authority.
+assert_contains "$development_policy" '[VALIDATION.md](VALIDATION.md)'
+assert_contains "$validation_policy" 'PR / mergeのcanonical host gateは`test-host-release`である。'
+assert_contains "$validation_policy" '`release-check`はstandalone互換targetとして維持するが、full host A–Dのapproval evidenceではない。'
+assert_contains "$validation_policy" '`test-container`はhost A–D / Gを代替せず、`test-live-contract`はactual Fを代替しない。'
+assert_contains "$validation_policy" 'focused / affected resultだけはPR approval tokenにはならない。'
+assert_contains "$validation_policy" 'release candidateは新しいapproval evidence epochである。'
+assert_contains "$validation_policy" '## Evidence reuse / invalidation'
+assert_contains "$validation_policy" '## Review stop rule / closure rule'
 
 # Existing offline files and target remain isolated from the new live paths.
 assert_not_contains "$offline_dockerfile" 'arch-live-validation'

@@ -25,6 +25,7 @@ Moguetは、pacman、makepkg、AUR、gitの既存契約を尊重しながらArch
 - `docs/PROJECT_STANCE.md`: projectの立場と非目標
 - `docs/COMPATIBILITY.md`: 互換性境界
 - `docs/DEVELOPMENT.md`: branch、PR、mirror、release運用
+- `docs/VALIDATION.md`: 段階別validation、approval evidence、再利用 / 無効化、review closure
 - `docs/VERSIONING.md`: version policy
 - `docs/LICENSING.md`: dependencyと配布物のlicense契約
 - `docs/CODING_CONVENTIONS.md`: Moguet固有のC++追加・上書き規約
@@ -52,11 +53,15 @@ Moguetは、pacman、makepkg、AUR、gitの既存契約を尊重しながらArch
 ## Build・testの入口
 
 - `make`: binaryとman pageの基本build
-- `make test`: repositoryのtest集合
+- `make test`: full host A–D
 - `make test-<領域>`: 変更責務に対応する限定test
-- `make release-check`: release前の統合確認
+- `make test-host-release`: PR / mergeのcanonical host gateとなるA–D + G
+- `make release-check`: standalone互換target。full host A–Dではない
+- `make test-container`: offline/current Arch Docker E
+- `make test-container-live`: actual provider / AUR / local F
 - `git diff --check`: docs-onlyを含む差分の基本確認
 
+実行段階、approvalへ十分なevidence、再実行が必要な変更は`docs/VALIDATION.md`を正とする。
 CLI出力や終了codeを変えた場合は対象commandを直接確認する。pacman、makepkg、sudo、system package databaseへ影響する確認は通常testと同列に実行せず、対象と副作用を明示した依頼に基づいて行う。
 
 ## Branch・remote・mirror

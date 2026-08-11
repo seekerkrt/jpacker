@@ -4,7 +4,9 @@ Moguetは、`main` / `develop` / `feature/*` / `fix/*` / `docs/*` / `release/*`�
 
 branch / tag同期のownerはGitHub Actionsのmirror workflowとする。同じrefをGitHubとGitLabへ二重に手動pushせず、GitHubをauthority、GitLabをmirror destinationとして扱う。
 
-バージョン番号の付け方は [VERSIONING.md](VERSIONING.md) を参照する。
+バージョン番号の付け方は [VERSIONING.md](VERSIONING.md) を参照する。developmentからrelease
+candidateまでのvalidation selection、approval evidence、evidence reuse / invalidation、review closureは
+[VALIDATION.md](VALIDATION.md)をpolicy authorityとする。
 
 ## Branches
 
@@ -65,9 +67,16 @@ Issue ごとの作業ブランチ。
     git pull --ff-only origin develop
     git switch -c feature/issue-XX-topic
 
-作業後:
+実装中は`VALIDATION.md`のrisk classificationに従い、incremental buildとaffected / focused
+targetを使う。例:
 
-    make clean && make
+    env -u MAKEFLAGS -u MFLAGS make -j8 --output-sync=target test-<affected-area>
+
+Slice completionでは変更contractのfocused supersetと必要なhost / deterministic regressionを確認する。
+PR / merge approvalのcanonical host gateは次の1回である。同じcandidateの有効なevidenceがある場合は、
+`VALIDATION.md`のinvalidation ruleに従って不要な再実行を避ける。
+
+    env -u MAKEFLAGS -u MFLAGS make -j8 --output-sync=target test-host-release
     git diff --check
     git status --short
 
@@ -272,6 +281,7 @@ test behavior、link firewallを測定し、このbaselineと比較する。
 `test`はfull host A–Dを所有し、`release-check-exclusive`はversion、license、packaging、tracked
 Markdownのrelease固有4 checkerだけを所有する。`test-host-release`は同じtop-level runで`test`を
 完了してから`release-check-exclusive`を1回実行するため、A–DとGを重複なく構成できる。
+実行段階とevidenceの扱いは[VALIDATION.md](VALIDATION.md)を正とする。
 
 既存`release-check`のstandalone互換性は維持し、従来のA–D subset prerequisiteを完了してから同じ
 `release-check-exclusive`へ委譲する。`release-check`単独をfull A–Dへ拡張したものではない。
@@ -336,11 +346,15 @@ static `test-live-contract`として確認するが、networkやcontainer runtim
 
 リリース準備後:
 
-    make clean
-    make
-    make test
-    make release-check
+    env -u MAKEFLAGS -u MFLAGS make clean
+    env -u MAKEFLAGS -u MFLAGS make -j8 --output-sync=target
+    env -u MAKEFLAGS -u MFLAGS make -j8 --output-sync=target test-host-release
+    env -u MAKEFLAGS -u MFLAGS make test-container
+    env -u MAKEFLAGS -u MFLAGS make test-container-live
     git diff --check
+
+ccache / mold parityは必要なreleaseでの追加validationであり、上記default gateの代替にしない。
+それぞれのexact compile / link scopeとclean / incremental条件を`VALIDATION.md`に従って記録する。
 
     git status --short
 
