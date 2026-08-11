@@ -318,28 +318,218 @@ if grep -F 'pkgname = clean-root-cli' "$export_fixture/.SRCINFO" >/dev/null; the
     fail 'export fixture .SRCINFO was incorrectly unified with PKGBUILD projection'
 fi
 
-# VERSION is the canonical current-release input.  makepkg and built-binary
-# output remain separate actual paths in their owning checks; validation code
-# must not copy the current literal into another authority.
+# VERSION is the canonical current-release input.  Only tracked consumers with
+# an explicit current-project-version responsibility are checked for duplicate
+# literals.  Generated man/catalog files are verified as projections, while
+# synthetic and historical version records remain independent test contracts.
 current_version=$(tr -d '[:space:]' < "$repo_root/VERSION")
 [ -n "$current_version" ] || fail 'root VERSION is empty'
-current_version_matches=$tmp_dir/current-version-literals.txt
-if grep -R -F -n -- "$current_version" \
-    "$repo_root/tests" \
-    "$repo_root/scripts" \
-    "$repo_root/containers" \
-    "$repo_root/PKGBUILD" \
-    "$repo_root/Makefile" \
-    "$repo_root/.github" \
-    "$repo_root/.gitlab" >"$current_version_matches"; then
-    sed -n '1,120p' "$current_version_matches" >&2
-    fail 'validation or packaging code duplicates the current VERSION literal'
-else
-    version_grep_status=$?
-fi
-case $version_grep_status in
-    1) ;;
-    *) fail "current VERSION scan failed with status $version_grep_status" ;;
-esac
+python3 - "$repo_root" "$current_version" "$tmp_dir" <<'PY'
+from pathlib import Path
+import re
+import subprocess
+import sys
+
+repo_root = Path(sys.argv[1])
+canonical_version = sys.argv[2]
+scratch_root = Path(sys.argv[3])
+
+if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", canonical_version):
+    raise SystemExit(f"root VERSION is not X.Y.Z: {canonical_version!r}")
+
+
+def tracked_paths(repository: Path) -> set[str]:
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(repository), "ls-files", "-z"],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise SystemExit(f"unable to enumerate tracked current-version consumers: {error}")
+    return {
+        value.decode("utf-8")
+        for value in result.stdout.split(b"\0")
+        if value
+    }
+
+
+# These paths consume the current project version as source/build/validation
+# input.  A version-looking value elsewhere can instead be a synthetic,
+# external, or historical test contract and is not classified by spelling.
+source_consumers = (
+    "Makefile",
+    "PKGBUILD",
+    "scripts/check-license-compliance.sh",
+    "scripts/check-packaging-metadata.sh",
+    "scripts/check-release-version.sh",
+    "scripts/check_public_documentation.py",
+    "scripts/extract-release-notes.sh",
+    "src/application_identity.hpp",
+    "src/aur_rpc.cpp",
+    "src/moguet.cpp",
+    "tests/application_identity_test.cpp",
+    "tests/test-aur-rpc-validation.sh",
+    "tests/test-fixture-authority.sh",
+    "tests/test-help-man-completion.sh",
+    "tests/test-install-layout.sh",
+    "tests/test-package-transition.sh",
+    "tests/test-runtime-identity.sh",
+)
+man_projections = (
+    ("man/moguet.1.in", "man/moguet.1"),
+    ("man/ja/moguet.1.in", "man/ja/moguet.1"),
+)
+catalog_projections = ("po/moguet.pot", "po/ja.po")
+owned_paths = {
+    "VERSION",
+    *source_consumers,
+    *catalog_projections,
+    *(path for pair in man_projections for path in pair),
+}
+missing_or_unsafe_owners = sorted(
+    relative_path
+    for relative_path in owned_paths
+    if not (repo_root / relative_path).is_file()
+    or (repo_root / relative_path).is_symlink()
+)
+if missing_or_unsafe_owners:
+    raise SystemExit(
+        "current-version owner is missing, non-regular, or a symlink: "
+        + ", ".join(missing_or_unsafe_owners)
+    )
+
+# Docker and release source snapshots intentionally omit .git.  The explicit
+# owner set remains authoritative there; a host checkout additionally proves
+# that every owner is tracked.
+if (repo_root / ".git").exists():
+    repository_tracked_paths = tracked_paths(repo_root)
+    untracked_owners = sorted(owned_paths - repository_tracked_paths)
+    if untracked_owners:
+        raise SystemExit(
+            "current-version owner is untracked: " + ", ".join(untracked_owners)
+        )
+
+version_token = re.compile(
+    r"(?<![A-Za-z0-9])v?"
+    r"(?P<value>[0-9]+\.[0-9]+\.[0-9]+"
+    r"(?:-[A-Za-z0-9][A-Za-z0-9._+~:-]*)?)"
+    r"(?![A-Za-z0-9._+~:-])"
+)
+
+
+def duplicate_current_literals(
+    repository: Path, consumers: list[str] | tuple[str, ...], version: str
+) -> list[str]:
+    duplicates: list[str] = []
+    for relative_path in consumers:
+        path = repository / relative_path
+        text = path.read_text(encoding="utf-8")
+        for line_number, line in enumerate(text.splitlines(), start=1):
+            if any(match.group("value") == version for match in version_token.finditer(line)):
+                duplicates.append(f"{relative_path}:{line_number}:{line}")
+    return duplicates
+
+
+duplicates = duplicate_current_literals(
+    repo_root, source_consumers, canonical_version
+)
+if duplicates:
+    raise SystemExit(
+        "tracked current-version source consumer duplicates root VERSION:\n"
+        + "\n".join(duplicates)
+    )
+
+makefile = (repo_root / "Makefile").read_text(encoding="utf-8")
+if not re.search(r"(?m)^VERSION_FILE\s*:=\s*VERSION\s*$", makefile):
+    raise SystemExit("Makefile no longer names root VERSION as its input")
+if not re.search(
+    r"(?m)^VERSION\s*:=\s*\$\(strip \$\(shell cat \$\(VERSION_FILE\)",
+    makefile,
+):
+    raise SystemExit("Makefile no longer derives its current version from VERSION_FILE")
+
+pkgbuild = (repo_root / "PKGBUILD").read_text(encoding="utf-8")
+if len(re.findall(r"(?m)^pkgver=\$\(_read_version_file VERSION\)\s*$", pkgbuild)) != 1:
+    raise SystemExit("PKGBUILD current pkgver is not one projection of root VERSION")
+
+for template_name, projection_name in man_projections:
+    template = (repo_root / template_name).read_text(encoding="utf-8")
+    if "@VERSION@" not in template:
+        raise SystemExit(f"{template_name} lacks its current-version projection token")
+    expected_projection = template.replace("@VERSION@", canonical_version)
+    actual_projection = (repo_root / projection_name).read_text(encoding="utf-8")
+    if actual_projection != expected_projection:
+        raise SystemExit(
+            f"{projection_name} is not the actual projection of {template_name} and VERSION"
+        )
+
+catalog_header = re.compile(
+    r'^"Project-Id-Version: Moguet (?P<value>[^"\\]+)\\n"$', re.MULTILINE
+)
+for catalog_name in catalog_projections:
+    catalog = (repo_root / catalog_name).read_text(encoding="utf-8")
+    projected_versions = [
+        match.group("value") for match in catalog_header.finditer(catalog)
+    ]
+    if projected_versions != [canonical_version]:
+        raise SystemExit(
+            f"{catalog_name} current-version projection is {projected_versions!r}; "
+            f"expected {[canonical_version]!r}"
+        )
+
+# Focused regression: a tracked synthetic package release with the canonical
+# X.Y.Z prefix is not the current project version.  Exact current literals in
+# ignored or untracked files do not enter the Git-owned consumer set, while an
+# exact literal in a tracked consumer is rejected.
+regression_root = scratch_root / "current-version-semantic-regression"
+regression_root.mkdir()
+(regression_root / ".gitignore").write_text("ignored-current.txt\n", encoding="utf-8")
+(regression_root / "consumer.txt").write_text(
+    f"synthetic_package_version={canonical_version}-1\n", encoding="utf-8"
+)
+(regression_root / "ignored-current.txt").write_text(
+    f"current_version={canonical_version}\n", encoding="utf-8"
+)
+(regression_root / "untracked-current.txt").write_text(
+    f"current_version={canonical_version}\n", encoding="utf-8"
+)
+try:
+    subprocess.run(
+        ["git", "-C", str(regression_root), "init", "--quiet"],
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    subprocess.run(
+        ["git", "-C", str(regression_root), "add", ".gitignore", "consumer.txt"],
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+except (OSError, subprocess.CalledProcessError) as error:
+    raise SystemExit(f"current-version tracked-only regression setup failed: {error}")
+
+regression_tracked = tracked_paths(regression_root)
+if regression_tracked != {".gitignore", "consumer.txt"}:
+    raise SystemExit(
+        f"current-version tracked-only regression has unexpected owners: {regression_tracked!r}"
+    )
+if duplicate_current_literals(
+    regression_root, sorted(regression_tracked), canonical_version
+):
+    raise SystemExit("synthetic package release was mistaken for current VERSION")
+
+(regression_root / "consumer.txt").write_text(
+    f"current_version={canonical_version}\n", encoding="utf-8"
+)
+if len(
+    duplicate_current_literals(
+        regression_root, sorted(regression_tracked), canonical_version
+    )
+) != 1:
+    raise SystemExit("tracked exact current-version duplicate was not rejected")
+PY
 
 printf '%s\n' 'fixture authority tests: all checks passed'

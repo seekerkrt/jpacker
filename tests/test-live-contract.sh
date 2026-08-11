@@ -19,6 +19,7 @@ local_payload_file=$live_root/fixtures/local-package/payload-authority.tsv
 aur_case_file=$live_root/aur-cases.tsv
 aur_payload_file=$live_root/fixtures/aur/payload-authority.tsv
 aur_case_loader=$live_root/fixtures/aur/load-case.sh
+aur_conflict_mutator=$live_root/aur-mutate-pkginfo-conflict.py
 live_dockerfile=$live_root/Dockerfile
 provider_runner=$live_root/run-provider-selection.sh
 pacman_sentinel=$live_root/pacman-sentinel.sh
@@ -91,6 +92,7 @@ assert_regular_file "$local_payload_file" 'local payload authority'
 assert_regular_file "$aur_case_file" 'AUR case authority table'
 assert_regular_file "$aur_payload_file" 'AUR expected payload authority'
 assert_regular_file "$aur_case_loader" 'AUR case authority loader'
+assert_regular_file "$aur_conflict_mutator" 'AUR conflict mutation helper'
 assert_regular_file "$live_dockerfile" 'live provider Dockerfile'
 assert_regular_file "$provider_runner" 'live provider runner'
 assert_regular_file "$pacman_sentinel" 'live pacman sentinel source'
@@ -179,6 +181,153 @@ do
         esac
     done
 done
+
+# The conflict-policy negative artifact is scenario-derived, not an
+# independent dependency oracle.  Keep the runner connected to the loaded
+# make-dependency field and exercise that relationship with a temporary case
+# whose dependency records do not occur in the tracked consumer.
+python3 - "$aur_runner" <<'PY' || fail 'AUR conflict mutation is not scenario-derived'
+from pathlib import Path
+import re
+import sys
+
+runner = Path(sys.argv[1]).read_text(encoding="utf-8")
+start_marker = "current_phase=conflict-policy-negative"
+end_marker = "/usr/bin/zstd --quiet --force -o \"$conflict_gateway_artifact\""
+if runner.count(start_marker) != 1 or runner.count(end_marker) != 1:
+    raise SystemExit("conflict mutation block markers are not unique")
+block = runner.split(start_marker, 1)[1].split(end_marker, 1)[0]
+expected_call = (
+    'python3 "$conflict_mutator" "$conflict_raw_tar" "$make_dependencies"'
+)
+if block.count(expected_call) != 1:
+    raise SystemExit("conflict mutation does not consume loaded make_dependencies once")
+if re.search(r"makedepend\s*=", block):
+    raise SystemExit("conflict mutation block contains a consumer-side dependency record")
+PY
+
+aur_mutation_case=$tmp_dir/aur-mutation-case.tsv
+python3 - "$aur_case_file" "$aur_mutation_case" <<'PY' || fail 'temporary AUR dependency authority setup failed'
+import csv
+from pathlib import Path
+import sys
+
+source = Path(sys.argv[1])
+destination = Path(sys.argv[2])
+with source.open(encoding="utf-8", newline="") as stream:
+    rows = list(csv.reader(stream, delimiter="\t"))
+if len(rows) != 2 or "make_dependencies" not in rows[0]:
+    raise SystemExit("tracked AUR scenario shape drift")
+make_dependencies_index = rows[0].index("make_dependencies")
+rows[1][make_dependencies_index] = (
+    "fixture-build-one>=1.0,fixture-build-two"
+)
+with destination.open("w", encoding="utf-8", newline="") as stream:
+    writer = csv.writer(stream, delimiter="\t", lineterminator="\n")
+    writer.writerows(rows)
+PY
+validation_load_aur_case "$aur_mutation_case" ||
+    fail 'temporary AUR dependency authority did not load'
+
+aur_mutation_positive=$tmp_dir/aur-mutation-positive.tar
+aur_mutation_zero=$tmp_dir/aur-mutation-zero.tar
+aur_mutation_multiple=$tmp_dir/aur-mutation-multiple.tar
+python3 - \
+    "$aur_mutation_positive" "$aur_mutation_zero" "$aur_mutation_multiple" \
+    "$AUR_CASE_MAKE_DEPENDENCIES" <<'PY' || fail 'temporary AUR PKGINFO mutation archives could not be created'
+from io import BytesIO
+from pathlib import Path
+import sys
+import tarfile
+
+positive_path, zero_path, multiple_path = map(Path, sys.argv[1:4])
+dependencies = sys.argv[4].split(",")
+if len(dependencies) < 2 or any(not dependency for dependency in dependencies):
+    raise SystemExit("temporary make dependency authority is not a useful separator case")
+
+
+def write_archive(path: Path, records: list[str]) -> None:
+    contents = "pkgname = fixture\n" + "".join(
+        f"makedepend = {record}\n" for record in records
+    )
+    payload = contents.encode("ascii")
+    member = tarfile.TarInfo(".PKGINFO")
+    member.mode = 0o644
+    member.size = len(payload)
+    with tarfile.open(path, mode="w") as archive:
+        archive.addfile(member, BytesIO(payload))
+
+
+write_archive(positive_path, dependencies)
+write_archive(zero_path, dependencies[1:])
+write_archive(multiple_path, [dependencies[0], dependencies[0], *dependencies[1:]])
+PY
+
+if python3 "$aur_conflict_mutator" \
+    "$aur_mutation_positive" "$AUR_CASE_MAKE_DEPENDENCIES"; then
+    :
+else
+    mutation_status=$?
+    fail "scenario-derived AUR conflict mutation failed with status $mutation_status"
+fi
+python3 - "$aur_mutation_positive" "$AUR_CASE_MAKE_DEPENDENCIES" <<'PY' || fail 'scenario-derived AUR conflict mutation result is invalid'
+from pathlib import Path
+import sys
+import tarfile
+
+archive_path = Path(sys.argv[1])
+dependencies = sys.argv[2].split(",")
+with tarfile.open(archive_path, mode="r:") as archive:
+    members = [member for member in archive.getmembers() if member.name == ".PKGINFO"]
+    if len(members) != 1:
+        raise SystemExit("mutated archive has no unique .PKGINFO")
+    extracted = archive.extractfile(members[0])
+    if extracted is None:
+        raise SystemExit("mutated .PKGINFO is not readable")
+    records = extracted.read().decode("ascii").splitlines()
+
+target_dependency = dependencies[0]
+if f"makedepend = {target_dependency}" in records:
+    raise SystemExit("scenario-selected make dependency was not mutated")
+replacement = f"conflict = {'x' * (len(target_dependency) + 2)}"
+if records.count(replacement) != 1:
+    raise SystemExit("derived conflict record is not exact and unique")
+for dependency in dependencies[1:]:
+    if records.count(f"makedepend = {dependency}") != 1:
+        raise SystemExit("non-target scenario make dependency changed")
+PY
+
+for mutation_case in zero multiple
+do
+    case $mutation_case in
+        zero) mutation_archive=$aur_mutation_zero ;;
+        multiple) mutation_archive=$aur_mutation_multiple ;;
+        *) fail "unknown AUR conflict mutation regression: $mutation_case" ;;
+    esac
+    if validation_expect_status \
+        "aur-conflict-mutation-$mutation_case" 1 \
+        "$tmp_dir/aur-conflict-mutation-$mutation_case.stdout" \
+        "$tmp_dir/aur-conflict-mutation-$mutation_case.stderr" \
+        python3 "$aur_conflict_mutator" \
+        "$mutation_archive" "$AUR_CASE_MAKE_DEPENDENCIES"; then
+        :
+    else
+        fail "AUR conflict mutation $mutation_case target did not fail closed"
+    fi
+done
+if validation_expect_status \
+    aur-conflict-mutation-empty-authority 1 \
+    "$tmp_dir/aur-conflict-mutation-empty.stdout" \
+    "$tmp_dir/aur-conflict-mutation-empty.stderr" \
+    python3 "$aur_conflict_mutator" "$aur_mutation_zero" ''; then
+    :
+else
+    fail 'AUR conflict mutation empty authority did not fail closed'
+fi
+
+# Restore the tracked case for the static checks below.
+validation_load_aur_case "$aur_case_file" ||
+    fail 'tracked AUR case authority did not reload after mutation regression'
 
 python3 - \
     "$aur_payload_file" "$local_payload_file" \

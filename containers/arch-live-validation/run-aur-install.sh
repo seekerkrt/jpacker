@@ -11,6 +11,7 @@ repo_root=$(CDPATH='' cd "$(dirname "$0")/../.." && pwd)
 case_policy=$repo_root/containers/arch-live-validation/aur-cases.tsv
 case_loader=$repo_root/containers/arch-live-validation/fixtures/aur/load-case.sh
 payload_policy=$repo_root/containers/arch-live-validation/fixtures/aur/payload-authority.tsv
+conflict_mutator=$repo_root/containers/arch-live-validation/aur-mutate-pkginfo-conflict.py
 runtime_policy_root=/usr/share/moguet-live-aur/policy
 runtime_case_policy=$runtime_policy_root/aur-cases.tsv
 runtime_payload_policy=$runtime_policy_root/payload-authority.tsv
@@ -297,6 +298,7 @@ assert_repacked_path_set() {
 }
 
 assert_regular_non_symlink "$case_loader" 'tracked AUR case loader'
+assert_regular_non_symlink "$conflict_mutator" 'tracked AUR conflict mutator'
 # shellcheck source=fixtures/aur/load-case.sh
 . "$case_loader"
 validation_load_aur_case "$case_policy" || fail 'AUR case policy is invalid'
@@ -870,20 +872,12 @@ conflict_workspace=$(mktemp -d "$XDG_CACHE_HOME/moguet/.artifact-workspace~-XXXX
 conflict_gateway_artifact=$conflict_workspace/$package_name-$expected_version-$expected_architecture.pkg.tar.zst
 conflict_output=$case_root/conflict-policy-gateway.output
 /usr/bin/zstd --decompress --stdout "$negative_artifact" > "$conflict_raw_tar"
-python3 - "$conflict_raw_tar" <<'PY'
-from pathlib import Path
-import sys
-
-archive = Path(sys.argv[1])
-expected = b"makedepend = make\n"
-replacement = b"conflict = foo   \n"
-if len(expected) != len(replacement):
-    raise SystemExit("conflict mutation changes PKGINFO member length")
-contents = archive.read_bytes()
-if contents.count(expected) != 1:
-    raise SystemExit("expected unique make dependency line in PKGINFO")
-archive.write_bytes(contents.replace(expected, replacement, 1))
-PY
+if python3 "$conflict_mutator" "$conflict_raw_tar" "$make_dependencies"; then
+    :
+else
+    mutation_status=$?
+    fail "conflict mutation failed with status $mutation_status"
+fi
 /usr/bin/zstd --quiet --force -o "$conflict_gateway_artifact" "$conflict_raw_tar"
 /usr/bin/touch "$conflict_gateway_artifact"
 assert_repacked_path_set "$negative_artifact" "$conflict_gateway_artifact" conflict-policy

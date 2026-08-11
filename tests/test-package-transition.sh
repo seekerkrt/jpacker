@@ -946,10 +946,20 @@ rollback_version=$(LC_ALL=C \
     sha256sum -c "$tmp_dir/v2-package.sha256" >/dev/null) ||
     fail 'v2 package archive changed during transition validation'
 
+if v2_payload_count=$(wc -l <"$v2_manifest"); then
+    :
+else
+    payload_count_status=$?
+    fail "verified payload count failed with status $payload_count_status"
+fi
+case "$v2_payload_count" in
+    ''|*[!0-9]*) fail "verified payload count is invalid: $v2_payload_count" ;;
+esac
+
 printf 'package-transition-test: actual v1/v2 package archives have 0 path conflicts\n'
 printf 'package-transition-test: v2 .PKGINFO identity/dependencies and transition metadata passed\n'
 printf 'package-transition-test: archive owners, modes, and entry types passed\n'
-printf 'package-transition-test: %s archive payload (19 regular files):\n' \
-    "$PROJECT_NAME"
+printf 'package-transition-test: %s archive payload (%s regular files):\n' \
+    "$PROJECT_NAME" "$v2_payload_count"
 sed 's|^\./|/|' "$v2_manifest"
 printf 'package-transition-test: all checks passed\n'
