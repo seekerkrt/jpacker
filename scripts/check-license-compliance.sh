@@ -5,6 +5,7 @@ set -eu
 script_dir=$(CDPATH='' cd "$(dirname "$0")" && pwd)
 repo_root=$(CDPATH='' cd "$script_dir/.." && pwd)
 . "$script_dir/validation-status.sh"
+current_package_contract=$repo_root/tests/fixtures/current-package/contract.env
 
 fail() {
     printf 'license-check: %s\n' "$*" >&2
@@ -79,16 +80,16 @@ check_pkgbuild_metadata() {
         :
     else
         metadata_status=$?
-        fail "PKGBUILD evaluation failed for Moguet $case_version (status $metadata_status)."
+        fail "PKGBUILD evaluation failed for $PROJECT_NAME $case_version (status $metadata_status)."
     fi
 
     evaluated_pkgbase=$(sed -n 's/^pkgbase = //p' "$package_metadata_file")
-    [ "$evaluated_pkgbase" = moguet ] ||
-        fail "PKGBUILD evaluated pkgbase=$evaluated_pkgbase; expected moguet."
+    [ "$evaluated_pkgbase" = "$PACKAGE_BASE" ] ||
+        fail "PKGBUILD evaluated pkgbase=$evaluated_pkgbase; expected $PACKAGE_BASE."
 
     evaluated_pkgname=$(sed -n 's/^pkgname = //p' "$package_metadata_file")
-    [ "$evaluated_pkgname" = moguet ] ||
-        fail "PKGBUILD evaluated pkgname=$evaluated_pkgname; expected moguet."
+    [ "$evaluated_pkgname" = "$PACKAGE_NAME" ] ||
+        fail "PKGBUILD evaluated pkgname=$evaluated_pkgname; expected $PACKAGE_NAME."
 
     evaluated_version=$(sed -n \
         's/^[[:space:]]*pkgver = //p' "$package_metadata_file")
@@ -97,22 +98,22 @@ check_pkgbuild_metadata() {
 
     evaluated_license=$(sed -n \
         's/^[[:space:]]*license = //p' "$package_metadata_file")
-    [ "$evaluated_license" = GPL-3.0-or-later ] ||
-        fail "PKGBUILD evaluated license=$evaluated_license; expected GPL-3.0-or-later."
+    [ "$evaluated_license" = "$PACKAGE_LICENSE" ] ||
+        fail "PKGBUILD evaluated license=$evaluated_license; expected $PACKAGE_LICENSE."
 
     evaluated_url=$(sed -n \
         's/^[[:space:]]*url = //p' "$package_metadata_file")
-    expected_url="https://github.com/seekerkrt/moguet"
+    expected_url=$PROJECT_REPOSITORY_URL
     [ "$evaluated_url" = "$expected_url" ] ||
         fail "PKGBUILD URL mismatch: expected $expected_url, got $evaluated_url."
 
     evaluated_source=$(sed -n \
         's/^[[:space:]]*source = //p' "$package_metadata_file")
-    expected_source="moguet-src::git+https://github.com/seekerkrt/moguet.git#tag=v$case_version"
+    expected_source="$PACKAGE_SOURCE_NAME::git+$PROJECT_REPOSITORY_URL.git#tag=v$case_version"
     [ "$evaluated_source" = "$expected_source" ] ||
         fail "PKGBUILD source mismatch: expected $expected_source, got $evaluated_source."
 
-    pass "PKGBUILD describes Moguet $case_version under GPL-3.0-or-later"
+    pass "PKGBUILD describes $PROJECT_NAME $case_version under $PACKAGE_LICENSE"
 }
 
 evaluate_pkgbuild_metadata() {
@@ -121,6 +122,10 @@ evaluate_pkgbuild_metadata() {
         makepkg --printsrcinfo || exit $?
     )
 }
+
+require_regular_file "$current_package_contract"
+# shellcheck source=../tests/fixtures/current-package/contract.env
+. "$current_package_contract"
 
 cd "$repo_root"
 
@@ -147,7 +152,7 @@ pass "required license and notice files are present and non-empty"
 check_sha256 LICENSE \
     fb981668c18a279e285fc4d83fba1e836cc84dd4daa73c9697d3cfd2d8aca6e0
 
-installed_gpl=/usr/share/licenses/spdx/GPL-3.0-or-later.txt
+installed_gpl=/usr/share/licenses/spdx/$PACKAGE_LICENSE.txt
 if [ -f "$installed_gpl" ]; then
     cmp -s LICENSE "$installed_gpl" ||
         fail "LICENSE differs from the installed SPDX GPL-3.0-or-later canonical copy."
@@ -284,10 +289,9 @@ pass "third-party components and external-process boundary are classified"
 require_regular_file VERSION
 require_regular_file PKGBUILD
 current_version=$(tr -d '[:space:]' < VERSION)
-[ "$current_version" = 2.2.0 ] ||
-    fail "VERSION must identify the Moguet v2.2.0 package; got $current_version."
+[ -n "$current_version" ] || fail "VERSION must identify the current $PROJECT_NAME package."
 
-# POLICY(#310): The current PKGBUILD describes only Moguet v2.2.0. Historical
+# POLICY(#310): The current PKGBUILD describes the release named by VERSION. Historical
 # jpacker tags retain their own metadata; this validator does not reinterpret them.
 pkgbuild_test_dir=$(mktemp -d)
 cleanup_pkgbuild_test() {

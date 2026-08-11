@@ -8,9 +8,6 @@ LC_ALL=C
 export LC_ALL
 
 reject_status=97
-fixture_name=moguet-live-fixture
-fixture_version=1.0.0-1
-fixture_arch=any
 script_dir=$(CDPATH='' cd "$(dirname "$0")" && pwd)
 status_library=$script_dir/validation-status.sh
 
@@ -24,7 +21,41 @@ reject() {
 # shellcheck source=../../scripts/validation-status.sh
 . "$status_library"
 
-[ "$#" -eq 2 ] || reject 'archive validator requires artifact and evidence directory'
+case $# in
+    2)
+        fixture_root=$script_dir/fixtures/local-package
+        ;;
+    3)
+        fixture_root=$3
+        ;;
+    *)
+        reject 'archive validator requires artifact, evidence directory, and optional authority directory'
+        ;;
+esac
+fixture_contract=$fixture_root/contract.env
+payload_authority=$fixture_root/payload-authority.tsv
+if authority_owner=$(/usr/bin/id -u) &&
+    authority_group=$(/usr/bin/id -g); then
+    :
+else
+    producer_status=$?
+    reject "authority owner inspection failed with status $producer_status"
+fi
+expected_authority_metadata=$authority_owner:$authority_group:444:regular\ file
+[ -f "$fixture_contract" ] && [ ! -L "$fixture_contract" ] ||
+    reject 'local fixture contract is not a regular non-symlink'
+[ "$(/usr/bin/stat -c '%u:%g:%a:%F' -- "$fixture_contract")" = \
+    "$expected_authority_metadata" ] || reject 'local fixture contract metadata drift'
+[ -f "$payload_authority" ] && [ ! -L "$payload_authority" ] ||
+    reject 'payload authority is not a regular non-symlink'
+[ "$(/usr/bin/stat -c '%u:%g:%a:%F' -- "$payload_authority")" = \
+    "$expected_authority_metadata" ] || reject 'payload authority metadata drift'
+# shellcheck source=fixtures/local-package/contract.env
+. "$fixture_contract"
+fixture_name=$PACKAGE_NAME
+fixture_version=$PACKAGE_VERSION
+fixture_arch=$PACKAGE_ARCHITECTURE
+
 staged_artifact=$1
 evidence_directory=$2
 [ -f "$staged_artifact" ] && [ ! -L "$staged_artifact" ] ||
@@ -81,7 +112,7 @@ require_pkginfo_line() {
 }
 
 require_pkginfo_line "pkgname = $fixture_name" 'artifact package name drift'
-require_pkginfo_line "pkgbase = $fixture_name" 'artifact PackageBase drift'
+require_pkginfo_line "pkgbase = $PACKAGE_BASE" 'artifact PackageBase drift'
 require_pkginfo_line "pkgver = $fixture_version" 'artifact version drift'
 require_pkginfo_line "arch = $fixture_arch" 'artifact architecture drift'
 if /usr/bin/grep -E \
@@ -96,6 +127,26 @@ else
     esac
 fi
 
+expected_member_paths() {
+    printf '%s\n' \
+        .BUILDINFO \
+        .MTREE \
+        .PKGINFO || return $?
+    /usr/bin/awk -F '\t' '
+        NR == 1 {
+            if ($0 != "# path\ttype\tmode\tsha256") exit 2
+            next
+        }
+        NF != 4 || $1 == "" { exit 2 }
+        $1 ~ /^\// || $1 ~ /(^|\/)\.\.(\/|$)/ || $1 ~ /\/\// { exit 2 }
+        $2 != "directory" && $2 != "regular" { exit 2 }
+        $3 !~ /^0[0-7][0-7][0-7]$/ { exit 2 }
+        $4 != "-" && (length($4) != 64 || $4 !~ /^[0-9a-f]+$/) { exit 2 }
+        { print $1; count++ }
+        END { if (count == 0) exit 3 }
+    ' "$payload_authority"
+}
+
 if validation_capture_sorted_output "$member_list_raw" "$member_list" \
     /usr/bin/bsdtar -tf "$staged_artifact"; then
     :
@@ -106,16 +157,7 @@ fi
 
 if validation_capture_sorted_output \
     "$expected_members_raw" "$expected_members" \
-    printf '%s\n' \
-        .BUILDINFO \
-        .MTREE \
-        .PKGINFO \
-        usr/ \
-        usr/bin/ \
-        usr/bin/moguet-live-fixture \
-        usr/share/ \
-        usr/share/moguet-live-validation/ \
-        usr/share/moguet-live-validation/live-fixture-marker; then
+    expected_member_paths; then
     :
 else
     producer_status=$?
@@ -132,26 +174,49 @@ else
     esac
 fi
 
+static_payload_record=$(/usr/bin/awk -F '\t' '
+    NR == 1 {
+        if ($0 != "# path\ttype\tmode\tsha256") exit 2
+        next
+    }
+    NF != 4 || $1 == "" { exit 2 }
+    $2 == "regular" && $4 != "-" {
+        print $1 "\t" $4
+        count++
+    }
+    END { if (count != 1) exit 3 }
+' "$payload_authority") || reject 'payload authority lacks one static payload record'
+tab=$(printf '\tX')
+tab=${tab%X}
+if IFS=$tab read -r static_payload_path static_payload_sha256 <<EOF
+$static_payload_record
+EOF
+then
+    :
+else
+    producer_status=$?
+    reject "static payload authority parsing failed with status $producer_status"
+fi
+
 if validation_capture_output "$marker_raw" /usr/bin/bsdtar -xOf \
-    "$staged_artifact" \
-    usr/share/moguet-live-validation/live-fixture-marker; then
+    "$staged_artifact" "$static_payload_path"; then
     :
 else
     producer_status=$?
-    reject "artifact marker producer failed with status $producer_status"
+    reject "static payload producer failed with status $producer_status"
 fi
-if marker=$(/usr/bin/cat "$marker_raw"); then
-    :
+if marker_checksum_output=$(/usr/bin/sha256sum -- "$marker_raw"); then
+    marker_sha256=${marker_checksum_output%% *}
 else
     producer_status=$?
-    reject "artifact marker normalization failed with status $producer_status"
+    reject "static payload checksum failed with status $producer_status"
 fi
-printf '%s\n' 'live-validation-local-package-fixture marker' >"$expected_marker" ||
-    reject 'expected marker creation failed'
-[ "$marker" = 'live-validation-local-package-fixture marker' ] ||
-    reject 'artifact marker payload drift'
+[ "$marker_sha256" = "$static_payload_sha256" ] ||
+    reject 'artifact static payload drift'
+printf '%s\t%s\n' "$static_payload_path" "$static_payload_sha256" \
+    >"$expected_marker" || reject 'expected static payload evidence creation failed'
+printf '%s\t%s\n' "$static_payload_path" "$marker_sha256" \
+    >"$marker_file" || reject 'validated static payload evidence creation failed'
 
 printf '%s\n' "$pkginfo" >"$pkginfo_file" ||
     reject 'validated PKGINFO evidence creation failed'
-printf '%s\n' "$marker" >"$marker_file" ||
-    reject 'validated marker evidence creation failed'

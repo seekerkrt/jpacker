@@ -1,0 +1,7 @@
+curl
+git
+libalpm.so
+libarchive
+nano
+pacman
+sudo

@@ -4,10 +4,16 @@ LABEL org.opencontainers.image.title="Moguet Arch live AUR install validation" \
       org.opencontainers.image.source="https://github.com/seekerkrt/moguet" \
       org.opencontainers.image.base.name="docker.io/library/archlinux:latest"
 
+COPY containers/arch-live-validation/aur-cases.tsv \
+     containers/arch-live-validation/fixtures/aur/load-case.sh \
+     /tmp/moguet-live-aur/
+
 # Package provisioning is the image build's only root package transaction.
 # base-devel supplies gcc, make, makepkg, gettext, pkgconf, and the remaining
-# Arch build baseline; fetchfetch itself must remain absent until runtime.
-RUN pacman-key --init \
+# Arch build baseline; the selected fixture itself remains absent until runtime.
+RUN . /tmp/moguet-live-aur/load-case.sh \
+    && validation_load_aur_case /tmp/moguet-live-aur/aur-cases.tsv \
+    && pacman-key --init \
     && pacman-key --populate archlinux \
     && pacman -Syu --needed --noconfirm \
         acl \
@@ -23,8 +29,13 @@ RUN pacman-key --init \
         tomlplusplus \
         util-linux \
         zstd \
-    && test "$(uname -m)" = x86_64 \
-    && ! pacman -Qq fetchfetch \
+    && test "$(uname -m)" = "$AUR_CASE_EXPECTED_ARCHITECTURE" \
+    && if pacman -Qq "$AUR_CASE_PACKAGE_NAME"; then \
+        exit 1; \
+    else \
+        query_status=$?; \
+        test "$query_status" -eq 1 || exit "$query_status"; \
+    fi \
     && rm -f /var/cache/pacman/pkg/*
 
 ARG VALIDATION_UID=1000
@@ -69,20 +80,17 @@ USER root:root
 # been installed. The reference package is built from the fixed AUR authority
 # in this same image before the gateway replaces canonical pacman. It leaves
 # only a root-owned payload manifest: the reference source, build workspace,
-# and package artifacts are removed without installing fetchfetch.
+# and package artifacts are removed without installing the selected fixture.
 #
 # The validation user can execute pacman.real only without privilege; kernel
 # permissions then protect the system package database. The official minimal
-# image excludes usr/share/doc globally, so reopen only the one README path
-# required by the frozen fetchfetch payload authority.
-RUN printf '%s\n' \
-        '# Moguet live AUR: retain the exact tracked fetchfetch README.' \
-        'NoExtract = !usr/share/doc/fetchfetch/README.md' \
-        >> /etc/pacman.conf \
-    && pacman-conf NoExtract | \
-        grep -Fx -- '!usr/share/doc/fetchfetch/README.md' \
-    && install -d -o root -g root -m 0755 \
+# image excludes usr/share/doc globally, so reopen only the README path whose
+# identity is derived from the reviewed package scenario.
+RUN install -d -o root -g root -m 0755 \
         /usr/libexec/moguet-live-aur \
+    && install -o root -g root -m 0555 \
+        containers/arch-live-validation/fixtures/aur/load-case.sh \
+        /usr/libexec/moguet-live-aur/load-case.sh \
     && install -o root -g root -m 0755 \
         /usr/bin/pacman \
         /usr/libexec/moguet-live-aur/pacman.real \
@@ -105,16 +113,32 @@ RUN printf '%s\n' \
         containers/arch-live-validation/aur-cases.tsv \
         /usr/share/moguet-live-aur/policy/aur-cases.tsv \
     && install -o root -g root -m 0444 \
-        containers/arch-live-validation/fixtures/aur/fetchfetch-payload-authority.tsv \
-        /usr/share/moguet-live-aur/policy/fetchfetch-payload-authority.tsv \
+        containers/arch-live-validation/fixtures/aur/payload-authority.tsv \
+        /usr/share/moguet-live-aur/policy/payload-authority.tsv \
+    && . /usr/libexec/moguet-live-aur/load-case.sh \
+    && validation_load_aur_case \
+        /usr/share/moguet-live-aur/policy/aur-cases.tsv \
+    && /usr/bin/awk -F '\t' -v expected_path="$AUR_CASE_README_PATH" \
+        '$1 == expected_path && $2 == "regular" && $3 == "0644" && \
+         $4 ~ /^[0-9a-f]{64}$/ { count++ } \
+         END { exit count == 1 ? 0 : 1 }' \
+        /usr/share/moguet-live-aur/policy/payload-authority.tsv \
+    && printf '%s\n' \
+        '# Moguet live AUR: retain the tracked scenario README.' \
+        "NoExtract = !$AUR_CASE_README_PATH" \
+        >> /etc/pacman.conf \
+    && pacman-conf NoExtract > /tmp/moguet-live-aur-noextract \
+    && grep -Fx -- "!$AUR_CASE_README_PATH" \
+        /tmp/moguet-live-aur-noextract \
+    && rm -f -- /tmp/moguet-live-aur-noextract \
     && reference_root=/usr/libexec/moguet-live-aur/reference-build \
     && reference_repository=$reference_root/aur \
     && reference_package_root=$reference_root/packages \
     && reference_source_cache=$reference_root/sources \
     && reference_config=$reference_root/makepkg.conf \
-    && reference_source_archive=$reference_source_cache/fetchfetch-2.0.0.tar.gz \
-    && reference_artifact=$reference_package_root/fetchfetch-2.0.0-1-x86_64.pkg.tar.zst \
-    && reference_staged_artifact=$reference_root/fetchfetch-reference.pkg.tar.zst \
+    && reference_source_archive=$reference_source_cache/$AUR_CASE_EXPECTED_SOURCE_FILENAME \
+    && reference_artifact=$reference_package_root/$AUR_CASE_EXPECTED_ARTIFACT_FILENAME \
+    && reference_staged_artifact=$reference_root/$AUR_CASE_PACKAGE_NAME-reference.pkg.tar.zst \
     && install -d -o root -g root -m 0755 \
         "$reference_root" "$reference_root/build" "$reference_source_cache" \
     && /usr/bin/chown root:moguet-validation "$reference_root/build" \
@@ -124,19 +148,26 @@ RUN printf '%s\n' \
     && install -d -o moguet-validation -g moguet-validation -m 0755 \
         "$reference_root/build/pkg" "$reference_package_root" \
     && /usr/bin/git clone --no-checkout \
-        https://aur.archlinux.org/fetchfetch.git "$reference_repository" \
+        "https://aur.archlinux.org/$AUR_CASE_PACKAGE_BASE.git" \
+        "$reference_repository" \
     && /usr/bin/git -C "$reference_repository" checkout --detach \
-        353dc8ea947734b85175158cda87e5d084585c3f \
-    && test "$(/usr/bin/sha256sum "$reference_repository/PKGBUILD" | /usr/bin/awk '{print $1}')" = \
-        6b9e09ae9c297c5be32b1bd6a038172ad1400cd0f4a5867fe2393b468d964232 \
-    && test "$(/usr/bin/sha256sum "$reference_repository/.SRCINFO" | /usr/bin/awk '{print $1}')" = \
-        d685ae938e6cfe1d2001dba3772539564b2cd8e7b2d488e7e78d92762f411df1 \
+        "$AUR_CASE_EXPECTED_GIT_HEAD" \
+    && reference_pkgbuild_checksum=$(/usr/bin/sha256sum -- \
+        "$reference_repository/PKGBUILD") \
+    && test "${reference_pkgbuild_checksum%% *}" = \
+        "$AUR_CASE_EXPECTED_PKGBUILD_SHA256" \
+    && reference_srcinfo_checksum=$(/usr/bin/sha256sum -- \
+        "$reference_repository/.SRCINFO") \
+    && test "${reference_srcinfo_checksum%% *}" = \
+        "$AUR_CASE_EXPECTED_SRCINFO_SHA256" \
     && /usr/bin/curl --fail --location --silent --show-error \
         --proto '=https' --tlsv1.2 \
         --output "$reference_source_archive" \
-        https://github.com/spenserblack/fetchfetch/archive/v2.0.0.tar.gz \
-    && test "$(/usr/bin/sha256sum "$reference_source_archive" | /usr/bin/awk '{print $1}')" = \
-        e67be2f63497b6f75017873e06935218a407e46023fe10f422fb259e92a7d7ae \
+        "$AUR_CASE_EXPECTED_SOURCE_URL" \
+    && reference_source_checksum=$(/usr/bin/sha256sum -- \
+        "$reference_source_archive") \
+    && test "${reference_source_checksum%% *}" = \
+        "$AUR_CASE_EXPECTED_SOURCE_SHA256" \
     && install -o root -g root -m 0444 /etc/makepkg.conf "$reference_config" \
     && printf '%s\n' \
         "BUILDDIR=$reference_root/build" \
@@ -161,14 +192,20 @@ RUN printf '%s\n' \
         "$reference_staged_artifact" \
     && /usr/bin/python3 -I /usr/libexec/moguet-live-aur/aur-stage-artifact.py \
         manifest \
-        /usr/share/moguet-live-aur/policy/fetchfetch-payload-authority.tsv \
+        /usr/share/moguet-live-aur/policy/payload-authority.tsv \
         "$reference_staged_artifact" \
-        /usr/libexec/moguet-live-aur/fixtures/fetchfetch-payload.tsv \
+        /usr/libexec/moguet-live-aur/fixtures/reference-payload.tsv \
+        "$AUR_CASE_PACKAGE_NAME" "$AUR_CASE_PACKAGE_BASE" \
+        "$AUR_CASE_EXPECTED_VERSION" "$AUR_CASE_RUNTIME_DEPENDENCIES" \
+        "$AUR_CASE_MAKE_DEPENDENCIES" "$AUR_CASE_EXPECTED_ARCHITECTURE" \
     && /usr/bin/python3 -I /usr/libexec/moguet-live-aur/aur-stage-artifact.py \
         pkginfo-manifest \
-        /usr/share/moguet-live-aur/policy/fetchfetch-payload-authority.tsv \
+        /usr/share/moguet-live-aur/policy/payload-authority.tsv \
         "$reference_staged_artifact" \
-        /usr/libexec/moguet-live-aur/fixtures/fetchfetch-pkginfo.tsv \
+        /usr/libexec/moguet-live-aur/fixtures/reference-pkginfo.tsv \
+        "$AUR_CASE_PACKAGE_NAME" "$AUR_CASE_PACKAGE_BASE" \
+        "$AUR_CASE_EXPECTED_VERSION" "$AUR_CASE_RUNTIME_DEPENDENCIES" \
+        "$AUR_CASE_MAKE_DEPENDENCIES" "$AUR_CASE_EXPECTED_ARCHITECTURE" \
     && /usr/bin/rm -rf -- "$reference_root" \
     && test ! -e "$reference_root" \
     && install -d -o root -g root -m 0711 \

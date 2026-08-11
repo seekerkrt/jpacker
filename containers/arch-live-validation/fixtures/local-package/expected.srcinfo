@@ -1,0 +1,10 @@
+pkgbase = moguet-live-fixture
+	pkgdesc = Moguet issue-372 slice 1 local marker fixture
+	pkgver = 1.0.0
+	pkgrel = 1
+	url = https://example.invalid/moguet-live-fixture
+	arch = any
+	license = custom
+	makedepends = cargo
+
+pkgname = moguet-live-fixture
