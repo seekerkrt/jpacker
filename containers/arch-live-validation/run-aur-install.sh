@@ -297,6 +297,12 @@ assert_repacked_path_set() {
         fail "$label repack changed the package path set"
 }
 
+mutate_conflict_policy_archive() {
+    mutation_archive_path=$1
+    python3 "$conflict_mutator" \
+        "$mutation_archive_path" "$AUR_CASE_MAKE_DEPENDENCIES"
+}
+
 assert_regular_non_symlink "$case_loader" 'tracked AUR case loader'
 assert_regular_non_symlink "$conflict_mutator" 'tracked AUR conflict mutator'
 # shellcheck source=fixtures/aur/load-case.sh
@@ -306,7 +312,6 @@ package_name=$AUR_CASE_PACKAGE_NAME
 package_base=$AUR_CASE_PACKAGE_BASE
 expected_version=$AUR_CASE_EXPECTED_VERSION
 runtime_dependencies=$AUR_CASE_RUNTIME_DEPENDENCIES
-make_dependencies=$AUR_CASE_MAKE_DEPENDENCIES
 source_kind=$AUR_CASE_SOURCE_KIND
 install_reason=$AUR_CASE_INSTALL_REASON
 fallback_policy=$AUR_CASE_FALLBACK_POLICY
@@ -550,7 +555,8 @@ curl --fail --silent --show-error --location \
     fail 'public AUR RPC query failed'
 python3 - \
     "$rpc_evidence" "$package_name" "$package_base" "$expected_version" \
-    "$runtime_dependencies" "$make_dependencies" "$expected_rpc_url_path" <<'PY'
+    "$runtime_dependencies" "$AUR_CASE_MAKE_DEPENDENCIES" \
+    "$expected_rpc_url_path" <<'PY'
 import json
 from pathlib import Path
 import sys
@@ -663,7 +669,8 @@ cmp -s "$preflight_root/expected-tree.txt" "$preflight_root/tree.txt" ||
 python3 - \
     "$preflight_pkgbuild" "$preflight_srcinfo" "$payload_policy" \
     "$package_name" "$package_base" "$expected_version" \
-    "$runtime_dependencies" "$make_dependencies" "$expected_source_filename" \
+    "$runtime_dependencies" "$AUR_CASE_MAKE_DEPENDENCIES" \
+    "$expected_source_filename" \
     "$expected_source_url" "$expected_source_sha256" "$expected_architecture" <<'PY'
 from collections import defaultdict
 from pathlib import Path
@@ -872,7 +879,7 @@ conflict_workspace=$(mktemp -d "$XDG_CACHE_HOME/moguet/.artifact-workspace~-XXXX
 conflict_gateway_artifact=$conflict_workspace/$package_name-$expected_version-$expected_architecture.pkg.tar.zst
 conflict_output=$case_root/conflict-policy-gateway.output
 /usr/bin/zstd --decompress --stdout "$negative_artifact" > "$conflict_raw_tar"
-if python3 "$conflict_mutator" "$conflict_raw_tar" "$make_dependencies"; then
+if mutate_conflict_policy_archive "$conflict_raw_tar"; then
     :
 else
     mutation_status=$?
@@ -1069,7 +1076,9 @@ for metadata_line in \
 do
     assert_contains "$metadata_line" "$metadata_output"
 done
-python3 - "$metadata_output" "$runtime_dependencies" "$make_dependencies" <<'PY'
+python3 - \
+    "$metadata_output" "$runtime_dependencies" \
+    "$AUR_CASE_MAKE_DEPENDENCIES" <<'PY'
 from pathlib import Path
 import re
 import sys
@@ -1095,7 +1104,7 @@ printf '  production metadata: %s / PackageBase=%s / Version=%s / AUR\n' \
 capture_package_inventory "$case_root/before-install"
 saved_ifs=$IFS
 IFS=,
-all_dependencies=$runtime_dependencies,$make_dependencies
+all_dependencies=$runtime_dependencies,$AUR_CASE_MAKE_DEPENDENCIES
 for dependency_name in $all_dependencies; do
     inventory_record "$dependency_name" "$case_root/before-install.tsv" \
         >> "$case_root/dependencies-before.tsv" ||
@@ -1435,7 +1444,7 @@ fi
 : > "$case_root/dependencies-after.tsv"
 saved_ifs=$IFS
 IFS=,
-all_dependencies=$runtime_dependencies,$make_dependencies
+all_dependencies=$runtime_dependencies,$AUR_CASE_MAKE_DEPENDENCIES
 for dependency_name in $all_dependencies; do
     inventory_record "$dependency_name" "$case_root/after-install.tsv" \
         >> "$case_root/dependencies-after.tsv" ||

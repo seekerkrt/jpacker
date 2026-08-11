@@ -183,28 +183,93 @@ do
 done
 
 # The conflict-policy negative artifact is scenario-derived, not an
-# independent dependency oracle.  Keep the runner connected to the loaded
-# make-dependency field and exercise that relationship with a temporary case
-# whose dependency records do not occur in the tracked consumer.
-python3 - "$aur_runner" <<'PY' || fail 'AUR conflict mutation is not scenario-derived'
+# independent dependency oracle.  Extract and execute the runner's actual
+# mutator argument construction so a temporary authority change crosses the
+# loader -> runner -> mutator boundary.
+validate_runner_conflict_mutation_contract() {
+    checked_runner=$1
+    extracted_function=$2
+    python3 - "$checked_runner" "$extracted_function" <<'PY'
 from pathlib import Path
 import re
 import sys
 
-runner = Path(sys.argv[1]).read_text(encoding="utf-8")
+runner_path, extracted_path = map(Path, sys.argv[1:])
+runner = runner_path.read_text(encoding="utf-8")
+function_start = "mutate_conflict_policy_archive() {\n"
+if runner.count(function_start) != 1:
+    raise SystemExit("conflict mutation runner function is not unique")
+start_index = runner.index(function_start)
+end_index = runner.find("\n}\n", start_index)
+if end_index < 0:
+    raise SystemExit("conflict mutation runner function is not closed")
+function_text = runner[start_index:end_index + 3]
+expected_function = (
+    "mutate_conflict_policy_archive() {\n"
+    "    mutation_archive_path=$1\n"
+    '    python3 "$conflict_mutator" \\\n'
+    '        "$mutation_archive_path" "$AUR_CASE_MAKE_DEPENDENCIES"\n'
+    "}\n"
+)
+if function_text != expected_function:
+    raise SystemExit(
+        "conflict mutation runner does not pass loaded AUR make dependencies directly"
+    )
+if re.search(r"(?m)^[ \t]*make_dependencies=", runner):
+    raise SystemExit("runner reintroduces a make-dependency alias assignment")
+if '"$make_dependencies"' in runner:
+    raise SystemExit("runner consumes a make-dependency alias")
 start_marker = "current_phase=conflict-policy-negative"
 end_marker = "/usr/bin/zstd --quiet --force -o \"$conflict_gateway_artifact\""
 if runner.count(start_marker) != 1 or runner.count(end_marker) != 1:
     raise SystemExit("conflict mutation block markers are not unique")
 block = runner.split(start_marker, 1)[1].split(end_marker, 1)[0]
-expected_call = (
-    'python3 "$conflict_mutator" "$conflict_raw_tar" "$make_dependencies"'
-)
+expected_call = 'if mutate_conflict_policy_archive "$conflict_raw_tar"; then'
 if block.count(expected_call) != 1:
-    raise SystemExit("conflict mutation does not consume loaded make_dependencies once")
+    raise SystemExit("conflict mutation block does not invoke runner construction once")
 if re.search(r"makedepend\s*=", block):
     raise SystemExit("conflict mutation block contains a consumer-side dependency record")
+extracted_path.write_text(function_text, encoding="utf-8")
 PY
+}
+
+runner_mutation_function=$tmp_dir/runner-conflict-mutation.sh
+if validate_runner_conflict_mutation_contract \
+    "$aur_runner" "$runner_mutation_function"; then
+    :
+else
+    runner_contract_status=$?
+    fail "AUR conflict mutation runner contract failed with status $runner_contract_status"
+fi
+
+# Focused regression for the previous counterexample: a consumer-side literal
+# assignment must be rejected even if the direct mutator call remains intact.
+literal_runner=$tmp_dir/run-aur-install-literal.sh
+python3 - "$aur_runner" "$literal_runner" <<'PY' || fail 'literal runner counterexample setup failed'
+from pathlib import Path
+import sys
+
+source, destination = map(Path, sys.argv[1:])
+runner = source.read_text(encoding="utf-8")
+anchor = "runtime_dependencies=$AUR_CASE_RUNTIME_DEPENDENCIES\n"
+if runner.count(anchor) != 1:
+    raise SystemExit("runner make-dependency authority anchor is not unique")
+destination.write_text(
+    runner.replace(anchor, anchor + "make_dependencies=fixture-build-literal\n", 1),
+    encoding="utf-8",
+)
+PY
+if validation_expect_status \
+    aur-runner-literal-counterexample 1 \
+    "$tmp_dir/aur-runner-literal.stdout" \
+    "$tmp_dir/aur-runner-literal.stderr" \
+    validate_runner_conflict_mutation_contract \
+    "$literal_runner" "$tmp_dir/literal-runner-function.sh"; then
+    :
+else
+    fail 'consumer-side make-dependency literal counterexample was not rejected'
+fi
+printf '%s\n' '  consumer-side make-dependency literal counterexample: rejected'
 
 aur_mutation_case=$tmp_dir/aur-mutation-case.tsv
 python3 - "$aur_case_file" "$aur_mutation_case" <<'PY' || fail 'temporary AUR dependency authority setup failed'
@@ -263,8 +328,10 @@ write_archive(zero_path, dependencies[1:])
 write_archive(multiple_path, [dependencies[0], dependencies[0], *dependencies[1:]])
 PY
 
-if python3 "$aur_conflict_mutator" \
-    "$aur_mutation_positive" "$AUR_CASE_MAKE_DEPENDENCIES"; then
+# shellcheck source=/dev/null
+. "$runner_mutation_function"
+conflict_mutator=$aur_conflict_mutator
+if mutate_conflict_policy_archive "$aur_mutation_positive"; then
     :
 else
     mutation_status=$?
@@ -296,6 +363,7 @@ for dependency in dependencies[1:]:
     if records.count(f"makedepend = {dependency}") != 1:
         raise SystemExit("non-target scenario make dependency changed")
 PY
+printf '%s\n' '  changed AUR authority reached the runner mutator argument'
 
 for mutation_case in zero multiple
 do
