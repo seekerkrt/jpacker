@@ -628,7 +628,7 @@ void test_cross_source_required_artifact_identity() {
     prepared_source.required_target_provenance =
             RequiredTargetProvenance::RepositoryExactPackageProjection;
     prepared_source.artifact_lifecycle_intent =
-            ArtifactLifecycleIntent::SingularCompatibility;
+            ArtifactLifecycleIntent::PackageBaseSet;
     prepared_source.repository_identity =
             ResolvedRepositorySourceBuildIdentity{
                     RepositoryPackagePresent{
@@ -658,7 +658,7 @@ void test_cross_source_required_artifact_identity() {
             std::cref(prepared_requested_package),
             std::cref(prepared_checkout_package_base),
             RequiredTargetProvenance::RepositoryExactPackageProjection,
-            ArtifactLifecycleIntent::SingularCompatibility, true,
+            ArtifactLifecycleIntent::PackageBaseSet, true,
             std::cref(prepared_targets)));
     input.required_artifacts.emplace_back(
             AurPackageBaseBuildUnitReference(std::cref(aur_plan), 0),
@@ -674,7 +674,7 @@ void test_cross_source_required_artifact_identity() {
                     std::cref(prepared_checkout_package_base),
                     RequiredTargetProvenance::
                             RepositoryExactPackageProjection,
-                    ArtifactLifecycleIntent::SingularCompatibility, true,
+                    ArtifactLifecycleIntent::PackageBaseSet, true,
                     std::cref(prepared_targets)),
             std::cref(prepared_targets[0]));
 
