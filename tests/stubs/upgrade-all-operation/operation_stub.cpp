@@ -128,6 +128,9 @@ struct OperationStubState {
     std::vector<stub::Event> events;
     std::vector<std::string> strict_preference_reads;
     std::vector<stub::SourceExecutionCall> source_calls;
+    std::vector<stub::SourcePreparationCall> source_preparation_calls;
+    std::vector<stub::PackageBaseSourceExecutionCall>
+            package_base_source_calls;
     std::vector<stub::AurExecutionCall> aur_calls;
     std::vector<std::string> system_commands;
     std::size_t repository_configuration_call_count = 0;
@@ -515,6 +518,15 @@ const std::vector<SourceExecutionCall>& source_execution_calls() {
     return g_state.source_calls;
 }
 
+const std::vector<SourcePreparationCall>& source_preparation_calls() {
+    return g_state.source_preparation_calls;
+}
+
+const std::vector<PackageBaseSourceExecutionCall>&
+package_base_source_execution_calls() {
+    return g_state.package_base_source_calls;
+}
+
 const std::vector<AurExecutionCall>& aur_execution_calls() {
     return g_state.aur_calls;
 }
@@ -719,6 +731,30 @@ ProductionSourceBuildWorkItem prepare_resolved_source_build_work_item(
             identity, std::move(environment), only_if_updated, needed);
 }
 
+ProductionSourceBuildWorkItem prepare_registered_source_build_work_item(
+        const ResolvedSourceBuildIdentity& identity,
+        SourceBuildEnvironment environment,
+        const ProviderSelectionCallback& select_provider) {
+    ProductionSourceBuildWorkItem work_item =
+            prepare_resolved_source_build_work_item(
+                    identity, std::move(environment),
+                    identity.source_kind() == SourceBuildSourceKind::Aur,
+                    false, select_provider);
+    if(identity.source_kind() == SourceBuildSourceKind::Repository) {
+        work_item.artifact_lifecycle_intent =
+                ArtifactLifecycleIntent::PackageBaseSet;
+        work_item.request.only_if_updated = false;
+        work_item.uses_system_update_baseline = true;
+    } else {
+        work_item.artifact_lifecycle_intent =
+                ArtifactLifecycleIntent::SingularCompatibility;
+        work_item.request.only_if_updated = true;
+        work_item.uses_system_update_baseline = false;
+    }
+    work_item.request.needed = false;
+    return work_item;
+}
+
 PackageMetadataError::PackageMetadataError(PackageMetadataFailure failure)
     : std::runtime_error(failure.diagnostic),
       failure_(std::move(failure)) {
@@ -858,6 +894,152 @@ SeparatedSourceBuildCleanupError::SeparatedSourceBuildCleanupError(
         const std::string& diagnostic)
     : std::runtime_error(diagnostic),
       install_outcome_(install_outcome) {
+}
+
+SourceBuildPreparationOutcome
+prepare_package_base_source_build_work_item_typed(
+        const ProductionSourceBuildWorkItem& work_item,
+        SourceBuildUpdatePolicy update_policy,
+        const AppConfig& config) {
+    if(work_item.required_targets.size() != 1 ||
+       work_item.request.package_name.empty() ||
+       work_item.request.package_name !=
+               work_item.required_targets.front().package_name ||
+       work_item.request.checkout_name !=
+               work_item.required_targets.front().package_base ||
+       work_item.required_target_provenance !=
+               RequiredTargetProvenance::RepositoryExactPackageProjection ||
+       work_item.artifact_lifecycle_intent !=
+               ArtifactLifecycleIntent::PackageBaseSet ||
+       work_item.request.only_if_updated || work_item.request.needed) {
+        fail_unexpected(
+                "Upgrade-all registered repository preparation received an inconsistent PackageBase work item.");
+    }
+    const PacmanDatabasePaths database_paths{
+            "/upgrade-all-stub/root", "/upgrade-all-stub/database"};
+    const stub::ConfigSnapshot config_snapshot = snapshot_config(config);
+    g_state.source_preparation_calls.push_back(stub::SourcePreparationCall{
+            work_item.request.package_name,
+            work_item.request.checkout_name,
+            work_item.request,
+            update_policy,
+            database_paths,
+            config_snapshot});
+    record_event(
+            stub::EventKind::SourcePreparation,
+            work_item.request.package_name,
+            {work_item.request.package_name});
+    // 既存aggregate testのsource開始観測はpreparation開始へ対応させる。
+    g_state.source_calls.push_back(stub::SourceExecutionCall{
+            work_item.request.package_name,
+            work_item.request.checkout_name,
+            work_item.request,
+            database_paths,
+            config_snapshot});
+    record_event(
+            stub::EventKind::SourceExecution,
+            work_item.request.package_name,
+            {work_item.request.package_name});
+    if(g_state.source_executions.empty()) {
+        fail_unexpected(
+                "Unexpected upgrade-all registered repository preparation for " +
+                work_item.request.package_name + ".");
+    }
+    ScriptedSourceExecution& execution = g_state.source_executions.front();
+    if(execution.kind == ScriptedSourceExecutionKind::Success) {
+        if(execution.result.status == SourceBuildExecutionStatus::UpToDate) {
+            SourceBuildUpToDate outcome{
+                    std::move(execution.result.diagnostic)};
+            g_state.source_executions.pop_front();
+            return outcome;
+        }
+        if(execution.result.status ==
+           SourceBuildExecutionStatus::UpdateStatusUnknownSkipped) {
+            SourceBuildUpdateStatusUnknownSkipped outcome{
+                    execution.result.update_status_unknown_skip_reason
+                            .value_or(
+                                    SourceBuildUpdateStatusUnknownSkipReason::
+                                            NoConfirm),
+                    std::move(execution.result.diagnostic)};
+            g_state.source_executions.pop_front();
+            return outcome;
+        }
+    }
+    return PreparedSourceBuildNeedsBuild::
+            make_for_registered_source_build_test();
+}
+
+RegisteredSourcePackageBaseExecutionResult
+execute_prepared_package_base_source_build_work_item_typed(
+        const ProductionSourceBuildWorkItem& work_item,
+        PreparedSourceBuildNeedsBuild prepared,
+        const PacmanDatabasePaths& database_paths,
+        const AppConfig& config) {
+    static_cast<void>(prepared);
+    if(work_item.required_targets.size() != 1) {
+        fail_unexpected(
+                "Upgrade-all registered repository PackageBase execution received an inconsistent target.");
+    }
+    g_state.package_base_source_calls.push_back(
+            stub::PackageBaseSourceExecutionCall{
+                    work_item.request.package_name,
+                    work_item.request.checkout_name,
+                    work_item.request,
+                    database_paths,
+                    snapshot_config(config)});
+    record_event(
+            stub::EventKind::PackageBaseSourceExecution,
+            work_item.request.package_name,
+            {work_item.request.package_name});
+    if(g_state.source_executions.empty()) {
+        fail_unexpected(
+                "Unexpected upgrade-all registered repository PackageBase execution for " +
+                work_item.request.package_name + ".");
+    }
+    ScriptedSourceExecution execution =
+            std::move(g_state.source_executions.front());
+    g_state.source_executions.pop_front();
+    const RequiredPackageArtifactTarget& required =
+            work_item.required_targets.front();
+    const auto result = [&](ArtifactInstallExecutionOutcome outcome) {
+        return RegisteredSourcePackageBaseExecutionResult(
+                work_item.request.checkout_name,
+                std::vector<PackageBaseSourceBuildSelectedResult>{
+                        PackageBaseSourceBuildSelectedResult{
+                                ArtifactPackageIdentity{
+                                        required.package_name, "2.0-1"},
+                                required.desired_reason,
+                                outcome}},
+                std::vector<ArtifactPackageIdentity>{});
+    };
+    switch(execution.kind) {
+    case ScriptedSourceExecutionKind::Success:
+        if(execution.result.status == SourceBuildExecutionStatus::Installed) {
+            return result(ArtifactInstallExecutionOutcome::Installed);
+        }
+        if(execution.result.status ==
+           SourceBuildExecutionStatus::SkippedAsNeeded) {
+            return result(ArtifactInstallExecutionOutcome::SkippedAsNeeded);
+        }
+        fail_unexpected(
+                "Prepared registered repository execution received a closed preparation outcome.");
+    case ScriptedSourceExecutionKind::Failure:
+        throw RegisteredSourcePackageBasePhaseError(
+                SeparatedPackageBaseSourceBuildFailurePhase::Build,
+                execution.diagnostic);
+    case ScriptedSourceExecutionKind::CacheFailure:
+        throw TrustedCacheError(TrustedCacheFailure{
+                TrustedCacheStage::RootRevalidation,
+                TrustedCacheErrorCode::ConcurrentReplacement,
+                std::nullopt});
+    case ScriptedSourceExecutionKind::CleanupFailure:
+        throw RegisteredSourcePackageBaseCleanupError(
+                result(execution.cleanup_outcome), execution.diagnostic);
+    case ScriptedSourceExecutionKind::UnknownFailure:
+        throw UnknownSourceExecutionFailure{};
+    }
+    throw std::logic_error(
+            "Unknown upgrade-all registered repository execution script.");
 }
 
 SourceBuildExecutionResult execute_prepared_source_build_work_item_typed(

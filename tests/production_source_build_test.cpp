@@ -28,7 +28,9 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include <fcntl.h>
@@ -48,6 +50,19 @@ CapturedCommandResult capture_command_output(const char* command) {
     result.output = result.output.substr(first, last - first + 1);
     return result;
 }
+
+static_assert(std::variant_size_v<SourceBuildPreparationOutcome> == 3);
+static_assert(std::is_same_v<
+              std::variant_alternative_t<0, SourceBuildPreparationOutcome>,
+              SourceBuildUpToDate>);
+static_assert(std::is_same_v<
+              std::variant_alternative_t<1, SourceBuildPreparationOutcome>,
+              SourceBuildUpdateStatusUnknownSkipped>);
+static_assert(std::is_same_v<
+              std::variant_alternative_t<2, SourceBuildPreparationOutcome>,
+              PreparedSourceBuildNeedsBuild>);
+static_assert(!std::is_copy_constructible_v<PreparedSourceBuildNeedsBuild>);
+static_assert(std::is_move_constructible_v<PreparedSourceBuildNeedsBuild>);
 
 std::string exec_command(const char* command) {
     return capture_command_output(command).output;
@@ -641,6 +656,21 @@ ProductionSourceBuildWorkItem make_repository_package_base_work_item(
             ArtifactLifecycleIntent::PackageBaseSet;
     require_static_production_source_build_work_item(work_item);
     return work_item;
+}
+
+ProductionSourceBuildWorkItem
+make_registered_repository_package_base_work_item(
+        const std::string& package_base,
+        const std::string& package_name) {
+    const RepositoryPackagePresent exact{
+            "extra", 0, package_name, package_base,
+            ObservedVersion::available(
+                    ObservedVersionSource::RepositoryExactPackage,
+                    ARTIFACT_VERSION),
+            std::vector<std::string>{"extra"}};
+    return prepare_registered_source_build_work_item(
+            make_repository_source_build_identity(exact),
+            SourceBuildEnvironment{}, ProviderSelectionCallback{});
 }
 
 ProductionSourceBuildWorkItem make_update_check_work_item(
@@ -2522,6 +2552,116 @@ void test_resolved_repository_split_identity_and_required_target_projection() {
     query_stub::reset_aur_stub();
 }
 
+void test_registered_source_factory_selects_route_owned_lifecycle() {
+    process_stub::reset_process_stub();
+    query_stub::reset_repository_stub();
+    query_stub::reset_aur_stub();
+
+    const RepositoryPackagePresent exact{
+            "extra", 0, "registered-repository-child",
+            "registered-repository-base",
+            ObservedVersion::available(
+                    ObservedVersionSource::RepositoryExactPackage,
+                    ARTIFACT_VERSION),
+            std::vector<std::string>{"extra"}};
+    SourceBuildEnvironment repository_environment;
+    repository_environment.ordered_assignments.push_back(
+            SourceEnvironmentAssignment{"CXXFLAGS", "-O2"});
+    const ProductionSourceBuildWorkItem repository_work_item =
+            prepare_registered_source_build_work_item(
+                    make_repository_source_build_identity(exact),
+                    std::move(repository_environment),
+                    ProviderSelectionCallback{});
+    expect(
+            repository_work_item.required_target_provenance ==
+                            RequiredTargetProvenance::
+                                    RepositoryExactPackageProjection &&
+                    repository_work_item.artifact_lifecycle_intent ==
+                            ArtifactLifecycleIntent::PackageBaseSet &&
+                    !repository_work_item.request.only_if_updated &&
+                    !repository_work_item.request.needed &&
+                    repository_work_item.uses_system_update_baseline &&
+                    repository_work_item.repository_identity.has_value() &&
+                    repository_work_item.required_targets.size() == 1,
+            "Registered repository factory did not select Set/false/false policy");
+    expect_required_target(
+            repository_work_item.required_targets.front(),
+            "registered-repository-base", "registered-repository-child",
+            DesiredInstallReason::Explicit,
+            "registered repository target");
+    expect(
+            repository_work_item.request.custom_environment
+                            .ordered_assignments.size() == 1 &&
+                    repository_work_item.request.custom_environment
+                                    .ordered_assignments.front().key ==
+                            "CXXFLAGS" &&
+                    repository_work_item.request.custom_environment
+                                    .ordered_assignments.front().value ==
+                            "-O2",
+            "Registered repository factory lost the owned environment");
+
+    AurPackageInfo aur_package;
+    aur_package.Name = "registered-aur";
+    aur_package.PackageBase = "registered-aur";
+    aur_package.Version = ARTIFACT_VERSION;
+    query_stub::set_repository_package_response(
+            "registered-aur", std::nullopt);
+    query_stub::set_aur_package_response(
+            "registered-aur", aur_package);
+    const ProductionSourceBuildWorkItem aur_work_item =
+            prepare_registered_source_build_work_item(
+                    ResolvedSourceBuildIdentity{
+                            ResolvedAurSourceBuildIdentity{
+                                    "registered-aur", "registered-aur"}},
+                    SourceBuildEnvironment{},
+                    ProviderSelectionCallback{});
+    expect(
+            aur_work_item.required_target_provenance ==
+                            RequiredTargetProvenance::AurBuildPlanProjection &&
+                    aur_work_item.artifact_lifecycle_intent ==
+                            ArtifactLifecycleIntent::SingularCompatibility &&
+                    aur_work_item.request.only_if_updated &&
+                    !aur_work_item.request.needed &&
+                    !aur_work_item.uses_system_update_baseline &&
+                    !aur_work_item.repository_identity.has_value(),
+            "Registered AUR factory changed singular/true/false policy");
+    expect_required_target(
+            require_singular_required_package_target(aur_work_item),
+            "registered-aur", "registered-aur",
+            DesiredInstallReason::Explicit,
+            "registered AUR target");
+
+    AurPackageInfo split_package;
+    split_package.Name = "registered-aur-split-child";
+    split_package.PackageBase = "registered-aur-split-base";
+    split_package.Version = ARTIFACT_VERSION;
+    query_stub::set_repository_package_response(
+            "registered-aur-split-child", std::nullopt);
+    query_stub::set_aur_package_response(
+            "registered-aur-split-child", split_package);
+    static_cast<void>(expect_runtime_error(
+            [&]() {
+                static_cast<void>(
+                        prepare_registered_source_build_work_item(
+                                ResolvedSourceBuildIdentity{
+                                        ResolvedAurSourceBuildIdentity{
+                                                "registered-aur-split-child",
+                                                "registered-aur-split-base"}},
+                                SourceBuildEnvironment{},
+                                ProviderSelectionCallback{}));
+            },
+            "registered AUR split guard", "does not support split"));
+
+    expect(
+            process_stub::capture_command_call_count() == 0 &&
+                    process_stub::run_command_call_count() == 0,
+            "Registered factory route selection started source mutation");
+    process_stub::require_process_expectations_consumed();
+    process_stub::reset_process_stub();
+    query_stub::reset_repository_stub();
+    query_stub::reset_aur_stub();
+}
+
 void test_standalone_repository_preparation_uses_package_base_set() {
     process_stub::reset_process_stub();
     query_stub::reset_repository_stub();
@@ -3410,6 +3550,154 @@ void test_extended_work_item_install_outcomes(
             MetadataMode::ExistingExplicitSameVersion,
             SourceBuildExecutionStatus::SkippedAsNeeded,
             "extended --needed skip outcome");
+}
+
+void test_registered_repository_closed_preparation_outcomes(
+        const TemporaryProductionEnvironment& environment) {
+    {
+        AppConfig config = noninteractive_config();
+        std::vector<ProductionSourceBuildWorkItem> work_items;
+        work_items.push_back(
+                make_registered_repository_package_base_work_item(
+                        "registered-up-to-date-base",
+                        "registered-up-to-date-child"));
+        work_items.front().request.installed_snapshot =
+                SourceInstalledSnapshot{ARTIFACT_VERSION};
+        work_items.front().request.update_baseline =
+                SourceUpdateBaseline{ARTIFACT_VERSION};
+        ProductionScenario scenario =
+                make_execution_scenario(environment, work_items, config);
+        write_file(
+                scenario.units.front().checkout_path / ".SRCINFO",
+                "pkgver = 1.0\npkgrel = 1\n");
+        fs::permissions(
+                scenario.units.front().checkout_path / ".SRCINFO",
+                fs::perms::owner_read | fs::perms::owner_write,
+                fs::perm_options::replace);
+        PreparedProductionSourceBuildInvocation invocation =
+                prepare_execution(std::move(work_items), scenario);
+        expect_version_comparison(
+                ARTIFACT_VERSION, ARTIFACT_VERSION, "0");
+
+        SourceBuildPreparationOutcome outcome =
+                prepare_package_base_source_build_work_item_typed(
+                        invocation.work_items.front(),
+                        SourceBuildUpdatePolicy::OnlyIfUpdated,
+                        config);
+        const SourceBuildUpToDate* up_to_date =
+                std::get_if<SourceBuildUpToDate>(&outcome);
+        expect(
+                up_to_date != nullptr &&
+                        up_to_date->diagnostic ==
+                                "registered-up-to-date-child is up to date (1.0-1). Skipping.",
+                "Registered preparation did not return the closed UpToDate outcome");
+        expect(
+                scenario.workspace_paths.empty() &&
+                        scenario.install_attempt_order.empty(),
+                "Registered UpToDate preparation reached build/install");
+        require_scenario_complete(
+                scenario, 0, "registered closed UpToDate outcome");
+    }
+
+    {
+        AppConfig config = noninteractive_config();
+        config.no_confirm = true;
+        std::vector<ProductionSourceBuildWorkItem> work_items;
+        work_items.push_back(
+                make_registered_repository_package_base_work_item(
+                        "registered-unknown-base",
+                        "registered-unknown-child"));
+        work_items.front().request.installed_snapshot =
+                SourceInstalledSnapshot{ARTIFACT_VERSION};
+        ProductionScenario scenario =
+                make_execution_scenario(environment, work_items, config);
+        PreparedProductionSourceBuildInvocation invocation =
+                prepare_execution(std::move(work_items), scenario);
+
+        SourceBuildPreparationOutcome outcome =
+                prepare_package_base_source_build_work_item_typed(
+                        invocation.work_items.front(),
+                        SourceBuildUpdatePolicy::OnlyIfUpdated,
+                        config);
+        const auto* skipped =
+                std::get_if<SourceBuildUpdateStatusUnknownSkipped>(&outcome);
+        expect(
+                skipped != nullptr &&
+                        skipped->reason ==
+                                SourceBuildUpdateStatusUnknownSkipReason::
+                                        NoConfirm &&
+                        skipped->diagnostic ==
+                                "Skipping registered-unknown-child: update status is unknown and --noconfirm is set.",
+                "Registered preparation did not retain the closed unknown-status outcome");
+        expect(
+                scenario.workspace_paths.empty() &&
+                        scenario.install_attempt_order.empty(),
+                "Registered unknown-status preparation reached build/install");
+        require_scenario_complete(
+                scenario, 0,
+                "registered closed unknown-status outcome");
+    }
+
+    {
+        AppConfig config = noninteractive_config();
+        std::vector<ProductionSourceBuildWorkItem> work_items;
+        work_items.push_back(
+                make_registered_repository_package_base_work_item(
+                        "registered-needs-build-base",
+                        "registered-needs-build-child"));
+        work_items.front().request.installed_snapshot =
+                SourceInstalledSnapshot{std::nullopt};
+        ProductionScenario scenario =
+                make_execution_scenario(environment, work_items, config);
+        PreparedProductionSourceBuildInvocation invocation =
+                prepare_execution(std::move(work_items), scenario);
+
+        SourceBuildPreparationOutcome outcome =
+                prepare_package_base_source_build_work_item_typed(
+                        invocation.work_items.front(),
+                        SourceBuildUpdatePolicy::OnlyIfUpdated,
+                        config);
+        expect(
+                std::holds_alternative<PreparedSourceBuildNeedsBuild>(outcome),
+                "Registered preparation did not return the one-shot NeedsBuild capability");
+        const std::size_t remote_calls = scenario.git_remote_calls;
+        const std::size_t fetch_calls = scenario.git_fetch_calls;
+        const std::size_t branch_calls = scenario.git_branch_calls;
+        const std::size_t reset_calls = scenario.git_reset_calls;
+
+        const PackageBaseSourceBuildExecutionResult result =
+                execute_prepared_package_base_source_build_work_item_typed(
+                        invocation.work_items.front(),
+                        std::move(std::get<PreparedSourceBuildNeedsBuild>(
+                                outcome)),
+                        invocation.database_paths,
+                        config);
+        expect(
+                result.package_base() == "registered-needs-build-base" &&
+                        result.selected_children().size() == 1 &&
+                        result.selected_children().front()
+                                        .identity.package_name ==
+                                "registered-needs-build-child" &&
+                        result.selected_children().front().outcome ==
+                                ArtifactInstallExecutionOutcome::Installed,
+                "Prepared registered PackageBase execution lost its aggregate");
+        expect(
+                scenario.git_remote_calls == remote_calls &&
+                        scenario.git_fetch_calls == fetch_calls &&
+                        scenario.git_branch_calls == branch_calls &&
+                        scenario.git_reset_calls == reset_calls &&
+                        remote_calls == 1 && fetch_calls == 1 &&
+                        branch_calls == 1 && reset_calls == 1,
+                "Prepared PackageBase executor repeated checkout/update preparation");
+        expect(
+                scenario.install_attempt_order ==
+                        std::vector<std::string>{
+                                "registered-needs-build-base"},
+                "Prepared registered PackageBase execution did not install the requested child once");
+        require_scenario_complete(
+                scenario, 1,
+                "registered closed NeedsBuild outcome");
+    }
 }
 
 void test_up_to_date_outcome_and_legacy_flattening(
@@ -4351,6 +4639,7 @@ int main() {
         test_same_package_base_source_preference_route();
         test_resolved_repository_identity_and_owned_environment_preparation();
         test_resolved_repository_split_identity_and_required_target_projection();
+        test_registered_source_factory_selects_route_owned_lifecycle();
         test_standalone_repository_preparation_uses_package_base_set();
         test_repository_query_failure_stops_before_aur_or_mutation();
         test_confirmed_repository_not_found_allows_exact_aur_fallback();
@@ -4393,6 +4682,8 @@ int main() {
             test_database_resolver_failure_stops_all_targets(environment);
             test_work_item_typed_install_outcomes(environment);
             test_extended_work_item_install_outcomes(environment);
+            test_registered_repository_closed_preparation_outcomes(
+                    environment);
             test_up_to_date_outcome_and_legacy_flattening(environment);
             test_unknown_update_status_no_confirm_outcome(environment);
             test_unknown_update_status_noninteractive_outcome(environment);

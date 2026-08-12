@@ -2,7 +2,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Moguet 2.2.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-11 17:54+0900\n"
+"POT-Creation-Date: 2026-08-12 12:05+0900\n"
 "PO-Revision-Date: 2026-08-03 06:53+0900\n"
 "Last-Translator: Moguet contributors\n"
 "Language-Team: Japanese\n"
@@ -5708,6 +5708,9 @@ msgstr "{} のビルド専用 {} 実行に失敗しました。"
 msgid "{} artifact aggregate validation failed."
 msgstr "{} アーティファクトの集約検証に失敗しました。"
 
+msgid "Prepared source-build execution capability is invalid or test-only."
+msgstr "準備済みソースビルドの実行capabilityが無効か、テスト専用です。"
+
 #, c++-format
 msgid "{} is up to date ({}). Skipping."
 msgstr "{} は最新です（{}）。スキップします。"
@@ -5855,25 +5858,31 @@ msgstr "{} セットのソースビルドで、単一要求の識別情報に整
 msgid "{} set source-build multiple request must not expose a singular package name."
 msgstr "{} セットの複数対象ソースビルド要求で、単一のパッケージ名を公開してはいけません。"
 
-#, c++-format
-msgid "{} private artifact workspace preparation failed: {}"
-msgstr "{} の専用アーティファクト作業領域を準備できませんでした: {}"
+msgid "Private artifact workspace preparation failed."
+msgstr "専用アーティファクト作業領域の準備に失敗しました。"
+
+msgid "Source checkout or build preparation failed."
+msgstr "ソース取得またはビルド準備に失敗しました。"
 
 #, c++-format
 msgid "{} private artifact workspace preparation failed."
 msgstr "{} の専用アーティファクト作業領域を準備できませんでした。"
 
 #, c++-format
-msgid "{} source checkout or build preparation failed: {}"
-msgstr "{} のソース取得またはビルド準備に失敗しました: {}"
-
-#, c++-format
 msgid "{} source checkout or build preparation failed."
 msgstr "{} のソース取得またはビルド準備に失敗しました。"
 
 #, c++-format
-msgid "{} set source-build unexpectedly produced a singular update-status result."
-msgstr "{} セットのソースビルドが予期せず単一対象の更新状態結果を生成しました。"
+msgid "{} private artifact workspace preparation failed: {}"
+msgstr "{} の専用アーティファクト作業領域を準備できませんでした: {}"
+
+#, c++-format
+msgid "{} source checkout or build preparation failed: {}"
+msgstr "{} のソース取得またはビルド準備に失敗しました: {}"
+
+#, c++-format
+msgid "{} set source-build unexpectedly produced an update-status result."
+msgstr "{} セットのソースビルドが予期せず更新状態結果を生成しました。"
 
 msgid "Unknown source-build execution status."
 msgstr "ソースビルドの実行状態が不明です。"
@@ -6139,6 +6148,60 @@ msgstr "システム更新前のローカルパッケージバージョンをス
 #, c++-format
 msgid "Failed to snapshot local package versions after the system upgrade: {}"
 msgstr "システム更新後のローカルパッケージバージョンをスナップショットへ保存できませんでした: {}"
+
+#. TRANSLATORS: {} is the literal Arch field name "PackageBase".
+#, c++-format
+msgid "Registered repository source-build result does not match the prepared {}."
+msgstr "登録済みリポジトリのソースビルド結果が準備済みの {} と一致しません。"
+
+msgid "Registered repository source-build selected child count does not match preparation."
+msgstr "登録済みリポジトリのソースビルドで選択された子パッケージ数が準備内容と一致しません。"
+
+msgid "Registered repository selected artifact identity does not match the requested child."
+msgstr "登録済みリポジトリで選択されたアーティファクトの識別情報が要求された子パッケージと一致しません。"
+
+msgid "Registered repository selected artifact has an empty version."
+msgstr "登録済みリポジトリで選択されたアーティファクトのバージョンが空です。"
+
+msgid "Registered repository selected artifact install reason does not match preparation."
+msgstr "登録済みリポジトリで選択されたアーティファクトのインストール理由が準備内容と一致しません。"
+
+msgid "Registered repository source-build unexpectedly reported skipped-as-needed with needed disabled."
+msgstr "登録済みリポジトリのソースビルドが、needed が無効なのに予期せず不要のためスキップしたと報告しました。"
+
+msgid "Registered repository selected artifact has an unknown execution outcome."
+msgstr "登録済みリポジトリで選択されたアーティファクトの実行結果が不明です。"
+
+msgid "Registered repository unselected artifact identity is incomplete."
+msgstr "登録済みリポジトリで未選択のアーティファクト識別情報が不完全です。"
+
+msgid "Registered repository unselected artifact overlaps the selected child."
+msgstr "登録済みリポジトリで未選択のアーティファクトが選択済みの子パッケージと重複しています。"
+
+msgid "Registered repository source-build contains a duplicate unselected artifact identity."
+msgstr "登録済みリポジトリのソースビルドに重複した未選択アーティファクト識別情報が含まれています。"
+
+#. TRANSLATORS: {} is the literal Arch field name "PackageBase".
+#, c++-format
+msgid "Registered repository package transaction failure does not match the prepared {}."
+msgstr "登録済みリポジトリのパッケージトランザクション失敗が準備済みの {} と一致しません。"
+
+msgid "Registered repository package transaction attempt count does not match preparation."
+msgstr "登録済みリポジトリのパッケージトランザクション試行数が準備内容と一致しません。"
+
+msgid "Registered repository transaction attempt identity does not match the requested child."
+msgstr "登録済みリポジトリのトランザクション試行識別情報が要求された子パッケージと一致しません。"
+
+msgid "Registered repository transaction attempt has an empty version."
+msgstr "登録済みリポジトリのトランザクション試行でバージョンが空です。"
+
+msgid "Registered repository transaction attempt install reason does not match preparation."
+msgstr "登録済みリポジトリのトランザクション試行に指定されたインストール理由が準備内容と一致しません。"
+
+#. TRANSLATORS: {} is the literal Arch field name "PackageBase".
+#, c++-format
+msgid "Registered repository install preparation failure does not match the prepared {}."
+msgstr "登録済みリポジトリのインストール準備失敗が準備済みの {} と一致しません。"
 
 msgid "Source preference enumeration failed with an unknown exception."
 msgstr "ソース設定の列挙が不明な例外で失敗しました。"

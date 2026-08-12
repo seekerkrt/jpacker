@@ -34,6 +34,8 @@ enum class EventKind {
     LocalPackageSnapshot,
     Progress,
     SystemCommand,
+    SourcePreparation,
+    PackageBaseSourceExecution,
     SourceExecution,
     RepositoryConfigurationResolution,
     ForeignInventoryQuery,
@@ -76,6 +78,24 @@ struct MetadataSessionScript {
 };
 
 struct SourceExecutionCall {
+    std::string          package_name;
+    std::string          package_base;
+    SourceBuildRequest   request;
+    PacmanDatabasePaths database_paths;
+    ConfigSnapshot      config;
+};
+
+struct SourcePreparationCall {
+    std::string          package_name;
+    std::string          package_base;
+    SourceBuildRequest   request;
+    SourceBuildUpdatePolicy update_policy =
+            SourceBuildUpdatePolicy::AlwaysBuild;
+    PacmanDatabasePaths database_paths;
+    ConfigSnapshot      config;
+};
+
+struct PackageBaseSourceExecutionCall {
     std::string          package_name;
     std::string          package_base;
     SourceBuildRequest   request;
@@ -198,6 +218,9 @@ void record_progress(const std::string& subject);
 const std::vector<Event>& event_history();
 const std::vector<Event>& events();
 const std::vector<SourceExecutionCall>& source_execution_calls();
+const std::vector<SourcePreparationCall>& source_preparation_calls();
+const std::vector<PackageBaseSourceExecutionCall>&
+package_base_source_execution_calls();
 const std::vector<AurExecutionCall>& aur_execution_calls();
 const std::vector<std::string>& system_commands();
 

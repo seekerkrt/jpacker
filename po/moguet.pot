@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Moguet 2.2.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-11 17:54+0900\n"
+"POT-Creation-Date: 2026-08-12 12:05+0900\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -5715,6 +5715,9 @@ msgstr ""
 msgid "{} artifact aggregate validation failed."
 msgstr ""
 
+msgid "Prepared source-build execution capability is invalid or test-only."
+msgstr ""
+
 #, c++-format
 msgid "{} is up to date ({}). Skipping."
 msgstr ""
@@ -5862,8 +5865,10 @@ msgstr ""
 msgid "{} set source-build multiple request must not expose a singular package name."
 msgstr ""
 
-#, c++-format
-msgid "{} private artifact workspace preparation failed: {}"
+msgid "Private artifact workspace preparation failed."
+msgstr ""
+
+msgid "Source checkout or build preparation failed."
 msgstr ""
 
 #, c++-format
@@ -5871,15 +5876,19 @@ msgid "{} private artifact workspace preparation failed."
 msgstr ""
 
 #, c++-format
-msgid "{} source checkout or build preparation failed: {}"
-msgstr ""
-
-#, c++-format
 msgid "{} source checkout or build preparation failed."
 msgstr ""
 
 #, c++-format
-msgid "{} set source-build unexpectedly produced a singular update-status result."
+msgid "{} private artifact workspace preparation failed: {}"
+msgstr ""
+
+#, c++-format
+msgid "{} source checkout or build preparation failed: {}"
+msgstr ""
+
+#, c++-format
+msgid "{} set source-build unexpectedly produced an update-status result."
 msgstr ""
 
 msgid "Unknown source-build execution status."
@@ -6145,6 +6154,60 @@ msgstr ""
 
 #, c++-format
 msgid "Failed to snapshot local package versions after the system upgrade: {}"
+msgstr ""
+
+#. TRANSLATORS: {} is the literal Arch field name "PackageBase".
+#, c++-format
+msgid "Registered repository source-build result does not match the prepared {}."
+msgstr ""
+
+msgid "Registered repository source-build selected child count does not match preparation."
+msgstr ""
+
+msgid "Registered repository selected artifact identity does not match the requested child."
+msgstr ""
+
+msgid "Registered repository selected artifact has an empty version."
+msgstr ""
+
+msgid "Registered repository selected artifact install reason does not match preparation."
+msgstr ""
+
+msgid "Registered repository source-build unexpectedly reported skipped-as-needed with needed disabled."
+msgstr ""
+
+msgid "Registered repository selected artifact has an unknown execution outcome."
+msgstr ""
+
+msgid "Registered repository unselected artifact identity is incomplete."
+msgstr ""
+
+msgid "Registered repository unselected artifact overlaps the selected child."
+msgstr ""
+
+msgid "Registered repository source-build contains a duplicate unselected artifact identity."
+msgstr ""
+
+#. TRANSLATORS: {} is the literal Arch field name "PackageBase".
+#, c++-format
+msgid "Registered repository package transaction failure does not match the prepared {}."
+msgstr ""
+
+msgid "Registered repository package transaction attempt count does not match preparation."
+msgstr ""
+
+msgid "Registered repository transaction attempt identity does not match the requested child."
+msgstr ""
+
+msgid "Registered repository transaction attempt has an empty version."
+msgstr ""
+
+msgid "Registered repository transaction attempt install reason does not match preparation."
+msgstr ""
+
+#. TRANSLATORS: {} is the literal Arch field name "PackageBase".
+#, c++-format
+msgid "Registered repository install preparation failure does not match the prepared {}."
 msgstr ""
 
 msgid "Source preference enumeration failed with an unknown exception."

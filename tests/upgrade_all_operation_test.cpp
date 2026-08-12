@@ -1952,6 +1952,12 @@ void test_no_updates_success_contract() {
                     !result.has_partial_completion() &&
                     !result.has_not_attempted_phase(),
             "NoUpdates conjunction was not enforced");
+    expect(
+            stub::source_preparation_calls().size() == 1 &&
+                    stub::source_preparation_calls().front().update_policy ==
+                            SourceBuildUpdatePolicy::OnlyIfUpdated &&
+                    stub::package_base_source_execution_calls().empty(),
+            "Upgrade-all UpToDate source crossed the closed preparation boundary");
     stub::require_script_consumed();
 }
 
@@ -2031,6 +2037,23 @@ void test_source_updated_only() {
                     result.package_state_change() ==
                             PackageStateChange::Changed,
             "Source-only package change was not aggregated");
+    expect(
+            stub::source_preparation_calls().size() == 1 &&
+                    stub::package_base_source_execution_calls().size() == 1 &&
+                    stub::source_preparation_calls().front().package_name ==
+                            "updated-source" &&
+                    stub::package_base_source_execution_calls().front()
+                                    .package_name ==
+                            "updated-source" &&
+                    stub::package_base_source_execution_calls().front()
+                                    .database_paths.root_dir ==
+                            stub::source_execution_calls().front()
+                                    .database_paths.root_dir &&
+                    stub::package_base_source_execution_calls().front()
+                                    .database_paths.db_path ==
+                            stub::source_execution_calls().front()
+                                    .database_paths.db_path,
+            "Upgrade-all registered repository route did not preserve prepare/Set execution authority");
     stub::require_script_consumed();
 }
 
