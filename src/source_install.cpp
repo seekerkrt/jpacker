@@ -404,7 +404,7 @@ void present_package_base_result(
                         "PackageBase"));
     }
 
-    // TRANSLATORS: The placeholders are the PackageBase field identity and an AUR PackageBase name.
+    // TRANSLATORS: The placeholders are the PackageBase field identity and a PackageBase name.
     Logger::info(localization::format_translated_message(
             "{} result: {}", "PackageBase", result.package_base()));
     for(std::size_t index = 0;

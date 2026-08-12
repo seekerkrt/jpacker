@@ -520,16 +520,32 @@ void configure_repository_package_from_environment(
     }
 
     package_state.lookup_mode = PackageLookupMode::Absent;
-    std::string fixture_repository;
-    std::string fixture_package;
-    off_t       package_size = 0;
-    off_t       installed_size = 0;
-    while(state_file >> fixture_repository >> fixture_package >> package_size >> installed_size) {
+    std::string line;
+    while(std::getline(state_file, line)) {
+        if(line.empty()) continue;
+
+        std::istringstream fields(line);
+        std::string fixture_repository;
+        std::string fixture_package;
+        off_t       package_size = 0;
+        off_t       installed_size = 0;
+        std::string fixture_package_base;
+        std::string unexpected_field;
+        if(!(fields >> fixture_repository >> fixture_package >> package_size >>
+             installed_size) ||
+           ((fields >> fixture_package_base) &&
+            (fields >> unexpected_field))) {
+            package_state.lookup_mode = PackageLookupMode::Failure;
+            package_state.query_error = ALPM_ERR_DB_OPEN;
+            return;
+        }
         if(fixture_repository != repository_name || fixture_package != package_name) continue;
 
         package_state.lookup_mode = PackageLookupMode::Present;
         package_state.returned_name = fixture_package;
-        package_state.package_base = fixture_package;
+        package_state.package_base = fixture_package_base.empty()
+                ? fixture_package
+                : fixture_package_base;
         package_state.package_base_is_null = false;
         package_state.package_size = package_size;
         package_state.installed_size = installed_size;
@@ -537,7 +553,7 @@ void configure_repository_package_from_environment(
         return;
     }
 
-    if(!state_file.eof()) {
+    if(state_file.bad()) {
         package_state.lookup_mode = PackageLookupMode::Failure;
         package_state.query_error = ALPM_ERR_DB_OPEN;
     }

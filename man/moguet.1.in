@@ -673,11 +673,29 @@ selected AUR roots to enter the existing source-build lifecycle. A later AUR
 failure does not roll back the completed repository transaction.
 .
 .PP
-The registered-source phase offers provider selection only when every
-candidate is from an official repository. A candidate set containing an AUR
-provider remains ambiguous and fails closed before system or source execution,
-because the singular source lifecycle cannot schedule that provider's
-PackageBase.
+The registered AUR route offers provider selection only when every candidate
+is from an official repository. A candidate set containing an AUR provider
+remains ambiguous and fails closed before system or source execution, because
+this singular compatibility route cannot schedule that provider's PackageBase.
+.
+.PP
+Official-repository source identity comes from the exact configured libalpm
+snapshot. Only a confirmed
+.B NotFound
+may fall back to AUR; query, configuration, or metadata failure stops instead
+of being treated as absence. Standalone official builds use
+.BR PackageBaseSet ;
+registered official sources use it after
+.B OnlyIfUpdated
+preparation. They build the authoritative PackageBase once, install only the
+requested explicit child, and report sibling and debug outputs as unselected
+and not installed. The sync repository route remains
+.B SingularCompatibility
+with its existing
+.B --needed
+behavior, and registered AUR remains
+.B SingularCompatibility
+with its existing provider and split-package guards.
 .
 .PP
 .B deps

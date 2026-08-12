@@ -385,6 +385,20 @@ assert_command_occurrence_before() {
     fi
 }
 
+assert_output_before() {
+    first=$1
+    second=$2
+    file=$3
+    first_line=$(grep -nF -- "$first" "$file" | sed -n '1s/:.*//p')
+    second_line=$(grep -nF -- "$second" "$file" | sed -n '1s/:.*//p')
+    if [ -z "$first_line" ] || [ -z "$second_line" ] ||
+       [ "$first_line" -ge "$second_line" ]; then
+        echo "unexpected output order: $first -> $second" >&2
+        sed -n '1,260p' "$file" >&2
+        exit 1
+    fi
+}
+
 assert_editor_argv_log() {
     expected=$1
     expected_file=$case_dir/expected-editor-argv.log
@@ -455,6 +469,14 @@ assert_single_selected_install \
 assert_file_line_count 'env[SLICE3_FLAGS]=<-O1>' 2 "$makepkg_env_log"
 assert_file_line_count 'env[SLICE3_EMPTY]=<>' 2 "$makepkg_env_log"
 assert_not_contains "Building AUR PackageBase" "$output_file"
+assert_contains "PackageBase result: clean-root" "$output_file"
+assert_contains \
+    "  required child: clean-root -> clean-root 1.1-1 (explicit): installed" \
+    "$output_file"
+assert_output_before \
+    "  produced artifact: clean-root-sibling 2.0-1 (not selected; not installed)" \
+    "  produced artifact: clean-root-debug 1.1-1 (not selected; not installed)" \
+    "$output_file"
 
 # P0-2: the changed-diff prompt controls display only; reset always follows.
 setup_case changed-diff-yes

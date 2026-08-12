@@ -131,11 +131,22 @@ detailed plan.
   auto-select provider candidates, and do not authorize source fallback.
   When selected AUR provider metadata is refreshed, the current matching
   capability is evaluated again and the stale result is discarded.
-- The registered-source phase keeps its singular source lifecycle. It offers
-  provider selection only when every candidate is from an official repository;
-  a candidate set containing an AUR provider remains ambiguous and stops before
-  system or source execution because that phase cannot schedule the provider's
-  PackageBase.
+- Source-build routes keep their route-specific lifecycle. A standalone
+  official-repository build uses `PackageBaseSet`; a registered official
+  source uses `PackageBaseSet` after `OnlyIfUpdated` preparation. The sync
+  repository route remains `SingularCompatibility` with its existing
+  `--needed` behavior, while a registered AUR source remains
+  `SingularCompatibility` with its existing provider and split-package guards.
+- Official-repository source identity comes from the exact configured libalpm
+  snapshot. Only a confirmed `NotFound` may fall back to AUR; query,
+  configuration, or metadata failure stops. Standalone and registered builds
+  build the authoritative PackageBase once, install only the requested
+  `Explicit` child, and retain sibling and debug outputs as unselected and not
+  installed.
+- The registered AUR route offers provider selection only when every candidate
+  is from an official repository. A candidate set containing an AUR provider
+  remains ambiguous and stops before system or source execution because this
+  singular compatibility route cannot schedule that provider's PackageBase.
 - Moguet rejects unresolved dependencies, unselected ambiguous providers,
   cycles, conflicts/replacements that it cannot safely resolve, and
   unprovable artifact identities before the corresponding mutation.

@@ -386,7 +386,7 @@ assert_event_count 1 \
 assert_event_count 1 \
     "upgrade-all execute noedit=false nodiff=false noconfirm=false rebuild=false cleanbuild=true rmdeps=false"
 
-# 22-27: success matrix and normal detailed presentation.
+# 22-28: success matrix and normal detailed presentation.
 setup_case completed-changed completed-changed
 run_status 0 upgrade-all
 assert_exact_line "system: completed" "$stdout_file"
@@ -401,6 +401,38 @@ assert_contains "fixture AUR preparation warning" "$stdout_file"
 assert_not_contains "fixture registered source warning" "$stderr_file"
 assert_exact_line "upgrade-all completed" "$stdout_file"
 assert_exact_line "package state changed" "$stdout_file"
+
+setup_case registered-packagebase-result registered-packagebase-result
+run_status 0 upgrade-all
+assert_exact_line \
+    "registered source: registered-child: updated" "$stdout_file"
+assert_exact_line "PackageBase result: registered-suite" "$stdout_file"
+assert_exact_line \
+    "  required child: registered-child -> registered-child 4.2-3 (explicit): installed" \
+    "$stdout_file"
+assert_exact_line \
+    "  produced artifact: registered-sibling 4.2-3 (not selected; not installed)" \
+    "$stdout_file"
+assert_exact_line \
+    "  produced artifact: registered-child-debug 4.2-3 (not selected; not installed)" \
+    "$stdout_file"
+assert_line_before \
+    "registered source: registered-child: updated" \
+    "PackageBase result: registered-suite" "$stdout_file"
+assert_line_before \
+    "  required child: registered-child -> registered-child 4.2-3 (explicit): installed" \
+    "  produced artifact: registered-sibling 4.2-3 (not selected; not installed)" \
+    "$stdout_file"
+assert_line_before \
+    "  produced artifact: registered-sibling 4.2-3 (not selected; not installed)" \
+    "  produced artifact: registered-child-debug 4.2-3 (not selected; not installed)" \
+    "$stdout_file"
+assert_line_before \
+    "  produced artifact: registered-child-debug 4.2-3 (not selected; not installed)" \
+    "registered source: registered-ordinary: updated" "$stdout_file"
+assert_not_contains \
+    "PackageBase result: registered-ordinary" "$stdout_file"
+assert_occurrence_count 1 "PackageBase result:" "$stdout_file"
 
 setup_case aur-split-multiple aur-split-multiple
 run_status 0 upgrade-all
@@ -959,7 +991,7 @@ run_matrix_table external-attribution-missing 1 <<'EOF'
 1|AUR phase: completed|Unexpected upgrade-all command failure: External satisfaction has no explicit source identity.
 EOF
 
-if [ "$case_count" -ne 216 ]; then
+if [ "$case_count" -ne 217 ]; then
     echo "upgrade-all command test scenario count drifted: $case_count" >&2
     exit 1
 fi

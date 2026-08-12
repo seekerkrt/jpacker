@@ -2057,6 +2057,168 @@ void test_source_updated_only() {
     stub::require_script_consumed();
 }
 
+void test_registered_package_base_result_and_composition() {
+    stub::reset();
+    const std::string requested_child = "registered-child";
+    const std::string package_base = "registered-suite";
+    const std::string aur_root = "aur-root";
+    const AppConfig config;
+
+    stub::set_preference_directory(
+            preference_directory({requested_child}));
+    SourcePreferenceLoaded preference = loaded_preference(requested_child);
+    preference.environment.ordered_assignments = {
+            {"FIRST_FLAG", "first value"},
+            {"SECOND_FLAG", "second value"}};
+    stub::enqueue_preference_result(
+            requested_child, std::move(preference));
+    stub::set_source_identity(
+            requested_child,
+            source_identity(requested_child, package_base));
+    stub::enqueue_metadata_session(metadata_session(
+            {requested_child},
+            LocalPackageVersionSnapshot{{requested_child, "1.0-1"}}));
+
+    PreparedUpgradeAllOperation prepared = take_prepared(
+            prepare_upgrade_all_operation(config),
+            "registered PackageBase composition fixture");
+    enqueue_post_source_metadata(
+            {requested_child},
+            LocalPackageVersionSnapshot{{requested_child, "1.0-1"}});
+    stub::enqueue_package_base_source_success(
+            package_base,
+            ArtifactPackageIdentity{requested_child, "4.2-3"},
+            {ArtifactPackageIdentity{"registered-sibling", "4.2-3"},
+             ArtifactPackageIdentity{"registered-child-debug", "4.2-3"}});
+    stub::set_foreign_inventory(
+            foreign_inventory({requested_child, aur_root}));
+    enqueue_aur_query({
+            {requested_child, package_base},
+            {aur_root, aur_root}});
+    return_build_plan(root_plan({{aur_root, aur_root}}), {aur_root});
+    stub::enqueue_aur_success(ArtifactInstallExecutionOutcome::Installed);
+
+    UpgradeAllOperationResult result =
+            execute_prepared_upgrade_all_operation(
+                    std::move(prepared), config);
+
+    const RegisteredSourceUpgradeResult& registered =
+            result.system_source.registered_source_results.front();
+    expect(
+            result.is_success() &&
+                    registered.status ==
+                            RegisteredSourceUpgradeStatus::Updated &&
+                    registered.package_base_execution.has_value() &&
+                    registered.package_base_execution->package_base ==
+                            package_base &&
+                    registered.package_base_execution->selected_child.identity.
+                                    package_name == requested_child &&
+                    registered.package_base_execution->selected_child.identity.
+                                    full_version == "4.2-3" &&
+                    registered.package_base_execution->selected_child.
+                                    desired_reason ==
+                            DesiredInstallReason::Explicit &&
+                    registered.package_base_execution->selected_child.outcome ==
+                            ArtifactInstallExecutionOutcome::Installed &&
+                    registered.package_base_execution->unselected_artifacts.
+                                    size() == 2 &&
+                    registered.package_base_execution->unselected_artifacts[0].
+                                    package_name == "registered-sibling" &&
+                    registered.package_base_execution->unselected_artifacts[0].
+                                    full_version == "4.2-3" &&
+                    registered.package_base_execution->unselected_artifacts[1].
+                                    package_name ==
+                            "registered-child-debug" &&
+                    registered.package_base_execution->unselected_artifacts[1].
+                                    full_version == "4.2-3",
+            "Registered PackageBase aggregate lost selected or unselected identities");
+
+    const auto environment_matches = [](
+                                             const SourceBuildRequest& request) {
+        const auto& assignments =
+                request.custom_environment.ordered_assignments;
+        return request.empty_value_policy ==
+                               SourceEnvironmentEmptyValuePolicy::Omit &&
+               assignments.size() == 2 &&
+               assignments[0].key == "FIRST_FLAG" &&
+               assignments[0].value == "first value" &&
+               assignments[1].key == "SECOND_FLAG" &&
+               assignments[1].value == "second value";
+    };
+    expect(
+            stub::source_preparation_calls().size() == 1 &&
+                    stub::package_base_source_execution_calls().size() == 1 &&
+                    stub::source_preparation_calls().front().package_name ==
+                            requested_child &&
+                    stub::source_preparation_calls().front().package_base ==
+                            package_base &&
+                    stub::source_preparation_calls().front().update_policy ==
+                            SourceBuildUpdatePolicy::OnlyIfUpdated &&
+                    environment_matches(
+                            stub::source_preparation_calls().front().request) &&
+                    stub::package_base_source_execution_calls().front().
+                                    package_name == requested_child &&
+                    stub::package_base_source_execution_calls().front().
+                                    package_base == package_base &&
+                    environment_matches(
+                            stub::package_base_source_execution_calls().front().
+                                    request),
+            "Registered custom environment or PackageBase execution count changed");
+
+    expect(
+            result.foreign_inventory.inventory.size() == 2 &&
+                    result.foreign_inventory.inventory[0].name ==
+                            requested_child &&
+                    result.foreign_inventory.inventory[1].name == aur_root &&
+                    result.has_duplicate_exclusions() &&
+                    result.duplicate_excluded_aur_targets.size() == 1 &&
+                    result.duplicate_excluded_aur_targets[0].query_entry.
+                                    installed_name == requested_child &&
+                    stub::info_many_call_history() ==
+                            std::vector<std::vector<std::string>>{
+                                    {requested_child, aur_root}} &&
+                    stub::aur_execution_calls().size() == 1 &&
+                    stub::aur_execution_calls().front().package_base ==
+                            aur_root &&
+                    stub::aur_execution_calls().front().plan_package_names ==
+                            std::vector<std::string>{aur_root},
+            "Fresh inventory filtering rebuilt an explicit registered source");
+
+    expect(
+            event_position(
+                    stub::EventKind::SourcePreparation,
+                    requested_child) <
+                            event_position(
+                                    stub::EventKind::PackageBaseSourceExecution,
+                                    requested_child) &&
+                    event_position(
+                            stub::EventKind::PackageBaseSourceExecution,
+                            requested_child) <
+                            event_position(
+                                    stub::EventKind::ForeignInventoryQuery,
+                                    "foreign-inventory") &&
+                    event_position(
+                            stub::EventKind::ForeignInventoryQuery,
+                            "foreign-inventory") <
+                            event_position(
+                                    stub::EventKind::AurInfoMany,
+                                    "aur-info-many") &&
+                    event_position(
+                            stub::EventKind::AurInfoMany,
+                            "aur-info-many") <
+                            event_position(
+                                    stub::EventKind::BuildPlanResolution,
+                                    "build-plan") &&
+                    event_position(
+                            stub::EventKind::BuildPlanResolution,
+                            "build-plan") <
+                            event_position(
+                                    stub::EventKind::AurCheckout,
+                                    aur_root),
+            "Registered PackageBase and filtered AUR phase order changed");
+    stub::require_script_consumed();
+}
+
 void test_aur_updated_only_and_fresh_inventory() {
     stub::reset();
     stub::set_preference_directory(preference_directory({}));
@@ -2792,6 +2954,9 @@ int main() {
                 test_system_unknown_does_not_reduce_to_no_updates);
         run_case("system Changed only", test_system_changed_only);
         run_case("source Updated only", test_source_updated_only);
+        run_case(
+                "registered PackageBase result and composition",
+                test_registered_package_base_result_and_composition);
         run_case(
                 "AUR Updated only and fresh inventory",
                 test_aur_updated_only_and_fresh_inventory);
