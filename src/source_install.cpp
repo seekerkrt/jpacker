@@ -806,7 +806,7 @@ RemoteSourceBuildPreparation prepare_remote_source_build(
         work_items.push_back(make_direct_source_build_work_item(
                 source, custom_environment,
                 SourceEnvironmentEmptyValuePolicy::Forward, false, false,
-                ArtifactLifecycleIntent::SingularCompatibility,
+                ArtifactLifecycleIntent::PackageBaseSet,
                 select_provider));
     }
     PreparedProductionSourceBuildInvocation invocation =
@@ -898,13 +898,6 @@ execute_prepared_package_base_source_build_work_item_typed(
         throw std::logic_error(
                 "PackageBase set source-build execution received a non-set lifecycle work item.");
     }
-    // Slice 2 transition: repository + PackageBaseSetはmodel上のfuture-valid
-    // combinationとして保持するが、production execution接続はSlice 3へ譲る。
-    if(work_item.required_target_provenance !=
-       RequiredTargetProvenance::AurBuildPlanProjection) {
-        throw std::logic_error(
-                "Repository PackageBase set source-build execution is not connected.");
-    }
     if(work_item.request.only_if_updated) {
         throw std::logic_error(
                 localization::format_translated_message(
@@ -912,14 +905,17 @@ execute_prepared_package_base_source_build_work_item_typed(
                         "PackageBase"));
     }
 
-    // TRANSLATORS: The placeholders are AUR and PackageBase identities and an AUR PackageBase name.
-    Logger::info(localization::format_translated_message(
-            "Building {} {}: {}", "AUR", "PackageBase",
-            work_item.request.checkout_name));
-    // TRANSLATORS: The placeholder is a comma-separated list of package names.
-    Logger::info(localization::format_translated_message(
-            "Target package(s): {}",
-            join_required_package_names(work_item.required_targets)));
+    if(work_item.required_target_provenance ==
+       RequiredTargetProvenance::AurBuildPlanProjection) {
+        // TRANSLATORS: The placeholders are AUR and PackageBase identities and an AUR PackageBase name.
+        Logger::info(localization::format_translated_message(
+                "Building {} {}: {}", "AUR", "PackageBase",
+                work_item.request.checkout_name));
+        // TRANSLATORS: The placeholder is a comma-separated list of package names.
+        Logger::info(localization::format_translated_message(
+                "Target package(s): {}",
+                join_required_package_names(work_item.required_targets)));
+    }
     return execute_source_build_package_base_typed(
             work_item.request, work_item.required_targets,
             require_prepared_cache_root(work_item),

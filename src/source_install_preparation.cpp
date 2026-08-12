@@ -127,6 +127,12 @@ void require_static_production_source_build_work_item(
         throw std::logic_error(
                 "Production source-build work item has no supported artifact lifecycle intent.");
     }
+    if(work_item.artifact_lifecycle_intent ==
+               ArtifactLifecycleIntent::PackageBaseSet &&
+       work_item.request.only_if_updated) {
+        throw std::logic_error(
+                "Production PackageBase set source-build work item does not support only-if-updated requests.");
+    }
 
     require_valid_package_name(work_item.request.checkout_name);
     if(work_item.request.git_url.empty()) {

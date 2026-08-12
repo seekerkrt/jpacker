@@ -246,8 +246,8 @@ private:
     std::reference_wrapper<const LocalPackageMetadata> metadata_;
 };
 
-// Standalone repository source-buildのcache-free production workをborrowする。
-// AUR BuildPlan unitは既存AurPackageBaseBuildUnitReferenceを正本とする。
+// standalone / sync repository source-buildのcache-free production workをborrowする。
+// exact lifecycleは各route projection ownerが固定し、AUR unitは別referenceを使う。
 class PreparedRemoteSourceBuildUnitReference final {
 public:
     PreparedRemoteSourceBuildUnitReference(

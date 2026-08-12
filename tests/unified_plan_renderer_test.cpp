@@ -2537,7 +2537,7 @@ void test_slice_five_route_authority_rendering() {
     work.required_target_provenance =
             RequiredTargetProvenance::RepositoryExactPackageProjection;
     work.artifact_lifecycle_intent =
-            ArtifactLifecycleIntent::SingularCompatibility;
+            ArtifactLifecycleIntent::PackageBaseSet;
     work.repository_identity = *source.repository_identity();
     work.uses_system_update_baseline = true;
     UnifiedPlanObservationInput remote_input;

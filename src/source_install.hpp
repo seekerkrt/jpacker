@@ -384,8 +384,8 @@ struct SelectedRepositoryProviderTransactionResult {
 void require_static_production_source_build_work_item(
         const ProductionSourceBuildWorkItem& work_item);
 
-// official/generic/registered-source singular lifecycleのcompatibility境界。
-// multipleを先頭要素へ潰さない。
+// generic/sync/registered source routeが所有するsingular compatibility境界。
+// standalone repository routeはPackageBaseSetを使い、multipleを先頭へ潰さない。
 const RequiredPackageArtifactTarget& require_singular_required_package_target(
         const ProductionSourceBuildWorkItem& work_item);
 
@@ -480,7 +480,7 @@ execute_selected_repository_provider_transaction(
         const PreparedProductionSourceBuildInvocation& invocation,
         const AppConfig& config);
 
-// AUR PackageBase execution専用のset owner。required_targetsをauthorityにし、
+// source-neutralなPackageBase set execution owner。required_targetsをauthorityにし、
 // child別outcomeとunselected artifact identityをflattenせず返す。
 PackageBaseSourceBuildExecutionResult
 execute_prepared_package_base_source_build_work_item_typed(
@@ -501,8 +501,8 @@ execute_prepared_source_build_work_item(
         const PacmanDatabasePaths& database_paths,
         const AppConfig& config);
 
-// AUR BuildPlan work itemはPackageBase set owner、それ以外はlegacy
-// singular ownerへroutingする。invocationのDB snapshotを再queryしない。
+// lifecycle intentがSetならsource-neutral set owner、それ以外はroute ownerが
+// 検証済みのsingular compatibilityへroutingする。DB snapshotを再queryしない。
 void execute_prepared_source_build_invocation(
         PreparedProductionSourceBuildInvocation invocation,
         const AppConfig& config);

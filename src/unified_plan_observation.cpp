@@ -409,8 +409,10 @@ bool PreparedRemoteSourceBuildUnitReference::has_complete_identity()
        work.request.git_url != source.git_url() ||
        work.required_target_provenance !=
                RequiredTargetProvenance::RepositoryExactPackageProjection ||
-       work.artifact_lifecycle_intent !=
-               ArtifactLifecycleIntent::SingularCompatibility ||
+       (work.artifact_lifecycle_intent !=
+                ArtifactLifecycleIntent::SingularCompatibility &&
+        work.artifact_lifecycle_intent !=
+                ArtifactLifecycleIntent::PackageBaseSet) ||
        work.repository_identity !=
                std::optional<ResolvedRepositorySourceBuildIdentity>{
                        *repository} ||

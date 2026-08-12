@@ -119,6 +119,9 @@ setup_case() {
     unset MOGUET_TEST_PACKAGE_METADATA_PACMAN_CONF_EXIT_CODE
     unset MOGUET_TEST_PACKAGE_METADATA_PACMAN_CONF_FAILURE_AT
     unset MOGUET_TEST_MAKEPKG_PACKAGE_METADATA_STATE_AFTER_SUCCESS_FILE
+    unset MOGUET_TEST_MAKEPKG_ARTIFACT_IDENTITIES
+    unset MOGUET_TEST_MAKEPKG_ENV_LOG
+    unset MOGUET_TEST_MAKEPKG_ENV_KEYS
     unset MOGUET_TEST_MAKEPKG_PACKAGELIST_EXIT_CODE
     unset MOGUET_TEST_MAKEPKG_PACKAGELIST_OUTPUT_FILE
 }
@@ -292,6 +295,61 @@ assert_command_count() {
     fi
 }
 
+assert_command_content_count() {
+    expected_content=$1
+    expected_count=$2
+    actual_count=$(validation_grep_count -Fc -- "$expected_content" "$command_log")
+    if [ "$actual_count" -ne "$expected_count" ]; then
+        echo "unexpected command content count for: $expected_content" >&2
+        echo "expected $expected_count, got $actual_count" >&2
+        cat "$command_log" >&2
+        exit 1
+    fi
+}
+
+assert_file_line_count() {
+    expected_line=$1
+    expected_count=$2
+    file=$3
+    actual_count=$(validation_grep_count -Fxc -- "$expected_line" "$file")
+    if [ "$actual_count" -ne "$expected_count" ]; then
+        echo "unexpected line count for: $expected_line" >&2
+        echo "expected $expected_count, got $actual_count" >&2
+        cat "$file" >&2
+        exit 1
+    fi
+}
+
+assert_single_selected_install() {
+    selected_fragment=$1
+    rejected_first_fragment=$2
+    rejected_second_fragment=$3
+    assert_command_content_count "sudo pacman -U" 1
+    install_command=$(grep -F -- "sudo pacman -U" "$command_log" | sed -n '1p')
+    case $install_command in
+        *"$selected_fragment"*) ;;
+        *)
+            echo "selected artifact is missing from the install transaction: $selected_fragment" >&2
+            cat "$command_log" >&2
+            exit 1
+            ;;
+    esac
+    case $install_command in
+        *"$rejected_first_fragment"*|*"$rejected_second_fragment"*)
+            echo "unselected artifact leaked into the install transaction" >&2
+            echo "$install_command" >&2
+            exit 1
+            ;;
+    esac
+    case " $install_command " in
+        *" --needed "*)
+            echo "standalone repository install unexpectedly used --needed" >&2
+            echo "$install_command" >&2
+            exit 1
+            ;;
+    esac
+}
+
 assert_command_prefix_absent() {
     unexpected=$1
     if grep -F -- "$unexpected" "$command_log" >/dev/null; then
@@ -372,6 +430,31 @@ assert_contains "Detected branch: master" "$output_file"
 assert_command "git show-ref --verify --quiet refs/remotes/origin/main"
 assert_command "git show-ref --verify --quiet refs/remotes/origin/master"
 assert_command "git reset --hard origin/master"
+
+# Issue #406 Slice 3: standalone repository builds always use the
+# PackageBase-set lifecycle and install only the archive-selected child.
+setup_case repository-packagebase-set-selected-only
+makepkg_env_log=$case_dir/makepkg-environment.log
+: > "$makepkg_env_log"
+export MOGUET_TEST_MAKEPKG_ENV_LOG=$makepkg_env_log
+export MOGUET_TEST_MAKEPKG_ENV_KEYS='SLICE3_FLAGS SLICE3_EMPTY'
+export MOGUET_TEST_MAKEPKG_ARTIFACT_IDENTITIES='clean-root|clean-root-sibling|2.0-1
+clean-root|clean-root|1.1-1
+clean-root|clean-root-debug|1.1-1'
+run_ok --noedit --nodiff build clean-root SLICE3_FLAGS=-O1 SLICE3_EMPTY=
+assert_command "makepkg --packagelist"
+assert_command "makepkg -sc"
+assert_command_content_count "pacman -U --print --print-format" 3
+assert_contains "clean-root-sibling-2.0-1-x86_64.pkg.tar.zst" "$command_log"
+assert_contains "clean-root-1.1-1-x86_64.pkg.tar.zst" "$command_log"
+assert_contains "clean-root-debug-1.1-1-x86_64.pkg.tar.zst" "$command_log"
+assert_single_selected_install \
+    "clean-root-1.1-1-x86_64.pkg.tar.zst" \
+    "clean-root-sibling-2.0-1-x86_64.pkg.tar.zst" \
+    "clean-root-debug-1.1-1-x86_64.pkg.tar.zst"
+assert_file_line_count 'env[SLICE3_FLAGS]=<-O1>' 2 "$makepkg_env_log"
+assert_file_line_count 'env[SLICE3_EMPTY]=<>' 2 "$makepkg_env_log"
+assert_not_contains "Building AUR PackageBase" "$output_file"
 
 # P0-2: the changed-diff prompt controls display only; reset always follows.
 setup_case changed-diff-yes
@@ -536,7 +619,7 @@ export MOGUET_TEST_EDITOR_ARGV_LOG="$editor_argv_log"
 export EDITOR='moguet-test-editor --environment-option'
 export MOGUET_TEST_EDITOR_EXIT_CODE=42
 run_config_tty_fail 'y\n' build clean-root
-assert_contains "Build Error: Failed while building/installing PackageBase clean-root (clean-root): Editor failed." "$output_file"
+assert_contains "Build Error: PackageBase source checkout or build preparation failed: Editor failed." "$output_file"
 assert_not_contains "Edit install script -option.install?" "$output_file"
 assert_command "moguet-test-editor --environment-option ./PKGBUILD"
 assert_command_absent "moguet-test-editor --environment-option ./-option.install"
