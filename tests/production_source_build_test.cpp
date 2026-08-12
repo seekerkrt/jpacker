@@ -928,8 +928,8 @@ std::string expected_build_command(
 
 std::string expected_identity_command(const fs::path& artifact_path) {
     return "LC_ALL=C " + shell_join(
-            {"pacman", "-U", "--print", "--print-format", "%n\t%v",
-             "--", artifact_path.string()});
+            {"pacman", "-Qp", "--color", "never", "--",
+             artifact_path.string()});
 }
 
 std::vector<fs::path> produced_artifact_paths(
@@ -1119,7 +1119,7 @@ void observe_workspace(const fs::path& workspace_path) {
             process_stub::expect_capture_command(
                     expected_identity_command(artifact_paths[index]),
                     CapturedCommandResult{
-                            archive_package_name(artifact) + "\t" +
+                            archive_package_name(artifact) + " " +
                                     artifact.full_version + "\n",
                             0});
         }

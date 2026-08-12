@@ -458,7 +458,7 @@ clean-root|clean-root-debug|1.1-1'
 run_ok --noedit --nodiff build clean-root SLICE3_FLAGS=-O1 SLICE3_EMPTY=
 assert_command "makepkg --packagelist"
 assert_command "makepkg -sc"
-assert_command_content_count "pacman -U --print --print-format" 3
+assert_command_content_count "pacman -Qp --color never" 3
 assert_contains "clean-root-sibling-2.0-1-x86_64.pkg.tar.zst" "$command_log"
 assert_contains "clean-root-1.1-1-x86_64.pkg.tar.zst" "$command_log"
 assert_contains "clean-root-debug-1.1-1-x86_64.pkg.tar.zst" "$command_log"

@@ -708,18 +708,18 @@ assert_event_at 6 "git clone https://aur.archlinux.org/plan-a.git plan-a"
 assert_event_at 7 "git config --get remote.origin.url"
 assert_event_at 8 "makepkg --packagelist"
 assert_event_at 9 "makepkg -sc --noconfirm"
-assert_event_pattern '^pacman -U --print --print-format .* -- .*/plan-a-1\.0-1-x86_64\.pkg\.tar\.zst$'
+assert_event_pattern '^pacman -Qp --color never -- .*/plan-a-1\.0-1-x86_64\.pkg\.tar\.zst$'
 assert_event_pattern '^sudo pacman -U --noconfirm --needed -- .*/plan-a-1\.0-1-x86_64\.pkg\.tar\.zst$'
 assert_event_at 12 "git clone https://aur.archlinux.org/plan-b.git plan-b"
 assert_event_at 13 "git config --get remote.origin.url"
 assert_event_at 14 "makepkg --packagelist"
 assert_event_at 15 "makepkg -sc --noconfirm"
-assert_event_pattern '^pacman -U --print --print-format .* -- .*/plan-b-1\.0-1-x86_64\.pkg\.tar\.zst$'
+assert_event_pattern '^pacman -Qp --color never -- .*/plan-b-1\.0-1-x86_64\.pkg\.tar\.zst$'
 assert_event_pattern '^sudo pacman -U --noconfirm --needed -- .*/plan-b-1\.0-1-x86_64\.pkg\.tar\.zst$'
 assert_event_count 1 "pacman-conf --verbose RootDir DBPath"
 assert_event_count 2 "makepkg --packagelist"
 assert_event_count 2 "makepkg -sc --noconfirm"
-assert_event_pattern_count 2 '^pacman -U --print --print-format '
+assert_event_pattern_count 2 '^pacman -Qp --color never '
 assert_event_pattern_count 2 '^sudo pacman -U --noconfirm --needed -- '
 assert_event_absent "sudo pacman -S --noconfirm --needed plan-a plan-b"
 assert_not_contains "Loading custom build flags" "$output_file"
@@ -739,7 +739,7 @@ assert_event_at 5 "pacman-conf --verbose RootDir DBPath"
 assert_event_at 6 "git clone https://aur.archlinux.org/plan-a.git plan-a"
 assert_event_at 8 "makepkg --packagelist"
 assert_event_at 9 "makepkg -sc --noconfirm"
-assert_event_pattern_count 0 '^pacman -U --print --print-format '
+assert_event_pattern_count 0 '^pacman -Qp --color never '
 assert_event_pattern_count 0 '^sudo pacman -U '
 assert_event_absent "git clone https://aur.archlinux.org/plan-b.git plan-b"
 assert_event_absent "sudo pacman -S --noconfirm --needed plan-a plan-b"
@@ -764,7 +764,7 @@ assert_not_contains "Failed while building/installing PackageBase" "$output_file
 assert_not_contains "Pacman failed." "$output_file"
 assert_not_contains "pacman -U failed" "$output_file"
 assert_not_contains "The update failed." "$output_file"
-assert_event_pattern_count 1 '^pacman -U --print --print-format '
+assert_event_pattern_count 1 '^pacman -Qp --color never '
 assert_event_pattern_count 1 '^sudo pacman -U --noconfirm -- '
 assert_event_absent "git clone https://aur.archlinux.org/plan-b.git plan-b"
 assert_cache_entry_absent plan-b
@@ -870,7 +870,7 @@ assert_event_before "git clone https://gitlab.archlinux.org/archlinux/packaging/
 assert_event_count 5 "pacman-conf --verbose RootDir DBPath"
 assert_event_count 3 "makepkg --packagelist"
 assert_event_count 3 "makepkg -sc --noconfirm"
-assert_event_pattern_count 3 '^pacman -U --print --print-format '
+assert_event_pattern_count 3 '^pacman -Qp --color never '
 assert_event_pattern_count 3 '^sudo pacman -U --noconfirm --needed -- '
 assert_event_absent "sudo pacman -S --noconfirm official-a --needed source-a forced-official source-b"
 assert_event_absent "sudo pacman -S --noconfirm source-a"
@@ -932,7 +932,7 @@ assert_event "sudo pacman -S --noconfirm official-a"
 assert_event_before "sudo pacman -S --noconfirm official-a" "git clone https://aur.archlinux.org/source-a.git source-a"
 assert_event "makepkg --packagelist"
 assert_event "makepkg -sc --noconfirm"
-assert_event_pattern_count 0 '^pacman -U --print --print-format '
+assert_event_pattern_count 0 '^pacman -Qp --color never '
 assert_event_pattern_count 0 '^sudo pacman -U '
 assert_event_absent "git clone https://aur.archlinux.org/source-b.git source-b"
 assert_cache_entry_present source-a
@@ -947,7 +947,7 @@ assert_event_before "pacman-conf --verbose RootDir DBPath" "sudo pacman -Syu --n
 assert_event_before "sudo pacman -Syu --noconfirm" "git clone https://aur.archlinux.org/source-a.git source-a"
 assert_event "makepkg --packagelist"
 assert_event "makepkg -sc --noconfirm"
-assert_event_pattern '^pacman -U --print --print-format .* -- .*/source-a-1\.0-1-x86_64\.pkg\.tar\.zst$'
+assert_event_pattern '^pacman -Qp --color never -- .*/source-a-1\.0-1-x86_64\.pkg\.tar\.zst$'
 assert_event_pattern '^sudo pacman -U --noconfirm -- .*/source-a-1\.0-1-x86_64\.pkg\.tar\.zst$'
 assert_event_absent "sudo pacman -Syu --noconfirm source-a"
 

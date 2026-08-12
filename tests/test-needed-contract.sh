@@ -318,7 +318,7 @@ assert_separated_source_install() {
         cat "$command_log" >&2
         exit 1
     fi
-    assert_command_prefix "pacman -U --print --print-format "
+    assert_command_prefix "pacman -Qp --color never "
     assert_command_prefix "$expected_sudo_prefix"
 }
 
@@ -644,7 +644,7 @@ split-base|split-child-debug|4.0-2'
 run_ok --noedit --nodiff -S --aur --needed split-child
 assert_command_count "makepkg --packagelist" 1
 assert_command_count "makepkg -sc" 1
-assert_command_prefix_count "pacman -U --print --print-format " 3
+assert_command_prefix_count "pacman -Qp --color never " 3
 assert_command_prefix_count "sudo pacman -U --needed -- " 1
 if ! grep -E '^sudo pacman -U --needed -- .*/split-child-4\.0-2-x86_64\.pkg\.tar\.zst$' \
     "$command_log" >/dev/null; then

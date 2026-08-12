@@ -509,7 +509,7 @@ assert_command_content_absent() {
 assert_separated_source_commands() {
     expected_count=$1
     assert_command_count "makepkg --packagelist" "$expected_count"
-    assert_command_prefix_count "pacman -U --print --print-format " "$expected_count"
+    assert_command_prefix_count "pacman -Qp --color never " "$expected_count"
     assert_command_prefix_count "sudo pacman -U " "$expected_count"
     assert_command_content_absent "pacman -D"
 }
@@ -2280,7 +2280,7 @@ assert_output_line_count \
 assert_contains \
     "Applying custom build flags: REGISTERED_FIRST='one' REGISTERED_SECOND='two words' " \
     "$output_file"
-assert_command_prefix_count "pacman -U --print --print-format " 3
+assert_command_prefix_count "pacman -Qp --color never " 3
 assert_command_pattern_count \
     '^sudo pacman -U --noconfirm -- .*/registered-child-4\.2-3-x86_64\.pkg\.tar\.zst$' 1
 assert_command_pattern_absent '^sudo pacman -U .*registered-sibling'

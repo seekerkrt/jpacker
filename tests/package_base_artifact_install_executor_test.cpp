@@ -471,8 +471,8 @@ std::string expected_shell_join(
 
 std::string expected_identity_command(const fs::path& artifact_path) {
     return "LC_ALL=C " + expected_shell_join(
-            {"pacman", "-U", "--print", "--print-format", "%n\t%v",
-             "--", artifact_path.string()});
+            {"pacman", "-Qp", "--color", "never", "--",
+             artifact_path.string()});
 }
 
 std::string expected_install_command(
@@ -512,7 +512,7 @@ void expect_identity_queries(
         process_stub::expect_capture_command(
                 expected_identity_command(fixture.path_at(index)),
                 CapturedCommandResult{
-                        identities[index].package_name + "\t" +
+                        identities[index].package_name + " " +
                                 identities[index].full_version + "\n",
                         0});
     }

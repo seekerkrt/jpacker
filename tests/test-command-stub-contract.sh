@@ -107,8 +107,8 @@ expect_rejected 'unexpected read-only pacman option' \
 expect_rejected 'unexpected sync read-only pacman option' \
     "$repo_root/tests/stubs/commands-sync/pacman" -Si target --unexpected
 expect_rejected 'identity query with extra argv' \
-    "$repo_root/tests/stubs/pacman" -U --print --print-format \
-        "$(printf '%s\t%s' '%n' '%v')" -- "$tmp_dir/artifact" extra
+    "$repo_root/tests/stubs/pacman" -Qp --color never -- \
+        "$tmp_dir/artifact" extra
 expect_rejected 'typed install with two reason options' \
     "$repo_root/tests/stubs/sudo" pacman -U --asdeps --asexplicit -- \
         "$tmp_dir/artifact"

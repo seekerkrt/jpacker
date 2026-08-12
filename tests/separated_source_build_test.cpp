@@ -439,8 +439,8 @@ std::string expected_build_command(
 
 std::string expected_identity_command(const fs::path& artifact_path) {
     return "LC_ALL=C " + expected_shell_join(
-            {"pacman", "-U", "--print", "--print-format", "%n\t%v",
-             "--", artifact_path.string()});
+            {"pacman", "-Qp", "--color", "never", "--",
+             artifact_path.string()});
 }
 
 std::string expected_install_command(
@@ -513,7 +513,7 @@ void observe_workspace(const fs::path& workspace_path) {
         process_stub::expect_capture_command(
                 expected_identity_command(artifact_path),
                 CapturedCommandResult{
-                        plan.identity_package_name + "\t" +
+                        plan.identity_package_name + " " +
                                 plan.identity_version + "\n",
                         plan.identity_exit_code});
     }

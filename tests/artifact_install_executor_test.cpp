@@ -272,7 +272,7 @@ void reset_stubs_with_identity(
     expect_artifact_identity_capture(
             fixture,
             CapturedCommandResult{
-                    package_name + "\t" + full_version + "\n", 0});
+                    package_name + " " + full_version + "\n", 0});
 }
 
 PreparedArtifactInstall prepare_fixture(
@@ -324,8 +324,8 @@ std::string expected_shell_join(const std::vector<std::string>& arguments) {
 
 std::string expected_identity_command(const fs::path& artifact_path) {
     return "LC_ALL=C " + expected_shell_join(
-            {"pacman", "-U", "--print", "--print-format", "%n\t%v",
-             "--", artifact_path.string()});
+            {"pacman", "-Qp", "--color", "never", "--",
+             artifact_path.string()});
 }
 
 std::string expected_install_command(
@@ -718,7 +718,7 @@ void test_preparation_failures_preserve_artifact() {
         reset_stubs();
         expect_artifact_identity_capture(
                 fixture,
-                CapturedCommandResult{"sample-package 1-1\n", 0});
+                CapturedCommandResult{"sample-package  1-1\n", 0});
 
         static_cast<void>(expect_runtime_error(
                 [&]() {
@@ -989,11 +989,11 @@ void test_fresh_session_per_preparation() {
     expect_artifact_identity_capture(
             first_fixture,
             CapturedCommandResult{
-                    std::string(PACKAGE_NAME) + "\t" + ARTIFACT_VERSION + "\n", 0});
+                    std::string(PACKAGE_NAME) + " " + ARTIFACT_VERSION + "\n", 0});
     expect_artifact_identity_capture(
             second_fixture,
             CapturedCommandResult{
-                    std::string(PACKAGE_NAME) + "\t" + ARTIFACT_VERSION + "\n", 0});
+                    std::string(PACKAGE_NAME) + " " + ARTIFACT_VERSION + "\n", 0});
     metadata_stub::set_package_metadata(
             PACKAGE_NAME, ARTIFACT_VERSION, ALPM_PKG_REASON_EXPLICIT);
 

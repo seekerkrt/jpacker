@@ -16,8 +16,6 @@
 
 namespace {
 
-constexpr const char* ARTIFACT_IDENTITY_FORMAT = "%n\t%v";
-
 [[noreturn]] void throw_malformed_artifact_identity() {
     // POLICY: package-controlled stdoutをdiagnosticへ埋め込まず、control characterも漏らさない。
     throw std::runtime_error(localization::format_translated_message(
@@ -47,9 +45,9 @@ ArtifactPackageIdentity parse_artifact_package_identity(
         throw_malformed_artifact_identity();
     }
 
-    std::size_t delimiter = record.find('\t');
+    std::size_t delimiter = record.find(' ');
     if(delimiter == std::string::npos ||
-       record.find('\t', delimiter + 1) != std::string::npos) {
+       record.find(' ', delimiter + 1) != std::string::npos) {
         throw_malformed_artifact_identity();
     }
 
@@ -77,12 +75,12 @@ ArtifactPackageIdentity parse_artifact_package_identity(
 
 CapturedCommandResult capture_artifact_package_identity_output(
         const std::filesystem::path& artifact_path) {
+    // POLICY(#406): archive identityはtransaction dependency resolutionから分離する。
     const std::vector<std::string> arguments = {
             "pacman",
-            "-U",
-            "--print",
-            "--print-format",
-            ARTIFACT_IDENTITY_FORMAT,
+            "-Qp",
+            "--color",
+            "never",
             "--",
             artifact_path.string(),
     };

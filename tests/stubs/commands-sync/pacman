@@ -2,14 +2,12 @@
 set -eu
 
 is_artifact_identity_query() {
-    expected_identity_format=$(printf '%s\t%s' '%n' '%v')
-    [ "$#" -eq 6 ] &&
-        [ "${1:-}" = "-U" ] &&
-        [ "${2:-}" = "--print" ] &&
-        [ "${3:-}" = "--print-format" ] &&
-        [ "${4:-}" = "$expected_identity_format" ] &&
-        [ "${5:-}" = "--" ] &&
-        [ -n "${6:-}" ]
+    [ "$#" -eq 5 ] &&
+        [ "${1:-}" = "-Qp" ] &&
+        [ "${2:-}" = "--color" ] &&
+        [ "${3:-}" = "never" ] &&
+        [ "${4:-}" = "--" ] &&
+        [ -n "${5:-}" ]
 }
 
 require_commands_sync_pacman_argument_tail() {
@@ -43,7 +41,7 @@ require_commands_sync_pacman_argv() {
         exit 2
     fi
     case $1 in
-        -U)
+        -Qp)
             is_artifact_identity_query "$@" || exit 2
             ;;
         -Qm)
@@ -67,7 +65,7 @@ printf 'pacman %s\n' "$*" >> "$MOGUET_TEST_COMMAND_LOG"
 require_commands_sync_pacman_argv "$@"
 
 if is_artifact_identity_query "$@"; then
-    artifact_path=$6
+    artifact_path=$5
     identity_status=${MOGUET_TEST_PACMAN_ARTIFACT_IDENTITY_EXIT_CODE:-0}
     if [ "$identity_status" -ne 0 ]; then
         exit "$identity_status"
@@ -75,7 +73,7 @@ if is_artifact_identity_query "$@"; then
     if [ -z "$artifact_path" ] || [ ! -f "$artifact_path" ]; then
         exit 1
     fi
-    /usr/bin/awk 'NR == 1 { printf "%s\t%s\n", $1, $2; found = 1; exit }
+    /usr/bin/awk 'NR == 1 { printf "%s %s\n", $1, $2; found = 1; exit }
         END { if (!found) exit 1 }' "$artifact_path"
     exit $?
 fi
