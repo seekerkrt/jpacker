@@ -687,8 +687,10 @@ validate_registered_package_base_result(
         return registered_correlation_failure(
                 RegisteredSourceExecutionCorrelationFailureReason::
                         PackageBaseMismatch,
-                localization::translate_message(
-                        "Registered repository source-build result does not match the prepared PackageBase."));
+                localization::format_translated_message(
+                        // TRANSLATORS: {} is the literal Arch field name "PackageBase".
+                        "Registered repository source-build result does not match the prepared {}.",
+                        "PackageBase"));
     }
     if(completed.selected_children().size() != 1) {
         return registered_correlation_failure(
@@ -788,8 +790,10 @@ validate_registered_transaction_failure(
         return registered_correlation_failure(
                 RegisteredSourceExecutionCorrelationFailureReason::
                         PackageBaseMismatch,
-                localization::translate_message(
-                        "Registered repository package transaction failure does not match the prepared PackageBase."));
+                localization::format_translated_message(
+                        // TRANSLATORS: {} is the literal Arch field name "PackageBase".
+                        "Registered repository package transaction failure does not match the prepared {}.",
+                        "PackageBase"));
     }
     if(error.attempts().size() != 1) {
         return registered_correlation_failure(
@@ -850,8 +854,10 @@ validate_registered_preparation_failure(
     return registered_correlation_failure(
             RegisteredSourceExecutionCorrelationFailureReason::
                     PackageBaseMismatch,
-            localization::translate_message(
-                    "Registered repository install preparation failure does not match the prepared PackageBase."),
+            localization::format_translated_message(
+                    // TRANSLATORS: {} is the literal Arch field name "PackageBase".
+                    "Registered repository install preparation failure does not match the prepared {}.",
+                    "PackageBase"),
             std::nullopt, *package_base);
 }
 
