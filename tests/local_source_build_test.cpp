@@ -334,7 +334,7 @@ std::string expected_makepkg_command(
 
 std::string expected_identity_command(const fs::path& artifact_path) {
     const std::vector<std::string> arguments = {
-            "pacman", "-U", "--print", "--print-format", "%n\t%v", "--",
+            "pacman", "-Qp", "--color", "never", "--",
             artifact_path.string()};
     std::string command = "LC_ALL=C";
     for(const std::string& argument : arguments) {
@@ -570,7 +570,7 @@ void observe_artifact_workspace_creation(const fs::path& workspace_path) {
                 CapturedCommandResult{
                         query_failure
                                 ? std::string{}
-                                : identity_names[index] + "\t1.0-1\n",
+                                : identity_names[index] + " 1.0-1\n",
                         query_failure ? 31 : 0});
         if(query_failure) break;
     }

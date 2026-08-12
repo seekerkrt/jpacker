@@ -111,10 +111,20 @@ helperと同等の自動解決能力・完成度を約束しません。unsuppor
 - constraint resultはprovider candidateのfilter、sort、番号変更、recommend、default、
   auto-selectを行わず、source fallbackの根拠にもなりません。selected AUR provider metadataを
   refreshした場合はcurrent matching capabilityを再評価し、古いresultを再利用しません。
-- registered source phaseはsingular source lifecycleを維持します。candidateがすべて
-  official repository由来の場合だけprovider selectionを行い、AUR providerを含む
-  candidate setは、そのPackageBaseをこのphaseでscheduleできないためambiguousのまま
-  system / source execution前に停止します。
+- source-build routeはroute固有のlifecycleを維持します。standalone official
+  repository buildは`PackageBaseSet`、registered official sourceは
+  `OnlyIfUpdated` preparation後の`PackageBaseSet`を使います。sync repository
+  routeは既存`--needed`付きの`SingularCompatibility`、registered AUR sourceは
+  既存provider / split-package guard付きの`SingularCompatibility`のままです。
+- official repository source identityはconfigured libalpmのexact snapshotを
+  authorityとします。confirmed `NotFound`だけがAUR fallbackを許し、query、config、
+  metadata failureでは停止します。standalone / registered buildはauthoritativeな
+  PackageBaseを1回buildし、requested `Explicit` childだけをinstallします。sibling / debug
+  outputはunselectedかつnot installedとして保持します。
+- registered AUR routeは、candidateがすべてofficial repository由来の場合だけprovider
+  selectionを行います。AUR providerを含むcandidate setは、このsingular compatibility
+  routeでそのproviderのPackageBaseをscheduleできないためambiguousのままsystem / source
+  execution前に停止します。
 - 未解決dependency、未選択のambiguous provider、cycle、安全に解決できないconflicts /
   replaces、証明できないartifact identityは、対応するmutation前に拒否します。
 - `--noconfirm`は対話停止を避ける指定であり、「すべてyes」ではありません。source

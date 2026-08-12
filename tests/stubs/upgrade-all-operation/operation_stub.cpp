@@ -32,12 +32,19 @@ enum class ScriptedSourceExecutionKind {
     UnknownFailure,
 };
 
+struct ScriptedPackageBaseExecution {
+    std::string package_base;
+    ArtifactPackageIdentity selected_child;
+    std::vector<ArtifactPackageIdentity> unselected_artifacts;
+};
+
 struct ScriptedSourceExecution {
     ScriptedSourceExecutionKind kind =
             ScriptedSourceExecutionKind::Success;
     SourceBuildExecutionResult result;
     ArtifactInstallExecutionOutcome cleanup_outcome =
             ArtifactInstallExecutionOutcome::Installed;
+    std::optional<ScriptedPackageBaseExecution> package_base_execution;
     std::string diagnostic;
 };
 
@@ -326,6 +333,19 @@ void enqueue_source_success(SourceBuildExecutionResult result) {
     ScriptedSourceExecution execution;
     execution.kind = ScriptedSourceExecutionKind::Success;
     execution.result = std::move(result);
+    g_state.source_executions.push_back(std::move(execution));
+}
+
+void enqueue_package_base_source_success(
+        std::string package_base,
+        ArtifactPackageIdentity selected_child,
+        std::vector<ArtifactPackageIdentity> unselected_artifacts) {
+    ScriptedSourceExecution execution;
+    execution.kind = ScriptedSourceExecutionKind::Success;
+    execution.result.status = SourceBuildExecutionStatus::Installed;
+    execution.package_base_execution = ScriptedPackageBaseExecution{
+            std::move(package_base), std::move(selected_child),
+            std::move(unselected_artifacts)};
     g_state.source_executions.push_back(std::move(execution));
 }
 
@@ -1002,15 +1022,26 @@ execute_prepared_package_base_source_build_work_item_typed(
     const RequiredPackageArtifactTarget& required =
             work_item.required_targets.front();
     const auto result = [&](ArtifactInstallExecutionOutcome outcome) {
+        std::string package_base = work_item.request.checkout_name;
+        ArtifactPackageIdentity selected_child{
+                required.package_name, "2.0-1"};
+        std::vector<ArtifactPackageIdentity> unselected_artifacts;
+        if(execution.package_base_execution.has_value()) {
+            package_base =
+                    execution.package_base_execution->package_base;
+            selected_child =
+                    execution.package_base_execution->selected_child;
+            unselected_artifacts =
+                    execution.package_base_execution->unselected_artifacts;
+        }
         return RegisteredSourcePackageBaseExecutionResult(
-                work_item.request.checkout_name,
+                std::move(package_base),
                 std::vector<PackageBaseSourceBuildSelectedResult>{
                         PackageBaseSourceBuildSelectedResult{
-                                ArtifactPackageIdentity{
-                                        required.package_name, "2.0-1"},
+                                std::move(selected_child),
                                 required.desired_reason,
                                 outcome}},
-                std::vector<ArtifactPackageIdentity>{});
+                std::move(unselected_artifacts));
     };
     switch(execution.kind) {
     case ScriptedSourceExecutionKind::Success:

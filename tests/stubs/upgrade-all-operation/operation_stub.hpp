@@ -155,6 +155,10 @@ void fail_cache_seed();
 void set_after_next_cache_seed_hook(std::function<void()> hook);
 void fail_cache_activation();
 void enqueue_source_success(SourceBuildExecutionResult result);
+void enqueue_package_base_source_success(
+        std::string package_base,
+        ArtifactPackageIdentity selected_child,
+        std::vector<ArtifactPackageIdentity> unselected_artifacts);
 void enqueue_source_failure(std::string diagnostic);
 void enqueue_source_cache_failure();
 void enqueue_source_cleanup_failure(

@@ -2,7 +2,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Moguet 2.2.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-12 12:05+0900\n"
+"POT-Creation-Date: 2026-08-12 13:55+0900\n"
 "PO-Revision-Date: 2026-08-03 06:53+0900\n"
 "Last-Translator: Moguet contributors\n"
 "Language-Team: Japanese\n"
@@ -2647,6 +2647,10 @@ msgstr "ソースパッケージを確認しています..."
 
 msgid "Unknown system/source upgrade event kind."
 msgstr "不明なシステム/ソース更新イベント種別です。"
+
+#, c++-format
+msgid "  required child: {} -> {} {} (explicit): installed"
+msgstr "  必要な子パッケージ: {} -> {} {}（明示）: インストール済み"
 
 msgid "System/source upgrade stopped without a failure diagnostic."
 msgstr "失敗診断がないままシステム/ソース更新が停止しました。"
@@ -5920,10 +5924,6 @@ msgstr "{} のソースビルド結果は表示に必要な整合性を満たし
 #, c++-format
 msgid "{} source-build child result is incoherent for presentation."
 msgstr "{} のソースビルドにおける子パッケージの結果は、表示に必要な整合性を満たしていません。"
-
-#, c++-format
-msgid "  required child: {} -> {} {} (explicit): installed"
-msgstr "  必要な子パッケージ: {} -> {} {}（明示）: インストール済み"
 
 #, c++-format
 msgid "  required child: {} -> {} {} (explicit): skipped as needed ({})"

@@ -98,9 +98,11 @@ dependency edgeはmetadata trust boundaryで構成したtyped requirement、inst
 `-Ss`は軽いsearch / discovery表示として、AUR resultの状態tagを`[installed]`、`[out-of-date]`、`[orphaned]`の順に表示する。`-Si`はAUR metadataの`Maintainer`、`Installed`、`Orphaned`、`Out of Date`を表示する。repository packageの`-Si`はpacmanへ委譲し、AUR metadata表示と混ぜない。status表示はselectionやbuild executionを開始しない。
 
 <a id="compat-split-package"></a>
-## AUR split package summary
+## Remote source-build PackageBase summary
 
-PackageBaseはclone / fetch / build repositoryの単位であり、package nameはinstall targetである。`deps` / `plan` / `fetch` / `-G` / `-Gp`はPackageBaseとrequested packageの違いを表示・取得のidentityとして保持するだけで、splitであることだけを理由にincomplete扱いしたり全artifactをinstallしたりしない。build / install routeはBuildPlanのrequired childとartifact metadata identityがexactly one一致する場合だけselected childを渡し、sibling / debug outputを暗黙にinstallしない。詳細なselection、transaction、partial completionは[PackageBase contract](contracts/packagebase-child-selection.md)を参照する。
+PackageBaseはclone / fetch / build repositoryの単位であり、package nameはinstall targetである。official repositoryでは、requested childとPackageBaseの対応をconfigured repository順のstrict libalpm exact snapshotから取得する。`Present`だけをrepository sourceとして採用し、confirmed `NotFound`だけをAUR fallbackへ渡す。query / config / metadata failureをabsenceへflattenせず停止し、requested name、filename、URL、artifact pathからPackageBaseを推測しない。
+
+`deps` / `plan` / `fetch` / `-G` / `-Gp`はPackageBaseとrequested packageの違いを表示・取得のidentityとして保持するだけで、splitであることだけを理由にincomplete扱いしたり全artifactをinstallしたりしない。build / install routeはsource-build upper projectionが確定したrequired childとartifact metadata identityがexactly one一致する場合だけselected childを渡し、sibling / debug outputを暗黙にinstallしない。official repositoryのstandalone / registered routeではrequested `Explicit` childだけをinstallし、全unselected sibling / debugをresultへ保持する。詳細なselection、transaction、partial completionは[PackageBase contract](contracts/packagebase-child-selection.md)を参照する。
 
 <a id="compat-contract-summary"></a>
 ## Production contract summary
@@ -109,7 +111,7 @@ PackageBaseはclone / fetch / build repositoryの単位であり、package name�
 
 | Behavior / safety contract | User-visible compatibility summary | Normative contract |
 | --- | --- | --- |
-| PackageBase / child selection | PackageBase単位でbuildするが、installするのはBuildPlanが要求しmetadata identityで選択したchildだけ。sibling / debugは暗黙installしない | [PackageBase / required-child selection](contracts/packagebase-child-selection.md) |
+| PackageBase / child selection | PackageBase単位でbuildするが、installするのはsource-build upper projectionが要求しmetadata identityで選択したchildだけ。sibling / debugは暗黙installしない | [PackageBase / required-child selection](contracts/packagebase-child-selection.md) |
 | separated source-build `--rmdeps` | source-buildではownershipを証明できないためmutation前に拒否。pacman-onlyではMoguetが消費するが作用させず、pacmanへ転送しない | [source-build `--rmdeps`](contracts/source-build-rmdeps.md) |
 | XDG cache cutover | trusted root、filesystem identity、symlink、root escape、legacy cache非変更を守る。implementation moduleは固定しない | [XDG cache safety](contracts/xdg-cache-safety.md) |
 | source-build preference | `${XDG_CONFIG_HOME:-$HOME/.config}/moguet/source-build.d/`をreader / writer共通のauthorityとする。legacy storeへfallbackしない | [source-build preference XDG authority](contracts/source-build-preference-xdg.md) |
@@ -121,6 +123,17 @@ PackageBaseはclone / fetch / build repositoryの単位であり、package name�
 ## PackageBase / required-child compatibility
 
 PackageBaseはrepository / build / workspace / package transactionの単位、required childはinstall-selectionの単位である。1 PackageBaseを1 fresh workspaceで1回buildし、`makepkg --packagelist`のexpected aggregateとbuild後package metadata identityを照合する。required childがexactly one選択できない場合、filename、先頭artifact、PackageBase名、`--noconfirm`で補わずfail closedする。
+
+remote source-buildのcurrent route matrixは次である。
+
+| Route | PackageBase lifecycle / preparation |
+| --- | --- |
+| standalone repository | `PackageBaseSet` |
+| registered repository | `OnlyIfUpdated` preparation後の`PackageBaseSet` |
+| sync repository | `SingularCompatibility` + existing `--needed` |
+| registered AUR | `SingularCompatibility` + existing provider / split guard |
+
+official repositoryのrequested child / PackageBase authorityはstrict libalpm exact snapshotである。confirmed `NotFound`だけがAUR fallbackを許し、metadata query / config / malformed identityは停止する。standalone / registered repository routeはsingle / multiple outputに関係なくrequested `Explicit` childだけをinstallし、sibling / debug artifactはunselectedかつnot installedとして保持する。sync / registered AUR routeの既存capabilityを、このSet対応から推測して拡張しない。
 
 selected childだけがinstall input、install reason、installed / skipped-as-needed outcome、target attributionを持つ。unselected sibling / debug artifactはresult dataとして保持する。transaction failureでchild successを推測せず、cleanup failureはcompleted childを保持するpartial successとして扱う。詳細は[contract](contracts/packagebase-child-selection.md)を参照する。
 

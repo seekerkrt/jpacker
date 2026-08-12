@@ -972,6 +972,38 @@ void print_system_phase(const SystemSourceUpgradeResult& result) {
               << std::endl;
 }
 
+void print_registered_package_base_result(
+        const RegisteredSourceUpgradeResult& source) {
+    if(!source.package_base_execution.has_value()) return;
+    const RegisteredSourcePackageBaseExecutionSnapshot& execution =
+            *source.package_base_execution;
+    if(execution.package_base == source.preference_package_name &&
+       execution.unselected_artifacts.empty()) {
+        return;
+    }
+
+    // TRANSLATORS: The placeholders are the PackageBase field identity and a PackageBase name.
+    std::cout << localization::format_translated_message(
+                         "{} result: {}", PACKAGE_BASE_FIELD,
+                         execution.package_base)
+              << std::endl;
+    // TRANSLATORS: The placeholders are the requested package, produced package, and full version.
+    std::cout << localization::format_translated_message(
+                         "  required child: {} -> {} {} (explicit): installed",
+                         source.preference_package_name,
+                         execution.selected_child.identity.package_name,
+                         execution.selected_child.identity.full_version)
+              << std::endl;
+    for(const ArtifactPackageIdentity& artifact :
+        execution.unselected_artifacts) {
+        // TRANSLATORS: The placeholders are a produced package name and full version.
+        std::cout << localization::format_translated_message(
+                             "  produced artifact: {} {} (not selected; not installed)",
+                             artifact.package_name, artifact.full_version)
+                  << std::endl;
+    }
+}
+
 void print_registered_sources(const SystemSourceUpgradeResult& result) {
     if(result.registered_source_results.empty()) {
         std::cout << localization::translate_message(
@@ -991,6 +1023,7 @@ void print_registered_sources(const SystemSourceUpgradeResult& result) {
                              "registered source: {}: {}", package_name,
                              source_status_label(source))
                   << std::endl;
+        print_registered_package_base_result(source);
         if(source.resolved_package_base.has_value()) {
             // NO_TRANSLATE(Issue #308): PackageBase is a schema field name,
             // and the value is a package identity.

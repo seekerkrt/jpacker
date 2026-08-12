@@ -380,14 +380,15 @@ UpgradeAllOperationResult make_success_result(
 
 RegisteredSourcePreferenceSnapshot make_source_snapshot(
         std::size_t index,
-        const std::string& package_name) {
+        const std::string& package_name,
+        const std::optional<std::string>& resolved_package_base) {
     RegisteredSourcePreferenceSnapshot snapshot;
     snapshot.original_preference_index = index;
     snapshot.preference_package_name = package_name;
     snapshot.entry_path = "/fixture/preferences/" + package_name;
     snapshot.canonical_source_identity_key =
             "repository:https://sources.example/" + package_name;
-    snapshot.resolved_package_base = package_name + "-base";
+    snapshot.resolved_package_base = resolved_package_base;
     return snapshot;
 }
 
@@ -421,11 +422,13 @@ void add_source(
     result.prepared_snapshot.system_source.registered_sources.push_back(
             make_source_snapshot(
                     source.original_preference_index,
-                    source.preference_package_name));
+                    source.preference_package_name,
+                    source.resolved_package_base));
     result.system_source.prepared_snapshot.registered_sources.push_back(
             make_source_snapshot(
                     source.original_preference_index,
-                    source.preference_package_name));
+                    source.preference_package_name,
+                    source.resolved_package_base));
     result.system_source.registered_source_results.push_back(
             std::move(source));
 }
@@ -1180,6 +1183,52 @@ UpgradeAllOperationResult make_aur_split_multiple_result() {
     return result;
 }
 
+UpgradeAllOperationResult make_registered_package_base_result() {
+    UpgradeAllOperationResult result = make_success_result(
+            UpgradeAllOperationStatus::Completed,
+            PackageStateChange::Changed);
+
+    RegisteredSourceUpgradeResult distinct = make_source_result(
+            0,
+            "registered-child",
+            RegisteredSourceUpgradeStatus::Updated,
+            RegisteredSourceUpgradeFailureKind::None,
+            PackageStateChange::Changed);
+    distinct.resolved_package_base = "registered-suite";
+    distinct.package_base_execution =
+            RegisteredSourcePackageBaseExecutionSnapshot{
+                    "registered-suite",
+                    PackageBaseSourceBuildSelectedResult{
+                            ArtifactPackageIdentity{
+                                    "registered-child", "4.2-3"},
+                            DesiredInstallReason::Explicit,
+                            ArtifactInstallExecutionOutcome::Installed},
+                    {ArtifactPackageIdentity{
+                             "registered-sibling", "4.2-3"},
+                     ArtifactPackageIdentity{
+                             "registered-child-debug", "4.2-3"}}};
+    add_source(result, std::move(distinct));
+
+    RegisteredSourceUpgradeResult ordinary = make_source_result(
+            1,
+            "registered-ordinary",
+            RegisteredSourceUpgradeStatus::Updated,
+            RegisteredSourceUpgradeFailureKind::None,
+            PackageStateChange::Changed);
+    ordinary.resolved_package_base = "registered-ordinary";
+    ordinary.package_base_execution =
+            RegisteredSourcePackageBaseExecutionSnapshot{
+                    "registered-ordinary",
+                    PackageBaseSourceBuildSelectedResult{
+                            ArtifactPackageIdentity{
+                                    "registered-ordinary", "1.0-2"},
+                            DesiredInstallReason::Explicit,
+                            ArtifactInstallExecutionOutcome::Installed},
+                    {}};
+    add_source(result, std::move(ordinary));
+    return result;
+}
+
 UpgradeAllOperationResult make_aur_mixed_cleanup_failure_result() {
     UpgradeAllOperationResult result = make_base_result(
             UpgradeAllOperationStatus::StoppedAfterAurCleanupFailure,
@@ -1853,6 +1902,9 @@ UpgradeAllOperationResult result_for_scenario(const std::string& scenario) {
     }
     if(scenario == "aur-split-multiple") {
         return make_aur_split_multiple_result();
+    }
+    if(scenario == "registered-packagebase-result") {
+        return make_registered_package_base_result();
     }
     if(scenario == "completed-no-change") {
         return make_success_result(

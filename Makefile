@@ -1398,6 +1398,7 @@ LIBALPM_BUILD_TARGETS := \
 .PHONY: check-unified-plan-observation-link-firewall test-unified-plan-observation test-observation-contract-gate
 .PHONY: check-unified-plan-projection-link-firewall test-unified-plan-projection test-projection-fixture-gate
 .PHONY: check-unified-plan-renderer-link-firewall test-unified-plan-renderer
+.PHONY: test-artifact-identity-real-pacman
 .PHONY: FORCE catalogs check-catalogs check-localization-config check-pot update-po update-pot test-localization test-catalog-metadata-gate test-cli-localization-surface test-public-documentation
 .PHONY: test-container test-container-live test-container-live-provider test-container-live-aur test-container-live-local
 .PHONY: test-validation-status
@@ -2738,6 +2739,9 @@ check-multiple-artifact-identity-link-firewall:
 test-multiple-artifact-identity: check-multiple-artifact-identity-link-firewall $(MULTIPLE_ARTIFACT_IDENTITY_TEST_TARGET)
 	$(abspath $(MULTIPLE_ARTIFACT_IDENTITY_TEST_TARGET))
 
+test-artifact-identity-real-pacman:
+	sh tests/test-artifact-identity-real-pacman.sh
+
 check-package-base-artifact-install-plan-link-firewall:
 	@echo ":: Checking PackageBase artifact install reason plan link firewall"
 	@set -e; for source in $(PACKAGE_BASE_ARTIFACT_INSTALL_PLAN_ALLOWED_PRODUCTION_TEST_SRCS); do \
@@ -3439,6 +3443,7 @@ test: \
 	test-multiple-artifact-workspace \
 	test-artifact-identity \
 	test-multiple-artifact-identity \
+	test-artifact-identity-real-pacman \
 	test-artifact-install-executor \
 	test-package-base-artifact-install-executor \
 	test-separated-source-build \

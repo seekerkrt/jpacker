@@ -207,6 +207,7 @@ setup_case() {
     unset MOGUET_TEST_ALPM_VERCMP_EXPECTED_RHS
     unset MOGUET_TEST_ALPM_VERCMP_RESULT
     unset MOGUET_TEST_MAKEPKG_PACKAGE_METADATA_STATE_AFTER_SUCCESS_FILE
+    unset MOGUET_TEST_REPOSITORY_PACKAGE_BASE
     unset MOGUET_TEST_PACMAN_U_SUCCESS_LOG
     unset MOGUET_TEST_REPLACE_WORKSPACE_AFTER_PACMAN_U
     unset MOGUET_TEST_APPEND_LOCAL_PKGBUILD_AFTER_ASDEPS
@@ -220,7 +221,14 @@ setup_case() {
 refresh_repository_metadata_fixture() {
     : > "$repository_metadata_state"
     for package in ${MOGUET_TEST_PACMAN_REPO_PACKAGES:-}; do
-        printf 'core %s 1 1\n' "$package" >> "$repository_metadata_state"
+        if [ -n "${MOGUET_TEST_REPOSITORY_PACKAGE_BASE:-}" ]; then
+            printf 'core %s 1 1 %s\n' \
+                "$package" "$MOGUET_TEST_REPOSITORY_PACKAGE_BASE" \
+                >> "$repository_metadata_state"
+        else
+            printf 'core %s 1 1\n' "$package" \
+                >> "$repository_metadata_state"
+        fi
     done
 }
 
@@ -501,7 +509,7 @@ assert_command_content_absent() {
 assert_separated_source_commands() {
     expected_count=$1
     assert_command_count "makepkg --packagelist" "$expected_count"
-    assert_command_prefix_count "pacman -U --print --print-format " "$expected_count"
+    assert_command_prefix_count "pacman -Qp --color never " "$expected_count"
     assert_command_prefix_count "sudo pacman -U " "$expected_count"
     assert_command_content_absent "pacman -D"
 }
@@ -2223,6 +2231,69 @@ assert_command_count "makepkg -sc --noconfirm" 2
     printf '%s\n' "$cache_root/$preference_second"
 } > "$case_dir/expected-makepkg-cwd.log"
 assert_file_equals "$case_dir/expected-makepkg-cwd.log" "$makepkg_cwd_log"
+assert_not_contains "PackageBase result:" "$output_file"
+
+setup_case upgrade-registered-packagebase-selected-only
+registered_child=registered-child
+registered_base=registered-suite
+registered_checkout=$cache_root/$registered_base
+makepkg_cwd_log=$case_dir/makepkg-cwd.log
+makepkg_env_log=$case_dir/makepkg-environment.log
+printf 'REGISTERED_FIRST=one\nREGISTERED_EMPTY=\nREGISTERED_SECOND="two words"\n' \
+    > "$preference_dir/$registered_child"
+printf '%s 1.0-1\n' "$registered_child" > "$package_metadata_state"
+mkdir -p "$registered_checkout/.git"
+{
+    printf 'pkgbase = %s\n' "$registered_base"
+    printf 'pkgver = 4.2\n'
+    printf 'pkgrel = 3\n'
+    printf 'pkgname = %s\n' "$registered_child"
+    printf 'pkgname = registered-sibling\n'
+} > "$registered_checkout/.SRCINFO"
+printf 'pkgbase=%s\npkgname=(%s registered-sibling)\npkgver=4.2\npkgrel=3\n' \
+    "$registered_base" "$registered_child" \
+    > "$registered_checkout/PKGBUILD"
+printf 'https://gitlab.archlinux.org/archlinux/packaging/packages/%s.git\n' \
+    "$registered_base" \
+    > "$registered_checkout/.git/.moguet-test-remote-url"
+: > "$makepkg_cwd_log"
+: > "$makepkg_env_log"
+export MOGUET_TEST_PACMAN_REPO_PACKAGES=$registered_child
+export MOGUET_TEST_REPOSITORY_PACKAGE_BASE=$registered_base
+export MOGUET_TEST_MAKEPKG_CWD_LOG=$makepkg_cwd_log
+export MOGUET_TEST_MAKEPKG_ENV_LOG=$makepkg_env_log
+export MOGUET_TEST_MAKEPKG_ENV_KEYS='REGISTERED_FIRST REGISTERED_EMPTY REGISTERED_SECOND'
+export MOGUET_TEST_MAKEPKG_ARTIFACT_IDENTITIES='registered-suite|registered-sibling|4.2-3
+registered-suite|registered-child|4.2-3
+registered-suite|registered-child-debug|4.2-3'
+run_upgrade_ok --noedit --nodiff --noconfirm upgrade
+assert_command_count "alpm sync-query core/$registered_child" 1
+assert_command_absent "alpm sync-query core/$registered_base"
+assert_command_count "git fetch origin" 1
+assert_command_count "makepkg --packagelist" 1
+assert_command_count "makepkg -sc --noconfirm" 1
+assert_output_line_count "$registered_checkout" 2 "$makepkg_cwd_log"
+assert_output_line_count 'env[REGISTERED_FIRST]=<one>' 2 "$makepkg_env_log"
+assert_output_line_count 'env[REGISTERED_EMPTY]=<unset>' 2 "$makepkg_env_log"
+assert_output_line_count \
+    'env[REGISTERED_SECOND]=<two words>' 2 "$makepkg_env_log"
+assert_contains \
+    "Applying custom build flags: REGISTERED_FIRST='one' REGISTERED_SECOND='two words' " \
+    "$output_file"
+assert_command_prefix_count "pacman -Qp --color never " 3
+assert_command_pattern_count \
+    '^sudo pacman -U --noconfirm -- .*/registered-child-4\.2-3-x86_64\.pkg\.tar\.zst$' 1
+assert_command_pattern_absent '^sudo pacman -U .*registered-sibling'
+assert_command_pattern_absent '^sudo pacman -U .*registered-child-debug'
+assert_request_log_empty
+assert_contains "PackageBase result: $registered_base" "$output_file"
+assert_contains \
+    "  required child: $registered_child -> $registered_child 4.2-3 (explicit): installed" \
+    "$output_file"
+assert_output_before \
+    "  produced artifact: registered-sibling 4.2-3 (not selected; not installed)" \
+    "  produced artifact: registered-child-debug 4.2-3 (not selected; not installed)" \
+    "$output_file"
 
 setup_case upgrade-first-runtime-source-failure-stops-later-source
 for package in beta alpha; do

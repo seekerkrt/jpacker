@@ -732,13 +732,13 @@ assert_command "git clone https://aur.archlinux.org/clean-root.git clean-root"
 assert_command "pacman-conf --verbose RootDir DBPath"
 assert_command "makepkg --packagelist"
 assert_command "makepkg -sc --noconfirm"
-assert_command_pattern '^pacman -U --print --print-format .* -- .*/clean-root-1\.0-1-x86_64\.pkg\.tar\.zst$'
+assert_command_pattern '^pacman -Qp --color never -- .*/clean-root-1\.0-1-x86_64\.pkg\.tar\.zst$'
 assert_command_pattern '^sudo pacman -U --noconfirm -- .*/clean-root-1\.0-1-x86_64\.pkg\.tar\.zst$'
 assert_command_pattern_count 1 '^pacman-conf --verbose RootDir DBPath$'
 assert_command_pattern_count 0 '^pacman-conf --repo-list$'
 assert_command_pattern_count 1 '^makepkg --packagelist$'
 assert_command_pattern_count 1 '^makepkg -sc --noconfirm$'
-assert_command_pattern_count 1 '^pacman -U --print --print-format '
+assert_command_pattern_count 1 '^pacman -Qp --color never '
 assert_command_pattern_count 1 '^sudo pacman -U --noconfirm -- '
 assert_command_absent "pacman -Si clean-root"
 assert_request_log_nonempty
@@ -956,7 +956,7 @@ assert_command "git clone https://gitlab.archlinux.org/archlinux/packaging/packa
 assert_command "pacman-conf --verbose RootDir DBPath"
 assert_command "makepkg --packagelist"
 assert_command "makepkg -sc --noconfirm"
-assert_command_pattern '^pacman -U --print --print-format .* -- .*/clean-root-1\.0-1-x86_64\.pkg\.tar\.zst$'
+assert_command_pattern '^pacman -Qp --color never -- .*/clean-root-1\.0-1-x86_64\.pkg\.tar\.zst$'
 assert_command_pattern '^sudo pacman -U --noconfirm -- .*/clean-root-1\.0-1-x86_64\.pkg\.tar\.zst$'
 assert_repository_read_counts 1 1
 assert_contains "Loading custom build flags from $preference_dir/clean-root." "$output_file"
@@ -987,7 +987,7 @@ assert_command "git clone https://aur.archlinux.org/clean-root.git clean-root"
 assert_command "pacman-conf --verbose RootDir DBPath"
 assert_command "makepkg --packagelist"
 assert_command "makepkg -sc --noconfirm"
-assert_command_pattern '^pacman -U --print --print-format .* -- .*/clean-root-1\.0-1-x86_64\.pkg\.tar\.zst$'
+assert_command_pattern '^pacman -Qp --color never -- .*/clean-root-1\.0-1-x86_64\.pkg\.tar\.zst$'
 assert_command_pattern '^sudo pacman -U --noconfirm -- .*/clean-root-1\.0-1-x86_64\.pkg\.tar\.zst$'
 assert_repository_read_counts 1 1
 assert_request_log_nonempty
@@ -1010,7 +1010,7 @@ assert_command "git clone https://aur.archlinux.org/clean-root.git clean-root"
 assert_command "pacman-conf --verbose RootDir DBPath"
 assert_command "makepkg --packagelist"
 assert_command "makepkg -sc --noconfirm"
-assert_command_pattern '^pacman -U --print --print-format .* -- .*/clean-root-1\.0-1-x86_64\.pkg\.tar\.zst$'
+assert_command_pattern '^pacman -Qp --color never -- .*/clean-root-1\.0-1-x86_64\.pkg\.tar\.zst$'
 assert_command_pattern '^sudo pacman -U --noconfirm -- .*/clean-root-1\.0-1-x86_64\.pkg\.tar\.zst$'
 assert_repository_read_counts 2 1
 assert_request_log_nonempty

@@ -278,6 +278,47 @@ void present_system_source_upgrade_event(
             "Unknown system/source upgrade event kind."));
 }
 
+bool should_present_registered_package_base_result(
+        const RegisteredSourceUpgradeResult& source) noexcept {
+    if(!source.package_base_execution.has_value()) return false;
+    const RegisteredSourcePackageBaseExecutionSnapshot& execution =
+            *source.package_base_execution;
+    return execution.package_base != source.preference_package_name ||
+           !execution.unselected_artifacts.empty();
+}
+
+void present_registered_package_base_result(
+        const RegisteredSourceUpgradeResult& source) {
+    if(!should_present_registered_package_base_result(source)) return;
+    const RegisteredSourcePackageBaseExecutionSnapshot& execution =
+            *source.package_base_execution;
+
+    // TRANSLATORS: The placeholders are the PackageBase field identity and a PackageBase name.
+    Logger::info(localization::format_translated_message(
+            "{} result: {}", "PackageBase", execution.package_base));
+    // TRANSLATORS: The placeholders are the requested package, produced package, and full version.
+    Logger::info(localization::format_translated_message(
+            "  required child: {} -> {} {} (explicit): installed",
+            source.preference_package_name,
+            execution.selected_child.identity.package_name,
+            execution.selected_child.identity.full_version));
+    for(const ArtifactPackageIdentity& artifact :
+        execution.unselected_artifacts) {
+        // TRANSLATORS: The placeholders are a produced package name and full version.
+        Logger::info(localization::format_translated_message(
+                "  produced artifact: {} {} (not selected; not installed)",
+                artifact.package_name, artifact.full_version));
+    }
+}
+
+void present_registered_package_base_results(
+        const SystemSourceUpgradeResult& result) {
+    for(const RegisteredSourceUpgradeResult& source :
+        result.registered_source_results) {
+        present_registered_package_base_result(source);
+    }
+}
+
 [[noreturn]] void throw_system_source_upgrade_failure(
         const SystemSourceUpgradeResult& result) {
     std::optional<std::string> diagnostic = result.failure_diagnostic();
@@ -1377,6 +1418,7 @@ int cmd_upgrade(const AppConfig& config) {
                                     preparation)),
                     config,
                     present_system_source_upgrade_event);
+    present_registered_package_base_results(result);
     if(result.status != SystemSourceUpgradeStatus::Completed) {
         throw_system_source_upgrade_failure(result);
     }

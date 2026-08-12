@@ -215,7 +215,7 @@ std::string expected_shell_quote(const std::string& value) {
 }
 
 std::string expected_identity_command(const fs::path& artifact_path) {
-    return "LC_ALL=C 'pacman' '-U' '--print' '--print-format' '%n\t%v' '--' " +
+    return "LC_ALL=C 'pacman' '-Qp' '--color' 'never' '--' " +
            expected_shell_quote(artifact_path.string());
 }
 
@@ -226,7 +226,7 @@ std::vector<stub::CapturedCommandStep> successful_steps(
     for(std::size_t index = 0; index < package_names.size(); ++index) {
         steps.push_back(stub::CapturedCommandStep{
                 CapturedCommandResult{
-                        package_names[index] + "\t" +
+                        package_names[index] + " " +
                                 std::to_string(index + 1) + ".0-1\n",
                         0}});
     }
@@ -256,7 +256,7 @@ void test_ordinary_one_artifact_and_epoch() {
     ArtifactSetFixture fixture({"ordinary.pkg.tar.zst"});
     stub::reset_process_stub();
     stub::set_captured_command_results(
-            {CapturedCommandResult{"ordinary\t2:1.4.0-3\n", 0}});
+            {CapturedCommandResult{"ordinary 2:1.4.0-3\n", 0}});
 
     ArtifactPackageIdentitySet identities =
             query_artifact_package_identities(fixture.artifacts());
@@ -275,9 +275,9 @@ void test_multiple_order_full_versions_and_commands() {
              "-beta-package.pkg.tar.zst"});
     stub::reset_process_stub();
     stub::set_captured_command_results(
-            {CapturedCommandResult{"gamma\t1:9.0-2\n", 0},
-             CapturedCommandResult{"alpha\t3.4.5-6\n", 0},
-             CapturedCommandResult{"beta\t2:7.8-9", 0}});
+            {CapturedCommandResult{"gamma 1:9.0-2\n", 0},
+             CapturedCommandResult{"alpha 3.4.5-6\n", 0},
+             CapturedCommandResult{"beta 2:7.8-9", 0}});
 
     ArtifactPackageIdentitySet identities =
             query_artifact_package_identities(fixture.artifacts());
@@ -296,13 +296,45 @@ void test_multiple_order_full_versions_and_commands() {
     }
 }
 
+void test_obs_shaped_base_plugin_debug_queries_all_artifacts() {
+    ArtifactSetFixture fixture(
+            {"obs-studio-32.2.1-7-x86_64.pkg.tar.zst",
+             "obs-studio-plugin-browser-32.2.1-7-x86_64.pkg.tar.zst",
+             "obs-studio-debug-32.2.1-7-x86_64.pkg.tar.zst"});
+    stub::reset_process_stub();
+    stub::set_captured_command_results(
+            {CapturedCommandResult{"obs-studio 32.2.1-7\n", 0},
+             CapturedCommandResult{
+                     "obs-studio-plugin-browser 32.2.1-7\n", 0},
+             CapturedCommandResult{"obs-studio-debug 32.2.1-7\n", 0}});
+
+    ArtifactPackageIdentitySet identities =
+            query_artifact_package_identities(fixture.artifacts());
+    expect(identities.size() == 3, "OBS-shaped identity set size differs");
+    expect_identity(identities, 0, 0, "obs-studio", "32.2.1-7");
+    expect_identity(
+            identities, 1, 1, "obs-studio-plugin-browser", "32.2.1-7");
+    expect_identity(identities, 2, 2, "obs-studio-debug", "32.2.1-7");
+
+    const std::vector<std::string> commands = stub::captured_commands();
+    expect(commands.size() == 3, "OBS-shaped query count differs");
+    for(std::size_t index = 0; index < commands.size(); ++index) {
+        expect(
+                commands[index] ==
+                        expected_identity_command(fixture.path_at(index)),
+                "OBS-shaped command order differs at index " +
+                        std::to_string(index));
+    }
+    fixture.artifacts().require_validity();
+}
+
 void test_duplicate_package_names_are_preserved() {
     ArtifactSetFixture fixture(
             {"duplicate-one.pkg.tar.zst", "duplicate-two.pkg.tar.zst"});
     stub::reset_process_stub();
     stub::set_captured_command_results(
-            {CapturedCommandResult{"duplicate\t1.0-1\n", 0},
-             CapturedCommandResult{"duplicate\t2.0-1\n", 0}});
+            {CapturedCommandResult{"duplicate 1.0-1\n", 0},
+             CapturedCommandResult{"duplicate 2.0-1\n", 0}});
 
     ArtifactPackageIdentitySet identities =
             query_artifact_package_identities(fixture.artifacts());
@@ -340,7 +372,7 @@ void test_command_failure_at_each_position() {
 void test_malformed_output_at_each_position() {
     const std::vector<std::string> malformed_outputs = {
             "",
-            "middle\t1-1\nextra\t2-1\n",
+            "middle 1-1\nextra 2-1\n",
             "\n",
     };
     for(std::size_t malformed_index = 0;
@@ -375,10 +407,10 @@ void test_malformed_output_at_each_position() {
 void test_invalid_identity_outputs_fail_closed() {
     ArtifactSetFixture fixture({"invalid-identity.pkg.tar.zst"});
     const std::vector<std::string> invalid_outputs = {
-            "-invalid-name\t1-1\n",
-            "valid-name\t1\v-1\n",
-            "valid-name\t1-1\n\n",
-            "valid-name\t1-1\tunexpected\n",
+            "-invalid-name 1-1\n",
+            "valid-name 1\v-1\n",
+            "valid-name 1-1\n\n",
+            "valid-name 1-1 unexpected\n",
     };
     for(const std::string& output : invalid_outputs) {
         stub::reset_process_stub();
@@ -449,8 +481,8 @@ void test_replacement_before_query_runs_no_command() {
 
     stub::reset_process_stub();
     stub::set_captured_command_results(
-            {CapturedCommandResult{"pre-query-one\t1-1\n", 0},
-             CapturedCommandResult{"pre-query-two\t1-1\n", 0}});
+            {CapturedCommandResult{"pre-query-one 1-1\n", 0},
+             CapturedCommandResult{"pre-query-two 1-1\n", 0}});
     expect_runtime_error(
             [&fixture]() {
                 static_cast<void>(query_artifact_package_identities(
@@ -630,7 +662,7 @@ void test_moved_from_and_cleaned_aggregate_run_no_command() {
         ValidatedPackageArtifactSet moved = std::move(fixture.artifacts());
         stub::reset_process_stub();
         stub::set_captured_command_results(
-                {CapturedCommandResult{"moved-one\t1-1\n", 0}});
+                {CapturedCommandResult{"moved-one 1-1\n", 0}});
         expect_runtime_error(
                 [&fixture]() {
                     static_cast<void>(query_artifact_package_identities(
@@ -648,7 +680,7 @@ void test_moved_from_and_cleaned_aggregate_run_no_command() {
         fixture.artifacts().cleanup_workspace();
         stub::reset_process_stub();
         stub::set_captured_command_results(
-                {CapturedCommandResult{"cleaned-one\t1-1\n", 0}});
+                {CapturedCommandResult{"cleaned-one 1-1\n", 0}});
         expect_runtime_error(
                 [&fixture]() {
                     static_cast<void>(query_artifact_package_identities(
@@ -668,8 +700,8 @@ void test_failure_and_success_leave_aggregate_ownership_with_caller() {
                  "owned-failure-two.pkg.tar.zst"});
         stub::reset_process_stub();
         stub::set_captured_command_results(
-                {CapturedCommandResult{"owned-failure-one\t1-1\n", 0},
-                 CapturedCommandResult{"owned-failure-two\t1-1\n", 17}});
+                {CapturedCommandResult{"owned-failure-one 1-1\n", 0},
+                 CapturedCommandResult{"owned-failure-two 1-1\n", 17}});
         expect_runtime_error(
                 [&fixture]() {
                     static_cast<void>(query_artifact_package_identities(
@@ -689,8 +721,8 @@ void test_failure_and_success_leave_aggregate_ownership_with_caller() {
                  "owned-success-two.pkg.tar.zst"});
         stub::reset_process_stub();
         stub::set_captured_command_results(
-                {CapturedCommandResult{"owned-success-one\t1-1\n", 0},
-                 CapturedCommandResult{"owned-success-two\t2-1\n", 0}});
+                {CapturedCommandResult{"owned-success-one 1-1\n", 0},
+                 CapturedCommandResult{"owned-success-two 2-1\n", 0}});
         ArtifactPackageIdentitySet identities =
                 query_artifact_package_identities(fixture.artifacts());
 
@@ -712,8 +744,8 @@ void test_identity_set_move_closes_source() {
              "move-result-two.pkg.tar.zst"});
     stub::reset_process_stub();
     stub::set_captured_command_results(
-            {CapturedCommandResult{"move-result-one\t1-1\n", 0},
-             CapturedCommandResult{"move-result-two\t2-1\n", 0}});
+            {CapturedCommandResult{"move-result-one 1-1\n", 0},
+             CapturedCommandResult{"move-result-two 2-1\n", 0}});
     ArtifactPackageIdentitySet source =
             query_artifact_package_identities(fixture.artifacts());
     ArtifactPackageIdentitySet moved(std::move(source));
@@ -734,6 +766,7 @@ int main() {
     try {
         test_ordinary_one_artifact_and_epoch();
         test_multiple_order_full_versions_and_commands();
+        test_obs_shaped_base_plugin_debug_queries_all_artifacts();
         test_duplicate_package_names_are_preserved();
         test_command_failure_at_each_position();
         test_malformed_output_at_each_position();

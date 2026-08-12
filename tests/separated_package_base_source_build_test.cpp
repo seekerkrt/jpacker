@@ -427,8 +427,8 @@ std::string expected_build_command(
 
 std::string expected_identity_command(const fs::path& artifact_path) {
     return "LC_ALL=C " + shell_join(
-            {"pacman", "-U", "--print", "--print-format", "%n\t%v",
-             "--", artifact_path.string()});
+            {"pacman", "-Qp", "--color", "never", "--",
+             artifact_path.string()});
 }
 
 std::size_t produced_index_for_required_target(
@@ -507,7 +507,7 @@ void observe_workspace(const fs::path& workspace_path) {
         process_stub::expect_capture_command(
                 expected_identity_command(scenario.artifact_paths[index]),
                 CapturedCommandResult{
-                        produced.identity.package_name + "\t" +
+                        produced.identity.package_name + " " +
                                 produced.identity.full_version + "\n",
                         produced.identity_exit_code});
     }

@@ -644,10 +644,29 @@ targetを1つのrepository transactionとして先に実行し、成功した場
 rollbackしません。
 .
 .PP
-registered source phaseは、candidateがすべてofficial repository由来の場合だけprovider
-selectionを行います。AUR providerを含むcandidate setは、そのproviderのPackageBaseを
-singular source lifecycleでscheduleできないため、ambiguousのままsystem / source
+registered AUR routeは、candidateがすべてofficial repository由来の場合だけprovider
+selectionを行います。AUR providerを含むcandidate setは、このsingular compatibility
+routeでそのproviderのPackageBaseをscheduleできないため、ambiguousのままsystem / source
 execution前にfail-closedで停止します。
+.
+.PP
+official repository source identityはconfigured libalpmのexact snapshotをauthorityとします。
+confirmed
+.B NotFound
+だけがAUR fallbackを許し、query、config、metadata failureをabsenceとして扱わず停止します。
+standalone official buildは
+.BR PackageBaseSet 、
+registered official sourceは
+.B OnlyIfUpdated
+preparation後のPackageBaseSetを使います。authoritativeなPackageBaseを1回buildし、requested
+explicit childだけをinstallして、sibling / debug outputをunselectedかつnot installedとして
+表示します。sync repository routeは既存
+.B --needed
+付きの
+.BR SingularCompatibility 、
+registered AURは既存provider / split-package guard付きの
+.B SingularCompatibility
+のままです。
 .
 .PP
 .B deps
