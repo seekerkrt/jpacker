@@ -7,6 +7,8 @@
 
 #include <optional>
 #include <string>
+#include <utility>
+#include <variant>
 #include <vector>
 
 struct AppConfig;
@@ -22,6 +24,21 @@ enum class SourceBuildUpdateStatusUnknownSkipReason {
     NoConfirm,
     NonInteractiveStdin,
     UserDeclined,
+};
+
+enum class SourceBuildUpdatePolicy {
+    AlwaysBuild,
+    OnlyIfUpdated,
+};
+
+struct SourceBuildUpToDate {
+    std::string diagnostic;
+};
+
+struct SourceBuildUpdateStatusUnknownSkipped {
+    SourceBuildUpdateStatusUnknownSkipReason reason =
+            SourceBuildUpdateStatusUnknownSkipReason::NoConfirm;
+    std::string diagnostic;
 };
 
 // generic source-buildの正常終了を、package transactionの有無まで潰さず返す。
@@ -56,6 +73,69 @@ struct SourceBuildRequest {
     bool        only_if_updated = false;
     bool        needed = false;
 };
+
+// checkout/update-check/reviewとprivate artifact rootを一度だけ通過した
+// execution capability。raw pathはpreparation/executor ownerへ閉じる。
+class PreparedSourceBuildNeedsBuild final {
+    std::optional<ValidatedCachePath> checkout_;
+    std::optional<ValidatedPrivateCacheRoot> artifact_root_;
+    bool rebuild_ = false;
+    bool clean_build_ = false;
+
+    PreparedSourceBuildNeedsBuild(
+            ValidatedCachePath checkout,
+            ValidatedPrivateCacheRoot artifact_root,
+            bool rebuild,
+            bool clean_build) noexcept
+        : checkout_(std::move(checkout)),
+          artifact_root_(std::move(artifact_root)), rebuild_(rebuild),
+          clean_build_(clean_build) {
+    }
+
+    PreparedSourceBuildNeedsBuild() noexcept = default;
+
+    friend struct SourceBuildPreparationAccess;
+    friend struct SourceBuildPreparedExecutionAccess;
+
+public:
+    PreparedSourceBuildNeedsBuild(
+            const PreparedSourceBuildNeedsBuild&) = delete;
+    PreparedSourceBuildNeedsBuild& operator=(
+            const PreparedSourceBuildNeedsBuild&) = delete;
+    PreparedSourceBuildNeedsBuild(
+            PreparedSourceBuildNeedsBuild&&) noexcept = default;
+    PreparedSourceBuildNeedsBuild& operator=(
+            PreparedSourceBuildNeedsBuild&&) = delete;
+    ~PreparedSourceBuildNeedsBuild() = default;
+
+#if defined(MOGUET_ENABLE_SYSTEM_SOURCE_UPGRADE_TEST_HOOKS) || \
+        defined(MOGUET_ENABLE_UPGRADE_ALL_OPERATION_TEST_HOOKS)
+    static PreparedSourceBuildNeedsBuild
+    make_for_registered_source_build_test() noexcept {
+        return PreparedSourceBuildNeedsBuild{};
+    }
+#endif
+};
+
+using SourceBuildPreparationOutcome = std::variant<
+        SourceBuildUpToDate,
+        SourceBuildUpdateStatusUnknownSkipped,
+        PreparedSourceBuildNeedsBuild>;
+
+SourceBuildPreparationOutcome prepare_source_build_for_execution(
+        const SourceBuildRequest& request,
+        const std::string& display_name,
+        SourceBuildUpdatePolicy update_policy,
+        const ValidatedCacheRoot& cache_root,
+        const AppConfig& config);
+
+PackageBaseSourceBuildExecutionResult
+execute_prepared_source_build_package_base_typed(
+        const SourceBuildRequest& request,
+        const std::vector<RequiredPackageArtifactTarget>& required_targets,
+        PreparedSourceBuildNeedsBuild prepared,
+        const PacmanDatabasePaths& database_paths,
+        const AppConfig& config);
 
 SourceBuildExecutionResult execute_source_build_typed(
         const SourceBuildRequest& request,

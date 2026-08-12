@@ -33,11 +33,73 @@
 
 namespace fs = std::filesystem;
 
+struct PreparedSourceBuildExecutionCapabilities {
+    ValidatedCachePath checkout;
+    ValidatedPrivateCacheRoot artifact_root;
+    bool rebuild = false;
+    bool clean_build = false;
+};
+
+struct SourceBuildPreparationAccess {
+    static PreparedSourceBuildNeedsBuild make(
+            ValidatedCachePath checkout,
+            ValidatedPrivateCacheRoot artifact_root,
+            bool rebuild,
+            bool clean_build) noexcept {
+        return PreparedSourceBuildNeedsBuild(
+                std::move(checkout), std::move(artifact_root), rebuild,
+                clean_build);
+    }
+};
+
+struct SourceBuildPreparedExecutionAccess {
+    static PreparedSourceBuildExecutionCapabilities consume(
+            PreparedSourceBuildNeedsBuild prepared) {
+        if(!prepared.checkout_.has_value() ||
+           !prepared.artifact_root_.has_value()) {
+            throw std::logic_error(localization::translate_message(
+                    "Prepared source-build execution capability is invalid or test-only."));
+        }
+        return PreparedSourceBuildExecutionCapabilities{
+                std::move(prepared.checkout_.value()),
+                std::move(prepared.artifact_root_.value()),
+                prepared.rebuild_,
+                prepared.clean_build_};
+    }
+};
+
 namespace {
 
 struct MakepkgBuildOptions {
     bool rebuild = false;
     bool clean_build = false;
+};
+
+enum class SourceBuildPreparationFailureStage {
+    ArtifactRoot,
+    CheckoutOrReview,
+};
+
+class SourceBuildPreparationError final : public std::runtime_error {
+    SourceBuildPreparationFailureStage stage_;
+    bool unknown_exception_ = false;
+
+public:
+    SourceBuildPreparationError(
+            SourceBuildPreparationFailureStage stage,
+            const std::string& diagnostic,
+            bool unknown_exception = false)
+        : std::runtime_error(diagnostic), stage_(stage),
+          unknown_exception_(unknown_exception) {
+    }
+
+    SourceBuildPreparationFailureStage stage() const noexcept {
+        return stage_;
+    }
+
+    bool unknown_exception() const noexcept {
+        return unknown_exception_;
+    }
 };
 
 class ScopedPrivateUmask final {
@@ -583,15 +645,20 @@ struct PreparedSourceBuildCheckout {
 };
 
 using SourceBuildCheckoutPreparation =
-        std::variant<PreparedSourceBuildCheckout, SourceBuildExecutionResult>;
+        std::variant<
+                SourceBuildUpToDate,
+                SourceBuildUpdateStatusUnknownSkipped,
+                PreparedSourceBuildCheckout>;
 
 SourceBuildCheckoutPreparation prepare_source_build_checkout(
         const SourceBuildRequest& request,
         const std::string& display_name,
+        SourceBuildUpdatePolicy update_policy,
         const ValidatedCacheRoot& build_root,
         const AppConfig& config) {
     require_valid_package_name(request.checkout_name);
-    if(request.only_if_updated && !request.installed_snapshot.has_value()) {
+    if(update_policy == SourceBuildUpdatePolicy::OnlyIfUpdated &&
+       !request.installed_snapshot.has_value()) {
         // TRANSLATORS: The placeholder is a package name.
         throw std::runtime_error(localization::format_translated_message(
                 "No authoritative installed package snapshot was supplied for {}.",
@@ -748,16 +815,14 @@ SourceBuildCheckoutPreparation prepare_source_build_checkout(
         require_safe_persistent_checkout_descendants(pkg_path);
         WorkDirGuard wd(pkg_path);
 
-        if(request.only_if_updated) {
+        if(update_policy == SourceBuildUpdatePolicy::OnlyIfUpdated) {
             UpdateCheckResult update_check = check_update_status(
                     request.package_name, ".",
                     request.installed_snapshot.value(), request.update_baseline);
             if(update_check == UpdateCheckResult::UpToDate) {
                 static_cast<void>(revalidate_trusted_cache_path(
                         pkg_path, CachePathRequirement::ExistingDirectory));
-                return SourceBuildExecutionResult{
-                        SourceBuildExecutionStatus::UpToDate,
-                        std::nullopt,
+                return SourceBuildUpToDate{
                         up_to_date_diagnostic(
                                 request.package_name,
                                 request.installed_snapshot->installed_version.value())};
@@ -780,8 +845,7 @@ SourceBuildCheckoutPreparation prepare_source_build_checkout(
                     static_cast<void>(revalidate_trusted_cache_path(
                             pkg_path,
                             CachePathRequirement::ExistingDirectory));
-                    return SourceBuildExecutionResult{
-                            SourceBuildExecutionStatus::UpdateStatusUnknownSkipped,
+                    return SourceBuildUpdateStatusUnknownSkipped{
                             reason,
                             std::move(diagnostic)};
                 }
@@ -794,8 +858,7 @@ SourceBuildCheckoutPreparation prepare_source_build_checkout(
                     static_cast<void>(revalidate_trusted_cache_path(
                             pkg_path,
                             CachePathRequirement::ExistingDirectory));
-                    return SourceBuildExecutionResult{
-                            SourceBuildExecutionStatus::UpdateStatusUnknownSkipped,
+                    return SourceBuildUpdateStatusUnknownSkipped{
                             reason,
                             std::move(diagnostic)};
                 }
@@ -810,8 +873,7 @@ SourceBuildCheckoutPreparation prepare_source_build_checkout(
                     static_cast<void>(revalidate_trusted_cache_path(
                             pkg_path,
                             CachePathRequirement::ExistingDirectory));
-                    return SourceBuildExecutionResult{
-                            SourceBuildExecutionStatus::UpdateStatusUnknownSkipped,
+                    return SourceBuildUpdateStatusUnknownSkipped{
                             reason,
                             unknown_update_skip_diagnostic(
                                     request.package_name, reason)};
@@ -916,6 +978,69 @@ void require_package_base_source_build_request(
 
 } // namespace
 
+SourceBuildPreparationOutcome prepare_source_build_for_execution(
+        const SourceBuildRequest& request,
+        const std::string& display_name,
+        SourceBuildUpdatePolicy update_policy,
+        const ValidatedCacheRoot& cache_root,
+        const AppConfig& config) {
+    // POLICY: checkoutのclone/fetch/resetより先に、artifact ownerと同じ
+    // private cache contractを証明し、NeedsBuild capabilityへ一緒に保持する。
+    ValidatedPrivateCacheRoot artifact_root = [&]() {
+        try {
+            return prepare_private_trusted_cache_root(cache_root);
+        } catch(const TrustedCacheError&) {
+            throw;
+        } catch(const std::exception& error) {
+            throw SourceBuildPreparationError(
+                    SourceBuildPreparationFailureStage::ArtifactRoot,
+                    error.what());
+        } catch(...) {
+            throw SourceBuildPreparationError(
+                    SourceBuildPreparationFailureStage::ArtifactRoot,
+                    localization::translate_message(
+                            "Private artifact workspace preparation failed."),
+                    true);
+        }
+    }();
+
+    SourceBuildCheckoutPreparation checkout_preparation = [&]() {
+        try {
+            return prepare_source_build_checkout(
+                    request, display_name, update_policy, cache_root,
+                    config);
+        } catch(const TrustedCacheError&) {
+            throw;
+        } catch(const std::exception& error) {
+            throw SourceBuildPreparationError(
+                    SourceBuildPreparationFailureStage::CheckoutOrReview,
+                    error.what());
+        } catch(...) {
+            throw SourceBuildPreparationError(
+                    SourceBuildPreparationFailureStage::CheckoutOrReview,
+                    localization::translate_message(
+                            "Source checkout or build preparation failed."),
+                    true);
+        }
+    }();
+
+    if(auto* up_to_date =
+               std::get_if<SourceBuildUpToDate>(&checkout_preparation)) {
+        return std::move(*up_to_date);
+    }
+    if(auto* skipped = std::get_if<
+               SourceBuildUpdateStatusUnknownSkipped>(
+                       &checkout_preparation)) {
+        return std::move(*skipped);
+    }
+    PreparedSourceBuildCheckout checkout = std::move(
+            std::get<PreparedSourceBuildCheckout>(checkout_preparation));
+    return SourceBuildPreparationAccess::make(
+            std::move(checkout.checkout), std::move(artifact_root),
+            checkout.makepkg_options.rebuild,
+            checkout.makepkg_options.clean_build);
+}
+
 SourceBuildExecutionResult execute_source_build_typed(
         const SourceBuildRequest& request,
         const ValidatedCacheRoot& cache_root,
@@ -924,25 +1049,41 @@ SourceBuildExecutionResult execute_source_build_typed(
         const AppConfig& config) {
     // generic/direct/system compatibility pathはsingular identityを引き続き要求する。
     require_valid_package_name(request.package_name);
-    // POLICY: checkoutのclone/fetch/resetより先に、artifact ownerと同じ
-    // private cache contractを証明してinvocation中保持する。
-    ValidatedPrivateCacheRoot artifact_root =
-            prepare_private_trusted_cache_root(cache_root);
-    SourceBuildCheckoutPreparation preparation =
-            prepare_source_build_checkout(
-                    request, request.package_name, cache_root, config);
-    if(const auto* skipped =
-               std::get_if<SourceBuildExecutionResult>(&preparation)) {
-        return *skipped;
+    SourceBuildPreparationOutcome preparation = [&]() {
+        try {
+            return prepare_source_build_for_execution(
+                    request, request.package_name,
+                    request.only_if_updated
+                            ? SourceBuildUpdatePolicy::OnlyIfUpdated
+                            : SourceBuildUpdatePolicy::AlwaysBuild,
+                    cache_root, config);
+        } catch(const SourceBuildPreparationError& error) {
+            throw std::runtime_error(error.what());
+        }
+    }();
+    if(const auto* up_to_date =
+               std::get_if<SourceBuildUpToDate>(&preparation)) {
+        return SourceBuildExecutionResult{
+                SourceBuildExecutionStatus::UpToDate,
+                std::nullopt,
+                up_to_date->diagnostic};
     }
-    PreparedSourceBuildCheckout prepared = std::move(
-            std::get<PreparedSourceBuildCheckout>(preparation));
+    if(const auto* skipped = std::get_if<
+               SourceBuildUpdateStatusUnknownSkipped>(&preparation)) {
+        return SourceBuildExecutionResult{
+                SourceBuildExecutionStatus::UpdateStatusUnknownSkipped,
+                skipped->reason,
+                skipped->diagnostic};
+    }
+    PreparedSourceBuildExecutionCapabilities prepared =
+            SourceBuildPreparedExecutionAccess::consume(std::move(
+                    std::get<PreparedSourceBuildNeedsBuild>(preparation)));
 
     return source_build_result_from_artifact_outcome(
             execute_separated_source_build_unit(
                     SeparatedSourceBuildUnitRequest{
-                            prepared.checkout,
-                            std::move(artifact_root),
+                            std::move(prepared.checkout),
+                            std::move(prepared.artifact_root),
                             request.package_name,
                             request.checkout_name,
                             desired_reason,
@@ -953,9 +1094,39 @@ SourceBuildExecutionResult execute_source_build_typed(
                             .no_confirm = config.no_confirm,
                             .needed = request.needed,
                             .rm_deps = config.rm_deps,
-                            .rebuild = prepared.makepkg_options.rebuild,
-                            .clean_build =
-                                    prepared.makepkg_options.clean_build}));
+                            .rebuild = prepared.rebuild,
+                            .clean_build = prepared.clean_build}));
+}
+
+PackageBaseSourceBuildExecutionResult
+execute_prepared_source_build_package_base_typed(
+        const SourceBuildRequest& request,
+        const std::vector<RequiredPackageArtifactTarget>& required_targets,
+        PreparedSourceBuildNeedsBuild prepared,
+        const PacmanDatabasePaths& database_paths,
+        const AppConfig& config) {
+    require_package_base_source_build_request(request, required_targets);
+    require_supported_separated_install_options(config.rm_deps);
+    require_unclaimed_artifact_pkgdest(request.custom_environment);
+    PreparedSourceBuildExecutionCapabilities capabilities =
+            SourceBuildPreparedExecutionAccess::consume(
+                    std::move(prepared));
+
+    return execute_separated_package_base_source_build(
+            SeparatedPackageBaseSourceBuildRequest{
+                    std::move(capabilities.checkout),
+                    std::move(capabilities.artifact_root),
+                    request.checkout_name,
+                    required_targets,
+                    request.custom_environment,
+                    request.empty_value_policy,
+                    database_paths},
+            SeparatedSourceBuildUnitOptions{
+                    .no_confirm = config.no_confirm,
+                    .needed = request.needed,
+                    .rm_deps = config.rm_deps,
+                    .rebuild = capabilities.rebuild,
+                    .clean_build = capabilities.clean_build});
 }
 
 PackageBaseSourceBuildExecutionResult
@@ -969,75 +1140,51 @@ execute_source_build_package_base_typed(
     require_package_base_source_build_request(request, required_targets);
     require_supported_separated_install_options(config.rm_deps);
     require_unclaimed_artifact_pkgdest(request.custom_environment);
-    ValidatedPrivateCacheRoot artifact_root = [&]() {
+    SourceBuildPreparationOutcome preparation = [&]() {
         try {
-            return prepare_private_trusted_cache_root(cache_root);
+            return prepare_source_build_for_execution(
+                    request, request.checkout_name,
+                    SourceBuildUpdatePolicy::AlwaysBuild,
+                    cache_root, config);
         } catch(const TrustedCacheError&) {
             throw;
-        } catch(const std::exception& error) {
+        } catch(const SourceBuildPreparationError& error) {
+            const bool artifact_root_failure =
+                    error.stage() ==
+                    SourceBuildPreparationFailureStage::ArtifactRoot;
+            std::string diagnostic;
+            if(error.unknown_exception()) {
+                diagnostic = artifact_root_failure
+                        ? localization::format_translated_message(
+                                  "{} private artifact workspace preparation failed.",
+                                  "PackageBase")
+                        : localization::format_translated_message(
+                                  "{} source checkout or build preparation failed.",
+                                  "PackageBase");
+            } else {
+                diagnostic = artifact_root_failure
+                        ? localization::format_translated_message(
+                                  "{} private artifact workspace preparation failed: {}",
+                                  "PackageBase", error.what())
+                        : localization::format_translated_message(
+                                  "{} source checkout or build preparation failed: {}",
+                                  "PackageBase", error.what());
+            }
             throw SeparatedPackageBaseSourceBuildPhaseError(
                     SeparatedPackageBaseSourceBuildFailurePhase::Build,
-                    // TRANSLATORS: The placeholders are the PackageBase identity and a private workspace preparation diagnostic.
-                    localization::format_translated_message(
-                            "{} private artifact workspace preparation failed: {}",
-                            "PackageBase",
-                            error.what()));
-        } catch(...) {
-            throw SeparatedPackageBaseSourceBuildPhaseError(
-                    SeparatedPackageBaseSourceBuildFailurePhase::Build,
-                    localization::format_translated_message(
-                            "{} private artifact workspace preparation failed.",
-                            "PackageBase"));
+                    std::move(diagnostic));
         }
     }();
-    SourceBuildCheckoutPreparation preparation = [&]() {
-        try {
-            return prepare_source_build_checkout(
-                    request, request.checkout_name, cache_root, config);
-        } catch(const TrustedCacheError&) {
-            throw;
-        } catch(const std::exception& error) {
-            // AUR update presentationはtyped categoryだけを表示する一方、direct
-            // build/sync routeは既存のcheckout safety detailを失わない。
-            throw SeparatedPackageBaseSourceBuildPhaseError(
-                    SeparatedPackageBaseSourceBuildFailurePhase::Build,
-                    // TRANSLATORS: The placeholders are the PackageBase identity and a checkout or build preparation diagnostic.
-                    localization::format_translated_message(
-                            "{} source checkout or build preparation failed: {}",
-                            "PackageBase",
-                            error.what()));
-        } catch(...) {
-            throw SeparatedPackageBaseSourceBuildPhaseError(
-                    SeparatedPackageBaseSourceBuildFailurePhase::Build,
-                    localization::format_translated_message(
-                            "{} source checkout or build preparation failed.",
-                            "PackageBase"));
-        }
-    }();
-    if(std::holds_alternative<SourceBuildExecutionResult>(preparation)) {
+    if(!std::holds_alternative<PreparedSourceBuildNeedsBuild>(preparation)) {
         throw std::logic_error(
                 localization::format_translated_message(
-                        "{} set source-build unexpectedly produced a singular update-status result.",
+                        "{} set source-build unexpectedly produced an update-status result.",
                         "PackageBase"));
     }
-    PreparedSourceBuildCheckout prepared = std::move(
-            std::get<PreparedSourceBuildCheckout>(preparation));
-
-    return execute_separated_package_base_source_build(
-            SeparatedPackageBaseSourceBuildRequest{
-                    prepared.checkout,
-                    std::move(artifact_root),
-                    request.checkout_name,
-                    required_targets,
-                    request.custom_environment,
-                    request.empty_value_policy,
-                    database_paths},
-            SeparatedSourceBuildUnitOptions{
-                    .no_confirm = config.no_confirm,
-                    .needed = request.needed,
-                    .rm_deps = config.rm_deps,
-                    .rebuild = prepared.makepkg_options.rebuild,
-                    .clean_build = prepared.makepkg_options.clean_build});
+    return execute_prepared_source_build_package_base_typed(
+            request, required_targets,
+            std::move(std::get<PreparedSourceBuildNeedsBuild>(preparation)),
+            database_paths, config);
 }
 
 std::optional<ArtifactInstallExecutionOutcome> execute_source_build(

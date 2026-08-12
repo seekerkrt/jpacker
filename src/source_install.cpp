@@ -671,6 +671,36 @@ const ValidatedCacheRoot& require_prepared_cache_root(
     return work_item.cache_root.value();
 }
 
+void require_registered_repository_package_base_work_item(
+        const ProductionSourceBuildWorkItem& work_item,
+        const AppConfig& config) {
+    require_static_production_source_build_work_item(work_item);
+    if(work_item.required_target_provenance !=
+               RequiredTargetProvenance::RepositoryExactPackageProjection ||
+       work_item.artifact_lifecycle_intent !=
+               ArtifactLifecycleIntent::PackageBaseSet ||
+       !work_item.repository_identity.has_value()) {
+        throw std::logic_error(
+                "Registered repository prepared source-build requires exact repository PackageBase-set provenance.");
+    }
+    if(work_item.request.only_if_updated) {
+        throw std::logic_error(
+                "Registered repository PackageBase-set work item must keep only-if-updated out of the lower request.");
+    }
+    if(work_item.request.needed) {
+        throw std::logic_error(
+                "Registered repository PackageBase-set work item does not support needed execution.");
+    }
+    if(work_item.required_targets.size() != 1 ||
+       work_item.required_targets.front().desired_reason !=
+               DesiredInstallReason::Explicit) {
+        throw std::logic_error(
+                "Registered repository PackageBase-set work item requires exactly one explicit requested child.");
+    }
+    require_supported_separated_install_options(config.rm_deps);
+    require_unclaimed_artifact_pkgdest(work_item.request.custom_environment);
+}
+
 } // namespace
 
 ResolvedSourceBuildIdentity resolve_source_build_identity(
@@ -840,6 +870,22 @@ ProductionSourceBuildWorkItem prepare_resolved_source_build_work_item(
             select_provider);
 }
 
+ProductionSourceBuildWorkItem prepare_registered_source_build_work_item(
+        const ResolvedSourceBuildIdentity& identity,
+        SourceBuildEnvironment environment,
+        const ProviderSelectionCallback& select_provider) {
+    const bool is_repository =
+            identity.source_kind() == SourceBuildSourceKind::Repository;
+    return make_direct_source_build_work_item(
+            identity, std::move(environment),
+            SourceEnvironmentEmptyValuePolicy::Omit,
+            !is_repository,
+            false,
+            is_repository ? ArtifactLifecycleIntent::PackageBaseSet
+                          : ArtifactLifecycleIntent::SingularCompatibility,
+            select_provider);
+}
+
 std::vector<ProductionSourceBuildWorkItem> prepare_aur_source_build_work_items(
         const BuildPlan& plan,
         bool use_source_build_preferences,
@@ -920,6 +966,41 @@ execute_prepared_package_base_source_build_work_item_typed(
             work_item.request, work_item.required_targets,
             require_prepared_cache_root(work_item),
             database_paths, config);
+}
+
+SourceBuildPreparationOutcome
+prepare_package_base_source_build_work_item_typed(
+        const ProductionSourceBuildWorkItem& work_item,
+        SourceBuildUpdatePolicy update_policy,
+        const AppConfig& config) {
+    require_registered_repository_package_base_work_item(work_item, config);
+    try {
+        return prepare_source_build_for_execution(
+                work_item.request, work_item.request.checkout_name,
+                update_policy, require_prepared_cache_root(work_item),
+                config);
+    } catch(const TrustedCacheError&) {
+        throw;
+    } catch(const std::exception& error) {
+        // registered CLIの既存prefix ownerへ原診断を返し、checkout failureを
+        // PackageBase lower phaseの文言へ置換しない。
+        throw std::runtime_error(error.what());
+    } catch(...) {
+        throw std::runtime_error(localization::translate_message(
+                "Source checkout or build preparation failed."));
+    }
+}
+
+RegisteredSourcePackageBaseExecutionResult
+execute_prepared_package_base_source_build_work_item_typed(
+        const ProductionSourceBuildWorkItem& work_item,
+        PreparedSourceBuildNeedsBuild prepared,
+        const PacmanDatabasePaths& database_paths,
+        const AppConfig& config) {
+    require_registered_repository_package_base_work_item(work_item, config);
+    return execute_prepared_source_build_package_base_typed(
+            work_item.request, work_item.required_targets,
+            std::move(prepared), database_paths, config);
 }
 
 SourceBuildExecutionResult execute_prepared_source_build_work_item_typed(

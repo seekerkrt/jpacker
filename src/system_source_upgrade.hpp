@@ -373,6 +373,65 @@ struct SystemUpgradePhaseResult {
     std::optional<std::string> diagnostic;
 };
 
+enum class RegisteredSourceBuildFailureCategory {
+    Build,
+    ArtifactValidation,
+    ArtifactIdentity,
+    Other,
+};
+
+struct RegisteredSourceBuildFailureSnapshot {
+    RegisteredSourceBuildFailureCategory category =
+            RegisteredSourceBuildFailureCategory::Other;
+    std::string diagnostic;
+};
+
+struct RegisteredSourcePackageTransactionFailureSnapshot {
+    PackageBaseArtifactInstallTransactionFailureKind category =
+            PackageBaseArtifactInstallTransactionFailureKind::UnknownException;
+    std::vector<PackageBaseArtifactInstallTransactionAttempt> attempts;
+    std::optional<int> exit_code;
+    std::string diagnostic;
+};
+
+enum class RegisteredSourceExecutionCorrelationFailureReason {
+    PackageBaseMismatch,
+    MissingSelectedChild,
+    ExtraSelectedChild,
+    SelectedArtifactIdentityMismatch,
+    EmptySelectedArtifactVersion,
+    DesiredInstallReasonMismatch,
+    UnexpectedSkippedAsNeeded,
+    UnknownChildOutcome,
+    InvalidUnselectedArtifactIdentity,
+    SelectedAndUnselectedIdentityOverlap,
+    DuplicateUnselectedArtifactIdentity,
+};
+
+struct RegisteredSourceExecutionCorrelationFailure {
+    RegisteredSourceExecutionCorrelationFailureReason reason =
+            RegisteredSourceExecutionCorrelationFailureReason::
+                    PackageBaseMismatch;
+    std::optional<std::size_t> required_child_index;
+    std::optional<std::string> package_name;
+    std::string diagnostic;
+};
+
+struct RegisteredSourcePackageBaseExecutionSnapshot {
+    std::string package_base;
+    PackageBaseSourceBuildSelectedResult selected_child;
+    std::vector<ArtifactPackageIdentity> unselected_artifacts;
+};
+
+using RegisteredSourceUpgradeFailureDetail = std::variant<
+        std::monostate,
+        PackageBaseArtifactIdentitySelectionFailure,
+        MixedPackageBaseInstallReasonUnsupported,
+        PackageMetadataFailure,
+        RegisteredSourceBuildFailureSnapshot,
+        RegisteredSourcePackageTransactionFailureSnapshot,
+        RegisteredSourceExecutionCorrelationFailure>;
+
 struct RegisteredSourceUpgradeResult {
     std::size_t original_preference_index = 0;
     std::string preference_package_name;
@@ -385,6 +444,26 @@ struct RegisteredSourceUpgradeResult {
     PackageStateChange package_state_change = PackageStateChange::NoChange;
     std::optional<std::string> diagnostic;
     std::optional<std::string> cleanup_diagnostic;
+    std::optional<RegisteredSourcePackageBaseExecutionSnapshot>
+            package_base_execution;
+    // correlation failure時もsafe attempt evidenceを別slotで保持する。
+    std::optional<RegisteredSourcePackageTransactionFailureSnapshot>
+            package_transaction_failure;
+    RegisteredSourceUpgradeFailureDetail failure_detail = std::monostate{};
+
+    RegisteredSourceUpgradeResult() = default;
+
+    // Slice 4以前のcoarse result構築は維持し、typed detailだけをdefaultで足す。
+    RegisteredSourceUpgradeResult(
+            std::size_t original_index,
+            std::string package_name,
+            std::optional<std::string> source_identity_key,
+            std::optional<std::string> package_base,
+            RegisteredSourceUpgradeStatus source_status,
+            RegisteredSourceUpgradeFailureKind source_failure_kind,
+            PackageStateChange state_change,
+            std::optional<std::string> source_diagnostic,
+            std::optional<std::string> source_cleanup_diagnostic);
 };
 
 struct SystemSourceUpgradeResult {

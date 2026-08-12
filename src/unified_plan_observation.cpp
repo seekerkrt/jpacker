@@ -490,16 +490,26 @@ bool PreparedSystemSourceBuildUnitReference::has_complete_identity()
         const noexcept {
     const RegisteredSourcePreferenceSnapshot& prepared_source = source_.get();
     const auto& targets = required_targets_.get();
+    const bool is_repository =
+            prepared_source.source_kind ==
+            std::optional<SourceBuildSourceKind>{
+                    SourceBuildSourceKind::Repository};
+    const ArtifactLifecycleIntent expected_lifecycle = is_repository
+            ? ArtifactLifecycleIntent::PackageBaseSet
+            : ArtifactLifecycleIntent::SingularCompatibility;
     if(prepared_source.preference_package_name.empty() ||
        !prepared_source.resolved_package_base.has_value() ||
        prepared_source.resolved_package_base->empty() ||
        !prepared_source.canonical_source_identity_key.has_value() ||
        prepared_source.canonical_source_identity_key->empty() ||
-       !prepared_source.source_kind.has_value() || targets.empty() ||
+       !prepared_source.source_kind.has_value() ||
+       (prepared_source.source_kind.value() !=
+                SourceBuildSourceKind::Repository &&
+        prepared_source.source_kind.value() != SourceBuildSourceKind::Aur) ||
+       targets.empty() ||
        requested_package_name_.get().empty() ||
        checkout_package_base_.get().empty() ||
-       artifact_lifecycle_intent_ !=
-               ArtifactLifecycleIntent::SingularCompatibility ||
+       artifact_lifecycle_intent_ != expected_lifecycle ||
        prepared_source.required_target_provenance !=
                std::optional<RequiredTargetProvenance>{
                        required_target_provenance_} ||
@@ -510,13 +520,10 @@ bool PreparedSystemSourceBuildUnitReference::has_complete_identity()
                prepared_source.preference_package_name ||
        checkout_package_base_.get() !=
                prepared_source.resolved_package_base.value() ||
-       targets.size() != 1 || uses_system_update_baseline_ !=
-               (prepared_source.source_kind.value() ==
-                SourceBuildSourceKind::Repository)) {
+       targets.size() != 1 || uses_system_update_baseline_ != is_repository) {
         return false;
     }
-    if(prepared_source.source_kind.value() ==
-       SourceBuildSourceKind::Repository) {
+    if(is_repository) {
         if(required_target_provenance_ !=
                    RequiredTargetProvenance::
                            RepositoryExactPackageProjection ||

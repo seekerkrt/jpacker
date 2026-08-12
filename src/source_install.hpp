@@ -380,6 +380,162 @@ struct SelectedRepositoryProviderTransactionResult {
     }
 };
 
+#ifdef MOGUET_ENABLE_SYSTEM_SOURCE_UPGRADE_TEST_HOOKS
+// phase/upgrade-allのfake-symbol binaryは#268 lower lifecycleをlinkしない。
+// production factoryを公開せず、registered orchestration seamのtyped ABIだけを
+// layout非依存のdoubleで保持する。
+class RegisteredSourcePackageBaseExecutionResultTestDouble final {
+    std::string package_base_;
+    std::vector<PackageBaseSourceBuildSelectedResult> selected_children_;
+    std::vector<ArtifactPackageIdentity> unselected_artifacts_;
+
+public:
+    RegisteredSourcePackageBaseExecutionResultTestDouble(
+            std::string package_base,
+            std::vector<PackageBaseSourceBuildSelectedResult>
+                    selected_children,
+            std::vector<ArtifactPackageIdentity> unselected_artifacts)
+        : package_base_(std::move(package_base)),
+          selected_children_(std::move(selected_children)),
+          unselected_artifacts_(std::move(unselected_artifacts)) {
+    }
+
+    const std::string& package_base() const noexcept {
+        return package_base_;
+    }
+    const std::vector<PackageBaseSourceBuildSelectedResult>&
+    selected_children() const noexcept {
+        return selected_children_;
+    }
+    const std::vector<ArtifactPackageIdentity>&
+    unselected_artifacts() const noexcept {
+        return unselected_artifacts_;
+    }
+};
+
+class RegisteredSourcePackageBaseCleanupErrorTestDouble final
+    : public std::runtime_error {
+    RegisteredSourcePackageBaseExecutionResultTestDouble result_;
+
+public:
+    RegisteredSourcePackageBaseCleanupErrorTestDouble(
+            RegisteredSourcePackageBaseExecutionResultTestDouble result,
+            const std::string& diagnostic)
+        : std::runtime_error(diagnostic), result_(std::move(result)) {
+    }
+
+    const RegisteredSourcePackageBaseExecutionResultTestDouble& result()
+            const noexcept {
+        return result_;
+    }
+};
+
+class RegisteredSourcePackageBasePreparationErrorTestDouble final
+    : public std::runtime_error {
+    std::variant<
+            PackageBaseArtifactIdentitySelectionFailure,
+            MixedPackageBaseInstallReasonUnsupported>
+            failure_;
+
+public:
+    RegisteredSourcePackageBasePreparationErrorTestDouble(
+            PackageBaseArtifactIdentitySelectionFailure failure,
+            const std::string& diagnostic)
+        : std::runtime_error(diagnostic), failure_(std::move(failure)) {
+    }
+    RegisteredSourcePackageBasePreparationErrorTestDouble(
+            MixedPackageBaseInstallReasonUnsupported failure,
+            const std::string& diagnostic)
+        : std::runtime_error(diagnostic), failure_(std::move(failure)) {
+    }
+
+    const PackageBaseArtifactIdentitySelectionFailure* selection_failure()
+            const noexcept {
+        return std::get_if<
+                PackageBaseArtifactIdentitySelectionFailure>(&failure_);
+    }
+    const MixedPackageBaseInstallReasonUnsupported* mixed_reason_failure()
+            const noexcept {
+        return std::get_if<
+                MixedPackageBaseInstallReasonUnsupported>(&failure_);
+    }
+};
+
+class RegisteredSourcePackageBasePhaseErrorTestDouble final
+    : public std::runtime_error {
+    SeparatedPackageBaseSourceBuildFailurePhase phase_;
+
+public:
+    RegisteredSourcePackageBasePhaseErrorTestDouble(
+            SeparatedPackageBaseSourceBuildFailurePhase phase,
+            const std::string& diagnostic)
+        : std::runtime_error(diagnostic), phase_(phase) {
+    }
+
+    SeparatedPackageBaseSourceBuildFailurePhase phase() const noexcept {
+        return phase_;
+    }
+};
+
+class RegisteredSourcePackageTransactionErrorTestDouble final
+    : public std::runtime_error {
+    PackageBaseArtifactInstallTransactionFailureKind failure_kind_;
+    std::string package_base_;
+    std::vector<PackageBaseArtifactInstallTransactionAttempt> attempts_;
+    std::optional<int> exit_code_;
+
+public:
+    RegisteredSourcePackageTransactionErrorTestDouble(
+            PackageBaseArtifactInstallTransactionFailureKind failure_kind,
+            std::string package_base,
+            std::vector<PackageBaseArtifactInstallTransactionAttempt>
+                    attempts,
+            std::optional<int> exit_code,
+            const std::string& diagnostic)
+        : std::runtime_error(diagnostic), failure_kind_(failure_kind),
+          package_base_(std::move(package_base)),
+          attempts_(std::move(attempts)), exit_code_(exit_code) {
+    }
+
+    PackageBaseArtifactInstallTransactionFailureKind failure_kind()
+            const noexcept {
+        return failure_kind_;
+    }
+    const std::string& package_base() const noexcept {
+        return package_base_;
+    }
+    const std::vector<PackageBaseArtifactInstallTransactionAttempt>&
+    attempts() const noexcept {
+        return attempts_;
+    }
+    const std::optional<int>& exit_code() const noexcept {
+        return exit_code_;
+    }
+};
+
+using RegisteredSourcePackageBaseExecutionResult =
+        RegisteredSourcePackageBaseExecutionResultTestDouble;
+using RegisteredSourcePackageBaseCleanupError =
+        RegisteredSourcePackageBaseCleanupErrorTestDouble;
+using RegisteredSourcePackageBasePreparationError =
+        RegisteredSourcePackageBasePreparationErrorTestDouble;
+using RegisteredSourcePackageBasePhaseError =
+        RegisteredSourcePackageBasePhaseErrorTestDouble;
+using RegisteredSourcePackageTransactionError =
+        RegisteredSourcePackageTransactionErrorTestDouble;
+#else
+using RegisteredSourcePackageBaseExecutionResult =
+        PackageBaseSourceBuildExecutionResult;
+using RegisteredSourcePackageBaseCleanupError =
+        SeparatedPackageBaseSourceBuildCleanupError;
+using RegisteredSourcePackageBasePreparationError =
+        SeparatedPackageBaseSourceBuildPreparationError;
+using RegisteredSourcePackageBasePhaseError =
+        SeparatedPackageBaseSourceBuildPhaseError;
+using RegisteredSourcePackageTransactionError =
+        PackageBaseArtifactInstallTransactionError;
+#endif
+
 // checkoutやmetadata queryより前に確認できるwork item単体のstatic契約。
 void require_static_production_source_build_work_item(
         const ProductionSourceBuildWorkItem& work_item);
@@ -419,6 +575,13 @@ ProductionSourceBuildWorkItem prepare_resolved_source_build_work_item(
         SourceBuildEnvironment environment,
         bool only_if_updated,
         bool needed,
+        const ProviderSelectionCallback& select_provider);
+
+// registered system/source routeだけがsource kindに応じたlifecycle policyを
+// 選ぶ。shared standalone/sync factoryの契約は変更しない。
+ProductionSourceBuildWorkItem prepare_registered_source_build_work_item(
+        const ResolvedSourceBuildIdentity& identity,
+        SourceBuildEnvironment environment,
         const ProviderSelectionCallback& select_provider);
 
 ProductionSourceBuildWorkItem prepare_smart_source_build_work_item(
@@ -485,6 +648,19 @@ execute_selected_repository_provider_transaction(
 PackageBaseSourceBuildExecutionResult
 execute_prepared_package_base_source_build_work_item_typed(
         const ProductionSourceBuildWorkItem& work_item,
+        const PacmanDatabasePaths& database_paths,
+        const AppConfig& config);
+
+SourceBuildPreparationOutcome
+prepare_package_base_source_build_work_item_typed(
+        const ProductionSourceBuildWorkItem& work_item,
+        SourceBuildUpdatePolicy update_policy,
+        const AppConfig& config);
+
+RegisteredSourcePackageBaseExecutionResult
+execute_prepared_package_base_source_build_work_item_typed(
+        const ProductionSourceBuildWorkItem& work_item,
+        PreparedSourceBuildNeedsBuild prepared,
         const PacmanDatabasePaths& database_paths,
         const AppConfig& config);
 

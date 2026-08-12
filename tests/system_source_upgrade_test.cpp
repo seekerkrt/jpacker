@@ -210,6 +210,17 @@ SourceBuildExecutionResult source_execution(
     return result;
 }
 
+PackageBaseSourceBuildSelectedResult selected_child(
+        const std::string& package_name,
+        ArtifactInstallExecutionOutcome outcome =
+                ArtifactInstallExecutionOutcome::Installed,
+        const std::string& version = "2.0-1") {
+    return PackageBaseSourceBuildSelectedResult{
+            ArtifactPackageIdentity{package_name, version},
+            DesiredInstallReason::Explicit,
+            outcome};
+}
+
 ProvidedDependency selected_repository_provider() {
     return ProvidedDependency::from_repository(
             "extra", "registered-source-provider",
@@ -310,6 +321,24 @@ void enqueue_post_metadata(
                 LocalPackageVersionSnapshot{{"core", "1.0-1"}}) {
     stub::enqueue_metadata_session(metadata_session(
             package_names, std::move(after_snapshot)));
+}
+
+template<typename ConfigureScript>
+SystemSourceUpgradeResult execute_registered_repository_case(
+        const std::string& package_name,
+        const std::string& package_base,
+        ConfigureScript&& configure_script) {
+    stub::reset();
+    stub::set_source_identity(
+            package_name,
+            registered_repository_identity(package_name, package_base));
+    const AppConfig config = full_option_config();
+    PreparedSystemSourceUpgrade prepared =
+            prepare_sources({package_name}, config);
+    enqueue_post_metadata({package_name});
+    std::forward<ConfigureScript>(configure_script)();
+    return execute_prepared_system_source_upgrade(
+            std::move(prepared), config, OBSERVER);
 }
 
 SystemSourceUpgradeResult take_blocked(
@@ -429,12 +458,21 @@ void test_preparation_retains_aur_plan_and_source_kind() {
     const auto& targets = projection_authority->source_work_items()
                                   .front()
                                   .required_targets();
+    const PreparedSystemSourceWorkReference& work =
+            projection_authority->source_work_items().front();
     expect(
             targets.size() == 1 &&
                     targets.front().package_base == package_name &&
                     targets.front().package_name == package_name &&
                     targets.front().desired_reason ==
-                            DesiredInstallReason::Explicit,
+                            DesiredInstallReason::Explicit &&
+                    work.required_target_provenance() ==
+                            RequiredTargetProvenance::AurBuildPlanProjection &&
+                    work.artifact_lifecycle_intent() ==
+                            ArtifactLifecycleIntent::SingularCompatibility &&
+                    work.only_if_updated() && !work.needed() &&
+                    !work.uses_system_update_baseline() &&
+                    !work.repository_identity().has_value(),
             "Prepared AUR projection seam did not retain actual work targets");
     stub::require_script_consumed();
 }
@@ -470,7 +508,7 @@ void test_preparation_exposes_repository_work_targets() {
                                     RepositoryExactPackageProjection &&
                     snapshot->registered_sources.front()
                                     .artifact_lifecycle_intent ==
-                            ArtifactLifecycleIntent::SingularCompatibility,
+                            ArtifactLifecycleIntent::PackageBaseSet,
             "Prepared repository projection seam lost source authority");
     const PreparedSystemSourceWorkReference& work =
             projection_authority->source_work_items().front();
@@ -487,7 +525,7 @@ void test_preparation_exposes_repository_work_targets() {
                             RequiredTargetProvenance::
                                     RepositoryExactPackageProjection &&
                     work.artifact_lifecycle_intent() ==
-                            ArtifactLifecycleIntent::SingularCompatibility &&
+                            ArtifactLifecycleIntent::PackageBaseSet &&
                     work.repository_identity().has_value() &&
                     work.repository_identity()->requested_child() ==
                             package_name &&
@@ -495,7 +533,7 @@ void test_preparation_exposes_repository_work_targets() {
                             package_base &&
                     work.uses_system_update_baseline() &&
                     !work.needed() &&
-                    work.only_if_updated() &&
+                    !work.only_if_updated() &&
                     work.source().environment.has_value() &&
                     work.source().environment->ordered_assignments.size() == 1 &&
                     work.source().environment->ordered_assignments.front()
@@ -589,8 +627,8 @@ void test_all_sources_success_order_options_and_change() {
                "Resolved PackageBase was not forwarded");
         expect(calls[index].config == snapshot_config(config),
                "Source option propagation changed");
-        expect(calls[index].request.only_if_updated,
-               "Upgrade source work item lost only-if-updated");
+        expect(!calls[index].request.only_if_updated,
+               "Registered repository work item retained singular update policy");
         expect(!calls[index].request.needed,
                "Upgrade source work item invented --needed");
         expect(
@@ -607,6 +645,35 @@ void test_all_sources_success_order_options_and_change() {
                 result.registered_source_results[index].status ==
                         RegisteredSourceUpgradeStatus::Updated,
                 "Installed source did not map to Updated");
+    }
+    const auto& preparation_calls = stub::source_preparation_calls();
+    const auto& package_base_calls =
+            stub::package_base_source_execution_calls();
+    expect(
+            preparation_calls.size() == packages.size() &&
+                    package_base_calls.size() == packages.size(),
+            "Registered repository route did not use prepare then PackageBase execution");
+    for(std::size_t index = 0; index < packages.size(); ++index) {
+        expect(
+                preparation_calls[index].package_name == packages[index] &&
+                        preparation_calls[index].update_policy ==
+                                SourceBuildUpdatePolicy::OnlyIfUpdated &&
+                        preparation_calls[index].request.update_baseline
+                                .has_value() &&
+                        preparation_calls[index].request.update_baseline
+                                        ->installed_version ==
+                                std::optional<std::string>{"1.0-1"} &&
+                        preparation_calls[index].request.installed_snapshot
+                                .has_value() &&
+                        preparation_calls[index].request.installed_snapshot
+                                        ->installed_version ==
+                                std::optional<std::string>{"1.0-1"} &&
+                        preparation_calls[index].request.custom_environment
+                                        .ordered_assignments.front().value ==
+                                packages[index] &&
+                        package_base_calls[index].package_name ==
+                                packages[index],
+                "Registered repository preparation/execution correlation changed");
     }
     expect(stub::supported_option_configs() ==
                    std::vector<stub::ConfigSnapshot>{snapshot_config(config)},
@@ -740,6 +807,12 @@ void test_source_no_change_and_package_state_no_change() {
             "Equal system/source snapshots did not reduce to NoChange");
     expect(!result.definitely_changed_package_state(),
            "NoChange was reported as definitely changed");
+    expect(
+            stub::source_preparation_calls().size() == 1 &&
+                    stub::source_preparation_calls().front().update_policy ==
+                            SourceBuildUpdatePolicy::OnlyIfUpdated &&
+                    stub::package_base_source_execution_calls().empty(),
+            "UpToDate did not terminate at the closed preparation outcome");
     stub::require_script_consumed();
 }
 
@@ -804,7 +877,7 @@ void test_repository_provider_transaction_runs_after_system_and_blocks_all_sourc
     PreparedSystemSourceUpgrade successful = prepare_sources(packages, config);
     enqueue_post_metadata(packages);
     stub::enqueue_source_success(source_execution(
-            SourceBuildExecutionStatus::UpToDate));
+            SourceBuildExecutionStatus::Installed));
     stub::enqueue_source_success(source_execution(
             SourceBuildExecutionStatus::UpToDate));
     const SystemSourceUpgradeResult success =
@@ -822,10 +895,17 @@ void test_repository_provider_transaction_runs_after_system_and_blocks_all_sourc
                            std::vector<ProvidedDependency>{
                                    selected_repository_provider()} &&
                    success.package_state_change() ==
-                           PackageStateChange::Unknown,
+                           PackageStateChange::Changed,
            "Repository provider transaction success blocked registered sources");
     expect(
-            event_position(stub::EventKind::SystemCommand, SYSTEM_COMMAND) <
+            event_position(
+                    stub::EventKind::InstalledPackageQuery,
+                    "second", 1) <
+                            event_position(
+                                    stub::EventKind::
+                                            RepositoryProviderTransaction,
+                                    "selected-repository-providers") &&
+                    event_position(stub::EventKind::SystemCommand, SYSTEM_COMMAND) <
                             event_position(
                                     stub::EventKind::
                                             RepositoryProviderTransaction,
@@ -834,9 +914,16 @@ void test_repository_provider_transaction_runs_after_system_and_blocks_all_sourc
                             stub::EventKind::RepositoryProviderTransaction,
                             "selected-repository-providers") <
                             event_position(
-                                    stub::EventKind::SourceExecution,
+                                    stub::EventKind::SourcePreparation,
+                                    "first") &&
+                    event_position(
+                            stub::EventKind::SourcePreparation,
+                            "first") <
+                            event_position(
+                                    stub::EventKind::
+                                            PackageBaseSourceExecution,
                                     "first"),
-            "Repository provider transaction did not stay between system and source execution");
+            "Post-system guards/provider transaction/preparation/Set execution order changed");
     stub::require_script_consumed();
 
     stub::reset();
@@ -1096,7 +1183,7 @@ void test_first_source_failure_stops_suffix() {
            "Completed system + source failure lost partial completion");
     expect(result.failure_diagnostic() ==
                    std::optional<std::string>(
-                           "scripted first source failure"),
+                           "Failed while building/installing PackageBase first (first): scripted first source failure"),
            "Source failure diagnostic was lost");
     stub::require_script_consumed();
 }
@@ -1195,14 +1282,324 @@ void test_partial_source_completion() {
     stub::require_script_consumed();
 }
 
+void test_registered_package_base_success_retains_typed_aggregate() {
+    const SystemSourceUpgradeResult result =
+            execute_registered_repository_case(
+                    "aggregate-child", "aggregate-base", []() {
+                        stub::enqueue_package_base_success(
+                                "aggregate-base",
+                                {selected_child("aggregate-child")},
+                                {ArtifactPackageIdentity{
+                                         "aggregate-sibling", "3.0-1"},
+                                 ArtifactPackageIdentity{
+                                         "aggregate-child-debug", "2.0-1"}});
+                    });
+    const RegisteredSourceUpgradeResult& source =
+            result.registered_source_results.front();
+    expect(
+            result.status == SystemSourceUpgradeStatus::Completed &&
+                    source.status == RegisteredSourceUpgradeStatus::Updated &&
+                    source.failure_kind ==
+                            RegisteredSourceUpgradeFailureKind::None &&
+                    source.package_state_change ==
+                            PackageStateChange::Changed &&
+                    source.package_base_execution.has_value() &&
+                    source.package_base_execution->package_base ==
+                            "aggregate-base" &&
+                    source.package_base_execution->selected_child
+                                    .identity.package_name ==
+                            "aggregate-child" &&
+                    source.package_base_execution->selected_child
+                                    .identity.full_version ==
+                            "2.0-1" &&
+                    source.package_base_execution->unselected_artifacts
+                                    .size() ==
+                            2 &&
+                    source.package_base_execution->unselected_artifacts[0]
+                                    .package_name ==
+                            "aggregate-sibling" &&
+                    source.package_base_execution->unselected_artifacts[1]
+                                    .package_name ==
+                            "aggregate-child-debug" &&
+                    std::holds_alternative<std::monostate>(
+                            source.failure_detail),
+            "Registered PackageBase success did not retain its typed aggregate");
+    stub::require_script_consumed();
+}
+
+void test_registered_package_base_phase_and_preparation_failures_are_typed() {
+    struct PhaseCase {
+        SeparatedPackageBaseSourceBuildFailurePhase phase;
+        RegisteredSourceBuildFailureCategory category;
+    };
+    const std::vector<PhaseCase> phase_cases = {
+            {SeparatedPackageBaseSourceBuildFailurePhase::Build,
+             RegisteredSourceBuildFailureCategory::Build},
+            {SeparatedPackageBaseSourceBuildFailurePhase::ArtifactValidation,
+             RegisteredSourceBuildFailureCategory::ArtifactValidation},
+            {SeparatedPackageBaseSourceBuildFailurePhase::ArtifactIdentity,
+             RegisteredSourceBuildFailureCategory::ArtifactIdentity},
+    };
+    for(const PhaseCase& phase_case : phase_cases) {
+        const SystemSourceUpgradeResult result =
+                execute_registered_repository_case(
+                        "phase-child", "phase-base", [&]() {
+                            stub::enqueue_package_base_phase_failure(
+                                    phase_case.phase,
+                                    "scripted PackageBase phase failure");
+                        });
+        const RegisteredSourceUpgradeResult& source =
+                result.registered_source_results.front();
+        const auto* detail =
+                std::get_if<RegisteredSourceBuildFailureSnapshot>(
+                        &source.failure_detail);
+        expect(
+                result.status ==
+                                SystemSourceUpgradeStatus::
+                                        StoppedOnSourceFailure &&
+                        source.status ==
+                                RegisteredSourceUpgradeStatus::Failed &&
+                        source.failure_kind ==
+                                RegisteredSourceUpgradeFailureKind::
+                                        BuildOrInstallFailed &&
+                        source.package_state_change ==
+                                PackageStateChange::Unknown &&
+                        detail != nullptr &&
+                        detail->category == phase_case.category &&
+                        detail->diagnostic ==
+                                "scripted PackageBase phase failure",
+                "Registered PackageBase phase failure lost typed detail");
+        stub::require_script_consumed();
+    }
+
+    {
+        PackageBaseArtifactIdentitySelectionFailure failure;
+        failure.package_base = "selection-base";
+        failure.missing_required_artifacts.push_back(
+                MissingRequiredArtifact{
+                        0,
+                        RequiredPackageArtifactTarget{
+                                "selection-base", "selection-child",
+                                DesiredInstallReason::Explicit}});
+        const SystemSourceUpgradeResult result =
+                execute_registered_repository_case(
+                        "selection-child", "selection-base", [&]() {
+                            stub::enqueue_package_base_selection_failure(
+                                    std::move(failure),
+                                    "scripted selection failure");
+                        });
+        const RegisteredSourceUpgradeResult& source =
+                result.registered_source_results.front();
+        const auto* detail = std::get_if<
+                PackageBaseArtifactIdentitySelectionFailure>(
+                &source.failure_detail);
+        expect(
+                detail != nullptr &&
+                        detail->package_base == "selection-base" &&
+                        detail->missing_required_artifacts.size() == 1 &&
+                        source.package_state_change ==
+                                PackageStateChange::Unknown,
+                "Registered selection failure was flattened to diagnostic text");
+        stub::require_script_consumed();
+    }
+
+    {
+        MixedPackageBaseInstallReasonUnsupported failure;
+        failure.package_base = "mixed-base";
+        const SystemSourceUpgradeResult result =
+                execute_registered_repository_case(
+                        "mixed-child", "mixed-base", [&]() {
+                            stub::enqueue_package_base_mixed_reason_failure(
+                                    std::move(failure),
+                                    "scripted mixed reason failure");
+                        });
+        const auto* detail = std::get_if<
+                MixedPackageBaseInstallReasonUnsupported>(
+                &result.registered_source_results.front().failure_detail);
+        expect(
+                detail != nullptr && detail->package_base == "mixed-base",
+                "Registered mixed-reason failure was flattened");
+        stub::require_script_consumed();
+    }
+}
+
+void test_registered_package_base_transaction_and_metadata_failures_are_typed() {
+    {
+        const SystemSourceUpgradeResult result =
+                execute_registered_repository_case(
+                        "transaction-child", "transaction-base", []() {
+                            stub::enqueue_package_base_transaction_failure(
+                                    PackageBaseArtifactInstallTransactionFailureKind::
+                                            NonzeroExit,
+                                    "transaction-base",
+                                    {PackageBaseArtifactInstallTransactionAttempt{
+                                            ArtifactPackageIdentity{
+                                                    "transaction-child",
+                                                    "4.0-1"},
+                                            DesiredInstallReason::Explicit}},
+                                    73,
+                                    "scripted package transaction failure");
+                        });
+        const RegisteredSourceUpgradeResult& source =
+                result.registered_source_results.front();
+        const auto* detail = std::get_if<
+                RegisteredSourcePackageTransactionFailureSnapshot>(
+                &source.failure_detail);
+        expect(
+                detail != nullptr &&
+                        detail->category ==
+                                PackageBaseArtifactInstallTransactionFailureKind::
+                                        NonzeroExit &&
+                        detail->attempts.size() == 1 &&
+                        detail->attempts.front().identity.package_name ==
+                                "transaction-child" &&
+                        detail->attempts.front().identity.full_version ==
+                                "4.0-1" &&
+                        detail->exit_code == std::optional<int>{73} &&
+                        source.package_transaction_failure.has_value() &&
+                        source.package_transaction_failure->attempts.size() ==
+                                1,
+                "Registered package transaction failure lost typed attempt evidence");
+        stub::require_script_consumed();
+    }
+
+    {
+        const PackageMetadataFailure failure{
+                PackageMetadataErrorCode::MalformedMetadata,
+                "scripted PackageBase metadata failure"};
+        const SystemSourceUpgradeResult result =
+                execute_registered_repository_case(
+                        "metadata-child", "metadata-base", [&]() {
+                            stub::enqueue_package_base_metadata_failure(
+                                    failure);
+                        });
+        const auto* detail = std::get_if<PackageMetadataFailure>(
+                &result.registered_source_results.front().failure_detail);
+        expect(
+                detail != nullptr &&
+                        detail->code ==
+                                PackageMetadataErrorCode::MalformedMetadata &&
+                        detail->diagnostic ==
+                                "scripted PackageBase metadata failure",
+                "Registered PackageBase metadata failure lost typed detail");
+        stub::require_script_consumed();
+    }
+}
+
+void test_registered_package_base_correlation_failures_fail_closed() {
+    {
+        const SystemSourceUpgradeResult result =
+                execute_registered_repository_case(
+                        "correlation-child", "correlation-base", []() {
+                            stub::enqueue_package_base_success(
+                                    "other-base",
+                                    {selected_child("correlation-child")});
+                        });
+        const auto* detail = std::get_if<
+                RegisteredSourceExecutionCorrelationFailure>(
+                &result.registered_source_results.front().failure_detail);
+        expect(
+                detail != nullptr &&
+                        detail->reason ==
+                                RegisteredSourceExecutionCorrelationFailureReason::
+                                        PackageBaseMismatch &&
+                        result.registered_source_results.front()
+                                        .package_state_change ==
+                                PackageStateChange::Unknown,
+                "Mismatched PackageBase aggregate was accepted as success");
+        stub::require_script_consumed();
+    }
+
+    {
+        const SystemSourceUpgradeResult result =
+                execute_registered_repository_case(
+                        "needed-child", "needed-base", []() {
+                            stub::enqueue_package_base_success(
+                                    "needed-base",
+                                    {selected_child(
+                                            "needed-child",
+                                            ArtifactInstallExecutionOutcome::
+                                                    SkippedAsNeeded)});
+                        });
+        const auto* detail = std::get_if<
+                RegisteredSourceExecutionCorrelationFailure>(
+                &result.registered_source_results.front().failure_detail);
+        expect(
+                detail != nullptr &&
+                        detail->reason ==
+                                RegisteredSourceExecutionCorrelationFailureReason::
+                                        UnexpectedSkippedAsNeeded,
+                "needed=false PackageBase result accepted SkippedAsNeeded");
+        stub::require_script_consumed();
+    }
+
+    {
+        PackageBaseArtifactIdentitySelectionFailure failure;
+        failure.package_base = "wrong-preparation-base";
+        const SystemSourceUpgradeResult result =
+                execute_registered_repository_case(
+                        "preparation-correlation-child",
+                        "preparation-correlation-base", [&]() {
+                            stub::enqueue_package_base_selection_failure(
+                                    std::move(failure),
+                                    "scripted mismatched preparation failure");
+                        });
+        const auto* detail = std::get_if<
+                RegisteredSourceExecutionCorrelationFailure>(
+                &result.registered_source_results.front().failure_detail);
+        expect(
+                detail != nullptr &&
+                        detail->reason ==
+                                RegisteredSourceExecutionCorrelationFailureReason::
+                                        PackageBaseMismatch,
+                "Mismatched preparation failure retained false authority");
+        stub::require_script_consumed();
+    }
+
+    {
+        const SystemSourceUpgradeResult result =
+                execute_registered_repository_case(
+                        "attempt-child", "attempt-base", []() {
+                            stub::enqueue_package_base_transaction_failure(
+                                    PackageBaseArtifactInstallTransactionFailureKind::
+                                            ProcessException,
+                                    "attempt-base",
+                                    {PackageBaseArtifactInstallTransactionAttempt{
+                                            ArtifactPackageIdentity{
+                                                    "other-child", "5.0-1"},
+                                            DesiredInstallReason::Explicit}},
+                                    std::nullopt,
+                                    "scripted mismatched attempt");
+                        });
+        const RegisteredSourceUpgradeResult& source =
+                result.registered_source_results.front();
+        const auto* detail = std::get_if<
+                RegisteredSourceExecutionCorrelationFailure>(
+                &source.failure_detail);
+        expect(
+                detail != nullptr &&
+                        detail->reason ==
+                                RegisteredSourceExecutionCorrelationFailureReason::
+                                        SelectedArtifactIdentityMismatch &&
+                        source.package_transaction_failure.has_value() &&
+                        source.package_transaction_failure->attempts.front()
+                                        .identity.package_name ==
+                                "other-child",
+                "Transaction correlation failure discarded safe attempt evidence");
+        stub::require_script_consumed();
+    }
+}
+
 void test_cleanup_failure_preserves_transaction_outcome() {
     stub::reset();
     const std::vector<std::string> packages = {"first", "second"};
     AppConfig config = full_option_config();
     PreparedSystemSourceUpgrade prepared = prepare_sources(packages, config);
     enqueue_post_metadata(packages);
-    stub::enqueue_source_cleanup_failure(
-            ArtifactInstallExecutionOutcome::Installed,
+    stub::enqueue_package_base_cleanup_failure(
+            "first",
+            {selected_child("first")},
+            {ArtifactPackageIdentity{"first-debug", "2.0-1"}},
             "scripted cleanup failure");
 
     SystemSourceUpgradeResult result =
@@ -1224,6 +1621,19 @@ void test_cleanup_failure_preserves_transaction_outcome() {
                    std::optional<std::string>("scripted cleanup failure"),
            "Cleanup diagnostic was lost");
     expect(
+            failed.package_base_execution.has_value() &&
+                    failed.package_base_execution->package_base == "first" &&
+                    failed.package_base_execution->selected_child
+                                    .identity.package_name ==
+                            "first" &&
+                    failed.package_base_execution->unselected_artifacts
+                                    .size() ==
+                            1 &&
+                    failed.package_base_execution->unselected_artifacts
+                                    .front().package_name ==
+                            "first-debug",
+            "Registered cleanup failure flattened the PackageBase aggregate");
+    expect(
             result.registered_source_results[1].status ==
                     RegisteredSourceUpgradeStatus::NotAttempted,
             "Cleanup failure executed a later source");
@@ -1237,6 +1647,8 @@ void test_cleanup_failure_preserves_transaction_outcome() {
 void test_no_change_cleanup_failure() {
     stub::reset();
     const std::vector<std::string> packages = {"needed-skip"};
+    stub::set_source_identity(
+            packages.front(), registered_aur_identity(packages.front()));
     AppConfig config = full_option_config();
     PreparedSystemSourceUpgrade prepared = prepare_sources(packages, config);
     enqueue_post_metadata(packages);
@@ -1257,6 +1669,11 @@ void test_no_change_cleanup_failure() {
             "No-change cleanup failure guessed a package change");
     expect(result.has_cleanup_failure(),
            "No-change cleanup helper returned false");
+    expect(
+            stub::source_preparation_calls().empty() &&
+                    stub::package_base_source_execution_calls().empty() &&
+                    stub::source_execution_calls().size() == 1,
+            "Registered AUR cleanup route leaked into repository PackageBase execution");
     stub::require_script_consumed();
 }
 
@@ -1775,6 +2192,15 @@ void test_update_status_unknown_is_incomplete_but_continues() {
     expect(result.diagnostics.back().diagnostic ==
                    "scripted unknown update status",
            "Unknown-status diagnostic was lost");
+    expect(
+            stub::source_preparation_calls().size() == 2 &&
+                    stub::package_base_source_execution_calls().size() == 1 &&
+                    stub::source_preparation_calls().front().package_name ==
+                            "unknown" &&
+                    stub::package_base_source_execution_calls().front()
+                                    .package_name ==
+                            "later",
+            "Unknown closed preparation outcome did not continue to the later NeedsBuild source");
     stub::require_script_consumed();
 }
 
@@ -1987,6 +2413,22 @@ int main() {
         run_case(
                 "partial source completion",
                 test_partial_source_completion,
+                completed_cases);
+        run_case(
+                "registered PackageBase success retains typed aggregate",
+                test_registered_package_base_success_retains_typed_aggregate,
+                completed_cases);
+        run_case(
+                "registered PackageBase phase and preparation failures are typed",
+                test_registered_package_base_phase_and_preparation_failures_are_typed,
+                completed_cases);
+        run_case(
+                "registered PackageBase transaction and metadata failures are typed",
+                test_registered_package_base_transaction_and_metadata_failures_are_typed,
+                completed_cases);
+        run_case(
+                "registered PackageBase correlation failures fail closed",
+                test_registered_package_base_correlation_failures_fail_closed,
                 completed_cases);
         run_case(
                 "updated cleanup failure",
