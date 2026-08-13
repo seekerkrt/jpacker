@@ -47,6 +47,59 @@ KNOWN_OPERAND_ORDERINGS = frozenset(
 KNOWN_TARGET_POLICIES = frozenset(
     {"none", "exactly-one", "one-or-more", "ordered-items", "delegated"}
 )
+KNOWN_OPTION_OCCURRENCES = frozenset(
+    {"once", "repeat-idempotent", "repeat-same-value", "delegated"}
+)
+KNOWN_OPTION_PLACEMENTS = frozenset(
+    {
+        "parser-global",
+        "first-non-global",
+        "operation-local",
+        "pacman-grammar",
+        "end-of-options",
+    }
+)
+KNOWN_OPTION_VALUE_KINDS = frozenset({"none", "attached-enum", "marker"})
+KNOWN_OPTION_CONFLICT_RULES = frozenset(
+    {"none", "mutually-exclusive", "final-value-must-agree"}
+)
+KNOWN_OPTION_SEMANTIC_SCOPES = frozenset(
+    {
+        "information",
+        "source-build-review",
+        "source-checkout-review",
+        "source-build",
+        "dry-run-routing",
+        "root-package-selection",
+        "source-selection",
+        "local-source-build",
+        "dependency-inspection",
+        "final-package-install",
+        "pacman-delegation",
+        "parser-boundary",
+        "dependency-cleanup",
+    }
+)
+KNOWN_GRAMMAR_OWNERSHIPS = frozenset(
+    {"moguet-owned", "intercepted-pacman", "delegated-pacman"}
+)
+KNOWN_RELATION_REQUIREMENTS = frozenset({"optional", "required"})
+KNOWN_PUBLIC_SYNTAX = frozenset({"hidden", "optional", "required"})
+KNOWN_SEMANTIC_EFFECTS = frozenset(
+    {
+        "none",
+        "moguet-control",
+        "upstream-argument",
+        "final-install-semantic",
+        "parser-boundary",
+    }
+)
+KNOWN_FORWARDING_TARGETS = frozenset(
+    {"none", "pacman", "makepkg", "final-install-pacman"}
+)
+KNOWN_FORWARDING_OCCURRENCES = frozenset(
+    {"none", "preserve-all", "consolidate-single"}
+)
 PRIMARY_OPERAND_KINDS = frozenset({"package", "directory", "query"})
 ASSIGNMENT_PRIMARY_OPERAND_KINDS = frozenset({"package", "directory"})
 
@@ -58,7 +111,13 @@ class Option:
     completion_token: str
     occurrence: str
     placement: str
+    value_kind: str
+    allowed_values: tuple[str, ...]
+    conflict_rule: str
     conflicts: tuple[int, ...]
+    conflict_value_identity: str
+    semantic_scopes: tuple[str, ...]
+    ownership: str
     has_public_definition: bool
 
 
@@ -70,13 +129,35 @@ class OperandTerm:
 
 
 @dataclass(frozen=True)
+class OptionRelation:
+    identity: int
+    requirement: str
+    occurrence: str
+    public_syntax: str
+    semantic_effects: tuple[str, ...]
+    forwarding_targets: tuple[str, ...]
+    forwarding_occurrence: str
+
+
+@dataclass(frozen=True)
 class Form:
     syntax: str
     target_policy: str
     operand_ordering: str
     operand_terms: tuple[OperandTerm, ...]
-    option_ids: tuple[int, ...]
-    selector_ids: tuple[int, ...]
+    option_relations: tuple[OptionRelation, ...]
+
+    @property
+    def option_ids(self) -> tuple[int, ...]:
+        return tuple(relation.identity for relation in self.option_relations)
+
+    @property
+    def selector_ids(self) -> tuple[int, ...]:
+        return tuple(
+            relation.identity
+            for relation in self.option_relations
+            if relation.public_syntax == "required"
+        )
 
 
 @dataclass(frozen=True)
@@ -90,9 +171,15 @@ class Operation:
 class CliSchema:
     operations: tuple[Operation, ...]
     options: tuple[Option, ...]
-    delegated_option_ids: tuple[int, ...]
+    delegated_form: Form | None
     terminal_tokens: tuple[str, ...]
     canonical_grammar: tuple[str, ...]
+
+    @property
+    def delegated_option_ids(self) -> tuple[int, ...]:
+        if self.delegated_form is None:
+            return ()
+        return self.delegated_form.option_ids
 
 
 @dataclass(frozen=True)
@@ -106,8 +193,71 @@ def fail(message: str) -> None:
     raise SystemExit(1)
 
 
+def parse_identity(value: str, context: str) -> int:
+    try:
+        identity = int(value)
+    except ValueError:
+        fail(f"invalid {context} identity: {value!r}")
+    if identity < 0:
+        fail(f"invalid {context} identity: {value!r}")
+    return identity
+
+
 def parse_id_list(value: str) -> tuple[int, ...]:
-    return tuple(int(item) for item in value.split(",") if item)
+    return tuple(
+        parse_identity(item, "option") for item in value.split(",") if item
+    )
+
+
+def parse_name_set(
+    value: str, known_values: frozenset[str], context: str
+) -> tuple[str, ...]:
+    names = tuple(value.split("+")) if value else ()
+    if not names or any(name not in known_values for name in names):
+        fail(f"unsupported {context} projection: {value!r}")
+    if len(set(names)) != len(names):
+        fail(f"duplicate {context} projection: {value!r}")
+    if "none" in names and len(names) != 1:
+        fail(f"inconsistent {context} projection: {value!r}")
+    return names
+
+
+def parse_option_relations(value: str) -> tuple[OptionRelation, ...]:
+    relations: list[OptionRelation] = []
+    for encoded in value.split(","):
+        if not encoded:
+            continue
+        fields = encoded.split(":")
+        if len(fields) != 7:
+            fail(f"invalid option relation: {encoded!r}")
+        requirement, occurrence, public_syntax = fields[1:4]
+        if requirement not in KNOWN_RELATION_REQUIREMENTS:
+            fail(f"unsupported option requirement projection: {requirement!r}")
+        if occurrence not in KNOWN_OPTION_OCCURRENCES:
+            fail(f"unsupported relation occurrence projection: {occurrence!r}")
+        if public_syntax not in KNOWN_PUBLIC_SYNTAX:
+            fail(f"unsupported public syntax projection: {public_syntax!r}")
+        forwarding_occurrence = fields[6]
+        if forwarding_occurrence not in KNOWN_FORWARDING_OCCURRENCES:
+            fail(
+                "unsupported forwarding occurrence projection: "
+                f"{forwarding_occurrence!r}"
+            )
+        relation = OptionRelation(
+            identity=parse_identity(fields[0], "relation option"),
+            requirement=requirement,
+            occurrence=occurrence,
+            public_syntax=public_syntax,
+            semantic_effects=parse_name_set(
+                fields[4], KNOWN_SEMANTIC_EFFECTS, "semantic effect"
+            ),
+            forwarding_targets=parse_name_set(
+                fields[5], KNOWN_FORWARDING_TARGETS, "forwarding target"
+            ),
+            forwarding_occurrence=forwarding_occurrence,
+        )
+        relations.append(relation)
+    return tuple(relations)
 
 
 def parse_operand_terms(value: str) -> tuple[OperandTerm, ...]:
@@ -179,48 +329,91 @@ def parse_exported_schema(exported_schema: str) -> CliSchema:
 
     options: list[Option] = []
     operations: dict[str, Operation] = {}
-    delegated_option_ids: tuple[int, ...] = ()
+    operation_modes: set[tuple[str, str]] = set()
+    delegated_form: Form | None = None
     terminal_tokens: list[str] = []
     canonical_grammar: list[str] = []
 
     for line in exported_schema.splitlines():
         fields = line.split("\t")
         record = fields[0]
-        if record == "OPTION" and len(fields) == 8:
-            if fields[7] not in {"definition", "syntax-only"}:
+        if record == "OPTION" and len(fields) == 14:
+            occurrence = fields[4]
+            placement = fields[5]
+            value_kind = fields[6]
+            conflict_rule = fields[8]
+            ownership = fields[12]
+            if occurrence not in KNOWN_OPTION_OCCURRENCES:
+                fail(f"unsupported option occurrence projection: {occurrence!r}")
+            if placement not in KNOWN_OPTION_PLACEMENTS:
+                fail(f"unsupported option placement projection: {placement!r}")
+            if value_kind not in KNOWN_OPTION_VALUE_KINDS:
+                fail(f"unsupported option value projection: {value_kind!r}")
+            if conflict_rule not in KNOWN_OPTION_CONFLICT_RULES:
+                fail(f"unsupported option conflict projection: {conflict_rule!r}")
+            if ownership not in KNOWN_GRAMMAR_OWNERSHIPS:
+                fail(f"unsupported option ownership projection: {ownership!r}")
+            if fields[13] not in {"definition", "syntax-only"}:
                 fail(f"invalid public option projection: {line!r}")
             options.append(
                 Option(
-                    identity=int(fields[1]),
+                    identity=parse_identity(fields[1], "option"),
                     token=fields[2],
                     completion_token=fields[3],
-                    occurrence=fields[4],
-                    placement=fields[5],
-                    conflicts=parse_id_list(fields[6]),
-                    has_public_definition=fields[7] == "definition",
+                    occurrence=occurrence,
+                    placement=placement,
+                    value_kind=value_kind,
+                    allowed_values=tuple(
+                        value for value in fields[7].split(",") if value
+                    ),
+                    conflict_rule=conflict_rule,
+                    conflicts=parse_id_list(fields[9]),
+                    conflict_value_identity=fields[10],
+                    semantic_scopes=parse_name_set(
+                        fields[11],
+                        KNOWN_OPTION_SEMANTIC_SCOPES,
+                        "option semantic scope",
+                    ),
+                    ownership=ownership,
+                    has_public_definition=fields[13] == "definition",
                 )
             )
         elif record == "OPERATION" and len(fields) == 3:
             token = fields[1]
+            mode = fields[2]
+            if not token or mode not in {"closed", "open"}:
+                fail(f"invalid operation projection: {line!r}")
+            if (token, mode) in operation_modes:
+                fail(f"duplicate operation projection: {token!r} {mode!r}")
+            operation_modes.add((token, mode))
             existing = operations.get(token, Operation(token))
             operations[token] = replace(
                 existing,
-                open_grammar=existing.open_grammar or fields[2] == "open",
+                open_grammar=existing.open_grammar or mode == "open",
             )
-        elif record == "FORM" and len(fields) == 8:
+        elif record == "FORM" and len(fields) == 7:
             token = fields[1]
+            if (token, "closed") not in operation_modes:
+                fail(f"grammar form has no closed operation projection: {token!r}")
             existing = operations.get(token, Operation(token))
             form = Form(
                 syntax=fields[2],
                 target_policy=fields[3],
                 operand_ordering=fields[4],
                 operand_terms=parse_operand_terms(fields[5]),
-                option_ids=parse_id_list(fields[6]),
-                selector_ids=parse_id_list(fields[7]),
+                option_relations=parse_option_relations(fields[6]),
             )
             operations[token] = replace(existing, forms=existing.forms + (form,))
-        elif record == "DELEGATED_OPTIONS" and len(fields) == 2:
-            delegated_option_ids = parse_id_list(fields[1])
+        elif record == "DELEGATED" and len(fields) == 5:
+            if delegated_form is not None:
+                fail("CLI authority exporter returned duplicate delegated grammar")
+            delegated_form = Form(
+                syntax="<delegated-pacman-grammar>",
+                target_policy=fields[1],
+                operand_ordering=fields[2],
+                operand_terms=parse_operand_terms(fields[3]),
+                option_relations=parse_option_relations(fields[4]),
+            )
         elif record == "TERMINAL" and len(fields) == 2:
             terminal_tokens.append(fields[1])
         elif record == "CANONICAL" and len(fields) == 2:
@@ -238,11 +431,11 @@ def parse_exported_schema(exported_schema: str) -> CliSchema:
     schema = CliSchema(
         operations=tuple(operations.values()),
         options=tuple(options),
-        delegated_option_ids=delegated_option_ids,
+        delegated_form=delegated_form,
         terminal_tokens=tuple(terminal_tokens),
         canonical_grammar=tuple(canonical_grammar),
     )
-    validate_schema_operand_projection(schema)
+    validate_schema_projection(schema)
     return schema
 
 
@@ -423,10 +616,177 @@ def validate_operand_projection(operation: Operation, form: Form) -> None:
     fail(f"unsupported target policy projection: {form.target_policy!r}")
 
 
-def validate_schema_operand_projection(schema: CliSchema) -> None:
+def option_contract_projection(option: Option) -> tuple[object, ...]:
+    return (
+        option.occurrence,
+        option.placement,
+        option.value_kind,
+        option.allowed_values,
+        option.conflict_rule,
+        option.conflicts,
+        option.conflict_value_identity,
+        option.semantic_scopes,
+        option.ownership,
+        option.has_public_definition,
+    )
+
+
+def validate_option_projection(schema: CliSchema) -> dict[int, Option]:
+    options_by_identity: dict[int, Option] = {}
+    for option in schema.options:
+        existing = options_by_identity.get(option.identity)
+        if existing is None:
+            options_by_identity[option.identity] = option
+        elif option_contract_projection(existing) != option_contract_projection(option):
+            fail(f"option aliases disagree for identity {option.identity}")
+
+        if not option.token or not option.completion_token:
+            fail(f"empty option token projection for identity {option.identity}")
+        if len(set(option.allowed_values)) != len(option.allowed_values):
+            fail(f"duplicate option values for {option.token}")
+        if option.value_kind == "attached-enum":
+            if (
+                not option.allowed_values
+                or option.completion_token != option.token + "="
+            ):
+                fail(f"invalid attached-enum option projection: {option.token}")
+        elif option.allowed_values or option.completion_token != option.token:
+            fail(f"invalid valueless option projection: {option.token}")
+
+        expected_definition = option.placement != "operation-local"
+        if option.has_public_definition != expected_definition:
+            fail(f"inconsistent public option definition: {option.token}")
+
+        if len(set(option.conflicts)) != len(option.conflicts):
+            fail(f"duplicate option conflict projection: {option.token}")
+        if option.identity in option.conflicts:
+            fail(f"self-conflicting option projection: {option.token}")
+        if option.conflict_rule == "none":
+            if option.conflicts or option.conflict_value_identity:
+                fail(f"inconsistent conflict-free option projection: {option.token}")
+        elif not option.conflicts:
+            fail(f"conflict rule has no conflicting options: {option.token}")
+        elif option.conflict_rule == "mutually-exclusive":
+            if option.conflict_value_identity:
+                fail(f"mutual exclusion has a value identity: {option.token}")
+        elif not option.conflict_value_identity:
+            fail(f"final-value conflict lacks a value identity: {option.token}")
+
+    for option in options_by_identity.values():
+        for conflicting_identity in option.conflicts:
+            conflicting = options_by_identity.get(conflicting_identity)
+            if conflicting is None:
+                fail(
+                    f"option {option.token} references unknown conflict "
+                    f"identity {conflicting_identity}"
+                )
+            if option.identity not in conflicting.conflicts:
+                fail(
+                    f"asymmetric option conflict projection: "
+                    f"{option.token} -> {conflicting.token}"
+                )
+            if (
+                option.conflict_rule != conflicting.conflict_rule
+                or option.conflict_value_identity
+                != conflicting.conflict_value_identity
+            ):
+                fail(
+                    f"inconsistent option conflict semantics: "
+                    f"{option.token} <-> {conflicting.token}"
+                )
+    return options_by_identity
+
+
+def validate_relation_projection(
+    form: Form,
+    options_by_identity: dict[int, Option],
+    option_tokens_by_identity: dict[int, tuple[str, ...]],
+    *,
+    delegated_grammar: bool = False,
+) -> None:
+    relation_ids = form.option_ids
+    if len(set(relation_ids)) != len(relation_ids):
+        fail(f"duplicate option relation projection: {form.syntax}")
+
+    for relation in form.option_relations:
+        option = options_by_identity.get(relation.identity)
+        if option is None:
+            fail(
+                f"form {form.syntax} references unknown option "
+                f"identity {relation.identity}"
+            )
+        if relation.occurrence == "delegated" and not delegated_grammar:
+            fail(f"delegated option occurrence in closed form: {form.syntax}")
+        has_forwarding_target = relation.forwarding_targets != ("none",)
+        has_forwarding_occurrence = relation.forwarding_occurrence != "none"
+        if has_forwarding_target != has_forwarding_occurrence:
+            fail(f"inconsistent option forwarding projection: {form.syntax}")
+        if (
+            relation.public_syntax != "hidden"
+            and not any(
+                token in form.syntax
+                for token in option_tokens_by_identity[relation.identity]
+            )
+        ):
+            fail(
+                f"public option syntax is absent from form projection: "
+                f"{form.syntax}"
+            )
+
+
+def validate_schema_projection(schema: CliSchema) -> None:
+    options_by_identity = validate_option_projection(schema)
+    option_tokens_by_identity = {
+        identity: tuple(
+            option.token
+            for option in schema.options
+            if option.identity == identity
+        )
+        for identity in options_by_identity
+    }
+    public_syntax_ids: set[int] = set()
+    closed_forms: list[str] = []
+    has_open_grammar = False
+
     for operation in schema.operations:
+        has_open_grammar = has_open_grammar or operation.open_grammar
         for form in operation.forms:
             validate_operand_projection(operation, form)
+            validate_relation_projection(
+                form, options_by_identity, option_tokens_by_identity
+            )
+            public_syntax_ids.update(
+                relation.identity
+                for relation in form.option_relations
+                if relation.public_syntax != "hidden"
+            )
+            closed_forms.append(form.syntax)
+
+    if has_open_grammar:
+        if schema.delegated_form is None:
+            fail("open grammar has no delegated operand projection")
+        validate_operand_projection(
+            Operation("<delegated>", open_grammar=True), schema.delegated_form
+        )
+        validate_relation_projection(
+            schema.delegated_form,
+            options_by_identity,
+            option_tokens_by_identity,
+            delegated_grammar=True,
+        )
+    elif schema.delegated_form is not None:
+        fail("delegated operand projection has no open grammar")
+
+    for option in options_by_identity.values():
+        if not option.has_public_definition and option.identity not in public_syntax_ids:
+            fail(f"syntax-only option has no public grammar form: {option.token}")
+
+    if len(set(closed_forms)) != len(closed_forms):
+        fail("CLI authority exporter returned duplicate closed grammar forms")
+    if tuple(closed_forms) != schema.canonical_grammar:
+        fail("canonical grammar differs from closed form projection")
+    if len(set(schema.terminal_tokens)) != len(schema.terminal_tokens):
+        fail("CLI authority exporter returned duplicate terminal tokens")
 
 
 def finite_operand_max(form: Form) -> int | None:

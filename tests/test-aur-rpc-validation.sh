@@ -499,19 +499,19 @@ assert_validation_error "info[package=\"recursive-malformed\"]"
 setup_case direct-plan
 run_fail plan direct-root
 assert_validation_error "info[package=\"malformed-direct\"]"
-assert_not_contains "unresolved dependencies remain" "$output_file"
+assert_not_contains "Unresolved dependencies:" "$output_file"
 
 setup_case recursive-plan
 run_fail plan recursive-root
 assert_validation_error "info[package=\"recursive-malformed\"]"
-assert_not_contains "unresolved dependencies remain" "$output_file"
+assert_not_contains "Unresolved dependencies:" "$output_file"
 
 while IFS='|' read -r root context detail; do
     setup_case "provider-$root"
     run_fail plan "$root"
     assert_validation_error "$context"
     assert_contains "$detail" "$output_file"
-    assert_not_contains "unresolved dependencies remain" "$output_file"
+    assert_not_contains "Unresolved dependencies:" "$output_file"
 done <<'CASES'
 provider-name-root|search[provides="virtual-provider-name"]|invalid Name "../provider"
 provider-base-root|search[provides="virtual-provider-base"]|invalid PackageBase "../provider-base"
@@ -630,21 +630,37 @@ assert_contains "provider-one" "$output_file"
 
 setup_case ambiguous-provider
 run_ok plan ambiguous-provider-root
-assert_contains "ambiguous providers are not selected" "$output_file"
+assert_contains "construction: Constructed" "$output_file"
+assert_contains "completeness: Incomplete" "$output_file"
+assert_contains "provider decision: Ambiguous" "$output_file"
+assert_contains "Fetch readiness: Blocked" "$output_file"
+assert_contains "Build readiness: Blocked" "$output_file"
+assert_contains "Install readiness: Blocked" "$output_file"
+assert_contains "Ambiguous provided dependencies:" "$output_file"
 
 setup_case cycle
 run_ok plan cycle-root-174
-assert_contains "cyclic dependencies detected" "$output_file"
+assert_contains "construction: Constructed" "$output_file"
+assert_contains "completeness: Incomplete" "$output_file"
+assert_contains "Fetch readiness: Blocked" "$output_file"
+assert_contains "Cyclic dependencies:" "$output_file"
 
 setup_case unresolved
 run_ok plan unresolved-root-174
-assert_contains "unresolved dependencies remain" "$output_file"
+assert_contains "construction: Constructed" "$output_file"
+assert_contains "completeness: Incomplete" "$output_file"
+assert_contains "Fetch readiness: Blocked" "$output_file"
+assert_contains "Unresolved dependencies:" "$output_file"
 
 setup_case split
 run_ok plan valid-split
 assert_contains "Split package install targets:" "$output_file"
 assert_contains "valid-split (base: valid-split-base)" "$output_file"
-assert_not_contains "Plan status: incomplete" "$output_file"
+assert_contains "construction: Constructed" "$output_file"
+assert_contains "completeness: Complete" "$output_file"
+assert_contains "Fetch readiness: Ready" "$output_file"
+assert_contains "Build readiness: Ready" "$output_file"
+assert_contains "Install readiness: Blocked" "$output_file"
 
 setup_case normal-fetch
 run_ok fetch valid-root

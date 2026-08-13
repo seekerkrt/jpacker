@@ -124,6 +124,28 @@ std::string cli_special_operation_syntax(SpecialOperationId operation) {
     return syntax;
 }
 
+std::string cli_option_syntax(cli_authority::OptionId option_id) {
+    const cli_authority::OptionContract& option =
+            cli_authority::option_contract(option_id);
+    std::string syntax;
+    for(std::size_t index = 0; index < option.aliases.count; ++index) {
+        if(!syntax.empty()) syntax += ", ";
+        syntax += option.aliases.values[index];
+    }
+    if(!syntax.empty()) syntax += ", ";
+    syntax += option.canonical_token;
+
+    if(option.value.kind == cli_authority::OptionValueKind::AttachedEnum) {
+        syntax += "=";
+        for(std::size_t index = 0;
+            index < option.value.allowed_value_count; ++index) {
+            if(index != 0) syntax += "|";
+            syntax += option.value.allowed_values[index];
+        }
+    }
+    return syntax;
+}
+
 std::span<const OperationId> cli_public_operation_order() {
     return PUBLIC_OPERATION_ORDER;
 }

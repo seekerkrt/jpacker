@@ -3,10 +3,12 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <iostream>
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace {
 
@@ -17,10 +19,14 @@ using cli_authority::OperandOrderingRule;
 using cli_authority::OperationId;
 using cli_authority::OperationOptionRelationSet;
 using cli_authority::OptionConflictSet;
+using cli_authority::OptionConflictRule;
+using cli_authority::OptionForwardingOccurrence;
 using cli_authority::OptionId;
 using cli_authority::OptionLexicalPlacement;
 using cli_authority::OptionOccurrence;
 using cli_authority::OptionPublicSyntax;
+using cli_authority::OptionRelationRequirement;
+using cli_authority::OptionValueKind;
 using cli_authority::SpecialOperationId;
 using cli_authority::TargetPolicy;
 
@@ -56,6 +62,79 @@ std::string_view placement_name(
         return "pacman-grammar";
     case OptionLexicalPlacement::EndOfOptionsMarker:
         return "end-of-options";
+    }
+    return "unknown";
+}
+
+std::string_view value_kind_name(OptionValueKind kind) noexcept {
+    switch(kind) {
+    case OptionValueKind::None:
+        return "none";
+    case OptionValueKind::AttachedEnum:
+        return "attached-enum";
+    case OptionValueKind::Marker:
+        return "marker";
+    }
+    return "unknown";
+}
+
+std::string_view conflict_rule_name(OptionConflictRule rule) noexcept {
+    switch(rule) {
+    case OptionConflictRule::None:
+        return "none";
+    case OptionConflictRule::MutuallyExclusive:
+        return "mutually-exclusive";
+    case OptionConflictRule::FinalValueMustAgree:
+        return "final-value-must-agree";
+    }
+    return "unknown";
+}
+
+std::string_view ownership_name(GrammarOwnership ownership) noexcept {
+    switch(ownership) {
+    case GrammarOwnership::MoguetOwned:
+        return "moguet-owned";
+    case GrammarOwnership::InterceptedPacman:
+        return "intercepted-pacman";
+    case GrammarOwnership::DelegatedPacman:
+        return "delegated-pacman";
+    }
+    return "unknown";
+}
+
+std::string_view requirement_name(
+        OptionRelationRequirement requirement) noexcept {
+    switch(requirement) {
+    case OptionRelationRequirement::Optional:
+        return "optional";
+    case OptionRelationRequirement::Required:
+        return "required";
+    }
+    return "unknown";
+}
+
+std::string_view public_syntax_name(
+        OptionPublicSyntax syntax) noexcept {
+    switch(syntax) {
+    case OptionPublicSyntax::Hidden:
+        return "hidden";
+    case OptionPublicSyntax::Optional:
+        return "optional";
+    case OptionPublicSyntax::Required:
+        return "required";
+    }
+    return "unknown";
+}
+
+std::string_view forwarding_occurrence_name(
+        OptionForwardingOccurrence occurrence) noexcept {
+    switch(occurrence) {
+    case OptionForwardingOccurrence::None:
+        return "none";
+    case OptionForwardingOccurrence::PreserveAll:
+        return "preserve-all";
+    case OptionForwardingOccurrence::ConsolidateSingle:
+        return "consolidate-single";
     }
     return "unknown";
 }
@@ -113,6 +192,95 @@ std::string_view operand_ordering_name(
     return "unknown";
 }
 
+template<typename Enum, std::size_t Size>
+void print_mask_names(
+        std::uint32_t mask,
+        const std::array<std::pair<Enum, std::string_view>, Size>& names) {
+    if(mask == 0) {
+        std::cout << "none";
+        return;
+    }
+
+    bool first = true;
+    std::uint32_t remaining = mask;
+    for(const auto& [value, name] : names) {
+        const std::uint32_t bit = static_cast<std::uint32_t>(value);
+        if((remaining & bit) == 0) continue;
+        if(!first) std::cout << '+';
+        first = false;
+        std::cout << name;
+        remaining &= ~bit;
+    }
+    if(remaining == 0) return;
+    if(!first) std::cout << '+';
+    std::cout << "unknown";
+}
+
+void print_semantic_scopes(
+        cli_authority::OptionSemanticScopeMask scopes) {
+    constexpr std::array NAMES = {
+            std::pair{cli_authority::OptionSemanticScope::Information,
+                      std::string_view{"information"}},
+            std::pair{cli_authority::OptionSemanticScope::SourceBuildReview,
+                      std::string_view{"source-build-review"}},
+            std::pair{
+                    cli_authority::OptionSemanticScope::SourceCheckoutReview,
+                    std::string_view{"source-checkout-review"}},
+            std::pair{cli_authority::OptionSemanticScope::SourceBuild,
+                      std::string_view{"source-build"}},
+            std::pair{cli_authority::OptionSemanticScope::DryRunRouting,
+                      std::string_view{"dry-run-routing"}},
+            std::pair{cli_authority::OptionSemanticScope::RootPackageSelection,
+                      std::string_view{"root-package-selection"}},
+            std::pair{cli_authority::OptionSemanticScope::SourceSelection,
+                      std::string_view{"source-selection"}},
+            std::pair{cli_authority::OptionSemanticScope::LocalSourceBuild,
+                      std::string_view{"local-source-build"}},
+            std::pair{
+                    cli_authority::OptionSemanticScope::DependencyInspection,
+                    std::string_view{"dependency-inspection"}},
+            std::pair{cli_authority::OptionSemanticScope::FinalPackageInstall,
+                      std::string_view{"final-package-install"}},
+            std::pair{cli_authority::OptionSemanticScope::PacmanDelegation,
+                      std::string_view{"pacman-delegation"}},
+            std::pair{cli_authority::OptionSemanticScope::ParserBoundary,
+                      std::string_view{"parser-boundary"}},
+            std::pair{cli_authority::OptionSemanticScope::DependencyCleanup,
+                      std::string_view{"dependency-cleanup"}},
+    };
+    print_mask_names(scopes, NAMES);
+}
+
+void print_semantic_effects(
+        cli_authority::OptionSemanticEffectMask effects) {
+    constexpr std::array NAMES = {
+            std::pair{cli_authority::OptionSemanticEffect::MoguetControl,
+                      std::string_view{"moguet-control"}},
+            std::pair{cli_authority::OptionSemanticEffect::UpstreamArgument,
+                      std::string_view{"upstream-argument"}},
+            std::pair{
+                    cli_authority::OptionSemanticEffect::FinalInstallSemantic,
+                    std::string_view{"final-install-semantic"}},
+            std::pair{cli_authority::OptionSemanticEffect::ParserBoundary,
+                      std::string_view{"parser-boundary"}},
+    };
+    print_mask_names(effects, NAMES);
+}
+
+void print_forwarding_targets(
+        cli_authority::OptionForwardingTargetMask targets) {
+    constexpr std::array NAMES = {
+            std::pair{cli_authority::OptionForwardingTarget::Pacman,
+                      std::string_view{"pacman"}},
+            std::pair{cli_authority::OptionForwardingTarget::Makepkg,
+                      std::string_view{"makepkg"}},
+            std::pair{
+                    cli_authority::OptionForwardingTarget::FinalInstallPacman,
+                    std::string_view{"final-install-pacman"}},
+    };
+    print_mask_names(targets, NAMES);
+}
+
 void print_operand_terms(const OperandContract& operands) {
     for(std::size_t index = 0; index < operands.term_count; ++index) {
         if(index != 0) std::cout << ',';
@@ -132,6 +300,10 @@ bool has_public_option_definition(
     return placement != OptionLexicalPlacement::OperationLocal;
 }
 
+bool is_public_option_projection(OptionId id) noexcept {
+    return id != OptionId::EndOfOptions;
+}
+
 void print_ids(std::span<const OptionId> ids) {
     for(std::size_t index = 0; index < ids.size(); ++index) {
         if(index != 0) std::cout << ',';
@@ -144,22 +316,31 @@ void print_conflicts(const OptionConflictSet& conflicts) {
 }
 
 void print_relations(const OperationOptionRelationSet& relations) {
-    for(std::size_t index = 0; index < relations.count; ++index) {
-        if(index != 0) std::cout << ',';
-        std::cout << enum_index(relations.values[index].option);
-    }
-}
-
-void print_public_selectors(
-        const OperationOptionRelationSet& relations) {
     bool first = true;
     for(std::size_t index = 0; index < relations.count; ++index) {
         const cli_authority::OptionRelationContract& relation =
                 relations.values[index];
-        if(relation.public_syntax != OptionPublicSyntax::Required) continue;
+        if(!is_public_option_projection(relation.option)) continue;
         if(!first) std::cout << ',';
         first = false;
-        std::cout << enum_index(relation.option);
+        std::cout << enum_index(relation.option) << ':'
+                  << requirement_name(relation.requirement) << ':'
+                  << occurrence_name(relation.occurrence) << ':'
+                  << public_syntax_name(relation.public_syntax) << ':';
+        print_semantic_effects(relation.semantic_effects);
+        std::cout << ':';
+        print_forwarding_targets(relation.forwarding_targets);
+        std::cout << ':'
+                  << forwarding_occurrence_name(
+                             relation.forwarding_occurrence);
+    }
+}
+
+void print_allowed_values(
+        const cli_authority::OptionValueContract& value) {
+    for(std::size_t index = 0; index < value.allowed_value_count; ++index) {
+        if(index != 0) std::cout << ',';
+        std::cout << value.allowed_values[index];
     }
 }
 
@@ -173,8 +354,14 @@ void print_option_token(OptionId id, std::string_view token) {
         std::cout << token;
     }
     std::cout << '\t' << occurrence_name(option.default_occurrence)
-              << '\t' << placement_name(option.lexical_placement) << '\t';
+              << '\t' << placement_name(option.lexical_placement) << '\t'
+              << value_kind_name(option.value.kind) << '\t';
+    print_allowed_values(option.value);
+    std::cout << '\t' << conflict_rule_name(option.conflicts.rule) << '\t';
     print_conflicts(option.conflicts);
+    std::cout << '\t' << option.conflicts.value_identity << '\t';
+    print_semantic_scopes(option.semantic_scopes);
+    std::cout << '\t' << ownership_name(option.owner);
     const std::string_view definition_role =
             has_public_option_definition(option.lexical_placement)
             ? "definition"
@@ -201,47 +388,12 @@ void print_form(
     print_operand_terms(operands);
     std::cout << '\t';
     print_relations(relations);
-    std::cout << '\t';
-    print_public_selectors(relations);
     std::cout << '\n';
-}
-
-bool validate_legacy_syntax() {
-    for(OperationId id : cli_public_operation_order()) {
-        const std::string projected = cli_operation_syntax(id);
-        const std::string_view legacy =
-                cli_authority::operation_spec(id).help_syntax;
-        if(projected == legacy) continue;
-        std::cerr << "CLI authority drift for "
-                  << cli_authority::operation_spec(id).token
-                  << ": legacy='" << legacy
-                  << "', projected='" << projected << "'\n";
-        return false;
-    }
-
-    const std::array special_syntax = {
-            std::pair{SpecialOperationId::PkgbuildExport,
-                      cli_authority::PKGBUILD_EXPORT_SYNTAX},
-            std::pair{SpecialOperationId::PkgbuildPrint,
-                      cli_authority::PKGBUILD_PRINT_SYNTAX},
-            std::pair{SpecialOperationId::SyncSelect,
-                      cli_authority::PACMAN_SYNC_SELECT_SYNTAX},
-    };
-    for(const auto& [id, legacy] : special_syntax) {
-        const std::string projected = cli_special_operation_syntax(id);
-        if(projected == legacy) continue;
-        std::cerr << "CLI special-operation authority drift: legacy='"
-                  << legacy << "', projected='" << projected << "'\n";
-        return false;
-    }
-    return true;
 }
 
 } // namespace
 
 int main() {
-    if(!validate_legacy_syntax()) return 1;
-
     constexpr std::array OPTION_ORDER = {
             OptionId::Help,
             OptionId::Version,
@@ -308,7 +460,11 @@ int main() {
     const cli_authority::SpecialOperationSpec& delegated =
             cli_authority::special_operation_spec(
                     SpecialOperationId::DelegatedPacmanGrammar);
-    std::cout << "DELEGATED_OPTIONS\t";
+    std::cout << "DELEGATED\t"
+              << target_policy_name(delegated.target_policy) << '\t'
+              << operand_ordering_name(delegated.operands.ordering) << '\t';
+    print_operand_terms(delegated.operands);
+    std::cout << '\t';
     print_relations(delegated.option_relations);
     std::cout << '\n';
 

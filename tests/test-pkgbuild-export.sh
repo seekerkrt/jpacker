@@ -335,27 +335,29 @@ assert_fixture_tree() {
 # Matrix A: exact operation、arity、option roleをnetwork/filesystem mutation前に固定する。
 setup_case cli-validation
 run_fail -G
-assert_contains "requires exactly one AUR package target" "$stderr_file"
-assert_contains "Usage: moguet -G <pkg>" "$stderr_file"
+assert_contains \
+    "Operation -G requires exactly one <pkg> operand." "$stderr_file"
 assert_command_log_empty
 assert_normal_request_log_empty
 assert_cache_root_absent
 
 run_fail -Gp
-assert_contains "requires exactly one AUR package target" "$stderr_file"
-assert_contains "Usage: moguet -Gp <pkg>" "$stderr_file"
+assert_contains \
+    "Operation -Gp requires exactly one <pkg> operand." "$stderr_file"
 assert_stdout_empty
 assert_command_log_empty
 assert_normal_request_log_empty
 assert_cache_root_absent
 
 run_fail -G clean-root risk-root
-assert_contains "requires exactly one AUR package target" "$stderr_file"
+assert_contains \
+    "Operation -G requires exactly one <pkg> operand." "$stderr_file"
 assert_command_log_empty
 assert_normal_request_log_empty
 
 run_fail -Gp clean-root risk-root
-assert_contains "requires exactly one AUR package target" "$stderr_file"
+assert_contains \
+    "Operation -Gp requires exactly one <pkg> operand." "$stderr_file"
 assert_stdout_empty
 assert_command_log_empty
 assert_normal_request_log_empty
@@ -463,7 +465,8 @@ run_ok --version
 assert_contains "Moguet v" "$stdout_file"
 assert_command_log_empty
 run_fail -Gp --help
-assert_contains "Unsupported option --help for operation -Gp" "$stderr_file"
+assert_contains \
+    "Operation -Gp requires exactly one <pkg> operand." "$stderr_file"
 assert_stdout_empty
 assert_command_log_empty
 

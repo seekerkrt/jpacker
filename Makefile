@@ -1445,7 +1445,7 @@ LIBALPM_BUILD_TARGETS := \
 .PHONY: check-cli-diagnostic-model-link-firewall test-cli-diagnostic-model
 .PHONY: check-runtime-cli-connection-link-firewall test-runtime-cli-connection
 .PHONY: test-artifact-identity-real-pacman
-.PHONY: FORCE catalogs check-catalogs check-localization-config check-pot update-po update-pot test-localization test-catalog-metadata-gate test-cli-localization-surface test-completion-schema test-public-documentation
+.PHONY: FORCE catalogs check-catalogs check-localization-config check-pot update-po update-pot test-localization test-catalog-metadata-gate test-cli-localization-surface check-completion-freshness test-completion-schema test-public-documentation
 .PHONY: test-container test-container-live test-container-live-provider test-container-live-aur test-container-live-local
 .PHONY: test-validation-status
 .PHONY: $(HEAVY_LINK_FIREWALLS)
@@ -3385,7 +3385,10 @@ test-dry-run-command: $(TEST_TARGET) $(AUR_RPC_VALIDATION_TEST_TARGET)
 test-completion-schema: scripts/generate_completions.py tests/test-completion-schema-validator.py
 	PYTHONDONTWRITEBYTECODE=1 python3 tests/test-completion-schema-validator.py
 
-test-public-documentation: test-completion-schema $(CLI_LOCALIZATION_TEST_TARGET) $(MANPAGES) $(COMPLETION_FILES) $(MO_FILES) tests/test-help-man-completion.sh tests/test-public-documentation-checker.py tests/test-static-completion.sh
+check-completion-freshness:
+	PYTHONDONTWRITEBYTECODE=1 python3 scripts/generate_completions.py --check
+
+test-public-documentation: check-completion-freshness test-completion-schema $(CLI_LOCALIZATION_TEST_TARGET) $(MANPAGES) $(COMPLETION_FILES) $(MO_FILES) tests/test-help-man-completion.sh tests/test-public-documentation-checker.py tests/test-static-completion.sh
 	PYTHONDONTWRITEBYTECODE=1 python3 tests/test-public-documentation-checker.py
 	sh tests/test-help-man-completion.sh $(abspath $(CLI_LOCALIZATION_TEST_TARGET))
 	bash tests/test-static-completion.sh $(abspath $(BASH_COMPLETION))
@@ -3621,7 +3624,7 @@ release-check-exclusive:
 	@echo ":: Checking tracked Markdown links"
 	sh scripts/check-markdown-links.sh
 
-install: check-localization-config $(TARGET) $(MANPAGES) $(COMPLETION_FILES) $(MO_FILES) $(PROJECT_LICENSE_FILES) $(COMPLIANCE_DOC_FILES) $(PUBLIC_DOC_FILES)
+install: check-localization-config check-completion-freshness $(TARGET) $(MANPAGES) $(COMPLETION_FILES) $(MO_FILES) $(PROJECT_LICENSE_FILES) $(COMPLIANCE_DOC_FILES) $(PUBLIC_DOC_FILES)
 	@echo ":: Installing binary..."
 	install -Dm755 $(TARGET) $(DESTDIR)$(BINDIR)/$(TARGET)
 

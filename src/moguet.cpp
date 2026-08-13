@@ -672,8 +672,8 @@ int main(int argc, char* argv[]) {
 
 // CLI入口 / help
 void print_help() {
-    using cli_authority::GlobalOptionId;
     using cli_authority::OperationId;
+    using cli_authority::OptionId;
     using cli_authority::SpecialOperationId;
 
     // NO_TRANSLATE: Product/version identity and CLI grammar tokens are
@@ -836,45 +836,44 @@ void print_help() {
     std::cout << std::endl;
     print_help_section(localization::translate_message("OPTIONS"));
     print_help_entry(
-            cli_authority::HELP_OPTION_SYNTAX,
+            cli_option_syntax(OptionId::Help),
             localization::translate_message(
                     "Show this help message and exit"));
     print_help_entry(
-            cli_authority::VERSION_OPTION_SYNTAX,
+            cli_option_syntax(OptionId::Version),
             localization::translate_message(
                     "Show version information and exit"));
     print_help_entry(
-            cli_authority::global_option_spec(GlobalOptionId::DryRun)
-                    .help_syntax,
+            cli_option_syntax(OptionId::DryRun),
             localization::translate_message(
                     "Observe supported mutating operations without changing persistent state"));
     print_help_continuation(localization::translate_message(
             "Reject unsupported routes and do not create state, cache, or workspaces"));
     print_help_entry(
-            cli_authority::global_option_spec(GlobalOptionId::Edit).help_syntax,
+            cli_option_syntax(OptionId::Edit),
             localization::format_translated_message(
                     // TRANSLATORS: PKGBUILD and .install are literal artifact names.
                     "Prompt to review {} and {} files", "PKGBUILD", ".install"));
     print_help_entry(
-            cli_authority::global_option_spec(GlobalOptionId::NoEdit).help_syntax,
+            cli_option_syntax(OptionId::NoEdit),
             localization::format_translated_message(
                     // TRANSLATORS: PKGBUILD and .install are literal artifact names.
                     "Skip {} and {} review", "PKGBUILD", ".install"));
     print_help_entry(
-            cli_authority::global_option_spec(GlobalOptionId::Diff).help_syntax,
+            cli_option_syntax(OptionId::Diff),
             localization::translate_message(
                     "Prompt to view repository update diffs"));
     print_help_entry(
-            cli_authority::global_option_spec(GlobalOptionId::NoDiff).help_syntax,
+            cli_option_syntax(OptionId::NoDiff),
             localization::translate_message(
                     "Skip the repository update diff prompt"));
     print_help_entry(
-            cli_authority::global_option_spec(GlobalOptionId::NoConfirm).help_syntax,
+            cli_option_syntax(OptionId::NoConfirm),
             localization::format_translated_message(
                     // TRANSLATORS: pacman and makepkg are literal external-program identities.
                     "Pass this option to {} and {}", "pacman", "makepkg"));
     print_help_entry(
-            cli_authority::PACMAN_NEEDED_OPTION_SYNTAX,
+            cli_option_syntax(OptionId::Needed),
             localization::format_translated_message(
                     // TRANSLATORS: pacman, AUR, and -S are literal identities or CLI tokens.
                     "Pass this option to {}; on {} or source-build {} routes, apply it only to final installation",
@@ -885,32 +884,32 @@ void print_help() {
                     "Do not skip {} build, review, or plan steps",
                     application_identity::PROJECT_NAME));
     print_help_entry(
-            cli_authority::global_option_spec(GlobalOptionId::BuildMode).help_syntax,
+            cli_option_syntax(OptionId::BuildMode),
             localization::translate_message("Select the source-build mode"));
     print_help_entry(
-            cli_authority::global_option_spec(GlobalOptionId::Rebuild).help_syntax,
+            cli_option_syntax(OptionId::Rebuild),
             localization::format_translated_message(
                     // TRANSLATORS: The placeholder is a literal compatibility option form.
                     "Compatibility alias for {}",
                     cli_authority::BUILD_MODE_REBUILD_OPTION));
     print_help_entry(
-            cli_authority::global_option_spec(GlobalOptionId::CleanBuild).help_syntax,
+            cli_option_syntax(OptionId::CleanBuild),
             localization::format_translated_message(
                     // TRANSLATORS: The placeholder is a literal compatibility option form.
                     "Compatibility alias for {}",
                     cli_authority::BUILD_MODE_CLEAN_OPTION));
     print_help_entry(
-            cli_authority::global_option_spec(GlobalOptionId::RmDeps).help_syntax,
+            cli_option_syntax(OptionId::RmDeps),
             localization::translate_message(
                     "Unsupported for separated source builds; no dependency cleanup is performed"));
     print_help_entry(
-            cli_authority::global_option_spec(GlobalOptionId::Aur).help_syntax,
+            cli_option_syntax(OptionId::Aur),
             localization::format_translated_message(
                     // TRANSLATORS: -S, -Ss, -Si, and AUR are literal CLI/project identities.
                     "Limit {}, {}, and {} to {}; do not fall back to repositories",
                     "-S", "-Ss", "-Si", "AUR"));
     print_help_entry(
-            cli_authority::global_option_spec(GlobalOptionId::Repo).help_syntax,
+            cli_option_syntax(OptionId::Repo),
             localization::format_translated_message(
                     // TRANSLATORS: -S, -Ss, -Si, and AUR are literal CLI/project identities.
                     "Limit {}, {}, and {} to official binary repositories; do not use {} or source builds",

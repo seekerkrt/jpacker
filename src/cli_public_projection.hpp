@@ -17,6 +17,8 @@ std::string cli_operation_syntax(cli_authority::OperationId operation);
 std::string cli_special_operation_syntax(
         cli_authority::SpecialOperationId operation);
 
+std::string cli_option_syntax(cli_authority::OptionId option);
+
 std::span<const cli_authority::OperationId> cli_public_operation_order();
 
 std::span<const cli_authority::SpecialOperationId>
