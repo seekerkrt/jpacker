@@ -108,7 +108,7 @@ detailed plan.
   order, numbering, or the required explicit choice.
 - Non-TTY use and `--noconfirm` do not read provider input from stdin or
   auto-select a candidate. Unselected ambiguity fails closed.
-- `moguet -S --select <query>` discovers source-aware root package candidates
+- `moguet -S --select [--needed] <query>` discovers source-aware root package candidates
   from official repositories and AUR. An interactive TTY accepts package
   numbers, multiple numbers, inclusive ranges, and an `@group` selector for a
   displayed official group; there is no default, even for one candidate.
@@ -246,10 +246,40 @@ page.
 `moguet --help` is the runtime authority for the current command and option
 surface. Command and option tokens never change with the selected locale.
 
+The closed Moguet-owned and intercepted grammar is:
+
+<!-- CLI CANONICAL GRAMMAR BEGIN -->
+```text
+build <pkg> [V=K...]
+build --local <directory> [V=K...]
+upgrade
+upgrade-aur
+upgrade-all
+clean
+deps [--recursive] <pkg>...
+plan <pkg>...
+fetch <pkg>...
+add-src <item>...
+edit-src <pkg>...
+list-src
+del-src <pkg>...
+revert <pkg>...
+-G <pkg>
+-Gp <pkg>
+-S --select [--needed] <query>
+```
+<!-- CLI CANONICAL GRAMMAR END -->
+
+Other pacman operation forms remain delegated open grammar, not a Moguet
+allowlist. The closed grammar rejects a second bare operand for remote or local
+`build`, and rejects target operands for `upgrade`, `upgrade-aur`,
+`upgrade-all`, `clean`, and `list-src`. Inspection and source-maintenance forms
+shown with `...` keep their multi-target behavior.
+
 ```bash
 # Install, search, or inspect packages
 moguet -S <pkg>
-moguet -S --select <query>
+moguet -S --select [--needed] <query>
 moguet -Ss <query>
 moguet -Si <pkg>
 
@@ -266,11 +296,18 @@ moguet build <pkg> [V=K...]
 moguet build --local <directory> [V=K...]
 
 # Inspect AUR dependencies and build order without building
-moguet deps --recursive <pkg>
-moguet plan <pkg>
+moguet deps --recursive <pkg>...
+moguet plan <pkg>...
 
 # Retrieve build repositories without building or installing
-moguet fetch <pkg>
+moguet fetch <pkg>...
+
+# Maintain one or more source-build preferences
+moguet add-src <item>...
+moguet edit-src <pkg>...
+moguet list-src
+moguet del-src <pkg>...
+moguet revert <pkg>...
 
 # Export one PackageBase checkout or print only its PKGBUILD
 moguet -G <pkg>
@@ -279,7 +316,7 @@ moguet -Gp <pkg>
 # Observe every supported mutating route without changing persistent state
 moguet --dry-run -S <pkg>
 moguet --dry-run -Syu
-moguet --dry-run fetch <pkg>
+moguet --dry-run fetch <pkg>...
 moguet --dry-run build <pkg>
 moguet --dry-run build --local <directory>
 moguet --dry-run upgrade
@@ -306,6 +343,15 @@ is not reused as an approval token, execution capability, or cached provider
 choice: a later actual invocation revalidates current state. The v2.2.0 surface
 is human-readable only and adds no JSON or other machine-readable plan schema.
 
+Human-readable diagnostics are projections of typed state, never the authority
+used to classify it. English and Japanese keep the same hierarchy: a normal
+summary first, attention-required details next, and route-owned necessary
+detail last. Operation outcome and package-state observation remain distinct;
+plan construction, completeness, and execution readiness are reported
+independently. A successful but unverified observation remains successful with
+the required check, `Unknown` is not rewritten as `NoOp`, and severity,
+blocking, and exit-status effect remain separate dimensions.
+
 **Choosing an upgrade command:** For ordinary package installation, search,
 and system upgrades, use pacman-compatible operations such as `-S`, `-Ss`,
 and `-Syu`, as with pacman and other AUR helpers. Use the corresponding
@@ -320,15 +366,16 @@ error before an external command or AUR query. Pacman-only routes preserve
 compatible pacman options; a source-build route rejects options whose meaning
 cannot be preserved instead of silently ignoring them.
 
-`-S --select <query>` is the interactive source-aware discovery form. Without
+`-S --select [--needed] <query>` is the interactive source-aware discovery form. Without
 a source selector it searches both official repositories and AUR; `--aur` or
 `--repo` limits the candidate source. Only `--needed` has a shared meaning on
 both selected routes. Non-TTY use and `--noconfirm` fail without querying or
 choosing a package.
 
-Source-build preferences are managed with `add-src`, `edit-src`, `list-src`,
-`del-src`, and `revert`. A one-off `build <pkg> [V=K...]` resolves a remote
-package and does not save a preference. `build --local <directory> [V=K...]`
+Source-build preferences are managed with multi-target `add-src`, `edit-src`,
+`del-src`, and `revert`, plus target-less `list-src`. A one-off
+`build <pkg> [V=K...]` resolves a remote package and does not save a preference.
+`build --local <directory> [V=K...]`
 instead treats exactly one user-owned directory as a local PackageBase source;
 it does not infer a local root from a path-like package operand or query AUR for
 that root.

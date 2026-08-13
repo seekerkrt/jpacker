@@ -2,7 +2,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Moguet 2.2.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-13 16:16+0900\n"
+"POT-Creation-Date: 2026-08-13 19:03+0900\n"
 "PO-Revision-Date: 2026-08-03 06:53+0900\n"
 "Last-Translator: Moguet contributors\n"
 "Language-Team: Japanese\n"
@@ -2374,6 +2374,13 @@ msgstr "メタデータ     : 利用不可（メタデータの取得に失敗�
 msgid "Repository package sizes:"
 msgstr "リポジトリパッケージのサイズ:"
 
+msgid "not found"
+msgstr "見つかりません"
+
+#, c++-format
+msgid "  packages: {}"
+msgstr "  パッケージ数: {}"
+
 #, c++-format
 msgid "    Package size   : {}"
 msgstr "    パッケージサイズ  : {}"
@@ -2381,6 +2388,180 @@ msgstr "    パッケージサイズ  : {}"
 #, c++-format
 msgid "    Installed size : {}"
 msgstr "    インストールサイズ: {}"
+
+msgid "    totals: unavailable (overflow)"
+msgstr "    合計: 利用不可（オーバーフロー）"
+
+#, c++-format
+msgid "  attention: {}"
+msgstr "  要確認: {}"
+
+msgid "Constructed"
+msgstr "構築済み"
+
+msgid "Failed"
+msgstr "失敗"
+
+msgid "Unknown plan construction state."
+msgstr "プラン構築状態が不明です。"
+
+msgid "Complete"
+msgstr "完全"
+
+msgid "Incomplete"
+msgstr "不完全"
+
+msgid "Unknown"
+msgstr "不明"
+
+msgid "Unknown plan completeness state."
+msgstr "プラン完全性の状態が不明です。"
+
+msgid "Unique"
+msgstr "一意"
+
+msgid "Selected"
+msgstr "選択済み"
+
+msgid "Ambiguous"
+msgstr "曖昧"
+
+msgid "Cancelled"
+msgstr "取り消し"
+
+msgid "Unavailable"
+msgstr "利用不可"
+
+msgid "Unknown provider decision state."
+msgstr "プロバイダー判断の状態が不明です。"
+
+msgid "Fetch"
+msgstr "取得"
+
+msgid "Build"
+msgstr "ビルド"
+
+msgid "Install"
+msgstr "インストール"
+
+msgid "Unknown execution capability."
+msgstr "実行能力が不明です。"
+
+msgid "Not assessed"
+msgstr "未評価"
+
+msgid "Ready"
+msgstr "準備完了"
+
+msgid "Requires check"
+msgstr "確認が必要"
+
+msgid "Blocked"
+msgstr "実行不可"
+
+msgid "Unknown execution readiness state."
+msgstr "実行準備状態が不明です。"
+
+msgid "None"
+msgstr "なし"
+
+msgid "Correct plan authority"
+msgstr "プランauthorityを修正"
+
+msgid "Resolve dependency"
+msgstr "依存関係を解決"
+
+msgid "Select provider"
+msgstr "プロバイダーを選択"
+
+msgid "Obtain metadata"
+msgstr "メタデータを取得"
+
+msgid "Review declared relations"
+msgstr "宣言済み関係を確認"
+
+msgid "Use the package-base set lifecycle"
+msgstr "PackageBase集合ライフサイクルを使用"
+
+msgid "Unknown plan required action."
+msgstr "プランに必要な対応が不明です。"
+
+msgid "constraint authority"
+msgstr "制約authority"
+
+msgid "selected provider identity conflict"
+msgstr "選択済みプロバイダー識別情報の競合"
+
+msgid "constraint readiness"
+msgstr "制約の実行準備"
+
+msgid "resolution failure"
+msgstr "解決失敗"
+
+msgid "declared relation (actual relation unassessed)"
+msgstr "宣言済み関係（実際の関係は未評価）"
+
+msgid "split package"
+msgstr "分割パッケージ"
+
+msgid "incomplete provider candidate"
+msgstr "不完全なプロバイダー候補"
+
+msgid "Unknown plan presentation reason."
+msgstr "プラン表示理由が不明です。"
+
+msgid "Plan state:"
+msgstr "プラン状態:"
+
+#, c++-format
+msgid "  construction: {}"
+msgstr "  構築状態: {}"
+
+#, c++-format
+msgid "  completeness: {}"
+msgstr "  完全性: {}"
+
+#, c++-format
+msgid "  provider decision: {}"
+msgstr "  プロバイダー判断: {}"
+
+#, c++-format
+msgid "  {} readiness: {}"
+msgstr "  {}の実行準備: {}"
+
+#, c++-format
+msgid "  items: {} total, {} normal, {} attention-required"
+msgstr "  項目: 全{}件、通常{}件、要確認{}件"
+
+#, c++-format
+msgid "  normal unconstrained dependencies: {}"
+msgstr "  通常の制約なし依存関係: {}"
+
+msgid "Attention-required details:"
+msgstr "確認が必要な詳細:"
+
+msgid "<plan-wide>"
+msgstr "<プラン全体>"
+
+#, c++-format
+msgid "  - package: {}"
+msgstr "  - パッケージ: {}"
+
+#, c++-format
+msgid "    diagnostic: {}"
+msgstr "    診断: {}"
+
+#, c++-format
+msgid "    {}: {}"
+msgstr "    {}: {}"
+
+#, c++-format
+msgid "      reason: {}"
+msgstr "      理由: {}"
+
+#, c++-format
+msgid "      required action: {}"
+msgstr "      必要な対応: {}"
 
 #, c++-format
 msgid "base: {}"
@@ -3015,9 +3196,6 @@ msgstr "[期限切れ]"
 
 msgid "[orphaned]"
 msgstr "[保守担当者なし]"
-
-msgid "None"
-msgstr "なし"
 
 msgid "no"
 msgstr "いいえ"
@@ -3756,6 +3934,271 @@ msgstr "不明な{}ビルド単位役割です。"
 msgid "unknown packages"
 msgstr "不明なパッケージ"
 
+msgid "Succeeded"
+msgstr "成功"
+
+msgid "No operation needed"
+msgstr "操作不要"
+
+msgid "Partial failure"
+msgstr "部分的失敗"
+
+msgid "Not attempted"
+msgstr "未試行"
+
+msgid "Inconsistent"
+msgstr "不整合"
+
+msgid "Unknown operation outcome."
+msgstr "操作結果が不明です。"
+
+msgid "Changed"
+msgstr "変更あり"
+
+msgid "Verified unchanged"
+msgstr "変更なしを確認"
+
+msgid "Unverified"
+msgstr "未検証"
+
+msgid "Not observed"
+msgstr "未観測"
+
+msgid "Unknown package-state observation."
+msgstr "パッケージ状態の観測が不明です。"
+
+msgid "Before snapshot unavailable"
+msgstr "事前スナップショットを利用できない"
+
+msgid "After snapshot unavailable"
+msgstr "事後スナップショットを利用できない"
+
+msgid "Observation not prepared"
+msgstr "観測未準備"
+
+msgid "Phase not attempted"
+msgstr "処理段階を未試行"
+
+msgid "Operation failed"
+msgstr "操作失敗"
+
+msgid "Authority failure"
+msgstr "authorityの失敗"
+
+msgid "Inconsistent evidence"
+msgstr "根拠の不整合"
+
+msgid "Unknown observation reason."
+msgstr "観測理由が不明です。"
+
+msgid "No relevant work"
+msgstr "該当作業なし"
+
+msgid "Unknown no-op basis."
+msgstr "no-opの根拠が不明です。"
+
+msgid "Correct input"
+msgstr "入力を修正"
+
+msgid "Select a candidate"
+msgstr "候補を選択"
+
+msgid "Enable interaction"
+msgstr "対話入力を有効化"
+
+msgid "Retry the query"
+msgstr "問い合わせを再試行"
+
+msgid "Inspect metadata"
+msgstr "メタデータを確認"
+
+msgid "Confirm evaluation"
+msgstr "評価を確認"
+
+msgid "Resolve the blocker"
+msgstr "blockerを解決"
+
+msgid "Inspect the partial result"
+msgstr "部分結果を確認"
+
+msgid "Report the inconsistency"
+msgstr "不整合を報告"
+
+msgid "Unknown diagnostic required action."
+msgstr "診断に必要な対応が不明です。"
+
+msgid "foreign inventory not attempted"
+msgstr "外部パッケージ一覧を未取得"
+
+msgid "foreign inventory completed"
+msgstr "外部パッケージ一覧を取得済み"
+
+msgid "foreign inventory failed"
+msgstr "外部パッケージ一覧の取得に失敗"
+
+msgid "Unknown foreign inventory status."
+msgstr "外部パッケージ一覧の取得状態が不明です。"
+
+msgid "registered source updated"
+msgstr "登録済みソースを更新"
+
+msgid "registered source unchanged"
+msgstr "登録済みソースは変更なし"
+
+msgid "registered source failed"
+msgstr "登録済みソースの更新に失敗"
+
+msgid "registered source updated; cleanup failed"
+msgstr "登録済みソースを更新、後処理に失敗"
+
+msgid "registered source unchanged; cleanup failed"
+msgstr "登録済みソースは変更なし、後処理に失敗"
+
+msgid "registered source not attempted"
+msgstr "登録済みソースの更新を未試行"
+
+msgid "registered source unsupported"
+msgstr "登録済みソースは未対応"
+
+msgid "registered source incomplete"
+msgstr "登録済みソースの処理が不完全"
+
+msgid "Unknown registered-source status."
+msgstr "登録済みソースの状態が不明です。"
+
+#, c++-format
+msgid "{} target updated"
+msgstr "{}対象を更新"
+
+#, c++-format
+msgid "{} target unchanged"
+msgstr "{}対象は変更なし"
+
+#, c++-format
+msgid "{} target skipped"
+msgstr "{}対象をスキップ"
+
+#, c++-format
+msgid "{} target unsupported"
+msgstr "{}対象は未対応"
+
+#, c++-format
+msgid "{} target incomplete"
+msgstr "{}対象の処理が不完全"
+
+#, c++-format
+msgid "{} target failed"
+msgstr "{}対象の処理に失敗"
+
+#, c++-format
+msgid "{} target updated; cleanup failed"
+msgstr "{}対象を更新、後処理に失敗"
+
+#, c++-format
+msgid "{} target unchanged; cleanup failed"
+msgstr "{}対象は変更なし、後処理に失敗"
+
+#, c++-format
+msgid "{} target not attempted"
+msgstr "{}対象の処理を未試行"
+
+msgid "aggregate diagnostic"
+msgstr "集約診断"
+
+#, c++-format
+msgid "{} phase diagnostic"
+msgstr "{}処理段階の診断"
+
+#, c++-format
+msgid "{} query failure"
+msgstr "{}問い合わせの失敗"
+
+msgid "Unknown presentation boundary reason."
+msgstr "表示境界の理由が不明です。"
+
+#, c++-format
+msgid "{} work-item failure"
+msgstr "{}作業項目の失敗"
+
+#, c++-format
+msgid "{} summary:"
+msgstr "{}の概要:"
+
+#, c++-format
+msgid "  operation outcome: {}"
+msgstr "  操作結果: {}"
+
+#, c++-format
+msgid "  package state observation: {}"
+msgstr "  パッケージ状態の観測: {}"
+
+#, c++-format
+msgid "  observation reason: {}"
+msgstr "  観測理由: {}"
+
+#, c++-format
+msgid "  no-op basis: {}"
+msgstr "  no-opの根拠: {}"
+
+#, c++-format
+msgid "  update candidates: {}, blockers: {}, requires-check: {}, failures: {}"
+msgstr "  更新候補: {}件、blocker: {}件、要確認: {}件、失敗: {}件"
+
+#, c++-format
+msgid "package: {}"
+msgstr "パッケージ: {}"
+
+#, c++-format
+msgid "source: {}"
+msgstr "ソース: {}"
+
+msgid "operation-wide"
+msgstr "操作全体"
+
+#, c++-format
+msgid "    repository: {}"
+msgstr "    リポジトリ: {}"
+
+#, c++-format
+msgid "    canonical source identity: {}"
+msgstr "    正規ソース識別情報: {}"
+
+#, c++-format
+msgid "    local root: {}"
+msgstr "    ローカルルート: {}"
+
+#, c++-format
+msgid "    package state: {}"
+msgstr "    パッケージ状態: {}"
+
+#, c++-format
+msgid "    observation reason: {}"
+msgstr "    観測理由: {}"
+
+msgid "    update candidate"
+msgstr "    更新候補"
+
+msgid "    blocking"
+msgstr "    実行を阻害"
+
+msgid "    requires check"
+msgstr "    確認が必要"
+
+msgid "    manual action required"
+msgstr "    手動対応が必要"
+
+#, c++-format
+msgid "    selected artifact: {} {}"
+msgstr "    選択済み成果物: {} {}"
+
+#, c++-format
+msgid "    unselected artifact: {} {}"
+msgstr "    未選択成果物: {} {}"
+
+#, c++-format
+msgid "    reason [{}]: {}"
+msgstr "    理由 [{}]: {}"
+
 #, c++-format
 msgid "excluded from {} update: {}"
 msgstr "{}更新から除外: {}"
@@ -4165,9 +4608,6 @@ msgstr "充足"
 
 msgid "Unsatisfied"
 msgstr "未充足"
-
-msgid "Unknown"
-msgstr "不明"
 
 msgid "Invalid"
 msgstr "不正"
@@ -4666,20 +5106,20 @@ msgstr "ソースビルド設定"
 msgid "Store each preference in the active user's {} config authority"
 msgstr "各設定を実行ユーザーの{}設定領域へ保存"
 
-msgid "Enable a source-build preference for a package"
-msgstr "パッケージのソースビルド設定を有効化"
+msgid "Enable source-build preferences for one or more items"
+msgstr "1件以上の項目についてソースビルド設定を有効化"
 
-msgid "Edit a source-build preference"
-msgstr "ソースビルド設定を編集"
+msgid "Edit one or more source-build preferences"
+msgstr "1件以上のソースビルド設定を編集"
 
 msgid "List source-build preferences"
 msgstr "ソースビルド設定を一覧表示"
 
-msgid "Remove a source-build preference"
-msgstr "ソースビルド設定を削除"
+msgid "Remove one or more source-build preferences"
+msgstr "1件以上のソースビルド設定を削除"
 
-msgid "Remove a preference and reinstall the binary package"
-msgstr "設定を削除してバイナリパッケージを再インストール"
+msgid "Remove preferences and reinstall binary packages"
+msgstr "1件以上の設定を削除してバイナリパッケージを再インストール"
 
 #. TRANSLATORS: The placeholder is the literal pacman program identity.
 #, c++-format
@@ -5474,6 +5914,42 @@ msgstr "警告: プロバイダー候補 {} のインストール状態を取得
 
 msgid "Repository provider capability metadata is invalid."
 msgstr "リポジトリプロバイダーのcapabilityメタデータが無効です。"
+
+msgid "Unsupported"
+msgstr "未対応"
+
+msgid "Query failure"
+msgstr "問い合わせ失敗"
+
+msgid "Metadata failure"
+msgstr "メタデータ失敗"
+
+msgid "Execution failure"
+msgstr "実行失敗"
+
+msgid "Internal inconsistency"
+msgstr "内部不整合"
+
+msgid "Unknown diagnostic classification."
+msgstr "診断分類が不明です。"
+
+msgid "Unknown diagnostic source kind."
+msgstr "診断のソース種別が不明です。"
+
+msgid "source"
+msgstr "ソース"
+
+msgid "repository"
+msgstr "リポジトリ"
+
+msgid "package"
+msgstr "パッケージ"
+
+msgid "source identity"
+msgstr "ソース識別情報"
+
+msgid "local root"
+msgstr "ローカルルート"
 
 #. TRANSLATORS: The placeholder is the literal Arch field name
 #. "PackageBase".
@@ -6502,20 +6978,11 @@ msgstr "利用不可"
 msgid "not observed"
 msgstr "未観測"
 
-msgid "Ready"
-msgstr "準備完了"
-
 msgid "NoOp"
 msgstr "操作なし"
 
-msgid "Blocked"
-msgstr "実行不可"
-
 msgid "Unified plan status is not supported by the renderer."
 msgstr "統合プランの状態はレンダラーでサポートされていません。"
-
-msgid "repository"
-msgstr "リポジトリ"
 
 msgid "local"
 msgstr "ローカル"
@@ -7814,12 +8281,6 @@ msgstr "不明な状態ログエラーコードです。"
 #~ msgid "Interactive package selection has an unknown input gate."
 #~ msgstr "対話形式のパッケージ選択の入力ゲートが不明です。"
 
-#~ msgid "changed"
-#~ msgstr "変更あり"
-
-#~ msgid "Unknown package-state change value."
-#~ msgstr "不明なパッケージ状態変更値です。"
-
 #~ msgid "no package state change"
 #~ msgstr "パッケージ状態の変更なし"
 
@@ -7838,39 +8299,16 @@ msgstr "不明な状態ログエラーコードです。"
 #~ msgid "system failure"
 #~ msgstr "システム処理の失敗"
 
-#~ msgid "source failure"
-#~ msgstr "ソース処理の失敗"
-
 #~ msgid "source cleanup failure"
 #~ msgstr "ソースの後処理失敗"
-
-#~ msgid "foreign inventory failure"
-#~ msgstr "外部パッケージ一覧の取得失敗"
-
-#~ msgid "prior aggregate inconsistency"
-#~ msgstr "先行する集約結果に矛盾があります"
-
-#~ msgid "stopped on work-item failure"
-#~ msgstr "作業項目の失敗により停止しました"
 
 #, c++-format
 #~ msgid "failed: {}"
 #~ msgstr "失敗: {}"
 
 #, c++-format
-#~ msgid "not attempted: {}"
-#~ msgstr "未試行: {}"
-
-#, c++-format
 #~ msgid "unsupported: {}"
 #~ msgstr "未対応: {}"
-
-#, c++-format
-#~ msgid "incomplete: {}"
-#~ msgstr "未完了: {}"
-
-#~ msgid "Unknown registered source status."
-#~ msgstr "不明な登録済みソース状態です。"
 
 #, c++-format
 #~ msgid "skipped: {}"
@@ -7879,10 +8317,6 @@ msgstr "不明な状態ログエラーコードです。"
 #, c++-format
 #~ msgid "system: {}"
 #~ msgstr "システム: {}"
-
-#, c++-format
-#~ msgid "package state: {}"
-#~ msgstr "パッケージ状態: {}"
 
 #~ msgid "registered source packages: none"
 #~ msgstr "登録済みソースパッケージ: なし"
@@ -7895,28 +8329,12 @@ msgstr "不明な状態ログエラーコードです。"
 #~ msgstr "登録済みソース: {}: {}"
 
 #, c++-format
-#~ msgid "  canonical source identity: {}"
-#~ msgstr "  正規ソース識別情報: {}"
-
-#, c++-format
 #~ msgid "The {} phase is {} without a typed reason."
 #~ msgstr "{}段階は型付きの理由がないまま{}になっています。"
 
 #, c++-format
-#~ msgid "{} phase not attempted: {}"
-#~ msgstr "{}段階は未試行です: {}"
-
-#, c++-format
 #~ msgid "{} phase: {}"
 #~ msgstr "{}段階: {}"
-
-#, c++-format
-#~ msgid "{} targets: unavailable"
-#~ msgstr "{}対象: 利用不可"
-
-#, c++-format
-#~ msgid "{} targets: none"
-#~ msgstr "{}対象: なし"
 
 #, c++-format
 #~ msgid "{} target: {}: {}"
@@ -7950,9 +8368,6 @@ msgstr "不明な状態ログエラーコードです。"
 #, c++-format
 #~ msgid "Operation {} requires a target."
 #~ msgstr "操作{}には対象が必要です。"
-
-#~ msgid "Unknown source-build source kind."
-#~ msgstr "不明なソースビルド元種別です。"
 
 #, c++-format
 #~ msgid "{} set source-build execution requires an {} {} work item."
@@ -8040,10 +8455,6 @@ msgstr "不明な状態ログエラーコードです。"
 #, c++-format
 #~ msgid "{} resolution failure for {}: {}"
 #~ msgstr "{}の{}に対する解決失敗: {}"
-
-#, c++-format
-#~ msgid "incomplete provider candidates for {}"
-#~ msgstr "{}のプロバイダー候補が不完全です"
 
 #, c++-format
 #~ msgid "repository package source failure: {}/{}"

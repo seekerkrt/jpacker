@@ -45,13 +45,13 @@ inline constexpr std::array<OperationSpec, static_cast<std::size_t>(OperationId:
                 {OperationId::UpgradeAur, "upgrade-aur", "upgrade-aur", false, true},
                 {OperationId::UpgradeAll, "upgrade-all", "upgrade-all", false, true},
                 {OperationId::Clean, "clean", "clean", false, true},
-                {OperationId::Deps, "deps", "deps [--recursive] <pkg>", true, false},
-                {OperationId::Plan, "plan", "plan <pkg>", true, false},
-                {OperationId::Fetch, "fetch", "fetch <pkg>", true, false},
-                {OperationId::AddSource, "add-src", "add-src <pkg> [V=K]", true, true},
-                {OperationId::DeleteSource, "del-src", "del-src <pkg>", true, true},
-                {OperationId::Revert, "revert", "revert <pkg>", true, true},
-                {OperationId::EditSource, "edit-src", "edit-src <pkg>", true, true},
+                {OperationId::Deps, "deps", "deps [--recursive] <pkg>...", true, false},
+                {OperationId::Plan, "plan", "plan <pkg>...", true, false},
+                {OperationId::Fetch, "fetch", "fetch <pkg>...", true, false},
+                {OperationId::AddSource, "add-src", "add-src <item>...", true, true},
+                {OperationId::DeleteSource, "del-src", "del-src <pkg>...", true, true},
+                {OperationId::Revert, "revert", "revert <pkg>...", true, true},
+                {OperationId::EditSource, "edit-src", "edit-src <pkg>...", true, true},
                 {OperationId::ListSources, "list-src", "list-src", false, true},
         }};
 
@@ -154,7 +154,7 @@ inline constexpr std::string_view PKGBUILD_PRINT_SYNTAX = "-Gp <pkg>";
 // pacman-compatible entries are documentation examples, not a parser allowlist.
 inline constexpr std::string_view PACMAN_SYNC_INSTALL_SYNTAX = "-S <pkg>";
 inline constexpr std::string_view PACMAN_SYNC_SELECT_SYNTAX =
-        "-S --select <query>";
+        "-S --select [--needed] <query>";
 inline constexpr std::string_view PACMAN_SYSTEM_UPGRADE_SYNTAX = "-Syu";
 inline constexpr std::string_view PACMAN_SYNC_SEARCH_SYNTAX = "-Ss <query>";
 inline constexpr std::string_view PACMAN_SYNC_INFO_SYNTAX = "-Si <pkg>";
@@ -708,6 +708,12 @@ enum class OptionRelationRequirement {
     Required,
 };
 
+enum class OptionPublicSyntax {
+    Hidden,
+    Optional,
+    Required,
+};
+
 enum class OptionSemanticEffect : std::uint32_t {
     None = 0,
     MoguetControl = 1U << 0,
@@ -766,6 +772,8 @@ struct OptionRelationContract {
             option_forwarding_target(OptionForwardingTarget::None);
     OptionForwardingOccurrence   forwarding_occurrence =
             OptionForwardingOccurrence::None;
+    OptionPublicSyntax           public_syntax =
+            OptionPublicSyntax::Hidden;
 };
 
 constexpr OptionRelationContract consumed_option_relation(
@@ -891,6 +899,20 @@ constexpr OptionRelationContract relation_contract(
     return relation;
 }
 
+constexpr OptionRelationContract public_syntax_option_relation(
+        OptionId option, OptionPublicSyntax public_syntax) noexcept {
+    OptionRelationContract relation = consumed_option_relation(option);
+    relation.public_syntax = public_syntax;
+    return relation;
+}
+
+constexpr OptionRelationContract public_syntax_option_relation(
+        OptionRelationContract relation,
+        OptionPublicSyntax public_syntax) noexcept {
+    relation.public_syntax = public_syntax;
+    return relation;
+}
+
 struct OperationOptionRelationSet {
     std::array<OptionRelationContract, 13> values{};
     std::size_t                            count = 0;
@@ -958,7 +980,10 @@ inline constexpr std::array<OperationFormSpec, 14> MOGUET_OPERATION_FORMS = {{
                  OptionId::Edit, OptionId::NoEdit,
                  source_no_confirm_option_relation(), OptionId::DryRun,
                  OptionId::BuildMode, OptionId::Rebuild,
-                 OptionId::CleanBuild, OptionId::LocalSource)},
+                 OptionId::CleanBuild,
+                 public_syntax_option_relation(
+                         OptionId::LocalSource,
+                         OptionPublicSyntax::Required))},
         {OperationId::Upgrade,
          "cli.upgrade.registered-and-system",
          no_operands(),
@@ -1002,7 +1027,9 @@ inline constexpr std::array<OperationFormSpec, 14> MOGUET_OPERATION_FORMS = {{
          TargetPolicy::OneOrMore,
          operation_option_relations(
                  consumed_option_relation(OptionId::NoConfirm),
-                 OptionId::Recursive)},
+                 public_syntax_option_relation(
+                         OptionId::Recursive,
+                         OptionPublicSyntax::Optional))},
         {OperationId::Plan,
          "cli.inspect.plan",
          one_operand_term(OperandKind::Package, 1, UNBOUNDED_OPERAND_COUNT,
@@ -1231,10 +1258,14 @@ inline constexpr std::array<SpecialOperationSpec,
                                   OperandOrderingRule::PreserveInputOrder),
                  TargetPolicy::ExactlyOne,
                  operation_option_relations(
-                         consumed_option_relation(
-                                 OptionId::Select,
-                                 OptionRelationRequirement::Required),
-                         sync_select_needed_option_relation(),
+                         public_syntax_option_relation(
+                                 consumed_option_relation(
+                                         OptionId::Select,
+                                         OptionRelationRequirement::Required),
+                                 OptionPublicSyntax::Required),
+                         public_syntax_option_relation(
+                                 sync_select_needed_option_relation(),
+                                 OptionPublicSyntax::Optional),
                          OptionId::Edit, OptionId::NoEdit,
                          OptionId::Diff, OptionId::NoDiff,
                          sync_select_no_confirm_option_relation(),

@@ -37,6 +37,8 @@ void test_rich_cli_operation_contract() {
 
     const OperationFormSpec& remote = operation_form(build, 0);
     const OperationFormSpec& local = operation_form(build, 1);
+    const OptionRelationContract* local_source =
+            local.option_relations.find(OptionId::LocalSource);
     expect(
             remote.operands.term_count == 2 &&
                     remote.operands.terms[0].kind == OperandKind::Package &&
@@ -52,7 +54,9 @@ void test_rich_cli_operation_contract() {
     expect(
             local.operands.terms[0].kind == OperandKind::Directory &&
                     local.target_policy == TargetPolicy::ExactlyOne &&
-                    local.option_relations.contains(OptionId::LocalSource) &&
+                    local_source != nullptr &&
+                    local_source->public_syntax ==
+                            OptionPublicSyntax::Required &&
                     local.option_relations.contains(OptionId::NoConfirm) &&
                     !local.option_relations.contains(OptionId::Diff) &&
                     !local.option_relations.contains(OptionId::RmDeps) &&
@@ -62,6 +66,8 @@ void test_rich_cli_operation_contract() {
 
     const OperationMetadata& deps = operation_metadata(OperationId::Deps);
     const OperationFormSpec& deps_form = operation_form(deps, 0);
+    const OptionRelationContract* recursive =
+            deps_form.option_relations.find(OptionId::Recursive);
     expect(
                     deps.semantic_scope ==
                             OperationSemanticScope::DependencyInspection &&
@@ -70,7 +76,9 @@ void test_rich_cli_operation_contract() {
                     deps_form.operands.terms[0].max_count ==
                             UNBOUNDED_OPERAND_COUNT &&
                     deps_form.target_policy == TargetPolicy::OneOrMore &&
-                    deps_form.option_relations.contains(OptionId::Recursive),
+                    recursive != nullptr &&
+                    recursive->public_syntax ==
+                            OptionPublicSyntax::Optional,
             "deps canonical repeatable operand contract differs");
 
     const OperationFormSpec& add_source = operation_form(
@@ -199,9 +207,13 @@ void test_rich_cli_option_and_ownership_contract() {
             select_relation != nullptr &&
                     select_relation->requirement ==
                             OptionRelationRequirement::Required &&
+                    select_relation->public_syntax ==
+                            OptionPublicSyntax::Required &&
                     select_needed != nullptr &&
                     select_needed->requirement ==
                             OptionRelationRequirement::Optional &&
+                    select_needed->public_syntax ==
+                            OptionPublicSyntax::Optional &&
                     select_needed->occurrence ==
                             OptionOccurrence::RepeatIdempotent &&
                     select_needed->forwarding_occurrence ==

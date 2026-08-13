@@ -674,6 +674,7 @@ int main(int argc, char* argv[]) {
 void print_help() {
     using cli_authority::GlobalOptionId;
     using cli_authority::OperationId;
+    using cli_authority::SpecialOperationId;
 
     // NO_TRANSLATE: Product/version identity and CLI grammar tokens are
     // locale-independent; surrounding headings and descriptions are msgids.
@@ -733,13 +734,15 @@ void print_help() {
                     // TRANSLATORS: The placeholder is the AUR project identity.
                     "{} INSPECTION", "AUR"));
     print_help_entry(
-            cli_authority::PKGBUILD_EXPORT_SYNTAX,
+            cli_special_operation_syntax(
+                    SpecialOperationId::PkgbuildExport),
             localization::format_translated_message(
                     // TRANSLATORS: AUR, PackageBase, and the destination path are literal identities.
                     "Export one {} {} repository to {} without building or installing",
                     "AUR", "PackageBase", "./<PackageBase>"));
     print_help_entry(
-            cli_authority::PKGBUILD_PRINT_SYNTAX,
+            cli_special_operation_syntax(
+                    SpecialOperationId::PkgbuildPrint),
             localization::format_translated_message(
                     // TRANSLATORS: AUR, PackageBase, PKGBUILD, and stdout are literal identities.
                     "Print one {} {} {} to {} without keeping a checkout",
@@ -777,11 +780,11 @@ void print_help() {
     print_help_entry(
             cli_operation_syntax(OperationId::AddSource),
             localization::translate_message(
-                    "Enable a source-build preference for a package"));
+                    "Enable source-build preferences for one or more items"));
     print_help_entry(
             cli_operation_syntax(OperationId::EditSource),
             localization::translate_message(
-                    "Edit a source-build preference"));
+                    "Edit one or more source-build preferences"));
     print_help_entry(
             cli_operation_syntax(OperationId::ListSources),
             localization::translate_message(
@@ -789,11 +792,11 @@ void print_help() {
     print_help_entry(
             cli_operation_syntax(OperationId::DeleteSource),
             localization::translate_message(
-                    "Remove a source-build preference"));
+                    "Remove one or more source-build preferences"));
     print_help_entry(
             cli_operation_syntax(OperationId::Revert),
             localization::translate_message(
-                    "Remove a preference and reinstall the binary package"));
+                    "Remove preferences and reinstall binary packages"));
     std::cout << std::endl;
     print_help_section(
             localization::format_translated_message(
@@ -803,7 +806,7 @@ void print_help() {
             cli_authority::PACMAN_SYNC_INSTALL_SYNTAX,
             localization::translate_message("Install packages"));
     print_help_entry(
-            cli_authority::PACMAN_SYNC_SELECT_SYNTAX,
+            cli_special_operation_syntax(SpecialOperationId::SyncSelect),
             localization::translate_message(
                     "Interactively search for and select root packages to install"));
     print_help_continuation(

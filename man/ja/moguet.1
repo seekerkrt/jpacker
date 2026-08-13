@@ -13,7 +13,7 @@ moguet \- 検証済みsource buildを備えたpacman-first AUR helper
 .RI [ targets... ]
 .
 .B moguet
-.B -S --select
+.B -S --select [--needed]
 .I query
 .
 .B moguet
@@ -69,6 +69,18 @@ pacmanだけで完結するoperationは、Moguetが消費しないcompatibleなp
 targetがAUR / source-build routeへ進む場合、意味を維持できないoptionは黙って
 無視せずexternal mutation前に拒否します。
 command / option tokenはlocale非依存です。
+closed Moguet grammarはremote / local buildのprimary operand 1件より後にenvironment
+assignmentだけを許し、extra bare build operandを拒否します。
+.BR upgrade 、
+.BR upgrade-aur 、
+.BR upgrade-all 、
+.BR clean 、
+.B list-src
+はtarget operandを拒否します。
+.BR deps 、
+.BR plan 、
+.BR fetch
+およびellipsis付きsource-maintenance formはmulti-targetを維持します。
 .
 .\" parity:commands
 .SH コマンド
@@ -147,8 +159,8 @@ build、installを行いません。
 global / pacman optionはunsupportedです。
 .
 .TP
-.B "deps [--recursive] <pkg>"
-AURのruntime、make、check dependencyを分類します。
+.B "deps [--recursive] <pkg>..."
+1件以上のpackageについてAURのruntime、make、check dependencyを分類します。
 .B --recursive
 を付けるとexact AUR dependencyとuser-selected AUR providerを再帰的に辿ります。
 installed dependency、official dependency、unique provider、selected official repository
@@ -162,8 +174,9 @@ commandを継続し、Invalid / Conflictingはfail-closedです。
 clone、build、install、build order計算は行いません。
 .
 .TP
-.B "plan <pkg>"
-AUR build-order planとdirect official repository package sizeを表示します。
+.B "plan <pkg>..."
+1件以上のpackageについてAUR build-order planとdirect official repository package
+sizeを表示します。
 unknown dependency、未選択のambiguous provider、cycle、安全に解決できないconflicts /
 replacesがあるplanはincompleteです。
 unique resolve、user-selected provider、未選択のambiguous providerを区別します。
@@ -173,8 +186,9 @@ Unsatisfied / Unknownのdependency constraintはplanをincompleteとし、result
 clone、build、installは行いません。
 .
 .TP
-.B "fetch <pkg>"
-complete inspection planが必要とするAUR PackageBase repositoryを取得します。
+.B "fetch <pkg>..."
+1件以上のpackageについてcomplete inspection planが必要とするAUR PackageBase
+repositoryを取得します。
 selected AUR providerのPackageBaseも含め、selected official repository providerはclone
 しません。
 Unsatisfied / Unknownのdependency constraintはclone / fetch開始前に停止します。
@@ -184,18 +198,20 @@ Unsatisfied / Unknownのdependency constraintはclone / fetch開始前に停止�
 だけを実行し、pull、merge、reset、working tree更新、build、installを行いません。
 .
 .TP
-.B "add-src <pkg> [V=K]"
-package 1件のsource-build preferenceとoptional build environment assignmentを
-登録します。
+.B "add-src <item>..."
+ordered itemから1件以上のsource-build preferenceを登録します。package itemはpreferenceを
+開始し、後続の
+.I V=K
+itemは次のpackage itemまでそのpackageへ属します。
 v2 config fileはsource-preference tableではありません。
 最初のwriteは、必要な場合にmanaged XDG directoryを作成します。
 .
 .TP
-.B "edit-src <pkg>"
+.B "edit-src <pkg>..."
 .B VISUAL
 または
 .B EDITOR
-を使って既存source-build preferenceを編集するか、新規作成します。
+を使って1件以上の既存source-build preferenceを編集するか、新規作成します。
 editor実行後にfailureとなった場合は、安全に保持できるedited temporary fileを残し、そのpathを
 表示します。
 .
@@ -205,19 +221,19 @@ registered source-build preferenceと表示可能なenvironment assignmentを一
 entryを1件でも表示する前にdirectory snapshot全体をvalidateします。
 .
 .TP
-.B "del-src <pkg>"
-binary packageをreinstallせず、source-build preference 1件を削除します。
+.B "del-src <pkg>..."
+binary packageをreinstallせず、source-build preferenceを1件以上削除します。
 entryがmissingならpreference directoryを作成せずに成功します。
 .
 .TP
-.B "revert <pkg>"
-source-build preference 1件を削除し、configured official repositoryにtargetがあれば
-official binary packageをreinstallします。
+.B "revert <pkg>..."
+source-build preferenceを1件以上削除し、configured official repositoryにtargetがあれば
+対応するofficial binary packageをreinstallします。
 preferenceがmissingでもdirectoryを作成せず、repository reinstallは省略しません。
 confirm前に表示されたpacman transactionをreviewしてください。
 .
 .TP
-.B "-S <pkg>"
+.B "-S <pkg> | -S --select [--needed] <query>"
 packageをinstallします。
 Auto routingはofficial repositoryを優先し、適用可能なsource preferenceを尊重し、
 それ以外ではAURを検討します。
@@ -229,6 +245,9 @@ Auto routingはofficial repositoryを優先し、適用可能なsource preferenc
 を指定すると、1つのoperandをexact package targetではなく検索queryとして扱い、
 source-awareなofficial repository / AUR candidateを表示して、interactiveな明示選択を
 要求します。
+このrouteでは
+.B --needed
+をroute-owned final installationだけへ適用します。
 .
 .TP
 .B "-Syu"
@@ -261,6 +280,9 @@ packageも表示します。
 pacman-compatible queryであり、
 .B upgrade-aur
 の実行とは別です。
+上記のpacman-compatible formはdelegated open grammarの例であり、closed allowlistでは
+ありません。Moguetが消費しないargumentは、選択routeが意味を維持できる場合にpacmanが
+所有します。
 .\" PUBLIC COMMANDS END
 .
 .\" parity:options

@@ -844,156 +844,178 @@ std::string join_query_package_names(
 }
 
 std::string operation_outcome_label(OperationOutcome outcome) {
-    // NO_TRANSLATE(Issue #350): Stable typed outcome/observation tokens.
-    // Slice 4 owns full gettext semantic parity for surrounding prose.
     switch(outcome) {
     case OperationOutcome::Succeeded:
-        return "Succeeded";
+        return localization::translate_message("Succeeded");
     case OperationOutcome::NoOp:
-        return "NoOp";
+        return localization::translate_message("No operation needed");
     case OperationOutcome::Blocked:
-        return "Blocked";
+        return localization::translate_message("Blocked");
     case OperationOutcome::PartialFailure:
-        return "PartialFailure";
+        return localization::translate_message("Partial failure");
     case OperationOutcome::Failed:
-        return "Failed";
+        return localization::translate_message("Failed");
     case OperationOutcome::NotAttempted:
-        return "NotAttempted";
+        return localization::translate_message("Not attempted");
     case OperationOutcome::Inconsistent:
-        return "Inconsistent";
+        return localization::translate_message("Inconsistent");
     }
-    throw std::logic_error("Unknown operation outcome.");
+    throw std::logic_error(localization::translate_message(
+            "Unknown operation outcome."));
 }
 
 std::string package_state_observation_label(
         PackageStateObservation observation) {
     switch(observation) {
     case PackageStateObservation::Changed:
-        return "Changed";
+        return localization::translate_message("Changed");
     case PackageStateObservation::VerifiedUnchanged:
-        return "VerifiedUnchanged";
+        return localization::translate_message("Verified unchanged");
     case PackageStateObservation::Unverified:
-        return "Unverified";
+        return localization::translate_message("Unverified");
     case PackageStateObservation::NotObserved:
-        return "NotObserved";
+        return localization::translate_message("Not observed");
     }
-    throw std::logic_error("Unknown package-state observation.");
+    throw std::logic_error(localization::translate_message(
+            "Unknown package-state observation."));
 }
 
 std::string observation_reason_label(ObservationReason reason) {
     switch(reason) {
     case ObservationReason::BeforeSnapshotUnavailable:
-        return "BeforeSnapshotUnavailable";
+        return localization::translate_message(
+                "Before snapshot unavailable");
     case ObservationReason::AfterSnapshotUnavailable:
-        return "AfterSnapshotUnavailable";
+        return localization::translate_message(
+                "After snapshot unavailable");
     case ObservationReason::ObservationNotPrepared:
-        return "ObservationNotPrepared";
+        return localization::translate_message("Observation not prepared");
     case ObservationReason::PhaseNotAttempted:
-        return "PhaseNotAttempted";
+        return localization::translate_message("Phase not attempted");
     case ObservationReason::OperationFailed:
-        return "OperationFailed";
+        return localization::translate_message("Operation failed");
     case ObservationReason::AuthorityFailure:
-        return "AuthorityFailure";
+        return localization::translate_message("Authority failure");
     case ObservationReason::InconsistentEvidence:
-        return "InconsistentEvidence";
+        return localization::translate_message("Inconsistent evidence");
     }
-    throw std::logic_error("Unknown observation reason.");
+    throw std::logic_error(localization::translate_message(
+            "Unknown observation reason."));
 }
 
 std::string no_op_basis_label(NoOpBasis basis) {
     switch(basis) {
     case NoOpBasis::NoRelevantWork:
-        return "NoRelevantWork";
+        return localization::translate_message("No relevant work");
     case NoOpBasis::VerifiedUnchanged:
-        return "VerifiedUnchanged";
+        return localization::translate_message("Verified unchanged");
     }
-    throw std::logic_error("Unknown no-op basis.");
+    throw std::logic_error(localization::translate_message(
+            "Unknown no-op basis."));
 }
 
 std::string diagnostic_required_action_label(
         DiagnosticRequiredAction action) {
     switch(action) {
     case DiagnosticRequiredAction::None:
-        return "None";
+        return localization::translate_message("None");
     case DiagnosticRequiredAction::CorrectInput:
-        return "CorrectInput";
+        return localization::translate_message("Correct input");
     case DiagnosticRequiredAction::SelectCandidate:
-        return "SelectCandidate";
+        return localization::translate_message("Select a candidate");
     case DiagnosticRequiredAction::EnableInteraction:
-        return "EnableInteraction";
+        return localization::translate_message("Enable interaction");
     case DiagnosticRequiredAction::RetryQuery:
-        return "RetryQuery";
+        return localization::translate_message("Retry the query");
     case DiagnosticRequiredAction::InspectMetadata:
-        return "InspectMetadata";
+        return localization::translate_message("Inspect metadata");
     case DiagnosticRequiredAction::ConfirmEvaluation:
-        return "ConfirmEvaluation";
+        return localization::translate_message("Confirm evaluation");
     case DiagnosticRequiredAction::ResolveBlocker:
-        return "ResolveBlocker";
+        return localization::translate_message("Resolve the blocker");
     case DiagnosticRequiredAction::InspectPartialResult:
-        return "InspectPartialResult";
+        return localization::translate_message("Inspect the partial result");
     case DiagnosticRequiredAction::ReportInconsistency:
-        return "ReportInconsistency";
+        return localization::translate_message("Report the inconsistency");
     }
-    throw std::logic_error("Unknown diagnostic required action.");
+    throw std::logic_error(localization::translate_message(
+            "Unknown diagnostic required action."));
 }
 
 std::string foreign_inventory_status_label(
         UpgradeAllForeignInventoryPhaseStatus status) {
     switch(status) {
     case UpgradeAllForeignInventoryPhaseStatus::NotAttempted:
-        return "foreign inventory not attempted";
+        return localization::translate_message(
+                "foreign inventory not attempted");
     case UpgradeAllForeignInventoryPhaseStatus::Completed:
-        return "foreign inventory completed";
+        return localization::translate_message("foreign inventory completed");
     case UpgradeAllForeignInventoryPhaseStatus::Failed:
-        return "foreign inventory failed";
+        return localization::translate_message("foreign inventory failed");
     }
-    throw std::logic_error("Unknown foreign inventory status.");
+    throw std::logic_error(localization::translate_message(
+            "Unknown foreign inventory status."));
 }
 
 std::string registered_source_status_reason_label(
         RegisteredSourceUpgradeStatus status) {
     switch(status) {
     case RegisteredSourceUpgradeStatus::Updated:
-        return "registered source updated";
+        return localization::translate_message("registered source updated");
     case RegisteredSourceUpgradeStatus::NoChange:
-        return "registered source unchanged";
+        return localization::translate_message("registered source unchanged");
     case RegisteredSourceUpgradeStatus::Failed:
-        return "registered source failed";
+        return localization::translate_message("registered source failed");
     case RegisteredSourceUpgradeStatus::UpdatedCleanupFailed:
-        return "registered source updated; cleanup failed";
+        return localization::translate_message(
+                "registered source updated; cleanup failed");
     case RegisteredSourceUpgradeStatus::NoChangeCleanupFailed:
-        return "registered source unchanged; cleanup failed";
+        return localization::translate_message(
+                "registered source unchanged; cleanup failed");
     case RegisteredSourceUpgradeStatus::NotAttempted:
-        return "registered source not attempted";
+        return localization::translate_message(
+                "registered source not attempted");
     case RegisteredSourceUpgradeStatus::Unsupported:
-        return "registered source unsupported";
+        return localization::translate_message(
+                "registered source unsupported");
     case RegisteredSourceUpgradeStatus::Incomplete:
-        return "registered source incomplete";
+        return localization::translate_message(
+                "registered source incomplete");
     }
-    throw std::logic_error("Unknown registered-source status.");
+    throw std::logic_error(localization::translate_message(
+            "Unknown registered-source status."));
 }
 
 std::string aur_target_status_reason_label(
         AurUpdateOperationTargetStatus status) {
     switch(status) {
     case AurUpdateOperationTargetStatus::Updated:
-        return "AUR target updated";
+        return localization::format_translated_message(
+                "{} target updated", AUR_SERVICE);
     case AurUpdateOperationTargetStatus::NoChange:
-        return "AUR target unchanged";
+        return localization::format_translated_message(
+                "{} target unchanged", AUR_SERVICE);
     case AurUpdateOperationTargetStatus::Skipped:
-        return "AUR target skipped";
+        return localization::format_translated_message(
+                "{} target skipped", AUR_SERVICE);
     case AurUpdateOperationTargetStatus::Unsupported:
-        return "AUR target unsupported";
+        return localization::format_translated_message(
+                "{} target unsupported", AUR_SERVICE);
     case AurUpdateOperationTargetStatus::Incomplete:
-        return "AUR target incomplete";
+        return localization::format_translated_message(
+                "{} target incomplete", AUR_SERVICE);
     case AurUpdateOperationTargetStatus::Failed:
-        return "AUR target failed";
+        return localization::format_translated_message(
+                "{} target failed", AUR_SERVICE);
     case AurUpdateOperationTargetStatus::UpdatedCleanupFailed:
-        return "AUR target updated; cleanup failed";
+        return localization::format_translated_message(
+                "{} target updated; cleanup failed", AUR_SERVICE);
     case AurUpdateOperationTargetStatus::NoChangeCleanupFailed:
-        return "AUR target unchanged; cleanup failed";
+        return localization::format_translated_message(
+                "{} target unchanged; cleanup failed", AUR_SERVICE);
     case AurUpdateOperationTargetStatus::NotAttempted:
-        return "AUR target not attempted";
+        return localization::format_translated_message(
+                "{} target not attempted", AUR_SERVICE);
     }
     throw std::logic_error(localization::format_translated_message(
             // TRANSLATORS: The placeholder is the literal service name "AUR".
@@ -1004,13 +1026,16 @@ std::string presentation_boundary_reason_label(
         UpgradeAllPresentationBoundaryReason reason) {
     switch(reason) {
     case UpgradeAllPresentationBoundaryReason::AggregateDiagnostic:
-        return "aggregate diagnostic";
+        return localization::translate_message("aggregate diagnostic");
     case UpgradeAllPresentationBoundaryReason::AurPhaseDiagnostic:
-        return "AUR phase diagnostic";
+        return localization::format_translated_message(
+                "{} phase diagnostic", AUR_SERVICE);
     case UpgradeAllPresentationBoundaryReason::AurQueryFailure:
-        return "AUR query failure";
+        return localization::format_translated_message(
+                "{} query failure", AUR_SERVICE);
     }
-    throw std::logic_error("Unknown presentation boundary reason.");
+    throw std::logic_error(localization::translate_message(
+            "Unknown presentation boundary reason."));
 }
 
 std::string upgrade_all_presentation_reason_label(
@@ -1075,7 +1100,8 @@ std::string upgrade_all_presentation_reason_label(
                 } else {
                     // The carrier still retains the exact typed enum. Existing
                     // route detail below prints its route-owned diagnostic.
-                    return "AUR work-item failure";
+                    return localization::format_translated_message(
+                            "{} work-item failure", AUR_SERVICE);
                 }
             },
             reason);
@@ -1084,13 +1110,17 @@ std::string upgrade_all_presentation_reason_label(
 void print_upgrade_all_summary(
         const OperationStateProjection& operation_state,
         const PresentationProjection& presentation) {
-    std::cout << "upgrade-all summary:" << std::endl;
-    std::cout << "  operation outcome: "
-              << operation_outcome_label(operation_state.outcome)
+    std::cout << localization::format_translated_message(
+                         "{} summary:", COMMAND_NAME)
               << std::endl;
-    std::cout << "  package state observation: "
-              << package_state_observation_label(
-                         operation_state.package_state.state)
+    std::cout << localization::format_translated_message(
+                         "  operation outcome: {}",
+                         operation_outcome_label(operation_state.outcome))
+              << std::endl;
+    std::cout << localization::format_translated_message(
+                         "  package state observation: {}",
+                         package_state_observation_label(
+                                 operation_state.package_state.state))
               << std::endl;
     const bool reason_is_presented_as_attention =
             operation_state.outcome == OperationOutcome::Succeeded &&
@@ -1098,27 +1128,31 @@ void print_upgrade_all_summary(
                     PackageStateObservation::Unverified;
     if(operation_state.package_state.reason.has_value() &&
        !reason_is_presented_as_attention) {
-        std::cout << "  observation reason: "
-                  << observation_reason_label(
-                             operation_state.package_state.reason.value())
+        std::cout << localization::format_translated_message(
+                             "  observation reason: {}",
+                             observation_reason_label(
+                                     operation_state.package_state.reason.value()))
                   << std::endl;
     }
     if(operation_state.no_op_basis.has_value()) {
-        std::cout << "  NoOp basis: "
-                  << no_op_basis_label(operation_state.no_op_basis.value())
+        std::cout << localization::format_translated_message(
+                             "  no-op basis: {}",
+                             no_op_basis_label(
+                                     operation_state.no_op_basis.value()))
                   << std::endl;
     }
-    std::cout << "  items: " << presentation.summary_counts.total
-              << " total, " << presentation.summary_counts.normal
-              << " normal, "
-              << presentation.summary_counts.attention_required
-              << " attention-required" << std::endl;
-    std::cout << "  update candidates: "
-              << presentation.summary_counts.update_candidates
-              << ", blockers: " << presentation.summary_counts.blockers
-              << ", requires-check: "
-              << presentation.summary_counts.requires_check
-              << ", failures: " << presentation.summary_counts.failures
+    std::cout << localization::format_translated_message(
+                         "  items: {} total, {} normal, {} attention-required",
+                         presentation.summary_counts.total,
+                         presentation.summary_counts.normal,
+                         presentation.summary_counts.attention_required)
+              << std::endl;
+    std::cout << localization::format_translated_message(
+                         "  update candidates: {}, blockers: {}, requires-check: {}, failures: {}",
+                         presentation.summary_counts.update_candidates,
+                         presentation.summary_counts.blockers,
+                         presentation.summary_counts.requires_check,
+                         presentation.summary_counts.failures)
               << std::endl;
 }
 
@@ -1126,16 +1160,21 @@ void print_upgrade_all_attention(
         const PresentationProjection& presentation) {
     if(presentation.attention_items.empty()) return;
 
-    std::cout << std::endl << "Attention-required details:" << std::endl;
+    std::cout << std::endl
+              << localization::translate_message(
+                         "Attention-required details:")
+              << std::endl;
     for(const PresentationItem& item : presentation.attention_items) {
         std::cout << "  - ";
         if(item.requested_package.has_value()) {
-            std::cout << "package: " << item.requested_package.value();
+            std::cout << localization::format_translated_message(
+                    "package: {}", item.requested_package.value());
         } else if(item.source_kind != DiagnosticSourceKind::Unspecified) {
-            std::cout << "source: "
-                      << diagnostic_source_label(item.source_kind);
+            std::cout << localization::format_translated_message(
+                    "source: {}",
+                    diagnostic_source_label(item.source_kind));
         } else {
-            std::cout << "operation-wide";
+            std::cout << localization::translate_message("operation-wide");
         }
         std::cout << std::endl;
         if(item.package_base.has_value() &&
@@ -1144,67 +1183,91 @@ void print_upgrade_all_attention(
                       << std::endl;
         }
         if(item.repository.has_value()) {
-            std::cout << "    repository: " << item.repository.value()
+            std::cout << localization::format_translated_message(
+                                 "    repository: {}",
+                                 item.repository.value())
                       << std::endl;
         }
         if(item.canonical_source_identity.has_value()) {
-            std::cout << "    canonical source identity: "
-                      << item.canonical_source_identity.value()
+            std::cout << localization::format_translated_message(
+                                 "    canonical source identity: {}",
+                                 item.canonical_source_identity.value())
                       << std::endl;
         }
         if(item.local_root.has_value()) {
-            std::cout << "    local root: " << item.local_root->string()
+            std::cout << localization::format_translated_message(
+                                 "    local root: {}",
+                                 item.local_root->string())
                       << std::endl;
         }
         if(item.package_state.has_value()) {
-            std::cout << "    package state: "
-                      << package_state_observation_label(
-                                 item.package_state->state)
+            std::cout << localization::format_translated_message(
+                                 "    package state: {}",
+                                 package_state_observation_label(
+                                         item.package_state->state))
                       << std::endl;
             if(item.package_state->reason.has_value()) {
-                std::cout << "    observation reason: "
-                          << observation_reason_label(
-                                     item.package_state->reason.value())
+                std::cout << localization::format_translated_message(
+                                     "    observation reason: {}",
+                                     observation_reason_label(
+                                             item.package_state->reason.value()))
                           << std::endl;
             }
         }
         if(item.diagnostic_class.has_value()) {
-            std::cout << "    diagnostic: "
-                      << diagnostic_class_label(
-                                 item.diagnostic_class.value())
+            std::cout << localization::format_translated_message(
+                                 "    diagnostic: {}",
+                                 diagnostic_class_label(
+                                         item.diagnostic_class.value()))
                       << std::endl;
         }
         if(item.is_update_candidate) {
-            std::cout << "    update candidate" << std::endl;
+            std::cout << localization::translate_message(
+                                 "    update candidate")
+                      << std::endl;
         }
-        if(item.is_blocking) std::cout << "    blocking" << std::endl;
+        if(item.is_blocking) {
+            std::cout << localization::translate_message("    blocking")
+                      << std::endl;
+        }
         if(item.requires_check) {
-            std::cout << "    requires check" << std::endl;
+            std::cout << localization::translate_message(
+                                 "    requires check")
+                      << std::endl;
         }
         if(item.requires_manual_action) {
-            std::cout << "    manual action required" << std::endl;
+            std::cout << localization::translate_message(
+                                 "    manual action required")
+                      << std::endl;
         }
         for(const PresentationArtifactIdentity& artifact :
             item.selected_artifacts) {
-            std::cout << "    selected artifact: "
-                      << artifact.package_name << " "
-                      << artifact.full_version << std::endl;
+            std::cout << localization::format_translated_message(
+                                 "    selected artifact: {} {}",
+                                 artifact.package_name,
+                                 artifact.full_version)
+                      << std::endl;
         }
         for(const PresentationArtifactIdentity& artifact :
             item.unselected_artifacts) {
-            std::cout << "    unselected artifact: "
-                      << artifact.package_name << " "
-                      << artifact.full_version << std::endl;
+            std::cout << localization::format_translated_message(
+                                 "    unselected artifact: {} {}",
+                                 artifact.package_name,
+                                 artifact.full_version)
+                      << std::endl;
         }
         for(const UpgradeAllPresentationReason& reason :
             item.upgrade_all_reasons) {
-            std::cout << "    reason ["
-                      << aggregate_phase_label(reason.phase) << "]: "
-                      << upgrade_all_presentation_reason_label(reason.reason)
+            std::cout << localization::format_translated_message(
+                                 "    reason [{}]: {}",
+                                 aggregate_phase_label(reason.phase),
+                                 upgrade_all_presentation_reason_label(
+                                         reason.reason))
                       << std::endl;
-            std::cout << "      required action: "
-                      << diagnostic_required_action_label(
-                                 reason.required_action)
+            std::cout << localization::format_translated_message(
+                                 "      required action: {}",
+                                 diagnostic_required_action_label(
+                                         reason.required_action))
                       << std::endl;
         }
     }
