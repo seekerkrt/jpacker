@@ -21,6 +21,35 @@ CLI_AUTHORITY_EXPORTER = REPOSITORY_ROOT / "scripts/export_cli_authority.cpp"
 CLI_PUBLIC_PROJECTION = REPOSITORY_ROOT / "src/cli_public_projection.cpp"
 DESCRIPTION_ROOT = REPOSITORY_ROOT / "completions/descriptions"
 
+# The exporter owns the C++ authority projection.  The loader does not trust
+# wire values that it does not understand: adding an enum value in C++ also
+# requires an explicit completion projection before rendering may continue.
+KNOWN_OPERAND_KINDS = frozenset(
+    {
+        "none",
+        "package",
+        "directory",
+        "query",
+        "source-preference-item",
+        "environment-assignment",
+        "delegated-pacman-argument",
+    }
+)
+KNOWN_OPERAND_ORDERINGS = frozenset(
+    {
+        "none",
+        "preserve-input-order",
+        "primary-then-environment-assignments",
+        "package-introduces-following-assignment-scope",
+        "delegated",
+    }
+)
+KNOWN_TARGET_POLICIES = frozenset(
+    {"none", "exactly-one", "one-or-more", "ordered-items", "delegated"}
+)
+PRIMARY_OPERAND_KINDS = frozenset({"package", "directory", "query"})
+ASSIGNMENT_PRIMARY_OPERAND_KINDS = frozenset({"package", "directory"})
+
 
 @dataclass(frozen=True)
 class Option:
@@ -89,6 +118,8 @@ def parse_operand_terms(value: str) -> tuple[OperandTerm, ...]:
         fields = encoded.split(":")
         if len(fields) != 3:
             fail(f"invalid operand term: {encoded!r}")
+        if fields[0] not in KNOWN_OPERAND_KINDS:
+            fail(f"unsupported operand kind projection: {fields[0]!r}")
         try:
             min_count = int(fields[1])
             max_count = None if fields[2] == "*" else int(fields[2])
@@ -143,14 +174,16 @@ def export_authority() -> str:
         return export_result.stdout
 
 
-def load_schema() -> CliSchema:
+def parse_exported_schema(exported_schema: str) -> CliSchema:
+    """Parse and validate the exporter wire schema before any renderer uses it."""
+
     options: list[Option] = []
     operations: dict[str, Operation] = {}
     delegated_option_ids: tuple[int, ...] = ()
     terminal_tokens: list[str] = []
     canonical_grammar: list[str] = []
 
-    for line in export_authority().splitlines():
+    for line in exported_schema.splitlines():
         fields = line.split("\t")
         record = fields[0]
         if record == "OPTION" and len(fields) == 8:
@@ -211,6 +244,10 @@ def load_schema() -> CliSchema:
     )
     validate_schema_operand_projection(schema)
     return schema
+
+
+def load_schema() -> CliSchema:
+    return parse_exported_schema(export_authority())
 
 
 def validate_description_map(
@@ -309,40 +346,87 @@ def option_case_patterns(schema: CliSchema) -> list[tuple[int, tuple[str, ...]]]
     return [(identity, tuple(patterns)) for identity, patterns in grouped.items()]
 
 
-def validate_operand_projection(form: Form) -> None:
+def validate_operand_projection(operation: Operation, form: Form) -> None:
     terms = form.operand_terms
-    if form.operand_ordering == "none":
-        if terms:
-            fail(f"operand-free form exported terms: {form.syntax}")
+    if form.target_policy not in KNOWN_TARGET_POLICIES:
+        fail(f"unsupported target policy projection: {form.target_policy!r}")
+    if form.operand_ordering not in KNOWN_OPERAND_ORDERINGS:
+        fail(f"unsupported operand ordering projection: {form.operand_ordering!r}")
+
+    if form.target_policy == "none":
+        if form.operand_ordering != "none" or terms:
+            fail(f"invalid targetless operand projection: {form.syntax}")
         return
-    if form.operand_ordering == "preserve-input-order":
-        if len(terms) != 1:
-            fail(f"ordered form must export exactly one term: {form.syntax}")
-        return
-    if form.operand_ordering == "primary-then-environment-assignments":
+
+    if form.target_policy == "exactly-one":
+        if form.operand_ordering == "preserve-input-order":
+            if (
+                len(terms) != 1
+                or terms[0].kind not in PRIMARY_OPERAND_KINDS
+                or terms[0].min_count != 1
+                or terms[0].max_count != 1
+            ):
+                fail(f"invalid exactly-one operand projection: {form.syntax}")
+            return
+        if form.operand_ordering == "primary-then-environment-assignments":
+            if (
+                len(terms) != 2
+                or terms[0].kind not in ASSIGNMENT_PRIMARY_OPERAND_KINDS
+                or terms[0].min_count != 1
+                or terms[0].max_count != 1
+                or terms[1].kind != "environment-assignment"
+                or terms[1].min_count != 0
+                or terms[1].max_count is not None
+            ):
+                fail(
+                    "invalid exactly-one primary/assignment projection: "
+                    f"{form.syntax}"
+                )
+            return
+        fail(f"invalid exactly-one operand ordering: {form.syntax}")
+
+    if form.target_policy == "one-or-more":
         if (
-            len(terms) != 2
+            form.operand_ordering != "preserve-input-order"
+            or len(terms) != 1
+            or terms[0].kind not in PRIMARY_OPERAND_KINDS
             or terms[0].min_count != 1
-            or terms[0].max_count != 1
-            or terms[1].kind != "environment-assignment"
-            or terms[1].min_count != 0
-            or terms[1].max_count is not None
+            or terms[0].max_count is not None
         ):
-            fail(f"invalid primary/assignment projection: {form.syntax}")
+            fail(f"invalid one-or-more operand projection: {form.syntax}")
         return
-    if form.operand_ordering == "package-introduces-following-assignment-scope":
-        if len(terms) != 1 or terms[0].max_count is not None:
-            fail(f"invalid source-preference item projection: {form.syntax}")
+
+    if form.target_policy == "ordered-items":
+        if (
+            form.operand_ordering
+            != "package-introduces-following-assignment-scope"
+            or len(terms) != 1
+            or terms[0].kind != "source-preference-item"
+            or terms[0].min_count != 1
+            or terms[0].max_count is not None
+        ):
+            fail(f"invalid ordered-items operand projection: {form.syntax}")
         return
-    if form.operand_ordering == "delegated":
+
+    if form.target_policy == "delegated":
+        if (
+            not operation.open_grammar
+            or form.operand_ordering != "delegated"
+            or len(terms) != 1
+            or terms[0].kind != "delegated-pacman-argument"
+            or terms[0].min_count != 0
+            or terms[0].max_count is not None
+        ):
+            fail(f"invalid delegated operand projection: {form.syntax}")
         return
-    fail(f"unsupported operand ordering projection: {form.operand_ordering!r}")
+
+    fail(f"unsupported target policy projection: {form.target_policy!r}")
 
 
 def validate_schema_operand_projection(schema: CliSchema) -> None:
     for operation in schema.operations:
         for form in operation.forms:
-            validate_operand_projection(form)
+            validate_operand_projection(operation, form)
 
 
 def finite_operand_max(form: Form) -> int | None:

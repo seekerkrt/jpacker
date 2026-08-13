@@ -1445,7 +1445,7 @@ LIBALPM_BUILD_TARGETS := \
 .PHONY: check-cli-diagnostic-model-link-firewall test-cli-diagnostic-model
 .PHONY: check-runtime-cli-connection-link-firewall test-runtime-cli-connection
 .PHONY: test-artifact-identity-real-pacman
-.PHONY: FORCE catalogs check-catalogs check-localization-config check-pot update-po update-pot test-localization test-catalog-metadata-gate test-cli-localization-surface test-public-documentation
+.PHONY: FORCE catalogs check-catalogs check-localization-config check-pot update-po update-pot test-localization test-catalog-metadata-gate test-cli-localization-surface test-completion-schema test-public-documentation
 .PHONY: test-container test-container-live test-container-live-provider test-container-live-aur test-container-live-local
 .PHONY: test-validation-status
 .PHONY: $(HEAVY_LINK_FIREWALLS)
@@ -3382,7 +3382,10 @@ test-dry-run-command: $(TEST_TARGET) $(AUR_RPC_VALIDATION_TEST_TARGET)
 		$(abspath $(TEST_TARGET)) \
 		$(abspath $(AUR_RPC_VALIDATION_TEST_TARGET))
 
-test-public-documentation: $(CLI_LOCALIZATION_TEST_TARGET) $(MANPAGES) $(COMPLETION_FILES) $(MO_FILES) tests/test-help-man-completion.sh tests/test-public-documentation-checker.py tests/test-static-completion.sh
+test-completion-schema: scripts/generate_completions.py tests/test-completion-schema-validator.py
+	PYTHONDONTWRITEBYTECODE=1 python3 tests/test-completion-schema-validator.py
+
+test-public-documentation: test-completion-schema $(CLI_LOCALIZATION_TEST_TARGET) $(MANPAGES) $(COMPLETION_FILES) $(MO_FILES) tests/test-help-man-completion.sh tests/test-public-documentation-checker.py tests/test-static-completion.sh
 	PYTHONDONTWRITEBYTECODE=1 python3 tests/test-public-documentation-checker.py
 	sh tests/test-help-man-completion.sh $(abspath $(CLI_LOCALIZATION_TEST_TARGET))
 	bash tests/test-static-completion.sh $(abspath $(BASH_COMPLETION))
