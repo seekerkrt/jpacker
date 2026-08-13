@@ -3382,7 +3382,8 @@ test-dry-run-command: $(TEST_TARGET) $(AUR_RPC_VALIDATION_TEST_TARGET)
 		$(abspath $(TEST_TARGET)) \
 		$(abspath $(AUR_RPC_VALIDATION_TEST_TARGET))
 
-test-public-documentation: $(CLI_LOCALIZATION_TEST_TARGET) $(MANPAGES) $(COMPLETION_FILES) $(MO_FILES) tests/test-help-man-completion.sh tests/test-static-completion.sh
+test-public-documentation: $(CLI_LOCALIZATION_TEST_TARGET) $(MANPAGES) $(COMPLETION_FILES) $(MO_FILES) tests/test-help-man-completion.sh tests/test-public-documentation-checker.py tests/test-static-completion.sh
+	PYTHONDONTWRITEBYTECODE=1 python3 tests/test-public-documentation-checker.py
 	sh tests/test-help-man-completion.sh $(abspath $(CLI_LOCALIZATION_TEST_TARGET))
 	bash tests/test-static-completion.sh $(abspath $(BASH_COMPLETION))
 

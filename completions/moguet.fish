@@ -96,6 +96,8 @@ function __moguet_operation
         end
         __moguet_option_id $word >/dev/null; and continue
         string match -q -- '-*' $word; and echo __delegated__; and return 0
+        echo __invalid__
+        return 0
     end
     return 1
 end
@@ -112,6 +114,80 @@ function __moguet_has_operand --argument-names expected_operation
     return 1
 end
 
+function __moguet_is_assignment_operand --argument-names word
+    string match -q -- '*=*' "$word"
+end
+
+function __moguet_form_prefix_valid --argument-names expected_operation form_index
+    set -l seen_operation false
+    set -l operands
+    for word in (commandline -opc)[2..-1]
+        if test $seen_operation = false
+            test "$word" = "$expected_operation"; and set seen_operation true
+            continue
+        end
+        __moguet_option_id $word >/dev/null; and continue
+        set -a operands "$word"
+    end
+    switch "$expected_operation:$form_index"
+        case 'build:0'
+            test (count $operands) -eq 0; and return 0
+            __moguet_is_assignment_operand "$operands[1]"; and return 1
+            for word in $operands[2..-1]
+                __moguet_is_assignment_operand "$word"; or return 1
+            end
+            return 0
+        case 'build:1'
+            test (count $operands) -eq 0; and return 0
+            __moguet_is_assignment_operand "$operands[1]"; and return 1
+            for word in $operands[2..-1]
+                __moguet_is_assignment_operand "$word"; or return 1
+            end
+            return 0
+        case 'upgrade:0'
+            test (count $operands) -le 0; and return 0
+            return 1
+        case 'upgrade-aur:0'
+            test (count $operands) -le 0; and return 0
+            return 1
+        case 'upgrade-all:0'
+            test (count $operands) -le 0; and return 0
+            return 1
+        case 'clean:0'
+            test (count $operands) -le 0; and return 0
+            return 1
+        case 'deps:0'
+            return 0
+        case 'plan:0'
+            return 0
+        case 'fetch:0'
+            return 0
+        case 'add-src:0'
+            test (count $operands) -eq 0; and return 0
+            __moguet_is_assignment_operand "$operands[1]"; and return 1
+            return 0
+        case 'edit-src:0'
+            return 0
+        case 'list-src:0'
+            test (count $operands) -le 0; and return 0
+            return 1
+        case 'del-src:0'
+            return 0
+        case 'revert:0'
+            return 0
+        case '-G:0'
+            test (count $operands) -le 1; and return 0
+            return 1
+        case '-Gp:0'
+            test (count $operands) -le 1; and return 0
+            return 1
+        case '-S:0'
+            test (count $operands) -le 1; and return 0
+            return 1
+    end
+    return 1
+end
+
 function __moguet_operation_allows --argument-names option_id
     set -l operation (__moguet_operation)
     if test -z "$operation"
@@ -122,49 +198,61 @@ function __moguet_operation_allows --argument-names option_id
             set -l selected false
             __moguet_has_option_id 15; and set selected true
             if test $selected = true
+                __moguet_form_prefix_valid 'build' 1; or return 1
                 contains -- $option_id 0 1 4 5 6 7 8 15; and return 0; or return 1
             else if __moguet_has_operand 'build'
+                __moguet_form_prefix_valid 'build' 0; or return 1
                 contains -- $option_id 0 1 2 3 4 5 6 7 8; and return 0; or return 1
             else
                 contains -- $option_id 0 1 2 3 4 5 6 7 8 15; and return 0; or return 1
             end
         case 'upgrade'
-            __moguet_has_operand 'upgrade'; and return 1
+            __moguet_form_prefix_valid 'upgrade' 0; or return 1
             contains -- $option_id 0 1 2 3 4 5 6 7 8; and return 0; or return 1
         case 'upgrade-aur'
-            __moguet_has_operand 'upgrade-aur'; and return 1
+            __moguet_form_prefix_valid 'upgrade-aur' 0; or return 1
             contains -- $option_id 0 1 2 3 4 5 6 7 8; and return 0; or return 1
         case 'upgrade-all'
-            __moguet_has_operand 'upgrade-all'; and return 1
+            __moguet_form_prefix_valid 'upgrade-all' 0; or return 1
             contains -- $option_id 0 1 2 3 4 5 6 7 8; and return 0; or return 1
         case 'clean'
-            __moguet_has_operand 'clean'; and return 1
+            __moguet_form_prefix_valid 'clean' 0; or return 1
             contains -- $option_id 4; and return 0; or return 1
         case 'deps'
+            __moguet_form_prefix_valid 'deps' 0; or return 1
             contains -- $option_id 4 16; and return 0; or return 1
         case 'plan'
+            __moguet_form_prefix_valid 'plan' 0; or return 1
             contains -- $option_id 4; and return 0; or return 1
         case 'fetch'
+            __moguet_form_prefix_valid 'fetch' 0; or return 1
             contains -- $option_id 4 5; and return 0; or return 1
         case 'add-src'
+            __moguet_form_prefix_valid 'add-src' 0; or return 1
             return 1
         case 'edit-src'
+            __moguet_form_prefix_valid 'edit-src' 0; or return 1
             return 1
         case 'list-src'
-            __moguet_has_operand 'list-src'; and return 1
+            __moguet_form_prefix_valid 'list-src' 0; or return 1
             return 1
         case 'del-src'
+            __moguet_form_prefix_valid 'del-src' 0; or return 1
             return 1
         case 'revert'
+            __moguet_form_prefix_valid 'revert' 0; or return 1
             contains -- $option_id 4; and return 0; or return 1
         case '-G'
+            __moguet_form_prefix_valid '-G' 0; or return 1
             return 1
         case '-Gp'
+            __moguet_form_prefix_valid '-Gp' 0; or return 1
             return 1
         case '-S'
             set -l selected false
             __moguet_has_option_id 10; and set selected true
             if test $selected = true
+                __moguet_form_prefix_valid '-S' 0; or return 1
                 contains -- $option_id 10 17 0 1 2 3 4 5 6 7 8 11 12; and return 0; or return 1
             else
                 contains -- $option_id 17 4 10; and return 0; or return 1

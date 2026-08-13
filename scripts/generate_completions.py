@@ -30,12 +30,22 @@ class Option:
     occurrence: str
     placement: str
     conflicts: tuple[int, ...]
+    has_public_definition: bool
+
+
+@dataclass(frozen=True)
+class OperandTerm:
+    kind: str
+    min_count: int
+    max_count: int | None
 
 
 @dataclass(frozen=True)
 class Form:
     syntax: str
     target_policy: str
+    operand_ordering: str
+    operand_terms: tuple[OperandTerm, ...]
     option_ids: tuple[int, ...]
     selector_ids: tuple[int, ...]
 
@@ -69,6 +79,25 @@ def fail(message: str) -> None:
 
 def parse_id_list(value: str) -> tuple[int, ...]:
     return tuple(int(item) for item in value.split(",") if item)
+
+
+def parse_operand_terms(value: str) -> tuple[OperandTerm, ...]:
+    terms: list[OperandTerm] = []
+    for encoded in value.split(","):
+        if not encoded:
+            continue
+        fields = encoded.split(":")
+        if len(fields) != 3:
+            fail(f"invalid operand term: {encoded!r}")
+        try:
+            min_count = int(fields[1])
+            max_count = None if fields[2] == "*" else int(fields[2])
+        except ValueError:
+            fail(f"invalid operand cardinality: {encoded!r}")
+        if min_count < 0 or (max_count is not None and max_count < min_count):
+            fail(f"invalid operand cardinality range: {encoded!r}")
+        terms.append(OperandTerm(fields[0], min_count, max_count))
+    return tuple(terms)
 
 
 def export_authority() -> str:
@@ -124,7 +153,9 @@ def load_schema() -> CliSchema:
     for line in export_authority().splitlines():
         fields = line.split("\t")
         record = fields[0]
-        if record == "OPTION" and len(fields) == 7:
+        if record == "OPTION" and len(fields) == 8:
+            if fields[7] not in {"definition", "syntax-only"}:
+                fail(f"invalid public option projection: {line!r}")
             options.append(
                 Option(
                     identity=int(fields[1]),
@@ -133,6 +164,7 @@ def load_schema() -> CliSchema:
                     occurrence=fields[4],
                     placement=fields[5],
                     conflicts=parse_id_list(fields[6]),
+                    has_public_definition=fields[7] == "definition",
                 )
             )
         elif record == "OPERATION" and len(fields) == 3:
@@ -142,14 +174,16 @@ def load_schema() -> CliSchema:
                 existing,
                 open_grammar=existing.open_grammar or fields[2] == "open",
             )
-        elif record == "FORM" and len(fields) == 6:
+        elif record == "FORM" and len(fields) == 8:
             token = fields[1]
             existing = operations.get(token, Operation(token))
             form = Form(
                 syntax=fields[2],
                 target_policy=fields[3],
-                option_ids=parse_id_list(fields[4]),
-                selector_ids=parse_id_list(fields[5]),
+                operand_ordering=fields[4],
+                operand_terms=parse_operand_terms(fields[5]),
+                option_ids=parse_id_list(fields[6]),
+                selector_ids=parse_id_list(fields[7]),
             )
             operations[token] = replace(existing, forms=existing.forms + (form,))
         elif record == "DELEGATED_OPTIONS" and len(fields) == 2:
@@ -168,13 +202,15 @@ def load_schema() -> CliSchema:
     if any(not operation.forms and not operation.open_grammar for operation in operations.values()):
         fail("CLI authority exporter returned an operation without a grammar form")
 
-    return CliSchema(
+    schema = CliSchema(
         operations=tuple(operations.values()),
         options=tuple(options),
         delegated_option_ids=delegated_option_ids,
         terminal_tokens=tuple(terminal_tokens),
         canonical_grammar=tuple(canonical_grammar),
     )
+    validate_schema_operand_projection(schema)
+    return schema
 
 
 def validate_description_map(
@@ -273,6 +309,158 @@ def option_case_patterns(schema: CliSchema) -> list[tuple[int, tuple[str, ...]]]
     return [(identity, tuple(patterns)) for identity, patterns in grouped.items()]
 
 
+def validate_operand_projection(form: Form) -> None:
+    terms = form.operand_terms
+    if form.operand_ordering == "none":
+        if terms:
+            fail(f"operand-free form exported terms: {form.syntax}")
+        return
+    if form.operand_ordering == "preserve-input-order":
+        if len(terms) != 1:
+            fail(f"ordered form must export exactly one term: {form.syntax}")
+        return
+    if form.operand_ordering == "primary-then-environment-assignments":
+        if (
+            len(terms) != 2
+            or terms[0].min_count != 1
+            or terms[0].max_count != 1
+            or terms[1].kind != "environment-assignment"
+            or terms[1].min_count != 0
+            or terms[1].max_count is not None
+        ):
+            fail(f"invalid primary/assignment projection: {form.syntax}")
+        return
+    if form.operand_ordering == "package-introduces-following-assignment-scope":
+        if len(terms) != 1 or terms[0].max_count is not None:
+            fail(f"invalid source-preference item projection: {form.syntax}")
+        return
+    if form.operand_ordering == "delegated":
+        return
+    fail(f"unsupported operand ordering projection: {form.operand_ordering!r}")
+
+
+def validate_schema_operand_projection(schema: CliSchema) -> None:
+    for operation in schema.operations:
+        for form in operation.forms:
+            validate_operand_projection(form)
+
+
+def finite_operand_max(form: Form) -> int | None:
+    if form.operand_ordering == "none":
+        return 0
+    if form.operand_ordering == "preserve-input-order":
+        return form.operand_terms[0].max_count
+    return None
+
+
+def bash_form_prefix_cases(schema: CliSchema) -> str:
+    cases: list[str] = []
+    for operation in schema.operations:
+        for form_index, form in enumerate(operation.forms):
+            key = shell_quote(f"{operation.token}:{form_index}")
+            maximum = finite_operand_max(form)
+            if maximum is not None:
+                body = (
+                    f"            (( ${{#operands[@]}} <= {maximum} )) && return 0\n"
+                    "            return 1"
+                )
+            elif form.operand_ordering == "preserve-input-order":
+                body = "            return 0"
+            elif form.operand_ordering == "primary-then-environment-assignments":
+                body = (
+                    "            (( ${#operands[@]} == 0 )) && return 0\n"
+                    "            _moguet_is_assignment_operand \"${operands[0]}\" && return 1\n"
+                    "            for word in \"${operands[@]:1}\"; do\n"
+                    "                _moguet_is_assignment_operand \"$word\" || return 1\n"
+                    "            done\n"
+                    "            return 0"
+                )
+            elif form.operand_ordering == "package-introduces-following-assignment-scope":
+                body = (
+                    "            (( ${#operands[@]} == 0 )) && return 0\n"
+                    "            _moguet_is_assignment_operand \"${operands[0]}\" && return 1\n"
+                    "            return 0"
+                )
+            elif form.operand_ordering == "delegated":
+                body = "            return 0"
+            else:
+                fail(f"unsupported Bash operand projection: {form.syntax}")
+            cases.append(f"        {key})\n{body}\n            ;;")
+    return "\n".join(cases)
+
+
+def zsh_form_prefix_cases(schema: CliSchema) -> str:
+    cases: list[str] = []
+    for operation in schema.operations:
+        for form_index, form in enumerate(operation.forms):
+            key = shell_quote(f"{operation.token}:{form_index}")
+            maximum = finite_operand_max(form)
+            if maximum is not None:
+                body = (
+                    f"            (( ${{#operands[@]}} <= {maximum} )) && return 0\n"
+                    "            return 1"
+                )
+            elif form.operand_ordering == "preserve-input-order":
+                body = "            return 0"
+            elif form.operand_ordering == "primary-then-environment-assignments":
+                body = (
+                    "            (( ${#operands[@]} == 0 )) && return 0\n"
+                    "            _moguet_is_assignment_operand \"${operands[1]}\" && return 1\n"
+                    "            for (( operand_index=2; operand_index<=${#operands[@]}; ++operand_index )); do\n"
+                    "                _moguet_is_assignment_operand \"${operands[operand_index]}\" || return 1\n"
+                    "            done\n"
+                    "            return 0"
+                )
+            elif form.operand_ordering == "package-introduces-following-assignment-scope":
+                body = (
+                    "            (( ${#operands[@]} == 0 )) && return 0\n"
+                    "            _moguet_is_assignment_operand \"${operands[1]}\" && return 1\n"
+                    "            return 0"
+                )
+            elif form.operand_ordering == "delegated":
+                body = "            return 0"
+            else:
+                fail(f"unsupported Zsh operand projection: {form.syntax}")
+            cases.append(f"        {key})\n{body}\n            ;;")
+    return "\n".join(cases)
+
+
+def fish_form_prefix_cases(schema: CliSchema) -> list[str]:
+    cases: list[str] = []
+    for operation in schema.operations:
+        for form_index, form in enumerate(operation.forms):
+            key = fish_quote(f"{operation.token}:{form_index}")
+            maximum = finite_operand_max(form)
+            if maximum is not None:
+                body = [
+                    f"            test (count $operands) -le {maximum}; and return 0",
+                    "            return 1",
+                ]
+            elif form.operand_ordering == "preserve-input-order":
+                body = ["            return 0"]
+            elif form.operand_ordering == "primary-then-environment-assignments":
+                body = [
+                    "            test (count $operands) -eq 0; and return 0",
+                    "            __moguet_is_assignment_operand \"$operands[1]\"; and return 1",
+                    "            for word in $operands[2..-1]",
+                    "                __moguet_is_assignment_operand \"$word\"; or return 1",
+                    "            end",
+                    "            return 0",
+                ]
+            elif form.operand_ordering == "package-introduces-following-assignment-scope":
+                body = [
+                    "            test (count $operands) -eq 0; and return 0",
+                    "            __moguet_is_assignment_operand \"$operands[1]\"; and return 1",
+                    "            return 0",
+                ]
+            elif form.operand_ordering == "delegated":
+                body = ["            return 0"]
+            else:
+                fail(f"unsupported Fish operand projection: {form.syntax}")
+            cases.extend([f"        case {key}", *body])
+    return cases
+
+
 def bash_array(values: tuple[str, ...] | list[str], indent: str = "            ") -> str:
     return " ".join(shell_quote(value) for value in values)
 
@@ -322,6 +510,8 @@ def render_bash(schema: CliSchema, descriptions: Descriptions, locale: str) -> s
                 fail(f"unsupported multi-form completion projection: {operation.token}")
             selected = selector_forms[0]
             default = default_forms[0]
+            selected_index = operation.forms.index(selected)
+            default_index = operation.forms.index(default)
             selector_checks = " || ".join(
                 f"_moguet_has_option_id {identity}"
                 for identity in selected.selector_ids
@@ -338,9 +528,17 @@ def render_bash(schema: CliSchema, descriptions: Descriptions, locale: str) -> s
             operation_cases.append(
                 f"        {operation.token})\n"
                 f"            if {selector_checks}; then\n"
-                f"                candidates=({bash_array(selected_tokens)})\n"
+                f"                if _moguet_form_prefix_valid {shell_quote(operation.token)} {selected_index}; then\n"
+                f"                    candidates=({bash_array(selected_tokens)})\n"
+                f"                else\n"
+                f"                    candidates=()\n"
+                f"                fi\n"
                 f"            elif _moguet_has_operand {shell_quote(operation.token)}; then\n"
-                f"                candidates=({bash_array(default_tokens)})\n"
+                f"                if _moguet_form_prefix_valid {shell_quote(operation.token)} {default_index}; then\n"
+                f"                    candidates=({bash_array(default_tokens)})\n"
+                f"                else\n"
+                f"                    candidates=()\n"
+                f"                fi\n"
                 f"            else\n"
                 f"                candidates=({bash_array(union_tokens)})\n"
                 f"            fi\n"
@@ -364,7 +562,11 @@ def render_bash(schema: CliSchema, descriptions: Descriptions, locale: str) -> s
             operation_cases.append(
                 f"        {operation.token})\n"
                 f"            if {selector_checks}; then\n"
-                f"                candidates=({bash_array(selected_tokens)})\n"
+                f"                if _moguet_form_prefix_valid {shell_quote(operation.token)} 0; then\n"
+                f"                    candidates=({bash_array(selected_tokens)})\n"
+                f"                else\n"
+                f"                    candidates=()\n"
+                f"                fi\n"
                 f"            else\n"
                 f"                candidates=({bash_array(preselection_tokens)})\n"
                 f"            fi\n"
@@ -375,20 +577,15 @@ def render_bash(schema: CliSchema, descriptions: Descriptions, locale: str) -> s
             tokens = unique_completion_tokens(
                 options_for_ids(schema, form.option_ids)
             )
-            if form.target_policy == "none":
-                operation_cases.append(
-                    f"        {operation.token})\n"
-                    f"            if _moguet_has_operand {shell_quote(operation.token)}; then\n"
-                    f"                candidates=()\n"
-                    f"            else\n"
-                    f"                candidates=({bash_array(tokens)})\n"
-                    f"            fi\n"
-                    f"            ;;"
-                )
-            else:
-                operation_cases.append(
-                    f"        {operation.token}) candidates=({bash_array(tokens)}) ;;"
-                )
+            operation_cases.append(
+                f"        {operation.token})\n"
+                f"            if _moguet_form_prefix_valid {shell_quote(operation.token)} 0; then\n"
+                f"                candidates=({bash_array(tokens)})\n"
+                f"            else\n"
+                f"                candidates=()\n"
+                f"            fi\n"
+                f"            ;;"
+            )
         else:
             operation_cases.append(
                 f"        {operation.token}) candidates=({bash_array(delegated_tokens)}) ;;"
@@ -431,6 +628,8 @@ _moguet_find_operation() {{
             printf '%s' __delegated__
             return 0
         fi
+        printf '%s' __invalid__
+        return 0
     done
     return 1
 }}
@@ -448,6 +647,29 @@ _moguet_has_operand() {{
         [[ -z $actual ]] && return 0
     done
     return 1
+}}
+
+_moguet_is_assignment_operand() {{
+    [[ $1 == *=* ]]
+}}
+
+_moguet_form_prefix_valid() {{
+    local expected_operation="$1" form_index="$2" word actual
+    local seen_operation=false
+    local -a operands=()
+    for word in "${{COMP_WORDS[@]:1:COMP_CWORD-1}}"; do
+        if [[ $seen_operation == false ]]; then
+            [[ $word == "$expected_operation" ]] && seen_operation=true
+            continue
+        fi
+        actual="$(_moguet_option_id "$word" || true)"
+        [[ -n $actual ]] && continue
+        operands+=("$word")
+    done
+    case "$expected_operation:$form_index" in
+{bash_form_prefix_cases(schema)}
+        *) return 1 ;;
+    esac
 }}
 
 _moguet_conflicts_with_present_option() {{
@@ -538,6 +760,8 @@ def render_zsh(schema: CliSchema, descriptions: Descriptions, locale: str) -> st
         if len(operation.forms) > 1:
             selected = next(form for form in operation.forms if form.selector_ids)
             default = next(form for form in operation.forms if not form.selector_ids)
+            selected_index = operation.forms.index(selected)
+            default_index = operation.forms.index(default)
             selector_checks = " || ".join(
                 f"_moguet_has_option_id {identity}"
                 for identity in selected.selector_ids
@@ -554,9 +778,17 @@ def render_zsh(schema: CliSchema, descriptions: Descriptions, locale: str) -> st
             operation_cases.append(
                 f"        {operation.token})\n"
                 f"            if {selector_checks}; then\n"
-                f"                reply=({zsh_case_values(selected_tokens)})\n"
+                f"                if _moguet_form_prefix_valid {shell_quote(operation.token)} {selected_index}; then\n"
+                f"                    reply=({zsh_case_values(selected_tokens)})\n"
+                f"                else\n"
+                f"                    reply=()\n"
+                f"                fi\n"
                 f"            elif _moguet_has_operand {shell_quote(operation.token)}; then\n"
-                f"                reply=({zsh_case_values(default_tokens)})\n"
+                f"                if _moguet_form_prefix_valid {shell_quote(operation.token)} {default_index}; then\n"
+                f"                    reply=({zsh_case_values(default_tokens)})\n"
+                f"                else\n"
+                f"                    reply=()\n"
+                f"                fi\n"
                 f"            else\n"
                 f"                reply=({zsh_case_values(union_tokens)})\n"
                 f"            fi\n"
@@ -580,7 +812,11 @@ def render_zsh(schema: CliSchema, descriptions: Descriptions, locale: str) -> st
             operation_cases.append(
                 f"        {operation.token})\n"
                 f"            if {selector_checks}; then\n"
-                f"                reply=({zsh_case_values(selected_tokens)})\n"
+                f"                if _moguet_form_prefix_valid {shell_quote(operation.token)} 0; then\n"
+                f"                    reply=({zsh_case_values(selected_tokens)})\n"
+                f"                else\n"
+                f"                    reply=()\n"
+                f"                fi\n"
                 f"            else\n"
                 f"                reply=({zsh_case_values(preselection_tokens)})\n"
                 f"            fi\n"
@@ -591,20 +827,15 @@ def render_zsh(schema: CliSchema, descriptions: Descriptions, locale: str) -> st
             tokens = unique_completion_tokens(
                 options_for_ids(schema, form.option_ids)
             )
-            if form.target_policy == "none":
-                operation_cases.append(
-                    f"        {operation.token})\n"
-                    f"            if _moguet_has_operand {shell_quote(operation.token)}; then\n"
-                    f"                reply=()\n"
-                    f"            else\n"
-                    f"                reply=({zsh_case_values(tokens)})\n"
-                    f"            fi\n"
-                    f"            ;;"
-                )
-            else:
-                operation_cases.append(
-                    f"        {operation.token}) reply=({zsh_case_values(tokens)}) ;;"
-                )
+            operation_cases.append(
+                f"        {operation.token})\n"
+                f"            if _moguet_form_prefix_valid {shell_quote(operation.token)} 0; then\n"
+                f"                reply=({zsh_case_values(tokens)})\n"
+                f"            else\n"
+                f"                reply=()\n"
+                f"            fi\n"
+                f"            ;;"
+            )
         else:
             operation_cases.append(
                 f"        {operation.token}) reply=({zsh_case_values(delegated_tokens)}) ;;"
@@ -670,6 +901,8 @@ _moguet_find_operation() {{
             REPLY=__delegated__
             return 0
         fi
+        REPLY=__invalid__
+        return 0
     done
     return 1
 }}
@@ -686,6 +919,29 @@ _moguet_has_operand() {{
         _moguet_option_id "$word" || return 0
     done
     return 1
+}}
+
+_moguet_is_assignment_operand() {{
+    [[ $1 == *=* ]]
+}}
+
+_moguet_form_prefix_valid() {{
+    local expected_operation="$1" form_index="$2" word actual operand_index
+    local seen_operation=false
+    local -a operands
+    for (( operand_index=2; operand_index<CURRENT; ++operand_index )); do
+        word=$words[operand_index]
+        if [[ $seen_operation == false ]]; then
+            [[ $word == "$expected_operation" ]] && seen_operation=true
+            continue
+        fi
+        _moguet_option_id "$word" && continue
+        operands+=("$word")
+    done
+    case "$expected_operation:$form_index" in
+{zsh_form_prefix_cases(schema)}
+        *) return 1 ;;
+    esac
 }}
 
 _moguet_conflicts_with_present_option() {{
@@ -798,6 +1054,8 @@ def render_fish(schema: CliSchema, descriptions: Descriptions, locale: str) -> s
         if len(operation.forms) > 1:
             selected = next(form for form in operation.forms if form.selector_ids)
             default = next(form for form in operation.forms if not form.selector_ids)
+            selected_index = operation.forms.index(selected)
+            default_index = operation.forms.index(default)
             selector_test = "\n".join(
                 f"            __moguet_has_option_id {identity}; and set selected true"
                 for identity in selected.selector_ids
@@ -807,8 +1065,10 @@ def render_fish(schema: CliSchema, descriptions: Descriptions, locale: str) -> s
                 f"            set -l selected false\n"
                 f"{selector_test}\n"
                 f"            if test $selected = true\n"
+                f"                __moguet_form_prefix_valid {fish_quote(operation.token)} {selected_index}; or return 1\n"
                 f"                {fish_contains(selected.option_ids)}\n"
                 f"            else if __moguet_has_operand {fish_quote(operation.token)}\n"
+                f"                __moguet_form_prefix_valid {fish_quote(operation.token)} {default_index}; or return 1\n"
                 f"                {fish_contains(default.option_ids)}\n"
                 f"            else\n"
                 f"                {fish_contains(union_form_ids(operation.forms))}\n"
@@ -828,6 +1088,7 @@ def render_fish(schema: CliSchema, descriptions: Descriptions, locale: str) -> s
                 f"            set -l selected false\n"
                 f"{selector_test}\n"
                 f"            if test $selected = true\n"
+                f"                __moguet_form_prefix_valid {fish_quote(operation.token)} 0; or return 1\n"
                 f"                {fish_contains(form.option_ids)}\n"
                 f"            else\n"
                 f"                {fish_contains(preselection_ids)}\n"
@@ -835,14 +1096,9 @@ def render_fish(schema: CliSchema, descriptions: Descriptions, locale: str) -> s
             )
         elif operation.forms:
             form = operation.forms[0]
-            operand_guard = (
-                f"            __moguet_has_operand {fish_quote(operation.token)}; and return 1\n"
-                if form.target_policy == "none"
-                else ""
-            )
             allow_cases.append(
                 f"        case {fish_quote(operation.token)}\n"
-                f"{operand_guard}"
+                f"            __moguet_form_prefix_valid {fish_quote(operation.token)} 0; or return 1\n"
                 f"            {fish_contains(form.option_ids)}"
             )
         else:
@@ -894,6 +1150,8 @@ def render_fish(schema: CliSchema, descriptions: Descriptions, locale: str) -> s
         "        end",
         "        __moguet_option_id $word >/dev/null; and continue",
         "        string match -q -- '-*' $word; and echo __delegated__; and return 0",
+        "        echo __invalid__",
+        "        return 0",
         "    end",
         "    return 1",
         "end",
@@ -906,6 +1164,27 @@ def render_fish(schema: CliSchema, descriptions: Descriptions, locale: str) -> s
         "            continue",
         "        end",
         "        __moguet_option_id $word >/dev/null; or return 0",
+        "    end",
+        "    return 1",
+        "end",
+        "",
+        "function __moguet_is_assignment_operand --argument-names word",
+        "    string match -q -- '*=*' \"$word\"",
+        "end",
+        "",
+        "function __moguet_form_prefix_valid --argument-names expected_operation form_index",
+        "    set -l seen_operation false",
+        "    set -l operands",
+        "    for word in (commandline -opc)[2..-1]",
+        "        if test $seen_operation = false",
+        "            test \"$word\" = \"$expected_operation\"; and set seen_operation true",
+        "            continue",
+        "        end",
+        "        __moguet_option_id $word >/dev/null; and continue",
+        "        set -a operands \"$word\"",
+        "    end",
+        "    switch \"$expected_operation:$form_index\"",
+        *fish_form_prefix_cases(schema),
         "    end",
         "    return 1",
         "end",

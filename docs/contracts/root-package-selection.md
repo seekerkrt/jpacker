@@ -14,9 +14,11 @@
 
 ### CLI入口とsource-aware identity
 
-root package discoveryの正式入口は`moguet -S --select <query>`である。通常のpacman-compatible `-Ss`は非対話のsearch / presentationとして維持し、install selectionへ入らない。operation omissionや新しいbare operationは追加せず、unknown bare tokenはunknown-operation errorとする。
+root package discoveryの正式入口は`moguet -S --select [--needed] <query>`である。通常のpacman-compatible `-Ss`は非対話のsearch / presentationとして維持し、install selectionへ入らない。operation omissionや新しいbare operationは追加せず、unknown bare tokenはunknown-operation errorとする。
 
 `-S`はinstall intent、`--select`はexact targetではなく検索候補から選ぶintentを表す。候補が1件でもdefault選択しない。repository candidateはsource kind、package name、repository name、root roleを保持し、AUR candidateはsource kind、package name、PackageBase、root roleを保持する。candidateとselected rootをpackage nameだけへflattenせず、同名でもsource identityが異なる候補は別に扱う。
+
+`--needed`はselection自体をskipせず、planningやbuildもskipしない。supported routeでselectionとpreflightを完了した後、そのrouteが所有するfinal installにだけ適用する。
 
 official searchとArch package groupはread-only libalpm metadata、AUR searchはtyped AUR responseをauthorityとする。pacmanのhuman-readable search outputやsync database formatをroot candidateへparseしない。Autoで一方のsource queryがfailureした場合、failureをempty resultへflattenした不完全なsnapshotからselectionを続行しない。
 

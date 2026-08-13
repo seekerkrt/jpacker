@@ -11,6 +11,9 @@
 namespace {
 
 using cli_authority::GrammarOwnership;
+using cli_authority::OperandContract;
+using cli_authority::OperandKind;
+using cli_authority::OperandOrderingRule;
 using cli_authority::OperationId;
 using cli_authority::OperationOptionRelationSet;
 using cli_authority::OptionConflictSet;
@@ -73,6 +76,62 @@ std::string_view target_policy_name(TargetPolicy policy) noexcept {
     return "unknown";
 }
 
+std::string_view operand_kind_name(OperandKind kind) noexcept {
+    switch(kind) {
+    case OperandKind::None:
+        return "none";
+    case OperandKind::Package:
+        return "package";
+    case OperandKind::Directory:
+        return "directory";
+    case OperandKind::Query:
+        return "query";
+    case OperandKind::SourcePreferenceItem:
+        return "source-preference-item";
+    case OperandKind::EnvironmentAssignment:
+        return "environment-assignment";
+    case OperandKind::DelegatedPacmanArgument:
+        return "delegated-pacman-argument";
+    }
+    return "unknown";
+}
+
+std::string_view operand_ordering_name(
+        OperandOrderingRule ordering) noexcept {
+    switch(ordering) {
+    case OperandOrderingRule::None:
+        return "none";
+    case OperandOrderingRule::PreserveInputOrder:
+        return "preserve-input-order";
+    case OperandOrderingRule::PrimaryThenEnvironmentAssignments:
+        return "primary-then-environment-assignments";
+    case OperandOrderingRule::PackageIntroducesFollowingAssignmentScope:
+        return "package-introduces-following-assignment-scope";
+    case OperandOrderingRule::Delegated:
+        return "delegated";
+    }
+    return "unknown";
+}
+
+void print_operand_terms(const OperandContract& operands) {
+    for(std::size_t index = 0; index < operands.term_count; ++index) {
+        if(index != 0) std::cout << ',';
+        const cli_authority::OperandTermSpec& term = operands.terms[index];
+        std::cout << operand_kind_name(term.kind) << ':' << term.min_count
+                  << ':';
+        if(term.max_count == cli_authority::UNBOUNDED_OPERAND_COUNT) {
+            std::cout << '*';
+        } else {
+            std::cout << term.max_count;
+        }
+    }
+}
+
+bool has_public_option_definition(
+        OptionLexicalPlacement placement) noexcept {
+    return placement != OptionLexicalPlacement::OperationLocal;
+}
+
 void print_ids(std::span<const OptionId> ids) {
     for(std::size_t index = 0; index < ids.size(); ++index) {
         if(index != 0) std::cout << ',';
@@ -116,7 +175,11 @@ void print_option_token(OptionId id, std::string_view token) {
     std::cout << '\t' << occurrence_name(option.default_occurrence)
               << '\t' << placement_name(option.lexical_placement) << '\t';
     print_conflicts(option.conflicts);
-    std::cout << '\n';
+    const std::string_view definition_role =
+            has_public_option_definition(option.lexical_placement)
+            ? "definition"
+            : "syntax-only";
+    std::cout << '\t' << definition_role << '\n';
 }
 
 void print_option(OptionId id) {
@@ -130,10 +193,13 @@ void print_option(OptionId id) {
 
 void print_form(
         std::string_view token, std::string_view syntax,
-        TargetPolicy target_policy,
+        const OperandContract& operands, TargetPolicy target_policy,
         const OperationOptionRelationSet& relations) {
     std::cout << "FORM\t" << token << '\t' << syntax << '\t'
-              << target_policy_name(target_policy) << '\t';
+              << target_policy_name(target_policy) << '\t'
+              << operand_ordering_name(operands.ordering) << '\t';
+    print_operand_terms(operands);
+    std::cout << '\t';
     print_relations(relations);
     std::cout << '\t';
     print_public_selectors(relations);
@@ -210,7 +276,8 @@ int main() {
             print_form(
                     metadata.canonical_token,
                     cli_operation_form_syntax(metadata, form),
-                    form.target_policy, form.option_relations);
+                    form.operands, form.target_policy,
+                    form.option_relations);
         }
     }
 
@@ -220,8 +287,8 @@ int main() {
         std::cout << "OPERATION\t" << operation.canonical_token
                   << "\tclosed\n";
         print_form(
-                operation.canonical_token,
-                cli_special_operation_syntax(id), operation.target_policy,
+                operation.canonical_token, cli_special_operation_syntax(id),
+                operation.operands, operation.target_policy,
                 operation.option_relations);
     }
 

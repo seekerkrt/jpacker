@@ -20,6 +20,9 @@ from generate_completions import (
 ANSI_HELP_ENTRY = re.compile(r"^    \x1b\[1m(.*?)\x1b\[0m", re.MULTILINE)
 LONG_TOKEN = re.compile(r"(?<![A-Za-z0-9-])--[a-z][a-z0-9-]*(?![A-Za-z0-9-])")
 SHORT_TOKEN = re.compile(r"(?<![A-Za-z0-9-])-(?!-)[A-Za-z][A-Za-z]*(?![A-Za-z0-9-])")
+CLI_DASH_TOKEN = re.compile(
+    r"(?<![A-Za-z0-9-])(?:--[a-z][a-z0-9-]*|-(?!-)[A-Za-z][A-Za-z]*)(?![A-Za-z0-9-])"
+)
 MARKDOWN_MARKER = re.compile(r"^<!-- parity:([a-z0-9][a-z0-9-]*) -->\s*$")
 MAN_MARKER = re.compile(r'^\.\\" parity:([a-z0-9][a-z0-9-]*)\s*$')
 README_SECTION_SLUGS = (
@@ -83,6 +86,13 @@ def read_text(path: Path) -> str:
         return path.read_text(encoding="utf-8")
     except FileNotFoundError:
         fail(f"missing required file: {path.relative_to(REPOSITORY_ROOT)}")
+
+
+def shown_path(path: Path) -> str:
+    try:
+        return str(path.relative_to(REPOSITORY_ROOT))
+    except ValueError:
+        return str(path)
 
 
 def expected_surface(schema) -> PublicSurface:
@@ -219,26 +229,157 @@ def man_public_entry_payloads(region: str, category: str, path: Path) -> list[st
     return payloads
 
 
+def normalized_cli_form(value: str) -> str:
+    normalized = " ".join(value.strip().split())
+    if normalized.startswith("moguet "):
+        return normalized[len("moguet ") :].lstrip()
+    return normalized
+
+
+def man_command_forms(payloads: list[str]) -> list[str]:
+    forms: list[str] = []
+    for payload in payloads:
+        normalized = normalized_cli_form(payload)
+        forms.extend(
+            normalized_cli_form(form)
+            for form in re.split(r"\s+\|\s+", normalized)
+        )
+    return forms
+
+
+def option_tokens_for_ids(schema, identities: tuple[int, ...]) -> set[str]:
+    identity_set = set(identities)
+    return {
+        option.token
+        for option in schema.options
+        if option.identity in identity_set
+    }
+
+
+def is_closed_command_form(form: str, schema) -> bool:
+    words = form.split()
+    if not words:
+        return False
+    operation = next(
+        (operation for operation in schema.operations if operation.token == words[0]),
+        None,
+    )
+    if operation is None or not operation.forms:
+        return False
+    if not operation.open_grammar:
+        return True
+
+    selector_ids = tuple(
+        dict.fromkeys(
+            identity
+            for operation_form in operation.forms
+            for identity in operation_form.selector_ids
+        )
+    )
+    selector_tokens = option_tokens_for_ids(schema, selector_ids)
+    return bool(selector_tokens.intersection(CLI_DASH_TOKEN.findall(form)))
+
+
+def format_form_counts(forms: Counter[str]) -> str:
+    return ", ".join(
+        f"{form!r}" if count == 1 else f"{form!r} x{count}"
+        for form, count in sorted(forms.items())
+    )
+
+
+def assert_man_command_projection(
+    path: Path, payloads: list[str], schema
+) -> None:
+    expected_forms = Counter(
+        normalized_cli_form(form) for form in schema.canonical_grammar
+    )
+    actual_forms = Counter(
+        form
+        for form in man_command_forms(payloads)
+        if is_closed_command_form(form, schema)
+    )
+    if actual_forms == expected_forms:
+        return
+
+    missing = expected_forms - actual_forms
+    unexpected = actual_forms - expected_forms
+    details: list[str] = []
+    if missing:
+        details.append("missing forms: " + format_form_counts(missing))
+    if unexpected:
+        details.append("unexpected forms: " + format_form_counts(unexpected))
+    fail(
+        f"{shown_path(path)} PUBLIC COMMANDS differs from "
+        f"the canonical form projection ({'; '.join(details)})"
+    )
+
+
+def expected_option_definition_counts(schema) -> Counter[str]:
+    return Counter(
+        option.token
+        for option in schema.options
+        if option.has_public_definition
+    )
+
+
+def assert_man_option_definition_projection(
+    path: Path, payloads: list[str], schema
+) -> Counter[str]:
+    expected_counts = expected_option_definition_counts(schema)
+    actual_counts: Counter[str] = Counter()
+    unknown: set[str] = set()
+    known_options = {option.token for option in schema.options}
+    for payload in payloads:
+        tokens = CLI_DASH_TOKEN.findall(payload)
+        if not tokens:
+            unknown.add(payload.strip())
+        for token in tokens:
+            if token in known_options:
+                actual_counts[token] += 1
+            else:
+                unknown.add(token)
+
+    if unknown:
+        fail(
+            f"{shown_path(path)} PUBLIC OPTIONS contains "
+            f"tokens outside src/cli_authority.hpp: {format_tokens(unknown)}"
+        )
+    if actual_counts != expected_counts:
+        missing = expected_counts - actual_counts
+        unexpected = actual_counts - expected_counts
+        details: list[str] = []
+        if missing:
+            details.append("missing definitions: " + format_form_counts(missing))
+        if unexpected:
+            details.append(
+                "unexpected or duplicate definitions: "
+                + format_form_counts(unexpected)
+            )
+        fail(
+            f"{shown_path(path)} PUBLIC OPTIONS differs from "
+            f"the option-definition projection ({'; '.join(details)})"
+        )
+    return actual_counts
+
+
 def exact_man_public_surface(
-    path: Path, expected: PublicSurface
+    path: Path, expected: PublicSurface, schema
 ) -> PublicSurface:
     text = read_text(path)
     operation_counts: Counter[str] = Counter()
     command_option_counts: Counter[str] = Counter()
-    definition_option_counts: Counter[str] = Counter()
     unknown_commands: set[str] = set()
-    unknown_options: set[str] = set()
 
     command_region = man_public_region(text, "COMMANDS", path)
-    for payload in man_public_entry_payloads(command_region, "COMMANDS", path):
-        dash_tokens = set(LONG_TOKEN.findall(payload)) | set(SHORT_TOKEN.findall(payload))
+    command_payloads = man_public_entry_payloads(command_region, "COMMANDS", path)
+    assert_man_command_projection(path, command_payloads, schema)
+    for payload in command_payloads:
+        dash_tokens = CLI_DASH_TOKEN.findall(payload)
+        entry_operations: set[str] = set()
         for token in dash_tokens:
             if token in expected.operations:
-                operation_counts[token] += 1
+                entry_operations.add(token)
             elif token in expected.options:
-                # Command syntax and option definitions are separate public
-                # projections. Some operation-local options appear only here;
-                # closed special forms can also repeat a documented option.
                 command_option_counts[token] += 1
             else:
                 unknown_commands.add(token)
@@ -251,55 +392,28 @@ def exact_man_public_surface(
             if word is not None:
                 token = word.group(1)
                 if token in expected.operations:
-                    operation_counts[token] += 1
+                    entry_operations.add(token)
                 else:
                     unknown_commands.add(token)
+        operation_counts.update(entry_operations)
 
     option_region = man_public_region(text, "OPTIONS", path)
-    for payload in man_public_entry_payloads(option_region, "OPTIONS", path):
-        dash_tokens = set(LONG_TOKEN.findall(payload)) | set(SHORT_TOKEN.findall(payload))
-        if not dash_tokens:
-            unknown_options.add(payload.strip())
-        for token in dash_tokens:
-            if token in expected.options:
-                definition_option_counts[token] += 1
-            else:
-                unknown_options.add(token)
+    option_payloads = man_public_entry_payloads(option_region, "OPTIONS", path)
+    definition_option_counts = assert_man_option_definition_projection(
+        path, option_payloads, schema
+    )
 
     if unknown_commands:
         fail(
             f"{path.relative_to(REPOSITORY_ROOT)} PUBLIC COMMANDS contains "
             f"tokens outside src/cli_authority.hpp: {format_tokens(unknown_commands)}"
         )
-    if unknown_options:
-        fail(
-            f"{path.relative_to(REPOSITORY_ROOT)} PUBLIC OPTIONS contains "
-            f"tokens outside src/cli_authority.hpp: {format_tokens(unknown_options)}"
-        )
-
     duplicate_operations = {token for token, count in operation_counts.items() if count != 1}
-    duplicate_command_options = {
-        token for token, count in command_option_counts.items() if count != 1
-    }
-    duplicate_definition_options = {
-        token for token, count in definition_option_counts.items() if count != 1
-    }
     if duplicate_operations:
         fail(
             f"{path.relative_to(REPOSITORY_ROOT)} PUBLIC COMMANDS repeats: "
             + format_tokens(duplicate_operations)
         )
-    if duplicate_command_options:
-        fail(
-            f"{path.relative_to(REPOSITORY_ROOT)} PUBLIC COMMANDS repeats options: "
-            + format_tokens(duplicate_command_options)
-        )
-    if duplicate_definition_options:
-        fail(
-            f"{path.relative_to(REPOSITORY_ROOT)} PUBLIC OPTIONS repeats definitions: "
-            + format_tokens(duplicate_definition_options)
-        )
-
     actual = PublicSurface(
         frozenset(operation_counts),
         frozenset(command_option_counts) | frozenset(definition_option_counts),
@@ -580,10 +694,10 @@ def main() -> int:
         MAN_SECTION_SLUGS,
     )
     english_man_surface = exact_man_public_surface(
-        REPOSITORY_ROOT / "man/moguet.1.in", expected
+        REPOSITORY_ROOT / "man/moguet.1.in", expected, schema
     )
     japanese_man_surface = exact_man_public_surface(
-        REPOSITORY_ROOT / "man/ja/moguet.1.in", expected
+        REPOSITORY_ROOT / "man/ja/moguet.1.in", expected, schema
     )
     if english_man_surface != japanese_man_surface:
         fail("English and Japanese man PUBLIC token sets differ")

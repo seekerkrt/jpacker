@@ -70,6 +70,8 @@ _moguet_find_operation() {
             REPLY=__delegated__
             return 0
         fi
+        REPLY=__invalid__
+        return 0
     done
     return 1
 }
@@ -86,6 +88,99 @@ _moguet_has_operand() {
         _moguet_option_id "$word" || return 0
     done
     return 1
+}
+
+_moguet_is_assignment_operand() {
+    [[ $1 == *=* ]]
+}
+
+_moguet_form_prefix_valid() {
+    local expected_operation="$1" form_index="$2" word actual operand_index
+    local seen_operation=false
+    local -a operands
+    for (( operand_index=2; operand_index<CURRENT; ++operand_index )); do
+        word=$words[operand_index]
+        if [[ $seen_operation == false ]]; then
+            [[ $word == "$expected_operation" ]] && seen_operation=true
+            continue
+        fi
+        _moguet_option_id "$word" && continue
+        operands+=("$word")
+    done
+    case "$expected_operation:$form_index" in
+        build:0)
+            (( ${#operands[@]} == 0 )) && return 0
+            _moguet_is_assignment_operand "${operands[1]}" && return 1
+            for (( operand_index=2; operand_index<=${#operands[@]}; ++operand_index )); do
+                _moguet_is_assignment_operand "${operands[operand_index]}" || return 1
+            done
+            return 0
+            ;;
+        build:1)
+            (( ${#operands[@]} == 0 )) && return 0
+            _moguet_is_assignment_operand "${operands[1]}" && return 1
+            for (( operand_index=2; operand_index<=${#operands[@]}; ++operand_index )); do
+                _moguet_is_assignment_operand "${operands[operand_index]}" || return 1
+            done
+            return 0
+            ;;
+        upgrade:0)
+            (( ${#operands[@]} <= 0 )) && return 0
+            return 1
+            ;;
+        upgrade-aur:0)
+            (( ${#operands[@]} <= 0 )) && return 0
+            return 1
+            ;;
+        upgrade-all:0)
+            (( ${#operands[@]} <= 0 )) && return 0
+            return 1
+            ;;
+        clean:0)
+            (( ${#operands[@]} <= 0 )) && return 0
+            return 1
+            ;;
+        deps:0)
+            return 0
+            ;;
+        plan:0)
+            return 0
+            ;;
+        fetch:0)
+            return 0
+            ;;
+        add-src:0)
+            (( ${#operands[@]} == 0 )) && return 0
+            _moguet_is_assignment_operand "${operands[1]}" && return 1
+            return 0
+            ;;
+        edit-src:0)
+            return 0
+            ;;
+        list-src:0)
+            (( ${#operands[@]} <= 0 )) && return 0
+            return 1
+            ;;
+        del-src:0)
+            return 0
+            ;;
+        revert:0)
+            return 0
+            ;;
+        -G:0)
+            (( ${#operands[@]} <= 1 )) && return 0
+            return 1
+            ;;
+        -Gp:0)
+            (( ${#operands[@]} <= 1 )) && return 0
+            return 1
+            ;;
+        -S:0)
+            (( ${#operands[@]} <= 1 )) && return 0
+            return 1
+            ;;
+        *) return 1 ;;
+    esac
 }
 
 _moguet_conflicts_with_present_option() {
@@ -112,60 +207,126 @@ _moguet_collect_candidates() {
     case "$operation" in
         build)
             if _moguet_has_option_id 15; then
-                reply=(--edit --noedit --noconfirm --dry-run --build-mode= --rebuild --cleanbuild --local)
+                if _moguet_form_prefix_valid build 1; then
+                    reply=(--edit --noedit --noconfirm --dry-run --build-mode= --rebuild --cleanbuild --local)
+                else
+                    reply=()
+                fi
             elif _moguet_has_operand build; then
-                reply=(--edit --noedit --diff --nodiff --noconfirm --dry-run --build-mode= --rebuild --cleanbuild)
+                if _moguet_form_prefix_valid build 0; then
+                    reply=(--edit --noedit --diff --nodiff --noconfirm --dry-run --build-mode= --rebuild --cleanbuild)
+                else
+                    reply=()
+                fi
             else
                 reply=(--edit --noedit --diff --nodiff --noconfirm --dry-run --build-mode= --rebuild --cleanbuild --local)
             fi
             ;;
         upgrade)
-            if _moguet_has_operand upgrade; then
-                reply=()
-            else
+            if _moguet_form_prefix_valid upgrade 0; then
                 reply=(--edit --noedit --diff --nodiff --noconfirm --dry-run --build-mode= --rebuild --cleanbuild)
+            else
+                reply=()
             fi
             ;;
         upgrade-aur)
-            if _moguet_has_operand upgrade-aur; then
-                reply=()
-            else
+            if _moguet_form_prefix_valid upgrade-aur 0; then
                 reply=(--edit --noedit --diff --nodiff --noconfirm --dry-run --build-mode= --rebuild --cleanbuild)
+            else
+                reply=()
             fi
             ;;
         upgrade-all)
-            if _moguet_has_operand upgrade-all; then
-                reply=()
-            else
+            if _moguet_form_prefix_valid upgrade-all 0; then
                 reply=(--edit --noedit --diff --nodiff --noconfirm --dry-run --build-mode= --rebuild --cleanbuild)
+            else
+                reply=()
             fi
             ;;
         clean)
-            if _moguet_has_operand clean; then
-                reply=()
-            else
+            if _moguet_form_prefix_valid clean 0; then
                 reply=(--noconfirm)
+            else
+                reply=()
             fi
             ;;
-        deps) reply=(--noconfirm --recursive) ;;
-        plan) reply=(--noconfirm) ;;
-        fetch) reply=(--noconfirm --dry-run) ;;
-        add-src) reply=() ;;
-        edit-src) reply=() ;;
-        list-src)
-            if _moguet_has_operand list-src; then
+        deps)
+            if _moguet_form_prefix_valid deps 0; then
+                reply=(--noconfirm --recursive)
+            else
+                reply=()
+            fi
+            ;;
+        plan)
+            if _moguet_form_prefix_valid plan 0; then
+                reply=(--noconfirm)
+            else
+                reply=()
+            fi
+            ;;
+        fetch)
+            if _moguet_form_prefix_valid fetch 0; then
+                reply=(--noconfirm --dry-run)
+            else
+                reply=()
+            fi
+            ;;
+        add-src)
+            if _moguet_form_prefix_valid add-src 0; then
                 reply=()
             else
                 reply=()
             fi
             ;;
-        del-src) reply=() ;;
-        revert) reply=(--noconfirm) ;;
-        -G) reply=() ;;
-        -Gp) reply=() ;;
+        edit-src)
+            if _moguet_form_prefix_valid edit-src 0; then
+                reply=()
+            else
+                reply=()
+            fi
+            ;;
+        list-src)
+            if _moguet_form_prefix_valid list-src 0; then
+                reply=()
+            else
+                reply=()
+            fi
+            ;;
+        del-src)
+            if _moguet_form_prefix_valid del-src 0; then
+                reply=()
+            else
+                reply=()
+            fi
+            ;;
+        revert)
+            if _moguet_form_prefix_valid revert 0; then
+                reply=(--noconfirm)
+            else
+                reply=()
+            fi
+            ;;
+        -G)
+            if _moguet_form_prefix_valid -G 0; then
+                reply=()
+            else
+                reply=()
+            fi
+            ;;
+        -Gp)
+            if _moguet_form_prefix_valid -Gp 0; then
+                reply=()
+            else
+                reply=()
+            fi
+            ;;
         -S)
             if _moguet_has_option_id 10; then
-                reply=(--select --needed --edit --noedit --diff --nodiff --noconfirm --dry-run --build-mode= --rebuild --cleanbuild --aur --repo)
+                if _moguet_form_prefix_valid -S 0; then
+                    reply=(--select --needed --edit --noedit --diff --nodiff --noconfirm --dry-run --build-mode= --rebuild --cleanbuild --aur --repo)
+                else
+                    reply=()
+                fi
             else
                 reply=(--needed --noconfirm --select)
             fi
