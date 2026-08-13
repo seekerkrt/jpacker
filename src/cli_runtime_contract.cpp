@@ -272,34 +272,6 @@ std::string operand_placeholder(OperandKind kind) {
     return "<operand>";
 }
 
-std::string operation_form_syntax(
-        const OperationMetadata& metadata,
-        const OperationFormSpec& form) {
-    std::string syntax(metadata.canonical_token);
-    if(form.option_relations.contains(cli_authority::OptionId::LocalSource)) {
-        syntax += " ";
-        syntax += cli_authority::LOCAL_SOURCE_OPTION;
-    }
-    if(form.option_relations.contains(cli_authority::OptionId::Recursive)) {
-        syntax += " [--recursive]";
-    }
-
-    for(std::size_t index = 0; index < form.operands.term_count; ++index) {
-        const cli_authority::OperandTermSpec& term =
-                form.operands.terms[index];
-        syntax += " ";
-        const std::string placeholder = operand_placeholder(term.kind);
-        const bool optional = term.min_count == 0;
-        if(optional) syntax += "[";
-        syntax += placeholder;
-        if(term.max_count == cli_authority::UNBOUNDED_OPERAND_COUNT) {
-            syntax += "...";
-        }
-        if(optional) syntax += "]";
-    }
-    return syntax;
-}
-
 } // namespace
 
 bool ResolvedCliRuntimeContract::is_known() const noexcept {
@@ -481,18 +453,4 @@ std::string cli_invocation_issue_message(
             "Operation {} requires exactly one {} operand.",
             issue.operation,
             operand_placeholder(issue.primary_operand_kind));
-}
-
-std::string cli_operation_syntax(OperationId operation) {
-    const OperationMetadata& metadata =
-            cli_authority::operation_metadata(operation);
-    std::string syntax;
-    for(std::size_t form_index = 0;
-        form_index < metadata.form_count; ++form_index) {
-        if(form_index != 0) syntax += " | ";
-        syntax += operation_form_syntax(
-                metadata,
-                cli_authority::operation_form(metadata, form_index));
-    }
-    return syntax;
 }

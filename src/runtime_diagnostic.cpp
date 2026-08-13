@@ -1,39 +1,39 @@
 #include "runtime_diagnostic.hpp"
 
+#include "localization.hpp"
 #include "logging.hpp"
 
 #include <stdexcept>
 
 std::string diagnostic_class_label(DiagnosticClass classification) {
-    // NO_TRANSLATE(Issue #350): Stable diagnostic taxonomy tokens. Slice 4
-    // owns full gettext semantic parity for surrounding prose.
     switch(classification) {
     case DiagnosticClass::Invalid:
-        return "Invalid";
+        return localization::translate_message("Invalid");
     case DiagnosticClass::Unsupported:
-        return "Unsupported";
+        return localization::translate_message("Unsupported");
     case DiagnosticClass::Ambiguous:
-        return "Ambiguous";
+        return localization::translate_message("Ambiguous");
     case DiagnosticClass::Cancelled:
-        return "Cancelled";
+        return localization::translate_message("Cancelled");
     case DiagnosticClass::Unavailable:
-        return "Unavailable";
+        return localization::translate_message("Unavailable");
     case DiagnosticClass::QueryFailure:
-        return "QueryFailure";
+        return localization::translate_message("Query failure");
     case DiagnosticClass::MetadataFailure:
-        return "MetadataFailure";
+        return localization::translate_message("Metadata failure");
     case DiagnosticClass::RequiresCheck:
-        return "RequiresCheck";
+        return localization::translate_message("Requires check");
     case DiagnosticClass::Blocked:
-        return "Blocked";
+        return localization::translate_message("Blocked");
     case DiagnosticClass::PartialFailure:
-        return "PartialFailure";
+        return localization::translate_message("Partial failure");
     case DiagnosticClass::ExecutionFailure:
-        return "ExecutionFailure";
+        return localization::translate_message("Execution failure");
     case DiagnosticClass::InternalInconsistency:
-        return "InternalInconsistency";
+        return localization::translate_message("Internal inconsistency");
     }
-    throw std::logic_error("Unknown diagnostic classification.");
+    throw std::logic_error(localization::translate_message(
+            "Unknown diagnostic classification."));
 }
 
 std::string diagnostic_source_label(DiagnosticSourceKind source_kind) {
@@ -52,7 +52,8 @@ std::string diagnostic_source_label(DiagnosticSourceKind source_kind) {
     case DiagnosticSourceKind::Pacman:
         return "pacman";
     }
-    throw std::logic_error("Unknown diagnostic source kind.");
+    throw std::logic_error(localization::translate_message(
+            "Unknown diagnostic source kind."));
 }
 
 std::string diagnostic_identity_suffix(const DiagnosticIdentity& identity) {
@@ -64,22 +65,27 @@ std::string diagnostic_identity_suffix(const DiagnosticIdentity& identity) {
         suffix += value;
     };
     if(identity.source_kind != DiagnosticSourceKind::Unspecified) {
-        append("source", diagnostic_source_label(identity.source_kind));
+        append(localization::translate_message("source"),
+               diagnostic_source_label(identity.source_kind));
     }
     if(identity.repository.has_value()) {
-        append("repository", identity.repository.value());
+        append(localization::translate_message("repository"),
+               identity.repository.value());
     }
     if(identity.requested_package.has_value()) {
-        append("package", identity.requested_package.value());
+        append(localization::translate_message("package"),
+               identity.requested_package.value());
     }
     if(identity.package_base.has_value()) {
         append("PackageBase", identity.package_base.value());
     }
     if(identity.canonical_source_identity.has_value()) {
-        append("source-identity", identity.canonical_source_identity.value());
+        append(localization::translate_message("source identity"),
+               identity.canonical_source_identity.value());
     }
     if(identity.local_root.has_value()) {
-        append("local-root", identity.local_root->string());
+        append(localization::translate_message("local root"),
+               identity.local_root->string());
     }
     if(!suffix.empty()) suffix += "]";
     return suffix;

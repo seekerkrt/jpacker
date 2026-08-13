@@ -92,7 +92,7 @@ helperと同等の自動解決能力・完成度を約束しません。unsuppor
   明示選択の必要性を変更しません。
 - non-TTYと`--noconfirm`ではprovider inputをstdinから読まず、candidateを自動選択しません。
   未選択のambiguous providerはfail-closedで停止します。
-- `moguet -S --select <query>`はofficial repositoryとAURからsource-awareなroot
+- `moguet -S --select [--needed] <query>`はofficial repositoryとAURからsource-awareなroot
   package candidateを検索します。interactive TTYではpackage番号、複数番号、inclusive range、
   表示済みofficial groupの`@group` selectorを受理します。candidateが1件でもdefaultは
   ありません。empty input、`q`、`quit`、`cancel`、EOFは取消とし、invalid inputは同じ
@@ -216,10 +216,39 @@ AUR pageを公開していません。
 現在のcommand / option surfaceは`moguet --help`をruntime authorityとします。command
 tokenとoption tokenはlocaleによって変わりません。
 
+Moguet-owned / interceptedのclosed grammarは次のとおりです。
+
+<!-- CLI CANONICAL GRAMMAR BEGIN -->
+```text
+build <pkg> [V=K...]
+build --local <directory> [V=K...]
+upgrade
+upgrade-aur
+upgrade-all
+clean
+deps [--recursive] <pkg>...
+plan <pkg>...
+fetch <pkg>...
+add-src <item>...
+edit-src <pkg>...
+list-src
+del-src <pkg>...
+revert <pkg>...
+-G <pkg>
+-Gp <pkg>
+-S --select [--needed] <query>
+```
+<!-- CLI CANONICAL GRAMMAR END -->
+
+その他のpacman operation formは、Moguetのallowlistではなくdelegated open grammarのまま
+です。closed grammarはremote / local `build`の2つ目のbare operandを拒否し、`upgrade`、
+`upgrade-aur`、`upgrade-all`、`clean`、`list-src`のtarget operandを拒否します。`...`を
+示したinspection / source-maintenance formはmulti-target behaviorを維持します。
+
 ```bash
 # packageのinstall、search、info表示
 moguet -S <pkg>
-moguet -S --select <query>
+moguet -S --select [--needed] <query>
 moguet -Ss <query>
 moguet -Si <pkg>
 
@@ -236,11 +265,18 @@ moguet build <pkg> [V=K...]
 moguet build --local <directory> [V=K...]
 
 # buildせずAUR dependencyとbuild orderを調査
-moguet deps --recursive <pkg>
-moguet plan <pkg>
+moguet deps --recursive <pkg>...
+moguet plan <pkg>...
 
 # build / installせずbuild repositoryを取得
-moguet fetch <pkg>
+moguet fetch <pkg>...
+
+# source-build preferenceを1件以上maintenance
+moguet add-src <item>...
+moguet edit-src <pkg>...
+moguet list-src
+moguet del-src <pkg>...
+moguet revert <pkg>...
 
 # PackageBase checkoutをexport、またはPKGBUILDだけを表示
 moguet -G <pkg>
@@ -249,7 +285,7 @@ moguet -Gp <pkg>
 # persistent stateを変更せず、対応する全mutating routeを観測
 moguet --dry-run -S <pkg>
 moguet --dry-run -Syu
-moguet --dry-run fetch <pkg>
+moguet --dry-run fetch <pkg>...
 moguet --dry-run build <pkg>
 moguet --dry-run build --local <directory>
 moguet --dry-run upgrade
@@ -273,6 +309,13 @@ token、execution capability、cached provider choiceとして再利用せず、
 current stateを再validationします。v2.2.0のsurfaceはhuman-readableだけで、JSONその他の
 machine-readable plan schemaは追加しません。
 
+human-readable diagnosticはtyped stateのprojectionであり、classificationを決める
+authorityではありません。英日ともnormal summary、attention-required detail、route-owned
+necessary detailの順を保ちます。operation outcomeとpackage state observationを分け、plan
+construction、completeness、execution readinessを独立して表示します。successfulだが
+unverifiedな観測はrequired check付きのsuccessとして維持し、`Unknown`を`NoOp`へ書き換えず、
+severity、blocking、exit-status effectも別dimensionとして扱います。
+
 **upgrade commandの選択:** 通常のpackage install、search、system upgradeでは、
 pacmanや他のAUR helperと同様に`-S`、`-Ss`、`-Syu`等のpacman-compatible
 operationを使用してください。保存済みsource-build preferenceの適用、installed AUR
@@ -285,14 +328,14 @@ repositoryへ限定します。両selectorの併用はexternal commandやAUR que
 失敗します。pacman-only routeではcompatibleなpacman optionを保持し、source-build
 routeで意味を維持できないoptionは黙って無視せず拒否します。
 
-`-S --select <query>`はinteractiveなsource-aware discovery形式です。source selectorを
+`-S --select [--needed] <query>`はinteractiveなsource-aware discovery形式です。source selectorを
 指定しなければofficial repositoryとAURの両方を検索し、`--aur`または`--repo`でcandidate
 sourceを限定します。両selected routeで同じ意味を持つoptionは`--needed`だけです。
 non-TTYと`--noconfirm`ではqueryやpackage選択を行わず失敗します。
 
-source-build preferenceは`add-src`、`edit-src`、`list-src`、`del-src`、`revert`で
-管理します。一時的な`build <pkg> [V=K...]`はremote packageを解決し、preferenceを
-保存しません。`build --local <directory> [V=K...]`は、代わりにuser所有directoryを
+source-build preferenceはmulti-targetの`add-src`、`edit-src`、`del-src`、`revert`と、
+target-lessの`list-src`で管理します。一時的な`build <pkg> [V=K...]`はremote packageを
+解決し、preferenceを保存しません。`build --local <directory> [V=K...]`は、代わりにuser所有directoryを
 exactly oneのlocal PackageBase sourceとして扱います。pathらしいpackage operandからlocal
 rootを推測せず、そのrootをAURへqueryしません。
 

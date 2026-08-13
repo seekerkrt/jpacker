@@ -85,8 +85,7 @@ def read_text(path: Path) -> str:
         fail(f"missing required file: {path.relative_to(REPOSITORY_ROOT)}")
 
 
-def expected_surface() -> PublicSurface:
-    schema = load_schema()
+def expected_surface(schema) -> PublicSurface:
     return PublicSurface(
         frozenset(operation.token for operation in schema.operations),
         frozenset(option.token for option in schema.options),
@@ -225,7 +224,8 @@ def exact_man_public_surface(
 ) -> PublicSurface:
     text = read_text(path)
     operation_counts: Counter[str] = Counter()
-    option_counts: Counter[str] = Counter()
+    command_option_counts: Counter[str] = Counter()
+    definition_option_counts: Counter[str] = Counter()
     unknown_commands: set[str] = set()
     unknown_options: set[str] = set()
 
@@ -236,9 +236,10 @@ def exact_man_public_surface(
             if token in expected.operations:
                 operation_counts[token] += 1
             elif token in expected.options:
-                # Operation-specific syntax such as `deps --recursive` owns a
-                # public option even though it is not repeated in OPTIONS.
-                option_counts[token] += 1
+                # Command syntax and option definitions are separate public
+                # projections. Some operation-local options appear only here;
+                # closed special forms can also repeat a documented option.
+                command_option_counts[token] += 1
             else:
                 unknown_commands.add(token)
 
@@ -261,7 +262,7 @@ def exact_man_public_surface(
             unknown_options.add(payload.strip())
         for token in dash_tokens:
             if token in expected.options:
-                option_counts[token] += 1
+                definition_option_counts[token] += 1
             else:
                 unknown_options.add(token)
 
@@ -277,20 +278,31 @@ def exact_man_public_surface(
         )
 
     duplicate_operations = {token for token, count in operation_counts.items() if count != 1}
-    duplicate_options = {token for token, count in option_counts.items() if count != 1}
+    duplicate_command_options = {
+        token for token, count in command_option_counts.items() if count != 1
+    }
+    duplicate_definition_options = {
+        token for token, count in definition_option_counts.items() if count != 1
+    }
     if duplicate_operations:
         fail(
             f"{path.relative_to(REPOSITORY_ROOT)} PUBLIC COMMANDS repeats: "
             + format_tokens(duplicate_operations)
         )
-    if duplicate_options:
+    if duplicate_command_options:
         fail(
-            f"{path.relative_to(REPOSITORY_ROOT)} PUBLIC OPTIONS repeats: "
-            + format_tokens(duplicate_options)
+            f"{path.relative_to(REPOSITORY_ROOT)} PUBLIC COMMANDS repeats options: "
+            + format_tokens(duplicate_command_options)
+        )
+    if duplicate_definition_options:
+        fail(
+            f"{path.relative_to(REPOSITORY_ROOT)} PUBLIC OPTIONS repeats definitions: "
+            + format_tokens(duplicate_definition_options)
         )
 
     actual = PublicSurface(
-        frozenset(operation_counts), frozenset(option_counts)
+        frozenset(operation_counts),
+        frozenset(command_option_counts) | frozenset(definition_option_counts),
     )
     assert_surface(str(path.relative_to(REPOSITORY_ROOT)), actual, expected)
     return actual
@@ -464,8 +476,7 @@ def check_generated_man(source: Path, generated: Path, version: str) -> None:
         )
 
 
-def check_generated_completions() -> None:
-    schema = load_schema()
+def check_generated_completions(schema) -> None:
     descriptions = load_descriptions(schema, "en")
     outputs = generated_files(
         schema, descriptions, "en", REPOSITORY_ROOT / "completions"
@@ -482,6 +493,39 @@ def check_generated_completions() -> None:
         )
 
 
+def assert_canonical_syntax_present(
+    label: str, text: str, canonical_grammar: tuple[str, ...]
+) -> None:
+    normalized = text.replace(r"\-", "-")
+    missing = [syntax for syntax in canonical_grammar if syntax not in normalized]
+    if missing:
+        fail(f"{label} is missing canonical syntax: {', '.join(missing)}")
+
+
+def markdown_canonical_grammar(path: Path) -> tuple[str, ...]:
+    text = read_text(path)
+    begin_marker = "<!-- CLI CANONICAL GRAMMAR BEGIN -->"
+    end_marker = "<!-- CLI CANONICAL GRAMMAR END -->"
+    if text.count(begin_marker) != 1 or text.count(end_marker) != 1:
+        fail(
+            f"{path.relative_to(REPOSITORY_ROOT)} must contain exactly one "
+            "CLI canonical grammar marker pair"
+        )
+    begin = text.index(begin_marker) + len(begin_marker)
+    end = text.index(end_marker, begin)
+    region = text[begin:end]
+    lines = [line.strip() for line in region.splitlines()]
+    try:
+        fence_start = lines.index("```text")
+        fence_end = lines.index("```", fence_start + 1)
+    except ValueError:
+        fail(
+            f"{path.relative_to(REPOSITORY_ROOT)} canonical grammar must use "
+            "one ```text block"
+        )
+    return tuple(line for line in lines[fence_start + 1 : fence_end] if line)
+
+
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Check bilingual public-document and CLI schema parity."
@@ -493,7 +537,8 @@ def parse_arguments() -> argparse.Namespace:
 
 def main() -> int:
     arguments = parse_arguments()
-    expected = expected_surface()
+    schema = load_schema()
+    expected = expected_surface(schema)
 
     english_help = help_surface(arguments.help_en, expected)
     japanese_help = help_surface(arguments.help_ja, expected)
@@ -501,6 +546,16 @@ def main() -> int:
     assert_surface("Japanese runtime help", japanese_help, expected)
     if english_help != japanese_help:
         fail("English and Japanese runtime help token sets differ")
+    assert_canonical_syntax_present(
+        "English runtime help",
+        read_text(arguments.help_en),
+        schema.canonical_grammar,
+    )
+    assert_canonical_syntax_present(
+        "Japanese runtime help",
+        read_text(arguments.help_ja),
+        schema.canonical_grammar,
+    )
 
     version = read_text(REPOSITORY_ROOT / "VERSION").strip()
     if not version:
@@ -532,6 +587,24 @@ def main() -> int:
     )
     if english_man_surface != japanese_man_surface:
         fail("English and Japanese man PUBLIC token sets differ")
+    assert_canonical_syntax_present(
+        "English man page",
+        man_public_region(
+            read_text(REPOSITORY_ROOT / "man/moguet.1.in"),
+            "COMMANDS",
+            REPOSITORY_ROOT / "man/moguet.1.in",
+        ),
+        schema.canonical_grammar,
+    )
+    assert_canonical_syntax_present(
+        "Japanese man page",
+        man_public_region(
+            read_text(REPOSITORY_ROOT / "man/ja/moguet.1.in"),
+            "COMMANDS",
+            REPOSITORY_ROOT / "man/ja/moguet.1.in",
+        ),
+        schema.canonical_grammar,
+    )
 
     compare_marked_documents(
         "README",
@@ -552,7 +625,20 @@ def main() -> int:
         MIGRATION_SECTION_SLUGS,
     )
 
-    check_generated_completions()
+    for path in (
+        REPOSITORY_ROOT / "README.md",
+        REPOSITORY_ROOT / "README.ja.md",
+        REPOSITORY_ROOT / "docs/COMPATIBILITY.md",
+    ):
+        documented = markdown_canonical_grammar(path)
+        if documented != schema.canonical_grammar:
+            fail(
+                f"{path.relative_to(REPOSITORY_ROOT)} canonical grammar differs "
+                "from the structured CLI authority: "
+                f"documented={documented}, expected={schema.canonical_grammar}"
+            )
+
+    check_generated_completions(schema)
     print("public-documentation-check: all checks passed")
     return 0
 

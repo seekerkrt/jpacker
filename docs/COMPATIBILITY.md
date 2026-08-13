@@ -33,25 +33,46 @@ MoguetはArch Linux向けの **pacman-first wrapper** として扱う。日常�
 source routeのselection、preflight、partial completion、failureの詳細は各contractが正本である。routeの結果をpackage nameだけへflattenして別sourceを再推定しない。
 
 <a id="compat-moguet-operations"></a>
-## Moguet固有 operation
+## Closed CLI grammar
 
-次のoperationはMoguet固有であり、pacmanへそのまま委譲しない。
+Moguet-owned operationと、Moguetがinterceptするsource-aware `-S --select`のcanonical
+grammarは次のとおりである。
 
-- `build <pkg> [VAR=VALUE...]`
-- `build --local <directory> [VAR=VALUE...]`
-- `upgrade`
-- `upgrade-aur`
-- `upgrade-all`
-- `clean`
-- `deps [--recursive] <pkg>`
-- `plan <pkg>`
-- `fetch <pkg>`
-- `-G <pkg>` / `-Gp <pkg>`
-- `add-src <pkg> [VAR=VALUE...]`
-- `del-src <pkg>` / `edit-src <pkg>` / `list-src`
-- `revert <pkg>`
+<!-- CLI CANONICAL GRAMMAR BEGIN -->
+```text
+build <pkg> [V=K...]
+build --local <directory> [V=K...]
+upgrade
+upgrade-aur
+upgrade-all
+clean
+deps [--recursive] <pkg>...
+plan <pkg>...
+fetch <pkg>...
+add-src <item>...
+edit-src <pkg>...
+list-src
+del-src <pkg>...
+revert <pkg>...
+-G <pkg>
+-Gp <pkg>
+-S --select [--needed] <query>
+```
+<!-- CLI CANONICAL GRAMMAR END -->
 
-`deps`、`plan`、`fetch`、`-G`、`-Gp`は調査・表示・取得段階であり、build / installを混ぜない。`deps`の`--recursive`を除き、Moguet固有operationに未対応optionを指定した場合は停止する。
+remote / local `build`はprimary operandをexactly oneだけ取り、その後には`V=K`
+assignmentだけを許すため、extra bare operandを拒否する。`upgrade`、`upgrade-aur`、
+`upgrade-all`、`clean`、`list-src`はtarget-lessであり、target operandを拒否する。一方、
+`deps`、`plan`、`fetch`と`add-src`、`edit-src`、`del-src`、`revert`は表示どおり
+multi-targetを維持する。`add-src`ではpackage itemが後続assignmentのscopeを開始する。
+
+`--local`はlocal `build`、`--recursive`は`deps`、`--select`はplain `-S`だけが所有する。
+`-S --select`の`--needed`はroute-owned final installationだけへ作用する。Moguet固有routeに
+scope外optionを指定した場合は黙って無視せず停止する。上記以外のpacman operation formは
+delegated open grammarであり、この一覧をpacman parserのclosed allowlistとして扱わない。
+
+`deps`、`plan`、`fetch`、`-G`、`-Gp`は調査・表示・取得段階であり、build / installを
+混ぜない。
 
 <a id="compat-dry-run"></a>
 ## Unified dry-run compatibility
@@ -63,6 +84,13 @@ global `--dry-run`は、Moguet-owned supported `-S` install / system-update、`f
 absolute no-mutation boundaryとして、dry-runはstate log / persistent stateのwriteやdirectory作成、cache、workspace、worktree、Git clone / fetch / checkout mutation、`makepkg --printsrcinfo`その他のlocal metadata生成・評価、build output、sudo、pacman transactionの開始・mutation、pacman transaction lock、install、cleanup mutationへ到達しない。local routeは安全な既存descriptorだけを使い、metadata評価が必要ならreadyを推測せず`Blocked`とする。
 
 dry-run observationはapproval token、prepared execution capability、cached provider choiceではない。後続のactual invocationへ渡さず、actual routeはcurrent stateからproduction validationとprovider selectionを再実行する。v2.2.0ではhuman-readable outputだけを提供し、JSON / machine-readable schemaは追加しない。
+
+diagnostic presentationはtyped stateからlocalizeする一方向のprojectionであり、localized / raw
+stringからclassificationを逆算しない。English / Japaneseともnormal summary、
+attention-required detail、route-owned necessary detailの順を保つ。operation outcomeとpackage
+state observation、plan constructionとcompletenessとexecution readiness、severityとblockingと
+exit-status effectはそれぞれ独立したdimensionである。successful-unverifiedはrequired actionを
+伴うsuccessとして保持し、failureへ丸めない。`Unknown`も`NoOp`へ丸めない。
 
 <a id="compat-aur-update"></a>
 ## AUR update operation summary
@@ -83,12 +111,12 @@ dry-run observationはapproval token、prepared execution capability、cached pr
 <a id="compat-conflicts-replaces"></a>
 ## AUR conflicts / replaces summary
 
-AUR RPCの`Conflicts` / `Replaces`はdependency resolutionとは分離したmetadata riskとしてraw valueを保持する。`-Si`はmetadataとして表示し、`deps` / `plan`はdependency分類とは別のwarning / incomplete reasonとして表示する。`fetch`はunresolved dependency、未選択ambiguous provider、cycleがなければ取得を許可するが、build / install routeはriskをclone、fetch、makepkg、pacman transactionより前にblocking reasonとして扱う。Moguetはinstalled DBとmetadataを独自照合してconflictを解決せず、削除、置換、provider選択を自動実行しない。
+AUR RPCの`Conflicts` / `Replaces`はdependency resolutionとは分離したmetadata riskとしてraw valueを保持し、actual relationは`DeclaredMetadataActualRelationUnassessed`のままである。`-Si`はmetadataとして表示し、`deps` / `plan`はdependency分類とは別のwarning / incomplete reasonとして表示する。`fetch`はunresolved dependency、未選択ambiguous provider、cycleがなければ取得を許可するが、build / install routeはriskをclone、fetch、makepkg、pacman transactionより前にblocking reasonとして扱う。Moguetはinstalled DBとmetadataを独自照合してconflictを解決せず、削除、置換、provider選択を自動実行しない。active relation evaluationはこのcompatibility surfaceの責務ではない。
 
 <a id="compat-plan-size"></a>
 ## Planのofficial package size summary
 
-`plan <pkg>`で表示するofficial repository dependencyのpackage sizeはpresentation metadataであり、BuildPlanのgraph safety、AUR build unitのsize、dependency resolution、provider selection、transactionを変更しない。configured repository orderとread-only sync metadataをauthorityとし、package absence、query failure、malformed metadata、configuration failure、0 bytesを区別する。size metadataが取得できなくても、既存のplan本文を表示できる場合はgraph statusやexit codeを不必要に変えない。
+`plan <pkg>...`で表示するofficial repository dependencyのpackage sizeはpresentation metadataであり、BuildPlanのgraph safety、AUR build unitのsize、dependency resolution、provider selection、transactionを変更しない。configured repository orderとread-only sync metadataをauthorityとし、package absence、query failure、malformed metadata、configuration failure、0 bytesを区別する。size metadataが取得できなくても、既存のplan本文を表示できる場合はgraph statusやexit codeを不必要に変えない。
 
 dependency edgeはmetadata trust boundaryで構成したtyped requirement、installed / configured repository / AUR / local / providerのsource-aware candidate、`ConstraintEvaluation`を保持し、production downstreamでraw constraintを再parseしない。`deps`は`Satisfied` / `Unconstrained`を通常表示し、`Unsatisfied` / `Unknown`をresult / reason付きwarningとして継続する。`plan`は同じ2状態をincompleteとする。`Invalid` / `Conflicting`はread-only plan constructionでもfail-closedとする。`fetch`、build、install、upgrade、local buildは`Unsatisfied` / `Unknown`を含め、成功を証明できないconstraint resultをclone、fetch、source mutation、build、sudo、pacman、transaction開始前に拒否する。preflight successはtransaction successを意味しない。
 
@@ -192,7 +220,7 @@ interactive candidate listには、read-only local package databaseにcandidate�
 <a id="compat-root-package-selection"></a>
 ## Root package selection compatibility
 
-正式入口は`moguet -S --select <query>`であり、`-Ss`は非対話search / presentationのままである。repository / AUR candidateはsource identityを保持し、同名packageでもsourceが違えば別候補とする。official searchはread-only libalpm metadata、AUR searchはtyped AUR responseをauthorityとし、pacmanのhuman-readable search outputをparseしない。
+正式入口は`moguet -S --select [--needed] <query>`であり、`-Ss`は非対話search / presentationのままである。repository / AUR candidateはsource identityを保持し、同名packageでもsourceが違えば別候補とする。official searchはread-only libalpm metadata、AUR searchはtyped AUR responseをauthorityとし、pacmanのhuman-readable search outputをparseしない。
 
 interactive stdinで番号、複数番号、inclusive range、表示済みofficial groupの`@group` selectorを扱う。empty、cancel、EOF、non-TTY、`--noconfirm`はnon-zeroで停止し、invalid lineはatomically retryする。selection、identity validation、全static preflightが終わるまでpacman、sudo、clone、build、install、cache / workspace mutationを開始しない。selected repository rootとAUR rootは明示routeへprojectし、package nameからsourceを再推定しない。詳細は[root package selection contract](contracts/root-package-selection.md)を参照する。
 

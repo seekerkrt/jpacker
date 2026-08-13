@@ -164,6 +164,29 @@ void test_runtime_help_connection() {
                 "Runtime syntax did not derive canonical cardinality: " +
                         syntax);
     }
+
+    const std::vector<std::string> canonical = {
+            "build <pkg> [V=K...]",
+            "build --local <directory> [V=K...]",
+            "upgrade",
+            "upgrade-aur",
+            "upgrade-all",
+            "clean",
+            "deps [--recursive] <pkg>...",
+            "plan <pkg>...",
+            "fetch <pkg>...",
+            "add-src <item>...",
+            "edit-src <pkg>...",
+            "list-src",
+            "del-src <pkg>...",
+            "revert <pkg>...",
+            "-G <pkg>",
+            "-Gp <pkg>",
+            "-S --select [--needed] <query>",
+    };
+    expect(
+            cli_canonical_grammar() == canonical,
+            "Canonical public grammar projection differs");
 }
 
 void test_typed_runtime_diagnostic_connection() {
@@ -182,9 +205,9 @@ void test_typed_runtime_diagnostic_connection() {
             DiagnosticClass::InternalInconsistency};
     const std::array labels = {
             "Invalid", "Unsupported", "Ambiguous", "Cancelled",
-            "Unavailable", "QueryFailure", "MetadataFailure",
-            "RequiresCheck", "Blocked", "PartialFailure",
-            "ExecutionFailure", "InternalInconsistency"};
+            "Unavailable", "Query failure", "Metadata failure",
+            "Requires check", "Blocked", "Partial failure",
+            "Execution failure", "Internal inconsistency"};
     for(std::size_t index = 0; index < classifications.size(); ++index) {
         expect(
                 diagnostic_class_label(classifications[index]) ==

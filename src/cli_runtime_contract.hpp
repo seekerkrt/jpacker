@@ -2,6 +2,7 @@
 
 #include "cli_authority.hpp"
 #include "cli_parser.hpp"
+#include "cli_public_projection.hpp"
 #include "diagnostic_model.hpp"
 
 #include <optional>
@@ -61,7 +62,3 @@ CliInvocationValidation validate_cli_invocation_contract(
 // から推測せず、validate_cli_invocation_contractが明示した値を保持する。
 std::string cli_invocation_issue_message(
         const CliInvocationIssue& issue);
-
-// Runtime help / usage syntaxをOperationFormSpecのoperand cardinalityとordering
-// から生成する。OperationSpec::help_syntaxはSlice 4 completion同期までのlegacy。
-std::string cli_operation_syntax(cli_authority::OperationId operation);

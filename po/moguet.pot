@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Moguet 2.2.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-13 16:16+0900\n"
+"POT-Creation-Date: 2026-08-13 19:03+0900\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -2380,12 +2380,193 @@ msgstr ""
 msgid "Repository package sizes:"
 msgstr ""
 
+msgid "not found"
+msgstr ""
+
+#, c++-format
+msgid "  packages: {}"
+msgstr ""
+
 #, c++-format
 msgid "    Package size   : {}"
 msgstr ""
 
 #, c++-format
 msgid "    Installed size : {}"
+msgstr ""
+
+msgid "    totals: unavailable (overflow)"
+msgstr ""
+
+#, c++-format
+msgid "  attention: {}"
+msgstr ""
+
+msgid "Constructed"
+msgstr ""
+
+msgid "Failed"
+msgstr ""
+
+msgid "Unknown plan construction state."
+msgstr ""
+
+msgid "Complete"
+msgstr ""
+
+msgid "Incomplete"
+msgstr ""
+
+msgid "Unknown"
+msgstr ""
+
+msgid "Unknown plan completeness state."
+msgstr ""
+
+msgid "Unique"
+msgstr ""
+
+msgid "Selected"
+msgstr ""
+
+msgid "Ambiguous"
+msgstr ""
+
+msgid "Cancelled"
+msgstr ""
+
+msgid "Unavailable"
+msgstr ""
+
+msgid "Unknown provider decision state."
+msgstr ""
+
+msgid "Fetch"
+msgstr ""
+
+msgid "Build"
+msgstr ""
+
+msgid "Install"
+msgstr ""
+
+msgid "Unknown execution capability."
+msgstr ""
+
+msgid "Not assessed"
+msgstr ""
+
+msgid "Ready"
+msgstr ""
+
+msgid "Requires check"
+msgstr ""
+
+msgid "Blocked"
+msgstr ""
+
+msgid "Unknown execution readiness state."
+msgstr ""
+
+msgid "None"
+msgstr ""
+
+msgid "Correct plan authority"
+msgstr ""
+
+msgid "Resolve dependency"
+msgstr ""
+
+msgid "Select provider"
+msgstr ""
+
+msgid "Obtain metadata"
+msgstr ""
+
+msgid "Review declared relations"
+msgstr ""
+
+msgid "Use the package-base set lifecycle"
+msgstr ""
+
+msgid "Unknown plan required action."
+msgstr ""
+
+msgid "constraint authority"
+msgstr ""
+
+msgid "selected provider identity conflict"
+msgstr ""
+
+msgid "constraint readiness"
+msgstr ""
+
+msgid "resolution failure"
+msgstr ""
+
+msgid "declared relation (actual relation unassessed)"
+msgstr ""
+
+msgid "split package"
+msgstr ""
+
+msgid "incomplete provider candidate"
+msgstr ""
+
+msgid "Unknown plan presentation reason."
+msgstr ""
+
+msgid "Plan state:"
+msgstr ""
+
+#, c++-format
+msgid "  construction: {}"
+msgstr ""
+
+#, c++-format
+msgid "  completeness: {}"
+msgstr ""
+
+#, c++-format
+msgid "  provider decision: {}"
+msgstr ""
+
+#, c++-format
+msgid "  {} readiness: {}"
+msgstr ""
+
+#, c++-format
+msgid "  items: {} total, {} normal, {} attention-required"
+msgstr ""
+
+#, c++-format
+msgid "  normal unconstrained dependencies: {}"
+msgstr ""
+
+msgid "Attention-required details:"
+msgstr ""
+
+msgid "<plan-wide>"
+msgstr ""
+
+#, c++-format
+msgid "  - package: {}"
+msgstr ""
+
+#, c++-format
+msgid "    diagnostic: {}"
+msgstr ""
+
+#, c++-format
+msgid "    {}: {}"
+msgstr ""
+
+#, c++-format
+msgid "      reason: {}"
+msgstr ""
+
+#, c++-format
+msgid "      required action: {}"
 msgstr ""
 
 #, c++-format
@@ -3021,9 +3202,6 @@ msgid "[out-of-date]"
 msgstr ""
 
 msgid "[orphaned]"
-msgstr ""
-
-msgid "None"
 msgstr ""
 
 msgid "no"
@@ -3763,6 +3941,271 @@ msgstr ""
 msgid "unknown packages"
 msgstr ""
 
+msgid "Succeeded"
+msgstr ""
+
+msgid "No operation needed"
+msgstr ""
+
+msgid "Partial failure"
+msgstr ""
+
+msgid "Not attempted"
+msgstr ""
+
+msgid "Inconsistent"
+msgstr ""
+
+msgid "Unknown operation outcome."
+msgstr ""
+
+msgid "Changed"
+msgstr ""
+
+msgid "Verified unchanged"
+msgstr ""
+
+msgid "Unverified"
+msgstr ""
+
+msgid "Not observed"
+msgstr ""
+
+msgid "Unknown package-state observation."
+msgstr ""
+
+msgid "Before snapshot unavailable"
+msgstr ""
+
+msgid "After snapshot unavailable"
+msgstr ""
+
+msgid "Observation not prepared"
+msgstr ""
+
+msgid "Phase not attempted"
+msgstr ""
+
+msgid "Operation failed"
+msgstr ""
+
+msgid "Authority failure"
+msgstr ""
+
+msgid "Inconsistent evidence"
+msgstr ""
+
+msgid "Unknown observation reason."
+msgstr ""
+
+msgid "No relevant work"
+msgstr ""
+
+msgid "Unknown no-op basis."
+msgstr ""
+
+msgid "Correct input"
+msgstr ""
+
+msgid "Select a candidate"
+msgstr ""
+
+msgid "Enable interaction"
+msgstr ""
+
+msgid "Retry the query"
+msgstr ""
+
+msgid "Inspect metadata"
+msgstr ""
+
+msgid "Confirm evaluation"
+msgstr ""
+
+msgid "Resolve the blocker"
+msgstr ""
+
+msgid "Inspect the partial result"
+msgstr ""
+
+msgid "Report the inconsistency"
+msgstr ""
+
+msgid "Unknown diagnostic required action."
+msgstr ""
+
+msgid "foreign inventory not attempted"
+msgstr ""
+
+msgid "foreign inventory completed"
+msgstr ""
+
+msgid "foreign inventory failed"
+msgstr ""
+
+msgid "Unknown foreign inventory status."
+msgstr ""
+
+msgid "registered source updated"
+msgstr ""
+
+msgid "registered source unchanged"
+msgstr ""
+
+msgid "registered source failed"
+msgstr ""
+
+msgid "registered source updated; cleanup failed"
+msgstr ""
+
+msgid "registered source unchanged; cleanup failed"
+msgstr ""
+
+msgid "registered source not attempted"
+msgstr ""
+
+msgid "registered source unsupported"
+msgstr ""
+
+msgid "registered source incomplete"
+msgstr ""
+
+msgid "Unknown registered-source status."
+msgstr ""
+
+#, c++-format
+msgid "{} target updated"
+msgstr ""
+
+#, c++-format
+msgid "{} target unchanged"
+msgstr ""
+
+#, c++-format
+msgid "{} target skipped"
+msgstr ""
+
+#, c++-format
+msgid "{} target unsupported"
+msgstr ""
+
+#, c++-format
+msgid "{} target incomplete"
+msgstr ""
+
+#, c++-format
+msgid "{} target failed"
+msgstr ""
+
+#, c++-format
+msgid "{} target updated; cleanup failed"
+msgstr ""
+
+#, c++-format
+msgid "{} target unchanged; cleanup failed"
+msgstr ""
+
+#, c++-format
+msgid "{} target not attempted"
+msgstr ""
+
+msgid "aggregate diagnostic"
+msgstr ""
+
+#, c++-format
+msgid "{} phase diagnostic"
+msgstr ""
+
+#, c++-format
+msgid "{} query failure"
+msgstr ""
+
+msgid "Unknown presentation boundary reason."
+msgstr ""
+
+#, c++-format
+msgid "{} work-item failure"
+msgstr ""
+
+#, c++-format
+msgid "{} summary:"
+msgstr ""
+
+#, c++-format
+msgid "  operation outcome: {}"
+msgstr ""
+
+#, c++-format
+msgid "  package state observation: {}"
+msgstr ""
+
+#, c++-format
+msgid "  observation reason: {}"
+msgstr ""
+
+#, c++-format
+msgid "  no-op basis: {}"
+msgstr ""
+
+#, c++-format
+msgid "  update candidates: {}, blockers: {}, requires-check: {}, failures: {}"
+msgstr ""
+
+#, c++-format
+msgid "package: {}"
+msgstr ""
+
+#, c++-format
+msgid "source: {}"
+msgstr ""
+
+msgid "operation-wide"
+msgstr ""
+
+#, c++-format
+msgid "    repository: {}"
+msgstr ""
+
+#, c++-format
+msgid "    canonical source identity: {}"
+msgstr ""
+
+#, c++-format
+msgid "    local root: {}"
+msgstr ""
+
+#, c++-format
+msgid "    package state: {}"
+msgstr ""
+
+#, c++-format
+msgid "    observation reason: {}"
+msgstr ""
+
+msgid "    update candidate"
+msgstr ""
+
+msgid "    blocking"
+msgstr ""
+
+msgid "    requires check"
+msgstr ""
+
+msgid "    manual action required"
+msgstr ""
+
+#, c++-format
+msgid "    selected artifact: {} {}"
+msgstr ""
+
+#, c++-format
+msgid "    unselected artifact: {} {}"
+msgstr ""
+
+#, c++-format
+msgid "    reason [{}]: {}"
+msgstr ""
+
 #, c++-format
 msgid "excluded from {} update: {}"
 msgstr ""
@@ -4171,9 +4614,6 @@ msgid "Satisfied"
 msgstr ""
 
 msgid "Unsatisfied"
-msgstr ""
-
-msgid "Unknown"
 msgstr ""
 
 msgid "Invalid"
@@ -4673,19 +5113,19 @@ msgstr ""
 msgid "Store each preference in the active user's {} config authority"
 msgstr ""
 
-msgid "Enable a source-build preference for a package"
+msgid "Enable source-build preferences for one or more items"
 msgstr ""
 
-msgid "Edit a source-build preference"
+msgid "Edit one or more source-build preferences"
 msgstr ""
 
 msgid "List source-build preferences"
 msgstr ""
 
-msgid "Remove a source-build preference"
+msgid "Remove one or more source-build preferences"
 msgstr ""
 
-msgid "Remove a preference and reinstall the binary package"
+msgid "Remove preferences and reinstall binary packages"
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the literal pacman program identity.
@@ -5480,6 +5920,42 @@ msgid "Warning: installed state is unavailable for provider candidate {}: {}."
 msgstr ""
 
 msgid "Repository provider capability metadata is invalid."
+msgstr ""
+
+msgid "Unsupported"
+msgstr ""
+
+msgid "Query failure"
+msgstr ""
+
+msgid "Metadata failure"
+msgstr ""
+
+msgid "Execution failure"
+msgstr ""
+
+msgid "Internal inconsistency"
+msgstr ""
+
+msgid "Unknown diagnostic classification."
+msgstr ""
+
+msgid "Unknown diagnostic source kind."
+msgstr ""
+
+msgid "source"
+msgstr ""
+
+msgid "repository"
+msgstr ""
+
+msgid "package"
+msgstr ""
+
+msgid "source identity"
+msgstr ""
+
+msgid "local root"
 msgstr ""
 
 #. TRANSLATORS: The placeholder is the literal Arch field name
@@ -6509,19 +6985,10 @@ msgstr ""
 msgid "not observed"
 msgstr ""
 
-msgid "Ready"
-msgstr ""
-
 msgid "NoOp"
 msgstr ""
 
-msgid "Blocked"
-msgstr ""
-
 msgid "Unified plan status is not supported by the renderer."
-msgstr ""
-
-msgid "repository"
 msgstr ""
 
 msgid "local"

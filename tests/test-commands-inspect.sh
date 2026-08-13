@@ -676,10 +676,10 @@ export MOGUET_TEST_INSPECTION_SCENARIO=plan-metadata-risk-readiness
 run_ok plan plan-metadata-risk-root
 assert_exact_line "  completeness: Unknown" "$stdout_file"
 assert_exact_line "  Fetch readiness: Ready" "$stdout_file"
-assert_exact_line "  Build readiness: RequiresCheck" "$stdout_file"
-assert_exact_line "  Install readiness: RequiresCheck" "$stdout_file"
+assert_exact_line "  Build readiness: Requires check" "$stdout_file"
+assert_exact_line "  Install readiness: Requires check" "$stdout_file"
 assert_contains \
-    "reason: declared-relation (actual relation unassessed)" "$stdout_file"
+    "reason: declared relation (actual relation unassessed)" "$stdout_file"
 assert_exact_line "  actual relation: unassessed (#353)" "$stdout_file"
 echo "  ok: plan keeps declared relation metadata separate from assessment"
 
@@ -692,7 +692,7 @@ assert_exact_line "  Build readiness: Ready" "$stdout_file"
 assert_exact_line "  Install readiness: Blocked" "$stdout_file"
 assert_exact_line "  - package: plan-split-child" "$stdout_file"
 assert_exact_line "    PackageBase: plan-split-suite" "$stdout_file"
-assert_contains "reason: split-package" "$stdout_file"
+assert_contains "reason: split package" "$stdout_file"
 echo "  ok: plan preserves split PackageBase install readiness"
 
 setup_case plan-density-attention
@@ -703,7 +703,7 @@ assert_exact_line \
 assert_exact_line "  normal unconstrained dependencies: 33" "$stdout_file"
 assert_exact_line "  - package: attention-risk-child" "$stdout_file"
 assert_contains \
-    "reason: declared-relation (actual relation unassessed)" "$stdout_file"
+    "reason: declared relation (actual relation unassessed)" "$stdout_file"
 assert_before "Attention-required details:" "Build plan:" "$stdout_file"
 echo "  ok: plan aggregates normal dependencies before attention detail"
 
@@ -1058,7 +1058,7 @@ export MOGUET_TEST_ALPM_VERCMP_EXPECTED_RHS=3
 export MOGUET_TEST_ALPM_VERCMP_RESULT=-1
 run_ok plan constraint-unsatisfied-root
 assert_exact_line "  completeness: Incomplete" "$stdout_file"
-assert_contains "reason: constraint-readiness" "$stdout_file"
+assert_contains "reason: constraint readiness" "$stdout_file"
 assert_contains "constraint-leaf>=3: result=Unsatisfied" "$stdout_file"
 
 setup_case fetch-constraint-firewall
@@ -1288,5 +1288,29 @@ assert_not_contains "foreign-up-to-date 1.0-1 ->" "$stdout_file"
 assert_contains "Foreign package not found in AUR: foreign-non-aur" "$stdout_file"
 assert_no_foreign_update_mutation
 echo "  ok: foreign version parse failure remains fail-closed"
+
+# Issue #350 Slice 4: typed plan state is localized only at presentation time.
+# The same scenario must retain construction/completeness/readiness/action
+# distinctions and the summary -> attention hierarchy in Japanese.
+command -v localedef >/dev/null 2>&1 ||
+    fail_case "localedef is required for plan localization coverage"
+locale_root=$tmp_dir/locale
+mkdir -p "$locale_root"
+localedef --no-archive -i en_US -f UTF-8 "$locale_root/en_US.UTF-8"
+setup_case plan-localized-semantic-parity
+export MOGUET_TEST_INSPECTION_SCENARIO=plan-metadata-risk-readiness
+LOCPATH=$locale_root \
+LANG=en_US.UTF-8 \
+LC_ALL=en_US.UTF-8 \
+LANGUAGE=ja \
+    run_ok plan plan-metadata-risk-root
+assert_exact_line "プラン状態:" "$stdout_file"
+assert_exact_line "  完全性: 不明" "$stdout_file"
+assert_exact_line "  ビルドの実行準備: 確認が必要" "$stdout_file"
+assert_exact_line "  インストールの実行準備: 確認が必要" "$stdout_file"
+assert_contains "宣言済み関係（実際の関係は未評価）" "$stdout_file"
+assert_contains "必要な対応: 宣言済み関係を確認" "$stdout_file"
+assert_before "確認が必要な詳細:" "ビルド計画:" "$stdout_file"
+echo "  ok: Japanese plan presentation preserves typed semantic dimensions"
 
 echo "command inspection characterization tests: all checks passed"

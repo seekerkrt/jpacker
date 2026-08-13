@@ -744,6 +744,7 @@ CLI_DIAGNOSTIC_MODEL_FORBIDDEN_TEST_SRCS := \
 # its existing assignment parser, and diagnostic presentation adapter.
 RUNTIME_CLI_CONNECTION_ALLOWED_PRODUCTION_TEST_SRCS := \
 	$(SRC_DIR)/cli_runtime_contract.cpp \
+	$(SRC_DIR)/cli_public_projection.cpp \
 	$(SRC_DIR)/runtime_diagnostic.cpp \
 	$(SRC_DIR)/source_environment.cpp
 RUNTIME_CLI_CONNECTION_TEST_SRCS := \
@@ -1269,6 +1270,7 @@ AUR_UPDATE_COMMAND_FORBIDDEN_TEST_LDLIBS = $(LIBALPM_LDLIBS)
 UPGRADE_ALL_COMMAND_TEST_CPPFLAGS = \
 	-DMOGUET_ENABLE_TEST_OVERRIDES \
 	-DMOGUET_ENABLE_TEST_CONFIG_PATH \
+	-DMOGUET_LOCALE_DIRECTORY=\"$(MOGUET_TEST_CATALOG_DIR)\" \
 	-I$(SRC_DIR) \
 	-Itests/stubs/package-metadata
 UPGRADE_ALL_COMMAND_TEST_LDLIBS = $(MY_LDLIBS)
@@ -1284,6 +1286,7 @@ COMMANDS_SYNC_FORBIDDEN_TEST_LDLIBS = $(LIBALPM_LDLIBS)
 
 COMMANDS_INSPECT_TEST_CPPFLAGS = \
 	-DMOGUET_ENABLE_TEST_OVERRIDES \
+	-DMOGUET_LOCALE_DIRECTORY=\"$(MOGUET_TEST_CATALOG_DIR)\" \
 	-I$(SRC_DIR) \
 	-Itests/stubs/package-metadata
 COMMANDS_INSPECT_TEST_LDLIBS = $(MY_LDLIBS)
@@ -2977,7 +2980,7 @@ $(HEAVY_LINK_FIREWALLS):
 test-aur-update-command: check-aur-update-command-link-firewall $(AUR_UPDATE_COMMAND_TEST_TARGET)
 	sh tests/test-aur-update-command.sh $(abspath $(AUR_UPDATE_COMMAND_TEST_TARGET))
 
-test-upgrade-all-command: check-upgrade-all-command-link-firewall $(UPGRADE_ALL_COMMAND_TEST_TARGET)
+test-upgrade-all-command: check-upgrade-all-command-link-firewall $(UPGRADE_ALL_COMMAND_TEST_TARGET) $(MO_FILES)
 	sh tests/test-upgrade-all-command.sh $(abspath $(UPGRADE_ALL_COMMAND_TEST_TARGET))
 
 test-aur-update-execution-preflight: $(AUR_UPDATE_EXECUTION_PREFLIGHT_TEST_TARGET)
@@ -3383,7 +3386,7 @@ test-public-documentation: $(CLI_LOCALIZATION_TEST_TARGET) $(MANPAGES) $(COMPLET
 	sh tests/test-help-man-completion.sh $(abspath $(CLI_LOCALIZATION_TEST_TARGET))
 	bash tests/test-static-completion.sh $(abspath $(BASH_COMPLETION))
 
-test-commands-inspect: $(COMMANDS_INSPECT_TEST_TARGET)
+test-commands-inspect: $(COMMANDS_INSPECT_TEST_TARGET) $(MO_FILES)
 	sh tests/test-commands-inspect.sh $(abspath $(COMMANDS_INSPECT_TEST_TARGET))
 
 # POLICY(#406): strict repository discovery in the full CLI and lower

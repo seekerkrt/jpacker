@@ -147,7 +147,7 @@ assert_successful_snapshot_unavailable() {
     assert_exact_line \
         "    observation reason: $expected_reason" "$stdout_file"
     assert_occurrence_count 1 "$expected_reason" "$stdout_file"
-    assert_exact_line "    diagnostic: RequiresCheck" "$stdout_file"
+    assert_exact_line "    diagnostic: Requires check" "$stdout_file"
     assert_exact_line "    requires check" "$stdout_file"
     assert_not_contains "    blocking" "$stdout_file"
     assert_contains \
@@ -279,10 +279,10 @@ assert_line_before \
     "upgrade-all prepare $default_snapshot" \
     "upgrade-all execute $default_snapshot" "$command_log"
 assert_exact_line "upgrade-all summary:" "$stdout_file"
-assert_exact_line "  operation outcome: NoOp" "$stdout_file"
+assert_exact_line "  operation outcome: No operation needed" "$stdout_file"
 assert_exact_line \
-    "  package state observation: VerifiedUnchanged" "$stdout_file"
-assert_exact_line "  NoOp basis: NoRelevantWork" "$stdout_file"
+    "  package state observation: Verified unchanged" "$stdout_file"
+assert_exact_line "  no-op basis: No relevant work" "$stdout_file"
 assert_exact_line \
     "  items: 0 total, 0 normal, 0 attention-required" "$stdout_file"
 assert_not_contains "pacman upgrade-all" "$command_log"
@@ -489,18 +489,18 @@ setup_case completed-no-change completed-no-change
 run_status 0 upgrade-all
 assert_exact_line "  operation outcome: Succeeded" "$stdout_file"
 assert_exact_line \
-    "  package state observation: VerifiedUnchanged" "$stdout_file"
+    "  package state observation: Verified unchanged" "$stdout_file"
 
 setup_case before-snapshot-unavailable before-snapshot-unavailable
 run_status 0 upgrade-all
 assert_successful_snapshot_unavailable \
-    BeforeSnapshotUnavailable \
+    "Before snapshot unavailable" \
     "fixture before snapshot unavailable"
 
 setup_case after-snapshot-unavailable after-snapshot-unavailable
 run_status 0 upgrade-all
 assert_successful_snapshot_unavailable \
-    AfterSnapshotUnavailable \
+    "After snapshot unavailable" \
     "fixture after snapshot unavailable"
 
 setup_case completed-unknown completed-unknown
@@ -508,9 +508,9 @@ run_status 0 upgrade-all
 assert_exact_line "  operation outcome: Succeeded" "$stdout_file"
 assert_exact_line "  package state observation: Unverified" "$stdout_file"
 assert_exact_line \
-    "    observation reason: ObservationNotPrepared" "$stdout_file"
-assert_occurrence_count 1 "ObservationNotPrepared" "$stdout_file"
-assert_exact_line "    diagnostic: RequiresCheck" "$stdout_file"
+    "    observation reason: Observation not prepared" "$stdout_file"
+assert_occurrence_count 1 "Observation not prepared" "$stdout_file"
+assert_exact_line "    diagnostic: Requires check" "$stdout_file"
 assert_not_contains "  operation outcome: Failed" "$stdout_file"
 
 setup_case normal-aur-skips aur-skips
@@ -563,7 +563,7 @@ run_status 1 upgrade-all
 assert_event_count 1 "upgrade-all prepare $default_snapshot"
 assert_event_count 0 "upgrade-all execute $default_snapshot"
 assert_exact_line "  operation outcome: Blocked" "$stdout_file"
-assert_exact_line "  package state observation: NotObserved" "$stdout_file"
+assert_exact_line "  package state observation: Not observed" "$stdout_file"
 assert_exact_line \
     "  - package: source-unsupported" \
     "$stdout_file"
@@ -573,7 +573,7 @@ assert_exact_line \
     "  - package: source-incomplete" \
     "$stdout_file"
 assert_exact_line \
-    "    diagnostic: RequiresCheck" "$stdout_file"
+    "    diagnostic: Requires check" "$stdout_file"
 assert_contains "reason [preparation]: explicit source adapter invalid" \
     "$stdout_file"
 assert_contains "fixture aggregate preparation blocked" "$stderr_file"
@@ -586,7 +586,7 @@ assert_contains \
 setup_case stopped-system stopped-on-system-failure
 run_status 1 upgrade-all
 assert_exact_line "  operation outcome: Failed" "$stdout_file"
-assert_exact_line "  package state observation: NotObserved" "$stdout_file"
+assert_exact_line "  package state observation: Not observed" "$stdout_file"
 assert_exact_line \
     "  - package: source-after-system" \
     "$stdout_file"
@@ -594,18 +594,18 @@ assert_exact_line \
     "    reason [registered source]: registered source not attempted" \
     "$stdout_file"
 assert_exact_line "  - source: pacman" "$stdout_file"
-assert_exact_line "    diagnostic: ExecutionFailure" "$stdout_file"
+assert_exact_line "    diagnostic: Execution failure" "$stdout_file"
 assert_contains "fixture system upgrade failed" "$stderr_file"
 
 setup_case stopped-source stopped-on-source-failure
 run_status 1 upgrade-all
-assert_exact_line "  operation outcome: PartialFailure" "$stdout_file"
+assert_exact_line "  operation outcome: Partial failure" "$stdout_file"
 assert_exact_line "  package state observation: Changed" "$stdout_file"
 assert_exact_line \
     "  - package: source-failed" \
     "$stdout_file"
 assert_exact_line \
-    "    diagnostic: ExecutionFailure" "$stdout_file"
+    "    diagnostic: Execution failure" "$stdout_file"
 assert_exact_line \
     "    reason [registered source]: registered source failed" \
     "$stdout_file"
@@ -613,13 +613,13 @@ assert_contains "fixture source build or install failed" "$stderr_file"
 
 setup_case stopped-source-cleanup stopped-after-source-cleanup-failure
 run_status 1 upgrade-all
-assert_exact_line "  operation outcome: PartialFailure" "$stdout_file"
+assert_exact_line "  operation outcome: Partial failure" "$stdout_file"
 assert_exact_line "  package state observation: Changed" "$stdout_file"
 assert_exact_line \
     "  - package: source-cleanup-failed" \
     "$stdout_file"
 assert_exact_line \
-    "    diagnostic: PartialFailure" "$stdout_file"
+    "    diagnostic: Partial failure" "$stdout_file"
 assert_exact_line \
     "    reason [registered source]: registered source updated; cleanup failed" \
     "$stdout_file"
@@ -632,14 +632,14 @@ assert_exact_line \
     "  - package: source-no-change-cleanup-failed" \
     "$stdout_file"
 assert_exact_line \
-    "  package state observation: NotObserved" "$stdout_file"
+    "  package state observation: Not observed" "$stdout_file"
 assert_exact_line \
     "    reason [registered source]: registered source unchanged; cleanup failed" \
     "$stdout_file"
 
 setup_case stopped-before-aur stopped-before-aur-execution
 run_status 1 upgrade-all
-assert_exact_line "  operation outcome: PartialFailure" "$stdout_file"
+assert_exact_line "  operation outcome: Partial failure" "$stdout_file"
 assert_exact_line "  package state observation: Unverified" "$stdout_file"
 assert_exact_line \
     "  - package: aur-preflight-blocked" \
@@ -655,14 +655,14 @@ assert_contains "fixture AUR preparation blocker" "$stderr_file"
 
 setup_case stopped-aur stopped-on-aur-failure
 run_status 1 upgrade-all
-assert_exact_line "  operation outcome: PartialFailure" "$stdout_file"
+assert_exact_line "  operation outcome: Partial failure" "$stdout_file"
 assert_exact_line "  package state observation: Changed" "$stdout_file"
 assert_exact_line "  - package: aur-first-updated" "$stdout_file"
 assert_exact_line \
     "  - package: aur-failed" \
     "$stdout_file"
 assert_exact_line \
-    "    diagnostic: ExecutionFailure" "$stdout_file"
+    "    diagnostic: Execution failure" "$stdout_file"
 assert_exact_line \
     "  - package: aur-later" \
     "$stdout_file"
@@ -718,14 +718,14 @@ assert_contains \
     "$stderr_file"
 assert_not_contains "/private/workspace/upgrade-all-secret" "$stdout_file"
 assert_not_contains "/private/workspace/upgrade-all-secret" "$stderr_file"
-assert_exact_line "  operation outcome: PartialFailure" "$stdout_file"
+assert_exact_line "  operation outcome: Partial failure" "$stdout_file"
 
 setup_case foreign-inventory-failure foreign-inventory-failure
 run_status 1 upgrade-all
-assert_exact_line "  operation outcome: PartialFailure" "$stdout_file"
-assert_exact_line "  package state observation: NotObserved" "$stdout_file"
+assert_exact_line "  operation outcome: Partial failure" "$stdout_file"
+assert_exact_line "  package state observation: Not observed" "$stdout_file"
 assert_exact_line \
-    "    diagnostic: QueryFailure" "$stdout_file"
+    "    diagnostic: Query failure" "$stdout_file"
 assert_exact_line \
     "    reason [foreign inventory]: foreign inventory failed" \
     "$stdout_file"
@@ -740,9 +740,9 @@ assert_occurrence_count 1 "fixture foreign inventory read failed" "$stderr_file"
 setup_case defensive-direct-foreign-inventory \
     completed-direct-foreign-inventory-failure
 run_status 1 upgrade-all
-assert_exact_line "  operation outcome: PartialFailure" "$stdout_file"
+assert_exact_line "  operation outcome: Partial failure" "$stdout_file"
 assert_exact_line \
-    "  package state observation: VerifiedUnchanged" "$stdout_file"
+    "  package state observation: Verified unchanged" "$stdout_file"
 assert_contains \
     "foreign inventory failure [local database unavailable]: fixture direct foreign inventory failure" \
     "$stderr_file"
@@ -756,14 +756,14 @@ run_status 1 upgrade-all
 assert_exact_line "  operation outcome: Inconsistent" "$stdout_file"
 assert_exact_line "  package state observation: Unverified" "$stdout_file"
 assert_exact_line \
-    "    diagnostic: InternalInconsistency" "$stdout_file"
+    "    diagnostic: Internal inconsistency" "$stdout_file"
 assert_contains "fixture aggregate correlation inconsistency" "$stderr_file"
 
 setup_case nested-system-unavailable nested-system-unavailable
 run_status 1 upgrade-all
 assert_exact_line "  operation outcome: Inconsistent" "$stdout_file"
 assert_exact_line "  - source: pacman" "$stdout_file"
-assert_exact_line "    diagnostic: ExecutionFailure" "$stdout_file"
+assert_exact_line "    diagnostic: Execution failure" "$stdout_file"
 assert_contains \
     "The system result is unavailable because an unexpected exception occurred after the phase started." \
     "$stderr_file"
@@ -777,7 +777,7 @@ assert_exact_line \
 assert_exact_line \
     "  - package: source-unavailable-after-start" \
     "$stdout_file"
-assert_exact_line "    diagnostic: RequiresCheck" "$stdout_file"
+assert_exact_line "    diagnostic: Requires check" "$stdout_file"
 assert_exact_line \
     "  - package: source-not-started" \
     "$stdout_file"
@@ -791,8 +791,8 @@ setup_case defensive-query completed-query-failure
 run_status 1 upgrade-all
 assert_contains "AUR query failure for query-broken, query-also-broken" \
     "$stderr_file"
-assert_exact_line "  operation outcome: PartialFailure" "$stdout_file"
-assert_exact_line "    diagnostic: QueryFailure" "$stdout_file"
+assert_exact_line "  operation outcome: Partial failure" "$stdout_file"
+assert_exact_line "    diagnostic: Query failure" "$stdout_file"
 assert_contains \
     "failure details despite a successful aggregate status" "$stderr_file"
 
@@ -804,7 +804,7 @@ assert_contains "AUR mapping issue: target/planner mapping inconsistent" \
     "$stderr_file"
 assert_exact_line "  operation outcome: Inconsistent" "$stdout_file"
 assert_exact_line "    diagnostic: Blocked" "$stdout_file"
-assert_exact_line "    diagnostic: InternalInconsistency" "$stdout_file"
+assert_exact_line "    diagnostic: Internal inconsistency" "$stdout_file"
 
 setup_case defensive-inconsistency completed-inconsistency
 run_status 1 upgrade-all
@@ -817,7 +817,7 @@ run_status 1 upgrade-all
 assert_exact_line \
     "  - package: defensive-cleanup" \
     "$stdout_file"
-assert_exact_line "    diagnostic: PartialFailure" "$stdout_file"
+assert_exact_line "    diagnostic: Partial failure" "$stdout_file"
 assert_contains \
     "execution failure: cleanup failure after successful package transaction" \
     "$stderr_file"
@@ -1061,7 +1061,31 @@ run_matrix_table external-attribution-missing 1 <<'EOF'
 1|upgrade-all summary:|Unexpected upgrade-all command failure: External satisfaction has no explicit source identity.
 EOF
 
-if [ "$case_count" -ne 220 ]; then
+# Issue #350 Slice 4: successful-unverified remains a successful typed outcome
+# while the observation and required check are localized for presentation.
+command -v localedef >/dev/null 2>&1 ||
+    fail_case "localedef is required for upgrade-all localization coverage"
+locale_root=$tmp_dir/locale
+mkdir -p "$locale_root"
+localedef --no-archive -i en_US -f UTF-8 "$locale_root/en_US.UTF-8"
+setup_case localized-completed-unknown completed-unknown
+LOCPATH=$locale_root \
+LANG=en_US.UTF-8 \
+LC_ALL=en_US.UTF-8 \
+LANGUAGE=ja \
+    run_status 0 upgrade-all
+assert_exact_line "upgrade-allの概要:" "$stdout_file"
+assert_exact_line "  操作結果: 成功" "$stdout_file"
+assert_exact_line "  パッケージ状態の観測: 未検証" "$stdout_file"
+assert_exact_line "    観測理由: 観測未準備" "$stdout_file"
+assert_exact_line "    診断: 確認が必要" "$stdout_file"
+assert_exact_line "    確認が必要" "$stdout_file"
+assert_not_contains "  操作結果: 失敗" "$stdout_file"
+assert_line_before \
+    "upgrade-allの概要:" \
+    "確認が必要な詳細:" "$stdout_file"
+
+if [ "$case_count" -ne 221 ]; then
     echo "upgrade-all command test scenario count drifted: $case_count" >&2
     exit 1
 fi

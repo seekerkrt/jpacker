@@ -362,7 +362,7 @@ void print_repository_package_sizes(
         if(std::holds_alternative<PackageNotFound>(result)) {
             unavailable_details.push_back(
                     repository_package_lookup_display(lookup) +
-                    ": not found");
+                    ": " + localization::translate_message("not found"));
             continue;
         }
 
@@ -373,7 +373,9 @@ void print_repository_package_sizes(
                 repository_metadata_unavailable_display(failure.code));
     }
 
-    std::cout << "  packages: " << displayed_packages.size() << std::endl;
+    std::cout << localization::format_translated_message(
+                         "  packages: {}", displayed_packages.size())
+              << std::endl;
     if(totals_available) {
         std::cout << localization::format_translated_message(
                              "    Package size   : {}",
@@ -384,10 +386,14 @@ void print_repository_package_sizes(
                              format_iec_bytes(installed_size_total))
                   << std::endl;
     } else {
-        std::cout << "    totals: unavailable (overflow)" << std::endl;
+        std::cout << localization::translate_message(
+                             "    totals: unavailable (overflow)")
+                  << std::endl;
     }
     for(const std::string& detail : unavailable_details) {
-        std::cout << "  attention: " << detail << std::endl;
+        std::cout << localization::format_translated_message(
+                             "  attention: {}", detail)
+                  << std::endl;
     }
 }
 
@@ -409,118 +415,127 @@ std::string join_comma_display_values(const std::vector<std::string>& values) {
 }
 
 std::string plan_construction_label(PlanConstruction construction) {
-    // NO_TRANSLATE(Issue #350): Stable typed plan-state tokens. Slice 4 owns
-    // full gettext semantic parity for this new runtime surface.
     switch(construction) {
     case PlanConstruction::Constructed:
-        return "Constructed";
+        return localization::translate_message("Constructed");
     case PlanConstruction::Failed:
-        return "Failed";
+        return localization::translate_message("Failed");
     }
-    throw std::logic_error("Unknown plan construction state.");
+    throw std::logic_error(localization::translate_message(
+            "Unknown plan construction state."));
 }
 
 std::string plan_completeness_label(PlanCompleteness completeness) {
     switch(completeness) {
     case PlanCompleteness::Complete:
-        return "Complete";
+        return localization::translate_message("Complete");
     case PlanCompleteness::Incomplete:
-        return "Incomplete";
+        return localization::translate_message("Incomplete");
     case PlanCompleteness::Unknown:
-        return "Unknown";
+        return localization::translate_message("Unknown");
     }
-    throw std::logic_error("Unknown plan completeness state.");
+    throw std::logic_error(localization::translate_message(
+            "Unknown plan completeness state."));
 }
 
 std::string provider_decision_label(ProviderDecision decision) {
     switch(decision) {
     case ProviderDecision::Unique:
-        return "Unique";
+        return localization::translate_message("Unique");
     case ProviderDecision::Selected:
-        return "Selected";
+        return localization::translate_message("Selected");
     case ProviderDecision::Ambiguous:
-        return "Ambiguous";
+        return localization::translate_message("Ambiguous");
     case ProviderDecision::Cancelled:
-        return "Cancelled";
+        return localization::translate_message("Cancelled");
     case ProviderDecision::Unavailable:
-        return "Unavailable";
+        return localization::translate_message("Unavailable");
     }
-    throw std::logic_error("Unknown provider decision state.");
+    throw std::logic_error(localization::translate_message(
+            "Unknown provider decision state."));
 }
 
 std::string execution_capability_label(ExecutionCapability capability) {
     switch(capability) {
     case ExecutionCapability::Fetch:
-        return "Fetch";
+        return localization::translate_message("Fetch");
     case ExecutionCapability::Build:
-        return "Build";
+        return localization::translate_message("Build");
     case ExecutionCapability::Install:
-        return "Install";
+        return localization::translate_message("Install");
     }
-    throw std::logic_error("Unknown execution capability.");
+    throw std::logic_error(localization::translate_message(
+            "Unknown execution capability."));
 }
 
 std::string execution_readiness_label(ExecutionReadinessState readiness) {
     switch(readiness) {
     case ExecutionReadinessState::NotAssessed:
-        return "NotAssessed";
+        return localization::translate_message("Not assessed");
     case ExecutionReadinessState::Ready:
-        return "Ready";
+        return localization::translate_message("Ready");
     case ExecutionReadinessState::RequiresCheck:
-        return "RequiresCheck";
+        return localization::translate_message("Requires check");
     case ExecutionReadinessState::Blocked:
-        return "Blocked";
+        return localization::translate_message("Blocked");
     case ExecutionReadinessState::Unknown:
-        return "Unknown";
+        return localization::translate_message("Unknown");
     }
-    throw std::logic_error("Unknown execution readiness state.");
+    throw std::logic_error(localization::translate_message(
+            "Unknown execution readiness state."));
 }
 
 std::string plan_required_action_label(PlanRequiredAction action) {
     switch(action) {
     case PlanRequiredAction::None:
-        return "None";
+        return localization::translate_message("None");
     case PlanRequiredAction::CorrectPlanAuthority:
-        return "CorrectPlanAuthority";
+        return localization::translate_message("Correct plan authority");
     case PlanRequiredAction::ResolveDependency:
-        return "ResolveDependency";
+        return localization::translate_message("Resolve dependency");
     case PlanRequiredAction::SelectProvider:
-        return "SelectProvider";
+        return localization::translate_message("Select provider");
     case PlanRequiredAction::ObtainMetadata:
-        return "ObtainMetadata";
+        return localization::translate_message("Obtain metadata");
     case PlanRequiredAction::ReviewDeclaredRelations:
-        return "ReviewDeclaredRelations";
+        return localization::translate_message("Review declared relations");
     case PlanRequiredAction::UsePackageBaseSetLifecycle:
-        return "UsePackageBaseSetLifecycle";
+        return localization::translate_message(
+                "Use the package-base set lifecycle");
     }
-    throw std::logic_error("Unknown plan required action.");
+    throw std::logic_error(localization::translate_message(
+            "Unknown plan required action."));
 }
 
 std::string plan_presentation_reason_label(
         PlanPresentationReasonKind kind) {
     switch(kind) {
     case PlanPresentationReasonKind::ConstraintAuthority:
-        return "constraint-authority";
+        return localization::translate_message("constraint authority");
     case PlanPresentationReasonKind::SelectedProviderIdentityConflict:
-        return "selected-provider-identity-conflict";
+        return localization::translate_message(
+                "selected provider identity conflict");
     case PlanPresentationReasonKind::ConstraintReadiness:
-        return "constraint-readiness";
+        return localization::translate_message("constraint readiness");
     case PlanPresentationReasonKind::ResolutionFailure:
-        return "resolution-failure";
+        return localization::translate_message("resolution failure");
     case PlanPresentationReasonKind::UnresolvedDependency:
-        return "unresolved-dependency";
+        return localization::translate_message("unresolved dependency");
     case PlanPresentationReasonKind::AmbiguousProvider:
-        return "ambiguous-provider";
+        return localization::translate_message("ambiguous provider");
     case PlanPresentationReasonKind::DependencyCycle:
-        return "dependency-cycle";
+        return localization::translate_message("dependency cycle");
     case PlanPresentationReasonKind::DeclaredRelation:
-        return "declared-relation (actual relation unassessed)";
+        return localization::translate_message(
+                "declared relation (actual relation unassessed)");
     case PlanPresentationReasonKind::SplitPackage:
-        return "split-package";
+        return localization::translate_message("split package");
     case PlanPresentationReasonKind::IncompleteProviderCandidate:
-        return "incomplete-provider-candidate";
+        return localization::translate_message(
+                "incomplete provider candidate");
     }
-    throw std::logic_error("Unknown plan presentation reason.");
+    throw std::logic_error(localization::translate_message(
+            "Unknown plan presentation reason."));
 }
 
 std::size_t unconstrained_dependency_count(const BuildPlan& plan) {
@@ -537,32 +552,43 @@ void print_plan_state_summary(
         const BuildPlan& plan,
         const PlanStateProjection& state,
         const PresentationProjection& presentation) {
-    std::cout << "Plan state:" << std::endl;
-    std::cout << "  construction: "
-              << plan_construction_label(state.construction) << std::endl;
-    std::cout << "  completeness: "
-              << plan_completeness_label(state.completeness) << std::endl;
-    std::cout << "  provider decision: "
-              << provider_decision_label(state.provider_decision) << std::endl;
+    std::cout << localization::translate_message("Plan state:") << std::endl;
+    std::cout << localization::format_translated_message(
+                         "  construction: {}",
+                         plan_construction_label(state.construction))
+              << std::endl;
+    std::cout << localization::format_translated_message(
+                         "  completeness: {}",
+                         plan_completeness_label(state.completeness))
+              << std::endl;
+    std::cout << localization::format_translated_message(
+                         "  provider decision: {}",
+                         provider_decision_label(state.provider_decision))
+              << std::endl;
     for(ExecutionCapability capability : {
                 ExecutionCapability::Fetch,
                 ExecutionCapability::Build,
                 ExecutionCapability::Install}) {
         const ExecutionReadiness& readiness =
                 execution_readiness(state, capability);
-        std::cout << "  " << execution_capability_label(capability)
-                  << " readiness: "
-                  << execution_readiness_label(readiness.state) << std::endl;
+        std::cout << localization::format_translated_message(
+                             "  {} readiness: {}",
+                             execution_capability_label(capability),
+                             execution_readiness_label(readiness.state))
+                  << std::endl;
     }
-    std::cout << "  items: " << presentation.summary_counts.total
-              << " total, " << presentation.summary_counts.normal
-              << " normal, "
-              << presentation.summary_counts.attention_required
-              << " attention-required" << std::endl;
+    std::cout << localization::format_translated_message(
+                         "  items: {} total, {} normal, {} attention-required",
+                         presentation.summary_counts.total,
+                         presentation.summary_counts.normal,
+                         presentation.summary_counts.attention_required)
+              << std::endl;
     const std::size_t unconstrained = unconstrained_dependency_count(plan);
     if(unconstrained != 0) {
-        std::cout << "  normal unconstrained dependencies: "
-                  << unconstrained << std::endl;
+        std::cout << localization::format_translated_message(
+                             "  normal unconstrained dependencies: {}",
+                             unconstrained)
+                  << std::endl;
     }
 }
 
@@ -570,10 +596,16 @@ void print_plan_attention_details(
         const PresentationProjection& presentation) {
     if(presentation.attention_items.empty()) return;
 
-    std::cout << std::endl << "Attention-required details:" << std::endl;
+    std::cout << std::endl
+              << localization::translate_message(
+                         "Attention-required details:")
+              << std::endl;
     for(const PresentationItem& item : presentation.attention_items) {
-        std::cout << "  - package: "
-                  << item.requested_package.value_or("<plan-wide>")
+        std::cout << localization::format_translated_message(
+                             "  - package: {}",
+                             item.requested_package.value_or(
+                                     localization::translate_message(
+                                             "<plan-wide>")))
                   << std::endl;
         if(item.package_base.has_value() &&
            item.package_base != item.requested_package) {
@@ -581,22 +613,26 @@ void print_plan_attention_details(
                       << std::endl;
         }
         if(item.diagnostic_class.has_value()) {
-            std::cout << "    diagnostic: "
-                      << diagnostic_class_label(
-                                 item.diagnostic_class.value())
+            std::cout << localization::format_translated_message(
+                                 "    diagnostic: {}",
+                                 diagnostic_class_label(
+                                         item.diagnostic_class.value()))
                       << std::endl;
         }
         for(const PlanPresentationReason& reason : item.plan_reasons) {
-            std::cout << "    "
-                      << execution_capability_label(reason.capability)
-                      << ": "
-                      << execution_readiness_label(reason.readiness)
+            std::cout << localization::format_translated_message(
+                                 "    {}: {}",
+                                 execution_capability_label(reason.capability),
+                                 execution_readiness_label(reason.readiness))
                       << std::endl;
-            std::cout << "      reason: "
-                      << plan_presentation_reason_label(reason.kind)
+            std::cout << localization::format_translated_message(
+                                 "      reason: {}",
+                                 plan_presentation_reason_label(reason.kind))
                       << std::endl;
-            std::cout << "      required action: "
-                      << plan_required_action_label(reason.required_action)
+            std::cout << localization::format_translated_message(
+                                 "      required action: {}",
+                                 plan_required_action_label(
+                                         reason.required_action))
                       << std::endl;
         }
     }
