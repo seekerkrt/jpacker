@@ -2,7 +2,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: Moguet 2.2.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-12 13:55+0900\n"
+"POT-Creation-Date: 2026-08-13 16:16+0900\n"
 "PO-Revision-Date: 2026-08-03 06:53+0900\n"
 "Last-Translator: Moguet contributors\n"
 "Language-Team: Japanese\n"
@@ -1927,7 +1927,6 @@ msgstr "操作 {} ではオプション {} をサポートしていません。"
 msgid "Operation {} requires exactly one {} package target."
 msgstr "操作 {} には {} パッケージ対象をちょうど1つ指定する必要があります。"
 
-#. TRANSLATORS: The placeholders are the command, operation, and operand tokens.
 #, c++-format
 msgid "Usage: {} {} {}"
 msgstr "使用方法: {} {} {}"
@@ -1984,6 +1983,23 @@ msgstr "環境変数代入の前にディレクトリが必要です: {}"
 msgid "Invalid environment assignment: {}"
 msgstr "不正な環境変数代入です: {}"
 
+#, c++-format
+msgid "Unknown operation: {}"
+msgstr "不明な操作です: {}"
+
+#, c++-format
+msgid "Operation {} does not accept target operands."
+msgstr "操作{}は対象オペランドを受け付けません。"
+
+#, c++-format
+msgid "Environment assignment requires a preceding package: {}"
+msgstr "環境変数代入の前にパッケージが必要です: {}"
+
+#. TRANSLATORS: The placeholders are the command and complete operation syntax.
+#, c++-format
+msgid "Usage: {} {}"
+msgstr "使用法: {} {}"
+
 msgid "no updates"
 msgstr "更新なし"
 
@@ -2006,8 +2022,7 @@ msgid "inconsistent result"
 msgstr "結果に整合性なし"
 
 #. TRANSLATORS: AUR is a runtime project identity.
-#. TRANSLATORS: The placeholder is the literal service name
-#. "AUR".
+#. TRANSLATORS: The placeholder is the literal service name "AUR".
 #, c++-format
 msgid "Unknown {} update operation status."
 msgstr "不明な{}更新操作状態です。"
@@ -2326,11 +2341,6 @@ msgstr "{}更新には未試行の対象があります。"
 msgid "{} update completed, but query failures were reported."
 msgstr "{}更新は完了しましたが、問い合わせの失敗が報告されました。"
 
-#. TRANSLATORS: The placeholders are the command, operation, option, and operand tokens.
-#, c++-format
-msgid "Usage: {} {} [{}] {}"
-msgstr "使用法: {} {} [{}] {}"
-
 msgid "Metadata       : unavailable (configuration unavailable)"
 msgstr "メタデータ     : 利用不可（設定を取得できません）"
 
@@ -2371,9 +2381,6 @@ msgstr "    パッケージサイズ  : {}"
 #, c++-format
 msgid "    Installed size : {}"
 msgstr "    インストールサイズ: {}"
-
-msgid "    Metadata       : not found"
-msgstr "    メタデータ        : 見つかりません"
 
 #, c++-format
 msgid "base: {}"
@@ -2458,20 +2465,6 @@ msgstr "    競合: {}"
 msgid "    replaces: {}"
 msgstr "    置換: {}"
 
-msgid "Build plan:"
-msgstr "ビルド計画:"
-
-#, c++-format
-msgid "     target package: {}"
-msgid_plural "     target packages: {}"
-msgstr[0] "     対象パッケージ: {}"
-
-msgid "Provided dependencies:"
-msgstr "提供された依存関係:"
-
-msgid " (selected)"
-msgstr " （選択済み）"
-
 msgid "Ambiguous provided dependencies:"
 msgstr "プロバイダーを一意に決定できない依存関係:"
 
@@ -2488,23 +2481,19 @@ msgstr "未解決の依存関係:"
 msgid "Cyclic dependencies:"
 msgstr "循環している依存関係:"
 
-msgid "Plan status: incomplete"
-msgstr "計画の状態: 未完了"
+msgid "Build plan:"
+msgstr "ビルド計画:"
 
-msgid "  unresolved dependencies remain"
-msgstr "  未解決の依存関係が残っています"
+#, c++-format
+msgid "     target package: {}"
+msgid_plural "     target packages: {}"
+msgstr[0] "     対象パッケージ: {}"
 
-msgid "  ambiguous providers are not selected"
-msgstr "  一意に決定できないプロバイダーは選択されていません"
+msgid "Provided dependencies:"
+msgstr "提供された依存関係:"
 
-msgid "  cyclic dependencies detected"
-msgstr "  循環依存が検出されました"
-
-msgid "  conflicts/replaces metadata is not resolved automatically"
-msgstr "  競合/置換メタデータは自動的には解決されません"
-
-msgid "  dependency constraints are incomplete"
-msgstr "  依存関係制約が不完全です"
+msgid " (selected)"
+msgstr " （選択済み）"
 
 msgid "Fetch targets:"
 msgstr "取得対象:"
@@ -2882,14 +2871,6 @@ msgstr "診断用に保持したアーティファクト作業領域: {}"
 msgid "Local source workspace cleanup also failed: {}"
 msgstr "ローカルソース作業領域の後処理にも失敗しました: {}"
 
-#, c++-format
-msgid "Usage: {} {}"
-msgstr "使用法: {} {}"
-
-#, c++-format
-msgid "Ignoring extra arg '{}'"
-msgstr "余分な引数'{}'を無視します"
-
 msgid "No package specified."
 msgstr "パッケージが指定されていません。"
 
@@ -2900,10 +2881,6 @@ msgstr "ビルドエラー: {}"
 #, c++-format
 msgid "Added {} to source-build list."
 msgstr "{}をソースビルド一覧へ追加しました。"
-
-#, c++-format
-msgid "Environment assignment requires a preceding package: {}"
-msgstr "環境変数代入の前にパッケージが必要です: {}"
 
 #, c++-format
 msgid "Appending {} to {}"
@@ -3154,9 +3131,6 @@ msgstr "対話形式のパッケージ選択は {} と併用できません。"
 msgid "Interactive package selection has an inconsistent input gate."
 msgstr "対話形式のパッケージ選択で入力ゲートの状態が矛盾しています。"
 
-msgid "Interactive package selection has an unknown input gate."
-msgstr "対話形式のパッケージ選択の入力ゲートが不明です。"
-
 #, c++-format
 msgid "Repository package search failed: {}"
 msgstr "リポジトリパッケージの検索に失敗しました: {}"
@@ -3326,27 +3300,6 @@ msgstr "{}情報を{}について取得できませんでした: {}"
 msgid "Package not found in repos or {}: {}"
 msgstr "リポジトリにも{}にもパッケージが見つかりません: {}"
 
-msgid "changed"
-msgstr "変更あり"
-
-msgid "unknown"
-msgstr "不明"
-
-msgid "Unknown package-state change value."
-msgstr "不明なパッケージ状態変更値です。"
-
-msgid "no package state change"
-msgstr "パッケージ状態の変更なし"
-
-msgid "package state changed"
-msgstr "パッケージ状態が変更されました"
-
-msgid "package state change unknown"
-msgstr "パッケージ状態の変更は不明です"
-
-msgid "Unknown aggregate package-state change value."
-msgstr "不明な集約パッケージ状態変更値です。"
-
 #. TRANSLATORS: The placeholder is the literal command name
 #. "upgrade-all".
 #, c++-format
@@ -3428,47 +3381,20 @@ msgstr "集約"
 msgid "Unknown {} operation phase."
 msgstr "不明な{}操作段階です。"
 
-msgid "preparation blocked"
-msgstr "準備が阻止されました"
-
-msgid "system failure"
-msgstr "システム処理の失敗"
-
-msgid "source failure"
-msgstr "ソース処理の失敗"
-
-msgid "source cleanup failure"
-msgstr "ソースの後処理失敗"
-
-msgid "system/source phase incomplete"
-msgstr "システム/ソース段階が未完了です"
-
-msgid "foreign inventory failure"
-msgstr "外部パッケージ一覧の取得失敗"
-
-msgid "cache authority failure"
-msgstr "キャッシュ権限の失敗"
-
-msgid "prior aggregate inconsistency"
-msgstr "先行する集約結果に矛盾があります"
-
 #. TRANSLATORS: The placeholders are the literal command name
-#. "upgrade-all" and enum state "NotAttempted".
+#. "upgrade-all" and service name "AUR".
+#, c++-format
+msgid "Unknown {} {} phase status."
+msgstr "不明な{}の{}段階状態です。"
+
+#. TRANSLATORS: The placeholders are the literal command
+#. name "upgrade-all" and enum state "NotAttempted".
 #, c++-format
 msgid "Unknown {} {} reason."
 msgstr "不明な{}の{}理由です。"
 
 msgid "not attempted"
 msgstr "未試行"
-
-msgid "stopped on work-item failure"
-msgstr "作業項目の失敗により停止しました"
-
-#. TRANSLATORS: The placeholders are the literal command name
-#. "upgrade-all" and service name "AUR".
-#, c++-format
-msgid "Unknown {} {} phase status."
-msgstr "不明な{}の{}段階状態です。"
 
 msgid "Unknown system upgrade phase status."
 msgstr "不明なシステム更新段階の状態です。"
@@ -3478,6 +3404,9 @@ msgstr "無効なソース設定名"
 
 msgid "package metadata unavailable"
 msgstr "パッケージメタデータを利用できません"
+
+msgid "cache authority failure"
+msgstr "キャッシュ権限の失敗"
 
 msgid "build or install failed"
 msgstr "ビルドまたはインストールに失敗しました"
@@ -3493,25 +3422,6 @@ msgstr "先行段階が停止しました"
 
 msgid "Unknown registered source failure kind."
 msgstr "不明な登録済みソース失敗種別です。"
-
-#, c++-format
-msgid "failed: {}"
-msgstr "失敗: {}"
-
-#, c++-format
-msgid "not attempted: {}"
-msgstr "未試行: {}"
-
-#, c++-format
-msgid "unsupported: {}"
-msgstr "未対応: {}"
-
-#, c++-format
-msgid "incomplete: {}"
-msgstr "未完了: {}"
-
-msgid "Unknown registered source status."
-msgstr "不明な登録済みソース状態です。"
 
 msgid "Unknown system/source phase."
 msgstr "不明なシステム/ソース段階です。"
@@ -3599,6 +3509,9 @@ msgstr "準備済み実行権は使用済みです"
 
 msgid "system/source execution failed unexpectedly"
 msgstr "システム/ソース実行が予期せず失敗しました"
+
+msgid "system/source phase incomplete"
+msgstr "システム/ソース段階が未完了です"
 
 msgid "foreign inventory configuration failed"
 msgstr "外部パッケージ一覧の設定に失敗しました"
@@ -3840,64 +3753,8 @@ msgstr "テスト依存"
 msgid "Unknown {} build-unit role."
 msgstr "不明な{}ビルド単位役割です。"
 
-#, c++-format
-msgid "skipped: {}"
-msgstr "スキップ: {}"
-
 msgid "unknown packages"
 msgstr "不明なパッケージ"
-
-#, c++-format
-msgid "system: {}"
-msgstr "システム: {}"
-
-#, c++-format
-msgid "package state: {}"
-msgstr "パッケージ状態: {}"
-
-msgid "registered source packages: none"
-msgstr "登録済みソースパッケージ: なし"
-
-msgid "<unknown preference>"
-msgstr "<不明な設定>"
-
-#, c++-format
-msgid "registered source: {}: {}"
-msgstr "登録済みソース: {}: {}"
-
-#, c++-format
-msgid "  canonical source identity: {}"
-msgstr "  正規ソース識別情報: {}"
-
-#. TRANSLATORS: The placeholders are the literal service
-#. name "AUR" and enum state "NotAttempted".
-#, c++-format
-msgid "The {} phase is {} without a typed reason."
-msgstr "{}段階は型付きの理由がないまま{}になっています。"
-
-#, c++-format
-msgid "{} phase not attempted: {}"
-msgstr "{}段階は未試行です: {}"
-
-#, c++-format
-msgid "{} phase: {}"
-msgstr "{}段階: {}"
-
-#, c++-format
-msgid "{} targets: unavailable"
-msgstr "{}対象: 利用不可"
-
-#, c++-format
-msgid "{} targets: none"
-msgstr "{}対象: なし"
-
-#, c++-format
-msgid "{} target: {}: {}"
-msgstr "{}対象: {}: {}"
-
-#, c++-format
-msgid "{} phase not attempted: foreign inventory failure"
-msgstr "{}段階は未試行です: 外部パッケージ一覧の取得失敗"
 
 #, c++-format
 msgid "excluded from {} update: {}"
@@ -4123,40 +3980,11 @@ msgstr "{}段階の診断: {}"
 msgid "{} diagnostic: {}: {}"
 msgstr "{}診断: {}: {}"
 
-msgid "partial completion"
-msgstr "一部完了"
-
-msgid "some phases were not attempted"
-msgstr "未試行の段階があります"
-
-msgid "cleanup failure occurred"
-msgstr "後処理に失敗しました"
-
-#, c++-format
-msgid "duplicate {} targets excluded"
-msgstr "重複する{}対象を除外しました"
-
-#, c++-format
-msgid "{} build units externally satisfied"
-msgstr "{}ビルド単位は外部で充足されています"
-
 #. TRANSLATORS: The placeholder is the literal command name
 #. "upgrade-all".
 #, c++-format
 msgid "The {} result contains failure details despite a successful aggregate status."
 msgstr "{}の集約状態は成功ですが、結果に失敗の詳細が含まれています。"
-
-#. TRANSLATORS: The first placeholder is the literal
-#. command name "upgrade-all"; the second is an operand.
-#, c++-format
-msgid "{} does not accept target operands: {}"
-msgstr "{}は対象オペランドを受け付けません: {}"
-
-#. TRANSLATORS: The first placeholder is the literal
-#. command name "upgrade-all"; the second is an operand.
-#, c++-format
-msgid "{} does not accept opaque operands: {}"
-msgstr "{}は不透明なオペランドを受け付けません: {}"
 
 #. TRANSLATORS: The first placeholder is the literal
 #. command name "upgrade-all"; the second is a runtime
@@ -4290,26 +4118,6 @@ msgid "Cannot execute build plan for {}; dependency {} is {}: {}."
 msgstr "{}のbuild planを実行できません。dependency {}は{}です: {}"
 
 #, c++-format
-msgid "Build plan constraint requirement is invalid for {}."
-msgstr "{}のbuild plan constraint requirementが不正です。"
-
-#, c++-format
-msgid "Build plan constraint requirement identity changed for {}."
-msgstr "{}のbuild plan constraint requirement identityが変化しました。"
-
-#, c++-format
-msgid "Build plan constraint source identity is inconsistent for {}."
-msgstr "{}のbuild plan constraint source identityに整合性がありません。"
-
-#, c++-format
-msgid "Build plan constraint evaluation is missing for {}."
-msgstr "{}のbuild plan constraint evaluationがありません。"
-
-#, c++-format
-msgid "Cannot construct build plan; dependency {} is {}: {}."
-msgstr "build planを構成できません。dependency {}は{}です: {}"
-
-#, c++-format
 msgid "Cannot execute build plan for {}; unresolved dependencies: {}"
 msgstr "{}のビルド計画を実行できません。未解決の依存関係: {}"
 
@@ -4328,6 +4136,26 @@ msgstr "{}のビルド計画を実行できません。競合/置換メタデー
 #, c++-format
 msgid "Cannot execute singular install plan for {}; split package targets require the {} set lifecycle: {}"
 msgstr "{}の単一インストール計画を実行できません。分割パッケージの対象には{}集合のライフサイクルが必要です: {}"
+
+#, c++-format
+msgid "Build plan constraint requirement is invalid for {}."
+msgstr "{}のbuild plan constraint requirementが不正です。"
+
+#, c++-format
+msgid "Build plan constraint requirement identity changed for {}."
+msgstr "{}のbuild plan constraint requirement identityが変化しました。"
+
+#, c++-format
+msgid "Build plan constraint source identity is inconsistent for {}."
+msgstr "{}のbuild plan constraint source identityに整合性がありません。"
+
+#, c++-format
+msgid "Build plan constraint evaluation is missing for {}."
+msgstr "{}のbuild plan constraint evaluationがありません。"
+
+#, c++-format
+msgid "Cannot construct build plan; dependency {} is {}: {}."
+msgstr "build planを構成できません。dependency {}は{}です: {}"
 
 msgid "Unconstrained"
 msgstr "制約なし"
@@ -4436,10 +4264,6 @@ msgstr "システム/ソース更新の事前検査に投影authorityがあり�
 
 msgid "Upgrade-all preflight has no projection authority."
 msgstr "upgrade-allの事前検査に投影authorityがありません。"
-
-#, c++-format
-msgid "Operation {} does not accept target operands."
-msgstr "操作{}は対象オペランドを受け付けません。"
 
 #, c++-format
 msgid "Option {} is not supported for operation {}."
@@ -4730,18 +4554,6 @@ msgstr "警告: {}"
 #, c++-format
 msgid "Running: {}"
 msgstr "実行中: {}"
-
-#, c++-format
-msgid "Unknown operation: {}"
-msgstr "不明な操作です: {}"
-
-#, c++-format
-msgid "Usage: {} {} {} {}"
-msgstr "使用法: {} {} {} {}"
-
-#, c++-format
-msgid "Operation {} requires a target."
-msgstr "操作{}には対象が必要です。"
 
 #, c++-format
 msgid "Do not run {} as {} or with {}."
@@ -6149,6 +5961,9 @@ msgstr "システム更新前のローカルパッケージバージョンをス
 msgid "Failed to snapshot local package versions after the system upgrade: {}"
 msgstr "システム更新後のローカルパッケージバージョンをスナップショットへ保存できませんでした: {}"
 
+msgid "An unknown exception occurred."
+msgstr "不明な例外が発生しました。"
+
 #. TRANSLATORS: {} is the literal Arch field name "PackageBase".
 #, c++-format
 msgid "Registered repository source-build result does not match the prepared {}."
@@ -6259,9 +6074,6 @@ msgstr "システム更新は完了しましたが、{}の更新後パッケー�
 #, c++-format
 msgid "Ignoring invalid source-build preference filename: {}"
 msgstr "無効なソースビルド設定ファイル名を無視します: {}"
-
-msgid "An unknown exception occurred."
-msgstr "不明な例外が発生しました。"
 
 msgid "Unknown trusted cache stage."
 msgstr "不明な信頼済みキャッシュ段階です。"
@@ -6828,6 +6640,9 @@ msgstr "{}: {}"
 
 msgid "provider"
 msgstr "プロバイダー"
+
+msgid "unknown"
+msgstr "不明"
 
 msgid "A dependency kind is not supported by the renderer."
 msgstr "依存関係の種別はレンダラーでサポートされていません。"
@@ -7958,6 +7773,183 @@ msgstr "{}のデフォルト状態ログを段階{}で安全に使用できま�
 
 msgid "Unknown state log error code."
 msgstr "不明な状態ログエラーコードです。"
+
+#, c++-format
+#~ msgid "{} does not accept target operands: {}"
+#~ msgstr "{}は対象オペランドを受け付けません: {}"
+
+#, c++-format
+#~ msgid "{} does not accept opaque operands: {}"
+#~ msgstr "{}は不透明なオペランドを受け付けません: {}"
+
+#, c++-format
+#~ msgid "Usage: {} {} [{}] {}"
+#~ msgstr "使用法: {} {} [{}] {}"
+
+#~ msgid "    Metadata       : not found"
+#~ msgstr "    メタデータ        : 見つかりません"
+
+#~ msgid "Plan status: incomplete"
+#~ msgstr "計画の状態: 未完了"
+
+#~ msgid "  unresolved dependencies remain"
+#~ msgstr "  未解決の依存関係が残っています"
+
+#~ msgid "  ambiguous providers are not selected"
+#~ msgstr "  一意に決定できないプロバイダーは選択されていません"
+
+#~ msgid "  cyclic dependencies detected"
+#~ msgstr "  循環依存が検出されました"
+
+#~ msgid "  conflicts/replaces metadata is not resolved automatically"
+#~ msgstr "  競合/置換メタデータは自動的には解決されません"
+
+#~ msgid "  dependency constraints are incomplete"
+#~ msgstr "  依存関係制約が不完全です"
+
+#, c++-format
+#~ msgid "Ignoring extra arg '{}'"
+#~ msgstr "余分な引数'{}'を無視します"
+
+#~ msgid "Interactive package selection has an unknown input gate."
+#~ msgstr "対話形式のパッケージ選択の入力ゲートが不明です。"
+
+#~ msgid "changed"
+#~ msgstr "変更あり"
+
+#~ msgid "Unknown package-state change value."
+#~ msgstr "不明なパッケージ状態変更値です。"
+
+#~ msgid "no package state change"
+#~ msgstr "パッケージ状態の変更なし"
+
+#~ msgid "package state changed"
+#~ msgstr "パッケージ状態が変更されました"
+
+#~ msgid "package state change unknown"
+#~ msgstr "パッケージ状態の変更は不明です"
+
+#~ msgid "Unknown aggregate package-state change value."
+#~ msgstr "不明な集約パッケージ状態変更値です。"
+
+#~ msgid "preparation blocked"
+#~ msgstr "準備が阻止されました"
+
+#~ msgid "system failure"
+#~ msgstr "システム処理の失敗"
+
+#~ msgid "source failure"
+#~ msgstr "ソース処理の失敗"
+
+#~ msgid "source cleanup failure"
+#~ msgstr "ソースの後処理失敗"
+
+#~ msgid "foreign inventory failure"
+#~ msgstr "外部パッケージ一覧の取得失敗"
+
+#~ msgid "prior aggregate inconsistency"
+#~ msgstr "先行する集約結果に矛盾があります"
+
+#~ msgid "stopped on work-item failure"
+#~ msgstr "作業項目の失敗により停止しました"
+
+#, c++-format
+#~ msgid "failed: {}"
+#~ msgstr "失敗: {}"
+
+#, c++-format
+#~ msgid "not attempted: {}"
+#~ msgstr "未試行: {}"
+
+#, c++-format
+#~ msgid "unsupported: {}"
+#~ msgstr "未対応: {}"
+
+#, c++-format
+#~ msgid "incomplete: {}"
+#~ msgstr "未完了: {}"
+
+#~ msgid "Unknown registered source status."
+#~ msgstr "不明な登録済みソース状態です。"
+
+#, c++-format
+#~ msgid "skipped: {}"
+#~ msgstr "スキップ: {}"
+
+#, c++-format
+#~ msgid "system: {}"
+#~ msgstr "システム: {}"
+
+#, c++-format
+#~ msgid "package state: {}"
+#~ msgstr "パッケージ状態: {}"
+
+#~ msgid "registered source packages: none"
+#~ msgstr "登録済みソースパッケージ: なし"
+
+#~ msgid "<unknown preference>"
+#~ msgstr "<不明な設定>"
+
+#, c++-format
+#~ msgid "registered source: {}: {}"
+#~ msgstr "登録済みソース: {}: {}"
+
+#, c++-format
+#~ msgid "  canonical source identity: {}"
+#~ msgstr "  正規ソース識別情報: {}"
+
+#, c++-format
+#~ msgid "The {} phase is {} without a typed reason."
+#~ msgstr "{}段階は型付きの理由がないまま{}になっています。"
+
+#, c++-format
+#~ msgid "{} phase not attempted: {}"
+#~ msgstr "{}段階は未試行です: {}"
+
+#, c++-format
+#~ msgid "{} phase: {}"
+#~ msgstr "{}段階: {}"
+
+#, c++-format
+#~ msgid "{} targets: unavailable"
+#~ msgstr "{}対象: 利用不可"
+
+#, c++-format
+#~ msgid "{} targets: none"
+#~ msgstr "{}対象: なし"
+
+#, c++-format
+#~ msgid "{} target: {}: {}"
+#~ msgstr "{}対象: {}: {}"
+
+#, c++-format
+#~ msgid "{} phase not attempted: foreign inventory failure"
+#~ msgstr "{}段階は未試行です: 外部パッケージ一覧の取得失敗"
+
+#~ msgid "partial completion"
+#~ msgstr "一部完了"
+
+#~ msgid "some phases were not attempted"
+#~ msgstr "未試行の段階があります"
+
+#~ msgid "cleanup failure occurred"
+#~ msgstr "後処理に失敗しました"
+
+#, c++-format
+#~ msgid "duplicate {} targets excluded"
+#~ msgstr "重複する{}対象を除外しました"
+
+#, c++-format
+#~ msgid "{} build units externally satisfied"
+#~ msgstr "{}ビルド単位は外部で充足されています"
+
+#, c++-format
+#~ msgid "Usage: {} {} {} {}"
+#~ msgstr "使用法: {} {} {} {}"
+
+#, c++-format
+#~ msgid "Operation {} requires a target."
+#~ msgstr "操作{}には対象が必要です。"
 
 #~ msgid "Unknown source-build source kind."
 #~ msgstr "不明なソースビルド元種別です。"

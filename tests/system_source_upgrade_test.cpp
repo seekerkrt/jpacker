@@ -388,6 +388,8 @@ void expect_source_order(
 void test_empty_registered_snapshot() {
     stub::reset();
     stub::set_preference_directory(preference_directory({}));
+    stub::enqueue_metadata_session(metadata_session(
+            {}, LocalPackageVersionSnapshot{{"core", "1.0-1"}}));
     AppConfig config = full_option_config();
     SystemSourceUpgradePreparation preparation =
             prepare_system_source_upgrade(config, OBSERVER);
@@ -401,6 +403,8 @@ void test_empty_registered_snapshot() {
     expect(snapshot->preference_root_exists, "Existing empty root was lost");
     expect(snapshot->registered_sources.empty(), "Empty root gained sources");
 
+    stub::enqueue_metadata_session(metadata_session(
+            {}, LocalPackageVersionSnapshot{{"core", "2.0-1"}}));
     SystemSourceUpgradeResult result =
             execute_prepared_system_source_upgrade(
                     std::move(prepared), config, OBSERVER);
@@ -409,12 +413,51 @@ void test_empty_registered_snapshot() {
             result.system.status == SystemUpgradePhaseStatus::Completed,
             "System-only phase did not complete");
     expect(
-            result.system.package_state_change == PackageStateChange::Unknown,
-            "System-only phase guessed package state");
+            result.system.package_state_change == PackageStateChange::Changed,
+            "System-only phase did not compare authoritative snapshots");
     expect(result.registered_source_results.empty(), "System-only result gained sources");
     expect(stub::system_commands() == std::vector<std::string>{SYSTEM_COMMAND},
            "System command changed");
     expect(stub::source_execution_calls().empty(), "System-only phase executed source");
+    stub::require_script_consumed();
+}
+
+void test_system_only_observation_failure_is_non_blocking() {
+    stub::reset();
+    stub::set_preference_directory(preference_directory({}));
+    stub::MetadataSessionScript failed_snapshot;
+    failed_snapshot.local_package_snapshot = PackageMetadataFailure{
+            PackageMetadataErrorCode::QueryFailed,
+            "scripted system-only snapshot failure"};
+    stub::enqueue_metadata_session(std::move(failed_snapshot));
+
+    AppConfig config = full_option_config();
+    SystemSourceUpgradePreparation preparation =
+            prepare_system_source_upgrade(config, OBSERVER);
+    expect(
+            std::holds_alternative<PreparedSystemSourceUpgrade>(preparation),
+            "System-only observation failure blocked execution");
+
+    SystemSourceUpgradeResult result =
+            execute_prepared_system_source_upgrade(
+                    std::move(
+                            std::get<PreparedSystemSourceUpgrade>(preparation)),
+                    config, OBSERVER);
+    expect(result.is_success(),
+           "System-only observation failure became operation failure");
+    expect(
+            result.system.status == SystemUpgradePhaseStatus::Completed &&
+                    result.system.package_state_change ==
+                            PackageStateChange::Unknown,
+            "System-only observation failure did not remain unverified");
+    expect(
+            result.system.before_snapshot_failure.has_value() &&
+                    result.issues.size() == 1 &&
+                    result.issues.front().impact ==
+                            SystemSourceUpgradeIssueImpact::ObservabilityOnly,
+            "System-only observation failure lost typed evidence");
+    expect(stub::system_commands() == std::vector<std::string>{SYSTEM_COMMAND},
+           "System-only observation failure skipped system mutation");
     stub::require_script_consumed();
 }
 
@@ -2086,8 +2129,8 @@ void test_system_snapshot_failure_is_unknown_and_nonblocking() {
            "Unknown pre-system snapshot was reported as definitely changed");
     expect(result.system.before_snapshot_failure.has_value(),
            "Pre-system snapshot failure was not retained");
-    expect(!result.is_success(),
-           "Pre-system snapshot failure was rounded to aggregate success");
+    expect(result.is_success(),
+           "Pre-system snapshot failure changed successful operation outcome");
     expect(!result.has_blocking_issue(),
            "Observability-only snapshot failure became a blocker");
     expect(stub::source_execution_calls().size() == 1,
@@ -2120,8 +2163,8 @@ void test_post_system_snapshot_failure_is_unknown_and_nonblocking() {
            "Unknown post-system snapshot was reported as definitely changed");
     expect(result.system.after_snapshot_failure.has_value(),
            "Post-system snapshot failure was lost");
-    expect(!result.is_success(),
-           "Post-system snapshot failure was rounded to aggregate success");
+    expect(result.is_success(),
+           "Post-system snapshot failure changed successful operation outcome");
     expect(result.status == SystemSourceUpgradeStatus::Completed,
            "Observability failure stopped source execution");
     expect(result.registered_source_results.front().status ==
@@ -2230,11 +2273,15 @@ void test_invalid_preference_name_blocks_before_mutation() {
 void test_prepared_capability_replay_is_rejected() {
     stub::reset();
     stub::set_preference_directory(preference_directory({}));
+    stub::enqueue_metadata_session(metadata_session(
+            {}, LocalPackageVersionSnapshot{{"core", "1.0-1"}}));
     AppConfig config = full_option_config();
     SystemSourceUpgradePreparation preparation =
             prepare_system_source_upgrade(config, OBSERVER);
     PreparedSystemSourceUpgrade prepared = std::move(
             std::get<PreparedSystemSourceUpgrade>(preparation));
+    stub::enqueue_metadata_session(metadata_session(
+            {}, LocalPackageVersionSnapshot{{"core", "1.0-1"}}));
     SystemSourceUpgradeResult first =
             execute_prepared_system_source_upgrade(
                     std::move(prepared), config, OBSERVER);
@@ -2260,6 +2307,8 @@ void test_prepared_capability_replay_is_rejected() {
 void test_option_mismatch_is_rejected_before_mutation() {
     stub::reset();
     stub::set_preference_directory(preference_directory({}));
+    stub::enqueue_metadata_session(metadata_session(
+            {}, LocalPackageVersionSnapshot{{"core", "1.0-1"}}));
     AppConfig prepared_config = full_option_config();
     SystemSourceUpgradePreparation preparation =
             prepare_system_source_upgrade(prepared_config, OBSERVER);
@@ -2341,6 +2390,10 @@ int main() {
         run_case(
                 "empty registered source snapshot",
                 test_empty_registered_snapshot,
+                completed_cases);
+        run_case(
+                "system-only observation failure remains unverified",
+                test_system_only_observation_failure_is_non_blocking,
                 completed_cases);
         run_case(
                 "preference read failure blocks mutation and cache creation",

@@ -810,12 +810,18 @@ PackageMetadataSession PackageMetadataSession::open(
     record_event(
             stub::EventKind::MetadataSessionOpen,
             paths.db_path.string());
+    stub::MetadataSessionScript script;
     if(g_state.metadata_sessions.empty()) {
-        fail_unexpected("Unexpected package metadata session open.");
+        if(!g_state.preference_directory.entries.empty()) {
+            fail_unexpected("Unexpected package metadata session open.");
+        }
+        // POLICY(#350): The default system-only fixture represents an empty
+        // authoritative local database. Explicit queued scripts still own
+        // changed snapshots and observation failures.
+    } else {
+        script = std::move(g_state.metadata_sessions.front());
+        g_state.metadata_sessions.pop_front();
     }
-    stub::MetadataSessionScript script =
-            std::move(g_state.metadata_sessions.front());
-    g_state.metadata_sessions.pop_front();
     if(script.open_failure.has_value()) {
         throw PackageMetadataError(*script.open_failure);
     }

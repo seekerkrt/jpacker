@@ -431,6 +431,9 @@ void test_cancelled_dependency_does_not_prompt_or_read_again() {
     std::optional<ProvidedDependency> first =
             session.select_provider("virtual-dependency>=1", candidates());
     expect(!first.has_value(), "cancel unexpectedly selected a provider");
+    expect(
+            session.was_cancelled(" virtual-dependency<9 "),
+            "constraint-bearing cancellation lookup lost canonical identity");
 
     const std::string output_after_cancel = output.str();
     std::optional<ProvidedDependency> second =

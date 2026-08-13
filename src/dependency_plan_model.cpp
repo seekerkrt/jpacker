@@ -594,7 +594,9 @@ PlanStateProjection project_build_plan_state(const BuildPlan& plan) {
         projection.completeness = PlanCompleteness::Complete;
     }
 
-    if(!plan.ambiguous_providers.empty()) {
+    if(!plan.cancelled_provider_dependencies.empty()) {
+        projection.provider_decision = ProviderDecision::Cancelled;
+    } else if(!plan.ambiguous_providers.empty()) {
         projection.provider_decision = ProviderDecision::Ambiguous;
     } else if(!plan.incomplete_provider_candidate_sets.empty()) {
         projection.provider_decision = ProviderDecision::Unavailable;

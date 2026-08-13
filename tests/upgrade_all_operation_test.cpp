@@ -1405,7 +1405,7 @@ void test_cache_replacement_during_inventory_blocks_aur_query() {
             stub::repository_configuration_calls() == 1 &&
                     stub::inventory_calls() == 1 &&
                     stub::info_many_call_history().empty() &&
-                    stub::database_call_count() == 0 &&
+                    stub::database_call_count() == 1 &&
                     stub::resolver_call_count() == 0,
             "Foreign-inventory cache replacement crossed the next production stage");
     remove_cache_fixture(moved);
@@ -1417,6 +1417,9 @@ void test_cache_replacement_during_aur_query_blocks_preparation() {
     stub::set_preference_directory(preference_directory({}));
     stub::set_foreign_inventory(foreign_inventory({"query-root"}));
     enqueue_aur_query({{"query-root", "query-base"}});
+    stub::enqueue_database_paths(PacmanDatabasePaths{
+            "/upgrade-all-stub/root",
+            "/upgrade-all-stub/database"});
     stub::set_database_failure(PackageMetadataFailure{
             PackageMetadataErrorCode::LocalDatabaseUnavailable,
             "fixture later database failure"});
@@ -1460,7 +1463,7 @@ void test_cache_replacement_during_aur_query_blocks_preparation() {
     expect_aur_not_attempted(
             result, UpgradeAllNotAttemptedReason::CacheAuthorityFailure,
             "AUR-query cache replacement");
-    expect(stub::database_call_count() == 0 &&
+    expect(stub::database_call_count() == 1 &&
                    stub::resolver_call_count() == 0 &&
                    stub::aur_execution_calls().empty(),
            "AUR-query cache replacement reached provider/database preparation");
@@ -1506,7 +1509,7 @@ void test_cache_replacement_during_filtered_planning_blocks_database() {
             "filtered-planning cache replacement");
     expect(
             stub::resolver_call_count() == 1 &&
-                    stub::database_call_count() == 0 &&
+                    stub::database_call_count() == 1 &&
                     stub::aur_execution_calls().empty(),
             "Filtered-planning cache replacement reached package-database preparation");
     remove_cache_fixture(moved);
@@ -1552,7 +1555,7 @@ void test_filtered_preparation_failure_keeps_stage_precedence() {
             "Filtered preparation failure lost same-stage precedence");
     expect(
             stub::resolver_call_count() == 1 &&
-                    stub::database_call_count() == 0 &&
+                    stub::database_call_count() == 1 &&
                     stub::aur_execution_calls().empty(),
             "Filtered preparation failure crossed the expected stage boundary");
     remove_cache_fixture(moved);
@@ -1607,7 +1610,7 @@ void test_strict_preference_failure_precedes_post_stage_cache_drift() {
             !moved.empty() &&
                     stub::strict_preference_read_history() ==
                             std::vector<std::string>{"strict-root"} &&
-                    stub::database_call_count() == 0 &&
+                    stub::database_call_count() == 1 &&
                     stub::aur_execution_calls().empty(),
             "Strict preference failure crossed the typed preparation boundary");
     remove_cache_fixture(moved);
@@ -1627,7 +1630,10 @@ void test_pacman_database_failure_precedes_post_stage_cache_drift() {
     const PackageMetadataFailure database_failure{
             PackageMetadataErrorCode::LocalDatabaseUnavailable,
             "fixture pacman database failure"};
-    stub::set_database_failure(database_failure);
+    stub::enqueue_database_paths(PacmanDatabasePaths{
+            "/upgrade-all-stub/root",
+            "/upgrade-all-stub/database"});
+    stub::enqueue_database_failure(database_failure);
     const AppConfig config;
     PreparedUpgradeAllOperation prepared = take_prepared(
             prepare_upgrade_all_operation(config),
@@ -1666,7 +1672,7 @@ void test_pacman_database_failure_precedes_post_stage_cache_drift() {
             !moved.empty() &&
                     stub::strict_preference_read_history() ==
                             std::vector<std::string>{"database-root"} &&
-                    stub::database_call_count() == 1 &&
+                    stub::database_call_count() == 2 &&
                     stub::aur_execution_calls().empty(),
             "Pacman database failure crossed the typed preparation boundary");
     remove_cache_fixture(moved);
@@ -1718,7 +1724,7 @@ void test_executable_preparation_cache_drift_blocks_aur_execution() {
             "executable preparation cache drift");
     expect(
             !moved.empty() && stub::resolver_call_count() == 1 &&
-                    stub::database_call_count() == 1 &&
+                    stub::database_call_count() == 2 &&
                     stub::aur_execution_calls().empty(),
             "Executable preparation cache drift reached AUR execution");
     remove_cache_fixture(moved);
@@ -1896,7 +1902,7 @@ void test_preflight_blocker_stops_before_preparation_io() {
                     result.aur.operation_result.has_value() &&
                     !result.is_success(),
             "Preflight blocker was rounded to success");
-    expect(stub::database_call_count() == 0 &&
+    expect(stub::database_call_count() == 1 &&
                    stub::aur_execution_calls().empty(),
            "Preflight blocker crossed AUR preparation/mutation boundary");
     stub::require_script_consumed();
@@ -1971,14 +1977,101 @@ void test_no_updates_success_contract() {
     stub::require_script_consumed();
 }
 
-void test_system_unknown_does_not_reduce_to_no_updates() {
+void test_system_only_authoritative_unchanged_observation() {
     stub::reset();
     stub::set_preference_directory(preference_directory({}));
     stub::set_foreign_inventory({});
     const AppConfig config;
     PreparedUpgradeAllOperation prepared = take_prepared(
             prepare_upgrade_all_operation(config),
-            "system Unknown fixture");
+            "system-only unchanged fixture");
+
+    UpgradeAllOperationResult result =
+            execute_prepared_upgrade_all_operation(
+                    std::move(prepared), config);
+    expect(
+            result.status == UpgradeAllOperationStatus::NoUpdates &&
+                    result.is_success() &&
+                    result.system_source.system.package_state_change ==
+                            PackageStateChange::NoChange &&
+                    result.package_state_change() ==
+                            PackageStateChange::NoChange,
+            "System-only authoritative no-change observation differs");
+    const OperationStateProjection operation_state =
+            project_upgrade_all_operation_state(result);
+    expect(
+            operation_state.outcome == OperationOutcome::NoOp &&
+                    operation_state.package_state.state ==
+                            PackageStateObservation::VerifiedUnchanged &&
+                    operation_state.no_op_basis ==
+                            std::optional<NoOpBasis>{
+                                    NoOpBasis::NoRelevantWork},
+            "System-only no-change evidence lost its typed NoOp basis");
+    const std::size_t metadata_open_count =
+            static_cast<std::size_t>(std::count_if(
+                    stub::events().begin(), stub::events().end(),
+                    [](const stub::Event& event) {
+                        return event.kind ==
+                                stub::EventKind::MetadataSessionOpen;
+                    }));
+    const std::size_t snapshot_count =
+            static_cast<std::size_t>(std::count_if(
+                    stub::events().begin(), stub::events().end(),
+                    [](const stub::Event& event) {
+                        return event.kind ==
+                                stub::EventKind::LocalPackageSnapshot;
+                    }));
+    expect(
+            stub::database_call_count() == 1 &&
+                    metadata_open_count == 2 && snapshot_count == 2,
+            "System-only pre/post observation did not use package metadata authority");
+    stub::require_script_consumed();
+}
+
+void test_system_only_changed_observation() {
+    stub::reset();
+    stub::set_preference_directory(preference_directory({}));
+    stub::set_foreign_inventory({});
+    stub::enqueue_metadata_session(metadata_session(
+            {}, LocalPackageVersionSnapshot{{"core", "1.0-1"}}));
+    const AppConfig config;
+    PreparedUpgradeAllOperation prepared = take_prepared(
+            prepare_upgrade_all_operation(config),
+            "system-only changed fixture");
+    stub::enqueue_metadata_session(metadata_session(
+            {}, LocalPackageVersionSnapshot{{"core", "2.0-1"}}));
+
+    UpgradeAllOperationResult result =
+            execute_prepared_upgrade_all_operation(
+                    std::move(prepared), config);
+    const OperationStateProjection operation_state =
+            project_upgrade_all_operation_state(result);
+    expect(
+            result.status == UpgradeAllOperationStatus::Completed &&
+                    result.is_success() &&
+                    result.package_state_change() ==
+                            PackageStateChange::Changed &&
+                    operation_state.outcome == OperationOutcome::Succeeded &&
+                    operation_state.package_state.state ==
+                            PackageStateObservation::Changed &&
+                    !operation_state.no_op_basis.has_value(),
+            "System-only changed observation was flattened");
+    stub::require_script_consumed();
+}
+
+void test_system_only_observation_failure_remains_unverified() {
+    stub::reset();
+    stub::set_preference_directory(preference_directory({}));
+    stub::set_foreign_inventory({});
+    stub::MetadataSessionScript failure;
+    failure.open_failure = PackageMetadataFailure{
+            PackageMetadataErrorCode::LocalDatabaseUnavailable,
+            "fixture system-only observation failure"};
+    stub::enqueue_metadata_session(std::move(failure));
+    const AppConfig config;
+    PreparedUpgradeAllOperation prepared = take_prepared(
+            prepare_upgrade_all_operation(config),
+            "system-only unverified fixture");
 
     UpgradeAllOperationResult result =
             execute_prepared_upgrade_all_operation(
@@ -1990,7 +2083,7 @@ void test_system_unknown_does_not_reduce_to_no_updates() {
                             PackageStateChange::Unknown &&
                     result.package_state_change() ==
                             PackageStateChange::Unknown,
-            "Unknown system package state was rounded to NoUpdates");
+            "Observation failure was rounded to failure or NoUpdates");
     const OperationStateProjection operation_state =
             project_upgrade_all_operation_state(result);
     const PresentationProjection presentation =
@@ -2000,8 +2093,8 @@ void test_system_unknown_does_not_reduce_to_no_updates() {
                     operation_state.package_state.state ==
                             PackageStateObservation::Unverified &&
                     operation_state.package_state.reason ==
-                            ObservationReason::ObservationNotPrepared,
-            "System-only success did not retain its typed unverified state");
+                            ObservationReason::BeforeSnapshotUnavailable,
+            "System-only observation failure lost its typed unverified state");
     expect(
             presentation.summary_counts.total == 1 &&
                     presentation.summary_counts.attention_required == 1 &&
@@ -2039,7 +2132,7 @@ void test_system_unknown_does_not_reduce_to_no_updates() {
                             UpgradeAllOperationPhase::System &&
                     outcome_reason->source_kind ==
                             DiagnosticSourceKind::Pacman,
-            "System-only observation lost typed reason, phase, or attribution");
+            "System-only observation failure lost typed reason or attribution");
     stub::require_script_consumed();
 }
 
@@ -2700,8 +2793,8 @@ void test_aur_cleanup_failure_partial_and_not_attempted() {
 }
 
 void test_constructed_no_source_no_updates_helper_fixture() {
-    // PR2のsourceなしproduction resultはsystem stateをUnknownにするため、
-    // pure aggregate helperのNoChange conjunctionだけをconstructed resultで固定する。
+    // Pure aggregate helper keeps NoRelevantWork distinct from the
+    // production system-only authoritative snapshot fixture above.
     UpgradeAllOperationResult result;
     result.status = UpgradeAllOperationStatus::NoUpdates;
     result.stopped_phase = UpgradeAllOperationPhase::None;
@@ -3070,8 +3163,14 @@ int main() {
                 test_preparation_blocker_stops_before_aur_mutation);
         run_case("NoUpdates success", test_no_updates_success_contract);
         run_case(
-                "system Unknown is not NoUpdates",
-                test_system_unknown_does_not_reduce_to_no_updates);
+                "system-only authoritative unchanged observation",
+                test_system_only_authoritative_unchanged_observation);
+        run_case(
+                "system-only changed observation",
+                test_system_only_changed_observation);
+        run_case(
+                "system-only observation failure remains Unverified",
+                test_system_only_observation_failure_remains_unverified);
         run_case("system Changed only", test_system_changed_only);
         run_case("source Updated only", test_source_updated_only);
         run_case(

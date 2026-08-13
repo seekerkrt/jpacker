@@ -449,6 +449,34 @@ PackageMetadataFailure generic_metadata_failure(
             diagnostic};
 }
 
+void prepare_system_only_package_observation(
+        SystemSourceUpgradePreparationState& state) {
+    try {
+        state.system_database_paths = resolve_pacman_database_paths();
+        PackageMetadataSession session = PackageMetadataSession::open(
+                state.system_database_paths.value());
+        LocalPackageVersionSnapshotResult snapshot =
+                session.snapshot_local_package_versions();
+        if(const auto* failure =
+                   std::get_if<PackageMetadataFailure>(&snapshot)) {
+            record_system_snapshot_failure(state, *failure);
+            return;
+        }
+        state.before_system_snapshot =
+                std::get<LocalPackageVersionSnapshot>(std::move(snapshot));
+    } catch(const PackageMetadataError& error) {
+        record_system_snapshot_failure(state, error.failure());
+    } catch(const std::exception& error) {
+        record_system_snapshot_failure(
+                state, generic_metadata_failure(error.what()));
+    } catch(...) {
+        record_system_snapshot_failure(
+                state,
+                generic_metadata_failure(localization::translate_message(
+                        "An unknown exception occurred.")));
+    }
+}
+
 bool has_non_success_source_status(
         RegisteredSourceUpgradeStatus status) noexcept {
     return status != RegisteredSourceUpgradeStatus::Updated &&
@@ -1060,9 +1088,17 @@ RegisteredSourceUpgradeResult::RegisteredSourceUpgradeResult(
 bool SystemSourceUpgradeResult::is_success() const noexcept {
     if(status != SystemSourceUpgradeStatus::Completed) return false;
     if(!selected_repository_provider_transaction.is_success()) return false;
-    // snapshot failureはexecutionを止めない場合もあるが、観測不能を完全成功へ
-    // 丸めない。legacy CLIのexit互換はcommand adapter側で別に判断する。
-    if(!issues.empty()) return false;
+    // ObservabilityOnly は実行結果ではなく package-state observation の
+    // 信頼性を下げる。transaction 成功を failure へ丸めず、projection 側で
+    // Succeeded + Unverified として保持する。
+    if(std::any_of(
+               issues.begin(), issues.end(),
+               [](const SystemSourceUpgradeIssue& issue) {
+                   return issue.impact !=
+                           SystemSourceUpgradeIssueImpact::ObservabilityOnly;
+               })) {
+        return false;
+    }
     return std::none_of(
             registered_source_results.begin(),
             registered_source_results.end(),
@@ -1710,6 +1746,11 @@ SystemSourceUpgradePreparation prepare_system_source_upgrade(
                     RegisteredSourceUpgradeFailureKind::
                             PackageMetadataUnavailable);
         }
+    } else {
+        // POLICY(#350): system-only execution uses the same authoritative
+        // local package database snapshots as the registered-source path.
+        // Failure is observability-only and remains Unknown/Unverified.
+        prepare_system_only_package_observation(state);
     }
 
     return SystemSourceUpgradePreparationAccess::make(std::move(state));

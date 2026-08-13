@@ -4,11 +4,14 @@
 #include "app_config.hpp"
 #include "cache_authority.hpp"
 #include "cli_authority.hpp"
+#include "cli_runtime_contract.hpp"
+#include "diagnostic_projection.hpp"
 #include "local_source_build.hpp"
 #include "local_source_install.hpp"
 #include "local_source_metadata_evaluation.hpp"
 #include "localization.hpp"
 #include "logging.hpp"
+#include "runtime_diagnostic.hpp"
 #include "package_metadata.hpp"
 #include "package_identifier.hpp"
 #include "process.hpp"
@@ -787,9 +790,7 @@ RemoteSourceBuildInvocation require_remote_source_build_invocation(
         throw std::invalid_argument(localization::format_translated_message(
                 "Usage: {} {}",
                 application_identity::COMMAND_NAME,
-                cli_authority::operation_spec(
-                        cli_authority::OperationId::Build)
-                        .help_syntax));
+                cli_operation_syntax(cli_authority::OperationId::Build)));
     }
 
     RemoteSourceBuildInvocation invocation;
@@ -807,9 +808,12 @@ RemoteSourceBuildInvocation require_remote_source_build_invocation(
         } else if(invocation.package_name.empty()) {
             invocation.package_name = arg;
         } else {
-            // TRANSLATORS: The placeholder is a literal CLI argument.
-            Logger::warn(localization::format_translated_message(
-                    "Ignoring extra arg '{}'", arg));
+            // Shared runtime validation rejects this before dispatch. Keep the
+            // direct helper fail-closed for test/support callers as well.
+            throw std::invalid_argument(
+                    localization::format_translated_message(
+                            "Operation {} requires exactly one {} operand.",
+                            "build", "<pkg>"));
         }
     }
     if(invocation.package_name.empty()) {
@@ -906,7 +910,9 @@ int cmd_build_local(
                 local_source_build_failure_diagnostic(error)));
         return 1;
     } catch(const LocalSourceRootError& error) {
-        Logger::error(local_source_root_failure_diagnostic(error.failure()));
+        report_runtime_diagnostic(
+                project_local_source_root_diagnostic(error.failure()),
+                local_source_root_failure_diagnostic(error.failure()));
         return 1;
     } catch(const LocalSourceWorkspaceError& error) {
         Logger::error(

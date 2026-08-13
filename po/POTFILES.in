@@ -15,6 +15,7 @@ src/build_plan_artifact_target_projection.cpp
 src/checkout_fetch.cpp
 src/cli_parser.cpp
 src/cli_routing.cpp
+src/cli_runtime_contract.cpp
 src/commands_aur_update.cpp
 src/commands_inspect.cpp
 src/commands_source_maintenance.cpp
