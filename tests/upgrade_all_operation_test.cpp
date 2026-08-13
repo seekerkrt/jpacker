@@ -1,5 +1,7 @@
 #include "app_config.hpp"
 #include "artifact_install_executor.hpp"
+#include "operation_state_model.hpp"
+#include "presentation_projection.hpp"
 #include "source_build.hpp"
 #include "stubs/upgrade-all-operation/operation_stub.hpp"
 #include "unified_plan_projection.hpp"
@@ -1952,6 +1954,14 @@ void test_no_updates_success_contract() {
                     !result.has_partial_completion() &&
                     !result.has_not_attempted_phase(),
             "NoUpdates conjunction was not enforced");
+    const OperationStateProjection projection =
+            project_upgrade_all_operation_state(result);
+    expect(
+            projection.outcome == OperationOutcome::NoOp &&
+                    projection.no_op_basis ==
+                            std::optional<NoOpBasis>{
+                                    NoOpBasis::VerifiedUnchanged},
+            "Registered-source UpToDate evidence lost its NoOp basis");
     expect(
             stub::source_preparation_calls().size() == 1 &&
                     stub::source_preparation_calls().front().update_policy ==
@@ -1981,6 +1991,55 @@ void test_system_unknown_does_not_reduce_to_no_updates() {
                     result.package_state_change() ==
                             PackageStateChange::Unknown,
             "Unknown system package state was rounded to NoUpdates");
+    const OperationStateProjection operation_state =
+            project_upgrade_all_operation_state(result);
+    const PresentationProjection presentation =
+            project_upgrade_all_presentation(result);
+    expect(
+            operation_state.outcome == OperationOutcome::Succeeded &&
+                    operation_state.package_state.state ==
+                            PackageStateObservation::Unverified &&
+                    operation_state.package_state.reason ==
+                            ObservationReason::ObservationNotPrepared,
+            "System-only success did not retain its typed unverified state");
+    expect(
+            presentation.summary_counts.total == 1 &&
+                    presentation.summary_counts.attention_required == 1 &&
+                    presentation.summary_counts.unverified == 1 &&
+                    presentation.attention_items.size() == 1 &&
+                    presentation.full_items.size() == 1,
+            "System-only successful-unverified result fell through presentation");
+    const PresentationItem& observation =
+            presentation.attention_items.front();
+    const auto outcome_reason = std::find_if(
+            observation.upgrade_all_reasons.begin(),
+            observation.upgrade_all_reasons.end(),
+            [](const UpgradeAllPresentationReason& reason) {
+                const OperationOutcome* outcome =
+                        std::get_if<OperationOutcome>(&reason.reason);
+                return outcome != nullptr &&
+                       *outcome == OperationOutcome::Succeeded;
+            });
+    expect(
+            observation.package_state ==
+                            std::optional<PackageStateObservationValue>{
+                                    operation_state.package_state} &&
+                    observation.source_kind ==
+                            DiagnosticSourceKind::Pacman &&
+                    !observation.requested_package.has_value() &&
+                    !observation.package_base.has_value() &&
+                    !observation.canonical_source_identity.has_value() &&
+                    observation.diagnostic_class ==
+                            DiagnosticClass::RequiresCheck &&
+                    observation.requires_check &&
+                    !observation.is_blocking &&
+                    outcome_reason !=
+                            observation.upgrade_all_reasons.end() &&
+                    outcome_reason->phase ==
+                            UpgradeAllOperationPhase::System &&
+                    outcome_reason->source_kind ==
+                            DiagnosticSourceKind::Pacman,
+            "System-only observation lost typed reason, phase, or attribution");
     stub::require_script_consumed();
 }
 
@@ -2427,6 +2486,14 @@ void test_source_no_change_and_aur_no_change() {
                     result.package_state_change() ==
                             PackageStateChange::NoChange,
             "All-NoChange execution did not satisfy NoUpdates contract");
+    const OperationStateProjection projection =
+            project_upgrade_all_operation_state(result);
+    expect(
+            projection.outcome == OperationOutcome::NoOp &&
+                    projection.no_op_basis ==
+                            std::optional<NoOpBasis>{
+                                    NoOpBasis::VerifiedUnchanged},
+            "AUR SkippedAsNeeded/NoChange evidence lost its NoOp basis");
     stub::require_script_consumed();
 }
 
@@ -2663,6 +2730,48 @@ void test_constructed_no_source_no_updates_helper_fixture() {
                     !result.has_external_satisfaction() &&
                     !result.has_inconsistency(),
             "Constructed no-source NoUpdates helper semantics differ");
+
+    const OperationStateProjection projection =
+            project_upgrade_all_operation_state(result);
+    expect(
+            projection.outcome == OperationOutcome::NoOp &&
+                    projection.no_op_basis ==
+                            std::optional<NoOpBasis>{
+                                    NoOpBasis::NoRelevantWork} &&
+                    projection.package_state.state ==
+                            PackageStateObservation::VerifiedUnchanged,
+            "Verified NoUpdates did not project to NoOp + VerifiedUnchanged");
+}
+
+void test_constructed_aur_no_change_noop_basis_fixture() {
+    UpgradeAllOperationResult result;
+    result.status = UpgradeAllOperationStatus::NoUpdates;
+    result.stopped_phase = UpgradeAllOperationPhase::None;
+    result.system_source.status = SystemSourceUpgradeStatus::Completed;
+    result.system_source.stopped_phase = SystemSourceUpgradePhase::None;
+    result.system_source.system.status = SystemUpgradePhaseStatus::Completed;
+    result.system_source.system.package_state_change =
+            PackageStateChange::NoChange;
+    result.foreign_inventory.status =
+            UpgradeAllForeignInventoryPhaseStatus::Completed;
+    result.aur.status = UpgradeAllAurPhaseStatus::NoUpdates;
+    result.aur.operation_result.emplace();
+    AurUpdateOperationResult& aur =
+            result.aur.operation_result->reduced_operation_result;
+    aur.status = AurUpdateOperationStatus::NoUpdates;
+    AurUpdateOperationTargetResult target;
+    target.update.installed_name = "unchanged-aur";
+    target.status = AurUpdateOperationTargetStatus::NoChange;
+    aur.targets.push_back(std::move(target));
+
+    const OperationStateProjection projection =
+            project_upgrade_all_operation_state(result);
+    expect(
+            projection.outcome == OperationOutcome::NoOp &&
+                    projection.no_op_basis ==
+                            std::optional<NoOpBasis>{
+                                    NoOpBasis::VerifiedUnchanged},
+            "AUR-only NoChange evidence was treated as no relevant work");
 }
 
 UpgradeAllOperationResult make_constructed_completed_helper_fixture(
@@ -2695,6 +2804,17 @@ void test_constructed_completed_unknown_success_fixture() {
                     result.package_state_change() ==
                             PackageStateChange::Unknown,
             "Completed + Unknown package state must remain successful");
+
+    const OperationStateProjection projection =
+            project_upgrade_all_operation_state(result);
+    expect(
+            projection.outcome == OperationOutcome::Succeeded &&
+                    projection.outcome != OperationOutcome::NoOp &&
+                    projection.package_state.state ==
+                            PackageStateObservation::Unverified &&
+                    projection.package_state.reason ==
+                            ObservationReason::ObservationNotPrepared,
+            "Completed + Unknown was flattened to NoOp or failure");
 }
 
 void test_constructed_provider_transaction_unknown_reaches_aggregate() {
@@ -2984,6 +3104,9 @@ int main() {
         run_case(
                 "constructed no-source NoUpdates helpers",
                 test_constructed_no_source_no_updates_helper_fixture);
+        run_case(
+                "constructed AUR NoChange NoOp basis",
+                test_constructed_aur_no_change_noop_basis_fixture);
         run_case(
                 "constructed Completed Unknown success",
                 test_constructed_completed_unknown_success_fixture);

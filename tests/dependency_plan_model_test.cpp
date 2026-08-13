@@ -672,6 +672,183 @@ void test_execution_guard_category_order() {
             "split-child (base: split-base)");
 }
 
+void test_plan_state_projection_keeps_capability_axes() {
+    const ExecutionReadiness not_assessed;
+    expect(
+            not_assessed.state == ExecutionReadinessState::NotAssessed,
+            "Default readiness did not preserve NotAssessed");
+
+    BuildPlan relation_plan;
+    relation_plan.metadata_risks.push_back(BuildPlanMetadataRisk{
+            "risk-child", "risk-base",
+            {"declared-conflict"}, {"declared-replacement"}});
+    relation_plan.split_package_targets.push_back(
+            BuildPlanSplitPackageTarget{"split-base", "split-child"});
+
+    const PlanStateProjection relation_projection =
+            project_build_plan_state(relation_plan);
+    const ExecutionReadiness& fetch = execution_readiness(
+            relation_projection, ExecutionCapability::Fetch);
+    const ExecutionReadiness& build = execution_readiness(
+            relation_projection, ExecutionCapability::Build);
+    const ExecutionReadiness& install = execution_readiness(
+            relation_projection, ExecutionCapability::Install);
+    expect(
+            fetch.state == ExecutionReadinessState::Ready &&
+                    !fetch.is_blocked_by_production_guard,
+            "Fetch readiness imported build-only metadata policy");
+    expect(
+            build.state == ExecutionReadinessState::RequiresCheck &&
+                    build.is_blocked_by_production_guard &&
+                    std::find(
+                            build.required_actions.begin(),
+                            build.required_actions.end(),
+                            PlanRequiredAction::ReviewDeclaredRelations) !=
+                            build.required_actions.end(),
+            "Build readiness lost declared metadata review");
+    expect(
+            install.state == ExecutionReadinessState::Blocked &&
+                    install.is_blocked_by_production_guard &&
+                    std::find(
+                            install.required_actions.begin(),
+                            install.required_actions.end(),
+                            PlanRequiredAction::UsePackageBaseSetLifecycle) !=
+                            install.required_actions.end(),
+            "Install readiness lost the singular split-package gate");
+
+    const auto relation_reason = std::find_if(
+            build.reasons.begin(), build.reasons.end(),
+            [](const ExecutionReadinessReason& reason) {
+                return std::holds_alternative<PlanDeclaredRelationReason>(
+                        reason.reason);
+            });
+    expect(relation_reason != build.reasons.end(),
+           "Build readiness lost declared relation metadata");
+    const PlanDeclaredRelationReason& declared =
+            std::get<PlanDeclaredRelationReason>(relation_reason->reason);
+    expect(
+            declared.assessment == DeclaredRelationAssessment::
+                                           DeclaredMetadataActualRelationUnassessed &&
+                    declared.metadata.package_name == "risk-child" &&
+                    declared.metadata.package_base == "risk-base" &&
+                    declared.metadata.conflicts ==
+                            std::vector<std::string>{"declared-conflict"} &&
+                    declared.metadata.replaces ==
+                            std::vector<std::string>{"declared-replacement"},
+            "#353 relation authority was inferred or flattened");
+
+    BuildPlan ambiguous_plan;
+    ambiguous_plan.ambiguous_providers.push_back(
+            AmbiguousProvidedDependency{
+                    "virtual-api",
+                    {case8_repository_provider_a(),
+                     case8_repository_provider_b()}});
+    const PlanStateProjection ambiguous_projection =
+            project_build_plan_state(ambiguous_plan);
+    const ExecutionReadiness& ambiguous_fetch = execution_readiness(
+            ambiguous_projection, ExecutionCapability::Fetch);
+    expect(
+            ambiguous_projection.provider_decision ==
+                            ProviderDecision::Ambiguous &&
+                    ambiguous_fetch.state ==
+                            ExecutionReadinessState::Blocked &&
+                    std::find(
+                            ambiguous_fetch.required_actions.begin(),
+                            ambiguous_fetch.required_actions.end(),
+                            PlanRequiredAction::SelectProvider) !=
+                            ambiguous_fetch.required_actions.end(),
+            "Ambiguous provider decision was flattened");
+
+    BuildPlan unknown_plan = typed_constraint_plan(
+            ConstraintEvaluation::unknown(
+                    ObservedVersionUnknownReason::
+                            CandidateVersionUnavailable));
+    const PlanStateProjection unknown_projection =
+            project_build_plan_state(unknown_plan);
+    const ExecutionReadiness& unknown_fetch = execution_readiness(
+            unknown_projection, ExecutionCapability::Fetch);
+    expect(
+            unknown_projection.construction ==
+                            PlanConstruction::Constructed &&
+                    unknown_projection.completeness ==
+                            PlanCompleteness::Unknown &&
+                    unknown_fetch.state ==
+                            ExecutionReadinessState::Unknown &&
+                    unknown_fetch.is_blocked_by_production_guard &&
+                    std::find(
+                            unknown_fetch.required_actions.begin(),
+                            unknown_fetch.required_actions.end(),
+                            PlanRequiredAction::ObtainMetadata) !=
+                            unknown_fetch.required_actions.end(),
+            "Unknown constraint was reduced to a readiness bool");
+
+    BuildPlan invalid_plan = typed_constraint_plan(
+            ConstraintEvaluation::invalid(
+                    ConstraintInvalidReason::MalformedRequirement));
+    const PlanStateProjection invalid_projection =
+            project_build_plan_state(invalid_plan);
+    expect(
+            invalid_projection.construction == PlanConstruction::Failed &&
+                    invalid_projection.completeness ==
+                            PlanCompleteness::Incomplete &&
+                    execution_readiness(
+                            invalid_projection,
+                            ExecutionCapability::Build)
+                                    .state ==
+                            ExecutionReadinessState::Blocked,
+            "Invalid plan construction was flattened into completeness");
+}
+
+void test_split_package_install_readiness_is_orthogonal_to_completeness() {
+    BuildPlan split_plan;
+    split_plan.split_package_targets.push_back(
+            BuildPlanSplitPackageTarget{"split-base", "split-child"});
+
+    const PlanStateProjection projection =
+            project_build_plan_state(split_plan);
+    const ExecutionReadiness& fetch = execution_readiness(
+            projection, ExecutionCapability::Fetch);
+    const ExecutionReadiness& build = execution_readiness(
+            projection, ExecutionCapability::Build);
+    const ExecutionReadiness& install = execution_readiness(
+            projection, ExecutionCapability::Install);
+
+    expect(
+            projection.construction == PlanConstruction::Constructed &&
+                    projection.completeness == PlanCompleteness::Complete,
+            "Split-only install policy changed plan completeness");
+    expect(
+            fetch.state == ExecutionReadinessState::Ready &&
+                    build.state == ExecutionReadinessState::Ready,
+            "Split-only install policy leaked into fetch/build readiness");
+    expect(
+            install.state == ExecutionReadinessState::Blocked &&
+                    install.is_blocked_by_production_guard,
+            "Split-only singular install gate was not preserved");
+    expect(
+            std::none_of(
+                    projection.completeness_reasons.begin(),
+                    projection.completeness_reasons.end(),
+                    [](const PlanReason& reason) {
+                        return std::holds_alternative<PlanSplitPackageReason>(
+                                reason);
+                    }),
+            "Split-package install reason became completeness authority");
+    const auto split_reason = std::find_if(
+            install.reasons.begin(), install.reasons.end(),
+            [](const ExecutionReadinessReason& reason) {
+                return std::holds_alternative<PlanSplitPackageReason>(
+                        reason.reason);
+            });
+    expect(
+            split_reason != install.reasons.end() &&
+                    split_reason->state == ExecutionReadinessState::Blocked &&
+                    split_reason->blocks_production_guard &&
+                    split_reason->required_action ==
+                            PlanRequiredAction::UsePackageBaseSetLifecycle,
+            "Split-package install reason lost its independent readiness axes");
+}
+
 void test_case_1_root_only() {
     BuildPlan plan = resolve_build_plan("case1-app");
     expect(
@@ -2488,6 +2665,12 @@ int main() {
         run_case(
                 "execution guard category order",
                 test_execution_guard_category_order);
+        run_case(
+                "plan construction/completeness/readiness axes",
+                test_plan_state_projection_keeps_capability_axes);
+        run_case(
+                "split package install readiness is orthogonal to completeness",
+                test_split_package_install_readiness_is_orthogonal_to_completeness);
         run_case("Case 1 root only", test_case_1_root_only);
         run_case("Case 2 dependency roles", test_case_2_dependency_roles);
         run_case("Case 3 multiple roles", test_case_3_multiple_roles);
