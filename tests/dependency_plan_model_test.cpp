@@ -465,6 +465,11 @@ void expect_equivalent_plans(const BuildPlan& lhs, const BuildPlan& rhs) {
         }
     }
 
+    expect(
+            lhs.cancelled_provider_dependencies ==
+                    rhs.cancelled_provider_dependencies,
+            "BuildPlan::cancelled_provider_dependencies differs");
+
     expect(lhs.unresolved == rhs.unresolved, "BuildPlan::unresolved differs");
     expect(lhs.cycles == rhs.cycles, "BuildPlan::cycles differs");
 }
@@ -758,6 +763,20 @@ void test_plan_state_projection_keeps_capability_axes() {
                             PlanRequiredAction::SelectProvider) !=
                             ambiguous_fetch.required_actions.end(),
             "Ambiguous provider decision was flattened");
+
+    ambiguous_plan.cancelled_provider_dependencies.push_back(
+            "virtual-api");
+    const PlanStateProjection cancelled_projection =
+            project_build_plan_state(ambiguous_plan);
+    expect(
+            cancelled_projection.provider_decision ==
+                            ProviderDecision::Cancelled &&
+                    execution_readiness(
+                            cancelled_projection,
+                            ExecutionCapability::Fetch)
+                                    .state ==
+                            ExecutionReadinessState::Blocked,
+            "Cancelled provider decision was flattened into ambiguity");
 
     BuildPlan unknown_plan = typed_constraint_plan(
             ConstraintEvaluation::unknown(

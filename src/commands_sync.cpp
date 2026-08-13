@@ -4,6 +4,7 @@
 #include "aur_rpc.hpp"
 #include "cli_routing.hpp"
 #include "dependency_plan.hpp"
+#include "diagnostic_projection.hpp"
 #include "localization.hpp"
 #include "logging.hpp"
 #include "package_identifier.hpp"
@@ -12,6 +13,7 @@
 #include "root_package_route_projection.hpp"
 #include "root_package_search.hpp"
 #include "root_package_selection.hpp"
+#include "runtime_diagnostic.hpp"
 #include "shell_words.hpp"
 #include "source_install.hpp"
 #include "source_preference.hpp"
@@ -336,6 +338,8 @@ void report_sync_install_preparation_failure(
                     if constexpr(std::is_same_v<
                                          Detail,
                                          SyncInstallPreparationIssue>) {
+                        const auto diagnostic =
+                                project_sync_install_diagnostic(typed_detail);
                         if(typed_detail.kind ==
                            SyncInstallPreparationIssueKind::
                                    UnsupportedSourceOption) {
@@ -345,20 +349,25 @@ void report_sync_install_preparation_failure(
                             const std::size_t separator =
                                     typed_detail.diagnostic.find('\n');
                             if(separator != std::string::npos) {
-                                Logger::error(
+                                report_runtime_diagnostic(
+                                        diagnostic,
                                         typed_detail.diagnostic.substr(
                                                 0, separator));
-                                Logger::error(
+                                report_runtime_diagnostic(
+                                        diagnostic,
                                         typed_detail.diagnostic.substr(
                                                 separator + 1));
                                 return;
                             }
                         }
-                        Logger::error(typed_detail.diagnostic);
+                        report_runtime_diagnostic(
+                                diagnostic, typed_detail.diagnostic);
                     } else if constexpr(std::is_same_v<
                                                 Detail,
                                                 SyncRepositoryMetadataReadFailure>) {
-                        Logger::error(typed_detail.failure.diagnostic);
+                        report_runtime_diagnostic(
+                                project_sync_install_diagnostic(typed_detail),
+                                typed_detail.failure.diagnostic);
                     } else {
                         Logger::error(typed_detail.diagnostic);
                     }
@@ -413,50 +422,51 @@ void present_root_package_candidate(
     }
 }
 
-void present_invalid_root_package_selection_issue(
-        std::ostream& output,
+std::string root_package_selection_issue_message(
         const RootPackageSelectionIssue& issue) {
-    std::visit(
-            [&output](const auto& typed_issue) {
+    return std::visit(
+            [](const auto& typed_issue) -> std::string {
                 using Issue = std::decay_t<decltype(typed_issue)>;
-                output << ":: ";
                 if constexpr(std::is_same_v<
                                      Issue,
                                      MalformedRootPackageSelectionToken>) {
-                    output << localization::translate_message(
+                    return localization::translate_message(
                             "Invalid package selection token.");
                 } else if constexpr(std::is_same_v<
                                             Issue,
                                             RootPackageSelectionIndexOutOfRange>) {
                     // TRANSLATORS: The placeholder is the number of displayed package candidates.
-                    output << localization::format_translated_message(
+                    return localization::format_translated_message(
                             "Package selection index is outside the displayed range 1-{}.",
                             typed_issue.candidate_count);
                 } else if constexpr(std::is_same_v<
                                             Issue,
                                             DescendingRootPackageSelectionRange>) {
-                    output << localization::translate_message(
+                    return localization::translate_message(
                             "Package selection ranges must use ascending endpoints.");
                 } else if constexpr(std::is_same_v<
                                             Issue,
                                             UnknownRootPackageSelectionGroup>) {
-                    output << localization::translate_message(
+                    return localization::translate_message(
                             "Package selection names an unknown displayed group.");
                 } else if constexpr(std::is_same_v<
                                             Issue,
                                             MixedRootPackageSelectionCancellationToken>) {
-                    output << localization::translate_message(
+                    return localization::translate_message(
                             "A package selection cancellation token cannot be combined with selectors.");
                 } else if constexpr(std::is_same_v<
                                             Issue,
                                             ConflictingRootPackageSelectionAlternatives>) {
                     // package_name comes from the validated candidate snapshot; raw input tokens are not echoed.
                     // TRANSLATORS: The placeholder is a validated package name.
-                    output << localization::format_translated_message(
+                    return localization::format_translated_message(
                             "Package {} was selected from more than one source; select exactly one source.",
                             typed_issue.package_name);
                 }
-                output << '\n';
+                // NO_TRANSLATE: Exhaustiveness guard for a typed variant;
+                // never presented as a recoverable user-facing diagnostic.
+                throw std::logic_error(
+                        "Unknown root package selection validation issue.");
             },
             issue);
 }
@@ -490,32 +500,47 @@ root_package_selection_interaction() {
 
         const auto& invalid =
                 std::get<InvalidRootPackageSelectionAttempt>(event);
-        for(const auto& issue : invalid.selection.issues) {
-            present_invalid_root_package_selection_issue(
-                    std::cout, issue);
+        const auto diagnostics = project_root_selection_diagnostics(
+                invalid.selection);
+        for(std::size_t index = 0; index < diagnostics.size(); ++index) {
+            const RuntimeDiagnosticPresentation presentation =
+                    present_runtime_diagnostic(
+                            diagnostics[index],
+                            root_package_selection_issue_message(
+                                    diagnostics[index].reason));
+            // Interactive retry feedback remains on the prompt stream. The
+            // typed reporter still owns classification and identity formatting.
+            std::cout << ":: " << presentation.message << '\n';
         }
     };
 }
 
 void report_root_package_selection_input_gate(
         RootPackageSelectionInputGate input_gate) {
+    RootPackageSelectionUnavailableReason reason =
+            RootPackageSelectionUnavailableReason::NonInteractiveInput;
+    std::string message;
     switch(input_gate) {
     case RootPackageSelectionInputGate::NonTty:
-        Logger::error(localization::translate_message(
-                "Interactive package selection requires a TTY on standard input."));
-        return;
+        reason = RootPackageSelectionUnavailableReason::NonInteractiveInput;
+        message = localization::translate_message(
+                "Interactive package selection requires a TTY on standard input.");
+        break;
     case RootPackageSelectionInputGate::NoConfirm:
         // TRANSLATORS: The placeholder is the literal CLI option --noconfirm.
-        Logger::error(localization::format_translated_message(
+        reason = RootPackageSelectionUnavailableReason::NoConfirm;
+        message = localization::format_translated_message(
                 "Interactive package selection is not available with {}.",
-                "--noconfirm"));
-        return;
+                "--noconfirm");
+        break;
     case RootPackageSelectionInputGate::Interactive:
         throw std::logic_error(localization::translate_message(
                 "Interactive package selection has an inconsistent input gate."));
     }
-    throw std::logic_error(localization::translate_message(
-            "Interactive package selection has an unknown input gate."));
+    report_runtime_diagnostic(
+            project_root_selection_diagnostic(
+                    UnavailableRootPackageSelection{reason}),
+            message);
 }
 
 RootPackageSearchScope root_package_search_scope(
@@ -729,7 +754,9 @@ RootPackageInstallPreparation prepare_root_package_install(
         {
             const std::string diagnostic = localization::translate_message(
                     "No package candidates were found.");
-            Logger::error(diagnostic);
+            report_runtime_diagnostic(
+                    project_root_selection_diagnostic(*unavailable),
+                    diagnostic);
             RootPackageInstallPreparationFailure failure = issue_failure(
                     RootPackageInstallPreparationIssue{
                             RootPackageInstallPreparationIssueKind::
@@ -774,7 +801,9 @@ RootPackageInstallPreparation prepare_root_package_install(
        cancelled != nullptr) {
         const std::string diagnostic = localization::translate_message(
                 "Package selection was cancelled.");
-        Logger::error(diagnostic);
+        report_runtime_diagnostic(
+                project_root_selection_diagnostic(*cancelled),
+                diagnostic);
         RootPackageInstallPreparationFailure failure = issue_failure(
                 RootPackageInstallPreparationIssue{
                         RootPackageInstallPreparationIssueKind::

@@ -648,8 +648,8 @@ assert_command_log_empty
 
 setup_case aur-install-rejects-option-before-plan
 run_status 1 -S --aur plan-a --config config-value plan-b
-assert_contains "Error: Unsupported pacman option for AUR/source-build target: --config" "$output_file"
-assert_contains "Error: Rerun --aur without this option." "$output_file"
+assert_contains "Error: Unsupported: Unsupported pacman option for AUR/source-build target: --config" "$output_file"
+assert_contains "Error: Unsupported: Rerun --aur without this option." "$output_file"
 assert_output_count 2 "Error:"
 assert_command_log_empty
 
@@ -796,8 +796,8 @@ assert_event_at 1 "pacman-conf --verbose RootDir DBPath"
 assert_event_at 2 "pacman-conf --repo-list"
 assert_event_prefix_absent '^aur '
 assert_no_mutation_events
-assert_contains "Error: Unsupported pacman option for AUR/source-build target: --config" "$output_file"
-assert_contains "Error: Split official repository and AUR/source-build targets, or rerun without this option." "$output_file"
+assert_contains "Error: Unsupported: Unsupported pacman option for AUR/source-build target: --config" "$output_file"
+assert_contains "Error: Unsupported: Split official repository and AUR/source-build targets, or rerun without this option." "$output_file"
 assert_output_count 2 "Error:"
 
 setup_case auto-install-all-source-guard-before-pacman
@@ -954,14 +954,18 @@ assert_event_absent "sudo pacman -Syu --noconfirm source-a"
 # P0-8/P0-9: Issue #217 production root search/selection route and phase barrier.
 setup_case select-nontty-gate-before-query
 run_status 1 -S --select select-scope
-assert_contains "Interactive package selection requires a TTY on standard input." "$output_file"
+assert_contains \
+    "Error: Unavailable: Interactive package selection requires a TTY on standard input." \
+    "$output_file"
 assert_event_prefix_absent '^root search '
 assert_command_log_empty
 assert_state_log_absent
 
 setup_case select-noconfirm-gate-before-query
 run_status 1 --noconfirm -S --select select-scope
-assert_contains "Interactive package selection is not available with --noconfirm." "$output_file"
+assert_contains \
+    "Error: Unavailable: Interactive package selection is not available with --noconfirm." \
+    "$output_file"
 assert_event_prefix_absent '^root search '
 assert_command_log_empty
 assert_state_log_absent
@@ -969,7 +973,8 @@ assert_state_log_absent
 setup_case select-no-candidates-without-prompt
 run_status_pty 1 '' -S --select select-empty
 assert_event_at 1 "root search all select-empty"
-assert_contains "No package candidates were found." "$output_file"
+assert_contains "Error: Unavailable: No package candidates were found." \
+    "$output_file"
 assert_not_contains "Package candidates:" "$output_file"
 assert_not_contains "Select package numbers" "$output_file"
 assert_event_prefix_absent '^(sudo|pacman|pacman-conf|git|makepkg|aur) '
@@ -1002,9 +1007,21 @@ assert_contains "1) source=repository repository=aur package=repo-presented vers
 assert_contains "    repository presentation fixture" "$output_file"
 assert_contains "2) source=AUR package=aur-presented PackageBase=aur-presented version=4.0-1" "$output_file"
 assert_contains "    AUR presentation fixture" "$output_file"
-assert_contains "Package selection index is outside the displayed range 1-2." "$output_file"
+assert_contains \
+    "Invalid: Package selection index is outside the displayed range 1-2." \
+    "$output_file"
 assert_output_count 2 "Select package numbers, ascending ranges, or displayed @group; press Enter or enter q/quit/cancel to cancel:"
-assert_contains "Package selection was cancelled." "$output_file"
+assert_contains "Cancelled: Package selection was cancelled." "$output_file"
+assert_event_prefix_absent '^(sudo|pacman|pacman-conf|git|makepkg|aur) '
+assert_state_log_absent
+
+setup_case select-ambiguous-alternative-retry-cancel
+run_status_pty 1 '1-2\nq\n' -S --select select-alternative-conflict
+assert_event_at 1 "root search all select-alternative-conflict"
+assert_contains \
+    "Ambiguous: Package shared-alternative was selected from more than one source; select exactly one source. [package=shared-alternative]" \
+    "$output_file"
+assert_contains "Cancelled: Package selection was cancelled." "$output_file"
 assert_event_prefix_absent '^(sudo|pacman|pacman-conf|git|makepkg|aur) '
 assert_state_log_absent
 
@@ -1013,7 +1030,7 @@ run_status_pty 1 'q\n' -S --select --repo select-scope
 assert_event_at 1 "root search repository select-scope"
 assert_contains "source=repository repository=core package=scope-repo" "$output_file"
 assert_not_contains "source=AUR package=scope-aur" "$output_file"
-assert_contains "Package selection was cancelled." "$output_file"
+assert_contains "Cancelled: Package selection was cancelled." "$output_file"
 assert_event_prefix_absent '^(sudo|pacman|pacman-conf|git|makepkg|aur) '
 assert_state_log_absent
 
@@ -1022,7 +1039,7 @@ run_status_pty 1 'q\n' -S --select --aur select-scope
 assert_event_at 1 "root search aur select-scope"
 assert_not_contains "source=repository repository=core package=scope-repo" "$output_file"
 assert_contains "source=AUR package=scope-aur PackageBase=scope-aur" "$output_file"
-assert_contains "Package selection was cancelled." "$output_file"
+assert_contains "Cancelled: Package selection was cancelled." "$output_file"
 assert_event_prefix_absent '^(sudo|pacman|pacman-conf|git|makepkg|aur) '
 assert_state_log_absent
 

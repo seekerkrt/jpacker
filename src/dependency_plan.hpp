@@ -231,6 +231,9 @@ struct BuildPlan {
     std::vector<BuildPlanProvidedDependency> provided;
     std::vector<BuildPlanMetadataRisk>       metadata_risks;
     std::vector<AmbiguousProvidedDependency> ambiguous_providers;
+    // Interactive provider selection が明示的に取消された dependency。
+    // candidate ambiguity は残しつつ、decision の typed evidence を失わない。
+    std::vector<std::string>                 cancelled_provider_dependencies;
     std::vector<std::string>                 unresolved;
     std::vector<std::string>                 cycles;
     std::vector<IncompleteProviderCandidateSet>

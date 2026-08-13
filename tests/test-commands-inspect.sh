@@ -89,6 +89,12 @@ extra'
     unset MOGUET_TEST_ALPM_VERCMP_RESULT
 }
 
+expect_constrained_provider_version_match() {
+    export MOGUET_TEST_ALPM_VERCMP_EXPECTED_LHS=2
+    export MOGUET_TEST_ALPM_VERCMP_EXPECTED_RHS=1
+    export MOGUET_TEST_ALPM_VERCMP_RESULT=1
+}
+
 show_case_diagnostics() {
     echo "--- stdout ---" >&2
     sed -n '1,260p' "$stdout_file" >&2
@@ -520,7 +526,10 @@ run_ok plan plan-first plan-fail plan-third
 assert_contains "AUR package metadata for plan-fail is unavailable: fixture plan failure" "$stdout_file"
 assert_before "  1. plan-first" "  2. plan-third" "$stdout_file"
 assert_exact_line_count 1 "Build plan:" "$stdout_file"
-assert_contains "Plan status: incomplete" "$stdout_file"
+assert_exact_line "  completeness: Incomplete" "$stdout_file"
+assert_exact_line "  Fetch readiness: Blocked" "$stdout_file"
+assert_exact_line "  Build readiness: Blocked" "$stdout_file"
+assert_exact_line "  Install readiness: Blocked" "$stdout_file"
 assert_exact_command_before "aur info-strict plan-first" "aur info-strict plan-fail"
 assert_exact_command_before "aur info-strict plan-fail" "aur info-strict plan-third"
 echo "  ok: plan retains ordinary failure as one incomplete invocation"
@@ -545,7 +554,8 @@ assert_contains_count 1 \
     "moguet-inspect-203-virtual-provider -> aur/provider-a (selected)" \
     "$stdout_file"
 assert_contains_count 1 "  1. provider-a" "$stdout_file"
-assert_not_contains "Plan status: incomplete" "$stdout_file"
+assert_contains "completeness: Complete" "$stdout_file"
+assert_contains "provider decision: Selected" "$stdout_file"
 echo "  ok: plan reuses one interactive provider choice across targets"
 
 setup_case plan-provider-interactive-cancel
@@ -555,11 +565,74 @@ assert_contains_count 1 \
     ":: provider dependency=moguet-inspect-203-virtual-provider" \
     "$stdout_file"
 assert_not_contains " (selected)" "$stdout_file"
-assert_contains_count 1 "Plan status: incomplete" "$stdout_file"
+assert_contains_count 1 "completeness: Incomplete" "$stdout_file"
+assert_contains "provider decision: Cancelled" "$stdout_file"
 assert_no_git_mutation
 assert_not_contains "makepkg " "$command_log"
 assert_not_contains "sudo " "$command_log"
 echo "  ok: plan retains provider cancellation across multiple targets"
+
+# Constraint-bearing dependencies retain their raw BuildPlan identity while
+# cancellation evidence is looked up by the session's canonical identity.
+setup_case plan-provider-constraint-q-cancel
+export MOGUET_TEST_INSPECTION_SCENARIO=plan-provider-constraint-q-cancel
+expect_constrained_provider_version_match
+run_tty_ok q plan provider-constraint-root
+assert_contains_count 1 \
+    ":: provider dependency=moguet-inspect-350-virtual-provider" \
+    "$stdout_file"
+assert_contains \
+    "  moguet-inspect-350-virtual-provider>=1" "$stdout_file"
+assert_contains "provider decision: Cancelled" "$stdout_file"
+assert_not_contains "provider decision: Ambiguous" "$stdout_file"
+assert_no_git_mutation
+assert_not_contains "makepkg " "$command_log"
+assert_not_contains "sudo " "$command_log"
+echo "  ok: constrained provider q cancellation retains canonical evidence and raw identity"
+
+setup_case plan-provider-constraint-eof-cancel
+export MOGUET_TEST_INSPECTION_SCENARIO=plan-provider-constraint-eof-cancel
+expect_constrained_provider_version_match
+run_tty_ok_with_eof plan provider-constraint-root
+assert_contains_count 1 \
+    ":: provider dependency=moguet-inspect-350-virtual-provider" \
+    "$stdout_file"
+assert_contains \
+    "  moguet-inspect-350-virtual-provider>=1" "$stdout_file"
+assert_contains "provider decision: Cancelled" "$stdout_file"
+assert_not_contains "provider decision: Ambiguous" "$stdout_file"
+assert_no_git_mutation
+assert_not_contains "makepkg " "$command_log"
+assert_not_contains "sudo " "$command_log"
+echo "  ok: constrained provider EOF cancellation retains canonical evidence and raw identity"
+
+setup_case plan-provider-constraint-non-tty
+export MOGUET_TEST_INSPECTION_SCENARIO=plan-provider-constraint-non-tty
+expect_constrained_provider_version_match
+run_ok_with_pipe 2 plan provider-constraint-root
+assert_not_contains ":: provider dependency=" "$stdout_file"
+assert_contains \
+    "  moguet-inspect-350-virtual-provider>=1" "$stdout_file"
+assert_contains "provider decision: Ambiguous" "$stdout_file"
+assert_not_contains "provider decision: Cancelled" "$stdout_file"
+assert_no_git_mutation
+assert_not_contains "makepkg " "$command_log"
+assert_not_contains "sudo " "$command_log"
+echo "  ok: constrained provider non-TTY ambiguity does not invent cancellation"
+
+setup_case plan-provider-constraint-noconfirm
+export MOGUET_TEST_INSPECTION_SCENARIO=plan-provider-constraint-noconfirm
+expect_constrained_provider_version_match
+run_tty_ok 2 --noconfirm plan provider-constraint-root
+assert_not_contains ":: provider dependency=" "$stdout_file"
+assert_contains \
+    "  moguet-inspect-350-virtual-provider>=1" "$stdout_file"
+assert_contains "provider decision: Ambiguous" "$stdout_file"
+assert_not_contains "provider decision: Cancelled" "$stdout_file"
+assert_no_git_mutation
+assert_not_contains "makepkg " "$command_log"
+assert_not_contains "sudo " "$command_log"
+echo "  ok: constrained provider --noconfirm ambiguity does not invent cancellation"
 
 # --noconfirm suppresses provider selection even when stdin is a TTY.
 setup_case plan-provider-noconfirm-tty
@@ -568,7 +641,8 @@ run_tty_ok 2 --noconfirm plan provider-root
 assert_not_contains ":: provider dependency=" "$stdout_file"
 assert_not_contains " (selected)" "$stdout_file"
 assert_contains "Ambiguous provided dependencies:" "$stdout_file"
-assert_contains "Plan status: incomplete" "$stdout_file"
+assert_contains "completeness: Incomplete" "$stdout_file"
+assert_contains "provider decision: Ambiguous" "$stdout_file"
 echo "  ok: --noconfirm keeps an ambiguous provider fail-closed on a TTY"
 
 setup_case plan-provider-partial-source-failure
@@ -577,7 +651,8 @@ run_tty_ok 1 plan partial-provider-root
 assert_not_contains ":: provider dependency=" "$stdout_file"
 assert_contains "Incomplete provider candidate observations:" "$stdout_file"
 assert_contains "observed candidates: aur/partial-provider-a" "$stdout_file"
-assert_contains "Plan status: incomplete" "$stdout_file"
+assert_contains "completeness: Incomplete" "$stdout_file"
+assert_contains "provider decision: Unavailable" "$stdout_file"
 assert_contains \
     "partial-provider-virtual>=1: result=Unknown, reason=source metadata is incomplete" \
     "$stdout_file"
@@ -596,6 +671,42 @@ assert_not_contains ":: provider dependency=" "$stdout_file"
 assert_no_git_mutation
 echo "  ok: same-root conflict fails before provider interaction"
 
+setup_case plan-metadata-risk-readiness
+export MOGUET_TEST_INSPECTION_SCENARIO=plan-metadata-risk-readiness
+run_ok plan plan-metadata-risk-root
+assert_exact_line "  completeness: Unknown" "$stdout_file"
+assert_exact_line "  Fetch readiness: Ready" "$stdout_file"
+assert_exact_line "  Build readiness: RequiresCheck" "$stdout_file"
+assert_exact_line "  Install readiness: RequiresCheck" "$stdout_file"
+assert_contains \
+    "reason: declared-relation (actual relation unassessed)" "$stdout_file"
+assert_exact_line "  actual relation: unassessed (#353)" "$stdout_file"
+echo "  ok: plan keeps declared relation metadata separate from assessment"
+
+setup_case plan-split-only-readiness
+export MOGUET_TEST_INSPECTION_SCENARIO=plan-split-only-readiness
+run_ok plan plan-split-child
+assert_exact_line "  completeness: Complete" "$stdout_file"
+assert_exact_line "  Fetch readiness: Ready" "$stdout_file"
+assert_exact_line "  Build readiness: Ready" "$stdout_file"
+assert_exact_line "  Install readiness: Blocked" "$stdout_file"
+assert_exact_line "  - package: plan-split-child" "$stdout_file"
+assert_exact_line "    PackageBase: plan-split-suite" "$stdout_file"
+assert_contains "reason: split-package" "$stdout_file"
+echo "  ok: plan preserves split PackageBase install readiness"
+
+setup_case plan-density-attention
+export MOGUET_TEST_INSPECTION_SCENARIO=plan-density-attention
+run_ok plan plan-density-root
+assert_exact_line \
+    "  items: 34 total, 33 normal, 1 attention-required" "$stdout_file"
+assert_exact_line "  normal unconstrained dependencies: 33" "$stdout_file"
+assert_exact_line "  - package: attention-risk-child" "$stdout_file"
+assert_contains \
+    "reason: declared-relation (actual relation unassessed)" "$stdout_file"
+assert_before "Attention-required details:" "Build plan:" "$stdout_file"
+echo "  ok: plan aggregates normal dependencies before attention detail"
+
 # Issue #125: formatterはprivate helperのまま、repository metadataからplan表示へ流して固定する。
 setup_case plan-repository-size-formatter
 export MOGUET_TEST_INSPECTION_SCENARIO=plan-repository-size-formatter
@@ -613,18 +724,11 @@ set_repository_metadata core format-991730 991730 991730
 set_repository_metadata core format-5283285 5283285 5283285
 set_repository_metadata core format-int64-max 9223372036854775807 9223372036854775807
 run_ok plan plan-formatter-root
-assert_line_immediately_after "  core/format-0" "    Package size   : 0 B" "$stdout_file"
-assert_line_immediately_after "  core/format-1023" "    Package size   : 1023 B" "$stdout_file"
-assert_line_immediately_after "  core/format-1024" "    Package size   : 1.00 KiB" "$stdout_file"
-assert_line_immediately_after "  core/format-1152" "    Package size   : 1.13 KiB" "$stdout_file"
-assert_line_immediately_after "  core/format-1536" "    Package size   : 1.50 KiB" "$stdout_file"
-assert_line_immediately_after "  core/format-1048570" "    Package size   : 1023.99 KiB" "$stdout_file"
-assert_line_immediately_after "  core/format-1048571" "    Package size   : 1.00 MiB" "$stdout_file"
-assert_line_immediately_after "  core/format-1048576" "    Package size   : 1.00 MiB" "$stdout_file"
-assert_line_immediately_after "  core/format-991730" "    Package size   : 968.49 KiB" "$stdout_file"
-assert_line_immediately_after "  core/format-5283285" "    Package size   : 5.04 MiB" "$stdout_file"
-assert_line_immediately_after "  core/format-int64-max" "    Package size   : 8.00 EiB" "$stdout_file"
-echo "  ok: plan repository size formatting uses integer IEC round-half-up"
+assert_line_immediately_after "  packages: 11" \
+    "    Package size   : 8.00 EiB" "$stdout_file"
+assert_exact_line "    Installed size : 8.00 EiB" "$stdout_file"
+assert_not_contains "  core/format-" "$stdout_file"
+echo "  ok: plan aggregates normal repository size detail"
 
 # success/zero/not-found/query failure/malformedは別stateとして表示し、plan statusを汚さない。
 setup_case plan-repository-size-results
@@ -637,16 +741,21 @@ set_repository_metadata core result-malformed -1 4096
 set_repository_metadata core result-after-failure 1024 1536
 set_repository_metadata core result-later-target 2048 3072
 run_ok plan plan-result-root plan-result-later-root
-assert_line_immediately_after "  core/result-zero" "    Package size   : 0 B" "$stdout_file"
-assert_exact_line "    Installed size : 0 B" "$stdout_file"
-assert_line_immediately_after "  result-missing" "    Metadata       : not found" "$stdout_file"
-assert_line_immediately_after "  result-query-failure" "    Metadata       : unavailable (query failed)" "$stdout_file"
-assert_line_immediately_after "  result-malformed" "    Metadata       : unavailable (invalid metadata)" "$stdout_file"
-assert_line_immediately_after "  core/result-after-failure" "    Package size   : 1.00 KiB" "$stdout_file"
-assert_line_immediately_after "  core/result-later-target" "    Package size   : 2.00 KiB" "$stdout_file"
-assert_before "  result-query-failure" "  core/result-after-failure" "$stdout_file"
+assert_line_immediately_after "  packages: 3" \
+    "    Package size   : 3.00 KiB" "$stdout_file"
+assert_exact_line "    Installed size : 4.50 KiB" "$stdout_file"
+assert_exact_line "  attention: result-missing: not found" "$stdout_file"
+assert_exact_line \
+    "  attention: result-query-failure: Metadata       : unavailable (query failed)" \
+    "$stdout_file"
+assert_exact_line \
+    "  attention: result-malformed: Metadata       : unavailable (invalid metadata)" \
+    "$stdout_file"
+assert_before "  attention: result-query-failure: Metadata       : unavailable (query failed)" \
+    "  attention: result-malformed: Metadata       : unavailable (invalid metadata)" \
+    "$stdout_file"
 assert_before "  1. plan-result-root" "  2. plan-result-later-root" "$stdout_file"
-assert_not_contains "Plan status: incomplete" "$stdout_file"
+assert_exact_line "  completeness: Complete" "$stdout_file"
 echo "  ok: plan repository metadata preserves zero, absence, failure, and malformed states"
 
 # semantic lookupは(exact repository, package)、成功表示はreturned repo/packageでdedupeする。
@@ -664,17 +773,16 @@ set_repository_metadata extra different-package 4096 5120
 set_repository_metadata core same-semantic 6144 7168
 set_repository_metadata aur repository-aur-package 8192 9216
 run_ok plan plan-identity-root
-assert_exact_line_count 1 "  extra/same-package" "$stdout_file"
-assert_exact_line_count 1 "  core/different-package" "$stdout_file"
-assert_exact_line_count 1 "  extra/different-package" "$stdout_file"
-assert_exact_line_count 1 "  core/same-semantic" "$stdout_file"
-assert_exact_line_count 1 "  aur/repository-aur-package" "$stdout_file"
+assert_exact_line_count 1 "  packages: 5" "$stdout_file"
+assert_exact_line "    Package size   : 21.00 KiB" "$stdout_file"
+assert_exact_line "    Installed size : 26.00 KiB" "$stdout_file"
 assert_exact_line "  - identity-repository-aur-virtual -> aur/repository-aur-package" "$stdout_file"
 assert_exact_line "  - identity-aur-virtual -> aur/identity-aur-provider" "$stdout_file"
-assert_before "  extra/same-package" "  core/different-package" "$stdout_file"
-assert_before "  core/different-package" "  extra/different-package" "$stdout_file"
-assert_before "  extra/different-package" "  core/same-semantic" "$stdout_file"
-assert_before "  core/same-semantic" "  aur/repository-aur-package" "$stdout_file"
+assert_not_exact_line "  extra/same-package" "$stdout_file"
+assert_not_exact_line "  core/different-package" "$stdout_file"
+assert_not_exact_line "  extra/different-package" "$stdout_file"
+assert_not_exact_line "  core/same-semantic" "$stdout_file"
+assert_not_exact_line "  aur/repository-aur-package" "$stdout_file"
 assert_exact_line_count 1 "alpm sync-query core/same-package" "$command_log"
 assert_exact_line_count 2 "alpm sync-query extra/same-package" "$command_log"
 assert_exact_line_count 1 "alpm sync-query core/different-package" "$command_log"
@@ -719,7 +827,10 @@ export MOGUET_TEST_PACMAN_REPO_PACKAGES=cache-shared
 set_repository_metadata core cache-shared 991730 5283285
 run_ok plan plan-cache-first plan-cache-second
 assert_exact_line_count 1 "Repository package sizes:" "$stdout_file"
-assert_exact_line_count 1 "  core/cache-shared" "$stdout_file"
+assert_exact_line_count 1 "  packages: 1" "$stdout_file"
+assert_exact_line "    Package size   : 968.49 KiB" "$stdout_file"
+assert_exact_line "    Installed size : 5.04 MiB" "$stdout_file"
+assert_not_exact_line "  core/cache-shared" "$stdout_file"
 assert_exact_line_count 1 "pacman-conf --verbose RootDir DBPath" "$command_log"
 assert_exact_line_count 1 "pacman-conf --repo-list" "$command_log"
 assert_exact_line_count 1 "alpm initialize" "$command_log"
@@ -781,30 +892,30 @@ echo "  ok: pacman -Ss/-Si routes do not initialize repository metadata"
 # Handler-owned usage/option messagesも、抽出でrunner側へずらさない。
 setup_case deps-empty
 run_fail deps
-assert_contains "Usage: moguet deps [--recursive] <pkg>" "$stderr_file"
+assert_contains "Usage: moguet deps [--recursive] <pkg>..." "$stderr_file"
 
 setup_case deps-unsupported
 run_fail deps --unsupported deps-first
 assert_contains "Unsupported deps option: --unsupported" "$stderr_file"
-assert_contains "Usage: moguet deps [--recursive] <pkg>" "$stderr_file"
+assert_contains "Usage: moguet deps [--recursive] <pkg>..." "$stderr_file"
 
 setup_case plan-empty
 run_fail plan
-assert_contains "Usage: moguet plan <pkg>" "$stderr_file"
+assert_contains "Usage: moguet plan <pkg>..." "$stderr_file"
 
 setup_case plan-unsupported
 run_fail plan --unsupported plan-first
 assert_contains "Unsupported plan option: --unsupported" "$stderr_file"
-assert_contains "Usage: moguet plan <pkg>" "$stderr_file"
+assert_contains "Usage: moguet plan <pkg>..." "$stderr_file"
 
 setup_case fetch-empty
 run_fail fetch
-assert_contains "Usage: moguet fetch <pkg>" "$stderr_file"
+assert_contains "Usage: moguet fetch <pkg>..." "$stderr_file"
 
 setup_case fetch-unsupported
 run_fail fetch --unsupported fetch-preflight-root
 assert_contains "Unsupported fetch option: --unsupported" "$stderr_file"
-assert_contains "Usage: moguet fetch <pkg>" "$stderr_file"
+assert_contains "Usage: moguet fetch <pkg>..." "$stderr_file"
 
 setup_case fetch-validation-position
 export MOGUET_TEST_INSPECTION_SCENARIO=fetch-validation-position
@@ -946,8 +1057,8 @@ export MOGUET_TEST_ALPM_VERCMP_EXPECTED_LHS=2.0-1
 export MOGUET_TEST_ALPM_VERCMP_EXPECTED_RHS=3
 export MOGUET_TEST_ALPM_VERCMP_RESULT=-1
 run_ok plan constraint-unsatisfied-root
-assert_contains "Plan status: incomplete" "$stdout_file"
-assert_contains "dependency constraints are incomplete" "$stdout_file"
+assert_exact_line "  completeness: Incomplete" "$stdout_file"
+assert_contains "reason: constraint-readiness" "$stdout_file"
 assert_contains "constraint-leaf>=3: result=Unsatisfied" "$stdout_file"
 
 setup_case fetch-constraint-firewall

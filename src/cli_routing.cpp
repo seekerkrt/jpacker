@@ -2,6 +2,7 @@
 
 #include "application_identity.hpp"
 #include "cli_authority.hpp"
+#include "cli_runtime_contract.hpp"
 #include "localization.hpp"
 
 #include <algorithm>
@@ -403,9 +404,13 @@ DryRunOperation classify_dry_run_operation(
                        : DryRunOperation::SyncInstall;
     }
 
-    const cli_authority::OperationSpec* operation =
-            cli_authority::find_moguet_operation(parsed.operation);
-    if(operation == nullptr) return DryRunOperation::Unsupported;
+    const ResolvedCliRuntimeContract runtime_contract =
+            resolve_cli_runtime_contract(parsed);
+    if(runtime_contract.operation == nullptr ||
+       runtime_contract.operation->dry_run_support !=
+               cli_authority::DryRunSupport::Supported) {
+        return DryRunOperation::Unsupported;
+    }
     if(parsed.root_package_selection_requested ||
        parsed.source_selection != PackageSourceSelection::Auto) {
         return DryRunOperation::Unsupported;
@@ -418,7 +423,7 @@ DryRunOperation classify_dry_run_operation(
                        token.role != CliTokenRole::Target;
             });
 
-    switch(operation->id) {
+    switch(runtime_contract.operation->id) {
     case cli_authority::OperationId::Build: {
         const bool local_build = local_source_build_requested(parsed);
         std::size_t local_selector_count = 0;
@@ -448,19 +453,19 @@ DryRunOperation classify_dry_run_operation(
                            : DryRunOperation::RemoteBuild;
     }
     case cli_authority::OperationId::Fetch:
-        return has_unexpected_custom_token || parsed.targets.empty()
+        return has_unexpected_custom_token
                        ? DryRunOperation::Unsupported
                        : DryRunOperation::Fetch;
     case cli_authority::OperationId::Upgrade:
-        return has_unexpected_custom_token || !parsed.targets.empty()
+        return has_unexpected_custom_token
                        ? DryRunOperation::Unsupported
                        : DryRunOperation::Upgrade;
     case cli_authority::OperationId::UpgradeAur:
-        return has_unexpected_custom_token || !parsed.targets.empty()
+        return has_unexpected_custom_token
                        ? DryRunOperation::Unsupported
                        : DryRunOperation::UpgradeAur;
     case cli_authority::OperationId::UpgradeAll:
-        return has_unexpected_custom_token || !parsed.targets.empty()
+        return has_unexpected_custom_token
                        ? DryRunOperation::Unsupported
                        : DryRunOperation::UpgradeAll;
     case cli_authority::OperationId::Clean:

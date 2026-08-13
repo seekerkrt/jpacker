@@ -64,6 +64,9 @@ public:
             const ProviderCandidatePresenter& present_candidate);
 
     bool is_interactive() const noexcept;
+    // Raw dependency specifications use the same canonical package-name
+    // authority as selection and cancellation storage.
+    bool was_cancelled(const std::string& dependency) const;
 
 private:
     std::istream* input_;

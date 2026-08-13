@@ -85,6 +85,7 @@ AUR_UPDATE_OPERATION_RESULT_TEST_TARGET := $(BUILD_DIR)/tests/aur-update-operati
 FILTERED_AUR_UPDATE_OPERATION_TEST_TARGET := $(BUILD_DIR)/tests/filtered-aur-update-operation-test
 UPGRADE_ALL_OPERATION_TEST_TARGET := $(BUILD_DIR)/tests/upgrade-all-operation-test
 CLI_DIAGNOSTIC_MODEL_TEST_TARGET := $(BUILD_DIR)/tests/cli-diagnostic-model-test
+RUNTIME_CLI_CONNECTION_TEST_TARGET := $(BUILD_DIR)/tests/runtime-cli-connection-test
 DEPENDENCY_PLAN_MODEL_TEST_TARGET := $(BUILD_DIR)/tests/dependency-plan-model-test
 BUILD_PLAN_ARTIFACT_TARGET_PROJECTION_TEST_TARGET := $(BUILD_DIR)/tests/build-plan-artifact-target-projection-test
 UNIFIED_PLAN_OBSERVATION_TEST_TARGET := $(BUILD_DIR)/tests/unified-plan-observation-test
@@ -738,6 +739,19 @@ CLI_DIAGNOSTIC_MODEL_TEST_SRCS := \
 CLI_DIAGNOSTIC_MODEL_FORBIDDEN_TEST_SRCS := \
 	$(filter-out \
 		$(CLI_DIAGNOSTIC_MODEL_ALLOWED_PRODUCTION_TEST_SRCS), \
+		$(SRCS))
+# POLICY(#350): Slice 3 focused boundary links only the runtime CLI adapter,
+# its existing assignment parser, and diagnostic presentation adapter.
+RUNTIME_CLI_CONNECTION_ALLOWED_PRODUCTION_TEST_SRCS := \
+	$(SRC_DIR)/cli_runtime_contract.cpp \
+	$(SRC_DIR)/runtime_diagnostic.cpp \
+	$(SRC_DIR)/source_environment.cpp
+RUNTIME_CLI_CONNECTION_TEST_SRCS := \
+	tests/runtime_cli_connection_test.cpp \
+	$(RUNTIME_CLI_CONNECTION_ALLOWED_PRODUCTION_TEST_SRCS)
+RUNTIME_CLI_CONNECTION_FORBIDDEN_TEST_SRCS := \
+	$(filter-out \
+		$(RUNTIME_CLI_CONNECTION_ALLOWED_PRODUCTION_TEST_SRCS), \
 		$(SRCS))
 # POLICY(#268): dependency resolver model testはresolverとpure model supportだけを
 # productionからlinkし、metadata/process/source-build execution ownerを持ち込まない。
@@ -1426,6 +1440,7 @@ LIBALPM_BUILD_TARGETS := \
 .PHONY: check-unified-plan-projection-link-firewall test-unified-plan-projection test-projection-fixture-gate
 .PHONY: check-unified-plan-renderer-link-firewall test-unified-plan-renderer
 .PHONY: check-cli-diagnostic-model-link-firewall test-cli-diagnostic-model
+.PHONY: check-runtime-cli-connection-link-firewall test-runtime-cli-connection
 .PHONY: test-artifact-identity-real-pacman
 .PHONY: FORCE catalogs check-catalogs check-localization-config check-pot update-po update-pot test-localization test-catalog-metadata-gate test-cli-localization-surface test-public-documentation
 .PHONY: test-container test-container-live test-container-live-provider test-container-live-aur test-container-live-local
@@ -1649,6 +1664,7 @@ NON_HEAVY_TARGETS := \
 	$(FILTERED_AUR_UPDATE_OPERATION_TEST_TARGET) \
 	$(UPGRADE_ALL_OPERATION_TEST_TARGET) \
 	$(CLI_DIAGNOSTIC_MODEL_TEST_TARGET) \
+	$(RUNTIME_CLI_CONNECTION_TEST_TARGET) \
 	$(DEPENDENCY_PLAN_MODEL_TEST_TARGET) \
 	$(BUILD_PLAN_ARTIFACT_TARGET_PROJECTION_TEST_TARGET) \
 	$(UNIFIED_PLAN_OBSERVATION_TEST_TARGET) \
@@ -1786,6 +1802,7 @@ $(eval $(call define_non_heavy_test_profile,AUR_UPDATE_OPERATION_RESULT,$(DIRECT
 $(eval $(call define_non_heavy_test_profile,FILTERED_AUR_UPDATE_OPERATION,$(DIRECT_LIBALPM_COMPILE_ARGS) -DMOGUET_ENABLE_AUR_UPDATE_EXECUTION_PREPARATION_TEST_HOOKS -DMOGUET_ENABLE_AUR_UPDATE_EXECUTION_RUNNER_TEST_HOOKS -I$(SRC_DIR),$(FILTERED_AUR_UPDATE_OPERATION_TEST_SRCS),,,$(LIBALPM_LDLIBS)))
 $(eval $(call define_non_heavy_test_profile,UPGRADE_ALL_OPERATION,$(DIRECT_LIBALPM_COMPILE_ARGS) -ffunction-sections -fdata-sections -DMOGUET_ENABLE_UPGRADE_ALL_OPERATION_TEST_HOOKS -DMOGUET_ENABLE_SYSTEM_SOURCE_UPGRADE_TEST_HOOKS -I$(SRC_DIR),$(UPGRADE_ALL_OPERATION_TEST_SRCS),,$(GC_SECTIONS_LINK_ARG),$(LIBALPM_LDLIBS)))
 $(eval $(call define_non_heavy_test_profile,CLI_DIAGNOSTIC_MODEL,$(DIRECT_LIBALPM_COMPILE_ARGS) -I$(SRC_DIR),$(CLI_DIAGNOSTIC_MODEL_TEST_SRCS),,,$(LIBALPM_LDLIBS)))
+$(eval $(call define_non_heavy_test_profile,RUNTIME_CLI_CONNECTION,$(DIRECT_COMPILE_ARGS) -ffunction-sections -fdata-sections -I$(SRC_DIR),$(RUNTIME_CLI_CONNECTION_TEST_SRCS),,$(GC_SECTIONS_LINK_ARG)))
 $(eval $(call define_non_heavy_test_profile,DEPENDENCY_PLAN_MODEL,$(DIRECT_LIBALPM_COMPILE_ARGS) -I$(SRC_DIR),$(DEPENDENCY_PLAN_MODEL_TEST_SRCS),,,$(LIBALPM_LDLIBS)))
 $(eval $(call define_non_heavy_test_profile,BUILD_PLAN_ARTIFACT_TARGET_PROJECTION,$(DIRECT_LIBALPM_COMPILE_ARGS) -I$(SRC_DIR),$(BUILD_PLAN_ARTIFACT_TARGET_PROJECTION_TEST_SRCS),,,$(LIBALPM_LDLIBS)))
 $(eval $(call define_non_heavy_test_profile,UNIFIED_PLAN_OBSERVATION,$(DIRECT_LIBALPM_COMPILE_ARGS) -I$(SRC_DIR),$(UNIFIED_PLAN_OBSERVATION_TEST_SRCS),,,$(LIBALPM_LDLIBS)))
@@ -2228,6 +2245,11 @@ $(CLI_DIAGNOSTIC_MODEL_TEST_TARGET): $(CLI_DIAGNOSTIC_MODEL_TEST_SRCS) $(SRC_DIR
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling CLI/diagnostic pure-model test binary"
 	$(call compile_non_heavy_test,CLI_DIAGNOSTIC_MODEL)
+
+$(RUNTIME_CLI_CONNECTION_TEST_TARGET): $(RUNTIME_CLI_CONNECTION_TEST_SRCS) $(SRC_DIR)/cli_runtime_contract.hpp $(SRC_DIR)/runtime_diagnostic.hpp $(VERSION_FILE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling runtime CLI connection focused test binary"
+	$(call compile_non_heavy_test,RUNTIME_CLI_CONNECTION)
 
 $(DEPENDENCY_PLAN_MODEL_TEST_TARGET): $(DEPENDENCY_PLAN_MODEL_TEST_SRCS) $(SRC_DIR)/dependency_plan.hpp $(SRC_DIR)/dependency_plan_projection_support.hpp $(SRC_DIR)/dependency_provider.hpp $(SRC_DIR)/aur_rpc.hpp $(SRC_DIR)/repository_query.hpp $(SRC_DIR)/dependency_spec.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/logging.hpp $(SRC_DIR)/localization.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
@@ -3059,6 +3081,28 @@ check-cli-diagnostic-model-link-firewall:
 test-cli-diagnostic-model: check-cli-diagnostic-model-link-firewall $(CLI_DIAGNOSTIC_MODEL_TEST_TARGET)
 	$(abspath $(CLI_DIAGNOSTIC_MODEL_TEST_TARGET))
 
+check-runtime-cli-connection-link-firewall:
+	@echo ":: Checking runtime CLI connection link firewall"
+	@set -e; for source in $(RUNTIME_CLI_CONNECTION_ALLOWED_PRODUCTION_TEST_SRCS); do \
+		count=$$(printf '%s\n' $(RUNTIME_CLI_CONNECTION_TEST_SRCS) | \
+			awk -v expected="$$source" '$$0 == expected { count++ } END { print count + 0 }'); \
+		test "$$count" -eq 1 || { \
+			echo "error: runtime CLI connection test must link $$source exactly once" >&2; \
+			exit 1; \
+		}; \
+	done
+	@test -z "$(filter $(RUNTIME_CLI_CONNECTION_FORBIDDEN_TEST_SRCS),$(RUNTIME_CLI_CONNECTION_TEST_SRCS))" || { \
+		echo "error: runtime CLI connection test links an unrelated production source" >&2; \
+		exit 1; \
+	}
+	@test -z "$(filter tests/stubs/%,$(RUNTIME_CLI_CONNECTION_TEST_SRCS))" || { \
+		echo "error: runtime CLI connection test links a test stub" >&2; \
+		exit 1; \
+	}
+
+test-runtime-cli-connection: check-runtime-cli-connection-link-firewall $(RUNTIME_CLI_CONNECTION_TEST_TARGET)
+	$(abspath $(RUNTIME_CLI_CONNECTION_TEST_TARGET))
+
 check-dependency-plan-model-link-firewall:
 	@echo ":: Checking dependency plan model link firewall"
 	@set -e; for source in $(DEPENDENCY_PLAN_MODEL_ALLOWED_PRODUCTION_TEST_SRCS); do \
@@ -3521,6 +3565,7 @@ test: \
 	test-filtered-aur-update-operation \
 	test-upgrade-all-operation \
 	test-cli-diagnostic-model \
+	test-runtime-cli-connection \
 	test-dependency-plan-model \
 	test-build-plan-artifact-target-projection \
 	test-unified-plan-observation \

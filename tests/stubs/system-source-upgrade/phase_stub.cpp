@@ -658,6 +658,10 @@ const PackageMetadataFailure& PackageMetadataError::failure() const noexcept {
     return failure_;
 }
 
+PacmanDatabasePaths resolve_pacman_database_paths() {
+    return PacmanDatabasePaths{"/stub/root", "/stub/database"};
+}
+
 struct PackageMetadataSession::Impl {
     explicit Impl(stub::MetadataSessionScript scripted)
         : script(std::move(scripted)) {

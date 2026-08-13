@@ -5,6 +5,7 @@
 #include "cli_authority.hpp"
 #include "cli_parser.hpp"
 #include "cli_routing.hpp"
+#include "cli_runtime_contract.hpp"
 #include "commands_inspect.hpp"
 #include "commands_source_maintenance.hpp"
 #include "commands_sync.hpp"
@@ -15,6 +16,7 @@
 #include "local_source_metadata_evaluation.hpp"
 #include "localization.hpp"
 #include "logging.hpp"
+#include "runtime_diagnostic.hpp"
 #include "source_install.hpp"
 #include "system_source_upgrade.hpp"
 #include "unified_plan_projection.hpp"
@@ -256,6 +258,16 @@ int run_dry_run(
         const ParsedCliArguments& parsed,
         const AppConfig& config) {
     try {
+        const CliInvocationValidation invocation_validation =
+                validate_cli_invocation_contract(parsed);
+        if(!invocation_validation.is_valid()) {
+            const auto& diagnostic =
+                    invocation_validation.diagnostic.value();
+            report_runtime_diagnostic(
+                    diagnostic,
+                    cli_invocation_issue_message(diagnostic.reason));
+            return DRY_RUN_BLOCKED_STATUS;
+        }
         if(const std::optional<std::string> selection_error =
                    validate_source_selection_operation(parsed);
            selection_error.has_value()) {
@@ -277,14 +289,6 @@ int run_dry_run(
         case DryRunOperation::Upgrade:
             return run_upgrade_dry_run(config);
         case DryRunOperation::UpgradeAur:
-            if(!parsed.targets.empty()) {
-                Logger::error(localization::format_translated_message(
-                        "Operation {} does not accept target operands.",
-                        cli_authority::operation_spec(
-                                cli_authority::OperationId::UpgradeAur)
-                                .token));
-                return DRY_RUN_BLOCKED_STATUS;
-            }
             return run_upgrade_aur_dry_run(config);
         case DryRunOperation::UpgradeAll:
             return run_upgrade_all_dry_run(parsed, config);

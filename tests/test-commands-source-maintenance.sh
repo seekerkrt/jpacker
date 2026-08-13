@@ -878,7 +878,9 @@ assert_total_command_count 0
 
 setup_case build-environment-without-package
 run_fail build FIRST=one SECOND=two
-assert_contains "No package specified." "$output_file"
+assert_contains \
+    "Invalid: Environment assignment requires a preceding package: FIRST=one" \
+    "$output_file"
 assert_total_command_count 0
 
 setup_case build-invalid-environment
@@ -890,9 +892,8 @@ assert_total_command_count 0
 setup_case build-environment-order
 export MOGUET_TEST_PACMAN_REPO_PACKAGES=clean-root
 run_fail --noedit --nodiff --noconfirm build \
-    FIRST=one clean-root "SECOND=two words" FIRST=last EMPTY= \
-    PKGDEST=first-path PKGDEST= ignored
-assert_contains "Ignoring extra arg 'ignored'" "$output_file"
+    clean-root FIRST=one "SECOND=two words" FIRST=last EMPTY= \
+    PKGDEST=first-path PKGDEST=
 assert_contains "Source environment PKGDEST conflicts with the invocation-owned artifact workspace." "$output_file"
 assert_command "pacman-conf --verbose RootDir DBPath"
 assert_command "pacman-conf --repo-list"
@@ -901,6 +902,13 @@ assert_command_absent "pacman -Si clean-root"
 assert_command_content_absent "git clone"
 assert_command_content_absent "makepkg"
 assert_command_content_absent "pacman -U"
+
+setup_case build-extra-bare-operand-rejected
+run_fail build clean-root ignored
+assert_contains \
+    "Invalid: Operation build requires exactly one <pkg> operand." \
+    "$output_file"
+assert_total_command_count 0
 
 setup_case build-inherited-pkgdest
 export MOGUET_TEST_PACMAN_REPO_PACKAGES=clean-root
@@ -1422,8 +1430,10 @@ setup_case add-src-leading-assignment
 run_fail add-src FIRST=one alpha SECOND=two
 assert_contains "Environment assignment requires a preceding package: FIRST=one" "$output_file"
 assert_total_command_count 0
-printf 'SECOND=two\n' > "$case_dir/alpha.expected"
-assert_file_equals "$case_dir/alpha.expected" "$preference_dir/alpha"
+if [ -e "$preference_dir/alpha" ]; then
+    echo "add-src mutated preferences after ordered grammar rejection" >&2
+    exit 1
+fi
 
 setup_case add-src-package-failure
 printf 'UNSAFE=yes\n' > "$preference_dir/failed"
@@ -1852,23 +1862,30 @@ echo "  ok: P0-5 cmd_clean"
 # P0-6: upgrade keeps metadata preflight -> pacman -> source execution and catch hierarchy.
 setup_case upgrade-metadata-no-target
 run_upgrade_ok --noconfirm upgrade
+assert_command_at 1 "pacman-conf --verbose RootDir DBPath"
+assert_command_at 2 "alpm initialize"
+assert_command_at 3 "alpm release"
+assert_command_at 4 "sudo pacman -Syu --noconfirm"
+assert_command_at 5 "alpm initialize"
+assert_command_at 6 "alpm release"
 assert_command "sudo pacman -Syu --noconfirm"
-assert_command_content_absent "pacman-conf "
-assert_command_content_absent "alpm "
-assert_total_command_count 1
+assert_total_command_count 6
 
-setup_case upgrade-positional-operand-is-ignored
-run_upgrade_ok --noconfirm upgrade ignored-target
-assert_command "sudo pacman -Syu --noconfirm"
-assert_command_content_absent "ignored-target"
-assert_total_command_count 1
+setup_case upgrade-positional-operand-is-rejected
+run_upgrade_fail --noconfirm upgrade ignored-target
+assert_contains \
+    "Invalid: Operation upgrade does not accept target operands." \
+    "$output_file"
+assert_total_command_count 0
 
 # 現行契約: --rmdepsはregularかつvalidなsource preferenceがある場合だけ検証する。
 # sourceが空のupgradeは--rmdepsを無視してsystem Syuを実行する。
 setup_case upgrade-rmdeps-without-source-is-ignored
 run_upgrade_ok --rmdeps --noconfirm upgrade
 assert_command "sudo pacman -Syu --noconfirm"
-assert_total_command_count 1
+assert_command_count "alpm initialize" 2
+assert_command_count "alpm release" 2
+assert_total_command_count 6
 
 setup_case upgrade-rmdeps-with-source-stops-before-mutation
 : > "$preference_dir/clean-root"
@@ -1912,9 +1929,10 @@ setup_case upgrade-metadata-no-preference-root
 rmdir "$preference_dir"
 run_upgrade_ok --noconfirm upgrade
 assert_command "sudo pacman -Syu --noconfirm"
-assert_command_content_absent "pacman-conf "
-assert_command_content_absent "alpm "
-assert_total_command_count 1
+assert_command_count "pacman-conf --verbose RootDir DBPath" 1
+assert_command_count "alpm initialize" 2
+assert_command_count "alpm release" 2
+assert_total_command_count 6
 
 setup_case upgrade-metadata-nonregular-only
 mkdir "$preference_dir/alpha"
@@ -2459,14 +2477,15 @@ assert_file_equals "$installed_version_after" "$installed_version_state"
 assert_file_equals "$initial_srcinfo" "$checkout_dir/.SRCINFO"
 assert_not_contains "rebuilding the preferred source package." "$output_file"
 assert_command "sudo pacman -Syu --noconfirm"
-assert_command_content_absent "pacman-conf "
-assert_command_content_absent "alpm "
+assert_command_count "pacman-conf --verbose RootDir DBPath" 1
+assert_command_count "alpm initialize" 2
+assert_command_count "alpm release" 2
 assert_command_absent "pacman -Si $upgrade_package"
 assert_command_content_absent "git "
 assert_command_absent "pacman -Q $upgrade_package"
 assert_command_content_absent "vercmp"
 assert_command_content_absent "makepkg"
-assert_total_command_count 1
+assert_total_command_count 6
 assert_file_empty "$vercmp_argv_log"
 assert_file_empty "$makepkg_argv_log"
 assert_request_log_empty
