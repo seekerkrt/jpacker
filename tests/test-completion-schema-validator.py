@@ -405,6 +405,31 @@ def main() -> int:
             ),
         ),
         (
+            "public attached-value syntax",
+            exported_schema(
+                target_policy="one-or-more",
+                operand_ordering="preserve-input-order",
+                operand_terms="package:1:*",
+                syntax="fixture [--mode=<mode>] <operand>",
+                relations=(
+                    "0:optional:repeat-same-value:optional:"
+                    "moguet-control:none:none"
+                ),
+                options=(
+                    option_record(
+                        token="--mode",
+                        completion_token="--mode=",
+                        occurrence="repeat-same-value",
+                        placement="operation-local",
+                        value_kind="attached-enum",
+                        allowed_values="normal,rebuild,clean",
+                        semantic_scopes="source-build",
+                        definition_role="syntax-only",
+                    ),
+                ),
+            ),
+        ),
+        (
             "symmetric final-value conflicts",
             exported_schema(
                 options=(
@@ -797,6 +822,27 @@ def main() -> int:
             "public syntax appears only in an option value",
             recursive_public_schema(
                 "fixture [--mode=<--recursive>] <operand>"
+            ),
+            "public option syntax is absent from form projection",
+        ),
+        (
+            "public syntax appears only in an attached value alternative",
+            recursive_public_schema(
+                "fixture [--mode=<normal|--recursive|clean>] <operand>"
+            ),
+            "public option syntax is absent from form projection",
+        ),
+        (
+            "public syntax appears only in a metavariable alternative",
+            recursive_public_schema(
+                "fixture <foo|--recursive|bar> <operand>"
+            ),
+            "public option syntax is absent from form projection",
+        ),
+        (
+            "public syntax is embedded only in an attached value alternative",
+            recursive_public_schema(
+                "fixture [--mode=<normal|foo--recursive|clean>] <operand>"
             ),
             "public option syntax is absent from form projection",
         ),

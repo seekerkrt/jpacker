@@ -108,11 +108,10 @@ KNOWN_FORWARDING_OCCURRENCES = frozenset(
 )
 PRIMARY_OPERAND_KINDS = frozenset({"package", "directory", "query"})
 ASSIGNMENT_PRIMARY_OPERAND_KINDS = frozenset({"package", "directory"})
+CANONICAL_GRAMMAR_ATOM_BOUNDARIES = frozenset("[](){}|,")
 CANONICAL_OPTION_TOKEN_PATTERN = re.compile(
-    r"(?:^|[\s\[\](){}|,])"
-    r"(?P<token>--(?:[A-Za-z0-9][A-Za-z0-9_-]*)?"
-    r"|-[A-Za-z0-9][A-Za-z0-9_-]*)"
-    r"(?=$|[\s\[\](){}|,=])"
+    r"--(?:[A-Za-z0-9][A-Za-z0-9_-]*)?"
+    r"|-[A-Za-z0-9][A-Za-z0-9_-]*"
 )
 
 
@@ -581,10 +580,48 @@ def option_case_patterns(schema: CliSchema) -> list[tuple[int, tuple[str, ...]]]
 
 
 def canonical_syntax_option_tokens(syntax: str) -> frozenset[str]:
-    return frozenset(
-        match.group("token")
-        for match in CANONICAL_OPTION_TOKEN_PATTERN.finditer(syntax)
-    )
+    tokens: set[str] = set()
+    metavariable_depth = 0
+    index = 0
+
+    while index < len(syntax):
+        character = syntax[index]
+        if character == "<":
+            metavariable_depth += 1
+            index += 1
+            continue
+        if character == ">" and metavariable_depth:
+            metavariable_depth -= 1
+            index += 1
+            continue
+        if metavariable_depth:
+            index += 1
+            continue
+
+        if (
+            index
+            and not syntax[index - 1].isspace()
+            and syntax[index - 1] not in CANONICAL_GRAMMAR_ATOM_BOUNDARIES
+        ):
+            index += 1
+            continue
+
+        match = CANONICAL_OPTION_TOKEN_PATTERN.match(syntax, index)
+        if match is None:
+            index += 1
+            continue
+
+        token_end = match.end()
+        if (
+            token_end == len(syntax)
+            or syntax[token_end].isspace()
+            or syntax[token_end] in CANONICAL_GRAMMAR_ATOM_BOUNDARIES
+            or syntax[token_end] == "="
+        ):
+            tokens.add(match.group(0))
+        index = token_end
+
+    return frozenset(tokens)
 
 
 def validate_operand_projection(operation: Operation, form: Form) -> None:
