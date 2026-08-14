@@ -417,6 +417,10 @@ std::string constraint_metadata_field_name(
         return "CheckDepends";
     case AurConstraintMetadataField::Provides:
         return "Provides";
+    case AurConstraintMetadataField::Conflicts:
+        return "Conflicts";
+    case AurConstraintMetadataField::Replaces:
+        return "Replaces";
     }
     throw std::logic_error("Unknown AUR constraint metadata field.");
 }

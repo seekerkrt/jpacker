@@ -3,6 +3,7 @@
 #include "aur_rpc.hpp"
 
 #include <algorithm>
+#include <iterator>
 #include <utility>
 
 namespace {
@@ -13,6 +14,10 @@ using DependencyArrayProjectionResult = std::variant<
 
 using ProvidesProjectionResult = std::variant<
         std::vector<AurProviderCapabilityMetadata>,
+        AurConstraintMetadataProjectionFailure>;
+
+using RelationArrayProjectionResult = std::variant<
+        std::vector<DeclaredPackageRelation>,
         AurConstraintMetadataProjectionFailure>;
 
 ObservedVersion aur_exact_package_version(const std::string& version) {
@@ -93,6 +98,38 @@ ProvidesProjectionResult project_provides(const AurPackageInfo& package) {
                 *capability, std::move(provided_version)});
     }
     return capabilities;
+}
+
+RelationArrayProjectionResult project_relation_array(
+        const AurPackageInfo& package,
+        const std::vector<std::string>& specifications,
+        AurConstraintMetadataField field, PackageRelationKind kind) {
+    std::vector<DeclaredPackageRelation> relations;
+    relations.reserve(specifications.size());
+    for(std::size_t index = 0; index < specifications.size(); ++index) {
+        DeclaredPackageRelationParseResult parse_result =
+                parse_declared_package_relation(
+                        package.Name, package.PackageBase, kind,
+                        specifications[index]);
+        if(const auto* failure = parse_result.failure(); failure != nullptr) {
+            return AurConstraintMetadataProjectionFailure{
+                    package.Name, package.PackageBase, field, index, *failure};
+        }
+        const DeclaredPackageRelation* relation = parse_result.relation();
+        if(relation == nullptr) {
+            return AurConstraintMetadataProjectionFailure{
+                    package.Name,
+                    package.PackageBase,
+                    field,
+                    index,
+                    DependencyConstraintParseFailure{
+                            DependencyConstraintParseFailureKind::
+                                    InvalidPackageIdentity,
+                            specifications[index]}};
+        }
+        relations.push_back(*relation);
+    }
+    return relations;
 }
 
 AurProviderDependencyProjectionFailure invalid_candidate_failure(
@@ -202,6 +239,39 @@ AurConstraintMetadataProjectionResult project_aur_constraint_metadata(
         return *failure;
     }
 
+    RelationArrayProjectionResult conflicts = project_relation_array(
+            package, package.Conflicts,
+            AurConstraintMetadataField::Conflicts,
+            PackageRelationKind::Conflict);
+    if(const auto* failure =
+               std::get_if<AurConstraintMetadataProjectionFailure>(
+                       &conflicts);
+       failure != nullptr) {
+        return *failure;
+    }
+
+    RelationArrayProjectionResult replaces = project_relation_array(
+            package, package.Replaces,
+            AurConstraintMetadataField::Replaces,
+            PackageRelationKind::Replacement);
+    if(const auto* failure =
+               std::get_if<AurConstraintMetadataProjectionFailure>(
+                       &replaces);
+       failure != nullptr) {
+        return *failure;
+    }
+
+    std::vector<DeclaredPackageRelation> relations =
+            std::get<std::vector<DeclaredPackageRelation>>(
+                    std::move(conflicts));
+    std::vector<DeclaredPackageRelation> replacement_relations =
+            std::get<std::vector<DeclaredPackageRelation>>(
+                    std::move(replaces));
+    relations.reserve(relations.size() + replacement_relations.size());
+    std::move(
+            replacement_relations.begin(), replacement_relations.end(),
+            std::back_inserter(relations));
+
     return AurPackageConstraintMetadata{
             package.Name,
             package.PackageBase,
@@ -212,7 +282,8 @@ AurConstraintMetadataProjectionResult project_aur_constraint_metadata(
             std::get<std::vector<DependencyRequirement>>(
                     std::move(check_depends)),
             std::get<std::vector<AurProviderCapabilityMetadata>>(
-                    std::move(provides))};
+                    std::move(provides)),
+            std::move(relations)};
 }
 
 AurProviderDependencyProjectionResult project_aur_provider_dependency(

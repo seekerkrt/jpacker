@@ -360,6 +360,30 @@
       "Version": "1.0-1",
       "Provides": ["virtual-empty-version="]
     },
+    "semantic-conflicts-malformed": {
+      "Name": "semantic-conflicts-malformed",
+      "PackageBase": "semantic-conflicts-malformed",
+      "Version": "1.0-1",
+      "Conflicts": ["legacy-component>>1"]
+    },
+    "semantic-conflicts-empty-version": {
+      "Name": "semantic-conflicts-empty-version",
+      "PackageBase": "semantic-conflicts-empty-version",
+      "Version": "1.0-1",
+      "Conflicts": ["legacy-component>="]
+    },
+    "semantic-replaces-malformed": {
+      "Name": "semantic-replaces-malformed",
+      "PackageBase": "semantic-replaces-malformed",
+      "Version": "1.0-1",
+      "Replaces": ["legacy-component==1"]
+    },
+    "semantic-replaces-invalid-version": {
+      "Name": "semantic-replaces-invalid-version",
+      "PackageBase": "semantic-replaces-invalid-version",
+      "Version": "1.0-1",
+      "Replaces": ["legacy-component=1/2"]
+    },
     "semantic-conflicts": {
       "Name": "semantic-conflicts",
       "PackageBase": "semantic-conflicts",
