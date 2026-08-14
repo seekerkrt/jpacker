@@ -376,11 +376,15 @@ semantic-provides-control|field Provides[0] contains a control character
 semantic-provides-malformed|field Provides[0] contains an invalid version constraint
 semantic-provides-non-equality|field Provides[0] contains an invalid version constraint
 semantic-provides-empty-version|field Provides[0] contains an invalid version constraint
+semantic-conflicts-malformed|field Conflicts[0] contains an invalid version constraint
+semantic-conflicts-empty-version|field Conflicts[0] contains an invalid version constraint
+semantic-replaces-malformed|field Replaces[0] contains an invalid version constraint
+semantic-replaces-invalid-version|field Replaces[0] contains an invalid version constraint
 CASES
 
 setup_case strict-constraint-metadata-projection
 run_envelope_ok constraint-metadata-strict arrays-valid
-assert_contains "arrays-valid|arrays-valid|1|1|1|1" "$output_file"
+assert_contains "arrays-valid|arrays-valid|1|1|1|1|2" "$output_file"
 assert_command_log_empty
 
 setup_case strict-envelope-search-type

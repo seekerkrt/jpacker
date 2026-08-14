@@ -2,6 +2,7 @@
 
 #include "dependency_constraint.hpp"
 #include "dependency_provider.hpp"
+#include "package_relation.hpp"
 
 #include <cstddef>
 #include <optional>
@@ -29,6 +30,7 @@ struct AurPackageConstraintMetadata {
     std::vector<DependencyRequirement>         make_depends;
     std::vector<DependencyRequirement>         check_depends;
     std::vector<AurProviderCapabilityMetadata> provides;
+    std::vector<DeclaredPackageRelation>        relations;
 
     bool operator==(const AurPackageConstraintMetadata&) const = default;
 };
@@ -37,7 +39,9 @@ enum class AurConstraintMetadataField {
     Depends,
     MakeDepends,
     CheckDepends,
-    Provides
+    Provides,
+    Conflicts,
+    Replaces
 };
 
 struct AurConstraintMetadataProjectionFailure {
