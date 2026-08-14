@@ -98,7 +98,11 @@ def shown_path(path: Path) -> str:
 def expected_surface(schema) -> PublicSurface:
     return PublicSurface(
         frozenset(operation.token for operation in schema.operations),
-        frozenset(option.token for option in schema.options),
+        frozenset(
+            option.token
+            for option in schema.options
+            if option.definition_role != "schema-only"
+        ),
     )
 
 
@@ -318,7 +322,7 @@ def expected_option_definition_counts(schema) -> Counter[str]:
     return Counter(
         option.token
         for option in schema.options
-        if option.has_public_definition
+        if option.definition_role == "definition"
     )
 
 

@@ -1289,9 +1289,9 @@ assert_contains "Foreign package not found in AUR: foreign-non-aur" "$stdout_fil
 assert_no_foreign_update_mutation
 echo "  ok: foreign version parse failure remains fail-closed"
 
-# Issue #350 Slice 4: typed plan state is localized only at presentation time.
-# The same scenario must retain construction/completeness/readiness/action
-# distinctions and the summary -> attention hierarchy in Japanese.
+# Issue #350 Slice 5: typed plan state is localized only at presentation time.
+# Representative Unknown, Complete, Incomplete, Ready, RequiresCheck, and
+# Blocked states must retain their independent dimensions in Japanese.
 command -v localedef >/dev/null 2>&1 ||
     fail_case "localedef is required for plan localization coverage"
 locale_root=$tmp_dir/locale
@@ -1305,12 +1305,48 @@ LC_ALL=en_US.UTF-8 \
 LANGUAGE=ja \
     run_ok plan plan-metadata-risk-root
 assert_exact_line "プラン状態:" "$stdout_file"
+assert_exact_line "  構築状態: 構築済み" "$stdout_file"
 assert_exact_line "  完全性: 不明" "$stdout_file"
+assert_exact_line "  プロバイダー判断: 一意" "$stdout_file"
+assert_exact_line "  取得の実行準備: 準備完了" "$stdout_file"
 assert_exact_line "  ビルドの実行準備: 確認が必要" "$stdout_file"
 assert_exact_line "  インストールの実行準備: 確認が必要" "$stdout_file"
 assert_contains "宣言済み関係（実際の関係は未評価）" "$stdout_file"
 assert_contains "必要な対応: 宣言済み関係を確認" "$stdout_file"
 assert_before "確認が必要な詳細:" "ビルド計画:" "$stdout_file"
 echo "  ok: Japanese plan presentation preserves typed semantic dimensions"
+
+setup_case plan-localized-split-readiness
+export MOGUET_TEST_INSPECTION_SCENARIO=plan-split-only-readiness
+LOCPATH=$locale_root \
+LANG=en_US.UTF-8 \
+LC_ALL=en_US.UTF-8 \
+LANGUAGE=ja \
+    run_ok plan plan-split-child
+assert_exact_line "  構築状態: 構築済み" "$stdout_file"
+assert_exact_line "  完全性: 完全" "$stdout_file"
+assert_exact_line "  取得の実行準備: 準備完了" "$stdout_file"
+assert_exact_line "  ビルドの実行準備: 準備完了" "$stdout_file"
+assert_exact_line "  インストールの実行準備: 実行不可" "$stdout_file"
+assert_exact_line "  - パッケージ: plan-split-child" "$stdout_file"
+assert_exact_line "    PackageBase: plan-split-suite" "$stdout_file"
+assert_contains "理由: 分割パッケージ" "$stdout_file"
+assert_contains \
+    "必要な対応: PackageBase集合ライフサイクルを使用" "$stdout_file"
+echo "  ok: Japanese plan presentation preserves split readiness and PackageBase"
+
+setup_case plan-localized-incomplete
+export MOGUET_TEST_INSPECTION_SCENARIO=plan-partial-failure
+LOCPATH=$locale_root \
+LANG=en_US.UTF-8 \
+LC_ALL=en_US.UTF-8 \
+LANGUAGE=ja \
+    run_ok plan plan-first plan-fail plan-third
+assert_exact_line "  構築状態: 構築済み" "$stdout_file"
+assert_exact_line "  完全性: 不完全" "$stdout_file"
+assert_exact_line "  取得の実行準備: 実行不可" "$stdout_file"
+assert_exact_line "  ビルドの実行準備: 実行不可" "$stdout_file"
+assert_exact_line "  インストールの実行準備: 実行不可" "$stdout_file"
+echo "  ok: Japanese plan presentation preserves incomplete blocked readiness"
 
 echo "command inspection characterization tests: all checks passed"

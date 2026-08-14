@@ -1061,13 +1061,36 @@ run_matrix_table external-attribution-missing 1 <<'EOF'
 1|upgrade-all summary:|Unexpected upgrade-all command failure: External satisfaction has no explicit source identity.
 EOF
 
-# Issue #350 Slice 4: successful-unverified remains a successful typed outcome
-# while the observation and required check are localized for presentation.
+# Issue #350 Slice 5: representative typed outcomes, observations, and
+# diagnostic classes must retain their semantics in Japanese presentation.
 command -v localedef >/dev/null 2>&1 ||
     fail_case "localedef is required for upgrade-all localization coverage"
 locale_root=$tmp_dir/locale
 mkdir -p "$locale_root"
 localedef --no-archive -i en_US -f UTF-8 "$locale_root/en_US.UTF-8"
+
+setup_case localized-no-op no-updates
+LOCPATH=$locale_root \
+LANG=en_US.UTF-8 \
+LC_ALL=en_US.UTF-8 \
+LANGUAGE=ja \
+    run_status 0 upgrade-all
+assert_exact_line "  操作結果: 操作不要" "$stdout_file"
+assert_exact_line \
+    "  パッケージ状態の観測: 変更なしを確認" "$stdout_file"
+assert_exact_line "  no-opの根拠: 該当作業なし" "$stdout_file"
+assert_not_contains "  操作結果: 失敗" "$stdout_file"
+
+setup_case localized-completed-changed completed-changed
+LOCPATH=$locale_root \
+LANG=en_US.UTF-8 \
+LC_ALL=en_US.UTF-8 \
+LANGUAGE=ja \
+    run_status 0 upgrade-all
+assert_exact_line "  操作結果: 成功" "$stdout_file"
+assert_exact_line "  パッケージ状態の観測: 変更あり" "$stdout_file"
+assert_not_contains "  操作結果: 操作不要" "$stdout_file"
+
 setup_case localized-completed-unknown completed-unknown
 LOCPATH=$locale_root \
 LANG=en_US.UTF-8 \
@@ -1084,8 +1107,54 @@ assert_not_contains "  操作結果: 失敗" "$stdout_file"
 assert_line_before \
     "upgrade-allの概要:" \
     "確認が必要な詳細:" "$stdout_file"
+if [ -s "$stderr_file" ]; then
+    fail_case "localized successful-unverified case wrote to stderr"
+fi
 
-if [ "$case_count" -ne 221 ]; then
+setup_case localized-blocked blocked-before-mutation
+LOCPATH=$locale_root \
+LANG=en_US.UTF-8 \
+LC_ALL=en_US.UTF-8 \
+LANGUAGE=ja \
+    run_status 1 upgrade-all
+assert_exact_line "  操作結果: 実行不可" "$stdout_file"
+assert_exact_line "  パッケージ状態の観測: 未観測" "$stdout_file"
+assert_exact_line "    診断: 未対応" "$stdout_file"
+assert_exact_line "    診断: 確認が必要" "$stdout_file"
+assert_contains "    実行を阻害" "$stdout_file"
+
+setup_case localized-partial-failure stopped-on-source-failure
+LOCPATH=$locale_root \
+LANG=en_US.UTF-8 \
+LC_ALL=en_US.UTF-8 \
+LANGUAGE=ja \
+    run_status 1 upgrade-all
+assert_exact_line "  操作結果: 部分的失敗" "$stdout_file"
+assert_exact_line "  パッケージ状態の観測: 変更あり" "$stdout_file"
+assert_exact_line "    診断: 実行失敗" "$stdout_file"
+
+setup_case localized-failed stopped-on-system-failure
+LOCPATH=$locale_root \
+LANG=en_US.UTF-8 \
+LC_ALL=en_US.UTF-8 \
+LANGUAGE=ja \
+    run_status 1 upgrade-all
+assert_exact_line "  操作結果: 失敗" "$stdout_file"
+assert_exact_line "  パッケージ状態の観測: 未観測" "$stdout_file"
+assert_exact_line "    診断: 実行失敗" "$stdout_file"
+assert_contains "登録済みソースの更新を未試行" "$stdout_file"
+
+setup_case localized-inconsistent inconsistent-result
+LOCPATH=$locale_root \
+LANG=en_US.UTF-8 \
+LC_ALL=en_US.UTF-8 \
+LANGUAGE=ja \
+    run_status 1 upgrade-all
+assert_exact_line "  操作結果: 不整合" "$stdout_file"
+assert_exact_line "  パッケージ状態の観測: 未検証" "$stdout_file"
+assert_exact_line "    診断: 内部不整合" "$stdout_file"
+
+if [ "$case_count" -ne 227 ]; then
     echo "upgrade-all command test scenario count drifted: $case_count" >&2
     exit 1
 fi

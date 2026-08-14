@@ -29,30 +29,24 @@ enum class OperationId {
 struct OperationSpec {
     OperationId      id;
     std::string_view token;
-    std::string_view help_syntax;
-    bool             requires_target;
     bool             rejects_options_before_dispatch;
 };
 
 inline constexpr std::array<OperationSpec, static_cast<std::size_t>(OperationId::Count)>
         MOGUET_OPERATIONS = {{
-                {OperationId::Build,
-                 "build",
-                 "build <pkg> [V=K...] | build --local <directory> [V=K...]",
-                 true,
-                 true},
-                {OperationId::Upgrade, "upgrade", "upgrade", false, true},
-                {OperationId::UpgradeAur, "upgrade-aur", "upgrade-aur", false, true},
-                {OperationId::UpgradeAll, "upgrade-all", "upgrade-all", false, true},
-                {OperationId::Clean, "clean", "clean", false, true},
-                {OperationId::Deps, "deps", "deps [--recursive] <pkg>...", true, false},
-                {OperationId::Plan, "plan", "plan <pkg>...", true, false},
-                {OperationId::Fetch, "fetch", "fetch <pkg>...", true, false},
-                {OperationId::AddSource, "add-src", "add-src <item>...", true, true},
-                {OperationId::DeleteSource, "del-src", "del-src <pkg>...", true, true},
-                {OperationId::Revert, "revert", "revert <pkg>...", true, true},
-                {OperationId::EditSource, "edit-src", "edit-src <pkg>...", true, true},
-                {OperationId::ListSources, "list-src", "list-src", false, true},
+                {OperationId::Build, "build", true},
+                {OperationId::Upgrade, "upgrade", true},
+                {OperationId::UpgradeAur, "upgrade-aur", true},
+                {OperationId::UpgradeAll, "upgrade-all", true},
+                {OperationId::Clean, "clean", true},
+                {OperationId::Deps, "deps", false},
+                {OperationId::Plan, "plan", false},
+                {OperationId::Fetch, "fetch", false},
+                {OperationId::AddSource, "add-src", true},
+                {OperationId::DeleteSource, "del-src", true},
+                {OperationId::Revert, "revert", true},
+                {OperationId::EditSource, "edit-src", true},
+                {OperationId::ListSources, "list-src", true},
         }};
 
 constexpr const OperationSpec& operation_spec(OperationId id) noexcept {
@@ -87,25 +81,24 @@ enum class GlobalOptionId {
 struct GlobalOptionSpec {
     GlobalOptionId   id;
     std::string_view token;
-    std::string_view help_syntax;
     bool             accepts_attached_value;
 };
 
 inline constexpr std::array<GlobalOptionSpec, static_cast<std::size_t>(GlobalOptionId::Count)>
         MOGUET_GLOBAL_OPTIONS = {{
-                {GlobalOptionId::Edit, "--edit", "--edit", false},
-                {GlobalOptionId::NoEdit, "--noedit", "--noedit", false},
-                {GlobalOptionId::Diff, "--diff", "--diff", false},
-                {GlobalOptionId::NoDiff, "--nodiff", "--nodiff", false},
-                {GlobalOptionId::NoConfirm, "--noconfirm", "--noconfirm", false},
-                {GlobalOptionId::DryRun, "--dry-run", "--dry-run", false},
-                {GlobalOptionId::BuildMode, "--build-mode", "--build-mode=normal|rebuild|clean", true},
-                {GlobalOptionId::Rebuild, "--rebuild", "--rebuild", false},
-                {GlobalOptionId::CleanBuild, "--cleanbuild", "--cleanbuild", false},
-                {GlobalOptionId::RmDeps, "--rmdeps", "--rmdeps", false},
-                {GlobalOptionId::Select, "--select", "--select", false},
-                {GlobalOptionId::Aur, "--aur", "--aur", false},
-                {GlobalOptionId::Repo, "--repo", "--repo", false},
+                {GlobalOptionId::Edit, "--edit", false},
+                {GlobalOptionId::NoEdit, "--noedit", false},
+                {GlobalOptionId::Diff, "--diff", false},
+                {GlobalOptionId::NoDiff, "--nodiff", false},
+                {GlobalOptionId::NoConfirm, "--noconfirm", false},
+                {GlobalOptionId::DryRun, "--dry-run", false},
+                {GlobalOptionId::BuildMode, "--build-mode", true},
+                {GlobalOptionId::Rebuild, "--rebuild", false},
+                {GlobalOptionId::CleanBuild, "--cleanbuild", false},
+                {GlobalOptionId::RmDeps, "--rmdeps", false},
+                {GlobalOptionId::Select, "--select", false},
+                {GlobalOptionId::Aur, "--aur", false},
+                {GlobalOptionId::Repo, "--repo", false},
         }};
 
 constexpr const GlobalOptionSpec& global_option_spec(
@@ -141,30 +134,23 @@ inline constexpr std::string_view LOCAL_SOURCE_OPTION = "--local";
 
 inline constexpr std::string_view HELP_SHORT_OPTION = "-h";
 inline constexpr std::string_view HELP_LONG_OPTION = "--help";
-inline constexpr std::string_view HELP_OPTION_SYNTAX = "-h, --help";
 inline constexpr std::string_view VERSION_SHORT_OPTION = "-V";
 inline constexpr std::string_view VERSION_LONG_OPTION = "--version";
-inline constexpr std::string_view VERSION_OPTION_SYNTAX = "-V, --version";
 
 inline constexpr std::string_view PKGBUILD_EXPORT_OPERATION = "-G";
-inline constexpr std::string_view PKGBUILD_EXPORT_SYNTAX = "-G <pkg>";
 inline constexpr std::string_view PKGBUILD_PRINT_OPERATION = "-Gp";
-inline constexpr std::string_view PKGBUILD_PRINT_SYNTAX = "-Gp <pkg>";
 
 // pacman-compatible entries are documentation examples, not a parser allowlist.
 inline constexpr std::string_view PACMAN_SYNC_INSTALL_SYNTAX = "-S <pkg>";
-inline constexpr std::string_view PACMAN_SYNC_SELECT_SYNTAX =
-        "-S --select [--needed] <query>";
 inline constexpr std::string_view PACMAN_SYSTEM_UPGRADE_SYNTAX = "-Syu";
 inline constexpr std::string_view PACMAN_SYNC_SEARCH_SYNTAX = "-Ss <query>";
 inline constexpr std::string_view PACMAN_SYNC_INFO_SYNTAX = "-Si <pkg>";
 inline constexpr std::string_view PACMAN_FOREIGN_UPDATES_SYNTAX = "-Qua";
-inline constexpr std::string_view PACMAN_NEEDED_OPTION_SYNTAX = "--needed";
+inline constexpr std::string_view PACMAN_NEEDED_OPTION = "--needed";
 
 // Public token compatibility remains in MOGUET_OPERATIONS and
-// MOGUET_GLOBAL_OPTIONS above. The richer contract below is keyed by those
-// stable IDs so parser/help consumers can migrate without changing the
-// current runtime surface in the same slice.
+// MOGUET_GLOBAL_OPTIONS above. The structured contract below is keyed by
+// those stable IDs and owns public grammar semantics.
 enum class GrammarOwnership {
     MoguetOwned,
     InterceptedPacman,
@@ -459,6 +445,17 @@ constexpr bool has_option_scope(
     return (scopes & option_scope(scope)) != 0;
 }
 
+enum class OptionPublicDefinitionRole {
+    Definition,
+    SyntaxOnly,
+    SchemaOnly,
+};
+
+enum class OptionCompletionVisibility {
+    SuggestedAndDescribed,
+    Hidden,
+};
+
 struct OptionContract {
     OptionId                    id;
     std::string_view            canonical_token;
@@ -469,6 +466,8 @@ struct OptionContract {
     OptionLexicalPlacement      lexical_placement;
     OptionSemanticScopeMask     semantic_scopes;
     GrammarOwnership            owner;
+    OptionPublicDefinitionRole  public_definition_role;
+    OptionCompletionVisibility  completion_visibility;
     std::string_view            related_contract_identity;
 };
 
@@ -488,6 +487,8 @@ inline constexpr std::array<OptionContract,
                  OptionLexicalPlacement::ParserGlobalNormalPosition,
                  option_scope(OptionSemanticScope::SourceBuildReview),
                  GrammarOwnership::MoguetOwned,
+                 OptionPublicDefinitionRole::Definition,
+                 OptionCompletionVisibility::SuggestedAndDescribed,
                  "cli.option.source-review"},
                 {OptionId::NoEdit,
                  global_option_spec(GlobalOptionId::NoEdit).token,
@@ -498,6 +499,8 @@ inline constexpr std::array<OptionContract,
                  OptionLexicalPlacement::ParserGlobalNormalPosition,
                  option_scope(OptionSemanticScope::SourceBuildReview),
                  GrammarOwnership::MoguetOwned,
+                 OptionPublicDefinitionRole::Definition,
+                 OptionCompletionVisibility::SuggestedAndDescribed,
                  "cli.option.source-review"},
                 {OptionId::Diff,
                  global_option_spec(GlobalOptionId::Diff).token,
@@ -508,6 +511,8 @@ inline constexpr std::array<OptionContract,
                  OptionLexicalPlacement::ParserGlobalNormalPosition,
                  option_scope(OptionSemanticScope::SourceCheckoutReview),
                  GrammarOwnership::MoguetOwned,
+                 OptionPublicDefinitionRole::Definition,
+                 OptionCompletionVisibility::SuggestedAndDescribed,
                  "cli.option.source-diff"},
                 {OptionId::NoDiff,
                  global_option_spec(GlobalOptionId::NoDiff).token,
@@ -518,6 +523,8 @@ inline constexpr std::array<OptionContract,
                  OptionLexicalPlacement::ParserGlobalNormalPosition,
                  option_scope(OptionSemanticScope::SourceCheckoutReview),
                  GrammarOwnership::MoguetOwned,
+                 OptionPublicDefinitionRole::Definition,
+                 OptionCompletionVisibility::SuggestedAndDescribed,
                  "cli.option.source-diff"},
                 {OptionId::NoConfirm,
                  global_option_spec(GlobalOptionId::NoConfirm).token,
@@ -530,6 +537,8 @@ inline constexpr std::array<OptionContract,
                          option_scope(OptionSemanticScope::RootPackageSelection) |
                          option_scope(OptionSemanticScope::PacmanDelegation),
                  GrammarOwnership::MoguetOwned,
+                 OptionPublicDefinitionRole::Definition,
+                 OptionCompletionVisibility::SuggestedAndDescribed,
                  "cli.option.no-confirm"},
                 {OptionId::DryRun,
                  global_option_spec(GlobalOptionId::DryRun).token,
@@ -540,6 +549,8 @@ inline constexpr std::array<OptionContract,
                  OptionLexicalPlacement::ParserGlobalNormalPosition,
                  option_scope(OptionSemanticScope::DryRunRouting),
                  GrammarOwnership::MoguetOwned,
+                 OptionPublicDefinitionRole::Definition,
+                 OptionCompletionVisibility::SuggestedAndDescribed,
                  "cli.option.dry-run"},
                 {OptionId::BuildMode,
                  global_option_spec(GlobalOptionId::BuildMode).token,
@@ -552,6 +563,8 @@ inline constexpr std::array<OptionContract,
                  OptionLexicalPlacement::ParserGlobalNormalPosition,
                  option_scope(OptionSemanticScope::SourceBuild),
                  GrammarOwnership::MoguetOwned,
+                 OptionPublicDefinitionRole::Definition,
+                 OptionCompletionVisibility::SuggestedAndDescribed,
                  "cli.option.build-mode"},
                 {OptionId::Rebuild,
                  global_option_spec(GlobalOptionId::Rebuild).token,
@@ -564,6 +577,8 @@ inline constexpr std::array<OptionContract,
                  OptionLexicalPlacement::ParserGlobalNormalPosition,
                  option_scope(OptionSemanticScope::SourceBuild),
                  GrammarOwnership::MoguetOwned,
+                 OptionPublicDefinitionRole::Definition,
+                 OptionCompletionVisibility::SuggestedAndDescribed,
                  "cli.option.build-mode.rebuild"},
                 {OptionId::CleanBuild,
                  global_option_spec(GlobalOptionId::CleanBuild).token,
@@ -576,6 +591,8 @@ inline constexpr std::array<OptionContract,
                  OptionLexicalPlacement::ParserGlobalNormalPosition,
                  option_scope(OptionSemanticScope::SourceBuild),
                  GrammarOwnership::MoguetOwned,
+                 OptionPublicDefinitionRole::Definition,
+                 OptionCompletionVisibility::SuggestedAndDescribed,
                  "cli.option.build-mode.clean"},
                 {OptionId::RmDeps,
                  global_option_spec(GlobalOptionId::RmDeps).token,
@@ -587,6 +604,8 @@ inline constexpr std::array<OptionContract,
                  option_scope(OptionSemanticScope::DependencyCleanup) |
                          option_scope(OptionSemanticScope::PacmanDelegation),
                  GrammarOwnership::MoguetOwned,
+                 OptionPublicDefinitionRole::Definition,
+                 OptionCompletionVisibility::SuggestedAndDescribed,
                  "cli.option.remove-dependencies"},
                 {OptionId::Select,
                  global_option_spec(GlobalOptionId::Select).token,
@@ -597,6 +616,8 @@ inline constexpr std::array<OptionContract,
                  OptionLexicalPlacement::ParserGlobalNormalPosition,
                  option_scope(OptionSemanticScope::RootPackageSelection),
                  GrammarOwnership::MoguetOwned,
+                 OptionPublicDefinitionRole::Definition,
+                 OptionCompletionVisibility::SuggestedAndDescribed,
                  "cli.option.root-selection"},
                 {OptionId::Aur,
                  global_option_spec(GlobalOptionId::Aur).token,
@@ -607,6 +628,8 @@ inline constexpr std::array<OptionContract,
                  OptionLexicalPlacement::ParserGlobalNormalPosition,
                  option_scope(OptionSemanticScope::SourceSelection),
                  GrammarOwnership::MoguetOwned,
+                 OptionPublicDefinitionRole::Definition,
+                 OptionCompletionVisibility::SuggestedAndDescribed,
                  "cli.option.source-selection"},
                 {OptionId::Repo,
                  global_option_spec(GlobalOptionId::Repo).token,
@@ -617,6 +640,8 @@ inline constexpr std::array<OptionContract,
                  OptionLexicalPlacement::ParserGlobalNormalPosition,
                  option_scope(OptionSemanticScope::SourceSelection),
                  GrammarOwnership::MoguetOwned,
+                 OptionPublicDefinitionRole::Definition,
+                 OptionCompletionVisibility::SuggestedAndDescribed,
                  "cli.option.source-selection"},
                 {OptionId::Help,
                  HELP_LONG_OPTION,
@@ -627,6 +652,8 @@ inline constexpr std::array<OptionContract,
                  OptionLexicalPlacement::FirstNonGlobalToken,
                  option_scope(OptionSemanticScope::Information),
                  GrammarOwnership::MoguetOwned,
+                 OptionPublicDefinitionRole::Definition,
+                 OptionCompletionVisibility::SuggestedAndDescribed,
                  "cli.information.help"},
                 {OptionId::Version,
                  VERSION_LONG_OPTION,
@@ -637,6 +664,8 @@ inline constexpr std::array<OptionContract,
                  OptionLexicalPlacement::FirstNonGlobalToken,
                  option_scope(OptionSemanticScope::Information),
                  GrammarOwnership::MoguetOwned,
+                 OptionPublicDefinitionRole::Definition,
+                 OptionCompletionVisibility::SuggestedAndDescribed,
                  "cli.information.version"},
                 {OptionId::LocalSource,
                  LOCAL_SOURCE_OPTION,
@@ -647,6 +676,8 @@ inline constexpr std::array<OptionContract,
                  OptionLexicalPlacement::OperationLocal,
                  option_scope(OptionSemanticScope::LocalSourceBuild),
                  GrammarOwnership::MoguetOwned,
+                 OptionPublicDefinitionRole::SyntaxOnly,
+                 OptionCompletionVisibility::SuggestedAndDescribed,
                  "cli.build.local"},
                 {OptionId::Recursive,
                  "--recursive",
@@ -657,9 +688,11 @@ inline constexpr std::array<OptionContract,
                  OptionLexicalPlacement::OperationLocal,
                  option_scope(OptionSemanticScope::DependencyInspection),
                  GrammarOwnership::MoguetOwned,
+                 OptionPublicDefinitionRole::SyntaxOnly,
+                 OptionCompletionVisibility::SuggestedAndDescribed,
                  "cli.deps.recursive"},
                 {OptionId::Needed,
-                 PACMAN_NEEDED_OPTION_SYNTAX,
+                 PACMAN_NEEDED_OPTION,
                  no_token_aliases(),
                  no_option_value(),
                  OptionOccurrence::Delegated,
@@ -669,6 +702,8 @@ inline constexpr std::array<OptionContract,
                          option_scope(OptionSemanticScope::RootPackageSelection) |
                          option_scope(OptionSemanticScope::PacmanDelegation),
                  GrammarOwnership::InterceptedPacman,
+                 OptionPublicDefinitionRole::Definition,
+                 OptionCompletionVisibility::SuggestedAndDescribed,
                  "cli.pacman.needed"},
                 {OptionId::EndOfOptions,
                  "--",
@@ -680,6 +715,8 @@ inline constexpr std::array<OptionContract,
                  option_scope(OptionSemanticScope::ParserBoundary) |
                          option_scope(OptionSemanticScope::PacmanDelegation),
                  GrammarOwnership::InterceptedPacman,
+                 OptionPublicDefinitionRole::SchemaOnly,
+                 OptionCompletionVisibility::Hidden,
                  "cli.lexical.end-of-options"},
         }};
 

@@ -114,7 +114,12 @@ assert_contains "replaces: replace-legacy" "$tmp_dir/replace-plan.out"
 run_ok "$tmp_dir/dependency-plan.out" plan dependency-risk-root
 assert_contains "risk-dep" "$tmp_dir/dependency-plan.out"
 assert_contains "conflicts: dep-old>=2" "$tmp_dir/dependency-plan.out"
-assert_contains "Plan status: incomplete" "$tmp_dir/dependency-plan.out"
+assert_contains "construction: Constructed" "$tmp_dir/dependency-plan.out"
+assert_contains "completeness: Unknown" "$tmp_dir/dependency-plan.out"
+assert_contains "Fetch readiness: Ready" "$tmp_dir/dependency-plan.out"
+assert_contains "Build readiness: Requires check" "$tmp_dir/dependency-plan.out"
+assert_contains "Install readiness: Requires check" "$tmp_dir/dependency-plan.out"
+assert_contains "actual relation: unassessed (#353)" "$tmp_dir/dependency-plan.out"
 risk_dep_count=$(validation_grep_count -c '^  risk-dep$' \
     "$tmp_dir/dependency-plan.out")
 if [ "$risk_dep_count" -ne 1 ]; then
@@ -124,7 +129,11 @@ fi
 
 run_ok "$tmp_dir/clean-plan.out" plan clean-root
 assert_not_contains "Metadata conflicts/replaces:" "$tmp_dir/clean-plan.out"
-assert_not_contains "Plan status: incomplete" "$tmp_dir/clean-plan.out"
+assert_contains "construction: Constructed" "$tmp_dir/clean-plan.out"
+assert_contains "completeness: Complete" "$tmp_dir/clean-plan.out"
+assert_contains "Fetch readiness: Ready" "$tmp_dir/clean-plan.out"
+assert_contains "Build readiness: Ready" "$tmp_dir/clean-plan.out"
+assert_contains "Install readiness: Ready" "$tmp_dir/clean-plan.out"
 
 run_ok "$tmp_dir/deps.out" deps risk-root
 assert_contains "Metadata conflicts/replaces:" "$tmp_dir/deps.out"
@@ -165,15 +174,26 @@ assert_not_contains "makepkg " "$command_log"
 assert_not_contains "sudo " "$command_log"
 
 run_ok "$tmp_dir/unresolved.out" plan unresolved-root
-assert_contains "unresolved dependencies remain" "$tmp_dir/unresolved.out"
+assert_contains "completeness: Incomplete" "$tmp_dir/unresolved.out"
+assert_contains "Fetch readiness: Blocked" "$tmp_dir/unresolved.out"
+assert_contains "Unresolved dependencies:" "$tmp_dir/unresolved.out"
 run_ok "$tmp_dir/ambiguous.out" plan ambiguous-root
-assert_contains "ambiguous providers are not selected" "$tmp_dir/ambiguous.out"
+assert_contains "provider decision: Ambiguous" "$tmp_dir/ambiguous.out"
+assert_contains "Fetch readiness: Blocked" "$tmp_dir/ambiguous.out"
+assert_contains "Ambiguous provided dependencies:" "$tmp_dir/ambiguous.out"
 run_ok "$tmp_dir/cycle.out" plan cycle-root
-assert_contains "cyclic dependencies detected" "$tmp_dir/cycle.out"
+assert_contains "completeness: Incomplete" "$tmp_dir/cycle.out"
+assert_contains "Fetch readiness: Blocked" "$tmp_dir/cycle.out"
+assert_contains "Cyclic dependencies:" "$tmp_dir/cycle.out"
 run_ok "$tmp_dir/split.out" plan split-child
 assert_contains "Split package install targets:" "$tmp_dir/split.out"
 assert_contains "split-child (base: split-base)" "$tmp_dir/split.out"
-assert_not_contains "Plan status: incomplete" "$tmp_dir/split.out"
+assert_contains "construction: Constructed" "$tmp_dir/split.out"
+assert_contains "completeness: Complete" "$tmp_dir/split.out"
+assert_contains "Fetch readiness: Ready" "$tmp_dir/split.out"
+assert_contains "Build readiness: Ready" "$tmp_dir/split.out"
+assert_contains "Install readiness: Blocked" "$tmp_dir/split.out"
+assert_contains "required action: Use the package-base set lifecycle" "$tmp_dir/split.out"
 
 for guard_target in unresolved-root ambiguous-root cycle-root; do
     : > "$command_log"
