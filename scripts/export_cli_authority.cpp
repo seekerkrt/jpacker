@@ -20,10 +20,12 @@ using cli_authority::OperationId;
 using cli_authority::OperationOptionRelationSet;
 using cli_authority::OptionConflictSet;
 using cli_authority::OptionConflictRule;
+using cli_authority::OptionCompletionVisibility;
 using cli_authority::OptionForwardingOccurrence;
 using cli_authority::OptionId;
 using cli_authority::OptionLexicalPlacement;
 using cli_authority::OptionOccurrence;
+using cli_authority::OptionPublicDefinitionRole;
 using cli_authority::OptionPublicSyntax;
 using cli_authority::OptionRelationRequirement;
 using cli_authority::OptionValueKind;
@@ -122,6 +124,30 @@ std::string_view public_syntax_name(
         return "optional";
     case OptionPublicSyntax::Required:
         return "required";
+    }
+    return "unknown";
+}
+
+std::string_view public_definition_role_name(
+        OptionPublicDefinitionRole role) noexcept {
+    switch(role) {
+    case OptionPublicDefinitionRole::Definition:
+        return "definition";
+    case OptionPublicDefinitionRole::SyntaxOnly:
+        return "syntax-only";
+    case OptionPublicDefinitionRole::SchemaOnly:
+        return "schema-only";
+    }
+    return "unknown";
+}
+
+std::string_view completion_visibility_name(
+        OptionCompletionVisibility visibility) noexcept {
+    switch(visibility) {
+    case OptionCompletionVisibility::SuggestedAndDescribed:
+        return "suggested-and-described";
+    case OptionCompletionVisibility::Hidden:
+        return "hidden";
     }
     return "unknown";
 }
@@ -295,15 +321,6 @@ void print_operand_terms(const OperandContract& operands) {
     }
 }
 
-bool has_public_option_definition(
-        OptionLexicalPlacement placement) noexcept {
-    return placement != OptionLexicalPlacement::OperationLocal;
-}
-
-bool is_public_option_projection(OptionId id) noexcept {
-    return id != OptionId::EndOfOptions;
-}
-
 void print_ids(std::span<const OptionId> ids) {
     for(std::size_t index = 0; index < ids.size(); ++index) {
         if(index != 0) std::cout << ',';
@@ -320,7 +337,6 @@ void print_relations(const OperationOptionRelationSet& relations) {
     for(std::size_t index = 0; index < relations.count; ++index) {
         const cli_authority::OptionRelationContract& relation =
                 relations.values[index];
-        if(!is_public_option_projection(relation.option)) continue;
         if(!first) std::cout << ',';
         first = false;
         std::cout << enum_index(relation.option) << ':'
@@ -361,12 +377,13 @@ void print_option_token(OptionId id, std::string_view token) {
     print_conflicts(option.conflicts);
     std::cout << '\t' << option.conflicts.value_identity << '\t';
     print_semantic_scopes(option.semantic_scopes);
-    std::cout << '\t' << ownership_name(option.owner);
-    const std::string_view definition_role =
-            has_public_option_definition(option.lexical_placement)
-            ? "definition"
-            : "syntax-only";
-    std::cout << '\t' << definition_role << '\n';
+    std::cout << '\t' << ownership_name(option.owner) << '\t'
+              << public_definition_role_name(
+                         option.public_definition_role)
+              << '\t'
+              << completion_visibility_name(
+                         option.completion_visibility)
+              << '\n';
 }
 
 void print_option(OptionId id) {
@@ -391,6 +408,21 @@ void print_form(
     std::cout << '\n';
 }
 
+template<std::size_t Size>
+constexpr bool is_complete_option_projection_order(
+        const std::array<OptionId, Size>& order) noexcept {
+    constexpr std::size_t option_count = enum_index(OptionId::Count);
+    if constexpr(Size != option_count) return false;
+
+    std::array<bool, option_count> seen{};
+    for(OptionId id : order) {
+        const std::size_t index = enum_index(id);
+        if(index >= seen.size() || seen[index]) return false;
+        seen[index] = true;
+    }
+    return true;
+}
+
 } // namespace
 
 int main() {
@@ -413,7 +445,9 @@ int main() {
             OptionId::LocalSource,
             OptionId::Recursive,
             OptionId::Needed,
+            OptionId::EndOfOptions,
     };
+    static_assert(is_complete_option_projection_order(OPTION_ORDER));
     for(OptionId id : OPTION_ORDER) print_option(id);
 
     for(OperationId id : cli_public_operation_order()) {

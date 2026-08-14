@@ -83,6 +83,12 @@ KNOWN_OPTION_SEMANTIC_SCOPES = frozenset(
 KNOWN_GRAMMAR_OWNERSHIPS = frozenset(
     {"moguet-owned", "intercepted-pacman", "delegated-pacman"}
 )
+KNOWN_OPTION_DEFINITION_ROLES = frozenset(
+    {"definition", "syntax-only", "schema-only"}
+)
+KNOWN_OPTION_COMPLETION_VISIBILITIES = frozenset(
+    {"suggested-and-described", "hidden"}
+)
 KNOWN_RELATION_REQUIREMENTS = frozenset({"optional", "required"})
 KNOWN_PUBLIC_SYNTAX = frozenset({"hidden", "optional", "required"})
 KNOWN_SEMANTIC_EFFECTS = frozenset(
@@ -102,6 +108,12 @@ KNOWN_FORWARDING_OCCURRENCES = frozenset(
 )
 PRIMARY_OPERAND_KINDS = frozenset({"package", "directory", "query"})
 ASSIGNMENT_PRIMARY_OPERAND_KINDS = frozenset({"package", "directory"})
+CANONICAL_OPTION_TOKEN_PATTERN = re.compile(
+    r"(?:^|[\s\[\](){}|,])"
+    r"(?P<token>--(?:[A-Za-z0-9][A-Za-z0-9_-]*)?"
+    r"|-[A-Za-z0-9][A-Za-z0-9_-]*)"
+    r"(?=$|[\s\[\](){}|,=])"
+)
 
 
 @dataclass(frozen=True)
@@ -118,7 +130,12 @@ class Option:
     conflict_value_identity: str
     semantic_scopes: tuple[str, ...]
     ownership: str
-    has_public_definition: bool
+    definition_role: str
+    completion_visibility: str
+
+    @property
+    def is_completion_visible(self) -> bool:
+        return self.completion_visibility == "suggested-and-described"
 
 
 @dataclass(frozen=True)
@@ -203,9 +220,19 @@ def parse_identity(value: str, context: str) -> int:
     return identity
 
 
+def parse_comma_list(value: str, context: str) -> tuple[str, ...]:
+    if not value:
+        return ()
+    items = tuple(value.split(","))
+    if any(not item for item in items):
+        fail(f"empty {context} list element: {value!r}")
+    return items
+
+
 def parse_id_list(value: str) -> tuple[int, ...]:
     return tuple(
-        parse_identity(item, "option") for item in value.split(",") if item
+        parse_identity(item, "option")
+        for item in parse_comma_list(value, "option conflict")
     )
 
 
@@ -224,9 +251,7 @@ def parse_name_set(
 
 def parse_option_relations(value: str) -> tuple[OptionRelation, ...]:
     relations: list[OptionRelation] = []
-    for encoded in value.split(","):
-        if not encoded:
-            continue
+    for encoded in parse_comma_list(value, "option relation"):
         fields = encoded.split(":")
         if len(fields) != 7:
             fail(f"invalid option relation: {encoded!r}")
@@ -262,9 +287,7 @@ def parse_option_relations(value: str) -> tuple[OptionRelation, ...]:
 
 def parse_operand_terms(value: str) -> tuple[OperandTerm, ...]:
     terms: list[OperandTerm] = []
-    for encoded in value.split(","):
-        if not encoded:
-            continue
+    for encoded in parse_comma_list(value, "operand term"):
         fields = encoded.split(":")
         if len(fields) != 3:
             fail(f"invalid operand term: {encoded!r}")
@@ -337,12 +360,14 @@ def parse_exported_schema(exported_schema: str) -> CliSchema:
     for line in exported_schema.splitlines():
         fields = line.split("\t")
         record = fields[0]
-        if record == "OPTION" and len(fields) == 14:
+        if record == "OPTION" and len(fields) == 15:
             occurrence = fields[4]
             placement = fields[5]
             value_kind = fields[6]
             conflict_rule = fields[8]
             ownership = fields[12]
+            definition_role = fields[13]
+            completion_visibility = fields[14]
             if occurrence not in KNOWN_OPTION_OCCURRENCES:
                 fail(f"unsupported option occurrence projection: {occurrence!r}")
             if placement not in KNOWN_OPTION_PLACEMENTS:
@@ -353,8 +378,16 @@ def parse_exported_schema(exported_schema: str) -> CliSchema:
                 fail(f"unsupported option conflict projection: {conflict_rule!r}")
             if ownership not in KNOWN_GRAMMAR_OWNERSHIPS:
                 fail(f"unsupported option ownership projection: {ownership!r}")
-            if fields[13] not in {"definition", "syntax-only"}:
-                fail(f"invalid public option projection: {line!r}")
+            if definition_role not in KNOWN_OPTION_DEFINITION_ROLES:
+                fail(
+                    "unsupported option definition role projection: "
+                    f"{definition_role!r}"
+                )
+            if completion_visibility not in KNOWN_OPTION_COMPLETION_VISIBILITIES:
+                fail(
+                    "unsupported option completion visibility projection: "
+                    f"{completion_visibility!r}"
+                )
             options.append(
                 Option(
                     identity=parse_identity(fields[1], "option"),
@@ -363,8 +396,8 @@ def parse_exported_schema(exported_schema: str) -> CliSchema:
                     occurrence=occurrence,
                     placement=placement,
                     value_kind=value_kind,
-                    allowed_values=tuple(
-                        value for value in fields[7].split(",") if value
+                    allowed_values=parse_comma_list(
+                        fields[7], "allowed value"
                     ),
                     conflict_rule=conflict_rule,
                     conflicts=parse_id_list(fields[9]),
@@ -375,7 +408,8 @@ def parse_exported_schema(exported_schema: str) -> CliSchema:
                         "option semantic scope",
                     ),
                     ownership=ownership,
-                    has_public_definition=fields[13] == "definition",
+                    definition_role=definition_role,
+                    completion_visibility=completion_visibility,
                 )
             )
         elif record == "OPERATION" and len(fields) == 3:
@@ -497,7 +531,11 @@ def load_descriptions(schema: CliSchema, locale: str) -> Descriptions:
         validate_description_map(
             "options",
             raw.get("options"),
-            tuple(option.token for option in schema.options),
+            tuple(
+                option.token
+                for option in schema.options
+                if option.is_completion_visible
+            ),
         ),
     )
 
@@ -514,6 +552,7 @@ def options_for_ids(schema: CliSchema, identities: tuple[int, ...]) -> tuple[Opt
         option
         for identity in identities
         for option in by_identity.get(identity, ())
+        if option.is_completion_visible
     )
 
 
@@ -532,11 +571,20 @@ def union_form_ids(forms: tuple[Form, ...]) -> tuple[int, ...]:
 def option_case_patterns(schema: CliSchema) -> list[tuple[int, tuple[str, ...]]]:
     grouped: dict[int, list[str]] = {}
     for option in schema.options:
+        if not option.is_completion_visible:
+            continue
         patterns = grouped.setdefault(option.identity, [])
         patterns.append(option.token)
         if option.completion_token.endswith("="):
             patterns.append(option.token + "=*")
     return [(identity, tuple(patterns)) for identity, patterns in grouped.items()]
+
+
+def canonical_syntax_option_tokens(syntax: str) -> frozenset[str]:
+    return frozenset(
+        match.group("token")
+        for match in CANONICAL_OPTION_TOKEN_PATTERN.finditer(syntax)
+    )
 
 
 def validate_operand_projection(operation: Operation, form: Form) -> None:
@@ -627,7 +675,8 @@ def option_contract_projection(option: Option) -> tuple[object, ...]:
         option.conflict_value_identity,
         option.semantic_scopes,
         option.ownership,
-        option.has_public_definition,
+        option.definition_role,
+        option.completion_visibility,
     )
 
 
@@ -653,9 +702,27 @@ def validate_option_projection(schema: CliSchema) -> dict[int, Option]:
         elif option.allowed_values or option.completion_token != option.token:
             fail(f"invalid valueless option projection: {option.token}")
 
-        expected_definition = option.placement != "operation-local"
-        if option.has_public_definition != expected_definition:
-            fail(f"inconsistent public option definition: {option.token}")
+        is_end_of_options = (
+            option.value_kind == "marker"
+            or option.placement == "end-of-options"
+        )
+        if is_end_of_options and (
+            option.token != "--"
+            or option.completion_token != "--"
+            or option.occurrence != "once"
+            or option.placement != "end-of-options"
+            or option.value_kind != "marker"
+            or option.allowed_values
+            or option.conflict_rule != "none"
+            or option.conflicts
+            or option.conflict_value_identity
+            or frozenset(option.semantic_scopes)
+            != frozenset({"parser-boundary", "pacman-delegation"})
+            or option.ownership != "intercepted-pacman"
+            or option.definition_role != "schema-only"
+            or option.completion_visibility != "hidden"
+        ):
+            fail(f"inconsistent end-of-options option projection: {option.token}")
 
         if len(set(option.conflicts)) != len(option.conflicts):
             fail(f"duplicate option conflict projection: {option.token}")
@@ -705,6 +772,7 @@ def validate_relation_projection(
     delegated_grammar: bool = False,
 ) -> None:
     relation_ids = form.option_ids
+    syntax_option_tokens = canonical_syntax_option_tokens(form.syntax)
     if len(set(relation_ids)) != len(relation_ids):
         fail(f"duplicate option relation projection: {form.syntax}")
 
@@ -724,7 +792,7 @@ def validate_relation_projection(
         if (
             relation.public_syntax != "hidden"
             and not any(
-                token in form.syntax
+                token in syntax_option_tokens
                 for token in option_tokens_by_identity[relation.identity]
             )
         ):
@@ -732,6 +800,46 @@ def validate_relation_projection(
                 f"public option syntax is absent from form projection: "
                 f"{form.syntax}"
             )
+
+
+def validate_end_of_options_relation(
+    schema: CliSchema,
+    options_by_identity: dict[int, Option],
+) -> None:
+    marker_identities = {
+        option.identity
+        for option in options_by_identity.values()
+        if option.value_kind == "marker"
+        or option.placement == "end-of-options"
+    }
+    if not marker_identities:
+        return
+    if len(marker_identities) != 1:
+        fail("multiple end-of-options option projections")
+    if schema.delegated_form is None:
+        fail("end-of-options option has no delegated relation projection")
+
+    marker_identity = next(iter(marker_identities))
+    relation = next(
+        (
+            candidate
+            for candidate in schema.delegated_form.option_relations
+            if candidate.identity == marker_identity
+        ),
+        None,
+    )
+    if relation is None:
+        fail("delegated end-of-options relation is absent")
+    if (
+        relation.requirement != "optional"
+        or relation.occurrence != "once"
+        or relation.public_syntax != "hidden"
+        or frozenset(relation.semantic_effects)
+        != frozenset({"parser-boundary", "upstream-argument"})
+        or relation.forwarding_targets != ("pacman",)
+        or relation.forwarding_occurrence != "preserve-all"
+    ):
+        fail("inconsistent delegated end-of-options relation projection")
 
 
 def validate_schema_projection(schema: CliSchema) -> None:
@@ -777,8 +885,13 @@ def validate_schema_projection(schema: CliSchema) -> None:
     elif schema.delegated_form is not None:
         fail("delegated operand projection has no open grammar")
 
+    validate_end_of_options_relation(schema, options_by_identity)
+
     for option in options_by_identity.values():
-        if not option.has_public_definition and option.identity not in public_syntax_ids:
+        if (
+            option.definition_role == "syntax-only"
+            and option.identity not in public_syntax_ids
+        ):
             fail(f"syntax-only option has no public grammar form: {option.token}")
 
     if len(set(closed_forms)) != len(closed_forms):
@@ -915,7 +1028,8 @@ def render_bash(schema: CliSchema, descriptions: Descriptions, locale: str) -> s
     root_options = tuple(
         option
         for option in schema.options
-        if option.placement in {"parser-global", "first-non-global"}
+        if option.is_completion_visible
+        and option.placement in {"parser-global", "first-non-global"}
     )
     terminal_pattern = "|".join(schema.terminal_tokens)
     operation_pattern = "|".join(operations)
@@ -923,7 +1037,7 @@ def render_bash(schema: CliSchema, descriptions: Descriptions, locale: str) -> s
         dict.fromkeys(
             option.identity
             for option in schema.options
-            if option.occurrence == "once"
+            if option.is_completion_visible and option.occurrence == "once"
         )
     )
 
@@ -1170,7 +1284,8 @@ def render_zsh(schema: CliSchema, descriptions: Descriptions, locale: str) -> st
     root_options = tuple(
         option
         for option in schema.options
-        if option.placement in {"parser-global", "first-non-global"}
+        if option.is_completion_visible
+        and option.placement in {"parser-global", "first-non-global"}
     )
     terminal_pattern = "|".join(schema.terminal_tokens)
     operation_pattern = "|".join(operations)
@@ -1178,7 +1293,7 @@ def render_zsh(schema: CliSchema, descriptions: Descriptions, locale: str) -> st
         dict.fromkeys(
             option.identity
             for option in schema.options
-            if option.occurrence == "once"
+            if option.is_completion_visible and option.occurrence == "once"
         )
     )
     option_id_cases = "\n".join(
@@ -1294,6 +1409,8 @@ def render_zsh(schema: CliSchema, descriptions: Descriptions, locale: str) -> st
             f"        {operation.token}) REPLY={shell_quote(description)} ;;"
         )
     for option in schema.options:
+        if not option.is_completion_visible:
+            continue
         description = descriptions.options[option.token].replace(":", r"\:")
         description_cases.append(
             f"        {shell_quote(option.completion_token)}) "
@@ -1469,14 +1586,15 @@ def render_fish(schema: CliSchema, descriptions: Descriptions, locale: str) -> s
         dict.fromkeys(
             option.identity
             for option in schema.options
-            if option.placement in {"parser-global", "first-non-global"}
+            if option.is_completion_visible
+            and option.placement in {"parser-global", "first-non-global"}
         )
     )
     once_ids = tuple(
         dict.fromkeys(
             option.identity
             for option in schema.options
-            if option.occurrence == "once"
+            if option.is_completion_visible and option.occurrence == "once"
         )
     )
     option_id_cases = "\n".join(
@@ -1492,7 +1610,10 @@ def render_fish(schema: CliSchema, descriptions: Descriptions, locale: str) -> s
     delegated_ids = tuple(
         identity
         for identity in schema.delegated_option_ids
-        if any(option.identity == identity for option in schema.options)
+        if any(
+            option.identity == identity and option.is_completion_visible
+            for option in schema.options
+        )
     )
     for operation in schema.operations:
         if len(operation.forms) > 1:
@@ -1667,6 +1788,8 @@ def render_fish(schema: CliSchema, descriptions: Descriptions, locale: str) -> s
             f"{fish_quote(descriptions.operations[operation.token])}"
         )
     for option in schema.options:
+        if not option.is_completion_visible:
+            continue
         lines.append(
             "complete -c moguet -f -n "
             f"{fish_quote(f'__moguet_candidate_available {option.identity}')} "

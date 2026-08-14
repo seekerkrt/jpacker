@@ -11,7 +11,7 @@ import sys
 REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPOSITORY_ROOT / "scripts"))
 
-from generate_completions import parse_exported_schema  # noqa: E402
+from generate_completions import export_authority, parse_exported_schema  # noqa: E402
 
 
 def fail(message: str) -> None:
@@ -33,6 +33,7 @@ def option_record(
     semantic_scopes: str = "information",
     ownership: str = "moguet-owned",
     definition_role: str = "definition",
+    completion_visibility: str = "suggested-and-described",
 ) -> str:
     return "\t".join(
         (
@@ -50,7 +51,101 @@ def option_record(
             semantic_scopes,
             ownership,
             definition_role,
+            completion_visibility,
         )
+    )
+
+
+DELEGATED_NEEDED_RELATION = (
+    "0:optional:delegated:hidden:upstream-argument:pacman:preserve-all"
+)
+DELEGATED_END_OF_OPTIONS_RELATION = (
+    "2:optional:once:hidden:upstream-argument+parser-boundary:"
+    "pacman:preserve-all"
+)
+DELEGATED_NO_CONFIRM_RELATION = (
+    "1:optional:repeat-idempotent:hidden:moguet-control+upstream-argument:"
+    "pacman:consolidate-single"
+)
+
+
+def delegated_options(*, end_ownership: str = "intercepted-pacman") -> tuple[str, ...]:
+    return (
+        option_record(
+            identity=0,
+            token="--needed",
+            occurrence="delegated",
+            placement="pacman-grammar",
+            semantic_scopes=(
+                "root-package-selection+final-package-install+pacman-delegation"
+            ),
+            ownership="intercepted-pacman",
+        ),
+        option_record(
+            identity=1,
+            token="--noconfirm",
+            occurrence="repeat-idempotent",
+            semantic_scopes=(
+                "source-build+root-package-selection+pacman-delegation"
+            ),
+        ),
+        option_record(
+            identity=2,
+            token="--",
+            occurrence="once",
+            placement="end-of-options",
+            value_kind="marker",
+            semantic_scopes="pacman-delegation+parser-boundary",
+            ownership=end_ownership,
+            definition_role="schema-only",
+            completion_visibility="hidden",
+        ),
+    )
+
+
+def delegated_schema(
+    *,
+    end_relation: str = DELEGATED_END_OF_OPTIONS_RELATION,
+    end_ownership: str = "intercepted-pacman",
+) -> str:
+    relations = ",".join(
+        (
+            DELEGATED_NEEDED_RELATION,
+            end_relation,
+            DELEGATED_NO_CONFIRM_RELATION,
+        )
+        if end_relation
+        else (
+            DELEGATED_NEEDED_RELATION,
+            DELEGATED_NO_CONFIRM_RELATION,
+        )
+    )
+    return exported_schema(
+        open_grammar=True,
+        options=delegated_options(end_ownership=end_ownership),
+        delegated_relations=relations,
+    )
+
+
+def recursive_public_schema(syntax: str) -> str:
+    return exported_schema(
+        target_policy="one-or-more",
+        operand_ordering="preserve-input-order",
+        operand_terms="package:1:*",
+        syntax=syntax,
+        relations=(
+            "0:optional:repeat-idempotent:optional:"
+            "moguet-control:none:none"
+        ),
+        options=(
+            option_record(
+                token="--recursive",
+                occurrence="repeat-idempotent",
+                placement="operation-local",
+                semantic_scopes="dependency-inspection",
+                definition_role="syntax-only",
+            ),
+        ),
     )
 
 
@@ -144,6 +239,25 @@ def expect_rejected(label: str, schema: str, expected_diagnostic: str) -> None:
     fail(f"{label} unexpectedly passed")
 
 
+def expect_current_authority_projection() -> None:
+    schema = parse_exported_schema(export_authority())
+    delegated_ids = set(schema.delegated_option_ids)
+    delegated_tokens = {
+        option.token
+        for option in schema.options
+        if option.identity in delegated_ids
+    }
+    required_tokens = {"--needed", "--noconfirm", "--"}
+    if not required_tokens.issubset(delegated_tokens):
+        fail(
+            "current C++ delegated projection is missing: "
+            + ", ".join(sorted(required_tokens - delegated_tokens))
+        )
+    if sum(option.token == "--" for option in schema.options) != 1:
+        fail("current C++ authority did not project exactly one -- OPTION record")
+    print("  ok: accepted current C++ delegated authority projection")
+
+
 def main() -> int:
     positive_controls = (
         (
@@ -208,6 +322,10 @@ def main() -> int:
             ),
         ),
         (
+            "delegated end-of-options authority projection",
+            delegated_schema(),
+        ),
+        (
             "attached enum option semantics",
             exported_schema(
                 options=(
@@ -229,6 +347,28 @@ def main() -> int:
                 operand_ordering="preserve-input-order",
                 operand_terms="package:1:*",
                 syntax="fixture [--recursive] <operand>",
+                relations=(
+                    "0:optional:repeat-idempotent:optional:"
+                    "moguet-control:none:none"
+                ),
+                options=(
+                    option_record(
+                        token="--recursive",
+                        occurrence="repeat-idempotent",
+                        placement="operation-local",
+                        semantic_scopes="dependency-inspection",
+                        definition_role="syntax-only",
+                    ),
+                ),
+            ),
+        ),
+        (
+            "public optional syntax in an alternative",
+            exported_schema(
+                target_policy="one-or-more",
+                operand_ordering="preserve-input-order",
+                operand_terms="package:1:*",
+                syntax="fixture [--recursive|--shallow] <operand>",
                 relations=(
                     "0:optional:repeat-idempotent:optional:"
                     "moguet-control:none:none"
@@ -290,6 +430,7 @@ def main() -> int:
     )
     for label, schema in positive_controls:
         expect_accepted(label, schema)
+    expect_current_authority_projection()
 
     rejected_controls = (
         (
@@ -415,6 +556,94 @@ def main() -> int:
             "unsupported option ownership projection",
         ),
         (
+            "unknown option definition role",
+            exported_schema(
+                options=(option_record(definition_role="unknown-role"),)
+            ),
+            "unsupported option definition role projection",
+        ),
+        (
+            "unknown option completion visibility",
+            exported_schema(
+                options=(option_record(completion_visibility="unknown"),)
+            ),
+            "unsupported option completion visibility projection",
+        ),
+        (
+            "consecutive allowed-value delimiter",
+            exported_schema(
+                options=(
+                    option_record(
+                        token="--mode",
+                        completion_token="--mode=",
+                        occurrence="repeat-same-value",
+                        value_kind="attached-enum",
+                        allowed_values="normal,,clean",
+                        semantic_scopes="source-build",
+                    ),
+                )
+            ),
+            "empty allowed value list element",
+        ),
+        (
+            "leading allowed-value delimiter",
+            exported_schema(
+                options=(
+                    option_record(
+                        token="--mode",
+                        completion_token="--mode=",
+                        occurrence="repeat-same-value",
+                        value_kind="attached-enum",
+                        allowed_values=",normal",
+                        semantic_scopes="source-build",
+                    ),
+                )
+            ),
+            "empty allowed value list element",
+        ),
+        (
+            "trailing allowed-value delimiter",
+            exported_schema(
+                options=(
+                    option_record(
+                        token="--mode",
+                        completion_token="--mode=",
+                        occurrence="repeat-same-value",
+                        value_kind="attached-enum",
+                        allowed_values="normal,",
+                        semantic_scopes="source-build",
+                    ),
+                )
+            ),
+            "empty allowed value list element",
+        ),
+        (
+            "empty conflict-list element",
+            exported_schema(
+                options=(option_record(conflicts="1,,2"),)
+            ),
+            "empty option conflict list element",
+        ),
+        (
+            "empty relation-list element",
+            exported_schema(
+                relations=(
+                    "0:optional:once:hidden:moguet-control:none:none,,"
+                    "0:optional:once:hidden:moguet-control:none:none"
+                )
+            ),
+            "empty option relation list element",
+        ),
+        (
+            "empty operand-list element",
+            exported_schema(
+                target_policy="exactly-one",
+                operand_ordering="preserve-input-order",
+                operand_terms="package:1:1,",
+            ),
+            "empty operand term list element",
+        ),
+        (
             "asymmetric option conflict",
             exported_schema(
                 options=(
@@ -516,9 +745,58 @@ def main() -> int:
             "inconsistent option forwarding projection",
         ),
         (
+            "delegated end-of-options relation missing",
+            delegated_schema(end_relation=""),
+            "delegated end-of-options relation is absent",
+        ),
+        (
+            "delegated end-of-options occurrence mismatch",
+            delegated_schema(
+                end_relation=(
+                    "2:optional:repeat-idempotent:hidden:"
+                    "upstream-argument+parser-boundary:pacman:preserve-all"
+                )
+            ),
+            "inconsistent delegated end-of-options relation projection",
+        ),
+        (
+            "delegated end-of-options forwarding mismatch",
+            delegated_schema(
+                end_relation=(
+                    "2:optional:once:hidden:upstream-argument+parser-boundary:"
+                    "pacman:consolidate-single"
+                )
+            ),
+            "inconsistent delegated end-of-options relation projection",
+        ),
+        (
+            "delegated end-of-options ownership mismatch",
+            delegated_schema(end_ownership="moguet-owned"),
+            "inconsistent end-of-options option projection",
+        ),
+        (
             "public syntax missing from rendered form",
             exported_schema(
                 relations="0:required:once:required:moguet-control:none:none"
+            ),
+            "public option syntax is absent from form projection",
+        ),
+        (
+            "public syntax prefix only",
+            recursive_public_schema(
+                "fixture [--recursive-extra] <operand>"
+            ),
+            "public option syntax is absent from form projection",
+        ),
+        (
+            "public syntax embedded in another token",
+            recursive_public_schema("fixture [foo--recursive] <operand>"),
+            "public option syntax is absent from form projection",
+        ),
+        (
+            "public syntax appears only in an option value",
+            recursive_public_schema(
+                "fixture [--mode=<--recursive>] <operand>"
             ),
             "public option syntax is absent from form projection",
         ),
@@ -557,7 +835,8 @@ def main() -> int:
 
     print(
         "completion-schema-validator-test: "
-        f"{len(positive_controls) + len(rejected_controls)} scenarios passed"
+        f"{len(positive_controls) + len(rejected_controls) + 1} "
+        "scenarios passed"
     )
     return 0
 
