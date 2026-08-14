@@ -323,6 +323,9 @@ std::optional<AurPackageInfo> AurClient::info(const std::string& package_name) {
     if(package_name == "case22-app") {
         return package_info(package_name, {"case22-virtual"});
     }
+    if(package_name == "case23-app") {
+        return package_info(package_name, {"case23-virtual"});
+    }
     if(package_name == "case22-provider") {
         AurPackageInfo info = package_info(
                 package_name, {}, {}, {}, {"case22-virtual"});
@@ -518,6 +521,7 @@ std::optional<AurPackageInfo> AurClient::info(const std::string& package_name) {
        package_name == "case11-ambiguous" || package_name == "case11-missing" ||
        package_name == "case14-virtual" || package_name == "case21-virtual" ||
        package_name == "case22-virtual" ||
+       package_name == "case23-virtual" ||
        package_name == "recursive-selected-provider-failure-virtual" ||
        package_name == "selected-provider-identity-virtual" ||
        package_name == "selected-provider-provides-virtual" ||

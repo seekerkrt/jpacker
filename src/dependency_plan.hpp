@@ -4,6 +4,7 @@
 #include "dependency_constraint.hpp"
 #include "dependency_provider.hpp"
 #include "package_constraint_metadata.hpp"
+#include "package_relation_observation.hpp"
 
 #include <array>
 #include <cstddef>
@@ -225,6 +226,8 @@ struct BuildPlan {
     std::vector<BuildPlanEntry>              order;
     std::vector<RootTargetIdentity>           root_targets;
     std::vector<PlannedPackageTarget>         package_targets;
+    std::vector<PlannedPackageRelationObservation>
+            planned_relation_observations;
     std::vector<BuildPlanDependencyEdge>      dependency_edges;
     std::vector<BuildPlanResolutionFailure>   resolution_failures;
     std::vector<BuildPlanSplitPackageTarget> split_package_targets;

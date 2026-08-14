@@ -153,7 +153,8 @@ StrictRepositoryPackageQueryResult query_repository_package_strict(
                     package->package_name,
                     package->package_base,
                     package->package_version,
-                    observation.configured_repository_order};
+                    observation.configured_repository_order,
+                    package->provides};
         }
         if(std::holds_alternative<RepositoryExactPackageAbsent>(
                    source_result)) {
@@ -211,6 +212,7 @@ StrictRepositoryProvidersQueryResult query_repository_providers_strict(
                            &source_result);
            source != nullptr) {
             for(const auto& package : source->packages) {
+                snapshot.observed_packages.push_back(package);
                 add_repository_provider_candidates(
                         snapshot.candidates, package, dependency_name);
             }

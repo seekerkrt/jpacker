@@ -574,7 +574,7 @@ RepositoryPackageBaseSnapshotResult snapshot_repository_package_base(
     return std::string(package_base);
 }
 
-RepositoryProvidedPackageMetadataResult snapshot_repository_provides(
+RepositoryProvidedPackageMetadataResult snapshot_package_provides(
         alpm_pkg_t* package) {
     std::vector<RepositoryProvidedPackageMetadata> provides;
     for(alpm_list_t* node = alpm_pkg_get_provides(package);
@@ -583,7 +583,7 @@ RepositoryProvidedPackageMetadataResult snapshot_repository_provides(
         if(node->data == nullptr) {
             return PackageMetadataFailure{
                     PackageMetadataErrorCode::MalformedMetadata,
-                    "Repository package metadata contains an invalid provided capability."};
+                    "Package metadata contains an invalid provided capability."};
         }
 
         const auto* dependency = static_cast<const alpm_depend_t*>(node->data);
@@ -1184,6 +1184,89 @@ PackageMetadataSession::snapshot_local_package_versions() const {
     return snapshot;
 }
 
+InstalledPackageRelationMetadataInventoryResult
+PackageMetadataSession::snapshot_installed_package_relation_metadata() const {
+    if(impl_ == nullptr) {
+        return InstalledPackageRelationMetadataInventoryFailure{
+                {},
+                std::nullopt,
+                query_failure(
+                        PackageMetadataErrorCode::QueryFailed,
+                        localization::translate_message(
+                                "Package metadata session is not open."))};
+    }
+
+    InstalledPackageRelationMetadataInventory inventory;
+    std::set<std::string> observed_package_names;
+    std::size_t package_index = 0;
+    for(alpm_list_t* node = impl_->local_package_cache;
+        node != nullptr;
+        node = node->next, ++package_index) {
+        if(node->data == nullptr) {
+            return InstalledPackageRelationMetadataInventoryFailure{
+                    std::move(inventory),
+                    package_index,
+                    query_failure(
+                            PackageMetadataErrorCode::QueryFailed,
+                            localization::translate_message(
+                                    "Local package cache contains an invalid package entry."))};
+        }
+
+        auto* package = static_cast<alpm_pkg_t*>(node->data);
+        const char* raw_package_name = alpm_pkg_get_name(package);
+        if(raw_package_name == nullptr ||
+           !is_valid_package_name(raw_package_name)) {
+            return InstalledPackageRelationMetadataInventoryFailure{
+                    std::move(inventory),
+                    package_index,
+                    query_failure(
+                            PackageMetadataErrorCode::MalformedMetadata,
+                            localization::translate_message(
+                                    "Local package metadata contains an invalid package name."))};
+        }
+        std::string package_name(raw_package_name);
+        if(!observed_package_names.insert(package_name).second) {
+            return InstalledPackageRelationMetadataInventoryFailure{
+                    std::move(inventory),
+                    package_index,
+                    query_failure(
+                            PackageMetadataErrorCode::MalformedMetadata,
+                            localization::translate_message(
+                                    "Local package metadata contains a duplicate package name."))};
+        }
+
+        const char* raw_version = alpm_pkg_get_version(package);
+        std::optional<std::string> version = raw_version == nullptr
+                ? std::nullopt
+                : std::optional<std::string>(raw_version);
+        if(version.has_value() && version->empty()) {
+            return InstalledPackageRelationMetadataInventoryFailure{
+                    std::move(inventory),
+                    package_index,
+                    query_failure(
+                            PackageMetadataErrorCode::MalformedMetadata,
+                            localization::translate_message(
+                                    "Local package metadata contains an invalid version."))};
+        }
+
+        RepositoryProvidedPackageMetadataResult provides_result =
+                snapshot_package_provides(package);
+        if(const auto* failure =
+                   std::get_if<PackageMetadataFailure>(&provides_result);
+           failure != nullptr) {
+            return InstalledPackageRelationMetadataInventoryFailure{
+                    std::move(inventory), package_index, *failure};
+        }
+
+        inventory.push_back(InstalledPackageRelationMetadata{
+                std::move(package_name),
+                std::move(version),
+                std::get<std::vector<RepositoryProvidedPackageMetadata>>(
+                        std::move(provides_result))});
+    }
+    return inventory;
+}
+
 struct RepositoryPackageMetadataSession::Impl {
     struct RegisteredRepository {
         std::string repository_name;
@@ -1400,7 +1483,7 @@ RepositoryPackageMetadataSession::query_repository_exact_package_metadata(
         }
 
         RepositoryProvidedPackageMetadataResult provides_result =
-                snapshot_repository_provides(package);
+                snapshot_package_provides(package);
         if(const auto* failure =
                    std::get_if<PackageMetadataFailure>(&provides_result);
            failure != nullptr) {
@@ -1476,7 +1559,7 @@ RepositoryPackageMetadataSession::query_repository_provider_package_metadata(
 
             auto* package = static_cast<alpm_pkg_t*>(node->data);
             RepositoryProvidedPackageMetadataResult provides_result =
-                    snapshot_repository_provides(package);
+                    snapshot_package_provides(package);
             if(const auto* failure =
                        std::get_if<PackageMetadataFailure>(&provides_result);
                failure != nullptr) {

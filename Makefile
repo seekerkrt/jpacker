@@ -46,6 +46,7 @@ PROVIDER_SELECTION_TEST_TARGET := $(BUILD_DIR)/tests/provider-selection-test
 PROVIDER_INSTALLED_STATE_TEST_TARGET := $(BUILD_DIR)/tests/provider-installed-state-test
 DEPENDENCY_CONSTRAINT_TEST_TARGET := $(BUILD_DIR)/tests/dependency-constraint-test
 PACKAGE_RELATION_TEST_TARGET := $(BUILD_DIR)/tests/package-relation-test
+PACKAGE_RELATION_OBSERVATION_TEST_TARGET := $(BUILD_DIR)/tests/package-relation-observation-test
 PACKAGE_CONSTRAINT_METADATA_TEST_TARGET := $(BUILD_DIR)/tests/package-constraint-metadata-test
 AUR_CONSTRAINT_METADATA_TEST_TARGET := $(BUILD_DIR)/tests/aur-constraint-metadata-test
 ROOT_PACKAGE_CANDIDATE_TEST_TARGET := $(BUILD_DIR)/tests/root-package-candidate-test
@@ -345,6 +346,8 @@ AUR_UPDATE_EXECUTION_PREFLIGHT_INTEGRATION_TEST_SRCS := \
 	$(SRC_DIR)/aur_update_execution_preflight.cpp \
 	$(SRC_DIR)/aur_constraint_metadata.cpp \
 	$(SRC_DIR)/package_relation.cpp \
+	$(SRC_DIR)/package_relation_observation.cpp \
+	$(SRC_DIR)/package_relation_observation_adapter.cpp \
 	$(SRC_DIR)/build_plan_artifact_target_projection.cpp \
 	$(SRC_DIR)/dependency_constraint.cpp \
 	$(SRC_DIR)/dependency_constraint_presentation.cpp \
@@ -651,6 +654,8 @@ LOCAL_DEPENDENCY_PLAN_PROJECTION_ALLOWED_PRODUCTION_TEST_SRCS := \
 	$(SRC_DIR)/local_dependency_plan_projection.cpp \
 	$(SRC_DIR)/aur_constraint_metadata.cpp \
 	$(SRC_DIR)/package_relation.cpp \
+	$(SRC_DIR)/package_relation_observation.cpp \
+	$(SRC_DIR)/package_relation_observation_adapter.cpp \
 	$(SRC_DIR)/dependency_constraint.cpp \
 	$(SRC_DIR)/dependency_constraint_presentation.cpp \
 	$(SRC_DIR)/dependency_plan.cpp \
@@ -698,6 +703,8 @@ LOCAL_SOURCE_BUILD_ALLOWED_PRODUCTION_TEST_SRCS := \
 	$(SRC_DIR)/local_dependency_plan_projection.cpp \
 	$(SRC_DIR)/aur_constraint_metadata.cpp \
 	$(SRC_DIR)/package_relation.cpp \
+	$(SRC_DIR)/package_relation_observation.cpp \
+	$(SRC_DIR)/package_relation_observation_adapter.cpp \
 	$(SRC_DIR)/dependency_constraint.cpp \
 	$(SRC_DIR)/dependency_constraint_presentation.cpp \
 	$(SRC_DIR)/dependency_plan.cpp \
@@ -766,6 +773,8 @@ DEPENDENCY_PLAN_MODEL_ALLOWED_PRODUCTION_TEST_SRCS := \
 	$(SRC_DIR)/dependency_plan_model.cpp \
 	$(SRC_DIR)/aur_constraint_metadata.cpp \
 	$(SRC_DIR)/package_relation.cpp \
+	$(SRC_DIR)/package_relation_observation.cpp \
+	$(SRC_DIR)/package_relation_observation_adapter.cpp \
 	$(SRC_DIR)/dependency_constraint.cpp \
 	$(SRC_DIR)/dependency_constraint_presentation.cpp \
 	$(SRC_DIR)/dependency_spec.cpp \
@@ -824,6 +833,8 @@ UNIFIED_PLAN_PROJECTION_ALLOWED_PRODUCTION_TEST_SRCS := \
 	$(SRC_DIR)/local_dependency_plan_projection.cpp \
 	$(SRC_DIR)/aur_constraint_metadata.cpp \
 	$(SRC_DIR)/package_relation.cpp \
+	$(SRC_DIR)/package_relation_observation.cpp \
+	$(SRC_DIR)/package_relation_observation_adapter.cpp \
 	$(SRC_DIR)/dependency_constraint.cpp \
 	$(SRC_DIR)/dependency_constraint_presentation.cpp \
 	$(SRC_DIR)/dependency_plan.cpp \
@@ -853,6 +864,8 @@ UNIFIED_PLAN_RENDERER_ALLOWED_PRODUCTION_TEST_SRCS := \
 	$(SRC_DIR)/local_dependency_plan_projection.cpp \
 	$(SRC_DIR)/aur_constraint_metadata.cpp \
 	$(SRC_DIR)/package_relation.cpp \
+	$(SRC_DIR)/package_relation_observation.cpp \
+	$(SRC_DIR)/package_relation_observation_adapter.cpp \
 	$(SRC_DIR)/dependency_constraint.cpp \
 	$(SRC_DIR)/dependency_constraint_presentation.cpp \
 	$(SRC_DIR)/dependency_plan.cpp \
@@ -1077,6 +1090,8 @@ PRODUCTION_SOURCE_BUILD_TEST_SRCS := \
 	$(SRC_DIR)/app_config.cpp \
 	$(SRC_DIR)/aur_constraint_metadata.cpp \
 	$(SRC_DIR)/package_relation.cpp \
+	$(SRC_DIR)/package_relation_observation.cpp \
+	$(SRC_DIR)/package_relation_observation_adapter.cpp \
 	$(SRC_DIR)/provider_selection.cpp \
 	$(SRC_DIR)/source_install.cpp \
 	$(SRC_DIR)/local_source_build_dependency_preparation.cpp \
@@ -1168,12 +1183,31 @@ PACKAGE_RELATION_FORBIDDEN_TEST_SRCS := \
 	$(filter-out \
 		$(PACKAGE_RELATION_ALLOWED_PRODUCTION_TEST_SRCS), \
 		$(SRCS))
+# POLICY(#353): Slice 3 matching test links the owned observation domain and
+# declared relation/version owners only. Plan, CLI, renderer, query, and
+# transaction translation units remain outside this binary.
+PACKAGE_RELATION_OBSERVATION_ALLOWED_PRODUCTION_TEST_SRCS := \
+	$(SRC_DIR)/package_relation_observation.cpp \
+	$(SRC_DIR)/package_relation.cpp \
+	$(SRC_DIR)/dependency_constraint.cpp \
+	$(SRC_DIR)/package_identifier.cpp
+PACKAGE_RELATION_OBSERVATION_TEST_SRCS := \
+	tests/package_relation_observation_test.cpp \
+	$(PACKAGE_RELATION_OBSERVATION_ALLOWED_PRODUCTION_TEST_SRCS)
+PACKAGE_RELATION_OBSERVATION_FORBIDDEN_TEST_SRCS := \
+	$(filter-out \
+		$(PACKAGE_RELATION_OBSERVATION_ALLOWED_PRODUCTION_TEST_SRCS), \
+		$(SRCS))
 # POLICY(#351): Slice 3 adapter testはlibalpm read phase、owned adapter、
 # pure constraint modelだけをlinkし、legacy repository query、provider
 # selection、CLI、production executionへ接続しない。
 PACKAGE_CONSTRAINT_METADATA_ALLOWED_PRODUCTION_TEST_SRCS := \
+	$(SRC_DIR)/installed_package_relation_inventory.cpp \
 	$(SRC_DIR)/package_constraint_metadata.cpp \
 	$(SRC_DIR)/package_metadata.cpp \
+	$(SRC_DIR)/package_relation_observation_adapter.cpp \
+	$(SRC_DIR)/package_relation_observation.cpp \
+	$(SRC_DIR)/package_relation.cpp \
 	$(SRC_DIR)/dependency_constraint.cpp \
 	$(SRC_DIR)/package_identifier.cpp \
 	$(SRC_DIR)/shell_words.cpp
@@ -1459,7 +1493,7 @@ LIBALPM_BUILD_TARGETS := \
 	$(UNIFIED_PLAN_RENDERER_TEST_TARGET) \
 	$(UPGRADE_BASELINE_METADATA_TEST_TARGET)
 
-.PHONY: all check-libalpm clean check-upgrade-all-plan-link-firewall check-system-source-upgrade-link-firewall check-aur-update-execution-runner-link-firewall check-aur-update-operation-result-link-firewall check-filtered-aur-update-operation-link-firewall check-upgrade-all-operation-link-firewall check-upgrade-all-command-link-firewall check-commands-sync-link-firewall check-provider-installed-state-link-firewall check-dependency-constraint-link-firewall check-package-relation-link-firewall check-package-constraint-metadata-link-firewall check-aur-constraint-metadata-link-firewall check-root-package-candidate-link-firewall check-root-package-search-link-firewall check-root-package-selection-link-firewall check-root-package-route-projection-link-firewall check-dependency-plan-model-link-firewall check-build-plan-artifact-target-projection-link-firewall check-artifact-selection-model-link-firewall check-artifact-identity-selection-link-firewall check-multiple-artifact-workspace-link-firewall check-multiple-artifact-identity-link-firewall check-package-base-artifact-install-plan-link-firewall check-package-base-artifact-install-executor-link-firewall check-separated-package-base-source-build-link-firewall test test-host-release test-internal-identity test-application-identity test-xdg-paths test-xdg-directory-safety test-xdg-state-log test-trusted-cache test-runtime-identity test-app-config test-provider-selection test-provider-installed-state test-dependency-constraint test-package-relation test-package-constraint-metadata test-aur-constraint-metadata test-root-package-candidate test-root-package-search test-root-package-selection test-root-package-route-projection test-user-config test-package-identifier test-package-metadata test-package-metadata-integration test-repository-query test-shell-words test-source-environment test-artifact-workspace test-multiple-artifact-workspace test-artifact-identity test-multiple-artifact-identity test-artifact-install-executor test-package-base-artifact-install-plan test-package-base-artifact-install-executor test-separated-source-build test-separated-package-base-source-build test-production-source-build test-process-capture test-aur-update-plan test-upgrade-all-plan test-system-source-upgrade test-aur-update-query test-aur-update-command test-upgrade-all-command test-aur-update-execution-preflight test-aur-update-execution-preflight-integration test-aur-update-execution-preparation test-aur-update-execution-runner test-aur-update-operation-result test-filtered-aur-update-operation test-upgrade-all-operation test-dependency-plan-model test-build-plan-artifact-target-projection test-artifact-install-plan test-artifact-selection-model test-artifact-identity-selection test-command-stub-contract test-markdown-links test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-dry-run-command test-commands-inspect test-commands-source-maintenance test-commands-sync test-fixture-authority test-live-contract test-run-with-pty test-conflicts-replaces test-install-layout test-package-transition test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check release-check-exclusive install uninstall
+.PHONY: all check-libalpm clean check-upgrade-all-plan-link-firewall check-system-source-upgrade-link-firewall check-aur-update-execution-runner-link-firewall check-aur-update-operation-result-link-firewall check-filtered-aur-update-operation-link-firewall check-upgrade-all-operation-link-firewall check-upgrade-all-command-link-firewall check-commands-sync-link-firewall check-provider-installed-state-link-firewall check-dependency-constraint-link-firewall check-package-relation-link-firewall check-package-relation-observation-link-firewall check-package-constraint-metadata-link-firewall check-aur-constraint-metadata-link-firewall check-root-package-candidate-link-firewall check-root-package-search-link-firewall check-root-package-selection-link-firewall check-root-package-route-projection-link-firewall check-dependency-plan-model-link-firewall check-build-plan-artifact-target-projection-link-firewall check-artifact-selection-model-link-firewall check-artifact-identity-selection-link-firewall check-multiple-artifact-workspace-link-firewall check-multiple-artifact-identity-link-firewall check-package-base-artifact-install-plan-link-firewall check-package-base-artifact-install-executor-link-firewall check-separated-package-base-source-build-link-firewall test test-host-release test-internal-identity test-application-identity test-xdg-paths test-xdg-directory-safety test-xdg-state-log test-trusted-cache test-runtime-identity test-app-config test-provider-selection test-provider-installed-state test-dependency-constraint test-package-relation test-package-relation-observation test-package-constraint-metadata test-aur-constraint-metadata test-root-package-candidate test-root-package-search test-root-package-selection test-root-package-route-projection test-user-config test-package-identifier test-package-metadata test-package-metadata-integration test-repository-query test-shell-words test-source-environment test-artifact-workspace test-multiple-artifact-workspace test-artifact-identity test-multiple-artifact-identity test-artifact-install-executor test-package-base-artifact-install-plan test-package-base-artifact-install-executor test-separated-source-build test-separated-package-base-source-build test-production-source-build test-process-capture test-aur-update-plan test-upgrade-all-plan test-system-source-upgrade test-aur-update-query test-aur-update-command test-upgrade-all-command test-aur-update-execution-preflight test-aur-update-execution-preflight-integration test-aur-update-execution-preparation test-aur-update-execution-runner test-aur-update-operation-result test-filtered-aur-update-operation test-upgrade-all-operation test-dependency-plan-model test-build-plan-artifact-target-projection test-artifact-install-plan test-artifact-selection-model test-artifact-identity-selection test-command-stub-contract test-markdown-links test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-dry-run-command test-commands-inspect test-commands-source-maintenance test-commands-sync test-fixture-authority test-live-contract test-run-with-pty test-conflicts-replaces test-install-layout test-package-transition test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check release-check-exclusive install uninstall
 .PHONY: check-local-package-metadata-link-firewall check-local-source-root-link-firewall check-local-dependency-plan-projection-link-firewall test-local-package-metadata test-local-source-root test-local-dependency-plan-projection
 .PHONY: check-local-source-workspace-link-firewall check-local-source-build-link-firewall test-local-source-workspace test-local-source-build
 .PHONY: check-unified-plan-observation-link-firewall test-unified-plan-observation test-observation-contract-gate
@@ -1704,6 +1738,7 @@ NON_HEAVY_TARGETS := \
 	$(PROVIDER_INSTALLED_STATE_TEST_TARGET) \
 	$(DEPENDENCY_CONSTRAINT_TEST_TARGET) \
 	$(PACKAGE_RELATION_TEST_TARGET) \
+	$(PACKAGE_RELATION_OBSERVATION_TEST_TARGET) \
 	$(PACKAGE_CONSTRAINT_METADATA_TEST_TARGET) \
 	$(AUR_CONSTRAINT_METADATA_TEST_TARGET) \
 	$(PACKAGE_METADATA_INTEGRATION_TEST_TARGET)
@@ -1843,6 +1878,7 @@ $(eval $(call define_non_heavy_test_profile,PACKAGE_METADATA,$(DIRECT_LIBALPM_CO
 $(eval $(call define_non_heavy_test_profile,PROVIDER_INSTALLED_STATE,$(DIRECT_LIBALPM_COMPILE_ARGS) -I$(SRC_DIR) -Itests/stubs/package-metadata,$(PROVIDER_INSTALLED_STATE_TEST_SRCS)))
 $(eval $(call define_non_heavy_test_profile,DEPENDENCY_CONSTRAINT,$(DIRECT_LIBALPM_COMPILE_ARGS) -I$(SRC_DIR),$(DEPENDENCY_CONSTRAINT_TEST_SRCS),,,$(LIBALPM_LDLIBS)))
 $(eval $(call define_non_heavy_test_profile,PACKAGE_RELATION,$(DIRECT_LIBALPM_COMPILE_ARGS) -I$(SRC_DIR),$(PACKAGE_RELATION_TEST_SRCS),,,$(LIBALPM_LDLIBS)))
+$(eval $(call define_non_heavy_test_profile,PACKAGE_RELATION_OBSERVATION,$(DIRECT_LIBALPM_COMPILE_ARGS) -I$(SRC_DIR),$(PACKAGE_RELATION_OBSERVATION_TEST_SRCS),,,$(LIBALPM_LDLIBS)))
 $(eval $(call define_non_heavy_test_profile,PACKAGE_CONSTRAINT_METADATA,$(DIRECT_LIBALPM_COMPILE_ARGS) -I$(SRC_DIR) -Itests/stubs/package-metadata,$(PACKAGE_CONSTRAINT_METADATA_TEST_SRCS)))
 $(eval $(call define_non_heavy_test_profile,AUR_CONSTRAINT_METADATA,$(DIRECT_LIBALPM_COMPILE_ARGS) -I$(SRC_DIR),$(AUR_CONSTRAINT_METADATA_TEST_SRCS),,,$(LIBALPM_LDLIBS)))
 $(eval $(call define_non_heavy_test_profile,PACKAGE_METADATA_INTEGRATION,$(DIRECT_LIBALPM_COMPILE_ARGS) -I$(SRC_DIR),$(PACKAGE_METADATA_INTEGRATION_TEST_SRCS),,,$(LIBALPM_LDLIBS)))
@@ -2344,7 +2380,12 @@ $(PACKAGE_RELATION_TEST_TARGET): $(PACKAGE_RELATION_TEST_SRCS) $(SRC_DIR)/packag
 	@echo ":: Compiling package relation model test binary"
 	$(call compile_non_heavy_test,PACKAGE_RELATION)
 
-$(PACKAGE_CONSTRAINT_METADATA_TEST_TARGET): $(PACKAGE_CONSTRAINT_METADATA_TEST_SRCS) $(SRC_DIR)/package_constraint_metadata.hpp $(SRC_DIR)/dependency_constraint.hpp $(SRC_DIR)/package_metadata.hpp $(SRC_DIR)/installed_package.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/shell_words.hpp $(SRC_DIR)/localization.hpp tests/stubs/package-metadata/alpm_stub.hpp tests/stubs/package-metadata/process_stub.hpp $(VERSION_FILE)
+$(PACKAGE_RELATION_OBSERVATION_TEST_TARGET): $(PACKAGE_RELATION_OBSERVATION_TEST_SRCS) $(SRC_DIR)/package_relation_observation.hpp $(SRC_DIR)/package_relation.hpp $(SRC_DIR)/dependency_constraint.hpp $(VERSION_FILE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling package relation observation test binary"
+	$(call compile_non_heavy_test,PACKAGE_RELATION_OBSERVATION)
+
+$(PACKAGE_CONSTRAINT_METADATA_TEST_TARGET): $(PACKAGE_CONSTRAINT_METADATA_TEST_SRCS) $(SRC_DIR)/installed_package_relation_inventory.hpp $(SRC_DIR)/package_relation_observation_adapter.hpp $(SRC_DIR)/package_relation_observation.hpp $(SRC_DIR)/package_constraint_metadata.hpp $(SRC_DIR)/package_relation.hpp $(SRC_DIR)/dependency_constraint.hpp $(SRC_DIR)/package_metadata.hpp $(SRC_DIR)/installed_package.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/shell_words.hpp $(SRC_DIR)/localization.hpp tests/stubs/package-metadata/alpm_stub.hpp tests/stubs/package-metadata/process_stub.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling package constraint metadata adapter test binary"
 	$(call compile_non_heavy_test,PACKAGE_CONSTRAINT_METADATA)
@@ -2514,6 +2555,32 @@ check-package-relation-link-firewall:
 
 test-package-relation: check-package-relation-link-firewall $(PACKAGE_RELATION_TEST_TARGET)
 	$(abspath $(PACKAGE_RELATION_TEST_TARGET))
+
+check-package-relation-observation-link-firewall:
+	@echo ":: Checking package relation observation link firewall"
+	@test "$(words $(PACKAGE_RELATION_OBSERVATION_TEST_SRCS))" -eq "$(words $(sort $(PACKAGE_RELATION_OBSERVATION_TEST_SRCS)))" || { \
+		echo "error: package relation observation test source list contains duplicates" >&2; \
+		exit 1; \
+	}
+	@set -e; for source in $(PACKAGE_RELATION_OBSERVATION_ALLOWED_PRODUCTION_TEST_SRCS); do \
+		count=$$(printf '%s\n' $(PACKAGE_RELATION_OBSERVATION_TEST_SRCS) | \
+			awk -v expected="$$source" '$$0 == expected { count++ } END { print count + 0 }'); \
+		test "$$count" -eq 1 || { \
+			echo "error: package relation observation test must link $$source exactly once" >&2; \
+			exit 1; \
+		}; \
+	done
+	@test -z "$(filter $(PACKAGE_RELATION_OBSERVATION_FORBIDDEN_TEST_SRCS),$(PACKAGE_RELATION_OBSERVATION_TEST_SRCS))" || { \
+		echo "error: package relation observation test links a forbidden production source" >&2; \
+		exit 1; \
+	}
+	@test -z "$(filter tests/stubs/%,$(PACKAGE_RELATION_OBSERVATION_TEST_SRCS))" || { \
+		echo "error: package relation observation test links a test stub" >&2; \
+		exit 1; \
+	}
+
+test-package-relation-observation: check-package-relation-observation-link-firewall $(PACKAGE_RELATION_OBSERVATION_TEST_TARGET)
+	$(abspath $(PACKAGE_RELATION_OBSERVATION_TEST_TARGET))
 
 check-package-constraint-metadata-link-firewall:
 	@echo ":: Checking package constraint metadata adapter link firewall"
@@ -3589,6 +3656,7 @@ test: \
 	test-provider-installed-state \
 	test-dependency-constraint \
 	test-package-relation \
+	test-package-relation-observation \
 	test-package-constraint-metadata \
 	test-aur-constraint-metadata \
 	test-root-package-candidate \

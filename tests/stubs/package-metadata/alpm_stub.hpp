@@ -45,6 +45,7 @@ struct LocalPackageMetadata {
     std::string       name;
     std::string       version;
     alpm_pkgreason_t reason = ALPM_PKG_REASON_EXPLICIT;
+    std::vector<RepositoryProvidedPackageMetadata> provides = {};
 };
 
 void reset_alpm_stub();
@@ -73,6 +74,9 @@ void enqueue_local_package_query_failure(
         alpm_errno_t error = ALPM_ERR_DB_OPEN);
 void require_local_package_query_expectations_consumed();
 void set_local_packages(const std::vector<LocalPackageMetadata>& packages);
+void set_local_package_provides(
+        std::size_t package_index,
+        const std::vector<RepositoryProvidedPackageMetadata>& provides);
 void set_local_package_cache_entry_null(std::size_t package_index);
 void set_local_package_name_null(std::size_t package_index);
 void set_local_package_version_null(std::size_t package_index);

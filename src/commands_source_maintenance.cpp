@@ -845,6 +845,10 @@ int cmd_build_local(
                         config);
         LocalBuildPlan plan = resolve_local_build_plan(
                 accepted_metadata.metadata(), effective_architecture,
+                PackageRelationLocalSourceIdentity{
+                        reviewed.source_root.canonical_path(),
+                        reviewed.source_root.directory_identity().device,
+                        reviewed.source_root.directory_identity().inode},
                 provider_selection_callback(config));
         require_complete_local_build_plan(plan);
 

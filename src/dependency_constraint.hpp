@@ -207,6 +207,7 @@ ProviderCapabilityParseResult parse_provider_capability(
 
 enum class ObservedVersionSource {
     InstalledExactPackage,
+    InstalledProviderCapability,
     RepositoryExactPackage,
     AurExactPackage,
     LocalExactPackage,
