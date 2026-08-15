@@ -162,6 +162,22 @@ const PlannedPackageTarget& require_package_target(
     return *target;
 }
 
+const PlannedPackageRelationObservation& require_relation_observation(
+        const BuildPlan& plan, std::string_view package_name) {
+    const auto observation = std::find_if(
+            plan.planned_relation_observations.begin(),
+            plan.planned_relation_observations.end(),
+            [package_name](const PlannedPackageRelationObservation& candidate) {
+                return candidate.package.package_name == package_name;
+            });
+    if(observation == plan.planned_relation_observations.end()) {
+        throw std::runtime_error(
+                "Missing local relation observation: " +
+                std::string(package_name));
+    }
+    return *observation;
+}
+
 const BuildPlanDependencyEdge& require_remote_edge(
         const BuildPlan& plan, std::string_view parent_package_name,
         std::string_view dependency_specification, PackageRole role) {
@@ -1454,6 +1470,123 @@ void test_remote_provider_local_name_collision_fails_closed() {
             "AUR provider collision candidate metadata query count differs");
 }
 
+void test_local_relation_observation_retains_source_and_effective_scope() {
+    const LocalPackageMetadata metadata = metadata_fixture(
+            "local-observation-suite",
+            {"local-observation-cli", "local-observation-libs"},
+            {base_relation(
+                     RelationKind::Provides,
+                     "common-api=2",
+                     package_target(
+                             "common-api", Comparison::Equal, "2")),
+             base_relation(
+                     RelationKind::Provides,
+                     "ignored-architecture-api=9",
+                     package_target(
+                             "ignored-architecture-api",
+                             Comparison::Equal,
+                             "9"),
+                     "aarch64"),
+             base_relation(
+                     RelationKind::Conflicts,
+                     "legacy-suite>=1",
+                     package_target(
+                             "legacy-suite",
+                             Comparison::GreaterThanOrEqual,
+                             "1")),
+             base_relation(
+                     RelationKind::Replaces,
+                     "old-suite",
+                     package_target("old-suite")),
+             child_relation(
+                     RelationKind::Provides,
+                     "cli-api",
+                     package_target("cli-api"),
+                     "local-observation-cli"),
+             child_relation(
+                     RelationKind::Conflicts,
+                     "cli-legacy",
+                     package_target("cli-legacy"),
+                     "local-observation-cli")},
+            "2", "1.2", "3");
+    const PackageRelationLocalSourceIdentity source{
+            "/tmp/local-observation-suite", 42, 99};
+    const LocalBuildPlan plan = resolve_local_build_plan(
+            metadata, "x86_64", source, reject_provider_selection());
+
+    const auto& cli = require_relation_observation(
+            plan.build_plan(), "local-observation-cli");
+    const auto& libraries = require_relation_observation(
+            plan.build_plan(), "local-observation-libs");
+    expect(
+            cli.package.package_base ==
+                            std::optional<std::string>(
+                                    "local-observation-suite") &&
+                    libraries.package.package_base ==
+                            cli.package.package_base &&
+                    cli.package.package_version.version() != nullptr &&
+                    *cli.package.package_version.version() == "2:1.2-3" &&
+                    *libraries.package.package_version.version() ==
+                            "2:1.2-3" &&
+                    std::get<PackageRelationLocalSourceIdentity>(
+                            cli.package.source) == source &&
+                    std::get<PackageRelationLocalSourceIdentity>(
+                            libraries.package.source) == source,
+            "Local source/PackageBase/version authority was flattened");
+    expect(
+            cli.package.roots ==
+                            std::vector<PackageRelationRootAttribution>{
+                                    {0, "local-observation-cli"}} &&
+                    libraries.package.roots ==
+                            std::vector<PackageRelationRootAttribution>{
+                                    {1, "local-observation-libs"}},
+            "Local planned root attribution differs");
+    expect(
+            cli.package.provides.size() == 1 &&
+                    cli.package.provides.front()
+                                    .capability.raw_specification() ==
+                            "cli-api" &&
+                    cli.package.provides.front()
+                                    .observed_version.unknown_reason() !=
+                            nullptr &&
+                    libraries.package.provides.size() == 1 &&
+                    libraries.package.provides.front()
+                                    .capability.raw_specification() ==
+                            "common-api=2" &&
+                    libraries.package.provides.front()
+                                    .observed_version.version() != nullptr &&
+                    *libraries.package.provides.front()
+                             .observed_version.version() == "2",
+            "Local effective Provides scope/version differs");
+    expect(
+            cli.declarations.size() == 2 &&
+                    cli.declarations[0].kind() ==
+                            PackageRelationKind::Replacement &&
+                    cli.declarations[0].target_component() == "old-suite" &&
+                    cli.declarations[1].kind() ==
+                            PackageRelationKind::Conflict &&
+                    cli.declarations[1].target_component() == "cli-legacy",
+            "Local child override relation projection differs");
+    expect(
+            libraries.declarations.size() == 2 &&
+                    libraries.declarations[0].kind() ==
+                            PackageRelationKind::Conflict &&
+                    libraries.declarations[0].target_component() ==
+                            "legacy-suite" &&
+                    libraries.declarations[0].constraint().has_value() &&
+                    libraries.declarations[1].kind() ==
+                            PackageRelationKind::Replacement &&
+                    libraries.declarations[1].target_component() ==
+                            "old-suite",
+            "Local inherited typed declarations differ");
+
+    const LocalBuildPlan unsupported = resolve_local_build_plan(
+            metadata, "riscv64", source, reject_provider_selection());
+    expect(
+            unsupported.build_plan().planned_relation_observations.empty(),
+            "Unsupported local architecture produced active observations");
+}
+
 template <typename Callable>
 void run_case(const std::string& name, Callable callable) {
     reset_queries();
@@ -1498,6 +1631,9 @@ int main() {
         run_case(
                 "remote provider/local name collision fails closed",
                 test_remote_provider_local_name_collision_fails_closed);
+        run_case(
+                "local relation observation source and effective scope",
+                test_local_relation_observation_retains_source_and_effective_scope);
     } catch(const std::exception& error) {
         std::cerr << error.what() << '\n';
         return 1;

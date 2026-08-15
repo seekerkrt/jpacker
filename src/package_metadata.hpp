@@ -104,6 +104,25 @@ struct InstalledExactPackageMetadata {
     std::optional<std::string> version;
 };
 
+struct InstalledPackageRelationMetadata {
+    std::string                                    package_name;
+    std::optional<std::string>                     version;
+    std::vector<RepositoryProvidedPackageMetadata> provides;
+};
+
+using InstalledPackageRelationMetadataInventory =
+        std::vector<InstalledPackageRelationMetadata>;
+
+struct InstalledPackageRelationMetadataInventoryFailure {
+    InstalledPackageRelationMetadataInventory observed_packages;
+    std::optional<std::size_t> package_index;
+    PackageMetadataFailure failure;
+};
+
+using InstalledPackageRelationMetadataInventoryResult = std::variant<
+        InstalledPackageRelationMetadataInventory,
+        InstalledPackageRelationMetadataInventoryFailure>;
+
 using InstalledExactPackageMetadataQueryResult = std::variant<
         InstalledExactPackageMetadata,
         PackageNotFound,
@@ -256,6 +275,9 @@ public:
             const std::string& package_name) const;
 
     LocalPackageVersionSnapshotResult snapshot_local_package_versions() const;
+
+    InstalledPackageRelationMetadataInventoryResult
+    snapshot_installed_package_relation_metadata() const;
 
 private:
     struct Impl;

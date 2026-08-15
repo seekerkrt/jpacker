@@ -92,6 +92,10 @@ private:
     friend LocalBuildPlan resolve_local_build_plan(
             const LocalPackageMetadata&, const std::string&,
             const ProviderSelectionCallback&);
+    friend LocalBuildPlan resolve_local_build_plan(
+            const LocalPackageMetadata&, const std::string&,
+            PackageRelationLocalSourceIdentity,
+            const ProviderSelectionCallback&);
 };
 
 LocalBuildPlan resolve_local_build_plan(
@@ -100,4 +104,13 @@ LocalBuildPlan resolve_local_build_plan(
 LocalBuildPlan resolve_local_build_plan(
         const LocalPackageMetadata& metadata,
         const std::string& effective_architecture,
+        const ProviderSelectionCallback& select_provider);
+LocalBuildPlan resolve_local_build_plan(
+        const LocalPackageMetadata& metadata,
+        const std::string& effective_architecture,
+        PackageRelationLocalSourceIdentity source);
+LocalBuildPlan resolve_local_build_plan(
+        const LocalPackageMetadata& metadata,
+        const std::string& effective_architecture,
+        PackageRelationLocalSourceIdentity source,
         const ProviderSelectionCallback& select_provider);

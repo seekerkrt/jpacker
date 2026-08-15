@@ -180,6 +180,26 @@ const PlannedPackageTarget& require_package_target(
     return *found;
 }
 
+const PlannedPackageRelationObservation& require_relation_observation(
+        const BuildPlan& plan, std::string_view package_name) {
+    const PlannedPackageRelationObservation* found = nullptr;
+    for(const auto& observation : plan.planned_relation_observations) {
+        if(observation.package.package_name != package_name) continue;
+        if(found != nullptr) {
+            throw std::runtime_error(
+                    "Duplicate planned relation observation: " +
+                    std::string(package_name));
+        }
+        found = &observation;
+    }
+    if(found == nullptr) {
+        throw std::runtime_error(
+                "Missing planned relation observation: " +
+                std::string(package_name));
+    }
+    return *found;
+}
+
 std::size_t package_target_count(
         const BuildPlan& plan, std::string_view package_name) {
     return static_cast<std::size_t>(std::count_if(
@@ -2662,6 +2682,148 @@ void test_legacy_resolution_failure_boundary() {
             "AUR package not found: preflight-root-not-found");
 }
 
+void test_planned_relation_observation_authorities() {
+    const BuildPlan root_plan = resolve_build_plan("case11-root");
+    const PlannedPackageRelationObservation& root_observation =
+            require_relation_observation(root_plan, "case11-root");
+    expect(
+            root_observation.package.package_base ==
+                            std::optional<std::string>("case11-root") &&
+                    root_observation.package.package_version.version() !=
+                            nullptr &&
+                    *root_observation.package.package_version.version() ==
+                            "1.0-1" &&
+                    std::get<PackageRelationAurSourceIdentity>(
+                            root_observation.package.source) ==
+                            PackageRelationAurSourceIdentity{
+                                    "case11-root", "case11-root"} &&
+                    root_observation.package.roots ==
+                            std::vector<PackageRelationRootAttribution>{
+                                    {0, "case11-root"}} &&
+                    root_observation.declarations.size() == 1 &&
+                    root_observation.declarations.front().kind() ==
+                            PackageRelationKind::Conflict &&
+                    root_observation.declarations.front()
+                                    .target_component() == "case11-old",
+            "AUR root observation did not retain direct metadata authority");
+
+    const PlannedPackageRelationObservation& dependency_observation =
+            require_relation_observation(root_plan, "case11-direct");
+    expect(
+            dependency_observation.package.package_base ==
+                            std::optional<std::string>(
+                                    "case11-direct-base") &&
+                    dependency_observation.package.package_version.version() !=
+                            nullptr &&
+                    *dependency_observation.package.package_version.version() ==
+                            "1.0-1" &&
+                    dependency_observation.package.roots ==
+                            std::vector<PackageRelationRootAttribution>{
+                                    {0, "case11-root"}} &&
+                    dependency_observation.declarations.size() == 1 &&
+                    dependency_observation.declarations.front().kind() ==
+                            PackageRelationKind::Replacement &&
+                    dependency_observation.declarations.front()
+                                    .target_component() ==
+                            "case11-replaced",
+            "AUR dependency observation lost PackageBase/version/root/relation");
+
+    const BuildPlan split_plan = resolve_build_plan(
+            std::vector<std::string>{
+                    "case16-child-a", "case16-child-b"});
+    const auto& split_a =
+            require_relation_observation(split_plan, "case16-child-a");
+    const auto& split_b =
+            require_relation_observation(split_plan, "case16-child-b");
+    const auto& split_shared =
+            require_relation_observation(split_plan, "case16-shared");
+    expect(
+            split_a.package.package_base ==
+                            std::optional<std::string>("case16-suite") &&
+                    split_b.package.package_base ==
+                            std::optional<std::string>("case16-suite") &&
+                    split_a.package.package_name !=
+                            split_b.package.package_name &&
+                    std::get<PackageRelationAurSourceIdentity>(
+                            split_a.package.source)
+                                    .package_name == "case16-child-a" &&
+                    std::get<PackageRelationAurSourceIdentity>(
+                            split_b.package.source)
+                                    .package_name == "case16-child-b",
+            "Split PackageBase siblings were flattened");
+    expect(
+            split_shared.package.roots ==
+                    std::vector<PackageRelationRootAttribution>{
+                            {0, "case16-child-a"},
+                            {1, "case16-child-b"}},
+            "Repeated planned observation lost root attribution");
+
+    const BuildPlan aur_provider_plan = resolve_build_plan("case7-app");
+    const auto& aur_provider = require_relation_observation(
+            aur_provider_plan, "case7-provider-pkg");
+    expect(
+            aur_provider.package.package_version.version() != nullptr &&
+                    *aur_provider.package.package_version.version() ==
+                            "1.0-1" &&
+                    aur_provider.package.provides.size() == 1 &&
+                    aur_provider.package.provides.front()
+                                    .capability.package_name() ==
+                            "case7-virtual-api" &&
+                    aur_provider.package.provides.front()
+                                    .observed_version.unknown_reason() !=
+                            nullptr &&
+                    *aur_provider.package.provides.front()
+                             .observed_version.unknown_reason() ==
+                            ObservedVersionUnknownReason::
+                                    UnversionedProviderCapability,
+            "AUR provider observation lost package/provided versions");
+
+    const BuildPlan repository_plan = resolve_build_plan("case6-app");
+    const auto& repository = require_relation_observation(
+            repository_plan, "case6-repo-lib");
+    expect(
+            repository.package.package_base ==
+                            std::optional<std::string>("case6-repo-lib") &&
+                    repository.package.package_version.version() != nullptr &&
+                    *repository.package.package_version.version() ==
+                            "1.0-1" &&
+                    std::get<ConfiguredRepositoryIdentity>(
+                            repository.package.source) ==
+                            ConfiguredRepositoryIdentity{"core", 0} &&
+                    repository.package.roots ==
+                            std::vector<PackageRelationRootAttribution>{
+                                    {0, "case6-app"}},
+            "Repository package observation lost source/version/root");
+
+    const BuildPlan repository_provider_plan =
+            resolve_build_plan("case23-app");
+    const auto& repository_provider = require_relation_observation(
+            repository_provider_plan, "case23-provider");
+    expect(
+            repository_provider.package.package_base ==
+                            std::optional<std::string>(
+                                    "case23-provider-base") &&
+                    repository_provider.package.package_version.version() !=
+                            nullptr &&
+                    *repository_provider.package.package_version.version() ==
+                            "5.0-1" &&
+                    repository_provider.package.provides.size() == 1 &&
+                    repository_provider.package.provides.front()
+                                    .capability.raw_specification() ==
+                            "case23-virtual=6" &&
+                    repository_provider.package.provides.front()
+                                    .observed_version.version() != nullptr &&
+                    *repository_provider.package.provides.front()
+                             .observed_version.version() == "6" &&
+                    std::get<ConfiguredRepositoryIdentity>(
+                            repository_provider.package.source) ==
+                            ConfiguredRepositoryIdentity{"extra", 1} &&
+                    repository_provider.package.roots ==
+                            std::vector<PackageRelationRootAttribution>{
+                                    {0, "case23-app"}},
+            "Repository provider observation lost source/provides/root");
+}
+
 template <typename Callable>
 void run_case(const std::string& name, Callable callable) {
     callable();
@@ -2775,6 +2937,9 @@ int main() {
         run_case(
                 "legacy resolution failure boundary",
                 test_legacy_resolution_failure_boundary);
+        run_case(
+                "planned relation observation authorities",
+                test_planned_relation_observation_authorities);
     } catch(const std::exception& error) {
         std::cerr << error.what() << '\n';
         return 1;

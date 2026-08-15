@@ -156,6 +156,10 @@ int run_local_build_dry_run(
             route.source_root, effective_architecture);
     LocalBuildPlan plan = resolve_local_build_plan(
             metadata.metadata(), effective_architecture,
+            PackageRelationLocalSourceIdentity{
+                    route.source_root.canonical_path(),
+                    route.source_root.directory_identity().device,
+                    route.source_root.directory_identity().inode},
             provider_selection_callback(config));
     if(!plan.failures().empty()) {
         return render_dry_run_projection(project_local_source_unified_plan(
