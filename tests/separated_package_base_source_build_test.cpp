@@ -407,11 +407,34 @@ std::string source_environment_prefix(
     return prefix;
 }
 
+std::vector<std::string> source_environment_assignment_words(
+        const LifecycleScenario& scenario,
+        const fs::path& workspace_path) {
+    std::vector<std::string> words;
+    for(const SourceEnvironmentAssignment& assignment :
+        scenario.source_environment.ordered_assignments) {
+        if(assignment.value.empty() &&
+           scenario.empty_value_policy ==
+                   SourceEnvironmentEmptyValuePolicy::Omit) {
+            continue;
+        }
+        words.push_back(assignment.key + "=" + assignment.value);
+    }
+    words.push_back("PKGDEST=" + workspace_path.string());
+    return words;
+}
+
 std::string expected_packagelist_command(
         const LifecycleScenario& scenario,
         const fs::path& workspace_path) {
+    std::vector<std::string> arguments{"makepkg", "--packagelist"};
+    const std::vector<std::string> assignment_words =
+            source_environment_assignment_words(scenario, workspace_path);
+    arguments.insert(
+            arguments.end(), assignment_words.begin(),
+            assignment_words.end());
     return source_environment_prefix(scenario, workspace_path) +
-           shell_join({"makepkg", "--packagelist"});
+           shell_join(arguments);
 }
 
 std::string expected_build_command(
@@ -421,6 +444,11 @@ std::string expected_build_command(
     if(scenario.options.no_confirm) arguments.emplace_back("--noconfirm");
     if(scenario.options.rebuild) arguments.emplace_back("-f");
     if(scenario.options.clean_build) arguments.emplace_back("-C");
+    const std::vector<std::string> assignment_words =
+            source_environment_assignment_words(scenario, workspace_path);
+    arguments.insert(
+            arguments.end(), assignment_words.begin(),
+            assignment_words.end());
     return source_environment_prefix(scenario, workspace_path) +
            shell_join(arguments);
 }

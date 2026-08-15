@@ -419,11 +419,34 @@ std::string expected_environment_prefix(
     return prefix;
 }
 
+std::vector<std::string> expected_assignment_words(
+        const LifecycleScenario& scenario,
+        const fs::path& workspace_path) {
+    std::vector<std::string> words;
+    for(const SourceEnvironmentAssignment& assignment :
+        scenario.source_environment.ordered_assignments) {
+        if(assignment.value.empty() &&
+           scenario.empty_value_policy ==
+                   SourceEnvironmentEmptyValuePolicy::Omit) {
+            continue;
+        }
+        words.push_back(assignment.key + "=" + assignment.value);
+    }
+    words.push_back("PKGDEST=" + workspace_path.string());
+    return words;
+}
+
 std::string expected_packagelist_command(
         const LifecycleScenario& scenario,
         const fs::path& workspace_path) {
+    std::vector<std::string> arguments{"makepkg", "--packagelist"};
+    const std::vector<std::string> assignment_words =
+            expected_assignment_words(scenario, workspace_path);
+    arguments.insert(
+            arguments.end(), assignment_words.begin(),
+            assignment_words.end());
     return expected_environment_prefix(scenario, workspace_path) +
-           expected_shell_join({"makepkg", "--packagelist"});
+           expected_shell_join(arguments);
 }
 
 std::string expected_build_command(
@@ -433,6 +456,11 @@ std::string expected_build_command(
     if(scenario.options.no_confirm) arguments.emplace_back("--noconfirm");
     if(scenario.options.rebuild) arguments.emplace_back("-f");
     if(scenario.options.clean_build) arguments.emplace_back("-C");
+    const std::vector<std::string> assignment_words =
+            expected_assignment_words(scenario, workspace_path);
+    arguments.insert(
+            arguments.end(), assignment_words.begin(),
+            assignment_words.end());
     return expected_environment_prefix(scenario, workspace_path) +
            expected_shell_join(arguments);
 }
@@ -1261,10 +1289,14 @@ void test_makepkg_build_options_are_projected_independently(
                 test_case.context,
                 "The build-only makepkg command failed with exit code 47."));
 
+        std::vector<std::string> expected_arguments =
+                test_case.expected_arguments;
+        expected_arguments.push_back(
+                "PKGDEST=" + scenario.workspace_paths.at(0).string());
         const std::string expected_command =
                 expected_environment_prefix(
                         scenario, scenario.workspace_paths.at(0)) +
-                expected_shell_join(test_case.expected_arguments);
+                expected_shell_join(expected_arguments);
         expect(
                 process_stub::last_run_command() == expected_command,
                 std::string(test_case.context) +

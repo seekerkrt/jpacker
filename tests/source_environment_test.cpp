@@ -402,6 +402,14 @@ void expect_equal(
             test_case + ": expected [" + expected + "], actual [" + actual + "]");
 }
 
+void expect_words(
+        const std::string& test_case,
+        const std::vector<std::string>& actual,
+        const std::vector<std::string>& expected) {
+    if(actual == expected) return;
+    throw std::runtime_error(test_case + ": assignment words differ");
+}
+
 template<typename Alternative>
 Alternative expect_strict_alternative(
         const StrictSourcePreferenceResult& result,
@@ -532,6 +540,16 @@ void test_absent_environment() {
             serialize_source_build_environment(
                     environment, SourceEnvironmentEmptyValuePolicy::Forward),
             "");
+    expect_words(
+            "absent preference assignment words",
+            materialize_source_build_environment_assignment_words(
+                    environment, SourceEnvironmentEmptyValuePolicy::Omit),
+            {});
+    expect_words(
+            "absent CLI assignment words",
+            materialize_source_build_environment_assignment_words(
+                    environment, SourceEnvironmentEmptyValuePolicy::Forward),
+            {});
     expect(
             !fs::exists(source_preference_root()),
             "Absent source preference read created the canonical store");
@@ -697,6 +715,75 @@ void test_preference_parsing_and_serialization() {
             "FIRST='alpha value' QUOTED='quoted # value' EMPTY='' "
             "BRACED='alpha value/brace' UNDEFINED='' DUP='first' DUP='second' "
             "SIMPLE='second/simple' ");
+    expect_words(
+            "preference compatibility assignment words",
+            materialize_source_build_environment_assignment_words(
+                    environment, SourceEnvironmentEmptyValuePolicy::Omit),
+            {"FIRST=alpha value", "QUOTED=quoted # value",
+             "BRACED=alpha value/brace", "DUP=first", "DUP=second",
+             "SIMPLE=second/simple"});
+    expect_words(
+            "CLI compatibility assignment words",
+            materialize_source_build_environment_assignment_words(
+                    environment, SourceEnvironmentEmptyValuePolicy::Forward),
+            {"FIRST=alpha value", "QUOTED=quoted # value", "EMPTY=",
+             "BRACED=alpha value/brace", "UNDEFINED=", "DUP=first",
+             "DUP=second", "SIMPLE=second/simple"});
+}
+
+void test_raw_assignment_word_materialization() {
+    const SourceBuildEnvironment environment{{
+            {"PLAIN", "alpha"},
+            {"DUP", "first"},
+            {"EMPTY", ""},
+            {"DUP", "second"},
+            {"EQUALS", "left=middle=right"},
+            {"SPACES", "two words"},
+            {"SINGLE", "single'quote"},
+            {"DOUBLE", "double\"quote"},
+            {"DOLLAR", "literal $value"},
+            {"BACKSLASH", "slash\\value"},
+            {"NEWLINE", "line1\nline2"},
+            {"UNICODE", "日本語"},
+    }};
+
+    expect_words(
+            "Forward raw assignment words",
+            materialize_source_build_environment_assignment_words(
+                    environment, SourceEnvironmentEmptyValuePolicy::Forward),
+            {"PLAIN=alpha", "DUP=first", "EMPTY=", "DUP=second",
+             "EQUALS=left=middle=right", "SPACES=two words",
+             "SINGLE=single'quote", "DOUBLE=double\"quote",
+             "DOLLAR=literal $value", "BACKSLASH=slash\\value",
+             "NEWLINE=line1\nline2", "UNICODE=日本語"});
+    expect_equal(
+            "Forward raw assignment prefix",
+            serialize_source_build_environment(
+                    environment, SourceEnvironmentEmptyValuePolicy::Forward),
+            "PLAIN='alpha' DUP='first' EMPTY='' DUP='second' "
+            "EQUALS='left=middle=right' SPACES='two words' "
+            "SINGLE='single'\\''quote' DOUBLE='double\"quote' "
+            "DOLLAR='literal $value' BACKSLASH='slash\\value' "
+            "NEWLINE='line1\nline2' UNICODE='日本語' ");
+
+    expect_words(
+            "Omit raw assignment words",
+            materialize_source_build_environment_assignment_words(
+                    environment, SourceEnvironmentEmptyValuePolicy::Omit),
+            {"PLAIN=alpha", "DUP=first", "DUP=second",
+             "EQUALS=left=middle=right", "SPACES=two words",
+             "SINGLE=single'quote", "DOUBLE=double\"quote",
+             "DOLLAR=literal $value", "BACKSLASH=slash\\value",
+             "NEWLINE=line1\nline2", "UNICODE=日本語"});
+    expect_equal(
+            "Omit raw assignment prefix",
+            serialize_source_build_environment(
+                    environment, SourceEnvironmentEmptyValuePolicy::Omit),
+            "PLAIN='alpha' DUP='first' DUP='second' "
+            "EQUALS='left=middle=right' SPACES='two words' "
+            "SINGLE='single'\\''quote' DOUBLE='double\"quote' "
+            "DOLLAR='literal $value' BACKSLASH='slash\\value' "
+            "NEWLINE='line1\nline2' UNICODE='日本語' ");
 }
 
 void test_empty_duplicate_pkgdest_definitions() {
@@ -1737,6 +1824,7 @@ int main(int argc, char* argv[]) {
         test_absent_environment();
         test_native_mutation_creation_boundary_and_identity();
         test_preference_parsing_and_serialization();
+        test_raw_assignment_word_materialization();
         test_empty_duplicate_pkgdest_definitions();
         test_mixed_duplicate_pkgdest_uses_last_value_for_expansion();
         test_invalid_only_preference();

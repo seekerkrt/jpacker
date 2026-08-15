@@ -3,6 +3,7 @@
 #include "localization.hpp"
 #include "logging.hpp"
 #include "process.hpp"
+#include "shell_words.hpp"
 
 #include <algorithm>
 #include <cstdlib>
@@ -90,11 +91,19 @@ LocalSourceBuildMetadata evaluate_local_source_metadata(
     require_unclaimed_artifact_pkgdest(source_environment);
     source_root.require_unchanged_identity();
 
-    const std::string command = serialize_source_build_environment(
-                                        source_environment,
-                                        SourceEnvironmentEmptyValuePolicy::
-                                                Forward) +
-                                "makepkg --printsrcinfo";
+    std::vector<std::string> command_words{"makepkg", "--printsrcinfo"};
+    const std::vector<std::string> assignment_words =
+            materialize_source_build_environment_assignment_words(
+                    source_environment,
+                    SourceEnvironmentEmptyValuePolicy::Forward);
+    command_words.insert(
+            command_words.end(), assignment_words.begin(),
+            assignment_words.end());
+    const std::string command =
+            serialize_source_build_environment(
+                    source_environment,
+                    SourceEnvironmentEmptyValuePolicy::Forward) +
+            shell_words::join(command_words);
     Logger::raw_cmd(command);
     ExplicitProcessInvocation invocation{
             "/bin/sh", {"-c", command},

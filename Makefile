@@ -66,6 +66,7 @@ SHELL_WORDS_TEST_TARGET := build/tests/shell-words-test
 SOURCE_ENVIRONMENT_TEST_TARGET := build/tests/source-environment-test
 ARTIFACT_WORKSPACE_TEST_TARGET := build/tests/artifact-workspace-test
 MULTIPLE_ARTIFACT_WORKSPACE_TEST_TARGET := build/tests/multiple-artifact-workspace-test
+MAKEPKG_ASSIGNMENT_PRECEDENCE_TEST_TARGET := $(BUILD_DIR)/tests/makepkg-assignment-precedence-test
 ARTIFACT_IDENTITY_TEST_TARGET := build/tests/artifact-identity-test
 MULTIPLE_ARTIFACT_IDENTITY_TEST_TARGET := build/tests/multiple-artifact-identity-test
 ARTIFACT_INSTALL_EXECUTOR_TEST_TARGET := build/tests/artifact-install-executor-test
@@ -1003,6 +1004,28 @@ MULTIPLE_ARTIFACT_WORKSPACE_TEST_SRCS := \
 	$(MULTIPLE_ARTIFACT_WORKSPACE_ALLOWED_PRODUCTION_TEST_SRCS)
 MULTIPLE_ARTIFACT_WORKSPACE_FORBIDDEN_TEST_SRCS := \
 	$(filter-out $(MULTIPLE_ARTIFACT_WORKSPACE_ALLOWED_PRODUCTION_TEST_SRCS),$(SRCS))
+# POLICY(#425): real makepkg precedence testはlocal metadataとartifact commandの
+# production owner、およびそのfilesystem/process closureだけをlinkする。
+# Unused local lifecycle sectionsはGCし、makepkg/process境界をstubへ差し替えない。
+MAKEPKG_ASSIGNMENT_PRECEDENCE_ALLOWED_PRODUCTION_TEST_SRCS := \
+	$(SRC_DIR)/local_source_metadata_evaluation.cpp \
+	$(SRC_DIR)/local_source_build.cpp \
+	$(SRC_DIR)/local_source_root.cpp \
+	$(SRC_DIR)/local_package_metadata.cpp \
+	$(SRC_DIR)/artifact_workspace.cpp \
+	$(TRUSTED_CACHE_SRCS) \
+	$(SRC_DIR)/source_environment.cpp \
+	$(SRC_DIR)/package_identifier.cpp \
+	$(SRC_DIR)/shell_words.cpp \
+	$(SRC_DIR)/process.cpp \
+	$(SRC_DIR)/logging.cpp
+MAKEPKG_ASSIGNMENT_PRECEDENCE_TEST_SRCS := \
+	tests/makepkg_assignment_precedence_test.cpp \
+	$(MAKEPKG_ASSIGNMENT_PRECEDENCE_ALLOWED_PRODUCTION_TEST_SRCS)
+MAKEPKG_ASSIGNMENT_PRECEDENCE_FORBIDDEN_TEST_SRCS := \
+	$(filter-out \
+		$(MAKEPKG_ASSIGNMENT_PRECEDENCE_ALLOWED_PRODUCTION_TEST_SRCS), \
+		$(SRCS))
 ARTIFACT_IDENTITY_TEST_SRCS := \
 	tests/artifact_identity_test.cpp \
 	$(SRC_DIR)/artifact_identity.cpp \
@@ -1565,6 +1588,7 @@ LIBALPM_BUILD_TARGETS := \
 .PHONY: all check-libalpm clean check-upgrade-all-plan-link-firewall check-system-source-upgrade-link-firewall check-aur-update-execution-runner-link-firewall check-aur-update-operation-result-link-firewall check-filtered-aur-update-operation-link-firewall check-upgrade-all-operation-link-firewall check-upgrade-all-command-link-firewall check-commands-sync-link-firewall check-provider-installed-state-link-firewall check-dependency-constraint-link-firewall check-package-relation-link-firewall check-package-relation-observation-link-firewall check-package-constraint-metadata-link-firewall check-aur-constraint-metadata-link-firewall check-root-package-candidate-link-firewall check-root-package-search-link-firewall check-root-package-selection-link-firewall check-root-package-route-projection-link-firewall check-dependency-plan-model-link-firewall check-build-plan-artifact-target-projection-link-firewall check-artifact-selection-model-link-firewall check-artifact-identity-selection-link-firewall check-multiple-artifact-workspace-link-firewall check-multiple-artifact-identity-link-firewall check-package-base-artifact-install-plan-link-firewall check-package-base-artifact-install-executor-link-firewall check-separated-package-base-source-build-link-firewall test test-host-release test-internal-identity test-application-identity test-xdg-paths test-xdg-directory-safety test-xdg-state-log test-trusted-cache test-runtime-identity test-app-config test-provider-selection test-provider-installed-state test-dependency-constraint test-package-relation test-package-relation-observation test-package-constraint-metadata test-aur-constraint-metadata test-root-package-candidate test-root-package-search test-root-package-selection test-root-package-route-projection test-user-config test-package-identifier test-package-metadata test-package-metadata-integration test-repository-query test-shell-words test-source-environment test-artifact-workspace test-multiple-artifact-workspace test-artifact-identity test-multiple-artifact-identity test-artifact-install-executor test-package-base-artifact-install-plan test-package-base-artifact-install-executor test-separated-source-build test-separated-package-base-source-build test-production-source-build test-process-capture test-aur-update-plan test-upgrade-all-plan test-system-source-upgrade test-aur-update-query test-aur-update-command test-upgrade-all-command test-aur-update-execution-preflight test-aur-update-execution-preflight-integration test-aur-update-execution-preparation test-aur-update-execution-runner test-aur-update-operation-result test-filtered-aur-update-operation test-upgrade-all-operation test-dependency-plan-model test-build-plan-artifact-target-projection test-artifact-install-plan test-artifact-selection-model test-artifact-identity-selection test-command-stub-contract test-markdown-links test-aur-rpc-validation test-build-cache-symlink test-cli-parser test-dry-run-command test-commands-inspect test-commands-source-maintenance test-commands-sync test-fixture-authority test-live-contract test-run-with-pty test-conflicts-replaces test-install-layout test-package-transition test-needed-contract test-pacman-routing test-pkgbuild-export test-source-build test-source-selection release-check release-check-exclusive install uninstall
 .PHONY: check-local-package-metadata-link-firewall check-local-source-root-link-firewall check-local-dependency-plan-projection-link-firewall test-local-package-metadata test-local-source-root test-local-dependency-plan-projection
 .PHONY: check-local-source-workspace-link-firewall check-local-source-build-link-firewall test-local-source-workspace test-local-source-build
+.PHONY: check-makepkg-assignment-precedence-link-firewall test-makepkg-assignment-precedence
 .PHONY: check-unified-plan-observation-link-firewall test-unified-plan-observation test-observation-contract-gate
 .PHONY: check-unified-plan-projection-link-firewall test-unified-plan-projection test-projection-fixture-gate
 .PHONY: check-unified-plan-renderer-link-firewall test-unified-plan-renderer
@@ -1772,6 +1796,7 @@ NON_HEAVY_TARGETS := \
 	$(SOURCE_ENVIRONMENT_TEST_TARGET) \
 	$(ARTIFACT_WORKSPACE_TEST_TARGET) \
 	$(MULTIPLE_ARTIFACT_WORKSPACE_TEST_TARGET) \
+	$(MAKEPKG_ASSIGNMENT_PRECEDENCE_TEST_TARGET) \
 	$(ARTIFACT_IDENTITY_TEST_TARGET) \
 	$(MULTIPLE_ARTIFACT_IDENTITY_TEST_TARGET) \
 	$(PACKAGE_BASE_ARTIFACT_INSTALL_PLAN_TEST_TARGET) \
@@ -1913,6 +1938,7 @@ $(eval $(call define_non_heavy_test_profile,SHELL_WORDS,$(DIRECT_COMPILE_ARGS) -
 $(eval $(call define_non_heavy_test_profile,SOURCE_ENVIRONMENT,$(DIRECT_COMPILE_ARGS) -DMOGUET_ENABLE_TEST_OVERRIDES -DMOGUET_ENABLE_SOURCE_PREFERENCE_TEST_HOOKS -I$(SRC_DIR),$(SOURCE_ENVIRONMENT_TEST_SRCS)))
 $(eval $(call define_non_heavy_test_profile,ARTIFACT_WORKSPACE,$(DIRECT_COMPILE_ARGS) -DMOGUET_ENABLE_ARTIFACT_WORKSPACE_TEST_HOOKS -DMOGUET_ENABLE_TRUSTED_CACHE_TEST_HOOKS -I$(SRC_DIR),$(ARTIFACT_WORKSPACE_TEST_SRCS)))
 $(eval $(call define_non_heavy_test_profile,MULTIPLE_ARTIFACT_WORKSPACE,$(DIRECT_COMPILE_ARGS) -DMOGUET_ENABLE_ARTIFACT_WORKSPACE_TEST_HOOKS -DMOGUET_ENABLE_TRUSTED_CACHE_TEST_HOOKS -I$(SRC_DIR),$(MULTIPLE_ARTIFACT_WORKSPACE_TEST_SRCS)))
+$(eval $(call define_non_heavy_test_profile,MAKEPKG_ASSIGNMENT_PRECEDENCE,$(DIRECT_COMPILE_ARGS) -ffunction-sections -fdata-sections -I$(SRC_DIR) -Itests,$(MAKEPKG_ASSIGNMENT_PRECEDENCE_TEST_SRCS),,$(GC_SECTIONS_LINK_ARG)))
 $(eval $(call define_non_heavy_test_profile,ARTIFACT_IDENTITY,$(DIRECT_COMPILE_ARGS) -I$(SRC_DIR),$(ARTIFACT_IDENTITY_TEST_SRCS)))
 $(eval $(call define_non_heavy_test_profile,MULTIPLE_ARTIFACT_IDENTITY,$(DIRECT_COMPILE_ARGS) -I$(SRC_DIR),$(MULTIPLE_ARTIFACT_IDENTITY_TEST_SRCS)))
 $(eval $(call define_non_heavy_test_profile,PACKAGE_BASE_ARTIFACT_INSTALL_PLAN,$(DIRECT_COMPILE_ARGS) -I$(SRC_DIR),$(PACKAGE_BASE_ARTIFACT_INSTALL_PLAN_TEST_SRCS)))
@@ -2267,6 +2293,28 @@ $(MULTIPLE_ARTIFACT_WORKSPACE_TEST_TARGET): $(MULTIPLE_ARTIFACT_WORKSPACE_TEST_S
 	@mkdir -p $(dir $@)
 	@echo ":: Compiling multiple artifact workspace test binary"
 	$(call compile_non_heavy_test,MULTIPLE_ARTIFACT_WORKSPACE)
+
+$(MAKEPKG_ASSIGNMENT_PRECEDENCE_TEST_TARGET): \
+	$(MAKEPKG_ASSIGNMENT_PRECEDENCE_TEST_SRCS) \
+	$(SRC_DIR)/local_source_metadata_evaluation.hpp \
+	$(SRC_DIR)/local_source_build.hpp \
+	$(SRC_DIR)/local_source_root.hpp \
+	$(SRC_DIR)/local_package_metadata.hpp \
+	$(SRC_DIR)/artifact_workspace.hpp \
+	$(SRC_DIR)/trusted_cache.hpp \
+	$(SRC_DIR)/xdg_directory_safety.hpp \
+	$(SRC_DIR)/xdg_paths.hpp \
+	$(SRC_DIR)/source_environment.hpp \
+	$(SRC_DIR)/package_identifier.hpp \
+	$(SRC_DIR)/shell_words.hpp \
+	$(SRC_DIR)/process.hpp \
+	$(SRC_DIR)/logging.hpp \
+	$(SRC_DIR)/localization.hpp \
+	$(TRUSTED_CACHE_SUPPORT_HEADER) \
+	$(VERSION_FILE)
+	@mkdir -p $(dir $@)
+	@echo ":: Compiling real makepkg assignment precedence test binary"
+	$(call compile_non_heavy_test,MAKEPKG_ASSIGNMENT_PRECEDENCE)
 
 $(ARTIFACT_IDENTITY_TEST_TARGET): $(ARTIFACT_IDENTITY_TEST_SRCS) $(SRC_DIR)/artifact_identity.hpp $(SRC_DIR)/artifact_workspace.hpp $(SRC_DIR)/trusted_cache.hpp $(SRC_DIR)/source_environment.hpp $(SRC_DIR)/package_identifier.hpp $(SRC_DIR)/shell_words.hpp $(SRC_DIR)/process.hpp $(SRC_DIR)/logging.hpp $(SRC_DIR)/localization.hpp $(TRUSTED_CACHE_SUPPORT_HEADER) tests/stubs/artifact-identity/process_stub.hpp $(VERSION_FILE)
 	@mkdir -p $(dir $@)
@@ -3004,6 +3052,36 @@ check-multiple-artifact-workspace-link-firewall:
 test-multiple-artifact-workspace: check-multiple-artifact-workspace-link-firewall $(MULTIPLE_ARTIFACT_WORKSPACE_TEST_TARGET)
 	MOGUET_TEST_MAKEPKG_STUB=$(abspath tests/stubs/makepkg) \
 		$(abspath $(MULTIPLE_ARTIFACT_WORKSPACE_TEST_TARGET))
+
+check-makepkg-assignment-precedence-link-firewall:
+	@echo ":: Checking real makepkg assignment precedence link firewall"
+	@set -e; for source in $(MAKEPKG_ASSIGNMENT_PRECEDENCE_ALLOWED_PRODUCTION_TEST_SRCS); do \
+		count=$$(printf '%s\n' $(MAKEPKG_ASSIGNMENT_PRECEDENCE_TEST_SRCS) | \
+			awk -v expected="$$source" '$$0 == expected { count++ } END { print count + 0 }'); \
+		test "$$count" -eq 1 || { \
+			echo "error: makepkg assignment precedence test must link $$source exactly once" >&2; \
+			exit 1; \
+		}; \
+	done
+	@test -z "$(filter $(MAKEPKG_ASSIGNMENT_PRECEDENCE_FORBIDDEN_TEST_SRCS),$(MAKEPKG_ASSIGNMENT_PRECEDENCE_TEST_SRCS))" || { \
+		echo "error: makepkg assignment precedence test links a forbidden production source" >&2; \
+		exit 1; \
+	}
+	@test -z "$(filter tests/stubs/%,$(MAKEPKG_ASSIGNMENT_PRECEDENCE_TEST_SRCS))" || { \
+		echo "error: makepkg assignment precedence test links a test stub" >&2; \
+		exit 1; \
+	}
+
+test-makepkg-assignment-precedence: check-makepkg-assignment-precedence-link-firewall $(MAKEPKG_ASSIGNMENT_PRECEDENCE_TEST_TARGET)
+	@test -x /usr/bin/makepkg || { \
+		echo "error: /usr/bin/makepkg is required for assignment precedence validation" >&2; \
+		exit 1; \
+	}
+	@test -x /usr/bin/bsdtar || { \
+		echo "error: /usr/bin/bsdtar is required for assignment precedence validation" >&2; \
+		exit 1; \
+	}
+	$(abspath $(MAKEPKG_ASSIGNMENT_PRECEDENCE_TEST_TARGET))
 
 test-artifact-identity: $(ARTIFACT_IDENTITY_TEST_TARGET)
 	$(abspath $(ARTIFACT_IDENTITY_TEST_TARGET))
@@ -3791,6 +3869,7 @@ test: \
 	test-source-environment \
 	test-artifact-workspace \
 	test-multiple-artifact-workspace \
+	test-makepkg-assignment-precedence \
 	test-artifact-identity \
 	test-multiple-artifact-identity \
 	test-artifact-identity-real-pacman \

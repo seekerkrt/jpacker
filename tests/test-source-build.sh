@@ -413,6 +413,24 @@ assert_editor_argv_log() {
     fi
 }
 
+assert_makepkg_argv_log() {
+    actual_file=$1
+    expected=$2
+    normalized_file=$case_dir/normalized-makepkg-argv.log
+    expected_file=$case_dir/expected-makepkg-argv.log
+    sed 's#^\(arg\[[0-9][0-9]*\]=<PKGDEST=\).*>$#\1<owned>>#' \
+        "$actual_file" > "$normalized_file"
+    printf '%s\n' "$expected" > "$expected_file"
+    if ! cmp "$expected_file" "$normalized_file" >/dev/null 2>&1; then
+        echo "unexpected makepkg argv log" >&2
+        echo "expected:" >&2
+        sed -n '1,240p' "$expected_file" >&2
+        echo "actual:" >&2
+        sed -n '1,240p' "$normalized_file" >&2
+        exit 1
+    fi
+}
+
 assert_checkout_retained() {
     if [ ! -d "$checkout_dir/.git" ] || [ -L "$checkout_dir/.git" ] ||
        [ ! -f "$checkout_dir/PKGBUILD" ] || [ -L "$checkout_dir/PKGBUILD" ]; then
@@ -449,9 +467,12 @@ assert_command "git reset --hard origin/master"
 # PackageBase-set lifecycle and install only the archive-selected child.
 setup_case repository-packagebase-set-selected-only
 makepkg_env_log=$case_dir/makepkg-environment.log
+makepkg_argv_log=$case_dir/makepkg-argv.log
 : > "$makepkg_env_log"
+: > "$makepkg_argv_log"
 export MOGUET_TEST_MAKEPKG_ENV_LOG=$makepkg_env_log
 export MOGUET_TEST_MAKEPKG_ENV_KEYS='SLICE3_FLAGS SLICE3_EMPTY'
+export MOGUET_TEST_MAKEPKG_ARGV_LOG=$makepkg_argv_log
 export MOGUET_TEST_MAKEPKG_ARTIFACT_IDENTITIES='clean-root|clean-root-sibling|2.0-1
 clean-root|clean-root|1.1-1
 clean-root|clean-root-debug|1.1-1'
@@ -468,6 +489,18 @@ assert_single_selected_install \
     "clean-root-debug-1.1-1-x86_64.pkg.tar.zst"
 assert_file_line_count 'env[SLICE3_FLAGS]=<-O1>' 2 "$makepkg_env_log"
 assert_file_line_count 'env[SLICE3_EMPTY]=<>' 2 "$makepkg_env_log"
+assert_makepkg_argv_log "$makepkg_argv_log" 'argv-begin
+arg[0]=<--packagelist>
+arg[1]=<SLICE3_FLAGS=-O1>
+arg[2]=<SLICE3_EMPTY=>
+arg[3]=<PKGDEST=<owned>>
+argv-end
+argv-begin
+arg[0]=<-sc>
+arg[1]=<SLICE3_FLAGS=-O1>
+arg[2]=<SLICE3_EMPTY=>
+arg[3]=<PKGDEST=<owned>>
+argv-end'
 assert_not_contains "Building AUR PackageBase" "$output_file"
 assert_contains "PackageBase result: clean-root" "$output_file"
 assert_contains \

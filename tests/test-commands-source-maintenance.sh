@@ -746,6 +746,15 @@ assert_argv_log() {
     assert_file_equals "$expected_file" "$actual_file"
 }
 
+assert_makepkg_argv_log() {
+    actual_file=$1
+    expected=$2
+    normalized_file=$case_dir/normalized-makepkg-argv.log
+    sed 's#^\(arg\[[0-9][0-9]*\]=<PKGDEST=\).*>$#\1<owned>>#' \
+        "$actual_file" > "$normalized_file"
+    assert_argv_log "$normalized_file" "$expected"
+}
+
 write_upgrade_srcinfo() {
     srcinfo_file=$1
     srcinfo_version=$2
@@ -1318,14 +1327,17 @@ cp "$local_root/.SRCINFO" "$metadata_output"
 rm "$local_root/.SRCINFO"
 makepkg_env_log=$case_dir/makepkg-env.log
 makepkg_cwd_log=$case_dir/makepkg-cwd.log
+makepkg_argv_log=$case_dir/makepkg-argv.log
 : > "$makepkg_env_log"
 : > "$makepkg_cwd_log"
+: > "$makepkg_argv_log"
 export MOGUET_TEST_MAKEPKG_LOCAL_PACKAGE_BASE=local-eval
 export MOGUET_TEST_MAKEPKG_ARTIFACT_IDENTITIES='local-eval|local-eval|1.0-1'
 export MOGUET_TEST_MAKEPKG_SRCINFO_OUTPUT_FILE=$metadata_output
 export MOGUET_TEST_MAKEPKG_ENV_LOG=$makepkg_env_log
 export MOGUET_TEST_MAKEPKG_ENV_KEYS='FIRST EMPTY'
 export MOGUET_TEST_MAKEPKG_CWD_LOG=$makepkg_cwd_log
+export MOGUET_TEST_MAKEPKG_ARGV_LOG=$makepkg_argv_log
 if ! printf 'y\n' |
     script -qec \
         "$test_binary --noedit build --local $local_root FIRST=one EMPTY= FIRST=last" \
@@ -1343,6 +1355,26 @@ assert_contains "FIRST='last'" "$output_file"
 assert_contains "EMPTY=''" "$output_file"
 assert_output_line_count "env[FIRST]=<last>" 3 "$makepkg_env_log"
 assert_output_line_count "env[EMPTY]=<>" 3 "$makepkg_env_log"
+assert_makepkg_argv_log "$makepkg_argv_log" 'argv-begin
+arg[0]=<--printsrcinfo>
+arg[1]=<FIRST=one>
+arg[2]=<EMPTY=>
+arg[3]=<FIRST=last>
+argv-end
+argv-begin
+arg[0]=<--packagelist>
+arg[1]=<FIRST=one>
+arg[2]=<EMPTY=>
+arg[3]=<FIRST=last>
+arg[4]=<PKGDEST=<owned>>
+argv-end
+argv-begin
+arg[0]=<-sc>
+arg[1]=<FIRST=one>
+arg[2]=<EMPTY=>
+arg[3]=<FIRST=last>
+arg[4]=<PKGDEST=<owned>>
+argv-end'
 assert_path_absent "$local_root/.SRCINFO"
 first_makepkg_cwd=$(sed -n '1p' "$makepkg_cwd_log")
 if [ "$first_makepkg_cwd" != "$local_root" ]; then
@@ -2426,12 +2458,14 @@ assert_argv_log "$vercmp_argv_log" 'argv-begin
 arg[0]=<2.0-1>
 arg[1]=<2.0-1>
 argv-end'
-assert_argv_log "$makepkg_argv_log" 'argv-begin
+assert_makepkg_argv_log "$makepkg_argv_log" 'argv-begin
 arg[0]=<--packagelist>
+arg[1]=<PKGDEST=<owned>>
 argv-end
 argv-begin
 arg[0]=<-sc>
 arg[1]=<--noconfirm>
+arg[2]=<PKGDEST=<owned>>
 argv-end'
 assert_request_log_empty
 
@@ -2463,12 +2497,14 @@ assert_argv_log "$vercmp_argv_log" 'argv-begin
 arg[0]=<2.0-1>
 arg[1]=<1.0-1>
 argv-end'
-assert_argv_log "$makepkg_argv_log" 'argv-begin
+assert_makepkg_argv_log "$makepkg_argv_log" 'argv-begin
 arg[0]=<--packagelist>
+arg[1]=<PKGDEST=<owned>>
 argv-end
 argv-begin
 arg[0]=<-sc>
 arg[1]=<--noconfirm>
+arg[2]=<PKGDEST=<owned>>
 argv-end'
 assert_request_log_empty
 
@@ -2522,12 +2558,14 @@ assert_argv_log "$vercmp_argv_log" 'argv-begin
 arg[0]=<2.0-1>
 arg[1]=<1.0-1>
 argv-end'
-assert_argv_log "$makepkg_argv_log" 'argv-begin
+assert_makepkg_argv_log "$makepkg_argv_log" 'argv-begin
 arg[0]=<--packagelist>
+arg[1]=<PKGDEST=<owned>>
 argv-end
 argv-begin
 arg[0]=<-sc>
 arg[1]=<--noconfirm>
+arg[2]=<PKGDEST=<owned>>
 argv-end'
 if [ ! -s "$request_log" ]; then
     echo "expected AUR RPC request for $upgrade_package" >&2
@@ -2609,12 +2647,14 @@ assert_argv_log "$vercmp_argv_log" 'argv-begin
 arg[0]=<2.0-1>
 arg[1]=<2.0-1>
 argv-end'
-assert_argv_log "$makepkg_argv_log" 'argv-begin
+assert_makepkg_argv_log "$makepkg_argv_log" 'argv-begin
 arg[0]=<--packagelist>
+arg[1]=<PKGDEST=<owned>>
 argv-end
 argv-begin
 arg[0]=<-sc>
 arg[1]=<--noconfirm>
+arg[2]=<PKGDEST=<owned>>
 argv-end'
 assert_request_log_empty
 

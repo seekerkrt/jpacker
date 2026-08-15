@@ -905,10 +905,31 @@ std::string source_environment_prefix(
     return prefix;
 }
 
+std::vector<std::string> source_environment_assignment_words(
+        const UnitPlan& unit, const fs::path& workspace_path) {
+    std::vector<std::string> words;
+    for(const SourceEnvironmentAssignment& assignment :
+        unit.source_environment.ordered_assignments) {
+        if(assignment.value.empty() &&
+           unit.empty_value_policy == SourceEnvironmentEmptyValuePolicy::Omit) {
+            continue;
+        }
+        words.push_back(assignment.key + "=" + assignment.value);
+    }
+    words.push_back("PKGDEST=" + workspace_path.string());
+    return words;
+}
+
 std::string expected_packagelist_command(
         const UnitPlan& unit, const fs::path& workspace_path) {
+    std::vector<std::string> arguments{"makepkg", "--packagelist"};
+    const std::vector<std::string> assignment_words =
+            source_environment_assignment_words(unit, workspace_path);
+    arguments.insert(
+            arguments.end(), assignment_words.begin(),
+            assignment_words.end());
     return source_environment_prefix(unit, workspace_path) +
-           shell_join({"makepkg", "--packagelist"});
+           shell_join(arguments);
 }
 
 std::string expected_build_command(
@@ -922,6 +943,11 @@ std::string expected_build_command(
     if(scenario.config.user_config.build.mode == BuildMode::Clean) {
         arguments.emplace_back("-C");
     }
+    const std::vector<std::string> assignment_words =
+            source_environment_assignment_words(unit, workspace_path);
+    arguments.insert(
+            arguments.end(), assignment_words.begin(),
+            assignment_words.end());
     return source_environment_prefix(unit, workspace_path) +
            shell_join(arguments);
 }
